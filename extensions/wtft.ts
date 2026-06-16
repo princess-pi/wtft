@@ -893,7 +893,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			// Render manifest help menu if requested
 			if (showHelp) {
 				try {
-					const manifestPath = path.join(process.cwd(), "docs", "extensions", "manifests", "wtft-cmd.json");
+					const manifestPath = path.join(process.cwd(), "docs", "manifests", "wtft-cmd.json");
 					const manifestStr = fs.readFileSync(manifestPath, "utf8");
 					const manifest = JSON.parse(manifestStr);
 

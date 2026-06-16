@@ -982,4 +982,55 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			ctx.ui.notify("Token cost audit widget updated below the editor.", "info");
 		}
 	});
+
+	// 4. Debugging command
+	pi.registerCommand("wtft-debug", {
+		description: "Debug 'other' interactions by listing their content",
+		handler: async (_args, ctx) => {
+			const branch = ctx.sessionManager.getBranch();
+			let debugOutput = "--- Other Interaction Debug ---\n";
+			let count = 0;
+
+			for (const entry of branch) {
+				if (entry.type === "message" && entry.message && entry.message.role === "assistant") {
+					const assistantMsg = entry.message;
+					const interaction: Interaction = {
+						timestamp: assistantMsg.timestamp || new Date(entry.timestamp).getTime(),
+						cost: assistantMsg.usage?.cost?.total || 0,
+						files: new Set<string>(),
+						commands: [],
+						texts: []
+					};
+
+					if (Array.isArray(assistantMsg.content)) {
+						for (const block of assistantMsg.content) {
+							if (block.type === "text") interaction.texts.push(block.text);
+							else if (block.type === "thinking") interaction.texts.push(block.thinking);
+							else if (block.type === "toolCall") {
+								const args = block.arguments || {};
+								if (block.name === "read" || block.name === "write" || block.name === "edit") {
+									if (args.path) interaction.files.add(args.path);
+								} else if (block.name === "bash") {
+									if (args.command) interaction.commands.push(args.command);
+								}
+							}
+						}
+					}
+
+					if (classifyInteraction(interaction) === "other") {
+						count++;
+						if (interaction.commands.length > 0) {
+							debugOutput += `[CMD] ${interaction.commands.join(" | ")}\n`;
+						} else if (interaction.texts.length > 0) {
+							debugOutput += `[CHAT] ${interaction.texts.join(" ").substring(0, 50).replace(/\n/g, " ")}...\n`;
+						} else {
+							debugOutput += `[EMPTY]\n`;
+						}
+					}
+				}
+			}
+			debugOutput += `--- Total Other: ${count} ---\n`;
+			ctx.ui.notify(debugOutput, "info");
+		}
+	});
 }

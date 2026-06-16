@@ -189,6 +189,8 @@ function classifyInteraction(interaction: Interaction): "spec" | "code" | "mixed
 	// Check file paths accessed or modified via tools
 	for (const f of interaction.files) {
 		const norm = f.replace(/\\/g, "/");
+		let matchedByPath = false;
+
 		if (
 			norm.startsWith("docs/") || norm.includes("/docs/") ||
 			norm.endsWith("AGENTS.md") ||
@@ -196,14 +198,27 @@ function classifyInteraction(interaction: Interaction): "spec" | "code" | "mixed
 			norm.endsWith("README.md")
 		) {
 			hasSpec = true;
+			matchedByPath = true;
 		}
 		if (
 			norm.startsWith(".pi/extensions/") || norm.includes("/.pi/extensions/") ||
+			norm.startsWith("extensions/") || norm.includes("/extensions/") ||
 			norm.startsWith("src/") || norm.includes("/src/") ||
 			norm.startsWith("tests/") || norm.includes("/tests/") ||
 			norm.startsWith("public/") || norm.includes("/public/")
 		) {
 			hasCode = true;
+			matchedByPath = true;
+		}
+
+		// Fallback to extension-based classifier if the file wasn't matched by high-confidence directory paths
+		if (!matchedByPath) {
+			const ext = path.extname(norm).toLowerCase();
+			if (ext === ".md") {
+				hasSpec = true;
+			} else if ([".ts", ".js", ".mjs", ".json", ".css", ".tsx", ".jsx", ".py", ".rs", ".go", ".sh", ".yml", ".yaml"].includes(ext)) {
+				hasCode = true;
+			}
 		}
 	}
 
@@ -214,6 +229,7 @@ function classifyInteraction(interaction: Interaction): "spec" | "code" | "mixed
 		// Paths inside bash commands
 		if (
 			lowerCmd.includes(".pi/extensions/") ||
+			lowerCmd.includes("extensions/") ||
 			lowerCmd.includes("src/") ||
 			lowerCmd.includes("tests/") ||
 			lowerCmd.includes("public/")

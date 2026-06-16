@@ -77,12 +77,12 @@
             <tr>
                 <td style="color: var(--accent-green); font-weight: bold;">Spec Work (spec)</td>
                 <td>ANSI Bright Green (<code>\x1b[92m</code>)</td>
-                <td>Touches files under <code>docs/</code> or <code>/docs/</code>, or matching <code>AGENTS.md</code>, <code>ARCHITECTURE.md</code>, <code>README.md</code>, or contains prominent spec planning keywords.</td>
+                <td>Touches files under <code>docs/</code> or <code>/docs/</code>, or matching <code>AGENTS.md</code>, <code>ARCHITECTURE.md</code>, <code>README.md</code>, or contains prominent spec planning keywords. Falls back to treating any <code>.md</code> file as spec.</td>
             </tr>
             <tr>
                 <td style="color: var(--accent-orange); font-weight: bold;">Code Work (code)</td>
                 <td>ANSI Orange (<code>\x1b[38;5;208m</code>)</td>
-                <td>Touches files under <code>.pi/extensions/</code>, <code>src/</code>, <code>tests/</code>, <code>public/</code> (or their slash-prefixed equivalents), or executes test/compilation terminal commands via `bash`.</td>
+                <td>Touches files under <code>.pi/extensions/</code>, <code>extensions/</code>, <code>src/</code>, <code>tests/</code>, <code>public/</code> (or their slash-prefixed equivalents), or executes test/compilation terminal commands via `bash`. Falls back to treating code files (e.g., <code>.ts</code>, <code>.js</code>, <code>.json</code>) as code.</td>
             </tr>
             <tr>
                 <td style="color: var(--text-color); font-weight: bold;">Other Work (other)</td>

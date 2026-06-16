@@ -205,14 +205,16 @@ function classifyInteraction(interaction: Interaction): "spec" | "code" | "mixed
 			norm.startsWith("extensions/") || norm.includes("/extensions/") ||
 			norm.startsWith("src/") || norm.includes("/src/") ||
 			norm.startsWith("tests/") || norm.includes("/tests/") ||
-			norm.startsWith("public/") || norm.includes("/public/")
+			norm.startsWith("public/") || norm.includes("/public/") ||
+			norm.startsWith("bin/") || norm.includes("/bin/")
 		) {
 			hasCode = true;
 			matchedByPath = true;
 		}
 
-		// Fallback to extension-based classifier if the file wasn't matched by high-confidence directory paths
-		if (!matchedByPath) {
+		// Fallback to extension-based classifier if the file wasn't matched
+		// and not yet definitively classified as Spec or Code
+		if (!hasSpec && !hasCode) {
 			const ext = path.extname(norm).toLowerCase();
 			if (ext === ".md") {
 				hasSpec = true;

@@ -6,23 +6,14 @@ import * as path from "node:path";
 // DATA STRUCTURES & TYPES
 // ---
 
+type Category = "spec" | "code" | "mixed" | "other" | "test" | "prompt";
+
 interface Interaction {
 	timestamp: number;
 	cost: number;
-	files: Set<string>;
+	files: { path: string; action: "read" | "write" }[];
 	commands: string[];
 	texts: string[];
-}
-
-interface Bin {
-	label: string;
-	dateStr: string;
-	spec_cost: number;
-	code_cost: number;
-	mixed_cost: number; // For overlapping Spec and Code efforts in the same turn
-	other_cost: number;
-	total_cost: number;
-	incremental_cost?: number; // Stores the original bucket cost before cumulative summing
 }
 
 interface IntervalConfig {
@@ -182,103 +173,61 @@ function parseArgs(argsStr: string = "") {
  * 
  * NOTE: This classification runs 100% locally in JavaScript and consumes ZERO LLM tokens!
  */
-function classifyInteraction(interaction: Interaction): "spec" | "code" | "mixed" | "other" {
-	let hasSpec = false;
-	let hasCode = false;
+function classifyInteraction(interaction: Interaction): Category {
+	const specPaths = new Set<string>();
+	const codePaths = new Set<string>();
+	const testPaths = new Set<string>();
 
-	// Check file paths accessed or modified via tools
+	// Categorize file paths
 	for (const f of interaction.files) {
-		const norm = f.replace(/\\/g, "/");
-		let matchedByPath = false;
+		const norm = f.path.replace(/\\/g, "/");
+		let category: "spec" | "code" | "test" | null = null;
 
-		if (
-			norm.startsWith("docs/") || norm.includes("/docs/") ||
-			norm.endsWith("AGENTS.md") ||
-			norm.endsWith("ARCHITECTURE.md") ||
-			norm.endsWith("README.md")
-		) {
-			hasSpec = true;
-			matchedByPath = true;
-		}
-		if (
-			norm.startsWith(".pi/extensions/") || norm.includes("/.pi/extensions/") ||
-			norm.startsWith("extensions/") || norm.includes("/extensions/") ||
-			norm.startsWith("src/") || norm.includes("/src/") ||
-			norm.startsWith("tests/") || norm.includes("/tests/") ||
-			norm.startsWith("public/") || norm.includes("/public/") ||
-			norm.startsWith("bin/") || norm.includes("/bin/")
-		) {
-			hasCode = true;
-			matchedByPath = true;
-		}
-
-		// Fallback to extension-based classifier if the file wasn't matched
-		// and not yet definitively classified as Spec or Code
-		if (!hasSpec && !hasCode) {
+		if (norm.startsWith("docs/") || norm.includes("/docs/") || norm.endsWith("AGENTS.md") || norm.endsWith("ARCHITECTURE.md") || norm.endsWith("README.md") || path.extname(norm).toLowerCase() === ".md") {
+			category = "spec";
+		} else if (norm.startsWith("tests/") || norm.includes("/tests/")) {
+			category = "test";
+		} else if (norm.startsWith(".pi/extensions/") || norm.includes("/.pi/extensions/") || norm.startsWith("extensions/") || norm.includes("/extensions/") || norm.startsWith("src/") || norm.includes("/src/") || norm.startsWith("public/") || norm.includes("/public/") || norm.startsWith("bin/") || norm.includes("/bin/")) {
+			category = "code";
+		} else {
 			const ext = path.extname(norm).toLowerCase();
-			if (ext === ".md") {
-				hasSpec = true;
-			} else if ([".ts", ".js", ".mjs", ".json", ".css", ".tsx", ".jsx", ".py", ".rs", ".go", ".sh", ".yml", ".yaml"].includes(ext)) {
-				hasCode = true;
+			if ([".ts", ".js", ".mjs", ".json", ".css", ".tsx", ".jsx", ".py", ".rs", ".go", ".sh", ".yml", ".yaml"].includes(ext)) {
+				category = "code";
 			}
 		}
+
+		if (category === "spec") specPaths.add(f.action);
+		else if (category === "code") codePaths.add(f.action);
+		else if (category === "test") testPaths.add(f.action);
 	}
 
-	// Analyze executed shell commands
-	for (const cmd of interaction.commands) {
-		const lowerCmd = cmd.toLowerCase();
-		
-		// Paths inside bash commands
-		if (
-			lowerCmd.includes(".pi/extensions/") ||
-			lowerCmd.includes("extensions/") ||
-			lowerCmd.includes("src/") ||
-			lowerCmd.includes("tests/") ||
-			lowerCmd.includes("public/")
-		) {
-			hasCode = true;
-		}
-		if (
-			lowerCmd.includes("docs/") ||
-			lowerCmd.includes("agents.md") ||
-			lowerCmd.includes("architecture.md") ||
-			lowerCmd.includes("readme.md")
-		) {
-			hasSpec = true;
-		}
+	// Re-think the logic based on the user's table
+	const specWrites = specPaths.has("write");
+	const codeWrites = codePaths.has("write");
+	const testWrites = testPaths.has("write");
+	const writeCount = (specWrites ? 1 : 0) + (codeWrites ? 1 : 0) + (testWrites ? 1 : 0);
 
-		// Development/Test indicators
-		if (
-			/\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|build|compile)\b/.test(lowerCmd) ||
-			/\b(vitest|jest|pytest|tsc|cargo\s+test|go\s+test)\b/.test(lowerCmd)
-		) {
-			hasCode = true;
-		}
+	if (writeCount > 1) return "mixed";
+	if (writeCount === 1) {
+		if (specWrites) return "spec";
+		if (codeWrites) return "code";
+		if (testWrites) return "test";
 	}
 
-	// Check prominent spec planning keywords in dialogue text
-	const specKeywords = [
-		"spec", "specification", "architecture", "plan",
-		"design spec", "planning", "requirement", "roadmap"
-	];
-	for (const text of interaction.texts) {
-		const lowerText = text.toLowerCase();
-		for (const keyword of specKeywords) {
-			if (lowerText.includes(keyword)) {
-				hasSpec = true;
-			}
-		}
-	}
+	// Read only logic
+	const hasSpec = specPaths.has("read");
+	const hasCode = codePaths.has("read");
+	const hasTest = testPaths.has("read");
+	const readCount = (hasSpec ? 1 : 0) + (hasCode ? 1 : 0) + (hasTest ? 1 : 0);
+	
+	if (readCount > 1) return "mixed";
+	if (hasSpec) return "spec";
+	if (hasCode) return "code";
+	if (hasTest) return "test";
 
-	if (hasSpec && hasCode) {
-		return "mixed";
-	}
-	if (hasCode) {
-		return "code";
-	}
-	if (hasSpec) {
-		return "spec";
-	}
+	// No files, look at prompt
+	if (interaction.texts.length > 0) return "prompt";
+	if (interaction.commands.length > 0) return "other";
 	return "other";
 }
 
@@ -665,7 +614,7 @@ function updateWtftWidget(
 			const cost = assistantMsg.usage?.cost?.total || 0;
 			const timestamp = assistantMsg.timestamp || new Date(entry.timestamp).getTime();
 
-			const files = new Set<string>();
+			const files: { path: string; action: "read" | "write" }[] = [];
 			const commands: string[] = [];
 			const texts: string[] = [];
 
@@ -678,10 +627,10 @@ function updateWtftWidget(
 					} else if (block.type === "toolCall") {
 						const name = block.name;
 						const args = block.arguments || {};
-						if (name === "read" || name === "write" || name === "edit") {
-							if (args.path) {
-								files.add(args.path);
-							}
+						if (name === "read") {
+							if (args.path) files.push({ path: args.path, action: "read" });
+						} else if (name === "write" || name === "edit") {
+							if (args.path) files.push({ path: args.path, action: "write" });
 						} else if (name === "bash") {
 							if (args.command) {
 								commands.push(args.command);
@@ -716,6 +665,8 @@ function updateWtftWidget(
 			bin.code_cost += interaction.cost;
 		} else if (classification === "mixed") {
 			bin.mixed_cost += interaction.cost;
+		} else if (classification === "prompt") {
+			bin.other_cost += interaction.cost; // Temporarily map prompt to other for display
 		} else {
 			bin.other_cost += interaction.cost;
 		}
@@ -984,53 +935,62 @@ export default function wtftExtension(pi: ExtensionAPI) {
 	});
 
 	// 4. Debugging command
-	pi.registerCommand("wtft-debug", {
-		description: "Debug 'other' interactions by listing their content",
+	pi.registerCommand("wtft-other", {
+		description: "Debug 'other' interactions with a bash command histogram",
 		handler: async (_args, ctx) => {
 			const branch = ctx.sessionManager.getBranch();
-			let debugOutput = "--- Other Interaction Debug ---\n";
-			let count = 0;
+			const commandMap = new Map<string, { count: number; cost: number }>();
 
 			for (const entry of branch) {
 				if (entry.type === "message" && entry.message && entry.message.role === "assistant") {
 					const assistantMsg = entry.message;
+					const cost = assistantMsg.usage?.cost?.total || 0;
 					const interaction: Interaction = {
 						timestamp: assistantMsg.timestamp || new Date(entry.timestamp).getTime(),
-						cost: assistantMsg.usage?.cost?.total || 0,
-						files: new Set<string>(),
+						cost: cost,
+						files: [],
 						commands: [],
 						texts: []
 					};
 
 					if (Array.isArray(assistantMsg.content)) {
 						for (const block of assistantMsg.content) {
-							if (block.type === "text") interaction.texts.push(block.text);
-							else if (block.type === "thinking") interaction.texts.push(block.thinking);
-							else if (block.type === "toolCall") {
+							if (block.type === "toolCall") {
 								const args = block.arguments || {};
-								if (block.name === "read" || block.name === "write" || block.name === "edit") {
-									if (args.path) interaction.files.add(args.path);
-								} else if (block.name === "bash") {
-									if (args.command) interaction.commands.push(args.command);
+								if (block.name === "bash") {
+									if (args.command) {
+										const parts = args.command.split(" ");
+										const primary = parts[0];
+										if (primary && primary !== "#") {
+											interaction.commands.push(primary);
+										}
+									}
+								} else if (block.name === "read") {
+									if (args.path) interaction.files.push({ path: args.path, action: "read" });
+								} else if (block.name === "write" || block.name === "edit") {
+									if (args.path) interaction.files.push({ path: args.path, action: "write" });
 								}
 							}
 						}
 					}
 
 					if (classifyInteraction(interaction) === "other") {
-						count++;
-						if (interaction.commands.length > 0) {
-							debugOutput += `[CMD] ${interaction.commands.join(" | ")}\n`;
-						} else if (interaction.texts.length > 0) {
-							debugOutput += `[CHAT] ${interaction.texts.join(" ").substring(0, 50).replace(/\n/g, " ")}...\n`;
-						} else {
-							debugOutput += `[EMPTY]\n`;
+						for (const cmd of interaction.commands) {
+							const existing = commandMap.get(cmd) || { count: 0, cost: 0 };
+							commandMap.set(cmd, {
+								count: existing.count + 1,
+								cost: existing.cost + cost
+							});
 						}
 					}
 				}
 			}
-			debugOutput += `--- Total Other: ${count} ---\n`;
-			ctx.ui.notify(debugOutput, "info");
+
+			let output = "--- 'Other' Command Histogram ---\n";
+			for (const [cmd, data] of commandMap.entries()) {
+				output += `${cmd.padEnd(15)} : ${"#".repeat(data.count)} (${data.count}) $${data.cost.toFixed(4)}\n`;
+			}
+			ctx.ui.notify(output, "info");
 		}
 	});
 }

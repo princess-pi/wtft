@@ -457,8 +457,8 @@ function distributeChars(
 /**
  * Places tick markers above the bars at mathematically proportional intervals.
  */
-function buildTickLines(maxCost: number, barWidth: number): { labelsLine: string | null; markersLine: string | null } {
-	if (maxCost <= 0 || barWidth < 15) {
+function buildTickLines(scaleMax: number, barWidth: number, totalSessionCost: number): { labelsLine: string | null; markersLine: string | null } {
+	if (scaleMax <= 0 || barWidth < 15) {
 		return { labelsLine: null, markersLine: null };
 	}
 
@@ -470,11 +470,18 @@ function buildTickLines(maxCost: number, barWidth: number): { labelsLine: string
 	const q1Idx = Math.floor(barWidth / 4);
 	const q3Idx = Math.floor((barWidth * 3) / 4);
 
+	// Calculate index of the actual total session cost on the scale
+	const totalCostIdx = Math.min(
+		barWidth - 1,
+		Math.max(0, Math.round((totalSessionCost / scaleMax) * (barWidth - 1)))
+	);
+
 	markerArr[0] = "┿";
 	markerArr[barWidth - 1] = "┿";
 	markerArr[midIdx] = "┿";
 	markerArr[q1Idx] = "┿";
 	markerArr[q3Idx] = "┿";
+	markerArr[totalCostIdx] = "┿"; // Add explicit tick for total cost
 	const markersLine = markerArr.join("");
 
 	const tryPlaceLabel = (text: string, startIdx: number): boolean => {
@@ -502,17 +509,17 @@ function buildTickLines(maxCost: number, barWidth: number): { labelsLine: string
 		return true;
 	};
 
+	// 1. Try placing the absolute boundary limits first
 	tryPlaceLabel("$0.00", 0);
-	tryPlaceLabel(`$${maxCost.toFixed(2)}`, barWidth - 1);
+	tryPlaceLabel(`$${scaleMax.toFixed(2)}`, barWidth - 1);
 
-	if (maxCost > 0) {
-		tryPlaceLabel(`$${(maxCost / 2).toFixed(2)}`, midIdx);
-	}
+	// 2. Try placing the actual total session cost with high priority
+	tryPlaceLabel(`$${totalSessionCost.toFixed(2)}`, totalCostIdx);
 
-	if (maxCost > 0) {
-		tryPlaceLabel(`$${(maxCost / 4).toFixed(2)}`, q1Idx);
-		tryPlaceLabel(`$${((maxCost * 3) / 4).toFixed(2)}`, q3Idx);
-	}
+	// 3. Try placing standard interval ticks (will be skipped if they overlap with the above)
+	tryPlaceLabel(`$${(scaleMax / 2).toFixed(2)}`, midIdx);
+	tryPlaceLabel(`$${(scaleMax / 4).toFixed(2)}`, q1Idx);
+	tryPlaceLabel(`$${((scaleMax * 3) / 4).toFixed(2)}`, q3Idx);
 
 	const labelsLine = labelArr.join("");
 	return { labelsLine, markersLine };
@@ -734,7 +741,15 @@ function updateWtftWidget(
 		return;
 	}
 
-	const maxCostInDisplayed = Math.max(...displayedBins.map(b => b.total_cost), 0);
+	const calculateScaleMax = (total: number): number => {
+		if (total <= 0) return 1.0;
+		if (total > 20) {
+			return Math.ceil(total / 5) * 5;
+		} else {
+			return Math.ceil(total);
+		}
+	};
+	const scaleMax = calculateScaleMax(totalSessionCost);
 
 	// Compute dynamic column and prefix widths based on the max width of binned labels in this redraw
 	const labelWidth = Math.max(...displayedBins.map(b => b.label.length), 5);
@@ -757,7 +772,6 @@ function updateWtftWidget(
 	const widgetLines: string[] = [];
 	
 	const titleLeft = "💸 WTF Tokens?";
-	const titleRight = `Total Cost: ${formatCost(totalSessionCost)}`;
 	
 	const legendItems = [
 		`\x1b[38;5;108m█\x1b[0m Spec`,
@@ -773,33 +787,26 @@ function updateWtftWidget(
 	const legendStr = legendItems.join("  ");
 	
 	const leftLen = getVisualLength(titleLeft);
-	const rightLen = getVisualLength(titleRight);
 	const legendLen = getVisualLength(legendStr);
-	const totalNeeded = leftLen + rightLen + legendLen + 4; // 4 spaces margin
+	const totalNeeded = leftLen + legendLen + 4; // 4 spaces margin
 	
 	if (totalNeeded <= finalWidth) {
-		const remainingSpaces = finalWidth - leftLen - rightLen - legendLen;
-		const spaceLeft = Math.floor(remainingSpaces / 2);
-		const spaceRight = remainingSpaces - spaceLeft;
-		
-		const titleLine = titleLeft + " ".repeat(spaceLeft) + legendStr + " ".repeat(spaceRight) + titleRight;
+		const remainingSpaces = finalWidth - leftLen - legendLen;
+		const titleLine = titleLeft + " ".repeat(remainingSpaces) + legendStr;
 		widgetLines.push(titleLine);
 	} else {
-		const remainingSpaces = finalWidth - leftLen - rightLen;
-		const titleLine = titleLeft + " ".repeat(Math.max(1, remainingSpaces)) + titleRight;
-		widgetLines.push(titleLine);
-		
+		widgetLines.push(titleLeft);
 		// 2nd row has the legend
 		widgetLines.push(legendStr);
 	}
 
 	// Render tick labels and marker lines above the bars if enabled
-	if (showTicks && maxCostInDisplayed > 0) {
+	if (showTicks && scaleMax > 0) {
 		// Embed the date right-aligned inside the prefix spaces before the first tick label starts!
 		const labelPrefix = padString(titleDateStr, prefixWidth);
 		const markerPrefix = " ".repeat(prefixWidth);
 
-		const { labelsLine, markersLine } = buildTickLines(maxCostInDisplayed, maxBarWidth);
+		const { labelsLine, markersLine } = buildTickLines(scaleMax, maxBarWidth, totalSessionCost);
 		if (labelsLine) {
 			widgetLines.push(labelPrefix + `\x1b[2m${labelsLine}\x1b[0m`);
 		}
@@ -821,7 +828,7 @@ function updateWtftWidget(
 			widgetLines.push(`\x1b[2m${dividerLine}\x1b[0m`);
 		}
 
-		const barWidth = maxCostInDisplayed > 0 ? Math.round((bin.total_cost / maxCostInDisplayed) * maxBarWidth) : 0;
+		const barWidth = scaleMax > 0 ? Math.round((bin.total_cost / scaleMax) * maxBarWidth) : 0;
 		const chars = distributeChars(bin.costs, barWidth);
 
 		let barStr = "";

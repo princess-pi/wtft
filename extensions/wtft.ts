@@ -756,15 +756,42 @@ function updateWtftWidget(
 
 	const widgetLines: string[] = [];
 	
-	// Format tight-justified title using the money-with-wings emoji 💸 (no date, right-justified Total Cost unit)
-	const titleLeft = "💸 Where The F***ing Tokens?!";
+	const titleLeft = "💸 WTF Tokens?";
 	const titleRight = `Total Cost: ${formatCost(totalSessionCost)}`;
+	
+	const legendItems = [
+		`\x1b[38;5;108m█\x1b[0m Spec`,
+		`\x1b[38;5;108;48;5;173m▒\x1b[0m Mixed`,
+		`\x1b[38;5;173m█\x1b[0m Code`,
+		`\x1b[38;5;223m█\x1b[0m Tests`,
+		`\x1b[38;5;134m█\x1b[0m Research`,
+		`\x1b[38;5;73m█\x1b[0m Git`,
+		`\x1b[38;5;67m█\x1b[0m Grep`,
+		`\x1b[38;5;168m░\x1b[0m Prompt`,
+		`\x1b[38;5;238m░\x1b[0m Other`
+	];
+	const legendStr = legendItems.join("  ");
+	
 	const leftLen = getVisualLength(titleLeft);
 	const rightLen = getVisualLength(titleRight);
-	const spacesNeeded = Math.max(1, finalWidth - leftLen - rightLen);
-	const titleLine = titleLeft + " ".repeat(spacesNeeded) + titleRight;
+	const legendLen = getVisualLength(legendStr);
+	const totalNeeded = leftLen + rightLen + legendLen + 4; // 4 spaces margin
 	
-	widgetLines.push(titleLine);
+	if (totalNeeded <= finalWidth) {
+		const remainingSpaces = finalWidth - leftLen - rightLen - legendLen;
+		const spaceLeft = Math.floor(remainingSpaces / 2);
+		const spaceRight = remainingSpaces - spaceLeft;
+		
+		const titleLine = titleLeft + " ".repeat(spaceLeft) + legendStr + " ".repeat(spaceRight) + titleRight;
+		widgetLines.push(titleLine);
+	} else {
+		const remainingSpaces = finalWidth - leftLen - rightLen;
+		const titleLine = titleLeft + " ".repeat(Math.max(1, remainingSpaces)) + titleRight;
+		widgetLines.push(titleLine);
+		
+		// 2nd row has the legend
+		widgetLines.push(legendStr);
+	}
 
 	// Render tick labels and marker lines above the bars if enabled
 	if (showTicks && maxCostInDisplayed > 0) {
@@ -848,8 +875,6 @@ function updateWtftWidget(
 			widgetLines.push(`${coloredLabel}  ${coloredCost}  ${barStr}`);
 		}
 	}
-
-	widgetLines.push(`Legend: \x1b[38;5;108m█\x1b[0m Spec   \x1b[38;5;108;48;5;173m▒\x1b[0m Mixed   \x1b[38;5;173m█\x1b[0m Code   \x1b[38;5;223m█\x1b[0m Tests   \x1b[38;5;134m█\x1b[0m Research   \x1b[38;5;73m█\x1b[0m Git   \x1b[38;5;67m█\x1b[0m Grep   \x1b[38;5;168m░\x1b[0m Prompt   \x1b[38;5;238m░\x1b[0m Other`);
 
 	ctx.ui.setWidget("wtft", widgetLines, { placement: "belowEditor" });
 }

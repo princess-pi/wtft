@@ -11,6 +11,7 @@
     { "flags": "-b, --bucket", "desc": "Render bars as discrete interval cost buckets." },
     { "flags": "--ticks", "desc": "Display proportional cost scale tick marks above the bars (default behavior)." },
     { "flags": "--no-ticks", "desc": "Disable cost scale tick marks above the bars." },
+    { "flags": "--other", "desc": "Debug 'other' interactions with a bash command histogram." },
     { "flags": "-S, --show", "desc": "Show or refresh the WTFT cost-auditing widget (default behavior)." },
     { "flags": "-H, --hide", "desc": "Hide the WTFT cost-auditing widget." },
     { "flags": "--help, -h", "desc": "Display this help information." }
@@ -21,6 +22,7 @@
     { "cmd": "/wtft -t America/New_York", "desc": "Render binned date/time labels in Eastern Standard Time." },
     { "cmd": "/wtft -i 4h -l 20", "desc": "Show last 20 4-hour interval bars of cumulative token costs." },
     { "cmd": "/wtft --show", "desc": "Force show or refresh the cost audit widget." },
+    { "cmd": "/wtft-other", "desc": "Debug 'other' interactions with a bash command histogram." },
     { "cmd": "/wtft --hide", "desc": "Hide the cost audit widget from the display." }
   ]
 }

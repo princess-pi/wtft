@@ -10,8 +10,9 @@ import * as path from "node:path";
 import * as os from "node:os";
 import {
 	buildWtftLines,
-	type Interaction
-} from "../extensions/lib/wtft-shared.js";
+	type Interaction,
+	type Category
+} from "../extensions/lib/wtft-shared.ts";
 
 // ---
 // DEFAULT CONFIG

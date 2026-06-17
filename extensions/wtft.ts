@@ -809,7 +809,7 @@ function updateWtftWidget(
 			barStr += `\x1b[38;5;173m${"█".repeat(chars.code)}\x1b[0m`; // Code Work (Terracotta Rust)
 		}
 		if (chars.tests > 0) {
-			barStr += `\x1b[38;5;168m${"█".repeat(chars.tests)}\x1b[0m`; // Tests Work (Matte Rose Pink)
+			barStr += `\x1b[38;5;223m${"█".repeat(chars.tests)}\x1b[0m`; // Tests Work (Chalky Sand)
 		}
 		if (chars.research > 0) {
 			barStr += `\x1b[38;5;134m${"█".repeat(chars.research)}\x1b[0m`; // Research Work (Plum Lavender)
@@ -821,7 +821,7 @@ function updateWtftWidget(
 			barStr += `\x1b[38;5;67m${"█".repeat(chars.grep)}\x1b[0m`; // Grep Work (Steel Blue)
 		}
 		if (chars.prompt > 0) {
-			barStr += `\x1b[38;5;223m${"░".repeat(chars.prompt)}\x1b[0m`; // Prompt Work (Chalky Sand)
+			barStr += `\x1b[38;5;168m${"░".repeat(chars.prompt)}\x1b[0m`; // Prompt Work (Matte Rose Pink)
 		}
 		if (chars.other > 0) {
 			barStr += `\x1b[38;5;238m${"░".repeat(chars.other)}\x1b[0m`; // Other Work (Charcoal)
@@ -849,7 +849,7 @@ function updateWtftWidget(
 		}
 	}
 
-	widgetLines.push(`Legend: \x1b[38;5;108m█\x1b[0m Spec   \x1b[38;5;108;48;5;173m▒\x1b[0m Mixed   \x1b[38;5;173m█\x1b[0m Code   \x1b[38;5;168m█\x1b[0m Tests   \x1b[38;5;134m█\x1b[0m Research   \x1b[38;5;73m█\x1b[0m Git   \x1b[38;5;67m█\x1b[0m Grep   \x1b[38;5;223m░\x1b[0m Prompt   \x1b[38;5;238m░\x1b[0m Other`);
+	widgetLines.push(`Legend: \x1b[38;5;108m█\x1b[0m Spec   \x1b[38;5;108;48;5;173m▒\x1b[0m Mixed   \x1b[38;5;173m█\x1b[0m Code   \x1b[38;5;223m█\x1b[0m Tests   \x1b[38;5;134m█\x1b[0m Research   \x1b[38;5;73m█\x1b[0m Git   \x1b[38;5;67m█\x1b[0m Grep   \x1b[38;5;168m░\x1b[0m Prompt   \x1b[38;5;238m░\x1b[0m Other`);
 
 	ctx.ui.setWidget("wtft", widgetLines, { placement: "belowEditor" });
 }

@@ -455,74 +455,40 @@ function distributeChars(
 // ---
 
 /**
- * Places tick markers above the bars at mathematically proportional intervals.
+ * Places tick markers inside a single horizontal line using inverted block styling.
  */
-function buildTickLines(scaleMax: number, barWidth: number, totalSessionCost: number): { labelsLine: string | null; markersLine: string | null } {
+function buildTickLine(scaleMax: number, barWidth: number): string | null {
 	if (scaleMax <= 0 || barWidth < 15) {
-		return { labelsLine: null, markersLine: null };
+		return null;
 	}
 
-	const labelArr = Array(barWidth).fill(" ");
-	const markerArr = Array(barWidth).fill("─");
-	const occupied = Array(barWidth).fill(false);
+	const leftText = " $0.00 ";
+	const midText = ` $${(scaleMax / 2).toFixed(2)} `;
+	const rightText = ` $${scaleMax.toFixed(2)} `;
 
-	const midIdx = Math.floor(barWidth / 2);
-	const q1Idx = Math.floor(barWidth / 4);
-	const q3Idx = Math.floor((barWidth * 3) / 4);
+	const leftLen = leftText.length;
+	const midLen = midText.length;
+	const rightLen = rightText.length;
 
-	// Calculate index of the actual total session cost on the scale
-	const totalCostIdx = Math.min(
-		barWidth - 1,
-		Math.max(0, Math.round((totalSessionCost / scaleMax) * (barWidth - 1)))
-	);
+	const leftCol = `\x1b[2;7m${leftText}\x1b[0m`;
+	const midCol = `\x1b[2;7m${midText}\x1b[0m`;
+	const rightCol = `\x1b[2;7m${rightText}\x1b[0m`;
 
-	markerArr[0] = "┿";
-	markerArr[barWidth - 1] = "┿";
-	markerArr[midIdx] = "┿";
-	markerArr[q1Idx] = "┿";
-	markerArr[q3Idx] = "┿";
-	markerArr[totalCostIdx] = "┿"; // Add explicit tick for total cost
-	const markersLine = markerArr.join("");
+	const totalLen = leftLen + midLen + rightLen;
+	const remaining = barWidth - totalLen;
 
-	const tryPlaceLabel = (text: string, startIdx: number): boolean => {
-		const len = text.length;
-		if (startIdx + len > barWidth) {
-			startIdx = barWidth - len;
+	if (remaining >= 6) {
+		const space1 = Math.floor(remaining / 2);
+		const space2 = remaining - space1;
+		return leftCol + `\x1b[2m${"─".repeat(space1)}\x1b[0m` + midCol + `\x1b[2m${"─".repeat(space2)}\x1b[0m` + rightCol;
+	} else {
+		const spaceAll = barWidth - leftLen - rightLen;
+		if (spaceAll >= 0) {
+			return leftCol + `\x1b[2m${"─".repeat(spaceAll)}\x1b[0m` + rightCol;
+		} else {
+			return null;
 		}
-		if (startIdx < 0) {
-			return false;
-		}
-
-		for (let i = startIdx; i < startIdx + len; i++) {
-			if (occupied[i]) return false;
-		}
-
-		for (let i = 0; i < len; i++) {
-			labelArr[startIdx + i] = text[i];
-		}
-
-		const padStart = Math.max(0, startIdx - 1);
-		const padEnd = Math.min(barWidth - 1, startIdx + len);
-		for (let i = padStart; i <= padEnd; i++) {
-			occupied[i] = true;
-		}
-		return true;
-	};
-
-	// 1. Try placing the absolute boundary limits first
-	tryPlaceLabel("$0.00", 0);
-	tryPlaceLabel(`$${scaleMax.toFixed(2)}`, barWidth - 1);
-
-	// 2. Try placing the actual total session cost with high priority
-	tryPlaceLabel(`$${totalSessionCost.toFixed(2)}`, totalCostIdx);
-
-	// 3. Try placing standard interval ticks (will be skipped if they overlap with the above)
-	tryPlaceLabel(`$${(scaleMax / 2).toFixed(2)}`, midIdx);
-	tryPlaceLabel(`$${(scaleMax / 4).toFixed(2)}`, q1Idx);
-	tryPlaceLabel(`$${((scaleMax * 3) / 4).toFixed(2)}`, q3Idx);
-
-	const labelsLine = labelArr.join("");
-	return { labelsLine, markersLine };
+	}
 }
 
 // ---
@@ -800,18 +766,12 @@ function updateWtftWidget(
 		widgetLines.push(legendStr);
 	}
 
-	// Render tick labels and marker lines above the bars if enabled
+	// Render single-row collapsed ticks line
 	if (showTicks && scaleMax > 0) {
-		// Embed the date right-aligned inside the prefix spaces before the first tick label starts!
 		const labelPrefix = padString(titleDateStr, prefixWidth);
-		const markerPrefix = " ".repeat(prefixWidth);
-
-		const { labelsLine, markersLine } = buildTickLines(scaleMax, maxBarWidth, totalSessionCost);
-		if (labelsLine) {
-			widgetLines.push(labelPrefix + `\x1b[2m${labelsLine}\x1b[0m`);
-		}
-		if (markersLine) {
-			widgetLines.push(markerPrefix + `\x1b[2m${markersLine}\x1b[0m`);
+		const ticksLine = buildTickLine(scaleMax, maxBarWidth);
+		if (ticksLine) {
+			widgetLines.push(labelPrefix + ticksLine);
 		}
 	}
 

@@ -152,16 +152,15 @@
 
     <h3>TUI Visualization Style</h3>
     <p>The TUI outputs a stacked, horizontal ASCII bar graph in a persistent widget below the editor. It uses standard block-drawing characters (<code>█</code> and <code>░</code>) to represent absolute cost. Each segment within that bar is allocated its proportional share of characters using a generalized implementation of the Largest Remainder Method, ensuring the total width matches perfectly. Legend indicators are placed dynamically on the top title row (or on the second row if the terminal width is narrow), completely removing the redundant 'Legend:' prefix as it is self-evident.</p>
-    <p>To maximize space for the top-row Legend, the unrounded <code>Total Cost</code> is removed from the top title row and is instead plotted as its own explicit tick mark (and label) directly on the ticks scale row (when ticks are enabled). The rightmost scale limit is dynamically rounded up to the nearest <code>$1.00</code> (or nearest <code>$5.00</code> if the total exceeds <code>$20</code>) so that all binned interval bars remain cleanly binned within a standardized, whole-dollar scale limit.</p>
+    <p>To maximize space and minimize vertical height, the ticks scale and dollar labels are collapsed into a <strong>single, ultra-clean horizontal row</strong> (when ticks are enabled). The dollar labels themselves (e.g. <code>$0.00</code>, <code>$scaleMax/2</code>, and <code>$scaleMax</code>) are embedded directly inside the horizontal box-drawing line and styled as <strong>inverted blocks</strong> (so the text is rendered in the background color over a background of the same color as the box-drawing characters). The rightmost scale limit is dynamically rounded up to the nearest <code>$1.00</code> (or nearest <code>$5.00</code> if the total exceeds <code>$20</code>) to ensure consistent, whole-dollar binned limits.</p>
     
-    <h4 style="color: var(--accent-yellow); margin-bottom: 5px;">Example 1: Granular 1-Minute Cumulative Widget (Wide Terminal)</h4>
+    <h4 style="color: var(--accent-yellow); margin-bottom: 5px;">Example 1: Granular 1-Minute Cumulative Widget (Wide Terminal with Collapsed, Inverted Ticks)</h4>
     <pre style="background: var(--box-bg); padding: 12px; border-radius: 6px; border: 1px solid #404040; overflow-x: auto; color: #f0f0f0; font-family: monospace;">
 💸 WTF Tokens?    <span style="color: #38;5;108m">█</span> Spec  <span style="color: #38;5;108;48;5;173m">▒</span> Mixed  <span style="color: #38;5;173m">█</span> Code  <span style="color: #38;5;223m">█</span> Tests  <span style="color: #38;5;134m">█</span> Research  <span style="color: #38;5;73m">█</span> Git  <span style="color: #38;5;67m">█</span> Grep  <span style="color: #38;5;168m">░</span> Prompt  <span style="color: #38;5;238m">░</span> Other
 
 Interval (1m bins)             Cost ($)    Stacked Bar Breakdown
 ────────────────────────────────────────────────────────────────────────────────
-Jun-09                                     $0.00      $1.75      $3.50      $5.25   $6.83  $7.00
-                                           ┿━━━━━━━━━━┿━━━━━━━━━━┿━━━━━━━━━━┿━━━━━━━┿━━━━━━┿
+Jun-09                                     <span style="background: #a0a0a0; color: #000;"> $0.00 </span>───────────<span style="background: #a0a0a0; color: #000;"> $3.50 </span>───────────<span style="background: #a0a0a0; color: #000;"> $7.00 </span>
 16:25                  +$0.03  $6.83       <span style="color: #2ecc71;">████████████████</span><span style="color: #ff8c00;">█</span><span style="color: #888888;">░░</span>
 16:24                  +$0.05  $6.80       <span style="color: #2ecc71;">████████████</span><span style="color: #ff8c00;">█</span><span style="color: #888888;">░░</span>
 16:23                  +$0.02  $6.75       <span style="color: #2ecc71;">██████</span><span style="color: #ff8c00;">█</span><span style="color: #888888;">░</span>
@@ -174,8 +173,7 @@ Jun-09                                     $0.00      $1.75      $3.50      $5.2
 
 Interval (1h bins)             Cost ($)    Stacked Bar Breakdown
 ────────────────────────────────────────────────────────────────────────────────
-Jun-09                                     $0.00   $0.25      $0.50      $0.75      $1.00
-                                           ┿━━━━━━━┿━━━━━━━━━━┿━━━━━━━━━━┿━━━━━━━━━━┿
+Jun-09                                     <span style="background: #a0a0a0; color: #000;"> $0.00 </span>───────────<span style="background: #a0a0a0; color: #000;"> $0.50 </span>───────────<span style="background: #a0a0a0; color: #000;"> $1.00 </span>
 01:00                  $0.12               <span style="color: #2ecc71;">████████████████</span><span style="color: #ff8c00;">█</span><span style="color: #888888;">░░</span>
 00:00                  $0.09               <span style="color: #2ecc71;">████████████</span><span style="color: #ff8c00;">█</span><span style="color: #888888;">░░</span>
 ─── Jun-08 ─────────────────────────────────────────────────────────────────────

@@ -959,10 +959,18 @@ export default function wtftExtension(pi: ExtensionAPI) {
 								const args = block.arguments || {};
 								if (block.name === "bash") {
 									if (args.command) {
-										const parts = args.command.split(" ");
-										const primary = parts[0];
-										if (primary && primary !== "#") {
-											interaction.commands.push(primary);
+										// Split by lines first, then take the first non-empty/non-comment line
+										const lines = args.command.split('\n');
+										for (const line of lines) {
+											const trimmed = line.trim();
+											if (trimmed && !trimmed.startsWith("#")) {
+												const parts = trimmed.split(" ");
+												const primary = parts[0];
+												if (primary) {
+													interaction.commands.push(primary);
+													break; // Only capture the first effective command
+												}
+											}
 										}
 									}
 								} else if (block.name === "read") {
@@ -986,11 +994,31 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				}
 			}
 
-			let output = "--- 'Other' Command Histogram ---\n";
-			for (const [cmd, data] of commandMap.entries()) {
-				output += `${cmd.padEnd(15)} : ${"#".repeat(data.count)} (${data.count}) $${data.cost.toFixed(4)}\n`;
-			}
-			ctx.ui.notify(output, "info");
+            let output = "--- 'Other' Command Histogram ---\n";
+            
+            // Sort command map entries by count descending
+            const sortedEntries = Array.from(commandMap.entries()).sort((a, b) => b[1].count - a[1].count);
+
+            // Find max command length for alignment
+            let maxCmdLen = 0;
+            for (const cmd of commandMap.keys()) maxCmdLen = Math.max(maxCmdLen, cmd.length);
+            
+            const settings = getSettings(ctx);
+            const width = Math.max(settings.width, 40);
+            const countWidth = 7; // Fixed width for "(count)"
+            const costWidth = 10; // Fixed width for "$1.0000"
+
+            for (const [cmd, data] of sortedEntries) {
+                const countStr = `(${data.count})`.padStart(countWidth);
+                const costStr = `$${data.cost.toFixed(4)}`.padStart(costWidth);
+                
+                // Available space for bars
+                const barWidth = Math.max(5, width - maxCmdLen - countWidth - costWidth - 10);
+                const bar = "#".repeat(Math.min(data.count, barWidth));
+                
+                output += `${cmd.padEnd(maxCmdLen)} ${costStr} ${countStr} : ${bar}\n`;
+            }
+            ctx.ui.notify(output, "info");
 		}
 	});
 }

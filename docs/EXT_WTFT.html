@@ -13,6 +13,8 @@
             --accent-green: #6a9955;
             --accent-orange: #ce9178;
             --accent-yellow: #dcdcaa;
+            --accent-magenta: #da70d6;
+            --accent-cyan: #00ffff;
             --anchor-red: #e74c3c;
         }
         body { 
@@ -29,6 +31,7 @@
         h2 { margin-top: 2rem; }
         a { color: var(--accent-blue); text-decoration: none; }
         a:hover { text-decoration: underline; }
+        code { background: var(--box-bg); padding: 2px 4px; border-radius: 4px; }
         
         .diagram { 
             background: var(--box-bg); 
@@ -44,7 +47,7 @@
     <p><strong>Domain:</strong> Cost Audit, Telemetry & Token Accounting</p>
 
     <h3>Overview</h3>
-    <p>The WTFT (Where The F***ing Tokens?!) utility provides visual, granular accounting of your session's token consumption and associated monetary cost ($ USD). It parses the active session's append-only <code>.jsonl</code> log, classifies each historical interaction into one of three work types, and renders a stacked, color-coded ASCII bar graph over configurable time intervals.</p>
+    <p>The WTFT (Where The F***ing Tokens?!) utility provides visual, granular accounting of your session's token consumption and associated monetary cost ($ USD). It parses the active session's append-only <code>.jsonl</code> log, classifies each historical interaction into one of 9 work types, and renders a stacked, color-coded ASCII bar graph over configurable time intervals.</p>
 
     <h3>Command Reference</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
@@ -61,10 +64,40 @@
             <li><code>--ticks</code> / <code>--no-ticks</code> - Enable or disable the proportional cost scale ticks above the bars (default: <code>true</code>).</li>
             <li><code>-S, --show</code> / <code>-H, --hide</code> - Show (force refresh) or hide the cost audit widget.</li>
         </ul>
+
+        <hr style="border: 0; border-top: 1px solid #404040; margin: 15px 0;">
+
+        <p><strong><code>/wtft-other</code></strong></p>
+        <p>Debug "other" interactions with a cleanly aligned, descending-frequency histogram of executed bash commands along with their cumulative token costs, scaled to fit your configured terminal width.</p>
     </div>
 
-    <h3>Classification Taxonomy</h3>
-    <p>To avoid guessing or misrepresenting untraced exchanges, interactions are strictly bucketed into three mutually exclusive categories:</p>
+    <h3>Classification Taxonomy & Priority Rules</h3>
+    <p>To avoid guessing or misrepresenting untraced exchanges, interactions are strictly classified based on the file paths written or read, or the commands executed, under a strict priority system:</p>
+
+    <h4 style="color: var(--accent-yellow);">1. Writes take priority over Reads</h4>
+    <ul>
+        <li>If <strong>two or more distinct categories</strong> are written, the turn is <code>mixed</code>.</li>
+        <li>If exactly <strong>one category</strong> is written, the turn is classified as that category (<code>spec</code>, <code>code</code>, <code>tests</code>, or <code>research</code>).</li>
+    </ul>
+
+    <h4 style="color: var(--accent-yellow);">2. Reads Fallback</h4>
+    <ul>
+        <li>If no writes exist, the same logic applies: multiple categories read becomes <code>mixed</code>, while a single category read becomes that category.</li>
+    </ul>
+
+    <h4 style="color: var(--accent-yellow);">3. Command Analysis Fallback</h4>
+    <ul>
+        <li>If no files are accessed, but a command is executed in bash:
+            <ul>
+                <li>If starting with <code>git</code> -> <code>git</code>.</li>
+                <li>If starting with <code>grep</code>, <code>rg</code>, <code>ripgrep</code>, or <code>find</code> -> <code>grep</code>.</li>
+                <li>Any other commands -> <code>other</code>.</li>
+            </ul>
+        </li>
+        <li>If no commands exist, but dialogue text is present -> <code>prompt</code>.</li>
+        <li>Otherwise -> <code>other</code>.</li>
+    </ul>
+
     <table border="1" cellpadding="8" style="border-collapse: collapse; border-color: #404040; width: 100%; margin-bottom: 20px; background: var(--box-bg);">
         <thead>
             <tr style="background: #252526;">
@@ -77,23 +110,48 @@
             <tr>
                 <td style="color: var(--accent-green); font-weight: bold;">Spec Work (spec)</td>
                 <td>ANSI Bright Green (<code>\x1b[92m</code>)</td>
-                <td>Touches files under <code>docs/</code> or <code>/docs/</code>, or matching <code>AGENTS.md</code>, <code>ARCHITECTURE.md</code>, <code>README.md</code>, or contains prominent spec planning keywords. Falls back to treating any <code>.md</code> file as spec.</td>
+                <td>Touches files under <code>docs/</code> or matching <code>AGENTS.md</code>, <code>ARCHITECTURE.md</code>, <code>README.md</code>, or contains spec planning keywords. Treats any <code>.md</code> file as spec.</td>
             </tr>
             <tr>
                 <td style="color: var(--accent-orange); font-weight: bold;">Code Work (code)</td>
                 <td>ANSI Orange (<code>\x1b[38;5;208m</code>)</td>
-                <td>Touches files under <code>.pi/extensions/</code>, <code>extensions/</code>, <code>src/</code>, <code>tests/</code>, <code>public/</code> (or their slash-prefixed equivalents), or executes test or compilation terminal commands via `bash`. Falls back to treating code files (e.g., <code>.ts</code>, <code>.js</code>, <code>.json</code>) as code.</td>
+                <td>Touches files under <code>.pi/extensions/</code>, <code>extensions/</code>, <code>src/</code>, <code>public/</code>, <code>bin/</code>. Treats code files (e.g., <code>.ts</code>, <code>.js</code>, <code>.json</code>, etc.) as code.</td>
             </tr>
             <tr>
-                <td style="color: var(--text-color); font-weight: bold;">Other Work (other)</td>
-                <td>ANSI Grey (<code>\x1b[38;5;244m</code>)</td>
-                <td>General conversation, session initialization, model system prompts, or untraced exchanges that do not cleanly match the other two categories.</td>
+                <td style="color: var(--accent-yellow); font-weight: bold;">Tests Work (tests)</td>
+                <td>ANSI Yellow (<code>\x1b[93m</code>)</td>
+                <td>Touches files under <code>tests/</code> (the dedicated test suite directory).</td>
+            </tr>
+            <tr>
+                <td style="color: var(--accent-magenta); font-weight: bold;">Research Work (research)</td>
+                <td>ANSI Magenta (<code>\x1b[95m</code>)</td>
+                <td>Touches files under <code>research/</code> (prototypes and algorithmic experiments).</td>
+            </tr>
+            <tr>
+                <td style="color: var(--accent-cyan); font-weight: bold;">Git Work (git)</td>
+                <td>ANSI Cyan (<code>\x1b[96m</code>)</td>
+                <td>Runs git bash commands.</td>
+            </tr>
+            <tr>
+                <td style="color: #3498db; font-weight: bold;">Grep Work (grep)</td>
+                <td>ANSI Blue (<code>\x1b[94m</code>)</td>
+                <td>Runs search tools like grep, rg, ripgrep, or find.</td>
+            </tr>
+            <tr>
+                <td style="color: #bdc3c7; font-weight: bold;">Prompt Work (prompt)</td>
+                <td>ANSI Dim White (<code>\x1b[37m</code>)</td>
+                <td>Conversational prompt and response with no files or commands accessed.</td>
+            </tr>
+            <tr>
+                <td style="color: #7f8c8d; font-weight: bold;">Other Work (other)</td>
+                <td>ANSI Dark Grey (<code>\x1b[90m</code>)</td>
+                <td>Generic commands, default fallback.</td>
             </tr>
         </tbody>
     </table>
 
     <h3>TUI Visualization Style</h3>
-    <p>The TUI outputs a stacked, horizontal ASCII bar graph in a persistent widget below the editor. It uses standard block-drawing characters (<code>█</code> and <code>░</code>) to represent absolute cost, scaled relative to the maximum interval cost. To maximize horizontal space for bars, dates are omitted from individual time labels (which display in local <code>hh:mm</code> 24hr format) and instead, the most recent date is appended to the ticks labels row above the bars (if ticks are enabled). The title row displays the winged money emoji and the command name, and right-justifies the cost as a single block: <code>Total Cost: $6.83</code>, aligned with the rightmost boundary of the bar region. In <code>--cumulative</code> mode (the default), an extra field showing the incremental cost for each bucket is displayed between the time label and the cumulative cost column. If intervals cross a day boundary and <code>--ticks</code> is enabled, a visual day change indicator line is rendered between those intervals.</p>
+    <p>The TUI outputs a stacked, horizontal ASCII bar graph in a persistent widget below the editor. It uses standard block-drawing characters (<code>█</code> and <code>░</code>) to represent absolute cost, scaled relative to the maximum interval cost. Each segment within that bar is allocated its proportional share of characters using a generalized implementation of the Largest Remainder Method, ensuring the total width matches perfectly. Legend codes are appended cleanly at the base of the widget.</p>
     
     <h4 style="color: var(--accent-yellow); margin-bottom: 5px;">Example 1: Granular 1-Minute Cumulative Widget (Single Day)</h4>
     <pre style="background: var(--box-bg); padding: 12px; border-radius: 6px; border: 1px solid #404040; overflow-x: auto; color: #f0f0f0; font-family: monospace;">
@@ -107,31 +165,14 @@ Jun-09                                     $0.00      $1.70      $3.41      $5.1
 16:24                  +$0.05  $6.80       <span style="color: #2ecc71;">████████████</span><span style="color: #ff8c00;">█</span><span style="color: #888888;">░░</span>
 16:23                  +$0.02  $6.75       <span style="color: #2ecc71;">██████</span><span style="color: #ff8c00;">█</span><span style="color: #888888;">░</span>
 
-Legend:  <span style="color: #2ecc71;">█</span> Spec (Green)   <span style="color: #ff8c00;">█</span> Code (Orange)   <span style="color: #888888;">░</span> Other (Grey)
-    </pre>
-
-    <h4 style="color: var(--accent-yellow); margin-bottom: 5px;">Example 2: 1-Hour Bucket Widget Crossing Day Boundary</h4>
-    <pre style="background: var(--box-bg); padding: 12px; border-radius: 6px; border: 1px solid #404040; overflow-x: auto; color: #f0f0f0; font-family: monospace;">
-💸 Where The F***ing Tokens?!                             Total Cost: $0.25
-
-Interval (1h bins)             Cost ($)    Stacked Bar Breakdown
-────────────────────────────────────────────────────────────────────────────────
-Jun-09                                     $0.00      $0.03      $0.06      $0.09      $0.12
-                                           ┿━━━━━━━━━━┿━━━━━━━━━━┿━━━━━━━━━━┿━━━━━━━━━━┿
-01:00                  $0.12               <span style="color: #2ecc71;">████████████████</span><span style="color: #ff8c00;">█</span><span style="color: #888888;">░░</span>
-00:00                  $0.09               <span style="color: #2ecc71;">████████████</span><span style="color: #ff8c00;">█</span><span style="color: #888888;">░░</span>
-─── Jun-08 ─────────────────────────────────────────────────────────────────────
-23:00                  $0.06               <span style="color: #2ecc71;">██████</span><span style="color: #ff8c00;">█</span><span style="color: #888888;">░</span>
-22:00                  $0.02               <span style="color: #2ecc71;">██</span><span style="color: #ff8c00;">█</span>
-
-Legend:  <span style="color: #2ecc71;">█</span> Spec (Green)   <span style="color: #ff8c00;">█</span> Code (Orange)   <span style="color: #888888;">░</span> Other (Grey)
+Legend: <span style="color: #2ecc71;">█</span> Spec   <span style="color: #2ecc71; background: #ff8c00;">▒</span> Mixed   <span style="color: #ff8c00;">█</span> Code   <span style="color: #f1c40f;">█</span> Tests   <span style="color: #9b59b6;">█</span> Research   <span style="color: #1abc9c;">█</span> Git   <span style="color: #3498db;">█</span> Grep   <span style="color: #bdc3c7;">░</span> Prompt   <span style="color: #7f8c8d;">░</span> Other
     </pre>
 
     <h3>Architectural Design</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
         <p><strong>1. Log Parser:</strong> Reads <code>ctx.sessionManager.getEntries()</code> (which includes raw historical messages, tool calls, and exact usage/costs) or reads the `.jsonl` session file directly if more raw history is needed.</p>
         <p><strong>2. Binning Engine:</strong> Groups entries by their <code>timestamp</code> into chronological bins based on the requested interval (e.g., 6-minute windows for granular auditing, or 1-day windows for multi-day tracks).</p>
-        <p><strong>3. Scaling & Layout:</strong> Normalizes the absolute length of each interval's ASCII bar based on the maximum cost in any single interval (typically capped at 30-40 characters wide to fit standard terminal outputs gracefully). Each sub-segment (Spec, Code, Other) within that bar is allocated its proportional share of characters based on its absolute cost contribution, without rendering percentages or additional trailing text.</p>
+        <p><strong>3. Scaling & Layout:</strong> Normalizes the absolute length of each interval's ASCII bar based on the maximum cost in any single interval (typically capped at 30-40 characters wide to fit standard terminal outputs gracefully). Each sub-segment within that bar is allocated its proportional share of characters based on its absolute cost contribution, without rendering percentages or additional trailing text.</p>
     </div>
 
     <h3>Proposed Verification Plan</h3>

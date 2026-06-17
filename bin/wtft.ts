@@ -92,6 +92,8 @@ for (let i = 2; i < process.argv.length; i++) {
 		mode = "bucket";
 	} else if (arg === "--no-ticks") {
 		showTicks = false;
+	} else if (arg === "--ticks") {
+		showTicks = true;
 	} else if (arg === "-t" || arg === "--tz") {
 		timezone = process.argv[++i];
 	}

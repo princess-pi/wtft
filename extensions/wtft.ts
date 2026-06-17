@@ -6,7 +6,7 @@ import * as path from "node:path";
 // DATA STRUCTURES & TYPES
 // ---
 
-type Category = "spec" | "code" | "mixed" | "other" | "test" | "prompt";
+type Category = "spec" | "code" | "mixed" | "tests" | "research" | "git" | "grep" | "prompt" | "other";
 
 interface Interaction {
 	timestamp: number;
@@ -14,6 +14,14 @@ interface Interaction {
 	files: { path: string; action: "read" | "write" }[];
 	commands: string[];
 	texts: string[];
+}
+
+interface Bin {
+	label: string;
+	dateStr: string;
+	costs: Record<Category, number>;
+	total_cost: number;
+	incremental_cost?: number; // Stores the original bucket cost before cumulative summing
 }
 
 interface IntervalConfig {
@@ -176,17 +184,20 @@ function parseArgs(argsStr: string = "") {
 function classifyInteraction(interaction: Interaction): Category {
 	const specPaths = new Set<string>();
 	const codePaths = new Set<string>();
-	const testPaths = new Set<string>();
+	const testsPaths = new Set<string>();
+	const researchPaths = new Set<string>();
 
 	// Categorize file paths
 	for (const f of interaction.files) {
 		const norm = f.path.replace(/\\/g, "/");
-		let category: "spec" | "code" | "test" | null = null;
+		let category: "spec" | "code" | "tests" | "research" | null = null;
 
 		if (norm.startsWith("docs/") || norm.includes("/docs/") || norm.endsWith("AGENTS.md") || norm.endsWith("ARCHITECTURE.md") || norm.endsWith("README.md") || path.extname(norm).toLowerCase() === ".md") {
 			category = "spec";
 		} else if (norm.startsWith("tests/") || norm.includes("/tests/")) {
-			category = "test";
+			category = "tests";
+		} else if (norm.startsWith("research/") || norm.includes("/research/")) {
+			category = "research";
 		} else if (norm.startsWith(".pi/extensions/") || norm.includes("/.pi/extensions/") || norm.startsWith("extensions/") || norm.includes("/extensions/") || norm.startsWith("src/") || norm.includes("/src/") || norm.startsWith("public/") || norm.includes("/public/") || norm.startsWith("bin/") || norm.includes("/bin/")) {
 			category = "code";
 		} else {
@@ -198,36 +209,57 @@ function classifyInteraction(interaction: Interaction): Category {
 
 		if (category === "spec") specPaths.add(f.action);
 		else if (category === "code") codePaths.add(f.action);
-		else if (category === "test") testPaths.add(f.action);
+		else if (category === "tests") testsPaths.add(f.action);
+		else if (category === "research") researchPaths.add(f.action);
 	}
 
-	// Re-think the logic based on the user's table
+	// Priority logic for writes
 	const specWrites = specPaths.has("write");
 	const codeWrites = codePaths.has("write");
-	const testWrites = testPaths.has("write");
-	const writeCount = (specWrites ? 1 : 0) + (codeWrites ? 1 : 0) + (testWrites ? 1 : 0);
+	const testsWrites = testsPaths.has("write");
+	const researchWrites = researchPaths.has("write");
+	const writeCount = (specWrites ? 1 : 0) + (codeWrites ? 1 : 0) + (testsWrites ? 1 : 0) + (researchWrites ? 1 : 0);
 
 	if (writeCount > 1) return "mixed";
 	if (writeCount === 1) {
 		if (specWrites) return "spec";
 		if (codeWrites) return "code";
-		if (testWrites) return "test";
+		if (testsWrites) return "tests";
+		if (researchWrites) return "research";
 	}
 
 	// Read only logic
 	const hasSpec = specPaths.has("read");
 	const hasCode = codePaths.has("read");
-	const hasTest = testPaths.has("read");
-	const readCount = (hasSpec ? 1 : 0) + (hasCode ? 1 : 0) + (hasTest ? 1 : 0);
+	const hasTests = testsPaths.has("read");
+	const hasResearch = researchPaths.has("read");
+	const readCount = (hasSpec ? 1 : 0) + (hasCode ? 1 : 0) + (hasTests ? 1 : 0) + (hasResearch ? 1 : 0);
 	
 	if (readCount > 1) return "mixed";
 	if (hasSpec) return "spec";
 	if (hasCode) return "code";
-	if (hasTest) return "test";
+	if (hasTests) return "tests";
+	if (hasResearch) return "research";
 
-	// No files, look at prompt
+	// No files, look at commands
+	if (interaction.commands.length > 0) {
+		let isGit = false;
+		let isGrep = false;
+		for (const cmd of interaction.commands) {
+			const lower = cmd.toLowerCase().trim();
+			if (lower === "git" || lower.startsWith("git ")) {
+				isGit = true;
+			} else if (lower === "grep" || lower.startsWith("grep ") || lower === "rg" || lower.startsWith("rg ") || lower === "ripgrep" || lower.startsWith("ripgrep ") || lower === "find" || lower.startsWith("find ")) {
+				isGrep = true;
+			}
+		}
+		if (isGit) return "git";
+		if (isGrep) return "grep";
+		return "other";
+	}
+
+	// No files, no commands, look at texts
 	if (interaction.texts.length > 0) return "prompt";
-	if (interaction.commands.length > 0) return "other";
 	return "other";
 }
 
@@ -369,52 +401,53 @@ function getBinInfo(timestamp: number, config: IntervalConfig, tz?: string): { k
 // ---
 
 /**
- * Distributes character counts across spec, mixed, code, and other segments using
+ * Distributes character counts across all categories using
  * the Largest Remainder Method, ensuring the total matches barWidth exactly.
  */
 function distributeChars(
-	spec_cost: number,
-	mixed_cost: number,
-	code_cost: number,
-	other_cost: number,
+	costs: Record<Category, number>,
 	barWidth: number
-): { spec: number; mixed: number; code: number; other: number } {
-	const total = spec_cost + mixed_cost + code_cost + other_cost;
+): Record<Category, number> {
+	const total = Object.values(costs).reduce((sum, val) => sum + val, 0);
+	const result = {} as Record<Category, number>;
+	const remainders = {} as Record<Category, number>;
+	
+	const categories = Object.keys(costs) as Category[];
+	
 	if (total <= 0 || barWidth <= 0) {
-		return { spec: 0, mixed: 0, code: 0, other: 0 };
-	}
-
-	const raw_spec = (spec_cost / total) * barWidth;
-	const raw_mixed = (mixed_cost / total) * barWidth;
-	const raw_code = (code_cost / total) * barWidth;
-	const raw_other = (other_cost / total) * barWidth;
-
-	let spec = Math.floor(raw_spec);
-	let mixed = Math.floor(raw_mixed);
-	let code = Math.floor(raw_code);
-	let other = Math.floor(raw_other);
-
-	const remainder_spec = raw_spec - spec;
-	const remainder_mixed = raw_mixed - mixed;
-	const remainder_code = raw_code - code;
-	const remainder_other = raw_other - other;
-
-	let allocated = spec + mixed + code + other;
-	while (allocated < barWidth) {
-		const maxRemainder = Math.max(remainder_spec, remainder_mixed, remainder_code, remainder_other);
-		if (maxRemainder === remainder_spec) {
-			spec++;
-		} else if (maxRemainder === remainder_mixed) {
-			mixed++;
-		} else if (maxRemainder === remainder_code) {
-			code++;
-		} else {
-			other++;
+		for (const cat of categories) {
+			result[cat] = 0;
 		}
-		allocated++;
+		return result;
 	}
 
-	return { spec, mixed, code, other };
+	let allocated = 0;
+	for (const cat of categories) {
+		const raw = (costs[cat] / total) * barWidth;
+		result[cat] = Math.floor(raw);
+		remainders[cat] = raw - result[cat];
+		allocated += result[cat];
+	}
+
+	while (allocated < barWidth) {
+		let maxCat: Category | null = null;
+		let maxRemainder = -1;
+		for (const cat of categories) {
+			if (remainders[cat] > maxRemainder) {
+				maxRemainder = remainders[cat];
+				maxCat = cat;
+			}
+		}
+		if (maxCat) {
+			result[maxCat]++;
+			remainders[maxCat] = -1; // Mark as allocated
+			allocated++;
+		} else {
+			break;
+		}
+	}
+
+	return result;
 }
 
 // ---
@@ -655,21 +688,15 @@ function updateWtftWidget(
 
 		let bin = binMap.get(key);
 		if (!bin) {
-			bin = { label, dateStr, spec_cost: 0, code_cost: 0, mixed_cost: 0, other_cost: 0, total_cost: 0 };
+			const costs = {} as Record<Category, number>;
+			for (const cat of ["spec", "code", "mixed", "tests", "research", "git", "grep", "prompt", "other"] as Category[]) {
+				costs[cat] = 0;
+			}
+			bin = { label, dateStr, costs, total_cost: 0 };
 			binMap.set(key, bin);
 		}
 
-		if (classification === "spec") {
-			bin.spec_cost += interaction.cost;
-		} else if (classification === "code") {
-			bin.code_cost += interaction.cost;
-		} else if (classification === "mixed") {
-			bin.mixed_cost += interaction.cost;
-		} else if (classification === "prompt") {
-			bin.other_cost += interaction.cost; // Temporarily map prompt to other for display
-		} else {
-			bin.other_cost += interaction.cost;
-		}
+		bin.costs[classification] += interaction.cost;
 		bin.total_cost += interaction.cost;
 	}
 
@@ -680,24 +707,20 @@ function updateWtftWidget(
 
 	// Apply mode conversions
 	if (mode === "cumulative") {
-		let running_spec = 0;
-		let running_code = 0;
-		let running_mixed = 0;
-		let running_other = 0;
+		const runningCosts = {} as Record<Category, number>;
+		for (const cat of ["spec", "code", "mixed", "tests", "research", "git", "grep", "prompt", "other"] as Category[]) {
+			runningCosts[cat] = 0;
+		}
 		let running_total = 0;
 
 		for (const bin of sortedBins) {
 			bin.incremental_cost = bin.total_cost; // Preserve binned cost
-			running_spec += bin.spec_cost;
-			running_code += bin.code_cost;
-			running_mixed += bin.mixed_cost;
-			running_other += bin.other_cost;
 			running_total += bin.total_cost;
 
-			bin.spec_cost = running_spec;
-			bin.code_cost = running_code;
-			bin.mixed_cost = running_mixed;
-			bin.other_cost = running_other;
+			for (const cat of Object.keys(bin.costs) as Category[]) {
+				runningCosts[cat] += bin.costs[cat];
+				bin.costs[cat] = runningCosts[cat];
+			}
 			bin.total_cost = running_total;
 		}
 	}
@@ -772,7 +795,7 @@ function updateWtftWidget(
 		}
 
 		const barWidth = maxCostInDisplayed > 0 ? Math.round((bin.total_cost / maxCostInDisplayed) * maxBarWidth) : 0;
-		const chars = distributeChars(bin.spec_cost, bin.mixed_cost, bin.code_cost, bin.other_cost, barWidth);
+		const chars = distributeChars(bin.costs, barWidth);
 
 		let barStr = "";
 		if (chars.spec > 0) {
@@ -785,8 +808,23 @@ function updateWtftWidget(
 		if (chars.code > 0) {
 			barStr += `\x1b[38;5;208m${"█".repeat(chars.code)}\x1b[0m`; // Code Work (Orange)
 		}
+		if (chars.tests > 0) {
+			barStr += `\x1b[93m${"█".repeat(chars.tests)}\x1b[0m`; // Tests Work (Yellow)
+		}
+		if (chars.research > 0) {
+			barStr += `\x1b[95m${"█".repeat(chars.research)}\x1b[0m`; // Research Work (Magenta)
+		}
+		if (chars.git > 0) {
+			barStr += `\x1b[96m${"█".repeat(chars.git)}\x1b[0m`; // Git Work (Cyan)
+		}
+		if (chars.grep > 0) {
+			barStr += `\x1b[94m${"█".repeat(chars.grep)}\x1b[0m`; // Grep Work (Blue)
+		}
+		if (chars.prompt > 0) {
+			barStr += `\x1b[37m${"░".repeat(chars.prompt)}\x1b[0m`; // Prompt Work (White/Dim)
+		}
 		if (chars.other > 0) {
-			barStr += `\x1b[38;5;244m${"░".repeat(chars.other)}\x1b[0m`; // Other Work (Grey)
+			barStr += `\x1b[90m${"░".repeat(chars.other)}\x1b[0m`; // Other Work (Dark Grey)
 		}
 
 		const labelPart = padString(bin.label, labelWidth);
@@ -811,7 +849,7 @@ function updateWtftWidget(
 		}
 	}
 
-	widgetLines.push(`Legend:  \x1b[92m█\x1b[0m Spec (Green)   \x1b[38;5;120;48;5;208m▒\x1b[0m Mixed (Blend)   \x1b[38;5;208m█\x1b[0m Code (Orange)   \x1b[38;5;244m░\x1b[0m Other (Grey)`);
+	widgetLines.push(`Legend: \x1b[92m█\x1b[0m Spec   \x1b[38;5;120;48;5;208m▒\x1b[0m Mixed   \x1b[38;5;208m█\x1b[0m Code   \x1b[93m█\x1b[0m Tests   \x1b[95m█\x1b[0m Research   \x1b[96m█\x1b[0m Git   \x1b[94m█\x1b[0m Grep   \x1b[37m░\x1b[0m Prompt   \x1b[90m░\x1b[0m Other`);
 
 	ctx.ui.setWidget("wtft", widgetLines, { placement: "belowEditor" });
 }

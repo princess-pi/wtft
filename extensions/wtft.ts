@@ -799,32 +799,32 @@ function updateWtftWidget(
 
 		let barStr = "";
 		if (chars.spec > 0) {
-			barStr += `\x1b[92m${"█".repeat(chars.spec)}\x1b[0m`; // Spec Work (Green)
+			barStr += `\x1b[38;5;108m${"█".repeat(chars.spec)}\x1b[0m`; // Spec Work (Sage Green)
 		}
 		if (chars.mixed > 0) {
-			// Blended Spec + Code (Green foreground, Orange background, Medium Shade glyph)
-			barStr += `\x1b[38;5;120;48;5;208m${"▒".repeat(chars.mixed)}\x1b[0m`; // Mixed Work (Blended)
+			// Blended Spec + Code (Sage Green foreground, Terracotta Rust background, Medium Shade glyph)
+			barStr += `\x1b[38;5;108;48;5;173m${"▒".repeat(chars.mixed)}\x1b[0m`; // Mixed Work (Blended)
 		}
 		if (chars.code > 0) {
-			barStr += `\x1b[38;5;208m${"█".repeat(chars.code)}\x1b[0m`; // Code Work (Orange)
+			barStr += `\x1b[38;5;173m${"█".repeat(chars.code)}\x1b[0m`; // Code Work (Terracotta Rust)
 		}
 		if (chars.tests > 0) {
-			barStr += `\x1b[93m${"█".repeat(chars.tests)}\x1b[0m`; // Tests Work (Yellow)
+			barStr += `\x1b[38;5;168m${"█".repeat(chars.tests)}\x1b[0m`; // Tests Work (Matte Rose Pink)
 		}
 		if (chars.research > 0) {
-			barStr += `\x1b[95m${"█".repeat(chars.research)}\x1b[0m`; // Research Work (Magenta)
+			barStr += `\x1b[38;5;134m${"█".repeat(chars.research)}\x1b[0m`; // Research Work (Plum Lavender)
 		}
 		if (chars.git > 0) {
-			barStr += `\x1b[96m${"█".repeat(chars.git)}\x1b[0m`; // Git Work (Cyan)
+			barStr += `\x1b[38;5;73m${"█".repeat(chars.git)}\x1b[0m`; // Git Work (Petrol Teal)
 		}
 		if (chars.grep > 0) {
-			barStr += `\x1b[94m${"█".repeat(chars.grep)}\x1b[0m`; // Grep Work (Blue)
+			barStr += `\x1b[38;5;67m${"█".repeat(chars.grep)}\x1b[0m`; // Grep Work (Steel Blue)
 		}
 		if (chars.prompt > 0) {
-			barStr += `\x1b[37m${"░".repeat(chars.prompt)}\x1b[0m`; // Prompt Work (White/Dim)
+			barStr += `\x1b[38;5;223m${"░".repeat(chars.prompt)}\x1b[0m`; // Prompt Work (Chalky Sand)
 		}
 		if (chars.other > 0) {
-			barStr += `\x1b[90m${"░".repeat(chars.other)}\x1b[0m`; // Other Work (Dark Grey)
+			barStr += `\x1b[38;5;238m${"░".repeat(chars.other)}\x1b[0m`; // Other Work (Charcoal)
 		}
 
 		const labelPart = padString(bin.label, labelWidth);
@@ -849,7 +849,7 @@ function updateWtftWidget(
 		}
 	}
 
-	widgetLines.push(`Legend: \x1b[92m█\x1b[0m Spec   \x1b[38;5;120;48;5;208m▒\x1b[0m Mixed   \x1b[38;5;208m█\x1b[0m Code   \x1b[93m█\x1b[0m Tests   \x1b[95m█\x1b[0m Research   \x1b[96m█\x1b[0m Git   \x1b[94m█\x1b[0m Grep   \x1b[37m░\x1b[0m Prompt   \x1b[90m░\x1b[0m Other`);
+	widgetLines.push(`Legend: \x1b[38;5;108m█\x1b[0m Spec   \x1b[38;5;108;48;5;173m▒\x1b[0m Mixed   \x1b[38;5;173m█\x1b[0m Code   \x1b[38;5;168m█\x1b[0m Tests   \x1b[38;5;134m█\x1b[0m Research   \x1b[38;5;73m█\x1b[0m Git   \x1b[38;5;67m█\x1b[0m Grep   \x1b[38;5;223m░\x1b[0m Prompt   \x1b[38;5;238m░\x1b[0m Other`);
 
 	ctx.ui.setWidget("wtft", widgetLines, { placement: "belowEditor" });
 }

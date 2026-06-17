@@ -65,6 +65,7 @@ function parseArgs(argsStr: string = "") {
 	let showHelp = false;
 	let showTicks = true;
 	let mode: "bucket" | "cumulative" = "cumulative";
+	let pager = false;
 
 	let hasInterval = false;
 	let hasLimit = false;
@@ -93,6 +94,8 @@ function parseArgs(argsStr: string = "") {
 		} else if (arg === "--bucket" || arg === "-b") {
 			mode = "bucket";
 			hasMode = true;
+		} else if (arg === "--pager" || arg === "-p") {
+			pager = true;
 		} else if (arg === "-i" || arg === "--interval") {
 			const val = args[i + 1];
 			if (val && /^(\d+)([mhdw])$/.test(val)) {
@@ -162,6 +165,7 @@ function parseArgs(argsStr: string = "") {
 		showTicks,
 		mode,
 		showHelp,
+		pager,
 		hasInterval,
 		hasLimit,
 		hasWidth,
@@ -579,35 +583,28 @@ function getVisualLength(str: string): number {
 // ---
 
 /**
- * Dynamically computes costs binned by interval and updates the TUI widget
- * positioned below the editor. Operates in the configured timezone.
+ * Dynamically computes costs binned by interval and returns formatted lines.
+ * Operates in the configured timezone.
  */
-function updateWtftWidget(
+function buildWtftLines(
 	ctx: any,
 	pi: ExtensionAPI,
 	opts?: {
 		interval?: string;
 		limit?: number;
 		width?: number;
-		visible?: boolean;
 		showTicks?: boolean;
 		mode?: "bucket" | "cumulative";
 		timezone?: string;
 	}
-) {
+): string[] | null {
 	const current = getSettings(ctx);
 	const intervalStr = opts?.interval !== undefined ? opts.interval : current.interval;
 	const limit = opts?.limit !== undefined ? opts.limit : current.limit;
 	const width = opts?.width !== undefined ? opts.width : current.width;
-	const visible = opts?.visible !== undefined ? opts.visible : current.visible;
 	const showTicks = opts?.showTicks !== undefined ? opts.showTicks : current.showTicks;
 	const mode = opts?.mode !== undefined ? opts.mode : current.mode;
 	const tz = opts?.timezone !== undefined ? opts.timezone : current.timezone;
-
-	if (!visible) {
-		ctx.ui.setWidget("wtft", undefined);
-		return;
-	}
 
 	const intervalConfig = parseInterval(intervalStr);
 	const branch = ctx.sessionManager.getBranch();
@@ -703,8 +700,7 @@ function updateWtftWidget(
 	const displayedBins = reversedBins.slice(0, limit);
 
 	if (displayedBins.length === 0) {
-		ctx.ui.setWidget("wtft", undefined);
-		return;
+		return null;
 	}
 
 	const calculateScaleMax = (total: number): number => {
@@ -843,7 +839,93 @@ function updateWtftWidget(
 		}
 	}
 
-	ctx.ui.setWidget("wtft", widgetLines, { placement: "belowEditor" });
+	return widgetLines;
+}
+
+/**
+ * Dynamically computes costs binned by interval and updates the TUI widget
+ * positioned below the editor. Operates in the configured timezone.
+ */
+function updateWtftWidget(
+	ctx: any,
+	pi: ExtensionAPI,
+	opts?: {
+		interval?: string;
+		limit?: number;
+		width?: number;
+		visible?: boolean;
+		showTicks?: boolean;
+		mode?: "bucket" | "cumulative";
+		timezone?: string;
+	}
+) {
+	const current = getSettings(ctx);
+	const visible = opts?.visible !== undefined ? opts.visible : current.visible;
+
+	if (!visible) {
+		ctx.ui.setWidget("wtft", undefined);
+		return;
+	}
+
+	const lines = buildWtftLines(ctx, pi, opts);
+	if (!lines) {
+		ctx.ui.setWidget("wtft", undefined);
+		return;
+	}
+
+	ctx.ui.setWidget("wtft", lines, { placement: "belowEditor" });
+}
+
+// ---
+class PagerComponent {
+	private lines: string[];
+	private scrollOffset = 0;
+	private onDone: () => void;
+
+	constructor(lines: string[], onDone: () => void) {
+		this.lines = lines;
+		this.onDone = onDone;
+	}
+
+	render(width: number): string[] {
+		const termHeight = process.stdout.rows || 24;
+		const displayHeight = Math.max(5, termHeight - 4); // Leave space for headers/footers
+
+		const rendered: string[] = [];
+		rendered.push(`\x1b[1;36m┌─── WTFT Cost Audit Scrollable Pager ──────────────────────────┐\x1b[0m`);
+		
+		const limit = Math.min(this.lines.length, this.scrollOffset + displayHeight);
+		for (let i = this.scrollOffset; i < limit; i++) {
+			rendered.push("│ " + this.lines[i]);
+		}
+		
+		const actualPrinted = limit - this.scrollOffset;
+		for (let i = actualPrinted; i < displayHeight; i++) {
+			rendered.push("│");
+		}
+
+		rendered.push(`\x1b[1;36m└─── ↑↓/j/k navigate • PageUp/PageDown • q/Esc exit (Row ${this.scrollOffset + 1}/${this.lines.length}) ──┘\x1b[0m`);
+		return rendered;
+	}
+
+	handleInput(data: string): void {
+		const termHeight = process.stdout.rows || 24;
+		const displayHeight = Math.max(5, termHeight - 4);
+
+		if (data === "q" || data === "\x1b") {
+			this.onDone();
+		} else if (data === "\x1b[A" || data === "k") {
+			if (this.scrollOffset > 0) this.scrollOffset--;
+		} else if (data === "\x1b[B" || data === "j") {
+			if (this.scrollOffset < this.lines.length - displayHeight) this.scrollOffset++;
+		} else if (data === "\x1b[5~") { // Page Up
+			this.scrollOffset = Math.max(0, this.scrollOffset - displayHeight);
+		} else if (data === "\x1b[6~") { // Page Down
+			this.scrollOffset = Math.min(Math.max(0, this.lines.length - displayHeight), this.scrollOffset + displayHeight);
+		}
+	}
+
+	invalidate(): void {}
 }
 
 // ---
@@ -881,6 +963,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				showTicks,
 				mode,
 				showHelp,
+				pager,
 				hasInterval,
 				hasLimit,
 				hasWidth,
@@ -939,6 +1022,28 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			const nextTicks = hasTicks ? showTicks : current.showTicks;
 			const nextMode = hasMode ? mode : current.mode;
 			const nextTimezone = hasTimezone ? timezone : current.timezone;
+
+			if (pager) {
+				const lines = buildWtftLines(ctx, pi, {
+					interval: nextInterval,
+					limit: hasLimit ? nextLimit : 100, // Large default for pager
+					width: nextWidth,
+					showTicks: nextTicks,
+					mode: nextMode,
+					timezone: nextTimezone
+				});
+
+				if (!lines || lines.length === 0) {
+					ctx.ui.notify("No cost history found to display in the pager.", "warning");
+					return;
+				}
+
+				// Launch TUI custom pager overlay
+				await ctx.ui.custom((tui, _theme, _keybindings, done) => {
+					return new PagerComponent(lines, () => done(null));
+				}, { overlay: true });
+				return;
+			}
 
 			pi.appendEntry("wtft-settings", {
 				interval: nextInterval,

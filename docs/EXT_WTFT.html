@@ -62,6 +62,7 @@
             <li><code>-c, --cumulative</code> - Render running cumulative sums (default behavior).</li>
             <li><code>-b, --bucket</code> - Render discrete binned interval cost buckets.</li>
             <li><code>--ticks</code> / <code>--no-ticks</code> - Enable or disable the proportional cost scale ticks above the bars (default: <code>true</code>).</li>
+            <li><code>-p, --pager</code> - Launch a fullscreen, interactive scrollable TUI pager overlay to browse expanded cost history inside your session.</li>
             <li><code>-S, --show</code> / <code>-H, --hide</code> - Show (force refresh) or hide the cost audit widget.</li>
         </ul>
 
@@ -69,6 +70,11 @@
 
         <p><strong><code>/wtft-other</code></strong></p>
         <p>Debug "other" interactions with a cleanly aligned, descending-frequency histogram of executed bash commands along with their cumulative token costs, scaled to fit your configured terminal width.</p>
+
+        <hr style="border: 0; border-top: 1px solid #404040; margin: 15px 0;">
+
+        <p><strong><code>wtft-cli</code></strong> [options] (Standalone Shell Binary)</p>
+        <p>Run the cost auditor directly from your host shell outside of Pi. Reuses the identical binned classification visual parser, and outputs the complete, unbounded audit timeline directly to your standard terminal stdout, enabling mouse scrollback or standard piping (e.g. <code>wtft-cli -i 1d | less -R</code>).</p>
     </div>
 
     <h3>Classification Taxonomy & Priority Rules</h3>

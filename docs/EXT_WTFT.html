@@ -73,8 +73,8 @@
 
         <hr style="border: 0; border-top: 1px solid #404040; margin: 15px 0;">
 
-        <p><strong><code>wtft</code></strong> [options] (Standalone Shell Binary)</p>
-        <p>Run the cost auditor directly from your host shell outside of Pi. Reuses the identical binned classification visual parser, and outputs the complete, unbounded audit timeline directly to your standard terminal stdout, enabling mouse scrollback or standard piping (e.g. <code>wtft | less -R</code>).</p>
+        <p><strong><code>wtft</code></strong> [options] (Standalone Shell Binary — Cross-Harness)</p>
+        <p>Run the cost auditor directly from your host shell outside of Pi. Just like <code>bin/merge.mjs</code>, it is shipped as plain ESM JavaScript (<code>bin/wtft.mjs</code>) so it can be installed globally for Claude Code (<code>npm install -g github:duppypro/princess-pi-packages</code>) without triggering Node's type-stripping errors. You can invoke it as the npm-global <code>wtft</code>, via the <code>./wtft</code> wrapper from the repo root, or through Claude Code's <code>!</code> prefix (e.g. <code>!wtft -w 90 -i 1d</code>). It reuses the exact same classification engine as the Pi extension, but outputs directly to stdout, allowing you to pipe the output (e.g., <code>wtft | less -R</code>).</p>
     </div>
 
     <h3>Classification Taxonomy & Priority Rules</h3>

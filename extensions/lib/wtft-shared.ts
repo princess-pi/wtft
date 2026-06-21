@@ -496,7 +496,8 @@ export function buildWtftLines(
 		const labelPrefix = padString(titleDateStr, prefixWidth);
 		const ticksLine = buildTickLine(scaleMax, maxBarWidth);
 		if (ticksLine) {
-			widgetLines.push(labelPrefix + `\x1b[2m${ticksLine}\x1b[0m`);
+			// Using \x1b[90m instead of \x1b[2m for the tick line background
+			widgetLines.push(labelPrefix + `\x1b[90m${ticksLine}\x1b[0m`);
 		}
 	}
 
@@ -510,7 +511,13 @@ export function buildWtftLines(
 			const labelDay = formatMmmDdStr(bin.dateStr);
 			const dayChangeText = `─── ${labelDay} `;
 			const dividerLine = dayChangeText + "─".repeat(Math.max(0, finalWidth - dayChangeText.length));
-			widgetLines.push(`\x1b[2m${dividerLine}\x1b[0m`);
+			// Use \x1b[30;47m for the day change divider to avoid pure black backgrounds on some terminal themes
+			// Wait, the divider is just "dim" text usually. The issue said: "date rows and the time stamp labels... have the jarring black background".
+			// If \x1b[2m (dim) is causing black backgrounds on that terminal emulator, it's because
+			// the terminal treats "dim" as a background modification in some color schemes, or it's interacting poorly.
+			// Let's just use \x1b[90m (bright black/dark grey) which gives the exact same visual "dim" effect 
+			// without using the \x1b[2m dim attribute that breaks backgrounds.
+			widgetLines.push(`\x1b[90m${dividerLine}\x1b[0m`);
 		}
 
 		const barWidth = scaleMax > 0 ? Math.round((bin.total_cost / scaleMax) * maxBarWidth) : 0;
@@ -547,7 +554,8 @@ export function buildWtftLines(
 		}
 
 		const labelPart = padString(bin.label, labelWidth);
-		const coloredLabel = `\x1b[2m${labelPart}\x1b[0m`; // Dim White
+		// Replace \x1b[2m with \x1b[90m (dark grey foreground) to avoid terminal emulator background bugs
+		const coloredLabel = `\x1b[90m${labelPart}\x1b[0m`; // Dark Grey / Dim White effect
 		
 		if (mode === "cumulative") {
 			// Prepend plus to the incremental cost

@@ -20,6 +20,139 @@ export interface Interaction {
 	texts: string[];
 }
 
+export function calculateClaudeCost(model: string, usage: any): number {
+	if (!usage) return 0;
+	
+	// Default to Sonnet pricing
+	let inputPrice = 3.00;
+	let outputPrice = 15.00;
+	let cacheWritePrice = 3.75;
+	let cacheReadPrice = 0.30;
+	
+	const m = (model || "").toLowerCase();
+	if (m.includes("haiku")) {
+		inputPrice = 0.80;
+		outputPrice = 4.00;
+		cacheWritePrice = 1.00;
+		cacheReadPrice = 0.08;
+	} else if (m.includes("opus")) {
+		inputPrice = 15.00;
+		outputPrice = 75.00;
+		cacheWritePrice = 18.75;
+		cacheReadPrice = 1.50;
+	}
+	
+	const cost = 
+		((usage.input_tokens || 0) * (inputPrice / 1000000)) +
+		((usage.output_tokens || 0) * (outputPrice / 1000000)) +
+		((usage.cache_creation_input_tokens || 0) * (cacheWritePrice / 1000000)) +
+		((usage.cache_read_input_tokens || 0) * (cacheReadPrice / 1000000));
+		
+	return cost;
+}
+
+export function parseEntryToInteraction(entry: any): Interaction | null {
+	if (!entry) return null;
+	
+	// Support both Pi schema (entry.type === "message") and Claude Code schema (entry.type === "assistant" or lacking type but having message)
+	const isPiSchema = entry.type === "message" && entry.message && entry.message.role === "assistant";
+	const isClaudeSchema = entry.type === "assistant" && entry.message && entry.message.role === "assistant";
+
+	if (isPiSchema || isClaudeSchema) {
+		const assistantMsg = entry.message;
+		
+		let cost = 0;
+		if (assistantMsg.usage?.cost?.total !== undefined) {
+			// Pi Coding Agent native cost tracking
+			cost = assistantMsg.usage.cost.total;
+		} else if (assistantMsg.model && assistantMsg.usage) {
+			// Claude Code token usage fallback calculation
+			cost = calculateClaudeCost(assistantMsg.model, assistantMsg.usage);
+		}
+
+		// Use assistantMsg.timestamp if available (Pi), fallback to top-level entry.timestamp (Claude Code)
+		let timestampStr = assistantMsg.timestamp || entry.timestamp;
+		let timestamp = 0;
+		if (typeof timestampStr === "string") {
+			timestamp = new Date(timestampStr).getTime();
+		} else if (typeof timestampStr === "number") {
+			timestamp = timestampStr;
+		}
+
+		const files: { path: string; action: "read" | "write" }[] = [];
+		const commands: string[] = [];
+		const texts: string[] = [];
+
+		if (Array.isArray(assistantMsg.content)) {
+			for (const block of assistantMsg.content) {
+				if (block.type === "text") {
+					texts.push(block.text);
+				} else if (block.type === "thinking") {
+					texts.push(block.thinking);
+				} else if (block.type === "toolCall") {
+					// Pi Schema
+					const name = block.name;
+					const args = block.arguments || {};
+					if (name === "read") {
+						if (args.path) files.push({ path: args.path, action: "read" });
+					} else if (name === "write" || name === "edit") {
+						if (args.path) files.push({ path: args.path, action: "write" });
+					} else if (name === "bash") {
+						if (args.command) commands.push(args.command);
+					}
+				} else if (block.type === "tool_use") {
+					// Claude Code Schema
+					const name = (block.name || "").toLowerCase();
+					const args = block.input || {};
+					
+					if (name === "read" || name === "view" || name === "glob" || name === "ls") {
+						const p = args.file_path || args.path || args.directory || args.target;
+						if (p) files.push({ path: p, action: "read" });
+					} else if (name === "edit" || name === "write" || name === "replace") {
+						const p = args.file_path || args.path || args.target;
+						if (p) files.push({ path: p, action: "write" });
+					} else if (name === "bash" || name === "run") {
+						if (args.command) {
+							commands.push(args.command);
+							
+							// Claude Code frequently uses `cat <file>`, `head <file>`, `tail <file>` inside Bash instead of a direct read tool.
+							// We heuristically extract the file path to ensure these turns don't fall through to "other" classification.
+							const cmdLines = args.command.split('\n');
+							for (const line of cmdLines) {
+								const trimmed = line.trim();
+								if (trimmed.startsWith("cat ") || trimmed.startsWith("head ") || trimmed.startsWith("tail ")) {
+									const parts = trimmed.split(/\s+/);
+									if (parts.length > 1) {
+										// parts[1] is typically the file path. Handle potential quotes.
+										const possiblePath = parts[1].replace(/['"]/g, '');
+										if (possiblePath && !possiblePath.startsWith("-")) { // Ignore flags like `cat -n`
+											files.push({ path: possiblePath, action: "read" });
+										} else if (parts.length > 2 && parts[1].startsWith("-")) {
+											// Handle `cat -n file.txt` or `tail -n 50 file.txt`
+											// We just try to find the first argument that doesn't start with '-' and isn't a number
+											for (let i = 2; i < parts.length; i++) {
+												const candidate = parts[i].replace(/['"]/g, '');
+												if (!candidate.startsWith("-") && isNaN(Number(candidate))) {
+													files.push({ path: candidate, action: "read" });
+													break;
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		return { timestamp, cost, files, commands, texts };
+	}
+	
+	return null;
+}
+
 export interface Bin {
 	label: string;
 	dateStr: string;
@@ -67,7 +200,7 @@ export function classifyInteraction(interaction: Interaction): Category {
 			category = "code";
 		} else {
 			const ext = path.extname(norm).toLowerCase();
-			if ([".ts", ".js", ".mjs", ".json", ".css", ".tsx", ".jsx", ".py", ".rs", ".go", ".sh", ".yml", ".yaml"].includes(ext)) {
+			if ([".ts", ".js", ".mjs", ".json", ".css", ".tsx", ".jsx", ".py", ".rs", ".go", ".sh", ".yml", ".yaml", ".sql"].includes(ext) || norm.endsWith(".gitignore") || norm.endsWith(".dockerignore")) {
 				category = "code";
 			}
 		}

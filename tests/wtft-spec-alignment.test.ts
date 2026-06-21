@@ -98,8 +98,24 @@ function runAlignmentTest(mode: "cumulative" | "bucket") {
 
 	try {
 		assert.strictEqual(ticksRow.length, width, "Ticks row length must match configured terminal width exactly");
-		assert.strictEqual(firstDotIdx, actualBarStart, "The decimal point of the $0.00 label must perfectly align with the start of the bar");
-		assert.strictEqual(lastDotIdx, lastBarCharIdx, "The decimal point of the maximum cost label must perfectly align with the end of the bar");
+		if (mode === "cumulative") {
+			assert.strictEqual(firstDotIdx, actualBarStart, "The decimal point of the $0.00 label must perfectly align with the start of the bar");
+			assert.strictEqual(lastDotIdx, lastBarCharIdx, "The decimal point of the maximum cost label must perfectly align with the end of the bar");
+		} else {
+			// Bucket mode: verify that the $0.00 dot aligns with prefixWidth
+			assert.strictEqual(firstDotIdx, 15, "The decimal point of the $0.00 label must perfectly align with prefixWidth (15)");
+			
+			// Verify that the newest bin's Mixed work character '▒' is exactly on the maximum tick (index 76)
+			assert.strictEqual(firstBarRow.indexOf("▒"), 76, "The point-of-spend marker '▒' for the max cost bin must reside exactly at index 76");
+			
+			// Verify that the older bin's Code work character '█' is located at the $5.00 point on the scale.
+			// Scale max is $13.00. Cost is $5.00. 
+			// maxBarWidth = 80 - 15 - 3 = 62.
+			// pos = Math.round((5 / 13) * (62 - 1)) = Math.round(0.3846 * 61) = Math.round(23.46) = 23.
+			// Absolute index = prefixWidth (15) + 23 = 38.
+			const secondBarRow = barRows[1];
+			assert.strictEqual(secondBarRow.indexOf("█"), 38, "The point-of-spend marker '█' for the $5.00 bin must reside exactly at index 38");
+		}
 		console.log(`✅ ${mode.toUpperCase()} ALIGNMENT CHECKS PASSED PERFECTLY!`);
 	} catch (err: any) {
 		console.error(`\n❌ ${mode.toUpperCase()} ALIGNMENT CHECK FAILED: ${err.message}`);

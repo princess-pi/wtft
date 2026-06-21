@@ -706,37 +706,64 @@ export function buildWtftLines(
 			widgetLines.push(`\x1b[90m${dividerLine}\x1b[0m`);
 		}
 
-		const barWidth = scaleMax > 0 ? Math.round((bin.total_cost / scaleMax) * maxBarWidth) : 0;
-		const chars = distributeChars(bin.costs, barWidth);
-
 		let barStr = "";
-		if (chars.spec > 0) {
-			barStr += `\x1b[38;5;108m${"█".repeat(chars.spec)}\x1b[0m`; // Spec Work (Sage Green)
-		}
-		if (chars.mixed > 0) {
-			// Blended Spec + Code (Sage Green foreground, Terracotta Rust background, Medium Shade glyph)
-			barStr += `\x1b[38;5;108;48;5;173m${"▒".repeat(chars.mixed)}\x1b[0m`; // Mixed Work (Blended)
-		}
-		if (chars.code > 0) {
-			barStr += `\x1b[38;5;173m${"█".repeat(chars.code)}\x1b[0m`; // Code Work (Terracotta Rust)
-		}
-		if (chars.tests > 0) {
-			barStr += `\x1b[38;5;223m${"█".repeat(chars.tests)}\x1b[0m`; // Tests Work (Chalky Sand)
-		}
-		if (chars.research > 0) {
-			barStr += `\x1b[38;5;134m${"█".repeat(chars.research)}\x1b[0m`; // Research Work (Plum Lavender)
-		}
-		if (chars.git > 0) {
-			barStr += `\x1b[38;5;73m${"█".repeat(chars.git)}\x1b[0m`; // Git Work (Petrol Teal)
-		}
-		if (chars.grep > 0) {
-			barStr += `\x1b[38;5;67m${"█".repeat(chars.grep)}\x1b[0m`; // Grep Work (Steel Blue)
-		}
-		if (chars.prompt > 0) {
-			barStr += `\x1b[38;5;168m${"░".repeat(chars.prompt)}\x1b[0m`; // Prompt Work (Matte Rose Pink)
-		}
-		if (chars.other > 0) {
-			barStr += `\x1b[38;5;238m${"░".repeat(chars.other)}\x1b[0m`; // Other Work (Charcoal)
+		if (mode === "cumulative") {
+			const barWidth = scaleMax > 0 ? Math.round((bin.total_cost / scaleMax) * maxBarWidth) : 0;
+			const chars = distributeChars(bin.costs, barWidth);
+
+			if (chars.spec > 0) {
+				barStr += `\x1b[38;5;108m${"█".repeat(chars.spec)}\x1b[0m`; // Spec Work (Sage Green)
+			}
+			if (chars.mixed > 0) {
+				// Blended Spec + Code (Sage Green foreground, Terracotta Rust background, Medium Shade glyph)
+				barStr += `\x1b[38;5;108;48;5;173m${"▒".repeat(chars.mixed)}\x1b[0m`; // Mixed Work (Blended)
+			}
+			if (chars.code > 0) {
+				barStr += `\x1b[38;5;173m${"█".repeat(chars.code)}\x1b[0m`; // Code Work (Terracotta Rust)
+			}
+			if (chars.tests > 0) {
+				barStr += `\x1b[38;5;223m${"█".repeat(chars.tests)}\x1b[0m`; // Tests Work (Chalky Sand)
+			}
+			if (chars.research > 0) {
+				barStr += `\x1b[38;5;134m${"█".repeat(chars.research)}\x1b[0m`; // Research Work (Plum Lavender)
+			}
+			if (chars.git > 0) {
+				barStr += `\x1b[38;5;73m${"█".repeat(chars.git)}\x1b[0m`; // Git Work (Petrol Teal)
+			}
+			if (chars.grep > 0) {
+				barStr += `\x1b[38;5;67m${"█".repeat(chars.grep)}\x1b[0m`; // Grep Work (Steel Blue)
+			}
+			if (chars.prompt > 0) {
+				barStr += `\x1b[38;5;168m${"░".repeat(chars.prompt)}\x1b[0m`; // Prompt Work (Matte Rose Pink)
+			}
+			if (chars.other > 0) {
+				barStr += `\x1b[38;5;238m${"░".repeat(chars.other)}\x1b[0m`; // Other Work (Charcoal)
+			}
+		} else {
+			// Point-of-spend multi-line chart mode for bucket display
+			const cells = Array(maxBarWidth).fill(" ");
+			const categoriesInReverse: { cat: Category; color: string; char: string }[] = [
+				{ cat: "other", color: "\x1b[38;5;238m", char: "░" },
+				{ cat: "prompt", color: "\x1b[38;5;168m", char: "░" },
+				{ cat: "grep", color: "\x1b[38;5;67m", char: "█" },
+				{ cat: "git", color: "\x1b[38;5;73m", char: "█" },
+				{ cat: "research", color: "\x1b[38;5;134m", char: "█" },
+				{ cat: "tests", color: "\x1b[38;5;223m", char: "█" },
+				{ cat: "code", color: "\x1b[38;5;173m", char: "█" },
+				{ cat: "mixed", color: "\x1b[38;5;108;48;5;173m", char: "▒" },
+				{ cat: "spec", color: "\x1b[38;5;108m", char: "█" }
+			];
+
+			for (const { cat, color, char } of categoriesInReverse) {
+				const cost = bin.costs[cat] || 0;
+				if (cost > 0 && scaleMax > 0) {
+					const pos = Math.round((cost / scaleMax) * (maxBarWidth - 1));
+					if (pos >= 0 && pos < maxBarWidth) {
+						cells[pos] = `${color}${char}\x1b[0m`;
+					}
+				}
+			}
+			barStr = cells.join("");
 		}
 
 		const labelPart = padString(bin.label, labelWidth);

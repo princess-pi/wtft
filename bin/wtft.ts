@@ -95,114 +95,299 @@ for (let i = 2; i < process.argv.length; i++) {
 // SESSION AUTO-DISCOVERY
 // ---
 
-function findLatestSession(harness: "pi" | "claude-code" | "auto" = "auto"): string | null {
+interface SessionCandidate {
+	path: string;
+	harness: "pi" | "claude-code";
+	timestamp: number; // mtime of file
+	name: string;      // e.g. "1422cc01-4b08-4ff5-8583-42beaab8665a.jsonl"
+}
+
+function discoverSessions(harness: "pi" | "claude-code" | "auto" = "auto"): SessionCandidate[] {
 	const piSessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions");
 	
-	// We dynamically locate the current project's Claude Code session directory
-	// Claude maps ~/.claude/projects/<slug>/sessions/
-	let claudeSessionsDir: string | null = null;
+	let claudeSessionsDirs: string[] = [];
 	const claudeProjectsDir = path.join(os.homedir(), ".claude", "projects");
 	if (fs.existsSync(claudeProjectsDir)) {
 		// Replace / or \ with - for the project slug, similar to how Claude encodes it
 		const cwdSlug = process.cwd().replace(/[/\\\\]/g, "-");
 		const possibleDir = path.join(claudeProjectsDir, cwdSlug, "sessions");
-		// Fallback: If Claude Code is tracking this repo, the .jsonl files might just be directly inside the project root folder in .claude
 		const alternativeDir = path.join(claudeProjectsDir, cwdSlug);
-		if (fs.existsSync(possibleDir)) claudeSessionsDir = possibleDir;
-		else if (fs.existsSync(alternativeDir)) claudeSessionsDir = alternativeDir;
+		if (fs.existsSync(possibleDir)) claudeSessionsDirs.push(possibleDir);
+		if (fs.existsSync(alternativeDir)) claudeSessionsDirs.push(alternativeDir);
 	}
 
-	let newestFile: string | null = null;
-	let newestMtime = 0;
+	const candidates: SessionCandidate[] = [];
 
-	// Recursively walk through session worktrees
-	const walk = (dir: string) => {
+	const walk = (dir: string, type: "pi" | "claude-code") => {
 		const files = fs.readdirSync(dir);
 		for (const f of files) {
 			const fullPath = path.join(dir, f);
 			const stat = fs.statSync(fullPath);
 			if (stat.isDirectory()) {
-				walk(fullPath);
-			} else if (f.endsWith(".jsonl")) {
-				if (stat.mtimeMs > newestMtime) {
-					newestMtime = stat.mtimeMs;
-					newestFile = fullPath;
+				// Avoid recursing into 'subagents' directory during selection candidates discovery
+				// (We only want the parent sessions, not the individual subagent logs)
+				if (f !== "subagents" && f !== "tool-results" && f !== "memory") {
+					walk(fullPath, type);
 				}
+			} else if (f.endsWith(".jsonl")) {
+				candidates.push({
+					path: fullPath,
+					harness: type,
+					timestamp: stat.mtimeMs,
+					name: f
+				});
 			}
 		}
 	};
 
 	try {
 		if (harness === "auto" || harness === "pi") {
-			if (fs.existsSync(piSessionsDir)) walk(piSessionsDir);
+			if (fs.existsSync(piSessionsDir)) walk(piSessionsDir, "pi");
 		}
 		if (harness === "auto" || harness === "claude-code") {
-			if (claudeSessionsDir) walk(claudeSessionsDir);
-		}
-	} catch {
-		// Ignore walk errors
-	}
-
-	return newestFile;
-}
-
-const finalSessionPath = targetSessionPath || findLatestSession(harnessOption);
-if (!finalSessionPath || !fs.existsSync(finalSessionPath)) {
-	console.error("❌ Error: No active session log files found. Ensure Pi has been run, or specify an explicit session log path with -s.");
-	process.exit(1);
-}
-
-// ---
-// READ & PARSE LOGS
-// ---
-
-const lines = fs.readFileSync(finalSessionPath, "utf8").split("\n");
-const interactions: Interaction[] = [];
-
-for (const line of lines) {
-	if (!line.trim()) continue;
-	try {
-		const entry = JSON.parse(line);
-		const interaction = parseEntryToInteraction(entry);
-		if (interaction) {
-			interactions.push(interaction);
+			for (const dir of claudeSessionsDirs) {
+				if (fs.existsSync(dir)) walk(dir, "claude-code");
+			}
 		}
 	} catch {}
+
+	// Sort candidates by timestamp descending (newest first)
+	return candidates.sort((a, b) => b.timestamp - a.timestamp);
+}
+
+function getSessionSummary(filePath: string): { turns: number; cost: number } {
+	let turns = 0;
+	let cost = 0;
+	try {
+		const content = fs.readFileSync(filePath, "utf8");
+		const lines = content.split("\n");
+		for (const line of lines) {
+			if (!line.trim()) continue;
+			const entry = JSON.parse(line);
+			// Count assistant turns
+			if (entry.type === "assistant" || (entry.message && entry.message.role === "assistant")) {
+				turns++;
+			}
+			const i = parseEntryToInteraction(entry);
+			if (i) {
+				cost += i.cost;
+			}
+		}
+	} catch {}
+	return { turns, cost };
+}
+
+async function selectSessionPrompt(candidates: SessionCandidate[]): Promise<string> {
+	return new Promise((resolve) => {
+		// If stdout is not a TTY, fallback to non-interactive list and select index 0
+		if (!process.stdout.isTTY) {
+			console.log(`\x1b[90mNon-interactive environment detected. Defaulting to newest session [1]:\x1b[0m`);
+			for (let i = 0; i < Math.min(candidates.length, 5); i++) {
+				const c = candidates[i];
+				const stats = getSessionSummary(c.path);
+				const shortName = c.name.length > 25
+					? `${c.name.substring(0, 10)}...${c.name.substring(c.name.length - 15)}`
+					: c.name;
+				const dateStr = new Date(c.timestamp).toLocaleString();
+				console.log(`  [${i + 1}] ${shortName.padEnd(28)} (${dateStr}) - ${stats.turns} turns, $${stats.cost.toFixed(2)} [${c.harness.toUpperCase()}]`);
+			}
+			console.log(`\x1b[90mRun 'wtft -s <number>' to target a specific session index.\x1b[0m\n`);
+			resolve(candidates[0].path);
+			return;
+		}
+
+		// Interactive Select Mode (TTY)
+		let selectedIndex = 0;
+		const limit = 10;
+		const displayCandidates = candidates.slice(0, limit);
+
+		// We pre-calculate stats for the displayed candidates so the user has context!
+		const statsList = displayCandidates.map(c => getSessionSummary(c.path));
+
+		const stdin = process.stdin;
+		stdin.setRawMode(true);
+		stdin.resume();
+		stdin.setEncoding("utf8");
+
+		// Hide terminal cursor
+		process.stdout.write("\x1b[?25l");
+
+		const render = () => {
+			let out = `\x1b[1m\x1b[36m💸 WTFT Session Selector\x1b[0m (Use ↑/↓ keys, Enter to select, Ctrl+C to cancel):\n`;
+			for (let i = 0; i < displayCandidates.length; i++) {
+				const c = displayCandidates[i];
+				const stats = statsList[i];
+				const shortName = c.name.length > 25
+					? `${c.name.substring(0, 10)}...${c.name.substring(c.name.length - 15)}`
+					: c.name;
+				const dateStr = new Date(c.timestamp).toLocaleString();
+				
+				const isSelected = i === selectedIndex;
+				const prefix = isSelected ? `\x1b[36m\x1b[1m > \x1b[0m` : "   ";
+				const highlight = isSelected ? `\x1b[1m\x1b[36m` : "";
+				const reset = isSelected ? `\x1b[0m` : "";
+				
+				out += `${prefix}${highlight}${shortName.padEnd(28)}${reset} \x1b[90m(${dateStr})\x1b[0m  \x1b[32m$${stats.cost.toFixed(2).padStart(6)}\x1b[0m \x1b[90m(${stats.turns} turns) [${c.harness.toUpperCase()}]\x1b[0m\n`;
+			}
+			process.stdout.write(out);
+		};
+
+		const cleanScreen = () => {
+			// Move cursor up by (displayCandidates.length + 1) lines and clear them
+			const linesToClear = displayCandidates.length + 1;
+			process.stdout.write(`\x1b[${linesToClear}A\x1b[J`);
+		};
+
+		render();
+
+		const onKey = (key: string) => {
+			if (key === "\u0003") { // Ctrl+C
+				cleanup();
+				process.exit(130);
+			} else if (key === "\r" || key === "\n") { // Enter
+				cleanup();
+				resolve(displayCandidates[selectedIndex].path);
+			} else if (key === "\u001b[A" || key === "k") { // Up Arrow or 'k'
+				selectedIndex = (selectedIndex - 1 + displayCandidates.length) % displayCandidates.length;
+				cleanScreen();
+				render();
+			} else if (key === "\u001b[B" || key === "j") { // Down Arrow or 'j'
+				selectedIndex = (selectedIndex + 1) % displayCandidates.length;
+				cleanScreen();
+				render();
+			}
+		};
+
+		const cleanup = () => {
+			stdin.removeListener("data", onKey);
+			stdin.setRawMode(false);
+			stdin.pause();
+			// Show cursor again
+			process.stdout.write("\x1b[?25h");
+		};
+
+		stdin.on("data", onKey);
+	});
 }
 
 // ---
-// COMPILING AND PRINTING
+// MAIN EXECUTION FLOW (ASYNC)
 // ---
 
-const defaultSettings = {
-	interval: "1h",
-	limit: 100,
-	width: 80,
-	showTicks: true,
-	mode: "cumulative" as "cumulative" | "bucket",
-	timezone: undefined
-};
+async function main() {
+	const isIndex = /^\d+$/.test(targetSessionPath || "");
+	const candidates = discoverSessions(harnessOption);
+	
+	let finalSessionPath = "";
+	if (targetSessionPath && isIndex) {
+		const idx = parseInt(targetSessionPath, 10);
+		if (idx > 0 && idx <= candidates.length) {
+			finalSessionPath = candidates[idx - 1].path;
+		} else {
+			console.error(`❌ Error: Session index '${targetSessionPath}' is out of range. Discovered ${candidates.length} sessions.`);
+			process.exit(1);
+		}
+	} else if (targetSessionPath) {
+		finalSessionPath = targetSessionPath;
+	} else {
+		// Auto select or show selector prompt
+		if (candidates.length === 0) {
+			console.error("❌ Error: No active session log files found. Ensure Pi or Claude has been run, or specify an explicit session log path with -s.");
+			process.exit(1);
+		} else if (candidates.length === 1) {
+			finalSessionPath = candidates[0].path;
+		} else {
+			// Show select menu!
+			finalSessionPath = await selectSessionPrompt(candidates);
+		}
+	}
 
-const outputLines = buildWtftLines(interactions, defaultSettings, {
-	interval: intervalStr,
-	limit,
-	width,
-	showTicks,
-	mode,
-	timezone
+	if (!finalSessionPath || !fs.existsSync(finalSessionPath)) {
+		console.error("❌ Error: Selected session log file path is invalid or does not exist.");
+		process.exit(1);
+	}
+
+	// Resolve all subagent files to recursively roll up cost if applicable
+	const sessionFiles: string[] = [finalSessionPath];
+	const extName = path.extname(finalSessionPath);
+	if (extName === ".jsonl") {
+		const baseName = path.basename(finalSessionPath, extName);
+		const parentDir = path.dirname(finalSessionPath);
+		// Claude Code puts subagents inside <parentDir>/<session-id>/subagents/
+		const possibleSubagentsDir = path.join(parentDir, baseName, "subagents");
+		if (fs.existsSync(possibleSubagentsDir)) {
+			try {
+				const subFiles = fs.readdirSync(possibleSubagentsDir);
+				for (const f of subFiles) {
+					if (f.startsWith("agent-") && f.endsWith(".jsonl")) {
+						sessionFiles.push(path.join(possibleSubagentsDir, f));
+					}
+				}
+			} catch {}
+		}
+	}
+
+	// Read lines from all associated session files
+	const lines: string[] = [];
+	for (const file of sessionFiles) {
+		try {
+			const content = fs.readFileSync(file, "utf8");
+			lines.push(...content.split("\n"));
+		} catch {}
+	}
+
+	const interactions: Interaction[] = [];
+
+	for (const line of lines) {
+		if (!line.trim()) continue;
+		try {
+			const entry = JSON.parse(line);
+			const interaction = parseEntryToInteraction(entry);
+			if (interaction) {
+				interactions.push(interaction);
+			}
+		} catch {}
+	}
+
+	// ---
+	// COMPILING AND PRINTING
+	// ---
+
+	const defaultSettings = {
+		interval: "1h",
+		limit: 100,
+		width: 80,
+		showTicks: true,
+		mode: "cumulative" as "cumulative" | "bucket",
+		timezone: undefined
+	};
+
+	const outputLines = buildWtftLines(interactions, defaultSettings, {
+		interval: intervalStr,
+		limit,
+		width,
+		showTicks,
+		mode,
+		timezone
+	});
+
+	if (!outputLines) {
+		console.log("No binned data found in session logs.");
+		process.exit(0);
+	}
+
+	for (const line of outputLines) {
+		console.log(line);
+	}
+
+	if (showOther) {
+		console.log(""); // empty line spacer
+		const otherOutput = renderOtherHistogram(interactions, width);
+		console.log(otherOutput);
+	}
+}
+
+main().catch(err => {
+	console.error(`❌ System Error: ${err.message}`);
+	process.exit(1);
 });
-
-if (!outputLines) {
-	console.log("No binned data found in session logs.");
-	process.exit(0);
-}
-
-for (const line of outputLines) {
-	console.log(line);
-}
-
-if (showOther) {
-	console.log(""); // empty line spacer
-	const otherOutput = renderOtherHistogram(interactions, width);
-	console.log(otherOutput);
-}

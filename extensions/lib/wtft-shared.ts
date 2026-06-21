@@ -259,25 +259,27 @@ export function calculateScaleMax(total: number): number {
 
 export function buildTickLine(maxCost: number, barWidth: number): string | null {
 	if (maxCost <= 0 || barWidth < 15) return null;
-	const labelArr = Array(barWidth).fill(" ");
-	const markerArr = Array(barWidth).fill("─");
-	const occupied = Array(barWidth).fill(false);
+	const outArr = Array(barWidth).fill("─");
 	const midIdx = Math.floor(barWidth / 2);
 	const q1Idx = Math.floor(barWidth / 4);
 	const q3Idx = Math.floor((barWidth * 3) / 4);
 
-	markerArr[0] = "┿"; markerArr[barWidth - 1] = "┿";
-	markerArr[midIdx] = "┿"; markerArr[q1Idx] = "┿"; markerArr[q3Idx] = "┿";
+	outArr[0] = "┿"; outArr[barWidth - 1] = "┿";
+	outArr[midIdx] = "┿"; outArr[q1Idx] = "┿"; outArr[q3Idx] = "┿";
+
+	const labels: {text: string, start: number}[] = [];
 
 	const tryPlaceLabel = (text: string, startIdx: number) => {
-		const len = text.length;
+		const displayStr = ` ${text} `; // Pad with spaces for the inverted block
+		const len = displayStr.length;
 		if (startIdx + len > barWidth) startIdx = barWidth - len;
 		if (startIdx < 0) return false;
-		for (let i = startIdx; i < startIdx + len; i++) if (occupied[i]) return false;
-		for (let i = 0; i < len; i++) labelArr[startIdx + i] = text[i];
-		const padStart = Math.max(0, startIdx - 1);
-		const padEnd = Math.min(barWidth - 1, startIdx + len);
-		for (let i = padStart; i <= padEnd; i++) occupied[i] = true;
+		for (const l of labels) {
+			if (startIdx < l.start + l.text.length && startIdx + len > l.start) {
+				return false;
+			}
+		}
+		labels.push({ text: displayStr, start: startIdx });
 		return true;
 	};
 
@@ -287,7 +289,28 @@ export function buildTickLine(maxCost: number, barWidth: number): string | null 
 	tryPlaceLabel(`$${(maxCost / 4).toFixed(2)}`, q1Idx);
 	tryPlaceLabel(`$${((maxCost * 3) / 4).toFixed(2)}`, q3Idx);
 
-	return `${labelArr.join("")}\n${" ".repeat(labelArr.length - barWidth)}${markerArr.join("")}`;
+	labels.sort((a, b) => a.start - b.start);
+
+	let result = "";
+	let currentIndex = 0;
+
+	for (const l of labels) {
+		if (l.start > currentIndex) {
+			result += outArr.slice(currentIndex, l.start).join("");
+		}
+		// Invert the colors for the label block. We use \x1b[7m (invert) 
+		// but since some terminals render inverted default background as pure black instead of terminal background,
+		// we explicitly set the foreground to black (\x1b[30m) and the background to terminal default / bright white (\x1b[47m)
+		// for a consistent "highlight block" look across all terminal emulators.
+		result += `\x1b[30;47m${l.text}\x1b[0m`;
+		currentIndex = l.start + l.text.length;
+	}
+
+	if (currentIndex < barWidth) {
+		result += outArr.slice(currentIndex).join("");
+	}
+
+	return result;
 }
 
 export function padString(str: string, len: number): string {
@@ -473,10 +496,7 @@ export function buildWtftLines(
 		const labelPrefix = padString(titleDateStr, prefixWidth);
 		const ticksLine = buildTickLine(scaleMax, maxBarWidth);
 		if (ticksLine) {
-			// Because ticksLine contains a newline, let's split it and apply prefix to each line!
-			const parts = ticksLine.split('\n');
-			if (parts[0]) widgetLines.push(labelPrefix + `\x1b[2m${parts[0]}\x1b[0m`);
-			if (parts[1]) widgetLines.push(" ".repeat(prefixWidth) + `\x1b[2m${parts[1]}\x1b[0m`);
+			widgetLines.push(labelPrefix + `\x1b[2m${ticksLine}\x1b[0m`);
 		}
 	}
 

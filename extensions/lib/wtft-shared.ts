@@ -269,11 +269,21 @@ export function buildTickLine(maxCost: number, barWidth: number): string | null 
 
 	const labels: {text: string, start: number}[] = [];
 
-	const tryPlaceLabel = (text: string, startIdx: number) => {
+	const tryPlaceLabel = (text: string, targetTickIdx: number) => {
 		const displayStr = ` ${text} `; // Pad with spaces for the inverted block
+		
+		// Find the index of the decimal point inside the display string
+		const dotIdx = displayStr.indexOf(".");
+		// We want the '.' to land exactly on the targetTickIdx
+		let startIdx = targetTickIdx - dotIdx;
+
+		// If shifting it pushes it before the start of the bar (index 0), clamp it.
+		// (This should no longer happen for $0.00 because index 0 - 3 = -3, but we don't
+		// want it to overwrite the date prefix).
+		if (startIdx < 0) startIdx = 0;
+
 		const len = displayStr.length;
-		if (startIdx + len > barWidth) startIdx = barWidth - len;
-		if (startIdx < 0) return false;
+
 		for (const l of labels) {
 			if (startIdx < l.start + l.text.length && startIdx + len > l.start) {
 				return false;
@@ -446,7 +456,11 @@ export function buildWtftLines(
 	const labelWidth = Math.max(...displayedBins.map(b => b.label.length), 5);
 	const prefixWidth = mode === "cumulative" ? (labelWidth + 18) : (labelWidth + 10);
 	const finalWidth = Math.max(width, 40);
-	const maxBarWidth = finalWidth - prefixWidth;
+	
+	// We reserve 4 characters at the very end of the line.
+	// Why? To guarantee that when the final label (e.g. ` $100.00 `) is aligned so its `.` 
+	// sits on the final tick, the `.00 ` trailing characters do not overflow `finalWidth`.
+	const maxBarWidth = finalWidth - prefixWidth - 4;
 
 	// Resolve the newest local date for display on the ticks line
 	const newestBin = displayedBins[0];
@@ -493,8 +507,9 @@ export function buildWtftLines(
 
 	// Render single-row collapsed ticks line
 	if (showTicks && scaleMax > 0) {
-		const dateLabel = `─── ${titleDateStr} `;
-		const labelPrefix = padString(dateLabel, prefixWidth);
+		const dateLabel = `── ${titleDateStr} `;
+		const paddingLen = Math.max(0, prefixWidth - dateLabel.length);
+		const labelPrefix = dateLabel + "─".repeat(paddingLen);
 		const ticksLine = buildTickLine(scaleMax, maxBarWidth);
 		if (ticksLine) {
 			// Using \x1b[90m (Dark Grey) for the entire prefix and tick line
@@ -510,7 +525,7 @@ export function buildWtftLines(
 		// draw a visual day change indicator line only if ticks are enabled!
 		if (showTicks && i > 0 && bin.dateStr !== displayedBins[i - 1].dateStr) {
 			const labelDay = formatMmmDdStr(bin.dateStr);
-			const dayChangeText = `─── ${labelDay} `;
+			const dayChangeText = `── ${labelDay} `;
 			const dividerLine = dayChangeText + "─".repeat(Math.max(0, finalWidth - dayChangeText.length));
 			// Use \x1b[30;47m for the day change divider to avoid pure black backgrounds on some terminal themes
 			// Wait, the divider is just "dim" text usually. The issue said: "date rows and the time stamp labels... have the jarring black background".

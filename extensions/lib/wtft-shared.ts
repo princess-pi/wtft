@@ -562,7 +562,9 @@ export function buildWtftLines(
 			const incSign = (bin.incremental_cost ?? 0) >= 0 ? "+" : "";
 			const incStr = `${incSign}${formatCost(bin.incremental_cost ?? 0)}`;
 			const incPart = padString(incStr, 6);
-			const coloredInc = `\x1b[37m${incPart}\x1b[0m`; // Slightly brighter than dim (Normal grey/white)
+			// Using \x1b[90m for Dark Grey / Bright Black.
+			// \x1b[37m is standard white/light-grey, \x1b[1;30m is bold black, and \x1b[90m is high-intensity black (dark grey)
+			const coloredInc = `\x1b[90m${incPart}\x1b[0m`; // Dark Grey / Bright Black
 
 			const costPart = padString(formatCost(bin.total_cost), 6);
 			const coloredCost = `\x1b[1;37m${costPart}\x1b[0m`; // Normal/Bright White

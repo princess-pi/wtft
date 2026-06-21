@@ -257,67 +257,84 @@ export function calculateScaleMax(total: number): number {
 	}
 }
 
-export function buildTickLine(maxCost: number, barWidth: number): string | null {
+export function buildTickLine(maxCost: number, barWidth: number, prefixWidth: number, labelPrefix: string): string | null {
 	if (maxCost <= 0 || barWidth < 15) return null;
-	const outArr = Array(barWidth).fill("─");
-	const midIdx = Math.floor(barWidth / 2);
-	const q1Idx = Math.floor(barWidth / 4);
-	const q3Idx = Math.floor((barWidth * 3) / 4);
+	
+	// Create the unified background characters array for the ENTIRE line width
+	const totalWidth = prefixWidth + barWidth;
+	const chars = Array(totalWidth).fill("─");
 
-	outArr[0] = "┿"; outArr[barWidth - 1] = "┿";
-	outArr[midIdx] = "┿"; outArr[q1Idx] = "┿"; outArr[q3Idx] = "┿";
+	// Fill the date prefix into the start of the characters array
+	const cleanPrefix = labelPrefix.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, ""); // Strip ANSI if any
+	for (let i = 0; i < cleanPrefix.length; i++) {
+		chars[i] = cleanPrefix[i];
+	}
 
-	const labels: {text: string, start: number}[] = [];
+	// Calculate absolute tick index positions in the overall line
+	const ticks = [
+		prefixWidth,
+		prefixWidth + Math.floor(barWidth / 4),
+		prefixWidth + Math.floor(barWidth / 2),
+		prefixWidth + Math.floor((barWidth * 3) / 4),
+		prefixWidth + barWidth - 1
+	];
 
-	const tryPlaceLabel = (text: string, targetTickIdx: number) => {
-		const displayStr = ` ${text} `; // Pad with spaces for the inverted block
+	// Draw tick indicators directly into the unified horizontal line
+	for (const t of ticks) {
+		if (t < chars.length) chars[t] = "┿";
+	}
+
+	const labels: {text: string, start: number, end: number}[] = [];
+	const tickValues = [0, maxCost / 4, maxCost / 2, (maxCost * 3) / 4, maxCost];
+
+	for (let i = 0; i < ticks.length; i++) {
+		const text = `$${tickValues[i].toFixed(2)}`;
+		const displayStr = ` ${text} `; // Inverted block padding
 		
-		// Find the index of the decimal point inside the display string
 		const dotIdx = displayStr.indexOf(".");
-		// We want the '.' to land exactly on the targetTickIdx
-		let startIdx = targetTickIdx - dotIdx;
+		// Align the decimal point exactly on the tick index inside the overall line
+		const startIdx = ticks[i] - dotIdx;
+		const endIdx = startIdx + displayStr.length;
 
-		// If shifting it pushes it before the start of the bar (index 0), clamp it.
-		// (This should no longer happen for $0.00 because index 0 - 3 = -3, but we don't
-		// want it to overwrite the date prefix).
-		if (startIdx < 0) startIdx = 0;
-
-		const len = displayStr.length;
-
+		// Check overlap with existing placed labels
+		let overlap = false;
 		for (const l of labels) {
-			if (startIdx < l.start + l.text.length && startIdx + len > l.start) {
-				return false;
+			if (startIdx < l.end && endIdx > l.start) {
+				overlap = true; break;
 			}
 		}
-		labels.push({ text: displayStr, start: startIdx });
-		return true;
-	};
+		if (!overlap) {
+			labels.push({
+				text: displayStr,
+				start: startIdx,
+				end: endIdx
+			});
+		}
+	}
 
-	tryPlaceLabel("$0.00", 0);
-	tryPlaceLabel(`$${maxCost.toFixed(2)}`, barWidth - 1);
-	tryPlaceLabel(`$${(maxCost / 2).toFixed(2)}`, midIdx);
-	tryPlaceLabel(`$${(maxCost / 4).toFixed(2)}`, q1Idx);
-	tryPlaceLabel(`$${((maxCost * 3) / 4).toFixed(2)}`, q3Idx);
-
+	// Sort labels left-to-right
 	labels.sort((a, b) => a.start - b.start);
 
 	let result = "";
-	let currentIndex = 0;
+	let cursor = 0;
 
 	for (const l of labels) {
-		if (l.start > currentIndex) {
-			result += outArr.slice(currentIndex, l.start).join("");
+		// Fill in the horizontal bar lines before the label
+		if (l.start > cursor) {
+			result += chars.slice(cursor, Math.min(l.start, chars.length)).join("");
+			// If a label starts past the end of the base characters array, pad with spaces
+			if (l.start > chars.length) {
+				result += " ".repeat(l.start - Math.max(cursor, chars.length));
+			}
 		}
-		// Invert the current foreground/background colors (\x1b[7m).
-		// Because the entire tick line is wrapped in \x1b[90m (Dark Grey) later on,
-		// this will produce a Dark Grey background with the terminal's default background color as the text!
-		// We use \x1b[27m to turn OFF invert without resetting the \x1b[90m line color.
+		// Wrap the label with the ANSI Invert sequence and reset-to-dark-grey sequence
 		result += `\x1b[7m${l.text}\x1b[27m`;
-		currentIndex = l.start + l.text.length;
+		cursor = Math.max(cursor, l.end);
 	}
 
-	if (currentIndex < barWidth) {
-		result += outArr.slice(currentIndex).join("");
+	// Fill in any remaining horizontal bar characters
+	if (cursor < chars.length) {
+		result += chars.slice(cursor).join("");
 	}
 
 	return result;
@@ -452,15 +469,32 @@ export function buildWtftLines(
 
 	const scaleMax = calculateScaleMax(totalSessionCost);
 
-	// Compute dynamic column and prefix widths based on the max width of binned labels in this redraw
+	// Compute the exact prefix width of the bar rows dynamically to prevent alignment offsets when costs grow wide
 	const labelWidth = Math.max(...displayedBins.map(b => b.label.length), 5);
-	const prefixWidth = mode === "cumulative" ? (labelWidth + 18) : (labelWidth + 10);
+	let prefixWidth = labelWidth + 2; // labelPart + "  "
+	
+	let maxIncLen = 6;
+	let maxCostLen = 6;
+
+	if (mode === "cumulative") {
+		maxIncLen = Math.max(...displayedBins.map(bin => {
+			const incSign = (bin.incremental_cost ?? 0) >= 0 ? "+" : "";
+			return `${incSign}${formatCost(bin.incremental_cost ?? 0)}`.length;
+		}), 6);
+		maxCostLen = Math.max(...displayedBins.map(b => formatCost(b.total_cost).length), 6);
+		prefixWidth += maxIncLen + 2 + maxCostLen + 2; // incPart + "  " + costPart + "  "
+	} else {
+		maxCostLen = Math.max(...displayedBins.map(b => formatCost(b.total_cost).length), 6);
+		prefixWidth += maxCostLen + 2; // costPart + "  "
+	}
+
 	const finalWidth = Math.max(width, 40);
 	
-	// We reserve 4 characters at the very end of the line.
+	// We reserve 3 characters at the very end of the line.
 	// Why? To guarantee that when the final label (e.g. ` $100.00 `) is aligned so its `.` 
 	// sits on the final tick, the `.00 ` trailing characters do not overflow `finalWidth`.
-	const maxBarWidth = finalWidth - prefixWidth - 4;
+	// Shaving exactly 3 characters makes the ticks row length perfectly match `finalWidth`.
+	const maxBarWidth = finalWidth - prefixWidth - 3;
 
 	// Resolve the newest local date for display on the ticks line
 	const newestBin = displayedBins[0];
@@ -510,10 +544,10 @@ export function buildWtftLines(
 		const dateLabel = `── ${titleDateStr} `;
 		const paddingLen = Math.max(0, prefixWidth - dateLabel.length);
 		const labelPrefix = dateLabel + "─".repeat(paddingLen);
-		const ticksLine = buildTickLine(scaleMax, maxBarWidth);
+		const ticksLine = buildTickLine(scaleMax, maxBarWidth, prefixWidth, labelPrefix);
 		if (ticksLine) {
-			// Using \x1b[90m (Dark Grey) for the entire prefix and tick line
-			widgetLines.push(`\x1b[90m${labelPrefix}${ticksLine}\x1b[0m`);
+			// Using \x1b[90m (Dark Grey) for the entire tick line (which now contains the prefix already built-in!)
+			widgetLines.push(`\x1b[90m${ticksLine}\x1b[0m`);
 		}
 	}
 
@@ -577,18 +611,18 @@ export function buildWtftLines(
 			// Prepend plus to the incremental cost
 			const incSign = (bin.incremental_cost ?? 0) >= 0 ? "+" : "";
 			const incStr = `${incSign}${formatCost(bin.incremental_cost ?? 0)}`;
-			const incPart = padString(incStr, 6);
+			const incPart = padString(incStr, maxIncLen);
 			// Using \x1b[90m for Dark Grey / Bright Black.
 			// \x1b[37m is standard white/light-grey, \x1b[1;30m is bold black, and \x1b[90m is high-intensity black (dark grey)
 			const coloredInc = `\x1b[90m${incPart}\x1b[0m`; // Dark Grey / Bright Black
 
-			const costPart = padString(formatCost(bin.total_cost), 6);
+			const costPart = padString(formatCost(bin.total_cost), maxCostLen);
 			const coloredCost = `\x1b[1;37m${costPart}\x1b[0m`; // Normal/Bright White
 			
 			widgetLines.push(`${coloredLabel}  ${coloredInc}  ${coloredCost}  ${barStr}`);
 		} else {
 			// Bucket mode (no cumulative or incremental, just simple bucket cost)
-			const costPart = padString(formatCost(bin.total_cost), 6);
+			const costPart = padString(formatCost(bin.total_cost), maxCostLen);
 			const coloredCost = `\x1b[1;37m${costPart}\x1b[0m`; // Normal/Bright White
 			widgetLines.push(`${coloredLabel}  ${coloredCost}  ${barStr}`);
 		}

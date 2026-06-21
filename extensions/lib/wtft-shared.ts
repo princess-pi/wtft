@@ -298,10 +298,11 @@ export function buildTickLine(maxCost: number, barWidth: number): string | null 
 		if (l.start > currentIndex) {
 			result += outArr.slice(currentIndex, l.start).join("");
 		}
-		// To ensure the absolute highest contrast (pure black text on pure bright white background),
-		// we use 256-color codes: \x1b[38;5;16m (pure black) and \x1b[48;5;255m (pure white).
-		// This guarantees it looks like a clean cutout on any terminal theme.
-		result += `\x1b[38;5;16;48;5;255m${l.text}\x1b[0m`;
+		// Invert the current foreground/background colors (\x1b[7m).
+		// Because the entire tick line is wrapped in \x1b[90m (Dark Grey) later on,
+		// this will produce a Dark Grey background with the terminal's default background color as the text!
+		// We use \x1b[27m to turn OFF invert without resetting the \x1b[90m line color.
+		result += `\x1b[7m${l.text}\x1b[27m`;
 		currentIndex = l.start + l.text.length;
 	}
 

@@ -190,6 +190,13 @@
         <p><strong>1. Log Parser:</strong> Reads <code>ctx.sessionManager.getEntries()</code> (which includes raw historical messages, tool calls, and exact usage/costs) or reads the `.jsonl` session file directly if more raw history is needed.</p>
         <p><strong>2. Binning Engine:</strong> Groups entries by their <code>timestamp</code> into chronological bins based on the requested interval (e.g., 6-minute windows for granular auditing, or 1-day windows for multi-day tracks).</p>
         <p><strong>3. Scaling & Layout:</strong> Normalizes the absolute length of each interval's ASCII bar based on the maximum cost in any single interval (typically capped at 30-40 characters wide to fit standard terminal outputs gracefully). Each sub-segment within that bar is allocated its proportional share of characters based on its absolute cost contribution, without rendering percentages or additional trailing text.</p>
+        <p><strong>4. Recursive Subagent Rollup:</strong> When a Claude Code session log is targeted, WTFT auto-detects if a subagent directory exists (e.g., <code>&lt;session-id&gt;/subagents/</code>). If present, WTFT recursively reads all subagent <code>.jsonl</code> logs and blends their interactions chronologically based on their individual timestamps. This guarantees that binned timelines and other command histograms represent the true, cumulative cost and work allocations of the entire multi-agent session tree.</p>
+        <p><strong>5. Smart Session Auto-Discovery & Selector:</strong> When running WTFT without an explicit session path option, WTFT discovers all available session logs for the current repository and environment. If multiple candidates exist:
+            <ul>
+                <li><strong>Interactive Selector (TTY):</strong> If standard output is a real terminal (interactive TTY), WTFT renders an interactive selection screen showing shortened UUIDs (API-key style: <code>1422...665a</code>) with date/time and estimated costs/turns.</li>
+                <li><strong>Non-Interactive List Fallback (Pipes/Claude Code '!'):</strong> If standard output is non-interactive (such as running <code>!wtft</code> inside Claude Code where standard input is closed), WTFT defaults to the newest session and prints a clean, numbered list of the top candidates. Users/agents can target any older session easily by running <code>wtft -s &lt;number&gt;</code>.</li>
+            </ul>
+        </p>
     </div>
 
     <h3>Proposed Verification Plan</h3>

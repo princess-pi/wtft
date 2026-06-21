@@ -163,22 +163,20 @@
     <h4 style="color: var(--accent-yellow); margin-bottom: 5px;">Example 1: Granular 1-Minute Cumulative Widget (Wide Terminal with Collapsed, Inverted Ticks)</h4>
     <pre style="background: var(--box-bg); padding: 12px; border-radius: 6px; border: 1px solid #404040; overflow-x: auto; color: #f0f0f0; font-family: monospace;">
 💸 WTF Tokens?
-█ Spec  ▒ Mixed  █ Code  █ Tests  █ Research  █ Git  █ Grep  ░ Prompt  ░ Other
-
-── Jun-20 ─────────── <span style="background: #f0f0f0; color: #1e1e1e;"> $0.00 </span>────── <span style="background: #f0f0f0; color: #1e1e1e;"> $3.25 </span>────── <span style="background: #f0f0f0; color: #1e1e1e;"> $6.50 </span>────── <span style="background: #f0f0f0; color: #1e1e1e;"> $9.75 </span>───── <span style="background: #f0f0f0; color: #1e1e1e;"> $13.00 </span>
-22:42  +$13.00  $13.00  █████████████████████████████████████████████████████
-22:41  +$10.00  $10.00  ████████████████████████████████████████
+<span style="color: #87af87;">█</span> Spec  <span style="color: #87af87; background: #d7875f;">▒</span> Mixed  <span style="color: #d7875f;">█</span> Code  <span style="color: #ffafaf;">█</span> Tests  <span style="color: #af5fd7;">█</span> Research  <span style="color: #5fafaf;">█</span> Git  <span style="color: #5f87af;">█</span> Grep  <span style="color: #d75f87;">░</span> Prompt  <span style="color: #444444;">░</span> Other
+<span style="color: #888;">── Jun-20 ───────────<span style="background: #e0e0e0; color: #1e1e1e;"> $0.00 </span>──────<span style="background: #e0e0e0; color: #1e1e1e;"> $6.25 </span>─────<span style="background: #e0e0e0; color: #1e1e1e;"> $12.50 </span>─────<span style="background: #e0e0e0; color: #1e1e1e;"> $18.75 </span>─────<span style="background: #e0e0e0; color: #1e1e1e;"> $25.00 </span></span>
+<span style="color: #888;">22:42</span>  <span style="color: #888;">+$13.00</span>  <strong>$23.00</strong>  <span style="color: #87af87; background: #d7875f;">▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒</span><span style="color: #d7875f;">█████████████████████</span>
+<span style="color: #888;">22:41</span>  <span style="color: #888;">+$10.00</span>  <strong>$10.00</strong>  <span style="color: #d7875f;">█████████████████████</span>
     </pre>
 
     <h4 style="color: var(--accent-yellow); margin-bottom: 5px;">Example 2: 1-Hour Bucket Widget Crossing Day Boundary (Narrow Terminal wrapping Legend to 2nd Row)</h4>
     <pre style="background: var(--box-bg); padding: 12px; border-radius: 6px; border: 1px solid #404040; overflow-x: auto; color: #f0f0f0; font-family: monospace;">
 💸 WTF Tokens?
-█ Spec  ▒ Mixed  █ Code  █ Tests  █ Research  █ Git  █ Grep  ░ Prompt  ░ Other
-
-── Jun-20 ─────────── <span style="background: #f0f0f0; color: #1e1e1e;"> $0.00 </span>────── <span style="background: #f0f0f0; color: #1e1e1e;"> $3.25 </span>────── <span style="background: #f0f0f0; color: #1e1e1e;"> $6.50 </span>────── <span style="background: #f0f0f0; color: #1e1e1e;"> $9.75 </span>───── <span style="background: #f0f0f0; color: #1e1e1e;"> $13.00 </span>
-22:00           $13.00  █████████████████████████████████████████████████████
-── Jun-19 ──────────────────────────────────────────────────────────────────────
-23:00           $10.00  ████████████████████████████████████████
+<span style="color: #87af87;">█</span> Spec  <span style="color: #87af87; background: #d7875f;">▒</span> Mixed  <span style="color: #d7875f;">█</span> Code  <span style="color: #ffafaf;">█</span> Tests  <span style="color: #af5fd7;">█</span> Research  <span style="color: #5fafaf;">█</span> Git  <span style="color: #5f87af;">█</span> Grep  <span style="color: #d75f87;">░</span> Prompt  <span style="color: #444444;">░</span> Other
+<span style="color: #888;">── Jun-20 ──<span style="background: #e0e0e0; color: #1e1e1e;"> $0.00 </span>────────<span style="background: #e0e0e0; color: #1e1e1e;"> $6.25 </span>────────<span style="background: #e0e0e0; color: #1e1e1e;"> $12.50 </span>───────<span style="background: #e0e0e0; color: #1e1e1e;"> $18.75 </span>───────<span style="background: #e0e0e0; color: #1e1e1e;"> $25.00 </span></span>
+<span style="color: #888;">22:00</span>  <strong>$13.00</strong>  <span style="color: #87af87; background: #d7875f;">▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒</span>
+<span style="color: #888;">── Jun-19 ──────────────────────────────────────────────────────────────────────</span>
+<span style="color: #888;">23:00</span>  <strong>$10.00</strong>  <span style="color: #d7875f;">█████████████████████████</span>
     </pre>
 
     <h3>Architectural Design</h3>

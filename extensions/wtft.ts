@@ -379,6 +379,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				
 				const output = renderOtherHistogram(interactions, Math.max(current.width, 40));
 				ctx.ui.notify(output, "info");
+				return;
 			}
 
 			if (hideWidget) {

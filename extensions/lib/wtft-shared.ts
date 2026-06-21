@@ -493,11 +493,12 @@ export function buildWtftLines(
 
 	// Render single-row collapsed ticks line
 	if (showTicks && scaleMax > 0) {
-		const labelPrefix = padString(titleDateStr, prefixWidth);
+		const dateLabel = `─── ${titleDateStr} `;
+		const labelPrefix = padString(dateLabel, prefixWidth);
 		const ticksLine = buildTickLine(scaleMax, maxBarWidth);
 		if (ticksLine) {
-			// Using \x1b[90m instead of \x1b[2m for the tick line background
-			widgetLines.push(labelPrefix + `\x1b[90m${ticksLine}\x1b[0m`);
+			// Using \x1b[90m (Dark Grey) for the entire prefix and tick line
+			widgetLines.push(`\x1b[90m${labelPrefix}${ticksLine}\x1b[0m`);
 		}
 	}
 

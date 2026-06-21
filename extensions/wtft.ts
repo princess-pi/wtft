@@ -6,7 +6,9 @@ import {
 	type Category,
 	type Interaction,
 	classifyInteraction,
-	formatCost
+	formatCost,
+	parseEntryToInteraction,
+	renderOtherHistogram
 } from "./lib/wtft-shared.js";
 
 // ---
@@ -244,39 +246,9 @@ function buildWtftLines(
 	const interactions: Interaction[] = [];
 
 	for (let i = 0; i < branch.length; i++) {
-		const entry = branch[i];
-		if (entry.type === "message" && entry.message && entry.message.role === "assistant") {
-			const assistantMsg = entry.message;
-			const cost = assistantMsg.usage?.cost?.total || 0;
-			const timestamp = assistantMsg.timestamp || new Date(entry.timestamp).getTime();
-
-			const files: { path: string; action: "read" | "write" }[] = [];
-			const commands: string[] = [];
-			const texts: string[] = [];
-
-			if (Array.isArray(assistantMsg.content)) {
-				for (const block of assistantMsg.content) {
-					if (block.type === "text") {
-						texts.push(block.text);
-					} else if (block.type === "thinking") {
-						texts.push(block.thinking);
-					} else if (block.type === "toolCall") {
-						const name = block.name;
-						const args = block.arguments || {};
-						if (name === "read") {
-							if (args.path) files.push({ path: args.path, action: "read" });
-						} else if (name === "write" || name === "edit") {
-							if (args.path) files.push({ path: args.path, action: "write" });
-						} else if (name === "bash") {
-							if (args.command) {
-								commands.push(args.command);
-							}
-						}
-					}
-				}
-			}
-
-			interactions.push({ timestamp, cost, files, commands, texts });
+		const interaction = parseEntryToInteraction(branch[i]);
+		if (interaction) {
+			interactions.push(interaction);
 		}
 	}
 
@@ -463,86 +435,15 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		description: "Debug 'other' interactions with a bash command histogram",
 		handler: async (_args, ctx) => {
 			const branch = ctx.sessionManager.getBranch();
-			const commandMap = new Map<string, { count: number; cost: number }>();
-
-			for (const entry of branch) {
-				if (entry.type === "message" && entry.message && entry.message.role === "assistant") {
-					const assistantMsg = entry.message;
-					const cost = assistantMsg.usage?.cost?.total || 0;
-					const interaction: Interaction = {
-						timestamp: assistantMsg.timestamp || new Date(entry.timestamp).getTime(),
-						cost: cost,
-						files: [],
-						commands: [],
-						texts: []
-					};
-
-					if (Array.isArray(assistantMsg.content)) {
-						for (const block of assistantMsg.content) {
-							if (block.type === "toolCall") {
-								const args = block.arguments || {};
-								if (block.name === "bash") {
-									if (args.command) {
-										// Split by lines first, then take the first non-empty/non-comment line
-										const lines = args.command.split('\n');
-										for (const line of lines) {
-											const trimmed = line.trim();
-											if (trimmed && !trimmed.startsWith("#")) {
-												const parts = trimmed.split(" ");
-												const primary = parts[0];
-												if (primary) {
-													interaction.commands.push(primary);
-													break; // Only capture the first effective command
-												}
-											}
-										}
-									}
-								} else if (block.name === "read") {
-									if (args.path) interaction.files.push({ path: args.path, action: "read" });
-								} else if (block.name === "write" || block.name === "edit") {
-									if (args.path) interaction.files.push({ path: args.path, action: "write" });
-								}
-							}
-						}
-					}
-
-					const classification = classifyInteraction(interaction);
-					if (classification === "other") {
-						for (const cmd of interaction.commands) {
-							const existing = commandMap.get(cmd) || { count: 0, cost: 0 };
-							commandMap.set(cmd, {
-								count: existing.count + 1,
-								cost: existing.cost + cost
-							});
-						}
-					}
-				}
-			}
-
-			let output = "--- 'Other' Command Histogram ---\n";
 			
-			// Sort command map entries by count descending
-			const sortedEntries = Array.from(commandMap.entries()).sort((a, b) => b[1].count - a[1].count);
-
-			// Find max command length for alignment
-			let maxCmdLen = 0;
-			for (const cmd of commandMap.keys()) maxCmdLen = Math.max(maxCmdLen, cmd.length);
-			
+			const interactions = branch
+				.map(entry => parseEntryToInteraction(entry))
+				.filter((i): i is NonNullable<typeof i> => i !== null);
+				
 			const settings = getSettings(ctx);
 			const width = Math.max(settings.width, 40);
-			const countWidth = 7; // Fixed width for "(count)"
-			const costWidth = 10; // Fixed width for "$1.0000"
-
-			for (const [cmd, data] of sortedEntries) {
-				const countStr = `(${data.count})`.padStart(countWidth);
-				const costStr = `$${data.cost.toFixed(4)}`.padStart(costWidth);
-				
-				// Available space for bars
-				const barWidth = Math.max(5, width - maxCmdLen - countWidth - costWidth - 10);
-				const bar = "#".repeat(Math.min(data.count, barWidth));
-				
-				output += `${cmd.padEnd(maxCmdLen)} ${costStr} ${countStr} : ${bar}\n`;
-			}
+			
+			const output = renderOtherHistogram(interactions, width);
 			ctx.ui.notify(output, "info");
 		}
 	});

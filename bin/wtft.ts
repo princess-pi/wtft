@@ -11,6 +11,7 @@ import * as os from "node:os";
 import {
 	buildWtftLines,
 	parseEntryToInteraction,
+	renderOtherHistogram,
 	type Interaction,
 	type Category
 } from "../extensions/lib/wtft-shared.ts";
@@ -27,6 +28,7 @@ let showTicks = true;
 let targetSessionPath: string | undefined = undefined;
 let timezone: string | undefined = undefined;
 let harnessOption: "auto" | "pi" | "claude-code" = "auto";
+let showOther = false;
 
 // ---
 // HELP MENU
@@ -47,6 +49,7 @@ Options:
   --ticks                 Enable the proportional cost scale ticks above the bars (default behavior).
   --no-ticks              Disable the proportional cost scale ticks above the bars.
   -t, --tz <zone>         Specify a display timezone (e.g. America/Los_Angeles).
+  -o, --other             Instead of the visual timeline, print a histogram of commands categorized as 'Other'.
   -h, --help              Display this help menu.
 `);
 }
@@ -78,6 +81,8 @@ for (let i = 2; i < process.argv.length; i++) {
 		showTicks = true;
 	} else if (arg === "-t" || arg === "--tz") {
 		timezone = process.argv[++i];
+	} else if (arg === "-o" || arg === "--other") {
+		showOther = true;
 	} else if (arg === "--harness") {
 		const val = process.argv[++i];
 		if (val === "pi" || val === "claude-code" || val === "auto") {
@@ -168,6 +173,12 @@ for (const line of lines) {
 // ---
 // COMPILING AND PRINTING
 // ---
+
+if (showOther) {
+	const output = renderOtherHistogram(interactions, width);
+	console.log(output);
+	process.exit(0);
+}
 
 const defaultSettings = {
 	interval: "1h",

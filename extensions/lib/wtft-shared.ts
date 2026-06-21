@@ -763,3 +763,66 @@ export function buildWtftLines(
 
 	return widgetLines;
 }
+
+export function renderOtherHistogram(interactions: Interaction[], maxWidth: number = 80): string {
+	const commandMap = new Map<string, { count: number; cost: number }>();
+
+	for (const interaction of interactions) {
+		const classification = classifyInteraction(interaction);
+		if (classification === "other") {
+			// Extract exact primary command for bash
+			const primaryCommands: string[] = [];
+			for (const rawCmd of interaction.commands) {
+				const lines = rawCmd.split('\n');
+				for (const line of lines) {
+					const trimmed = line.trim();
+					if (trimmed && !trimmed.startsWith("#")) {
+						const parts = trimmed.split(" ");
+						const primary = parts[0];
+						if (primary) {
+							primaryCommands.push(primary);
+							break; // Only capture the first effective command
+						}
+					}
+				}
+			}
+
+			for (const cmd of primaryCommands) {
+				const existing = commandMap.get(cmd) || { count: 0, cost: 0 };
+				commandMap.set(cmd, {
+					count: existing.count + 1,
+					cost: existing.cost + interaction.cost
+				});
+			}
+		}
+	}
+
+	if (commandMap.size === 0) {
+		return "No 'Other' commands found in this session.";
+	}
+
+	let output = "--- 'Other' Command Histogram ---\n";
+	
+	// Sort command map entries by count descending
+	const sortedEntries = Array.from(commandMap.entries()).sort((a, b) => b[1].count - a[1].count);
+
+	// Find max command length for alignment
+	let maxCmdLen = 0;
+	for (const cmd of commandMap.keys()) maxCmdLen = Math.max(maxCmdLen, cmd.length);
+	
+	const countWidth = 7; // Fixed width for "(count)"
+	const costWidth = 10; // Fixed width for "$1.0000"
+
+	for (const [cmd, data] of sortedEntries) {
+		const countStr = `(${data.count})`.padStart(countWidth);
+		const costStr = `$${data.cost.toFixed(4)}`.padStart(costWidth);
+		
+		// Available space for bars
+		const barWidth = Math.max(5, maxWidth - maxCmdLen - countWidth - costWidth - 10);
+		const bar = "#".repeat(Math.min(data.count, barWidth));
+		
+		output += `${cmd.padEnd(maxCmdLen)} ${costStr} ${countStr} : ${bar}\n`;
+	}
+	
+	return output;
+}

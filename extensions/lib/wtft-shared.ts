@@ -298,11 +298,10 @@ export function buildTickLine(maxCost: number, barWidth: number): string | null 
 		if (l.start > currentIndex) {
 			result += outArr.slice(currentIndex, l.start).join("");
 		}
-		// Invert the colors for the label block. We use \x1b[7m (invert) 
-		// but since some terminals render inverted default background as pure black instead of terminal background,
-		// we explicitly set the foreground to black (\x1b[30m) and the background to terminal default / bright white (\x1b[47m)
-		// for a consistent "highlight block" look across all terminal emulators.
-		result += `\x1b[30;47m${l.text}\x1b[0m`;
+		// To ensure the absolute highest contrast (pure black text on pure bright white background),
+		// we use 256-color codes: \x1b[38;5;16m (pure black) and \x1b[48;5;255m (pure white).
+		// This guarantees it looks like a clean cutout on any terminal theme.
+		result += `\x1b[38;5;16;48;5;255m${l.text}\x1b[0m`;
 		currentIndex = l.start + l.text.length;
 	}
 

@@ -338,7 +338,8 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				hasTicks,
 				hasMode,
 				hasTimezone,
-				hasOther
+				hasOther,
+				other
 			} = parseArgs(args);
 
 			// Render manifest help menu if requested

@@ -1,6 +1,11 @@
 import { buildWtftLines, type Interaction } from "../extensions/lib/wtft-shared.ts";
 import * as assert from "node:assert";
 
+// Helper to strip ANSI codes
+function stripAnsi(str: string): string {
+	return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+}
+
 // 1. Create mock data matching Example 1 from the spec:
 // Timestamp starts at Jun 20, 2026, 22:42 (using UTC to keep it stable)
 const startTs = new Date("2026-06-20T22:42:00Z").getTime();
@@ -8,7 +13,7 @@ const startTs = new Date("2026-06-20T22:42:00Z").getTime();
 const mockInteractions: Interaction[] = [
 	{
 		timestamp: startTs,
-		cost: 13.00, // Total cost is 13.00
+		cost: 13.00, // First bin cost is 13.00
 		files: [
 			{ path: "docs/spec.md", action: "write" }, // Spec
 			{ path: "src/main.ts", action: "write" },  // Code
@@ -16,74 +21,88 @@ const mockInteractions: Interaction[] = [
 		],
 		commands: [],
 		texts: []
+	},
+	{
+		timestamp: startTs - 3600000, // 1 hour earlier
+		cost: 5.00, // Second bin cost is 5.00
+		files: [
+			{ path: "src/main.ts", action: "write" } // Code
+		],
+		commands: [],
+		texts: []
 	}
 ];
 
 const width = 80;
-const settings = {
-	interval: "6m",
-	limit: 5,
-	width: width,
-	showTicks: true,
-	mode: "cumulative" as "cumulative" | "bucket",
-	timezone: "UTC"
-};
+console.log("=== RUNNING CUMULATIVE ALIGNMENT TESTS ===");
+runAlignmentTest("cumulative");
 
-const lines = buildWtftLines(mockInteractions, settings);
-if (!lines) {
-	console.error("❌ Failed to render wtft lines.");
-	process.exit(1);
-}
+console.log("\n=== RUNNING BUCKET ALIGNMENT TESTS ===");
+runAlignmentTest("bucket");
 
-// Helper to strip ANSI codes
-function stripAnsi(str: string): string {
-	return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-}
+function runAlignmentTest(mode: "cumulative" | "bucket") {
+	const settings = {
+		interval: "1h",
+		limit: 5,
+		width: width,
+		showTicks: true,
+		mode: mode,
+		timezone: "UTC"
+	};
 
-const cleanLines = lines.map(stripAnsi);
+	const lines = buildWtftLines(mockInteractions, settings);
+	if (!lines) {
+		console.error("❌ Failed to render wtft lines.");
+		process.exit(1);
+	}
 
-console.log("=== AUTOMATED SPEC ALIGNMENT TEST ===");
-for (const line of cleanLines) {
-	console.log(line);
-}
-console.log("=====================================");
+	const cleanLines = lines.map(stripAnsi);
 
-const ticksRow = cleanLines[2]; // Index 2 is the ticks line (index 0 is title, index 1 is legend)
-const firstBarRow = cleanLines[3]; // Index 3 is the first bar row
+	for (const line of cleanLines) {
+		console.log(line);
+	}
+	console.log("-------------------------------------");
 
-const firstDotIdx = ticksRow.indexOf(".");
-const lastDotIdx = ticksRow.lastIndexOf(".");
+	// Find the ticks row (the one starting with "──" or containing "$0.00")
+	const ticksRow = cleanLines.find(l => l.includes("$0.00")) || "";
+	// The bar rows are the ones starting with time (e.g. "22:00", "21:00")
+	const barRows = cleanLines.filter(l => /^[0-9]{2}:[0-9]{2}/.test(l));
 
-// Find the end of the bar (either solid block or shaded block)
-const lastBarCharIdx = Math.max(
-	firstBarRow.lastIndexOf("█"),
-	firstBarRow.lastIndexOf("░"),
-	firstBarRow.lastIndexOf("▒")
-);
+	if (!ticksRow || barRows.length === 0) {
+		console.error("❌ Failed to find ticks line or bar lines in the output.");
+		process.exit(1);
+	}
 
-// We need to find the actual start of the bar. It's the first non-space character
-// after the timestamp, incremental cost, and total cost columns.
-const barStartIdx = firstBarRow.search(/[^ ]/);
-// Wait, the timestamp has non-space characters.
-// We need to find the first character after the 3rd column.
-// The easiest way is to find the index of the first '█', '░', or '▒'
-const actualBarStart = Math.min(
-	firstBarRow.indexOf("█") !== -1 ? firstBarRow.indexOf("█") : Infinity,
-	firstBarRow.indexOf("░") !== -1 ? firstBarRow.indexOf("░") : Infinity,
-	firstBarRow.indexOf("▒") !== -1 ? firstBarRow.indexOf("▒") : Infinity
-);
+	const firstBarRow = barRows[0]; // Newest/highest value bar row
 
-console.log(`Ticks Row Length:      ${ticksRow.length}`);
-console.log(`Bar Row Prefix Width:  ${actualBarStart}`);
-console.log(`First Dot Align Index: ${firstDotIdx} (Expected: ${actualBarStart})`);
-console.log(`Last Dot Align Index:  ${lastDotIdx} (Expected: ${lastBarCharIdx})`);
+	const firstDotIdx = ticksRow.indexOf(".");
+	const lastDotIdx = ticksRow.lastIndexOf(".");
 
-try {
-	assert.strictEqual(ticksRow.length, width, "Ticks row length must match configured terminal width exactly");
-	assert.strictEqual(firstDotIdx, actualBarStart, "The decimal point of the $0.00 label must perfectly align with the start of the bar");
-	assert.strictEqual(lastDotIdx, lastBarCharIdx, "The decimal point of the maximum cost label must perfectly align with the end of the bar");
-	console.log("\n✅ ALL ALIGNMENT CHECKS PASSED PERFECTLY!");
-} catch (err: any) {
-	console.error(`\n❌ ALIGNMENT CHECK FAILED: ${err.message}`);
-	process.exit(1);
+	// Find the end of the first bar (either solid block or shaded block)
+	const lastBarCharIdx = Math.max(
+		firstBarRow.lastIndexOf("█"),
+		firstBarRow.lastIndexOf("░"),
+		firstBarRow.lastIndexOf("▒")
+	);
+
+	const actualBarStart = Math.min(
+		firstBarRow.indexOf("█") !== -1 ? firstBarRow.indexOf("█") : Infinity,
+		firstBarRow.indexOf("░") !== -1 ? firstBarRow.indexOf("░") : Infinity,
+		firstBarRow.indexOf("▒") !== -1 ? firstBarRow.indexOf("▒") : Infinity
+	);
+
+	console.log(`Ticks Row Length:      ${ticksRow.length}`);
+	console.log(`Bar Row Prefix Width:  ${actualBarStart}`);
+	console.log(`First Dot Align Index: ${firstDotIdx} (Expected: ${actualBarStart})`);
+	console.log(`Last Dot Align Index:  ${lastDotIdx} (Expected: ${lastBarCharIdx})`);
+
+	try {
+		assert.strictEqual(ticksRow.length, width, "Ticks row length must match configured terminal width exactly");
+		assert.strictEqual(firstDotIdx, actualBarStart, "The decimal point of the $0.00 label must perfectly align with the start of the bar");
+		assert.strictEqual(lastDotIdx, lastBarCharIdx, "The decimal point of the maximum cost label must perfectly align with the end of the bar");
+		console.log(`✅ ${mode.toUpperCase()} ALIGNMENT CHECKS PASSED PERFECTLY!`);
+	} catch (err: any) {
+		console.error(`\n❌ ${mode.toUpperCase()} ALIGNMENT CHECK FAILED: ${err.message}`);
+		process.exit(1);
+	}
 }

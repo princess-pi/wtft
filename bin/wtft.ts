@@ -10,6 +10,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import {
 	buildWtftLines,
+	parseEntryToInteraction,
 	type Interaction,
 	type Category
 } from "../extensions/lib/wtft-shared.ts";
@@ -25,6 +26,7 @@ let mode: "bucket" | "cumulative" = "cumulative";
 let showTicks = true;
 let targetSessionPath: string | undefined = undefined;
 let timezone: string | undefined = undefined;
+let harnessOption: "auto" | "pi" | "claude-code" = "auto";
 
 // ---
 // HELP MENU
@@ -36,6 +38,7 @@ Usage: wtft [options]
 
 Options:
   -s, --session <path>    Specify an explicit session .jsonl log file path (defaults to latest active session).
+  --harness <type>        Target a specific harness for auto-discovery (pi, claude-code, or auto). Default: auto.
   -i, --interval <val>    Group cost data into binned intervals (e.g., 1m, 7m, 4h, 1d, 2w; default: 1h).
   -l, --limit <number>    Limit the number of interval bars displayed (default: 100).
   -w, --width <number>    Set the maximum character width of the CLI output (default: 80).
@@ -75,6 +78,11 @@ for (let i = 2; i < process.argv.length; i++) {
 		showTicks = true;
 	} else if (arg === "-t" || arg === "--tz") {
 		timezone = process.argv[++i];
+	} else if (arg === "--harness") {
+		const val = process.argv[++i];
+		if (val === "pi" || val === "claude-code" || val === "auto") {
+			harnessOption = val;
+		}
 	}
 }
 
@@ -82,9 +90,22 @@ for (let i = 2; i < process.argv.length; i++) {
 // SESSION AUTO-DISCOVERY
 // ---
 
-function findLatestSession(): string | null {
-	const sessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions");
-	if (!fs.existsSync(sessionsDir)) return null;
+function findLatestSession(harness: "pi" | "claude-code" | "auto" = "auto"): string | null {
+	const piSessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions");
+	
+	// We dynamically locate the current project's Claude Code session directory
+	// Claude maps ~/.claude/projects/<slug>/sessions/
+	let claudeSessionsDir: string | null = null;
+	const claudeProjectsDir = path.join(os.homedir(), ".claude", "projects");
+	if (fs.existsSync(claudeProjectsDir)) {
+		// Replace / or \ with - for the project slug, similar to how Claude encodes it
+		const cwdSlug = process.cwd().replace(/[/\\\\]/g, "-");
+		const possibleDir = path.join(claudeProjectsDir, cwdSlug, "sessions");
+		// Fallback: If Claude Code is tracking this repo, the .jsonl files might just be directly inside the project root folder in .claude
+		const alternativeDir = path.join(claudeProjectsDir, cwdSlug);
+		if (fs.existsSync(possibleDir)) claudeSessionsDir = possibleDir;
+		else if (fs.existsSync(alternativeDir)) claudeSessionsDir = alternativeDir;
+	}
 
 	let newestFile: string | null = null;
 	let newestMtime = 0;
@@ -107,15 +128,20 @@ function findLatestSession(): string | null {
 	};
 
 	try {
-		walk(sessionsDir);
+		if (harness === "auto" || harness === "pi") {
+			if (fs.existsSync(piSessionsDir)) walk(piSessionsDir);
+		}
+		if (harness === "auto" || harness === "claude-code") {
+			if (claudeSessionsDir) walk(claudeSessionsDir);
+		}
 	} catch {
-		return null;
+		// Ignore walk errors
 	}
 
 	return newestFile;
 }
 
-const finalSessionPath = targetSessionPath || findLatestSession();
+const finalSessionPath = targetSessionPath || findLatestSession(harnessOption);
 if (!finalSessionPath || !fs.existsSync(finalSessionPath)) {
 	console.error("❌ Error: No active session log files found. Ensure Pi has been run, or specify an explicit session log path with -s.");
 	process.exit(1);
@@ -132,33 +158,9 @@ for (const line of lines) {
 	if (!line.trim()) continue;
 	try {
 		const entry = JSON.parse(line);
-		if (entry.type === "message" && entry.message && entry.message.role === "assistant") {
-			const assistantMsg = entry.message;
-			const cost = assistantMsg.usage?.cost?.total || 0;
-			const timestamp = assistantMsg.timestamp || new Date(entry.timestamp).getTime();
-
-			const files: { path: string; action: "read" | "write" }[] = [];
-			const commands: string[] = [];
-			const texts: string[] = [];
-
-			if (Array.isArray(assistantMsg.content)) {
-				for (const block of assistantMsg.content) {
-					if (block.type === "text") texts.push(block.text);
-					else if (block.type === "thinking") texts.push(block.thinking);
-					else if (block.type === "toolCall") {
-						const name = block.name;
-						const args = block.arguments || {};
-						if (name === "read") {
-							if (args.path) files.push({ path: args.path, action: "read" });
-						} else if (name === "write" || name === "edit") {
-							if (args.path) files.push({ path: args.path, action: "write" });
-						} else if (name === "bash") {
-							if (args.command) commands.push(args.command);
-						}
-					}
-				}
-			}
-			interactions.push({ timestamp, cost, files, commands, texts });
+		const interaction = parseEntryToInteraction(entry);
+		if (interaction) {
+			interactions.push(interaction);
 		}
 	} catch {}
 }

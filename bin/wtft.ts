@@ -174,12 +174,6 @@ for (const line of lines) {
 // COMPILING AND PRINTING
 // ---
 
-if (showOther) {
-	const output = renderOtherHistogram(interactions, width);
-	console.log(output);
-	process.exit(0);
-}
-
 const defaultSettings = {
 	interval: "1h",
 	limit: 100,
@@ -205,4 +199,10 @@ if (!outputLines) {
 
 for (const line of outputLines) {
 	console.log(line);
+}
+
+if (showOther) {
+	console.log(""); // empty line spacer
+	const otherOutput = renderOtherHistogram(interactions, width);
+	console.log(otherOutput);
 }

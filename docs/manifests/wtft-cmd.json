@@ -24,7 +24,7 @@
     { "cmd": "/wtft -i 4h -l 20", "desc": "Show last 20 4-hour interval bars of cumulative token costs." },
     { "cmd": "/wtft --show", "desc": "Force show or refresh the cost audit widget." },
     { "cmd": "/wtft -p", "desc": "View a full, scrollable cost audit timeline inside a fullscreen TUI pager." },
-    { "cmd": "/wtft-other", "desc": "Debug 'other' interactions with a bash command histogram." },
+    { "cmd": "/wtft --other", "desc": "Debug 'other' interactions with a bash command histogram." },
     { "cmd": "/wtft --hide", "desc": "Hide the cost audit widget from the display." }
   ]
 }

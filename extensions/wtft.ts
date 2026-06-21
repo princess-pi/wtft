@@ -28,6 +28,7 @@ function parseArgs(argsStr: string = "") {
 	let showTicks = true;
 	let mode: "bucket" | "cumulative" = "cumulative";
 	let pager = false;
+	let other = false;
 
 	let hasInterval = false;
 	let hasLimit = false;
@@ -35,6 +36,7 @@ function parseArgs(argsStr: string = "") {
 	let hasTicks = false;
 	let hasMode = false;
 	let hasTimezone = false;
+	let hasOther = false;
 
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
@@ -44,6 +46,9 @@ function parseArgs(argsStr: string = "") {
 			hideWidget = true;
 		} else if (arg === "--show" || arg === "-S") {
 			showWidget = true;
+		} else if (arg === "-o" || arg === "--other") {
+			other = true;
+			hasOther = true;
 		} else if (arg === "--ticks") {
 			showTicks = true;
 			hasTicks = true;
@@ -133,7 +138,9 @@ function parseArgs(argsStr: string = "") {
 		hasWidth,
 		hasTicks,
 		hasMode,
-		hasTimezone
+		hasTimezone,
+		hasOther,
+		other
 	};
 }
 
@@ -330,7 +337,8 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				hasWidth,
 				hasTicks,
 				hasMode,
-				hasTimezone
+				hasTimezone,
+				hasOther
 			} = parseArgs(args);
 
 			// Render manifest help menu if requested
@@ -361,6 +369,16 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			}
 
 			const current = getSettings(ctx);
+
+			if (other) {
+				const branch = ctx.sessionManager.getBranch();
+				const interactions = branch
+					.map((entry: any) => parseEntryToInteraction(entry))
+					.filter((i: any): i is NonNullable<typeof i> => i !== null);
+				
+				const output = renderOtherHistogram(interactions, Math.max(current.width, 40));
+				ctx.ui.notify(output, "info");
+			}
 
 			if (hideWidget) {
 				pi.appendEntry("wtft-settings", {
@@ -430,21 +448,5 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	// 4. Debugging command
-	pi.registerCommand("wtft-other", {
-		description: "Debug 'other' interactions with a bash command histogram",
-		handler: async (_args, ctx) => {
-			const branch = ctx.sessionManager.getBranch();
-			
-			const interactions = branch
-				.map(entry => parseEntryToInteraction(entry))
-				.filter((i): i is NonNullable<typeof i> => i !== null);
-				
-			const settings = getSettings(ctx);
-			const width = Math.max(settings.width, 40);
-			
-			const output = renderOtherHistogram(interactions, width);
-			ctx.ui.notify(output, "info");
-		}
-	});
+
 }

@@ -158,7 +158,12 @@
     </table>
 
     <h3>TUI Visualization Style</h3>
-    <p>The TUI outputs a stacked, horizontal ASCII bar graph in a persistent widget below the editor. It uses standard block-drawing characters (<code>█</code> and <code>░</code>) to represent absolute cost. Each segment within that bar is allocated its proportional share of characters using a generalized implementation of the Largest Remainder Method, ensuring the total width matches perfectly. Legend indicators are placed dynamically on the top title row (or on the second row if the terminal width is narrow), completely removing the redundant 'Legend:' prefix as it is self-evident.</p>
+    <p>The TUI offers two distinct high-fidelity visualization styles depending on the display mode:</p>
+    <ul>
+        <li><strong>Cumulative Mode (Stacked Bars):</strong> Renders a stacked, horizontal binned bar representing overall running cost over time. Each segment is allocated its proportional share of block characters (<code>█</code>, <code>▒</code>, <code>░</code>) using a generalized implementation of the Largest Remainder Method, ensuring perfect pixel alignment.</li>
+        <li><strong>Bucket Mode (Scatter/Multi-Line Plot):</strong> Acts as a non-stacked point-of-spend multi-line chart. Each category is evaluated independently, placing exactly <strong>one colored marker block</strong> at its absolute visual position on the scale. Categories that did not spend anything in that interval are omitted. To resolve overlap conflicts where multiple categories happen to fall onto the same horizontal index, characters are plotted in the reverse priority of the legend (from right to left, i.e., <code>Other</code> -> <code>Spec</code>) ensuring that more critical categories like <code>Spec</code> always overlay and sit on top of others.</li>
+    </ul>
+    <p>Legend indicators are placed dynamically on the top title row (or on the second row if the terminal width is narrow), completely removing the redundant 'Legend:' prefix as it is self-evident.</p>
     <p>To maximize space and minimize vertical height, the ticks scale and dollar labels are collapsed into a <strong>single, ultra-clean horizontal row</strong> (when ticks are enabled). The dollar labels themselves (e.g. <code>$0.00</code>, <code>$scaleMax/2</code>, and <code>$scaleMax</code>) are embedded directly inside the horizontal box-drawing line and styled as <strong>inverted blocks</strong>. To ensure the date indicator on this top ticks row aligns perfectly with the rest of the visual hierarchy, it is styled identically to the standard day-change separator rows (Dark Grey/Bright Black) and rendered as <code>─── Mmm-DD ───</code> leading directly into the dollar scale line.</p>
     
     <h4 style="color: var(--accent-yellow); margin-bottom: 5px;">Example 1: Granular 1-Minute Cumulative Widget (Wide Terminal with Collapsed, Inverted Ticks)</h4>
@@ -170,14 +175,14 @@
 <span style="color: #888;">22:41</span>  <span style="color: #888;">+$10.00</span>  <strong>$10.00</strong>  <span style="color: #d7875f;">█████████████████████</span>
     </pre>
 
-    <h4 style="color: var(--accent-yellow); margin-bottom: 5px;">Example 2: 1-Hour Bucket Widget Crossing Day Boundary (Narrow Terminal wrapping Legend to 2nd Row)</h4>
+    <h4 style="color: var(--accent-yellow); margin-bottom: 5px;">Example 2: 1-Hour Bucket Widget Crossing Day Boundary (Point-of-Spend Multi-Line Style)</h4>
     <pre style="background: var(--box-bg); padding: 12px; border-radius: 6px; border: 1px solid #404040; overflow-x: auto; color: #f0f0f0; font-family: monospace;">
 💸 WTF Tokens?
 <span style="color: #87af87;">█</span> Spec  <span style="color: #87af87; background: #d7875f;">▒</span> Mixed  <span style="color: #d7875f;">█</span> Code  <span style="color: #ffafaf;">█</span> Tests  <span style="color: #af5fd7;">█</span> Research  <span style="color: #5fafaf;">█</span> Git  <span style="color: #5f87af;">█</span> Grep  <span style="color: #d75f87;">░</span> Prompt  <span style="color: #444444;">░</span> Other
-<span style="color: #888;">── Jun-20 ──<span style="background: #e0e0e0; color: #1e1e1e;"> $0.00 </span>────────<span style="background: #e0e0e0; color: #1e1e1e;"> $6.25 </span>────────<span style="background: #e0e0e0; color: #1e1e1e;"> $12.50 </span>───────<span style="background: #e0e0e0; color: #1e1e1e;"> $18.75 </span>───────<span style="background: #e0e0e0; color: #1e1e1e;"> $25.00 </span></span>
-<span style="color: #888;">22:00</span>  <strong>$13.00</strong>  <span style="color: #87af87; background: #d7875f;">▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒</span>
+<span style="color: #888;">── Jun-20 ──<span style="background: #e0e0e0; color: #1e1e1e;"> $0.00 </span>────────<span style="background: #e0e0e0; color: #1e1e1e;"> $3.25 </span>────────<span style="background: #e0e0e0; color: #1e1e1e;"> $6.50 </span>───────<span style="background: #e0e0e0; color: #1e1e1e;"> $9.75 </span>───────<span style="background: #e0e0e0; color: #1e1e1e;"> $13.00 </span></span>
+<span style="color: #888;">22:00</span>  <strong>$13.00</strong>                                                                  <span style="color: #87af87; background: #d7875f;">▒</span>
 <span style="color: #888;">── Jun-19 ──────────────────────────────────────────────────────────────────────</span>
-<span style="color: #888;">23:00</span>  <strong>$10.00</strong>  <span style="color: #d7875f;">█████████████████████████</span>
+<span style="color: #888;">23:00</span>  <strong>$10.00</strong>                                                <span style="color: #d7875f;">█</span>
     </pre>
 
     <h3>Architectural Design</h3>

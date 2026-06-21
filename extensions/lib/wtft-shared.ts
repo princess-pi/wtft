@@ -600,7 +600,10 @@ export function buildWtftLines(
 		return null;
 	}
 
-	const scaleMax = calculateScaleMax(totalSessionCost);
+	const maxBarValue = mode === "cumulative"
+		? totalSessionCost
+		: Math.max(...displayedBins.map(b => b.total_cost), 0);
+	const scaleMax = calculateScaleMax(maxBarValue);
 
 	// Compute the exact prefix width of the bar rows dynamically to prevent alignment offsets when costs grow wide
 	const labelWidth = Math.max(...displayedBins.map(b => b.label.length), 5);

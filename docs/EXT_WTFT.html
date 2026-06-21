@@ -95,6 +95,7 @@
     <ul>
         <li>If no files are accessed, but a command is executed in bash:
             <ul>
+                <li>If starting with <code>cat</code>, <code>head</code>, or <code>tail</code> -> extracts file path and dynamically maps to <code>Read Fallback</code>.</li>
                 <li>If starting with <code>git</code> -> <code>git</code>.</li>
                 <li>If starting with <code>grep</code>, <code>rg</code>, <code>ripgrep</code>, or <code>find</code> -> <code>grep</code>.</li>
                 <li>Any other commands -> <code>other</code>.</li>
@@ -121,7 +122,7 @@
             <tr>
                 <td style="color: var(--accent-orange); font-weight: bold;">Code Work (code)</td>
                 <td>ANSI Orange (<code>\x1b[38;5;208m</code>)</td>
-                <td>Touches files under <code>.pi/extensions/</code>, <code>extensions/</code>, <code>src/</code>, <code>public/</code>, <code>bin/</code>. Treats code files (e.g., <code>.ts</code>, <code>.js</code>, <code>.json</code>, etc.) as code.</td>
+                <td>Touches files under <code>.pi/extensions/</code>, <code>extensions/</code>, <code>src/</code>, <code>public/</code>, <code>bin/</code>. Treats code files (e.g., <code>.ts</code>, <code>.js</code>, <code>.json</code>, <code>.sql</code>) and ignores (e.g., <code>.gitignore</code>, <code>.dockerignore</code>) as code.</td>
             </tr>
             <tr>
                 <td style="color: var(--accent-yellow); font-weight: bold;">Tests Work (tests)</td>

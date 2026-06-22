@@ -8,6 +8,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { execSync } from "node:child_process";
 import {
 	buildWtftLines,
 	parseEntryToInteraction,
@@ -15,6 +16,23 @@ import {
 	type Interaction,
 	type Category
 } from "../extensions/lib/wtft-shared.ts";
+
+function getTerminalWidth(): number {
+	if (process.stdout.columns) return process.stdout.columns;
+	if (process.env.TMUX) {
+		try {
+			const tmuxWidth = execSync("tmux display-message -p '#{pane_width}'", { stdio: ["inherit", "pipe", "ignore"], encoding: "utf8" }).trim();
+			const num = parseInt(tmuxWidth, 10);
+			if (!isNaN(num) && num > 0) return num;
+		} catch (e) {}
+	}
+	try {
+		const cols = execSync("tput cols", { stdio: ["inherit", "pipe", "ignore"], encoding: "utf8" }).trim();
+		const num = parseInt(cols, 10);
+		if (!isNaN(num) && num > 0) return num;
+	} catch (e) {}
+	return 80; // fallback
+}
 
 // ---
 // DEFAULT CONFIG
@@ -353,7 +371,7 @@ async function main() {
 	// COMPILING AND PRINTING
 	// ---
 
-	const termColumns = process.stdout.columns || 80;
+	const termColumns = getTerminalWidth();
 	const width = Math.min(widthOption !== null ? widthOption : termColumns, 240);
 
 	const defaultSettings = {

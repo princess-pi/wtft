@@ -677,8 +677,8 @@ export function buildWtftLines(
 	const legendLen = getVisualLength(legendStr);
 	const totalNeeded = leftLen + legendLen + 4; // 4 spaces margin
 	
-	if (totalNeeded <= finalWidth) {
-		const remainingSpaces = finalWidth - leftLen - legendLen;
+	if (totalNeeded <= finalWidth - 3) {
+		const remainingSpaces = (finalWidth - 3) - leftLen - legendLen;
 		const titleLine = titleLeft + " ".repeat(remainingSpaces) + legendStr;
 		widgetLines.push(titleLine);
 	} else {
@@ -708,7 +708,7 @@ export function buildWtftLines(
 		if (showTicks && i > 0 && bin.dateStr !== displayedBins[i - 1].dateStr) {
 			const labelDay = formatMmmDdStr(bin.dateStr);
 			const dayChangeText = `── ${labelDay} `;
-			const dividerLine = dayChangeText + "─".repeat(Math.max(0, finalWidth - dayChangeText.length));
+			const dividerLine = dayChangeText + "─".repeat(Math.max(0, (finalWidth - 3) - dayChangeText.length));
 			// Use \x1b[30;47m for the day change divider to avoid pure black backgrounds on some terminal themes
 			// Wait, the divider is just "dim" text usually. The issue said: "date rows and the time stamp labels... have the jarring black background".
 			// If \x1b[2m (dim) is causing black backgrounds on that terminal emulator, it's because

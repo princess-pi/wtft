@@ -1,6 +1,7 @@
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { execSync } from "node:child_process";
 import {
 	buildWtftLines as sharedBuildWtftLines,
 	type Category,
@@ -199,6 +200,23 @@ class PagerComponent {
 	invalidate(): void {}
 }
 
+function getTerminalWidth(): number {
+	if (process.stdout.columns) return process.stdout.columns;
+	if (process.env.TMUX) {
+		try {
+			const tmuxWidth = execSync("tmux display-message -p '#{pane_width}'", { stdio: ["inherit", "pipe", "ignore"], encoding: "utf8" }).trim();
+			const num = parseInt(tmuxWidth, 10);
+			if (!isNaN(num) && num > 0) return num;
+		} catch (e) {}
+	}
+	try {
+		const cols = execSync("tput cols", { stdio: ["inherit", "pipe", "ignore"], encoding: "utf8" }).trim();
+		const num = parseInt(cols, 10);
+		if (!isNaN(num) && num > 0) return num;
+	} catch (e) {}
+	return 80; // fallback
+}
+
 // ---
 // STATE PERSISTENCE (STORE/RETRIEVE)
 // ---
@@ -211,8 +229,8 @@ function getSettings(ctx: any) {
 	let interval = "1h";
 	let limit = 10;
 	
-	// Dynamic terminal width fallback, capped at 240
-	const termColumns = process.stdout.columns || 80;
+	// Dynamic terminal width fallback (minus safety padding for TUI box margin), capped at 240
+	const termColumns = getTerminalWidth() - 4;
 	let width = Math.min(termColumns, 240);
 	let widthIsLocked = false;
 	let visible = false; // Default invisible on fresh session
@@ -231,7 +249,7 @@ function getSettings(ctx: any) {
 						widthIsLocked = true;
 					} else {
 						// Responsive auto-fit on the fly!
-						const termColumnsDynamic = process.stdout.columns || 80;
+						const termColumnsDynamic = getTerminalWidth() - 4;
 						width = Math.min(termColumnsDynamic, 240);
 					}
 				}
@@ -413,8 +431,8 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			const nextInterval = hasInterval ? interval : current.interval;
 			const nextLimit = hasLimit ? limit : current.limit;
 			
-			// Dynamic fallback capped at 240 if no explicit width set
-			const termColumns = process.stdout.columns || 80;
+			// Dynamic fallback (minus safety padding) capped at 240 if no explicit width set
+			const termColumns = getTerminalWidth() - 4;
 			const nextWidth = hasWidth ? Math.min(width, 240) : Math.min(termColumns, 240);
 			const nextWidthIsLocked = hasWidth || current.widthIsLocked || false;
 			

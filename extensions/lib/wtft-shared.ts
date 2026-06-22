@@ -195,7 +195,14 @@ export function classifyInteraction(interaction: Interaction): Category {
 		const norm = f.path.replace(/\\/g, "/");
 		let category: "spec" | "code" | "tests" | "research" | null = null;
 
-		if (norm.startsWith("docs/") || norm.includes("/docs/") || norm.endsWith("AGENTS.md") || norm.endsWith("ARCHITECTURE.md") || norm.endsWith("README.md") || path.extname(norm).toLowerCase() === ".md") {
+		if (norm.includes("node_modules/")) {
+			// Third-party library documentation/READMEs represent reference material (Research)
+			if (path.extname(norm).toLowerCase() === ".md" || norm.includes("/docs/")) {
+				category = "research";
+			} else {
+				category = "code";
+			}
+		} else if (norm.startsWith("docs/") || norm.includes("/docs/") || norm.endsWith("AGENTS.md") || norm.endsWith("ARCHITECTURE.md") || norm.endsWith("README.md") || path.extname(norm).toLowerCase() === ".md") {
 			category = "spec";
 		} else if (norm.startsWith("tests/") || norm.includes("/tests/")) {
 			category = "tests";

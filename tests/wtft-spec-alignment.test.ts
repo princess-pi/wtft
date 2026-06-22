@@ -1,4 +1,4 @@
-import { buildWtftLines, type Interaction } from "../extensions/lib/wtft-shared.ts";
+import { buildWtftLines, type Interaction, parseEntryToInteraction, classifyInteraction } from "../extensions/lib/wtft-shared.ts";
 import * as assert from "node:assert";
 
 // Helper to strip ANSI codes
@@ -121,4 +121,84 @@ function runAlignmentTest(mode: "cumulative" | "bucket") {
 		console.error(`\n❌ ${mode.toUpperCase()} ALIGNMENT CHECK FAILED: ${err.message}`);
 		process.exit(1);
 	}
+}
+
+// ---
+// MOCK PI SCHEMA 'BASH CAT' TEST
+// ---
+console.log("\n=== RUNNING PI SCHEMA BASH CAT HEURISTIC TEST ===");
+const mockPiEntry = {
+	type: "message",
+	timestamp: "2026-06-20T22:42:00Z",
+	message: {
+		role: "assistant",
+		content: [
+			{
+				type: "toolCall",
+				name: "bash",
+				arguments: {
+					command: "cat docs/EXT_WTFT.html"
+				}
+			}
+		],
+		usage: {
+			cost: {
+				total: 1.50
+			}
+		}
+	}
+};
+
+const parsed = parseEntryToInteraction(mockPiEntry);
+try {
+	assert.ok(parsed, "Parsed interaction must not be null");
+	assert.strictEqual(parsed.files.length, 1, "Must extract 1 file read from Pi bash cat command");
+	assert.strictEqual(parsed.files[0].path, "docs/EXT_WTFT.html", "Extracted path must be docs/EXT_WTFT.html");
+	assert.strictEqual(parsed.files[0].action, "read", "Action must be read");
+	
+	const classification = classifyInteraction(parsed);
+	assert.strictEqual(classification, "spec", "Interaction reading docs/ must be classified as 'spec' instead of 'other'");
+	console.log("✅ PI SCHEMA BASH CAT PARSING AND TAXONOMY TEST PASSED PERFECTLY!");
+} catch (err: any) {
+	console.error(`❌ PI SCHEMA BASH CAT TEST FAILED: ${err.message}`);
+	process.exit(1);
+}
+
+// ---
+// MOCK PI SCHEMA 'NODE_MODULES RESEARCH' TEST
+// ---
+console.log("\n=== RUNNING PI SCHEMA NODE_MODULES RESEARCH TEST ===");
+const mockPiNodeModulesEntry = {
+	type: "message",
+	timestamp: "2026-06-20T22:42:00Z",
+	message: {
+		role: "assistant",
+		content: [
+			{
+				type: "toolCall",
+				name: "bash",
+				arguments: {
+					command: "cat ~/.nvm/versions/node/v22.22.3/lib/node_modules/@earendil-works/pi-coding-agent/docs/packages.md"
+				}
+			}
+		],
+		usage: {
+			cost: {
+				total: 1.50
+			}
+		}
+	}
+};
+
+const parsedNodeModules = parseEntryToInteraction(mockPiNodeModulesEntry);
+try {
+	assert.ok(parsedNodeModules, "Parsed node_modules interaction must not be null");
+	assert.strictEqual(parsedNodeModules.files.length, 1, "Must extract 1 file read from node_modules bash cat command");
+	
+	const classification = classifyInteraction(parsedNodeModules);
+	assert.strictEqual(classification, "research", "Interaction reading platform docs inside node_modules/ must be classified as 'research' instead of 'spec'");
+	console.log("✅ PI SCHEMA NODE_MODULES RESEARCH CLASSIFICATION TEST PASSED PERFECTLY!");
+} catch (err: any) {
+	console.error(`❌ PI SCHEMA NODE_MODULES RESEARCH TEST FAILED: ${err.message}`);
+	process.exit(1);
 }

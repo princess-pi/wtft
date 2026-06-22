@@ -126,7 +126,10 @@ export function parseEntryToInteraction(entry: any): Interaction | null {
 					} else if (name === "write" || name === "edit") {
 						if (args.path) files.push({ path: args.path, action: "write" });
 					} else if (name === "bash") {
-						if (args.command) commands.push(args.command);
+						if (args.command) {
+							commands.push(args.command);
+							extractFilesFromBashCommand(args.command, files);
+						}
 					}
 				} else if (block.type === "tool_use") {
 					// Claude Code Schema
@@ -142,33 +145,7 @@ export function parseEntryToInteraction(entry: any): Interaction | null {
 					} else if (name === "bash" || name === "run") {
 						if (args.command) {
 							commands.push(args.command);
-							
-							// Claude Code frequently uses `cat <file>`, `head <file>`, `tail <file>` inside Bash instead of a direct read tool.
-							// We heuristically extract the file path to ensure these turns don't fall through to "other" classification.
-							const cmdLines = args.command.split('\n');
-							for (const line of cmdLines) {
-								const trimmed = line.trim();
-								if (trimmed.startsWith("cat ") || trimmed.startsWith("head ") || trimmed.startsWith("tail ")) {
-									const parts = trimmed.split(/\s+/);
-									if (parts.length > 1) {
-										// parts[1] is typically the file path. Handle potential quotes.
-										const possiblePath = parts[1].replace(/['"]/g, '');
-										if (possiblePath && !possiblePath.startsWith("-")) { // Ignore flags like `cat -n`
-											files.push({ path: possiblePath, action: "read" });
-										} else if (parts.length > 2 && parts[1].startsWith("-")) {
-											// Handle `cat -n file.txt` or `tail -n 50 file.txt`
-											// We just try to find the first argument that doesn't start with '-' and isn't a number
-											for (let i = 2; i < parts.length; i++) {
-												const candidate = parts[i].replace(/['"]/g, '');
-												if (!candidate.startsWith("-") && isNaN(Number(candidate))) {
-													files.push({ path: candidate, action: "read" });
-													break;
-												}
-											}
-										}
-									}
-								}
-							}
+							extractFilesFromBashCommand(args.command, files);
 						}
 					}
 				}

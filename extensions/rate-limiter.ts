@@ -250,7 +250,7 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
     const hGlobalStr = getReadableSize(hostingData.tpm);
     const hLimitStr = getReadableSize(hostingCeiling);
 
-    lines.push(`\x1b[1m  👉 ${hColor}[${hBar}] ${hostingShortCode}\x1b[0m\x1b[1m: ${hSessionStr} (session) / ${hGlobalStr} (global) of ${hLimitStr} max\x1b[0m`);
+    lines.push(`\x1b[1m  👉 ${hColor}[${hBar}] ${hostingShortCode}\x1b[0m\x1b[1m: ${hSessionStr} ses / ${hGlobalStr} glo [max ${hLimitStr}]\x1b[0m`);
 
     // Render other active models (non-bolded, auto-pruned)
     for (const [shortCode, data] of Object.entries(stats)) {
@@ -276,7 +276,7 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
       const globalStr = getReadableSize(data.tpm);
       const limitStr = getReadableSize(ceiling);
 
-      lines.push(`     ${color}[${bar}] ${shortCode}\x1b[0m: ${globalStr} (global) of ${limitStr} max`);
+      lines.push(`     ${color}[${bar}] ${shortCode}\x1b[0m: ${globalStr} glo [max ${limitStr}]`);
     }
 
     ctx.ui.setWidget("rate-limiter", lines, { placement: "belowEditor" });

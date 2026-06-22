@@ -215,10 +215,11 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
 
   try {
     const activeFiles = findActiveSessionFiles();
-    const hostingSessionId = ctx.sessionManager.getSessionHeader()?.sessionId || null;
+    const hostingSessionId = ctx.sessionManager.getSessionId() || null;
     
     // Always find current model of the hosting session
-    const currentModel = ctx.sessionManager.getSessionHeader()?.model || "unknown";
+    const context = ctx.sessionManager.buildSessionContext();
+    const currentModel = context.model?.modelId || "unknown";
     const hostingShortCode = getModelShortName(currentModel);
 
     const stats = aggregateActiveTpm(activeFiles, hostingSessionId);
@@ -301,9 +302,10 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
     try {
       const now = Date.now();
       const activeFiles = findActiveSessionFiles();
-      const hostingSessionId = ctx.sessionManager.getSessionHeader()?.sessionId || null;
+      const hostingSessionId = ctx.sessionManager.getSessionId() || null;
       
-      const currentModel = ctx.sessionManager.getSessionHeader()?.model || "unknown";
+      const context = ctx.sessionManager.buildSessionContext();
+      const currentModel = context.model?.modelId || "unknown";
       const shortCode = getModelShortName(currentModel);
       const ceiling = MODEL_QUOTA_REGISTRY[shortCode] || DEFAULT_CEILING;
 

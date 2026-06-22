@@ -51,6 +51,34 @@ export function calculateClaudeCost(model: string, usage: any): number {
 	return cost;
 }
 
+function extractFilesFromBashCommand(command: string, files: { path: string; action: "read" | "write" }[]) {
+	// Heuristically extract the file path to ensure these turns don't fall through to "other" classification.
+	const cmdLines = command.split('\n');
+	for (const line of cmdLines) {
+		const trimmed = line.trim();
+		if (trimmed.startsWith("cat ") || trimmed.startsWith("head ") || trimmed.startsWith("tail ")) {
+			const parts = trimmed.split(/\s+/);
+			if (parts.length > 1) {
+				// parts[1] is typically the file path. Handle potential quotes.
+				const possiblePath = parts[1].replace(/['"]/g, '');
+				if (possiblePath && !possiblePath.startsWith("-")) { // Ignore flags like `cat -n`
+					files.push({ path: possiblePath, action: "read" });
+				} else if (parts.length > 2 && parts[1].startsWith("-")) {
+					// Handle `cat -n file.txt` or `tail -n 50 file.txt`
+					// We just try to find the first argument that doesn't start with '-' and isn't a number
+					for (let i = 2; i < parts.length; i++) {
+						const candidate = parts[i].replace(/['"]/g, '');
+						if (!candidate.startsWith("-") && isNaN(Number(candidate))) {
+							files.push({ path: candidate, action: "read" });
+							break;
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
 export function parseEntryToInteraction(entry: any): Interaction | null {
 	if (!entry) return null;
 	

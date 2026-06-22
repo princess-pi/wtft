@@ -1,95 +1,357 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
 
-/**
- * @package princess-pi-packages
- * @module rate-limiter
- * @description Dynamic Token-Bucket Rate Limiter extension for Pi Coding Agent.
- *              Intercepts the before_provider_request hook, sums up input token spend
- *              over the sliding 60-second window, and enforces a flat 40-second 
- *              "coffee break" pause if token velocity exceeds 2.5M to prevent Gemini 429s.
- */
+// ---
+// CONFIGURATION
+// ---
 
-const INPUT_TOKEN_LIMIT_PER_MIN = 2500000; // 2.5M (Safety ceiling for Gemini's 3.0M limit)
-const COOLDOWN_DURATION_MS = 40000; // 40 seconds flat "coffee break"
+const HOME = os.homedir();
+const CLAUDE_DIR = path.join(HOME, ".claude", "projects");
+const PI_DIR = path.join(HOME, ".pi", "agent", "sessions");
 const COFFEE_FILE = "/tmp/pi-rate-limit-coffee.json";
+
+// Safe model-specific limit ceilings (80% of actual subscription quota)
+const MODEL_QUOTA_REGISTRY: Record<string, number> = {
+  "g35fla": 2500000,  // gemini-3.5-flash (Tier 2 limit: 3.0M)
+  "g35fli": 2500000,  // gemini-3.5-flash-lite (Tier 2 limit: 3.0M)
+  "g15pro": 1600000,  // gemini-1.5-pro (Tier 2 limit: 2.0M)
+  "c35son": 320000,   // claude-3-5-sonnet (Tier 4 limit: 400K)
+  "c35hai": 320000,   // claude-3-5-haiku
+  "c30opu": 80000,    // claude-3-opus (Opus standard limit)
+};
+
+const DEFAULT_CEILING = 1000000;
+const BAR_WIDTH = 5;
+const COOLDOWN_DURATION_MS = 40000; // 40 seconds flat "coffee break"
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Keep track of widget visibility state in-memory
+let isWidgetVisible = true;
+
+// ---
+// HELPERS
+// ---
+
+function getModelShortName(modelName: string): string {
+  if (!modelName) return "unknown";
+  const m = modelName.toLowerCase();
+
+  if (m.includes("gemini-3.5-flash") || m.includes("gemini-flash-latest")) {
+    return "g35fla";
+  }
+  if (m.includes("gemini-3.5-flash-lite") || m.includes("gemini-flash-lite-latest")) {
+    return "g35fli";
+  }
+  if (m.includes("gemini-1.5-pro") || m.includes("gemini-pro-latest")) {
+    return "g15pro";
+  }
+  if (m.includes("claude-3-5-sonnet") || m.includes("claude-sonnet-4-6") || m.includes("claude-3-5-sonnet-20240620") || m.includes("claude-3-5-sonnet-20241022")) {
+    return "c35son";
+  }
+  if (m.includes("claude-3-5-haiku") || m.includes("claude-3-5-haiku-20241022")) {
+    return "c35hai";
+  }
+  if (m.includes("claude-3-opus") || m.includes("claude-3-0-opus") || m.includes("opus")) {
+    return "c30opu";
+  }
+
+  // Fallback fixed-width 6-char encoder (C-V-MMM)
+  const comp = m.includes("gemini") || m.includes("google") ? "g" : "c";
+  let ver = "35";
+  if (m.includes("3.0") || m.includes("3-0")) ver = "30";
+  else if (m.includes("1.5") || m.includes("1-5")) ver = "15";
+
+  let modelPart = "unk";
+  const parts = m.split("-");
+  const lastPart = parts[parts.length - 1];
+  if (lastPart) {
+    if (lastPart === "lite") modelPart = "fli";
+    else modelPart = lastPart.slice(0, 3);
+  }
+
+  return (comp + ver + modelPart).padEnd(6, " ").slice(0, 6);
+}
+
+function getReadableSize(tokens: number): string {
+  if (tokens >= 1000000) {
+    return `${(tokens / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
+  }
+  if (tokens >= 1000) {
+    return `${Math.round(tokens / 1000)}K`;
+  }
+  return `${tokens}`;
+}
+
+interface FileInfo {
+  path: string;
+  mtime: number;
+}
+
+function findActiveSessionFiles(): FileInfo[] {
+  const activeFiles: FileInfo[] = [];
+  const now = Date.now();
+  const TWO_MINUTES_MS = 2 * 60 * 1000;
+
+  function scanDir(dir: string) {
+    if (!fs.existsSync(dir)) return;
+    try {
+      const files = fs.readdirSync(dir);
+      for (const f of files) {
+        const fullPath = path.join(dir, f);
+        const stat = fs.statSync(fullPath);
+        if (stat.isDirectory()) {
+          scanDir(fullPath);
+        } else if (f.endsWith(".jsonl")) {
+          if (now - stat.mtimeMs < TWO_MINUTES_MS) {
+            activeFiles.push({ path: fullPath, mtime: stat.mtimeMs });
+          }
+        }
+      }
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  scanDir(CLAUDE_DIR);
+  scanDir(PI_DIR);
+
+  return activeFiles;
+}
+
+interface ModelStats {
+  tpm: number;
+  lastActiveAge: number;
+  sessionTpm: number; // Tokens spent ONLY by the hosting session
+}
+
+function aggregateActiveTpm(activeFiles: FileInfo[], hostingSessionId: string | null): Record<string, ModelStats> {
+  const modelStats: Record<string, ModelStats> = {};
+  const now = Date.now();
+
+  for (const { path: filePath } of activeFiles) {
+    try {
+      const isHostingSession = hostingSessionId && filePath.includes(hostingSessionId);
+      const content = fs.readFileSync(filePath, "utf8");
+      const lines = content.split("\n").filter(Boolean);
+
+      for (const line of lines) {
+        try {
+          const entry = JSON.parse(line);
+          if (!entry) continue;
+
+          const msg = entry.message;
+          const timestampStr = msg?.timestamp || entry.timestamp;
+          let timestamp = 0;
+          if (typeof timestampStr === "string") {
+            timestamp = new Date(timestampStr).getTime();
+          } else if (typeof timestampStr === "number") {
+            timestamp = timestampStr;
+          }
+
+          if (!timestamp) continue;
+
+          const age = now - timestamp;
+          if (age > 120000) continue;
+
+          let modelName = "";
+          if (msg?.model) {
+            modelName = msg.model;
+          } else if (entry.model) {
+            modelName = entry.model;
+          }
+
+          if (!modelName) continue;
+          const shortCode = getModelShortName(modelName);
+
+          if (!modelStats[shortCode]) {
+            modelStats[shortCode] = { tpm: 0, lastActiveAge: 120000, sessionTpm: 0 };
+          }
+
+          modelStats[shortCode].lastActiveAge = Math.min(modelStats[shortCode].lastActiveAge, age);
+
+          if (age <= 60000) {
+            let inputTokens = 0;
+            if (entry.usage && typeof entry.usage.input_tokens === "number") {
+              inputTokens = entry.usage.input_tokens;
+            } else if (msg?.usage) {
+              inputTokens = msg.usage.input_tokens || msg.usage.input_token_count || msg.usage.prompt_tokens || 0;
+            }
+            
+            // Increment global TPM
+            modelStats[shortCode].tpm += inputTokens;
+            
+            // If this is the hosting session, increment session-only TPM
+            if (isHostingSession) {
+              modelStats[shortCode].sessionTpm += inputTokens;
+            }
+          }
+        } catch (e) {
+          // ignore line parses
+        }
+      }
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  return modelStats;
+}
+
+// ---
+// WIDGET RENDERER
+// ---
+
+function updateRateLimiterWidget(ctx: ExtensionContext) {
+  if (!isWidgetVisible) {
+    ctx.ui.setWidget("rate-limiter", undefined);
+    return;
+  }
+
+  try {
+    const activeFiles = findActiveSessionFiles();
+    const hostingSessionId = ctx.sessionManager.getSessionHeader()?.sessionId || null;
+    
+    // Always find current model of the hosting session
+    const currentModel = ctx.sessionManager.getSessionHeader()?.model || "unknown";
+    const hostingShortCode = getModelShortName(currentModel);
+
+    const stats = aggregateActiveTpm(activeFiles, hostingSessionId);
+    
+    // Ensure hosting shortcode exists in our list even if 0 TPM
+    if (!stats[hostingShortCode]) {
+      stats[hostingShortCode] = { tpm: 0, lastActiveAge: 0, sessionTpm: 0 };
+    }
+
+    const lines: string[] = [];
+    lines.push(`\x1b[1;36m🛡️  Token Sentinel (TPM Active Monitors) ───────────────────\x1b[0m`);
+
+    // Render hosting session's model FIRST and BOLDED
+    const hostingData = stats[hostingShortCode];
+    const hostingCeiling = MODEL_QUOTA_REGISTRY[hostingShortCode] || DEFAULT_CEILING;
+    
+    const hFilled = Math.min(Math.round((hostingData.tpm / hostingCeiling) * BAR_WIDTH), BAR_WIDTH);
+    const hBar = "$".repeat(hFilled) + " ".repeat(BAR_WIDTH - hFilled);
+    
+    let hColor = "\x1b[32m"; // Green
+    if (hostingData.tpm > hostingCeiling * 0.8) hColor = "\x1b[31;1m"; // Red
+    else if (hostingData.tpm > hostingCeiling * 0.5) hColor = "\x1b[33m"; // Yellow
+
+    const hSessionStr = getReadableSize(hostingData.sessionTpm);
+    const hGlobalStr = getReadableSize(hostingData.tpm);
+    const hLimitStr = getReadableSize(hostingCeiling);
+
+    lines.push(`\x1b[1m  👉 ${hColor}[${hBar}] ${hostingShortCode}\x1b[0m\x1b[1m: ${hSessionStr} (session) / ${hGlobalStr} (global) of ${hLimitStr} max\x1b[0m`);
+
+    // Render other active models (non-bolded, auto-pruned)
+    for (const [shortCode, data] of Object.entries(stats)) {
+      if (shortCode === hostingShortCode) continue; // Already rendered first
+
+      // Auto-prune other models if 0 TPM for >= 2 minutes
+      if (data.tpm === 0 && data.lastActiveAge >= 120000) {
+        continue;
+      }
+
+      const ceiling = MODEL_QUOTA_REGISTRY[shortCode] || DEFAULT_CEILING;
+      const filled = Math.min(Math.round((data.tpm / ceiling) * BAR_WIDTH), BAR_WIDTH);
+      const bar = "$".repeat(filled) + " ".repeat(BAR_WIDTH - filled);
+
+      let color = "\x1b[32m";
+      if (data.tpm > ceiling * 0.8) color = "\x1b[31;1m";
+      else if (data.tpm > ceiling * 0.5) color = "\x1b[33m";
+      else if (data.tpm === 0) color = "\x1b[90m"; // Gray
+
+      const globalStr = getReadableSize(data.tpm);
+      const limitStr = getReadableSize(ceiling);
+
+      lines.push(`     ${color}[${bar}] ${shortCode}\x1b[0m: ${globalStr} (global) of ${limitStr} max`);
+    }
+
+    ctx.ui.setWidget("rate-limiter", lines, { placement: "belowEditor" });
+  } catch (err: any) {
+    ctx.ui.setWidget("rate-limiter", [`⚠️ Rate Limiter Widget Error: ${err.message}`], { placement: "belowEditor" });
+  }
+}
+
+// ---
+// EXTENSION DEFINITION
+// ---
+
 export default function rateLimiterExtension(pi: ExtensionAPI) {
+  // 1. On turn/session starts and ends, refresh the Pi status widget
+  pi.on("session_start", async (_event, ctx) => {
+    updateRateLimiterWidget(ctx);
+  });
+
+  pi.on("turn_start", async (_event, ctx) => {
+    updateRateLimiterWidget(ctx);
+  });
+
+  pi.on("turn_end", async (_event, ctx) => {
+    updateRateLimiterWidget(ctx);
+  });
+
+  // 2. Intercept requests to verify rolling TPM rate-limit limits
   pi.on("before_provider_request", async (_event, ctx) => {
     try {
       const now = Date.now();
-      const branch = ctx.sessionManager.getBranch();
+      const activeFiles = findActiveSessionFiles();
+      const hostingSessionId = ctx.sessionManager.getSessionHeader()?.sessionId || null;
       
-      let rollingInputTokens = 0;
-      
-      for (const entry of branch) {
-        if (!entry) continue;
-        
-        // 1. Resolve entry timestamp
-        const msg = entry.message;
-        const timestampStr = msg?.timestamp || entry.timestamp;
-        let timestamp = 0;
-        
-        if (typeof timestampStr === "string") {
-          timestamp = new Date(timestampStr).getTime();
-        } else if (typeof timestampStr === "number") {
-          timestamp = timestampStr;
-        }
-        
-        if (!timestamp) continue;
-        
-        // 2. Filter to sliding 60-second window
-        if (now - timestamp > 60000) continue;
-        
-        // 3. Extract input tokens from assistant messages (where API usage resides)
-        let inputTokens = 0;
-        const isAssistant = msg?.role === "assistant" || entry.type === "assistant";
-        
-        if (isAssistant && msg?.usage) {
-          inputTokens = 
-            msg.usage.input_tokens || 
-            msg.usage.input_token_count || 
-            msg.usage.prompt_tokens || 
-            0;
-        }
-        
-        rollingInputTokens += inputTokens;
-      }
-      
-      // 4. If rolling input tokens exceed our 2.5M ceiling, trigger the 40s coffee break
-      if (rollingInputTokens > INPUT_TOKEN_LIMIT_PER_MIN) {
+      const currentModel = ctx.sessionManager.getSessionHeader()?.model || "unknown";
+      const shortCode = getModelShortName(currentModel);
+      const ceiling = MODEL_QUOTA_REGISTRY[shortCode] || DEFAULT_CEILING;
+
+      const stats = aggregateActiveTpm(activeFiles, hostingSessionId);
+      const currentTpm = stats[shortCode]?.tpm || 0;
+
+      // Update widget with pre-request metrics
+      updateRateLimiterWidget(ctx);
+
+      // If our specific active model is crossing its safety threshold:
+      if (currentTpm > ceiling) {
         ctx.ui.notify(
-          `⚠️ [Rate Limiter] Sliding window has consumed ${rollingInputTokens.toLocaleString()} input tokens. ` +
-          `Initiating a 40-second "coffee break" to let Gemini quota reset...`,
+          `⚠️ [Rate Limiter] ${shortCode} sliding window has consumed ${currentTpm.toLocaleString()} input tokens. ` +
+          `Initiating a 40-second "coffee break" to let Gemini/Claude quota reset...`,
           "warning"
         );
-        
-        // Write the coffee lockfile for external status bar sync (e.g. tmux)
+
+        // Write the lockfile for external (tmux) status bar integration
         try {
           fs.writeFileSync(COFFEE_FILE, JSON.stringify({ startTime: now, endTime: now + COOLDOWN_DURATION_MS }), "utf8");
         } catch (e) {
-          // ignore write errors
+          // ignore
         }
-        
-        // Sleep blocks the before_provider_request loop asynchronously
+
+        // Sleep blocks the turn synchronously in the harness
         await sleep(COOLDOWN_DURATION_MS);
-        
+
         // Clean up the lockfile
         try {
           if (fs.existsSync(COFFEE_FILE)) {
             fs.unlinkSync(COFFEE_FILE);
           }
         } catch (e) {
-          // ignore delete errors
+          // ignore
         }
-        
+
         ctx.ui.notify("☕ [Rate Limiter] Cooldown complete. Resuming turn execution.", "success");
+        updateRateLimiterWidget(ctx);
       }
     } catch (err: any) {
-      // Degrade gracefully to prevent breaking the developer session on error
-      ctx.ui.notify(`⚠️ [Rate Limiter Error] Failed to compute token limit: ${err.message}`, "error");
+      ctx.ui.notify(`⚠️ [Rate Limiter Error] Failed to compute rate limit: ${err.message}`, "error");
+    }
+  });
+
+  // 3. Register '/tpm' slash command to manually toggle widget visibility
+  pi.registerCommand("tpm", {
+    description: "Toggle visibility of the Tokens Per Minute (TPM) rate-limiter widget",
+    handler: async (_args, ctx) => {
+      isWidgetVisible = !isWidgetVisible;
+      updateRateLimiterWidget(ctx);
+      ctx.ui.notify(`TPM rate limiter widget is now ${isWidgetVisible ? "VISIBLE" : "HIDDEN"}.`, "info");
     }
   });
 }

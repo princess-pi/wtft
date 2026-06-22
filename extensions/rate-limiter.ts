@@ -14,12 +14,15 @@ const COFFEE_FILE = "/tmp/pi-rate-limit-coffee.json";
 
 // Safe model-specific limit ceilings (80% of actual subscription quota)
 const MODEL_QUOTA_REGISTRY: Record<string, number> = {
-  "g35fla": 2500000,  // gemini-3.5-flash (Tier 2 limit: 3.0M)
-  "g35fli": 2500000,  // gemini-3.5-flash-lite (Tier 2 limit: 3.0M)
-  "g15pro": 1600000,  // gemini-1.5-pro (Tier 2 limit: 2.0M)
-  "c35son": 320000,   // claude-3-5-sonnet (Tier 4 limit: 400K)
-  "c35hai": 320000,   // claude-3-5-haiku
-  "c30opu": 80000,    // claude-3-opus (Opus standard limit)
+  "g3-5fla": 2500000,  // gemini-3.5-flash (Tier 2 limit: 3.0M)
+  "glatfla": 2500000,  // gemini-flash-latest (Tier 2 limit: 3.0M)
+  "g3-5fli": 2500000,  // gemini-3.5-flash-lite (Tier 2 limit: 3.0M)
+  "glatfli": 2500000,  // gemini-flash-lite-latest (Tier 2 limit: 3.0M)
+  "g1-5pro": 1600000,  // gemini-1.5-pro (Tier 2 limit: 2.0M)
+  "glatpro": 1600000,  // gemini-pro-latest (Tier 2 limit: 2.0M)
+  "c3-5son": 320000,   // claude-3-5-sonnet (Tier 4 limit: 400K)
+  "c3-5hai": 320000,   // claude-3-5-haiku
+  "c3-0opu": 80000,    // claude-3-opus (Opus standard limit)
 };
 
 const DEFAULT_CEILING = 1000000;
@@ -39,40 +42,40 @@ function getModelShortName(modelName: string): string {
   if (!modelName) return "unknown";
   const m = modelName.toLowerCase();
 
-  if (m.includes("gemini-3.5-flash") || m.includes("gemini-flash-latest")) {
-    return "g35fla";
-  }
-  if (m.includes("gemini-3.5-flash-lite") || m.includes("gemini-flash-lite-latest")) {
-    return "g35fli";
-  }
-  if (m.includes("gemini-1.5-pro") || m.includes("gemini-pro-latest")) {
-    return "g15pro";
-  }
+  if (m.includes("gemini-3.5-flash")) return "g3-5fla";
+  if (m.includes("gemini-flash-latest")) return "glatfla";
+  if (m.includes("gemini-3.5-flash-lite")) return "g3-5fli";
+  if (m.includes("gemini-flash-lite-latest")) return "glatfli";
+  if (m.includes("gemini-1.5-pro")) return "g1-5pro";
   if (m.includes("claude-3-5-sonnet") || m.includes("claude-sonnet-4-6") || m.includes("claude-3-5-sonnet-20240620") || m.includes("claude-3-5-sonnet-20241022")) {
-    return "c35son";
+    return "c3-5son";
   }
   if (m.includes("claude-3-5-haiku") || m.includes("claude-3-5-haiku-20241022")) {
-    return "c35hai";
+    return "c3-5hai";
   }
   if (m.includes("claude-3-opus") || m.includes("claude-3-0-opus") || m.includes("opus")) {
-    return "c30opu";
+    return "c3-0opu";
   }
 
-  // Fallback fixed-width 6-char encoder (C-V-MMM)
+  // Fallback fixed-width 7-char encoder (C-VVV-MMM)
   const comp = m.includes("gemini") || m.includes("google") ? "g" : "c";
-  let ver = "35";
-  if (m.includes("3.0") || m.includes("3-0")) ver = "30";
-  else if (m.includes("1.5") || m.includes("1-5")) ver = "15";
+  
+  let ver = "3-5";
+  if (m.includes("latest")) ver = "lat";
+  else if (m.includes("3.0") || m.includes("3-0")) ver = "3-0";
+  else if (m.includes("1.5") || m.includes("1-5")) ver = "1-5";
 
   let modelPart = "unk";
   const parts = m.split("-");
   const lastPart = parts[parts.length - 1];
   if (lastPart) {
-    if (lastPart === "lite") modelPart = "fli";
+    if (lastPart === "lite" || (lastPart === "latest" && m.includes("lite"))) modelPart = "fli";
+    else if (lastPart === "latest" && m.includes("flash")) modelPart = "fla";
+    else if (lastPart === "latest" && m.includes("pro")) modelPart = "pro";
     else modelPart = lastPart.slice(0, 3);
   }
 
-  return (comp + ver + modelPart).padEnd(6, " ").slice(0, 6);
+  return (comp + ver + modelPart).padEnd(7, " ").slice(0, 7);
 }
 
 function getReadableSize(tokens: number): string {

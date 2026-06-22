@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import * as fs from "node:fs";
 
 /**
  * @package princess-pi-packages
@@ -11,6 +12,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const INPUT_TOKEN_LIMIT_PER_MIN = 2500000; // 2.5M (Safety ceiling for Gemini's 3.0M limit)
 const COOLDOWN_DURATION_MS = 40000; // 40 seconds flat "coffee break"
+const COFFEE_FILE = "/tmp/pi-rate-limit-coffee.json";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -64,8 +66,25 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
           "warning"
         );
         
+        // Write the coffee lockfile for external status bar sync (e.g. tmux)
+        try {
+          fs.writeFileSync(COFFEE_FILE, JSON.stringify({ startTime: now, endTime: now + COOLDOWN_DURATION_MS }), "utf8");
+        } catch (e) {
+          // ignore write errors
+        }
+        
         // Sleep blocks the before_provider_request loop asynchronously
         await sleep(COOLDOWN_DURATION_MS);
+        
+        // Clean up the lockfile
+        try {
+          if (fs.existsSync(COFFEE_FILE)) {
+            fs.unlinkSync(COFFEE_FILE);
+          }
+        } catch (e) {
+          // ignore delete errors
+        }
+        
         ctx.ui.notify("☕ [Rate Limiter] Cooldown complete. Resuming turn execution.", "success");
       }
     } catch (err: any) {

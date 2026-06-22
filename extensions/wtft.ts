@@ -210,7 +210,10 @@ class PagerComponent {
 function getSettings(ctx: any) {
 	let interval = "1h";
 	let limit = 10;
-	let width = 80;
+	
+	// Dynamic terminal width fallback, capped at 240
+	const termColumns = process.stdout.columns || 80;
+	let width = Math.min(termColumns, 240);
 	let visible = false; // Default invisible on fresh session
 	let showTicks = true;
 	let mode: "bucket" | "cumulative" = "cumulative";
@@ -221,7 +224,7 @@ function getSettings(ctx: any) {
 			if (entry.data) {
 				if (entry.data.interval) interval = entry.data.interval;
 				if (typeof entry.data.limit === "number") limit = entry.data.limit;
-				if (typeof entry.data.width === "number") width = entry.data.width;
+				if (typeof entry.data.width === "number") width = Math.min(entry.data.width, 240);
 				if (typeof entry.data.visible === "boolean") visible = entry.data.visible;
 				if (typeof entry.data.showTicks === "boolean") showTicks = entry.data.showTicks;
 				if (entry.data.mode) mode = entry.data.mode;
@@ -399,7 +402,11 @@ export default function wtftExtension(pi: ExtensionAPI) {
 
 			const nextInterval = hasInterval ? interval : current.interval;
 			const nextLimit = hasLimit ? limit : current.limit;
-			const nextWidth = hasWidth ? width : current.width;
+			
+			// Dynamic fallback capped at 240 if no explicit width set
+			const termColumns = process.stdout.columns || 80;
+			const nextWidth = hasWidth ? Math.min(width, 240) : Math.min(current.width || termColumns, 240);
+			
 			const nextTicks = hasTicks ? showTicks : current.showTicks;
 			const nextMode = hasMode ? mode : current.mode;
 			const nextTimezone = hasTimezone ? timezone : current.timezone;

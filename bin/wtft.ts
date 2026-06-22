@@ -22,7 +22,7 @@ import {
 
 let intervalStr = "1h";
 let limit = 100; // Large default for CLI
-let width = 80;
+let widthOption: number | null = null;
 let mode: "bucket" | "cumulative" = "cumulative";
 let showTicks = true;
 let targetSessionPath: string | undefined = undefined;
@@ -70,7 +70,7 @@ for (let i = 2; i < process.argv.length; i++) {
 	} else if (arg === "-l" || arg === "--limit") {
 		limit = parseInt(process.argv[++i], 10);
 	} else if (arg === "-w" || arg === "--width") {
-		width = parseInt(process.argv[++i], 10);
+		widthOption = parseInt(process.argv[++i], 10);
 	} else if (arg === "-c" || arg === "--cumulative") {
 		mode = "cumulative";
 	} else if (arg === "-b" || arg === "--bucket") {
@@ -353,10 +353,13 @@ async function main() {
 	// COMPILING AND PRINTING
 	// ---
 
+	const termColumns = process.stdout.columns || 80;
+	const width = Math.min(widthOption !== null ? widthOption : termColumns, 240);
+
 	const defaultSettings = {
 		interval: "1h",
 		limit: 100,
-		width: 80,
+		width,
 		showTicks: true,
 		mode: "cumulative" as "cumulative" | "bucket",
 		timezone: undefined

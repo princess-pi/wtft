@@ -201,7 +201,12 @@ class PagerComponent {
 }
 
 function getTerminalWidth(): number {
-	if (process.stdout.columns) return process.stdout.columns;
+	if (process.stdout && process.stdout.columns) return process.stdout.columns;
+	if (process.stderr && process.stderr.columns) return process.stderr.columns;
+	if (process.env.COLUMNS) {
+		const num = parseInt(process.env.COLUMNS, 10);
+		if (!isNaN(num) && num > 0) return num;
+	}
 	if (process.env.TMUX) {
 		try {
 			const tmuxWidth = execSync("tmux display-message -p '#{pane_width}'", { stdio: ["inherit", "pipe", "ignore"], encoding: "utf8" }).trim();

@@ -236,7 +236,10 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
     const hostingData = stats[hostingShortCode];
     const hostingCeiling = MODEL_QUOTA_REGISTRY[hostingShortCode] || DEFAULT_CEILING;
     
-    const hFilled = Math.min(Math.round((hostingData.tpm / hostingCeiling) * BAR_WIDTH), BAR_WIDTH);
+    let hFilled = Math.min(Math.round((hostingData.tpm / hostingCeiling) * BAR_WIDTH), BAR_WIDTH);
+    if (hostingData.tpm > 0 && hFilled === 0) {
+      hFilled = 1;
+    }
     const hBar = "$".repeat(hFilled) + " ".repeat(BAR_WIDTH - hFilled);
     
     let hColor = "\x1b[32m"; // Green
@@ -259,7 +262,10 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
       }
 
       const ceiling = MODEL_QUOTA_REGISTRY[shortCode] || DEFAULT_CEILING;
-      const filled = Math.min(Math.round((data.tpm / ceiling) * BAR_WIDTH), BAR_WIDTH);
+      let filled = Math.min(Math.round((data.tpm / ceiling) * BAR_WIDTH), BAR_WIDTH);
+      if (data.tpm > 0 && filled === 0) {
+        filled = 1;
+      }
       const bar = "$".repeat(filled) + " ".repeat(BAR_WIDTH - filled);
 
       let color = "\x1b[32m";

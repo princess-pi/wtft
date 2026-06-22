@@ -214,6 +214,7 @@ function getSettings(ctx: any) {
 	// Dynamic terminal width fallback, capped at 240
 	const termColumns = process.stdout.columns || 80;
 	let width = Math.min(termColumns, 240);
+	let widthIsLocked = false;
 	let visible = false; // Default invisible on fresh session
 	let showTicks = true;
 	let mode: "bucket" | "cumulative" = "cumulative";
@@ -224,7 +225,16 @@ function getSettings(ctx: any) {
 			if (entry.data) {
 				if (entry.data.interval) interval = entry.data.interval;
 				if (typeof entry.data.limit === "number") limit = entry.data.limit;
-				if (typeof entry.data.width === "number") width = Math.min(entry.data.width, 240);
+				if (typeof entry.data.width === "number") {
+					if (entry.data.widthIsLocked) {
+						width = Math.min(entry.data.width, 240);
+						widthIsLocked = true;
+					} else {
+						// Responsive auto-fit on the fly!
+						const termColumnsDynamic = process.stdout.columns || 80;
+						width = Math.min(termColumnsDynamic, 240);
+					}
+				}
 				if (typeof entry.data.visible === "boolean") visible = entry.data.visible;
 				if (typeof entry.data.showTicks === "boolean") showTicks = entry.data.showTicks;
 				if (entry.data.mode) mode = entry.data.mode;
@@ -233,7 +243,7 @@ function getSettings(ctx: any) {
 		}
 	}
 
-	return { interval, limit, width, visible, showTicks, mode, timezone };
+	return { interval, limit, width, widthIsLocked, visible, showTicks, mode, timezone };
 }
 
 // ---
@@ -405,7 +415,8 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			
 			// Dynamic fallback capped at 240 if no explicit width set
 			const termColumns = process.stdout.columns || 80;
-			const nextWidth = hasWidth ? Math.min(width, 240) : Math.min(current.width || termColumns, 240);
+			const nextWidth = hasWidth ? Math.min(width, 240) : Math.min(termColumns, 240);
+			const nextWidthIsLocked = hasWidth || current.widthIsLocked || false;
 			
 			const nextTicks = hasTicks ? showTicks : current.showTicks;
 			const nextMode = hasMode ? mode : current.mode;
@@ -437,6 +448,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				interval: nextInterval,
 				limit: nextLimit,
 				width: nextWidth,
+				widthIsLocked: nextWidthIsLocked,
 				visible: true,
 				showTicks: nextTicks,
 				mode: nextMode,

@@ -120,7 +120,7 @@ if (!inputTokens && msg?.usage) {
 }</code></pre>
 
     <h4>5. Live Cooldown Countdown</h4>
-    <p>To ensure maximum visibility and a highly responsive user experience, the extension does not passively block the harness thread during a coffee break. Instead, it executes a 1-second interval loop that dynamically decrements the remaining cooldown seconds and live-refreshes the Pi TUI widget content in real-time, showing a countdown row right below the header: <code>☕ [COOLDOWN ACTIVE] Coffee break ends in 35s...</code>. This runs in perfect synchrony with the external tmux status bar.</p>
+    <p>To ensure maximum visibility and a highly responsive user experience, the extension does not passively block the harness thread during a coffee break. Instead, it executes a 1-second interval loop that dynamically decrements the remaining cooldown seconds and live-refreshes the Pi TUI widget content in real-time, displaying a decrementing sequence of 8 coffee cups representing the 40-second block (one cup per 5s): <code>[☕☕☕☕☕☕☕ ] 35s remaining...</code>. This runs in perfect synchrony with the external tmux status bar.</p>
 
     <h3>TUI Visualizations</h3>
     <p>The Sentinel renders a widget below the editor depicting active rate monitors with a custom 5-character <code>$</code> progress meter:</p>

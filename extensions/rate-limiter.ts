@@ -177,10 +177,26 @@ function aggregateActiveTpm(activeFiles: FileInfo[], hostingSessionId: string | 
 
           if (age <= 60000) {
             let inputTokens = 0;
-            if (entry.usage && typeof entry.usage.input_tokens === "number") {
-              inputTokens = entry.usage.input_tokens;
-            } else if (msg?.usage) {
-              inputTokens = msg.usage.input_tokens || msg.usage.input_token_count || msg.usage.prompt_tokens || 0;
+            if (entry.usage) {
+              if (typeof entry.usage.input === "number") {
+                inputTokens = entry.usage.input;
+                if (typeof entry.usage.cacheRead === "number") {
+                  inputTokens += entry.usage.cacheRead;
+                }
+              } else if (typeof entry.usage.input_tokens === "number") {
+                inputTokens = entry.usage.input_tokens;
+                if (typeof entry.usage.cache_read === "number") {
+                  inputTokens += entry.usage.cache_read;
+                }
+              } else if (typeof entry.usage.prompt_tokens === "number") {
+                inputTokens = entry.usage.prompt_tokens;
+              }
+            }
+
+            if (!inputTokens && msg?.usage) {
+              const baseInput = msg.usage.input || msg.usage.input_tokens || msg.usage.input_token_count || msg.usage.prompt_tokens || 0;
+              const cacheRead = msg.usage.cacheRead || msg.usage.cache_read || 0;
+              inputTokens = baseInput + cacheRead;
             }
             
             // Increment global TPM

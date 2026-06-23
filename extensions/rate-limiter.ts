@@ -33,6 +33,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Keep track of widget visibility state in-memory
 let isWidgetVisible = true;
+let cooldownRemainingSecs: number | null = null;
 
 // ---
 // HELPERS
@@ -248,6 +249,10 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
     const lines: string[] = [];
     lines.push(`\x1b[1;36m🛡️  Token Sentinel (TPM Active Monitors) ───────────────────\x1b[0m`);
 
+    if (cooldownRemainingSecs !== null) {
+      lines.push(`\x1b[1;33m☕ [COOLDOWN ACTIVE] Coffee break ends in ${cooldownRemainingSecs}s...\x1b[0m`);
+    }
+
     // Render hosting session's model FIRST and BOLDED
     const hostingData = stats[hostingShortCode];
     const hostingCeiling = MODEL_QUOTA_REGISTRY[hostingShortCode] || DEFAULT_CEILING;
@@ -352,8 +357,17 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
           // ignore
         }
 
-        // Sleep blocks the turn synchronously in the harness
-        await sleep(COOLDOWN_DURATION_MS);
+        // Sleep blocks the turn synchronously in the harness while live-refreshing the widget
+        const endTime = Date.now() + COOLDOWN_DURATION_MS;
+        while (Date.now() < endTime) {
+          const remainingMs = endTime - Date.now();
+          const remainingSecs = Math.ceil(remainingMs / 1000);
+          cooldownRemainingSecs = remainingSecs;
+          updateRateLimiterWidget(ctx);
+          await sleep(1000);
+        }
+        cooldownRemainingSecs = null;
+        updateRateLimiterWidget(ctx);
 
         // Clean up the lockfile
         try {

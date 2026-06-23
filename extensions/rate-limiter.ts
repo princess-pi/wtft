@@ -250,7 +250,10 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
     lines.push(`\x1b[1;36m🛡️  Token Sentinel (TPM Active Monitors) ───────────────────\x1b[0m`);
 
     if (cooldownRemainingSecs !== null) {
-      lines.push(`\x1b[1;33m☕ [COOLDOWN ACTIVE] Coffee break ends in ${cooldownRemainingSecs}s...\x1b[0m`);
+      const remainingMs = cooldownRemainingSecs * 1000;
+      const remainingCups = Math.max(0, Math.min(8, Math.ceil(remainingMs / 5000)));
+      const cupsStr = "☕".repeat(remainingCups) + "  ".repeat(8 - remainingCups);
+      lines.push(`\x1b[1;33m  [${cupsStr}] ${cooldownRemainingSecs}s remaining...\x1b[0m`);
     }
 
     // Render hosting session's model FIRST and BOLDED

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- (c) 2026 David 'Duppy' Proctor, Interface Arts -->
+    <meta charset="UTF-8">
+    <title>Pi Extensions: Token Sentinel (Rate Limiter) Spec</title>
+    <style>
+        :root {
+            --bg-color: #1e1e1e;
+            --text-color: #d4d4d4;
+            --box-bg: #2d2d2d;
+            --accent-blue: #569cd6;
+            --accent-green: #6a9955;
+            --accent-orange: #ce9178;
+            --accent-yellow: #dcdcaa;
+            --accent-magenta: #da70d6;
+            --accent-cyan: #00ffff;
+            --anchor-red: #e74c3c;
+        }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.6; 
+            max-width: 1000px; 
+            margin: 0 auto; 
+            padding: 2rem; 
+        }
+        h1, h2, h3 { color: var(--accent-blue); }
+        h1 { border-bottom: 2px solid var(--accent-blue); padding-bottom: 10px; }
+        h2 { margin-top: 2rem; }
+        a { color: var(--accent-blue); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        code { background: var(--box-bg); padding: 2px 4px; border-radius: 4px; }
+        
+        .diagram { 
+            background: var(--box-bg); 
+            border: 1px solid #404040; 
+            border-radius: 8px; 
+            padding: 20px; 
+            margin: 20px 0; 
+        }
+    </style>
+</head>
+<body>
+    <h1>Token Sentinel / Rate Limiter Utility (<code>rate-limiter.ts</code>)</h1>
+    <p><strong>Domain:</strong> Quota Management, Proactive Rate Limiting & Cooldown Breaks</p>
+
+    <h3>Overview</h3>
+    <p>The Token Sentinel / Rate Limiter extension prevents the agent from breaching model subscription quota limits (TPM - Tokens Per Minute). It runs transparently in the background, intercepting provider requests to check sliding-window usage metrics across all active local agent sessions. When a safety threshold is crossed, it enforces a 40-second synchronous "coffee break" (cooldown) to let API quota windows reset safely, notifying the user and maintaining a lockfile for external status bar / tmux integration.</p>
+
+    <h3>Specification & Mechanisms</h3>
+    
+    <h4>1. Quota Safety Limits</h4>
+    <p>We maintain a hardcoded quota safety registry mapped to model shortcodes, configured to roughly 80% of actual provider subscription tiers to ensure a conservative buffer:</p>
+    <ul>
+        <li><code>g3.5fla</code>, <code>glatfla</code>, <code>g3.5fli</code>, <code>glatfli</code>: 2,500,000 TPM (Tier 2 limit: 3.0M)</li>
+        <li><code>g1.5pro</code>, <code>glatpro</code>: 1,600,000 TPM (Tier 2 limit: 2.0M)</li>
+        <li><code>c3.5son</code>, <code>c3.5hai</code>: 320,000 TPM (Tier 4 limit: 400K)</li>
+        <li><code>c3.0opu</code>: 80,000 TPM</li>
+    </ul>
+
+    <h4>2. Active Session Log aggregation</h4>
+    <p>The Sentinel scans the append-only <code>.jsonl</code> logs in <code>~/.claude/projects/</code> and <code>~/.pi/agent/sessions/</code> updated within the last 2 minutes to aggregate total TPM across all parallel agent sessions.</p>
+
+    <h4>3. Schema & Token Counting (Issue #25 Fix)</h4>
+    <p>To support multiple provider engines seamlessly, the token extractor parses provider-specific usage schemas from JSONL session records with robust fallbacks.</p>
+    
+    <p>Due to Google's API integration logging structure, token usage is stored differently than Anthropic models. We aggregate both raw input tokens and cached prompt tokens (under Option B - Error on the side of more coffee breaks) to prevent exceeding active quota buckets:</p>
+
+    <div class="diagram">
+        <strong>Google/Gemini Logging Format:</strong>
+        <pre><code>{
+  "type": "message",
+  "model": "gemini-flash-latest",
+  "usage": {
+    "input": 8572,
+    "output": 405,
+    "cacheRead": 25347,
+    "totalTokens": 34324
+  }
+}</code></pre>
+        <strong>Anthropic/Claude Logging Format:</strong>
+        <pre><code>{
+  "type": "message",
+  "message": {
+    "role": "assistant",
+    "model": "claude-3-5-sonnet-20241022",
+    "usage": {
+      "input_tokens": 5472,
+      "output_tokens": 375
+    }
+  }
+}</code></pre>
+    </div>
+
+    <h4>4. Parser Consolidation Rules</h4>
+    <p>The parser retrieves sliding-window input tokens dynamically across either structure, summing cached reads when present:</p>
+    <pre><code>let inputTokens = 0;
+if (entry.usage) {
+  if (typeof entry.usage.input === "number") {
+    inputTokens = entry.usage.input;
+    if (typeof entry.usage.cacheRead === "number") {
+      inputTokens += entry.usage.cacheRead; // Sum Gemini Cached Reads
+    }
+  } else if (typeof entry.usage.input_tokens === "number") {
+    inputTokens = entry.usage.input_tokens;
+    if (typeof entry.usage.cache_read === "number") {
+      inputTokens += entry.usage.cache_read;
+    }
+  } else if (typeof entry.usage.prompt_tokens === "number") {
+    inputTokens = entry.usage.prompt_tokens;
+  }
+}
+
+if (!inputTokens && msg?.usage) {
+  const baseInput = msg.usage.input || msg.usage.input_tokens || msg.usage.input_token_count || msg.usage.prompt_tokens || 0;
+  const cacheRead = msg.usage.cacheRead || msg.usage.cache_read || 0;
+  inputTokens = baseInput + cacheRead;
+}</code></pre>
+
+    <h3>TUI Visualizations</h3>
+    <p>The Sentinel renders a widget below the editor depicting active rate monitors with a custom 5-character <code>$</code> progress meter:</p>
+    <pre><code>👉 [$$   ] glatfla: 25.3K ses / 33.9K glo [max 2.5M]</code></pre>
+
+</body>
+</html>

@@ -202,3 +202,158 @@ try {
 	console.error(`❌ PI SCHEMA NODE_MODULES RESEARCH TEST FAILED: ${err.message}`);
 	process.exit(1);
 }
+
+// ---
+// MOCK PI SCHEMA 'HEREDOC WRITE' TEST
+// ---
+console.log("\n=== RUNNING PI SCHEMA HEREDOC WRITE HEURISTIC TEST ===");
+const mockPiHeredocEntry = {
+	type: "message",
+	timestamp: "2026-06-20T22:42:00Z",
+	message: {
+		role: "assistant",
+		content: [
+			{
+				type: "toolCall",
+				name: "bash",
+				arguments: {
+					command: "cat << 'EOF' > debug/strip-ts.mjs\nconsole.log('hi');\nEOF"
+				}
+			}
+		],
+		usage: {
+			cost: {
+				total: 1.50
+			}
+		}
+	}
+};
+
+const parsedHeredoc = parseEntryToInteraction(mockPiHeredocEntry);
+try {
+	assert.ok(parsedHeredoc, "Parsed heredoc interaction must not be null");
+	assert.strictEqual(parsedHeredoc.files.length, 1, "Must extract 1 file write from heredoc");
+	assert.strictEqual(parsedHeredoc.files[0].path, "debug/strip-ts.mjs", "Extracted path must be debug/strip-ts.mjs");
+	assert.strictEqual(parsedHeredoc.files[0].action, "write", "Action must be 'write' instead of 'read' for heredoc redirection");
+	
+	const classification = classifyInteraction(parsedHeredoc);
+	assert.strictEqual(classification, "code", "Heredoc writing code to debug/ must be classified as 'code'");
+	console.log("✅ PI SCHEMA HEREDOC WRITE TEST PASSED PERFECTLY!");
+} catch (err: any) {
+	console.error(`❌ PI SCHEMA HEREDOC WRITE TEST FAILED: ${err.message}`);
+	process.exit(1);
+}
+
+// ---
+// MOCK PI SCHEMA 'BARE FILE READ' TEST
+// ---
+console.log("\n=== RUNNING PI SCHEMA BARE FILE READ TAXONOMY TEST ===");
+const mockPiBareEntry = {
+	type: "message",
+	timestamp: "2026-06-20T22:42:00Z",
+	message: {
+		role: "assistant",
+		content: [
+			{
+				type: "toolCall",
+				name: "bash",
+				arguments: {
+					command: "cat wtft"
+				}
+			}
+		],
+		usage: {
+			cost: {
+				total: 1.50
+			}
+		}
+	}
+};
+
+const parsedBare = parseEntryToInteraction(mockPiBareEntry);
+try {
+	assert.ok(parsedBare, "Parsed bare file interaction must not be null");
+	assert.strictEqual(parsedBare.files.length, 1, "Must extract 1 file read from bare file command");
+	assert.strictEqual(parsedBare.files[0].path, "wtft", "Extracted path must be wtft");
+	
+	const classification = classifyInteraction(parsedBare);
+	assert.strictEqual(classification, "code", "Bare wrapper files with no extension must be classified as 'code'");
+	console.log("✅ PI SCHEMA BARE FILE READ TAXONOMY TEST PASSED PERFECTLY!");
+} catch (err: any) {
+	console.error(`❌ PI SCHEMA BARE FILE READ TEST FAILED: ${err.message}`);
+	process.exit(1);
+}
+
+// ---
+// MOCK PI SCHEMA 'JSONL AND DEBUG' TAXONOMY TEST
+// ---
+console.log("\n=== RUNNING PI SCHEMA JSONL AND DEBUG TAXONOMY TEST ===");
+const mockPiJsonlEntry = {
+	type: "message",
+	timestamp: "2026-06-20T22:42:00Z",
+	message: {
+		role: "assistant",
+		content: [
+			{
+				type: "toolCall",
+				name: "bash",
+				arguments: {
+					command: "cat ~/.claude/projects/test/sessions/session-1.jsonl"
+				}
+			}
+		],
+		usage: {
+			cost: {
+				total: 1.50
+			}
+		}
+	}
+};
+
+const parsedJsonl = parseEntryToInteraction(mockPiJsonlEntry);
+try {
+	assert.ok(parsedJsonl, "Parsed JSONL interaction must not be null");
+	assert.strictEqual(parsedJsonl.files[0].path, "~/.claude/projects/test/sessions/session-1.jsonl", "Extracted path must match");
+	
+	const classification = classifyInteraction(parsedJsonl);
+	assert.strictEqual(classification, "code", "Session log JSONL files must be classified as 'code'");
+	console.log("✅ PI SCHEMA JSONL TEST PASSED PERFECTLY!");
+} catch (err: any) {
+	console.error(`❌ PI SCHEMA JSONL TEST FAILED: ${err.message}`);
+	process.exit(1);
+}
+
+const mockPiDebugEntry = {
+	type: "message",
+	timestamp: "2026-06-20T22:42:00Z",
+	message: {
+		role: "assistant",
+		content: [
+			{
+				type: "toolCall",
+				name: "bash",
+				arguments: {
+					command: "cat << 'EOF' > debug/issue-body.txt\nissue outline\nEOF"
+				}
+			}
+		],
+		usage: {
+			cost: {
+				total: 1.50
+			}
+		}
+	}
+};
+
+const parsedDebug = parseEntryToInteraction(mockPiDebugEntry);
+try {
+	assert.ok(parsedDebug, "Parsed debug interaction must not be null");
+	assert.strictEqual(parsedDebug.files[0].path, "debug/issue-body.txt", "Extracted path must be debug/issue-body.txt");
+	
+	const classification = classifyInteraction(parsedDebug);
+	assert.strictEqual(classification, "code", "Diagnostic files under debug/ must be classified as 'code'");
+	console.log("✅ PI SCHEMA DEBUG FILES TEST PASSED PERFECTLY!");
+} catch (err: any) {
+	console.error(`❌ PI SCHEMA DEBUG FILES TEST FAILED: ${err.message}`);
+	process.exit(1);
+}

@@ -57,6 +57,20 @@ function extractFilesFromBashCommand(command: string, files: { path: string; act
 	const cmdLines = command.split('\n');
 	for (const line of cmdLines) {
 		const trimmed = line.trim();
+		
+		// 1. Intercept heredoc write redirections: cat << 'EOF' > file.txt or cat <<EOF >> file.txt
+		if (trimmed.startsWith("cat ") && trimmed.includes("<<") && trimmed.includes(">")) {
+			const parts = trimmed.split(/>+/);
+			if (parts.length > 1) {
+				const possiblePath = parts[1].trim().replace(/['"]/g, '');
+				if (possiblePath && !possiblePath.startsWith("-")) {
+					files.push({ path: possiblePath, action: "write" });
+					continue; // Parsed successfully as write, skip standard read extraction
+				}
+			}
+		}
+
+		// 2. Standard read commands (cat, head, tail)
 		if (trimmed.startsWith("cat ") || trimmed.startsWith("head ") || trimmed.startsWith("tail ")) {
 			const parts = trimmed.split(/\s+/);
 			if (parts.length > 1) {
@@ -209,11 +223,14 @@ export function classifyInteraction(interaction: Interaction): Category {
 			category = "tests";
 		} else if (norm.startsWith("research/") || norm.includes("/research/")) {
 			category = "research";
-		} else if (norm.startsWith(".pi/extensions/") || norm.includes("/.pi/extensions/") || norm.startsWith("extensions/") || norm.includes("/extensions/") || norm.startsWith("src/") || norm.includes("/src/") || norm.startsWith("public/") || norm.includes("/public/") || norm.startsWith("bin/") || norm.includes("/bin/")) {
+		} else if (norm.startsWith(".pi/extensions/") || norm.includes("/.pi/extensions/") || norm.startsWith("extensions/") || norm.includes("/extensions/") || norm.startsWith("src/") || norm.includes("/src/") || norm.startsWith("public/") || norm.includes("/public/") || norm.startsWith("bin/") || norm.includes("/bin/") || norm.startsWith("debug/") || norm.includes("/debug/")) {
 			category = "code";
 		} else {
 			const ext = path.extname(norm).toLowerCase();
-			if ([".ts", ".js", ".mjs", ".json", ".css", ".tsx", ".jsx", ".py", ".rs", ".go", ".sh", ".yml", ".yaml", ".sql"].includes(ext) || norm.endsWith(".gitignore") || norm.endsWith(".dockerignore")) {
+			if ([".ts", ".js", ".mjs", ".json", ".jsonl", ".css", ".tsx", ".jsx", ".py", ".rs", ".go", ".sh", ".yml", ".yaml", ".sql", ".txt"].includes(ext) || norm.endsWith(".gitignore") || norm.endsWith(".dockerignore")) {
+				category = "code";
+			} else if (ext === "") {
+				// Bare files with no extension (like wrapper scripts 'wtft', 'serve', 'merge') are Code
 				category = "code";
 			}
 		}

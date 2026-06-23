@@ -119,9 +119,37 @@ if (!inputTokens && msg?.usage) {
   inputTokens = baseInput + cacheRead;
 }</code></pre>
 
+    <h4>5. Live Cooldown Countdown</h4>
+    <p>To ensure maximum visibility and a highly responsive user experience, the extension does not passively block the harness thread during a coffee break. Instead, it executes a 1-second interval loop that dynamically decrements the remaining cooldown seconds and live-refreshes the Pi TUI widget content in real-time, showing a countdown row right below the header: <code>☕ [COOLDOWN ACTIVE] Coffee break ends in 35s...</code>. This runs in perfect synchrony with the external tmux status bar.</p>
+
     <h3>TUI Visualizations</h3>
     <p>The Sentinel renders a widget below the editor depicting active rate monitors with a custom 5-character <code>$</code> progress meter:</p>
     <pre><code>👉 [$$   ] glatfla: 25.3K ses / 33.9K glo [max 2.5M]</code></pre>
+
+    <h3>Tmux Status Bar Integration</h3>
+    <p>The Token Sentinel integrates seamlessly with your terminal environment by utilizing a light, fast lockfile standard:</p>
+    <ul>
+        <li><strong>Mechanism:</strong> When a coffee break cooldown is initiated, the extension writes an ephemeral JSON file to <code>/tmp/pi-rate-limit-coffee.json</code> containing the cooldown's <code>startTime</code> and <code>endTime</code>.</li>
+        <li><strong>How It Updates:</strong> Under the Pi TUI Widget, the countdown live-refreshes every 1 second directly on-screen. Under the tmux status bar, an external script (<code>tpm_meter.js</code>) reads the JSON file synchronously on a fixed client status interval (typically 5 seconds), rendering decrementing coffee cups (<code>☕☕☕  </code>) and remaining seconds.</li>
+        <li><strong>How to Enable/Disable:</strong>
+            <ul>
+                <li><em>To Enable:</em> Configure your <code>.tmux.conf</code> to execute the helper script (e.g. <code>set -g status-right "#(node ~/.config/tmux/tpm_meter.js)"</code>) and set <code>set -g status-interval 5</code>.</li>
+                <li><em>To Disable:</em> Comment out or remove the status-right script reference in your <code>.tmux.conf</code> and reload tmux configuration.</li>
+            </ul>
+        </li>
+    </ul>
+
+    <h3>Architectural Scope & Quota Isolation Boundaries</h3>
+    <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
+        <p><strong>1. Single Host / Local User Limit:</strong></p>
+        <p>Because the Token Sentinel aggregates rolling TPM by reading append-only <code>.jsonl</code> logs stored under local home folders (<code>~/.claude/projects/</code> and <code>~/.pi/agent/sessions/</code>), rate limits are only computed and tracked for active sessions running under the <strong>same user account on the same local host machine</strong>. There is no inter-host, inter-machine, or network-level tracking for other development machines or autonomous services sharing the same model API key.</p>
+        
+        <p><strong>2. Best Practices & Isolation Workarounds:</strong></p>
+        <ul>
+            <li><strong>Separate Accounts/Dev Keys:</strong> Developers on different machines should always use distinct Google/Anthropic API keys or separate subscription project scopes to avoid unexpected quota collisions.</li>
+            <li><strong>Isolate Autonomous Services:</strong> Background autonomous agents running in production must be separated onto isolated accounts/tiers. This ensures that heavy local developer activity does not trigger limit cooldowns that lock out critical production workflows (or vice versa).</li>
+        </ul>
+    </div>
 
 </body>
 </html>

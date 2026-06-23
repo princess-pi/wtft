@@ -5,6 +5,7 @@
  */
 
 import * as path from "node:path";
+import { execSync } from "node:child_process";
 
 // ---
 // DATA STRUCTURES & TYPES
@@ -528,6 +529,33 @@ export function getVisualLength(str: string): number {
 // MAIN LAYOUT COMPILER
 // ---
 
+export function getTerminalWidth(isWidget = false): number {
+	let width = 80;
+	if (process.stdout && process.stdout.columns) {
+		width = process.stdout.columns;
+	} else if (process.stderr && process.stderr.columns) {
+		width = process.stderr.columns;
+	} else if (process.env.COLUMNS) {
+		const num = parseInt(process.env.COLUMNS, 10);
+		if (!isNaN(num) && num > 0) width = num;
+	}
+	if (width === 80 && process.env.TMUX) {
+		try {
+			const tmuxWidth = execSync("tmux display-message -p '#{pane_width}'", { stdio: ["inherit", "pipe", "ignore"], encoding: "utf8" }).trim();
+			const num = parseInt(tmuxWidth, 10);
+			if (!isNaN(num) && num > 0) width = num;
+		} catch (e) {}
+	}
+	if (width === 80) {
+		try {
+			const cols = execSync("tput cols", { stdio: ["inherit", "pipe", "ignore"], encoding: "utf8" }).trim();
+			const num = parseInt(cols, 10);
+			if (!isNaN(num) && num > 0) width = num;
+		} catch (e) {}
+	}
+	return isWidget ? width - 4 : width;
+}
+
 export function buildWtftLines(
 	interactions: Interaction[],
 	defaultSettings: {
@@ -545,11 +573,16 @@ export function buildWtftLines(
 		showTicks?: boolean;
 		mode?: "bucket" | "cumulative";
 		timezone?: string;
+		isWidget?: boolean;
 	}
 ): string[] | null {
 	const intervalStr = opts?.interval !== undefined ? opts.interval : defaultSettings.interval;
 	const limit = opts?.limit !== undefined ? opts.limit : defaultSettings.limit;
-	const width = opts?.width !== undefined ? opts.width : defaultSettings.width;
+	
+	const isWidget = opts?.isWidget ?? false;
+	const termWidth = getTerminalWidth(isWidget);
+	const rawWidth = opts?.width !== undefined ? opts.width : defaultSettings.width;
+	const width = Math.min(rawWidth, termWidth);
 	const showTicks = opts?.showTicks !== undefined ? opts.showTicks : defaultSettings.showTicks;
 	const mode = opts?.mode !== undefined ? opts.mode : defaultSettings.mode;
 	const tz = opts?.timezone !== undefined ? opts.timezone : defaultSettings.timezone;

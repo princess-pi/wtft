@@ -9,7 +9,8 @@ import {
 	classifyInteraction,
 	formatCost,
 	parseEntryToInteraction,
-	renderOtherHistogram
+	renderOtherHistogram,
+	getTerminalWidth
 } from "./lib/wtft-shared.js";
 
 // ---
@@ -200,28 +201,6 @@ class PagerComponent {
 	invalidate(): void {}
 }
 
-function getTerminalWidth(): number {
-	if (process.stdout && process.stdout.columns) return process.stdout.columns;
-	if (process.stderr && process.stderr.columns) return process.stderr.columns;
-	if (process.env.COLUMNS) {
-		const num = parseInt(process.env.COLUMNS, 10);
-		if (!isNaN(num) && num > 0) return num;
-	}
-	if (process.env.TMUX) {
-		try {
-			const tmuxWidth = execSync("tmux display-message -p '#{pane_width}'", { stdio: ["inherit", "pipe", "ignore"], encoding: "utf8" }).trim();
-			const num = parseInt(tmuxWidth, 10);
-			if (!isNaN(num) && num > 0) return num;
-		} catch (e) {}
-	}
-	try {
-		const cols = execSync("tput cols", { stdio: ["inherit", "pipe", "ignore"], encoding: "utf8" }).trim();
-		const num = parseInt(cols, 10);
-		if (!isNaN(num) && num > 0) return num;
-	} catch (e) {}
-	return 80; // fallback
-}
-
 // ---
 // STATE PERSISTENCE (STORE/RETRIEVE)
 // ---
@@ -234,9 +213,9 @@ function getSettings(ctx: any) {
 	let interval = "1h";
 	let limit = 10;
 	
-	// Dynamic terminal width fallback (minus safety padding for TUI box margin), capped at 240
-	const termColumns = getTerminalWidth() - 4;
-	let width = Math.min(termColumns, 240);
+	// Reset default fallback to 240 max so we can easily test scaling down on-the-fly to terminal columns
+	const termColumns = getTerminalWidth(true);
+	let width = 240;
 	let widthIsLocked = false;
 	let visible = false; // Default invisible on fresh session
 	let showTicks = true;
@@ -250,11 +229,11 @@ function getSettings(ctx: any) {
 				if (typeof entry.data.limit === "number") limit = entry.data.limit;
 				if (typeof entry.data.width === "number") {
 					if (entry.data.widthIsLocked) {
-						width = Math.min(entry.data.width, 240);
+						width = Math.min(entry.data.width, termColumns, 240);
 						widthIsLocked = true;
 					} else {
 						// Responsive auto-fit on the fly!
-						const termColumnsDynamic = getTerminalWidth() - 4;
+						const termColumnsDynamic = getTerminalWidth(true);
 						width = Math.min(termColumnsDynamic, 240);
 					}
 				}
@@ -437,7 +416,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			const nextLimit = hasLimit ? limit : current.limit;
 			
 			// Dynamic fallback (minus safety padding) capped at 240 if no explicit width set
-			const termColumns = getTerminalWidth() - 4;
+			const termColumns = getTerminalWidth(true);
 			const nextWidth = hasWidth ? Math.min(width, 240) : Math.min(termColumns, 240);
 			const nextWidthIsLocked = hasWidth || current.widthIsLocked || false;
 			

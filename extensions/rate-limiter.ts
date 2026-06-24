@@ -28,12 +28,16 @@ const MODEL_QUOTA_REGISTRY: Record<string, number> = {
 const DEFAULT_CEILING = 1000000;
 const BAR_WIDTH = 5;
 const COOLDOWN_DURATION_MS = 40000; // 40 seconds flat "coffee break"
+const STATS_CACHE_FILE = "/tmp/pi-rate-limit-stats.json";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Keep track of widget visibility state in-memory
 let isWidgetVisible = true;
 let cooldownRemainingSecs: number | null = null;
+let refreshInterval: ReturnType<typeof setInterval> | null = null;
+let lastCtx: ExtensionContext | null = null;
+let currentTickMs = 1000; // Default to 1 second
 
 // ---
 // HELPERS
@@ -220,6 +224,151 @@ function aggregateActiveTpm(activeFiles: FileInfo[], hostingSessionId: string | 
   return modelStats;
 }
 
+interface CacheSchema {
+  timestamp: number;
+  stats: Record<string, { tpm: number; lastActiveAge: number }>;
+}
+
+function parseIntervalToMs(val: string): number {
+  const clean = val.trim().toLowerCase();
+  if (clean.endsWith("ms")) {
+    const num = parseFloat(clean.slice(0, -2));
+    return isNaN(num) ? 1000 : num;
+  }
+  if (clean.endsWith("s")) {
+    const num = parseFloat(clean.slice(0, -1));
+    return isNaN(num) ? 1000 : num * 1000;
+  }
+  const num = parseFloat(clean);
+  return isNaN(num) ? 1000 : num * 1000;
+}
+
+function getHostingSessionTpm(hostingSessionId: string, activeFiles: FileInfo[]): Record<string, number> {
+  const hostingFile = activeFiles.find(f => f.path.includes(hostingSessionId));
+  if (!hostingFile) return {};
+  
+  const sessionTpms: Record<string, number> = {};
+  const now = Date.now();
+  try {
+    const content = fs.readFileSync(hostingFile.path, "utf8");
+    const lines = content.split("\n").filter(Boolean);
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line);
+        if (!entry) continue;
+        const msg = entry.message;
+        const timestampStr = msg?.timestamp || entry.timestamp;
+        let timestamp = 0;
+        if (typeof timestampStr === "string") {
+          timestamp = new Date(timestampStr).getTime();
+        } else if (typeof timestampStr === "number") {
+          timestamp = timestampStr;
+        }
+        if (!timestamp) continue;
+        const age = now - timestamp;
+        if (age > 60000) continue;
+
+        let modelName = "";
+        if (msg?.model) {
+          modelName = msg.model;
+        } else if (entry.model) {
+          modelName = entry.model;
+        }
+        if (!modelName) continue;
+        const shortCode = getModelShortName(modelName);
+
+        let inputTokens = 0;
+        if (entry.usage) {
+          if (typeof entry.usage.input === "number") {
+            inputTokens = entry.usage.input;
+            if (typeof entry.usage.cacheRead === "number") {
+              inputTokens += entry.usage.cacheRead;
+            }
+          } else if (typeof entry.usage.input_tokens === "number") {
+            inputTokens = entry.usage.input_tokens;
+            if (typeof entry.usage.cache_read === "number") {
+              inputTokens += entry.usage.cache_read;
+            }
+          } else if (typeof entry.usage.prompt_tokens === "number") {
+            inputTokens = entry.usage.prompt_tokens;
+          }
+        }
+        if (!inputTokens && msg?.usage) {
+          const baseInput = msg.usage.input || msg.usage.input_tokens || msg.usage.input_token_count || msg.usage.prompt_tokens || 0;
+          const cacheRead = msg.usage.cacheRead || msg.usage.cache_read || 0;
+          inputTokens = baseInput + cacheRead;
+        }
+
+        sessionTpms[shortCode] = (sessionTpms[shortCode] || 0) + inputTokens;
+      } catch (e) {
+        // ignore
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+  return sessionTpms;
+}
+
+function getOrUpdateStats(activeFiles: FileInfo[], hostingSessionId: string | null, tickMs: number): Record<string, ModelStats> {
+  const now = Date.now();
+  let cached: CacheSchema | null = null;
+
+  if (fs.existsSync(STATS_CACHE_FILE)) {
+    try {
+      const content = fs.readFileSync(STATS_CACHE_FILE, "utf8");
+      const data = JSON.parse(content) as CacheSchema;
+      const freshWindow = Math.max(1000, tickMs);
+      if (now - data.timestamp < freshWindow) {
+        cached = data;
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  let baseStats: Record<string, { tpm: number; lastActiveAge: number }> = {};
+
+  if (cached) {
+    baseStats = cached.stats;
+  } else {
+    const fullStats = aggregateActiveTpm(activeFiles, null);
+    for (const [shortCode, data] of Object.entries(fullStats)) {
+      baseStats[shortCode] = { tpm: data.tpm, lastActiveAge: data.lastActiveAge };
+    }
+    try {
+      const cacheData: CacheSchema = {
+        timestamp: now,
+        stats: baseStats
+      };
+      fs.writeFileSync(STATS_CACHE_FILE, JSON.stringify(cacheData), "utf8");
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  const stats: Record<string, ModelStats> = {};
+  for (const [shortCode, data] of Object.entries(baseStats)) {
+    stats[shortCode] = {
+      tpm: data.tpm,
+      lastActiveAge: data.lastActiveAge,
+      sessionTpm: 0
+    };
+  }
+
+  if (hostingSessionId) {
+    const sessionTpms = getHostingSessionTpm(hostingSessionId, activeFiles);
+    for (const [shortCode, sessionTpm] of Object.entries(sessionTpms)) {
+      if (!stats[shortCode]) {
+        stats[shortCode] = { tpm: 0, lastActiveAge: 0, sessionTpm: 0 };
+      }
+      stats[shortCode].sessionTpm = sessionTpm;
+    }
+  }
+
+  return stats;
+}
+
 // ---
 // WIDGET RENDERER
 // ---
@@ -239,7 +388,7 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
     const currentModel = context.model?.modelId || "unknown";
     const hostingShortCode = getModelShortName(currentModel);
 
-    const stats = aggregateActiveTpm(activeFiles, hostingSessionId);
+    const stats = getOrUpdateStats(activeFiles, hostingSessionId, currentTickMs);
     
     // Ensure hosting shortcode exists in our list even if 0 TPM
     if (!stats[hostingShortCode]) {
@@ -314,16 +463,78 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
 // ---
 
 export default function rateLimiterExtension(pi: ExtensionAPI) {
+  // Register flags for tick refresh rate
+  pi.registerFlag("tick", {
+    description: "Specify the refresh interval in s (seconds) or ms (milliseconds), e.g. '2' or '500ms'",
+    type: "string",
+    default: "1s",
+  });
+  pi.registerFlag("t", {
+    description: "Specify the refresh interval in s (seconds) or ms (milliseconds), alias for --tick",
+    type: "string",
+  });
+
+  function startBackgroundRefresh(ctx: ExtensionContext) {
+    lastCtx = ctx;
+    if (refreshInterval) {
+      clearInterval(refreshInterval);
+    }
+
+    // Determine configured tick rate
+    let tickStr = "1s";
+    const flagT = pi.getFlag("t") as string | undefined;
+    const flagTick = pi.getFlag("tick") as string | undefined;
+    if (flagT !== undefined) {
+      tickStr = flagT;
+    } else if (flagTick !== undefined) {
+      tickStr = flagTick;
+    }
+    
+    currentTickMs = parseIntervalToMs(tickStr);
+
+    let activeTickMs = cooldownRemainingSecs !== null ? 1000 : currentTickMs;
+
+    const tick = () => {
+      if (lastCtx) {
+        updateRateLimiterWidget(lastCtx);
+      }
+      
+      // Dynamic adjust: if we enter or leave cooldown, adjust the active tick rate!
+      const targetTickMs = cooldownRemainingSecs !== null ? 1000 : currentTickMs;
+      if (targetTickMs !== activeTickMs) {
+        activeTickMs = targetTickMs;
+        clearInterval(refreshInterval!);
+        refreshInterval = setInterval(tick, activeTickMs);
+      }
+    };
+
+    refreshInterval = setInterval(tick, activeTickMs);
+  }
+
+  function stopBackgroundRefresh() {
+    if (refreshInterval) {
+      clearInterval(refreshInterval);
+      refreshInterval = null;
+    }
+  }
+
   // 1. On turn/session starts and ends, refresh the Pi status widget
   pi.on("session_start", async (_event, ctx) => {
     updateRateLimiterWidget(ctx);
+    startBackgroundRefresh(ctx);
+  });
+
+  pi.on("session_shutdown", async (_event, _ctx) => {
+    stopBackgroundRefresh();
   });
 
   pi.on("turn_start", async (_event, ctx) => {
+    lastCtx = ctx;
     updateRateLimiterWidget(ctx);
   });
 
   pi.on("turn_end", async (_event, ctx) => {
+    lastCtx = ctx;
     updateRateLimiterWidget(ctx);
   });
 
@@ -339,7 +550,7 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
       const shortCode = getModelShortName(currentModel);
       const ceiling = MODEL_QUOTA_REGISTRY[shortCode] || DEFAULT_CEILING;
 
-      const stats = aggregateActiveTpm(activeFiles, hostingSessionId);
+      const stats = getOrUpdateStats(activeFiles, hostingSessionId, currentTickMs);
       const currentTpm = stats[shortCode]?.tpm || 0;
 
       // Update widget with pre-request metrics

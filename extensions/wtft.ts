@@ -31,6 +31,7 @@ function parseArgs(argsStr: string = "") {
 	let mode: "bucket" | "cumulative" = "cumulative";
 	let pager = false;
 	let other = false;
+	let enableEmoji: boolean | undefined = undefined;
 
 	let hasInterval = false;
 	let hasLimit = false;
@@ -57,6 +58,10 @@ function parseArgs(argsStr: string = "") {
 		} else if (arg === "--no-ticks") {
 			showTicks = false;
 			hasTicks = true;
+		} else if (arg === "--no-emojii" || arg === "--no-emoji") {
+			enableEmoji = false;
+		} else if (arg === "--emojii" || arg === "--emoji") {
+			enableEmoji = true;
 		} else if (arg === "--cumulative" || arg === "-c") {
 			mode = "cumulative";
 			hasMode = true;
@@ -142,7 +147,8 @@ function parseArgs(argsStr: string = "") {
 		hasMode,
 		hasTimezone,
 		hasOther,
-		other
+		other,
+		enableEmoji
 	};
 }
 
@@ -205,6 +211,18 @@ class PagerComponent {
 // STATE PERSISTENCE (STORE/RETRIEVE)
 // ---
 
+function isEmojiDisabled(ctx: any): boolean {
+	if (!ctx || !ctx.sessionManager) return false;
+	for (const entry of ctx.sessionManager.getEntries()) {
+		if (entry.type === "custom" && entry.customType === "emoji-settings") {
+			if (entry.data && typeof entry.data.disabled === "boolean") {
+				return entry.data.disabled;
+			}
+		}
+	}
+	return false;
+}
+
 /**
  * Retrieves setting configurations stored persistently in the session log.
  * Defaults mode to "cumulative" for cohesive cost progression tracks.
@@ -245,7 +263,9 @@ function getSettings(ctx: any) {
 		}
 	}
 
-	return { interval, limit, width, widthIsLocked, visible, showTicks, mode, timezone };
+	const disabledEmoji = isEmojiDisabled(ctx);
+
+	return { interval, limit, width, widthIsLocked, visible, showTicks, mode, timezone, disabledEmoji };
 }
 
 // ---
@@ -354,8 +374,17 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				hasMode,
 				hasTimezone,
 				hasOther,
-				other
+				other,
+				enableEmoji
 			} = parseArgs(args);
+
+			if (typeof enableEmoji === "boolean") {
+				pi.appendEntry("emoji-settings", { disabled: !enableEmoji });
+				const statusText = enableEmoji ? "enabled" : "disabled";
+				ctx.ui.notify(`Emoji icons in widgets have been ${statusText}.`, "info");
+				updateWtftWidget(ctx, pi);
+				return;
+			}
 
 			// Render manifest help menu if requested
 			if (showHelp) {

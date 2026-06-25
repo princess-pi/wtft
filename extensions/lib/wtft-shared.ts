@@ -582,6 +582,7 @@ export function buildWtftLines(
 		showTicks: boolean;
 		mode: "bucket" | "cumulative";
 		timezone?: string;
+		disabledEmoji?: boolean;
 	},
 	opts?: {
 		interval?: string;
@@ -591,6 +592,7 @@ export function buildWtftLines(
 		mode?: "bucket" | "cumulative";
 		timezone?: string;
 		isWidget?: boolean;
+		disabledEmoji?: boolean;
 	}
 ): string[] | null {
 	const intervalStr = opts?.interval !== undefined ? opts.interval : defaultSettings.interval;
@@ -708,7 +710,8 @@ export function buildWtftLines(
 
 	const widgetLines: string[] = [];
 	
-	const titleLeft = "💸 WTF Tokens?";
+	const disabledEmoji = opts?.disabledEmoji !== undefined ? opts.disabledEmoji : defaultSettings.disabledEmoji;
+	const titleLeft = disabledEmoji ? "[$] WTF Tokens?" : "💸 WTF Tokens?";
 	
 	const legendItems = [
 		`\x1b[38;5;108m█\x1b[0m Spec`,

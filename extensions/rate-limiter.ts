@@ -373,11 +373,25 @@ function getOrUpdateStats(activeFiles: FileInfo[], hostingSessionId: string | nu
 // WIDGET RENDERER
 // ---
 
+function isEmojiDisabled(ctx: any): boolean {
+  if (!ctx || !ctx.sessionManager) return false;
+  for (const entry of ctx.sessionManager.getEntries()) {
+    if (entry.type === "custom" && entry.customType === "emoji-settings") {
+      if (entry.data && typeof entry.data.disabled === "boolean") {
+        return entry.data.disabled;
+      }
+    }
+  }
+  return false;
+}
+
 function updateRateLimiterWidget(ctx: ExtensionContext) {
   if (!isWidgetVisible) {
     ctx.ui.setWidget("rate-limiter", undefined);
     return;
   }
+
+  const emojiDisabled = isEmojiDisabled(ctx);
 
   try {
     const activeFiles = findActiveSessionFiles();
@@ -396,12 +410,13 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
     }
 
     const lines: string[] = [];
-    lines.push(`\x1b[1;36m🛡️  Token Sentinel (TPM Active Monitors) ───────────────────\x1b[0m`);
+    const sentinelTitle = emojiDisabled ? "[!] Token Sentinel" : "🛡️  Token Sentinel";
+    lines.push(`\x1b[1;36m${sentinelTitle} (TPM Active Monitors) ───────────────────\x1b[0m`);
 
     if (cooldownRemainingSecs !== null) {
       const remainingMs = cooldownRemainingSecs * 1000;
       const remainingCups = Math.max(0, Math.min(8, Math.ceil(remainingMs / 5000)));
-      const cupsStr = "☕".repeat(remainingCups) + "  ".repeat(8 - remainingCups);
+      const cupsStr = emojiDisabled ? "#".repeat(remainingCups) + " ".repeat(8 - remainingCups) : "☕".repeat(remainingCups) + "  ".repeat(8 - remainingCups);
       lines.push(`\x1b[1;33m  [${cupsStr}] ${cooldownRemainingSecs}s remaining...\x1b[0m`);
     }
 
@@ -423,7 +438,8 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
     const hGlobalStr = getReadableSize(hostingData.tpm);
     const hLimitStr = getReadableSize(hostingCeiling);
 
-    lines.push(`\x1b[1m  👉 ${hColor}[${hBar}] ${hostingShortCode}\x1b[0m\x1b[1m: ${hSessionStr} ses / ${hGlobalStr} glo [max ${hLimitStr}]\x1b[0m`);
+    const fingerPointer = emojiDisabled ? "-> " : "👉 ";
+    lines.push(`\x1b[1m  ${fingerPointer}${hColor}[${hBar}] ${hostingShortCode}\x1b[0m\x1b[1m: ${hSessionStr} ses / ${hGlobalStr} glo [max ${hLimitStr}]\x1b[0m`);
 
     // Render other active models (non-bolded, auto-pruned)
     for (const [shortCode, data] of Object.entries(stats)) {
@@ -454,7 +470,8 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
 
     ctx.ui.setWidget("rate-limiter", lines, { placement: "belowEditor" });
   } catch (err: any) {
-    ctx.ui.setWidget("rate-limiter", [`⚠️ Rate Limiter Widget Error: ${err.message}`], { placement: "belowEditor" });
+    const warningIcon = emojiDisabled ? "[!]" : "⚠️";
+    ctx.ui.setWidget("rate-limiter", [`${warningIcon} Rate Limiter Widget Error: ${err.message}`], { placement: "belowEditor" });
   }
 }
 
@@ -603,10 +620,21 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
   // 3. Register '/tpm' slash command to manually toggle widget visibility
   pi.registerCommand("tpm", {
     description: "Toggle visibility of the Tokens Per Minute (TPM) rate-limiter widget",
-    handler: async (_args, ctx) => {
-      isWidgetVisible = !isWidgetVisible;
-      updateRateLimiterWidget(ctx);
-      ctx.ui.notify(`TPM rate limiter widget is now ${isWidgetVisible ? "VISIBLE" : "HIDDEN"}.`, "info");
+    handler: async (args, ctx) => {
+      const trimmed = args.trim();
+      if (trimmed === "--no-emojii" || trimmed === "--no-emoji") {
+        pi.appendEntry("emoji-settings", { disabled: true });
+        updateRateLimiterWidget(ctx);
+        ctx.ui.notify("Emoji icons in widgets have been disabled.", "info");
+      } else if (trimmed === "--emojii" || trimmed === "--emoji") {
+        pi.appendEntry("emoji-settings", { disabled: false });
+        updateRateLimiterWidget(ctx);
+        ctx.ui.notify("Emoji icons in widgets have been enabled.", "info");
+      } else {
+        isWidgetVisible = !isWidgetVisible;
+        updateRateLimiterWidget(ctx);
+        ctx.ui.notify(`TPM rate limiter widget is now ${isWidgetVisible ? "VISIBLE" : "HIDDEN"}.`, "info");
+      }
     }
   });
 }

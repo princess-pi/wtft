@@ -60,6 +60,16 @@ Options:
 // ARGUMENT PARSING
 // ---
 
+let hasInterval = false;
+let hasLimit = false;
+let hasWidth = false;
+let hasCumulative = false;
+let hasBucket = false;
+let hasNoTicks = false;
+let hasTicks = false;
+let hasTz = false;
+let hasOther = false;
+
 for (let i = 2; i < process.argv.length; i++) {
 	const arg = process.argv[i];
 	if (arg === "-h" || arg === "--help") {
@@ -69,22 +79,31 @@ for (let i = 2; i < process.argv.length; i++) {
 		targetSessionPath = process.argv[++i];
 	} else if (arg === "-i" || arg === "--interval") {
 		intervalStr = process.argv[++i];
+		hasInterval = true;
 	} else if (arg === "-l" || arg === "--limit") {
 		limit = parseInt(process.argv[++i], 10);
+		hasLimit = true;
 	} else if (arg === "-w" || arg === "--width") {
 		widthOption = parseInt(process.argv[++i], 10);
+		hasWidth = true;
 	} else if (arg === "-c" || arg === "--cumulative") {
 		mode = "cumulative";
+		hasCumulative = true;
 	} else if (arg === "-b" || arg === "--bucket") {
 		mode = "bucket";
+		hasBucket = true;
 	} else if (arg === "--no-ticks") {
 		showTicks = false;
+		hasNoTicks = true;
 	} else if (arg === "--ticks") {
 		showTicks = true;
+		hasTicks = true;
 	} else if (arg === "-t" || arg === "--tz") {
 		timezone = process.argv[++i];
+		hasTz = true;
 	} else if (arg === "-o" || arg === "--other") {
 		showOther = true;
+		hasOther = true;
 	} else if (arg === "--harness") {
 		const val = process.argv[++i];
 		if (val === "pi" || val === "claude-code" || val === "auto") {
@@ -339,11 +358,36 @@ async function main() {
 	}
 
 	const interactions: Interaction[] = [];
+	let disabledEmoji = false;
+
+	// Saved session log options
+	let sessionInterval: string | undefined;
+	let sessionLimit: number | undefined;
+	let sessionWidth: number | undefined;
+	let sessionMode: "cumulative" | "bucket" | undefined;
+	let sessionShowTicks: boolean | undefined;
+	let sessionTimezone: string | undefined;
 
 	for (const line of lines) {
 		if (!line.trim()) continue;
 		try {
 			const entry = JSON.parse(line);
+			if (entry.type === "custom" && entry.customType === "emoji-settings") {
+				if (entry.data && typeof entry.data.disabled === "boolean") {
+					disabledEmoji = entry.data.disabled;
+				}
+			} else if (entry.type === "custom" && entry.customType === "wtft-settings") {
+				if (entry.data) {
+					if (typeof entry.data.interval === "string") sessionInterval = entry.data.interval;
+					if (typeof entry.data.limit === "number") sessionLimit = entry.data.limit;
+					if (typeof entry.data.width === "number") sessionWidth = entry.data.width;
+					if (entry.data.mode === "cumulative" || entry.data.mode === "bucket") {
+						sessionMode = entry.data.mode;
+					}
+					if (typeof entry.data.showTicks === "boolean") sessionShowTicks = entry.data.showTicks;
+					if (typeof entry.data.timezone === "string") sessionTimezone = entry.data.timezone;
+				}
+			}
 			const interaction = parseEntryToInteraction(entry);
 			if (interaction) {
 				interactions.push(interaction);
@@ -356,24 +400,30 @@ async function main() {
 	// ---
 
 	const termColumns = getTerminalWidth();
-	const width = Math.min(widthOption !== null ? widthOption : 240, termColumns, 240);
+	const finalWidth = hasWidth ? (widthOption as number) : (sessionWidth ?? Math.min(240, termColumns, 240));
+	const finalInterval = hasInterval ? intervalStr : (sessionInterval ?? "1h");
+	const finalLimit = hasLimit ? limit : (sessionLimit ?? 100);
+	const finalMode = (hasCumulative || hasBucket) ? mode : (sessionMode ?? "cumulative");
+	const finalShowTicks = (hasTicks || hasNoTicks) ? showTicks : (sessionShowTicks ?? true);
+	const finalTimezone = hasTz ? timezone : sessionTimezone;
 
 	const defaultSettings = {
 		interval: "1h",
 		limit: 100,
-		width,
+		width: finalWidth,
 		showTicks: true,
 		mode: "cumulative" as "cumulative" | "bucket",
 		timezone: undefined
 	};
 
 	const outputLines = buildWtftLines(interactions, defaultSettings, {
-		interval: intervalStr,
-		limit,
-		width,
-		showTicks,
-		mode,
-		timezone
+		interval: finalInterval,
+		limit: finalLimit,
+		width: finalWidth,
+		showTicks: finalShowTicks,
+		mode: finalMode,
+		timezone: finalTimezone,
+		disabledEmoji
 	});
 
 	if (!outputLines) {

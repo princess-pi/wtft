@@ -357,3 +357,41 @@ try {
 	console.error(`❌ PI SCHEMA DEBUG FILES TEST FAILED: ${err.message}`);
 	process.exit(1);
 }
+
+// ---
+// EMOJI TOGGLE TEST
+// ---
+console.log("\n=== RUNNING WTFT EMOJI TOGGLE TESTS ===");
+const settingsWithEmoji = {
+	interval: "1h",
+	limit: 5,
+	width: 80,
+	showTicks: true,
+	mode: "cumulative" as const,
+	timezone: "UTC",
+	disabledEmoji: false
+};
+
+const settingsNoEmoji = {
+	interval: "1h",
+	limit: 5,
+	width: 80,
+	showTicks: true,
+	mode: "cumulative" as const,
+	timezone: "UTC",
+	disabledEmoji: true
+};
+
+const linesWithEmoji = buildWtftLines(mockInteractions, settingsWithEmoji);
+const linesNoEmoji = buildWtftLines(mockInteractions, settingsNoEmoji);
+
+try {
+	assert.ok(linesWithEmoji);
+	assert.ok(linesNoEmoji);
+	assert.ok(linesWithEmoji[0].includes("💸"), "Header must contain 💸 emoji");
+	assert.ok(linesNoEmoji[0].includes("[$]"), "Header must contain [$] placeholder when emojis are disabled");
+	console.log("✅ WTFT EMOJI TOGGLE TESTS PASSED PERFECTLY!");
+} catch (err: any) {
+	console.error(`❌ WTFT EMOJI TOGGLE TESTS FAILED: ${err.message}`);
+	process.exit(1);
+}

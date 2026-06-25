@@ -375,14 +375,15 @@ function getOrUpdateStats(activeFiles: FileInfo[], hostingSessionId: string | nu
 
 function isEmojiDisabled(ctx: any): boolean {
   if (!ctx || !ctx.sessionManager) return false;
+  let disabled = false;
   for (const entry of ctx.sessionManager.getEntries()) {
     if (entry.type === "custom" && entry.customType === "emoji-settings") {
       if (entry.data && typeof entry.data.disabled === "boolean") {
-        return entry.data.disabled;
+        disabled = entry.data.disabled;
       }
     }
   }
-  return false;
+  return disabled;
 }
 
 function updateRateLimiterWidget(ctx: ExtensionContext) {

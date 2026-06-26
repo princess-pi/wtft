@@ -32,8 +32,6 @@ const STATS_CACHE_FILE = "/tmp/pi-rate-limit-stats.json";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Keep track of widget visibility state in-memory
-let isWidgetVisible = true;
 let cooldownRemainingSecs: number | null = null;
 let refreshInterval: ReturnType<typeof setInterval> | null = null;
 let lastCtx: ExtensionContext | null = null;
@@ -373,6 +371,26 @@ function getOrUpdateStats(activeFiles: FileInfo[], hostingSessionId: string | nu
 // WIDGET RENDERER
 // ---
 
+interface TpmSettings {
+  widget: boolean;
+  footer: boolean;
+}
+
+function getTpmSettings(ctx: any): TpmSettings {
+  if (!ctx || !ctx.sessionManager) return { widget: true, footer: false };
+  let widget = true;
+  let footer = false;
+  for (const entry of ctx.sessionManager.getEntries()) {
+    if (entry.type === "custom" && entry.customType === "tpm-settings") {
+      if (entry.data) {
+        if (typeof entry.data.widget === "boolean") widget = entry.data.widget;
+        if (typeof entry.data.footer === "boolean") footer = entry.data.footer;
+      }
+    }
+  }
+  return { widget, footer };
+}
+
 function isEmojiDisabled(ctx: any): boolean {
   if (!ctx || !ctx.sessionManager) return false;
   let disabled = false;
@@ -387,8 +405,17 @@ function isEmojiDisabled(ctx: any): boolean {
 }
 
 function updateRateLimiterWidget(ctx: ExtensionContext) {
-  if (!isWidgetVisible) {
+  const settings = getTpmSettings(ctx);
+
+  if (!settings.widget) {
     ctx.ui.setWidget("rate-limiter", undefined);
+  }
+
+  if (!settings.footer) {
+    ctx.ui.setStatus("rate-limiter", undefined);
+  }
+
+  if (!settings.widget && !settings.footer) {
     return;
   }
 
@@ -410,69 +437,93 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
       stats[hostingShortCode] = { tpm: 0, lastActiveAge: 0, sessionTpm: 0 };
     }
 
-    const lines: string[] = [];
-    const sentinelTitle = emojiDisabled ? "[!] Token Sentinel" : "🛡️  Token Sentinel";
-    lines.push(`\x1b[1;36m${sentinelTitle} (TPM Active Monitors) ───────────────────\x1b[0m`);
-
-    if (cooldownRemainingSecs !== null) {
-      const remainingMs = cooldownRemainingSecs * 1000;
-      const remainingCups = Math.max(0, Math.min(8, Math.ceil(remainingMs / 5000)));
-      const cupsStr = emojiDisabled ? "#".repeat(remainingCups) + " ".repeat(8 - remainingCups) : "☕".repeat(remainingCups) + "  ".repeat(8 - remainingCups);
-      lines.push(`\x1b[1;33m  [${cupsStr}] ${cooldownRemainingSecs}s remaining...\x1b[0m`);
-    }
-
-    // Render hosting session's model FIRST and BOLDED
     const hostingData = stats[hostingShortCode];
     const hostingCeiling = MODEL_QUOTA_REGISTRY[hostingShortCode] || DEFAULT_CEILING;
-    
-    let hFilled = Math.min(Math.round((hostingData.tpm / hostingCeiling) * BAR_WIDTH), BAR_WIDTH);
-    if (hostingData.tpm > 0 && hFilled === 0) {
-      hFilled = 1;
-    }
-    const hBar = "$".repeat(hFilled) + " ".repeat(BAR_WIDTH - hFilled);
-    
-    let hColor = "\x1b[32m"; // Green
-    if (hostingData.tpm > hostingCeiling * 0.8) hColor = "\x1b[31;1m"; // Red
-    else if (hostingData.tpm > hostingCeiling * 0.5) hColor = "\x1b[33m"; // Yellow
 
     const hSessionStr = getReadableSize(hostingData.sessionTpm);
     const hGlobalStr = getReadableSize(hostingData.tpm);
     const hLimitStr = getReadableSize(hostingCeiling);
 
-    const fingerPointer = emojiDisabled ? "-> " : "👉 ";
-    lines.push(`\x1b[1m  ${fingerPointer}${hColor}[${hBar}] ${hostingShortCode}\x1b[0m\x1b[1m: ${hSessionStr} ses / ${hGlobalStr} glo [max ${hLimitStr}]\x1b[0m`);
-
-    // Render other active models (non-bolded, auto-pruned)
-    for (const [shortCode, data] of Object.entries(stats)) {
-      if (shortCode === hostingShortCode) continue; // Already rendered first
-
-      // Auto-prune other models if 0 TPM for >= 2 minutes
-      if (data.tpm === 0 && data.lastActiveAge >= 120000) {
-        continue;
+    // 1. Render Footer Status Line 3 if enabled
+    if (settings.footer) {
+      let footerParts: string[] = [];
+      if (cooldownRemainingSecs !== null) {
+        const cooldownIcon = emojiDisabled ? "[!]" : "☕";
+        footerParts.push(`\x1b[1;33m${cooldownIcon} Cooldown: ${cooldownRemainingSecs}s\x1b[0m`);
       }
+      const sentinelIcon = emojiDisabled ? "[!]" : "🛡️";
+      let hColor = "\x1b[32m"; // Green
+      if (hostingData.tpm > hostingCeiling * 0.8) hColor = "\x1b[31;1m"; // Red
+      else if (hostingData.tpm > hostingCeiling * 0.5) hColor = "\x1b[33m"; // Yellow
 
-      const ceiling = MODEL_QUOTA_REGISTRY[shortCode] || DEFAULT_CEILING;
-      let filled = Math.min(Math.round((data.tpm / ceiling) * BAR_WIDTH), BAR_WIDTH);
-      if (data.tpm > 0 && filled === 0) {
-        filled = 1;
-      }
-      const bar = "$".repeat(filled) + " ".repeat(BAR_WIDTH - filled);
-
-      let color = "\x1b[32m";
-      if (data.tpm > ceiling * 0.8) color = "\x1b[31;1m";
-      else if (data.tpm > ceiling * 0.5) color = "\x1b[33m";
-      else if (data.tpm === 0) color = "\x1b[90m"; // Gray
-
-      const globalStr = getReadableSize(data.tpm);
-      const limitStr = getReadableSize(ceiling);
-
-      lines.push(`     ${color}[${bar}] ${shortCode}\x1b[0m: ${globalStr} glo [max ${limitStr}]`);
+      footerParts.push(`\x1b[1m${sentinelIcon} TPM (${hostingShortCode}): ${hSessionStr} ses / ${hColor}${hGlobalStr}\x1b[0m\x1b[1m glo [max ${hLimitStr}]\x1b[0m`);
+      ctx.ui.setStatus("rate-limiter", footerParts.join(" | "));
     }
 
-    ctx.ui.setWidget("rate-limiter", lines, { placement: "belowEditor" });
+    // 2. Render TUI Widget if enabled
+    if (settings.widget) {
+      const lines: string[] = [];
+      const sentinelTitle = emojiDisabled ? "[!] Token Sentinel" : "🛡️  Token Sentinel";
+      lines.push(`\x1b[1;36m${sentinelTitle} (TPM Active Monitors) ───────────────────\x1b[0m`);
+
+      if (cooldownRemainingSecs !== null) {
+        const remainingMs = cooldownRemainingSecs * 1000;
+        const remainingCups = Math.max(0, Math.min(8, Math.ceil(remainingMs / 5000)));
+        const cupsStr = emojiDisabled ? "#".repeat(remainingCups) + " ".repeat(8 - remainingCups) : "☕".repeat(remainingCups) + "  ".repeat(8 - remainingCups);
+        lines.push(`\x1b[1;33m  [${cupsStr}] ${cooldownRemainingSecs}s remaining...\x1b[0m`);
+      }
+
+      // Render hosting session's model FIRST and BOLDED
+      let hFilled = Math.min(Math.round((hostingData.tpm / hostingCeiling) * BAR_WIDTH), BAR_WIDTH);
+      if (hostingData.tpm > 0 && hFilled === 0) {
+        hFilled = 1;
+      }
+      const hBar = "$".repeat(hFilled) + " ".repeat(BAR_WIDTH - hFilled);
+      
+      let hColor = "\x1b[32m"; // Green
+      if (hostingData.tpm > hostingCeiling * 0.8) hColor = "\x1b[31;1m"; // Red
+      else if (hostingData.tpm > hostingCeiling * 0.5) hColor = "\x1b[33m"; // Yellow
+
+      const fingerPointer = emojiDisabled ? "-> " : "👉 ";
+      lines.push(`\x1b[1m  ${fingerPointer}${hColor}[${hBar}] ${hostingShortCode}\x1b[0m\x1b[1m: ${hSessionStr} ses / ${hGlobalStr} glo [max ${hLimitStr}]\x1b[0m`);
+
+      // Render other active models (non-bolded, auto-pruned)
+      for (const [shortCode, data] of Object.entries(stats)) {
+        if (shortCode === hostingShortCode) continue; // Already rendered first
+
+        // Auto-prune other models if 0 TPM for >= 2 minutes
+        if (data.tpm === 0 && data.lastActiveAge >= 120000) {
+          continue;
+        }
+
+        const ceiling = MODEL_QUOTA_REGISTRY[shortCode] || DEFAULT_CEILING;
+        let filled = Math.min(Math.round((data.tpm / ceiling) * BAR_WIDTH), BAR_WIDTH);
+        if (data.tpm > 0 && filled === 0) {
+          filled = 1;
+        }
+        const bar = "$".repeat(filled) + " ".repeat(BAR_WIDTH - filled);
+
+        let color = "\x1b[32m";
+        if (data.tpm > ceiling * 0.8) color = "\x1b[31;1m";
+        else if (data.tpm > ceiling * 0.5) color = "\x1b[33m";
+        else if (data.tpm === 0) color = "\x1b[90m"; // Gray
+
+        const globalStr = getReadableSize(data.tpm);
+        const limitStr = getReadableSize(ceiling);
+
+        lines.push(`     ${color}[${bar}] ${shortCode}\x1b[0m: ${globalStr} glo [max ${limitStr}]`);
+      }
+
+      ctx.ui.setWidget("rate-limiter", lines, { placement: "belowEditor" });
+    }
   } catch (err: any) {
     const warningIcon = emojiDisabled ? "[!]" : "⚠️";
-    ctx.ui.setWidget("rate-limiter", [`${warningIcon} Rate Limiter Widget Error: ${err.message}`], { placement: "belowEditor" });
+    if (settings.widget) {
+      ctx.ui.setWidget("rate-limiter", [`${warningIcon} Rate Limiter Widget Error: ${err.message}`], { placement: "belowEditor" });
+    }
+    if (settings.footer) {
+      ctx.ui.setStatus("rate-limiter", `${warningIcon} Rate Limiter Error`);
+    }
   }
 }
 
@@ -618,24 +669,75 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
     }
   });
 
-  // 3. Register '/tpm' slash command to manually toggle widget visibility
+  // 3. Register '/tpm' slash command to manually toggle widget visibility and footer status
   pi.registerCommand("tpm", {
-    description: "Toggle visibility of the Tokens Per Minute (TPM) rate-limiter widget",
+    description: "Configure TPM rate-limiter display options (e.g. /tpm --widget off --footer on)",
     handler: async (args, ctx) => {
       const trimmed = args.trim();
+      const current = getTpmSettings(ctx);
+
+      let newWidget = current.widget;
+      let newFooter = current.footer;
+      let handled = false;
+
       if (trimmed === "--no-emojii" || trimmed === "--no-emoji") {
         pi.appendEntry("emoji-settings", { disabled: true });
         updateRateLimiterWidget(ctx);
         ctx.ui.notify("Emoji icons in widgets have been disabled.", "info");
+        return;
       } else if (trimmed === "--emojii" || trimmed === "--emoji") {
         pi.appendEntry("emoji-settings", { disabled: false });
         updateRateLimiterWidget(ctx);
         ctx.ui.notify("Emoji icons in widgets have been enabled.", "info");
-      } else {
-        isWidgetVisible = !isWidgetVisible;
-        updateRateLimiterWidget(ctx);
-        ctx.ui.notify(`TPM rate limiter widget is now ${isWidgetVisible ? "VISIBLE" : "HIDDEN"}.`, "info");
+        return;
       }
+
+      if (trimmed.includes("--widget") || trimmed.includes("-w")) {
+        const parts = trimmed.split(/\s+/);
+        const idx = parts.findIndex(p => p === "--widget" || p === "-w");
+        const next = parts[idx + 1];
+        if (next === "on" || next === "true") {
+          newWidget = true;
+        } else if (next === "off" || next === "false") {
+          newWidget = false;
+        } else {
+          newWidget = !current.widget;
+        }
+        handled = true;
+      } else if (trimmed.includes("--no-widget")) {
+        newWidget = false;
+        handled = true;
+      }
+
+      if (trimmed.includes("--footer") || trimmed.includes("-f")) {
+        const parts = trimmed.split(/\s+/);
+        const idx = parts.findIndex(p => p === "--footer" || p === "-f");
+        const next = parts[idx + 1];
+        if (next === "on" || next === "true") {
+          newFooter = true;
+        } else if (next === "off" || next === "false") {
+          newFooter = false;
+        } else {
+          newFooter = !current.footer;
+        }
+        handled = true;
+      } else if (trimmed.includes("--no-footer")) {
+        newFooter = false;
+        handled = true;
+      }
+
+      if (!handled) {
+        // Toggle widget by default if no flags passed
+        newWidget = !current.widget;
+      }
+
+      pi.appendEntry("tpm-settings", { widget: newWidget, footer: newFooter });
+      updateRateLimiterWidget(ctx);
+
+      const statusMsgs: string[] = [];
+      statusMsgs.push(`Widget Box: ${newWidget ? "ENABLED" : "DISABLED"}`);
+      statusMsgs.push(`Footer Line 3 Status: ${newFooter ? "ENABLED" : "DISABLED"}`);
+      ctx.ui.notify(`TPM Rate Limiter display settings updated: ${statusMsgs.join(" | ")}`, "info");
     }
   });
 }

@@ -481,7 +481,24 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
         lines.push(`\x1b[1;33m  [${cupsStr}] ${cooldownRemainingSecs}s remaining...\x1b[0m`);
       }
 
-      // Render hosting session's model FIRST and BOLDED
+      // Render hosting session's ONLY TPM
+      let sFilled = Math.min(Math.round((hostingData.sessionTpm / hostingCeiling) * BAR_WIDTH), BAR_WIDTH);
+      if (hostingData.sessionTpm > 0 && sFilled === 0) {
+        sFilled = 1;
+      }
+      const sBar = "$".repeat(sFilled) + " ".repeat(BAR_WIDTH - sFilled);
+      
+      let sColor = "\x1b[32m"; // Green
+      if (hostingData.sessionTpm > hostingCeiling * 0.8) sColor = "\x1b[31;1m"; // Red
+      else if (hostingData.sessionTpm > hostingCeiling * 0.5) sColor = "\x1b[33m"; // Yellow
+
+      const fingerPointer = emojiDisabled ? "-> " : "👉 ";
+      lines.push(`\x1b[1m  ${fingerPointer}${sColor}[${sBar}] ${hostingShortCode} (Session): ${hSessionStr} ses [max ${hLimitStr}]\x1b[0m`);
+
+      // Render Global TPM Monitors (Non-bolded, auto-pruned)
+      lines.push(`\x1b[1;36m  Global Multi-Model Status ───────────────────────\x1b[0m`);
+      
+      // Render hosting model global stats first under global list
       let hFilled = Math.min(Math.round((hostingData.tpm / hostingCeiling) * BAR_WIDTH), BAR_WIDTH);
       if (hostingData.tpm > 0 && hFilled === 0) {
         hFilled = 1;
@@ -492,15 +509,15 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
       if (hostingData.tpm > hostingCeiling * 0.8) hColor = "\x1b[31;1m"; // Red
       else if (hostingData.tpm > hostingCeiling * 0.5) hColor = "\x1b[33m"; // Yellow
 
-      const fingerPointer = emojiDisabled ? "-> " : "👉 ";
-      lines.push(`\x1b[1m  ${fingerPointer}${hColor}[${hBar}] ${hostingShortCode}\x1b[0m\x1b[1m: ${hSessionStr} ses / ${hGlobalStr} glo [max ${hLimitStr}]\x1b[0m`);
+      const bullet = emojiDisabled ? "* " : "• ";
+      lines.push(`\x1b[1m     ${bullet}${hColor}[${hBar}] ${hostingShortCode}: ${hGlobalStr} glo [max ${hLimitStr}]\x1b[0m`);
 
-      // Render other active models (non-bolded, auto-pruned)
+      // Render other active models
       for (const [shortCode, data] of Object.entries(stats)) {
         if (shortCode === hostingShortCode) continue; // Already rendered first
 
-        // Auto-prune other models if 0 TPM for >= 2 minutes
-        if (data.tpm === 0 && data.lastActiveAge >= 120000) {
+        // Only show global models with active non-zero TPM usage
+        if (data.tpm === 0) {
           continue;
         }
 
@@ -514,12 +531,11 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
         let color = "\x1b[32m";
         if (data.tpm > ceiling * 0.8) color = "\x1b[31;1m";
         else if (data.tpm > ceiling * 0.5) color = "\x1b[33m";
-        else if (data.tpm === 0) color = "\x1b[90m"; // Gray
 
         const globalStr = getReadableSize(data.tpm);
         const limitStr = getReadableSize(ceiling);
 
-        lines.push(`     ${color}[${bar}] ${shortCode}\x1b[0m: ${globalStr} glo [max ${limitStr}]`);
+        lines.push(`     ${bullet}${color}[${bar}] ${shortCode}: ${globalStr} glo [max ${limitStr}]`);
       }
 
       ctx.ui.setWidget("rate-limiter", lines, { placement: "belowEditor" });

@@ -450,13 +450,21 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
       if (cooldownRemainingSecs !== null) {
         const cooldownIcon = emojiDisabled ? "[!]" : "☕";
         footerParts.push(`\x1b[1;33m${cooldownIcon} Cooldown: ${cooldownRemainingSecs}s\x1b[0m`);
-      }
-      const sentinelIcon = emojiDisabled ? "[!]" : "🛡️";
-      let hColor = "\x1b[32m"; // Green
-      if (hostingData.tpm > hostingCeiling * 0.8) hColor = "\x1b[31;1m"; // Red
-      else if (hostingData.tpm > hostingCeiling * 0.5) hColor = "\x1b[33m"; // Yellow
+      } else {
+        let hFilled = Math.min(Math.round((hostingData.tpm / hostingCeiling) * BAR_WIDTH), BAR_WIDTH);
+        if (hostingData.tpm > 0 && hFilled === 0) {
+          hFilled = 1;
+        }
+        const hBar = "$".repeat(hFilled) + " ".repeat(BAR_WIDTH - hFilled);
 
-      footerParts.push(`\x1b[1m${sentinelIcon} TPM (${hostingShortCode}): ${hSessionStr} ses / ${hColor}${hGlobalStr}\x1b[0m\x1b[1m glo [max ${hLimitStr}]\x1b[0m`);
+        let hColor = "\x1b[32m"; // Green
+        if (hostingData.tpm > hostingCeiling * 0.8) hColor = "\x1b[31;1m"; // Red
+        else if (hostingData.tpm > hostingCeiling * 0.5) hColor = "\x1b[33m"; // Yellow
+        else if (hostingData.tpm === 0) hColor = "\x1b[90m"; // Gray
+
+        const sentinelIcon = emojiDisabled ? "[!]" : "🛡️";
+        footerParts.push(`\x1b[1m${sentinelIcon} [${hColor}${hBar}\x1b[0m\x1b[1m] ${hostingShortCode}: ${hColor}${hGlobalStr}\x1b[0m\x1b[1m/${hLimitStr}\x1b[0m`);
+      }
       ctx.ui.setStatus("rate-limiter", footerParts.join(" | "));
     }
 

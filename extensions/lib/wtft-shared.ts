@@ -546,7 +546,7 @@ export function getVisualLength(str: string): number {
 // MAIN LAYOUT COMPILER
 // ---
 
-export function getTerminalWidth(isWidget = false): number {
+export function getTerminalWidth(isWidget = false, disabledEmoji = false): number {
 	let width = 80;
 	if (process.stdout && process.stdout.columns) {
 		width = process.stdout.columns;
@@ -570,7 +570,7 @@ export function getTerminalWidth(isWidget = false): number {
 			if (!isNaN(num) && num > 0) width = num;
 		} catch (e) {}
 	}
-	return isWidget ? width - 4 : width;
+	return isWidget ? (disabledEmoji ? width - 2 : width - 4) : width;
 }
 
 export function buildWtftLines(
@@ -599,7 +599,8 @@ export function buildWtftLines(
 	const limit = opts?.limit !== undefined ? opts.limit : defaultSettings.limit;
 	
 	const isWidget = opts?.isWidget ?? false;
-	const termWidth = getTerminalWidth(isWidget);
+	const disabledEmoji = opts?.disabledEmoji !== undefined ? opts.disabledEmoji : defaultSettings.disabledEmoji;
+	const termWidth = getTerminalWidth(isWidget, disabledEmoji);
 	const rawWidth = opts?.width !== undefined ? opts.width : defaultSettings.width;
 	const width = Math.min(rawWidth, termWidth);
 	const showTicks = opts?.showTicks !== undefined ? opts.showTicks : defaultSettings.showTicks;
@@ -710,7 +711,6 @@ export function buildWtftLines(
 
 	const widgetLines: string[] = [];
 	
-	const disabledEmoji = opts?.disabledEmoji !== undefined ? opts.disabledEmoji : defaultSettings.disabledEmoji;
 	const titleLeft = disabledEmoji ? "[$] WTF Tokens?" : "💸 WTF Tokens?";
 	
 	const legendItems = [

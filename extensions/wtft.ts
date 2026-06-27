@@ -232,8 +232,9 @@ function getSettings(ctx: any) {
 	let interval = "1h";
 	let limit = 10;
 	
+	const disabledEmoji = isEmojiDisabled(ctx);
 	// Reset default fallback to 240 max so we can easily test scaling down on-the-fly to terminal columns
-	const termColumns = getTerminalWidth(true);
+	const termColumns = getTerminalWidth(true, disabledEmoji);
 	let width = 240;
 	let widthIsLocked = false;
 	let visible = false; // Default invisible on fresh session
@@ -252,7 +253,7 @@ function getSettings(ctx: any) {
 						widthIsLocked = true;
 					} else {
 						// Responsive auto-fit on the fly!
-						const termColumnsDynamic = getTerminalWidth(true);
+						const termColumnsDynamic = getTerminalWidth(true, disabledEmoji);
 						width = Math.min(termColumnsDynamic, 240);
 					}
 				}
@@ -263,8 +264,6 @@ function getSettings(ctx: any) {
 			}
 		}
 	}
-
-	const disabledEmoji = isEmojiDisabled(ctx);
 
 	return { interval, limit, width, widthIsLocked, visible, showTicks, mode, timezone, disabledEmoji };
 }
@@ -446,7 +445,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			const nextLimit = hasLimit ? limit : current.limit;
 			
 			// Dynamic fallback (minus safety padding) capped at 240 if no explicit width set
-			const termColumns = getTerminalWidth(true);
+			const termColumns = getTerminalWidth(true, isEmojiDisabled(ctx));
 			const nextWidth = hasWidth ? Math.min(width, 240) : Math.min(termColumns, 240);
 			const nextWidthIsLocked = hasWidth || current.widthIsLocked || false;
 			

@@ -455,7 +455,7 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
         if (hostingData.tpm > 0 && hFilled === 0) {
           hFilled = 1;
         }
-        const hBar = "$".repeat(hFilled) + " ".repeat(BAR_WIDTH - hFilled);
+        const hBar = "$".repeat(hFilled) + ".".repeat(BAR_WIDTH - hFilled);
 
         let hColor = "\x1b[32m"; // Green
         if (hostingData.tpm > hostingCeiling * 0.8) hColor = "\x1b[31;1m"; // Red
@@ -486,7 +486,7 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
       if (hostingData.sessionTpm > 0 && sFilled === 0) {
         sFilled = 1;
       }
-      const sBar = "$".repeat(sFilled) + " ".repeat(BAR_WIDTH - sFilled);
+      const sBar = "$".repeat(sFilled) + ".".repeat(BAR_WIDTH - sFilled);
       
       let sColor = "\x1b[32m"; // Green
       if (hostingData.sessionTpm > hostingCeiling * 0.8) sColor = "\x1b[31;1m"; // Red
@@ -503,7 +503,7 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
       if (hostingData.tpm > 0 && hFilled === 0) {
         hFilled = 1;
       }
-      const hBar = "$".repeat(hFilled) + " ".repeat(BAR_WIDTH - hFilled);
+      const hBar = "$".repeat(hFilled) + ".".repeat(BAR_WIDTH - hFilled);
       
       let hColor = "\x1b[32m"; // Green
       if (hostingData.tpm > hostingCeiling * 0.8) hColor = "\x1b[31;1m"; // Red
@@ -526,7 +526,7 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
         if (data.tpm > 0 && filled === 0) {
           filled = 1;
         }
-        const bar = "$".repeat(filled) + " ".repeat(BAR_WIDTH - filled);
+        const bar = "$".repeat(filled) + ".".repeat(BAR_WIDTH - filled);
 
         let color = "\x1b[32m";
         if (data.tpm > ceiling * 0.8) color = "\x1b[31;1m";
@@ -699,6 +699,28 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const trimmed = args.trim();
       const current = getTpmSettings(ctx);
+
+      if (trimmed === "--help" || trimmed === "-h") {
+        let helpText = `\x1b[1m\x1b[36m/tpm\x1b[0m - Configure TPM Rate-Limiter Display Options\n\n`;
+        helpText += `Control the visibility of the TPM floating widget box and the status bar footer.\n\n`;
+
+        helpText += `\x1b[1mUsage:\x1b[0m\n`;
+        helpText += `  /tpm                                    Toggle the floating widget panel on/off\n`;
+        helpText += `  /tpm --widget [on|off]                  Explicitly enable or disable the floating widget panel\n`;
+        helpText += `  /tpm --footer [on|off]                  Explicitly enable or disable the bottom footer line 3\n`;
+        helpText += `  /tpm --emoji                            Enable emoji icons in widgets/footer\n`;
+        helpText += `  /tpm --no-emoji                         Disable emoji icons in widgets/footer\n\n`;
+
+        helpText += `\x1b[1mAliases:\x1b[0m\n`;
+        helpText += `  -w for --widget, -f for --footer\n\n`;
+
+        helpText += `\x1b[1mExamples:\x1b[0m\n`;
+        helpText += `  /tpm --widget off --footer on\n`;
+        helpText += `  /tpm --no-emoji\n`;
+
+        ctx.ui.notify(helpText, "info");
+        return;
+      }
 
       let newWidget = current.widget;
       let newFooter = current.footer;

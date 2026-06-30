@@ -34,7 +34,7 @@ export interface Interaction {
  * Peak windows (UTC): 01:00–04:00 and 06:00–10:00.
  * Off-peak: all other hours. Returns 2.0 or 1.0 multiplier.
  */
-function getDeepSeekPeakMultiplier(timestamp?: number): number {
+export function getDeepSeekPeakMultiplier(timestamp?: number): number {
 	const ts = timestamp || Date.now();
 	const d = new Date(ts);
 	const utcHour = d.getUTCHours();

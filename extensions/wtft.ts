@@ -10,7 +10,8 @@ import {
 	formatCost,
 	parseEntryToInteraction,
 	renderOtherHistogram,
-	getTerminalWidth
+	getTerminalWidth,
+	getDeepSeekPeakMultiplier
 } from "./lib/wtft-shared.js";
 
 // ---
@@ -323,9 +324,22 @@ function updateWtftWidget(
 	}
 
 	const lines = buildWtftLines(ctx, pi, opts);
-	if (!lines) {
+	if (!lines || lines.length === 0) {
 		ctx.ui.setWidget("wtft", undefined);
 		return;
+	}
+
+	// DeepSeek peak pricing badge: if current model is DeepSeek and we're in peak hours,
+	// patch the title line to show [⚡ PEAK 2x]
+	try {
+		const sessionCtx = ctx.sessionManager.buildSessionContext();
+		const currentModel = (sessionCtx?.model?.modelId || "").toLowerCase();
+		if (currentModel.includes("deepseek") && getDeepSeekPeakMultiplier() > 1) {
+			const peakBadge = " \x1b[1;38;5;208m⚡ PEAK 2x\x1b[0m";
+			lines[0] = lines[0] + peakBadge;
+		}
+	} catch (_) {
+		// buildSessionContext not available (CLI mode), skip badge
 	}
 
 	ctx.ui.setWidget("wtft", lines, { placement: "belowEditor" });

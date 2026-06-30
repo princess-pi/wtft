@@ -462,11 +462,6 @@ export function buildTickLine(maxCost: number, barWidth: number, prefixWidth: nu
 		prefixWidth + barWidth - 1
 	];
 
-	// Draw tick indicators directly into the unified horizontal line
-	for (const t of ticks) {
-		if (t < chars.length) chars[t] = "┿";
-	}
-
 	const labels: {text: string, start: number, end: number}[] = [];
 	const tickValues = [0, maxCost / 4, maxCost / 2, (maxCost * 3) / 4, maxCost];
 

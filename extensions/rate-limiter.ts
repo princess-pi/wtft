@@ -23,6 +23,8 @@ const MODEL_QUOTA_REGISTRY: Record<string, number> = {
   "c3.5son": 320000,   // claude-3-5-sonnet (Tier 4 limit: 400K)
   "c3.5hai": 320000,   // claude-3-5-haiku
   "c3.0opu": 80000,    // claude-3-opus (Opus standard limit)
+  "d4.0fla": 10000000,  // deepseek-v4-flash (no TPM limit — concurrency-based: 2500)
+  "d4.0pro": 10000000,  // deepseek-v4-pro (no TPM limit — concurrency-based: 500)
 };
 
 const DEFAULT_CEILING = 1000000;
@@ -50,6 +52,9 @@ function getModelShortName(modelName: string): string {
   if (m.includes("gemini-3.5-flash-lite")) return "g3.5fli";
   if (m.includes("gemini-flash-lite-latest")) return "glatfli";
   if (m.includes("gemini-1.5-pro")) return "g1.5pro";
+  if (m.includes("deepseek-v4-pro")) return "d4.0pro";
+  if (m.includes("deepseek-v4-flash") || m.includes("deepseek-chat") || m.includes("deepseek-reasoner")) return "d4.0fla";
+
   if (m.includes("claude-3-5-sonnet") || m.includes("claude-sonnet-4-6") || m.includes("claude-3-5-sonnet-20240620") || m.includes("claude-3-5-sonnet-20241022")) {
     return "c3.5son";
   }
@@ -60,8 +65,11 @@ function getModelShortName(modelName: string): string {
     return "c3.0opu";
   }
 
-  // Fallback fixed-width 7-char encoder (C-VVV-MMM)
-  const comp = m.includes("gemini") || m.includes("google") ? "g" : "c";
+  // Fallback fixed-width 7-char encoder (P-VVV-MMM)
+  // Prefix: g=Gemini, c=Claude, d=DeepSeek
+  let comp = "c";
+  if (m.includes("gemini") || m.includes("google")) comp = "g";
+  else if (m.includes("deepseek")) comp = "d";
   
   let ver = "3.5";
   if (m.includes("latest")) ver = "lat";

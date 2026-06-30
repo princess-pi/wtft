@@ -23,8 +23,8 @@ const MODEL_QUOTA_REGISTRY: Record<string, number> = {
   "c3.5son": 320000,   // claude-3-5-sonnet (Tier 4 limit: 400K)
   "c3.5hai": 320000,   // claude-3-5-haiku
   "c3.0opu": 80000,    // claude-3-opus (Opus standard limit)
-  "d4.0fla": 10000000,  // deepseek-v4-flash (no TPM limit — concurrency-based: 2500)
-  "d4.0pro": 10000000,  // deepseek-v4-pro (no TPM limit — concurrency-based: 500)
+  "d4.0fla": 2500000,  // deepseek-v4-flash (concurrency limit: 2500; no TPM limit — Gemini-equivalent ceiling for redline visibility)
+  "d4.0pro": 1600000,  // deepseek-v4-pro (concurrency limit: 500; no TPM limit — Gemini-equivalent ceiling for redline visibility)
 };
 
 const DEFAULT_CEILING = 1000000;
@@ -658,7 +658,10 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
       updateRateLimiterWidget(ctx);
 
       // If our specific active model is crossing its safety threshold:
-      if (currentTpm > ceiling) {
+      // DeepSeek models (prefix "d") are concurrency-limited, not TPM-limited —
+      // redline the meter for visibility but never trigger a cooldown.
+      const isDeepseek = shortCode.startsWith("d");
+      if (currentTpm > ceiling && !isDeepseek) {
         ctx.ui.notify(
           `⚠️ [Rate Limiter] ${shortCode} sliding window has consumed ${currentTpm.toLocaleString()} input tokens. ` +
           `Initiating a 40-second "coffee break" to let Gemini/Claude quota reset...`,

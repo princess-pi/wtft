@@ -788,7 +788,8 @@ export function buildWtftLines(
 			// Build the divider as an array so we can punch tick marks through the horizontal line
 			const dividerChars = Array.from({ length: dividerLen }, () => "─");
 			
-			// Punch ┿ at the same tick positions as the main scale line
+			// Punch ┼ (light vertical + light horizontal) at the same tick positions as the main scale line.
+			// ┼ matches the ─ horizontal weight better than ┿ (which has a heavy horizontal stroke).
 			const tickPositions = [
 				prefixWidth,
 				prefixWidth + Math.floor(maxBarWidth / 4),
@@ -799,7 +800,7 @@ export function buildWtftLines(
 			for (const t of tickPositions) {
 				const idx = t - dayChangeText.length;
 				if (idx >= 0 && idx < dividerChars.length) {
-					dividerChars[idx] = "┿";
+					dividerChars[idx] = "┼";
 				}
 			}
 			

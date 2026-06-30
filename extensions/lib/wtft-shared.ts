@@ -21,17 +21,37 @@ export interface Interaction {
 	texts: string[];
 }
 
+// ---
+// MODEL COST CALCULATOR
+// Supports: Claude (Haiku, Sonnet, Opus) + DeepSeek (v4-flash, v4-pro, legacy chat/reasoner)
+// Pricing per 1M tokens. DeepSeek: cache-hit vs cache-miss input pricing;
+// conservatively defaults to cache-miss until the DeepSeek Anthropic-compat usage schema is confirmed.
+// ---
 export function calculateClaudeCost(model: string, usage: any): number {
 	if (!usage) return 0;
 	
-	// Default to Sonnet pricing
+	// Default to Claude Sonnet pricing
 	let inputPrice = 3.00;
 	let outputPrice = 15.00;
 	let cacheWritePrice = 3.75;
 	let cacheReadPrice = 0.30;
 	
 	const m = (model || "").toLowerCase();
-	if (m.includes("haiku")) {
+	if (m.includes("deepseek")) {
+		// DeepSeek models — input/output only (cache_creation/read tokens not yet confirmed in their Anthropic-compat usage schema)
+		if (m.includes("v4-pro")) {
+			// deepseek-v4-pro: $0.435/M input, $0.87/M output. Concurrency: 500.
+			inputPrice = 0.435;
+			outputPrice = 0.87;
+		} else {
+			// deepseek-v4-flash + legacy deepseek-chat & deepseek-reasoner: $0.14/M input, $0.28/M output. Concurrency: 2500.
+			// (legacy names deprecate 2026-07-24)
+			inputPrice = 0.14;
+			outputPrice = 0.28;
+		}
+		cacheWritePrice = 0; // DeepSeek does not expose separate cache-write tokens in the usage object
+		cacheReadPrice = 0;  // TODO: add cache-hit input pricing ($0.0028/M flash, $0.003625/M pro) once schema confirmed
+	} else if (m.includes("haiku")) {
 		inputPrice = 0.80;
 		outputPrice = 4.00;
 		cacheWritePrice = 1.00;

@@ -590,7 +590,10 @@ export function getTerminalWidth(isWidget = false, disabledEmoji = false): numbe
 			if (!isNaN(num) && num > 0) width = num;
 		} catch (e) {}
 	}
-	return isWidget ? (disabledEmoji ? width - 2 : width - 4) : width;
+	// Widgets: subtract minimal breathing room (1 char per side).
+	// Pi's setWidget() does not enforce its own padding on raw line arrays,
+	// so we only need 2 chars total. Previously subtracted 4 unnecessarily.
+	return isWidget ? width - 2 : width;
 }
 
 export function buildWtftLines(
@@ -781,13 +784,26 @@ export function buildWtftLines(
 		if (showTicks && i > 0 && bin.dateStr !== displayedBins[i - 1].dateStr) {
 			const labelDay = formatMmmDdStr(bin.dateStr);
 			const dayChangeText = `── ${labelDay} `;
-			const dividerLine = dayChangeText + "─".repeat(Math.max(0, (finalWidth - 3) - dayChangeText.length));
-			// Use \x1b[30;47m for the day change divider to avoid pure black backgrounds on some terminal themes
-			// Wait, the divider is just "dim" text usually. The issue said: "date rows and the time stamp labels... have the jarring black background".
-			// If \x1b[2m (dim) is causing black backgrounds on that terminal emulator, it's because
-			// the terminal treats "dim" as a background modification in some color schemes, or it's interacting poorly.
-			// Let's just use \x1b[90m (bright black/dark grey) which gives the exact same visual "dim" effect 
-			// without using the \x1b[2m dim attribute that breaks backgrounds.
+			const dividerLen = Math.max(0, (finalWidth - 3) - dayChangeText.length);
+			// Build the divider as an array so we can punch tick marks through the horizontal line
+			const dividerChars = Array.from({ length: dividerLen }, () => "─");
+			
+			// Punch ┿ at the same tick positions as the main scale line
+			const tickPositions = [
+				prefixWidth,
+				prefixWidth + Math.floor(maxBarWidth / 4),
+				prefixWidth + Math.floor(maxBarWidth / 2),
+				prefixWidth + Math.floor((maxBarWidth * 3) / 4),
+				prefixWidth + maxBarWidth - 1
+			];
+			for (const t of tickPositions) {
+				const idx = t - dayChangeText.length;
+				if (idx >= 0 && idx < dividerChars.length) {
+					dividerChars[idx] = "┿";
+				}
+			}
+			
+			const dividerLine = dayChangeText + dividerChars.join("");
 			widgetLines.push(`\x1b[90m${dividerLine}\x1b[0m`);
 		}
 

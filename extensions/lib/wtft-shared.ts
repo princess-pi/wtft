@@ -26,8 +26,30 @@ export interface Interaction {
 // Supports: Claude (Haiku, Sonnet, Opus) + DeepSeek (v4-flash, v4-pro, legacy chat/reasoner)
 // Pricing per 1M tokens. DeepSeek: cache-hit vs cache-miss input pricing;
 // conservatively defaults to cache-miss until the DeepSeek Anthropic-compat usage schema is confirmed.
+// DeepSeek peak-valley surge pricing (2x) applies during UTC 01:00–04:00 and 06:00–10:00.
 // ---
-export function calculateClaudeCost(model: string, usage: any): number {
+
+/**
+ * DeepSeek peak-valley surge pricing: 2x during peak UTC hours.
+ * Peak windows (UTC): 01:00–04:00 and 06:00–10:00.
+ * Off-peak: all other hours. Returns 2.0 or 1.0 multiplier.
+ */
+function getDeepSeekPeakMultiplier(timestamp?: number): number {
+	const ts = timestamp || Date.now();
+	const d = new Date(ts);
+	const utcHour = d.getUTCHours();
+	const utcMin = d.getUTCMinutes();
+	const utcTime = utcHour * 60 + utcMin; // minutes since UTC midnight
+
+	// Peak window 1: 01:00–04:00 UTC → minutes 60–240
+	// Peak window 2: 06:00–10:00 UTC → minutes 360–600
+	if ((utcTime >= 60 && utcTime < 240) || (utcTime >= 360 && utcTime < 600)) {
+		return 2.0;
+	}
+	return 1.0;
+}
+
+export function calculateClaudeCost(model: string, usage: any, timestamp?: number): number {
 	if (!usage) return 0;
 	
 	// Default to Claude Sonnet pricing
@@ -39,15 +61,16 @@ export function calculateClaudeCost(model: string, usage: any): number {
 	const m = (model || "").toLowerCase();
 	if (m.includes("deepseek")) {
 		// DeepSeek models — input/output only (cache_creation/read tokens not yet confirmed in their Anthropic-compat usage schema)
+		const peak = getDeepSeekPeakMultiplier(timestamp);
 		if (m.includes("v4-pro")) {
 			// deepseek-v4-pro: $0.435/M input, $0.87/M output. Concurrency: 500.
-			inputPrice = 0.435;
-			outputPrice = 0.87;
+			inputPrice = 0.435 * peak;
+			outputPrice = 0.87 * peak;
 		} else {
 			// deepseek-v4-flash + legacy deepseek-chat & deepseek-reasoner: $0.14/M input, $0.28/M output. Concurrency: 2500.
 			// (legacy names deprecate 2026-07-24)
-			inputPrice = 0.14;
-			outputPrice = 0.28;
+			inputPrice = 0.14 * peak;
+			outputPrice = 0.28 * peak;
 		}
 		cacheWritePrice = 0; // DeepSeek does not expose separate cache-write tokens in the usage object
 		cacheReadPrice = 0;  // TODO: add cache-hit input pricing ($0.0028/M flash, $0.003625/M pro) once schema confirmed
@@ -130,7 +153,7 @@ export function parseEntryToInteraction(entry: any): Interaction | null {
 			cost = assistantMsg.usage.cost.total;
 		} else if (assistantMsg.model && assistantMsg.usage) {
 			// Claude Code token usage fallback calculation
-			cost = calculateClaudeCost(assistantMsg.model, assistantMsg.usage);
+			cost = calculateClaudeCost(assistantMsg.model, assistantMsg.usage, timestamp);
 		}
 
 		// Use assistantMsg.timestamp if available (Pi), fallback to top-level entry.timestamp (Claude Code)

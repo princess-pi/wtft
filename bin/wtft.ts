@@ -36,6 +36,40 @@ let showOther = false;
 // HELP MENU
 // ---
 
+function printWhy(): void {
+	try {
+		const manifestPath = path.join(process.cwd(), "docs", "manifests", "wtft-cmd.json");
+		const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+		let text = `${manifest.name} - ${manifest.tagline}
+
+`;
+		text += `${manifest.description}
+
+`;
+		text += `Why run wtft?
+
+`;
+		const scenarios = manifest.why || [];
+		for (const s of scenarios) {
+			text += `  ${s.scenario}
+`;
+			for (const cmd of s.commands) {
+				text += `    $ wtft${cmd ? " " + cmd : ""}
+`;
+			}
+			text += `    → ${s.result}
+
+`;
+		}
+		text += `Run wtft --help for the full flag reference.
+`;
+		console.log(text);
+	} catch (err) {
+		console.error(`⚠️ Failed to load command manifest: ${err}`);
+		process.exitCode = 1;
+	}
+}
+
 function printHelp() {
 	console.log(`
 Usage: wtft [options]
@@ -74,6 +108,9 @@ for (let i = 2; i < process.argv.length; i++) {
 	const arg = process.argv[i];
 	if (arg === "-h" || arg === "--help") {
 		printHelp();
+		process.exit(0);
+	} else if (arg === "--why") {
+		printWhy();
 		process.exit(0);
 	} else if (arg === "-s" || arg === "--session") {
 		targetSessionPath = process.argv[++i];

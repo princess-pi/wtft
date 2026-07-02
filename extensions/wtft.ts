@@ -28,6 +28,7 @@ function parseArgs(argsStr: string = "") {
 	let hideWidget = false;
 	let showWidget = false;
 	let showHelp = false;
+	let showWhy = false;
 	let showTicks = true;
 	let mode: "bucket" | "cumulative" = "cumulative";
 	let pager = false;
@@ -46,6 +47,8 @@ function parseArgs(argsStr: string = "") {
 		const arg = args[i];
 		if (arg === "--help" || arg === "-h") {
 			showHelp = true;
+		} else if (arg === "--why") {
+			showWhy = true;
 		} else if (arg === "--hide" || arg === "-H") {
 			hideWidget = true;
 		} else if (arg === "--show" || arg === "-S") {
@@ -140,6 +143,7 @@ function parseArgs(argsStr: string = "") {
 		showTicks,
 		mode,
 		showHelp,
+		showWhy,
 		pager,
 		hasInterval,
 		hasLimit,
@@ -380,6 +384,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				showTicks,
 				mode,
 				showHelp,
+				showWhy,
 				pager,
 				hasInterval,
 				hasLimit,
@@ -421,6 +426,19 @@ export default function wtftExtension(pi: ExtensionAPI) {
 					}
 
 					ctx.ui.notify(helpText, "info");
+				} catch (err) {
+					ctx.ui.notify(`⚠️ Failed to load WTFT command manifest: ${err}`, "error");
+				}
+				return;
+			}
+
+			// Render --why scenario-driven output
+			if (showWhy) {
+				try {
+					const { renderWhy } = await import("./lib/merge/help.js");
+					const manifestPath = path.join(process.cwd(), "docs", "manifests", "wtft-cmd.json");
+					const whyText = renderWhy(manifestPath, "/wtft");
+					ctx.ui.notify(whyText, "info");
 				} catch (err) {
 					ctx.ui.notify(`⚠️ Failed to load WTFT command manifest: ${err}`, "error");
 				}

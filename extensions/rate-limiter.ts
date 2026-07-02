@@ -733,6 +733,28 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
         return;
       }
 
+      if (trimmed === "--why") {
+        let whyText = `\x1b[1m\x1b[36m/tpm\x1b[0m - Configure TPM Rate-Limiter Display Options\n\n`;
+        whyText += `Control the visibility of the TPM floating widget box and the status bar footer.\n\n`;
+        whyText += `\x1b[1mWhy run /tpm?\x1b[0m\n\n`;
+        whyText += `  You're approaching your API rate limit and need to see your current usage at a glance.\n`;
+        whyText += `    \x1b[33m$ /tpm\x1b[0m\n`;
+        whyText += `    \x1b[32m→ A floating widget panel appears showing the current model's TPM usage as a colored bar, updated every second.\x1b[0m\n\n`;
+        whyText += `  You want the rate info in the status bar but not as a floating widget box.\n`;
+        whyText += `    \x1b[33m$ /tpm --widget off --footer on\x1b[0m\n`;
+        whyText += `    \x1b[32m→ The widget box is hidden but the TPM status line remains visible in the footer.\x1b[0m\n\n`;
+        whyText += `  Your terminal doesn't render emoji well and you need ASCII-only widgets.\n`;
+        whyText += `    \x1b[33m$ /tpm --no-emoji\x1b[0m\n`;
+        whyText += `    \x1b[32m→ All widget icons switch to single-width ASCII characters.\x1b[0m\n\n`;
+        whyText += `  You want to increase your actual API quota or change provider rate limits.\n`;
+        whyText += `    \x1b[33m$ /tpm  # won't help\x1b[0m\n`;
+        whyText += `    \x1b[32m→ The TPM tool only displays and monitors usage — it cannot change provider quotas or API limits. Contact your provider to adjust tier limits.\x1b[0m\n\n`;
+        whyText += `\x1b[2mRun \x1b[0m/tpm --help\x1b[2m for the full flag reference.\x1b[0m\n`;
+
+        ctx.ui.notify(whyText, "info");
+        return;
+      }
+
       let newWidget = current.widget;
       let newFooter = current.footer;
       let handled = false;

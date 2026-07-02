@@ -95,6 +95,7 @@ Options:
   --no-ticks              Disable the proportional cost scale ticks above the bars.
   -t, --tz <zone>         Specify a display timezone (e.g. America/Los_Angeles).
   -o, --other             Print a histogram of 'Other' commands grouped by semantic sub-category (Build, Lint, System, etc.).
+  -W, --watch             Watch a session file for changes and re-render the bar chart in real-time.
   --why                   Explain why you'd run this tool, with user scenarios and anti-use-cases.
   -h, --help              Display this help menu.
 `);
@@ -113,6 +114,7 @@ let hasNoTicks = false;
 let hasTicks = false;
 let hasTz = false;
 let hasOther = false;
+let showWatch = false;
 
 for (let i = 2; i < process.argv.length; i++) {
 	const arg = process.argv[i];
@@ -151,6 +153,8 @@ for (let i = 2; i < process.argv.length; i++) {
 	} else if (arg === "-o" || arg === "--other") {
 		showOther = true;
 		hasOther = true;
+	} else if (arg === "-W" || arg === "--watch") {
+		showWatch = true;
 	} else if (arg === "--harness") {
 		const val = process.argv[++i];
 		if (val === "pi" || val === "claude-code" || val === "auto") {
@@ -343,6 +347,199 @@ async function selectSessionPrompt(candidates: SessionCandidate[]): Promise<stri
 // MAIN EXECUTION FLOW (ASYNC)
 // ---
 
+// ---
+// WATCH MODE: tail -f style live re-rendering (#45)
+// ---
+
+async function watchMode(
+	sessionPath: string,
+	settings: {
+		interval: string;
+		limit: number;
+		width: number;
+		mode: "cumulative" | "bucket";
+		showTicks: boolean;
+		timezone?: string;
+		disabledEmoji: boolean;
+	}
+) {
+	if (!process.stdout.isTTY) {
+		console.error("❌ --watch requires a real terminal (TTY). Refusing to start.");
+		process.exit(1);
+	}
+
+	const sessionName = path.basename(sessionPath);
+	let totalCost = 0;
+	let interactionCount = 0;
+	let lastSize = 0;
+	let needsRedraw = true;
+
+	// Hide cursor
+	process.stdout.write("\x1b[?25l");
+
+	// SIGWINCH handler — mark dirty for next poll cycle
+	process.on("SIGWINCH", () => {
+		needsRedraw = true;
+	});
+
+	// SIGINT handler — clean exit with final stats
+	process.on("SIGINT", () => {
+		process.stdout.write("\x1b[2J\x1b[H");
+		process.stdout.write("\x1b[?25h");
+		console.log(`WTFT watch stopped — ${interactionCount} interactions, $${totalCost.toFixed(4)} total cost.`);
+		process.exit(0);
+	});
+
+	const parseInteractions = (filePath: string): { interactions: Interaction[]; disabledEmoji: boolean; sessionInterval?: string; sessionLimit?: number; sessionMode?: "cumulative" | "bucket"; sessionShowTicks?: boolean; sessionTimezone?: string; } => {
+		const interactions: Interaction[] = [];
+		let disabledEmoji = false;
+		let sessionInterval: string | undefined;
+		let sessionLimit: number | undefined;
+		let sessionMode: "cumulative" | "bucket" | undefined;
+		let sessionShowTicks: boolean | undefined;
+		let sessionTimezone: string | undefined;
+
+		try {
+			const stat = fs.statSync(filePath);
+			const currentSize = stat.size;
+
+			if (currentSize < lastSize) {
+				// File truncated or rotated — reset
+				lastSize = 0;
+			}
+
+			if (currentSize <= lastSize) return { interactions, disabledEmoji, sessionInterval, sessionLimit, sessionMode, sessionShowTicks, sessionTimezone };
+
+			const fd = fs.openSync(filePath, "r");
+			const buf = Buffer.alloc(currentSize - lastSize);
+			fs.readSync(fd, buf, 0, buf.length, lastSize);
+			fs.closeSync(fd);
+			lastSize = currentSize;
+
+			const newContent = buf.toString("utf8");
+			const lines = newContent.split("\n");
+
+			for (const line of lines) {
+				if (!line.trim()) continue;
+				try {
+					const entry = JSON.parse(line);
+					if (entry.type === "custom" && entry.customType === "emoji-settings") {
+						if (entry.data && typeof entry.data.disabled === "boolean") {
+							disabledEmoji = entry.data.disabled;
+						}
+					} else if (entry.type === "custom" && entry.customType === "wtft-settings") {
+						if (entry.data) {
+							if (typeof entry.data.interval === "string") sessionInterval = entry.data.interval;
+							if (typeof entry.data.limit === "number") sessionLimit = entry.data.limit;
+							if (entry.data.mode === "cumulative" || entry.data.mode === "bucket") sessionMode = entry.data.mode;
+							if (typeof entry.data.showTicks === "boolean") sessionShowTicks = entry.data.showTicks;
+							if (typeof entry.data.timezone === "string") sessionTimezone = entry.data.timezone;
+						}
+					}
+					const interaction = parseEntryToInteraction(entry);
+					if (interaction) {
+						interactions.push(interaction);
+					}
+				} catch {
+					// Skip unparseable lines (partial writes, non-JSON)
+				}
+			}
+		} catch {
+			// File may not exist yet — just return empty
+		}
+
+		return { interactions, disabledEmoji, sessionInterval, sessionLimit, sessionMode, sessionShowTicks, sessionTimezone };
+	};
+
+	// Accumulator
+	let allInteractions: Interaction[] = [];
+	let disabledEmoji = settings.disabledEmoji;
+	let sessionInterval: string | undefined;
+	let sessionLimit: number | undefined;
+	let sessionMode: "cumulative" | "bucket" | undefined;
+	let sessionShowTicks: boolean | undefined;
+	let sessionTimezone: string | undefined;
+
+	const render = () => {
+		const width = getTerminalWidth();
+		const finalInterval = sessionInterval ?? settings.interval;
+		const finalLimit = sessionLimit ?? settings.limit;
+		const finalMode = sessionMode ?? settings.mode;
+		const finalShowTicks = sessionShowTicks ?? settings.showTicks;
+		const finalTimezone = sessionTimezone ?? settings.timezone;
+		const finalWidth = Math.min(settings.width, width);
+
+		const defaultSettings = {
+			interval: "1h", limit: 100, width: finalWidth,
+			showTicks: true, mode: "cumulative" as "cumulative" | "bucket",
+			timezone: undefined
+		};
+
+		const lines = buildWtftLines(allInteractions, defaultSettings, {
+			interval: finalInterval,
+			limit: finalLimit,
+			width: finalWidth,
+			showTicks: finalShowTicks,
+			mode: finalMode,
+			timezone: finalTimezone,
+			disabledEmoji
+		});
+
+		const buf: string[] = [];
+		buf.push("\x1b[2J\x1b[H"); // Clear screen, home cursor
+
+		if (lines && lines.length > 0) {
+			for (const l of lines) buf.push(l);
+		} else {
+			buf.push("\x1b[90mWaiting for session data...\x1b[0m");
+		}
+
+		totalCost = allInteractions.reduce((sum, i) => sum + i.cost, 0);
+		interactionCount = allInteractions.length;
+
+		buf.push("");
+		buf.push(`\x1b[90mWatching ${sessionName} (${interactionCount} interactions, $${totalCost.toFixed(4)}) — Ctrl+C to exit\x1b[0m`);
+
+		process.stdout.write(buf.join("\n"));
+		needsRedraw = false;
+	};
+
+	// Initial render
+	render();
+
+	// Poll loop
+	const POLL_MS = 500;
+	while (true) {
+		await new Promise(resolve => setTimeout(resolve, POLL_MS));
+
+		// Check if file still exists
+		if (!fs.existsSync(sessionPath)) {
+			lastSize = 0;
+			needsRedraw = true;
+			render();
+			continue;
+		}
+
+		const { interactions: newInteractions, disabledEmoji: newDisabledEmoji, sessionInterval: newInterval, sessionLimit: newLimit, sessionMode: newMode, sessionShowTicks: newTicks, sessionTimezone: newTz } = parseInteractions(sessionPath);
+
+		if (newDisabledEmoji !== undefined) disabledEmoji = newDisabledEmoji;
+		if (newInterval !== undefined) sessionInterval = newInterval;
+		if (newLimit !== undefined) sessionLimit = newLimit;
+		if (newMode !== undefined) sessionMode = newMode;
+		if (newTicks !== undefined) sessionShowTicks = newTicks;
+		if (newTz !== undefined) sessionTimezone = newTz;
+
+		if (newInteractions.length > 0) {
+			allInteractions.push(...newInteractions);
+			needsRedraw = true;
+		}
+
+		if (needsRedraw) {
+			render();
+		}
+	}
+}
+
 async function main() {
 	const isIndex = /^\d+$/.test(targetSessionPath || "");
 	const candidates = discoverSessions(harnessOption);
@@ -374,6 +571,24 @@ async function main() {
 	if (!finalSessionPath || !fs.existsSync(finalSessionPath)) {
 		console.error("❌ Error: Selected session log file path is invalid or does not exist.");
 		process.exit(1);
+	}
+
+	// ---
+	// WATCH MODE: enter live re-render loop (#45)
+	// ---
+	if (showWatch) {
+		const termColumns = getTerminalWidth();
+		const maxWidth = hasWidth ? (maxWidthOption as number) : 240;
+		await watchMode(finalSessionPath, {
+			interval: hasInterval ? intervalStr : "1h",
+			limit: hasLimit ? limit : 100,
+			width: Math.min(maxWidth, termColumns),
+			mode: (hasCumulative || hasBucket) ? mode : "cumulative",
+			showTicks: (hasTicks || hasNoTicks) ? showTicks : true,
+			timezone: hasTz ? timezone : undefined,
+			disabledEmoji: false
+		});
+		return; // watchMode never returns until SIGINT
 	}
 
 	// Resolve all subagent files to recursively roll up cost if applicable

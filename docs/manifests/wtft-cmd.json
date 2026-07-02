@@ -4,51 +4,61 @@
   "description": "Displays a horizontal, stacked TUI bar chart widget of your session's token costs classified into Spec, Code, and Other work types.",
   "why": [
     {
-      "scenario": "You just finished a coding session and want to see where your token costs went — was it all spec-writing or code refactoring?",
-      "commands": [""],
+      "scenario": "You just finished a coding session and want to see where your token costs went \u2014 was it all spec-writing or code refactoring?",
+      "commands": [
+        ""
+      ],
       "result": "A stacked bar chart widget appears showing token costs broken into Spec, Code, and Other categories over 1-hour intervals. You see exactly which hours burned the most tokens.",
       "demo": [
-        "\u001b[90m── Jul-01 ──────────────────────────────────────────────────────\u001b[0m",
-        "\u001b[90m13:00\u001b[0m  \u001b[90m+$0.12\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[38;5;108m████\u001b[0m\u001b[38;5;173m███\u001b[0m\u001b[38;5;238m░\u001b[0m",
-        "\u001b[90m14:00\u001b[0m  \u001b[90m+$0.51\u001b[0m  \u001b[1;37m$1.74\u001b[0m  \u001b[38;5;108m██████\u001b[0m\u001b[38;5;108;48;5;173m▒\u001b[0m\u001b[38;5;173m█\u001b[0m",
-        "\u001b[90m15:00\u001b[0m  \u001b[90m+$0.09\u001b[0m  \u001b[1;37m$1.83\u001b[0m  \u001b[38;5;108m██\u001b[0m\u001b[38;5;238m░░\u001b[0m"
+        "\u001b[90m\u2500\u2500 Jul-01 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[0m",
+        "\u001b[90m13:00\u001b[0m  \u001b[90m+$0.12\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;173m\u2588\u2588\u2588\u001b[0m\u001b[38;5;238m\u2591\u001b[0m",
+        "\u001b[90m14:00\u001b[0m  \u001b[90m+$0.51\u001b[0m  \u001b[1;37m$1.74\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;108;48;5;173m\u2592\u001b[0m\u001b[38;5;173m\u2588\u001b[0m",
+        "\u001b[90m15:00\u001b[0m  \u001b[90m+$0.09\u001b[0m  \u001b[1;37m$1.83\u001b[0m  \u001b[38;5;108m\u2588\u2588\u001b[0m\u001b[38;5;238m\u2591\u2591\u001b[0m"
       ]
     },
     {
       "scenario": "You're tracking costs over a full workday and want finer granularity.",
-      "commands": ["-i 4h -l 48"],
+      "commands": [
+        "-i 4h -l 48"
+      ],
       "result": "The last 48 four-hour intervals are displayed, giving you a two-day cost breakdown at quarter-day resolution.",
       "demo": [
-        "\u001b[90m── Jul-01 ───────────────────────────\u001b[0m",
-        "\u001b[90m00:00\u001b[0m  \u001b[1;37m$3.45\u001b[0m  \u001b[38;5;108m████\u001b[0m\u001b[38;5;173m███\u001b[0m\u001b[38;5;134m█\u001b[0m",
-        "\u001b[90m04:00\u001b[0m  \u001b[1;37m$8.12\u001b[0m  \u001b[38;5;108m███████\u001b[0m\u001b[38;5;173m████\u001b[0m",
-        "\u001b[90m08:00\u001b[0m  \u001b[1;37m$2.10\u001b[0m  \u001b[38;5;108m██\u001b[0m\u001b[38;5;168m░\u001b[0m\u001b[38;5;238m░\u001b[0m"
+        "\u001b[90m\u2500\u2500 Jul-01 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[0m",
+        "\u001b[90m00:00\u001b[0m  \u001b[1;37m$3.45\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;173m\u2588\u2588\u2588\u001b[0m\u001b[38;5;134m\u2588\u001b[0m",
+        "\u001b[90m04:00\u001b[0m  \u001b[1;37m$8.12\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;173m\u2588\u2588\u2588\u2588\u001b[0m",
+        "\u001b[90m08:00\u001b[0m  \u001b[1;37m$2.10\u001b[0m  \u001b[38;5;108m\u2588\u2588\u001b[0m\u001b[38;5;168m\u2591\u001b[0m\u001b[38;5;238m\u2591\u001b[0m"
       ]
     },
     {
       "scenario": "You're auditing Claude Code sessions (not Pi) to compare costs across harnesses.",
-      "commands": ["--harness claude-code"],
+      "commands": [
+        "--harness claude-code"
+      ],
       "result": "The widget pulls session data from your Claude Code session directory instead of Pi's, rendering the same bar chart for Claude interactions.",
       "demo": [
-        "\u001b[90m── Jul-01 (Claude Code) ────────────\u001b[0m",
-        "\u001b[90m10:00\u001b[0m  \u001b[1;37m$5.67\u001b[0m  \u001b[38;5;108m██████\u001b[0m\u001b[38;5;173m██\u001b[0m\u001b[38;5;108;48;5;173m▒\u001b[0m",
-        "\u001b[90m11:00\u001b[0m  \u001b[1;37m$2.34\u001b[0m  \u001b[38;5;108m███\u001b[0m\u001b[38;5;73m█\u001b[0m\u001b[38;5;67m█\u001b[0m"
+        "\u001b[90m\u2500\u2500 Jul-01 (Claude Code) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[0m",
+        "\u001b[90m10:00\u001b[0m  \u001b[1;37m$5.67\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;173m\u2588\u2588\u001b[0m\u001b[38;5;108;48;5;173m\u2592\u001b[0m",
+        "\u001b[90m11:00\u001b[0m  \u001b[1;37m$2.34\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u001b[0m\u001b[38;5;73m\u2588\u001b[0m\u001b[38;5;67m\u2588\u001b[0m"
       ]
     },
     {
       "scenario": "You want to scroll through a long cost history that doesn't fit in the TUI widget.",
-      "commands": ["-p"],
+      "commands": [
+        "-p"
+      ],
       "result": "A fullscreen scrollable pager overlay opens with the expanded cost timeline.",
       "demo": [
-        "\u001b[1;36m┌── WTFT Cost Audit Scrollable Pager ──┐\u001b[0m",
-        "\u001b[90m│\u001b[0m \u001b[90m13:00\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[38;5;108m████\u001b[0m\u001b[38;5;173m███\u001b[0m\u001b[38;5;238m░\u001b[0m      \u001b[90m│\u001b[0m",
-        "\u001b[90m│\u001b[0m \u001b[90m14:00\u001b[0m  \u001b[1;37m$1.74\u001b[0m  \u001b[38;5;108m██████\u001b[0m\u001b[38;5;173m█\u001b[0m      \u001b[90m│\u001b[0m",
-        "\u001b[1;36m└── ↑↓/j/k  ·  q/Esc exit (Row 1/32) ──┘\u001b[0m"
+        "\u001b[1;36m\u250c\u2500\u2500 WTFT Cost Audit Scrollable Pager \u2500\u2500\u2510\u001b[0m",
+        "\u001b[90m\u2502\u001b[0m \u001b[90m13:00\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;173m\u2588\u2588\u2588\u001b[0m\u001b[38;5;238m\u2591\u001b[0m      \u001b[90m\u2502\u001b[0m",
+        "\u001b[90m\u2502\u001b[0m \u001b[90m14:00\u001b[0m  \u001b[1;37m$1.74\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;173m\u2588\u001b[0m      \u001b[90m\u2502\u001b[0m",
+        "\u001b[1;36m\u2514\u2500\u2500 \u2191\u2193/j/k  \u00b7  q/Esc exit (Row 1/32) \u2500\u2500\u2518\u001b[0m"
       ]
     },
     {
       "scenario": "The 'Other' category in your WTFT widget is consuming a large share of your session cost and you want to drill into which specific commands are causing it.",
-      "commands": ["--other"],
+      "commands": [
+        "--other"
+      ],
       "result": "A grouped histogram appears, breaking 'Other' commands into semantic sub-categories (Build & Bundling, Linting & Formatting, System Utilities, etc.) with per-command counts and costs. Unclassified commands appear under their own section.",
       "demo": [
         "",
@@ -67,36 +77,118 @@
     },
     {
       "scenario": "You want to see the exact USD amount on your billing invoice or reconcile costs across multiple providers.",
-      "commands": ["  # won't help"],
-      "result": "WTFT uses public pricing estimates per model and excludes things like caching discounts, free-tier credits, or provider-specific billing nuances. It's a directional cost-awareness tool — not an accounting ledger."
+      "commands": [
+        "  # won't help"
+      ],
+      "result": "WTFT uses public pricing estimates per model and excludes things like caching discounts, free-tier credits, or provider-specific billing nuances. It's a directional cost-awareness tool \u2014 not an accounting ledger."
     }
   ],
   "usage": [
-    { "flags": "-i, --interval <size><m|h|d|w>", "desc": "Group cost data into arbitrary binned intervals of minutes, hours, days, or weeks (e.g., 1m, 7m, 4h, 1d, 2w; default: 1h)." },
-    { "flags": "-l, --limit <number>", "desc": "Limit the number of interval bars displayed (default: 10)." },
-    { "flags": "-w, --width <number>", "desc": "Set the maximum character width of the TUI widget (default: 240)." },
-    { "flags": "-t, --tz, --timezone <zone>", "desc": "Set the display timezone (e.g., America/New_York, Europe/London, Asia/Tokyo) to avoid UTC display on servers (default: system local)." },
-    { "flags": "-c, --cumulative", "desc": "Render bars as cumulative sums over time (each bar is sum of current and all prior intervals) (default behavior)." },
-    { "flags": "-b, --bucket", "desc": "Render bars as discrete interval cost buckets." },
-    { "flags": "--ticks", "desc": "Display proportional cost scale tick marks above the bars (default behavior)." },
-    { "flags": "--no-ticks", "desc": "Disable cost scale tick marks above the bars." },
-    { "flags": "-p, --pager", "desc": "Launch an interactive scrollable fullscreen pager overlay to view expanded cost history." },
-    { "flags": "-o, --other", "desc": "Print a histogram of 'Other' commands grouped by semantic sub-category (Build, Lint, Test, System, etc.) with per-command counts and costs." },
-    { "flags": "-S, --show", "desc": "Show or refresh the WTFT cost-auditing widget (default behavior)." },
-    { "flags": "-H, --hide", "desc": "Hide the WTFT cost-auditing widget." },
-    { "flags": "--no-emoji", "desc": "Disable emoji icons and use clean single-width ASCII characters for TUI widgets." },
-    { "flags": "--emoji", "desc": "Enable emoji icons in TUI widgets." },
-    { "flags": "--help, -h", "desc": "Display this help information." },
-    { "flags": "--why", "desc": "Explain why you'd run this tool, with user scenarios and anti-use-cases." }
+    {
+      "flags": "-i, --interval <size><m|h|d|w>",
+      "desc": "Group cost data into arbitrary binned intervals of minutes, hours, days, or weeks (e.g., 1m, 7m, 4h, 1d, 2w; default: 1h)."
+    },
+    {
+      "flags": "-l, --limit <number>",
+      "desc": "Limit the number of interval bars displayed (default: 10)."
+    },
+    {
+      "flags": "-w, --width <number>",
+      "desc": "Set the maximum character width of the TUI widget (default: 240)."
+    },
+    {
+      "flags": "-t, --tz, --timezone <zone>",
+      "desc": "Set the display timezone (e.g., America/New_York, Europe/London, Asia/Tokyo) to avoid UTC display on servers (default: system local)."
+    },
+    {
+      "flags": "-c, --cumulative",
+      "desc": "Render bars as cumulative sums over time (each bar is sum of current and all prior intervals) (default behavior)."
+    },
+    {
+      "flags": "-b, --bucket",
+      "desc": "Render bars as discrete interval cost buckets."
+    },
+    {
+      "flags": "--ticks",
+      "desc": "Display proportional cost scale tick marks above the bars (default behavior)."
+    },
+    {
+      "flags": "--no-ticks",
+      "desc": "Disable cost scale tick marks above the bars."
+    },
+    {
+      "flags": "-p, --pager",
+      "desc": "Launch an interactive scrollable fullscreen pager overlay to view expanded cost history."
+    },
+    {
+      "flags": "-o, --other",
+      "desc": "Print a histogram of 'Other' commands grouped by semantic sub-category (Build, Lint, Test, System, etc.) with per-command counts and costs."
+    },
+    {
+      "flags": "-S, --show",
+      "desc": "Show or refresh the WTFT cost-auditing widget (default behavior)."
+    },
+    {
+      "flags": "-H, --hide",
+      "desc": "Hide the WTFT cost-auditing widget."
+    },
+    {
+      "flags": "--no-emoji",
+      "desc": "Disable emoji icons and use clean single-width ASCII characters for TUI widgets."
+    },
+    {
+      "flags": "-W, --watch",
+      "desc": "Watch a session file for changes and re-render the bar chart in real-time (companion terminal mode for Claude Code). Ctrl+C to exit."
+    },
+    {
+      "flags": "--emoji",
+      "desc": "Enable emoji icons in TUI widgets."
+    },
+    {
+      "flags": "--help, -h",
+      "desc": "Display this help information."
+    },
+    {
+      "flags": "--why",
+      "desc": "Explain why you'd run this tool, with user scenarios and anti-use-cases."
+    }
   ],
   "examples": [
-    { "cmd": "/wtft", "desc": "Analyze session cost breakdown in a widget below the editor (240 chars wide)." },
-    { "cmd": "/wtft -i 7m", "desc": "Group token costs into custom 7-minute intervals." },
-    { "cmd": "/wtft -t America/New_York", "desc": "Render binned date/time labels in Eastern Standard Time." },
-    { "cmd": "/wtft -i 4h -l 20", "desc": "Show last 20 4-hour interval bars of cumulative token costs." },
-    { "cmd": "/wtft --show", "desc": "Force show or refresh the cost audit widget." },
-    { "cmd": "/wtft -p", "desc": "View a full, scrollable cost audit timeline inside a fullscreen TUI pager." },
-    { "cmd": "/wtft --other", "desc": "Print a histogram of 'Other' commands grouped by semantic sub-category." },
-    { "cmd": "/wtft --hide", "desc": "Hide the cost audit widget from the display." }
+    {
+      "cmd": "/wtft",
+      "desc": "Analyze session cost breakdown in a widget below the editor (240 chars wide)."
+    },
+    {
+      "cmd": "/wtft -i 7m",
+      "desc": "Group token costs into custom 7-minute intervals."
+    },
+    {
+      "cmd": "/wtft -t America/New_York",
+      "desc": "Render binned date/time labels in Eastern Standard Time."
+    },
+    {
+      "cmd": "/wtft -i 4h -l 20",
+      "desc": "Show last 20 4-hour interval bars of cumulative token costs."
+    },
+    {
+      "cmd": "/wtft --show",
+      "desc": "Force show or refresh the cost audit widget."
+    },
+    {
+      "cmd": "/wtft -p",
+      "desc": "View a full, scrollable cost audit timeline inside a fullscreen TUI pager."
+    },
+    {
+      "cmd": "/wtft --other",
+      "desc": "Print a histogram of 'Other' commands grouped by semantic sub-category."
+    },
+    {
+      "cmd": "/wtft --hide",
+      "desc": "Hide the cost audit widget from the display."
+    },
+    {
+      "cmd": "/wtft --watch",
+      "desc": "Watch a session file in real-time and re-render the bar chart as new interactions arrive."
+    }
   ]
 }

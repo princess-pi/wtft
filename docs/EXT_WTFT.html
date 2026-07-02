@@ -205,5 +205,42 @@
         <li><strong>Step 2 (Interval Binning Test):</strong> Verify that setting <code>-i 6m</code> groupings binned the events correctly across tight time gaps.</li>
         <li><strong>Step 3 (Color rendering check):</strong> Run `/wtft` and verify that ANSI codes map correctly to your terminal theme without leaving raw escape characters.</li>
     </ul>
+
+    <h3>Why run /wtft?</h3>
+    <div id="wtft-why-reference" style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040;">
+        <em style="color: #666;">Loading why scenarios...</em>
+    </div>
+
+    <script>
+        fetch('manifests/wtft-cmd.json')
+            .then(r => r.json())
+            .then(data => {
+                const container = document.getElementById('wtft-why-reference');
+                if (!container) return;
+                const invokedAs = "/wtft";
+                const scenarios = data.why || [];
+                if (scenarios.length === 0) {
+                    container.innerHTML = '<p style="color:#666">No scenarios defined.</p>';
+                    return;
+                }
+                let html = '';
+                scenarios.forEach(s => {
+                    html += `<div style="margin-bottom: 12px; padding-left: 12px;">`;
+                    html += `<p style="margin: 0 0 4px 0;">${s.scenario}</p>`;
+                    s.commands.forEach(cmd => {
+                        const fullCmd = cmd ? `${invokedAs} ${cmd}` : invokedAs;
+                        html += `<code style="color: var(--accent-orange);">$ ${fullCmd}</code><br>`;
+                    });
+                    html += `<span style="color: var(--accent-green);">→ ${s.result}</span>`;
+                    html += `</div>`;
+                });
+                container.innerHTML = html;
+            })
+            .catch(err => {
+                const container = document.getElementById('wtft-why-reference');
+                if (container) container.innerHTML = `<p style="color:var(--anchor-red)">Failed to load command manifest: ${err}</p>`;
+            });
+    </script>
+
 </body>
 </html>

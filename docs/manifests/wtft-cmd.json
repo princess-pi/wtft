@@ -76,6 +76,20 @@
       ]
     },
     {
+      "scenario": "You're running Claude Code and want a companion terminal showing live token costs as your session progresses.",
+      "commands": [
+        "--watch"
+      ],
+      "result": "A real-time updating bar chart appears, re-rendering in-place as new interactions are logged. Runs until Ctrl+C. Ideal in a separate tmux pane.",
+      "demo": [
+        "\u001b[90mWatching session-abc123.jsonl (15 interactions, $4.23) \u2014 Ctrl+C to exit\u001b[0m",
+        "\u001b[90m\u2500\u2500 Jul-01 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[0m",
+        "\u001b[90m13:00\u001b[0m  \u001b[90m+$0.12\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;173m\u2588\u2588\u2588\u001b[0m\u001b[38;5;238m\u2591\u001b[0m",
+        "\u001b[90m14:00\u001b[0m  \u001b[90m+$0.51\u001b[0m  \u001b[1;37m$1.74\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;108;48;5;173m\u2592\u001b[0m\u001b[38;5;173m\u2588\u001b[0m",
+        "\u001b[90m15:00\u001b[0m  \u001b[90m+$0.09\u001b[0m  \u001b[1;37m$1.83\u001b[0m  \u001b[38;5;108m\u2588\u2588\u001b[0m\u001b[38;5;238m\u2591\u2591\u001b[0m"
+      ]
+    },
+    {
       "scenario": "You want to see the exact USD amount on your billing invoice or reconcile costs across multiple providers.",
       "commands": [
         "  # won't help"

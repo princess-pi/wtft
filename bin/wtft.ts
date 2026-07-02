@@ -9,6 +9,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import {
 	buildWtftLines,
 	parseEntryToInteraction,
@@ -40,7 +41,7 @@ let showOther = false;
 
 function printWhy(): void {
 	try {
-		const manifestPath = path.join(process.cwd(), "docs", "manifests", "wtft-cmd.json");
+		const manifestPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "docs", "manifests", "wtft-cmd.json");
 		const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 		let text = `${manifest.name} - ${manifest.tagline}
 

@@ -8,6 +8,7 @@ import {
 	type Interaction,
 	classifyInteraction,
 	formatCost,
+	getSemanticCommandGroup,
 	parseEntryToInteraction,
 	renderOtherHistogram,
 	getTerminalWidth,

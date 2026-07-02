@@ -928,7 +928,82 @@ export function buildWtftLines(
 		}
 	}
 
+	// ---
+	// Proactive "Other" bloat warning (#17)
+	// Trigger: other > 20% of total session cost AND absolute other > $6.00
+	// ---
+	const totalOtherCost = displayedBins.reduce((sum, b) => sum + (b.costs.other || 0), 0);
+	if (totalSessionCost > 0) {
+		const otherPct = totalOtherCost / totalSessionCost;
+		if (otherPct > 0.20 && totalOtherCost > 6.00) {
+			const pctStr = `${Math.round(otherPct * 100)}%`;
+			const costStr = formatCost(totalOtherCost);
+			// Warning line: bright yellow bold for visibility in widget and CLI
+			widgetLines.push(`\x1b[1;33m⚠️  "Other" category: ${pctStr} of session cost (${costStr}). Run wtft-other to drill down.\x1b[0m`);
+		}
+	}
+
 	return widgetLines;
+}
+
+// ---
+// SEMANTIC COMMAND SUB-CLASSIFICATION
+// Maps bare command names to semantic groups for wtft-other histogram.
+// ---
+
+const SEMANTIC_GROUPS: Record<string, { label: string; commands: Set<string> }> = {
+	build: {
+		label: "Build & Bundling",
+		commands: new Set(["npm", "npx", "esbuild", "webpack", "vite", "tsc", "make", "gcc", "cargo", "go", "pnpm", "yarn", "bun", "node", "tsx", "ts-node", "cmake", "ninja", "g++"])
+	},
+	deps: {
+		label: "Dependency Management",
+		commands: new Set(["pip", "pip3", "gem", "brew", "apt-get", "apt", "dnf", "pacman", "zypper", "apk"])
+	},
+	lint: {
+		label: "Linting & Formatting",
+		commands: new Set(["eslint", "prettier", "black", "rustfmt", "shfmt", "biome", "stylelint", "shellcheck", "ruff", "flake8", "pylint", "clippy"])
+	},
+	test: {
+		label: "Testing",
+		commands: new Set(["jest", "vitest", "pytest", "cypress", "playwright", "mocha", "ava", "tap", "karma"])
+	},
+	db: {
+		label: "Database & Infrastructure",
+		commands: new Set(["sqlite3", "psql", "mysql", "docker", "kubectl", "aws", "terraform", "gh", "fly", "railway", "mongo", "redis-cli", "pg_dump", "pg_restore"])
+	},
+	sys: {
+		label: "System & File Utilities",
+		commands: new Set(["ls", "mkdir", "cp", "rm", "mv", "chmod", "chown", "touch", "wc", "du", "df", "which", "echo", "pwd", "cd", "ln", "stat", "file", "realpath", "readlink", "dirname", "basename", "tar", "gzip", "gunzip", "zip", "unzip", "curl", "wget", "ssh", "scp", "rsync"])
+	},
+	git: {
+		label: "Git Operations",
+		commands: new Set(["git"])
+	},
+	session: {
+		label: "Session & Agent",
+		commands: new Set(["pi", "python", "python3", "bash", "zsh", "clear", "exit", "source", ".", "exec", "env", "export", "alias", "unalias"])
+	}
+};
+
+export function getSemanticCommandGroup(command: string): string | null {
+	const base = command.split("/").pop() || command; // Strip path prefix e.g. /usr/bin/ls → ls
+	for (const [key, group] of Object.entries(SEMANTIC_GROUPS)) {
+		if (group.commands.has(base)) return group.label;
+	}
+	// Git subcommands: anything starting with "git" → Git Operations
+	if (base === "git" || command.startsWith("git ")) return SEMANTIC_GROUPS.git.label;
+	// npm subcommands → Build & Bundling (covers npm run/build/test/install/etc.)
+	if (command.startsWith("npm ")) return SEMANTIC_GROUPS.build.label;
+	// yarn/pnpm/bun subcommands → Build & Bundling
+	if (command.startsWith("yarn ") || command.startsWith("pnpm ") || command.startsWith("bun ")) return SEMANTIC_GROUPS.build.label;
+	// go subcommands → Build & Bundling
+	if (command.startsWith("go ")) return SEMANTIC_GROUPS.build.label;
+	// cargo subcommands not already matched
+	if (command.startsWith("cargo ")) return SEMANTIC_GROUPS.build.label;
+	// pip subcommands → Deps
+	if (command.startsWith("pip ") || command.startsWith("pip3 ")) return SEMANTIC_GROUPS.deps.label;
+	return null;
 }
 
 export function renderOtherHistogram(interactions: Interaction[], maxWidth: number = 80): string {
@@ -968,28 +1043,67 @@ export function renderOtherHistogram(interactions: Interaction[], maxWidth: numb
 		return "No 'Other' commands found in this session.";
 	}
 
+	// Group commands by semantic category
+	const groups = new Map<string, { count: number; cost: number; commands: Map<string, { count: number; cost: number }> }>();
+
+	for (const [cmd, data] of commandMap) {
+		const groupName = getSemanticCommandGroup(cmd) || "Unclassified";
+		let group = groups.get(groupName);
+		if (!group) {
+			group = { count: 0, cost: 0, commands: new Map() };
+			groups.set(groupName, group);
+		}
+		group.count += data.count;
+		group.cost += data.cost;
+		group.commands.set(cmd, data);
+	}
+
+	// Sort groups: known categories first (by spec order), then Unclassified last
+	const groupOrder = [
+		"Build & Bundling",
+		"Dependency Management",
+		"Linting & Formatting",
+		"Testing",
+		"Database & Infrastructure",
+		"System & File Utilities",
+		"Git Operations",
+		"Session & Agent"
+	];
+	const sortedGroups = Array.from(groups.entries()).sort((a, b) => {
+		const ai = groupOrder.indexOf(a[0]);
+		const bi = groupOrder.indexOf(b[0]);
+		if (ai === -1 && bi === -1) return a[0].localeCompare(b[0]);
+		if (ai === -1) return 1;
+		if (bi === -1) return -1;
+		return ai - bi;
+	});
+
 	let output = "--- 'Other' Command Histogram ---\n";
-	
-	// Sort command map entries by count descending
-	const sortedEntries = Array.from(commandMap.entries()).sort((a, b) => b[1].count - a[1].count);
 
 	// Find max command length for alignment
 	let maxCmdLen = 0;
 	for (const cmd of commandMap.keys()) maxCmdLen = Math.max(maxCmdLen, cmd.length);
-	
-	const countWidth = 7; // Fixed width for "(count)"
-	const costWidth = 10; // Fixed width for "$1.0000"
 
-	for (const [cmd, data] of sortedEntries) {
-		const countStr = `(${data.count})`.padStart(countWidth);
-		const costStr = `$${data.cost.toFixed(4)}`.padStart(costWidth);
-		
-		// Available space for bars
-		const barWidth = Math.max(5, maxWidth - maxCmdLen - countWidth - costWidth - 10);
-		const bar = "#".repeat(Math.min(data.count, barWidth));
-		
-		output += `${cmd.padEnd(maxCmdLen)} ${costStr} ${countStr} : ${bar}\n`;
+	const countWidth = 7;
+	const costWidth = 10;
+
+	for (const [groupName, group] of sortedGroups) {
+		const groupCostStr = `$${group.cost.toFixed(4)}`;
+		output += `\n[${groupName}]  (${group.count} calls, ${groupCostStr})\n`;
+
+		// Sort commands within group by count descending
+		const sortedCmds = Array.from(group.commands.entries()).sort((a, b) => b[1].count - a[1].count);
+
+		for (const [cmd, data] of sortedCmds) {
+			const countStr = `(${data.count})`.padStart(countWidth);
+			const costStr = `$${data.cost.toFixed(4)}`.padStart(costWidth);
+
+			const barWidth = Math.max(5, maxWidth - maxCmdLen - countWidth - costWidth - 10);
+			const bar = "#".repeat(Math.min(data.count, barWidth));
+
+			output += `  ${cmd.padEnd(maxCmdLen)} ${costStr} ${countStr} : ${bar}\n`;
+		}
 	}
-	
+
 	return output;
 }

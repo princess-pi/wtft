@@ -13,6 +13,7 @@ import {
 	buildWtftLines,
 	parseEntryToInteraction,
 	renderOtherHistogram,
+	getSemanticCommandGroup,
 	formatCost,
 	type Interaction,
 	type Category,

@@ -146,23 +146,36 @@ export function parseEntryToInteraction(entry: any): Interaction | null {
 
 	if (isPiSchema || isClaudeSchema) {
 		const assistantMsg = entry.message;
-		
-		let cost = 0;
-		if (assistantMsg.usage?.cost?.total !== undefined) {
-			// Pi Coding Agent native cost tracking
-			cost = assistantMsg.usage.cost.total;
-		} else if (assistantMsg.model && assistantMsg.usage) {
-			// Claude Code token usage fallback calculation
-			cost = calculateClaudeCost(assistantMsg.model, assistantMsg.usage, timestamp);
-		}
 
-		// Use assistantMsg.timestamp if available (Pi), fallback to top-level entry.timestamp (Claude Code)
+		// Parse timestamp first — used below for DeepSeek peak pricing
 		let timestampStr = assistantMsg.timestamp || entry.timestamp;
 		let timestamp = 0;
 		if (typeof timestampStr === "string") {
 			timestamp = new Date(timestampStr).getTime();
 		} else if (typeof timestampStr === "number") {
 			timestamp = timestampStr;
+		}
+
+		let cost = 0;
+		// Prefer Pi's native cost tracking, but fall through to manual calculation
+		// when cost.total is 0 while actual tokens were consumed (e.g. DeepSeek pricing
+		// not yet supported by Pi's internal cost tracker). Also normalize Pi's field
+		// names (input/output) to the Anthropic-compat names (input_tokens/output_tokens).
+		const usage = assistantMsg.usage || {};
+		const piCost = usage.cost?.total;
+		const hasTokens = (usage.input_tokens || usage.input || 0) > 0 ||
+		                  (usage.output_tokens || usage.output || 0) > 0;
+		if (piCost !== undefined && piCost !== null && !(piCost === 0 && hasTokens)) {
+			cost = piCost;
+		} else if (assistantMsg.model && hasTokens) {
+			// Normalize Pi field names to Anthropic-compat for calculateClaudeCost
+			const normalizedUsage = {
+				input_tokens: usage.input_tokens ?? usage.input ?? 0,
+				output_tokens: usage.output_tokens ?? usage.output ?? 0,
+				cache_creation_input_tokens: usage.cache_creation_input_tokens ?? usage.cacheWrite ?? 0,
+				cache_read_input_tokens: usage.cache_read_input_tokens ?? usage.cacheRead ?? 0,
+			};
+			cost = calculateClaudeCost(assistantMsg.model, normalizedUsage, timestamp);
 		}
 
 		const files: { path: string; action: "read" | "write" }[] = [];
@@ -489,7 +502,7 @@ export function buildTickLine(maxCost: number, barWidth: number, prefixWidth: nu
 	const tickValues = [0, maxCost / 4, maxCost / 2, (maxCost * 3) / 4, maxCost];
 
 	for (let i = 0; i < ticks.length; i++) {
-		const text = `$${tickValues[i].toFixed(2)}`;
+		const text = formatCost(tickValues[i]);
 		const displayStr = ` ${text} `; // Inverted block padding
 		
 		const dotIdx = displayStr.indexOf(".");
@@ -546,7 +559,11 @@ export function padString(str: string, len: number): string {
 }
 
 export function formatCost(cost: number): string {
-	return `$${cost.toFixed(2)}`;
+	// Adaptive precision: 4 decimal places for sub-cent values (< $0.01),
+	// 2 decimal places otherwise. Handles DeepSeek's sub-cent pricing
+	// ($0.14/M input) without cluttering Claude/Gemini displays.
+	const decimals = cost > 0 && cost < 0.01 ? 4 : 2;
+	return `$${cost.toFixed(decimals)}`;
 }
 
 export function formatMmmDdStr(dateStr: string): string {

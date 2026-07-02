@@ -13,6 +13,7 @@ import {
 	buildWtftLines,
 	parseEntryToInteraction,
 	renderOtherHistogram,
+	formatCost,
 	type Interaction,
 	type Category,
 	getTerminalWidth
@@ -248,7 +249,7 @@ async function selectSessionPrompt(candidates: SessionCandidate[]): Promise<stri
 					? `${c.name.substring(0, 10)}...${c.name.substring(c.name.length - 15)}`
 					: c.name;
 				const dateStr = new Date(c.timestamp).toLocaleString();
-				console.log(`  [${i + 1}] ${shortName.padEnd(28)} (${dateStr}) - ${stats.turns} turns, $${stats.cost.toFixed(2)} [${c.harness.toUpperCase()}]`);
+				console.log(`  [${i + 1}] ${shortName.padEnd(28)} (${dateStr}) - ${stats.turns} turns, ${formatCost(stats.cost)} [${c.harness.toUpperCase()}]`);
 			}
 			console.log(`\x1b[90mRun 'wtft -s <number>' to target a specific session index.\x1b[0m\n`);
 			resolve(candidates[0].path);
@@ -286,7 +287,8 @@ async function selectSessionPrompt(candidates: SessionCandidate[]): Promise<stri
 				const highlight = isSelected ? `\x1b[1m\x1b[36m` : "";
 				const reset = isSelected ? `\x1b[0m` : "";
 				
-				out += `${prefix}${highlight}${shortName.padEnd(28)}${reset} \x1b[90m(${dateStr})\x1b[0m  \x1b[32m$${stats.cost.toFixed(2).padStart(6)}\x1b[0m \x1b[90m(${stats.turns} turns) [${c.harness.toUpperCase()}]\x1b[0m\n`;
+				const costStr = `\x1b[32m${formatCost(stats.cost).padStart(7)}\x1b[0m`;
+			out += `${prefix}${highlight}${shortName.padEnd(28)}${reset} \x1b[90m(${dateStr})\x1b[0m  ${costStr} \x1b[90m(${stats.turns} turns) [${c.harness.toUpperCase()}]\x1b[0m\n`;
 			}
 			process.stdout.write(out);
 		};

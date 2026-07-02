@@ -720,7 +720,8 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
         helpText += `  /tpm --widget [on|off]                  Explicitly enable or disable the floating widget panel\n`;
         helpText += `  /tpm --footer [on|off]                  Explicitly enable or disable the bottom footer line 3\n`;
         helpText += `  /tpm --emoji                            Enable emoji icons in widgets/footer\n`;
-        helpText += `  /tpm --no-emoji                         Disable emoji icons in widgets/footer\n\n`;
+        helpText += `  /tpm --no-emoji                         Disable emoji icons in widgets/footer\n`;
+        helpText += `  /tpm --why                              Explain why you'd run this tool, with user scenarios\n\n`;
 
         helpText += `\x1b[1mAliases:\x1b[0m\n`;
         helpText += `  -w for --widget, -f for --footer\n\n`;

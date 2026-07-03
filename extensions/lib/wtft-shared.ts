@@ -724,13 +724,24 @@ export function buildTimelineString(
 		const isSurge = surgeHours.has(h);
 		const isCurrent = h === currentHour;
 
-		// Noon divider: default terminal color, diamond replaces it if h==12 is current
-		if (h === 12 && !isCurrent) {
+		// Noon divider: always emit the | separator at hour 12
+		// If h=12 is also the current hour, emit both | and the diamond
+		if (h === 12) {
 			if (lastColor !== "") {
 				segments.push({ color: "", text: "|" });
 				lastColor = "";
 			} else {
 				segments[segments.length - 1].text += "|";
+			}
+			if (isCurrent) {
+				// Also emit the diamond marker after the separator
+				const diaColor = "1;" + (isSurge ? "38;5;208" : "32");
+				if (diaColor !== lastColor) {
+					segments.push({ color: diaColor, text: "◆" });
+					lastColor = diaColor;
+				} else {
+					segments[segments.length - 1].text += "◆";
+				}
 			}
 			continue;
 		}

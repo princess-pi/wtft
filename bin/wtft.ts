@@ -19,12 +19,9 @@ import {
 	type Category,
 	getTerminalWidth
 } from "../extensions/lib/wtft-shared.ts";
-import { formatRelativeTime } from "../extensions/lib/session-path-shortener.ts";
 import {
 	discoverSessions,
-	getSessionSummary,
-	selectSessionPrompt,
-	type SessionCandidate
+	selectSessionPrompt
 } from "../extensions/lib/session-selector.ts";
 
 // ---

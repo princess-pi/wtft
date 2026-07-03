@@ -191,12 +191,17 @@
         <p><strong>2. Binning Engine:</strong> Groups entries by their <code>timestamp</code> into chronological bins based on the requested interval (e.g., 6-minute windows for granular auditing, or 1-day windows for multi-day tracks).</p>
         <p><strong>3. Scaling & Layout:</strong> Normalizes the absolute length of each interval's ASCII bar based on the maximum cost in any single interval (typically capped at 30-40 characters wide to fit standard terminal outputs gracefully). Each sub-segment within that bar is allocated its proportional share of characters based on its absolute cost contribution, without rendering percentages or additional trailing text.</p>
         <p><strong>4. Recursive Subagent Rollup:</strong> When a Claude Code session log is targeted, WTFT auto-detects if a subagent directory exists (e.g., <code>&lt;session-id&gt;/subagents/</code>). If present, WTFT recursively reads all subagent <code>.jsonl</code> logs and blends their interactions chronologically based on their individual timestamps. This guarantees that binned timelines and other command histograms represent the true, cumulative cost and work allocations of the entire multi-agent session tree.</p>
-        <p><strong>5. Smart Session Auto-Discovery & Selector:</strong> When running WTFT without an explicit session path option, WTFT discovers all available session logs for the current repository and environment. If multiple candidates exist:
+        <p><strong>5. Smart Session Auto-Discovery & Selector:</strong> When running WTFT without an explicit session path option, WTFT discovers all available session logs for the current repository and environment. Sessions are identified by their parent directory slug (e.g. <code>--home-&lt;user&gt;-git-projects-&lt;project&gt;--</code> for Pi, <code>-home-&lt;user&gt;-git-projects-&lt;project&gt;</code> for Claude). The selector display shortens the slug to a compact form: <code>~/g-p/&lt;project&gt;/&lt;date&gt;...&lt;uuid-tail&gt;</code> where <code>g-p</code> is the first-letter shortening of <code>git-projects</code> and the project name is kept in full. UUIDs are truncated to the last 4 hex characters. Session age is shown as a relative time (e.g. <code>2h ago</code>, <code>3d ago</code>). If multiple candidates exist:
             <ul>
-                <li><strong>Interactive Selector (TTY):</strong> If standard output is a real terminal (interactive TTY), WTFT renders an interactive selection screen showing shortened UUIDs (API-key style: <code>1422...665a</code>) with date/time and estimated costs/turns.</li>
+                <li><strong>Interactive Selector (TTY):</strong> If standard output is a real terminal (interactive TTY), WTFT renders an interactive selection screen showing the compact path slug, estimated cost, turn count, harness type, and relative time since last active.</li>
                 <li><strong>Non-Interactive List Fallback (Pipes/Claude Code '!'):</strong> If standard output is non-interactive (such as running <code>!wtft</code> inside Claude Code where standard input is closed), WTFT defaults to the newest session and prints a clean, numbered list of the top candidates. Users/agents can target any older session easily by running <code>wtft -s &lt;number&gt;</code>.</li>
             </ul>
         </p>
+        <pre style="background: var(--box-bg); padding: 12px; border-radius: 6px; border: 1px solid #404040; overflow-x: auto; color: #f0f0f0; font-family: monospace;">  [1] ~/g-p/princess-pi-packages/2026-07-02...9063    $0.12  (234t) [PI]  just now
+  [2] ~/g-p/princess-pi-packages/2026-07-02...268a    $0.45  (367t) [PI]  1d ago
+  [3] ~/g-p/princess-pi-packages/2026-07-02...beee    $0.35  (270t) [PI]  1d ago
+  [4] ~/g-p/princess-pi-packages/2026-07-02...433e    $0.04   (38t) [PI]  1d ago
+  [5] ~/g-p/princess-pi-packages/2026-06-11...9bbf   $63.28 (1202t) [PI]  1d ago</pre>
     </div>
 
     <h3>Proposed Verification Plan</h3>

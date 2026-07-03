@@ -12,7 +12,11 @@ import {
 	parseEntryToInteraction,
 	renderOtherHistogram,
 	getTerminalWidth,
-	getDeepSeekPeakMultiplier
+	getDeepSeekPeakMultiplier,
+	getCurrentLocalHour,
+	getSurgeLocalHours,
+	checkSurgeProximity,
+	buildTimelineString
 } from "./lib/wtft-shared.js";
 
 // ---
@@ -288,6 +292,7 @@ function buildWtftLines(
 		showTicks?: boolean;
 		mode?: "bucket" | "cumulative";
 		timezone?: string;
+		forceLegendRow?: boolean;
 	}
 ): string[] | null {
 	const branch = ctx.sessionManager.getBranch();
@@ -302,6 +307,9 @@ function buildWtftLines(
 
 	return sharedBuildWtftLines(interactions, getSettings(ctx), opts);
 }
+
+// SURGE TIMELINE helpers now imported from wtft-shared.js (getCurrentLocalHour,
+// getSurgeLocalHours, checkSurgeProximity, buildTimelineString)
 
 /**
  * Dynamically computes costs binned by interval and updates the TUI widget
@@ -328,24 +336,30 @@ function updateWtftWidget(
 		return;
 	}
 
-	const lines = buildWtftLines(ctx, pi, opts);
+	// Check model for surge coloring; timeline itself is always shown.
+	let isDeepSeek = false;
+	try {
+		const sessionCtx = ctx.sessionManager.buildSessionContext();
+		isDeepSeek = (sessionCtx?.model?.modelId || "").toLowerCase().includes("deepseek");
+	} catch (_) {}
+
+	// Force legend to its own row — timeline is always appended to title line
+	const buildOpts = { ...opts, forceLegendRow: true };
+	const lines = buildWtftLines(ctx, pi, buildOpts);
 	if (!lines || lines.length === 0) {
 		ctx.ui.setWidget("wtft", undefined);
 		return;
 	}
 
-	// DeepSeek peak pricing badge: if current model is DeepSeek and we're in peak hours,
-	// patch the title line to show [⚡ PEAK 2x]
-	try {
-		const sessionCtx = ctx.sessionManager.buildSessionContext();
-		const currentModel = (sessionCtx?.model?.modelId || "").toLowerCase();
-		if (currentModel.includes("deepseek") && getDeepSeekPeakMultiplier() > 1) {
-			const peakBadge = " \x1b[1;38;5;208m⚡ PEAK 2x\x1b[0m";
-			lines[0] = lines[0] + peakBadge;
-		}
-	} catch (_) {
-		// buildSessionContext not available (CLI mode), skip badge
-	}
+	// 24-hour timeline: colored by surge for DeepSeek, all green for other models
+	const tz = current.timezone;
+	const surgeHours = isDeepSeek ? getSurgeLocalHours(tz) : new Set<number>();
+	const currentHour = getCurrentLocalHour(tz);
+	const proximity = isDeepSeek ? checkSurgeProximity() : { status: undefined, multiplier: 1.0 };
+	const timelineStr = buildTimelineString(surgeHours, currentHour, proximity.status);
+
+	// Append inline to the title line — legend is always on row 2 via forceLegendRow
+	lines[0] = lines[0] + "  " + timelineStr;
 
 	ctx.ui.setWidget("wtft", lines, { placement: "belowEditor" });
 }
@@ -354,17 +368,35 @@ function updateWtftWidget(
 // MAIN EXTENSION ENTRY POINT
 // ---
 
+// Periodic refresh (1 min) so the 24hr timeline diamond and surge APPROACHING/ENDING
+// badges update in real time even without new session activity.
+let _wtftCtx: any = null;
+let _wtftRefreshTimer: ReturnType<typeof setInterval> | null = null;
+
 export default function wtftExtension(pi: ExtensionAPI) {
 	// 1. Auto-restore on startup
 	pi.on("session_start", async (_event, ctx) => {
+		_wtftCtx = ctx;
 		const current = getSettings(ctx);
 		if (current.visible) {
 			updateWtftWidget(ctx, pi);
+		}
+		// Start 1-minute timer for timeline live-updates
+		if (!_wtftRefreshTimer) {
+			_wtftRefreshTimer = setInterval(() => {
+				if (_wtftCtx) {
+					const s = getSettings(_wtftCtx);
+					if (s.visible) {
+						updateWtftWidget(_wtftCtx, pi);
+					}
+				}
+			}, 60000);
 		}
 	});
 
 	// 2. Auto-refresh on turn completion (zero token cost)
 	pi.on("agent_end", async (_event, ctx) => {
+		_wtftCtx = ctx;
 		const current = getSettings(ctx);
 		if (current.visible) {
 			updateWtftWidget(ctx, pi);

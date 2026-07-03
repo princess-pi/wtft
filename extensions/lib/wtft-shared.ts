@@ -632,6 +632,134 @@ export function getTerminalWidth(isWidget = false, disabledEmoji = false): numbe
 	return isWidget ? width - 2 : width;
 }
 
+// ---
+// SURGE TIMELINE: 24-hour bar showing normal (green) vs surge (orange) pricing
+// Used by both Pi TUI widget and CLI watch mode.
+// ---
+
+/**
+ * Get the current local hour (0-23) for a given timezone.
+ */
+export function getCurrentLocalHour(tz?: string): number {
+	const parts = getZonedParts(Date.now(), tz);
+	return parts.hour;
+}
+
+/**
+ * Get the UTC offset in ms for a given timezone at a given timestamp.
+ */
+export function getTimezoneOffsetMs(timestamp: number, tz: string): number {
+	const parts = getZonedParts(timestamp, tz);
+	const utcMs = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+	return utcMs - timestamp;
+}
+
+/**
+ * Returns which local hours (0-23) fall in a surge window,
+ * given the configured timezone. Surge windows defined in UTC:
+ * 01:00-04:00 and 06:00-10:00 UTC.
+ */
+export function getSurgeLocalHours(tz?: string): Set<number> {
+	const result = new Set<number>();
+	const now = Date.now();
+
+	for (let localHour = 0; localHour < 24; localHour++) {
+		let ts: number;
+		if (tz) {
+			const parts = getZonedParts(now, tz);
+			const offsetMs = getTimezoneOffsetMs(now, tz);
+			ts = Date.UTC(parts.year, parts.month - 1, parts.day, localHour, 0, 0, 0) - offsetMs;
+		} else {
+			const d = new Date();
+			d.setHours(localHour, 0, 0, 0);
+			ts = d.getTime();
+		}
+		const utcHour = new Date(ts).getUTCHours();
+		if ((utcHour >= 1 && utcHour < 4) || (utcHour >= 6 && utcHour < 10)) {
+			result.add(localHour);
+		}
+	}
+	return result;
+}
+
+/**
+ * Checks current surge proximity (in UTC). Returns status and multiplier.
+ */
+export function checkSurgeProximity(): { status: 'surge' | 'approaching' | 'ending' | undefined; multiplier: number } {
+	const now = new Date();
+	const currentUtcMinute = now.getUTCHours() * 60 + now.getUTCMinutes();
+	const surgeWindows: [number, number][] = [[60, 240], [360, 600]];
+
+	for (const [start, end] of surgeWindows) {
+		if (currentUtcMinute >= start && currentUtcMinute < end) {
+			return { status: 'surge', multiplier: 2.0 };
+		}
+		if (currentUtcMinute >= start - 20 && currentUtcMinute < start) {
+			return { status: 'approaching', multiplier: 2.0 };
+		}
+		if (currentUtcMinute >= end - 20 && currentUtcMinute < end) {
+			return { status: 'ending', multiplier: 2.0 };
+		}
+	}
+	return { status: undefined, multiplier: 1.0 };
+}
+
+/**
+ * Build a 24-hour surge timeline string in the format:
+ * (---[colored]---◆---) [⚡ SURGE 2x] [⚡ SURGE APPROACHING]
+ *
+ * @param surgeHours - Set of local hours (0-23) that are surge-priced
+ * @param currentHour - Current local hour (0-23) for diamond marker
+ * @param proximityStatus - If set, appends the appropriate surge badge
+ */
+export function buildTimelineString(
+	surgeHours: Set<number>,
+	currentHour: number,
+	proximityStatus?: 'surge' | 'approaching' | 'ending'
+): string {
+	const segments: { color: string; text: string }[] = [];
+	let lastColor: string | null = null;
+
+	for (let h = 0; h < 24; h++) {
+		const isSurge = surgeHours.has(h);
+		const isCurrent = h === currentHour;
+
+		// Noon divider: default terminal color, diamond replaces it if h==12 is current
+		if (h === 12 && !isCurrent) {
+			if (lastColor !== "") {
+				segments.push({ color: "", text: "|" });
+				lastColor = "";
+			} else {
+				segments[segments.length - 1].text += "|";
+			}
+			continue;
+		}
+
+		const color = isCurrent ? "1;" + (isSurge ? "38;5;208" : "32") : (isSurge ? "38;5;208" : "32");
+		const char = isCurrent ? "◆" : "-";
+
+		if (color !== lastColor) {
+			segments.push({ color, text: char });
+			lastColor = color;
+		} else {
+			segments[segments.length - 1].text += char;
+		}
+	}
+
+	const timelineBody = segments.map(s => `\x1b[${s.color}m${s.text}\x1b[0m`).join("");
+	let result = `(${timelineBody})`;
+
+	if (proximityStatus === 'surge') {
+		result += ` \x1b[1;38;5;208m⚡ SURGE 2x\x1b[0m`;
+	} else if (proximityStatus === 'approaching') {
+		result += ` \x1b[1;5;38;5;208m⚡ SURGE APPROACHING\x1b[0m`;
+	} else if (proximityStatus === 'ending') {
+		result += ` \x1b[1;5;32m⚡ SURGE ENDING\x1b[0m`;
+	}
+
+	return result;
+}
+
 export function buildWtftLines(
 	interactions: Interaction[],
 	defaultSettings: {
@@ -652,6 +780,7 @@ export function buildWtftLines(
 		timezone?: string;
 		isWidget?: boolean;
 		disabledEmoji?: boolean;
+		forceLegendRow?: boolean;
 	}
 ): string[] | null {
 	const intervalStr = opts?.interval !== undefined ? opts.interval : defaultSettings.interval;
@@ -773,23 +902,24 @@ export function buildWtftLines(
 	const titleLeft = disabledEmoji ? "[$] WTF Tokens?" : "💸 WTF Tokens?";
 	
 	const legendItems = [
-		`\x1b[38;5;108m█\x1b[0m Spec`,
-		`\x1b[38;5;108;48;5;173m▒\x1b[0m Mixed`,
-		`\x1b[38;5;173m█\x1b[0m Code`,
-		`\x1b[38;5;223m█\x1b[0m Tests`,
-		`\x1b[38;5;134m█\x1b[0m Research`,
-		`\x1b[38;5;73m█\x1b[0m Git`,
-		`\x1b[38;5;67m█\x1b[0m Grep`,
-		`\x1b[38;5;168m░\x1b[0m Prompt`,
-		`\x1b[38;5;238m░\x1b[0m Other`
+		`\x1b[38;5;108m█\x1b[0mSpec`,
+		`\x1b[38;5;108;48;5;173m▒\x1b[0mMixed`,
+		`\x1b[38;5;173m█\x1b[0mCode`,
+		`\x1b[38;5;223m█\x1b[0mTests`,
+		`\x1b[38;5;134m█\x1b[0mResearch`,
+		`\x1b[38;5;73m█\x1b[0mGit`,
+		`\x1b[38;5;67m█\x1b[0mGrep`,
+		`\x1b[38;5;168m░\x1b[0mPrompt`,
+		`\x1b[38;5;238m░\x1b[0mOther`
 	];
-	const legendStr = legendItems.join("  ");
+	const legendStr = legendItems.join(" ");
 	
 	const leftLen = getVisualLength(titleLeft);
 	const legendLen = getVisualLength(legendStr);
 	const totalNeeded = leftLen + legendLen + 4; // 4 spaces margin
+	const forceLegendRow = opts?.forceLegendRow ?? false;
 	
-	if (totalNeeded <= finalWidth - 3) {
+	if (!forceLegendRow && totalNeeded <= finalWidth - 3) {
 		const remainingSpaces = (finalWidth - 3) - leftLen - legendLen;
 		const titleLine = titleLeft + " ".repeat(remainingSpaces) + legendStr;
 		widgetLines.push(titleLine);
@@ -932,8 +1062,12 @@ export function buildWtftLines(
 	// ---
 	// Proactive "Other" bloat warning (#17)
 	// Trigger: other > 20% of total session cost AND absolute other > $6.00
+	// Uses raw interactions (not bin costs) to avoid double-counting in cumulative mode
+	// where bin.costs[n].other is a running total, summing across bins inflates the value.
 	// ---
-	const totalOtherCost = displayedBins.reduce((sum, b) => sum + (b.costs.other || 0), 0);
+	const totalOtherCost = interactions
+		.filter(i => classifyInteraction(i) === "other")
+		.reduce((sum, i) => sum + i.cost, 0);
 	if (totalSessionCost > 0) {
 		const otherPct = totalOtherCost / totalSessionCost;
 		if (otherPct > 0.20 && totalOtherCost > 6.00) {
@@ -1138,14 +1272,10 @@ export async function watchMode(
 	let interactionCount = 0;
 	let lastSize = 0;
 	let needsRedraw = true;
+	let _lastRenderMin = -1;
 
 	// Hide cursor
 	process.stdout.write("\x1b[?25l");
-
-	// SIGWINCH handler — mark dirty for next poll cycle
-	process.on("SIGWINCH", () => {
-		needsRedraw = true;
-	});
 
 	// SIGINT handler — clean exit with final stats
 	process.on("SIGINT", () => {
@@ -1247,13 +1377,18 @@ export async function watchMode(
 			showTicks: finalShowTicks,
 			mode: finalMode,
 			timezone: finalTimezone,
-			disabledEmoji
+			disabledEmoji,
+			forceLegendRow: true
 		});
 
 		const buf: string[] = [];
 		buf.push("\x1b[2J\x1b[H"); // Clear screen, home cursor
 
 		if (lines && lines.length > 0) {
+			// Append 24-hour timeline to the title line (always green in CLI, no model context)
+			const tlHour = getCurrentLocalHour(finalTimezone);
+			const tlStr = buildTimelineString(new Set<number>(), tlHour, undefined);
+			lines[0] = lines[0] + "  " + tlStr;
 			for (const l of lines) buf.push(l);
 		} else {
 			buf.push("\x1b[90mWaiting for session data...\x1b[0m");
@@ -1267,13 +1402,20 @@ export async function watchMode(
 
 		process.stdout.write(buf.join("\n"));
 		needsRedraw = false;
+		_lastRenderMin = new Date().getMinutes();
 	};
 
 	// Initial render
 	render();
 
+	// SIGWINCH handler — re-render immediately on terminal resize
+	process.on("SIGWINCH", () => {
+		needsRedraw = true;
+		render();
+	});
+
 	// Poll loop
-	const POLL_MS = 500;
+	const POLL_MS = 667;
 	while (true) {
 		await new Promise(resolve => setTimeout(resolve, POLL_MS));
 
@@ -1296,6 +1438,12 @@ export async function watchMode(
 
 		if (newInteractions.length > 0) {
 			allInteractions.push(...newInteractions);
+			needsRedraw = true;
+		}
+
+		// Re-render every minute for timeline diamond/badge live-updates
+		const _curMin = new Date().getMinutes();
+		if (_curMin !== _lastRenderMin) {
 			needsRedraw = true;
 		}
 

@@ -360,6 +360,9 @@ async function selectSessionPrompt(candidates: SessionCandidate[]): Promise<stri
 
 		const render = () => {
 			let out = `\x1b[1m\x1b[36m💸 WTFT Session Selector\x1b[0m (Use ↑/↓ keys, Enter to select, Ctrl+C to cancel):\n`;
+			// Full path of currently selected session (unselectable, dim)
+			const selected = displayCandidates[selectedIndex];
+			out += `  \x1b[90m${selected.path}\x1b[0m\n`;
 			for (let i = 0; i < displayCandidates.length; i++) {
 				const c = displayCandidates[i];
 				const stats = statsList[i];
@@ -378,8 +381,8 @@ async function selectSessionPrompt(candidates: SessionCandidate[]): Promise<stri
 		};
 
 		const cleanScreen = () => {
-			// Move cursor up by (displayCandidates.length + 1) lines and clear them
-			const linesToClear = displayCandidates.length + 1;
+			// Move cursor up by (displayCandidates.length + 2) lines (+2 for header + full-path row)
+			const linesToClear = displayCandidates.length + 2;
 			process.stdout.write(`\x1b[${linesToClear}A\x1b[J`);
 		};
 

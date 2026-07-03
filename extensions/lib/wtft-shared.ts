@@ -1267,7 +1267,6 @@ export async function watchMode(
 		process.exit(1);
 	}
 
-	const sessionName = path.basename(sessionPath);
 	let totalCost = 0;
 	let interactionCount = 0;
 	let lastSize = 0;
@@ -1383,6 +1382,12 @@ export async function watchMode(
 
 		const buf: string[] = [];
 		buf.push("\x1b[2J\x1b[H"); // Clear screen, home cursor
+		totalCost = allInteractions.reduce((sum, i) => sum + i.cost, 0);
+		interactionCount = allInteractions.length;
+
+		// Watching banner at top with full file path
+		buf.push(`\x1b[90m${sessionPath}  (${interactionCount} interactions, $${totalCost.toFixed(4)}) — Ctrl+C to exit\x1b[0m`);
+		buf.push("");
 
 		if (lines && lines.length > 0) {
 			// Append 24-hour timeline to the title line (always green in CLI, no model context)
@@ -1393,12 +1398,6 @@ export async function watchMode(
 		} else {
 			buf.push("\x1b[90mWaiting for session data...\x1b[0m");
 		}
-
-		totalCost = allInteractions.reduce((sum, i) => sum + i.cost, 0);
-		interactionCount = allInteractions.length;
-
-		buf.push("");
-		buf.push(`\x1b[90mWatching ${sessionName} (${interactionCount} interactions, $${totalCost.toFixed(4)}) — Ctrl+C to exit\x1b[0m`);
 
 		process.stdout.write(buf.join("\n"));
 		needsRedraw = false;

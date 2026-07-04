@@ -190,6 +190,18 @@ assert "daemon for deleted session killed" \
 
 kill_daemons
 
+# ── Test 8: wtft passthrough flags ──
+echo ""
+echo "8. wtft passthrough flags"
+
+$DAEMON --session "$SESSION" &
+sleep 1
+
+assert "wtft --list forwards to daemon" \
+  "./bin/wtft.mjs --list 2>&1 | grep -q 'RUNNING'"
+
+kill_daemons
+
 # ── Results ──
 echo ""
 echo "──────────────────────────────"

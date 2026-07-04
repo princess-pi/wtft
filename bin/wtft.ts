@@ -36,6 +36,7 @@ let showTicks = true;
 let targetSessionPath: string | undefined = undefined;
 let timezone: string | undefined = undefined;
 let harnessOption: "auto" | "pi" | "claude-code" = "auto";
+let cwdOverride: string | undefined = undefined;
 let showOther = false;
 
 // ---
@@ -89,6 +90,7 @@ Usage: wtft [options]
 
 Options:
   -s, --session <path>    Specify an explicit session .jsonl log file path (defaults to latest active session).
+  --dir, --cwd <path>     Working directory for Claude Code session discovery (default: current directory).
   --harness <type>        Target a specific harness for auto-discovery (pi, claude-code, or auto). Default: auto.
   -i, --interval <val>    Group cost data into binned intervals (e.g., 1m, 7m, 4h, 1d, 2w; default: 1h).
   -l, --limit <number>    Limit the number of interval bars displayed (default: 100).
@@ -159,6 +161,8 @@ for (let i = 2; i < process.argv.length; i++) {
 		hasOther = true;
 	} else if (arg === "-W" || arg === "--watch") {
 		showWatch = true;
+	} else if (arg === "--dir" || arg === "--cwd") {
+		cwdOverride = process.argv[++i];
 	} else if (arg === "--harness") {
 		const val = process.argv[++i];
 		if (val === "pi" || val === "claude-code" || val === "auto") {
@@ -174,7 +178,7 @@ for (let i = 2; i < process.argv.length; i++) {
 
 async function main() {
 	const isIndex = /^\d+$/.test(targetSessionPath || "");
-	const candidates = discoverSessions(harnessOption);
+	const candidates = discoverSessions(harnessOption, cwdOverride);
 	
 	let finalSessionPath = "";
 	if (targetSessionPath && isIndex) {

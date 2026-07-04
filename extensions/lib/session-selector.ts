@@ -44,7 +44,8 @@ export interface SessionCandidate {
  * @returns Sorted array of session candidates
  */
 export function discoverSessions(
-	harness: "pi" | "claude-code" | "auto" = "auto"
+	harness: "pi" | "claude-code" | "auto" = "auto",
+	cwdOverride?: string
 ): SessionCandidate[] {
 	const piSessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions");
 
@@ -52,7 +53,7 @@ export function discoverSessions(
 	const claudeProjectsDir = path.join(os.homedir(), ".claude", "projects");
 	if (fs.existsSync(claudeProjectsDir)) {
 		// Build the CWD slug the same way Claude encodes it: replace / or \ with -
-		const cwdSlug = process.cwd().replace(/[/\\]/g, "-");
+		const cwdSlug = (cwdOverride ?? process.cwd()).replace(/[/\\]/g, "-");
 		const sessionsSubdir = path.join(claudeProjectsDir, cwdSlug, "sessions");
 		const directDir = path.join(claudeProjectsDir, cwdSlug);
 		if (fs.existsSync(sessionsSubdir)) claudeSessionsDirs.push(sessionsSubdir);

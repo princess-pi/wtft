@@ -53,7 +53,8 @@ export function getDeepSeekPeakMultiplier(timestamp?: number): number {
 export function calculateClaudeCost(model: string, usage: any, timestamp?: number): number {
 	if (!usage) return 0;
 	
-	// Default to Claude Sonnet pricing
+	// Default to Claude Sonnet 4.6 pricing ($3/$15 per 1M tokens)
+	// Cache write: 1.25x input, cache read: 0.10x input (Anthropic standard)
 	let inputPrice = 3.00;
 	let outputPrice = 15.00;
 	let cacheWritePrice = 3.75;
@@ -76,15 +77,17 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 		cacheWritePrice = 0; // DeepSeek does not expose separate cache-write tokens in the usage object
 		cacheReadPrice = 0;  // TODO: add cache-hit input pricing ($0.0028/M flash, $0.003625/M pro) once schema confirmed
 	} else if (m.includes("haiku")) {
-		inputPrice = 0.80;
-		outputPrice = 4.00;
-		cacheWritePrice = 1.00;
-		cacheReadPrice = 0.08;
+		// Claude Haiku 4.5: $1/M input, $5/M output
+		inputPrice = 1.00;
+		outputPrice = 5.00;
+		cacheWritePrice = 1.25;
+		cacheReadPrice = 0.10;
 	} else if (m.includes("opus")) {
-		inputPrice = 15.00;
-		outputPrice = 75.00;
-		cacheWritePrice = 18.75;
-		cacheReadPrice = 1.50;
+		// Claude Opus 4.6/4.7: $5/M input, $25/M output
+		inputPrice = 5.00;
+		outputPrice = 25.00;
+		cacheWritePrice = 6.25;
+		cacheReadPrice = 0.50;
 	}
 	
 	const cost = 
@@ -165,7 +168,9 @@ export function parseEntryToInteraction(entry: any): Interaction | null {
 		const usage = assistantMsg.usage || {};
 		const piCost = usage.cost?.total;
 		const hasTokens = (usage.input_tokens || usage.input || 0) > 0 ||
-		                  (usage.output_tokens || usage.output || 0) > 0;
+		                  (usage.output_tokens || usage.output || 0) > 0 ||
+		                  (usage.cache_read_input_tokens || usage.cacheRead || 0) > 0 ||
+		                  (usage.cache_creation_input_tokens || usage.cacheWrite || 0) > 0;
 		if (piCost !== undefined && piCost !== null && !(piCost === 0 && hasTokens)) {
 			cost = piCost;
 		} else if (assistantMsg.model && hasTokens) {

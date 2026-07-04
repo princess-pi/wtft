@@ -202,6 +202,30 @@ assert "wtft --list forwards to daemon" \
 
 kill_daemons
 
+# ── Test 9: cache-only turns are NOT recorded as $0 (#49) ──
+echo ""
+echo "9. Cache-only turns priced correctly (#49)"
+
+CACHE_SESSION="/tmp/wtft-daemon-test-cache.jsonl"
+cat > "$CACHE_SESSION" << 'JSONLEOF'
+{"type":"assistant","message":{"role":"assistant","timestamp":"2026-07-04T10:00:00Z","model":"claude-sonnet-4-20250514","usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":110000}}}
+JSONLEOF
+
+$DAEMON --session "$CACHE_SESSION" &
+sleep 2
+CF="${CACHE_SESSION}.classified.jsonl"
+
+# Extract cost from classified output (grep the classified line, not headers/heartbeats)
+CACHE_COST=$(grep '"cat":' "$CF" | head -1 | python3 -c "import sys,json; print(json.loads(sys.stdin.readline())['c'])" 2>/dev/null || echo "0")
+
+# Expected: 110000 cache-read tokens at $0.30/M = $0.033
+# Allow small floating point variance
+assert "cache-read-only turn is NOT \$0" \
+  "python3 -c \"exit(0 if float('${CACHE_COST:-0}') > 0.001 else 1)\""
+
+kill_daemons
+rm -f "$CACHE_SESSION" "$CF" /tmp/wtft-daemon-*.pid 2>/dev/null || true
+
 # ── Results ──
 echo ""
 echo "──────────────────────────────"

@@ -224,10 +224,6 @@ export async function selectSessionPrompt(
 		);
 
 		const render = () => {
-			// Restore saved cursor + clear to end. Avoids fragile line counting
-			// which breaks when wide candidate lines wrap across physical rows.
-			process.stdout.write("\x1b[u\x1b[J");
-
 			const selected = displayCandidates[selectedIndex];
 			let out = `\x1b[1m\x1b[36m\u{1F4B8} WTFT Session Selector\x1b[0m (Use \u2191/\u2193 keys, Enter to select, Ctrl+C to cancel):\n`;
 			out += `  \x1b[90m${selected.path}\x1b[0m\n`;
@@ -250,10 +246,13 @@ export async function selectSessionPrompt(
 			process.stdout.write(out);
 		};
 
+		// 30 rows covers any wrapping of 10 candidates + 2 header lines.
+		// \x1b[J clears from cursor to end of screen, removing ghost text.
+		const cleanScreen = () => {
+			process.stdout.write("\x1b[30A\x1b[J");
+		};
+
 		// Move cursor up to overwrite previous render
-		// Save cursor position so subsequent renders can restore + clear
-		// without fragile line-counting (see render() above).
-		process.stdout.write("\x1b[s");
 		render();
 
 		const onKey = (key: string) => {
@@ -270,11 +269,13 @@ export async function selectSessionPrompt(
 				selectedIndex =
 					(selectedIndex - 1 + displayCandidates.length) %
 					displayCandidates.length;
+				cleanScreen();
 				render();
 			} else if (key === "\u001b[B" || key === "j") {
 				// Down Arrow or 'j'
 				selectedIndex =
 					(selectedIndex + 1) % displayCandidates.length;
+				cleanScreen();
 				render();
 			}
 		};

@@ -102,6 +102,7 @@ Options:
   -t, --tz <zone>         Specify a display timezone (e.g. America/Los_Angeles).
   -o, --other             Print a histogram of 'Other' commands grouped by semantic sub-category (Build, Lint, System, etc.).
   -W, --watch             Watch a session file for changes and re-render the bar chart in real-time.
+  --version               Display this tool's version.
   --why                   Explain why you'd run this tool, with user scenarios and anti-use-cases.
   -h, --help              Display this help menu.
 `);

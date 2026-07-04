@@ -108,6 +108,14 @@
       "desc": "Limit the number of interval bars displayed (default: 10)."
     },
     {
+      "flags": "-s, --session <path>",
+      "desc": "Specify an explicit session .jsonl log file path (defaults to latest active session)."
+    },
+    {
+      "flags": "--dir, --cwd <path>",
+      "desc": "Working directory for Claude Code session discovery (default: current directory)."
+    },
+    {
       "flags": "-w, --width <number>",
       "desc": "Set the maximum character width of the TUI widget (default: 240)."
     },

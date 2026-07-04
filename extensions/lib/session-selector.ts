@@ -110,7 +110,22 @@ export function discoverSessions(
 		// Silently ignore permission errors or missing directories
 	}
 
-	return candidates.sort((a, b) => b.timestamp - a.timestamp);
+	return candidates.sort((a, b) => b.timestamp - a.timestamp)
+		.filter((c) => {
+			// When --dir is specified, filter Pi sessions to only those
+			// whose project slug matches the target directory.
+			if (!cwdOverride || c.harness !== "pi") return true;
+			const expectedPiSlug = computePiSlug(path.resolve(cwdOverride));
+			const candidateSlug = path.basename(path.dirname(c.path));
+			return candidateSlug === expectedPiSlug;
+		});
+}
+
+/** When --dir is specified, filter Pi sessions to only those from the target project.
+ *  Without this, Pi sessions from ALL projects appear even with --dir. */
+function computePiSlug(cwd: string): string {
+	const dirSlug = cwd.replace(/[/\\]/g, "-");
+	return `--${dirSlug}--`;
 }
 
 // ---

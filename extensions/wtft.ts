@@ -34,6 +34,8 @@ function parseArgs(argsStr: string = "") {
 	let showWidget = false;
 	let showHelp = false;
 	let showWhy = false;
+	let showVersion = false;
+
 	let showTicks = true;
 	let mode: "bucket" | "cumulative" = "cumulative";
 	let pager = false;
@@ -52,6 +54,8 @@ function parseArgs(argsStr: string = "") {
 		const arg = args[i];
 		if (arg === "--help" || arg === "-h") {
 			showHelp = true;
+		} else if (arg === "--version") {
+			showVersion = true;
 		} else if (arg === "--why") {
 			showWhy = true;
 		} else if (arg === "--hide" || arg === "-H") {
@@ -149,6 +153,7 @@ function parseArgs(argsStr: string = "") {
 		mode,
 		showHelp,
 		showWhy,
+		showVersion,
 		pager,
 		hasInterval,
 		hasLimit,
@@ -435,6 +440,18 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				const statusText = enableEmoji ? "enabled" : "disabled";
 				ctx.ui.notify(`Emoji icons in widgets have been ${statusText}.`, "info");
 				updateWtftWidget(ctx, pi);
+				return;
+			}
+
+			// Display tool version if requested
+			if (showVersion) {
+				try {
+					const manifestPath = path.join(process.cwd(), "docs", "manifests", "wtft-cmd.json");
+					const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+					ctx.ui.notify(`${manifest.name} ${manifest.version}`, "info");
+				} catch (err) {
+					ctx.ui.notify(`\u26A0\uFE0F Failed to load WTFT command manifest: ${err}`, "error");
+				}
 				return;
 			}
 

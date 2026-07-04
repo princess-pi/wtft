@@ -130,6 +130,11 @@ for (let i = 2; i < process.argv.length; i++) {
 	} else if (arg === "--why") {
 		printWhy();
 		process.exit(0);
+	} else if (arg === "--version") {
+		const manifestPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "docs", "manifests", "wtft-cmd.json");
+		const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+		console.log(`${manifest.name} ${manifest.version}`);
+		process.exit(0);
 	} else if (arg === "-s" || arg === "--session") {
 		targetSessionPath = process.argv[++i];
 	} else if (arg === "-i" || arg === "--interval") {

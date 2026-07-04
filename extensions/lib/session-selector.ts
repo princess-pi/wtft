@@ -53,7 +53,8 @@ export function discoverSessions(
 	const claudeProjectsDir = path.join(os.homedir(), ".claude", "projects");
 	if (fs.existsSync(claudeProjectsDir)) {
 		// Build the CWD slug the same way Claude encodes it: replace / or \ with -
-		const cwdSlug = (cwdOverride ?? process.cwd()).replace(/[/\\]/g, "-");
+		const resolvedCwd = cwdOverride ? path.resolve(cwdOverride) : process.cwd();
+		const cwdSlug = resolvedCwd.replace(/[/\\]/g, "-");
 		const sessionsSubdir = path.join(claudeProjectsDir, cwdSlug, "sessions");
 		const directDir = path.join(claudeProjectsDir, cwdSlug);
 		if (fs.existsSync(sessionsSubdir)) claudeSessionsDirs.push(sessionsSubdir);

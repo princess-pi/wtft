@@ -69,15 +69,16 @@ export function discoverSessions(
 			const fullPath = path.join(dir, f);
 			const stat = fs.statSync(fullPath);
 			if (stat.isDirectory()) {
-				// Avoid recursing into subagent/tool result/memory directories
+				// Avoid recursing into subagent/tool result/memory/wtft-tags directories
 				if (
 					f !== "subagents" &&
 					f !== "tool-results" &&
-					f !== "memory"
+					f !== "memory" &&
+					f !== "wtft-tags"
 				) {
 					walk(fullPath, type);
 				}
-			} else if (f.endsWith(".jsonl") && !f.includes(".wtft-tag.v")) {
+			} else if (f.endsWith(".jsonl")) {
 				// Compute the project slug from the parent directory
 				let slug: string;
 				if (type === "pi") {

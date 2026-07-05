@@ -283,6 +283,41 @@ export interface IntervalConfig {
 }
 
 // ---
+// SHARED FILE PARSER (#54 DRY refactor)
+// Single source of truth for reading a .jsonl session file into Interaction[]
+// (raw, undeduped). Consumers (session selector, CLI chart, Pi TUI) read lines
+// differently (File I/O vs ctx.sessionManager), but the parseEntryToInteraction
+// call and subsequent dedup are identical — those live here.
+// ---
+
+/**
+ * Parse a .jsonl session file into raw (undeduped) interactions.
+ * Caller is responsible for deduplication via {@link deduplicateInteractions}.
+ *
+ * @param filePath - Absolute path to the .jsonl session log
+ * @returns Array of parsed interactions (may contain duplicate message.id entries)
+ */
+export function parseSessionFile(filePath: string): Interaction[] {
+	const interactions: Interaction[] = [];
+	try {
+		const content = fs.readFileSync(filePath, "utf8");
+		for (const line of content.split("\n")) {
+			if (!line.trim()) continue;
+			try {
+				const entry = JSON.parse(line);
+				const interaction = parseEntryToInteraction(entry);
+				if (interaction) interactions.push(interaction);
+			} catch {
+				// Skip unparseable lines (partial writes, non-JSON)
+			}
+		}
+	} catch {
+		// File may not exist or be unreadable
+	}
+	return interactions;
+}
+
+// ---
 // MESSAGE-ID DEDUPLICATION (#54)
 // Claude Code emits multiple JSONL lines per API response (one per content block +
 // streaming/compaction re-logging), each echoing the same message-level `usage`.

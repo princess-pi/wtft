@@ -10,7 +10,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	buildWtftLines,
-	parseEntryToInteraction,
+	parseSessionFile,
 	renderOtherHistogram,
 	renderTokenSummary,
 	getSemanticCommandGroup,
@@ -261,19 +261,15 @@ async function main() {
 		}
 	}
 
-	// Read lines from all associated session files
-	const lines: string[] = [];
+	// Parse interactions from all session files (parent + subagents) using the
+	// shared parseSessionFile utility (#54 DRY refactor).
+	const interactions: Interaction[] = [];
 	for (const file of sessionFiles) {
-		try {
-			const content = fs.readFileSync(file, "utf8");
-			lines.push(...content.split("\n"));
-		} catch {}
+		interactions.push(...parseSessionFile(file));
 	}
 
-	const interactions: Interaction[] = [];
+	// Separate pass: read parent file for custom entries (emoji/wtft settings, Pi-only).
 	let disabledEmoji = false;
-
-	// Saved session log options
 	let sessionInterval: string | undefined;
 	let sessionLimit: number | undefined;
 	let sessionWidth: number | undefined;
@@ -281,31 +277,36 @@ async function main() {
 	let sessionShowTicks: boolean | undefined;
 	let sessionTimezone: string | undefined;
 
-	for (const line of lines) {
-		if (!line.trim()) continue;
+	if (sessionFiles.length > 0) {
 		try {
-			const entry = JSON.parse(line);
-			if (entry.type === "custom" && entry.customType === "emoji-settings") {
-				if (entry.data && typeof entry.data.disabled === "boolean") {
-					disabledEmoji = entry.data.disabled;
-				}
-			} else if (entry.type === "custom" && entry.customType === "wtft-settings") {
-				if (entry.data) {
-					if (typeof entry.data.interval === "string") sessionInterval = entry.data.interval;
-					if (typeof entry.data.limit === "number") sessionLimit = entry.data.limit;
-					if (typeof entry.data.width === "number") sessionWidth = entry.data.width;
-					if (entry.data.mode === "cumulative" || entry.data.mode === "bucket") {
-						sessionMode = entry.data.mode;
+			const content = fs.readFileSync(sessionFiles[0], "utf8");
+			for (const line of content.split("\n")) {
+				if (!line.trim()) continue;
+				try {
+					const entry = JSON.parse(line);
+					if (entry.type === "custom" && entry.customType === "emoji-settings") {
+						if (entry.data && typeof entry.data.disabled === "boolean") {
+							disabledEmoji = entry.data.disabled;
+						}
+					} else if (entry.type === "custom" && entry.customType === "wtft-settings") {
+						if (entry.data) {
+							if (typeof entry.data.interval === "string") sessionInterval = entry.data.interval;
+							if (typeof entry.data.limit === "number") sessionLimit = entry.data.limit;
+							if (typeof entry.data.width === "number") sessionWidth = entry.data.width;
+							if (entry.data.mode === "cumulative" || entry.data.mode === "bucket") {
+								sessionMode = entry.data.mode;
+							}
+							if (typeof entry.data.showTicks === "boolean") sessionShowTicks = entry.data.showTicks;
+							if (typeof entry.data.timezone === "string") sessionTimezone = entry.data.timezone;
+						}
 					}
-					if (typeof entry.data.showTicks === "boolean") sessionShowTicks = entry.data.showTicks;
-					if (typeof entry.data.timezone === "string") sessionTimezone = entry.data.timezone;
+				} catch {
+					// Skip unparseable lines
 				}
 			}
-			const interaction = parseEntryToInteraction(entry);
-			if (interaction) {
-				interactions.push(interaction);
-			}
-		} catch {}
+		} catch {
+			// File may not exist or be unreadable
+		}
 	}
 
 	// ---

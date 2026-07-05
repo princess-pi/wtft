@@ -131,12 +131,12 @@ export function getSessionSummary(
 	const interactions: Interaction[] = [];
 	try {
 		const content = fs.readFileSync(filePath, "utf8");
-		const lines = content.split("\n");
-		for (const line of lines) {
+		for (const line of content.split("\n")) {
 			if (!line.trim()) continue;
 			try {
 				const entry = JSON.parse(line);
-				// Count assistant turns
+				// Count assistant turns (per-line count — approximate, one message
+				// may span multiple JSONL lines in Claude Code transcripts)
 				if (
 					entry.type === "assistant" ||
 					(entry.message && entry.message.role === "assistant")
@@ -144,9 +144,7 @@ export function getSessionSummary(
 					turns++;
 				}
 				const interaction = parseEntryToInteraction(entry);
-				if (interaction) {
-					interactions.push(interaction);
-				}
+				if (interaction) interactions.push(interaction);
 			} catch {
 				// Skip unparseable lines
 			}
@@ -154,8 +152,7 @@ export function getSessionSummary(
 	} catch {
 		// File may not exist or be unreadable
 	}
-	// Dedup by message.id before summing (#54) — same double-count bug
-	// that wtft chart rendering fixed; session selector cost must match.
+	// Dedup by message.id before summing (#54)
 	const deduped = deduplicateInteractions(interactions);
 	const cost = deduped.reduce((sum, i) => sum + i.cost, 0);
 	return { turns, cost };

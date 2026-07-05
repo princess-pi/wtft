@@ -77,7 +77,7 @@ export function discoverSessions(
 				) {
 					walk(fullPath, type);
 				}
-			} else if (f.endsWith(".jsonl") && !f.includes(".wtft-tag.v")) {
+			} else if (f.endsWith(".jsonl") && !f.includes(".wtft-tag.v") && !f.endsWith(".classified.jsonl")) {
 				// Compute the project slug from the parent directory
 				let slug: string;
 				if (type === "pi") {

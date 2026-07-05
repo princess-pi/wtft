@@ -1538,16 +1538,44 @@ export async function watchMode(
 	let needsRedraw = true;
 	let _lastRenderMin = -1;
 
-	// Hide cursor
+	// Enter alternate screen buffer — chart updates stay inside,
+	// main scrollback is untouched. Hide cursor.
+	process.stdout.write("\x1b[?1049h");
 	process.stdout.write("\x1b[?25l");
 
-	// SIGINT handler — clean exit with final stats
-	process.on("SIGINT", () => {
-		process.stdout.write("\x1b[2J\x1b[H");
+	let lastBuffer: string[] = []; // saved for exit printout
+
+	// Shared exit: restores main screen, prints final chart, exits cleanly.
+	// Called by SIGINT, 'q' key, and process exit.
+	const exitWatch = () => {
+		process.stdout.write("\x1b[?1049l"); // exit alternate screen
 		process.stdout.write("\x1b[?25h");
-		console.log(`WTFT watch stopped — ${interactionCount} interactions, $${totalCost.toFixed(4)} total cost.`);
+		// Restore raw mode if stdin is a TTY
+		if (process.stdin.isTTY) {
+			try { process.stdin.setRawMode(false); } catch (_) {}
+			try { process.stdin.pause(); } catch (_) {}
+		}
+		// Re-print the final chart to main screen so it persists
+		if (lastBuffer.length > 0) {
+			for (const l of lastBuffer) console.log(l);
+		}
+		console.log(`WTFT watch stopped \u2014 ${interactionCount} interactions, $${totalCost.toFixed(4)} total cost.`);
 		process.exit(0);
-	});
+	};
+
+	// Ctrl+C → shared exit
+	process.on("SIGINT", exitWatch);
+
+	// Raw stdin for 'q'/'Q' quit (same as Ctrl+C but cleaner)
+	if (process.stdin.isTTY) {
+		process.stdin.setRawMode(true);
+		process.stdin.on("data", (data: Buffer) => {
+			const key = data.toString();
+			if (key === "q" || key === "Q" || key === "\u0003") {
+				exitWatch();
+			}
+		});
+	}
 
 	const parseInteractions = (filePath: string): { interactions: Interaction[]; disabledEmoji: boolean; sessionInterval?: string; sessionLimit?: number; sessionMode?: "cumulative" | "bucket"; sessionShowTicks?: boolean; sessionTimezone?: string; } => {
 		const interactions: Interaction[] = [];
@@ -1646,12 +1674,12 @@ export async function watchMode(
 		});
 
 		const buf: string[] = [];
-		buf.push("\x1b[2J\x1b[H"); // Clear screen, home cursor
+		buf.push("\x1b[H"); // Home cursor (alt screen handles buffer)
 		totalCost = allInteractions.reduce((sum, i) => sum + i.cost, 0);
 		interactionCount = allInteractions.length;
 
 		// Watching banner at top with full file path
-		buf.push(`\x1b[90m${sessionPath}  (${interactionCount} interactions, $${totalCost.toFixed(4)}) — Ctrl+C to exit\x1b[0m`);
+		buf.push(`\x1b[90m${sessionPath}  (${interactionCount} interactions, $${totalCost.toFixed(4)}) — q/Ctrl+C to exit\x1b[0m`);
 		buf.push("");
 
 		if (lines && lines.length > 0) {
@@ -1664,6 +1692,7 @@ export async function watchMode(
 			buf.push("\x1b[90mWaiting for session data...\x1b[0m");
 		}
 
+		lastBuffer = [...buf]; // save for exit printout
 		process.stdout.write(buf.join("\n"));
 		needsRedraw = false;
 		_lastRenderMin = new Date().getMinutes();

@@ -19,6 +19,11 @@ export interface Interaction {
 	cost: number;
 	messageId?: string;
 	requestId?: string;
+	model?: string;
+	inputTokens: number;
+	outputTokens: number;
+	cacheReadTokens: number;
+	cacheWriteTokens: number;
 	files: { path: string; action: "read" | "write" }[];
 	commands: string[];
 	texts: string[];
@@ -252,7 +257,13 @@ export function parseEntryToInteraction(entry: any): Interaction | null {
 			}
 		}
 
-		return { timestamp, cost, messageId: assistantMsg.id, requestId: entry.requestId, files, commands, texts };
+		return { timestamp, cost, messageId: assistantMsg.id, requestId: entry.requestId,
+			model: assistantMsg.model || undefined,
+			inputTokens: (usage.input_tokens || usage.input || 0) as number,
+			outputTokens: (usage.output_tokens || usage.output || 0) as number,
+			cacheReadTokens: (usage.cache_read_input_tokens || usage.cacheRead || 0) as number,
+			cacheWriteTokens: (usage.cache_creation_input_tokens || usage.cacheWrite || 0) as number,
+			files, commands, texts };
 	}
 	
 	return null;
@@ -1351,6 +1362,115 @@ export function renderOtherHistogram(interactions: Interaction[], maxWidth: numb
 	}
 
 	return output;
+}
+
+// ---
+// TOKEN SUMMARY TABLE (per-model, deduped)
+// Renders token counts for cross-referencing with Claude Code /usage.
+// Wire via --tokens flag (CLI) or /wtft --tokens (Pi TUI).
+// ---
+
+function formatTokenCount(n: number): string {
+	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+	if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+	return String(n);
+}
+
+function shortenModel(model: string): string {
+	// Strip "claude-" prefix and trim version suffix for display
+	return model.replace(/^claude-/, "").replace(/-\d{8}$/, "");
+}
+
+export function renderTokenSummary(interactions: Interaction[], maxWidth: number = 80): string {
+	// Dedup before aggregating (caller may pass raw, we ensure consistent counts)
+	const deduped = deduplicateInteractions(interactions);
+
+	// Group by model
+	type ModelAgg = {
+		inputTokens: number;
+		outputTokens: number;
+		cacheReadTokens: number;
+		cacheWriteTokens: number;
+		cost: number;
+	};
+	const byModel = new Map<string, ModelAgg>();
+	let unmatched = 0;
+
+	for (const i of deduped) {
+		const model = i.model || "(unknown)";
+		// Skip synthetic/system entries (no real tokens) and untagged entries
+		if (model === "(unknown)" || model === "<synthetic>") {
+			unmatched++;
+			continue;
+		}
+		const agg = byModel.get(model) || { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 };
+		agg.inputTokens += i.inputTokens;
+		agg.outputTokens += i.outputTokens;
+		agg.cacheReadTokens += i.cacheReadTokens;
+		agg.cacheWriteTokens += i.cacheWriteTokens;
+		agg.cost += i.cost;
+		byModel.set(model, agg);
+	}
+
+	if (byModel.size === 0) {
+		return unmatched > 0
+			? `No model-tagged interactions found (${unmatched} untagged).`
+			: "No model-tagged interactions found.";
+	}
+
+	// Sort by cost descending
+	const sorted = Array.from(byModel.entries())
+		.sort((a, b) => b[1].cost - a[1].cost);
+
+	// Column widths
+	const modelColW = Math.max(10, ...sorted.map(([m]) => shortenModel(m).length));
+	const numColW = 10; // fixed width for numbers
+
+	const sep = "─".repeat(Math.min(maxWidth, modelColW + numColW * 4 + 20));
+
+	let out = "";
+	out += `\n── Token Summary (per model, deduped) ──${unmatched > 0 ? `  (${unmatched} untagged interactions skipped)` : ""}\n`;
+
+	// Header
+	out += [
+		"Model".padEnd(modelColW),
+		"Input".padStart(numColW),
+		"Output".padStart(numColW),
+		"Cache-Read".padStart(numColW),
+		"Cache-Write".padStart(numColW),
+		"Cost".padStart(numColW)
+	].join(" ") + "\n";
+
+	// Rows
+	let totalInput = 0, totalOutput = 0, totalCr = 0, totalCw = 0, totalCost = 0;
+	for (const [model, agg] of sorted) {
+		out += [
+			shortenModel(model).padEnd(modelColW),
+			formatTokenCount(agg.inputTokens).padStart(numColW),
+			formatTokenCount(agg.outputTokens).padStart(numColW),
+			formatTokenCount(agg.cacheReadTokens).padStart(numColW),
+			formatTokenCount(agg.cacheWriteTokens).padStart(numColW),
+			formatCost(agg.cost).padStart(numColW)
+		].join(" ") + "\n";
+		totalInput += agg.inputTokens;
+		totalOutput += agg.outputTokens;
+		totalCr += agg.cacheReadTokens;
+		totalCw += agg.cacheWriteTokens;
+		totalCost += agg.cost;
+	}
+
+	// Total row
+	out += sep + "\n";
+	out += [
+		"TOTAL".padEnd(modelColW),
+		formatTokenCount(totalInput).padStart(numColW),
+		formatTokenCount(totalOutput).padStart(numColW),
+		formatTokenCount(totalCr).padStart(numColW),
+		formatTokenCount(totalCw).padStart(numColW),
+		formatCost(totalCost).padStart(numColW)
+	].join(" ") + "\n";
+
+	return out;
 }
 
 // ---

@@ -11,6 +11,7 @@ import {
 	getSemanticCommandGroup,
 	parseEntryToInteraction,
 	renderOtherHistogram,
+	renderTokenSummary,
 	deduplicateInteractions,
 	getTerminalWidth,
 	getDeepSeekPeakMultiplier,
@@ -41,6 +42,7 @@ function parseArgs(argsStr: string = "") {
 	let mode: "bucket" | "cumulative" = "cumulative";
 	let pager = false;
 	let other = false;
+	let tokens = false;
 	let enableEmoji: boolean | undefined = undefined;
 
 	let hasInterval = false;
@@ -50,6 +52,7 @@ function parseArgs(argsStr: string = "") {
 	let hasMode = false;
 	let hasTimezone = false;
 	let hasOther = false;
+	let hasTokens = false;
 
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
@@ -66,6 +69,9 @@ function parseArgs(argsStr: string = "") {
 		} else if (arg === "-o" || arg === "--other") {
 			other = true;
 			hasOther = true;
+		} else if (arg === "--tokens" || arg === "-T") {
+			tokens = true;
+			hasTokens = true;
 		} else if (arg === "--ticks") {
 			showTicks = true;
 			hasTicks = true;
@@ -163,7 +169,9 @@ function parseArgs(argsStr: string = "") {
 		hasMode,
 		hasTimezone,
 		hasOther,
+		hasTokens,
 		other,
+		tokens,
 		enableEmoji
 	};
 }
@@ -433,7 +441,9 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				hasMode,
 				hasTimezone,
 				hasOther,
+				hasTokens,
 				other,
+				tokens,
 				enableEmoji
 			} = parseArgs(args);
 
@@ -507,6 +517,17 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				
 				const deduped = deduplicateInteractions(interactions);
 				const output = renderOtherHistogram(deduped, Math.max(current.width, 40));
+				ctx.ui.notify(output, "info");
+				return;
+			}
+
+			if (tokens) {
+				const branch = ctx.sessionManager.getBranch();
+				const interactions = branch
+					.map((entry: any) => parseEntryToInteraction(entry))
+					.filter((i: any): i is NonNullable<typeof i> => i !== null);
+				
+				const output = renderTokenSummary(interactions, Math.max(current.width, 40));
 				ctx.ui.notify(output, "info");
 				return;
 			}

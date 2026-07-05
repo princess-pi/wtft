@@ -12,6 +12,7 @@ import {
 	buildWtftLines,
 	parseEntryToInteraction,
 	renderOtherHistogram,
+	renderTokenSummary,
 	getSemanticCommandGroup,
 	deduplicateInteractions,
 	watchMode,
@@ -39,6 +40,7 @@ let timezone: string | undefined = undefined;
 let harnessOption: "auto" | "pi" | "claude-code" = "auto";
 let cwdOverride: string | undefined = undefined;
 let showOther = false;
+let showTokens = false;
 
 // ---
 // HELP MENU
@@ -102,6 +104,7 @@ Options:
   --no-ticks              Disable the proportional cost scale ticks above the bars.
   -t, --tz <zone>         Specify a display timezone (e.g. America/Los_Angeles).
   -o, --other             Print a histogram of 'Other' commands grouped by semantic sub-category (Build, Lint, System, etc.).
+  -T, --tokens            Print a per-model token summary table (deduped) for cross-referencing with /usage.
   -W, --watch             Watch a session file for changes and re-render the bar chart in real-time.
   --version               Display this tool's version.
   --why                   Explain why you'd run this tool, with user scenarios and anti-use-cases.
@@ -122,6 +125,7 @@ let hasNoTicks = false;
 let hasTicks = false;
 let hasTz = false;
 let hasOther = false;
+let hasTokens = false;
 let showWatch = false;
 
 for (let i = 2; i < process.argv.length; i++) {
@@ -166,6 +170,9 @@ for (let i = 2; i < process.argv.length; i++) {
 	} else if (arg === "-o" || arg === "--other") {
 		showOther = true;
 		hasOther = true;
+	} else if (arg === "--tokens" || arg === "-T") {
+		showTokens = true;
+		hasTokens = true;
 	} else if (arg === "-W" || arg === "--watch") {
 		showWatch = true;
 	} else if (arg === "--dir" || arg === "--cwd") {
@@ -346,6 +353,11 @@ async function main() {
 		const dedupedInteractions = deduplicateInteractions(interactions);
 		const otherOutput = renderOtherHistogram(dedupedInteractions, maxWidth);
 		console.log(otherOutput);
+	}
+
+	if (showTokens) {
+		const tokenOutput = renderTokenSummary(interactions, maxWidth);
+		console.log(tokenOutput);
 	}
 }
 

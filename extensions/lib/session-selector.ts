@@ -168,6 +168,22 @@ function formatCostPadded(cost: number): string {
 }
 
 /**
+ * Count visual (wrapped) lines the selector will occupy in the terminal.
+ * Each logical line may wrap into ceil(len / termWidth) visual rows.
+ * ANSI escape codes are stripped before measuring.
+ */
+function visualLineCount(text: string, termWidth: number): number {
+	const ansiRe = /\x1b\[[0-9;]*[a-zA-Z]/g;
+	const lines = text.split("\n");
+	let count = 0;
+	for (const line of lines) {
+		const cleanLen = line.replace(ansiRe, "").length;
+		count += cleanLen === 0 ? 1 : Math.ceil(cleanLen / Math.max(termWidth, 1));
+	}
+	return count;
+}
+
+/**
  * Render an interactive TTY session selector. Uses alternate screen buffer
  * (matches watch mode, less, vim) so scrollback is preserved when the selector
  * exits. Keyboard navigation wraps around the candidate list.
@@ -252,8 +268,9 @@ export async function selectSessionPrompt(
 				const costStr = `\x1b[32m${formatCostPadded(stats.cost)}\x1b[0m`;
 				out += `${prefix}${highlight}${c.displayPath.padEnd(maxPathLen)}${reset}  ${costStr}  (${stats.turns}t) [${harnessLabel}]  \x1b[90m${relTime}\x1b[0m\n`;
 			}
-			// Count rendered lines for precise cursor-up on re-render
-			lastLineCount = out.split("\n").length;
+			// Count visual (wrapped) lines for precise cursor-up on re-render.
+			const cols = process.stdout.columns || 80;
+			lastLineCount = visualLineCount(out, cols);
 			process.stdout.write(out);
 		};
 

@@ -168,14 +168,13 @@ function formatCostPadded(cost: number): string {
 }
 
 /**
- * Render an interactive TTY session selector. If stdout is not a TTY, falls back
- * to a non-interactive numbered list and auto-selects the first candidate.
+ * Render an interactive TTY session selector. Uses alternate screen buffer
+ * (matches watch mode, less, vim) so scrollback is preserved when the selector
+ * exits. Keyboard navigation wraps around the candidate list.
  *
- * Keyboard navigation:
- *   - ↑/k: move up (wraps around)
- *   - ↓/j: move down (wraps around)
- *   - Enter: select current item
- *   - Ctrl+C: cancel (exits with code 130)
+ *   - j/k, arrows: navigate
+ *   - Enter: select
+ *   - q or Ctrl+C: exit (code 130)
  *
  * @param candidates - Sorted array of session candidates (displayed top 10)
  * @returns Promise resolving to the selected session file path
@@ -219,6 +218,9 @@ export async function selectSessionPrompt(
 		stdin.resume();
 		stdin.setEncoding("utf8");
 
+		// Enter alternate screen buffer (matches watch mode, less, vim).
+		// Preserves scrollback — when selector exits, terminal is exactly as before.
+		process.stdout.write("\x1b[?1049h");
 		process.stdout.write("\x1b[?25l"); // Hide cursor
 
 		const maxPathLen = Math.max(
@@ -226,9 +228,13 @@ export async function selectSessionPrompt(
 			10
 		);
 
+		// Track how many lines we rendered last time so cleanScreen moves exactly that far
+		let lastLineCount = 0;
+
 		const render = () => {
 			const selected = displayCandidates[selectedIndex];
-			let out = `\x1b[1m\x1b[36m\u{1F4B8} WTFT Session Selector\x1b[0m (Use \u2191/\u2193 keys, Enter to select, Ctrl+C to cancel):\n`;
+			// Full path (not truncated) — wraps naturally if wider than terminal
+			let out = `\x1b[1m\x1b[36m\u{1F4B8} WTFT Session Selector\x1b[0m (j/k or arrows navigate, Enter select, q quit):\n`;
 			out += `  \x1b[90m${selected.path}\x1b[0m\n`;
 			for (let i = 0; i < displayCandidates.length; i++) {
 				const c = displayCandidates[i];
@@ -246,36 +252,41 @@ export async function selectSessionPrompt(
 				const costStr = `\x1b[32m${formatCostPadded(stats.cost)}\x1b[0m`;
 				out += `${prefix}${highlight}${c.displayPath.padEnd(maxPathLen)}${reset}  ${costStr}  (${stats.turns}t) [${harnessLabel}]  \x1b[90m${relTime}\x1b[0m\n`;
 			}
+			// Count rendered lines for precise cursor-up on re-render
+			lastLineCount = out.split("\n").length;
 			process.stdout.write(out);
 		};
 
-		// 30 rows covers any wrapping of 10 candidates + 2 header lines.
-		// \x1b[J clears from cursor to end of screen, removing ghost text.
+		// Move cursor up exactly the number of rendered lines, then clear to end.
+		// Dynamic count prevents overshooting into scrollback (old \x1b[30A was hardcoded).
 		const cleanScreen = () => {
-			process.stdout.write("\x1b[30A\x1b[J");
+			if (lastLineCount > 0) {
+				process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
+			}
 		};
 
-		// Move cursor up to overwrite previous render
+		// Initial render
 		render();
 
 		const onKey = (key: string) => {
-			if (key === "\u0003") {
-				// Ctrl+C
+			if (key === "\u0003" || key === "q" || key === "Q") {
+				// Ctrl+C or q — exit alternate screen, exit 130
 				cleanup();
 				process.exit(130);
 			} else if (key === "\r" || key === "\n") {
-				// Enter
+				// Enter — exit alternate screen, return selected path
+				const selectedPath = displayCandidates[selectedIndex].path;
 				cleanup();
-				resolve(displayCandidates[selectedIndex].path);
+				resolve(selectedPath);
 			} else if (key === "\u001b[A" || key === "k") {
-				// Up Arrow or 'k'
+				// Up Arrow or 'k' — wrap around
 				selectedIndex =
 					(selectedIndex - 1 + displayCandidates.length) %
 					displayCandidates.length;
 				cleanScreen();
 				render();
 			} else if (key === "\u001b[B" || key === "j") {
-				// Down Arrow or 'j'
+				// Down Arrow or 'j' — wrap around
 				selectedIndex =
 					(selectedIndex + 1) % displayCandidates.length;
 				cleanScreen();
@@ -287,7 +298,9 @@ export async function selectSessionPrompt(
 			stdin.removeListener("data", onKey);
 			stdin.setRawMode(false);
 			stdin.pause();
-			process.stdout.write("\x1b[?25h"); // Show cursor
+			// Exit alternate screen buffer + restore cursor
+			process.stdout.write("\x1b[?1049l");
+			process.stdout.write("\x1b[?25h");
 		};
 
 		stdin.on("data", onKey);

@@ -17,6 +17,8 @@ export type Category = "spec" | "code" | "mixed" | "tests" | "research" | "git" 
 export interface Interaction {
 	timestamp: number;
 	cost: number;
+	messageId?: string;
+	requestId?: string;
 	files: { path: string; action: "read" | "write" }[];
 	commands: string[];
 	texts: string[];
@@ -54,10 +56,10 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 	if (!usage) return 0;
 	
 	// Default to Claude Sonnet 4.6 pricing ($3/$15 per 1M tokens)
-	// Cache write: 1.25x input, cache read: 0.10x input (Anthropic standard)
+	// Cache write: 1.25x input (5-min TTL), 2.00x input (1-hour TTL)
+	// Cache read: 0.10x input (Anthropic standard)
 	let inputPrice = 3.00;
 	let outputPrice = 15.00;
-	let cacheWritePrice = 3.75;
 	let cacheReadPrice = 0.30;
 	
 	const m = (model || "").toLowerCase();
@@ -74,26 +76,45 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 			inputPrice = 0.14 * peak;
 			outputPrice = 0.28 * peak;
 		}
-		cacheWritePrice = 0; // DeepSeek does not expose separate cache-write tokens in the usage object
 		cacheReadPrice = 0;  // TODO: add cache-hit input pricing ($0.0028/M flash, $0.003625/M pro) once schema confirmed
+		// DeepSeek does not expose separate cache-write tokens → 0, no TTL split needed
 	} else if (m.includes("haiku")) {
 		// Claude Haiku 4.5: $1/M input, $5/M output
 		inputPrice = 1.00;
 		outputPrice = 5.00;
-		cacheWritePrice = 1.25;
 		cacheReadPrice = 0.10;
 	} else if (m.includes("opus")) {
 		// Claude Opus 4.6/4.7: $5/M input, $25/M output
 		inputPrice = 5.00;
 		outputPrice = 25.00;
-		cacheWritePrice = 6.25;
 		cacheReadPrice = 0.50;
+	}
+	
+	// ----
+	// Cache-write pricing: split by TTL when the breakdown object is present (#55).
+	// 5-minute TTL caches = 1.25× input; 1-hour TTL caches = 2.00× input.
+	// Falls back to flat 1.25× when only the scalar cache_creation_input_tokens is available.
+	// ----
+	let cacheWriteCost = 0;
+	const cc = usage.cache_creation || {};
+	const cw5m = cc.ephemeral_5m_input_tokens ?? 0;
+	const cw1h = cc.ephemeral_1h_input_tokens ?? 0;
+	const cwFlat = Math.max(0, (usage.cache_creation_input_tokens || 0) - cw5m - cw1h);
+	
+	if (m.includes("deepseek")) {
+		// DeepSeek: no cache-write pricing (all zero)
+		cacheWriteCost = 0;
+	} else {
+		cacheWriteCost =
+			cw5m * (inputPrice * 1.25 / 1000000) +
+			cw1h * (inputPrice * 2.00 / 1000000) +
+			cwFlat * (inputPrice * 1.25 / 1000000); // unknown TTL → default 5-min (1.25×)
 	}
 	
 	const cost = 
 		((usage.input_tokens || 0) * (inputPrice / 1000000)) +
 		((usage.output_tokens || 0) * (outputPrice / 1000000)) +
-		((usage.cache_creation_input_tokens || 0) * (cacheWritePrice / 1000000)) +
+		cacheWriteCost +
 		((usage.cache_read_input_tokens || 0) * (cacheReadPrice / 1000000));
 		
 	return cost;
@@ -174,12 +195,14 @@ export function parseEntryToInteraction(entry: any): Interaction | null {
 		if (piCost !== undefined && piCost !== null && !(piCost === 0 && hasTokens)) {
 			cost = piCost;
 		} else if (assistantMsg.model && hasTokens) {
-			// Normalize Pi field names to Anthropic-compat for calculateClaudeCost
+			// Normalize Pi field names to Anthropic-compat for calculateClaudeCost.
+			// Pass the cache_creation sub-object through for TTL-split pricing (#55).
 			const normalizedUsage = {
 				input_tokens: usage.input_tokens ?? usage.input ?? 0,
 				output_tokens: usage.output_tokens ?? usage.output ?? 0,
 				cache_creation_input_tokens: usage.cache_creation_input_tokens ?? usage.cacheWrite ?? 0,
 				cache_read_input_tokens: usage.cache_read_input_tokens ?? usage.cacheRead ?? 0,
+				cache_creation: usage.cache_creation || null,
 			};
 			cost = calculateClaudeCost(assistantMsg.model, normalizedUsage, timestamp);
 		}
@@ -229,7 +252,7 @@ export function parseEntryToInteraction(entry: any): Interaction | null {
 			}
 		}
 
-		return { timestamp, cost, files, commands, texts };
+		return { timestamp, cost, messageId: assistantMsg.id, requestId: entry.requestId, files, commands, texts };
 	}
 	
 	return null;
@@ -246,6 +269,72 @@ export interface Bin {
 export interface IntervalConfig {
 	size: number;
 	unit: "m" | "h" | "d" | "w";
+}
+
+// ---
+// MESSAGE-ID DEDUPLICATION (#54)
+// Claude Code emits multiple JSONL lines per API response (one per content block +
+// streaming/compaction re-logging), each echoing the same message-level `usage`.
+// Summing per line inflates costs ~1.8×. Dedup by message.id: keep the max-cost
+// copy (handles streaming partials where usage grows), merge content blocks from
+// all copies for correct classification.
+// ---
+
+export function deduplicateInteractions(interactions: Interaction[]): Interaction[] {
+	const byId = new Map<string, Interaction[]>();
+	const withoutId: Interaction[] = [];
+
+	for (const i of interactions) {
+		if (i.messageId) {
+			const existing = byId.get(i.messageId);
+			if (existing) {
+				existing.push(i);
+			} else {
+				byId.set(i.messageId, [i]);
+			}
+		} else {
+			withoutId.push(i);
+		}
+	}
+
+	const deduped: Interaction[] = [...withoutId];
+
+	for (const [, group] of byId) {
+		if (group.length === 1) {
+			deduped.push(group[0]);
+		} else {
+			// Take max cost (handles streaming partials), merge content for classification
+			let best = group[0];
+			for (let j = 1; j < group.length; j++) {
+				if (group[j].cost > best.cost) best = group[j];
+			}
+			const merged: Interaction = {
+				...best,
+				files: [],
+				commands: [],
+				texts: []
+			};
+			const seenFiles = new Set<string>();
+			for (const i of group) {
+				for (const f of i.files) {
+					const key = `${f.path}:${f.action}`;
+					if (!seenFiles.has(key)) {
+						seenFiles.add(key);
+						merged.files.push(f);
+					}
+				}
+				for (const c of i.commands) {
+					if (!merged.commands.includes(c)) merged.commands.push(c);
+				}
+				for (const t of i.texts) {
+					if (!merged.texts.includes(t)) merged.texts.push(t);
+				}
+			}
+			deduped.push(merged);
+		}
+	}
+
+	return deduped;
 }
 
 // ---
@@ -812,6 +901,11 @@ export function buildWtftLines(
 	const tz = opts?.timezone !== undefined ? opts.timezone : defaultSettings.timezone;
 
 	const intervalConfig = parseInterval(intervalStr);
+
+	// Deduplicate by message.id before binning (#54): Claude Code emits multiple
+	// JSONL lines per API response, each echoing the same message-level usage.
+	// Summing per line inflates costs ~1.8×.
+	interactions = deduplicateInteractions(interactions);
 
 	// Group interactions into binned intervals
 	const binMap = new Map<string, Bin>();

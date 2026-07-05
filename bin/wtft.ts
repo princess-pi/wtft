@@ -13,6 +13,7 @@ import {
 	parseEntryToInteraction,
 	renderOtherHistogram,
 	getSemanticCommandGroup,
+	deduplicateInteractions,
 	watchMode,
 	type WatchSettings,
 	type Interaction,
@@ -342,7 +343,8 @@ async function main() {
 
 	if (showOther) {
 		console.log(""); // empty line spacer
-		const otherOutput = renderOtherHistogram(interactions, maxWidth);
+		const dedupedInteractions = deduplicateInteractions(interactions);
+		const otherOutput = renderOtherHistogram(dedupedInteractions, maxWidth);
 		console.log(otherOutput);
 	}
 }

@@ -11,6 +11,7 @@ import {
 	getSemanticCommandGroup,
 	parseEntryToInteraction,
 	renderOtherHistogram,
+	deduplicateInteractions,
 	getTerminalWidth,
 	getDeepSeekPeakMultiplier,
 	getCurrentLocalHour,
@@ -423,6 +424,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				mode,
 				showHelp,
 				showWhy,
+				showVersion,
 				pager,
 				hasInterval,
 				hasLimit,
@@ -503,7 +505,8 @@ export default function wtftExtension(pi: ExtensionAPI) {
 					.map((entry: any) => parseEntryToInteraction(entry))
 					.filter((i: any): i is NonNullable<typeof i> => i !== null);
 				
-				const output = renderOtherHistogram(interactions, Math.max(current.width, 40));
+				const deduped = deduplicateInteractions(interactions);
+				const output = renderOtherHistogram(deduped, Math.max(current.width, 40));
 				ctx.ui.notify(output, "info");
 				return;
 			}

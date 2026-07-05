@@ -15,7 +15,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { buildDisplayPath, formatRelativeTime } from "./session-path-shortener.ts";
-import { formatCost, parseEntryToInteraction } from "./wtft-shared.ts";
+import { formatCost, parseEntryToInteraction, deduplicateInteractions, type Interaction } from "./wtft-shared.ts";
 
 // ---
 // TYPES
@@ -128,7 +128,7 @@ export function getSessionSummary(
 	filePath: string
 ): { turns: number; cost: number } {
 	let turns = 0;
-	let cost = 0;
+	const interactions: Interaction[] = [];
 	try {
 		const content = fs.readFileSync(filePath, "utf8");
 		const lines = content.split("\n");
@@ -145,7 +145,7 @@ export function getSessionSummary(
 				}
 				const interaction = parseEntryToInteraction(entry);
 				if (interaction) {
-					cost += interaction.cost;
+					interactions.push(interaction);
 				}
 			} catch {
 				// Skip unparseable lines
@@ -154,6 +154,10 @@ export function getSessionSummary(
 	} catch {
 		// File may not exist or be unreadable
 	}
+	// Dedup by message.id before summing (#54) — same double-count bug
+	// that wtft chart rendering fixed; session selector cost must match.
+	const deduped = deduplicateInteractions(interactions);
+	const cost = deduped.reduce((sum, i) => sum + i.cost, 0);
 	return { turns, cost };
 }
 

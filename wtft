@@ -1,2 +1,2 @@
 #!/bin/sh
-node ./bin/wtft.mjs "$@"
+node --experimental-strip-types ./bin/wtft.ts "$@"

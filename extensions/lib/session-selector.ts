@@ -168,27 +168,13 @@ function formatCostPadded(cost: number): string {
 }
 
 /**
- * Count visual (wrapped) lines the selector will occupy in the terminal.
- * Each logical line may wrap into ceil(len / termWidth) visual rows.
- * ANSI escape codes are stripped before measuring.
- */
-function visualLineCount(text: string, termWidth: number): number {
-	const ansiRe = /\x1b\[[0-9;]*[a-zA-Z]/g;
-	const lines = text.replace(/\n$/, "").split("\n");
-	let count = 0;
-	for (const line of lines) {
-		const cleanLen = line.replace(ansiRe, "").length;
-		count += cleanLen === 0 ? 1 : Math.ceil(cleanLen / Math.max(termWidth, 1));
-	}
-	return count;
-}
-
-/**
- * Render an interactive TTY session selector. Uses alternate screen buffer
- * (matches watch mode, less, vim) so scrollback is preserved when the selector
- * exits. Keyboard navigation wraps around the candidate list.
+ * Render an interactive TTY session selector IN-PLACE on the main screen.
+ * Uses \\x1b[N A \\x1b[J to overwrite previous output on re-render — no alt
+ * screen buffer. When the selector exits, the output is cleared and the chart
+ * renders starting where the selector's first line was, preserving scrollback
+ * above.
  *
- *   - j/k, arrows: navigate
+ *   - j/k, arrows: navigate (wraps around)
  *   - Enter: select
  *   - q or Ctrl+C: exit (code 130)
  *
@@ -234,9 +220,6 @@ export async function selectSessionPrompt(
 		stdin.resume();
 		stdin.setEncoding("utf8");
 
-		// Enter alternate screen buffer (matches watch mode, less, vim).
-		// Preserves scrollback — when selector exits, terminal is exactly as before.
-		process.stdout.write("\x1b[?1049h");
 		process.stdout.write("\x1b[?25l"); // Hide cursor
 
 		const maxPathLen = Math.max(
@@ -244,7 +227,7 @@ export async function selectSessionPrompt(
 			10
 		);
 
-		// Track how many lines we rendered last time so cleanScreen moves exactly that far
+		// Track rendered lines for precise in-place overwrite
 		let lastLineCount = 0;
 
 		const render = () => {
@@ -268,15 +251,15 @@ export async function selectSessionPrompt(
 				const costStr = `\x1b[32m${formatCostPadded(stats.cost)}\x1b[0m`;
 				out += `${prefix}${highlight}${c.displayPath.padEnd(maxPathLen)}${reset}  ${costStr}  (${stats.turns}t) [${harnessLabel}]  \x1b[90m${relTime}\x1b[0m\n`;
 			}
-			// Count visual (wrapped) lines for precise cursor-up on re-render.
+			// Count visual (wrapped) lines to move cursor exactly that far on re-render
 			const cols = process.stdout.columns || 80;
 			lastLineCount = visualLineCount(out, cols);
 			process.stdout.write(out);
 		};
 
-		// Move cursor up exactly the number of rendered lines, then clear to end.
-		// Dynamic count prevents overshooting into scrollback (old \x1b[30A was hardcoded).
-		const cleanScreen = () => {
+		// Move cursor up exactly the number of visual lines rendered, then clear
+		// to end of screen. This overwrites the previous render in-place.
+		const overwritePrevious = () => {
 			if (lastLineCount > 0) {
 				process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
 			}
@@ -287,26 +270,26 @@ export async function selectSessionPrompt(
 
 		const onKey = (key: string) => {
 			if (key === "\u0003" || key === "q" || key === "Q") {
-				// Ctrl+C or q — exit alternate screen, exit 130
+				// Clear selector output before exiting
+				overwritePrevious();
 				cleanup();
 				process.exit(130);
 			} else if (key === "\r" || key === "\n") {
-				// Enter — exit alternate screen, return selected path
+				// Clear selector output so chart starts in its place
+				overwritePrevious();
 				const selectedPath = displayCandidates[selectedIndex].path;
 				cleanup();
 				resolve(selectedPath);
 			} else if (key === "\u001b[A" || key === "k") {
-				// Up Arrow or 'k' — wrap around
 				selectedIndex =
 					(selectedIndex - 1 + displayCandidates.length) %
 					displayCandidates.length;
-				cleanScreen();
+				overwritePrevious();
 				render();
 			} else if (key === "\u001b[B" || key === "j") {
-				// Down Arrow or 'j' — wrap around
 				selectedIndex =
 					(selectedIndex + 1) % displayCandidates.length;
-				cleanScreen();
+				overwritePrevious();
 				render();
 			}
 		};
@@ -315,9 +298,7 @@ export async function selectSessionPrompt(
 			stdin.removeListener("data", onKey);
 			stdin.setRawMode(false);
 			stdin.pause();
-			// Exit alternate screen buffer + restore cursor
-			process.stdout.write("\x1b[?1049l");
-			process.stdout.write("\x1b[?25h");
+			process.stdout.write("\x1b[?25h"); // Show cursor
 		};
 
 		stdin.on("data", onKey);

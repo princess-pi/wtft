@@ -1743,3 +1743,317 @@ export async function watchMode(
 		}
 	}
 }
+
+// ---
+// CLASSIFIED TAG FILE READER (#53 — daemon output → Interaction[])
+// The daemon writes pre-classified, pre-costed entries to
+// wtft-tags/<session>.wtft-tag.v{N}.jsonl. These helpers read them back
+// without re-parsing raw harness entries or re-calculating costs.
+// ---
+
+/**
+ * Convert a single classified tag-file line to an Interaction.
+ * The classified format is: {t, c, cat, f: [{p, a}], cmd}
+ * cost is already computed by the daemon with current pricing (#54/#55).
+ * files/commands are populated so classifyInteraction produces the same
+ * category the daemon already computed.
+ */
+export function classifiedToInteraction(obj: any): Interaction | null {
+	if (!obj || typeof obj.t !== "number" || typeof obj.c !== "number") return null;
+	return {
+		timestamp: obj.t,
+		cost: obj.c,
+		files: (obj.f || []).map((f: any) => ({ path: f.p || "", action: (f.a === "w" ? "write" : "read") as "read" | "write" })),
+		commands: obj.cmd || [],
+		texts: [],
+		inputTokens: 0,
+		outputTokens: 0,
+		cacheReadTokens: 0,
+		cacheWriteTokens: 0,
+	};
+}
+
+/**
+ * Read all classified interactions from a tag file, skipping heartbeat lines.
+ *
+ * @param tagPath - Absolute path to the .wtft-tag.v{N}.jsonl file
+ * @returns Array of Interactions (costs already computed by daemon)
+ */
+export function readClassifiedTagFile(tagPath: string): Interaction[] {
+	const interactions: Interaction[] = [];
+	try {
+		const content = fs.readFileSync(tagPath, "utf8");
+		for (const line of content.split("\n")) {
+			if (!line.trim()) continue;
+			try {
+				const obj = JSON.parse(line);
+				if (obj._hb) continue; // skip heartbeat lines
+				const interaction = classifiedToInteraction(obj);
+				if (interaction) interactions.push(interaction);
+			} catch {
+				// Skip unparseable lines
+			}
+		}
+	} catch {
+		// File may not exist yet
+	}
+	return interactions;
+}
+
+// ---
+// INOTIFY-BASED WATCH MODE (#53)
+// Replaces the poll-loop watchMode with fs.watch on the daemon's classified
+// tag file. Auto-spawn of the daemon happens in the CLI entry point (bin/wtft.ts).
+// ---
+
+/**
+ * Watch a classified tag file via inotify (fs.watch) and re-render the bar
+ * chart in real time on every write. The daemon guarantees:
+ *   - Writes at most every 667ms (90bpm)
+ *   - Every line is a complete, valid JSON line (atomic writes)
+ *   - No partial lines, no mid-write reads
+ *
+ * This means the consumer can use event-driven fs.watch — no polling,
+ * no throttling, no partial-line handling.
+ *
+ * @param sessionPath - Path to the session.jsonl (shown in title)
+ * @param tagPath - Path to the daemon's classified tag file
+ * @param settings - Display settings (interval, limit, width, etc.)
+ */
+export async function watchTagFile(
+	sessionPath: string,
+	tagPath: string,
+	settings: WatchSettings
+): Promise<void> {
+	if (!process.stdout.isTTY) {
+		console.error("❌ --watch requires a real terminal (TTY). Refusing to start.");
+		process.exit(1);
+	}
+
+	let totalCost = 0;
+	let interactionCount = 0;
+	let needsRedraw = true;
+	let _lastRenderMin = -1;
+
+	// Alt screen buffer — live updates inside, main screen restored on exit.
+	process.stdout.write("\x1b[?1049h");
+	hideCursor();
+
+	let lastBuffer: string[] = [];
+
+	// Shared exit: clears chart output, restores terminal, prints final chart.
+	const exitWatch = () => {
+		if (watcher) watcher.close();
+		process.stdout.write("\x1b[?1049l");
+		showCursor();
+		cleanupStdin();
+		if (lastBuffer.length > 0) {
+			for (const l of lastBuffer) console.log(l);
+		}
+		console.log(`WTFT watch stopped \u2014 ${interactionCount} interactions, $${totalCost.toFixed(4)} total cost.`);
+		process.exit(0);
+	};
+
+	process.on("SIGINT", exitWatch);
+
+	// Raw stdin for 'q'/'Q' quit.
+	const cleanupStdin = enterRawStdin((key: string) => {
+		if (key === "q" || key === "Q" || key === "\u0003") {
+			exitWatch();
+		}
+	});
+
+	// Read initial classified entries from tag file (daemon may have already
+	// processed part of the session before we started watching).
+	let allInteractions: Interaction[] = readClassifiedTagFile(tagPath);
+	let lastReadOffset = 0;
+	try {
+		lastReadOffset = fs.statSync(tagPath).size;
+	} catch {}
+
+	// Session-level settings from inline wtft-settings entries (same as watchMode).
+	let disabledEmoji = settings.disabledEmoji;
+	let sessionInterval: string | undefined;
+	let sessionLimit: number | undefined;
+	let sessionMode: "cumulative" | "bucket" | undefined;
+	let sessionShowTicks: boolean | undefined;
+	let sessionTimezone: string | undefined;
+
+	// Parse inline wtft-settings from the tag file (if the daemon wrote any).
+	// wtft-settings are written as custom entries in the session.jsonl, not the
+	// classified tag file, so we read the session directly for settings only.
+	try {
+		const sessionContent = fs.readFileSync(sessionPath, "utf8");
+		for (const line of sessionContent.split("\n")) {
+			if (!line.trim()) continue;
+			try {
+				const entry = JSON.parse(line);
+				if (entry.type === "custom" && entry.customType === "emoji-settings") {
+					if (entry.data && typeof entry.data.disabled === "boolean") {
+						disabledEmoji = entry.data.disabled;
+					}
+				} else if (entry.type === "custom" && entry.customType === "wtft-settings") {
+					if (entry.data) {
+						if (typeof entry.data.interval === "string") sessionInterval = entry.data.interval;
+						if (typeof entry.data.limit === "number") sessionLimit = entry.data.limit;
+						if (entry.data.mode === "cumulative" || entry.data.mode === "bucket") sessionMode = entry.data.mode;
+						if (typeof entry.data.showTicks === "boolean") sessionShowTicks = entry.data.showTicks;
+						if (typeof entry.data.timezone === "string") sessionTimezone = entry.data.timezone;
+					}
+				}
+			} catch {
+				// Skip unparseable lines
+			}
+		}
+	} catch {
+		// Session file may not exist or be unreadable
+	}
+
+	const render = () => {
+		// Home cursor + clear — safe inside alt screen, prevents scrollback accumulation
+		process.stdout.write("\x1b[H\x1b[J");
+
+		const width = getTerminalWidth();
+		const finalInterval = sessionInterval ?? settings.interval;
+		const finalLimit = sessionLimit ?? settings.limit;
+		const finalMode = sessionMode ?? settings.mode;
+		const finalShowTicks = sessionShowTicks ?? settings.showTicks;
+		const finalTimezone = sessionTimezone ?? settings.timezone;
+		const finalWidth = Math.min(settings.width, width);
+
+		const defaultSettings = {
+			interval: "1h", limit: 100, width: finalWidth,
+			showTicks: true, mode: "cumulative" as "cumulative" | "bucket",
+			timezone: undefined
+		};
+
+		// Deduplicate before rendering (tag file entries are already deduped by
+		// the daemon, but incremental re-reads might re-add entries if the daemon
+		// rewrites heartbeats in-place — the dedup is cheap insurance).
+		const deduped = deduplicateInteractions(allInteractions);
+		interactionCount = deduped.length;
+
+		const lines = buildWtftLines(deduped, defaultSettings, {
+			interval: finalInterval,
+			limit: finalLimit,
+			width: finalWidth,
+			showTicks: finalShowTicks,
+			mode: finalMode,
+			timezone: finalTimezone,
+			disabledEmoji,
+			forceLegendRow: true
+		});
+
+		const buf: string[] = [];
+		buf.push(`\x1b[90m${sessionPath}\x1b[0m`);
+		totalCost = deduped.reduce((sum, i) => sum + i.cost, 0);
+
+		if (lines && lines.length > 0) {
+			// Append 24-hour timeline to the title line
+			const tlHour = getCurrentLocalHour(finalTimezone);
+			const tlStr = buildTimelineString(new Set<number>(), tlHour, undefined);
+			lines[0] = lines[0] + "  " + tlStr;
+			for (const l of lines) buf.push(l);
+		} else {
+			buf.push("\x1b[90mWaiting for session data...\x1b[0m");
+		}
+
+		// Footer row
+		buf.push(`\x1b[90mq/Ctrl+C to exit\x1b[0m`);
+
+		lastBuffer = [...buf];
+		process.stdout.write(buf.join("\n"));
+		needsRedraw = false;
+		_lastRenderMin = new Date().getMinutes();
+	};
+
+	// Initial render
+	render();
+
+	// SIGWINCH handler — re-render immediately on terminal resize
+	process.on("SIGWINCH", () => {
+		needsRedraw = true;
+		render();
+	});
+
+	// ---
+	// fs.watch on the classified tag file (inotify on Linux).
+	// The daemon writes at most every 667ms with complete JSON lines.
+	// We debounce 100ms to absorb any double-fire from the OS.
+	// ---
+	let watcher: fs.FSWatcher | null = null;
+	let watchTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	try {
+		watcher = fs.watch(tagPath, (eventType) => {
+			if (eventType !== "change") return;
+
+			// Debounce: daemon writes at most every 667ms; 100ms is plenty
+			if (watchTimeout) clearTimeout(watchTimeout);
+			watchTimeout = setTimeout(() => {
+				try {
+					const stat = fs.statSync(tagPath);
+					if (stat.size <= lastReadOffset) return;
+
+					const fd = fs.openSync(tagPath, "r");
+					const buf = Buffer.alloc(stat.size - lastReadOffset);
+					fs.readSync(fd, buf, 0, buf.length, lastReadOffset);
+					fs.closeSync(fd);
+					lastReadOffset = stat.size;
+
+					const newContent = buf.toString("utf8");
+					const lines = newContent.split("\n");
+					let newCount = 0;
+					for (const line of lines) {
+						if (!line.trim()) continue;
+						try {
+							const obj = JSON.parse(line);
+							if (obj._hb) continue; // skip heartbeats
+							const interaction = classifiedToInteraction(obj);
+							if (interaction) {
+								allInteractions.push(interaction);
+								newCount++;
+							}
+						} catch {
+							// Skip unparseable lines
+						}
+					}
+
+					if (newCount > 0) {
+						needsRedraw = true;
+						render();
+					}
+				} catch {
+					// Tag file may have been deleted or truncated — re-read from zero
+					try {
+						lastReadOffset = 0;
+						allInteractions = readClassifiedTagFile(tagPath);
+						lastReadOffset = fs.statSync(tagPath).size;
+						needsRedraw = true;
+						render();
+					} catch {
+						// File gone — wait for it to reappear
+					}
+				}
+			}, 100);
+		});
+	} catch {
+		// If fs.watch fails (e.g. file doesn't exist yet), fall back to polling
+		console.error("❌ Failed to watch tag file. Is the daemon running?");
+		process.exit(1);
+	}
+
+	// Per-minute re-render for timeline diamond/badge live-updates
+	const minuteInterval = setInterval(() => {
+		const _curMin = new Date().getMinutes();
+		if (_curMin !== _lastRenderMin) {
+			needsRedraw = true;
+			render();
+		}
+	}, 60000);
+
+	// Keep the process alive (fs.watch is the primary event source).
+	// The minuteInterval also prevents exit when watcher is quiet.
+	// This is an intentional infinite await — exitWatch() calls process.exit().
+	await new Promise(() => {});
+}

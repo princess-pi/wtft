@@ -16,11 +16,14 @@ import {
 	getSemanticCommandGroup,
 	deduplicateInteractions,
 	watchMode,
+	watchTagFile,
+	readClassifiedTagFile,
 	type WatchSettings,
 	type Interaction,
 	type Category,
 	getTerminalWidth
 } from "../extensions/lib/wtft-shared.ts";
+import { execSync, spawn } from "node:child_process";
 import {
 	discoverSessions,
 	selectSessionPrompt
@@ -224,12 +227,47 @@ async function main() {
 	}
 
 	// ---
-	// WATCH MODE: enter live re-render loop (#45)
+	// WATCH MODE: enter live re-render loop (#45, #53)
+	// Spawns the wtft-daemon for classified tag output, then watches the
+	// tag file via inotify (fs.watch) instead of polling session.jsonl.
 	// ---
 	if (showWatch) {
 		const termColumns = getTerminalWidth();
 		const maxWidth = hasWidth ? (maxWidthOption as number) : 240;
-		await watchMode(finalSessionPath, {
+
+		// Compute tag file path (matches daemon's path logic: wtft-tags/<base>.wtft-tag.v2.0.0.jsonl)
+		const sessionDir = path.dirname(finalSessionPath);
+		const sessionBase = path.basename(finalSessionPath);
+		const tagsDir = path.join(sessionDir, "wtft-tags");
+		const tagPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.0.0.jsonl");
+
+		// Auto-spawn daemon if not already running (singleton via PID file).
+		const daemonPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "wtft-daemon.mjs");
+		try {
+			const child = spawn(process.execPath, [daemonPath, "--session", finalSessionPath], {
+				detached: true,
+				stdio: "ignore"
+			});
+			child.unref();
+		} catch (err) {
+			// Daemon spawn failed — fall back to polling mode
+			console.error(`\x1b[33m⚠ Daemon spawn failed, falling back to polling mode: ${err}\x1b[0m`);
+			await watchMode(finalSessionPath, {
+				interval: hasInterval ? intervalStr : "1h",
+				limit: hasLimit ? limit : 100,
+				width: Math.min(maxWidth, termColumns),
+				mode: (hasCumulative || hasBucket) ? mode : "cumulative",
+				showTicks: (hasTicks || hasNoTicks) ? showTicks : true,
+				timezone: hasTz ? timezone : undefined,
+				disabledEmoji: false
+			});
+			return;
+		}
+
+		// Wait briefly for daemon to write the first classified lines, then
+		// enter the inotify-based watch loop.
+		await new Promise(resolve => setTimeout(resolve, 500));
+		await watchTagFile(finalSessionPath, tagPath, {
 			interval: hasInterval ? intervalStr : "1h",
 			limit: hasLimit ? limit : 100,
 			width: Math.min(maxWidth, termColumns),
@@ -238,7 +276,7 @@ async function main() {
 			timezone: hasTz ? timezone : undefined,
 			disabledEmoji: false
 		});
-		return; // watchMode never returns until SIGINT
+		return; // watchTagFile never returns until SIGINT
 	}
 
 	// Resolve all subagent files to recursively roll up cost if applicable

@@ -164,6 +164,22 @@
       "desc": "Watch a session file for changes and re-render the bar chart in real-time (companion terminal mode for Claude Code). Ctrl+C to exit."
     },
     {
+      "flags": "--list",
+      "desc": "List all running wtft-tag daemons (session, PID, idle time)."
+    },
+    {
+      "flags": "--cleanup",
+      "desc": "Kill daemons whose source session no longer exists."
+    },
+    {
+      "flags": "--restart",
+      "desc": "Kill all running daemons (fresh spawn on next wtft)."
+    },
+    {
+      "flags": "--stop <session>",
+      "desc": "Stop daemon for a specific session path."
+    },
+    {
       "flags": "--emoji",
       "desc": "Enable emoji icons in TUI widgets."
     },

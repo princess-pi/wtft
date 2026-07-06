@@ -235,11 +235,22 @@ async function main() {
 		const termColumns = getTerminalWidth();
 		const maxWidth = hasWidth ? (maxWidthOption as number) : 240;
 
-		// Compute tag file path (matches daemon's path logic: wtft-tags/<base>.wtft-tag.v2.0.0.jsonl)
+		// Compute tag file path — discover the current version by scanning wtft-tags/
+		// for any file matching <sessionBase>.wtft-tag.v*.jsonl.
+		// The daemon cleans up stale versions on startup, so at most one exists.
 		const sessionDir = path.dirname(finalSessionPath);
 		const sessionBase = path.basename(finalSessionPath);
 		const tagsDir = path.join(sessionDir, "wtft-tags");
-		const tagPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.0.0.jsonl");
+		let tagPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.1.0.jsonl"); // default
+		try {
+			const prefix = sessionBase + ".wtft-tag.v";
+			for (const f of fs.readdirSync(tagsDir)) {
+				if (f.startsWith(prefix) && f.endsWith(".jsonl")) {
+					tagPath = path.join(tagsDir, f);
+					break;
+				}
+			}
+		} catch {}
 
 		// Auto-spawn daemon if not already running (singleton via PID file).
 		const daemonPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "wtft-daemon.mjs");

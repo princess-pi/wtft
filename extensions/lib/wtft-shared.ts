@@ -1652,6 +1652,12 @@ export async function watchMode(
 	let sessionTimezone: string | undefined;
 
 	const render = () => {
+		// Move cursor up to overwrite previous render, then clear to end.
+		// On first render lastLineCount is 0 → no-op (writes at current cursor).
+		if (lastLineCount > 0) {
+			process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
+		}
+
 		const width = getTerminalWidth();
 		const finalInterval = sessionInterval ?? settings.interval;
 		const finalLimit = sessionLimit ?? settings.limit;

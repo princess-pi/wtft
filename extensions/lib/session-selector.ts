@@ -238,12 +238,16 @@ export async function selectSessionPrompt(
 
 		process.stdout.write("\x1b[?25l"); // Hide cursor
 
+		// Save cursor position before first render. On exit / re-render,
+		// restore cursor + clear to end — guaranteed exact, no line counting.
+		process.stdout.write("\x1b7");
+
 		const maxPathLen = Math.max(
 			...displayCandidates.map((c) => c.displayPath.length),
 			10
 		);
 
-		// Track rendered lines for precise in-place overwrite
+		// Track rendered lines for precise in-place overwrite on arrow keys
 		let lastLineCount = 0;
 
 		const render = () => {
@@ -286,13 +290,13 @@ export async function selectSessionPrompt(
 
 		const onKey = (key: string) => {
 			if (key === "\u0003" || key === "q" || key === "Q") {
-				// Clear selector output before exiting
-				overwritePrevious();
+				// Restore saved cursor pos + clear to end — wipes selector cleanly
+				process.stdout.write("\x1b8\x1b[J");
 				cleanup();
 				process.exit(130);
 			} else if (key === "\r" || key === "\n") {
-				// Clear selector output so chart starts in its place
-				overwritePrevious();
+				// Restore saved cursor pos + clear to end — chart starts exactly here
+				process.stdout.write("\x1b8\x1b[J");
 				const selectedPath = displayCandidates[selectedIndex].path;
 				cleanup();
 				resolve(selectedPath);

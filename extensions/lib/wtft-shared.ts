@@ -1677,8 +1677,8 @@ export async function watchMode(
 		});
 
 		const buf: string[] = [];
-		buf.push("\x1b[H"); // Home cursor (alt screen handles buffer)
-		totalCost = allInteractions.reduce((sum, i) => sum + i.cost, 0);
+		// Home cursor removed — render in-place on main screen at current cursor
+		totalCost = deduplicateInteractions(allInteractions).reduce((sum, i) => sum + i.cost, 0);
 		interactionCount = allInteractions.length;
 
 		// Watching banner at top with full file path
@@ -1696,6 +1696,9 @@ export async function watchMode(
 		}
 
 		lastBuffer = [...buf]; // save for exit printout
+		// Compute visual line count for in-place overwrite on next render
+		const cols = process.stdout.columns || 80;
+		lastLineCount = buf.join("\n").split("\n").length;
 		process.stdout.write(buf.join("\n"));
 		needsRedraw = false;
 		_lastRenderMin = new Date().getMinutes();

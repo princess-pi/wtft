@@ -1927,9 +1927,9 @@ export async function watchTagFile(
 			timezone: undefined
 		};
 
-		// Deduplicate before rendering (tag file entries are already deduped by
-		// the daemon, but incremental re-reads might re-add entries if the daemon
-		// rewrites heartbeats in-place — the dedup is cheap insurance).
+		// Deduplicate by message.id — classified entries from the daemon are already
+		// deduped (the daemon uses the same message-ID dedup logic), so this is a no-op
+		// in normal operation. Present as cheap insurance against edge cases.
 		const deduped = deduplicateInteractions(allInteractions);
 		interactionCount = deduped.length;
 

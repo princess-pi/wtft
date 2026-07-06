@@ -6,18 +6,312 @@
 // Auto-spawned by wtft CLI; runs detached.
 //
 // Source file — esbuild bundles into bin/wtft-daemon.mjs.
-// Shared classifier/cost functions imported from wtft-shared.ts — no inlining.
+// Self-contained: harness-specific parsing lives here, not in wtft-shared.ts.
+// The renderers (CLI, Pi extension) consume the harness-agnostic tag file format.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
-	parseEntryToInteraction,
-	classifyInteraction,
-	deduplicateInteractions,
-} from "../extensions/lib/wtft-shared.ts";
+
+// ---
+// HARNESS-SPECIFIC PARSING & CLASSIFICATION (sole owner — not shared with renderers)
+// The daemon is the only component that reads raw Pi/Claude Code session.jsonl.
+// These functions live here, not in wtft-shared.ts, because the renderers
+// consume the harness-agnostic tag file format and never parse raw entries.
+// ---
+
+function getDeepSeekPeakMultiplier(timestamp) {
+  const ts = timestamp || Date.now();
+  const d = new Date(ts);
+  const utcHour = d.getUTCHours();
+  const utcMin = d.getUTCMinutes();
+  const utcTime = utcHour * 60 + utcMin;
+  if ((utcTime >= 60 && utcTime < 240) || (utcTime >= 360 && utcTime < 600)) {
+    return 2.0;
+  }
+  return 1.0;
+}
+
+function calculateClaudeCost(model, usage, timestamp) {
+  if (!usage) return 0;
+  let inputPrice = 3.0;
+  let outputPrice = 15.0;
+  let cacheReadPrice = 0.3;
+  const m = (model || "").toLowerCase();
+  if (m.includes("deepseek")) {
+    const peak = getDeepSeekPeakMultiplier(timestamp);
+    if (m.includes("v4-pro")) {
+      inputPrice = 0.435 * peak;
+      outputPrice = 0.87 * peak;
+    } else {
+      inputPrice = 0.14 * peak;
+      outputPrice = 0.28 * peak;
+    }
+    cacheReadPrice = 0;
+  } else if (m.includes("haiku")) {
+    inputPrice = 1.0;
+    outputPrice = 5.0;
+    cacheReadPrice = 0.1;
+  } else if (m.includes("opus")) {
+    inputPrice = 5.0;
+    outputPrice = 25.0;
+    cacheReadPrice = 0.5;
+  }
+  // TTL-split cache-write pricing (#55): 5-min = 1.25x input, 1-hour = 2x input.
+  let cacheWriteCost = 0;
+  const cc = usage.cache_creation || {};
+  const cw5m = cc.ephemeral_5m_input_tokens ?? 0;
+  const cw1h = cc.ephemeral_1h_input_tokens ?? 0;
+  const cwFlat = Math.max(0, (usage.cache_creation_input_tokens || 0) - cw5m - cw1h);
+  if (m.includes("deepseek")) {
+    cacheWriteCost = 0;
+  } else {
+    cacheWriteCost =
+      cw5m * (inputPrice * 1.25 / 1e6) +
+      cw1h * (inputPrice * 2.0 / 1e6) +
+      cwFlat * (inputPrice * 1.25 / 1e6);
+  }
+  const cost =
+    (usage.input_tokens || 0) * (inputPrice / 1e6) +
+    (usage.output_tokens || 0) * (outputPrice / 1e6) +
+    cacheWriteCost +
+    (usage.cache_read_input_tokens || 0) * (cacheReadPrice / 1e6);
+  return cost;
+}
+
+function extractFilesFromBashCommand(command, files) {
+  const cmdLines = command.split("\n");
+  for (const line of cmdLines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("cat ") && trimmed.includes("<<") && trimmed.includes(">")) {
+      const parts = trimmed.split(/>+/);
+      if (parts.length > 1) {
+        const possiblePath = parts[1].trim().replace(/['"]/g, "");
+        if (possiblePath && !possiblePath.startsWith("-")) {
+          files.push({ path: possiblePath, action: "write" });
+          continue;
+        }
+      }
+    }
+    if (trimmed.startsWith("cat ") || trimmed.startsWith("head ") || trimmed.startsWith("tail ")) {
+      const parts = trimmed.split(/\s+/);
+      if (parts.length > 1) {
+        const possiblePath = parts[1].replace(/['"]/g, "");
+        if (possiblePath && !possiblePath.startsWith("-")) {
+          files.push({ path: possiblePath, action: "read" });
+        } else if (parts.length > 2 && parts[1].startsWith("-")) {
+          for (let i = 2; i < parts.length; i++) {
+            const candidate = parts[i].replace(/['"]/g, "");
+            if (!candidate.startsWith("-") && isNaN(Number(candidate))) {
+              files.push({ path: candidate, action: "read" });
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+function parseEntryToInteraction(entry) {
+  if (!entry) return null;
+  const isPiSchema = entry.type === "message" && entry.message && entry.message.role === "assistant";
+  const isClaudeSchema = entry.type === "assistant" && entry.message && entry.message.role === "assistant";
+  if (isPiSchema || isClaudeSchema) {
+    const assistantMsg = entry.message;
+    let timestampStr = assistantMsg.timestamp || entry.timestamp;
+    let timestamp = 0;
+    if (typeof timestampStr === "string") {
+      timestamp = new Date(timestampStr).getTime();
+    } else if (typeof timestampStr === "number") {
+      timestamp = timestampStr;
+    }
+    let cost = 0;
+    const usage = assistantMsg.usage || {};
+    const piCost = usage.cost?.total;
+    const hasTokens = (usage.input_tokens || usage.input || 0) > 0 ||
+                      (usage.output_tokens || usage.output || 0) > 0 ||
+                      (usage.cache_read_input_tokens || usage.cacheRead || 0) > 0 ||
+                      (usage.cache_creation_input_tokens || usage.cacheWrite || 0) > 0;
+    if (piCost !== undefined && piCost !== null && !(piCost === 0 && hasTokens)) {
+      cost = piCost;
+    } else if (assistantMsg.model && hasTokens) {
+      const normalizedUsage = {
+        input_tokens: usage.input_tokens ?? usage.input ?? 0,
+        output_tokens: usage.output_tokens ?? usage.output ?? 0,
+        cache_creation_input_tokens: usage.cache_creation_input_tokens ?? usage.cacheWrite ?? 0,
+        cache_read_input_tokens: usage.cache_read_input_tokens ?? usage.cacheRead ?? 0,
+        cache_creation: usage.cache_creation || null,
+      };
+      cost = calculateClaudeCost(assistantMsg.model, normalizedUsage, timestamp);
+    }
+    const files = [];
+    const commands = [];
+    const texts = [];
+    if (Array.isArray(assistantMsg.content)) {
+      for (const block of assistantMsg.content) {
+        if (block.type === "text") {
+          texts.push(block.text);
+        } else if (block.type === "thinking") {
+          texts.push(block.thinking);
+        } else if (block.type === "toolCall") {
+          const name = block.name;
+          const args = block.arguments || {};
+          if (name === "read") {
+            if (args.path) files.push({ path: args.path, action: "read" });
+          } else if (name === "write" || name === "edit") {
+            if (args.path) files.push({ path: args.path, action: "write" });
+          } else if (name === "bash") {
+            if (args.command) {
+              commands.push(args.command);
+              extractFilesFromBashCommand(args.command, files);
+            }
+          }
+        } else if (block.type === "tool_use") {
+          const name = (block.name || "").toLowerCase();
+          const args = block.input || {};
+          if (name === "read" || name === "view" || name === "glob" || name === "ls") {
+            const p = args.file_path || args.path || args.directory || args.target;
+            if (p) files.push({ path: p, action: "read" });
+          } else if (name === "edit" || name === "write" || name === "replace") {
+            const p = args.file_path || args.path || args.target;
+            if (p) files.push({ path: p, action: "write" });
+          } else if (name === "bash" || name === "run") {
+            if (args.command) {
+              commands.push(args.command);
+              extractFilesFromBashCommand(args.command, files);
+            }
+          }
+        }
+      }
+    }
+    return { timestamp, cost, messageId: assistantMsg.id, files, commands, texts };
+  }
+  return null;
+}
+
+function classifyInteraction(interaction) {
+  const specPaths = new Set();
+  const codePaths = new Set();
+  const testsPaths = new Set();
+  const researchPaths = new Set();
+  for (const f of interaction.files) {
+    const norm = f.path.replace(/\\/g, "/");
+    let category = null;
+    if (norm.includes("node_modules/")) {
+      if (path.extname(norm).toLowerCase() === ".md" || norm.includes("/docs/")) {
+        category = "research";
+      } else {
+        category = "code";
+      }
+    } else if (norm.startsWith("docs/") || norm.includes("/docs/") || norm.endsWith("AGENTS.md") || norm.endsWith("ARCHITECTURE.md") || norm.endsWith("README.md") || path.extname(norm).toLowerCase() === ".md") {
+      category = "spec";
+    } else if (norm.startsWith("tests/") || norm.includes("/tests/")) {
+      category = "tests";
+    } else if (norm.startsWith("research/") || norm.includes("/research/")) {
+      category = "research";
+    } else if (norm.startsWith(".pi/extensions/") || norm.includes("/.pi/extensions/") || norm.startsWith("extensions/") || norm.includes("/extensions/") || norm.startsWith("src/") || norm.includes("/src/") || norm.startsWith("public/") || norm.includes("/public/") || norm.startsWith("bin/") || norm.includes("/bin/") || norm.startsWith("debug/") || norm.includes("/debug/")) {
+      category = "code";
+    } else {
+      const ext = path.extname(norm).toLowerCase();
+      if ([".ts", ".js", ".mjs", ".json", ".jsonl", ".css", ".tsx", ".jsx", ".py", ".rs", ".go", ".sh", ".yml", ".yaml", ".sql", ".txt"].includes(ext) || norm.endsWith(".gitignore") || norm.endsWith(".dockerignore")) {
+        category = "code";
+      } else if (ext === "") {
+        category = "code";
+      }
+    }
+    if (category === "spec") specPaths.add(f.action);
+    else if (category === "code") codePaths.add(f.action);
+    else if (category === "tests") testsPaths.add(f.action);
+    else if (category === "research") researchPaths.add(f.action);
+  }
+  const specWrites = specPaths.has("write");
+  const codeWrites = codePaths.has("write");
+  const testsWrites = testsPaths.has("write");
+  const researchWrites = researchPaths.has("write");
+  const writeCount = (specWrites ? 1 : 0) + (codeWrites ? 1 : 0) + (testsWrites ? 1 : 0) + (researchWrites ? 1 : 0);
+  if (writeCount > 1) return "mixed";
+  if (writeCount === 1) {
+    if (specWrites) return "spec";
+    if (codeWrites) return "code";
+    if (testsWrites) return "tests";
+    if (researchWrites) return "research";
+  }
+  const hasSpec = specPaths.has("read");
+  const hasCode = codePaths.has("read");
+  const hasTests = testsPaths.has("read");
+  const hasResearch = researchPaths.has("read");
+  const readCount = (hasSpec ? 1 : 0) + (hasCode ? 1 : 0) + (hasTests ? 1 : 0) + (hasResearch ? 1 : 0);
+  if (readCount > 1) return "mixed";
+  if (hasSpec) return "spec";
+  if (hasCode) return "code";
+  if (hasTests) return "tests";
+  if (hasResearch) return "research";
+  if (interaction.commands.length > 0) {
+    let isGit = false;
+    let isGrep = false;
+    for (const cmd of interaction.commands) {
+      const lower = cmd.toLowerCase().trim();
+      if (lower === "git" || lower.startsWith("git ")) isGit = true;
+      else if (lower === "grep" || lower.startsWith("grep ") || lower === "rg" || lower.startsWith("rg ") || lower === "ripgrep" || lower.startsWith("ripgrep ") || lower === "find" || lower.startsWith("find ")) isGrep = true;
+    }
+    if (isGit) return "git";
+    if (isGrep) return "grep";
+    return "other";
+  }
+  if (interaction.texts.length > 0) return "prompt";
+  return "other";
+}
+
+function deduplicateInteractions(interactions) {
+  const byId = new Map();
+  const withoutId = [];
+  for (const i of interactions) {
+    if (i.messageId) {
+      const existing = byId.get(i.messageId);
+      if (existing) { existing.push(i); }
+      else { byId.set(i.messageId, [i]); }
+    } else {
+      withoutId.push(i);
+    }
+  }
+  const deduped = [...withoutId];
+  for (const [, group] of byId) {
+    if (group.length === 1) {
+      deduped.push(group[0]);
+    } else {
+      let best = group[0];
+      for (let j = 1; j < group.length; j++) {
+        if (group[j].cost > best.cost) best = group[j];
+      }
+      const merged = {
+        timestamp: best.timestamp, cost: best.cost,
+        messageId: best.messageId,
+        files: [], commands: [], texts: []
+      };
+      const seenFiles = new Set();
+      for (const i of group) {
+        for (const f of i.files) {
+          const key = f.path + ":" + f.action;
+          if (!seenFiles.has(key)) {
+            seenFiles.add(key);
+            merged.files.push(f);
+          }
+        }
+        for (const c of i.commands) {
+          if (!merged.commands.includes(c)) merged.commands.push(c);
+        }
+        for (const t of i.texts) {
+          if (!merged.texts.includes(t)) merged.texts.push(t);
+        }
+      }
+      deduped.push(merged);
+    }
+  }
+  return deduped;
+}
 
 // ---
 // DAEMON CONFIGURATION

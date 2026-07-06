@@ -290,31 +290,57 @@ async function main() {
 		return; // watchTagFile never returns until SIGINT
 	}
 
-	// Resolve all subagent files to recursively roll up cost if applicable
-	const sessionFiles: string[] = [finalSessionPath];
-	const extName = path.extname(finalSessionPath);
-	if (extName === ".jsonl") {
-		const baseName = path.basename(finalSessionPath, extName);
-		const parentDir = path.dirname(finalSessionPath);
-		// Claude Code puts subagents inside <parentDir>/<session-id>/subagents/
-		const possibleSubagentsDir = path.join(parentDir, baseName, "subagents");
-		if (fs.existsSync(possibleSubagentsDir)) {
-			try {
-				const subFiles = fs.readdirSync(possibleSubagentsDir);
-				for (const f of subFiles) {
-					if (f.startsWith("agent-") && f.endsWith(".jsonl")) {
-						sessionFiles.push(path.join(possibleSubagentsDir, f));
-					}
-				}
-			} catch {}
+	// ---
+	// NON-WATCH MODE: spawn daemon, read classified tag file, render.
+	// Both watch and non-watch now read from the same tag file format —
+	// the daemon is the sole harness→tag converter.
+	// ---
+
+	// Compute tag path + auto-spawn daemon (same logic as watch mode).
+	const sessionDir = path.dirname(finalSessionPath);
+	const sessionBase = path.basename(finalSessionPath);
+	const tagsDir = path.join(sessionDir, "wtft-tags");
+	let tagPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.1.0.jsonl");
+	try {
+		const prefix = sessionBase + ".wtft-tag.v";
+		for (const f of fs.readdirSync(tagsDir)) {
+			if (f.startsWith(prefix) && f.endsWith(".jsonl")) {
+				tagPath = path.join(tagsDir, f);
+				break;
+			}
 		}
+	} catch {}
+
+	// Auto-spawn daemon (singleton via PID file).
+	const daemonPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "wtft-daemon.mjs");
+	try {
+		const child = spawn(process.execPath, [daemonPath, "--session", finalSessionPath], {
+			detached: true,
+			stdio: "ignore"
+		});
+		child.unref();
+	} catch (err) {
+		// Daemon spawn failed — fall back to direct session parsing
+		console.error(`\x1b[33m⚠ Daemon spawn failed, falling back to direct parse: ${err}\x1b[0m`);
 	}
 
-	// Parse interactions from all session files (parent + subagents) using the
-	// shared parseSessionFile utility (#54 DRY refactor).
-	const interactions: Interaction[] = [];
-	for (const file of sessionFiles) {
-		interactions.push(...parseSessionFile(file));
+	// Wait for daemon to process existing entries (poll up to 3s for classified data).
+	// Daemon poll cycle is 667ms; 3s ≈ 4 cycles for a full re-parse.
+	const waitStart = Date.now();
+	while (Date.now() - waitStart < 3000) {
+		if (fs.existsSync(tagPath)) {
+			const content = fs.readFileSync(tagPath, "utf8");
+			if (content.split("\n").some(l => l.trim() && !l.includes('"_hb"'))) break;
+		}
+		await new Promise(r => setTimeout(r, 250));
+	}
+
+	// Read interactions from the classified tag file (harness-agnostic).
+	const interactions: Interaction[] = readClassifiedTagFile(tagPath);
+
+	// If daemon produced nothing, fall back to direct session parsing.
+	if (interactions.length === 0) {
+		interactions.push(...parseSessionFile(finalSessionPath));
 	}
 
 	// Separate pass: read parent file for custom entries (emoji/wtft settings, Pi-only).
@@ -326,9 +352,8 @@ async function main() {
 	let sessionShowTicks: boolean | undefined;
 	let sessionTimezone: string | undefined;
 
-	if (sessionFiles.length > 0) {
-		try {
-			const content = fs.readFileSync(sessionFiles[0], "utf8");
+	try {
+		const content = fs.readFileSync(finalSessionPath, "utf8");
 			for (const line of content.split("\n")) {
 				if (!line.trim()) continue;
 				try {
@@ -356,8 +381,6 @@ async function main() {
 		} catch {
 			// File may not exist or be unreadable
 		}
-	}
-
 	// ---
 	// COMPILING AND PRINTING
 	// ---

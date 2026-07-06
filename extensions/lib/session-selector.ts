@@ -285,20 +285,17 @@ export async function selectSessionPrompt(
 			}
 		};
 
-		// Save cursor with DECSC (\x1b7) — tmux doesn't support ANSI \x1b[u for restore.
-		// On Enter/q, \x1b8 (DECRC) + \x1b[J clears everything from saved position down.
-		process.stdout.write("\x1b7");
 
 		// Initial render
 		render();
 
 		const onKey = (key: string) => {
 			if (key === "\u0003" || key === "q" || key === "Q") {
-				process.stdout.write("\x1b8\x1b[J");
+				overwritePrevious();
 				cleanup();
 				process.exit(130);
 			} else if (key === "\r" || key === "\n") {
-				process.stdout.write("\x1b8\x1b[J");
+				overwritePrevious();
 				const selectedPath = displayCandidates[selectedIndex].path;
 				cleanup();
 				resolve(selectedPath);

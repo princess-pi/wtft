@@ -7,6 +7,7 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { execSync } from "node:child_process";
+import { enterRawStdin, showCursor, hideCursor } from "./tty-helpers.ts";
 
 // ---
 // DATA STRUCTURES & TYPES
@@ -1539,7 +1540,7 @@ export async function watchMode(
 	let _lastRenderMin = -1;
 	// Alt screen buffer — live updates inside, main screen restored on exit.
 	process.stdout.write("\x1b[?1049h");
-	process.stdout.write("\x1b[?25l");
+	hideCursor();
 
 	let lastBuffer: string[] = []; // saved for exit printout
 	let lastLineCount = 0;         // visual lines rendered (for in-place overwrite)
@@ -1547,11 +1548,8 @@ export async function watchMode(
 	// Shared exit: clears chart output, restores terminal, prints final chart.
 	const exitWatch = () => {
 		process.stdout.write("\x1b[?1049l");
-		process.stdout.write("\x1b[?25h");
-		if (process.stdin.isTTY) {
-			process.stdin.setRawMode(false);
-			process.stdin.pause();
-		}
+		showCursor();
+		cleanupStdin();
 		if (lastBuffer.length > 0) {
 			for (const l of lastBuffer) console.log(l);
 		}
@@ -1561,19 +1559,12 @@ export async function watchMode(
 
 	process.on("SIGINT", exitWatch);
 
-	// Raw stdin for 'q'/'Q' quit — match selector's exact setup.
-	// Selector cleanup pauses stdin and restores raw mode; we re-init.
-	if (process.stdin.isTTY) {
-		process.stdin.resume();
-		process.stdin.setEncoding("utf8");
-		process.stdin.setRawMode(true);
-		process.stdin.on("data", (data: Buffer) => {
-			const key = data.toString();
-			if (key === "q" || key === "Q" || key === "\u0003") {
-				exitWatch();
-			}
-		});
-	}
+	// Raw stdin for 'q'/'Q' quit.
+	const cleanupStdin = enterRawStdin((key: string) => {
+		if (key === "q" || key === "Q" || key === "\u0003") {
+			exitWatch();
+		}
+	});
 
 	const parseInteractions = (filePath: string): { interactions: Interaction[]; disabledEmoji: boolean; sessionInterval?: string; sessionLimit?: number; sessionMode?: "cumulative" | "bucket"; sessionShowTicks?: boolean; sessionTimezone?: string; } => {
 		const interactions: Interaction[] = [];

@@ -16,6 +16,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { buildDisplayPath, formatRelativeTime } from "./session-path-shortener.ts";
 import { formatCost, parseEntryToInteraction, deduplicateInteractions, type Interaction } from "./wtft-shared.ts";
+import { enterRawStdin, showCursor, hideCursor, clearPreviousLines, visualLineCount } from "./tty-helpers.ts";
 
 // ---
 // TYPES
@@ -168,22 +169,6 @@ function formatCostPadded(cost: number): string {
 }
 
 /**
- * Count visual (wrapped) lines the selector will occupy in the terminal.
- * Each logical line may wrap into ceil(len / termWidth) visual rows.
- * ANSI escape codes are stripped before measuring.
- */
-function visualLineCount(text: string, termWidth: number): number {
-	const ansiRe = /\x1b\[[0-9;]*[a-zA-Z]/g;
-	const lines = text.replace(/\n$/, "").split("\n");
-	let count = 0;
-	for (const line of lines) {
-		const cleanLen = line.replace(ansiRe, "").length;
-		count += cleanLen === 0 ? 1 : Math.ceil(cleanLen / Math.max(termWidth, 1));
-	}
-	return count;
-}
-
-/**
  * Render an interactive TTY session selector IN-PLACE on the main screen.
  * Uses \\x1b[N A \\x1b[J to overwrite previous output on re-render — no alt
  * screen buffer. When the selector exits, the output is cleared and the chart
@@ -231,12 +216,7 @@ export async function selectSessionPrompt(
 		const displayCandidates = candidates.slice(0, limit);
 		const statsList = displayCandidates.map((c) => getSessionSummary(c.path));
 
-		const stdin = process.stdin;
-		stdin.setRawMode(true);
-		stdin.resume();
-		stdin.setEncoding("utf8");
-
-		process.stdout.write("\x1b[?25l"); // Hide cursor
+		hideCursor();
 
 		const maxPathLen = Math.max(
 			...displayCandidates.map((c) => c.displayPath.length),
@@ -277,25 +257,16 @@ export async function selectSessionPrompt(
 			process.stdout.write(out);
 		};
 
-		// Move cursor up exactly the number of visual lines rendered, then clear
-		// to end of screen. This overwrites the previous render in-place.
-		const overwritePrevious = () => {
-			if (lastLineCount > 0) {
-				process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
-			}
-		};
-
-
 		// Initial render
 		render();
 
 		const onKey = (key: string) => {
 			if (key === "\u0003" || key === "q" || key === "Q") {
-				overwritePrevious();
+				clearPreviousLines(lastLineCount);
 				cleanup();
 				process.exit(130);
 			} else if (key === "\r" || key === "\n") {
-				overwritePrevious();
+				clearPreviousLines(lastLineCount);
 				const selectedPath = displayCandidates[selectedIndex].path;
 				cleanup();
 				resolve(selectedPath);
@@ -303,23 +274,21 @@ export async function selectSessionPrompt(
 				selectedIndex =
 					(selectedIndex - 1 + displayCandidates.length) %
 					displayCandidates.length;
-				overwritePrevious();
+				clearPreviousLines(lastLineCount);
 				render();
 			} else if (key === "\u001b[B" || key === "j") {
 				selectedIndex =
 					(selectedIndex + 1) % displayCandidates.length;
-				overwritePrevious();
+				clearPreviousLines(lastLineCount);
 				render();
 			}
 		};
 
-		const cleanup = () => {
-			stdin.removeListener("data", onKey);
-			stdin.setRawMode(false);
-			stdin.pause();
-			process.stdout.write("\x1b[?25h"); // Show cursor
-		};
+		const cleanupStdin = enterRawStdin(onKey);
 
-		stdin.on("data", onKey);
+		const cleanup = () => {
+			cleanupStdin();
+			showCursor();
+		};
 	});
 }

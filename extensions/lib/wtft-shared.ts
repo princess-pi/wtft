@@ -1567,10 +1567,11 @@ export async function watchMode(
 
 	process.on("SIGINT", exitWatch);
 
-	// Raw stdin for 'q'/'Q' quit — MUST resume() because the selector's
-	// cleanup() called stdin.pause() before returning control to us.
+	// Raw stdin for 'q'/'Q' quit — match selector's exact setup.
+	// Selector cleanup pauses stdin and restores raw mode; we re-init.
 	if (process.stdin.isTTY) {
 		process.stdin.resume();
+		process.stdin.setEncoding("utf8");
 		process.stdin.setRawMode(true);
 		process.stdin.on("data", (data: Buffer) => {
 			const key = data.toString();

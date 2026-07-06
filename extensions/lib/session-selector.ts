@@ -284,6 +284,15 @@ export async function selectSessionPrompt(
 		// Initial render
 		render();
 
+		// SIGWINCH: re-render immediately on terminal resize so lastLineCount
+		// stays accurate. Without this, resize + next key press would use a
+		// stale count (computed at old width) and overshoot the cursor-up.
+		const onResize = () => {
+			overwritePrevious();
+			render();
+		};
+		process.on("SIGWINCH", onResize);
+
 		const onKey = (key: string) => {
 			if (key === "\u0003" || key === "q" || key === "Q") {
 				// Clear selector output before exiting
@@ -311,6 +320,7 @@ export async function selectSessionPrompt(
 		};
 
 		const cleanup = () => {
+			process.removeListener("SIGWINCH", onResize);
 			stdin.removeListener("data", onKey);
 			stdin.setRawMode(false);
 			stdin.pause();

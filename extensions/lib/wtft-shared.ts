@@ -1978,68 +1978,79 @@ export async function watchTagFile(
 
 	// ---
 	// fs.watch on the classified tag file (inotify on Linux).
-	// The daemon writes at most every 667ms with complete JSON lines.
-	// We debounce 100ms to absorb any double-fire from the OS.
+	// The daemon guarantees:
+	//   - Writes at most every 667ms (90bpm)
+	//   - Every line is a complete JSON + \n (atomic fs.appendFileSync)
+	//   - No partial lines, no mid-write reads
+	// Therefore every "change" event = one or more complete lines ready.
+	// No debounce needed — double-fire is harmless (stat.size check is a no-op).
+	//
+	// Wait up to 5s for the daemon to create the tag file before watching.
 	// ---
 	let watcher: fs.FSWatcher | null = null;
-	let watchTimeout: ReturnType<typeof setTimeout> | null = null;
 
-	try {
+	const startWatching = () => {
 		watcher = fs.watch(tagPath, (eventType) => {
 			if (eventType !== "change") return;
 
-			// Debounce: daemon writes at most every 667ms; 100ms is plenty
-			if (watchTimeout) clearTimeout(watchTimeout);
-			watchTimeout = setTimeout(() => {
-				try {
-					const stat = fs.statSync(tagPath);
-					if (stat.size <= lastReadOffset) return;
+			try {
+				const stat = fs.statSync(tagPath);
+				if (stat.size <= lastReadOffset) return;
 
-					const fd = fs.openSync(tagPath, "r");
-					const buf = Buffer.alloc(stat.size - lastReadOffset);
-					fs.readSync(fd, buf, 0, buf.length, lastReadOffset);
-					fs.closeSync(fd);
-					lastReadOffset = stat.size;
+				const fd = fs.openSync(tagPath, "r");
+				const buf = Buffer.alloc(stat.size - lastReadOffset);
+				fs.readSync(fd, buf, 0, buf.length, lastReadOffset);
+				fs.closeSync(fd);
+				lastReadOffset = stat.size;
 
-					const newContent = buf.toString("utf8");
-					const lines = newContent.split("\n");
-					let newCount = 0;
-					for (const line of lines) {
-						if (!line.trim()) continue;
-						try {
-							const obj = JSON.parse(line);
-							if (obj._hb) continue; // skip heartbeats
-							const interaction = classifiedToInteraction(obj);
-							if (interaction) {
-								allInteractions.push(interaction);
-								newCount++;
-							}
-						} catch {
-							// Skip unparseable lines
-						}
-					}
-
-					if (newCount > 0) {
-						needsRedraw = true;
-						render();
-					}
-				} catch {
-					// Tag file may have been deleted or truncated — re-read from zero
+				const newContent = buf.toString("utf8");
+				const lines = newContent.split("\n");
+				let newCount = 0;
+				for (const line of lines) {
+					if (!line.trim()) continue;
 					try {
-						lastReadOffset = 0;
-						allInteractions = readClassifiedTagFile(tagPath);
-						lastReadOffset = fs.statSync(tagPath).size;
-						needsRedraw = true;
-						render();
+						const obj = JSON.parse(line);
+						if (obj._hb) continue; // skip heartbeats
+						const interaction = classifiedToInteraction(obj);
+						if (interaction) {
+							allInteractions.push(interaction);
+							newCount++;
+						}
 					} catch {
-						// File gone — wait for it to reappear
+						// Skip unparseable lines
 					}
 				}
-			}, 100);
+
+				if (newCount > 0) {
+					needsRedraw = true;
+					render();
+				}
+			} catch {
+				// Tag file may have been deleted or truncated — re-read from zero
+				try {
+					lastReadOffset = 0;
+					allInteractions = readClassifiedTagFile(tagPath);
+					lastReadOffset = fs.statSync(tagPath).size;
+					needsRedraw = true;
+					render();
+				} catch {
+					// File gone — wait for it to reappear
+				}
+			}
 		});
-	} catch {
-		// If fs.watch fails (e.g. file doesn't exist yet), fall back to polling
-		console.error("❌ Failed to watch tag file. Is the daemon running?");
+	};
+
+	// Poll for the tag file to appear (daemon creates it on first write).
+	const fileWaitStart = Date.now();
+	while (!fs.existsSync(tagPath) && Date.now() - fileWaitStart < 5000) {
+		await new Promise(r => setTimeout(r, 250));
+	}
+
+	if (fs.existsSync(tagPath)) {
+		startWatching();
+	} else {
+		console.error("❌ Daemon did not create tag file within 5s. Is wtft-daemon installed?");
+		console.error(`   Expected: ${tagPath}`);
 		process.exit(1);
 	}
 

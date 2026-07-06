@@ -1537,10 +1537,8 @@ export async function watchMode(
 	let lastSize = 0;
 	let needsRedraw = true;
 	let _lastRenderMin = -1;
-
-	// Render in-place on main screen (no alt screen — preserves prompt + scrollback).
-	// First render writes at current cursor (where selector was). Re-renders use
-	// \x1b[N A \x1b[J to overwrite in-place.
+	// Alt screen buffer — live updates inside, main screen restored on exit.
+	process.stdout.write("\x1b[?1049h");
 	process.stdout.write("\x1b[?25l");
 
 	let lastBuffer: string[] = []; // saved for exit printout
@@ -1548,14 +1546,12 @@ export async function watchMode(
 
 	// Shared exit: clears chart output, restores terminal, prints final chart.
 	const exitWatch = () => {
-		// Clear chart output from main screen
-		process.stdout.write("\x1b8\x1b[J");
+		process.stdout.write("\x1b[?1049l");
 		process.stdout.write("\x1b[?25h");
 		if (process.stdin.isTTY) {
 			process.stdin.setRawMode(false);
 			process.stdin.pause();
 		}
-		// Re-print the final chart to main screen so it persists
 		if (lastBuffer.length > 0) {
 			for (const l of lastBuffer) console.log(l);
 		}
@@ -1654,9 +1650,8 @@ export async function watchMode(
 	process.stdout.write("\x1b7");
 
 	const render = () => {
-		// Restore saved cursor + clear to end — guaranteed in-place regardless of
-		// line count drift, terminal width changes, or wrapping.
-		process.stdout.write("\x1b8\x1b[J");
+		// Home cursor + clear — safe inside alt screen, prevents scrollback accumulation
+		process.stdout.write("\x1b[H\x1b[J");
 
 		const width = getTerminalWidth();
 		const finalInterval = sessionInterval ?? settings.interval;

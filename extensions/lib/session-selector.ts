@@ -168,6 +168,22 @@ function formatCostPadded(cost: number): string {
 }
 
 /**
+ * Count visual (wrapped) lines the selector will occupy in the terminal.
+ * Each logical line may wrap into ceil(len / termWidth) visual rows.
+ * ANSI escape codes are stripped before measuring.
+ */
+function visualLineCount(text: string, termWidth: number): number {
+	const ansiRe = /\x1b\[[0-9;]*[a-zA-Z]/g;
+	const lines = text.replace(/\n$/, "").split("\n");
+	let count = 0;
+	for (const line of lines) {
+		const cleanLen = line.replace(ansiRe, "").length;
+		count += cleanLen === 0 ? 1 : Math.ceil(cleanLen / Math.max(termWidth, 1));
+	}
+	return count;
+}
+
+/**
  * Render an interactive TTY session selector IN-PLACE on the main screen.
  * Uses \\x1b[N A \\x1b[J to overwrite previous output on re-render — no alt
  * screen buffer. When the selector exits, the output is cleared and the chart

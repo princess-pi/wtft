@@ -342,7 +342,7 @@ let sessionPath = null;
 let tagPath = null;
 let pidPath = null;
 let lastSize = 0;            // bytes read from session.jsonl
-let lastWriteMs = 0;         // last time we flushed to classified.jsonl
+let lastWriteMs = 0;         // last time we flushed to the tag file
 let lastActivityMs = Date.now(); // last time we classified a new interaction
 let pendingLines = [];       // classified lines waiting for next flush
 let idleStartMs = 0;         // start of current idle period (for _hb range)
@@ -376,7 +376,7 @@ process.on("SIGHUP", () => shutdown("SIGHUP"));
 // ---
 
 /**
- * Overwrite the last line of classified.jsonl if it's a heartbeat.
+ * Overwrite the last line of the tag file if it's a heartbeat.
  * Updates the _hb range's `last` timestamp in place.
  * Always uses {"_hb":{"first":<ts>,"last":<ts>}} format for fixed width
  * so overwrites never change byte length. If the last line isn't a heartbeat
@@ -773,7 +773,7 @@ if (showList || showCleanup || showRestart || stopSession) {
     }
   }
 
-  // Initialize classified.jsonl (version check, header, start heartbeat)
+  // Initialize tag file (version check, header, start heartbeat)
   initClassified();
 
   if (process.env.WTFT_DAEMON_DEBUG) {

@@ -13,14 +13,12 @@ import {
 	parseSessionFile,
 	renderOtherHistogram,
 	renderTokenSummary,
-	getSemanticCommandGroup,
 	deduplicateInteractions,
 	watchMode,
 	watchTagFile,
 	readClassifiedTagFile,
 	type WatchSettings,
 	type Interaction,
-	type Category,
 	getTerminalWidth
 } from "../extensions/lib/wtft-shared.ts";
 import { execSync, spawn } from "node:child_process";

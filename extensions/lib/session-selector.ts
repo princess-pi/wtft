@@ -238,9 +238,9 @@ export async function selectSessionPrompt(
 
 		process.stdout.write("\x1b[?25l"); // Hide cursor
 
-		// Save cursor position before first render. On exit / re-render,
-		// restore cursor + clear to end — guaranteed exact, no line counting.
-		process.stdout.write("\x1b7");
+		// Save cursor position before first render (ANSI standard).
+		// On exit / Enter, restore + clear to end drops us exactly where we started.
+		process.stdout.write("\x1b[s");
 
 		const maxPathLen = Math.max(
 			...displayCandidates.map((c) => c.displayPath.length),
@@ -291,12 +291,12 @@ export async function selectSessionPrompt(
 		const onKey = (key: string) => {
 			if (key === "\u0003" || key === "q" || key === "Q") {
 				// Restore saved cursor pos + clear to end — wipes selector cleanly
-				process.stdout.write("\x1b8\x1b[J");
+				process.stdout.write("\x1b[u\x1b[J");
 				cleanup();
 				process.exit(130);
 			} else if (key === "\r" || key === "\n") {
 				// Restore saved cursor pos + clear to end — chart starts exactly here
-				process.stdout.write("\x1b8\x1b[J");
+				process.stdout.write("\x1b[u\x1b[J");
 				const selectedPath = displayCandidates[selectedIndex].path;
 				cleanup();
 				resolve(selectedPath);

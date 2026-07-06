@@ -168,6 +168,10 @@
       "desc": "Enable emoji icons in TUI widgets."
     },
     {
+      "flags": "-T, --tokens",
+      "desc": "Print a per-model token summary table (deduped) for cross-referencing with /usage."
+    },
+    {
       "flags": "--help, -h",
       "desc": "Display this help information."
     },
@@ -212,6 +216,10 @@
     {
       "cmd": "/wtft --hide",
       "desc": "Hide the cost audit widget from the display."
+    },
+    {
+      "cmd": "/wtft --tokens",
+      "desc": "Print a per-model token summary table to cross-reference costs with /usage."
     },
     {
       "cmd": "/wtft --watch",

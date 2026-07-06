@@ -1686,10 +1686,7 @@ export async function watchMode(
 		const buf: string[] = [];
 		// Session file path first (no interaction count, no cost — just path)
 		buf.push(`\x1b[90m${sessionPath}\x1b[0m`);
-		buf.push("");
 		totalCost = deduplicateInteractions(allInteractions).reduce((sum, i) => sum + i.cost, 0);
-		interactionCount = allInteractions.length;
-		buf.push("");
 
 		if (lines && lines.length > 0) {
 			// Append 24-hour timeline to the title line (always green in CLI, no model context)

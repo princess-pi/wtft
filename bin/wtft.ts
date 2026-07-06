@@ -109,6 +109,13 @@ Options:
   -o, --other             Print a histogram of 'Other' commands grouped by semantic sub-category (Build, Lint, System, etc.).
   -T, --tokens            Print a per-model token summary table (deduped) for cross-referencing with /usage.
   -W, --watch             Watch a session file for changes and re-render the bar chart in real-time.
+
+Daemon management:
+  --list                  List all running wtft-tag daemons (session, PID, idle time).
+  --cleanup               Kill daemons whose source session no longer exists.
+  --restart               Kill all running daemons (fresh spawn on next wtft).
+  --stop <session>        Stop daemon for a specific session path.
+
   --version               Display this tool's version.
   --why                   Explain why you'd run this tool, with user scenarios and anti-use-cases.
   -h, --help              Display this help menu.
@@ -130,6 +137,10 @@ let hasTz = false;
 let hasOther = false;
 let hasTokens = false;
 let showWatch = false;
+let daemonList = false;
+let daemonCleanup = false;
+let daemonRestart = false;
+let daemonStop: string | undefined;
 
 for (let i = 2; i < process.argv.length; i++) {
 	const arg = process.argv[i];
@@ -144,6 +155,14 @@ for (let i = 2; i < process.argv.length; i++) {
 		const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 		console.log(`${manifest.name} ${manifest.version}`);
 		process.exit(0);
+	} else if (arg === "--list") {
+		daemonList = true;
+	} else if (arg === "--cleanup") {
+		daemonCleanup = true;
+	} else if (arg === "--restart") {
+		daemonRestart = true;
+	} else if (arg === "--stop") {
+		daemonStop = process.argv[++i];
 	} else if (arg === "-s" || arg === "--session") {
 		targetSessionPath = process.argv[++i];
 	} else if (arg === "-i" || arg === "--interval") {
@@ -194,6 +213,29 @@ for (let i = 2; i < process.argv.length; i++) {
 // ---
 
 async function main() {
+	// ---
+	// DAEMON MANAGEMENT COMMANDS: passthrough to wtft-daemon
+	// ---
+	if (daemonList || daemonCleanup || daemonRestart || daemonStop) {
+		const daemonPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "wtft-daemon.mjs");
+		const daemonArgs = [daemonPath];
+		if (daemonList) daemonArgs.push("--list");
+		if (daemonCleanup) daemonArgs.push("--cleanup");
+		if (daemonRestart) daemonArgs.push("--restart");
+		if (daemonStop) daemonArgs.push("--stop", daemonStop);
+		try {
+			const result = execSync(`${process.execPath} ${daemonArgs.join(" ")}`, {
+				encoding: "utf8",
+				timeout: 10000
+			});
+			if (result) console.log(result.trim());
+		} catch (err: any) {
+			if (err.stdout) console.log(err.stdout.trim());
+			if (err.stderr) console.error(err.stderr.trim());
+		}
+		return;
+	}
+
 	const isIndex = /^\d+$/.test(targetSessionPath || "");
 	const candidates = discoverSessions(harnessOption, cwdOverride);
 	

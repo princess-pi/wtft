@@ -1554,8 +1554,8 @@ export async function watchMode(
 		}
 		process.stdout.write("\x1b[?25h");
 		if (process.stdin.isTTY) {
-			try { process.stdin.setRawMode(false); } catch (_) {}
-			try { process.stdin.pause(); } catch (_) {}
+			process.stdin.setRawMode(false);
+			process.stdin.pause();
 		}
 		// Re-print the final chart to main screen so it persists
 		if (lastBuffer.length > 0) {

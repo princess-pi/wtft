@@ -243,8 +243,11 @@ export async function selectSessionPrompt(
 			10
 		);
 
-		// Track rendered lines for precise in-place overwrite on arrow keys
+		// Track rendered lines for precise in-place overwrite on arrow keys.
+		// logicalLineCount tracks the fixed number of logical lines (title+path+candidates)
+		// for the caller to clear when we exit.
 		let lastLineCount = 0;
+		let logicalLineCount = 0;
 
 		const render = () => {
 			const selected = displayCandidates[selectedIndex];
@@ -270,6 +273,7 @@ export async function selectSessionPrompt(
 			// Count visual (wrapped) lines to move cursor exactly that far on re-render
 			const cols = process.stdout.columns || 80;
 			lastLineCount = visualLineCount(out, cols);
+			logicalLineCount = out.replace(/\\n$/, "").split("\\n").length;
 			process.stdout.write(out);
 		};
 
@@ -281,19 +285,20 @@ export async function selectSessionPrompt(
 			}
 		};
 
-		// Save cursor before any output — restore+clear on Enter/q/Ctrl+C.
-		process.stdout.write("\x1b[s");
+		// Save cursor with DECSC (\x1b7) — tmux doesn't support ANSI \x1b[u for restore.
+		// On Enter/q, \x1b8 (DECRC) + \x1b[J clears everything from saved position down.
+		process.stdout.write("\x1b7");
 
 		// Initial render
 		render();
 
 		const onKey = (key: string) => {
 			if (key === "\u0003" || key === "q" || key === "Q") {
-				process.stdout.write("\x1b[u\x1b[J");
+				process.stdout.write("\x1b8\x1b[J");
 				cleanup();
 				process.exit(130);
 			} else if (key === "\r" || key === "\n") {
-				process.stdout.write("\x1b[u\x1b[J");
+				process.stdout.write("\x1b8\x1b[J");
 				const selectedPath = displayCandidates[selectedIndex].path;
 				cleanup();
 				resolve(selectedPath);

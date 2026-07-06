@@ -1705,10 +1705,9 @@ export async function watchMode(
 		buf.push(`\x1b[90mq/Ctrl+C to exit\x1b[0m`);
 
 		lastBuffer = [...buf]; // save for exit printout
-		// Compute visual line count for in-place overwrite on next render.
-		// Add 5 extra lines of clearance so growth doesn't leave ghost text.
+		// Compute visual line count for in-place overwrite on next render
 		const cols = process.stdout.columns || 80;
-		lastLineCount = buf.join("\n").split("\n").length + 5;
+		lastLineCount = buf.join("\n").split("\n").length;
 		process.stdout.write(buf.join("\n"));
 		needsRedraw = false;
 		_lastRenderMin = new Date().getMinutes();

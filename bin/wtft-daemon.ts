@@ -318,7 +318,7 @@ function deduplicateInteractions(interactions) {
 // ---
 
 // Bump when classification heuristics or cost model change (#54, #55, etc).
-const TAGGER_VERSION = "2.1.0";
+const TAGGER_VERSION = "2.2.0";
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const POLL_MS = 667;              // 90bpm throttle
 const IDLE_EXIT_MS = 30 * 60 * 1000; // exit if session.jsonl unchanged for 30 min

@@ -141,7 +141,7 @@ function runDaemon(sessionPath: string): string {
 	const sessionDir = path.dirname(sessionPath);
 	const sessionBase = path.basename(sessionPath);
 	const tagsDir = path.join(sessionDir, "wtft-tags");
-	const tagPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.1.0.jsonl");
+	const tagPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.2.0.jsonl");
 
 	// Remove any stale tag files
 	try { fs.rmSync(tagsDir, { recursive: true }); } catch {}
@@ -244,8 +244,8 @@ assert(
 
 // 5. Tag version check
 const tagContent = fs.readFileSync(tagPath, "utf8");
-const hasV21 = tagPath.includes("v2.1.0");
-assert(hasV21, "Tag file uses v2.1.0 version");
+const hasV22 = tagPath.includes("v2.2.0");
+assert(hasV22, "Tag file uses v2.2.0 version");
 
 // Cleanup
 try { fs.rmSync(dir, { recursive: true }); } catch {}

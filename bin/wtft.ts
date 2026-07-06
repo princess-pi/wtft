@@ -241,7 +241,7 @@ async function main() {
 		const sessionDir = path.dirname(finalSessionPath);
 		const sessionBase = path.basename(finalSessionPath);
 		const tagsDir = path.join(sessionDir, "wtft-tags");
-		let tagPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.1.0.jsonl"); // default
+		let tagPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.2.0.jsonl"); // default
 		try {
 			const prefix = sessionBase + ".wtft-tag.v";
 			for (const f of fs.readdirSync(tagsDir)) {
@@ -300,7 +300,7 @@ async function main() {
 	const sessionDir = path.dirname(finalSessionPath);
 	const sessionBase = path.basename(finalSessionPath);
 	const tagsDir = path.join(sessionDir, "wtft-tags");
-	let tagPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.1.0.jsonl");
+	let tagPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.2.0.jsonl");
 	try {
 		const prefix = sessionBase + ".wtft-tag.v";
 		for (const f of fs.readdirSync(tagsDir)) {

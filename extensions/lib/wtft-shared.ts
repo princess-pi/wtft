@@ -1549,9 +1549,7 @@ export async function watchMode(
 	// Shared exit: clears chart output, restores terminal, prints final chart.
 	const exitWatch = () => {
 		// Clear chart output from main screen
-		if (lastLineCount > 0) {
-			process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
-		}
+		process.stdout.write("\x1b8\x1b[J");
 		process.stdout.write("\x1b[?25h");
 		if (process.stdin.isTTY) {
 			process.stdin.setRawMode(false);
@@ -1651,12 +1649,14 @@ export async function watchMode(
 	let sessionShowTicks: boolean | undefined;
 	let sessionTimezone: string | undefined;
 
+	// Save cursor before first render (DECSC \x1b7 — tmux-compatible).
+	// On every re-render, restore + clear erases old output before writing new.
+	process.stdout.write("\x1b7");
+
 	const render = () => {
-		// Move cursor up to overwrite previous render, then clear to end.
-		// On first render lastLineCount is 0 → no-op (writes at current cursor).
-		if (lastLineCount > 0) {
-			process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
-		}
+		// Restore saved cursor + clear to end — guaranteed in-place regardless of
+		// line count drift, terminal width changes, or wrapping.
+		process.stdout.write("\x1b8\x1b[J");
 
 		const width = getTerminalWidth();
 		const finalInterval = sessionInterval ?? settings.interval;

@@ -1678,12 +1678,11 @@ export async function watchMode(
 		});
 
 		const buf: string[] = [];
-		// Home cursor removed — render in-place on main screen at current cursor
+		// Session file path first (no interaction count, no cost — just path)
+		buf.push(`\x1b[90m${sessionPath}\x1b[0m`);
+		buf.push("");
 		totalCost = deduplicateInteractions(allInteractions).reduce((sum, i) => sum + i.cost, 0);
 		interactionCount = allInteractions.length;
-
-		// Watching banner at top with full file path
-		buf.push(`\x1b[90m${sessionPath}  (${interactionCount} interactions, $${totalCost.toFixed(4)}) — q/Ctrl+C to exit\x1b[0m`);
 		buf.push("");
 
 		if (lines && lines.length > 0) {
@@ -1696,10 +1695,14 @@ export async function watchMode(
 			buf.push("\x1b[90mWaiting for session data...\x1b[0m");
 		}
 
+		// Footer row: q/Ctrl+C to exit (always last line)
+		buf.push(`\x1b[90mq/Ctrl+C to exit\x1b[0m`);
+
 		lastBuffer = [...buf]; // save for exit printout
-		// Compute visual line count for in-place overwrite on next render
+		// Compute visual line count for in-place overwrite on next render.
+		// Add 5 extra lines of clearance so growth doesn't leave ghost text.
 		const cols = process.stdout.columns || 80;
-		lastLineCount = buf.join("\n").split("\n").length;
+		lastLineCount = buf.join("\n").split("\n").length + 5;
 		process.stdout.write(buf.join("\n"));
 		needsRedraw = false;
 		_lastRenderMin = new Date().getMinutes();

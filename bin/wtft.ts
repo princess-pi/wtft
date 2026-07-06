@@ -345,6 +345,8 @@ async function main() {
 		process.exit(0);
 	}
 
+	// Session file path above chart (once)
+	console.log(`\x1b[90m${finalSessionPath}\x1b[0m`);
 	for (const line of outputLines) {
 		console.log(line);
 	}

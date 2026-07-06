@@ -1538,19 +1538,21 @@ export async function watchMode(
 	let needsRedraw = true;
 	let _lastRenderMin = -1;
 
-	// Enter alternate screen buffer — chart updates stay inside,
-	// main scrollback is untouched. Hide cursor.
-	process.stdout.write("\x1b[?1049h");
+	// Render in-place on main screen (no alt screen — preserves prompt + scrollback).
+	// First render writes at current cursor (where selector was). Re-renders use
+	// \x1b[N A \x1b[J to overwrite in-place.
 	process.stdout.write("\x1b[?25l");
 
 	let lastBuffer: string[] = []; // saved for exit printout
+	let lastLineCount = 0;         // visual lines rendered (for in-place overwrite)
 
-	// Shared exit: restores main screen, prints final chart, exits cleanly.
-	// Called by SIGINT, 'q' key, and process exit.
+	// Shared exit: clears chart output, restores terminal, prints final chart.
 	const exitWatch = () => {
-		process.stdout.write("\x1b[?1049l"); // exit alternate screen
+		// Clear chart output from main screen
+		if (lastLineCount > 0) {
+			process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
+		}
 		process.stdout.write("\x1b[?25h");
-		// Restore raw mode if stdin is a TTY
 		if (process.stdin.isTTY) {
 			try { process.stdin.setRawMode(false); } catch (_) {}
 			try { process.stdin.pause(); } catch (_) {}
@@ -1563,11 +1565,12 @@ export async function watchMode(
 		process.exit(0);
 	};
 
-	// Ctrl+C → shared exit
 	process.on("SIGINT", exitWatch);
 
-	// Raw stdin for 'q'/'Q' quit (same as Ctrl+C but cleaner)
+	// Raw stdin for 'q'/'Q' quit — MUST resume() because the selector's
+	// cleanup() called stdin.pause() before returning control to us.
 	if (process.stdin.isTTY) {
+		process.stdin.resume();
 		process.stdin.setRawMode(true);
 		process.stdin.on("data", (data: Buffer) => {
 			const key = data.toString();

@@ -191,7 +191,16 @@ function parseEntryToInteraction(entry) {
         }
       }
     }
-    return { timestamp, cost, messageId: assistantMsg.id, files, commands, texts };
+    return {
+      timestamp, cost, messageId: assistantMsg.id,
+      model: assistantMsg.model || undefined,
+      inputTokens: usage.input_tokens ?? usage.input ?? 0,
+      outputTokens: usage.output_tokens ?? usage.output ?? 0,
+      cacheReadTokens: usage.cache_read_input_tokens ?? usage.cacheRead ?? 0,
+      cacheWriteTokens: usage.cache_creation_input_tokens ?? usage.cacheWrite ?? 0,
+      reasoningTokens: usage.reasoning_tokens ?? usage.reasoning ?? 0,
+      files, commands, texts,
+    };
   }
   return null;
 }
@@ -322,19 +331,26 @@ function deduplicateInteractions(interactions) {
 // ---
 
 // Bump when classification heuristics or cost model change (#54, #55, etc).
-const TAGGER_VERSION = "2.3.0";
+const TAGGER_VERSION = "2.4.0";
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const POLL_MS = 667;              // 90bpm throttle
 const IDLE_EXIT_MS = 30 * 60 * 1000; // exit if session.jsonl unchanged for 30 min
 
 function serializeClassified(interaction) {
-  const line = {
+  const line: any = {
     t: interaction.timestamp,
     c: interaction.cost,
     cat: classifyInteraction(interaction),
     f: interaction.files.map(f => ({ p: f.path, a: f.action })),
     cmd: interaction.commands,
   };
+  // Include model/token data when available (for -T summary table)
+  if (interaction.model) line.m = interaction.model;
+  if (interaction.inputTokens > 0) line.in = interaction.inputTokens;
+  if (interaction.outputTokens > 0) line.out = interaction.outputTokens;
+  if (interaction.cacheReadTokens > 0) line.cr = interaction.cacheReadTokens;
+  if (interaction.cacheWriteTokens > 0) line.cw = interaction.cacheWriteTokens;
+  if (interaction.reasoningTokens > 0) line.rs = interaction.reasoningTokens;
   return JSON.stringify(line) + "\n";
 }
 

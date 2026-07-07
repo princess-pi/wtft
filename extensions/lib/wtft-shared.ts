@@ -1781,14 +1781,15 @@ export function classifiedToInteraction(obj: any): Interaction | null {
 	return {
 		timestamp: obj.t,
 		cost: obj.c,
+		model: obj.m || undefined,
 		files: (obj.f || []).map((f: any) => ({ path: f.p || "", action: (f.a === "w" ? "write" : "read") as "read" | "write" })),
 		commands: obj.cmd || [],
 		texts: [],
-		inputTokens: 0,
-		outputTokens: 0,
-		cacheReadTokens: 0,
-		cacheWriteTokens: 0,
-		reasoningTokens: 0,
+		inputTokens: obj.in || 0,
+		outputTokens: obj.out || 0,
+		cacheReadTokens: obj.cr || 0,
+		cacheWriteTokens: obj.cw || 0,
+		reasoningTokens: obj.rs || 0,
 	};
 }
 
@@ -1849,7 +1850,7 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
  * Compute the tag file path for a given session path.
  * Scans wtft-tags/ subdirectory for the current version's tag file.
  */
-export const WTFT_TAGGER_VERSION = "2.3.0";
+export const WTFT_TAGGER_VERSION = "2.4.0";
 
 export function getTagPath(sessionPath: string): string {
 	const sessionDir = path.dirname(sessionPath);

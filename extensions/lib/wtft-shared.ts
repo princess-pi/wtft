@@ -1850,7 +1850,7 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
  * Compute the tag file path for a given session path.
  * Scans wtft-tags/ subdirectory for the current version's tag file.
  */
-export const WTFT_TAGGER_VERSION = "2.4.0";
+export const WTFT_TAGGER_VERSION = "2.3.1";
 
 export function getTagPath(sessionPath: string): string {
 	const sessionDir = path.dirname(sessionPath);

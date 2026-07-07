@@ -27,6 +27,7 @@ export interface Interaction {
 	outputTokens: number;
 	cacheReadTokens: number;
 	cacheWriteTokens: number;
+	reasoningTokens: number;
 	files: { path: string; action: "read" | "write" }[];
 	commands: string[];
 	texts: string[];
@@ -76,16 +77,19 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 		// uses DeepSeek's cache-hit discount rate (confirmed via Pi usage schema).
 		const peak = getDeepSeekPeakMultiplier(timestamp);
 		if (m.includes("v4-pro")) {
-			// deepseek-v4-pro: $0.435/M input, $0.87/M output. Concurrency: 500.
-			inputPrice = 0.435 * peak;
-			outputPrice = 0.87 * peak;
+			// deepseek-v4-pro: $1.74/M input, $3.48/M output, cache-hit $0.0145/M.
+			// Reasoning tokens priced at output rate.
+			inputPrice = 1.74 * peak;
+			outputPrice = 3.48 * peak;
+			cacheReadPrice = 0.0145 * peak;
 		} else {
-			// deepseek-v4-flash + legacy deepseek-chat & deepseek-reasoner: $0.14/M input, $0.28/M output. Concurrency: 2500.
+			// deepseek-v4-flash + legacy deepseek-chat & deepseek-reasoner:
+			// $0.14/M input, $0.28/M output, cache-hit $0.0028/M.
 			// (legacy names deprecate 2026-07-24)
 			inputPrice = 0.14 * peak;
 			outputPrice = 0.28 * peak;
+			cacheReadPrice = 0.0028 * peak;
 		}
-		cacheReadPrice = 0;  // TODO: add cache-hit input pricing ($0.0028/M flash, $0.003625/M pro) once schema confirmed
 		// DeepSeek does not expose separate cache-write tokens → 0, no TTL split needed
 	} else if (m.includes("haiku")) {
 		// Claude Haiku 4.5: $1/M input, $5/M output
@@ -123,6 +127,7 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 	const cost = 
 		((usage.input_tokens || 0) * (inputPrice / 1000000)) +
 		((usage.output_tokens || 0) * (outputPrice / 1000000)) +
+		((usage.reasoning_tokens || usage.reasoning || 0) * (outputPrice / 1000000)) +
 		cacheWriteCost +
 		((usage.cache_read_input_tokens || 0) * (cacheReadPrice / 1000000));
 		
@@ -200,7 +205,8 @@ export function parseEntryToInteraction(entry: any): Interaction | null {
 		const hasTokens = (usage.input_tokens || usage.input || 0) > 0 ||
 		                  (usage.output_tokens || usage.output || 0) > 0 ||
 		                  (usage.cache_read_input_tokens || usage.cacheRead || 0) > 0 ||
-		                  (usage.cache_creation_input_tokens || usage.cacheWrite || 0) > 0;
+		                  (usage.cache_creation_input_tokens || usage.cacheWrite || 0) > 0 ||
+		                  (usage.reasoning_tokens || usage.reasoning || 0) > 0;
 		if (piCost !== undefined && piCost !== null && !(piCost === 0 && hasTokens)) {
 			cost = piCost;
 		} else if (assistantMsg.model && hasTokens) {
@@ -212,6 +218,7 @@ export function parseEntryToInteraction(entry: any): Interaction | null {
 				cache_creation_input_tokens: usage.cache_creation_input_tokens ?? usage.cacheWrite ?? 0,
 				cache_read_input_tokens: usage.cache_read_input_tokens ?? usage.cacheRead ?? 0,
 				cache_creation: usage.cache_creation || null,
+				reasoning_tokens: usage.reasoning_tokens ?? usage.reasoning ?? 0,
 			};
 			cost = calculateClaudeCost(assistantMsg.model, normalizedUsage, timestamp);
 		}
@@ -267,6 +274,7 @@ export function parseEntryToInteraction(entry: any): Interaction | null {
 			outputTokens: (usage.output_tokens || usage.output || 0) as number,
 			cacheReadTokens: (usage.cache_read_input_tokens || usage.cacheRead || 0) as number,
 			cacheWriteTokens: (usage.cache_creation_input_tokens || usage.cacheWrite || 0) as number,
+			reasoningTokens: (usage.reasoning || 0) as number,
 			files, commands, texts };
 	}
 	
@@ -1430,6 +1438,7 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 		outputTokens: number;
 		cacheReadTokens: number;
 		cacheWriteTokens: number;
+		reasoningTokens: number;
 		cost: number;
 	};
 	const byModel = new Map<string, ModelAgg>();
@@ -1442,11 +1451,12 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 			unmatched++;
 			continue;
 		}
-		const agg = byModel.get(model) || { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 };
+		const agg = byModel.get(model) || { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, cost: 0 };
 		agg.inputTokens += i.inputTokens;
 		agg.outputTokens += i.outputTokens;
 		agg.cacheReadTokens += i.cacheReadTokens;
 		agg.cacheWriteTokens += i.cacheWriteTokens;
+		agg.reasoningTokens += i.reasoningTokens;
 		agg.cost += i.cost;
 		byModel.set(model, agg);
 	}
@@ -1465,7 +1475,7 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 	const modelColW = Math.max(10, ...sorted.map(([m]) => shortenModel(m).length));
 	const numColW = 10; // fixed width for numbers
 
-	const sep = "─".repeat(Math.min(maxWidth, modelColW + numColW * 4 + 20));
+	const sep = "─".repeat(Math.min(maxWidth, modelColW + numColW * 5 + 24));
 
 	let out = "";
 	out += `\n── Token Summary (per model, deduped) ──${unmatched > 0 ? `  (${unmatched} untagged interactions skipped)` : ""}\n`;
@@ -1475,18 +1485,20 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 		"Model".padEnd(modelColW),
 		"Input".padStart(numColW),
 		"Output".padStart(numColW),
+		"Reasoning".padStart(numColW),
 		"Cache-Read".padStart(numColW),
 		"Cache-Write".padStart(numColW),
 		"Cost".padStart(numColW)
 	].join(" ") + "\n";
 
 	// Rows
-	let totalInput = 0, totalOutput = 0, totalCr = 0, totalCw = 0, totalCost = 0;
+	let totalInput = 0, totalOutput = 0, totalCr = 0, totalCw = 0, totalReasoning = 0, totalCost = 0;
 	for (const [model, agg] of sorted) {
 		out += [
 			shortenModel(model).padEnd(modelColW),
 			formatTokenCount(agg.inputTokens).padStart(numColW),
 			formatTokenCount(agg.outputTokens).padStart(numColW),
+			formatTokenCount(agg.reasoningTokens).padStart(numColW),
 			formatTokenCount(agg.cacheReadTokens).padStart(numColW),
 			formatTokenCount(agg.cacheWriteTokens).padStart(numColW),
 			formatCost(agg.cost).padStart(numColW)
@@ -1495,6 +1507,7 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 		totalOutput += agg.outputTokens;
 		totalCr += agg.cacheReadTokens;
 		totalCw += agg.cacheWriteTokens;
+		totalReasoning += agg.reasoningTokens;
 		totalCost += agg.cost;
 	}
 
@@ -1504,6 +1517,7 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 		"TOTAL".padEnd(modelColW),
 		formatTokenCount(totalInput).padStart(numColW),
 		formatTokenCount(totalOutput).padStart(numColW),
+		formatTokenCount(totalReasoning).padStart(numColW),
 		formatTokenCount(totalCr).padStart(numColW),
 		formatTokenCount(totalCw).padStart(numColW),
 		formatCost(totalCost).padStart(numColW)
@@ -1774,6 +1788,7 @@ export function classifiedToInteraction(obj: any): Interaction | null {
 		outputTokens: 0,
 		cacheReadTokens: 0,
 		cacheWriteTokens: 0,
+		reasoningTokens: 0,
 	};
 }
 
@@ -1830,14 +1845,17 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
 // ---
 
 /**
+/**
  * Compute the tag file path for a given session path.
  * Scans wtft-tags/ subdirectory for the current version's tag file.
  */
+export const WTFT_TAGGER_VERSION = "2.3.0";
+
 export function getTagPath(sessionPath: string): string {
 	const sessionDir = path.dirname(sessionPath);
 	const sessionBase = path.basename(sessionPath);
 	const tagsDir = path.join(sessionDir, "wtft-tags");
-	const defaultPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.2.0.jsonl");
+	const defaultPath = path.join(tagsDir, sessionBase + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
 	try {
 		const prefix = sessionBase + ".wtft-tag.v";
 		for (const f of fs.readdirSync(tagsDir)) {

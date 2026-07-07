@@ -43,13 +43,14 @@ function calculateClaudeCost(model, usage, timestamp) {
   if (m.includes("deepseek")) {
     const peak = getDeepSeekPeakMultiplier(timestamp);
     if (m.includes("v4-pro")) {
-      inputPrice = 0.435 * peak;
-      outputPrice = 0.87 * peak;
+      inputPrice = 1.74 * peak;
+      outputPrice = 3.48 * peak;
+      cacheReadPrice = 0.0145 * peak;
     } else {
       inputPrice = 0.14 * peak;
       outputPrice = 0.28 * peak;
+      cacheReadPrice = 0.0028 * peak;
     }
-    cacheReadPrice = 0;
   } else if (m.includes("haiku")) {
     inputPrice = 1.0;
     outputPrice = 5.0;
@@ -76,6 +77,7 @@ function calculateClaudeCost(model, usage, timestamp) {
   const cost =
     (usage.input_tokens || 0) * (inputPrice / 1e6) +
     (usage.output_tokens || 0) * (outputPrice / 1e6) +
+    (usage.reasoning_tokens || usage.reasoning || 0) * (outputPrice / 1e6) +
     cacheWriteCost +
     (usage.cache_read_input_tokens || 0) * (cacheReadPrice / 1e6);
   return cost;
@@ -134,7 +136,8 @@ function parseEntryToInteraction(entry) {
     const hasTokens = (usage.input_tokens || usage.input || 0) > 0 ||
                       (usage.output_tokens || usage.output || 0) > 0 ||
                       (usage.cache_read_input_tokens || usage.cacheRead || 0) > 0 ||
-                      (usage.cache_creation_input_tokens || usage.cacheWrite || 0) > 0;
+                      (usage.cache_creation_input_tokens || usage.cacheWrite || 0) > 0 ||
+                      (usage.reasoning_tokens || usage.reasoning || 0) > 0;
     if (piCost !== undefined && piCost !== null && !(piCost === 0 && hasTokens)) {
       cost = piCost;
     } else if (assistantMsg.model && hasTokens) {
@@ -144,6 +147,7 @@ function parseEntryToInteraction(entry) {
         cache_creation_input_tokens: usage.cache_creation_input_tokens ?? usage.cacheWrite ?? 0,
         cache_read_input_tokens: usage.cache_read_input_tokens ?? usage.cacheRead ?? 0,
         cache_creation: usage.cache_creation || null,
+        reasoning_tokens: usage.reasoning_tokens ?? usage.reasoning ?? 0,
       };
       cost = calculateClaudeCost(assistantMsg.model, normalizedUsage, timestamp);
     }
@@ -318,7 +322,7 @@ function deduplicateInteractions(interactions) {
 // ---
 
 // Bump when classification heuristics or cost model change (#54, #55, etc).
-const TAGGER_VERSION = "2.2.0";
+const TAGGER_VERSION = "2.3.0";
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const POLL_MS = 667;              // 90bpm throttle
 const IDLE_EXIT_MS = 30 * 60 * 1000; // exit if session.jsonl unchanged for 30 min

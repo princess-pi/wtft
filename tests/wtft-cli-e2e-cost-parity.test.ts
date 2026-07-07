@@ -153,7 +153,7 @@ try {
 // ---
 
 const tagsDir = path.join(dir, "wtft-tags");
-const tagPath = path.join(tagsDir, `${FIXTURE_ID}.jsonl.wtft-tag.v2.2.0.jsonl`);
+const tagPath = path.join(tagsDir, `${FIXTURE_ID}.jsonl.wtft-tag.v2.3.0.jsonl`);
 
 // Wait for daemon to finish processing (spawned by non-watch CLI above).
 let tagEntries: any[] = [];
@@ -196,7 +196,7 @@ assert(rawInteractions.length === 4, `Raw parse: 4 lines (got ${rawInteractions.
 assert(dedupedInteractions.length === 2, `Deduped: 2 messages (got ${dedupedInteractions.length})`);
 
 // Tag version check
-assert(tagPath.includes("v2.2.0"), "Tag file uses v2.2.0");
+assert(tagPath.includes("v2.3.0"), "Tag file uses v2.3.0");
 
 // Cleanup
 killAllLogParsers();

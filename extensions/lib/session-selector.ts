@@ -232,7 +232,7 @@ export async function selectSessionPrompt(
 		const render = () => {
 			const selected = displayCandidates[selectedIndex];
 			// Full path (not truncated) — wraps naturally if wider than terminal
-			let out = `\x1b[1m\x1b[36m\u{1F4B8} WTFT Session Selector\x1b[0m (j/k or arrows navigate, Enter select, q quit):\n`;
+			let out = `\x1b[1m\x1b[36m\u{1F4B8} WTFT — select session log\x1b[0m (j/k or arrows navigate, Enter select, q quit):\n`;
 			out += `  \x1b[90m${selected.path}\x1b[0m\n`;
 			for (let i = 0; i < displayCandidates.length; i++) {
 				const c = displayCandidates[i];

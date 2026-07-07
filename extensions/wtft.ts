@@ -1,7 +1,8 @@
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import {
 	buildWtftLines as sharedBuildWtftLines,
 	type Category,
@@ -18,8 +19,46 @@ import {
 	getCurrentLocalHour,
 	getSurgeLocalHours,
 	checkSurgeProximity,
-	buildTimelineString
+	buildTimelineString,
+	getVisualLength,
+	checkDaemonHealth,
+	restartDaemon,
+	getTagPath,
+	type DaemonStatus
 } from "./lib/wtft-shared.js";
+// ---
+// LOG PARSER STATE (keeps wtft-tag file warm for CLI use)
+// ---
+let _parserSessionPath: string | null = null;
+let _parserSpawned = false;
+
+function ensureParserRunning(sessionPath: string): void {
+	if (_parserSpawned && _parserSessionPath === sessionPath) return;
+
+	const daemonPath = path.join(
+		path.dirname(fileURLToPath(import.meta.url)),
+		"..", "bin", "wtft-daemon.mjs"
+	);
+
+	try {
+		const child = spawn(process.execPath, [daemonPath, "--session", sessionPath], {
+			detached: true,
+			stdio: "ignore"
+		});
+		child.unref();
+		_parserSpawned = true;
+		_parserSessionPath = sessionPath;
+	} catch (_) {
+		// Daemon not available — status will show "log parser not found"
+	}
+}
+
+function getParserStatus(sessionPath: string): DaemonStatus {
+	if (!_parserSessionPath) return { alive: false, reason: "log parser not started" };
+	const tagPath = getTagPath(sessionPath);
+	return checkDaemonHealth(sessionPath, tagPath);
+}
+
 
 // ---
 // ARGUMENT PARSING
@@ -375,6 +414,34 @@ function updateWtftWidget(
 	// Append inline to the title line — legend is always on row 2 via forceLegendRow
 	lines[0] = lines[0] + "  " + timelineStr;
 
+	// ---
+	// Append log parser status (inline if it fits, otherwise separate line).
+	// ---
+	let parserStatusStr = "";
+	const sessionFile = ctx.sessionManager.getSessionFile?.();
+	if (sessionFile && _parserSpawned) {
+		const status = getParserStatus(sessionFile);
+		if (!status.alive) {
+			const label = status.lastHbTime
+				? `stopped ${status.lastHbTime}`
+				: (status.reason || "unknown");
+			parserStatusStr = `  \x1b[31m●\x1b[0m ${label}`;
+		} else {
+			parserStatusStr = "  \x1b[32m●\x1b[0m live";
+		}
+	}
+
+	if (parserStatusStr) {
+		const titleVisualLen = getVisualLength(lines[0]);
+		const statusVisualLen = getVisualLength(parserStatusStr);
+		const width = getTerminalWidth(true, false);
+		if (titleVisualLen + statusVisualLen <= width - 2) {
+			lines[0] = lines[0] + parserStatusStr;
+		} else {
+			lines.splice(1, 0, parserStatusStr.trim());
+		}
+	}
+
 	ctx.ui.setWidget("wtft", lines, { placement: "belowEditor" });
 }
 
@@ -388,9 +455,14 @@ let _wtftCtx: any = null;
 let _wtftRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
 export default function wtftExtension(pi: ExtensionAPI) {
-	// 1. Auto-restore on startup
+	// 1. Auto-restore on startup + spawn log parser
 	pi.on("session_start", async (_event, ctx) => {
 		_wtftCtx = ctx;
+		// Spawn log parser for this session to keep wtft-tag file warm for CLI use.
+		const sessionFile = ctx.sessionManager.getSessionFile?.();
+		if (sessionFile) {
+			ensureParserRunning(sessionFile);
+		}
 		const current = getSettings(ctx);
 		if (current.visible) {
 			updateWtftWidget(ctx, pi);

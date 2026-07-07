@@ -344,6 +344,7 @@ let pidPath = null;
 let lastSize = 0;            // bytes read from session.jsonl
 let lastWriteMs = 0;         // last time we flushed to the tag file
 let lastActivityMs = Date.now(); // last time we classified a new interaction
+let startupTime = Date.now();    // daemon start time (idle exit grace period)
 let pendingLines = [];       // classified lines waiting for next flush
 let idleStartMs = 0;         // start of current idle period (for _hb range)
 let running = true;
@@ -363,7 +364,7 @@ function shutdown(reason) {
   } catch (_) {}
   // Remove PID file
   try { fs.unlinkSync(pidPath); } catch (_) {}
-  // Daemon goes silent but exits cleanly
+  // Log parser goes silent but exits cleanly
   process.exit(0);
 }
 
@@ -453,9 +454,9 @@ function flushPending() {
     fs.appendFileSync(tagPath, batch);
     idleStartMs = 0; // Data arrived — idle period ended
   } catch (err) {
-    // If we can't write, log and continue — don't crash the daemon
+    // If we can't write, log and continue — don't crash the log parser
     if (process.env.WTFT_DAEMON_DEBUG) {
-      process.stderr.write(`[wtft-daemon] write error: ${err.message}\n`);
+      process.stderr.write(`[wtft-log-parser] write error: ${err.message}\n`);
     }
   }
   lastWriteMs = Date.now();
@@ -469,7 +470,7 @@ function parseNewLines(filePath) {
     if (currentSize < lastSize) {
       // File truncated or rotated — reset
       if (process.env.WTFT_DAEMON_DEBUG) {
-        process.stderr.write(`[wtft-daemon] session truncated, resetting offset\n`);
+        process.stderr.write(`[wtft-log-parser] session truncated, resetting offset\n`);
       }
       lastSize = 0;
     }
@@ -552,16 +553,16 @@ function main() {
     } else if (arg === "--stop") {
       stopSession = process.argv[++i];
     } else if (arg === "--help" || arg === "-h") {
-      console.log(`wtft-daemon — Tagger daemon for WTFT
+      console.log(`wtft-daemon — Session log parser for WTFT
 Usage: wtft-daemon --session <path> [--debug]
 
 Management:
-  --list, -l            List all running daemons (session, PID, idle time)
-  --cleanup             Kill daemons whose source session no longer exists
-  --restart             Kill all running daemons (fresh spawn on next wtft)
-  --stop <session>      Stop daemon for a specific session path
+  --list, -l            List all running log parsers (session, PID, idle time)
+  --cleanup             Kill log parsers whose source session no longer exists
+  --restart             Kill all running log parsers (fresh spawn on next wtft)
+  --stop <session>      Stop log parser for a specific session path
 
-Daemon mode:
+Log parser mode:
   -s, --session <path>  Path to session.jsonl to watch
   --debug               Enable debug logging to stderr
   -h, --help            Show this help`);
@@ -628,7 +629,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         process.kill(pid, "SIGTERM");
       }
       try { fs.unlinkSync(fullPath); } catch (_) {}
-      // Re-launch fresh daemon for same session
+      // Re-launch fresh log parser for same session
       if (sessionFound) {
         try {
           const child = spawn(process.execPath, [process.argv[1], "--session", sessionFound], {
@@ -638,7 +639,7 @@ if (showList || showCleanup || showRestart || stopSession) {
           child.unref();
         } catch (_2) {}
       }
-      console.log(`Restarted: PID ${pid} → fresh daemon for ${sessionFound || "(unknown)"}`);
+      console.log(`Restarted: PID ${pid} → fresh log parser for ${sessionFound || "(unknown)"}`);
       found++;
       continue;
     }
@@ -683,16 +684,16 @@ if (showList || showCleanup || showRestart || stopSession) {
   }
 
   if (showRestart) {
-    console.log(`Restarted ${found} daemon(s). Run wtft to spawn fresh instances.`);
+    console.log(`Restarted ${found} log parser(s). Run wtft to spawn fresh instances.`);
   }
   if (showCleanup) {
-    console.log(`Cleaned up ${found} daemon(s).`);
+    console.log(`Cleaned up ${found} log parser(s).`);
   }
   if (showList && found === 0) {
-    console.log("No wtft-daemon processes found.");
+    console.log("No log parser processes found.");
   }
   if (stopSession && found === 0) {
-    console.log(`No daemon found for: ${stopSession}`);
+    console.log(`No log parser found for: ${stopSession}`);
   }
   process.exit(0);
 }
@@ -707,7 +708,7 @@ if (showList || showCleanup || showRestart || stopSession) {
     process.stderr.write(`wtft-daemon: session file not found: ${sessionPath}\n`);
     process.exit(1);
   }
-  // Guard: refuse to watch a wtft-tag file (prevents recursive daemon loops).
+  // Guard: refuse to watch a wtft-tag file (prevents recursive log parser loops).
   if (sessionPath.includes(".wtft-tag.v")) {
     process.stderr.write(`wtft-daemon: refusing to watch a tag cache file: ${sessionPath}\n`);
     process.exit(1);
@@ -730,7 +731,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         const stale = path.join(tagsDir, f);
         try { fs.unlinkSync(stale); } catch (_) {}
         if (process.env.WTFT_DAEMON_DEBUG) {
-          process.stderr.write(`[wtft-daemon] removed stale tag file: ${f}\n`);
+          process.stderr.write(`[wtft-log-parser] removed stale tag file: ${f}\n`);
         }
       }
     }
@@ -754,7 +755,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       if (existingPid > 0) {
         try {
           process.kill(existingPid, 0);
-          // Process exists — another daemon is running, exit quietly
+          // Process exists — another log parser is running, exit quietly
           process.exit(0);
         } catch (_2) {
           // Stale PID — clean up and retry
@@ -777,9 +778,9 @@ if (showList || showCleanup || showRestart || stopSession) {
   initClassified();
 
   if (process.env.WTFT_DAEMON_DEBUG) {
-    process.stderr.write(`[wtft-daemon] started, watching: ${sessionPath}\n`);
-    process.stderr.write(`[wtft-daemon] classified: ${tagPath}\n`);
-    process.stderr.write(`[wtft-daemon] pid: ${process.pid}\n`);
+    process.stderr.write(`[wtft-log-parser] started, watching: ${sessionPath}\n`);
+    process.stderr.write(`[wtft-log-parser] classified: ${tagPath}\n`);
+    process.stderr.write(`[wtft-log-parser] pid: ${process.pid}\n`);
   }
 
   // --- Main poll loop ---
@@ -806,26 +807,28 @@ if (showList || showCleanup || showRestart || stopSession) {
     // First idle poll appends {"_hb":{"first":<ts>}}. Subsequent idle polls
     // overwrite the last line in-place with {"_hb":{"first":<ts>,"last":<ts>}}.
     // When data arrives, the idle period ends — next idle starts a new line.
+    // NOTE: do NOT update lastActivityMs here — it tracks actual data activity
+    // for the idle-exit check below, not heartbeat flushes.
     if (pendingLines.length === 0) {
       if (idleStartMs === 0) idleStartMs = now;
       upsertHeartbeat(now);
       lastWriteMs = now;
-      lastActivityMs = now;
     }
 
-    // Idle exit: if session.jsonl hasn't been modified in >30 min,
+    // Idle exit: if no new interactions have been classified in >30 min,
     // assume the session is finished and shut down cleanly.
-    try {
-      const sessionStat = fs.statSync(sessionPath);
-      if (now - sessionStat.mtimeMs >= IDLE_EXIT_MS) {
-        if (process.env.WTFT_DAEMON_DEBUG) {
-          process.stderr.write(`[wtft-daemon] session idle for ${Math.round((now - sessionStat.mtimeMs)/60000)}m, exiting\n`);
-        }
-        shutdown("idle timeout");
-        return;
+    // Skip idle exit during the first 60s of daemon runtime (startup grace
+    // period) so freshly-spawned daemons aren't killed on their first cycle.
+    if (now - lastActivityMs >= IDLE_EXIT_MS && now - startupTime >= 60000) {
+      if (process.env.WTFT_DAEMON_DEBUG) {
+        process.stderr.write(`[wtft-log-parser] no new data for ${Math.round((now - lastActivityMs)/60000)}m, exiting\n`);
       }
-    } catch (_) {
-      // Session file gone — clean exit
+      shutdown("idle timeout");
+      return;
+    }
+
+    // If the session file disappears, exit cleanly.
+    if (!fs.existsSync(sessionPath)) {
       shutdown("session removed");
       return;
     }

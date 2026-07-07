@@ -6,7 +6,9 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { execSync } from "node:child_process";
+import * as os from "node:os";
+import { createHash } from "node:crypto";
+import { execSync, spawn } from "node:child_process";
 import { enterRawStdin, showCursor, hideCursor } from "./tty-helpers.ts";
 
 // ---
@@ -70,7 +72,8 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 	
 	const m = (model || "").toLowerCase();
 	if (m.includes("deepseek")) {
-		// DeepSeek models — input/output only (cache_creation/read tokens not yet confirmed in their Anthropic-compat usage schema)
+		// DeepSeek models — input/output/reasoning pricing. Cache-read pricing
+		// uses DeepSeek's cache-hit discount rate (confirmed via Pi usage schema).
 		const peak = getDeepSeekPeakMultiplier(timestamp);
 		if (m.includes("v4-pro")) {
 			// deepseek-v4-pro: $0.435/M input, $0.87/M output. Concurrency: 500.
@@ -1522,6 +1525,7 @@ export interface WatchSettings {
 	showTicks: boolean;
 	timezone?: string;
 	disabledEmoji: boolean;
+	daemonPath?: string; // path to wtft-daemon.mjs (CLI watch mode only)
 }
 
 export async function watchMode(
@@ -1820,6 +1824,118 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
  * @param tagPath - Path to the daemon's classified tag file
  * @param settings - Display settings (interval, limit, width, etc.)
  */
+
+// ---
+// DAEMON HEALTH CHECK (used by watchTagFile + Pi widget)
+// ---
+
+/**
+ * Compute the tag file path for a given session path.
+ * Scans wtft-tags/ subdirectory for the current version's tag file.
+ */
+export function getTagPath(sessionPath: string): string {
+	const sessionDir = path.dirname(sessionPath);
+	const sessionBase = path.basename(sessionPath);
+	const tagsDir = path.join(sessionDir, "wtft-tags");
+	const defaultPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.2.0.jsonl");
+	try {
+		const prefix = sessionBase + ".wtft-tag.v";
+		for (const f of fs.readdirSync(tagsDir)) {
+			if (f.startsWith(prefix) && f.endsWith(".jsonl")) {
+				return path.join(tagsDir, f);
+			}
+		}
+	} catch {}
+	return defaultPath;
+}
+
+export function getDaemonPidPath(sessionPath: string): string {
+	const sessionHash = createHash("sha256").update(sessionPath).digest("hex").slice(0, 12);
+	return path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
+}
+
+export interface DaemonStatus {
+	alive: boolean;
+	reason?: string;
+	lastHbTime?: string; // HH:MM local time of last heartbeat
+}
+
+export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonStatus {
+	// Fast path: check if PID file exists and process is alive.
+	const pidPath = getDaemonPidPath(sessionPath);
+	let pidAlive = false;
+	try {
+		const pid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
+		if (pid > 0) {
+			try { process.kill(pid, 0); pidAlive = true; } catch {}
+		}
+	} catch {}
+
+	if (pidAlive) return { alive: true };
+
+	// PID dead or missing — read last _hb heartbeat for stop reason + time.
+	let lastHbMs = 0;
+	try {
+		const stat = fs.statSync(tagPath);
+		// Read last ~8KB to find the most recent heartbeat line.
+		const readStart = Math.max(0, stat.size - 8192);
+		const fd = fs.openSync(tagPath, "r");
+		const buf = Buffer.alloc(stat.size - readStart);
+		fs.readSync(fd, buf, 0, buf.length, readStart);
+		fs.closeSync(fd);
+		const lines = buf.toString("utf8").split("\n");
+		for (let i = lines.length - 1; i >= 0; i--) {
+			const line = lines[i].trim();
+			if (!line) continue;
+			try {
+				const obj = JSON.parse(line);
+				if (obj._hb && obj._hb.last) {
+					lastHbMs = obj._hb.last;
+					break;
+				}
+			} catch {}
+		}
+	} catch {}
+
+	if (lastHbMs === 0) {
+		return { alive: false, reason: "log parser not found" };
+	}
+
+	// Format the heartbeat time as local HH:MM.
+	const d = new Date(lastHbMs);
+	const hh = String(d.getHours()).padStart(2, "0");
+	const mm = String(d.getMinutes()).padStart(2, "0");
+	const timeStr = `${hh}:${mm}`;
+
+	return { alive: false, reason: "idle timeout", lastHbTime: timeStr };
+}
+
+export function restartDaemon(sessionPath: string, daemonPath: string): boolean {
+	// Kill existing daemon (stale or alive) for this session.
+	const pidPath = getDaemonPidPath(sessionPath);
+	try {
+		const pid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
+		if (pid > 0) {
+			try { process.kill(pid, "SIGTERM"); } catch {}
+		}
+		try { fs.unlinkSync(pidPath); } catch {}
+	} catch {}
+
+	// Spawn fresh daemon.
+	try {
+		const child = spawn(process.execPath, [daemonPath, "--session", sessionPath], {
+			detached: true,
+			stdio: "ignore"
+		});
+		child.unref();
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+// ---
+
 export async function watchTagFile(
 	sessionPath: string,
 	tagPath: string,
@@ -1856,10 +1972,67 @@ export async function watchTagFile(
 
 	process.on("SIGINT", exitWatch);
 
-	// Raw stdin for 'q'/'Q' quit.
+	// ---
+	// DAEMON HEALTH TRACKING
+	// ---
+	let daemonDead = false;
+	let daemonStopReason = "";
+	let daemonStopTime = "";
+	let daemonRestarting = false;
+
+	const updateDaemonHealth = () => {
+		if (daemonRestarting) {
+			// Check if daemon came back online after restart.
+			const health = checkDaemonHealth(sessionPath, tagPath);
+			if (health.alive) {
+				daemonRestarting = false;
+				daemonDead = false;
+				daemonStopReason = "";
+				daemonStopTime = "";
+			}
+			return;
+		}
+		const health = checkDaemonHealth(sessionPath, tagPath);
+		if (!health.alive) {
+			daemonDead = true;
+			daemonStopReason = health.reason || "unknown";
+			daemonStopTime = health.lastHbTime || "";
+		} else {
+			daemonDead = false;
+			daemonStopReason = "";
+			daemonStopTime = "";
+		}
+	};
+
+	// Raw stdin for 'q'/'Q' quit and 'r' log parser restart.
 	const cleanupStdin = enterRawStdin((key: string) => {
 		if (key === "q" || key === "Q" || key === "\u0003") {
 			exitWatch();
+		}
+		if (key === "r" || key === "R") {
+			if (settings.daemonPath) {
+				daemonRestarting = true;
+				daemonDead = false;
+				const ok = restartDaemon(sessionPath, settings.daemonPath);
+				if (!ok) {
+					daemonRestarting = false;
+					daemonDead = true;
+					daemonStopReason = "restart failed";
+				}
+				needsRedraw = true;
+				render();
+				// Fast health re-check: poll every second for up to 5s after restart.
+				let pollCount = 0;
+				const postRestartPoll = setInterval(() => {
+					pollCount++;
+					updateDaemonHealth();
+					if (!daemonRestarting || pollCount >= 5) {
+						clearInterval(postRestartPoll);
+					}
+					needsRedraw = true;
+					render();
+				}, 1000);
+			}
 		}
 	});
 
@@ -1953,13 +2126,43 @@ export async function watchTagFile(
 			const tlHour = getCurrentLocalHour(finalTimezone);
 			const tlStr = buildTimelineString(new Set<number>(), tlHour, undefined);
 			lines[0] = lines[0] + "  " + tlStr;
+
+			// ---
+			// Append daemon status (inline if it fits, otherwise separate line).
+			// ---
+			let daemonStatusStr = "";
+			if (daemonRestarting) {
+				daemonStatusStr = "  \x1b[33m●\x1b[0m restarting...";
+			} else if (daemonDead) {
+				const label = daemonStopTime
+					? `stopped ${daemonStopTime}`
+					: daemonStopReason;
+				daemonStatusStr = `  \x1b[31m●\x1b[0m ${label}`;
+			} else {
+				daemonStatusStr = "  \x1b[32m●\x1b[0m live";
+			}
+
+			if (daemonStatusStr) {
+				const titleVisualLen = getVisualLength(lines[0]);
+				const statusVisualLen = getVisualLength(daemonStatusStr);
+				if (titleVisualLen + statusVisualLen <= finalWidth - 2) {
+					lines[0] = lines[0] + daemonStatusStr;
+				} else {
+					// Doesn't fit — insert as a separate line after the title
+					lines.splice(1, 0, daemonStatusStr.trim());
+				}
+			}
+
 			for (const l of lines) buf.push(l);
 		} else {
 			buf.push("\x1b[90mWaiting for session data...\x1b[0m");
 		}
 
 		// Footer row
-		buf.push(`\x1b[90mq/Ctrl+C to exit\x1b[0m`);
+		const restartHint = settings.daemonPath
+			? (daemonDead ? ", \x1b[31mr to restart log parser\x1b[0m" : ", r to restart log parser")
+			: "";
+		buf.push(`\x1b[90mq/Ctrl+C to exit\x1b[0m${restartHint}`);
 
 		lastBuffer = [...buf];
 		process.stdout.write(buf.join("\n"));
@@ -2049,15 +2252,19 @@ export async function watchTagFile(
 	if (fs.existsSync(tagPath)) {
 		startWatching();
 	} else {
-		console.error("❌ Daemon did not create tag file within 5s. Is wtft-daemon installed?");
+		console.error("❌ Log parser did not create tag file within 5s. Is wtft-daemon installed?");
 		console.error(`   Expected: ${tagPath}`);
 		process.exit(1);
 	}
 
-	// Per-minute re-render for timeline diamond/badge live-updates
+	// Initial daemon health check (10s after startup to let daemon settle).
+	setTimeout(() => { updateDaemonHealth(); needsRedraw = true; render(); }, 10000);
+
+	// Per-minute re-render for timeline diamond/badge + daemon health updates.
 	const minuteInterval = setInterval(() => {
 		const _curMin = new Date().getMinutes();
 		if (_curMin !== _lastRenderMin) {
+			updateDaemonHealth();
 			needsRedraw = true;
 			render();
 		}

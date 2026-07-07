@@ -108,11 +108,11 @@ Options:
   -T, --tokens            Print a per-model token summary table (deduped) for cross-referencing with /usage.
   -W, --watch             Watch a session file for changes and re-render the bar chart in real-time.
 
-Daemon management:
-  --list                  List all running wtft-tag daemons (session, PID, idle time).
-  --cleanup               Kill daemons whose source session no longer exists.
-  --restart               Kill all running daemons (fresh spawn on next wtft).
-  --stop <session>        Stop daemon for a specific session path.
+Log parser management:
+  --list                  List all running log parsers (session, PID, idle time).
+  --cleanup               Kill log parsers whose source session no longer exists.
+  --restart               Kill all running log parsers (fresh spawn on next wtft).
+  --stop <session>        Stop log parser for a specific session path.
 
   --version               Display this tool's version.
   --why                   Explain why you'd run this tool, with user scenarios and anti-use-cases.
@@ -301,8 +301,8 @@ async function main() {
 			});
 			child.unref();
 		} catch (err) {
-			// Daemon spawn failed — fall back to polling mode
-			console.error(`\x1b[33m⚠ Daemon spawn failed, falling back to polling mode: ${err}\x1b[0m`);
+			// Log parser spawn failed — fall back to polling mode
+			console.error(`\x1b[33m⚠ Log parser spawn failed, falling back to polling mode: ${err}\x1b[0m`);
 			await watchMode(finalSessionPath, {
 				interval: hasInterval ? intervalStr : "1h",
 				limit: hasLimit ? limit : 100,
@@ -325,7 +325,8 @@ async function main() {
 			mode: (hasCumulative || hasBucket) ? mode : "cumulative",
 			showTicks: (hasTicks || hasNoTicks) ? showTicks : true,
 			timezone: hasTz ? timezone : undefined,
-			disabledEmoji: false
+			disabledEmoji: false,
+			daemonPath
 		});
 		return; // watchTagFile never returns until SIGINT
 	}
@@ -360,8 +361,8 @@ async function main() {
 		});
 		child.unref();
 	} catch (err) {
-		// Daemon spawn failed — fall back to direct session parsing
-		console.error(`\x1b[33m⚠ Daemon spawn failed, falling back to direct parse: ${err}\x1b[0m`);
+		// Log parser spawn failed — fall back to direct session parsing
+		console.error(`\x1b[33m⚠ Log parser spawn failed, falling back to direct parse: ${err}\x1b[0m`);
 	}
 
 	// Wait for daemon to process existing entries (poll up to 3s for classified data).

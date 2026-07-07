@@ -1688,8 +1688,8 @@ export async function watchMode(
 			buf.push("\x1b[90mWaiting for session data...\x1b[0m");
 		}
 
-		// Footer row: q/Ctrl+C to exit (always last line)
-		buf.push(`\x1b[90mq/Ctrl+C to exit\x1b[0m`);
+		// Footer row (always last line)
+		buf.push(`'q' to exit`);
 
 		lastBuffer = [...buf]; // save for exit printout
 		// Compute visual line count for in-place overwrite on next render
@@ -2160,9 +2160,9 @@ export async function watchTagFile(
 
 		// Footer row
 		const restartHint = settings.daemonPath
-			? (daemonDead ? ", \x1b[31mr to restart log parser\x1b[0m" : ", r to restart log parser")
+			? (daemonDead ? `, \x1b[31m'r' to restart parser\x1b[0m` : `, using v${WTFT_TAGGER_VERSION}, 'r' to restart parser`)
 			: "";
-		buf.push(`\x1b[90mq/Ctrl+C to exit\x1b[0m${restartHint}`);
+		buf.push(`'q' to exit${restartHint}`);
 
 		lastBuffer = [...buf];
 		process.stdout.write(buf.join("\n"));

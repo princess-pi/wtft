@@ -510,15 +510,26 @@ function parseNewLines(filePath) {
 
 function initClassified() {
   // Version is embedded in filename (TAG_SUFFIX), so no _cv header needed.
-  // On startup: if the tag file already exists (same version), resume incrementally.
-  // If not, create fresh (stale files already cleaned up by caller).
+  // On startup: if the tag file already exists (same version) AND contains
+  // actual classified entries (not just heartbeats), resume incrementally.
+  // If tag file is missing or only has heartbeats, do a full re-parse.
+  let hasData = false;
   try {
     fs.accessSync(tagPath);
-    // Tag file exists with matching version — resume from current session end
-    try {
-      const stat = fs.statSync(sessionPath);
-      lastSize = stat.size;
-    } catch (_) {}
+    // Check if tag file has actual classified entries (not just _hb lines).
+    const tagContent = fs.readFileSync(tagPath, "utf8");
+    hasData = tagContent.split("\n").some(l => l.trim() && !l.includes('"_hb"'));
+    if (hasData) {
+      // Tag file has real data — resume from current session end
+      try {
+        const stat = fs.statSync(sessionPath);
+        lastSize = stat.size;
+      } catch (_) {}
+    } else {
+      // Tag file exists but no classified data (only heartbeats from a
+      // previous daemon that exited before its first poll). Full re-parse.
+      lastSize = 0;
+    }
   } catch (_) {
     // No tag file for this version — fresh start, full reparse on next poll
     lastSize = 0;

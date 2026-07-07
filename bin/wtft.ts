@@ -275,22 +275,12 @@ async function main() {
 		const termColumns = getTerminalWidth();
 		const maxWidth = hasWidth ? (maxWidthOption as number) : 240;
 
-		// Compute tag file path — discover the current version by scanning wtft-tags/
-		// for any file matching <sessionBase>.wtft-tag.v*.jsonl.
-		// The daemon cleans up stale versions on startup, so at most one exists.
+		// Tag file path — always use the current version. The daemon
+		// handles stale-version cleanup internally on startup.
 		const sessionDir = path.dirname(finalSessionPath);
 		const sessionBase = path.basename(finalSessionPath);
 		const tagsDir = path.join(sessionDir, "wtft-tags");
-		let tagPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.3.0.jsonl"); // default
-		try {
-			const prefix = sessionBase + ".wtft-tag.v";
-			for (const f of fs.readdirSync(tagsDir)) {
-				if (f.startsWith(prefix) && f.endsWith(".jsonl")) {
-					tagPath = path.join(tagsDir, f);
-					break;
-				}
-			}
-		} catch {}
+		const tagPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.3.0.jsonl");
 
 		// Auto-spawn daemon if not already running (singleton via PID file).
 		const daemonPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "wtft-daemon.mjs");
@@ -337,20 +327,11 @@ async function main() {
 	// the daemon is the sole harness→tag converter.
 	// ---
 
-	// Compute tag path + auto-spawn daemon (same logic as watch mode).
+	// Compute tag path — always use the current version (no stale-version scan).
 	const sessionDir = path.dirname(finalSessionPath);
 	const sessionBase = path.basename(finalSessionPath);
 	const tagsDir = path.join(sessionDir, "wtft-tags");
-	let tagPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.3.0.jsonl");
-	try {
-		const prefix = sessionBase + ".wtft-tag.v";
-		for (const f of fs.readdirSync(tagsDir)) {
-			if (f.startsWith(prefix) && f.endsWith(".jsonl")) {
-				tagPath = path.join(tagsDir, f);
-				break;
-			}
-		}
-	} catch {}
+	const tagPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.3.0.jsonl");
 
 	// Auto-spawn daemon (singleton via PID file).
 	const daemonPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "wtft-daemon.mjs");

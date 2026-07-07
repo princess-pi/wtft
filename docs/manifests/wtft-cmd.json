@@ -1,6 +1,6 @@
 {
   "name": "/wtft",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "tagline": "Where The F***ing Tokens?! (WTFT) - Cost Auditing Widget",
   "description": "Displays a horizontal, stacked TUI bar chart widget of your session's token costs classified into Spec, Code, and Other work types.",
   "why": [

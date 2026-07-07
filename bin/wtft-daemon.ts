@@ -640,7 +640,8 @@ if (showList || showCleanup || showRestart || stopSession) {
       }
     } catch (_) {}
 
-    // Get tag file mtime for idle time (look in wtft-tags/ subdirectory)
+    // Get tag file mtime and version (look in wtft-tags/ subdirectory)
+    let taggerVersion = "?";
     if (sessionFound) {
       try {
         const tagsDir = path.join(path.dirname(sessionFound), "wtft-tags");
@@ -649,6 +650,8 @@ if (showList || showCleanup || showRestart || stopSession) {
         for (const f of fs.readdirSync(tagsDir)) {
           if (f.startsWith(prefix)) {
             tagMtime = fs.statSync(path.join(tagsDir, f)).mtimeMs;
+            // Extract version from filename: ...wtft-tag.v2.3.1.jsonl → 2.3.1
+            taggerVersion = f.slice(prefix.length, f.length - 6); // strip '.jsonl'
             break;
           }
         }
@@ -710,7 +713,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         else idleStr = `${Math.floor(idleSec / 3600)}h`;
       }
       const sessionDisplay = sessionFound || `(hash: ${pidFile.replace(/^wtft-daemon-/, "").replace(/\.pid$/, "")})`;
-      console.log(`PID ${String(pid).padEnd(7)} ${status.padEnd(20)} idle: ${idleStr.padEnd(5)} ${sessionDisplay}`);
+      console.log(`PID ${String(pid).padEnd(7)} ${status.padEnd(20)} v${taggerVersion.padEnd(7)} idle: ${idleStr.padEnd(5)} ${sessionDisplay}`);
     }
   }
 

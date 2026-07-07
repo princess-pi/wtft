@@ -109,7 +109,7 @@ Options:
   -W, --watch             Watch a session file for changes and re-render the bar chart in real-time.
 
 Log parser management:
-  --list                  List all running log parsers (session, PID, idle time).
+  --list                  List all running log parsers with session path, PID, parser version, and idle time.
   --cleanup               Kill log parsers whose source session no longer exists.
   --restart               Kill all running log parsers (fresh spawn on next wtft).
   --stop <session>        Stop log parser for a specific session path.

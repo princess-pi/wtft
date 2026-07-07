@@ -165,7 +165,7 @@
     },
     {
       "flags": "--list",
-      "desc": "List all running log parsers (session, PID, idle time)."
+      "desc": "List all running log parsers with session path, PID, parser version, and idle time."
     },
     {
       "flags": "--cleanup",

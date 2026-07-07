@@ -93,7 +93,7 @@ function printHelp() {
 Usage: wtft [options]
 
 Options:
-  -s, --session <path>    Specify an explicit session .jsonl log file path (defaults to latest active session).
+  -s, --session <path|filter>  Explicit session .jsonl path, numeric index, or fuzzy substring filter (e.g. 'b04c'). Skips selector on single match.
   --dir, --cwd <path>     Working directory for Claude Code session discovery (default: current directory).
   --harness <type>        Target a specific harness for auto-discovery (pi, claude-code, or auto). Default: auto.
   -i, --interval <val>    Group cost data into binned intervals (e.g., 1m, 7m, 4h, 1d, 2w; default: 1h).
@@ -247,7 +247,26 @@ async function main() {
 			process.exit(1);
 		}
 	} else if (targetSessionPath) {
-		finalSessionPath = targetSessionPath;
+		// Direct path — use as-is if it exists
+		if (fs.existsSync(targetSessionPath)) {
+			finalSessionPath = targetSessionPath;
+		} else {
+			// Fuzzy filter against discovered sessions
+			const filter = targetSessionPath.toLowerCase();
+			const filtered = candidates.filter(c =>
+				c.path.toLowerCase().includes(filter) ||
+				c.name.toLowerCase().includes(filter)
+			);
+			if (filtered.length === 0) {
+				console.error(`❌ Error: Session '${targetSessionPath}' does not exist as a file and matches no discovered sessions (${candidates.length} available).`);
+				process.exit(1);
+			} else if (filtered.length === 1) {
+				finalSessionPath = filtered[0].path;
+			} else {
+				// Show filtered selector
+				finalSessionPath = await selectSessionPrompt(filtered);
+			}
+		}
 	} else {
 		// Auto select or show selector prompt
 		if (candidates.length === 0) {

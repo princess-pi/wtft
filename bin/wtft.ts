@@ -23,6 +23,7 @@ import {
 	getTerminalWidth
 } from "../extensions/lib/wtft-shared.ts";
 import { execSync, spawn } from "node:child_process";
+import { readConfig, hasConfig } from "../extensions/lib/config.ts";
 import {
 	discoverSessions,
 	selectSessionPrompt
@@ -367,17 +368,20 @@ async function main() {
 		interactions.push(...parseSessionFile(finalSessionPath));
 	}
 
-	// Separate pass: read parent file for custom entries (emoji/wtft settings, Pi-only).
-	let disabledEmoji = false;
-	let sessionInterval: string | undefined;
-	let sessionLimit: number | undefined;
-	let sessionWidth: number | undefined;
-	let sessionMode: "cumulative" | "bucket" | undefined;
-	let sessionShowTicks: boolean | undefined;
-	let sessionTimezone: string | undefined;
+	// Read settings from harness-agnostic config file (#72).
+	// Falls back to .jsonl custom entries if no config file exists (backward compat).
+	const config = readConfig("wtft");
+	let disabledEmoji = (typeof config.disabledEmoji === "boolean" ? config.disabledEmoji : false) as boolean;
+	let sessionInterval = (typeof config.interval === "string" ? config.interval : undefined) as string | undefined;
+	let sessionLimit = (typeof config.limit === "number" ? config.limit : undefined) as number | undefined;
+	let sessionMode = (config.mode === "cumulative" || config.mode === "bucket" ? config.mode : undefined) as "cumulative" | "bucket" | undefined;
+	let sessionShowTicks = (typeof config.showTicks === "boolean" ? config.showTicks : undefined) as boolean | undefined;
+	let sessionTimezone = (typeof config.timezone === "string" ? config.timezone : undefined) as string | undefined;
 
-	try {
-		const content = fs.readFileSync(finalSessionPath, "utf8");
+	// Backward compat: if no config file exists, fall back to legacy .jsonl entries
+	if (!hasConfig("wtft")) {
+		try {
+			const content = fs.readFileSync(finalSessionPath, "utf8");
 			for (const line of content.split("\n")) {
 				if (!line.trim()) continue;
 				try {
@@ -388,14 +392,13 @@ async function main() {
 						}
 					} else if (entry.type === "custom" && entry.customType === "wtft-settings") {
 						if (entry.data) {
-							if (typeof entry.data.interval === "string") sessionInterval = entry.data.interval;
-							if (typeof entry.data.limit === "number") sessionLimit = entry.data.limit;
-							if (typeof entry.data.width === "number") sessionWidth = entry.data.width;
-							if (entry.data.mode === "cumulative" || entry.data.mode === "bucket") {
+							if (typeof entry.data.interval === "string" && sessionInterval === undefined) sessionInterval = entry.data.interval;
+							if (typeof entry.data.limit === "number" && sessionLimit === undefined) sessionLimit = entry.data.limit;
+							if ((entry.data.mode === "cumulative" || entry.data.mode === "bucket") && sessionMode === undefined) {
 								sessionMode = entry.data.mode;
 							}
-							if (typeof entry.data.showTicks === "boolean") sessionShowTicks = entry.data.showTicks;
-							if (typeof entry.data.timezone === "string") sessionTimezone = entry.data.timezone;
+							if (typeof entry.data.showTicks === "boolean" && sessionShowTicks === undefined) sessionShowTicks = entry.data.showTicks;
+							if (typeof entry.data.timezone === "string" && sessionTimezone === undefined) sessionTimezone = entry.data.timezone;
 						}
 					}
 				} catch {
@@ -405,6 +408,7 @@ async function main() {
 		} catch {
 			// File may not exist or be unreadable
 		}
+	}
 	// ---
 	// COMPILING AND PRINTING
 	// ---

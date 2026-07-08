@@ -99,6 +99,10 @@ The 24-hour timeline on the title line shows DeepSeek peak-valley surge pricing 
 
 Handler calls `render()` directly. Daemon status indicator reflows — may move from inline to separate line or vice versa depending on available width.
 
+## Settings Persistence (Cross-Harness Config)
+
+Data settings (`interval`, `limit`, `mode`, `showTicks`, `timezone`, `disabledEmoji`) are persisted in harness-agnostic JSON config files (`~/.config/princess-pi/wtft.json` and `./.princess-pi/wtft.json`), shared across Pi and Claude Code. See `EXT_WTFT.html` for the full config hierarchy. TUI-only settings (`visible`, `width`, `widthIsLocked`) remain in Pi's session `.jsonl`. The shared module `extensions/lib/config.ts` provides `readConfig`/`writeConfig` for all tools.
+
 ## SIGINT / 'q'
 
 Clears alt screen, restores cursor, prints final chart + summary line.

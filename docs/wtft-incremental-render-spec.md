@@ -12,7 +12,7 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 ┌─────────────────────────────────────────────────────────┐
 │  wtft-daemon (log parser) — detached, singleton per     │
 │  session. Polls session.jsonl every 667ms, classifies   │
-│  entries, writes to wtft-tags/<session>.tag.v2.3.2.jsonl│
+│  entries, writes to wtft-tags/<session>.tag.v2.3.3.jsonl│
 │  Tag format includes message.id for cross-run dedup.    │
 │  Heartbeats: single _hb line updated in-place per idle  │
 │  cycle (consolidated, not appended).                     │
@@ -45,7 +45,7 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 |---|---|
 | `session_start` (Pi) or `wtft` / `wtft --watch` invoked (CLI) | Auto-spawns daemon if not already running (singleton via PID file) |
 | New session data arrives | Daemon parses, classifies, flushes to tag file at 90bpm throttle |
-| No new data for 30 min | Daemon cleanly exits ("idle timeout") |
+| No new data for 24h | Daemon cleanly exits ("idle timeout") |
 | Daemon just spawned (< 60s) | Idle exit suppressed (startup grace period) |
 | Session file deleted | Daemon exits ("session removed") |
 | Press `r` in `--watch` | Kills stale daemon, spawns fresh, fast-polls health at 1s × 5 |
@@ -80,7 +80,7 @@ Health is checked:
 
 The Pi `/wtft` widget also spawns a log parser daemon on `session_start`, using `ctx.sessionManager.getSessionFile()` to determine the session path. This keeps the wtft-tag file warm for CLI use. The widget renders its own daemon status indicator on the title line (inline or wrapped), using the same `checkDaemonHealth`/`getTagPath` functions.
 
-**Daemon auto-revive:** If the daemon died from idle timeout (30 min), the Pi `agent_end` handler calls `ensureParserRunning`, which now checks actual daemon health via `checkDaemonHealth` before trusting the module-level `_parserSpawned` flag. If the daemon is dead, the flag is reset and the daemon is re-spawned. This keeps `wtft --watch` in an external terminal alive even after long idle periods — just type a new prompt and the daemon wakes up.
+**Daemon auto-revive:** If the daemon died from idle timeout (24h), the Pi `agent_end` handler calls `ensureParserRunning`, which now checks actual daemon health via `checkDaemonHealth` before trusting the module-level `_parserSpawned` flag. If the daemon is dead, the flag is reset and the daemon is re-spawned. This keeps `wtft --watch` in an external terminal alive even after long idle periods — just type a new prompt and the daemon wakes up.
 
 ## SURGE Timeline (24-hour pricing bar)
 

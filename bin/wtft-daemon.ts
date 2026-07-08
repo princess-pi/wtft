@@ -352,7 +352,7 @@ function deduplicateInteractions(interactions) {
 // ---
 
 // Bump when classification heuristics or cost model change (#54, #55, etc).
-const TAGGER_VERSION = "2.3.2";
+const TAGGER_VERSION = "2.3.3";
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const POLL_MS = 667;              // 90bpm throttle
 const IDLE_EXIT_MS = 24 * 60 * 60 * 1000; // exit if session.jsonl unchanged for 24h (polite to ps aux)
@@ -873,7 +873,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         lastWriteMs = now;
       }
 
-      // Idle exit: if no new interactions have been classified in >30 min,
+      // Idle exit: if no new interactions have been classified in >24h,
       // assume the session is finished and shut down cleanly.
       // Skip idle exit during the first 60s of daemon runtime (startup grace
       // period) so freshly-spawned daemons aren't killed on their first cycle.

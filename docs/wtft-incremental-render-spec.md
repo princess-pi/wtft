@@ -14,8 +14,11 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 │  session. Polls session.jsonl every 667ms, classifies   │
 │  entries, writes to wtft-tags/<session>.tag.v2.3.2.jsonl│
 │  Tag format includes message.id for cross-run dedup.    │
-│  Heartbeats every idle cycle via _hb lines.              │
-│  Idle exit: 30 min of no new data → clean shutdown.     │
+│  Heartbeats: single _hb line updated in-place per idle  │
+│  cycle (consolidated, not appended).                     │
+│  Poll loop wrapped in try/catch: transient errors       │
+│  (disk full, bad JSON) are logged, daemon survives.     │
+│  Idle exit: 24h of no new data → clean shutdown.        │
 │  Startup grace: 60s before idle exit can fire.          │
 └────────────┬────────────────────────────────────────────┘
              │  tag file (fs.watch / inotify)
@@ -112,11 +115,12 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 | Situation | Handling |
 |---|---|
 | Daemon exits (idle timeout, 24h) | Title shows `● stopped HH:MM` in red; footer shows red `r to restart log parser` |
-| No activity for 2m2s | Status flips to `● idle (M:SS to expire)` — countdown from model cache TTL |
+| No activity for 2m2s | Status flips to `● idle (M:SS to expire)` — countdown from model cache TTL. Model is read from the most recent classified tag entry (scanning past the consolidated heartbeat line). |
 | Local model (no cache) | Status shows `● idle` without countdown |
 | User presses `r` | Daemon restarts, status shows `● restarting...`, clears to `● live` within 5s |
 | Tag file deleted/truncated | `fs.watch` handler re-reads from zero |
 | Daemon never started | PID check fails, status shows "log parser not found" |
+| Daemon encounters transient error | Error logged (debug mode), daemon continues on next poll cycle — does not crash |
 | Terminal too narrow for inline status | Status wraps to separate line between title and legend |
 | Session file gone | Daemon exits cleanly; TUI continues showing last-known data with stopped indicator |
 
@@ -130,3 +134,5 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 6. Run `wtft --list` → shows running parsers with idle times
 7. Pi `/wtft` widget → shows same idle/stopped states as CLI (shared `renderDaemonStatus`)
 8. Terminal resize → width auto-fits; status reflows correctly (inline vs. separate line)
+9. Idle for 2m2s with a remote model (Claude/DeepSeek) → countdown timer shows `(M:SS to expire)`
+10. Kill daemon, restart Pi, send prompt → daemon auto-revives on agent_end (ensureParserRunning)

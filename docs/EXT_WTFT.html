@@ -272,7 +272,8 @@
             <li><span style="color: #d44;">● stopped HH:MM</span> — log parser exited (24h idle timeout or crash)</li>
             <li><span style="color: #da0;">● restarting...</span> — log parser is being restarted</li>
         </ul>
-        <p>Status rendering is shared via <code>renderDaemonStatus()</code> in <code>wtft-shared.ts</code> — DRY between Pi widget and CLI watch modes.</p>
+        <p>Status rendering is shared via <code>renderDaemonStatus()</code> in <code>wtft-shared.ts</code> — DRY between Pi widget and CLI watch modes. The countdown timer reads the model from the most recent classified tag entry (scanning past the consolidated heartbeat line) to determine the appropriate cache TTL: 5 min for Claude, 1 hr for DeepSeek, no countdown for local models.</p>
+        <p>The log parser daemon wraps its main poll loop in a <code>try/catch</code> so transient errors (disk full, permission denied, corrupted JSON) are logged and the daemon continues running on the next poll cycle — it does not crash silently.</p>
         <p>Width is always auto-detected from terminal (clamped at 1023). No <code>-w/--width</code> flag. Watch modes re-render on terminal resize (SIGWINCH).</p>
         <p>In CLI <code>--watch</code> mode, press <code>r</code> to restart the log parser. The footer shows <code style="color: #d44;">r to restart log parser</code> in red when the parser is stopped. The Pi widget auto-spawns a log parser on session start to keep the tag file warm for CLI use.</p>
         <p>Management commands: <code>--list</code> (list running parsers), <code>--cleanup</code> (kill stale parsers), <code>--restart</code> (restart all), <code>--stop &lt;session&gt;</code> (stop one).</p>

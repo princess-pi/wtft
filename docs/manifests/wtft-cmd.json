@@ -109,7 +109,7 @@
     },
     {
       "flags": "-s, --session <path|filter>",
-      "desc": "Specify an explicit session .jsonl file path, a numeric session index, or a fuzzy substring filter (e.g. 'b04c'). When the argument is not an existing file or an index, it filters discovered sessions by basename or path substring. If exactly one match, runs immediately; if multiple, shows the session selector filtered to matching sessions."
+      "desc": "Specify an explicit session .jsonl file path, or a fuzzy substring filter (e.g. 'b04c'). When the argument is not an existing file, it filters discovered sessions by basename or path substring. If exactly one match, runs immediately; if multiple, shows the session selector filtered to matching sessions."
     },
     {
       "flags": "--dir, --cwd <path>",

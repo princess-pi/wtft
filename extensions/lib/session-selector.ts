@@ -204,7 +204,7 @@ export async function selectSessionPrompt(
 				);
 			}
 			console.log(
-				`\x1b[90mRun 'wtft -s <number>' to target a specific session index.\x1b[0m\n`
+				`\x1b[90mRun 'wtft -s <substring>' to target a specific session by path or basename filter.\x1b[0m\n`
 			);
 			resolve(candidates[0].path);
 			return;

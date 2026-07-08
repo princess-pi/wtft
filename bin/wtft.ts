@@ -17,6 +17,7 @@ import {
 	watchMode,
 	watchTagFile,
 	readClassifiedTagFile,
+	WTFT_TAGGER_VERSION,
 	type WatchSettings,
 	type Interaction,
 	getTerminalWidth
@@ -299,7 +300,7 @@ async function main() {
 		const sessionDir = path.dirname(finalSessionPath);
 		const sessionBase = path.basename(finalSessionPath);
 		const tagsDir = path.join(sessionDir, "wtft-tags");
-		const tagPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.3.0.jsonl");
+		const tagPath = path.join(tagsDir, sessionBase + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
 
 		// Auto-spawn daemon if not already running (singleton via PID file).
 		const daemonPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "wtft-daemon.mjs");
@@ -350,7 +351,7 @@ async function main() {
 	const sessionDir = path.dirname(finalSessionPath);
 	const sessionBase = path.basename(finalSessionPath);
 	const tagsDir = path.join(sessionDir, "wtft-tags");
-	const tagPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.3.0.jsonl");
+	const tagPath = path.join(tagsDir, sessionBase + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
 
 	// Auto-spawn daemon (singleton via PID file).
 	const daemonPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "wtft-daemon.mjs");

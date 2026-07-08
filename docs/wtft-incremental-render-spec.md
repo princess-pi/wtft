@@ -107,7 +107,9 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 
 | Situation | Handling |
 |---|---|
-| Daemon exits (idle timeout) | Title shows `● stopped HH:MM` in red; footer shows red `r to restart log parser` |
+| Daemon exits (idle timeout, 24h) | Title shows `● stopped HH:MM` in red; footer shows red `r to restart log parser` |
+| No activity for 2m2s | Status flips to `● idle (M:SS to expire)` — countdown from model cache TTL |
+| Local model (no cache) | Status shows `● idle` without countdown |
 | User presses `r` | Daemon restarts, status shows `● restarting...`, clears to `● live` within 5s |
 | Tag file deleted/truncated | `fs.watch` handler re-reads from zero |
 | Daemon never started | PID check fails, status shows "log parser not found" |
@@ -119,7 +121,8 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 1. Start `wtft --watch` → confirm `● live` on title line
 2. `kill <daemon-pid>` → within 60s, title shows `● stopped HH:MM` in red
 3. Press `r` → status shows `● restarting...`, clears to `● live` within 5s
-4. Wait 30+ min with no session activity → daemon exits, title shows stopped indicator
-5. Run `wtft --list` → shows running parsers with idle times
-6. Pi `/wtft` widget → shows `● live` on title line
-7. Terminal resize → status reflows correctly (inline vs. separate line)
+4. Wait 2m2s with no session activity → status flips to `● idle (M:SS to expire)`
+5. Wait 24h with no session activity → daemon exits, title shows stopped indicator
+6. Run `wtft --list` → shows running parsers with idle times
+7. Pi `/wtft` widget → shows same idle/stopped states as CLI (shared `renderDaemonStatus`)
+8. Terminal resize → width auto-fits; status reflows correctly (inline vs. separate line)

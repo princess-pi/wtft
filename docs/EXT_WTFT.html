@@ -240,10 +240,13 @@
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
         <p>The widget title line shows a colored status indicator for the background log parser:</p>
         <ul>
-            <li><span style="color: #4a4;">🟢 live</span> — log parser is running and processing new interactions</li>
-            <li><span style="color: #d44;">🔴 stopped HH:MM</span> — log parser exited (idle timeout or crash), shows last heartbeat time</li>
-            <li><span style="color: #da0;">🟡 restarting...</span> — log parser is being restarted</li>
+            <li><span style="color: #4a4;">● live</span> — log parser is running and processing new interactions</li>
+            <li><span style="color: #da0;">● idle (3:22 to expire)</span> — no new data for 2m2s; countdown shows time until model cache expires (Claude: 5 min, DeepSeek: 1 hr, local: no countdown)</li>
+            <li><span style="color: #d44;">● stopped HH:MM</span> — log parser exited (24h idle timeout or crash)</li>
+            <li><span style="color: #da0;">● restarting...</span> — log parser is being restarted</li>
         </ul>
+        <p>Status rendering is shared via <code>renderDaemonStatus()</code> in <code>wtft-shared.ts</code> — DRY between Pi widget and CLI watch modes.</p>
+        <p>Width is always auto-detected from terminal (clamped at 1023). No <code>-w/--width</code> flag. Watch modes re-render on terminal resize (SIGWINCH).</p>
         <p>In CLI <code>--watch</code> mode, press <code>r</code> to restart the log parser. The footer shows <code style="color: #d44;">r to restart log parser</code> in red when the parser is stopped. The Pi widget auto-spawns a log parser on session start to keep the tag file warm for CLI use.</p>
         <p>Management commands: <code>--list</code> (list running parsers), <code>--cleanup</code> (kill stale parsers), <code>--restart</code> (restart all), <code>--stop &lt;session&gt;</code> (stop one).</p>
     </div>

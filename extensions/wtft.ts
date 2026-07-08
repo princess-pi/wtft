@@ -416,6 +416,12 @@ function updateWtftWidget(
 				? `stopped ${status.lastHbTime}`
 				: (status.reason || "unknown");
 			parserStatusStr = `  \x1b[31m●\x1b[0m ${label}`;
+		} else if (status.idle) {
+			const idleSec = Math.floor((status.idleMs || 0) / 1000);
+			const idleMin = Math.floor(idleSec / 60);
+			const idleRem = idleSec % 60;
+			const idleStr = `${idleMin}:${String(idleRem).padStart(2, "0")}`;
+			parserStatusStr = `  \x1b[33m●\x1b[0m idle ${idleStr}`;
 		} else {
 			parserStatusStr = "  \x1b[32m●\x1b[0m live";
 		}

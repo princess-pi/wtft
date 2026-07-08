@@ -1926,10 +1926,17 @@ export function getDaemonPidPath(sessionPath: string): string {
 	return path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
 }
 
+/** Threshold for "idle" state: 2m2s — a classic TV commercial break. */
+export const IDLE_THRESHOLD_MS = 122_000;
+
 export interface DaemonStatus {
 	alive: boolean;
 	reason?: string;
 	lastHbTime?: string; // HH:MM local time of last heartbeat
+	/** Daemon is alive but no new classified data for ≥ IDLE_THRESHOLD_MS. */
+	idle?: boolean;
+	/** Milliseconds since last non-heartbeat entry (when idle). */
+	idleMs?: number;
 }
 
 export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonStatus {
@@ -1943,7 +1950,37 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 		}
 	} catch {}
 
-	if (pidAlive) return { alive: true };
+	if (pidAlive) {
+		// Daemon is alive — check if last tag entry was a heartbeat
+		// for idle detection (no new classified data for ≥ IDLE_THRESHOLD_MS).
+		try {
+			const stat = fs.statSync(tagPath);
+			if (stat.size > 0) {
+				const fd = fs.openSync(tagPath, "r");
+				const buf = Buffer.alloc(Math.min(stat.size, 4096));
+				fs.readSync(fd, buf, 0, buf.length, Math.max(0, stat.size - 4096));
+				fs.closeSync(fd);
+				const lines = buf.toString("utf8").split("\n");
+				// Find last non-empty line
+				for (let i = lines.length - 1; i >= 0; i--) {
+					const line = lines[i].trim();
+					if (!line) continue;
+					try {
+						const obj = JSON.parse(line);
+						if (obj._hb && obj._hb.first) {
+							const idleMs = Date.now() - obj._hb.first;
+							if (idleMs >= IDLE_THRESHOLD_MS) {
+								return { alive: true, idle: true, idleMs };
+							}
+						}
+						// Last line is actual data — daemon is active
+						break;
+					} catch { continue; }
+				}
+			}
+		} catch { /* tag file unreadable — assume live */ }
+		return { alive: true };
+	}
 
 	// PID dead or missing — read last _hb heartbeat for stop reason + time.
 	let lastHbMs = 0;
@@ -2051,6 +2088,8 @@ export async function watchTagFile(
 	let daemonStopReason = "";
 	let daemonStopTime = "";
 	let daemonRestarting = false;
+	let daemonIdle = false;
+	let daemonIdleMs = 0;
 
 	const updateDaemonHealth = () => {
 		if (daemonRestarting) {
@@ -2061,6 +2100,7 @@ export async function watchTagFile(
 				daemonDead = false;
 				daemonStopReason = "";
 				daemonStopTime = "";
+				daemonIdle = false;
 			}
 			return;
 		}
@@ -2069,10 +2109,18 @@ export async function watchTagFile(
 			daemonDead = true;
 			daemonStopReason = health.reason || "unknown";
 			daemonStopTime = health.lastHbTime || "";
+			daemonIdle = false;
+		} else if (health.idle) {
+			daemonDead = false;
+			daemonStopReason = "";
+			daemonStopTime = "";
+			daemonIdle = true;
+			daemonIdleMs = health.idleMs || 0;
 		} else {
 			daemonDead = false;
 			daemonStopReason = "";
 			daemonStopTime = "";
+			daemonIdle = false;
 		}
 	};
 
@@ -2085,6 +2133,7 @@ export async function watchTagFile(
 			if (settings.daemonPath) {
 				daemonRestarting = true;
 				daemonDead = false;
+				daemonIdle = false;
 				const ok = restartDaemon(sessionPath, settings.daemonPath);
 				if (!ok) {
 					daemonRestarting = false;
@@ -2205,6 +2254,12 @@ export async function watchTagFile(
 					? `stopped ${daemonStopTime}`
 					: daemonStopReason;
 				daemonStatusStr = `  \x1b[31m●\x1b[0m ${label}`;
+			} else if (daemonIdle) {
+				const idleSec = Math.floor(daemonIdleMs / 1000);
+				const idleMin = Math.floor(idleSec / 60);
+				const idleRem = idleSec % 60;
+				const idleStr = `${idleMin}:${String(idleRem).padStart(2, "0")}`;
+				daemonStatusStr = `  \x1b[33m●\x1b[0m idle ${idleStr}`;
 			} else {
 				daemonStatusStr = "  \x1b[32m●\x1b[0m live";
 			}

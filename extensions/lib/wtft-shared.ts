@@ -31,6 +31,8 @@ export interface Interaction {
 	files: { path: string; action: "read" | "write" }[];
 	commands: string[];
 	texts: string[];
+	/** Pre-computed classification from the daemon tag file. When set, classifyInteraction() returns this directly. */
+	_cat?: Category;
 }
 
 // ---
@@ -434,6 +436,11 @@ function normalizeCommand(cmd: string): string {
 }
 
 export function classifyInteraction(interaction: Interaction): Category {
+	// When the interaction was read from a pre-classified daemon tag file,
+	// use the stored category directly (avoids re-classification which fails
+	// for "prompt" because texts are not serialized to the tag file).
+	if (interaction._cat) return interaction._cat;
+
 	const specPaths = new Set<string>();
 	const codePaths = new Set<string>();
 	const testsPaths = new Set<string>();
@@ -1809,6 +1816,7 @@ export function classifiedToInteraction(obj: any): Interaction | null {
 	return {
 		timestamp: obj.t,
 		cost: obj.c,
+		messageId: obj.id || undefined,
 		model: obj.m || undefined,
 		files: (obj.f || []).map((f: any) => ({ path: f.p || "", action: (f.a === "w" ? "write" : "read") as "read" | "write" })),
 		commands: obj.cmd || [],
@@ -1818,6 +1826,7 @@ export function classifiedToInteraction(obj: any): Interaction | null {
 		cacheReadTokens: obj.cr || 0,
 		cacheWriteTokens: obj.cw || 0,
 		reasoningTokens: obj.rs || 0,
+		_cat: obj.cat || undefined,
 	};
 }
 
@@ -1878,7 +1887,7 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
  * Compute the tag file path for a given session path.
  * Scans wtft-tags/ subdirectory for the current version's tag file.
  */
-export const WTFT_TAGGER_VERSION = "2.3.1";
+export const WTFT_TAGGER_VERSION = "2.3.2";
 
 export function getTagPath(sessionPath: string): string {
 	const sessionDir = path.dirname(sessionPath);

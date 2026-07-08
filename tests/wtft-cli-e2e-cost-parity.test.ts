@@ -15,6 +15,7 @@ import {
 	readClassifiedTagFile,
 	deduplicateInteractions,
 	parseSessionFile,
+	WTFT_TAGGER_VERSION,
 } from "../extensions/lib/wtft-shared.ts";
 
 // ---
@@ -153,7 +154,7 @@ try {
 // ---
 
 const tagsDir = path.join(dir, "wtft-tags");
-const tagPath = path.join(tagsDir, `${FIXTURE_ID}.jsonl.wtft-tag.v2.3.1.jsonl`);
+const tagPath = path.join(tagsDir, `${FIXTURE_ID}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
 
 // Wait for daemon to finish processing (spawned by non-watch CLI above).
 let tagEntries: any[] = [];
@@ -196,7 +197,7 @@ assert(rawInteractions.length === 4, `Raw parse: 4 lines (got ${rawInteractions.
 assert(dedupedInteractions.length === 2, `Deduped: 2 messages (got ${dedupedInteractions.length})`);
 
 // Tag version check
-assert(tagPath.includes("v2.3.1"), "Tag file uses v2.3.1");
+assert(tagPath.includes(`v${WTFT_TAGGER_VERSION}`), `Tag file uses v${WTFT_TAGGER_VERSION}`);
 
 // Cleanup
 killAllLogParsers();

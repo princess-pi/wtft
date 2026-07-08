@@ -352,7 +352,7 @@ function deduplicateInteractions(interactions) {
 // ---
 
 // Bump when classification heuristics or cost model change (#54, #55, etc).
-const TAGGER_VERSION = "2.3.1";
+const TAGGER_VERSION = "2.3.2";
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const POLL_MS = 667;              // 90bpm throttle
 const IDLE_EXIT_MS = 30 * 60 * 1000; // exit if session.jsonl unchanged for 30 min
@@ -365,6 +365,8 @@ function serializeClassified(interaction) {
     f: interaction.files.map(f => ({ p: f.path, a: f.action })),
     cmd: interaction.commands,
   };
+  // Include message.id for cross-run dedup in tag-file consumers (#65)
+  if (interaction.messageId) line.id = interaction.messageId;
   // Include model/token data when available (for -T summary table)
   if (interaction.model) line.m = interaction.model;
   if (interaction.inputTokens > 0) line.in = interaction.inputTokens;

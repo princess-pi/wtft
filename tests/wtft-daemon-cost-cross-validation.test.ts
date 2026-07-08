@@ -17,6 +17,7 @@ import {
 	parseSessionFile,
 	deduplicateInteractions,
 	readClassifiedTagFile,
+	WTFT_TAGGER_VERSION,
 	type Interaction,
 } from "../extensions/lib/wtft-shared.ts";
 
@@ -141,7 +142,7 @@ function runDaemon(sessionPath: string): string {
 	const sessionDir = path.dirname(sessionPath);
 	const sessionBase = path.basename(sessionPath);
 	const tagsDir = path.join(sessionDir, "wtft-tags");
-	const tagPath = path.join(tagsDir, sessionBase + ".wtft-tag.v2.3.1.jsonl");
+	const tagPath = path.join(tagsDir, sessionBase + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
 
 	// Remove any stale tag files
 	try { fs.rmSync(tagsDir, { recursive: true }); } catch {}
@@ -244,8 +245,8 @@ assert(
 
 // 5. Tag version check
 const tagContent = fs.readFileSync(tagPath, "utf8");
-const hasV23 = tagPath.includes("v2.3.1");
-assert(hasV23, "Tag file uses v2.3.1 version");
+const hasExpectedVersion = tagPath.includes(`v${WTFT_TAGGER_VERSION}`);
+assert(hasExpectedVersion, `Tag file uses v${WTFT_TAGGER_VERSION} version`);
 
 // Cleanup
 try { fs.rmSync(dir, { recursive: true }); } catch {}

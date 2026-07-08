@@ -409,6 +409,30 @@ export function parseInterval(val: string): IntervalConfig {
 	return { size: 1, unit: "h" };
 }
 
+// ---
+// COMMAND NORMALIZATION (#63)
+// Strips cd /path prefixes and VAR=value assignments from chained bash commands
+// so that 'cd /foo && git push' classifies as 'git', not 'other'.
+// ---
+
+function normalizeCommand(cmd: string): string {
+	let normalized = cmd.trim();
+	let changed = true;
+	while (changed) {
+		changed = false;
+		// Strip leading variable assignments: VAR=val (val is non-space, double-quoted, or single-quoted)
+		const stripped = normalized.replace(/^(?:\w+=(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*)+/, '');
+		if (stripped !== normalized) { normalized = stripped.trim(); changed = true; }
+		// Strip leading shell separators left after var stripping (&&, ;, |, ||)
+		const afterSep = normalized.replace(/^(?:&&|;|\|\|?)\s*/, '');
+		if (afterSep !== normalized) { normalized = afterSep; changed = true; }
+		// Strip leading cd <path> && / cd <path> ;
+		const afterCd = normalized.replace(/^cd\s+(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*/, '');
+		if (afterCd !== normalized) { normalized = afterCd; changed = true; }
+	}
+	return normalized;
+}
+
 export function classifyInteraction(interaction: Interaction): Category {
 	const specPaths = new Set<string>();
 	const codePaths = new Set<string>();
@@ -480,7 +504,9 @@ export function classifyInteraction(interaction: Interaction): Category {
 		let isGit = false;
 		let isGrep = false;
 		for (const cmd of interaction.commands) {
-			const lower = cmd.toLowerCase().trim();
+			const normalized = normalizeCommand(cmd);
+			if (!normalized) continue; // stripped to nothing (pure cd, pure var assignment)
+			const lower = normalized.toLowerCase().trim();
 			if (lower === "git" || lower.startsWith("git ")) {
 				isGit = true;
 			} else if (lower === "grep" || lower.startsWith("grep ") || lower === "rg" || lower.startsWith("rg ") || lower === "ripgrep" || lower.startsWith("ripgrep ") || lower === "find" || lower.startsWith("find ")) {
@@ -1318,7 +1344,9 @@ export function renderOtherHistogram(interactions: Interaction[], maxWidth: numb
 			// Extract exact primary command for bash
 			const primaryCommands: string[] = [];
 			for (const rawCmd of interaction.commands) {
-				const lines = rawCmd.split('\n');
+				const normalized = normalizeCommand(rawCmd);
+				if (!normalized) continue; // stripped to nothing (pure cd, pure var assignment)
+				const lines = normalized.split('\n');
 				for (const line of lines) {
 					const trimmed = line.trim();
 					if (trimmed && !trimmed.startsWith("#")) {

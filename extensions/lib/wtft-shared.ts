@@ -1589,13 +1589,11 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 export interface WatchSettings {
 	interval: string;
 	limit: number;
-	width: number;
 	mode: "cumulative" | "bucket";
 	showTicks: boolean;
 	timezone?: string;
-	disabledEmoji: boolean;
 	daemonPath?: string; // path to wtft-daemon.mjs (CLI watch mode only)
-	/** True when the user explicitly passed -i/--interval from CLI (overrides file-read settings). */
+	/** True when the user explicitly passed the flag from CLI (overrides file-read settings). */
 	hasInterval?: boolean;
 	hasLimit?: boolean;
 	hasMode?: boolean;
@@ -1708,7 +1706,7 @@ export async function watchMode(
 
 	// Accumulator
 	let allInteractions: Interaction[] = [];
-	let disabledEmoji = settings.disabledEmoji;
+	let disabledEmoji = false; // read from session file, not settings
 	let sessionInterval: string | undefined;
 	let sessionLimit: number | undefined;
 	let sessionMode: "cumulative" | "bucket" | undefined;
@@ -1729,7 +1727,7 @@ export async function watchMode(
 		const finalMode = settings.hasMode ? settings.mode : (sessionMode ?? settings.mode);
 		const finalShowTicks = settings.hasTicks ? settings.showTicks : (sessionShowTicks ?? settings.showTicks);
 		const finalTimezone = settings.hasTimezone ? settings.timezone : (sessionTimezone ?? settings.timezone);
-		const finalWidth = Math.min(settings.width, width);
+		const finalWidth = Math.min(width, 1023);
 
 		const defaultSettings = {
 			interval: "1h", limit: 100, width: finalWidth,
@@ -2230,6 +2228,9 @@ export async function watchTagFile(
 
 	// Read initial classified entries from tag file (daemon may have already
 	// processed part of the session before we started watching).
+	// Read emoji setting from session file (not from WatchSettings — emoji disable
+	// is only toggled via Pi, never from CLI flags)
+	let disabledEmoji = false;
 	let allInteractions: Interaction[] = readClassifiedTagFile(tagPath);
 	let lastReadOffset = 0;
 	try {
@@ -2237,7 +2238,6 @@ export async function watchTagFile(
 	} catch {}
 
 	// Session-level settings from inline wtft-settings entries (same as watchMode).
-	let disabledEmoji = settings.disabledEmoji;
 	let sessionInterval: string | undefined;
 	let sessionLimit: number | undefined;
 	let sessionMode: "cumulative" | "bucket" | undefined;
@@ -2284,7 +2284,7 @@ export async function watchTagFile(
 		const finalMode = settings.hasMode ? settings.mode : (sessionMode ?? settings.mode);
 		const finalShowTicks = settings.hasTicks ? settings.showTicks : (sessionShowTicks ?? settings.showTicks);
 		const finalTimezone = settings.hasTimezone ? settings.timezone : (sessionTimezone ?? settings.timezone);
-		const finalWidth = Math.min(settings.width, width);
+		const finalWidth = Math.min(width, 1023);
 
 		const defaultSettings = {
 			interval: "1h", limit: 100, width: finalWidth,

@@ -34,7 +34,6 @@ import {
 
 let intervalStr = "1h";
 let limit = 100; // Large default for CLI
-let maxWidthOption: number | null = null;
 let mode: "bucket" | "cumulative" = "cumulative";
 let showTicks = true;
 let targetSessionPath: string | undefined = undefined;
@@ -99,7 +98,6 @@ Options:
   --harness <type>        Target a specific harness for auto-discovery (pi, claude-code, or auto). Default: auto.
   -i, --interval <val>    Group cost data into binned intervals (e.g., 1m, 7m, 4h, 1d, 2w; default: 1h).
   -l, --limit <number>    Limit the number of interval bars displayed (default: 100).
-  -w, --width <number>    Set the maximum character width of the CLI output (default: 240).
   -c, --cumulative        Render running cumulative sums (default behavior).
   -b, --bucket            Render discrete binned interval cost buckets.
   --ticks                 Enable the proportional cost scale ticks above the bars (default behavior).
@@ -127,7 +125,6 @@ Log parser management:
 
 let hasInterval = false;
 let hasLimit = false;
-let hasWidth = false;
 let hasCumulative = false;
 let hasBucket = false;
 let hasNoTicks = false;
@@ -170,9 +167,6 @@ for (let i = 2; i < process.argv.length; i++) {
 	} else if (arg === "-l" || arg === "--limit") {
 		limit = parseInt(process.argv[++i], 10);
 		hasLimit = true;
-	} else if (arg === "-w" || arg === "--width") {
-		maxWidthOption = parseInt(process.argv[++i], 10);
-		hasWidth = true;
 	} else if (arg === "-c" || arg === "--cumulative") {
 		mode = "cumulative";
 		hasCumulative = true;
@@ -282,8 +276,6 @@ async function main() {
 	// tag file via inotify (fs.watch) instead of polling session.jsonl.
 	// ---
 	if (showWatch) {
-		const termColumns = getTerminalWidth();
-		const maxWidth = hasWidth ? (maxWidthOption as number) : 240;
 
 		// Tag file path — always use the current version. The daemon
 		// handles stale-version cleanup internally on startup.
@@ -306,11 +298,9 @@ async function main() {
 			await watchMode(finalSessionPath, {
 				interval: hasInterval ? intervalStr : "1h",
 				limit: hasLimit ? limit : 100,
-				width: Math.min(maxWidth, termColumns),
 				mode: (hasCumulative || hasBucket) ? mode : "cumulative",
 				showTicks: (hasTicks || hasNoTicks) ? showTicks : true,
 				timezone: hasTz ? timezone : undefined,
-				disabledEmoji: false,
 				hasInterval, hasLimit, hasMode: hasCumulative || hasBucket,
 				hasTicks: hasTicks || hasNoTicks, hasTimezone: hasTz
 			});
@@ -323,11 +313,9 @@ async function main() {
 		await watchTagFile(finalSessionPath, tagPath, {
 			interval: hasInterval ? intervalStr : "1h",
 			limit: hasLimit ? limit : 100,
-			width: Math.min(maxWidth, termColumns),
 			mode: (hasCumulative || hasBucket) ? mode : "cumulative",
 			showTicks: (hasTicks || hasNoTicks) ? showTicks : true,
 			timezone: hasTz ? timezone : undefined,
-			disabledEmoji: false,
 			daemonPath,
 			hasInterval, hasLimit, hasMode: hasCumulative || hasBucket,
 			hasTicks: hasTicks || hasNoTicks, hasTimezone: hasTz
@@ -422,7 +410,6 @@ async function main() {
 	// ---
 
 	const termColumns = getTerminalWidth();
-	const maxWidth = hasWidth ? (maxWidthOption as number) : (sessionWidth ?? 240);
 	const finalInterval = hasInterval ? intervalStr : (sessionInterval ?? "1h");
 	const finalLimit = hasLimit ? limit : (sessionLimit ?? 100);
 	const finalMode = (hasCumulative || hasBucket) ? mode : (sessionMode ?? "cumulative");
@@ -432,7 +419,7 @@ async function main() {
 	const defaultSettings = {
 		interval: "1h",
 		limit: 100,
-		width: maxWidth,
+		width: Math.min(getTerminalWidth(), 1023),
 		showTicks: true,
 		mode: "cumulative" as "cumulative" | "bucket",
 		timezone: undefined
@@ -441,7 +428,7 @@ async function main() {
 	const outputLines = buildWtftLines(interactions, defaultSettings, {
 		interval: finalInterval,
 		limit: finalLimit,
-		width: maxWidth,
+		width: Math.min(getTerminalWidth(), 1023),
 		showTicks: finalShowTicks,
 		mode: finalMode,
 		timezone: finalTimezone,
@@ -462,12 +449,12 @@ async function main() {
 	if (showOther) {
 		console.log(""); // empty line spacer
 		const dedupedInteractions = deduplicateInteractions(interactions);
-		const otherOutput = renderOtherHistogram(dedupedInteractions, maxWidth);
+		const otherOutput = renderOtherHistogram(dedupedInteractions, Math.min(getTerminalWidth(), 1023));
 		console.log(otherOutput);
 	}
 
 	if (showTokens) {
-		const tokenOutput = renderTokenSummary(interactions, maxWidth);
+		const tokenOutput = renderTokenSummary(interactions, Math.min(getTerminalWidth(), 1023));
 		console.log(tokenOutput);
 	}
 }

@@ -18,6 +18,7 @@ import {
 	getVisualLength,
 	checkDaemonHealth,
 	restartDaemon,
+	renderDaemonStatus,
 	getTagPath,
 	type DaemonStatus
 } from "./lib/wtft-shared.js";
@@ -411,32 +412,7 @@ function updateWtftWidget(
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	if (sessionFile && _parserSpawned) {
 		const status = getParserStatus(sessionFile);
-		if (!status.alive) {
-			const label = status.lastHbTime
-				? `stopped ${status.lastHbTime}`
-				: (status.reason || "unknown");
-			parserStatusStr = `  \x1b[31m●\x1b[0m ${label}`;
-		} else if (status.idle) {
-			const cacheTtlMs = status.cacheTtlMs;
-			if (cacheTtlMs != null && status.idleMs != null) {
-				// Countdown: cache TTL minus time already idle
-				const remainingMs = Math.max(0, cacheTtlMs - (status.idleMs || 0));
-				const remainingSec = Math.floor(remainingMs / 1000);
-				if (remainingSec >= 3600) {
-					const h = Math.floor(remainingSec / 3600);
-					const m = Math.floor((remainingSec % 3600) / 60);
-					parserStatusStr = `  \x1b[33m●\x1b[0m idle (${h}h${m}m to expire)`;
-				} else {
-					const m = Math.floor(remainingSec / 60);
-					const s = remainingSec % 60;
-					parserStatusStr = `  \x1b[33m●\x1b[0m idle (${m}:${String(s).padStart(2, "0")} to expire)`;
-				}
-			} else {
-				parserStatusStr = "  \x1b[33m●\x1b[0m idle";
-			}
-		} else {
-			parserStatusStr = "  \x1b[32m●\x1b[0m live";
-		}
+		parserStatusStr = renderDaemonStatus(status, false);
 	}
 
 	if (parserStatusStr) {

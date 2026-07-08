@@ -1595,6 +1595,12 @@ export interface WatchSettings {
 	timezone?: string;
 	disabledEmoji: boolean;
 	daemonPath?: string; // path to wtft-daemon.mjs (CLI watch mode only)
+	/** True when the user explicitly passed -i/--interval from CLI (overrides file-read settings). */
+	hasInterval?: boolean;
+	hasLimit?: boolean;
+	hasMode?: boolean;
+	hasTicks?: boolean;
+	hasTimezone?: boolean;
 }
 
 export async function watchMode(
@@ -1718,11 +1724,11 @@ export async function watchMode(
 		process.stdout.write("\x1b[H\x1b[J");
 
 		const width = getTerminalWidth();
-		const finalInterval = sessionInterval ?? settings.interval;
-		const finalLimit = sessionLimit ?? settings.limit;
-		const finalMode = sessionMode ?? settings.mode;
-		const finalShowTicks = sessionShowTicks ?? settings.showTicks;
-		const finalTimezone = sessionTimezone ?? settings.timezone;
+		const finalInterval = settings.hasInterval ? settings.interval : (sessionInterval ?? settings.interval);
+		const finalLimit = settings.hasLimit ? settings.limit : (sessionLimit ?? settings.limit);
+		const finalMode = settings.hasMode ? settings.mode : (sessionMode ?? settings.mode);
+		const finalShowTicks = settings.hasTicks ? settings.showTicks : (sessionShowTicks ?? settings.showTicks);
+		const finalTimezone = settings.hasTimezone ? settings.timezone : (sessionTimezone ?? settings.timezone);
 		const finalWidth = Math.min(settings.width, width);
 
 		const defaultSettings = {
@@ -1962,6 +1968,39 @@ export interface DaemonStatus {
 	idleMs?: number;
 	/** Cache TTL in ms for the current model (null = local/no cache). */
 	cacheTtlMs?: number | null;
+}
+
+/**
+ * Render a daemon status indicator string (shared by Pi widget + CLI watch modes).
+ * Returns e.g. "  ● live" (green), "  ● idle (3:22 to expire)" (yellow), etc.
+ */
+export function renderDaemonStatus(status: DaemonStatus, restarting = false): string {
+	if (restarting) {
+		return "  \x1b[33m●\x1b[0m restarting...";
+	}
+	if (!status.alive) {
+		const label = status.lastHbTime
+			? `stopped ${status.lastHbTime}`
+			: (status.reason || "unknown");
+		return `  \x1b[31m●\x1b[0m ${label}`;
+	}
+	if (status.idle) {
+		const cacheTtlMs = status.cacheTtlMs;
+		if (cacheTtlMs != null && status.idleMs != null) {
+			const remainingMs = Math.max(0, cacheTtlMs - (status.idleMs || 0));
+			const remainingSec = Math.floor(remainingMs / 1000);
+			if (remainingSec >= 3600) {
+				const h = Math.floor(remainingSec / 3600);
+				const m = Math.floor((remainingSec % 3600) / 60);
+				return `  \x1b[33m●\x1b[0m idle (${h}h${m}m to expire)`;
+			}
+			const m = Math.floor(remainingSec / 60);
+			const s = remainingSec % 60;
+			return `  \x1b[33m●\x1b[0m idle (${m}:${String(s).padStart(2, "0")} to expire)`;
+		}
+		return "  \x1b[33m●\x1b[0m idle";
+	}
+	return "  \x1b[32m●\x1b[0m live";
 }
 
 export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonStatus {
@@ -2240,11 +2279,11 @@ export async function watchTagFile(
 		process.stdout.write("\x1b[H\x1b[J");
 
 		const width = getTerminalWidth();
-		const finalInterval = sessionInterval ?? settings.interval;
-		const finalLimit = sessionLimit ?? settings.limit;
-		const finalMode = sessionMode ?? settings.mode;
-		const finalShowTicks = sessionShowTicks ?? settings.showTicks;
-		const finalTimezone = sessionTimezone ?? settings.timezone;
+		const finalInterval = settings.hasInterval ? settings.interval : (sessionInterval ?? settings.interval);
+		const finalLimit = settings.hasLimit ? settings.limit : (sessionLimit ?? settings.limit);
+		const finalMode = settings.hasMode ? settings.mode : (sessionMode ?? settings.mode);
+		const finalShowTicks = settings.hasTicks ? settings.showTicks : (sessionShowTicks ?? settings.showTicks);
+		const finalTimezone = settings.hasTimezone ? settings.timezone : (sessionTimezone ?? settings.timezone);
 		const finalWidth = Math.min(settings.width, width);
 
 		const defaultSettings = {
@@ -2280,30 +2319,13 @@ export async function watchTagFile(
 			// ---
 			let daemonStatusStr = "";
 			if (daemonRestarting) {
-				daemonStatusStr = "  \x1b[33m●\x1b[0m restarting...";
+				daemonStatusStr = renderDaemonStatus({ alive: true }, true);
 			} else if (daemonDead) {
-				const label = daemonStopTime
-					? `stopped ${daemonStopTime}`
-					: daemonStopReason;
-				daemonStatusStr = `  \x1b[31m●\x1b[0m ${label}`;
+				daemonStatusStr = renderDaemonStatus({ alive: false, reason: daemonStopReason || undefined, lastHbTime: daemonStopTime || undefined }, false);
 			} else if (daemonIdle) {
-				if (daemonCacheTtlMs != null) {
-					const remainingMs = Math.max(0, daemonCacheTtlMs - daemonIdleMs);
-					const remainingSec = Math.floor(remainingMs / 1000);
-					if (remainingSec >= 3600) {
-						const h = Math.floor(remainingSec / 3600);
-						const m = Math.floor((remainingSec % 3600) / 60);
-						daemonStatusStr = `  \x1b[33m●\x1b[0m idle (${h}h${m}m to expire)`;
-					} else {
-						const m = Math.floor(remainingSec / 60);
-						const s = remainingSec % 60;
-						daemonStatusStr = `  \x1b[33m●\x1b[0m idle (${m}:${String(s).padStart(2, "0")} to expire)`;
-					}
-				} else {
-					daemonStatusStr = "  \x1b[33m●\x1b[0m idle";
-				}
+				daemonStatusStr = renderDaemonStatus({ alive: true, idle: true, idleMs: daemonIdleMs, cacheTtlMs: daemonCacheTtlMs }, false);
 			} else {
-				daemonStatusStr = "  \x1b[32m●\x1b[0m live";
+				daemonStatusStr = renderDaemonStatus({ alive: true }, false);
 			}
 
 			if (daemonStatusStr) {

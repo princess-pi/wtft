@@ -310,7 +310,9 @@ async function main() {
 				mode: (hasCumulative || hasBucket) ? mode : "cumulative",
 				showTicks: (hasTicks || hasNoTicks) ? showTicks : true,
 				timezone: hasTz ? timezone : undefined,
-				disabledEmoji: false
+				disabledEmoji: false,
+				hasInterval, hasLimit, hasMode: hasCumulative || hasBucket,
+				hasTicks: hasTicks || hasNoTicks, hasTimezone: hasTz
 			});
 			return;
 		}
@@ -326,7 +328,9 @@ async function main() {
 			showTicks: (hasTicks || hasNoTicks) ? showTicks : true,
 			timezone: hasTz ? timezone : undefined,
 			disabledEmoji: false,
-			daemonPath
+			daemonPath,
+			hasInterval, hasLimit, hasMode: hasCumulative || hasBucket,
+			hasTicks: hasTicks || hasNoTicks, hasTimezone: hasTz
 		});
 		return; // watchTagFile never returns until SIGINT
 	}

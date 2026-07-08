@@ -28,7 +28,15 @@ let _parserSessionPath: string | null = null;
 let _parserSpawned = false;
 
 function ensureParserRunning(sessionPath: string): void {
-	if (_parserSpawned && _parserSessionPath === sessionPath) return;
+	// Same session, already spawned — but verify daemon is actually alive.
+	// If the daemon died (idle timeout, crash), reset and re-spawn.
+	if (_parserSpawned && _parserSessionPath === sessionPath) {
+		const tagPath = getTagPath(sessionPath);
+		const health = checkDaemonHealth(sessionPath, tagPath);
+		if (health.alive) return;
+		// Daemon dead — fall through to re-spawn
+		_parserSpawned = false;
+	}
 
 	const daemonPath = path.join(
 		path.dirname(fileURLToPath(import.meta.url)),
@@ -465,6 +473,11 @@ export default function wtftExtension(pi: ExtensionAPI) {
 	// 2. Auto-refresh on turn completion (zero token cost)
 	pi.on("agent_end", async (_event, ctx) => {
 		_wtftCtx = ctx;
+		// Revive dead daemon so CLI wtft --watch stays live after idle timeout.
+		const sessionFile = ctx.sessionManager.getSessionFile?.();
+		if (sessionFile) {
+			ensureParserRunning(sessionFile);
+		}
 		const current = getSettings(ctx);
 		if (current.visible) {
 			updateWtftWidget(ctx, pi);

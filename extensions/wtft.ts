@@ -15,11 +15,6 @@ import {
 	renderTokenSummary,
 	deduplicateInteractions,
 	getTerminalWidth,
-	getDeepSeekPeakMultiplier,
-	getCurrentLocalHour,
-	getSurgeLocalHours,
-	checkSurgeProximity,
-	buildTimelineString,
 	getVisualLength,
 	checkDaemonHealth,
 	restartDaemon,
@@ -361,9 +356,6 @@ function buildWtftLines(
 	return sharedBuildWtftLines(interactions, getSettings(ctx), opts);
 }
 
-// SURGE TIMELINE helpers now imported from wtft-shared.js (getCurrentLocalHour,
-// getSurgeLocalHours, checkSurgeProximity, buildTimelineString)
-
 /**
  * Dynamically computes costs binned by interval and updates the TUI widget
  * positioned below the editor. Operates in the configured timezone.
@@ -389,30 +381,20 @@ function updateWtftWidget(
 		return;
 	}
 
-	// Check model for surge coloring; timeline itself is always shown.
-	let isDeepSeek = false;
+	// Detect model for SURGE timeline coloring (passed to shared buildWtftLines).
+	let modelId: string | undefined;
 	try {
 		const sessionCtx = ctx.sessionManager.buildSessionContext();
-		isDeepSeek = (sessionCtx?.model?.modelId || "").toLowerCase().includes("deepseek");
+		modelId = sessionCtx?.model?.modelId;
 	} catch (_) {}
 
-	// Force legend to its own row — timeline is always appended to title line
-	const buildOpts = { ...opts, forceLegendRow: true };
+	// Force legend to its own row — SURGE timeline is appended to title line inside buildWtftLines
+	const buildOpts = { ...opts, forceLegendRow: true, model: modelId };
 	const lines = buildWtftLines(ctx, pi, buildOpts);
 	if (!lines || lines.length === 0) {
 		ctx.ui.setWidget("wtft", undefined);
 		return;
 	}
-
-	// 24-hour timeline: colored by surge for DeepSeek, all green for other models
-	const tz = current.timezone;
-	const surgeHours = isDeepSeek ? getSurgeLocalHours(tz) : new Set<number>();
-	const currentHour = getCurrentLocalHour(tz);
-	const proximity = isDeepSeek ? checkSurgeProximity() : { status: undefined, multiplier: 1.0 };
-	const timelineStr = buildTimelineString(surgeHours, currentHour, proximity.status);
-
-	// Append inline to the title line — legend is always on row 2 via forceLegendRow
-	lines[0] = lines[0] + "  " + timelineStr;
 
 	// ---
 	// Append log parser status (inline if it fits, otherwise separate line).

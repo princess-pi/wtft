@@ -977,6 +977,8 @@ export function buildWtftLines(
 		isWidget?: boolean;
 		disabledEmoji?: boolean;
 		forceLegendRow?: boolean;
+		/** Model ID for SURGE timeline coloring (pass "deepseek-..." for orange surge segments + badges). Auto-detected from interactions if omitted. */
+		model?: string;
 	}
 ): string[] | null {
 	const intervalStr = opts?.interval !== undefined ? opts.interval : defaultSettings.interval;
@@ -1259,6 +1261,24 @@ export function buildWtftLines(
 			widgetLines.push(`${coloredLabel}  ${coloredCost}  ${barStr}`);
 		}
 	}
+
+	// ---
+	// SURGE TIMELINE: 24-hour bar showing normal (green) vs surge (orange) pricing.
+	// Colored by model: DeepSeek gets orange surge segments + badges; others get all-green.
+	// Model auto-detected from interactions if caller doesn't pass one explicitly.
+	// ---
+	let surgeModel = opts?.model;
+	if (!surgeModel) {
+		for (const i of interactions) {
+			if (i.model) { surgeModel = i.model; break; }
+		}
+	}
+	const isDeepSeek = (surgeModel || "").toLowerCase().includes("deepseek");
+	const surgeHours = isDeepSeek ? getSurgeLocalHours(tz) : new Set<number>();
+	const currentHour = getCurrentLocalHour(tz);
+	const proximity = isDeepSeek ? checkSurgeProximity() : { status: undefined, multiplier: 1.0 };
+	const timelineStr = buildTimelineString(surgeHours, currentHour, proximity.status);
+	widgetLines[0] = widgetLines[0] + "  " + timelineStr;
 
 	// ---
 	// Proactive "Other" bloat warning (#17)
@@ -1728,10 +1748,6 @@ export async function watchMode(
 		totalCost = deduplicateInteractions(allInteractions).reduce((sum, i) => sum + i.cost, 0);
 
 		if (lines && lines.length > 0) {
-			// Append 24-hour timeline to the title line (always green in CLI, no model context)
-			const tlHour = getCurrentLocalHour(finalTimezone);
-			const tlStr = buildTimelineString(new Set<number>(), tlHour, undefined);
-			lines[0] = lines[0] + "  " + tlStr;
 			for (const l of lines) buf.push(l);
 		} else {
 			buf.push("\x1b[90mWaiting for session data...\x1b[0m");
@@ -2178,11 +2194,6 @@ export async function watchTagFile(
 		totalCost = deduped.reduce((sum, i) => sum + i.cost, 0);
 
 		if (lines && lines.length > 0) {
-			// Append 24-hour timeline to the title line
-			const tlHour = getCurrentLocalHour(finalTimezone);
-			const tlStr = buildTimelineString(new Set<number>(), tlHour, undefined);
-			lines[0] = lines[0] + "  " + tlStr;
-
 			// ---
 			// Append daemon status (inline if it fits, otherwise separate line).
 			// ---

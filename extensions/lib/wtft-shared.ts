@@ -1929,6 +1929,29 @@ export function getDaemonPidPath(sessionPath: string): string {
 /** Threshold for "idle" state: 2m2s — a classic TV commercial break. */
 export const IDLE_THRESHOLD_MS = 122_000;
 
+/** Daemon self-exit: 24h of no new data. Polite to ps aux browsers. */
+export const IDLE_EXIT_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Get the prompt cache TTL for a given model in milliseconds.
+ * Returns null for local models (no remote cache).
+ */
+export function getModelCacheTtlMs(model: string): number | null {
+	const m = model.toLowerCase();
+	// Claude: 5-minute ephemeral cache (the default cache_control TTL).
+	// The 1-hour extended cache is opt-in and rare — default to 5 min.
+	if (m.includes("claude") || m.includes("haiku") || m.includes("sonnet") || m.includes("opus")) {
+		return 5 * 60 * 1000;
+	}
+	// DeepSeek: hard-disk cache, "automatically cleared within a few hours to a few days."
+	// Conservative: use 1 hour as display TTL.
+	if (m.includes("deepseek")) {
+		return 60 * 60 * 1000;
+	}
+	// Local models (ollama, llama.cpp, etc.) — no remote cache.
+	return null;
+}
+
 export interface DaemonStatus {
 	alive: boolean;
 	reason?: string;
@@ -1937,6 +1960,8 @@ export interface DaemonStatus {
 	idle?: boolean;
 	/** Milliseconds since last non-heartbeat entry (when idle). */
 	idleMs?: number;
+	/** Cache TTL in ms for the current model (null = local/no cache). */
+	cacheTtlMs?: number | null;
 }
 
 export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonStatus {
@@ -1953,24 +1978,29 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 	if (pidAlive) {
 		// Daemon is alive — check if last tag entry was a heartbeat
 		// for idle detection (no new classified data for ≥ IDLE_THRESHOLD_MS).
+		// Also extract model from last classified entry for cache TTL countdown.
 		try {
 			const stat = fs.statSync(tagPath);
 			if (stat.size > 0) {
 				const fd = fs.openSync(tagPath, "r");
-				const buf = Buffer.alloc(Math.min(stat.size, 4096));
-				fs.readSync(fd, buf, 0, buf.length, Math.max(0, stat.size - 4096));
+				const buf = Buffer.alloc(Math.min(stat.size, 8192));
+				fs.readSync(fd, buf, 0, buf.length, Math.max(0, stat.size - 8192));
 				fs.closeSync(fd);
 				const lines = buf.toString("utf8").split("\n");
-				// Find last non-empty line
+				let lastModel: string | undefined;
+				// Find last non-empty line + scan for model from recent entries
 				for (let i = lines.length - 1; i >= 0; i--) {
 					const line = lines[i].trim();
 					if (!line) continue;
 					try {
 						const obj = JSON.parse(line);
+						// Track model from most recent classified entry
+						if (!lastModel && obj.m) lastModel = obj.m;
 						if (obj._hb && obj._hb.first) {
 							const idleMs = Date.now() - obj._hb.first;
 							if (idleMs >= IDLE_THRESHOLD_MS) {
-								return { alive: true, idle: true, idleMs };
+								const cacheTtlMs = lastModel ? getModelCacheTtlMs(lastModel) : null;
+								return { alive: true, idle: true, idleMs, cacheTtlMs };
 							}
 						}
 						// Last line is actual data — daemon is active
@@ -2090,6 +2120,7 @@ export async function watchTagFile(
 	let daemonRestarting = false;
 	let daemonIdle = false;
 	let daemonIdleMs = 0;
+	let daemonCacheTtlMs: number | null | undefined = undefined;
 
 	const updateDaemonHealth = () => {
 		if (daemonRestarting) {
@@ -2116,6 +2147,7 @@ export async function watchTagFile(
 			daemonStopTime = "";
 			daemonIdle = true;
 			daemonIdleMs = health.idleMs || 0;
+			daemonCacheTtlMs = health.cacheTtlMs;
 		} else {
 			daemonDead = false;
 			daemonStopReason = "";
@@ -2255,11 +2287,21 @@ export async function watchTagFile(
 					: daemonStopReason;
 				daemonStatusStr = `  \x1b[31m●\x1b[0m ${label}`;
 			} else if (daemonIdle) {
-				const idleSec = Math.floor(daemonIdleMs / 1000);
-				const idleMin = Math.floor(idleSec / 60);
-				const idleRem = idleSec % 60;
-				const idleStr = `${idleMin}:${String(idleRem).padStart(2, "0")}`;
-				daemonStatusStr = `  \x1b[33m●\x1b[0m idle ${idleStr}`;
+				if (daemonCacheTtlMs != null) {
+					const remainingMs = Math.max(0, daemonCacheTtlMs - daemonIdleMs);
+					const remainingSec = Math.floor(remainingMs / 1000);
+					if (remainingSec >= 3600) {
+						const h = Math.floor(remainingSec / 3600);
+						const m = Math.floor((remainingSec % 3600) / 60);
+						daemonStatusStr = `  \x1b[33m●\x1b[0m idle (${h}h${m}m to expire)`;
+					} else {
+						const m = Math.floor(remainingSec / 60);
+						const s = remainingSec % 60;
+						daemonStatusStr = `  \x1b[33m●\x1b[0m idle (${m}:${String(s).padStart(2, "0")} to expire)`;
+					}
+				} else {
+					daemonStatusStr = "  \x1b[33m●\x1b[0m idle";
+				}
 			} else {
 				daemonStatusStr = "  \x1b[32m●\x1b[0m live";
 			}

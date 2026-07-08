@@ -355,7 +355,7 @@ function deduplicateInteractions(interactions) {
 const TAGGER_VERSION = "2.3.2";
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const POLL_MS = 667;              // 90bpm throttle
-const IDLE_EXIT_MS = 30 * 60 * 1000; // exit if session.jsonl unchanged for 30 min
+const IDLE_EXIT_MS = 24 * 60 * 60 * 1000; // exit if session.jsonl unchanged for 24h (polite to ps aux)
 
 function serializeClassified(interaction) {
   const line: any = {

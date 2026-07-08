@@ -101,7 +101,7 @@ Handler calls `render()` directly. Daemon status indicator reflows — may move 
 
 ## Settings Persistence (Cross-Harness Config)
 
-Data settings (`interval`, `limit`, `mode`, `showTicks`, `timezone`, `disabledEmoji`) are persisted in harness-agnostic JSON config files (`~/.config/princess-pi/wtft.json` and `./.princess-pi/wtft.json`), shared across Pi and Claude Code. See `EXT_WTFT.html` for the full config hierarchy. TUI-only settings (`visible`, `width`, `widthIsLocked`) remain in Pi's session `.jsonl`. The shared module `extensions/lib/config.ts` provides `readConfig`/`writeConfig` for all tools.
+All WTFT settings are persisted in harness-agnostic JSON config files via the shared `extensions/lib/config.ts` module. No `.jsonl` persistence — settings survive across Pi sessions, Claude Code invocations, and machine restarts. Config hierarchy: code defaults → `~/.config/princess-pi/wtft.json` → `./.princess-pi/wtft.json` → CLI flags. Widget auto-shows on session start if a config file exists. See `EXT_WTFT.html` for the full config reference.
 
 ## SIGINT / 'q'
 

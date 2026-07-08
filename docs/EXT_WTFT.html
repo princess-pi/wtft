@@ -231,16 +231,15 @@
 
     <h3>Settings Persistence (Cross-Harness Config)</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
-        <p>WTFT settings that affect data rendering (<code>interval</code>, <code>limit</code>, <code>mode</code>, <code>showTicks</code>, <code>timezone</code>, <code>disabledEmoji</code>) are persisted in harness-agnostic JSON config files, shared across Pi and Claude Code. TUI-only settings (<code>visible</code>, <code>width</code>, <code>widthIsLocked</code>) remain in Pi's session <code>.jsonl</code>.</p>
+        <p>All WTFT settings are persisted in harness-agnostic JSON config files via the shared <code>extensions/lib/config.ts</code> module. There is no <code>.jsonl</code> persistence — settings survive across Pi sessions, Claude Code invocations, and machine restarts.</p>
 
         <h4 style="color: var(--accent-yellow);">Config Hierarchy (lowest → highest precedence)</h4>
         <ol>
-            <li><strong>Code defaults</strong> — hardcoded in the tool (e.g., interval=1h, limit=10, mode=cumulative).</li>
+            <li><strong>Code defaults</strong> — hardcoded (interval=1h, limit=10, mode=cumulative, showTicks=true, timezone=America/Los_Angeles, disabledEmoji=false).</li>
             <li><strong>User-global config:</strong> <code>~/.config/princess-pi/wtft.json</code></li>
-            <li><strong>Project-local config:</strong> <code>./.princess-pi/wtft.json</code> (overrides global)</li>
-            <li><strong>CLI flags</strong> — highest precedence, applied by the caller after reading config.</li>
+            <li><strong>Project-local config:</strong> <code>./.princess-pi/wtft.json</code> (overrides global keys)</li>
+            <li><strong>CLI flags</strong> — highest precedence, applied by caller after reading config.</li>
         </ol>
-
         <p>Each level overrides only the keys it defines; missing keys inherit from the layer below. When settings are changed via <code>/wtft</code> in Pi, they are written to the project-local config if it already exists, otherwise to the user-global config.</p>
 
         <h4 style="color: var(--accent-yellow);">Config Format (wtft.json)</h4>
@@ -253,16 +252,8 @@
   "disabledEmoji": false
 }</pre>
 
-        <h4 style="color: var(--accent-yellow);">What Stays in .jsonl</h4>
-        <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
-            <tr style="border-bottom: 1px solid #404040;">
-                <th style="text-align: left; padding: 6px;">Setting</th>
-                <th style="text-align: left; padding: 6px;">Rationale</th>
-            </tr>
-            <tr><td><code>visible</code></td><td>TUI-only — whether the widget is shown below the editor.</td></tr>
-            <tr><td><code>width</code></td><td>TUI-only — widget width in characters.</td></tr>
-            <tr><td><code>widthIsLocked</code></td><td>TUI-only — whether width was explicitly set (vs. auto-fit).</td></tr>
-        </table>
+        <h4 style="color: var(--accent-yellow);">Widget Auto-Show</h4>
+        <p>The WTFT widget auto-shows on session start if a config file exists (user has configured wtft at least once). No separate <code>visible</code> setting needed — delete the config file to permanently hide, or use <code>/wtft --hide</code> to hide for the current session only.</p>
     </div>
 
     <h3>Proposed Verification Plan</h3>

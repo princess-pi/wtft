@@ -279,85 +279,33 @@ class PagerComponent {
 // STATE PERSISTENCE (STORE/RETRIEVE)
 // ---
 
-function isEmojiDisabled(ctx: any): boolean {
-	// Prefer harness-agnostic config file (#72)
+function isEmojiDisabled(): boolean {
 	const config = readConfig("wtft");
-	if (typeof config.disabledEmoji === "boolean") {
-		return config.disabledEmoji;
-	}
-	// Backward compat: fall back to legacy .jsonl emoji-settings entries
-	if (!ctx || !ctx.sessionManager) return false;
-	let disabled = false;
-	for (const entry of ctx.sessionManager.getEntries()) {
-		if (entry.type === "custom" && entry.customType === "emoji-settings") {
-			if (entry.data && typeof entry.data.disabled === "boolean") {
-				disabled = entry.data.disabled;
-			}
-		}
-	}
-	return disabled;
+	return typeof config.disabledEmoji === "boolean" ? config.disabledEmoji : false;
 }
 
 /**
- * Retrieves setting configurations stored persistently in the session log.
- * Data settings (interval, limit, mode, showTicks, timezone, disabledEmoji)
- * are read from the harness-agnostic config file (#72), falling back to
- * legacy .jsonl entries for backward compat. TUI-only settings (visible,
- * width, widthIsLocked) remain in .jsonl.
- * Defaults mode to "cumulative" for cohesive cost progression tracks.
+ * Retrieves setting configurations from the harness-agnostic config file (#72).
+ * All settings (including TUI appearance) are now config-only — no .jsonl persistence.
+ * Widget auto-shows on session_start if any config exists.
  */
-function getSettings(ctx: any) {
-	// --- Data settings: config file first, fall back to .jsonl (#72) ---
+function getSettings(_ctx: any) {
 	const config = readConfig("wtft");
 
-	let interval = (config.interval as string) || "1h";
-	let limit = (typeof config.limit === "number" ? config.limit : 10) as number;
-	let showTicks = (typeof config.showTicks === "boolean" ? config.showTicks : true) as boolean;
-	let mode: "bucket" | "cumulative" = (config.mode === "bucket" || config.mode === "cumulative" ? config.mode : "cumulative") as "bucket" | "cumulative";
-	let timezone: string | undefined = (typeof config.timezone === "string" ? config.timezone : "America/Los_Angeles") as string | undefined;
+	const interval = (config.interval as string) || "1h";
+	const limit = (typeof config.limit === "number" ? config.limit : 10) as number;
+	const showTicks = (typeof config.showTicks === "boolean" ? config.showTicks : true) as boolean;
+	const mode: "bucket" | "cumulative" = (config.mode === "bucket" || config.mode === "cumulative" ? config.mode : "cumulative") as "bucket" | "cumulative";
+	const timezone: string | undefined = (typeof config.timezone === "string" ? config.timezone : "America/Los_Angeles") as string | undefined;
+	const disabledEmoji = isEmojiDisabled();
 
-	const disabledEmoji = isEmojiDisabled(ctx);
+	// Width auto-fits to terminal (no separate lock/default — CLI doesn't use it either)
+	const width = Math.min(getTerminalWidth(true, disabledEmoji), 240);
 
-	// Backward compat: if no config file exists, also check legacy .jsonl entries
-	if (!hasConfig("wtft")) {
-		for (const entry of ctx.sessionManager.getEntries()) {
-			if (entry.type === "custom" && entry.customType === "wtft-settings") {
-				if (entry.data) {
-					if (entry.data.interval && interval === "1h") interval = entry.data.interval;
-					if (typeof entry.data.limit === "number" && limit === 10) limit = entry.data.limit;
-					if (typeof entry.data.showTicks === "boolean" && showTicks === true) showTicks = entry.data.showTicks;
-					if (entry.data.mode && mode === "cumulative") mode = entry.data.mode;
-					if (entry.data.timezone && timezone === "America/Los_Angeles") timezone = entry.data.timezone;
-				}
-			}
-		}
-	}
+	// Auto-show if config exists (user has configured wtft at least once)
+	const visible = hasConfig("wtft");
 
-	// --- TUI-only settings: always from .jsonl (#72) ---
-	const termColumns = getTerminalWidth(true, disabledEmoji);
-	let width = 240;
-	let widthIsLocked = false;
-	let visible = false; // Default invisible on fresh session
-
-	for (const entry of ctx.sessionManager.getEntries()) {
-		if (entry.type === "custom" && entry.customType === "wtft-settings") {
-			if (entry.data) {
-				if (typeof entry.data.width === "number") {
-					if (entry.data.widthIsLocked) {
-						width = Math.min(entry.data.width, termColumns, 240);
-						widthIsLocked = true;
-					} else {
-						// Responsive auto-fit on the fly!
-						const termColumnsDynamic = getTerminalWidth(true, disabledEmoji);
-						width = Math.min(termColumnsDynamic, 240);
-					}
-				}
-				if (typeof entry.data.visible === "boolean") visible = entry.data.visible;
-			}
-		}
-	}
-
-	return { interval, limit, width, widthIsLocked, visible, showTicks, mode, timezone, disabledEmoji };
+	return { interval, limit, width, visible, showTicks, mode, timezone, disabledEmoji };
 }
 
 // ---
@@ -472,8 +420,8 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		if (sessionFile) {
 			ensureParserRunning(sessionFile);
 		}
-		const current = getSettings(ctx);
-		if (current.visible) {
+		// Auto-show widget if user has configured wtft at least once (#72)
+		if (hasConfig("wtft")) {
 			updateWtftWidget(ctx, pi);
 		}
 		// Start 1-minute timer for timeline live-updates
@@ -620,11 +568,6 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			}
 
 			if (hideWidget) {
-				// TUI-only: persist visibility in .jsonl (#72)
-				pi.appendEntry("wtft-settings", {
-					width: current.width,
-					visible: false
-				});
 				ctx.ui.setWidget("wtft", undefined);
 				ctx.ui.notify("Token cost audit widget hidden.", "info");
 				return;
@@ -634,10 +577,9 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			const nextLimit = hasLimit ? limit : current.limit;
 			
 			// Dynamic fallback (minus safety padding) capped at 240 if no explicit width set
-			const termColumns = getTerminalWidth(true, isEmojiDisabled(ctx));
+			const termColumns = getTerminalWidth(true, isEmojiDisabled());
 			const nextWidth = hasWidth ? Math.min(width, 240) : Math.min(termColumns, 240);
-			const nextWidthIsLocked = hasWidth || current.widthIsLocked || false;
-			
+
 			const nextTicks = hasTicks ? showTicks : current.showTicks;
 			const nextMode = hasMode ? mode : current.mode;
 			const nextTimezone = hasTimezone ? timezone : current.timezone;
@@ -664,20 +606,13 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			// Persist data settings to harness-agnostic config file (#72)
+			// Persist all settings to harness-agnostic config file (#72)
 			writeConfig("wtft", {
 				interval: nextInterval,
 				limit: nextLimit,
 				showTicks: nextTicks,
 				mode: nextMode,
 				timezone: nextTimezone
-			});
-
-			// Persist TUI-only settings to session .jsonl (#72)
-			pi.appendEntry("wtft-settings", {
-				width: nextWidth,
-				widthIsLocked: nextWidthIsLocked,
-				visible: true
 			});
 
 			updateWtftWidget(ctx, pi, {

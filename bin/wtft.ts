@@ -23,7 +23,7 @@ import {
 	getTerminalWidth
 } from "../extensions/lib/wtft-shared.ts";
 import { execSync, spawn } from "node:child_process";
-import { readConfig, hasConfig } from "../extensions/lib/config.ts";
+import { readConfig } from "../extensions/lib/config.ts";
 import {
 	discoverSessions,
 	selectSessionPrompt
@@ -369,46 +369,13 @@ async function main() {
 	}
 
 	// Read settings from harness-agnostic config file (#72).
-	// Falls back to .jsonl custom entries if no config file exists (backward compat).
 	const config = readConfig("wtft");
-	let disabledEmoji = (typeof config.disabledEmoji === "boolean" ? config.disabledEmoji : false) as boolean;
-	let sessionInterval = (typeof config.interval === "string" ? config.interval : undefined) as string | undefined;
-	let sessionLimit = (typeof config.limit === "number" ? config.limit : undefined) as number | undefined;
-	let sessionMode = (config.mode === "cumulative" || config.mode === "bucket" ? config.mode : undefined) as "cumulative" | "bucket" | undefined;
-	let sessionShowTicks = (typeof config.showTicks === "boolean" ? config.showTicks : undefined) as boolean | undefined;
-	let sessionTimezone = (typeof config.timezone === "string" ? config.timezone : undefined) as string | undefined;
-
-	// Backward compat: if no config file exists, fall back to legacy .jsonl entries
-	if (!hasConfig("wtft")) {
-		try {
-			const content = fs.readFileSync(finalSessionPath, "utf8");
-			for (const line of content.split("\n")) {
-				if (!line.trim()) continue;
-				try {
-					const entry = JSON.parse(line);
-					if (entry.type === "custom" && entry.customType === "emoji-settings") {
-						if (entry.data && typeof entry.data.disabled === "boolean") {
-							disabledEmoji = entry.data.disabled;
-						}
-					} else if (entry.type === "custom" && entry.customType === "wtft-settings") {
-						if (entry.data) {
-							if (typeof entry.data.interval === "string" && sessionInterval === undefined) sessionInterval = entry.data.interval;
-							if (typeof entry.data.limit === "number" && sessionLimit === undefined) sessionLimit = entry.data.limit;
-							if ((entry.data.mode === "cumulative" || entry.data.mode === "bucket") && sessionMode === undefined) {
-								sessionMode = entry.data.mode;
-							}
-							if (typeof entry.data.showTicks === "boolean" && sessionShowTicks === undefined) sessionShowTicks = entry.data.showTicks;
-							if (typeof entry.data.timezone === "string" && sessionTimezone === undefined) sessionTimezone = entry.data.timezone;
-						}
-					}
-				} catch {
-					// Skip unparseable lines
-				}
-			}
-		} catch {
-			// File may not exist or be unreadable
-		}
-	}
+	const disabledEmoji = (typeof config.disabledEmoji === "boolean" ? config.disabledEmoji : false) as boolean;
+	const sessionInterval = (typeof config.interval === "string" ? config.interval : undefined) as string | undefined;
+	const sessionLimit = (typeof config.limit === "number" ? config.limit : undefined) as number | undefined;
+	const sessionMode = (config.mode === "cumulative" || config.mode === "bucket" ? config.mode : undefined) as "cumulative" | "bucket" | undefined;
+	const sessionShowTicks = (typeof config.showTicks === "boolean" ? config.showTicks : undefined) as boolean | undefined;
+	const sessionTimezone = (typeof config.timezone === "string" ? config.timezone : undefined) as string | undefined;
 	// ---
 	// COMPILING AND PRINTING
 	// ---

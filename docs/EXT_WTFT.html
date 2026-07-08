@@ -157,6 +157,10 @@
         </tbody>
     </table>
 
+    <h3>SURGE Timeline (24-hour pricing bar)</h3>
+    <p>The title line renders a 24-hour timeline showing DeepSeek peak-valley surge pricing windows. Orange segments mark surge-priced hours (UTC 01:00–04:00 and 06:00–10:00 mapped to local time), green segments mark normal-priced hours, and a ◆ diamond marks the current hour. When in or near a surge window, a badge is appended: <code>⚡ SURGE 2x</code> (active), <code>⚡ SURGE APPROACHING</code> (within 20 min of start, blinking orange), or <code>⚡ SURGE ENDING</code> (within 20 min of end, blinking green).</p>
+    <p><strong>Unified in <code>buildWtftLines</code>:</strong> Both Pi widget and CLI (non-watch and <code>--watch</code>) share one code path. The Pi widget passes the session model explicitly; the CLI auto-detects DeepSeek from classified interactions. Non-DeepSeek models render an all-green timeline with no badges.</p>
+
     <h3>TUI Visualization Style</h3>
     <p>The TUI offers two distinct high-fidelity visualization styles depending on the display mode:</p>
     <ul>
@@ -168,7 +172,7 @@
     
     <h4 style="color: var(--accent-yellow); margin-bottom: 5px;">Example 1: Granular 1-Minute Cumulative Widget (Wide Terminal with Collapsed, Inverted Ticks)</h4>
     <pre style="background: var(--box-bg); padding: 12px; border-radius: 6px; border: 1px solid #404040; overflow-x: auto; color: #f0f0f0; font-family: monospace;">
-💸 WTF Tokens?
+💸 WTF Tokens?  (◆--◆) ⚡ SURGE 2x
 <span style="color: #87af87;">█</span> Spec  <span style="color: #87af87; background: #d7875f;">▒</span> Mixed  <span style="color: #d7875f;">█</span> Code  <span style="color: #ffafaf;">█</span> Tests  <span style="color: #af5fd7;">█</span> Research  <span style="color: #5fafaf;">█</span> Git  <span style="color: #5f87af;">█</span> Grep  <span style="color: #d75f87;">░</span> Prompt  <span style="color: #444444;">░</span> Other
 <span style="color: #888;">── Jun-20 ───────────<span style="background: #e0e0e0; color: #1e1e1e;"> $0.00 </span>──────<span style="background: #e0e0e0; color: #1e1e1e;"> $6.25 </span>─────<span style="background: #e0e0e0; color: #1e1e1e;"> $12.50 </span>─────<span style="background: #e0e0e0; color: #1e1e1e;"> $18.75 </span>─────<span style="background: #e0e0e0; color: #1e1e1e;"> $25.00 </span></span>
 <span style="color: #888;">22:42</span>  <span style="color: #888;">+$13.00</span>  <strong>$23.00</strong>  <span style="color: #87af87; background: #d7875f;">▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒</span><span style="color: #d7875f;">█████████████████████</span>
@@ -177,7 +181,7 @@
 
     <h4 style="color: var(--accent-yellow); margin-bottom: 5px;">Example 2: 1-Hour Bucket Widget Crossing Day Boundary (Point-of-Spend Multi-Line Style)</h4>
     <pre style="background: var(--box-bg); padding: 12px; border-radius: 6px; border: 1px solid #404040; overflow-x: auto; color: #f0f0f0; font-family: monospace;">
-💸 WTF Tokens?
+💸 WTF Tokens?  (◆--◆) ⚡ SURGE 2x
 <span style="color: #87af87;">█</span> Spec  <span style="color: #87af87; background: #d7875f;">▒</span> Mixed  <span style="color: #d7875f;">█</span> Code  <span style="color: #ffafaf;">█</span> Tests  <span style="color: #af5fd7;">█</span> Research  <span style="color: #5fafaf;">█</span> Git  <span style="color: #5f87af;">█</span> Grep  <span style="color: #d75f87;">░</span> Prompt  <span style="color: #444444;">░</span> Other
 <span style="color: #888;">── Jun-20 ──<span style="background: #e0e0e0; color: #1e1e1e;"> $0.00 </span>────────<span style="background: #e0e0e0; color: #1e1e1e;"> $3.25 </span>────────<span style="background: #e0e0e0; color: #1e1e1e;"> $6.50 </span>───────<span style="background: #e0e0e0; color: #1e1e1e;"> $9.75 </span>───────<span style="background: #e0e0e0; color: #1e1e1e;"> $13.00 </span></span>
 <span style="color: #888;">22:00</span>  <strong>$13.00</strong>                                                                  <span style="color: #87af87; background: #d7875f;">▒</span>
@@ -187,7 +191,7 @@
 
     <h3>Architectural Design</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
-        <p><strong>1. Log Parser:</strong> A persistent background daemon (<code>wtft-daemon</code>) watches the session <code>.jsonl</code> file, classifies each interaction, and writes pre-computed entries to a harness-agnostic tag file (<code>wtft-tags/*.tag.v2.2.0.jsonl</code>). In Pi, the widget reads directly from <code>ctx.sessionManager.getEntries()</code> (in-memory) but also spawns a log parser to keep the tag file warm for CLI use.</p>
+        <p><strong>1. Log Parser:</strong> A persistent background daemon (<code>wtft-daemon</code>) watches the session <code>.jsonl</code> file, classifies each interaction, and writes pre-computed entries to a harness-agnostic tag file (<code>wtft-tags/*.tag.v2.3.2.jsonl</code>). In Pi, the widget reads directly from <code>ctx.sessionManager.getEntries()</code> (in-memory) but also spawns a log parser on <code>session_start</code> to keep the tag file warm for CLI use. If the daemon dies from idle timeout (30 min), the <code>agent_end</code> handler checks health via <code>checkDaemonHealth</code> and auto-revives it.</p>
         <p><strong>2. Binning Engine:</strong> Groups entries by their <code>timestamp</code> into chronological bins based on the requested interval (e.g., 6-minute windows for granular auditing, or 1-day windows for multi-day tracks).</p>
         <p><strong>3. Scaling & Layout:</strong> Normalizes the absolute length of each interval's ASCII bar based on the maximum cost in any single interval (typically capped at 30-40 characters wide to fit standard terminal outputs gracefully). Each sub-segment within that bar is allocated its proportional share of characters based on its absolute cost contribution, without rendering percentages or additional trailing text.</p>
         <p><strong>4. Recursive Subagent Rollup:</strong> When a Claude Code session log is targeted, WTFT auto-detects if a subagent directory exists (e.g., <code>&lt;session-id&gt;/subagents/</code>). If present, WTFT recursively reads all subagent <code>.jsonl</code> logs and blends their interactions chronologically based on their individual timestamps. This guarantees that binned timelines and other command histograms represent the true, cumulative cost and work allocations of the entire multi-agent session tree.</p>

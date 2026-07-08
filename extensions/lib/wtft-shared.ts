@@ -2025,7 +2025,10 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 				fs.closeSync(fd);
 				const lines = buf.toString("utf8").split("\n");
 				let lastModel: string | undefined;
-				// Find last non-empty line + scan for model from recent entries
+				let idleMs: number | undefined;
+				// Scan backwards: heartbeats are after classified entries,
+				// so we encounter them first. Continue past heartbeats to
+				// find model info from earlier classified entries (#72 fix).
 				for (let i = lines.length - 1; i >= 0; i--) {
 					const line = lines[i].trim();
 					if (!line) continue;
@@ -2034,15 +2037,19 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 						// Track model from most recent classified entry
 						if (!lastModel && obj.m) lastModel = obj.m;
 						if (obj._hb && obj._hb.first) {
-							const idleMs = Date.now() - obj._hb.first;
-							if (idleMs >= IDLE_THRESHOLD_MS) {
-								const cacheTtlMs = lastModel ? getModelCacheTtlMs(lastModel) : null;
-								return { alive: true, idle: true, idleMs, cacheTtlMs };
+							if (idleMs === undefined) {
+								idleMs = Date.now() - obj._hb.first;
 							}
+							// Heartbeat — keep scanning for model
+							continue;
 						}
-						// Last line is actual data — daemon is active
+						// Classified entry (no _hb) — daemon is active, stop
 						break;
 					} catch { continue; }
+				}
+				if (idleMs !== undefined && idleMs >= IDLE_THRESHOLD_MS) {
+					const cacheTtlMs = lastModel ? getModelCacheTtlMs(lastModel) : null;
+					return { alive: true, idle: true, idleMs, cacheTtlMs };
 				}
 			}
 		} catch { /* tag file unreadable — assume live */ }

@@ -844,50 +844,58 @@ if (showList || showCleanup || showRestart || stopSession) {
   const loop = () => {
     if (!running) return;
 
-    // Read new lines from session, dedup by message.id (#54), then classify.
-    const rawInteractions = parseNewLines(sessionPath);
-    const newInteractions = deduplicateInteractions(rawInteractions);
-    if (newInteractions.length > 0) {
-      lastActivityMs = Date.now();
-      for (const interaction of newInteractions) {
-        pendingLines.push(serializeClassified(interaction));
+    try {
+      // Read new lines from session, dedup by message.id (#54), then classify.
+      const rawInteractions = parseNewLines(sessionPath);
+      const newInteractions = deduplicateInteractions(rawInteractions);
+      if (newInteractions.length > 0) {
+        lastActivityMs = Date.now();
+        for (const interaction of newInteractions) {
+          pendingLines.push(serializeClassified(interaction));
+        }
       }
-    }
 
-    // Throttled flush: write at most every 667ms
-    const now = Date.now();
-    if (pendingLines.length > 0 && (now - lastWriteMs) >= POLL_MS) {
-      flushPending();
-    }
+      // Throttled flush: write at most every 667ms
+      const now = Date.now();
+      if (pendingLines.length > 0 && (now - lastWriteMs) >= POLL_MS) {
+        flushPending();
+      }
 
-    // Heartbeat: on every poll cycle when idle, update the _hb range line.
-    // First idle poll appends {"_hb":{"first":<ts>}}. Subsequent idle polls
-    // overwrite the last line in-place with {"_hb":{"first":<ts>,"last":<ts>}}.
-    // When data arrives, the idle period ends — next idle starts a new line.
-    // NOTE: do NOT update lastActivityMs here — it tracks actual data activity
-    // for the idle-exit check below, not heartbeat flushes.
-    if (pendingLines.length === 0) {
-      if (idleStartMs === 0) idleStartMs = now;
-      upsertHeartbeat(now);
-      lastWriteMs = now;
-    }
+      // Heartbeat: on every poll cycle when idle, update the _hb range line.
+      // First idle poll appends {"_hb":{"first":<ts>}}. Subsequent idle polls
+      // overwrite the last line in-place with {"_hb":{"first":<ts>,"last":<ts>}}.
+      // When data arrives, the idle period ends — next idle starts a new line.
+      // NOTE: do NOT update lastActivityMs here — it tracks actual data activity
+      // for the idle-exit check below, not heartbeat flushes.
+      if (pendingLines.length === 0) {
+        if (idleStartMs === 0) idleStartMs = now;
+        upsertHeartbeat(now);
+        lastWriteMs = now;
+      }
 
-    // Idle exit: if no new interactions have been classified in >30 min,
-    // assume the session is finished and shut down cleanly.
-    // Skip idle exit during the first 60s of daemon runtime (startup grace
-    // period) so freshly-spawned daemons aren't killed on their first cycle.
-    if (now - lastActivityMs >= IDLE_EXIT_MS && now - startupTime >= 60000) {
+      // Idle exit: if no new interactions have been classified in >30 min,
+      // assume the session is finished and shut down cleanly.
+      // Skip idle exit during the first 60s of daemon runtime (startup grace
+      // period) so freshly-spawned daemons aren't killed on their first cycle.
+      if (now - lastActivityMs >= IDLE_EXIT_MS && now - startupTime >= 60000) {
+        if (process.env.WTFT_DAEMON_DEBUG) {
+          process.stderr.write(`[wtft-log-parser] no new data for ${Math.round((now - lastActivityMs)/60000)}m, exiting\n`);
+        }
+        shutdown("idle timeout");
+        return;
+      }
+
+      // If the session file disappears, exit cleanly.
+      if (!fs.existsSync(sessionPath)) {
+        shutdown("session removed");
+        return;
+      }
+    } catch (err) {
+      // Transient error (disk full, permission denied, corrupted JSON) —
+      // log and continue. Don't crash the daemon on a single bad poll cycle.
       if (process.env.WTFT_DAEMON_DEBUG) {
-        process.stderr.write(`[wtft-log-parser] no new data for ${Math.round((now - lastActivityMs)/60000)}m, exiting\n`);
+        process.stderr.write(`[wtft-log-parser] poll error: ${err.message}\n`);
       }
-      shutdown("idle timeout");
-      return;
-    }
-
-    // If the session file disappears, exit cleanly.
-    if (!fs.existsSync(sessionPath)) {
-      shutdown("session removed");
-      return;
     }
 
     setTimeout(loop, POLL_MS);

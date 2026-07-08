@@ -12,7 +12,8 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 ┌─────────────────────────────────────────────────────────┐
 │  wtft-daemon (log parser) — detached, singleton per     │
 │  session. Polls session.jsonl every 667ms, classifies   │
-│  entries, writes to wtft-tags/<session>.tag.v2.3.1.jsonl│
+│  entries, writes to wtft-tags/<session>.tag.v2.3.2.jsonl│
+│  Tag format includes message.id for cross-run dedup.    │
 │  Heartbeats every idle cycle via _hb lines.              │
 │  Idle exit: 30 min of no new data → clean shutdown.     │
 │  Startup grace: 60s before idle exit can fire.          │

@@ -12,7 +12,7 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 ┌─────────────────────────────────────────────────────────┐
 │  wtft-daemon (log parser) — detached, singleton per     │
 │  session. Polls session.jsonl every 667ms, classifies   │
-│  entries, writes to wtft-tags/<session>.tag.v2.3.3.jsonl│
+│  entries, writes to wtft-tags/<session>.tag.v2.3.4.jsonl│
 │  Tag format includes message.id for cross-run dedup.    │
 │  Heartbeats: single _hb line updated in-place per idle  │
 │  cycle (consolidated, not appended).                     │
@@ -20,6 +20,10 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 │  (disk full, bad JSON) are logged, daemon survives.     │
 │  Idle exit: 24h of no new data → clean shutdown.        │
 │  Startup grace: 60s before idle exit can fire.          │
+│  Costs rounded to 6 decimal places before JSON write    │
+│  (eliminates float drift vs in-memory widget).          │
+│  Version-aware singleton: detects old tag file, kills    │
+│  old daemon, auto-upgrades — no manual restart needed.  │
 └────────────┬────────────────────────────────────────────┘
              │  tag file (fs.watch / inotify)
              ▼

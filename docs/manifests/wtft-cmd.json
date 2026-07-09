@@ -188,6 +188,14 @@
       "desc": "Print a per-model token summary table (deduped) for cross-referencing with /usage."
     },
     {
+      "flags": "--pad <N>",
+      "desc": "Pad output with N spaces on each side (default: 1, max: floor(term/2)-1). Makes CLI output width match Pi TUI widget."
+    },
+    {
+      "flags": "--debug",
+      "desc": "Print diagnostic cost totals (tag file vs direct parse + dedup) after the chart."
+    },
+    {
       "flags": "--help, -h",
       "desc": "Display this help information."
     },
@@ -240,6 +248,14 @@
     {
       "cmd": "/wtft --watch",
       "desc": "Watch a session file in real-time and re-render the bar chart as new interactions arrive."
+    },
+    {
+      "cmd": "/wtft --debug",
+      "desc": "Print diagnostic cost totals (tag file vs direct parse + dedup) after the chart."
+    },
+    {
+      "cmd": "/wtft --pad 0",
+      "desc": "Render with zero padding (full terminal width). Default --pad 1 matches Pi widget width."
     }
   ]
 }

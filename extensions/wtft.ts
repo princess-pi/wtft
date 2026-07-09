@@ -7,10 +7,7 @@ import {
 	buildWtftLines as sharedBuildWtftLines,
 	type Category,
 	type Interaction,
-	classifyInteraction,
-	formatCost,
-	getSemanticCommandGroup,
-	parseEntryToInteraction,
+	parseSessionFile,
 	renderOtherHistogram,
 	renderTokenSummary,
 	deduplicateInteractions,
@@ -20,7 +17,6 @@ import {
 	restartDaemon,
 	renderDaemonStatus,
 	getTagPath,
-	getDaemonPidPath,
 	type DaemonStatus
 } from "./lib/wtft-shared.js";
 import { readConfig, writeConfig, hasConfig } from "./lib/config.js";
@@ -326,15 +322,12 @@ function buildWtftLines(
 		forceLegendRow?: boolean;
 	}
 ): string[] | null {
-	const branch = ctx.sessionManager.getBranch();
-	const interactions: Interaction[] = [];
-
-	for (let i = 0; i < branch.length; i++) {
-		const interaction = parseEntryToInteraction(branch[i]);
-		if (interaction) {
-			interactions.push(interaction);
-		}
-	}
+	// Read from the session file on disk — same source as the daemon and CLI.
+	// This guarantees the Pi widget and `wtft` CLI always show identical costs.
+	const sessionFile = ctx?.sessionManager?.getSessionFile?.();
+	const interactions: Interaction[] = sessionFile
+		? parseSessionFile(sessionFile)
+		: [];
 
 	return sharedBuildWtftLines(interactions, getSettings(ctx), opts);
 }
@@ -445,15 +438,6 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		const sessionFile = ctx.sessionManager.getSessionFile?.();
 		if (sessionFile) {
 			ensureParserRunning(sessionFile);
-			// Give Pi time to flush the session file to disk, then signal
-			// the daemon to parse+flush immediately so the tag file matches
-			// in-memory state before the next CLI wtft / --watch read.
-			await new Promise(r => setTimeout(r, 200));
-			try {
-				const pidPath = getDaemonPidPath(sessionFile);
-				const pid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
-				if (pid > 0) process.kill(pid, "SIGUSR1");
-			} catch { /* daemon not running — fine */ }
 		}
 		const current = getSettings(ctx);
 		if (current.visible) {
@@ -555,10 +539,10 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			const current = getSettings(ctx);
 
 			if (other) {
-				const branch = ctx.sessionManager.getBranch();
-				const interactions = branch
-					.map((entry: any) => parseEntryToInteraction(entry))
-					.filter((i: any): i is NonNullable<typeof i> => i !== null);
+				const sessionFile = ctx.sessionManager.getSessionFile?.();
+				const interactions = sessionFile
+					? parseSessionFile(sessionFile)
+					: [];
 				
 				const deduped = deduplicateInteractions(interactions);
 				const output = renderOtherHistogram(deduped, Math.max(current.width, 40));
@@ -567,10 +551,10 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			}
 
 			if (tokens) {
-				const branch = ctx.sessionManager.getBranch();
-				const interactions = branch
-					.map((entry: any) => parseEntryToInteraction(entry))
-					.filter((i: any): i is NonNullable<typeof i> => i !== null);
+				const sessionFile = ctx.sessionManager.getSessionFile?.();
+				const interactions = sessionFile
+					? parseSessionFile(sessionFile)
+					: [];
 				
 				const output = renderTokenSummary(interactions, Math.max(current.width, 40));
 				ctx.ui.notify(output, "info");

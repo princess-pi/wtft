@@ -7,7 +7,7 @@ import {
 	buildWtftLines as sharedBuildWtftLines,
 	type Category,
 	type Interaction,
-	parseSessionFile,
+	parseEntryToInteraction,
 	renderOtherHistogram,
 	renderTokenSummary,
 	deduplicateInteractions,
@@ -322,12 +322,19 @@ function buildWtftLines(
 		forceLegendRow?: boolean;
 	}
 ): string[] | null {
-	// Read from the session file on disk — same source as the daemon and CLI.
-	// This guarantees the Pi widget and `wtft` CLI always show identical costs.
-	const sessionFile = ctx?.sessionManager?.getSessionFile?.();
-	const interactions: Interaction[] = sessionFile
-		? parseSessionFile(sessionFile)
-		: [];
+	// Read from in-memory session (always complete, no concurrent-write race).
+	// The CLI wtft reads from the session file on disk — identical at turn
+	// boundaries when Pi is idle. During active turns, the widget may show
+	// the current interaction's cost before it's flushed to disk.
+	const branch = ctx.sessionManager.getBranch();
+	const interactions: Interaction[] = [];
+
+	for (let i = 0; i < branch.length; i++) {
+		const interaction = parseEntryToInteraction(branch[i]);
+		if (interaction) {
+			interactions.push(interaction);
+		}
+	}
 
 	return sharedBuildWtftLines(interactions, getSettings(ctx), opts);
 }
@@ -539,10 +546,10 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			const current = getSettings(ctx);
 
 			if (other) {
-				const sessionFile = ctx.sessionManager.getSessionFile?.();
-				const interactions = sessionFile
-					? parseSessionFile(sessionFile)
-					: [];
+				const branch = ctx.sessionManager.getBranch();
+				const interactions = branch
+					.map((entry: any) => parseEntryToInteraction(entry))
+					.filter((i: any): i is NonNullable<typeof i> => i !== null);
 				
 				const deduped = deduplicateInteractions(interactions);
 				const output = renderOtherHistogram(deduped, Math.max(current.width, 40));
@@ -551,10 +558,10 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			}
 
 			if (tokens) {
-				const sessionFile = ctx.sessionManager.getSessionFile?.();
-				const interactions = sessionFile
-					? parseSessionFile(sessionFile)
-					: [];
+				const branch = ctx.sessionManager.getBranch();
+				const interactions = branch
+					.map((entry: any) => parseEntryToInteraction(entry))
+					.filter((i: any): i is NonNullable<typeof i> => i !== null);
 				
 				const output = renderTokenSummary(interactions, Math.max(current.width, 40));
 				ctx.ui.notify(output, "info");

@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { parseEntryToInteraction } from "./lib/wtft-shared.js";
 
 // ---
 // CONFIGURATION
@@ -154,31 +155,15 @@ function aggregateActiveTpm(activeFiles: FileInfo[], hostingSessionId: string | 
       for (const line of lines) {
         try {
           const entry = JSON.parse(line);
-          if (!entry) continue;
+          const interaction = parseEntryToInteraction(entry);
+          if (!interaction) continue;
+          if (!interaction.timestamp) continue;
 
-          const msg = entry.message;
-          const timestampStr = msg?.timestamp || entry.timestamp;
-          let timestamp = 0;
-          if (typeof timestampStr === "string") {
-            timestamp = new Date(timestampStr).getTime();
-          } else if (typeof timestampStr === "number") {
-            timestamp = timestampStr;
-          }
-
-          if (!timestamp) continue;
-
-          const age = now - timestamp;
+          const age = now - interaction.timestamp;
           if (age > 120000) continue;
+          if (!interaction.model) continue;
 
-          let modelName = "";
-          if (msg?.model) {
-            modelName = msg.model;
-          } else if (entry.model) {
-            modelName = entry.model;
-          }
-
-          if (!modelName) continue;
-          const shortCode = getModelShortName(modelName);
+          const shortCode = getModelShortName(interaction.model);
 
           if (!modelStats[shortCode]) {
             modelStats[shortCode] = { tpm: 0, lastActiveAge: 120000, sessionTpm: 0 };
@@ -187,28 +172,7 @@ function aggregateActiveTpm(activeFiles: FileInfo[], hostingSessionId: string | 
           modelStats[shortCode].lastActiveAge = Math.min(modelStats[shortCode].lastActiveAge, age);
 
           if (age <= 60000) {
-            let inputTokens = 0;
-            if (entry.usage) {
-              if (typeof entry.usage.input === "number") {
-                inputTokens = entry.usage.input;
-                if (typeof entry.usage.cacheRead === "number") {
-                  inputTokens += entry.usage.cacheRead;
-                }
-              } else if (typeof entry.usage.input_tokens === "number") {
-                inputTokens = entry.usage.input_tokens;
-                if (typeof entry.usage.cache_read === "number") {
-                  inputTokens += entry.usage.cache_read;
-                }
-              } else if (typeof entry.usage.prompt_tokens === "number") {
-                inputTokens = entry.usage.prompt_tokens;
-              }
-            }
-
-            if (!inputTokens && msg?.usage) {
-              const baseInput = msg.usage.input || msg.usage.input_tokens || msg.usage.input_token_count || msg.usage.prompt_tokens || 0;
-              const cacheRead = msg.usage.cacheRead || msg.usage.cache_read || 0;
-              inputTokens = baseInput + cacheRead;
-            }
+            const inputTokens = interaction.inputTokens + interaction.cacheReadTokens;
             
             // Increment global TPM
             modelStats[shortCode].tpm += inputTokens;
@@ -261,50 +225,15 @@ function getHostingSessionTpm(hostingSessionId: string, activeFiles: FileInfo[])
     for (const line of lines) {
       try {
         const entry = JSON.parse(line);
-        if (!entry) continue;
-        const msg = entry.message;
-        const timestampStr = msg?.timestamp || entry.timestamp;
-        let timestamp = 0;
-        if (typeof timestampStr === "string") {
-          timestamp = new Date(timestampStr).getTime();
-        } else if (typeof timestampStr === "number") {
-          timestamp = timestampStr;
-        }
-        if (!timestamp) continue;
-        const age = now - timestamp;
+        const interaction = parseEntryToInteraction(entry);
+        if (!interaction) continue;
+        if (!interaction.timestamp) continue;
+        const age = now - interaction.timestamp;
         if (age > 60000) continue;
+        if (!interaction.model) continue;
+        const shortCode = getModelShortName(interaction.model);
 
-        let modelName = "";
-        if (msg?.model) {
-          modelName = msg.model;
-        } else if (entry.model) {
-          modelName = entry.model;
-        }
-        if (!modelName) continue;
-        const shortCode = getModelShortName(modelName);
-
-        let inputTokens = 0;
-        if (entry.usage) {
-          if (typeof entry.usage.input === "number") {
-            inputTokens = entry.usage.input;
-            if (typeof entry.usage.cacheRead === "number") {
-              inputTokens += entry.usage.cacheRead;
-            }
-          } else if (typeof entry.usage.input_tokens === "number") {
-            inputTokens = entry.usage.input_tokens;
-            if (typeof entry.usage.cache_read === "number") {
-              inputTokens += entry.usage.cache_read;
-            }
-          } else if (typeof entry.usage.prompt_tokens === "number") {
-            inputTokens = entry.usage.prompt_tokens;
-          }
-        }
-        if (!inputTokens && msg?.usage) {
-          const baseInput = msg.usage.input || msg.usage.input_tokens || msg.usage.input_token_count || msg.usage.prompt_tokens || 0;
-          const cacheRead = msg.usage.cacheRead || msg.usage.cache_read || 0;
-          inputTokens = baseInput + cacheRead;
-        }
-
+        const inputTokens = interaction.inputTokens + interaction.cacheReadTokens;
         sessionTpms[shortCode] = (sessionTpms[shortCode] || 0) + inputTokens;
       } catch (e) {
         // ignore

@@ -805,26 +805,43 @@ if (showList || showCleanup || showRestart || stopSession) {
   pidPath = path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
 
   // Singleton check — atomic exclusive-create prevents TOCTOU race.
-  // If PID file exists, verify the process is alive; clean up stale ones.
+  // PID file format: "<pid> <version>" — allows version comparison so
+  // a new daemon can auto-replace an old-version daemon.
+  const pidPayload = `${process.pid} ${TAGGER_VERSION}`;
   let fd;
   try {
     fd = fs.openSync(pidPath, "wx");
-    fs.writeSync(fd, String(process.pid));
+    fs.writeSync(fd, pidPayload);
     fs.closeSync(fd);
   } catch (_) {
-    // PID file exists — check if the process is still alive
+    // PID file exists — check version and process liveness
     try {
-      const existingPid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
+      const existing = fs.readFileSync(pidPath, "utf8").trim().split(/\s+/);
+      const existingPid = parseInt(existing[0], 10);
+      const existingVer = existing[1] || "";
       if (existingPid > 0) {
         try {
           process.kill(existingPid, 0);
-          // Process exists — another log parser is running, exit quietly
-          process.exit(0);
+          // Process exists — compare versions
+          if (existingVer !== TAGGER_VERSION) {
+            // Old version — kill and replace
+            if (process.env.WTFT_DAEMON_DEBUG) {
+              process.stderr.write(`[wtft-log-parser] replacing v${existingVer} daemon (pid ${existingPid}) with v${TAGGER_VERSION}\n`);
+            }
+            try { process.kill(existingPid, "SIGTERM"); } catch {}
+            try { fs.unlinkSync(pidPath); } catch {}
+            fd = fs.openSync(pidPath, "wx");
+            fs.writeSync(fd, pidPayload);
+            fs.closeSync(fd);
+          } else {
+            // Same version — exit quietly
+            process.exit(0);
+          }
         } catch (_2) {
           // Stale PID — clean up and retry
-          fs.unlinkSync(pidPath);
+          try { fs.unlinkSync(pidPath); } catch {}
           fd = fs.openSync(pidPath, "wx");
-          fs.writeSync(fd, String(process.pid));
+          fs.writeSync(fd, pidPayload);
           fs.closeSync(fd);
         }
       }
@@ -832,7 +849,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       // Couldn't read PID — clean up and retry
       try { fs.unlinkSync(pidPath); } catch (_4) {}
       fd = fs.openSync(pidPath, "wx");
-      fs.writeSync(fd, String(process.pid));
+      fs.writeSync(fd, pidPayload);
       fs.closeSync(fd);
     }
   }

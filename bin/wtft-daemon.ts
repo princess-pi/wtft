@@ -785,10 +785,35 @@ if (showList || showCleanup || showRestart || stopSession) {
   try { fs.mkdirSync(tagsDir, { recursive: true }); } catch (_) {}
   tagPath = path.join(tagsDir, sessionBase + TAG_SUFFIX);
 
-  // Clean up old-version tag files (different version suffix) on startup.
-  // Version-in-filename means no _cv header check — just delete stale files.
+  // PID file for singleton detection
+  const sessionHash = createHash("sha256").update(sessionPath).digest("hex").slice(0, 12);
+  pidPath = path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
+
+  // Before the singleton check: if an old-version tag file exists, kill
+  // the old daemon so the new version takes over automatically. Must run
+  // BEFORE the old-version cleanup below (which deletes the signal).
+  const prefix = sessionBase + ".wtft-tag.v";
   try {
-    const prefix = sessionBase + ".wtft-tag.v";
+    for (const f of fs.readdirSync(tagsDir)) {
+      if (f.indexOf(prefix) === 0 && f !== sessionBase + TAG_SUFFIX) {
+        // Old-version tag file found — kill the existing daemon
+        try {
+          const existingPid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
+          if (existingPid > 0) {
+            try { process.kill(existingPid, "SIGTERM"); } catch {}
+          }
+        } catch { /* PID file may not exist yet */ }
+        try { fs.unlinkSync(pidPath); } catch {}
+        break;
+      }
+    }
+  } catch (e) {
+    process.stderr.write(`[wtft-log-parser] auto-upgrade scan error: ${e.message}\n`);
+  }
+
+  // Clean up old-version tag files (different version suffix) on startup.
+  // Runs AFTER auto-upgrade — the old tag file was the signal to kill the old daemon.
+  try {
     for (const f of fs.readdirSync(tagsDir)) {
       if (f.startsWith(prefix) && f !== sessionBase + TAG_SUFFIX) {
         const stale = path.join(tagsDir, f);
@@ -800,34 +825,7 @@ if (showList || showCleanup || showRestart || stopSession) {
     }
   } catch (_) {}
 
-  // PID file for singleton detection
-  const sessionHash = createHash("sha256").update(sessionPath).digest("hex").slice(0, 12);
-  pidPath = path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
-
   // Singleton check — atomic exclusive-create prevents TOCTOU race.
-  // If PID file exists, verify the process is alive; clean up stale ones.
-  //
-  // Before the singleton check: if a tag file for an older version exists,
-  // kill the old daemon so the new version takes over automatically.
-  try {
-    const prefix = sessionBase + ".wtft-tag.v";
-    for (const f of fs.readdirSync(tagsDir)) {
-      if (f.startsWith(prefix) && f !== sessionBase + TAG_SUFFIX) {
-        // Old-version tag file found — kill the existing daemon
-        try {
-          const existingPid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
-          if (existingPid > 0) {
-            if (process.env.WTFT_DAEMON_DEBUG) {
-              process.stderr.write(`[wtft-log-parser] replacing old daemon (tag: ${f}) with v${TAGGER_VERSION}\n`);
-            }
-            try { process.kill(existingPid, "SIGTERM"); } catch {}
-          }
-        } catch {}
-        try { fs.unlinkSync(pidPath); } catch {}
-        break;
-      }
-    }
-  } catch {}
 
   let fd;
   try {

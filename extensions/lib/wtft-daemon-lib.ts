@@ -390,7 +390,12 @@ export interface DaemonStatus {
 
 /**
  * Render a daemon status indicator string (shared by Pi widget + CLI watch modes).
- * Returns e.g. "  ● live" (green), "  ● idle (3:22 to expire)" (yellow), etc.
+ * Returns e.g.:
+ *   "  ● live" (green) — daemon active, recent data
+ *   "  ● idle (3:22 to expire)" (yellow) — daemon idle, cache TTL ticking down
+ *   "  ● No Cache (local)" (green) — daemon idle, local model (no remote cache)
+ *   "  ● stopped 14:30" (red) — daemon exited cleanly
+ *   "  ● restarting..." (yellow) — daemon being relaunched
  */
 export function renderDaemonStatus(status: DaemonStatus, restarting = false): string {
 	if (restarting) {

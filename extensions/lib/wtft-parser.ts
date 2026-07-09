@@ -1,3 +1,12 @@
+/**
+ * @package princess-pi-packages
+ * @module wtft-parser
+ * @description Session log parsing and interaction classification.
+ *   Reads Pi and Claude Code session.jsonl files, extracts token usage
+ *   and cost per assistant message, normalizes field names across
+ *   schemas, and classifies interactions into spec/code/other categories.
+ */
+
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { calculateClaudeCost } from "./wtft-cost.js";

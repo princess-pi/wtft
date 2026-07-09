@@ -96,6 +96,17 @@
         "  # won't help"
       ],
       "result": "WTFT uses public pricing estimates per model and excludes things like caching discounts, free-tier credits, or provider-specific billing nuances. It's a directional cost-awareness tool \u2014 not an accounting ledger."
+    },
+    {
+      "scenario": "Your session has been idle for a while and the model cache has expired, or you're running a local model like Ollama with no remote caching at all.",
+      "commands": [
+        ""
+      ],
+      "result": "Instead of hiding the widget or showing stale data, WTFT displays 'Cache Empty' (cloud models) or 'No Cache (local model)' in the widget area, plus the daemon's idle countdown. You know immediately whether the session is just idle or cache-free.",
+      "demo": [
+        "\u001b[90mCache Empty\u001b[0m",
+        "  \u001b[33m\u25CF\u001b[0m idle (0:23 to expire)"
+      ]
     }
   ],
   "usage": [

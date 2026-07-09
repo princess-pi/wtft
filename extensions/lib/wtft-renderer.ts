@@ -1,3 +1,11 @@
+/**
+ * @package princess-pi-packages
+ * @module wtft-renderer
+ * @description Bar chart rendering, histograms, token summaries, and terminal utilities.
+ *   Builds visual output from parsed Interaction arrays: binned bar charts,
+ *   SURGE timeline markers, "Other" command histograms, and per-model token tables.
+ */
+
 import type { Interaction, Category, Bin, IntervalConfig } from "./wtft-shared.js";
 import {
 	classifyInteraction,

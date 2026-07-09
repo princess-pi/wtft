@@ -17,6 +17,7 @@ import {
 	restartDaemon,
 	renderDaemonStatus,
 	getTagPath,
+	getModelCacheTtlMs,
 	type DaemonStatus
 } from "./lib/wtft-shared.js";
 import { readConfig, writeConfig, hasConfig } from "./lib/config.js";
@@ -375,7 +376,24 @@ function updateWtftWidget(
 	const buildOpts = { ...opts, forceLegendRow: true, model: modelId };
 	const lines = buildWtftLines(ctx, pi, buildOpts);
 	if (!lines || lines.length === 0) {
-		ctx.ui.setWidget("wtft", undefined);
+		// --- Show cache/empty state instead of hiding widget. ---
+		const emptyModel = modelId || "";
+		const cacheTtl = getModelCacheTtlMs(emptyModel);
+		const emptyLine = cacheTtl === null
+			? "\x1b[90mNo Cache (local model)\x1b[0m"
+			: "\x1b[90mCache Empty\x1b[0m";
+
+		let parserStatusStr = "";
+		const sessionFile = ctx.sessionManager.getSessionFile?.();
+		if (sessionFile && _parserSpawned) {
+			const status = getParserStatus(sessionFile);
+			parserStatusStr = renderDaemonStatus(status, false);
+		}
+
+		const widgetLines = parserStatusStr
+			? [emptyLine, parserStatusStr.trim()]
+			: [emptyLine];
+		ctx.ui.setWidget("wtft", widgetLines, { placement: "belowEditor" });
 		return;
 	}
 

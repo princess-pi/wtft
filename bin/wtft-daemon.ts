@@ -414,22 +414,6 @@ function shutdown(reason) {
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGHUP", () => shutdown("SIGHUP"));
-// SIGUSR1: Pi extension signals after agent_end to force immediate flush
-// so the tag file stays in sync with in-memory state.
-process.on("SIGUSR1", () => {
-	if (!running || !sessionPath) return;
-	try {
-		const rawInteractions = parseNewLines(sessionPath);
-		const newInteractions = deduplicateInteractions(rawInteractions);
-		if (newInteractions.length > 0) {
-			lastActivityMs = Date.now();
-			for (const interaction of newInteractions) {
-				pendingLines.push(serializeClassified(interaction));
-			}
-			flushPending();
-		}
-	} catch { /* transient error — poll loop will retry */ }
-});
 
 // ---
 // FILE I/O HELPERS

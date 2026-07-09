@@ -10,6 +10,7 @@ import {
 	deduplicateInteractions,
 	buildWtftLines
 } from "./wtft-shared.js";
+import { showCursor, hideCursor, enterRawStdin } from "./tty-helpers.js";
 export interface WatchSettings {
 	interval: string;
 	limit: number;

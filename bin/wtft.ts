@@ -365,15 +365,23 @@ async function main() {
 		console.error(`\x1b[33m⚠ Log parser spawn failed, falling back to direct parse: ${err}\x1b[0m`);
 	}
 
-	// Wait for daemon to process existing entries (poll up to 3s for classified data).
-	// Daemon poll cycle is 667ms; 3s ≈ 4 cycles for a full re-parse.
+	// Wait for daemon to finish its initial parse. Poll tag file size every
+	// 667ms (daemon poll cycle). When size is stable for 2 consecutive polls
+	// (≥1.3s of no growth), the daemon has caught up. Cap at 30s.
 	const waitStart = Date.now();
-	while (Date.now() - waitStart < 3000) {
-		if (fs.existsSync(tagPath)) {
-			const content = fs.readFileSync(tagPath, "utf8");
-			if (content.split("\n").some(l => l.trim() && !l.includes('"_hb"'))) break;
+	let lastTagSize = 0;
+	let stablePolls = 0;
+	while (Date.now() - waitStart < 30000) {
+		let size = 0;
+		try { size = fs.statSync(tagPath).size; } catch {}
+		if (size > 0 && size === lastTagSize) {
+			stablePolls++;
+			if (stablePolls >= 2) break;
+		} else {
+			stablePolls = 0;
 		}
-		await new Promise(r => setTimeout(r, 250));
+		lastTagSize = size;
+		await new Promise(r => setTimeout(r, 667));
 	}
 
 	// Read interactions from the classified tag file (harness-agnostic).

@@ -43,6 +43,8 @@ let harnessOption: "auto" | "pi" | "claude-code" = "auto";
 let cwdOverride: string | undefined = undefined;
 let showOther = false;
 let showTokens = false;
+let pad = 1;
+let hasPad = false;
 
 // ---
 // HELP MENU
@@ -107,6 +109,8 @@ Options:
   -o, --other             Print a histogram of 'Other' commands grouped by semantic sub-category (Build, Lint, System, etc.).
   -T, --tokens            Print a per-model token summary table (deduped) for cross-referencing with /usage.
   -W, --watch             Watch a session file for changes and re-render the bar chart in real-time.
+  --pad <N>               Pad output with N spaces on each side (default: 1, max: floor(term/2)-1).
+                          Makes CLI output width match Pi TUI widget in the same terminal.
 
 Log parser management:
   --list                  List all running log parsers with session path, PID, parser version, and idle time.
@@ -191,6 +195,12 @@ for (let i = 2; i < process.argv.length; i++) {
 		hasTokens = true;
 	} else if (arg === "-W" || arg === "--watch") {
 		showWatch = true;
+	} else if (arg === "--pad") {
+		const val = parseInt(process.argv[++i], 10);
+		if (!isNaN(val) && val >= 0) {
+			pad = val;
+			hasPad = true;
+		}
 	} else if (arg === "--dir" || arg === "--cwd") {
 		cwdOverride = process.argv[++i];
 	} else if (arg === "--harness") {
@@ -302,6 +312,7 @@ async function main() {
 				mode: (hasCumulative || hasBucket) ? mode : "cumulative",
 				showTicks: (hasTicks || hasNoTicks) ? showTicks : true,
 				timezone: hasTz ? timezone : undefined,
+				pad,
 				hasInterval, hasLimit, hasMode: hasCumulative || hasBucket,
 				hasTicks: hasTicks || hasNoTicks, hasTimezone: hasTz
 			});
@@ -318,6 +329,7 @@ async function main() {
 			showTicks: (hasTicks || hasNoTicks) ? showTicks : true,
 			timezone: hasTz ? timezone : undefined,
 			daemonPath,
+			pad,
 			hasInterval, hasLimit, hasMode: hasCumulative || hasBucket,
 			hasTicks: hasTicks || hasNoTicks, hasTimezone: hasTz
 		});
@@ -381,6 +393,13 @@ async function main() {
 	// ---
 
 	const termColumns = getTerminalWidth();
+	// Pad: default 1 to match Pi TUI widget's enforced 1-space padding.
+	// Clamp to valid range (max: floor(term/2)-1).
+	if (!hasPad) pad = 1;
+	const maxPad = Math.max(0, Math.floor(termColumns / 2) - 1);
+	pad = Math.min(pad, maxPad);
+	const padStr = " ".repeat(pad);
+	const paddedWidth = termColumns - 2 * pad;
 	const finalInterval = hasInterval ? intervalStr : (sessionInterval ?? "1h");
 	const finalLimit = hasLimit ? limit : (sessionLimit ?? 100);
 	const finalMode = (hasCumulative || hasBucket) ? mode : (sessionMode ?? "cumulative");
@@ -390,7 +409,7 @@ async function main() {
 	const defaultSettings = {
 		interval: "1h",
 		limit: 100,
-		width: Math.min(getTerminalWidth(), 1023),
+		width: Math.min(paddedWidth, 1023),
 		showTicks: true,
 		mode: "cumulative" as "cumulative" | "bucket",
 		timezone: undefined
@@ -399,7 +418,7 @@ async function main() {
 	const outputLines = buildWtftLines(interactions, defaultSettings, {
 		interval: finalInterval,
 		limit: finalLimit,
-		width: Math.min(getTerminalWidth(), 1023),
+		width: Math.min(paddedWidth, 1023),
 		showTicks: finalShowTicks,
 		mode: finalMode,
 		timezone: finalTimezone,
@@ -407,26 +426,30 @@ async function main() {
 	});
 
 	if (!outputLines) {
-		console.log("No binned data found in session logs.");
+		console.log(padStr + "No binned data found in session logs.");
 		process.exit(0);
 	}
 
 	// Session file path above chart (once)
-	console.log(`\x1b[90m${finalSessionPath}\x1b[0m`);
+	console.log(padStr + `\x1b[90m${finalSessionPath}\x1b[0m`);
 	for (const line of outputLines) {
-		console.log(line);
+		console.log(padStr + line);
 	}
 
 	if (showOther) {
 		console.log(""); // empty line spacer
 		const dedupedInteractions = deduplicateInteractions(interactions);
-		const otherOutput = renderOtherHistogram(dedupedInteractions, Math.min(getTerminalWidth(), 1023));
-		console.log(otherOutput);
+		const otherOutput = renderOtherHistogram(dedupedInteractions, Math.min(paddedWidth, 1023));
+		for (const line of otherOutput.split("\n")) {
+			console.log(padStr + line);
+		}
 	}
 
 	if (showTokens) {
-		const tokenOutput = renderTokenSummary(interactions, Math.min(getTerminalWidth(), 1023));
-		console.log(tokenOutput);
+		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023));
+		for (const line of tokenOutput.split("\n")) {
+			console.log(padStr + line);
+		}
 	}
 }
 

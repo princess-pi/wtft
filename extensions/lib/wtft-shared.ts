@@ -1593,6 +1593,8 @@ export interface WatchSettings {
 	showTicks: boolean;
 	timezone?: string;
 	daemonPath?: string; // path to wtft-daemon.mjs (CLI watch mode only)
+	/** Padding spaces on each side of output (default 0 = no padding). */
+	pad?: number;
 	/** True when the user explicitly passed the flag from CLI (overrides file-read settings). */
 	hasInterval?: boolean;
 	hasLimit?: boolean;
@@ -2286,12 +2288,17 @@ export async function watchTagFile(
 		process.stdout.write("\x1b[H\x1b[J");
 
 		const width = getTerminalWidth();
+		const pad = settings.pad || 0;
+		const maxPad = Math.max(0, Math.floor(width / 2) - 1);
+		const actualPad = Math.min(pad, maxPad);
+		const padStr = " ".repeat(actualPad);
+		const paddedWidth = width - 2 * actualPad;
 		const finalInterval = settings.hasInterval ? settings.interval : (sessionInterval ?? settings.interval);
 		const finalLimit = settings.hasLimit ? settings.limit : (sessionLimit ?? settings.limit);
 		const finalMode = settings.hasMode ? settings.mode : (sessionMode ?? settings.mode);
 		const finalShowTicks = settings.hasTicks ? settings.showTicks : (sessionShowTicks ?? settings.showTicks);
 		const finalTimezone = settings.hasTimezone ? settings.timezone : (sessionTimezone ?? settings.timezone);
-		const finalWidth = Math.min(width, 1023);
+		const finalWidth = Math.min(paddedWidth, 1023);
 
 		const defaultSettings = {
 			interval: "1h", limit: 100, width: finalWidth,
@@ -2358,7 +2365,7 @@ export async function watchTagFile(
 		buf.push(`'q' to exit${restartHint}`);
 
 		lastBuffer = [...buf];
-		process.stdout.write(buf.join("\n"));
+		process.stdout.write(buf.map(l => padStr + l).join("\n"));
 		needsRedraw = false;
 		_lastRenderMin = new Date().getMinutes();
 	};

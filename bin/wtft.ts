@@ -365,27 +365,26 @@ async function main() {
 		console.error(`\x1b[33m⚠ Log parser spawn failed, falling back to direct parse: ${err}\x1b[0m`);
 	}
 
-	// Wait for daemon to finish its initial parse. Poll tag file size every
-	// 667ms (daemon poll cycle). When size is stable for 2 consecutive polls
-	// (≥1.3s of no growth), the daemon has caught up. Cap at 30s.
+	// Wait for daemon to finish its initial parse. Poll until the tag file
+	// entry count matches a direct session parse + dedup (the daemon is caught
+	// up). Retry every 667ms, capped at 30s.
 	const waitStart = Date.now();
-	let lastTagSize = 0;
-	let stablePolls = 0;
+	let tagInteractions: Interaction[] = [];
 	while (Date.now() - waitStart < 30000) {
-		let size = 0;
-		try { size = fs.statSync(tagPath).size; } catch {}
-		if (size > 0 && size === lastTagSize) {
-			stablePolls++;
-			if (stablePolls >= 2) break;
-		} else {
-			stablePolls = 0;
+		if (fs.existsSync(tagPath)) {
+			tagInteractions = readClassifiedTagFile(tagPath);
+			if (tagInteractions.length > 0) {
+				const directInteractions = deduplicateInteractions(parseSessionFile(finalSessionPath));
+				if (tagInteractions.length >= directInteractions.length) break;
+			}
 		}
-		lastTagSize = size;
 		await new Promise(r => setTimeout(r, 667));
 	}
 
 	// Read interactions from the classified tag file (harness-agnostic).
-	const interactions: Interaction[] = readClassifiedTagFile(tagPath);
+	const interactions: Interaction[] = tagInteractions.length > 0
+		? tagInteractions
+		: [];
 
 	// If daemon produced nothing, fall back to direct session parsing.
 	if (interactions.length === 0) {

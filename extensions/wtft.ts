@@ -445,8 +445,10 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		const sessionFile = ctx.sessionManager.getSessionFile?.();
 		if (sessionFile) {
 			ensureParserRunning(sessionFile);
-			// Signal daemon to flush immediately so the tag file matches
+			// Give Pi time to flush the session file to disk, then signal
+			// the daemon to parse+flush immediately so the tag file matches
 			// in-memory state before the next CLI wtft / --watch read.
+			await new Promise(r => setTimeout(r, 200));
 			try {
 				const pidPath = getDaemonPidPath(sessionFile);
 				const pid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);

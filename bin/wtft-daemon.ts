@@ -352,15 +352,21 @@ function deduplicateInteractions(interactions) {
 // ---
 
 // Bump when classification heuristics or cost model change (#54, #55, etc).
-const TAGGER_VERSION = "2.3.3";
+const TAGGER_VERSION = "2.3.4";
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const POLL_MS = 667;              // 90bpm throttle
 const IDLE_EXIT_MS = 24 * 60 * 60 * 1000; // exit if session.jsonl unchanged for 24h (polite to ps aux)
 
 function serializeClassified(interaction) {
+  // Round cost to 6 decimal places (micro-cent precision) before JSON
+  // serialization. JSON.parse of a float like 0.004166666666666667
+  // produces a slightly different float — accumulated across dozens of
+  // entries, this causes the CLI to show $0.02-0.04 less than the
+  // in-memory widget which keeps full-precision floats (#72 fix).
+  const cost = Number(interaction.cost.toFixed(6));
   const line: any = {
     t: interaction.timestamp,
-    c: interaction.cost,
+    c: cost,
     cat: classifyInteraction(interaction),
     f: interaction.files.map(f => ({ p: f.path, a: f.action })),
     cmd: interaction.commands,

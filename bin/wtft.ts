@@ -110,6 +110,7 @@ Options:
   -t, --tz <zone>         Specify a display timezone (e.g. America/Los_Angeles).
   -o, --other             Print a histogram of 'Other' commands grouped by semantic sub-category (Build, Lint, System, etc.).
   -T, --tokens            Print a per-model token summary table (deduped) for cross-referencing with /usage.
+  --thinking-budget <n>   Thinking token budget for utilization display in --tokens (default: no budget shown).
   -W, --watch             Watch a session file for changes and re-render the bar chart in real-time.
   -F, --force             Kill the log parser, delete tag files, and force a full session re-parse.
   --pad <N>               Pad output with N spaces on each side (default: 1, max: floor(term/2)-1).
@@ -148,6 +149,7 @@ let daemonRestart = false;
 let daemonStop: string | undefined;
 let debugMode = false;
 let forceReparse = false;
+let thinkingBudget: number | undefined = undefined; // --thinking-budget for --tokens detail (#79)
 
 for (let i = 2; i < process.argv.length; i++) {
 	const arg = process.argv[i];
@@ -211,6 +213,11 @@ for (let i = 2; i < process.argv.length; i++) {
 		debugMode = true;
 	} else if (arg === "--force" || arg === "-F") {
 		forceReparse = true;
+	} else if (arg === "--thinking-budget") {
+		const val = parseInt(process.argv[++i], 10);
+		if (!isNaN(val) && val > 0) {
+			thinkingBudget = val;
+		}
 	} else if (arg === "--dir" || arg === "--cwd") {
 		cwdOverride = process.argv[++i];
 	} else if (arg === "--harness") {
@@ -501,7 +508,7 @@ async function main() {
 	}
 
 	if (showTokens) {
-		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023));
+		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), thinkingBudget);
 		for (const line of tokenOutput.split("\n")) {
 			console.log(padStr + line);
 		}

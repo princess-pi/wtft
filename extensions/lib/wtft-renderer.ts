@@ -475,6 +475,25 @@ export function buildTimelineString(
 	return result;
 }
 
+// CACHE EFFICIENCY HELPER (#79)
+// Compute cache hit rate from a set of interactions:
+//   CH% = cacheReadTokens / (cacheReadTokens + cacheWriteTokens + inputTokens)
+// Returns undefined if no cache-related tokens are present.
+function computeCacheMetrics(interactions: Interaction[]): { hitRate: string; readTokens: string; totalOps: string } | undefined {
+	let cr = 0, cw = 0, input = 0;
+	for (const i of interactions) {
+		cr += i.cacheReadTokens;
+		cw += i.cacheWriteTokens;
+		input += i.inputTokens;
+	}
+	const total = cr + cw + input;
+	if (total === 0) return undefined;
+	const hitRate = ((cr / total) * 100).toFixed(0);
+	return { hitRate, readTokens: formatTokenCount(cr), totalOps: formatTokenCount(total) };
+}
+
+// ---
+
 export function buildWtftLines(
 	interactions: Interaction[],
 	defaultSettings: {
@@ -829,6 +848,12 @@ export function buildWtftLines(
 		}
 	}
 
+	// Cache efficiency metric line (#79) — displayed below bars
+	const cacheMetrics = computeCacheMetrics(interactions);
+	if (cacheMetrics) {
+		widgetLines.push(`\x1b[90m  CH: ${cacheMetrics.hitRate}% cache hit (${cacheMetrics.readTokens} read / ${cacheMetrics.totalOps} total ops)\x1b[0m`);
+	}
+
 	return widgetLines;
 }
 
@@ -1009,7 +1034,7 @@ function shortenModel(model: string): string {
 	return model.replace(/^claude-/, "").replace(/-\d{8}$/, "");
 }
 
-export function renderTokenSummary(interactions: Interaction[], maxWidth: number = 80): string {
+export function renderTokenSummary(interactions: Interaction[], maxWidth: number = 80, thinkingBudget?: number): string {
 	// Dedup before aggregating (caller may pass raw, we ensure consistent counts)
 	const deduped = deduplicateInteractions(interactions);
 
@@ -1084,6 +1109,21 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 			formatTokenCount(agg.cacheWriteTokens).padStart(numColW),
 			formatCost(agg.cost).padStart(numColW)
 		].join(" ") + "\n";
+		// Cache hit rate detail line (#79)
+		const cacheTotal = agg.cacheReadTokens + agg.cacheWriteTokens + agg.inputTokens;
+		if (cacheTotal > 0) {
+			const hitRate = ((agg.cacheReadTokens / cacheTotal) * 100).toFixed(0);
+			out += `  Cache: ${hitRate}% hit (${formatTokenCount(agg.cacheReadTokens)} read / ${formatTokenCount(cacheTotal)} total ops)\n`;
+		}
+		// Thinking detail line (#79)
+		if (agg.reasoningTokens > 0) {
+			if (thinkingBudget && thinkingBudget > 0) {
+				const utilized = ((agg.reasoningTokens / thinkingBudget) * 100).toFixed(0);
+				out += `  Think: ${formatTokenCount(agg.reasoningTokens)} tokens (budget: ${formatTokenCount(thinkingBudget)} — ${utilized}% utilized)\n`;
+			} else {
+				out += `  Think: ${formatTokenCount(agg.reasoningTokens)} tokens\n`;
+			}
+		}
 		totalInput += agg.inputTokens;
 		totalOutput += agg.outputTokens;
 		totalCr += agg.cacheReadTokens;

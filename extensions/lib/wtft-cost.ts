@@ -6,6 +6,34 @@
  *   with DeepSeek peak-valley surge pricing and TTL-split cache-write costs.
  */
 
+// ---
+// PER-REQUEST TOOL PRICING (separate meter from token pricing)
+// ---
+
+/** Per-request fee for web_search tool (Claude models). */
+export const WEB_SEARCH_PRICE = 0.03;  // $0.03 per search request
+/** Per-request fee for web_fetch tool (Claude models). */
+export const WEB_FETCH_PRICE = 0.03;   // $0.03 per fetch request
+
+/**
+ * Calculate the per-request cost of server-side tool usage for a given model.
+ * Only Claude models are billed per-request for web search/fetch today.
+ * DeepSeek, Gemini, and local models do not charge for server_tool_use.
+ */
+export function calculateServerToolCost(
+	model: string,
+	webSearchRequests: number,
+	webFetchRequests: number
+): number {
+	const m = (model || "").toLowerCase();
+	// Only Claude charges per-request for server tools.
+	// Other providers (DeepSeek, Gemini, local) don't — return 0.
+	if (!m.includes("claude") && !/\b(haiku|sonnet|opus)\b/.test(m)) {
+		return 0;
+	}
+	return (webSearchRequests * WEB_SEARCH_PRICE) + (webFetchRequests * WEB_FETCH_PRICE);
+}
+
 export function getDeepSeekPeakMultiplier(timestamp?: number): number {
 	const ts = timestamp || Date.now();
 	const d = new Date(ts);

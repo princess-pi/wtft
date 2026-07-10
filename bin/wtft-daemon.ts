@@ -57,6 +57,10 @@ function serializeClassified(interaction) {
   if (interaction.cacheReadTokens > 0) line.cr = interaction.cacheReadTokens;
   if (interaction.cacheWriteTokens > 0) line.cw = interaction.cacheWriteTokens;
   if (interaction.reasoningTokens > 0) line.rs = interaction.reasoningTokens;
+  // Server-side tool requests (per-request billed, #73)
+  if (interaction.serverToolCost) line.sc = Number(interaction.serverToolCost.toFixed(6));
+  if (interaction.webSearchRequests > 0) line.ws = interaction.webSearchRequests;
+  if (interaction.webFetchRequests > 0) line.wf = interaction.webFetchRequests;
   return JSON.stringify(line) + "\n";
 }
 

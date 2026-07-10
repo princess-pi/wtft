@@ -271,6 +271,9 @@ export function classifiedToInteraction(obj: any): Interaction | null {
 		cacheReadTokens: obj.cr || 0,
 		cacheWriteTokens: obj.cw || 0,
 		reasoningTokens: obj.rs || 0,
+		webSearchRequests: obj.ws || 0,
+		webFetchRequests: obj.wf || 0,
+		serverToolCost: obj.sc || 0,
 		_cat: obj.cat || undefined,
 	};
 }

@@ -9,7 +9,7 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { calculateClaudeCost } from "./wtft-cost.js";
+import { calculateClaudeCost, calculateServerToolCost } from "./wtft-cost.js";
 function extractFilesFromBashCommand(command: string, files: { path: string; action: "read" | "write" }[]) {
 	// Heuristically extract the file path to ensure these turns don't fall through to "other" classification.
 	const cmdLines = command.split('\n');
@@ -99,6 +99,15 @@ export function parseEntryToInteraction(entry: any): Interaction | null {
 			cost = calculateClaudeCost(assistantMsg.model, normalizedUsage, timestamp);
 		}
 
+		// Server-side tool requests: per-request billed, separate meter from tokens.
+		// Claude Code surfaces web_search / web_fetch via usage.server_tool_use (#73).
+		const serverToolRequests = usage.server_tool_use || {};
+		const serverToolCost = calculateServerToolCost(
+			assistantMsg.model || "",
+			serverToolRequests.web_search_requests || 0,
+			serverToolRequests.web_fetch_requests || 0
+		);
+
 		const files: { path: string; action: "read" | "write" }[] = [];
 		const commands: string[] = [];
 		const texts: string[] = [];
@@ -151,6 +160,9 @@ export function parseEntryToInteraction(entry: any): Interaction | null {
 			cacheReadTokens: (usage.cache_read_input_tokens || usage.cacheRead || 0) as number,
 			cacheWriteTokens: (usage.cache_creation_input_tokens || usage.cacheWrite || 0) as number,
 			reasoningTokens: (usage.reasoning || 0) as number,
+			webSearchRequests: (serverToolRequests.web_search_requests || 0) as number,
+			webFetchRequests: (serverToolRequests.web_fetch_requests || 0) as number,
+			serverToolCost,
 			files, commands, texts };
 	}
 	

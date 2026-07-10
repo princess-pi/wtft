@@ -523,6 +523,8 @@ export function buildWtftLines(
 	const binMap = new Map<string, Bin>();
 	let totalSessionCost = 0;
 
+	const ALL_CATEGORIES = ["spec", "code", "mixed", "tests", "research", "git", "grep", "web", "prompt", "other"] as Category[];
+
 	for (const interaction of interactions) {
 		const classification = classifyInteraction(interaction);
 		const { key, label, dateStr } = getBinInfo(interaction.timestamp, intervalConfig, tz);
@@ -531,7 +533,7 @@ export function buildWtftLines(
 		let bin = binMap.get(key);
 		if (!bin) {
 			const costs = {} as Record<Category, number>;
-			for (const cat of ["spec", "code", "mixed", "tests", "research", "git", "grep", "prompt", "other"] as Category[]) {
+			for (const cat of ALL_CATEGORIES) {
 				costs[cat] = 0;
 			}
 			bin = { label, dateStr, costs, total_cost: 0 };
@@ -540,6 +542,14 @@ export function buildWtftLines(
 
 		bin.costs[classification] += interaction.cost;
 		bin.total_cost += interaction.cost;
+
+		// Server-side tool cost is a separate line item, not token spend (#73).
+		// Attribute it to the "web" category independently of file classification.
+		if (interaction.serverToolCost) {
+			bin.costs["web"] += interaction.serverToolCost;
+			bin.total_cost += interaction.serverToolCost;
+			totalSessionCost += interaction.serverToolCost;
+		}
 	}
 
 	// Sort bins chronological (ascending)
@@ -550,7 +560,7 @@ export function buildWtftLines(
 	// Apply mode conversions
 	if (mode === "cumulative") {
 		const runningCosts = {} as Record<Category, number>;
-		for (const cat of ["spec", "code", "mixed", "tests", "research", "git", "grep", "prompt", "other"] as Category[]) {
+		for (const cat of ALL_CATEGORIES) {
 			runningCosts[cat] = 0;
 		}
 		let running_total = 0;
@@ -631,6 +641,7 @@ export function buildWtftLines(
 		`\x1b[38;5;134m█\x1b[0mResearch`,
 		`\x1b[38;5;73m█\x1b[0mGit`,
 		`\x1b[38;5;67m█\x1b[0mGrep`,
+		`\x1b[38;5;209m▓\x1b[0mWeb`,
 		`\x1b[38;5;168m░\x1b[0mPrompt`,
 		`\x1b[38;5;238m░\x1b[0mOther`
 	];
@@ -723,6 +734,9 @@ export function buildWtftLines(
 			if (chars.grep > 0) {
 				barStr += `\x1b[38;5;67m${"█".repeat(chars.grep)}\x1b[0m`; // Grep Work (Steel Blue)
 			}
+			if (chars.web > 0) {
+				barStr += `\x1b[38;5;209m${"▓".repeat(chars.web)}\x1b[0m`; // Web Tool Spend (Orange-Gold)
+			}
 			if (chars.prompt > 0) {
 				barStr += `\x1b[38;5;168m${"░".repeat(chars.prompt)}\x1b[0m`; // Prompt Work (Matte Rose Pink)
 			}
@@ -736,6 +750,7 @@ export function buildWtftLines(
 				{ cat: "other", color: "\x1b[38;5;238m", char: "░" },
 				{ cat: "prompt", color: "\x1b[38;5;168m", char: "░" },
 				{ cat: "grep", color: "\x1b[38;5;67m", char: "█" },
+				{ cat: "web", color: "\x1b[38;5;209m", char: "▓" },
 				{ cat: "git", color: "\x1b[38;5;73m", char: "█" },
 				{ cat: "research", color: "\x1b[38;5;134m", char: "█" },
 				{ cat: "tests", color: "\x1b[38;5;223m", char: "█" },

@@ -47,8 +47,6 @@ export async function watchMode(
 
 	let lastBuffer: string[] = []; // saved for exit printout
 	let lastLineCount = 0;         // visual lines rendered (for in-place overwrite)
-	// Start chart on a fresh line below the prompt.
-	process.stdout.write("\n");
 
 	// Shared exit: clears chart output, restores terminal, prints final chart.
 	const exitWatch = () => {
@@ -620,11 +618,6 @@ export async function watchTagFile(
 	// clear previous render on each update, clean up on exit.
 	let lastLineCount = 0;
 	hideCursor();
-	// Emit a newline so the chart starts on a fresh line below the prompt
-	// (matching session-selector behavior). The newline pushes the prompt
-	// into terminal scrollback — not part of the clearable chart region.
-	process.stdout.write("\n");
-
 	let lastBuffer: string[] = [];
 
 	// Shared exit: clears chart output, restores terminal, prints final chart.

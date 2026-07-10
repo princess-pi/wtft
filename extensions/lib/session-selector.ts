@@ -100,9 +100,27 @@ export function discoverSessions(
 		}
 	};
 
+	// Pi session directory slug for CWD filtering.
+	// Pi directory names look like "--home-princess-pi-git-projects-princess-pi-packages--"
+	// which is "--" + cwdSlug + "--". Match by containment.
+	const piCwdSlug = cwdOverride ? path.resolve(cwdOverride).replace(/[/\\]/g, "-") : null;
+
 	try {
 		if (harness === "auto" || harness === "pi") {
-			if (fs.existsSync(piSessionsDir)) walk(piSessionsDir, "pi");
+			if (fs.existsSync(piSessionsDir)) {
+				// When --dir is specified, only include Pi sessions from the
+				// matching project directory, not all Pi sessions globally.
+				if (piCwdSlug) {
+					const entries = fs.readdirSync(piSessionsDir, { withFileTypes: true });
+					for (const entry of entries) {
+						if (entry.isDirectory() && entry.name.includes(piCwdSlug)) {
+							walk(path.join(piSessionsDir, entry.name), "pi");
+						}
+					}
+				} else {
+					walk(piSessionsDir, "pi");
+				}
+			}
 		}
 		if (harness === "auto" || harness === "claude-code") {
 			for (const dir of claudeSessionsDirs) {

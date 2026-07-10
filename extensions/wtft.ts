@@ -462,31 +462,26 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			ensureParserRunning(sessionFile);
 		}
 
-		// Reconstruct historical interactions from the daemon's classified
-		// tag file — same source as the CLI, ensuring widget and CLI totals
-		// never diverge. Fall back to branch walk if the daemon hasn't
-		// written the tag file yet (e.g., first session start).
+		// Reconstruct historical interactions from the session JSONL file.
+		// We use the session file directly (not the tag file) because the tag
+		// file may be incomplete if the daemon is mid-restart after an idle
+		// timeout (daemon re-parses from scratch, tag file is partial).
+		// The session file is always complete and instantly available.
+		// The tag file remains the source for CLI cross-harness use.
 		_allInteractions = [];
-		if (sessionFile) {
-			const tagPath = getTagPath(sessionFile);
+		if (sessionFile && fs.existsSync(sessionFile)) {
+			_allInteractions = parseSessionFile(sessionFile);
+		} else {
+			// No session file — try tag file as fallback
+			const tagPath = getTagPath(sessionFile!);
 			const tagInteractions = readClassifiedTagFile(tagPath);
 			if (tagInteractions.length > 0) {
 				_allInteractions = tagInteractions;
-			}
-		}
-		// Fallback: if tag file is empty, parse the full session JSONL.
-		// Avoids getBranch() which returns compacted entries (fewer than full JSONL),
-		// causing widget/CLI cost divergence (#86).
-		if (_allInteractions.length === 0) {
-			if (sessionFile && fs.existsSync(sessionFile)) {
-				// Parse full JSONL — same source as CLI, avoids compaction truncation
-				_allInteractions = parseSessionFile(sessionFile);
 			} else {
-				// Last resort: branch walk (no session file available)
+				// Last resort: branch walk
 				const branch = ctx.sessionManager.getBranch();
 				let branchThinkingLevel: string | undefined;
 				for (let i = 0; i < branch.length; i++) {
-					// Track thinking level changes (#77)
 					if (branch[i].type === "thinking_level_change" && branch[i].thinkingLevel) {
 						branchThinkingLevel = branch[i].thinkingLevel;
 						continue;

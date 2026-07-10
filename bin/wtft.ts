@@ -418,12 +418,21 @@ async function main() {
 	// up). Retry every 667ms, capped at 30s.
 	const waitStart = Date.now();
 	let tagInteractions: Interaction[] = [];
+	let directCost = 0;
 	while (Date.now() - waitStart < 30000) {
 		if (fs.existsSync(tagPath)) {
 			tagInteractions = readClassifiedTagFile(tagPath);
 			if (tagInteractions.length > 0) {
-				const directInteractions = deduplicateInteractions(parseSessionFile(finalSessionPath));
-				if (tagInteractions.length >= directInteractions.length) break;
+				// Compute direct parse cost once (expensive, so cache it).
+				if (directCost === 0) {
+					const directInteractions = deduplicateInteractions(parseSessionFile(finalSessionPath));
+					directCost = directInteractions.reduce((sum, i) => sum + i.cost, 0);
+				}
+				// Wait for daemon to catch up: compare total cost, not entry count.
+				// Classified entries may split interactions into multiple lines,
+				// so count-based comparison can diverge. Cost is the real target.
+				const tagCost = tagInteractions.reduce((sum, i) => sum + i.cost, 0);
+				if (tagCost >= directCost - 0.001) break; // within 0.1¢
 			}
 		}
 		await new Promise(r => setTimeout(r, 667));

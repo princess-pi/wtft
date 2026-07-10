@@ -25,7 +25,7 @@ import {
 	getTerminalWidth
 } from "../extensions/lib/wtft-shared.ts";
 import { execSync, spawn } from "node:child_process";
-import { readConfig } from "../extensions/lib/config.ts";
+import { loadConfig, readConfig } from "../extensions/lib/config.ts";
 import {
 	discoverSessions,
 	selectSessionPrompt
@@ -35,12 +35,20 @@ import {
 // DEFAULT CONFIG
 // ---
 
-let intervalStr = "1h";
-let limit = 100; // Large default for CLI
-let mode: "bucket" | "cumulative" = "cumulative";
+// Load config file (#20) — overrides hardcoded defaults, CLI flags override both
+const cfg = loadConfig("wtft", { interval: "1h", limit: 100, mode: "cumulative" }) as {
+	interval?: string;
+	limit?: number;
+	mode?: "bucket" | "cumulative";
+	timezone?: string;
+};
+
+let intervalStr = String(cfg.interval ?? "1h");
+let limit = Number(cfg.limit ?? 100);
+let mode: "bucket" | "cumulative" = (cfg.mode as "bucket" | "cumulative") ?? "cumulative";
 let showTicks = true;
 let targetSessionPath: string | undefined = undefined;
-let timezone: string | undefined = undefined;
+let timezone: string | undefined = cfg.timezone || undefined;
 let harnessOption: "auto" | "pi" | "claude-code" = "auto";
 let cwdOverride: string | undefined = undefined;
 let showOther = false;

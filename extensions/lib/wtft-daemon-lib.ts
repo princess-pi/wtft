@@ -10,7 +10,7 @@ import {
 	deduplicateInteractions,
 	buildWtftLines
 } from "./wtft-shared.js";
-import { showCursor, hideCursor, enterRawStdin } from "./tty-helpers.js";
+import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
 export interface WatchSettings {
 	interval: string;
 	limit: number;
@@ -42,8 +42,7 @@ export async function watchMode(
 	let lastSize = 0;
 	let needsRedraw = true;
 	let _lastRenderMin = -1;
-	// In-place rendering (save cursor, re-render over same region, restore on exit).
-	process.stdout.write("\x1b7");
+	// In-place rendering (track visual lines, clear previous render each update).
 	hideCursor();
 
 	let lastBuffer: string[] = []; // saved for exit printout
@@ -51,7 +50,7 @@ export async function watchMode(
 
 	// Shared exit: clears chart output, restores terminal, prints final chart.
 	const exitWatch = () => {
-		process.stdout.write("\x1b8\x1b[J");
+		clearPreviousLines(lastLineCount);
 		showCursor();
 		cleanupStdin();
 		if (lastBuffer.length > 0) {
@@ -145,8 +144,8 @@ export async function watchMode(
 	process.stdout.write("\x1b7");
 
 	const render = () => {
-		// Restore cursor to save point + clear below — in-place re-render
-		process.stdout.write("\x1b8\x1b[J");
+		// Clear previous render's output lines, then re-render in place.
+		clearPreviousLines(lastLineCount);
 
 		const width = getTerminalWidth();
 		const finalInterval = settings.hasInterval ? settings.interval : (sessionInterval ?? settings.interval);
@@ -188,10 +187,10 @@ export async function watchMode(
 		buf.push(`'q' to exit`);
 
 		lastBuffer = [...buf]; // save for exit printout
-		// Compute visual line count for in-place overwrite on next render
-		const cols = process.stdout.columns || 80;
-		lastLineCount = buf.join("\n").split("\n").length;
-		process.stdout.write(buf.join("\n"));
+		const output = buf.join("\n");
+		process.stdout.write(output);
+		// Track visual line count (accounts for wrapped lines) for in-place overwrite
+		lastLineCount = visualLineCount(output, width);
 		needsRedraw = false;
 		_lastRenderMin = new Date().getMinutes();
 	};
@@ -615,9 +614,9 @@ export async function watchTagFile(
 	let needsRedraw = true;
 	let _lastRenderMin = -1;
 
-	// In-place rendering (no alt screen): save cursor, re-render over
-	// the same region, restore on exit (#73 repair).
-	process.stdout.write("\x1b7");
+	// In-place rendering (no alt screen): track visual line count,
+	// clear previous render on each update, clean up on exit.
+	let lastLineCount = 0;
 	hideCursor();
 
 	let lastBuffer: string[] = [];
@@ -625,7 +624,7 @@ export async function watchTagFile(
 	// Shared exit: clears chart output, restores terminal, prints final chart.
 	const exitWatch = () => {
 		if (watcher) watcher.close();
-		process.stdout.write("\x1b8\x1b[J");
+		clearPreviousLines(lastLineCount);
 		showCursor();
 		cleanupStdin();
 		if (lastBuffer.length > 0) {
@@ -762,8 +761,8 @@ export async function watchTagFile(
 	}
 
 	const render = () => {
-		// Restore cursor to save point + clear below — in-place re-render (#73 repair)
-		process.stdout.write("\x1b8\x1b[J");
+		// Clear previous render's output lines, then re-render in place.
+		clearPreviousLines(lastLineCount);
 
 		const width = getTerminalWidth();
 		const pad = settings.pad || 0;
@@ -841,7 +840,9 @@ export async function watchTagFile(
 		buf.push(`'q' to exit${restartHint}`);
 
 		lastBuffer = [...buf];
-		process.stdout.write(buf.map(l => padStr + l).join("\n"));
+		const output = buf.map(l => padStr + l).join("\n");
+		process.stdout.write(output);
+		lastLineCount = visualLineCount(output, width);
 		needsRedraw = false;
 		_lastRenderMin = new Date().getMinutes();
 	};

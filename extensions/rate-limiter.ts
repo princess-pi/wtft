@@ -211,7 +211,6 @@ function aggregateActiveTpm(activeFiles: FileInfo[], hostingSessionId: string | 
 
   return modelStats;
 }
-}
 
 interface CacheSchema {
   timestamp: number;

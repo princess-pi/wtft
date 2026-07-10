@@ -17,6 +17,8 @@ import {
 	watchMode,
 	watchTagFile,
 	readClassifiedTagFile,
+	getDaemonPidPath,
+	getTagPath,
 	WTFT_TAGGER_VERSION,
 	type WatchSettings,
 	type Interaction,
@@ -109,6 +111,7 @@ Options:
   -o, --other             Print a histogram of 'Other' commands grouped by semantic sub-category (Build, Lint, System, etc.).
   -T, --tokens            Print a per-model token summary table (deduped) for cross-referencing with /usage.
   -W, --watch             Watch a session file for changes and re-render the bar chart in real-time.
+  -F, --force             Kill the log parser, delete tag files, and force a full session re-parse.
   --pad <N>               Pad output with N spaces on each side (default: 1, max: floor(term/2)-1).
                           Makes CLI output width match Pi TUI widget in the same terminal.
   --debug                 Print diagnostic cost totals (tag file vs direct parse + dedup).
@@ -144,6 +147,7 @@ let daemonCleanup = false;
 let daemonRestart = false;
 let daemonStop: string | undefined;
 let debugMode = false;
+let forceReparse = false;
 
 for (let i = 2; i < process.argv.length; i++) {
 	const arg = process.argv[i];
@@ -205,6 +209,8 @@ for (let i = 2; i < process.argv.length; i++) {
 		}
 	} else if (arg === "--debug") {
 		debugMode = true;
+	} else if (arg === "--force" || arg === "-F") {
+		forceReparse = true;
 	} else if (arg === "--dir" || arg === "--cwd") {
 		cwdOverride = process.argv[++i];
 	} else if (arg === "--harness") {
@@ -283,6 +289,33 @@ async function main() {
 	if (!finalSessionPath || !fs.existsSync(finalSessionPath)) {
 		console.error("❌ Error: Selected session log file path is invalid or does not exist.");
 		process.exit(1);
+	}
+
+	// ---
+	// --force: kill existing daemon, delete tag file, re-parse from scratch.
+	// ---
+	if (forceReparse) {
+		const forceTagPath = getTagPath(finalSessionPath);
+		const forcePidPath = getDaemonPidPath(finalSessionPath);
+		// Kill existing daemon
+		try {
+			const pid = parseInt(fs.readFileSync(forcePidPath, "utf8").trim(), 10);
+			if (pid > 0) {
+				try { process.kill(pid, "SIGTERM"); } catch {}
+			}
+			try { fs.unlinkSync(forcePidPath); } catch {}
+		} catch {}
+		// Delete tag file (and any stale-version tag files)
+		const forceTagsDir = path.dirname(forceTagPath);
+		const forceSessionBase = path.basename(finalSessionPath);
+		try {
+			for (const f of fs.readdirSync(forceTagsDir)) {
+				if (f.startsWith(forceSessionBase + ".wtft-tag.v") && f.endsWith(".jsonl")) {
+					fs.unlinkSync(path.join(forceTagsDir, f));
+				}
+			}
+		} catch {}
+		console.error(`\x1b[33mForce re-parse: killed daemon + deleted tag files for ${path.basename(finalSessionPath)}\x1b[0m`);
 	}
 
 	// ---

@@ -47,6 +47,9 @@ export async function watchMode(
 
 	let lastBuffer: string[] = []; // saved for exit printout
 	let lastLineCount = 0;         // visual lines rendered (for in-place overwrite)
+	// Start chart on a fresh line below the prompt.
+	process.stdout.write("\n");
+	lastLineCount = 1;
 
 	// Shared exit: clears chart output, restores terminal, prints final chart.
 	const exitWatch = () => {
@@ -618,6 +621,11 @@ export async function watchTagFile(
 	// clear previous render on each update, clean up on exit.
 	let lastLineCount = 0;
 	hideCursor();
+	// Emit a newline so the chart starts on a fresh line below the prompt
+	// (matching session-selector behavior). Prevents the first render
+	// from overwriting the shell prompt and throw off clearPreviousLines.
+	process.stdout.write("\n");
+	lastLineCount = 1; // the empty line counts as one visual line
 
 	let lastBuffer: string[] = [];
 
@@ -835,7 +843,7 @@ export async function watchTagFile(
 
 		// Footer row
 		const restartHint = settings.daemonPath
-			? (daemonDead ? `, \x1b[31m'r' to restart parser\x1b[0m` : `, using v${WTFT_TAGGER_VERSION}, 'r' to restart parser`)
+			? `, using v${WTFT_TAGGER_VERSION}, ` + (daemonDead ? `\x1b[31m'r' to restart\x1b[0m` : `'r' to restart`)
 			: "";
 		buf.push(`'q' to exit${restartHint}`);
 

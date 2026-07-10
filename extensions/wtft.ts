@@ -22,6 +22,7 @@ import {
 	getModelCacheTtlMs,
 	type DaemonStatus
 } from "./lib/wtft-shared.js";
+import { parseSessionFile } from "./lib/wtft-parser.js";
 import { readConfig, writeConfig, hasConfig } from "./lib/config.js";
 import { BurstAccumulator } from "./lib/wtft-burst.js";
 // ---
@@ -460,19 +461,27 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				_allInteractions = tagInteractions;
 			}
 		}
-		// Fallback: if tag file is empty, walk the branch directly.
+		// Fallback: if tag file is empty, parse the full session JSONL.
+		// Avoids getBranch() which returns compacted entries (fewer than full JSONL),
+		// causing widget/CLI cost divergence (#86).
 		if (_allInteractions.length === 0) {
-			const branch = ctx.sessionManager.getBranch();
-			let branchThinkingLevel: string | undefined;
-			for (let i = 0; i < branch.length; i++) {
-				// Track thinking level changes (#77)
-				if (branch[i].type === "thinking_level_change" && branch[i].thinkingLevel) {
-					branchThinkingLevel = branch[i].thinkingLevel;
-					continue;
-				}
-				const interaction = parseEntryToInteraction(branch[i], branchThinkingLevel);
-				if (interaction) {
-					_allInteractions.push(interaction);
+			if (sessionFile && fs.existsSync(sessionFile)) {
+				// Parse full JSONL — same source as CLI, avoids compaction truncation
+				_allInteractions = parseSessionFile(sessionFile);
+			} else {
+				// Last resort: branch walk (no session file available)
+				const branch = ctx.sessionManager.getBranch();
+				let branchThinkingLevel: string | undefined;
+				for (let i = 0; i < branch.length; i++) {
+					// Track thinking level changes (#77)
+					if (branch[i].type === "thinking_level_change" && branch[i].thinkingLevel) {
+						branchThinkingLevel = branch[i].thinkingLevel;
+						continue;
+					}
+					const interaction = parseEntryToInteraction(branch[i], branchThinkingLevel);
+					if (interaction) {
+						_allInteractions.push(interaction);
+					}
 				}
 			}
 		}

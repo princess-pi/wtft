@@ -480,6 +480,41 @@ export function renderDaemonStatus(status: DaemonStatus, restarting = false): st
 	return "  \x1b[32m●\x1b[0m live";
 }
 
+/**
+ * Fallback: scan the session file backwards for the most recent assistant
+ * message's model when the daemon tag file doesn't have a recent classified
+ * entry with model info. Used when the daemon is idle (only heartbeats in
+ * the tag file) so the cache TTL countdown can still display correctly.
+ */
+function getModelFromSessionFile(sessionPath: string): string | undefined {
+	try {
+		const stat = fs.statSync(sessionPath);
+		const readStart = Math.max(0, stat.size - 8192);
+		const fd = fs.openSync(sessionPath, "r");
+		const buf = Buffer.alloc(stat.size - readStart);
+		fs.readSync(fd, buf, 0, buf.length, readStart);
+		fs.closeSync(fd);
+		const lines = buf.toString("utf8").split("\n");
+		// Scan backwards for the most recent assistant message with model info.
+		for (let i = lines.length - 1; i >= 0; i--) {
+			const line = lines[i].trim();
+			if (!line) continue;
+			try {
+				const entry = JSON.parse(line);
+				// Pi schema: { type: "message", message: { role: "assistant", model: "..." } }
+				if (entry.type === "message" && entry.message?.role === "assistant" && entry.message?.model) {
+					return entry.message.model;
+				}
+				// Claude Code schema: { type: "assistant", message: { role: "assistant", model: "..." } }
+				if (entry.type === "assistant" && entry.message?.role === "assistant" && entry.message?.model) {
+					return entry.message.model;
+				}
+			} catch { continue; }
+		}
+	} catch { /* session file unreadable */ }
+	return undefined;
+}
+
 export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonStatus {
 	// Fast path: check if PID file exists and process is alive.
 	const pidPath = getDaemonPidPath(sessionPath);
@@ -529,6 +564,9 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 					} catch { continue; }
 				}
 				if (idleMs !== undefined && idleMs >= IDLE_THRESHOLD_MS) {
+					// If the tag file had no recent classified entry with model info
+					// (only heartbeats), fall back to the session file.
+					if (!lastModel) lastModel = getModelFromSessionFile(sessionPath);
 					const cacheTtlMs = lastModel ? getModelCacheTtlMs(lastModel) : null;
 					return { alive: true, idle: true, idleMs, cacheTtlMs };
 				}

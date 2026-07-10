@@ -8,6 +8,7 @@ import { getVisualLength, getTerminalWidth } from "./wtft-shared.js";
 import {
 	parseEntryToInteraction,
 	deduplicateInteractions,
+	classifyInteraction,
 	buildWtftLines
 } from "./wtft-shared.js";
 import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
@@ -247,6 +248,41 @@ export async function watchMode(
 // The daemon writes pre-classified, pre-costed entries to
 // wtft-tags/<session>.wtft-tag.v{N}.jsonl. These helpers read them back
 // without re-parsing raw harness entries or re-calculating costs.
+
+/**
+ * Serialize an Interaction to a classified tag-file line.
+ *
+ * This is the single source of truth for the tag-file wire format.
+ * Must stay in sync with classifiedToInteraction (below).
+ * When adding a field, update BOTH functions in this file.
+ */
+export function serializeClassified(interaction: Interaction): string {
+	// Round cost to 6 decimal places — the daemon cost calculator
+	// produces a slightly different float than the in-memory widget.
+	// Without rounding, accumulated drift causes $0.02-0.04 mismatches.
+	const cost = Number(interaction.cost.toFixed(6));
+	const line: any = {
+		t: interaction.timestamp,
+		c: cost,
+		cat: classifyInteraction(interaction),
+		f: interaction.files.map(f => ({ p: f.path, a: f.action === "write" ? "w" : "r" })),
+		cmd: interaction.commands,
+	};
+	// Include message.id for cross-run dedup in tag-file consumers (#65)
+	if (interaction.messageId) line.id = interaction.messageId;
+	// Include model/token data when available (for -T summary table)
+	if (interaction.model) line.m = interaction.model;
+	if (interaction.inputTokens > 0) line.in = interaction.inputTokens;
+	if (interaction.outputTokens > 0) line.out = interaction.outputTokens;
+	if (interaction.cacheReadTokens > 0) line.cr = interaction.cacheReadTokens;
+	if (interaction.cacheWriteTokens > 0) line.cw = interaction.cacheWriteTokens;
+	if (interaction.reasoningTokens > 0) line.rs = interaction.reasoningTokens;
+	// Server-side tool requests (per-request billed, #73)
+	if (interaction.serverToolCost) line.sc = Number(interaction.serverToolCost.toFixed(6));
+	if (interaction.webSearchRequests > 0) line.ws = interaction.webSearchRequests;
+	if (interaction.webFetchRequests > 0) line.wf = interaction.webFetchRequests;
+	return JSON.stringify(line) + "\n";
+}
 
 /**
  * Convert a single classified tag-file line to an Interaction.

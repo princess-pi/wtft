@@ -17,8 +17,8 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
 	parseEntryToInteraction,
-	classifyInteraction,
 	deduplicateInteractions,
+	serializeClassified,
 	WTFT_TAGGER_VERSION as TAGGER_VERSION
 } from "../extensions/lib/wtft-shared.js";
 
@@ -33,36 +33,6 @@ import {
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const POLL_MS = 667;              // 90bpm throttle
 const IDLE_EXIT_MS = 24 * 60 * 60 * 1000; // exit if session.jsonl unchanged for 24h (polite to ps aux)
-
-function serializeClassified(interaction) {
-  // Round cost to 6 decimal places (micro-cent precision) before JSON
-  // serialization. JSON.parse of a float like 0.004166666666666667
-  // produces a slightly different float — accumulated across dozens of
-  // entries, this causes the CLI to show $0.02-0.04 less than the
-  // in-memory widget which keeps full-precision floats (#72 fix).
-  const cost = Number(interaction.cost.toFixed(6));
-  const line: any = {
-    t: interaction.timestamp,
-    c: cost,
-    cat: classifyInteraction(interaction),
-    f: interaction.files.map(f => ({ p: f.path, a: f.action })),
-    cmd: interaction.commands,
-  };
-  // Include message.id for cross-run dedup in tag-file consumers (#65)
-  if (interaction.messageId) line.id = interaction.messageId;
-  // Include model/token data when available (for -T summary table)
-  if (interaction.model) line.m = interaction.model;
-  if (interaction.inputTokens > 0) line.in = interaction.inputTokens;
-  if (interaction.outputTokens > 0) line.out = interaction.outputTokens;
-  if (interaction.cacheReadTokens > 0) line.cr = interaction.cacheReadTokens;
-  if (interaction.cacheWriteTokens > 0) line.cw = interaction.cacheWriteTokens;
-  if (interaction.reasoningTokens > 0) line.rs = interaction.reasoningTokens;
-  // Server-side tool requests (per-request billed, #73)
-  if (interaction.serverToolCost) line.sc = Number(interaction.serverToolCost.toFixed(6));
-  if (interaction.webSearchRequests > 0) line.ws = interaction.webSearchRequests;
-  if (interaction.webFetchRequests > 0) line.wf = interaction.webFetchRequests;
-  return JSON.stringify(line) + "\n";
-}
 
 // ---
 // DAEMON STATE

@@ -21,11 +21,20 @@ import {
 	type DaemonStatus
 } from "./lib/wtft-shared.js";
 import { readConfig, writeConfig, hasConfig } from "./lib/config.js";
+import { BurstAccumulator } from "./lib/wtft-burst.js";
 // ---
 // LOG PARSER STATE (keeps wtft-tag file warm for CLI use)
 // ---
 let _parserSessionPath: string | null = null;
 let _parserSpawned = false;
+
+// ---
+// BURST-AWARE ACCUMULATION STATE (#78)
+// _allInteractions: merged history (branch walk from session_start + flushed bursts)
+// _burstAccumulator: per-burst incremental accumulator, flushed on agent_settled
+// ---
+let _allInteractions: Interaction[] = [];
+let _burstAccumulator = new BurstAccumulator();
 
 function ensureParserRunning(sessionPath: string): void {
 	// Same session, already spawned — but verify daemon is actually alive.
@@ -323,19 +332,10 @@ function buildWtftLines(
 		forceLegendRow?: boolean;
 	}
 ): string[] | null {
-	// Read from in-memory session (always complete, no concurrent-write race).
-	// The CLI wtft reads from the session file on disk — identical at turn
-	// boundaries when Pi is idle. During active turns, the widget may show
-	// the current interaction's cost before it's flushed to disk.
-	const branch = ctx.sessionManager.getBranch();
-	const interactions: Interaction[] = [];
-
-	for (let i = 0; i < branch.length; i++) {
-		const interaction = parseEntryToInteraction(branch[i]);
-		if (interaction) {
-			interactions.push(interaction);
-		}
-	}
+	// Use pre-accumulated interactions (branch walk on session_start +
+	// incremental burst accumulation from message_end). O(1) at widget
+	// render time instead of O(n) branch walk on every refresh (#78).
+	const interactions = _allInteractions;
 
 	return sharedBuildWtftLines(interactions, getSettings(ctx), opts);
 }
@@ -439,6 +439,20 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		if (sessionFile) {
 			ensureParserRunning(sessionFile);
 		}
+
+		// Reconstruct historical interactions from the full session branch.
+		// This O(n) walk happens once at session_start; after this, all
+		// widget renders use the pre-built _allInteractions array (#78).
+		_allInteractions = [];
+		const branch = ctx.sessionManager.getBranch();
+		for (let i = 0; i < branch.length; i++) {
+			const interaction = parseEntryToInteraction(branch[i]);
+			if (interaction) {
+				_allInteractions.push(interaction);
+			}
+		}
+		_burstAccumulator = new BurstAccumulator();
+
 		// Auto-show widget if user has configured wtft at least once (#72)
 		if (hasConfig("wtft")) {
 			updateWtftWidget(ctx, pi);
@@ -456,7 +470,39 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	// 2. Auto-refresh on turn completion (zero token cost)
+	// 2. Incremental accumulation: classify each assistant message as it
+	//    completes, without walking the branch (#78).
+	pi.on("message_end", async (event, ctx) => {
+		_wtftCtx = ctx;
+		// Only accumulate assistant messages with usage data.
+		if ((event.message as any).role !== "assistant") return;
+		const usage = (event.message as any).usage;
+		if (!usage) return;
+		// Wrap in Pi-schema entry form so parseEntryToInteraction works.
+		const fakeEntry = { type: "message", message: event.message };
+		_burstAccumulator.accumulateFromEntry(fakeEntry);
+	});
+
+	// 3. Burst boundary: agent_settled fires once per prompt after all
+	//    retries, compactions, and follow-ups are done. This is the
+	//    definitive per-prompt boundary — render the widget once with
+	//    complete data (#78).
+	pi.on("agent_settled", async (_event, ctx) => {
+		_wtftCtx = ctx;
+		// Flush burst → persistent interaction store
+		const flushed = _burstAccumulator.flush();
+		_allInteractions.push(...flushed);
+
+		const current = getSettings(ctx);
+		if (current.visible) {
+			updateWtftWidget(ctx, pi);
+		}
+	});
+
+	// 4. Daemon health check only — no widget refresh here.
+	//    agent_end fires multiple times per burst (retry, compaction+retry,
+	//    follow-up). Widget flicker from mid-burst refreshes is eliminated
+	//    by moving rendering to agent_settled (#78).
 	pi.on("agent_end", async (_event, ctx) => {
 		_wtftCtx = ctx;
 		// Revive dead daemon so CLI wtft --watch stays live after idle timeout.
@@ -464,13 +510,9 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		if (sessionFile) {
 			ensureParserRunning(sessionFile);
 		}
-		const current = getSettings(ctx);
-		if (current.visible) {
-			updateWtftWidget(ctx, pi);
-		}
 	});
 
-	// 3. Command registration
+	// 5. Command registration
 	pi.registerCommand("wtft", {
 		description: "Where The F***ing Tokens?! (WTFT) - Cost Auditing Widget",
 		handler: async (args, ctx) => {
@@ -564,24 +606,14 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			const current = getSettings(ctx);
 
 			if (other) {
-				const branch = ctx.sessionManager.getBranch();
-				const interactions = branch
-					.map((entry: any) => parseEntryToInteraction(entry))
-					.filter((i: any): i is NonNullable<typeof i> => i !== null);
-				
-				const deduped = deduplicateInteractions(interactions);
+				const deduped = deduplicateInteractions(_allInteractions);
 				const output = renderOtherHistogram(deduped, Math.max(current.width, 40));
 				ctx.ui.notify(output, "info");
 				return;
 			}
 
 			if (tokens) {
-				const branch = ctx.sessionManager.getBranch();
-				const interactions = branch
-					.map((entry: any) => parseEntryToInteraction(entry))
-					.filter((i: any): i is NonNullable<typeof i> => i !== null);
-				
-				const output = renderTokenSummary(interactions, Math.max(current.width, 40));
+				const output = renderTokenSummary(_allInteractions, Math.max(current.width, 40));
 				ctx.ui.notify(output, "info");
 				return;
 			}

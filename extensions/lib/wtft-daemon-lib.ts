@@ -468,16 +468,8 @@ export function renderDaemonStatus(status: DaemonStatus, restarting = false): st
 		// countdown updates every render without re-running checkDaemonHealth.
 		const elapsedMs = status.idleSinceMs != null ? Date.now() - status.idleSinceMs : (status.idleMs || 0);
 		if (cacheTtlMs != null && elapsedMs > 0) {
-			const remainingMs = Math.max(0, cacheTtlMs - elapsedMs);
-			const remainingSec = Math.floor(remainingMs / 1000);
-			if (remainingSec >= 3600) {
-				const h = Math.floor(remainingSec / 3600);
-				const m = Math.floor((remainingSec % 3600) / 60);
-				return `  \x1b[33m●\x1b[0m idle (${h}h${m}m to expire)`;
-			}
-			const m = Math.floor(remainingSec / 60);
-			const s = remainingSec % 60;
-			return `  \x1b[33m●\x1b[0m idle (${m}:${String(s).padStart(2, "0")} to expire)`;
+			const remainingMin = Math.ceil(Math.max(0, cacheTtlMs - elapsedMs) / 60_000);
+			return `  \x1b[33m●\x1b[0m idle (${remainingMin}min to expire)`;
 		}
 		// Cache TTL unknown — daemon is idle, we just don't know the cache window.
 		// Show "local model" only when we confirmed the model has no remote cache.
@@ -982,22 +974,18 @@ export async function watchTagFile(
 	// Initial daemon health check (10s after startup to let daemon settle).
 	setTimeout(() => { updateDaemonHealth(); needsRedraw = true; render(); }, 10000);
 
-	// Dynamic refresh: always ticks every 1s, but only re-renders when:
-	// - A minute boundary passes (timeline diamond/surge badges)
-	// - The daemon is idle (live countdown display)
-	// The 1s idle render causes minor screen flicker (clearPreviousLines)
-	// but is necessary for a live countdown that ticks every second (#78).
-	const refreshTimer = setInterval(() => {
+	// Per-minute re-render for timeline diamond/badge + daemon health updates.
+	const minuteInterval = setInterval(() => {
 		const _curMin = new Date().getMinutes();
-		if (_curMin !== _lastRenderMin || daemonIdle) {
+		if (_curMin !== _lastRenderMin) {
 			updateDaemonHealth();
 			needsRedraw = true;
 			render();
 		}
-	}, 1000);
+	}, 60000);
 
 	// Keep the process alive (fs.watch is the primary event source).
-	// The refreshTimer also prevents exit when watcher is quiet.
+	// The minuteInterval also prevents exit when watcher is quiet.
 	// This is an intentional infinite await — exitWatch() calls process.exit().
 	await new Promise(() => {});
 }

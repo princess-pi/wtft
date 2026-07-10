@@ -462,36 +462,16 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		if (hasConfig("wtft")) {
 			updateWtftWidget(ctx, pi);
 		}
-		// Start dynamic refresh timer: 1s when daemon is idle (live countdown),
-		// 60s otherwise (timeline diamond/surge badges).
-		let _lastRefreshMs = 1000;
-		const startRefreshTimer = () => {
-			if (_wtftRefreshTimer) clearInterval(_wtftRefreshTimer);
-			_wtftRefreshTimer = setInterval(() => {
-				if (!_wtftCtx) return;
-				const s = getSettings(_wtftCtx);
-				if (!s.visible) return;
-
-				// Check daemon health to decide refresh rate
-				const sessionFile = _wtftCtx.sessionManager.getSessionFile?.();
-				let daemonIsIdle = false;
-				if (sessionFile) {
-					const tagPath = getTagPath(sessionFile);
-					const health = checkDaemonHealth(sessionFile, tagPath);
-					daemonIsIdle = !!(health.alive && health.idle && health.idleSinceMs != null);
-				}
-
-				const targetMs = daemonIsIdle ? 1000 : 60000;
-				if (targetMs !== _lastRefreshMs) {
-					_lastRefreshMs = targetMs;
-					startRefreshTimer();
-				}
-
-				updateWtftWidget(_wtftCtx, pi);
-			}, _lastRefreshMs);
-		};
+		// Start 1-minute timer for timeline live-updates
 		if (!_wtftRefreshTimer) {
-			startRefreshTimer();
+			_wtftRefreshTimer = setInterval(() => {
+				if (_wtftCtx) {
+					const s = getSettings(_wtftCtx);
+					if (s.visible) {
+						updateWtftWidget(_wtftCtx, pi);
+					}
+				}
+			}, 60000);
 		}
 	});
 

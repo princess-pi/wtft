@@ -4,8 +4,8 @@
  * @description Session discovery and interactive TTY selector for Pi and Claude Code session logs.
  *
  * Provides session discovery (walking Pi and Claude Code session directories),
- * session summary extraction (turns + cost from .jsonl files), and an interactive
- * TTY keyboard-navigable session picker.
+ * session summary extraction (turns + cost from classified wtft-tag files),
+ * and an interactive TTY keyboard-navigable session picker.
  *
  * This is a cross-harness module: consumed by both the WTFT CLI (via esbuild bundle)
  * and the Pi WTFT extension (via tsx import).
@@ -13,9 +13,16 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+
+// ---
+// CONSTANTS (mirrored from wtft-daemon-lib.ts — session-selector is a
+// standalone module and should not depend on the daemon's internals)
+// ---
+
+const TAGGER_VERSION = "2.3.6";
 import * as os from "node:os";
 import { buildDisplayPath, formatRelativeTime } from "./session-path-shortener.ts";
-import { formatCost, parseEntryToInteraction, deduplicateInteractions, type Interaction } from "./wtft-shared.ts";
+import { formatCost } from "./wtft-shared.ts";
 import { enterRawStdin, showCursor, hideCursor, clearPreviousLines, visualLineCount } from "./tty-helpers.ts";
 
 // ---
@@ -139,43 +146,44 @@ export function discoverSessions(
 // ---
 
 /**
- * Read a session .jsonl file and return a summary of assistant turns and total cost.
+ * Read a session summary from the harness-agnostic classified tag file.
+ * Only inspects wtft-tag contents — never parses raw .jsonl files.
+ * All parsing knowledge of internal harness formats is isolated in the
+ * log parser daemon, not duplicated in the renderer.
  *
- * @param filePath - Path to the .jsonl session file
+ * @param sessionPath - Path to the raw .jsonl session file (used only
+ *   to derive the tag file path)
  * @returns Object with turn count and total cost
  */
 export function getSessionSummary(
-	filePath: string
+	sessionPath: string
 ): { turns: number; cost: number } {
-	let turns = 0;
-	const interactions: Interaction[] = [];
+	const sessionDir = path.dirname(sessionPath);
+	const sessionBase = path.basename(sessionPath);
+	const tagPath = path.join(sessionDir, "wtft-tags", sessionBase + `.wtft-tag.v${TAGGER_VERSION}.jsonl`);
+
 	try {
-		const content = fs.readFileSync(filePath, "utf8");
-		for (const line of content.split("\n")) {
+		const content = fs.readFileSync(tagPath, "utf8");
+		const lines = content.split("\n");
+		let cost = 0;
+		let turns = 0;
+		for (const line of lines) {
 			if (!line.trim()) continue;
 			try {
-				const entry = JSON.parse(line);
-				// Count assistant turns (per-line count — approximate, one message
-				// may span multiple JSONL lines in Claude Code transcripts)
-				if (
-					entry.type === "assistant" ||
-					(entry.message && entry.message.role === "assistant")
-				) {
-					turns++;
-				}
-				const interaction = parseEntryToInteraction(entry);
-				if (interaction) interactions.push(interaction);
+				const obj = JSON.parse(line);
+				// Skip heartbeat lines
+				if (obj._hb) continue;
+				if (typeof obj.c === "number") cost += obj.c;
+				turns++;
 			} catch {
 				// Skip unparseable lines
 			}
 		}
+		return { turns, cost };
 	} catch {
-		// File may not exist or be unreadable
+		// Tag file doesn't exist (daemon hasn't processed this session yet)
+		return { turns: 0, cost: 0 };
 	}
-	// Dedup by message.id before summing (#54)
-	const deduped = deduplicateInteractions(interactions);
-	const cost = deduped.reduce((sum, i) => sum + i.cost, 0);
-	return { turns, cost };
 }
 
 // ---

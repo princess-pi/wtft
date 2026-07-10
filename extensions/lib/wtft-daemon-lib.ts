@@ -508,6 +508,9 @@ export function renderDaemonStatus(status: DaemonStatus, restarting = false): st
 		const elapsedMs = status.idleSinceMs != null ? Date.now() - status.idleSinceMs : (status.idleMs || 0);
 		if (cacheTtlMs != null && elapsedMs > 0) {
 			const remainingMin = Math.ceil(Math.max(0, cacheTtlMs - elapsedMs) / 60_000);
+			if (remainingMin <= 0) {
+				return "  \x1b[33m●\x1b[0m idle (cache emptied)";
+			}
 			return `  \x1b[33m●\x1b[0m idle (${remainingMin}min to expire)`;
 		}
 		// Cache TTL unknown — daemon is idle, we just don't know the cache window.

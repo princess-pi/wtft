@@ -14,6 +14,7 @@ import {
 	getTerminalWidth,
 	getVisualLength,
 	checkDaemonHealth,
+	readClassifiedTagFile,
 	restartDaemon,
 	renderDaemonStatus,
 	getTagPath,
@@ -445,15 +446,26 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			ensureParserRunning(sessionFile);
 		}
 
-		// Reconstruct historical interactions from the full session branch.
-		// This O(n) walk happens once at session_start; after this, all
-		// widget renders use the pre-built _allInteractions array (#78).
+		// Reconstruct historical interactions from the daemon's classified
+		// tag file — same source as the CLI, ensuring widget and CLI totals
+		// never diverge. Fall back to branch walk if the daemon hasn't
+		// written the tag file yet (e.g., first session start).
 		_allInteractions = [];
-		const branch = ctx.sessionManager.getBranch();
-		for (let i = 0; i < branch.length; i++) {
-			const interaction = parseEntryToInteraction(branch[i]);
-			if (interaction) {
-				_allInteractions.push(interaction);
+		if (sessionFile) {
+			const tagPath = getTagPath(sessionFile);
+			const tagInteractions = readClassifiedTagFile(tagPath);
+			if (tagInteractions.length > 0) {
+				_allInteractions = tagInteractions;
+			}
+		}
+		// Fallback: if tag file is empty, walk the branch directly.
+		if (_allInteractions.length === 0) {
+			const branch = ctx.sessionManager.getBranch();
+			for (let i = 0; i < branch.length; i++) {
+				const interaction = parseEntryToInteraction(branch[i]);
+				if (interaction) {
+					_allInteractions.push(interaction);
+				}
 			}
 		}
 		_burstAccumulator = new BurstAccumulator();
@@ -510,12 +522,23 @@ export default function wtftExtension(pi: ExtensionAPI) {
 	//    correct history (#78).
 	pi.on("session_tree", async (_event, ctx) => {
 		_wtftCtx = ctx;
+		// Rebuild from daemon's classified tag file (same source as CLI).
 		_allInteractions = [];
-		const branch = ctx.sessionManager.getBranch();
-		for (let i = 0; i < branch.length; i++) {
-			const interaction = parseEntryToInteraction(branch[i]);
-			if (interaction) {
-				_allInteractions.push(interaction);
+		const sFile = ctx.sessionManager.getSessionFile?.();
+		if (sFile) {
+			const tagPath = getTagPath(sFile);
+			const tagInteractions = readClassifiedTagFile(tagPath);
+			if (tagInteractions.length > 0) {
+				_allInteractions = tagInteractions;
+			}
+		}
+		if (_allInteractions.length === 0) {
+			const branch = ctx.sessionManager.getBranch();
+			for (let i = 0; i < branch.length; i++) {
+				const interaction = parseEntryToInteraction(branch[i]);
+				if (interaction) {
+					_allInteractions.push(interaction);
+				}
 			}
 		}
 		_burstAccumulator = new BurstAccumulator();

@@ -42,8 +42,8 @@ export async function watchMode(
 	let lastSize = 0;
 	let needsRedraw = true;
 	let _lastRenderMin = -1;
-	// Alt screen buffer — live updates inside, main screen restored on exit.
-	process.stdout.write("\x1b[?1049h");
+	// In-place rendering (save cursor, re-render over same region, restore on exit).
+	process.stdout.write("\x1b7");
 	hideCursor();
 
 	let lastBuffer: string[] = []; // saved for exit printout
@@ -51,7 +51,7 @@ export async function watchMode(
 
 	// Shared exit: clears chart output, restores terminal, prints final chart.
 	const exitWatch = () => {
-		process.stdout.write("\x1b[?1049l");
+		process.stdout.write("\x1b8\x1b[J");
 		showCursor();
 		cleanupStdin();
 		if (lastBuffer.length > 0) {
@@ -145,8 +145,8 @@ export async function watchMode(
 	process.stdout.write("\x1b7");
 
 	const render = () => {
-		// Home cursor + clear — safe inside alt screen, prevents scrollback accumulation
-		process.stdout.write("\x1b[H\x1b[J");
+		// Restore cursor to save point + clear below — in-place re-render
+		process.stdout.write("\x1b8\x1b[J");
 
 		const width = getTerminalWidth();
 		const finalInterval = settings.hasInterval ? settings.interval : (sessionInterval ?? settings.interval);
@@ -507,8 +507,9 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 				let lastModel: string | undefined;
 				let idleMs: number | undefined;
 				// Scan backwards: heartbeats are after classified entries,
-				// so we encounter them first. Continue past heartbeats to
-				// find model info from earlier classified entries (#72 fix).
+				// so we encounter them first. Scan past ALL heartbeats
+				// (including _hb:"stop" from prior daemon instances) to
+				// find model info from earlier classified entries (#72, #73).
 				for (let i = lines.length - 1; i >= 0; i--) {
 					const line = lines[i].trim();
 					if (!line) continue;
@@ -516,11 +517,12 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 						const obj = JSON.parse(line);
 						// Track model from most recent classified entry
 						if (!lastModel && obj.m) lastModel = obj.m;
-						if (obj._hb && obj._hb.first) {
-							if (idleMs === undefined) {
+						// Heartbeat lines (any form) — keep scanning for model.
+						// Range heartbeat: sets idle time. Stop heartbeat: skip.
+						if (obj._hb) {
+							if (typeof obj._hb === "object" && obj._hb.first && idleMs === undefined) {
 								idleMs = Date.now() - obj._hb.first;
 							}
-							// Heartbeat — keep scanning for model
 							continue;
 						}
 						// Classified entry (no _hb) — daemon is active, stop
@@ -613,8 +615,9 @@ export async function watchTagFile(
 	let needsRedraw = true;
 	let _lastRenderMin = -1;
 
-	// Alt screen buffer — live updates inside, main screen restored on exit.
-	process.stdout.write("\x1b[?1049h");
+	// In-place rendering (no alt screen): save cursor, re-render over
+	// the same region, restore on exit (#73 repair).
+	process.stdout.write("\x1b7");
 	hideCursor();
 
 	let lastBuffer: string[] = [];
@@ -622,7 +625,7 @@ export async function watchTagFile(
 	// Shared exit: clears chart output, restores terminal, prints final chart.
 	const exitWatch = () => {
 		if (watcher) watcher.close();
-		process.stdout.write("\x1b[?1049l");
+		process.stdout.write("\x1b8\x1b[J");
 		showCursor();
 		cleanupStdin();
 		if (lastBuffer.length > 0) {
@@ -759,8 +762,8 @@ export async function watchTagFile(
 	}
 
 	const render = () => {
-		// Home cursor + clear — safe inside alt screen, prevents scrollback accumulation
-		process.stdout.write("\x1b[H\x1b[J");
+		// Restore cursor to save point + clear below — in-place re-render (#73 repair)
+		process.stdout.write("\x1b8\x1b[J");
 
 		const width = getTerminalWidth();
 		const pad = settings.pad || 0;

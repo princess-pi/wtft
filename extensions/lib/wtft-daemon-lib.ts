@@ -614,6 +614,21 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 					const cacheTtlMs = lastModel ? getModelCacheTtlMs(lastModel) : null;
 					return { alive: true, idle: true, idleMs, idleSinceMs, cacheTtlMs };
 				}
+				// Heartbeat found but too fresh (< IDLE_THRESHOLD).
+				// Also check the session file mtime: if the session hasn't been
+				// written to for ≥ IDLE_THRESHOLD, the daemon just restarted on
+				// an already-idle session — report idle regardless of fresh heartbeat.
+				if (idleMs === undefined) {
+					try {
+						const sessionStat = fs.statSync(sessionPath);
+						const sessionIdleMs = Date.now() - sessionStat.mtimeMs;
+						if (sessionIdleMs >= IDLE_THRESHOLD_MS) {
+							if (!lastModel) lastModel = getModelFromSessionFile(sessionPath);
+							const cacheTtlMs = lastModel ? getModelCacheTtlMs(lastModel) : null;
+							return { alive: true, idle: true, idleMs: sessionIdleMs, idleSinceMs: sessionStat.mtimeMs, cacheTtlMs };
+						}
+					} catch { /* session file unreadable — fall through to live */ }
+				}
 			}
 		} catch { /* tag file unreadable — assume live */ }
 		return { alive: true };

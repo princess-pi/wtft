@@ -759,6 +759,13 @@ export async function watchTagFile(
 		}
 		const health = checkDaemonHealth(sessionPath, tagPath);
 		if (!health.alive) {
+			// Debounce: if the PID is dead but the tag file was recently written
+			// (within 2s), a new daemon instance is spinning up — mask the restart
+			// gap by treating the state as unchanged instead of "stopped."
+			try {
+				const tagStat = fs.statSync(tagPath);
+				if (Date.now() - tagStat.mtimeMs < 2000 && tagStat.size > 0) return;
+			} catch { /* tag file missing — genuinely dead */ }
 			daemonDead = true;
 			daemonStopReason = health.reason || "unknown";
 			daemonStopTime = health.lastHbTime || "";

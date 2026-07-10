@@ -267,12 +267,36 @@
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
         <p>The widget title line shows a colored status indicator for the background log parser:</p>
         <ul>
+            <li><span style="color: #888;">● reading...</span> — CLI startup placeholder, shown before the first health check completes (500ms)</li>
             <li><span style="color: #4a4;">● live</span> — log parser is running and processing new interactions</li>
             <li><span style="color: #da0;">● idle (3:22 to expire)</span> — no new data for 2m2s; countdown shows time until model cache expires (Claude: 5 min, DeepSeek: 1 hr, local: no countdown)</li>
+            <li><span style="color: #da0;">● idle (cache emptied)</span> — cache TTL fully elapsed (remaining ≤ 0 min); model context cache has expired</li>
+            <li><span style="color: #da0;">● idle (local model)</span> — daemon idle, no remote cache (local model)</li>
             <li><span style="color: #d44;">● stopped HH:MM</span> — log parser exited (24h idle timeout or crash)</li>
             <li><span style="color: #da0;">● restarting...</span> — log parser is being restarted</li>
         </ul>
-        <p>Status rendering is shared via <code>renderDaemonStatus()</code> in <code>wtft-shared.ts</code> — DRY between Pi widget and CLI watch modes. The countdown timer reads the model from the most recent classified tag entry (scanning past the consolidated heartbeat line) to determine the appropriate cache TTL: 5 min for Claude, 1 hr for DeepSeek, no countdown for local models.</p>
+        <p>Status rendering is shared via <code>renderDaemonStatus()</code> in <code>wtft-daemon-lib.ts</code> — DRY between Pi widget and CLI watch modes.</p>
+
+        <h4>Health Check Mechanism</h4>
+        <p>The daemon health check (<code>checkDaemonHealth</code>) reads the PID file and the last ~8KB of the tag file to determine state:</p>
+        <ul>
+            <li><strong>PID alive + classified entries present</strong> → <code>live</code></li>
+            <li><strong>PID alive + only heartbeats for ≥ 2m2s</strong> → <code>idle</code>. The heartbeat's <code>first</code> timestamp (set by the daemon at idle start) is used as the clock baseline, so the countdown ticks accurately even across health-check poll intervals.</li>
+            <li><strong>PID alive + fresh heartbeat but session mtime ≥ 2m2s</strong> → <code>idle</code> immediately. This handles daemon restarts on already-idle sessions — the startup heartbeat's freshness is overridden by the session file's modification time.</li>
+            <li><strong>PID dead</strong> → <code>stopped</code>, with the most recent heartbeat's stop reason and timestamp.</li>
+            <li><strong>PID dead but tag file written within 2s</strong> → state unchanged (debounce). Masks the restart gap when a new daemon replaces an old one, preventing a spurious "stopped" flash.</li>
+        </ul>
+
+        <h4>Update Timing</h4>
+        <p>Status updates are triggered by three mechanisms, from fastest to slowest:</p>
+        <table style="width:100%; border-collapse: collapse;">
+            <tr style="border-bottom: 1px solid #404040;"><th style="text-align:left; padding: 4px 8px;">Trigger</th><th style="text-align:left; padding: 4px 8px;">Latency</th><th style="text-align:left; padding: 4px 8px;">Applies to</th></tr>
+            <tr style="border-bottom: 1px solid #303030;"><td style="padding: 4px 8px;">Inotify (fs.watch) on tag file</td><td style="padding: 4px 8px;">~667ms (daemon write interval)</td><td style="padding: 4px 8px;">CLI <code>--watch</code></td></tr>
+            <tr style="border-bottom: 1px solid #303030;"><td style="padding: 4px 8px;">Pi widget render timer</td><td style="padding: 4px 8px;">~2-5s (widget refresh)</td><td style="padding: 4px 8px;">Pi widget</td></tr>
+            <tr style="border-bottom: 1px solid #303030;"><td style="padding: 4px 8px;">60-second backup timer</td><td style="padding: 4px 8px;">≤ 60s</td><td style="padding: 4px 8px;">CLI <code>--watch</code> (fallback if inotify misses)</td></tr>
+            <tr><td style="padding: 4px 8px;">Initial startup</td><td style="padding: 4px 8px;">500ms</td><td style="padding: 4px 8px;">CLI <code>--watch</code></td></tr>
+        </table>
+        <p>Inotify-driven updates mean that idle → live transitions are instant — the status flips the moment the daemon writes classified entries to the tag file. The 60-second timer is a safety net, not the primary mechanism.</p>
         <p>The log parser daemon wraps its main poll loop in a <code>try/catch</code> so transient errors (disk full, permission denied, corrupted JSON) are logged and the daemon continues running on the next poll cycle — it does not crash silently.</p>
         <p>Width is always auto-detected from terminal (clamped at 1023). No <code>-w/--width</code> flag. Watch modes re-render on terminal resize (SIGWINCH).</p>
         <p>In CLI <code>--watch</code> mode, press <code>r</code> to restart the log parser. The footer shows <code style="color: #d44;">r to restart log parser</code> in red when the parser is stopped. The Pi widget auto-spawns a log parser on session start to keep the tag file warm for CLI use.</p>

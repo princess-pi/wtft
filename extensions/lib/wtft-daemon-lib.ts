@@ -359,22 +359,69 @@ export const IDLE_EXIT_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Get the prompt cache TTL for a given model in milliseconds.
- * Returns null for local models (no remote cache).
+ * Returns null for local models (no remote cache) or unrecognized providers.
+ *
+ * NOTE: Cache TTLs are provider-dependent and can change. These are conservative
+ * estimates used for the idle countdown display — not precise billing values.
+ *
+ * Recognized cloud providers with prompt caching:
+ *   - DeepSeek:   hard-disk cache, cleared within hours-to-days. 1h display TTL.
+ *   - Claude:     5-min ephemeral cache (default cache_control TTL).
+ *   - Gemini:     ~1h cache TTL (varies by model, conservative).
+ *   - GPT/OpenAI: variable (30m-1h). Conservative 30min display TTL.
+ *   - OpenAI-compat providers (together.ai, fireworks, etc.): 30min.
  */
 export function getModelCacheTtlMs(model: string): number | null {
 	const m = model.toLowerCase();
-	// Claude: 5-minute ephemeral cache (the default cache_control TTL).
-	// The 1-hour extended cache is opt-in and rare — default to 5 min.
-	if (m.includes("claude") || m.includes("haiku") || m.includes("sonnet") || m.includes("opus")) {
-		return 5 * 60 * 1000;
-	}
-	// DeepSeek: hard-disk cache, "automatically cleared within a few hours to a few days."
-	// Conservative: use 1 hour as display TTL.
+
+	// --- Cloud providers with known prompt caching ---
+
+	// DeepSeek first (independent of Claude substring overlap):
+	// hard-disk cache, "automatically cleared within a few hours to a few days."
 	if (m.includes("deepseek")) {
 		return 60 * 60 * 1000;
 	}
-	// Local models (ollama, llama.cpp, etc.) — no remote cache.
-	return null;
+
+	// Claude: 5-minute ephemeral cache (the default cache_control TTL).
+	// The 1-hour extended cache is opt-in and rare — default to 5 min.
+	if (m.includes("claude")) {
+		return 5 * 60 * 1000;
+	}
+
+	// Gemini: cache TTL varies — 5 min for short, ~1h for long contexts.
+	// Conservative 1h display TTL.
+	if (m.includes("gemini")) {
+		return 60 * 60 * 1000;
+	}
+
+	// GPT / OpenAI: prompt caching with variable TTL (typically 5-30 min).
+	// Conservative: 30 min display TTL.
+	if (m.includes("gpt") || m.includes("o1") || m.includes("o3")) {
+		return 30 * 60 * 1000;
+	}
+
+	// OpenAI-compat third-party providers commonly used through Pi:
+	// together.ai, fireworks, openrouter, etc. Variable caching — 30min.
+	if (m.includes("together") || m.includes("fireworks") || m.includes("openrouter")) {
+		return 30 * 60 * 1000;
+	}
+
+	// Anthropic-specific model code patterns (non-Claude branded).
+	// Covers: "haiku", "sonnet", "opus" (both standalone and in compound names).
+	if (/\b(haiku|sonnet|opus)\b/.test(m)) {
+		return 5 * 60 * 1000;
+	}
+
+	// Local models (ollama, llama.cpp, lmstudio, etc.) — no remote cache.
+	if (m.includes("ollama") || m.includes("llama") || m.includes("lmstudio") || m.includes("local")) {
+		return null;
+	}
+
+	// Unknown model — don't assume local; use a conservative 5-min display TTL
+	// so the idle countdown still shows something. The worst case is showing a
+	// short countdown for a model that has a longer cache — better than showing
+	// "No Cache (local)" for a cloud model that DOES have caching.
+	return 5 * 60 * 1000;
 }
 
 export interface DaemonStatus {

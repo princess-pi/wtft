@@ -434,6 +434,10 @@ export interface DaemonStatus {
 	idle?: boolean;
 	/** Milliseconds since last non-heartbeat entry (when idle). */
 	idleMs?: number;
+	/** Raw timestamp (Date.now()) of the first heartbeat in the current idle
+	 *  period. Used by renderDaemonStatus to compute a real-time countdown
+	 *  without re-running checkDaemonHealth. */
+	idleSinceMs?: number;
 	/** Cache TTL in ms for the current model (null = local/no cache). */
 	cacheTtlMs?: number | null;
 }
@@ -460,8 +464,11 @@ export function renderDaemonStatus(status: DaemonStatus, restarting = false): st
 	if (status.idle) {
 		const cacheTtlMs = status.cacheTtlMs;
 		// Always show "idle" — cache info is supplementary.
-		if (cacheTtlMs != null && status.idleMs != null) {
-			const remainingMs = Math.max(0, cacheTtlMs - (status.idleMs || 0));
+		// Compute elapsed fresh from idleSinceMs (raw timestamp) so the
+		// countdown updates every render without re-running checkDaemonHealth.
+		const elapsedMs = status.idleSinceMs != null ? Date.now() - status.idleSinceMs : (status.idleMs || 0);
+		if (cacheTtlMs != null && elapsedMs > 0) {
+			const remainingMs = Math.max(0, cacheTtlMs - elapsedMs);
 			const remainingSec = Math.floor(remainingMs / 1000);
 			if (remainingSec >= 3600) {
 				const h = Math.floor(remainingSec / 3600);
@@ -484,20 +491,18 @@ export function renderDaemonStatus(status: DaemonStatus, restarting = false): st
 }
 
 /**
- * Fallback: scan the session file backwards for the most recent assistant
- * message's model when the daemon tag file doesn't have a recent classified
- * entry with model info. Used when the daemon is idle (only heartbeats in
- * the tag file) so the cache TTL countdown can still display correctly.
+ * Fallback: scan the ENTIRE session file backwards for the most recent
+ * assistant message's model. Used when the daemon tag file doesn't have a
+ * recent classified entry with model info (only heartbeats).
+ *
+ * Reads the whole file — session files are typically < 1MB, so this is
+ * fast enough. Using an 8KB window caused flickering because the model
+ * entry could fall outside the window as the tag file grew.
  */
 function getModelFromSessionFile(sessionPath: string): string | undefined {
 	try {
-		const stat = fs.statSync(sessionPath);
-		const readStart = Math.max(0, stat.size - 8192);
-		const fd = fs.openSync(sessionPath, "r");
-		const buf = Buffer.alloc(stat.size - readStart);
-		fs.readSync(fd, buf, 0, buf.length, readStart);
-		fs.closeSync(fd);
-		const lines = buf.toString("utf8").split("\n");
+		const content = fs.readFileSync(sessionPath, "utf8");
+		const lines = content.split("\n");
 		// Scan backwards for the most recent assistant message with model info.
 		for (let i = lines.length - 1; i >= 0; i--) {
 			const line = lines[i].trim();
@@ -543,6 +548,7 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 				const lines = buf.toString("utf8").split("\n");
 				let lastModel: string | undefined;
 				let idleMs: number | undefined;
+				let idleSinceMs: number | undefined;
 				// Scan backwards: heartbeats are after classified entries,
 				// so we encounter them first. Scan past ALL heartbeats
 				// (including _hb:"stop" from prior daemon instances) to
@@ -555,9 +561,10 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 						// Track model from most recent classified entry
 						if (!lastModel && obj.m) lastModel = obj.m;
 						// Heartbeat lines (any form) — keep scanning for model.
-						// Range heartbeat: sets idle time. Stop heartbeat: skip.
+						// Range heartbeat: sets idle time + raw timestamp.
 						if (obj._hb) {
 							if (typeof obj._hb === "object" && obj._hb.first && idleMs === undefined) {
+								idleSinceMs = obj._hb.first;
 								idleMs = Date.now() - obj._hb.first;
 							}
 							continue;
@@ -571,7 +578,7 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 					// (only heartbeats), fall back to the session file.
 					if (!lastModel) lastModel = getModelFromSessionFile(sessionPath);
 					const cacheTtlMs = lastModel ? getModelCacheTtlMs(lastModel) : null;
-					return { alive: true, idle: true, idleMs, cacheTtlMs };
+					return { alive: true, idle: true, idleMs, idleSinceMs, cacheTtlMs };
 				}
 			}
 		} catch { /* tag file unreadable — assume live */ }
@@ -975,18 +982,22 @@ export async function watchTagFile(
 	// Initial daemon health check (10s after startup to let daemon settle).
 	setTimeout(() => { updateDaemonHealth(); needsRedraw = true; render(); }, 10000);
 
-	// Per-minute re-render for timeline diamond/badge + daemon health updates.
-	const minuteInterval = setInterval(() => {
+	// Dynamic refresh: always ticks every 1s, but only re-renders when:
+	// - A minute boundary passes (timeline diamond/surge badges)
+	// - The daemon is idle (live countdown display)
+	// The 1s idle render causes minor screen flicker (clearPreviousLines)
+	// but is necessary for a live countdown that ticks every second (#78).
+	const refreshTimer = setInterval(() => {
 		const _curMin = new Date().getMinutes();
-		if (_curMin !== _lastRenderMin) {
+		if (_curMin !== _lastRenderMin || daemonIdle) {
 			updateDaemonHealth();
 			needsRedraw = true;
 			render();
 		}
-	}, 60000);
+	}, 1000);
 
 	// Keep the process alive (fs.watch is the primary event source).
-	// The minuteInterval also prevents exit when watcher is quiet.
+	// The refreshTimer also prevents exit when watcher is quiet.
 	// This is an intentional infinite await — exitWatch() calls process.exit().
 	await new Promise(() => {});
 }

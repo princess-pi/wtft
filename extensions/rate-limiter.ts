@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { parseEntryToInteraction } from "./lib/wtft-shared.js";
+
 
 // ---
 // CONFIGURATION
@@ -110,6 +110,9 @@ function findActiveSessionFiles(): FileInfo[] {
   const now = Date.now();
   const TWO_MINUTES_MS = 2 * 60 * 1000;
 
+  // Scan wtft-tags directories for classified tag files — harness-agnostic,
+  // same source as the CLI, widget, and session selector. No raw .jsonl
+  // parsing needed (#87 — Ports & Adapters seam).
   function scanDir(dir: string) {
     if (!fs.existsSync(dir)) return;
     try {
@@ -118,10 +121,20 @@ function findActiveSessionFiles(): FileInfo[] {
         const fullPath = path.join(dir, f);
         const stat = fs.statSync(fullPath);
         if (stat.isDirectory()) {
-          scanDir(fullPath);
-        } else if (f.endsWith(".jsonl")) {
-          if (now - stat.mtimeMs < TWO_MINUTES_MS) {
-            activeFiles.push({ path: fullPath, mtime: stat.mtimeMs });
+          // Look for wtft-tags subdirectory
+          if (f === "wtft-tags") {
+            const tagFiles = fs.readdirSync(fullPath);
+            for (const tagFile of tagFiles) {
+              if (tagFile.endsWith(".jsonl")) {
+                const tagPath = path.join(fullPath, tagFile);
+                const tagStat = fs.statSync(tagPath);
+                if (now - tagStat.mtimeMs < TWO_MINUTES_MS) {
+                  activeFiles.push({ path: tagPath, mtime: tagStat.mtimeMs });
+                }
+              }
+            }
+          } else {
+            scanDir(fullPath);
           }
         }
       }
@@ -130,8 +143,10 @@ function findActiveSessionFiles(): FileInfo[] {
     }
   }
 
-  scanDir(CLAUDE_DIR);
+  // Pi sessions dir contains per-session subdirs, each with a wtft-tags/ subdir
   scanDir(PI_DIR);
+  // Claude Code projects dir contains per-project subdirs, each with session subdirs
+  scanDir(CLAUDE_DIR);
 
   return activeFiles;
 }
@@ -147,23 +162,30 @@ function aggregateActiveTpm(activeFiles: FileInfo[], hostingSessionId: string | 
   const now = Date.now();
 
   for (const { path: filePath } of activeFiles) {
+    // Derive hosting session ID from the tag file path:
+    // <sessionDir>/wtft-tags/<sessionId>.jsonl.wtft-tag.vX.Y.Z.jsonl
+    const tagName = path.basename(filePath);
+    const tagVersionIdx = tagName.indexOf(".wtft-tag.v");
+    const sessionId = tagVersionIdx > 0 ? tagName.substring(0, tagVersionIdx) : "";
+    const isHostingSession = hostingSessionId ? sessionId.includes(hostingSessionId) : false;
+
     try {
-      const isHostingSession = hostingSessionId && filePath.includes(hostingSessionId);
       const content = fs.readFileSync(filePath, "utf8");
       const lines = content.split("\n").filter(Boolean);
 
       for (const line of lines) {
         try {
-          const entry = JSON.parse(line);
-          const interaction = parseEntryToInteraction(entry);
-          if (!interaction) continue;
-          if (!interaction.timestamp) continue;
+          const obj = JSON.parse(line);
+          // Skip heartbeat lines
+          if (obj._hb) continue;
+          // Classified format: { c, in, out, cr, cw, m, t, cat, f, cmd, ... }
+          if (!obj.m || !obj.t) continue;
 
-          const age = now - interaction.timestamp;
+          const age = now - obj.t;
           if (age > 120000) continue;
-          if (!interaction.model) continue;
 
-          const shortCode = getModelShortName(interaction.model);
+          const shortCode = getModelShortName(obj.m);
+          const inputTokens = (obj.in || 0) + (obj.cr || 0);
 
           if (!modelStats[shortCode]) {
             modelStats[shortCode] = { tpm: 0, lastActiveAge: 120000, sessionTpm: 0 };
@@ -172,26 +194,23 @@ function aggregateActiveTpm(activeFiles: FileInfo[], hostingSessionId: string | 
           modelStats[shortCode].lastActiveAge = Math.min(modelStats[shortCode].lastActiveAge, age);
 
           if (age <= 60000) {
-            const inputTokens = interaction.inputTokens + interaction.cacheReadTokens;
-            
-            // Increment global TPM
             modelStats[shortCode].tpm += inputTokens;
-            
             // If this is the hosting session, increment session-only TPM
             if (isHostingSession) {
               modelStats[shortCode].sessionTpm += inputTokens;
             }
           }
-        } catch (e) {
-          // ignore line parses
+        } catch {
+          // Skip unparseable lines
         }
       }
-    } catch (err) {
-      // ignore
+    } catch {
+      // File may not exist or be unreadable
     }
   }
 
   return modelStats;
+}
 }
 
 interface CacheSchema {
@@ -214,7 +233,15 @@ function parseIntervalToMs(val: string): number {
 }
 
 function getHostingSessionTpm(hostingSessionId: string, activeFiles: FileInfo[]): Record<string, number> {
-  const hostingFile = activeFiles.find(f => f.path.includes(hostingSessionId));
+  // Find the tag file for the hosting session — identified by session ID in the
+  // tag filename: <sessionDir>/wtft-tags/<sessionId>.jsonl.wtft-tag.vX.Y.Z.jsonl
+  const hostingFile = activeFiles.find(f => {
+    const tagName = path.basename(f.path);
+    const tagVersionIdx = tagName.indexOf(".wtft-tag.v");
+    if (tagVersionIdx <= 0) return false;
+    const sessionId = tagName.substring(0, tagVersionIdx);
+    return sessionId.includes(hostingSessionId);
+  });
   if (!hostingFile) return {};
   
   const sessionTpms: Record<string, number> = {};
@@ -224,16 +251,14 @@ function getHostingSessionTpm(hostingSessionId: string, activeFiles: FileInfo[])
     const lines = content.split("\n").filter(Boolean);
     for (const line of lines) {
       try {
-        const entry = JSON.parse(line);
-        const interaction = parseEntryToInteraction(entry);
-        if (!interaction) continue;
-        if (!interaction.timestamp) continue;
-        const age = now - interaction.timestamp;
+        const obj = JSON.parse(line);
+        if (obj._hb) continue; // skip heartbeats
+        if (!obj.m || !obj.t) continue;
+        const age = now - obj.t;
         if (age > 60000) continue;
-        if (!interaction.model) continue;
-        const shortCode = getModelShortName(interaction.model);
+        const shortCode = getModelShortName(obj.m);
 
-        const inputTokens = interaction.inputTokens + interaction.cacheReadTokens;
+        const inputTokens = (obj.in || 0) + (obj.cr || 0);
         sessionTpms[shortCode] = (sessionTpms[shortCode] || 0) + inputTokens;
       } catch (e) {
         // ignore

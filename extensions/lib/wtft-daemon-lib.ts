@@ -997,6 +997,9 @@ export async function watchTagFile(
 				}
 
 				if (newCount > 0) {
+					// Daemon wrote new classified data — refresh health status
+					// so idle→live transition is instant (not lagging on 60s timer).
+					updateDaemonHealth();
 					needsRedraw = true;
 					render();
 				}
@@ -1029,8 +1032,9 @@ export async function watchTagFile(
 		process.exit(1);
 	}
 
-	// Initial daemon health check (10s after startup to let daemon settle).
-	setTimeout(() => { updateDaemonHealth(); needsRedraw = true; render(); }, 10000);
+	// Initial daemon health check — run after a short settle (500ms) instead of
+	// 10s so the idle/live status updates quickly when the daemon is already idle.
+	setTimeout(() => { updateDaemonHealth(); needsRedraw = true; render(); }, 500);
 
 	// Per-minute re-render for timeline diamond/badge + daemon health updates.
 	const minuteInterval = setInterval(() => {

@@ -73,7 +73,20 @@ function ensureParserRunning(sessionPath: string): void {
 function getParserStatus(sessionPath: string): DaemonStatus {
 	if (!_parserSessionPath) return { alive: false, reason: "log parser not started" };
 	const tagPath = getTagPath(sessionPath);
-	return checkDaemonHealth(sessionPath, tagPath);
+	const health = checkDaemonHealth(sessionPath, tagPath);
+	// Grace period: if the daemon PID is gone but the tag file was recently
+	// written (within 2s), a new daemon instance is spinning up — mask the
+	// restart gap by reporting alive (idle or live depending on session).
+	if (!health.alive && _parserSpawned) {
+		try {
+			const tagStat = fs.statSync(tagPath);
+			const tagAge = Date.now() - tagStat.mtimeMs;
+			if (tagAge < 2000 && tagStat.size > 0) {
+				return { alive: true, idle: true, idleMs: 0 };
+			}
+		} catch { /* tag file missing — genuinely dead */ }
+	}
+	return health;
 }
 
 

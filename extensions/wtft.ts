@@ -499,7 +499,29 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	// 4. Daemon health check only — no widget refresh here.
+	// 4. Tree navigation: when the user navigates to a different point
+	//    in the session tree (/tree), the active branch changes. Rebuild
+	//    _allInteractions from the new branch so the widget reflects the
+	//    correct history (#78).
+	pi.on("session_tree", async (_event, ctx) => {
+		_wtftCtx = ctx;
+		_allInteractions = [];
+		const branch = ctx.sessionManager.getBranch();
+		for (let i = 0; i < branch.length; i++) {
+			const interaction = parseEntryToInteraction(branch[i]);
+			if (interaction) {
+				_allInteractions.push(interaction);
+			}
+		}
+		_burstAccumulator = new BurstAccumulator();
+
+		const current = getSettings(ctx);
+		if (current.visible) {
+			updateWtftWidget(ctx, pi);
+		}
+	});
+
+	// 5. Daemon health check only — no widget refresh here.
 	//    agent_end fires multiple times per burst (retry, compaction+retry,
 	//    follow-up). Widget flicker from mid-burst refreshes is eliminated
 	//    by moving rendering to agent_settled (#78).
@@ -512,7 +534,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	// 5. Command registration
+	// 6. Command registration
 	pi.registerCommand("wtft", {
 		description: "Where The F***ing Tokens?! (WTFT) - Cost Auditing Widget",
 		handler: async (args, ctx) => {

@@ -34,9 +34,11 @@ let _parserSpawned = false;
 // BURST-AWARE ACCUMULATION STATE (#78)
 // _allInteractions: merged history (branch walk from session_start + flushed bursts)
 // _burstAccumulator: per-burst incremental accumulator, flushed on agent_settled
+// _currentThinkingLevel: tracked from thinking_level_select events (#77)
 // ---
 let _allInteractions: Interaction[] = [];
 let _burstAccumulator = new BurstAccumulator();
+let _currentThinkingLevel: string | undefined;
 
 function ensureParserRunning(sessionPath: string): void {
 	// Same session, already spawned — but verify daemon is actually alive.
@@ -461,8 +463,14 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		// Fallback: if tag file is empty, walk the branch directly.
 		if (_allInteractions.length === 0) {
 			const branch = ctx.sessionManager.getBranch();
+			let branchThinkingLevel: string | undefined;
 			for (let i = 0; i < branch.length; i++) {
-				const interaction = parseEntryToInteraction(branch[i]);
+				// Track thinking level changes (#77)
+				if (branch[i].type === "thinking_level_change" && branch[i].thinkingLevel) {
+					branchThinkingLevel = branch[i].thinkingLevel;
+					continue;
+				}
+				const interaction = parseEntryToInteraction(branch[i], branchThinkingLevel);
 				if (interaction) {
 					_allInteractions.push(interaction);
 				}
@@ -487,7 +495,13 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	// 2. Incremental accumulation: classify each assistant message as it
+	// 2. Track thinking level changes so burst accumulator can stamp
+	//    each interaction with the active effort level (#77).
+	pi.on("thinking_level_select", (event) => {
+		_currentThinkingLevel = event.level;
+	});
+
+	// 3. Incremental accumulation: classify each assistant message as it
 	//    completes, without walking the branch (#78).
 	pi.on("message_end", async (event, ctx) => {
 		_wtftCtx = ctx;
@@ -497,10 +511,10 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		if (!usage) return;
 		// Wrap in Pi-schema entry form so parseEntryToInteraction works.
 		const fakeEntry = { type: "message", message: event.message };
-		_burstAccumulator.accumulateFromEntry(fakeEntry);
+		_burstAccumulator.accumulateFromEntry(fakeEntry, _currentThinkingLevel);
 	});
 
-	// 3. Burst boundary: agent_settled fires once per prompt after all
+	// 4. Burst boundary: agent_settled fires once per prompt after all
 	//    retries, compactions, and follow-ups are done. This is the
 	//    definitive per-prompt boundary — render the widget once with
 	//    complete data (#78).
@@ -516,7 +530,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	// 4. Tree navigation: when the user navigates to a different point
+	// 5. Tree navigation: when the user navigates to a different point
 	//    in the session tree (/tree), the active branch changes. Rebuild
 	//    _allInteractions from the new branch so the widget reflects the
 	//    correct history (#78).
@@ -534,8 +548,14 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		}
 		if (_allInteractions.length === 0) {
 			const branch = ctx.sessionManager.getBranch();
+			let branchThinkingLevel: string | undefined;
 			for (let i = 0; i < branch.length; i++) {
-				const interaction = parseEntryToInteraction(branch[i]);
+				// Track thinking level changes (#77)
+				if (branch[i].type === "thinking_level_change" && branch[i].thinkingLevel) {
+					branchThinkingLevel = branch[i].thinkingLevel;
+					continue;
+				}
+				const interaction = parseEntryToInteraction(branch[i], branchThinkingLevel);
 				if (interaction) {
 					_allInteractions.push(interaction);
 				}
@@ -549,7 +569,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	// 5. Daemon health check only — no widget refresh here.
+	// 6. Daemon health check only — no widget refresh here.
 	//    agent_end fires multiple times per burst (retry, compaction+retry,
 	//    follow-up). Widget flicker from mid-burst refreshes is eliminated
 	//    by moving rendering to agent_settled (#78).
@@ -615,8 +635,14 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				// Rebuild _allInteractions from scratch
 				_allInteractions = [];
 				const branch = ctx.sessionManager.getBranch();
+				let branchThinkingLevel: string | undefined;
 				for (let i = 0; i < branch.length; i++) {
-					const interaction = parseEntryToInteraction(branch[i]);
+					// Track thinking level changes (#77)
+					if (branch[i].type === "thinking_level_change" && branch[i].thinkingLevel) {
+						branchThinkingLevel = branch[i].thinkingLevel;
+						continue;
+					}
+					const interaction = parseEntryToInteraction(branch[i], branchThinkingLevel);
 					if (interaction) _allInteractions.push(interaction);
 				}
 				_burstAccumulator = new BurstAccumulator();

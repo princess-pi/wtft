@@ -281,6 +281,8 @@ export function serializeClassified(interaction: Interaction): string {
 	if (interaction.serverToolCost) line.sc = Number(interaction.serverToolCost.toFixed(6));
 	if (interaction.webSearchRequests > 0) line.ws = interaction.webSearchRequests;
 	if (interaction.webFetchRequests > 0) line.wf = interaction.webFetchRequests;
+	// Thinking effort level (#77)
+	if (interaction.thinkingLevel) line.tl = interaction.thinkingLevel;
 	return JSON.stringify(line) + "\n";
 }
 
@@ -309,6 +311,7 @@ export function classifiedToInteraction(obj: any): Interaction | null {
 		webSearchRequests: obj.ws || 0,
 		webFetchRequests: obj.wf || 0,
 		serverToolCost: obj.sc || 0,
+		thinkingLevel: obj.tl || undefined,
 		_cat: obj.cat || undefined,
 	};
 }

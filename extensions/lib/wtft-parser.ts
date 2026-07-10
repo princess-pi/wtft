@@ -52,7 +52,7 @@ function extractFilesFromBashCommand(command: string, files: { path: string; act
 	}
 }
 
-export function parseEntryToInteraction(entry: any): Interaction | null {
+export function parseEntryToInteraction(entry: any, thinkingLevel?: string): Interaction | null {
 	if (!entry) return null;
 	
 	// Support both Pi schema (entry.type === "message") and Claude Code schema (entry.type === "assistant" or lacking type but having message)
@@ -163,6 +163,7 @@ export function parseEntryToInteraction(entry: any): Interaction | null {
 			webSearchRequests: (serverToolRequests.web_search_requests || 0) as number,
 			webFetchRequests: (serverToolRequests.web_fetch_requests || 0) as number,
 			serverToolCost,
+			thinkingLevel,
 			files, commands, texts };
 	}
 	
@@ -171,13 +172,19 @@ export function parseEntryToInteraction(entry: any): Interaction | null {
 
 export function parseSessionFile(filePath: string): Interaction[] {
 	const interactions: Interaction[] = [];
+	let currentThinkingLevel: string | undefined;
 	try {
 		const content = fs.readFileSync(filePath, "utf8");
 		for (const line of content.split("\n")) {
 			if (!line.trim()) continue;
 			try {
 				const entry = JSON.parse(line);
-				const interaction = parseEntryToInteraction(entry);
+				// Track thinking level changes (#77)
+				if (entry.type === "thinking_level_change" && entry.thinkingLevel) {
+					currentThinkingLevel = entry.thinkingLevel;
+					continue;
+				}
+				const interaction = parseEntryToInteraction(entry, currentThinkingLevel);
 				if (interaction) interactions.push(interaction);
 			} catch {
 				// Skip unparseable lines (partial writes, non-JSON)

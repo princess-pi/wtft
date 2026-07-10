@@ -187,7 +187,7 @@ export async function watchMode(
 		buf.push(`'q' to exit`);
 
 		lastBuffer = [...buf]; // save for exit printout
-		const output = buf.join("\n");
+		const output = buf.join("\n") + "\n";
 		process.stdout.write(output);
 		// Track visual line count (accounts for wrapped lines) for in-place overwrite
 		lastLineCount = visualLineCount(output, width);
@@ -839,7 +839,7 @@ export async function watchTagFile(
 		buf.push(`'q' to exit${restartHint}`);
 
 		lastBuffer = [...buf];
-		const output = buf.map(l => padStr + l).join("\n");
+		const output = buf.map(l => padStr + l).join("\n") + "\n";
 		process.stdout.write(output);
 		lastLineCount = visualLineCount(output, width);
 		needsRedraw = false;

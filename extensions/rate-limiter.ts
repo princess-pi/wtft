@@ -388,10 +388,7 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
         const cooldownIcon = emojiDisabled ? "[!]" : "☕";
         footerParts.push(`\x1b[1;33m${cooldownIcon} Cooldown: ${cooldownRemainingSecs}s\x1b[0m`);
       } else {
-        let hFilled = Math.min(Math.round((hostingData.tpm / hostingCeiling) * BAR_WIDTH), BAR_WIDTH);
-        if (hostingData.tpm > 0 && hFilled === 0) {
-          hFilled = 1;
-        }
+        let hFilled = Math.min(Math.ceil((hostingData.tpm / hostingCeiling) * BAR_WIDTH), BAR_WIDTH);
         const hBar = "$".repeat(hFilled) + ".".repeat(BAR_WIDTH - hFilled);
 
         let hColor = "\x1b[32m"; // Green
@@ -419,7 +416,7 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
       }
 
       // Render hosting session's ONLY TPM
-      let sFilled = Math.min(Math.round((hostingData.sessionTpm / hostingCeiling) * BAR_WIDTH), BAR_WIDTH);
+      let sFilled = Math.min(Math.ceil((hostingData.sessionTpm / hostingCeiling) * BAR_WIDTH), BAR_WIDTH);
       if (hostingData.sessionTpm > 0 && sFilled === 0) {
         sFilled = 1;
       }
@@ -436,10 +433,7 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
       lines.push(`\x1b[1;36m  Global Multi-Model Status ───────────────────────\x1b[0m`);
       
       // Render hosting model global stats first under global list
-      let hFilled = Math.min(Math.round((hostingData.tpm / hostingCeiling) * BAR_WIDTH), BAR_WIDTH);
-      if (hostingData.tpm > 0 && hFilled === 0) {
-        hFilled = 1;
-      }
+      let hFilled = Math.min(Math.ceil((hostingData.tpm / hostingCeiling) * BAR_WIDTH), BAR_WIDTH);
       const hBar = "$".repeat(hFilled) + ".".repeat(BAR_WIDTH - hFilled);
       
       let hColor = "\x1b[32m"; // Green
@@ -459,10 +453,7 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
         }
 
         const ceiling = MODEL_QUOTA_REGISTRY[shortCode] || DEFAULT_CEILING;
-        let filled = Math.min(Math.round((data.tpm / ceiling) * BAR_WIDTH), BAR_WIDTH);
-        if (data.tpm > 0 && filled === 0) {
-          filled = 1;
-        }
+        let filled = Math.min(Math.ceil((data.tpm / ceiling) * BAR_WIDTH), BAR_WIDTH);
         const bar = "$".repeat(filled) + ".".repeat(BAR_WIDTH - filled);
 
         let color = "\x1b[32m";

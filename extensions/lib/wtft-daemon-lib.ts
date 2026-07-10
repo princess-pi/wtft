@@ -459,6 +459,7 @@ export function renderDaemonStatus(status: DaemonStatus, restarting = false): st
 	}
 	if (status.idle) {
 		const cacheTtlMs = status.cacheTtlMs;
+		// Always show "idle" — cache info is supplementary.
 		if (cacheTtlMs != null && status.idleMs != null) {
 			const remainingMs = Math.max(0, cacheTtlMs - (status.idleMs || 0));
 			const remainingSec = Math.floor(remainingMs / 1000);
@@ -471,10 +472,12 @@ export function renderDaemonStatus(status: DaemonStatus, restarting = false): st
 			const s = remainingSec % 60;
 			return `  \x1b[33m●\x1b[0m idle (${m}:${String(s).padStart(2, "0")} to expire)`;
 		}
-		// Local models (no remote cache) — show distinct label.
+		// Cache TTL unknown — daemon is idle, we just don't know the cache window.
+		// Show "local model" only when we confirmed the model has no remote cache.
 		if (cacheTtlMs === null) {
-			return "  \x1b[32m●\x1b[0m No Cache (local)";
+			return "  \x1b[33m●\x1b[0m idle (local model)";
 		}
+		// cacheTtlMs is undefined (not null) — model unknown, just show idle.
 		return "  \x1b[33m●\x1b[0m idle";
 	}
 	return "  \x1b[32m●\x1b[0m live";

@@ -17,6 +17,7 @@ import {
 	restartDaemon,
 	renderDaemonStatus,
 	getTagPath,
+	getDaemonPidPath,
 	getModelCacheTtlMs,
 	type DaemonStatus
 } from "./lib/wtft-shared.js";
@@ -95,6 +96,7 @@ function parseArgs(argsStr: string = "") {
 	let other = false;
 	let tokens = false;
 	let enableEmoji: boolean | undefined = undefined;
+	let forceReparse = false;
 
 	let hasInterval = false;
 	let hasLimit = false;
@@ -123,6 +125,8 @@ function parseArgs(argsStr: string = "") {
 		} else if (arg === "--tokens" || arg === "-T") {
 			tokens = true;
 			hasTokens = true;
+		} else if (arg === "--force" || arg === "-F") {
+			forceReparse = true;
 		} else if (arg === "--ticks") {
 			showTicks = true;
 			hasTicks = true;
@@ -221,6 +225,7 @@ function parseArgs(argsStr: string = "") {
 		hasTimezone,
 		hasOther,
 		hasTokens,
+		forceReparse,
 		other,
 		tokens,
 		enableEmoji
@@ -559,10 +564,47 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				hasTimezone,
 				hasOther,
 				hasTokens,
+				forceReparse,
 				other,
 				tokens,
 				enableEmoji
 			} = parseArgs(args);
+
+			// --force: kill daemon, delete tag file, respawn → full re-parse (#78)
+			if (forceReparse) {
+				const sessionFile = ctx.sessionManager.getSessionFile?.();
+				if (!sessionFile) {
+					ctx.ui.notify("No session file available for re-parse.", "warning");
+					return;
+				}
+				const tagPath = getTagPath(sessionFile);
+				const pidPath = getDaemonPidPath(sessionFile);
+				// Kill existing daemon
+				try {
+					const pid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
+					if (pid > 0) {
+						try { process.kill(pid, "SIGTERM"); } catch {}
+					}
+					try { fs.unlinkSync(pidPath); } catch {}
+				} catch {}
+				// Delete tag file
+				try { fs.unlinkSync(tagPath); } catch {}
+				// Rebuild _allInteractions from scratch
+				_allInteractions = [];
+				const branch = ctx.sessionManager.getBranch();
+				for (let i = 0; i < branch.length; i++) {
+					const interaction = parseEntryToInteraction(branch[i]);
+					if (interaction) _allInteractions.push(interaction);
+				}
+				_burstAccumulator = new BurstAccumulator();
+				// Respawn daemon
+				_parserSpawned = false;
+				_parserSessionPath = null;
+				ensureParserRunning(sessionFile);
+				updateWtftWidget(ctx, pi);
+				ctx.ui.notify("Tag file deleted and log parser respawned — full session re-parse in progress.", "info");
+				return;
+			}
 
 			if (typeof enableEmoji === "boolean") {
 				// Persist to harness-agnostic config file (#72)

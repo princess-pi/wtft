@@ -1144,6 +1144,19 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 		formatCost(totalCost).padStart(numColW)
 	].join(" ") + "\n";
 
+	// Compaction summary (#90) — show how many tokens were freed by compaction
+	let totalCompacted = 0;
+	let compactionCount = 0;
+	for (const i of deduped) {
+		if (i.compactionTokensBefore) {
+			totalCompacted += i.compactionTokensBefore;
+			compactionCount++;
+		}
+	}
+	if (compactionCount > 0) {
+		out += `\nCompaction: ${compactionCount} event(s), ${formatTokenCount(totalCompacted)} total tokens freed\n`;
+	}
+
 	return out;
 }
 

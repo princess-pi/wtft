@@ -48,6 +48,7 @@ let startupTime = Date.now();    // daemon start time (idle exit grace period)
 let pendingLines = [];       // classified lines waiting for next flush
 let idleStartMs = 0;         // start of current idle period (for _hb range)
 let currentThinkingLevel: string | undefined; // Track thinking level from session events (#77)
+let lastCompactionTokensBefore: number | undefined; // Track compaction tokensBefore (#90)
 let running = true;
 
 // ---
@@ -192,9 +193,16 @@ function parseNewLines(filePath) {
           currentThinkingLevel = entry.thinkingLevel;
           continue;
         }
-        const interaction = parseEntryToInteraction(entry, currentThinkingLevel);
+        // Track compaction entries — stamp tokensBefore onto the next
+        // assistant interaction (#90).
+        if (entry.type === "compaction" && typeof entry.tokensBefore === "number") {
+          lastCompactionTokensBefore = entry.tokensBefore;
+          continue;
+        }
+        const interaction = parseEntryToInteraction(entry, currentThinkingLevel, lastCompactionTokensBefore);
         if (interaction) {
           interactions.push(interaction);
+          lastCompactionTokensBefore = undefined; // consumed
         }
       } catch (_) {
         // Skip unparseable lines (partial writes, non-JSON)

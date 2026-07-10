@@ -283,6 +283,8 @@ export function serializeClassified(interaction: Interaction): string {
 	if (interaction.webFetchRequests > 0) line.wf = interaction.webFetchRequests;
 	// Thinking effort level (#77)
 	if (interaction.thinkingLevel) line.tl = interaction.thinkingLevel;
+	// Compaction tokens before this interaction (#90)
+	if (interaction.compactionTokensBefore) line.cb = interaction.compactionTokensBefore;
 	return JSON.stringify(line) + "\n";
 }
 
@@ -312,6 +314,7 @@ export function classifiedToInteraction(obj: any): Interaction | null {
 		webFetchRequests: obj.wf || 0,
 		serverToolCost: obj.sc || 0,
 		thinkingLevel: obj.tl || undefined,
+		compactionTokensBefore: obj.cb || undefined,
 		_cat: obj.cat || undefined,
 	};
 }
@@ -369,7 +372,7 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
  * Compute the tag file path for a given session path.
  * Scans wtft-tags/ subdirectory for the current version's tag file.
  */
-export const WTFT_TAGGER_VERSION = "2.3.6";
+export const WTFT_TAGGER_VERSION = "2.3.8";
 
 export function getTagPath(sessionPath: string): string {
 	const sessionDir = path.dirname(sessionPath);

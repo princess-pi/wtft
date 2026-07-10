@@ -19,7 +19,7 @@ import * as path from "node:path";
 // standalone module and should not depend on the daemon's internals)
 // ---
 
-const TAGGER_VERSION = "2.3.6";
+const TAGGER_VERSION = "2.3.8";
 import * as os from "node:os";
 import { buildDisplayPath, formatRelativeTime } from "./session-path-shortener.ts";
 import { formatCost } from "./wtft-shared.ts";

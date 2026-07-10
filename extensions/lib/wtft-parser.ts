@@ -52,7 +52,7 @@ function extractFilesFromBashCommand(command: string, files: { path: string; act
 	}
 }
 
-export function parseEntryToInteraction(entry: any, thinkingLevel?: string): Interaction | null {
+export function parseEntryToInteraction(entry: any, thinkingLevel?: string, compactionTokensBefore?: number): Interaction | null {
 	if (!entry) return null;
 	
 	// Support both Pi schema (entry.type === "message") and Claude Code schema (entry.type === "assistant" or lacking type but having message)
@@ -164,6 +164,7 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string): Int
 			webFetchRequests: (serverToolRequests.web_fetch_requests || 0) as number,
 			serverToolCost,
 			thinkingLevel,
+			compactionTokensBefore,
 			files, commands, texts };
 	}
 	
@@ -173,6 +174,7 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string): Int
 export function parseSessionFile(filePath: string): Interaction[] {
 	const interactions: Interaction[] = [];
 	let currentThinkingLevel: string | undefined;
+	let lastCompactionTokensBefore: number | undefined;
 	try {
 		const content = fs.readFileSync(filePath, "utf8");
 		for (const line of content.split("\n")) {
@@ -184,8 +186,18 @@ export function parseSessionFile(filePath: string): Interaction[] {
 					currentThinkingLevel = entry.thinkingLevel;
 					continue;
 				}
-				const interaction = parseEntryToInteraction(entry, currentThinkingLevel);
-				if (interaction) interactions.push(interaction);
+				// Track compaction entries — stamp tokensBefore onto the next
+				// assistant interaction so cost/token summaries can surface
+				// how much context was freed (#90).
+				if (entry.type === "compaction" && typeof entry.tokensBefore === "number") {
+					lastCompactionTokensBefore = entry.tokensBefore;
+					continue;
+				}
+				const interaction = parseEntryToInteraction(entry, currentThinkingLevel, lastCompactionTokensBefore);
+				if (interaction) {
+					interactions.push(interaction);
+					lastCompactionTokensBefore = undefined; // consumed by this interaction
+				}
 			} catch {
 				// Skip unparseable lines (partial writes, non-JSON)
 			}

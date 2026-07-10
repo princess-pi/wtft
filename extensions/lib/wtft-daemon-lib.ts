@@ -741,8 +741,10 @@ export async function watchTagFile(
 	let daemonIdle = false;
 	let daemonIdleMs = 0;
 	let daemonCacheTtlMs: number | null | undefined = undefined;
+	let daemonChecked = false;  // true after first health check completes
 
 	const updateDaemonHealth = () => {
+		daemonChecked = true;
 		if (daemonRestarting) {
 			// Check if daemon came back online after restart.
 			const health = checkDaemonHealth(sessionPath, tagPath);
@@ -904,7 +906,9 @@ export async function watchTagFile(
 		if (lines && lines.length > 0) {
 			// Append daemon status (inline if it fits, otherwise separate line).
 			let daemonStatusStr = "";
-			if (daemonRestarting) {
+			if (!daemonChecked) {
+				daemonStatusStr = "  \x1b[90m●\x1b[0m reading...";
+			} else if (daemonRestarting) {
 				daemonStatusStr = renderDaemonStatus({ alive: true }, true);
 			} else if (daemonDead) {
 				daemonStatusStr = renderDaemonStatus({ alive: false, reason: daemonStopReason || undefined, lastHbTime: daemonStopTime || undefined }, false);

@@ -230,6 +230,8 @@ function initClassified() {
     } else {
       // Tag file exists but no classified data (only heartbeats from a
       // previous daemon that exited before its first poll). Full re-parse.
+      // Clear the tag file so previous heartbeat/stop lines don't accumulate.
+      try { fs.truncateSync(tagPath, 0); } catch { /* best effort */ }
       lastSize = 0;
     }
   } catch (_) {

@@ -340,15 +340,12 @@ interface TpmSettings {
 
 // Config-file defaults: ~/.config/princess-pi-packages/tpm.json
 // Session-level /tpm overrides take precedence.
-let _cachedConfig: TpmSettings | null = null;
 function getConfigDefaults(): TpmSettings {
-  if (_cachedConfig) return _cachedConfig;
   const cfg = loadConfig("tpm", { widget: true, footer: false });
-  _cachedConfig = {
+  return {
     widget: cfg.widget !== false,
     footer: cfg.footer === true,
   };
-  return _cachedConfig;
 }
 
 function getTpmSettings(ctx: any): TpmSettings {

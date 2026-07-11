@@ -338,12 +338,12 @@ interface TpmSettings {
   footer: boolean;
 }
 
-// Config-file defaults: ~/.config/princess-pi-packages/rate-limiter.json
+// Config-file defaults: ~/.config/princess-pi-packages/tpm.json
 // Session-level /tpm overrides take precedence.
 let _cachedConfig: TpmSettings | null = null;
 function getConfigDefaults(): TpmSettings {
   if (_cachedConfig) return _cachedConfig;
-  const cfg = loadConfig("rate-limiter", { widget: true, footer: false });
+  const cfg = loadConfig("tpm", { widget: true, footer: false });
   _cachedConfig = {
     widget: cfg.widget !== false,
     footer: cfg.footer === true,

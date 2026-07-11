@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { loadConfig } from "./lib/config.js";
 
 
 // ---
@@ -337,10 +338,24 @@ interface TpmSettings {
   footer: boolean;
 }
 
+// Config-file defaults: ~/.config/princess-pi-packages/rate-limiter.json
+// Session-level /tpm overrides take precedence.
+let _cachedConfig: TpmSettings | null = null;
+function getConfigDefaults(): TpmSettings {
+  if (_cachedConfig) return _cachedConfig;
+  const cfg = loadConfig("rate-limiter", { widget: true, footer: false });
+  _cachedConfig = {
+    widget: cfg.widget !== false,
+    footer: cfg.footer === true,
+  };
+  return _cachedConfig;
+}
+
 function getTpmSettings(ctx: any): TpmSettings {
-  if (!ctx || !ctx.sessionManager) return { widget: true, footer: false };
-  let widget = true;
-  let footer = false;
+  const defaults = getConfigDefaults();
+  if (!ctx || !ctx.sessionManager) return defaults;
+  let widget = defaults.widget;
+  let footer = defaults.footer;
   for (const entry of ctx.sessionManager.getEntries()) {
     if (entry.type === "custom" && entry.customType === "tpm-settings") {
       if (entry.data) {

@@ -20,13 +20,24 @@ const MODEL_QUOTA_REGISTRY: Record<string, number> = {
   "glatfla": 2500000,  // gemini-flash-latest (Tier 2 limit: 3.0M)
   "g3.5fli": 2500000,  // gemini-3.5-flash-lite (Tier 2 limit: 3.0M)
   "glatfli": 2500000,  // gemini-flash-lite-latest (Tier 2 limit: 3.0M)
+  "g3.5pro": 1600000,  // gemini-3.5-pro (Tier 2 limit: 2.0M)
   "g1.5pro": 1600000,  // gemini-1.5-pro (Tier 2 limit: 2.0M)
   "glatpro": 1600000,  // gemini-pro-latest (Tier 2 limit: 2.0M)
-  "c3.5son": 320000,   // claude-3-5-sonnet (Tier 4 limit: 400K)
-  "c3.5hai": 320000,   // claude-3-5-haiku
+  "c5.0son": 320000,   // claude-sonnet-5 (Tier 4 limit: 400K)
+  "c3.5son": 320000,   // claude-3-5-sonnet / claude-sonnet-4-6 (Tier 4 limit: 400K)
+  "c5.0fab": 80000,    // claude-fable-5 (Opus-equivalent Tier: 100K)
+  "c3.5hai": 320000,   // claude-3-5-haiku (Tier 4 limit: 400K)
+  "c5.0hai": 320000,   // claude-haiku-5 (Tier 4 limit: 400K)
+  "c4.0opu": 80000,    // claude-opus-4-x (Opus standard limit)
   "c3.0opu": 80000,    // claude-3-opus (Opus standard limit)
   "d4.0fla": 2500000,  // deepseek-v4-flash (concurrency limit: 2500; no TPM limit — Gemini-equivalent ceiling for redline visibility)
   "d4.0pro": 1600000,  // deepseek-v4-pro (concurrency limit: 500; no TPM limit — Gemini-equivalent ceiling for redline visibility)
+  // GPT-5.x: no hard TPM limits (RPM-limited instead), but register for visibility
+  "gpt5sol": 1000000,  // gpt-5.6-sol (default ceiling for visibility)
+  "gpt5ter": 1000000,  // gpt-5.6-terra
+  "gpt5lun": 1000000,  // gpt-5.6-luna
+  "gpt5.5": 1000000,   // gpt-5.5
+  "gpt5.4": 1000000,   // gpt-5.4
 };
 
 const DEFAULT_CEILING = 1000000;
@@ -49,32 +60,58 @@ function getModelShortName(modelName: string): string {
   if (!modelName) return "unknown";
   const m = modelName.toLowerCase();
 
+  // Gemini
   if (m.includes("gemini-3.5-flash")) return "g3.5fla";
+  if (m.includes("gemini-3.5-pro")) return "g3.5pro";
   if (m.includes("gemini-flash-latest")) return "glatfla";
   if (m.includes("gemini-3.5-flash-lite")) return "g3.5fli";
   if (m.includes("gemini-flash-lite-latest")) return "glatfli";
-  if (m.includes("gemini-1.5-pro")) return "g1.5pro";
+  if (m.includes("gemini-1.5-pro") || m.includes("gemini-pro-latest")) return "glatpro";
+
+  // DeepSeek
   if (m.includes("deepseek-v4-pro")) return "d4.0pro";
   if (m.includes("deepseek-v4-flash") || m.includes("deepseek-chat") || m.includes("deepseek-reasoner")) return "d4.0fla";
 
-  if (m.includes("claude-3-5-sonnet") || m.includes("claude-sonnet-4-6") || m.includes("claude-3-5-sonnet-20240620") || m.includes("claude-3-5-sonnet-20241022")) {
+  // Claude — check from most specific to least
+  if (m.includes("claude-fable-5") || m.includes("fable-5")) return "c5.0fab";
+  if (m.includes("claude-sonnet-5") || m.includes("sonnet-5")) return "c5.0son";
+  if (m.includes("claude-haiku-5") || m.includes("haiku-5")) return "c5.0hai";
+  if (m.includes("claude-opus-4") || m.includes("opus-4")) return "c4.0opu";
+  if (m.includes("claude-3-5-sonnet") || m.includes("claude-sonnet-4-6") || m.includes("claude-sonnet-4-5") || m.includes("claude-3-5-sonnet-20240620") || m.includes("claude-3-5-sonnet-20241022")) {
     return "c3.5son";
   }
   if (m.includes("claude-3-5-haiku") || m.includes("claude-3-5-haiku-20241022")) {
     return "c3.5hai";
   }
-  if (m.includes("claude-3-opus") || m.includes("claude-3-0-opus") || m.includes("opus")) {
-    return "c3.0opu";
-  }
+  if (m.includes("claude-3-opus") || m.includes("claude-3-0-opus")) return "c3.0opu";
+  // Generic Claude fallbacks: check specific model families before the generic opus catch-all
+  if (m.includes("sonnet")) return "c3.5son"; // unknown sonnet variant → treat as Sonnet tier
+  if (m.includes("haiku")) return "c3.5hai";
+  if (m.includes("opus")) return "c4.0opu"; // unknown opus variant → treat as Opus 4 tier
+
+  // GPT-5.x
+  if (m.includes("gpt-5.6-sol")) return "gpt5sol";
+  if (m.includes("gpt-5.6-terra")) return "gpt5ter";
+  if (m.includes("gpt-5.6-luna")) return "gpt5lun";
+  if (m.includes("gpt-5.6")) return "gpt5sol"; // generic gpt-5.6 → Sol pricing tier
+  if (m.includes("gpt-5.5")) return "gpt5.5";
+  if (m.includes("gpt-5.4")) return "gpt5.4";
+  if (m.includes("gpt-5") || m.includes("gpt5")) return "gpt5sol"; // catch-all GPT-5 family
 
   // Fallback fixed-width 7-char encoder (P-VVV-MMM)
-  // Prefix: g=Gemini, c=Claude, d=DeepSeek
+  // Prefix: g=Gemini/Google, c=Claude, d=DeepSeek, o=OpenAI/GPT
   let comp = "c";
   if (m.includes("gemini") || m.includes("google")) comp = "g";
   else if (m.includes("deepseek")) comp = "d";
+  else if (m.includes("gpt") || m.includes("openai")) comp = "o";
   
   let ver = "3.5";
   if (m.includes("latest")) ver = "lat";
+  else if (m.includes("5.6")) ver = "5.6";
+  else if (m.includes("5.5")) ver = "5.5";
+  else if (m.includes("5.4")) ver = "5.4";
+  else if (m.includes("5.0") || m.includes("5-")) ver = "5.0";
+  else if (m.includes("4.0") || m.includes("4-")) ver = "4.0";
   else if (m.includes("3.0") || m.includes("3-0")) ver = "3.0";
   else if (m.includes("1.5") || m.includes("1-5")) ver = "1.5";
 
@@ -85,6 +122,9 @@ function getModelShortName(modelName: string): string {
     if (lastPart === "lite" || (lastPart === "latest" && m.includes("lite"))) modelPart = "fli";
     else if (lastPart === "latest" && m.includes("flash")) modelPart = "fla";
     else if (lastPart === "latest" && m.includes("pro")) modelPart = "pro";
+    else if (lastPart === "sol") modelPart = "sol";
+    else if (lastPart === "terra") modelPart = "ter";
+    else if (lastPart === "luna") modelPart = "lun";
     else modelPart = lastPart.slice(0, 3);
   }
 

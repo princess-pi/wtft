@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { loadConfig } from "./lib/config.js";
+import { loadConfig, writeConfig } from "./lib/config.js";
 
 
 // ---
@@ -338,59 +338,21 @@ interface TpmSettings {
   footer: boolean;
 }
 
-// Config-file defaults: ~/.config/princess-pi-packages/tpm.json
-// Session-level /tpm overrides take precedence.
-function getConfigDefaults(ctx?: any): TpmSettings {
-  try {
-    const cfg = loadConfig("tpm", { widget: true, footer: false });
-    return {
-      widget: cfg.widget !== false,
-      footer: cfg.footer === true,
-    };
-  } catch (e: any) {
-    // If loadConfig fails (missing config lib, bad import), fall back to defaults.
-    // Log once to status bar so user knows config didn't load.
-    if (ctx?.ui?.setStatus) {
-      ctx.ui.setStatus("tpm-config", `tpm.json load failed: ${e.message}`);
-    }
-    return { widget: true, footer: false };
-  }
+function getTpmSettings(ctx?: any): TpmSettings {
+  const cfg = loadConfig("tpm", { widget: true, footer: false });
+  return {
+    widget: cfg.widget !== false,
+    footer: cfg.footer === true,
+  };
 }
 
-function getTpmSettings(ctx: any): TpmSettings {
-  const defaults = getConfigDefaults(ctx);
-  if (!ctx || !ctx.sessionManager) return defaults;
-  let widget = defaults.widget;
-  let footer = defaults.footer;
-  // Iterate in reverse — later entries override earlier ones.
-  // A _reset entry clears session overrides to config defaults.
-  const entries = ctx.sessionManager.getEntries();
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const entry = entries[i];
-    if (entry.type === "custom" && entry.customType === "tpm-settings") {
-      if (entry.data?._reset) break; // stop — config defaults win
-      if (typeof entry.data?.widget === "boolean") widget = entry.data.widget;
-      if (typeof entry.data?.footer === "boolean") footer = entry.data.footer;
-    }
-  }
-  return { widget, footer };
-}
-
-function isEmojiDisabled(ctx: any): boolean {
-  if (!ctx || !ctx.sessionManager) return false;
-  let disabled = false;
-  for (const entry of ctx.sessionManager.getEntries()) {
-    if (entry.type === "custom" && entry.customType === "emoji-settings") {
-      if (entry.data && typeof entry.data.disabled === "boolean") {
-        disabled = entry.data.disabled;
-      }
-    }
-  }
-  return disabled;
+function isEmojiDisabled(): boolean {
+  const cfg = loadConfig("tpm", {});
+  return cfg.emojiDisabled === true;
 }
 
 function updateRateLimiterWidget(ctx: ExtensionContext) {
-  const settings = getTpmSettings(ctx);
+  const settings = getTpmSettings();
 
   if (!settings.widget) {
     ctx.ui.setWidget("rate-limiter", undefined);
@@ -404,7 +366,7 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
     return;
   }
 
-  const emojiDisabled = isEmojiDisabled(ctx);
+  const emojiDisabled = isEmojiDisabled();
 
   try {
     const activeFiles = findActiveSessionFiles();
@@ -729,21 +691,21 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
       let handled = false;
 
       if (trimmed === "--reset") {
-        pi.appendEntry("tpm-settings", { _reset: true });
+        writeConfig("tpm", { widget: null, footer: null });
         updateRateLimiterWidget(ctx);
-        ctx.ui.notify("TPM settings reset to config defaults.", "info");
+        ctx.ui.notify("TPM settings reset. Edit ~/.config/princess-pi-packages/tpm.json for new defaults.", "info");
         return;
       }
 
       if (trimmed === "--no-emojii" || trimmed === "--no-emoji") {
-        pi.appendEntry("emoji-settings", { disabled: true });
+        writeConfig("tpm", { emojiDisabled: true });
         updateRateLimiterWidget(ctx);
-        ctx.ui.notify("Emoji icons in widgets have been disabled.", "info");
+        ctx.ui.notify("Emoji icons in widgets have been disabled. (Persisted to tpm.json)", "info");
         return;
       } else if (trimmed === "--emojii" || trimmed === "--emoji") {
-        pi.appendEntry("emoji-settings", { disabled: false });
+        writeConfig("tpm", { emojiDisabled: false });
         updateRateLimiterWidget(ctx);
-        ctx.ui.notify("Emoji icons in widgets have been enabled.", "info");
+        ctx.ui.notify("Emoji icons in widgets have been enabled. (Persisted to tpm.json)", "info");
         return;
       }
 
@@ -786,7 +748,7 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
         newWidget = !current.widget;
       }
 
-      pi.appendEntry("tpm-settings", { widget: newWidget, footer: newFooter });
+      writeConfig("tpm", { widget: newWidget, footer: newFooter });
       updateRateLimiterWidget(ctx);
 
       const statusMsgs: string[] = [];

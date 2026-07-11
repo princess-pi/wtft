@@ -340,16 +340,25 @@ interface TpmSettings {
 
 // Config-file defaults: ~/.config/princess-pi-packages/tpm.json
 // Session-level /tpm overrides take precedence.
-function getConfigDefaults(): TpmSettings {
-  const cfg = loadConfig("tpm", { widget: true, footer: false });
-  return {
-    widget: cfg.widget !== false,
-    footer: cfg.footer === true,
-  };
+function getConfigDefaults(ctx?: any): TpmSettings {
+  try {
+    const cfg = loadConfig("tpm", { widget: true, footer: false });
+    return {
+      widget: cfg.widget !== false,
+      footer: cfg.footer === true,
+    };
+  } catch (e: any) {
+    // If loadConfig fails (missing config lib, bad import), fall back to defaults.
+    // Log once to status bar so user knows config didn't load.
+    if (ctx?.ui?.setStatus) {
+      ctx.ui.setStatus("tpm-config", `tpm.json load failed: ${e.message}`);
+    }
+    return { widget: true, footer: false };
+  }
 }
 
 function getTpmSettings(ctx: any): TpmSettings {
-  const defaults = getConfigDefaults();
+  const defaults = getConfigDefaults(ctx);
   if (!ctx || !ctx.sessionManager) return defaults;
   let widget = defaults.widget;
   let footer = defaults.footer;

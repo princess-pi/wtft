@@ -362,12 +362,15 @@ function getTpmSettings(ctx: any): TpmSettings {
   if (!ctx || !ctx.sessionManager) return defaults;
   let widget = defaults.widget;
   let footer = defaults.footer;
-  for (const entry of ctx.sessionManager.getEntries()) {
+  // Iterate in reverse — later entries override earlier ones.
+  // A _reset entry clears session overrides to config defaults.
+  const entries = ctx.sessionManager.getEntries();
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
     if (entry.type === "custom" && entry.customType === "tpm-settings") {
-      if (entry.data) {
-        if (typeof entry.data.widget === "boolean") widget = entry.data.widget;
-        if (typeof entry.data.footer === "boolean") footer = entry.data.footer;
-      }
+      if (entry.data?._reset) break; // stop — config defaults win
+      if (typeof entry.data?.widget === "boolean") widget = entry.data.widget;
+      if (typeof entry.data?.footer === "boolean") footer = entry.data.footer;
     }
   }
   return { widget, footer };
@@ -724,6 +727,13 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
       let newWidget = current.widget;
       let newFooter = current.footer;
       let handled = false;
+
+      if (trimmed === "--reset") {
+        pi.appendEntry("tpm-settings", { _reset: true });
+        updateRateLimiterWidget(ctx);
+        ctx.ui.notify("TPM settings reset to config defaults.", "info");
+        return;
+      }
 
       if (trimmed === "--no-emojii" || trimmed === "--no-emoji") {
         pi.appendEntry("emoji-settings", { disabled: true });

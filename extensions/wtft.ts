@@ -426,7 +426,6 @@ function updateWtftWidget(
 	// Append log parser status (inline if it fits, otherwise separate line).
 	// ---
 	let parserStatusStr = "";
-	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	if (sessionFile && _parserSpawned) {
 		const status = getParserStatus(sessionFile);
 		parserStatusStr = renderDaemonStatus(status, false);

@@ -652,6 +652,10 @@ export function buildWtftLines(
 	
 	const titleLeft = disabledEmoji ? "[$] WTF Tokens?" : "💸 WTF Tokens?";
 	
+	// Append session suffix (last 4 chars of session name) if available
+	const sessionSuffix = opts?.sessionNameSuffix ? ` \x1b[90m...${opts.sessionNameSuffix.replace(/.jsonl$/, "").slice(-4)}\x1b[0m` : "";
+	const titleLeftFinal = titleLeft + sessionSuffix;
+	
 	const legendItems = [
 		`\x1b[38;5;108m█\x1b[0mSpec`,
 		`\x1b[38;5;108;48;5;173m▒\x1b[0mMixed`,
@@ -666,17 +670,17 @@ export function buildWtftLines(
 	];
 	const legendStr = legendItems.join(" ");
 	
-	const leftLen = getVisualLength(titleLeft);
+	const leftLen = getVisualLength(titleLeftFinal);
 	const legendLen = getVisualLength(legendStr);
 	const totalNeeded = leftLen + legendLen + 4; // 4 spaces margin
 	const forceLegendRow = opts?.forceLegendRow ?? false;
 	
 	if (!forceLegendRow && totalNeeded <= finalWidth - 3) {
 		const remainingSpaces = (finalWidth - 3) - leftLen - legendLen;
-		const titleLine = titleLeft + " ".repeat(remainingSpaces) + legendStr;
+		const titleLine = titleLeftFinal + " ".repeat(remainingSpaces) + legendStr;
 		widgetLines.push(titleLine);
 	} else {
-		widgetLines.push(titleLeft);
+		widgetLines.push(titleLeftFinal);
 		// 2nd row has the legend
 		widgetLines.push(legendStr);
 	}

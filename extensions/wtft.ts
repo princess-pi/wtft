@@ -352,6 +352,7 @@ function buildWtftLines(
 		mode?: "bucket" | "cumulative";
 		timezone?: string;
 		forceLegendRow?: boolean;
+		sessionNameSuffix?: string;
 	}
 ): string[] | null {
 	// Use pre-accumulated interactions (branch walk on session_start +
@@ -395,7 +396,9 @@ function updateWtftWidget(
 	} catch (_) {}
 
 	// Force legend to its own row — SURGE timeline is appended to title line inside buildWtftLines
-	const buildOpts = { ...opts, forceLegendRow: true, model: modelId };
+	const sessionFile = ctx.sessionManager.getSessionFile?.();
+	const sessionNameSuffix = sessionFile ? path.basename(sessionFile) : undefined;
+	const buildOpts = { ...opts, forceLegendRow: true, model: modelId, sessionNameSuffix };
 	const lines = buildWtftLines(ctx, pi, buildOpts);
 	if (!lines || lines.length === 0) {
 		// --- Show cache/empty state instead of hiding widget. ---

@@ -490,7 +490,8 @@ async function main() {
 		showTicks: finalShowTicks,
 		mode: finalMode,
 		timezone: finalTimezone,
-		disabledEmoji
+		disabledEmoji,
+		sessionNameSuffix: path.basename(finalSessionPath),
 	});
 
 	if (!outputLines) {

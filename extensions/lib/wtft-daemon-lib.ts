@@ -487,7 +487,7 @@ export interface DaemonStatus {
  * Render a daemon status indicator string (shared by Pi widget + CLI watch modes).
  * Returns e.g.:
  *   "  ● live" (green) — daemon active, recent data
- *   "  ● idle (3:22 to expire)" (yellow) — daemon idle, cache TTL ticking down
+ *   "  ● idle (cache expires in 3:22)" (yellow) — daemon idle, cache TTL ticking down
  *   "  ● No Cache (local)" (green) — daemon idle, local model (no remote cache)
  *   "  ● stopped 14:30" (red) — daemon exited cleanly
  *   "  ● restarting..." (yellow) — daemon being relaunched
@@ -513,7 +513,7 @@ export function renderDaemonStatus(status: DaemonStatus, restarting = false): st
 			if (remainingMin <= 0) {
 				return "  \x1b[33m●\x1b[0m idle (cache emptied)";
 			}
-			return `  \x1b[33m●\x1b[0m idle (${remainingMin}min to expire)`;
+			return `  \x1b[33m●\x1b[0m idle (cache expires in ${remainingMin}min)`;
 		}
 		// Cache TTL unknown — daemon is idle, we just don't know the cache window.
 		// Show "local model" only when we confirmed the model has no remote cache.
@@ -1032,7 +1032,7 @@ export async function watchTagFile(
 
 				// In-place modification (heartbeat overwrite): file didn't grow
 				// but the idle timestamp changed. Refresh health status so the
-				// countdown (e.g. "idle (3min to expire)") stays current.
+				// countdown (e.g. "idle (cache expires in 3min)") stays current.
 				updateDaemonHealth();
 				needsRedraw = true;
 				render();

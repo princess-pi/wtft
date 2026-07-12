@@ -11,7 +11,7 @@ import {
 	classifyInteraction,
 	buildWtftLines
 } from "./wtft-shared.js";
-import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
+import { showCursor, hideCursor, enterRawStdin } from "./tty-helpers.js";
 export interface WatchSettings {
 	interval: string;
 	limit: number;
@@ -51,7 +51,7 @@ export async function watchMode(
 
 	// Shared exit: clears chart output, restores terminal, prints final chart.
 	const exitWatch = () => {
-		clearPreviousLines(lastLineCount);
+		if (lastLineCount > 0) process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
 		showCursor();
 		cleanupStdin();
 		if (lastBuffer.length > 0) {
@@ -140,13 +140,13 @@ export async function watchMode(
 	let sessionShowTicks: boolean | undefined;
 	let sessionTimezone: string | undefined;
 
-	// Save cursor before first render (DECSC \x1b7 — tmux-compatible).
-	// On every re-render, restore + clear erases old output before writing new.
-	process.stdout.write("\x1b7");
-
+	// Rewrite in-place: move cursor up to top of previous output,
+	// overwrite each line padded with \x1b[K, then \x1b[J below.
+	// No DECSC/DECRC — they break on terminal resize.
 	const render = () => {
-		// Clear previous render's output lines, then re-render in place.
-		clearPreviousLines(lastLineCount);
+		if (lastLineCount > 0) {
+			process.stdout.write(`\x1b[${lastLineCount}A`);
+		}
 
 		const width = getTerminalWidth();
 		const finalInterval = settings.hasInterval ? settings.interval : (sessionInterval ?? settings.interval);
@@ -187,10 +187,16 @@ export async function watchMode(
 		buf.push(`'q' to exit`);
 
 		lastBuffer = [...buf]; // save for exit printout
-		const output = buf.join("\n") + "\n";
-		process.stdout.write(output);
-		// Track visual line count (accounts for wrapped lines) for in-place overwrite
-		lastLineCount = visualLineCount(output, width);
+
+		// Write each line padded to terminal width with clear-to-EOL
+		const allLines = [...buf];
+		for (let i = 0; i < allLines.length; i++) {
+			const visLen = getVisualLength(allLines[i]);
+			const padNeeded = Math.max(0, width - visLen - 1);
+			process.stdout.write(allLines[i] + " ".repeat(padNeeded) + "\x1b[K\n");
+		}
+		process.stdout.write("\x1b[J");
+		lastLineCount = allLines.length;
 		needsRedraw = false;
 		_lastRenderMin = new Date().getMinutes();
 	};

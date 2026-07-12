@@ -144,9 +144,11 @@ export async function watchMode(
 	// overwrite each line padded with \x1b[K, then \x1b[J below.
 	// No DECSC/DECRC — they break on terminal resize.
 	const render = () => {
-		if (lastLineCount > 0) {
-			process.stdout.write(`\x1b[${lastLineCount}A`);
-		}
+		// Recompute upRows from previous output at current width (handles resize)
+		const upRows = lastLineCount > 0
+			? visualLineCount(lastBuffer.join("\n") + "\n", getTerminalWidth())
+			: 0;
+		if (upRows > 0) process.stdout.write(`\x1b[${upRows}A`);
 
 		const width = getTerminalWidth();
 		const finalInterval = settings.hasInterval ? settings.interval : (sessionInterval ?? settings.interval);
@@ -896,9 +898,11 @@ export async function watchTagFile(
 		// Rewrite in-place: move cursor back up to top of previous render,
 		// then overwrite each line (padded with \x1b[K clear-to-EOL).
 		// Clear below (\x1b[J) after writing to erase any leftover lines.
-		if (lastLineCount > 0) {
-			process.stdout.write(`\x1b[${lastLineCount}A`);
-		}
+		// Recompute upRows from previous output at current width (handles resize)
+		const upRows = lastLineCount > 0
+			? visualLineCount(lastBuffer.join("\n") + "\n", getTerminalWidth())
+			: 0;
+		if (upRows > 0) process.stdout.write(`\x1b[${upRows}A`);
 
 		const width = getTerminalWidth();
 		const pad = settings.pad || 0;

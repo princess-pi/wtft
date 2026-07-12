@@ -962,10 +962,10 @@ export function buildWtftLines(
 				allChars += segChars;
 			}
 
-			// Server tool cost marker (◆) at bar tail if no tokens but had cost (#14)
+			// Server tool cost marker ($) at bar tail if no tokens but had cost (#14)
 			const hasServerToolCost = (bin.costs["web"] || 0) > 0 && (bin.tokens["web"]?.total ?? 0) === 0;
 			if (hasServerToolCost && allChars < maxBarWidth) {
-				barStr += `\x1b[38;5;209m◆\x1b[0m`;
+				barStr += `\x1b[38;5;209m$\x1b[0m`;
 				allChars++;
 			}
 
@@ -1094,7 +1094,7 @@ export function buildWtftLines(
 	// --- TOKEN MODE FOOTER (#14): density key bar + Pi-style summary ---
 	if (unit === "tokens") {
 		// Density key bar
-		widgetLines.push(`\x1b[90m  cheap \$/tok  \x1b[37m░\x1b[0m\x1b[37m░\x1b[0m \x1b[37m▒\x1b[0m\x1b[37m▒\x1b[0m \x1b[37m▓\x1b[0m\x1b[37m▓\x1b[0m \x1b[37m█\x1b[0m\x1b[37m█\x1b[0m  expensive \$/tok  \x1b[90m◆ = cost-only (web tools)\x1b[0m`);
+		widgetLines.push(`\x1b[90m  cheap \$/tok  \x1b[37m░\x1b[0m\x1b[37m░\x1b[0m \x1b[37m▒\x1b[0m\x1b[37m▒\x1b[0m \x1b[37m▓\x1b[0m\x1b[37m▓\x1b[0m \x1b[37m█\x1b[0m\x1b[37m█\x1b[0m  expensive \$/tok  \x1b[90m\$ = cost-only (web tools)\x1b[0m`);
 		// Footer summary
 		const summary = tokenFooterSummary(interactions);
 		if (summary) {

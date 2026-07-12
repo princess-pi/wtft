@@ -405,12 +405,14 @@ async function main() {
 	const tagPath = path.join(tagsDir, sessionBase + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
 
 	// Auto-spawn daemon (singleton via PID file).
-	// The daemon is the canonical parser — CLI never duplicates its work.
-	// Spawn if not running (singleton via PID file), then wait briefly for
-	// the tag file. The daemon writes the full tag atomically on startup;
-	// for typical sessions this is sub-second. If it doesn't appear within
-	// 2s, fall back to direct parse (daemon may be cold-starting on a very
-	// large session file).
+	// The daemon is the sole parser — CLI never parses session files directly.
+	// Spawn if not running (singleton via PID file), then wait up to 2 daemon
+	// beats (2 × 667ms ≈ 1.3s) for the tag file. The daemon writes the tag
+	// atomically on startup; for typical sessions this is sub-beat.
+	//
+	// No direct-parse fallback. If the tag file isn't ready within the window,
+	// the daemon is still processing — exit with a status message. (In --watch
+	// mode, the inotify loop continues waiting indefinitely.)
 	const daemonPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "wtft-daemon.mjs");
 	try {
 		const child = spawn(process.execPath, [daemonPath, "--session", finalSessionPath], {
@@ -419,27 +421,29 @@ async function main() {
 		});
 		child.unref();
 	} catch (_) {
-		// Daemon binary not found — direct parse fallback
+		console.error(`\x1b[31m❌ wtft-daemon not found at ${daemonPath}\x1b[0m`);
+		process.exit(1);
 	}
 
-	// Use tag file if it exists (daemon already warm); otherwise wait up to
-	// 2s for the freshly-spawned daemon to produce it.
 	let interactions: Interaction[] = [];
 	if (fs.existsSync(tagPath)) {
 		interactions = readClassifiedTagFile(tagPath);
 	}
 	if (interactions.length === 0) {
+		// Wait up to 2 daemon beats for the freshly-spawned daemon to produce the tag file.
 		const tagWaitStart = Date.now();
-		while (Date.now() - tagWaitStart < 2000) {
+		while (Date.now() - tagWaitStart < 1400) {
 			if (fs.existsSync(tagPath)) {
 				interactions = readClassifiedTagFile(tagPath);
 				if (interactions.length > 0) break;
 			}
-			await new Promise(r => setTimeout(r, 100));
+			await new Promise(r => setTimeout(r, 667));
 		}
 	}
 	if (interactions.length === 0) {
-		interactions = parseSessionFile(finalSessionPath);
+		const sessionName = path.basename(finalSessionPath).replace(/.jsonl$/, "");
+		console.log(`\x1b[33mDaemon started on session ${sessionName.slice(0, 12)}… — no data yet. Try again in a moment.\x1b[0m`);
+		process.exit(0);
 	}
 
 	// Read settings from harness-agnostic config file (#72).

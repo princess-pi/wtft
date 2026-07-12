@@ -176,8 +176,12 @@ export async function watchMode(
 		});
 
 		const buf: string[] = [];
-		// Session file path first (no interaction count, no cost — just path)
-		buf.push(`\x1b[90m${sessionPath}\x1b[0m`);
+		// Session file path first — truncate to avoid wrapping
+		const wmMaxPathLen = Math.max(20, finalWidth - 2);
+		const wmShortPath = sessionPath.length > wmMaxPathLen
+			? "..." + sessionPath.slice(-(wmMaxPathLen - 3))
+			: sessionPath;
+		buf.push(`\x1b[90m${wmShortPath}\x1b[0m`);
 		totalCost = deduplicateInteractions(allInteractions).reduce((sum, i) => sum + i.cost, 0);
 
 		if (lines && lines.length > 0) {
@@ -957,7 +961,12 @@ export async function watchTagFile(
 		});
 
 		const buf: string[] = [];
-		buf.push(`\x1b[90m${sessionPath}\x1b[0m`);
+		// Truncate session path to avoid wrapping
+		const maxPathLen = Math.max(20, finalWidth - 2);
+		const shortPath = sessionPath.length > maxPathLen
+			? "..." + sessionPath.slice(-(maxPathLen - 3))
+			: sessionPath;
+		buf.push(`\x1b[90m${shortPath}\x1b[0m`);
 		totalCost = deduped.reduce((sum, i) => sum + i.cost, 0);
 
 		if (lines && lines.length > 0) {

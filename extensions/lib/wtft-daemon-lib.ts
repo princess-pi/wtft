@@ -982,39 +982,45 @@ export async function watchTagFile(
 
 			try {
 				const stat = fs.statSync(tagPath);
-				if (stat.size <= lastReadOffset) return;
 
-				const fd = fs.openSync(tagPath, "r");
-				const buf = Buffer.alloc(stat.size - lastReadOffset);
-				fs.readSync(fd, buf, 0, buf.length, lastReadOffset);
-				fs.closeSync(fd);
-				lastReadOffset = stat.size;
+				// File grew — read new data and accumulate
+				if (stat.size > lastReadOffset) {
+					const fd = fs.openSync(tagPath, "r");
+					const buf = Buffer.alloc(stat.size - lastReadOffset);
+					fs.readSync(fd, buf, 0, buf.length, lastReadOffset);
+					fs.closeSync(fd);
+					lastReadOffset = stat.size;
 
-				const newContent = buf.toString("utf8");
-				const lines = newContent.split("\n");
-				let newCount = 0;
-				for (const line of lines) {
-					if (!line.trim()) continue;
-					try {
-						const obj = JSON.parse(line);
-						if (obj._hb) continue; // skip heartbeats
-						const interaction = classifiedToInteraction(obj);
-						if (interaction) {
-							allInteractions.push(interaction);
-							newCount++;
-						}
-					} catch {
-						// Skip unparseable lines
+					const newContent = buf.toString("utf8");
+					const lines = newContent.split("\n");
+					let newCount = 0;
+					for (const line of lines) {
+						if (!line.trim()) continue;
+						try {
+							const obj = JSON.parse(line);
+							if (obj._hb) continue;
+							const interaction = classifiedToInteraction(obj);
+							if (interaction) {
+								allInteractions.push(interaction);
+								newCount++;
+							}
+						} catch {}
+					}
+
+					if (newCount > 0) {
+						updateDaemonHealth();
+						needsRedraw = true;
+						render();
+						return;
 					}
 				}
 
-				if (newCount > 0) {
-					// Daemon wrote new classified data — refresh health status
-					// so idle→live transition is instant (not lagging on 60s timer).
-					updateDaemonHealth();
-					needsRedraw = true;
-					render();
-				}
+				// In-place modification (heartbeat overwrite): file didn't grow
+				// but the idle timestamp changed. Refresh health status so the
+				// countdown (e.g. "idle (3min to expire)") stays current.
+				updateDaemonHealth();
+				needsRedraw = true;
+				render();
 			} catch {
 				// Tag file may have been deleted or truncated — re-read from zero
 				try {

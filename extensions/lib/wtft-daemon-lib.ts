@@ -200,10 +200,17 @@ export async function watchMode(
 			const padNeeded = Math.max(0, termW - (visLen % termW || termW) - 1);
 			process.stdout.write(allLines[i] + " ".repeat(Math.max(0, padNeeded)) + "\x1b[K\n");
 		}
-		process.stdout.write("\x1b[J");
-		// Count display lines including wraps
+		// If new output is shorter than previous, pad with blank lines
+		// (no \x1b[J — it clears scrollback). upRows already computed from
+		// previous buffer at current width, so resize is handled correctly.
 		const tempOutput = allLines.join("\n") + "\n";
-		lastLineCount = visualLineCount(tempOutput, termW);
+		const newVisualLines = visualLineCount(tempOutput, termW);
+		if (newVisualLines < upRows) {
+			for (let i = newVisualLines; i < upRows; i++) {
+				process.stdout.write(" ".repeat(Math.max(0, termW - 1)) + "\x1b[K\n");
+			}
+		}
+		lastLineCount = newVisualLines;
 		needsRedraw = false;
 		_lastRenderMin = new Date().getMinutes();
 	};
@@ -1000,10 +1007,17 @@ export async function watchTagFile(
 			const padNeeded = Math.max(0, termW - lastSegLen - 1);
 			process.stdout.write(allLines[i] + " ".repeat(padNeeded) + "\x1b[K\n");
 		}
-		process.stdout.write("\x1b[J");
-		// Count display lines including wraps
+		// If new output is shorter than previous, pad with blank lines
+		// (no \x1b[J — it clears scrollback). upRows already computed from
+		// previous buffer at current width, so resize is handled correctly.
 		const tempOutput = allLines.join("\n") + "\n";
-		lastLineCount = visualLineCount(tempOutput, termW);
+		const newVisualLines = visualLineCount(tempOutput, termW);
+		if (newVisualLines < upRows) {
+			for (let i = newVisualLines; i < upRows; i++) {
+				process.stdout.write(" ".repeat(Math.max(0, termW - 1)) + "\x1b[K\n");
+			}
+		}
+		lastLineCount = newVisualLines;
 		needsRedraw = false;
 	};
 

@@ -736,8 +736,8 @@ export async function watchTagFile(
 	const exitWatch = () => {
 		if (watcher) watcher.close();
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
-		// Restore to top of chart, clear everything below
-		process.stdout.write("\x1b8\x1b[J");
+		// Move back to top of chart and clear everything below
+		if (lastLineCount > 0) process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
 		showCursor();
 		cleanupStdin();
 		if (lastBuffer.length > 0) {
@@ -883,12 +883,11 @@ export async function watchTagFile(
 	}
 
 	const render = () => {
-		// Rewrite in-place: restore to saved cursor position, overwrite
-		// each line padded to terminal width (\x1b[K clears to EOL),
-		// then clear any leftover lines below (\x1b[J).
-		// No flicker — old content is overwritten, not cleared first.
+		// Rewrite in-place: move cursor back up to top of previous render,
+		// then overwrite each line (padded with \x1b[K clear-to-EOL).
+		// Clear below (\x1b[J) after writing to erase any leftover lines.
 		if (lastLineCount > 0) {
-			process.stdout.write("\x1b8"); // restore cursor (DECRC)
+			process.stdout.write(`\x1b[${lastLineCount}A`);
 		}
 
 		const width = getTerminalWidth();
@@ -982,9 +981,6 @@ export async function watchTagFile(
 		lastLineCount = allLines.length;
 		needsRedraw = false;
 	};
-
-	// Save cursor before first render (DECSC)
-	process.stdout.write("\x1b7");
 
 	// Initial render
 	render();

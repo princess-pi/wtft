@@ -712,7 +712,19 @@ export async function watchTagFile(
 	let totalCost = 0;
 	let interactionCount = 0;
 	let needsRedraw = true;
-	let _lastRenderMin = -1;
+	let daemonWatchdog: ReturnType<typeof setTimeout> | null = null;
+	const HEALTHY_BEAT_MS = 1334; // 2 × 667ms daemon poll cycle
+	const resetWatchdog = () => {
+		if (daemonWatchdog) clearTimeout(daemonWatchdog);
+		if (!daemonDead) {
+			daemonWatchdog = setTimeout(() => {
+				updateDaemonHealth();
+				needsRedraw = true;
+				render();
+				if (!daemonDead) resetWatchdog();
+			}, HEALTHY_BEAT_MS);
+		}
+	};
 
 	// In-place rendering (no alt screen): track visual line count,
 	// clear previous render on each update, clean up on exit.
@@ -723,6 +735,7 @@ export async function watchTagFile(
 	// Shared exit: clears chart output, restores terminal, prints final chart.
 	const exitWatch = () => {
 		if (watcher) watcher.close();
+		if (daemonWatchdog) clearTimeout(daemonWatchdog);
 		clearPreviousLines(lastLineCount);
 		showCursor();
 		cleanupStdin();
@@ -953,16 +966,17 @@ export async function watchTagFile(
 		process.stdout.write(output);
 		lastLineCount = visualLineCount(output, width);
 		needsRedraw = false;
-		_lastRenderMin = new Date().getMinutes();
 	};
 
 	// Initial render
 	render();
+	resetWatchdog();
 
 	// SIGWINCH handler — re-render immediately on terminal resize
 	process.on("SIGWINCH", () => {
 		needsRedraw = true;
 		render();
+		resetWatchdog();
 	});
 
 	// fs.watch on the classified tag file (inotify on Linux).
@@ -1011,6 +1025,7 @@ export async function watchTagFile(
 						updateDaemonHealth();
 						needsRedraw = true;
 						render();
+						resetWatchdog();
 						return;
 					}
 				}
@@ -1021,6 +1036,7 @@ export async function watchTagFile(
 				updateDaemonHealth();
 				needsRedraw = true;
 				render();
+				resetWatchdog();
 			} catch {
 				// Tag file may have been deleted or truncated — re-read from zero
 				try {
@@ -1029,6 +1045,7 @@ export async function watchTagFile(
 					lastReadOffset = fs.statSync(tagPath).size;
 					needsRedraw = true;
 					render();
+					resetWatchdog();
 				} catch {
 					// File gone — wait for it to reappear
 				}
@@ -1052,20 +1069,9 @@ export async function watchTagFile(
 
 	// Initial daemon health check — run after a short settle (500ms) instead of
 	// 10s so the idle/live status updates quickly when the daemon is already idle.
-	setTimeout(() => { updateDaemonHealth(); needsRedraw = true; render(); }, 500);
+	setTimeout(() => { updateDaemonHealth(); needsRedraw = true; render(); resetWatchdog(); }, 500);
 
-	// Per-minute re-render for timeline diamond/badge + daemon health updates.
-	const minuteInterval = setInterval(() => {
-		const _curMin = new Date().getMinutes();
-		if (_curMin !== _lastRenderMin) {
-			updateDaemonHealth();
-			needsRedraw = true;
-			render();
-		}
-	}, 60000);
-
-	// Keep the process alive (fs.watch is the primary event source).
-	// The minuteInterval also prevents exit when watcher is quiet.
+	// Keep the process alive (fs.watch + watchdog are the event sources).
 	// This is an intentional infinite await — exitWatch() calls process.exit().
 	await new Promise(() => {});
 }

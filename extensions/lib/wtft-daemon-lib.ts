@@ -51,9 +51,10 @@ export async function watchMode(
 
 	// Shared exit: clears chart output, restores terminal, prints final chart.
 	const exitWatch = () => {
-		if (lastLineCount > 0) process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
 		showCursor();
 		cleanupStdin();
+		// Print final chart below the in-place render (preserves scrollback)
+		console.log("");
 		if (lastBuffer.length > 0) {
 			for (const l of lastBuffer) console.log(l);
 		}
@@ -753,10 +754,10 @@ export async function watchTagFile(
 	const exitWatch = () => {
 		if (watcher) watcher.close();
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
-		// Move back to top of chart and clear everything below
-		if (lastLineCount > 0) process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
 		showCursor();
 		cleanupStdin();
+		// Print final chart below the in-place render (preserves scrollback)
+		console.log("");
 		if (lastBuffer.length > 0) {
 			for (const l of lastBuffer) console.log(l);
 		}

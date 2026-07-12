@@ -405,14 +405,12 @@ async function main() {
 	const tagPath = path.join(tagsDir, sessionBase + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
 
 	// Auto-spawn daemon (singleton via PID file).
-	// Spawn daemon async (fire-and-forget) so the tag file is warm for the
-	// next invocation. We NEVER wait for it — direct parse is faster than
-	// daemon startup, and the tag file convergence check fails on actively-
-	// growing sessions where new entries arrive faster than the daemon can
-	// finish processing (causing 30s stalls).
-	//
-	// Strategy: use tag file if it already exists and has entries; otherwise
-	// direct-parse the session file. The daemon catches up in the background.
+	// The daemon is the canonical parser — CLI never duplicates its work.
+	// Spawn if not running (singleton via PID file), then wait briefly for
+	// the tag file. The daemon writes the full tag atomically on startup;
+	// for typical sessions this is sub-second. If it doesn't appear within
+	// 2s, fall back to direct parse (daemon may be cold-starting on a very
+	// large session file).
 	const daemonPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "wtft-daemon.mjs");
 	try {
 		const child = spawn(process.execPath, [daemonPath, "--session", finalSessionPath], {
@@ -420,14 +418,25 @@ async function main() {
 			stdio: "ignore"
 		});
 		child.unref();
-	} catch (err) {
-		// Daemon not available — direct parse is the fallback
+	} catch (_) {
+		// Daemon binary not found — direct parse fallback
 	}
 
-	// Read interactions: prefer tag file, fall back to direct parse.
+	// Use tag file if it exists (daemon already warm); otherwise wait up to
+	// 2s for the freshly-spawned daemon to produce it.
 	let interactions: Interaction[] = [];
 	if (fs.existsSync(tagPath)) {
 		interactions = readClassifiedTagFile(tagPath);
+	}
+	if (interactions.length === 0) {
+		const tagWaitStart = Date.now();
+		while (Date.now() - tagWaitStart < 2000) {
+			if (fs.existsSync(tagPath)) {
+				interactions = readClassifiedTagFile(tagPath);
+				if (interactions.length > 0) break;
+			}
+			await new Promise(r => setTimeout(r, 100));
+		}
 	}
 	if (interactions.length === 0) {
 		interactions = parseSessionFile(finalSessionPath);

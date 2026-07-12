@@ -145,7 +145,8 @@ for (const width of WIDTHS) {
 		const row3 = allRows.length >= 4 ? allRows[3] : "";
 		const legendOnRow2or3 = isLegendRow(row2) || isLegendRow(row3);
 
-		// At wide terminals (>=200), legend fits on title row for all non-watch paths.
+		// At wide terminals (>=200), legend fits on title row.
+		// At narrower ones, legend moves to its own row.
 		if (width >= 200) {
 			check(`${label}: legend on title row (wide)`, legendOnTitle);
 			check(`${label}: legend NOT on own row (wide)`, !legendOnRow2or3);

@@ -666,7 +666,6 @@ export function buildWtftLines(
 		timezone?: string;
 		isWidget?: boolean;
 		disabledEmoji?: boolean;
-		forceLegendRow?: boolean;
 		/** Model ID for SURGE timeline coloring (pass "deepseek-..." for orange surge segments + badges). Auto-detected from interactions if omitted. */
 		model?: string;
 		/** Unit for bar scaling: "cost" (default) or "tokens" (#14). */
@@ -902,9 +901,7 @@ export function buildWtftLines(
 	const legendLen = getVisualLength(legendStr);
 	// Reserve room for legend + timeline on the title row (+ 2 spaces before each)
 	const totalNeeded = leftLen + legendLen + timelineLen + 6;
-	const forceLegendRow = opts?.forceLegendRow ?? false;
-	
-	if (!forceLegendRow && totalNeeded <= finalWidth - 3) {
+	if (totalNeeded <= finalWidth - 3) {
 		// Everything fits on one row: title + spaces + legend + 2sp + timeline
 		const remainingSpaces = (finalWidth - 3) - leftLen - legendLen - timelineLen - 2;
 		const titleLine = titleLeftFinal + " ".repeat(remainingSpaces) + legendStr + "  " + timelineStr;

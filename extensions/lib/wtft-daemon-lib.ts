@@ -170,7 +170,6 @@ export async function watchMode(
 			mode: finalMode,
 			timezone: finalTimezone,
 			disabledEmoji,
-			forceLegendRow: true
 		});
 
 		const buf: string[] = [];
@@ -906,7 +905,6 @@ export async function watchTagFile(
 			mode: finalMode,
 			timezone: finalTimezone,
 			disabledEmoji,
-			forceLegendRow: true
 		});
 
 		const buf: string[] = [];

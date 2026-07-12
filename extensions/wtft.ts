@@ -350,7 +350,6 @@ function buildWtftLines(
 		showTicks?: boolean;
 		mode?: "bucket" | "cumulative";
 		timezone?: string;
-		forceLegendRow?: boolean;
 		sessionNameSuffix?: string;
 	}
 ): string[] | null {
@@ -399,7 +398,7 @@ function updateWtftWidget(
 	// Force legend to its own row — SURGE timeline is appended to title line inside buildWtftLines
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	const sessionNameSuffix = sessionFile ? path.basename(sessionFile) : undefined;
-	const buildOpts = { ...opts, forceLegendRow: true, model: modelId, sessionNameSuffix };
+	const buildOpts = { ...opts, model: modelId, sessionNameSuffix };
 	const lines = buildWtftLines(ctx, pi, buildOpts);
 	if (!lines || lines.length === 0) {
 		// --- Show cache/empty state instead of hiding widget. ---

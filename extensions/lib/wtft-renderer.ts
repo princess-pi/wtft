@@ -1094,7 +1094,7 @@ export function buildWtftLines(
 	// --- TOKEN MODE FOOTER (#14): density key bar + Pi-style summary ---
 	if (unit === "tokens") {
 		// Density key bar
-		widgetLines.push(`\x1b[90m  cheap \$/tok  \x1b[38;5;22m░\x1b[0m\x1b[38;5;22m░\x1b[0m \x1b[38;5;94m▒\x1b[0m\x1b[38;5;94m▒\x1b[0m \x1b[38;5;130m▓\x1b[0m\x1b[38;5;130m▓\x1b[0m \x1b[38;5;88m█\x1b[0m\x1b[38;5;88m█\x1b[0m  expensive \$/tok  \x1b[90m◆ = cost-only (web tools)\x1b[0m`);
+		widgetLines.push(`\x1b[90m  cheap \$/tok  \x1b[37m░\x1b[0m\x1b[37m░\x1b[0m \x1b[37m▒\x1b[0m\x1b[37m▒\x1b[0m \x1b[37m▓\x1b[0m\x1b[37m▓\x1b[0m \x1b[37m█\x1b[0m\x1b[37m█\x1b[0m  expensive \$/tok  \x1b[90m◆ = cost-only (web tools)\x1b[0m`);
 		// Footer summary
 		const summary = tokenFooterSummary(interactions);
 		if (summary) {

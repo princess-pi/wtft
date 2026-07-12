@@ -191,14 +191,18 @@ export async function watchMode(
 
 		lastBuffer = [...buf]; // save for exit printout
 
-		// Write each line padded to terminal width with clear-to-EOL,
-		// then count visual lines (accounts for terminal wrapping).
+		// Write each line padded to terminal width with clear-to-EOL.
+		// Only pad lines that fit on one display row — padding a wrapped
+		// line adds characters that cause MORE wrapping, not less.
 		const allLines = [...buf];
 		const termW = width;
 		for (let i = 0; i < allLines.length; i++) {
 			const visLen = getVisualLength(allLines[i]);
-			const padNeeded = Math.max(0, termW - (visLen % termW || termW) - 1);
-			process.stdout.write(allLines[i] + " ".repeat(Math.max(0, padNeeded)) + "\x1b[K\n");
+			if (visLen < termW) {
+				process.stdout.write(allLines[i] + " ".repeat(termW - visLen - 1) + "\x1b[K\n");
+			} else {
+				process.stdout.write(allLines[i] + "\x1b[K\n");
+			}
 		}
 		// If new output is shorter than previous, pad with blank lines
 		// (no \x1b[J — it clears scrollback). upRows already computed from
@@ -1001,11 +1005,11 @@ export async function watchTagFile(
 		const allLines = buf.map(l => padStr + l);
 		for (let i = 0; i < allLines.length; i++) {
 			const visLen = getVisualLength(allLines[i]);
-			const wrapped = visLen > 0 ? Math.ceil(visLen / termW) : 1;
-			// Pad the last visual segment of each logical line
-			const lastSegLen = visLen > 0 ? ((visLen - 1) % termW) + 1 : 0;
-			const padNeeded = Math.max(0, termW - lastSegLen - 1);
-			process.stdout.write(allLines[i] + " ".repeat(padNeeded) + "\x1b[K\n");
+			if (visLen < termW) {
+				process.stdout.write(allLines[i] + " ".repeat(termW - visLen - 1) + "\x1b[K\n");
+			} else {
+				process.stdout.write(allLines[i] + "\x1b[K\n");
+			}
 		}
 		// If new output is shorter than previous, pad with blank lines
 		// (no \x1b[J — it clears scrollback). upRows already computed from

@@ -1074,7 +1074,18 @@ export function buildWtftLines(
 	const currentHour = getCurrentLocalHour(tz);
 	const proximity = isDeepSeek ? checkSurgeProximity() : { status: undefined, multiplier: 1.0 };
 	const timelineStr = buildTimelineString(surgeHours, currentHour, proximity.status);
-	widgetLines[0] = widgetLines[0] + "  " + timelineStr;
+	// If the timeline doesn't fit on the title row, push to its own right-aligned row.
+	// The remainingSpaces calculation when building the title line doesn't reserve
+	// space for the timeline (it's computed later); overflowing past finalWidth
+	// causes the terminal to wrap the title uglily.
+	const timelineLen = getVisualLength(timelineStr);
+	const titleLen = getVisualLength(widgetLines[0]);
+	if (titleLen + 2 + timelineLen <= finalWidth - 2) {
+		widgetLines[0] = widgetLines[0] + "  " + timelineStr;
+	} else {
+		// Right-align on its own row just below the title
+		widgetLines.splice(1, 0, " ".repeat(Math.max(0, finalWidth - timelineLen - 2)) + timelineStr);
+	}
 
 	// PROACTIVE "OTHER" BLOAT WARNING (#17) — cost mode only
 	if (unit === "cost") {

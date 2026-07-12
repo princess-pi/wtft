@@ -15,8 +15,8 @@ import {
 	lookupModelPricing,
 	calculateClaudeCost,
 	MODEL_PRICING,
-	type ModelPricing,
-} from "../extensions/lib/wtft-cost.js";
+} from "../bin/wtft.mjs";
+import type { ModelPricing } from "../extensions/lib/wtft-cost.js";
 
 // --- resolveTieredRates ---
 

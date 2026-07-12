@@ -1,4 +1,5 @@
-import { buildWtftLines, type Interaction, parseEntryToInteraction, classifyInteraction } from "../extensions/lib/wtft-shared.ts";
+import { buildWtftLines, parseEntryToInteraction, classifyInteraction } from "../bin/wtft.mjs";
+import type { Interaction } from "../extensions/lib/wtft-shared.ts";
 import * as assert from "node:assert";
 
 // Helper to strip ANSI codes

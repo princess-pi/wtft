@@ -7,8 +7,7 @@
  *   are billed at $0.03 per request, separate from token costs.
  */
 
-import { parseEntryToInteraction } from "../extensions/lib/wtft-shared.ts";
-import { calculateServerToolCost } from "../extensions/lib/wtft-cost.js";
+import { parseEntryToInteraction, calculateServerToolCost } from "../bin/wtft.mjs";
 
 const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";

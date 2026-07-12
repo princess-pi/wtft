@@ -6,8 +6,8 @@ import {
 	buildWtftLines, 
 	parseEntryToInteraction, 
 	getTerminalWidth,
-	type Interaction 
-} from "../extensions/lib/wtft-shared.ts";
+} from "../bin/wtft.mjs";
+import type { Interaction } from "../extensions/lib/wtft-shared.ts";
 
 // Helper to strip ANSI escape codes
 function stripAnsi(str: string): string {

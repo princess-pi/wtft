@@ -25,8 +25,8 @@ import {
 	readClassifiedTagFile,
 	parseEntryToInteraction,
 	WTFT_TAGGER_VERSION,
-	type Interaction,
-} from "../extensions/lib/wtft-shared.ts";
+} from "../bin/wtft.mjs";
+import type { Interaction } from "../extensions/lib/wtft-shared.ts";
 
 // ---
 // FIXTURE: a session that has undergone /tree navigation.

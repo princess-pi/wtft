@@ -10,8 +10,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { parseSessionFile, parseEntryToInteraction } from "../extensions/lib/wtft-parser.js";
-import { serializeClassified, classifiedToInteraction } from "../extensions/lib/wtft-daemon-lib.js";
+import { parseSessionFile, parseEntryToInteraction, serializeClassified, classifiedToInteraction } from "../bin/wtft.mjs";
 
 const TEST_DIR = path.join(os.tmpdir(), "wtft-thinking-level-test-" + Date.now());
 const SESSION_FILE = path.join(TEST_DIR, "session.jsonl");

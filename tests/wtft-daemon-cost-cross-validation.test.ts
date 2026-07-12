@@ -18,8 +18,8 @@ import {
 	deduplicateInteractions,
 	readClassifiedTagFile,
 	WTFT_TAGGER_VERSION,
-	type Interaction,
-} from "../extensions/lib/wtft-shared.ts";
+} from "../bin/wtft.mjs";
+import type { Interaction } from "../extensions/lib/wtft-shared.ts";
 
 // ---
 // FIXTURE: Claude Code multi-block response with shared message.id

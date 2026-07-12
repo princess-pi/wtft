@@ -11,17 +11,27 @@ import { fileURLToPath } from "node:url";
 import {
 	buildWtftLines,
 	parseSessionFile,
+	parseEntryToInteraction,
+	classifyInteraction,
 	renderOtherHistogram,
 	renderTokenSummary,
 	deduplicateInteractions,
+	calculateClaudeCost,
+	calculateServerToolCost,
 	watchMode,
 	watchTagFile,
 	readClassifiedTagFile,
 	getDaemonPidPath,
 	getTagPath,
 	WTFT_TAGGER_VERSION,
+	serializeClassified,
+	classifiedToInteraction,
+	resolveTieredRates,
+	lookupModelPricing,
+	MODEL_PRICING,
 	type WatchSettings,
 	type Interaction,
+	type ModelPricing,
 	getTerminalWidth
 } from "../extensions/lib/wtft-shared.ts";
 import { execSync, spawn } from "node:child_process";
@@ -30,6 +40,28 @@ import {
 	discoverSessions,
 	selectSessionPrompt
 } from "../extensions/lib/session-selector.ts";
+
+// ---
+// Re-exports for test imports from built bin/wtft.mjs
+// (esbuild tree-shakes unused imports; explicit exports keep them in the bundle)
+// ---
+export {
+	calculateClaudeCost,
+	calculateServerToolCost,
+	resolveTieredRates,
+	lookupModelPricing,
+	MODEL_PRICING,
+	parseEntryToInteraction,
+	classifyInteraction,
+	buildWtftLines,
+	parseSessionFile,
+	deduplicateInteractions,
+	serializeClassified,
+	classifiedToInteraction,
+	readClassifiedTagFile,
+	getTerminalWidth,
+	WTFT_TAGGER_VERSION
+};
 
 // ---
 // DEFAULT CONFIG

@@ -10,7 +10,7 @@ import { describe, it } from "node:test";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
-import { parseSessionFile } from "../extensions/lib/wtft-parser.js";
+import { parseSessionFile } from "../bin/wtft.mjs";
 
 // --- Helpers ---
 

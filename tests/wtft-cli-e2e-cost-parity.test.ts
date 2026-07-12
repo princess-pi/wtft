@@ -16,7 +16,7 @@ import {
 	deduplicateInteractions,
 	parseSessionFile,
 	WTFT_TAGGER_VERSION,
-} from "../extensions/lib/wtft-shared.ts";
+} from "../bin/wtft.mjs";
 
 // ---
 // FIXTURE: Claude Code multi-block response plus a second distinct message.

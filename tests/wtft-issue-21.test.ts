@@ -2,7 +2,8 @@ import * as assert from "node:assert";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { parseEntryToInteraction, buildWtftLines, type Interaction } from "../extensions/lib/wtft-shared.ts";
+import { parseEntryToInteraction, buildWtftLines } from "../bin/wtft.mjs";
+import type { Interaction } from "../extensions/lib/wtft-shared.ts";
 
 // Create a temp directory for our mock sessions
 const tmpDir = path.join(os.tmpdir(), `wtft-test-${Math.random().toString(36).substring(2, 11)}`);

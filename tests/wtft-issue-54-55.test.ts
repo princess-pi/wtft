@@ -15,8 +15,8 @@ import {
 	deduplicateInteractions,
 	parseEntryToInteraction,
 	buildWtftLines,
-	type Interaction
-} from "../extensions/lib/wtft-shared.ts";
+} from "../bin/wtft.mjs";
+import type { Interaction } from "../extensions/lib/wtft-shared.ts";
 
 // ---
 // #54: MESSAGE-ID DEDUPLICATION

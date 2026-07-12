@@ -405,6 +405,14 @@ async function main() {
 	const tagPath = path.join(tagsDir, sessionBase + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
 
 	// Auto-spawn daemon (singleton via PID file).
+	// Spawn daemon async (fire-and-forget) so the tag file is warm for the
+	// next invocation. We NEVER wait for it — direct parse is faster than
+	// daemon startup, and the tag file convergence check fails on actively-
+	// growing sessions where new entries arrive faster than the daemon can
+	// finish processing (causing 30s stalls).
+	//
+	// Strategy: use tag file if it already exists and has entries; otherwise
+	// direct-parse the session file. The daemon catches up in the background.
 	const daemonPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "wtft-daemon.mjs");
 	try {
 		const child = spawn(process.execPath, [daemonPath, "--session", finalSessionPath], {
@@ -413,43 +421,16 @@ async function main() {
 		});
 		child.unref();
 	} catch (err) {
-		// Log parser spawn failed — fall back to direct session parsing
-		console.error(`\x1b[33m⚠ Log parser spawn failed, falling back to direct parse: ${err}\x1b[0m`);
+		// Daemon not available — direct parse is the fallback
 	}
 
-	// Wait for daemon to finish its initial parse. Poll until the tag file
-	// entry count matches a direct session parse + dedup (the daemon is caught
-	// up). Retry every 667ms, capped at 30s.
-	const waitStart = Date.now();
-	let tagInteractions: Interaction[] = [];
-	let directCost = 0;
-	while (Date.now() - waitStart < 30000) {
-		if (fs.existsSync(tagPath)) {
-			tagInteractions = readClassifiedTagFile(tagPath);
-			if (tagInteractions.length > 0) {
-				// Compute direct parse cost once (expensive, so cache it).
-				if (directCost === 0) {
-					const directInteractions = deduplicateInteractions(parseSessionFile(finalSessionPath));
-					directCost = directInteractions.reduce((sum, i) => sum + i.cost, 0);
-				}
-				// Wait for daemon to catch up: compare total cost, not entry count.
-				// Classified entries may split interactions into multiple lines,
-				// so count-based comparison can diverge. Cost is the real target.
-				const tagCost = tagInteractions.reduce((sum, i) => sum + i.cost, 0);
-				if (tagCost >= directCost - 0.001) break; // within 0.1¢
-			}
-		}
-		await new Promise(r => setTimeout(r, 667));
+	// Read interactions: prefer tag file, fall back to direct parse.
+	let interactions: Interaction[] = [];
+	if (fs.existsSync(tagPath)) {
+		interactions = readClassifiedTagFile(tagPath);
 	}
-
-	// Read interactions from the classified tag file (harness-agnostic).
-	const interactions: Interaction[] = tagInteractions.length > 0
-		? tagInteractions
-		: [];
-
-	// If daemon produced nothing, fall back to direct session parsing.
 	if (interactions.length === 0) {
-		interactions.push(...parseSessionFile(finalSessionPath));
+		interactions = parseSessionFile(finalSessionPath);
 	}
 
 	// Read settings from harness-agnostic config file (#72).

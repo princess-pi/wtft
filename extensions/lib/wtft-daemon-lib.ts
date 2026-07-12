@@ -11,7 +11,7 @@ import {
 	classifyInteraction,
 	buildWtftLines
 } from "./wtft-shared.js";
-import { showCursor, hideCursor, enterRawStdin } from "./tty-helpers.js";
+import { showCursor, hideCursor, enterRawStdin, visualLineCount } from "./tty-helpers.js";
 export interface WatchSettings {
 	interval: string;
 	limit: number;
@@ -188,15 +188,19 @@ export async function watchMode(
 
 		lastBuffer = [...buf]; // save for exit printout
 
-		// Write each line padded to terminal width with clear-to-EOL
+		// Write each line padded to terminal width with clear-to-EOL,
+		// then count visual lines (accounts for terminal wrapping).
 		const allLines = [...buf];
+		const termW = width;
 		for (let i = 0; i < allLines.length; i++) {
 			const visLen = getVisualLength(allLines[i]);
-			const padNeeded = Math.max(0, width - visLen - 1);
-			process.stdout.write(allLines[i] + " ".repeat(padNeeded) + "\x1b[K\n");
+			const padNeeded = Math.max(0, termW - (visLen % termW || termW) - 1);
+			process.stdout.write(allLines[i] + " ".repeat(Math.max(0, padNeeded)) + "\x1b[K\n");
 		}
 		process.stdout.write("\x1b[J");
-		lastLineCount = allLines.length;
+		// Count display lines including wraps
+		const tempOutput = allLines.join("\n") + "\n";
+		lastLineCount = visualLineCount(tempOutput, termW);
 		needsRedraw = false;
 		_lastRenderMin = new Date().getMinutes();
 	};
@@ -974,17 +978,22 @@ export async function watchTagFile(
 
 		lastBuffer = [...buf];
 
-		// Write each line padded to terminal width with clear-to-EOL
+		// Write each line padded to terminal width with clear-to-EOL,
+		// then count visual lines (accounts for terminal wrapping).
 		const termW = width;
 		const allLines = buf.map(l => padStr + l);
 		for (let i = 0; i < allLines.length; i++) {
 			const visLen = getVisualLength(allLines[i]);
-			const padNeeded = Math.max(0, termW - visLen - 1);
+			const wrapped = visLen > 0 ? Math.ceil(visLen / termW) : 1;
+			// Pad the last visual segment of each logical line
+			const lastSegLen = visLen > 0 ? ((visLen - 1) % termW) + 1 : 0;
+			const padNeeded = Math.max(0, termW - lastSegLen - 1);
 			process.stdout.write(allLines[i] + " ".repeat(padNeeded) + "\x1b[K\n");
 		}
-		// Clear any leftover lines from a taller previous render
 		process.stdout.write("\x1b[J");
-		lastLineCount = allLines.length;
+		// Count display lines including wraps
+		const tempOutput = allLines.join("\n") + "\n";
+		lastLineCount = visualLineCount(tempOutput, termW);
 		needsRedraw = false;
 	};
 

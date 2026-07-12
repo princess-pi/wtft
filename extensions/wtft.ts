@@ -558,34 +558,47 @@ export default function wtftExtension(pi: ExtensionAPI) {
 	//    in the session tree (/tree), the active branch changes. Rebuild
 	//    _allInteractions from the new branch so the widget reflects the
 	//    correct history (#78).
+	//
+	//    Guard against regression: if the tag file is behind the burst
+	//    accumulator (daemon hasn't caught up yet), keep the larger set.
+	//    Only replace when the new source has more entries — typically
+	//    when navigating to a branch with a longer history.
 	pi.on("session_tree", async (_event, ctx) => {
 		_wtftCtx = ctx;
-		// Rebuild from daemon's classified tag file (same source as CLI).
-		_allInteractions = [];
+		const prevCount = _allInteractions.length;
+
+		// Read from daemon's classified tag file (same source as CLI).
+		let freshInteractions: Interaction[] = [];
 		const sFile = ctx.sessionManager.getSessionFile?.();
 		if (sFile) {
 			const tagPath = getTagPath(sFile);
 			const tagInteractions = readClassifiedTagFile(tagPath);
 			if (tagInteractions.length > 0) {
-				_allInteractions = tagInteractions;
+				freshInteractions = tagInteractions;
 			}
 		}
-		if (_allInteractions.length === 0) {
+		if (freshInteractions.length === 0) {
 			const branch = ctx.sessionManager.getBranch();
 			let branchThinkingLevel: string | undefined;
 			for (let i = 0; i < branch.length; i++) {
-				// Track thinking level changes (#77)
 				if (branch[i].type === "thinking_level_change" && branch[i].thinkingLevel) {
 					branchThinkingLevel = branch[i].thinkingLevel;
 					continue;
 				}
 				const interaction = parseEntryToInteraction(branch[i], branchThinkingLevel);
 				if (interaction) {
-					_allInteractions.push(interaction);
+					freshInteractions.push(interaction);
 				}
 			}
 		}
-		_burstAccumulator = new BurstAccumulator();
+
+		// Never regress: only replace if new source has more entries.
+		// The burst accumulator may have already collected interactions
+		// that the tag file hasn't caught up to yet.
+		if (freshInteractions.length > prevCount) {
+			_allInteractions = freshInteractions;
+			_burstAccumulator = new BurstAccumulator();
+		}
 
 		const current = getSettings(ctx);
 		if (current.visible) {

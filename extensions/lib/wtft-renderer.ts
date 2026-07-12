@@ -869,6 +869,21 @@ export function buildWtftLines(
 	const sessionSuffix = opts?.sessionNameSuffix ? ` \x1b[90m...${opts.sessionNameSuffix.replace(/.jsonl$/, "").slice(-4)}\x1b[0m` : "";
 	const titleLeftFinal = titleLeft + sessionSuffix;
 	
+	// --- SURGE timeline (computed early so title row can account for its width) ---
+	// Model auto-detected from interactions if caller doesn't pass one explicitly.
+	let surgeModel = opts?.model;
+	if (!surgeModel) {
+		for (const i of interactions) {
+			if (i.model) { surgeModel = i.model; break; }
+		}
+	}
+	const isDeepSeek = (surgeModel || "").toLowerCase().includes("deepseek");
+	const surgeHours = isDeepSeek ? getSurgeLocalHours(tz) : new Set<number>();
+	const currentHour = getCurrentLocalHour(tz);
+	const proximity = isDeepSeek ? checkSurgeProximity() : { status: undefined as string | undefined, multiplier: 1.0 };
+	const timelineStr = buildTimelineString(surgeHours, currentHour, proximity.status);
+	const timelineLen = getVisualLength(timelineStr);
+	
 	const legendItems = [
 		`\x1b[38;5;108m█\x1b[0mSpec`,
 		`\x1b[38;5;108;48;5;173m▒\x1b[0mMixed`,
@@ -885,16 +900,18 @@ export function buildWtftLines(
 	
 	const leftLen = getVisualLength(titleLeftFinal);
 	const legendLen = getVisualLength(legendStr);
-	const totalNeeded = leftLen + legendLen + 4; // 4 spaces margin
+	// Reserve room for legend + timeline on the title row (+ 2 spaces before each)
+	const totalNeeded = leftLen + legendLen + timelineLen + 6;
 	const forceLegendRow = opts?.forceLegendRow ?? false;
 	
 	if (!forceLegendRow && totalNeeded <= finalWidth - 3) {
-		const remainingSpaces = (finalWidth - 3) - leftLen - legendLen;
-		const titleLine = titleLeftFinal + " ".repeat(remainingSpaces) + legendStr;
+		// Everything fits on one row: title + spaces + legend + 2sp + timeline
+		const remainingSpaces = (finalWidth - 3) - leftLen - legendLen - timelineLen - 2;
+		const titleLine = titleLeftFinal + " ".repeat(remainingSpaces) + legendStr + "  " + timelineStr;
 		widgetLines.push(titleLine);
 	} else {
-		widgetLines.push(titleLeftFinal);
-		// 2nd row has the legend
+		// Title + timeline on row 0, legend on row 1
+		widgetLines.push(titleLeftFinal + "  " + timelineStr);
 		widgetLines.push(legendStr);
 	}
 
@@ -1058,33 +1075,6 @@ export function buildWtftLines(
 				widgetLines.push(`${coloredLabel}  ${coloredCost}  ${barStr}`);
 			}
 		}
-	}
-
-	// SURGE TIMELINE: 24-hour bar showing normal (green) vs surge (orange) pricing.
-	// Colored by model: DeepSeek gets orange surge segments + badges; others get all-green.
-	// Model auto-detected from interactions if caller doesn't pass one explicitly.
-	let surgeModel = opts?.model;
-	if (!surgeModel) {
-		for (const i of interactions) {
-			if (i.model) { surgeModel = i.model; break; }
-		}
-	}
-	const isDeepSeek = (surgeModel || "").toLowerCase().includes("deepseek");
-	const surgeHours = isDeepSeek ? getSurgeLocalHours(tz) : new Set<number>();
-	const currentHour = getCurrentLocalHour(tz);
-	const proximity = isDeepSeek ? checkSurgeProximity() : { status: undefined, multiplier: 1.0 };
-	const timelineStr = buildTimelineString(surgeHours, currentHour, proximity.status);
-	// If the timeline doesn't fit on the title row, push to its own right-aligned row.
-	// The remainingSpaces calculation when building the title line doesn't reserve
-	// space for the timeline (it's computed later); overflowing past finalWidth
-	// causes the terminal to wrap the title uglily.
-	const timelineLen = getVisualLength(timelineStr);
-	const titleLen = getVisualLength(widgetLines[0]);
-	if (titleLen + 2 + timelineLen <= finalWidth - 2) {
-		widgetLines[0] = widgetLines[0] + "  " + timelineStr;
-	} else {
-		// Right-align on its own row just below the title
-		widgetLines.splice(1, 0, " ".repeat(Math.max(0, finalWidth - timelineLen - 2)) + timelineStr);
 	}
 
 	// PROACTIVE "OTHER" BLOAT WARNING (#17) — cost mode only

@@ -736,7 +736,8 @@ export async function watchTagFile(
 	const exitWatch = () => {
 		if (watcher) watcher.close();
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
-		clearPreviousLines(lastLineCount);
+		// Restore to top of chart, clear everything below
+		process.stdout.write("\x1b8\x1b[J");
 		showCursor();
 		cleanupStdin();
 		if (lastBuffer.length > 0) {
@@ -882,8 +883,13 @@ export async function watchTagFile(
 	}
 
 	const render = () => {
-		// Clear previous render's output lines, then re-render in place.
-		clearPreviousLines(lastLineCount);
+		// Rewrite in-place: restore to saved cursor position, overwrite
+		// each line padded to terminal width (\x1b[K clears to EOL),
+		// then clear any leftover lines below (\x1b[J).
+		// No flicker — old content is overwritten, not cleared first.
+		if (lastLineCount > 0) {
+			process.stdout.write("\x1b8"); // restore cursor (DECRC)
+		}
 
 		const width = getTerminalWidth();
 		const pad = settings.pad || 0;
@@ -962,11 +968,23 @@ export async function watchTagFile(
 		buf.push(`'q' to exit${restartHint}`);
 
 		lastBuffer = [...buf];
-		const output = buf.map(l => padStr + l).join("\n") + "\n";
-		process.stdout.write(output);
-		lastLineCount = visualLineCount(output, width);
+
+		// Write each line padded to terminal width with clear-to-EOL
+		const termW = width;
+		const allLines = buf.map(l => padStr + l);
+		for (let i = 0; i < allLines.length; i++) {
+			const visLen = getVisualLength(allLines[i]);
+			const padNeeded = Math.max(0, termW - visLen - 1);
+			process.stdout.write(allLines[i] + " ".repeat(padNeeded) + "\x1b[K\n");
+		}
+		// Clear any leftover lines from a taller previous render
+		process.stdout.write("\x1b[J");
+		lastLineCount = allLines.length;
 		needsRedraw = false;
 	};
+
+	// Save cursor before first render (DECSC)
+	process.stdout.write("\x1b7");
 
 	// Initial render
 	render();

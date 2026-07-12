@@ -1,13 +1,11 @@
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
 	buildWtftLines as sharedBuildWtftLines,
-	type Category,
 	type Interaction,
-	parseEntryToInteraction,
 	renderOtherHistogram,
 	renderTokenSummary,
 	deduplicateInteractions,
@@ -15,30 +13,22 @@ import {
 	getVisualLength,
 	checkDaemonHealth,
 	readClassifiedTagFile,
-	restartDaemon,
 	renderDaemonStatus,
 	getTagPath,
 	getDaemonPidPath,
 	getModelCacheTtlMs,
 	type DaemonStatus
 } from "./lib/wtft-shared.js";
-import { parseSessionFile } from "./lib/wtft-parser.js";
 import { readConfig, writeConfig, hasConfig } from "./lib/config.js";
-import { BurstAccumulator } from "./lib/wtft-burst.js";
+
 // ---
-// LOG PARSER STATE (keeps wtft-tag file warm for CLI use)
+// SINGLE DATA SOURCE: classified tag file from wtft-daemon (#92)
+// All interactions are read from the tag file on each event — no internal
+// accumulation state. The daemon writes at most every 667ms; the gap between
+// agent_settled and the next daemon beat is invisible at widget render time.
 // ---
 let _parserSessionPath: string | null = null;
 let _parserSpawned = false;
-
-// ---
-// BURST-AWARE ACCUMULATION STATE (#78)
-// _allInteractions: merged history (branch walk from session_start + flushed bursts)
-// _burstAccumulator: per-burst incremental accumulator, flushed on agent_settled
-// _currentThinkingLevel: tracked from thinking_level_select events (#77)
-// ---
-let _allInteractions: Interaction[] = [];
-let _burstAccumulator = new BurstAccumulator();
 let _currentThinkingLevel: string | undefined;
 
 function ensureParserRunning(sessionPath: string): void {
@@ -342,6 +332,14 @@ function getSettings(_ctx: any) {
 // TUI WIDGET UPDATE ENGINE & COMPILER
 // ---
 
+/** Read interactions from the daemon's classified tag file (#92). */
+function readInteractions(ctx: any): Interaction[] {
+	const sessionFile = ctx.sessionManager.getSessionFile?.();
+	if (!sessionFile) return [];
+	const tagPath = getTagPath(sessionFile);
+	return readClassifiedTagFile(tagPath);
+}
+
 function buildWtftLines(
 	ctx: any,
 	pi: ExtensionAPI,
@@ -356,10 +354,8 @@ function buildWtftLines(
 		sessionNameSuffix?: string;
 	}
 ): string[] | null {
-	// Use pre-accumulated interactions (branch walk on session_start +
-	// incremental burst accumulation from message_end). O(1) at widget
-	// render time instead of O(n) branch walk on every refresh (#78).
-	const interactions = _allInteractions;
+	// Read from the classified tag file — single source of truth (#92).
+	const interactions = readInteractions(ctx);
 	const settings = getSettings(ctx);
 
 	return sharedBuildWtftLines(interactions, settings, {
@@ -469,39 +465,6 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			ensureParserRunning(sessionFile);
 		}
 
-		// Reconstruct historical interactions from the session JSONL file.
-		// We use the session file directly (not the tag file) because the tag
-		// file may be incomplete if the daemon is mid-restart after an idle
-		// timeout (daemon re-parses from scratch, tag file is partial).
-		// The session file is always complete and instantly available.
-		// The tag file remains the source for CLI cross-harness use.
-		_allInteractions = [];
-		if (sessionFile && fs.existsSync(sessionFile)) {
-			_allInteractions = parseSessionFile(sessionFile);
-		} else {
-			// No session file — try tag file as fallback
-			const tagPath = getTagPath(sessionFile!);
-			const tagInteractions = readClassifiedTagFile(tagPath);
-			if (tagInteractions.length > 0) {
-				_allInteractions = tagInteractions;
-			} else {
-				// Last resort: branch walk
-				const branch = ctx.sessionManager.getBranch();
-				let branchThinkingLevel: string | undefined;
-				for (let i = 0; i < branch.length; i++) {
-					if (branch[i].type === "thinking_level_change" && branch[i].thinkingLevel) {
-						branchThinkingLevel = branch[i].thinkingLevel;
-						continue;
-					}
-					const interaction = parseEntryToInteraction(branch[i], branchThinkingLevel);
-					if (interaction) {
-						_allInteractions.push(interaction);
-					}
-				}
-			}
-		}
-		_burstAccumulator = new BurstAccumulator();
-
 		// Auto-show widget if user has configured wtft at least once (#72)
 		if (hasConfig("wtft")) {
 			updateWtftWidget(ctx, pi);
@@ -519,100 +482,32 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	// 2. Track thinking level changes so burst accumulator can stamp
-	//    each interaction with the active effort level (#77).
+	// 2. Track thinking level for --tokens budget display.
 	pi.on("thinking_level_select", (event) => {
 		_currentThinkingLevel = event.level;
 	});
 
-	// 3. Incremental accumulation: classify each assistant message as it
-	//    completes, without walking the branch (#78).
-	pi.on("message_end", async (event, ctx) => {
-		_wtftCtx = ctx;
-		// Only accumulate assistant messages with usage data.
-		if ((event.message as any).role !== "assistant") return;
-		const usage = (event.message as any).usage;
-		if (!usage) return;
-		// Wrap in Pi-schema entry form so parseEntryToInteraction works.
-		const fakeEntry = { type: "message", message: event.message };
-		_burstAccumulator.accumulateFromEntry(fakeEntry, _currentThinkingLevel);
-	});
-
-	// 4. Burst boundary: agent_settled fires once per prompt after all
-	//    retries, compactions, and follow-ups are done. This is the
-	//    definitive per-prompt boundary — render the widget once with
-	//    complete data (#78).
+	// 3. End-of-turn: read tag file + render (#92).
 	pi.on("agent_settled", async (_event, ctx) => {
 		_wtftCtx = ctx;
-		// Flush burst → persistent interaction store
-		const flushed = _burstAccumulator.flush();
-		_allInteractions.push(...flushed);
-
 		const current = getSettings(ctx);
 		if (current.visible) {
 			updateWtftWidget(ctx, pi);
 		}
 	});
 
-	// 5. Tree navigation: when the user navigates to a different point
-	//    in the session tree (/tree), the active branch changes. Rebuild
-	//    _allInteractions from the new branch so the widget reflects the
-	//    correct history (#78).
-	//
-	//    Guard against regression: if the tag file is behind the burst
-	//    accumulator (daemon hasn't caught up yet), keep the larger set.
-	//    Only replace when the new source has more entries — typically
-	//    when navigating to a branch with a longer history.
+	// 4. Tree navigation: re-read tag file so widget reflects the new branch (#92).
 	pi.on("session_tree", async (_event, ctx) => {
 		_wtftCtx = ctx;
-		const prevCount = _allInteractions.length;
-
-		// Read from daemon's classified tag file (same source as CLI).
-		let freshInteractions: Interaction[] = [];
-		const sFile = ctx.sessionManager.getSessionFile?.();
-		if (sFile) {
-			const tagPath = getTagPath(sFile);
-			const tagInteractions = readClassifiedTagFile(tagPath);
-			if (tagInteractions.length > 0) {
-				freshInteractions = tagInteractions;
-			}
-		}
-		if (freshInteractions.length === 0) {
-			const branch = ctx.sessionManager.getBranch();
-			let branchThinkingLevel: string | undefined;
-			for (let i = 0; i < branch.length; i++) {
-				if (branch[i].type === "thinking_level_change" && branch[i].thinkingLevel) {
-					branchThinkingLevel = branch[i].thinkingLevel;
-					continue;
-				}
-				const interaction = parseEntryToInteraction(branch[i], branchThinkingLevel);
-				if (interaction) {
-					freshInteractions.push(interaction);
-				}
-			}
-		}
-
-		// Never regress: only replace if new source has more entries.
-		// The burst accumulator may have already collected interactions
-		// that the tag file hasn't caught up to yet.
-		if (freshInteractions.length > prevCount) {
-			_allInteractions = freshInteractions;
-			_burstAccumulator = new BurstAccumulator();
-		}
-
 		const current = getSettings(ctx);
 		if (current.visible) {
 			updateWtftWidget(ctx, pi);
 		}
 	});
 
-	// 6. Daemon health check only — no widget refresh here.
-	//    agent_end fires multiple times per burst (retry, compaction+retry,
-	//    follow-up). Widget flicker from mid-burst refreshes is eliminated
-	//    by moving rendering to agent_settled (#78).
+	// 5. Daemon health revive — keep CLI wtft --watch alive after idle timeout.
 	pi.on("agent_end", async (_event, ctx) => {
 		_wtftCtx = ctx;
-		// Revive dead daemon so CLI wtft --watch stays live after idle timeout.
 		const sessionFile = ctx.sessionManager.getSessionFile?.();
 		if (sessionFile) {
 			ensureParserRunning(sessionFile);
@@ -669,21 +564,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				} catch {}
 				// Delete tag file
 				try { fs.unlinkSync(tagPath); } catch {}
-				// Rebuild _allInteractions from scratch
-				_allInteractions = [];
-				const branch = ctx.sessionManager.getBranch();
-				let branchThinkingLevel: string | undefined;
-				for (let i = 0; i < branch.length; i++) {
-					// Track thinking level changes (#77)
-					if (branch[i].type === "thinking_level_change" && branch[i].thinkingLevel) {
-						branchThinkingLevel = branch[i].thinkingLevel;
-						continue;
-					}
-					const interaction = parseEntryToInteraction(branch[i], branchThinkingLevel);
-					if (interaction) _allInteractions.push(interaction);
-				}
-				_burstAccumulator = new BurstAccumulator();
-				// Respawn daemon
+				// Respawn daemon (reads session file from scratch, rewrites tag file)
 				_parserSpawned = false;
 				_parserSessionPath = null;
 				ensureParserRunning(sessionFile);
@@ -756,7 +637,8 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			const current = getSettings(ctx);
 
 			if (other) {
-				const deduped = deduplicateInteractions(_allInteractions);
+				const interactions = readInteractions(ctx);
+				const deduped = deduplicateInteractions(interactions);
 				const output = renderOtherHistogram(deduped, Math.max(current.width, 40));
 				ctx.ui.notify(output, "info");
 				return;
@@ -773,7 +655,8 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				high: 32768, xhigh: 65536, max: 131072
 			};
 			const budget = _currentThinkingLevel ? BUDGET_MAP[_currentThinkingLevel] : undefined;
-			const output = renderTokenSummary(_allInteractions, Math.max(current.width, 40), budget);
+			const interactions = readInteractions(ctx);
+			const output = renderTokenSummary(interactions, Math.max(current.width, 40), budget);
 			ctx.ui.notify(output, "info");
 			return;
 		}

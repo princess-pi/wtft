@@ -210,9 +210,14 @@ export async function watchMode(
 	// Initial render
 	render();
 
-	// SIGWINCH handler — re-render immediately on terminal resize
+	// SIGWINCH handler — on resize, clear old area before re-render.
+	// Terminal re-flows text independently; fragments of old wrapped
+	// content remain. A one-time \x1b[J clear is the only reliable fix.
 	process.on("SIGWINCH", () => {
-		needsRedraw = true;
+		const upRows = lastLineCount > 0
+			? visualLineCount(lastBuffer.join("\n") + "\n", getTerminalWidth())
+			: 0;
+		if (upRows > 0) process.stdout.write(`\x1b[${upRows}A\x1b[J`);
 		render();
 	});
 
@@ -1005,9 +1010,15 @@ export async function watchTagFile(
 	render();
 	resetWatchdog();
 
-	// SIGWINCH handler — re-render immediately on terminal resize
+	// SIGWINCH handler — on resize, clear old area before re-render.
+	// The terminal re-flows text on resize independently; fragments of old
+	// wrapped content remain between our cursor-up + overwrite. A one-time
+	// \x1b[J clear on resize is the only reliable fix for raw ANSI.
 	process.on("SIGWINCH", () => {
-		needsRedraw = true;
+		const upRows = lastLineCount > 0
+			? visualLineCount(lastBuffer.join("\n") + "\n", getTerminalWidth())
+			: 0;
+		if (upRows > 0) process.stdout.write(`\x1b[${upRows}A\x1b[J`);
 		render();
 		resetWatchdog();
 	});

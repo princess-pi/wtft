@@ -897,20 +897,13 @@ export function buildWtftLines(
 	];
 	const legendStr = legendItems.join(" ");
 	
-	const leftLen = getVisualLength(titleLeftFinal);
-	const legendLen = getVisualLength(legendStr);
-	// Reserve room for legend + timeline on the title row (+ 2 spaces before each)
-	const totalNeeded = leftLen + legendLen + timelineLen + 6;
-	if (totalNeeded <= finalWidth - 3) {
-		// Everything fits on one row: title + spaces + legend + 2sp + timeline
-		const remainingSpaces = (finalWidth - 3) - leftLen - legendLen - timelineLen - 2;
-		const titleLine = titleLeftFinal + " ".repeat(remainingSpaces) + legendStr + "  " + timelineStr;
-		widgetLines.push(titleLine);
-	} else {
-		// Title + timeline on row 0, legend on row 1
-		widgetLines.push(titleLeftFinal + "  " + timelineStr);
-		widgetLines.push(legendStr);
-	}
+
+	// Title + timeline on row 0, legend always on row 1.
+	// Putting the legend on its own row avoids layout flip-flop when the
+	// SURGE proximity badge appears/disappears (shifts timelineLen
+	// ~20 chars, potentially crossing an inline-fit threshold).
+	widgetLines.push(titleLeftFinal + "  " + timelineStr);
+	widgetLines.push(legendStr);
 
 	// Render single-row collapsed ticks line
 	if (showTicks && scaleMax > 0) {

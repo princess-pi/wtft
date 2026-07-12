@@ -196,7 +196,7 @@
     },
     {
       "flags": "-T, --tokens",
-      "desc": "Print a per-model token summary table (deduped) for cross-referencing with /usage."
+      "desc": "Switch bar chart to token-unit mode and print a per-model token summary table (deduped). Bar chart uses bg color for token width and character density for output \$/tok cost signal. Config-persistable."
     },
     {
       "flags": "--pad <N>",

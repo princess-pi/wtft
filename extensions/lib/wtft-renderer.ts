@@ -18,6 +18,95 @@ export interface Bin {
 	costs: Record<Category, number>;
 	total_cost: number;
 	incremental_cost?: number;
+	/** Token-mode fields — populated when unit==="tokens" (#14) */
+	tokens?: Record<Category, { total: number; output: number }>;
+	total_tokens?: number;
+	incremental_tokens?: number;
+}
+
+// ---
+// TOKEN-UNIT MODE (#14): Background colors, density calculation, and rendering
+// ---
+
+/** 256-color background codes for token-mode bar segments (dark tones for bright-white density chars). */
+const TOKEN_BG_COLORS: Record<Category, number> = {
+	spec: 22,      // deep forest green
+	mixed: 94,     // dark gold / earth
+	code: 130,     // burnt orange
+	tests: 178,    // warm tan
+	research: 54,  // midnight plum
+	git: 23,       // deep teal
+	grep: 24,      // navy blue
+	web: 88,       // crimson
+	prompt: 89,    // dark mauve
+	other: 236,    // near-black charcoal
+};
+
+/** Density chars mapped by output-token share quartile. */
+const DENSITY_CHARS = ["░", "▒", "▓", "█"] as const;
+
+/**
+ * Map output-token share (0–1) to a density character.
+ *   0–25% → ░ (cheap — input/cache-heavy)
+ *   25–50% → ▒
+ *   50–75% → ▓
+ *   75–100% → █ (expensive — output-heavy)
+ */
+export function densityChar(outputShare: number): string {
+	const idx = Math.min(3, Math.floor(outputShare * 4));
+	return DENSITY_CHARS[idx];
+}
+
+/**
+ * Compute total tokens for an interaction (mirrors Anthropic API fields — mutually exclusive, no double-count).
+ */
+export function interactionTotalTokens(i: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number }): number {
+	return i.inputTokens + i.outputTokens + i.cacheReadTokens + i.cacheWriteTokens + i.reasoningTokens;
+}
+
+/**
+ * Compute Pi-style footer summary line.
+ *   ↑47k ↓14k R1.3M CH99.7%
+ */
+export function tokenFooterSummary(interactions: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number }[]): string {
+	let input = 0, output = 0, cr = 0, cw = 0, reasoning = 0;
+	for (const i of interactions) {
+		input += i.inputTokens + i.cacheReadTokens + i.cacheWriteTokens;
+		output += i.outputTokens;
+		cr += i.cacheReadTokens;
+		cw += i.cacheWriteTokens;
+		reasoning += i.reasoningTokens;
+	}
+	const totalCacheOps = cr + cw + input - cr - cw; // input-only portion...
+	// Actually: cache hit rate = cacheRead / (cacheRead + cacheWrite + inputTokens uncached)
+	// input already includes cache? No — field layout: inputTokens = non-cached, cacheRead = separate, cacheWrite = separate
+	const denom = (input - cr - cw) + cr + cw; // = input (total input including cache)
+	const hitRate = denom > 0 ? ((cr / denom) * 100).toFixed(0) : "0";
+	const parts: string[] = [];
+	if (input > 0) parts.push(`↑${formatTokenCount(input)}`);
+	if (output > 0) parts.push(`↓${formatTokenCount(output)}`);
+	if (reasoning > 0) parts.push(`R${formatTokenCount(reasoning)}`);
+	if (cr > 0 || cw > 0) parts.push(`CH${hitRate}%`);
+	return parts.join(" ");
+}
+
+/**
+ * Accumulate tokens into a Bin alongside cost data during the binning loop.
+ * Call this inside the interaction→bin loop in binInteractions().
+ */
+export function accumulateTokens(bin: Bin, category: Category, interaction: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number }): void {
+	if (!bin.tokens) {
+		bin.tokens = {} as Record<Category, { total: number; output: number }>;
+		for (const cat of ["spec", "code", "mixed", "tests", "research", "git", "grep", "web", "prompt", "other"] as Category[]) {
+			bin.tokens[cat] = { total: 0, output: 0 };
+		}
+		bin.total_tokens = 0;
+	}
+	const t = interactionTotalTokens(interaction);
+	const o = interaction.outputTokens + interaction.reasoningTokens;
+	bin.tokens[category].total += t;
+	bin.tokens[category].output += o;
+	bin.total_tokens! += t;
 }
 
 export interface IntervalConfig {
@@ -183,6 +272,69 @@ export function calculateScaleMax(total: number): number {
 	} else {
 		return Math.ceil(total);
 	}
+}
+
+/**
+ * Build tick line with token-count labels (e.g. "0", "25k", "50k").
+ * Same layout as buildTickLine but uses formatTokenCount instead of formatCost.
+ */
+export function buildTokenTickLine(maxTokens: number, barWidth: number, prefixWidth: number, labelPrefix: string): string | null {
+	if (maxTokens <= 0 || barWidth < 15) return null;
+
+	const totalWidth = prefixWidth + barWidth;
+	const chars = Array(totalWidth).fill("─");
+
+	const cleanPrefix = labelPrefix.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+	for (let i = 0; i < cleanPrefix.length; i++) {
+		chars[i] = cleanPrefix[i];
+	}
+
+	const ticks = [
+		prefixWidth,
+		prefixWidth + Math.floor(barWidth / 4),
+		prefixWidth + Math.floor(barWidth / 2),
+		prefixWidth + Math.floor((barWidth * 3) / 4),
+		prefixWidth + barWidth - 1
+	];
+
+	const labels: {text: string, start: number, end: number}[] = [];
+	const tickValues = [0, maxTokens / 4, maxTokens / 2, (maxTokens * 3) / 4, maxTokens];
+
+	for (let i = 0; i < ticks.length; i++) {
+		const text = formatTokenCount(Math.round(tickValues[i]));
+		const displayStr = ` ${text} `;
+		const startIdx = ticks[i]; // align start of label to tick
+		const endIdx = startIdx + displayStr.length;
+
+		let overlap = false;
+		for (const l of labels) {
+			if (startIdx < l.end && endIdx > l.start) {
+				overlap = true; break;
+			}
+		}
+		if (!overlap) {
+			labels.push({ text: displayStr, start: startIdx, end: endIdx });
+		}
+	}
+
+	labels.sort((a, b) => a.start - b.start);
+
+	let result = "";
+	let cursor = 0;
+	for (const l of labels) {
+		if (l.start > cursor) {
+			result += chars.slice(cursor, Math.min(l.start, chars.length)).join("");
+			if (l.start > chars.length) {
+				result += " ".repeat(l.start - Math.max(cursor, chars.length));
+			}
+		}
+		result += `\x1b[7m${l.text}\x1b[27m`;
+		cursor = Math.max(cursor, l.end);
+	}
+	if (cursor < chars.length) {
+		result += chars.slice(cursor).join("");
+	}
+	return result;
 }
 
 export function buildTickLine(maxCost: number, barWidth: number, prefixWidth: number, labelPrefix: string): string | null {
@@ -517,10 +669,13 @@ export function buildWtftLines(
 		forceLegendRow?: boolean;
 		/** Model ID for SURGE timeline coloring (pass "deepseek-..." for orange surge segments + badges). Auto-detected from interactions if omitted. */
 		model?: string;
+		/** Unit for bar scaling: "cost" (default) or "tokens" (#14). */
+		unit?: "cost" | "tokens";
 	}
 ): string[] | null {
 	const intervalStr = opts?.interval !== undefined ? opts.interval : defaultSettings.interval;
 	const limit = opts?.limit !== undefined ? opts.limit : defaultSettings.limit;
+	const unit: "cost" | "tokens" = opts?.unit ?? "cost";
 	
 	const isWidget = opts?.isWidget ?? false;
 	const disabledEmoji = opts?.disabledEmoji !== undefined ? opts.disabledEmoji : defaultSettings.disabledEmoji;
@@ -569,6 +724,11 @@ export function buildWtftLines(
 			bin.total_cost += interaction.serverToolCost;
 			totalSessionCost += interaction.serverToolCost;
 		}
+
+		// Token accumulation for --tokens mode (#14)
+		if (unit === "tokens") {
+			accumulateTokens(bin, classification, interaction);
+		}
 	}
 
 	// Sort bins chronological (ascending)
@@ -593,8 +753,38 @@ export function buildWtftLines(
 				bin.costs[cat] = runningCosts[cat];
 			}
 			bin.total_cost = running_total;
+
+			// Token cumulative tracking (#14)
+			if (unit === "tokens" && bin.tokens && bin.total_tokens != null) {
+				bin.incremental_tokens = bin.total_tokens;
+			}
+		}
+
+		// Second pass for cumulative token totals (need incremental_tokens preserved first)
+		if (unit === "tokens") {
+			let runningTokens = 0;
+			const runningTokByCat = {} as Record<Category, { total: number; output: number }>;
+			for (const cat of ALL_CATEGORIES) {
+				runningTokByCat[cat] = { total: 0, output: 0 };
+			}
+			for (const bin of sortedBins) {
+				if (bin.tokens) {
+					runningTokens += bin.total_tokens!;
+					for (const cat of ALL_CATEGORIES) {
+						runningTokByCat[cat].total += bin.tokens[cat].total;
+						runningTokByCat[cat].output += bin.tokens[cat].output;
+						bin.tokens[cat] = { ...runningTokByCat[cat] };
+					}
+					bin.total_tokens = runningTokens;
+				}
+			}
 		}
 	}
+
+	// Token mode: compute global totals for scale
+	const totalSessionTokens = unit === "tokens"
+		? interactions.reduce((sum, i) => sum + interactionTotalTokens(i), 0)
+		: 0;
 
 	// Descending order for binned bars display
 	const reversedBins = sortedBins.reverse();
@@ -605,9 +795,17 @@ export function buildWtftLines(
 	}
 
 	const maxBarValue = mode === "cumulative"
-		? totalSessionCost
-		: Math.max(...displayedBins.map(b => b.total_cost), 0);
-	const scaleMax = calculateScaleMax(maxBarValue);
+		? (unit === "tokens" ? totalSessionTokens : totalSessionCost)
+		: Math.max(...displayedBins.map(b => unit === "tokens" ? (b.total_tokens ?? 0) : b.total_cost), 0);
+	const scaleMax = unit === "tokens"
+		? Math.ceil(maxBarValue / 1000) * 1000  // round to nearest 1k for tokens
+		: calculateScaleMax(maxBarValue);
+
+	// Token mode: format scale label for tick marks
+	const formatScaleLabel = (v: number): string => {
+		if (unit === "tokens") return formatTokenCount(v);
+		return formatCost(v);
+	};
 
 	// Compute the exact prefix width of the bar rows dynamically to prevent alignment offsets when costs grow wide
 	const labelWidth = Math.max(...displayedBins.map(b => b.label.length), 5);
@@ -616,7 +814,20 @@ export function buildWtftLines(
 	let maxIncLen = 6;
 	let maxCostLen = 6;
 
-	if (mode === "cumulative") {
+	if (unit === "tokens") {
+		// Token mode: show cumulative tokens + incremental tokens
+		if (mode === "cumulative") {
+			maxIncLen = Math.max(...displayedBins.map(bin => {
+				const incSign = (bin.incremental_tokens ?? 0) >= 0 ? "+" : "";
+				return `${incSign}${formatTokenCount(bin.incremental_tokens ?? 0)}`.length;
+			}), 6);
+			maxCostLen = Math.max(...displayedBins.map(b => formatTokenCount(b.total_tokens ?? 0).length), 6);
+			prefixWidth += maxIncLen + 2 + maxCostLen + 2;
+		} else {
+			maxCostLen = Math.max(...displayedBins.map(b => formatTokenCount(b.total_tokens ?? 0).length), 6);
+			prefixWidth += maxCostLen + 2;
+		}
+	} else if (mode === "cumulative") {
 		maxIncLen = Math.max(...displayedBins.map(bin => {
 			const incSign = (bin.incremental_cost ?? 0) >= 0 ? "+" : "";
 			return `${incSign}${formatCost(bin.incremental_cost ?? 0)}`.length;
@@ -650,7 +861,9 @@ export function buildWtftLines(
 
 	const widgetLines: string[] = [];
 	
-	const titleLeft = disabledEmoji ? "[$] WTF Tokens?" : "💸 WTF Tokens?";
+	const titleLeft = unit === "tokens"
+		? (disabledEmoji ? "[#] WTF Tokens?" : "🔢 WTF Tokens?")
+		: (disabledEmoji ? "[$] WTF Tokens?" : "💸 WTF Tokens?");
 	
 	// Append session suffix (last 4 chars of session name) if available
 	const sessionSuffix = opts?.sessionNameSuffix ? ` \x1b[90m...${opts.sessionNameSuffix.replace(/.jsonl$/, "").slice(-4)}\x1b[0m` : "";
@@ -690,9 +903,11 @@ export function buildWtftLines(
 		const dateLabel = `── ${titleDateStr} `;
 		const paddingLen = Math.max(0, prefixWidth - dateLabel.length);
 		const labelPrefix = dateLabel + "─".repeat(paddingLen);
-		const ticksLine = buildTickLine(scaleMax, maxBarWidth, prefixWidth, labelPrefix);
+		// Use formatScaleLabel for tick labels in token mode
+		const ticksLine = unit === "tokens"
+			? buildTokenTickLine(scaleMax, maxBarWidth, prefixWidth, labelPrefix)
+			: buildTickLine(scaleMax, maxBarWidth, prefixWidth, labelPrefix);
 		if (ticksLine) {
-			// Using \x1b[90m (Dark Grey) for the entire tick line (which now contains the prefix already built-in!)
 			widgetLines.push(`\x1b[90m${ticksLine}\x1b[0m`);
 		}
 	}
@@ -701,17 +916,12 @@ export function buildWtftLines(
 	for (let i = 0; i < displayedBins.length; i++) {
 		const bin = displayedBins[i];
 
-		// If crossing a local day boundary (current bin date is different from previous in descending loop),
-		// draw a visual day change indicator line only if ticks are enabled!
+		// Day boundary divider (same for both modes)
 		if (showTicks && i > 0 && bin.dateStr !== displayedBins[i - 1].dateStr) {
 			const labelDay = formatMmmDdStr(bin.dateStr);
 			const dayChangeText = `── ${labelDay} `;
 			const dividerLen = Math.max(0, (finalWidth - 3) - dayChangeText.length);
-			// Build the divider as an array so we can punch tick marks through the horizontal line
 			const dividerChars = Array.from({ length: dividerLen }, () => "─");
-			
-			// Punch ┼ (light vertical + light horizontal) at the same tick positions as the main scale line.
-			// ┼ matches the ─ horizontal weight better than ┿ (which has a heavy horizontal stroke).
 			const tickPositions = [
 				prefixWidth,
 				prefixWidth + Math.floor(maxBarWidth / 4),
@@ -725,97 +935,128 @@ export function buildWtftLines(
 					dividerChars[idx] = "┼";
 				}
 			}
-			
 			const dividerLine = dayChangeText + dividerChars.join("");
 			widgetLines.push(`\x1b[90m${dividerLine}\x1b[0m`);
 		}
 
-		let barStr = "";
-		if (mode === "cumulative") {
-			const barWidth = scaleMax > 0 ? Math.round((bin.total_cost / scaleMax) * maxBarWidth) : 0;
-			const chars = distributeChars(bin.costs, barWidth);
+		const labelPart = padString(bin.label, labelWidth);
+		const coloredLabel = `\x1b[90m${labelPart}\x1b[0m`;
 
-			if (chars.spec > 0) {
-				barStr += `\x1b[38;5;108m${"█".repeat(chars.spec)}\x1b[0m`; // Spec Work (Sage Green)
+		if (unit === "tokens" && bin.tokens) {
+			// --- TOKEN MODE BAR RENDERING (#14) ---
+			const barWidth = scaleMax > 0 ? Math.round(((bin.total_tokens ?? 0) / scaleMax) * maxBarWidth) : 0;
+			// Token bar: bg color for category, fg white density char per output share
+			let barStr = "";
+			let allChars: number = 0;
+			for (const cat of ALL_CATEGORIES) {
+				const t = bin.tokens[cat];
+				if (!t || t.total <= 0) continue;
+				const segWidth = scaleMax > 0 ? Math.round(((bin.total_tokens ?? 0) / scaleMax) * maxBarWidth * (t.total / (bin.total_tokens || 1))) : 0;
+				// distribute proportional chars
+				const segChars = Math.max(0, Math.min(segWidth, maxBarWidth - allChars));
+				if (segChars <= 0) continue;
+				const outputShare = t.total > 0 ? t.output / t.total : 0;
+				const dc = densityChar(outputShare);
+				const bg = TOKEN_BG_COLORS[cat] ?? 236;
+				barStr += `\x1b[48;5;${bg}m\x1b[38;5;15m${dc.repeat(segChars)}\x1b[0m`;
+				allChars += segChars;
 			}
-			if (chars.mixed > 0) {
-				// Blended Spec + Code (Sage Green foreground, Terracotta Rust background, Medium Shade glyph)
-				barStr += `\x1b[38;5;108;48;5;173m${"▒".repeat(chars.mixed)}\x1b[0m`; // Mixed Work (Blended)
+
+			// Server tool cost marker (◆) at bar tail if no tokens but had cost (#14)
+			const hasServerToolCost = (bin.costs["web"] || 0) > 0 && (bin.tokens["web"]?.total ?? 0) === 0;
+			if (hasServerToolCost && allChars < maxBarWidth) {
+				barStr += `\x1b[38;5;209m◆\x1b[0m`;
+				allChars++;
 			}
-			if (chars.code > 0) {
-				barStr += `\x1b[38;5;173m${"█".repeat(chars.code)}\x1b[0m`; // Code Work (Terracotta Rust)
-			}
-			if (chars.tests > 0) {
-				barStr += `\x1b[38;5;223m${"█".repeat(chars.tests)}\x1b[0m`; // Tests Work (Chalky Sand)
-			}
-			if (chars.research > 0) {
-				barStr += `\x1b[38;5;134m${"█".repeat(chars.research)}\x1b[0m`; // Research Work (Plum Lavender)
-			}
-			if (chars.git > 0) {
-				barStr += `\x1b[38;5;73m${"█".repeat(chars.git)}\x1b[0m`; // Git Work (Petrol Teal)
-			}
-			if (chars.grep > 0) {
-				barStr += `\x1b[38;5;67m${"█".repeat(chars.grep)}\x1b[0m`; // Grep Work (Steel Blue)
-			}
-			if (chars.web > 0) {
-				barStr += `\x1b[38;5;209m${"▓".repeat(chars.web)}\x1b[0m`; // Web Tool Spend (Orange-Gold)
-			}
-			if (chars.prompt > 0) {
-				barStr += `\x1b[38;5;168m${"░".repeat(chars.prompt)}\x1b[0m`; // Prompt Work (Matte Rose Pink)
-			}
-			if (chars.other > 0) {
-				barStr += `\x1b[38;5;238m${"░".repeat(chars.other)}\x1b[0m`; // Other Work (Charcoal)
+
+			// Prefix: incremental + cumulative tokens
+			if (mode === "cumulative") {
+				const incSign = (bin.incremental_tokens ?? 0) >= 0 ? "+" : "";
+				const incStr = `${incSign}${formatTokenCount(bin.incremental_tokens ?? 0)}`;
+				const incPart = padString(incStr, maxIncLen);
+				const tokPart = padString(formatTokenCount(bin.total_tokens ?? 0), maxCostLen);
+				widgetLines.push(`${coloredLabel}  \x1b[90m${incPart}\x1b[0m  \x1b[1;37m${tokPart} tok\x1b[0m  ${barStr}`);
+			} else {
+				const tokPart = padString(formatTokenCount(bin.total_tokens ?? 0), maxCostLen);
+				widgetLines.push(`${coloredLabel}  \x1b[1;37m${tokPart} tok\x1b[0m  ${barStr}`);
 			}
 		} else {
-			// Point-of-spend multi-line chart mode for bucket display
-			const cells = Array(maxBarWidth).fill(" ");
-			const categoriesInReverse: { cat: Category; color: string; char: string }[] = [
-				{ cat: "other", color: "\x1b[38;5;238m", char: "░" },
-				{ cat: "prompt", color: "\x1b[38;5;168m", char: "░" },
-				{ cat: "grep", color: "\x1b[38;5;67m", char: "█" },
-				{ cat: "web", color: "\x1b[38;5;209m", char: "▓" },
-				{ cat: "git", color: "\x1b[38;5;73m", char: "█" },
-				{ cat: "research", color: "\x1b[38;5;134m", char: "█" },
-				{ cat: "tests", color: "\x1b[38;5;223m", char: "█" },
-				{ cat: "code", color: "\x1b[38;5;173m", char: "█" },
-				{ cat: "mixed", color: "\x1b[38;5;108;48;5;173m", char: "▒" },
-				{ cat: "spec", color: "\x1b[38;5;108m", char: "█" }
-			];
+			// --- COST MODE BAR RENDERING (original) ---
+			let barStr = "";
+			if (mode === "cumulative") {
+				const barWidth = scaleMax > 0 ? Math.round((bin.total_cost / scaleMax) * maxBarWidth) : 0;
+				const chars = distributeChars(bin.costs, barWidth);
 
-			for (const { cat, color, char } of categoriesInReverse) {
-				const cost = bin.costs[cat] || 0;
-				if (cost > 0 && scaleMax > 0) {
-					const pos = Math.round((cost / scaleMax) * (maxBarWidth - 1));
-					if (pos >= 0 && pos < maxBarWidth) {
-						cells[pos] = `${color}${char}\x1b[0m`;
+				if (chars.spec > 0) {
+					barStr += `\x1b[38;5;108m${"█".repeat(chars.spec)}\x1b[0m`;
+				}
+				if (chars.mixed > 0) {
+					barStr += `\x1b[38;5;108;48;5;173m${"▒".repeat(chars.mixed)}\x1b[0m`;
+				}
+				if (chars.code > 0) {
+					barStr += `\x1b[38;5;173m${"█".repeat(chars.code)}\x1b[0m`;
+				}
+				if (chars.tests > 0) {
+					barStr += `\x1b[38;5;223m${"█".repeat(chars.tests)}\x1b[0m`;
+				}
+				if (chars.research > 0) {
+					barStr += `\x1b[38;5;134m${"█".repeat(chars.research)}\x1b[0m`;
+				}
+				if (chars.git > 0) {
+					barStr += `\x1b[38;5;73m${"█".repeat(chars.git)}\x1b[0m`;
+				}
+				if (chars.grep > 0) {
+					barStr += `\x1b[38;5;67m${"█".repeat(chars.grep)}\x1b[0m`;
+				}
+				if (chars.web > 0) {
+					barStr += `\x1b[38;5;209m${"▓".repeat(chars.web)}\x1b[0m`;
+				}
+				if (chars.prompt > 0) {
+					barStr += `\x1b[38;5;168m${"░".repeat(chars.prompt)}\x1b[0m`;
+				}
+				if (chars.other > 0) {
+					barStr += `\x1b[38;5;238m${"░".repeat(chars.other)}\x1b[0m`;
+				}
+			} else {
+				const cells = Array(maxBarWidth).fill(" ");
+				const categoriesInReverse: { cat: Category; color: string; char: string }[] = [
+					{ cat: "other", color: "\x1b[38;5;238m", char: "░" },
+					{ cat: "prompt", color: "\x1b[38;5;168m", char: "░" },
+					{ cat: "grep", color: "\x1b[38;5;67m", char: "█" },
+					{ cat: "web", color: "\x1b[38;5;209m", char: "▓" },
+					{ cat: "git", color: "\x1b[38;5;73m", char: "█" },
+					{ cat: "research", color: "\x1b[38;5;134m", char: "█" },
+					{ cat: "tests", color: "\x1b[38;5;223m", char: "█" },
+					{ cat: "code", color: "\x1b[38;5;173m", char: "█" },
+					{ cat: "mixed", color: "\x1b[38;5;108;48;5;173m", char: "▒" },
+					{ cat: "spec", color: "\x1b[38;5;108m", char: "█" }
+				];
+
+				for (const { cat, color, char } of categoriesInReverse) {
+					const cost = bin.costs[cat] || 0;
+					if (cost > 0 && scaleMax > 0) {
+						const pos = Math.round((cost / scaleMax) * (maxBarWidth - 1));
+						if (pos >= 0 && pos < maxBarWidth) {
+							cells[pos] = `${color}${char}\x1b[0m`;
+						}
 					}
 				}
+				barStr = cells.join("");
 			}
-			barStr = cells.join("");
-		}
 
-		const labelPart = padString(bin.label, labelWidth);
-		// Replace \x1b[2m with \x1b[90m (dark grey foreground) to avoid terminal emulator background bugs
-		const coloredLabel = `\x1b[90m${labelPart}\x1b[0m`; // Dark Grey / Dim White effect
-		
-		if (mode === "cumulative") {
-			// Prepend plus to the incremental cost
-			const incSign = (bin.incremental_cost ?? 0) >= 0 ? "+" : "";
-			const incStr = `${incSign}${formatCost(bin.incremental_cost ?? 0)}`;
-			const incPart = padString(incStr, maxIncLen);
-			// Using \x1b[90m for Dark Grey / Bright Black.
-			// \x1b[37m is standard white/light-grey, \x1b[1;30m is bold black, and \x1b[90m is high-intensity black (dark grey)
-			const coloredInc = `\x1b[90m${incPart}\x1b[0m`; // Dark Grey / Bright Black
-
-			const costPart = padString(formatCost(bin.total_cost), maxCostLen);
-			const coloredCost = `\x1b[1;37m${costPart}\x1b[0m`; // Normal/Bright White
-			
-			widgetLines.push(`${coloredLabel}  ${coloredInc}  ${coloredCost}  ${barStr}`);
-		} else {
-			// Bucket mode (no cumulative or incremental, just simple bucket cost)
-			const costPart = padString(formatCost(bin.total_cost), maxCostLen);
-			const coloredCost = `\x1b[1;37m${costPart}\x1b[0m`; // Normal/Bright White
-			widgetLines.push(`${coloredLabel}  ${coloredCost}  ${barStr}`);
+			if (mode === "cumulative") {
+				const incSign = (bin.incremental_cost ?? 0) >= 0 ? "+" : "";
+				const incStr = `${incSign}${formatCost(bin.incremental_cost ?? 0)}`;
+				const incPart = padString(incStr, maxIncLen);
+				const coloredInc = `\x1b[90m${incPart}\x1b[0m`;
+				const costPart = padString(formatCost(bin.total_cost), maxCostLen);
+				const coloredCost = `\x1b[1;37m${costPart}\x1b[0m`;
+				widgetLines.push(`${coloredLabel}  ${coloredInc}  ${coloredCost}  ${barStr}`);
+			} else {
+				const costPart = padString(formatCost(bin.total_cost), maxCostLen);
+				const coloredCost = `\x1b[1;37m${costPart}\x1b[0m`;
+				widgetLines.push(`${coloredLabel}  ${coloredCost}  ${barStr}`);
+			}
 		}
 	}
 
@@ -835,27 +1076,43 @@ export function buildWtftLines(
 	const timelineStr = buildTimelineString(surgeHours, currentHour, proximity.status);
 	widgetLines[0] = widgetLines[0] + "  " + timelineStr;
 
-	// Proactive "Other" bloat warning (#17)
-	// Trigger: other > 20% of total session cost AND absolute other > $6.00
-	// Uses raw interactions (not bin costs) to avoid double-counting in cumulative mode
-	// where bin.costs[n].other is a running total, summing across bins inflates the value.
-	const totalOtherCost = interactions
-		.filter(i => classifyInteraction(i) === "other")
-		.reduce((sum, i) => sum + i.cost, 0);
-	if (totalSessionCost > 0) {
-		const otherPct = totalOtherCost / totalSessionCost;
-		if (otherPct > 0.20 && totalOtherCost > 6.00) {
-			const pctStr = `${Math.round(otherPct * 100)}%`;
-			const costStr = formatCost(totalOtherCost);
-			// Warning line: bright yellow bold for visibility in widget and CLI
-			widgetLines.push(`\x1b[1;33m⚠️  "Other" category: ${pctStr} of session cost (${costStr}). Run wtft --other to drill down.\x1b[0m`);
+	// PROACTIVE "OTHER" BLOAT WARNING (#17) — cost mode only
+	if (unit === "cost") {
+		const totalOtherCost = interactions
+			.filter(i => classifyInteraction(i) === "other")
+			.reduce((sum, i) => sum + i.cost, 0);
+		if (totalSessionCost > 0) {
+			const otherPct = totalOtherCost / totalSessionCost;
+			if (otherPct > 0.20 && totalOtherCost > 6.00) {
+				const pctStr = `${Math.round(otherPct * 100)}%`;
+				const costStr = formatCost(totalOtherCost);
+				widgetLines.push(`\x1b[1;33m⚠️  "Other" category: ${pctStr} of session cost (${costStr}). Run wtft --other to drill down.\x1b[0m`);
+			}
 		}
 	}
 
-	// Cache efficiency metric line (#79) — displayed below bars
-	const cacheMetrics = computeCacheMetrics(interactions);
-	if (cacheMetrics) {
-		widgetLines.push(`\x1b[90m  CH: ${cacheMetrics.hitRate}% cache hit (${cacheMetrics.readTokens} read / ${cacheMetrics.totalOps} total ops)\x1b[0m`);
+	// --- TOKEN MODE FOOTER (#14): density key bar + Pi-style summary ---
+	if (unit === "tokens") {
+		// Density key bar
+		widgetLines.push(`\x1b[90m  cheap \$/tok  \x1b[38;5;22m░\x1b[0m\x1b[38;5;22m░\x1b[0m \x1b[38;5;94m▒\x1b[0m\x1b[38;5;94m▒\x1b[0m \x1b[38;5;130m▓\x1b[0m\x1b[38;5;130m▓\x1b[0m \x1b[38;5;88m█\x1b[0m\x1b[38;5;88m█\x1b[0m  expensive \$/tok  \x1b[90m◆ = cost-only (web tools)\x1b[0m`);
+		// Footer summary
+		const summary = tokenFooterSummary(interactions);
+		if (summary) {
+			widgetLines.push(`\x1b[37m  ${summary}\x1b[0m`);
+		}
+		// Still show cache efficiency if relevant
+		const cacheMetrics = computeCacheMetrics(interactions);
+		if (cacheMetrics) {
+			widgetLines.push(`\x1b[90m  CH: ${cacheMetrics.hitRate}% cache hit (${cacheMetrics.readTokens} read / ${cacheMetrics.totalOps} total ops)\x1b[0m`);
+		}
+	}
+
+	// Cache efficiency metric line (#79) — cost mode only
+	if (unit === "cost") {
+		const cacheMetrics = computeCacheMetrics(interactions);
+		if (cacheMetrics) {
+			widgetLines.push(`\x1b[90m  CH: ${cacheMetrics.hitRate}% cache hit (${cacheMetrics.readTokens} read / ${cacheMetrics.totalOps} total ops)\x1b[0m`);
+		}
 	}
 
 	return widgetLines;

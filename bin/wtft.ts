@@ -41,6 +41,7 @@ const cfg = loadConfig("wtft", { interval: "1h", limit: 100, mode: "cumulative" 
 	limit?: number;
 	mode?: "bucket" | "cumulative";
 	timezone?: string;
+	tokens?: boolean;
 };
 
 let intervalStr = String(cfg.interval ?? "1h");
@@ -53,6 +54,7 @@ let harnessOption: "auto" | "pi" | "claude-code" = "auto";
 let cwdOverride: string | undefined = undefined;
 let showOther = false;
 let showTokens = false;
+let unit: "cost" | "tokens" = cfg.tokens ? "tokens" : "cost";
 let pad = 1;
 let hasPad = false;
 
@@ -117,7 +119,8 @@ Options:
   --no-ticks              Disable the proportional cost scale ticks above the bars.
   -t, --tz <zone>         Specify a display timezone (e.g. America/Los_Angeles).
   -o, --other             Print a histogram of 'Other' commands grouped by semantic sub-category (Build, Lint, System, etc.).
-  -T, --tokens            Print a per-model token summary table (deduped) for cross-referencing with /usage.
+  -T, --tokens            Switch bar chart to token-unit mode (bg=token width, density=output $$$/tok)
+                          AND print per-model token summary table below.
   --thinking-budget <n>   Thinking token budget for utilization display in --tokens (default: no budget shown).
   -W, --watch             Watch a session file for changes and re-render the bar chart in real-time.
   -F, --force             Kill the log parser, delete tag files, and force a full session re-parse.
@@ -208,6 +211,7 @@ for (let i = 2; i < process.argv.length; i++) {
 		hasOther = true;
 	} else if (arg === "--tokens" || arg === "-T") {
 		showTokens = true;
+		unit = "tokens";
 		hasTokens = true;
 	} else if (arg === "-W" || arg === "--watch") {
 		showWatch = true;
@@ -492,6 +496,7 @@ async function main() {
 		timezone: finalTimezone,
 		disabledEmoji,
 		sessionNameSuffix: path.basename(finalSessionPath),
+		unit,
 	});
 
 	if (!outputLines) {

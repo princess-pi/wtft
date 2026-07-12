@@ -327,6 +327,7 @@ function getSettings(_ctx: any) {
 	const mode: "bucket" | "cumulative" = (config.mode === "bucket" || config.mode === "cumulative" ? config.mode : "cumulative") as "bucket" | "cumulative";
 	const timezone: string | undefined = (typeof config.timezone === "string" ? config.timezone : "America/Los_Angeles") as string | undefined;
 	const disabledEmoji = isEmojiDisabled();
+	const tokens = (typeof config.tokens === "boolean" ? config.tokens : false) as boolean;
 
 	// Width auto-fits to terminal (no separate lock/default — CLI doesn't use it either)
 	const width = Math.min(getTerminalWidth(true, disabledEmoji), 240);
@@ -334,7 +335,7 @@ function getSettings(_ctx: any) {
 	// Auto-show if config exists (user has configured wtft at least once)
 	const visible = hasConfig("wtft");
 
-	return { interval, limit, width, visible, showTicks, mode, timezone, disabledEmoji };
+	return { interval, limit, width, visible, showTicks, mode, timezone, disabledEmoji, tokens };
 }
 
 // ---
@@ -359,8 +360,12 @@ function buildWtftLines(
 	// incremental burst accumulation from message_end). O(1) at widget
 	// render time instead of O(n) branch walk on every refresh (#78).
 	const interactions = _allInteractions;
+	const settings = getSettings(ctx);
 
-	return sharedBuildWtftLines(interactions, getSettings(ctx), opts);
+	return sharedBuildWtftLines(interactions, settings, {
+		...opts,
+		unit: settings.tokens ? "tokens" as const : "cost" as const,
+	});
 }
 
 /**
@@ -745,6 +750,10 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			}
 
 			if (tokens) {
+			// Toggle widget to token-unit mode and persist (#14)
+			writeConfig("wtft", { tokens: true });
+			updateWtftWidget(ctx, pi, { visible: true });
+
 			// Map current thinking level to budget tokens (#79)
 			const BUDGET_MAP: Record<string, number> = {
 				minimal: 1024, low: 4096, medium: 10240,

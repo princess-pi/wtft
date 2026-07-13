@@ -805,6 +805,7 @@ export async function watchTagFile(
 	process.on("SIGWINCH", () => {
 		if (_sigwinchPending) return; // debounce rapid resize events
 		_sigwinchPending = true;
+		_sigwinchHandled = true; // block cursor-up during settle window
 		setTimeout(() => {
 			_sigwinchPending = false;
 			if (lastBuffer.length > 0) {

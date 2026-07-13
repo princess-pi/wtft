@@ -119,6 +119,30 @@ from the old map and must re-classify.
 4. `npm run build` then run built `bin/wtft.mjs --tokens` and cost mode against a live session —
    legend shows Plan/Agents, no color collisions, daemon regenerates tags at v2.4.0.
 
+## Verification results (2026-07-13, Code Approved b83127a)
+
+All four gates passed:
+
+1. `tests/wtft-issue-52-tool-categories.test.ts` — **25/25 pass** (tool map, prompt
+   purification, precedence, Pi schema, dedup toolCats merge).
+2. All 15 existing wtft suites pass. (`tests/session-name-display.test.ts` fails
+   pre-existing: `@earendil-works/pi-tui` absent from repo `node_modules` — Pi sandbox only.)
+3. Live before/after on session `8548d7f1` ($36.13, 193 messages), old classifier taken
+   from the `a5a8cbd` build:
+
+   | Category | Before | After |
+   |---|---|---|
+   | other | 101 msgs · 49.5% | 95 msgs · 44.4% |
+   | prompt | 57 msgs · 37.1% | 46 msgs · 32.7% |
+   | web | — | 9 msgs · 6.2% |
+   | plan | — | 5 msgs · 1.9% |
+   | agents | — | 3 msgs · 1.4% |
+
+   `prompt`+`other` fell 86.6% → 77.1% — the migrated $3.44 matches the predicted ~9%
+   unmodeled-tool share from the pre-spec measurement.
+4. Built `bin/wtft.mjs` renders cost and `--tokens` modes with the Agents/Plan legend and
+   new bar segments; daemon regenerated tags at v2.4.0.
+
 ## Roads not taken
 
 - **CoT/Sys2 category** — measured zero thinking-only turns (see table). Revisit only as part

@@ -74,6 +74,21 @@ and wired in Phase 3.
 | `notebookedit` | file write (`args.notebook_path`) — classified by path like `edit` |
 | any other tool | marks `hasUnrecognizedTool` |
 
+### Path rule: `docs/research/` → `plan` (Duppy decision 2026-07-13)
+
+Written explorations are thinking artifacts, not normative specs. `docs/research/**`
+(analysis docs, audits, why-not writeups) classifies **`plan`** for both reads and writes
+— checked *before* the general `docs/` → `spec` rule. The taxonomy's clean lines:
+
+- **spec** — normative specification documents (`docs/`, `.md` elsewhere)
+- **plan** — steering/thinking artifacts: planning tools *and* `docs/research/` documents
+- **research** — running experiments: code and mock data (root `research/`)
+
+Observation recorded, no classifier change: root `research/` currently holds ten `.md`
+files that are mostly specs (`14-token-unit-mode-spec.md`, `serve-*-spec.md`, …). The
+`.md` rule already classifies them `spec` — accidentally correct, but they likely belong
+under `docs/` per the convention above. File-placement cleanup, separate from #52.
+
 ### Mechanism
 
 - `Interaction` gains `toolCats?: Category[]` (populated at parse time, serialized to the tag

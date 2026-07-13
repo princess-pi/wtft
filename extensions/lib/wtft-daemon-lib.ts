@@ -11,7 +11,7 @@ import {
 	classifyInteraction,
 	buildWtftLines
 } from "./wtft-shared.js";
-import { showCursor, hideCursor, enterRawStdin, visualLineCount } from "./tty-helpers.js";
+import { showCursor, hideCursor, enterRawStdin } from "./tty-helpers.js";
 export interface WatchSettings {
 	interval: string;
 	limit: number;
@@ -132,8 +132,8 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
 }
 
 // INOTIFY-BASED WATCH MODE (#53)
-// Watches the daemon's classified tag file via fs.watch. The daemon is spawned
-// by the CLI entry point (bin/wtft.ts) before this function is called.
+// Replaces the poll-loop watchMode with fs.watch on the daemon's classified
+// tag file. Auto-spawn of the daemon happens in the CLI entry point (bin/wtft.ts).
 
 /**
  * Watch a classified tag file via inotify (fs.watch) and re-render the bar
@@ -499,7 +499,6 @@ export async function watchTagFile(
 	let interactionCount = 0;
 	let needsRedraw = true;
 	let daemonWatchdog: ReturnType<typeof setTimeout> | null = null;
-	let _lastRenderWidth = 0;
 	const HEALTHY_BEAT_MS = 1334; // 2 × 667ms daemon poll cycle
 	const resetWatchdog = () => {
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
@@ -513,25 +512,18 @@ export async function watchTagFile(
 		}
 	};
 
-	// In-place rendering on main screen (no alt screen) — preserves scrollback.
-	// Tracks visual line count for precise cursor-up + \x1b[J overwrite,
-	// following the same pattern as the interactive session selector.
+	// Alternate screen — isolated buffer, no scrollback interference.
+	process.stdout.write("\x1b[?1049h");
 	hideCursor();
 	let lastBuffer: string[] = [];
-	let _lastPath = "";          // session path for exit reprint (written once, never in cursor-up loop)
-	let lastLineCount = 0;     // visual lines of chart area only (excludes path)
 
+	// Shared exit: switch to normal screen, print final chart.
 	const exitWatch = () => {
 		if (watcher) watcher.close();
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
-		// Clear chart area (lastLineCount excludes path rows)
-		if (lastLineCount > 0) {
-			process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
-		}
+		process.stdout.write("\x1b[?1049l"); // back to normal screen
 		showCursor();
 		cleanupStdin();
-		// Reprint: path first (written once), then chart
-		if (_lastPath) console.log(_lastPath);
 		if (lastBuffer.length > 0) {
 			for (const l of lastBuffer) console.log(l);
 		}
@@ -637,7 +629,7 @@ export async function watchTagFile(
 		lastReadOffset = fs.statSync(tagPath).size;
 	} catch {}
 
-	// Session-level settings from inline wtft-settings entries.
+	// Session-level settings from inline wtft-settings entries (same as watchMode).
 	let sessionInterval: string | undefined;
 	let sessionLimit: number | undefined;
 	let sessionMode: "cumulative" | "bucket" | undefined;
@@ -675,15 +667,8 @@ export async function watchTagFile(
 	}
 
 	const render = () => {
-		// In-place rendering: move cursor up to top of previous output,
-		// pad each line to terminal width with spaces (full overwrite, no
-		// \x1b[J needed), and fill any gap below with blank lines.
-		// After a resize, lastLineCount is reset to 0 — first post-resize
-		// render writes from current cursor position (may briefly overlap
-		// old re-flowed content); next render snaps clean.
-		if (lastLineCount > 0) {
-			process.stdout.write(`\x1b[${lastLineCount}A`);
-		}
+		// Clear alternate screen and re-render from top
+		process.stdout.write("\x1b[2J\x1b[H");
 
 		const width = getTerminalWidth();
 		const pad = settings.pad || 0;
@@ -720,14 +705,8 @@ export async function watchTagFile(
 			disabledEmoji,
 		});
 
-		// Session path — written once, never participates in cursor-up loop.
-		// Wrapping creates multiple display rows that \x1b[K can't fully clear.
-		if (!_lastPath) {
-			_lastPath = padStr + `\x1b[90m${sessionPath}\x1b[0m`;
-			process.stdout.write(_lastPath + "\n");
-		}
-
 		const buf: string[] = [];
+		buf.push(`\x1b[90m${sessionPath}\x1b[0m`);
 		totalCost = deduped.reduce((sum, i) => sum + i.cost, 0);
 
 		if (lines && lines.length > 0) {
@@ -746,10 +725,14 @@ export async function watchTagFile(
 			}
 
 			if (daemonStatusStr) {
-				// Always insert as a separate line — inlining causes layout
-				// drift (visual line count changes when status text length
-				// changes between "reading...", "live", "idle (cache...)").
-				lines.splice(1, 0, daemonStatusStr.trim());
+				const titleVisualLen = getVisualLength(lines[0]);
+				const statusVisualLen = getVisualLength(daemonStatusStr);
+				if (titleVisualLen + statusVisualLen <= finalWidth - 2) {
+					lines[0] = lines[0] + daemonStatusStr;
+				} else {
+					// Doesn't fit — insert as a separate line after the title
+					lines.splice(1, 0, daemonStatusStr.trim());
+				}
 			}
 
 			for (const l of lines) buf.push(l);
@@ -763,50 +746,12 @@ export async function watchTagFile(
 			: "";
 		buf.push(`'q' to exit${restartHint}`);
 
+		lastBuffer = [...buf];
+
+		// Write lines — alternate screen handles everything, no wrap worries
 		const allLines = buf.map(l => padStr + l);
-		// Pad each line to full terminal width with spaces — no \x1b[K needed
-		// for non-wrapping lines. Store the exact written content (including
-		// trailing spaces) in lastBuffer so SIGWINCH/exit recomputation of
-		// visual line count is accurate at any terminal width.
-		const paddedLines: string[] = [];  // includes blank rows for wrapping, used for visual line count
-		const cleanLines: string[] = [];   // exit reprint only, no blank rows
 		for (const l of allLines) {
-			const visLen = getVisualLength(l);
-			if (visLen < width) {
-				const line = l + " ".repeat(width - visLen);
-				paddedLines.push(line);
-				cleanLines.push(line);
-				process.stdout.write(line + "\n");
-			} else {
-				// Wrapping: write content, then explicit blank rows
-				// to cover wrapped continuation segments.
-				// No \x1b[K — it only clears the last display row.
-				const wrappedRows = Math.ceil(visLen / width);
-				paddedLines.push(l);
-				cleanLines.push(l);
-				process.stdout.write(l + "\n");
-				for (let r = 1; r < wrappedRows; r++) {
-					const blank = " ".repeat(width);
-					paddedLines.push(blank);
-					process.stdout.write(blank + "\n");
-				}
-			}
-		}
-		const output = paddedLines.join("\n") + "\n";
-		lastBuffer = cleanLines;
-		// If new output is shorter, blank out the remaining lines
-		const newVisualLines = visualLineCount(output, width);
-		if (newVisualLines < lastLineCount) {
-			for (let i = newVisualLines; i < lastLineCount; i++) {
-				process.stdout.write(" ".repeat(width) + "\n");
-			}
-		}
-		// Track visual line count once on first render, never change.
-		// Dynamic content (SURGE badge, status text) changes newVisualLines
-		// between renders — Math.max would accumulate inflation, causing
-		// cursor-up to overshoot and old content to survive.
-		if (lastLineCount === 0) {
-			lastLineCount = newVisualLines;
+			process.stdout.write(l + "\x1b[K\n");
 		}
 		needsRedraw = false;
 	};
@@ -815,13 +760,9 @@ export async function watchTagFile(
 	render();
 	resetWatchdog();
 
-	// SIGWINCH handler — on resize, scroll past the re-flowed mess.
-	// Old content goes into scrollback; path + chart render fresh below.
+	// SIGWINCH handler — re-render on resize. Terminal re-flows old text
+	// to new boundaries; the next render's per-line \x1b[K handles it.
 	process.on("SIGWINCH", () => {
-		process.stdout.write("\n");
-		_lastPath = "";  // force path reprint after scroll
-		lastLineCount = 0;
-		needsRedraw = true;
 		render();
 		resetWatchdog();
 	});

@@ -132,7 +132,7 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
 }
 
 // INOTIFY-BASED WATCH MODE (#53)
-// Replaces the poll-loop watchMode with fs.watch on the daemon's classified
+// Watches the daemon's classified tag file via fs.watch. Auto-spawned by CLI.
 // tag file. Auto-spawn of the daemon happens in the CLI entry point (bin/wtft.ts).
 
 /**
@@ -629,7 +629,7 @@ export async function watchTagFile(
 		lastReadOffset = fs.statSync(tagPath).size;
 	} catch {}
 
-	// Session-level settings from inline wtft-settings entries (same as watchMode).
+	// Session-level settings from inline wtft-settings entries.
 	let sessionInterval: string | undefined;
 	let sessionLimit: number | undefined;
 	let sessionMode: "cumulative" | "bucket" | undefined;

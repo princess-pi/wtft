@@ -518,6 +518,7 @@ export async function watchTagFile(
 	// following the same pattern as the interactive session selector.
 	hideCursor();
 	let lastBuffer: string[] = [];
+	let _lastPathLine = "";       // session path for exit reprint (not in lastBuffer)
 	let lastLineCount = 0;     // visual lines of last render (at render-time width)
 
 	const exitWatch = () => {
@@ -534,6 +535,7 @@ export async function watchTagFile(
 		showCursor();
 		cleanupStdin();
 		if (lastBuffer.length > 0) {
+			if (_lastPathLine) console.log(_lastPathLine);
 			for (const l of lastBuffer) console.log(l);
 		}
 		console.log(`WTFT watch stopped \u2014 ${interactionCount} interactions, $${totalCost.toFixed(4)} total cost.`);
@@ -722,7 +724,13 @@ export async function watchTagFile(
 		});
 
 		const buf: string[] = [];
-		buf.push(`\x1b[90m${sessionPath}\x1b[0m`);
+		// Session path — written once, never participates in cursor-up loop.
+		// It wraps to 2+ rows and \x1b[K on wrapped segments doesn't fully
+		// clear, causing visual drift if included in the in-place buffer.
+		if (!_lastPathLine) {
+			_lastPathLine = padStr + `\x1b[90m${sessionPath}\x1b[0m`;
+			process.stdout.write(_lastPathLine + "\n");
+		}
 		totalCost = deduped.reduce((sum, i) => sum + i.cost, 0);
 
 		if (lines && lines.length > 0) {

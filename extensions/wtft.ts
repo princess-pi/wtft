@@ -26,6 +26,7 @@ import { readConfig, writeConfig, hasConfig } from "./lib/config.js";
 // All interactions are read from the tag file on each event — no internal
 // accumulation state. The daemon writes at most every 667ms; the gap between
 // agent_settled and the next daemon beat is invisible at widget render time.
+// Known rendering artifacts on terminal resize: tracked in #93.
 // ---
 let _parserSessionPath: string | null = null;
 let _parserSpawned = false;

@@ -801,7 +801,13 @@ export async function watchTagFile(
 				process.stdout.write(" ".repeat(width) + "\n");
 			}
 		}
-		lastLineCount = Math.max(newVisualLines, lastLineCount);
+		// Track visual line count once on first render, never change.
+		// Dynamic content (SURGE badge, status text) changes newVisualLines
+		// between renders — Math.max would accumulate inflation, causing
+		// cursor-up to overshoot and old content to survive.
+		if (lastLineCount === 0) {
+			lastLineCount = newVisualLines;
+		}
 		needsRedraw = false;
 	};
 

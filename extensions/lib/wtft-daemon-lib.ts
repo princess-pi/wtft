@@ -164,7 +164,7 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
  */
 // 2.4.x (#52): new categories (agents/plan, prompt purification, docs/research→plan)
 // — stale caches carry _cat values from the old map and must re-classify.
-export const WTFT_TAGGER_VERSION = "2.4.1";
+export const WTFT_TAGGER_VERSION = "2.4.2";
 
 export function getTagPath(sessionPath: string): string {
 	const sessionDir = path.dirname(sessionPath);

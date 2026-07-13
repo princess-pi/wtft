@@ -114,11 +114,24 @@ assert("write docs/spec.md still → spec",
 assert("root research/proto.ts still → research",
 	classify(claudeEntry([{ type: "tool_use", name: "Read", input: { file_path: "research/proto.ts" } }])) === "research");
 
-assert("write docs/research + write src → mixed",
+// --- Latest-stage-wins (mixed removed, #52 amendment 2) ---
+assert("write docs/research + write src → code (latest stage wins, no mixed)",
 	classify(claudeEntry([
 		{ type: "tool_use", name: "Write", input: { file_path: "docs/research/notes.md" } },
 		{ type: "tool_use", name: "Edit", input: { file_path: "src/a.ts" } }
-	])) === "mixed");
+	])) === "code");
+
+assert("write src + write tests → tests (latest stage wins)",
+	classify(claudeEntry([
+		{ type: "tool_use", name: "Edit", input: { file_path: "src/a.ts" } },
+		{ type: "tool_use", name: "Write", input: { file_path: "tests/a.test.ts" } }
+	])) === "tests");
+
+assert("write docs/spec.md + write src → code (spec tweak mid-coding)",
+	classify(claudeEntry([
+		{ type: "tool_use", name: "Edit", input: { file_path: "docs/spec.md" } },
+		{ type: "tool_use", name: "Edit", input: { file_path: "src/a.ts" } }
+	])) === "code");
 
 // --- Prompt purification ---
 console.log("\nPrompt purification:");

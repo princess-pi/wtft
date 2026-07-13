@@ -18,8 +18,8 @@ import { calculateClaudeCost, calculateServerToolCost } from "./wtft-cost.js";
 // ---
 
 export type Category =
-	| "spec" | "code" | "mixed" | "tests" | "research"
-	| "git" | "grep" | "web" | "agents" | "plan"
+	| "plan" | "spec" | "research" | "web" | "grep"
+	| "code" | "tests" | "git" | "agents"
 	| "prompt" | "compaction" | "interrupted" | "other";
 
 export interface Interaction {
@@ -427,35 +427,20 @@ export function classifyInteraction(interaction: Interaction): Category {
 		else if (category === "plan") planPaths.add(f.action);
 	}
 
-	const specWrites = specPaths.has("write");
-	const codeWrites = codePaths.has("write");
-	const testsWrites = testsPaths.has("write");
-	const researchWrites = researchPaths.has("write");
-	const planWrites = planPaths.has("write");
-	const writeCount = (specWrites ? 1 : 0) + (codeWrites ? 1 : 0) + (testsWrites ? 1 : 0) + (researchWrites ? 1 : 0) + (planWrites ? 1 : 0);
+	// Multi-category turns resolve by latest-workflow-stage-wins (no more "mixed",
+	// #52 amendment 2): the furthest stage is the turn's real progress; earlier-stage
+	// touches (a spec tweak mid-coding) are supporting edits. Writes beat reads.
+	if (testsPaths.has("write")) return "tests";
+	if (codePaths.has("write")) return "code";
+	if (researchPaths.has("write")) return "research";
+	if (specPaths.has("write")) return "spec";
+	if (planPaths.has("write")) return "plan";
 
-	if (writeCount > 1) return "mixed";
-	if (writeCount === 1) {
-		if (specWrites) return "spec";
-		if (codeWrites) return "code";
-		if (testsWrites) return "tests";
-		if (researchWrites) return "research";
-		if (planWrites) return "plan";
-	}
-
-	const hasSpec = specPaths.has("read");
-	const hasCode = codePaths.has("read");
-	const hasTests = testsPaths.has("read");
-	const hasResearch = researchPaths.has("read");
-	const hasPlan = planPaths.has("read");
-	const readCount = (hasSpec ? 1 : 0) + (hasCode ? 1 : 0) + (hasTests ? 1 : 0) + (hasResearch ? 1 : 0) + (hasPlan ? 1 : 0);
-
-	if (readCount > 1) return "mixed";
-	if (hasSpec) return "spec";
-	if (hasCode) return "code";
-	if (hasTests) return "tests";
-	if (hasResearch) return "research";
-	if (hasPlan) return "plan";
+	if (testsPaths.has("read")) return "tests";
+	if (codePaths.has("read")) return "code";
+	if (researchPaths.has("read")) return "research";
+	if (specPaths.has("read")) return "spec";
+	if (planPaths.has("read")) return "plan";
 
 	// Tool-implied categories (#52) — priority: agents (spawn cost dominates) >
 	// web (joins #73 request-cost billing) > plan > grep. Sits below file ops

@@ -28,23 +28,42 @@ export interface Bin {
 // TOKEN-UNIT MODE (#14): Background colors, density calculation, and rendering
 // ---
 
-/** 256-color background codes for token-mode bar segments (dark tones for bright-white density chars). */
-const TOKEN_BG_COLORS: Record<Category, number> = {
-	spec: 22,        // deep forest green
-	mixed: 94,       // dark gold / earth
-	code: 130,       // burnt orange
-	tests: 178,      // warm tan
-	research: 54,    // midnight plum
-	git: 23,         // deep teal
-	grep: 24,        // navy blue
-	web: 88,         // crimson
-	agents: 55,      // dark purple (#52)
-	plan: 30,        // dark cyan (#52)
-	prompt: 89,      // dark mauve
-	compaction: 58,  // dark olive (#52, wired in Phase 3)
-	interrupted: 52, // dark red (#52, wired in Phase 3)
-	other: 236,      // near-black charcoal
+// ---
+// CATEGORY ORDER + STYLE (#52 amendment 2) — single source of truth.
+// Workflow order: plan → spec → research (web/grep support) → code → tests →
+// git → agents (delegation) → prompt (conversation) → overhead → other.
+// Legend, cost-mode stacking, bucket-mode markers, and token-mode segments
+// all derive from this table, so bar order matches legend order by construction.
+// ---
+
+export const CATEGORY_ORDER: Category[] = [
+	"plan", "spec", "research", "web", "grep", "code", "tests", "git",
+	"agents", "prompt", "compaction", "interrupted", "other",
+];
+
+/** fg = legend/bar ANSI 256 color; bg = token-mode segment (dark tones for
+ *  bright-white density chars); char = bar glyph; label = legend text
+ *  (null = hidden from legend until wired — Phase 3 overhead categories). */
+const CATEGORY_STYLE: Record<Category, { fg: number; bg: number; char: string; label: string | null }> = {
+	plan:        { fg: 116, bg: 30,  char: "█", label: "Plan" },
+	spec:        { fg: 108, bg: 22,  char: "█", label: "Spec" },
+	research:    { fg: 134, bg: 54,  char: "█", label: "Research" },
+	web:         { fg: 209, bg: 88,  char: "▓", label: "Web" },
+	grep:        { fg: 67,  bg: 24,  char: "█", label: "Grep" },
+	code:        { fg: 173, bg: 130, char: "█", label: "Code" },
+	tests:       { fg: 223, bg: 178, char: "█", label: "Tests" },
+	git:         { fg: 73,  bg: 23,  char: "█", label: "Git" },
+	agents:      { fg: 141, bg: 55,  char: "█", label: "Agents" },
+	prompt:      { fg: 168, bg: 89,  char: "░", label: "Prompt" },
+	compaction:  { fg: 143, bg: 58,  char: "░", label: null },
+	interrupted: { fg: 167, bg: 52,  char: "░", label: null },
+	other:       { fg: 238, bg: 236, char: "░", label: "Other" },
 };
+
+/** 256-color background codes for token-mode bar segments (derived from CATEGORY_STYLE). */
+const TOKEN_BG_COLORS: Record<Category, number> = Object.fromEntries(
+	CATEGORY_ORDER.map(c => [c, CATEGORY_STYLE[c].bg])
+) as Record<Category, number>;
 
 /** Density chars mapped by output-token share quartile. */
 const DENSITY_CHARS = ["░", "▒", "▓", "█"] as const;
@@ -101,7 +120,7 @@ export function tokenFooterSummary(interactions: { inputTokens: number; outputTo
 export function accumulateTokens(bin: Bin, category: Category, interaction: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number }): void {
 	if (!bin.tokens) {
 		bin.tokens = {} as Record<Category, { total: number; output: number }>;
-		for (const cat of ["spec", "code", "mixed", "tests", "research", "git", "grep", "web", "agents", "plan", "prompt", "compaction", "interrupted", "other"] as Category[]) {
+		for (const cat of CATEGORY_ORDER) {
 			bin.tokens[cat] = { total: 0, output: 0 };
 		}
 		bin.total_tokens = 0;
@@ -700,7 +719,7 @@ export function buildWtftLines(
 	const binMap = new Map<string, Bin>();
 	let totalSessionCost = 0;
 
-	const ALL_CATEGORIES = ["spec", "code", "mixed", "tests", "research", "git", "grep", "web", "agents", "plan", "prompt", "compaction", "interrupted", "other"] as Category[];
+	const ALL_CATEGORIES = CATEGORY_ORDER;
 
 	for (const interaction of interactions) {
 		const classification = classifyInteraction(interaction);
@@ -887,20 +906,9 @@ export function buildWtftLines(
 	const timelineStr = buildTimelineString(surgeHours, currentHour, proximity.status);
 	const timelineLen = getVisualLength(timelineStr);
 	
-	const legendItems = [
-		`\x1b[38;5;108m█\x1b[0mSpec`,
-		`\x1b[38;5;108;48;5;173m▒\x1b[0mMixed`,
-		`\x1b[38;5;173m█\x1b[0mCode`,
-		`\x1b[38;5;223m█\x1b[0mTests`,
-		`\x1b[38;5;134m█\x1b[0mResearch`,
-		`\x1b[38;5;73m█\x1b[0mGit`,
-		`\x1b[38;5;67m█\x1b[0mGrep`,
-		`\x1b[38;5;209m▓\x1b[0mWeb`,
-		`\x1b[38;5;141m█\x1b[0mAgents`,
-		`\x1b[38;5;116m█\x1b[0mPlan`,
-		`\x1b[38;5;168m░\x1b[0mPrompt`,
-		`\x1b[38;5;238m░\x1b[0mOther`
-	];
+	const legendItems = CATEGORY_ORDER
+		.filter(c => CATEGORY_STYLE[c].label !== null)
+		.map(c => `\x1b[38;5;${CATEGORY_STYLE[c].fg}m${CATEGORY_STYLE[c].char}\x1b[0m${CATEGORY_STYLE[c].label}`);
 	const legendStr = legendItems.join(" ");
 	
 
@@ -1000,66 +1008,23 @@ export function buildWtftLines(
 				const barWidth = scaleMax > 0 ? Math.round((bin.total_cost / scaleMax) * maxBarWidth) : 0;
 				const chars = distributeChars(bin.costs, barWidth);
 
-				if (chars.spec > 0) {
-					barStr += `\x1b[38;5;108m${"█".repeat(chars.spec)}\x1b[0m`;
-				}
-				if (chars.mixed > 0) {
-					barStr += `\x1b[38;5;108;48;5;173m${"▒".repeat(chars.mixed)}\x1b[0m`;
-				}
-				if (chars.code > 0) {
-					barStr += `\x1b[38;5;173m${"█".repeat(chars.code)}\x1b[0m`;
-				}
-				if (chars.tests > 0) {
-					barStr += `\x1b[38;5;223m${"█".repeat(chars.tests)}\x1b[0m`;
-				}
-				if (chars.research > 0) {
-					barStr += `\x1b[38;5;134m${"█".repeat(chars.research)}\x1b[0m`;
-				}
-				if (chars.git > 0) {
-					barStr += `\x1b[38;5;73m${"█".repeat(chars.git)}\x1b[0m`;
-				}
-				if (chars.grep > 0) {
-					barStr += `\x1b[38;5;67m${"█".repeat(chars.grep)}\x1b[0m`;
-				}
-				if (chars.web > 0) {
-					barStr += `\x1b[38;5;209m${"▓".repeat(chars.web)}\x1b[0m`;
-				}
-				if (chars.agents > 0) {
-					barStr += `\x1b[38;5;141m${"█".repeat(chars.agents)}\x1b[0m`;
-				}
-				if (chars.plan > 0) {
-					barStr += `\x1b[38;5;116m${"█".repeat(chars.plan)}\x1b[0m`;
-				}
-				if (chars.prompt > 0) {
-					barStr += `\x1b[38;5;168m${"░".repeat(chars.prompt)}\x1b[0m`;
-				}
-				if (chars.compaction > 0) {
-					barStr += `\x1b[38;5;143m${"░".repeat(chars.compaction)}\x1b[0m`;
-				}
-				if (chars.interrupted > 0) {
-					barStr += `\x1b[38;5;167m${"░".repeat(chars.interrupted)}\x1b[0m`;
-				}
-				if (chars.other > 0) {
-					barStr += `\x1b[38;5;238m${"░".repeat(chars.other)}\x1b[0m`;
+				// Stack segments in CATEGORY_ORDER — matches the legend by construction
+				for (const cat of CATEGORY_ORDER) {
+					const count = chars[cat] || 0;
+					if (count > 0) {
+						const { fg, char } = CATEGORY_STYLE[cat];
+						barStr += `\x1b[38;5;${fg}m${char.repeat(count)}\x1b[0m`;
+					}
 				}
 			} else {
 				const cells = Array(maxBarWidth).fill(" ");
-				const categoriesInReverse: { cat: Category; color: string; char: string }[] = [
-					{ cat: "other", color: "\x1b[38;5;238m", char: "░" },
-					{ cat: "interrupted", color: "\x1b[38;5;167m", char: "░" },
-					{ cat: "compaction", color: "\x1b[38;5;143m", char: "░" },
-					{ cat: "prompt", color: "\x1b[38;5;168m", char: "░" },
-					{ cat: "plan", color: "\x1b[38;5;116m", char: "█" },
-					{ cat: "grep", color: "\x1b[38;5;67m", char: "█" },
-					{ cat: "web", color: "\x1b[38;5;209m", char: "▓" },
-					{ cat: "agents", color: "\x1b[38;5;141m", char: "█" },
-					{ cat: "git", color: "\x1b[38;5;73m", char: "█" },
-					{ cat: "research", color: "\x1b[38;5;134m", char: "█" },
-					{ cat: "tests", color: "\x1b[38;5;223m", char: "█" },
-					{ cat: "code", color: "\x1b[38;5;173m", char: "█" },
-					{ cat: "mixed", color: "\x1b[38;5;108;48;5;173m", char: "▒" },
-					{ cat: "spec", color: "\x1b[38;5;108m", char: "█" }
-				];
+				// Paint in reverse workflow order so earlier-stage categories win
+				// cell collisions — same precedence the legend implies.
+				const categoriesInReverse = [...CATEGORY_ORDER].reverse().map(cat => ({
+					cat,
+					color: `\x1b[38;5;${CATEGORY_STYLE[cat].fg}m`,
+					char: CATEGORY_STYLE[cat].char,
+				}));
 
 				for (const { cat, color, char } of categoriesInReverse) {
 					const cost = bin.costs[cat] || 0;

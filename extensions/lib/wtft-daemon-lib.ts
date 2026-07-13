@@ -518,24 +518,19 @@ export async function watchTagFile(
 	// following the same pattern as the interactive session selector.
 	hideCursor();
 	let lastBuffer: string[] = [];
-	let _lastPathLine = "";       // session path for exit reprint (not in lastBuffer)
 	let lastLineCount = 0;     // visual lines of last render (at render-time width)
 
 	const exitWatch = () => {
 		if (watcher) watcher.close();
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
-		// Clear old render from screen with correct visual line count,
-		// then reprint final chart (exact same content, so only 1 copy in scrollback).
-		if (lastBuffer.length > 0) {
-			const width = getTerminalWidth();
-			const output = lastBuffer.join("\n") + "\n";
-			const upRows = visualLineCount(output, width);
-			process.stdout.write(`\x1b[${upRows}A\x1b[J`);
+		// Clear old render — use lastLineCount which accounts for
+		// wrapped-line blank rows, not just lastBuffer content.
+		if (lastLineCount > 0) {
+			process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
 		}
 		showCursor();
 		cleanupStdin();
 		if (lastBuffer.length > 0) {
-			if (_lastPathLine) console.log(_lastPathLine);
 			for (const l of lastBuffer) console.log(l);
 		}
 		console.log(`WTFT watch stopped \u2014 ${interactionCount} interactions, $${totalCost.toFixed(4)} total cost.`);
@@ -724,13 +719,7 @@ export async function watchTagFile(
 		});
 
 		const buf: string[] = [];
-		// Session path — written once, never participates in cursor-up loop.
-		// It wraps to 2+ rows and \x1b[K on wrapped segments doesn't fully
-		// clear, causing visual drift if included in the in-place buffer.
-		if (!_lastPathLine) {
-			_lastPathLine = padStr + `\x1b[90m${sessionPath}\x1b[0m`;
-			process.stdout.write(_lastPathLine + "\n");
-		}
+		buf.push(`\x1b[90m${sessionPath}\x1b[0m`);
 		totalCost = deduped.reduce((sum, i) => sum + i.cost, 0);
 
 		if (lines && lines.length > 0) {
@@ -772,20 +761,32 @@ export async function watchTagFile(
 		// for non-wrapping lines. Store the exact written content (including
 		// trailing spaces) in lastBuffer so SIGWINCH/exit recomputation of
 		// visual line count is accurate at any terminal width.
-		const paddedLines: string[] = [];
+		const paddedLines: string[] = [];  // includes blank rows for wrapping, used for visual line count
+		const cleanLines: string[] = [];   // exit reprint only, no blank rows
 		for (const l of allLines) {
 			const visLen = getVisualLength(l);
 			if (visLen < width) {
 				const line = l + " ".repeat(width - visLen);
 				paddedLines.push(line);
+				cleanLines.push(line);
 				process.stdout.write(line + "\n");
 			} else {
+				// Wrapping: write content, then explicit blank rows
+				// to cover wrapped continuation segments.
+				// No \x1b[K — it only clears the last display row.
+				const wrappedRows = Math.ceil(visLen / width);
 				paddedLines.push(l);
-				process.stdout.write(l + "\x1b[K\n");
+				cleanLines.push(l);
+				process.stdout.write(l + "\n");
+				for (let r = 1; r < wrappedRows; r++) {
+					const blank = " ".repeat(width);
+					paddedLines.push(blank);
+					process.stdout.write(blank + "\n");
+				}
 			}
 		}
 		const output = paddedLines.join("\n") + "\n";
-		lastBuffer = paddedLines;
+		lastBuffer = cleanLines;
 		// If new output is shorter, blank out the remaining lines
 		const newVisualLines = visualLineCount(output, width);
 		if (newVisualLines < lastLineCount) {
@@ -805,7 +806,6 @@ export async function watchTagFile(
 	// Old content goes into scrollback; path + chart render fresh below.
 	process.on("SIGWINCH", () => {
 		process.stdout.write("\n");
-		_lastPathLine = "";  // force path reprint on fresh line
 		lastLineCount = 0;
 		needsRedraw = true;
 		render();

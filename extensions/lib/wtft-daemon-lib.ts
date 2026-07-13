@@ -799,7 +799,7 @@ export async function watchTagFile(
 	// SIGWINCH handler — re-render on resize. The terminal re-flows content
 	// asynchronously after the signal is delivered; without a delay, cursor
 	// positioning races the re-flow and causes duplication artifacts.
-	// A 50ms setTimeout lets the terminal emulator settle first.
+	// A 667ms setTimeout (1 daemon beat) lets the terminal emulator settle first.
 	process.on("SIGWINCH", () => {
 		if (_sigwinchPending) return; // debounce rapid resize events
 		_sigwinchPending = true;
@@ -821,7 +821,7 @@ export async function watchTagFile(
 			}
 			render();
 			resetWatchdog();
-		}, 50);
+		}, 667);
 	});
 
 	// fs.watch on the classified tag file (inotify on Linux).

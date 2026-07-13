@@ -99,6 +99,27 @@ assert("ToolSearch → plan",
 assert("NotebookEdit → file write → code (src/ path)",
 	classify(claudeEntry([{ type: "tool_use", name: "NotebookEdit", input: { notebook_path: "src/analysis.ipynb" } }])) === "code");
 
+// --- docs/research/ path rule → plan ---
+console.log("\ndocs/research/ path rule:");
+
+assert("write docs/research/analysis.md → plan (not spec)",
+	classify(claudeEntry([{ type: "tool_use", name: "Write", input: { file_path: "docs/research/analysis.md" } }])) === "plan");
+
+assert("read docs/research/why-not.html → plan (whole path, reads too)",
+	classify(claudeEntry([{ type: "tool_use", name: "Read", input: { file_path: "/home/u/repo/docs/research/why-not.html" } }])) === "plan");
+
+assert("write docs/spec.md still → spec",
+	classify(claudeEntry([{ type: "tool_use", name: "Write", input: { file_path: "docs/spec.md" } }])) === "spec");
+
+assert("root research/proto.ts still → research",
+	classify(claudeEntry([{ type: "tool_use", name: "Read", input: { file_path: "research/proto.ts" } }])) === "research");
+
+assert("write docs/research + write src → mixed",
+	classify(claudeEntry([
+		{ type: "tool_use", name: "Write", input: { file_path: "docs/research/notes.md" } },
+		{ type: "tool_use", name: "Edit", input: { file_path: "src/a.ts" } }
+	])) === "mixed");
+
 // --- Prompt purification ---
 console.log("\nPrompt purification:");
 

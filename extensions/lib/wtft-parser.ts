@@ -385,10 +385,11 @@ export function classifyInteraction(interaction: Interaction): Category {
 	const codePaths = new Set<string>();
 	const testsPaths = new Set<string>();
 	const researchPaths = new Set<string>();
+	const planPaths = new Set<string>();
 
 	for (const f of interaction.files) {
 		const norm = f.path.replace(/\\/g, "/");
-		let category: "spec" | "code" | "tests" | "research" | null = null;
+		let category: "spec" | "code" | "tests" | "research" | "plan" | null = null;
 
 		if (norm.includes("node_modules/")) {
 			// Third-party library documentation/READMEs represent reference material (Research)
@@ -397,6 +398,10 @@ export function classifyInteraction(interaction: Interaction): Category {
 			} else {
 				category = "code";
 			}
+		} else if (norm.startsWith("docs/research/") || norm.includes("/docs/research/")) {
+			// Written explorations (analyses, audits, why-not docs) are thinking
+			// artifacts, not normative specs — checked before the docs/ → spec rule (#52)
+			category = "plan";
 		} else if (norm.startsWith("docs/") || norm.includes("/docs/") || norm.endsWith("AGENTS.md") || norm.endsWith("ARCHITECTURE.md") || norm.endsWith("README.md") || path.extname(norm).toLowerCase() === ".md") {
 			category = "spec";
 		} else if (norm.startsWith("tests/") || norm.includes("/tests/")) {
@@ -419,13 +424,15 @@ export function classifyInteraction(interaction: Interaction): Category {
 		else if (category === "code") codePaths.add(f.action);
 		else if (category === "tests") testsPaths.add(f.action);
 		else if (category === "research") researchPaths.add(f.action);
+		else if (category === "plan") planPaths.add(f.action);
 	}
 
 	const specWrites = specPaths.has("write");
 	const codeWrites = codePaths.has("write");
 	const testsWrites = testsPaths.has("write");
 	const researchWrites = researchPaths.has("write");
-	const writeCount = (specWrites ? 1 : 0) + (codeWrites ? 1 : 0) + (testsWrites ? 1 : 0) + (researchWrites ? 1 : 0);
+	const planWrites = planPaths.has("write");
+	const writeCount = (specWrites ? 1 : 0) + (codeWrites ? 1 : 0) + (testsWrites ? 1 : 0) + (researchWrites ? 1 : 0) + (planWrites ? 1 : 0);
 
 	if (writeCount > 1) return "mixed";
 	if (writeCount === 1) {
@@ -433,19 +440,22 @@ export function classifyInteraction(interaction: Interaction): Category {
 		if (codeWrites) return "code";
 		if (testsWrites) return "tests";
 		if (researchWrites) return "research";
+		if (planWrites) return "plan";
 	}
 
 	const hasSpec = specPaths.has("read");
 	const hasCode = codePaths.has("read");
 	const hasTests = testsPaths.has("read");
 	const hasResearch = researchPaths.has("read");
-	const readCount = (hasSpec ? 1 : 0) + (hasCode ? 1 : 0) + (hasTests ? 1 : 0) + (hasResearch ? 1 : 0);
-	
+	const hasPlan = planPaths.has("read");
+	const readCount = (hasSpec ? 1 : 0) + (hasCode ? 1 : 0) + (hasTests ? 1 : 0) + (hasResearch ? 1 : 0) + (hasPlan ? 1 : 0);
+
 	if (readCount > 1) return "mixed";
 	if (hasSpec) return "spec";
 	if (hasCode) return "code";
 	if (hasTests) return "tests";
 	if (hasResearch) return "research";
+	if (hasPlan) return "plan";
 
 	// Tool-implied categories (#52) — priority: agents (spawn cost dominates) >
 	// web (joins #73 request-cost billing) > plan > grep. Sits below file ops

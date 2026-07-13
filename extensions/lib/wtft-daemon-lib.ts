@@ -162,9 +162,9 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
  * Compute the tag file path for a given session path.
  * Scans wtft-tags/ subdirectory for the current version's tag file.
  */
-// 2.4.0 (#52): new categories (agents/plan, prompt purification) — stale caches
-// carry _cat values from the old map and must re-classify.
-export const WTFT_TAGGER_VERSION = "2.4.0";
+// 2.4.x (#52): new categories (agents/plan, prompt purification, docs/research→plan)
+// — stale caches carry _cat values from the old map and must re-classify.
+export const WTFT_TAGGER_VERSION = "2.4.1";
 
 export function getTagPath(sessionPath: string): string {
 	const sessionDir = path.dirname(sessionPath);

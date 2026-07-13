@@ -801,10 +801,11 @@ export async function watchTagFile(
 	render();
 	resetWatchdog();
 
-	// SIGWINCH handler — on resize, reset cursor tracking so the next
-	// render writes from current position. The terminal re-flows old
-	// content asynchronously; padded-line overwrite will clean it up.
+	// SIGWINCH handler — on resize, scroll past the re-flowed mess.
+	// Old content goes into scrollback; path + chart render fresh below.
 	process.on("SIGWINCH", () => {
+		process.stdout.write("\n");
+		_lastPathLine = "";  // force path reprint on fresh line
 		lastLineCount = 0;
 		needsRedraw = true;
 		render();

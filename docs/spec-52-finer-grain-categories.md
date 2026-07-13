@@ -158,6 +158,10 @@ All four gates passed:
 4. Built `bin/wtft.mjs` renders cost and `--tokens` modes with the Agents/Plan legend and
    new bar segments; daemon regenerated tags at v2.4.0.
 
+**Amendment (Code Approved `044ceeb`):** `docs/research/` → `plan` path rule verified —
+suite grew to 30/30 (write→plan, read→plan, `docs/` still spec, root `research/` code still
+research, docs/research + src write → mixed). Tagger bumped to **2.4.1**.
+
 ## Roads not taken
 
 - **CoT/Sys2 category** — measured zero thinking-only turns (see table). Revisit only as part

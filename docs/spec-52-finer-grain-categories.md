@@ -183,7 +183,12 @@ All four gates passed:
 
 **Amendment (Code Approved `044ceeb`):** `docs/research/` → `plan` path rule verified —
 suite grew to 30/30 (write→plan, read→plan, `docs/` still spec, root `research/` code still
-research, docs/research + src write → mixed). Tagger bumped to **2.4.1**.
+research). Tagger bumped to **2.4.1**.
+
+**Amendment 2 (Code Approved `43a3ea0`):** workflow-order `CATEGORY_ORDER` + `mixed` removal
+verified — suite at 32/32 (latest-stage-wins: research+src→code, src+tests→tests,
+spec+src→code); all 15 suites pass after assertion updates; live render confirms legend and
+bar segment order match by construction. Tagger bumped to **2.4.2**.
 
 ## Roads not taken
 

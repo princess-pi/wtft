@@ -527,12 +527,7 @@ export async function watchTagFile(
 		// then reprint final chart (exact same content, so only 1 copy in scrollback).
 		if (lastBuffer.length > 0) {
 			const width = getTerminalWidth();
-			const pad = settings.pad || 0;
-			const maxPad = Math.max(0, Math.floor(width / 2) - 1);
-			const actualPad = Math.min(pad, maxPad);
-			const padStr = " ".repeat(actualPad);
-			const allLines = lastBuffer.map(l => padStr + l);
-			const output = allLines.join("\n") + "\n";
+			const output = lastBuffer.join("\n") + "\n";
 			const upRows = visualLineCount(output, width);
 			process.stdout.write(`\x1b[${upRows}A\x1b[J`);
 		}
@@ -770,17 +765,24 @@ export async function watchTagFile(
 
 		lastBuffer = [...buf];
 		const allLines = buf.map(l => padStr + l);
-		const output = allLines.join("\n") + "\n";
-		// Pad each line to full terminal width with spaces — no \x1b[K needed.
-		// Wrapped lines (visLen > width) still get \x1b[K on last segment only.
+		// Pad each line to full terminal width with spaces — no \x1b[K needed
+		// for non-wrapping lines. Store the exact written content (including
+		// trailing spaces) in lastBuffer so SIGWINCH/exit recomputation of
+		// visual line count is accurate at any terminal width.
+		const paddedLines: string[] = [];
 		for (const l of allLines) {
 			const visLen = getVisualLength(l);
 			if (visLen < width) {
-				process.stdout.write(l + " ".repeat(width - visLen) + "\n");
+				const line = l + " ".repeat(width - visLen);
+				paddedLines.push(line);
+				process.stdout.write(line + "\n");
 			} else {
+				paddedLines.push(l);
 				process.stdout.write(l + "\x1b[K\n");
 			}
 		}
+		const output = paddedLines.join("\n") + "\n";
+		lastBuffer = paddedLines;
 		// If new output is shorter, blank out the remaining lines
 		const newVisualLines = visualLineCount(output, width);
 		if (newVisualLines < lastLineCount) {
@@ -807,12 +809,7 @@ export async function watchTagFile(
 			_sigwinchPending = false;
 			if (lastBuffer.length > 0) {
 				const newWidth = getTerminalWidth();
-				const pad = settings.pad || 0;
-				const maxPad = Math.max(0, Math.floor(newWidth / 2) - 1);
-				const actualPad = Math.min(pad, maxPad);
-				const padStr = " ".repeat(actualPad);
-				const allLines = lastBuffer.map(l => padStr + l);
-				const output = allLines.join("\n") + "\n";
+				const output = lastBuffer.join("\n") + "\n";
 				lastLineCount = visualLineCount(output, newWidth);
 			}
 			if (lastLineCount > 0) {

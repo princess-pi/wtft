@@ -518,18 +518,20 @@ export async function watchTagFile(
 	// following the same pattern as the interactive session selector.
 	hideCursor();
 	let lastBuffer: string[] = [];
-	let lastLineCount = 0;     // visual lines of last render (at render-time width)
+	let _lastPath = "";          // session path for exit reprint (written once, never in cursor-up loop)
+	let lastLineCount = 0;     // visual lines of chart area only (excludes path)
 
 	const exitWatch = () => {
 		if (watcher) watcher.close();
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
-		// Clear old render — use lastLineCount which accounts for
-		// wrapped-line blank rows, not just lastBuffer content.
+		// Clear chart area (lastLineCount excludes path rows)
 		if (lastLineCount > 0) {
 			process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
 		}
 		showCursor();
 		cleanupStdin();
+		// Reprint: path first (written once), then chart
+		if (_lastPath) console.log(_lastPath);
 		if (lastBuffer.length > 0) {
 			for (const l of lastBuffer) console.log(l);
 		}
@@ -718,8 +720,14 @@ export async function watchTagFile(
 			disabledEmoji,
 		});
 
+		// Session path — written once, never participates in cursor-up loop.
+		// Wrapping creates multiple display rows that \x1b[K can't fully clear.
+		if (!_lastPath) {
+			_lastPath = padStr + `\x1b[90m${sessionPath}\x1b[0m`;
+			process.stdout.write(_lastPath + "\n");
+		}
+
 		const buf: string[] = [];
-		buf.push(`\x1b[90m${sessionPath}\x1b[0m`);
 		totalCost = deduped.reduce((sum, i) => sum + i.cost, 0);
 
 		if (lines && lines.length > 0) {
@@ -755,7 +763,6 @@ export async function watchTagFile(
 			: "";
 		buf.push(`'q' to exit${restartHint}`);
 
-		lastBuffer = [...buf];
 		const allLines = buf.map(l => padStr + l);
 		// Pad each line to full terminal width with spaces — no \x1b[K needed
 		// for non-wrapping lines. Store the exact written content (including
@@ -806,6 +813,7 @@ export async function watchTagFile(
 	// Old content goes into scrollback; path + chart render fresh below.
 	process.on("SIGWINCH", () => {
 		process.stdout.write("\n");
+		_lastPath = "";  // force path reprint after scroll
 		lastLineCount = 0;
 		needsRedraw = true;
 		render();

@@ -104,6 +104,29 @@ under `docs/` per the convention above. File-placement cleanup, separate from #5
   mapping and no files/commands classifies `other`, never `prompt` — `prompt` becomes purely
   "Claude replied/planned in prose".
 
+### Amendment 2 (Duppy decisions 2026-07-13, pre-merge testing)
+
+**Workflow-order display.** One `CATEGORY_ORDER` constant in the renderer drives the legend,
+the cost-mode stacked bar, the bucket-mode marker chart, and token-mode segments — so bar
+stacking always matches legend order by construction:
+
+```
+plan → spec → research → web → grep → code → tests → git → agents → prompt
+     → compaction → interrupted → other
+```
+
+Rationale: mirrors the 5-step flow (plan/grill → spec → research → build → test → commit),
+with support activities adjacent to the stage they serve (web by research, grep by code),
+delegation (`agents`) and conversation (`prompt`) after, harness overhead last.
+
+**`mixed` removed.** With finer-grained assignment, multi-category turns now resolve by
+**latest-workflow-stage-wins** priority instead of collapsing to `mixed`:
+`tests > code > research > spec > plan` (writes first, then reads, as before). A TDD turn
+writing code + tests reads `tests`; a spec tweak during coding reads `code` — the furthest
+stage is the turn's real progress; earlier-stage touches are supporting edits. Roads not
+taken: keeping `mixed` (hides exactly the signal #52 exists to surface); splitting cost
+across categories (blocked by the per-message billing floor). Tagger → **2.4.2**.
+
 ### Renderer additions
 
 | Category | Legend | fg (legend/bar) | bg (token mode) |

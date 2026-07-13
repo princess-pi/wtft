@@ -753,23 +753,18 @@ export async function watchTagFile(
 		}
 	};
 
-	// In-place rendering (no alt screen): track visual line count,
-	// clear previous render on each update, clean up on exit.
-	let lastLineCount = 0;
+	// Alternate screen — isolated buffer, no scrollback interference.
+	process.stdout.write("\x1b[?1049h");
 	hideCursor();
 	let lastBuffer: string[] = [];
 
-	// Shared exit: clears chart output, restores terminal, prints final chart.
+	// Shared exit: switch to normal screen, print final chart.
 	const exitWatch = () => {
 		if (watcher) watcher.close();
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
+		process.stdout.write("\x1b[?1049l"); // back to normal screen
 		showCursor();
 		cleanupStdin();
-		// Overwrite in-place chart with same content so only 1 copy in scrollback
-		const upRows = lastLineCount > 0
-			? visualLineCount(lastBuffer.join("\n") + "\n", getTerminalWidth())
-			: 0;
-		if (upRows > 0) process.stdout.write(`\x1b[${upRows}A`);
 		if (lastBuffer.length > 0) {
 			for (const l of lastBuffer) console.log(l);
 		}
@@ -913,14 +908,8 @@ export async function watchTagFile(
 	}
 
 	const render = () => {
-		// Rewrite in-place: move cursor back up to top of previous render,
-		// then overwrite each line (padded with \x1b[K clear-to-EOL).
-		// Clear below (\x1b[J) after writing to erase any leftover lines.
-		// Recompute upRows from previous output at current width (handles resize)
-		const upRows = lastLineCount > 0
-			? visualLineCount(lastBuffer.join("\n") + "\n", getTerminalWidth())
-			: 0;
-		if (upRows > 0) process.stdout.write(`\x1b[${upRows}A`);
+		// Clear alternate screen and re-render from top
+		process.stdout.write("\x1b[2J\x1b[H");
 
 		const width = getTerminalWidth();
 		const pad = settings.pad || 0;
@@ -1000,29 +989,11 @@ export async function watchTagFile(
 
 		lastBuffer = [...buf];
 
-		// Write each line padded to terminal width with clear-to-EOL,
-		// then count visual lines (accounts for terminal wrapping).
-		const termW = width;
+		// Write lines — alternate screen handles everything, no wrap worries
 		const allLines = buf.map(l => padStr + l);
-		for (let i = 0; i < allLines.length; i++) {
-			const visLen = getVisualLength(allLines[i]);
-			if (visLen < termW) {
-				process.stdout.write(allLines[i] + " ".repeat(termW - visLen - 1) + "\x1b[K\n");
-			} else {
-				process.stdout.write(allLines[i] + "\x1b[K\n");
-			}
+		for (const l of allLines) {
+			process.stdout.write(l + "\x1b[K\n");
 		}
-		// If new output is shorter than previous, pad with blank lines
-		// (no \x1b[J — it clears scrollback). upRows already computed from
-		// previous buffer at current width, so resize is handled correctly.
-		const tempOutput = allLines.join("\n") + "\n";
-		const newVisualLines = visualLineCount(tempOutput, termW);
-		if (newVisualLines < upRows) {
-			for (let i = newVisualLines; i < upRows; i++) {
-				process.stdout.write(" ".repeat(Math.max(0, termW - 1)) + "\x1b[K\n");
-			}
-		}
-		lastLineCount = newVisualLines;
 		needsRedraw = false;
 	};
 

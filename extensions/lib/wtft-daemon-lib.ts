@@ -499,7 +499,7 @@ export async function watchTagFile(
 	let interactionCount = 0;
 	let needsRedraw = true;
 	let daemonWatchdog: ReturnType<typeof setTimeout> | null = null;
-	let _sigwinchPending = false; // debounce rapid resize events
+	let _lastRenderWidth = 0;
 	const HEALTHY_BEAT_MS = 1334; // 2 × 667ms daemon poll cycle
 	const resetWatchdog = () => {
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
@@ -675,24 +675,16 @@ export async function watchTagFile(
 		// Session file may not exist or be unreadable
 	}
 
-	let _sigwinchHandled = false;
-	let _settleWindow = false;    // block data-driven renders during SIGWINCH settle
-
 	const render = () => {
-		// During SIGWINCH settle window, skip data-driven renders.
-		// The SIGWINCH callback will do a full clear + redraw.
-		if (_settleWindow) {
-			needsRedraw = true;
-			return;
-		}
 		// In-place rendering: move cursor up to top of previous output,
 		// pad each line to terminal width with spaces (full overwrite, no
 		// \x1b[J needed), and fill any gap below with blank lines.
-		// SIGWINCH pre-handles cursor-up with \x1b[J as a safety net.
-		if (!_sigwinchHandled && lastLineCount > 0) {
+		// After a resize, lastLineCount is reset to 0 — first post-resize
+		// render writes from current cursor position (may briefly overlap
+		// old re-flowed content); next render snaps clean.
+		if (lastLineCount > 0) {
 			process.stdout.write(`\x1b[${lastLineCount}A`);
 		}
-		_sigwinchHandled = false;
 
 		const width = getTerminalWidth();
 		const pad = settings.pad || 0;
@@ -805,29 +797,14 @@ export async function watchTagFile(
 	render();
 	resetWatchdog();
 
-	// SIGWINCH handler — re-render on resize. The terminal re-flows content
-	// asynchronously after the signal is delivered; without a delay, cursor
-	// positioning races the re-flow and causes duplication artifacts.
-	// A 667ms setTimeout (1 daemon beat) lets the terminal emulator settle first.
+	// SIGWINCH handler — on resize, reset cursor tracking so the next
+	// render writes from current position. The terminal re-flows old
+	// content asynchronously; padded-line overwrite will clean it up.
 	process.on("SIGWINCH", () => {
-		if (_sigwinchPending) return; // debounce rapid resize events
-		_sigwinchPending = true;
-		_settleWindow = true;
-		setTimeout(() => {
-			_sigwinchPending = false;
-			_settleWindow = false;
-			if (lastBuffer.length > 0) {
-				const newWidth = getTerminalWidth();
-				const output = lastBuffer.join("\n") + "\n";
-				lastLineCount = visualLineCount(output, newWidth);
-			}
-			if (lastLineCount > 0) {
-				process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
-				_sigwinchHandled = true;
-			}
-			render();
-			resetWatchdog();
-		}, 667);
+		lastLineCount = 0;
+		needsRedraw = true;
+		render();
+		resetWatchdog();
 	});
 
 	// fs.watch on the classified tag file (inotify on Linux).

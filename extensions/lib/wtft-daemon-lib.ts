@@ -499,6 +499,7 @@ export async function watchTagFile(
 	let interactionCount = 0;
 	let needsRedraw = true;
 	let daemonWatchdog: ReturnType<typeof setTimeout> | null = null;
+	let _sigwinchPending = false; // debounce rapid resize events
 	const HEALTHY_BEAT_MS = 1334; // 2 × 667ms daemon poll cycle
 	const resetWatchdog = () => {
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
@@ -795,27 +796,32 @@ export async function watchTagFile(
 	render();
 	resetWatchdog();
 
-	// SIGWINCH handler — re-render on resize. The terminal has already
-	// re-flowed the old content. Recompute visual line count of lastBuffer
-	// at the new width, move cursor up, clear to end of screen (\x1b[J safety
-	// net for re-flow edge cases), then re-render.
+	// SIGWINCH handler — re-render on resize. The terminal re-flows content
+	// asynchronously after the signal is delivered; without a delay, cursor
+	// positioning races the re-flow and causes duplication artifacts.
+	// A 50ms setTimeout lets the terminal emulator settle first.
 	process.on("SIGWINCH", () => {
-		if (lastBuffer.length > 0) {
-			const newWidth = getTerminalWidth();
-			const pad = settings.pad || 0;
-			const maxPad = Math.max(0, Math.floor(newWidth / 2) - 1);
-			const actualPad = Math.min(pad, maxPad);
-			const padStr = " ".repeat(actualPad);
-			const allLines = lastBuffer.map(l => padStr + l);
-			const output = allLines.join("\n") + "\n";
-			lastLineCount = visualLineCount(output, newWidth);
-		}
-		if (lastLineCount > 0) {
-			process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
-			_sigwinchHandled = true;
-		}
-		render();
-		resetWatchdog();
+		if (_sigwinchPending) return; // debounce rapid resize events
+		_sigwinchPending = true;
+		setTimeout(() => {
+			_sigwinchPending = false;
+			if (lastBuffer.length > 0) {
+				const newWidth = getTerminalWidth();
+				const pad = settings.pad || 0;
+				const maxPad = Math.max(0, Math.floor(newWidth / 2) - 1);
+				const actualPad = Math.min(pad, maxPad);
+				const padStr = " ".repeat(actualPad);
+				const allLines = lastBuffer.map(l => padStr + l);
+				const output = allLines.join("\n") + "\n";
+				lastLineCount = visualLineCount(output, newWidth);
+			}
+			if (lastLineCount > 0) {
+				process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
+				_sigwinchHandled = true;
+			}
+			render();
+			resetWatchdog();
+		}, 50);
 	});
 
 	// fs.watch on the classified tag file (inotify on Linux).

@@ -741,14 +741,10 @@ export async function watchTagFile(
 			}
 
 			if (daemonStatusStr) {
-				const titleVisualLen = getVisualLength(lines[0]);
-				const statusVisualLen = getVisualLength(daemonStatusStr);
-				if (titleVisualLen + statusVisualLen <= finalWidth - 2) {
-					lines[0] = lines[0] + daemonStatusStr;
-				} else {
-					// Doesn't fit — insert as a separate line after the title
-					lines.splice(1, 0, daemonStatusStr.trim());
-				}
+				// Always insert as a separate line — inlining causes layout
+				// drift (visual line count changes when status text length
+				// changes between "reading...", "live", "idle (cache...)").
+				lines.splice(1, 0, daemonStatusStr.trim());
 			}
 
 			for (const l of lines) buf.push(l);

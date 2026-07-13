@@ -106,8 +106,10 @@ function runAlignmentTest(mode: "cumulative" | "bucket") {
 			// Bucket mode: verify that the $0.00 dot aligns with prefixWidth
 			assert.strictEqual(firstDotIdx, 15, "The decimal point of the $0.00 label must perfectly align with prefixWidth (15)");
 			
-			// Verify that the newest bin's Mixed work character '▒' is exactly on the maximum tick (index 76)
-			assert.strictEqual(firstBarRow.indexOf("▒"), 76, "The point-of-spend marker '▒' for the max cost bin must reside exactly at index 76");
+			// Verify that the newest bin's marker is exactly on the maximum tick (index 76).
+			// Fixture writes spec+code+tests → classifies "tests" (█) under
+			// latest-stage-wins (#52 amendment 2 removed "mixed"/▒).
+			assert.strictEqual(firstBarRow.indexOf("█"), 76, "The point-of-spend marker '█' for the max cost bin must reside exactly at index 76");
 			
 			// Verify that the older bin's Code work character '█' is located at the $5.00 point on the scale.
 			// Scale max is $13.00. Cost is $5.00. 

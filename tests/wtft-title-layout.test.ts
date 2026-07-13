@@ -107,7 +107,7 @@ function runWtft(session: string, args: string[], columns: number): { titleRow: 
 
 // --- Helper: check if a row is the legend ---
 function isLegendRow(line: string): boolean {
-	return line.includes("Spec") && line.includes("Mixed") && line.includes("Code");
+	return line.includes("Spec") && line.includes("Plan") && line.includes("Code");
 }
 
 // ---

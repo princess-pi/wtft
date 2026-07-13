@@ -212,7 +212,8 @@ console.log("\n4. Legend categories appear in both outputs");
 const nonWatchAll = stripAnsi(nonWatchResult);
 const watchAll = stripAnsi(watchResult);
 
-const legendCats = ["Spec", "Mixed", "Code", "Tests", "Research", "Git", "Grep", "Web", "Prompt", "Other"];
+// Workflow order, mixed removed (#52 amendment 2)
+const legendCats = ["Plan", "Spec", "Research", "Web", "Grep", "Code", "Tests", "Git", "Agents", "Prompt", "Other"];
 for (const cat of legendCats) {
 	assert(
 		`"${cat}" in non-watch output`,

@@ -70,6 +70,9 @@ export function serializeClassified(interaction: Interaction): string {
 	if (interaction.thinkingLevel) line.tl = interaction.thinkingLevel;
 	// Compaction tokens before this interaction (#90)
 	if (interaction.compactionTokensBefore) line.cb = interaction.compactionTokensBefore;
+	// Tool-implied categories + unrecognized-tool flag (#52)
+	if (interaction.toolCats && interaction.toolCats.length > 0) line.tc = interaction.toolCats;
+	if (interaction.unrecognizedTool) line.ut = 1;
 	return JSON.stringify(line) + "\n";
 }
 
@@ -100,6 +103,8 @@ export function classifiedToInteraction(obj: any): Interaction | null {
 		serverToolCost: obj.sc || 0,
 		thinkingLevel: obj.tl || undefined,
 		compactionTokensBefore: obj.cb || undefined,
+		toolCats: obj.tc || undefined,
+		unrecognizedTool: obj.ut ? true : undefined,
 		_cat: obj.cat || undefined,
 	};
 }
@@ -157,7 +162,9 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
  * Compute the tag file path for a given session path.
  * Scans wtft-tags/ subdirectory for the current version's tag file.
  */
-export const WTFT_TAGGER_VERSION = "2.3.8";
+// 2.4.0 (#52): new categories (agents/plan, prompt purification) — stale caches
+// carry _cat values from the old map and must re-classify.
+export const WTFT_TAGGER_VERSION = "2.4.0";
 
 export function getTagPath(sessionPath: string): string {
 	const sessionDir = path.dirname(sessionPath);

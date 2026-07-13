@@ -30,16 +30,20 @@ export interface Bin {
 
 /** 256-color background codes for token-mode bar segments (dark tones for bright-white density chars). */
 const TOKEN_BG_COLORS: Record<Category, number> = {
-	spec: 22,      // deep forest green
-	mixed: 94,     // dark gold / earth
-	code: 130,     // burnt orange
-	tests: 178,    // warm tan
-	research: 54,  // midnight plum
-	git: 23,       // deep teal
-	grep: 24,      // navy blue
-	web: 88,       // crimson
-	prompt: 89,    // dark mauve
-	other: 236,    // near-black charcoal
+	spec: 22,        // deep forest green
+	mixed: 94,       // dark gold / earth
+	code: 130,       // burnt orange
+	tests: 178,      // warm tan
+	research: 54,    // midnight plum
+	git: 23,         // deep teal
+	grep: 24,        // navy blue
+	web: 88,         // crimson
+	agents: 55,      // dark purple (#52)
+	plan: 30,        // dark cyan (#52)
+	prompt: 89,      // dark mauve
+	compaction: 58,  // dark olive (#52, wired in Phase 3)
+	interrupted: 52, // dark red (#52, wired in Phase 3)
+	other: 236,      // near-black charcoal
 };
 
 /** Density chars mapped by output-token share quartile. */
@@ -97,7 +101,7 @@ export function tokenFooterSummary(interactions: { inputTokens: number; outputTo
 export function accumulateTokens(bin: Bin, category: Category, interaction: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number }): void {
 	if (!bin.tokens) {
 		bin.tokens = {} as Record<Category, { total: number; output: number }>;
-		for (const cat of ["spec", "code", "mixed", "tests", "research", "git", "grep", "web", "prompt", "other"] as Category[]) {
+		for (const cat of ["spec", "code", "mixed", "tests", "research", "git", "grep", "web", "agents", "plan", "prompt", "compaction", "interrupted", "other"] as Category[]) {
 			bin.tokens[cat] = { total: 0, output: 0 };
 		}
 		bin.total_tokens = 0;
@@ -696,7 +700,7 @@ export function buildWtftLines(
 	const binMap = new Map<string, Bin>();
 	let totalSessionCost = 0;
 
-	const ALL_CATEGORIES = ["spec", "code", "mixed", "tests", "research", "git", "grep", "web", "prompt", "other"] as Category[];
+	const ALL_CATEGORIES = ["spec", "code", "mixed", "tests", "research", "git", "grep", "web", "agents", "plan", "prompt", "compaction", "interrupted", "other"] as Category[];
 
 	for (const interaction of interactions) {
 		const classification = classifyInteraction(interaction);
@@ -892,6 +896,8 @@ export function buildWtftLines(
 		`\x1b[38;5;73m█\x1b[0mGit`,
 		`\x1b[38;5;67m█\x1b[0mGrep`,
 		`\x1b[38;5;209m▓\x1b[0mWeb`,
+		`\x1b[38;5;141m█\x1b[0mAgents`,
+		`\x1b[38;5;116m█\x1b[0mPlan`,
 		`\x1b[38;5;168m░\x1b[0mPrompt`,
 		`\x1b[38;5;238m░\x1b[0mOther`
 	];
@@ -1018,8 +1024,20 @@ export function buildWtftLines(
 				if (chars.web > 0) {
 					barStr += `\x1b[38;5;209m${"▓".repeat(chars.web)}\x1b[0m`;
 				}
+				if (chars.agents > 0) {
+					barStr += `\x1b[38;5;141m${"█".repeat(chars.agents)}\x1b[0m`;
+				}
+				if (chars.plan > 0) {
+					barStr += `\x1b[38;5;116m${"█".repeat(chars.plan)}\x1b[0m`;
+				}
 				if (chars.prompt > 0) {
 					barStr += `\x1b[38;5;168m${"░".repeat(chars.prompt)}\x1b[0m`;
+				}
+				if (chars.compaction > 0) {
+					barStr += `\x1b[38;5;143m${"░".repeat(chars.compaction)}\x1b[0m`;
+				}
+				if (chars.interrupted > 0) {
+					barStr += `\x1b[38;5;167m${"░".repeat(chars.interrupted)}\x1b[0m`;
 				}
 				if (chars.other > 0) {
 					barStr += `\x1b[38;5;238m${"░".repeat(chars.other)}\x1b[0m`;
@@ -1028,9 +1046,13 @@ export function buildWtftLines(
 				const cells = Array(maxBarWidth).fill(" ");
 				const categoriesInReverse: { cat: Category; color: string; char: string }[] = [
 					{ cat: "other", color: "\x1b[38;5;238m", char: "░" },
+					{ cat: "interrupted", color: "\x1b[38;5;167m", char: "░" },
+					{ cat: "compaction", color: "\x1b[38;5;143m", char: "░" },
 					{ cat: "prompt", color: "\x1b[38;5;168m", char: "░" },
+					{ cat: "plan", color: "\x1b[38;5;116m", char: "█" },
 					{ cat: "grep", color: "\x1b[38;5;67m", char: "█" },
 					{ cat: "web", color: "\x1b[38;5;209m", char: "▓" },
+					{ cat: "agents", color: "\x1b[38;5;141m", char: "█" },
 					{ cat: "git", color: "\x1b[38;5;73m", char: "█" },
 					{ cat: "research", color: "\x1b[38;5;134m", char: "█" },
 					{ cat: "tests", color: "\x1b[38;5;223m", char: "█" },

@@ -1,15 +1,15 @@
 {
   "name": "/wtft",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "tagline": "Where The F***ing Tokens?! (WTFT) - Cost Auditing Widget",
-  "description": "Displays a horizontal, stacked TUI bar chart widget of your session's token costs classified into Spec, Code, and Other work types.",
+  "description": "Displays a horizontal, stacked TUI bar chart widget of your session's cost during each activity (Spec, Code, Plan, Agents, ...). Bars are cost totals tagged by each turn's action - every turn's cost includes the context re-send overhead regardless of category, and Prompt means pure conversational replies. For an input/output token decomposition use --tokens.",
   "why": [
     {
       "scenario": "You just finished a coding session and want to see where your token costs went \u2014 was it all spec-writing or code refactoring?",
       "commands": [
         ""
       ],
-      "result": "A stacked bar chart widget appears showing token costs broken into Spec, Code, and Other categories over 1-hour intervals. You see exactly which hours burned the most tokens.",
+      "result": "A stacked bar chart widget appears showing your cost during each activity (Spec, Code, Plan, Agents, ...) over 1-hour intervals. You see exactly which hours burned the most tokens.",
       "demo": [
         "\u001b[90m\u2500\u2500 Jul-01 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[0m",
         "\u001b[90m13:00\u001b[0m  \u001b[90m+$0.12\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;173m\u2588\u2588\u2588\u001b[0m\u001b[38;5;238m\u2591\u001b[0m",

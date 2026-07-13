@@ -10,6 +10,72 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { calculateClaudeCost, calculateServerToolCost } from "./wtft-cost.js";
+
+// ---
+// TYPES (#52) — single source of truth for parser output. These were referenced
+// module-wide but never defined after the #68 monolith split (build.mjs strips
+// types without checking, so the gap was invisible until #52 grew the union).
+// ---
+
+export type Category =
+	| "spec" | "code" | "mixed" | "tests" | "research"
+	| "git" | "grep" | "web" | "agents" | "plan"
+	| "prompt" | "compaction" | "interrupted" | "other";
+
+export interface Interaction {
+	timestamp: number;
+	cost: number;
+	messageId?: string;
+	requestId?: string;
+	model?: string;
+	inputTokens: number;
+	outputTokens: number;
+	cacheReadTokens: number;
+	cacheWriteTokens: number;
+	reasoningTokens: number;
+	webSearchRequests: number;
+	webFetchRequests: number;
+	serverToolCost: number;
+	thinkingLevel?: string;
+	compactionTokensBefore?: number;
+	files: { path: string; action: "read" | "write" }[];
+	commands: string[];
+	texts: string[];
+	/** Categories implied by recognized non-file tools (Task→agents, WebSearch→web, …) (#52) */
+	toolCats?: Category[];
+	/** Message carried a tool_use we don't model — classifies "other", never "prompt" (#52) */
+	unrecognizedTool?: boolean;
+	/** Pre-classified category from the daemon tag file — short-circuits classifyInteraction */
+	_cat?: Category;
+}
+
+// ---
+// TOOL → CATEGORY MAP (#52) — non-file tools that earn a category directly.
+// Why: unmapped tools previously fell into "prompt"/"other", so a turn that
+// spawned three subagents was billed as conversation. Names are lowercased.
+// ---
+const TOOL_CATEGORY_MAP: Record<string, Category> = {
+	// Subagent orchestration — largest measured unmodeled spend (#52 measurements)
+	task: "agents", agent: "agents", workflow: "agents",
+	// Server-side web tools — token side joins the request-cost side (#73)
+	websearch: "web", webfetch: "web",
+	// Standalone Grep tool joins bash grep/rg in the existing category
+	grep: "grep",
+	// Planning/steering tools — split out of "prompt" so prompt = pure reply
+	todowrite: "plan", taskcreate: "plan", taskupdate: "plan", taskget: "plan",
+	tasklist: "plan", askuserquestion: "plan", enterplanmode: "plan",
+	exitplanmode: "plan", skill: "plan", toolsearch: "plan",
+};
+
+/** Route one non-file tool call into toolCats / unrecognizedTool flags (#52). */
+function mapToolToCategory(name: string, toolCats: Set<Category>): boolean {
+	const cat = TOOL_CATEGORY_MAP[name];
+	if (cat) {
+		toolCats.add(cat);
+		return true;
+	}
+	return false;
+}
 function extractFilesFromBashCommand(command: string, files: { path: string; action: "read" | "write" }[]) {
 	// Heuristically extract the file path to ensure these turns don't fall through to "other" classification.
 	const cmdLines = command.split('\n');
@@ -111,6 +177,8 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string, comp
 		const files: { path: string; action: "read" | "write" }[] = [];
 		const commands: string[] = [];
 		const texts: string[] = [];
+		const toolCats = new Set<Category>();
+		let unrecognizedTool = false;
 
 		if (Array.isArray(assistantMsg.content)) {
 			for (const block of assistantMsg.content) {
@@ -120,7 +188,7 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string, comp
 					texts.push(block.thinking);
 				} else if (block.type === "toolCall") {
 					// Pi Schema
-					const name = block.name;
+					const name = (block.name || "").toLowerCase();
 					const args = block.arguments || {};
 					if (name === "read") {
 						if (args.path) files.push({ path: args.path, action: "read" });
@@ -131,23 +199,30 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string, comp
 							commands.push(args.command);
 							extractFilesFromBashCommand(args.command, files);
 						}
+					} else if (!mapToolToCategory(name, toolCats)) {
+						unrecognizedTool = true;
 					}
 				} else if (block.type === "tool_use") {
 					// Claude Code Schema
 					const name = (block.name || "").toLowerCase();
 					const args = block.input || {};
-					
+
 					if (name === "read" || name === "view" || name === "glob" || name === "ls") {
 						const p = args.file_path || args.path || args.directory || args.target;
 						if (p) files.push({ path: p, action: "read" });
 					} else if (name === "edit" || name === "write" || name === "replace") {
 						const p = args.file_path || args.path || args.target;
 						if (p) files.push({ path: p, action: "write" });
+					} else if (name === "notebookedit") {
+						// Notebook edits classify by path like any other file write (#52)
+						if (args.notebook_path) files.push({ path: args.notebook_path, action: "write" });
 					} else if (name === "bash" || name === "run") {
 						if (args.command) {
 							commands.push(args.command);
 							extractFilesFromBashCommand(args.command, files);
 						}
+					} else if (!mapToolToCategory(name, toolCats)) {
+						unrecognizedTool = true;
 					}
 				}
 			}
@@ -165,7 +240,9 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string, comp
 			serverToolCost,
 			thinkingLevel,
 			compactionTokensBefore,
-			files, commands, texts };
+			files, commands, texts,
+			toolCats: toolCats.size > 0 ? [...toolCats] : undefined,
+			unrecognizedTool: unrecognizedTool || undefined };
 	}
 	
 	return null;
@@ -247,9 +324,12 @@ export function deduplicateInteractions(interactions: Interaction[]): Interactio
 				...best,
 				files: [],
 				commands: [],
-				texts: []
+				texts: [],
+				toolCats: undefined,
+				unrecognizedTool: undefined
 			};
 			const seenFiles = new Set<string>();
+			const mergedToolCats = new Set<Category>();
 			for (const i of group) {
 				for (const f of i.files) {
 					const key = `${f.path}:${f.action}`;
@@ -264,7 +344,10 @@ export function deduplicateInteractions(interactions: Interaction[]): Interactio
 				for (const t of i.texts) {
 					if (!merged.texts.includes(t)) merged.texts.push(t);
 				}
+				for (const tc of i.toolCats || []) mergedToolCats.add(tc);
+				if (i.unrecognizedTool) merged.unrecognizedTool = true;
 			}
+			if (mergedToolCats.size > 0) merged.toolCats = [...mergedToolCats];
 			deduped.push(merged);
 		}
 	}
@@ -364,6 +447,15 @@ export function classifyInteraction(interaction: Interaction): Category {
 	if (hasTests) return "tests";
 	if (hasResearch) return "research";
 
+	// Tool-implied categories (#52) — priority: agents (spawn cost dominates) >
+	// web (joins #73 request-cost billing) > plan > grep. Sits below file ops
+	// (a turn that edits AND spawns is still the edit) and above bash commands.
+	if (interaction.toolCats && interaction.toolCats.length > 0) {
+		for (const cat of ["agents", "web", "plan", "grep"] as Category[]) {
+			if (interaction.toolCats.includes(cat)) return cat;
+		}
+	}
+
 	if (interaction.commands.length > 0) {
 		let isGit = false;
 		let isGrep = false;
@@ -382,6 +474,8 @@ export function classifyInteraction(interaction: Interaction): Category {
 		return "other";
 	}
 
-	if (interaction.texts.length > 0) return "prompt";
+	// Prompt purification (#52): a message that fired an unmodeled tool is not
+	// conversation, even if it narrated first — "prompt" means pure reply.
+	if (interaction.texts.length > 0 && !interaction.unrecognizedTool) return "prompt";
 	return "other";
 }

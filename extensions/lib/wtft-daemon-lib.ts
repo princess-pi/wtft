@@ -676,8 +676,15 @@ export async function watchTagFile(
 	}
 
 	let _sigwinchHandled = false;
+	let _settleWindow = false;    // block data-driven renders during SIGWINCH settle
 
 	const render = () => {
+		// During SIGWINCH settle window, skip data-driven renders.
+		// The SIGWINCH callback will do a full clear + redraw.
+		if (_settleWindow) {
+			needsRedraw = true;
+			return;
+		}
 		// In-place rendering: move cursor up to top of previous output,
 		// pad each line to terminal width with spaces (full overwrite, no
 		// \x1b[J needed), and fill any gap below with blank lines.
@@ -805,9 +812,10 @@ export async function watchTagFile(
 	process.on("SIGWINCH", () => {
 		if (_sigwinchPending) return; // debounce rapid resize events
 		_sigwinchPending = true;
-		_sigwinchHandled = true; // block cursor-up during settle window
+		_settleWindow = true;
 		setTimeout(() => {
 			_sigwinchPending = false;
+			_settleWindow = false;
 			if (lastBuffer.length > 0) {
 				const newWidth = getTerminalWidth();
 				const output = lastBuffer.join("\n") + "\n";

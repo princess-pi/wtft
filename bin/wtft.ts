@@ -18,7 +18,6 @@ import {
 	deduplicateInteractions,
 	calculateClaudeCost,
 	calculateServerToolCost,
-	watchMode,
 	watchTagFile,
 	readClassifiedTagFile,
 	getDaemonPidPath,
@@ -392,19 +391,9 @@ async function main() {
 			});
 			child.unref();
 		} catch (err) {
-			// Log parser spawn failed — fall back to polling mode
-			console.error(`\x1b[33m⚠ Log parser spawn failed, falling back to polling mode: ${err}\x1b[0m`);
-			await watchMode(finalSessionPath, {
-				interval: hasInterval ? intervalStr : "1h",
-				limit: hasLimit ? limit : 100,
-				mode: (hasCumulative || hasBucket) ? mode : "cumulative",
-				showTicks: (hasTicks || hasNoTicks) ? showTicks : true,
-				timezone: hasTz ? timezone : undefined,
-				pad,
-				hasInterval, hasLimit, hasMode: hasCumulative || hasBucket,
-				hasTicks: hasTicks || hasNoTicks, hasTimezone: hasTz
-			});
-			return;
+			console.error(`\x1b[31m❌ Failed to start log parser daemon: ${err}\x1b[0m`);
+			console.error(`   Expected: ${daemonPath}`);
+			process.exit(1);
 		}
 
 		// Wait briefly for daemon to write the first classified lines, then

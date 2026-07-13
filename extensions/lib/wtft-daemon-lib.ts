@@ -29,247 +29,6 @@ export interface WatchSettings {
 	hasTimezone?: boolean;
 }
 
-export async function watchMode(
-	sessionPath: string,
-	settings: WatchSettings
-): Promise<void> {
-	if (!process.stdout.isTTY) {
-		console.error("❌ --watch requires a real terminal (TTY). Refusing to start.");
-		process.exit(1);
-	}
-
-	let totalCost = 0;
-	let interactionCount = 0;
-	let lastSize = 0;
-	let needsRedraw = true;
-	let _lastRenderMin = -1;
-	// In-place rendering (track visual lines, clear previous render each update).
-	hideCursor();
-
-	let lastBuffer: string[] = []; // saved for exit printout
-	let lastLineCount = 0;         // visual lines rendered (for in-place overwrite)
-
-	// Shared exit: clears chart output, restores terminal, prints final chart.
-	const exitWatch = () => {
-		showCursor();
-		cleanupStdin();
-		// Overwrite in-place chart with same content so only 1 copy in scrollback
-		const upRows = lastLineCount > 0
-			? visualLineCount(lastBuffer.join("\n") + "\n", getTerminalWidth())
-			: 0;
-		if (upRows > 0) process.stdout.write(`\x1b[${upRows}A`);
-		if (lastBuffer.length > 0) {
-			for (const l of lastBuffer) console.log(l);
-		}
-		console.log(`WTFT watch stopped \u2014 ${interactionCount} interactions, $${totalCost.toFixed(4)} total cost.`);
-		process.exit(0);
-	};
-
-	process.on("SIGINT", exitWatch);
-
-	// Raw stdin for 'q'/'Q' quit.
-	const cleanupStdin = enterRawStdin((key: string) => {
-		if (key === "q" || key === "Q" || key === "\u0003") {
-			exitWatch();
-		}
-	});
-
-	const parseInteractions = (filePath: string): { interactions: Interaction[]; disabledEmoji: boolean; sessionInterval?: string; sessionLimit?: number; sessionMode?: "cumulative" | "bucket"; sessionShowTicks?: boolean; sessionTimezone?: string; } => {
-		const interactions: Interaction[] = [];
-		let disabledEmoji = false;
-		let sessionInterval: string | undefined;
-		let sessionLimit: number | undefined;
-		let sessionMode: "cumulative" | "bucket" | undefined;
-		let sessionShowTicks: boolean | undefined;
-		let sessionTimezone: string | undefined;
-
-		try {
-			const stat = fs.statSync(filePath);
-			const currentSize = stat.size;
-
-			if (currentSize < lastSize) {
-				// File truncated or rotated — reset
-				lastSize = 0;
-			}
-
-			if (currentSize <= lastSize) return { interactions, disabledEmoji, sessionInterval, sessionLimit, sessionMode, sessionShowTicks, sessionTimezone };
-
-			const fd = fs.openSync(filePath, "r");
-			const buf = Buffer.alloc(currentSize - lastSize);
-			fs.readSync(fd, buf, 0, buf.length, lastSize);
-			fs.closeSync(fd);
-			lastSize = currentSize;
-
-			const newContent = buf.toString("utf8");
-			const lines = newContent.split("\n");
-
-			for (const line of lines) {
-				if (!line.trim()) continue;
-				try {
-					const entry = JSON.parse(line);
-					if (entry.type === "custom" && entry.customType === "emoji-settings") {
-						if (entry.data && typeof entry.data.disabled === "boolean") {
-							disabledEmoji = entry.data.disabled;
-						}
-					} else if (entry.type === "custom" && entry.customType === "wtft-settings") {
-						if (entry.data) {
-							if (typeof entry.data.interval === "string") sessionInterval = entry.data.interval;
-							if (typeof entry.data.limit === "number") sessionLimit = entry.data.limit;
-							if (entry.data.mode === "cumulative" || entry.data.mode === "bucket") sessionMode = entry.data.mode;
-							if (typeof entry.data.showTicks === "boolean") sessionShowTicks = entry.data.showTicks;
-							if (typeof entry.data.timezone === "string") sessionTimezone = entry.data.timezone;
-						}
-					}
-					const interaction = parseEntryToInteraction(entry);
-					if (interaction) {
-						interactions.push(interaction);
-					}
-				} catch {
-					// Skip unparseable lines (partial writes, non-JSON)
-				}
-			}
-		} catch {
-			// File may not exist yet — just return empty
-		}
-
-		return { interactions, disabledEmoji, sessionInterval, sessionLimit, sessionMode, sessionShowTicks, sessionTimezone };
-	};
-
-	// Accumulator
-	let allInteractions: Interaction[] = [];
-	let disabledEmoji = false; // read from session file, not settings
-	let sessionInterval: string | undefined;
-	let sessionLimit: number | undefined;
-	let sessionMode: "cumulative" | "bucket" | undefined;
-	let sessionShowTicks: boolean | undefined;
-	let sessionTimezone: string | undefined;
-
-	// Rewrite in-place: move cursor up to top of previous output,
-	// overwrite each line padded with \x1b[K, then \x1b[J below.
-	// No DECSC/DECRC — they break on terminal resize.
-	const render = () => {
-		// Recompute upRows from previous output at current width (handles resize)
-		const upRows = lastLineCount > 0
-			? visualLineCount(lastBuffer.join("\n") + "\n", getTerminalWidth())
-			: 0;
-		if (upRows > 0) process.stdout.write(`\x1b[${upRows}A`);
-
-		const width = getTerminalWidth();
-		const finalInterval = settings.hasInterval ? settings.interval : (sessionInterval ?? settings.interval);
-		const finalLimit = settings.hasLimit ? settings.limit : (sessionLimit ?? settings.limit);
-		const finalMode = settings.hasMode ? settings.mode : (sessionMode ?? settings.mode);
-		const finalShowTicks = settings.hasTicks ? settings.showTicks : (sessionShowTicks ?? settings.showTicks);
-		const finalTimezone = settings.hasTimezone ? settings.timezone : (sessionTimezone ?? settings.timezone);
-		const finalWidth = Math.min(width, 1023);
-
-		const defaultSettings = {
-			interval: "1h", limit: 100, width: finalWidth,
-			showTicks: true, mode: "cumulative" as "cumulative" | "bucket",
-			timezone: undefined
-		};
-
-		const lines = buildWtftLines(allInteractions, defaultSettings, {
-			interval: finalInterval,
-			limit: finalLimit,
-			width: finalWidth,
-			showTicks: finalShowTicks,
-			mode: finalMode,
-			timezone: finalTimezone,
-			disabledEmoji,
-		});
-
-		const buf: string[] = [];
-		// Session file path first (no interaction count, no cost — just path)
-		buf.push(`\x1b[90m${sessionPath}\x1b[0m`);
-		totalCost = deduplicateInteractions(allInteractions).reduce((sum, i) => sum + i.cost, 0);
-
-		if (lines && lines.length > 0) {
-			for (const l of lines) buf.push(l);
-		} else {
-			buf.push("\x1b[90mWaiting for session data...\x1b[0m");
-		}
-
-		// Footer row (always last line)
-		buf.push(`'q' to exit`);
-
-		lastBuffer = [...buf]; // save for exit printout
-
-		// Write each line padded to terminal width with clear-to-EOL.
-		// Only pad lines that fit on one display row — padding a wrapped
-		// line adds characters that cause MORE wrapping, not less.
-		const allLines = [...buf];
-		const termW = width;
-		for (let i = 0; i < allLines.length; i++) {
-			const visLen = getVisualLength(allLines[i]);
-			if (visLen < termW) {
-				process.stdout.write(allLines[i] + " ".repeat(termW - visLen - 1) + "\x1b[K\n");
-			} else {
-				process.stdout.write(allLines[i] + "\x1b[K\n");
-			}
-		}
-		// If new output is shorter than previous, pad with blank lines
-		// (no \x1b[J — it clears scrollback). upRows already computed from
-		// previous buffer at current width, so resize is handled correctly.
-		const tempOutput = allLines.join("\n") + "\n";
-		const newVisualLines = visualLineCount(tempOutput, termW);
-		if (newVisualLines < upRows) {
-			for (let i = newVisualLines; i < upRows; i++) {
-				process.stdout.write(" ".repeat(Math.max(0, termW - 1)) + "\x1b[K\n");
-			}
-		}
-		lastLineCount = newVisualLines;
-		needsRedraw = false;
-		_lastRenderMin = new Date().getMinutes();
-	};
-
-	// Initial render
-	render();
-
-	// SIGWINCH handler — re-render on resize. Terminal re-flows old text
-	// to new boundaries; the next render's per-line \x1b[K handles it.
-	process.on("SIGWINCH", () => {
-		render();
-	});
-
-	// Poll loop
-	const POLL_MS = 667;
-	while (true) {
-		await new Promise(resolve => setTimeout(resolve, POLL_MS));
-
-		// Check if file still exists
-		if (!fs.existsSync(sessionPath)) {
-			lastSize = 0;
-			needsRedraw = true;
-			render();
-			continue;
-		}
-
-		const { interactions: newInteractions, disabledEmoji: newDisabledEmoji, sessionInterval: newInterval, sessionLimit: newLimit, sessionMode: newMode, sessionShowTicks: newTicks, sessionTimezone: newTz } = parseInteractions(sessionPath);
-
-		if (newDisabledEmoji !== undefined) disabledEmoji = newDisabledEmoji;
-		if (newInterval !== undefined) sessionInterval = newInterval;
-		if (newLimit !== undefined) sessionLimit = newLimit;
-		if (newMode !== undefined) sessionMode = newMode;
-		if (newTicks !== undefined) sessionShowTicks = newTicks;
-		if (newTz !== undefined) sessionTimezone = newTz;
-
-		if (newInteractions.length > 0) {
-			allInteractions.push(...newInteractions);
-			needsRedraw = true;
-		}
-
-		// Re-render every minute for timeline diamond/badge live-updates
-		const _curMin = new Date().getMinutes();
-		if (_curMin !== _lastRenderMin) {
-			needsRedraw = true;
-		}
-
-		if (needsRedraw) {
-			render();
-		}
-	}
-}
-
 // CLASSIFIED TAG FILE READER (#53 — daemon output → Interaction[])
 // The daemon writes pre-classified, pre-costed entries to
 // wtft-tags/<session>.wtft-tag.v{N}.jsonl. These helpers read them back
@@ -373,8 +132,8 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
 }
 
 // INOTIFY-BASED WATCH MODE (#53)
-// Replaces the poll-loop watchMode with fs.watch on the daemon's classified
-// tag file. Auto-spawn of the daemon happens in the CLI entry point (bin/wtft.ts).
+// Watches the daemon's classified tag file via fs.watch. The daemon is spawned
+// by the CLI entry point (bin/wtft.ts) before this function is called.
 
 /**
  * Watch a classified tag file via inotify (fs.watch) and re-render the bar
@@ -753,16 +512,29 @@ export async function watchTagFile(
 		}
 	};
 
-	// Alternate screen — isolated buffer, no scrollback interference.
-	process.stdout.write("\x1b[?1049h");
+	// In-place rendering on main screen (no alt screen) — preserves scrollback.
+	// Tracks visual line count for precise cursor-up + \x1b[J overwrite,
+	// following the same pattern as the interactive session selector.
 	hideCursor();
 	let lastBuffer: string[] = [];
+	let lastLineCount = 0;     // visual lines of last render (at render-time width)
 
-	// Shared exit: switch to normal screen, print final chart.
 	const exitWatch = () => {
 		if (watcher) watcher.close();
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
-		process.stdout.write("\x1b[?1049l"); // back to normal screen
+		// Clear old render from screen with correct visual line count,
+		// then reprint final chart (exact same content, so only 1 copy in scrollback).
+		if (lastBuffer.length > 0) {
+			const width = getTerminalWidth();
+			const pad = settings.pad || 0;
+			const maxPad = Math.max(0, Math.floor(width / 2) - 1);
+			const actualPad = Math.min(pad, maxPad);
+			const padStr = " ".repeat(actualPad);
+			const allLines = lastBuffer.map(l => padStr + l);
+			const output = allLines.join("\n") + "\n";
+			const upRows = visualLineCount(output, width);
+			process.stdout.write(`\x1b[${upRows}A\x1b[J`);
+		}
 		showCursor();
 		cleanupStdin();
 		if (lastBuffer.length > 0) {
@@ -870,7 +642,7 @@ export async function watchTagFile(
 		lastReadOffset = fs.statSync(tagPath).size;
 	} catch {}
 
-	// Session-level settings from inline wtft-settings entries (same as watchMode).
+	// Session-level settings from inline wtft-settings entries.
 	let sessionInterval: string | undefined;
 	let sessionLimit: number | undefined;
 	let sessionMode: "cumulative" | "bucket" | undefined;
@@ -907,9 +679,17 @@ export async function watchTagFile(
 		// Session file may not exist or be unreadable
 	}
 
+	let _sigwinchHandled = false;
+
 	const render = () => {
-		// Clear alternate screen and re-render from top
-		process.stdout.write("\x1b[2J\x1b[H");
+		// In-place rendering: move cursor up to top of previous output,
+		// pad each line to terminal width with spaces (full overwrite, no
+		// \x1b[J needed), and fill any gap below with blank lines.
+		// SIGWINCH pre-handles cursor-up with \x1b[J as a safety net.
+		if (!_sigwinchHandled && lastLineCount > 0) {
+			process.stdout.write(`\x1b[${lastLineCount}A`);
+		}
+		_sigwinchHandled = false;
 
 		const width = getTerminalWidth();
 		const pad = settings.pad || 0;
@@ -988,12 +768,26 @@ export async function watchTagFile(
 		buf.push(`'q' to exit${restartHint}`);
 
 		lastBuffer = [...buf];
-
-		// Write lines — alternate screen handles everything, no wrap worries
 		const allLines = buf.map(l => padStr + l);
+		const output = allLines.join("\n") + "\n";
+		// Pad each line to full terminal width with spaces — no \x1b[K needed.
+		// Wrapped lines (visLen > width) still get \x1b[K on last segment only.
 		for (const l of allLines) {
-			process.stdout.write(l + "\x1b[K\n");
+			const visLen = getVisualLength(l);
+			if (visLen < width) {
+				process.stdout.write(l + " ".repeat(width - visLen) + "\n");
+			} else {
+				process.stdout.write(l + "\x1b[K\n");
+			}
 		}
+		// If new output is shorter, blank out the remaining lines
+		const newVisualLines = visualLineCount(output, width);
+		if (newVisualLines < lastLineCount) {
+			for (let i = newVisualLines; i < lastLineCount; i++) {
+				process.stdout.write(" ".repeat(width) + "\n");
+			}
+		}
+		lastLineCount = Math.max(newVisualLines, lastLineCount);
 		needsRedraw = false;
 	};
 
@@ -1001,9 +795,25 @@ export async function watchTagFile(
 	render();
 	resetWatchdog();
 
-	// SIGWINCH handler — re-render on resize. Terminal re-flows old text
-	// to new boundaries; the next render's per-line \x1b[K handles it.
+	// SIGWINCH handler — re-render on resize. The terminal has already
+	// re-flowed the old content. Recompute visual line count of lastBuffer
+	// at the new width, move cursor up, clear to end of screen (\x1b[J safety
+	// net for re-flow edge cases), then re-render.
 	process.on("SIGWINCH", () => {
+		if (lastBuffer.length > 0) {
+			const newWidth = getTerminalWidth();
+			const pad = settings.pad || 0;
+			const maxPad = Math.max(0, Math.floor(newWidth / 2) - 1);
+			const actualPad = Math.min(pad, maxPad);
+			const padStr = " ".repeat(actualPad);
+			const allLines = lastBuffer.map(l => padStr + l);
+			const output = allLines.join("\n") + "\n";
+			lastLineCount = visualLineCount(output, newWidth);
+		}
+		if (lastLineCount > 0) {
+			process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
+			_sigwinchHandled = true;
+		}
 		render();
 		resetWatchdog();
 	});

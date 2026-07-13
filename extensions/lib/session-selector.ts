@@ -23,8 +23,8 @@ import * as os from "node:os";
 const TAGGER_VERSION = "2.3.8";
 
 import { buildDisplayPath, formatRelativeTime } from "./session-path-shortener.ts";
-import { formatCost } from "./wtft-shared.ts";
-import { enterRawStdin, showCursor, hideCursor, clearPreviousLines, visualLineCount } from "./tty-helpers.ts";
+import { formatCost, getVisualLength } from "./wtft-shared.ts";
+import { enterRawStdin, showCursor, hideCursor, visualLineCount } from "./tty-helpers.ts";
 
 // ---
 // TYPES
@@ -324,14 +324,11 @@ export async function selectSessionPrompt(
 		);
 
 		// Track rendered lines for precise in-place overwrite on arrow keys.
-		// logicalLineCount tracks the fixed number of logical lines (title+path+candidates)
-		// for the caller to clear when we exit.
 		let lastLineCount = 0;
 		let logicalLineCount = 0;
 
 		const render = () => {
 			const selected = displayCandidates[selectedIndex];
-			// Full path (not truncated) — wraps naturally if wider than terminal
 			const shortName = selected.name.replace(".jsonl", "").slice(-4);
 			let out = `\x1b[1m\x1b[36m\u{1F4B8} WTFT — select session log\x1b[0m \x1b[90m...${shortName}\x1b[0m (j/k or arrows navigate, Enter select, q quit):\n`;
 			out += `  \x1b[90m${selected.path}\x1b[0m\n`;
@@ -353,11 +350,30 @@ export async function selectSessionPrompt(
 				const tagStr = formatTagSuffix(stats);
 				out += `${prefix}${highlight}${c.displayPath.padEnd(maxPathLen)}${reset}  ${costStr}  ${turnStr}  [${harnessLabel.padEnd(6)}]  \x1b[90m${relTime.padEnd(6)}\x1b[0m  ${tagStr}\n`;
 			}
-			// Count visual (wrapped) lines to move cursor exactly that far on re-render
 			const cols = process.stdout.columns || 80;
+			const prevLineCount = lastLineCount;
 			lastLineCount = visualLineCount(out, cols);
 			logicalLineCount = out.replace(/\\n$/, "").split("\\n").length;
-			process.stdout.write(out);
+
+			// Pad each line to terminal width with spaces for full overwrite.
+			const lines = out.split("\n");
+			let paddedOut = "";
+			for (const line of lines) {
+				const visLen = getVisualLength(line);
+				if (visLen < cols) {
+					paddedOut += line + " ".repeat(cols - visLen) + "\n";
+				} else {
+					paddedOut += line + "\n";
+				}
+			}
+			// If new output is shorter, blank out remaining visual lines
+			if (lastLineCount < prevLineCount) {
+				for (let i = lastLineCount; i < prevLineCount; i++) {
+					paddedOut += " ".repeat(cols) + "\n";
+				}
+				lastLineCount = prevLineCount;
+			}
+			process.stdout.write(paddedOut);
 		};
 
 		// Initial render
@@ -365,11 +381,11 @@ export async function selectSessionPrompt(
 
 		const onKey = (key: string) => {
 			if (key === "\u0003" || key === "q" || key === "Q") {
-				clearPreviousLines(lastLineCount);
+				if (lastLineCount > 0) process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
 				cleanup();
 				process.exit(130);
 			} else if (key === "\r" || key === "\n") {
-				clearPreviousLines(lastLineCount);
+				if (lastLineCount > 0) process.stdout.write(`\x1b[${lastLineCount}A\x1b[J`);
 				const selectedPath = displayCandidates[selectedIndex].path;
 				cleanup();
 				resolve(selectedPath);
@@ -377,12 +393,12 @@ export async function selectSessionPrompt(
 				selectedIndex =
 					(selectedIndex - 1 + displayCandidates.length) %
 					displayCandidates.length;
-				clearPreviousLines(lastLineCount);
+				if (lastLineCount > 0) process.stdout.write(`\x1b[${lastLineCount}A`);
 				render();
 			} else if (key === "\u001b[B" || key === "j") {
 				selectedIndex =
 					(selectedIndex + 1) % displayCandidates.length;
-				clearPreviousLines(lastLineCount);
+				if (lastLineCount > 0) process.stdout.write(`\x1b[${lastLineCount}A`);
 				render();
 			}
 		};

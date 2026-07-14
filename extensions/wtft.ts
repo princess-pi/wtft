@@ -81,6 +81,10 @@ function getParserStatus(sessionPath: string): DaemonStatus {
 }
 
 
+// Module-scope flag overrides so getSettings can see them.
+let hasTokens = false;
+let hasCost = false;
+
 // ---
 // ARGUMENT PARSING
 // ---
@@ -114,8 +118,6 @@ function parseArgs(argsStr: string = "") {
 	let hasMode = false;
 	let hasTimezone = false;
 	let hasOther = false;
-	let hasTokens = false;
-	let hasCost = false;
 
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];

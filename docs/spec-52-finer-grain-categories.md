@@ -1,4 +1,4 @@
-# Spec #52 — Finer-grain category mapping (Phases 1–2)
+# Spec #52 — Finer-grain category mapping (Phases 1–4)
 
 Umbrella: [#52](https://github.com/duppypro/princess-pi-packages/issues/52). This spec covers
 Phase 1 (relabel) and Phase 2 (tool recognition) of the resolution plan posted 2026-07-13.
@@ -301,8 +301,56 @@ New cases (Phase-3 suite):
   arriving after its turn was flushed is dropped — bounded by one 667ms beat,
   as specced under "Mechanism".
 
+## Phase 4 — Decision record (close-out, 2026-07-14)
+
+Phases 1–3 shipped the *activity-axis* refinement: relabel (Ph1), tool recognition
+(Ph2), and the overhead meter-split — `compaction`/`overhead`/`interrupted` (Ph3).
+Phase 4 records the decisions that bound the umbrella, so #52 can close.
+
+**`--tokens` is the designated honest input/output decomposition view.** The default
+`wtft` render answers *"what activity was the money spent on?"* (one category per
+billed turn, latest-stage-wins). The question *"how did the tokens split across
+input / output / cache-read / cache-write?"* is answered by `--tokens`, which renders a
+**per-model token summary table** (Input / Output / Reasoning / cache-read / cache-write
+columns) directly from the billing meters with **no modeling** — every number is
+measured, not attributed. This is the road out of the false-confidence
+concern that motivated the sub-turn-split research: rather than invent a per-tool
+proportional split (which the meters can't support — see below), we expose the raw
+meter breakdown as its own view and let the reader see where the dollars actually are
+(≈85–92% cache economics). `--tokens` is thus the *complement* to the activity view,
+not a competitor. (Its row-overflow rendering bug is tracked separately in #99.)
+
 ## Roads not taken
 
-- **CoT/Sys2 category** — measured zero thinking-only turns (see table). Revisit only as part
-  of Direction B, as a dimension overlay, with legend label "CoT".
-- **Per-tool cost split within one message** — blocked by the per-message billing floor.
+- **Per-tool proportional cost split within one message** — *declined, with a re-decision
+  rule.* The sub-turn-split research (5 independent subagent proposals + a measurement
+  harness over 3 real sessions, all preserved under `docs/research/52-split-strategies/`)
+  found the movable money is tiny: **strict multi-category-tool messages hold 0.0–0.5%**
+  of session cost, and the **total dollars any sub-turn splitter can move is 1.9–4.0%**,
+  most of it merely shuffling between `prompt` and the action category. 92–98% of every
+  session is a turn-level context property (cache_read/cache_write) that is invariant
+  under *any* sub-turn split. Adopt splitting only if a future re-run of the harness shows
+  **strict-mixed cost share > 5%** or **movable dollars > 10%** (e.g. if harnesses start
+  batching many heterogeneous tool calls into one API call). Today's numbers are an order
+  of magnitude below both thresholds. Full analysis: `docs/research/52-split-strategies/skeptic-report.md`.
+- **`--by=rent` (Context-Ledger) view** — *parked, not declined.* The cache-rent economist
+  proposal (`proposal-context-ledger.md`) models cache_read as rent on accumulated context,
+  attributing the ~53% cache_read dollars to the categories whose content still resides in
+  the window — a genuinely different, defensible lens (answers *"what content is the money
+  paying for?"* vs the default *"what were we doing when it left?"*). It is shelved rather
+  than rejected: it is a *second* view (`--by=rent` alongside the default `--by=activity`),
+  its rent split rides on deposit-size estimates (only ~38–55% of cache_write is directly
+  explained), and it uniquely reveals the "compact earlier" lever. Revisit if the rent
+  question becomes load-bearing.
+- **CoT / reasoning-token dimension (Direction B)** — *split out to #101.* Measured zero
+  thinking-only turns: reasoning rides inside a turn's `output_tokens`, so a *category*
+  is the wrong shape (it would steal whole turns). The right shape is a **dimension overlay**
+  (legend "CoT") that re-describes output dollars already counted without moving any between
+  activity categories. Filed as its own issue rather than declined, because it is concretely
+  useful once shaped as an overlay.
+- **2-D matrix view (category × meter, Direction D)** — *declined.* A full activity × meter
+  cross-tab is the maximal version of both `--tokens` (meter axis) and `--by=rent` (attribution
+  axis). Declined as too heavy for the payoff: `--tokens` already exposes the meter axis
+  honestly, and the matrix multiplies render complexity (13 categories × 4 meters) for a view
+  no measurement showed a need for. The two axes are more legible shipped as separate views
+  than crossed into one grid.

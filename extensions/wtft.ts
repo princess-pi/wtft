@@ -103,6 +103,7 @@ function parseArgs(argsStr: string = "") {
 	let pager = false;
 	let other = false;
 	let tokens = false;
+	let cost = false;
 	let enableEmoji: boolean | undefined = undefined;
 	let forceReparse = false;
 
@@ -114,6 +115,7 @@ function parseArgs(argsStr: string = "") {
 	let hasTimezone = false;
 	let hasOther = false;
 	let hasTokens = false;
+	let hasCost = false;
 
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
@@ -132,7 +134,12 @@ function parseArgs(argsStr: string = "") {
 			hasOther = true;
 		} else if (arg === "--tokens" || arg === "-T") {
 			tokens = true;
+			cost = false;
 			hasTokens = true;
+		} else if (arg === "--cost" || arg === "-C") {
+			cost = true;
+			tokens = false;
+			hasCost = true;
 		} else if (arg === "--force" || arg === "-F") {
 			forceReparse = true;
 		} else if (arg === "--ticks") {
@@ -318,7 +325,9 @@ function getSettings(_ctx: any) {
 	const mode: "bucket" | "cumulative" = (config.mode === "bucket" || config.mode === "cumulative" ? config.mode : "cumulative") as "bucket" | "cumulative";
 	const timezone: string | undefined = (typeof config.timezone === "string" ? config.timezone : "America/Los_Angeles") as string | undefined;
 	const disabledEmoji = isEmojiDisabled();
-	const tokens = (typeof config.tokens === "boolean" ? config.tokens : false) as boolean;
+	// --tokens / --cost explicit flags override config (last wins)
+	const configTokens = (typeof config.tokens === "boolean" ? config.tokens : false) as boolean;
+	const tokens = hasCost ? false : (hasTokens ? true : configTokens);
 
 	// Width auto-fits to terminal (no separate lock/default — CLI doesn't use it either)
 	const width = Math.min(getTerminalWidth(true, disabledEmoji), 240);
@@ -644,10 +653,13 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			if (tokens) {
-			// Toggle widget to token-unit mode and persist (#14)
-			writeConfig("wtft", { tokens: true });
+			if (tokens || cost) {
+			// Toggle widget token-unit mode and persist (#14).
+			// --cost explicitly switches back to $ units.
+			writeConfig("wtft", { tokens });
 			updateWtftWidget(ctx, pi, { visible: true });
+
+			if (tokens) {
 
 			// Map current thinking level to budget tokens (#79)
 			const BUDGET_MAP: Record<string, number> = {

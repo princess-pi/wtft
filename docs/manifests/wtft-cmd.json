@@ -196,7 +196,11 @@
     },
     {
       "flags": "-T, --tokens",
-      "desc": "Switch bar chart to token-unit mode and print a per-model token summary table (deduped). Bar chart uses bg color for token width and character density for output \$/tok cost signal. Config-persistable."
+      "desc": "Switch bar chart to token-unit mode and print a per-model token summary table (deduped). Bar chart uses bg color for token width and character density for output $/tok cost signal. Config-persistable. Use --cost to switch back."
+    },
+    {
+      "flags": "-C, --cost",
+      "desc": "Switch bar chart back to cost-unit mode ($). Overrides a persisted --tokens setting. Config-persistable."
     },
     {
       "flags": "--pad <N>",

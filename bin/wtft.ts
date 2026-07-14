@@ -99,6 +99,7 @@ let harnessOption: "auto" | "pi" | "claude-code" = "auto";
 let cwdOverride: string | undefined = undefined;
 let showOther = false;
 let showTokens = false;
+let showCost = false;
 let unit: "cost" | "tokens" = cfg.tokens ? "tokens" : "cost";
 let pad = 1;
 let hasPad = false;
@@ -166,6 +167,7 @@ Options:
   -o, --other             Print a histogram of 'Other' commands grouped by semantic sub-category (Build, Lint, System, etc.).
   -T, --tokens            Switch bar chart to token-unit mode (bg=token width, density=output $$$/tok)
                           AND print per-model token summary table below.
+  -C, --cost              Switch back to cost-unit mode ($). Overrides persisted --tokens.
   --thinking-budget <n>   Thinking token budget for utilization display in --tokens (default: no budget shown).
   -W, --watch             Watch a session file for changes and re-render the bar chart in real-time.
   -F, --force             Kill the log parser, delete tag files, and force a full session re-parse.
@@ -198,6 +200,7 @@ let hasTicks = false;
 let hasTz = false;
 let hasOther = false;
 let hasTokens = false;
+let hasCost = false;
 let showWatch = false;
 let daemonList = false;
 let daemonCleanup = false;
@@ -258,6 +261,10 @@ for (let i = 2; i < process.argv.length; i++) {
 		showTokens = true;
 		unit = "tokens";
 		hasTokens = true;
+	} else if (arg === "--cost" || arg === "-C") {
+		showCost = true;
+		unit = "cost";
+		hasCost = true;
 	} else if (arg === "-W" || arg === "--watch") {
 		showWatch = true;
 	} else if (arg === "--pad") {

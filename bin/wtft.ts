@@ -25,6 +25,9 @@ import {
 	checkDaemonHealth,
 	IDLE_THRESHOLD_MS,
 	WTFT_TAGGER_VERSION,
+	splitOverheadCost,
+	serializeClassifiedWithOverheadSplit,
+	isInterruptMarker,
 	serializeClassified,
 	classifiedToInteraction,
 	resolveTieredRates,
@@ -66,7 +69,11 @@ export {
 	checkDaemonHealth,
 	getTagPath,
 	getDaemonPidPath,
-	IDLE_THRESHOLD_MS
+	IDLE_THRESHOLD_MS,
+	// Phase 3 overhead classes (#52) — meter-split + interrupt tests
+	splitOverheadCost,
+	serializeClassifiedWithOverheadSplit,
+	isInterruptMarker
 };
 
 // ---

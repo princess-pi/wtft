@@ -331,7 +331,6 @@ export function splitOverheadCost(
 		const ctx = interaction.inputTokens + cr + cw;
 		const isRecache =
 			cw > 30_000 &&
-			(interaction.cacheWrite1hTokens || 0) === cw &&
 			interaction.inputTokens <= 16 &&
 			cr < 0.2 * (cr + cw) &&
 			prevCtxTokens > 0 && Math.abs(ctx - prevCtxTokens) < 0.15 * prevCtxTokens &&

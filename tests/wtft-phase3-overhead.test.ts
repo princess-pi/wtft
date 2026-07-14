@@ -108,10 +108,11 @@ console.log("1. splitOverheadCost — compaction and recache detection");
 	// cache_write dominates this turn's cost (150k cw @2× vs tiny rest)
 	assert("recache overhead is the dominant share", rSplit!.overheadCost > 0.9 * recache.cost);
 
-	// Each single broken condition → no split
+	// Each single broken condition → no split (cacheWrite1hTokens === cw condition
+	// removed in #103 — 5m-tier idle rewrites are also overhead, so "e1h != cw"
+	// now splits instead).
 	const breaks: [string, any, number][] = [
 		["input > 16", { ...RECACHE_USAGE, input_tokens: 20 }, prevCtxTokens],
-		["e1h != cw", { ...RECACHE_USAGE, cache_creation: { ephemeral_5m_input_tokens: 150_000, ephemeral_1h_input_tokens: 0 } }, prevCtxTokens],
 		["cw ≤ 30k", { ...RECACHE_USAGE, cache_creation_input_tokens: 25_000, cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 25_000 } }, prevCtxTokens],
 		["cr ≥ 20% of ctx", { ...RECACHE_USAGE, cache_read_input_tokens: 60_000 }, 2 + 60_000 + 150_000],
 		["prevCtx mismatch", RECACHE_USAGE, 50_000],
@@ -121,6 +122,13 @@ console.log("1. splitOverheadCost — compaction and recache detection");
 		const t = parseEntryToInteraction(claudeAssistant({ usage }))!;
 		assert(`no split when ${label}`, splitOverheadCost(t, ctx) === null);
 	}
+
+	// #103: 5m-tier cache rewrite after idle is ALSO overhead (condition removed)
+	const recache5m = parseEntryToInteraction(claudeAssistant({
+		usage: { ...RECACHE_USAGE, cache_creation: { ephemeral_5m_input_tokens: 150_000, ephemeral_1h_input_tokens: 0 } },
+	}))!;
+	const r5mSplit = splitOverheadCost(recache5m, prevCtxTokens);
+	assert("5m-tier idle rewrite now splits (#103)", r5mSplit !== null && r5mSplit.kind === "overhead");
 
 	// Sidechain never recache-splits
 	const side = parseEntryToInteraction(claudeAssistant({ usage: RECACHE_USAGE, sidechain: true }))!;

@@ -31,22 +31,21 @@ export interface Bin {
 // ---
 
 // ---
-// CATEGORY ORDER + STYLE (#52 amendment 2) — single source of truth.
-// Workflow order: plan → spec → research (web/grep support) → code → tests →
-// git → agents (delegation) → prompt (conversation) → overhead → other.
+// CATEGORY ORDER + STYLE (#52 amendment 2, #103 reorder) — single source of truth.
+// Overhead-first: Ovrhd (recache) → Waste (interrupted) → workflow → Cmpct → Other.
 // Legend, cost-mode stacking, bucket-mode markers, and token-mode segments
 // all derive from this table, so bar order matches legend order by construction.
 // ---
 
 export const CATEGORY_ORDER: Category[] = [
-	"plan", "spec", "research", "web", "grep", "code", "tests", "git",
-	"agents", "prompt", "compaction", "interrupted", "overhead", "other",
+	"overhead", "interrupted", "plan", "spec", "research", "web", "grep", "code", "tests", "git",
+	"agents", "prompt", "compaction", "other",
 ];
 
 /** fg = legend/bar ANSI 256 color; bg = token-mode segment (dark tones for
  *  bright-white density chars); char = bar glyph; label = legend text.
- *  Phase 3 (#52) wired the overhead trio: Cmpct = compaction cache re-write,
- *  Intr = user-killed turns, Ovrhd = recache (full-context 1h-tier rewrite). */
+ *  Phase 3 (#52) wired the overhead trio: Ovrhd = recache (full-context 1h-tier
+ *  rewrite), Waste = user-killed turns, Cmpct = compaction cache re-write. */
 const CATEGORY_STYLE: Record<Category, { fg: number; bg: number; char: string; label: string | null }> = {
 	plan:        { fg: 116, bg: 30,  char: "█", label: "Plan" },
 	spec:        { fg: 108, bg: 22,  char: "█", label: "Spec" },
@@ -59,7 +58,7 @@ const CATEGORY_STYLE: Record<Category, { fg: number; bg: number; char: string; l
 	agents:      { fg: 141, bg: 55,  char: "█", label: "Agents" },
 	prompt:      { fg: 168, bg: 89,  char: "░", label: "Prompt" },
 	compaction:  { fg: 143, bg: 58,  char: "░", label: "Cmpct" },
-	interrupted: { fg: 167, bg: 52,  char: "░", label: "Intr" },
+	interrupted: { fg: 167, bg: 52,  char: "░", label: "Waste" },
 	overhead:    { fg: 179, bg: 94,  char: "░", label: "Ovrhd" },
 	other:       { fg: 238, bg: 236, char: "░", label: "Other" },
 };

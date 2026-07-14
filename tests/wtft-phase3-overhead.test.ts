@@ -12,7 +12,7 @@
  *      literal inside assistant text does NOT reclassify.
  *   4. Pi compaction — type:"compaction" meter-splits and still carries
  *      compactionTokensBefore (#90 unaffected).
- *   5. Legend renders Cmpct/Intr/Ovrhd in CATEGORY_ORDER slots.
+ *   5. Legend renders Ovrhd/Waste/Cmpct in CATEGORY_ORDER slots.
  */
 
 import * as fs from "node:fs";
@@ -235,7 +235,7 @@ console.log("\n4. Compaction flags — Claude isCompactSummary and Pi type:compa
 // ---
 // 5. Legend + stacking via built CLI on a fixture with all three overheads
 // ---
-console.log("\n5. Legend renders Cmpct/Intr/Ovrhd (built CLI, daemon pipeline)");
+console.log("\n5. Legend renders Ovrhd/Waste/Cmpct (built CLI, daemon pipeline)");
 {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-p3-legend-"));
 	const sessionPath = path.join(dir, "session.jsonl");
@@ -266,12 +266,12 @@ console.log("\n5. Legend renders Cmpct/Intr/Ovrhd (built CLI, daemon pipeline)")
 	}
 	const clean = out.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
 	assert("legend shows Cmpct", clean.includes("Cmpct"));
-	assert("legend shows Intr", clean.includes("Intr"));
+	assert("legend shows Waste", clean.includes("Waste"));
 	assert("legend shows Ovrhd", clean.includes("Ovrhd"));
-	assert("legend order Cmpct < Intr < Ovrhd < Other",
-		clean.indexOf("Cmpct") < clean.indexOf("Intr") &&
-		clean.indexOf("Intr") < clean.indexOf("Ovrhd") &&
-		clean.indexOf("Ovrhd") < clean.indexOf("Other"));
+	assert("legend order Ovrhd < Waste < Plan < ... < Cmpct < Other",
+		clean.indexOf("Ovrhd") < clean.indexOf("Waste") &&
+		clean.indexOf("Waste") < clean.indexOf("Cmpct") &&
+		clean.indexOf("Cmpct") < clean.indexOf("Other"));
 
 	// Daemon pipeline correctness: read the tag file back
 	const tagsDir = path.join(dir, "wtft-tags");

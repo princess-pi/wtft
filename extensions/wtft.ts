@@ -242,9 +242,11 @@ function parseArgs(argsStr: string = "") {
 		hasTimezone,
 		hasOther,
 		hasTokens,
+		hasCost,
 		forceReparse,
 		other,
 		tokens,
+		cost,
 		enableEmoji
 	};
 }
@@ -550,9 +552,11 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				hasTimezone,
 				hasOther,
 				hasTokens,
+				hasCost,
 				forceReparse,
 				other,
 				tokens,
+				cost,
 				enableEmoji
 			} = parseArgs(args);
 

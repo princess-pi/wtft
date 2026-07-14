@@ -73,6 +73,8 @@ export function serializeClassified(interaction: Interaction): string {
 	// Tool-implied categories + unrecognized-tool flag (#52)
 	if (interaction.toolCats && interaction.toolCats.length > 0) line.tc = interaction.toolCats;
 	if (interaction.unrecognizedTool) line.ut = 1;
+	// Observed cache TTL class — idle countdown uses data over model-name guess (#95)
+	if (interaction.cacheTtl) line.ttl = interaction.cacheTtl;
 	return JSON.stringify(line) + "\n";
 }
 
@@ -105,6 +107,7 @@ export function classifiedToInteraction(obj: any): Interaction | null {
 		compactionTokensBefore: obj.cb || undefined,
 		toolCats: obj.tc || undefined,
 		unrecognizedTool: obj.ut ? true : undefined,
+		cacheTtl: obj.ttl === "1h" || obj.ttl === "5m" ? obj.ttl : undefined,
 		_cat: obj.cat || undefined,
 	};
 }
@@ -162,22 +165,31 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
  * Compute the tag file path for a given session path.
  * Scans wtft-tags/ subdirectory for the current version's tag file.
  */
-// 2.4.x (#52): new categories (agents/plan, prompt purification, docs/research→plan)
-// — stale caches carry _cat values from the old map and must re-classify.
-export const WTFT_TAGGER_VERSION = "2.4.2";
+// 2.5.0 (#95): wire format adds `ttl` (observed cache TTL class) + daemon
+// lifecycle semantics change (takeover protocol) — stale caches lack ttl
+// and stale daemons must be superseded, so the bump forces both.
+export const WTFT_TAGGER_VERSION = "2.5.0";
 
 export function getTagPath(sessionPath: string): string {
 	const sessionDir = path.dirname(sessionPath);
 	const sessionBase = path.basename(sessionPath);
 	const tagsDir = path.join(sessionDir, "wtft-tags");
 	const defaultPath = path.join(tagsDir, sessionBase + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	// Prefer the exact current-version file; else newest mtime — never readdir
+	// order, which made multi-version dirs a coin flip (#95).
 	try {
 		const prefix = sessionBase + ".wtft-tag.v";
+		let newest: { path: string; mtimeMs: number } | null = null;
 		for (const f of fs.readdirSync(tagsDir)) {
-			if (f.startsWith(prefix) && f.endsWith(".jsonl")) {
-				return path.join(tagsDir, f);
-			}
+			if (!f.startsWith(prefix) || !f.endsWith(".jsonl")) continue;
+			const full = path.join(tagsDir, f);
+			if (full === defaultPath) return defaultPath;
+			try {
+				const mtimeMs = fs.statSync(full).mtimeMs;
+				if (!newest || mtimeMs > newest.mtimeMs) newest = { path: full, mtimeMs };
+			} catch {}
 		}
+		if (newest) return newest.path;
 	} catch {}
 	return defaultPath;
 }
@@ -376,37 +388,52 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 				fs.closeSync(fd);
 				const lines = buf.toString("utf8").split("\n");
 				let lastModel: string | undefined;
+				let lastTtl: "1h" | "5m" | undefined;
 				let idleMs: number | undefined;
 				let idleSinceMs: number | undefined;
-				// Scan backwards: heartbeats are after classified entries,
-				// so we encounter them first. Scan past ALL heartbeats
-				// (including _hb:"stop" from prior daemon instances) to
-				// find model info from earlier classified entries (#72, #73).
+				let sawClassified = false;
+				// Scan backwards: heartbeats are after classified entries, so we
+				// encounter them first. Idle comes from the newest heartbeat's
+				// range start, CLAMPED by the newest classified entry's timestamp
+				// (#95) — heartbeats alone (possibly interleaved from a stale
+				// duplicate daemon) can never declare idle when classified data
+				// is fresher. Keep scanning past the newest classified entry for
+				// model (#72, #73) and observed cache TTL class (#95).
 				for (let i = lines.length - 1; i >= 0; i--) {
 					const line = lines[i].trim();
 					if (!line) continue;
 					try {
 						const obj = JSON.parse(line);
-						// Track model from most recent classified entry
+						// Track model + TTL class from most recent entries carrying them
 						if (!lastModel && obj.m) lastModel = obj.m;
-						// Heartbeat lines (any form) — keep scanning for model.
-						// Range heartbeat: sets idle time + raw timestamp.
+						if (!lastTtl && (obj.ttl === "1h" || obj.ttl === "5m")) lastTtl = obj.ttl;
 						if (obj._hb) {
-							if (typeof obj._hb === "object" && obj._hb.first && idleMs === undefined) {
+							// Only the newest heartbeat, and only if no classified
+							// entry has been seen yet (i.e. it is truly the tail).
+							if (typeof obj._hb === "object" && obj._hb.first && idleSinceMs === undefined && !sawClassified) {
 								idleSinceMs = obj._hb.first;
-								idleMs = Date.now() - obj._hb.first;
 							}
 							continue;
 						}
-						// Classified entry (no _hb) — daemon is active, stop
-						break;
+						// Classified entry — clamp the idle window start.
+						if (!sawClassified) {
+							sawClassified = true;
+							if (typeof obj.t === "number" && idleSinceMs !== undefined && obj.t > idleSinceMs) {
+								idleSinceMs = obj.t;
+							}
+						}
+						if (lastModel && lastTtl) break;
 					} catch { continue; }
 				}
+				if (idleSinceMs !== undefined) idleMs = Date.now() - idleSinceMs;
 				if (idleMs !== undefined && idleMs >= IDLE_THRESHOLD_MS) {
 					// If the tag file had no recent classified entry with model info
 					// (only heartbeats), fall back to the session file.
 					if (!lastModel) lastModel = getModelFromSessionFile(sessionPath);
-					const cacheTtlMs = lastModel ? getModelCacheTtlMs(lastModel) : null;
+					// Observed TTL class beats the model-name guess (#95).
+					const cacheTtlMs = lastTtl
+						? (lastTtl === "1h" ? 3_600_000 : 300_000)
+						: (lastModel ? getModelCacheTtlMs(lastModel) : null);
 					return { alive: true, idle: true, idleMs, idleSinceMs, cacheTtlMs };
 				}
 				// Heartbeat is too fresh (< IDLE_THRESHOLD) or absent.
@@ -420,7 +447,9 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 						const sessionIdleMs = Date.now() - sessionStat.mtimeMs;
 						if (sessionIdleMs >= IDLE_THRESHOLD_MS) {
 							if (!lastModel) lastModel = getModelFromSessionFile(sessionPath);
-							const cacheTtlMs = lastModel ? getModelCacheTtlMs(lastModel) : null;
+							const cacheTtlMs = lastTtl
+								? (lastTtl === "1h" ? 3_600_000 : 300_000)
+								: (lastModel ? getModelCacheTtlMs(lastModel) : null);
 							return { alive: true, idle: true, idleMs: sessionIdleMs, idleSinceMs: sessionStat.mtimeMs, cacheTtlMs };
 						}
 					} catch { /* session file unreadable — fall through to live */ }

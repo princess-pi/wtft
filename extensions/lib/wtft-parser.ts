@@ -38,6 +38,9 @@ export interface Interaction {
 	serverToolCost: number;
 	thinkingLevel?: string;
 	compactionTokensBefore?: number;
+	/** Observed prompt-cache TTL class from usage.cache_creation — data beats
+	 *  the model-name guess for the idle countdown (#95). */
+	cacheTtl?: "1h" | "5m";
 	files: { path: string; action: "read" | "write" }[];
 	commands: string[];
 	texts: string[];
@@ -165,6 +168,14 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string, comp
 			cost = calculateClaudeCost(assistantMsg.model, normalizedUsage, timestamp);
 		}
 
+		// Observed cache TTL class (#95): the transcript records which ephemeral
+		// tier cache writes actually used — authoritative over any model-name guess.
+		const cacheCreation = usage.cache_creation || {};
+		const cacheTtl: "1h" | "5m" | undefined =
+			(cacheCreation.ephemeral_1h_input_tokens || 0) > 0 ? "1h"
+			: (cacheCreation.ephemeral_5m_input_tokens || 0) > 0 ? "5m"
+			: undefined;
+
 		// Server-side tool requests: per-request billed, separate meter from tokens.
 		// Claude Code surfaces web_search / web_fetch via usage.server_tool_use (#73).
 		const serverToolRequests = usage.server_tool_use || {};
@@ -240,6 +251,7 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string, comp
 			serverToolCost,
 			thinkingLevel,
 			compactionTokensBefore,
+			cacheTtl,
 			files, commands, texts,
 			toolCats: toolCats.size > 0 ? [...toolCats] : undefined,
 			unrecognizedTool: unrecognizedTool || undefined };

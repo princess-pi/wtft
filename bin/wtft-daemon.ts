@@ -58,14 +58,24 @@ let running = true;
 function shutdown(reason) {
   if (!running) return;
   running = false;
-  // Flush any pending lines
-  flushPending();
-  // Write stop heartbeat
+  // Ownership-aware shutdown (#95): a taken-over daemon must exit silently.
+  // Writing anything would recreate the tag file the new owner's version
+  // hygiene just deleted, and unlinking would destroy the new owner's lease
+  // — that unlocked singleton was the daemon-per-restart leak.
+  let ownsLease = false;
   try {
-    fs.appendFileSync(tagPath, JSON.stringify({ _hb: "stop" }) + "\n");
+    ownsLease = fs.readFileSync(pidPath, "utf8").trim() === String(process.pid);
   } catch (_) {}
-  // Remove PID file
-  try { fs.unlinkSync(pidPath); } catch (_) {}
+  if (ownsLease) {
+    flushPending();
+    // Stop heartbeat only if our tag file still exists — never recreate.
+    try {
+      if (fs.existsSync(tagPath)) {
+        fs.appendFileSync(tagPath, JSON.stringify({ _hb: "stop" }) + "\n");
+      }
+    } catch (_) {}
+    try { fs.unlinkSync(pidPath); } catch (_) {}
+  }
   // Log parser goes silent but exits cleanly
   process.exit(0);
 }
@@ -456,74 +466,82 @@ if (showList || showCleanup || showRestart || stopSession) {
   const sessionHash = createHash("sha256").update(sessionPath).digest("hex").slice(0, 12);
   pidPath = path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
 
-  // Before the singleton check: if an old-version tag file exists, kill
-  // the old daemon so the new version takes over automatically. Must run
-  // BEFORE the old-version cleanup below (which deletes the signal).
+  // Version-aware spawn takeover (#95): if an old-version tag file exists,
+  // an old-build daemon may still own this session (it baked its tag path at
+  // startup and would heartbeat into the stale file forever). Claim the PID
+  // file by overwriting it — the old daemon notices the lost lease on its
+  // next beat and exits via the takeover protocol. No SIGTERM: the signal
+  // handler race (dying daemon unlinking the new owner's PID file) was the
+  // daemon-per-restart leak.
   const prefix = sessionBase + ".wtft-tag.v";
+  let claimedByTakeover = false;
   try {
     for (const f of fs.readdirSync(tagsDir)) {
       if (f.indexOf(prefix) === 0 && f !== sessionBase + TAG_SUFFIX) {
-        // Old-version tag file found — kill the existing daemon
-        try {
-          const existingPid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
-          if (existingPid > 0) {
-            try { process.kill(existingPid, "SIGTERM"); } catch {}
-          }
-        } catch { /* PID file may not exist yet */ }
-        try { fs.unlinkSync(pidPath); } catch {}
+        fs.writeFileSync(pidPath, String(process.pid));
+        claimedByTakeover = true;
         break;
       }
     }
   } catch (e) {
-    process.stderr.write(`[wtft-log-parser] auto-upgrade scan error: ${e.message}\n`);
+    process.stderr.write(`[wtft-log-parser] takeover scan error: ${e.message}\n`);
   }
 
-  // Clean up old-version tag files (different version suffix) on startup.
-  // Runs AFTER auto-upgrade — the old tag file was the signal to kill the old daemon.
-  try {
-    for (const f of fs.readdirSync(tagsDir)) {
-      if (f.startsWith(prefix) && f !== sessionBase + TAG_SUFFIX) {
-        const stale = path.join(tagsDir, f);
-        try { fs.unlinkSync(stale); } catch (_) {}
-        if (process.env.WTFT_DAEMON_DEBUG) {
-          process.stderr.write(`[wtft-log-parser] removed stale tag file: ${f}\n`);
-        }
-      }
-    }
-  } catch (_) {}
-
   // Singleton check — atomic exclusive-create prevents TOCTOU race.
+  // Skipped when takeover already claimed the lease above.
 
-  let fd;
-  try {
-    fd = fs.openSync(pidPath, "wx");
-    fs.writeSync(fd, String(process.pid));
-    fs.closeSync(fd);
-  } catch (_) {
-    // PID file exists — check if the process is still alive
+  if (!claimedByTakeover) {
+    let fd;
     try {
-      const existingPid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
-      if (existingPid > 0) {
-        try {
-          process.kill(existingPid, 0);
-          // Process exists — another log parser is running, exit quietly
-          process.exit(0);
-        } catch (_2) {
-          // Stale PID — clean up and retry
-          fs.unlinkSync(pidPath);
-          fd = fs.openSync(pidPath, "wx");
-          fs.writeSync(fd, String(process.pid));
-          fs.closeSync(fd);
-        }
-      }
-    } catch (_3) {
-      // Couldn't read PID — clean up and retry
-      try { fs.unlinkSync(pidPath); } catch (_4) {}
       fd = fs.openSync(pidPath, "wx");
       fs.writeSync(fd, String(process.pid));
       fs.closeSync(fd);
+    } catch (_) {
+      // PID file exists — check if the process is still alive
+      try {
+        const existingPid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
+        if (existingPid > 0) {
+          try {
+            process.kill(existingPid, 0);
+            // Process exists — another log parser is running, exit quietly
+            process.exit(0);
+          } catch (_2) {
+            // Stale PID — clean up and retry
+            fs.unlinkSync(pidPath);
+            fd = fs.openSync(pidPath, "wx");
+            fs.writeSync(fd, String(process.pid));
+            fs.closeSync(fd);
+          }
+        }
+      } catch (_3) {
+        // Couldn't read PID — clean up and retry
+        try { fs.unlinkSync(pidPath); } catch (_4) {}
+        fd = fs.openSync(pidPath, "wx");
+        fs.writeSync(fd, String(process.pid));
+        fs.closeSync(fd);
+      }
     }
   }
+
+  // Version hygiene AFTER claiming the lease (#95): other-version tag files
+  // are derived caches — regeneration is the point of the version bump.
+  // Re-sweep once after 5s to catch a final heartbeat the outgoing daemon
+  // may have written into its old file during its last beat window.
+  const sweepOldTagFiles = () => {
+    try {
+      for (const f of fs.readdirSync(tagsDir)) {
+        if (f.startsWith(prefix) && f !== sessionBase + TAG_SUFFIX) {
+          try { fs.unlinkSync(path.join(tagsDir, f)); } catch (_) {}
+          if (process.env.WTFT_DAEMON_DEBUG) {
+            process.stderr.write(`[wtft-log-parser] removed stale tag file: ${f}\n`);
+          }
+        }
+      }
+    } catch (_) {}
+  };
+  sweepOldTagFiles();
+  const resweep = setTimeout(sweepOldTagFiles, 5000);
+  resweep.unref();
 
   // Initialize tag file (version check, header, start heartbeat)
   initClassified();
@@ -537,6 +555,20 @@ if (showList || showCleanup || showRestart || stopSession) {
   // --- Main poll loop ---
   const loop = () => {
     if (!running) return;
+
+    // Takeover protocol (#95): ownership of the PID file IS ownership of the
+    // session. If the lease no longer holds our PID (another daemon claimed
+    // it, or the file is gone), exit before writing anything — the check runs
+    // first each beat so a superseded daemon dies within one beat.
+    try {
+      if (fs.readFileSync(pidPath, "utf8").trim() !== String(process.pid)) {
+        running = false;
+        process.exit(0);
+      }
+    } catch (_) {
+      running = false;
+      process.exit(0);
+    }
 
     try {
       // Read new lines from session, dedup by message.id (#54), then classify.

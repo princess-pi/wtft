@@ -38,14 +38,15 @@ const IDLE_EXIT_MS = 24 * 60 * 60 * 1000; // exit if session.jsonl unchanged for
 // DAEMON STATE
 // ---
 
-let sessionPath = null;
-let tagPath = null;
-let pidPath = null;
+// Empty string = not yet initialized (set once during startup, before the poll loop).
+let sessionPath = "";
+let tagPath = "";
+let pidPath = "";
 let lastSize = 0;            // bytes read from session.jsonl
 let lastWriteMs = 0;         // last time we flushed to the tag file
 let lastActivityMs = Date.now(); // last time we classified a new interaction
 let startupTime = Date.now();    // daemon start time (idle exit grace period)
-let pendingLines = [];       // classified lines waiting for next flush
+let pendingLines: string[] = [];       // classified lines waiting for next flush
 let idleStartMs = 0;         // start of current idle period (for _hb range)
 let currentThinkingLevel: string | undefined; // Track thinking level from session events (#77)
 let lastCompactionTokensBefore: number | undefined; // Track compaction tokensBefore (#90)
@@ -55,7 +56,7 @@ let running = true;
 // SIGNAL HANDLING
 // ---
 
-function shutdown(reason) {
+function shutdown(reason: string) {
   if (!running) return;
   running = false;
   // Ownership-aware shutdown (#95): a taken-over daemon must exit silently.
@@ -98,7 +99,7 @@ process.on("SIGHUP", () => shutdown("SIGHUP"));
  * Scans backwards from EOF for the last newline to handle arbitrarily long
  * preceding lines (classified data lines can be large with `cmd` arrays).
  */
-function upsertHeartbeat(now) {
+function upsertHeartbeat(now: number) {
   try {
     const hbLine = JSON.stringify({ _hb: { first: idleStartMs, last: now } }) + "\n";
     const stat = fs.statSync(tagPath);
@@ -168,14 +169,15 @@ function flushPending() {
   } catch (err) {
     // If we can't write, log and continue — don't crash the log parser
     if (process.env.WTFT_DAEMON_DEBUG) {
-      process.stderr.write(`[wtft-log-parser] write error: ${err.message}\n`);
+      process.stderr.write(`[wtft-log-parser] write error: ${err instanceof Error ? err.message : String(err)}\n`);
     }
   }
   lastWriteMs = Date.now();
 }
 
-function parseNewLines(filePath) {
-  const interactions = [];
+function parseNewLines(filePath: string) {
+  // Pushes are null-guarded below, so the array holds only real Interactions.
+  const interactions: NonNullable<ReturnType<typeof parseEntryToInteraction>>[] = [];
   try {
     const stat = fs.statSync(filePath);
     const currentSize = stat.size;
@@ -313,7 +315,7 @@ Log parser mode:
 
 if (showList || showCleanup || showRestart || stopSession) {
   const pidDir = os.tmpdir();
-  let pidFiles = [];
+  let pidFiles: string[] = [];
   try {
     pidFiles = fs.readdirSync(pidDir).filter(f => f.startsWith("wtft-daemon-") && f.endsWith(".pid"));
   } catch (_) {}
@@ -484,7 +486,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       }
     }
   } catch (e) {
-    process.stderr.write(`[wtft-log-parser] takeover scan error: ${e.message}\n`);
+    process.stderr.write(`[wtft-log-parser] takeover scan error: ${e instanceof Error ? e.message : String(e)}\n`);
   }
 
   // Singleton check — atomic exclusive-create prevents TOCTOU race.
@@ -620,7 +622,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       // Transient error (disk full, permission denied, corrupted JSON) —
       // log and continue. Don't crash the daemon on a single bad poll cycle.
       if (process.env.WTFT_DAEMON_DEBUG) {
-        process.stderr.write(`[wtft-log-parser] poll error: ${err.message}\n`);
+        process.stderr.write(`[wtft-log-parser] poll error: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
 

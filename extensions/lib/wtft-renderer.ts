@@ -6,12 +6,13 @@
  *   SURGE timeline markers, "Other" command histograms, and per-model token tables.
  */
 
-import type { Interaction, Category, Bin, IntervalConfig } from "./wtft-shared.js";
+import type { Interaction, Category } from "./wtft-shared.js";
 import {
 	classifyInteraction,
 	normalizeCommand,
 	deduplicateInteractions
 } from "./wtft-shared.js";
+import { execSync } from "node:child_process";
 export interface Bin {
 	label: string;
 	dateStr: string;
@@ -693,6 +694,8 @@ export function buildWtftLines(
 		model?: string;
 		/** Unit for bar scaling: "cost" (default) or "tokens" (#14). */
 		unit?: "cost" | "tokens";
+		/** Session filename; last 4 chars shown as a dim title suffix. */
+		sessionNameSuffix?: string;
 	}
 ): string[] | null {
 	const intervalStr = opts?.interval !== undefined ? opts.interval : defaultSettings.interval;
@@ -902,7 +905,7 @@ export function buildWtftLines(
 	const isDeepSeek = (surgeModel || "").toLowerCase().includes("deepseek");
 	const surgeHours = isDeepSeek ? getSurgeLocalHours(tz) : new Set<number>();
 	const currentHour = getCurrentLocalHour(tz);
-	const proximity = isDeepSeek ? checkSurgeProximity() : { status: undefined as string | undefined, multiplier: 1.0 };
+	const proximity = isDeepSeek ? checkSurgeProximity() : { status: undefined as ReturnType<typeof checkSurgeProximity>["status"], multiplier: 1.0 };
 	const timelineStr = buildTimelineString(surgeHours, currentHour, proximity.status);
 	const timelineLen = getVisualLength(timelineStr);
 	

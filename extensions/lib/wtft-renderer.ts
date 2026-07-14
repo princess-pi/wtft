@@ -13,6 +13,7 @@ import {
 	deduplicateInteractions
 } from "./wtft-shared.js";
 import { execSync } from "node:child_process";
+import wcwidth from "wcwidth";
 export interface Bin {
 	label: string;
 	dateStr: string;
@@ -472,13 +473,12 @@ export function getVisualLength(str: string): number {
 	let len = 0;
 	for (let i = 0; i < clean.length; i++) {
 		const code = clean.charCodeAt(i);
+		// Surrogate pair: pass the full code point (2 JS chars) to wcwidth
 		if (code >= 0xD800 && code <= 0xDBFF && i + 1 < clean.length) {
-			len += 2;
+			len += wcwidth(clean.substring(i, i + 2));
 			i++;
-		} else if (code >= 0x3000 && code <= 0x9FFF) {
-			len += 2;
 		} else {
-			len += 1;
+			len += wcwidth(clean[i]);
 		}
 	}
 	return len;
@@ -606,24 +606,16 @@ export function buildTimelineString(
 		const isSurge = surgeHours.has(h);
 		const isCurrent = h === currentHour;
 
-		// Noon divider: always emit the | separator at hour 12
-		// If h=12 is also the current hour, emit both | and the diamond
+		// Noon divider: clock emoji at hour 12 marks the midday point.
+		// When it is also the current hour, color it like the diamond marker
+		// (bold + surge orange / normal green).
 		if (h === 12) {
-			if (lastColor !== "") {
-				segments.push({ color: "", text: "|" });
-				lastColor = "";
+			const clockColor = isCurrent ? "1;" + (isSurge ? "38;5;208" : "32") : "";
+			if (clockColor !== lastColor) {
+				segments.push({ color: clockColor, text: "🕛" });
+				lastColor = clockColor;
 			} else {
-				segments[segments.length - 1].text += "|";
-			}
-			if (isCurrent) {
-				// Also emit the diamond marker after the separator
-				const diaColor = "1;" + (isSurge ? "38;5;208" : "32");
-				if (diaColor !== lastColor) {
-					segments.push({ color: diaColor, text: "◆" });
-					lastColor = diaColor;
-				} else {
-					segments[segments.length - 1].text += "◆";
-				}
+				segments[segments.length - 1].text += "🕛";
 			}
 			continue;
 		}

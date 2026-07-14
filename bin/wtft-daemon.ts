@@ -5,7 +5,7 @@
 // Throttled writes at 90bpm (667ms). Heartbeat protocol.
 // Auto-spawned by wtft CLI; runs detached.
 //
-// Source file — esbuild bundles into bin/wtft-daemon.mjs.
+// Source file — build.ts (Bun.build) bundles into bin/wtft-daemon.mjs.
 // Parsing, classification, and cost calculation live in extensions/lib/wtft-shared.ts
 // and are imported here. The daemon owns only: file watching, incremental parsing,
 // tag file I/O, heartbeat protocol, singleton PID management, and serialization.

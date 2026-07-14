@@ -44,7 +44,7 @@ import {
 
 // ---
 // Re-exports for test imports from built bin/wtft.mjs
-// (esbuild tree-shakes unused imports; explicit exports keep them in the bundle)
+// (the bundler tree-shakes unused imports; explicit exports keep them in the bundle)
 // ---
 export {
 	calculateClaudeCost,

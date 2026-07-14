@@ -210,47 +210,76 @@ Cost reality: the assistant message immediately after a compact summary wrote
 on exactly one adjacent message. Interrupted turns are cost-unremarkable but their
 spend is discarded work, worth honest labeling.
 
-### Detection and attribution (whole-message, per the billing floor)
+### Detection and attribution (rev 2 — meter-split, per the split-strategies research)
 
-- **Compaction** — Claude Code: `entry.isCompactSummary === true` (a `user` entry) →
-  stamp the **next** assistant interaction `compaction`. Pi: `type:"compaction"`
-  entries already stamp `compactionTokensBefore` onto the next interaction (#90);
-  that stamp now also classifies it. Rationale: the next message pays the
-  compaction bill (cache re-creation of the summarized context).
-- **Interrupted** — Claude Code: a `user` entry whose content includes the literal
-  `[Request interrupted by user]` → stamp the **preceding** assistant interaction
-  `interrupted`. Rationale: that turn's spend was killed; the category answers
-  "what did I spend on turns I aborted."
+Grounding: `docs/research/52-split-strategies/` measured that the post-compaction
+and recache turns' overhead is exactly their **cache_write meter component** — an
+exact billing decomposition, not an estimate — while interrupted turns are wholly
+wasted spend. Three attributions:
 
-### Precedence
+- **Compaction (meter-split)** — Claude Code: `entry.isCompactSummary === true`
+  (a `user` entry, zero usage) flags the **next** assistant interaction; Pi:
+  `type:"compaction"` stamping (#90) flags likewise. The flagged interaction's
+  **cache_write dollar component → `compaction`**; the remainder (input, output,
+  cache_read) classifies normally — the turn's real work stays visible.
+- **Overhead / recache (meter-split, new category)** — detection is the exact
+  meter conjunction from the research (all conditions, per deduped non-sidechain
+  message): `cacheWrite > 30k` ∧ `ephemeral_1h == cacheWrite` ∧ `input ≤ 16` ∧
+  `cacheRead < 0.2×(cacheRead+cacheWrite)` ∧ `|ctx − prevCtx| < 0.15×prevCtx` ∧
+  `iterations ≤ 1` ∧ not compaction-flagged. The **cache_write dollar component →
+  `overhead`**; remainder classifies normally. Measured impact: 13.7–39.1% of
+  Claude session cost, previously billed to work categories. Triggers: 1h TTL
+  expiry (primary), early-context mutation e.g. memory writes (secondary, #98).
+- **Interrupted (whole-message)** — a `user` entry whose content contains the
+  prefix `[Request interrupted by user` (matches both marker spellings) stamps
+  the **preceding** assistant interaction `interrupted`; its whole cost is
+  discarded work. Precedence: `interrupted` wins the remainder classification;
+  a compaction/recache meter-split still extracts its cache_write component
+  first (`compaction`/`overhead` beat `interrupted` for that component).
 
-Both overrides WIN over the file/tool classification of the stamped message
-(applied before latest-stage-wins). A compaction turn that also edits a file is
-still dominated by cache re-write cost; an interrupted turn's work was discarded —
-classifying either as `code` would hide exactly the overhead the categories exist
-to expose. `compaction` beats `interrupted` if both land on one message.
+### Mechanism (wire format)
+
+The daemon (sole classifier) tracks `prevCtx` (input+cacheRead+cacheWrite of the
+previous non-sidechain deduped message) across beats. When a meter-split applies
+it emits **two** classified lines: the main line (cost = remainder, `cat` =
+normal classification, cache-write tokens zeroed) and an overhead line
+(`{t, c: cacheWrite$, cat: "compaction"|"overhead", id: <messageId>+"#oh",
+cw: <tokens>}`). Message-id dedup treats the `#oh` suffix as distinct; renderers
+need no changes — two interactions in the same bucket stack naturally. New
+Interaction fields: `interrupted` (wire `ir:1`), `afterCompaction` (wire
+implied by split), `cacheWrite1hTokens`/`iterations` (parser-internal, for
+detection). The cache_write dollar component comes from a new `wtft-cost`
+helper exposing the per-meter decomposition already computed internally
+(TTL-split #55 rates). Tagger bump **2.5.0 → 2.5.1**.
 
 ### Rendering
 
-`CATEGORY_STYLE` labels flip from `null` to `Cmpct` and `Intr` (short, legend-width
-friendly). Order stays as reserved in `CATEGORY_ORDER` (after `prompt`, before
-`other`). Wire format: classified lines carry the category as today (`cat`); no new
-fields. Tagger bump **2.5.0 → 2.5.1**.
+`Category` union gains `"overhead"`. `CATEGORY_ORDER`: ... `prompt`,
+`compaction`, `interrupted`, `overhead`, `other`. `CATEGORY_STYLE` labels flip
+from `null` to `Cmpct`, `Intr`; `overhead` gets `Ovrhd` (Duppy: "we will
+definitely add an 'overhead' category").
 
 ### Verification (defines Code Approved)
 
-New cases (Phase-3 additions to the #52 suite or their own file):
-1. Claude fixture: `isCompactSummary` user entry followed by an assistant code-write
-   message → that message classifies `compaction` (override beats `code`).
-2. Claude fixture: assistant message followed by `[Request interrupted by user]`
-   user entry → the assistant message classifies `interrupted`.
-3. Pi fixture: `type:"compaction"` entry → next interaction classifies `compaction`
-   (and still carries `compactionTokensBefore` for #90's countdown).
-4. Non-adjacent noise: the literal interrupt string inside a tool RESULT or
-   assistant text does NOT reclassify anything (only `user`-entry content counts).
-5. Legend renders `Cmpct` and `Intr`; bar stacking slot matches `CATEGORY_ORDER`.
-6. Live check on this session: exactly 1 `compaction` message (~35× median cache
-   write) and 1 `interrupted` message.
+New cases (Phase-3 suite):
+1. Claude fixture: `isCompactSummary` user entry, then an assistant code-write
+   message with large cache_write → tag file has TWO lines: `compaction` line
+   carrying the cache_write $ and a `code` line carrying the remainder; the two
+   sum to the original message cost.
+2. Recache fixture: message matching the 5-condition signature after a normal
+   message → `overhead` line + remainder line; a message failing any single
+   condition (e.g. `input=20`) does NOT split.
+3. Claude fixture: assistant message followed by `[Request interrupted by user
+   for tool use]` user entry → whole message classifies `interrupted` (both
+   marker spellings).
+4. Pi fixture: `type:"compaction"` entry → next interaction meter-splits and
+   still carries `compactionTokensBefore` (#90 unaffected).
+5. Non-adjacent noise: interrupt literal inside a tool RESULT or assistant text
+   does NOT reclassify (only `user`-entry content counts).
+6. Legend renders `Cmpct`/`Intr`/`Ovrhd`; stacking slots match `CATEGORY_ORDER`;
+   conservation: session total unchanged vs pre-split build.
+7. Live check on this session: recache events ≈ the 2 found by
+   `debug/recache-trigger-analysis.mjs`; 1 compaction split; 1 interrupted turn.
 
 ## Roads not taken
 

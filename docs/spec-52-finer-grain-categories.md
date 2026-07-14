@@ -281,6 +281,26 @@ New cases (Phase-3 suite):
 7. Live check on this session: recache events ≈ the 2 found by
    `debug/recache-trigger-analysis.mjs`; 1 compaction split; 1 interrupted turn.
 
+### Amendment 3 verification results (Code Approved `647cff5`, 2026-07-14)
+
+- `tests/wtft-phase3-overhead.test.ts`: **39/39 zero-shot** — all seven cases
+  above, including 6 negative single-condition recache cases, sidechain
+  exclusion, exact cost conservation on the dual-line split, both interrupt
+  marker spellings with tool-result/assistant-text noise immunity, and #90
+  `compactionTokensBefore` unaffected.
+- Full regression 24/25 (pre-existing environmental session-name-display
+  failure only). One batch-load timing flake in the legend case fixed by
+  polling for the daemon tag file before asserting.
+- Live check (case 7) on a copy of session `ea0143ab`: **overhead 2 msgs
+  $2.28** = exactly the 2 recache events the trigger analysis found;
+  **compaction 1 msg $0.21** (matching the pre-implementation estimate);
+  **interrupted 1 msg $0.03**. Tagger shipped at **2.5.1**.
+- Implementation note vs spec: the daemon serializes at flush (pendingItems
+  hold parsed interactions, not strings) so an interrupt marker arriving
+  within the same beat window can still stamp the killed turn; a marker
+  arriving after its turn was flushed is dropped — bounded by one 667ms beat,
+  as specced under "Mechanism".
+
 ## Roads not taken
 
 - **CoT/Sys2 category** — measured zero thinking-only turns (see table). Revisit only as part

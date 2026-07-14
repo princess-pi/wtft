@@ -1,6 +1,6 @@
 # Spec #95 — wtft-daemon lifecycle: takeover protocol, idle clamp, data-derived cache TTL
 
-Status: **Spec Draft** (2026-07-13)
+Status: **Spec Approved** (2026-07-14, Duppy)
 Issue: [#95](https://github.com/duppypro/princess-pi-packages/issues/95)
 
 ## Problem

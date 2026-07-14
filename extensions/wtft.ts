@@ -660,17 +660,17 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			updateWtftWidget(ctx, pi, { visible: true });
 
 			if (tokens) {
-
-			// Map current thinking level to budget tokens (#79)
-			const BUDGET_MAP: Record<string, number> = {
-				minimal: 1024, low: 4096, medium: 10240,
-				high: 32768, xhigh: 65536, max: 131072
-			};
-			const budget = _currentThinkingLevel ? BUDGET_MAP[_currentThinkingLevel] : undefined;
-			const interactions = readInteractions(ctx);
-			const output = renderTokenSummary(interactions, Math.max(current.width, 40), budget);
-			ctx.ui.notify(output, "info");
-			return;
+				// Map current thinking level to budget tokens (#79)
+				const BUDGET_MAP: Record<string, number> = {
+					minimal: 1024, low: 4096, medium: 10240,
+					high: 32768, xhigh: 65536, max: 131072
+				};
+				const budget = _currentThinkingLevel ? BUDGET_MAP[_currentThinkingLevel] : undefined;
+				const interactions = readInteractions(ctx);
+				const output = renderTokenSummary(interactions, Math.max(current.width, 40), budget);
+				ctx.ui.notify(output, "info");
+				return;
+			}
 		}
 
 			if (hideWidget) {

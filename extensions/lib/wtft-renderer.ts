@@ -823,10 +823,10 @@ export function buildWtftLines(
 				return `${incSign}${formatTokenCount(bin.incremental_tokens ?? 0)}`.length;
 			}), 6);
 			maxCostLen = Math.max(...displayedBins.map(b => formatTokenCount(b.total_tokens ?? 0).length), 6);
-			prefixWidth += maxIncLen + 2 + maxCostLen + 2;
+			prefixWidth += maxIncLen + 2 + maxCostLen + 2 + 4; // +4 for " tok" unit suffix
 		} else {
 			maxCostLen = Math.max(...displayedBins.map(b => formatTokenCount(b.total_tokens ?? 0).length), 6);
-			prefixWidth += maxCostLen + 2;
+			prefixWidth += maxCostLen + 2 + 4; // +4 for " tok" unit suffix
 		}
 	} else if (mode === "cumulative") {
 		maxIncLen = Math.max(...displayedBins.map(bin => {

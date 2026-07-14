@@ -20,7 +20,7 @@ import { calculateClaudeCost, calculateServerToolCost } from "./wtft-cost.js";
 export type Category =
 	| "plan" | "spec" | "research" | "web" | "grep"
 	| "code" | "tests" | "git" | "agents"
-	| "prompt" | "compaction" | "interrupted" | "other";
+	| "prompt" | "compaction" | "interrupted" | "overhead" | "other";
 
 export interface Interaction {
 	timestamp: number;
@@ -41,6 +41,17 @@ export interface Interaction {
 	/** Observed prompt-cache TTL class from usage.cache_creation — data beats
 	 *  the model-name guess for the idle countdown (#95). */
 	cacheTtl?: "1h" | "5m";
+	/** Turn was killed by the user — whole cost is discarded work (#52 Phase 3). */
+	interrupted?: boolean;
+	/** Turn immediately follows a compact summary — its cache_write component
+	 *  is the compaction bill (#52 Phase 3 meter-split). */
+	afterCompaction?: boolean;
+	/** 1h-tier share of cacheWriteTokens; recache-signature input (#52 Phase 3). */
+	cacheWrite1hTokens?: number;
+	/** usage.iterations length when present; recache-signature guard. */
+	iterations?: number;
+	/** Subagent sidechain entry — excluded from prevCtx recache tracking. */
+	isSidechain?: boolean;
 	files: { path: string; action: "read" | "write" }[];
 	commands: string[];
 	texts: string[];
@@ -121,7 +132,7 @@ function extractFilesFromBashCommand(command: string, files: { path: string; act
 	}
 }
 
-export function parseEntryToInteraction(entry: any, thinkingLevel?: string, compactionTokensBefore?: number): Interaction | null {
+export function parseEntryToInteraction(entry: any, thinkingLevel?: string, compactionTokensBefore?: number, afterCompaction?: boolean): Interaction | null {
 	if (!entry) return null;
 	
 	// Support both Pi schema (entry.type === "message") and Claude Code schema (entry.type === "assistant" or lacking type but having message)
@@ -252,18 +263,113 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string, comp
 			thinkingLevel,
 			compactionTokensBefore,
 			cacheTtl,
+			afterCompaction: (afterCompaction || compactionTokensBefore !== undefined) || undefined,
+			cacheWrite1hTokens: (cacheCreation.ephemeral_1h_input_tokens || 0) > 0
+				? cacheCreation.ephemeral_1h_input_tokens : undefined,
+			iterations: Array.isArray(usage.iterations) ? usage.iterations.length : undefined,
+			isSidechain: entry.isSidechain === true || undefined,
 			files, commands, texts,
 			toolCats: toolCats.size > 0 ? [...toolCats] : undefined,
 			unrecognizedTool: unrecognizedTool || undefined };
 	}
-	
+
 	return null;
+}
+
+// ---
+// HARNESS-OVERHEAD DETECTION (#52 Phase 3)
+// ---
+
+/** Both marker spellings: "[Request interrupted by user]" and
+ *  "[Request interrupted by user for tool use]". */
+export const INTERRUPT_PREFIX = "[Request interrupted by user";
+
+/** True when a transcript entry is a user interrupt marker — stamps the
+ *  PRECEDING assistant interaction as interrupted (whole cost = waste).
+ *  Only user-entry content counts; the literal inside tool results or
+ *  assistant text must not reclassify anything. */
+export function isInterruptMarker(entry: any): boolean {
+	if (!entry || entry.type !== "user") return false;
+	const c = entry.message?.content;
+	if (typeof c === "string") return c.includes(INTERRUPT_PREFIX);
+	if (Array.isArray(c)) {
+		return c.some((b: any) => b?.type === "text" && typeof b.text === "string" && b.text.includes(INTERRUPT_PREFIX));
+	}
+	return false;
+}
+
+/**
+ * Meter-split overhead detection (#52 Phase 3, grounded in
+ * docs/research/52-split-strategies/): returns the slice of this
+ * interaction's cost that is context maintenance rather than work.
+ *
+ *  - compaction: the turn after a compact summary pays the summary's
+ *    cache re-creation bill — its cache_write $ component → "compaction".
+ *  - overhead (recache): Claude Code rewriting the whole context into the
+ *    1h cache tier — exact 5-condition meter conjunction, measured at
+ *    13.7–39.1% of session cost. cache_write $ component → "overhead".
+ *
+ * The dollar component is the rate-weighted cache_write share of the
+ * interaction's real cost (conserves totals exactly; works for Pi-native
+ * costs too since only the meter RATIOS matter).
+ *
+ * @param prevCtxTokens input+cacheRead+cacheWrite of the previous
+ *   non-sidechain deduped interaction (0 = unknown → no recache detection)
+ */
+export function splitOverheadCost(
+	interaction: Interaction,
+	prevCtxTokens: number
+): { kind: "compaction" | "overhead"; overheadCost: number } | null {
+	const cw = interaction.cacheWriteTokens;
+	if (cw <= 0 || interaction.cost <= 0) return null;
+
+	let kind: "compaction" | "overhead" | null = null;
+	if (interaction.afterCompaction) {
+		kind = "compaction";
+	} else if (!interaction.isSidechain) {
+		const cr = interaction.cacheReadTokens;
+		const ctx = interaction.inputTokens + cr + cw;
+		const isRecache =
+			cw > 30_000 &&
+			(interaction.cacheWrite1hTokens || 0) === cw &&
+			interaction.inputTokens <= 16 &&
+			cr < 0.2 * (cr + cw) &&
+			prevCtxTokens > 0 && Math.abs(ctx - prevCtxTokens) < 0.15 * prevCtxTokens &&
+			(interaction.iterations || 0) <= 1;
+		if (isRecache) kind = "overhead";
+	}
+	if (!kind) return null;
+
+	// cache_write $ share via the production rate resolver: full cost minus
+	// the same usage with cache writes removed — no rate table duplication.
+	const cw1h = interaction.cacheWrite1hTokens || 0;
+	const usage = {
+		input_tokens: interaction.inputTokens,
+		output_tokens: interaction.outputTokens,
+		cache_read_input_tokens: interaction.cacheReadTokens,
+		cache_creation_input_tokens: cw,
+		cache_creation: cw1h > 0
+			? { ephemeral_1h_input_tokens: cw1h, ephemeral_5m_input_tokens: Math.max(0, cw - cw1h) }
+			: null,
+		reasoning_tokens: interaction.reasoningTokens,
+	};
+	const model = interaction.model || "claude";
+	const full = calculateClaudeCost(model, usage, interaction.timestamp);
+	const withoutCw = calculateClaudeCost(model, {
+		...usage, cache_creation_input_tokens: 0, cache_creation: null,
+	}, interaction.timestamp);
+	if (full <= 0 || full <= withoutCw) return null;
+	const cwFraction = (full - withoutCw) / full;
+	const overheadCost = interaction.cost * cwFraction;
+	if (overheadCost <= 0) return null;
+	return { kind, overheadCost };
 }
 
 export function parseSessionFile(filePath: string): Interaction[] {
 	const interactions: Interaction[] = [];
 	let currentThinkingLevel: string | undefined;
 	let lastCompactionTokensBefore: number | undefined;
+	let pendingAfterCompaction = false;
 	try {
 		const content = fs.readFileSync(filePath, "utf8");
 		for (const line of content.split("\n")) {
@@ -282,10 +388,23 @@ export function parseSessionFile(filePath: string): Interaction[] {
 					lastCompactionTokensBefore = entry.tokensBefore;
 					continue;
 				}
-				const interaction = parseEntryToInteraction(entry, currentThinkingLevel, lastCompactionTokensBefore);
+				// Claude Code compact summary marker → flag the next assistant
+				// interaction for the compaction meter-split (#52 Phase 3).
+				if (entry.isCompactSummary === true) {
+					pendingAfterCompaction = true;
+					continue;
+				}
+				// User interrupt marker → the PRECEDING assistant turn was
+				// killed; its whole cost is discarded work (#52 Phase 3).
+				if (isInterruptMarker(entry)) {
+					if (interactions.length > 0) interactions[interactions.length - 1].interrupted = true;
+					continue;
+				}
+				const interaction = parseEntryToInteraction(entry, currentThinkingLevel, lastCompactionTokensBefore, pendingAfterCompaction);
 				if (interaction) {
 					interactions.push(interaction);
 					lastCompactionTokensBefore = undefined; // consumed by this interaction
+					pendingAfterCompaction = false;
 				}
 			} catch {
 				// Skip unparseable lines (partial writes, non-JSON)
@@ -358,6 +477,10 @@ export function deduplicateInteractions(interactions: Interaction[]): Interactio
 				}
 				for (const tc of i.toolCats || []) mergedToolCats.add(tc);
 				if (i.unrecognizedTool) merged.unrecognizedTool = true;
+				// Overhead flags must survive the merge — any copy carrying
+				// them marks the whole billed message (#52 Phase 3).
+				if (i.interrupted) merged.interrupted = true;
+				if (i.afterCompaction) merged.afterCompaction = true;
 			}
 			if (mergedToolCats.size > 0) merged.toolCats = [...mergedToolCats];
 			deduped.push(merged);
@@ -392,6 +515,12 @@ export function classifyInteraction(interaction: Interaction): Category {
 	// use the stored category directly (avoids re-classification which fails
 	// for "prompt" because texts are not serialized to the tag file).
 	if (interaction._cat) return interaction._cat;
+
+	// Interrupted wins whole-message (#52 Phase 3): the turn's spend was
+	// discarded work — calling it "code" would overstate useful code spend.
+	// (Compaction/recache meter-splits extract their cache_write component
+	// BEFORE this classification; see splitOverheadCost.)
+	if (interaction.interrupted) return "interrupted";
 
 	const specPaths = new Set<string>();
 	const codePaths = new Set<string>();

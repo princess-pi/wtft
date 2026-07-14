@@ -11,6 +11,7 @@ import {
 	classifyInteraction,
 	buildWtftLines
 } from "./wtft-shared.js";
+import { splitOverheadCost } from "./wtft-parser.js";
 import { showCursor, hideCursor, enterRawStdin } from "./tty-helpers.js";
 export interface WatchSettings {
 	interval: string;
@@ -75,6 +76,8 @@ export function serializeClassified(interaction: Interaction): string {
 	if (interaction.unrecognizedTool) line.ut = 1;
 	// Observed cache TTL class — idle countdown uses data over model-name guess (#95)
 	if (interaction.cacheTtl) line.ttl = interaction.cacheTtl;
+	// Interrupted turn — whole cost is discarded work (#52 Phase 3)
+	if (interaction.interrupted) line.ir = 1;
 	return JSON.stringify(line) + "\n";
 }
 
@@ -108,6 +111,7 @@ export function classifiedToInteraction(obj: any): Interaction | null {
 		toolCats: obj.tc || undefined,
 		unrecognizedTool: obj.ut ? true : undefined,
 		cacheTtl: obj.ttl === "1h" || obj.ttl === "5m" ? obj.ttl : undefined,
+		interrupted: obj.ir ? true : undefined,
 		_cat: obj.cat || undefined,
 	};
 }
@@ -165,10 +169,46 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
  * Compute the tag file path for a given session path.
  * Scans wtft-tags/ subdirectory for the current version's tag file.
  */
-// 2.5.0 (#95): wire format adds `ttl` (observed cache TTL class) + daemon
-// lifecycle semantics change (takeover protocol) — stale caches lack ttl
-// and stale daemons must be superseded, so the bump forces both.
-export const WTFT_TAGGER_VERSION = "2.5.0";
+// 2.5.1 (#52 Phase 3): compaction/recache meter-split emits dual lines
+// (main + "#oh" overhead line), interrupted turns carry `ir` — stale caches
+// lack all three and must re-classify.
+export const WTFT_TAGGER_VERSION = "2.5.1";
+
+/**
+ * Serialize one interaction to its classified tag-file line(s) (#52 Phase 3).
+ * When a compaction/recache meter-split applies, emits TWO lines: the main
+ * line with the work remainder (cache-write tokens zeroed) and an overhead
+ * line ("<messageId>#oh") carrying the cache_write $ component under
+ * "compaction"/"overhead". Message-id dedup treats "#oh" as distinct, and
+ * both lines share a timestamp, so renderers need no changes — the split
+ * stacks naturally in the same bucket.
+ *
+ * @param prevCtxTokens input+cacheRead+cacheWrite of the previous
+ *   non-sidechain deduped interaction (recache signature input)
+ */
+export function serializeClassifiedWithOverheadSplit(interaction: Interaction, prevCtxTokens: number): string {
+	const split = splitOverheadCost(interaction, prevCtxTokens);
+	if (!split) return serializeClassified(interaction);
+	const remainder: Interaction = {
+		...interaction,
+		cost: Math.max(0, interaction.cost - split.overheadCost),
+		cacheWriteTokens: 0,
+		afterCompaction: undefined,
+	};
+	const overheadLine: Interaction = {
+		timestamp: interaction.timestamp,
+		cost: split.overheadCost,
+		messageId: interaction.messageId ? interaction.messageId + "#oh" : undefined,
+		model: interaction.model,
+		inputTokens: 0, outputTokens: 0, cacheReadTokens: 0,
+		cacheWriteTokens: interaction.cacheWriteTokens,
+		reasoningTokens: 0, webSearchRequests: 0, webFetchRequests: 0,
+		serverToolCost: 0,
+		files: [], commands: [], texts: [],
+		_cat: split.kind,
+	};
+	return serializeClassified(remainder) + serializeClassified(overheadLine);
+}
 
 export function getTagPath(sessionPath: string): string {
 	const sessionDir = path.dirname(sessionPath);

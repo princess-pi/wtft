@@ -39,12 +39,13 @@ export interface Bin {
 
 export const CATEGORY_ORDER: Category[] = [
 	"plan", "spec", "research", "web", "grep", "code", "tests", "git",
-	"agents", "prompt", "compaction", "interrupted", "other",
+	"agents", "prompt", "compaction", "interrupted", "overhead", "other",
 ];
 
 /** fg = legend/bar ANSI 256 color; bg = token-mode segment (dark tones for
- *  bright-white density chars); char = bar glyph; label = legend text
- *  (null = hidden from legend until wired — Phase 3 overhead categories). */
+ *  bright-white density chars); char = bar glyph; label = legend text.
+ *  Phase 3 (#52) wired the overhead trio: Cmpct = compaction cache re-write,
+ *  Intr = user-killed turns, Ovrhd = recache (full-context 1h-tier rewrite). */
 const CATEGORY_STYLE: Record<Category, { fg: number; bg: number; char: string; label: string | null }> = {
 	plan:        { fg: 116, bg: 30,  char: "█", label: "Plan" },
 	spec:        { fg: 108, bg: 22,  char: "█", label: "Spec" },
@@ -56,8 +57,9 @@ const CATEGORY_STYLE: Record<Category, { fg: number; bg: number; char: string; l
 	git:         { fg: 73,  bg: 23,  char: "█", label: "Git" },
 	agents:      { fg: 141, bg: 55,  char: "█", label: "Agents" },
 	prompt:      { fg: 168, bg: 89,  char: "░", label: "Prompt" },
-	compaction:  { fg: 143, bg: 58,  char: "░", label: null },
-	interrupted: { fg: 167, bg: 52,  char: "░", label: null },
+	compaction:  { fg: 143, bg: 58,  char: "░", label: "Cmpct" },
+	interrupted: { fg: 167, bg: 52,  char: "░", label: "Intr" },
+	overhead:    { fg: 179, bg: 94,  char: "░", label: "Ovrhd" },
 	other:       { fg: 238, bg: 236, char: "░", label: "Other" },
 };
 

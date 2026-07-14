@@ -19,6 +19,8 @@ import {
 	parseEntryToInteraction,
 	deduplicateInteractions,
 	serializeClassified,
+	serializeClassifiedWithOverheadSplit,
+	isInterruptMarker,
 	WTFT_TAGGER_VERSION as TAGGER_VERSION
 } from "../extensions/lib/wtft-shared.js";
 
@@ -46,10 +48,15 @@ let lastSize = 0;            // bytes read from session.jsonl
 let lastWriteMs = 0;         // last time we flushed to the tag file
 let lastActivityMs = Date.now(); // last time we classified a new interaction
 let startupTime = Date.now();    // daemon start time (idle exit grace period)
-let pendingLines: string[] = [];       // classified lines waiting for next flush
+// {interaction, prevCtx} waiting for next flush (#52 Phase 3: serialized at
+// flush so late interrupt markers can still stamp the tail interaction).
+let pendingItems: { interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>; prevCtx: number }[] = [];
 let idleStartMs = 0;         // start of current idle period (for _hb range)
 let currentThinkingLevel: string | undefined; // Track thinking level from session events (#77)
 let lastCompactionTokensBefore: number | undefined; // Track compaction tokensBefore (#90)
+let pendingAfterCompaction = false; // Claude isCompactSummary → flag next interaction (#52 Phase 3)
+let stampInterruptOnPending = false; // interrupt marker seen; assistant turn is in pendingItems (#52 Phase 3)
+let prevCtxTokens = 0; // input+cacheRead+cacheWrite of prev non-sidechain interaction (recache signature)
 let running = true;
 
 // ---
@@ -160,9 +167,11 @@ function upsertHeartbeat(now: number) {
 }
 
 function flushPending() {
-  if (pendingLines.length === 0) return;
-  const batch = pendingLines.join("");
-  pendingLines = [];
+  if (pendingItems.length === 0) return;
+  // Serialize at flush: compaction/recache meter-splits emit dual lines,
+  // and interrupt markers that arrived after enqueue are already stamped.
+  const batch = pendingItems.map(it => serializeClassifiedWithOverheadSplit(it.interaction, it.prevCtx)).join("");
+  pendingItems = [];
   try {
     fs.appendFileSync(tagPath, batch);
     idleStartMs = 0; // Data arrived — idle period ended
@@ -211,10 +220,30 @@ function parseNewLines(filePath: string) {
           lastCompactionTokensBefore = entry.tokensBefore;
           continue;
         }
-        const interaction = parseEntryToInteraction(entry, currentThinkingLevel, lastCompactionTokensBefore);
+        // Claude Code compact summary → flag next interaction for the
+        // compaction meter-split (#52 Phase 3).
+        if (entry.isCompactSummary === true) {
+          pendingAfterCompaction = true;
+          continue;
+        }
+        // User interrupt marker → the preceding assistant turn was killed.
+        // It is either the last interaction of this batch, or still sitting
+        // unflushed in pendingItems (stamped in the main loop). If it was
+        // already flushed to the tag file, the stamp is dropped — bounded by
+        // one 667ms beat.
+        if (isInterruptMarker(entry)) {
+          if (interactions.length > 0) {
+            interactions[interactions.length - 1].interrupted = true;
+          } else {
+            stampInterruptOnPending = true;
+          }
+          continue;
+        }
+        const interaction = parseEntryToInteraction(entry, currentThinkingLevel, lastCompactionTokensBefore, pendingAfterCompaction);
         if (interaction) {
           interactions.push(interaction);
           lastCompactionTokensBefore = undefined; // consumed
+          pendingAfterCompaction = false; // consumed
         }
       } catch (_) {
         // Skip unparseable lines (partial writes, non-JSON)
@@ -575,17 +604,32 @@ if (showList || showCleanup || showRestart || stopSession) {
     try {
       // Read new lines from session, dedup by message.id (#54), then classify.
       const rawInteractions = parseNewLines(sessionPath);
+      // Late interrupt marker: the killed turn is the unflushed tail of
+      // pendingItems (order is preserved; anything newer would have caught
+      // the stamp inside parseNewLines).
+      if (stampInterruptOnPending) {
+        if (pendingItems.length > 0) {
+          pendingItems[pendingItems.length - 1].interaction.interrupted = true;
+        }
+        stampInterruptOnPending = false;
+      }
       const newInteractions = deduplicateInteractions(rawInteractions);
       if (newInteractions.length > 0) {
         lastActivityMs = Date.now();
         for (const interaction of newInteractions) {
-          pendingLines.push(serializeClassified(interaction));
+          // prevCtx is captured per-interaction in arrival order — the
+          // recache signature compares against the previous non-sidechain
+          // message's context size (#52 Phase 3).
+          pendingItems.push({ interaction, prevCtx: prevCtxTokens });
+          if (!interaction.isSidechain) {
+            prevCtxTokens = interaction.inputTokens + interaction.cacheReadTokens + interaction.cacheWriteTokens;
+          }
         }
       }
 
       // Throttled flush: write at most every 667ms
       const now = Date.now();
-      if (pendingLines.length > 0 && (now - lastWriteMs) >= POLL_MS) {
+      if (pendingItems.length > 0 && (now - lastWriteMs) >= POLL_MS) {
         flushPending();
       }
 
@@ -595,7 +639,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       // When data arrives, the idle period ends — next idle starts a new line.
       // NOTE: do NOT update lastActivityMs here — it tracks actual data activity
       // for the idle-exit check below, not heartbeat flushes.
-      if (pendingLines.length === 0) {
+      if (pendingItems.length === 0) {
         if (idleStartMs === 0) idleStartMs = now;
         upsertHeartbeat(now);
         lastWriteMs = now;

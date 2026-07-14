@@ -1,6 +1,7 @@
 # Spec #95 — wtft-daemon lifecycle: takeover protocol, idle clamp, data-derived cache TTL
 
-Status: **Spec Approved** (2026-07-14, Duppy)
+Status: **Code and Spec Approved** (2026-07-14) — implemented on branch
+`95-daemon-lifecycle`, verified 24/24 (see Verification results below)
 Issue: [#95](https://github.com/duppypro/princess-pi-packages/issues/95)
 
 ## Problem
@@ -122,3 +123,20 @@ Automated (new `tests/wtft-daemon-lifecycle.test.ts`, run against built `bin/*.m
 
 Manual: run `wtft --watch` on the live session, `wtft-daemon --list` shows exactly one
 daemon per session across repeated `wtft` invocations and a forced version bump.
+
+## Verification results (2026-07-14, Code Approved)
+
+- `tests/wtft-daemon-lifecycle.test.ts`: **24/24 pass, zero-shot** (first run after
+  Code Draft commit). All six spec cases covered, including a real-process takeover
+  (lease stolen → exit within 2 beats, foreign PID file left intact) and a
+  spawn-twice singleton with `/proc/<pid>/cmdline` verification.
+- Full regression: 23/25 suites pass. Two failures pre-existing and unrelated:
+  `wtft-pricing-tiers` (DeepSeek surge case asserts non-peak price without pinning a
+  timestamp — fails during peak UTC hours on any branch; filed as its own issue) and
+  `session-name-display` (`@earendil-works/pi-tui` not installed).
+- Manual: live session converged to exactly one daemon + one tag file.
+- Implementation matches spec as written; the only addition discovered during
+  testing is a **rollout note**: while v2.5.0 and older builds coexist on one
+  machine, daemon ownership ping-pongs (old builds still use the SIGTERM path) and
+  converges to whichever build ran last. Resolves on merge + global reinstall +
+  Pi extension reload.

@@ -22,6 +22,8 @@ import {
 	readClassifiedTagFile,
 	getDaemonPidPath,
 	getTagPath,
+	checkDaemonHealth,
+	IDLE_THRESHOLD_MS,
 	WTFT_TAGGER_VERSION,
 	serializeClassified,
 	classifiedToInteraction,
@@ -59,7 +61,12 @@ export {
 	classifiedToInteraction,
 	readClassifiedTagFile,
 	getTerminalWidth,
-	WTFT_TAGGER_VERSION
+	WTFT_TAGGER_VERSION,
+	// Daemon lifecycle (#95) — takeover/idle-clamp/TTL tests
+	checkDaemonHealth,
+	getTagPath,
+	getDaemonPidPath,
+	IDLE_THRESHOLD_MS
 };
 
 // ---

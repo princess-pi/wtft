@@ -301,8 +301,10 @@ export function calculateScaleMax(total: number): number {
 }
 
 /**
- * Build tick line with token-count labels (e.g. "0", "25k", "50k").
- * Same layout as buildTickLine but uses formatTokenCount instead of formatCost.
+ * Build tick line with token-count labels (e.g. "0.0", "25.0k", "50.0k").
+ * Same layout as buildTickLine: decimal-point alignment, overlap-avoidance.
+ * Forces one decimal place on all tick values so every label has a "." to
+ * align — the zero tick ("0") becomes "0.0" (#99).
  */
 export function buildTokenTickLine(maxTokens: number, barWidth: number, prefixWidth: number, labelPrefix: string): string | null {
 	if (maxTokens <= 0 || barWidth < 15) return null;
@@ -327,9 +329,12 @@ export function buildTokenTickLine(maxTokens: number, barWidth: number, prefixWi
 	const tickValues = [0, maxTokens / 4, maxTokens / 2, (maxTokens * 3) / 4, maxTokens];
 
 	for (let i = 0; i < ticks.length; i++) {
+		// Force one decimal place so every label has a "." to align on the tick.
 		const text = formatTokenCount(Math.round(tickValues[i]));
-		const displayStr = ` ${text} `;
-		const startIdx = ticks[i]; // align start of label to tick
+		const displayStr = text.includes(".") ? ` ${text} ` : ` ${text}.0 `;
+		// Align the decimal point exactly on the tick (same strategy as buildTickLine).
+		const dotIdx = displayStr.indexOf(".");
+		const startIdx = ticks[i] - dotIdx;
 		const endIdx = startIdx + displayStr.length;
 
 		let overlap = false;
@@ -842,11 +847,12 @@ export function buildWtftLines(
 
 	const finalWidth = Math.max(width, 40);
 	
-	// We reserve 3 characters at the very end of the line.
-	// Why? To guarantee that when the final label (e.g. ` $100.00 `) is aligned so its `.` 
-	// sits on the final tick, the `.00 ` trailing characters do not overflow `finalWidth`.
-	// Shaving exactly 3 characters makes the ticks row length perfectly match `finalWidth`.
-	const maxBarWidth = finalWidth - prefixWidth - 3;
+	// We reserve characters at the end of the line so tick labels aligned by
+	// decimal point (e.g. ` $100.00 `, ` 13.1M `) don't overflow. Cost-mode
+	// labels ("$0.50") need 3 trailing chars; token-mode labels ("13.1M") are
+	// wider and need 5 trailing chars (#99).
+	const tickReserve = unit === "tokens" ? 5 : 3;
+	const maxBarWidth = finalWidth - prefixWidth - tickReserve;
 
 	// Resolve the newest local date for display on the ticks line
 	const newestBin = displayedBins[0];
@@ -920,7 +926,7 @@ export function buildWtftLines(
 		if (showTicks && i > 0 && bin.dateStr !== displayedBins[i - 1].dateStr) {
 			const labelDay = formatMmmDdStr(bin.dateStr);
 			const dayChangeText = `── ${labelDay} `;
-			const dividerLen = Math.max(0, (finalWidth - 3) - dayChangeText.length);
+			const dividerLen = Math.max(0, (finalWidth - tickReserve) - dayChangeText.length);
 			const dividerChars = Array.from({ length: dividerLen }, () => "─");
 			const tickPositions = [
 				prefixWidth,

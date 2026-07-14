@@ -468,20 +468,15 @@ export function formatMmmDdStr(dateStr: string): string {
 	return dateStr;
 }
 
+/**
+ * Compute visual (monospace cell) width of a string after stripping ANSI escapes.
+ * Delegates to the wcwidth library for proper Unicode East Asian Width handling
+ * (#103). Formerly used a hand-rolled CJK-range + surrogate-pair heuristic that
+ * mis-reported wide emoji (🕛, ⚡) as single-width.
+ */
 export function getVisualLength(str: string): number {
 	const clean = str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-	let len = 0;
-	for (let i = 0; i < clean.length; i++) {
-		const code = clean.charCodeAt(i);
-		// Surrogate pair: pass the full code point (2 JS chars) to wcwidth
-		if (code >= 0xD800 && code <= 0xDBFF && i + 1 < clean.length) {
-			len += wcwidth(clean.substring(i, i + 2));
-			i++;
-		} else {
-			len += wcwidth(clean[i]);
-		}
-	}
-	return len;
+	return wcwidth(clean);
 }
 
 // MAIN LAYOUT COMPILER
@@ -606,22 +601,10 @@ export function buildTimelineString(
 		const isSurge = surgeHours.has(h);
 		const isCurrent = h === currentHour;
 
-		// Noon divider: clock emoji at hour 12 marks the midday point.
-		// When it is also the current hour, color it like the diamond marker
-		// (bold + surge orange / normal green).
-		if (h === 12) {
-			const clockColor = isCurrent ? "1;" + (isSurge ? "38;5;208" : "32") : "";
-			if (clockColor !== lastColor) {
-				segments.push({ color: clockColor, text: "🕛" });
-				lastColor = clockColor;
-			} else {
-				segments[segments.length - 1].text += "🕛";
-			}
-			continue;
-		}
-
 		const color = isCurrent ? "1;" + (isSurge ? "38;5;208" : "32") : (isSurge ? "38;5;208" : "32");
-		const char = isCurrent ? "◆" : "-";
+		// Noon (h=12): use 🕛 (clock face twelve o'clock) instead of "-" so the
+		// divider's purpose is self-documenting. The diamond still wins at current hour.
+		const char = isCurrent ? "◆" : (h === 12 ? "🕛" : "-");
 
 		if (color !== lastColor) {
 			segments.push({ color, text: char });

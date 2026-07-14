@@ -252,10 +252,18 @@ console.log("\n5. Legend renders Cmpct/Intr/Ovrhd (built CLI, daemon pipeline)")
 		JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] } }),
 	].join("\n") + "\n");
 
-	const out = execSync(
-		`${process.execPath} ${CLI_BIN} -s '${sessionPath}' -i 10m -l 3 -w 200 --no-emoji 2>&1 || true`,
-		{ encoding: "utf8", timeout: 20_000 }
-	);
+	// First invocation spawns the daemon; under batch-run load the tag file
+	// can miss the CLI's ~1.4s wait window ("no data yet"), so poll for
+	// classified output before the render whose legend we assert on.
+	let out = "";
+	for (let attempt = 0; attempt < 5; attempt++) {
+		out = execSync(
+			`${process.execPath} ${CLI_BIN} -s '${sessionPath}' -i 10m -l 3 -w 200 --no-emoji 2>&1 || true`,
+			{ encoding: "utf8", timeout: 20_000 }
+		);
+		if (!out.includes("no data yet")) break;
+		execSync("sleep 1");
+	}
 	const clean = out.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
 	assert("legend shows Cmpct", clean.includes("Cmpct"));
 	assert("legend shows Intr", clean.includes("Intr"));

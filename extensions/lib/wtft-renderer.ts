@@ -990,8 +990,49 @@ export function buildWtftLines(
 			// --- COST MODE BAR RENDERING (original) ---
 			let barStr = "";
 			if (mode === "cumulative") {
+				// Absolute-cost allocation (#106): each category's chars are computed
+				// from its own cumulative cost vs the global scaleMax, not from its
+				// proportion of this bin's total. This guarantees monotonicity —
+				// a category's bar segment can only grow, never shrink, matching
+				// the mathematical guarantee that cumulative subtotals increase.
+				// (Proportional distribution via distributeChars allowed a category
+				// to lose chars when its proportion fell, even as its absolute
+				// cost grew — causing the visible regression.)
 				const barWidth = scaleMax > 0 ? Math.round((bin.total_cost / scaleMax) * maxBarWidth) : 0;
-				const chars = distributeChars(bin.costs, barWidth);
+				const chars = {} as Record<Category, number>;
+				let allocated = 0;
+				const remainders = {} as Record<Category, number>;
+
+				for (const cat of CATEGORY_ORDER) {
+					const raw = scaleMax > 0 ? (bin.costs[cat] / scaleMax) * maxBarWidth : 0;
+					chars[cat] = Math.floor(raw);
+					remainders[cat] = raw - chars[cat];
+					allocated += chars[cat];
+				}
+
+				// Distribute remainder chars to categories with largest fractional parts.
+				// Since floor(raw) is monotonic with costs[cat] (which only grows),
+				// the base allocation is guaranteed non-decreasing. Remainder
+				// redistribution can temporarily give +1 that falls off next bin,
+				// but never below the floor — at most a 1-char flicker, not the
+				// visible multi-char shrink of the old proportional method.
+				while (allocated < barWidth) {
+					let maxCat: Category | null = null;
+					let maxRemainder = -1;
+					for (const cat of CATEGORY_ORDER) {
+						if (remainders[cat] > maxRemainder) {
+							maxRemainder = remainders[cat];
+							maxCat = cat;
+						}
+					}
+					if (maxCat) {
+						chars[maxCat]++;
+						remainders[maxCat] = -1;
+						allocated++;
+					} else {
+						break;
+					}
+				}
 
 				// Stack segments in CATEGORY_ORDER — matches the legend by construction
 				for (const cat of CATEGORY_ORDER) {

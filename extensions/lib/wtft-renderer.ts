@@ -609,7 +609,7 @@ export function buildTimelineString(
 		const color = isCurrent ? "1;" + (isSurge ? "38;5;208" : "32") : (isSurge ? "38;5;208" : "32");
 		// Noon (h=12): use 🕛 (clock face twelve o'clock) instead of "-" so the
 		// divider's purpose is self-documenting. The diamond still wins at current hour.
-		const char = isCurrent ? "◆" : (h === 12 ? "🕛" : "-");
+		const char = isCurrent ? "◆" : (h === 12 ? "🕛" : "─");
 
 		if (color !== lastColor) {
 			segments.push({ color, text: char });

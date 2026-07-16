@@ -594,10 +594,25 @@ export function checkSurgeProximity(): { status: 'surge' | 'approaching' | 'endi
  * @param currentHour - Current local hour (0-23) for diamond marker
  * @param proximityStatus - If set, appends the appropriate surge badge
  */
+// Moon phase emoji — 8 phases from new moon through waning crescent.
+const MOON_PHASES = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"];
+const SYNODIC_MONTH_MS = 29.53058867 * 86400000;
+// Reference new moon: 2000-01-06 18:14 UTC.
+const REF_NEW_MOON = new Date("2000-01-06T18:14:00Z").getTime();
+
+function getMoonPhase(date: Date): string {
+	const ageMs = (date.getTime() - REF_NEW_MOON) % SYNODIC_MONTH_MS;
+	const ageDays = (ageMs + SYNODIC_MONTH_MS) % SYNODIC_MONTH_MS / 86400000;
+	const phase = Math.floor((ageDays / 29.53058867) * 8) % 8;
+	return MOON_PHASES[phase];
+}
+
 export function buildTimelineString(
 	surgeHours: Set<number>,
 	currentHour: number,
-	proximityStatus?: 'surge' | 'approaching' | 'ending'
+	proximityStatus?: 'surge' | 'approaching' | 'ending',
+	/** Date for moon-phase bookends — defaults to now. */
+	date?: Date
 ): string {
 	const segments: { color: string; text: string }[] = [];
 	let lastColor: string | null = null;
@@ -607,9 +622,10 @@ export function buildTimelineString(
 		const isCurrent = h === currentHour;
 
 		const color = isCurrent ? "1;" + (isSurge ? "38;5;208" : "32") : (isSurge ? "38;5;208" : "32");
-		// Noon (h=12): use 🕛 (clock face twelve o'clock) instead of "-" so the
-		// divider's purpose is self-documenting. The diamond still wins at current hour.
-		const char = isCurrent ? "◆" : (h === 12 ? "🕛" : "─");
+		// Current hour → clock face emoji (🕛🕐🕑…🕚, hour % 12).
+		// Noon when not current → ☀️ sun. Otherwise → ─ box-drawing rule.
+		const CLOCK_FACES = ["🕛","🕐","🕑","🕒","🕓","🕔","🕕","🕖","🕗","🕘","🕙","🕚"];
+		const char = isCurrent ? CLOCK_FACES[h % 12] : (h === 12 ? "☀️" : "─");
 
 		if (color !== lastColor) {
 			segments.push({ color, text: char });
@@ -620,7 +636,8 @@ export function buildTimelineString(
 	}
 
 	const timelineBody = segments.map(s => `\x1b[${s.color}m${s.text}\x1b[0m`).join("");
-	let result = `(${timelineBody})`;
+	const moon = getMoonPhase(date ?? new Date());
+	let result = `${moon}${timelineBody}${moon}`;
 
 	if (proximityStatus === 'surge') {
 		result += ` \x1b[1;38;5;208m⚡ SURGE 2x\x1b[0m`;

@@ -15,6 +15,7 @@ import {
 import { execSync } from "node:child_process";
 import wcwidth from "wcwidth";
 export interface Bin {
+	key?: string; // ISO bin key (e.g. "2026-07-15T18:00") — populated at creation
 	label: string;
 	dateStr: string;
 	costs: Record<Category, number>;
@@ -716,7 +717,7 @@ export function buildWtftLines(
 			for (const cat of ALL_CATEGORIES) {
 				costs[cat] = 0;
 			}
-			bin = { label, dateStr, costs, total_cost: 0 };
+			bin = { key, label, dateStr, costs, total_cost: 0 };
 			binMap.set(key, bin);
 		}
 
@@ -741,6 +742,32 @@ export function buildWtftLines(
 	const sortedBins = Array.from(binMap.entries())
 		.sort((a, b) => a[0].localeCompare(b[0]))
 		.map(entry => entry[1]);
+
+	// Detect cache TTL expiry boundaries (#106). Walk interactions chronologically;
+	// when a cache write's TTL window elapses before the next interaction, mark
+	// that bin boundary for a "Cache Expired" divider line.
+	const cacheExpiryBins = new Set<string>();
+	{
+		const sortedInteractions = [...interactions].sort(
+			(a, b) => a.timestamp - b.timestamp
+		);
+		let latestExpiry: number | null = null;
+		for (const ix of sortedInteractions) {
+			const ts = new Date(ix.timestamp).getTime();
+			if (latestExpiry !== null && ts > latestExpiry) {
+				const { key } = getBinInfo(ix.timestamp, intervalConfig, tz);
+				cacheExpiryBins.add(key);
+				latestExpiry = null;
+			}
+			if (ix.cacheTtl) {
+				const ttlMs = ix.cacheTtl === "1h" ? 3600000 : 300000;
+				const expiry = ts + ttlMs;
+				if (latestExpiry === null || expiry > latestExpiry) {
+					latestExpiry = expiry;
+				}
+			}
+		}
+	}
 
 	// Apply mode conversions
 	if (mode === "cumulative") {
@@ -988,31 +1015,41 @@ export function buildWtftLines(
 		}
 	}
 
+	// Helper: build a tick-aligned divider line with a left-side label.
+	// Same format as day change dividers, reused for cache TTL expiry (#106).
+	const buildDividerLine = (labelText: string): string => {
+		const prefix = `── ${labelText} `;
+		const dividerLen = Math.max(0, (finalWidth - tickReserve) - prefix.length);
+		const chars = Array.from({ length: dividerLen }, () => "─");
+		const tickPositions = [
+			prefixWidth,
+			prefixWidth + Math.floor(maxBarWidth / 4),
+			prefixWidth + Math.floor(maxBarWidth / 2),
+			prefixWidth + Math.floor((maxBarWidth * 3) / 4),
+			prefixWidth + maxBarWidth - 1
+		];
+		for (const t of tickPositions) {
+			const idx = t - prefix.length;
+			if (idx >= 0 && idx < chars.length) {
+				chars[idx] = "┼";
+			}
+		}
+		return prefix + chars.join("");
+	};
+
 	// Render binned stacked bars
 	for (let i = 0; i < displayedBins.length; i++) {
 		const bin = displayedBins[i];
 
-		// Day boundary divider (same for both modes)
+		// Day boundary divider (only with --ticks enabled)
 		if (showTicks && i > 0 && bin.dateStr !== displayedBins[i - 1].dateStr) {
-			const labelDay = formatMmmDdStr(bin.dateStr);
-			const dayChangeText = `── ${labelDay} `;
-			const dividerLen = Math.max(0, (finalWidth - tickReserve) - dayChangeText.length);
-			const dividerChars = Array.from({ length: dividerLen }, () => "─");
-			const tickPositions = [
-				prefixWidth,
-				prefixWidth + Math.floor(maxBarWidth / 4),
-				prefixWidth + Math.floor(maxBarWidth / 2),
-				prefixWidth + Math.floor((maxBarWidth * 3) / 4),
-				prefixWidth + maxBarWidth - 1
-			];
-			for (const t of tickPositions) {
-				const idx = t - dayChangeText.length;
-				if (idx >= 0 && idx < dividerChars.length) {
-					dividerChars[idx] = "┼";
-				}
-			}
-			const dividerLine = dayChangeText + dividerChars.join("");
-			widgetLines.push(`\x1b[90m${dividerLine}\x1b[0m`);
+			widgetLines.push(`\x1b[90m${buildDividerLine(formatMmmDdStr(bin.dateStr))}\x1b[0m`);
+		}
+
+		// Cache TTL expiry divider (#106) — always shown, even with --no-ticks.
+		// Drawn when the cache from a previous interaction expired before this bin.
+		if (bin.key && cacheExpiryBins.has(bin.key)) {
+			widgetLines.push(`\x1b[90m${buildDividerLine("Cache Expired")}\x1b[0m`);
 		}
 
 		const labelPart = padString(bin.label, labelWidth);

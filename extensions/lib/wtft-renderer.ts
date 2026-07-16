@@ -597,13 +597,17 @@ export function checkSurgeProximity(): { status: 'surge' | 'approaching' | 'endi
 // Moon phase emoji — 8 phases from new moon through waning crescent.
 const MOON_PHASES = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"];
 const SYNODIC_MONTH_MS = 29.53058867 * 86400000;
-// Reference new moon: 2000-01-06 18:14 UTC.
-const REF_NEW_MOON = new Date("2000-01-06T18:14:00Z").getTime();
+// Reference new moon: 2026-07-14 09:43 UTC. Re-centre every ~2 years.
+const REF_NEW_MOON = new Date("2026-07-14T09:43:00Z").getTime();
 
 function getMoonPhase(date: Date): string {
 	const ageMs = (date.getTime() - REF_NEW_MOON) % SYNODIC_MONTH_MS;
 	const ageDays = (ageMs + SYNODIC_MONTH_MS) % SYNODIC_MONTH_MS / 86400000;
-	const phase = Math.floor((ageDays / 29.53058867) * 8) % 8;
+	// Offset by half a phase width so each bucket is centred on its
+	// astronomical event (e.g. 🌑 covers ±1.8d around exact new moon,
+	// not 0-3.7d which would classify a 2-day crescent as "new").
+	const centered = ((ageDays + 29.53058867 / 16) / 29.53058867);
+	const phase = Math.floor(centered * 8) % 8;
 	return MOON_PHASES[phase];
 }
 
@@ -622,10 +626,10 @@ export function buildTimelineString(
 		const isCurrent = h === currentHour;
 
 		const color = isCurrent ? "1;" + (isSurge ? "38;5;208" : "32") : (isSurge ? "38;5;208" : "32");
-		// Current hour → clock face emoji (🕛🕐🕑…🕚, hour % 12).
-		// Noon when not current → ☀️ sun. Otherwise → ─ box-drawing rule.
+		// Current hour → clock face emoji (never at noon — ☀️ owns position 12).
+		// Noon → ☀️ sun. Otherwise → ─ box-drawing rule.
 		const CLOCK_FACES = ["🕛","🕐","🕑","🕒","🕓","🕔","🕕","🕖","🕗","🕘","🕙","🕚"];
-		const char = isCurrent ? CLOCK_FACES[h % 12] : (h === 12 ? "☀️" : "─");
+		const char = (isCurrent && h !== 12) ? CLOCK_FACES[h % 12] : (h === 12 ? "☀️" : "─");
 
 		if (color !== lastColor) {
 			segments.push({ color, text: char });

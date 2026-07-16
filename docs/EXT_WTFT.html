@@ -158,13 +158,16 @@
     </table>
 
     <h3>SURGE Timeline (24-hour pricing bar)</h3>
-    <p>The title line renders a 24-hour timeline showing DeepSeek peak-valley surge pricing windows. Orange segments mark surge-priced hours (UTC 01:00–04:00 and 06:00–10:00 mapped to local time), green segments mark normal-priced hours, and a ◆ diamond marks the current hour. When in or near a surge window, a badge is appended: <code>⚡ SURGE 2x</code> (active), <code>⚡ SURGE APPROACHING</code> (within 20 min of start, blinking orange), or <code>⚡ SURGE ENDING</code> (within 20 min of end, blinking green).</p>
+    <p>The title line renders a 24-hour timeline showing DeepSeek peak-valley surge pricing windows. Orange segments mark surge-priced hours (UTC 01:00–04:00 and 06:00–10:00 mapped to local time), green segments mark normal-priced hours. The timeline uses <code>─</code> box-drawing horizontal rule characters (U+2500) for a continuous unbroken line.</p>
+    <p><strong>Markers:</strong> The current hour displays a clock-face emoji (<code>🕐</code>–<code>🕛</code>, hour % 12). Noon (hour 12) always shows <code>☀️</code> — the clock face never overwrites it. The timeline is bookended by the current moon phase emoji (<code>🌑</code>–<code>🌘</code>, computed from synodic-month formula anchored to 2026-07-14 new moon with half-phase centering).</p>
+    <p><strong>Badges:</strong> When in or near a surge window, a badge is appended: <code>⚡ SURGE 2x</code> (active), <code>⚡ SURGE APPROACHING</code> (within 20 min of start, blinking orange), or <code>⚡ SURGE ENDING</code> (within 20 min of end, blinking green).</p>
+    <p><strong>Cache Expired divider:</strong> When a cache write's TTL (5m or 1h) elapses before the next interaction, a <code>── Cache Expired ──</code> divider line with tick-position <code>┼</code> markers is drawn at the bin boundary — always shown, even with <code>--no-ticks</code>.</p>
     <p><strong>Unified in <code>buildWtftLines</code>:</strong> Both Pi widget and CLI (non-watch and <code>--watch</code>) share one code path. The Pi widget passes the session model explicitly; the CLI auto-detects DeepSeek from classified interactions. Non-DeepSeek models render an all-green timeline with no badges.</p>
 
     <h3>TUI Visualization Style</h3>
     <p>The TUI offers two distinct high-fidelity visualization styles depending on the display mode:</p>
     <ul>
-        <li><strong>Cumulative Mode (Stacked Bars):</strong> Renders a stacked, horizontal binned bar representing overall running cost over time. Each segment is allocated its proportional share of block characters (<code>█</code>, <code>▒</code>, <code>░</code>) using a generalized implementation of the Largest Remainder Method, ensuring perfect pixel alignment.</li>
+        <li><strong>Cumulative Mode (Stacked Bars):</strong> Renders a stacked, horizontal binned bar representing overall running cost over time. Each category's segment is allocated characters from its absolute cumulative cost against the global scale-maximum, guaranteeing monotonically non-decreasing bar widths — a category's segment can only grow, never shrink, matching the mathematical guarantee that cumulative subtotals increase (#106).</li>
         <li><strong>Bucket Mode (Scatter/Multi-Line Plot):</strong> Acts as a non-stacked point-of-spend multi-line chart. Each category is evaluated independently, placing exactly <strong>one colored marker block</strong> at its absolute visual position on the scale. Categories that did not spend anything in that interval are omitted. To resolve overlap conflicts where multiple categories happen to fall onto the same horizontal index, characters are plotted in the reverse priority of the legend (from right to left, i.e., <code>Other</code> -> <code>Spec</code>) ensuring that more critical categories like <code>Spec</code> always overlay and sit on top of others.</li>
     </ul>
     <p>Legend indicators are placed dynamically on the top title row (or on the second row if the terminal width is narrow), completely removing the redundant 'Legend:' prefix as it is self-evident.</p>
@@ -172,7 +175,7 @@
     
     <h4 style="color: var(--accent-yellow); margin-bottom: 5px;">Example 1: Granular 1-Minute Cumulative Widget (Wide Terminal with Collapsed, Inverted Ticks)</h4>
     <pre style="background: var(--box-bg); padding: 12px; border-radius: 6px; border: 1px solid #404040; overflow-x: auto; color: #f0f0f0; font-family: monospace;">
-💸 WTF Tokens?  (◆--◆) ⚡ SURGE 2x
+💸 WTF Tokens?  🌒────────☀️───────🕚🌒 ⚡ SURGE 2x
 <span style="color: #87af87;">█</span> Spec  <span style="color: #87af87; background: #d7875f;">▒</span> Mixed  <span style="color: #d7875f;">█</span> Code  <span style="color: #ffafaf;">█</span> Tests  <span style="color: #af5fd7;">█</span> Research  <span style="color: #5fafaf;">█</span> Git  <span style="color: #5f87af;">█</span> Grep  <span style="color: #d75f87;">░</span> Prompt  <span style="color: #444444;">░</span> Other
 <span style="color: #888;">── Jun-20 ───────────<span style="background: #e0e0e0; color: #1e1e1e;"> $0.00 </span>──────<span style="background: #e0e0e0; color: #1e1e1e;"> $6.25 </span>─────<span style="background: #e0e0e0; color: #1e1e1e;"> $12.50 </span>─────<span style="background: #e0e0e0; color: #1e1e1e;"> $18.75 </span>─────<span style="background: #e0e0e0; color: #1e1e1e;"> $25.00 </span></span>
 <span style="color: #888;">22:42</span>  <span style="color: #888;">+$13.00</span>  <strong>$23.00</strong>  <span style="color: #87af87; background: #d7875f;">▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒</span><span style="color: #d7875f;">█████████████████████</span>
@@ -181,7 +184,7 @@
 
     <h4 style="color: var(--accent-yellow); margin-bottom: 5px;">Example 2: 1-Hour Bucket Widget Crossing Day Boundary (Point-of-Spend Multi-Line Style)</h4>
     <pre style="background: var(--box-bg); padding: 12px; border-radius: 6px; border: 1px solid #404040; overflow-x: auto; color: #f0f0f0; font-family: monospace;">
-💸 WTF Tokens?  (◆--◆) ⚡ SURGE 2x
+💸 WTF Tokens?  🌒────────☀️───────🕚🌒 ⚡ SURGE 2x
 <span style="color: #87af87;">█</span> Spec  <span style="color: #87af87; background: #d7875f;">▒</span> Mixed  <span style="color: #d7875f;">█</span> Code  <span style="color: #ffafaf;">█</span> Tests  <span style="color: #af5fd7;">█</span> Research  <span style="color: #5fafaf;">█</span> Git  <span style="color: #5f87af;">█</span> Grep  <span style="color: #d75f87;">░</span> Prompt  <span style="color: #444444;">░</span> Other
 <span style="color: #888;">── Jun-20 ──<span style="background: #e0e0e0; color: #1e1e1e;"> $0.00 </span>────────<span style="background: #e0e0e0; color: #1e1e1e;"> $3.25 </span>────────<span style="background: #e0e0e0; color: #1e1e1e;"> $6.50 </span>───────<span style="background: #e0e0e0; color: #1e1e1e;"> $9.75 </span>───────<span style="background: #e0e0e0; color: #1e1e1e;"> $13.00 </span></span>
 <span style="color: #888;">22:00</span>  <strong>$13.00</strong>                                                                  <span style="color: #87af87; background: #d7875f;">▒</span>

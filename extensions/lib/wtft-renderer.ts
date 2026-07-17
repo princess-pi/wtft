@@ -1068,13 +1068,14 @@ export function buildWtftLines(
 	}
 
 	// Pre-compute cumulative cost-mode half-slot allocations in chronological
-	// order with clamping (#106, #109). Operates at double resolution (barWidth × 2
-	// half-slots) for half-block rendering. Clamping ensures every category's
-	// segment is strictly ≥ its previous bin's segment.
+	// order with clamping (#106, #109). Half-slot distribution preserves boundary
+	// precision (▌ at category transitions). Clamping only applies to categories
+	// with ≥ 2 half-slots (1 full char) to avoid the "every category gets 1
+	// half-slot" artifact.
 	const precomputedHalfSlots: Map<Bin, Record<Category, number>> = new Map();
 	if (mode === "cumulative" && unit === "cost") {
 		const chronological = [...displayedBins].reverse();
-		let prevHalfSlots: Record<Category, number> | null = null;
+		let prevSlots: Record<Category, number> | null = null;
 		for (const bin of chronological) {
 			const barWidthCells = scaleMax > 0 ? Math.round((bin.total_cost / scaleMax) * maxBarWidth) : 0;
 			const halfSlotWidth = barWidthCells * 2;
@@ -1089,11 +1090,16 @@ export function buildWtftLines(
 				allocated += slots[cat];
 			}
 
-			// Clamp to previous bin (guarantees monotonicity across bins)
-			if (prevHalfSlots) {
+			// Clamp to previous bin — only for categories with ≥ 2 half-slots
+			// (1 full char). Tiny 1-half-slot allocations from remainder
+			// distribution are allowed to flicker; clamping them would make
+			// every category permanently visible.
+			if (prevSlots) {
 				let clampedTotal = 0;
 				for (const cat of CATEGORY_ORDER) {
-					slots[cat] = Math.max(slots[cat], prevHalfSlots[cat]);
+					if (prevSlots[cat] >= 2) {
+						slots[cat] = Math.max(slots[cat], prevSlots[cat]);
+					}
 					clampedTotal += slots[cat];
 				}
 				// If clamping overshot halfSlotWidth, trim from categories that grew
@@ -1103,7 +1109,7 @@ export function buildWtftLines(
 					let maxGrow = -1, maxCat: Category | null = null;
 					for (const cat of CATEGORY_ORDER) {
 						if (slots[cat] <= 0) continue;
-						const grow = slots[cat] - prevHalfSlots[cat];
+						const grow = slots[cat] - (prevSlots[cat] || 0);
 						if (grow > maxGrow) { maxGrow = grow; maxCat = cat; }
 					}
 					if (maxCat) { slots[maxCat]--; excess--; }
@@ -1132,7 +1138,7 @@ export function buildWtftLines(
 			}
 
 			precomputedHalfSlots.set(bin, slots);
-			prevHalfSlots = { ...slots };
+			prevSlots = { ...slots };
 		}
 	}
 
@@ -1218,9 +1224,8 @@ export function buildWtftLines(
 			// --- COST MODE BAR RENDERING (#109: half-block resolution) ---
 			let barStr = "";
 			if (mode === "cumulative") {
-				// Use precomputed half-slots (see pre-computation pass above for
-				// absolute-cost allocation + clamping logic that guarantees
-				// monotonicity — #106, #109).
+				// Use precomputed half-slots directly (#109). Clamping threshold
+				// (≥ 2 half-slots) prevents tiny categories from persisting.
 				const halfSlotCounts = precomputedHalfSlots.get(bin)!;
 				const halfSlots = halfSlotCountsToArray(halfSlotCounts);
 				barStr = renderHalfBlockBar(halfSlots, CATEGORY_STYLE);

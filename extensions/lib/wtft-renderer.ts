@@ -44,24 +44,26 @@ export const CATEGORY_ORDER: Category[] = [
 ];
 
 /** fg = legend/bar ANSI 256 color; bg = token-mode segment (dark tones for
- *  bright-white density chars); char = bar glyph; label = legend text.
+ *  bright-white density chars); char = bar glyph (█ for cost-mode half-block
+ *  rendering #109); label = legend text.
  *  Phase 3 (#52) wired the overhead trio: Ovrhd = recache (full-context 1h-tier
- *  rewrite), Waste = user-killed turns, Cmpct = compaction cache re-write. */
+ *  rewrite), Waste = user-killed turns, Cmpct = compaction cache re-write.
+ *  Palette rebalanced (#109): adjacent-pair distinctness, no red/green adjacency. */
 const CATEGORY_STYLE: Record<Category, { fg: number; bg: number; char: string; label: string | null }> = {
-	plan:        { fg: 116, bg: 30,  char: "█", label: "Plan" },
-	spec:        { fg: 108, bg: 22,  char: "█", label: "Spec" },
-	research:    { fg: 134, bg: 54,  char: "█", label: "Research" },
-	web:         { fg: 209, bg: 88,  char: "▓", label: "Web" },
-	grep:        { fg: 67,  bg: 24,  char: "█", label: "Grep" },
-	code:        { fg: 173, bg: 130, char: "█", label: "Code" },
-	tests:       { fg: 223, bg: 178, char: "█", label: "Tests" },
-	git:         { fg: 73,  bg: 23,  char: "█", label: "Git" },
-	agents:      { fg: 141, bg: 55,  char: "█", label: "Agents" },
-	prompt:      { fg: 168, bg: 89,  char: "░", label: "Prompt" },
-	compaction:  { fg: 143, bg: 58,  char: "░", label: "Cmpct" },
-	interrupted: { fg: 167, bg: 52,  char: "░", label: "Waste" },
-	overhead:    { fg: 179, bg: 94,  char: "░", label: "Ovrhd" },
-	other:       { fg: 238, bg: 236, char: "░", label: "Other" },
+	plan:        { fg: 75,  bg: 30,  char: "█", label: "Plan" },
+	spec:        { fg: 117, bg: 22,  char: "█", label: "Spec" },
+	research:    { fg: 141, bg: 54,  char: "█", label: "Research" },
+	web:         { fg: 209, bg: 88,  char: "█", label: "Web" },
+	grep:        { fg: 68,  bg: 24,  char: "█", label: "Grep" },
+	code:        { fg: 179, bg: 130, char: "█", label: "Code" },
+	tests:       { fg: 149, bg: 178, char: "█", label: "Tests" },
+	git:         { fg: 110, bg: 23,  char: "█", label: "Git" },
+	agents:      { fg: 204, bg: 55,  char: "█", label: "Agents" },
+	prompt:      { fg: 216, bg: 89,  char: "█", label: "Prompt" },
+	compaction:  { fg: 143, bg: 58,  char: "█", label: "Cmpct" },
+	interrupted: { fg: 197, bg: 52,  char: "█", label: "Waste" },
+	overhead:    { fg: 180, bg: 94,  char: "█", label: "Ovrhd" },
+	other:       { fg: 245, bg: 236, char: "█", label: "Other" },
 };
 
 /** 256-color background codes for token-mode bar segments (derived from CATEGORY_STYLE). */
@@ -287,6 +289,105 @@ export function distributeChars(costs: Record<Category, number>, barWidth: numbe
 			allocated++;
 		} else {
 			break;
+		}
+	}
+	return result;
+}
+
+// ---
+// HALF-BLOCK RENDERING (#109): double resolution inside each terminal cell.
+// Each cell encodes 2 half-slots via a single glyph:
+//   █ (full block) when both half-slots are the same category (FG only)
+//   ▌ (left half block) when they differ (FG=left category, BG=right category)
+// ---
+
+/**
+ * Distribute proportional counts across barWidth × 2 half-slots.
+ * Same remainder-distribution algorithm as {@link distributeChars}, but at
+ * double resolution for half-block rendering.
+ */
+export function distributeHalfSlots(costs: Record<Category, number>, barWidth: number): Record<Category, number> {
+	const total = Object.values(costs).reduce((sum, val) => sum + val, 0);
+	const result = {} as Record<Category, number>;
+	const remainders = {} as Record<Category, number>;
+	const categories = Object.keys(costs) as Category[];
+	const halfSlots = barWidth * 2;
+
+	if (total <= 0 || halfSlots <= 0) {
+		for (const cat of categories) result[cat] = 0;
+		return result;
+	}
+
+	let allocated = 0;
+	for (const cat of categories) {
+		const raw = (costs[cat] / total) * halfSlots;
+		result[cat] = Math.floor(raw);
+		remainders[cat] = raw - result[cat];
+		allocated += result[cat];
+	}
+
+	while (allocated < halfSlots) {
+		let maxCat: Category | null = null;
+		let maxRemainder = -1;
+		for (const cat of categories) {
+			if (remainders[cat] > maxRemainder) {
+				maxRemainder = remainders[cat];
+				maxCat = cat;
+			}
+		}
+		if (maxCat) {
+			result[maxCat]++;
+			remainders[maxCat] = -1;
+			allocated++;
+		} else {
+			break;
+		}
+	}
+	return result;
+}
+
+/**
+ * Render half-slots into terminal glyphs.
+ *
+ * Walks the half-slot array left-to-right, pairing slots[2n] + slots[2n+1]
+ * into one terminal cell each:
+ * - Same category → █ (full block) with FG = category color
+ * - Different categories → ▌ (left half block) with FG = left cat, BG = right cat
+ *
+ * @param halfSlots - Array of category tags, length = barWidth × 2
+ * @param styles - CATEGORY_STYLE lookup for FG colors
+ * @returns ANSI string for the bar (barWidth cells wide)
+ */
+export function renderHalfBlockBar(
+	halfSlots: Category[],
+	styles: Record<Category, { fg: number }>
+): string {
+	let out = "";
+	for (let i = 0; i < halfSlots.length; i += 2) {
+		const left = halfSlots[i];
+		const right = halfSlots[i + 1];
+		const fgLeft = styles[left]?.fg ?? 245;
+		if (left === right || right === undefined) {
+			out += `\x1b[38;5;${fgLeft}m█\x1b[0m`;
+		} else {
+			const fgRight = styles[right]?.fg ?? 245;
+			out += `\x1b[38;5;${fgLeft};48;5;${fgRight}m▌\x1b[0m`;
+		}
+	}
+	return out;
+}
+
+/**
+ * Flatten per-category half-slot counts into a half-slot array ordered by
+ * CATEGORY_ORDER, for feeding into {@link renderHalfBlockBar}.
+ *
+ * Example: { plan: 2, code: 3 } → ["plan", "plan", "code", "code", "code"]
+ */
+export function halfSlotCountsToArray(counts: Record<Category, number>): Category[] {
+	const result: Category[] = [];
+	for (const cat of CATEGORY_ORDER) {
+		for (let i = 0; i < (counts[cat] || 0); i++) {
+			result.push(cat);
 		}
 	}
 	return result;
@@ -966,54 +1067,53 @@ export function buildWtftLines(
 		}
 	}
 
-	// Pre-compute cumulative cost-mode char allocations in chronological
-	// order with clamping (#106). The absolute-cost floor alone guarantees
-	// monotonic non-decrease, but remainder redistribution can still give
-	// a +1 that disappears next bin — visible for small categories (Plan
-	// at 2–3 chars, a 1-char flicker is 33–50% of width). Clamping ensures
-	// every category's segment is strictly ≥ its previous bin's segment.
-	const precomputedChars: Map<Bin, Record<Category, number>> = new Map();
+	// Pre-compute cumulative cost-mode half-slot allocations in chronological
+	// order with clamping (#106, #109). Operates at double resolution (barWidth × 2
+	// half-slots) for half-block rendering. Clamping ensures every category's
+	// segment is strictly ≥ its previous bin's segment.
+	const precomputedHalfSlots: Map<Bin, Record<Category, number>> = new Map();
 	if (mode === "cumulative" && unit === "cost") {
 		const chronological = [...displayedBins].reverse();
-		let prevChars: Record<Category, number> | null = null;
+		let prevHalfSlots: Record<Category, number> | null = null;
 		for (const bin of chronological) {
-			const barWidth = scaleMax > 0 ? Math.round((bin.total_cost / scaleMax) * maxBarWidth) : 0;
-			const chars = {} as Record<Category, number>;
+			const barWidthCells = scaleMax > 0 ? Math.round((bin.total_cost / scaleMax) * maxBarWidth) : 0;
+			const halfSlotWidth = barWidthCells * 2;
+			const slots = {} as Record<Category, number>;
 			let allocated = 0;
 			const remainders = {} as Record<Category, number>;
 
 			for (const cat of CATEGORY_ORDER) {
-				const raw = scaleMax > 0 ? (bin.costs[cat] / scaleMax) * maxBarWidth : 0;
-				chars[cat] = Math.floor(raw);
-				remainders[cat] = raw - chars[cat];
-				allocated += chars[cat];
+				const raw = scaleMax > 0 ? (bin.costs[cat] / scaleMax) * halfSlotWidth : 0;
+				slots[cat] = Math.floor(raw);
+				remainders[cat] = raw - slots[cat];
+				allocated += slots[cat];
 			}
 
 			// Clamp to previous bin (guarantees monotonicity across bins)
-			if (prevChars) {
+			if (prevHalfSlots) {
 				let clampedTotal = 0;
 				for (const cat of CATEGORY_ORDER) {
-					chars[cat] = Math.max(chars[cat], prevChars[cat]);
-					clampedTotal += chars[cat];
+					slots[cat] = Math.max(slots[cat], prevHalfSlots[cat]);
+					clampedTotal += slots[cat];
 				}
-				// If clamping overshot barWidth, trim from categories that grew
+				// If clamping overshot halfSlotWidth, trim from categories that grew
 				// the most (they stole from others' remainder slots).
-				let excess = clampedTotal - barWidth;
+				let excess = clampedTotal - halfSlotWidth;
 				while (excess > 0) {
 					let maxGrow = -1, maxCat: Category | null = null;
 					for (const cat of CATEGORY_ORDER) {
-						if (chars[cat] <= 0) continue;
-						const grow = chars[cat] - prevChars[cat];
+						if (slots[cat] <= 0) continue;
+						const grow = slots[cat] - prevHalfSlots[cat];
 						if (grow > maxGrow) { maxGrow = grow; maxCat = cat; }
 					}
-					if (maxCat) { chars[maxCat]--; excess--; }
+					if (maxCat) { slots[maxCat]--; excess--; }
 					else break;
 				}
-				allocated = barWidth - excess;
+				allocated = halfSlotWidth - excess;
 			}
 
-			// Distribute remainders (only if not already at barWidth from clamping)
-			while (allocated < barWidth) {
+			// Distribute remainders (only if not already at halfSlotWidth from clamping)
+			while (allocated < halfSlotWidth) {
 				let maxCat: Category | null = null;
 				let maxRemainder = -1;
 				for (const cat of CATEGORY_ORDER) {
@@ -1023,7 +1123,7 @@ export function buildWtftLines(
 					}
 				}
 				if (maxCat) {
-					chars[maxCat]++;
+					slots[maxCat]++;
 					remainders[maxCat] = -1;
 					allocated++;
 				} else {
@@ -1031,8 +1131,8 @@ export function buildWtftLines(
 				}
 			}
 
-			precomputedChars.set(bin, chars);
-			prevChars = { ...chars };
+			precomputedHalfSlots.set(bin, slots);
+			prevHalfSlots = { ...slots };
 		}
 	}
 
@@ -1115,42 +1215,45 @@ export function buildWtftLines(
 				widgetLines.push(`${coloredLabel}  \x1b[1;37m${tokPart} tok\x1b[0m  ${barStr}`);
 			}
 		} else {
-			// --- COST MODE BAR RENDERING (original) ---
+			// --- COST MODE BAR RENDERING (#109: half-block resolution) ---
 			let barStr = "";
 			if (mode === "cumulative") {
-				// Use precomputed chars (see pre-computation pass above for
+				// Use precomputed half-slots (see pre-computation pass above for
 				// absolute-cost allocation + clamping logic that guarantees
-				// monotonicity — #106).
-				const chars = precomputedChars.get(bin)!;
-
-				// Stack segments in CATEGORY_ORDER — matches the legend by construction
-				for (const cat of CATEGORY_ORDER) {
-					const count = chars[cat] || 0;
-					if (count > 0) {
-						const { fg, char } = CATEGORY_STYLE[cat];
-						barStr += `\x1b[38;5;${fg}m${char.repeat(count)}\x1b[0m`;
-					}
-				}
+				// monotonicity — #106, #109).
+				const halfSlotCounts = precomputedHalfSlots.get(bin)!;
+				const halfSlots = halfSlotCountsToArray(halfSlotCounts);
+				barStr = renderHalfBlockBar(halfSlots, CATEGORY_STYLE);
 			} else {
-				const cells = Array(maxBarWidth).fill(" ");
-				// Paint in reverse workflow order so earlier-stage categories win
-				// cell collisions — same precedence the legend implies.
-				const categoriesInReverse = [...CATEGORY_ORDER].reverse().map(cat => ({
-					cat,
-					color: `\x1b[38;5;${CATEGORY_STYLE[cat].fg}m`,
-					char: CATEGORY_STYLE[cat].char,
-				}));
-
-				for (const { cat, color, char } of categoriesInReverse) {
+				// Bucket mode: two-pass cost-based collision resolution (#109).
+				// Pass 1: accumulate categories per position with their costs.
+				const buckets = new Map<number, { cat: Category; cost: number }[]>();
+				for (const cat of CATEGORY_ORDER) {
 					const cost = bin.costs[cat] || 0;
 					if (cost > 0 && scaleMax > 0) {
 						const pos = Math.round((cost / scaleMax) * (maxBarWidth - 1));
 						if (pos >= 0 && pos < maxBarWidth) {
-							cells[pos] = `${color}${char}\x1b[0m`;
+							if (!buckets.has(pos)) buckets.set(pos, []);
+							buckets.get(pos)!.push({ cat, cost });
 						}
 					}
 				}
-				barStr = cells.join("");
+				// Pass 2: per position, pick top 2 by cost, render as █ or ▌.
+				for (let pos = 0; pos < maxBarWidth; pos++) {
+					const entries = buckets.get(pos);
+					if (!entries || entries.length === 0) {
+						barStr += " ";
+					} else if (entries.length === 1) {
+						const fg = CATEGORY_STYLE[entries[0].cat].fg;
+						barStr += `\x1b[38;5;${fg}m█\x1b[0m`;
+					} else {
+						// Top 2 by cost
+						entries.sort((a, b) => b.cost - a.cost);
+						const fg = CATEGORY_STYLE[entries[0].cat].fg;
+						const bg = CATEGORY_STYLE[entries[1].cat].fg;
+						barStr += `\x1b[38;5;${fg};48;5;${bg}m▌\x1b[0m`;
+					}
+				}
 			}
 
 			if (mode === "cumulative") {

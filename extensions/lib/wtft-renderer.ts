@@ -1115,22 +1115,29 @@ export function buildWtftLines(
 					if (maxCat) { slots[maxCat]--; excess--; }
 					else break;
 				}
-				allocated = halfSlotWidth - excess;
+				// Recompute allocated from actual slot total.
+				// When clampedTotal < halfSlotWidth, excess is negative and
+				// halfSlotWidth - excess overshoots — remainder loop would skip.
+				allocated = 0;
+				for (const cat of CATEGORY_ORDER) allocated += slots[cat];
 			}
 
-			// Distribute remainders (only if not already at halfSlotWidth from clamping)
+			// Distribute remaining half-slots to categories furthest below their
+			// ideal proportional share. No gate on floor > 0 — the deficit formula
+			// naturally prefers categories with meaningful cost shares.
 			while (allocated < halfSlotWidth) {
+				let maxDeficit = -Infinity;
 				let maxCat: Category | null = null;
-				let maxRemainder = -1;
 				for (const cat of CATEGORY_ORDER) {
-					if (remainders[cat] > maxRemainder) {
-						maxRemainder = remainders[cat];
+					const ideal = (bin.costs[cat] / bin.total_cost) * halfSlotWidth;
+					const deficit = ideal - slots[cat];
+					if (deficit > maxDeficit) {
+						maxDeficit = deficit;
 						maxCat = cat;
 					}
 				}
 				if (maxCat) {
 					slots[maxCat]++;
-					remainders[maxCat] = -1;
 					allocated++;
 				} else {
 					break;

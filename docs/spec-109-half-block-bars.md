@@ -34,9 +34,22 @@ Existing `distributeChars` stays for token mode.
 
 No `▐` (right half block) needed — the left half covers both categories via FG+BG.
 
-### 3. Cumulative clamping at half-slot resolution
+### 3. Cumulative precomputation at half-slot resolution
 
-Same algorithm (#106), operating on `barWidth × 2` half-slots. No structural change.
+Precomputation distributes per-bin half-slot counts chronologically with:
+- **Floor distribution**: `floor((cost / scaleMax) * halfSlotWidth)` per category
+- **Clamping**: only for categories with ≥ 2 half-slots in previous bin (prevents "every
+  category gets 1 half-slot" artifact — 1-half-slot allocations from tiny costs are
+  allowed to flicker between bins)
+- **Trimming**: if clamping overshoots `halfSlotWidth`, trim from categories that grew
+  the most (same #106 algorithm, but growth computed against `prevSlots`, not clamped values)
+- **Deficit-based remainder distribution**: remaining half-slots go to the category
+  furthest below its ideal proportional share (`ideal = costShare * halfSlotWidth`).
+  This replaces the old one-remainder-per-category loop which was designed for char
+  resolution and can't fill `halfSlotWidth` at double resolution.
+- **Allocated tracking**: after clamping/trimming, `allocated` is recomputed from the
+  actual slot sum — not from `halfSlotWidth - excess` (which underflows when
+  `clampedTotal < halfSlotWidth`)
 
 ### 4. Bucket mode: cost-based top-2
 

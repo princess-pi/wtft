@@ -12,7 +12,7 @@ import {
 	buildWtftLines
 } from "./wtft-shared.js";
 import { splitOverheadCost } from "./wtft-parser.js";
-import { showCursor, hideCursor, enterRawStdin } from "./tty-helpers.js";
+import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
 export interface WatchSettings {
 	interval: string;
 	limit: number;
@@ -588,18 +588,21 @@ export async function watchTagFile(
 		}
 	};
 
-	// Alternate screen — isolated buffer, no scrollback interference.
-	process.stdout.write("\x1b[?1049h");
+	// In-place rendering — preserves scrollback above. Each re-render clears
+	// the previous render using visual-line counting (handles wrapping + resize).
 	hideCursor();
+	let lastLineCount = 0;
 	let lastBuffer: string[] = [];
 
-	// Shared exit: switch to normal screen, print final chart.
+	// Shared exit: clear the live chart, print final copy to scrollback.
 	const exitWatch = () => {
 		if (watcher) watcher.close();
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
-		process.stdout.write("\x1b[?1049l"); // back to normal screen
+		// Clear the in-place rendered chart
+		if (lastLineCount > 0) clearPreviousLines(lastLineCount);
 		showCursor();
 		cleanupStdin();
+		// Reprint final chart as static scrollback output
 		if (lastBuffer.length > 0) {
 			for (const l of lastBuffer) console.log(l);
 		}
@@ -743,8 +746,8 @@ export async function watchTagFile(
 	}
 
 	const render = () => {
-		// Clear alternate screen and re-render from top
-		process.stdout.write("\x1b[2J\x1b[H");
+		// Clear previous render using visual-line count (handles wrapping + resize).
+		if (lastLineCount > 0) clearPreviousLines(lastLineCount);
 
 		const width = getTerminalWidth();
 		const pad = settings.pad || 0;
@@ -824,11 +827,12 @@ export async function watchTagFile(
 
 		lastBuffer = [...buf];
 
-		// Write lines — alternate screen handles everything, no wrap worries
+		// Write all lines, then compute visual-line count for next clear
 		const allLines = buf.map(l => padStr + l);
-		for (const l of allLines) {
-			process.stdout.write(l + "\x1b[K\n");
-		}
+		const out = allLines.map(l => l + "\n").join("");
+		process.stdout.write(out);
+		const cols = process.stdout.columns || 80;
+		lastLineCount = visualLineCount(out, cols);
 		needsRedraw = false;
 	};
 
@@ -836,8 +840,9 @@ export async function watchTagFile(
 	render();
 	resetWatchdog();
 
-	// SIGWINCH handler — re-render on resize. Terminal re-flows old text
-	// to new boundaries; the next render's per-line \x1b[K handles it.
+	// SIGWINCH handler — re-render on resize. clearPreviousLines uses the
+	// previous render's visual-line count (computed at the old terminal width),
+	// so it always clears the correct number of rows.
 	process.on("SIGWINCH", () => {
 		render();
 		resetWatchdog();

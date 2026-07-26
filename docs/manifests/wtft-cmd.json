@@ -5,29 +5,29 @@
   "description": "Displays a horizontal, stacked TUI bar chart widget of your session's cost during each activity (Spec, Code, Plan, Agents, ...). Bars are cost totals tagged by each turn's action - every turn's cost includes the context re-send overhead regardless of category, and Prompt means pure conversational replies. For an input/output token decomposition use --tokens.",
   "why": [
     {
-      "scenario": "You just finished a coding session and want to see where your token costs went \u2014 was it all spec-writing or code refactoring?",
+      "scenario": "You just finished a coding session and want to see where your token costs went — was it all spec-writing or code refactoring?",
       "commands": [
         ""
       ],
-      "result": "A stacked bar chart widget appears showing your cost during each activity (Spec, Code, Plan, Agents, ...) over 1-hour intervals. You see exactly which hours burned the most tokens.",
+      "result": "A stacked bar chart widget appears showing your cost during each activity (Spec, Code, Plan, Agents, ...) over 1-hour intervals. You see exactly which hours cost the most.",
       "demo": [
-        "\u001b[90m\u2500\u2500 Jul-01 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[0m",
-        "\u001b[90m13:00\u001b[0m  \u001b[90m+$0.12\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;173m\u2588\u2588\u2588\u001b[0m\u001b[38;5;238m\u2591\u001b[0m",
-        "\u001b[90m14:00\u001b[0m  \u001b[90m+$0.51\u001b[0m  \u001b[1;37m$1.74\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;108;48;5;173m\u2592\u001b[0m\u001b[38;5;173m\u2588\u001b[0m",
-        "\u001b[90m15:00\u001b[0m  \u001b[90m+$0.09\u001b[0m  \u001b[1;37m$1.83\u001b[0m  \u001b[38;5;108m\u2588\u2588\u001b[0m\u001b[38;5;238m\u2591\u2591\u001b[0m"
+        "\u001b[90m── Jul-01 ──────────────────────────────────────────────────────\u001b[0m",
+        "\u001b[90m13:00\u001b[0m  \u001b[90m+$0.12\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[38;5;108m████\u001b[0m\u001b[38;5;173m███\u001b[0m\u001b[38;5;238m░\u001b[0m",
+        "\u001b[90m14:00\u001b[0m  \u001b[90m+$0.51\u001b[0m  \u001b[1;37m$1.74\u001b[0m  \u001b[38;5;108m██████\u001b[0m\u001b[38;5;108;48;5;173m▒\u001b[0m\u001b[38;5;173m█\u001b[0m",
+        "\u001b[90m15:00\u001b[0m  \u001b[90m+$0.09\u001b[0m  \u001b[1;37m$1.83\u001b[0m  \u001b[38;5;108m██\u001b[0m\u001b[38;5;238m░░\u001b[0m"
       ]
     },
     {
       "scenario": "You're tracking costs over a full workday and want finer granularity.",
       "commands": [
-        "-i 4h -l 48"
+        "-i 4h -l 12"
       ],
-      "result": "The last 48 four-hour intervals are displayed, giving you a two-day cost breakdown at quarter-day resolution.",
+      "result": "The last 12 four-hour intervals are displayed, giving you a two-day cost breakdown at quarter-day resolution.",
       "demo": [
-        "\u001b[90m\u2500\u2500 Jul-01 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[0m",
-        "\u001b[90m00:00\u001b[0m  \u001b[1;37m$3.45\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;173m\u2588\u2588\u2588\u001b[0m\u001b[38;5;134m\u2588\u001b[0m",
-        "\u001b[90m04:00\u001b[0m  \u001b[1;37m$8.12\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;173m\u2588\u2588\u2588\u2588\u001b[0m",
-        "\u001b[90m08:00\u001b[0m  \u001b[1;37m$2.10\u001b[0m  \u001b[38;5;108m\u2588\u2588\u001b[0m\u001b[38;5;168m\u2591\u001b[0m\u001b[38;5;238m\u2591\u001b[0m"
+        "\u001b[90m── Jul-01 ───────────────────────────\u001b[0m",
+        "\u001b[90m00:00\u001b[0m  \u001b[1;37m$3.45\u001b[0m  \u001b[38;5;108m████\u001b[0m\u001b[38;5;173m███\u001b[0m\u001b[38;5;134m█\u001b[0m",
+        "\u001b[90m04:00\u001b[0m  \u001b[1;37m$8.12\u001b[0m  \u001b[38;5;108m███████\u001b[0m\u001b[38;5;173m████\u001b[0m",
+        "\u001b[90m08:00\u001b[0m  \u001b[1;37m$2.10\u001b[0m  \u001b[38;5;108m██\u001b[0m\u001b[38;5;168m░\u001b[0m\u001b[38;5;238m░\u001b[0m"
       ]
     },
     {
@@ -35,11 +35,11 @@
       "commands": [
         "--harness claude-code"
       ],
-      "result": "The widget pulls session data from your Claude Code session directory instead of Pi's, rendering the same bar chart for Claude interactions.",
+      "result": "The chart pulls session data from your Claude Code session directory instead of Pi's, rendering the same bar chart for Claude interactions. (CLI only — the Pi extension auto-discovers Pi sessions.)",
       "demo": [
-        "\u001b[90m\u2500\u2500 Jul-01 (Claude Code) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[0m",
-        "\u001b[90m10:00\u001b[0m  \u001b[1;37m$5.67\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;173m\u2588\u2588\u001b[0m\u001b[38;5;108;48;5;173m\u2592\u001b[0m",
-        "\u001b[90m11:00\u001b[0m  \u001b[1;37m$2.34\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u001b[0m\u001b[38;5;73m\u2588\u001b[0m\u001b[38;5;67m\u2588\u001b[0m"
+        "\u001b[90m── Jul-01 (Claude Code) ────────────\u001b[0m",
+        "\u001b[90m10:00\u001b[0m  \u001b[1;37m$5.67\u001b[0m  \u001b[38;5;108m██████\u001b[0m\u001b[38;5;173m██\u001b[0m\u001b[38;5;108;48;5;173m▒\u001b[0m",
+        "\u001b[90m11:00\u001b[0m  \u001b[1;37m$2.34\u001b[0m  \u001b[38;5;108m███\u001b[0m\u001b[38;5;73m█\u001b[0m\u001b[38;5;67m█\u001b[0m"
       ]
     },
     {
@@ -47,12 +47,12 @@
       "commands": [
         "-p"
       ],
-      "result": "A fullscreen scrollable pager overlay opens with the expanded cost timeline.",
+      "result": "A fullscreen scrollable pager overlay opens with the expanded cost timeline. (Pi TUI only — not available in the CLI.)",
       "demo": [
-        "\u001b[1;36m\u250c\u2500\u2500 WTFT Cost Audit Scrollable Pager \u2500\u2500\u2510\u001b[0m",
-        "\u001b[90m\u2502\u001b[0m \u001b[90m13:00\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;173m\u2588\u2588\u2588\u001b[0m\u001b[38;5;238m\u2591\u001b[0m      \u001b[90m\u2502\u001b[0m",
-        "\u001b[90m\u2502\u001b[0m \u001b[90m14:00\u001b[0m  \u001b[1;37m$1.74\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;173m\u2588\u001b[0m      \u001b[90m\u2502\u001b[0m",
-        "\u001b[1;36m\u2514\u2500\u2500 \u2191\u2193/j/k  \u00b7  q/Esc exit (Row 1/32) \u2500\u2500\u2518\u001b[0m"
+        "\u001b[1;36m┌── WTFT Cost Audit Scrollable Pager ──┐\u001b[0m",
+        "\u001b[90m│\u001b[0m \u001b[90m13:00\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[38;5;108m████\u001b[0m\u001b[38;5;173m███\u001b[0m\u001b[38;5;238m░\u001b[0m      \u001b[90m│\u001b[0m",
+        "\u001b[90m│\u001b[0m \u001b[90m14:00\u001b[0m  \u001b[1;37m$1.74\u001b[0m  \u001b[38;5;108m██████\u001b[0m\u001b[38;5;173m█\u001b[0m      \u001b[90m│\u001b[0m",
+        "\u001b[1;36m└── ↑↓/j/k  ·  q/Esc exit (Row 1/32) ──┘\u001b[0m"
       ]
     },
     {
@@ -81,13 +81,13 @@
       "commands": [
         "--watch"
       ],
-      "result": "A real-time updating bar chart appears, re-rendering in-place as new interactions are logged. Runs until Ctrl+C. Ideal in a separate tmux pane.",
+      "result": "A real-time updating bar chart renders in-place as new interactions are logged. Runs until Ctrl+C or 'q'. Scrollback above the chart is preserved. Ideal in a separate tmux pane.",
       "demo": [
-        "\u001b[90mWatching session-abc123.jsonl (15 interactions, $4.23) \u2014 Ctrl+C to exit\u001b[0m",
-        "\u001b[90m\u2500\u2500 Jul-01 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[0m",
-        "\u001b[90m13:00\u001b[0m  \u001b[90m+$0.12\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;173m\u2588\u2588\u2588\u001b[0m\u001b[38;5;238m\u2591\u001b[0m",
-        "\u001b[90m14:00\u001b[0m  \u001b[90m+$0.51\u001b[0m  \u001b[1;37m$1.74\u001b[0m  \u001b[38;5;108m\u2588\u2588\u2588\u2588\u2588\u2588\u001b[0m\u001b[38;5;108;48;5;173m\u2592\u001b[0m\u001b[38;5;173m\u2588\u001b[0m",
-        "\u001b[90m15:00\u001b[0m  \u001b[90m+$0.09\u001b[0m  \u001b[1;37m$1.83\u001b[0m  \u001b[38;5;108m\u2588\u2588\u001b[0m\u001b[38;5;238m\u2591\u2591\u001b[0m"
+        "\u001b[90m/home/pi/sessions/session-abc123.jsonl\u001b[0m",
+        "\u001b[90m── Jul-01 ──────────────────────────────────────────────────────\u001b[0m",
+        "\u001b[90m13:00\u001b[0m  \u001b[90m+$0.12\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[38;5;108m████\u001b[0m\u001b[38;5;173m███\u001b[0m\u001b[38;5;238m░\u001b[0m",
+        "\u001b[90m14:00\u001b[0m  \u001b[90m+$0.51\u001b[0m  \u001b[1;37m$1.74\u001b[0m  \u001b[38;5;108m██████\u001b[0m\u001b[38;5;108;48;5;173m▒\u001b[0m\u001b[38;5;173m█\u001b[0m",
+        "'q' to exit, using v2.5.1"
       ]
     },
     {
@@ -95,7 +95,7 @@
       "commands": [
         "  # won't help"
       ],
-      "result": "WTFT uses public pricing estimates per model and excludes things like caching discounts, free-tier credits, or provider-specific billing nuances. It's a directional cost-awareness tool \u2014 not an accounting ledger."
+      "result": "WTFT uses public pricing estimates per model and excludes things like caching discounts, free-tier credits, or provider-specific billing nuances. It's a directional cost-awareness tool — not an accounting ledger."
     },
     {
       "scenario": "Your session has been idle for a while and the model cache has expired, or you're running a local model like Ollama with no remote caching at all.",
@@ -105,7 +105,7 @@
       "result": "Instead of hiding the widget or showing stale data, WTFT displays 'Cache Empty' (cloud models) or 'No Cache (local model)' in the widget area, plus the daemon's idle countdown. You know immediately whether the session is just idle or cache-free.",
       "demo": [
         "\u001b[90mCache Empty\u001b[0m",
-        "  \u001b[33m\u25CF\u001b[0m idle (0:23 to expire)"
+        "  \u001b[33m●\u001b[0m idle (0:23 to expire)"
       ]
     }
   ],

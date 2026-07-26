@@ -315,7 +315,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		handler: async (args, ctx) => {
 			const opts = parseWtftCliArgs((args || "").trim().split(/\s+/).filter(Boolean));
 			const { forceReparse, enableEmoji, showVersion, showHelp, showWhy,
-				other, tokens, hideWidget, hasInterval, interval,
+				other, tokens, cost, hideWidget, hasInterval, interval,
 				hasLimit, limit, hasWidth, width, hasTicks, showTicks,
 				hasMode, mode, hasTimezone, timezone, pager } = opts;
 

@@ -1,7 +1,6 @@
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
 	buildWtftLines as sharedBuildWtftLines,
@@ -11,245 +10,35 @@ import {
 	deduplicateInteractions,
 	getTerminalWidth,
 	getVisualLength,
-	checkDaemonHealth,
 	readClassifiedTagFile,
 	renderDaemonStatus,
 	getTagPath,
 	getDaemonPidPath,
 	getModelCacheTtlMs,
-	type DaemonStatus
 } from "./lib/wtft-shared.js";
 import { readConfig, writeConfig, hasConfig } from "./lib/config.js";
+import {
+	parseWtftCliArgs,
+	ensureDaemonRunning,
+	getDaemonStatus,
+	isEmojiDisabled,
+	renderWtftHelp,
+	renderWtftWhy,
+	renderWtftVersion,
+} from "./lib/wtft-cli-shared.js";
 
 // ---
 // SINGLE DATA SOURCE: classified tag file from wtft-daemon (#92)
 // All interactions are read from the tag file on each event — no internal
 // accumulation state. The daemon writes at most every 667ms; the gap between
 // agent_settled and the next daemon beat is invisible at widget render time.
-// Known rendering artifacts on terminal resize: tracked in #93.
 // ---
-let _parserSessionPath: string | null = null;
-let _parserSpawned = false;
 let _currentThinkingLevel: string | undefined;
 
-function ensureParserRunning(sessionPath: string): void {
-	// Same session, already spawned — but verify daemon is actually alive.
-	// If the daemon died (idle timeout, crash), reset and re-spawn.
-	if (_parserSpawned && _parserSessionPath === sessionPath) {
-		const tagPath = getTagPath(sessionPath);
-		const health = checkDaemonHealth(sessionPath, tagPath);
-		if (health.alive) return;
-		// Daemon dead — fall through to re-spawn
-		_parserSpawned = false;
-	}
-
-	const daemonPath = path.join(
-		path.dirname(fileURLToPath(import.meta.url)),
-		"..", "bin", "wtft-daemon.mjs"
-	);
-
-	try {
-		const child = spawn(process.execPath, [daemonPath, "--session", sessionPath], {
-			detached: true,
-			stdio: "ignore"
-		});
-		child.unref();
-		_parserSpawned = true;
-		_parserSessionPath = sessionPath;
-	} catch (_) {
-		// Daemon not available — status will show "log parser not found"
-	}
-}
-
-function getParserStatus(sessionPath: string): DaemonStatus {
-	if (!_parserSessionPath) return { alive: false, reason: "log parser not started" };
-	const tagPath = getTagPath(sessionPath);
-	const health = checkDaemonHealth(sessionPath, tagPath);
-	// Grace period: if the daemon PID is gone but the tag file was recently
-	// written (within 2s), a new daemon instance is spinning up — mask the
-	// restart gap by reporting alive (idle or live depending on session).
-	if (!health.alive && _parserSpawned) {
-		try {
-			const tagStat = fs.statSync(tagPath);
-			const tagAge = Date.now() - tagStat.mtimeMs;
-			if (tagAge < 2000 && tagStat.size > 0) {
-				return { alive: true, idle: true, idleMs: 0 };
-			}
-		} catch { /* tag file missing — genuinely dead */ }
-	}
-	return health;
-}
+// Daemon directory relative to this extension file
+const _daemonDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin");
 
 
-// Module-scope flag overrides so getSettings can see them.
-let hasTokens = false;
-let hasCost = false;
-
-// ---
-// ARGUMENT PARSING
-// ---
-
-function parseArgs(argsStr: string = "") {
-	const str = argsStr || "";
-	const args = str.trim().split(/\s+/).filter(Boolean);
-	let interval = "1h";
-	let limit = 10;
-	let width = 80;
-	let timezone: string | undefined = undefined;
-	let hideWidget = false;
-	let showWidget = false;
-	let showHelp = false;
-	let showWhy = false;
-	let showVersion = false;
-
-	let showTicks = true;
-	let mode: "bucket" | "cumulative" = "cumulative";
-	let pager = false;
-	let other = false;
-	let tokens = false;
-	let cost = false;
-	let enableEmoji: boolean | undefined = undefined;
-	let forceReparse = false;
-
-	let hasInterval = false;
-	let hasLimit = false;
-	let hasWidth = false;
-	let hasTicks = false;
-	let hasMode = false;
-	let hasTimezone = false;
-	let hasOther = false;
-
-	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
-		if (arg === "--help" || arg === "-h") {
-			showHelp = true;
-		} else if (arg === "--version") {
-			showVersion = true;
-		} else if (arg === "--why") {
-			showWhy = true;
-		} else if (arg === "--hide" || arg === "-H") {
-			hideWidget = true;
-		} else if (arg === "--show" || arg === "-S") {
-			showWidget = true;
-		} else if (arg === "-o" || arg === "--other") {
-			other = true;
-			hasOther = true;
-		} else if (arg === "--tokens" || arg === "-T") {
-			tokens = true;
-			cost = false;
-			hasTokens = true;
-		} else if (arg === "--cost" || arg === "-C") {
-			cost = true;
-			tokens = false;
-			hasCost = true;
-		} else if (arg === "--force" || arg === "-F") {
-			forceReparse = true;
-		} else if (arg === "--ticks") {
-			showTicks = true;
-			hasTicks = true;
-		} else if (arg === "--no-ticks") {
-			showTicks = false;
-			hasTicks = true;
-		} else if (arg === "--no-emojii" || arg === "--no-emoji") {
-			enableEmoji = false;
-		} else if (arg === "--emojii" || arg === "--emoji") {
-			enableEmoji = true;
-		} else if (arg === "--cumulative" || arg === "-c") {
-			mode = "cumulative";
-			hasMode = true;
-		} else if (arg === "--bucket" || arg === "-b") {
-			mode = "bucket";
-			hasMode = true;
-		} else if (arg === "--pager" || arg === "-p") {
-			pager = true;
-		} else if (arg === "-i" || arg === "--interval") {
-			const val = args[i + 1];
-			if (val && /^(\d+)([mhdw])$/.test(val)) {
-				interval = val;
-				hasInterval = true;
-				i++;
-			}
-		} else if (arg === "-l" || arg === "--limit") {
-			const val = args[i + 1];
-			const num = parseInt(val, 10);
-			if (!isNaN(num) && num > 0) {
-				limit = num;
-				hasLimit = true;
-				i++;
-			}
-		} else if (arg === "-w" || arg === "--width") {
-			const val = args[i + 1];
-			const num = parseInt(val, 10);
-			if (!isNaN(num) && num > 0) {
-				width = num;
-				hasWidth = true;
-				i++;
-			}
-		} else if (arg === "-t" || arg === "--tz" || arg === "--timezone") {
-			const val = args[i + 1];
-			if (val && !val.startsWith("-")) {
-				timezone = val;
-				hasTimezone = true;
-				i++;
-			}
-		} else if (arg.startsWith("--interval=")) {
-			const val = arg.split("=")[1];
-			if (val && /^(\d+)([mhdw])$/.test(val)) {
-				interval = val;
-				hasInterval = true;
-			}
-		} else if (arg.startsWith("--limit=")) {
-			const val = arg.split("=")[1];
-			const num = parseInt(val, 10);
-			if (!isNaN(num) && num > 0) {
-				limit = num;
-				hasLimit = true;
-			}
-		} else if (arg.startsWith("--width=")) {
-			const val = arg.split("=")[1];
-			const num = parseInt(val, 10);
-			if (!isNaN(num) && num > 0) {
-				width = num;
-				hasWidth = true;
-			}
-		} else if (arg.startsWith("--tz=")) {
-			timezone = arg.split("=")[1];
-			hasTimezone = true;
-		} else if (arg.startsWith("--timezone=")) {
-			timezone = arg.split("=")[1];
-			hasTimezone = true;
-		}
-	}
-
-	return {
-		interval,
-		limit,
-		width,
-		timezone,
-		hideWidget,
-		showWidget,
-		showTicks,
-		mode,
-		showHelp,
-		showWhy,
-		showVersion,
-		pager,
-		hasInterval,
-		hasLimit,
-		hasWidth,
-		hasTicks,
-		hasMode,
-		hasTimezone,
-		hasOther,
-		hasTokens,
-		hasCost,
-		forceReparse,
-		other,
-		tokens,
-		cost,
-		enableEmoji
-	};
-}
 
 // ---
 // TUI CUSTOM PAGER OVERLAY
@@ -310,11 +99,6 @@ class PagerComponent {
 // STATE PERSISTENCE (STORE/RETRIEVE)
 // ---
 
-function isEmojiDisabled(): boolean {
-	const config = readConfig("wtft");
-	return typeof config.disabledEmoji === "boolean" ? config.disabledEmoji : false;
-}
-
 /**
  * Retrieves setting configurations from the harness-agnostic config file (#72).
  * All settings (including TUI appearance) are now config-only — no .jsonl persistence.
@@ -329,9 +113,7 @@ function getSettings(_ctx: any) {
 	const mode: "bucket" | "cumulative" = (config.mode === "bucket" || config.mode === "cumulative" ? config.mode : "cumulative") as "bucket" | "cumulative";
 	const timezone: string | undefined = (typeof config.timezone === "string" ? config.timezone : "America/Los_Angeles") as string | undefined;
 	const disabledEmoji = isEmojiDisabled();
-	// --tokens / --cost explicit flags override config (last wins)
-	const configTokens = (typeof config.tokens === "boolean" ? config.tokens : false) as boolean;
-	const tokens = hasCost ? false : (hasTokens ? true : configTokens);
+	const tokens = (typeof config.tokens === "boolean" ? config.tokens : false) as boolean;
 
 	// Width auto-fits to terminal (no separate lock/default — CLI doesn't use it either)
 	const width = Math.min(getTerminalWidth(true, disabledEmoji), 240);
@@ -424,8 +206,8 @@ function updateWtftWidget(
 
 		let parserStatusStr = "";
 		const sessionFile = ctx.sessionManager.getSessionFile?.();
-		if (sessionFile && _parserSpawned) {
-			const status = getParserStatus(sessionFile);
+		if (sessionFile) {
+			const status = getDaemonStatus(sessionFile);
 			parserStatusStr = renderDaemonStatus(status, false);
 		}
 
@@ -440,8 +222,8 @@ function updateWtftWidget(
 	// Append log parser status (inline if it fits, otherwise separate line).
 	// ---
 	let parserStatusStr = "";
-	if (sessionFile && _parserSpawned) {
-		const status = getParserStatus(sessionFile);
+	if (sessionFile) {
+		const status = getDaemonStatus(sessionFile);
 		parserStatusStr = renderDaemonStatus(status, false);
 	}
 
@@ -475,7 +257,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		// Spawn log parser for this session to keep wtft-tag file warm for CLI use.
 		const sessionFile = ctx.sessionManager.getSessionFile?.();
 		if (sessionFile) {
-			ensureParserRunning(sessionFile);
+			ensureDaemonRunning(sessionFile, _daemonDir);
 		}
 
 		// Auto-show widget if user has configured wtft at least once (#72)
@@ -523,7 +305,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		_wtftCtx = ctx;
 		const sessionFile = ctx.sessionManager.getSessionFile?.();
 		if (sessionFile) {
-			ensureParserRunning(sessionFile);
+			ensureDaemonRunning(sessionFile, _daemonDir);
 		}
 	});
 
@@ -531,34 +313,11 @@ export default function wtftExtension(pi: ExtensionAPI) {
 	pi.registerCommand("wtft", {
 		description: "Where The F***ing Tokens?! (WTFT) - Cost Auditing Widget",
 		handler: async (args, ctx) => {
-			const {
-				interval,
-				limit,
-				width,
-				timezone,
-				hideWidget,
-				showWidget,
-				showTicks,
-				mode,
-				showHelp,
-				showWhy,
-				showVersion,
-				pager,
-				hasInterval,
-				hasLimit,
-				hasWidth,
-				hasTicks,
-				hasMode,
-				hasTimezone,
-				hasOther,
-				hasTokens,
-				hasCost,
-				forceReparse,
-				other,
-				tokens,
-				cost,
-				enableEmoji
-			} = parseArgs(args);
+			const opts = parseWtftCliArgs((args || "").trim().split(/\s+/).filter(Boolean));
+			const { forceReparse, enableEmoji, showVersion, showHelp, showWhy,
+				other, tokens, cost, hideWidget, hasInterval, interval,
+				hasLimit, limit, hasWidth, width, hasTicks, showTicks,
+				hasMode, mode, hasTimezone, timezone, pager } = opts;
 
 			// --force: kill daemon, delete tag file, respawn → full re-parse (#78)
 			if (forceReparse) {
@@ -580,9 +339,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				// Delete tag file
 				try { fs.unlinkSync(tagPath); } catch {}
 				// Respawn daemon (reads session file from scratch, rewrites tag file)
-				_parserSpawned = false;
-				_parserSessionPath = null;
-				ensureParserRunning(sessionFile);
+				ensureDaemonRunning(sessionFile, _daemonDir);
 				updateWtftWidget(ctx, pi);
 				ctx.ui.notify("Tag file deleted and log parser respawned — full session re-parse in progress.", "info");
 				return;
@@ -601,8 +358,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			if (showVersion) {
 				try {
 					const manifestPath = path.join(process.cwd(), "docs", "manifests", "wtft-cmd.json");
-					const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-					ctx.ui.notify(`${manifest.name} ${manifest.version}`, "info");
+					ctx.ui.notify(renderWtftVersion(manifestPath), "info");
 				} catch (err) {
 					ctx.ui.notify(`\u26A0\uFE0F Failed to load WTFT command manifest: ${err}`, "error");
 				}
@@ -613,23 +369,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			if (showHelp) {
 				try {
 					const manifestPath = path.join(process.cwd(), "docs", "manifests", "wtft-cmd.json");
-					const manifestStr = fs.readFileSync(manifestPath, "utf8");
-					const manifest = JSON.parse(manifestStr);
-
-					let helpText = `\x1b[1m\x1b[36m${manifest.name}\x1b[0m - ${manifest.tagline}\n\n`;
-					helpText += `${manifest.description}\n\n`;
-
-					helpText += `\x1b[1mUsage:\x1b[0m\n`;
-					for (const u of manifest.usage) {
-						helpText += `  ${manifest.name} ${(u.flags).padEnd(28)} ${u.desc}\n`;
-					}
-
-					helpText += `\n\x1b[1mExamples:\x1b[0m\n`;
-					for (const e of manifest.examples) {
-						helpText += `  ${(e.cmd).padEnd(30)} ${e.desc}\n`;
-					}
-
-					ctx.ui.notify(helpText, "info");
+					ctx.ui.notify(renderWtftHelp(manifestPath, "/wtft"), "info");
 				} catch (err) {
 					ctx.ui.notify(`⚠️ Failed to load WTFT command manifest: ${err}`, "error");
 				}
@@ -639,9 +379,8 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			// Render --why scenario-driven output
 			if (showWhy) {
 				try {
-					const { renderWhy } = await import("./lib/merge/help.js");
 					const manifestPath = path.join(process.cwd(), "docs", "manifests", "wtft-cmd.json");
-					const whyText = renderWhy(manifestPath, "/wtft");
+					const whyText = await renderWtftWhy(manifestPath, "/wtft");
 					ctx.ui.notify(whyText, "info");
 				} catch (err) {
 					ctx.ui.notify(`⚠️ Failed to load WTFT command manifest: ${err}`, "error");

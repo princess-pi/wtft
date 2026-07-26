@@ -185,14 +185,28 @@ describe("calculateClaudeCost with tiers", () => {
 		assert.ok(Math.abs(cost - expected) < 0.0001);
 	});
 
-	it("DeepSeek v4-pro in registry uses surge-adjusted pricing", () => {
+	it("DeepSeek v4-pro at off-peak UTC uses base pricing", () => {
+		// Pin to a known off-peak time: noon UTC is outside both peak windows
+		// (01:00–04:00 and 06:00–10:00).
+		const OFF_PEAK = new Date("2025-01-01T12:00:00Z").getTime();
 		const cost = calculateClaudeCost("deepseek-v4-pro", {
 			input_tokens: 100000,
 			output_tokens: 5000,
-		});
-		// Registry price $1.74/$3.48, peak multiplier may apply.
-		// At non-peak: 100K * $1.74/1M + 5K * $3.48/1M = $0.174 + $0.0174 = $0.1914
+		}, OFF_PEAK);
+		// 100K * $1.74/1M + 5K * $3.48/1M = $0.174 + $0.0174 = $0.1914
 		const expected = (100000 * 1.74 / 1000000) + (5000 * 3.48 / 1000000);
+		assert.ok(Math.abs(cost - expected) < 0.0001);
+	});
+
+	it("DeepSeek v4-pro at peak UTC applies 2x surge", () => {
+		// Pin to a known peak time: 02:00 UTC is inside the 01:00–04:00 window.
+		const PEAK = new Date("2025-01-01T02:00:00Z").getTime();
+		const cost = calculateClaudeCost("deepseek-v4-pro", {
+			input_tokens: 100000,
+			output_tokens: 5000,
+		}, PEAK);
+		// Same tokens, 2x surge: $0.1914 * 2 = $0.3828
+		const expected = (100000 * 1.74 / 1000000 + 5000 * 3.48 / 1000000) * 2;
 		assert.ok(Math.abs(cost - expected) < 0.0001);
 	});
 });

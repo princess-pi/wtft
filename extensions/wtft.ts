@@ -113,9 +113,7 @@ function getSettings(_ctx: any) {
 	const mode: "bucket" | "cumulative" = (config.mode === "bucket" || config.mode === "cumulative" ? config.mode : "cumulative") as "bucket" | "cumulative";
 	const timezone: string | undefined = (typeof config.timezone === "string" ? config.timezone : "America/Los_Angeles") as string | undefined;
 	const disabledEmoji = isEmojiDisabled();
-	// --tokens / --cost explicit flags override config (last wins)
-	const configTokens = (typeof config.tokens === "boolean" ? config.tokens : false) as boolean;
-	const tokens = hasCost ? false : (hasTokens ? true : configTokens);
+	const tokens = (typeof config.tokens === "boolean" ? config.tokens : false) as boolean;
 
 	// Width auto-fits to terminal (no separate lock/default — CLI doesn't use it either)
 	const width = Math.min(getTerminalWidth(true, disabledEmoji), 240);
@@ -208,8 +206,8 @@ function updateWtftWidget(
 
 		let parserStatusStr = "";
 		const sessionFile = ctx.sessionManager.getSessionFile?.();
-		if (sessionFile && _parserSpawned) {
-			const status = getParserStatus(sessionFile);
+		if (sessionFile) {
+			const status = getDaemonStatus(sessionFile);
 			parserStatusStr = renderDaemonStatus(status, false);
 		}
 
@@ -224,8 +222,8 @@ function updateWtftWidget(
 	// Append log parser status (inline if it fits, otherwise separate line).
 	// ---
 	let parserStatusStr = "";
-	if (sessionFile && _parserSpawned) {
-		const status = getParserStatus(sessionFile);
+	if (sessionFile) {
+		const status = getDaemonStatus(sessionFile);
 		parserStatusStr = renderDaemonStatus(status, false);
 	}
 
@@ -259,7 +257,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		// Spawn log parser for this session to keep wtft-tag file warm for CLI use.
 		const sessionFile = ctx.sessionManager.getSessionFile?.();
 		if (sessionFile) {
-			ensureParserRunning(sessionFile);
+			ensureDaemonRunning(sessionFile, _daemonDir);
 		}
 
 		// Auto-show widget if user has configured wtft at least once (#72)

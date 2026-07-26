@@ -131,7 +131,7 @@
       "desc": "Set the maximum character width of the TUI widget (default: 240)."
     },
     {
-      "flags": "-t, --tz, --timezone <zone>",
+      "flags": "--tz, --timezone <zone>",
       "desc": "Set the display timezone (e.g., America/New_York, Europe/London, Asia/Tokyo) to avoid UTC display on servers (default: system local)."
     },
     {
@@ -195,8 +195,20 @@
       "desc": "Enable emoji icons in TUI widgets."
     },
     {
-      "flags": "-T, --tokens",
+      "flags": "--tokens",
       "desc": "Switch bar chart to token-unit mode and print a per-model token summary table (deduped). Bar chart uses bg color for token width and character density for output $/tok cost signal. Config-persistable. Use --cost to switch back."
+    },
+    {
+      "flags": "-F, --force",
+      "desc": "Kill the log parser, delete tag files, and force a full session re-parse."
+    },
+    {
+      "flags": "--harness <pi|claude-code|auto>",
+      "desc": "Target a specific harness for auto-discovery (pi, claude-code, or auto). Default: auto."
+    },
+    {
+      "flags": "--thinking-budget <n>",
+      "desc": "Thinking token budget for utilization percentage display in --tokens output."
     },
     {
       "flags": "-C, --cost",

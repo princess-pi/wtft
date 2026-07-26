@@ -42,12 +42,20 @@ import {
 	type ModelPricing,
 	getTerminalWidth
 } from "../extensions/lib/wtft-shared.ts";
-import { execSync, spawn } from "node:child_process";
+import { execSync } from "node:child_process";
 import { loadConfig, readConfig } from "../extensions/lib/config.ts";
 import {
 	discoverSessions,
 	selectSessionPrompt
 } from "../extensions/lib/session-selector.ts";
+import {
+	parseWtftCliArgs,
+	spawnWtftDaemon,
+	isEmojiDisabled,
+	renderWtftHelp,
+	renderWtftWhy,
+	renderWtftVersion,
+} from "../extensions/lib/wtft-cli-shared.ts";
 
 // ---
 // Re-exports for test imports from built bin/wtft.mjs
@@ -85,7 +93,7 @@ export {
 };
 
 // ---
-// DEFAULT CONFIG
+// CONFIG + ARG PARSING
 // ---
 
 // Load config file (#20) — overrides hardcoded defaults, CLI flags override both
@@ -97,225 +105,46 @@ const cfg = loadConfig("wtft", { interval: "1h", limit: 100, mode: "cumulative" 
 	tokens?: boolean;
 };
 
-let intervalStr = String(cfg.interval ?? "1h");
-let limit = Number(cfg.limit ?? 100);
-let mode: "bucket" | "cumulative" = (cfg.mode as "bucket" | "cumulative") ?? "cumulative";
-let showTicks = true;
-let targetSessionPath: string | undefined = undefined;
-let timezone: string | undefined = cfg.timezone || undefined;
-let harnessOption: "auto" | "pi" | "claude-code" = "auto";
-let cwdOverride: string | undefined = undefined;
-let showOther = false;
-let showTokens = false;
-let showCost = false;
+const manifestPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "docs", "manifests", "wtft-cmd.json");
+const daemonDir = path.dirname(fileURLToPath(import.meta.url));
+
+// Parse all CLI args through the shared parser (#94)
+const opts = parseWtftCliArgs(process.argv.slice(2));
+
+// Derive unit from CLI flags or config default
 let unit: "cost" | "tokens" = cfg.tokens ? "tokens" : "cost";
-let pad = 1;
-let hasPad = false;
+if (opts.hasTokens) unit = "tokens";
+if (opts.hasCost) unit = "cost";
 
-// ---
-// HELP MENU
-// ---
-
-function printWhy(): void {
-	try {
-		const manifestPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "docs", "manifests", "wtft-cmd.json");
-		const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-		let text = `${manifest.name} - ${manifest.tagline}
-
-`;
-		text += `${manifest.description}
-
-`;
-		text += `Why run wtft?
-
-`;
-		const scenarios = manifest.why || [];
-		for (const s of scenarios) {
-			text += `  ${s.scenario}
-`;
-			for (const cmd of s.commands) {
-				text += `    $ wtft${cmd ? " " + cmd : ""}
-`;
-			}
-			text += `    → ${s.result}
-`;
-			if (s.demo && (s.demo as string[]).length > 0) {
-				for (const line of (s.demo as string[])) {
-					text += `    ${line}
-`;
-				}
-			}
-			text += `
-`;
-		}
-		text += `Run wtft --help for the full flag reference.
-`;
-		console.log(text);
-	} catch (err) {
-		console.error(`⚠️ Failed to load command manifest: ${err}`);
-		process.exitCode = 1;
-	}
-}
-
-function printHelp() {
-	console.log(`
-Usage: wtft [options]
-
-Options:
-  -s, --session <path|filter>  Explicit session .jsonl path, or fuzzy substring filter (e.g. 'b04c'). Skips selector on single match.
-  --dir, --cwd <path>     Working directory for Claude Code session discovery (default: current directory).
-  --harness <type>        Target a specific harness for auto-discovery (pi, claude-code, or auto). Default: auto.
-  -i, --interval <val>    Group cost data into binned intervals (e.g., 1m, 7m, 4h, 1d, 2w; default: 1h).
-  -l, --limit <number>    Limit the number of interval bars displayed (default: 100).
-  -c, --cumulative        Render running cumulative sums (default behavior).
-  -b, --bucket            Render discrete binned interval cost buckets.
-  --ticks                 Enable the proportional cost scale ticks above the bars (default behavior).
-  --no-ticks              Disable the proportional cost scale ticks above the bars.
-  -t, --tz <zone>         Specify a display timezone (e.g. America/Los_Angeles).
-  -o, --other             Print a histogram of 'Other' commands grouped by semantic sub-category (Build, Lint, System, etc.).
-  -T, --tokens            Switch bar chart to token-unit mode (bg=token width, density=output $$$/tok)
-                          AND print per-model token summary table below.
-  -C, --cost              Switch back to cost-unit mode ($). Overrides persisted --tokens.
-  --thinking-budget <n>   Thinking token budget for utilization display in --tokens (default: no budget shown).
-  -W, --watch             Watch a session file for changes and re-render the bar chart in real-time.
-  -F, --force             Kill the log parser, delete tag files, and force a full session re-parse.
-  --pad <N>               Pad output with N spaces on each side (default: 1, max: floor(term/2)-1).
-                          Makes CLI output width match Pi TUI widget in the same terminal.
-  --debug                 Print diagnostic cost totals (tag file vs direct parse + dedup).
-
-Log parser management:
-  --list                  List all running log parsers with session path, PID, parser version, and idle time.
-  --cleanup               Kill log parsers whose source session no longer exists.
-  --restart               Kill all running log parsers (fresh spawn on next wtft).
-  --stop <session>        Stop log parser for a specific session path.
-
-  --version               Display this tool's version.
-  --why                   Explain why you'd run this tool, with user scenarios and anti-use-cases.
-  -h, --help              Display this help menu.
-`);
-}
-
-// ---
-// ARGUMENT PARSING
-// ---
-
-let hasInterval = false;
-let hasLimit = false;
-let hasCumulative = false;
-let hasBucket = false;
-let hasNoTicks = false;
-let hasTicks = false;
-let hasTz = false;
-let hasOther = false;
-let hasTokens = false;
-let hasCost = false;
-let showWatch = false;
-let daemonList = false;
-let daemonCleanup = false;
-let daemonRestart = false;
-let daemonStop: string | undefined;
-let debugMode = false;
-let forceReparse = false;
-let thinkingBudget: number | undefined = undefined; // --thinking-budget for --tokens detail (#79)
-
-for (let i = 2; i < process.argv.length; i++) {
-	const arg = process.argv[i];
-	if (arg === "-h" || arg === "--help") {
-		printHelp();
-		process.exit(0);
-	} else if (arg === "--why") {
-		printWhy();
-		process.exit(0);
-	} else if (arg === "--version") {
-		const manifestPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "docs", "manifests", "wtft-cmd.json");
-		const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-		console.log(`${manifest.name} ${manifest.version}`);
-		process.exit(0);
-	} else if (arg === "--list") {
-		daemonList = true;
-	} else if (arg === "--cleanup") {
-		daemonCleanup = true;
-	} else if (arg === "--restart") {
-		daemonRestart = true;
-	} else if (arg === "--stop") {
-		daemonStop = process.argv[++i];
-	} else if (arg === "-s" || arg === "--session") {
-		targetSessionPath = process.argv[++i];
-	} else if (arg === "-i" || arg === "--interval") {
-		intervalStr = process.argv[++i];
-		hasInterval = true;
-	} else if (arg === "-l" || arg === "--limit") {
-		limit = parseInt(process.argv[++i], 10);
-		hasLimit = true;
-	} else if (arg === "-c" || arg === "--cumulative") {
-		mode = "cumulative";
-		hasCumulative = true;
-	} else if (arg === "-b" || arg === "--bucket") {
-		mode = "bucket";
-		hasBucket = true;
-	} else if (arg === "--no-ticks") {
-		showTicks = false;
-		hasNoTicks = true;
-	} else if (arg === "--ticks") {
-		showTicks = true;
-		hasTicks = true;
-	} else if (arg === "-t" || arg === "--tz") {
-		timezone = process.argv[++i];
-		hasTz = true;
-	} else if (arg === "-o" || arg === "--other") {
-		showOther = true;
-		hasOther = true;
-	} else if (arg === "--tokens" || arg === "-T") {
-		showTokens = true;
-		unit = "tokens";
-		hasTokens = true;
-	} else if (arg === "--cost" || arg === "-C") {
-		showCost = true;
-		unit = "cost";
-		hasCost = true;
-	} else if (arg === "-W" || arg === "--watch") {
-		showWatch = true;
-	} else if (arg === "--pad") {
-		const val = parseInt(process.argv[++i], 10);
-		if (!isNaN(val) && val >= 0) {
-			pad = val;
-			hasPad = true;
-		}
-	} else if (arg === "--debug") {
-		debugMode = true;
-	} else if (arg === "--force" || arg === "-F") {
-		forceReparse = true;
-	} else if (arg === "--thinking-budget") {
-		const val = parseInt(process.argv[++i], 10);
-		if (!isNaN(val) && val > 0) {
-			thinkingBudget = val;
-		}
-	} else if (arg === "--dir" || arg === "--cwd") {
-		cwdOverride = process.argv[++i];
-	} else if (arg === "--harness") {
-		const val = process.argv[++i];
-		if (val === "pi" || val === "claude-code" || val === "auto") {
-			harnessOption = val;
-		}
-	}
-}
-
-// ---
 // ---
 // MAIN EXECUTION FLOW
 // ---
 
 async function main() {
+	// Early exits for display-only flags (#94)
+	if (opts.showHelp) {
+		console.log(renderWtftHelp(manifestPath, "wtft"));
+		return;
+	}
+	if (opts.showWhy) {
+		console.log(await renderWtftWhy(manifestPath, "wtft"));
+		return;
+	}
+	if (opts.showVersion) {
+		console.log(renderWtftVersion(manifestPath));
+		return;
+	}
+
 	// ---
 	// DAEMON MANAGEMENT COMMANDS: passthrough to wtft-daemon
 	// ---
-	if (daemonList || daemonCleanup || daemonRestart || daemonStop) {
-		const daemonPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "wtft-daemon.mjs");
+	if (opts.daemonList || opts.daemonCleanup || opts.daemonRestart || opts.daemonStop) {
+		const daemonPath = path.join(daemonDir, "wtft-daemon.mjs");
 		const daemonArgs = [daemonPath];
-		if (daemonList) daemonArgs.push("--list");
-		if (daemonCleanup) daemonArgs.push("--cleanup");
-		if (daemonRestart) daemonArgs.push("--restart");
-		if (daemonStop) daemonArgs.push("--stop", daemonStop);
+		if (opts.daemonList) daemonArgs.push("--list");
+		if (opts.daemonCleanup) daemonArgs.push("--cleanup");
+		if (opts.daemonRestart) daemonArgs.push("--restart");
+		if (opts.daemonStop) daemonArgs.push("--stop", opts.daemonStop);
 		try {
 			const result = execSync(`${process.execPath} ${daemonArgs.join(" ")}`, {
 				encoding: "utf8",
@@ -329,22 +158,22 @@ async function main() {
 		return;
 	}
 
-	const candidates = discoverSessions(harnessOption, cwdOverride);
+	const candidates = discoverSessions(opts.harnessOption, opts.cwdOverride);
 	
 	let finalSessionPath = "";
-	if (targetSessionPath) {
+	if (opts.targetSession) {
 		// Direct path — use as-is if it exists
-		if (fs.existsSync(targetSessionPath)) {
-			finalSessionPath = targetSessionPath;
+		if (fs.existsSync(opts.targetSession)) {
+			finalSessionPath = opts.targetSession;
 		} else {
 			// Fuzzy substring filter against discovered sessions
-			const filter = targetSessionPath.toLowerCase();
+			const filter = opts.targetSession.toLowerCase();
 			const filtered = candidates.filter(c =>
 				c.path.toLowerCase().includes(filter) ||
 				c.name.toLowerCase().includes(filter)
 			);
 			if (filtered.length === 0) {
-				console.error(`❌ Error: Session '${targetSessionPath}' does not exist as a file and matches no discovered sessions (${candidates.length} available).`);
+				console.error(`❌ Error: Session '${opts.targetSession}' does not exist as a file and matches no discovered sessions (${candidates.length} available).`);
 				process.exit(1);
 			} else if (filtered.length === 1) {
 				finalSessionPath = filtered[0].path;
@@ -373,7 +202,7 @@ async function main() {
 	// ---
 	// --force: kill existing daemon, delete tag file, re-parse from scratch.
 	// ---
-	if (forceReparse) {
+	if (opts.forceReparse) {
 		const forceTagPath = getTagPath(finalSessionPath);
 		const forcePidPath = getDaemonPidPath(finalSessionPath);
 		// Kill existing daemon
@@ -402,7 +231,7 @@ async function main() {
 	// Spawns the wtft-daemon for classified tag output, then watches the
 	// tag file via inotify (fs.watch) instead of polling session.jsonl.
 	// ---
-	if (showWatch) {
+	if (opts.showWatch) {
 
 		// Tag file path — always use the current version. The daemon
 		// handles stale-version cleanup internally on startup.
@@ -412,16 +241,9 @@ async function main() {
 		const tagPath = path.join(tagsDir, sessionBase + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
 
 		// Auto-spawn daemon if not already running (singleton via PID file).
-		const daemonPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "wtft-daemon.mjs");
-		try {
-			const child = spawn(process.execPath, [daemonPath, "--session", finalSessionPath], {
-				detached: true,
-				stdio: "ignore"
-			});
-			child.unref();
-		} catch (err) {
-			console.error(`\x1b[31m❌ Failed to start log parser daemon: ${err}\x1b[0m`);
-			console.error(`   Expected: ${daemonPath}`);
+		const daemonPath = path.join(daemonDir, "wtft-daemon.mjs");
+		if (!spawnWtftDaemon(finalSessionPath, daemonDir)) {
+			console.error(`\x1b[31m❌ Failed to start log parser daemon: ${daemonPath}\x1b[0m`);
 			process.exit(1);
 		}
 
@@ -429,15 +251,18 @@ async function main() {
 		// enter the inotify-based watch loop.
 		await new Promise(resolve => setTimeout(resolve, 500));
 		await watchTagFile(finalSessionPath, tagPath, {
-			interval: hasInterval ? intervalStr : "1h",
-			limit: hasLimit ? limit : 100,
-			mode: (hasCumulative || hasBucket) ? mode : "cumulative",
-			showTicks: (hasTicks || hasNoTicks) ? showTicks : true,
-			timezone: hasTz ? timezone : undefined,
+			interval: opts.hasInterval ? opts.interval : "1h",
+			limit: opts.hasLimit ? opts.limit : 100,
+			mode: opts.hasMode ? opts.mode : "cumulative",
+			showTicks: opts.hasTicks ? opts.showTicks : true,
+			timezone: opts.hasTimezone ? opts.timezone : undefined,
 			daemonPath,
-			pad,
-			hasInterval, hasLimit, hasMode: hasCumulative || hasBucket,
-			hasTicks: hasTicks || hasNoTicks, hasTimezone: hasTz
+			pad: opts.pad,
+			hasInterval: opts.hasInterval,
+			hasLimit: opts.hasLimit,
+			hasMode: opts.hasMode,
+			hasTicks: opts.hasTicks,
+			hasTimezone: opts.hasTimezone,
 		});
 		return; // watchTagFile never returns until SIGINT
 	}
@@ -455,23 +280,8 @@ async function main() {
 	const tagPath = path.join(tagsDir, sessionBase + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
 
 	// Auto-spawn daemon (singleton via PID file).
-	// The daemon is the sole parser — CLI never parses session files directly.
-	// Spawn if not running (singleton via PID file), then wait up to 2 daemon
-	// beats (2 × 667ms ≈ 1.3s) for the tag file. The daemon writes the tag
-	// atomically on startup; for typical sessions this is sub-beat.
-	//
-	// No direct-parse fallback. If the tag file isn't ready within the window,
-	// the daemon is still processing — exit with a status message. (In --watch
-	// mode, the inotify loop continues waiting indefinitely.)
-	const daemonPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "wtft-daemon.mjs");
-	try {
-		const child = spawn(process.execPath, [daemonPath, "--session", finalSessionPath], {
-			detached: true,
-			stdio: "ignore"
-		});
-		child.unref();
-	} catch (_) {
-		console.error(`\x1b[31m❌ wtft-daemon not found at ${daemonPath}\x1b[0m`);
+	if (!spawnWtftDaemon(finalSessionPath, daemonDir)) {
+		console.error(`\x1b[31m❌ wtft-daemon not found at ${path.join(daemonDir, "wtft-daemon.mjs")}\x1b[0m`);
 		process.exit(1);
 	}
 
@@ -498,7 +308,7 @@ async function main() {
 
 	// Read settings from harness-agnostic config file (#72).
 	const config = readConfig("wtft");
-	const disabledEmoji = (typeof config.disabledEmoji === "boolean" ? config.disabledEmoji : false) as boolean;
+	const disabledEmoji = isEmojiDisabled();
 	const sessionInterval = (typeof config.interval === "string" ? config.interval : undefined) as string | undefined;
 	const sessionLimit = (typeof config.limit === "number" ? config.limit : undefined) as number | undefined;
 	const sessionMode = (config.mode === "cumulative" || config.mode === "bucket" ? config.mode : undefined) as "cumulative" | "bucket" | undefined;
@@ -511,16 +321,16 @@ async function main() {
 	const termColumns = getTerminalWidth();
 	// Pad: default 1 to match Pi TUI widget's enforced 1-space padding.
 	// Clamp to valid range (max: floor(term/2)-1).
-	if (!hasPad) pad = 1;
+	let pad = opts.hasPad ? opts.pad : 1;
 	const maxPad = Math.max(0, Math.floor(termColumns / 2) - 1);
 	pad = Math.min(pad, maxPad);
 	const padStr = " ".repeat(pad);
 	const paddedWidth = termColumns - 2 * pad;
-	const finalInterval = hasInterval ? intervalStr : (sessionInterval ?? "1h");
-	const finalLimit = hasLimit ? limit : (sessionLimit ?? 100);
-	const finalMode = (hasCumulative || hasBucket) ? mode : (sessionMode ?? "cumulative");
-	const finalShowTicks = (hasTicks || hasNoTicks) ? showTicks : (sessionShowTicks ?? true);
-	const finalTimezone = hasTz ? timezone : sessionTimezone;
+	const finalInterval = opts.hasInterval ? opts.interval : (sessionInterval ?? "1h");
+	const finalLimit = opts.hasLimit ? opts.limit : (sessionLimit ?? 100);
+	const finalMode = opts.hasMode ? opts.mode : (sessionMode ?? "cumulative");
+	const finalShowTicks = opts.hasTicks ? opts.showTicks : (sessionShowTicks ?? true);
+	const finalTimezone = opts.hasTimezone ? opts.timezone : sessionTimezone;
 
 	const defaultSettings = {
 		interval: "1h",
@@ -555,7 +365,7 @@ async function main() {
 	}
 
 	// --- Debug: compare tag file cost vs direct parse + dedup cost ---
-	if (debugMode) {
+	if (opts.debugMode) {
 		const tagCost = interactions.reduce((sum: number, i: any) => sum + (i.cost || 0), 0);
 		const rawInteractions = parseSessionFile(finalSessionPath);
 		const directCost = deduplicateInteractions(rawInteractions).reduce((sum, i) => sum + i.cost, 0);
@@ -565,7 +375,7 @@ async function main() {
 		console.log(padStr + `\x1b[90m  raw parse (no dedup): $${rawInteractions.reduce((sum, i) => sum + i.cost, 0).toFixed(4)}  (${rawInteractions.length} entries)\x1b[0m`);
 	}
 
-	if (showOther) {
+	if (opts.other) {
 		console.log(""); // empty line spacer
 		const dedupedInteractions = deduplicateInteractions(interactions);
 		const otherOutput = renderOtherHistogram(dedupedInteractions, Math.min(paddedWidth, 1023));
@@ -574,8 +384,8 @@ async function main() {
 		}
 	}
 
-	if (showTokens) {
-		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), thinkingBudget);
+	if (opts.tokens) {
+		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget);
 		for (const line of tokenOutput.split("\n")) {
 			console.log(padStr + line);
 		}

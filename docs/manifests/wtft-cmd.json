@@ -135,20 +135,12 @@
       "desc": "Set the display timezone (e.g., America/New_York, Europe/London, Asia/Tokyo) to avoid UTC display on servers (default: system local)."
     },
     {
-      "flags": "-c, --cumulative",
-      "desc": "Render bars as cumulative sums over time (each bar is sum of current and all prior intervals) (default behavior)."
+      "flags": "-c, --cumulative, -b, --bucket",
+      "desc": "Render mode. --cumulative (default) shows running sums over time; --bucket shows discrete interval cost buckets."
     },
     {
-      "flags": "-b, --bucket",
-      "desc": "Render bars as discrete interval cost buckets."
-    },
-    {
-      "flags": "--ticks",
-      "desc": "Display proportional cost scale tick marks above the bars (default behavior)."
-    },
-    {
-      "flags": "--no-ticks",
-      "desc": "Disable cost scale tick marks above the bars."
+      "flags": "--ticks, --no-ticks",
+      "desc": "Enable (default) or disable the proportional cost scale tick marks above the bars."
     },
     {
       "flags": "-p, --pager",
@@ -159,16 +151,12 @@
       "desc": "Print a histogram of 'Other' commands grouped by semantic sub-category (Build, Lint, Test, System, etc.) with per-command counts and costs."
     },
     {
-      "flags": "-S, --show",
-      "desc": "Show or refresh the WTFT cost-auditing widget (default behavior)."
+      "flags": "-S, --show, -H, --hide",
+      "desc": "Show (default) or hide the WTFT cost-auditing widget below the editor."
     },
     {
-      "flags": "-H, --hide",
-      "desc": "Hide the WTFT cost-auditing widget."
-    },
-    {
-      "flags": "--no-emoji",
-      "desc": "Disable emoji icons and use clean single-width ASCII characters for TUI widgets."
+      "flags": "--emoji, --no-emoji",
+      "desc": "Enable or disable emoji icons in TUI widgets. When disabled, clean single-width ASCII characters are used instead."
     },
     {
       "flags": "-W, --watch",
@@ -191,14 +179,6 @@
       "desc": "Stop log parser for a specific session path."
     },
     {
-      "flags": "--emoji",
-      "desc": "Enable emoji icons in TUI widgets."
-    },
-    {
-      "flags": "--tokens",
-      "desc": "Switch bar chart to token-unit mode and print a per-model token summary table (deduped). Bar chart uses bg color for token width and character density for output $/tok cost signal. Config-persistable. Use --cost to switch back."
-    },
-    {
       "flags": "-F, --force",
       "desc": "Kill the log parser, delete tag files, and force a full session re-parse."
     },
@@ -211,8 +191,8 @@
       "desc": "Thinking token budget for utilization percentage display in --tokens output."
     },
     {
-      "flags": "-C, --cost",
-      "desc": "Switch bar chart back to cost-unit mode ($). Overrides a persisted --tokens setting. Config-persistable."
+      "flags": "--tokens, -C, --cost",
+      "desc": "Switch between token-unit mode and cost-unit mode ($). --tokens shows a per-model token summary table with utilization. --cost switches back to $ mode. Config-persistable."
     },
     {
       "flags": "--pad <N>",

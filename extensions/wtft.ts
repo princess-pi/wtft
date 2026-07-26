@@ -99,11 +99,6 @@ class PagerComponent {
 // STATE PERSISTENCE (STORE/RETRIEVE)
 // ---
 
-function isEmojiDisabled(): boolean {
-	const config = readConfig("wtft");
-	return typeof config.disabledEmoji === "boolean" ? config.disabledEmoji : false;
-}
-
 /**
  * Retrieves setting configurations from the harness-agnostic config file (#72).
  * All settings (including TUI appearance) are now config-only — no .jsonl persistence.

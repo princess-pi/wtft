@@ -9,8 +9,8 @@ import {
 	renderOtherHistogram,
 	renderTokenSummary,
 	deduplicateInteractions,
-	parseSessionFile,
-	classifyInteraction,
+	discoverSubagentSessionFiles,
+	loadSubagentInteractions,
 	getTerminalWidth,
 	getVisualLength,
 	checkDaemonHealth,
@@ -350,93 +350,24 @@ function getSettings(_ctx: any) {
 
 // ---
 // SUBAGENT SESSION ROLLUP (#83)
-// When Pi spawns subagents (separate session files), their cost must be
-// rolled up into the parent session's totals. The daemon only classifies
-// the main session file; subagent files are raw-parsed and classified here.
+// Subagent discovery and loading are shared with the CLI via
+// extensions/lib/wtft-parser.ts (discoverSubagentSessionFiles,
+// loadSubagentInteractions).
 //
-// Two discovery patterns are supported (pre-emptive — Pi does not yet spawn
-// subagents, but both conventions are anticipated):
-//   1. Claude Code convention: <session-dir>/<session-name>/subagents/agent-*.jsonl
-//   2. Pi convention (expected): session files in the same directory with
-//      a "parentSession" header field matching the current session ID.
+// Two discovery patterns:
+//   1. Claude Code: <session>/subagents/agent-*.jsonl (recursive, depth ≤ 5)
+//   2. Pi (pre-emptive): sibling files with parentSession header match
 // ---
 
-/** Discover subagent session files for a given parent session path. */
-function discoverSubagentSessionFiles(sessionPath: string): string[] {
-	const files: string[] = [];
-	const sessionDir = path.dirname(sessionPath);
-	const sessionBase = path.basename(sessionPath, ".jsonl");
-
-	// Pattern 1: Claude Code convention — <session-base>/subagents/agent-*.jsonl
-	const ccSubagentsDir = path.join(sessionDir, sessionBase, "subagents");
-	if (fs.existsSync(ccSubagentsDir)) {
-		try {
-			for (const f of fs.readdirSync(ccSubagentsDir)) {
-				if (f.endsWith(".jsonl")) {
-					files.push(path.join(ccSubagentsDir, f));
-				}
-			}
-		} catch { /* dir unreadable — skip */ }
-	}
-
-	// Pattern 2: Pi convention — session files in the same directory whose
-	// header declares parentSession matching this session's ID.
-	// Pre-emptive: Pi's SessionManager supports parentSession in
-	// NewSessionOptions; the expected subagent spawn would create sibling
-	// files with that header field set.
-	let mainSessionId: string | undefined;
-	try {
-		const mainHeader = JSON.parse(fs.readFileSync(sessionPath, "utf8").split("\n")[0]);
-		if (mainHeader.type === "session") mainSessionId = mainHeader.id;
-	} catch { /* header unreadable */ }
-
-	if (mainSessionId) {
-		try {
-			for (const f of fs.readdirSync(sessionDir)) {
-				if (!f.endsWith(".jsonl")) continue;
-				const fullPath = path.join(sessionDir, f);
-				if (fullPath === sessionPath) continue;
-				// Already picked up by Pattern 1
-				if (files.includes(fullPath)) continue;
-				try {
-					const header = JSON.parse(fs.readFileSync(fullPath, "utf8").split("\n")[0]);
-					if (header.type === "session" && header.parentSession === mainSessionId) {
-						files.push(fullPath);
-					}
-				} catch { /* skip unreadable files */ }
-			}
-		} catch { /* dir unreadable */ }
-	}
-
-	return files;
-}
-
-/** Parse and classify subagent interactions from raw session files. */
-function loadSubagentInteractions(subagentFiles: string[]): Interaction[] {
-	const interactions: Interaction[] = [];
-	for (const file of subagentFiles) {
-		try {
-			const raw = parseSessionFile(file);
-			const deduped = deduplicateInteractions(raw);
-			for (const interaction of deduped) {
-				// Classify and stamp _cat so downstream rendering short-circuits
-				interaction._cat = classifyInteraction(interaction);
-				interactions.push(interaction);
-			}
-		} catch { /* file unreadable or unparseable */ }
-	}
-	return interactions;
-}
-
 /** Read interactions from the daemon's classified tag file (#92),
- *  merged with subagent session interactions (#83). */
+ *  merged with subagent session interactions (#83, #82). */
 function readInteractions(ctx: any): Interaction[] {
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	if (!sessionFile) return [];
 	const tagPath = getTagPath(sessionFile);
 	const mainInteractions = readClassifiedTagFile(tagPath);
 
-	// Subagent rollup: discover and parse subagent session files (#83)
+	// Subagent rollup: discover and parse subagent session files (#83, #82)
 	const subagentFiles = discoverSubagentSessionFiles(sessionFile);
 	if (subagentFiles.length === 0) return mainInteractions;
 

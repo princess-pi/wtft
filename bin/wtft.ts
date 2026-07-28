@@ -16,6 +16,8 @@ import {
 	renderOtherHistogram,
 	renderTokenSummary,
 	deduplicateInteractions,
+	discoverSubagentSessionFiles,
+	loadSubagentInteractions,
 	calculateClaudeCost,
 	calculateServerToolCost,
 	distributeHalfSlots,
@@ -64,6 +66,8 @@ export {
 	buildWtftLines,
 	parseSessionFile,
 	deduplicateInteractions,
+	discoverSubagentSessionFiles,
+	loadSubagentInteractions,
 	distributeHalfSlots,
 	halfSlotCountsToArray,
 	renderHalfBlockBar,
@@ -494,6 +498,19 @@ async function main() {
 		const sessionName = path.basename(finalSessionPath).replace(/.jsonl$/, "");
 		console.log(`\x1b[33mDaemon started on session ${sessionName.slice(0, 12)}… — no data yet. Try again in a moment.\x1b[0m`);
 		process.exit(0);
+	}
+
+	// Subagent rollup (#82): discover and merge subagent session interactions.
+	// The daemon only classifies the main session file; subagent files are
+	// raw-parsed and classified here. Walk is recursive up to Claude Code's
+	// depth-5 limit.
+	const subagentFiles = discoverSubagentSessionFiles(finalSessionPath);
+	if (subagentFiles.length > 0) {
+		const subInteractions = loadSubagentInteractions(subagentFiles);
+		if (subInteractions.length > 0) {
+			interactions = [...interactions, ...subInteractions];
+			interactions.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+		}
 	}
 
 	// Read settings from harness-agnostic config file (#72).

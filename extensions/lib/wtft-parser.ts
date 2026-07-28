@@ -614,3 +614,121 @@ export function classifyInteraction(interaction: Interaction): Category {
 	if (interaction.texts.length > 0 && !interaction.unrecognizedTool) return "prompt";
 	return "other";
 }
+
+// ---
+// SUBAGENT SESSION DISCOVERY (#82/#83)
+// Recursive walk of subagent directories up to a configurable depth.
+// Claude Code stores subagent sessions as agent-*.jsonl files under
+// <session-dir>/<session-name>/subagents/. Each subagent may itself
+// have nested subagents (depth ≤ 5 per Claude Code docs).
+//
+// Pi convention (pre-emptive): sibling .jsonl files with a
+// "parentSession" header matching the parent session ID.
+// ---
+
+const MAX_SUBAGENT_DEPTH = 5; // Claude Code hard limit
+
+/**
+ * Discover subagent session files for a given parent session, walking
+ * subdirectories recursively up to maxDepth (Claude Code convention).
+ *
+ * Pattern 1 (Claude Code): <session-dir>/<session-name>/subagents/agent-*.jsonl
+ * Pattern 2 (Pi, pre-emptive): sibling files with parentSession header match
+ */
+export function discoverSubagentSessionFiles(
+	sessionPath: string,
+	maxDepth: number = MAX_SUBAGENT_DEPTH,
+): string[] {
+	const files: string[] = [];
+	const sessionDir = path.dirname(sessionPath);
+	const sessionBase = path.basename(sessionPath, ".jsonl");
+
+	// Pattern 1: Claude Code recursive convention
+	const ccBaseDir = path.join(sessionDir, sessionBase, "subagents");
+	if (fs.existsSync(ccBaseDir)) {
+		walkSubagentDir(ccBaseDir, 1, maxDepth, files);
+	}
+
+	// Pattern 2: Pi parentSession convention (pre-emptive, non-recursive —
+	// Pi subagents would each get their own discoverSubagentSessionFiles call
+	// if they are themselves discovered as subagent files)
+	let mainSessionId: string | undefined;
+	try {
+		const mainHeader = JSON.parse(fs.readFileSync(sessionPath, "utf8").split("\n")[0]);
+		if (mainHeader.type === "session") mainSessionId = mainHeader.id;
+	} catch { /* header unreadable */ }
+
+	if (mainSessionId) {
+		try {
+			for (const f of fs.readdirSync(sessionDir)) {
+				if (!f.endsWith(".jsonl")) continue;
+				const fullPath = path.join(sessionDir, f);
+				if (fullPath === sessionPath) continue;
+				if (files.includes(fullPath)) continue;
+				try {
+					const header = JSON.parse(fs.readFileSync(fullPath, "utf8").split("\n")[0]);
+					if (header.type === "session" && header.parentSession === mainSessionId) {
+						files.push(fullPath);
+					}
+				} catch { /* skip unreadable files */ }
+			}
+		} catch { /* dir unreadable */ }
+	}
+
+	return files;
+}
+
+/** Recursively walk a subagent directory, collecting agent-*.jsonl files.
+ * Subagent directories are named agent-<hash>/ and may contain their own
+ * subagents/ subdirectory (Claude Code nested subagent convention). */
+function walkSubagentDir(
+	dir: string,
+	depth: number,
+	maxDepth: number,
+	files: string[],
+): void {
+	if (depth > maxDepth) return;
+	try {
+		for (const f of fs.readdirSync(dir)) {
+			const fullPath = path.join(dir, f);
+			try {
+				const stat = fs.statSync(fullPath);
+				if (stat.isDirectory()) {
+					// Recurse into directories that could contain nested subagents:
+					//   "subagents" / "ns" — the nested subagents container itself
+					//   "agent-*" — an individual subagent's session dir (may have
+					//     its own subagents/ subdirectory with grandchild agents)
+					if (f === "subagents" || f === "ns" || f.startsWith("agent-")) {
+						walkSubagentDir(fullPath, depth + (f === "subagents" || f === "ns" ? 1 : 0), maxDepth, files);
+					}
+				} else if (f.startsWith("agent-") && f.endsWith(".jsonl")) {
+					files.push(fullPath);
+				}
+			} catch { /* stat failed — skip */ }
+		}
+	} catch { /* dir unreadable */ }
+}
+
+/**
+ * Parse and classify subagent interactions from raw session files.
+ * Returns interactions stamped with _cat for downstream short-circuit.
+ */
+export function loadSubagentInteractions(
+	subagentFiles: string[],
+	parseFn = parseSessionFile,
+	classifyFn = classifyInteraction,
+	dedupFn = deduplicateInteractions,
+): Interaction[] {
+	const interactions: Interaction[] = [];
+	for (const file of subagentFiles) {
+		try {
+			const raw = parseFn(file);
+			const deduped = dedupFn(raw);
+			for (const interaction of deduped) {
+				interaction._cat = classifyFn(interaction);
+				interactions.push(interaction);
+			}
+		} catch { /* file unreadable or unparseable */ }
+	}
+	return interactions;
+}

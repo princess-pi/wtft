@@ -9,7 +9,7 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { calculateClaudeCost, calculateServerToolCost } from "./wtft-cost.js";
+import { calculateClaudeCost, calculateServerToolCost, getDeepSeekPeakMultiplier } from "./wtft-cost.js";
 
 // ---
 // TYPES (#52) — single source of truth for parser output. These were referenced
@@ -61,6 +61,8 @@ export interface Interaction {
 	unrecognizedTool?: boolean;
 	/** Pre-classified category from the daemon tag file — short-circuits classifyInteraction */
 	_cat?: Category;
+	/** True when this interaction's timestamp falls within DeepSeek surge-pricing hours (#119). */
+	surgePriced?: boolean;
 }
 
 // ---
@@ -196,6 +198,10 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string, comp
 			serverToolRequests.web_fetch_requests || 0
 		);
 
+		// Surge-pricing tag (#119): mark interactions that fell within DeepSeek peak hours
+		const surgePriced = (assistantMsg.model || "").toLowerCase().includes("deepseek")
+			? getDeepSeekPeakMultiplier(timestamp) > 1.0 : undefined;
+
 		const files: { path: string; action: "read" | "write" }[] = [];
 		const commands: string[] = [];
 		const texts: string[] = [];
@@ -260,6 +266,7 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string, comp
 			webSearchRequests: (serverToolRequests.web_search_requests || 0) as number,
 			webFetchRequests: (serverToolRequests.web_fetch_requests || 0) as number,
 			serverToolCost,
+		surgePriced,
 			thinkingLevel,
 			compactionTokensBefore,
 			cacheTtl,
@@ -480,6 +487,7 @@ export function deduplicateInteractions(interactions: Interaction[]): Interactio
 				// them marks the whole billed message (#52 Phase 3).
 				if (i.interrupted) merged.interrupted = true;
 				if (i.afterCompaction) merged.afterCompaction = true;
+				if (i.surgePriced) merged.surgePriced = true;
 			}
 			if (mergedToolCats.size > 0) merged.toolCats = [...mergedToolCats];
 			deduped.push(merged);

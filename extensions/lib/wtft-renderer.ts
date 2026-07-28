@@ -25,6 +25,8 @@ export interface Bin {
 	tokens?: Record<Category, { total: number; output: number }>;
 	total_tokens?: number;
 	incremental_tokens?: number;
+	/** True when any interaction in this bin fell within DeepSeek surge-pricing hours (#119). */
+	surgePriced?: boolean;
 }
 
 // ---
@@ -846,6 +848,9 @@ export function buildWtftLines(
 		bin.costs[classification] += interaction.cost;
 		bin.total_cost += interaction.cost;
 
+		// Track surge-pricing: mark bin if any interaction fell in DeepSeek peak hours (#119)
+		if (interaction.surgePriced) bin.surgePriced = true;
+
 		// Server-side tool cost is a separate line item, not token spend (#73).
 		// Attribute it to the "web" category independently of file classification.
 		if (interaction.serverToolCost) {
@@ -1189,6 +1194,9 @@ export function buildWtftLines(
 		const labelPart = padString(bin.label, labelWidth);
 		const coloredLabel = `\x1b[90m${labelPart}\x1b[0m`;
 
+		// Surge-pricing cost color (#119): orange for bins with any surge-priced interactions
+		const costColor = bin.surgePriced ? "\x1b[1;38;5;208m" : "\x1b[1;37m";
+
 		if (unit === "tokens" && bin.tokens) {
 			// --- TOKEN MODE BAR RENDERING (#14) ---
 			const barWidth = scaleMax > 0 ? Math.round(((bin.total_tokens ?? 0) / scaleMax) * maxBarWidth) : 0;
@@ -1222,10 +1230,10 @@ export function buildWtftLines(
 				const incStr = `${incSign}${formatTokenCount(bin.incremental_tokens ?? 0)}`;
 				const incPart = padString(incStr, maxIncLen);
 				const tokPart = padString(formatTokenCount(bin.total_tokens ?? 0), maxCostLen);
-				widgetLines.push(`${coloredLabel}  \x1b[90m${incPart}\x1b[0m  \x1b[1;37m${tokPart} tok\x1b[0m  ${barStr}`);
+				widgetLines.push(`${coloredLabel}  \x1b[90m${incPart}\x1b[0m  ${costColor}${tokPart} tok\x1b[0m  ${barStr}`);
 			} else {
 				const tokPart = padString(formatTokenCount(bin.total_tokens ?? 0), maxCostLen);
-				widgetLines.push(`${coloredLabel}  \x1b[1;37m${tokPart} tok\x1b[0m  ${barStr}`);
+				widgetLines.push(`${coloredLabel}  ${costColor}${tokPart} tok\x1b[0m  ${barStr}`);
 			}
 		} else {
 			// --- COST MODE BAR RENDERING (#109: half-block resolution) ---
@@ -1274,11 +1282,11 @@ export function buildWtftLines(
 				const incPart = padString(incStr, maxIncLen);
 				const coloredInc = `\x1b[90m${incPart}\x1b[0m`;
 				const costPart = padString(formatCost(bin.total_cost), maxCostLen);
-				const coloredCost = `\x1b[1;37m${costPart}\x1b[0m`;
+				const coloredCost = `${costColor}${costPart}\x1b[0m`;
 				widgetLines.push(`${coloredLabel}  ${coloredInc}  ${coloredCost}  ${barStr}`);
 			} else {
 				const costPart = padString(formatCost(bin.total_cost), maxCostLen);
-				const coloredCost = `\x1b[1;37m${costPart}\x1b[0m`;
+				const coloredCost = `${costColor}${costPart}\x1b[0m`;
 				widgetLines.push(`${coloredLabel}  ${coloredCost}  ${barStr}`);
 			}
 		}

@@ -314,6 +314,7 @@ export function spawnWtftDaemon(sessionPath: string, daemonDir: string): ChildPr
 // and exits, so it naturally starts fresh every invocation.
 let _daemonSessionPath: string | null = null;
 let _daemonSpawned = false;
+let _daemonSpawnedAt = 0; // Date.now() when the last spawn was attempted (#124)
 
 /**
  * Ensure the wtft-daemon is running for the given session. If already
@@ -332,6 +333,7 @@ export function ensureDaemonRunning(sessionPath: string, daemonDir: string): boo
 	const child = spawnWtftDaemon(sessionPath, daemonDir);
 	if (child) {
 		_daemonSpawned = true;
+		_daemonSpawnedAt = Date.now();
 		_daemonSessionPath = sessionPath;
 		return true;
 	}
@@ -344,12 +346,37 @@ export function ensureDaemonRunning(sessionPath: string, daemonDir: string): boo
  */
 export function getDaemonStatus(sessionPath: string): DaemonStatus {
 	if (!_daemonSessionPath) return { alive: false, reason: "log parser not started" };
+
+	// Session file existence (#124): the daemon now waits for the session
+	// file instead of exiting, but there's still a brief window where the
+	// daemon was spawned and hasn't claimed the PID file yet. In that gap,
+	// if the session file doesn't exist, show "waiting for session..."
+	// instead of "starting..." → falling through to "log parser not found".
+	let sessionExists = false;
+	try { sessionExists = fs.existsSync(sessionPath); } catch {}
+
 	const tagPath = getTagPath(sessionPath);
 	const health = checkDaemonHealth(sessionPath, tagPath);
+
+	// Daemon is alive — if session file doesn't exist, daemon is polling.
+	if (health.alive && !sessionExists) {
+		return { alive: true, waiting: true, reason: "waiting for session .jsonl..." };
+	}
+
 	// Grace period: if the daemon PID is gone but the tag file was recently
 	// written (within 2s), a new daemon instance is spinning up — mask the
 	// restart gap by reporting alive (idle or live depending on session).
 	if (!health.alive && _daemonSpawned) {
+		const elapsed = Date.now() - _daemonSpawnedAt;
+		// Within 5s of spawn: if PID file doesn't exist, daemon may still
+		// be starting. If session file doesn't exist either, the daemon is
+		// waiting for it — show that instead of a generic "starting...".
+		if (elapsed < 5000 && health.reason === "log parser not found") {
+			if (!sessionExists) {
+				return { alive: false, waiting: true, reason: "waiting for session .jsonl..." };
+			}
+			return { alive: false, reason: "starting...", starting: true };
+		}
 		try {
 			const tagStat = fs.statSync(tagPath);
 			const tagAge = Date.now() - tagStat.mtimeMs;

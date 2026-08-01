@@ -327,6 +327,12 @@ export interface DaemonStatus {
 	idleSinceMs?: number;
 	/** Cache TTL in ms for the current model (null = local/no cache). */
 	cacheTtlMs?: number | null;
+	/** Daemon was just spawned and hasn't confirmed alive yet — show "starting..."
+	 *  instead of "log parser not found" during the startup grace window (#124). */
+	starting?: boolean;
+	/** Session file doesn't exist yet — daemon is waiting for it to be created.
+	 *  Widget shows "waiting for session .jsonl..." instead of "starting..." (#124). */
+	waiting?: boolean;
 }
 
 /**
@@ -339,8 +345,11 @@ export interface DaemonStatus {
  *   "  ● restarting..." (yellow) — daemon being relaunched
  */
 export function renderDaemonStatus(status: DaemonStatus, restarting = false): string {
-	if (restarting) {
-		return "  \x1b[33m●\x1b[0m restarting...";
+	if (status.waiting) {
+		return "  \x1b[33m●\x1b[0m waiting for session .jsonl...";
+	}
+	if (restarting || status.starting) {
+		return "  \x1b[33m●\x1b[0m starting...";
 	}
 	if (!status.alive) {
 		const label = status.lastHbTime

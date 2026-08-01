@@ -174,6 +174,10 @@ function flushPending() {
   pendingItems = [];
   try {
     fs.appendFileSync(tagPath, batch);
+    // _meta offset tracking (#124): record the byte position processed so the
+    // next daemon instance knows exactly where to resume, rather than skipping
+    // to sessionPath.size and missing lines written while the daemon was dead.
+    fs.appendFileSync(tagPath, JSON.stringify({ _meta: { offset: lastSize } }) + "\n");
     idleStartMs = 0; // Data arrived — idle period ended
   } catch (err) {
     // If we can't write, log and continue — don't crash the log parser
@@ -256,26 +260,67 @@ function parseNewLines(filePath: string) {
 }
 
 // ---
+// META OFFSET TRACKING (#124)
+// ---
+
+/**
+ * Read the byte offset from the last _meta line in the tag file.
+ * Returns null if no _meta line found (tag file predates offset tracking).
+ */
+function readLastMetaOffset(tagPath: string): number | null {
+  try {
+    const stat = fs.statSync(tagPath);
+    if (stat.size === 0) return null;
+    // Scan last ~8KB for the most recent _meta line.
+    const readStart = Math.max(0, stat.size - 8192);
+    const fd = fs.openSync(tagPath, "r");
+    const buf = Buffer.alloc(stat.size - readStart);
+    fs.readSync(fd, buf, 0, buf.length, readStart);
+    fs.closeSync(fd);
+    const lines = buf.toString("utf8").split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      try {
+        const obj = JSON.parse(line);
+        if (obj._meta && typeof obj._meta.offset === "number") {
+          return obj._meta.offset;
+        }
+      } catch { continue; }
+    }
+  } catch { /* tag file unreadable */ }
+  return null;
+}
+
+// ---
 // INITIALIZATION
 // ---
 
 function initClassified() {
   // Version is embedded in filename (TAG_SUFFIX), so no _cv header needed.
   // On startup: if the tag file already exists (same version) AND contains
-  // actual classified entries (not just heartbeats), resume incrementally.
+  // actual classified entries (not just heartbeats or _meta lines), resume
+  // incrementally from the recorded _meta offset (#124). If no _meta offset
+  // exists, fall back to full re-parse.
   // If tag file is missing or only has heartbeats, do a full re-parse.
   let hasData = false;
   try {
     fs.accessSync(tagPath);
-    // Check if tag file has actual classified entries (not just _hb lines).
+    // Check if tag file has actual classified entries (not just _hb or _meta lines).
     const tagContent = fs.readFileSync(tagPath, "utf8");
-    hasData = tagContent.split("\n").some(l => l.trim() && !l.includes('"_hb"'));
+    hasData = tagContent.split("\n").some(l => l.trim() && !l.includes('"_hb"') && !l.includes('"_meta"'));
     if (hasData) {
-      // Tag file has real data — resume from current session end
-      try {
-        const stat = fs.statSync(sessionPath);
-        lastSize = stat.size;
-      } catch (_) {}
+      // Tag file has real data — resume from last known byte offset (#124).
+      const metaOffset = readLastMetaOffset(tagPath);
+      if (metaOffset !== null) {
+        lastSize = metaOffset;
+      } else {
+        // No _meta found — tag file predates offset tracking.
+        // Full re-parse — clear the tag file first so old entries
+        // don't duplicate when we re-classify everything from scratch.
+        try { fs.truncateSync(tagPath, 0); } catch { /* best effort */ }
+        lastSize = 0;
+      }
     } else {
       // Tag file exists but no classified data (only heartbeats from a
       // previous daemon that exited before its first poll). Full re-parse.
@@ -475,10 +520,11 @@ if (showList || showCleanup || showRestart || stopSession) {
     process.stderr.write("wtft-daemon: --session <path> is required\n");
     process.exit(1);
   }
-  if (!fs.existsSync(sessionPath)) {
-    process.stderr.write(`wtft-daemon: session file not found: ${sessionPath}\n`);
-    process.exit(1);
-  }
+  // Session file may not exist yet (e.g. Pi TUI started but no prompt
+  // entered — session.jsonl is created on first write). The daemon waits
+  // in its poll loop until the file appears, writing heartbeats so the
+  // widget can show "waiting for session .jsonl..." (#124).
+  //
   // Guard: refuse to watch a wtft-tag file (prevents recursive log parser loops).
   if (sessionPath.includes(".wtft-tag.v")) {
     process.stderr.write(`wtft-daemon: refusing to watch a tag cache file: ${sessionPath}\n`);
@@ -599,6 +645,21 @@ if (showList || showCleanup || showRestart || stopSession) {
     } catch (_) {
       running = false;
       process.exit(0);
+    }
+
+    // If session file doesn't exist yet (Pi session just started, no
+    // prompt entered), wait for it to be created. Write heartbeats so
+    // the widget knows the daemon is alive and waiting (#124).
+    if (!fs.existsSync(sessionPath)) {
+      const now = Date.now();
+      if (idleStartMs === 0) idleStartMs = now;
+      upsertHeartbeat(now);
+      lastWriteMs = now;
+      // Update lastActivityMs so the idle-exit timer doesn't kill a daemon
+      // that's been waiting for the session file since startup.
+      lastActivityMs = now;
+      setTimeout(loop, POLL_MS);
+      return;
     }
 
     try {

@@ -205,7 +205,7 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 		// --- valued flags (shared) ---
 		} else if (arg === "-i" || arg === "--interval") {
 			const val = argv[i + 1];
-			if (val && /^(\d+)([mhdw])$/.test(val)) {
+			if (val && /^(\d+)([mhdw]|t(?:urns?)?)$/.test(val)) {
 				interval = val;
 				hasInterval = true;
 				i++;
@@ -236,7 +236,7 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 		// --- valued flags (= syntax, extension already supports; CLI gets for free) ---
 		} else if (arg.startsWith("--interval=")) {
 			const val = arg.split("=")[1];
-			if (val && /^(\d+)([mhdw])$/.test(val)) {
+			if (val && /^(\d+)([mhdw]|t(?:urns?)?)$/.test(val)) {
 				interval = val;
 				hasInterval = true;
 			}

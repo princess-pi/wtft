@@ -12,6 +12,7 @@ import {
 	normalizeCommand,
 	deduplicateInteractions
 } from "./wtft-shared.js";
+import { lookupModelPricing, getDeepSeekPeakMultiplier } from "./wtft-cost.js";
 import { execSync } from "node:child_process";
 import wcwidth from "wcwidth";
 export interface Bin {
@@ -25,12 +26,15 @@ export interface Bin {
 	tokens?: Record<Category, { total: number; output: number }>;
 	total_tokens?: number;
 	incremental_tokens?: number;
+	/** Per-category incremental cost/token copies saved before cumulative conversion (#125). */
+	_incCosts?: Record<Category, number>;
+	_incTokens?: Record<Category, { total: number }>;
 	/** True when any interaction in this bin fell within DeepSeek surge-pricing hours (#119). */
 	surgePriced?: boolean;
 }
 
 // ---
-// TOKEN-UNIT MODE (#14): Background colors, density calculation, and rendering
+// TOKEN-UNIT MODE (#14): Background colors, block-height calculation, and rendering
 // ---
 
 // ---
@@ -45,9 +49,10 @@ export const CATEGORY_ORDER: Category[] = [
 	"agents", "prompt", "compaction", "other",
 ];
 
-/** fg = legend/bar ANSI 256 color; bg = token-mode segment (dark tones for
- *  bright-white density chars); char = bar glyph (█ for cost-mode half-block
- *  rendering #109); label = legend text.
+/** fg = legend/bar ANSI 256 color (used for token-mode block-height chars
+ *  and cost-mode half-block rendering #109); char = bar glyph (█ for cost-mode);
+ *  label = legend text. bg = retained for compatibility (no longer used in
+ *  token-mode — block chars render as colored fg on default background #125).
  *  Phase 3 (#52) wired the overhead trio: Ovrhd = recache (full-context 1h-tier
  *  rewrite), Waste = user-killed turns, Cmpct = compaction cache re-write.
  *  Palette rebalanced (#109): adjacent-pair distinctness, no red/green adjacency. */
@@ -68,24 +73,30 @@ const CATEGORY_STYLE: Record<Category, { fg: number; bg: number; char: string; l
 	other:       { fg: 245, bg: 236, char: "█", label: "Other" },
 };
 
-/** 256-color background codes for token-mode bar segments (derived from CATEGORY_STYLE). */
-const TOKEN_BG_COLORS: Record<Category, number> = Object.fromEntries(
-	CATEGORY_ORDER.map(c => [c, CATEGORY_STYLE[c].bg])
-) as Record<Category, number>;
-
-/** Density chars mapped by output-token share quartile. */
-const DENSITY_CHARS = ["░", "▒", "▓", "█"] as const;
+/** Block-height chars mapped by sqrt($/tok) relative, 8 levels (#125). */
+const BLOCK_CHARS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"] as const;
 
 /**
- * Map output-token share (0–1) to a density character.
- *   0–25% → ░ (cheap — input/cache-heavy)
- *   25–50% → ▒
- *   50–75% → ▓
- *   75–100% → █ (expensive — output-heavy)
+ * Map ∜($/tok) expensiveness (0–1) to a Unicode block-height character (#125).
+ * Uses 4th root to aggressively spread the compressed 0–5% raw range.
+ * Minimum height is offset to ▂ (index 1) so colors are visible even at
+ * the cheapest levels. In cumulative mode, per-category incremental
+ * cost/tokens are used so block height reflects the work done IN each
+ * turn, not the all-time average.
+ *
+ *   ∜ → 0–14%  → ▂ (cheapest — all cached)
+ *   ∜ → 14–29% → ▃ (~0.02–0.7% raw)
+ *   ∜ → 29–43% → ▄ (~0.7–3.4% raw — some uncached input)
+ *   ∜ → 43–57% → ▅ (~3.4–11% raw — significant new work)
+ *   ∜ → 57–71% → ▆ (~11–26% raw)
+ *   ∜ → 71–86% → ▇ (~26–54% raw — output-heavy)
+ *   ∜ → 86–100% → █ (most expensive, ~54%+ raw)
  */
-export function densityChar(outputShare: number): string {
-	const idx = Math.min(3, Math.floor(outputShare * 4));
-	return DENSITY_CHARS[idx];
+export function blockHeightChar(relExpensiveness: number): string {
+	// Offset by 1 so minimum height is ▂ (index 1), not ▁, for color visibility.
+	// Maps relExpensiveness 0–1 to indices 1–7 (▂–█).
+	const idx = Math.min(7, Math.floor(relExpensiveness * 7) + 1);
+	return BLOCK_CHARS[idx];
 }
 
 /**
@@ -921,6 +932,17 @@ export function buildWtftLines(
 
 	// Apply mode conversions
 	if (mode === "cumulative") {
+		// Save per-category incremental data before cumulative overwrite (#125 block-height)
+		for (const bin of sortedBins) {
+			bin._incCosts = { ...bin.costs };
+			if (unit === "tokens" && bin.tokens) {
+				bin._incTokens = {} as Record<Category, { total: number }>;
+				for (const cat of ALL_CATEGORIES) {
+					bin._incTokens[cat] = { total: bin.tokens[cat].total };
+				}
+			}
+		}
+
 		const runningCosts = {} as Record<Category, number>;
 		for (const cat of ALL_CATEGORIES) {
 			runningCosts[cat] = 0;
@@ -1067,7 +1089,22 @@ export function buildWtftLines(
 	const proximity = isDeepSeek ? checkSurgeProximity() : { status: undefined as ReturnType<typeof checkSurgeProximity>["status"], multiplier: 1.0 };
 	const timelineStr = buildTimelineString(surgeHours, currentHour, proximity.status);
 	const timelineLen = getVisualLength(timelineStr);
-	
+
+	// maxOutputPrice for block-height $/tok metric (#125).
+	// Derived from model pricing table, surge-adjusted for DeepSeek.
+	// Falls back to $15/M (Claude Sonnet) for unknown models.
+	const maxOutputPrice = (() => {
+		const pricing = surgeModel ? lookupModelPricing(surgeModel) : null;
+		if (pricing) {
+			let price = pricing.output;
+			if (surgeModel && surgeModel.toLowerCase().includes("deepseek")) {
+				price *= getDeepSeekPeakMultiplier();
+			}
+			return price;
+		}
+		return 15.00; // Claude Sonnet default
+	})();
+
 	const legendItems = CATEGORY_ORDER
 		.filter(c => CATEGORY_STYLE[c].label !== null)
 		.map(c => `\x1b[38;5;${CATEGORY_STYLE[c].fg}m${CATEGORY_STYLE[c].char}\x1b[0m${CATEGORY_STYLE[c].label}`);
@@ -1221,9 +1258,9 @@ export function buildWtftLines(
 		const costColor = bin.surgePriced ? "\x1b[1;38;5;208m" : "\x1b[1;37m";
 
 		if (unit === "tokens" && bin.tokens) {
-			// --- TOKEN MODE BAR RENDERING (#14) ---
+			// --- TOKEN MODE BAR RENDERING (#14, amended #125 block-height) ---
 			const barWidth = scaleMax > 0 ? Math.round(((bin.total_tokens ?? 0) / scaleMax) * maxBarWidth) : 0;
-			// Token bar: bg color for category, fg white density char per output share
+			// Token bar: colored fg block-height char on default background per $/tok
 			let barStr = "";
 			let allChars: number = 0;
 			for (const cat of ALL_CATEGORIES) {
@@ -1233,10 +1270,20 @@ export function buildWtftLines(
 				// distribute proportional chars
 				const segChars = Math.max(0, Math.min(segWidth, maxBarWidth - allChars));
 				if (segChars <= 0) continue;
-				const outputShare = t.total > 0 ? t.output / t.total : 0;
-				const dc = densityChar(outputShare);
-				const bg = TOKEN_BG_COLORS[cat] ?? 236;
-				barStr += `\x1b[48;5;${bg}m\x1b[38;5;15m${dc.repeat(segChars)}\x1b[0m`;
+				// $/tok relative to model's max output price (#125)
+				// In cumulative mode, use incremental (per-turn) cost/tokens
+				// so block height reflects the efficiency of work done IN this turn,
+				// not the blended average of all history.
+				const useIncCosts = mode === "cumulative" && bin._incCosts;
+				const useIncTokens = mode === "cumulative" && bin._incTokens;
+				const catCost = ((useIncCosts ? (bin._incCosts![cat] || 0) : (bin.costs[cat] || 0))) * 1_000_000;
+				const catTokens = useIncTokens ? (bin._incTokens![cat]?.total ?? 0) : t.total;
+				const relExpensiveness = catTokens > 0 && maxOutputPrice > 0
+					? Math.pow((catCost / catTokens) / maxOutputPrice, 0.25)  // 4th-root scale (#125) — aggressively spreads compressed 0–5% range
+					: 0;
+				const bh = blockHeightChar(relExpensiveness);
+				const fg = CATEGORY_STYLE[cat]?.fg ?? 245;
+				barStr += `\x1b[38;5;${fg}m${bh.repeat(segChars)}\x1b[0m`;
 				allChars += segChars;
 			}
 
@@ -1330,10 +1377,10 @@ export function buildWtftLines(
 		}
 	}
 
-	// --- TOKEN MODE FOOTER (#14): density key bar + Pi-style summary ---
+	// --- TOKEN MODE FOOTER (#14, amended #125): block-height key bar + Pi-style summary ---
 	if (unit === "tokens") {
-		// Density key bar
-		widgetLines.push(`\x1b[90m  cheap \$/tok  \x1b[37m░\x1b[0m\x1b[37m░\x1b[0m \x1b[37m▒\x1b[0m\x1b[37m▒\x1b[0m \x1b[37m▓\x1b[0m\x1b[37m▓\x1b[0m \x1b[37m█\x1b[0m\x1b[37m█\x1b[0m  expensive \$/tok  \x1b[90m\$ = cost-only (web tools)\x1b[0m`);
+		// Block-height key bar (#125): 8 levels, ▁ = cheap (cache-heavy), █ = expensive (output-heavy)
+		widgetLines.push(`\x1b[90m  cheap \$/tok  \x1b[37m▂\x1b[0m \x1b[37m▃\x1b[0m \x1b[37m▄\x1b[0m \x1b[37m▅\x1b[0m \x1b[37m▆\x1b[0m \x1b[37m▇\x1b[0m \x1b[37m█\x1b[0m  expensive \$/tok  \x1b[90m(∜ scale)  \$ = cost-only (web tools)\x1b[0m`);
 		// Footer summary
 		const summary = tokenFooterSummary(interactions);
 		if (summary) {

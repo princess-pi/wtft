@@ -79,17 +79,24 @@ function runAlignmentTest(mode: "cumulative" | "bucket") {
 	const firstDotIdx = ticksRow.indexOf(".");
 	const lastDotIdx = ticksRow.lastIndexOf(".");
 
-	// Find the end of the first bar (either solid block or shaded block)
+	// Find the end of the first bar (█ for cost-mode, block-height chars for token-mode)
 	const lastBarCharIdx = Math.max(
 		firstBarRow.lastIndexOf("█"),
-		firstBarRow.lastIndexOf("░"),
-		firstBarRow.lastIndexOf("▒")
+		firstBarRow.lastIndexOf("▁"), firstBarRow.lastIndexOf("▂"),
+		firstBarRow.lastIndexOf("▃"), firstBarRow.lastIndexOf("▄"),
+		firstBarRow.lastIndexOf("▅"), firstBarRow.lastIndexOf("▆"),
+		firstBarRow.lastIndexOf("▇")
 	);
 
 	const actualBarStart = Math.min(
 		firstBarRow.indexOf("█") !== -1 ? firstBarRow.indexOf("█") : Infinity,
-		firstBarRow.indexOf("░") !== -1 ? firstBarRow.indexOf("░") : Infinity,
-		firstBarRow.indexOf("▒") !== -1 ? firstBarRow.indexOf("▒") : Infinity
+		firstBarRow.indexOf("▁") !== -1 ? firstBarRow.indexOf("▁") : Infinity,
+		firstBarRow.indexOf("▂") !== -1 ? firstBarRow.indexOf("▂") : Infinity,
+		firstBarRow.indexOf("▃") !== -1 ? firstBarRow.indexOf("▃") : Infinity,
+		firstBarRow.indexOf("▄") !== -1 ? firstBarRow.indexOf("▄") : Infinity,
+		firstBarRow.indexOf("▅") !== -1 ? firstBarRow.indexOf("▅") : Infinity,
+		firstBarRow.indexOf("▆") !== -1 ? firstBarRow.indexOf("▆") : Infinity,
+		firstBarRow.indexOf("▇") !== -1 ? firstBarRow.indexOf("▇") : Infinity
 	);
 
 	console.log(`Ticks Row Length:      ${ticksRow.length}`);
@@ -108,7 +115,7 @@ function runAlignmentTest(mode: "cumulative" | "bucket") {
 			
 			// Verify that the newest bin's marker is exactly on the maximum tick (index 76).
 			// Fixture writes spec+code+tests → classifies "tests" (█) under
-			// latest-stage-wins (#52 amendment 2 removed "mixed"/▒).
+			// latest-stage-wins (#52 amendment 2 removed "mixed").
 			assert.strictEqual(firstBarRow.indexOf("█"), 76, "The point-of-spend marker '█' for the max cost bin must reside exactly at index 76");
 			
 			// Verify that the older bin's Code work character '█' is located at the $5.00 point on the scale.

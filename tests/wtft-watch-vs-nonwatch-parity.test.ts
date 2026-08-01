@@ -100,7 +100,7 @@ function stripAnsi(s: string): string {
  * layout (inline vs separate row) due to forceLegendRow / daemon status.
  *
  * Keeps lines with:
- *   ── tick scale lines, bar segments (█ ░ ▓ ▒), cost labels.
+ *   ── tick scale lines, bar segments (█ for cost-mode, ▃▅▇ for token-mode), cost labels.
  */
 function extractBarLines(output: string): string[] {
 	const rawLines = output.split("\n").filter(l => l.trim());

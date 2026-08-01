@@ -142,7 +142,8 @@ export function accumulateTokens(bin: Bin, category: Category, interaction: { in
 
 export interface IntervalConfig {
 	size: number;
-	unit: "m" | "h" | "d" | "w";
+	unit: "m" | "h" | "d" | "w" | "t";
+	type: "time" | "turns";
 }
 
 // SHARED FILE PARSER (#54 DRY refactor)
@@ -159,13 +160,18 @@ export interface IntervalConfig {
  * @returns Array of parsed interactions (may contain duplicate message.id entries)
  */
 export function parseInterval(val: string): IntervalConfig {
-	const match = /^(\d+)([mhdw])$/.exec(val);
-	if (match) {
-		const size = parseInt(match[1], 10);
-		const unit = match[2] as "m" | "h" | "d" | "w";
-		if (size > 0) return { size, unit };
+	const timeMatch = /^(\d+)([mhdw])$/.exec(val);
+	if (timeMatch) {
+		const size = parseInt(timeMatch[1], 10);
+		const unit = timeMatch[2] as "m" | "h" | "d" | "w";
+		if (size > 0) return { size, unit, type: "time" };
 	}
-	return { size: 1, unit: "h" };
+	const turnMatch = /^(\d+)(?:t|turns?)$/.exec(val);
+	if (turnMatch) {
+		const size = parseInt(turnMatch[1], 10);
+		if (size > 0) return { size, unit: "t", type: "turns" };
+	}
+	return { size: 1, unit: "h", type: "time" };
 }
 
 // COMMAND NORMALIZATION (#63)
@@ -221,11 +227,18 @@ export function getIsoWeekAndMonday(parts: { year: number; month: number; day: n
 	};
 }
 
-export function getBinInfo(timestamp: number, config: IntervalConfig, tz?: string) {
+export function getBinInfo(timestamp: number, config: IntervalConfig, turnIndex: number, tz?: string) {
 	const parts = getZonedParts(timestamp, tz);
 	const pad = (n: number) => String(n).padStart(2, "0");
 	const dateStr = `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`;
-	const { size, unit } = config;
+	const { size, unit, type } = config;
+
+	// Turn-based binning (#121): bin by interaction sequence position, not time.
+	// turnIndex is 1-based (first interaction = turn 1). Label = highest turn # in bucket.
+	if (type === "turns") {
+		const binEnd = Math.ceil(turnIndex / size) * size;
+		return { key: `turn:${String(binEnd).padStart(6, "0")}`, label: `${binEnd}t`, dateStr };
+	}
 
 	if (unit === "m") {
 		const totalMins = parts.hour * 60 + parts.minute;
@@ -827,12 +840,14 @@ export function buildWtftLines(
 	// Group interactions into binned intervals
 	const binMap = new Map<string, Bin>();
 	let totalSessionCost = 0;
+	let turnIndex = 0; // 1-based counter for turn-based binning (#121)
 
 	const ALL_CATEGORIES = CATEGORY_ORDER;
 
 	for (const interaction of interactions) {
+		turnIndex++;
 		const classification = classifyInteraction(interaction);
-		const { key, label, dateStr } = getBinInfo(interaction.timestamp, intervalConfig, tz);
+		const { key, label, dateStr } = getBinInfo(interaction.timestamp, intervalConfig, turnIndex, tz);
 		totalSessionCost += interaction.cost;
 
 		let bin = binMap.get(key);
@@ -843,6 +858,13 @@ export function buildWtftLines(
 			}
 			bin = { key, label, dateStr, costs, total_cost: 0 };
 			binMap.set(key, bin);
+		}
+
+		// Turn-based mode (#121): always update label to highest turn # in bucket
+		// and dateStr to latest interaction's date (for date separator logic).
+		if (intervalConfig.type === "turns") {
+			bin.label = `${turnIndex}t`;
+			bin.dateStr = dateStr;
 		}
 
 		bin.costs[classification] += interaction.cost;
@@ -873,8 +895,9 @@ export function buildWtftLines(
 	// Detect cache TTL expiry boundaries (#106). Walk interactions chronologically;
 	// when a cache write's TTL window elapses before the next interaction, mark
 	// that bin boundary for a "Cache Expired" divider line.
+	// Skipped for turn-based mode — cache TTL is time-based (#121).
 	const cacheExpiryBins = new Set<string>();
-	{
+	if (intervalConfig.type !== "turns") {
 		const sortedInteractions = [...interactions].sort(
 			(a, b) => a.timestamp - b.timestamp
 		);
@@ -882,7 +905,7 @@ export function buildWtftLines(
 		for (const ix of sortedInteractions) {
 			const ts = new Date(ix.timestamp).getTime();
 			if (latestExpiry !== null && ts > latestExpiry) {
-				const { key } = getBinInfo(ix.timestamp, intervalConfig, tz);
+				const { key } = getBinInfo(ix.timestamp, intervalConfig, 0, tz);
 				cacheExpiryBins.add(key);
 				latestExpiry = null;
 			}

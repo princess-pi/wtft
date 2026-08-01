@@ -19,6 +19,7 @@ export interface WatchSettings {
 	mode: "cumulative" | "bucket";
 	showTicks: boolean;
 	timezone?: string;
+	unit?: "cost" | "tokens";
 	daemonPath?: string; // path to wtft-daemon.mjs (CLI watch mode only)
 	/** Padding spaces on each side of output (default 0 = no padding). */
 	pad?: number;
@@ -781,6 +782,7 @@ export async function watchTagFile(
 			showTicks: finalShowTicks,
 			mode: finalMode,
 			timezone: finalTimezone,
+			unit: settings.unit,
 			disabledEmoji,
 		});
 

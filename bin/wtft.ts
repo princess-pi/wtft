@@ -264,6 +264,7 @@ async function main() {
 			mode: opts.hasMode ? opts.mode : "cumulative",
 			showTicks: opts.hasTicks ? opts.showTicks : true,
 			timezone: opts.hasTimezone ? opts.timezone : undefined,
+			unit,
 			daemonPath,
 			pad: opts.pad,
 			hasInterval: opts.hasInterval,

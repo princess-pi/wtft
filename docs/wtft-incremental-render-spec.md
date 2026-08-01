@@ -1,6 +1,6 @@
 # WTFT `--watch` Live Render + Log Parser Health Monitoring + SURGE Timeline
 
-**Status:** Code and Spec Approved (Step 5)
+**Status:** Code and Spec Approved (Step 5) — updated 2026-08-01 with #124 additions
 
 ## Goal
 
@@ -52,6 +52,7 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 | No new data for 24h | Daemon cleanly exits ("idle timeout") |
 | Daemon just spawned (< 60s) | Idle exit suppressed (startup grace period) |
 | Session file deleted | Daemon exits ("session removed") |
+| Session file not yet created | Daemon waits (no exit), writes heartbeats so widget shows "waiting for session .jsonl..." (#124) |
 | Press `r` in `--watch` | Kills stale daemon, spawns fresh, fast-polls health at 1s × 5 |
 | **New activity after idle timeout** | Pi's `agent_end` handler calls `ensureParserRunning`, which checks daemon health via `checkDaemonHealth` and re-spawns if dead |
 
@@ -73,7 +74,8 @@ The 24-hour SURGE timeline and daemon status indicator are appended inline to th
 |---|---|---|
 | Alive | `🟢 live` (green) | PID alive |
 | Dead | `🔴 stopped HH:MM` (red) | PID dead, last _hb timestamp shown |
-| Restarting | `🟡 restarting...` (yellow) | User pressed `r`, waiting for daemon to come online |
+| Restarting / Starting | `🟡 starting...` (yellow) | Daemon spawned but PID file not yet claimed; 5s grace window (#124) |
+| Waiting | `🟡 waiting for session .jsonl...` (yellow) | Daemon alive or just spawned, but session file doesn't exist yet (#124) |
 
 Health is checked:
 - 10s after `--watch` startup
@@ -106,6 +108,21 @@ The 24-hour timeline on the title line shows DeepSeek peak-valley surge pricing 
 
 Handler calls `render()` directly. Daemon status indicator reflows — may move from inline to separate line or vice versa depending on available width.
 
+## Daemon Correctness Verification (#124)
+
+The `--debug` flag was extracted from wtft into a standalone diagnostic script:
+
+```
+node debug/verify-daemon-parse.mjs --session <path/to/session.jsonl>
+```
+
+It compares three cost totals: tag file (daemon's incremental parse), direct parse+dedup
+(fresh full re-parse), and raw parse (no dedup). Mismatch → exit code 1. Uses the same
+`parseSessionFile` / `deduplicateInteractions` functions exported from the bundled wtft.mjs.
+
+wtft.mjs gained an entry-point guard so importing it (e.g. from the debug script) does not
+trigger `main()`.
+
 ## Settings Persistence (Cross-Harness Config)
 
 All WTFT settings are persisted in harness-agnostic JSON config files via the shared `extensions/lib/config.ts` module. No `.jsonl` persistence — settings survive across Pi sessions, Claude Code invocations, and machine restarts. Config hierarchy: code defaults → `~/.config/princess-pi/wtft.json` → `./.princess-pi/wtft.json` → CLI flags. Widget auto-shows on session start if a config file exists. See `EXT_WTFT.html` for the full config reference.
@@ -123,7 +140,9 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 | Local model (no cache) | Status shows `● idle` without countdown |
 | User presses `r` | Daemon restarts, status shows `● restarting...`, clears to `● live` within 5s |
 | Tag file deleted/truncated | `fs.watch` handler re-reads from zero |
+| Daemon spawned before session file exists | Status shows `● waiting for session .jsonl...` (yellow); daemon polls until file created (#124) |
 | Daemon never started | PID check fails, status shows "log parser not found" |
+| Daemon restarts after crash | Reads `_meta` offset from tag file for exact resume position; falls back to full re-parse if no meta offset found (#124) |
 | Daemon encounters transient error | Error logged (debug mode), daemon continues on next poll cycle — does not crash |
 | Terminal too narrow for inline status | Status wraps to separate line between title and legend |
 | Session file gone | Daemon exits cleanly; TUI continues showing last-known data with stopped indicator |
@@ -140,3 +159,5 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 8. Terminal resize → width auto-fits; status reflows correctly (inline vs. separate line)
 9. Idle for 2m2s with a remote model (Claude/DeepSeek) → countdown timer shows `(M:SS to expire)`
 10. Kill daemon, restart Pi, send prompt → daemon auto-revives on agent_end (ensureParserRunning)
+11. Start Pi in a git repo on `main` branch → git-guardrails shows warning notification on session_start (#124)
+12. Run `node debug/verify-daemon-parse.mjs --session <path>` → reports tag-vs-direct cost match/mismatch (#124)

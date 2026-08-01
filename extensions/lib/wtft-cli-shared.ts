@@ -54,7 +54,6 @@ export interface WtftCliOptions {
 	showWatch: boolean;
 	pad: number;
 	hasPad: boolean;
-	debugMode: boolean;
 	daemonList: boolean;
 	daemonCleanup: boolean;
 	daemonRestart: boolean;
@@ -113,7 +112,6 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 	let showWatch = false;
 	let pad = 1;
 	let hasPad = false;
-	let debugMode = false;
 	let daemonList = false;
 	let daemonCleanup = false;
 	let daemonRestart = false;
@@ -186,8 +184,6 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 				pad = val;
 				hasPad = true;
 			}
-		} else if (arg === "--debug") {
-			debugMode = true;
 		} else if (arg === "--list") {
 			daemonList = true;
 		} else if (arg === "--cleanup") {
@@ -278,7 +274,6 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 		targetSession, cwdOverride, harnessOption,
 		showWatch,
 		pad, hasPad,
-		debugMode,
 		daemonList, daemonCleanup, daemonRestart, daemonStop,
 		thinkingBudget,
 	};

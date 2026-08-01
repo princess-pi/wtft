@@ -386,17 +386,6 @@ async function main() {
 		console.log(padStr + line);
 	}
 
-	// --- Debug: compare tag file cost vs direct parse + dedup cost ---
-	if (opts.debugMode) {
-		const tagCost = interactions.reduce((sum: number, i: any) => sum + (i.cost || 0), 0);
-		const rawInteractions = parseSessionFile(finalSessionPath);
-		const directCost = deduplicateInteractions(rawInteractions).reduce((sum, i) => sum + i.cost, 0);
-		console.log(padStr + `\x1b[90m── debug ─────────────────────────────────────────────\x1b[0m`);
-		console.log(padStr + `\x1b[90m  tag file (daemon): $${tagCost.toFixed(4)}  (${interactions.length} entries)\x1b[0m`);
-		console.log(padStr + `\x1b[90m  direct parse+dedup: $${directCost.toFixed(4)}  (${deduplicateInteractions(rawInteractions).length} entries)\x1b[0m`);
-		console.log(padStr + `\x1b[90m  raw parse (no dedup): $${rawInteractions.reduce((sum, i) => sum + i.cost, 0).toFixed(4)}  (${rawInteractions.length} entries)\x1b[0m`);
-	}
-
 	if (opts.other) {
 		console.log(""); // empty line spacer
 		const dedupedInteractions = deduplicateInteractions(interactions);
@@ -414,7 +403,15 @@ async function main() {
 	}
 }
 
-main().catch(err => {
-	console.error(`❌ System Error: ${err.message}`);
-	process.exit(1);
-});
+// Entry-point guard: only run main() when executed directly, not when imported
+// (e.g. debug/verify-daemon-parse.mjs imports from the built bundle).
+if (process.argv[1]) {
+	const entry = fileURLToPath(import.meta.url);
+	const invoked = process.argv[1];
+	if (invoked === entry || invoked.endsWith("/wtft") || invoked.endsWith("/wtft.mjs")) {
+		main().catch(err => {
+			console.error(`❌ System Error: ${err.message}`);
+			process.exit(1);
+		});
+	}
+}

@@ -1221,9 +1221,10 @@ export function buildWtftLines(
 		const surgeActive = bin.surgePriced === true;
 		const surgeLabel = surgeActive ? "\x1b[1;38;5;208m" : "\x1b[90m";
 		const surgeInc = surgeActive ? "\x1b[1;38;5;208m" : "\x1b[90m";
-		const surgePrefix = surgeActive ? "\u26A1" : "";  // ⚡ lightning bolt
 		const costColor = surgeActive ? "\x1b[1;38;5;208m" : "\x1b[1;37m";
 		const coloredLabel = `${surgeLabel}${labelPart}\x1b[0m`;
+		// ⚡ replaces one space of the 2-char column gap — numbers stay aligned.
+		const boltGap = surgeActive ? " \x1b[1;38;5;208m\u26A1\x1b[0m" : "  ";
 
 		if (unit === "tokens" && bin.tokens) {
 			// --- TOKEN MODE BAR RENDERING (#14, amended #125 block-height) ---
@@ -1273,10 +1274,10 @@ export function buildWtftLines(
 				const incStr = `${incSign}${formatTokenCount(bin.incremental_tokens ?? 0)}`;
 				const incPart = padString(incStr, maxIncLen);
 				const tokPart = padString(formatTokenCount(bin.total_tokens ?? 0), maxCostLen);
-				widgetLines.push(`${coloredLabel}  ${surgeInc}${incPart}\x1b[0m  ${costColor}${tokPart} tok\x1b[0m  ${barStr}`);
+				widgetLines.push(`${coloredLabel}  ${surgeInc}${incPart}\x1b[0m${boltGap}${costColor}${tokPart} tok\x1b[0m  ${barStr}`);
 			} else {
 				const tokPart = padString(formatTokenCount(bin.total_tokens ?? 0), maxCostLen);
-				widgetLines.push(`${coloredLabel}  ${costColor}${tokPart} tok\x1b[0m  ${barStr}`);
+				widgetLines.push(`${coloredLabel}${boltGap}${costColor}${tokPart} tok\x1b[0m  ${barStr}`);
 			}
 		} else {
 			// --- COST MODE BAR RENDERING (#109: half-block resolution) ---
@@ -1325,12 +1326,12 @@ export function buildWtftLines(
 				const incPart = padString(incStr, maxIncLen);
 				const coloredInc = `${surgeInc}${incPart}\x1b[0m`;
 				const costPart = padString(formatCost(bin.total_cost), maxCostLen);
-				const coloredCost = `${costColor}${surgePrefix}${costPart}\x1b[0m`;
-				widgetLines.push(`${coloredLabel}  ${coloredInc}  ${coloredCost}  ${barStr}`);
+				const coloredCost = `${costColor}${costPart}\x1b[0m`;
+				widgetLines.push(`${coloredLabel}  ${coloredInc}${boltGap}${coloredCost}  ${barStr}`);
 			} else {
 				const costPart = padString(formatCost(bin.total_cost), maxCostLen);
-				const coloredCost = `${costColor}${surgePrefix}${costPart}\x1b[0m`;
-				widgetLines.push(`${coloredLabel}  ${coloredCost}  ${barStr}`);
+				const coloredCost = `${costColor}${costPart}\x1b[0m`;
+				widgetLines.push(`${coloredLabel}${boltGap}${coloredCost}  ${barStr}`);
 			}
 		}
 	}

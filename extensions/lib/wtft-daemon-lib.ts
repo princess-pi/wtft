@@ -173,7 +173,7 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
 // 2.5.1 (#52 Phase 3): compaction/recache meter-split emits dual lines
 // (main + "#oh" overhead line), interrupted turns carry `ir` — stale caches
 // lack all three and must re-classify.
-export const WTFT_TAGGER_VERSION = "2.5.1";
+export const WTFT_TAGGER_VERSION = "2.5.2";
 
 /**
  * Serialize one interaction to its classified tag-file line(s) (#52 Phase 3).

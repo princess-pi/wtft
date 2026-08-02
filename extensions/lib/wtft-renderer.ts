@@ -1227,7 +1227,8 @@ export function buildWtftLines(
 					// Use bin-wide inc/total ratio (always ≤ 1) applied uniformly.
 					const binIncRatio = bin.total_tokens && bin.total_tokens > 0
 						? (bin.incremental_tokens ?? 0) / bin.total_tokens : 0;
-					const newChars = Math.round(segChars * binIncRatio);
+					const rawNew = segChars * binIncRatio;
+					const newChars = rawNew > 0 ? Math.max(1, Math.round(rawNew)) : 0;
 					const oldChars = segChars - newChars;
 
 					if (oldChars > 0) barStr += `\x1b[38;5;${fg}m${BLOCK_OLD.repeat(oldChars)}\x1b[0m`;

@@ -146,7 +146,14 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string, comp
 
 		// Resolve effective model: Pi sessions track model via model_change events
 		// (passed as currentModel), not on each message. Claude Code stores it
-		// directly on assistantMsg.model. (#128)
+		// directly on assistantMsg.model.
+		//
+		// Spec (#128): model_change entries carry provider + modelId. We track
+		// modelId as currentModel through both parseSessionFile and the daemon's
+		// incremental parseNewLines. When assistantMsg.model is absent (Pi),
+		// the tracked currentModel fills in — enabling DeepSeek surge-pricing
+		// detection, cost calculation, and server-tool-cost lookups that previously
+		// failed silently. Claude Code's message.model always takes precedence.
 		const effectiveModel = assistantMsg.model || currentModel || "";
 
 		// Parse timestamp first — used below for DeepSeek peak pricing

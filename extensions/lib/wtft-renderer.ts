@@ -1207,16 +1207,17 @@ export function buildWtftLines(
 
 		if (unit === "tokens" && bin.tokens) {
 			// --- TOKEN MODE BAR RENDERING (#14, amended #125 block-height) ---
-			const barWidth = scaleMax > 0 ? Math.round(((bin.total_tokens ?? 0) / scaleMax) * maxBarWidth) : 0;
+			const barMax = Math.max(0, maxBarWidth - 2); // 2-char safety margin for Pi TUI padding
+			const barWidth = scaleMax > 0 && barMax > 0 ? Math.round(((bin.total_tokens ?? 0) / scaleMax) * barMax) : 0;
 			// Token bar: colored fg block-height char on default background per $/tok (#125)
 			let barStr = "";
 			let allChars: number = 0;
 			for (const cat of ALL_CATEGORIES) {
 				const t = bin.tokens[cat];
 				if (!t || t.total <= 0) continue;
-				const segWidth = scaleMax > 0 ? Math.round(((bin.total_tokens ?? 0) / scaleMax) * maxBarWidth * (t.total / (bin.total_tokens || 1))) : 0;
+				const segWidth = scaleMax > 0 && barMax > 0 ? Math.round(((bin.total_tokens ?? 0) / scaleMax) * barMax * (t.total / (bin.total_tokens || 1))) : 0;
 				// distribute proportional chars
-				const segChars = Math.max(0, Math.min(segWidth, maxBarWidth - allChars));
+				const segChars = Math.max(0, Math.min(segWidth, barMax - allChars));
 				if (segChars <= 0) continue;
 				const fg = CATEGORY_STYLE[cat]?.fg ?? 245;
 
@@ -1241,7 +1242,7 @@ export function buildWtftLines(
 
 			// Server tool cost marker ($) at bar tail if no tokens but had cost (#14)
 			const hasServerToolCost = (bin.costs["web"] || 0) > 0 && (bin.tokens["web"]?.total ?? 0) === 0;
-			if (hasServerToolCost && allChars < maxBarWidth) {
+			if (hasServerToolCost && allChars < barMax) {
 				barStr += `\x1b[38;5;209m$\x1b[0m`;
 				allChars++;
 			}

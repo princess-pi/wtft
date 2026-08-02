@@ -1223,8 +1223,8 @@ export function buildWtftLines(
 		const surgeInc = surgeActive ? "\x1b[1;38;5;208m" : "\x1b[90m";
 		const costColor = surgeActive ? "\x1b[1;38;5;208m" : "\x1b[1;37m";
 		const coloredLabel = `${surgeLabel}${labelPart}\x1b[0m`;
-		// ⚡ replaces one space of the 2-char column gap — numbers stay aligned.
-		const boltGap = surgeActive ? " \x1b[1;38;5;208m\u26A1\x1b[0m" : "  ";
+		// ⚡ is double-width — it fills the 2-char column gap on its own, numbers stay aligned.
+		const boltGap = surgeActive ? "\x1b[1;38;5;208m\u26A1\x1b[0m" : "  ";
 
 		if (unit === "tokens" && bin.tokens) {
 			// --- TOKEN MODE BAR RENDERING (#14, amended #125 block-height) ---

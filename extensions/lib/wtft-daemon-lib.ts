@@ -79,6 +79,8 @@ export function serializeClassified(interaction: Interaction): string {
 	if (interaction.cacheTtl) line.ttl = interaction.cacheTtl;
 	// Interrupted turn — whole cost is discarded work (#52 Phase 3)
 	if (interaction.interrupted) line.ir = 1;
+	// DeepSeek surge-pricing tag (#119, #128)
+	if (interaction.surgePriced) line.sp = 1;
 	return JSON.stringify(line) + "\n";
 }
 
@@ -113,6 +115,7 @@ export function classifiedToInteraction(obj: any): Interaction | null {
 		unrecognizedTool: obj.ut ? true : undefined,
 		cacheTtl: obj.ttl === "1h" || obj.ttl === "5m" ? obj.ttl : undefined,
 		interrupted: obj.ir ? true : undefined,
+		surgePriced: obj.sp ? true : undefined,
 		_cat: obj.cat || undefined,
 	};
 }
@@ -173,7 +176,7 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
 // 2.5.1 (#52 Phase 3): compaction/recache meter-split emits dual lines
 // (main + "#oh" overhead line), interrupted turns carry `ir` — stale caches
 // lack all three and must re-classify.
-export const WTFT_TAGGER_VERSION = "2.5.2";
+export const WTFT_TAGGER_VERSION = "2.5.3";
 
 /**
  * Serialize one interaction to its classified tag-file line(s) (#52 Phase 3).

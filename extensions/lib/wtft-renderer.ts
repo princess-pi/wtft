@@ -1214,10 +1214,16 @@ export function buildWtftLines(
 		}
 
 		const labelPart = padString(bin.label, labelWidth);
-		const coloredLabel = `\x1b[90m${labelPart}\x1b[0m`;
 
-		// Surge-pricing cost color (#119): orange for bins with any surge-priced interactions
-		const costColor = bin.surgePriced ? "\x1b[1;38;5;208m" : "\x1b[1;37m";
+		// Surge-pricing UI (#119, #128): orange for bins with surge-priced interactions.
+		// Label, increment, and cumulative cost all get the surge treatment — it's the
+		// time slot that triggers surge, so all cost/revenue of that bin is affected.
+		const surgeActive = bin.surgePriced === true;
+		const surgeLabel = surgeActive ? "\x1b[1;38;5;208m" : "\x1b[90m";
+		const surgeInc = surgeActive ? "\x1b[1;38;5;208m" : "\x1b[90m";
+		const surgePrefix = surgeActive ? "\u26A1" : "";  // ⚡ lightning bolt
+		const costColor = surgeActive ? "\x1b[1;38;5;208m" : "\x1b[1;37m";
+		const coloredLabel = `${surgeLabel}${labelPart}\x1b[0m`;
 
 		if (unit === "tokens" && bin.tokens) {
 			// --- TOKEN MODE BAR RENDERING (#14, amended #125 block-height) ---
@@ -1267,7 +1273,7 @@ export function buildWtftLines(
 				const incStr = `${incSign}${formatTokenCount(bin.incremental_tokens ?? 0)}`;
 				const incPart = padString(incStr, maxIncLen);
 				const tokPart = padString(formatTokenCount(bin.total_tokens ?? 0), maxCostLen);
-				widgetLines.push(`${coloredLabel}  \x1b[90m${incPart}\x1b[0m  ${costColor}${tokPart} tok\x1b[0m  ${barStr}`);
+				widgetLines.push(`${coloredLabel}  ${surgeInc}${incPart}\x1b[0m  ${costColor}${tokPart} tok\x1b[0m  ${barStr}`);
 			} else {
 				const tokPart = padString(formatTokenCount(bin.total_tokens ?? 0), maxCostLen);
 				widgetLines.push(`${coloredLabel}  ${costColor}${tokPart} tok\x1b[0m  ${barStr}`);
@@ -1317,13 +1323,13 @@ export function buildWtftLines(
 				const incSign = (bin.incremental_cost ?? 0) >= 0 ? "+" : "";
 				const incStr = `${incSign}${formatCost(bin.incremental_cost ?? 0)}`;
 				const incPart = padString(incStr, maxIncLen);
-				const coloredInc = `\x1b[90m${incPart}\x1b[0m`;
+				const coloredInc = `${surgeInc}${incPart}\x1b[0m`;
 				const costPart = padString(formatCost(bin.total_cost), maxCostLen);
-				const coloredCost = `${costColor}${costPart}\x1b[0m`;
+				const coloredCost = `${costColor}${surgePrefix}${costPart}\x1b[0m`;
 				widgetLines.push(`${coloredLabel}  ${coloredInc}  ${coloredCost}  ${barStr}`);
 			} else {
 				const costPart = padString(formatCost(bin.total_cost), maxCostLen);
-				const coloredCost = `${costColor}${costPart}\x1b[0m`;
+				const coloredCost = `${costColor}${surgePrefix}${costPart}\x1b[0m`;
 				widgetLines.push(`${coloredLabel}  ${coloredCost}  ${barStr}`);
 			}
 		}

@@ -190,6 +190,94 @@ assert(
 );
 
 // ---
+// Model tracking from model_change events (#128)
+// Pi sessions don't store model on each message; it's tracked via
+// model_change events passed as currentModel to parseEntryToInteraction.
+// ---
+console.log("\n6. Model tracking from model_change events (#128)");
+
+// Pi-style assistant message WITHOUT model field (Pi doesn't store model on messages)
+const piAssistantNoModel = {
+	type: "message",
+	message: {
+		role: "assistant",
+		id: "msg_pi_001",
+		// NO model field — Pi stores model via model_change events instead
+		timestamp: new Date("2025-01-01T12:00:00Z").toISOString(), // off-peak UTC
+		usage: { input: 1000, output: 200 },
+		content: [{ type: "text", text: "Hello from Pi" }],
+	},
+};
+
+// Pass deepseek model via currentModel (from model_change event)
+const piOffPeak = parseEntryToInteraction(piAssistantNoModel, undefined, undefined, undefined, "deepseek-v4-pro");
+assert(
+	"Pi session: model resolved from currentModel",
+	piOffPeak?.model === "deepseek-v4-pro"
+);
+assert(
+	"Pi session: surgePriced=false at off-peak UTC (noon)",
+	piOffPeak?.surgePriced === false
+);
+
+// Same entry but at peak time (02:00 UTC → inside 01:00-04:00 window)
+const piAssistantPeak = {
+	type: "message",
+	message: {
+		role: "assistant",
+		id: "msg_pi_002",
+		// NO model field
+		timestamp: new Date("2025-01-01T02:00:00Z").toISOString(), // peak UTC
+		usage: { input: 1000, output: 200 },
+		content: [{ type: "text", text: "Peak time" }],
+	},
+};
+const piPeak = parseEntryToInteraction(piAssistantPeak, undefined, undefined, undefined, "deepseek-v4-pro");
+assert(
+	"Pi session: surgePriced=true at peak UTC (02:00)",
+	piPeak?.surgePriced === true
+);
+
+// Non-DeepSeek model: surgePriced should be undefined (not applicable)
+const piAssistantGemini = {
+	type: "message",
+	message: {
+		role: "assistant",
+		id: "msg_pi_003",
+		timestamp: new Date("2025-01-01T02:00:00Z").toISOString(),
+		usage: { input: 1000, output: 200 },
+		content: [{ type: "text", text: "Gemini peak" }],
+	},
+};
+const piGemini = parseEntryToInteraction(piAssistantGemini, undefined, undefined, undefined, "gemini-2.5-pro");
+assert(
+	"Pi session non-DeepSeek: surgePriced=undefined",
+	piGemini?.surgePriced === undefined
+);
+
+// Claude Code sessions: message.model takes precedence over currentModel
+const ccAssistant = {
+	type: "assistant",
+	message: {
+		role: "assistant",
+		id: "msg_cc_001",
+		model: "claude-sonnet-4-6-20250714", // Claude Code stores model directly
+		timestamp: new Date("2025-01-01T02:00:00Z").toISOString(),
+		usage: { input_tokens: 1000, output_tokens: 200 },
+		content: [{ type: "text", text: "Claude Code" }],
+	},
+};
+const ccEntry = parseEntryToInteraction(ccAssistant, undefined, undefined, undefined, "some-stale-model");
+assert(
+	"Claude Code: message.model takes precedence over currentModel",
+	ccEntry?.model === "claude-sonnet-4-6-20250714"
+);
+assert(
+	"Claude Code non-DeepSeek: surgePriced=undefined",
+	ccEntry?.surgePriced === undefined
+);
+
+// ---
 // Results
 // ---
 console.log("\n──────────────────────────────");

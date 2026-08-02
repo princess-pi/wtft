@@ -61,7 +61,10 @@ export interface Interaction {
 	unrecognizedTool?: boolean;
 	/** Pre-classified category from the daemon tag file — short-circuits classifyInteraction */
 	_cat?: Category;
-	/** True when this interaction's timestamp falls within DeepSeek surge-pricing hours (#119). */
+	/** True when this interaction's timestamp falls within DeepSeek surge-pricing hours (#119).
+	 *  Populated by parseEntryToInteraction from effectiveModel (assistantMsg.model ||
+	 *  currentModel from model_change events, #128). Serialized to tag file as `sp` field
+	 *  (serializeClassified / classifiedToInteraction round-trip in wtft-daemon-lib.ts). */
 	surgePriced?: boolean;
 }
 

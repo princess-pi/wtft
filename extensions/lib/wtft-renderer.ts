@@ -1224,10 +1224,12 @@ export function buildWtftLines(
 				if (mode === "cumulative") {
 					// Cumulative mode: split segment into old (cached carryover → ▃)
 					// and new (incremental this turn → ▇) portions (#125).
+					// Use bin-wide inc/total ratio (always ≤ 1) applied per-category.
 					// Round up so new portion always gets at least 1 character.
-					const incTokens = bin.incremental_tokens ?? 0;
-					const newChars = incTokens > 0 && t.total > 0
-						? Math.max(1, Math.round(segChars * (incTokens / t.total)))
+					const binIncRatio = bin.total_tokens && bin.total_tokens > 0
+						? (bin.incremental_tokens ?? 0) / bin.total_tokens : 0;
+					const newChars = binIncRatio > 0
+						? Math.max(1, Math.round(segChars * binIncRatio))
 						: 0;
 					const oldChars = segChars - newChars;
 

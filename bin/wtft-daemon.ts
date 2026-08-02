@@ -53,6 +53,7 @@ let startupTime = Date.now();    // daemon start time (idle exit grace period)
 let pendingItems: { interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>; prevCtx: number }[] = [];
 let idleStartMs = 0;         // start of current idle period (for _hb range)
 let currentThinkingLevel: string | undefined; // Track thinking level from session events (#77)
+let currentModel: string | undefined; // Track model from model_change events (#128)
 let lastCompactionTokensBefore: number | undefined; // Track compaction tokensBefore (#90)
 let pendingAfterCompaction = false; // Claude isCompactSummary → flag next interaction (#52 Phase 3)
 let stampInterruptOnPending = false; // interrupt marker seen; assistant turn is in pendingItems (#52 Phase 3)
@@ -218,6 +219,13 @@ function parseNewLines(filePath: string) {
           currentThinkingLevel = entry.thinkingLevel;
           continue;
         }
+        // Track model from model_change events for Pi sessions (#128).
+        // Pi does not store the model on each message; it emits
+        // model_change entries with provider + modelId.
+        if (entry.type === "model_change" && entry.modelId) {
+          currentModel = entry.modelId;
+          continue;
+        }
         // Track compaction entries — stamp tokensBefore onto the next
         // assistant interaction (#90).
         if (entry.type === "compaction" && typeof entry.tokensBefore === "number") {
@@ -243,7 +251,7 @@ function parseNewLines(filePath: string) {
           }
           continue;
         }
-        const interaction = parseEntryToInteraction(entry, currentThinkingLevel, lastCompactionTokensBefore, pendingAfterCompaction);
+        const interaction = parseEntryToInteraction(entry, currentThinkingLevel, lastCompactionTokensBefore, pendingAfterCompaction, currentModel);
         if (interaction) {
           interactions.push(interaction);
           lastCompactionTokensBefore = undefined; // consumed

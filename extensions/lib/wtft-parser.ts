@@ -134,7 +134,7 @@ function extractFilesFromBashCommand(command: string, files: { path: string; act
 	}
 }
 
-export function parseEntryToInteraction(entry: any, thinkingLevel?: string, compactionTokensBefore?: number, afterCompaction?: boolean): Interaction | null {
+export function parseEntryToInteraction(entry: any, thinkingLevel?: string, compactionTokensBefore?: number, afterCompaction?: boolean, currentModel?: string): Interaction | null {
 	if (!entry) return null;
 	
 	// Support both Pi schema (entry.type === "message") and Claude Code schema (entry.type === "assistant" or lacking type but having message)
@@ -143,6 +143,11 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string, comp
 
 	if (isPiSchema || isClaudeSchema) {
 		const assistantMsg = entry.message;
+
+		// Resolve effective model: Pi sessions track model via model_change events
+		// (passed as currentModel), not on each message. Claude Code stores it
+		// directly on assistantMsg.model. (#128)
+		const effectiveModel = assistantMsg.model || currentModel || "";
 
 		// Parse timestamp first — used below for DeepSeek peak pricing
 		let timestampStr = assistantMsg.timestamp || entry.timestamp;
@@ -167,7 +172,7 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string, comp
 		                  (usage.reasoning_tokens || usage.reasoning || 0) > 0;
 		if (piCost !== undefined && piCost !== null && !(piCost === 0 && hasTokens)) {
 			cost = piCost;
-		} else if (assistantMsg.model && hasTokens) {
+		} else if (effectiveModel && hasTokens) {
 			// Normalize Pi field names to Anthropic-compat for calculateClaudeCost.
 			// Pass the cache_creation sub-object through for TTL-split pricing (#55).
 			const normalizedUsage = {
@@ -178,7 +183,7 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string, comp
 				cache_creation: usage.cache_creation || null,
 				reasoning_tokens: usage.reasoning_tokens ?? usage.reasoning ?? 0,
 			};
-			cost = calculateClaudeCost(assistantMsg.model, normalizedUsage, timestamp);
+			cost = calculateClaudeCost(effectiveModel, normalizedUsage, timestamp);
 		}
 
 		// Observed cache TTL class (#95): the transcript records which ephemeral
@@ -193,13 +198,13 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string, comp
 		// Claude Code surfaces web_search / web_fetch via usage.server_tool_use (#73).
 		const serverToolRequests = usage.server_tool_use || {};
 		const serverToolCost = calculateServerToolCost(
-			assistantMsg.model || "",
+			effectiveModel,
 			serverToolRequests.web_search_requests || 0,
 			serverToolRequests.web_fetch_requests || 0
 		);
 
 		// Surge-pricing tag (#119): mark interactions that fell within DeepSeek peak hours
-		const surgePriced = (assistantMsg.model || "").toLowerCase().includes("deepseek")
+		const surgePriced = effectiveModel.toLowerCase().includes("deepseek")
 			? getDeepSeekPeakMultiplier(timestamp) > 1.0 : undefined;
 
 		const files: { path: string; action: "read" | "write" }[] = [];
@@ -257,7 +262,7 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string, comp
 		}
 
 		return { timestamp, cost, messageId: assistantMsg.id, requestId: entry.requestId,
-			model: assistantMsg.model || undefined,
+			model: effectiveModel || undefined,
 			inputTokens: (usage.input_tokens || usage.input || 0) as number,
 			outputTokens: (usage.output_tokens || usage.output || 0) as number,
 			cacheReadTokens: (usage.cache_read_input_tokens || usage.cacheRead || 0) as number,
@@ -374,6 +379,7 @@ export function splitOverheadCost(
 export function parseSessionFile(filePath: string): Interaction[] {
 	const interactions: Interaction[] = [];
 	let currentThinkingLevel: string | undefined;
+	let currentModel: string | undefined;
 	let lastCompactionTokensBefore: number | undefined;
 	let pendingAfterCompaction = false;
 	try {
@@ -385,6 +391,13 @@ export function parseSessionFile(filePath: string): Interaction[] {
 				// Track thinking level changes (#77)
 				if (entry.type === "thinking_level_change" && entry.thinkingLevel) {
 					currentThinkingLevel = entry.thinkingLevel;
+					continue;
+				}
+				// Track model from model_change events for Pi sessions (#128).
+				// Pi does not store the model on each message; it emits
+				// model_change entries with provider + modelId.
+				if (entry.type === "model_change" && entry.modelId) {
+					currentModel = entry.modelId;
 					continue;
 				}
 				// Track compaction entries — stamp tokensBefore onto the next
@@ -406,7 +419,7 @@ export function parseSessionFile(filePath: string): Interaction[] {
 					if (interactions.length > 0) interactions[interactions.length - 1].interrupted = true;
 					continue;
 				}
-				const interaction = parseEntryToInteraction(entry, currentThinkingLevel, lastCompactionTokensBefore, pendingAfterCompaction);
+				const interaction = parseEntryToInteraction(entry, currentThinkingLevel, lastCompactionTokensBefore, pendingAfterCompaction, currentModel);
 				if (interaction) {
 					interactions.push(interaction);
 					lastCompactionTokensBefore = undefined; // consumed by this interaction

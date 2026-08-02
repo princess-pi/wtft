@@ -25,6 +25,8 @@ export interface Bin {
 	tokens?: Record<Category, { total: number; output: number }>;
 	total_tokens?: number;
 	incremental_tokens?: number;
+	/** Per-category incremental token copies saved before cumulative conversion (#125). */
+	_incTokens?: Record<Category, { total: number }>;
 	/** True when any interaction in this bin fell within DeepSeek surge-pricing hours (#119). */
 	surgePriced?: boolean;
 }
@@ -906,6 +908,18 @@ export function buildWtftLines(
 
 	// Apply mode conversions
 	if (mode === "cumulative") {
+		// Save per-category incremental tokens before cumulative overwrite (#125)
+		if (unit === "tokens") {
+			for (const bin of sortedBins) {
+				if (bin.tokens) {
+					bin._incTokens = {} as Record<Category, { total: number }>;
+					for (const cat of ALL_CATEGORIES) {
+						bin._incTokens[cat] = { total: bin.tokens[cat].total };
+					}
+				}
+			}
+		}
+
 		const runningCosts = {} as Record<Category, number>;
 		for (const cat of ALL_CATEGORIES) {
 			runningCosts[cat] = 0;
@@ -1224,10 +1238,10 @@ export function buildWtftLines(
 				if (mode === "cumulative") {
 					// Cumulative mode: split segment into old (cached carryover → ▃)
 					// and new (incremental this turn → ▇) portions (#125).
-					// Use bin-wide inc/total ratio (always ≤ 1) applied uniformly.
-					const binIncRatio = bin.total_tokens && bin.total_tokens > 0
-						? (bin.incremental_tokens ?? 0) / bin.total_tokens : 0;
-					const rawNew = segChars * binIncRatio;
+					// Use per-category incremental tokens (saved before cumulative conversion).
+					const incTokens = bin._incTokens?.[cat]?.total ?? 0;
+					const catIncRatio = t.total > 0 ? incTokens / t.total : 0;
+					const rawNew = segChars * catIncRatio;
 					const newChars = rawNew > 0 ? Math.max(1, Math.round(rawNew)) : 0;
 					const oldChars = segChars - newChars;
 

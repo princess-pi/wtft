@@ -6,6 +6,7 @@
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -123,6 +124,37 @@ const opts = parseWtftCliArgs(process.argv.slice(2));
 let unit: "cost" | "tokens" = cfg.tokens ? "tokens" : "cost";
 if (opts.hasTokens) unit = "tokens";
 if (opts.hasCost) unit = "cost";
+
+const WARN_LOG = path.join(os.homedir(), ".local", "state", "wtft", "reap.log");
+
+/** Surface reap warnings from the last daemon spawn (#130). */
+function showReapWarnings() {
+  try {
+    if (!fs.existsSync(WARN_LOG)) return;
+    const content = fs.readFileSync(WARN_LOG, "utf8").trim();
+    if (!content) return;
+    const lines = content.split("\n");
+    // Only show warnings from the last hour (avoid stale repeats)
+    const oneHourAgo = Date.now() - 3600000;
+    const recent = lines.filter(l => {
+      const m = l.match(/^\[([^\]]+)\]/);
+      if (!m) return false;
+      const ts = Date.parse(m[1]);
+      return !isNaN(ts) && ts > oneHourAgo;
+    });
+    if (recent.length === 0) return;
+    console.error("\x1b[33m\n┌─ wtft reap warnings ────────────────────────────────\x1b[0m");
+    for (const line of recent) {
+      // Color-code: KILLED = red, WARN = yellow
+      const isKilled = line.includes("KILLED");
+      const prefix = isKilled ? "\x1b[31m" : "\x1b[33m";
+      console.error(`${prefix}│ ${line}\x1b[0m`);
+    }
+    console.error("\x1b[33m└──────────────────────────────────────────────────────\x1b[0m\n");
+    // Truncate log after showing (warnings have been surfaced)
+    try { fs.truncateSync(WARN_LOG, 0); } catch (_) {}
+  } catch (_) {}
+}
 
 // ---
 // MAIN EXECUTION FLOW
@@ -336,6 +368,11 @@ async function main() {
 	const sessionMode = (config.mode === "cumulative" || config.mode === "bucket" ? config.mode : undefined) as "cumulative" | "bucket" | undefined;
 	const sessionShowTicks = (typeof config.showTicks === "boolean" ? config.showTicks : undefined) as boolean | undefined;
 	const sessionTimezone = (typeof config.timezone === "string" ? config.timezone : undefined) as string | undefined;
+	// ---
+	// REAP WARNINGS: surface any reap.log findings from daemon spawn (#130)
+	// ---
+	showReapWarnings();
+
 	// ---
 	// COMPILING AND PRINTING
 	// ---

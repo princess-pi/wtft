@@ -309,8 +309,166 @@ function readLastMetaOffset(tagPath: string): number | null {
 }
 
 // ---
-// INITIALIZATION
+// REAP & WARN (#130)
 // ---
+
+const WARN_LOG_DIR = path.join(os.homedir(), ".local", "state", "wtft");
+const WARN_LOG = path.join(WARN_LOG_DIR, "reap.log");
+const TAG_SIZE_WARN = 1_000_000;     // 1 MB — tag file suspiciously large
+const HB_RATIO_WARN = 0.9;            // >90% of lines are heartbeats → malfunction
+const ZERO_INTERACTIONS_AGE = 3600000; // 1h with zero real interactions → zombie
+
+function reapAndWarn() {
+  const pidDir = os.tmpdir();
+  let pidFiles: string[] = [];
+  try {
+    pidFiles = fs.readdirSync(pidDir).filter(f => f.startsWith("wtft-daemon-") && f.endsWith(".pid"));
+  } catch (_) {}
+
+  const warnings: string[] = [];
+
+  for (const pidFile of pidFiles) {
+    const fullPath = path.join(pidDir, pidFile);
+    let pid = 0;
+    try {
+      pid = parseInt(fs.readFileSync(fullPath, "utf8").trim(), 10);
+    } catch (_) { continue; }
+    if (pid <= 0) continue;
+
+    // Check if process is alive
+    let alive = false;
+    try { process.kill(pid, 0); alive = true; } catch (_) {}
+
+    // Resolve session path from /proc/<pid>/cmdline
+    let sessionFound: string | null = null;
+    try {
+      const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
+      const args = cmdline.split("\0");
+      const sessIdx = args.indexOf("--session");
+      if (sessIdx >= 0 && sessIdx + 1 < args.length) {
+        sessionFound = args[sessIdx + 1];
+      }
+    } catch (_) {}
+
+    // HARD: stale pidfile (process dead)
+    if (!alive) {
+      try { fs.unlinkSync(fullPath); } catch (_) {}
+      continue;
+    }
+
+    // HARD: session file gone → kill daemon
+    if (sessionFound && !fs.existsSync(sessionFound)) {
+      process.kill(pid, "SIGTERM");
+      try { fs.unlinkSync(fullPath); } catch (_) {}
+      warnings.push(`[${new Date().toISOString()}] KILLED PID ${pid}: session gone — ${sessionFound}`);
+      continue;
+    }
+
+    // SOFT: check alive daemon for warning predicates
+    if (sessionFound) {
+      // Find tag file for this session
+      let tagFound: string | null = null;
+      try {
+        const tagsDir = path.join(path.dirname(sessionFound), "wtft-tags");
+        const sessBase = path.basename(sessionFound);
+        const prefix = sessBase + ".wtft-tag.v";
+        for (const f of fs.readdirSync(tagsDir)) {
+          if (f.startsWith(prefix)) {
+            tagFound = path.join(tagsDir, f);
+            break;
+          }
+        }
+      } catch (_) {}
+
+      if (tagFound) {
+        try {
+          const stat = fs.statSync(tagFound);
+          const content = fs.readFileSync(tagFound, "utf8");
+          const lines = content.trim().split("\n");
+          const hbLines = lines.filter(l => l.includes('"_hb"') && !l.includes('"stop"'));
+          const hbRatio = lines.length > 0 ? hbLines.length / lines.length : 0;
+
+          // SOFT: tag file suspiciously large
+          if (stat.size > TAG_SIZE_WARN) {
+            const mb = (stat.size / (1024 * 1024)).toFixed(1);
+            warnings.push(`[${new Date().toISOString()}] WARN PID ${pid}: tag file large (${mb} MB) — ${tagFound}`);
+          }
+
+          // SOFT: heartbeat ratio too high (malfunctioning daemon writing only heartbeats)
+          if (lines.length > 10 && hbRatio >= HB_RATIO_WARN) {
+            const pct = Math.round(hbRatio * 100);
+            warnings.push(`[${new Date().toISOString()}] WARN PID ${pid}: ${pct}% heartbeats (${hbLines.length}/${lines.length} lines) — possible malfunction — ${tagFound}`);
+          }
+
+          // SOFT: daemon age with zero real interactions
+          // Check if any line in the tag file is a classified interaction (not _hb, not _meta)
+          const hasInteractions = lines.some(l => {
+            try { const o = JSON.parse(l.trim()); return o.cat !== undefined; } catch { return false; }
+          });
+          if (!hasInteractions) {
+            // Estimate daemon age from first heartbeat
+            const firstHb = hbLines[0];
+            if (firstHb) {
+              try {
+                const hb = JSON.parse(firstHb);
+                const startTime = hb._hb?.first;
+                if (startTime && (Date.now() - startTime) > ZERO_INTERACTIONS_AGE) {
+                  const ageH = Math.round((Date.now() - startTime) / 3600000);
+                  warnings.push(`[${new Date().toISOString()}] WARN PID ${pid}: ${ageH}h old with zero real interactions — zombie daemon? — ${sessionFound}`);
+                }
+              } catch (_) {}
+            }
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
+  // SOFT: stale fixture dirs in /tmp with no owning daemon
+  try {
+    const tmpEntries = fs.readdirSync(os.tmpdir());
+    const liveSessions = new Set<string>();
+    for (const pidFile of pidFiles) {
+      try {
+        const fullPath = path.join(pidDir, pidFile);
+        const pid = parseInt(fs.readFileSync(fullPath, "utf8").trim(), 10);
+        if (pid > 0) {
+          const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
+          const args = cmdline.split("\0");
+          const sessIdx = args.indexOf("--session");
+          if (sessIdx >= 0 && sessIdx + 1 < args.length) {
+            liveSessions.add(args[sessIdx + 1]);
+          }
+        }
+      } catch (_) {}
+    }
+    for (const entry of tmpEntries) {
+      if (!entry.startsWith("wtft-")) continue;
+      const fullDir = path.join(os.tmpdir(), entry);
+      let isDir = false;
+      try { isDir = fs.statSync(fullDir).isDirectory(); } catch (_) { continue; }
+      if (!isDir) continue;
+      // Check if any live daemon's session path contains this dir
+      const claimed = [...liveSessions].some(s => s.startsWith(fullDir));
+      if (!claimed) {
+        // Check age: only warn for dirs older than 1h (avoid fresh test dirs)
+        try {
+          const mtime = fs.statSync(fullDir).mtimeMs;
+          if (Date.now() - mtime > 3600000) {
+            warnings.push(`[${new Date().toISOString()}] WARN: stale fixture dir with no owning daemon — ${fullDir}`);
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+
+  if (warnings.length > 0) {
+    try {
+      fs.mkdirSync(WARN_LOG_DIR, { recursive: true });
+      fs.appendFileSync(WARN_LOG, warnings.join("\n") + "\n");
+    } catch (_) {}
+  }
+}
 
 function initClassified() {
   // Version is embedded in filename (TAG_SUFFIX), so no _cv header needed.
@@ -635,6 +793,11 @@ if (showList || showCleanup || showRestart || stopSession) {
   sweepOldTagFiles();
   const resweep = setTimeout(sweepOldTagFiles, 5000);
   resweep.unref();
+
+  // Reap orphaned daemons and warn on malfunctioning ones (#130).
+  // This is the auto-invocation that was missing — before #130, cleanup
+  // only ran when a human explicitly typed `wtft --cleanup`.
+  reapAndWarn();
 
   // Initialize tag file (version check, header, start heartbeat)
   initClassified();

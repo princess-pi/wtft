@@ -7,9 +7,10 @@
  *   2. Takeover protocol — lost PID lease → exit within 2 beats, no unlink
  *   3. Spawn-twice — exactly one surviving daemon, and it owns the PID file
  *   4. Session deleted → daemon exits (#129 Bug A)
- *   5. Version hygiene — old-version tag files removed at startup
- *   6. getTagPath — exact version preferred, else newest mtime
- *   7. Cache TTL derived from usage.cache_creation, not the model name
+ *   5. Reap on spawn kills orphans + writes warnings (#130)
+ *   6. Version hygiene — old-version tag files removed at startup
+ *   7. getTagPath — exact version preferred, else newest mtime
+ *   8. Cache TTL derived from usage.cache_creation, not the model name
  */
 
 import * as fs from "node:fs";
@@ -230,9 +231,42 @@ console.log("\n4. Session deleted → daemon exits");
 }
 
 // ---
-// 5. Version hygiene: old-version tag files removed at startup
+// 5. Reap on spawn: kills orphans with gone session (#130)
 // ---
-console.log("\n5. Version hygiene at startup");
+console.log("\n5. Reap on spawn kills orphan daemons");
+{
+	const WARN_LOG = path.join(os.homedir(), ".local", "state", "wtft", "reap.log");
+	const { sessionPath: sessA } = makeSessionFixture("reap-orphan");
+	const { sessionPath: sessB } = makeSessionFixture("reap-new");
+
+	// Start daemon A (will become orphan)
+	const pidA = spawnDaemon(sessA);
+	await sleep(3 * BEAT_MS);
+	assert("daemon A started", isAlive(pidA));
+
+	// Delete session A's file
+	fs.unlinkSync(sessA);
+
+	// Start daemon B — should trigger reap of A during startup
+	const pidB = spawnDaemon(sessB);
+	await sleep(3 * BEAT_MS);
+
+	assert("orphan daemon A killed by reap on B's spawn", !isAlive(pidA));
+	assert("daemon B still alive", isAlive(pidB));
+
+	// PID file A should be cleaned up
+	const pidPathA = getDaemonPidPath(sessA);
+	assert("orphan pidfile cleaned up", !fs.existsSync(pidPathA));
+
+	// Cleanup
+	try { process.kill(pidB, "SIGTERM"); } catch {}
+	try { fs.unlinkSync(WARN_LOG); } catch {}
+}
+
+// ---
+// 6. Version hygiene: old-version tag files removed at startup
+// ---
+console.log("\n6. Version hygiene at startup");
 {
 	const { sessionPath, tagsDir } = makeSessionFixture("hygiene");
 	const pidPath = getDaemonPidPath(sessionPath);
@@ -252,9 +286,9 @@ console.log("\n5. Version hygiene at startup");
 }
 
 // ---
-// 6. getTagPath: exact version preferred, else newest mtime
+// 7. getTagPath: exact version preferred, else newest mtime
 // ---
-console.log("\n6. getTagPath determinism");
+console.log("\n7. getTagPath determinism");
 {
 	const { sessionPath, tagsDir } = makeSessionFixture("tagpath");
 	const base = path.basename(sessionPath);
@@ -280,9 +314,9 @@ console.log("\n6. getTagPath determinism");
 }
 
 // ---
-// 7. Cache TTL derived from data, not model name
+// 8. Cache TTL derived from data, not model name
 // ---
-console.log("\n7. Cache TTL from usage.cache_creation");
+console.log("\n8. Cache TTL from usage.cache_creation");
 {
 	// 6a. Parse → serialize → deserialize round-trip.
 	const entry1h = {

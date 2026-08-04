@@ -151,10 +151,10 @@ from the old map and must re-classify.
 1. New fixture + test in `tests/`: a synthetic session.jsonl containing messages with `Task`,
    `WebSearch`, `Grep`, `TodoWrite`, `NotebookEdit`, an unknown tool (`Monitor`), a pure reply,
    and a `bash git` turn — assert each classification, including prompt purification.
-2. Existing suites pass (`npm test`).
+2. Existing suites pass (`bun test`).
 3. Re-run the classification over session `8548d7f1` and record before/after `prompt`+`other`
    share in the issue (expect the ~9% unmodeled-tool share to migrate to `agents`/`web`/`plan`).
-4. `npm run build` then run built `bin/wtft.mjs --tokens` and cost mode against a live session —
+4. `bun run build` then run built `bin/wtft.mjs --tokens` and cost mode against a live session —
    legend shows Plan/Agents, no color collisions, daemon regenerates tags at v2.4.0.
 
 ## Verification results (2026-07-13, Code Approved b83127a)

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S npx tsx
+#!/usr/bin/env bun
 /**
  * @package princess-pi-packages
  * @test wtft-issue-52-tool-categories

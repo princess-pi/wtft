@@ -59,6 +59,7 @@ let pendingAfterCompaction = false; // Claude isCompactSummary → flag next int
 let stampInterruptOnPending = false; // interrupt marker seen; assistant turn is in pendingItems (#52 Phase 3)
 let prevCtxTokens = 0; // input+cacheRead+cacheWrite of prev non-sidechain interaction (recache signature)
 let running = true;
+let sessionExisted = false; // becomes true first time we observe the session file (#129 Bug A)
 
 // ---
 // SIGNAL HANDLING
@@ -98,11 +99,11 @@ process.on("SIGHUP", () => shutdown("SIGHUP"));
 // ---
 
 /**
- * Overwrite the last line of the tag file if it's a heartbeat.
- * Updates the _hb range's `last` timestamp in place.
- * Always uses {"_hb":{"first":<ts>,"last":<ts>}} format for fixed width
- * so overwrites never change byte length. If the last line isn't a heartbeat
- * (new data arrived), appends a new heartbeat line.
+ * Update the heartbeat line in the tag file.
+ *
+ * If the last line is already a heartbeat, truncates it off and appends the
+ * updated one (Fork C: no in-place overwrite, no fixed-width contract).
+ * If the last line is classified data, appends a new heartbeat line.
  *
  * Scans backwards from EOF for the last newline to handle arbitrarily long
  * preceding lines (classified data lines can be large with `cmd` arrays).
@@ -123,18 +124,31 @@ function upsertHeartbeat(now: number) {
     const CHUNK = 512;
     let searchOffset = stat.size;
     let tail = "";
-    let lastLineStart = -1;
+    let lastNl = -1;
 
-    while (searchOffset > 0 && lastLineStart === -1) {
+    while (searchOffset > 0 && lastNl === -1) {
       const readSize = Math.min(CHUNK, searchOffset);
       searchOffset -= readSize;
       const buf = Buffer.alloc(readSize);
       fs.readSync(fd, buf, 0, readSize, searchOffset);
       tail = buf.toString("utf8") + tail;
-      lastLineStart = tail.lastIndexOf("\n");
+      lastNl = tail.lastIndexOf("\n");
     }
-    if (lastLineStart === -1) lastLineStart = 0;
-    else lastLineStart += 1;
+
+    // Resolve the last complete line. If the file ends with \n (normal),
+    // the last \n is a terminator — step back to the previous \n to find
+    // the actual last line. If the file does not end with \n (edge case),
+    // the last \n is the separator before the last line.
+    let lastLineStart: number;
+    if (lastNl === tail.length - 1) {
+      // File ends with \n — find the \n that precedes the last line
+      const prevNl = tail.lastIndexOf("\n", tail.length - 2);
+      lastLineStart = prevNl === -1 ? 0 : prevNl + 1;
+    } else if (lastNl === -1) {
+      lastLineStart = 0;
+    } else {
+      lastLineStart = lastNl + 1;
+    }
 
     const lastLine = tail.slice(lastLineStart).trim();
 
@@ -145,19 +159,13 @@ function upsertHeartbeat(now: number) {
     } catch (_) {}
 
     if (isHb) {
-      // Overwrite in place — same format guarantees same length
-      const newBytes = Buffer.from(hbLine);
-      const oldByteLen = Buffer.from(lastLine + "\n").length;
-      const writeBuf = Buffer.alloc(Math.max(newBytes.length, oldByteLen), 0x20);
-      newBytes.copy(writeBuf, 0, 0, Math.min(newBytes.length, oldByteLen));
-      // offset = file start + (position of lastLineStart within the tail buffer)
-      // tail covers bytes [searchOffset, EOF), so lastLineStart is relative to searchOffset
-      const offset = searchOffset + lastLineStart;
-      fs.writeSync(fd, writeBuf, 0, oldByteLen, offset);
-    } else {
-      // Last line is data — append new heartbeat
-      fs.appendFileSync(tagPath, hbLine);
+      // Truncate the stale heartbeat line, then append the updated one.
+      // No fixed-width overwrite — the file simply shrinks by one heartbeat
+      // line and grows by one (net-zero for equal-length heartbeats).
+      const truncAt = searchOffset + lastLineStart;
+      fs.ftruncateSync(fd, truncAt);
     }
+    fs.appendFileSync(tagPath, hbLine);
     fs.closeSync(fd);
   } catch (_) {
     // Fallback: append if we can't seek/overwrite
@@ -659,6 +667,12 @@ if (showList || showCleanup || showRestart || stopSession) {
     // prompt entered), wait for it to be created. Write heartbeats so
     // the widget knows the daemon is alive and waiting (#124).
     if (!fs.existsSync(sessionPath)) {
+      // Was it previously seen and then deleted? Exit (#129 Bug A).
+      // If never seen yet, keep waiting — the session file is just late.
+      if (sessionExisted) {
+        shutdown("session removed");
+        return;
+      }
       const now = Date.now();
       if (idleStartMs === 0) idleStartMs = now;
       upsertHeartbeat(now);
@@ -669,6 +683,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       setTimeout(loop, POLL_MS);
       return;
     }
+    sessionExisted = true; // confirmed session file present at least once (#129 Bug A)
 
     try {
       // Read new lines from session, dedup by message.id (#54), then classify.

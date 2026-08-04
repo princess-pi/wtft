@@ -6,9 +6,10 @@
  *   1. Idle clamped by classified freshness (dual-daemon heartbeat fixture)
  *   2. Takeover protocol — lost PID lease → exit within 2 beats, no unlink
  *   3. Spawn-twice — exactly one surviving daemon, and it owns the PID file
- *   4. Version hygiene — old-version tag files removed at startup
- *   5. getTagPath — exact version preferred, else newest mtime
- *   6. Cache TTL derived from usage.cache_creation, not the model name
+ *   4. Session deleted → daemon exits (#129 Bug A)
+ *   5. Version hygiene — old-version tag files removed at startup
+ *   6. getTagPath — exact version preferred, else newest mtime
+ *   7. Cache TTL derived from usage.cache_creation, not the model name
  */
 
 import * as fs from "node:fs";
@@ -201,9 +202,37 @@ console.log("\n3. Spawn-twice singleton");
 }
 
 // ---
-// 4. Version hygiene: old-version tag files removed at startup
+// 4. Session deleted → daemon exits (#129 Bug A)
 // ---
-console.log("\n4. Version hygiene at startup");
+console.log("\n4. Session deleted → daemon exits");
+{
+	const { sessionPath } = makeSessionFixture("sessiongone");
+	const pidPath = getDaemonPidPath(sessionPath);
+	const spawnedPid = spawnDaemon(sessionPath);
+
+	// Wait for daemon to claim PID file and process the session data
+	// (so sessionExisted becomes true).
+	let claimed = 0;
+	for (let i = 0; i < 20 && !claimed; i++) {
+		await sleep(250);
+		try { claimed = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10); } catch {}
+	}
+	assert("daemon claimed PID file", claimed > 0 && isAlive(claimed));
+	await sleep(2 * BEAT_MS); // let daemon process the fixture data
+
+	// Delete the session file — daemon should exit, not idle forever.
+	fs.unlinkSync(sessionPath);
+	await sleep(3 * BEAT_MS);
+
+	assert("daemon exited after session file deleted", !isAlive(claimed));
+	try { fs.unlinkSync(pidPath); } catch {}
+	void spawnedPid;
+}
+
+// ---
+// 5. Version hygiene: old-version tag files removed at startup
+// ---
+console.log("\n5. Version hygiene at startup");
 {
 	const { sessionPath, tagsDir } = makeSessionFixture("hygiene");
 	const pidPath = getDaemonPidPath(sessionPath);
@@ -223,9 +252,9 @@ console.log("\n4. Version hygiene at startup");
 }
 
 // ---
-// 5. getTagPath: exact version preferred, else newest mtime
+// 6. getTagPath: exact version preferred, else newest mtime
 // ---
-console.log("\n5. getTagPath determinism");
+console.log("\n6. getTagPath determinism");
 {
 	const { sessionPath, tagsDir } = makeSessionFixture("tagpath");
 	const base = path.basename(sessionPath);
@@ -251,9 +280,9 @@ console.log("\n5. getTagPath determinism");
 }
 
 // ---
-// 6. Cache TTL derived from data, not model name
+// 7. Cache TTL derived from data, not model name
 // ---
-console.log("\n6. Cache TTL from usage.cache_creation");
+console.log("\n7. Cache TTL from usage.cache_creation");
 {
 	// 6a. Parse → serialize → deserialize round-trip.
 	const entry1h = {

@@ -184,6 +184,27 @@ assert("toolCats (plan) beats bash command (git)",
 assert("bash git alone still → git",
 	classify(claudeEntry([{ type: "tool_use", name: "Bash", input: { command: "git status" } }])) === "git");
 
+// --- Bash → claude classification (#138) ---
+console.log("\nBash → claude (#138):");
+
+assert("bash claude -p → agents",
+	classify(claudeEntry([{ type: "tool_use", name: "Bash", input: { command: "claude -p 'hello' --output-format text" } }])) === "agents");
+
+assert("bash timeout claude -p → agents",
+	classify(claudeEntry([{ type: "tool_use", name: "Bash", input: { command: "timeout 300 claude -p 'research X' --allowedTools WebSearch --output-format text" } }])) === "agents");
+
+assert("bash cd && timeout claude → agents (cd stripped by normalizeCommand)",
+	classify(claudeEntry([{ type: "tool_use", name: "Bash", input: { command: "cd /tmp && timeout 180 claude -p 'test' --output-format json" } }])) === "agents");
+
+assert("bash claude beats git in same message",
+	classify(claudeEntry([
+		{ type: "tool_use", name: "Bash", input: { command: "git status" } },
+		{ type: "tool_use", name: "Bash", input: { command: "timeout 300 claude -p 'research' --output-format text" } }
+	])) === "agents");
+
+assert("bash echo claude in string → agents (word-boundary match; known minor edge case with negligible spend)",
+	classify(claudeEntry([{ type: "tool_use", name: "Bash", input: { command: "echo 'use claude for this'" } }])) === "agents");
+
 // --- Pi schema ---
 console.log("\nPi toolCall schema:");
 

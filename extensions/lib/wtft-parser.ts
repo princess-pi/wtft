@@ -625,16 +625,20 @@ export function classifyInteraction(interaction: Interaction): Category {
 	if (interaction.commands.length > 0) {
 		let isGit = false;
 		let isGrep = false;
+		let isAgents = false;
 		for (const cmd of interaction.commands) {
 			const normalized = normalizeCommand(cmd);
 			if (!normalized) continue; // stripped to nothing (pure cd, pure var assignment)
 			const lower = normalized.toLowerCase().trim();
-			if (lower === "git" || lower.startsWith("git ")) {
+			if (/\bclaude\b/.test(lower)) {
+				isAgents = true;
+			} else if (lower === "git" || lower.startsWith("git ")) {
 				isGit = true;
 			} else if (lower === "grep" || lower.startsWith("grep ") || lower === "rg" || lower.startsWith("rg ") || lower === "ripgrep" || lower.startsWith("ripgrep ") || lower === "find" || lower.startsWith("find ")) {
 				isGrep = true;
 			}
 		}
+		if (isAgents) return "agents";
 		if (isGit) return "git";
 		if (isGrep) return "grep";
 		return "other";

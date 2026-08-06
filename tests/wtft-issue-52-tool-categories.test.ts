@@ -202,8 +202,11 @@ assert("bash claude beats git in same message",
 		{ type: "tool_use", name: "Bash", input: { command: "timeout 300 claude -p 'research' --output-format text" } }
 	])) === "agents");
 
-assert("bash echo claude in string → agents (word-boundary match; known minor edge case with negligible spend)",
-	classify(claudeEntry([{ type: "tool_use", name: "Bash", input: { command: "echo 'use claude for this'" } }])) === "agents");
+assert("bash .claude/ path → spec (reads .md; claude preceded by period not matched as command)",
+	classify(claudeEntry([{ type: "tool_use", name: "Bash", input: { command: "cat .claude/skills/deploy/SKILL.md" } }])) === "spec");
+
+assert("bash echo claude in string → other (not followed by flag/pipe)",
+	classify(claudeEntry([{ type: "tool_use", name: "Bash", input: { command: "echo 'use claude for this'" } }])) === "other");
 
 // --- Pi schema ---
 console.log("\nPi toolCall schema:");

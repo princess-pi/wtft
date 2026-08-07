@@ -349,25 +349,6 @@ async function main() {
 		process.exit(0);
 	}
 
-	// Subagent rollup (#82): discover and merge subagent session interactions.
-	// The daemon only classifies the main session file; subagent files are
-	// raw-parsed and classified here. Walk is recursive up to Claude Code's
-	// depth-5 limit.
-	const subagentFiles = discoverSubagentSessionFiles(finalSessionPath);
-	if (subagentFiles.length > 0) {
-		const subInteractions = loadSubagentInteractions(subagentFiles);
-		if (subInteractions.length > 0) {
-			interactions = [...interactions, ...subInteractions];
-			interactions.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
-		}
-	}
-
-	// Claude bash sub-agent cost attribution (#138): scan interactions for
-	// `claude -p` bash commands, discover sub-agent session files, and fold
-	// their token totals into the parent interactions. Runs after both the
-	// tag-file load and subagent rollup so it covers all code paths.
-	attributeClaudeSubAgentCosts(interactions);
-
 	// Read settings from harness-agnostic config file (#72).
 	const config = readConfig("wtft");
 	const disabledEmoji = isEmojiDisabled();

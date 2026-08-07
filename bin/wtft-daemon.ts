@@ -17,10 +17,13 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
 	parseEntryToInteraction,
+	parseSessionFile,
 	deduplicateInteractions,
 	serializeClassified,
 	serializeClassifiedWithOverheadSplit,
 	isInterruptMarker,
+	extractCwdFromBashCommand,
+	discoverClaudeSubAgentSessionFiles,
 	WTFT_TAGGER_VERSION as TAGGER_VERSION
 } from "../extensions/lib/wtft-shared.js";
 
@@ -60,6 +63,12 @@ let stampInterruptOnPending = false; // interrupt marker seen; assistant turn is
 let prevCtxTokens = 0; // input+cacheRead+cacheWrite of prev non-sidechain interaction (recache signature)
 let running = true;
 let sessionExisted = false; // becomes true first time we observe the session file (#129 Bug A)
+
+// Claude bash sub-agent discovery (#138): track interactions that spawn
+// `claude -p` so we can periodically check for completed sub-agent sessions
+// and write their classified interactions to the tag file.
+const pendingClaudeCommands: { interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>; prevCtx: number }[] = [];
+const discoveredClaudeSessions = new Set<string>();
 
 // ---
 // SIGNAL HANDLING
@@ -195,6 +204,80 @@ function flushPending() {
     }
   }
   lastWriteMs = Date.now();
+}
+
+/** Check if an interaction has a bash command that spawns `claude -p`. */
+function hasClaudeCommand(interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>): boolean {
+  return interaction.commands.some(cmd => {
+    // Replicate normalizeCommand + regex from wtft-parser.ts classifyInteraction
+    let normalized = cmd.trim();
+    let changed = true;
+    while (changed) {
+      changed = false;
+      const stripped = normalized.replace(/^(?:\w+=(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*)+/, '');
+      if (stripped !== normalized) { normalized = stripped.trim(); changed = true; }
+      const afterSep = normalized.replace(/^(?:&&|;|\|\|?)\s*/, '');
+      if (afterSep !== normalized) { normalized = afterSep; changed = true; }
+      const afterCd = normalized.replace(/^cd\s+(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*/, '');
+      if (afterCd !== normalized) { normalized = afterCd; changed = true; }
+    }
+    if (!normalized) return false;
+    return /(?:^|\s)claude(?:\s+-|\s*\||\s*$)/.test(normalized.toLowerCase());
+  });
+}
+
+/** Scan pending claude commands for completed sub-agent sessions.
+ *  When found, parse, classify, and write to the tag file as additional
+ *  classified entries — the renderers see them as regular turns. */
+function scanForClaudeSubAgents() {
+  if (pendingClaudeCommands.length === 0) return;
+  const stillPending: typeof pendingClaudeCommands = [];
+  let wroteAny = false;
+
+  for (const item of pendingClaudeCommands) {
+    const interaction = item.interaction;
+    let cwd: string | null = null;
+    for (const cmd of interaction.commands) {
+      cwd = extractCwdFromBashCommand(cmd);
+      if (cwd) break;
+    }
+    if (!cwd) continue;
+
+    const files = discoverClaudeSubAgentSessionFiles(cwd, interaction.timestamp);
+    if (files.length === 0) {
+      stillPending.push(item);
+      continue;
+    }
+
+    for (const file of files) {
+      const sessionId = path.basename(file, '.jsonl');
+      if (discoveredClaudeSessions.has(sessionId)) continue;
+      discoveredClaudeSessions.add(sessionId);
+
+      try {
+        const subInteractions = parseSessionFile(file);
+        const deduped = deduplicateInteractions(subInteractions);
+        let batch = '';
+        for (const si of deduped) {
+          batch += serializeClassified(si);
+        }
+        if (batch) {
+          fs.appendFileSync(tagPath, batch);
+          wroteAny = true;
+        }
+      } catch { /* file unreadable — try again next cycle */ }
+    }
+  }
+
+  pendingClaudeCommands.length = 0;
+  if (stillPending.length > 0) {
+    pendingClaudeCommands.push(...stillPending);
+  }
+  if (wroteAny) {
+    lastWriteMs = Date.now();
+    // Reset idle — we wrote data
+    idleStartMs = 0;
+  }
 }
 
 function parseNewLines(filePath: string) {
@@ -871,6 +954,10 @@ if (showList || showCleanup || showRestart || stopSession) {
           if (!interaction.isSidechain) {
             prevCtxTokens = interaction.inputTokens + interaction.cacheReadTokens + interaction.cacheWriteTokens;
           }
+          // Track claude -p commands for sub-agent discovery (#138)
+          if (hasClaudeCommand(interaction)) {
+            pendingClaudeCommands.push({ interaction, prevCtx: prevCtxTokens });
+          }
         }
       }
 
@@ -879,6 +966,10 @@ if (showList || showCleanup || showRestart || stopSession) {
       if (pendingItems.length > 0 && (now - lastWriteMs) >= POLL_MS) {
         flushPending();
       }
+
+      // Claude sub-agent discovery (#138): scan for completed claude -p
+      // sessions and write their classified interactions to the tag file.
+      scanForClaudeSubAgents();
 
       // Heartbeat: on every poll cycle when idle, update the _hb range line.
       // First idle poll appends {"_hb":{"first":<ts>}}. Subsequent idle polls

@@ -869,6 +869,9 @@ export function attributeClaudeSubAgentCosts(
 
 	for (const interaction of interactions) {
 		if (!interactionHasClaudeCommand(interaction)) continue;
+		// Already attributed by a prior call (e.g. parseSessionFile did it
+		// internally, and the CLI is doing a post-hoc pass on tag-file data)
+		if ((interaction as any).claudeSubAgentSessionIds) continue;
 
 		// Extract CWD from the first command that has a cd prefix
 		let cwd: string | null = null;

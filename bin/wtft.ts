@@ -362,6 +362,12 @@ async function main() {
 		}
 	}
 
+	// Claude bash sub-agent cost attribution (#138): scan interactions for
+	// `claude -p` bash commands, discover sub-agent session files, and fold
+	// their token totals into the parent interactions. Runs after both the
+	// tag-file load and subagent rollup so it covers all code paths.
+	attributeClaudeSubAgentCosts(interactions);
+
 	// Read settings from harness-agnostic config file (#72).
 	const config = readConfig("wtft");
 	const disabledEmoji = isEmojiDisabled();

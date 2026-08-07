@@ -349,6 +349,18 @@ async function main() {
 		process.exit(0);
 	}
 
+	// Subagent rollup (#82): discover and merge subagent session interactions
+	// from task/agent/workflow spawns. These live in subdirectories of the
+	// parent session and are not covered by the daemon's incremental parser.
+	const subagentFiles = discoverSubagentSessionFiles(finalSessionPath);
+	if (subagentFiles.length > 0) {
+		const subInteractions = loadSubagentInteractions(subagentFiles);
+		if (subInteractions.length > 0) {
+			interactions = [...interactions, ...subInteractions];
+			interactions.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+		}
+	}
+
 	// Read settings from harness-agnostic config file (#72).
 	const config = readConfig("wtft");
 	const disabledEmoji = isEmojiDisabled();

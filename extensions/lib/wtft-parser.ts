@@ -9,6 +9,7 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import { calculateClaudeCost, calculateServerToolCost, getDeepSeekPeakMultiplier } from "./wtft-cost.js";
 
 // ---
@@ -766,4 +767,150 @@ export function loadSubagentInteractions(
 		} catch { /* file unreadable or unparseable */ }
 	}
 	return interactions;
+}
+
+// ---
+// CLAUDE BASH SUB-AGENT DISCOVERY (#138)
+// When a parent session spawns `claude -p` via a bash command, discover the
+// sub-agent's session file and attribute its tokens to the parent turn.
+// ---
+
+const CLAUDE_SUBAGENT_WINDOW_MS = 15_000; // ±15s window for timestamp matching
+
+/** Extract the CWD from a bash command's `cd <dir>` prefix.
+ *  Handles: `cd /path && ...`, `cd "/path" && ...`,
+ *  `cd /path 2>/dev/null || cd /tmp\n...`
+ *  Returns the first cd target directory, or null if no cd found. */
+export function extractCwdFromBashCommand(cmd: string): string | null {
+	const firstLine = cmd.split('\n')[0].trim();
+	const m = firstLine.match(/^cd\s+(?:"([^"]*)"|'([^']*)'|([^\s;&|]+))/);
+	if (!m) return null;
+	return m[1] || m[2] || m[3] || null;
+}
+
+/** Convert a CWD path to the Claude Code project directory slug.
+ *  Replaces all `/` with `-` (the leading `/` becomes leading `-`). */
+export function cwdToClaudeProjectSlug(cwd: string): string {
+	return cwd.replace(/\//g, '-');
+}
+
+/** Discover sub-agent session files spawned by a bash `claude -p` command.
+ *  Scans `~/.claude/projects/<slug>/` for `.jsonl` files whose first
+ *  timestamp falls within `windowMs` of `parentTimestamp`. */
+export function discoverClaudeSubAgentSessionFiles(
+	cwd: string,
+	parentTimestamp: number,
+	windowMs: number = CLAUDE_SUBAGENT_WINDOW_MS,
+): string[] {
+	const slug = cwdToClaudeProjectSlug(cwd);
+	const projectDir = path.join(os.homedir(), '.claude', 'projects', slug);
+	if (!fs.existsSync(projectDir)) return [];
+
+	const files: string[] = [];
+	const tsWindowStart = parentTimestamp - windowMs;
+	const tsWindowEnd = parentTimestamp + windowMs;
+
+	try {
+		for (const f of fs.readdirSync(projectDir)) {
+			if (!f.endsWith('.jsonl')) continue;
+			const fullPath = path.join(projectDir, f);
+			try {
+				// Scan first 10 lines for a timestamp — the first line may be
+				// an ai-title entry with no timestamp field.
+				const head = fs.readFileSync(fullPath, 'utf8').split('\n').slice(0, 10);
+				let ts: string | undefined;
+				for (const line of head) {
+					if (!line.trim()) continue;
+					try {
+						const entry = JSON.parse(line);
+						ts = entry.timestamp || entry.createdAt || entry.startTime;
+						if (ts) break;
+					} catch { /* skip */ }
+				}
+				if (!ts) continue;
+				const tsMs = new Date(ts).getTime();
+				if (tsMs >= tsWindowStart && tsMs <= tsWindowEnd) {
+					files.push(fullPath);
+				}
+			} catch { /* skip unreadable files */ }
+		}
+	} catch { /* dir unreadable */ }
+
+	return files;
+}
+
+/** Check if any command in an interaction invokes `claude` as a sub-agent.
+ *  Uses the same regex as classifyInteraction's claude detection. */
+function interactionHasClaudeCommand(interaction: Interaction): boolean {
+	return interaction.commands.some(cmd => {
+		const normalized = normalizeCommand(cmd);
+		if (!normalized) return false;
+		return /(?:^|\s)claude(?:\s+-|\s*\||\s*$)/.test(normalized.toLowerCase());
+	});
+}
+
+/** Post-processing pass: for each interaction that spawns `claude -p` via bash,
+ *  discover the sub-agent session files, parse them, and add their token
+ *  totals to the parent interaction. Mutates interactions in place.
+ *
+ *  Sub-agent session IDs are tracked globally to prevent double-counting
+ *  across multiple interactions that reference the same session. */
+export function attributeClaudeSubAgentCosts(
+	interactions: Interaction[],
+): void {
+	const seenSessionIds = new Set<string>();
+
+	for (const interaction of interactions) {
+		if (!interactionHasClaudeCommand(interaction)) continue;
+
+		// Extract CWD from the first command that has a cd prefix
+		let cwd: string | null = null;
+		for (const cmd of interaction.commands) {
+			cwd = extractCwdFromBashCommand(cmd);
+			if (cwd) break;
+		}
+		if (!cwd) continue;
+
+		const subAgentFiles = discoverClaudeSubAgentSessionFiles(
+			cwd, interaction.timestamp,
+		);
+
+		let totalInput = 0;
+		let totalOutput = 0;
+		let totalCacheRead = 0;
+		let totalCacheWrite = 0;
+		let totalReasoning = 0;
+		let totalCost = 0;
+		const sessionIds: string[] = [];
+
+		for (const file of subAgentFiles) {
+			const sessionId = path.basename(file, '.jsonl');
+			if (seenSessionIds.has(sessionId)) continue;
+			seenSessionIds.add(sessionId);
+			sessionIds.push(sessionId);
+
+			try {
+				const subInteractions = parseSessionFile(file);
+				const deduped = deduplicateInteractions(subInteractions);
+				for (const si of deduped) {
+					totalInput += si.inputTokens || 0;
+					totalOutput += si.outputTokens || 0;
+					totalCacheRead += si.cacheReadTokens || 0;
+					totalCacheWrite += si.cacheWriteTokens || 0;
+					totalReasoning += si.reasoningTokens || 0;
+					totalCost += si.cost || 0;
+				}
+			} catch { /* file unreadable */ }
+		}
+
+		if (sessionIds.length > 0) {
+			interaction.inputTokens += totalInput;
+			interaction.outputTokens += totalOutput;
+			interaction.cacheReadTokens += totalCacheRead;
+			interaction.cacheWriteTokens += totalCacheWrite;
+			interaction.reasoningTokens += totalReasoning;
+			interaction.cost += totalCost;
+			(interaction as any).claudeSubAgentSessionIds = sessionIds;
+		}
+	}
 }

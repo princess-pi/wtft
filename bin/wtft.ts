@@ -362,11 +362,6 @@ async function main() {
 		}
 	}
 
-	// Claude bash sub-agent discovery (#138): for interactions that spawn
-	// `claude -p` via a bash command, find the sub-agent session files and
-	// attribute their token totals to the parent interaction.
-	attributeClaudeSubAgentCosts(interactions);
-
 	// Read settings from harness-agnostic config file (#72).
 	const config = readConfig("wtft");
 	const disabledEmoji = isEmojiDisabled();

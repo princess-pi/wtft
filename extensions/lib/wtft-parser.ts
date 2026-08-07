@@ -443,6 +443,13 @@ export function parseSessionFile(filePath: string): Interaction[] {
 	} catch {
 		// File may not exist or be unreadable
 	}
+
+	// Claude bash sub-agent discovery (#138): find sub-agent sessions
+	// spawned by `claude -p` bash commands and attribute their token
+	// totals to the parent interactions. Done inside parseSessionFile so
+	// callers always get complete data — no separate attribution step.
+	attributeClaudeSubAgentCosts(interactions);
+
 	return interactions;
 }
 

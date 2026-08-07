@@ -24,6 +24,8 @@ import {
 	isInterruptMarker,
 	extractCwdFromBashCommand,
 	discoverClaudeSubAgentSessionFiles,
+	discoverSubagentSessionFiles,
+	loadSubagentInteractions,
 	WTFT_TAGGER_VERSION as TAGGER_VERSION
 } from "../extensions/lib/wtft-shared.js";
 
@@ -226,58 +228,73 @@ function hasClaudeCommand(interaction: NonNullable<ReturnType<typeof parseEntryT
   });
 }
 
-/** Scan pending claude commands for completed sub-agent sessions.
- *  When found, parse, classify, and write to the tag file as additional
- *  classified entries — the renderers see them as regular turns. */
-function scanForClaudeSubAgents() {
-  if (pendingClaudeCommands.length === 0) return;
-  const stillPending: typeof pendingClaudeCommands = [];
+/** Scan for sub-agent sessions (both task/agent/workflow spawns #82 and
+ *  claude -p bash commands #138). When found, parse, classify, and write
+ *  to the tag file — renderers see them as regular turns. */
+function scanForSubAgents() {
   let wroteAny = false;
 
-  for (const item of pendingClaudeCommands) {
-    const interaction = item.interaction;
-    let cwd: string | null = null;
-    for (const cmd of interaction.commands) {
-      cwd = extractCwdFromBashCommand(cmd);
-      if (cwd) break;
-    }
-    if (!cwd) continue;
+  // --- Claude bash sub-agents (#138) ---
+  if (pendingClaudeCommands.length > 0) {
+    const stillPending: typeof pendingClaudeCommands = [];
+    for (const item of pendingClaudeCommands) {
+      const interaction = item.interaction;
+      let cwd: string | null = null;
+      for (const cmd of interaction.commands) {
+        cwd = extractCwdFromBashCommand(cmd);
+        if (cwd) break;
+      }
+      if (!cwd) continue;
 
-    const files = discoverClaudeSubAgentSessionFiles(cwd, interaction.timestamp);
-    if (files.length === 0) {
-      stillPending.push(item);
-      continue;
+      const files = discoverClaudeSubAgentSessionFiles(cwd, interaction.timestamp);
+      if (files.length === 0) {
+        stillPending.push(item);
+        continue;
+      }
+      for (const file of files) {
+        const sessionId = path.basename(file, '.jsonl');
+        if (discoveredClaudeSessions.has(sessionId)) continue;
+        discoveredClaudeSessions.add(sessionId);
+        wroteAny = writeSessionToTagFile(file) || wroteAny;
+      }
     }
+    pendingClaudeCommands.length = 0;
+    if (stillPending.length > 0) pendingClaudeCommands.push(...stillPending);
+  }
 
-    for (const file of files) {
+  // --- Task/agent/workflow sub-agents (#82) ---
+  const taskAgentFiles = discoverSubagentSessionFiles(sessionPath);
+  if (taskAgentFiles.length > 0) {
+    for (const file of taskAgentFiles) {
       const sessionId = path.basename(file, '.jsonl');
       if (discoveredClaudeSessions.has(sessionId)) continue;
       discoveredClaudeSessions.add(sessionId);
-
-      try {
-        const subInteractions = parseSessionFile(file);
-        const deduped = deduplicateInteractions(subInteractions);
-        let batch = '';
-        for (const si of deduped) {
-          batch += serializeClassified(si);
-        }
-        if (batch) {
-          fs.appendFileSync(tagPath, batch);
-          wroteAny = true;
-        }
-      } catch { /* file unreadable — try again next cycle */ }
+      wroteAny = writeSessionToTagFile(file) || wroteAny;
     }
   }
 
-  pendingClaudeCommands.length = 0;
-  if (stillPending.length > 0) {
-    pendingClaudeCommands.push(...stillPending);
-  }
   if (wroteAny) {
     lastWriteMs = Date.now();
-    // Reset idle — we wrote data
     idleStartMs = 0;
   }
+}
+
+/** Parse a sub-agent session file, classify its interactions, and write
+ *  them to the tag file. Returns true if any entries were written. */
+function writeSessionToTagFile(file: string): boolean {
+  try {
+    const subInteractions = parseSessionFile(file);
+    const deduped = deduplicateInteractions(subInteractions);
+    let batch = '';
+    for (const si of deduped) {
+      batch += serializeClassified(si);
+    }
+    if (batch) {
+      fs.appendFileSync(tagPath, batch);
+      return true;
+    }
+  } catch { /* file unreadable */ }
+  return false;
 }
 
 function parseNewLines(filePath: string) {
@@ -967,9 +984,10 @@ if (showList || showCleanup || showRestart || stopSession) {
         flushPending();
       }
 
-      // Claude sub-agent discovery (#138): scan for completed claude -p
-      // sessions and write their classified interactions to the tag file.
-      scanForClaudeSubAgents();
+      // Sub-agent discovery (#82, #138): scan for completed sub-agent
+      // sessions (task/agent spawns and claude -p bash commands) and
+      // write their classified interactions to the tag file.
+      scanForSubAgents();
 
       // Heartbeat: on every poll cycle when idle, update the _hb range line.
       // First idle poll appends {"_hb":{"first":<ts>}}. Subsequent idle polls

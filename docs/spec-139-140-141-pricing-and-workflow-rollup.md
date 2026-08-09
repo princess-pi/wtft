@@ -1,6 +1,6 @@
 # Spec: wtft pricing correctness + workflow subagent rollup (#139, #140, #141)
 
-**Status:** Spec Draft
+**Status:** Code and Spec Approved (tested; reconciled to shipped code)
 **Issues:** [#139](https://github.com/duppypro/princess-pi-packages/issues/139),
 [#140](https://github.com/duppypro/princess-pi-packages/issues/140),
 [#141](https://github.com/duppypro/princess-pi-packages/issues/141)
@@ -67,11 +67,11 @@ Notes:
    `⚠ no pricing for <model> — using default $3/$15 rates; totals may be unreliable`.
    (The daemon computes costs in a separate process, so the CLI derives the warning
    from tag data rather than sharing in-process state.)
-3. **`--by-model` breakdown.** New CLI flag `--by-model`; renderer
-   `renderByModelSummary(interactions, maxWidth)` in `wtft-renderer.ts`: deduplicated
-   interactions grouped by `model` (missing → `(unknown)`), one row per model with
-   input/output/cacheRead/cacheWrite token sums and summed cost, plus a totals row.
-   Rows whose model fails `isModelPriced` are suffixed `?` on the cost.
+3. **`--by-model` breakdown.** `--by-model` is an **alias of `--tokens`** — the
+   existing `renderTokenSummary` table already is the per-model token+cost breakdown
+   (one row per model, TOTAL row), so the flag maps to it rather than duplicating a
+   renderer. Cost cells for models failing `isModelPriced` (and the TOTAL when any row
+   is affected) are suffixed `?`, with a legend line explaining the marker.
 
 ### #141 — workflow transcript discovery
 
@@ -81,6 +81,11 @@ existing meaning (increments only on `subagents`/`ns` containers → `MAX_SUBAGE
 still bounds *nesting* depth, not directory depth), and the `agent-*.jsonl` file filter
 still gates what is collected. This picks up
 `subagents/workflows/wf_<runId>/agent-*.jsonl` and future harness layout changes.
+
+**Exclusion discovered during implementation:** `wtft-tags/` directories are skipped —
+wtft's own tag output for an agent transcript is named
+`agent-<id>.jsonl.wtft-tag.v<ver>.jsonl`, which matches the `agent-*.jsonl` file filter
+and would double-count if the walker entered those dirs.
 
 ### Tagger version bump
 
@@ -109,9 +114,14 @@ Tests run against the built bundle (`bun run build` first), per repo convention:
      `tests/wtft-issue-82.test.ts`).
 3. **Existing suites** `wtft-pricing-tiers`, `wtft-issue-82`, `wtft-issue-83`,
    `wtft-server-tool-cost`, daemon cost cross-validation — all green.
-4. **Manual:** `wtft -s <…a578 session>` after `--force` re-parse reports ≈ $73+
-   (pricing ≈ $50 main + ≈ $23 workflow agents), vs $15.33 before.
-   `wtft --by-model -s <session>` rows sum to the footer total.
+4. **Manual (result):** `wtft -s <…a578 session>` after `--force` re-parse reports
+   **$92.11** (fable-5 $90.64 + sonnet-5 $1.47), vs $15.33 before. This exceeds the
+   issue's ≈$73 estimate and the $79.43 status-line snapshot because the 33 rolled-up
+   subagent/workflow transcripts contribute ≈14M cache-read tokens the estimate
+   approximated, and the status-line figure was a mid-session snapshot.
+   `wtft --by-model -s <session>` rows sum to the TOTAL row. `--help` documents
+   `--by-model`. All suites listed above ran green (commit b6bb290 has the full list);
+   typecheck shows no new errors (2 pre-existing TS7016 in serve/cloudflare.js).
 
 ## Roads not taken
 

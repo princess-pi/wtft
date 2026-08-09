@@ -18,3 +18,4 @@ export * from "./wtft-renderer.js";
 export * from "./wtft-daemon-lib.js";
 // Harness seam (#156) — registry lookups + the out-of-tree loader.
 export * from "./harness/registry.ts";
+export * from "./harness/session-cwd.ts";

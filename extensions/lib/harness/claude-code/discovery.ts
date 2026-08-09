@@ -23,8 +23,9 @@ const ID = "claude-code";
 /** Directories that hold derived data, not sessions. */
 const SKIP_DIRS = new Set(["subagents", "tool-results", "memory", "wtft-tags"]);
 
+/** Test seam: point discovery at a fixture tree instead of the real home dir. */
 function projectsDir(): string {
-	return path.join(os.homedir(), ".claude", "projects");
+	return process.env.WTFT_CLAUDE_PROJECTS_DIR || path.join(os.homedir(), ".claude", "projects");
 }
 
 /** Session id = the transcript basename without its extension (a UUID). */

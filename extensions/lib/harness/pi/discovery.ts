@@ -26,8 +26,9 @@ const ID = "pi";
 
 const SKIP_DIRS = new Set(["subagents", "tool-results", "memory", "wtft-tags"]);
 
+/** Test seam: point discovery at a fixture tree instead of the real home dir. */
 function sessionsDir(): string {
-	return path.join(os.homedir(), ".pi", "agent", "sessions");
+	return process.env.WTFT_PI_SESSIONS_DIR || path.join(os.homedir(), ".pi", "agent", "sessions");
 }
 
 /** Session id = the transcript basename without its extension. */

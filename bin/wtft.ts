@@ -48,6 +48,23 @@ import {
 	loadUserPricing,
 	getUserPricingPath,
 	loadExternalHarnesses,
+	getHarnesses,
+	getHarness,
+	getDiscoveries,
+	getParseAdapters,
+	registerHarness,
+	resetHarnessRegistry,
+	loadHarnessConfig,
+	getHarnessConfigPath,
+	getCurrentVersionTagPath,
+	resolveMovedSession,
+	applyControlEntry,
+	newParseStreamState,
+	readControlEntry,
+	resolveLastCwd,
+	cwdToSlug,
+	resetCwdCache,
+	getCwdReadCount,
 	type WatchSettings,
 	type Interaction,
 	type ModelPricing,
@@ -57,6 +74,7 @@ import { execSync } from "node:child_process";
 import { loadConfig, readConfig } from "../extensions/lib/config.ts";
 import {
 	discoverSessions,
+	harnessLabel,
 	selectSessionPrompt
 } from "../extensions/lib/session-selector.ts";
 import {
@@ -110,7 +128,28 @@ export {
 	// Phase 3 overhead classes (#52) — meter-split + interrupt tests
 	splitOverheadCost,
 	serializeClassifiedWithOverheadSplit,
-	isInterruptMarker
+	isInterruptMarker,
+	// Harness seam (#156) + moved-session follow (#155)
+	discoverSessions,
+	harnessLabel,
+	getHarnesses,
+	getHarness,
+	getDiscoveries,
+	getParseAdapters,
+	registerHarness,
+	resetHarnessRegistry,
+	loadHarnessConfig,
+	loadExternalHarnesses,
+	getHarnessConfigPath,
+	getCurrentVersionTagPath,
+	resolveMovedSession,
+	applyControlEntry,
+	newParseStreamState,
+	readControlEntry,
+	resolveLastCwd,
+	cwdToSlug,
+	resetCwdCache,
+	getCwdReadCount
 };
 
 // ---

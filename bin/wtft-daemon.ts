@@ -85,6 +85,11 @@ const discoveredClaudeSessions = new Set<string>();
 function shutdown(reason: string) {
   if (!running) return;
   running = false;
+  // Why the daemon stopped is the diagnostic #155 turns on: "session moved" and
+  // "session removed" look identical from outside, and only one is a bug.
+  if (process.env.WTFT_DAEMON_DEBUG) {
+    process.stderr.write(`[wtft-log-parser] shutdown: ${reason}\n`);
+  }
   // Ownership-aware shutdown (#95): a taken-over daemon must exit silently.
   // Writing anything would recreate the tag file the new owner's version
   // hygiene just deleted, and unlinking would destroy the new owner's lease

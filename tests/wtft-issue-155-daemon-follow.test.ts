@@ -23,6 +23,7 @@ import {
 	getDaemonPidPath,
 	getTagPath,
 	getCurrentVersionTagPath,
+	isSessionIdBasename,
 	resolveMovedSession,
 	resetCwdCache,
 	resetHarnessRegistry,
@@ -69,12 +70,31 @@ function turnLine(id: string, cwd: string, ts: string): string {
 
 console.log("\n=== PART A: the singleton key survives a move ===\n");
 {
-	const a = "/home/tester/.claude/projects/-home-tester-demo/abc-123.jsonl";
-	const b = "/home/tester/.claude/projects/-home-tester-worktrees-demo-9/abc-123.jsonl";
+	// Real session basenames carry a UUID — that is what makes them a usable
+	// identity across project dirs (#157).
+	const ID1 = "b1f54c2f-5140-4934-8075-c21e2339f4e2.jsonl";
+	const ID2 = "9890440e-05ad-421c-bc03-cd0b845aea42.jsonl";
+	const a = `/home/tester/.claude/projects/-home-tester-demo/${ID1}`;
+	const b = `/home/tester/.claude/projects/-home-tester-worktrees-demo-9/${ID1}`;
 	check(getDaemonPidPath(a) === getDaemonPidPath(b), "same session in two project dirs → one PID file");
 
-	const other = "/home/tester/.claude/projects/-home-tester-demo/def-456.jsonl";
+	const other = `/home/tester/.claude/projects/-home-tester-demo/${ID2}`;
 	check(getDaemonPidPath(a) !== getDaemonPidPath(other), "two distinct sessions → distinct PID files");
+
+	// Pi's shape also carries a UUID.
+	const pi1 = `/home/tester/.pi/agent/sessions/--home-tester-demo--/2026-08-06T23-19-38-943Z_019fd960-0ebf-7fb2-85ed-798b50f61b8e.jsonl`;
+	const pi2 = `/home/tester/.pi/agent/sessions/--elsewhere--/2026-08-06T23-19-38-943Z_019fd960-0ebf-7fb2-85ed-798b50f61b8e.jsonl`;
+	check(getDaemonPidPath(pi1) === getDaemonPidPath(pi2), "Pi session basenames are identities too");
+
+	// The #157 gate: a basename that is NOT a session id is not an identity, so
+	// it keeps the pre-#155 full-path key. Two fixtures both named session.jsonl
+	// in different directories must NOT share a daemon lease.
+	const plainA = "/tmp/wtft-fixture-a/session.jsonl";
+	const plainB = "/tmp/wtft-fixture-b/session.jsonl";
+	check(getDaemonPidPath(plainA) !== getDaemonPidPath(plainB),
+		"non-UUID basenames stay path-keyed — same-named files do not collide (#157)");
+	check(isSessionIdBasename(a) && !isSessionIdBasename(plainA),
+		"isSessionIdBasename distinguishes a session id from an arbitrary filename");
 	check(
 		path.basename(getDaemonPidPath(a)).startsWith("wtft-daemon-") &&
 		getDaemonPidPath(a).endsWith(".pid"),
@@ -87,7 +107,7 @@ console.log("\n=== PART B: tag path resolution across project dirs ===\n");
 	const projects = mktmp("wtft-155-b-");
 	const ownSlug = cwdToSlug("/home/tester/demo");
 	const sibSlug = cwdToSlug("/home/tester/worktrees/demo/9");
-	const base = "sess-b.jsonl";
+	const base = "3f2b7c11-9d4e-4a6b-8c25-77aa1e93b0d4.jsonl";
 
 	const ownSession = path.join(projects, ownSlug, base);
 	fs.mkdirSync(path.dirname(ownSession), { recursive: true });
@@ -120,6 +140,18 @@ console.log("\n=== PART B: tag path resolution across project dirs ===\n");
 			path.join(projects, ownSlug, "wtft-tags", `sess-fresh.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`),
 		"a fresh session gets the own-dir current-version default"
 	);
+
+	// The #157 gate on the other cross-dir behaviour: a non-session path must
+	// never trigger a sibling scan, or getTagPath walks the grandparent of an
+	// arbitrary directory (for /tmp/<fixture>/session.jsonl, that is /tmp).
+	const plain = path.join(projects, ownSlug, "session.jsonl");
+	fs.writeFileSync(plain, "");
+	const plainSibTag = path.join(projects, sibSlug, "wtft-tags", `session.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	fs.writeFileSync(plainSibTag, "");
+	check(
+		getTagPath(plain) === path.join(projects, ownSlug, "wtft-tags", `session.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`),
+		"a non-UUID basename does not reach into sibling dirs (#157)"
+	);
 }
 
 console.log("\n=== PART C: a live daemon follows its transcript ===\n");
@@ -131,7 +163,7 @@ console.log("\n=== PART C: a live daemon follows its transcript ===\n");
 
 	const cwdA = "/home/tester/git-projects/demo";
 	const cwdB = "/home/tester/worktrees/demo/155-branch";
-	const base = "live-session.jsonl";
+	const base = "7c9e1a44-2f80-4d3e-9b17-5ac6de210f38.jsonl";
 	const dirA = path.join(projects, cwdToSlug(cwdA));
 	const dirB = path.join(projects, cwdToSlug(cwdB));
 	fs.mkdirSync(dirA, { recursive: true });
@@ -201,7 +233,7 @@ console.log("\n=== PART D: the reaper does not shoot a moved daemon ===\n");
 	resetCwdCache();
 	resetHarnessRegistry();
 
-	const base = "reap-session.jsonl";
+	const base = "d41c8b60-3a52-4f19-8e77-90bb2cd541aa.jsonl";
 	const oldPath = path.join(projects, cwdToSlug("/home/tester/demo"), base);
 	const newPath = path.join(projects, cwdToSlug("/home/tester/worktrees/demo/1"), base);
 	fs.mkdirSync(path.dirname(newPath), { recursive: true });
@@ -212,7 +244,7 @@ console.log("\n=== PART D: the reaper does not shoot a moved daemon ===\n");
 	check(!fs.existsSync(oldPath), "the old cmdline path is indeed gone");
 	check(resolveMovedSession(oldPath) === newPath, "…but the session resolves to its new home, so it must not be reaped");
 
-	const goner = path.join(projects, cwdToSlug("/home/tester/demo"), "goner.jsonl");
+	const goner = path.join(projects, cwdToSlug("/home/tester/demo"), "0f9a7c23-6b41-4d88-a5e2-31cc70de9b14.jsonl");
 	check(
 		!fs.existsSync(goner) && resolveMovedSession(goner) === null,
 		"a genuinely deleted session stays reapable"

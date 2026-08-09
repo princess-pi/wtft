@@ -233,6 +233,28 @@ export function serializeClassifiedWithOverheadSplit(interaction: Interaction, p
 }
 
 /**
+ * True when a transcript basename carries a session UUID — the shape every real
+ * harness session has: `<uuid>.jsonl` (Claude Code) or `<timestamp>_<uuid>.jsonl`
+ * (Pi).
+ *
+ * This is the gate on both cross-directory behaviours below (#157). Both were
+ * introduced by #155 keyed on the basename alone, which is only a safe identity
+ * when the basename is globally unique. It is not: an arbitrary path handed to
+ * `-s`, or a fixture named `session.jsonl`, collides with every other file of
+ * the same name in a different directory. Two unrelated sessions then shared a
+ * daemon lease, and a tag lookup wandered into unrelated directories.
+ *
+ * Anything without a UUID keeps the pre-#155 path-keyed behaviour, which is
+ * strictly safer and loses nothing: only real harness sessions move between
+ * project dirs, and those always carry a UUID.
+ */
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+export function isSessionIdBasename(sessionPath: string): boolean {
+	return UUID_RE.test(path.basename(sessionPath));
+}
+
+/**
  * Current-version tag file for this transcript basename in a *sibling* project
  * dir (#155). A session that moves — worktree enter/exit, or any switch that
  * changes its project dir — leaves its daemon writing to the tag path it opened
@@ -245,6 +267,10 @@ export function serializeClassifiedWithOverheadSplit(interaction: Interaction, p
  * session UUIDs, so a cross-dir match cannot collide.
  */
 function findSiblingTagPath(sessionPath: string): string | null {
+	// Only real session transcripts move between project dirs (#157). Without
+	// this gate the scan below walks the grandparent of ANY path — for
+	// /tmp/<fixture>/session.jsonl that grandparent is /tmp itself.
+	if (!isSessionIdBasename(sessionPath)) return null;
 	const sessionBase = path.basename(sessionPath);
 	const wanted = sessionBase + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`;
 	// The project-dir parent: …/<projects-root>/<project-slug>/<session>.jsonl
@@ -333,7 +359,12 @@ export function getCurrentVersionTagPath(sessionPath: string): string {
  * unique per session and invariant under a move.
  */
 export function getDaemonPidPath(sessionPath: string): string {
-	const sessionHash = createHash("sha256").update(path.basename(sessionPath)).digest("hex").slice(0, 12);
+	// Key on the basename only when it is a session UUID — unique across every
+	// project dir, so it survives a move. Any other path keeps the full-path key
+	// (#157): basenames like "session.jsonl" are not identities, and collapsing
+	// them onto one lease made two unrelated sessions fight over one daemon.
+	const key = isSessionIdBasename(sessionPath) ? path.basename(sessionPath) : sessionPath;
+	const sessionHash = createHash("sha256").update(key).digest("hex").slice(0, 12);
 	return path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
 }
 

@@ -30,6 +30,7 @@ import {
 	loadUserPricing,
 	resolveMovedSession,
 	getCurrentVersionTagPath,
+	isSessionIdBasename,
 	loadExternalHarnesses,
 	WTFT_TAGGER_VERSION as TAGGER_VERSION
 } from "../extensions/lib/wtft-shared.js";
@@ -862,7 +863,9 @@ if (showList || showCleanup || showRestart || stopSession) {
   // dirs, and a path-keyed hash would change under it — a `wtft` run from the
   // new directory would miss the still-live daemon and spawn a second one on
   // the same transcript. Must stay in step with getDaemonPidPath().
-  const sessionHash = createHash("sha256").update(sessionBase).digest("hex").slice(0, 12);
+  const sessionHash = createHash("sha256").update(
+    isSessionIdBasename(sessionPath) ? sessionBase : sessionPath
+  ).digest("hex").slice(0, 12);
   pidPath = path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
 
   // Version-aware spawn takeover (#95): if an old-version tag file exists,

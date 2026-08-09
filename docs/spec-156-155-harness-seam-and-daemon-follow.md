@@ -270,46 +270,142 @@ would leave the daemon to be shot from outside.
 
 ---
 
-# Verification
 
-Tests live in `tests/wtft-issue-156-harness-seam.test.ts` and
-`tests/wtft-issue-155-daemon-follow.test.ts`; both run under `bun test`.
+# As built — reconciliation
 
-### #156
+Everything below is how the shipped code differs from, or adds to, the design above. Recorded
+after the tests ran, per Step 5.
 
-| # | Assertion |
+## Additions the design implied but did not name
+
+**`ParsedBlock.handled`.** A tool block carries an explicit `handled` flag rather than letting
+shared code infer "recognized" from empty `files`/`commands`. Without it, a `Read` call with no
+path argument would have fallen through to category mapping and been marked
+`unrecognizedTool` — a behaviour change the pre-seam code did not make, since the `read` branch
+swallowed it. The flag is what keeps the refactor a refactor.
+
+**Shared control-entry state machine.** The design said harnesses recognize control entries;
+what shipped also unified how they are *applied*. `wtft-parser.ts` now exports
+`newParseStreamState()`, `applyControlEntry()` and `readControlEntry()`, and both
+`parseSessionFile` and the daemon's `parseNewLines` drive the same state object. That deletes
+the duplicated marker block the entanglement table called out (`wtft-parser.ts:418-447` **and**
+`bin/wtft-daemon.ts:327-357`) instead of merely relocating it — the incremental and whole-file
+paths can no longer drift.
+
+Precedence note: every registered adapter is consulted per entry, first match wins, in registry
+order (`claude-code` before `pi`). The pre-seam code checked Pi's markers first. The predicates
+are disjoint on every real entry — they key on distinct `type` values and distinct top-level
+fields — so the reordering is unobservable; a seam between harnesses that do not know about
+each other cannot preserve a total order across them anyway.
+
+**`getCurrentVersionTagPath()`** — a *writer-side* resolver alongside `getTagPath()`'s reader
+fallback. Both prefer own-dir current, then sibling current; only the reader falls back to a
+stale-version file. A writer must never open a stale-version filename — regenerating it is the
+point of a version bump (#95) — so the daemon uses the writer form and derives its `tagsDir`
+(takeover scan, version sweep) from the resolved path rather than from the session's directory.
+
+**`resolveMovedSession()`** in `wtft-daemon-lib.ts` — the thin wrapper that asks every
+registered harness where a vanished session id lives now. Both the daemon's poll loop and the
+reap guard call it, so "moved vs deleted" is decided in exactly one place.
+
+**`shutdown()` logs its reason** under `WTFT_DAEMON_DEBUG`. Found while testing: `shutdown`
+took a `reason` string and discarded it, so "session moved" and "session removed" were
+indistinguishable from outside — the one diagnostic this issue most needs. One line, and the
+test asserts on it.
+
+**`harnessLabel()`** replaces the two `c.harness === "claude-code" ? "Claude" : "Pi"` literals
+in the selector; the label now comes from the harness. Relatedly `buildDisplayPath()`'s third
+parameter widened from `"pi" | "claude-code"` to `string`, keying its Pi-specific `--`-slug and
+date-prefix handling on `=== "pi"` and giving every other harness the generic treatment.
+Without that widening, adding a harness would have required editing a shared file — the exact
+thing the acceptance criterion forbids.
+
+**Test seams.** `WTFT_CLAUDE_PROJECTS_DIR` and `WTFT_PI_SESSIONS_DIR` redirect the built-in
+discoveries at fixture trees (the Codex sketch uses `CODEX_SESSIONS_DIR`). Without them the
+union rule could only be tested against the real home directory.
+
+**Registry memoisation.** `getHarnesses()` and `getParseAdapters()` cache their arrays, since
+the parse path consults the adapter list once per transcript line. Every mutation
+(`registerHarness`, `resetHarnessRegistry`, `loadExternalHarnesses`) invalidates both.
+
+## The one deliberate behaviour change
+
+Cache-miss observation (#152) now reads **normalized** usage, so Pi sessions get Cache Miss
+dividers. Before the seam the check read `usage.cache_read_input_tokens` /
+`usage.cache_creation_input_tokens` — Anthropic spellings only — while Pi writes `cacheRead` /
+`cacheWrite`, so the divider was silently Claude-only. #152 specified an *observed* miss, and
+the observation was always in the Pi log; nothing was reading it.
+
+Everything else in the normalization is byte-identical on real data. The one place worth
+checking was `Interaction.reasoningTokens`, which the old code read as `usage.reasoning` (Pi's
+spelling) while the cost path accepted `reasoning_tokens ?? reasoning`. The seam collapses
+these to one normalized field. Verified across 40 Pi transcripts: `reasoning_tokens` appears
+**0** times and `reasoning` appears throughout, so the divergent case is unreachable.
+
+## Verification — as run
+
+Tests are standalone scripts run with `node --experimental-strip-types`, importing through the
+built `bin/wtft.mjs` bundle (repo convention; the spec draft said `bun test`, which this repo
+does not use).
+
+```
+node --experimental-strip-types tests/wtft-issue-156-harness-seam.test.ts   → 63 passed, 0 failed
+node --experimental-strip-types tests/wtft-issue-155-daemon-follow.test.ts  → 23 passed, 0 failed
+```
+
+### #156 — `tests/wtft-issue-156-harness-seam.test.ts`
+
+| Part | Covers |
 |---|---|
-| 1 | `resolveLastCwd` returns the last `cwd` in a fixture transcript; returns `null` for a transcript with none (Pi shape) |
-| 2 | Widening works: a transcript whose only `cwd` sits >8 KB from the tail still resolves |
-| 3 | The truncated first line of a non-zero-offset read is dropped, not mis-parsed |
-| 4 | Memoisation: a second resolve of an unchanged file performs no read (counter on a wrapped reader) |
-| 5 | **Union** — fixture with dir `A` holding a transcript whose last-cwd is `B`: discovering from `B` finds it, **and** discovering from `A` still finds it |
-| 6 | **No regression** — every session the pre-change selector finds is still found (snapshot of `discoverSessions()` against the real home dir, asserted as a subset) |
-| 7 | Dedup by session id keeps the newest mtime when the same id appears in two dirs |
-| 8 | `resolveSessionById` finds a transcript in a project dir unrelated to cwd |
-| 9 | Latency: `discoverSessions()` over a fixture of 300 transcripts stays under 500 ms, and a second call (memoised) is faster |
-| 10 | Parse parity — `parseEntryToInteraction` output is byte-identical (`JSON.stringify`) before and after the seam, for a Pi entry and a Claude entry fixture |
-| 11 | Control-entry parity — `model_change`, `compaction`, `isCompactSummary`, interrupt markers still take effect through `parseSessionFile` |
-| 12 | Registry: a disabled harness disappears from `getHarnesses()`; an unknown config key is ignored, not fatal |
-| 13 | The Codex sketch registers, discovers, and parses through the registry with **zero** edits to shared files (asserted by importing the sketch and running it end-to-end) |
+| A | `resolveLastCwd`: resolves a recorded cwd; returns null on the Pi shape; widens past the 8 KB window; drops the truncated first line of a windowed read; memoises (no second read) |
+| B | Union rule: a moved session is found from its new dir **and** still from its old one; the repo-root-slug-vs-subdirectory case both ways; dedup by session id keeps the newest; `resolveSessionById` reaches an unrelated project dir and returns null for an unknown id |
+| C | No regression against the **real** `~/.claude/projects`: every session the old cwd-slug rule found is still found; discovery completes in 1 ms |
+| D | Parse parity: Claude and Pi entries — ids, tokens, cache fields, observed cache miss, native-cost preference, tool→file/command mapping, classification, and the "branched tool with no arguments is not unrecognized" case |
+| E | Control entries still take effect end to end through `parseSessionFile`: `model_change`, `thinking_level_change`, `compaction` tokensBefore, `isCompactSummary`, interrupt-stamps-preceding-turn |
+| F | The Codex sketch loads from config, discovers its sessions, parses a schema unlike both built-ins, and inherits cost, cache-miss detection, reasoning accounting and classification — **no shared file edited** |
+| G | Registry config: disabling a built-in, malformed JSON, an entry with no module paths, an unloadable module, `registerHarness`/`resetHarnessRegistry` |
 
-### #155
+Part F is the acceptance criterion. The sketch lives at `research/156-codex-harness-sketch/`
+and the guide it exercises is `docs/adding-a-harness.md`.
 
-| # | Assertion |
+### #155 — `tests/wtft-issue-155-daemon-follow.test.ts`
+
+| Part | Covers |
 |---|---|
-| 14 | `getDaemonPidPath` is stable across a directory change and differs between two distinct sessions |
-| 15 | Moving a transcript between two project dirs mid-run: the daemon survives, keeps its original tag path, and continues appending (no restart, no second daemon) |
-| 16 | Deleting the transcript outright still shuts the daemon down |
-| 17 | `getTagPath` returns the sibling-dir current-version tag when the own dir holds only a stale-version one |
-| 18 | `getTagPath` prefers the own-dir current-version tag over a sibling one |
-| 19 | The reap guard leaves a moved-session daemon alive (simulated cmdline path vs. resolved path) |
+| A | The singleton key is identical for the same session in two project dirs, distinct between sessions, and still matches the `wtft-daemon-*.pid` glob that `--list`/`--cleanup` scan |
+| B | Tag resolution: sibling current-version outranks a stale own-dir tag (the case #155 measured); own-dir current outranks a sibling; a fresh session gets the own-dir current-version default and never a stale filename |
+| C | A **real daemon** is spawned, its transcript renamed into another project dir, and it survives: logs `session moved`, does not shut down, keeps its original tag path, keeps parsing (2 → 4 tagged lines), and the PID file resolved from the new path is the same one, still held by the original process. Deleting the transcript then exits it cleanly with reason `session removed` |
+| D | The reap predicate: a moved session resolves elsewhere and is not reapable; a deleted one still is |
+
+### Full suite
+
+42 suites: **31 pass, 11 fail**. All 11 failures are pre-existing on `main` — verified by
+stashing the branch and re-running, with identical results (`wtft-daemon-lifecycle` 25 passed /
+5 failed both before and after; `wtft-title-layout` 25 passed / 7 failed both before and
+after). Causes are unrelated to this work: a missing `@earendil-works/pi-tui` package, and the
+serve / merge / rate-limiter / CLI-layout suites.
+
+`bun run typecheck` reports only the two pre-existing `serve/cloudflare.js` TS7016 errors,
+identical on `main`. `bun run build` compiles all five bins and generates the harness registry
+(`claude-code, pi`).
 
 ### Manual
 
-- `wtft` from the main clone lists a session currently live in a worktree, with the same total
-  as when run from the worktree.
-- `wtft --watch` in a worktree, then exit the worktree: the chart keeps updating.
-- `wtft --list` shows one daemon, not two, after a switch.
+- `wtft -s b1f54c2f -i 6h --tokens` renders end to end.
+- Session `19d0ba8d` — the live mismatch measured above — is now visible from
+  `rogue-savvy/frontend` **and** still from the repo root. The union property, on real data.
+- `getDaemonPidPath` is identical for the same session basename in two different project dirs.
+
+## Roads not taken
+
+- **Sweeping orphaned tag files.** With `getTagPath`'s sibling fallback they are found and
+  used, so deleting them would throw away the *more complete* of the two artifacts — the
+  opposite of the measured problem.
+- **Inode-keyed daemon identity.** More faithful to "same file", but not derivable from a path
+  the CLI holds before opening, and it does not survive a copy-then-delete move.
+- **One full parser per harness.** Per-harness cost drift, and N copies of #52 Phase 3.
+- **A pointer file written at the switch.** Only written if a parser happened to be running at
+  that moment, which cannot be guaranteed. The transcript already carries the answer.
 
 ---
 

@@ -21,12 +21,16 @@ import {
 	deduplicateInteractions,
 	serializeClassified,
 	serializeClassifiedWithOverheadSplit,
-	isInterruptMarker,
+	applyControlEntry,
+	newParseStreamState,
 	extractCwdFromBashCommand,
 	discoverClaudeSubAgentSessionFiles,
 	discoverSubagentSessionFiles,
 	loadSubagentInteractions,
 	loadUserPricing,
+	resolveMovedSession,
+	getCurrentVersionTagPath,
+	loadExternalHarnesses,
 	WTFT_TAGGER_VERSION as TAGGER_VERSION
 } from "../extensions/lib/wtft-shared.js";
 
@@ -58,10 +62,11 @@ let startupTime = Date.now();    // daemon start time (idle exit grace period)
 // flush so late interrupt markers can still stamp the tail interaction).
 let pendingItems: { interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>; prevCtx: number }[] = [];
 let idleStartMs = 0;         // start of current idle period (for _hb range)
-let currentThinkingLevel: string | undefined; // Track thinking level from session events (#77)
-let currentModel: string | undefined; // Track model from model_change events (#128)
-let lastCompactionTokensBefore: number | undefined; // Track compaction tokensBefore (#90)
-let pendingAfterCompaction = false; // Claude isCompactSummary → flag next interaction (#52 Phase 3)
+// Stream state threaded across incremental reads: thinking level (#77), model
+// from model_change (#128), compaction tokensBefore (#90), and the pending
+// after-compaction flag (#52 Phase 3). Shared shape with parseSessionFile so
+// the incremental and whole-file paths cannot drift (#156).
+const streamState = newParseStreamState();
 let stampInterruptOnPending = false; // interrupt marker seen; assistant turn is in pendingItems (#52 Phase 3)
 let prevCtxTokens = 0; // input+cacheRead+cacheWrite of prev non-sidechain interaction (recache signature)
 let running = true;
@@ -323,48 +328,30 @@ function parseNewLines(filePath: string) {
       if (!line.trim()) continue;
       try {
         const entry = JSON.parse(line);
-        // Track thinking level changes (#77)
-        if (entry.type === "thinking_level_change" && entry.thinkingLevel) {
-          currentThinkingLevel = entry.thinkingLevel;
-          continue;
-        }
-        // Track model from model_change events for Pi sessions (#128).
-        // Pi does not store the model on each message; it emits
-        // model_change entries with provider + modelId.
-        if (entry.type === "model_change" && entry.modelId) {
-          currentModel = entry.modelId;
-          continue;
-        }
-        // Track compaction entries — stamp tokensBefore onto the next
-        // assistant interaction (#90).
-        if (entry.type === "compaction" && typeof entry.tokensBefore === "number") {
-          lastCompactionTokensBefore = entry.tokensBefore;
-          continue;
-        }
-        // Claude Code compact summary → flag next interaction for the
-        // compaction meter-split (#52 Phase 3).
-        if (entry.isCompactSummary === true) {
-          pendingAfterCompaction = true;
-          continue;
-        }
-        // User interrupt marker → the preceding assistant turn was killed.
-        // It is either the last interaction of this batch, or still sitting
-        // unflushed in pendingItems (stamped in the main loop). If it was
-        // already flushed to the tag file, the stamp is dropped — bounded by
-        // one 667ms beat.
-        if (isInterruptMarker(entry)) {
+        // Stream-control entries (thinking level #77, model_change #128,
+        // compaction #90, compact summary + interrupt #52 Phase 3). Recognition
+        // is per harness (#156); the state machine is shared with
+        // parseSessionFile, so the incremental and whole-file paths can no
+        // longer drift apart.
+        //
+        // Interrupt: the killed turn is either the last interaction of this
+        // batch, or still sitting unflushed in pendingItems (stamped in the
+        // main loop). If it was already flushed to the tag file, the stamp is
+        // dropped — bounded by one 667ms beat.
+        const isControl = applyControlEntry(entry, streamState, () => {
           if (interactions.length > 0) {
             interactions[interactions.length - 1].interrupted = true;
           } else {
             stampInterruptOnPending = true;
           }
-          continue;
-        }
-        const interaction = parseEntryToInteraction(entry, currentThinkingLevel, lastCompactionTokensBefore, pendingAfterCompaction, currentModel);
+        });
+        if (isControl) continue;
+
+        const interaction = parseEntryToInteraction(entry, streamState.thinkingLevel, streamState.compactionTokensBefore, streamState.afterCompaction, streamState.model);
         if (interaction) {
           interactions.push(interaction);
-          lastCompactionTokensBefore = undefined; // consumed
-          pendingAfterCompaction = false; // consumed
+          streamState.compactionTokensBefore = undefined; // consumed
+          streamState.afterCompaction = false; // consumed
         }
       } catch (_) {
         // Skip unparseable lines (partial writes, non-JSON)
@@ -407,6 +394,46 @@ function readLastMetaOffset(tagPath: string): number | null {
     }
   } catch { /* tag file unreadable */ }
   return null;
+}
+
+// ---
+// FOLLOW A MOVED SESSION (#155)
+// ---
+
+/**
+ * The transcript is MOVED, not copied, when a session changes project dirs
+ * (worktree enter/exit). One file, one session id, nothing duplicated — so the
+ * right response to a vanished path is to find the file again, not to die.
+ *
+ * Re-points `sessionPath` and returns true when the session was found
+ * elsewhere. Deliberately does NOT re-point `tagPath`: `--watch` binds fs.watch
+ * to the tag path once and never re-resolves, so holding the output fixed is
+ * what lets an attached watch survive the move. One daemon, moving input, fixed
+ * output. A `wtft` started afterwards from the new directory still finds that
+ * output — getTagPath() searches sibling project dirs for exactly this case.
+ *
+ * Incremental parsing is untouched: a move preserves size, so the next poll
+ * reads from where the last one stopped.
+ */
+function followMovedSession(): boolean {
+  const moved = resolveMovedSession(sessionPath);
+  if (!moved) return false;
+  if (process.env.WTFT_DAEMON_DEBUG) {
+    process.stderr.write(`[wtft-log-parser] session moved: ${sessionPath} -> ${moved}\n`);
+  }
+  sessionPath = moved;
+  return true;
+}
+
+/**
+ * Guard for the two places that SIGTERM a daemon whose `--session` path (read
+ * from /proc/<pid>/cmdline) no longer exists. After a move the cmdline still
+ * shows the old path, so without this every `wtft` run would kill the very
+ * daemon #155 exists to keep alive.
+ */
+function sessionIsGone(sessionCmdlinePath: string): boolean {
+  if (fs.existsSync(sessionCmdlinePath)) return false;
+  return resolveMovedSession(sessionCmdlinePath) === null;
 }
 
 // ---
@@ -457,8 +484,8 @@ function reapAndWarn() {
       continue;
     }
 
-    // HARD: session file gone → kill daemon
-    if (sessionFound && !fs.existsSync(sessionFound)) {
+    // HARD: session file gone → kill daemon. "Gone" excludes "merely moved" (#155).
+    if (sessionFound && sessionIsGone(sessionFound)) {
       process.kill(pid, "SIGTERM");
       try { fs.unlinkSync(fullPath); } catch (_) {}
       warnings.push(`[${new Date().toISOString()}] KILLED PID ${pid}: session gone — ${sessionFound}`);
@@ -618,10 +645,14 @@ function initClassified() {
 // MAIN LOOP
 // ---
 
-function main() {
+async function main() {
   // User pricing registry (#140) — the daemon computes every per-turn cost
   // baked into tag files, so overrides must merge before any parsing.
   loadUserPricing();
+
+  // Out-of-tree harnesses (#156) — config-declared modules must register
+  // before any discovery or parsing. Built-ins need no load step.
+  await loadExternalHarnesses();
 
   // ---
   // ARG PARSING & MANAGEMENT COMMANDS
@@ -744,7 +775,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         try { fs.unlinkSync(fullPath); } catch (_) {}
         continue;
       }
-      if (sessionFound && !fs.existsSync(sessionFound)) {
+      if (sessionFound && sessionIsGone(sessionFound)) {
         process.kill(pid, "SIGTERM");
         try { fs.unlinkSync(fullPath); } catch (_) {}
         console.log(`Cleaned up: PID ${pid} — session gone: ${sessionFound}`);
@@ -812,14 +843,21 @@ if (showList || showCleanup || showRestart || stopSession) {
 
   // Determine wtft-tag path (wtft-tags/ subdirectory, version in filename).
   // Subdirectory keeps tag files out of session discovery — no filename filter needed.
-  const sessionDir = path.dirname(sessionPath);
   const sessionBase = path.basename(sessionPath);
-  const tagsDir = path.join(sessionDir, "wtft-tags");
+  // Prefer an existing current-version tag wherever it lives — a session that
+  // moved project dirs leaves its tag behind, and adopting it keeps one
+  // continuous tag file across the switch instead of stranding the fuller
+  // artifact in an abandoned directory (#155).
+  tagPath = getCurrentVersionTagPath(sessionPath);
+  const tagsDir = path.dirname(tagPath);
   try { fs.mkdirSync(tagsDir, { recursive: true }); } catch (_) {}
-  tagPath = path.join(tagsDir, sessionBase + TAG_SUFFIX);
 
-  // PID file for singleton detection
-  const sessionHash = createHash("sha256").update(sessionPath).digest("hex").slice(0, 12);
+  // PID file for singleton detection. Keyed on the transcript BASENAME, not the
+  // full path (#155): a worktree switch moves the transcript between project
+  // dirs, and a path-keyed hash would change under it — a `wtft` run from the
+  // new directory would miss the still-live daemon and spawn a second one on
+  // the same transcript. Must stay in step with getDaemonPidPath().
+  const sessionHash = createHash("sha256").update(sessionBase).digest("hex").slice(0, 12);
   pidPath = path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
 
   // Version-aware spawn takeover (#95): if an old-version tag file exists,
@@ -935,11 +973,16 @@ if (showList || showCleanup || showRestart || stopSession) {
     // prompt entered), wait for it to be created. Write heartbeats so
     // the widget knows the daemon is alive and waiting (#124).
     if (!fs.existsSync(sessionPath)) {
-      // Was it previously seen and then deleted? Exit (#129 Bug A).
-      // If never seen yet, keep waiting — the session file is just late.
+      // Was it previously seen and then deleted? Distinguish MOVED from DELETED
+      // first (#155): a worktree switch moves the transcript to a project dir
+      // derived from the new cwd, so the path vanishes while the session is
+      // very much alive. Only shut down when no harness can find it.
+      // If never seen yet, keep waiting — the session file is just late (#129 Bug A).
       if (sessionExisted) {
-        shutdown("session removed");
-        return;
+        if (!followMovedSession()) {
+          shutdown("session removed");
+          return;
+        }
       }
       const now = Date.now();
       if (idleStartMs === 0) idleStartMs = now;
@@ -1018,8 +1061,9 @@ if (showList || showCleanup || showRestart || stopSession) {
         return;
       }
 
-      // If the session file disappears, exit cleanly.
-      if (!fs.existsSync(sessionPath)) {
+      // If the session file disappears, follow it if it merely moved (#155);
+      // otherwise exit cleanly.
+      if (!fs.existsSync(sessionPath) && !followMovedSession()) {
         shutdown("session removed");
         return;
       }
@@ -1040,4 +1084,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   loop();
 }
 
-main();
+main().catch((err) => {
+  process.stderr.write(`wtft-daemon: ${err instanceof Error ? err.stack || err.message : String(err)}\n`);
+  process.exit(1);
+});

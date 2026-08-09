@@ -2,15 +2,24 @@
  * @package princess-pi-packages
  * @module wtft-parser
  * @description Session log parsing and interaction classification.
- *   Reads Pi and Claude Code session.jsonl files, extracts token usage
- *   and cost per assistant message, normalizes field names across
- *   schemas, and classifies interactions into spec/code/other categories.
+ *   Extracts token usage and cost per assistant message, and classifies
+ *   interactions into spec/code/other categories.
+ *
+ *   Schema knowledge lives behind the harness seam (#156):
+ *   harness/<id>/parse.ts translates one harness's entry shape into the neutral
+ *   AssistantTurn / ParsedBlock / ControlSignal vocabulary, and everything in
+ *   this file operates on that vocabulary alone. Cost, cache observation, the
+ *   meter-split, and classification stay here — shared — so a new harness
+ *   cannot get billing wrong. Adding a harness must not require editing this
+ *   file; see docs/adding-a-harness.md.
  */
 
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import { calculateClaudeCost, calculateServerToolCost, getDeepSeekPeakMultiplier } from "./wtft-cost.js";
+import { getParseAdapters } from "./harness/registry.ts";
+import type { ControlSignal } from "./harness/types.ts";
 
 // ---
 // TYPES (#52) — single source of truth for parser output. These were referenced
@@ -144,174 +153,148 @@ function extractFilesFromBashCommand(command: string, files: { path: string; act
 
 export function parseEntryToInteraction(entry: any, thinkingLevel?: string, compactionTokensBefore?: number, afterCompaction?: boolean, currentModel?: string): Interaction | null {
 	if (!entry) return null;
-	
-	// Support both Pi schema (entry.type === "message") and Claude Code schema (entry.type === "assistant" or lacking type but having message)
-	const isPiSchema = entry.type === "message" && entry.message && entry.message.role === "assistant";
-	const isClaudeSchema = entry.type === "assistant" && entry.message && entry.message.role === "assistant";
 
-	if (isPiSchema || isClaudeSchema) {
-		const assistantMsg = entry.message;
-
-		// Resolve effective model: Pi sessions track model via model_change events
-		// (passed as currentModel), not on each message. Claude Code stores it
-		// directly on assistantMsg.model.
-		//
-		// Spec (#128): model_change entries carry provider + modelId. We track
-		// modelId as currentModel through both parseSessionFile and the daemon's
-		// incremental parseNewLines. When assistantMsg.model is absent (Pi),
-		// the tracked currentModel fills in — enabling DeepSeek surge-pricing
-		// detection, cost calculation, and server-tool-cost lookups that previously
-		// failed silently. Claude Code's message.model always takes precedence.
-		const effectiveModel = assistantMsg.model || currentModel || "";
-
-		// Parse timestamp first — used below for DeepSeek peak pricing
-		let timestampStr = assistantMsg.timestamp || entry.timestamp;
-		let timestamp = 0;
-		if (typeof timestampStr === "string") {
-			timestamp = new Date(timestampStr).getTime();
-		} else if (typeof timestampStr === "number") {
-			timestamp = timestampStr;
+	// Schema dispatch: the first harness that recognizes this entry owns it.
+	let turn = null;
+	for (const adapter of getParseAdapters()) {
+		turn = adapter.matchAssistant(entry);
+		if (turn) {
+			return buildInteraction(turn, adapter, thinkingLevel, compactionTokensBefore, afterCompaction, currentModel);
 		}
-
-		let cost = 0;
-		// Prefer Pi's native cost tracking, but fall through to manual calculation
-		// when cost.total is 0 while actual tokens were consumed (e.g. DeepSeek pricing
-		// not yet supported by Pi's internal cost tracker). Also normalize Pi's field
-		// names (input/output) to the Anthropic-compat names (input_tokens/output_tokens).
-		const usage = assistantMsg.usage || {};
-		const piCost = usage.cost?.total;
-		const hasTokens = (usage.input_tokens || usage.input || 0) > 0 ||
-		                  (usage.output_tokens || usage.output || 0) > 0 ||
-		                  (usage.cache_read_input_tokens || usage.cacheRead || 0) > 0 ||
-		                  (usage.cache_creation_input_tokens || usage.cacheWrite || 0) > 0 ||
-		                  (usage.reasoning_tokens || usage.reasoning || 0) > 0;
-		if (piCost !== undefined && piCost !== null && !(piCost === 0 && hasTokens)) {
-			cost = piCost;
-		} else if (effectiveModel && hasTokens) {
-			// Normalize Pi field names to Anthropic-compat for calculateClaudeCost.
-			// Pass the cache_creation sub-object through for TTL-split pricing (#55).
-			const normalizedUsage = {
-				input_tokens: usage.input_tokens ?? usage.input ?? 0,
-				output_tokens: usage.output_tokens ?? usage.output ?? 0,
-				cache_creation_input_tokens: usage.cache_creation_input_tokens ?? usage.cacheWrite ?? 0,
-				cache_read_input_tokens: usage.cache_read_input_tokens ?? usage.cacheRead ?? 0,
-				cache_creation: usage.cache_creation || null,
-				reasoning_tokens: usage.reasoning_tokens ?? usage.reasoning ?? 0,
-			};
-			cost = calculateClaudeCost(effectiveModel, normalizedUsage, timestamp);
-		}
-
-		// Observed cache TTL class (#95): the transcript records which ephemeral
-		// tier cache writes actually used — authoritative over any model-name guess.
-		const cacheCreation = usage.cache_creation || {};
-		const cacheTtl: "1h" | "5m" | undefined =
-			(cacheCreation.ephemeral_1h_input_tokens || 0) > 0 ? "1h"
-			: (cacheCreation.ephemeral_5m_input_tokens || 0) > 0 ? "5m"
-			: undefined;
-
-		// Observed cache miss (#152): the whole prefix was re-primed rather than read.
-		// Decided HERE, against raw usage, not later against the tag file — the
-		// compaction/recache meter-split (#52 Phase 3) rewrites cr and cw across two
-		// lines, so by tag-read time neither line can be told apart from a partial
-		// re-prime. This is the only point where the original pair is still intact.
-		const cacheMiss =
-			(usage.cache_read_input_tokens || 0) === 0 &&
-			(usage.cache_creation_input_tokens || 0) > 0
-				? true : undefined;
-
-		// Server-side tool requests: per-request billed, separate meter from tokens.
-		// Claude Code surfaces web_search / web_fetch via usage.server_tool_use (#73).
-		const serverToolRequests = usage.server_tool_use || {};
-		const serverToolCost = calculateServerToolCost(
-			effectiveModel,
-			serverToolRequests.web_search_requests || 0,
-			serverToolRequests.web_fetch_requests || 0
-		);
-
-		// Surge-pricing tag (#119): mark interactions that fell within DeepSeek peak hours
-		const surgePriced = effectiveModel.toLowerCase().includes("deepseek")
-			? getDeepSeekPeakMultiplier(timestamp) > 1.0 : undefined;
-
-		const files: { path: string; action: "read" | "write" }[] = [];
-		const commands: string[] = [];
-		const texts: string[] = [];
-		const toolCats = new Set<Category>();
-		let unrecognizedTool = false;
-
-		if (Array.isArray(assistantMsg.content)) {
-			for (const block of assistantMsg.content) {
-				if (block.type === "text") {
-					texts.push(block.text);
-				} else if (block.type === "thinking") {
-					texts.push(block.thinking);
-				} else if (block.type === "toolCall") {
-					// Pi Schema
-					const name = (block.name || "").toLowerCase();
-					const args = block.arguments || {};
-					if (name === "read") {
-						if (args.path) files.push({ path: args.path, action: "read" });
-					} else if (name === "write" || name === "edit") {
-						if (args.path) files.push({ path: args.path, action: "write" });
-					} else if (name === "bash") {
-						if (args.command) {
-							commands.push(args.command);
-							extractFilesFromBashCommand(args.command, files);
-						}
-					} else if (!mapToolToCategory(name, toolCats)) {
-						unrecognizedTool = true;
-					}
-				} else if (block.type === "tool_use") {
-					// Claude Code Schema
-					const name = (block.name || "").toLowerCase();
-					const args = block.input || {};
-
-					if (name === "read" || name === "view" || name === "glob" || name === "ls") {
-						const p = args.file_path || args.path || args.directory || args.target;
-						if (p) files.push({ path: p, action: "read" });
-					} else if (name === "edit" || name === "write" || name === "replace") {
-						const p = args.file_path || args.path || args.target;
-						if (p) files.push({ path: p, action: "write" });
-					} else if (name === "notebookedit") {
-						// Notebook edits classify by path like any other file write (#52)
-						if (args.notebook_path) files.push({ path: args.notebook_path, action: "write" });
-					} else if (name === "bash" || name === "run") {
-						if (args.command) {
-							commands.push(args.command);
-							extractFilesFromBashCommand(args.command, files);
-						}
-					} else if (!mapToolToCategory(name, toolCats)) {
-						unrecognizedTool = true;
-					}
-				}
-			}
-		}
-
-		return { timestamp, cost, messageId: assistantMsg.id, requestId: entry.requestId,
-			model: effectiveModel || undefined,
-			inputTokens: (usage.input_tokens || usage.input || 0) as number,
-			outputTokens: (usage.output_tokens || usage.output || 0) as number,
-			cacheReadTokens: (usage.cache_read_input_tokens || usage.cacheRead || 0) as number,
-			cacheWriteTokens: (usage.cache_creation_input_tokens || usage.cacheWrite || 0) as number,
-			reasoningTokens: (usage.reasoning || 0) as number,
-			webSearchRequests: (serverToolRequests.web_search_requests || 0) as number,
-			webFetchRequests: (serverToolRequests.web_fetch_requests || 0) as number,
-			serverToolCost,
-		surgePriced,
-			thinkingLevel,
-			compactionTokensBefore,
-			cacheTtl,
-			cacheMiss,
-			afterCompaction: (afterCompaction || compactionTokensBefore !== undefined) || undefined,
-			cacheWrite1hTokens: (cacheCreation.ephemeral_1h_input_tokens || 0) > 0
-				? cacheCreation.ephemeral_1h_input_tokens : undefined,
-			iterations: Array.isArray(usage.iterations) ? usage.iterations.length : undefined,
-			isSidechain: entry.isSidechain === true || undefined,
-			files, commands, texts,
-			toolCats: toolCats.size > 0 ? [...toolCats] : undefined,
-			unrecognizedTool: unrecognizedTool || undefined };
 	}
 
 	return null;
+}
+
+/**
+ * Everything that is true regardless of which harness wrote the entry.
+ * Operates only on the normalized AssistantTurn / ParsedBlock vocabulary.
+ */
+function buildInteraction(
+	turn: import("./harness/types.ts").AssistantTurn,
+	adapter: import("./harness/types.ts").HarnessParseAdapter,
+	thinkingLevel?: string,
+	compactionTokensBefore?: number,
+	afterCompaction?: boolean,
+	currentModel?: string
+): Interaction {
+	const usage = turn.usage;
+
+	// Resolve effective model: harnesses that track the model via model_change
+	// events rather than per message (Pi, #128) leave turn.model undefined and
+	// the tracked currentModel fills in. A per-message model always wins.
+	const effectiveModel = turn.model || currentModel || "";
+
+	// Parse timestamp first — used below for DeepSeek peak pricing
+	let timestamp = 0;
+	if (typeof turn.timestamp === "string") {
+		timestamp = new Date(turn.timestamp).getTime();
+	} else if (typeof turn.timestamp === "number") {
+		timestamp = turn.timestamp;
+	}
+
+	const hasTokens =
+		usage.input_tokens > 0 ||
+		usage.output_tokens > 0 ||
+		usage.cache_read_input_tokens > 0 ||
+		usage.cache_creation_input_tokens > 0 ||
+		usage.reasoning_tokens > 0;
+
+	// Prefer a harness-native per-turn cost, but fall through to manual
+	// calculation when it is 0 while tokens were actually consumed (e.g. DeepSeek
+	// pricing not yet supported by Pi's internal cost tracker).
+	let cost = 0;
+	const nativeCost = usage.nativeCost;
+	if (nativeCost !== null && !(nativeCost === 0 && hasTokens)) {
+		cost = nativeCost;
+	} else if (effectiveModel && hasTokens) {
+		cost = calculateClaudeCost(effectiveModel, {
+			input_tokens: usage.input_tokens,
+			output_tokens: usage.output_tokens,
+			cache_creation_input_tokens: usage.cache_creation_input_tokens,
+			cache_read_input_tokens: usage.cache_read_input_tokens,
+			cache_creation: usage.cache_creation,
+			reasoning_tokens: usage.reasoning_tokens,
+		}, timestamp);
+	}
+
+	// Observed cache TTL class (#95): the transcript records which ephemeral
+	// tier cache writes actually used — authoritative over any model-name guess.
+	const cacheCreation = usage.cache_creation || {};
+	const cacheTtl: "1h" | "5m" | undefined =
+		(cacheCreation.ephemeral_1h_input_tokens || 0) > 0 ? "1h"
+		: (cacheCreation.ephemeral_5m_input_tokens || 0) > 0 ? "5m"
+		: undefined;
+
+	// Observed cache miss (#152): the whole prefix was re-primed rather than read.
+	// Decided HERE, against normalized usage, not later against the tag file — the
+	// compaction/recache meter-split (#52 Phase 3) rewrites cr and cw across two
+	// lines, so by tag-read time neither line can be told apart from a partial
+	// re-prime. This is the only point where the original pair is still intact.
+	const cacheMiss =
+		usage.cache_read_input_tokens === 0 && usage.cache_creation_input_tokens > 0
+			? true : undefined;
+
+	// Server-side tool requests: per-request billed, separate meter from tokens.
+	const serverToolRequests = usage.server_tool_use || {};
+	const serverToolCost = calculateServerToolCost(
+		effectiveModel,
+		serverToolRequests.web_search_requests || 0,
+		serverToolRequests.web_fetch_requests || 0
+	);
+
+	// Surge-pricing tag (#119): mark interactions that fell within DeepSeek peak hours
+	const surgePriced = effectiveModel.toLowerCase().includes("deepseek")
+		? getDeepSeekPeakMultiplier(timestamp) > 1.0 : undefined;
+
+	const files: { path: string; action: "read" | "write" }[] = [];
+	const commands: string[] = [];
+	const texts: string[] = [];
+	const toolCats = new Set<Category>();
+	let unrecognizedTool = false;
+
+	for (const rawBlock of turn.content) {
+		const block = adapter.readBlock(rawBlock);
+		if (!block) continue;
+		if (block.kind === "text") {
+			texts.push(block.text);
+			continue;
+		}
+		// Tool block: the adapter mapped its own argument names to files and
+		// commands; the shared side owns what those mean.
+		if (block.files.length > 0) files.push(...block.files);
+		for (const command of block.commands) {
+			commands.push(command);
+			extractFilesFromBashCommand(command, files);
+		}
+		if (!block.handled && !mapToolToCategory(block.name, toolCats)) {
+			unrecognizedTool = true;
+		}
+	}
+
+	return { timestamp, cost, messageId: turn.messageId, requestId: turn.requestId,
+		model: effectiveModel || undefined,
+		inputTokens: usage.input_tokens,
+		outputTokens: usage.output_tokens,
+		cacheReadTokens: usage.cache_read_input_tokens,
+		cacheWriteTokens: usage.cache_creation_input_tokens,
+		reasoningTokens: usage.reasoning_tokens,
+		webSearchRequests: (serverToolRequests.web_search_requests || 0) as number,
+		webFetchRequests: (serverToolRequests.web_fetch_requests || 0) as number,
+		serverToolCost,
+		surgePriced,
+		thinkingLevel,
+		compactionTokensBefore,
+		cacheTtl,
+		cacheMiss,
+		afterCompaction: (afterCompaction || compactionTokensBefore !== undefined) || undefined,
+		cacheWrite1hTokens: (cacheCreation.ephemeral_1h_input_tokens || 0) > 0
+			? cacheCreation.ephemeral_1h_input_tokens : undefined,
+		iterations: usage.iterations,
+		isSidechain: turn.isSidechain || undefined,
+		files, commands, texts,
+		toolCats: toolCats.size > 0 ? [...toolCats] : undefined,
+		unrecognizedTool: unrecognizedTool || undefined };
 }
 
 // ---
@@ -324,16 +307,65 @@ export const INTERRUPT_PREFIX = "[Request interrupted by user";
 
 /** True when a transcript entry is a user interrupt marker — stamps the
  *  PRECEDING assistant interaction as interrupted (whole cost = waste).
- *  Only user-entry content counts; the literal inside tool results or
- *  assistant text must not reclassify anything. */
+ *  Recognition now lives behind the harness seam (#156); this stays exported
+ *  because the daemon and tests call it directly. */
 export function isInterruptMarker(entry: any): boolean {
-	if (!entry || entry.type !== "user") return false;
-	const c = entry.message?.content;
-	if (typeof c === "string") return c.includes(INTERRUPT_PREFIX);
-	if (Array.isArray(c)) {
-		return c.some((b: any) => b?.type === "text" && typeof b.text === "string" && b.text.includes(INTERRUPT_PREFIX));
+	return readControlEntry(entry)?.kind === "interrupt";
+}
+
+/**
+ * Recognize a stream-control entry — a non-assistant line that changes how
+ * following turns are read (model changes, thinking level, compaction markers,
+ * interrupts).
+ *
+ * Every registered adapter is consulted, not just the one whose assistant
+ * schema matched: control markers are not mutually exclusive across harnesses,
+ * and the pre-seam code applied all of them to every transcript. Preserving
+ * that is what makes the seam a refactor rather than a behaviour change.
+ */
+export function readControlEntry(entry: any): ControlSignal | null {
+	if (!entry) return null;
+	for (const adapter of getParseAdapters()) {
+		const signal = adapter.readControlEntry(entry);
+		if (signal) return signal;
 	}
-	return false;
+	return null;
+}
+
+/** Mutable per-file state threaded through a sequential transcript read. */
+export interface ParseStreamState {
+	thinkingLevel?: string;
+	model?: string;
+	compactionTokensBefore?: number;
+	afterCompaction: boolean;
+}
+
+/** A fresh stream state — one per transcript read. */
+export function newParseStreamState(): ParseStreamState {
+	return { afterCompaction: false };
+}
+
+/**
+ * Apply a control signal to the running stream state.
+ * Returns true when the entry was a control entry and must not be parsed as an
+ * assistant turn. `onInterrupt` stamps the preceding interaction, which the
+ * caller owns (the file reader has a list; the daemon has a pending queue).
+ */
+export function applyControlEntry(
+	entry: any,
+	state: ParseStreamState,
+	onInterrupt: () => void
+): boolean {
+	const signal = readControlEntry(entry);
+	if (!signal) return false;
+	switch (signal.kind) {
+		case "thinking-level": state.thinkingLevel = signal.level; break;
+		case "model": state.model = signal.modelId; break;
+		case "compaction": state.compactionTokensBefore = signal.tokensBefore; break;
+		case "after-compaction": state.afterCompaction = true; break;
+		case "interrupt": onInterrupt(); break;
+	}
+	return true;
 }
 
 /**
@@ -404,52 +436,26 @@ export function splitOverheadCost(
 
 export function parseSessionFile(filePath: string): Interaction[] {
 	const interactions: Interaction[] = [];
-	let currentThinkingLevel: string | undefined;
-	let currentModel: string | undefined;
-	let lastCompactionTokensBefore: number | undefined;
-	let pendingAfterCompaction = false;
+	const state = newParseStreamState();
 	try {
 		const content = fs.readFileSync(filePath, "utf8");
 		for (const line of content.split("\n")) {
 			if (!line.trim()) continue;
 			try {
 				const entry = JSON.parse(line);
-				// Track thinking level changes (#77)
-				if (entry.type === "thinking_level_change" && entry.thinkingLevel) {
-					currentThinkingLevel = entry.thinkingLevel;
-					continue;
-				}
-				// Track model from model_change events for Pi sessions (#128).
-				// Pi does not store the model on each message; it emits
-				// model_change entries with provider + modelId.
-				if (entry.type === "model_change" && entry.modelId) {
-					currentModel = entry.modelId;
-					continue;
-				}
-				// Track compaction entries — stamp tokensBefore onto the next
-				// assistant interaction so cost/token summaries can surface
-				// how much context was freed (#90).
-				if (entry.type === "compaction" && typeof entry.tokensBefore === "number") {
-					lastCompactionTokensBefore = entry.tokensBefore;
-					continue;
-				}
-				// Claude Code compact summary marker → flag the next assistant
-				// interaction for the compaction meter-split (#52 Phase 3).
-				if (entry.isCompactSummary === true) {
-					pendingAfterCompaction = true;
-					continue;
-				}
-				// User interrupt marker → the PRECEDING assistant turn was
-				// killed; its whole cost is discarded work (#52 Phase 3).
-				if (isInterruptMarker(entry)) {
+				// Stream-control entries (thinking level #77, model_change #128,
+				// compaction #90, compact summary + interrupt #52 Phase 3) are
+				// recognized per harness and applied here.
+				const isControl = applyControlEntry(entry, state, () => {
 					if (interactions.length > 0) interactions[interactions.length - 1].interrupted = true;
-					continue;
-				}
-				const interaction = parseEntryToInteraction(entry, currentThinkingLevel, lastCompactionTokensBefore, pendingAfterCompaction, currentModel);
+				});
+				if (isControl) continue;
+
+				const interaction = parseEntryToInteraction(entry, state.thinkingLevel, state.compactionTokensBefore, state.afterCompaction, state.model);
 				if (interaction) {
 					interactions.push(interaction);
-					lastCompactionTokensBefore = undefined; // consumed by this interaction
-					pendingAfterCompaction = false;
+					state.compactionTokensBefore = undefined; // consumed by this interaction
+					state.afterCompaction = false;
 				}
 			} catch {
 				// Skip unparseable lines (partial writes, non-JSON)

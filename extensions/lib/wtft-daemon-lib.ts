@@ -12,6 +12,7 @@ import {
 	buildWtftLines
 } from "./wtft-shared.js";
 import { splitOverheadCost } from "./wtft-parser.js";
+import { getDiscoveries } from "./harness/registry.ts";
 import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
 export interface WatchSettings {
 	interval: string;
@@ -231,33 +232,125 @@ export function serializeClassifiedWithOverheadSplit(interaction: Interaction, p
 	return serializeClassified(remainder) + serializeClassified(overheadLine);
 }
 
+/**
+ * Current-version tag file for this transcript basename in a *sibling* project
+ * dir (#155). A session that moves — worktree enter/exit, or any switch that
+ * changes its project dir — leaves its daemon writing to the tag path it opened
+ * at startup, because `--watch` binds fs.watch once and never re-resolves. So
+ * the tag file can legitimately live beside a different copy of the project dir
+ * than the transcript does.
+ *
+ * Only the current-version filename is matched: stale-version tags elsewhere
+ * are derived caches that a version bump is meant to regenerate. Basenames are
+ * session UUIDs, so a cross-dir match cannot collide.
+ */
+function findSiblingTagPath(sessionPath: string): string | null {
+	const sessionBase = path.basename(sessionPath);
+	const wanted = sessionBase + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`;
+	// The project-dir parent: …/<projects-root>/<project-slug>/<session>.jsonl
+	const projectsRoot = path.dirname(path.dirname(sessionPath));
+	let best: { path: string; mtimeMs: number } | null = null;
+	try {
+		for (const slug of fs.readdirSync(projectsRoot)) {
+			const candidate = path.join(projectsRoot, slug, "wtft-tags", wanted);
+			try {
+				const stat = fs.statSync(candidate);
+				if (!stat.isFile()) continue;
+				if (!best || stat.mtimeMs > best.mtimeMs) best = { path: candidate, mtimeMs: stat.mtimeMs };
+			} catch { /* not present in this dir */ }
+		}
+	} catch { /* projects root unreadable */ }
+	return best ? best.path : null;
+}
+
+/**
+ * Where this session's tag file is, resolved in this order:
+ *   1. current-version tag in the session's own dir;
+ *   2. current-version tag in a sibling project dir (the moved-session case);
+ *   3. any-version tag in the own dir, newest mtime — never readdir order,
+ *      which made multi-version dirs a coin flip (#95);
+ *   4. the default (current-version path in the own dir).
+ *
+ * Sibling outranks stale-own-dir deliberately: #155 measured a stale v2.6.1
+ * 125-line tag in the main clone while the fuller v2.7.0 356-line tag sat in
+ * the worktree's project dir. The more complete artifact should win rather than
+ * be stranded.
+ */
 export function getTagPath(sessionPath: string): string {
 	const sessionDir = path.dirname(sessionPath);
 	const sessionBase = path.basename(sessionPath);
 	const tagsDir = path.join(sessionDir, "wtft-tags");
 	const defaultPath = path.join(tagsDir, sessionBase + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
-	// Prefer the exact current-version file; else newest mtime — never readdir
-	// order, which made multi-version dirs a coin flip (#95).
+
+	let newest: { path: string; mtimeMs: number } | null = null;
 	try {
 		const prefix = sessionBase + ".wtft-tag.v";
-		let newest: { path: string; mtimeMs: number } | null = null;
 		for (const f of fs.readdirSync(tagsDir)) {
 			if (!f.startsWith(prefix) || !f.endsWith(".jsonl")) continue;
 			const full = path.join(tagsDir, f);
-			if (full === defaultPath) return defaultPath;
+			if (full === defaultPath) return defaultPath;                      // (1)
 			try {
 				const mtimeMs = fs.statSync(full).mtimeMs;
 				if (!newest || mtimeMs > newest.mtimeMs) newest = { path: full, mtimeMs };
 			} catch {}
 		}
-		if (newest) return newest.path;
 	} catch {}
-	return defaultPath;
+
+	const sibling = findSiblingTagPath(sessionPath);                         // (2)
+	if (sibling) return sibling;
+
+	if (newest) return newest.path;                                          // (3)
+	return defaultPath;                                                      // (4)
 }
 
+/**
+ * The current-version tag path a *writer* should open — own dir if it already
+ * holds one, else a sibling project dir's (#155), else the own-dir default.
+ *
+ * Never returns a stale-version filename, unlike getTagPath()'s reader
+ * fallback: the daemon owns the version protocol, and writing into an old
+ * version's file is exactly what the version bump exists to stop (#95).
+ */
+export function getCurrentVersionTagPath(sessionPath: string): string {
+	const sessionBase = path.basename(sessionPath);
+	const own = path.join(
+		path.dirname(sessionPath),
+		"wtft-tags",
+		sessionBase + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`
+	);
+	if (fs.existsSync(own)) return own;
+	return findSiblingTagPath(sessionPath) || own;
+}
+
+/**
+ * Singleton key for a session's daemon.
+ *
+ * Keyed on the transcript *basename*, not the full path (#155). A worktree
+ * switch moves the transcript between project dirs; a path-keyed hash would
+ * change under it, so a `wtft` run from the new directory would not recognise
+ * the still-live daemon and would spawn a second one on the same transcript.
+ * The basename is a session UUID (Claude Code) or `<timestamp>_<uuid>` (Pi) —
+ * unique per session and invariant under a move.
+ */
 export function getDaemonPidPath(sessionPath: string): string {
-	const sessionHash = createHash("sha256").update(sessionPath).digest("hex").slice(0, 12);
+	const sessionHash = createHash("sha256").update(path.basename(sessionPath)).digest("hex").slice(0, 12);
 	return path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
+}
+
+/**
+ * Re-resolve a session transcript that vanished from its known path, by asking
+ * every registered harness where that session id lives now (#155, #156).
+ * Returns the new path, or null when the session is genuinely gone.
+ */
+export function resolveMovedSession(sessionPath: string): string | null {
+	const sessionId = path.basename(sessionPath).replace(/\.jsonl$/i, "");
+	for (const discovery of getDiscoveries()) {
+		try {
+			const found = discovery.resolveSessionById(sessionId);
+			if (found && found !== sessionPath && fs.existsSync(found)) return found;
+		} catch { /* a misbehaving harness must not break the daemon */ }
+	}
+	return null;
 }
 
 /** Threshold for "idle" state: 2m2s — a classic TV commercial break. */

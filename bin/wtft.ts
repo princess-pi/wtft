@@ -47,6 +47,7 @@ import {
 	isModelPriced,
 	loadUserPricing,
 	getUserPricingPath,
+	loadExternalHarnesses,
 	type WatchSettings,
 	type Interaction,
 	type ModelPricing,
@@ -176,6 +177,10 @@ async function main() {
 	// cost math in this process (tree-navigation divergence, renderers).
 	// The daemon loads it independently for tag-file cost computation.
 	loadUserPricing();
+
+	// Out-of-tree harnesses (#156) — config-declared modules must register
+	// before any discovery. Built-ins need no load step.
+	await loadExternalHarnesses();
 
 	// Early exits for display-only flags (#94)
 	if (opts.showHelp) {

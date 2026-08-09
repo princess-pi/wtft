@@ -1,11 +1,14 @@
 /**
  * @package princess-pi-packages
  * @module session-selector
- * @description Session discovery and interactive TTY selector for Pi and Claude Code session logs.
+ * @description Cross-harness session discovery fan-out and interactive TTY selector.
  *
- * Provides session discovery (walking Pi and Claude Code session directories),
+ * Provides session discovery (delegated to harness/<id>/discovery.ts, #156),
  * session summary extraction (turns + cost from classified wtft-tag files),
  * and an interactive TTY keyboard-navigable session picker.
+ *
+ * No harness layout knowledge lives here. Adding a harness must not require
+ * editing this file — see docs/adding-a-harness.md.
  *
  * This is a cross-harness module: consumed by both the WTFT CLI (via esbuild bundle)
  * and the Pi WTFT extension (via tsx import).
@@ -13,7 +16,6 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as os from "node:os";
 
 // ---
 // CONSTANTS (mirrored from wtft-daemon-lib.ts — session-selector is a
@@ -22,124 +24,68 @@ import * as os from "node:os";
 
 const TAGGER_VERSION = "2.3.8";
 
-import { buildDisplayPath, formatRelativeTime } from "./session-path-shortener.ts";
+import { formatRelativeTime } from "./session-path-shortener.ts";
 import { formatCost } from "./wtft-shared.ts";
 import { enterRawStdin, showCursor, hideCursor, clearPreviousLines, visualLineCount } from "./tty-helpers.ts";
+import { getDiscoveries, getHarness, getHarnesses } from "./harness/registry.ts";
+import type { SessionCandidate } from "./harness/types.ts";
 
 // ---
 // TYPES
 // ---
 
-export interface SessionCandidate {
-	path: string;
-	harness: "pi" | "claude-code";
-	timestamp: number; // mtime of file
-	name: string;      // e.g. "2026-07-02T01-38-34-253Z_019f207a-4e8d-7527-8290-deb8bc53268a.jsonl"
-	displayPath: string; // e.g. "~/g-p/princess-pi-packages/2026-07-02...268a"
-}
+// SessionCandidate now lives behind the harness seam (#156) — re-exported here
+// so existing importers of session-selector are unaffected.
+export type { SessionCandidate } from "./harness/types.ts";
 
 // ---
 // SESSION AUTO-DISCOVERY
 // ---
 
 /**
- * Discover Pi and/or Claude Code session files by walking the standard directory
- * structures. Returns candidates sorted by modification time descending (newest first).
+ * Discover session logs across every enabled harness, newest first.
  *
- * Pi session dir: ~/.pi/agent/sessions/
- * Claude session dir: ~/.claude/projects/<cwd-slug>/sessions/ (and direct parent)
+ * Layout knowledge lives in harness/<id>/discovery.ts (#156); this function
+ * only fans out and merges. Each harness applies the union rule internally —
+ * a transcript is a candidate when its project-dir slug matches the target cwd
+ * OR its own recorded last-cwd does — which is what makes a session that moved
+ * (worktree switch, or an ordinary `cd` into a subdir) visible from where it
+ * now lives, without dropping any session the old cwd-slug-only scan found.
  *
- * @param harness - Target harness: "pi", "claude-code", or "auto" (both)
- * @returns Sorted array of session candidates
+ * @param harness - Target harness id, or "auto" for all enabled harnesses
+ * @param cwdOverride - Directory to scope to; each harness decides what a
+ *   missing override means (Claude Code: process.cwd(); Pi: no filter)
+ * @returns Candidates sorted by modification time descending (newest first)
  */
 export function discoverSessions(
-	harness: "pi" | "claude-code" | "auto" = "auto",
+	harness: string = "auto",
 	cwdOverride?: string
 ): SessionCandidate[] {
-	const piSessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions");
-
-	let claudeSessionsDirs: string[] = [];
-	const claudeProjectsDir = path.join(os.homedir(), ".claude", "projects");
-	if (fs.existsSync(claudeProjectsDir)) {
-		// Build the CWD slug the same way Claude encodes it: replace / or \ with -
-		const resolvedCwd = cwdOverride ? path.resolve(cwdOverride) : process.cwd();
-		const cwdSlug = resolvedCwd.replace(/[/\\]/g, "-");
-		const sessionsSubdir = path.join(claudeProjectsDir, cwdSlug, "sessions");
-		const directDir = path.join(claudeProjectsDir, cwdSlug);
-		if (fs.existsSync(sessionsSubdir)) claudeSessionsDirs.push(sessionsSubdir);
-		if (fs.existsSync(directDir)) claudeSessionsDirs.push(directDir);
-	}
+	const targets = harness === "auto"
+		? getDiscoveries()
+		: [getHarness(harness)?.discovery].filter((d): d is NonNullable<typeof d> => !!d);
 
 	const candidates: SessionCandidate[] = [];
-
-	const walk = (dir: string, type: "pi" | "claude-code") => {
-		const files = fs.readdirSync(dir);
-		for (const f of files) {
-			const fullPath = path.join(dir, f);
-			const stat = fs.statSync(fullPath);
-			if (stat.isDirectory()) {
-				// Avoid recursing into subagent/tool result/memory/wtft-tags directories
-				if (
-					f !== "subagents" &&
-					f !== "tool-results" &&
-					f !== "memory" &&
-					f !== "wtft-tags"
-				) {
-					walk(fullPath, type);
-				}
-			} else if (f.endsWith(".jsonl")) {
-				// Compute the project slug from the parent directory
-				let slug: string;
-				if (type === "pi") {
-					slug = path.basename(dir);
-				} else {
-					// Claude sessions may be in a 'sessions/' subdir
-					const base = path.basename(dir);
-					slug = base === "sessions" ? path.basename(path.dirname(dir)) : base;
-				}
-				candidates.push({
-					path: fullPath,
-					harness: type,
-					timestamp: stat.mtimeMs,
-					name: f,
-					displayPath: buildDisplayPath(f, slug, type),
-				});
-			}
+	for (const discovery of targets) {
+		try {
+			candidates.push(...discovery.discover(cwdOverride ?? null));
+		} catch {
+			// A misbehaving harness must not take the selector down with it.
 		}
-	};
-
-	// Pi session directory slug for CWD filtering.
-	// Pi directory names look like "--home-princess-pi-git-projects-princess-pi-packages--"
-	// which is "--" + cwdSlug + "--". Match by containment.
-	const piCwdSlug = cwdOverride ? path.resolve(cwdOverride).replace(/[/\\]/g, "-") : null;
-
-	try {
-		if (harness === "auto" || harness === "pi") {
-			if (fs.existsSync(piSessionsDir)) {
-				// When --dir is specified, only include Pi sessions from the
-				// matching project directory, not all Pi sessions globally.
-				if (piCwdSlug) {
-					const entries = fs.readdirSync(piSessionsDir, { withFileTypes: true });
-					for (const entry of entries) {
-						if (entry.isDirectory() && entry.name.includes(piCwdSlug)) {
-							walk(path.join(piSessionsDir, entry.name), "pi");
-						}
-					}
-				} else {
-					walk(piSessionsDir, "pi");
-				}
-			}
-		}
-		if (harness === "auto" || harness === "claude-code") {
-			for (const dir of claudeSessionsDirs) {
-				if (fs.existsSync(dir)) walk(dir, "claude-code");
-			}
-		}
-	} catch {
-		// Silently ignore permission errors or missing directories
 	}
 
 	return candidates.sort((a, b) => b.timestamp - a.timestamp);
+}
+
+/**
+ * Display label for a harness id, from the harness itself — never a literal.
+ * Falls back to the raw id so an unregistered harness still renders.
+ */
+export function harnessLabel(id: string): string {
+	for (const h of getHarnesses()) {
+		if (h.id === id) return h.discovery.label;
+	}
+	return id;
 }
 
 // ---
@@ -295,12 +241,12 @@ export async function selectSessionPrompt(
 				const c = candidates[i];
 				const stats = getSessionSummary(c.path);
 				const relTime = formatRelativeTime(c.timestamp);
-				const harnessLabel = c.harness === "claude-code" ? "Claude" : "Pi";
+				const label = harnessLabel(c.harness);
 				const costStr = formatCostOrUnknown(stats).replace(/\x1b\[[0-9;]*m/g, "");
 				const turnStr = formatTurnsOrLines(stats);
 				const tagStr = formatTagSuffix(stats).replace(/\x1b\[[0-9;]*m/g, "");
 				console.log(
-					`  [${i + 1}] ${c.displayPath.padEnd(maxPathLen)}  ${costStr}  ${turnStr}  [${harnessLabel.padEnd(6)}]  ${relTime.padEnd(6)}  ${tagStr}`
+					`  [${i + 1}] ${c.displayPath.padEnd(maxPathLen)}  ${costStr}  ${turnStr}  [${label.padEnd(6)}]  ${relTime.padEnd(6)}  ${tagStr}`
 				);
 			}
 			console.log(
@@ -347,11 +293,11 @@ export async function selectSessionPrompt(
 				const highlight = isSelected ? "\x1b[1m\x1b[36m" : "";
 				const reset = isSelected ? "\x1b[0m" : "";
 
-				const harnessLabel = c.harness === "claude-code" ? "Claude" : "Pi";
+				const label = harnessLabel(c.harness);
 				const costStr = formatCostOrUnknown(stats);
 				const turnStr = formatTurnsOrLines(stats);
 				const tagStr = formatTagSuffix(stats);
-				out += `${prefix}${highlight}${c.displayPath.padEnd(maxPathLen)}${reset}  ${costStr}  ${turnStr}  [${harnessLabel.padEnd(6)}]  \x1b[90m${relTime.padEnd(6)}\x1b[0m  ${tagStr}\n`;
+				out += `${prefix}${highlight}${c.displayPath.padEnd(maxPathLen)}${reset}  ${costStr}  ${turnStr}  [${label.padEnd(6)}]  \x1b[90m${relTime.padEnd(6)}\x1b[0m  ${tagStr}\n`;
 			}
 			// Count visual (wrapped) lines to move cursor exactly that far on re-render
 			const cols = process.stdout.columns || 80;

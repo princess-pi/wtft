@@ -78,6 +78,46 @@ interaction of a *rendered slice* is not necessarily the first of the *session*,
 mid-session expiry landing at a window edge would be silently dropped. One honest divider beats
 a special case that can hide a real event.
 
+### Rename: "Cache Expired" → "Cache Miss"
+
+`Expired` asserts a **cause** — a TTL elapsed — that observation cannot attest to. The
+`d730d9c3` model-switch turn is the counterexample: a genuine full re-prime 539 seconds in,
+with nothing expired. The observed signal supports only the weaker, true claim: this bin
+contains a turn that paid a full re-prime.
+
+Renaming makes the label state what was measured and stops the divider from making a claim the
+new implementation deliberately gave up the ability to check. Touch points: the divider string
+at `wtft-renderer.ts:1214` and its description in `docs/EXT_WTFT.html:164`.
+
+### Subagent cold starts are marked too
+
+Each subagent sidechain runs against its own cache namespace, so its first turn is a genuine
+miss and now draws a divider on the parent timeline.
+
+`Interaction.isSidechain` exists (`wtft-parser.ts:55`, populated at `:293` from
+`entry.isSidechain`, which subagent transcripts do carry) and could gate it out — but it is
+**not in the tag-file wire format**. `serializeClassified` / `classifiedToInteraction`
+(`wtft-daemon-lib.ts:46,94`) never round-trip the field, so the renderer, which reads from the
+tag file, sees `undefined` for every interaction. Excluding sidechains therefore means adding a
+wire field *and* bumping `WTFT_TAGGER_VERSION` to re-tag every session.
+
+Measured against that cost, on `a578` — the most subagent-heavy session on this machine, 31
+sidechain transcripts across two workflow bursts — its v2.6.1 tag file yields:
+
+| | count |
+|---|---:|
+| interactions with `cr=0, cw>0` | 10 |
+| distinct 1h bins containing one | **6** |
+| distinct 1d bins containing one | **2** |
+
+Six dividers on a worst-case session is information, not noise, and every one of them marks
+real re-prime spend that already shows up in that bin's cost. Adding a wire-format field and a
+full re-tag to suppress six lines is a bad trade and cuts against the simplification this issue
+exists to make.
+
+**Decision: no wire-format change, no `WTFT_TAGGER_VERSION` bump.** Recorded so the omission is
+deliberate; revisit only if a session shows the dividers actually crowding the render.
+
 ### Road not taken: partial re-primes
 
 `cr === 0` does not catch a *partial* re-prime, where a small prefix survives and the bulk is
@@ -97,7 +137,7 @@ deserves one at all. Out of scope; recorded so the omission is deliberate.
 `tests/wtft-issue-152-cache-expiry.test.ts`, against `buildWtftLines`:
 
 1. **Observed miss draws a divider** — an interaction with `cr=0, cw>0` yields a
-   `Cache Expired` line.
+   `Cache Miss` line (and no `Cache Expired` line survives anywhere).
 2. **All-hit renders none** — every interaction `cr>0` yields no divider.
 3. **No cache activity renders none** — `cr=0, cw=0` (the #121 mock shape) yields no divider,
    guarding against a naive `cr === 0` test.
@@ -111,8 +151,10 @@ deserves one at all. Out of scope; recorded so the omission is deliberate.
 Regression: `tests/wtft-issue-121.test.ts` must stay green unchanged. Its mocks use
 `cacheReadTokens: 0, cacheWriteTokens: 0`, which case 3 covers.
 
-No `WTFT_TAGGER_VERSION` bump — `cacheReadTokens` / `cacheWriteTokens` are already tagged.
-This is renderer-only; existing tag files re-render correctly.
+No `WTFT_TAGGER_VERSION` bump — `cr` / `cw` are already in the tag wire format
+(`wtft-daemon-lib.ts:63-64`). This is renderer-only; existing tag files re-render correctly.
+See "Subagent cold starts" above for the one change that *would* have forced a bump, and why
+it was declined.
 
 ---
 
@@ -163,6 +205,7 @@ The Pi TUI path (`extensions/wtft.ts:464`) is untouched and keeps working.
 
 - `bun run build` — regenerate `bin/*.mjs`; tests import from `bin/wtft.mjs`.
 - `bun run typecheck` — TS7 clean.
+- `docs/EXT_WTFT.html:164` reconciled to the observed rule and the new label (Step 5).
 - `node --experimental-strip-types tests/wtft-issue-152-cache-expiry.test.ts`
 - `node --experimental-strip-types tests/wtft-issue-153-pager-cli.test.ts`
 - `node --experimental-strip-types tests/wtft-issue-121.test.ts` (regression)

@@ -179,7 +179,9 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
 // 2.6.0 (#139/#140/#141): Claude 5 family pricing + user pricing registry
 // change baked-in costs, and workflow subagent discovery adds transcripts —
 // stale tags carry wrong totals and must re-parse.
-export const WTFT_TAGGER_VERSION = "2.6.0";
+// 2.6.1 (#146): 1h-TTL cache writes re-priced from 2.5x to 2.0x input for
+// registry models — v2.6.0 tags overbill Claude Code sessions.
+export const WTFT_TAGGER_VERSION = "2.6.1";
 
 /**
  * Serialize one interaction to its classified tag-file line(s) (#52 Phase 3).

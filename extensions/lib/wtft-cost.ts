@@ -286,9 +286,14 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 	// that don't charge for cache writes, e.g. GPT-5.x via OpenAI Responses).
 	// Non-registry models: use the legacy 1.25x/2.00x input-price heuristic.
 	if (registryPricing) {
+		// 1h-TTL writes bill at 2x BASE INPUT (API rule), not 2x the 5m rate —
+		// doubling cacheWritePrice (1.25x input) overbilled 1h writes by 25%
+		// (#146; Claude Code caches on the 1h tier, so every CC session read
+		// high). Free-cache-write models stay free.
+		const cw1hPrice = cacheWritePrice === 0 ? 0 : inputPrice * 2.00;
 		cacheWriteCost =
 			cw5m * (cacheWritePrice / 1000000) +
-			cw1h * (cacheWritePrice * 2.00 / 1000000) +
+			cw1h * (cw1hPrice / 1000000) +
 			cwFlat * (cacheWritePrice / 1000000);
 	} else if (m.includes("deepseek")) {
 		cacheWriteCost = 0;

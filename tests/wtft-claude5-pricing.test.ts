@@ -36,12 +36,33 @@ describe("Claude 5 family pricing (#139)", () => {
 		assert.strictEqual(calculateClaudeCost("claude-fable-5", { cache_creation_input_tokens: MTOK }), 12.50);
 	});
 
-	it("bills claude-fable-5 1h-TTL cache writes at 2x the 5m rate ($25/MTok)", () => {
+	it("bills claude-fable-5 1h-TTL cache writes at 2x base input ($20/MTok, #146)", () => {
+		// API rule: 5m write = 1.25x input, 1h write = 2.0x input. NOT 2x the
+		// 5m rate — that's 2.5x input and overbilled Claude Code sessions by
+		// 25% on cache writes (this test wrongly pinned $25/MTok pre-#146).
 		const cost = calculateClaudeCost("claude-fable-5", {
 			cache_creation_input_tokens: MTOK,
 			cache_creation: { ephemeral_1h_input_tokens: MTOK },
 		});
-		assert.strictEqual(cost, 25.00);
+		assert.strictEqual(cost, 20.00);
+	});
+
+	it("bills claude-opus-5 1h-TTL cache writes at 2x base input ($10/MTok, #146)", () => {
+		const cost = calculateClaudeCost("claude-opus-5", {
+			cache_creation_input_tokens: MTOK,
+			cache_creation: { ephemeral_1h_input_tokens: MTOK },
+		});
+		assert.strictEqual(cost, 10.00);
+	});
+
+	it("keeps free-cache-write registry models free on 1h writes (#146)", () => {
+		// gpt-5.4 has cacheWrite: 0 (OpenAI Responses doesn't charge writes) —
+		// a naive input*2 derivation would have started charging them.
+		const cost = calculateClaudeCost("gpt-5.4", {
+			cache_creation_input_tokens: MTOK,
+			cache_creation: { ephemeral_1h_input_tokens: MTOK },
+		});
+		assert.strictEqual(cost, 0);
 	});
 
 	it("prices claude-mythos-5 identically to claude-fable-5", () => {

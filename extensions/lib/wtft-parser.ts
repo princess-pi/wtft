@@ -42,6 +42,10 @@ export interface Interaction {
 	/** Observed prompt-cache TTL class from usage.cache_creation — data beats
 	 *  the model-name guess for the idle countdown (#95). */
 	cacheTtl?: "1h" | "5m";
+	/** Whole prefix re-primed instead of read (cache_read 0, cache_creation > 0).
+	 *  Set from raw usage at parse time and carried through the meter-split, which
+	 *  otherwise destroys the signal; drives the "Cache Miss" divider (#152). */
+	cacheMiss?: boolean;
 	/** Turn was killed by the user — whole cost is discarded work (#52 Phase 3). */
 	interrupted?: boolean;
 	/** Turn immediately follows a compact summary — its cache_write component
@@ -205,6 +209,16 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string, comp
 			: (cacheCreation.ephemeral_5m_input_tokens || 0) > 0 ? "5m"
 			: undefined;
 
+		// Observed cache miss (#152): the whole prefix was re-primed rather than read.
+		// Decided HERE, against raw usage, not later against the tag file — the
+		// compaction/recache meter-split (#52 Phase 3) rewrites cr and cw across two
+		// lines, so by tag-read time neither line can be told apart from a partial
+		// re-prime. This is the only point where the original pair is still intact.
+		const cacheMiss =
+			(usage.cache_read_input_tokens || 0) === 0 &&
+			(usage.cache_creation_input_tokens || 0) > 0
+				? true : undefined;
+
 		// Server-side tool requests: per-request billed, separate meter from tokens.
 		// Claude Code surfaces web_search / web_fetch via usage.server_tool_use (#73).
 		const serverToolRequests = usage.server_tool_use || {};
@@ -286,6 +300,7 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string, comp
 			thinkingLevel,
 			compactionTokensBefore,
 			cacheTtl,
+			cacheMiss,
 			afterCompaction: (afterCompaction || compactionTokensBefore !== undefined) || undefined,
 			cacheWrite1hTokens: (cacheCreation.ephemeral_1h_input_tokens || 0) > 0
 				? cacheCreation.ephemeral_1h_input_tokens : undefined,

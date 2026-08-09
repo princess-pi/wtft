@@ -77,6 +77,11 @@ export function serializeClassified(interaction: Interaction): string {
 	if (interaction.unrecognizedTool) line.ut = 1;
 	// Observed cache TTL class — idle countdown uses data over model-name guess (#95)
 	if (interaction.cacheTtl) line.ttl = interaction.cacheTtl;
+	// Whole prefix re-primed — "Cache Miss" divider (#152). Carried as its own
+	// field because the meter-split below splits cr and cw onto separate lines,
+	// after which cr/cw alone can no longer distinguish a full miss from a
+	// partial re-prime.
+	if (interaction.cacheMiss) line.miss = 1;
 	// Interrupted turn — whole cost is discarded work (#52 Phase 3)
 	if (interaction.interrupted) line.ir = 1;
 	// DeepSeek surge-pricing tag (#119, #128)
@@ -114,6 +119,7 @@ export function classifiedToInteraction(obj: any): Interaction | null {
 		toolCats: obj.tc || undefined,
 		unrecognizedTool: obj.ut ? true : undefined,
 		cacheTtl: obj.ttl === "1h" || obj.ttl === "5m" ? obj.ttl : undefined,
+		cacheMiss: obj.miss ? true : undefined,
 		interrupted: obj.ir ? true : undefined,
 		surgePriced: obj.sp ? true : undefined,
 		_cat: obj.cat || undefined,
@@ -181,7 +187,10 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
 // stale tags carry wrong totals and must re-parse.
 // 2.6.1 (#146): 1h-TTL cache writes re-priced from 2.5x to 2.0x input for
 // registry models — v2.6.0 tags overbill Claude Code sessions.
-export const WTFT_TAGGER_VERSION = "2.6.1";
+// 2.7.0 (#152): adds `miss` (observed cache miss). Cannot be back-derived from
+// v2.6.1 tags — the meter-split writes cr and cw onto separate lines, so a full
+// miss and a partial re-prime are indistinguishable once tagged.
+export const WTFT_TAGGER_VERSION = "2.7.0";
 
 /**
  * Serialize one interaction to its classified tag-file line(s) (#52 Phase 3).
@@ -211,6 +220,9 @@ export function serializeClassifiedWithOverheadSplit(interaction: Interaction, p
 		model: interaction.model,
 		inputTokens: 0, outputTokens: 0, cacheReadTokens: 0,
 		cacheWriteTokens: interaction.cacheWriteTokens,
+		// Miss stays on the remainder line only — flagging both would be harmless
+		// (bins are a Set) but would misreport the overhead line as its own event.
+		cacheMiss: undefined,
 		reasoningTokens: 0, webSearchRequests: 0, webFetchRequests: 0,
 		serverToolCost: 0,
 		files: [], commands: [], texts: [],

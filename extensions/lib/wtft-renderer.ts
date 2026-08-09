@@ -844,11 +844,12 @@ export function buildWtftLines(
 		const { key, label, dateStr } = getBinInfo(interaction.timestamp, intervalConfig, turnIndex, tz);
 		totalSessionCost += interaction.cost;
 
-		// Observed cache miss (#152): the whole prefix was re-primed rather than read.
-		// Ground truth, not a TTL guess — it also catches invalidation that consumed no
-		// time at all (model switch, prompt edit), which the old clock-based rule missed.
-		// Both fields must be checked: cw === 0 means the turn did no caching at all.
-		if (interaction.cacheReadTokens === 0 && interaction.cacheWriteTokens > 0) {
+		// Observed cache miss (#152): decided at parse time against raw usage and
+		// carried here, because the meter-split makes cr/cw unreadable for this by
+		// the time the renderer sees them. Ground truth, not a TTL guess — it also
+		// catches invalidation that consumed no time (model switch, prompt edit),
+		// which the clock-based rule this replaced could never see.
+		if (interaction.cacheMiss) {
 			cacheMissBins.add(key);
 		}
 

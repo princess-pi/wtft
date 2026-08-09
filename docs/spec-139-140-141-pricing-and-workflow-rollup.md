@@ -139,7 +139,7 @@ Tests run against the built bundle (`bun run build` first), per repo convention:
 
 ## Errata — #146: 1h-TTL cache-write rate (Spec)
 
-**Status:** Spec Draft → approved for immediate code (Duppy delegated: "take #146 through the flow")
+**Status:** Code and Spec Approved (tested; reconciled to shipped code)
 **Issue:** [#146](https://github.com/duppypro/princess-pi-packages/issues/146)
 
 ### Wrong claim shipped in #139
@@ -172,8 +172,12 @@ const cw1hPrice = cacheWritePrice === 0 ? 0 : inputPrice * 2.00;
    **$20.00** (was wrongly pinned $25.00). New guards: Opus 5 1h = $10.00;
    `gpt-5.4` 1h cache-write tokens = $0 (free-cache-write preservation).
 2. All #139 suites re-run green.
-3. Manual: session `…ea42` re-parsed lands materially closer to the Claude Code
-   status line (exact delta reported at test time — the session is live and grows).
+3. Manual (result): at tagger 2.6.1, `…a578` re-parsed **$97.79 → $91.21** — the
+   −$6.58 is exactly the main transcript's 1.32M 1h-TTL tokens × $5/MTok. Subagent
+   transcripts were unaffected: their usage carries flat/5m cache-creation shapes, so
+   only 1h-tagged writes repriced. `…ea42` (live) read $86.63 all-Fable at re-parse
+   time; it had grown past the original $73.44-vs-$71.96 comparison, so status-line
+   parity is an eyeball check against the live status line rather than a fixed delta.
 
 ### Roads not taken
 

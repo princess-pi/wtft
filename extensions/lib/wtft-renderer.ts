@@ -830,6 +830,12 @@ export function buildWtftLines(
 	let totalSessionCost = 0;
 	let turnIndex = 0; // 1-based counter for turn-based binning (#121)
 
+	// Bins containing a cache miss — drives the "Cache Miss" divider (#106, #152).
+	// Populated inline below: the miss is a property of the single interaction, so
+	// unlike the TTL model this replaced it needs no neighbour comparison, no second
+	// chronological sort, and no exemption for turn-based intervals.
+	const cacheMissBins = new Set<string>();
+
 	const ALL_CATEGORIES = CATEGORY_ORDER;
 
 	for (const interaction of interactions) {
@@ -837,6 +843,14 @@ export function buildWtftLines(
 		const classification = classifyInteraction(interaction);
 		const { key, label, dateStr } = getBinInfo(interaction.timestamp, intervalConfig, turnIndex, tz);
 		totalSessionCost += interaction.cost;
+
+		// Observed cache miss (#152): the whole prefix was re-primed rather than read.
+		// Ground truth, not a TTL guess — it also catches invalidation that consumed no
+		// time at all (model switch, prompt edit), which the old clock-based rule missed.
+		// Both fields must be checked: cw === 0 means the turn did no caching at all.
+		if (interaction.cacheReadTokens === 0 && interaction.cacheWriteTokens > 0) {
+			cacheMissBins.add(key);
+		}
 
 		let bin = binMap.get(key);
 		if (!bin) {
@@ -879,33 +893,6 @@ export function buildWtftLines(
 	const sortedBins = Array.from(binMap.entries())
 		.sort((a, b) => a[0].localeCompare(b[0]))
 		.map(entry => entry[1]);
-
-	// Detect cache TTL expiry boundaries (#106). Walk interactions chronologically;
-	// when a cache write's TTL window elapses before the next interaction, mark
-	// that bin boundary for a "Cache Expired" divider line.
-	// Skipped for turn-based mode — cache TTL is time-based (#121).
-	const cacheExpiryBins = new Set<string>();
-	if (intervalConfig.type !== "turns") {
-		const sortedInteractions = [...interactions].sort(
-			(a, b) => a.timestamp - b.timestamp
-		);
-		let latestExpiry: number | null = null;
-		for (const ix of sortedInteractions) {
-			const ts = new Date(ix.timestamp).getTime();
-			if (latestExpiry !== null && ts > latestExpiry) {
-				const { key } = getBinInfo(ix.timestamp, intervalConfig, 0, tz);
-				cacheExpiryBins.add(key);
-				latestExpiry = null;
-			}
-			if (ix.cacheTtl) {
-				const ttlMs = ix.cacheTtl === "1h" ? 3600000 : 300000;
-				const expiry = ts + ttlMs;
-				if (latestExpiry === null || expiry > latestExpiry) {
-					latestExpiry = expiry;
-				}
-			}
-		}
-	}
 
 	// Apply mode conversions
 	if (mode === "cumulative") {
@@ -1208,10 +1195,11 @@ export function buildWtftLines(
 			widgetLines.push(`\x1b[90m${buildDividerLine(formatMmmDdStr(bin.dateStr))}\x1b[0m`);
 		}
 
-		// Cache TTL expiry divider (#106) — always shown, even with --no-ticks.
-		// Drawn when the cache from a previous interaction expired before this bin.
-		if (bin.key && cacheExpiryBins.has(bin.key)) {
-			widgetLines.push(`\x1b[90m${buildDividerLine("Cache Expired")}\x1b[0m`);
+		// Cache miss divider (#106, #152) — always shown, even with --no-ticks.
+		// Labelled "Miss" not "Expired": the usage block proves the re-prime happened,
+		// but says nothing about why, and TTL is only one of the causes.
+		if (bin.key && cacheMissBins.has(bin.key)) {
+			widgetLines.push(`\x1b[90m${buildDividerLine("Cache Miss")}\x1b[0m`);
 		}
 
 		const labelPart = padString(bin.label, labelWidth);

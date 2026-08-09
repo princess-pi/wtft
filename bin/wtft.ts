@@ -191,6 +191,16 @@ async function main() {
 		return;
 	}
 
+	// -p/--pager opens a Pi TUI overlay (extensions/wtft.ts) — there is no overlay to
+	// open out here, and the flag used to be parsed and silently dropped (#153). The
+	// manifest already documented it as TUI-only; only the code disagreed. Refuse
+	// rather than page: `| less -R` already does this correctly, and implementing it
+	// would commit the CLI to a subprocess, TTY detection, and the SIGPIPE path.
+	if (opts.pager) {
+		console.error("❌ Error: -p/--pager is a Pi TUI overlay and is not available in the CLI. Pipe to a pager instead: wtft … | less -R");
+		process.exit(1);
+	}
+
 	// ---
 	// DAEMON MANAGEMENT COMMANDS: passthrough to wtft-daemon
 	// ---

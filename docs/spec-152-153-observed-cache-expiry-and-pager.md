@@ -39,12 +39,12 @@ real, measured events in exactly the view a user reaches for when asking what a 
 
 ### Decision
 
-Delete the predictive walk. Derive the divider from the observation already parsed into
-`Interaction`:
+Delete the predictive walk. Derive the divider from the observation the API already records —
+`cache_read_input_tokens === 0 && cache_creation_input_tokens > 0` — evaluated **at parse time
+against raw usage** and carried on `Interaction.cacheMiss`.
 
-```
-cacheReadTokens === 0 && cacheWriteTokens > 0
-```
+The "at parse time" half is not incidental; see *The meter-split trap* below. Evaluating the
+same expression later, against tag-file `cr`/`cw`, is unsound.
 
 ### Why removal, not augmentation
 
@@ -66,6 +66,53 @@ because it compared neighbours; observation judges each interaction alone.
 
 `Interaction.cacheTtl` stays on the type — `wtft-parser.ts:200-205` sets it and the recache
 signature (#52 Phase 3) consumes it. Only the renderer's use goes.
+
+### The meter-split trap
+
+*Found at Step 4; it reversed the version-bump decision below.*
+
+The compaction/recache meter-split (#52 Phase 3, `serializeClassifiedWithOverheadSplit`) emits
+**two** tag lines for one interaction: a remainder with `cw` zeroed, and a `#oh` line with `cr`
+zeroed. Its recache test is
+
+```
+cw > 30_000 && inputTokens <= 16 && cr < 0.2 * (cr + cw) && …
+```
+
+— which a **partial** re-prime satisfies just as well as a full miss (`17,266 / (17,266 +
+333,021)` = 4.9%). So both produce a `#oh` line carrying `cr=0, cw>0`, and once tagged the two
+are indistinguishable:
+
+| case | remainder line | `#oh` line |
+|---|---|---|
+| full miss | `cr=0, cw=0` | `cr=0, cw=big` |
+| partial re-prime | `cr=17k, cw=0` | `cr=0, cw=big` |
+
+Measured on `b1f54c2f`: **4 of 5** `cr=0/cw>0` tag lines were split artifacts; 1 was a real miss.
+A renderer-side `cr`/`cw` check would have drawn a divider on the partial re-prime this spec
+explicitly put out of scope.
+
+No renderer-only rule escapes this. Reading the `#oh` line over-reports partials; reading the
+remainder line under-reports split full misses (its `cw` is zero); pairing the two by base id
+reintroduces exactly the neighbour-comparison this issue set out to delete. The wire format
+destroyed the signal, so the signal has to be captured before it reaches the wire.
+
+Hence `cacheMiss` is set in `parseEntryToInteraction` from raw usage, propagates onto the
+remainder line via the `{...interaction}` spread, and is explicitly cleared on the `#oh` line so
+one event is reported once.
+
+### Version bump — reversing the Step-2 decision
+
+Step 2 declined a `WTFT_TAGGER_VERSION` bump. That call weighed a bump against a **cosmetic**
+gain (suppressing sidechain dividers), and it was right on those terms. The meter-split trap
+changes the terms: `cacheMiss` cannot be back-derived from a v2.6.1 tag file at all, so the
+choice is a bump or a wrong divider.
+
+**`WTFT_TAGGER_VERSION` 2.6.1 → 2.7.0.** Sessions re-tag on next read; `cr`/`cw` are unchanged,
+so nothing else in the format moves.
+
+The renderer ends up simpler than the Step-2 design anyway — `if (interaction.cacheMiss)`, no
+token arithmetic at the render site at all.
 
 ### Behaviour change: the session's first turn
 
@@ -101,6 +148,10 @@ miss and now draws a divider on the parent timeline.
 tag file, sees `undefined` for every interaction. Excluding sidechains therefore means adding a
 wire field *and* bumping `WTFT_TAGGER_VERSION` to re-tag every session.
 
+*Superseded in part: the bump happened anyway, for the correctness reason above. The
+measurement below still stands as the reason sidechains are **not** gated out — that decision
+was never about the bump alone, and adding an `isSidechain` wire field remains unjustified.*
+
 Measured against that cost, on `a578` — the most subagent-heavy session on this machine, 31
 sidechain transcripts across two workflow bursts — its v2.6.1 tag file yields:
 
@@ -115,12 +166,12 @@ real re-prime spend that already shows up in that bin's cost. Adding a wire-form
 full re-tag to suppress six lines is a bad trade and cuts against the simplification this issue
 exists to make.
 
-**Decision: no wire-format change, no `WTFT_TAGGER_VERSION` bump.** Recorded so the omission is
+**Decision: no `isSidechain` wire field, no sidechain gating.** Recorded so the omission is
 deliberate; revisit only if a session shows the dividers actually crowding the render.
 
 ### Road not taken: partial re-primes
 
-`cr === 0` does not catch a *partial* re-prime, where a small prefix survives and the bulk is
+The rule does not flag a *partial* re-prime, where a small prefix survives and the bulk is
 rewritten:
 
 ```
@@ -132,29 +183,41 @@ A ratio heuristic (`cw >> cr`) would flag these, but that trades a measured sign
 threshold, and a partial re-prime is arguably a different event deserving its own marker if it
 deserves one at all. Out of scope; recorded so the omission is deliberate.
 
+Worth noting that the meter-split's recache test already *is* such a heuristic
+(`cr < 0.2 × (cr + cw)`), and it groups partials with full misses. That grouping is right for
+its own purpose — attributing overhead cost — and wrong for this one, which is the whole reason
+`cacheMiss` is captured separately rather than inferred from the split.
+
 ### Test plan
 
-`tests/wtft-issue-152-cache-expiry.test.ts`, against `buildWtftLines`:
+`tests/wtft-issue-152-cache-expiry.test.ts` — **20 assertions, three parts**. The three parts
+exist because the trap above sits between them: the renderer and the parser can each be right
+while the wire format between them loses the signal.
 
-1. **Observed miss draws a divider** — an interaction with `cr=0, cw>0` yields a
-   `Cache Miss` line (and no `Cache Expired` line survives anywhere).
-2. **All-hit renders none** — every interaction `cr>0` yields no divider.
-3. **No cache activity renders none** — `cr=0, cw=0` (the #121 mock shape) yields no divider,
-   guarding against a naive `cr === 0` test.
-4. **Turn mode shows it** — the same miss under `-i 1t` draws the divider, which is the #121
-   regression this fix exists to close.
-5. **Model switch inside the TTL** — two interactions 539s apart, second with `cr=0, cw>0`,
-   draws a divider. The predictive model produced none here.
-6. **Divider count equals miss count** — a mixed run of hits and misses draws exactly one
-   divider per bin containing a miss.
+**Part A — renderer** (`buildWtftLines`, against `Interaction.cacheMiss`):
 
-Regression: `tests/wtft-issue-121.test.ts` must stay green unchanged. Its mocks use
-`cacheReadTokens: 0, cacheWriteTokens: 0`, which case 3 covers.
+1. A flagged miss yields a `Cache Miss` line, and no `Cache Expired` line survives anywhere.
+2. All-hit input yields no divider.
+3. `cr=0, cw=0` yields no divider — the #121 mock shape, so it doubles as that suite's guard.
+4. The same miss under `-i 1t` draws the divider: the #121 regression this fix exists to close.
+5. One divider per *bin* containing a miss — two misses in one bin collapse to one line.
+6. Shuffled input yields the same count, since nothing compares neighbours any more.
 
-No `WTFT_TAGGER_VERSION` bump — `cr` / `cw` are already in the tag wire format
-(`wtft-daemon-lib.ts:63-64`). This is renderer-only; existing tag files re-render correctly.
-See "Subagent cold starts" above for the one change that *would* have forced a bump, and why
-it was declined.
+**Part B — parser** (`parseSessionFile`, against raw usage): `cacheMiss` is `true` for
+`cr=0, cw>0` and falsy for a partial re-prime, a plain hit, and a turn with no cache activity.
+The partial case uses the measured `17,266 / 333,021` shape from `b1f54c2f`.
+
+**Part C — meter-split round-trip** (`serializeClassifiedWithOverheadSplit`), the regression for
+the Step-4 defect:
+
+- A full miss splits into two lines, exactly one carries `miss=1`, and it is the remainder — not
+  the `#oh` line.
+- A partial re-prime splits into two lines, **does** emit a `cr=0/cw>0` line (asserted
+  explicitly, so the trap stays documented in executable form), and yet no line is flagged.
+- A split full miss round-tripped through tag lines into `buildWtftLines` renders exactly one
+  divider — covering the serialize → restore → render path the CLI actually uses.
+
+Regression: `tests/wtft-issue-121.test.ts` stays green unchanged (27 assertions).
 
 ---
 
@@ -191,24 +254,53 @@ the flag stop lying.
 
 ### Test plan
 
-`tests/wtft-issue-153-pager-cli.test.ts`:
+`tests/wtft-issue-153-pager-cli.test.ts` — **10 assertions**, driving the built
+`bin/wtft.mjs` as a subprocess against a one-message fixture session:
 
-1. `wtft -p` exits non-zero.
-2. Its stderr names both `--pager` and `less -R`.
-3. `wtft` without `-p` still renders (the guard is not swallowing normal runs).
+1. `-p` exits non-zero; stderr names both `--pager` and `less -R`.
+2. `--pager` is rejected identically — the long form is not a separate code path by accident.
+3. Without the flag the CLI exits 0, emits output, and prints no pager error: the guard is not
+   swallowing normal runs.
+4. `--help` still exits 0 and still lists `--pager`. The flag remains valid inside the Pi TUI,
+   so help keeps describing it — the CLI refuses to *run* it, it does not pretend it never
+   existed.
+
+The fixture matters: without a real session the control case could pass for the wrong reason
+("no sessions found" is also non-zero).
 
 The Pi TUI path (`extensions/wtft.ts:464`) is untouched and keeps working.
 
 ---
 
-## Verification
+## Verification — as run (Step 4)
 
-- `bun run build` — regenerate `bin/*.mjs`; tests import from `bin/wtft.mjs`.
-- `bun run typecheck` — TS7 clean.
-- `docs/EXT_WTFT.html:164` reconciled to the observed rule and the new label (Step 5).
-- `node --experimental-strip-types tests/wtft-issue-152-cache-expiry.test.ts`
-- `node --experimental-strip-types tests/wtft-issue-153-pager-cli.test.ts`
-- `node --experimental-strip-types tests/wtft-issue-121.test.ts` (regression)
-- Manual, against live sessions:
-  - `wtft -i 1d -s <d730d9c3 path>` → divider on the 19:59:57Z model-switch turn.
-  - `wtft -i 3t -s <b1f54c2f path>` → dividers now present where there were none.
+| check | result |
+|---|---|
+| `tests/wtft-issue-152-cache-expiry.test.ts` | 20 passed, 0 failed |
+| `tests/wtft-issue-153-pager-cli.test.ts` | 10 passed, 0 failed |
+| `tests/wtft-issue-121.test.ts` (regression) | 27 passed, 0 failed |
+| `wtft-compaction-tracking`, `wtft-claude5-pricing`, `wtft-half-block`, `wtft-issue-21` | pass |
+| `wtft-issue-141-workflow-discovery` | 7 passed, 0 failed |
+| `wtft-daemon-lifecycle` | 30 passed, 0 failed |
+| `wtft-daemon-cost-cross-validation` | 5 passed, 0 failed |
+| `wtft-cli-e2e-cost-parity` | 5 passed, 0 failed |
+| `bun run build` | pass |
+| `bun run typecheck` | 2 pre-existing TS7016 in `serve/cloudflare.js`; 0 in files this branch touches |
+
+Two suites fail identically on unmodified `main` (confirmed in a detached baseline worktree),
+so they are environment, not regression: `wtft-auto-fit` ("CLI rendering should have ticks
+line") and `session-name-display` (`ERR_MODULE_NOT_FOUND @earendil-works/pi-tui`).
+
+Manual, divider counts cross-checked against `miss` flags in the regenerated v2.7.0 tag files:
+
+| session | render | dividers | ground truth |
+|---|---|---:|---|
+| `b1f54c2f` | `-i 1h` | 2 | 2 flagged misses in 2 distinct 1h bins; 5 lines carry `cr=0/cw>0`, so the 3 phantoms are gone |
+| `b1f54c2f` | `-i 3t` | present | previously zero — the #121 gate |
+| `d730d9c3` | `-i 1d` | 3 | 5 flagged misses across 3 distinct local days (PDT) |
+
+The `d730d9c3` set includes `2026-08-05T19:59:55Z`, the `opus-4-8` → `opus-5` switch 539
+seconds after the previous turn — the case that motivated the issue. `07:50:38Z`, the partial
+re-prime, is correctly not flagged.
+
+`docs/EXT_WTFT.html` reconciled to the observed rule and the new label at Step 5.

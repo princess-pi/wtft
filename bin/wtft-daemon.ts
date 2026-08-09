@@ -26,6 +26,7 @@ import {
 	discoverClaudeSubAgentSessionFiles,
 	discoverSubagentSessionFiles,
 	loadSubagentInteractions,
+	loadUserPricing,
 	WTFT_TAGGER_VERSION as TAGGER_VERSION
 } from "../extensions/lib/wtft-shared.js";
 
@@ -618,6 +619,10 @@ function initClassified() {
 // ---
 
 function main() {
+  // User pricing registry (#140) — the daemon computes every per-turn cost
+  // baked into tag files, so overrides must merge before any parsing.
+  loadUserPricing();
+
   // ---
   // ARG PARSING & MANAGEMENT COMMANDS
   // ---

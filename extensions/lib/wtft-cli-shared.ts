@@ -131,7 +131,9 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 		} else if (arg === "-o" || arg === "--other") {
 			other = true;
 			hasOther = true;
-		} else if (arg === "--tokens") {
+		} else if (arg === "--tokens" || arg === "--by-model") {
+			// --by-model (#140): alias — the token summary IS the per-model
+			// token/cost breakdown, one row per model id plus a TOTAL row.
 			tokens = true;
 			cost = false;
 			hasTokens = true;

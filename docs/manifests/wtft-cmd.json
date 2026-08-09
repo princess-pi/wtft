@@ -195,6 +195,10 @@
       "desc": "Switch between token-unit mode and cost-unit mode ($). --tokens shows a per-model token summary table with utilization. --cost switches back to $ mode. Config-persistable."
     },
     {
+      "flags": "--by-model",
+      "desc": "Alias of --tokens: per-model token+cost breakdown table. Models missing from the pricing registry are marked '?' (priced at default rates). Extend the registry without a rebuild via ~/.config/princess-pi-packages/wtft-pricing.json."
+    },
+    {
       "flags": "--pad <N>",
       "desc": "Pad output with N spaces on each side (default: 1, max: floor(term/2)-1). Makes CLI output width match Pi TUI widget."
     },

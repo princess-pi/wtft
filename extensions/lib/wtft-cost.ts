@@ -92,6 +92,24 @@ export function getDeepSeekPeakMultiplier(timestamp?: number): number {
  * (input + cacheRead + cacheWrite) exceed inputTokensAbove.
  */
 export const MODEL_PRICING: Record<string, ModelPricing> = {
+	// Claude (#139) — list rates per MTok. cacheWrite is the 5-min-TTL rate
+	// (1.25x input); the 1h-TTL rate is derived as 2x input by the cw1h
+	// handling in calculateClaudeCost. Fuzzy substring lookup resolves dated
+	// IDs (claude-haiku-4-5-20251001) to their alias key. New top-tier names
+	// (fable, mythos) MUST be here — they match no legacy fallback branch and
+	// would otherwise silently price at Sonnet-tier defaults, ~3.3x under.
+	"claude-fable-5":    { input: 10.00, output: 50.00, cacheRead: 1.00, cacheWrite: 12.50 },
+	"claude-mythos-5":   { input: 10.00, output: 50.00, cacheRead: 1.00, cacheWrite: 12.50 },
+	"claude-opus-5":     { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
+	"claude-opus-4-8":   { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
+	"claude-opus-4-7":   { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
+	"claude-opus-4-6":   { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
+	"claude-opus-4-5":   { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
+	"claude-opus-4-1":   { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
+	"claude-sonnet-5":   { input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
+	"claude-sonnet-4-6": { input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
+	"claude-sonnet-4-5": { input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
+	"claude-haiku-4-5":  { input: 1.00, output: 5.00, cacheRead: 0.10, cacheWrite: 1.25 },
 	// DeepSeek — no tiers, surge pricing handled by getDeepSeekPeakMultiplier
 	"deepseek-v4-flash": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 },
 	"deepseek-v4-pro":   { input: 1.74, output: 3.48, cacheRead: 0.0145, cacheWrite: 0 },
@@ -159,6 +177,35 @@ export function resolveTieredRates(
 	}
 
 	return rates;
+}
+
+/**
+ * Merge user-supplied pricing entries over the built-in registry (#140).
+ * Entries with the same key replace built-ins; new keys extend the registry.
+ * Pure merge — reading the pricing file from disk lives in
+ * wtft-pricing-config.ts so this module stays fs-free.
+ */
+export function applyUserPricing(overrides: Record<string, ModelPricing>): void {
+	for (const [key, pricing] of Object.entries(overrides)) {
+		if (!pricing || typeof pricing !== "object") continue;
+		const { input, output, cacheRead, cacheWrite } = pricing;
+		// Why validate: a malformed JSON entry must not poison cost math with NaN.
+		if ([input, output, cacheRead, cacheWrite].some(v => typeof v !== "number" || !isFinite(v))) continue;
+		MODEL_PRICING[key.toLowerCase().trim()] = pricing;
+	}
+}
+
+/**
+ * Whether a model resolves to real pricing (#140) — via the (user-merged)
+ * registry or one of the legacy substring fallback branches in
+ * calculateClaudeCost. False means calculateClaudeCost silently used the
+ * hardcoded Sonnet-tier defaults and totals for this model are a guess.
+ */
+export function isModelPriced(model: string): boolean {
+	if (!model) return false;
+	if (lookupModelPricing(model)) return true;
+	const m = model.toLowerCase();
+	return m.includes("deepseek") || m.includes("haiku") || m.includes("opus");
 }
 
 /**

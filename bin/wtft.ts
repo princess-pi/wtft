@@ -43,6 +43,10 @@ import {
 	resolveTieredRates,
 	lookupModelPricing,
 	MODEL_PRICING,
+	applyUserPricing,
+	isModelPriced,
+	loadUserPricing,
+	getUserPricingPath,
 	type WatchSettings,
 	type Interaction,
 	type ModelPricing,
@@ -73,6 +77,11 @@ export {
 	resolveTieredRates,
 	lookupModelPricing,
 	MODEL_PRICING,
+	// Pricing registry + miss-path (#139/#140)
+	applyUserPricing,
+	isModelPriced,
+	loadUserPricing,
+	getUserPricingPath,
 	parseEntryToInteraction,
 	classifyInteraction,
 	buildWtftLines,
@@ -163,6 +172,11 @@ function showReapWarnings() {
 // ---
 
 async function main() {
+	// User pricing registry (#140) — merge ~/.config overrides before any
+	// cost math in this process (tree-navigation divergence, renderers).
+	// The daemon loads it independently for tag-file cost computation.
+	loadUserPricing();
+
 	// Early exits for display-only flags (#94)
 	if (opts.showHelp) {
 		console.log(renderWtftHelp(manifestPath, "wtft"));
@@ -426,6 +440,22 @@ async function main() {
 		for (const line of tokenOutput.split("\n")) {
 			console.log(padStr + line);
 		}
+	}
+
+	// ---
+	// UNKNOWN-MODEL WARNING (#140): one stderr line per distinct model that
+	// priced at fallback defaults. Costs are computed in the daemon process,
+	// so the miss is re-derived here from the tag file's model ids rather
+	// than shared in-process state.
+	// ---
+	const unknownModels = new Set<string>();
+	for (const i of interactions) {
+		if (i.model && i.model !== "<synthetic>" && !isModelPriced(i.model)) {
+			unknownModels.add(i.model);
+		}
+	}
+	for (const m of unknownModels) {
+		console.error(`\x1b[33m⚠ no pricing for ${m} — using default $3/$15 rates; totals may be unreliable. Add an entry to ${getUserPricingPath()} (no rebuild needed).\x1b[0m`);
 	}
 }
 

@@ -12,6 +12,7 @@
 
 // Re-export all public API from deep modules
 export * from "./wtft-cost.js";
+export * from "./wtft-pricing-config.js";
 export * from "./wtft-parser.js";
 export * from "./wtft-renderer.js";
 export * from "./wtft-daemon-lib.js";

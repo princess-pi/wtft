@@ -12,6 +12,7 @@ import {
 	normalizeCommand,
 	deduplicateInteractions
 } from "./wtft-shared.js";
+import { isModelPriced } from "./wtft-cost.js";
 import { execSync } from "node:child_process";
 import wcwidth from "wcwidth";
 export interface Bin {
@@ -1618,9 +1619,13 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 		"Cost".padStart(numColW)
 	].join(" ") + "\n";
 
-	// Rows
+	// Rows — a "?" on the cost marks a model priced at fallback defaults
+	// (no registry entry, no legacy branch): the figure is a guess (#140).
 	let totalInput = 0, totalOutput = 0, totalCr = 0, totalCw = 0, totalReasoning = 0, totalCost = 0;
+	let anyUnpriced = false;
 	for (const [model, agg] of sorted) {
+		const unpriced = !isModelPriced(model);
+		if (unpriced) anyUnpriced = true;
 		out += [
 			shortenModel(model).padEnd(modelColW),
 			formatTokenCount(agg.inputTokens).padStart(numColW),
@@ -1628,7 +1633,7 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 			formatTokenCount(agg.reasoningTokens).padStart(numColW),
 			formatTokenCount(agg.cacheReadTokens).padStart(numColW),
 			formatTokenCount(agg.cacheWriteTokens).padStart(numColW),
-			formatCost(agg.cost).padStart(numColW)
+			(formatCost(agg.cost) + (unpriced ? "?" : "")).padStart(numColW)
 		].join(" ") + "\n";
 		// Cache hit rate detail line (#79)
 		const cacheTotal = agg.cacheReadTokens + agg.cacheWriteTokens + agg.inputTokens;
@@ -1662,8 +1667,11 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 		formatTokenCount(totalReasoning).padStart(numColW),
 		formatTokenCount(totalCr).padStart(numColW),
 		formatTokenCount(totalCw).padStart(numColW),
-		formatCost(totalCost).padStart(numColW)
+		(formatCost(totalCost) + (anyUnpriced ? "?" : "")).padStart(numColW)
 	].join(" ") + "\n";
+	if (anyUnpriced) {
+		out += `? = model not in pricing registry — priced at default $3/$15 rates; totals may be unreliable\n`;
+	}
 
 	// Compaction summary (#90) — show how many tokens were freed by compaction
 	let totalCompacted = 0;

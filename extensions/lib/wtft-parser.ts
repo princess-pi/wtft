@@ -737,11 +737,17 @@ function walkSubagentDir(
 			try {
 				const stat = fs.statSync(fullPath);
 				if (stat.isDirectory()) {
-					// Recurse into directories that could contain nested subagents:
-					//   "subagents" / "ns" — the nested subagents container itself
-					//   "agent-*" — an individual subagent's session dir (may have
-					//     its own subagents/ subdirectory with grandchild agents)
-					if (f === "subagents" || f === "ns" || f.startsWith("agent-")) {
+					// Recurse into ALL subdirectories (#141) — the agent-*.jsonl
+					// file filter gates what gets collected, so directory names
+					// need no allowlist. This picks up Dynamic Workflow layouts
+					// (subagents/workflows/wf_<runId>/agent-*.jsonl) and
+					// future-proofs against the next harness layout change.
+					// Depth still counts only "subagents"/"ns" containers, so
+					// maxDepth keeps bounding NESTING depth (Claude Code limit),
+					// not raw directory depth. "wtft-tags" is our own output —
+					// its agent-*.jsonl.wtft-tag.v*.jsonl files would match the
+					// file filter and double-count.
+					if (f !== "wtft-tags") {
 						walkSubagentDir(fullPath, depth + (f === "subagents" || f === "ns" ? 1 : 0), maxDepth, files);
 					}
 				} else if (f.startsWith("agent-") && f.endsWith(".jsonl")) {

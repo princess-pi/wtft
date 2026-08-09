@@ -37,8 +37,9 @@ Add per-MTok entries to `MODEL_PRICING` in `extensions/lib/wtft-cost.ts`
 Notes:
 - `lookupModelPricing` fuzzy-matches by substring, so dated IDs
   (`claude-haiku-4-5-20251001`) resolve via their alias key.
-- Existing registry cache-write handling (`cw1h` billed at 2× the 5m rate) is correct
-  for Anthropic and is reused as-is.
+- ~~Existing registry cache-write handling (`cw1h` billed at 2× the 5m rate) is correct
+  for Anthropic and is reused as-is.~~ **Wrong — see Errata (#146) below.** The API rule
+  is 1h write = 2× *base input* ($20/MTok on Fable), not 2× the 5m rate ($25/MTok).
 - The legacy `haiku`/`opus` substring branches stay as a safety net for IDs not in the
   registry (e.g. `claude-opus-4-0`); registry entries win because they are checked first.
 - Sonnet 5 intro pricing ($2/$10 through 2026-08-31) is a road not taken — wtft prices
@@ -99,7 +100,8 @@ Tests run against the built bundle (`bun run build` first), per repo convention:
 
 1. **`tests/wtft-claude5-pricing.test.ts`** (new)
    - `calculateClaudeCost("claude-fable-5", …)` prices at $10/$50/$1.00/$12.50
-     (input, output, cacheRead, 5m cacheWrite), 1h cacheWrite at 2× = $25/MTok.
+     (input, output, cacheRead, 5m cacheWrite), 1h cacheWrite at ~~2× = $25/MTok~~
+     **$20/MTok (2× input — corrected by #146)**.
    - Opus 5 / Sonnet 5 / Haiku 4.5 rows spot-checked.
    - Repro guard: 25M cacheRead + 1.6M cacheWrite + 100k output on `claude-fable-5`
      ≈ $50 (±5%), NOT ≈ $15.
@@ -132,3 +134,50 @@ Tests run against the built bundle (`bun run build` first), per repo convention:
   derive the same fact from `interaction.model`; avoids a tag-schema field.
 - **`~/.config/wtft/` config dir** — repo already standardizes on
   `~/.config/princess-pi-packages/`.
+
+---
+
+## Errata — #146: 1h-TTL cache-write rate (Spec)
+
+**Status:** Spec Draft → approved for immediate code (Duppy delegated: "take #146 through the flow")
+**Issue:** [#146](https://github.com/duppypro/princess-pi-packages/issues/146)
+
+### Wrong claim shipped in #139
+
+This spec asserted 1h cache writes bill at 2× the 5m rate. The API rule is:
+5m write = **1.25× base input**; 1h write = **2.0× base input**. The registry path in
+`calculateClaudeCost` doubles `cacheWritePrice` (the 5m rate), yielding **2.5× input**
+($25/MTok on Fable vs the real $20). Claude Code caches on the 1h tier, so every CC
+session reads high. Measured on session `…ea42`: 844,950 cache-write tokens, 100%
+1h-TTL → $4.22 gross overbill; wtft $73.44 vs status line $71.96.
+
+### Fix
+
+In the registry branch of `calculateClaudeCost`, derive the 1h rate from the
+(tier-resolved) input price, preserving free-cache-write models:
+
+```ts
+const cw1hPrice = cacheWritePrice === 0 ? 0 : inputPrice * 2.00;
+```
+
+- `cacheWrite: 0` entries (DeepSeek, gpt-5.4/5.5 via OpenAI Responses) stay free —
+  naive `input × 2` would have started charging them.
+- 5m and flat cache-write pricing unchanged (`cacheWritePrice`).
+- Legacy non-registry path already correct (`inputPrice * 2.00`) — untouched.
+- `WTFT_TAGGER_VERSION` 2.6.0 → 2.6.1 so tagged sessions re-price.
+
+### Verification
+
+1. `tests/wtft-claude5-pricing.test.ts` corrected: Fable 1M 1h cache-write tokens =
+   **$20.00** (was wrongly pinned $25.00). New guards: Opus 5 1h = $10.00;
+   `gpt-5.4` 1h cache-write tokens = $0 (free-cache-write preservation).
+2. All #139 suites re-run green.
+3. Manual: session `…ea42` re-parsed lands materially closer to the Claude Code
+   status line (exact delta reported at test time — the session is live and grows).
+
+### Roads not taken
+
+- **Explicit `cacheWrite1h` field on `ModelPricing`** — cleaner if a provider's 1h
+  multiple ever differs from 2× input, but it wouldn't tier-resolve without more
+  plumbing, and only Anthropic usage shapes carry `ephemeral_1h_input_tokens` today.
+  Derivation keeps one source of truth; revisit if a second provider grows 1h TTLs.

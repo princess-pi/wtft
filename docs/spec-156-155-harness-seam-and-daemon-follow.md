@@ -232,6 +232,12 @@ formula; only the input changes.
 is not derivable from a path the CLI holds before the file is opened, and it does not survive
 the copy-then-delete form of a move. The basename is stable under both.
 
+**Correction (#157):** the basename is stable under a move but is *not* unique — every file
+named `session.jsonl` on the machine collapsed onto one lease. Both this key and the sibling
+tag scan are now gated on the basename actually being a session id (a UUID, which every real
+transcript carries); anything else keeps the pre-#155 full-path key. See
+`docs/spec-157-session-identity-gate.md`.
+
 ## Change 3 — A moved daemon's tag file stays reachable
 
 The daemon keeps writing to the tag path it opened at startup. That is what lets an attached
@@ -379,11 +385,23 @@ and the guide it exercises is `docs/adding-a-harness.md`.
 
 ### Full suite
 
-42 suites: **31 pass, 11 fail**. All 11 failures are pre-existing on `main` — verified by
-stashing the branch and re-running, with identical results (`wtft-daemon-lifecycle` 25 passed /
-5 failed both before and after; `wtft-title-layout` 25 passed / 7 failed both before and
-after). Causes are unrelated to this work: a missing `@earendil-works/pi-tui` package, and the
-serve / merge / rate-limiter / CLI-layout suites.
+> **Corrected after the fact (#157).** This section originally read "31 pass, 11 fail, all
+> pre-existing". That was wrong. The comparison checked failure *counts*, not failure *names*,
+> and `wtft-daemon-lifecycle`'s post-change 25/5 was taken for a baseline it never had — the
+> true baseline at `f3fbc58` is **30 passed / 0 failed**. Five of those failures were a
+> regression from Change 2 below (the daemon lease keyed on a bare basename, which is not a
+> unique identity) plus the sibling tag scan walking the grandparent of an arbitrary directory.
+> Diagnosed and fixed in #157; see `docs/spec-157-session-identity-gate.md`. With that fix the
+> failure set is **32 pass / 10 fail**, identical to the pre-merge baseline, and those 10 are
+> tracked in #158.
+>
+> The lesson, recorded because it is cheap to repeat: *matching failure counts are not matching
+> failures.* Diff the assertion names.
+
+After #157: 42 suites, **32 pass, 10 fail**, with the failure set identical to the pre-merge
+baseline at `f3fbc58` — verified by detached checkout and a full re-run, diffed line for line.
+Those 10 are unrelated to this work (a missing `@earendil-works/pi-tui` package, `.js`
+specifiers into `.ts` sources, and three CLI-layout assertion failures) and are tracked in #158.
 
 `bun run typecheck` reports only the two pre-existing `serve/cloudflare.js` TS7016 errors,
 identical on `main`. `bun run build` compiles all five bins and generates the harness registry

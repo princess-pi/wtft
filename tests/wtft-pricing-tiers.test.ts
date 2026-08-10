@@ -1,11 +1,15 @@
 /**
  * Tests for #88 — input-based pricing tiers and max thinking level.
+ * Also covers #148 — dated-rate windows (`dateTiers`) on `resolveTieredRates`.
  *
  * Pi v0.80.6 added cost.tiers[] with inputTokensAbove thresholds.
  * This validates that our fallback cost calculator correctly:
  *   - Uses base rates when total input ≤ threshold
  *   - Switches to tier rates when total input > threshold
  *   - Picks the highest-matching tier when multiple exist
+ *   - Resolves a `dateTiers` window before size-tiering when a timestamp
+ *     falls before its `effectiveBefore` cutoff, else falls back to base
+ *     (including `timestamp === 0`, per wtft-parser's "unparsed" convention)
  */
 
 import * as assert from "node:assert";

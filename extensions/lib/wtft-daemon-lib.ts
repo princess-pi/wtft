@@ -173,13 +173,6 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
  * @param settings - Display settings (interval, limit, width, etc.)
  */
 
-// DAEMON HEALTH CHECK (used by watchTagFile + Pi widget)
-
-/**
-/**
- * Compute the tag file path for a given session path.
- * Scans wtft-tags/ subdirectory for the current version's tag file.
- */
 // 2.5.1 (#52 Phase 3): compaction/recache meter-split emits dual lines
 // (main + "#oh" overhead line), interrupted turns carry `ir` — stale caches
 // lack all three and must re-classify.

@@ -1,6 +1,8 @@
 /**
  * Tests for #139/#140 — Claude 5 family in MODEL_PRICING, user pricing
  * registry merge, and the isModelPriced miss-path predicate.
+ * Also covers #148 — claude-sonnet-5's intro-rate `dateTiers` window
+ * end-to-end through calculateClaudeCost (see "Sonnet 5 intro pricing" below).
  *
  * #139 repro class: claude-fable-5 matched neither the registry nor the
  * haiku/opus substring fallbacks and silently priced at Sonnet-tier

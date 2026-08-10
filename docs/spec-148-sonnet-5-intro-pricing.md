@@ -2,7 +2,7 @@
 
 **Issue:** #148
 **Branch:** `148-sonnet-5-intro-pricing`
-**State:** Spec Approved
+**State:** Code and Spec Approved (tested; reconciled to shipped code)
 
 ---
 
@@ -175,8 +175,11 @@ $6.00/MTok standard — with no new code at that line.
 #96: a DeepSeek surge test asserted a non-peak price by comparing against whatever
 `getDeepSeekPeakMultiplier(undefined)` resolved to at whatever moment the suite happened to run,
 which flips value near UTC peak-window boundaries. The fix pattern already in this repo
-(`wtft-pricing-tiers.test.ts:191`, `:203`) is to construct a fixed `Date(...).getTime()` and pass
-it explicitly as the timestamp argument — never rely on the function's internal fallback.
+(`wtft-pricing-tiers.test.ts`, "DeepSeek v4-pro at off-peak/peak UTC") is to construct a fixed
+`Date(...).getTime()` and pass it explicitly as the timestamp argument — never rely on the
+function's internal fallback. (Line numbers on that pre-existing block moved when this branch's
+own `dateTiers` describe-block was inserted above it — naming the test by title instead of a
+line number here so this reference doesn't rot the same way.)
 
 Every new test in this branch does the same: `PRE_CUTOFF`, `POST_CUTOFF`, and
 `EXACT_CUTOFF` are all `new Date("...Z").getTime()` constants, passed explicitly as
@@ -268,5 +271,36 @@ explicitly as the reason that road was not taken, not left as an accidental side
 
 Every V above is mechanically checkable by running the named test file(s) or reading the named
 constant — no criterion depends on a subjective read.
+
+---
+
+## 8. Step 5 reconciliation record
+
+File-level blast radius (`git diff ad91cdc..HEAD --name-only`): `extensions/lib/wtft-cost.ts`,
+`extensions/lib/wtft-daemon-lib.ts`, `tests/wtft-claude5-pricing.test.ts`,
+`tests/wtft-pricing-tiers.test.ts`, `bin/wtft.mjs`, `bin/wtft-daemon.mjs` (generated, verified
+byte-consistent with a clean `bun run build`), plus this spec. Every docstring/comment in each
+`.ts` file was swept in file order against the shipped code; `README.md`, `docs/manifests/*.json`,
+and `docs/EXT_*.html` were grepped for any Sonnet-5/`dateTiers`/pricing-figure claim.
+
+| Artifact | Claim | Contradicted by | Covered by a test? | Action |
+|---|---|---|---|---|
+| `docs/spec-139-140-141-pricing-and-workflow-rollup.md:45` (pre-#148) | "Sonnet 5 intro pricing … is a road not taken — wtft prices at list rates … (no date-dependent pricing)" | `wtft-cost.ts:134-140` — `claude-sonnet-5` now carries a `dateTiers` window; #148 took exactly that road | ✅ V1-V9 | Fixed this commit — struck through, pointer to new Errata §148 added |
+| `docs/spec-139-140-141-pricing-and-workflow-rollup.md:34` table | `claude-sonnet-5` row lists flat `3.00/15.00/0.30/3.75` with no caveat | Same rates are the base only; effective rate is date-dependent below the 2026-09-01 cutoff | ✅ V1-V9 | Fixed this commit — added a caveat line pointing to spec-148 |
+| `docs/spec-148-sonnet-5-intro-pricing.md:96` (§3, pre-fix) | "fix pattern already in this repo (`wtft-pricing-tiers.test.ts:191`, `:203`)" | Those lines are `wtft-pricing-tiers.test.ts:247`/`:259` as of this branch's own `dateTiers` describe-block insertion (52 lines) above them | N/A (a citation, not a behavior claim) | Fixed this commit — cited by test title instead of line number so it can't rot the same way again |
+| `extensions/lib/wtft-daemon-lib.ts:178-182` (pre-fix) | Orphaned JSDoc "Compute the tag file path for a given session path. Scans wtft-tags/ subdirectory…" (plus a stray duplicate `/**` and a misplaced `// DAEMON HEALTH CHECK` banner) sat directly above `WTFT_TAGGER_VERSION` — TS/reader attaches it to that constant, not to any tag-path function | `getTagPath` (`:306`) already carries its own correct, fuller docstring; `checkDaemonHealth` (`:564`) is the real daemon-health-check function. Pre-existing at baseline `ad91cdc` (predates #148), found because this file is in #148's blast radius | N/A (comment-only, no assertion) | Fixed this commit — deleted the orphaned banner/docstring/stray-`/**`, no logic touched; `bun run build` confirms zero `.mjs` diff, `bun run typecheck`/`bun run test` re-verified green |
+| `tests/wtft-pricing-tiers.test.ts:1-9` header (pre-fix) | Describes only #88 (size-based `tiers`) | File now also carries a full `dateTiers`/#148 `describe` block (7 tests) | ✅ (the tests themselves) | Fixed this commit — header now names both #88 and #148 |
+| `tests/wtft-claude5-pricing.test.ts:1-10` header (pre-fix) | Describes only #139/#140 | File now also carries a "Sonnet 5 intro pricing (#148)" `describe` block (5 tests) | ✅ (the tests themselves) | Fixed this commit — header now names #148 too |
+| `extensions/lib/wtft-cost.ts` — `DateTier`/`ModelPricing`/`resolveTieredRates` docstrings | Describe the dated-window resolution order, the falsy `timestamp` gate, and the `claude-sonnet-5` entry's dual rates | Read against `resolveTieredRates` (`:185-238`) and the registry entry (`:134-140`) — no discrepancy found | ✅ V1-V9 | No action — verified accurate |
+| `extensions/lib/wtft-daemon-lib.ts` `WTFT_TAGGER_VERSION` changelog comment | `2.7.1` bump, dated, cites the 50% overbill figure | `"2.7.1"` (`:197`) confirmed; `(3.00-2.00)/2.00 = 50%` checks out arithmetically | ✅ V11 | No action — verified accurate |
+| `docs/EXT_WTFT.html` "Model Pricing" table | Lists only Opus 4 / Sonnet 4 / Haiku 4.5 / DeepSeek — no Fable 5, Mythos 5, Opus 5, Sonnet 5 (or its `dateTiers`), or any GPT-5.x row | `MODEL_PRICING` (`wtft-cost.ts:113-169`) has carried the full Claude 5 + GPT-5.x lineup since #139/#141, well before this branch | N/A (doc-only) | **Not fixed here** — predates #148, this branch never touched the file, and a correct fix needs a design call (generate the table from the registry, per the doc's existing manifest-fetch pattern) rather than a mechanical edit. Filed as [#169](https://github.com/duppypro/princess-pi-packages/issues/169) |
+| `docs/manifests/wtft-cmd.json` (`--by-model`/`--cost` flag descriptions) | No model names or dollar figures asserted | N/A — manifest describes flags, not rates | N/A | No action — not a contradiction, out of scope for this table |
+| `README.md` | No Sonnet-5/pricing-figure claims | N/A | N/A | No action |
+
+**Re-audit pass (post-fix):** re-ran the same sweep after applying the fixes above — no new
+contradictions surfaced. `bun run typecheck` (2 pre-existing unrelated TS7016 on
+`bin/serve.ts`→`serve/cloudflare.js`, present on `main` before this branch), `bun run build`
+(clean, zero `.mjs` diff from the comment-only `.ts` edit), and `bun run test` (43/43 suites
+green) all re-verified after the reconciliation edits, not just before them.
 
 — 👑π🐱 Princess Pi

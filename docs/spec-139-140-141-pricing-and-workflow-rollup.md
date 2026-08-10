@@ -34,6 +34,11 @@ Add per-MTok entries to `MODEL_PRICING` in `extensions/lib/wtft-cost.ts`
 | `claude-sonnet-5`, `claude-sonnet-4-6`, `claude-sonnet-4-5` | 3.00 | 15.00 | 0.30 | 3.75 |
 | `claude-haiku-4-5` | 1.00 | 5.00 | 0.10 | 1.25 |
 
+`claude-sonnet-5`'s row above is the **standard (post-intro)** rate only — as of #148
+the entry also carries a `dateTiers` window overriding these four fields with
+$2.00/$10.00/$0.20/$2.50 for interactions timestamped before 2026-09-01T00:00:00Z. See
+[spec-148](spec-148-sonnet-5-intro-pricing.md) and the Errata below.
+
 Notes:
 - `lookupModelPricing` fuzzy-matches by substring, so dated IDs
   (`claude-haiku-4-5-20251001`) resolve via their alias key.
@@ -42,8 +47,10 @@ Notes:
   is 1h write = 2× *base input* ($20/MTok on Fable), not 2× the 5m rate ($25/MTok).
 - The legacy `haiku`/`opus` substring branches stay as a safety net for IDs not in the
   registry (e.g. `claude-opus-4-0`); registry entries win because they are checked first.
-- Sonnet 5 intro pricing ($2/$10 through 2026-08-31) is a road not taken — wtft prices
-  at list rates, same as every other entry (no date-dependent pricing).
+- ~~Sonnet 5 intro pricing ($2/$10 through 2026-08-31) is a road not taken — wtft prices
+  at list rates, same as every other entry (no date-dependent pricing).~~ **Superseded —
+  see Errata (#148) below.** #148 took this road: `claude-sonnet-5` gained a `dateTiers`
+  window and now prices $2/$10/$0.20/$2.50 for interactions before 2026-09-01T00:00:00Z.
 
 ### #140 — pricing as data + loud miss path + per-model breakdown
 
@@ -185,3 +192,43 @@ const cw1hPrice = cacheWritePrice === 0 ? 0 : inputPrice * 2.00;
   multiple ever differs from 2× input, but it wouldn't tier-resolve without more
   plumbing, and only Anthropic usage shapes carry `ephemeral_1h_input_tokens` today.
   Derivation keeps one source of truth; revisit if a second provider grows 1h TTLs.
+
+---
+
+## Errata — #148: Sonnet 5 intro pricing (Spec)
+
+**Status:** Code and Spec Approved (tested; reconciled to shipped code)
+**Issue:** [#148](https://github.com/duppypro/princess-pi-packages/issues/148)
+
+### Wrong claim shipped in #139
+
+§ "#139 — Claude 5 family in `MODEL_PRICING`" called Sonnet 5 intro pricing a **road not
+taken**, asserting wtft prices `claude-sonnet-5` flat at list rates with no
+date-dependent pricing. That was accurate at the time (#139 shipped before Anthropic's
+intro window was accounted for) but is now superseded: #148 took exactly that road.
+
+### Fix
+
+`ModelPricing` gained an optional `dateTiers?: DateTier[]` field (sibling to the
+existing size-based `tiers?: CostTier[]`); `resolveTieredRates` resolves it first,
+before size tiering. `claude-sonnet-5` carries one window: intro rate
+$2.00/$10.00/$0.20/$2.50 (1h-TTL cache write derives to $4.00) for interactions with
+`timestamp < 1788220800000` (2026-09-01T00:00:00Z); the base four fields
+($3.00/$15.00/$0.30/$3.75, 1h $6.00) are the standard post-intro rate and are what any
+caller gets with no timestamp, an out-of-window timestamp, or `timestamp === 0`
+(wtft-parser's spelling of "unparsed"). `WTFT_TAGGER_VERSION` `2.7.0` → `2.7.1`.
+
+Full design rationale, roads not taken, and the #96 clock-read hazard are in
+[spec-148](spec-148-sonnet-5-intro-pricing.md) — this Errata only corrects the record
+here, it does not restate that spec.
+
+### Verification
+
+See spec-148 §7 (V1–V12) and its reconciliation table. `tests/wtft-claude5-pricing.test.ts`
+and `tests/wtft-pricing-tiers.test.ts` both gained dedicated `#148` coverage; 43 suites
+green, `bun run build` regenerated `bin/*.mjs` with zero diff.
+
+### Roads not taken
+
+See spec-148 §2 "Roads not taken" — not duplicated here to avoid a second copy drifting
+out of sync with the primary spec.

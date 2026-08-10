@@ -5,12 +5,14 @@
  * @description Runs every `tests/*.test.ts` suite in its OWN process and
  *   aggregates the exit codes.
  *
- *   Why process-per-suite (#158): 34 of 42 suites are standalone scripts that
- *   end in `process.exit(failed > 0 ? 1 : 0)`. Under any single-process runner
- *   — `bun test <dir>`, vitest, `node --test` — the first suite to finish tears
- *   the shared process down mid-run. On main that meant `bun test` ran 3 of 42
- *   files and exited 0: a green result that never ran the tests. Giving each
- *   suite its own process makes that `process.exit` harmless.
+ *   Why process-per-suite (#158): the large majority of suites here are
+ *   standalone scripts that end in `process.exit(failed > 0 ? 1 : 0)`. Under any
+ *   single-process runner — `bun test <dir>`, vitest, `node --test` — the first
+ *   suite to finish tears the shared process down mid-run. Measured on `main` @
+ *   `9b2a16e` (34 of 42 suites then): `bun test` ran 3 of 42 files and exited 0,
+ *   a green result that never ran the tests. Giving each suite its own process
+ *   makes that `process.exit` harmless. (Counts are pinned to that measurement
+ *   on purpose — a live count here re-rots on every suite added, #163.)
  *
  *   Why `bun test <file>` rather than `bun <file>`: it executes both suite
  *   styles in this repo — plain assertion scripts AND the `describe`/`expect`

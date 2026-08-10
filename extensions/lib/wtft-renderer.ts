@@ -141,11 +141,18 @@ export interface IntervalConfig {
 // call and subsequent dedup are identical — those live here.
 
 /**
- * Parse a .jsonl session file into raw (undeduped) interactions.
- * Caller is responsible for deduplication via {@link deduplicateInteractions}.
+ * Parse an `--interval` argument into a binning configuration.
  *
- * @param filePath - Absolute path to the .jsonl session log
- * @returns Array of parsed interactions (may contain duplicate message.id entries)
+ * Two accepted shapes, and `--help` has historically only advertised the first
+ * (see #160):
+ *   - **time**  — `<n>m` / `<n>h` / `<n>d` / `<n>w`, e.g. `7m`, `4h`, `2w`
+ *   - **turns** — `<n>t` / `<n>turn` / `<n>turns`, e.g. `7t` (#121)
+ *
+ * Unparseable input does not throw: it falls back to `1h`, because an interval
+ * typo should degrade to the default chart rather than kill the widget mid-render.
+ *
+ * @param val - Raw `--interval` value as typed by the user
+ * @returns The parsed size, unit, and whether binning is by time or by turn
  */
 export function parseInterval(val: string): IntervalConfig {
 	const timeMatch = /^(\d+)([mhdw])$/.exec(val);
@@ -690,22 +697,6 @@ export function checkSurgeProximity(): { status: 'surge' | 'approaching' | 'endi
 	return { status: undefined, multiplier: 1.0 };
 }
 
-/**
- * Build a 24-hour surge timeline string in the format:
- * 🌘──────🕔───☀️───────🌘 [⚡ SURGE 2x] [⚡ SURGE APPROACHING]
- *
- * One glyph per hour: `─` normally, `☀️` at noon, and a clock-face emoji at the
- * current hour (except noon — ☀️ owns position 12). Green = normal pricing,
- * orange = surge. The whole run is bookended by the current moon phase.
- *
- * The bookends are the only glyphs guaranteed present at every hour, so they —
- * not the clock face — are what callers and tests should key off to identify
- * the timeline (#158).
- *
- * @param surgeHours - Set of local hours (0-23) that are surge-priced
- * @param currentHour - Current local hour (0-23) for the clock-face marker
- * @param proximityStatus - If set, appends the appropriate surge badge
- */
 // Moon phase emoji — 8 phases from new moon through waning crescent.
 const MOON_PHASES = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"];
 const SYNODIC_MONTH_MS = 29.53058867 * 86400000;
@@ -723,6 +714,27 @@ function getMoonPhase(date: Date): string {
 	return MOON_PHASES[phase];
 }
 
+/**
+ * Build a 24-hour surge timeline string in the format:
+ * 🌘──────🕔───☀️───────🌘 [⚡ SURGE 2x] [⚡ SURGE APPROACHING]
+ *
+ * One glyph per hour: `─` normally, `☀️` at noon, and a clock-face emoji at the
+ * current hour (except noon — ☀️ owns position 12). Green = normal pricing,
+ * orange = surge. The whole run is bookended by the current moon phase.
+ *
+ * The bookends are the only glyphs guaranteed present at every hour, so they —
+ * not the clock face — are what callers and tests should key off to identify
+ * the timeline (#158).
+ *
+ * Kept immediately above the function (#163): #158 landed this text four
+ * declarations too early, so every editor hover attached it to `MOON_PHASES`
+ * and the function itself read as undocumented. A docstring is only as good as
+ * the symbol it binds to.
+ *
+ * @param surgeHours - Set of local hours (0-23) that are surge-priced
+ * @param currentHour - Current local hour (0-23) for the clock-face marker
+ * @param proximityStatus - If set, appends the appropriate surge badge
+ */
 export function buildTimelineString(
 	surgeHours: Set<number>,
 	currentHour: number,

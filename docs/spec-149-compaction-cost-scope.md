@@ -2,7 +2,7 @@
 
 **Issue:** #149
 **Branch:** `149-compaction-cost-scope`
-**State:** Spec Draft
+**State:** Spec Approved
 
 ---
 
@@ -243,15 +243,26 @@ A separate scan rather than a new field on `Interaction` or a changed
 point), and `parseSessionFile`'s signature is load-bearing for the daemon tag file, the
 watch path and 40-odd suites. Small interface, no ripple.
 
+`readUncountedBillableClass(entry)` tries every registered harness adapter and returns the
+first non-null hit. This is safe rather than merely convenient: each adapter's own
+`readUncountedBillable` already gates on entry shape it owns (`entry.type === "system"` for
+claude-code, `entry.type === "compaction"` for pi) so a given entry matches at most one
+adapter in practice, but the "first wins" rule is the explicit tie-break if that ever stops
+being true — it prevents a single entry from being double-counted across two adapters that
+both happen to recognize it.
+
 ### 6.3 Renderer — the UNCOUNTED line
 
 `renderTokenSummary` gains an optional 4th parameter `uncounted?: UncountedBillables` and,
 when any count is non-zero, appends after the TOTAL row:
 
 ```
-UNCOUNTED  1 compaction, 3 recaps — Claude Code bills these; the transcript records
+UNCOUNTED  1 compaction, 3 recaps — billed by the harness; the transcript records
            no usage for them, so they are NOT in TOTAL above (#149)
 ```
+
+("billed by the harness", not "Claude Code bills these" — the wording is harness-neutral
+because Pi also has a `compaction` class, even though Pi has no `recap` class.)
 
 Existing behaviour is unchanged when the parameter is omitted or all counts are zero. The
 Pi "Compaction: N event(s), X total tokens freed" line stays exactly as it is — it reports
@@ -259,14 +270,27 @@ tokens *freed*, a different fact from spend *not counted*.
 
 ### 6.4 CLI wiring
 
-`bin/wtft.ts` calls `scanUncountedBillables` on the session file (plus any discovered
-subagent files) and passes the result to `renderTokenSummary`.
+`bin/wtft.ts` calls `scanUncountedBillables` on the session file **and on every file
+`discoverSubagentSessionFiles` finds** (the same discovery `--tokens` already uses to fold
+subagent cost into TOTAL), summing the counts with `addUncountedBillables` before passing
+the result to `renderTokenSummary`. A compaction or recap inside a subagent transcript is
+exactly as invisible as one in the parent, so it must be counted the same way. Wired into
+the non-watch `--tokens` path only (`bin/wtft.ts` around the `if (opts.tokens)` block); the
+daemon (`wtft-daemon.mjs`) and `serve.mjs` watch loops export the same functions (rebuilt
+into their bundles) but do not yet call `renderUncountedBillables` — see "Deliberately not
+in scope" below.
 
 ### Deliberately not in scope
 
 - No change to any cost arithmetic. #146 is confirmed correct twice over.
 - No change to the daemon tag-file format or to `parseSessionFile`'s return type.
 - No estimate, anywhere, of what the uncounted events cost.
+- No UNCOUNTED line in watch mode (`wtft-daemon.mjs`, `serve.mjs`). Both bundles carry the
+  new exports (`scanUncountedBillables`, `renderUncountedBillables`, …) because they inline
+  the whole of `bin/wtft.ts`, but neither watch loop calls `renderUncountedBillables` yet.
+  Deferred rather than wired blind: the watch UI redraws per keystroke/tail-event, and
+  whether re-scanning the transcript file on every redraw is cheap enough is untested. Left
+  as an open question for Step 4/5, not assumed here.
 
 ---
 

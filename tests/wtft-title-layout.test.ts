@@ -173,7 +173,7 @@ for (const width of WIDTHS) {
 // ---
 // Title prefix: cost vs token mode
 // ---
-const costRows = runWtft(sessionPath, [], 120).allRows;
+const costRows = runWtft(sessionPath, ["--cost"], 120).allRows;
 const tokenRows = runWtft(sessionPath, ["--tokens"], 120).allRows;
 check("cost mode title  : 💸 WTF Tokens?", costRows[1]?.includes("💸 WTF Tokens?") ?? false);
 check("token mode title : 🔢 WTF Tokens?", tokenRows[1]?.includes("🔢 WTF Tokens?") ?? false);

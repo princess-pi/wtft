@@ -120,7 +120,10 @@ fs.writeFileSync(tempLogFile, mockJsonlLines.join("\n") + "\n", "utf8");
 try {
 	const cliTermWidth = getTerminalWidth(false);
 	console.log(`Executing CLI wtft.mjs with mock log... (Max Width: 240, Terminal Limit: ${cliTermWidth})`);
-	const cliStdout = execSync(`node bin/wtft.mjs -s ${tempLogFile} -w 240`, { encoding: "utf8" });
+	// --cost is explicit: the mode is config-persistable, so a bare invocation
+	// renders whatever the developer last saved — and this test looks for "$0.00",
+	// which does not exist in token mode (#158).
+	const cliStdout = execSync(`node bin/wtft.mjs --cost -s ${tempLogFile} -w 240`, { encoding: "utf8" });
 	
 	const cliLines = cliStdout.split("\n").filter(Boolean).map(stripAnsi);
 	const cliTicksLine = cliLines.find(l => l.includes("$0.00"));

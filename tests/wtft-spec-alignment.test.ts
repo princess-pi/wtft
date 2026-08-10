@@ -1,6 +1,8 @@
-import { buildWtftLines, parseEntryToInteraction, classifyInteraction } from "../bin/wtft.mjs";
+import { buildWtftLines, parseEntryToInteraction, classifyInteraction, parseInterval } from "../bin/wtft.mjs";
 import type { Interaction } from "../extensions/lib/wtft-shared.ts";
 import * as assert from "node:assert";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 // Helper to strip ANSI codes
 function stripAnsi(str: string): string {
@@ -403,5 +405,76 @@ try {
 	console.log("✅ WTFT EMOJI TOGGLE TESTS PASSED PERFECTLY!");
 } catch (err: any) {
 	console.error(`❌ WTFT EMOJI TOGGLE TESTS FAILED: ${err.message}`);
+	process.exit(1);
+}
+
+// ---
+// MANIFEST/PARSER ALIGNMENT GATE (#160)
+//
+// docs/manifests/wtft-cmd.json is what drives --help, --why, and EXT_WTFT.html — it is the
+// one place a user or agent reads to learn what parseInterval accepts. #160 happened because
+// parseInterval grew a turn unit (#121) and nobody updated the manifest's -i entry to match;
+// nothing failed, because nothing checked. This test is that check, and it is deliberately
+// NOT a second hardcoded copy of "mhdwt" — that would just be the same failure mode one level
+// up (two places to keep in sync by hand instead of one). Instead it brute-forces every
+// lowercase letter as a candidate single-char time unit, and the three known turn spellings,
+// straight through the real parseInterval, and only trusts what comes back. If parseInterval
+// grows a new unit tomorrow and the manifest isn't updated, this fails without anyone having
+// to remember to extend the probe set too.
+// ---
+console.log("\n=== RUNNING MANIFEST/PARSER INTERVAL-UNIT ALIGNMENT TEST (#160) ===");
+try {
+	// Discover every single-char time unit parseInterval actually accepts by probing 'a'..'z'.
+	// The fallback for an unrecognized unit is always { size: 1, unit: "h", type: "time" } —
+	// probing with size=3 (not 1) makes a genuine accept distinguishable from the fallback even
+	// when the probed letter happens to be "h".
+	const acceptedTimeUnits: string[] = [];
+	for (let code = 97; code <= 122; code++) {
+		const ch = String.fromCharCode(code);
+		const result = parseInterval(`3${ch}`);
+		if (result.type === "time" && result.unit === ch && result.size === 3) {
+			acceptedTimeUnits.push(ch);
+		}
+	}
+	assert.ok(acceptedTimeUnits.length > 0, "Probe must find at least one accepted time unit (sanity check on the probe itself)");
+
+	// Discover which turn-unit spellings parseInterval accepts.
+	const turnCandidates = ["t", "turn", "turns"];
+	const acceptedTurnSpellings = turnCandidates.filter(spelling => {
+		const result = parseInterval(`3${spelling}`);
+		return result.type === "turns" && result.size === 3;
+	});
+	assert.ok(acceptedTurnSpellings.length > 0, "Probe must find at least one accepted turn spelling (sanity check on the probe itself)");
+
+	console.log(`  Accepted time units (probed a-z): ${acceptedTimeUnits.join(", ")}`);
+	console.log(`  Accepted turn spellings: ${acceptedTurnSpellings.join(", ")}`);
+
+	// Load the manifest and find the -i, --interval entry.
+	const manifestPath = path.resolve(import.meta.dirname, "..", "docs", "manifests", "wtft-cmd.json");
+	const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+	const intervalEntry = manifest.usage.find((u: { flags: string }) => u.flags.includes("--interval"));
+	assert.ok(intervalEntry, "Manifest must have a --interval usage entry");
+
+	// Every accepted time unit letter must appear inside the flags signature's <...> alternation.
+	for (const ch of acceptedTimeUnits) {
+		assert.ok(
+			intervalEntry.flags.includes(ch),
+			`parseInterval accepts unit '${ch}' but the manifest flags string ("${intervalEntry.flags}") never mentions it — the manifest gap #160 was filed for`
+		);
+	}
+
+	// Turn support isn't a single letter the flags signature enumerates the same way (it's
+	// documented as a word, "turns", plus spellings in the description) — so gate the
+	// description text instead of the flags signature for this one.
+	if (acceptedTurnSpellings.length > 0) {
+		assert.ok(
+			/turn/i.test(intervalEntry.desc),
+			`parseInterval accepts turn-unit spellings (${acceptedTurnSpellings.join(", ")}) but the manifest description never mentions "turn"`
+		);
+	}
+
+	console.log("✅ MANIFEST/PARSER INTERVAL-UNIT ALIGNMENT TEST PASSED — every accepted unit is documented!");
+} catch (err: any) {
+	console.error(`❌ MANIFEST/PARSER INTERVAL-UNIT ALIGNMENT TEST FAILED: ${err.message}`);
 	process.exit(1);
 }

@@ -224,6 +224,27 @@ usage — it is the manifest's and `EXT_WTFT.html`'s consistent choice, which is
 to match is production/doc-content work with its own blast radius — tracked as a follow-up
 issue (§4.3), not done on this branch, per #162's own explicit instruction.
 
+> **REVERSED 2026-08-10 — see #162 and #165.** The above stands as the record of what was ruled
+> and why; it is no longer the standing ruling. Duppy reversed it in favour of a two-register
+> rule that this analysis never considered: **"log parser daemon"** in high-level user-facing
+> prose, **"daemon"** as sanctioned shorthand in code, variable names, comments, and terse
+> operational messages. Bare **"log parser"** remains avoided — that part of the ruling survived.
+>
+> Two things this section got wrong, worth keeping visible:
+>
+> 1. **The framing was binary.** "Roads not taken" below considers exactly two options — daemon
+>    wins, or log parser wins — and picks the cheaper rename. Both options assume one word must
+>    serve every register. The reversal's premise is that it cannot: a reader meeting the process
+>    for the first time and a variable name have different needs, and the cost being weighed
+>    (renaming 11 filenames vs. 13 doc strings) was never the real cost.
+> 2. **The 68-count row is right; the ruling was made against 13 of them.** §4.3 and #165's
+>    original body both describe the work as manifest + `EXT_WTFT.html` only, and #165 went
+>    further and asserted "code already says `daemon` throughout" — contradicted by this very
+>    table, which lists 28 `log parser` occurrences in `.ts` sources three rows up. The evidence
+>    to catch that was on the page and went unread. `wtft --cleanup` printing
+>    `Cleaned up 0 log parser(s).` (`bin/wtft-daemon.ts:822`) is what surfaced it, in one command,
+>    a day later.
+
 ### 4.2 Bin vs. bucket, confirmed by reading the code (not guessed)
 
 `extensions/lib/wtft-renderer.ts:218-229`, `getBinInfo(timestamp, config: IntervalConfig,
@@ -255,6 +276,8 @@ Per #162's explicit instruction that renaming code belongs in its own 5-step cyc
 
 - Rename `log parser` → `daemon` in `docs/manifests/wtft-cmd.json` (5 occurrences) and
   `docs/EXT_WTFT.html` (8 occurrences) to match the `_Avoid_` ruling. Filed as **#165**.
+  *(Superseded — see the reversal note in §4.1. #165 was rewritten 2026-08-10 to apply the
+  two-register rule across all 69 occurrences, code included, on one branch.)*
 - One tracking issue for `## Language — Merge`, `## Language — Yada`, and the remaining
   extensions without a glossary section yet (mirrors the `## Language — Serve` precedent).
   Filed as **#166**.

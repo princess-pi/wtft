@@ -328,8 +328,13 @@ Each is a concrete assertion in
   of `tests/wtft-issue-156-harness-seam.test.ts` Parts A–C passes unchanged.
 - **V8** — Pi shape unaffected: a transcript with no `cwd` and no `relocated` resolves to `null`
   from `resolveLastCwd` and contributes nothing to any target.
-- **V9** — the gate holds: with a fixture whose last cwd **exists**, `resolveCwdHistory` is never
-  consulted — asserted by a read counter that does not advance.
+- **V9** — the gate holds: in a batch with one stranded transcript (last cwd removed) and one
+  live-cwd transcript (`homebody`, last cwd exists), the whole-file history scan fires **at most
+  once** — for the stranded one — never for `homebody`. `resolveCwdHistory` is called a second
+  time during display (`displaySlugFor`), but the `(path, mtimeMs, size)` memo absorbs it, so the
+  read counter still shows one scan, not two. Concretely: `getCwdHistoryReadCount() <= 1` after
+  `discoverSessions("claude-code", clone)`, with `getCwdReadCount() > 0` confirming the cheap tail
+  scan ran at all.
 - **V10** — display prefers a live path: the V5 candidate's `displayPath` names the main clone,
   not the removed worktree.
 - **V11 (cost, per #164)** — `resolveLastCwd` still resolves on a representative sample without
@@ -363,7 +368,8 @@ Each is a concrete assertion in
 
 **Whole-suite invariant**
 
-- **V21** — `bun run test` is green: 43 suites, no suite regressed by this branch.
+- **V21** — `bun run test` is green: the pre-branch 43 suites plus this branch's own
+  `wtft-issue-144-145-164-session-discovery` = 44, none regressed by this branch.
 
 ---
 

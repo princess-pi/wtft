@@ -15,6 +15,7 @@ import type {
 	HarnessParseAdapter,
 	NormalizedUsage,
 	ParsedBlock,
+	UncountedBillableClass,
 } from "../types.ts";
 
 const ID = "claude-code";
@@ -103,6 +104,19 @@ export const parse: HarnessParseAdapter = {
 					  c.some((b: any) => b?.type === "text" && typeof b.text === "string" && b.text.includes(INTERRUPT_PREFIX));
 			if (hit) return { kind: "interrupt" };
 		}
+		return null;
+	},
+
+	readUncountedBillable(entry: any): UncountedBillableClass | null {
+		if (!entry || entry.type !== "system") return null;
+		// The compaction request itself. `compact_boundary` is the ONLY entry
+		// Claude Code writes for it; the paired `isCompactSummary` user entry
+		// carries the summary text. Neither has a `usage` object — deliberately
+		// read from the boundary rather than the summary so one compaction
+		// counts once (#149).
+		if (entry.subtype === "compact_boundary") return "compaction";
+		// The "while you were away" recap. Also billed, also usage-free.
+		if (entry.subtype === "away_summary") return "recap";
 		return null;
 	},
 };

@@ -98,6 +98,23 @@
       "result": "WTFT uses public pricing estimates per model and excludes things like caching discounts, free-tier credits, or provider-specific billing nuances. It's a directional cost-awareness tool — not an accounting ledger."
     },
     {
+      "scenario": "Your harness's own cost counter reads higher than WTFT's TOTAL and you want to know whether WTFT is miscounting or just can't see something.",
+      "commands": [
+        "--tokens"
+      ],
+      "result": "TOTAL is strictly derived from recorded usage — every dollar traces to a `usage` object in the transcript. Below it, an UNCOUNTED line names the events the harness bills for but writes no usage for: /compact requests and 'while you were away' recaps, counted across the session and every subagent transcript. They are deliberately NOT priced and NOT in TOTAL. Measured across seven logged Claude Code sessions, this blind spot was 4.72% of the harness's own counter. The line appears only when a count is non-zero, and only in this non-watch --tokens path — --watch does not render it yet.",
+      "demo": [
+        "\u001b[1m── Token Summary (per model, deduped) ──\u001b[0m",
+        "Model           Input     Output  Reasoning Cache-Read Cache-Write       Cost",
+        "opus-5            424     171.4k          0      38.6M     856.6k     $32.15",
+        "\u001b[90m────────────────────────────────────────────────────────────────\u001b[0m",
+        "TOTAL             424     171.4k          0      38.6M     856.6k     $32.15",
+        "",
+        "UNCOUNTED  3 recaps — billed by the harness; the transcript records",
+        "           no usage for them, so they are NOT in TOTAL above (#149)"
+      ]
+    },
+    {
       "scenario": "Your session has been idle for a while and the model cache has expired, or you're running a local model like Ollama with no remote caching at all.",
       "commands": [
         ""
@@ -192,7 +209,7 @@
     },
     {
       "flags": "--tokens, -C, --cost",
-      "desc": "Switch between token-unit mode and cost-unit mode ($). --tokens shows a per-model token summary table with utilization. --cost switches back to $ mode. Config-persistable."
+      "desc": "Switch between token-unit mode and cost-unit mode ($). --tokens shows a per-model token summary table with utilization, plus — when the session or any of its subagent transcripts contains them — an UNCOUNTED line naming compactions and away-recaps: calls the harness bills for but writes no usage record for, so they are deliberately NOT in TOTAL (#149). --cost switches back to $ mode. Config-persistable."
     },
     {
       "flags": "--by-model",

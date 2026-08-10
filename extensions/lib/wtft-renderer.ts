@@ -4,9 +4,15 @@
  * @description Bar chart rendering, histograms, token summaries, and terminal utilities.
  *   Builds visual output from parsed Interaction arrays: binned bar charts,
  *   SURGE timeline markers, "Other" command histograms, and per-model token tables.
+ *
+ *   One renderer takes input that is NOT an Interaction array:
+ *   `renderUncountedBillables` prints counts of billed-but-unrecorded events
+ *   (#149) below TOTAL. It is the only output here that reports spend wtft
+ *   cannot price, and it deliberately carries no dollar figure.
  */
 
 import type { Interaction, Category } from "./wtft-shared.js";
+import type { UncountedBillables } from "./wtft-parser.ts";
 import {
 	classifyInteraction,
 	normalizeCommand,
@@ -1569,7 +1575,11 @@ function shortenModel(model: string): string {
 	return model.replace(/^claude-/, "").replace(/-\d{8}$/, "");
 }
 
-export function renderTokenSummary(interactions: Interaction[], maxWidth: number = 80, thinkingBudget?: number): string {
+/**
+ * @param uncounted Billed-but-unrecorded events found in the session (#149).
+ *   Omitted or all-zero renders nothing new — existing output is unchanged.
+ */
+export function renderTokenSummary(interactions: Interaction[], maxWidth: number = 80, thinkingBudget?: number, uncounted?: UncountedBillables): string {
 	// Dedup before aggregating (caller may pass raw, we ensure consistent counts)
 	const deduped = deduplicateInteractions(interactions);
 
@@ -1699,7 +1709,26 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 		out += `\nCompaction: ${compactionCount} event(s), ${formatTokenCount(totalCompacted)} total tokens freed\n`;
 	}
 
+	// Uncounted billables (#149) — the blind spot, named. Deliberately below the
+	// TOTAL row and deliberately without a dollar figure: TOTAL stays strictly
+	// derived from recorded `usage`, and these events write none. Measured at
+	// 4.72% of Claude Code's own counter across seven sessions, so leaving them
+	// unmentioned misleads; estimating them would make TOTAL partly modelled.
+	out += renderUncountedBillables(uncounted);
+
 	return out;
+}
+
+/** The UNCOUNTED block, or "" when there is no blind spot to report. Split out
+ *  so the daemon/watch paths can reuse the exact wording (#149). */
+export function renderUncountedBillables(uncounted?: UncountedBillables): string {
+	if (!uncounted) return "";
+	const parts: string[] = [];
+	if (uncounted.compaction > 0) parts.push(`${uncounted.compaction} compaction${uncounted.compaction === 1 ? "" : "s"}`);
+	if (uncounted.recap > 0) parts.push(`${uncounted.recap} recap${uncounted.recap === 1 ? "" : "s"}`);
+	if (parts.length === 0) return "";
+	return `\nUNCOUNTED  ${parts.join(", ")} — billed by the harness; the transcript records\n` +
+	       `           no usage for them, so they are NOT in TOTAL above (#149)\n`;
 }
 
 // WATCH MODE: tail -f style live re-rendering (#45)

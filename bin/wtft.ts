@@ -17,6 +17,11 @@ import {
 	renderOtherHistogram,
 	renderTokenSummary,
 	deduplicateInteractions,
+	scanUncountedBillables,
+	newUncountedBillables,
+	addUncountedBillables,
+	readUncountedBillableClass,
+	renderUncountedBillables,
 	discoverSubagentSessionFiles,
 	loadSubagentInteractions,
 	attributeClaudeSubAgentCosts,
@@ -107,6 +112,13 @@ export {
 	buildWtftLines,
 	parseSessionFile,
 	deduplicateInteractions,
+	renderTokenSummary,
+	// Uncounted billables (#149) — counted blind spot, never priced
+	scanUncountedBillables,
+	newUncountedBillables,
+	addUncountedBillables,
+	readUncountedBillableClass,
+	renderUncountedBillables,
 	discoverSubagentSessionFiles,
 	loadSubagentInteractions,
 	attributeClaudeSubAgentCosts,
@@ -492,7 +504,16 @@ async function main() {
 	}
 
 	if (opts.tokens) {
-		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget);
+		// Blind-spot scan (#149) reads the raw session files, never the tag file:
+		// the events it counts leave no interaction behind, so nothing the daemon
+		// serializes could carry them. Subagent files are scanned too — a
+		// compaction inside a subagent is just as invisible as one in the parent.
+		let uncounted = newUncountedBillables();
+		uncounted = addUncountedBillables(uncounted, scanUncountedBillables(finalSessionPath));
+		for (const sub of discoverSubagentSessionFiles(finalSessionPath)) {
+			uncounted = addUncountedBillables(uncounted, scanUncountedBillables(sub));
+		}
+		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, uncounted);
 		for (const line of tokenOutput.split("\n")) {
 			console.log(padStr + line);
 		}

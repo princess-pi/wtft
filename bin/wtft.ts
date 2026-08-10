@@ -63,9 +63,16 @@ import {
 	newParseStreamState,
 	readControlEntry,
 	resolveLastCwd,
+	resolveCwdHistory,
+	pickLiveCwd,
+	pathExists,
 	cwdToSlug,
+	cwdToStrictSlug,
+	cwdSlugVariants,
+	slugMatchesCwd,
 	resetCwdCache,
 	getCwdReadCount,
+	getCwdHistoryReadCount,
 	type WatchSettings,
 	type Interaction,
 	type ModelPricing,
@@ -78,6 +85,8 @@ import {
 	harnessLabel,
 	selectSessionPrompt
 } from "../extensions/lib/session-selector.ts";
+import { buildDisplayPath } from "../extensions/lib/session-path-shortener.ts";
+import { findRepoRoot, listWorktreeDirs, fanOutCwd } from "../extensions/lib/harness/worktrees.ts";
 import {
 	parseWtftCliArgs,
 	spawnWtftDaemon,
@@ -151,7 +160,20 @@ export {
 	resolveLastCwd,
 	cwdToSlug,
 	resetCwdCache,
-	getCwdReadCount
+	getCwdReadCount,
+	// Session discovery: slug encodings (#144), relocation history (#164),
+	// worktree fan-out (#145)
+	resolveCwdHistory,
+	pickLiveCwd,
+	pathExists,
+	cwdToStrictSlug,
+	cwdSlugVariants,
+	slugMatchesCwd,
+	getCwdHistoryReadCount,
+	buildDisplayPath,
+	findRepoRoot,
+	listWorktreeDirs,
+	fanOutCwd
 };
 
 // ---

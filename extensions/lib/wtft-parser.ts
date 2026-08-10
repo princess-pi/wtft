@@ -19,7 +19,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import { calculateClaudeCost, calculateServerToolCost, getDeepSeekPeakMultiplier } from "./wtft-cost.js";
 import { getParseAdapters } from "./harness/registry.ts";
-import type { ControlSignal } from "./harness/types.ts";
+import type { ControlSignal, UncountedBillableClass } from "./harness/types.ts";
 
 // ---
 // TYPES (#52) — single source of truth for parser output. These were referenced
@@ -472,6 +472,75 @@ export function parseSessionFile(filePath: string): Interaction[] {
 	attributeClaudeSubAgentCosts(interactions);
 
 	return interactions;
+}
+
+// ---
+// UNCOUNTED BILLABLES (#149) — naming the blind spot instead of estimating it
+//
+// Measured over seven status-line-logged sessions: 4.72% of Claude Code's own
+// `total_cost_usd` ($6.49 of $137.71) is spend the transcript records no `usage`
+// for. It is not an arithmetic error — #146's per-turn formula reproduces Claude
+// Code's counter to 4 decimal places — it is SCOPE. Two of the generating events
+// do leave a marker entry behind, so wtft can count them even though it can
+// never price them: `/compact` ($0.673267 measured on one Opus-5 compaction) and
+// the away-recap (1:1 with an unexplained cost step on every logged session).
+//
+// This deliberately returns COUNTS and no dollars. wtft's TOTAL stays strictly
+// derived from recorded usage — every dollar traceable to a `usage` object — and
+// the omission becomes visible rather than silent. See
+// docs/spec-149-compaction-cost-scope.md §5 for the roads not taken.
+// ---
+
+export interface UncountedBillables {
+	/** `/compact` requests: billed, and no `usage` is written for them. */
+	compaction: number;
+	/** "While you were away" recaps: billed, and no `usage` is written for them. */
+	recap: number;
+}
+
+export function newUncountedBillables(): UncountedBillables {
+	return { compaction: 0, recap: 0 };
+}
+
+export function addUncountedBillables(a: UncountedBillables, b: UncountedBillables): UncountedBillables {
+	return { compaction: a.compaction + b.compaction, recap: a.recap + b.recap };
+}
+
+/** First harness to claim the entry wins — an entry belongs to one schema, and
+ *  summing across adapters would double-count a marker two harnesses both
+ *  happen to recognize. */
+export function readUncountedBillableClass(entry: any): UncountedBillableClass | null {
+	for (const adapter of getParseAdapters()) {
+		const hit = adapter.readUncountedBillable?.(entry);
+		if (hit) return hit;
+	}
+	return null;
+}
+
+/**
+ * Count the billed-but-unrecorded events in one session file.
+ *
+ * A standalone scan rather than a field on `Interaction` or a wider
+ * `parseSessionFile` return type: these events attach to no interaction — that
+ * is precisely what makes them invisible — and `parseSessionFile`'s signature is
+ * load-bearing for the daemon tag file, watch mode and 40-odd suites.
+ */
+export function scanUncountedBillables(filePath: string): UncountedBillables {
+	const counts = newUncountedBillables();
+	let content: string;
+	try {
+		content = fs.readFileSync(filePath, "utf8");
+	} catch {
+		return counts; // missing/unreadable file reports no blind spot, never throws
+	}
+	for (const line of content.split("\n")) {
+		if (!line.trim()) continue;
+		let entry: any;
+		try { entry = JSON.parse(line); } catch { continue; }
+		const kind = readUncountedBillableClass(entry);
+		if (kind) counts[kind]++;
+	}
+	return counts;
 }
 
 // MESSAGE-ID DEDUPLICATION (#54)

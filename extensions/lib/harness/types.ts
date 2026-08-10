@@ -114,6 +114,19 @@ export type ControlSignal =
 	| { kind: "after-compaction" }
 	| { kind: "interrupt" };
 
+/**
+ * A class of API call the harness BILLS FOR but writes no `usage` object for
+ * (#149). Counted, never priced — see `docs/spec-149-compaction-cost-scope.md`.
+ *
+ * `compaction` — the call that produces a `/compact` summary. Measured
+ *   $0.673267 on one Opus-5 compaction; the transcript's `compactMetadata`
+ *   describes the resulting CONTEXT, never the call that produced it.
+ * `recap` — the "while you were away" summary. Every recap in the logged
+ *   sessions coincided 1:1 with an unexplained step in Claude Code's own cost
+ *   counter (3/3, 6/6, 3/3, 3/3 across four sessions).
+ */
+export type UncountedBillableClass = "compaction" | "recap";
+
 export interface HarnessParseAdapter {
 	/** Harness id — equals the directory name under harness/. */
 	readonly id: string;
@@ -123,6 +136,17 @@ export interface HarnessParseAdapter {
 	readBlock(block: any): ParsedBlock | null;
 	/** Recognize a stream-control entry. Null when the entry is not one. */
 	readControlEntry(entry: any): ControlSignal | null;
+	/**
+	 * Recognize an entry that stands for a billed API call carrying no `usage`
+	 * (#149). Measured: 4.72% of Claude Code's own `total_cost_usd` across seven
+	 * logged sessions is spend of this kind. wtft counts these so the omission is
+	 * NAMED rather than silent; it never prices them, because the numbers reach
+	 * no file any parser can read.
+	 *
+	 * Optional so out-of-tree harnesses registered through the #156 seam stay
+	 * valid unchanged — a harness that omits it simply reports no blind spot.
+	 */
+	readUncountedBillable?(entry: any): UncountedBillableClass | null;
 }
 
 // ---

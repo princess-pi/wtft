@@ -16,6 +16,7 @@ import type {
 	HarnessParseAdapter,
 	NormalizedUsage,
 	ParsedBlock,
+	UncountedBillableClass,
 } from "../types.ts";
 
 const ID = "pi";
@@ -97,6 +98,15 @@ export const parse: HarnessParseAdapter = {
 		if (entry.type === "compaction" && typeof entry.tokensBefore === "number") {
 			return { kind: "compaction", tokensBefore: entry.tokensBefore };
 		}
+		return null;
+	},
+
+	readUncountedBillable(entry: any): UncountedBillableClass | null {
+		// Same entry the control signal reads, answering a different question:
+		// `tokensBefore` says how much context was FREED, this says the summary
+		// call itself was billed and left no usage record (#149). Pi has no
+		// away-recap feature, so no "recap" arm.
+		if (entry?.type === "compaction") return "compaction";
 		return null;
 	},
 };

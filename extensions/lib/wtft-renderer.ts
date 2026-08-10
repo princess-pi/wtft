@@ -4,6 +4,11 @@
  * @description Bar chart rendering, histograms, token summaries, and terminal utilities.
  *   Builds visual output from parsed Interaction arrays: binned bar charts,
  *   SURGE timeline markers, "Other" command histograms, and per-model token tables.
+ *
+ *   One renderer takes input that is NOT an Interaction array:
+ *   `renderUncountedBillables` prints counts of billed-but-unrecorded events
+ *   (#149) below TOTAL. It is the only output here that reports spend wtft
+ *   cannot price, and it deliberately carries no dollar figure.
  */
 
 import type { Interaction, Category } from "./wtft-shared.js";

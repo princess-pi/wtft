@@ -2,7 +2,7 @@
 
 **Issue:** #149
 **Branch:** `149-compaction-cost-scope`
-**State:** Spec Approved
+**State:** Code and Spec Approved (Step 5)
 
 ---
 
@@ -13,14 +13,24 @@ Every number below comes from running
 in `~/.claude/statusline-logs/` on 2026-08-10. Nothing is carried over from the issue body
 on trust; the two claims from the issue that I re-verified in code are called out in §2.
 
-**No logged session has the `…a578` shape.** All seven are `claude-opus-5`, and none uses
-Task subagents — probed directly: zero `isSidechain` entries and zero `Task` `tool_use`
-blocks across all seven transcripts. The Fable-5-plus-35-subagents session that produced the
-original 11% observation predates the logging and cannot be re-measured. This spec therefore
-measures the gap on the sessions that exist and says plainly what that does and does not
-settle about a578 (§7).
+> **These are a snapshot, not a standing fact.** The measurement reads live, still-growing
+> session logs on one machine, so re-running the harness later returns different numbers by
+> construction. Every figure in §1 is stamped **as of 2026-08-10T11:00Z**. §1.4 records a
+> Step-5 re-run against the same seven sessions six hours later, and what changed between
+> them turned out to matter — see §7.
 
-### 1.1 Headline
+**No logged session had the `…a578` shape** *at that instant*. All seven were
+`claude-opus-5`, and none used Task subagents — probed directly: zero `isSidechain` entries
+and zero `Task` `tool_use` blocks across all seven transcripts as of 2026-08-10T11:00Z. The
+Fable-5-plus-35-subagents session that produced the original 11% observation predates the
+logging and cannot be re-measured. This spec therefore measures the gap on the sessions that
+exist and says plainly what that does and does not settle about a578 (§7).
+
+*(That "none uses subagents" fact expired the same day: by 2026-08-10T17:00Z session
+`e0d2ec4b` — live and partial in the table below — had acquired 18 subagent transcripts.
+§1.4 and §7 record what that revealed.)*
+
+### 1.1 Headline (as of 2026-08-10T11:00Z)
 
 | | |
 |---|---|
@@ -30,7 +40,7 @@ settle about a578 (§7).
 | residual as a fraction of billed | **4.72%** |
 | downward steps in the residual (instrument sanity) | **0** |
 
-### 1.2 Per session
+### 1.2 Per session (as of 2026-08-10T11:00Z)
 
 | session | model | billed (aligned span) | residual | % | steps | compactions |
 |---|---|---:|---:|---:|---:|---:|
@@ -42,7 +52,7 @@ settle about a578 (§7).
 | `e0d2ec4b` | opus-5 | $3.589026 | $0.213809 | 5.96% | 3 | 0 (live, partial) |
 | `d7b5ff30` | opus-5 | — | — | — | 0 | 0 (3 records, no span) |
 
-### 1.3 Decomposition of the $6.494548
+### 1.3 Decomposition of the $6.494548 (as of 2026-08-10T11:00Z)
 
 | class | steps | usd | share of residual |
 |---|---:|---:|---:|
@@ -54,17 +64,44 @@ The single compaction step reproduces the issue's earlier measurement to the cen
 with the old one-off. **But compaction is not the story.** Four of the five substantial
 sessions have zero compactions and still show a 2.9–6.4% residual.
 
+### 1.4 Step-5 re-run (2026-08-10T17:20Z) — the same seven sessions, six hours later
+
+`node research/149-cost-scope/paired-window-audit.mjs --all`, same log dir, same seven ids:
+
+| | 11:00Z | 17:20Z |
+|---|---:|---:|
+| billed over aligned spans | $137.709154 | $174.896350 |
+| residual | $6.494548 | $7.226350 |
+| residual as % of billed | 4.72% | 4.13% |
+| invisible-spend steps | 42 | 51 |
+| **downward steps** | **0** | **6** |
+
+The drift in the dollar figures is expected — live sessions kept billing. **The six downward
+steps are not.** All six are on `e0d2ec4b`, the row marked *(live, partial)* above, which in
+the interim ran a multi-agent workflow and grew 18 subagent transcripts. `ee53e779`, which
+has none, re-ran byte-identical: same $33.089463, same 9 steps at the same nine timestamps
+with the same amounts as the §4 table.
+
+A downward step is the instrument declaring itself unsound on that session — not a finding
+about spend. It is the first empirical confirmation of the caveat §7 had only asserted, and
+it is tracked as **#176**; the mechanism is deliberately not named here (see #176 for what
+is ruled out and what is only suspected). Consequences already carried:
+
+- the harness prints `⚠️  alignment broke` whenever `negativeSteps > 0`;
+- V1 skips subagent-bearing sessions rather than asserting on them (§8);
+- the §1 numbers are scoped to non-subagent sessions everywhere they are quoted.
+
 ---
 
 ## 2. Two claims from the issue, re-verified in code
 
 **(a) wtft has no compaction line at all for Claude Code sessions.** The renderer's
 compaction summary keys off `Interaction.compactionTokensBefore`
-(`extensions/lib/wtft-renderer.ts:1675-1684`), which is only ever set from a
-`{ kind: "compaction"; tokensBefore }` control signal. The **Pi** adapter emits that signal
-(`extensions/lib/harness/pi/parse.ts:97-98`); the **Claude Code** adapter emits only
-`{ kind: "after-compaction" }` from `entry.isCompactSummary`
-(`extensions/lib/harness/claude-code/parse.ts:93`) and never reads
+(`extensions/lib/wtft-renderer.ts:1683-1694`, post-branch line numbers), which is only ever
+set from a `{ kind: "compaction"; tokensBefore }` control signal. The **Pi** adapter emits
+that signal (`extensions/lib/harness/pi/parse.ts:98-99`); the **Claude Code** adapter emits
+only `{ kind: "after-compaction" }` from `entry.isCompactSummary`
+(`extensions/lib/harness/claude-code/parse.ts:94`) and never reads
 `system`/`compact_boundary` at all. So `tests/wtft-compaction-tracking.test.ts` — which
 constructs `type: "compaction"` entries — exercises the Pi path only, and a Claude Code
 session that compacted three times renders no compaction line whatsoever. The issue's
@@ -118,10 +155,21 @@ Records whose usage matches nothing ahead of the pointer (mid-stream renders, wh
 prefix sum by *index*, so a skipped record never drops an interaction, it only defers it to
 the next aligned record.
 
-**Sanity result: 0 downward steps across all 7 sessions.** A sound instrument on a
-one-directional phenomenon should never go backwards, and this one doesn't. The sawtooth is
-entirely gone. Alignment coverage: 225/225 interactions on `ee53e779`, 267/267 on
-`d730d9c3`, 146/147 on `227cbd29`.
+**Sanity result: 0 downward steps across all 7 sessions as they stood at 2026-08-10T11:00Z
+— none of which had Task subagents.** A sound instrument on a one-directional phenomenon
+should never go backwards, and on those sessions this one doesn't. The sawtooth is entirely
+gone. Alignment coverage: 225/225 interactions on `ee53e779`, 267/267 on `d730d9c3`,
+146/147 on `227cbd29`.
+
+**Where it is not sound.** Once `e0d2ec4b` grew 18 subagent transcripts the same harness
+reported 6 downward steps on it (§1.4), and alignment coverage collapsed to 55/107 records
+against 490/1003 interactions. So the monotonicity result above is a property of *this
+instrument on non-subagent sessions*, not of the instrument in general. The mechanism is
+unidentified and is tracked as **#176** — asserting one here would be exactly the
+plausible-story-ahead-of-a-measurement error §3.1 documents. Ruled out already:
+`loadWtftInteractions` does fold subagent files in, so it is not a missing-input problem.
+Practically: **treat any non-zero `negativeSteps` as "out of scope for this instrument",
+never as a finding.** The harness prints `⚠️  alignment broke` to make that unmissable.
 
 ### 3.3 Dedup rule (do not "fix" this)
 
@@ -135,8 +183,11 @@ measures **scope** and can never measure a difference in how the two sides were 
 
 ## 4. What the invisible spend actually is
 
-Each step has a consistent shape. Sample from `ee53e779` (Opus 5: cache read $0.50/MTok,
-output $25/MTok):
+Counts here are the 2026-08-10T11:00Z snapshot over the five substantial **non-subagent**
+sessions (§1.1); they do not include `e0d2ec4b`'s post-17:00Z steps, which the instrument
+flagged as unsound (§1.4). Each step has a consistent shape. Sample from `ee53e779` (Opus 5:
+cache read $0.50/MTok, output $25/MTok) — re-run at Step 5 and byte-identical, all nine
+steps at the same timestamps and amounts:
 
 | step at | usd | context at step start | implied output tokens if the call re-read the whole context from cache |
 |---|---:|---:|---:|
@@ -231,12 +282,23 @@ Optional so external harnesses registered through the #156 seam stay valid witho
 
 ### 6.2 Parser — a scan that does not disturb the interaction list
 
-New export in `extensions/lib/wtft-parser.ts`:
+New exports in `extensions/lib/wtft-parser.ts` — four functions and a type, all of them
+public because the CLI sums across several files and the tests exercise each step:
 
 ```ts
 export interface UncountedBillables { compaction: number; recap: number; }
+
+export function newUncountedBillables(): UncountedBillables;
+export function addUncountedBillables(a: UncountedBillables, b: UncountedBillables): UncountedBillables;
+export function readUncountedBillableClass(entry: any): UncountedBillableClass | null;
 export function scanUncountedBillables(filePath: string): UncountedBillables;
 ```
+
+`new`/`add` exist because §6.4 folds subagent files into one figure and needs an identity
+and a sum rather than ad-hoc `+`. `readUncountedBillableClass` is the registry fan-out and
+is exported so a test can assert the tie-break directly instead of inferring it from a file
+scan. `scanUncountedBillables` never throws: an unreadable or missing file reports no blind
+spot, because a session with no readable subagent file must not take the summary down.
 
 A separate scan rather than a new field on `Interaction` or a changed
 `parseSessionFile` return type: these events attach to no interaction (that is the whole
@@ -275,22 +337,35 @@ tokens *freed*, a different fact from spend *not counted*.
 subagent cost into TOTAL), summing the counts with `addUncountedBillables` before passing
 the result to `renderTokenSummary`. A compaction or recap inside a subagent transcript is
 exactly as invisible as one in the parent, so it must be counted the same way. Wired into
-the non-watch `--tokens` path only (`bin/wtft.ts` around the `if (opts.tokens)` block); the
-daemon (`wtft-daemon.mjs`) and `serve.mjs` watch loops export the same functions (rebuilt
-into their bundles) but do not yet call `renderUncountedBillables` — see "Deliberately not
-in scope" below.
+the non-watch `--tokens` path only (`bin/wtft.ts`, the `if (opts.tokens)` block).
+
+**A build constraint the code revealed (found at Step 4, not designed in).** `bin/wtft.ts`
+has an explicit `export { … }` block, and Bun tree-shakes anything absent from it out of
+`bin/wtft.mjs`. Every new symbol the tests import must therefore be added there — including
+`renderTokenSummary`, which this branch had to add even though it is *pre-existing* and
+*already used internally by `bin/wtft.ts`*: internal use is not a re-export, so it had never
+been reachable from the bundle. Any future test importing an existing helper from
+`bin/wtft.mjs` will hit the same wall. This is a packaging fact about the seam, not a
+change in behaviour — no runtime path changed by exporting it.
 
 ### Deliberately not in scope
 
 - No change to any cost arithmetic. #146 is confirmed correct twice over.
 - No change to the daemon tag-file format or to `parseSessionFile`'s return type.
 - No estimate, anywhere, of what the uncounted events cost.
-- No UNCOUNTED line in watch mode (`wtft-daemon.mjs`, `serve.mjs`). Both bundles carry the
-  new exports (`scanUncountedBillables`, `renderUncountedBillables`, …) because they inline
-  the whole of `bin/wtft.ts`, but neither watch loop calls `renderUncountedBillables` yet.
-  Deferred rather than wired blind: the watch UI redraws per keystroke/tail-event, and
-  whether re-scanning the transcript file on every redraw is cheap enough is untested. Left
-  as an open question for Step 4/5, not assumed here.
+- No UNCOUNTED line in watch mode (`wtft-daemon.mjs`, `serve.mjs`). Deferred rather than
+  wired blind: the watch UI redraws per keystroke/tail-event, and whether re-scanning the
+  transcript file on every redraw is cheap enough is untested. Naming a per-redraw cost
+  without measuring it is the same error §3.1 documents, so it stays an open question.
+
+  **What the built bundles actually contain** (verified at Step 5 by grepping them, because
+  the Step-2 draft asserted this wrongly): only `bin/wtft.mjs` carries the new functions —
+  `scanUncountedBillables`, `renderUncountedBillables`, `newUncountedBillables`,
+  `addUncountedBillables`, `readUncountedBillableClass`. `bin/wtft-daemon.mjs` carries only
+  the two adapters' `readUncountedBillable` methods, because it inlines the harness registry
+  and *not* `bin/wtft.ts`. `bin/serve.mjs` is untouched by this branch and carries none of
+  it. So wiring watch mode later is a real code change in two bundles, not a one-line call
+  into functions that are already there.
 
 ---
 
@@ -302,37 +377,114 @@ measured residual here; the issue's own scaled estimate for a578 was ~15%).
 
 **Does not settle:** a578 itself. Measured here is 4.72%; a578 showed ~11%. a578 was Fable 5
 (2× rates, which cancels in a ratio) with 35 subagent transcripts and one compaction — and
-**no logged session has subagents**, so the interaction between subagent sidechains and
-this invisible class is untested. The residual gap for a578 is roughly 6 percentage points,
-still unexplained.
+**no logged session had subagents at measurement time**, so the interaction between subagent
+sidechains and this invisible class is untested. The residual gap for a578 is roughly 6
+percentage points, still unexplained.
 
-**This issue therefore stays OPEN** with a specific next step: log a session that uses Task
-subagents, re-run the harness, and check whether each subagent contributes its own
-turn-boundary steps (which would roughly double the per-turn class on a subagent-heavy
-session and close most of the remaining 6 points). Closing it now on a 4.72% measurement
-presented as if it were the 11% would be a worse outcome than leaving it open.
+**The obvious next step was attempted, and it failed for a new reason.** By 2026-08-10T17Z a
+subagent-bearing session existed (`e0d2ec4b`, 18 subagent transcripts) and the harness ran
+against it. It reported a residual of 2.32% — and 6 downward steps (§1.4), which is the
+instrument declaring the number unsound rather than producing one. **So this spec still has
+no valid measurement of the subagent case**, and it is now clear that logging such a session
+was never sufficient: the instrument must first be made sound on sidechain sessions. That is
+filed as **#176**.
+
+**This issue therefore stays OPEN.** Revised next step, in order:
+
+1. **#176 first** — make usage alignment sound on subagent-bearing sessions, or establish
+   that `current_usage` cannot serve as a join key there. Until `negativeSteps === 0` on
+   such a session, any residual it reports is not evidence.
+2. **Then re-measure a578's shape** — with a sound instrument, check whether each subagent
+   contributes its own turn-boundary steps. That is the hypothesis that would roughly double
+   the per-turn class on a subagent-heavy session and close most of the remaining ~6 points.
+   It remains a hypothesis; nothing here tests it.
+
+Closing #149 now on a 4.72% non-subagent measurement presented as if it were the 11% would
+be a worse outcome than leaving it open — and closing it on `e0d2ec4b`'s 2.32% would be
+worse still, since that figure comes from a run the instrument itself flagged as broken.
+
+**What this branch does ship, independent of the above:** the blind spot is now *named* in
+the product (§6), which was the fork chosen in §5 and does not depend on resolving a578.
 
 ---
 
 ## 8. Spec gate — verification criteria
 
-Each is concretely checkable. V1–V4 are properties of the harness, V5–V9 of the wtft change.
+Each is concretely checkable. V1–V4 are properties of the harness, V5–V10 of the wtft change.
+All ten passed at Step 5 (2026-08-10T17:20Z): `bun run test` — **44 suites, 44 passed, 0
+failed**. The "status" column records what actually backs each row, including the two halves
+that no test covers.
 
-| | criterion | how it is checked |
-|---|---|---|
-| **V1** | The harness runs against any logged session id by prefix and against `--all`, and exits 0; against every *non-subagent* session on the machine, `negativeSteps === 0`. | `node research/149-cost-scope/paired-window-audit.mjs ee53e779` and `--all`; asserted live in `tests/wtft-issue-149-uncounted-billables.test.ts`, which skips (does not assert on) any logged session whose transcript has subagent files — §7 is explicit that alignment on subagent-bearing sessions is untested, and this machine now runs multi-agent workflows that log exactly such sessions mid-run. Caught for real during Step 4 (Code Approved): a live dispatcher session with Task subagents produced 6 negative steps, confirming the §7 caveat empirically rather than leaving it purely theoretical. |
-| **V2** | The residual staircase is monotone: `negativeSteps === 0` on every session with ≥ 2 aligned records. | printed as `downward steps (instrument sanity)`; asserted in `tests/wtft-issue-149-uncounted-billables.test.ts` over a synthetic log + transcript pair |
-| **V3** | Alignment is by usage, not timestamp: a synthetic transcript whose entries are written 5 s *after* the status record that bills them still yields residual 0. | test fixture with deliberately lagged timestamps |
-| **V4** | An injected invisible call (status cost advances with no matching transcript usage) is detected as exactly one step of exactly that size. | test fixture; assert `steps.length === 1` and `steps[0].usd` to 6 dp |
-| **V5** | `scanUncountedBillables` counts a Claude Code `system`/`compact_boundary` as one compaction. | unit test with a synthetic Claude Code JSONL |
-| **V6** | `scanUncountedBillables` counts a Claude Code `system`/`away_summary` as one recap. | same |
-| **V7** | `scanUncountedBillables` counts a Pi `type: "compaction"` entry as one compaction, and does **not** double-count it via the existing control-signal path. | unit test with a synthetic Pi JSONL; also assert the existing `compactionTokensBefore` stamp still lands |
-| **V8** | `renderTokenSummary` emits an `UNCOUNTED` line naming both counts when either is non-zero, and emits nothing new when both are zero or the argument is omitted. | string assertions on the rendered output |
-| **V9** | No cost number changes: `renderTokenSummary`'s TOTAL for a fixture is byte-identical with and without the `uncounted` argument. | assert the TOTAL row is unchanged |
-| **V10** | Existing compaction behaviour is untouched: `tests/wtft-compaction-tracking.test.ts` passes unmodified. | run that suite |
+| | criterion | how it is checked | status |
+|---|---|---|---|
+| **V1** | The harness runs against any logged session id by prefix and against `--all`, and exits 0; against every *non-subagent* session on the machine, `negativeSteps === 0`. | The exit-0 half is checked by hand — `node research/149-cost-scope/paired-window-audit.mjs ee53e779` and `--all` both exit 0 (re-run at Step 5). The monotonicity half is asserted live in `tests/wtft-issue-149-uncounted-billables.test.ts`, which **skips** any logged session whose transcript has subagent files, and additionally asserts `residual >= -1e-6`, every step positive, and `readStatusLog` ascending by `_epoch_ms`. | pass; the CLI-exit-0 half is **reconciled-against-untested** (no suite shells out to the harness binary). Skip rule is load-bearing, not defensive: `e0d2ec4b` really does produce 6 negative steps (§1.4, #176). |
+| **V2** | The residual staircase is monotone: `negativeSteps === 0` on every session with ≥ 2 aligned records. | printed as `downward steps (instrument sanity)`; asserted in `tests/wtft-issue-149-uncounted-billables.test.ts` over a synthetic log + transcript pair | pass **on synthetic fixtures and on non-subagent sessions only**. The criterion as originally worded ("every session") is now known to be false in general — see §1.4/§3.2 and #176. The scope limit is the finding, not a weakening of the test. |
+| **V3** | Alignment is by usage, not timestamp: a synthetic transcript whose entries are written 5 s *after* the status record that bills them still yields residual 0. | test fixture with deliberately lagged timestamps | pass |
+| **V4** | An injected invisible call (status cost advances with no matching transcript usage) is detected as exactly one step of exactly that size. | test fixture; assert `steps.length === 1` and `steps[0].usd` to 6 dp | pass (injected $0.157782, the magnitude measured on `ee53e779`, recovered to < 1e-9) |
+| **V5** | `scanUncountedBillables` counts a Claude Code `system`/`compact_boundary` as one compaction. | unit test with a synthetic Claude Code JSONL | pass — fixture pairs the boundary with its `isCompactSummary` user entry and asserts the count is 1, not 2 |
+| **V6** | `scanUncountedBillables` counts a Claude Code `system`/`away_summary` as one recap. | same | pass — same fixture asserts a sibling `system`/`turn_duration` is **not** counted (§5 "roads not taken": only ~55% of turn boundaries coincide with spend) |
+| **V7** | `scanUncountedBillables` counts a Pi `type: "compaction"` entry as one compaction, and does **not** double-count it via the existing control-signal path. | unit test with a synthetic Pi JSONL; also assert the existing `compactionTokensBefore` stamp still lands | pass — `compactionTokensBefore === 50000` still lands on the following interaction |
+| **V8** | `renderTokenSummary` emits an `UNCOUNTED` line naming both counts when either is non-zero, and emits nothing new when both are zero or the argument is omitted. | string assertions on the rendered output | pass, at both levels: `renderUncountedBillables` directly (singular/plural, only non-zero classes, `""` for all-zero and for `undefined`) and through `renderTokenSummary` |
+| **V9** | No cost number changes: `renderTokenSummary`'s TOTAL for a fixture is byte-identical with and without the `uncounted` argument. | assert the TOTAL row is unchanged | pass, and additionally that the block is *appended*, never interleaved |
+| **V10** | Existing compaction behaviour is untouched: `tests/wtft-compaction-tracking.test.ts` passes unmodified. | run that suite | pass, unmodified — and 43 other suites with it |
+
+**Typecheck.** `bun run typecheck` is red with 2 × TS7016 in `bin/serve.ts` and
+`extensions/lib/serve/process.ts`, both pointing at `extensions/lib/serve/cloudflare.js`.
+Verified byte-identical to `main` @ `ad91cdc` — pre-existing baseline debt on a file this
+branch does not touch, already tracked as **#168** ("typecheck is red on clean main — and
+nothing gates it"). Not fixed here: Step 5 forbids production-code changes, and the fix is
+`serve`'s, not `wtft`'s.
 
 ---
 
 ## 9. Reconciliation record (Step 5)
 
-_To be filled at Step 5._
+Pass performed 2026-08-10T17:20Z against the code at `f67425c` (Code Approved). Scope was
+**file-level**: every file the branch touched was audited whole, plus every readable surface
+that describes them — `docs/manifests/wtft-cmd.json` (drives `--help`, `--why` and the HTML
+docs), `docs/adding-a-harness.md`, `docs/EXT_WTFT.html`, `CONTEXT.md`, module docstrings,
+test header comments, and the rendered CLI output itself.
+
+Two passes were run; the second found nothing new.
+
+| artifact | claim it made | contradicted by | test-covered? | action |
+|---|---|---|---|---|
+| `docs/adding-a-harness.md` §2 | `HarnessParseAdapter` has exactly three methods | `extensions/lib/harness/types.ts` — a fourth, optional `readUncountedBillable` | yes, `wtft-issue-156-harness-seam` proves an adapter without it stays valid | **fixed** — method added to the interface block with an "optional (#149)" marker and a bullet stating the first-match-wins rule, the "omit it and your harness reports no blind spot" contract, and the 4.72% motivation. An omission, not a false statement: a harness author reading it concluded the method did not exist. |
+| `docs/manifests/wtft-cmd.json` `--tokens` | `--tokens` prints "a per-model token summary table with utilization" — full stop | `bin/wtft.ts` also prints an UNCOUNTED line under `--tokens`; verified live against `ee53e779` (`UNCOUNTED  3 recaps …`) | yes, V8 | **fixed** — flag description now names the UNCOUNTED line, that subagent transcripts are included, and that it is deliberately not in TOTAL |
+| `docs/manifests/wtft-cmd.json` `why` | nine scenarios, none explaining why TOTAL reads lower than the harness's own counter — the single most likely question this feature provokes | §5's chosen fork exists precisely to answer it | partly — V8 covers the wording, nothing covers the manifest | **fixed** — added a `why` scenario with a demo captured from real output. Also states the watch-mode limitation, which no user-facing surface said anywhere. |
+| spec §6.4 + "Deliberately not in scope" | `wtft-daemon.mjs` and `serve.mjs` "both bundles carry the new exports … because they inline the whole of `bin/wtft.ts`" | grep of the built bundles: only `bin/wtft.mjs` has them; `wtft-daemon.mjs` has only the two adapters' `readUncountedBillable`; `serve.mjs` is untouched by this branch | no — no suite asserts bundle contents | **fixed** — replaced with the verified contents, and the consequence spelled out: wiring watch mode later is a real change in two bundles, not a one-line call. `reconciled-against-untested`. |
+| spec §6.2 | wtft-parser gains 1 function + 1 interface | code exports 4 functions + 1 interface (`new`/`add`/`readUncountedBillableClass`/`scan`) | yes — every one is imported by name in the test suite | **fixed** — full signature list, plus why each is public and the never-throws contract on `scan` |
+| spec §6.4 | (silent) | `renderTokenSummary` had to be added to `bin/wtft.ts`'s explicit re-export block or Bun tree-shakes it out of `bin/wtft.mjs` — a pre-existing symbol, used internally, never reachable from the bundle | yes, by construction: the test imports it and failed until the export landed | **fixed** — documented as a packaging fact of the seam that will bite the next test that imports an existing helper |
+| spec §1 | "none uses Task subagents — zero `isSidechain` entries … across all seven transcripts" | `e0d2ec4b` now has 18 subagent transcripts (`discoverSubagentSessionFiles`) | yes, and it is why V1 skips such sessions | **fixed** — every §1 figure is now stamped *as of 2026-08-10T11:00Z* and flagged as a snapshot over live, growing logs |
+| spec §1.1 / §3.2 | "0 downward steps across all 7 sessions" | Step-5 re-run: 6 downward steps, all on `e0d2ec4b` | yes (V1/V2 scope) | **fixed** — new §1.4 records the re-run side by side; §3.2 gains an explicit "where it is not sound" and the practical rule that a non-zero `negativeSteps` is an out-of-scope signal, never a finding. Filed as **#176**. |
+| spec §2(a) | cites `wtft-renderer.ts:1675-1684`, `pi/parse.ts:97-98`, `claude-code/parse.ts:93` | this branch's own edits shifted all three | no | **fixed** — now `1683-1694`, `98-99`, `94`. (Line-number citations are inherently fragile; kept because §2 is an argument about specific code, and marked "post-branch".) |
+| spec §7 | next step is "log a session that uses Task subagents, re-run the harness" | that was done, and the run was unsound — so the step was never sufficient | n/a | **fixed** — next step re-ordered: #176 first, a578's shape second. #149 stays open, now with a sharper reason than "not measured yet". |
+| `research/…/paired-window-audit.mjs` header | "Measured across five logged sessions, R has ZERO negative steps" — stated as a property of the instrument | the subagent case | yes | **fixed** — split into "where it is validated" and "where it is not", with the mechanism explicitly *not* named (naming one would repeat the error the SAWTOOTH paragraph two lines above documents) |
+| `tests/wtft-issue-149-…test.ts` header | "Two halves: V2–V4 … V5–V10" | the file also contains a V1 group | n/a (it is the header) | **fixed** — three groups, with V1's machine-dependence and its skip rule stated in the header rather than only in an inline comment 170 lines down |
+| `extensions/lib/wtft-parser.ts` `@description` | module "extracts token usage and cost per assistant message, and classifies interactions"; neutral vocabulary is "AssistantTurn / ParsedBlock / ControlSignal" | it now also runs a scan producing *no* interactions, over a fourth vocabulary type | yes, V5–V7 | **fixed** — both sentences updated |
+| `extensions/lib/wtft-renderer.ts` `@description` | "Builds visual output from parsed Interaction arrays" | `renderUncountedBillables` takes no Interaction array | yes, V8 | **fixed** — called out as the one renderer whose input is not interactions, and the only output reporting spend wtft cannot price |
+| `docs/agents/tool-conventions.md` | "Manifest `why` entries have three fields" | the shared help renderer (`extensions/lib/merge/help.ts:44-45`) also renders a fourth, `demo` — used throughout `wtft-cmd.json`, including the entry added by this pass | no | **fixed** — fourth field documented as optional, with the ANSI-escape convention (written `\u001b[…m` in the JSON, never a raw control byte) and the rule to paste real output rather than invent it. Not a file this branch touched, but it is the doc that governs the manifest this branch edits, and it would have misled the next author. |
+| `docs/agents/build-and-toolchain.md` | states the GENERATED rule and that "tests must run against the built `.mjs`", and stops there | the two rules together produce a failure it never mentions: a suite cannot import a symbol missing from `bin/wtft.ts`'s explicit `export { … }` block, even one the file itself uses | yes — the Step-4 failure was exactly this | **fixed** — new subsection with the real error text and the `renderTokenSummary` case. The most reusable finding of this branch; it will recur for any suite reaching for an existing helper. |
+| §4 counts | step counts stated without scope | they exclude `e0d2ec4b`'s later, unsound steps | n/a | **fixed** — snapshot + non-subagent scope stated inline; `ee53e779`'s nine-step table re-verified byte-identical at Step 5 |
+| `docs/EXT_WTFT.html` | — | audited; describes the bar chart, cache-miss divider and pricing tables, and never enumerates `--tokens` summary rows, so the UNCOUNTED line contradicts nothing there | n/a | **no change**. Its own separate staleness is already tracked as #169/#167. |
+| `CONTEXT.md` | — | has only a `Language — Serve` section; no WTFT glossary exists yet to contradict | n/a | **no change** — a `Language — WTFT` section is #166's scope, and "uncounted billable" belongs in it when written |
+| `bin/*.mjs` | — | rebuilt from `.ts` at Step 4 and committed; re-verified at Step 5 that `bin/wtft.mjs` exports all five new symbols and the live CLI prints the line | yes, end to end | **no change** |
+
+### Verified unchanged (the point of the exercise)
+
+No production code was modified in this step. `git diff f67425c..HEAD` touches only
+`docs/` (spec, manifest, `adding-a-harness.md`, `tool-conventions.md`,
+`build-and-toolchain.md`), a `.mjs` module
+*comment* under `research/`, a test *header comment*, and two `@description` blocks in
+`extensions/`. Both `extensions/` edits are JSDoc — no statement, expression or signature
+changed, and no `bin/*.mjs` needed rebuilding (the manifest is read from disk at runtime,
+not bundled). `bun run test` re-run after the edits: **44 suites, 44 passed, 0 failed**.
+
+### Left open deliberately
+
+- **#149** — see §7. A 4.72% non-subagent measurement is not the ~11% the issue asked about,
+  and the one subagent measurement available is from a run the instrument flagged as broken.
+- **#176** (new) — usage alignment on subagent-bearing sessions. Blocks step 2 of §7.
+- **#168** — repo-wide red typecheck, pre-existing, `serve`-side.
+- **Watch-mode UNCOUNTED line** — §6 "Deliberately not in scope", now with the accurate
+  statement of what wiring it would actually cost.

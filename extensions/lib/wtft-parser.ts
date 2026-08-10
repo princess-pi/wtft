@@ -5,9 +5,16 @@
  *   Extracts token usage and cost per assistant message, and classifies
  *   interactions into spec/code/other categories.
  *
+ *   It also runs one scan that yields NO interactions at all:
+ *   `scanUncountedBillables` counts the entries that stand for API calls the
+ *   harness bills for but writes no `usage` object for (#149). Counted, never
+ *   priced — so TOTAL stays strictly derived from recorded usage while the
+ *   omission stops being silent.
+ *
  *   Schema knowledge lives behind the harness seam (#156):
  *   harness/<id>/parse.ts translates one harness's entry shape into the neutral
- *   AssistantTurn / ParsedBlock / ControlSignal vocabulary, and everything in
+ *   AssistantTurn / ParsedBlock / ControlSignal / UncountedBillableClass
+ *   vocabulary, and everything in
  *   this file operates on that vocabulary alone. Cost, cache observation, the
  *   meter-split, and classification stay here — shared — so a new harness
  *   cannot get billing wrong. Adding a harness must not require editing this

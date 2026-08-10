@@ -1,14 +1,21 @@
 /**
  * Tests for #149 — transcript-invisible spend, counted but never priced.
  *
- * Two halves, matching docs/spec-149-compaction-cost-scope.md §8:
+ * Three groups, matching docs/spec-149-compaction-cost-scope.md §8:
  *
- *   V2–V4  the research harness's residual instrument. The point of these is
- *          that the FIRST instrument (pair status records by timestamp) was
- *          wrong: transcript entries are flushed up to ~1.5s after the status
- *          record that bills them, so timestamp windows sawtooth ±$0.20. V3 is
- *          the regression guard — it builds a fixture whose transcript lags
- *          deliberately and asserts the residual is still zero.
+ *   V2–V4  the research harness's residual instrument, on synthetic fixtures.
+ *          The point of these is that the FIRST instrument (pair status records
+ *          by timestamp) was wrong: transcript entries are flushed up to ~1.5s
+ *          after the status record that bills them, so timestamp windows sawtooth
+ *          ±$0.20. V3 is the regression guard — it builds a fixture whose
+ *          transcript lags deliberately and asserts the residual is still zero.
+ *
+ *   V1     the same instrument against whatever real sessions this machine has
+ *          logged. Necessarily machine-dependent, so it degrades to a skip when
+ *          there are no logs. It deliberately SKIPS any session with subagent
+ *          transcripts: spec §7 states the subagent case is untested, and a live
+ *          dispatcher session (`e0d2ec4b`, 18 subagent files) does step downward.
+ *          Asserting there would test a claim the spec never made.
  *
  *   V5–V10 the wtft change: count `/compact` and away-recap events per harness,
  *          render them as an UNCOUNTED line, and change no cost number.

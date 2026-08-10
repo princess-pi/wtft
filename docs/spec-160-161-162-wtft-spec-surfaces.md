@@ -4,7 +4,7 @@
 [#161](https://github.com/duppypro/princess-pi-packages/issues/161),
 [#162](https://github.com/duppypro/princess-pi-packages/issues/162)
 **Branch:** `160-161-162-wtft-spec-surfaces`
-**State:** Spec Draft
+**State:** Spec Approved
 
 ---
 
@@ -117,10 +117,13 @@ a page with two flag references, one correct-forever (fetched) and one stale-for
    off the same `data.usage` array already in the manifest and already loaded for `--why`. One
    `fetch`, two render targets (`#wtft-flag-reference`, `#wtft-why-reference`).
 2. **Section structure**: add `id` attributes to every existing `<h3>` so anchors are real
-   (`#overview`, `#flag-reference`, `#classification`, `#surge-timeline`, `#tui-style`,
-   `#architecture`, `#pricing`, `#config`, `#daemon-health`, `#detailed-specs`, `#why`), and a
-   short in-page nav list right under the intro paragraph linking each — this is where the
-   `href` count goes from 0 to double digits.
+   (`#overview`, `#command-reference`, `#classification`, `#surge-timeline`, `#tui-style`,
+   `#architecture`, `#pricing`, `#config`, `#verification-plan`, `#daemon-health`,
+   `#detailed-specs`, `#why` — 12 headings, all of them, not just the ones with obvious nav
+   value), and a short in-page nav list right under the intro paragraph linking each (nav omits
+   `#verification-plan`, a stub three-line placeholder section with no content worth a direct
+   jump target — the `id` still exists for deep-linking) — this is where the `href` count goes
+   from 0 to 32.
 3. **New "Detailed specs" section** (`#detailed-specs`) — a static index (not fetched; these are
    files, not manifest data) of every `docs/spec-*.md` belonging to wtft, one-line summary, issue
    number(s), each an `<a href="spec-NNN-*.md">`. Includes an explicit note for the six branches
@@ -208,7 +211,7 @@ not identical):
 | `daemon` | `docs/manifests/wtft-cmd.json` | 1 (`"Is wtft-daemon installed?"`-style context only, not a standalone label) |
 | `log parser` | `docs/manifests/wtft-cmd.json` | 5 (`--list`, `--cleanup`, `--restart`, `--stop`, `-F`) |
 | `log parser` | repo-wide (`rg -ci "log parser" -g '!node_modules' .`, summed per-file) | 68, across `bin/wtft-daemon.{ts,mjs}` (27), `bin/wtft.{ts,mjs}` (4), `docs/wtft-incremental-render-spec.md` (9), `docs/EXT_WTFT.html` (8), the manifest (5), `extensions/wtft.ts` (4), `extensions/lib/wtft-cli-shared.ts` (3), `extensions/lib/wtft-daemon-lib.ts` (4), `session-selector.ts` (1), one test (3) |
-| Filenames containing `daemon` | repo-wide | `bin/wtft-daemon.ts`, `bin/wtft-daemon.mjs`, `extensions/lib/wtft-daemon-lib.ts`, `wtft-daemon` (wrapper), `docs/spec-95-daemon-lifecycle.md`, `docs/spec-156-155-harness-seam-and-daemon-follow.md`, `research/wtft-daemon-spec.md`, `tests/wtft-daemon-cost-cross-validation.test.ts`, `tests/wtft-daemon-lifecycle.test.ts`, `tests/wtft-daemon.test.sh`, `tests/wtft-issue-155-daemon-follow.test.ts` — **11 files**, not the issue's "three" (issue undercounted filenames too) |
+| Filenames containing `daemon` | repo-wide | `bin/wtft-daemon.ts`, `bin/wtft-daemon.mjs`, `extensions/lib/wtft-daemon-lib.ts`, `wtft-daemon` (wrapper), `debug/verify-daemon-parse.mjs`, `docs/spec-95-daemon-lifecycle.md`, `docs/spec-156-155-harness-seam-and-daemon-follow.md`, `research/wtft-daemon-spec.md`, `tests/wtft-daemon-cost-cross-validation.test.ts`, `tests/wtft-daemon-lifecycle.test.ts`, `tests/wtft-daemon.test.sh`, `tests/wtft-issue-155-daemon-follow.test.ts` — **12 files** (re-verified at Step 2 with `fd -HI daemon --type f`; the Step 1 draft undercounted by one, missing the `debug/` script), not the issue's "three" (issue undercounted filenames too) |
 
 Daemon wins on every axis that isn't the manifest's user-facing strings: overwhelming code
 volume, every filename, both spec files about the thing. `log parser` is not a typo or a stray
@@ -279,7 +282,7 @@ actual numbers if they differ from this draft — GitHub assigns at creation tim
 | V1 | `node bin/wtft.mjs --help` | Output mentions the turn unit (`t`, and the word "turns") | Manual run after manifest edit, output inspected for the string |
 | V2 | `node bin/wtft.mjs --why` | Runs clean, no new errors, existing scenarios unaffected | Manual run, diffed against pre-change output for unrelated scenarios |
 | V3 | New/extended test in `tests/wtft-spec-alignment.test.ts` | Brute-force probe of `parseInterval` against the manifest's `-i` flag string; **fails** if a unit the parser accepts is undocumented | `bun test tests/wtft-spec-alignment.test.ts` — exit 0 after the manifest fix; can be proven to catch regressions by reverting the manifest edit locally and re-running (not committed — see V3b) |
-| V3b | Regression-proof for V3 | Reverting the manifest's `-i` entry back to `<size><m\|h\|d\|w>` makes V3 fail | Manual: `git stash` the manifest hunk, rerun the suite, confirm FAIL, restore |
+| V3b | Regression-proof for V3 | Reverting the manifest's `-i` entry back to `<size><m\|h\|d\|w>` makes V3 fail | Executed at Step 2: reverted `flags`/`desc` in place, ran `node --experimental-strip-types tests/wtft-spec-alignment.test.ts`, confirmed the `#160` block FAILs with the exact "manifest description never mentions turn" message, restored the file, confirmed `git diff` empty |
 | V4 | New test asserting every `docs/spec-*.md` on disk is `href`-linked from `docs/EXT_WTFT.html` | PASS on this branch's file set; comment in the test explains why the reverse (every link resolves) is deliberately not asserted — five sibling specs are legitimately absent until merge | New test file, `bun test <file>` exit 0 |
 | V5 | `docs/EXT_WTFT.html` flag reference | No flag/behavior text is a second hardcoded copy of manifest content — the old `<ul>` Options block is gone, replaced by a `fetch`-driven render off `data.usage` | Manual diff of the file; `rg -c 'interval.*<size>' docs/EXT_WTFT.html` before/after (should drop from 2 static occurrences to 0, all through the manifest fetch) |
 | V6 | `docs/EXT_WTFT.html` `href` count | > 0 (was 0) | `rg -o 'href="[^"]*"' docs/EXT_WTFT.html \| wc -l` |
@@ -287,8 +290,11 @@ actual numbers if they differ from this draft — GitHub assigns at creation tim
 | V8 | `bun run build` | Succeeds; no generated `.mjs` hand-edited (none of this branch's changes touch `.ts` sources that build to `.mjs`) | `bun run build && git status --short` shows no unexpected `.mjs` diff |
 | V9 | `bun run typecheck` | No new errors beyond any pre-existing known ones | Manual run, diffed against baseline |
 
-Per the CLAUDE.md Step 3 rule, **V1–V9 are not run before the Code Draft commit** — they are the
-handoff to whoever takes this to Step 4.
+Per the CLAUDE.md Step 3 rule, **V1–V9 were not run before the Code Draft commit** — that
+handoff to Step 4 is now closed: all nine were run and passed at Step 2/4 of this same pass (this
+spec doc is corrected in place first — §2.1, §4.1 — per the ordering rule that Spec Approved
+precedes Code Approved). See the Step 4 status comments on #160/#161/#162 for the exact commands
+and output.
 
 ---
 

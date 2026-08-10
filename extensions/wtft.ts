@@ -245,7 +245,7 @@ function updateWtftWidget(
 	}
 
 	// ---
-	// Append log parser status (inline if it fits, otherwise separate line).
+	// Append daemon status (inline if it fits, otherwise separate line).
 	// ---
 	let parserStatusStr = "";
 	if (sessionFile) {
@@ -277,10 +277,10 @@ let _wtftCtx: any = null;
 let _wtftRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
 export default function wtftExtension(pi: ExtensionAPI) {
-	// 1. Auto-restore on startup + spawn log parser
+	// 1. Auto-restore on startup + spawn daemon
 	pi.on("session_start", async (_event, ctx) => {
 		_wtftCtx = ctx;
-		// Spawn log parser for this session to keep wtft-tag file warm for CLI use.
+		// Spawn daemon for this session to keep wtft-tag file warm for CLI use.
 		const sessionFile = ctx.sessionManager.getSessionFile?.();
 		if (sessionFile) {
 			ensureDaemonRunning(sessionFile, _daemonDir);
@@ -367,7 +367,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				// Respawn daemon (reads session file from scratch, rewrites tag file)
 				ensureDaemonRunning(sessionFile, _daemonDir);
 				updateWtftWidget(ctx, pi);
-				ctx.ui.notify("Tag file deleted and log parser respawned — full session re-parse in progress.", "info");
+				ctx.ui.notify("Tag file deleted and log parser daemon respawned — full session re-parse in progress.", "info");
 				return;
 			}
 

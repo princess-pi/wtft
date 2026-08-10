@@ -1,16 +1,16 @@
-# WTFT `--watch` Live Render + Log Parser Health Monitoring + SURGE Timeline
+# WTFT `--watch` Live Render + Log Parser Daemon Health Monitoring + SURGE Timeline
 
 **Status:** Code and Spec Approved (Step 5) — updated 2026-08-01 with #124 additions
 
 ## Goal
 
-Provide a live-updating cost chart in wtft `--watch` mode, backed by a persistent log parser daemon that pre-classifies session entries into a harness-agnostic tag file. The TUI watches the tag file via inotify (`fs.watch`) for zero-latency updates, and monitors the log parser's health with a colored status indicator on the title line. All render paths (Pi widget, CLI non-watch, CLI `--watch`) share a single SURGE timeline rendering inside `buildWtftLines`.
+Provide a live-updating cost chart in wtft `--watch` mode, backed by a persistent log parser daemon that pre-classifies session entries into a harness-agnostic tag file. The TUI watches the tag file via inotify (`fs.watch`) for zero-latency updates, and monitors the daemon's health with a colored status indicator on the title line. All render paths (Pi widget, CLI non-watch, CLI `--watch`) share a single SURGE timeline rendering inside `buildWtftLines`.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  wtft-daemon (log parser) — detached, singleton per     │
+│  wtft-daemon — detached, singleton per                  │
 │  session. Polls session.jsonl every 667ms, classifies   │
 │  entries, writes to wtft-tags/<session>.tag.v2.3.4.jsonl│
 │  Tag format includes message.id for cross-run dedup.    │
@@ -33,7 +33,7 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 │  watches for changes via fs.watch. Renders full chart   │
 │  on every new data event + per-minute timeline refresh. │
 │  Monitors daemon health via PID file + _hb heartbeat.   │
-│  'r' key restarts the log parser (5s fast-poll after).  │
+│  'r' key restarts the daemon (5s fast-poll after).      │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -43,7 +43,7 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 - `fs.watch` on the tag file gives zero-latency updates vs. 667ms poll worst-case
 - Same classified tag file format works across Pi (in-memory) and CLI (daemon-backed)
 
-## Log Parser Lifecycle
+## Log Parser Daemon Lifecycle
 
 | Event | Behavior |
 |---|---|
@@ -63,7 +63,7 @@ Row 1:  sessionPath  (dim)
 Row 2:  💸 WTF Tokens?  (◆--orange--green--|--green---orange--◆) ⚡ SURGE 2x  ● live
 Row 3:  [legend: Spec, Mixed, Code, Tests, Research, Git, Grep, Prompt, Other]
 Row 4+: ticks line (if --ticks), date dividers, bucket rows
-Footer: q/Ctrl+C to exit, r to restart log parser  (r in red when daemon dead)
+Footer: q/Ctrl+C to exit, 'r' to restart  (r in red when daemon dead)
 ```
 
 The 24-hour SURGE timeline and daemon status indicator are appended inline to the title line if they fit within terminal width; otherwise they wrap to separate lines between title and legend.
@@ -135,13 +135,13 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 
 | Situation | Handling |
 |---|---|
-| Daemon exits (idle timeout, 24h) | Title shows `● stopped HH:MM` in red; footer shows red `r to restart log parser` |
+| Daemon exits (idle timeout, 24h) | Title shows `● stopped HH:MM` in red; footer shows red `'r' to restart` |
 | No activity for 2m2s | Status flips to `● idle (M:SS to expire)` — countdown from model cache TTL. Model is read from the most recent classified tag entry (scanning past the consolidated heartbeat line). |
 | Local model (no cache) | Status shows `● idle` without countdown |
 | User presses `r` | Daemon restarts, status shows `● restarting...`, clears to `● live` within 5s |
 | Tag file deleted/truncated | `fs.watch` handler re-reads from zero |
 | Daemon spawned before session file exists | Status shows `● waiting for session .jsonl...` (yellow); daemon polls until file created (#124) |
-| Daemon never started | PID check fails, status shows "log parser not found" |
+| Daemon never started | PID check fails, status shows "daemon not found" |
 | Daemon restarts after crash | Reads `_meta` offset from tag file for exact resume position; falls back to full re-parse if no meta offset found (#124) |
 | Daemon encounters transient error | Error logged (debug mode), daemon continues on next poll cycle — does not crash |
 | Terminal too narrow for inline status | Status wraps to separate line between title and legend |

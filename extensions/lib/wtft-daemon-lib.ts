@@ -468,7 +468,7 @@ export interface DaemonStatus {
 	/** Cache TTL in ms for the current model (null = local/no cache). */
 	cacheTtlMs?: number | null;
 	/** Daemon was just spawned and hasn't confirmed alive yet — show "starting..."
-	 *  instead of "log parser not found" during the startup grace window (#124). */
+	 *  instead of "daemon not found" during the startup grace window (#124). */
 	starting?: boolean;
 	/** Session file doesn't exist yet — daemon is waiting for it to be created.
 	 *  Widget shows "waiting for session .jsonl..." instead of "starting..." (#124). */
@@ -674,7 +674,7 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 	} catch {}
 
 	if (lastHbMs === 0) {
-		return { alive: false, reason: "log parser not found" };
+		return { alive: false, reason: "daemon not found" };
 	}
 
 	// Format the heartbeat time as local HH:MM.
@@ -814,7 +814,7 @@ export async function watchTagFile(
 		}
 	};
 
-	// Raw stdin for 'q'/'Q' quit and 'r' log parser restart.
+	// Raw stdin for 'q'/'Q' quit and 'r' daemon restart.
 	const cleanupStdin = enterRawStdin((key: string) => {
 		if (key === "q" || key === "Q" || key === "\u0003") {
 			exitWatch();
@@ -1082,7 +1082,7 @@ export async function watchTagFile(
 	if (fs.existsSync(tagPath)) {
 		startWatching();
 	} else {
-		console.error("❌ Log parser did not create tag file within 5s. Is wtft-daemon installed?");
+		console.error("❌ Log parser daemon did not create tag file within 5s. Is wtft-daemon installed?");
 		console.error(`   Expected: ${tagPath}`);
 		process.exit(1);
 	}

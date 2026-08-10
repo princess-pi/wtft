@@ -193,23 +193,23 @@
     },
     {
       "flags": "--list",
-      "desc": "List all running log parsers with session path, PID, parser version, and idle time."
+      "desc": "List all running log parser daemons with session path, PID, parser version, and idle time."
     },
     {
       "flags": "--cleanup",
-      "desc": "Kill log parsers whose source session no longer exists."
+      "desc": "Kill log parser daemons whose source session no longer exists."
     },
     {
       "flags": "--restart",
-      "desc": "Kill all running log parsers (fresh spawn on next wtft)."
+      "desc": "Kill all running log parser daemons (fresh spawn on next wtft)."
     },
     {
       "flags": "--stop <session>",
-      "desc": "Stop log parser for a specific session path."
+      "desc": "Stop the log parser daemon for a specific session path."
     },
     {
       "flags": "-F, --force",
-      "desc": "Kill the log parser, delete tag files, and force a full session re-parse."
+      "desc": "Kill the log parser daemon, delete tag files, and force a full session re-parse."
     },
     {
       "flags": "--harness <pi|claude-code|auto>",

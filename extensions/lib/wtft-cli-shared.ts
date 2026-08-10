@@ -342,13 +342,13 @@ export function ensureDaemonRunning(sessionPath: string, daemonDir: string): boo
  * widget to display daemon health inline.
  */
 export function getDaemonStatus(sessionPath: string): DaemonStatus {
-	if (!_daemonSessionPath) return { alive: false, reason: "log parser not started" };
+	if (!_daemonSessionPath) return { alive: false, reason: "daemon not started" };
 
 	// Session file existence (#124): the daemon now waits for the session
 	// file instead of exiting, but there's still a brief window where the
 	// daemon was spawned and hasn't claimed the PID file yet. In that gap,
 	// if the session file doesn't exist, show "waiting for session..."
-	// instead of "starting..." → falling through to "log parser not found".
+	// instead of "starting..." → falling through to "daemon not found".
 	let sessionExists = false;
 	try { sessionExists = fs.existsSync(sessionPath); } catch {}
 
@@ -368,7 +368,7 @@ export function getDaemonStatus(sessionPath: string): DaemonStatus {
 		// Within 5s of spawn: if PID file doesn't exist, daemon may still
 		// be starting. If session file doesn't exist either, the daemon is
 		// waiting for it — show that instead of a generic "starting...".
-		if (elapsed < 5000 && health.reason === "log parser not found") {
+		if (elapsed < 5000 && health.reason === "daemon not found") {
 			if (!sessionExists) {
 				return { alive: false, waiting: true, reason: "waiting for session .jsonl..." };
 			}

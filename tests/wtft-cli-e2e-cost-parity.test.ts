@@ -171,13 +171,13 @@ while (waited < 5000) {
 	waited += 250;
 }
 const daemonCost = tagEntries.reduce((sum, i) => sum + i.cost, 0);
-console.log(`Log parser tag file: $${daemonCost.toFixed(6)} (${tagEntries.length} entries)`);
+console.log(`Daemon tag file: $${daemonCost.toFixed(6)} (${tagEntries.length} entries)`);
 
 // ---
 // Assertions
 // ---
 
-assert(daemonCost > 0, `Log parser cost > 0 (got $${daemonCost.toFixed(6)})`);
+assert(daemonCost > 0, `Daemon cost > 0 (got $${daemonCost.toFixed(6)})`);
 
 // Path 3: Reference cost via parseSessionFile + deduplicateInteractions
 // (same functions the daemon inlines — should produce identical results).
@@ -189,7 +189,7 @@ console.log(`Reference (parseSessionFile + dedup): $${referenceCost.toFixed(6)} 
 const tagDelta = Math.abs(daemonCost - referenceCost);
 assert(
 	tagDelta < 0.001,
-	`Log parser vs reference within 0.1¢: ref=$${daemonCost.toFixed(6)} ref=$${referenceCost.toFixed(6)} (delta=$${tagDelta.toFixed(6)})`
+	`Daemon vs reference within 0.1¢: ref=$${daemonCost.toFixed(6)} ref=$${referenceCost.toFixed(6)} (delta=$${tagDelta.toFixed(6)})`
 );
 
 // Verify dedup: raw 5 lines → 2 deduped messages

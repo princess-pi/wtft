@@ -109,7 +109,7 @@ function shutdown(reason: string) {
     } catch (_) {}
     try { fs.unlinkSync(pidPath); } catch (_) {}
   }
-  // Log parser goes silent but exits cleanly
+  // Daemon goes silent but exits cleanly
   process.exit(0);
 }
 
@@ -212,7 +212,7 @@ function flushPending() {
     fs.appendFileSync(tagPath, JSON.stringify({ _meta: { offset: lastSize } }) + "\n");
     idleStartMs = 0; // Data arrived — idle period ended
   } catch (err) {
-    // If we can't write, log and continue — don't crash the log parser
+    // If we can't write, log and continue — don't crash the daemon
     if (process.env.WTFT_DAEMON_DEBUG) {
       process.stderr.write(`[wtft-log-parser] write error: ${err instanceof Error ? err.message : String(err)}\n`);
     }
@@ -682,16 +682,16 @@ async function main() {
     } else if (arg === "--stop") {
       stopSession = process.argv[++i];
     } else if (arg === "--help" || arg === "-h") {
-      console.log(`wtft-daemon — Session log parser for WTFT
+      console.log(`wtft-daemon — Log parser daemon for WTFT
 Usage: wtft-daemon --session <path> [--debug]
 
 Management:
-  --list, -l            List all running log parsers (session, PID, idle time)
-  --cleanup             Kill log parsers whose source session no longer exists
-  --restart             Kill all running log parsers (fresh spawn on next wtft)
-  --stop <session>      Stop log parser for a specific session path
+  --list, -l            List all running daemons (session, PID, idle time)
+  --cleanup             Kill daemons whose source session no longer exists
+  --restart             Kill all running daemons (fresh spawn on next wtft)
+  --stop <session>      Stop the daemon for a specific session path
 
-Log parser mode:
+Daemon mode:
   -s, --session <path>  Path to session.jsonl to watch
   --debug               Enable debug logging to stderr
   -h, --help            Show this help`);
@@ -761,7 +761,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         process.kill(pid, "SIGTERM");
       }
       try { fs.unlinkSync(fullPath); } catch (_) {}
-      // Re-launch fresh log parser for same session
+      // Re-launch fresh daemon for same session
       if (sessionFound) {
         try {
           const child = spawn(process.execPath, [process.argv[1], "--session", sessionFound], {
@@ -771,7 +771,7 @@ if (showList || showCleanup || showRestart || stopSession) {
           child.unref();
         } catch (_2) {}
       }
-      console.log(`Restarted: PID ${pid} → fresh log parser for ${sessionFound || "(unknown)"}`);
+      console.log(`Restarted: PID ${pid} → fresh daemon for ${sessionFound || "(unknown)"}`);
       found++;
       continue;
     }
@@ -816,16 +816,16 @@ if (showList || showCleanup || showRestart || stopSession) {
   }
 
   if (showRestart) {
-    console.log(`Restarted ${found} log parser(s). Run wtft to spawn fresh instances.`);
+    console.log(`Restarted ${found} daemon(s). Run wtft to spawn fresh instances.`);
   }
   if (showCleanup) {
-    console.log(`Cleaned up ${found} log parser(s).`);
+    console.log(`Cleaned up ${found} daemon(s).`);
   }
   if (showList && found === 0) {
-    console.log("No log parser processes found.");
+    console.log("No daemon processes found.");
   }
   if (stopSession && found === 0) {
-    console.log(`No log parser found for: ${stopSession}`);
+    console.log(`No daemon found for: ${stopSession}`);
   }
   process.exit(0);
 }
@@ -841,7 +841,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   // in its poll loop until the file appears, writing heartbeats so the
   // widget can show "waiting for session .jsonl..." (#124).
   //
-  // Guard: refuse to watch a wtft-tag file (prevents recursive log parser loops).
+  // Guard: refuse to watch a wtft-tag file (prevents recursive daemon loops).
   if (sessionPath.includes(".wtft-tag.v")) {
     process.stderr.write(`wtft-daemon: refusing to watch a tag cache file: ${sessionPath}\n`);
     process.exit(1);
@@ -905,7 +905,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         if (existingPid > 0) {
           try {
             process.kill(existingPid, 0);
-            // Process exists — another log parser is running, exit quietly
+            // Process exists — another daemon is running, exit quietly
             process.exit(0);
           } catch (_2) {
             // Stale PID — clean up and retry

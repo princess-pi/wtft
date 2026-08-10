@@ -209,7 +209,7 @@
 
     <h3 id="architecture">Architectural Design</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
-        <p><strong>1. Log Parser:</strong> A persistent background daemon (<code>wtft-daemon</code>) watches the session <code>.jsonl</code> file, classifies each interaction, and writes pre-computed entries to a harness-agnostic tag file (<code>wtft-tags/*.tag.v2.3.4.jsonl</code>). Costs are rounded to 6 decimal places (micro-cent precision) before serialization to eliminate float drift between the in-memory widget and file-based CLI. In Pi, the widget reads directly from <code>ctx.sessionManager.getEntries()</code> (in-memory) but also spawns a log parser on <code>session_start</code> to keep the tag file warm for CLI use. If the daemon dies from idle timeout (24h), the <code>agent_end</code> handler checks health via <code>checkDaemonHealth</code> and auto-revives it. On version bump, the new daemon detects the old-version tag file and auto-replaces the old daemon — no manual restart needed.</p>
+        <p><strong>1. Log parser daemon:</strong> A persistent background daemon (<code>wtft-daemon</code>) watches the session <code>.jsonl</code> file, classifies each interaction, and writes pre-computed entries to a harness-agnostic tag file (<code>wtft-tags/*.tag.v2.3.4.jsonl</code>). Costs are rounded to 6 decimal places (micro-cent precision) before serialization to eliminate float drift between the in-memory widget and file-based CLI. In Pi, the widget reads directly from <code>ctx.sessionManager.getEntries()</code> (in-memory) but also spawns a daemon on <code>session_start</code> to keep the tag file warm for CLI use. If the daemon dies from idle timeout (24h), the <code>agent_end</code> handler checks health via <code>checkDaemonHealth</code> and auto-revives it. On version bump, the new daemon detects the old-version tag file and auto-replaces the old daemon — no manual restart needed.</p>
         <p><strong>2. Binning Engine:</strong> Groups entries by their <code>timestamp</code> into chronological bins based on the requested interval (e.g., 6-minute windows for granular auditing, or 1-day windows for multi-day tracks).</p>
         <p><strong>3. Scaling & Layout:</strong> Normalizes the absolute length of each interval's ASCII bar based on the maximum cost in any single interval (typically capped at 30-40 characters wide to fit standard terminal outputs gracefully). Each sub-segment within that bar is allocated its proportional share of characters based on its absolute cost contribution, without rendering percentages or additional trailing text.</p>
         <p><strong>4. Recursive Subagent Rollup:</strong> When a Claude Code session log is targeted, WTFT auto-detects if a subagent directory exists (e.g., <code>&lt;session-id&gt;/subagents/</code>). If present, WTFT recursively reads all subagent <code>.jsonl</code> logs and blends their interactions chronologically based on their individual timestamps. This guarantees that binned timelines and other command histograms represent the true, cumulative cost and work allocations of the entire multi-agent session tree.</p>
@@ -282,17 +282,17 @@
         <li><strong>Step 3 (Color rendering check):</strong> Run `/wtft` and verify that ANSI codes map correctly to your terminal theme without leaving raw escape characters.</li>
     </ul>
 
-    <h3 id="daemon-health">Log Parser Health Monitoring</h3>
+    <h3 id="daemon-health">Log Parser Daemon Health Monitoring</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
-        <p>The widget title line shows a colored status indicator for the background log parser:</p>
+        <p>The widget title line shows a colored status indicator for the background daemon:</p>
         <ul>
             <li><span style="color: #888;">● reading...</span> — CLI startup placeholder, shown before the first health check completes (500ms)</li>
-            <li><span style="color: #4a4;">● live</span> — log parser is running and processing new interactions</li>
+            <li><span style="color: #4a4;">● live</span> — daemon is running and processing new interactions</li>
             <li><span style="color: #da0;">● idle (3:22 to expire)</span> — no new data for 2m2s; countdown shows time until model cache expires (Claude: 5 min, DeepSeek: 1 hr, local: no countdown)</li>
             <li><span style="color: #da0;">● idle (cache emptied)</span> — cache TTL fully elapsed (remaining ≤ 0 min); model context cache has expired</li>
             <li><span style="color: #da0;">● idle (local model)</span> — daemon idle, no remote cache (local model)</li>
-            <li><span style="color: #d44;">● stopped HH:MM</span> — log parser exited (24h idle timeout or crash)</li>
-            <li><span style="color: #da0;">● restarting...</span> — log parser is being restarted</li>
+            <li><span style="color: #d44;">● stopped HH:MM</span> — daemon exited (24h idle timeout or crash)</li>
+            <li><span style="color: #da0;">● restarting...</span> — daemon is being restarted</li>
         </ul>
         <p>Status rendering is shared via <code>renderDaemonStatus()</code> in <code>wtft-daemon-lib.ts</code> — DRY between Pi widget and CLI watch modes.</p>
 
@@ -318,7 +318,7 @@
         <p>Inotify-driven updates mean that idle → live transitions are instant — the status flips the moment the daemon writes classified entries to the tag file. The 60-second timer is a safety net, not the primary mechanism.</p>
         <p>The log parser daemon wraps its main poll loop in a <code>try/catch</code> so transient errors (disk full, permission denied, corrupted JSON) are logged and the daemon continues running on the next poll cycle — it does not crash silently.</p>
         <p>Width is always auto-detected from terminal (clamped at 1023). No <code>-w/--width</code> flag. Watch modes re-render on terminal resize (SIGWINCH).</p>
-        <p>In CLI <code>--watch</code> mode, press <code>r</code> to restart the log parser. The footer shows <code style="color: #d44;">r to restart log parser</code> in red when the parser is stopped. The Pi widget auto-spawns a log parser on session start to keep the tag file warm for CLI use.</p>
+        <p>In CLI <code>--watch</code> mode, press <code>r</code> to restart the daemon. The footer shows <code style="color: #d44;">'r' to restart</code> in red when the daemon is stopped. The Pi widget auto-spawns a daemon on session start to keep the tag file warm for CLI use.</p>
         <p>Management commands: <code>--list</code> (list running parsers), <code>--cleanup</code> (kill stale parsers), <code>--restart</code> (restart all), <code>--stop &lt;session&gt;</code> (stop one).</p>
     </div>
 

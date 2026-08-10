@@ -726,10 +726,14 @@ function getMoonPhase(date: Date): string {
  * not the clock face — are what callers and tests should key off to identify
  * the timeline (#158).
  *
- * Kept immediately above the function (#163): #158 landed this text four
- * declarations too early, so every editor hover attached it to `MOON_PHASES`
- * and the function itself read as undocumented. A docstring is only as good as
- * the symbol it binds to.
+ * Kept immediately above the function (#163): four declarations — `MOON_PHASES`,
+ * `SYNODIC_MONTH_MS`, `REF_NEW_MOON`, `getMoonPhase` — used to sit between this
+ * text and the function, so every editor hover attached it to `MOON_PHASES` and
+ * the function itself read as undocumented. The misbinding predates #158 (it is
+ * already there at `9b2a16e`); #158 rewrote the docstring's *text* in place and
+ * inherited the bad binding without noticing. That is the lesson: a docstring is
+ * only as good as the symbol it binds to, and correcting its words does not
+ * re-point it.
  *
  * @param surgeHours - Set of local hours (0-23) that are surge-priced
  * @param currentHour - Current local hour (0-23) for the clock-face marker

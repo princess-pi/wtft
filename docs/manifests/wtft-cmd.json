@@ -123,8 +123,8 @@
   ],
   "usage": [
     {
-      "flags": "-i, --interval <size><m|h|d|w>",
-      "desc": "Group cost data into arbitrary binned intervals of minutes, hours, days, or weeks (e.g., 1m, 7m, 4h, 1d, 2w; default: 1h)."
+      "flags": "-i, --interval <size><m|h|d|w|t>",
+      "desc": "Group cost data into arbitrary binned intervals of minutes, hours, days, weeks, or turns (e.g., 1m, 7m, 4h, 1d, 2w, 5t; turn unit accepts t, turn, or turns; default: 1h)."
     },
     {
       "flags": "-l, --limit <number>",
@@ -237,7 +237,11 @@
       "desc": "Group token costs into custom 7-minute intervals."
     },
     {
-      "cmd": "/wtft -t America/New_York",
+      "cmd": "/wtft -i 5t",
+      "desc": "Group by turn count instead of clock time — bin every 5 interactions regardless of how long they took."
+    },
+    {
+      "cmd": "/wtft --tz America/New_York",
       "desc": "Render binned date/time labels in Eastern Standard Time."
     },
     {

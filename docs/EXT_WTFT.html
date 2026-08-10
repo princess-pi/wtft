@@ -45,25 +45,38 @@
 <body>
     <h2>Where The F***ing Tokens?! Utility (<code>wtft.ts</code>)</h2>
     <p><strong>Domain:</strong> Cost Audit, Telemetry & Token Accounting</p>
+    <p style="color: #888; font-size: 0.9em;">This page is the system spec for <code>wtft</code>: concepts and behavior live here, the flag reference below is rendered live from <code>manifests/wtft-cmd.json</code> (the same file that drives <code>--help</code> and <code>--why</code> — drift between this page and the CLI is structurally impossible for anything sourced that way), and <a href="#detailed-specs">Detailed specs</a> indexes every feature-level spec doc.</p>
 
-    <h3>Overview</h3>
+    <nav aria-label="Section index" style="margin: 1rem 0; padding: 12px 16px; background: var(--box-bg); border: 1px solid #404040; border-radius: 8px; font-size: 0.95em;">
+        <strong style="color: var(--accent-yellow);">Jump to:</strong>
+        <a href="#overview">Overview</a> ·
+        <a href="#command-reference">Flag Reference</a> ·
+        <a href="#classification">Classification</a> ·
+        <a href="#surge-timeline">Surge Timeline</a> ·
+        <a href="#tui-style">TUI Style</a> ·
+        <a href="#architecture">Architecture</a> ·
+        <a href="#pricing">Model Pricing</a> ·
+        <a href="#config">Config</a> ·
+        <a href="#verification-plan">Verification Plan</a> ·
+        <a href="#daemon-health">Daemon Health</a> ·
+        <a href="#detailed-specs">Detailed Specs</a> ·
+        <a href="#why">Why run /wtft?</a>
+    </nav>
+
+    <h3 id="overview">Overview</h3>
     <p>The WTFT (Where The F***ing Tokens?!) utility provides visual, granular accounting of your session's token consumption and associated monetary cost ($ USD). It parses the active session's append-only <code>.jsonl</code> log, classifies each historical interaction into one of 9 work types, and renders a stacked, color-coded ASCII bar graph over configurable time intervals.</p>
 
-    <h3>Command Reference</h3>
+    <h3 id="command-reference">Command Reference</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
         <p><strong><code>/wtft</code></strong> [options]</p>
         <p>Analyze and display the session cost breakdown in a persistent TUI widget below the editor.</p>
         <h4 style="color: var(--accent-yellow); margin-bottom: 5px;">Options</h4>
-        <ul>
-            <li><code>-i, --interval &lt;size&gt;&lt;m|h|d|w&gt;</code> - Group cost data into arbitrary binned intervals of minutes, hours, days, or weeks (e.g., 1m, 7m, 4h, 1d, 2w; default: <code>1h</code>).</li>
-            <li><code>-l, --limit &lt;number&gt;</code> - Limit the number of interval bars displayed (default: <code>10</code>).</li>
-            <li><code>-w, --width &lt;number&gt;</code> - Set the maximum character width of the TUI widget (default: <code>240</code>, dynamically scaled down to active terminal columns).</li>
-            <li><code>-t, --tz, --timezone &lt;zone&gt;</code> - Specify a target display timezone (e.g., <code>America/New_York</code>, <code>Europe/London</code>, <code>Asia/Tokyo</code>) to bypass UTC systems (default: system local).</li>
-            <li><code>-c, --cumulative</code> - Render running cumulative sums (default behavior).</li>
-            <li><code>-b, --bucket</code> - Render discrete binned interval cost buckets.</li>
-            <li><code>--ticks</code> / <code>--no-ticks</code> - Enable or disable the proportional cost scale ticks above the bars (default: <code>true</code>).</li>
-            <li><code>-p, --pager</code> - Launch a fullscreen, interactive scrollable TUI pager overlay to browse expanded cost history inside your session.</li>
-            <li><code>-S, --show</code> / <code>-H, --hide</code> - Show (force refresh) or hide the cost audit widget.</li>
+        <!-- Rendered live from manifests/wtft-cmd.json (see script below) — the same file
+             that drives --help and --why. Do not hand-list flags here: a hardcoded copy is
+             how #161 found this section already stale in three independent ways (a unit
+             letter missing, one flag split into two rows, 16 of 25 flags absent). -->
+        <ul id="wtft-flag-reference">
+            <li><em style="color:#666">Loading flag reference...</em></li>
         </ul>
 
         <hr style="border: 0; border-top: 1px solid #404040; margin: 15px 0;">
@@ -77,7 +90,7 @@
         <p>Run the cost auditor directly from your host shell outside of Pi. Just like <code>bin/merge.mjs</code>, it is shipped as plain ESM JavaScript (<code>bin/wtft.mjs</code>) so it can be installed globally for Claude Code (<code>npm install -g github:duppypro/princess-pi-packages</code>) without triggering Node's type-stripping errors. You can invoke it as the npm-global <code>wtft</code>, via the <code>./wtft</code> wrapper from the repo root, or through Claude Code's <code>!</code> prefix (e.g. <code>!wtft -w 90 -i 1d</code>). It reuses the exact same classification engine as the Pi extension, but outputs directly to stdout, allowing you to pipe the output (e.g., <code>wtft | less -R</code>).</p>
     </div>
 
-    <h3>Classification Taxonomy & Priority Rules</h3>
+    <h3 id="classification">Classification Taxonomy & Priority Rules</h3>
     <p>To avoid guessing or misrepresenting untraced exchanges, interactions are strictly classified based on the file paths written or read, or the commands executed, under a strict priority system:</p>
 
     <h4 style="color: var(--accent-yellow);">1. Writes take priority over Reads</h4>
@@ -157,7 +170,7 @@
         </tbody>
     </table>
 
-    <h3>SURGE Timeline (24-hour pricing bar)</h3>
+    <h3 id="surge-timeline">SURGE Timeline (24-hour pricing bar)</h3>
     <p>The title line renders a 24-hour timeline showing DeepSeek peak-valley surge pricing windows. Orange segments mark surge-priced hours (UTC 01:00–04:00 and 06:00–10:00 mapped to local time), green segments mark normal-priced hours. The timeline uses <code>─</code> box-drawing horizontal rule characters (U+2500) for a continuous unbroken line.</p>
     <p><strong>Markers:</strong> The current hour displays a clock-face emoji (<code>🕐</code>–<code>🕛</code>, hour % 12). Noon (hour 12) always shows <code>☀️</code> — the clock face never overwrites it. The timeline is bookended by the current moon phase emoji (<code>🌑</code>–<code>🌘</code>, computed from synodic-month formula anchored to 2026-07-14 new moon with half-phase centering).</p>
     <p><strong>Badges:</strong> When in or near a surge window, a badge is appended: <code>⚡ SURGE 2x</code> (active), <code>⚡ SURGE APPROACHING</code> (within 20 min of start, blinking orange), or <code>⚡ SURGE ENDING</code> (within 20 min of end, blinking green).</p>
@@ -166,7 +179,7 @@
     <p>The flag is computed at parse time (<code>Interaction.cacheMiss</code>, tag field <code>miss</code>, tagger v2.7.0) rather than at render time, because the compaction/recache meter-split writes <code>cr</code> and <code>cw</code> onto two separate tag lines — after which a full miss and a partial re-prime are indistinguishable. A session's first turn and each subagent sidechain's first turn are genuine misses and are marked as such. Partial re-primes, where a small prefix survives, are deliberately not marked.</p>
     <p><strong>Unified in <code>buildWtftLines</code>:</strong> Both Pi widget and CLI (non-watch and <code>--watch</code>) share one code path. The Pi widget passes the session model explicitly; the CLI auto-detects DeepSeek from classified interactions. Non-DeepSeek models render an all-green timeline with no badges.</p>
 
-    <h3>TUI Visualization Style</h3>
+    <h3 id="tui-style">TUI Visualization Style</h3>
     <p>The TUI offers two distinct high-fidelity visualization styles depending on the display mode:</p>
     <ul>
         <li><strong>Cumulative Mode (Stacked Bars):</strong> Renders a stacked, horizontal binned bar representing overall running cost over time. Each category's segment is allocated characters from its absolute cumulative cost against the global scale-maximum, guaranteeing monotonically non-decreasing bar widths — a category's segment can only grow, never shrink, matching the mathematical guarantee that cumulative subtotals increase (#106).</li>
@@ -194,7 +207,7 @@
 <span style="color: #888;">23:00</span>  <strong>$10.00</strong>                                                <span style="color: #d7875f;">█</span>
     </pre>
 
-    <h3>Architectural Design</h3>
+    <h3 id="architecture">Architectural Design</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
         <p><strong>1. Log Parser:</strong> A persistent background daemon (<code>wtft-daemon</code>) watches the session <code>.jsonl</code> file, classifies each interaction, and writes pre-computed entries to a harness-agnostic tag file (<code>wtft-tags/*.tag.v2.3.4.jsonl</code>). Costs are rounded to 6 decimal places (micro-cent precision) before serialization to eliminate float drift between the in-memory widget and file-based CLI. In Pi, the widget reads directly from <code>ctx.sessionManager.getEntries()</code> (in-memory) but also spawns a log parser on <code>session_start</code> to keep the tag file warm for CLI use. If the daemon dies from idle timeout (24h), the <code>agent_end</code> handler checks health via <code>checkDaemonHealth</code> and auto-revives it. On version bump, the new daemon detects the old-version tag file and auto-replaces the old daemon — no manual restart needed.</p>
         <p><strong>2. Binning Engine:</strong> Groups entries by their <code>timestamp</code> into chronological bins based on the requested interval (e.g., 6-minute windows for granular auditing, or 1-day windows for multi-day tracks).</p>
@@ -214,7 +227,7 @@
   [5] ~/g-p/princess-pi-packages/2026-06-11...9bbf   $63.28 (1202t) [PI]  1d ago</pre>
     </div>
 
-    <h3>Model Pricing</h3>
+    <h3 id="pricing">Model Pricing</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
         <p>WTFT estimates costs using public per-model pricing. These are directional estimates, not accounting ledgers — provider billing nuances (caching discounts, free-tier credits, surge pricing) may cause minor discrepancies.</p>
         <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
@@ -235,7 +248,7 @@
         </p>
     </div>
 
-    <h3>Settings Persistence (Cross-Harness Config)</h3>
+    <h3 id="config">Settings Persistence (Cross-Harness Config)</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
         <p>All WTFT settings are persisted in harness-agnostic JSON config files via the shared <code>extensions/lib/config.ts</code> module. There is no <code>.jsonl</code> persistence — settings survive across Pi sessions, Claude Code invocations, and machine restarts.</p>
 
@@ -262,14 +275,14 @@
         <p>The WTFT widget auto-shows on session start if a config file exists (user has configured wtft at least once). No separate <code>visible</code> setting needed — delete the config file to permanently hide, or use <code>/wtft --hide</code> to hide for the current session only.</p>
     </div>
 
-    <h3>Proposed Verification Plan</h3>
+    <h3 id="verification-plan">Proposed Verification Plan</h3>
     <ul>
         <li><strong>Step 1 (Mock Log Generation):</strong> Create a dummy session log with predefined entries explicitly classified into Spec (touches `docs/`), Code (touches `src/`), and Other (general chit-chat).</li>
         <li><strong>Step 2 (Interval Binning Test):</strong> Verify that setting <code>-i 6m</code> groupings binned the events correctly across tight time gaps.</li>
         <li><strong>Step 3 (Color rendering check):</strong> Run `/wtft` and verify that ANSI codes map correctly to your terminal theme without leaving raw escape characters.</li>
     </ul>
 
-    <h3>Log Parser Health Monitoring</h3>
+    <h3 id="daemon-health">Log Parser Health Monitoring</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
         <p>The widget title line shows a colored status indicator for the background log parser:</p>
         <ul>
@@ -309,40 +322,109 @@
         <p>Management commands: <code>--list</code> (list running parsers), <code>--cleanup</code> (kill stale parsers), <code>--restart</code> (restart all), <code>--stop &lt;session&gt;</code> (stop one).</p>
     </div>
 
-    <h3>Why run /wtft?</h3>
+    <h3 id="detailed-specs">Detailed Specs</h3>
+    <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
+        <p>Every <code>docs/spec-*.md</code> feature spec belonging to <code>wtft</code>, linked so a reader landing on this page can reach the detailed record of any feature. <strong>Superseded-spec policy (#161):</strong> a spec whose behavior a later branch supersedes is marked <code>**Status:** Superseded by #NNN</code> at its top rather than deleted or unlinked — it stays here, visibly marked. As of this page's last edit, none of the specs below are superseded (spot-checked <a href="spec-109-half-block-bars.md">#109</a> and <a href="spec-52-finer-grain-categories.md">#52</a>, the two most likely to have drifted, against the shipped code they describe).</p>
+
+        <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+            <thead>
+                <tr style="border-bottom: 1px solid #404040;">
+                    <th style="text-align: left; padding: 6px;">Spec</th>
+                    <th style="text-align: left; padding: 6px;">Issue(s)</th>
+                    <th style="text-align: left; padding: 6px;">Summary</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td style="padding: 6px;"><a href="spec-47-shared-session-utilities.md">spec-47</a></td><td style="padding: 6px;">#47</td><td style="padding: 6px;">Shared session-path shortener &amp; selector, extracted into a reusable lib.</td></tr>
+                <tr><td style="padding: 6px;"><a href="spec-52-finer-grain-categories.md">spec-52</a></td><td style="padding: 6px;">#52</td><td style="padding: 6px;">Finer-grain category mapping. Covers Phases 1–2 (relabel, tool recognition); the overhead trio (Phase 3) is wired in code but not written up as its own spec.</td></tr>
+                <tr><td style="padding: 6px;"><a href="spec-95-daemon-lifecycle.md">spec-95</a></td><td style="padding: 6px;">#95</td><td style="padding: 6px;">wtft-daemon lifecycle: takeover protocol, idle clamp, data-derived cache TTL.</td></tr>
+                <tr><td style="padding: 6px;"><a href="spec-109-half-block-bars.md">spec-109</a></td><td style="padding: 6px;">#109</td><td style="padding: 6px;">Half-block resolution stacked bars — double horizontal resolution per terminal cell.</td></tr>
+                <tr><td style="padding: 6px;"><a href="spec-139-140-141-pricing-and-workflow-rollup.md">spec-139-140-141</a></td><td style="padding: 6px;">#139, #140, #141</td><td style="padding: 6px;">Pricing correctness fixes plus workflow/subagent cost rollup.</td></tr>
+                <tr><td style="padding: 6px;"><a href="spec-152-153-observed-cache-expiry-and-pager.md">spec-152-153</a></td><td style="padding: 6px;">#152, #153</td><td style="padding: 6px;">Observed (not predicted) cache-miss divider; CLI <code>-p</code> pager no-op fix.</td></tr>
+                <tr><td style="padding: 6px;"><a href="spec-156-155-harness-seam-and-daemon-follow.md">spec-156-155</a></td><td style="padding: 6px;">#155, #156</td><td style="padding: 6px;">Hard harness seam + cwd-aware session discovery; daemon follows a moved session.</td></tr>
+                <tr><td style="padding: 6px;"><a href="spec-157-session-identity-gate.md">spec-157</a></td><td style="padding: 6px;">#157</td><td style="padding: 6px;">A bare basename is not a session identity — regression fix for #155.</td></tr>
+                <tr><td style="padding: 6px;"><a href="spec-158-one-test-runner.md">spec-158</a></td><td style="padding: 6px;">#158</td><td style="padding: 6px;">One declared test runner (process-per-suite) and the six root causes behind "the tests fail."</td></tr>
+                <tr><td style="padding: 6px;"><a href="spec-160-161-162-wtft-spec-surfaces.md">spec-160-161-162</a></td><td style="padding: 6px;">#160, #161, #162</td><td style="padding: 6px;">This page's spec: <code>--help</code>/manifest gap, this page's structure, <code>CONTEXT.md</code> glossary.</td></tr>
+            </tbody>
+        </table>
+
+        <p style="margin-top: 12px; color: #888; font-size: 0.9em;"><strong>Cross-tool (not wtft-exclusive):</strong> <a href="spec-config-loader.md">spec-config-loader.md</a> — Universal Configuration Loading Standard, shared by <code>wtft</code>, <code>serve</code>, and <code>merge</code>.</p>
+
+        <p style="margin-top: 6px; color: #888; font-size: 0.9em;"><strong>Predates the <code>spec-NNN-*.md</code> naming convention:</strong> <a href="wtft-incremental-render-spec.md">wtft-incremental-render-spec.md</a> — <code>--watch</code> live render, daemon health monitoring, SURGE timeline. Linked here for completeness; not part of the automated spec-index check below, which only scans the <code>docs/spec-*.md</code> glob.</p>
+
+        <p style="margin-top: 12px; color: #888; font-size: 0.9em;"><strong>Landing on merge — five sibling branches, not yet on disk on this branch:</strong></p>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 4px; opacity: 0.75;">
+            <tbody>
+                <tr><td style="padding: 6px;"><a href="spec-144-145-164-session-discovery.md">spec-144-145-164</a></td><td style="padding: 6px;">#144, #145, #164</td><td style="padding: 6px;">Session selector: dotted-path worktrees, worktree-aware discovery, stranded-session recovery.</td></tr>
+                <tr><td style="padding: 6px;"><a href="spec-148-sonnet-5-intro-pricing.md">spec-148</a></td><td style="padding: 6px;">#148</td><td style="padding: 6px;">Sonnet 5 intro pricing ($2/$10) vs. post-intro rate — 50% over-bill fix.</td></tr>
+                <tr><td style="padding: 6px;"><a href="spec-149-compaction-cost-scope.md">spec-149</a></td><td style="padding: 6px;">#149</td><td style="padding: 6px;">wtft vs. Claude Code status line: ~11% cost gap; cache-write tier rate under investigation.</td></tr>
+                <tr><td style="padding: 6px;"><a href="spec-159-pack-and-smoke.md">spec-159</a></td><td style="padding: 6px;">#159</td><td style="padding: 6px;"><em>Not wtft-specific.</em> Repo-wide: <code>npm pack</code> + smoke test gate for the install channels.</td></tr>
+                <tr><td style="padding: 6px;"><a href="spec-163-spec-reconcile-backtest.md">spec-163</a></td><td style="padding: 6px;">#163</td><td style="padding: 6px;"><em>Not wtft-specific.</em> Repo-wide: backtests the <code>spec-reconcile</code> skill against known drifts (one of which is this branch's #160).</td></tr>
+                <tr><td style="padding: 6px;"><a href="spec-168-typecheck-gate.md">spec-168</a></td><td style="padding: 6px;">#168</td><td style="padding: 6px;"><em>Not wtft-specific.</em> Repo-wide: <code>allowJs</code> types the <code>cloudflare.js</code> consumers, and a suite makes <code>tsc</code> a gate rather than a script nobody calls.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h3 id="why">Why run /wtft?</h3>
     <div id="wtft-why-reference" style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040;">
         <em style="color: #666;">Loading why scenarios...</em>
     </div>
 
     <script>
+        // Single fetch, two render targets — #161: the flag reference and the --why
+        // scenarios both come from manifests/wtft-cmd.json, the same file --help and
+        // --why read. Extending this fetch (rather than adding a second hand-written
+        // copy) is what makes drift between this page and the CLI structurally
+        // impossible for anything sourced this way.
         fetch('manifests/wtft-cmd.json')
             .then(r => r.json())
             .then(data => {
-                const container = document.getElementById('wtft-why-reference');
-                if (!container) return;
-                const invokedAs = "/wtft";
-                const scenarios = data.why || [];
-                if (scenarios.length === 0) {
-                    container.innerHTML = '<p style="color:#666">No scenarios defined.</p>';
-                    return;
-                }
-                let html = '';
-                scenarios.forEach(s => {
-                    html += `<div style="margin-bottom: 12px; padding-left: 12px;">`;
-                    html += `<p style="margin: 0 0 4px 0;">${s.scenario}</p>`;
-                    s.commands.forEach(cmd => {
-                        const fullCmd = cmd ? `${invokedAs} ${cmd}` : invokedAs;
-                        html += `<code style="color: var(--accent-orange);">$ ${fullCmd}</code><br>`;
-                    });
-                    html += `<span style="color: var(--accent-green);">→ ${s.result}</span>`;
-                    html += `</div>`;
-                });
-                container.innerHTML = html;
+                renderFlagReference(data);
+                renderWhyReference(data);
             })
             .catch(err => {
-                const container = document.getElementById('wtft-why-reference');
-                if (container) container.innerHTML = `<p style="color:var(--anchor-red)">Failed to load command manifest: ${err}</p>`;
+                const targets = ['wtft-flag-reference', 'wtft-why-reference'];
+                targets.forEach(id => {
+                    const container = document.getElementById(id);
+                    if (container) container.innerHTML = `<p style="color:var(--anchor-red)">Failed to load command manifest: ${err}</p>`;
+                });
             });
+
+        function renderFlagReference(data) {
+            const container = document.getElementById('wtft-flag-reference');
+            if (!container) return;
+            const usage = data.usage || [];
+            if (usage.length === 0) {
+                container.innerHTML = '<li style="color:#666">No flags defined.</li>';
+                return;
+            }
+            container.innerHTML = usage.map(u =>
+                `<li><code>${u.flags}</code> - ${u.desc}</li>`
+            ).join('');
+        }
+
+        function renderWhyReference(data) {
+            const container = document.getElementById('wtft-why-reference');
+            if (!container) return;
+            const invokedAs = "/wtft";
+            const scenarios = data.why || [];
+            if (scenarios.length === 0) {
+                container.innerHTML = '<p style="color:#666">No scenarios defined.</p>';
+                return;
+            }
+            let html = '';
+            scenarios.forEach(s => {
+                html += `<div style="margin-bottom: 12px; padding-left: 12px;">`;
+                html += `<p style="margin: 0 0 4px 0;">${s.scenario}</p>`;
+                s.commands.forEach(cmd => {
+                    const fullCmd = cmd ? `${invokedAs} ${cmd}` : invokedAs;
+                    html += `<code style="color: var(--accent-orange);">$ ${fullCmd}</code><br>`;
+                });
+                html += `<span style="color: var(--accent-green);">→ ${s.result}</span>`;
+                html += `</div>`;
+            });
+            container.innerHTML = html;
+        }
     </script>
 
 </body>

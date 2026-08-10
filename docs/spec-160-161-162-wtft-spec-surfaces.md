@@ -4,7 +4,7 @@
 [#161](https://github.com/duppypro/princess-pi-packages/issues/161),
 [#162](https://github.com/duppypro/princess-pi-packages/issues/162)
 **Branch:** `160-161-162-wtft-spec-surfaces`
-**State:** Spec Approved
+**State:** Code and Spec Approved (tested; reconciled to shipped code)
 
 ---
 
@@ -43,11 +43,14 @@ export function parseInterval(val: string): IntervalConfig {
 
 `rg -ci turns docs/manifests/wtft-cmd.json` → `0`, confirmed. Issue #160's own "Verification"
 section claims `bun run test` already guards this because `wtft-spec-alignment.test.ts` "reads
-the manifest" — **false, checked**: `rg -l "manifests" tests/` returns nothing, and
-`tests/wtft-spec-alignment.test.ts` imports only `buildWtftLines`, `parseEntryToInteraction`,
-`classifyInteraction` from `bin/wtft.mjs` — no `fs.readFileSync` of the manifest anywhere in
-`tests/`. Zero suites read `docs/manifests/wtft-cmd.json` today. The issue text is stale on
-this specific point; the manifest gap it describes is real.
+the manifest" — **false, checked, state before this branch's §2.2 extension**: `rg -l
+"manifests" tests/` returned nothing, and `tests/wtft-spec-alignment.test.ts` imported only
+`buildWtftLines`, `parseEntryToInteraction`, `classifyInteraction` from `bin/wtft.mjs` — no
+`fs.readFileSync` of the manifest anywhere in `tests/`. Zero suites read
+`docs/manifests/wtft-cmd.json` at that point. The issue text was stale on this specific point;
+the manifest gap it describes was real. (§2.2's new V3 gate below is what changed this — the
+file now also imports `parseInterval` and does `fs.readFileSync` the manifest; this paragraph
+describes the pre-fix state that justified building that gate, not the file's content today.)
 
 ### 2.2 Direction
 
@@ -120,10 +123,10 @@ a page with two flag references, one correct-forever (fetched) and one stale-for
    (`#overview`, `#command-reference`, `#classification`, `#surge-timeline`, `#tui-style`,
    `#architecture`, `#pricing`, `#config`, `#verification-plan`, `#daemon-health`,
    `#detailed-specs`, `#why` — 12 headings, all of them, not just the ones with obvious nav
-   value), and a short in-page nav list right under the intro paragraph linking each (nav omits
-   `#verification-plan`, a stub three-line placeholder section with no content worth a direct
-   jump target — the `id` still exists for deep-linking) — this is where the `href` count goes
-   from 0 to 32.
+   value), and a short in-page nav list right under the intro paragraph linking each — all 12,
+   including `#verification-plan` (a small three-`<li>` placeholder section that still earns a
+   direct jump target since the nav links every heading uniformly rather than curating) — this
+   is where the `href` count goes from 0 to 32.
 3. **New "Detailed specs" section** (`#detailed-specs`) — a static index (not fetched; these are
    files, not manifest data) of every `docs/spec-*.md` belonging to wtft, one-line summary, issue
    number(s), each an `<a href="spec-NNN-*.md">`. Includes an explicit note for the six branches
@@ -295,6 +298,37 @@ handoff to Step 4 is now closed: all nine were run and passed at Step 2/4 of thi
 spec doc is corrected in place first — §2.1, §4.1 — per the ordering rule that Spec Approved
 precedes Code Approved). See the Step 4 status comments on #160/#161/#162 for the exact commands
 and output.
+
+---
+
+## 6. Step 5 — reconciliation record
+
+Ran the `spec-reconcile` process (skill written during #158, first live use here) over every
+file this branch touched (`CONTEXT.md`, `docs/EXT_WTFT.html`, `docs/manifests/wtft-cmd.json`,
+this spec doc, the three test files) plus the production file this branch's own evidence cites
+as authority (`extensions/lib/wtft-renderer.ts`), read in full rather than only at the quoted
+line ranges — file-level blast radius, not symbol-level, per the skill's §1. Every quantitative
+claim in §2–§4 above (href count 32, daemon count 131/12-filenames, log-parser count 68,
+`_Avoid_` correspondence, spec-index completeness) was re-derived independently with fresh `rg`/
+`fd` runs and the two doc-index/glossary-format tests re-executed by hand — all confirmed
+accurate as drafted. Two passes: first found the three issues below; second (after fixing them)
+found nothing new.
+
+| Artifact | Claim | Contradicted by | Covered by a test? | Action |
+|---|---|---|---|---|
+| `docs/spec-160-161-162-wtft-spec-surfaces.md` §3.2 (before this commit) | "nav omits `#verification-plan`" | `docs/EXT_WTFT.html:60` — the nav `<a href="#verification-plan">Verification Plan</a>` is present; all 12 headings are linked, none omitted | ✅ `tests/wtft-doc-spec-index.test.ts` (counts total hrefs = 32, which only holds if all 12 nav links exist) | Fixed in this commit — §3.2 point 2 reworded to match the shipped nav |
+| `docs/manifests/wtft-cmd.json:232` `examples` | `"cmd": "/wtft -t America/New_York"` | `extensions/lib/wtft-cli-shared.ts:74-76` — "`-t` and `-T` shortcuts are intentionally NOT supported. `-t` was overloaded across --timezone, --tokens, --ticks..."; the parser has no `arg === "-t"` branch anywhere (`:78-260`) | ❌ no test runs manifest `examples` commands against the parser (only the `-i` `usage` entry is gated, by V3/#160) | Fixed in this commit (`-t` → `--tz`); reconciled-against-untested — the `examples` array as a whole has no alignment gate the way `usage`'s `-i` entry now does after #160. Worth a follow-up test extending V3's pattern to `examples`, not filed as its own issue here (out of scope for three already-large issues) |
+| `docs/spec-160-161-162-wtft-spec-surfaces.md` §2.1 | "`tests/wtft-spec-alignment.test.ts` imports only `buildWtftLines`, `parseEntryToInteraction`, `classifyInteraction`… no `fs.readFileSync` of the manifest anywhere" (read as present tense) | The file this branch itself ships imports a 4th symbol, `parseInterval`, and does `fs.readFileSync` the manifest at `:453-454` (the new V3 gate) | ✅ `tests/wtft-spec-alignment.test.ts` (the block being described) | Fixed in this commit — reworded to mark explicitly as the pre-fix state that motivated §2.2's new gate, not a claim about the file today |
+| `extensions/lib/wtft-renderer.ts:143-149` | JSDoc directly above `parseInterval` (`@param filePath`, `@returns … duplicate message.id entries`, mentions `deduplicateInteractions`) | Describes `parseEntryToInteraction`, which lives in a different file (`wtft-parser.ts:154`) and has no docstring of its own there; `parseInterval` (`val: string` → `IntervalConfig`) has nothing to do with `.jsonl` files or dedup | ❌ no test asserts docstring-to-symbol binding | **Not fixed here** — `wtft-renderer.ts` is outside this branch's declared file ownership (§1) and five sibling branches are editing concurrently; comment-only fixes still need to land in a branch that owns the file. Filed [#174](https://github.com/duppypro/princess-pi-packages/issues/174); reconciled-against-untested |
+
+Re-verified after the fixes: `bun run test` (45/45 suites green, including the three touched by
+this branch), `bun run typecheck` (same 2 pre-existing branch-unrelated TS7016 errors), `bun run
+build` (`git status --short` shows only the two doc edits above, no `.mjs` diff — V8 holds),
+`node bin/wtft.mjs --help` (shows `--tz, --timezone` in the flag reference and the corrected
+`/wtft --tz America/New_York` example), `node bin/wtft.mjs --why` (exit 0). Both re-run test
+suites that check the edited artifacts mechanically —
+`tests/wtft-doc-spec-index.test.ts` (32 hrefs, 11/11 specs linked) and
+`tests/context-glossary-format.test.ts` (33 checks) — passed clean on the corrected files.
 
 ---
 

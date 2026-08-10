@@ -229,7 +229,7 @@
       "desc": "Group by turn count instead of clock time — bin every 5 interactions regardless of how long they took."
     },
     {
-      "cmd": "/wtft -t America/New_York",
+      "cmd": "/wtft --tz America/New_York",
       "desc": "Render binned date/time labels in Eastern Standard Time."
     },
     {

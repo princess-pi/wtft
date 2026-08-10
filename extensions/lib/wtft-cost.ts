@@ -26,6 +26,24 @@ export interface CostTier {
 	cacheWrite: number;
 }
 
+/**
+ * A dated rate window (#148) — applies when the interaction timestamp is
+ * strictly before `effectiveBefore` (epoch ms). Generalizes the DeepSeek
+ * peak-multiplier idea (getDeepSeekPeakMultiplier, below) into a registry
+ * field any model can carry, for launches that ship introductory pricing
+ * ahead of a standard rate (Sonnet 5's $2/$10 intro through 2026-08-31 is
+ * the first user). No timestamp, or no matching window, falls back to the
+ * model's base rates — resolution never reads the host clock (#96: a dated
+ * DeepSeek surge test that read Date.now() went flaky near a window edge).
+ */
+export interface DateTier {
+	effectiveBefore: number;
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+}
+
 /** Complete pricing config for a model (base rates + optional tier overrides). */
 export interface ModelPricing {
 	input: number;
@@ -33,6 +51,7 @@ export interface ModelPricing {
 	cacheRead: number;
 	cacheWrite: number;
 	tiers?: CostTier[];
+	dateTiers?: DateTier[];
 }
 
 // ---
@@ -106,7 +125,19 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 	"claude-opus-4-6":   { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
 	"claude-opus-4-5":   { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
 	"claude-opus-4-1":   { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
-	"claude-sonnet-5":   { input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
+	// claude-sonnet-5 base rates are the standard (post-intro) quad — the
+	// permanent long-run rate. The dateTiers window is the exception: intro
+	// pricing $2/$10/$0.20/$2.50 applies for interactions strictly before
+	// 2026-09-01T00:00:00Z (epoch 1788220800000); $3/$15 from that instant on
+	// (#148). 1h-TTL cache writes derive as 2x whichever input rate resolves
+	// (calculateClaudeCost's cw1hPrice, below) — no separate dated field needed.
+	"claude-sonnet-5":   {
+		input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75,
+		dateTiers: [
+			{ effectiveBefore: 1788220800000 /* 2026-09-01T00:00:00Z */,
+			  input: 2.00, output: 10.00, cacheRead: 0.20, cacheWrite: 2.50 },
+		],
+	},
 	"claude-sonnet-4-6": { input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
 	"claude-sonnet-4-5": { input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
 	"claude-haiku-4-5":  { input: 1.00, output: 5.00, cacheRead: 0.10, cacheWrite: 1.25 },
@@ -143,22 +174,49 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
  * inputTokensAbove, that tier's rates replace the base rates for the
  * entire request. When multiple tiers match, the highest threshold wins.
  * Returns the base pricing if no tier matches.
+ *
+ * A dated window (#148) is resolved FIRST, before size tiering: when
+ * `timestamp` is supplied and falls before one of `pricing.dateTiers`'
+ * `effectiveBefore` cutoffs (earliest matching cutoff wins), that window's
+ * quad becomes the base that size tiers apply on top of. No timestamp, or no
+ * matching window, leaves `pricing`'s own four fields as the base — this
+ * function never reads the host clock (#96).
  */
 export function resolveTieredRates(
 	pricing: ModelPricing,
 	usage: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number },
+	timestamp?: number,
 ): { input: number; output: number; cacheRead: number; cacheWrite: number } {
 	const totalInput =
 		(usage.input_tokens || 0) +
 		(usage.cache_read_input_tokens || 0) +
 		(usage.cache_creation_input_tokens || 0);
 
-	let rates = {
+	let base = {
 		input: pricing.input,
 		output: pricing.output,
 		cacheRead: pricing.cacheRead,
 		cacheWrite: pricing.cacheWrite,
 	};
+
+	if (pricing.dateTiers && timestamp) {
+		const sortedByEarliestCutoff = [...pricing.dateTiers].sort(
+			(a, b) => a.effectiveBefore - b.effectiveBefore
+		);
+		for (const dateTier of sortedByEarliestCutoff) {
+			if (timestamp < dateTier.effectiveBefore) {
+				base = {
+					input: dateTier.input,
+					output: dateTier.output,
+					cacheRead: dateTier.cacheRead,
+					cacheWrite: dateTier.cacheWrite,
+				};
+				break;
+			}
+		}
+	}
+
+	let rates = { ...base };
 
 	if (pricing.tiers) {
 		// Sort descending — highest threshold first so first match wins
@@ -240,7 +298,7 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 	// Check registry first — handles DeepSeek (surge-adjusted), GPT-5.x (tiered)
 	const registryPricing = lookupModelPricing(model);
 	if (registryPricing) {
-		const rates = resolveTieredRates(registryPricing, usage);
+		const rates = resolveTieredRates(registryPricing, usage, timestamp);
 		if (m.includes("deepseek")) {
 			const peak = getDeepSeekPeakMultiplier(timestamp);
 			rates.input *= peak;

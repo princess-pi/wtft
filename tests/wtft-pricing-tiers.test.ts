@@ -1,11 +1,15 @@
 /**
  * Tests for #88 — input-based pricing tiers and max thinking level.
+ * Also covers #148 — dated-rate windows (`dateTiers`) on `resolveTieredRates`.
  *
  * Pi v0.80.6 added cost.tiers[] with inputTokensAbove thresholds.
  * This validates that our fallback cost calculator correctly:
  *   - Uses base rates when total input ≤ threshold
  *   - Switches to tier rates when total input > threshold
  *   - Picks the highest-matching tier when multiple exist
+ *   - Resolves a `dateTiers` window before size-tiering when a timestamp
+ *     falls before its `effectiveBefore` cutoff, else falls back to base
+ *     (including `timestamp === 0`, per wtft-parser's "unparsed" convention)
  */
 
 import * as assert from "node:assert";
@@ -86,6 +90,58 @@ describe("resolveTieredRates", () => {
 	it("handles missing usage fields as zero", () => {
 		const rates = resolveTieredRates(pricing, {});
 		assert.strictEqual(rates.input, 5); // total input = 0, base rates
+	});
+});
+
+// --- resolveTieredRates with dateTiers (#148) ---
+
+describe("resolveTieredRates with dateTiers", () => {
+	const dated: ModelPricing = {
+		input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75,
+		dateTiers: [
+			{ effectiveBefore: 1788220800000 /* 2026-09-01T00:00:00Z */,
+			  input: 2.00, output: 10.00, cacheRead: 0.20, cacheWrite: 2.50 },
+		],
+	};
+	const PRE_CUTOFF = new Date("2026-08-15T00:00:00Z").getTime();
+	const EXACT_CUTOFF = new Date("2026-09-01T00:00:00Z").getTime();
+	const POST_CUTOFF = new Date("2026-09-15T00:00:00Z").getTime();
+
+	it("uses the dated window's rates strictly before the cutoff", () => {
+		const rates = resolveTieredRates(dated, {}, PRE_CUTOFF);
+		assert.strictEqual(rates.input, 2.00);
+		assert.strictEqual(rates.output, 10.00);
+		assert.strictEqual(rates.cacheRead, 0.20);
+		assert.strictEqual(rates.cacheWrite, 2.50);
+	});
+
+	it("uses base (standard) rates exactly at the cutoff — boundary is not intro", () => {
+		const rates = resolveTieredRates(dated, {}, EXACT_CUTOFF);
+		assert.strictEqual(rates.input, 3.00);
+	});
+
+	it("uses base (standard) rates after the cutoff", () => {
+		const rates = resolveTieredRates(dated, {}, POST_CUTOFF);
+		assert.strictEqual(rates.input, 3.00);
+		assert.strictEqual(rates.output, 15.00);
+		assert.strictEqual(rates.cacheRead, 0.30);
+		assert.strictEqual(rates.cacheWrite, 3.75);
+	});
+
+	it("uses base rates when no timestamp is supplied — never falls back to Date.now() (#96)", () => {
+		const rates = resolveTieredRates(dated, {});
+		assert.strictEqual(rates.input, 3.00);
+	});
+
+	it("uses base rates when timestamp is 0 (unparsed/unknown, per wtft-parser's default)", () => {
+		const rates = resolveTieredRates(dated, {}, 0);
+		assert.strictEqual(rates.input, 3.00);
+	});
+
+	it("leaves models without dateTiers unaffected by a timestamp argument", () => {
+		const flat: ModelPricing = { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 };
+		const rates = resolveTieredRates(flat, {}, PRE_CUTOFF);
+		assert.strictEqual(rates.input, 5);
 	});
 });
 

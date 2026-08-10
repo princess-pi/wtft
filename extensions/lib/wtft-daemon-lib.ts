@@ -173,13 +173,6 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
  * @param settings - Display settings (interval, limit, width, etc.)
  */
 
-// DAEMON HEALTH CHECK (used by watchTagFile + Pi widget)
-
-/**
-/**
- * Compute the tag file path for a given session path.
- * Scans wtft-tags/ subdirectory for the current version's tag file.
- */
 // 2.5.1 (#52 Phase 3): compaction/recache meter-split emits dual lines
 // (main + "#oh" overhead line), interrupted turns carry `ir` — stale caches
 // lack all three and must re-classify.
@@ -191,7 +184,10 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
 // 2.7.0 (#152): adds `miss` (observed cache miss). Cannot be back-derived from
 // v2.6.1 tags — the meter-split writes cr and cw onto separate lines, so a full
 // miss and a partial re-prime are indistinguishable once tagged.
-export const WTFT_TAGGER_VERSION = "2.7.0";
+// 2.7.1 (#148): claude-sonnet-5 re-priced to intro rate ($2/$10/$0.20/$2.50,
+// derived 1h write $4.00) for interactions before 2026-09-01, was flat
+// post-intro $3/$15 — v2.7.0 tags overbill every Sonnet 5 line by 50%.
+export const WTFT_TAGGER_VERSION = "2.7.1";
 
 /**
  * Serialize one interaction to its classified tag-file line(s) (#52 Phase 3).

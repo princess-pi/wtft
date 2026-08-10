@@ -59,8 +59,13 @@ export function getCwdReadCount(): number {
 
 /**
  * Number of whole-file relocation scans since the last {@link resetCwdCache}.
- * The point of the counter is the *gate*: on a history where every session's
- * last cwd still exists this must stay at zero (spec V9).
+ *
+ * The point of the counter is the *gate*, and the number it counts is scans,
+ * not call sites: a stranded transcript is asked for its history twice per
+ * discovery (once to match, once to pick a live display path) and the
+ * `(path, mtimeMs, size)` memo absorbs the second, so the counter reads 1 per
+ * stranded transcript. Zero when every session's last cwd still exists. Spec
+ * V9 asserts the batch form of that: one stranded + one live ⇒ at most 1.
  */
 export function getCwdHistoryReadCount(): number {
 	return historyReadCount;

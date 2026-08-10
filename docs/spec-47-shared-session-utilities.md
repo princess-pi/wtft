@@ -62,8 +62,13 @@ export function formatRelativeTime(
 |---|---|---|
 | `home-princess-pi-git-projects-princess-pi-packages` | claude-code | `~/g-p/princess-pi-packages` |
 | `home-princess-pi-git-projects-some-project` + UUID tail | claude-code | `~/g-p/some-project/...abc1` |
+| `home-princess-pi-git-projects-worktrees-demo-99-branch` | any | `~/g-p/demo/w/99-branch` (worktree compaction, #145) |
+| `home-princess-pi-git-projects-demo--claude-worktrees-99-branch` | any | `~/g-p/demo/w/99-branch` (worktree compaction, #145) |
+| `home-princess-pi-git-projects-worktrees-demo-scratch` | any | `~/g-p/worktrees-demo-scratch` (no digit segment → left alone) |
 | `home--princess-pi--git-projects--foo` | pi | `home//princess/pi//git/projects//foo` (fallthrough, pre-existing gap) |
 | `some-dir-name` | any | `some/dir/name` |
+
+Worktree compaction (#145) applies only *inside* the two known `~/git-projects` prefixes — the generic fallthrough row is never rewritten this way. The out-of-tree form splits at the first all-digit segment (the `<issue#>` that opens every branch name under this repo's naming standard); being wrong there costs an uglier row, never a missing session.
 
 Note: Pi slugs use `--` internal separators and never match the `home-*-git-projects-` known prefix (which uses single dashes). They fall through to the generic `s/-/g` → `/` cleaner. Fixing this requires checking the `--` variant of the known prefix — tracked as a follow-up.
 

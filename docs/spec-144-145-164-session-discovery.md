@@ -176,15 +176,29 @@ returns `null`) never reaches arm 3, so Pi is untouched, exactly as in #156.
 `relocated` is treated as an **optimisation, never a dependency**: a transcript with no
 `relocated` entries simply yields a one-element history (its last `cwd`), and arms 1–2 remain the
 whole rule. If a future Claude Code drops the entry type, discovery degrades to today's
-behaviour rather than breaking.
+behaviour rather than breaking. A transcript with no `cwd` *and* no `relocated` yields the empty
+history — not a one-element one — which is the shape V8 asserts for Pi transcripts.
+
+The history is **most-recent-first and deduplicated**: index 0 is the last recorded `cwd`, then
+relocations walked newest-backwards, with repeats collapsed. Order is what makes "prefer a live
+path" mean "the most recent one that still exists"; dedup is because a session that bounces
+between two checkouts records the same pair many times.
 
 **Display prefers a live path.** When a session *is* stranded, the picker should not show a
 directory that no longer exists. `displayPath` is built from the first still-existing directory
 in the history; when the last cwd exists (the overwhelmingly common case) the physical project
-slug is used exactly as today, so no currently-rendered row changes.
+slug is used exactly as today, so no currently-rendered row changes. When *no* directory in the
+history still exists — every checkout it ever occupied is gone — the physical project slug is
+kept rather than inventing a label: the row is then honest about naming somewhere unreachable,
+because there is nowhere reachable to name.
 
 Memoisation mirrors `resolveLastCwd`: keyed on `(path, mtimeMs, size)`, so a repeated
-`discoverSessions` in one process re-reads nothing.
+`discoverSessions` in one process re-reads nothing. That memo is load-bearing for the cost
+argument, not just an optimisation: a stranded transcript is asked for its history twice per
+discovery — once to match, once to choose a display path — and the second ask is a cache hit.
+
+`resolveSessionById` is **deliberately unchanged**: it already scans every project dir for a
+matching session id, so it was never cwd-scoped and has nothing to fan out over.
 
 ## Roads not taken
 
@@ -229,21 +243,29 @@ a session that has only ever lived in a sibling worktree has never occupied the 
    today. This is a filesystem check, not a git invocation, so it is also the fallback's gate.
 2. Inside a repo: `git worktree list --porcelain`, take every `worktree <path>` line. Exact, no
    false positives, and symmetric — it answers the same from the main clone and from any
-   worktree, which is what "and vice versa" in the acceptance criteria requires.
-3. Git absent, erroring, or timing out: fall back to **slug prefix matching** —
-   `slug.startsWith(targetSlug + "-")` for either encoding. This catches the in-tree layout
-   (`<mainSlug>--claude-worktrees-<branch>`) from the main clone only. It cannot catch the
-   out-of-tree layout (`…-worktrees-<repo>-<branch>` is not prefixed by the main slug) or the
-   reverse direction; that is a known limit of the fallback, called out in #145 itself.
-   Gated on step 1, so `~` still does not fan out even when git is missing.
+   worktree, which is what "and vice versa" in the acceptance criteria requires. The subprocess
+   sits on the interactive path, so it is bounded at **3 s** and its stderr is discarded; any
+   breach of that bound is a fallback, not a hang.
+3. Git absent, erroring, timing out, or answering with no `worktree` lines at all: fall back to
+   **slug prefix matching** — `slug.startsWith(targetSlug + "-")` for either encoding. This
+   catches the in-tree layout (`<mainSlug>--claude-worktrees-<branch>`) from the main clone only.
+   It cannot catch the out-of-tree layout (`…-worktrees-<repo>-<branch>` is not prefixed by the
+   main slug) or the reverse direction; that is a known limit of the fallback, called out in #145
+   itself. Gated on step 1, so `~` still does not fan out even when git is missing. "Answered
+   with nothing" folds into the fallback because a real repo always reports at least itself, so
+   an empty list can only mean git did not really answer.
 
 `--dir <path>` keeps meaning "this specific cwd" and fans out over **that** path's repo — the
-flag selects the anchor, not the policy.
+flag selects the anchor, not the policy. That sentence is also the `--dir/--cwd` line in
+`docs/manifests/wtft-cmd.json`, which drives `--help`: a reader who is told only "working
+directory for discovery" would conclude the fan-out does not exist.
 
-Scope: **Claude discovery only.** Pi's match is already containment
-(`extensions/lib/harness/pi/discovery.ts:100`: `slug.includes(targetSlug)`), which by accident
+Scope of the **fan-out**: **Claude discovery only.** Pi's match is already containment
+(`extensions/lib/harness/pi/discovery.ts`: `slug.includes(targetSlug)`), which by accident
 already fans out over the in-tree worktree layout, and Pi has no worktree-switch mechanism that
-rewrites its slug. Fanning Pi out as well is deferred, not forgotten.
+rewrites its slug. Fanning Pi out as well is deferred, not forgotten. Pi *is* touched on this
+branch, but only by #144's slug union — containment is evaluated against every encoding variant
+rather than one — which is additive and changes no Pi row that resolves today.
 
 ## Display — worktree rows must be distinguishable
 
@@ -288,13 +310,33 @@ extensions/lib/harness/claude-code/discovery.ts   three-arm union + fan-out + li
 extensions/lib/harness/pi/discovery.ts       containment against the slug-variant union (#144)
 extensions/lib/session-path-shortener.ts     worktree compaction → <repo>/w/<branch>
 bin/wtft.ts                                  re-export the new seams for tests
+docs/manifests/wtft-cmd.json                 --dir/--cwd now documents the fan-out; one new
+                                             --why scenario for worktree/stranded discovery
 tests/wtft-issue-144-145-164-session-discovery.test.ts   NEW
 research/164-relocation-scan-probe.mjs       NEW (the measurement above)
+.gitignore                                   + a slash-less `node_modules` line
+bin/wtft.mjs, bin/wtft-daemon.mjs, bin/serve.mjs, bin/merge.mjs, bin/yada.mjs   rebuilt
 ```
+
+The `.gitignore` line is not incidental. `node_modules/` (with the trailing slash) does not match
+a **symlinked** `node_modules`, which is what every worktree here has — so a `git add -A` during
+Code Draft tracked this worktree's symlink, an absolute machine-local path, mode 120000. Fixed
+forward in `53440b7`; the slash-less pattern closes the class, not just the instance.
+
+The rebuilt `bin/*.mjs` carry one cosmetic artefact of being built inside a worktree: esbuild
+writes each vendored module's *realpath*-relative source comment, so `// node_modules/clone/…`
+becomes `// ../../../princess-pi-packages/node_modules/clone/…`. Comments only, no behavioural
+difference, and `bun run build` is reproducible within a given checkout — but it means a build
+from a worktree and a build from the main clone are not byte-identical. Tracked as **#172**, not
+fixed here (Step 5 forbids production changes, and hand-editing generated `.mjs` is a repo hard
+gate).
 
 Test seams: `WTFT_CLAUDE_PROJECTS_DIR` (existing) points discovery at a fixture tree;
 `WTFT_NO_GIT=1` (new) forces the no-git fallback path so it can be exercised without
-uninstalling git. Both are read at call time, never cached across a process.
+uninstalling git. Both are read at call time, never cached across a process. Neither appears in
+`docs/manifests/wtft-cmd.json`, deliberately and consistently with #156: they are test seams, not
+user-facing switches — a machine without git already reaches the fallback on its own, because the
+`git` subprocess throws.
 
 ---
 
@@ -302,8 +344,10 @@ uninstalling git. Both are read at call time, never cached across a process.
 
 Each is a concrete assertion in
 `tests/wtft-issue-144-145-164-session-discovery.test.ts` unless stated otherwise, driven through
-`WTFT_CLAUDE_PROJECTS_DIR` fixtures and the public `discoverSessions()` / `resolveLastCwd()` /
-`buildDisplayPath()` interfaces — never module internals.
+`WTFT_CLAUDE_PROJECTS_DIR` fixtures and interfaces exported from `bin/wtft.mjs` —
+`discoverSessions()`, `resolveLastCwd()`, `resolveCwdHistory()`, `buildDisplayPath()`,
+`fanOutCwd()`, `findRepoRoot()`, the slug helpers (`cwdToSlug`, `cwdToStrictSlug`,
+`cwdSlugVariants`, `slugMatchesCwd`) and the read counters. Never module internals.
 
 **Encoding (#144)**
 
@@ -327,7 +371,8 @@ Each is a concrete assertion in
 - **V7** — no regression: a session that never left the main clone is still found, and the whole
   of `tests/wtft-issue-156-harness-seam.test.ts` Parts A–C passes unchanged.
 - **V8** — Pi shape unaffected: a transcript with no `cwd` and no `relocated` resolves to `null`
-  from `resolveLastCwd` and contributes nothing to any target.
+  from `resolveLastCwd`, yields the **empty** history from `resolveCwdHistory`, and contributes
+  nothing to any target.
 - **V9** — the gate holds: in a batch with one stranded transcript (last cwd removed) and one
   live-cwd transcript (`homebody`, last cwd exists), the whole-file history scan fires **at most
   once** — for the stranded one — never for `homebody`. `resolveCwdHistory` is called a second
@@ -337,10 +382,13 @@ Each is a concrete assertion in
   scan ran at all.
 - **V10** — display prefers a live path: the V5 candidate's `displayPath` names the main clone,
   not the removed worktree.
-- **V11 (cost, per #164)** — `resolveLastCwd` still resolves on a representative sample without
-  widening, and `discoverSessions("claude-code", process.cwd())` over the real
-  `~/.claude/projects` stays under the existing 500 ms ceiling. Skipped when
-  `~/.claude/projects` is absent.
+- **V11 (cost, per #164)** — against the real `~/.claude/projects`, not a fixture:
+  `discoverSessions("claude-code", process.cwd())` returns without throwing, a *cold* call stays
+  under the 500 ms ceiling `tests/wtft-issue-156-harness-seam.test.ts` already asserts, and a
+  second call is not slower than the first plus 50 ms (the memo is doing its job). Skipped when
+  `~/.claude/projects` is absent. This is the one criterion measured in wall-clock time; it
+  reads `Date.now()` for *elapsed* time only — never a date — which is the same latitude #156's
+  ceiling test takes, because a duration is the quantity under test and cannot be injected away.
 
 **Sibling worktrees (#145)**
 
@@ -357,6 +405,12 @@ Each is a concrete assertion in
 - **V17** — `--dir <worktree>` from the main clone fans out over that worktree's repo (same set
   as V13).
 
+V12–V14, V16 and V17 build a **real** git repo and a **real** `git worktree add` in a temp dir
+rather than faking `git worktree list` output — the point of #145 is that git is the source of
+truth, so mocking it would test the mock. The consequence is that they self-skip (with a printed
+note) on a machine where `git init` fails; V15's non-repo case does not depend on git and always
+runs.
+
 **Display (#145)**
 
 - **V18** — `buildDisplayPath("x…5e9e.jsonl", "-home-<user>-git-projects-worktrees-demo-99-branch",
@@ -369,12 +423,95 @@ Each is a concrete assertion in
 **Whole-suite invariant**
 
 - **V21** — `bun run test` is green: the pre-branch 43 suites plus this branch's own
-  `wtft-issue-144-145-164-session-discovery` = 44, none regressed by this branch.
+  `wtft-issue-144-145-164-session-discovery` = 44, none regressed by this branch. V21 is the only
+  criterion with no assertion inside the test file — it *is* the runner's report. The declared
+  runner (`bun tests/run.ts`, #158) does not drive the two shell suites
+  (`serve-no-sudo-nginx.test.sh`, `wtft-daemon.test.sh`); it names them in its own output, and
+  neither touches any file on this branch.
 
 ---
 
 # Definition of done
 
-V1–V21 pass, `bun run typecheck` is clean, and `bin/wtft.mjs` is rebuilt and committed with its
-`.ts` sources. The union invariant is the thing to re-check on any later edit: **no arm of this
-rule may ever be turned into a replacement.**
+V1–V21 pass and `bin/wtft.mjs` is rebuilt and committed with its `.ts` sources. The union
+invariant is the thing to re-check on any later edit: **no arm of this rule may ever be turned
+into a replacement.**
+
+**`bun run typecheck` is not a gate this branch can meet, and the reason is not this branch.**
+An earlier draft of this section demanded a clean typecheck. `tsc --noEmit` is red at the branch
+point (`ad91cdc`) and stays red here, with the same two errors both times:
+
+```
+bin/serve.ts(21,81):                      error TS7016: … '../extensions/lib/serve/cloudflare.js' implicitly has an 'any' type.
+extensions/lib/serve/process.ts(6,59):    error TS7016: … './cloudflare.js' implicitly has an 'any' type.
+```
+
+`extensions/lib/serve/cloudflare.js` has no `.ts` source and no declaration file. No file this
+branch touches appears in either error, and this branch adds none. Tracked as **#168** ("typecheck
+is red on clean main — and nothing gates it"), which is where the fix belongs — fixing it here
+would be a production change during Step 5. The honest gate for this branch is: **`bun run test`
+green, and `tsc --noEmit` no worse than `ad91cdc`.** Both hold.
+
+---
+
+# Step 5 — reconciliation record
+
+Every readable artifact in this branch's file-level blast radius, checked against the code that
+actually shipped (`53440b7`). Rows are the contradictions **found**, not the surfaces inspected —
+surfaces that already matched are listed under "Clean on inspection" below. The loop ran until a
+fresh pass found nothing new; the pass that produced the last row is the pass that ended it.
+
+| Artifact | Claim it made | Contradicted by | Test-covered? | Action |
+|---|---|---|---|---|
+| `docs/spec-144-145-164…md` § Definition of done | "`bun run typecheck` is clean" is a gate this branch meets | `tsc --noEmit` is red at branch point `ad91cdc` *and* here, same 2 errors, in `serve/cloudflare.js` — a file this branch never touches | no (nothing gates typecheck — that is #168) | Replaced with the gate the branch can actually meet, errors quoted, deferred to #168 |
+| `docs/spec-144-145-164…md` V11 | "`resolveLastCwd` still resolves on a representative sample without widening" | no such assertion exists; Part E asserts cold < 500 ms, no-throw, and warm ≤ cold+50 | yes (V11) | Rewritten to the three assertions the test makes; the `Date.now()` latitude stated and justified |
+| `docs/spec-144-145-164…md` V8 | resolves to `null` from `resolveLastCwd` | true but partial — the test also asserts `resolveCwdHistory` returns `[]` | yes (V8) | Added the history half |
+| `docs/spec-144-145-164…md` § Verification preamble | tests drive "`discoverSessions()` / `resolveLastCwd()` / `buildDisplayPath()`" | test also drives `resolveCwdHistory`, `fanOutCwd`, `findRepoRoot`, all four slug helpers, both counters | n/a | List completed |
+| `docs/spec-144-145-164…md` § #164 Display | `displayPath` "is built from the first still-existing directory in the history" | `displaySlugFor` falls back to the physical slug when *no* directory in the history exists — the spec named no such case | partially (V10 covers the live case only) | Fallback documented; row marked `reconciled-against-untested` |
+| `docs/spec-144-145-164…md` § #164 | history described only as a list | `resolveCwdHistory` returns most-recent-first **and deduplicated** (`[...new Set(ordered)]`); empty (not one-element) when there is no `cwd` at all | yes (V6 order, V8 empty); dedup untested | Order + dedup + empty-case documented; dedup `reconciled-against-untested` |
+| `docs/spec-144-145-164…md` § #145 step 3 | fallback fires when git is "absent, erroring, or timing out" | `listWorktreeDirs` also returns null when git answers with **no `worktree` lines**, and bounds the subprocess at 3 s | no | Both stated, with why an empty list can only mean "git did not really answer" |
+| `docs/spec-144-145-164…md` § #145 Scope | "Claude discovery only" | `pi/discovery.ts` *is* changed on this branch — by #144's slug union | no direct Pi assertion | Scoped to the fan-out; the Pi change stated explicitly |
+| `docs/spec-144-145-164…md` § Shape of the change | omitted `.gitignore`, the manifest, and the rebuilt `bin/*.mjs` | `git diff main..HEAD` lists all three | n/a | Added, with the reason `node_modules/` failed to match a symlink, and #172 |
+| `docs/spec-144-145-164…md` | silent on `resolveSessionById` | it is unchanged and was never cwd-scoped — a reader could assume the fan-out reaches it | no | One line stating it is deliberately untouched |
+| `docs/spec-144-145-164…md` V21 | "43 + 1 = 44 suites" | true, but the runner also *declines* two shell suites and says so in its own output | yes (the runner) | Shell-suite caveat added |
+| `docs/manifests/wtft-cmd.json` `--dir/--cwd` | "Working directory for Claude Code session discovery" | `discover()` calls `fanOutCwd(target)` — the flag now anchors a repo-wide fan-out. **An omission: a reader concludes the fan-out does not exist.** Drives `--help`. | yes (V17) | Rewritten; a `--why` scenario added for worktree + stranded discovery |
+| `docs/EXT_WTFT.html` § 5 | "the project name is kept in full" | `compactWorktreeProject` rewrites a worktree checkout to `<repo>/w/<branch>` | yes (V18–V20) | Exception documented with a worked example |
+| `docs/EXT_WTFT.html` § 5 | sessions "are identified by their parent directory slug" — full stop | four arms now, three of them not the slug | yes (V1–V17) | New § 5b states the union rule and that no arm may become a replacement |
+| `docs/spec-156-155…md` § Rule — union | the shipped rule is the two arms stated there | `slug(D)` is now a set (#144), `D` is now a set (#145), and a third arm exists (#164) | yes (V1–V17) | Forward-pointer block; the additive invariant noted as what all three were measured against |
+| `docs/spec-156-155…md` § Pi is unaffected | Pi is untouched | true of arms 2–4, false of #144's slug union | no | Qualified per-arm |
+| `docs/spec-156-155…md` § Tail-scan | "scan the whole file as a last resort" | **pre-existing, not this branch.** `TAIL_WINDOWS` is `[8 KB, 64 KB, 512 KB]` with no unbounded pass. Probe 2026-08-10: an 851 KB transcript with its only `cwd` on line 1 → `resolveLastCwd` returns `null` | no | Doc corrected to the shipped behaviour with the probe inline; **code** question filed as **#170** |
+| `extensions/lib/harness/worktrees.ts` `listWorktreeDirs` | `WTFT_NO_GIT` is "a real escape hatch on machines without git" | a machine without git already reaches the fallback — `execFileSync` throws. The var is a test seam. | yes (V16) | Comment narrowed to what it is |
+| `extensions/lib/harness/session-cwd.ts` `getCwdHistoryReadCount` | counter "must stay at zero (spec V9)" | V9 now asserts `<= 1`; zero holds only when *every* last cwd exists | yes (V9) | Docstring states what it counts (scans, not call sites) and both cases |
+| `extensions/lib/session-path-shortener.ts` `buildDisplayPath` | "Transformations:" list | omitted the worktree compaction the same function now performs | yes (V18–V20) | Bullet added, with the scope limit (known prefixes only) |
+| `tests/wtft-issue-144…test.ts` header | "no test reads the host clock" | Part E calls `Date.now()` twice | — | **The exact failure this repo has shipped before.** Rewritten: no assertion depends on a wall-clock *date*; elapsed time is the quantity under test in V11 and cannot be injected away |
+| `tests/wtft-issue-144…test.ts` header | interface list, and "V1–V21" | list omitted six exported helpers; V21 has no assertion in the file | — | List completed; V21 explicitly named as the runner's report |
+| `docs/adding-a-harness.md` § 1 | the union rule is two arms, and `resolveLastCwd` is the only helper a harness author needs | three more arms and four more shared helpers now exist. **An omission with teeth: an author following this guide would write a pinned slug encoding — the exact #144 bug.** | yes, for the helpers (V1–V17) | Three arms documented as helpers to reach for, each with its gate and its cost, plus the additive invariant and the note that none of it is required to ship |
+| `docs/spec-47-shared-session-utilities.md` § `buildDisplayPath` transformation rules | a table presented as the complete set of transformations | omits the worktree compaction the same function now performs — a table that looks exhaustive and is not | yes (V18–V20) | Three rows added (both layouts + the no-digit case) with the scope limit stated |
+| `extensions/lib/session-selector.ts` `discoverSessions` docstring | states the two-arm union rule as *the* rule, on the public entry point every caller reads first | four arms shipped. The file itself is untouched by this branch, which is exactly why it drifted — the neighbour nobody looked at | yes (V1–V17) | All four arms enumerated with their gates, plus the additive invariant and which arms each harness actually uses |
+
+**Clean on inspection** — checked, contradicted nothing, changed nothing: `README.md` (says
+nothing about discovery scope); `docs/agents/*.md` (no suite count, no discovery claim);
+`bin/wtft.ts` (re-export block only, its comment matches); `extensions/lib/harness/pi/discovery.ts`
+(its new header paragraph already states the #144 union and the road not taken);
+`extensions/lib/harness/claude-code/discovery.ts` (header enumerates all three issues correctly);
+`research/164-relocation-scan-probe.mjs` (header matches what it measures, and the numbers it
+produced are the ones quoted above); `docs/EXTENSIONS.html` and `docs/EXT_MV_SESSION.html` (their
+"relocation" is `/mv-session` moving a Pi session, an unrelated sense of the word — no wtft
+discovery claim); `docs/manifests/{serve,merge,yada}-cmd.json` (no discovery surface); every
+error/warning/status string in the touched files — this branch adds none.
+
+The two rows that mattered most were both found this way rather than by following the diff:
+`docs/adding-a-harness.md` and `extensions/lib/session-selector.ts` are the two files a reader
+meets *before* any file this branch edited, and neither appears in `git diff main..HEAD`. Auditing
+by blast radius rather than by changed symbol is what surfaced them.
+
+**Rows marked `reconciled-against-untested`**, i.e. the doc now matches code that no assertion
+pins: the no-live-directory display fallback in `displaySlugFor`; the dedup in
+`resolveCwdHistory`; `listWorktreeDirs` returning null on an empty `worktree` list; the 3 s git
+timeout. Each is a defensive branch that a fixture cannot reach without contriving a broken git
+or a fully-deleted repo history. They are documented as behaviour, not asserted as contract.
+
+**Follow-ups filed, not fixed here** (Step 5 permits no production change): **#170** the 512 KB
+tail cap, **#171** the leaked `wtft-daemon` child in
+`tests/wtft-tree-navigation-cost-divergence.test.ts`, **#172** the worktree-build path leakage in
+generated `bin/*.mjs`. **#168** (typecheck red on clean main) predates this branch and stays open.

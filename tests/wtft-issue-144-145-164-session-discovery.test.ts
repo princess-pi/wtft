@@ -11,10 +11,20 @@
  *   D  V18–V20  #145  worktree rows render as <repo>/w/<branch>
  *   E  V11      #164  cost: the whole-file scan stays gated on real history
  *
- * Everything runs through the public interfaces (`discoverSessions`,
- * `resolveLastCwd`, `buildDisplayPath`, `fanOutCwd`) against fixture trees
- * pointed at by WTFT_CLAUDE_PROJECTS_DIR. No module internals are touched, and
- * no test reads the host clock.
+ * V21 is the whole-suite invariant and is not asserted here — it is what
+ * `bun run test` reports across every suite.
+ *
+ * Everything runs through interfaces exported from bin/wtft.mjs —
+ * `discoverSessions`, `resolveLastCwd`, `resolveCwdHistory`, `buildDisplayPath`,
+ * `fanOutCwd`, `findRepoRoot`, the slug helpers and the read counters — against
+ * fixture trees pointed at by WTFT_CLAUDE_PROJECTS_DIR. No module internals are
+ * touched.
+ *
+ * On clocks: no assertion depends on the wall-clock *date* — the #96 flaky
+ * pricing trap. Part E does read `Date.now()`, but only to measure elapsed
+ * time against the 500 ms discovery ceiling, which is the same thing
+ * tests/wtft-issue-156-harness-seam.test.ts already does. A duration is the
+ * quantity under test there, so it cannot be injected away.
  *
  * Run: node --experimental-strip-types tests/wtft-issue-144-145-164-session-discovery.test.ts
  */

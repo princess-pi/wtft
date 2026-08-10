@@ -62,10 +62,16 @@ export function findRepoRoot(dir: string): string | null {
  * null when git could not answer (absent, erroring, timed out, or suppressed).
  *
  * Null and `[]` mean different things: null means "ask the fallback", `[]` would
- * mean "this repo genuinely has no checkouts", which cannot happen.
+ * mean "this repo genuinely has no checkouts", which cannot happen — so a git
+ * that answers with no `worktree` lines is also reported as null.
+ *
+ * `WTFT_NO_GIT=1` short-circuits to null. It is a *test* seam, not a
+ * user-facing switch: a machine without git already lands on the fallback by
+ * itself, because `execFileSync` throws. Its job is to make that path
+ * exercisable without uninstalling git, and it is read at call time so a test
+ * can set and clear it inside one process.
  */
 export function listWorktreeDirs(repoRoot: string): string[] | null {
-	// Test seam, and a real escape hatch on machines without git.
 	if (process.env.WTFT_NO_GIT === "1") return null;
 	let out: string;
 	try {

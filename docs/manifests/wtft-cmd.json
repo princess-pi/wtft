@@ -43,6 +43,18 @@
       ]
     },
     {
+      "scenario": "You're standing in a git worktree (or the main clone) and the session you want was recorded from a sibling checkout of the same repo — or from a worktree that has since been removed.",
+      "commands": [
+        ""
+      ],
+      "result": "The session selector lists sessions from every checkout of the current repo, not just the exact directory you are standing in, and it works the same in both directions (clone sees worktrees, worktree sees clone). Worktree rows compact to <repo>/w/<branch> so they stay readable. A session whose directory was deleted is still found — from the moves the transcript itself records — and is shown under a directory that still exists. Outside a git repo nothing fans out. Use --dir <path> to anchor the fan-out somewhere other than the current directory.",
+      "demo": [
+        "  [1] ~/g-p/princess-pi-packages/...4e9e                        \u001b[1;37m$12.34\u001b[0m  (48t)      [Claude]  2m ago",
+        "  [2] ~/g-p/princess-pi-packages/w/158-one-test-runner/...5e9e  \u001b[1;37m$3.21\u001b[0m   (12t)      [Claude]  1h ago",
+        "  [3] ~/g-p/princess-pi-packages/w/145-worktree-scope/...9a01    \u001b[1;37m$0.87\u001b[0m   (4t)       [Claude]  3h ago"
+      ]
+    },
+    {
       "scenario": "You want to scroll through a long cost history that doesn't fit in the TUI widget.",
       "commands": [
         "-p"
@@ -124,7 +136,7 @@
     },
     {
       "flags": "--dir, --cwd <path>",
-      "desc": "Working directory for Claude Code session discovery (default: current directory)."
+      "desc": "Anchor directory for Claude Code session discovery (default: current directory). The flag picks the anchor, not the policy: when the anchor sits inside a git repo, discovery fans out over every checkout of that repo (main clone plus every worktree), so sibling-worktree sessions are listed too. An anchor outside any git repo means exactly that directory, so '--dir ~' still does not list every session on the machine."
     },
     {
       "flags": "-w, --width <number>",

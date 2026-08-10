@@ -7,8 +7,15 @@
  *   terminal widths. Tests against the BUILT bin/wtft.mjs — the
  *   end-user artifact — to catch stale-build regressions.
  *
- *   Invariant: the SURGE timeline (---◆---) MUST be on the title row,
- *   never on its own row. Legend goes to its own row when too wide.
+ *   Invariant: the SURGE timeline MUST be on the title row, never on its own
+ *   row. Legend goes to its own row when too wide.
+ *
+ *   The timeline is identified by its moon-phase bookends (🌑…🌘), not by the
+ *   current-hour marker: the marker is a clock face that changes every hour and
+ *   is replaced by ☀️ at noon, whereas the bookends are always present. This
+ *   suite used to key off the old ◆ marker, which the renderer dropped — the
+ *   replacement invariant is deliberately the one that does not depend on what
+ *   time the suite happens to run (#158).
  */
 
 import * as fs from "node:fs";
@@ -110,12 +117,24 @@ function isLegendRow(line: string): boolean {
 	return line.includes("Spec") && line.includes("Plan") && line.includes("Code");
 }
 
+// --- Helper: does a row carry the SURGE timeline? ---
+// Keyed off the moon-phase bookends, which buildTimelineString() emits
+// unconditionally. See the header note on why not the hour marker.
+const MOON_PHASES = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"];
+function hasTimeline(line: string): boolean {
+	return MOON_PHASES.some(m => line.includes(m));
+}
+
 // ---
 // Test matrix
 // ---
 const WIDTHS = [60, 120, 240] as const;
+// --cost is passed explicitly rather than relying on the default: the mode is
+// config-persistable, so a bare invocation renders whatever the developer last
+// saved. tests/run.ts also isolates XDG_CONFIG_HOME; this states the intent at
+// the call site (#158).
 const CASES: { name: string; args: string[] }[] = [
-	{ name: "CLI cost",   args: [] },
+	{ name: "CLI cost",   args: ["--cost"] },
 	{ name: "CLI tokens", args: ["--tokens"] },
 ];
 
@@ -127,12 +146,12 @@ for (const width of WIDTHS) {
 		check(`${label}: output produced`, allRows.length >= 2);
 
 		// Invariant 1: timeline on title row
-		check(`${label}: timeline on title row (contains ◆)`, titleRow.includes("◆"));
+		check(`${label}: timeline on title row (moon bookend)`, hasTimeline(titleRow));
 
 		// Invariant 2: timeline NOT on its own row (search rows 2+)
 		let timelineOnOwnRow = false;
 		for (let j = 2; j < allRows.length; j++) {
-			if (allRows[j].includes("◆") && !isLegendRow(allRows[j])) {
+			if (hasTimeline(allRows[j]) && !isLegendRow(allRows[j])) {
 				timelineOnOwnRow = true;
 				break;
 			}

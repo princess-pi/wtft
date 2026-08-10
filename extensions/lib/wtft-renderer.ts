@@ -692,10 +692,18 @@ export function checkSurgeProximity(): { status: 'surge' | 'approaching' | 'endi
 
 /**
  * Build a 24-hour surge timeline string in the format:
- * (---[colored]---◆---) [⚡ SURGE 2x] [⚡ SURGE APPROACHING]
+ * 🌘──────🕔───☀️───────🌘 [⚡ SURGE 2x] [⚡ SURGE APPROACHING]
+ *
+ * One glyph per hour: `─` normally, `☀️` at noon, and a clock-face emoji at the
+ * current hour (except noon — ☀️ owns position 12). Green = normal pricing,
+ * orange = surge. The whole run is bookended by the current moon phase.
+ *
+ * The bookends are the only glyphs guaranteed present at every hour, so they —
+ * not the clock face — are what callers and tests should key off to identify
+ * the timeline (#158).
  *
  * @param surgeHours - Set of local hours (0-23) that are surge-priced
- * @param currentHour - Current local hour (0-23) for diamond marker
+ * @param currentHour - Current local hour (0-23) for the clock-face marker
  * @param proximityStatus - If set, appends the appropriate surge badge
  */
 // Moon phase emoji — 8 phases from new moon through waning crescent.

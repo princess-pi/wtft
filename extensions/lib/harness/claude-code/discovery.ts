@@ -8,6 +8,16 @@
  * subdirectory in older installs. The slug is stamped at session start and
  * never revised, so it locates where a session *began*. The union rule below is
  * what makes a moved session reachable from where it now lives.
+ *
+ * Three further failure modes are folded into that same union, and every one of
+ * them only ever *adds* matches — no arm may become a replacement:
+ *
+ *   #144  the slug encoding munges more than separators, so matching accepts
+ *         either encoding rather than pinning one;
+ *   #164  a session whose directory has been *deleted* matches on the set of
+ *         directories it has ever occupied, not just its latest one;
+ *   #145  the target is a set of directories — every checkout of the cwd's
+ *         repo — rather than a single one.
  */
 
 import * as fs from "node:fs";
@@ -15,7 +25,15 @@ import * as path from "node:path";
 import * as os from "node:os";
 
 import type { HarnessDiscovery, SessionCandidate } from "../types.ts";
-import { resolveLastCwd, cwdToSlug } from "../session-cwd.ts";
+import {
+	resolveLastCwd,
+	resolveCwdHistory,
+	pickLiveCwd,
+	pathExists,
+	cwdToSlug,
+	cwdSlugVariants,
+} from "../session-cwd.ts";
+import { fanOutCwd } from "../worktrees.ts";
 import { buildDisplayPath } from "../../session-path-shortener.ts";
 
 const ID = "claude-code";
@@ -55,6 +73,22 @@ function collect(dir: string, projectSlug: string, out: string[]): void {
 	}
 }
 
+/**
+ * Which slug to *render* this session under (#164).
+ *
+ * The physical project slug is the answer in every ordinary case, and is kept
+ * verbatim so no row that renders today changes. It is only wrong for a
+ * stranded session, where it names a directory that has been deleted — showing
+ * the user a path they cannot visit. There, the most recent still-existing
+ * directory from the session's history is the honest label.
+ */
+function displaySlugFor(file: string, projectSlug: string): string {
+	const last = resolveLastCwd(file);
+	if (last === null || pathExists(last)) return projectSlug;
+	const live = pickLiveCwd(resolveCwdHistory(file));
+	return live ? cwdToSlug(live) : projectSlug;
+}
+
 function toCandidate(file: string, projectSlug: string): SessionCandidate | null {
 	let stat: fs.Stats;
 	try {
@@ -68,8 +102,28 @@ function toCandidate(file: string, projectSlug: string): SessionCandidate | null
 		harness: ID,
 		timestamp: stat.mtimeMs,
 		name,
-		displayPath: buildDisplayPath(name, projectSlug, ID),
+		displayPath: buildDisplayPath(name, displaySlugFor(file, projectSlug), ID),
 	};
+}
+
+/**
+ * Does this transcript's own recorded location put it in one of the targets?
+ *
+ * Two arms, in cost order. The second is gated on the first failing *and* on the
+ * session's home being gone — unconditionally it is a whole-file read costing
+ * ~315 ms over a real history, to serve 3 transcripts in 40
+ * (research/164-relocation-scan-probe.mjs).
+ *
+ * A transcript with no `cwd` at all resolves to null and matches nothing, which
+ * is what keeps Pi transcripts out of this entirely.
+ */
+function matchesRecordedCwd(file: string, targets: Set<string>): boolean {
+	const last = resolveLastCwd(file);
+	if (last === null) return false;
+	if (targets.has(last)) return true;
+	// Lives somewhere real, just not here — nothing further to ask.
+	if (pathExists(last)) return false;
+	return resolveCwdHistory(file).some(dir => targets.has(dir));
 }
 
 export const discovery: HarnessDiscovery = {
@@ -84,7 +138,16 @@ export const discovery: HarnessDiscovery = {
 		// explicit --dir", not "every session on the machine". That policy lives
 		// here rather than in shared code so each harness keeps its own.
 		const target = path.resolve(targetCwd || process.cwd());
-		const targetSlug = cwdToSlug(target);
+
+		// #145: "here" is every checkout of this repo, not one directory. A cwd
+		// outside any repo fans out to itself alone, so `~` still means `~`.
+		// --dir picks the anchor; the policy is the same either way.
+		const fan = fanOutCwd(target);
+		const targets = new Set(fan.dirs);
+		const targetSlugs = new Set<string>();
+		for (const dir of fan.dirs) {
+			for (const variant of cwdSlugVariants(dir)) targetSlugs.add(variant);
+		}
 
 		let projectDirs: string[];
 		try {
@@ -101,16 +164,20 @@ export const discovery: HarnessDiscovery = {
 		const bySessionId = new Map<string, SessionCandidate>();
 
 		for (const slug of projectDirs) {
-			const physicalMatch = slug === targetSlug;
+			// Physical arm: any encoding (#144) of any checkout (#145). The
+			// prefix arm only exists when git could not enumerate the checkouts.
+			const physicalMatch =
+				targetSlugs.has(slug) ||
+				fan.slugPrefixes.some(prefix => slug.startsWith(prefix));
 			const files: string[] = [];
 			collect(path.join(root, slug), slug, files);
 
 			for (const file of files) {
-				// Union rule: physical slug match OR resolved last-cwd match.
-				// Union, not replacement — a last-cwd-only rule would DROP the
-				// session filed under a repo-root slug whose cwd is a subdir,
-				// which is a session the current selector does find.
-				if (!physicalMatch && resolveLastCwd(file) !== target) continue;
+				// Union rule: physical slug match OR the transcript's own
+				// recorded location. Union, not replacement — a last-cwd-only
+				// rule would DROP the session filed under a repo-root slug whose
+				// cwd is a subdir, which is a session the current selector finds.
+				if (!physicalMatch && !matchesRecordedCwd(file, targets)) continue;
 
 				const candidate = toCandidate(file, slug);
 				if (!candidate) continue;

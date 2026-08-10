@@ -12,6 +12,12 @@
  * nothing. That is correct rather than a gap — Pi's directory slug already
  * encodes the start cwd and Pi has no worktree switch that rewrites it. The day
  * Pi records per-entry cwd, this works with no code change.
+ *
+ * #144 applies here only as the slug *union*: Pi's session dirs on this machine
+ * contain no dot-derived name, so Pi's own munging is unverified in exactly the
+ * same way Claude Code's was. Accepting either encoding is additive under
+ * containment matching and is right whichever way Pi actually behaves;
+ * replacing Pi's encoder outright is the road not taken.
  */
 
 import * as fs from "node:fs";
@@ -19,7 +25,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 
 import type { HarnessDiscovery, SessionCandidate } from "../types.ts";
-import { resolveLastCwd, cwdToSlug } from "../session-cwd.ts";
+import { resolveLastCwd, cwdSlugVariants } from "../session-cwd.ts";
 import { buildDisplayPath } from "../../session-path-shortener.ts";
 
 const ID = "pi";
@@ -81,7 +87,7 @@ export const discovery: HarnessDiscovery = {
 		// Pi's policy differs from Claude's: no explicit target means every Pi
 		// session, not the cwd's. Preserved from the pre-seam selector.
 		const target = targetCwd ? path.resolve(targetCwd) : null;
-		const targetSlug = target ? cwdToSlug(target) : null;
+		const targetSlugs = target ? cwdSlugVariants(target) : null;
 
 		let projectDirs: string[];
 		try {
@@ -95,8 +101,10 @@ export const discovery: HarnessDiscovery = {
 		const bySessionId = new Map<string, SessionCandidate>();
 
 		for (const slug of projectDirs) {
-			// Pi dir names are "--" + cwdSlug + "--", so match by containment.
-			const physicalMatch = targetSlug === null || slug.includes(targetSlug);
+			// Pi dir names are "--" + cwdSlug + "--", so match by containment —
+			// under any encoding the slug might have been written with (#144).
+			const physicalMatch =
+				targetSlugs === null || targetSlugs.some(variant => slug.includes(variant));
 			const files: string[] = [];
 			collect(path.join(root, slug), files);
 

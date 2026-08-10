@@ -53,11 +53,26 @@ Union is the whole point. A pure last-cwd match would *change* existing behaviou
 `rogue-savvy` session above would stop appearing at the repo root, where it appears today.
 Union is strictly additive: it never drops a session the current code finds.
 
+> **Extended, not replaced, by #144/#145/#164** — see
+> `docs/spec-144-145-164-session-discovery.md`. The two arms above are still exactly the first
+> two arms of the shipped rule, and this document's reasoning still holds; but the shipped rule is
+> now wider in three ways, and reading only this section will understate it. `slug(D)` became a
+> *set* of encodings rather than one string (#144); `D` became the set of every checkout of `D`'s
+> git repo (#145); and a third arm fires when a session's last cwd names a directory that no
+> longer exists, matching against every directory the transcript has ever recorded (#164). The
+> additive invariant this section establishes is what all three were measured against.
+
 ### Tail-scan refinements
 
-- Start at **8 KB**, widen to 64 KB then 512 KB only when no `cwd` is found; scan the whole
-  file as a last resort. (0.5 MB read at 8 KB vs 2.3 MB at a fixed 64 KB — the issue's
-  prototype used the fixed window.)
+- Start at **8 KB**, widen to 64 KB then 512 KB only when no `cwd` is found. (0.5 MB read at
+  8 KB vs 2.3 MB at a fixed 64 KB — the issue's prototype used the fixed window.)
+  **512 KB is the last window, not a step before a whole-file read.** An earlier draft of this
+  line promised "scan the whole file as a last resort"; the shipped `TAIL_WINDOWS` is exactly
+  `[8 KB, 64 KB, 512 KB]`, so a transcript *larger* than 512 KB whose only `cwd` sits before that
+  tail resolves to `null` rather than being fully read. Verified 2026-08-10 by probe: an 851 KB
+  transcript with its single `cwd` on line 1 returns `null` from `resolveLastCwd`. That is a
+  deliberate cost ceiling in effect but was never a deliberate *decision* — tracked separately,
+  and corrected here so the document stops describing behaviour the code does not have.
 - When the read did not start at byte 0, **drop the first line** — it is a truncated fragment.
 - Memoise on `(path, mtimeMs, size)`. An unchanged transcript is never re-read.
 
@@ -68,6 +83,12 @@ transcript finds nothing and contributes nothing to the union, leaving Pi discov
 it is today. That is correct rather than a gap: Pi's directory slug already encodes the start
 cwd, and Pi has no worktree-switch mechanism that rewrites it. The resolver is wired into Pi
 discovery anyway, so the day Pi starts recording per-entry cwd, it works with no code change.
+
+Still true after #144/#145/#164 for the last-cwd, relocation-history and worktree-fan-out arms —
+Pi is touched by exactly one of the three changes: its containment match is now evaluated against
+every slug encoding rather than one (#144). Pi's own munging is unverified in the same way
+Claude Code's was, so accepting either encoding is additive and changes no Pi row that resolves
+today. Replacing Pi's encoder outright remains the road not taken.
 
 ---
 

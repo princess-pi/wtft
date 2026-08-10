@@ -46,11 +46,29 @@ export type { SessionCandidate } from "./harness/types.ts";
  * Discover session logs across every enabled harness, newest first.
  *
  * Layout knowledge lives in harness/<id>/discovery.ts (#156); this function
- * only fans out and merges. Each harness applies the union rule internally —
- * a transcript is a candidate when its project-dir slug matches the target cwd
- * OR its own recorded last-cwd does — which is what makes a session that moved
- * (worktree switch, or an ordinary `cd` into a subdir) visible from where it
- * now lives, without dropping any session the old cwd-slug-only scan found.
+ * only fans out across harnesses and merges. Each harness applies the union
+ * rule internally, and the union is strictly additive: no arm may ever become a
+ * replacement, because every arm exists to stop dropping sessions the previous
+ * rule found. A transcript is a candidate when ANY of these holds —
+ *
+ *   - its project-dir slug matches the target cwd, under EITHER known slug
+ *     encoding rather than one pinned guess (#144);
+ *   - its own recorded last-cwd matches, which is what makes a session that
+ *     moved (worktree switch, or an ordinary `cd` into a subdir) visible from
+ *     where it now lives (#156);
+ *   - its last-cwd names a directory that no longer EXISTS, and some directory
+ *     in its recorded relocation history matches — gated on the existence
+ *     check, because it is a whole-file read (#164);
+ *   - the "target cwd" is any checkout of the target's git repo, not just the
+ *     one directory, so sibling worktrees are in scope in both directions.
+ *     No `.git` ancestor means no fan-out, so `~` still means `~` (#145).
+ *
+ * Which arms apply is each harness's own call. Claude Code wires up all four.
+ * Pi wires up the first two — its slug arm accepts both encodings, and the
+ * last-cwd arm is present but never fires, because Pi records `cwd` once on its
+ * session_start entry and a tail scan finds nothing. That is deliberate rather
+ * than a gap: the day Pi records per-entry cwd, the arm starts working with no
+ * code change. See docs/adding-a-harness.md.
  *
  * @param harness - Target harness id, or "auto" for all enabled harnesses
  * @param cwdOverride - Directory to scope to; each harness decides what a

@@ -112,6 +112,7 @@ export {
 	buildWtftLines,
 	parseSessionFile,
 	deduplicateInteractions,
+	renderTokenSummary,
 	// Uncounted billables (#149) — counted blind spot, never priced
 	scanUncountedBillables,
 	newUncountedBillables,

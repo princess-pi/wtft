@@ -244,6 +244,25 @@ issue (§4.3), not done on this branch, per #162's own explicit instruction.
 >    to catch that was on the page and went unread. `wtft --cleanup` printing
 >    `Cleaned up 0 log parser(s).` (`bin/wtft-daemon.ts:822`) is what surfaced it, in one command,
 >    a day later.
+>
+> **As shipped (#165, 2026-08-10).** All 69 occurrences resolved; 52/52 suites green. Per surface:
+> `wtft-daemon --help` header teaches the long form, its flag lines and the `Daemon mode:` heading
+> use the shorthand; the five manifest `desc` strings each carry the long form, because `--why`
+> renders them with no header above; runtime output (`Cleaned up N daemon(s).`) and all comments
+> use the shorthand; `EXT_WTFT.html` and this doc teach in headings and refer in bodies. Every
+> bare `log parser` that survives in the tree is the term being *mentioned* — glossary rule text,
+> this record, test assertion strings — never *used* to name the process.
+>
+> Two corrections landed incidentally, in sentences the rename was rewriting anyway:
+>
+> - `EXT_WTFT.html:321` and `docs/wtft-incremental-render-spec.md:66,138` quoted a watch-mode
+>   footer reading `r to restart log parser`. The code emits `'r' to restart`
+>   (`extensions/lib/wtft-daemon-lib.ts:975`) and always has. The #163 backtest had already
+>   flagged this (finding 91); it is part of #167's ~30. Corrected rather than renamed, since
+>   renaming a quote of a string that does not exist only makes the drift harder to spot later.
+> - The architecture diagram's `wtft-daemon (log parser)` gloss was dropped rather than expanded —
+>   the box had 5 spare columns and the long form needed 7. See the "when the long form does not
+>   fit" rule now in `CONTEXT.md`, which this case is what produced.
 
 ### 4.2 Bin vs. bucket, confirmed by reading the code (not guessed)
 

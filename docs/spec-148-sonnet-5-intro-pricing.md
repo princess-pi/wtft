@@ -2,7 +2,7 @@
 
 **Issue:** #148
 **Branch:** `148-sonnet-5-intro-pricing`
-**State:** Spec Draft
+**State:** Spec Approved
 
 ---
 
@@ -88,6 +88,13 @@ export interface ModelPricing {
 `timestamp`: the earliest window whose `effectiveBefore` is still greater than `timestamp` wins;
 no match (or no `timestamp`) leaves the model's plain `input/output/cacheRead/cacheWrite` fields
 as the base. Size-tiering then proceeds exactly as before, on top of whichever base was chosen.
+The gate is `if (pricing.dateTiers && timestamp)` — a **falsy check**, so `timestamp === 0` takes
+the same base/standard fallback path as `timestamp === undefined`. This is deliberate, not an
+edge case slipping through: `wtft-parser.ts:189-194` already defaults an unparsed/absent
+`turn.timestamp` to `0`, so `0` is that upstream code's spelling of "timestamp unknown," and must
+resolve identically to "no timestamp supplied" here. Confirmed by implementation
+(`wtft-cost.ts:202`) and a dedicated test (`wtft-pricing-tiers.test.ts`, "uses base rates when
+timestamp is 0").
 
 `claude-sonnet-5`'s entry becomes:
 
@@ -203,8 +210,10 @@ re-price on next read.
    dated changelog comment, matching the existing comment-per-bump convention (`:183-193`).
 3. **Tests** (new, alongside the two suites that already own this surface):
    - `tests/wtft-pricing-tiers.test.ts` — direct `resolveTieredRates` unit coverage of
-     `dateTiers`: before-cutoff, at-cutoff (boundary, standard wins), after-cutoff, and
-     no-timestamp-supplied (falls back to base).
+     `dateTiers`: before-cutoff, at-cutoff (boundary, standard wins), after-cutoff,
+     no-timestamp-supplied, `timestamp=0` (both fall back to base, per the falsy-gate note in
+     §2), and a `dateTiers`-less `ModelPricing` confirming a supplied `timestamp` is a no-op when
+     the model doesn't opt in.
    - `tests/wtft-claude5-pricing.test.ts` — `calculateClaudeCost("claude-sonnet-5", ...)`
      end-to-end: intro quad ($2/$10/$0.20/$2.50), standard quad ($3/$15/$0.30/$3.75), and the 1h
      derivation at both ends ($4.00 intro / $6.00 standard, tying back to #146's formula).
@@ -252,7 +261,7 @@ explicitly as the reason that road was not taken, not left as an accidental side
 | V6 | `calculateClaudeCost("claude-sonnet-5", {input_tokens: 1e6}, EXACT_CUTOFF)` where `EXACT_CUTOFF = new Date("2026-09-01T00:00:00Z").getTime()` | `3.00` — boundary is standard, not intro |
 | V7 | same as V1-V5 but with `POST_CUTOFF = new Date("2026-09-15T00:00:00Z").getTime()` | `3.00 / 15.00 / 0.30 / 3.75`, 1h write `6.00` |
 | V8 | `calculateClaudeCost("claude-sonnet-5", {input_tokens: 1e6})` — no timestamp arg | `3.00` (base/standard fallback, not `Date.now()`-dependent) |
-| V9 | `resolveTieredRates` direct unit tests for `dateTiers` (before/at/after/absent) | rates match §2 exactly at each point |
+| V9 | `resolveTieredRates` direct unit tests for `dateTiers` (before/at/after/absent/`timestamp=0`, plus a `dateTiers`-less model ignoring `timestamp` entirely) | rates match §2 exactly at each point; `timestamp=0` resolves identically to absent (falsy gate, §2) |
 | V10 | `bun run test wtft-claude5-pricing`, `wtft-pricing-tiers`, `wtft-server-tool-cost`, `wtft-daemon-cost-cross-validation`, `wtft-cli-e2e-cost-parity` | all green, no Sonnet-5 dollar figure elsewhere needed updating |
 | V11 | `WTFT_TAGGER_VERSION` | `"2.7.1"`, with a dated changelog comment above it |
 | V12 | `bun run build` after the `.ts` edits | succeeds, `bin/*.mjs` regenerated and committed |

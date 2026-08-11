@@ -453,9 +453,52 @@ export function getModelCacheTtlMs(model: string): number | null {
 	return 5 * 60 * 1000;
 }
 
+// ---
+// DAEMON HEALTH REASON — code (contract) vs. text (copy)
+//
+// WHY the split (#179): `reason` used to be one `string` carrying a human sentence,
+// read by two consumers with opposite requirements — a control comparison gating
+// #124's startup grace window (which needs the string frozen forever) and the widget's
+// display label (which wants it free to improve). #165 reworded both sides at once and
+// only a manual `rg` stood between that sweep and a silent #124 regression.
+//
+// Now the code is the contract and the sentence is derived from it. Reword the sentence
+// and nothing breaks; that is the entire point. See docs/spec-179-daemon-health-reason-codes.md.
+// ---
+
+/**
+ * Stable machine-readable daemon health codes. THIS is the contract — control flow
+ * compares these, never the rendered text. Adding a member is a feature; renaming or
+ * removing one is a breaking change. The human sentences in DAEMON_REASON_TEXT are free
+ * to change at any time precisely because this union exists.
+ */
+export type DaemonHealthReason =
+	| "not-started"      // no daemon spawned for this session yet
+	| "starting"         // spawned, inside the #124 startup grace window
+	| "waiting-session"  // spawned, session .jsonl not created yet
+	| "not-found"        // no live PID and no heartbeat on record
+	| "idle-timeout"     // exited after idling out (lastHbTime carries when)
+	| "restart-failed";  // respawn attempted and did not come up
+
+/** Display copy for each code. Change freely — no control flow reads these. */
+export const DAEMON_REASON_TEXT: Record<DaemonHealthReason, string> = {
+	"not-started": "daemon not started",
+	"starting": "starting...",
+	"waiting-session": "waiting for session .jsonl...",
+	"not-found": "daemon not found",
+	"idle-timeout": "idle timeout",
+	"restart-failed": "restart failed",
+};
+
+/** Render a health code as its human sentence. Unknown code → "unknown" (never throws). */
+export function daemonReasonText(reason: DaemonHealthReason | undefined | null): string {
+	return (reason && DAEMON_REASON_TEXT[reason]) || "unknown";
+}
+
 export interface DaemonStatus {
 	alive: boolean;
-	reason?: string;
+	/** Machine-readable health code (#179). Compare THIS, never the rendered text. */
+	reason?: DaemonHealthReason;
 	lastHbTime?: string; // HH:MM local time of last heartbeat
 	/** Daemon is alive but no new classified data for ≥ IDLE_THRESHOLD_MS. */
 	idle?: boolean;
@@ -467,12 +510,10 @@ export interface DaemonStatus {
 	idleSinceMs?: number;
 	/** Cache TTL in ms for the current model (null = local/no cache). */
 	cacheTtlMs?: number | null;
-	/** Daemon was just spawned and hasn't confirmed alive yet — show "starting..."
-	 *  instead of "daemon not found" during the startup grace window (#124). */
-	starting?: boolean;
-	/** Session file doesn't exist yet — daemon is waiting for it to be created.
-	 *  Widget shows "waiting for session .jsonl..." instead of "starting..." (#124). */
-	waiting?: boolean;
+	// NOTE (#179): the former `starting?: boolean` / `waiting?: boolean` flags are gone.
+	// Each was true exactly when `reason` held one specific value, so they were two more
+	// fields that could drift out of agreement with it. renderDaemonStatus switches on
+	// the code directly.
 }
 
 /**
@@ -485,16 +526,18 @@ export interface DaemonStatus {
  *   "  ● restarting..." (yellow) — daemon being relaunched
  */
 export function renderDaemonStatus(status: DaemonStatus, restarting = false): string {
-	if (status.waiting) {
-		return "  \x1b[33m●\x1b[0m waiting for session .jsonl...";
+	// Switch on the health CODE, then look the sentence up (#179) — the display text is
+	// derived here and nowhere else, so rewording DAEMON_REASON_TEXT is a safe edit.
+	if (status.reason === "waiting-session") {
+		return `  \x1b[33m●\x1b[0m ${daemonReasonText("waiting-session")}`;
 	}
-	if (restarting || status.starting) {
-		return "  \x1b[33m●\x1b[0m starting...";
+	if (restarting || status.reason === "starting") {
+		return `  \x1b[33m●\x1b[0m ${daemonReasonText("starting")}`;
 	}
 	if (!status.alive) {
 		const label = status.lastHbTime
 			? `stopped ${status.lastHbTime}`
-			: (status.reason || "unknown");
+			: daemonReasonText(status.reason);
 		return `  \x1b[31m●\x1b[0m ${label}`;
 	}
 	if (status.idle) {
@@ -674,7 +717,7 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 	} catch {}
 
 	if (lastHbMs === 0) {
-		return { alive: false, reason: "daemon not found" };
+		return { alive: false, reason: "not-found" };
 	}
 
 	// Format the heartbeat time as local HH:MM.
@@ -683,7 +726,7 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 	const mm = String(d.getMinutes()).padStart(2, "0");
 	const timeStr = `${hh}:${mm}`;
 
-	return { alive: false, reason: "idle timeout", lastHbTime: timeStr };
+	return { alive: false, reason: "idle-timeout", lastHbTime: timeStr };
 }
 
 export function restartDaemon(sessionPath: string, daemonPath: string): boolean {
@@ -764,7 +807,7 @@ export async function watchTagFile(
 
 	// DAEMON HEALTH TRACKING
 	let daemonDead = false;
-	let daemonStopReason = "";
+	let daemonStopReason: DaemonHealthReason | null = null;
 	let daemonStopTime = "";
 	let daemonRestarting = false;
 	let daemonIdle = false;
@@ -780,7 +823,7 @@ export async function watchTagFile(
 			if (health.alive) {
 				daemonRestarting = false;
 				daemonDead = false;
-				daemonStopReason = "";
+				daemonStopReason = null;
 				daemonStopTime = "";
 				daemonIdle = false;
 			}
@@ -796,19 +839,19 @@ export async function watchTagFile(
 				if (Date.now() - tagStat.mtimeMs < 2000 && tagStat.size > 0) return;
 			} catch { /* tag file missing — genuinely dead */ }
 			daemonDead = true;
-			daemonStopReason = health.reason || "unknown";
+			daemonStopReason = health.reason ?? null;
 			daemonStopTime = health.lastHbTime || "";
 			daemonIdle = false;
 		} else if (health.idle) {
 			daemonDead = false;
-			daemonStopReason = "";
+			daemonStopReason = null;
 			daemonStopTime = "";
 			daemonIdle = true;
 			daemonIdleMs = health.idleMs || 0;
 			daemonCacheTtlMs = health.cacheTtlMs;
 		} else {
 			daemonDead = false;
-			daemonStopReason = "";
+			daemonStopReason = null;
 			daemonStopTime = "";
 			daemonIdle = false;
 		}
@@ -828,7 +871,7 @@ export async function watchTagFile(
 				if (!ok) {
 					daemonRestarting = false;
 					daemonDead = true;
-					daemonStopReason = "restart failed";
+					daemonStopReason = "restart-failed";
 				}
 				needsRedraw = true;
 				render();
@@ -947,7 +990,7 @@ export async function watchTagFile(
 			} else if (daemonRestarting) {
 				daemonStatusStr = renderDaemonStatus({ alive: true }, true);
 			} else if (daemonDead) {
-				daemonStatusStr = renderDaemonStatus({ alive: false, reason: daemonStopReason || undefined, lastHbTime: daemonStopTime || undefined }, false);
+				daemonStatusStr = renderDaemonStatus({ alive: false, reason: daemonStopReason ?? undefined, lastHbTime: daemonStopTime || undefined }, false);
 			} else if (daemonIdle) {
 				daemonStatusStr = renderDaemonStatus({ alive: true, idle: true, idleMs: daemonIdleMs, cacheTtlMs: daemonCacheTtlMs }, false);
 			} else {

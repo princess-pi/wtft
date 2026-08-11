@@ -342,13 +342,13 @@ export function ensureDaemonRunning(sessionPath: string, daemonDir: string): boo
  * widget to display daemon health inline.
  */
 export function getDaemonStatus(sessionPath: string): DaemonStatus {
-	if (!_daemonSessionPath) return { alive: false, reason: "daemon not started" };
+	if (!_daemonSessionPath) return { alive: false, reason: "not-started" };
 
 	// Session file existence (#124): the daemon now waits for the session
 	// file instead of exiting, but there's still a brief window where the
 	// daemon was spawned and hasn't claimed the PID file yet. In that gap,
-	// if the session file doesn't exist, show "waiting for session..."
-	// instead of "starting..." → falling through to "daemon not found".
+	// if the session file doesn't exist, report "waiting-session"
+	// instead of "starting" → falling through to "not-found".
 	let sessionExists = false;
 	try { sessionExists = fs.existsSync(sessionPath); } catch {}
 
@@ -357,7 +357,7 @@ export function getDaemonStatus(sessionPath: string): DaemonStatus {
 
 	// Daemon is alive — if session file doesn't exist, daemon is polling.
 	if (health.alive && !sessionExists) {
-		return { alive: true, waiting: true, reason: "waiting for session .jsonl..." };
+		return { alive: true, reason: "waiting-session" };
 	}
 
 	// Grace period: if the daemon PID is gone but the tag file was recently
@@ -367,12 +367,16 @@ export function getDaemonStatus(sessionPath: string): DaemonStatus {
 		const elapsed = Date.now() - _daemonSpawnedAt;
 		// Within 5s of spawn: if PID file doesn't exist, daemon may still
 		// be starting. If session file doesn't exist either, the daemon is
-		// waiting for it — show that instead of a generic "starting...".
-		if (elapsed < 5000 && health.reason === "daemon not found") {
+		// waiting for it — report that instead of a generic "starting".
+		//
+		// #179: this compares a health CODE, not a display sentence. Typo it and
+		// `tsc --noEmit` rejects the comparison instead of silently producing an
+		// always-false branch — which is exactly how #124 could have regressed.
+		if (elapsed < 5000 && health.reason === "not-found") {
 			if (!sessionExists) {
-				return { alive: false, waiting: true, reason: "waiting for session .jsonl..." };
+				return { alive: false, reason: "waiting-session" };
 			}
-			return { alive: false, reason: "starting...", starting: true };
+			return { alive: false, reason: "starting" };
 		}
 		try {
 			const tagStat = fs.statSync(tagPath);

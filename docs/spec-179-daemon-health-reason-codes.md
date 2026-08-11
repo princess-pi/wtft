@@ -1,15 +1,15 @@
 # Spec — #179: daemon health reason becomes a code, not a sentence
 
 **Issue:** [#179](https://github.com/duppypro/princess-pi-packages/issues/179)
-**Status:** Spec Draft
+**Status:** Code and Spec Approved
 **Related:** #124 (the grace window this protects), #165 (where the coupling was found), #167
 
 ---
 
 ## 1. The bug, precisely
 
-`DaemonStatus.reason` is typed `string` and carries a human sentence. Two different
-consumers read it, for two different purposes:
+`DaemonStatus.reason` was typed `string` and carried a human sentence. Two different
+consumers read it, for two different purposes (line numbers are pre-#179 positions):
 
 | Site | Reads `reason` as | Consequence of a reword |
 |---|---|---|
@@ -80,8 +80,8 @@ permanently-false branch.
 
 ### What this removes
 
-`DaemonStatus` currently carries two booleans that exist only because `reason` could not
-be switched on:
+`DaemonStatus` carried two booleans that existed only because `reason` could not be
+switched on:
 
 - `starting?: boolean` — true exactly when `reason === "starting"`
 - `waiting?: boolean` — true exactly when `reason === "waiting-session"`
@@ -116,12 +116,16 @@ it is serving neither. Split it, and derive the person's half from the program's
 
 **In:**
 
-- `extensions/lib/wtft-daemon-lib.ts` — the type, the text table, `renderDaemonStatus`,
-  the `checkDaemonHealth` return sites (:677, :686), the `daemonStopReason` plumbing.
-- `extensions/lib/wtft-cli-shared.ts` — the `getDaemonStatus` return sites (:345, :360,
-  :373, :375) and the grace-window comparison (:371).
+- `extensions/lib/wtft-daemon-lib.ts` — the type, the text table, `daemonReasonText()`,
+  `renderDaemonStatus`, both `checkDaemonHealth` return sites, and the `daemonStopReason`
+  plumbing (now `DaemonHealthReason | null`).
+- `extensions/lib/wtft-cli-shared.ts` — all four `getDaemonStatus` return sites and the
+  grace-window comparison.
 - Rebuild `bin/wtft.mjs` / `bin/wtft-daemon.mjs` from source (generated).
 - `CONTEXT.md` — a `Daemon health reason` entry in `Language — WTFT`.
+- `docs/EXT_WTFT.html` — index row for this spec. Not anticipated when this section was
+  first written; `tests/wtft-doc-spec-index.test.ts` failed the run until it was added,
+  which is the gate doing its job.
 
 **Out:** the daemon's own `shutdown("idle timeout")` / `shutdown("n")` argument in
 `bin/wtft-daemon.ts` — a separate wire vocabulary written to the tag file, and narrowing
@@ -130,16 +134,28 @@ oversight.
 
 ## 5. Verification
 
-| # | Check | How |
-|---|---|---|
-| V1 | No bare reason literal survives in control flow | `rg '=== "daemon not found"'` and friends return nothing |
-| V2 | A typo'd comparison fails typecheck | negative-control probe in the style of `tests/typecheck-gate.test.ts` — a scratch file comparing `reason` to `"daemon not fuond"` must make `tsc --noEmit` exit non-zero |
-| V3 | **The #124 grace window actually works** | spawn a daemon with no session file yet, assert `getDaemonStatus()` returns code `starting` (or `waiting-session`) — *not* `not-found` — inside the first 5 s, and `not-found` after it. This test does not exist today, which is why the coupling was invisible. |
-| V4 | Display text unchanged for the user | `renderDaemonStatus` output strings byte-identical to before for every code |
-| V5 | Existing suites green | `bun run test` — `wtft-daemon-lifecycle`, `typecheck-gate`, `build-staleness-gate` in particular |
+All of the below live in `tests/wtft-179-daemon-health-reason.test.ts` (V1–V4) and the
+declared runner (V5). **Result: 17 assertions, 0 failures; full suite 53/53.**
 
-V3 is the test the issue asks for and the one that has real value: it exercises the
-behaviour, so it survives any future refactor of *how* the reason is represented.
+| # | Check | How it was actually done | Result |
+|---|---|---|---|
+| V1 | No reason sentence survives in control flow | Scans the four consumer sources for `=== "<sentence>"` / `!== "<sentence>"` against every value in `DAEMON_REASON_TEXT`, exempting the table's own declaration. Derived from the table rather than a hardcoded list, so a sentence added later is covered without editing the test. | pass |
+| V2 | A typo'd comparison fails typecheck | Negative-control probe in the style of `tests/typecheck-gate.test.ts`: writes `bin/__reason_code_probe__.ts` comparing `status.reason` to `"daemon not fuond"`, asserts `bun run typecheck` exits non-zero **and** that the diagnostic names the probe. Removed in a `finally`. | pass |
+| V3 | **The #124 grace window actually works** | Points `ensureDaemonRunning` at a stand-in daemon (`process.exit(0)`, claims no PID file) so `checkDaemonHealth` reports `not-found` for the whole run — the exact state the window exists to mask. Asserts `waiting-session` with no session file, `starting` with one, and `not-found` after 5.2 s. | pass |
+| V4 | Display text unchanged for the user | Pins all six code→sentence pairs, asserts the table has no missing member, asserts `undefined` degrades to `"unknown"` rather than throwing, and asserts the deleted `starting?:`/`waiting?:` booleans have not crept back. | pass |
+| V5 | Existing suites green | `bun run test` — 53 suites. | 53/53 |
+
+**Why V3's stand-in daemon, not a real one.** The spec draft said "spawn a daemon." A real
+daemon races the assertion to `alive`, and a test that sometimes passes for the wrong
+reason is worse than no test. The stand-in pins the health state deterministically and
+still exercises the real `ensureDaemonRunning` → `getDaemonStatus` path.
+
+**V3 was shown to go red.** Changing the grace-window comparison to a different valid code
+(`"idle-timeout"`) makes 4 of V3's assertions fail, with the indicator rendering
+`● daemon not found` — the literal #124 symptom. A guard never observed failing is not
+known to be a guard (the lesson of #168, restated here because it is what makes V3 worth
+more than V1 and V2 combined: V1/V2 protect the *representation*, V3 protects the
+*behaviour*, so it survives any future change to how the reason is represented).
 
 ---
 

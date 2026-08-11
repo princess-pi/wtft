@@ -157,6 +157,25 @@ known to be a guard (the lesson of #168, restated here because it is what makes 
 more than V1 and V2 combined: V1/V2 protect the *representation*, V3 protects the
 *behaviour*, so it survives any future change to how the reason is represented).
 
+## 7. Landed after #181 — and #181 applied this ruling forward
+
+This branch merged into `main` behind [#181](https://github.com/duppypro/princess-pi-packages/issues/181),
+which is the same family of bug one layer out: `serve` inferring process *identity* from a
+`ps aux` substring. One conflict, in `docs/EXT_WTFT.html` — both branches added a spec-index
+row after `spec-168`. Both rows kept; nothing semantic overlapped, and the full suite is
+54/54 on the merged tree.
+
+Worth recording that the ruling travelled rather than staying local. #181's `serve/kill@1`
+schema emits `"reason": "not-confirmed-dead"` — **a code, not a sentence** — because this
+spec's §3 rule was already written when that surface was authored:
+
+> when one field serves both a program and a person, it is serving neither. Split it, and
+> derive the person's half from the program's half.
+
+Applied at the point of writing costs nothing. Retrofitted, as here, it costs a spec, a
+migration of six call sites, and a test to prove the grace window still holds. That
+difference is the argument for the standard, stated in the only currency that matters.
+
 ---
 
 — 👑π🐱 Princess Pi

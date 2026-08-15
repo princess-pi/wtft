@@ -87,8 +87,13 @@ about spend. It is the first empirical confirmation of the caveat §7 had only a
 it is tracked as **#176**; the mechanism is deliberately not named here (see #176 for what
 is ruled out and what is only suspected). Consequences already carried:
 
-- the harness prints `⚠️  alignment broke` whenever `negativeSteps > 0`;
-- V1 skips subagent-bearing sessions rather than asserting on them (§8);
+- the harness prints `⚠️  alignment broke` whenever `negativeSteps > 0`, and since #256
+  also RECORDS each downward step in `dips[]` — magnitude, the records either side, and
+  the Claude cumulative before/after — because a tally said a session was out of scope
+  without saying by how much;
+- V1 skips subagent-bearing sessions rather than asserting on them, and since #256 no
+  longer asserts monotonicity on the non-subagent ones either — it surveys and reports
+  them (§8);
 - the §1 numbers are scoped to non-subagent sessions everywhere they are quoted.
 
 ---
@@ -411,14 +416,17 @@ the product (§6), which was the fork chosen in §5 and does not depend on resol
 ## 8. Spec gate — verification criteria
 
 Each is concretely checkable. V1–V4 are properties of the harness, V5–V10 of the wtft change.
+V1 was **restated** and V2b/V2c **added** on 2026-08-14 (#256); the rows say what changed and why.
 All ten passed at Step 5 (2026-08-10T17:20Z): `bun run test` — **44 suites, 44 passed, 0
 failed**. The "status" column records what actually backs each row, including the two halves
 that no test covers.
 
 | | criterion | how it is checked | status |
 |---|---|---|---|
-| **V1** | The harness runs against any logged session id by prefix and against `--all`, and exits 0; against every *non-subagent* session on the machine, `negativeSteps === 0`. | The exit-0 half is checked by hand — `node research/149-cost-scope/paired-window-audit.mjs ee53e779` and `--all` both exit 0 (re-run at Step 5). The monotonicity half is asserted live in `tests/wtft-issue-149-uncounted-billables.test.ts`, which **skips** any logged session whose transcript has subagent files, and additionally asserts `residual >= -1e-6`, every step positive, and `readStatusLog` ascending by `_epoch_ms`. | pass; the CLI-exit-0 half is **reconciled-against-untested** (no suite shells out to the harness binary). Skip rule is load-bearing, not defensive: `e0d2ec4b` really does produce 6 negative steps (§1.4, #176). |
-| **V2** | The residual staircase is monotone: `negativeSteps === 0` on every session with ≥ 2 aligned records. | printed as `downward steps (instrument sanity)`; asserted in `tests/wtft-issue-149-uncounted-billables.test.ts` over a synthetic log + transcript pair | pass **on synthetic fixtures and on non-subagent sessions only**. The criterion as originally worded ("every session") is now known to be false in general — see §1.4/§3.2 and #176. The scope limit is the finding, not a weakening of the test. |
+| **V1** | ~~against every *non-subagent* session on the machine, `negativeSteps === 0`~~ **restated 2026-08-14 (#256):** the harness surveys *every* logged session, accounts for each one in exactly one bucket, and prints what it found. The harness also runs by prefix and against `--all` and exits 0. | The exit-0 half is still checked by hand — `node research/149-cost-scope/paired-window-audit.mjs ee53e779` and `--all` both exit 0. The survey is `tests/wtft-issue-149-uncounted-billables.test.ts`, which prints one flat `#149-survey  key=value` record per session plus a totals line, and asserts only what holds on unknown data: `audited + skipped_subagent + unreadable + unauditable === sessions`, `readStatusLog` ascending by `_epoch_ms` on **every** log (not just `ids[0]`), steps positive, dips negative, and `negativeSteps === dips.length`. | pass. The monotonicity half was **withdrawn**, not weakened: it was measured on 7 sessions and asserted over 23, and is false on 2 of them (§1.4, #256, #282). It now lives on synthetic fixtures as V2b/V2c where the arithmetic is decidable. The CLI-exit-0 half remains **reconciled-against-untested** (no suite shells out to the harness binary). |
+| **V2** | The residual staircase is monotone: `negativeSteps === 0` on every session with ≥ 2 aligned records. | printed as `downward steps (instrument sanity)`; asserted in `tests/wtft-issue-149-uncounted-billables.test.ts` over a synthetic log + transcript pair | pass **on synthetic fixtures only** (#256). The criterion as originally worded ("every session") is false in general — see §1.4/§3.2, #176 and #282. The scope limit is the finding, not a weakening of the test. |
+| **V2b** | *(added 2026-08-14, #256)* A Claude Code counter RESET — cumulative `total_cost_usd` restarting mid-session — is recorded as exactly one dip of exactly the cost it dropped, and is **not** reported as a step. | synthetic fixture whose third status record carries only its own turn's cost; asserts `dips.length === 1`, `dips[0].usd` to 1e-9, `dips[0].at`, and `steps.length === 0` | pass. This is the shape `d971ae4a` has on this host: −$20.906723, landing on exactly the cost of the next turn (#282). Reset ≠ invisible spend, and conflating the two would have made a $20.91 instrument artifact look like a $20.91 finding. |
+| **V2c** | *(added 2026-08-14, #256)* `negativeSteps` and `dips` never disagree, and a clean session records neither. | same lagged fixture as V3 | pass. Guards the count-vs-record split that let the $20.91 dip stay invisible while the tally knew about it. |
 | **V3** | Alignment is by usage, not timestamp: a synthetic transcript whose entries are written 5 s *after* the status record that bills them still yields residual 0. | test fixture with deliberately lagged timestamps | pass |
 | **V4** | An injected invisible call (status cost advances with no matching transcript usage) is detected as exactly one step of exactly that size. | test fixture; assert `steps.length === 1` and `steps[0].usd` to 6 dp | pass (injected $0.157782, the magnitude measured on `ee53e779`, recovered to < 1e-9) |
 | **V5** | `scanUncountedBillables` counts a Claude Code `system`/`compact_boundary` as one compaction. | unit test with a synthetic Claude Code JSONL | pass — fixture pairs the boundary with its `isCompactSummary` user entry and asserts the count is 1, not 2 |

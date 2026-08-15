@@ -11,11 +11,14 @@
  *          transcript lags deliberately and asserts the residual is still zero.
  *
  *   V1     the same instrument against whatever real sessions this machine has
- *          logged. Necessarily machine-dependent, so it degrades to a skip when
- *          there are no logs. It deliberately SKIPS any session with subagent
- *          transcripts: spec §7 states the subagent case is untested, and a live
- *          dispatcher session (`e0d2ec4b`, 18 subagent files) does step downward.
- *          Asserting there would test a claim the spec never made.
+ *          logged — a SURVEY, not a characterisation (#256). It prints one flat
+ *          `#149-survey key=value` record per session and asserts only what
+ *          holds on unknown data: that every session lands in exactly one
+ *          bucket, that `readStatusLog` returns ascending records, and that
+ *          steps and dips carry the sign their names promise. It still skips
+ *          subagent-bearing sessions (spec §7: untested), and emits `##SKIP##`
+ *          when there is nothing to run against, so `bun run test` can say the
+ *          check did not happen instead of reporting a green it did not earn.
  *
  *   V5–V10 the wtft change: count `/compact` and away-recap events per harness,
  *          render them as an UNCOUNTED line, and change no cost number.
@@ -155,6 +158,51 @@ describe("#149 residual instrument — usage alignment, not timestamps", () => {
 		assert.strictEqual(stair.negativeSteps, 0, "a downward step means alignment broke");
 	});
 
+	it("V2b — a counter reset shows as exactly one dip of exactly its size", () => {
+		// The shape measured on `d971ae4a` (#282): Claude Code's cumulative
+		// `total_cost_usd` RESTARTS mid-session, so the third record reports the
+		// cost of its own turn alone. R therefore drops by everything billed
+		// before it and never recovers.
+		//
+		// This is V2's property inverted, and it lives here — on a fixture whose
+		// arithmetic is decidable — rather than on whatever this machine happens
+		// to have logged. V1 measured it on real sessions and was wrong about
+		// what it proved (#256): the claim held for the 7 sessions the spec
+		// analyzed and fails on 2 of the 23 this host now has.
+		const turns = [
+			{ in: 2, out: 500, cw: 100, cr: 50_000 },
+			{ in: 2, out: 900, cw: 40, cr: 90_000 },
+			{ in: 2, out: 871, cw: 17_748, cr: 211_573 },
+		];
+		const base = 1_786_000_000_000;
+		const transcript = writeJsonl("reset", turns.map((u, i) =>
+			ccAssistant(`msg_${i}`, new Date(base + i * 60_000 + 5_000).toISOString(), u)));
+
+		const cum = [
+			opus5Cost(turns[0]),
+			opus5Cost(turns[0]) + opus5Cost(turns[1]),
+			opus5Cost(turns[2]), // the reset: this turn's cost, and nothing before it
+		];
+		const records = turns.map((u, i) =>
+			statusRecord(new Date(base + i * 60_000).toISOString(), base + i * 60_000, cum[i], transcript, u));
+
+		const stair = residualStaircase(alignRecords(records, loadWtftInteractions(transcript)), [], 0.0005);
+		const lost = opus5Cost(turns[0]) + opus5Cost(turns[1]);
+
+		assert.strictEqual(stair.negativeSteps, 1, "one reset → one downward step");
+		assert.strictEqual(stair.dips.length, 1, "every counted downward step must also be RECORDED");
+		assert.ok(Math.abs(stair.dips[0].usd + lost) < 1e-9, `dip should be -${lost}, got ${stair.dips[0].usd}`);
+		assert.strictEqual(stair.dips[0].at, records[2]._ts, "a dip carries the record it lands on");
+		assert.strictEqual(stair.steps.length, 0, "a reset is not invisible spend — it must not be reported as a step");
+	});
+
+	it("V2c — dips and steps are disjoint, and negativeSteps equals dips.length", () => {
+		const { transcript, records } = laggedFixture();
+		const stair = residualStaircase(alignRecords(records, loadWtftInteractions(transcript)), [], 0.0005);
+		assert.strictEqual(stair.negativeSteps, stair.dips.length, "the count and the record must not disagree");
+		assert.deepStrictEqual(stair.dips, [], "a clean session records no dips");
+	});
+
 	it("V4 — an injected invisible call shows as exactly one step of exactly its size", () => {
 		const turns = [
 			{ in: 2, out: 500, cw: 100, cr: 50_000 },
@@ -184,47 +232,112 @@ describe("#149 residual instrument — usage alignment, not timestamps", () => {
 // V1 — the harness runs against real logged sessions
 // ---
 
-describe("#149 harness — runs against a real logged session", () => {
-	it("V1 — auditSession produces a monotone staircase on every logged non-subagent session", () => {
+describe("#149 harness — surveys every real logged session", () => {
+	/** V1 is REPORT-ONLY on the residual's shape, and that is a correction rather
+	 *  than a workaround (#256).
+	 *
+	 *  What it used to do: assert `negativeSteps === 0` on every non-subagent
+	 *  session this machine had logged. Two things were wrong with that.
+	 *
+	 *  The property is false. Spec §7 measured it on the 7 sessions it analyzed;
+	 *  this host now logs 23 auditable ones and 2 of them dip. One is a Claude
+	 *  Code counter RESET — `d971ae4a` falls $20.906723 to exactly the cost of
+	 *  the single turn that follows, and wtft priced that session to $0.000000
+	 *  per interaction on both sides of the cliff (#282). Asserting there fails
+	 *  the suite for something wtft got right.
+	 *
+	 *  And it under-reported itself. `assert` throws on the FIRST bad session and
+	 *  ends the loop, so the suite only ever named `d8e0363d` (-$0.27) while the
+	 *  $20.91 one sat behind it, in the asserted set, unseen for as long as both
+	 *  existed. A survey that stops at the first finding is not a survey.
+	 *
+	 *  So the residual's shape moved to V2b/V2c, where the arithmetic is decidable
+	 *  and a dip is a fixture rather than a fact about this laptop. What stays
+	 *  asserted here is what a survey can honestly claim on unknown data: that
+	 *  every session is ACCOUNTED FOR (no silent drops), that the records the
+	 *  harness reads obey their ordering contract, and that steps and dips carry
+	 *  the sign their names promise. The measurements themselves are printed as
+	 *  flat key=value records — one per session, greppable, no prose to parse. */
+	it("V1 — every logged session is accounted for, and the survey is printed in full", () => {
 		const logDir = path.join(os.homedir(), ".claude", "statusline-logs");
 		const ids = listLoggedSessions(logDir);
 		if (ids.length === 0) {
-			console.log("  (skipped: no status-line logs on this machine)");
+			console.log("##SKIP## V1 — no ~/.claude/statusline-logs on this machine: the harness ran against no real session");
 			return;
 		}
-		let audited = 0;
-		let skippedSubagent = 0;
+
+		const surveyed: any[] = [];
+		let audited = 0, skippedSubagent = 0, unreadable = 0, unauditable = 0;
+
 		for (const id of ids) {
-			// §7 of the spec is explicit that the "0 negative steps" measurement
-			// covers the 7 sessions it analyzed, none of which used Task
-			// subagents, and that the interaction between subagent sidechains and
-			// this instrument is UNTESTED. This machine now runs multi-agent
-			// workflows that log sessions with real subagent transcripts (a
-			// dispatcher session mid-run, e.g.) — asserting monotonicity there
-			// would test a claim the spec never made. Skip, don't assert.
+			const short = id.slice(0, 8);
 			let records;
-			try { records = readStatusLog(logDir, id); } catch { continue; }
+			try { records = readStatusLog(logDir, id); } catch {
+				unreadable++;
+				surveyed.push({ session: short, status: "unreadable-log" });
+				continue;
+			}
+
+			// readStatusLog's ordering contract, checked on EVERY log rather than
+			// on ids[0] — it is the one thing here that cannot depend on the host.
+			for (let i = 1; i < records.length; i++) {
+				assert.ok(records[i]._epoch_ms >= records[i - 1]._epoch_ms,
+					`${short}: readStatusLog must return records ascending by _epoch_ms`);
+			}
+
+			// Spec §7 is explicit that the interaction between subagent sidechains
+			// and this instrument is UNTESTED, so subagent-bearing sessions are
+			// surveyed but never characterised.
 			const transcriptPath = records[0]?.transcript_path;
 			if (transcriptPath && fs.existsSync(transcriptPath) && discoverSubagentSessionFiles(transcriptPath).length > 0) {
 				skippedSubagent++;
+				surveyed.push({ session: short, status: "skipped-subagent", records: records.length });
 				continue;
 			}
+
 			let report;
-			try { report = auditSession(logDir, id); } catch { continue; } // too few records / moved transcript
+			try { report = auditSession(logDir, id); } catch (e) {
+				unauditable++; // too few records, or a transcript that has since moved
+				surveyed.push({ session: short, status: "unauditable", records: records.length, why: (e as Error).message.split(":").pop()?.trim() });
+				continue;
+			}
 			audited++;
-			assert.strictEqual(report.negativeSteps, 0, `${id}: residual stepped downward — alignment broke`);
-			assert.ok(report.residual >= -1e-6, `${id}: residual should never be negative, got ${report.residual}`);
-			for (const s of report.steps) assert.ok(s.usd > 0, `${id}: a recorded step must be positive`);
+
+			// Shape invariants. These hold on ANY data — a step is spend the
+			// transcript never recorded, a dip is the opposite — so asserting
+			// them costs nothing and catches a sign error in the instrument.
+			for (const s of report.steps) assert.ok(s.usd > 0, `${short}: a recorded step must be positive, got ${s.usd}`);
+			for (const d of report.dips) assert.ok(d.usd < 0, `${short}: a recorded dip must be negative, got ${d.usd}`);
+			assert.strictEqual(report.negativeSteps, report.dips.length,
+				`${short}: negativeSteps (${report.negativeSteps}) and dips (${report.dips.length}) must not disagree`);
+
+			surveyed.push({
+				session: short,
+				status: report.dips.length > 0 ? "DIPS" : "monotone",
+				records: report.records,
+				aligned: report.alignedRecords,
+				residual: report.residual.toFixed(6),
+				pct: report.residualPct.toFixed(1),
+				steps: report.steps.length,
+				dips: report.dips.length,
+				worst_dip: report.dips.length ? Math.min(...report.dips.map((d: any) => d.usd)).toFixed(6) : "0",
+			});
 		}
-		if (skippedSubagent > 0) console.log(`  (${skippedSubagent} subagent-bearing session(s) skipped — see comment)`);
+
+		// Every id must land in exactly one bucket — the accounting IS the test.
+		// A survey that drops sessions on the floor reports a clean sweep of a
+		// corpus it never looked at.
+		assert.strictEqual(audited + skippedSubagent + unreadable + unauditable, ids.length,
+			"every logged session must be accounted for in exactly one bucket");
+		assert.strictEqual(surveyed.length, ids.length, "one survey record per logged session");
+
+		for (const r of surveyed) {
+			console.log("  #149-survey  " + Object.entries(r).map(([k, v]) => `${k}=${v}`).join("  "));
+		}
+		console.log(`  #149-survey-totals  sessions=${ids.length}  audited=${audited}  skipped_subagent=${skippedSubagent}  unreadable=${unreadable}  unauditable=${unauditable}  dip_bearing=${surveyed.filter(r => r.status === "DIPS").length}`);
+
 		if (audited === 0) {
-			console.log("  (skipped: every logged session on this machine currently has subagent transcripts)");
-			return;
-		}
-		// Sanity on readStatusLog's contract while we are here.
-		const recs = readStatusLog(logDir, ids[0]);
-		for (let i = 1; i < recs.length; i++) {
-			assert.ok(recs[i]._epoch_ms >= recs[i - 1]._epoch_ms, "records must be ascending by _epoch_ms");
+			console.log("##SKIP## V1 — every logged session was skipped or unauditable: the residual instrument ran on nothing");
 		}
 	});
 });

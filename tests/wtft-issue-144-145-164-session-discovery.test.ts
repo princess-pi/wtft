@@ -33,6 +33,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { execFileSync } from "node:child_process";
+import { skip } from "./lib/skips.ts";
 import {
 	discoverSessions,
 	resolveLastCwd,
@@ -265,7 +266,7 @@ function makeRepo(dir: string): string | null {
 
 	const clone = makeRepo(path.join(sandbox, "demo"));
 	if (!clone) {
-		console.log("  (skipped — git is not usable in this environment)");
+		skip("git is not usable in this environment — the git-repo discovery arm did not run");
 	} else {
 		const wt = path.join(sandbox, "worktrees", "demo", "99-branch");
 		let worktreeOk = true;
@@ -298,7 +299,7 @@ function makeRepo(dir: string): string | null {
 			check(viaDir.includes("in-clone.jsonl") && viaDir.includes("in-worktree.jsonl"),
 				"V17: --dir <worktree> fans out over that worktree's repo");
 		} else {
-			console.log("  (worktree arm skipped — `git worktree add` failed)");
+			skip("`git worktree add` failed — the worktree discovery arm did not run");
 		}
 
 		// V14 — a repo with no worktrees behaves exactly as today.
@@ -378,7 +379,7 @@ console.log("\n=== PART E: cost against the real session history (V11) ===\n");
 	resetHarnessRegistry();
 	const realProjects = path.join(os.homedir(), ".claude", "projects");
 	if (!fs.existsSync(realProjects)) {
-		console.log("  (skipped — no ~/.claude/projects on this machine)");
+		skip("no ~/.claude/projects on this machine — the real-transcript arm did not run");
 	} else {
 		const here = process.cwd();
 		const t0 = Date.now();

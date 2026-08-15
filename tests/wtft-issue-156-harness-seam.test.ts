@@ -16,6 +16,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { skip } from "./lib/skips.ts";
 import {
 	resolveLastCwd,
 	cwdToSlug,
@@ -192,7 +193,7 @@ console.log("\n=== PART C: no regression against the real session history ===\n"
 	resetHarnessRegistry();
 	const realProjects = path.join(os.homedir(), ".claude", "projects");
 	if (!fs.existsSync(realProjects)) {
-		console.log("  (skipped — no ~/.claude/projects on this machine)");
+		skip("no ~/.claude/projects on this machine — the real-transcript arm did not run");
 	} else {
 		const here = process.cwd();
 		const found = discoverSessions("claude-code", here).map((c: any) => c.path);

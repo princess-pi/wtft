@@ -29,6 +29,14 @@
  *   share `/tmp` fixture paths. Serial is the honest default until those are
  *   isolated from each other.
  *
+ *   Why it reports SKIPS as well as failures (#256): a suite that gates on host
+ *   state and finds none passes without checking anything, and the note it
+ *   prints scrolls away with everything else. Suites declare those checks with
+ *   `##SKIP## <reason>` (`tests/lib/skips.ts`); this driver counts them per
+ *   suite and lists them last. It does not fail on them — a developer laptop
+ *   legitimately lacks some of this state — but "34 passed, 0 failed" must
+ *   never again be the whole story.
+ *
  * @usage
  *   bun run test                 Run every suite.
  *   bun run test wtft-title      Run suites whose filename matches a substring.
@@ -39,6 +47,8 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+
+import { collectSkips, renderSkipSummary } from "./lib/skips.ts";
 
 // ---
 // Layout
@@ -91,6 +101,8 @@ interface Result {
 	ms: number;
 	timedOut: boolean;
 	output: string;
+	/** Checks the suite declared it did NOT run — see tests/lib/skips.ts. */
+	skips: string[];
 }
 
 const nameWidth = Math.max(...suites.map(s => s.replace(/\.test\.ts$/, "").length));
@@ -120,11 +132,13 @@ for (const file of suites) {
 	const ok = !timedOut && proc.status === 0;
 	const output = `${proc.stdout ?? ""}${proc.stderr ?? ""}`;
 
-	results.push({ name, ok, ms, timedOut, output });
+	results.push({ name, ok, ms, timedOut, output, skips: collectSkips(output) });
 
 	const badge = ok ? `${GREEN}PASS${RESET}` : `${RED}FAIL${RESET}`;
 	const note = timedOut ? ` ${RED}(timed out after ${SUITE_TIMEOUT_MS / 1000}s)${RESET}` : "";
-	console.log(`  ${badge}  ${name.padEnd(nameWidth)}  ${DIM}${(ms / 1000).toFixed(1)}s${RESET}${note}`);
+	const skipped = results[results.length - 1].skips.length;
+	const skipNote = skipped > 0 ? ` ${DIM}(${skipped} skipped)${RESET}` : "";
+	console.log(`  ${badge}  ${name.padEnd(nameWidth)}  ${DIM}${(ms / 1000).toFixed(1)}s${RESET}${note}${skipNote}`);
 }
 
 // ---
@@ -149,5 +163,16 @@ if (filters.length > 0) {
 if (shellSuites.length > 0) {
 	console.log(`${DIM}not run by this driver: ${shellSuites.join(", ")} — shell suites, run by hand${RESET}`);
 }
+
+// Skipped CHECKS, one level below skipped suites. A host-gated check that found
+// no host state passes without testing anything, and on CI that is every one of
+// them at once (#256). Printed after the pass/fail line so it is the last thing
+// on screen, and unconditionally — the renderer returns "" when there is
+// nothing to report.
+const skipSummary = renderSkipSummary(
+	results.map(r => ({ suite: r.name, reasons: r.skips })),
+	{ dim: DIM, bold: BOLD, reset: RESET },
+);
+if (skipSummary) console.log(`\n${skipSummary}`);
 
 process.exit(failed.length > 0 ? 1 : 0);

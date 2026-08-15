@@ -44,14 +44,15 @@ export function skip(reason: string): void {
  */
 export function collectSkips(output: string): string[] {
 	const out: string[] = [];
-	for (const line of output.split("\n")) {
-		const at = line.indexOf(SKIP_MARKER);
-		if (at === -1) continue;
-		const reason = line
-			.slice(at + SKIP_MARKER.length)
-			// eslint-disable-next-line no-control-regex
-			.replace(/\x1b\[[0-9;]*m/g, "")
-			.trim();
+	for (const raw of output.split("\n")) {
+		// Strip colour first, then require the marker at the START of the line.
+		// Matching it anywhere counted the literals echoed back inside a FAILING
+		// suite's assertion diff — tests/skip-reporting.test.ts asserts on the token
+		// itself, so its own failure output was read as four skips.
+		// eslint-disable-next-line no-control-regex
+		const line = raw.replace(/\x1b\[[0-9;]*m/g, "").trim();
+		if (!line.startsWith(SKIP_MARKER)) continue;
+		const reason = line.slice(SKIP_MARKER.length).trim();
 		if (reason) out.push(reason);
 	}
 	return out;

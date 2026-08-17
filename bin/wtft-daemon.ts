@@ -46,6 +46,14 @@ import {
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const POLL_MS = 667;              // 90bpm throttle
 const IDLE_EXIT_MS = 24 * 60 * 60 * 1000; // exit if session.jsonl unchanged for 24h (polite to ps aux)
+// How long to stay parked on a session .jsonl that has NEVER appeared (#308).
+// Claude Code writes the transcript only after the first real prompt completes,
+// so "absent at spawn" is the normal launch state, not an orphan — but a session
+// that never gets a prompt must not pin a daemon forever. One hour matches
+// ZERO_INTERACTIONS_AGE (the reaper's own notion of "zombie"), and a later
+// `wtft` run respawns for free. Only the never-seen case uses this ceiling; a
+// session seen once and then removed exits on the daemon's own knowledge.
+const SESSION_WAIT_MAX_MS = 60 * 60 * 1000;
 
 // ---
 // DAEMON STATE
@@ -439,7 +447,35 @@ function followMovedSession(): boolean {
  */
 function sessionIsGone(sessionCmdlinePath: string): boolean {
   if (fs.existsSync(sessionCmdlinePath)) return false;
-  return resolveMovedSession(sessionCmdlinePath) === null;
+  if (resolveMovedSession(sessionCmdlinePath) !== null) return false;
+  // Never written ≠ gone (#308). A daemon parked on a transcript Claude Code has
+  // not written yet (#124/#129) is doing its job; before this guard the reaper
+  // — which runs at every daemon's startup — SIGTERMed it, and SIGTERMed *itself*
+  // in the same pass, so the "waiting for session .jsonl" state could never be
+  // reached by a live daemon. "Gone" needs evidence the session once existed:
+  // a classified line or a _meta offset in the tag file. Absent that, the owner
+  // daemon's own SESSION_WAIT_MAX_MS ceiling is the bound, not this reaper.
+  return sessionWasEverParsed(sessionCmdlinePath);
+}
+
+/** Does the tag file carry evidence the session existed (a classified entry or a _meta offset)? */
+function sessionWasEverParsed(sessionCmdlinePath: string): boolean {
+  try {
+    const tagsDir = path.join(path.dirname(sessionCmdlinePath), "wtft-tags");
+    const prefix = path.basename(sessionCmdlinePath) + ".wtft-tag.v";
+    for (const f of fs.readdirSync(tagsDir)) {
+      if (!f.startsWith(prefix)) continue;
+      const content = fs.readFileSync(path.join(tagsDir, f), "utf8");
+      for (const line of content.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const o = JSON.parse(line);
+          if (o.cat !== undefined || o._meta !== undefined) return true;
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+  return false;
 }
 
 // ---
@@ -490,8 +526,9 @@ function reapAndWarn() {
       continue;
     }
 
-    // HARD: session file gone → kill daemon. "Gone" excludes "merely moved" (#155).
-    if (sessionFound && sessionIsGone(sessionFound)) {
+    // HARD: session file gone → kill daemon. "Gone" excludes "merely moved" (#155)
+    // and "not written yet" (#308). Never our own PID — the owner decides for itself.
+    if (pid !== process.pid && sessionFound && sessionIsGone(sessionFound)) {
       process.kill(pid, "SIGTERM");
       try { fs.unlinkSync(fullPath); } catch (_) {}
       warnings.push(`[${new Date().toISOString()}] KILLED PID ${pid}: session gone — ${sessionFound}`);
@@ -993,6 +1030,11 @@ if (showList || showCleanup || showRestart || stopSession) {
         }
       }
       const now = Date.now();
+      // Never seen, and past the wait ceiling → the session never got a prompt (#308).
+      if (!sessionExisted && now - startupTime >= SESSION_WAIT_MAX_MS) {
+        shutdown("session never written");
+        return;
+      }
       if (idleStartMs === 0) idleStartMs = now;
       upsertHeartbeat(now);
       lastWriteMs = now;

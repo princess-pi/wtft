@@ -295,6 +295,13 @@ issue is about keeping alive. Both call sites gain the same re-resolve-before-ki
 This coupling is the reason changes 1 and 4 must land together: fixing the poll loop alone
 would leave the daemon to be shot from outside.
 
+*Extended by #308:* the same guard now also excludes **"not written yet"** — a transcript whose
+tag file carries no classified line and no `_meta` offset was never seen, so its absence is
+Claude Code's normal pre-first-prompt state, not an orphan. Before #308 the reaper (which runs
+at every daemon's startup) SIGTERMed such daemons — including *itself* — so the #124
+`waiting-session` state was unreachable by a live daemon. Bound for that case is the owner
+daemon's own `SESSION_WAIT_MAX_MS` (1 h), not the reaper. See `docs/spec-308-lagging-session.md`.
+
 ---
 
 

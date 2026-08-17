@@ -286,6 +286,24 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 // ---
 
 /**
+ * Is this a session .jsonl path that may simply not be written YET? (#308)
+ *
+ * Claude Code fixes the session id — and so the transcript path — at launch, but
+ * writes the first line only after the first real prompt (not a /command)
+ * completes. A caller that knows the path early (a SessionStart hook, a
+ * statusline, `wtft -s <path>` fired at launch) must not be told "not found":
+ * the file is late, not missing. The daemon already parks on such a path
+ * (#124/#129); this predicate is what lets the CLI accept one.
+ *
+ * Deliberately narrow: absolute, ends in `.jsonl`, and is not a wtft tag file
+ * (the daemon refuses those anyway). A relative fuzzy filter that matches no
+ * discovered session is still an error — that path was never a fact.
+ */
+export function isPendingSessionPath(p: string): boolean {
+	return path.isAbsolute(p) && p.endsWith(".jsonl") && !p.includes(".wtft-tag.v");
+}
+
+/**
  * Spawn the wtft-daemon for the given session. Returns the child process
  * or null on failure. Callers handle errors their own way.
  *

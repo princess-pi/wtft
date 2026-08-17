@@ -24,6 +24,7 @@ import {
 	deduplicateInteractions,
 	readClassifiedTagFile,
 	parseEntryToInteraction,
+	getDaemonPidPath,
 	WTFT_TAGGER_VERSION,
 } from "../bin/wtft.mjs";
 import type { Interaction } from "../extensions/lib/wtft-shared.ts";
@@ -117,7 +118,66 @@ function makeFixture(): { dir: string; sessionPath: string } {
 }
 
 // ---
+// DAEMON REAP (#171): SIGTERM, then POLL until the pid is actually gone
+// (bounded), escalating to SIGKILL if it ignores the signal. Never a fixed
+// sleep — a fixed sleep either races a slow exit or wastes time on a fast
+// one, and neither variant actually proves the process is gone.
+// ---
+
+function isAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function waitUntilGone(pid: number, timeoutMs: number): Promise<boolean> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (!isAlive(pid)) return true;
+		await new Promise(r => setTimeout(r, 100));
+	}
+	return !isAlive(pid);
+}
+
+/** Reap the daemon we spawned. Returns whether it is confirmed gone. */
+async function reapDaemon(
+	pid: number | undefined,
+	pidFilePath: string,
+): Promise<{ gone: boolean; note: string }> {
+	if (!pid) return { gone: true, note: "no pid was spawned" };
+	if (!isAlive(pid)) {
+		try { fs.unlinkSync(pidFilePath); } catch {}
+		return { gone: true, note: "already exited before reap" };
+	}
+
+	try { process.kill(pid, "SIGTERM"); } catch {}
+	if (await waitUntilGone(pid, 5000)) {
+		try { fs.unlinkSync(pidFilePath); } catch {}
+		return { gone: true, note: "exited after SIGTERM" };
+	}
+
+	// Ignored SIGTERM — escalate rather than leave it running.
+	try { process.kill(pid, "SIGKILL"); } catch {}
+	if (await waitUntilGone(pid, 2000)) {
+		try { fs.unlinkSync(pidFilePath); } catch {}
+		return { gone: true, note: "required SIGKILL" };
+	}
+
+	return { gone: false, note: "survived SIGTERM and SIGKILL" };
+}
+
+// ---
 // MAIN
+//
+// Structured as try/finally so the daemon is reaped on EVERY exit path —
+// success, an assertion failure, or the poll below timing out (#171). Node
+// and Bun do NOT run `finally` after a `process.exit()` inside the `try`
+// (verified with a throwaway script before writing this), so no exit call
+// may live inside the try. Failures instead set `failure` and fall through
+// to `finally`; the actual process.exit happens after cleanup runs.
 // ---
 
 async function main() {
@@ -126,116 +186,135 @@ async function main() {
 		path.dirname(new URL(import.meta.url).pathname),
 		"..", "bin", "wtft-daemon.mjs",
 	);
+	const pidFilePath = getDaemonPidPath(sessionPath);
 
-	// 1. Run daemon to produce classified tag file
-	const child = spawn(process.execPath, [daemonPath, "--session", sessionPath], {
-		detached: true,
-		stdio: "ignore",
-	});
-	child.unref();
+	let failure: string | null = null;
+	// Declared outside the try so `finally` can always attempt a reap, even
+	// if something threw between spawning the daemon and entering the try.
+	let daemonPid: number | undefined;
 
-	// Wait for daemon to finish processing (poll tag file)
-	const tagPath = path.join(
-		path.dirname(sessionPath),
-		"wtft-tags",
-		path.basename(sessionPath) + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`,
-	);
+	try {
+		// 1. Run daemon to produce classified tag file
+		const child = spawn(process.execPath, [daemonPath, "--session", sessionPath], {
+			detached: true,
+			stdio: "ignore",
+		});
+		child.unref();
+		daemonPid = child.pid;
 
-	let tagInteractions: Interaction[] = [];
-	const start = Date.now();
-	while (Date.now() - start < 15000) {
-		if (fs.existsSync(tagPath)) {
-			tagInteractions = readClassifiedTagFile(tagPath);
-			const directInteractions = deduplicateInteractions(parseSessionFile(sessionPath));
-			if (tagInteractions.length > 0 && tagInteractions.length >= directInteractions.length) {
-				break;
+		// Wait for daemon to finish processing (poll tag file)
+		const tagPath = path.join(
+			path.dirname(sessionPath),
+			"wtft-tags",
+			path.basename(sessionPath) + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`,
+		);
+
+		let tagInteractions: Interaction[] = [];
+		const start = Date.now();
+		while (Date.now() - start < 15000) {
+			if (fs.existsSync(tagPath)) {
+				tagInteractions = readClassifiedTagFile(tagPath);
+				const directInteractions = deduplicateInteractions(parseSessionFile(sessionPath));
+				if (tagInteractions.length > 0 && tagInteractions.length >= directInteractions.length) {
+					break;
+				}
+			}
+			await new Promise(r => setTimeout(r, 500));
+		}
+
+		const tagCost = tagInteractions.reduce((sum, i) => sum + (i.cost || 0), 0);
+
+		// 2. Simulate getBranch() — only entries on the "active" branch.
+		//    In a real tree-navigated session, getBranch() returns entries from
+		//    the root to the current leaf through the active path. Entries on
+		//    pruned branches are excluded.
+		//
+		//    Our fixture: entries 1, 2, 3 are on main branch. The /tree rewound
+		//    to before entry 2. After tree navigation, the new branch only has
+		//    the branch-summary entry (not assistant) + entries 5, 6.
+		//
+		//    getBranch() would return: entries 1, tree-custom, 5, 6.
+		//    Parsing for assistant messages: msg_001 ($0.10) + msg_004 ($0.40) + msg_005 ($0.50) = $1.00
+		//
+		//    But the daemon processes ALL 5 assistant messages: $1.50
+
+		// Simulate getBranch by reading entries as if we only have the active branch.
+		// Active branch after /tree : entries 1, 4 (custom), 5, 6
+		const branchEntries = [
+			JSON.parse(makeEntry("message", "assistant", "claude-sonnet-4-6", "msg_001", 0.10, 0).trim()),
+			// skip 2, 3 (pruned)
+			// branch summary (not an assistant message, parseEntryToInteraction returns null)
+			{ type: "custom", customType: "branchSummary" },
+			JSON.parse(makeEntry("message", "assistant", "claude-sonnet-4-6", "msg_004", 0.40, 4000).trim()),
+			JSON.parse(makeEntry("message", "assistant", "claude-sonnet-4-6", "msg_005", 0.50, 5000).trim()),
+		];
+
+		let branchCost = 0;
+		for (const entry of branchEntries) {
+			const interaction = parseEntryToInteraction(entry);
+			if (interaction) {
+				branchCost += interaction.cost;
 			}
 		}
-		await new Promise(r => setTimeout(r, 500));
-	}
 
-	const tagCost = tagInteractions.reduce((sum, i) => sum + (i.cost || 0), 0);
+		console.log(`  Tag file (daemon, all entries):    $${tagCost.toFixed(2)}  (${tagInteractions.length} entries)`);
+		console.log(`  Branch-walk (getBranch, active):    $${branchCost.toFixed(2)}  (simulated)`);
 
-	// 2. Simulate getBranch() — only entries on the "active" branch.
-	//    In a real tree-navigated session, getBranch() returns entries from
-	//    the root to the current leaf through the active path. Entries on
-	//    pruned branches are excluded.
-	//
-	//    Our fixture: entries 1, 2, 3 are on main branch. The /tree rewound
-	//    to before entry 2. After tree navigation, the new branch only has
-	//    the branch-summary entry (not assistant) + entries 5, 6.
-	//
-	//    getBranch() would return: entries 1, tree-custom, 5, 6.
-	//    Parsing for assistant messages: msg_001 ($0.10) + msg_004 ($0.40) + msg_005 ($0.50) = $1.00
-	//
-	//    But the daemon processes ALL 5 assistant messages: $1.50
-
-	// Simulate getBranch by reading entries as if we only have the active branch.
-	// Active branch after /tree : entries 1, 4 (custom), 5, 6
-	const branchEntries = [
-		JSON.parse(makeEntry("message", "assistant", "claude-sonnet-4-6", "msg_001", 0.10, 0).trim()),
-		// skip 2, 3 (pruned)
-		// branch summary (not an assistant message, parseEntryToInteraction returns null)
-		{ type: "custom", customType: "branchSummary" },
-		JSON.parse(makeEntry("message", "assistant", "claude-sonnet-4-6", "msg_004", 0.40, 4000).trim()),
-		JSON.parse(makeEntry("message", "assistant", "claude-sonnet-4-6", "msg_005", 0.50, 5000).trim()),
-	];
-
-	let branchCost = 0;
-	for (const entry of branchEntries) {
-		const interaction = parseEntryToInteraction(entry);
-		if (interaction) {
-			branchCost += interaction.cost;
+		// 3. Assertions
+		if (tagCost !== 1.50) {
+			failure = `Tag file total should be $1.50, got $${tagCost.toFixed(2)}`;
+		} else if (branchCost === tagCost) {
+			// If they match, tree navigation doesn't cause divergence.
+			// This means the bug wouldn't reproduce with this fixture — but that's
+			// OK, the fixture validates that our assumption about tree navigation
+			// is correct.
+			console.log(`  ⚠ Branch-walk matches daemon — tree navigation in this harness may preserve all entries.`);
+		} else {
+			console.log(`  ✅ Branch-walk ($${branchCost.toFixed(2)}) < daemon ($${tagCost.toFixed(2)}) — tree navigation causes divergence.`);
 		}
+
+		// 4. The fix: reading from tag file should match daemon total.
+		//    This is what the widget now does.
+		if (!failure && Math.abs(tagCost - 1.50) > 0.001) {
+			failure = "Tag file total incorrect.";
+		}
+
+		if (!failure) {
+			console.log(`✅ PASS: Tag file total matches expected $1.50`);
+			console.log(`✅ Widget now reads from tag file → matches CLI`);
+		}
+	} catch (err) {
+		failure = `Test error: ${err instanceof Error ? err.message : String(err)}`;
+	} finally {
+		// Reap runs regardless of how the try above ended.
+		const reap = await reapDaemon(daemonPid, pidFilePath);
+		if (!reap.gone) {
+			const leakMsg = `daemon pid ${daemonPid} was NOT confirmed gone after reap (${reap.note})`;
+			failure = failure ? `${failure}; ALSO ${leakMsg}` : leakMsg;
+		} else {
+			console.log(`  daemon pid ${daemonPid ?? "(none)"} reaped and confirmed gone (${reap.note})`);
+		}
+
+		try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
 	}
 
-	console.log(`  Tag file (daemon, all entries):    $${tagCost.toFixed(2)}  (${tagInteractions.length} entries)`);
-	console.log(`  Branch-walk (getBranch, active):    $${branchCost.toFixed(2)}  (simulated)`);
-
-	// 3. Assertions
-	if (tagCost !== 1.50) {
-		console.error(`❌ FAIL: Tag file total should be $1.50, got $${tagCost.toFixed(2)}`);
+	if (failure) {
+		console.error(`❌ FAIL: ${failure}`);
 		process.exit(1);
 	}
-
-	if (branchCost === tagCost) {
-		// If they match, tree navigation doesn't cause divergence.
-		// This means the bug wouldn't reproduce with this fixture — but that's
-		// OK, the fixture validates that our assumption about tree navigation
-		// is correct.
-		console.log(`  ⚠ Branch-walk matches daemon — tree navigation in this harness may preserve all entries.`);
-	} else {
-		console.log(`  ✅ Branch-walk ($${branchCost.toFixed(2)}) < daemon ($${tagCost.toFixed(2)}) — tree navigation causes divergence.`);
-	}
-
-	// 4. The fix: reading from tag file should match daemon total.
-	//    This is what the widget now does.
-	if (Math.abs(tagCost - 1.50) > 0.001) {
-		console.error(`❌ FAIL: Tag file total incorrect.`);
-		process.exit(1);
-	}
-
-	console.log(`✅ PASS: Tag file total matches expected $1.50`);
-	console.log(`✅ Widget now reads from tag file → matches CLI`);
-
-	// Cleanup
-	try {
-		fs.rmSync(dir, { recursive: true });
-		// Kill daemon
-		const pidFiles = fs.readdirSync(os.tmpdir()).filter(f => f.startsWith("wtft-daemon-"));
-		for (const pf of pidFiles) {
-			try {
-				const pid = parseInt(fs.readFileSync(path.join(os.tmpdir(), pf), "utf8").trim(), 10);
-				if (pid > 0) try { process.kill(pid, "SIGTERM"); } catch {}
-				fs.unlinkSync(path.join(os.tmpdir(), pf));
-			} catch {}
-		}
-	} catch {}
 
 	process.exit(0);
 }
 
-main().catch(err => {
+// Top-level `await` (not fire-and-forget `main().catch(...)`) matters here:
+// `bun test <file>` on a suite with zero `test()`/`describe()` registrations
+// tears the process down as soon as the module's own evaluation completes.
+// Without an awaited module body, that happens right after the first
+// un-awaited `await` inside `main()` — before the daemon is ever reaped.
+// Verified with a throwaway script: a plain `main()` call let `bun test`
+// exit in ~25ms, mid-daemon-spawn; `await main()` made it wait for the
+// full ~1s of async work before exiting. Confirmed against this exact file.
+await main().catch(err => {
 	console.error(`❌ Test error: ${err.message}`);
 	process.exit(1);
 });

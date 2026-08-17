@@ -10,9 +10,11 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawn, type ChildProcess } from "node:child_process";
 import { checkDaemonHealth, getTagPath, type DaemonStatus } from "./wtft-shared.js";
 import { readConfig } from "./config.js";
+import { formatVersion } from "./build-stamp.ts";
 
 // ---
 // TYPES
@@ -455,9 +457,24 @@ export async function renderWtftWhy(manifestPath: string, invokedAs: string): Pr
 }
 
 /**
- * Render --version from the manifest. Returns "${name} ${version}".
+ * Render --version. The NAME still comes from the manifest; the VERSION comes
+ * from package.json (#347 — the manifest carried a second copy that only one
+ * of the two release paths ever bumped), and the build stamp says which tree
+ * produced the artifact answering (#178).
+ *
+ * `moduleUrl` must be the CALLER's import.meta.url, not this module's: after
+ * bundling they are the same file, but the Pi extension loads source, where
+ * this lib's URL would name the lib rather than the command you invoked.
  */
-export function renderWtftVersion(manifestPath: string): string {
+export function renderWtftVersion(manifestPath: string, moduleUrl: string): string {
 	const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-	return `${manifest.name} ${manifest.version}`;
+	const pkgPath = path.join(path.dirname(fileURLToPath(moduleUrl)), "..", "package.json");
+	let semver = manifest.version;
+	try {
+		semver = JSON.parse(fs.readFileSync(pkgPath, "utf8")).version ?? semver;
+	} catch {
+		// Fall back to the manifest rather than fail: --version is what you run
+		// when things are already confusing.
+	}
+	return formatVersion(manifest.name, semver, moduleUrl);
 }

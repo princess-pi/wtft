@@ -269,7 +269,7 @@ async function main() {
 		return;
 	}
 	if (opts.showVersion) {
-		console.log(renderWtftVersion(manifestPath));
+		console.log(renderWtftVersion(manifestPath, import.meta.url));
 		return;
 	}
 

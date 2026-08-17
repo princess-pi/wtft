@@ -384,7 +384,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			if (showVersion) {
 				try {
 					const manifestPath = path.join(process.cwd(), "docs", "manifests", "wtft-cmd.json");
-					ctx.ui.notify(renderWtftVersion(manifestPath), "info");
+					ctx.ui.notify(renderWtftVersion(manifestPath, import.meta.url), "info");
 				} catch (err) {
 					ctx.ui.notify(`\u26A0\uFE0F Failed to load WTFT command manifest: ${err}`, "error");
 				}

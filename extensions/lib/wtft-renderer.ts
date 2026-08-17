@@ -140,12 +140,6 @@ export interface IntervalConfig {
 	type: "time" | "turns";
 }
 
-// SHARED FILE PARSER (#54 DRY refactor)
-// Single source of truth for reading a .jsonl session file into Interaction[]
-// (raw, undeduped). Consumers (session selector, CLI chart, Pi TUI) read lines
-// differently (File I/O vs ctx.sessionManager), but the parseEntryToInteraction
-// call and subsequent dedup are identical — those live here.
-
 /**
  * Parse an `--interval` argument into a binning configuration.
  *
@@ -174,10 +168,6 @@ export function parseInterval(val: string): IntervalConfig {
 	}
 	return { size: 1, unit: "h", type: "time" };
 }
-
-// COMMAND NORMALIZATION (#63)
-// Strips cd /path prefixes and VAR=value assignments from chained bash commands
-// so that 'cd /foo && git push' classifies as 'git', not 'other'.
 
 export function getZonedParts(timestamp: number, tz?: string) {
 	const d = new Date(timestamp);

@@ -441,6 +441,12 @@ export function splitOverheadCost(
 	return { kind, overheadCost };
 }
 
+// SHARED FILE PARSER (#54 DRY refactor)
+// Single source of truth for reading a .jsonl session file into Interaction[]
+// (raw, undeduped). Consumers (session selector, CLI chart, Pi TUI) read lines
+// differently (File I/O vs ctx.sessionManager), but the parseEntryToInteraction
+// call and subsequent dedup are identical — those live here.
+
 export function parseSessionFile(filePath: string): Interaction[] {
 	const interactions: Interaction[] = [];
 	const state = newParseStreamState();
@@ -627,6 +633,9 @@ export function deduplicateInteractions(interactions: Interaction[]): Interactio
 
 // HELPERS & PARSERS
 
+// COMMAND NORMALIZATION (#63)
+// Strips cd /path prefixes and VAR=value assignments from chained bash commands
+// so that 'cd /foo && git push' classifies as 'git', not 'other'.
 export function normalizeCommand(cmd: string): string {
 	let normalized = cmd.trim();
 	let changed = true;

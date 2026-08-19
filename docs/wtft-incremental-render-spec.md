@@ -1,6 +1,6 @@
 # WTFT `--watch` Live Render + Log Parser Daemon Health Monitoring + SURGE Timeline
 
-**Status:** Code and Spec Approved (Step 5) — updated 2026-08-01 with #124 additions
+**Status:** Code and Spec Approved — updated 2026-08-01 with #124 additions
 
 ## Goal
 

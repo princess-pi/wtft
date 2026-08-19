@@ -1,6 +1,5 @@
 {
   "name": "/wtft",
-  "version": "1.1.0",
   "tagline": "Where The F***ing Tokens?! (WTFT) - Cost Auditing Widget",
   "description": "Displays a horizontal, stacked TUI bar chart widget of your session's cost during each activity (Spec, Code, Plan, Agents, ...). Bars are cost totals tagged by each turn's action - every turn's cost includes the context re-send overhead regardless of category, and Prompt means pure conversational replies. For an input/output token decomposition use --tokens.",
   "why": [

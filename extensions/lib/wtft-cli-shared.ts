@@ -469,12 +469,16 @@ export async function renderWtftWhy(manifestPath: string, invokedAs: string): Pr
 export function renderWtftVersion(manifestPath: string, moduleUrl: string): string {
 	const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 	const pkgPath = path.join(path.dirname(fileURLToPath(moduleUrl)), "..", "package.json");
-	let semver = manifest.version;
+	let semver: string;
 	try {
-		semver = JSON.parse(fs.readFileSync(pkgPath, "utf8")).version ?? semver;
-	} catch {
-		// Fall back to the manifest rather than fail: --version is what you run
-		// when things are already confusing.
+		semver = JSON.parse(fs.readFileSync(pkgPath, "utf8")).version;
+	} catch (err) {
+		// #347: this used to fall back to `manifest.version` — a second copy of the
+		// number that only one release path ever bumped. Falling back to it made an
+		// unreadable package.json print a STALE version instead of failing, which is
+		// the worst possible behaviour for the one command you run when you already
+		// suspect you are running the wrong build. Say what is missing instead.
+		semver = `unknown (cannot read ${pkgPath}: ${(err as Error).message})`;
 	}
 	return formatVersion(manifest.name, semver, moduleUrl);
 }

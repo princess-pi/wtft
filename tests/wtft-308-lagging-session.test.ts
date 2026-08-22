@@ -47,6 +47,7 @@ import * as os from "node:os";
 import { execSync, spawn } from "node:child_process";
 import { getDaemonPidPath, WTFT_TAGGER_VERSION, awaitDaemonUp } from "../extensions/lib/wtft-daemon-lib.ts";
 import { trackSandbox } from "./lib/sandbox";
+import { pollUntil } from "./lib/poll";
 
 const SCRIPT = path.resolve(import.meta.dirname, "..", "wtft");
 const RED = "\x1b[31m", GREEN = "\x1b[32m", RESET = "\x1b[0m";
@@ -55,16 +56,7 @@ function assert(label: string, ok: boolean, detail?: string) {
 	if (ok) { console.log(`  ${GREEN}PASS${RESET} ${label}`); passed++; }
 	else { console.log(`  ${RED}FAIL${RESET} ${label}${detail ? `\n       ${detail}` : ""}`); failed++; }
 }
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-async function pollUntil(pred: () => boolean, ceilingMs: number, stepMs = 100): Promise<boolean> {
-	const start = Date.now();
-	while (Date.now() - start < ceilingMs) {
-		if (pred()) return true;
-		await sleep(stepMs);
-	}
-	return pred();
-}
 function isAlive(pid: number): boolean {
 	try { process.kill(pid, 0); return true; } catch { return false; }
 }
@@ -132,7 +124,7 @@ console.log("1. Non-watch, session .jsonl not written yet");
 	assert("states the fact: log not written yet", /not written yet/i.test(stripAnsi(out)), stripAnsi(out).trim());
 	assert("names the path it is waiting on", out.includes(sessionPath));
 
-	const claimed = await pollUntil(() => readPid(pidPath) > 0 && isAlive(readPid(pidPath)), 5_000);
+	const claimed = await pollUntil(() => readPid(pidPath) > 0 && isAlive(readPid(pidPath)), 15_000);
 	const pid = readPid(pidPath);
 	if (pid > 0) spawnedPids.add(pid);
 	assert("daemon spawned and holds the lease while waiting", claimed, `pidPath=${pidPath} pid=${pid}`);
@@ -189,7 +181,7 @@ console.log("\n3. --watch, session .jsonl not written yet");
 	s.on("exit", (code) => { exitCode = code; });
 
 	// Past the old 5 s clock: still running, still waiting, no failure copy.
-	const waiting = await pollUntil(() => /waiting for session/i.test(stripAnsi(output)), 4_000);
+	const waiting = await pollUntil(() => /waiting for session/i.test(stripAnsi(output)), 15_000);
 	assert("renders a waiting line while the session is absent", waiting, stripAnsi(output).slice(-400));
 	await pollUntil(() => exitCode !== null, 6_500); // deliberately outlast the retired 5 s ceiling
 	assert("still running after 6.5 s (no clock-out)", exitCode === null, `exit=${exitCode} ${stripAnsi(output).slice(-400)}`);
@@ -200,7 +192,7 @@ console.log("\n3. --watch, session .jsonl not written yet");
 	assert("chart renders once the session is written", charted, stripAnsi(output).slice(-600));
 
 	s.stdin.write("q");
-	const exited = await pollUntil(() => exitCode !== null, 5_000);
+	const exited = await pollUntil(() => exitCode !== null, 10_000);
 	if (!exited) s.kill();
 	assert("'q' exits 0", exitCode === 0, `exit=${exitCode}`);
 
@@ -232,8 +224,8 @@ console.log("\n4. Startup reaper distinguishes never-written from removed");
 	const a = spawnDaemon(pathA);
 	fs.writeFileSync(pathB, sessionLines());
 	const b = spawnDaemon(pathB);
-	assert("A (never-written) claims its lease", await pollUntil(() => leaseOf(pathA) > 0 && isAlive(leaseOf(pathA)), 5_000));
-	assert("B (written) claims its lease", await pollUntil(() => leaseOf(pathB) > 0 && isAlive(leaseOf(pathB)), 5_000));
+	assert("A (never-written) claims its lease", await pollUntil(() => leaseOf(pathA) > 0 && isAlive(leaseOf(pathA)), 15_000));
+	assert("B (written) claims its lease", await pollUntil(() => leaseOf(pathB) > 0 && isAlive(leaseOf(pathB)), 15_000));
 	// B must have parsed something — that is the "session existed" evidence the reaper reads.
 	const tagsDir = path.join(dirA, "wtft-tags");
 	assert("B classified its session", await pollUntil(() => {
@@ -248,8 +240,8 @@ console.log("\n4. Startup reaper distinguishes never-written from removed");
 	// Newcomer C: its startup reapAndWarn() sweeps every lease.
 	fs.writeFileSync(pathC, sessionLines());
 	spawnDaemon(pathC);
-	assert("C claims its lease (its startup reap ran)", await pollUntil(() => leaseOf(pathC) > 0 && isAlive(leaseOf(pathC)), 5_000));
-	const bGone = await pollUntil(() => !isAlive(pidB), 5_000);
+	assert("C claims its lease (its startup reap ran)", await pollUntil(() => leaseOf(pathC) > 0 && isAlive(leaseOf(pathC)), 15_000));
+	const bGone = await pollUntil(() => !isAlive(pidB), 10_000);
 	assert("B (session removed) was reaped", bGone, `pidB=${pidB}`);
 	assert("A (session never written) survived the reap", isAlive(pidA) && leaseOf(pathA) === pidA, `pidA=${pidA} lease=${leaseOf(pathA)}`);
 	assert("A's own exit code is still open (it did not SIGTERM itself)", a.exitCode === null && a.signalCode === null, `exit=${a.exitCode} sig=${a.signalCode}`);
@@ -300,7 +292,7 @@ console.log("\n5. Tag file in a sibling project dir (#155 move)");
 	// The move: transcript to proj-b, tag file left behind, daemon stopped.
 	const pid5 = readPid(pidPath5);
 	if (pid5 > 0) { try { process.kill(pid5, "SIGTERM"); } catch {} }
-	await pollUntil(() => !isAlive(pid5), 5_000);
+	await pollUntil(() => !isAlive(pid5), 10_000);
 	try { fs.unlinkSync(pidPath5); } catch {}
 	fs.renameSync(pathA, pathB);
 	assert("proj-b holds no tag file of its own", !fs.existsSync(ownTag), ownTag);
@@ -335,7 +327,7 @@ console.log("\n5. Tag file in a sibling project dir (#155 move)");
 		assert("--watch is still running (it did not error out)", exitCode === null, `exit=${exitCode}`);
 
 		s.stdin.write("q");
-		const exited = await pollUntil(() => exitCode !== null, 5_000);
+		const exited = await pollUntil(() => exitCode !== null, 10_000);
 		if (!exited) s.kill();
 		assert("'q' exits 0", exitCode === 0, `exit=${exitCode}`);
 	}

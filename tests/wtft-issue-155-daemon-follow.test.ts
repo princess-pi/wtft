@@ -20,6 +20,7 @@ import * as os from "node:os";
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { trackSandbox } from "./lib/sandbox";
+import { pollUntil } from "./lib/poll";
 
 import {
 	getDaemonPidPath,
@@ -35,9 +36,11 @@ import {
 
 let passed = 0;
 let failed = 0;
-function check(cond: boolean, msg: string) {
+/** `detail` is the state actually observed — printed only on failure, so a
+ *  poll that timed out says what it was waiting for AND what it saw instead. */
+function check(cond: boolean, msg: string, detail?: string) {
 	if (cond) { passed++; console.log(`  ✅ ${msg}`); }
-	else { failed++; console.error(`  ❌ FAIL: ${msg}`); }
+	else { failed++; console.error(`  ❌ FAIL: ${msg}${detail ? `\n     ${detail}` : ""}`); }
 }
 
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -56,7 +59,6 @@ function cleanup() {
 	for (const p of pidFiles) { try { fs.unlinkSync(p); } catch {} }
 	for (const dir of tmpRoots) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} }
 }
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 /** One Claude-shaped assistant turn recording `cwd`. */
 function turnLine(id: string, cwd: string, ts: string): string {
@@ -187,25 +189,36 @@ console.log("\n=== PART C: a live daemon follows its transcript ===\n");
 	let stderr = "";
 	child.stderr?.on("data", (d) => { stderr += d.toString(); });
 
-	// Let it claim the lease and write the first tag lines.
-	await sleep(1500);
+	// Let it claim the lease and write the first tag lines — poll the tag file's
+	// own existence rather than betting a fixed sleep beats the daemon's
+	// spawn-plus-first-parse latency.
 	const tagPath = getCurrentVersionTagPath(pathA);
-	check(fs.existsSync(tagPath), "daemon started and created its tag file");
-	const linesBefore = fs.readFileSync(tagPath, "utf8").split("\n").filter(l => l.trim() && !l.includes('"_hb"')).length;
+	const tagAppeared = await pollUntil(() => fs.existsSync(tagPath), 10_000);
+	check(tagAppeared, "daemon started and created its tag file", `tagPath=${tagPath} exists=${fs.existsSync(tagPath)}`);
+	// NaN, not -1: a sentinel that must never win a numeric comparison. If the
+	// tag file is unreadable, `linesAfter > linesBefore` needs to read as
+	// unsatisfied no matter which side is missing — -1 would let a later
+	// `0 > -1` read as "grew" when nothing was ever actually compared.
+	const countTaggedLines = (): number => {
+		try {
+			return fs.readFileSync(tagPath, "utf8").split("\n").filter(l => l.trim() && !l.includes('"_hb"')).length;
+		} catch { return NaN; }
+	};
+	const linesBefore = countTaggedLines();
 
 	// The worktree switch: the transcript MOVES (one file, same inode, new dir).
 	fs.renameSync(pathA, pathB);
-	await sleep(1500);
-	check(child.exitCode === null, "daemon is still alive after its path vanished");
-	check(stderr.includes("session moved"), "daemon logged the move rather than shutting down");
-	check(!stderr.includes("shutdown: session removed"), "daemon did NOT shut down reporting the session as removed");
+	await pollUntil(() => stderr.includes("session moved") || child.exitCode !== null, 10_000);
+	check(child.exitCode === null, "daemon is still alive after its path vanished", `exitCode=${child.exitCode} signalCode=${child.signalCode}`);
+	check(stderr.includes("session moved"), "daemon logged the move rather than shutting down", stderr.slice(-400) || "(no stderr yet)");
+	check(!stderr.includes("shutdown: session removed"), "daemon did NOT shut down reporting the session as removed", stderr.slice(-400));
 
 	// New work arrives at the new location — the daemon must still parse it.
 	fs.appendFileSync(pathB, turnLine("m2", cwdB, "2026-08-01T00:05:00Z") + "\n");
-	await sleep(2000);
-	check(fs.existsSync(tagPath), "the tag path is unchanged — an attached --watch survives");
-	const linesAfter = fs.readFileSync(tagPath, "utf8").split("\n").filter(l => l.trim() && !l.includes('"_hb"')).length;
-	check(linesAfter > linesBefore, `daemon kept parsing after the move (${linesBefore} → ${linesAfter} tagged lines)`);
+	const parsedMore = await pollUntil(() => countTaggedLines() > linesBefore, 10_000);
+	check(fs.existsSync(tagPath), "the tag path is unchanged — an attached --watch survives", `tagPath=${tagPath}`);
+	const linesAfter = countTaggedLines();
+	check(parsedMore && linesAfter > linesBefore, `daemon kept parsing after the move (${linesBefore} → ${linesAfter} tagged lines)`, `parsedMore=${parsedMore}`);
 
 	// Exactly one daemon: the PID file is keyed on the basename, so a lookup
 	// from the NEW path finds the SAME lease.
@@ -219,9 +232,9 @@ console.log("\n=== PART C: a live daemon follows its transcript ===\n");
 	fs.unlinkSync(pathB);
 	resetCwdCache();
 	check(resolveMovedSession(pathB) === null, "a deleted session resolves to null");
-	await sleep(2500);
-	check(child.exitCode === 0, "daemon exits cleanly when the session is genuinely gone");
-	check(stderr.includes("shutdown: session removed"), "…reporting 'session removed' as the reason");
+	await pollUntil(() => child.exitCode !== null, 10_000);
+	check(child.exitCode === 0, "daemon exits cleanly when the session is genuinely gone", `exitCode=${child.exitCode} signalCode=${child.signalCode}`);
+	check(stderr.includes("shutdown: session removed"), "…reporting 'session removed' as the reason", stderr.slice(-400));
 
 	delete process.env.WTFT_CLAUDE_PROJECTS_DIR;
 	resetCwdCache();

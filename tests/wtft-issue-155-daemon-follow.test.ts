@@ -19,6 +19,8 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { trackSandbox } from "./lib/sandbox";
+
 import {
 	getDaemonPidPath,
 	getTagPath,
@@ -45,7 +47,7 @@ const tmpRoots: string[] = [];
 const children: ChildProcess[] = [];
 const pidFiles: string[] = [];
 function mktmp(prefix: string): string {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
 	tmpRoots.push(dir);
 	return dir;
 }

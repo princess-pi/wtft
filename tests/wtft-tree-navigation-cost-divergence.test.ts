@@ -28,6 +28,7 @@ import {
 	WTFT_TAGGER_VERSION,
 } from "../bin/wtft.mjs";
 import type { Interaction } from "../extensions/lib/wtft-shared.ts";
+import { trackSandbox } from "./lib/sandbox";
 
 // ---
 // FIXTURE: a session that has undergone /tree navigation.
@@ -89,7 +90,7 @@ function makeEntry(
 }
 
 function makeFixture(): { dir: string; sessionPath: string } {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-tree-nav-test-"));
+	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-tree-nav-test-")));
 	const sessionPath = path.join(dir, `${SESSION_ID}.jsonl`);
 
 	const lines = [

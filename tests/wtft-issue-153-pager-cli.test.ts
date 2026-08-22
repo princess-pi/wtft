@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { execFileSync } from "node:child_process";
+import { trackSandbox } from "./lib/sandbox";
 
 let passed = 0;
 let failed = 0;
@@ -28,7 +29,7 @@ const wtftBin = path.join(process.cwd(), "bin", "wtft.mjs");
 // real to render and cannot pass for the wrong reason (e.g. "no sessions found").
 // ---
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-153-"));
+const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-153-")));
 const sessionPath = path.join(dir, "fixture-153-pager.jsonl");
 const TS = new Date("2026-07-01T12:00:00Z").toISOString();
 

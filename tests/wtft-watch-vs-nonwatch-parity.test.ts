@@ -15,6 +15,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { execSync, spawn } from "node:child_process";
+import { trackSandbox } from "./lib/sandbox";
 
 const SCRIPT = path.resolve(import.meta.dirname, "..", "wtft");
 
@@ -45,7 +46,7 @@ const MSG_2 = "msg_render_002";
 const TS = Date.now();
 
 function makeFixture(): string {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-render-parity-"));
+	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-render-parity-")));
 	const sessionPath = path.join(dir, `${SESSION_ID}.jsonl`);
 
 	const lines = [

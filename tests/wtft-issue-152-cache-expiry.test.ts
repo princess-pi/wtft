@@ -16,6 +16,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { trackSandbox } from "./lib/sandbox";
+
 import {
 	buildWtftLines,
 	parseSessionFile,
@@ -140,7 +142,7 @@ check(
 
 console.log("=== PART B: parser ===");
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-152-"));
+const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-152-")));
 
 function usageLine(id: string, ts: string, cr: number, cw: number, model = "claude-opus-5") {
 	return JSON.stringify({

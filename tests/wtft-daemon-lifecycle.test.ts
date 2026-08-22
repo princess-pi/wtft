@@ -17,6 +17,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
+import { trackSandbox } from "./lib/sandbox";
+
 import {
 	checkDaemonHealth,
 	getTagPath,
@@ -62,7 +64,7 @@ const cleanupPidFiles: string[] = [];
 
 /** Fresh session fixture dir with one minimal assistant entry. */
 function makeSessionFixture(name: string): { dir: string; sessionPath: string; tagsDir: string } {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), `wtft-lifecycle-${name}-`));
+	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), `wtft-lifecycle-${name}-`)));
 	fixtureDirs.push(dir);
 	const sessionPath = path.join(dir, "session.jsonl");
 	fs.writeFileSync(sessionPath, JSON.stringify({

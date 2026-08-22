@@ -30,6 +30,7 @@ import {
 	type DaemonHealthReason,
 } from "../extensions/lib/wtft-daemon-lib.ts";
 import { ensureDaemonRunning, getDaemonStatus } from "../extensions/lib/wtft-cli-shared.ts";
+import { trackSandbox } from "./lib/sandbox";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -103,7 +104,6 @@ console.log("V2. A typo'd health-code comparison fails `tsc --noEmit`");
 	const PROBE_SOURCE = `// Temporary negative control written by tests/wtft-179-daemon-health-reason.test.ts (#179).
 // Deliberately compares a DaemonHealthReason against a value outside the union.
 import type { DaemonStatus } from "../extensions/lib/wtft-daemon-lib.ts";
-
 export function probe(status: DaemonStatus): boolean {
 	return status.reason === "daemon not fuond";
 }
@@ -142,7 +142,7 @@ export function probe(status: DaemonStatus): boolean {
 
 console.log("V3. #124 grace window — `starting`/`waiting-session`, never `not-found`, inside 5s");
 {
-	const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-179-"));
+	const fixture = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-179-")));
 	const fakeDaemonDir = path.join(fixture, "bin");
 	fs.mkdirSync(fakeDaemonDir, { recursive: true });
 	// Stand-in daemon: exits immediately, writes no PID file, claims nothing.

@@ -11,6 +11,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { execSync } from "node:child_process";
+import { trackSandbox } from "./lib/sandbox";
+
 import {
 	readClassifiedTagFile,
 	deduplicateInteractions,
@@ -29,7 +31,7 @@ const MSG_2 = "msg_e2e_002";
 const TS = Date.now();
 
 function makeFixture(): { dir: string; sessionPath: string } {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-e2e-"));
+	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-e2e-")));
 	const sessionPath = path.join(dir, `${FIXTURE_ID}.jsonl`);
 
 	const lines = [

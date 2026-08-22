@@ -17,6 +17,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { skip } from "./lib/skips.ts";
+import { trackSandbox } from "./lib/sandbox";
+
 import {
 	resolveLastCwd,
 	cwdToSlug,
@@ -44,7 +46,7 @@ function check(cond: boolean, msg: string) {
 
 const tmpRoots: string[] = [];
 function mktmp(prefix: string): string {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
 	tmpRoots.push(dir);
 	return dir;
 }

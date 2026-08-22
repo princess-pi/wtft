@@ -19,6 +19,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
+import { trackSandbox } from "./lib/sandbox";
+
 import {
 	parseEntryToInteraction,
 	parseSessionFile,
@@ -162,7 +164,7 @@ console.log("\n2. serializeClassifiedWithOverheadSplit — dual lines, conservat
 // ---
 console.log("\n3. Interrupted — marker spellings, preceding-turn stamp, noise immunity");
 {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-p3-intr-"));
+	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-p3-intr-")));
 	const sessionPath = path.join(dir, "s.jsonl");
 	const mk = (o: any) => JSON.stringify(o);
 	fs.writeFileSync(sessionPath, [
@@ -195,7 +197,7 @@ console.log("\n3. Interrupted — marker spellings, preceding-turn stamp, noise 
 // ---
 console.log("\n4. Compaction flags — Claude isCompactSummary and Pi type:compaction");
 {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-p3-comp-"));
+	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-p3-comp-")));
 	const sessionPath = path.join(dir, "s.jsonl");
 	fs.writeFileSync(sessionPath, [
 		JSON.stringify(claudeAssistant({ id: "msg_before" })),
@@ -245,7 +247,7 @@ console.log("\n4. Compaction flags — Claude isCompactSummary and Pi type:compa
 // ---
 console.log("\n5. Legend renders Ovrhd/Waste/Cmpct (built CLI, daemon pipeline)");
 {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-p3-legend-"));
+	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-p3-legend-")));
 	const sessionPath = path.join(dir, "session.jsonl");
 	const now = Date.now();
 	fs.writeFileSync(sessionPath, [

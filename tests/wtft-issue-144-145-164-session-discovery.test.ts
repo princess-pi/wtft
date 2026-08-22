@@ -34,6 +34,8 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { execFileSync } from "node:child_process";
 import { skip } from "./lib/skips.ts";
+import { trackSandbox } from "./lib/sandbox";
+
 import {
 	discoverSessions,
 	resolveLastCwd,
@@ -62,7 +64,7 @@ const tmpRoots: string[] = [];
 function mktmp(prefix: string): string {
 	// realpathSync: on macOS os.tmpdir() is a symlink, and every rule here
 	// compares resolved absolute paths.
-	const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+	const dir = fs.realpathSync(trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), prefix))));
 	tmpRoots.push(dir);
 	return dir;
 }

@@ -22,6 +22,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { execSync, spawn } from "node:child_process";
+import { trackSandbox } from "./lib/sandbox";
 
 const SCRIPT = path.resolve(import.meta.dirname, "..", "wtft");
 const CLI_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
@@ -48,7 +49,7 @@ function check(label: string, ok: boolean) {
 // (longer visual length — exercises the overflow case).
 // ---
 const now = Date.now();
-const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-title-layout-"));
+const fixtureDir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-title-layout-")));
 const sessionPath = path.join(fixtureDir, "session.jsonl");
 
 const lines: string[] = [];

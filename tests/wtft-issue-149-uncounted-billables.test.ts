@@ -33,6 +33,7 @@ import { describe, it } from "node:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { trackSandbox } from "./lib/sandbox";
 
 import {
 	scanUncountedBillables,
@@ -59,7 +60,7 @@ import {
 // ---
 
 let tmpSeq = 0;
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-149-"));
+const tmpDir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-149-")));
 
 function writeJsonl(name: string, entries: any[]): string {
 	const p = path.join(tmpDir, `${name}-${tmpSeq++}.jsonl`);

@@ -46,6 +46,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { execSync, spawn } from "node:child_process";
 import { getDaemonPidPath, WTFT_TAGGER_VERSION, awaitDaemonUp } from "../extensions/lib/wtft-daemon-lib.ts";
+import { trackSandbox } from "./lib/sandbox";
 
 const SCRIPT = path.resolve(import.meta.dirname, "..", "wtft");
 const RED = "\x1b[31m", GREEN = "\x1b[32m", RESET = "\x1b[0m";
@@ -100,7 +101,7 @@ function sessionLines(): string {
 	].join("\n") + "\n";
 }
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-308-"));
+const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-308-")));
 const sessionPath = path.join(dir, `${SESSION_ID}.jsonl`);
 const pidPath = getDaemonPidPath(sessionPath);
 try { fs.unlinkSync(pidPath); } catch {}
@@ -174,7 +175,7 @@ console.log("\n2. Session written after the fact → chart");
 // ---
 console.log("\n3. --watch, session .jsonl not written yet");
 {
-	const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-308w-"));
+	const dir2 = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-308w-")));
 	const SESSION_ID_2 = "308c0de0-1a9b-4c3d-9e8f-000000000309";
 	const sessionPath2 = path.join(dir2, `${SESSION_ID_2}.jsonl`);
 	const pidPath2 = getDaemonPidPath(sessionPath2);
@@ -215,7 +216,7 @@ console.log("\n3. --watch, session .jsonl not written yet");
 console.log("\n4. Startup reaper distinguishes never-written from removed");
 {
 	const DAEMON = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
-	const dirA = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-308r-"));
+	const dirA = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-308r-")));
 	const pathA = path.join(dirA, "308c0de0-1a9b-4c3d-9e8f-00000000030a.jsonl"); // never written
 	const pathB = path.join(dirA, "308c0de0-1a9b-4c3d-9e8f-00000000030b.jsonl"); // written, then removed
 	const pathC = path.join(dirA, "308c0de0-1a9b-4c3d-9e8f-00000000030c.jsonl"); // the newcomer whose startup reaps
@@ -271,7 +272,7 @@ console.log("\n4. Startup reaper distinguishes never-written from removed");
 console.log("\n5. Tag file in a sibling project dir (#155 move)");
 {
 	const DAEMON5 = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-308s-"));
+	const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-308s-")));
 	const slugA = path.join(root, "proj-a");   // where the tag file was, and stays
 	const slugB = path.join(root, "proj-b");   // where the transcript lives now
 	fs.mkdirSync(slugA); fs.mkdirSync(slugB);
@@ -355,9 +356,9 @@ console.log("\n5. Tag file in a sibling project dir (#155 move)");
 // ---
 console.log("\n6. Pending session + a daemon that dies during startup");
 {
-	const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-308d-"));
+	const fakeBin = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-308d-")));
 	fs.copyFileSync(path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs"), path.join(fakeBin, "wtft.mjs"));
-	const dir6 = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-308p-"));
+	const dir6 = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-308p-")));
 	const SESSION_ID_6 = "308c0de0-1a9b-4c3d-9e8f-00000000030e";
 	const path6 = path.join(dir6, `${SESSION_ID_6}.jsonl`); // never written
 	const pidPath6 = getDaemonPidPath(path6);
@@ -394,7 +395,7 @@ console.log("\n6. Pending session + a daemon that dies during startup");
 console.log("\n7. awaitDaemonUp proof rules");
 {
 	const mk = (id: string) => {
-		const d = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-308u-"));
+		const d = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-308u-")));
 		const sp = path.join(d, `${id}.jsonl`);
 		const pp = getDaemonPidPath(sp);
 		try { fs.unlinkSync(pp); } catch {}
@@ -445,9 +446,9 @@ console.log("\n7. awaitDaemonUp proof rules");
 // ---
 console.log("\n8. Existing session, daemon dead before data → not 'no data yet'");
 {
-	const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-308d2-"));
+	const fakeBin = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-308d2-")));
 	fs.copyFileSync(path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs"), path.join(fakeBin, "wtft.mjs"));
-	const dir8 = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-308e-"));
+	const dir8 = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-308e-")));
 	const path8 = path.join(dir8, "308c0de0-1a9b-4c3d-9e8f-000000000314.jsonl");
 	fs.writeFileSync(path8, sessionLines());
 	const pidPath8 = getDaemonPidPath(path8);

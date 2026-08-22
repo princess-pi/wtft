@@ -20,6 +20,7 @@ import {
 	WTFT_TAGGER_VERSION,
 } from "../bin/wtft.mjs";
 import type { Interaction } from "../extensions/lib/wtft-shared.ts";
+import { trackSandbox } from "./lib/sandbox";
 
 // ---
 // FIXTURE: Claude Code multi-block response with shared message.id
@@ -33,7 +34,7 @@ const MESSAGE_ID = "msg_dedup_test_001";
 const TIMESTAMP = Date.now();
 
 function makeFixture(): string {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-daemon-test-"));
+	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-daemon-test-")));
 	const sessionPath = path.join(dir, `${SESSION_ID}.jsonl`);
 
 	const lines = [

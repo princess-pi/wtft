@@ -19,6 +19,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
+import { trackSandbox } from "./lib/sandbox";
 
 const SCRIPT = path.resolve(import.meta.dirname, "..", "wtft");
 const CLI_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
@@ -49,7 +50,7 @@ const MESSAGE_ID = "msg_watch_001";
 const TIMESTAMP = Date.now();
 
 function makeFixture(): string {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-watch-test-"));
+	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-watch-test-")));
 	const sessionPath = path.join(dir, `${SESSION_ID}.jsonl`);
 
 	const lines = [

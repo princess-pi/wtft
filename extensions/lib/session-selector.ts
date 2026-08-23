@@ -175,22 +175,63 @@ export function getSessionSummary(sessionPath: string): SessionSummary {
 	}
 
 	if (fs.existsSync(tagPath)) {
+		// ONLY the READ may fall through to Tier 3 (PR review). "The tag file
+		// could not be read" and "the collapse below threw" are different facts,
+		// and the old single broad catch reported the second as the first —
+		// handing back a raw line count with no cost, indistinguishable from a
+		// session that was never tagged. A defect in the collapse must not
+		// disguise itself as a missing artifact, so the collapse sits OUTSIDE
+		// this catch: it is Map arithmetic over lines whose JSON.parse is already
+		// guarded per line, so it has no realistic throw path, and if one ever
+		// appears it should surface rather than quietly degrade the answer.
+		let content: string | null = null;
 		try {
-			const content = fs.readFileSync(tagPath, "utf8");
-			const lines = content.split("\n");
-			let cost = 0;
-			let turns = 0;
-			for (const line of lines) {
-				if (!line.trim()) continue;
-				try {
-					const obj = JSON.parse(line);
-					if (obj._hb) continue;
-					if (typeof obj.c === "number") cost += obj.c;
-					turns++;
-				} catch { /* skip unparseable lines */ }
-			}
-			return { turns, cost, tagVersion, rawLines: null };
-		} catch { /* tag file unreadable */ }
+			content = fs.readFileSync(tagPath, "utf8");
+		} catch { /* tag file unreadable — Tier 3 below is the honest answer */ }
+
+		if (content !== null) {
+				const lines = content.split("\n");
+				// A subagent's growing-usage message legitimately appears as
+				// multiple tag-file lines sharing one message.id (`obj.id`), at
+				// different costs, written across different polls — see
+				// docs/wtft-incremental-render-spec.md, "The append filter, and
+				// what the tag file may contain." Every reader must collapse by
+				// id (max cost) before summing. This module deliberately does
+				// not import wtft-daemon-lib's dedupeClassifiedById (see the
+				// CONSTANTS comment above), so the same collapse is reimplemented
+				// locally here rather than summing raw lines. Pinned against
+				// dedupeClassifiedById's behavior (PR review round 2, two
+				// independent implementations with nothing keeping them in sync is
+				// how they drift): tests/wtft-270-session-summary-dedup.test.ts.
+				const maxCostById = new Map<string, number>();
+				const idOrder: string[] = [];
+				let noIdCost = 0;
+				let noIdCount = 0;
+				for (const line of lines) {
+					if (!line.trim()) continue;
+					try {
+						const obj = JSON.parse(line);
+						if (obj._hb) continue;
+						const lineCost = typeof obj.c === "number" ? obj.c : 0;
+						if (typeof obj.id === "string" && obj.id) {
+							const prev = maxCostById.get(obj.id);
+							if (prev === undefined) idOrder.push(obj.id);
+							maxCostById.set(obj.id, prev === undefined ? lineCost : Math.max(prev, lineCost));
+						} else {
+							noIdCost += lineCost;
+							noIdCount++;
+						}
+					} catch { /* skip unparseable lines */ }
+				}
+				let cost = noIdCost;
+				// `?? 0` rather than a non-null assertion: idOrder only ever holds
+				// keys that were just written into maxCostById, so the fallback is
+				// unreachable — but an assertion that CAN fire is exactly the kind of
+				// throw the narrowed catch above would no longer hide (PR review).
+				for (const id of idOrder) cost += maxCostById.get(id) ?? 0;
+				const turns = idOrder.length + noIdCount;
+				return { turns, cost, tagVersion, rawLines: null };
+		}
 	}
 
 	// Tier 3: no tag file — count raw .jsonl lines

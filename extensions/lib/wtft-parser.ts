@@ -972,8 +972,15 @@ function interactionHasClaudeCommand(interaction: Interaction): boolean {
  *  discover the sub-agent session files, parse them, and add their token
  *  totals to the parent interaction. Mutates interactions in place.
  *
- *  Sub-agent session IDs are tracked globally to prevent double-counting
- *  across multiple interactions that reference the same session. */
+ *  Sub-agent session IDs are tracked for the duration of THIS CALL only, to
+ *  prevent double-counting across multiple interactions within the same
+ *  array that reference the same session — `seenSessionIds` is a local Set,
+ *  not a module-level one, so it carries no memory between calls. Calling
+ *  this function more than once over slices of what should be one file (e.g.
+ *  one poll batch at a time) re-attributes the same nested session's cost
+ *  once per call (#420 — see docs/wtft-incremental-render-spec.md, "Per-Call,
+ *  Not Global", and tests/wtft-420-subagent-call-site.test.ts, which pins
+ *  this function to its single whole-file call site). */
 export function attributeClaudeSubAgentCosts(
 	interactions: Interaction[],
 ): void {

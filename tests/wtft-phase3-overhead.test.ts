@@ -19,7 +19,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
-import { trackSandbox } from "./lib/sandbox";
+import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+
+
+// Private pid namespace for this suite (#486). Must precede the first
+// getDaemonPidPath() and the first daemon spawn — the daemon keys its lease on
+// os.tmpdir() and sweeps every wtft-daemon-*.pid there at startup.
+isolateTmpdir("phase3-overhead");
 
 import {
 	parseEntryToInteraction,
@@ -269,7 +275,10 @@ console.log("\n5. Legend renders Ovrhd/Waste/Cmpct (built CLI, daemon pipeline)"
 	for (let attempt = 0; attempt < 5; attempt++) {
 		out = execSync(
 			`${process.execPath} ${CLI_BIN} -s '${sessionPath}' -i 10m -l 3 -w 200 --no-emoji 2>&1 || true`,
-			{ encoding: "utf8", timeout: 20_000 }
+			// env explicit: bun's sync child_process ignores the runtime TMPDIR
+			// mutation isolateTmpdir() made, so without this the CLI's daemon
+			// lands in the real /tmp (#486, tests/bun-env-propagation.test.ts).
+			{ encoding: "utf8", env: process.env, timeout: 20_000 }
 		);
 		if (!out.includes("no data yet")) break;
 		execSync("sleep 1");

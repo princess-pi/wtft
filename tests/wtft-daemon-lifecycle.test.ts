@@ -17,7 +17,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
-import { trackSandbox } from "./lib/sandbox";
+import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+import { pollUntil } from "./lib/poll";
 
 import {
 	checkDaemonHealth,
@@ -30,8 +31,15 @@ import {
 	classifiedToInteraction,
 } from "../bin/wtft.mjs";
 
+
+// Private pid namespace for this suite (#486). Must precede the first
+// getDaemonPidPath() and the first daemon spawn: every daemon's startup
+// reapAndWarn() sweeps `os.tmpdir()` and unlinks any wtft-daemon-*.pid whose
+// process is dead, so on a shared /tmp this suite is racing every other daemon
+// on the host — and its own daemons are reaching theirs.
+isolateTmpdir("lifecycle");
+
 const DAEMON_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
-const BEAT_MS = 667;
 
 const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";
@@ -154,18 +162,21 @@ console.log("\n2. Takeover protocol (real daemon process)");
 	const spawnedPid = spawnDaemon(sessionPath);
 
 	// Wait for the daemon to claim the PID file.
-	let claimed = 0;
-	for (let i = 0; i < 20 && !claimed; i++) {
-		await sleep(250);
-		try { claimed = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10); } catch {}
-	}
+	const readClaim = (): number => {
+		try { return parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10); } catch { return 0; }
+	};
+	await pollUntil(() => readClaim() > 0, 15_000, 250);
+	const claimed = readClaim();
 	assert("daemon claimed PID file", claimed > 0 && isAlive(claimed));
 
 	// Steal the lease: overwrite with a foreign PID.
 	fs.writeFileSync(pidPath, "424242");
-	await sleep(2 * BEAT_MS + 500);
-
-	assert("daemon exited within 2 beats of losing the lease", !isAlive(claimed));
+	// Poll, don't sleep (#387). The claim under test is "a daemon that loses the
+	// lease exits" — "within 2 beats" was a constant, and a constant asserted
+	// against a shared host is a bet on scheduling. The ceiling is generous so a
+	// loaded host fails LATE (a real regression) rather than FALSELY.
+	const exited = await pollUntil(() => !isAlive(claimed), 15_000);
+	assert("daemon exited after losing the lease", exited);
 	let content = "";
 	try { content = fs.readFileSync(pidPath, "utf8").trim(); } catch {}
 	assert("exiting daemon did NOT unlink the new owner's PID file", content === "424242");
@@ -182,10 +193,12 @@ console.log("\n3. Spawn-twice singleton");
 	const pidPath = getDaemonPidPath(sessionPath);
 	spawnDaemon(sessionPath);
 	spawnDaemon(sessionPath);
-	await sleep(2 * BEAT_MS + 500);
+	const readOwner = (): number => {
+		try { return parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10); } catch { return 0; }
+	};
+	await pollUntil(() => readOwner() > 0 && isAlive(readOwner()), 15_000);
 
-	let owner = 0;
-	try { owner = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10); } catch {}
+	const owner = readOwner();
 	assert("PID file has an owner", owner > 0);
 	assert("owner is alive", isAlive(owner));
 
@@ -209,25 +222,31 @@ console.log("\n3. Spawn-twice singleton");
 // ---
 console.log("\n4. Session deleted → daemon exits");
 {
-	const { sessionPath } = makeSessionFixture("sessiongone");
+	const { sessionPath, tagsDir: tagsDir4 } = makeSessionFixture("sessiongone");
 	const pidPath = getDaemonPidPath(sessionPath);
 	const spawnedPid = spawnDaemon(sessionPath);
 
 	// Wait for daemon to claim PID file and process the session data
 	// (so sessionExisted becomes true).
-	let claimed = 0;
-	for (let i = 0; i < 20 && !claimed; i++) {
-		await sleep(250);
-		try { claimed = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10); } catch {}
-	}
+	const readClaim4 = (): number => {
+		try { return parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10); } catch { return 0; }
+	};
+	await pollUntil(() => readClaim4() > 0, 15_000, 250);
+	const claimed = readClaim4();
 	assert("daemon claimed PID file", claimed > 0 && isAlive(claimed));
-	await sleep(2 * BEAT_MS); // let daemon process the fixture data
+	// Let the daemon get a tag file on disk before the session is removed —
+	// polled, because "has it processed the fixture yet" is a condition, not a
+	// duration (#387). Asserted, not just awaited: if this precondition times
+	// out, the scenario below is VOID rather than failed, and a silent timeout
+	// would surface as a confusing result on a later assertion instead of
+	// naming the setup step that did not happen.
+	assert("daemon wrote a tag file before the session is removed", await pollUntil(() => {
+		try { return fs.readdirSync(tagsDir4).some(f => f.includes(".wtft-tag.v")); } catch { return false; }
+	}, 15_000));
 
 	// Delete the session file — daemon should exit, not idle forever.
 	fs.unlinkSync(sessionPath);
-	await sleep(3 * BEAT_MS);
-
-	assert("daemon exited after session file deleted", !isAlive(claimed));
+	assert("daemon exited after session file deleted", await pollUntil(() => !isAlive(claimed), 15_000));
 	try { fs.unlinkSync(pidPath); } catch {}
 	void spawnedPid;
 }
@@ -241,24 +260,34 @@ console.log("\n5. Reap on spawn kills orphan daemons");
 	const { sessionPath: sessA } = makeSessionFixture("reap-orphan");
 	const { sessionPath: sessB } = makeSessionFixture("reap-new");
 
-	// Start daemon A (will become orphan)
+	// Start daemon A (will become orphan). Wait for its LEASE, not a duration:
+	// the reap under test keys on the pid file, so a daemon that has not written
+	// one yet is invisible to B and the whole scenario is void (#387).
 	const pidA = spawnDaemon(sessA);
-	await sleep(3 * BEAT_MS);
-	assert("daemon A started", isAlive(pidA));
+	const pidPathA = getDaemonPidPath(sessA);
+	const leaseA = await pollUntil(() => {
+		try { return parseInt(fs.readFileSync(pidPathA, "utf8").trim(), 10) === pidA; } catch { return false; }
+	}, 15_000);
+	assert("daemon A started and holds its lease", leaseA && isAlive(pidA));
 
 	// Delete session A's file
 	fs.unlinkSync(sessA);
 
-	// Start daemon B — should trigger reap of A during startup
+	// Start daemon B — its startup reap should kill A. Wait for B's own lease
+	// first: the reap runs during startup, so "B has claimed" is the earliest
+	// point at which its sweep is known to have happened.
 	const pidB = spawnDaemon(sessB);
-	await sleep(3 * BEAT_MS);
+	const pidPathB = getDaemonPidPath(sessB);
+	const leaseB = await pollUntil(() => {
+		try { return parseInt(fs.readFileSync(pidPathB, "utf8").trim(), 10) === pidB; } catch { return false; }
+	}, 15_000);
+	assert("daemon B started and holds its lease", leaseB);
 
-	assert("orphan daemon A killed by reap on B's spawn", !isAlive(pidA));
+	assert("orphan daemon A killed by reap on B's spawn", await pollUntil(() => !isAlive(pidA), 15_000));
 	assert("daemon B still alive", isAlive(pidB));
 
 	// PID file A should be cleaned up
-	const pidPathA = getDaemonPidPath(sessA);
-	assert("orphan pidfile cleaned up", !fs.existsSync(pidPathA));
+	assert("orphan pidfile cleaned up", await pollUntil(() => !fs.existsSync(pidPathA), 15_000));
 
 	// Cleanup
 	try { process.kill(pidB, "SIGTERM"); } catch {}
@@ -276,7 +305,7 @@ console.log("\n6. Version hygiene at startup");
 	fs.writeFileSync(oldTag, hbLine(Date.now() - 60_000, Date.now() - 60_000));
 
 	spawnDaemon(sessionPath);
-	await sleep(2 * BEAT_MS + 500);
+	await pollUntil(() => !fs.existsSync(oldTag), 15_000);
 
 	assert("old-version tag file removed", !fs.existsSync(oldTag));
 	const currentTag = path.join(tagsDir, currentTagFileName(sessionPath));

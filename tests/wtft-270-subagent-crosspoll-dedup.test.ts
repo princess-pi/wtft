@@ -39,7 +39,13 @@ import {
 	deduplicateInteractions,
 	WTFT_TAGGER_VERSION,
 } from "../bin/wtft.mjs";
-import { trackSandbox } from "./lib/sandbox";
+import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+
+
+// Private pid namespace for this suite (#486). Must precede the first
+// getDaemonPidPath() and the first daemon spawn — the daemon keys its lease on
+// os.tmpdir() and sweeps every wtft-daemon-*.pid there at startup.
+isolateTmpdir("subagent-crosspoll");
 
 const DAEMON_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
 

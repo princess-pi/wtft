@@ -19,7 +19,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { trackSandbox } from "./lib/sandbox";
+import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { pollUntil } from "./lib/poll";
 
 import {
@@ -33,6 +33,14 @@ import {
 	cwdToSlug,
 	WTFT_TAGGER_VERSION,
 } from "../bin/wtft.mjs";
+
+
+// Private pid namespace for this suite (#486). Must precede the first
+// getDaemonPidPath() and the first daemon spawn: every daemon's startup
+// reapAndWarn() sweeps `os.tmpdir()` and unlinks any wtft-daemon-*.pid whose
+// process is dead, so on a shared /tmp this suite is racing every other daemon
+// on the host — and its own daemons are reaching theirs.
+isolateTmpdir("daemon-follow");
 
 let passed = 0;
 let failed = 0;

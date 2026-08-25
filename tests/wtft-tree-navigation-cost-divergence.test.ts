@@ -28,7 +28,13 @@ import {
 	WTFT_TAGGER_VERSION,
 } from "../bin/wtft.mjs";
 import type { Interaction } from "../extensions/lib/wtft-shared.ts";
-import { trackSandbox } from "./lib/sandbox";
+import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+
+
+// Private pid namespace for this suite (#486). Must precede the first
+// getDaemonPidPath() and the first daemon spawn — the daemon keys its lease on
+// os.tmpdir() and sweeps every wtft-daemon-*.pid there at startup.
+isolateTmpdir("tree-nav-divergence");
 
 // ---
 // FIXTURE: a session that has undergone /tree navigation.

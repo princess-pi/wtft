@@ -36,6 +36,8 @@
  */
 
 import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 const SANDBOXES: string[] = [];
 
@@ -147,4 +149,77 @@ export function trackSandbox(dir: string): string {
 /** `mkdtempSync` plus registration — the one-call form. */
 export function mkSandbox(prefix: string): string {
 	return trackSandbox(mkdtempSync(prefix));
+}
+
+/**
+ * Point `os.tmpdir()` at a private sandbox, for this process and every child it
+ * spawns (#486).
+ *
+ * The wtft daemon keys its singleton lease on `os.tmpdir()`, and every daemon
+ * runs `reapAndWarn()` at startup, which sweeps **every** `wtft-daemon-*.pid`
+ * in that directory and unlinks any whose PID is dead. On a shared `/tmp` that
+ * makes the pid namespace host-global: a suite that parks a synthetic dead PID
+ * to test the takeover protocol is racing every other daemon on the machine —
+ * this VPS routinely runs 5+ concurrent agent sessions, so the race is normal
+ * operation, not an edge case.
+ *
+ * Proven, not inferred: spawn one daemon for an unrelated session while a
+ * `424242` lease sits in `/tmp`, and the lease is gone 1.5s later, every time.
+ * Under a 400ms daemon-spawn loop, `wtft-daemon-lifecycle` failed 3 of 3 runs
+ * on "exiting daemon did NOT unlink the new owner's PID file" and
+ * `wtft-issue-155-daemon-follow` 2 of 2 — the same assertions #486 recorded
+ * from ordinary host load.
+ *
+ * A longer sleep cannot fix this and neither can `pollUntil` (#387): the
+ * failure is a file that is unlinked and *stays* unlinked, so there is no
+ * condition left to wait for. The shared resource has to go.
+ *
+ * Isolation cuts both ways, and the second direction is the one that matters
+ * off the test host: without it, a test daemon's startup sweep reaches the
+ * leases of real sessions, and a fixture directory removed by `sweep()` while
+ * another suite's daemon still holds it reads as "session gone" — which the
+ * reaper answers with SIGTERM.
+ *
+ * Call this **before** the first `getDaemonPidPath()` and the first daemon
+ * spawn, or the two sides compute different paths. Safe to call at module top
+ * level: `os.tmpdir()` reads `TMPDIR` on every call under both bun and node
+ * (verified on bun 1.3.14 — unlike `os.homedir()`, which bun caches at process
+ * start).
+ *
+ * **The trap: bun does not hand this mutation to every child.** Measured on bun
+ * 1.3.14, for an assignment made after startup:
+ *
+ * | call | inherits the mutation |
+ * |---|---|
+ * | `spawn` (async) | yes |
+ * | `spawnSync` | **no** |
+ * | `execSync` | **no** |
+ * | any of them with `env: process.env` | yes |
+ *
+ * Node propagates in all four. So a suite that isolates its tmpdir and then
+ * shells out with `execSync` gets the worst of both: it computes lease paths in
+ * the sandbox while its daemons write to the real `/tmp`. Nothing errors — the
+ * two sides simply stop describing the same file, which reads as a hard failure
+ * rather than a flake. That is not hypothetical: it is what happened to
+ * `wtft-308-lagging-session` on the first cut of this helper, 4 of 4 runs.
+ *
+ * **So: pass `env: process.env` on every sync child in an isolated suite.**
+ * `tests/bun-env-propagation.test.ts` pins the table above against the live
+ * runtime, so a bun that changes its mind goes red here instead of going quiet
+ * in four daemon suites.
+ *
+ * Known upstream and already reported — do not file a duplicate: oven-sh/bun
+ * #29237, "child_process.execFileSync uses stale PATH for command resolution
+ * when options.env is omitted", filed against 1.3.12 and **closed**. Same
+ * defect, reported through PATH rather than TMPDIR. We are on 1.3.14 and the
+ * behaviour is still here, so the fix either has not shipped or covered only
+ * execFileSync's command resolution. Re-check on the next bun upgrade — that
+ * check IS the pin test above.
+ */
+export function isolateTmpdir(label: string): string {
+	// Built under the REAL tmpdir, before the redirect — otherwise the sandbox
+	// would be created inside whatever this call is about to replace.
+	const root = mkSandbox(join(tmpdir(), `wtft-tmp-${label}-`));
+	process.env.TMPDIR = root;
+	return root;
 }

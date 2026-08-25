@@ -11,7 +11,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { execSync } from "node:child_process";
-import { trackSandbox } from "./lib/sandbox";
+import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 import {
 	readClassifiedTagFile,
@@ -19,6 +19,12 @@ import {
 	parseSessionFile,
 	WTFT_TAGGER_VERSION,
 } from "../bin/wtft.mjs";
+
+// Private pid namespace for this suite (#486). It sweeps os.tmpdir() for
+// wtft-daemon-*.pid files itself, so on a shared /tmp that sweep reaches every
+// other session's lease on this host — the raw-glob shape the enforcement gate
+// was widened to see.
+isolateTmpdir("cli-e2e-cost-parity");
 
 // ---
 // FIXTURE: Claude Code multi-block response plus a second distinct message.
@@ -144,7 +150,9 @@ const wtftBin = path.join(process.cwd(), "bin", "wtft.mjs");
 try {
 	const result = execSync(
 		`${process.execPath} ${wtftBin} --session ${sessionPath} -l 10`,
-		{ encoding: "utf8", timeout: 15000, stdio: "pipe" }
+		// env explicit: bun's sync child_process ignores the runtime TMPDIR
+		// mutation isolateTmpdir() made (#486, tests/bun-env-propagation.test.ts).
+		{ encoding: "utf8", env: process.env, timeout: 15000, stdio: "pipe" }
 	);
 	console.log("Non-watch CLI ran successfully");
 } catch (err: any) {

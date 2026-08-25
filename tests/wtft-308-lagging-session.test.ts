@@ -46,8 +46,27 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { execSync, spawn } from "node:child_process";
 import { getDaemonPidPath, WTFT_TAGGER_VERSION, awaitDaemonUp } from "../extensions/lib/wtft-daemon-lib.ts";
-import { trackSandbox } from "./lib/sandbox";
+import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { pollUntil } from "./lib/poll";
+
+// Private pid namespace for this suite (#486). Must precede the first
+// getDaemonPidPath() and the first daemon spawn. Beyond the lease race this
+// also isolates the CLI's reap-warning banner: on a shared /tmp it reports
+// abandoned fixture dirs left by every OTHER suite (wtft-watch-test-*,
+// wtft-title-layout-*, wtft-155-c-*), which is what broke "non-watch exits 0"
+// in part 5 — the assertion was reading another suite's litter.
+isolateTmpdir("lagging-session");
+
+// Bun 1.3.14 does NOT give a child the runtime mutation isolateTmpdir just made
+// to process.env — and it is inconsistent about it: async `spawn` inherits it,
+// `execSync` and `spawnSync` inherit the env this process STARTED with. Node
+// propagates in every case. Passing `env` explicitly is the only portable form,
+// so every sync child below takes CHILD_ENV. Without it this suite fails worse
+// than the flake it fixes: the CLI's daemon lands in the real /tmp while the
+// suite looks for its lease in the sandbox, so "daemon spawned and holds the
+// lease while waiting" fails 4 of 4 rather than 4 of 10.
+// Pinned against the live runtime by tests/bun-env-propagation.test.ts.
+const CHILD_ENV = process.env;
 
 const SCRIPT = path.resolve(import.meta.dirname, "..", "wtft");
 const RED = "\x1b[31m", GREEN = "\x1b[32m", RESET = "\x1b[0m";
@@ -114,7 +133,7 @@ console.log("1. Non-watch, session .jsonl not written yet");
 {
 	let out = "", code = 0;
 	try {
-		out = execSync(`${SCRIPT} -s '${sessionPath}' -l 5 --no-emoji 2>&1`, { encoding: "utf8", timeout: 15_000 });
+		out = execSync(`${SCRIPT} -s '${sessionPath}' -l 5 --no-emoji 2>&1`, { encoding: "utf8", env: CHILD_ENV, timeout: 15_000 });
 	} catch (err: any) {
 		out = `${err.stdout || ""}${err.stderr || ""}`;
 		code = err.status ?? 1;
@@ -153,7 +172,7 @@ console.log("\n2. Session written after the fact → chart");
 
 	let out = "", code = 0;
 	try {
-		out = execSync(`${SCRIPT} -s '${sessionPath}' -l 5 --no-emoji 2>&1`, { encoding: "utf8", timeout: 15_000 });
+		out = execSync(`${SCRIPT} -s '${sessionPath}' -l 5 --no-emoji 2>&1`, { encoding: "utf8", env: CHILD_ENV, timeout: 15_000 });
 	} catch (err: any) {
 		out = `${err.stdout || ""}${err.stderr || ""}`;
 		code = err.status ?? 1;
@@ -301,7 +320,7 @@ console.log("\n5. Tag file in a sibling project dir (#155 move)");
 	{
 		let out = "", code = 0;
 		try {
-			out = execSync(`${SCRIPT} -s '${pathB}' -l 5 --no-emoji 2>&1`, { encoding: "utf8", timeout: 20_000 });
+			out = execSync(`${SCRIPT} -s '${pathB}' -l 5 --no-emoji 2>&1`, { encoding: "utf8", env: CHILD_ENV, timeout: 20_000 });
 		} catch (err: any) {
 			out = `${err.stdout || ""}${err.stderr || ""}`;
 			code = err.status ?? 1;
@@ -358,7 +377,7 @@ console.log("\n6. Pending session + a daemon that dies during startup");
 
 	let out = "", code = 0;
 	try {
-		out = execSync(`${process.execPath} '${path.join(fakeBin, "wtft.mjs")}' -s '${path6}' -l 5 --no-emoji 2>&1`, { encoding: "utf8", timeout: 20_000 });
+		out = execSync(`${process.execPath} '${path.join(fakeBin, "wtft.mjs")}' -s '${path6}' -l 5 --no-emoji 2>&1`, { encoding: "utf8", env: CHILD_ENV, timeout: 20_000 });
 	} catch (err: any) {
 		out = `${err.stdout || ""}${err.stderr || ""}`;
 		code = err.status ?? 1;
@@ -447,7 +466,7 @@ console.log("\n8. Existing session, daemon dead before data → not 'no data yet
 	try { fs.unlinkSync(pidPath8); } catch {}
 	let out = "", code = 0;
 	try {
-		out = execSync(`${process.execPath} '${path.join(fakeBin, "wtft.mjs")}' -s '${path8}' -l 5 --no-emoji 2>&1`, { encoding: "utf8", timeout: 20_000 });
+		out = execSync(`${process.execPath} '${path.join(fakeBin, "wtft.mjs")}' -s '${path8}' -l 5 --no-emoji 2>&1`, { encoding: "utf8", env: CHILD_ENV, timeout: 20_000 });
 	} catch (err: any) {
 		out = `${err.stdout || ""}${err.stderr || ""}`;
 		code = err.status ?? 1;

@@ -31,7 +31,7 @@ kill_daemons() {
 
 cleanup() {
   kill_daemons
-  rm -f /tmp/wtft-daemon-test*.jsonl /tmp/wtft-daemon-test*.classified.jsonl /tmp/wtft-daemon-*.pid
+  rm -f /tmp/wtft-daemon-test*.jsonl /tmp/wtft-daemon-*.pid
 }
 trap cleanup EXIT
 
@@ -40,7 +40,12 @@ echo ""
 
 DAEMON="./bin/wtft-daemon.mjs"
 SESSION="/tmp/wtft-daemon-test-session.jsonl"
-CLASSIFIED="${SESSION}.classified.jsonl"
+# Tag filename is versioned (.wtft-tag.v{N}.jsonl). Derive N from the one source
+# of truth rather than mirroring it here — a mirrored literal is how this suite
+# went dead against `.classified.jsonl` for months (#499).
+TAGGER_VERSION=$(grep -o 'WTFT_TAGGER_VERSION = "[0-9.]*"' extensions/lib/wtft-tagger-version.ts | grep -o '[0-9.]*')
+[ -n "$TAGGER_VERSION" ] || { echo "FATAL: could not read WTFT_TAGGER_VERSION from extensions/lib/wtft-tagger-version.ts"; exit 1; }
+CLASSIFIED="${SESSION}.wtft-tag.v${TAGGER_VERSION}.jsonl"
 
 # Setup: create fake session
 cat > "$SESSION" << 'JSONLEOF'
@@ -57,11 +62,11 @@ $DAEMON --session "$SESSION" &
 DAEMON_PID=$!
 sleep 2
 
-assert "classified.jsonl created" \
+assert "tag file created (.wtft-tag.v${TAGGER_VERSION}.jsonl)" \
   "[ -f '$CLASSIFIED' ]"
 
-assert "classifier version header present" \
-  "head -1 '$CLASSIFIED' | grep -q '_cv'"
+assert "tag entries are headerless data (version lives in the filename, no _cv)" \
+  "! grep -q '_cv' '$CLASSIFIED'"
 
 assert "classified entries have NO txt field" \
   "! grep -q '\"txt\"' '$CLASSIFIED'"
@@ -162,10 +167,10 @@ echo "6. Recursion guard"
 touch "$CLASSIFIED"
 ERR=$($DAEMON --session "$CLASSIFIED" 2>&1 || true)
 if echo "$ERR" | grep -q "refusing to watch"; then
-  echo -e "  ${GREEN}PASS${NC} refuses .classified.jsonl as input"
+  echo -e "  ${GREEN}PASS${NC} refuses a .wtft-tag.v* file as input"
   PASS=$((PASS + 1))
 else
-  echo -e "  ${RED}FAIL${NC} refuses .classified.jsonl as input"
+  echo -e "  ${RED}FAIL${NC} refuses a .wtft-tag.v* file as input"
   FAIL=$((FAIL + 1))
 fi
 rm -f "$CLASSIFIED"
@@ -213,9 +218,9 @@ JSONLEOF
 
 $DAEMON --session "$CACHE_SESSION" &
 sleep 2
-CF="${CACHE_SESSION}.classified.jsonl"
+CF="${CACHE_SESSION}.wtft-tag.v${TAGGER_VERSION}.jsonl"
 
-# Extract cost from classified output (grep the classified line, not headers/heartbeats)
+# Extract cost from tag output (grep a data line, not heartbeats)
 CACHE_COST=$(grep '"cat":' "$CF" | head -1 | python3 -c "import sys,json; print(json.loads(sys.stdin.readline())['c'])" 2>/dev/null || echo "0")
 
 # Expected: 110000 cache-read tokens at $0.30/M = $0.033

@@ -18,11 +18,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 // ---
-// CONSTANTS (mirrored from wtft-daemon-lib.ts — session-selector is a
-// standalone module and should not depend on the daemon's internals)
+// CONSTANTS — the tagger version is imported from its leaf module, never
+// mirrored: a mirrored literal sat four bumps stale here (#499). The leaf
+// module keeps this file free of the daemon's tag-file I/O internals.
 // ---
 
-const TAGGER_VERSION = "2.3.8";
+import { WTFT_TAGGER_VERSION as TAGGER_VERSION } from "./wtft-tagger-version.ts";
 
 import { formatRelativeTime } from "./session-path-shortener.ts";
 import { formatCost } from "./wtft-shared.ts";
@@ -135,7 +136,7 @@ function compareVersions(a: string, b: string): number {
 
 /**
  * Read a session summary from classified tag files with two-tier fallback:
- *   1. Try current tagger version (v2.3.8)
+ *   1. Try the current tagger version (imported from wtft-tagger-version.ts)
  *   2. Scan wtft-tags/ for ANY matching tag file (newest version first)
  *   3. Fall back to raw .jsonl line count if no tag exists at all
  *

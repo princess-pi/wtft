@@ -2,7 +2,7 @@
 /**
  * @package princess-pi-packages
  * @test wtft-420-subagent-call-site
- * @description #420 review (Medium/contract, bin/wtft-daemon.ts:391) — the
+ * @description #420 review (Medium/contract, bin/wtft-daemon.ts) — the
  *   "never call `attributeClaudeSubAgentCosts` over anything less than the
  *   whole file" rule (docs/wtft-incremental-render-spec.md, "Per-Call, Not
  *   Global") was enforced by a comment only:
@@ -10,7 +10,7 @@
  *   (bin/wtft-daemon.ts, the subagent re-parse loop). `seenSessionIds` (extensions/lib/wtft-parser.ts, inside attributeClaudeSubAgentCosts)
  *   is a `Set` scoped to one call, so a second production call site over a
  *   partial slice — e.g. a byte-offset reader added for the still-one-shot
- *   `claude -p` bash sub-agent path (bin/wtft-daemon.ts:341-346, #420 review)
+ *   `claude -p` bash sub-agent path (bin/wtft-daemon.ts, #420 review)
  *   — reintroduces exactly the silent double-attribution three review rounds
  *   spent fixing (tests/wtft-270-subagent-nested-claude-attribution.test.ts),
  *   and nothing but a maintainer re-reading the comment would catch it.

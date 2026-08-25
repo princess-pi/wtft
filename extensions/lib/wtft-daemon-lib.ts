@@ -243,21 +243,11 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
  * @param settings - Display settings (interval, limit, width, etc.)
  */
 
-// 2.5.1 (#52 Phase 3): compaction/recache meter-split emits dual lines
-// (main + "#oh" overhead line), interrupted turns carry `ir` — stale caches
-// lack all three and must re-classify.
-// 2.6.0 (#139/#140/#141): Claude 5 family pricing + user pricing registry
-// change baked-in costs, and workflow subagent discovery adds transcripts —
-// stale tags carry wrong totals and must re-parse.
-// 2.6.1 (#146): 1h-TTL cache writes re-priced from 2.5x to 2.0x input for
-// registry models — v2.6.0 tags overbill Claude Code sessions.
-// 2.7.0 (#152): adds `miss` (observed cache miss). Cannot be back-derived from
-// v2.6.1 tags — the meter-split writes cr and cw onto separate lines, so a full
-// miss and a partial re-prime are indistinguishable once tagged.
-// 2.7.1 (#148): claude-sonnet-5 re-priced to intro rate ($2/$10/$0.20/$2.50,
-// derived 1h write $4.00) for interactions before 2026-09-01, was flat
-// post-intro $3/$15 — v2.7.0 tags overbill every Sonnet 5 line by 50%.
-export const WTFT_TAGGER_VERSION = "2.7.1";
+// The version and its bump changelog live in wtft-tagger-version.ts — a leaf
+// module, so tag readers that avoid daemon internals import it from there.
+// Re-exported here for the existing importers (#499).
+export { WTFT_TAGGER_VERSION } from "./wtft-tagger-version.js";
+import { WTFT_TAGGER_VERSION } from "./wtft-tagger-version.js";
 
 /**
  * Serialize one interaction to its classified tag-file line(s) (#52 Phase 3).
@@ -1118,9 +1108,9 @@ export async function watchTagFile(
 		};
 
 		// Deduplicate by message.id — dedupeClassifiedById, NOT deduplicateInteractions.
-		// `allInteractions` here always came from readClassifiedTagFile
-		// (line 1054/1273/1341) or the fs.watch branch's own dedupeClassifiedById
-		// call (line 1253) — both already collapse tag-file lines sharing one
+		// `allInteractions` here always came from readClassifiedTagFile or the
+		// fs.watch branch's own dedupeClassifiedById call — both already
+		// collapse tag-file lines sharing one
 		// message.id, taking max cost — so calling dedupeClassifiedById again is a
 		// true no-op here (it returns the input unchanged when nothing repeats,
 		// docs/wtft-incremental-render-spec.md#dedupeClassifiedById). Present as

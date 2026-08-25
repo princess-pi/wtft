@@ -382,13 +382,86 @@ Each is a concrete assertion in
   scan ran at all.
 - **V10** — display prefers a live path: the V5 candidate's `displayPath` names the main clone,
   not the removed worktree.
-- **V11 (cost, per #164)** — against the real `~/.claude/projects`, not a fixture:
-  `discoverSessions("claude-code", process.cwd())` returns without throwing, a *cold* call stays
-  under the 500 ms ceiling `tests/wtft-issue-156-harness-seam.test.ts` already asserts, and a
-  second call is not slower than the first plus 50 ms (the memo is doing its job). Skipped when
-  `~/.claude/projects` is absent. This is the one criterion measured in wall-clock time; it
+- **V11 (cost, per #164, restated per #477)** — against the real `~/.claude/projects`, not a
+  fixture: `discoverSessions("claude-code", process.cwd())` returns without throwing, and a
+  *cold* call stays within a bounded multiple of a second, *memoised* call
+  (`cold <= min(40 * max(warm, 5) + 250, 5000)`) rather than under a fixed millisecond ceiling.
+  The `max(warm, 5)` floor is not decoration: `Date.now()` resolves to about a millisecond, so on
+  a quiet host with little history a warm pass whose real cost is a few ms measures as **0**, and
+  the bound would collapse to its bare 250 ms additive term — tight enough to fail a legitimately
+  larger `cold` with no regression behind it. The floor holds the bound's minimum at
+  `40 * 5 + 250 = 450 ms`. Skipped
+  when `~/.claude/projects` is absent. This is the one criterion measured in wall-clock time; it
   reads `Date.now()` for *elapsed* time only — never a date — which is the same latitude #156's
   ceiling test takes, because a duration is the quantity under test and cannot be injected away.
+
+  **Why a ratio, not a ceiling (#477):** the original assertion was `cold < 500`, a fixed bound
+  on reading the *live* `~/.claude/projects` tree. That directory grows every session — this host
+  runs 5+ concurrent sessions, including the one running the suite — so the measurement's input
+  grew monotonically while its 500 ms budget never moved. Not flaky in the random sense: drifting
+  toward *always*-failing, and failing in part *because* it ran. #477's own repro needed
+  concurrent load to tip it over (`bun run test` hit 519 ms under contention from other sessions);
+  by the time of this fix the same host's history had grown enough that cold discovery breaches
+  500 ms even with **no concurrency at all** (measured standalone: 400-650 ms) — concurrency
+  made the ceiling fail sooner, but growth alone was enough on its own a few weeks later. Two
+  roads not taken: bound the input with a fixture tree
+  of fixed size (loses the "against the real history" property the check exists for), or raise
+  the ceiling (buys months, costs the same conversation again, weakens the check without saying
+  so). The ratio taken instead mirrors the sibling assertion three lines below
+  (`warm <= cold + 50`), which was never flaky for the same reason: bounding cold against warm's
+  `40 * warm` term scales with the input on its own. It still tests something real, at two cost
+  tiers. `matchesRecordedCwd` (`extensions/lib/harness/claude-code/discovery.ts`) does a bounded
+  tail read via `resolveLastCwd` for every transcript across the whole `~/.claude/projects` tree
+  whose slug doesn't physically match the target — not just stranded ones — and, for whichever of
+  those are *additionally* stranded (their last-cwd directory no longer exists), an expensive
+  whole-file scan via `resolveCwdHistory`, gated on `pathExists`
+  (`extensions/lib/harness/session-cwd.ts`). Both tiers are cache misses on cold and cache hits on
+  warm, so either one regressing — the cheap tier running unconditionally, or the expensive tier's
+  gate failing to gate — still shows up as cold ballooning relative to warm. The expensive tier is
+  documented as rare in general (`session-cwd.ts`: "~3 transcripts in 40"), but on *this*
+  measurement host it dominates: the #477 mutation probe counted 1496 whole-file scans out of
+  1803 tail reads (~83%) — this repo's own workflow creates and destroys worktrees constantly, so
+  most sessions here really are stranded. Proved by mutation during #477: a forced 1.5 ms stall on
+  every cache-miss resolve — hitting both tiers — pushed the measured ratio from ~10-30x to
+  ~130-175x on this machine, comfortably clearing the bound in one direction and tripping it in
+  the other.
+
+  A pure ratio has one blind spot: cold and warm degrading *together* — the memo itself breaking,
+  so the "warm" pass re-scans too — inflates the allowed bound right along with warm, so both this
+  check and the untouched `warm <= cold + 50` sibling would pass no matter how slow either call
+  got. `min(…, 5000)` **narrows** that gap; it does not close it, and an earlier draft of this
+  section said "closes" — corrected here, because a run falsifies it. Measured 2026-08-24 by
+  disabling the `cwdCache` read outright: cold=597 ms, warm=85 ms, and **both V11 checks passed**,
+  since 597 is under `min(3650, 5000)` and 85 is under `cold + 50`. Total memo collapse costs the
+  *warm* pass, and 85 ms is well short of the ~119 ms warm needs before the cap becomes the
+  binding constraint at all. **princess-pi-packages#489 tracks the gap**, and proposes the honest
+  fix: assert on the read counters this suite already exports (V9's idiom), which are
+  scale-invariant by construction and need no ceiling, no ratio, and no host calibration.
+
+  This is **not a regression the ratio introduced** — the fixed 500 ms ceiling never caught memo
+  collapse either, because nothing in this suite has ever bounded *warm* in absolute terms. The
+  failure mode was always untested; the ratio only makes it sayable.
+
+  The backstop is also **not free — a real, stated exception to "the fix scales with input," not
+  an unconditional one.** 5000 ms is a deliberately loose bound, ~8-12x today's measured cold
+  time, that becomes the binding constraint only once warm itself has grown past ~119 ms — call
+  it an order of magnitude further growth of this host's history — at which point the check *does*
+  degenerate back into
+  a fixed ceiling against a growing input, the same failure mode #477 exists to eliminate. The
+  trade accepted here is buying roughly a decade's worth of the growth rate observed so far, in
+  exchange for closing the co-degrade blind spot; it is not immune to the same drift indefinitely,
+  only to a much larger multiple of it. Caught a first-draft mistake during review
+  (princess-pi-packages#477): the natural-looking `Math.max(40 * warm + 250, 5000)` does the
+  opposite of what's wanted — it can only *raise* the bound, so a 10000 ms cold / 9800 ms warm
+  co-degrade would still pass at `max(392250, 5000) = 392250`. `Math.min` caps it at
+  `min(392250, 5000) = 5000` and correctly fails.
+
+  `tests/wtft-issue-156-harness-seam.test.ts` Part C asserts the same fixed `elapsed < 500`
+  ceiling over the same real tree — on a call that is already warm by the time it's timed, so it
+  currently has far more headroom (measured warm cost: ~20-40 ms) than V11's old cold-based
+  check ever did. It was out of scope for #477 and was left unchanged; it shares the same defect
+  class and can drift the same way as the live tree keeps growing. Tracked as **#487**, with a
+  pointer comment in the sibling test file itself.
 
 **Sibling worktrees (#145)**
 

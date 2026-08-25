@@ -9,7 +9,8 @@
  *   B  V5–V10   #164  a session stranded in a REMOVED directory is findable
  *   C  V12–V17  #145  live sibling worktrees fan out, non-repos do not
  *   D  V18–V20  #145  worktree rows render as <repo>/w/<branch>
- *   E  V11      #164  cost: the whole-file scan stays gated on real history
+ *   E  V11      #164  cost: cold discovery stays within a bounded multiple
+ *                     of the memoised pass, over the real history (#477)
  *
  * V21 is the whole-suite invariant and is not asserted here — it is what
  * `bun run test` reports across every suite.
@@ -21,10 +22,48 @@
  * touched.
  *
  * On clocks: no assertion depends on the wall-clock *date* — the #96 flaky
- * pricing trap. Part E does read `Date.now()`, but only to measure elapsed
- * time against the 500 ms discovery ceiling, which is the same thing
- * tests/wtft-issue-156-harness-seam.test.ts already does. A duration is the
- * quantity under test there, so it cannot be injected away.
+ * pricing trap. Part E does read `Date.now()`, to measure elapsed time — a
+ * duration is the quantity under test there, so it cannot be injected away —
+ * but as of #477 it no longer measures that duration against a fixed
+ * millisecond ceiling. `~/.claude/projects` is live and ever-growing (this
+ * host runs 5+ concurrent sessions, including the one running this suite), so
+ * a fixed ceiling's input grows every session while its budget never moves:
+ * not flaky in the random sense, but drifting toward always-failing, and
+ * failing *because* it ran. V11 now bounds cold discovery against its own
+ * memoised second pass instead (`cold <= min(40 * warm + 250, 5000)`) — the
+ * `40 * warm` term is a relative bound and scales with the input, the same
+ * idiom the untouched sibling assertion three lines below (`warm <= cold +
+ * 50`) already used. The `min(…, 5000)` cap is a deliberate, honest exception
+ * to that scale-invariance, not a second copy of the old ceiling: a pure
+ * ratio is blind to cold and warm degrading TOGETHER (e.g. the memo itself
+ * breaking), since a large warm would inflate the allowed cold right along
+ * with it. The cap closes that gap at the cost of reopening a MUCH slower
+ * version of the drift #477 exists to fix — 5000ms leaves ~8-12x headroom
+ * over today's measured cold time (400-650ms), so it only becomes the
+ * binding constraint once this host's history has grown roughly an order of
+ * magnitude further (or the memo has broken outright). It still tests
+ * something real today, at two cost tiers: `matchesRecordedCwd`
+ * (claude-code/discovery.ts) does a bounded tail read via `resolveLastCwd`
+ * for every transcript across the WHOLE ~/.claude/projects tree whose slug
+ * doesn't physically match, and, for whichever of those are additionally
+ * stranded (last-cwd directory gone), an expensive whole-file scan via
+ * `resolveCwdHistory`, gated on `pathExists` (session-cwd.ts). Both tiers are
+ * cache misses on cold and cache hits on warm, so either one regressing —
+ * the cheap tier running unconditionally, or the expensive tier's gate
+ * failing to gate — still shows up as cold ballooning relative to warm. The
+ * expensive tier is documented as rare in general (session-cwd.ts: "~3
+ * transcripts in 40"), but on THIS measurement host it dominates: the #477
+ * mutation probe counted 1496 whole-file scans out of 1803 tail reads
+ * (~83%) — this repo's workflow creates and destroys worktrees constantly,
+ * so most sessions here really are stranded. Proved by mutation during #477
+ * (a forced 1.5ms stall on every cache-miss resolve — hitting both tiers —
+ * pushed the observed ratio from ~10-30x to ~130-175x on this machine).
+ *
+ * tests/wtft-issue-156-harness-seam.test.ts (Part C) asserts the same fixed
+ * `elapsed < 500` ceiling over the same real tree, on a call that is already
+ * warm by the time it's timed. It was not in scope for #477 and was not
+ * changed here — flagged, not fixed, since it can drift the same way.
+ * Tracked as #487.
  *
  * Run: node --experimental-strip-types tests/wtft-issue-144-145-164-session-discovery.test.ts
  */
@@ -387,12 +426,66 @@ console.log("\n=== PART E: cost against the real session history (V11) ===\n");
 		const t0 = Date.now();
 		const found = discoverSessions("claude-code", here);
 		const cold = Date.now() - t0;
-		check(cold < 500, `V11: cold discovery over the real history stays under the #156 ceiling (${cold}ms < 500ms)`);
 		check(found.length >= 0, "V11: discovery returns without throwing on the real tree");
 
 		const t1 = Date.now();
 		discoverSessions("claude-code", here);
 		const warm = Date.now() - t1;
+
+		// #477: the fixed 500ms ceiling this used to be drifts toward
+		// always-failing, because its input (the live ~/.claude/projects tree)
+		// grows every session while the ceiling never moves — and it fails
+		// *because* of the very sessions running it. Bound cold discovery
+		// against the memoised pass instead: the #164 gate is what keeps the
+		// expensive whole-file relocation scan (resolveCwdHistory) off most
+		// transcripts, and cold pays for every scan the gate lets through while
+		// warm is pure cache hits — so cold ballooning relative to warm is
+		// exactly what "the gate stopped gating" looks like. 40x + a 250ms
+		// floor is generous enough to absorb host-load jitter (measured ratio
+		// on this host: ~10-30x under `bun run test`) while still catching a
+		// real regression (see the mutation proof: forcing a 1.5ms busy-wait
+		// into every cache-miss resolve pushed the ratio to ~130-175x).
+		//
+		// A pure ratio is blind to one failure mode: cold AND warm degrading
+		// TOGETHER (e.g. the (path, mtimeMs, size) memo itself breaking, so the
+		// "warm" pass re-scans too) — a large warm inflates the ratio bound
+		// right along with it, so both this check and the untouched
+		// `warm <= cold + 50` sibling below pass trivially regardless of how
+		// slow either call actually is. ABSOLUTE_CEILING_MS caps the bound
+		// (Math.min, not Math.max — a floor added via max would only ever
+		// loosen a bound that's already looser than it) so cold can never
+		// hide behind an inflated warm: 5000ms leaves ~8-12x headroom over
+		// today's measured cold time (400-650ms) — high enough that it should
+		// not drift into failure for a long time the way the original 500ms
+		// ceiling did.
+		//
+		// Be precise about what that backstop does and does not buy, because an
+		// earlier draft of this comment claimed more than a run supports. It
+		// NARROWS the blind spot; it does not close it. The cap only bites once
+		// cold exceeds 5000ms, so it catches memoisation collapse on a tree big
+		// enough to make the uncached walk that slow — and NOT on this host
+		// today. Measured 2026-08-24 by disabling the cwdCache read outright:
+		// cold=597ms, warm=85ms, and BOTH V11 checks passed — 597 is under
+		// min(3650, 5000), and 85 is under cold+50. #489 tracks the gap.
+		//
+		// This is not a regression the ratio introduced. The fixed 500ms ceiling
+		// never caught memoisation collapse either: collapse costs the WARM pass,
+		// and nothing here has ever bounded warm in absolute terms. The failure
+		// mode was always untested — the ratio just makes saying so possible.
+		// WARM_FLOOR_MS guards a Date.now() resolution artifact: on a quiet
+		// host with little history, warm's real cost (mostly the uncached
+		// directory walk) can be a handful of ms and still measure as 0 at
+		// ~1ms clock resolution, which would collapse the bound to the bare
+		// 250ms additive term — tight enough to flake on a legitimately
+		// larger cold cost with no regression at all. A floor of 5ms keeps
+		// the bound's minimum at 40*5+250=450ms.
+		const ABSOLUTE_CEILING_MS = 5000;
+		const WARM_FLOOR_MS = 5;
+		const ratioBound = Math.min(40 * Math.max(warm, WARM_FLOOR_MS) + 250, ABSOLUTE_CEILING_MS);
+		check(
+			cold <= ratioBound,
+			`V11: cold discovery stays within a bounded multiple of the memoised pass (${cold}ms ≤ min(40×max(${warm},${WARM_FLOOR_MS})ms + 250ms, ${ABSOLUTE_CEILING_MS}ms) = ${ratioBound}ms)`
+		);
 		check(warm <= cold + 50, `V11: the memoised second pass does not re-read (${warm}ms ≤ ${cold + 50}ms)`);
 	}
 }

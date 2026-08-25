@@ -213,6 +213,15 @@ console.log("\n=== PART C: no regression against the real session history ===\n"
 		const missing = oldRule.filter(p => !found.includes(p));
 		check(missing.length === 0, `every session the old cwd-slug rule found is still found (${oldRule.length} checked)`);
 
+		// #487: this fixed 500ms ceiling shares V11's defect (#477) — a bound
+		// against the live, ever-growing ~/.claude/projects tree that drifts
+		// toward always-failing as this host's history grows. Has more
+		// headroom today than V11's old cold-based check ever did, because
+		// discoverSessions() was already called once (untimed) just above,
+		// priming the (path, mtimeMs, size) memo before this call is timed —
+		// but the directory walk itself is never memoised, so even this
+		// "warm" cost scales with total file/directory count over time.
+		// Not restated here — tracked in #487, not fixed in #477's branch.
 		const t0 = Date.now();
 		discoverSessions("claude-code", here);
 		const elapsed = Date.now() - t0;

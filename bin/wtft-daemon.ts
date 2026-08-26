@@ -757,6 +757,13 @@ function syncSubagentTranscript(file: string): boolean {
   // warning. fileState.size/mtimeMs are only advanced after a SUCCESSFUL
   // write below, so a parse failure here still leaves the file marked
   // changed and gets retried next poll, same as before this split.
+  //
+  // Since #457 the READ is part of what can throw: parseSessionFile's bare
+  // catch is gone, so an EACCES/EISDIR/ENOMEM/vanished-file read failure
+  // propagates out of it and lands in this same handler — the warning fires
+  // for unreadable transcripts too (it used to fire for nothing at all, the
+  // bare catch swallowed every cause), and fileState is untouched, so the
+  // file stays marked changed and is re-read every poll until it succeeds.
   let deduped: ReturnType<typeof deduplicateInteractions>;
   try {
     // Whole file, exactly as the pre-#270 discovery-time parse did.
@@ -764,18 +771,18 @@ function syncSubagentTranscript(file: string): boolean {
     // whole result — do NOT add a second call here, that is the round-3 High.
     deduped = deduplicateInteractions(parseSessionFile(file));
   } catch (err) {
-    // Keep polling — one bad parse must not stop this subagent, the other
-    // subagents in this loop, or the parent session's own tag writes.
+    // Keep polling — one bad read or parse must not stop this subagent, the
+    // other subagents in this loop, or the parent session's own tag writes.
     // This sweep is not clean, so it must not stamp the tag as swept (#443).
     pollHadFailure = true;
     if (!warnedSubagentParseFailure.has(stateKey)) {
       warnedSubagentParseFailure.add(stateKey);
       process.stderr.write(
-        `[wtft-log-parser] WARNING: a subagent transcript could not be parsed, so its cost may be missing from this session's total until it succeeds (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`,
+        `[wtft-log-parser] WARNING: a subagent transcript could not be read or parsed, so its cost may be missing from this session's total until it succeeds (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`,
       );
     }
     if (process.env.WTFT_DAEMON_DEBUG) {
-      process.stderr.write(`[wtft-log-parser] subagent parse error (${sessionId}), will retry next poll: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(`[wtft-log-parser] subagent read or parse error (${sessionId}), will retry next poll: ${err instanceof Error ? err.message : String(err)}\n`);
     }
     return wroteAny;
   }
@@ -975,10 +982,10 @@ function scanForSubAgents() {
   //
   // What it still does NOT assert, because the name over-promises: this says a
   // sweep RAN AND REPORTED NO FAILURES, still weaker than "no failures occurred".
-  // #457 — parseSessionFile's bare catch returns [] on EACCES — makes an
-  // unreadable transcript indistinguishable from an empty one, so it never
-  // reports a failure and cannot set pollHadFailure. Closing #457 strengthens
-  // this marker for free.
+  // #457 is closed: parseSessionFile throws on read failure, so an unreadable
+  // transcript lands in the parse handler above, sets pollHadFailure, and can
+  // no longer be mistaken for an empty one — closing it strengthened this
+  // marker for free, exactly as the pre-fix note here predicted.
   //
   // Not gated on `wroteAny`: a session with no subagents has nothing to sweep,
   // and "nothing to sweep" is the same state to a reader as "swept". Gating on it

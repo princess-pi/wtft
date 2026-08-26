@@ -450,32 +450,38 @@ export function splitOverheadCost(
 export function parseSessionFile(filePath: string): Interaction[] {
 	const interactions: Interaction[] = [];
 	const state = newParseStreamState();
-	try {
-		const content = fs.readFileSync(filePath, "utf8");
-		for (const line of content.split("\n")) {
-			if (!line.trim()) continue;
-			try {
-				const entry = JSON.parse(line);
-				// Stream-control entries (thinking level #77, model_change #128,
-				// compaction #90, compact summary + interrupt #52 Phase 3) are
-				// recognized per harness and applied here.
-				const isControl = applyControlEntry(entry, state, () => {
-					if (interactions.length > 0) interactions[interactions.length - 1].interrupted = true;
-				});
-				if (isControl) continue;
+	// #457 — the READ is loud: an unreadable transcript (EACCES, EISDIR, ENOMEM,
+	// a mid-read I/O error, or the file vanishing) throws here instead of
+	// returning [] and reading as a legitimately empty session. The caller
+	// decides what a missing/unreadable file means: the daemon's
+	// syncSubagentTranscript warns, leaves its change detector untouched, and
+	// retries next poll; loadSubagentInteractions skips the file. Per-line
+	// errors below stay swallowed as before — a throw out of JSON.parse, a
+	// control entry, or parseEntryToInteraction is treated as a bad line
+	// (partial writes, non-JSON, an unknown entry shape), not a file-level
+	// failure.
+	const content = fs.readFileSync(filePath, "utf8");
+	for (const line of content.split("\n")) {
+		if (!line.trim()) continue;
+		try {
+			const entry = JSON.parse(line);
+			// Stream-control entries (thinking level #77, model_change #128,
+			// compaction #90, compact summary + interrupt #52 Phase 3) are
+			// recognized per harness and applied here.
+			const isControl = applyControlEntry(entry, state, () => {
+				if (interactions.length > 0) interactions[interactions.length - 1].interrupted = true;
+			});
+			if (isControl) continue;
 
-				const interaction = parseEntryToInteraction(entry, state.thinkingLevel, state.compactionTokensBefore, state.afterCompaction, state.model);
-				if (interaction) {
-					interactions.push(interaction);
-					state.compactionTokensBefore = undefined; // consumed by this interaction
-					state.afterCompaction = false;
-				}
-			} catch {
-				// Skip unparseable lines (partial writes, non-JSON)
+			const interaction = parseEntryToInteraction(entry, state.thinkingLevel, state.compactionTokensBefore, state.afterCompaction, state.model);
+			if (interaction) {
+				interactions.push(interaction);
+				state.compactionTokensBefore = undefined; // consumed by this interaction
+				state.afterCompaction = false;
 			}
+		} catch {
+			// Skip unparseable lines (partial writes, non-JSON)
 		}
-	} catch {
-		// File may not exist or be unreadable
 	}
 
 	// Claude bash sub-agent discovery (#138): find sub-agent sessions

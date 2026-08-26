@@ -268,10 +268,12 @@ The marker is a zero-cost `_meta` row carrying no `message.id`, so it is consist
 with the soundness condition above rather than an exception to it.
 
 **What `swept` does NOT assert.** It says a sweep RAN AND REPORTED NO FAILURES, which
-is weaker than "no failures occurred". #457 — `parseSessionFile`'s bare catch returns
-`[]` on EACCES — means an unreadable transcript is silently indistinguishable from an
-empty one and is never reported as a failure at all, so a transcript lost that way can
-still be marked swept. Closing #457 strengthens this marker for free.
+is weaker than "no failures occurred". #457 is closed — `parseSessionFile` now throws
+on read failure, so an unreadable transcript lands in `syncSubagentTranscript`'s parse
+handler, sets `pollHadFailure`, and is never mistaken for an empty one — which
+strengthened this marker for free, exactly as the pre-fix note here predicted. The
+remaining gap is only the ordinary one: a failure occurring between the last poll and
+the marker stamp is still not reflected in it.
 
 ### `readTagProvisional`, and what the CLI does with it
 

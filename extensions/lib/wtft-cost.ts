@@ -2,9 +2,17 @@
  * @package princess-pi-packages
  * @module wtft-cost
  * @description Pure cost calculation for model token pricing.
- *   Supports Claude (Haiku/Sonnet/Opus) and DeepSeek (v4-flash/v4-pro)
- *   with DeepSeek peak-valley surge pricing, TTL-split cache-write costs,
- *   and input-based pricing tiers (GPT-5.x long-context rates).
+ *   The registry covers the Claude 4 and 5 families (including fable and
+ *   mythos), DeepSeek (v4-pro, v4-flash, v4-flash-vision-exp) and GPT-5.x.
+ *   A rate resolves through three mechanisms, in this order: a DATED window
+ *   (`dateTiers`, #148/#495 — an intro rate or a superseded card), then an
+ *   input-SIZE tier (`tiers`, GPT-5.x long-context), then the entry's own
+ *   unconditioned quad. On top of that, DeepSeek rates carry a peak-valley
+ *   surge multiplier that is time-of-day AND weekday dependent, and cache
+ *   writes are TTL-split.
+ *
+ *   A second, separate meter runs alongside tokens: web_search and web_fetch
+ *   are billed per REQUEST, not per token (see WEB_SEARCH_PRICE below).
  *
  *   Pi's built-in usage.cost.total is authoritative when available — this
  *   module is the fallback for models where Pi doesn't track cost (DeepSeek,
@@ -33,8 +41,14 @@ export interface CostTier {
  * field any model can carry, for launches that ship introductory pricing
  * ahead of a standard rate (Sonnet 5's $2/$10 intro through 2026-08-31 is
  * the first user). No timestamp, or no matching window, falls back to the
- * model's base rates — resolution never reads the host clock (#96: a dated
- * DeepSeek surge test that read Date.now() went flaky near a window edge).
+ * model's unconditioned rates.
+ *
+ * Scope of the no-host-clock guarantee (#96, sharpened #495): it covers THIS
+ * resolver, which treats a missing or zero timestamp as "unknown date" and
+ * returns the current card. `getDeepSeekPeakMultiplier` makes the same promise
+ * separately — see its own docstring. Both are needed, because a cost is a
+ * dated rate AND a surge multiplier, and either reading the clock makes the
+ * same historical turn price differently on a second run.
  */
 export interface DateTier {
 	effectiveBefore: number;
@@ -82,17 +96,86 @@ export function calculateServerToolCost(
 	return (webSearchRequests * WEB_SEARCH_PRICE) + (webFetchRequests * WEB_FETCH_PRICE);
 }
 
-export function getDeepSeekPeakMultiplier(timestamp?: number): number {
-	const ts = timestamp || Date.now();
-	const d = new Date(ts);
-	const utcHour = d.getUTCHours();
-	const utcMin = d.getUTCMinutes();
-	const utcTime = utcHour * 60 + utcMin; // minutes since UTC midnight
+/**
+ * The DeepSeek peak windows, as minutes since UTC midnight, half-open
+ * `[start, end)` — 01:00–04:00 and 06:00–10:00 UTC.
+ *
+ * This is the ONE definition (#495). The windows were hardcoded in four
+ * places — here, and three more in wtft-renderer.ts — plus four prose copies,
+ * with nothing that failed when a schedule change missed one. Everything that
+ * needs the schedule imports this; nothing re-types the numbers.
+ */
+export const DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES: ReadonlyArray<readonly [number, number]> = [
+	[60, 240],   // 01:00–04:00 UTC
+	[360, 600],  // 06:00–10:00 UTC
+];
 
-	// Peak window 1: 01:00–04:00 UTC → minutes 60–240
-	// Peak window 2: 06:00–10:00 UTC → minutes 360–600
-	if ((utcTime >= 60 && utcTime < 240) || (utcTime >= 360 && utcTime < 600)) {
-		return 2.0;
+/**
+ * The instant weekends stopped being peak (2026-08-23T00:00:00Z).
+ *
+ * Not retroactive: a weekend session before this really was billed at the
+ * surge rate, so historical sessions must keep reporting what they cost.
+ *
+ * EVIDENCE, and it is weaker than DEEPSEEK_RATE_CARD_FROM's — say so rather than
+ * let the two dates borrow each other's confidence (PR #507 review). The scrape
+ * at research/495-deepseek-pricing/pricing-page-2026-08-25.md confirms the rule
+ * IS Monday-Friday as of 2026-08-25; it does not say when that started. The date
+ * here comes from a secondary report (#495's Sources), not from the vendor's own
+ * changelog. If the true cutover differs, weekend interactions between the two
+ * dates are mispriced in one direction or the other, and no test here can catch
+ * it — the tests verify the code agrees with this constant, not that the
+ * constant matches DeepSeek's billing. Re-scrape before trusting it for a
+ * historical audit that straddles this week.
+ *
+ * No Beijing-vs-UTC ambiguity, despite sources disagreeing on which calendar
+ * the "weekday" belongs to: the windows are 09:00–12:00 and 14:00–18:00
+ * Beijing, which sit entirely inside one Beijing daytime, so a peak window's
+ * UTC date and Beijing date are always the same date. Mon–Fri UTC ≡ Mon–Fri
+ * Beijing here, so resolving it in UTC is exact, not an approximation.
+ */
+export const DEEPSEEK_WEEKEND_OFFPEAK_FROM = Date.UTC(2026, 7, 23, 0, 0, 0);
+
+/**
+ * The instant the DeepSeek rate card changed (2026-08-16T16:00:00Z).
+ *
+ * Interactions strictly before this price at the old card, which `deepseek-v4-pro`
+ * and `deepseek-v4-flash` carry as a `dateTiers` window. `deepseek-v4-flash-vision-exp`
+ * deliberately carries none — see its registry entry for the reason and for how
+ * well evidenced it is.
+ *
+ * v4-pro got much cheaper and v4-flash dearer, so the two errors partly cancel in a
+ * TOTAL — which is exactly why nine days of wrong prices looked fine on screen (#495).
+ */
+export const DEEPSEEK_RATE_CARD_FROM = Date.UTC(2026, 7, 16, 16, 0, 0);
+
+/**
+ * The DeepSeek surge multiplier at `timestamp` — 2.0 inside a peak window on a
+ * weekday, 1.0 otherwise.
+ *
+ * Resolution reads the PASSED instant and never the host clock (#96, #495).
+ * The distinction that matters is omitted-vs-zero: `wtft-parser` stamps an
+ * unparsed turn with `timestamp: 0`, and `0 || Date.now()` used to hand that
+ * turn the current wall clock — so the same historical turn priced differently
+ * on every run, and a re-run near a window edge flipped it. A zero timestamp
+ * means "when this happened is unknown", and an unknown instant surges at 1.0,
+ * matching how `resolveTieredRates` treats the same 0 (current card, no dated
+ * window). Only an OMITTED argument reads the clock, for live callers.
+ */
+export function getDeepSeekPeakMultiplier(timestamp?: number): number {
+	if (timestamp === 0) return 1.0;
+	const ts = timestamp === undefined ? Date.now() : timestamp;
+	const d = new Date(ts);
+	const utcTime = d.getUTCHours() * 60 + d.getUTCMinutes(); // minutes since UTC midnight
+
+	// Since 2026-08-23 the peak schedule is Monday–Friday; Saturday and Sunday
+	// are off-peak all day, whatever the hour.
+	if (ts >= DEEPSEEK_WEEKEND_OFFPEAK_FROM) {
+		const utcDay = d.getUTCDay(); // 0 = Sunday, 6 = Saturday
+		if (utcDay === 0 || utcDay === 6) return 1.0;
+	}
+
+	for (const [start, end] of DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES) {
+		if (utcTime >= start && utcTime < end) return 2.0;
 	}
 	return 1.0;
 }
@@ -141,9 +224,54 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 	"claude-sonnet-4-6": { input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
 	"claude-sonnet-4-5": { input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
 	"claude-haiku-4-5":  { input: 1.00, output: 5.00, cacheRead: 0.10, cacheWrite: 1.25 },
-	// DeepSeek — no tiers, surge pricing handled by getDeepSeekPeakMultiplier
-	"deepseek-v4-flash": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 },
-	"deepseek-v4-pro":   { input: 1.74, output: 3.48, cacheRead: 0.0145, cacheWrite: 0 },
+	// DeepSeek (#495) — no size tiers; surge is getDeepSeekPeakMultiplier's job.
+	//
+	// Base rates are OFF-PEAK, which is the card DeepSeek publishes as "half of
+	// the peak rates". `input` is the CACHE-MISS rate and `cacheRead` the
+	// CACHE-HIT rate, because DeepSeek's Anthropic-format endpoint reports
+	// cache_creation_input_tokens: 0 on every turn and bills a miss as plain
+	// input_tokens — measured across 854 turns. `cacheWrite: 0` is therefore
+	// correct and must stay.
+	//
+	// The dateTiers window carries the pre-2026-08-16T16:00Z card so historical
+	// sessions still report what they actually cost. Rates verified against
+	// research/495-deepseek-pricing/pricing-page-2026-08-25.md.
+	//
+	// Order matters below: -vision-exp must precede -flash, because the fuzzy
+	// lookup would otherwise match the shorter key inside the longer model id.
+	// lookupModelPricing sorts longest-first so this is belt and braces, but a
+	// reader reordering these should know the constraint exists.
+	"deepseek-v4-flash-vision-exp": {
+		input: 0.22, output: 0.66, cacheRead: 0.007, cacheWrite: 0,
+		// No dateTiers: the model was released after the 2026-08-16 rate change,
+		// so no interaction of it can predate the current card, and an old-card
+		// window here would be a fiction nothing could ever hit.
+		//
+		// How well evidenced (PR #507 review): the release date 2026-08-21 comes
+		// from #495's Sources, NOT from the committed scrape — that page lists
+		// this model with no date suffix, while flash carries -0731 and pro
+		// -0813. What IS measured: every vision-exp turn in this host's corpus is
+		// dated 2026-08-24, comfortably after the cutover. So the omission is
+		// right for all observed data. The exposure, if the model actually
+		// shipped before 2026-08-16T16:00Z, is that such a turn prices at the
+		// current card rather than the old one — and no test here would catch
+		// it, because the tests check the code against this constant, not the
+		// constant against DeepSeek.
+	},
+	"deepseek-v4-flash": {
+		input: 0.22, output: 0.66, cacheRead: 0.007, cacheWrite: 0,
+		dateTiers: [
+			{ effectiveBefore: DEEPSEEK_RATE_CARD_FROM /* 2026-08-16T16:00:00Z */,
+			  input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 },
+		],
+	},
+	"deepseek-v4-pro": {
+		input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0,
+		dateTiers: [
+			{ effectiveBefore: DEEPSEEK_RATE_CARD_FROM /* 2026-08-16T16:00:00Z */,
+			  input: 1.74, output: 3.48, cacheRead: 0.0145, cacheWrite: 0 },
+		],
+	},
 	// GPT-5.x — tiered pricing (short-context ≤272K, long-context >272K total input)
 	// Source: pi-ai openai.models.js (v0.80.6)
 	"gpt-5.4": {
@@ -267,17 +395,31 @@ export function isModelPriced(model: string): boolean {
 }
 
 /**
- * Look up pricing for a model by fuzzy-matching its ID against the known
- * registry. Returns null if no match found (caller falls back to defaults).
+ * Look up pricing for a model by matching its ID against the known registry.
+ *
+ * Two rules, in order: an EXACT (lower-cased, trimmed) key wins outright;
+ * otherwise the LONGEST registry key that is a substring of the ID wins.
+ * Longest-first is load-bearing, not a tidiness preference — `deepseek-v4-flash`
+ * is a substring of `deepseek-v4-flash-vision-exp`, so insertion order would
+ * otherwise decide which card the longer model is priced with (#495).
+ *
+ * Returns null if nothing matches; the caller falls back to defaults.
  */
 export function lookupModelPricing(model: string): ModelPricing | null {
 	if (!model) return null;
 	const m = model.toLowerCase().trim();
 	// Exact match first
 	if (MODEL_PRICING[m]) return MODEL_PRICING[m];
-	// Fuzzy: check if any registry key is a substring of the model ID
-	for (const [key, pricing] of Object.entries(MODEL_PRICING)) {
-		if (m.includes(key)) return pricing;
+	// Fuzzy: the model ID contains a registry key (a provider prefix, a date
+	// suffix). LONGEST KEY WINS (#495) — some keys are substrings of others
+	// ("deepseek-v4-flash" inside "deepseek-v4-flash-vision-exp"), and matching
+	// in registry-insertion order silently priced the longer model with the
+	// shorter one's card. That was harmless only while their rates happened to
+	// be equal; the day they diverge, insertion order is not a pricing decision
+	// anyone made.
+	const keysLongestFirst = Object.keys(MODEL_PRICING).sort((a, b) => b.length - a.length);
+	for (const key of keysLongestFirst) {
+		if (m.includes(key)) return MODEL_PRICING[key];
 	}
 	return null;
 }
@@ -310,17 +452,17 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 		cacheReadPrice = rates.cacheRead;
 		cacheWritePrice = rates.cacheWrite; // already the per-1M 5-min TTL rate
 	} else if (m.includes("deepseek")) {
-		// Legacy path — DeepSeek not in registry (shouldn't happen, kept for safety)
+		// A DeepSeek id no registry key matched — a model newer than this
+		// registry. Guess with the closest sibling's entry, read FROM the
+		// registry (#495): this branch used to hold a second hardcoded copy of
+		// the rate card, and it was still serving the pre-2026-08-16 numbers
+		// long after the registry moved on, because nothing linked the two.
+		const sibling = MODEL_PRICING[m.includes("v4-pro") ? "deepseek-v4-pro" : "deepseek-v4-flash"];
+		const rates = resolveTieredRates(sibling, usage, timestamp);
 		const peak = getDeepSeekPeakMultiplier(timestamp);
-		if (m.includes("v4-pro")) {
-			inputPrice = 1.74 * peak;
-			outputPrice = 3.48 * peak;
-			cacheReadPrice = 0.0145 * peak;
-		} else {
-			inputPrice = 0.14 * peak;
-			outputPrice = 0.28 * peak;
-			cacheReadPrice = 0.0028 * peak;
-		}
+		inputPrice = rates.input * peak;
+		outputPrice = rates.output * peak;
+		cacheReadPrice = rates.cacheRead * peak;
 		cacheWritePrice = 0;
 	} else if (m.includes("haiku")) {
 		inputPrice = 1.00;

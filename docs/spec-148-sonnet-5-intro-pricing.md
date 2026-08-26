@@ -175,7 +175,8 @@ $6.00/MTok standard — with no new code at that line.
 #96: a DeepSeek surge test asserted a non-peak price by comparing against whatever
 `getDeepSeekPeakMultiplier(undefined)` resolved to at whatever moment the suite happened to run,
 which flips value near UTC peak-window boundaries. The fix pattern already in this repo
-(`wtft-pricing-tiers.test.ts`, "DeepSeek v4-pro at off-peak/peak UTC") is to construct a fixed
+(`wtft-pricing-tiers.test.ts`, the two DeepSeek v4-pro surge tests — renamed in #495 when the
+rate card moved, which is why this cites them by subject rather than by title) is to construct a fixed
 `Date(...).getTime()` and pass it explicitly as the timestamp argument — never rely on the
 function's internal fallback. (Line numbers on that pre-existing block moved when this branch's
 own `dateTiers` describe-block was inserted above it — naming the test by title instead of a

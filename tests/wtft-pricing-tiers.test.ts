@@ -157,10 +157,14 @@ describe("lookupModelPricing", () => {
 	});
 
 	it("fuzzy-matches model IDs containing a registry key", () => {
-		// DeepSeek v4-pro with provider prefix
+		// DeepSeek v4-pro with provider prefix.
+		// Base rates are the CURRENT (post-2026-08-16) card; the 1.74/3.48 card
+		// this used to assert is now the dateTiers window, where #495 moved it
+		// so historical sessions keep pricing correctly.
 		const p = lookupModelPricing("deepseek/deepseek-v4-pro");
 		assert.ok(p);
-		assert.strictEqual(p!.input, 1.74);
+		assert.strictEqual(p!.input, 0.66);
+		assert.strictEqual(p!.dateTiers?.[0].input, 1.74);
 	});
 
 	it("returns null for unknown models", () => {
@@ -241,27 +245,36 @@ describe("calculateClaudeCost with tiers", () => {
 		assert.ok(Math.abs(cost - expected) < 0.0001);
 	});
 
-	it("DeepSeek v4-pro at off-peak UTC uses base pricing", () => {
-		// Pin to a known off-peak time: noon UTC is outside both peak windows
-		// (01:00–04:00 and 06:00–10:00).
+	it("DeepSeek v4-pro at an off-peak instant on the PRE-2026-08-16 card", () => {
+		// Two things make this off-peak, and only one of them is the hour:
+		// noon UTC is outside both peak windows, AND 2025-01-01 is a Wednesday
+		// (irrelevant here — it also predates the weekend rule entirely).
+		// It also predates DEEPSEEK_RATE_CARD_FROM, so the rates asserted below
+		// are the dateTiers window, NOT the registry's current card. Renamed in
+		// #495: this said "uses base pricing", which was true until the card moved.
 		const OFF_PEAK = new Date("2025-01-01T12:00:00Z").getTime();
 		const cost = calculateClaudeCost("deepseek-v4-pro", {
 			input_tokens: 100000,
 			output_tokens: 5000,
 		}, OFF_PEAK);
+		// The SUPERSEDED card (dateTiers), not the current one: the current card
+		// would give 100K*$0.66 + 5K*$1.98 = $0.0759.
 		// 100K * $1.74/1M + 5K * $3.48/1M = $0.174 + $0.0174 = $0.1914
 		const expected = (100000 * 1.74 / 1000000) + (5000 * 3.48 / 1000000);
 		assert.ok(Math.abs(cost - expected) < 0.0001);
 	});
 
-	it("DeepSeek v4-pro at peak UTC applies 2x surge", () => {
-		// Pin to a known peak time: 02:00 UTC is inside the 01:00–04:00 window.
+	it("DeepSeek v4-pro surges 2x on a weekday peak instant, on the same old card", () => {
+		// 02:00 UTC is inside a peak window AND 2025-01-01 is a Wednesday. Since
+		// #495 both matter: the same hour on a Sat/Sun after 2026-08-23 is 1.0.
+		// This instant predates that rule, so the weekday is not what saves it —
+		// stated so the next reader does not conclude the hour alone is enough.
 		const PEAK = new Date("2025-01-01T02:00:00Z").getTime();
 		const cost = calculateClaudeCost("deepseek-v4-pro", {
 			input_tokens: 100000,
 			output_tokens: 5000,
 		}, PEAK);
-		// Same tokens, 2x surge: $0.1914 * 2 = $0.3828
+		// Same tokens and the same superseded card, 2x surge: $0.1914 * 2 = $0.3828
 		const expected = (100000 * 1.74 / 1000000 + 5000 * 3.48 / 1000000) * 2;
 		assert.ok(Math.abs(cost - expected) < 0.0001);
 	});

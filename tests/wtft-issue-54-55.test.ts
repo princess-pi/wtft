@@ -361,7 +361,10 @@ const round4 = (n: number) => Math.round(n * 10000) / 10000;
 	const offPeakTs = new Date("2026-07-05T12:00:00Z").getTime();
 	const cost = calculateClaudeCost("deepseek-v4-flash", usage, offPeakTs);
 
-	// deepseek-v4-flash off-peak: $0.14/M input, $0.28/M output, 0 cache
+	// deepseek-v4-flash on the SUPERSEDED card: $0.14/M input, $0.28/M output,
+	// 0 cache. 2026-07-05 predates DEEPSEEK_RATE_CARD_FROM (2026-08-16T16:00Z),
+	// so these are the dateTiers rates, not the registry's current $0.22/$0.66.
+	// That is the point of the fixed timestamp — it pins a historical price.
 	// input: 1.0 * 0.14 = 0.14
 	// output: 0.5 * 0.28 = 0.14
 	// total: 0.28

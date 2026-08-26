@@ -1,0 +1,312 @@
+{
+  "schema": "wtft-pricing/table@1",
+  "generatedFrom": "extensions/lib/wtft-cost.ts MODEL_PRICING",
+  "units": "USD per 1M tokens",
+  "deepseekSurge": {
+    "multiplier": 2,
+    "windowsUtc": [
+      "01:00–04:00",
+      "06:00–10:00"
+    ],
+    "weekendOffPeakFrom": "2026-08-23T00:00:00Z",
+    "note": "DeepSeek rows are the off-peak card; peak is 2x on the windows and weekdays given here. For DeepSeek only, the Input column is the cache-MISS rate and Cache Read the cache-HIT rate — the Anthropic-format endpoint reports no cache-creation tokens and bills a miss as plain input, so its cache writes genuinely cost nothing. For every model here, reasoning tokens bill at the output rate. Cache Write is the 5-minute-TTL rate; where it is above zero, a 1-hour-TTL write bills at 2x that row's input rate, and where it is zero both TTLs are free. Where a model shows a dated row, that row applies instead of the standard one until its date passes — the standard row is not necessarily the price in force today."
+  },
+  "models": [
+    {
+      "model": "claude-fable-5",
+      "rates": [
+        {
+          "condition": "",
+          "input": 10,
+          "output": 50,
+          "cacheRead": 1,
+          "cacheWrite": 12.5
+        }
+      ]
+    },
+    {
+      "model": "claude-haiku-4-5",
+      "rates": [
+        {
+          "condition": "",
+          "input": 1,
+          "output": 5,
+          "cacheRead": 0.1,
+          "cacheWrite": 1.25
+        }
+      ]
+    },
+    {
+      "model": "claude-mythos-5",
+      "rates": [
+        {
+          "condition": "",
+          "input": 10,
+          "output": 50,
+          "cacheRead": 1,
+          "cacheWrite": 12.5
+        }
+      ]
+    },
+    {
+      "model": "claude-opus-4-1",
+      "rates": [
+        {
+          "condition": "",
+          "input": 5,
+          "output": 25,
+          "cacheRead": 0.5,
+          "cacheWrite": 6.25
+        }
+      ]
+    },
+    {
+      "model": "claude-opus-4-5",
+      "rates": [
+        {
+          "condition": "",
+          "input": 5,
+          "output": 25,
+          "cacheRead": 0.5,
+          "cacheWrite": 6.25
+        }
+      ]
+    },
+    {
+      "model": "claude-opus-4-6",
+      "rates": [
+        {
+          "condition": "",
+          "input": 5,
+          "output": 25,
+          "cacheRead": 0.5,
+          "cacheWrite": 6.25
+        }
+      ]
+    },
+    {
+      "model": "claude-opus-4-7",
+      "rates": [
+        {
+          "condition": "",
+          "input": 5,
+          "output": 25,
+          "cacheRead": 0.5,
+          "cacheWrite": 6.25
+        }
+      ]
+    },
+    {
+      "model": "claude-opus-4-8",
+      "rates": [
+        {
+          "condition": "",
+          "input": 5,
+          "output": 25,
+          "cacheRead": 0.5,
+          "cacheWrite": 6.25
+        }
+      ]
+    },
+    {
+      "model": "claude-opus-5",
+      "rates": [
+        {
+          "condition": "",
+          "input": 5,
+          "output": 25,
+          "cacheRead": 0.5,
+          "cacheWrite": 6.25
+        }
+      ]
+    },
+    {
+      "model": "claude-sonnet-4-5",
+      "rates": [
+        {
+          "condition": "",
+          "input": 3,
+          "output": 15,
+          "cacheRead": 0.3,
+          "cacheWrite": 3.75
+        }
+      ]
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "rates": [
+        {
+          "condition": "",
+          "input": 3,
+          "output": 15,
+          "cacheRead": 0.3,
+          "cacheWrite": 3.75
+        }
+      ]
+    },
+    {
+      "model": "claude-sonnet-5",
+      "rates": [
+        {
+          "condition": "",
+          "input": 3,
+          "output": 15,
+          "cacheRead": 0.3,
+          "cacheWrite": 3.75
+        },
+        {
+          "condition": "before 2026-09-01T00:00:00Z",
+          "input": 2,
+          "output": 10,
+          "cacheRead": 0.2,
+          "cacheWrite": 2.5
+        }
+      ]
+    },
+    {
+      "model": "deepseek-v4-flash",
+      "rates": [
+        {
+          "condition": "",
+          "input": 0.22,
+          "output": 0.66,
+          "cacheRead": 0.007,
+          "cacheWrite": 0
+        },
+        {
+          "condition": "before 2026-08-16T16:00:00Z",
+          "input": 0.14,
+          "output": 0.28,
+          "cacheRead": 0.0028,
+          "cacheWrite": 0
+        }
+      ]
+    },
+    {
+      "model": "deepseek-v4-flash-vision-exp",
+      "rates": [
+        {
+          "condition": "",
+          "input": 0.22,
+          "output": 0.66,
+          "cacheRead": 0.007,
+          "cacheWrite": 0
+        }
+      ]
+    },
+    {
+      "model": "deepseek-v4-pro",
+      "rates": [
+        {
+          "condition": "",
+          "input": 0.66,
+          "output": 1.98,
+          "cacheRead": 0.022,
+          "cacheWrite": 0
+        },
+        {
+          "condition": "before 2026-08-16T16:00:00Z",
+          "input": 1.74,
+          "output": 3.48,
+          "cacheRead": 0.0145,
+          "cacheWrite": 0
+        }
+      ]
+    },
+    {
+      "model": "gpt-5.4",
+      "rates": [
+        {
+          "condition": "",
+          "input": 2.5,
+          "output": 15,
+          "cacheRead": 0.25,
+          "cacheWrite": 0
+        },
+        {
+          "condition": "combined input over 272,000 tokens",
+          "input": 5,
+          "output": 22.5,
+          "cacheRead": 0.5,
+          "cacheWrite": 0
+        }
+      ]
+    },
+    {
+      "model": "gpt-5.5",
+      "rates": [
+        {
+          "condition": "",
+          "input": 5,
+          "output": 30,
+          "cacheRead": 0.5,
+          "cacheWrite": 0
+        },
+        {
+          "condition": "combined input over 272,000 tokens",
+          "input": 10,
+          "output": 45,
+          "cacheRead": 1,
+          "cacheWrite": 0
+        }
+      ]
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "rates": [
+        {
+          "condition": "",
+          "input": 1.25,
+          "output": 7.5,
+          "cacheRead": 0.125,
+          "cacheWrite": 1.56
+        },
+        {
+          "condition": "combined input over 272,000 tokens",
+          "input": 2.5,
+          "output": 11.25,
+          "cacheRead": 0.25,
+          "cacheWrite": 3.13
+        }
+      ]
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "rates": [
+        {
+          "condition": "",
+          "input": 5,
+          "output": 30,
+          "cacheRead": 0.5,
+          "cacheWrite": 6.25
+        },
+        {
+          "condition": "combined input over 272,000 tokens",
+          "input": 10,
+          "output": 45,
+          "cacheRead": 1,
+          "cacheWrite": 12.5
+        }
+      ]
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "rates": [
+        {
+          "condition": "",
+          "input": 2.5,
+          "output": 15,
+          "cacheRead": 0.25,
+          "cacheWrite": 3.13
+        },
+        {
+          "condition": "combined input over 272,000 tokens",
+          "input": 5,
+          "output": 22.5,
+          "cacheRead": 0.5,
+          "cacheWrite": 6.25
+        }
+      ]
+    }
+  ]
+}

@@ -171,7 +171,7 @@
     </table>
 
     <h3 id="surge-timeline">SURGE Timeline (24-hour pricing bar)</h3>
-    <p>The title line renders a 24-hour timeline showing DeepSeek peak-valley surge pricing windows. Orange segments mark surge-priced hours (UTC 01:00–04:00 and 06:00–10:00 mapped to local time), green segments mark normal-priced hours. The timeline uses <code>─</code> box-drawing horizontal rule characters (U+2500) for a continuous unbroken line.</p>
+    <p>The title line renders a 24-hour timeline showing DeepSeek peak-valley surge pricing windows. Orange segments mark surge-priced hours, green segments mark normal-priced hours. The schedule is <code>DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES</code> in <code>extensions/lib/wtft-cost.ts</code>, weekday-gated by <code>DEEPSEEK_WEEKEND_OFFPEAK_FROM</code> (#495); the hours themselves are not re-typed here — the Model Pricing section below renders them from the generated manifest. The bar is coloured by asking <code>getDeepSeekPeakMultiplier</code> what each hour costs, so no hour is coloured differently from the way that hour is billed. It paints the schedule for <strong>the day containing <em>now</em></strong>, while the bins beneath it may be older — on a weekend the bar shows no surge hours even where weekday bins are still flagged. Which day the bar should describe is #496. The timeline uses <code>─</code> box-drawing horizontal rule characters (U+2500) for a continuous unbroken line.</p>
     <p><strong>Markers:</strong> The current hour displays a clock-face emoji (<code>🕐</code>–<code>🕛</code>, hour % 12). Noon (hour 12) always shows <code>☀️</code> — the clock face never overwrites it. The timeline is bookended by the current moon phase emoji (<code>🌑</code>–<code>🌘</code>, computed from synodic-month formula anchored to 2026-07-14 new moon with half-phase centering).</p>
     <p><strong>Badges:</strong> When in or near a surge window, a badge is appended: <code>⚡ SURGE 2x</code> (active), <code>⚡ SURGE APPROACHING</code> (within 20 min of start, blinking orange), or <code>⚡ SURGE ENDING</code> (within 20 min of end, blinking green).</p>
     <p><strong>Cache Miss divider:</strong> When a turn re-primes the whole prefix instead of reading it (<code>cache_read_input_tokens</code> 0 with <code>cache_creation_input_tokens</code> above 0), a <code>── Cache Miss ──</code> divider line with tick-position <code>┼</code> markers is drawn on that bin — always shown, even with <code>--no-ticks</code>, and in turn-based intervals as well as time-based ones.</p>
@@ -230,22 +230,16 @@
     <h3 id="pricing">Model Pricing</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
         <p>WTFT estimates costs using public per-model pricing. These are directional estimates, not accounting ledgers — provider billing nuances (caching discounts, free-tier credits, surge pricing) may cause minor discrepancies.</p>
-        <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
-            <tr style="border-bottom: 1px solid #404040;">
-                <th style="text-align: left; padding: 6px;">Model</th>
-                <th style="text-align: right; padding: 6px;">Input /M</th>
-                <th style="text-align: right; padding: 6px;">Output /M</th>
-                <th style="text-align: right; padding: 6px;">Cache Read /M</th>
-            </tr>
-            <tr><td>Claude Opus 4</td><td style="text-align: right;">$5.00</td><td style="text-align: right;">$25.00</td><td style="text-align: right;">$0.50</td></tr>
-            <tr><td>Claude Sonnet 4</td><td style="text-align: right;">$3.00</td><td style="text-align: right;">$15.00</td><td style="text-align: right;">$0.30</td></tr>
-            <tr><td>Claude Haiku 4.5</td><td style="text-align: right;">$1.00</td><td style="text-align: right;">$5.00</td><td style="text-align: right;">$0.10</td></tr>
-            <tr style="border-top: 1px solid #404040;"><td>DeepSeek V4 Pro</td><td style="text-align: right;">$1.74</td><td style="text-align: right;">$3.48</td><td style="text-align: right;">$0.0145</td></tr>
-            <tr><td>DeepSeek V4 Flash</td><td style="text-align: right;">$0.14</td><td style="text-align: right;">$0.28</td><td style="text-align: right;">$0.0028</td></tr>
+        <!-- Rendered live from manifests/wtft-pricing.json, generated at build time from
+             MODEL_PRICING (#169). The hand-written table this replaces was stale by an
+             entire model family — no Claude 5, no GPT-5.x, no dated or size tiers, and
+             DeepSeek rates from before the 2026-08-16 card — and nothing failed while it
+             was wrong. Edit extensions/lib/wtft-cost.ts and run `bun run build`; there is
+             no rate to edit on this page. -->
+        <table id="wtft-pricing-table" style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+            <tr><td style="color: #666;"><em>Loading pricing registry...</em></td></tr>
         </table>
-        <p style="margin-top: 10px; font-size: 0.9em; color: #888;">
-            DeepSeek: reasoning tokens are priced at the output rate. Peak-valley surge pricing (2×) applies during UTC 01:00–04:00 and 06:00–10:00. Cache-write tokens are not separately billed by DeepSeek. V4 Pro pricing reflects standard (non-promotional) rates as of July 2026.
-        </p>
+        <p id="wtft-pricing-note" style="margin-top: 10px; font-size: 0.9em; color: #888;"></p>
     </div>
 
     <h3 id="config">Settings Persistence (Cross-Harness Config)</h3>
@@ -394,6 +388,76 @@
                     if (container) container.innerHTML = `<p style="color:var(--anchor-red)">Failed to load command manifest: ${err}</p>`;
                 });
             });
+
+        // Model Pricing (#169) — generated at build time from MODEL_PRICING, so a
+        // rate change reaches this page by rebuilding rather than by remembering.
+        fetch('manifests/wtft-pricing.json')
+            .then(r => r.json())
+            .then(renderPricingTable)
+            .catch(err => {
+                const table = document.getElementById('wtft-pricing-table');
+                if (table) table.innerHTML = `<tr><td style="color:var(--anchor-red)">Failed to load pricing manifest: ${err}</td></tr>`;
+            });
+
+        function renderPricingTable(data) {
+            const table = document.getElementById('wtft-pricing-table');
+            if (!table) return;
+            // Never round away a significant digit. A fixed "< 0.01 ? 4dp : 2dp"
+            // cutoff rendered four-decimal cache-read rates at two decimals. Worst
+            // case measured across the committed manifest: 31% understated on
+            // deepseek-v4-pro's SUPERSEDED (dateTiers) rate, 9% on its current one —
+            // both are rows this table shows. In the very table #169/#495 built to
+            // stop hand-typed rates drifting. 4dp, trailing zeros
+            // trimmed to a 2dp floor. (No rate quoted here: tests/wtft-pricing-
+            // manifest.test.ts bans literal rates from this page, and is right to.)
+            const money = n => n === 0 ? '$0'
+                : '$' + n.toFixed(4).replace(/(\.\d\d)(\d*?)0+$/, '$1$2');
+            const head =
+                `<tr style="border-bottom: 1px solid #404040;">` +
+                `<th style="text-align: left; padding: 6px;">Model</th>` +
+                `<th style="text-align: left; padding: 6px;">When</th>` +
+                `<th style="text-align: right; padding: 6px;">Input /M</th>` +
+                `<th style="text-align: right; padding: 6px;">Output /M</th>` +
+                `<th style="text-align: right; padding: 6px;">Cache Read /M</th>` +
+                `<th style="text-align: right; padding: 6px;">Cache Write /M</th></tr>`;
+            const rows = (data.models || []).map(m => m.rates.map((r, i) => {
+                // A conditioned row (a dated window or a size tier) is indented under
+                // its model rather than given a model name of its own — the condition
+                // IS the distinction, and repeating the name reads like a second model.
+                const border = i === 0 ? ' style="border-top: 1px solid #404040;"' : '';
+                const name = i === 0 ? `<code>${m.model}</code>` : '';
+                // Not "base" (CONTEXT.md's _Avoid_ for the rows this governs), and
+                // NOT "current" either — that was wrong the day it was written:
+                // claude-sonnet-5's intro window runs to 2026-09-01, so its
+                // unconditioned row is not the rate in force. This table is
+                // generated without a clock on purpose, so it cannot say which row
+                // applies today; "standard" states what the row IS, and the note
+                // below says a dated row outranks it while its date stands.
+                const when = r.condition
+                    ? `<span style="color:#888;">${r.condition}</span>`
+                    : '<span style="color:#666;">standard</span>';
+                return `<tr${border}><td>${name}</td><td>${when}</td>` +
+                    `<td style="text-align: right;">${money(r.input)}</td>` +
+                    `<td style="text-align: right;">${money(r.output)}</td>` +
+                    `<td style="text-align: right;">${money(r.cacheRead)}</td>` +
+                    `<td style="text-align: right;">${money(r.cacheWrite)}</td></tr>`;
+            }).join('')).join('');
+            table.innerHTML = head + rows;
+
+            const note = document.getElementById('wtft-pricing-note');
+            const s = data.deepseekSurge;
+            if (note && s) {
+                const windows = s.windowsUtc.length === 1
+                    ? s.windowsUtc[0]
+                    : s.windowsUtc.slice(0, -1).join(', ') + ' and ' + s.windowsUtc.slice(-1);
+                // .textContent, so the note carries no markup — it is written
+                // without backticks in extensions/lib/wtft-pricing-manifest.ts.
+                note.textContent =
+                    `Rates are ${data.units}. ` +
+                    `DeepSeek surge windows: ${windows} UTC, ` +
+                    `weekends off-peak since ${s.weekendOffPeakFrom}. ${s.note}`;
+            }
+        }
 
         function renderFlagReference(data) {
             const container = document.getElementById('wtft-flag-reference');

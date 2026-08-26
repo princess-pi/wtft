@@ -220,7 +220,10 @@ assert(
 	piOffPeak?.surgePriced === false
 );
 
-// Same entry but at peak time (02:00 UTC → inside 01:00-04:00 window)
+// Same entry at a PEAK instant. Two things make it peak and only one is the
+// hour: 02:00 UTC is inside a window (see DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES —
+// not re-typed here), and 2025-01-01 is a Wednesday. Since #495 the weekday
+// matters: the same hour on a Sat/Sun after 2026-08-23 bills at 1x.
 const piAssistantPeak = {
 	type: "message",
 	message: {

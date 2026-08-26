@@ -207,9 +207,19 @@ The Pi `/wtft` widget also spawns a log parser daemon on `session_start`, using 
 ## SURGE Timeline (24-hour pricing bar)
 
 The 24-hour timeline on the title line shows DeepSeek peak-valley surge pricing windows:
-- **Orange segments**: Local hours that fall within surge windows (UTC 01:00–04:00, 06:00–10:00)
+- **Orange segments**: Local hours that fall within surge windows. The schedule is
+  `DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES` in `extensions/lib/wtft-cost.ts`, weekday-gated
+  from `DEEPSEEK_WEEKEND_OFFPEAK_FROM` (#495). **The hours are deliberately not written
+  here** — read them from those constants: they were hardcoded in four places plus four
+  prose copies, and a schedule change had no way to fail when it missed one. The renderer
+  asks `getDeepSeekPeakMultiplier` per hour, so the bar's colours cannot disagree with what
+  that hour is billed at. It paints the schedule for **the day containing `now`**, while the
+  bins below it may be older; on a weekend the bar shows no surge hours even where weekday
+  bins are still flagged. Which day the bar should describe is #496.
 - **Green segments**: All other hours (normal pricing)
-- **◆ diamond marker**: Current local hour
+- **Clock-face marker**: The current local hour renders as a clock-face emoji
+  (`☀️` at noon), and is additionally bold — which starts its own colour segment.
+  There is no `◆` and has not been for some time; this line said there was (#503).
 - **Surge badges**: Appended when in or near a surge window:
   - `⚡ SURGE 2x` — currently in a surge window (2× pricing active)
   - `⚡ SURGE APPROACHING` — within 20 minutes of surge start (blinking orange)

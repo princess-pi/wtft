@@ -18,7 +18,11 @@ import {
 	normalizeCommand,
 	deduplicateInteractions
 } from "./wtft-shared.js";
-import { isModelPriced } from "./wtft-cost.js";
+import {
+	isModelPriced,
+	getDeepSeekPeakMultiplier,
+	DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES,
+} from "./wtft-cost.js";
 import { execSync } from "node:child_process";
 import wcwidth from "wcwidth";
 export interface Bin {
@@ -559,9 +563,11 @@ export function padString(str: string, len: number): string {
 }
 
 export function formatCost(cost: number): string {
-	// Adaptive precision: 4 decimal places for sub-cent values (< $0.01),
-	// 2 decimal places otherwise. Handles DeepSeek's sub-cent pricing
-	// ($0.14/M input) without cluttering Claude/Gemini displays.
+	// Adaptive precision: 4 decimal places for sub-cent values, 2 otherwise,
+	// so DeepSeek's sub-cent per-turn costs stay readable without cluttering
+	// Claude/Gemini displays. No rate is quoted here on purpose — the one that
+	// used to be ($0.14/M) was the pre-2026-08-16 card and outlived it (#495).
+	// NOTE the guard is `> 0`: a negative cost gets 2 decimals, not 4.
 	const decimals = cost > 0 && cost < 0.01 ? 4 : 2;
 	return `$${cost.toFixed(decimals)}`;
 }
@@ -644,13 +650,20 @@ export function getTimezoneOffsetMs(timestamp: number, tz: string): number {
 }
 
 /**
- * Returns which local hours (0-23) fall in a surge window,
- * given the configured timezone. Surge windows defined in UTC:
- * 01:00-04:00 and 06:00-10:00 UTC.
+ * Returns which local hours (0-23) fall in a surge window, in the configured
+ * timezone, for the day containing `now` (default: the host clock).
+ *
+ * The schedule is NOT re-typed here (#495). This asks
+ * `getDeepSeekPeakMultiplier` what each hour actually costs, so the display
+ * cannot disagree with the bill — the windows were hardcoded in four places
+ * and a schedule change had no way to fail when it missed one.
+ *
+ * `now` is a parameter rather than a `Date.now()` call so a test can pin it
+ * (#96: a dated DeepSeek surge test that read the host clock went flaky near
+ * a window edge). Which day it describes is #496's question, not this one's.
  */
-export function getSurgeLocalHours(tz?: string): Set<number> {
+export function getSurgeLocalHours(tz?: string, now: number = Date.now()): Set<number> {
 	const result = new Set<number>();
-	const now = Date.now();
 
 	for (let localHour = 0; localHour < 24; localHour++) {
 		let ts: number;
@@ -659,12 +672,11 @@ export function getSurgeLocalHours(tz?: string): Set<number> {
 			const offsetMs = getTimezoneOffsetMs(now, tz);
 			ts = Date.UTC(parts.year, parts.month - 1, parts.day, localHour, 0, 0, 0) - offsetMs;
 		} else {
-			const d = new Date();
+			const d = new Date(now);
 			d.setHours(localHour, 0, 0, 0);
 			ts = d.getTime();
 		}
-		const utcHour = new Date(ts).getUTCHours();
-		if ((utcHour >= 1 && utcHour < 4) || (utcHour >= 6 && utcHour < 10)) {
+		if (getDeepSeekPeakMultiplier(ts) > 1.0) {
 			result.add(localHour);
 		}
 	}
@@ -672,14 +684,27 @@ export function getSurgeLocalHours(tz?: string): Set<number> {
 }
 
 /**
- * Checks current surge proximity (in UTC). Returns status and multiplier.
+ * Checks surge proximity (in UTC) at `at` — default the host clock. Returns
+ * status and multiplier.
+ *
+ * The windows come from `DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES` rather than a
+ * fourth hardcoded copy (#495), and a day that is entirely off-peak reports
+ * no proximity at all: on a weekend there is no window to approach.
  */
-export function checkSurgeProximity(): { status: 'surge' | 'approaching' | 'ending' | undefined; multiplier: number } {
-	const now = new Date();
+export function checkSurgeProximity(at: number = Date.now()): { status: 'surge' | 'approaching' | 'ending' | undefined; multiplier: number } {
+	const now = new Date(at);
 	const currentUtcMinute = now.getUTCHours() * 60 + now.getUTCMinutes();
-	const surgeWindows: [number, number][] = [[60, 240], [360, 600]];
 
-	for (const [start, end] of surgeWindows) {
+	// Ask the pricing module whether this day surges at all. Since 2026-08-23
+	// weekends are off-peak end to end, so "approaching" a window that will
+	// never open would be a warning about a charge that is not coming.
+	const daySurges = DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES.some(([start]) => {
+		const probe = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0) + start * 60000;
+		return getDeepSeekPeakMultiplier(probe) > 1.0;
+	});
+	if (!daySurges) return { status: undefined, multiplier: 1.0 };
+
+	for (const [start, end] of DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES) {
 		if (currentUtcMinute >= start && currentUtcMinute < end) {
 			return { status: 'surge', multiplier: 2.0 };
 		}

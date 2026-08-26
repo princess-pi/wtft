@@ -383,7 +383,13 @@ console.log("\n6. Pending session + a daemon that dies during startup");
 		code = err.status ?? 1;
 	}
 	const clean = stripAnsi(out).trim();
-	assert("exits nonzero when the daemon it spawned died", code !== 0, `exit ${code}: ${clean}`);
+	// Exit 1 specifically, not merely nonzero (#513). #443 added exit 9 for a
+	// PROVISIONAL read — a successful render whose total may still grow — and a
+	// `code !== 0` assertion accepts that as though it were the daemon-death
+	// failure this case is about. It cannot happen on this path today, because
+	// the death branch returns before the provisional check, but an assertion
+	// that would pass for the wrong reason is one refactor away from doing so.
+	assert("exits 1 when the daemon it spawned died", code === 1, `exit ${code}: ${clean}`);
 	assert("names the daemon as the failure", /daemon/i.test(clean), clean);
 	assert("does not claim the daemon is running and waiting", !/running and waiting/i.test(clean), clean);
 	assert("left no lease behind", readPid(pidPath6) === 0 || !isAlive(readPid(pidPath6)));
@@ -472,7 +478,8 @@ console.log("\n8. Existing session, daemon dead before data → not 'no data yet
 		code = err.status ?? 1;
 	}
 	const clean = stripAnsi(out).trim();
-	assert("exits nonzero when the daemon died before writing data", code !== 0, `exit ${code}: ${clean}`);
+	// Exit 1 specifically — see the note on the sibling case above (#513).
+	assert("exits 1 when the daemon died before writing data", code === 1, `exit ${code}: ${clean}`);
 	assert("does not say 'no data yet. Try again'", !/no data yet/i.test(clean), clean);
 	try { fs.unlinkSync(pidPath8); } catch {}
 	try { fs.rmSync(fakeBin, { recursive: true, force: true }); } catch {}

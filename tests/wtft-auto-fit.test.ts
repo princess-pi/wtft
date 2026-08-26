@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { runWtftCli } from "./lib/wtft-cli";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as assert from "node:assert";
@@ -123,7 +123,11 @@ try {
 	// --cost is explicit: the mode is config-persistable, so a bare invocation
 	// renders whatever the developer last saved — and this test looks for "$0.00",
 	// which does not exist in token mode (#158).
-	const cliStdout = execSync(`node bin/wtft.mjs --cost -s ${tempLogFile} -w 240`, { encoding: "utf8" });
+	// runWtftCli, not execSync: exit 9 means the render SUCCEEDED and the total
+	// may still grow (#443). execSync throws on any nonzero code, so a correct
+	// provisional run failed this suite — intermittently, since it depends on the
+	// CLI winning the race against the daemon it just spawned (#513).
+	const cliStdout = runWtftCli(`node bin/wtft.mjs --cost -s ${tempLogFile} -w 240`);
 	
 	const cliLines = cliStdout.split("\n").filter(Boolean).map(stripAnsi);
 	const cliTicksLine = cliLines.find(l => l.includes("$0.00"));

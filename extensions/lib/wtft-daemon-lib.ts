@@ -201,27 +201,213 @@ export function dedupeClassifiedById(interactions: Interaction[]): Interaction[]
 	return out;
 }
 
-export function readClassifiedTagFile(tagPath: string): Interaction[] {
-	const interactions: Interaction[] = [];
+/** Why a tag read is provisional. Null when it is settled. */
+export type TagProvisionalReason = "stale-version" | "unswept";
+
+export interface TagProvisional {
+	/** True when the total this tag yields may still grow under the daemon. */
+	provisional: boolean;
+	/** The condition that made it provisional; null when settled. */
+	reason: TagProvisionalReason | null;
+}
+
+/**
+ * Is the total this tag yields still subject to repair by the daemon? (#443)
+ *
+ * A one-shot `wtft` spawns the daemon and reads the tag immediately afterwards,
+ * so the read races the daemon it just started and loses. On the issue's
+ * specimen that was $79.74 against a true $84.59 — a 5.7% undercount reported as
+ * a plain total, with nothing to distinguish it from a settled one. This is the
+ * signal that was missing; the caller decides what to do with it.
+ *
+ * TWO CONDITIONS, either sufficient, checked in this order because the first
+ * outranks the second — a superseded-semantics tag is provisional whatever its
+ * sweep state:
+ *
+ *   `stale-version` — the tag is not at WTFT_TAGGER_VERSION. getTagPath's rule 3
+ *     falls back to "any-version tag in the own dir, newest mtime" (#95), so a
+ *     read can land on a tag written under superseded pricing or parse semantics
+ *     while the daemon builds a current-version one beside it.
+ *
+ *   `unswept` — a current-version tag holding classified data but no
+ *     `_meta.swept`. The daemon appends that marker once its first
+ *     scanForSubAgents() has completed, so its absence means NO daemon has read
+ *     a single subagent transcript since this tag was written.
+ *
+ * A tag with no classified data is NOT provisional: it yields no total, so there
+ * is nothing to doubt, and bin/wtft.ts already has waits for that case gated on
+ * `interactions.length === 0`. Reporting provisional there would fire on every
+ * fresh session and train the reader to ignore the flag.
+ *
+ * NO SCAN WINDOW, and that is a correction worth recording rather than a choice.
+ * This first scanned only the last 8KB, justified as "matching
+ * readLastMetaOffset". That justification does not survive contact:
+ * readLastMetaOffset windows because it does a PARTIAL read — open, seek, read
+ * 8KB, never load the file — whereas this function has already read the whole
+ * tag into `content` to answer the has-classified-data question above.
+ * Windowing content that is already in memory buys no I/O and costs a whole
+ * failure mode: a marker buried past 8KB by a busy session would read `unswept`
+ * forever. So the scan is the whole file.
+ *
+ * WHAT THAT COSTS, stated correctly — an earlier version of this comment claimed
+ * "on a settled tag the marker is near the end, so the backward walk stops within
+ * a few lines", and that is FALSE for the sessions this feature targets (PR
+ * review). The daemon writes the marker exactly once, guarded by
+ * `if (sweptAtMs === 0)`, right after its FIRST sweep — early in a session's
+ * life. Every classified line produced afterwards is appended AFTER it, pushing
+ * it further from the end, not closer; the `busy` case in
+ * `tests/wtft-443-daemon-swept-marker.test.ts` floods 160 turns and asserts
+ * exactly that. So the walk is proportional to how much data accumulated since
+ * the first sweep — up to the whole file. It stays cheap in absolute terms only
+ * because the `includes('"_meta"')` guard skips `JSON.parse` on the classified
+ * lines, which are almost all of them, and because the content is already in
+ * memory. Correctness never depended on the marker's position; only this cost
+ * note did, and it was wrong.
+ *
+ * AN UNREADABLE TAG READS AS NOT-PROVISIONAL, which is deliberate and is NOT an
+ * "err toward provisional" case — an earlier draft of this comment filed it under
+ * that heading and was self-contradictory as a result (PR review). The rule is
+ * narrower and has no exceptions: **a read is provisional only when a total was
+ * produced that could still change.** An ENOENT/EACCES tag produces no total at
+ * all, and `readClassifiedTagFile` will have yielded nothing from it either, so
+ * there is nothing for the flag to qualify. Read errors are therefore invisible
+ * here by design, not surfaced as doubt.
+ */
+export function readTagProvisional(tagPath: string): TagProvisional {
+	let content: string;
 	try {
-		const content = fs.readFileSync(tagPath, "utf8");
-		for (const line of content.split("\n")) {
-			if (!line.trim()) continue;
-			try {
-				const obj = JSON.parse(line);
-				if (obj._hb) continue; // skip heartbeat lines
-				const interaction = classifiedToInteraction(obj);
-				if (interaction) interactions.push(interaction);
-			} catch {
-				// Skip unparseable lines
-			}
-		}
+		content = fs.readFileSync(tagPath, "utf8");
 	} catch {
-		// File may not exist yet
+		// Missing or unreadable — no total was produced from it to doubt. The
+		// version check still has to run, so it happens in the content form below.
+		content = "";
+	}
+	return tagProvisionalFromContent(tagPath, content);
+}
+
+/**
+ * The provisional verdict for tag content ALREADY IN HAND (#443, PR review).
+ *
+ * This exists because `readTagProvisional(path)` and `readClassifiedTagFile(path)`
+ * each opened the file themselves, and a caller wanting both did two reads with a
+ * gap between them. The daemon is a separate OS process appending to that same
+ * file, so it can land the repaired lines AND the `_meta.swept` marker inside the
+ * gap — after which the interactions are the stale ones and the verdict says
+ * settled. That is #443's silent undercount again, through a narrower window,
+ * which is exactly the shape of bug this issue exists to close rather than
+ * relocate. `readTagFileWithVerdict` is the one-read entry point; this is the
+ * pure half it and `readTagProvisional` share, so the two can never disagree.
+ */
+export function tagProvisionalFromContent(tagPath: string, content: string): TagProvisional {
+	// Version first: it needs no content at all, and it outranks the sweep state.
+	if (!path.basename(tagPath).endsWith(`.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`)) {
+		return { provisional: true, reason: "stale-version" };
+	}
+	if (!content) return { provisional: false, reason: null };
+
+	const lines = content.split("\n");
+
+	// Does it yield a total at all? A classified line is one that parses and
+	// carries neither _hb nor _meta — the same rule readClassifiedTagFile uses.
+	let hasClassified = false;
+	for (const line of lines) {
+		if (!line.trim()) continue;
+		try {
+			const obj = JSON.parse(line);
+			if (obj._hb || obj._meta) continue;
+			hasClassified = true;
+			break;
+		} catch { continue; }
+	}
+	if (!hasClassified) return { provisional: false, reason: null };
+
+	// POSITIONAL, not merely present (PR review). Scan backward and stop at the
+	// first significant record: a `_meta.swept` settles the tag, a CLASSIFIED
+	// line invalidates any marker further back.
+	//
+	// Presence alone was wrong. The daemon's `flushPending()` runs BEFORE
+	// `scanForSubAgents()` in the same poll, so a new parent turn — including one
+	// that spawns a new subagent — lands after a marker left by an earlier sweep
+	// or an earlier daemon process. Accepting that historical marker reports
+	// SETTLED for data no sweep has covered: #443's own undercount through a
+	// narrower window. Requiring the marker to be LAST makes "swept" mean "swept
+	// as of everything in this file", which is the only claim a reader can check.
+	//
+	// Heartbeats and `_meta.offset` lines are not significant either way — they
+	// carry no cost — so the walk skips them and keeps looking.
+	for (let i = lines.length - 1; i >= 0; i--) {
+		const line = lines[i];
+		if (!line.trim()) continue;
+		// Cheap reject first: a line with neither marker is still possibly
+		// classified, so only `_hb`/`_meta` candidates and non-JSON reach parse.
+		try {
+			const obj = JSON.parse(line);
+			if (obj._hb) continue;
+			if (obj._meta) {
+				if (typeof obj._meta.swept === "number") {
+					return { provisional: false, reason: null };
+				}
+				continue; // an offset line, or a marker shape this writer never emits
+			}
+			// A classified line, newer than any marker behind it.
+			return { provisional: true, reason: "unswept" };
+		} catch { continue; }
+	}
+	return { provisional: true, reason: "unswept" };
+}
+
+/**
+ * Read a tag file ONCE and derive both the interactions and the provisional
+ * verdict from that single buffer (#443, PR review).
+ *
+ * Any caller that needs both MUST use this rather than calling
+ * `readClassifiedTagFile` and `readTagProvisional` in sequence — see
+ * `tagProvisionalFromContent` for the race that pairing reopens.
+ */
+export function readTagFileWithVerdict(tagPath: string): {
+	interactions: Interaction[];
+	provisional: TagProvisional;
+} {
+	let content = "";
+	try {
+		content = fs.readFileSync(tagPath, "utf8");
+	} catch { /* missing or unreadable — both halves handle "" */ }
+	return {
+		interactions: classifiedInteractionsFromContent(content),
+		provisional: tagProvisionalFromContent(tagPath, content),
+	};
+}
+
+/** Classified interactions from tag content already in hand. The pure half that
+ *  `readClassifiedTagFile` and `readTagFileWithVerdict` share, so a caller that
+ *  needs interactions AND the provisional verdict can get both from one read
+ *  (#443, PR review). */
+export function classifiedInteractionsFromContent(content: string): Interaction[] {
+	const interactions: Interaction[] = [];
+	for (const line of content.split("\n")) {
+		if (!line.trim()) continue;
+		try {
+			const obj = JSON.parse(line);
+			if (obj._hb) continue; // skip heartbeat lines
+			const interaction = classifiedToInteraction(obj);
+			if (interaction) interactions.push(interaction);
+		} catch {
+			// Skip unparseable lines
+		}
 	}
 	// One billed message can occupy several lines here — collapse before any
 	// caller sums it (#270 review).
 	return dedupeClassifiedById(interactions);
+}
+
+export function readClassifiedTagFile(tagPath: string): Interaction[] {
+	let content = "";
+	try {
+		content = fs.readFileSync(tagPath, "utf8");
+	} catch {
+		// File may not exist yet
+	}
+	return classifiedInteractionsFromContent(content);
 }
 
 // INOTIFY-BASED WATCH MODE (#53)

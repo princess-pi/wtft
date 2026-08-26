@@ -92,6 +92,34 @@ const pendingClaudeCommands: { interaction: NonNullable<ReturnType<typeof parseE
 // It was a `Set<sessionId>` used to SUPPRESS re-reading, which is #270's bug
 // surviving on the path #270 did not measure (PR review).
 const discoveredClaudeFiles = new Set<string>();
+// When this daemon completed its first full subagent sweep, or 0 before it has
+// (#443). Written into the tag as `_meta.swept` so a one-shot reader can tell a
+// settled total from one the daemon is still about to repair. Kept in memory
+// only to answer "have I already written it", and only set once the append
+// actually landed.
+// Has anything been appended to the tag since the last `_meta.swept`? (#443)
+//
+// Starts TRUE, and that matters: a daemon inheriting a tag written by an older
+// one has no idea whether that tag's marker still covers its contents, so it
+// must re-stamp after its own first sweep rather than trust what it found. Set
+// again by every successful append (flushPending, syncSubagentTranscript), and
+// cleared only when a marker actually lands.
+let tagGrewSinceMarker = true;
+// Did the sweep now running report any failure? Reset at the top of each
+// scanForSubAgents; set by syncSubagentTranscript's failure handlers. A sweep
+// that could not read what it was meant to read must not stamp the tag as
+// swept (#443, PR review).
+let pollHadFailure = false;
+// One ungated warning if that marker cannot be appended (#443, PR review). A
+// plain boolean, not one of the per-transcript Sets above: there is one tag file
+// per daemon, not one per transcript, so a Set keyed on anything would hold
+// exactly one entry.
+let warnedSweptMarkerFailure = false;
+// One ungated warning if the PARENT batch cannot be flushed to the tag. Same
+// policy and same reason as the four subagent warnings above — a persistent
+// failure here silently drops billed parent turns while the daemon looks
+// healthy.
+let warnedParentFlushFailure = false;
 /** How long a subagent transcript must have been quiet BEFORE we read it for
  *  that read to be provably complete. Must exceed the coarsest mtime
  *  granularity we expect to meet (1s on ext3/HFS+ and on some network mounts;
@@ -386,21 +414,191 @@ function upsertHeartbeat(now: number) {
   }
 }
 
+/**
+ * Append `batch` to the tag file, and on failure leave the file byte-identical
+ * to how it was found — then rethrow.
+ *
+ * ONE EXCEPTION, stated here because the sentence above otherwise over-promises
+ * and a reviewer read it as a guarantee (PR review): a file this write CREATED
+ * is never truncated, so a partial append into a brand-new tag leaves a
+ * fragment. See the NEVER UNLINK note below for why that guard is deliberate
+ * and must not be relaxed. The residual — the retry glues its first record to
+ * that fragment, making one unparseable line that readers skip, so a record is
+ * lost rather than duplicated — is #512; closing it means terminating the
+ * fragment, not truncating the file.
+ *
+ * EXTRACTED so there is exactly one of these (#443, PR review). It lived inline
+ * on the subagent write path; `flushPending` then needed the same guarantee, and
+ * a second hand-rolled copy is the shape this repo keeps getting bitten by (see
+ * `dedupeClassifiedById` vs session-selector's duplicate, pinned only by a test).
+ *
+ * WHY AN EXACT REWIND, rather than letting the reader sort it out. A partial
+ * `appendFileSync` can leave whole serialized records on disk before throwing.
+ * Retrying the batch then re-appends them, and `dedupeClassifiedById` only
+ * collapses lines that carry a `message.id` — its `if (!id)` branch passes
+ * no-id entries straight through (`extensions/lib/wtft-daemon-lib.ts`), and
+ * `serializeClassified` omits `id` whenever `Interaction.messageId` is absent.
+ * So a cost-bearing no-id record would double-count on retry. "Duplicates
+ * collapse on read" is true of id-bearing lines only, and leaning on it for the
+ * rest was wrong (PR review). Rewinding makes the retry exact instead.
+ *
+ * THREE states, not two. Conflating any pair of them corrupts something:
+ *   * file ABSENT   -> prior length is ZERO, and the file must not outlive a
+ *                      failed write. Leaving this "unknown" skipped the rewind
+ *                      on the one path the guard exists for (#437).
+ *   * length KNOWN  -> cut back to it.
+ *   * stat failed
+ *     for any other
+ *     reason        -> prior length is genuinely UNKNOWN, so do NOT rewind at
+ *                      all. The first cut of the #437 fix defaulted this to 0
+ *                      while still treating the file as pre-existing, which on a
+ *                      write failure truncated the WHOLE session tag file — every
+ *                      parent and subagent line already persisted, not just this
+ *                      batch — to zero bytes, reported only as one subagent's
+ *                      write warning (PR review).
+ *
+ * ONE stat, not existsSync-then-stat: the two-call form had a window in which
+ * the file could vanish between the calls, which is precisely how the UNKNOWN
+ * state got misread as zero.
+ */
+function appendToTagOrRewind(batch: string): void {
+  let sizeBeforeWrite: number | null = null;
+  let createdByThisWrite = false;
+  try {
+    sizeBeforeWrite = fs.statSync(tagPath).size;
+  } catch (statErr) {
+    if ((statErr as { code?: string }).code === 'ENOENT') {
+      sizeBeforeWrite = 0;
+      createdByThisWrite = true;
+    }
+    // Anything else leaves it null — the UNKNOWN state above.
+  }
+  try {
+    fs.appendFileSync(tagPath, batch);
+  } catch (writeErr) {
+    if (sizeBeforeWrite !== null) {
+      try {
+        // Throws when nothing was created, which is the common failure and
+        // needs no cleanup — that catch is this case, not an error.
+        const sizeAfter = fs.statSync(tagPath).size;
+        if (sizeAfter > sizeBeforeWrite) {
+          // PROVE the extra bytes are ours before destroying them (PR review).
+          // `sizeBeforeWrite` is stat'd before the append, so there is a window
+          // — narrow, but real during the singleton takeover race, where an
+          // outgoing daemon can still be mid-append to this same shared tag
+          // file. Truncating on arithmetic alone ("the file grew, so the growth
+          // is mine") would discard that writer's committed lines and report it
+          // as one write warning. Rewinding a failed write must never be able to
+          // destroy a successful one.
+          const extra = sizeAfter - sizeBeforeWrite;
+          const batchBuf = Buffer.from(batch);
+          let ours = false;
+          if (extra <= batchBuf.length) {
+            const seen = Buffer.alloc(extra);
+            const fd = fs.openSync(tagPath, 'r');
+            try {
+              fs.readSync(fd, seen, 0, extra, sizeBeforeWrite);
+            } finally {
+              fs.closeSync(fd);
+            }
+            // A partial write is a PREFIX of the batch. Anything else means
+            // another writer is interleaved here.
+            ours = seen.equals(batchBuf.subarray(0, extra));
+          }
+          // NEVER UNLINK (PR review). An earlier cut removed the whole file when
+          // `createdByThisWrite` was set, reasoning that a file this write
+          // created must not survive its own failure. That reasoning has a hole:
+          // `createdByThisWrite` only means OUR stat saw ENOENT. Another daemon
+          // can create and populate the file between that stat and our failed
+          // append — and during a singleton takeover it is writing the SAME
+          // lines for the SAME session, so its bytes can legitimately be a
+          // prefix-match for our batch and set `ours`. Unlinking then destroys a
+          // file another process successfully wrote, on evidence that cannot
+          // tell the two apart.
+          //
+          // So: truncate back only when the file was KNOWN to exist before the
+          // append, and never delete one that appeared during the race. The cost
+          // of leaving it is a possible partial trailing line — which every
+          // reader already skips per-line, and which initClassified handles at
+          // the next start anyway (a tag holding no real classified data is
+          // truncated and re-parsed whole).
+          if (ours && !createdByThisWrite) {
+            fs.truncateSync(tagPath, sizeBeforeWrite);
+          }
+          // Not ours: leave every byte alone. The cost is a possible partial
+          // trailing line, which every reader already skips (the per-line
+          // JSON.parse guard in readClassifiedTagFile). That is strictly cheaper
+          // than deleting data another writer committed.
+        }
+      } catch { /* best effort — never mask the original write error */ }
+    }
+    throw writeErr;
+  }
+}
+
 function flushPending() {
   if (pendingItems.length === 0) return;
   // Serialize at flush: compaction/recache meter-splits emit dual lines,
   // and interrupt markers that arrived after enqueue are already stamped.
   const batch = pendingItems.map(it => serializeClassifiedWithOverheadSplit(it.interaction, it.prevCtx)).join("");
-  pendingItems = [];
+  // pendingItems is NOT cleared here. It was, on main and in this branch's first
+  // draft, and that lost a whole billed batch permanently whenever the append
+  // threw — the items were already gone before anything could fail (PR review,
+  // High). The loss predates #443, but #443 made it worse rather than merely
+  // inheriting it: a marker could then be stamped over the gap, turning a silent
+  // undercount into an affirmative "settled".
+  let batchLanded = false;
   try {
-    fs.appendFileSync(tagPath, batch);
+    // Exact rewind on failure (PR review). A partial appendFileSync can leave
+    // whole records on disk before throwing, and retrying the batch would
+    // re-append them. "Duplicates collapse on read" covers only lines carrying a
+    // message.id — dedupeClassifiedById's `if (!id)` branch passes no-id entries
+    // straight through, and serializeClassified omits `id` when messageId is
+    // absent — so a cost-bearing no-id record would double-count. Rewinding
+    // makes the retry exact rather than leaning on the reader.
+    appendToTagOrRewind(batch);
+    batchLanded = true;
+    // Set the MOMENT the tag grew, not after the offset line (PR review,
+    // Medium). Classified data landed after whatever marker the tag currently
+    // holds, so that marker no longer covers the tag and this poll's sweep must
+    // re-stamp (#443) — flushPending runs BEFORE scanForSubAgents in the same
+    // poll, which is exactly the window a one-shot marker left open. Setting it
+    // after the offset append meant a failure BETWEEN the two left the tag grown
+    // and the flag false, so the next sweep skipped the re-stamp and the tag
+    // stayed provisional until some later write happened to set it again.
+    tagGrewSinceMarker = true;
     // _meta offset tracking (#124): record the byte position processed so the
     // next daemon instance knows exactly where to resume, rather than skipping
     // to sessionPath.size and missing lines written while the daemon was dead.
     fs.appendFileSync(tagPath, JSON.stringify({ _meta: { offset: lastSize } }) + "\n");
+    pendingItems = [];
     idleStartMs = 0; // Data arrived — idle period ended
   } catch (err) {
-    // If we can't write, log and continue — don't crash the daemon
+    // Keep the batch for the next poll ONLY if it never reached disk. If the
+    // classified lines landed and just the offset line failed, re-appending them
+    // would duplicate real cost, so drop them — the missing offset is recoverable
+    // (initClassified re-parses from zero when it finds none), a lost batch is
+    // not.
+    //
+    // The retry is EXACT, not merely tolerable: appendToTagOrRewind restores the
+    // tag to its pre-append length, so nothing from the failed attempt survives
+    // to be re-appended. An earlier version of this comment justified the retry
+    // with "duplicates collapse on read" — true only of id-bearing lines, and
+    // wrong for the no-id case (PR review).
+    pendingItems = batchLanded ? [] : pendingItems;
+    // Whatever failed, this poll did not write what it was asked to, so the
+    // sweep must not stamp the tag as settled over the gap (#443).
+    pollHadFailure = true;
+    // Ungated and latched, matching the policy for the sibling subagent failures
+    // in this file: the debug flag was never the binding constraint, and a
+    // persistent ENOSPC/EACCES here silently drops billed parent turns while the
+    // daemon looks healthy. That is the loudest thing this file can fail at.
+    if (!warnedParentFlushFailure) {
+      warnedParentFlushFailure = true;
+      process.stderr.write(
+        `[wtft-log-parser] WARNING: this session's classified turns could not be written to the tag file, so its reported cost is behind until it succeeds: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+    }
     if (process.env.WTFT_DAEMON_DEBUG) {
       process.stderr.write(`[wtft-log-parser] write error: ${err instanceof Error ? err.message : String(err)}\n`);
     }
@@ -486,6 +684,8 @@ function syncSubagentTranscript(file: string): boolean {
     // persistent stat failure is a silent, indefinite undercount of that one
     // transcript. See the note above the warned* sets for where this text
     // actually goes today (nowhere — #436) and why it is written anyway.
+    // This sweep is not clean, so it must not stamp the tag as swept (#443).
+    pollHadFailure = true;
     if (!warnedSubagentStatFailure.has(stateKey)) {
       warnedSubagentStatFailure.add(stateKey);
       process.stderr.write(
@@ -566,6 +766,8 @@ function syncSubagentTranscript(file: string): boolean {
   } catch (err) {
     // Keep polling — one bad parse must not stop this subagent, the other
     // subagents in this loop, or the parent session's own tag writes.
+    // This sweep is not clean, so it must not stamp the tag as swept (#443).
+    pollHadFailure = true;
     if (!warnedSubagentParseFailure.has(stateKey)) {
       warnedSubagentParseFailure.add(stateKey);
       process.stderr.write(
@@ -602,6 +804,8 @@ function syncSubagentTranscript(file: string): boolean {
     // Nothing written and nothing recorded, so the next poll still sees this
     // file as changed and retries it — the same shape as the parse failure
     // above, and the same reason it must not stop the other subagents.
+    // This sweep is not clean, so it must not stamp the tag as swept (#443).
+    pollHadFailure = true;
     if (!warnedSubagentSerializeFailure.has(stateKey)) {
       warnedSubagentSerializeFailure.add(stateKey);
       process.stderr.write(
@@ -622,100 +826,12 @@ function syncSubagentTranscript(file: string): boolean {
       // silently skipped by every reader's per-line `catch {}` (PR review
       // round 2).
       //
-      // THREE states, not two. Conflating any pair of them corrupts something:
-      //   * file ABSENT   -> prior length is ZERO, and the file must not
-      //                      outlive a failed write. Leaving this "unknown"
-      //                      skipped the rewind on the one path the guard
-      //                      exists for (#437).
-      //   * length KNOWN  -> cut back to it.
-      //   * stat failed
-      //     for any other
-      //     reason        -> prior length is genuinely UNKNOWN, so do NOT
-      //                      rewind at all. The first cut of the #437 fix
-      //                      defaulted this to 0 while still treating the file
-      //                      as pre-existing, which on a write failure
-      //                      truncated the WHOLE session tag file — every
-      //                      parent and subagent line already persisted, not
-      //                      just this batch — to zero bytes, reported only as
-      //                      one subagent's write warning (PR review).
-      //
-      // ONE stat, not existsSync-then-stat: the two-call form had a window in
-      // which the file could vanish between the calls, which is precisely how
-      // the UNKNOWN state got misread as zero.
-      let sizeBeforeWrite: number | null = null;
-      let createdByThisWrite = false;
-      try {
-        sizeBeforeWrite = fs.statSync(tagPath).size;
-      } catch (statErr) {
-        if ((statErr as { code?: string }).code === 'ENOENT') {
-          sizeBeforeWrite = 0;
-          createdByThisWrite = true;
-        }
-        // Anything else leaves it null — the UNKNOWN state above.
-      }
-      try {
-        fs.appendFileSync(tagPath, batch);
-      } catch (writeErr) {
-        if (sizeBeforeWrite !== null) {
-          try {
-            // Throws when nothing was created, which is the common failure and
-            // needs no cleanup — that catch is this case, not an error.
-            const sizeAfter = fs.statSync(tagPath).size;
-            if (sizeAfter > sizeBeforeWrite) {
-              // PROVE the extra bytes are ours before destroying them (PR
-              // review). `sizeBeforeWrite` is stat'd before the append, so
-              // there is a window — narrow, but real during the singleton
-              // takeover race below, where an outgoing daemon can still be
-              // mid-append to this same shared tag file. Truncating on
-              // arithmetic alone ("the file grew, so the growth is mine")
-              // would discard that writer's committed lines and report it as
-              // one subagent's write warning. Rewinding a failed write must
-              // never be able to destroy a successful one.
-              const extra = sizeAfter - sizeBeforeWrite;
-              const batchBuf = Buffer.from(batch);
-              let ours = false;
-              if (extra <= batchBuf.length) {
-                const seen = Buffer.alloc(extra);
-                const fd = fs.openSync(tagPath, 'r');
-                try {
-                  fs.readSync(fd, seen, 0, extra, sizeBeforeWrite);
-                } finally {
-                  fs.closeSync(fd);
-                }
-                // A partial write is a PREFIX of the batch. Anything else means
-                // another writer is interleaved here.
-                ours = seen.equals(batchBuf.subarray(0, extra));
-              }
-              // NEVER UNLINK (PR review). An earlier cut removed the whole file
-              // when `createdByThisWrite` was set, reasoning that a file this
-              // write created must not survive its own failure. That reasoning
-              // has a hole: `createdByThisWrite` only means OUR stat saw ENOENT.
-              // Another daemon can create and populate the file between that
-              // stat and our failed append — and during a singleton takeover it
-              // is writing the SAME subagent lines for the SAME session, so its
-              // bytes can legitimately be a prefix-match for our batch and set
-              // `ours`. Unlinking then destroys a file another process
-              // successfully wrote, on evidence that cannot tell the two apart.
-              //
-              // So: truncate back only when the file was KNOWN to exist before
-              // the append, and never delete one that appeared during the race.
-              // The cost of leaving it is a possible partial trailing line —
-              // which every reader already skips per-line, and which
-              // initClassified handles at the next start anyway (a tag holding
-              // no real classified data is truncated and re-parsed whole).
-              if (ours && !createdByThisWrite) {
-                fs.truncateSync(tagPath, sizeBeforeWrite);
-              }
-              // Not ours: leave every byte alone. The cost is a possible
-              // partial trailing line, which every reader already skips (the
-              // per-line JSON.parse guard in readClassifiedTagFile). That is
-              // strictly cheaper than deleting data another writer committed.
-            }
-          } catch { /* best effort — never mask the original write error below */ }
-        }
-        throw writeErr;
-      }
+      // Append with an exact rewind on failure — see appendToTagOrRewind.
+      appendToTagOrRewind(batch);
       wroteAny = true;
+      // Subagent lines landed after whatever marker the tag holds, so this
+      // sweep must re-stamp before a reader can call the tag settled (#443).
+      tagGrewSinceMarker = true;
     }
     // Reached only when the append SUCCEEDED. Recording the hashes and the
     // change detector here is the whole failure story: an ENOSPC/EACCES/
@@ -747,6 +863,8 @@ function syncSubagentTranscript(file: string): boolean {
     // this fires on every poll by construction, and a per-poll warning would
     // bury the one that matters. On where it goes today, see #436 and the note
     // above the warned* sets.
+    // This sweep is not clean, so it must not stamp the tag as swept (#443).
+    pollHadFailure = true;
     if (!warnedSubagentWriteFailure.has(stateKey)) {
       warnedSubagentWriteFailure.add(stateKey);
       process.stderr.write(
@@ -765,6 +883,11 @@ function syncSubagentTranscript(file: string): boolean {
  *  to the tag file — renderers see them as regular turns. */
 function scanForSubAgents() {
   let wroteAny = false;
+  // NOTE: pollHadFailure is reset by the POLL LOOP, not here. It was reset here
+  // first, and that was wrong — flushPending runs before this function in the
+  // same poll and can also fail, so resetting on entry wiped the flush's failure
+  // a few statements after it was set, and the marker below could stamp the tag
+  // settled over a lost parent batch.
 
   // --- Claude bash sub-agents (#138) ---
   if (pendingClaudeCommands.length > 0) {
@@ -818,6 +941,75 @@ function scanForSubAgents() {
   if (wroteAny) {
     lastWriteMs = Date.now();
     idleStartMs = 0;
+  }
+
+  // Sweep complete — stamp the tag, if anything was appended since the last
+  // stamp (#443).
+  //
+  // A one-shot `wtft` spawns this daemon and reads the tag immediately, so it
+  // races us and loses: on #443's specimen that was $79.74 against a true
+  // $84.59, reported as a plain total with nothing marking it provisional.
+  // `_meta.swept` is what readTagProvisional looks for.
+  //
+  // THE MARKER IS NOT ONE-SHOT, and the version that made it one-shot was wrong
+  // (PR review). `sweptAtMs` was process-local while the marker persists in the
+  // FILE, and `flushPending()` runs BEFORE this function in the same poll (see
+  // the loop: flushPending, then scanForSubAgents). So a new parent turn —
+  // including one spawning a new subagent — could be appended after a HISTORICAL
+  // marker left by an earlier sweep or an earlier daemon, and a read landing
+  // before this sweep finished would see that old marker and report SETTLED while
+  // the new subagent was still unread. #443's own undercount, narrower window.
+  //
+  // The contract is now POSITIONAL, which is what makes it checkable: the marker
+  // must be the last significant record in the tag. The reader scans backward and
+  // treats a classified line found before a marker as invalidating it, so a stale
+  // marker cannot certify data that arrived after it. This therefore re-stamps
+  // whenever the tag grew — on a busy session once per poll that wrote anything,
+  // ~35 bytes against the classified lines that poll already wrote, and nothing
+  // at all on an idle or finished session.
+  //
+  // WITHHELD ON A FAILED SWEEP (PR review). `pollHadFailure` is set by
+  // syncSubagentTranscript's stat/parse/serialize/write handlers, so a sweep that
+  // could not read part of what it was meant to read does not claim to have swept:
+  // the tag stays provisional and the next poll retries.
+  //
+  // What it still does NOT assert, because the name over-promises: this says a
+  // sweep RAN AND REPORTED NO FAILURES, still weaker than "no failures occurred".
+  // #457 — parseSessionFile's bare catch returns [] on EACCES — makes an
+  // unreadable transcript indistinguishable from an empty one, so it never
+  // reports a failure and cannot set pollHadFailure. Closing #457 strengthens
+  // this marker for free.
+  //
+  // Not gated on `wroteAny`: a session with no subagents has nothing to sweep,
+  // and "nothing to sweep" is the same state to a reader as "swept". Gating on it
+  // would leave every subagent-free session reading provisional forever, which
+  // trains the reader to ignore the flag.
+  if (tagGrewSinceMarker && !pollHadFailure) {
+    try {
+      fs.appendFileSync(tagPath, JSON.stringify({ _meta: { swept: Date.now() } }) + "\n");
+      // Cleared only on a landed append, so a failed write retries next poll.
+      tagGrewSinceMarker = false;
+    } catch (err) {
+      // The WRITE retries; the WARNING latches. Two different things, and an
+      // earlier version of this block conflated them (PR review).
+      //
+      // Warn: ungated and once, matching the policy stated for the sibling
+      // stat/parse/serialize/write failures at the top of this file — "the debug
+      // flag was never the binding constraint", and they stay ungated so they
+      // become visible the moment #436 fixes the transport. Debug-gating this one
+      // would be the exact anti-pattern that comment argues against, for a
+      // failure with real consequences: a PERSISTENT append failure leaves every
+      // read of this tag reporting provisional forever, and the operator would
+      // have nothing to go on. Latched by a boolean rather than a per-transcript
+      // Set because there is one tag file, not one per transcript — without it
+      // this re-prints on every poll and becomes its own noise floor.
+      if (!warnedSweptMarkerFailure) {
+        warnedSweptMarkerFailure = true;
+        process.stderr.write(
+          `[wtft-log-parser] WARNING: the swept marker could not be appended, so every read of this session's tag will report a PROVISIONAL total until it succeeds: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+      }
+    }
   }
 }
 
@@ -1551,6 +1743,15 @@ if (showList || showCleanup || showRestart || stopSession) {
     sessionExisted = true; // confirmed session file present at least once (#129 Bug A)
 
     try {
+      // Per POLL, not per sweep (#443). Reset here rather than at the top of
+      // scanForSubAgents, because flushPending runs BEFORE that function and can
+      // also fail — resetting inside the sweep wiped the flush's own failure a
+      // few statements after it was set, which would have let the marker stamp
+      // over a lost parent batch. Per poll rather than per daemon because a
+      // transcript that failed last poll and succeeds this one must not keep the
+      // tag provisional forever; the warned* Sets are cumulative by design and
+      // cannot answer "was THIS poll clean".
+      pollHadFailure = false;
       // Read new lines from session, dedup by message.id (#54), then classify.
       const rawInteractions = parseNewLines(sessionPath);
       // Late interrupt marker: the killed turn is the unflushed tail of

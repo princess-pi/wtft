@@ -38,6 +38,8 @@ import {
 	CATEGORY_ORDER,
 	watchTagFile,
 	readClassifiedTagFile,
+	readTagProvisional,
+	readTagFileWithVerdict,
 	getDaemonPidPath,
 	getTagPath,
 	awaitDaemonUp,
@@ -148,6 +150,8 @@ export {
 	serializeClassified,
 	classifiedToInteraction,
 	readClassifiedTagFile,
+	readTagProvisional,
+	readTagFileWithVerdict,
 	getTerminalWidth,
 	WTFT_TAGGER_VERSION,
 	// Daemon lifecycle (#95) — takeover/idle-clamp/TTL tests
@@ -194,7 +198,14 @@ export {
 	findRepoRoot,
 	listWorktreeDirs,
 	fanOutCwd
-};
+}
+
+/** A read whose total may still grow under the daemon (#443). Distinct from 1,
+ *  which means the run failed; 9 means the run SUCCEEDED and the number printed
+ *  is not yet final. "Found nothing wrong" and "could not see everything" are
+ *  different facts and need different codes — the same split pr-review draws
+ *  between 7 and 8. */
+const EXIT_PROVISIONAL = 9;
 
 // ---
 // CONFIG + ARG PARSING
@@ -457,8 +468,25 @@ async function main() {
 	}
 
 	let interactions: Interaction[] = [];
+	// The provisional verdict is captured WITH the interactions, never re-derived
+	// later (PR review, Medium/correctness). Reading the tag a second time at the
+	// end of main would straddle everything in between — building the output
+	// lines, printing the chart, and under --tokens scanning uncounted billables
+	// across the session and every subagent transcript. That is wall-clock
+	// comparable to a daemon poll (~667ms), so a sweep landing in that window
+	// would report SETTLED for totals that were rendered from the pre-sweep read:
+	// #443's own failure mode, now wearing a false exit 0.
+	//
+	// `readTagFileWithVerdict` — ONE readFileSync, both answers derived from that
+	// one buffer. Calling readClassifiedTagFile then readTagProvisional was two
+	// independent opens with a gap between them, and the daemon is a separate OS
+	// process appending to that same file: land the repaired lines AND the marker
+	// inside the gap and you get the stale interactions with a settled verdict.
+	// The same bug through a narrower window is still the bug (PR review round 3,
+	// which caught the comment above claiming an invariant the code did not have).
+	let provisional: ReturnType<typeof readTagProvisional> = { provisional: false, reason: null };
 	if (fs.existsSync(tagPath)) {
-		interactions = readClassifiedTagFile(tagPath);
+		({ interactions, provisional } = readTagFileWithVerdict(tagPath));
 	}
 	// #308: nothing to wait for while the session log itself is unwritten — the
 	// daemon is parked on it (heartbeating) and will parse the first line when it
@@ -494,7 +522,8 @@ async function main() {
 		const tagWaitStart = Date.now();
 		while (Date.now() - tagWaitStart < 1400) {
 			if (fs.existsSync(tagPath)) {
-				interactions = readClassifiedTagFile(tagPath);
+				// One read, both answers — see the capture above.
+				({ interactions, provisional } = readTagFileWithVerdict(tagPath));
 				if (interactions.length > 0) break;
 			}
 			await new Promise(r => setTimeout(r, 667));
@@ -619,6 +648,67 @@ async function main() {
 	}
 	for (const m of unknownModels) {
 		console.error(`\x1b[33m⚠ no pricing for ${m} — using default $3/$15 rates; totals may be unreliable. Add an entry to ${getUserPricingPath()} (no rebuild needed).\x1b[0m`);
+	}
+
+	// ---
+	// PROVISIONAL READ (#443)
+	// ---
+	// This CLI spawns the daemon and then reads the tag immediately, so on a
+	// session the daemon is about to repair the read races it and loses. On
+	// #443's specimen that was $79.74 against a true $84.59 — a 5.7% undercount
+	// printed as a plain total, indistinguishable from a settled one.
+	//
+	// Remedy (b), not (a): say the total is provisional rather than blocking.
+	// Blocking a one-shot CLI on a repair whose length is proportional to the
+	// session's subagent volume is the cost read-then-render exists to avoid.
+	//
+	// Reported LAST and as an EXIT CODE, for two different readers. The total
+	// still prints in full — withholding it would be worse than the undercount,
+	// since the number is usually close and always better than nothing. `wtft`
+	// has no --json/--porcelain today, so an exit code is the only surface here
+	// that costs an agent zero tokens and zero inference; it matches pr-review's
+	// 7/8/9 idiom and does not preempt a later structured field carrying the
+	// same fact. Nothing in this repo invokes this CLI and inspects $?, and it
+	// only ever exited 0 or 1 before, so no consumer regresses on the new code.
+	if (provisional.provisional) {
+		const why = provisional.reason === "stale-version"
+			? `this tag was written by tagger v${path.basename(tagPath).match(/\.wtft-tag\.v([^/]+)\.jsonl$/)?.[1] ?? "?"}, not v${WTFT_TAGGER_VERSION}`
+			: "no subagent transcript has been read since this tag was written";
+		// The remedy names ONE action, and deliberately does not mention -F (PR
+		// review, Medium/contract). `-F` does not return early: it deletes the
+		// tag, kills the daemon, and falls through to this same read path, so a
+		// forced run can land here too — and "use -F to force a full re-parse" is
+		// then a loop, told to the person who just did it, about the run that is
+		// supposed to be the authoritative reference.
+		//
+		// Fixed by deleting the branch rather than by branching on
+		// opts.forceReparse: a conditional remedy would have a second arm
+		// reachable only inside a race between flushPending and the first
+		// scanForSubAgents, which no test can hit reliably — and an arm that
+		// always skips is not covered, it is only untested. One sentence that is
+		// true in both cases has no such arm. Anyone who wants -F finds it in
+		// --help; re-running is the correct advice either way, since the daemon
+		// is already rebuilding.
+		//
+		// The exit code stays 9 regardless: the number really is not final, and
+		// softening that under -F would be the exact lie this issue is about.
+		console.error(`\x1b[33m⚠ PROVISIONAL: this total may still grow — ${why}.\x1b[0m`);
+		console.error(`\x1b[90m  The daemon is rebuilding this tag now — run wtft again in a moment to read the settled total. Exit ${EXIT_PROVISIONAL}.\x1b[0m`);
+		// `exitCode` and return, NOT process.exit() (PR review,
+		// Medium/correctness). On Linux node's stdout is ASYNCHRONOUS when it is a
+		// pipe rather than a TTY or a regular file, and process.exit() does not
+		// wait for pending writes — so `wtft --tokens | …` could lose the tail of
+		// the very chart and token table this branch exists to keep. That would
+		// contradict the guarantee three comments above it: the total still prints
+		// in full. Setting exitCode lets main() return and node exit 9 after the
+		// stream drains.
+		//
+		// No truncation test: the threshold is the OS pipe buffer, so asserting it
+		// would encode a platform constant rather than this program's behaviour.
+		// The suite pipes stdout and asserts the table survives, which pins the
+		// shape; this line removes the size-dependent failure mode.
+		process.exitCode = EXIT_PROVISIONAL;
+		return;
 	}
 }
 

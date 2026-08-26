@@ -154,6 +154,183 @@ So the zero above is a property of this host's traffic, not of the wire format: 
 
 **Residual, filed as #443**: the FIRST read after a stale tag still reports the pre-repair number. `bin/wtft.ts`'s non-watch path resolves the tag path, spawns the daemon, and reads the tag immediately, so the read races the repair and loses; `awaitDaemonUp` is entered only when the tag yields nothing AND the session file is absent, and a populated-but-stale tag satisfies neither. Pre-existing on `main`, unchanged by #270, and a genuine trap for one-shot audits (#176) — hence its own issue rather than a note here.
 
+## Provisional Reads: Saying So When run 1 Is Not run 2 (#443)
+
+The table above documents the repair. What it does not, on its own, tell the person
+reading it is that **run 1 and run 2 are indistinguishable at the point of reading**.
+`$79.74` printed exactly like `$84.59` — same table, same formatting, no warning —
+so a one-shot audit took the 5.7% undercount and had no signal that it had.
+
+That is #443, and it is a reader-side problem, not a writer-side one. The repair
+above is correct and already happens; the gap is that `bin/wtft.ts` spawns the
+daemon and reads the tag on the next statement, so the read races the daemon it
+started and loses. `awaitDaemonUp` sits on that path but is entered only when
+`interactions.length === 0`, and a populated-but-stale tag satisfies neither
+condition, so nothing waits.
+
+**The remedy is to say so, not to wait.** Blocking a one-shot CLI on a repair whose
+length is proportional to the session's subagent volume is exactly the cost that
+read-then-render exists to avoid.
+
+### `_meta.swept`
+
+The daemon appends `{"_meta":{"swept":<epochMs>}}` once, after its first
+`scanForSubAgents()` completes. Its **absence** is the honest statement that no
+subagent transcript has been read by any daemon since this tag was written — which
+is precisely the state run 1 above is in.
+
+**The marker is POSITIONAL, not merely present**, and it is re-stamped rather than
+written once. This is the correction that matters, and it came from review after the
+first version shipped one-shot.
+
+The one-shot version kept `sweptAtMs` in the daemon **process** while the marker
+persists in the **file** — and `flushPending()` runs *before* `scanForSubAgents()` in
+the same poll. So a new parent turn, including one that spawns a new subagent, is
+appended after a marker left by an earlier sweep or an earlier daemon. A reader that
+accepts "a marker exists" then reports SETTLED for data no sweep has covered: #443's own
+undercount, through a narrower window. Relocating a bug is not fixing it.
+
+So the contract is: **the marker must be the last significant record in the tag.** The
+reader scans backward and stops at the first significant line — a `_meta.swept` settles
+the tag, a *classified* line invalidates any marker behind it. Heartbeats and
+`_meta.offset` lines carry no cost and are skipped, so an idle session does not drift
+back to provisional while nothing is happening.
+
+The daemon therefore re-stamps whenever the tag grew since the last stamp: on a busy
+session once per poll that wrote anything (~35 bytes beside the classified lines that
+poll already wrote), and not at all on an idle or finished one. `tagGrewSinceMarker`
+starts **true**, so a daemon inheriting another daemon's tag re-stamps after its own
+first sweep rather than trusting a marker whose coverage it cannot verify.
+
+It cannot ride the existing `_meta.offset` line: that line is written only by
+`flushPending()`, which runs only when new PARENT interactions arrive, so on a finished
+session — this issue's own case — it never runs again.
+
+**Withheld on a failed poll.** `pollHadFailure` is set by every failure handler —
+`syncSubagentTranscript`'s stat/parse/serialize/write, and `flushPending`'s own write —
+so a poll that could not write what it was asked to does not claim to have swept: the tag
+stays provisional and the next poll retries.
+
+It is reset by the **poll loop**, not on entry to `scanForSubAgents`. Resetting it inside
+the sweep was the obvious placement and was wrong: `flushPending()` runs *before* that
+function in the same poll, so the reset wiped the flush's own failure a few statements
+after it was set, and the marker could stamp the tag settled over a lost parent batch. It
+is per *poll* rather than per daemon because a transcript that failed last poll and
+succeeds this one must not keep the tag provisional forever — the `warned*` Sets are
+cumulative by design and cannot answer "was **this** poll clean".
+
+**`flushPending` no longer clears `pendingItems` before writing.** It did, on `main` and
+in this branch's first draft, which lost a whole billed batch permanently whenever the
+append threw — the items were gone before anything could fail. That loss predates #443,
+but the marker made it worse rather than merely inheriting it: a sweep could stamp over
+the gap, turning a silent undercount into an affirmative *settled*. The batch is now kept
+for the next poll unless it actually reached disk, and `tagGrewSinceMarker` is set the
+moment the classified lines land rather than after the `_meta.offset` line — a failure
+*between* the two otherwise left the tag grown and the flag false, so the next sweep
+skipped the re-stamp.
+
+**The retry is exact, not merely tolerable.** A first cut justified it with this
+document's own line — *"Duplicates that do survive collapse on read; a suppressed line
+never arrives at all, which is the worse of the two"* — and that justification is wrong
+here (PR review). It holds only for lines carrying a `message.id`:
+`dedupeClassifiedById`'s `if (!id)` branch passes no-id entries straight through, and
+`serializeClassified` omits `id` whenever `Interaction.messageId` is absent, so a
+cost-bearing no-id record retried after a partial `appendFileSync` would double-count.
+The measurement that made the claim look safe — 3,339 of 3,409 rows on the #270 specimen
+carried an id, the 70 without all zero-cost — is one tag file, not a guarantee.
+
+So the append rewinds instead. `appendToTagOrRewind` restores the tag to its pre-append
+length on failure and rethrows — **with one exception, which is deliberate**: a file that
+this write *created* (the initial `statSync` returned `ENOENT`) is never truncated. That
+guard is #437's, and it is not a gap to close here. `createdByThisWrite` only means *our*
+stat saw `ENOENT`; another daemon can create and populate the file between that stat and
+our failed append, and during a singleton takeover it is writing the *same* lines for the
+*same* session — so its bytes can legitimately prefix-match our batch. Truncating there
+would destroy a file another process successfully wrote, on evidence that cannot tell the
+two apart.
+
+The residual is therefore narrow and named rather than implied: a partial append into a
+newly created tag leaves a fragment, and the retry appends after it, gluing the fragment
+to the first retried record into one line that no reader can parse. Every reader skips it
+per-line, so the effect is a single lost record rather than a duplicated one — an
+undercount, not an overcount. It is **#512**; closing it means terminating the
+fragment rather than relaxing the never-truncate rule. It is **one function used by both writers** — the subagent path (where it
+originated, as #437 plus two review rounds of hardening: three stat states, and a
+prefix-check proving the extra bytes are ours before truncating) and now `flushPending`.
+A second hand-rolled copy is the shape this repo keeps getting bitten by; see
+`dedupeClassifiedById` versus session-selector's duplicate, pinned only by a test.
+
+A session with **no subagents** still gets the marker. "Nothing to sweep" and "swept"
+are the same state to a reader, and withholding it would strand every subagent-free
+session as permanently provisional — which trains the reader to ignore the flag.
+
+The marker is a zero-cost `_meta` row carrying no `message.id`, so it is consistent
+with the soundness condition above rather than an exception to it.
+
+**What `swept` does NOT assert.** It says a sweep RAN AND REPORTED NO FAILURES, which
+is weaker than "no failures occurred". #457 — `parseSessionFile`'s bare catch returns
+`[]` on EACCES — means an unreadable transcript is silently indistinguishable from an
+empty one and is never reported as a failure at all, so a transcript lost that way can
+still be marked swept. Closing #457 strengthens this marker for free.
+
+### `readTagProvisional`, and what the CLI does with it
+
+`readTagProvisional` (`extensions/lib/wtft-daemon-lib.ts`) returns
+`{ provisional, reason }` for two conditions, either sufficient:
+
+| reason | condition |
+|---|---|
+| `stale-version` | the resolved tag is not at `WTFT_TAGGER_VERSION` — `getTagPath` rule 3 falls back to "any-version tag, newest mtime" (#95), so a read can land on superseded semantics while the daemon builds a current-version tag beside it |
+| `unswept` | a current-version tag holding classified data but no `_meta.swept` |
+
+**There is no scan window.** The first version scanned only the last 8KB, justified as
+"matching `readLastMetaOffset`" — a justification that does not survive contact, since
+that function windows because it does a *partial* read and never loads the file, while
+this one has already read the whole tag to answer the has-classified-data question.
+Windowing already-in-memory content bought no I/O and cost a real failure mode: on a
+busy session the marker is buried within minutes and the read would go
+false-provisional forever. The scan is the whole file, kept cheap by rejecting any line
+without `"_meta"` in it before `JSON.parse`.
+
+A tag holding no classified data is NOT provisional — it yields no total, so there is
+nothing to qualify. An unreadable tag reads the same way, for the same reason.
+
+**The verdict comes from the SAME READ as the interactions** (PR review, twice). Both are
+derived from one `readFileSync` by `readTagFileWithVerdict`, and the result is carried to
+the exit. Two separate corrections landed here, and the second is the one worth
+remembering: it is not enough to call the two functions adjacently, because each opened
+the file itself — the daemon is a separate OS process appending to that same file, so it
+can land the repaired lines *and* the marker in the gap between two adjacent reads, after
+which the interactions are stale and the verdict says settled. The same silent undercount,
+through a narrower window, is still the bug. Reading the tag a second time at the end of `main` would
+straddle everything in between — building the output lines, printing the chart, and under
+`--tokens` scanning uncounted billables across the session and every subagent transcript
+— which is wall-clock comparable to a daemon poll (~667ms). A sweep landing in that window
+would report SETTLED for totals rendered from the pre-sweep read: #443's own failure mode,
+wearing a false exit 0.
+
+`bin/wtft.ts` prints the total **in full**, then a warning line, then exits **9**.
+Withholding the number would be worse than the undercount: it is usually close and
+always better than nothing. The exit code and the prose line address two different
+readers, and 9 is distinct from 1 because "the run failed" and "the run succeeded but
+the number is not final" are different facts.
+
+The remedy line names **one** action — re-run — and deliberately never mentions `-F`.
+`-F` does not return early: it deletes the tag, kills the daemon, and falls through to the
+same read path, so a forced run can reach this branch too, and "use `-F`" would then be a
+loop told to the person who just did it, about the run that is supposed to be the
+authoritative reference. Fixed by deleting the branch rather than by conditioning on
+`opts.forceReparse`: that second arm is reachable only inside a race between
+`flushPending` and the first `scanForSubAgents`, which no test can hit reliably — and an
+arm that always skips is untested, not covered. One sentence true in both cases has no
+such arm.
+
+**Why an exit code and not a field.** `wtft` has no `--json`, no `--porcelain`, and no
+documented exit-code table; every number it produces is prose. An exit code is the only
+surface here that costs an agent zero tokens and zero inference. It carries one bit and
+deliberately does not preempt a structured mode — filed as **#510**, which should carry
+`provisional` as a field alongside the totals it currently cannot express at all.
+
 ## `attributeClaudeSubAgentCosts`: Per-Call, Not Global
 
 The docstring used to read: *"Sub-agent session IDs are tracked globally to prevent double-counting across multiple interactions that reference the same session."* — true only for a single call, since `seenSessionIds` (`extensions/lib/wtft-parser.ts:987`) is a local `Set` created fresh every time the function runs, with no lifetime beyond that one call. #420 review corrected the docstring itself (`extensions/lib/wtft-parser.ts:975-983`) to say this plainly rather than leaving the false "global" claim standing next to the code it describes; the paragraphs below are the fuller version of that correction.
@@ -269,6 +446,7 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 | Daemon spawned before session file exists | Status shows `● waiting for session .jsonl...` (yellow); daemon polls until file created (#124) |
 | Daemon never started | PID check fails, status shows "daemon not found" |
 | Daemon restarts after crash | Reads `_meta` offset from tag file for exact resume position; falls back to full re-parse if no meta offset found (#124) |
+| One-shot read beats the daemon to a stale tag | The total prints in full, a `PROVISIONAL` warning names why, and `wtft` exits **9** rather than 0 — `readTagProvisional` reports `stale-version` or `unswept` (#443). It does NOT wait: blocking a one-shot CLI on a repair proportional to subagent volume is the cost read-then-render avoids |
 | Daemon encounters transient error | Error logged (debug mode), daemon continues on next poll cycle — does not crash |
 | Terminal too narrow for inline status | Status wraps to separate line between title and legend |
 | Session file gone | Daemon exits cleanly; TUI continues showing last-known data with stopped indicator |

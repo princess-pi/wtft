@@ -300,6 +300,31 @@
             <li><strong>PID dead but tag file written within 2s</strong> → state unchanged (debounce). Masks the restart gap when a new daemon replaces an old one, preventing a spurious "stopped" flash.</li>
         </ul>
 
+        <h4>Provisional Reads (#443)</h4>
+        <p>A one-shot <code>wtft</code> spawns the daemon and reads the tag file on the next
+        statement, so on a session the daemon is about to repair, the read races the daemon it
+        just started &mdash; and loses. On the measured specimen that was <strong>$79.74 against a
+        true $84.59</strong>, a 5.7% undercount printed exactly like a settled total.</p>
+        <p>The daemon now appends a <code>_meta.swept</code> marker once its first sub-agent sweep
+        completes. Its <em>absence</em> means no sub-agent transcript has been read since the tag
+        was written. A read is <strong>provisional</strong> when either holds:</p>
+        <ul>
+            <li><code>stale-version</code> &mdash; the resolved tag is not at the current tagger
+            version, so its numbers are at superseded semantics</li>
+            <li><code>unswept</code> &mdash; a current-version tag holding classified data but no
+            <code>_meta.swept</code></li>
+        </ul>
+        <p>When provisional, <code>wtft</code> <strong>still prints the total in full</strong>, adds a
+        <code>PROVISIONAL</code> warning naming the reason, and exits <code>9</code> instead of
+        <code>0</code>. It does <em>not</em> block: waiting for a repair whose length scales with the
+        session's sub-agent volume is the cost that read-then-render exists to avoid. Withholding the
+        number would be worse than the undercount &mdash; it is usually close, and always better than
+        nothing.</p>
+        <p>Exit <code>9</code> is distinct from <code>1</code> on purpose: <em>the run failed</em> and
+        <em>the run succeeded but the number is not final</em> are different facts. It carries one bit,
+        which is all <code>wtft</code> can express today &mdash; there is no <code>--json</code> yet
+        (<a href="https://github.com/duppypro/princess-pi-packages/issues/510">#510</a>).</p>
+
         <h4>Update Timing</h4>
         <p>Status updates are triggered by three mechanisms, from fastest to slowest:</p>
         <table style="width:100%; border-collapse: collapse;">

@@ -20,7 +20,10 @@ import {
 
 // --- MOCK functions (mirror extensions/wtft.ts exactly) ---
 
-function discoverSubagentSessionFiles(sessionPath: string): string[] {
+// Round 6: the shared discovery helper now returns { files, unreadable } —
+// the report shape the claude half established in round 5, applied to the
+// shared function. The mock mirrors the extension's current shape.
+function discoverSubagentSessionFiles(sessionPath: string): { files: string[]; unreadable: Error | null } {
 	const files: string[] = [];
 	const sessionDir = path.dirname(sessionPath);
 	const sessionBase = path.basename(sessionPath, ".jsonl");
@@ -59,7 +62,7 @@ function discoverSubagentSessionFiles(sessionPath: string): string[] {
 		} catch { /* skip */ }
 	}
 
-	return files;
+	return { files, unreadable: null };
 }
 
 function loadSubagentInteractions(subagentFiles: string[]) {
@@ -120,9 +123,9 @@ try {
 	].join("\n"));
 
 	const discovered1 = discoverSubagentSessionFiles(parentFile);
-	check(discovered1.length === 2, "discovers 2 subagent files (Claude Code pattern)");
+	check(discovered1.files.length === 2, "discovers 2 subagent files (Claude Code pattern)");
 
-	const subInteractions1 = loadSubagentInteractions(discovered1);
+	const subInteractions1 = loadSubagentInteractions(discovered1.files);
 	check(subInteractions1.length === 2, "parses 2 subagent interactions");
 
 	const totalSubCost = subInteractions1.reduce((s: number, i: any) => s + i.cost, 0);
@@ -153,10 +156,10 @@ try {
 	].join("\n"));
 
 	const discovered2 = discoverSubagentSessionFiles(parentFile2);
-	check(discovered2.length === 1, "discovers exactly 1 subagent (not non-matching sibling)");
-	check(discovered2[0].endsWith("pi-subagent.jsonl"), "finds pi-subagent, not other-session");
+	check(discovered2.files.length === 1, "discovers exactly 1 subagent (not non-matching sibling)");
+	check(discovered2.files[0].endsWith("pi-subagent.jsonl"), "finds pi-subagent, not other-session");
 
-	const subInteractions2 = loadSubagentInteractions(discovered2);
+	const subInteractions2 = loadSubagentInteractions(discovered2.files);
 	check(Math.abs(subInteractions2[0].cost - 2.50) < 0.001, `Pi subagent cost = $${subInteractions2[0].cost.toFixed(2)} (expected $2.50)`);
 
 	// --- TEST 3: Graceful no-subagent fallback ---
@@ -167,7 +170,7 @@ try {
 		"",
 	].join("\n"));
 	const discovered3 = discoverSubagentSessionFiles(loneFile);
-	check(discovered3.length === 0, "returns empty array for session with no subagents");
+	check(discovered3.files.length === 0, "returns empty array for session with no subagents");
 
 	// --- TEST 4: Chronological merge order ---
 	console.log("--- TEST 4: Chronological interleave ---");
@@ -205,7 +208,7 @@ try {
 		"",
 	].join("\n"));
 	const discovered5 = discoverSubagentSessionFiles(catParentFile);
-	const catInteractions = loadSubagentInteractions(discovered5);
+	const catInteractions = loadSubagentInteractions(discovered5.files);
 	check(catInteractions.length === 1, "parses one subagent interaction");
 	check(catInteractions[0]._cat !== undefined, "_cat is stamped on subagent interaction");
 	check(typeof catInteractions[0]._cat === "string", "_cat is a string category");

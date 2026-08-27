@@ -56,7 +56,8 @@ try {
 	writeAgentFile(path.join(subagentsDir, "workflows", "wf_35102db9-a86", "agent-wf2.jsonl"), 0.25);
 	writeAgentFile(path.join(subagentsDir, "workflows", "wf_6296aeb7-4c5", "agent-wf3.jsonl"), 0.75);
 
-	const found = discoverSubagentSessionFiles(parentFile);
+	// Round 6: discovery returns { files, unreadable }.
+	const { files: found } = discoverSubagentSessionFiles(parentFile);
 	const names = found.map(f => path.basename(f)).sort();
 
 	check(names.includes("agent-plain.jsonl"), "plain subagents/agent-*.jsonl still discovered");
@@ -75,7 +76,7 @@ try {
 	// A tag of an agent transcript matches the agent-*.jsonl file filter by name
 	fs.writeFileSync(path.join(tagsDir, "agent-plain.jsonl.wtft-tag.v2.6.0.jsonl"), "{}\n");
 
-	const found2 = discoverSubagentSessionFiles(parentFile);
+	const { files: found2 } = discoverSubagentSessionFiles(parentFile);
 	check(found2.length === 4, `tag files not collected as transcripts (got ${found2.length})`);
 	check(!found2.some(f => f.includes("wtft-tags")), "no path under wtft-tags/ returned");
 } finally {

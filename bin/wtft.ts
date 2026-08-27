@@ -23,6 +23,7 @@ import {
 	readUncountedBillableClass,
 	renderUncountedBillables,
 	discoverSubagentSessionFiles,
+	discoverClaudeSubAgentSessionFiles,
 	loadSubagentInteractions,
 	attributeClaudeSubAgentCosts,
 	parseInterval,
@@ -139,6 +140,7 @@ export {
 	readUncountedBillableClass,
 	renderUncountedBillables,
 	discoverSubagentSessionFiles,
+	discoverClaudeSubAgentSessionFiles,
 	loadSubagentInteractions,
 	attributeClaudeSubAgentCosts,
 	parseInterval,
@@ -625,7 +627,41 @@ async function main() {
 		// compaction inside a subagent is just as invisible as one in the parent.
 		let uncounted = newUncountedBillables();
 		uncounted = addUncountedBillables(uncounted, scanUncountedBillables(finalSessionPath));
-		for (const sub of discoverSubagentSessionFiles(finalSessionPath)) {
+		// Subagent discovery can throw (#457): an unreadable subagents
+		// directory drops the whole Task/agent subtree. The parser already
+		// warned (once per dir, latched); degrade the blind-spot scan rather
+		// than crash the report — the tag-based costs are unaffected.
+		let subagentFiles: string[] = [];
+		try {
+			const discovered = discoverSubagentSessionFiles(finalSessionPath);
+			subagentFiles = discovered.files;
+			if (discovered.unreadable) {
+				// #457 (round 6) — a per-file discovery failure is REPORTED,
+				// not thrown: the readable siblings still scan (partial
+				// progress), while the report degrades the blind-spot scan
+				// the same way the dir-level catch below does — the token
+				// table is missing the unreadable sibling's uncounted
+				// billables, the same class of incomplete report #443's
+				// provisional exit exists for, so the exit code says so
+				// instead of printing a complete-looking report.
+				// (round 7) Assigned unconditionally: the CLI's own discovery
+				// failure is direct evidence, fresher than any reason derived
+				// from the tag. A permanent unreadability also keeps the
+				// daemon from rebuilding the tag (its poll fails), so the
+				// tag-derived "run wtft again in a moment" remedy would loop
+				// forever — the restore-readability remedy below is the
+				// actionable one regardless of the tag verdict.
+				provisional = { provisional: true, reason: "subagent-unreadable" };
+			}
+		} catch {
+			// The DIR-level failure still throws (rounds 4/6): an unreadable
+			// subagents directory or sibling sessionDir drops a whole
+			// subtree's uncounted billables. walkSubagentDir already warned
+			// (once per dir, latched); degrade the blind-spot scan the same
+			// way (round 7) — unconditional, for the same reason as above.
+			provisional = { provisional: true, reason: "subagent-unreadable" };
+		}
+		for (const sub of subagentFiles) {
 			uncounted = addUncountedBillables(uncounted, scanUncountedBillables(sub));
 		}
 		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, uncounted);
@@ -673,7 +709,9 @@ async function main() {
 	if (provisional.provisional) {
 		const why = provisional.reason === "stale-version"
 			? `this tag was written by tagger v${path.basename(tagPath).match(/\.wtft-tag\.v([^/]+)\.jsonl$/)?.[1] ?? "?"}, not v${WTFT_TAGGER_VERSION}`
-			: "no subagent transcript has been read since this tag was written";
+			: provisional.reason === "subagent-unreadable"
+				? "a subagent transcript could not be read, so the token table is incomplete"
+				: "no subagent transcript has been read since this tag was written";
 		// The remedy names ONE action, and deliberately does not mention -F (PR
 		// review, Medium/contract). `-F` does not return early: it deletes the
 		// tag, kills the daemon, and falls through to this same read path, so a
@@ -690,10 +728,31 @@ async function main() {
 		// --help; re-running is the correct advice either way, since the daemon
 		// is already rebuilding.
 		//
+		// subagent-unreadable is the one reason with a remedy that is NOT the
+		// daemon-rebuild line, and the reason for the split is the same -F loop
+		// logic (rounds 6/7, PR review, Low/correctness; round 7 dropped the
+		// guard, so this reason fires whenever the CLI's own discovery fails,
+		// whatever the tag verdict): a permanent unreadability also keeps the
+		// daemon from rebuilding the tag — its poll fails, so the marker stays
+		// stale and "run wtft again in a moment" is advice that loops forever
+		// against a permanent unreadability. The one action that ends the loop
+		// is restoring the unreadable transcript's readability; the daemon
+		// re-discovers on every poll, and this CLI's --tokens scan reads the
+		// transcript files directly too, so a re-run picks the file up once it
+		// is readable. The tag total may ALSO be missing this transcript's
+		// cost: readTagProvisional cannot tell whether the swept marker
+		// predates the failure (the marker is not retracted), so the total
+		// reads settled with the cost missing — which is why the exit code
+		// stays provisional either way, and why the remedy does not claim the
+		// total is "settled".
+		//
 		// The exit code stays 9 regardless: the number really is not final, and
 		// softening that under -F would be the exact lie this issue is about.
 		console.error(`\x1b[33m⚠ PROVISIONAL: this total may still grow — ${why}.\x1b[0m`);
-		console.error(`\x1b[90m  The daemon is rebuilding this tag now — run wtft again in a moment to read the settled total. Exit ${EXIT_PROVISIONAL}.\x1b[0m`);
+		const remedy = provisional.reason === "subagent-unreadable"
+			? "restore the unreadable transcript's readability, then run wtft again — the daemon re-reads it on its next poll, and the --tokens scan reads it directly"
+			: "The daemon is rebuilding this tag now — run wtft again in a moment to read the settled total";
+		console.error(`\x1b[90m  ${remedy}. Exit ${EXIT_PROVISIONAL}.\x1b[0m`);
 		// `exitCode` and return, NOT process.exit() (PR review,
 		// Medium/correctness). On Linux node's stdout is ASYNCHRONOUS when it is a
 		// pipe rather than a TTY or a regular file, and process.exit() does not

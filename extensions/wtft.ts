@@ -37,6 +37,14 @@ import {
 // ---
 let _currentThinkingLevel: string | undefined;
 
+// Round 10 (macroscope, Medium): the widget's own surface for unreadable
+// transcripts. The parser warns on stderr (latched once per file), but this
+// extension's stderr is not a user surface — the finding was that the TUI
+// showed a settled-looking total while discovery reported an unreadable
+// transcript. Set by readInteractions on every render pass; read by
+// updateWtftWidget after building the lines.
+let _subagentUnreadable = false;
+
 // Daemon directory relative to this extension file
 const _daemonDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin");
 
@@ -149,8 +157,28 @@ function readInteractions(ctx: any): Interaction[] {
 	const tagPath = getTagPath(sessionFile);
 	const mainInteractions = readClassifiedTagFile(tagPath);
 
-	// Subagent rollup: discover and parse subagent session files (#83, #82)
-	const subagentFiles = discoverSubagentSessionFiles(sessionFile);
+	// Subagent rollup: discover and parse subagent session files (#83, #82).
+	// Discovery can throw (#457): an unreadable subagents directory drops the
+	// whole Task/agent subtree. The parser warned once per dir (latched);
+	// render main interactions only rather than crash the widget on every
+	// refresh.
+	// Round 10: the flag is per-render — every pass re-reads discovery.
+	_subagentUnreadable = false;
+	let subagentFiles: string[] = [];
+	try {
+		// Round 6: discovery returns { files, unreadable } — the readable
+		// siblings still render (partial progress); the per-file failure was
+		// already warned once by the parser (latched). Round 10: the report
+		// DOES need an action here — stderr is not a user surface, so the
+		// widget appends a warning line whenever discovery reports an
+		// unreadable transcript. Only the DIR-level failure still throws,
+		// and it degrades to main interactions below.
+		const discovered = discoverSubagentSessionFiles(sessionFile);
+		subagentFiles = discovered.files;
+		if (discovered.unreadable) _subagentUnreadable = true;
+	} catch {
+		_subagentUnreadable = true; // walkSubagentDir already warned; degrade to main interactions
+	}
 	if (subagentFiles.length === 0) return mainInteractions;
 
 	const subInteractions = loadSubagentInteractions(subagentFiles);
@@ -240,6 +268,9 @@ function updateWtftWidget(
 		const widgetLines = parserStatusStr
 			? [emptyLine, parserStatusStr.trim()]
 			: [emptyLine];
+		if (_subagentUnreadable) {
+			widgetLines.push("\x1b[33m⚠ some transcripts unreadable — total may be incomplete\x1b[0m");
+		}
 		ctx.ui.setWidget("wtft", widgetLines, { placement: "belowEditor" });
 		return;
 	}
@@ -262,6 +293,10 @@ function updateWtftWidget(
 		} else {
 			lines.splice(1, 0, parserStatusStr.trim());
 		}
+	}
+
+	if (_subagentUnreadable) {
+		lines.push("\x1b[33m⚠ some transcripts unreadable — total may be incomplete\x1b[0m");
 	}
 
 	ctx.ui.setWidget("wtft", lines, { placement: "belowEditor" });

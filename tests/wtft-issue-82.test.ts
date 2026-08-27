@@ -68,7 +68,9 @@ try {
 		"",
 	].join("\n"));
 
-	const discovered = discoverSubagentSessionFiles(parentFile);
+	// Round 6: discovery returns { files, unreadable }; the readable files are
+	// what the walk contract is about, and no fixture here is unreadable.
+	const { files: discovered } = discoverSubagentSessionFiles(parentFile);
 	console.log(`  Discovered: ${discovered.length} subagent files`);
 	console.log(`  Files: ${discovered.map(f => path.basename(f)).join(", ")}`);
 
@@ -107,7 +109,7 @@ try {
 		currentDir = path.join(currentDir, `${currentName}-d${d}`, "subagents");
 	}
 
-	const deepDiscovered = discoverSubagentSessionFiles(deepParent);
+	const { files: deepDiscovered } = discoverSubagentSessionFiles(deepParent);
 	console.log(`  Discovered: ${deepDiscovered.length} files (depth 6 chain, max depth 5)`);
 	// Depth 5 → should find only 5 files (d1-d5), not d6
 	check(deepDiscovered.length === 5, "depth-5 limit: finds exactly 5 (not 6) subagent files");
@@ -150,7 +152,7 @@ try {
 		"",
 	].join("\n"));
 
-	const mixDiscovered = discoverSubagentSessionFiles(mixParent);
+	const { files: mixDiscovered } = discoverSubagentSessionFiles(mixParent);
 	console.log(`  Discovered: ${mixDiscovered.length} files (expected 4: A, B, C, C-child)`);
 	check(mixDiscovered.length === 4, "mixed structure: finds all 4 subagent files (3 siblings + 1 grandchild)");
 

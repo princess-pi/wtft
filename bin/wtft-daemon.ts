@@ -32,6 +32,7 @@ import {
 	getCurrentVersionTagPath,
 	isSessionIdBasename,
 	loadExternalHarnesses,
+	warnUnreadableTranscript,
 	WTFT_TAGGER_VERSION as TAGGER_VERSION
 } from "../extensions/lib/wtft-shared.js";
 
@@ -110,6 +111,15 @@ let tagGrewSinceMarker = true;
 // that could not read what it was meant to read must not stamp the tag as
 // swept (#443, PR review).
 let pollHadFailure = false;
+// Round 10 (macroscope, Medium): set when invalidateStaleSweptMarker appends
+// a retraction record. The sweep gate stamps on `tagGrewSinceMarker` OR this
+// flag, so a clean poll clears the retraction even when nothing new landed —
+// a retraction's only job is to doubt the marker it retracts, and a clean
+// poll has just read everything the failure hid (parseNewLines resumes from
+// its last offset, so content that arrived while unreadable lands in the
+// same clean poll). Without this, a transient failure on a session that
+// never grows again would leave the tag provisional forever.
+let sweptRetracted = false;
 // One ungated warning if that marker cannot be appended (#443, PR review). A
 // plain boolean, not one of the per-transcript Sets above: there is one tag file
 // per daemon, not one per transcript, so a Set keyed on anything would hold
@@ -908,18 +918,53 @@ function scanForSubAgents() {
       }
       if (!cwd) continue;
 
-      const files = discoverClaudeSubAgentSessionFiles(cwd, interaction.timestamp);
-      if (files.length === 0) {
+      let discovered: Awaited<ReturnType<typeof discoverClaudeSubAgentSessionFiles>>;
+      try {
+        discovered = discoverClaudeSubAgentSessionFiles(cwd, interaction.timestamp);
+      } catch (err) {
+        // #457 (round 4) — a discovery call can still THROW for the
+        // DIR-LEVEL failure: an unreadable ~/.claude/projects/<slug>/ itself
+        // (the parser warns once per dir, latched; the throw is how the
+        // failure reaches THIS handler instead of being silently skipped).
+        // Keep the command pending so registration retries next poll, and
+        // mark the sweep failed: the marker must not stamp while the
+        // project dir's candidates are missing. The warning is the
+        // parser's; this is debug-only.
+        pollHadFailure = true;
+        stillPending.push(item);
+        if (process.env.WTFT_DAEMON_DEBUG) {
+          process.stderr.write(`[wtft-log-parser] claude -p discovery failed, will retry next poll (${path.basename(cwd)}): ${err instanceof Error ? err.message : String(err)}\n`);
+        }
+        continue;
+      }
+      if (discovered.files.length === 0 && !discovered.unreadable) {
         stillPending.push(item);
         continue;
       }
-      for (const file of files) {
+      for (const file of discovered.files) {
         // Register only. The read happens below, in the same loop and through
         // the same function as the Task/agent path, every poll for as long as
         // this daemon lives.
         discoveredClaudeFiles.add(file);
         if (process.env.WTFT_DAEMON_DEBUG) {
           process.stderr.write(`[wtft-log-parser] claude -p subagent registered for re-parse (${path.basename(file, '.jsonl')})\n`);
+        }
+      }
+      if (discovered.unreadable) {
+        // #457 (round 5) — a per-file discovery failure no longer throws:
+        // the parser returns the readable matches alongside the report, so
+        // their costs land (they are usually OTHER sessions' transcripts in
+        // the shared ~/.claude/projects/<slug>/). But THIS command must
+        // still stay pending and the sweep must still fail: the unreadable
+        // candidate's timestamp window was never checkable, so it might BE
+        // this command's transcript — the swept marker must not stamp while
+        // its cost could be missing. Registration retries next poll, and the
+        // marker unblocks itself when readability returns. The warning is
+        // the parser's; this is debug-only.
+        pollHadFailure = true;
+        stillPending.push(item);
+        if (process.env.WTFT_DAEMON_DEBUG) {
+          process.stderr.write(`[wtft-log-parser] claude -p discovery candidate unreadable, will retry next poll (${path.basename(cwd)}): ${discovered.unreadable.message}\n`);
         }
       }
     }
@@ -932,7 +977,39 @@ function scanForSubAgents() {
   // not an incremental read. Short version: every invariant the parser provides
   // — id collapse, one nested-session attribution, compaction consumption — is
   // scoped to the array it is handed, and a poll batch is the wrong array.
-  const taskAgentFiles = discoverSubagentSessionFiles(sessionPath);
+  let taskAgentFiles: string[] = [];
+  try {
+    const discoveredPi = discoverSubagentSessionFiles(sessionPath);
+    taskAgentFiles = discoveredPi.files;
+    if (discoveredPi.unreadable) {
+      // #457 (round 6) — a per-file discovery failure no longer throws in
+      // the Pi half either: the readable siblings are returned alongside
+      // the report, so their costs land this poll (partial progress, same
+      // rule as the claude -p discovery above). But the sweep must still
+      // fail: the unreadable sibling's parentSession header was never
+      // checkable, so it might BE this session's subagent — the marker must
+      // not stamp while its cost could be missing. The sync loop below runs
+      // over the readable files; the unreadable one is retried next poll and
+      // the marker unblocks when readability returns. The warning is the
+      // parser's; this is debug-only.
+      pollHadFailure = true;
+      if (process.env.WTFT_DAEMON_DEBUG) {
+        process.stderr.write(`[wtft-log-parser] Pi discovery candidate unreadable, will retry next poll (${path.basename(sessionPath)}): ${discoveredPi.unreadable.message}\n`);
+      }
+    }
+  } catch (err) {
+    // #457 (round 4) — the DIR-level failures still throw (the parser warns
+    // once per dir, latched): an unreadable subagents DIRECTORY or an
+    // unreadable Pi sibling sessionDir drops every Task/agent cost under it.
+    // Route it into pollHadFailure like the claude discovery catch above:
+    // the marker must not stamp while the dir's costs are missing. The
+    // task/agent sync loop is skipped for this poll only — the claude -p
+    // syncs below still run.
+    pollHadFailure = true;
+    if (process.env.WTFT_DAEMON_DEBUG) {
+      process.stderr.write(`[wtft-log-parser] subagents dir discovery failed, will retry next poll (${path.basename(sessionPath)}): ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+  }
   for (const file of taskAgentFiles) {
     wroteAny = syncSubagentTranscript(file) || wroteAny;
   }
@@ -985,17 +1062,112 @@ function scanForSubAgents() {
   // #457 is closed: parseSessionFile throws on read failure, so an unreadable
   // transcript lands in the parse handler above, sets pollHadFailure, and can
   // no longer be mistaken for an empty one — closing it strengthened this
-  // marker for free, exactly as the pre-fix note here predicted.
+  // marker for free, exactly as the pre-fix note here predicted. That holds for
+  // the nested attribution read too: attributeClaudeSubAgentCosts propagates an
+  // unreadable nested transcript instead of swallowing it into a silent zero,
+  // so any part of this parse failing to read withholds the marker — and the
+  // SUBAGENT transcript's own rows are not written that poll (the parse threw,
+  // so the handler above returned before the append; the MAIN parent's rows are
+  // unaffected — flushPending runs before scanForSubAgents in this same poll,
+  // and parseSessionFile is only ever called on subagent files).
+  //
+  // Which read failures reach the handler above, honestly (round 4): (1) the
+  // nested read itself — the transient discovery→parse race, a file that
+  // vanished or became unreadable between discovery's read and the parse's
+  // read; (2) a statically unreadable Task/agent transcript — walkSubagentDir
+  // discovers by name and stat only, never a content read, so an EACCES file
+  // is listed and fails at the parse read; (3) a registered claude -p
+  // transcript re-read every poll whose unreadability was acquired after its
+  // one-time registration — a permissions change, an unmount — no discovery
+  // read precedes those later polls. Caveat on (3), round 5: unreadability
+  // acquired by CHMOD ALONE reads ZERO polls, because the sync loop's stat
+  // gate skips any registered file whose size/mtime are unchanged and already
+  // settled, and chmod touches ctime, not size/mtime — the registration read
+  // already synced that file in full, so no cost is missing and the marker
+  // stamps correctly; a class-(3) failure that actually reaches the handler
+  // needs a change the gate detected (an unmount, an edit, a delete).
+  // There is no silent-skip boundary left to hide the COMMON case: the
+  // discovery read itself (discoverClaudeSubAgentSessionFiles) warns once per
+  // file per process and reports the failure in its result — the "file
+  // unreadable at DISCOVERY is skipped there" carve-out this comment used to
+  // claim is gone (round 4), and the block above routes the report into
+  // pollHadFailure too. Round 6 narrowed the last per-entry skip honestly:
+  // walkSubagentDir's stat failure is silent only when the entry no longer
+  // exists (ENOENT) or cannot be a transcript (ELOOP) — no cost to miss,
+  // next poll re-lists; every other stat error warns once per file. The dir-level skips went the same way: an unreadable
+  // subagents directory (walkSubagentDir — top-level OR nested, the recursion
+  // sits outside the per-entry stat catch since round 5), an unreadable
+  // ~/.claude/projects/<slug>/, and the Pi-pattern sibling sessionDir all
+  // warn once per dir per process and throw, and the catches just above route
+  // those into pollHadFailure too.
+  // Round 9 closed the LAST silent one — the daemon's own read of the MAIN
+  // session file (parseNewLines, below): it swallowed every read failure
+  // (EACCES, EIO, ...) into an empty batch and never touched pollHadFailure,
+  // so a tag could keep claiming swept while the main file's cost was
+  // missing. It now warns once per process and sets pollHadFailure exactly
+  // like every other boundary (ENOENT alone stays silent — the session file
+  // legitimately does not exist at startup). The marker was already withheld
+  // in practice because the pattern-2 discovery read of the same file
+  // reports the failure first in the poll — the fix makes the boundary
+  // self-sufficient instead of ordering-dependent.
+  //
+  // And the vanished case, honestly: a REGISTERED claude -p transcript that is
+  // later deleted is never evicted from discoveredClaudeFiles, so its statSync
+  // throws ENOENT and the stat handler above sets pollHadFailure EVERY poll —
+  // the marker below never stamps again. Fail-safe (it never claims swept
+  // while a registered transcript is unreadable) but unending: nothing
+  // re-discovers the gone file, so this poll's failure is every poll's
+  // failure. Eviction on ENOENT is deliberately not taken — registration is
+  // one-shot (the parent's bash command is consumed), so an evicted transcript
+  // that returns (an unmount, a move) would never be re-registered, silently
+  // dropping it: #270's bug class on the claude path.
+  //
+  // The same unending outcome needs no vanished file: a discovery candidate
+  // that STAYS unreadable (a permission change never undone, an unmounted dir)
+  // is reported in every discovery result — every pending claude -p command
+  // sharing that project dir retries forever, pollHadFailure stays set, and
+  // the marker never stamps again. Round 5 softened the LOSS, not the
+  // verdict: the readable in-window candidates sharing that dir ARE still
+  // registered and counted (the unreadable file is usually a different
+  // session's transcript in the shared ~/.claude/projects/<slug>/), but the
+  // marker still withholds, because the candidate's timestamp window was
+  // never checkable — its cost might be THIS command's. It is recovered the
+  // moment readability returns (the candidate is re-read at each retry), so
+  // it is a second permanent-provisional case only when readability never
+  // returns.
+  //
+  // One limit on all of the above, honestly: "the tag stays provisional for
+  // this daemon's life" over-promises. readTagProvisional is purely
+  // positional — it scans backward over the tag file and cannot see
+  // pollHadFailure. pollHadFailure only withholds FUTURE stamps; a marker
+  // stamped BEFORE the failure began is not retracted, and while the parent
+  // stays quiet no classified line lands after it, so the tag still reads
+  // settled with the registered transcript's cost permanently missing. The
+  // failure-withholding mechanism prevents new false sweeps; it cannot
+  // invalidate an old one.
+  // Round 10 closed the MAIN-FILE half of that limit (macroscope, Medium):
+  // the parseNewLines catch below appends {"_meta":{"unswept":ts}} once per
+  // failure episode when a swept marker is the last significant record, and
+  // tagProvisionalFromContent's backward scan honors that record as a
+  // provisional verdict — the old marker is retracted, so the tag reads
+  // unswept until a fresh marker covers the recovered lines. The other
+  // failure classes (syncSubagentTranscript's stat/parse/serialize/write
+  // handlers) have no invalidation record: a marker stamped before such a
+  // failure began still stands until the next poll re-stamps or a
+  // classified line lands after it.
   //
   // Not gated on `wroteAny`: a session with no subagents has nothing to sweep,
   // and "nothing to sweep" is the same state to a reader as "swept". Gating on it
   // would leave every subagent-free session reading provisional forever, which
   // trains the reader to ignore the flag.
-  if (tagGrewSinceMarker && !pollHadFailure) {
+  if (!pollHadFailure && (tagGrewSinceMarker || sweptRetracted)) {
     try {
       fs.appendFileSync(tagPath, JSON.stringify({ _meta: { swept: Date.now() } }) + "\n");
       // Cleared only on a landed append, so a failed write retries next poll.
+      // sweptRetracted clears with it: the fresh marker is now the last
+      // significant record, so the retraction it replaces is discharged.
       tagGrewSinceMarker = false;
+      sweptRetracted = false;
     } catch (err) {
       // The WRITE retries; the WARNING latches. Two different things, and an
       // earlier version of this block conflated them (PR review).
@@ -1074,9 +1246,77 @@ function parseNewLines(filePath: string) {
       }
     }
     return interactions;
-  } catch (_) {
-    // File may not exist yet
+  } catch (err) {
+    // Round 9 (PR review, Medium): this catch used to swallow EVERY failure
+    // into an empty batch with the comment "File may not exist yet" — the
+    // daemon's last silent read boundary, and the same silent-empty lie the
+    // discovery read was fixed to report (rounds 4/5/8). The review said the
+    // poll loop's catch was the boundary and must set pollHadFailure; that
+    // catch never fires for this class because the swallow sits in front of
+    // it — the fix belongs HERE, at the swallow.
+    // ENOENT stays silent: the session file legitimately does not exist yet
+    // at daemon startup (the poll's existsSync and followMovedSession own
+    // absence). Anything else — EACCES, EIO, EPERM, ENOTDIR, a failed
+    // mid-read — is a transcript that exists but cannot be read: warn once
+    // per process, and withhold the swept marker. pollHadFailure resets at
+    // the top of the next poll (below), so the marker unblocks the moment
+    // readability returns; the discovery read of the same file (pattern 2)
+    // independently enforces the same contract, so this makes the boundary
+    // self-sufficient rather than depending on the poll ordering.
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return [];
+    warnUnreadableTranscript(filePath, "at discovery", err, "the session transcript");
+    pollHadFailure = true;
+    invalidateStaleSweptMarker(filePath); // Round 10: retract a swept marker stamped before this failure
     return [];
+  }
+}
+
+/**
+ * Round 10 (macroscope, Medium): the reader cannot see pollHadFailure —
+ * readTagProvisional scans the tag backward, so a swept marker stamped
+ * BEFORE this poll's failure would still certify the stale, undercounted
+ * total as settled (the positional limit named in the sweep comment above).
+ * Retract it: append {"_meta":{"unswept":ts}} only when a swept marker is
+ * the last significant record, and only once per episode — the next failed
+ * poll finds the unswept record last and skips; a fresh swept marker after
+ * recovery starts a new episode. Mirrors tagProvisionalFromContent's scan:
+ * other _meta shapes (offset) are passed over, and a classified line after
+ * the marker already invalidates it positionally, so nothing is appended.
+ * Best-effort: if the tag cannot be read or appended, the next failed poll
+ * retries, and the parse failure itself is already warned once.
+ */
+function invalidateStaleSweptMarker(filePath: string) {
+  try {
+    const tagPath = getCurrentVersionTagPath(filePath);
+    const lines = fs.readFileSync(tagPath, "utf8").split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      let obj: Record<string, unknown> | null = null;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        continue; // unparseable line — not a verdict, keep scanning
+      }
+      // Mirror tagProvisionalFromContent's backward scan exactly, so the
+      // writer and reader can never disagree about the last significant
+      // record: heartbeats and non-verdict _meta shapes (offset) carry no
+      // cost and are passed over; only a swept marker (retract it) or a
+      // classified line (which already invalidates the marker
+      // positionally) stops the walk.
+      if (obj?.["_hb"]) continue;
+      const meta = (obj?.["_meta"] ?? {}) as Record<string, unknown>;
+      if (typeof meta.unswept === "number") return; // this episode already invalidated
+      if (typeof meta.swept === "number") {
+        fs.appendFileSync(tagPath, JSON.stringify({ _meta: { unswept: Date.now() } }) + "\n");
+        sweptRetracted = true; // clear on the next clean poll's stamp (see sweep gate)
+        return;
+      }
+      if (obj?.["_meta"]) continue; // offset or foreign shape — keep scanning
+      return; // classified line — the reader already reads provisional past it
+    }
+  } catch {
+    // Best-effort retraction; the failure path already warned once per process.
   }
 }
 

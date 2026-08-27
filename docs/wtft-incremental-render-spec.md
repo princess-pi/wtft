@@ -271,19 +271,98 @@ with the soundness condition above rather than an exception to it.
 is weaker than "no failures occurred". #457 is closed — `parseSessionFile` now throws
 on read failure, so an unreadable transcript lands in `syncSubagentTranscript`'s parse
 handler, sets `pollHadFailure`, and is never mistaken for an empty one — which
-strengthened this marker for free, exactly as the pre-fix note here predicted. The
-remaining gap is only the ordinary one: a failure occurring between the last poll and
-the marker stamp is still not reflected in it.
+strengthened this marker for free, exactly as the pre-fix note here predicted. That
+holds for the nested attribution read too: `attributeClaudeSubAgentCosts` no longer
+swallows an unreadable nested transcript into a silent zero — the throw propagates to
+the same handler, so the SUBAGENT transcript's rows are not written that poll and the
+sweep is withheld while any part of the parse it depends on is unreadable. (The MAIN
+parent's rows are unaffected: `flushPending()` runs before `scanForSubAgents()` in the
+same poll, and `parseSessionFile` is only ever called on subagent files, never the main
+session.) There is no silent
+discovery boundary left (round 5): `discoverClaudeSubAgentSessionFiles` reads each
+candidate file IN FULL for its head scan, warns once per unreadable file per process,
+and REPORTS the failure in its result instead of throwing — an unreadable candidate at
+discovery still withholds the marker and is retried next poll, never dropped from the
+attribution silently, but the readable in-window matches sharing that project dir are
+returned alongside the report instead of being discarded with it. `~/.claude/projects/<slug>/`
+is shared across many sessions, so an unreadable candidate is usually a DIFFERENT
+session's transcript; the old throw stalled every pending claude -p command sharing the
+cwd — their costs permanently missing while the unreadable file stayed, every poll
+re-reading everything. The daemon registers the readable matches (their costs land) and
+still withholds the swept marker for the command whose window held the unreadable
+candidate, because that candidate's timestamp window was never checkable — it might BE
+that command's transcript. The attribution pass (`attributeClaudeSubAgentCosts`) keeps
+the throw: there, the parent turn is this transcript's own command, so its cost must
+land or the report is silently incomplete. The Pi-pattern sibling files follow the same
+warn-and-report rule (round 6): a per-file read failure warns once per file per process
+and REPORTS in the result, with the readable siblings returned alongside it — the same
+partial-progress shape, applied to this half of discovery after the round-5 throw
+proved to starve the whole subtree over one unreadable file. A sibling whose header
+cannot even PARSE (empty file, partial crash header, a non-transcript `.jsonl`) is
+skipped silently, same rule as the claude half's per-line JSON swallow: it can never
+declare `parentSession`, so it can never contribute cost — warning there would hold the
+marker forever over nothing. The dir-level skips went the same way — an unreadable
+subagents directory (`walkSubagentDir`, top-level OR nested: the recursion sits outside
+the per-entry stat catch since round 5), an unreadable `~/.claude/projects/<slug>/`
+(its existence gate was `existsSync` until round 6, which read a stat error — EACCES on
+an ancestor, ENOTDIR, ELOOP — as "absent" and stamped the marker over the missing
+subtree; the gate is now `statSync`, ENOENT absent, every other error a dir-level
+throw), and an unreadable Pi sibling sessionDir warn once per dir per process and
+throw; the daemon routes those into `pollHadFailure`, the TUI/CLI degrade to the
+warning. The one remaining per-entry skip is `walkSubagentDir`'s stat failure, honest
+about its carve-out (round 6): ENOENT (deleted between readdir and stat) and ELOOP hold
+no cost to miss, so they stay silent; every other stat error warns once per file per
+process. Which read
+failures reach the nested read, honestly: (1) the transient discovery→parse race (a
+file that vanished, or became unreadable, between the two reads); (2) a statically
+unreadable Task/agent transcript — `walkSubagentDir` discovers by name and stat only,
+never a content read, so an EACCES file is listed and fails at the nested read; (3) a
+registered claude -p transcript re-read every poll for the daemon's life whose
+unreadability was acquired after its one-time registration. Cases 1 and 2 retry next
+poll — the session id is not marked seen and the daemon's change detector was never
+advanced — and make the parent parse throw every poll until readability returns. Case 3
+has the same retry shape ONLY when the failure reaches the read: its chmod-only variant
+throws ZERO polls, because the sync loop's stat gate skips any registered file whose
+size/mtime are unchanged and already settled, and chmod touches ctime, not size/mtime —
+the registration read already synced that file in full, so no cost is missing and the
+marker stamps correctly. The cost is recovered the poll the file is readable again.
+
+Two cases have no recovery, honestly, and both end the same way — the marker never
+stamps again for the daemon's life. (a) The vanished REGISTERED claude -p transcript:
+registration is one-shot and never evicted, so a deleted registered file fails its
+statSync every poll. (b) A discovery candidate that STAYS unreadable (a permission
+change never undone, an unmounted dir): the failure is reported in every discovery
+result, so every pending claude -p command sharing that project dir retries forever.
+Both are fail-safe (never claim swept while the transcript's cost is missing) but
+unending; eviction on ENOENT is deliberately not taken, because an evicted transcript
+that returns would never be re-registered (#270's bug class). Round 5 softened the
+LOSS, not the verdict: in case (b) the readable in-window candidates sharing that dir
+ARE still registered and counted (the unreadable file is usually a different session's
+transcript), but the marker still withholds, because the candidate's timestamp window
+was never checkable. Case (b) recovers automatically when readability returns — the
+candidate is re-read at each retry; case (a) recovers only if the file itself returns.
+
+One limit on the "tag stays provisional" claim: `readTagProvisional` is purely
+positional over the tag file and cannot see `pollHadFailure`. `pollHadFailure` only
+withholds FUTURE stamps; a marker stamped BEFORE the failure began is not retracted, so
+while the parent stays quiet the tag still reads settled with the unreadable
+transcript's cost missing. The remaining gap is only the ordinary one: a failure
+occurring between the last poll and the marker stamp is still not reflected in it.
 
 ### `readTagProvisional`, and what the CLI does with it
 
 `readTagProvisional` (`extensions/lib/wtft-daemon-lib.ts`) returns
-`{ provisional, reason }` for two conditions, either sufficient:
+`{ provisional, reason }` for two conditions, any sufficient. A third reason,
+`subagent-unreadable`, is never returned by it — it is assigned by the CLI's
+own render-side degrade (round 7, PR review): the table lists it because the
+CLI consumes it, but a reader tracking the code should not look for it at the
+`readTagProvisional` layer.
 
-| reason | condition |
-|---|---|
-| `stale-version` | the resolved tag is not at `WTFT_TAGGER_VERSION` — `getTagPath` rule 3 falls back to "any-version tag, newest mtime" (#95), so a read can land on superseded semantics while the daemon builds a current-version tag beside it |
-| `unswept` | a current-version tag holding classified data but no `_meta.swept` |
+| reason | returned by `readTagProvisional`? | condition |
+|---|---|---|
+| `stale-version` | yes | the resolved tag is not at `WTFT_TAGGER_VERSION` — `getTagPath` rule 3 falls back to "any-version tag, newest mtime" (#95), so a read can land on superseded semantics while the daemon builds a current-version tag beside it |
+| `unswept` | yes | a current-version tag holding classified data but no `_meta.swept` |
+| `subagent-unreadable` | no — CLI-assigned | the CLI's own render-side degrade: a subagent transcript could not be read (one file, or a whole directory of them), so the `--tokens` table is missing a subtree's uncounted billables even though the tag still reads settled (#457). Assigned unconditionally on the CLI's own discovery failure — direct evidence that outranks any tag-derived reason, since a permanent unreadability also blocks the daemon's rebuild (round 7) |
 
 **There is no scan window.** The first version scanned only the last 8KB, justified as
 "matching `readLastMetaOffset`" — a justification that does not survive contact, since
@@ -317,6 +396,25 @@ always better than nothing. The exit code and the prose line address two differe
 readers, and 9 is distinct from 1 because "the run failed" and "the run succeeded but
 the number is not final" are different facts.
 
+The same exit is earned by a render-side degrade with the same shape (#457, round 5):
+under `--tokens`, an unreadable subagent transcript — one file (round 6: the failure
+is reported, not thrown, and the readable siblings still scan) or a whole unreadable
+directory of them — drops uncounted billables from the token table. The parser's
+warning is one-shot and
+latched; a machine reader must not see a complete-looking report, so the CLI sets
+`provisional = { provisional: true, reason: "subagent-unreadable" }` and exits 9 with
+the reason named in the warning line — assigned unconditionally on the CLI's own
+discovery failure, whatever the tag verdict (round 7): the failure is direct
+evidence, and a permanent unreadability also blocks the daemon's rebuild, so the
+tag-derived reasons cannot be trusted to point at an action that ends the loop.
+The TUI's degrade (main-interactions-only) has no exit surface — its reader is the
+interactive widget, and the widget appends a yellow warning line, "some transcripts
+unreadable — total may be incomplete", whenever discovery reports an unreadable
+transcript (round 10): the extension's stderr is not a user surface, so the
+parser's latched stderr warning alone left the degrade invisible. The prose line
+stays the whole surface — the warning appears on every render until readability
+returns, and the widget has no exit code to set.
+
 The remedy line names **one** action — re-run — and deliberately never mentions `-F`.
 `-F` does not return early: it deletes the tag, kills the daemon, and falls through to the
 same read path, so a forced run can reach this branch too, and "use `-F`" would then be a
@@ -326,6 +424,18 @@ authoritative reference. Fixed by deleting the branch rather than by conditionin
 `flushPending` and the first `scanForSubAgents`, which no test can hit reliably — and an
 arm that always skips is untested, not covered. One sentence true in both cases has no
 such arm.
+
+`subagent-unreadable` earns its own remedy line for the same reason (rounds 6/7): it
+fires whenever the CLI's own discovery reports an unreadable transcript — one file, or
+a whole directory — whatever the tag verdict. The tag-derived "run wtft again in a
+moment" line is a loop against a permanent unreadability for the same reason `-F` is:
+the daemon's poll fails on the same unreadable file, so no rebuild is coming and the
+marker stays stale. The tag total may ALSO be missing this transcript's cost: the swept
+marker is not retracted, so the tag can read settled with the cost missing — which is
+why the exit code stays provisional either way, and why the remedy names restoring
+readability, not waiting. The daemon re-discovers on every poll, and the `--tokens`
+scan reads transcript files directly, so a CLI re-run picks the file up once it is
+readable.
 
 **Why an exit code and not a field.** `wtft` has no `--json`, no `--porcelain`, and no
 documented exit-code table; every number it produces is prose. An exit code is the only
@@ -449,6 +559,7 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 | Daemon never started | PID check fails, status shows "daemon not found" |
 | Daemon restarts after crash | Reads `_meta` offset from tag file for exact resume position; falls back to full re-parse if no meta offset found (#124) |
 | One-shot read beats the daemon to a stale tag | The total prints in full, a `PROVISIONAL` warning names why, and `wtft` exits **9** rather than 0 — `readTagProvisional` reports `stale-version` or `unswept` (#443). It does NOT wait: blocking a one-shot CLI on a repair proportional to subagent volume is the cost read-then-render avoids |
+| `--tokens` blind-spot scan loses a subtree | An unreadable subagent transcript — one file (reported, not thrown, since round 6; the readable siblings still scan) or a whole unreadable directory — drops uncounted billables from the token table; the parser warned (latched), the CLI sets `provisional` with reason `subagent-unreadable` and exits **9** (#457, round 5; assigned unconditionally on the CLI's own discovery failure since round 7 — never already-provisional-superseded) — a machine reader never sees a complete-looking report |
 | Daemon encounters transient error | Error logged (debug mode), daemon continues on next poll cycle — does not crash |
 | Terminal too narrow for inline status | Status wraps to separate line between title and legend |
 | Session file gone | Daemon exits cleanly; TUI continues showing last-known data with stopped indicator |

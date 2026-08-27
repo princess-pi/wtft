@@ -290,7 +290,9 @@ describe("#149 harness — surveys every real logged session", () => {
 			// and this instrument is UNTESTED, so subagent-bearing sessions are
 			// surveyed but never characterised.
 			const transcriptPath = records[0]?.transcript_path;
-			if (transcriptPath && fs.existsSync(transcriptPath) && discoverSubagentSessionFiles(transcriptPath).length > 0) {
+			// Round 6: discovery returns { files, unreadable } — the walk's
+			// readable files are the count that matters here.
+			if (transcriptPath && fs.existsSync(transcriptPath) && discoverSubagentSessionFiles(transcriptPath).files.length > 0) {
 				skippedSubagent++;
 				surveyed.push({ session: short, status: "skipped-subagent", records: records.length });
 				continue;

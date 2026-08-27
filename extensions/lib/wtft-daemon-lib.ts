@@ -201,8 +201,17 @@ export function dedupeClassifiedById(interactions: Interaction[]): Interaction[]
 	return out;
 }
 
-/** Why a tag read is provisional. Null when it is settled. */
-export type TagProvisionalReason = "stale-version" | "unswept";
+/**
+ * Why a tag read is provisional. Null when it is settled.
+ *
+ * "unswept" is the marker verdict (a classified line landed after the sweep,
+ * or no sweep ran). "subagent-unreadable" is the CLI/TUI's own verdict for a
+ * render-side degrade: a subagent transcripts directory could not be read, so
+ * the rendered token table is incomplete even when the tag itself is settled
+ * (#457). "stale-version" outranks both — a superseded-semantics tag is
+ * provisional whatever the sweep says.
+ */
+export type TagProvisionalReason = "stale-version" | "unswept" | "subagent-unreadable";
 
 export interface TagProvisional {
 	/** True when the total this tag yields may still grow under the daemon. */
@@ -344,6 +353,18 @@ export function tagProvisionalFromContent(tagPath: string, content: string): Tag
 			const obj = JSON.parse(line);
 			if (obj._hb) continue;
 			if (obj._meta) {
+				if (typeof obj._meta.unswept === "number") {
+					// Round 10 (macroscope, Medium): the daemon's invalidation
+					// record. A swept marker certifies only what its own poll
+					// read; when a later poll FAILS to read the main session
+					// file (EACCES, EIO), the last marker would otherwise
+					// stand and this scan would report the stale, undercounted
+					// tag as settled. The failure path appends
+					// {"_meta":{"unswept":ts}} once per episode; this branch
+					// is what makes the reader honor it — the tag reads
+					// unswept until a fresh marker covers the recovered lines.
+					return { provisional: true, reason: "unswept" };
+				}
 				if (typeof obj._meta.swept === "number") {
 					return { provisional: false, reason: null };
 				}

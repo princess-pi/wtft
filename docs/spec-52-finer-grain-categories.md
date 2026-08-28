@@ -1,6 +1,6 @@
 # Spec #52 — Finer-grain category mapping (Phases 1–4)
 
-Umbrella: [#52](https://github.com/duppypro/princess-pi-packages/issues/52). This spec covers
+Umbrella: [#52](https://github.com/duppypro/princess-pi-tools/issues/52). This spec covers
 Phase 1 (relabel) and Phase 2 (tool recognition) of the resolution plan posted 2026-07-13.
 Phase 3 (compaction/interrupted overhead classes) reserves its categories here but wires them
 in a follow-up slice.

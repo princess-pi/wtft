@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-270-subagent-nested-claude-attribution
  * @description #270 review round 3 (High/correctness, bin/wtft-daemon.ts) — a
  *   SILENT OVERCOUNT of nested `claude -p` sub-agents, caused by calling

@@ -1,6 +1,6 @@
 # Spec — #179: daemon health reason becomes a code, not a sentence
 
-**Issue:** [#179](https://github.com/duppypro/princess-pi-packages/issues/179)
+**Issue:** [#179](https://github.com/duppypro/princess-pi-tools/issues/179)
 **Status:** Code and Spec Approved
 **Related:** #124 (the grace window this protects), #165 (where the coupling was found), #167
 
@@ -159,7 +159,7 @@ more than V1 and V2 combined: V1/V2 protect the *representation*, V3 protects th
 
 ## 7. Landed after #181 — and #181 applied this ruling forward
 
-This branch merged into `main` behind [#181](https://github.com/duppypro/princess-pi-packages/issues/181),
+This branch merged into `main` behind [#181](https://github.com/duppypro/princess-pi-tools/issues/181),
 which is the same family of bug one layer out: `serve` inferring process *identity* from a
 `ps aux` substring. One conflict, in `docs/EXT_WTFT.html` — both branches added a spec-index
 row after `spec-168`. Both rows kept; nothing semantic overlapped, and the full suite is

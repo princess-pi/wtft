@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-cli-e2e-cost-parity
  * @description End-to-end test: runs the actual `wtft` CLI binary on a fixture
  *   session and asserts that non-watch, watch-mode (simulated), and direct

@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module harness/claude-code/discovery
  * @description Where Claude Code keeps its transcripts, and how to find one
  *   whose project dir no longer matches its cwd (#156).

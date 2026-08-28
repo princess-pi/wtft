@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-270-tagfile-staleness
  * @description #270's second half — "the tag-file staleness needs its own
  *   answer ... a fix that only corrects live behaviour leaves every

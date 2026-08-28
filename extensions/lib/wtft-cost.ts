@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module wtft-cost
  * @description Pure cost calculation for model token pricing.
  *   The registry covers the Claude 4 and 5 families (including fable and

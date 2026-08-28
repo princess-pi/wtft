@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-tag-reader-collapse-guard
  * @description #270 review round 11 (Low/contract, docs/wtft-incremental-render-spec.md) —
  *   the "every tag-file reader must collapse by message.id before summing" rule was

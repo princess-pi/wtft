@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module harness/types
  * @description The two interfaces every harness implements (#156).
  *
@@ -25,7 +25,7 @@ export interface SessionCandidate {
 	harness: string;
 	timestamp: number;   // mtime of file
 	name: string;        // basename, e.g. "019f207a-….jsonl"
-	displayPath: string; // e.g. "~/g-p/princess-pi-packages/2026-07-02...268a"
+	displayPath: string; // e.g. "~/g-p/princess-pi-tools/2026-07-02...268a"
 }
 
 export interface HarnessDiscovery {
@@ -160,7 +160,7 @@ export interface RegisteredHarness {
 	parse: HarnessParseAdapter;
 }
 
-/** Shape of one entry in ~/.config/princess-pi-packages/wtft-harnesses.json. */
+/** Shape of one entry in ~/.config/princess-pi-tools/wtft-harnesses.json. */
 export interface HarnessConfigEntry {
 	enabled?: boolean;
 	label?: string;

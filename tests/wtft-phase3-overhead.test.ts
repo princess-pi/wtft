@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-phase3-overhead
  * @description Validates #52 Phase 3 against the BUILT bin/wtft.mjs:
  *   1. Compaction meter-split — isCompactSummary flags next assistant turn;

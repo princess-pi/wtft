@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module harness/session-cwd
  * @description Resolve where a session log *currently* lives, from the log itself (#156).
  *

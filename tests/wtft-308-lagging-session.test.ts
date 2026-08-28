@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-308-lagging-session
  * @description A session .jsonl that does not exist YET is not "not found" (#308).
  *

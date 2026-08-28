@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test rate-limiter-tpm-consolidation
  * @description Validates that the rate-limiter's TPM computation, now routed
  *   through wtft-shared's parseEntryToInteraction, produces the correct

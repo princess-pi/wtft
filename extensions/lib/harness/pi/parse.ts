@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module harness/pi/parse
  * @description Pi transcript schema — and nothing else (#156).
  *

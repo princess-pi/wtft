@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-270-subagent-crosspoll-dedup
  * @description #270 review (Medium/correctness, bin/wtft-daemon.ts) — an
  *   OVERCOUNT introduced by the incremental subagent reader, in the same file

@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @command wtft
  * @description Command-line cost auditing tool for Pi Coding Agent session logs.
  */

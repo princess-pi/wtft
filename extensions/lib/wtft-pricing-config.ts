@@ -1,9 +1,9 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module wtft-pricing-config
  * @description User-editable pricing registry loader (#140).
  *   New models are a config edit, not a rebuild: entries in
- *   ~/.config/princess-pi-packages/wtft-pricing.json (XDG_CONFIG_HOME
+ *   ~/.config/princess-pi-tools/wtft-pricing.json (XDG_CONFIG_HOME
  *   respected) merge OVER the built-in MODEL_PRICING table. File shape is
  *   Record<modelKey, ModelPricing> — same shape as MODEL_PRICING, optional
  *   tiers included. Called at startup by both the CLI and the daemon (the
@@ -14,15 +14,27 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { homedir } from "node:os";
 import { applyUserPricing, type ModelPricing } from "./wtft-cost.js";
+import { emitLegacyDeprecation } from "./config.js";
 
 // ---
 // PATH RESOLUTION
 // ---
 
-/** ~/.config/princess-pi-packages/wtft-pricing.json (repo config convention). */
+/**
+ * ~/.config/princess-pi-tools/wtft-pricing.json (repo config convention).
+ * Falls back to the pre-rename princess-pi-packages/ path when only that one
+ * exists, so an existing pricing file keeps working without being moved.
+ */
 export function getUserPricingPath(): string {
 	const xdgHome = process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config");
-	return path.join(xdgHome, "princess-pi-packages", "wtft-pricing.json");
+	const current = path.join(xdgHome, "princess-pi-tools", "wtft-pricing.json");
+	if (fs.existsSync(current)) return current;
+	const legacy = path.join(xdgHome, "princess-pi-packages", "wtft-pricing.json");
+	if (fs.existsSync(legacy)) {
+		emitLegacyDeprecation(legacy, current);
+		return legacy;
+	}
+	return current;
 }
 
 // ---

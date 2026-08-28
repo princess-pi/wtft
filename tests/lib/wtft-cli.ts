@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module tests/lib/wtft-cli
  * @description Run the `wtft` CLI from a test and get its stdout, treating a
  *   PROVISIONAL read as success (#513).

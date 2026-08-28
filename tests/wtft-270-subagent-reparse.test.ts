@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-270-subagent-reparse
  * @description #270 — the daemon parsed each subagent transcript once, at the
  *   moment it was first discovered, and never re-read it. Discovery re-runs

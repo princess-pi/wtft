@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @tool tests/lib/poll.ts — wait on a condition, never on a duration (#387)
  * @description A fixed `sleep(n)` before checking daemon/process state is a bet
  *   on scheduling, not an assertion about behaviour: it passes by luck on a

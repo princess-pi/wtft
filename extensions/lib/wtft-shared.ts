@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module wtft-shared
  * @deprecated Import directly from the deep modules:
  *   wtft-cost.ts       — Pure cost calculation

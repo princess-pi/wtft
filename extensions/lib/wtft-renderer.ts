@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module wtft-renderer
  * @description Bar chart rendering, histograms, token summaries, and terminal utilities.
  *   Builds visual output from parsed Interaction arrays: binned bar charts,

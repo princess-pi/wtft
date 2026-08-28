@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module harness/registry
  * @description Enumerates harnesses from runtime config (#156).
  *
@@ -35,15 +35,27 @@ import type {
 	RegisteredHarness,
 } from "./types.ts";
 import { BUILTIN_HARNESSES } from "./builtins.generated.ts";
+import { emitLegacyDeprecation } from "../config.js";
 
 // ---
 // CONFIG
 // ---
 
-/** ~/.config/princess-pi-packages/wtft-harnesses.json (repo config convention). */
+/**
+ * ~/.config/princess-pi-tools/wtft-harnesses.json (repo config convention).
+ * Falls back to the pre-rename princess-pi-packages/ path when only that one
+ * exists, so an existing harness config keeps working without being moved.
+ */
 export function getHarnessConfigPath(): string {
 	const xdgHome = process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config");
-	return path.join(xdgHome, "princess-pi-packages", "wtft-harnesses.json");
+	const current = path.join(xdgHome, "princess-pi-tools", "wtft-harnesses.json");
+	if (fs.existsSync(current)) return current;
+	const legacy = path.join(xdgHome, "princess-pi-packages", "wtft-harnesses.json");
+	if (fs.existsSync(legacy)) {
+		emitLegacyDeprecation(legacy, current);
+		return legacy;
+	}
+	return current;
 }
 
 /** Read the harness config. Missing/unreadable/invalid → {} (never blocks wtft). */

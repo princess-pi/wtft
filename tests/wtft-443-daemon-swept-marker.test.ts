@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-443-daemon-swept-marker
  * @description #443 slice 2 — the WRITER half. `readTagProvisional` (slice 1)
  *   decides a tag is settled by finding `_meta.swept`; this suite pins that the

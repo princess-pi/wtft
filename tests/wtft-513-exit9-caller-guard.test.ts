@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-513-exit9-caller-guard
  * @description #513 — a test that shells out to `wtft` must not fail because the
  *   read was PROVISIONAL.

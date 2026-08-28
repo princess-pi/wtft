@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-daemon-lifecycle
  * @description Validates #95 daemon lifecycle fixes against the BUILT bins:
  *   1. Idle clamped by classified freshness (dual-daemon heartbeat fixture)

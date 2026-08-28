@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module harness/worktrees
  * @description Fan a target directory out over every checkout of its git repo (#145).
  *

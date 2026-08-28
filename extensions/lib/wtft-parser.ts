@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module wtft-parser
  * @description Session log parsing and interaction classification.
  *   Extracts token usage and cost per assistant message, and classifies

@@ -1,9 +1,9 @@
 # Spec: wtft pricing correctness + workflow subagent rollup (#139, #140, #141)
 
 **Status:** Code and Spec Approved (tested; reconciled to shipped code)
-**Issues:** [#139](https://github.com/duppypro/princess-pi-packages/issues/139),
-[#140](https://github.com/duppypro/princess-pi-packages/issues/140),
-[#141](https://github.com/duppypro/princess-pi-packages/issues/141)
+**Issues:** [#139](https://github.com/duppypro/princess-pi-tools/issues/139),
+[#140](https://github.com/duppypro/princess-pi-tools/issues/140),
+[#141](https://github.com/duppypro/princess-pi-tools/issues/141)
 
 ---
 
@@ -56,8 +56,8 @@ Notes:
 
 1. **User pricing registry (data, not code).** New module
    `extensions/lib/wtft-pricing-config.ts`:
-   - `loadUserPricing()` reads `$XDG_CONFIG_HOME/princess-pi-packages/wtft-pricing.json`
-     (default `~/.config/princess-pi-packages/wtft-pricing.json`) and merges entries
+   - `loadUserPricing()` reads `$XDG_CONFIG_HOME/princess-pi-tools/wtft-pricing.json`
+     (default `~/.config/princess-pi-tools/wtft-pricing.json`) and merges entries
      **over** built-ins via `applyUserPricing(record)` exported from `wtft-cost.ts`.
    - File shape = `Record<string, ModelPricing>` (same shape as `MODEL_PRICING`,
      including optional `tiers`). Unreadable/invalid file → ignored silently (wtft
@@ -66,7 +66,7 @@ Notes:
      (`bin/wtft-daemon.ts`) — the daemon is where costs are actually computed.
    - *Deviation from issue text:* the issue suggested `~/.config/wtft/pricing.json`;
      this repo's config convention (`extensions/lib/config.ts`) is
-     `~/.config/princess-pi-packages/<tool>*.json`, so the pricing file lives there too.
+     `~/.config/princess-pi-tools/<tool>*.json`, so the pricing file lives there too.
 2. **Warn on unknown models.** New `isModelPriced(model): boolean` in `wtft-cost.ts` —
    true when the (user-merged) registry fuzzy-matches or a legacy fallback branch
    (`deepseek`/`haiku`/`opus`) applies. The CLI (non-watch path) scans distinct
@@ -140,14 +140,14 @@ Tests run against the built bundle (`bun run build` first), per repo convention:
 - **Sharing unknown-model state daemon→CLI via tag file schema change** — the CLI can
   derive the same fact from `interaction.model`; avoids a tag-schema field.
 - **`~/.config/wtft/` config dir** — repo already standardizes on
-  `~/.config/princess-pi-packages/`.
+  `~/.config/princess-pi-tools/`.
 
 ---
 
 ## Errata — #146: 1h-TTL cache-write rate (Spec)
 
 **Status:** Code and Spec Approved (tested; reconciled to shipped code)
-**Issue:** [#146](https://github.com/duppypro/princess-pi-packages/issues/146)
+**Issue:** [#146](https://github.com/duppypro/princess-pi-tools/issues/146)
 
 ### Wrong claim shipped in #139
 
@@ -198,7 +198,7 @@ const cw1hPrice = cacheWritePrice === 0 ? 0 : inputPrice * 2.00;
 ## Errata — #148: Sonnet 5 intro pricing (Spec)
 
 **Status:** Code and Spec Approved (tested; reconciled to shipped code)
-**Issue:** [#148](https://github.com/duppypro/princess-pi-packages/issues/148)
+**Issue:** [#148](https://github.com/duppypro/princess-pi-tools/issues/148)
 
 ### Wrong claim shipped in #139
 

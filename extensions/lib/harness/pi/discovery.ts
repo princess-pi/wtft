@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module harness/pi/discovery
  * @description Where Pi keeps its session logs (#156).
  *

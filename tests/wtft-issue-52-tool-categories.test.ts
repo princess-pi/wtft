@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-issue-52-tool-categories
  * @description Validates #52 Phase 2: tool → category recognition.
  *   Task/Agent → agents, WebSearch/WebFetch → web, Grep tool → grep,

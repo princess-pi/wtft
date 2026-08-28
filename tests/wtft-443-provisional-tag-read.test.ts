@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-443-provisional-tag-read
  * @description #443 — a one-shot `wtft` read of a session whose tag the daemon
  *   is ABOUT to repair reports the pre-repair number as a plain total, with no

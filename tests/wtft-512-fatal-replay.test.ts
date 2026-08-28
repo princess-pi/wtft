@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-512-fatal-replay
  * @description #512 — a partial tag append is terminal, poisons the existing
  *   singleton lease, and the next owner rederives the transient cache.

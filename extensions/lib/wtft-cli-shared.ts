@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module wtft-cli-shared
  * @description Shared CLI/extension interface layer — argument parsing, daemon
  *   lifecycle, config reading, and manifest-driven help/why/version rendering.

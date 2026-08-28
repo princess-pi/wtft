@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-daemon-cost-cross-validation
  * @description Validates that the daemon's classified output produces the same
  *   total cost as the direct parseSessionFile + deduplicateInteractions path.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-270-subagent-tagfile-growth
  * @description #270 — the cost bound on re-parsing subagent transcripts, made
  *   into a test instead of a claim in a comment.

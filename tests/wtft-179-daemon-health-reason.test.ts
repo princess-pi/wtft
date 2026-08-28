@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-179-daemon-health-reason
  * @description #179 — the daemon health reason is a machine code, the status text is
  *   derived from it. Verifies the spec's V1–V4:

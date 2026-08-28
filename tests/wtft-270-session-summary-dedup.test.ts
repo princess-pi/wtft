@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-270-session-summary-dedup
  * @description #270 review round 2 (Medium/contract, extensions/lib/session-selector.ts) —
  *   getSessionSummary() reimplements "collapse tag-file lines by message.id, keep max

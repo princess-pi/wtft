@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module tty-helpers
  * @description Shared TTY terminal helpers extracted from session-selector and wtft-shared (#58 DRY).
  *

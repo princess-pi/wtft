@@ -60,7 +60,7 @@ export function formatRelativeTime(
 
 | Input slug (after strip) | Harness | Output path |
 |---|---|---|
-| `home-princess-pi-git-projects-princess-pi-packages` | claude-code | `~/g-p/princess-pi-packages` |
+| `home-princess-pi-git-projects-princess-pi-tools` | claude-code | `~/g-p/princess-pi-tools` |
 | `home-princess-pi-git-projects-some-project` + UUID tail | claude-code | `~/g-p/some-project/...abc1` |
 | `home-princess-pi-git-projects-worktrees-demo-99-branch` | any | `~/g-p/demo/w/99-branch` (worktree compaction, #145) |
 | `home-princess-pi-git-projects-demo--claude-worktrees-99-branch` | any | `~/g-p/demo/w/99-branch` (worktree compaction, #145) |

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-watch-vs-nonwatch-render-parity
  * @description Compares the bar chart output between non-watch and --watch
  *   (immediate 'q') modes to catch rendering divergence. The bar segments,

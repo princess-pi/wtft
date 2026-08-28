@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-420-subagent-call-site
  * @description #420 review (Medium/contract, bin/wtft-daemon.ts) — the
  *   "never call `attributeClaudeSubAgentCosts` over anything less than the

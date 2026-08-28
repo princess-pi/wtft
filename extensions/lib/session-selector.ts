@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module session-selector
  * @description Cross-harness session discovery fan-out and interactive TTY selector.
  *

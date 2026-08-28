@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-watch-smoke
  * @description Verifies that `./wtft --watch` doesn't crash on startup and
  *   responds to the 'q' keystroke to exit cleanly. Catches missing-import bugs

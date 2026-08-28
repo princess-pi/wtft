@@ -2,7 +2,7 @@
 
 Status: **Code and Spec Approved** (2026-07-14) — implemented on branch
 `95-daemon-lifecycle`, verified 24/24 (see Verification results below)
-Issue: [#95](https://github.com/duppypro/princess-pi-packages/issues/95)
+Issue: [#95](https://github.com/duppypro/princess-pi-tools/issues/95)
 
 ## Problem
 

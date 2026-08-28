@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-270-single-subagent-reader
  * @description #270 — ONE reader for sub-agent transcripts, not two.
  *

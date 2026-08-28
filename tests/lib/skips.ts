@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @tool tests/lib/skips.ts — the skip contract shared by every suite and the runner
  * @description A suite that gates on host state and finds none reports PASS. It
  *   checked nothing, and nothing in the output says so once the suite's own

@@ -434,7 +434,7 @@ Each is a concrete assertion in
   disabling the `cwdCache` read outright: cold=597 ms, warm=85 ms, and **both V11 checks passed**,
   since 597 is under `min(3650, 5000)` and 85 is under `cold + 50`. Total memo collapse costs the
   *warm* pass, and 85 ms is well short of the ~119 ms warm needs before the cap becomes the
-  binding constraint at all. **princess-pi-packages#489 tracks the gap**, and proposes the honest
+  binding constraint at all. **princess-pi-tools#489 tracks the gap**, and proposes the honest
   fix: assert on the read counters this suite already exports (V9's idiom), which are
   scale-invariant by construction and need no ceiling, no ratio, and no host calibration.
 
@@ -451,7 +451,7 @@ Each is a concrete assertion in
   trade accepted here is buying roughly a decade's worth of the growth rate observed so far, in
   exchange for closing the co-degrade blind spot; it is not immune to the same drift indefinitely,
   only to a much larger multiple of it. Caught a first-draft mistake during review
-  (princess-pi-packages#477): the natural-looking `Math.max(40 * warm + 250, 5000)` does the
+  (princess-pi-tools#477): the natural-looking `Math.max(40 * warm + 250, 5000)` does the
   opposite of what's wanted — it can only *raise* the bound, so a 10000 ms cold / 9800 ms warm
   co-degrade would still pass at `max(392250, 5000) = 392250`. `Math.min` caps it at
   `min(392250, 5000) = 5000` and correctly fails.

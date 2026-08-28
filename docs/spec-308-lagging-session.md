@@ -1,6 +1,6 @@
 # Spec — #308: a session `.jsonl` that is not written *yet* is not "not found"
 
-**Issue:** [#308](https://github.com/duppypro/princess-pi-packages/issues/308)
+**Issue:** [#308](https://github.com/duppypro/princess-pi-tools/issues/308)
 **Status:** Code Approved (tests green), spec reconciled
 **Related:** #124 / #129 (daemon waits for the session file), #130 (startup reaper), #155 (moved ≠ gone), #179 (health codes)
 

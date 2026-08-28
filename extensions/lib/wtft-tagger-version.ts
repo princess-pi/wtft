@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module wtft-tagger-version
  * @description The tagger version — the ONE definition (#499). The daemon stamps
  *   it into every tag filename (`.wtft-tag.v{N}.jsonl`); readers resolve tag

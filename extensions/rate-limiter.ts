@@ -733,7 +733,7 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
       if (trimmed === "--reset") {
         writeConfig("tpm", { widget: null, footer: null });
         updateRateLimiterWidget(ctx);
-        ctx.ui.notify("TPM settings reset. Edit ~/.config/princess-pi-packages/tpm.json for new defaults.", "info");
+        ctx.ui.notify("TPM settings reset. Edit ~/.config/princess-pi-tools/tpm.json for new defaults.", "info");
         return;
       }
 

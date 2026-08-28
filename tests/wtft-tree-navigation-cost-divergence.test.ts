@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-tree-navigation-cost-divergence
  * @description Validates that the widget (reading from tag file) and CLI
  *   produce the same totals when a session has tree-navigation branches.

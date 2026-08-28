@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-457-unreadable-transcript
  * @description #457 — parseSessionFile's bare catch returned [] on any read
  *   failure (EACCES, EISDIR, ENOMEM, a mid-read I/O error), byte-identical to

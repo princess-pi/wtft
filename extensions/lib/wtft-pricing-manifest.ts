@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module wtft-pricing-manifest
  * @description Renders MODEL_PRICING as a manifest (#169).
  *

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-270-subagent-truncate-diagnostic
  * @description #270 review (Low/contract, bin/wtft-daemon.ts) — a rotated or
  *   truncated subagent transcript used to reset the daemon's position on that

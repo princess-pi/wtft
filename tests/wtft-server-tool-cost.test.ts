@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-server-tool-cost
  * @description Validates server_tool_use parsing and per-request pricing (#73).
  *   web_search_requests and web_fetch_requests from Claude Code usage objects

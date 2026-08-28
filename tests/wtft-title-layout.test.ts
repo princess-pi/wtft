@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-title-layout
  * @description Strictly validates title row layout consistency across all
  *   code paths (CLI cost, CLI tokens, CLI --watch) at narrow/medium/wide

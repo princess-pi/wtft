@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @test wtft-443-cli-exit-9
  * @description #443 slice 3 — the issue's own Closer, at the CLI.
  *

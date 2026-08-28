@@ -1,5 +1,5 @@
 /**
- * @package princess-pi-packages
+ * @package princess-pi-tools
  * @module harness/claude-code/parse
  * @description Claude Code transcript schema — and nothing else (#156).
  *

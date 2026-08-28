@@ -1,0 +1,35 @@
+{
+  "name": "@princess-pi/wtft",
+  "version": "1.0.0",
+  "description": "wtft — what the f**k tokens: live cost tracker for Claude Code and Pi harness sessions",
+  "license": "MIT-0",
+  "author": {
+    "name": "Princess Pi",
+    "email": "princess-pi@agentic-arts.ai",
+    "url": "https://github.com/duppypro"
+  },
+  "type": "module",
+  "bin": {
+    "wtft": "./bin/wtft.mjs",
+    "wtft-daemon": "./bin/wtft-daemon.mjs"
+  },
+  "files": [
+    "bin/wtft.mjs",
+    "bin/wtft-daemon.mjs"
+  ],
+  "scripts": {
+    "build": "bun run build.ts",
+    "test": "bun run tests/run.ts",
+    "prepare": "bun run build"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@princess-pi/libs": "1.0.0",
+    "wcwidth": "^1.0.1"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  }
+}

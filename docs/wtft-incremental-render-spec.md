@@ -229,36 +229,29 @@ moment the classified lines land rather than after the `_meta.offset` line — a
 *between* the two otherwise left the tag grown and the flag false, so the next sweep
 skipped the re-stamp.
 
-**The retry is exact, not merely tolerable.** A first cut justified it with this
-document's own line — *"Duplicates that do survive collapse on read; a suppressed line
-never arrives at all, which is the worse of the two"* — and that justification is wrong
-here (PR review). It holds only for lines carrying a `message.id`:
-`dedupeClassifiedById`'s `if (!id)` branch passes no-id entries straight through, and
-`serializeClassified` omits `id` whenever `Interaction.messageId` is absent, so a
-cost-bearing no-id record retried after a partial `appendFileSync` would double-count.
-The measurement that made the claim look safe — 3,339 of 3,409 rows on the #270 specimen
-carried an id, the 70 without all zero-cost — is one tag file, not a guarantee.
+**Append failure is terminal, not a retry protocol.** A tag is a transient derived cache,
+and re-deriving it from the available harness-specific session logs is assumed cheap in
+both time and compute. No tag byte is durable state.
 
-So the append rewinds instead. `appendToTagOrRewind` restores the tag to its pre-append
-length on failure and rethrows — **with one exception, which is deliberate**: a file that
-this write *created* (the initial `statSync` returned `ENOENT`) is never truncated. That
-guard is #437's, and it is not a gap to close here. `createdByThisWrite` only means *our*
-stat saw `ENOENT`; another daemon can create and populate the file between that stat and
-our failed append, and during a singleton takeover it is writing the *same* lines for the
-*same* session — so its bytes can legitimately prefix-match our batch. Truncating there
-would destroy a file another process successfully wrote, on evidence that cannot tell the
-two apart.
+Every tag append therefore uses one fatal helper. If an append throws, that append may
+already have left a partial fragment, but the failing process performs no further cleanup
+mutation of the shared tag: a successor may already own and be writing it. Instead it
+atomically replaces the existing singleton PID lease in the system temporary directory
+with the token `rebuild`, then exits immediately. The token invalidates any live successor
+at the lease check that begins its next poll. The next daemon invocation claims that token,
+clears the disposable tag as its new singleton owner, and follows the ordinary full-source
+parse path. Lease publication itself uses an exclusive hard link to a fully written inode,
+so another starter cannot mistake a not-yet-populated PID file for a failed owner.
 
-The residual is therefore narrow and named rather than implied: a partial append into a
-newly created tag leaves a fragment, and the retry appends after it, gluing the fragment
-to the first retried record into one line that no reader can parse. Every reader skips it
-per-line, so the effect is a single lost record rather than a duplicated one — an
-undercount, not an overcount. It is **#512**; closing it means terminating the
-fragment rather than relaxing the never-truncate rule. It is **one function used by both writers** — the subagent path (where it
-originated, as #437 plus two review rounds of hardening: three stat states, and a
-prefix-check proving the extra bytes are ours before truncating) and now `flushPending`.
-A second hand-rolled copy is the shape this repo keeps getting bitten by; see
-`dedupeClassifiedById` versus session-selector's duplicate, pinned only by a test.
+This is fail-and-rederive, not durable transaction machinery. There is no append retry,
+rewind, prefix preservation, tag-format error row, or continued polling after a write whose
+extent is unknown. The lease is the existing producer-coordination seam, not a renderer
+protocol; renderers still know only the harness-agnostic tag. If even the small atomic lease
+replacement fails, automatic replay cannot be recorded: the daemon still exits nonzero and
+writes a synchronous best-effort diagnostic requiring `wtft -F` after storage is restored.
+An ordinary stale numeric PID deliberately retains #124 incremental resume, because process
+death alone is not evidence of tag corruption. This relaxed contract supersedes #437's
+exact-rewind requirement and #512's retry-after-fragment requirement.
 
 A session with **no subagents** still gets the marker. "Nothing to sweep" and "swept"
 are the same state to a reader, and withholding it would strand every subagent-free

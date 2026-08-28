@@ -18,7 +18,7 @@
  *
  *   ONE helper rather than three try/catches, because the rule is a contract
  *   ("0 and 9 both mean the render happened") and three hand-rolled copies drift
- *   — the same argument that made `appendToTagOrRewind` a shared function.
+ *   — the same argument that keeps tag appends behind one failure helper.
  *
  *   It deliberately does NOT swallow other codes: exit 1 is still a failure and
  *   still throws, so this cannot quietly hide a broken CLI.

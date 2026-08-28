@@ -25,11 +25,10 @@
  *   `flushPending()`, which runs only when new PARENT interactions arrive — on a
  *   FINISHED session, this issue's own case, it never runs again.
  *
- *   WITHHELD ON A FAILED POLL. `pollHadFailure` is reset by the poll loop (not
- *   by `scanForSubAgents`, which runs after `flushPending` and would wipe the
- *   flush's own failure) and set by every failure handler, so a poll that could
- *   not write what it was asked to does not stamp the tag as settled over the
- *   gap. The readonly case below injects that for real with chmod 0444.
+ *   WITHHELD ON A RECOVERABLE FAILED POLL. `pollHadFailure` is reset by the poll
+ *   loop and set when a source transcript cannot be discovered, read, parsed,
+ *   or serialized, so that poll does not stamp the tag as settled over a gap.
+ *   A tag append failure is terminal and belongs to #512 instead.
  *
  *   A session with NO subagents still gets the marker. "Nothing to sweep" and
  *   "swept" are the same state as far as a reader is concerned, and withholding
@@ -38,8 +37,7 @@
  *   Closer: spawn a daemon on a session with a subagent transcript; the tag
  *   gains `_meta.swept` and `readTagProvisional` flips from provisional to
  *   settled; a flood of later turns returns it to settled via a NEW marker (the
- *   count must rise, since "a marker exists" is true before and after); and a
- *   tag that cannot be written is never stamped at all.
+ *   count must rise, since "a marker exists" is true before and after).
  */
 
 import * as fs from "node:fs";
@@ -224,62 +222,6 @@ try {
 			countSweptMarkers(tagPath) > markersBefore);
 	}
 
-	// --- A failed write must not be stamped as swept -----------------------
-	// PR review: flushPending cleared pendingItems BEFORE writing (pre-existing
-	// on main), so a failed append lost a whole billed batch permanently — and
-	// once #443 added the marker, a sweep could then stamp "settled" over the
-	// gap, turning a silent undercount into an affirmative false claim.
-	//
-	// Injected for real rather than mocked: chmod the tag 0444 so appendFileSync
-	// genuinely throws EACCES. Skips loudly under a uid that ignores the mode
-	// (root, or a filesystem mounted without permissions) instead of asserting
-	// something that cannot be true there.
-	{
-		const { sessionPath, tagPath } = makeSession("readonly", false);
-		startDaemon(sessionPath);
-		assert("readonly fixture: settled before the tag is locked",
-			await waitFor(() => tagHasSweptMarker(tagPath)));
-		const markersBefore = countSweptMarkers(tagPath);
-
-		fs.chmodSync(tagPath, 0o444);
-		let writable = true;
-		try {
-			fs.appendFileSync(tagPath, "");
-			fs.accessSync(tagPath, fs.constants.W_OK);
-		} catch { writable = false; }
-
-		if (writable) {
-			console.log("      \u2502 ##SKIP## tag still writable at mode 0444 (root or permissionless fs) — cannot inject the failure");
-		} else {
-			const T2 = Date.now();
-			let more = "";
-			for (let i = 0; i < 8; i++) more += turnLine(`msg_443_ro_${i}`, T2 + i * 10, 1300, 70);
-			fs.appendFileSync(sessionPath, more);
-
-			// Give the daemon several polls to try, fail, and NOT stamp.
-			await sleep(667 * 5);
-			assert("no new swept marker is written while the tag cannot be appended to",
-				countSweptMarkers(tagPath) === markersBefore);
-
-			// Restore and confirm it recovers: the retained batch lands and the
-			// daemon re-stamps, so the failure is a pause, not a permanent loss.
-			fs.chmodSync(tagPath, 0o644);
-			const recovered = await waitFor(() => countSweptMarkers(tagPath) > markersBefore);
-			assert("it recovers once the tag is writable again", recovered);
-			const tag = fs.readFileSync(tagPath, "utf8");
-			assert("  ...and the turns held back during the failure are not lost",
-				tag.includes("msg_443_ro_7"));
-			// The other direction, and the one appendToTagOrRewind exists for: the
-			// batch is retried across several failed polls, so it must land ONCE,
-			// not once per attempt. Counted on a raw line match rather than through
-			// the reader, because dedupeClassifiedById would hide a duplicate that
-			// happened to carry a message.id — and the no-id case it cannot hide is
-			// exactly what the rewind protects.
-			const landings = tag.split("\n").filter(l => l.includes("msg_443_ro_7")).length;
-			assert(`  ...and land exactly once, not once per failed poll (${landings} === 1)`,
-				landings === 1);
-		}
-	}
 } finally {
 	for (const pid of cleanupPids) { try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ } }
 	await sleep(300);

@@ -18,7 +18,7 @@ import {
 	getDaemonPidPath,
 	getModelCacheTtlMs,
 } from "./lib/wtft-shared.js";
-import { readConfig, writeConfig, hasConfig } from "./lib/config.js";
+import { readConfig, writeConfig, hasConfig } from "@princess-pi/libs/config";
 import {
 	parseWtftCliArgs,
 	ensureDaemonRunning,

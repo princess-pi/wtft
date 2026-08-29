@@ -34,7 +34,7 @@ import {
 	cwdSlugVariants,
 } from "../session-cwd.ts";
 import { fanOutCwd } from "../worktrees.ts";
-import { buildDisplayPath } from "../../session-path-shortener.ts";
+import { buildDisplayPath } from "@princess-pi/libs/session-path-shortener";
 
 const ID = "claude-code";
 

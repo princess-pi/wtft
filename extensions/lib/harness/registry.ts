@@ -35,7 +35,7 @@ import type {
 	RegisteredHarness,
 } from "./types.ts";
 import { BUILTIN_HARNESSES } from "./builtins.generated.ts";
-import { emitLegacyDeprecation } from "../config.js";
+import { emitLegacyDeprecation } from "@princess-pi/libs/config";
 
 // ---
 // CONFIG

@@ -91,13 +91,13 @@ import {
 	getTerminalWidth
 } from "../extensions/lib/wtft-shared.ts";
 import { execSync } from "node:child_process";
-import { loadConfig, readConfig } from "../extensions/lib/config.ts";
+import { loadConfig, readConfig } from "@princess-pi/libs/config";
 import {
 	discoverSessions,
 	harnessLabel,
 	selectSessionPrompt
 } from "../extensions/lib/session-selector.ts";
-import { buildDisplayPath } from "../extensions/lib/session-path-shortener.ts";
+import { buildDisplayPath } from "@princess-pi/libs/session-path-shortener";
 import { findRepoRoot, listWorktreeDirs, fanOutCwd } from "../extensions/lib/harness/worktrees.ts";
 import {
 	parseWtftCliArgs,

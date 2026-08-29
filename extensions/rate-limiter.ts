@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { loadConfig, writeConfig } from "./lib/config.js";
+import { loadConfig, writeConfig } from "@princess-pi/libs/config";
 
 
 // ---

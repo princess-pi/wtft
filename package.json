@@ -29,6 +29,9 @@
     "@princess-pi/libs": "1.0.0",
     "wcwidth": "^1.0.1"
   },
+  "overrides": {
+    "@princess-pi/libs": "file:../libs-work"
+  },
   "devDependencies": {
     "bun-types": "latest"
   }

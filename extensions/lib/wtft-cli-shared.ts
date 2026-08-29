@@ -452,7 +452,7 @@ export function renderWtftHelp(manifestPath: string, invokedAs: string): string 
  * for the scenario-driven output format.
  */
 export async function renderWtftWhy(manifestPath: string, invokedAs: string): Promise<string> {
-	const { renderWhy } = await import("./manifest-help.js");
+	const { renderWhy } = await import("@princess-pi/libs/manifest-help");
 	return renderWhy(manifestPath, invokedAs);
 }
 

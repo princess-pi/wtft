@@ -30,7 +30,7 @@
     "wcwidth": "^1.0.1"
   },
   "overrides": {
-    "@princess-pi/libs": "file:../libs-work"
+    "@princess-pi/libs": "git+https://github.com/princess-pi/libs.git"
   },
   "devDependencies": {
     "bun-types": "latest"

@@ -1,3 +1,6 @@
 node_modules/
 dist/
 bun.lock
+
+# Build output — `prepare` regenerates these at install/publish time.
+bin/*.mjs

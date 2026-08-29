@@ -448,11 +448,11 @@ export function renderWtftHelp(manifestPath: string, invokedAs: string): string 
 }
 
 /**
- * Render --why from the manifest. Delegates to manifest-help.js renderWhy
+ * Render --why from the manifest. Delegates to @princess-pi/libs/manifest-help renderWhy
  * for the scenario-driven output format.
  */
 export async function renderWtftWhy(manifestPath: string, invokedAs: string): Promise<string> {
-	const { renderWhy } = await import("./manifest-help.js");
+	const { renderWhy } = await import("@princess-pi/libs/manifest-help");
 	return renderWhy(manifestPath, invokedAs);
 }
 

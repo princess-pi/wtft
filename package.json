@@ -1,7 +1,7 @@
 {
   "name": "@princess-pi/wtft",
   "version": "1.0.0",
-  "description": "wtft — what the f**k tokens: live cost tracker for Claude Code and Pi harness sessions",
+  "description": "wtft \u2014 what the f**k tokens: live cost tracker for Claude Code and Pi harness sessions",
   "license": "MIT-0",
   "author": {
     "name": "Princess Pi",
@@ -26,13 +26,13 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@princess-pi/libs": "1.0.0",
+    "@princess-pi/libs": "git+https://github.com/princess-pi/libs.git#22dfec6c15f704d717fefe86bd2b05d21294bb5d",
     "wcwidth": "^1.0.1"
-  },
-  "overrides": {
-    "@princess-pi/libs": "file:../libs-work"
   },
   "devDependencies": {
     "bun-types": "latest"
-  }
+  },
+  "trustedDependencies": [
+    "@princess-pi/libs"
+  ]
 }

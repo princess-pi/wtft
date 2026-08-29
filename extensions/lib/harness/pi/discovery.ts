@@ -26,7 +26,7 @@ import * as os from "node:os";
 
 import type { HarnessDiscovery, SessionCandidate } from "../types.ts";
 import { resolveLastCwd, cwdSlugVariants } from "../session-cwd.ts";
-import { buildDisplayPath } from "../../session-path-shortener.ts";
+import { buildDisplayPath } from "@princess-pi/libs/session-path-shortener";
 
 const ID = "pi";
 

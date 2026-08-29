@@ -14,7 +14,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { homedir } from "node:os";
 import { applyUserPricing, type ModelPricing } from "./wtft-cost.js";
-import { emitLegacyDeprecation } from "./config.js";
+import { emitLegacyDeprecation } from "@princess-pi/libs/config";
 
 // ---
 // PATH RESOLUTION

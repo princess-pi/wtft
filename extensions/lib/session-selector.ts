@@ -25,7 +25,7 @@ import * as path from "node:path";
 
 import { WTFT_TAGGER_VERSION as TAGGER_VERSION } from "./wtft-tagger-version.ts";
 
-import { formatRelativeTime } from "./session-path-shortener.ts";
+import { formatRelativeTime } from "@princess-pi/libs/session-path-shortener";
 import { formatCost } from "./wtft-shared.ts";
 import { enterRawStdin, showCursor, hideCursor, clearPreviousLines, visualLineCount } from "./tty-helpers.ts";
 import { getDiscoveries, getHarness, getHarnesses } from "./harness/registry.ts";

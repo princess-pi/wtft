@@ -13,8 +13,8 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, type ChildProcess } from "node:child_process";
 import { checkDaemonHealth, getTagPath, type DaemonStatus } from "./wtft-shared.js";
-import { readConfig } from "./config.js";
-import { formatVersion } from "./build-stamp.ts";
+import { readConfig } from "@princess-pi/libs/config";
+import { formatVersion } from "@princess-pi/libs/build-stamp";
 
 // ---
 // TYPES

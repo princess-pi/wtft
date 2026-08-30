@@ -230,12 +230,16 @@ console.log("\n=== PART C: no regression against the real session history ===\n"
 		// The next attempt was a COUNT: snapshot getCwdReadCount(), discover again,
 		// assert nothing was re-read. PR review killed it, and was right. The memo
 		// keys on (path, mtimeMs, size), so any transcript APPENDED TO between the
-		// two calls loses its entry and forces a genuine read. Measured on an owned
-		// 20-file corpus: a quiet tree gives 0 new reads, and appending one line to
-		// ONE already-memoised file gives 1 — the check fails with no regression
-		// behind it. On the real tree that is not a hypothetical: this suite runs
-		// inside a live session whose own transcript lives under ~/.claude/projects
-		// and is being appended to while the suite runs.
+		// two calls loses its entry and forces a genuine read.
+		//
+		// Reproduce, rather than take the figure on faith:
+		//   bun run build && bun research/18-partc-race/memo-race.ts
+		// A quiet tree gives 0 new reads; appending one line to ONE already-memoised
+		// file gives 1, and the check fails with no regression behind it.
+		//
+		// On the real tree that is not a hypothetical: this suite runs inside a live
+		// session whose own transcript lives under ~/.claude/projects and is being
+		// appended to while the suite runs.
 		//
 		// Three shapes, one root cause: EVERY cost claim about this tree assumes it
 		// holds still, and it does not. A wall clock, a ratio and a counter all

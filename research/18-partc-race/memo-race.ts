@@ -20,7 +20,21 @@
  *   appended to while the suite runs. So the mutation below is not a contrived
  *   worst case — it is the ordinary condition.
  *
- *   Run: bun research/18-partc-race/memo-race.ts
+ *   Run: bun run build && bun research/18-partc-race/memo-race.ts
+ *
+ *   THE BUILD STEP IS PART OF THE COMMAND, NOT AN ASIDE. This imports the
+ *   bundled bin/wtft.mjs, which is gitignored build output — `bun install`
+ *   creates it via the `prepare` script, so a fresh clone works, but an edit
+ *   to a SOURCE file changes nothing here until a rebuild. That trap cost a
+ *   wrong mutation proof once already (see PART C's comment), so the rebuild
+ *   is spelled into the invocation.
+ *
+ *   Importing the bundle rather than extensions/lib/*.ts is deliberate, and
+ *   PR review proposed the reverse. This probe exists to explain why a check
+ *   in wtft-issue-156-harness-seam.test.ts is racy, and that suite — like all
+ *   37 that import wtft.mjs, and like research/39-v11-corpus/measure-gate.ts —
+ *   measures the bundle. A probe reading source could disagree with the very
+ *   thing it is explaining.
  *
  *   OUTCOME (2026-08-30): quiet tree 0 new reads, one append 1 new read. The
  *   counter was dropped from PART C rather than mutated a third time; the same

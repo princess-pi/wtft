@@ -338,9 +338,14 @@ async function main() {
 	// that fallback's "3 transcripts in 40" budget measured 34 in 40 on the
 	// development host — 760 MB re-read per run, 98% of wall clock.
 	//
-	// Memoised, not just deferred: the fuzzy branch reads it twice (filter, then
-	// the count in its error), and a second scan there would be the same bug worn
-	// smaller.
+	// Memoised as well as deferred, though nothing today needs the cache: both
+	// branches call it once and reuse the result. It is here so that a future
+	// second call site cannot quietly reintroduce a whole second scan — the cost
+	// of `??=` is one null check, and the cost of getting this wrong again is
+	// everything above. Stated as insurance rather than as a present saving,
+	// because an earlier draft of this comment claimed the fuzzy branch scanned
+	// twice; it does not, and a rationale that misdescribes its own control flow
+	// is how the next reader learns to distrust the comments (PR review).
 	// Named `getCandidates`, not `candidates`, because the array-to-thunk change is
 	// a JS footgun worth spending a word on: `candidates.length` on a function is
 	// its ARITY — 0 — so a call site that forgot the parens would read as "no

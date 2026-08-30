@@ -52,6 +52,25 @@ let readCount = 0;
 /** Test seam: counts whole-file history scans, so the #164 gate is observable. */
 let historyReadCount = 0;
 
+/**
+ * Test seam: counts directory reads during discovery, so the ONE cost neither
+ * other counter can see is observable (#39 review).
+ *
+ * The tree walk is not memoised — every discovery re-reads every directory —
+ * so its cost is a floor under any call, warm or cold. A wall-clock ratio
+ * cannot guard it, and not merely because it is blind: the walk is identical
+ * in both arms of a live-vs-stranded A/B, so it inflates numerator and
+ * denominator together and drives the ratio TOWARD 1. Measured on a
+ * 200-file corpus: 3.38x with no extra directories, 1.21x with 3,000 empty
+ * ones added to both sides. A `stranded > 2 x live` bound would therefore go
+ * RED on a harmless walk regression and GREEN as the walk got slower — it is
+ * anti-correlated with the thing it was supposed to protect.
+ *
+ * A count has none of that. Incremented in the claude-code discovery's
+ * `collect()`, once per directory actually read.
+ */
+let dirWalkCount = 0;
+
 /** Number of tail reads performed since the last {@link resetCwdCache}. */
 export function getCwdReadCount(): number {
 	return readCount;
@@ -71,13 +90,31 @@ export function getCwdHistoryReadCount(): number {
 	return historyReadCount;
 }
 
-/** Drop the memo tables (tests; long-lived processes never need this). */
+/**
+ * Directory reads performed by discovery's tree walk since the last
+ * {@link resetCwdCache}. One per directory visited, including nested ones —
+ * so a flat corpus of N project dirs reads exactly N.
+ */
+export function getDirWalkCount(): number {
+	return dirWalkCount;
+}
+
+/** Called by a harness discovery for each directory it reads. */
+export function countDirRead(): void {
+	dirWalkCount++;
+}
+
+/**
+ * Drop the memo tables and every discovery counter (tests; long-lived
+ * processes never need this).
+ */
 export function resetCwdCache(): void {
 	cwdCache.clear();
 	historyCache.clear();
 	existsCache.clear();
 	readCount = 0;
 	historyReadCount = 0;
+	dirWalkCount = 0;
 }
 
 // ---

@@ -21,49 +21,38 @@
  * fixture trees pointed at by WTFT_CLAUDE_PROJECTS_DIR. No module internals are
  * touched.
  *
- * On clocks: no assertion depends on the wall-clock *date* — the #96 flaky
- * pricing trap. Part E does read `Date.now()`, to measure elapsed time — a
- * duration is the quantity under test there, so it cannot be injected away —
- * but as of #477 it no longer measures that duration against a fixed
- * millisecond ceiling. `~/.claude/projects` is live and ever-growing (this
- * host runs 5+ concurrent sessions, including the one running this suite), so
- * a fixed ceiling's input grows every session while its budget never moves:
- * not flaky in the random sense, but drifting toward always-failing, and
- * failing *because* it ran. V11 now bounds cold discovery against its own
- * memoised second pass instead (`cold <= min(40 * warm + 250, 5000)`) — the
- * `40 * warm` term is a relative bound and scales with the input, the same
- * idiom the untouched sibling assertion three lines below (`warm <= cold +
- * 50`) already used. The `min(…, 5000)` cap is a deliberate, honest exception
- * to that scale-invariance, not a second copy of the old ceiling: a pure
- * ratio is blind to cold and warm degrading TOGETHER (e.g. the memo itself
- * breaking), since a large warm would inflate the allowed cold right along
- * with it. The cap closes that gap at the cost of reopening a MUCH slower
- * version of the drift #477 exists to fix — 5000ms leaves ~8-12x headroom
- * over today's measured cold time (400-650ms), so it only becomes the
- * binding constraint once this host's history has grown roughly an order of
- * magnitude further (or the memo has broken outright). It still tests
- * something real today, at two cost tiers: `matchesRecordedCwd`
- * (claude-code/discovery.ts) does a bounded tail read via `resolveLastCwd`
- * for every transcript across the WHOLE ~/.claude/projects tree whose slug
- * doesn't physically match, and, for whichever of those are additionally
- * stranded (last-cwd directory gone), an expensive whole-file scan via
- * `resolveCwdHistory`, gated on `pathExists` (session-cwd.ts). Both tiers are
- * cache misses on cold and cache hits on warm, so either one regressing —
- * the cheap tier running unconditionally, or the expensive tier's gate
- * failing to gate — still shows up as cold ballooning relative to warm. The
- * expensive tier is documented as rare in general (session-cwd.ts: "~3
- * transcripts in 40"), but on THIS measurement host it dominates: the #477
- * mutation probe counted 1496 whole-file scans out of 1803 tail reads
- * (~83%) — this repo's workflow creates and destroys worktrees constantly,
- * so most sessions here really are stranded. Proved by mutation during #477
- * (a forced 1.5ms stall on every cache-miss resolve — hitting both tiers —
- * pushed the observed ratio from ~10-30x to ~130-175x on this machine).
+ * On clocks: NOTHING IN THIS SUITE READS ONE. Not the wall-clock date (the
+ * #96 flaky pricing trap), and as of #39 not elapsed time either — Part E's
+ * `Date.now()` calls are gone with the bound they served.
  *
- * tests/wtft-issue-156-harness-seam.test.ts (Part C) asserts the same fixed
- * `elapsed < 500` ceiling over the same real tree, on a call that is already
- * warm by the time it's timed. It was not in scope for #477 and was not
- * changed here — flagged, not fixed, since it can drift the same way.
- * Tracked as #487.
+ * That took three attempts, and the history is the argument for the shape
+ * that survived. V11 began as `cold < 500`: a fixed ceiling over the live,
+ * ever-growing `~/.claude/projects` (this host runs 5+ concurrent sessions,
+ * including the one running this suite), so its input grew every session
+ * while its budget never moved — not flaky in the random sense, but drifting
+ * toward always-failing, and failing BECAUSE it ran. #477 replaced it with a
+ * ratio against the memoised second pass, which rots the mirror-image way:
+ * the memo makes `warm` cheaper as it IMPROVES, so the divisor shrinks while
+ * cold still walks the whole tree. Measured on an unmodified `main`:
+ * 6 failures in 6, cold ~2.1s against warm ~37ms — 53-61x against a 40x
+ * bound. A CONSTANT MULTIPLE OF A MEMOISED CALL CANNOT BOUND AN UNMEMOISED
+ * ONE, and no choice of multiple repairs that.
+ *
+ * So Part E now owns its corpus and counts, rather than borrowing the host's
+ * and timing. Every claim is an exact integer from the counters this suite
+ * already exported for V9: tail reads, whole-file relocation scans, and (new
+ * for #39) directory reads by the tree walk. The full rationale, the mutation
+ * record for each assertion, and the measurement showing why a ratio could
+ * never have guarded the walk are in Part E's own comment block.
+ *
+ * What a counter cannot say is what the `pathExists` gate is WORTH in time.
+ * That is measured by hand in research/39-v11-corpus/measure-gate.ts, which
+ * gates nothing on purpose: a ratio needs a threshold and a counter does not.
+ *
+ * tests/wtft-issue-156-harness-seam.test.ts (Part C) carried the same fixed
+ * `elapsed < 500` ceiling over the same real tree, on a call already warm by
+ * the time it was timed. Tracked as #18 and fixed there the same way, on its
+ * own branch.
  *
  * Run: node --experimental-strip-types tests/wtft-issue-144-145-164-session-discovery.test.ts
  */
@@ -82,6 +71,7 @@ import {
 	resetCwdCache,
 	getCwdReadCount,
 	getCwdHistoryReadCount,
+	getDirWalkCount,
 	cwdToSlug,
 	cwdToStrictSlug,
 	cwdSlugVariants,
@@ -112,6 +102,7 @@ function cleanup() {
 		try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
 	}
 	delete process.env.WTFT_CLAUDE_PROJECTS_DIR;
+	delete process.env.WTFT_PI_SESSIONS_DIR;
 	delete process.env.WTFT_NO_GIT;
 }
 
@@ -411,82 +402,188 @@ console.log("\n=== PART D: worktree display compaction (#145) ===\n");
 }
 
 // ---
-// PART E — #164 cost: the gate holds against the real history (V11)
+// PART E — #164 cost: the gate holds, counted on a corpus the TEST owns (V11)
 // ---
 
-console.log("\n=== PART E: cost against the real session history (V11) ===\n");
+console.log("\n=== PART E: the #164 gate, counted on a test-built corpus (V11) ===\n");
 {
 	resetCwdCache();
 	resetHarnessRegistry();
+
+	// WHY THIS NO LONGER TIMES THE LIVE ~/.claude/projects TREE (#39, 2026-08-30).
+	//
+	// V11 used to bound cold discovery by a constant multiple (40x) of the
+	// memoised pass. It failed 6 runs in 6 on a clean `main`, and the cause is
+	// structural rather than a badly chosen constant: cold scales with the live
+	// corpus while warm is pure cache hits, so cold/warm grows without bound as
+	// the corpus does. `pr-cleanup` strands every session that lived in a deleted
+	// worktree, permanently, so the corpus grows with every merge — measured
+	// 2,622 of 3,073 transcripts stranded (85%). Cold moved from the 400-650ms
+	// #477 wrote this against to ~2,100ms, warm stayed ~37ms: ~57x against a 40x
+	// bound. A CONSTANT MULTIPLE OF A MEMOISED CALL CANNOT BOUND AN UNMEMOISED
+	// ONE, and no choice of multiple repairs that.
+	//
+	// #477 had replaced a fixed 500ms ceiling with that ratio precisely to
+	// survive corpus growth. The ratio carries the mirror-image defect: the
+	// better the memo, the smaller the divisor, the tighter the bound. Both
+	// failed for one underlying reason — the input was not the test's to control.
+	//
+	// So the test now owns the corpus, and asserts on STATE rather than the
+	// clock. The gate's output is countable: `getCwdHistoryReadCount()` is
+	// exactly the number of whole-file relocation scans performed. Counting them
+	// is strictly better than timing them — no host speed, no load, no jitter,
+	// no threshold to re-tune, and the assertion says what it means.
+	//
+	// live     = recorded cwd EXISTS -> gate closed -> NO whole-file scan
+	// stranded = recorded cwd gone   -> gate open   -> one whole-file scan each
+	//
+	// A wall-clock A/B was built first and is kept at
+	// research/39-v11-corpus/measure-gate.ts: 250 files x 256 KB measured the
+	// gate as a 4.9-5.6x time difference. It is retained because it calibrates
+	// what the gate is WORTH, which a counter cannot say — but it is not what
+	// gates this suite, because a ratio needs a threshold and a counter does not.
+	const SESSIONS = 60;
+	const liveHome = mktmp("wtft-39-livecwd-");
+	const filler = JSON.stringify({
+		type: "assistant",
+		message: {
+			role: "assistant", id: "filler", model: "claude-sonnet-4-20250514",
+			usage: { input_tokens: 10, output_tokens: 10 },
+			content: [{ type: "text", text: "y".repeat(400) }],
+		},
+	}) + "\n";
+
+	const buildCorpus = (prefix: string, cwdFor: (i: number) => string): string => {
+		const root = mktmp(prefix);
+		const proj = path.join(root, "-home-synthetic-project");
+		fs.mkdirSync(proj, { recursive: true });
+		for (let i = 0; i < SESSIONS; i++) {
+			const id = `39c0de00-1a9b-4c3d-9e8f-${String(i).padStart(12, "0")}`;
+			fs.writeFileSync(path.join(proj, `${id}.jsonl`),
+				filler + JSON.stringify({ type: "user", cwd: cwdFor(i), message: { role: "user", content: "hi" } }) + "\n");
+		}
+		return root;
+	};
+
+	const liveCorpus = buildCorpus("wtft-39-live-", () => liveHome);
+	const strandedCorpus = buildCorpus("wtft-39-stranded-", (i) => path.join(liveHome, `gone-worktree-${i}`));
+
+	// BOTH harness roots are pinned, though only the Claude one is read below.
+	//
+	// PR review called the missing Pi override a High defect that would break
+	// `liveHistory === 0` on a host carrying real stale Pi sessions. It does not:
+	// `discoverSessions("claude-code", …)` selects exactly ONE discovery, so Pi's
+	// never runs. Measured — a Pi root poisoned with 60 non-matching-slug
+	// sessions gives tail=60 history=0, and so does leaving it unset against this
+	// host's real ~/.pi; the same poisoned root under `"auto"` adds exactly 60
+	// tail reads, so the corpus was capable of leaking and the door is shut.
+	// Pi's discovery also imports only `resolveLastCwd`, never
+	// `resolveCwdHistory`, so it cannot move the history counter under ANY
+	// harness argument.
+	//
+	// Pinned anyway, for the reason the finding did not give: which harnesses
+	// `discoverSessions` routes to is an implementation detail this block does
+	// not assert, and #39 exists to stop this test depending on state the HOST
+	// owns rather than the test.
+	process.env.WTFT_PI_SESSIONS_DIR = mktmp("wtft-39-nopi-");
+
+	// V11a — every recorded cwd exists, so the gate must keep EVERY whole-file
+	// scan off. V9 proves this for a 2-transcript corpus; this proves it holds at
+	// a scale where a per-transcript leak would be visible.
+	process.env.WTFT_CLAUDE_PROJECTS_DIR = liveCorpus;
+	resetCwdCache();
+	discoverSessions("claude-code", liveHome);
+	const liveTail = getCwdReadCount();
+	const liveHistory = getCwdHistoryReadCount();
+	check(liveTail >= SESSIONS, `V11a: the cheap tail scan ran for every transcript (${liveTail} >= ${SESSIONS})`);
+	check(liveHistory === 0, `V11a: a live cwd triggers NO whole-file scan (${liveHistory} scan(s) over ${SESSIONS} transcripts)`);
+
+	// V11b — the same corpus shape with dead cwds MUST trigger the fallback.
+	// Without this, V11a passes just as well on a corpus that could never have
+	// triggered a scan in the first place, which would make it vacuous.
+	process.env.WTFT_CLAUDE_PROJECTS_DIR = strandedCorpus;
+	resetCwdCache();
+	discoverSessions("claude-code", liveHome);
+	const strandedHistory = getCwdHistoryReadCount();
+	check(strandedHistory === SESSIONS,
+		`V11b: …and a dead cwd triggers exactly one each, so V11a is not vacuous (${strandedHistory} of ${SESSIONS})`);
+
+	// V11c — memoisation, asserted as state instead of `warm <= cold + 50`.
+	// The old sibling check could not fail: a broken memo inflates warm, which
+	// inflated the very bound it was compared against. This one counts reads, so
+	// memoisation collapse — the failure mode the previous comment admitted was
+	// never actually tested — now shows up directly as a non-zero delta.
+	const afterFirst = getCwdReadCount();
+	discoverSessions("claude-code", liveHome);
+	check(getCwdReadCount() === afterFirst,
+		`V11c: the memoised second pass re-reads nothing (${getCwdReadCount() - afterFirst} new tail read(s))`);
+	check(getCwdHistoryReadCount() === strandedHistory,
+		`V11c: …and re-scans nothing (${getCwdHistoryReadCount() - strandedHistory} new whole-file scan(s))`);
+
+	// V11e — THE WALK, which neither counter above can see (#39 review round 2).
+	//
+	// PR review called dropping V11's wall-clock claim a High defect: with no
+	// timing left, nothing guards the unmemoised `fs.readdirSync`/`collect()`
+	// tree walk, whose cost is a floor under every call regardless of the cache.
+	// The gap is real — but restoring a ratio would not have closed it, and
+	// measurably makes it worse. The walk happens IDENTICALLY in both arms of a
+	// live-vs-stranded A/B, so it inflates numerator and denominator together:
+	// on a 200-file corpus the ratio is 3.38x with no extra directories and
+	// 1.21x with 3,000 empty ones added to BOTH sides. A `stranded > 2x live`
+	// bound therefore fires on a harmless walk regression and goes quiet as the
+	// walk gets slower — anti-correlated with what it was meant to protect.
+	//
+	// So the walk gets the same treatment as the reads: an integer. `collect()`
+	// reads one directory per call, so a flat corpus of N project dirs must cost
+	// exactly N directory reads, and a nested one exactly N + its subdirectories.
+	// An accidental re-walk — the regression that actually threatens this path —
+	// is then a wrong number, on any host, at any speed.
+	{
+		const walkRoot = mktmp("wtft-39-walk-");
+		const PROJECTS = 7;
+		for (let i = 0; i < PROJECTS; i++) {
+			const proj = path.join(walkRoot, `-home-walk-project-${i}`);
+			fs.mkdirSync(proj, { recursive: true });
+			fs.writeFileSync(path.join(proj, `39c0de00-1a9b-4c3d-9e8f-${String(900 + i).padStart(12, "0")}.jsonl`),
+				filler + JSON.stringify({ type: "user", cwd: liveHome, message: { role: "user", content: "hi" } }) + "\n");
+		}
+		// One nested directory, and one the walk must SKIP. Without the pair, the
+		// count would be satisfied by a walk that recursed into neither, and
+		// SKIP_DIRS could regress to walking derived data unnoticed.
+		fs.mkdirSync(path.join(walkRoot, "-home-walk-project-0", "sessions"), { recursive: true });
+		fs.mkdirSync(path.join(walkRoot, "-home-walk-project-0", "wtft-tags"), { recursive: true });
+
+		process.env.WTFT_CLAUDE_PROJECTS_DIR = walkRoot;
+		process.env.WTFT_PI_SESSIONS_DIR = mktmp("wtft-39-nopi-walk-");
+		resetCwdCache();
+		discoverSessions("claude-code", liveHome);
+		const walk = getDirWalkCount();
+		check(walk === PROJECTS + 1,
+			`V11e: the tree walk reads each directory exactly once, and skips derived data (${walk} read(s), expected ${PROJECTS + 1})`);
+
+		// …and a second discovery walks it all again, because the walk is NOT
+		// memoised. Asserted rather than assumed: it is the reason the walk needs
+		// its own counter, and if it ever does become memoised this line is the
+		// one that says so instead of a comment quietly going stale.
+		discoverSessions("claude-code", liveHome);
+		check(getDirWalkCount() === walk * 2,
+			`V11e: …and is re-walked in full on every call, memo or not (${getDirWalkCount()} after two, expected ${walk * 2})`);
+
+		delete process.env.WTFT_PI_SESSIONS_DIR;
+	}
+
+	delete process.env.WTFT_CLAUDE_PROJECTS_DIR;
+	delete process.env.WTFT_PI_SESSIONS_DIR;
+
+	// V11d — the real tree still gets a smoke check, minus the cost claim it
+	// could never support: discovery must not throw on whatever this host holds.
+	resetCwdCache();
 	const realProjects = path.join(os.homedir(), ".claude", "projects");
 	if (!fs.existsSync(realProjects)) {
 		skip("no ~/.claude/projects on this machine — the real-transcript arm did not run");
 	} else {
-		const here = process.cwd();
-		const t0 = Date.now();
-		const found = discoverSessions("claude-code", here);
-		const cold = Date.now() - t0;
-		check(found.length >= 0, "V11: discovery returns without throwing on the real tree");
-
-		const t1 = Date.now();
-		discoverSessions("claude-code", here);
-		const warm = Date.now() - t1;
-
-		// #477: the fixed 500ms ceiling this used to be drifts toward
-		// always-failing, because its input (the live ~/.claude/projects tree)
-		// grows every session while the ceiling never moves — and it fails
-		// *because* of the very sessions running it. Bound cold discovery
-		// against the memoised pass instead: the #164 gate is what keeps the
-		// expensive whole-file relocation scan (resolveCwdHistory) off most
-		// transcripts, and cold pays for every scan the gate lets through while
-		// warm is pure cache hits — so cold ballooning relative to warm is
-		// exactly what "the gate stopped gating" looks like. 40x + a 250ms
-		// floor is generous enough to absorb host-load jitter (measured ratio
-		// on this host: ~10-30x under `bun run test`) while still catching a
-		// real regression (see the mutation proof: forcing a 1.5ms busy-wait
-		// into every cache-miss resolve pushed the ratio to ~130-175x).
-		//
-		// A pure ratio is blind to one failure mode: cold AND warm degrading
-		// TOGETHER (e.g. the (path, mtimeMs, size) memo itself breaking, so the
-		// "warm" pass re-scans too) — a large warm inflates the ratio bound
-		// right along with it, so both this check and the untouched
-		// `warm <= cold + 50` sibling below pass trivially regardless of how
-		// slow either call actually is. ABSOLUTE_CEILING_MS caps the bound
-		// (Math.min, not Math.max — a floor added via max would only ever
-		// loosen a bound that's already looser than it) so cold can never
-		// hide behind an inflated warm: 5000ms leaves ~8-12x headroom over
-		// today's measured cold time (400-650ms) — high enough that it should
-		// not drift into failure for a long time the way the original 500ms
-		// ceiling did.
-		//
-		// Be precise about what that backstop does and does not buy, because an
-		// earlier draft of this comment claimed more than a run supports. It
-		// NARROWS the blind spot; it does not close it. The cap only bites once
-		// cold exceeds 5000ms, so it catches memoisation collapse on a tree big
-		// enough to make the uncached walk that slow — and NOT on this host
-		// today. Measured 2026-08-24 by disabling the cwdCache read outright:
-		// cold=597ms, warm=85ms, and BOTH V11 checks passed — 597 is under
-		// min(3650, 5000), and 85 is under cold+50. #489 tracks the gap.
-		//
-		// This is not a regression the ratio introduced. The fixed 500ms ceiling
-		// never caught memoisation collapse either: collapse costs the WARM pass,
-		// and nothing here has ever bounded warm in absolute terms. The failure
-		// mode was always untested — the ratio just makes saying so possible.
-		// WARM_FLOOR_MS guards a Date.now() resolution artifact: on a quiet
-		// host with little history, warm's real cost (mostly the uncached
-		// directory walk) can be a handful of ms and still measure as 0 at
-		// ~1ms clock resolution, which would collapse the bound to the bare
-		// 250ms additive term — tight enough to flake on a legitimately
-		// larger cold cost with no regression at all. A floor of 5ms keeps
-		// the bound's minimum at 40*5+250=450ms.
-		const ABSOLUTE_CEILING_MS = 5000;
-		const WARM_FLOOR_MS = 5;
-		const ratioBound = Math.min(40 * Math.max(warm, WARM_FLOOR_MS) + 250, ABSOLUTE_CEILING_MS);
-		check(
-			cold <= ratioBound,
-			`V11: cold discovery stays within a bounded multiple of the memoised pass (${cold}ms ≤ min(40×max(${warm},${WARM_FLOOR_MS})ms + 250ms, ${ABSOLUTE_CEILING_MS}ms) = ${ratioBound}ms)`
-		);
-		check(warm <= cold + 50, `V11: the memoised second pass does not re-read (${warm}ms ≤ ${cold + 50}ms)`);
+		const found = discoverSessions("claude-code", process.cwd());
+		check(Array.isArray(found), "V11d: discovery returns without throwing on the real tree");
 	}
 }
 

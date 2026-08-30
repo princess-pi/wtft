@@ -496,7 +496,16 @@ export async function renderWtftWhy(src: ManifestSource, invokedAs: string): Pro
 	const file = path.join(dir, "wtft-cmd.json");
 	try {
 		fs.writeFileSync(file, JSON.stringify(src));
-		return renderWhy(file, invokedAs);
+		// `await` before returning, not `return renderWhy(...)`: `finally` runs when
+		// the try block RETURNS, not when the returned promise settles, so the bare
+		// return would delete the spill file during the read it exists for.
+		// Demonstrated with an async reader — the bare form throws ENOENT, this one
+		// returns the content. Latent rather than live today only because libs'
+		// renderWhy is synchronous (fs.readFileSync), which is a property of a
+		// PINNED external package that this call site cannot see and does not
+		// assert; the await is correct under either implementation. (Review round 1.)
+		const text = await renderWhy(file, invokedAs);
+		return text;
 	} finally {
 		try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
 	}

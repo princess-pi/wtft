@@ -30,9 +30,13 @@ function listFiles() {
 	} catch { return out; }
 	for (const d of dirs) {
 		let files = [];
-		try { files = fs.readdirSync(path.join(root(), d.name)); } catch { continue; }
+		// withFileTypes + isFile(): the outer walk already filters to directories,
+		// but the inner one used names only, so a DIRECTORY named `x.jsonl` was
+		// returned as a transcript candidate and `discover()` would statSync it
+		// happily and hand a directory to a consumer expecting JSONL. (#42 review.)
+		try { files = fs.readdirSync(path.join(root(), d.name), { withFileTypes: true }); } catch { continue; }
 		for (const f of files) {
-			if (f.endsWith(".jsonl")) out.push({ file: path.join(root(), d.name, f), slug: d.name });
+			if (f.isFile() && f.name.endsWith(".jsonl")) out.push({ file: path.join(root(), d.name, f.name), slug: d.name });
 		}
 	}
 	return out;

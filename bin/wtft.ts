@@ -325,8 +325,37 @@ async function main() {
 		return;
 	}
 
-	const candidates = discoverSessions(opts.harnessOption, opts.cwdOverride);
-	
+	// Discovery is LAZY, and that is a cost decision, not a style one (#35).
+	// Only two branches below read it — the fuzzy-substring fallback and the
+	// auto-select menu — and neither is reachable once `-s` names an existing file
+	// or a pending path. Run eagerly it was a whole session-corpus scan, paid for
+	// and thrown away on the commonest invocation of all.
+	//
+	// The scan is not cheap and gets less cheap over time: discovery asks each
+	// transcript where it lives, and one whose recorded cwd no longer exists falls
+	// through to resolveCwdHistory, a whole-file read. `pr-cleanup` deletes a
+	// worktree after every merge and strands every session that lived there, so
+	// that fallback's "3 transcripts in 40" budget measured 34 in 40 on the
+	// development host — 760 MB re-read per run, 98% of wall clock.
+	//
+	// Memoised as well as deferred, though nothing today needs the cache: both
+	// branches call it once and reuse the result. It is here so that a future
+	// second call site cannot quietly reintroduce a whole second scan — the cost
+	// of `??=` is one null check, and the cost of getting this wrong again is
+	// everything above. Stated as insurance rather than as a present saving,
+	// because an earlier draft of this comment claimed the fuzzy branch scanned
+	// twice; it does not, and a rationale that misdescribes its own control flow
+	// is how the next reader learns to distrust the comments (PR review).
+	// Named `getCandidates`, not `candidates`, because the array-to-thunk change is
+	// a JS footgun worth spending a word on: `candidates.length` on a function is
+	// its ARITY — 0 — so a call site that forgot the parens would read as "no
+	// sessions found" and never throw. A name that reads as a verb makes the
+	// missing `()` visible. `candidateCache` likewise avoids shadowing the
+	// unrelated `const discovered` further down in this function (PR review).
+	let candidateCache: ReturnType<typeof discoverSessions> | null = null;
+	const getCandidates = (): ReturnType<typeof discoverSessions> =>
+		(candidateCache ??= discoverSessions(opts.harnessOption, opts.cwdOverride));
+
 	let finalSessionPath = "";
 	// #308: a session .jsonl that does not exist YET is a known-lagging path, not an
 	// error. Claude Code fixes the session id — and so the transcript path — at launch,
@@ -345,12 +374,13 @@ async function main() {
 		} else {
 			// Fuzzy substring filter against discovered sessions
 			const filter = opts.targetSession.toLowerCase();
-			const filtered = candidates.filter(c =>
+			const found = getCandidates();
+			const filtered = found.filter(c =>
 				c.path.toLowerCase().includes(filter) ||
 				c.name.toLowerCase().includes(filter)
 			);
 			if (filtered.length === 0) {
-				console.error(`❌ Error: Session '${opts.targetSession}' does not exist as a file and matches no discovered sessions (${candidates.length} available).`);
+				console.error(`❌ Error: Session '${opts.targetSession}' does not exist as a file and matches no discovered sessions (${found.length} available).`);
 				process.exit(1);
 			} else if (filtered.length === 1) {
 				finalSessionPath = filtered[0].path;
@@ -360,14 +390,15 @@ async function main() {
 		}
 	} else {
 		// Auto select or show selector prompt
-		if (candidates.length === 0) {
+		const found = getCandidates();
+		if (found.length === 0) {
 			console.error("❌ Error: No active session log files found. Ensure Pi or Claude has been run, or specify an explicit session log path with -s.");
 			process.exit(1);
-		} else if (candidates.length === 1) {
-			finalSessionPath = candidates[0].path;
+		} else if (found.length === 1) {
+			finalSessionPath = found[0].path;
 		} else {
 			// Show select menu!
-			finalSessionPath = await selectSessionPrompt(candidates);
+			finalSessionPath = await selectSessionPrompt(found);
 		}
 	}
 

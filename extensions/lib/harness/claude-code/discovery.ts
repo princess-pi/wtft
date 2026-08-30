@@ -110,9 +110,19 @@ function toCandidate(file: string, projectSlug: string): SessionCandidate | null
  * Does this transcript's own recorded location put it in one of the targets?
  *
  * Two arms, in cost order. The second is gated on the first failing *and* on the
- * session's home being gone — unconditionally it is a whole-file read costing
- * ~315 ms over a real history, to serve 3 transcripts in 40
+ * session's home being gone — unconditionally it is a whole-file read
  * (research/164-relocation-scan-probe.mjs).
+ *
+ * That gate is far leakier than the figure once quoted here ("~315 ms, to serve
+ * 3 transcripts in 40"): the second arm opens precisely for a session whose home
+ * directory is gone, which `pr-cleanup` manufactures on every merge. Re-measured
+ * at 34 in 40. The current numbers live in ONE place — {@link resolveCwdHistory}
+ * in session-cwd.ts — deliberately not restated here, because the last set of
+ * these went stale in four artifacts at once (princess-pi/wtft#35).
+ *
+ * So callers gate on need, not only on cost: `discover()` is called lazily by
+ * bin/wtft.ts, since running it for an explicit `-s` was 98% of that command's
+ * wall clock.
  *
  * A transcript with no `cwd` at all resolves to null and matches nothing, which
  * is what keeps Pi transcripts out of this entirely.

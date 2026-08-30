@@ -7,3 +7,7 @@ bun.lock
 # channel only, per the Node Toolchain Standard. A stock-node consumer needs the
 # registry channel, which is still pending (#29).
 bin/*.mjs
+
+# Scratch space for test/daemon litter — never committed (Workspace Hygiene Standard).
+tmp/
+.claude/worktrees/

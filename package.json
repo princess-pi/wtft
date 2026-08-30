@@ -1,7 +1,7 @@
 {
   "name": "@princess-pi/wtft",
   "version": "1.0.0",
-  "description": "wtft \u2014 what the f**k tokens: live cost tracker for Claude Code and Pi harness sessions",
+  "description": "wtft — what the f**k tokens: live cost tracker for Claude Code and Pi harness sessions",
   "license": "MIT-0",
   "author": {
     "name": "Princess Pi",
@@ -20,6 +20,7 @@
   "scripts": {
     "build": "bun run build.ts",
     "test": "bun run tests/run.ts",
+    "typecheck": "tsc --noEmit",
     "prepare": "bun run build"
   },
   "engines": {
@@ -30,7 +31,10 @@
     "wcwidth": "^1.0.1"
   },
   "devDependencies": {
-    "bun-types": "latest"
+    "@types/node": "^26",
+    "@types/wcwidth": "^1",
+    "bun-types": "latest",
+    "typescript": "^7"
   },
   "trustedDependencies": [
     "@princess-pi/libs"

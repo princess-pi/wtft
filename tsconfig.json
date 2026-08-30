@@ -19,10 +19,25 @@
 		"noEmit": true,
 		"allowImportingTsExtensions": true,
 		"skipLibCheck": true,
+		// `["node"]` DELIBERATELY excludes the `bun-types` devDependency, and that exclusion
+		// is load-bearing rather than an oversight (PR review flagged it as the reverse).
+		// bin/*.ts is bundled by build.ts into bin/*.mjs, which must run on STOCK NODE —
+		// `engines.node >= 18`, and the Node Toolchain Standard's "bun is internal only,
+		// never a consumer requirement". A `Bun.*` global reaching bin/ would compile here
+		// and then die at a consumer's `npx`. Excluding bun-types turns that into a compile
+		// error instead, so this is a true positive, not the false one it looks like:
+		//   bin/__bun_types_probe__.ts(2,18): error TS2868: Cannot find name 'Bun'.
+		// Verified by probe, 2026-08-30. build.ts itself uses Bun.build freely — it is
+		// outside `include` because it is a build tool, not shipped output.
 		"types": ["node"]
 	},
 	// No `allowJs`: unlike princess-pi-tools, this repo has no hand-written .js module
 	// under extensions/ — every `./x.js` specifier resolves to a real .ts under nodenext.
 	// Add it back only when a genuine .js module arrives, and say which one.
+	//
+	// This glob matches bin/wtft.ts and bin/wtft-daemon.ts, the two tracked SOURCES.
+	// The bin/*.mjs beside them are gitignored build output and package.json's `bin`
+	// map points at those, so a reader who sees only the diff can conclude this glob
+	// matches nothing — PR review did. It does not: `git ls-files bin` lists both .ts.
 	"include": ["bin/**/*.ts"]
 }

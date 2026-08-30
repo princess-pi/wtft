@@ -42,8 +42,26 @@ const line = (text: string) => JSON.stringify({
 	},
 }) + "\n";
 
+/**
+ * Every temp root this probe creates, removed by one `finally` at the end.
+ *
+ * A registry rather than a list of named variables (PR #43 review): the
+ * reviewer was right that construction outside the try leaks, but a fix that
+ * only hoists the variables still misses the worst case — a corpus that throws
+ * PART WAY THROUGH being filled never returns its root, so no variable can
+ * name it. Recording the root at creation covers that; naming it at the call
+ * site cannot. Each corpus here is COUNT x FILE_KB, so a leak is hundreds of
+ * megabytes, not an empty directory.
+ */
+const roots: string[] = [];
+function mktmp(prefix: string): string {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+	roots.push(dir);
+	return dir;
+}
+
 function buildCorpus(label: string, cwdFor: (i: number) => string): string {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), `wtft-39-${label}-`));
+	const root = mktmp(`wtft-39-${label}-`);
 	const proj = path.join(root, "-home-synthetic-project");
 	fs.mkdirSync(proj, { recursive: true });
 	const filler = line("y".repeat(900));
@@ -58,16 +76,7 @@ function buildCorpus(label: string, cwdFor: (i: number) => string): string {
 	return root;
 }
 
-const liveDir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-39-livecwd-"));
-const live = buildCorpus("live", () => liveDir);
-const stranded = buildCorpus("stranded", (i) => `/home/princess-pi/NO-SUCH-DIR-${i}`);
-
-// mkdtemp, not a fixed /tmp/wtft-39-nopi: two probe runs at once would
-// otherwise share one directory, and the second to finish would delete it out
-// from under the first. Created once so the timed section allocates nothing.
-const noPi = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-39-nopi-"));
-
-async function timeDiscovery(projectsDir: string): Promise<number> {
+async function timeDiscovery(projectsDir: string, liveDir: string, noPi: string): Promise<number> {
 	process.env.WTFT_CLAUDE_PROJECTS_DIR = projectsDir;
 	process.env.WTFT_PI_SESSIONS_DIR = noPi;
 	const mod: any = await import("../../bin/wtft.mjs");
@@ -77,18 +86,25 @@ async function timeDiscovery(projectsDir: string): Promise<number> {
 	return performance.now() - t0;
 }
 
-// try/finally, so a throw inside the timing loop still removes the four
-// corpora. They are hundreds of megabytes here, and this probe is run by hand
-// on a box whose /tmp already carries the scars of suites that did not bother.
+// EVERYTHING that allocates is inside the try, not just the timing loop.
 try {
+	const liveDir = mktmp("wtft-39-livecwd-");
+	const live = buildCorpus("live", () => liveDir);
+	const stranded = buildCorpus("stranded", (i) => `/home/princess-pi/NO-SUCH-DIR-${i}`);
+	// mktmp, not a fixed /tmp/wtft-39-nopi: two probe runs at once would
+	// otherwise share one directory, and the second to finish would delete it
+	// out from under the first. Created once so the timed section allocates
+	// nothing.
+	const noPi = mktmp("wtft-39-nopi-");
+
 	const rows: string[] = [];
 	for (let r = 0; r < 3; r++) {
-		const l = await timeDiscovery(live);
-		const s = await timeDiscovery(stranded);
+		const l = await timeDiscovery(live, liveDir, noPi);
+		const s = await timeDiscovery(stranded, liveDir, noPi);
 		rows.push(`run ${r + 1}: live ${l.toFixed(0)}ms  stranded ${s.toFixed(0)}ms  ratio ${(s / l).toFixed(2)}x`);
 	}
 	console.log(`corpus: ${COUNT} files x ${FILE_KB} KB (tail window is 8 KB)`);
 	for (const r of rows) console.log(r);
 } finally {
-	for (const d of [live, stranded, liveDir, noPi]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+	for (const d of roots) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }

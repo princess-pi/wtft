@@ -1,0 +1,28 @@
+{
+	// TS7 (native compiler) typecheck config, restored with the Phase-5 transfer (#37).
+	//
+	// WHY THIS FILE EXISTS AT ALL, rather than being a nicety: a test depends on it.
+	// `tests/wtft-179-daemon-health-reason.test.ts` V2 is a negative control — it writes
+	// a probe comparing a DaemonHealthReason against a value outside the union, runs
+	// `bun run typecheck`, and requires tsc to REJECT it. Without a checker the union is
+	// decorative: before #179 split it out, `health.reason === "daemon not fuond"`
+	// compiled happily to an always-false branch. A compiler gate that cannot be shown
+	// to go red is indistinguishable from no gate (the lesson of #168).
+	//
+	// Scope: bin/ CLIs and the extensions/lib files they transitively import — which is
+	// what the probe needs, since it imports extensions/lib/wtft-daemon-lib.ts.
+	"compilerOptions": {
+		"target": "es2022",
+		"module": "nodenext",
+		"moduleResolution": "nodenext",
+		"strict": true,
+		"noEmit": true,
+		"allowImportingTsExtensions": true,
+		"skipLibCheck": true,
+		"types": ["node"]
+	},
+	// No `allowJs`: unlike princess-pi-tools, this repo has no hand-written .js module
+	// under extensions/ — every `./x.js` specifier resolves to a real .ts under nodenext.
+	// Add it back only when a genuine .js module arrives, and say which one.
+	"include": ["bin/**/*.ts"]
+}

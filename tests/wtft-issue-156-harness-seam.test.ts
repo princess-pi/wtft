@@ -213,19 +213,46 @@ console.log("\n=== PART C: no regression against the real session history ===\n"
 		const missing = oldRule.filter(p => !found.includes(p));
 		check(missing.length === 0, `every session the old cwd-slug rule found is still found (${oldRule.length} checked)`);
 
-		// #487: this fixed 500ms ceiling shares V11's defect (#477) — a bound
-		// against the live, ever-growing ~/.claude/projects tree that drifts
-		// toward always-failing as this host's history grows. Has more
-		// headroom today than V11's old cold-based check ever did, because
-		// discoverSessions() was already called once (untimed) just above,
-		// priming the (path, mtimeMs, size) memo before this call is timed —
-		// but the directory walk itself is never memoised, so even this
-		// "warm" cost scales with total file/directory count over time.
-		// Not restated here — tracked in #487, not fixed in #477's branch.
-		const t0 = Date.now();
+		// WHAT REPLACED THE 500ms CEILING, AND WHY NOT A RATIO (#18).
+		//
+		// This was `elapsed < 500` against the live ~/.claude/projects tree — a
+		// fixed bound on an input the test does not own, drifting toward
+		// always-failing as this host's history grows. #39 hit the end of that
+		// road in V11's sibling check and measured why no threshold repairs it:
+		// cold scales with the corpus while warm is pure cache hits, so the
+		// ratio between them grows without bound, and `pr-cleanup` strands every
+		// session that lived in a deleted worktree PERMANENTLY (2,622 of 3,073
+		// transcripts, 85%). The issue proposed closing this one "the way #477
+		// closed V11" — with a ratio. That is exactly what #39 then retired: a
+		// constant multiple of a memoised call cannot bound an unmemoised one.
+		//
+		// So it asserts the same thing PART A already asserts about a single
+		// file, one level up and against the real tree: the memo holds. That is
+		// the property "stays fast" was reaching for, it is an integer instead
+		// of a clock, and it cannot drift with the corpus — the bigger this
+		// host's history grows, the MORE reads the guard below covers.
+		//
+		// It is also STRICTLY STRONGER, not merely steadier. Disabling the
+		// (path, mtimeMs, size) memo and rebuilding fails the check below at
+		// 2,835 re-reads, while the same broken build ran the timed call in
+		// 137ms and would have sailed through `elapsed < 500`. The ceiling was
+		// blind to the exact regression this part exists to catch.
+		//
+		// Rebuild after touching a source file to reproduce that: this suite
+		// imports from ../bin/wtft.mjs, so it tests the BUILT artifact and a
+		// source-only edit changes nothing here.
+		//
+		// Still not covered, and deliberately: the directory walk itself is
+		// never memoised, so a call's floor scales with total file count no
+		// matter what the cache does. Nothing here can bound that without a
+		// corpus the test owns, which is what the counted V11 in
+		// wtft-issue-144-145-164-session-discovery.test.ts is for.
+		const readsBeforeSecond = getCwdReadCount();
 		discoverSessions("claude-code", here);
-		const elapsed = Date.now() - t0;
-		check(elapsed < 500, `discovery over the real history stays fast (${elapsed}ms < 500ms)`);
+		check(getCwdReadCount() === readsBeforeSecond,
+			`a second discovery over the real history re-reads nothing (${getCwdReadCount() - readsBeforeSecond} new read(s))`);
+		check(readsBeforeSecond > 0,
+			`…and the first one really did read it, so that is not vacuous (${readsBeforeSecond} read(s))`);
 	}
 }
 

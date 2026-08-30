@@ -10,9 +10,24 @@
 
 ## Install
 
+From a clone. Needs [bun](https://bun.sh) on PATH to build; the two files it
+installs then run on stock node with nothing beside them.
+
 ```sh
-npm install -g @princess-pi/wtft
+git clone https://github.com/princess-pi/wtft && cd wtft
+bun install
+bin/install-wtft            # builds, then copies into ~/bin
+bin/install-wtft --check    # later: has a rebuild left ~/bin stale?
 ```
+
+`install-wtft` copies `wtft`, `wtft-daemon` and `wtft-daemon.mjs` into `~/bin`
+(override with `--dir`), and tells you if some other `wtft` wins on your PATH —
+it prints the `rm`, it never deletes anything itself. `--json` gives the whole
+report as one document. Re-run it after every rebuild; `--check` is how you find
+out you needed to.
+
+**Not on npm yet.** `npm install -g @princess-pi/wtft` will not work — nothing is
+published. Tracked in [#29](https://github.com/princess-pi/wtft/issues/29).
 
 ## Usage
 

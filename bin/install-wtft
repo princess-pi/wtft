@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+# install-wtft — put THIS repo's wtft build on PATH.
+#
+# Why this exists (#46): `wtft` on the box it was written for resolved to
+# ~/.bun/bin/wtft -> the princess-pi-tools clone, reporting 1.1.0 while this
+# repo built 1.0.0 — so #36, #37, #39 and #18 were all absent from the command
+# that actually ran, and lazy session discovery got implemented twice, once in
+# each repo. `install-workflow-tools` has never contained a single wtft
+# reference: the route was `bun link` plus that repo's package.json bin map, so
+# there was nothing to remove from that installer. This is the missing half of
+# the Phase-5 extraction — it copied the sources and never moved the install.
+#
+# Usage:
+#   install-wtft                     build, then install into ~/bin
+#   install-wtft --check [--json]    report drift, write nothing (doctor mode)
+#   install-wtft --dir <dir>         install somewhere else (the test seam)
+#   install-wtft --json              machine-readable document, either mode
+#   install-wtft -h | --help         this text
+#   install-wtft --version           absolute path of this copy
+#
+# Exit codes:
+#   0   installed, or --check found this host in sync
+#   1   drift: an artifact is missing, stale, not executable, or not built
+#   2   installed correctly but SHADOWED on PATH by a different wtft
+#   3   the build failed
+#  64   bad usage
+#
+# 1 and 64 match install-workflow-tools deliberately, so the two installers
+# never disagree about what a number means. 2 is its own code because its
+# remedy is a different verb: re-running this script cannot fix a PATH shadow.
+# Drift outranks shadow when both hold — a shadowed copy of the wrong bytes is
+# still the wrong bytes, and fixing drift is the prerequisite.
+#
+# COPY, NOT SYMLINK. A symlink into the clone was the only workable option
+# before #36, because the artifacts still carried bare imports and only ran
+# from a directory with node_modules in an ancestor. #36 made them
+# self-contained, so a copy runs anywhere. The copy survives the clone moving
+# or being deleted, and reports a real version instead of a -dev stamp against
+# a working tree that has since changed; the cost is re-running this after each
+# build, which --check is what makes visible.
+#
+# THE DAEMON KEEPS ITS .mjs EXTENSION. bin/wtft.ts computes
+# `daemonDir = dirname(fileURLToPath(import.meta.url))` and joins
+# "wtft-daemon.mjs" onto it, at four call sites. Installing the daemon as
+# `wtft-daemon` would leave --watch unable to find it while everything else
+# kept working — the failure mode hardest to notice.
+#
+# SHADOWS ARE REPORTED, NEVER DELETED. The precedent is
+# install-workflow-tools, which reports a retired hook and prints its `rm`
+# rather than removing it: silently deleting an executable another repo manages
+# is the same class of move as silently installing one. A `bun link` deleted
+# here would also return the next time anyone re-links that repo, so deleting
+# it would be both rude and ineffective.
+#
+# Contract: docs/spec-46-install-wtft.md
+
+set -uo pipefail
+
+MODE=install
+JSON=0
+DEST_DIR=""
+
+self_path() { (cd "$(dirname "$0")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$0")"); }
+abspath()   { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$(basename "$1")") || printf '%s\n' "$1"; }
+json_str()  { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --check)   MODE=check ;;
+    --json)    JSON=1 ;;
+    --dir)     shift; [ $# -gt 0 ] || { echo "install-wtft: --dir needs a directory" >&2; exit 64; }; DEST_DIR="$1" ;;
+    --version) self_path; exit 0 ;;
+    -h|--help) sed -n '2,/^set -uo/p' "$(self_path)" | sed -e 's/^# \{0,1\}//' -e '$d'; exit 0 ;;
+    *)         echo "install-wtft: unknown argument '$1'" >&2; exit 64 ;;
+  esac
+  shift
+done
+
+REPO="$(cd "$(dirname "$(self_path)")/.." && pwd -P)"
+SRC_DIR="$REPO/bin"
+[ -n "$DEST_DIR" ] || DEST_DIR="$HOME/bin"
+# Absolute from here on: the document reports paths a caller can use directly,
+# and the shadow comparison below is only meaningful between absolute paths.
+mkdir -p "$DEST_DIR" 2>/dev/null || true
+DEST_DIR="$(cd "$DEST_DIR" 2>/dev/null && pwd -P || printf '%s' "$DEST_DIR")"
+
+# src-name:installed-name. The daemon lands TWICE, on purpose:
+#   wtft-daemon.mjs — the name `daemonDir` joins, load-bearing (see above)
+#   wtft-daemon     — the human-facing command, matching package.json's bin map
+#                     and `wtft-daemon start` in the README
+# A copy rather than a symlink so every artifact is checked by one rule; 111 KB
+# twice is not worth a second code path in --check.
+ARTIFACTS=("wtft.mjs:wtft" "wtft-daemon.mjs:wtft-daemon.mjs" "wtft-daemon.mjs:wtft-daemon")
+
+STATUS=ok
+EXIT=0
+BUILD_OUT=""
+
+# ---
+# Build first in install mode. --check never builds: it writes nothing, and a
+# doctor that modifies the tree it is diagnosing is not a doctor.
+# ---
+if [ "$MODE" = install ]; then
+  if ! BUILD_OUT="$(cd "$REPO" && bun run build 2>&1)"; then
+    STATUS=build-failed
+    EXIT=3
+  fi
+fi
+
+# ---
+# Install, then evaluate. Evaluating AFTER the copy means the reported state is
+# what is on disk now, not what the script intended to put there.
+# ---
+if [ "$MODE" = install ] && [ "$STATUS" != build-failed ]; then
+  mkdir -p "$DEST_DIR" || { echo "install-wtft: cannot create $DEST_DIR" >&2; exit 1; }
+  for entry in "${ARTIFACTS[@]}"; do
+    src="$SRC_DIR/${entry%%:*}"
+    dst="$DEST_DIR/${entry##*:}"
+    [ -f "$src" ] || continue
+    cp -f "$src" "$dst" && chmod 0755 "$dst"
+  done
+fi
+
+STATE_JSON=""
+for entry in "${ARTIFACTS[@]}"; do
+  name="${entry##*:}"
+  src="$SRC_DIR/${entry%%:*}"
+  dst="$DEST_DIR/$name"
+  if   [ ! -f "$src" ]; then state=no-source
+  elif [ ! -f "$dst" ]; then state=missing
+  elif ! cmp -s "$src" "$dst"; then state=stale
+  elif [ ! -x "$dst" ]; then state=not-executable
+  else state=ok
+  fi
+  [ "$state" = ok ] || { [ "$STATUS" = build-failed ] || STATUS=drift; }
+  [ -z "$STATE_JSON" ] || STATE_JSON="$STATE_JSON,"
+  STATE_JSON="$STATE_JSON{\"name\":\"$(json_str "$name")\",\"path\":\"$(json_str "$dst")\",\"state\":\"$state\"}"
+done
+[ "$STATUS" = drift ] && EXIT=1
+
+# ---
+# Shadow: whichever `wtft` PATH actually resolves. `onPath` is reported but
+# never fatal — a dir that is not on PATH is a host-wiring fact, not drift.
+# ---
+SHADOW_JSON=null
+ON_PATH=false
+WINNER="$(command -v wtft 2>/dev/null || true)"
+if [ -n "$WINNER" ]; then
+  if [ "$(abspath "$WINNER")" = "$(abspath "$DEST_DIR/wtft")" ]; then
+    ON_PATH=true
+  else
+    SHADOW_JSON="{\"found\":\"$(json_str "$WINNER")\",\"remedy\":\"rm $(json_str "$WINNER")\"}"
+    if [ "$STATUS" = ok ]; then STATUS=shadowed; EXIT=2; fi
+  fi
+fi
+
+if [ "$JSON" = 1 ]; then
+  printf '{"schema":"install-wtft@1","mode":"%s","dir":"%s","status":"%s","onPath":%s,"artifacts":[%s],"shadow":%s}\n' \
+    "$MODE" "$(json_str "$DEST_DIR")" "$STATUS" "$ON_PATH" "$STATE_JSON" "$SHADOW_JSON"
+else
+  case "$STATUS" in
+    build-failed) echo "❌ install-wtft: build failed" >&2; echo "$BUILD_OUT" >&2 ;;
+    drift)        echo "❌ install-wtft: $DEST_DIR does not match $SRC_DIR" >&2
+                  echo "$STATE_JSON" | tr ',' '\n' | sed -n 's/.*"name":"\([^"]*\)".*"state":"\([^"]*\)".*/   \1: \2/p' >&2
+                  echo "   Run: $(self_path)" >&2 ;;
+    shadowed)     echo "⚠️  install-wtft: installed into $DEST_DIR, but PATH resolves wtft to $WINNER" >&2
+                  echo "   Run: rm $WINNER" >&2 ;;
+    ok)           [ "$MODE" = check ] && echo "✅ install-wtft: $DEST_DIR is in sync with $SRC_DIR" \
+                                      || echo "✅ install-wtft: installed into $DEST_DIR" ;;
+  esac
+fi
+
+exit "$EXIT"

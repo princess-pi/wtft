@@ -517,12 +517,27 @@ export async function renderWtftWhy(src: ManifestSource, invokedAs: string): Pro
  * of the two release paths ever bumped), and the build stamp says which tree
  * produced the artifact answering (#178).
  *
+ * WHEN package.json is read has changed (#46): in a BUNDLED artifact it is read
+ * at BUILD time and substituted below, because an artifact installed into ~/bin
+ * has no package.json above it — and if one happens to be there, it is not
+ * ours. Unbundled source still reads it at run time. Same single source of
+ * truth, resolved at whichever moment the file is actually reachable.
+ *
  * `moduleUrl` must be the CALLER's import.meta.url, not this module's: after
  * bundling they are the same file, but the Pi extension loads source, where
  * this lib's URL would name the lib rather than the command you invoked.
  */
 export function renderWtftVersion(src: ManifestSource, moduleUrl: string): string {
 	const manifest = loadManifest(src);
+	// Bundled artifacts answer from themselves (#46): build.ts substitutes this
+	// expression for the literal it read out of package.json, so an artifact
+	// installed anywhere — ~/bin included — reports its real version instead of
+	// walking up to whatever package.json happens to sit above it. Unbundled
+	// source leaves the define unset and falls through to the read below, which
+	// is correct there: the Pi extension runs inside this repo.
+	const injected = process.env.WTFT_BUILD_VERSION;
+	if (injected) return formatVersion(manifest.name, injected, moduleUrl);
+
 	const pkgPath = path.join(path.dirname(fileURLToPath(moduleUrl)), "..", "package.json");
 	let semver: string;
 	try {

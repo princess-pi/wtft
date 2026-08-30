@@ -67,15 +67,24 @@ verb entirely: re-running the installer cannot fix a PATH shadow.
   "mode": "check" | "install",
   "dir": "/home/u/bin",
   "status": "ok" | "drift" | "shadowed" | "build-failed",
+  "onPath": true | false,
   "artifacts": [
-    { "name": "wtft", "path": "…/bin/wtft", "state": "ok" | "missing" | "stale" | "not-executable" }
+    { "name": "wtft", "path": "…/bin/wtft",
+      "state": "ok" | "missing" | "stale" | "not-executable" | "no-source" }
   ],
   "shadow": null | { "found": "/home/u/.bun/bin/wtft", "remedy": "rm /home/u/.bun/bin/wtft" }
 }
 ```
 
 Flat, one record per artifact, stable keys. `status` is the single field a caller reads
-to branch; `artifacts[].state` says which file to blame.
+to branch; `artifacts[].state` says which file to blame. `dir` and every `path` are
+absolute, so a caller can use them without knowing this script's cwd.
+
+`no-source` means `bin/*.mjs` has not been built — reachable only under `--check`, which
+never builds. `onPath` reports whether the installed copy is the one PATH resolves; it is
+**never fatal**, because a directory that is not on PATH is a host-wiring fact rather than
+drift. **Drift outranks shadow** when both hold: a shadowed copy of the wrong bytes is
+still the wrong bytes, and fixing drift is the prerequisite.
 
 ---
 
@@ -87,6 +96,10 @@ Installed files:
 |---|---|---|
 | `bin/wtft.mjs` | `<dir>/wtft` | the command |
 | `bin/wtft-daemon.mjs` | `<dir>/wtft-daemon.mjs` | **the extension is load-bearing** |
+| `bin/wtft-daemon.mjs` | `<dir>/wtft-daemon` | the human-facing command — package.json's `bin` map and the README's `wtft-daemon start` both use this name, so a clone install that omitted it would differ from a registry install in a way nobody would notice until they typed it |
+
+The daemon lands twice, as two copies rather than a file and a symlink: 111 KB twice
+is cheaper than a second code path in `--check`.
 
 `bin/wtft.ts` computes `daemonDir = path.dirname(fileURLToPath(import.meta.url))` and
 then joins `"wtft-daemon.mjs"` onto it — at four call sites. So the daemon must sit
@@ -137,17 +150,54 @@ Four, all driven through the CLI — no internal function is imported.
 | **V1** | `--check --json` on an empty dir | exit `1`, `status: "drift"`, both artifacts `missing` |
 | **V2** | install into an empty dir | exit `0`, both files present, mode `0755`, byte-identical to `bin/*.mjs`; `--check` then exits `0` |
 | **V3** | the installed command runs | `node <dir>/wtft --version` exits 0 and prints the version; `<dir>/wtft-daemon.mjs` exists beside it |
-| **V4** | shadow detection | a decoy `wtft` earlier on `PATH` → exit `2`, `shadow.found` names the decoy |
-| **V5** | staleness | append a byte to the installed `wtft` → `--check` exits `1` with `state: "stale"` |
+| **V4** | shadow detection | a decoy `wtft` earlier on `PATH` → exit `2`, `shadow.found` names it, the decoy is **still there**, the install still happened, and our own copy winning is exit `0` / `shadow: null` / `onPath: true` |
+| **V5** | staleness | append a byte to the installed `wtft` → `--check` exits `1`, that artifact `stale`, the untouched one still `ok`; `chmod 0644` → `not-executable` |
 
 Every test drives a temp `--dir` and a temp `PATH`. **No test writes to the real
 `~/bin`, and no test reads the developer's real `PATH`** — the seam exists so the suite
 never depends on how this box happens to be wired.
 
-V1, V4 and V5 are the mutation-proofs: each fails against a distinct regression
-(no drift detection, no shadow detection, no content comparison).
+### Mutation-proofs, run rather than asserted
+
+Three branches were deleted from a copy of the script inside `bin/` (the copy must live
+there: `REPO` is derived from the script's own location, so a mutant elsewhere fails with
+`build-failed` and proves nothing — that happened on the first attempt).
+
+| Mutation | Real installer | Mutant |
+|---|---|---|
+| never escalate a bad artifact state to `drift` | exit `1` | exit **`0`**, `status: "ok"` while artifacts say `missing` |
+| never escalate a foreign PATH winner to `shadowed` | exit `2` | exit **`0`**, `status: "ok"` while the decoy wins |
+| never `cmp` source against destination | exit `1` | exit **`0`**, `status: "ok"` on a modified copy |
+
+Each is caught by a distinct check: V1a/V1d, V4a/V4b, V5b/V5c.
 
 ---
+
+## The version had to move into the artifact
+
+Installing into `~/bin` broke `--version`, and V3 caught it on the first run.
+
+`renderWtftVersion` read `<artifactDir>/../package.json`. That resolves in a package
+install and in this repo, and in **no other layout** — including this one, where the
+lookup lands on `$HOME/package.json`. Two outcomes, and the second is the dangerous one:
+
+- **absent** → `wtft --version` prints `unknown`, on the one command anybody runs when
+  they already suspect they are running the wrong build. That command is exactly how #46
+  was diagnosed, so an install that breaks it defeats its own purpose.
+- **present** → it prints an unrelated project's version, confidently. A stray
+  `package.json` in a home directory is not exotic.
+
+`build.ts` now reads package.json at build time and substitutes the literal into the
+bundle (`define`). package.json stays the single source of truth; the artifact answers
+from itself. Unbundled source — the Pi extension loads it directly — keeps the run-time
+read, which is correct there because the file is genuinely reachable.
+
+This also closes the last hole in #36's own thesis: "the emitted ESM reaches for nothing
+outside itself" was true of imports and false of the version. `tests/wtft-36-relocatable-build.test.ts`
+V5 was rewritten to assert the new contract with a **deliberately wrong** neighbouring
+`package.json` (`9.9.9-decoy`), so the old read coming back fails the check instead of
+passing on a value that happens to match — the previous V5 could no longer fail for its
+stated reason once the version was injected.
 
 ## What this spec does not claim
 

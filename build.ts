@@ -73,6 +73,29 @@ const entries = [
   { src: "bin/wtft-daemon.ts", out: "wtft-daemon.mjs" },
 ] as const;
 
+// ---
+// THE VERSION IS THE LAST THING THE BUNDLE REACHED FOR OUTSIDE ITSELF (#46).
+//
+// `renderWtftVersion` reads `<artifactDir>/../package.json`. That resolves in a
+// package install (node_modules/@princess-pi/wtft/bin/wtft.mjs) and in this
+// repo, and in NO other layout — including the one #46 installs, where the
+// artifact sits in ~/bin and the lookup lands on `$HOME/package.json`. Two
+// failures, and the second is the bad one:
+//
+//   - absent  → `wtft --version` prints "unknown", on the one command you run
+//     when you already suspect you are running the wrong build.
+//   - PRESENT → it prints an unrelated project's version, confidently. A stray
+//     package.json in a home directory is not exotic.
+//
+// Injecting it at build time keeps package.json the single source of truth
+// (this reads it) while making the artifact answer from itself. In unbundled
+// source — the Pi extension loads it directly — the define is absent and the
+// package.json read still happens, which is correct there.
+// ---
+const pkgVersion = JSON.parse(
+  fs.readFileSync(path.join(import.meta.dir, "package.json"), "utf8"),
+).version as string;
+
 let errors = 0;
 for (const { src, out } of entries) {
   const result = await Bun.build({
@@ -81,6 +104,7 @@ for (const { src, out } of entries) {
     format: "esm",
     target: "node",
     naming: out,
+    define: { "process.env.WTFT_BUILD_VERSION": JSON.stringify(pkgVersion) },
   });
   if (!result.success) {
     console.error(`❌ ${out}:`, result.logs);

@@ -147,12 +147,25 @@ for (const name of ARTIFACTS) {
 }
 
 // ---
-// 5. The published LAYOUT, which is not the same claim as §3: there the artifact
-//    stands alone and --version honestly reports it cannot find package.json;
-//    here it sits in a package, where npm always ships one, and must read the
-//    real version out of it (#347).
+// 5. --version answers FROM THE ARTIFACT, not from whatever package.json happens
+//    to sit above it (#46).
+//
+//    This check used to assert the opposite — that a bundled artifact dropped
+//    into a package layout read `../package.json` (#347). That was true, and it
+//    was the last thing the bundle reached for outside itself, so #36's own
+//    thesis had a hole in it. #46's install layout is where the hole bites:
+//    `~/bin/wtft` looks up at `$HOME/package.json`, which is either absent
+//    (--version prints "unknown", on the one command you run when you already
+//    suspect you are running the wrong build) or PRESENT and unrelated
+//    (--version confidently prints someone else's version number).
+//
+//    build.ts now substitutes the version it read out of package.json at build
+//    time, so package.json is still the single source of truth and the artifact
+//    still answers alone. The neighbouring file below carries a DELIBERATELY
+//    WRONG version: if the read ever comes back, this fails instead of passing
+//    on a value that happens to match.
 // ---
-console.log("\n5. In a published layout, --version reads the package's own version");
+console.log("\n5. --version answers from the artifact, ignoring a neighbouring package.json");
 {
 	if (!NODE) {
 		skip("no `node` on PATH — the published-layout arm did not run");
@@ -161,15 +174,27 @@ console.log("\n5. In a published layout, --version reads the package's own versi
 		fs.mkdirSync(path.join(pkgRoot, "bin"));
 		for (const name of ARTIFACTS) fs.copyFileSync(path.join(REPO, "bin", name), path.join(pkgRoot, "bin", name));
 		const realPkg = JSON.parse(fs.readFileSync(path.join(REPO, "package.json"), "utf8"));
+		const DECOY_VERSION = "9.9.9-decoy";
 		fs.writeFileSync(path.join(pkgRoot, "package.json"), JSON.stringify({
-			name: realPkg.name, version: realPkg.version, type: realPkg.type, bin: realPkg.bin,
+			name: realPkg.name, version: DECOY_VERSION, type: realPkg.type, bin: realPkg.bin,
 		}));
 		let out = "", code = 0;
 		try { out = execFileSync(NODE, [path.join(pkgRoot, "bin", "wtft.mjs"), "--version"], { encoding: "utf8", stdio: "pipe" }); }
 		catch (err: any) { out = `${err.stdout || ""}${err.stderr || ""}`; code = err.status ?? 1; }
-		check(code === 0 && out.includes(realPkg.version),
-			`V5: --version prints ${realPkg.version} from the package it is installed in`,
+		check(code === 0 && out.includes(realPkg.version) && !out.includes(DECOY_VERSION),
+			`V5: --version prints the built-in ${realPkg.version}, not the neighbouring ${DECOY_VERSION}`,
 			`exit ${code}: ${out.trim().slice(0, 200)}`);
+
+		// And with NO package.json anywhere above it, which is the #46 install
+		// layout exactly. Before the injection this printed "unknown".
+		const bare = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-36-bare-")));
+		for (const name of ARTIFACTS) fs.copyFileSync(path.join(REPO, "bin", name), path.join(bare, name));
+		let bareOut = "", bareCode = 0;
+		try { bareOut = execFileSync(NODE, [path.join(bare, "wtft.mjs"), "--version"], { encoding: "utf8", stdio: "pipe" }); }
+		catch (err: any) { bareOut = `${err.stdout || ""}${err.stderr || ""}`; bareCode = err.status ?? 1; }
+		check(bareCode === 0 && bareOut.includes(realPkg.version) && !bareOut.includes("unknown"),
+			`V5b: with no package.json above it at all, --version still prints ${realPkg.version}`,
+			`exit ${bareCode}: ${bareOut.trim().slice(0, 200)}`);
 	}
 }
 

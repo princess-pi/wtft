@@ -213,68 +213,45 @@ console.log("\n=== PART C: no regression against the real session history ===\n"
 		const missing = oldRule.filter(p => !found.includes(p));
 		check(missing.length === 0, `every session the old cwd-slug rule found is still found (${oldRule.length} checked)`);
 
-		// WHAT REPLACED THE 500ms CEILING, AND WHY NOT A RATIO (#18).
+		// WHY THIS PART NO LONGER MAKES A COST CLAIM AT ALL (#18).
 		//
-		// This was `elapsed < 500` against the live ~/.claude/projects tree: a
-		// fixed bound on an input the test does not own, drifting toward
-		// always-failing as this host's history grows — and failing BECAUSE it
-		// ran, not because anything regressed.
+		// It used to assert `elapsed < 500` over the live ~/.claude/projects tree:
+		// a fixed bound on an input the test does not own, drifting toward
+		// always-failing as this host's history grows, and failing BECAUSE it ran
+		// rather than because anything regressed.
 		//
-		// #18 proposed closing it "the way #477 closed V11", with a ratio against
-		// a second call. #39 retired that shape, and the argument needs no
-		// measurement to check — it is visible in the code this file imports. The
-		// second call is served from the `(path, mtimeMs, size)` memo while the
-		// first is not, so the divisor shrinks as the memo IMPROVES while the
-		// numerator still walks the whole tree: a constant multiple of a memoised
-		// call cannot bound an unmemoised one, and the better the cache the
-		// tighter the test. (#39 carries the corpus figures behind that; they are
-		// its evidence, not this file's, and nothing here recomputes them.)
+		// #18 proposed a ratio against a second call instead. That shape is already
+		// retired: the second call is served from the `(path, mtimeMs, size)` memo
+		// while the first is not, so the divisor shrinks as the memo IMPROVES while
+		// the numerator still walks the whole tree — a constant multiple of a
+		// memoised call cannot bound an unmemoised one, and the better the cache the
+		// tighter the test (#39).
 		//
-		// So this asserts what PART A already asserts about a single file, one
-		// level up and against the real tree: the memo holds. An integer instead
-		// of a clock, and it cannot drift with the corpus — the bigger this host's
-		// history grows, the MORE reads the guard below covers.
+		// The next attempt was a COUNT: snapshot getCwdReadCount(), discover again,
+		// assert nothing was re-read. PR review killed it, and was right. The memo
+		// keys on (path, mtimeMs, size), so any transcript APPENDED TO between the
+		// two calls loses its entry and forces a genuine read. Measured on an owned
+		// 20-file corpus: a quiet tree gives 0 new reads, and appending one line to
+		// ONE already-memoised file gives 1 — the check fails with no regression
+		// behind it. On the real tree that is not a hypothetical: this suite runs
+		// inside a live session whose own transcript lives under ~/.claude/projects
+		// and is being appended to while the suite runs.
 		//
-		// WHAT THAT TRADE ACTUALLY BUYS AND COSTS — it is not a strict superset,
-		// and an earlier draft of this comment claimed it was (PR review).
+		// Three shapes, one root cause: EVERY cost claim about this tree assumes it
+		// holds still, and it does not. A wall clock, a ratio and a counter all
+		// inherit that, because the defect is the choice of corpus, not the choice
+		// of instrument.
 		//
-		//   Gained: memo collapse is caught deterministically, at any corpus size,
-		//   on any host. Measured by hand — set `const cached = undefined` in
-		//   session-cwd.ts's resolveLastCwd, `bun run build` (this suite imports
-		//   ../bin/wtft.mjs, so a source-only edit changes nothing), then re-run:
-		//   the check below failed at 2,835 re-reads while the same broken build
-		//   ran the timed call in 137ms and would have passed `elapsed < 500`.
+		// So the claim moves rather than mutating again. The sibling suite
+		// wtft-issue-144-145-164-session-discovery.test.ts asserts all of it
+		// against corpora that test BUILDS: V11a/V11b that the #164 gate opens and closes, V11c that a second
+		// pass re-reads nothing — this exact property, deterministically — and V11e
+		// that the tree walk reads each directory once per call. Nothing is lost by
+		// dropping it here; what is gained is that it cannot flake.
 		//
-		//   Given up: wall-clock blowups that cost no extra READS — an O(n^2) bug
-		//   in `collect()`, say. Walk time counted toward `elapsed`, so a large
-		//   enough one could have crossed 500ms; a read counter cannot see it at
-		//   all. What was given up is a probabilistic signal on a class the
-		//   ceiling never reliably held, since whether it fired depended on the
-		//   host and the corpus — and on this host it had begun firing without any
-		//   regression behind it, which is why it is gone.
-		//
-		// The walk therefore has no guard HERE, and deliberately keeps none.
-		// #39 (merged) covers it exactly — `getDirWalkCount` counts directory
-		// reads, and V11e in
-		// wtft-issue-144-145-164-session-discovery.test.ts asserts a flat corpus
-		// of 7 project dirs plus one nested `sessions/` costs exactly 8, with
-		// `wtft-tags/` skipped, and that a second call costs 8 more.
-		//
-		// An earlier draft of this comment promised to adopt that here "against
-		// the real tree" once both landed. It should not, and saying so is the
-		// point: the exact form needs the directory count to hold still between
-		// the two calls, and ~/.claude/projects does not — this host runs several
-		// sessions at once, including the one running this suite, so a directory
-		// can appear mid-test. An assertion that flakes because the corpus moved
-		// under it is precisely the defect #18 exists to remove, and importing a
-		// tolerance to absorb that would put a threshold back. The walk is
-		// counted where the corpus is owned; here it is not counted at all.
-		const readsBeforeSecond = getCwdReadCount();
-		discoverSessions("claude-code", here);
-		check(getCwdReadCount() === readsBeforeSecond,
-			`a second discovery over the real history re-reads nothing (${getCwdReadCount() - readsBeforeSecond} new read(s))`);
-		check(readsBeforeSecond > 0,
-			`…and the first one really did read it, so that is not vacuous (${readsBeforeSecond} read(s))`);
+		// PART C keeps the job its heading names, which needs the real tree and is
+		// immune to the tree changing under it: every session the old cwd-slug rule
+		// found is still found.
 	}
 }
 

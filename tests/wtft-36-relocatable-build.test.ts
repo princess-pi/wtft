@@ -89,9 +89,17 @@ console.log("\n2. The copy is somewhere node cannot resolve a package");
 const loose = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-36-loose-")));
 for (const name of ARTIFACTS) fs.copyFileSync(path.join(REPO, "bin", name), path.join(loose, name));
 {
+	// The break is at the BOTTOM, so the filesystem root is checked too. The
+	// natural `d !== path.dirname(d)` header stops one directory early —
+	// `path.dirname("/") === "/"`, so the body never runs for `/` — which would
+	// leave a root-level node_modules unseen while node's own resolution walks
+	// up to it. Unlikely layout, but this check exists ONLY to stop §3 passing
+	// for the wrong reason, so a hole in it is the one hole that matters.
+	// (PR #44 review, Low.)
 	const ancestors: string[] = [];
-	for (let d = loose; d !== path.dirname(d); d = path.dirname(d)) {
+	for (let d = loose; ; d = path.dirname(d)) {
 		if (fs.existsSync(path.join(d, "node_modules"))) ancestors.push(d);
+		if (d === path.dirname(d)) break;
 	}
 	check(ancestors.length === 0, "V2: no node_modules in any ancestor of the copy",
 		ancestors.length ? `would have resolved from: ${ancestors.join(", ")}` : undefined);

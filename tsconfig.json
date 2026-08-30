@@ -27,8 +27,12 @@
 		// and then die at a consumer's `npx`. Excluding bun-types turns that into a compile
 		// error instead, so this is a true positive, not the false one it looks like:
 		//   bin/__bun_types_probe__.ts(2,18): error TS2868: Cannot find name 'Bun'.
-		// Verified by probe, 2026-08-30. build.ts itself uses Bun.build freely — it is
-		// outside `include` because it is a build tool, not shipped output.
+		//   Do you need to install type definitions for Bun? Try `npm i --save-dev @types/bun`
+		// Verified by probe against tsc 7.0.2, 2026-08-30, and re-run at review round 2.
+		// TS2868 is the Bun-SPECIFIC diagnostic, not the generic "Cannot find name" TS2304
+		// a reader may expect — review round 2 called this a typo; it is the literal output.
+		// build.ts itself uses Bun.build freely — it is outside `include` because it is a
+		// build tool, not shipped output.
 		"types": ["node"]
 	},
 	// No `allowJs`: unlike princess-pi-tools, this repo has no hand-written .js module

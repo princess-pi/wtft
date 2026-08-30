@@ -77,13 +77,18 @@ async function timeDiscovery(projectsDir: string): Promise<number> {
 	return performance.now() - t0;
 }
 
-const rows: string[] = [];
-for (let r = 0; r < 3; r++) {
-	const l = await timeDiscovery(live);
-	const s = await timeDiscovery(stranded);
-	rows.push(`run ${r + 1}: live ${l.toFixed(0)}ms  stranded ${s.toFixed(0)}ms  ratio ${(s / l).toFixed(2)}x`);
+// try/finally, so a throw inside the timing loop still removes the four
+// corpora. They are hundreds of megabytes here, and this probe is run by hand
+// on a box whose /tmp already carries the scars of suites that did not bother.
+try {
+	const rows: string[] = [];
+	for (let r = 0; r < 3; r++) {
+		const l = await timeDiscovery(live);
+		const s = await timeDiscovery(stranded);
+		rows.push(`run ${r + 1}: live ${l.toFixed(0)}ms  stranded ${s.toFixed(0)}ms  ratio ${(s / l).toFixed(2)}x`);
+	}
+	console.log(`corpus: ${COUNT} files x ${FILE_KB} KB (tail window is 8 KB)`);
+	for (const r of rows) console.log(r);
+} finally {
+	for (const d of [live, stranded, liveDir, noPi]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }
-console.log(`corpus: ${COUNT} files x ${FILE_KB} KB (tail window is 8 KB)`);
-for (const r of rows) console.log(r);
-
-for (const d of [live, stranded, liveDir, noPi]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }

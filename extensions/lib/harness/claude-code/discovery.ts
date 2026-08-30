@@ -28,6 +28,7 @@ import type { HarnessDiscovery, SessionCandidate } from "../types.ts";
 import {
 	resolveLastCwd,
 	resolveCwdHistory,
+	countDirRead,
 	pickLiveCwd,
 	pathExists,
 	cwdToSlug,
@@ -63,6 +64,7 @@ function collect(dir: string, projectSlug: string, out: string[]): void {
 	} catch {
 		return;
 	}
+	countDirRead();
 	for (const entry of entries) {
 		const full = path.join(dir, entry.name);
 		if (entry.isDirectory()) {

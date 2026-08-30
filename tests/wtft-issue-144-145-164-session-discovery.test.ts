@@ -82,6 +82,7 @@ import {
 	resetCwdCache,
 	getCwdReadCount,
 	getCwdHistoryReadCount,
+	getDirWalkCount,
 	cwdToSlug,
 	cwdToStrictSlug,
 	cwdSlugVariants,
@@ -529,6 +530,58 @@ console.log("\n=== PART E: the #164 gate, counted on a test-built corpus (V11) =
 		`V11c: the memoised second pass re-reads nothing (${getCwdReadCount() - afterFirst} new tail read(s))`);
 	check(getCwdHistoryReadCount() === strandedHistory,
 		`V11c: …and re-scans nothing (${getCwdHistoryReadCount() - strandedHistory} new whole-file scan(s))`);
+
+	// V11e — THE WALK, which neither counter above can see (#39 review round 2).
+	//
+	// PR review called dropping V11's wall-clock claim a High defect: with no
+	// timing left, nothing guards the unmemoised `fs.readdirSync`/`collect()`
+	// tree walk, whose cost is a floor under every call regardless of the cache.
+	// The gap is real — but restoring a ratio would not have closed it, and
+	// measurably makes it worse. The walk happens IDENTICALLY in both arms of a
+	// live-vs-stranded A/B, so it inflates numerator and denominator together:
+	// on a 200-file corpus the ratio is 3.38x with no extra directories and
+	// 1.21x with 3,000 empty ones added to BOTH sides. A `stranded > 2x live`
+	// bound therefore fires on a harmless walk regression and goes quiet as the
+	// walk gets slower — anti-correlated with what it was meant to protect.
+	//
+	// So the walk gets the same treatment as the reads: an integer. `collect()`
+	// reads one directory per call, so a flat corpus of N project dirs must cost
+	// exactly N directory reads, and a nested one exactly N + its subdirectories.
+	// An accidental re-walk — the regression that actually threatens this path —
+	// is then a wrong number, on any host, at any speed.
+	{
+		const walkRoot = mktmp("wtft-39-walk-");
+		const PROJECTS = 7;
+		for (let i = 0; i < PROJECTS; i++) {
+			const proj = path.join(walkRoot, `-home-walk-project-${i}`);
+			fs.mkdirSync(proj, { recursive: true });
+			fs.writeFileSync(path.join(proj, `39c0de00-1a9b-4c3d-9e8f-${String(900 + i).padStart(12, "0")}.jsonl`),
+				filler + JSON.stringify({ type: "user", cwd: liveHome, message: { role: "user", content: "hi" } }) + "\n");
+		}
+		// One nested directory, and one the walk must SKIP. Without the pair, the
+		// count would be satisfied by a walk that recursed into neither, and
+		// SKIP_DIRS could regress to walking derived data unnoticed.
+		fs.mkdirSync(path.join(walkRoot, "-home-walk-project-0", "sessions"), { recursive: true });
+		fs.mkdirSync(path.join(walkRoot, "-home-walk-project-0", "wtft-tags"), { recursive: true });
+
+		process.env.WTFT_CLAUDE_PROJECTS_DIR = walkRoot;
+		process.env.WTFT_PI_SESSIONS_DIR = mktmp("wtft-39-nopi-walk-");
+		resetCwdCache();
+		discoverSessions("claude-code", liveHome);
+		const walk = getDirWalkCount();
+		check(walk === PROJECTS + 1,
+			`V11e: the tree walk reads each directory exactly once, and skips derived data (${walk} read(s), expected ${PROJECTS + 1})`);
+
+		// …and a second discovery walks it all again, because the walk is NOT
+		// memoised. Asserted rather than assumed: it is the reason the walk needs
+		// its own counter, and if it ever does become memoised this line is the
+		// one that says so instead of a comment quietly going stale.
+		discoverSessions("claude-code", liveHome);
+		check(getDirWalkCount() === walk * 2,
+			`V11e: …and is re-walked in full on every call, memo or not (${getDirWalkCount()} after two, expected ${walk * 2})`);
+
+		delete process.env.WTFT_PI_SESSIONS_DIR;
+	}
 
 	delete process.env.WTFT_CLAUDE_PROJECTS_DIR;
 	delete process.env.WTFT_PI_SESSIONS_DIR;

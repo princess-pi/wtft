@@ -112,6 +112,7 @@ function cleanup() {
 		try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
 	}
 	delete process.env.WTFT_CLAUDE_PROJECTS_DIR;
+	delete process.env.WTFT_PI_SESSIONS_DIR;
 	delete process.env.WTFT_NO_GIT;
 }
 
@@ -477,6 +478,25 @@ console.log("\n=== PART E: the #164 gate, counted on a test-built corpus (V11) =
 	const liveCorpus = buildCorpus("wtft-39-live-", () => liveHome);
 	const strandedCorpus = buildCorpus("wtft-39-stranded-", (i) => path.join(liveHome, `gone-worktree-${i}`));
 
+	// BOTH harness roots are pinned, though only the Claude one is read below.
+	//
+	// PR review called the missing Pi override a High defect that would break
+	// `liveHistory === 0` on a host carrying real stale Pi sessions. It does not:
+	// `discoverSessions("claude-code", …)` selects exactly ONE discovery, so Pi's
+	// never runs. Measured — a Pi root poisoned with 60 non-matching-slug
+	// sessions gives tail=60 history=0, and so does leaving it unset against this
+	// host's real ~/.pi; the same poisoned root under `"auto"` adds exactly 60
+	// tail reads, so the corpus was capable of leaking and the door is shut.
+	// Pi's discovery also imports only `resolveLastCwd`, never
+	// `resolveCwdHistory`, so it cannot move the history counter under ANY
+	// harness argument.
+	//
+	// Pinned anyway, for the reason the finding did not give: which harnesses
+	// `discoverSessions` routes to is an implementation detail this block does
+	// not assert, and #39 exists to stop this test depending on state the HOST
+	// owns rather than the test.
+	process.env.WTFT_PI_SESSIONS_DIR = mktmp("wtft-39-nopi-");
+
 	// V11a — every recorded cwd exists, so the gate must keep EVERY whole-file
 	// scan off. V9 proves this for a 2-transcript corpus; this proves it holds at
 	// a scale where a per-transcript leak would be visible.
@@ -511,6 +531,7 @@ console.log("\n=== PART E: the #164 gate, counted on a test-built corpus (V11) =
 		`V11c: …and re-scans nothing (${getCwdHistoryReadCount() - strandedHistory} new whole-file scan(s))`);
 
 	delete process.env.WTFT_CLAUDE_PROJECTS_DIR;
+	delete process.env.WTFT_PI_SESSIONS_DIR;
 
 	// V11d — the real tree still gets a smoke check, minus the cost claim it
 	// could never support: discovery must not throw on whatever this host holds.

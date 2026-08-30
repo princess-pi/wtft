@@ -62,10 +62,14 @@ const liveDir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-39-livecwd-"));
 const live = buildCorpus("live", () => liveDir);
 const stranded = buildCorpus("stranded", (i) => `/home/princess-pi/NO-SUCH-DIR-${i}`);
 
+// mkdtemp, not a fixed /tmp/wtft-39-nopi: two probe runs at once would
+// otherwise share one directory, and the second to finish would delete it out
+// from under the first. Created once so the timed section allocates nothing.
+const noPi = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-39-nopi-"));
+
 async function timeDiscovery(projectsDir: string): Promise<number> {
 	process.env.WTFT_CLAUDE_PROJECTS_DIR = projectsDir;
-	process.env.WTFT_PI_SESSIONS_DIR = path.join(os.tmpdir(), "wtft-39-nopi");
-	fs.mkdirSync(process.env.WTFT_PI_SESSIONS_DIR, { recursive: true });
+	process.env.WTFT_PI_SESSIONS_DIR = noPi;
 	const mod: any = await import("../../bin/wtft.mjs");
 	mod.resetCwdCache?.();
 	const t0 = performance.now();
@@ -82,4 +86,4 @@ for (let r = 0; r < 3; r++) {
 console.log(`corpus: ${COUNT} files x ${FILE_KB} KB (tail window is 8 KB)`);
 for (const r of rows) console.log(r);
 
-for (const d of [live, stranded, liveDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+for (const d of [live, stranded, liveDir, noPi]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }

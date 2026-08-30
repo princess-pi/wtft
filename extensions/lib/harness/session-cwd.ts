@@ -198,8 +198,21 @@ const RELOCATED_MARKER = '"relocated"';
  * machine (research/164-relocation-scan-probe.mjs) the earliest relocation sits
  * at 14–51 % of the file and even the *last* one falls outside the 8 KB tail of
  * a 2 MB transcript. So this is a whole-file read, which is why callers must
- * gate it on {@link pathExists} — unconditionally it costs 315 ms over the 68 MB
- * of transcripts here, against the 11 ms the tail scan costs.
+ * gate it on {@link pathExists}.
+ *
+ * THE GATE IS NOT THE BUDGET IT WAS WRITTEN AGAINST (#35, 2026-08-29). This
+ * docstring used to cost the unconditional case at "315 ms over the 68 MB of
+ * transcripts here", serving the ~3-in-40 that had actually moved. Both halves
+ * have since been overtaken: the corpus measured 1.3 GB / 3,073 transcripts, and
+ * 2,622 of them (85%) had a recorded cwd that no longer exists — so the gate
+ * OPENS for 34 in 40 and lets 760 MB of whole-file reads through per pass.
+ *
+ * The cause is structural, not accidental: `pr-cleanup` deletes a worktree after
+ * every merge and strands every session that lived there, permanently. So the
+ * stranded fraction only rises, and any caller that runs this over the whole
+ * corpus gets slower with every branch merged. Callers must therefore gate on
+ * NEED as well as on {@link pathExists} — see the lazy discovery in bin/wtft.ts,
+ * where running this eagerly was 98% of the CLI's wall clock.
  *
  * The *set* is the point, not the latest entry: in the #158 failure the latest
  * relocation pointed at the worktree that had been removed, and it was an

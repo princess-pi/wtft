@@ -103,7 +103,9 @@ const corpus = (claudeDir: string, piDir: string) => ({
 
 const run = (args: string, env: NodeJS.ProcessEnv, timeout = 30_000) => {
 	try {
-		return { out: execSync(`${SCRIPT} ${args} 2>&1`, { encoding: "utf8", env, timeout }), code: 0 };
+		// `env: env`, not the shorthand: the daemon-suite-isolation gate (#486) reads
+		// this as source text, and object shorthand reads to it as no env at all.
+		return { out: execSync(`${SCRIPT} ${args} 2>&1`, { encoding: "utf8", env: env, timeout }), code: 0 };
 	} catch (err: any) {
 		return { out: `${err.stdout || ""}${err.stderr || ""}`, code: err.status ?? 1 };
 	}

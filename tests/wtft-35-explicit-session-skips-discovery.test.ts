@@ -111,15 +111,28 @@ const run = (args: string, env: NodeJS.ProcessEnv, timeout = 30_000) => {
 	}
 };
 
-/** Median of three, so one scheduler hiccup cannot decide the verdict. */
-function medianRunMs(args: string, env: NodeJS.ProcessEnv): number {
+/** Median of three, so one scheduler hiccup cannot decide the verdict.
+ *
+ *  Every run's exit code is checked, not just its duration (PR review). A ratio
+ *  says nothing on its own: if a regression made `-s` fail fast under BOTH
+ *  corpora, both medians would be small and roughly equal, `ratio < 2` would
+ *  hold, and this suite would certify the very contract it exists to protect
+ *  while the command underneath was broken. `ok` is what stops a fast failure
+ *  from reading as a fast success. */
+function medianRunMs(args: string, env: NodeJS.ProcessEnv): { ms: number; ok: boolean; detail: string } {
 	const times: number[] = [];
+	let ok = true, detail = "";
 	for (let i = 0; i < 3; i++) {
 		const t0 = performance.now();
-		run(args, env);
+		const { out, code } = run(args, env);
 		times.push(performance.now() - t0);
+		const rendered = /[\u2588\u2591\u2592\u2593]/.test(out) || /\$\d/.test(stripAnsi(out));
+		if (code !== 0 || !rendered) {
+			ok = false;
+			detail = `run ${i + 1} exit ${code}, rendered=${rendered}: ${stripAnsi(out).trim().slice(0, 200)}`;
+		}
 	}
-	return times.sort((a, b) => a - b)[1];
+	return { ms: times.sort((a, b) => a - b)[1], ok, detail };
 }
 
 const emptyClaude = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-35-empty-c-")));
@@ -169,16 +182,18 @@ console.log("\n1. Explicit -s costs the same with or without a corpus");
 	}
 
 	const args = `-s '${sessionPath}' -l 5 --no-emoji`;
-	const emptyMs = medianRunMs(args, corpus(emptyClaude, emptyPi));
-	const strandedMs = medianRunMs(args, corpus(bigClaude, emptyPi));
-	const ratio = strandedMs / emptyMs;
-	const detail = `empty ${emptyMs.toFixed(0)}ms, stranded ${strandedMs.toFixed(0)}ms, ratio ${ratio.toFixed(1)}x`;
+	const empty = medianRunMs(args, corpus(emptyClaude, emptyPi));
+	const stranded = medianRunMs(args, corpus(bigClaude, emptyPi));
+	const ratio = stranded.ms / empty.ms;
+	const detail = `empty ${empty.ms.toFixed(0)}ms, stranded ${stranded.ms.toFixed(0)}ms, ratio ${ratio.toFixed(1)}x`;
 
-	assert("a 6000-transcript stranded corpus costs under 2x an empty one", ratio < 2, detail);
+	// Order matters: a ratio computed from two broken runs is meaningless, so the
+	// timings are only allowed to testify once both sides are known to have worked.
+	assert("every timed run rendered the session named by -s", empty.ok && stranded.ok,
+		[empty.detail, stranded.detail].filter(Boolean).join(" | "));
+	assert("a 6000-transcript stranded corpus costs under 2x an empty one",
+		empty.ok && stranded.ok && ratio < 2, detail);
 	console.log(`       (${detail})`);
-
-	const { out, code } = run(args, corpus(bigClaude, emptyPi));
-	assert("and it still renders the session named by -s", code === 0 && (/[█░▒▓]/.test(out) || /\$\d/.test(stripAnsi(out))), stripAnsi(out).trim());
 
 	try { fs.rmSync(bigClaude, { recursive: true, force: true }); } catch {}
 }

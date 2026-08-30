@@ -341,9 +341,15 @@ async function main() {
 	// Memoised, not just deferred: the fuzzy branch reads it twice (filter, then
 	// the count in its error), and a second scan there would be the same bug worn
 	// smaller.
-	let discovered: ReturnType<typeof discoverSessions> | null = null;
-	const candidates = (): ReturnType<typeof discoverSessions> =>
-		(discovered ??= discoverSessions(opts.harnessOption, opts.cwdOverride));
+	// Named `getCandidates`, not `candidates`, because the array-to-thunk change is
+	// a JS footgun worth spending a word on: `candidates.length` on a function is
+	// its ARITY — 0 — so a call site that forgot the parens would read as "no
+	// sessions found" and never throw. A name that reads as a verb makes the
+	// missing `()` visible. `candidateCache` likewise avoids shadowing the
+	// unrelated `const discovered` further down in this function (PR review).
+	let candidateCache: ReturnType<typeof discoverSessions> | null = null;
+	const getCandidates = (): ReturnType<typeof discoverSessions> =>
+		(candidateCache ??= discoverSessions(opts.harnessOption, opts.cwdOverride));
 
 	let finalSessionPath = "";
 	// #308: a session .jsonl that does not exist YET is a known-lagging path, not an
@@ -363,7 +369,7 @@ async function main() {
 		} else {
 			// Fuzzy substring filter against discovered sessions
 			const filter = opts.targetSession.toLowerCase();
-			const found = candidates();
+			const found = getCandidates();
 			const filtered = found.filter(c =>
 				c.path.toLowerCase().includes(filter) ||
 				c.name.toLowerCase().includes(filter)
@@ -379,7 +385,7 @@ async function main() {
 		}
 	} else {
 		// Auto select or show selector prompt
-		const found = candidates();
+		const found = getCandidates();
 		if (found.length === 0) {
 			console.error("❌ Error: No active session log files found. Ensure Pi or Claude has been run, or specify an explicit session log path with -s.");
 			process.exit(1);

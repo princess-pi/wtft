@@ -9,6 +9,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import wtftManifest from "../docs/manifests/wtft-cmd.json" with { type: "json" };
 import {
 	buildWtftLines,
 	parseSessionFile,
@@ -222,7 +223,13 @@ const cfg = loadConfig("wtft", { interval: "1h", limit: 100, mode: "cumulative" 
 	tokens?: boolean;
 };
 
-const manifestPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "docs", "manifests", "wtft-cmd.json");
+// The manifest travels INSIDE the bundle rather than being read from disk (#36).
+// `files` in package.json ships bin/*.mjs and nothing else, so a repo-relative
+// read of docs/manifests/wtft-cmd.json resolves to a path that does not exist
+// in any install — --help, --why and --version all died with ENOENT on a copied
+// or published artifact. An import is inlined by the bundler, so the help text
+// is part of the file that prints it.
+const manifest = wtftManifest;
 const daemonDir = path.dirname(fileURLToPath(import.meta.url));
 
 // Parse all CLI args through the shared parser (#94)
@@ -280,15 +287,15 @@ async function main() {
 
 	// Early exits for display-only flags (#94)
 	if (opts.showHelp) {
-		console.log(renderWtftHelp(manifestPath, "wtft"));
+		console.log(renderWtftHelp(manifest, "wtft"));
 		return;
 	}
 	if (opts.showWhy) {
-		console.log(await renderWtftWhy(manifestPath, "wtft"));
+		console.log(await renderWtftWhy(manifest, "wtft"));
 		return;
 	}
 	if (opts.showVersion) {
-		console.log(renderWtftVersion(manifestPath, import.meta.url));
+		console.log(renderWtftVersion(manifest, import.meta.url));
 		return;
 	}
 

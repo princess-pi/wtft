@@ -10,6 +10,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn, type ChildProcess } from "node:child_process";
 import { checkDaemonHealth, getTagPath, type DaemonStatus } from "./wtft-shared.js";
@@ -424,12 +425,41 @@ export function isEmojiDisabled(): boolean {
 // ---
 
 /**
+ * The manifest fields these renderers read. Loose on purpose — the manifest is
+ * hand-maintained JSON, and a renderer is not the place to enforce its schema.
+ */
+export interface WtftManifest {
+	name: string;
+	tagline: string;
+	description: string;
+	usage: { flags: string; desc: string }[];
+	examples: { cmd: string; desc: string }[];
+	why?: unknown;
+}
+
+/**
+ * A manifest, or a path to one (#36).
+ *
+ * Every renderer used to take only a path, which is why a published or copied
+ * `bin/wtft.mjs` could not print its own help: `files` ships the bundle alone,
+ * so the path pointed at a file no install contains. The CLI now hands over a
+ * manifest the bundler inlined. The path form stays because the Pi extension
+ * still reads the repo copy from `process.cwd()`, where the file really is.
+ */
+export type ManifestSource = string | WtftManifest;
+
+function loadManifest(src: ManifestSource): WtftManifest {
+	return typeof src === "string"
+		? JSON.parse(fs.readFileSync(src, "utf8")) as WtftManifest
+		: src;
+}
+
+/**
  * Render --help from the manifest. Returns the formatted help string;
  * callers output via ctx.ui.notify (extension) or console.log (CLI).
  */
-export function renderWtftHelp(manifestPath: string, invokedAs: string): string {
-	const manifestStr = fs.readFileSync(manifestPath, "utf8");
-	const manifest = JSON.parse(manifestStr);
+export function renderWtftHelp(src: ManifestSource, invokedAs: string): string {
+	const manifest = loadManifest(src);
 
 	let text = `\x1b[1m\x1b[36m${manifest.name}\x1b[0m - ${manifest.tagline}\n\n`;
 	text += `${manifest.description}\n\n`;
@@ -451,9 +481,25 @@ export function renderWtftHelp(manifestPath: string, invokedAs: string): string 
  * Render --why from the manifest. Delegates to @princess-pi/libs/manifest-help renderWhy
  * for the scenario-driven output format.
  */
-export async function renderWtftWhy(manifestPath: string, invokedAs: string): Promise<string> {
+export async function renderWtftWhy(src: ManifestSource, invokedAs: string): Promise<string> {
 	const { renderWhy } = await import("@princess-pi/libs/manifest-help");
-	return renderWhy(manifestPath, invokedAs);
+	if (typeof src === "string") return renderWhy(src, invokedAs);
+
+	// libs' renderWhy reads a PATH, and this repo pins @princess-pi/libs to a
+	// commit, so widening it there is a separate release — filed as
+	// princess-pi/libs#3. Until that lands the inlined manifest is spilled to a
+	// private temp file for the length of the call. Deliberately a spill and not
+	// a second copy of the renderer: one renderer that occasionally needs a file
+	// cannot drift from itself, and two that never need one can. Delete this
+	// branch when libs#3 lands.
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-why-"));
+	const file = path.join(dir, "wtft-cmd.json");
+	try {
+		fs.writeFileSync(file, JSON.stringify(src));
+		return renderWhy(file, invokedAs);
+	} finally {
+		try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+	}
 }
 
 /**
@@ -466,8 +512,8 @@ export async function renderWtftWhy(manifestPath: string, invokedAs: string): Pr
  * bundling they are the same file, but the Pi extension loads source, where
  * this lib's URL would name the lib rather than the command you invoked.
  */
-export function renderWtftVersion(manifestPath: string, moduleUrl: string): string {
-	const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+export function renderWtftVersion(src: ManifestSource, moduleUrl: string): string {
+	const manifest = loadManifest(src);
 	const pkgPath = path.join(path.dirname(fileURLToPath(moduleUrl)), "..", "package.json");
 	let semver: string;
 	try {

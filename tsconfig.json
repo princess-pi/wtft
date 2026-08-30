@@ -14,6 +14,9 @@
 	"compilerOptions": {
 		"target": "es2022",
 		"module": "nodenext",
+		// bin/wtft.ts imports docs/manifests/wtft-cmd.json so the BUNDLE carries its
+		// own help text (#36) — without this the import is a type error.
+		"resolveJsonModule": true,
 		"moduleResolution": "nodenext",
 		"strict": true,
 		"noEmit": true,

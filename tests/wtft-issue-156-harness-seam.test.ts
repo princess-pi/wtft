@@ -253,10 +253,22 @@ console.log("\n=== PART C: no regression against the real session history ===\n"
 		//   host and the corpus — and on this host it had begun firing without any
 		//   regression behind it, which is why it is gone.
 		//
-		// The walk therefore has no guard HERE. #39 adds the instrument it needs
-		// (`getDirWalkCount`, counting directory reads, asserted by V11e against a
-		// corpus that test builds); once both land, this part can adopt it against
-		// the real tree. Named rather than left to be rediscovered.
+		// The walk therefore has no guard HERE, and deliberately keeps none.
+		// #39 (merged) covers it exactly — `getDirWalkCount` counts directory
+		// reads, and V11e in
+		// wtft-issue-144-145-164-session-discovery.test.ts asserts a flat corpus
+		// of 7 project dirs plus one nested `sessions/` costs exactly 8, with
+		// `wtft-tags/` skipped, and that a second call costs 8 more.
+		//
+		// An earlier draft of this comment promised to adopt that here "against
+		// the real tree" once both landed. It should not, and saying so is the
+		// point: the exact form needs the directory count to hold still between
+		// the two calls, and ~/.claude/projects does not — this host runs several
+		// sessions at once, including the one running this suite, so a directory
+		// can appear mid-test. An assertion that flakes because the corpus moved
+		// under it is precisely the defect #18 exists to remove, and importing a
+		// tolerance to absorb that would put a threshold back. The walk is
+		// counted where the corpus is owned; here it is not counted at all.
 		const readsBeforeSecond = getCwdReadCount();
 		discoverSessions("claude-code", here);
 		check(getCwdReadCount() === readsBeforeSecond,

@@ -443,9 +443,17 @@ Each is a concrete assertion in
   ceiling over the same real tree, tracked as **#18** and addressed on its own branch by the
   same technique (not merged as of this branch) — a second
   discovery over the real history re-reads nothing, with the first pass's read count printed
-  beside it so the check cannot go vacuous. It is strictly stronger than the ceiling it replaced:
-  disabling the memo fails it at 2,835 re-reads, while the same broken build ran the timed call
-  in 137 ms and would have passed `elapsed < 500`.
+  beside it so the check cannot go vacuous.
+
+  That is a **trade, not a strict superset**, and an earlier draft of this paragraph said
+  otherwise. Gained: memo collapse is caught deterministically — disabling the memo fails it at
+  2,835 re-reads, while the same broken build ran the timed call in 137 ms and would have passed
+  `elapsed < 500`. Given up: a wall-clock blowup that costs no extra *reads* — an O(n²) bug in
+  `collect()`, say — is invisible to a read counter, where walk time did count toward `elapsed`.
+  What was surrendered is a probabilistic signal on a class the ceiling never reliably held:
+  whether it fired depended on the host and the corpus, and on this host it had begun firing with
+  no regression behind it. V11e is the instrument that covers the walk properly; once #18 merges,
+  its Part C can adopt it against the real tree.
 
 **Sibling worktrees (#145)**
 

@@ -215,38 +215,48 @@ console.log("\n=== PART C: no regression against the real session history ===\n"
 
 		// WHAT REPLACED THE 500ms CEILING, AND WHY NOT A RATIO (#18).
 		//
-		// This was `elapsed < 500` against the live ~/.claude/projects tree — a
+		// This was `elapsed < 500` against the live ~/.claude/projects tree: a
 		// fixed bound on an input the test does not own, drifting toward
-		// always-failing as this host's history grows. #39 hit the end of that
-		// road in V11's sibling check and measured why no threshold repairs it:
-		// cold scales with the corpus while warm is pure cache hits, so the
-		// ratio between them grows without bound, and `pr-cleanup` strands every
-		// session that lived in a deleted worktree PERMANENTLY (2,622 of 3,073
-		// transcripts, 85%). The issue proposed closing this one "the way #477
-		// closed V11" — with a ratio. That is exactly what #39 then retired: a
-		// constant multiple of a memoised call cannot bound an unmemoised one.
+		// always-failing as this host's history grows — and failing BECAUSE it
+		// ran, not because anything regressed.
 		//
-		// So it asserts the same thing PART A already asserts about a single
-		// file, one level up and against the real tree: the memo holds. That is
-		// the property "stays fast" was reaching for, it is an integer instead
-		// of a clock, and it cannot drift with the corpus — the bigger this
-		// host's history grows, the MORE reads the guard below covers.
+		// #18 proposed closing it "the way #477 closed V11", with a ratio against
+		// a second call. #39 retired that shape, and the argument needs no
+		// measurement to check — it is visible in the code this file imports. The
+		// second call is served from the `(path, mtimeMs, size)` memo while the
+		// first is not, so the divisor shrinks as the memo IMPROVES while the
+		// numerator still walks the whole tree: a constant multiple of a memoised
+		// call cannot bound an unmemoised one, and the better the cache the
+		// tighter the test. (#39 carries the corpus figures behind that; they are
+		// its evidence, not this file's, and nothing here recomputes them.)
 		//
-		// It is also STRICTLY STRONGER, not merely steadier. Disabling the
-		// (path, mtimeMs, size) memo and rebuilding fails the check below at
-		// 2,835 re-reads, while the same broken build ran the timed call in
-		// 137ms and would have sailed through `elapsed < 500`. The ceiling was
-		// blind to the exact regression this part exists to catch.
+		// So this asserts what PART A already asserts about a single file, one
+		// level up and against the real tree: the memo holds. An integer instead
+		// of a clock, and it cannot drift with the corpus — the bigger this host's
+		// history grows, the MORE reads the guard below covers.
 		//
-		// Rebuild after touching a source file to reproduce that: this suite
-		// imports from ../bin/wtft.mjs, so it tests the BUILT artifact and a
-		// source-only edit changes nothing here.
+		// WHAT THAT TRADE ACTUALLY BUYS AND COSTS — it is not a strict superset,
+		// and an earlier draft of this comment claimed it was (PR review).
 		//
-		// Still not covered, and deliberately: the directory walk itself is
-		// never memoised, so a call's floor scales with total file count no
-		// matter what the cache does. Nothing here can bound that without a
-		// corpus the test owns, which is what the counted V11 in
-		// wtft-issue-144-145-164-session-discovery.test.ts is for.
+		//   Gained: memo collapse is caught deterministically, at any corpus size,
+		//   on any host. Measured by hand — set `const cached = undefined` in
+		//   session-cwd.ts's resolveLastCwd, `bun run build` (this suite imports
+		//   ../bin/wtft.mjs, so a source-only edit changes nothing), then re-run:
+		//   the check below failed at 2,835 re-reads while the same broken build
+		//   ran the timed call in 137ms and would have passed `elapsed < 500`.
+		//
+		//   Given up: wall-clock blowups that cost no extra READS — an O(n^2) bug
+		//   in `collect()`, say. Walk time counted toward `elapsed`, so a large
+		//   enough one could have crossed 500ms; a read counter cannot see it at
+		//   all. What was given up is a probabilistic signal on a class the
+		//   ceiling never reliably held, since whether it fired depended on the
+		//   host and the corpus — and on this host it had begun firing without any
+		//   regression behind it, which is why it is gone.
+		//
+		// The walk therefore has no guard HERE. #39 adds the instrument it needs
+		// (`getDirWalkCount`, counting directory reads, asserted by V11e against a
+		// corpus that test builds); once both land, this part can adopt it against
+		// the real tree. Named rather than left to be rediscovered.
 		const readsBeforeSecond = getCwdReadCount();
 		discoverSessions("claude-code", here);
 		check(getCwdReadCount() === readsBeforeSecond,

@@ -332,8 +332,12 @@ fixed here (Step 5 forbids production changes, and hand-editing generated `.mjs`
 gate).
 
 Test seams: `WTFT_CLAUDE_PROJECTS_DIR` (existing) points discovery at a fixture tree;
-`WTFT_NO_GIT=1` (new) forces the no-git fallback path so it can be exercised without
-uninstalling git. Both are read at call time, never cached across a process. Neither appears in
+`WTFT_PI_SESSIONS_DIR` does the same for the Pi harness, so a suite that pins one root can pin
+both; `WTFT_NO_GIT=1` (new) forces the no-git fallback path so it can be exercised without
+uninstalling git. Three counters in `extensions/lib/harness/session-cwd.ts` make discovery's cost
+observable without a clock — `getCwdReadCount` (tail reads), `getCwdHistoryReadCount` (whole-file
+relocation scans) and `getDirWalkCount` (directories read by the tree walk, added for #39's V11e)
+— all reset together by `resetCwdCache()`. Both are read at call time, never cached across a process. Neither appears in
 `docs/manifests/wtft-cmd.json`, deliberately and consistently with #156: they are test seams, not
 user-facing switches — a machine without git already reaches the fallback on its own, because the
 `git` subprocess throws.
@@ -382,86 +386,66 @@ Each is a concrete assertion in
   scan ran at all.
 - **V10** — display prefers a live path: the V5 candidate's `displayPath` names the main clone,
   not the removed worktree.
-- **V11 (cost, per #164, restated per #477)** — against the real `~/.claude/projects`, not a
-  fixture: `discoverSessions("claude-code", process.cwd())` returns without throwing, and a
-  *cold* call stays within a bounded multiple of a second, *memoised* call
-  (`cold <= min(40 * max(warm, 5) + 250, 5000)`) rather than under a fixed millisecond ceiling.
-  The `max(warm, 5)` floor is not decoration: `Date.now()` resolves to about a millisecond, so on
-  a quiet host with little history a warm pass whose real cost is a few ms measures as **0**, and
-  the bound would collapse to its bare 250 ms additive term — tight enough to fail a legitimately
-  larger `cold` with no regression behind it. The floor holds the bound's minimum at
-  `40 * 5 + 250 = 450 ms`. Skipped
-  when `~/.claude/projects` is absent. This is the one criterion measured in wall-clock time; it
-  reads `Date.now()` for *elapsed* time only — never a date — which is the same latitude #156's
-  ceiling test takes, because a duration is the quantity under test and cannot be injected away.
+- **V11 (cost, per #164 — restated per #477, then REPLACED per #39)** — five assertions on a
+  corpus the TEST builds, not the live `~/.claude/projects` tree, and every one of them an exact
+  integer rather than a duration:
 
-  **Why a ratio, not a ceiling (#477):** the original assertion was `cold < 500`, a fixed bound
-  on reading the *live* `~/.claude/projects` tree. That directory grows every session — this host
-  runs 5+ concurrent sessions, including the one running the suite — so the measurement's input
-  grew monotonically while its 500 ms budget never moved. Not flaky in the random sense: drifting
-  toward *always*-failing, and failing in part *because* it ran. #477's own repro needed
-  concurrent load to tip it over (`bun run test` hit 519 ms under contention from other sessions);
-  by the time of this fix the same host's history had grown enough that cold discovery breaches
-  500 ms even with **no concurrency at all** (measured standalone: 400-650 ms) — concurrency
-  made the ceiling fail sooner, but growth alone was enough on its own a few weeks later. Two
-  roads not taken: bound the input with a fixture tree
-  of fixed size (loses the "against the real history" property the check exists for), or raise
-  the ceiling (buys months, costs the same conversation again, weakens the check without saying
-  so). The ratio taken instead mirrors the sibling assertion three lines below
-  (`warm <= cold + 50`), which was never flaky for the same reason: bounding cold against warm's
-  `40 * warm` term scales with the input on its own. It still tests something real, at two cost
-  tiers. `matchesRecordedCwd` (`extensions/lib/harness/claude-code/discovery.ts`) does a bounded
-  tail read via `resolveLastCwd` for every transcript across the whole `~/.claude/projects` tree
-  whose slug doesn't physically match the target — not just stranded ones — and, for whichever of
-  those are *additionally* stranded (their last-cwd directory no longer exists), an expensive
-  whole-file scan via `resolveCwdHistory`, gated on `pathExists`
-  (`extensions/lib/harness/session-cwd.ts`). Both tiers are cache misses on cold and cache hits on
-  warm, so either one regressing — the cheap tier running unconditionally, or the expensive tier's
-  gate failing to gate — still shows up as cold ballooning relative to warm. The expensive tier is
-  documented as rare in general (`session-cwd.ts`: "~3 transcripts in 40"), but on *this*
-  measurement host it dominates: the #477 mutation probe counted 1496 whole-file scans out of
-  1803 tail reads (~83%) — this repo's own workflow creates and destroys worktrees constantly, so
-  most sessions here really are stranded. Proved by mutation during #477: a forced 1.5 ms stall on
-  every cache-miss resolve — hitting both tiers — pushed the measured ratio from ~10-30x to
-  ~130-175x on this machine, comfortably clearing the bound in one direction and tripping it in
-  the other.
+  - **V11a** — 60 transcripts whose recorded cwd still exists: the cheap tail scan runs for every
+    one (`getCwdReadCount() >= 60`) and the `pathExists` gate keeps the expensive tier fully off
+    (`getCwdHistoryReadCount() === 0`).
+  - **V11b** — the same corpus shape with dead cwds triggers exactly one whole-file scan each
+    (`=== 60`), so V11a cannot pass on a corpus that could never have scanned in the first place.
+  - **V11c** — a second discovery re-reads nothing and re-scans nothing. This replaces
+    `warm <= cold + 50`, which **could not fail**: a broken memo inflated `warm` *and* the bound
+    it was compared against.
+  - **V11d** — the real tree keeps a smoke check only: discovery returns without throwing.
+    Skipped when `~/.claude/projects` is absent.
+  - **V11e** — the tree walk reads each directory exactly once per call (7 project dirs + one
+    nested `sessions/`, with `wtft-tags/` skipped ⇒ exactly 8), and is re-walked in full on a
+    second call. The second half pins the *absence* of a walk memo, so adding one trips a test
+    rather than leaving this paragraph stale.
 
-  A pure ratio has one blind spot: cold and warm degrading *together* — the memo itself breaking,
-  so the "warm" pass re-scans too — inflates the allowed bound right along with warm, so both this
-  check and the untouched `warm <= cold + 50` sibling would pass no matter how slow either call
-  got. `min(…, 5000)` **narrows** that gap; it does not close it, and an earlier draft of this
-  section said "closes" — corrected here, because a run falsifies it. Measured 2026-08-24 by
-  disabling the `cwdCache` read outright: cold=597 ms, warm=85 ms, and **both V11 checks passed**,
-  since 597 is under `min(3650, 5000)` and 85 is under `cold + 50`. Total memo collapse costs the
-  *warm* pass, and 85 ms is well short of the ~119 ms warm needs before the cap becomes the
-  binding constraint at all. **princess-pi-tools#489 tracks the gap**, and proposes the honest
-  fix: assert on the read counters this suite already exports (V9's idiom), which are
-  scale-invariant by construction and need no ceiling, no ratio, and no host calibration.
+  Both harness roots are pinned (`WTFT_CLAUDE_PROJECTS_DIR` **and** `WTFT_PI_SESSIONS_DIR`).
+  Only the Claude one is read — `discoverSessions("claude-code", …)` selects exactly one
+  discovery, measured identical with the Pi root poisoned and with it unset — but routing is an
+  implementation detail these assertions do not state.
 
-  This is **not a regression the ratio introduced** — the fixed 500 ms ceiling never caught memo
-  collapse either, because nothing in this suite has ever bounded *warm* in absolute terms. The
-  failure mode was always untested; the ratio only makes it sayable.
+  **Why no wall clock at all, after two attempts at one.** The original assertion was
+  `cold < 500`: a fixed bound on an input that grows every session, and it rotted. #477 replaced
+  it with a ratio against a memoised call, which rotted the opposite way — the memo makes `warm`
+  cheaper as it improves, so the divisor shrinks while cold still walks the whole tree. Measured
+  on `main` @ `bcedfd8`: **6 failures in 6**, cold ~2.1 s against warm ~37 ms, a ratio of 53-61x
+  against a bound of 40x. **A constant multiple of a memoised call cannot bound an unmemoised
+  one**, and no choice of multiple repairs it. princess-pi-tools#489 had already named the honest
+  fix — "assert on the read counters this suite already exports (V9's idiom), which are
+  scale-invariant by construction and need no ceiling, no ratio, and no host calibration" — and
+  that is what V11a-e are.
 
-  The backstop is also **not free — a real, stated exception to "the fix scales with input," not
-  an unconditional one.** 5000 ms is a deliberately loose bound, ~8-12x today's measured cold
-  time, that becomes the binding constraint only once warm itself has grown past ~119 ms — call
-  it an order of magnitude further growth of this host's history — at which point the check *does*
-  degenerate back into
-  a fixed ceiling against a growing input, the same failure mode #477 exists to eliminate. The
-  trade accepted here is buying roughly a decade's worth of the growth rate observed so far, in
-  exchange for closing the co-degrade blind spot; it is not immune to the same drift indefinitely,
-  only to a much larger multiple of it. Caught a first-draft mistake during review
-  (princess-pi-tools#477): the natural-looking `Math.max(40 * warm + 250, 5000)` does the
-  opposite of what's wanted — it can only *raise* the bound, so a 10000 ms cold / 9800 ms warm
-  co-degrade would still pass at `max(392250, 5000) = 392250`. `Math.min` caps it at
-  `min(392250, 5000) = 5000` and correctly fails.
+  **And a ratio could never have guarded the walk**, which is the one cost the counters were
+  accused of abandoning. The walk is identical in both arms of a live-vs-stranded A/B, so it
+  inflates numerator and denominator together: measured on a 200-file corpus, the ratio is
+  **3.38x** with no extra directories and **1.21x** with 3,000 empty ones added to *both* sides.
+  A `stranded > 2 x live` bound therefore fires red on a harmless walk regression and goes green
+  as the walk gets slower. V11e counts it instead.
 
-  `tests/wtft-issue-156-harness-seam.test.ts` Part C asserts the same fixed `elapsed < 500`
-  ceiling over the same real tree — on a call that is already warm by the time it's timed, so it
-  currently has far more headroom (measured warm cost: ~20-40 ms) than V11's old cold-based
-  check ever did. It was out of scope for #477 and was left unchanged; it shares the same defect
-  class and can drift the same way as the live tree keeps growing. Tracked as **#487**, with a
-  pointer comment in the sibling test file itself.
+  **What the counters can still not say** is what the gate is *worth* in time. That lives in
+  `research/39-v11-corpus/measure-gate.ts`, a manual probe that gates nothing: 250 files x 256 KB
+  measures the `pathExists` gate as a 4.9-5.6x difference. Kept deliberately — a ratio needs a
+  threshold and a counter does not, so the calibration is worth having and is not worth asserting.
+
+  The mutation record, since each assertion is only as good as the regression it catches:
+  short-circuiting `pathExists` fails V11a at 60 scans over 60 transcripts; disabling the
+  `cwdCache` read fails V11c at 60 new tail reads; dropping `wtft-tags` from `SKIP_DIRS` fails
+  V11e's first half (9 vs 8) and leaves its second green; memoising the walk fails the second
+  (8 vs 16) and leaves the first green.
+
+  `tests/wtft-issue-156-harness-seam.test.ts` Part C carried the same fixed `elapsed < 500`
+  ceiling over the same real tree, tracked as **#18** and addressed on its own branch by the
+  same technique (not merged as of this branch) — a second
+  discovery over the real history re-reads nothing, with the first pass's read count printed
+  beside it so the check cannot go vacuous. It is strictly stronger than the ceiling it replaced:
+  disabling the memo fails it at 2,835 re-reads, while the same broken build ran the timed call
+  in 137 ms and would have passed `elapsed < 500`.
 
 **Sibling worktrees (#145)**
 

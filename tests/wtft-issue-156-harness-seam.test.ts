@@ -213,19 +213,62 @@ console.log("\n=== PART C: no regression against the real session history ===\n"
 		const missing = oldRule.filter(p => !found.includes(p));
 		check(missing.length === 0, `every session the old cwd-slug rule found is still found (${oldRule.length} checked)`);
 
-		// #487: this fixed 500ms ceiling shares V11's defect (#477) — a bound
-		// against the live, ever-growing ~/.claude/projects tree that drifts
-		// toward always-failing as this host's history grows. Has more
-		// headroom today than V11's old cold-based check ever did, because
-		// discoverSessions() was already called once (untimed) just above,
-		// priming the (path, mtimeMs, size) memo before this call is timed —
-		// but the directory walk itself is never memoised, so even this
-		// "warm" cost scales with total file/directory count over time.
-		// Not restated here — tracked in #487, not fixed in #477's branch.
-		const t0 = Date.now();
-		discoverSessions("claude-code", here);
-		const elapsed = Date.now() - t0;
-		check(elapsed < 500, `discovery over the real history stays fast (${elapsed}ms < 500ms)`);
+		// WHY THIS PART NO LONGER MAKES A COST CLAIM AT ALL (#18).
+		//
+		// It used to assert `elapsed < 500` over the live ~/.claude/projects tree:
+		// a fixed bound on an input the test does not own, drifting toward
+		// always-failing as this host's history grows, and failing BECAUSE it ran
+		// rather than because anything regressed.
+		//
+		// #18 proposed a ratio against a second call instead. That shape is already
+		// retired: the second call is served from the `(path, mtimeMs, size)` memo
+		// while the first is not, so the divisor shrinks as the memo IMPROVES while
+		// the numerator still walks the whole tree — a constant multiple of a
+		// memoised call cannot bound an unmemoised one, and the better the cache the
+		// tighter the test (#39).
+		//
+		// The next attempt was a COUNT: snapshot getCwdReadCount(), discover again,
+		// assert nothing was re-read. PR review killed it, and was right. The memo
+		// keys on (path, mtimeMs, size), so any transcript APPENDED TO between the
+		// two calls loses its entry and forces a genuine read.
+		//
+		// Reproduce, rather than take the figure on faith:
+		//   bun run build && bun research/18-partc-race/memo-race.ts
+		// A quiet tree gives 0 new reads; appending one line to ONE already-memoised
+		// file gives 1, and the check fails with no regression behind it.
+		//
+		// On the real tree that is not a hypothetical: this suite runs inside a live
+		// session whose own transcript lives under ~/.claude/projects and is being
+		// appended to while the suite runs.
+		//
+		// Three shapes, one root cause: EVERY cost claim about this tree assumes it
+		// holds still, and it does not. A wall clock, a ratio and a counter all
+		// inherit that, because the defect is the choice of corpus, not the choice
+		// of instrument.
+		//
+		// So the claim moves rather than mutating a third time. The sibling suite
+		// wtft-issue-144-145-164-session-discovery.test.ts asserts these properties
+		// against corpora that test BUILDS: V11a/V11b that the #164 gate opens and
+		// closes, V11c that a second pass re-reads nothing, V11e that the walk reads
+		// each directory once per call.
+		//
+		// SOMETHING IS LOST, AND IT IS WORTH LOSING (an earlier draft said "nothing
+		// is lost", which review correctly rejected). What goes is the only exercise
+		// of discovery's cost against a REAL, production-shaped tree — thousands of
+		// transcripts, most of them stranded, accreted over months. A built corpus
+		// is 60 files chosen by the test, and no synthetic corpus reproduces that
+		// shape. This is a narrowing of coverage, not an equivalent swap.
+		//
+		// It is the right narrowing because what is given up was never dependable:
+		// three instruments in a row failed on this tree for the same reason, and
+		// the third failed while its own comment argued that reason. A check that
+		// reports red for a cause unrelated to the code is not coverage — it is a
+		// coin flip that teaches readers to re-run and move on. What is gained is a
+		// suite whose red means something.
+		//
+		// PART C keeps the job its heading names, which needs the real tree and is
+		// immune to the tree changing under it: every session the old cwd-slug rule
+		// found is still found.
 	}
 }
 

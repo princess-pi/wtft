@@ -19,8 +19,16 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd -P)"
 REAL="$REPO/bin/install-wtft"
 MUT="$REPO/bin/mut-install-wtft"
-BUNDIR="$(dirname "$(command -v bun)")"
-trap 'rm -f "$MUT"' EXIT
+# A ONE-ENTRY SHIM, not bun's own directory. On this host bun lives in ~/bin,
+# which is install-wtft's DEFAULT TARGET: once a real run puts ~/bin/wtft there,
+# putting bun's directory on the mutant's PATH makes every run see a foreign
+# wtft, report `shadowed` instead of `ok`, and fail on a correct mutation. The
+# suite that drives install-wtft defends against exactly this; the script the
+# spec tells you to trust over its own table has to as well.
+SHIM="$(mktemp -d)"
+ln -s "$(command -v bun)" "$SHIM/bun"
+BUNDIR="$SHIM"
+trap 'rm -f "$MUT"; rm -rf "$SHIM"' EXIT
 
 status_of() { sed -n 's/.*"status":"\([^"]*\)".*/\1/p' <<<"$1"; }
 fails=0

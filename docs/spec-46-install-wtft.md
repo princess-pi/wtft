@@ -43,14 +43,16 @@ install-wtft --version
 | *(none)* | Build, then install **four** entries into `--dir` — two copies and two symlinks |
 | `--check` | Report drift; **write nothing**. Doctor mode. |
 | `--json` | Emit the machine-readable document. Valid with or without `--check`; **ignored** by `--version` and `--help`, which exit inside the argument loop. |
-| `--dir <dir>` | Install target. Default `~/bin`. The seam the tests drive. A value beginning with `--` is rejected — `--dir --json` used to install into a directory literally named `--json`. Repeats are last-wins. |
+| `--dir <dir>` | Install target. Default `~/bin`. The seam the tests drive. A value beginning with `--` **or an empty string** is rejected — `--dir --json` used to install into a directory literally named `--json`, and `--dir ""` (an unexpanded caller variable) silently retargeted the real `~/bin`. Repeats are last-wins. |
 | `-h`, `--help` | This script's header, minus the `#` |
 | `--version` | The **absolute path of this script**, not a version number — the same convention as `install-workflow-tools`. |
 
 `--` is **not** an end-of-options marker; it is an unknown argument.
 
-**Install mode needs `bun install` first.** `build.ts` imports `@princess-pi/libs` and
-`wcwidth`, so a clone with no `node_modules` exits `3`.
+**Install mode needs `bun install` first** — not because `build.ts` imports anything beyond
+`node:fs` and `node:path`, but because `Bun.build` resolves the *entrypoints'* imports
+(`@princess-pi/libs`, `wcwidth`) and `noticeFor` reads each bundled package's LICENSE out of
+`node_modules`. A clone without them exits `3`.
 
 **This script does not install itself**, unlike `install-workflow-tools`. `REPO` is
 derived from the script's own location, so a copy in `~/bin` would compute `REPO=$HOME`,
@@ -72,8 +74,10 @@ Resolving only the parent was the bug — it produced exactly the self-comparing
 | `3` | The build failed | read the build output on stderr |
 | `64` | Bad usage: unknown argument, `--dir` with no directory, `--dir` followed by a flag **or given an empty string**, or no `--dir` on a host with `HOME` unset | — |
 
-`1` and `64` match `install-workflow-tools` deliberately, so the two installers do not
-disagree about what a number means. `2` is separate because its remedy is a different
+`1` and `64` are chosen to match `install-workflow-tools` so the two installers do not
+disagree about what a number means. **Nothing pins that correspondence**: the sibling lives
+in another clone on one host, and no test here reads it, so the two can diverge without
+either side noticing. Treat it as a convention this file states, not a guarantee it holds. `2` is separate because its remedy is a different
 verb entirely: re-running the installer cannot fix a PATH shadow.
 
 **Drift outranks shadow** when both hold — a shadowed copy of the wrong bytes is still
@@ -127,6 +131,9 @@ per-artifact in human mode.
 - **`no-source`** means `bin/*.mjs` has not been built. Reachable under `--check`, which
   never builds, **and in install mode after a build failure**, where it appears alongside
   `status: "build-failed"`.
+- **`no-dir` is install-mode only.** `--check` never calls `mkdir`, so an un-creatable
+  `--dir` reports `drift` with four `missing` records there instead. Both are exit `1`;
+  the mode is what separates them.
 - **`onPath`** reports whether the installed copy is the one PATH resolves. Never fatal —
   a directory that is not on PATH is a host-wiring fact, not drift — but a successful
   install into an off-PATH directory says so in human mode too, because a green run that
@@ -152,14 +159,26 @@ per-artifact in human mode.
 1. `bin/wtft.ts` computes `daemonDir = dirname(fileURLToPath(import.meta.url))` and joins
    the literal `"wtft-daemon.mjs"` onto it — four sites in that file and a fifth in
    `extensions/lib/wtft-cli-shared.ts` (`spawnWtftDaemon`).
-2. **Node needs it to see ESM.** Node only guesses module type for an *extensionless*
-   file from 20.10 (flagged) and 22 (default), and `/usr/bin/node` on this host is
-   **18.19.1** — exactly the floor `package.json`'s `engines: >=18` promises.
+2. **Node 18 needs it to see ESM.** Extensionless module detection is unflagged from
+   **20.19.0** and **22.7.0**, so the versions that need the extension are 18.x and early
+   20.x — and `/usr/bin/node` on this host is **18.19.1**, exactly the floor
+   `package.json`'s `engines: >=18` promises.
 
-The first layout installed the command as an extensionless copy. Measured: **exit 1 on
-node 18, 20 and 22** when invoked by name, dying on the bundle's first `import`. A
-symlink resolves to the `.mjs` realpath — which sits in the same directory, so `daemonDir`
-still finds the daemon — and works on all three.
+The first layout installed the command as an extensionless copy, and an earlier version of
+this paragraph reported it failing on **18, 20 and 22**. That was wrong in a specific way
+worth recording: the measurement was taken while the type-stripping shebang below was still
+in place, so it credited the missing extension with a failure the shebang caused.
+Re-measured against the fixed build:
+
+```
+cp bin/wtft.mjs $D/wtft && chmod +x $D/wtft
+PATH="$(dirname $NODE):/usr/bin:/bin" $D/wtft --version
+```
+
+**exit 1 on 18.19.1 only**; exit 0 on 20.20.2, 22.22.3 and 24.16.0. One supported major is
+enough to require the symlink; overstating it to three was not. A symlink resolves to the
+`.mjs` realpath — which sits in the same directory, so `daemonDir` still finds the daemon —
+and works on every version above.
 
 **The payload is a copy; only the command name is a link.** A symlink into the *clone* was
 the only workable option before #36, because the artifact still carried bare imports and
@@ -184,7 +203,9 @@ dependent and testing one version is how it stayed hidden.
 
 ## The shadow rule: report, never delete
 
-`~/.bun/bin` precedes `~/bin` on this host's PATH — four times over. So installing to
+`~/.bun/bin` precedes `~/bin` on this host's PATH — one host, one PATH, so the ordering is
+the motivation rather than a general law; check yours with
+`echo $PATH | tr : '\n' | grep -n bin`. So installing to
 `~/bin` while `~/.bun/bin/wtft` exists produces a **successful install that changes
 nothing**, and an installer that exits 0 there is lying.
 
@@ -211,7 +232,8 @@ Six sections, all driven through the CLI — no internal function is imported.
 | **V3** | the installed command runs **when you type its name** | `<dir>/wtft --version` through its own shebang, on **every** `node` on the host, exits 0 and prints the version; `<dir>/wtft-daemon.mjs` sits beside it |
 | **V4** | shadow detection | a decoy `wtft` earlier on `PATH` → exit `2`, `shadow.found` names it, the decoy is **still there**, the install still happened, and our own copy winning is exit `0` / `shadow: null` / `onPath: true` |
 | **V5** | staleness | append a byte to the installed `wtft.mjs` → `--check` exits `1`, that payload `stale`, the untouched one still `ok`; `chmod 0644` → `not-executable`; a command symlink repointed at the other payload → `wrong-target` |
-| **V6** | the nine defects a fresh-context reconcile audit found | see below |
+| **V6** | the ten defects the reconcile and review audits found | see below |
+| **V7** | the mutation probe | `run-mutants.sh` exits 0, and all three mutations applied |
 
 `0755` is what install *writes* and what V2 asserts; the **tool's** check is any execute
 bit, so a hand-`chmod`ed `0700` copy still reports `ok`.
@@ -244,7 +266,10 @@ the previous commit's script as well as the fixed one.
 ### Mutation-proofs — a script, not a paragraph
 
 `research/46-install-mutants/run-mutants.sh` deletes three branches from a copy of the
-script and prints the real-vs-mutant status for each. Run it; do not trust the table.
+script and prints the real-vs-mutant status for each. **V7 runs it as part of the suite** —
+`tests/run.ts` collects only `tests/*.test.ts`, so an instruction to "run it" reached nobody
+and left three figures a reader had to re-derive by hand, which is the state committing the
+script was meant to end.
 
 | Mutation | Real | Mutant |
 |---|---|---|

@@ -11,7 +11,7 @@
 # the Phase-5 extraction — it copied the sources and never moved the install.
 #
 # Usage:
-#   install-wtft                     build, then install three files into ~/bin
+#   install-wtft                     build, then install four entries into ~/bin
 #   install-wtft --check [--json]    report drift, write nothing (doctor mode)
 #   install-wtft --dir <dir>         install somewhere else (the test seam)
 #   install-wtft --json              machine-readable document, either mode
@@ -60,8 +60,10 @@
 # REPO=~ and compare the artifacts against a directory that is not this clone.
 # Run it by path: <clone>/bin/install-wtft.
 #
-# INSTALL MODE NEEDS `bun install` FIRST — build.ts imports @princess-pi/libs
-# and wcwidth, so a clone with no node_modules exits 3.
+# INSTALL MODE NEEDS `bun install` FIRST — not because build.ts imports anything
+# beyond node:fs and node:path, but because Bun.build resolves the ENTRYPOINTS'
+# imports (@princess-pi/libs, wcwidth) and noticeFor reads each bundled
+# package's LICENSE out of node_modules. A clone without them exits 3.
 #
 # SHADOWS ARE REPORTED, NEVER DELETED. The precedent is
 # install-workflow-tools, which reports a retired hook and prints its `rm`
@@ -147,12 +149,21 @@ DEST_DIR="$(abs_dir "$DEST_DIR")"
 #
 #   1. bin/wtft.ts joins the literal "wtft-daemon.mjs" onto daemonDir, so the
 #      daemon must sit beside the command under exactly that name.
-#   2. NODE NEEDS IT TO SEE ESM. An extensionless copy of the bundle, run by its
-#      own shebang, dies on `import * as fs from "node:fs"` — Node only guesses
-#      module type for an extensionless file from 20.10 (flagged) and 22
-#      (default), and /usr/bin/node on this host is 18.19.1, exactly the floor
-#      package.json's `engines: >=18` promises. Measured: extensionless → exit 1
-#      on 18, 20 and 22 via shebang; symlink → works on all three.
+#   2. NODE 18 NEEDS IT TO SEE ESM. An extensionless copy of the bundle, run by
+#      its own shebang, dies on `import * as fs from "node:fs"`. Node's
+#      extensionless module detection is unflagged from 20.19.0 and 22.7.0, so
+#      the versions that need the extension are 18.x and early 20.x — and
+#      /usr/bin/node here is 18.19.1, exactly the floor `engines: >=18`
+#      promises.
+#
+#      MEASURED, and narrower than an earlier version of this comment claimed.
+#      That one said "exit 1 on 18, 20 and 22", which conflated two causes: it
+#      was taken while the type-stripping shebang above was still in place, so
+#      it credited the missing extension with a failure the shebang caused.
+#      Re-measured against the fixed build — `cp bin/wtft.mjs $D/wtft && chmod
+#      +x $D/wtft && PATH=$(dirname $NODE):/usr/bin:/bin $D/wtft --version` —
+#      exit 1 on 18.19.1 only; 0 on 20.20.2, 22.22.3 and 24.16.0. One supported
+#      major is enough to need the symlink; overstating it was not.
 #
 # So the payload is a COPY (it survives the clone moving) and the command name
 # is a SYMLINK BESIDE IT (node resolves to the .mjs realpath, which is in the
@@ -183,7 +194,12 @@ finish() {
       no-dir)       echo "❌ install-wtft: cannot create $DEST_DIR" >&2 ;;
       drift)        echo "❌ install-wtft: $DEST_DIR does not match $SRC_DIR" >&2
                     printf '%s' "${STATE_LINES:-}" >&2
-                    echo "   Run: $(self_path)" >&2 ;;
+                    echo "   Run: $(self_path)" >&2
+                    # A shadow found alongside drift is still worth saying. It
+                    # loses the EXIT CODE to drift (fixing the bytes comes
+                    # first), not the report — otherwise a human needs two runs
+                    # to learn about two problems.
+                    [ "${SHADOW_JSON:-null}" = null ] || printf "   Also: PATH resolves wtft to %s — rm '%s'\n" "$WINNER" "$WINNER" >&2 ;;
       shadowed)     if [ "$MODE" = check ]; then
                       echo "⚠️  install-wtft: $DEST_DIR is in sync, but PATH resolves wtft to $WINNER" >&2
                     else
@@ -236,8 +252,11 @@ if [ "$MODE" = install ] && [ "$STATUS" != build-failed ]; then
   for name in "${COPIES[@]}"; do
     src="$SRC_DIR/$name"; dst="$DEST_DIR/$name"
     [ -f "$src" ] || continue
-    # A silent cp failure used to surface only as `drift`, whose remedy is to
-    # re-run the same failing cp.
+    # A silent cp failure used to be reported as nothing at all. It is a stderr
+    # line now; the STATUS stays `drift` and the printed remedy is still "run
+    # this again", which for a permissions problem is the wrong advice. Fixing
+    # that properly needs a write-failure state in the schema, which is more
+    # than this branch should change — the line at least says which path.
     if ! cp -f "$src" "$dst" 2>/dev/null || ! chmod 0755 "$dst" 2>/dev/null; then
       echo "install-wtft: cannot write $dst" >&2
     fi

@@ -51,23 +51,36 @@ const BIN = path.join(import.meta.dir, "bin");
 // Deriving it fixes all three and cannot drift: bun writes a `// node_modules/
 // <pkg>/…` marker above each vendored module, so the bundle names its own
 // contents, and each LICENSE is copied verbatim rather than paraphrased.
-// @princess-pi/libs is MIT-0, which waives attribution, so it is skipped by
-// name — the only hand-maintained fact left, and one this repo owns.
+// The whole `@princess-pi/` SCOPE is skipped, on the grounds that libs is MIT-0
+// and waives attribution. That is a scope-wide bet on a per-package fact: a
+// future `@princess-pi/*` under another licence would drop out silently. It is
+// the only hand-maintained fact left, and one this repo owns.
 // ---
 function noticeFor(code: string): string {
-  // The GREEDY `.*` takes the LAST `node_modules/` on the line, so a nested
-  // `// node_modules/wcwidth/node_modules/defaults/…` marker attributes to
-  // `defaults` rather than silently crediting wcwidth and dropping a notice —
-  // the exact miss this rewrite exists to prevent.
-  const pkgs = new Set<string>();
-  for (const m of code.matchAll(/^\/\/ .*node_modules\/((?:@[^/\n]+\/)?[^/\n]+)\//gm)) {
-    if (!m[1].startsWith("@princess-pi/")) pkgs.add(m[1]);
+  // Capture the whole path FROM the first `node_modules/`, so a nested
+  // `node_modules/wcwidth/node_modules/defaults/…` marker resolves to the
+  // directory that actually holds that copy's LICENSE. An earlier version took
+  // the last segment name and then joined it onto the TOP-LEVEL node_modules,
+  // where a genuinely nested package does not exist — so the comment claimed a
+  // fix the code turned into a throw. Today's tree has no nested markers, which
+  // is why nothing caught it.
+  const pkgs = new Map<string, string>();   // package name -> directory
+  for (const m of code.matchAll(/^\/\/ (.*node_modules\/((?:@[^/\n]+\/)?[^/\n]+))\//gm)) {
+    const name = m[2];
+    if (name.startsWith("@princess-pi/")) continue;
+    pkgs.set(name, path.join(import.meta.dir, m[1]));
   }
+  // An empty result is SILENT — a bundle with no notice at all is the violation
+  // this function exists to prevent, and it is the one failure mode with no
+  // error. The guarantee therefore lives in the test, not here:
+  // tests/wtft-36-relocatable-build.test.ts V4a fails the build's output when a
+  // bundle names no vendored package. Saying "cannot drift" of this code alone
+  // would be the claim, not the check.
   if (pkgs.size === 0) return "";
 
   const parts: string[] = [];
-  for (const name of [...pkgs].sort()) {
-    const dir = path.join(import.meta.dir, "node_modules", name);
+  for (const name of [...pkgs.keys()].sort()) {
+    const dir = pkgs.get(name)!;
     // Any file whose name starts LICENSE/LICENCE/COPYING, in any case and with
     // any suffix — `.txt`, `.md`, `-MIT`, none. A fixed four-name list turned a
     // dependency's filename choice into a hard build failure (and `install-wtft`
@@ -79,8 +92,12 @@ function noticeFor(code: string): string {
       .find(f => fs.statSync(f).isFile());
     if (!file) throw new Error(`bundled package ${name} has no LICENSE file — cannot emit a notice for it`);
     const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+    // `*/` inside a licence would close this comment block early and turn the
+    // rest of the notice into code. Verbatim, then, up to a `" * "` prefix, a
+    // trailing-whitespace trim, and this one escape.
+    const text = fs.readFileSync(file, "utf8").trimEnd().replaceAll("*/", "*\\/");
     parts.push(` * ${name}@${pkg.version} — ${pkg.license ?? "see below"}\n *\n` +
-      fs.readFileSync(file, "utf8").trimEnd().split("\n").map(l => ` * ${l}`.trimEnd()).join("\n"));
+      text.split("\n").map(l => ` * ${l}`.trimEnd()).join("\n"));
   }
   return `/*\n * This file is a BUNDLE. Besides @princess-pi/wtft (MIT-0) it contains the\n` +
     ` * following third-party code, with each project's licence reproduced verbatim:\n *\n` +
@@ -131,7 +148,11 @@ for (const { src, out } of entries) {
     naming: out,
     // A global, not `process.env.X`: with an env key, an unbundled source run
     // reads it LIVE, so `WTFT_BUILD_VERSION=13.3.7-pwned bun bin/wtft.ts
-    // --version` printed 13.3.7-pwned. A define'd global has no such reader.
+    // --version` printed 13.3.7-pwned. Inside the BUNDLE the identifier is
+    // replaced by a literal and nothing can reach it; in unbundled source it
+    // still resolves through globalThis, so a `NODE_OPTIONS=--import <preload>`
+    // could set it. Narrower than "no such reader" — one less reader, and only
+    // the bundle is airtight.
     define: { __WTFT_BUILD_VERSION__: JSON.stringify(pkgVersion) },
   });
   if (!result.success) {

@@ -11,7 +11,9 @@
 ## Install
 
 From a clone. Needs [bun](https://bun.sh) on PATH to build; what it installs then
-runs on stock node, with no `node_modules` anywhere.
+runs on stock node with no `node_modules` anywhere — for its own code. If you
+point `wtft-harnesses.json` at an external harness, that file is `import()`ed at
+runtime and has to be reachable.
 
 ```sh
 git clone https://github.com/princess-pi/wtft && cd wtft
@@ -31,9 +33,10 @@ report as one document on every exit path but one: a usage error (64) is
 reported on stderr and carries no document, because the arguments that would say
 what to report are the thing that is wrong. `--help` lists the rest.
 
-Re-run it after every rebuild; `--check` is how you find out you needed to. It
-exits **0** in sync, **1** drift, **2** shadowed on PATH, **3** build failed,
-**64** bad usage — so `--check` is scriptable.
+Re-run it after every rebuild; `--check` is how you find out you needed to, and
+it is scriptable: **0** in sync, **1** drift, **2** shadowed on PATH, **64** bad
+usage. A plain install adds **3** for a failed build, which `--check` cannot
+return because it never builds.
 
 **Not on npm yet.** `npm install -g @princess-pi/wtft` will not work — nothing is
 published. Tracked in [#29](https://github.com/princess-pi/wtft/issues/29).
@@ -48,7 +51,7 @@ wtft
 wtft --history
 
 # Start the background daemon
-wtft-daemon start
+wtft-daemon --session <path>
 ```
 
 ## License

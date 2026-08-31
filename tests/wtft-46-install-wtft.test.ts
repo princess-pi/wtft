@@ -12,10 +12,17 @@
  *   references); the route is `bun link` plus ppt's package.json bin map.
  *
  *   EVERY CHECK DRIVES THE CLI, and every one of them drives a TEMP --dir and a
- *   TEMP PATH. Nothing here writes to the real ~/bin or reads the developer's
- *   real PATH: the --dir seam exists precisely so this suite never depends on
- *   how one box happens to be wired. A suite that installed to the real ~/bin
- *   to prove installing works would be a suite nobody could run twice.
+ *   PATH this file constructs. Nothing here writes to the real ~/bin, and no
+ *   installer child inherits the real PATH — the --dir seam exists precisely so
+ *   this suite never depends on how one box happens to be wired.
+ *
+ *   TWO READS DO GO TO THE REAL PATH, and saying so is the point: `command -v
+ *   bun` and `command -v node` locate the interpreters the child needs. An
+ *   earlier version of this paragraph claimed no test read the real PATH at
+ *   all, which was false in exactly those two places. What the child SEES is
+ *   still fully constructed: bun arrives through a one-entry shim directory,
+ *   never its own, because bun lives in ~/bin here — install-wtft's default
+ *   target.
  *
  *   Contract under test: docs/spec-46-install-wtft.md.
  */
@@ -175,11 +182,12 @@ console.log("\n2. Installing into an empty dir produces both artifacts, executab
 // ---
 console.log("\n3. The installed command runs when you type its name, on every node we can find");
 {
-	// EVERY node on this host, not just the first and not just two: the failure
-	// was version-dependent, so a partial sweep is how it stayed hidden. An
-	// earlier version of this block took `command -v node` plus /usr/bin/node
-	// and therefore skipped node 20 — the exact version named in build.ts and
-	// the spec for `bad option: --experimental-strip-types`.
+	// Every node this host's CONVENTIONAL locations hold — `command -v node`,
+	// /usr/bin, /usr/local/bin, and nvm's version tree. Not "every node": fnm,
+	// volta, asdf and homebrew layouts are invisible to it, and naming the
+	// search rather than claiming completeness is the honest version. The sweep
+	// matters because the failure is version-dependent: an earlier block took
+	// `command -v node` plus /usr/bin/node and therefore skipped node 20.
 	const nodes: string[] = [];
 	const add = (p: string) => { if (p && fs.existsSync(p) && !nodes.includes(p)) nodes.push(p); };
 	try { add(execSync("command -v node", { encoding: "utf8" }).trim()); } catch { /* none */ }
@@ -439,6 +447,24 @@ console.log("\n6. Defects found by the reconcile audit");
 	check(offPath.code === 0 && /add .* to PATH/.test(`${offPath.out}${offPath.err}`),
 		"V6i: a successful install into a dir that is not on PATH says so",
 		`${offPath.out}${offPath.err}`.slice(0, 200));
+}
+
+// ---
+// 7. The mutation probe runs. `docs/spec-46-install-wtft.md` says "run it; do
+//    not trust the table" — but tests/run.ts collects only tests/*.test.ts, so
+//    nothing ever did, leaving three results a reader had to re-derive by hand.
+//    That is the state committing the script was supposed to end.
+// ---
+console.log("\n7. The mutation probe runs, and can fail");
+{
+	const probe = path.join(REPO, "research", "46-install-mutants", "run-mutants.sh");
+	let out = "", code = 0;
+	try { out = execFileSync(probe, [], { encoding: "utf8", stdio: "pipe" }); }
+	catch (e: any) { out = `${e.stdout ?? ""}${e.stderr ?? ""}`; code = e.status ?? 1; }
+	check(code === 0, "V7a: run-mutants.sh exits 0 — every mutant reported ok where the real script reported a fault",
+		`exit ${code}: ${out.trim().slice(0, 400)}`);
+	check(/M1 .*OK/.test(out) && /M2 .*OK/.test(out) && /M3 .*OK/.test(out),
+		"V7b: all three mutations applied and were caught", out.trim().slice(0, 300));
 }
 
 console.log(`\n${passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ""}`);

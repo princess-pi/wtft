@@ -174,9 +174,16 @@ for (const name of ARTIFACTS) {
 	}
 	check(bundled.size > 0, `V4a: bin/${name} names the packages it vendored`, [...bundled].join(","));
 	for (const pkg of [...bundled].sort()) {
-		const licPath = ["LICENSE", "LICENSE.md", "LICENCE", "license"]
-			.map(f => path.join(REPO, "node_modules", pkg, f))
-			.find(f => fs.existsSync(f));
+		// The SAME matcher build.ts uses. A fixed name list here while the build
+		// globs meant a dependency shipping COPYING would build green and fail
+		// the suite that gates the build — two matchers disagreeing about the
+		// same question.
+		const pkgDir = path.join(REPO, "node_modules", pkg);
+		const licPath = (fs.existsSync(pkgDir) ? fs.readdirSync(pkgDir) : [])
+			.filter(f => /^(licen[cs]e|copying)/i.test(f))
+			.sort()
+			.map(f => path.join(pkgDir, f))
+			.find(f => fs.statSync(f).isFile());
 		if (!licPath) { check(false, `V4b: ${pkg} has a LICENSE file to reproduce`); continue; }
 		// A distinctive middle line, not the boilerplate opener: "Permission is
 		// hereby granted" appears in every MIT text and would match the wrong

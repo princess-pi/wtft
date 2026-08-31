@@ -501,14 +501,49 @@ console.log("\n8. Paths with an apostrophe, a newline, or a symlink in the way")
 		"V8b: the remedy for a path containing an apostrophe actually runs, and removes that file",
 		JSON.stringify(remedy));
 
-	// A newline in a path is legal here, and it produced a document JSON.parse
-	// rejects — on a tool whose whole point is a machine-readable surface.
-	const nlDir = path.join(home, "a\nb"); fs.mkdirSync(nlDir);
-	const nl = run(["--check", "--json", "--dir", nlDir]);
-	let nlDoc: any = null;
-	try { nlDoc = JSON.parse(nl.out); } catch { /* left null */ }
-	check(nlDoc?.dir === nlDir, "V8c: a newline in --dir still yields a parseable document",
-		nl.out.slice(0, 160));
+	// Four shapes, because each broke a different escaper. A newline and a tab
+	// are control characters the first version interpolated raw. A CARET broke
+	// the SECOND version: it slurped stdin with awk's `RS = "^$"`, a GNU
+	// extension that mawk — Debian's default awk — reads as a regular
+	// expression, eating every `^` as a separator and returning a path naming a
+	// different file. Latent on this box (gawk) and live anywhere else, which is
+	// exactly the kind of defect a single-host test suite is blind to; the
+	// escaper is a bash loop now, with no dialect to be wrong about.
+	for (const [label, name] of [["newline", "a\nb"], ["tab", "a\tb"], ["caret", "a^b"], ["utf-8", "héllo"]]) {
+		const d = path.join(home, name);
+		fs.mkdirSync(d, { recursive: true });
+		const r = run(["--check", "--json", "--dir", d]);
+		let doc: any = null;
+		try { doc = JSON.parse(r.out); } catch { /* left null */ }
+		check(doc?.dir === d, `V8c: a ${label} in --dir yields a parseable document naming that exact path`,
+			`${r.out.slice(0, 120)} | want ${JSON.stringify(d)}`);
+	}
+
+	// A relative --dir resolved through `pwd -P`, which FAILS when the current
+	// directory has been unlinked — and the empty substitution left `printf`
+	// emitting "/tools", so the installer silently targeted a root-level
+	// directory. The first fix `exit 64`-ed from inside a command substitution,
+	// which leaves only the subshell: same trap the mutation probe's counter
+	// fell into. It returns non-zero and the caller decides.
+	{
+		// Node's `cwd:` chdirs the child at exec, so the directory has to still
+		// exist then — deleting it first just fails the spawn. A shell child
+		// does it in the right order: cd in, delete from inside, exec.
+		const gone = fs.mkdtempSync(path.join(os.tmpdir(), "46-gone-"));
+		let code = -1, err = "";
+		try {
+			execFileSync("/bin/sh", ["-c", 'cd "$1" && rm -rf "$1" && exec "$2" --check --json --dir tools',
+				"sh", gone, INSTALLER], {
+				encoding: "utf8", stdio: "pipe",
+				env: { ...process.env, PATH: [BUN_DIR, "/usr/bin", "/bin"].join(":") },
+			});
+			code = 0;
+		} catch (e: any) { code = e?.status ?? -1; err = `${e?.stderr ?? ""}${e?.stdout ?? ""}`; }
+		fs.rmSync(gone, { recursive: true, force: true });
+		check(code === 64 && /cannot resolve a relative --dir/.test(err),
+			"V8g: a relative --dir from a deleted cwd is refused, not resolved against /",
+			`exit ${code}: ${err.slice(0, 200)}`);
+	}
 
 	// `cp -f` writes THROUGH a destination symlink. An existing wtft.mjs
 	// pointing anywhere else had that file overwritten with the bundle and

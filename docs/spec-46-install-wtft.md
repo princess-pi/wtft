@@ -127,7 +127,11 @@ per-artifact in human mode.
   `stale` or `not-executable`, a link can be `not-a-link` or `wrong-target`.
 - **`dir` and every `path` are absolute** — a relative `--dir` is made absolute against
   the cwd lexically, *without creating anything*, because `--check` must be able to name
-  a directory it refuses to make.
+  a directory it refuses to make. If the cwd has been **unlinked**, `pwd -P` fails and the
+  run is refused with exit `64`: the empty substitution used to leave `printf` emitting
+  `/tools`, silently targeting a root-level directory. The first fix `exit`-ed from inside a
+  command substitution, which leaves only the subshell — the same trap the mutation probe's
+  counter fell into — so `abs_dir` returns non-zero and the caller decides.
 - **`no-source`** means `bin/*.mjs` has not been built. Reachable under `--check`, which
   never builds, **and in install mode after a build failure**, where it appears alongside
   `status: "build-failed"`.
@@ -144,6 +148,16 @@ per-artifact in human mode.
   newline or tab in a path is legal on this filesystem and used to produce a document
   `JSON.parse` rejects; this file previously carried that as a documented limit, which was
   the wrong call — a limit that costs eight lines to remove was not worth documenting.
+  It is a **bash loop, not `awk`**: the first version slurped stdin with `RS = "^$"`, a GNU
+  extension that mawk (Debian's default `awk`) reads as a regular expression, eating every
+  `^` in the value and returning a path naming a different file. Latent on this box, which
+  has gawk; live anywhere else — the kind of defect a single-host suite cannot see.
+- **Bytes above `0x7f` pass through unchanged**, so a path that is not valid UTF-8 yields a
+  document a strict parser rejects. Declined rather than fixed, with the reason stated: a
+  path is *bytes*, JSON is *text*, and the only faithful repairs are to re-encode `dir` and
+  `path` into something that is no longer a usable path, or to refuse to report on such a
+  path at all. Both are worse than the boundary. Every JSON-emitting shell tool on this
+  host shares it.
 - **`shadow.remedy` and the printed `rm` are shell-quoted**, apostrophes included. The
   printed command is meant to be *pasted*, so a path containing `'` did not merely fail: it
   closed the quoted word and handed the remainder to the shell as syntax. Three iterations
@@ -160,7 +174,10 @@ per-artifact in human mode.
 | `<dir>/wtft-daemon` | symlink → `wtft-daemon.mjs` | the command, matching package.json's `bin` map. (The README used to justify it with `wtft-daemon start`, which is not a real invocation — the daemon answers `--session <path>` and friends, not a verb.) |
 
 **Every payload is staged beside its destination and renamed over it**, never written in
-place. `cp -f` writes *through* a destination symlink, so an existing `<dir>/wtft.mjs`
+place, into a name `mktemp` creates with `O_EXCL` rather than a predictable `$dst.$$` —
+a predictable staging name is a window in which anyone who can write the directory replaces
+it with a symlink, which is the same defect as the destination symlink below, one step
+earlier. `cp -f` writes *through* a destination symlink, so an existing `<dir>/wtft.mjs`
 pointing anywhere else had that file overwritten with the bundle and `chmod`ed `0755` —
 verified on a throwaway file, which came back holding our shebang. It also blocks forever
 on a FIFO. `mv` replaces the directory entry itself, follows nothing, and makes the swap

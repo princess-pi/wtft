@@ -82,20 +82,35 @@ DEST_DIR=""
 
 # EVERY JSON control character, not just backslash and quote. A newline or tab
 # in a path is legal on this filesystem and produced a document `JSON.parse`
-# rejects — on a tool whose entire point is a machine-readable surface. The spec
-# used to carry this as a documented limit; a documented limit that costs eight
-# lines to remove was not worth documenting.
+# rejects — on a tool whose entire point is a machine-readable surface.
+#
+# BASH, NOT AWK. The first version of this used `awk` with `RS = "^$"` to slurp
+# the whole input, which is a GNU extension: on an awk that reads `^$` as a
+# regular expression — mawk is Debian's default `awk` — every `^` in the value
+# is eaten as a record separator, so a path containing a caret came back naming
+# a different file. Latent here (this box has gawk 5.2.1, where it round-trips)
+# and live anywhere else. A bash loop has no such dialect, and no subprocess.
+#
+# Bytes above 0x7f pass through unchanged. See the spec: a path is bytes, JSON
+# is text, and the two only agree while the bytes are valid UTF-8.
 json_str() {
-  printf '%s' "$1" | LC_ALL=C awk '
-    BEGIN {
-      RS = "^$"; ORS = ""
-      for (i = 0; i < 32; i++) esc[sprintf("%c", i)] = sprintf("\\u%04x", i)
-      esc["\b"] = "\\b"; esc["\f"] = "\\f"; esc["\n"] = "\\n"
-      esc["\r"] = "\\r"; esc["\t"] = "\\t"
-      esc["\\"] = "\\\\"; esc["\""] = "\\\""
-      esc[sprintf("%c", 127)] = "\\u007f"
-    }
-    { n = length($0); for (i = 1; i <= n; i++) { c = substr($0, i, 1); printf "%s", (c in esc ? esc[c] : c) } }'
+  local s=$1 out= c i o
+  for (( i = 0; i < ${#s}; i++ )); do
+    c=${s:i:1}
+    case $c in
+      '\')     out+='\\' ;;
+      '"')      out+='\"' ;;
+      $'\n')    out+='\n' ;;
+      $'\r')    out+='\r' ;;
+      $'\t')    out+='\t' ;;
+      $'\b')    out+='\b' ;;
+      $'\f')    out+='\f' ;;
+      *)        printf -v o '%d' "'$c"
+                if (( o < 32 || o == 127 )); then printf -v c '\\u%04x' "$o"; fi
+                out+=$c ;;
+    esac
+  done
+  printf '%s' "$out"
 }
 
 # Single-quote for a shell, the way a shell actually requires: close the quote,
@@ -134,7 +149,18 @@ self_path() { resolve "$0"; }
 abs_dir() {
   case "$1" in
     /*) printf '%s' "$1" ;;
-    *)  printf '%s/%s' "$(pwd -P)" "$1" ;;
+    *)  local here
+        # `pwd -P` FAILS when the current directory has been unlinked, and its
+        # empty substitution used to leave `printf` happily emitting "/tools" —
+        # so a relative --dir silently retargeted a root-level directory that
+        # has nothing to do with the caller. An empty result is a failure, not
+        # a root.
+        here="$(pwd -P 2>/dev/null)" || here=""
+        # RETURN, do not exit: this runs inside a command substitution, so an
+        # `exit` here leaves only the subshell and the empty result flows on —
+        # which is how "/tools" happened in the first place. The caller checks.
+        [ -n "$here" ] || return 1
+        printf '%s/%s' "$here" "$1" ;;
   esac
 }
 
@@ -167,7 +193,10 @@ if [ -z "$DEST_DIR" ]; then
   [ -n "${HOME:-}" ] || { echo "install-wtft: HOME is unset — pass --dir <dir>" >&2; exit 64; }
   DEST_DIR="$HOME/bin"
 fi
-DEST_DIR="$(abs_dir "$DEST_DIR")"
+DEST_DIR="$(abs_dir "$DEST_DIR")" || {
+  echo "install-wtft: cannot resolve a relative --dir — the current directory is gone. Pass an absolute path." >&2
+  exit 64
+}
 
 # Two copies and two symlinks. The .mjs EXTENSION IS LOAD-BEARING TWICE OVER:
 #
@@ -288,8 +317,13 @@ if [ "$MODE" = install ] && [ "$STATUS" != build-failed ]; then
     # printed remedy is "run this again", which for a permissions problem is the
     # wrong advice. Fixing that properly needs a write-failure state in the
     # schema, which is more than this branch should change.
-    stage="$dst.install-wtft.$$"
-    if cp -f "$src" "$stage" 2>/dev/null && chmod 0755 "$stage" 2>/dev/null && mv -f "$stage" "$dst" 2>/dev/null; then
+    # `mktemp` in the destination directory, not a predictable "$dst.$$": the
+    # predictable name is a window in which anyone who can write that directory
+    # replaces it with a symlink, and `cp -f` then follows it — the same defect
+    # as the destination symlink above, one step earlier. mktemp creates with
+    # O_EXCL, so there is no name to pre-empt.
+    stage="$(mktemp "$DEST_DIR/.install-wtft.XXXXXX" 2>/dev/null)" || stage=""
+    if [ -n "$stage" ] && cp -f "$src" "$stage" 2>/dev/null && chmod 0755 "$stage" 2>/dev/null && mv -f "$stage" "$dst" 2>/dev/null; then
       :
     else
       rm -f "$stage" 2>/dev/null

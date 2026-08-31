@@ -108,26 +108,40 @@ for (const name of ARTIFACTS) fs.copyFileSync(path.join(REPO, "bin", name), path
 // ---
 // 3. The behaviour itself, on stock node.
 // ---
-console.log("\n3. Every self-describing command runs from the copy, on stock node");
+console.log("\n3. wtft's three display flags, and the daemon's --help, run from the copy on stock node");
 {
 	if (!NODE) {
 		skip("no `node` on PATH — the stock-node arm did not run");
 	} else {
+		// A PRIVATE HOME. bin/wtft.ts calls loadUserPricing() and
+		// loadExternalHarnesses() BEFORE the display-flag early exits, so with an
+		// inherited HOME these runs read the developer's ~/.config and can
+		// `import()` whatever wtft-harnesses.json names there. A relocatability
+		// check that depends on one box's config is not checking relocatability.
+		const fakeHome = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-36-home-")));
+		const env = { ...process.env, HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config") };
+
 		for (const flag of ["--help", "--why", "--version"]) {
 			let out = "", code = 0;
 			try {
-				out = execFileSync(NODE, [path.join(loose, "wtft.mjs"), flag], { encoding: "utf8", stdio: "pipe" });
+				out = execFileSync(NODE, [path.join(loose, "wtft.mjs"), flag], { encoding: "utf8", stdio: "pipe", env });
 			} catch (err: any) {
 				out = `${err.stdout || ""}${err.stderr || ""}`;
 				code = err.status ?? 1;
 			}
-			check(code === 0, `V3: \`wtft ${flag}\` exits 0 from a bare directory`,
-				code === 0 ? undefined : `exit ${code}: ${out.trim().split("\n").slice(0, 3).join(" | ").slice(0, 300)}`);
+			// Output, not just the exit code: main() is guarded on the invoked
+			// name (bin/wtft.ts), so a copy under an unexpected name exits 0
+			// having printed nothing — which a code-only check reads as success.
+			check(code === 0 && out.trim().length > 0,
+				`V3: \`wtft ${flag}\` exits 0 AND prints something from a bare directory`,
+				`exit ${code}, ${out.trim().length} bytes: ${out.trim().split("\n").slice(0, 3).join(" | ").slice(0, 300)}`);
 		}
 		// The daemon is a separate entrypoint with its own bundle, so it gets its
-		// own check rather than being assumed to travel with the CLI.
+		// own check rather than being assumed to travel with the CLI. --help
+		// only: it parses --session/--list/--cleanup/--restart/--stop/--debug and
+		// answers neither --why nor --version.
 		let dcode = 0;
-		try { execFileSync(NODE, [path.join(loose, "wtft-daemon.mjs"), "--help"], { encoding: "utf8", stdio: "pipe" }); }
+		try { execFileSync(NODE, [path.join(loose, "wtft-daemon.mjs"), "--help"], { encoding: "utf8", stdio: "pipe", env }); }
 		catch (err: any) { dcode = err.status ?? 1; }
 		check(dcode === 0, "V3: `wtft-daemon --help` exits 0 from a bare directory", `exit ${dcode}`);
 	}
@@ -135,24 +149,78 @@ console.log("\n3. Every self-describing command runs from the copy, on stock nod
 
 // ---
 // 4. Bundling third-party code carries its licence with it. @princess-pi/libs is
-//    MIT-0 and waives attribution; wcwidth is MIT and does not — its notice must
+//    MIT-0 and waives attribution; the rest are MIT and do not — the notice must
 //    appear "in all copies or substantial portions", and a bundle is a copy.
+//
+//    THE CHECK IS DERIVED FROM THE BUNDLE, because the previous one could not
+//    fail for its stated reason. It looked for two fixed strings from a
+//    hand-written banner that build.ts emitted unconditionally: strip wcwidth
+//    from the bundle entirely and it still passed. A reconcile audit found that,
+//    and two real gaps behind it — `clone` and `defaults` were bundled and named
+//    nowhere, and the banner reproduced the STANDARD MIT disclaimer while
+//    wcwidth's own LICENSE uses a BSD-2-style one, so it was not reproducing
+//    wcwidth's notice at all.
+//
+//    Now the notice is generated from the `// node_modules/<pkg>/` markers bun
+//    writes, with each LICENSE copied verbatim — so this reads the same markers
+//    and demands a matching entry. Bundle a new dependency and it fails.
 // ---
-console.log("\n4. The bundle carries the notice for what it bundles");
+console.log("\n4. The bundle carries the verbatim licence of every package it bundles");
 for (const name of ARTIFACTS) {
 	const code = fs.readFileSync(path.join(REPO, "bin", name), "utf8");
-	check(code.includes("Copyright (C) 2012 by Jun Woong") && code.includes("Permission is hereby granted"),
-		`V4: bin/${name} carries wcwidth's MIT notice`);
-	check(code.startsWith("#!"), `V4: …and the shebang is still line 1 of bin/${name}`);
+	const bundled = new Set<string>();
+	for (const m of code.matchAll(/^\/\/ node_modules\/((?:@[^/\n]+\/)?[^/\n]+)\//gm)) {
+		if (!m[1].startsWith("@princess-pi/")) bundled.add(m[1]);
+	}
+	check(bundled.size > 0, `V4a: bin/${name} names the packages it vendored`, [...bundled].join(","));
+	for (const pkg of [...bundled].sort()) {
+		// The SAME matcher build.ts uses. A fixed name list here while the build
+		// globs meant a dependency shipping COPYING would build green and fail
+		// the suite that gates the build — two matchers disagreeing about the
+		// same question.
+		const pkgDir = path.join(REPO, "node_modules", pkg);
+		const licPath = (fs.existsSync(pkgDir) ? fs.readdirSync(pkgDir) : [])
+			.filter(f => /^(licen[cs]e|copying)/i.test(f))
+			.sort()
+			.map(f => path.join(pkgDir, f))
+			.find(f => fs.statSync(f).isFile());
+		if (!licPath) { check(false, `V4b: ${pkg} has a LICENSE file to reproduce`); continue; }
+		// A distinctive middle line, not the boilerplate opener: "Permission is
+		// hereby granted" appears in every MIT text and would match the wrong
+		// project's notice.
+		const distinctive = fs.readFileSync(licPath, "utf8")
+			.split("\n").map(l => l.trim())
+			.filter(l => /^Copyright/i.test(l))[0] ?? "";
+		check(distinctive !== "" && code.includes(distinctive),
+			`V4b: bin/${name} carries ${pkg}'s own notice ("${distinctive.slice(0, 46)}…")`);
+	}
+	// Flagless, and line 1. `#!/usr/bin/env -S node --experimental-strip-types`
+	// is right for the .ts entrypoint and fatal on the plain-JS bundle: node 18
+	// and 20 answer `bad option` and exit. bun copies the entrypoint's shebang
+	// through, so build.ts has to replace it.
+	check(code.split("\n")[0] === "#!/usr/bin/env node",
+		`V4c: bin/${name} line 1 is a flagless node shebang`, JSON.stringify(code.split("\n")[0]));
 }
 
 // ---
-// 5. The published LAYOUT, which is not the same claim as §3: there the artifact
-//    stands alone and --version honestly reports it cannot find package.json;
-//    here it sits in a package, where npm always ships one, and must read the
-//    real version out of it (#347).
+// 5. --version answers FROM THE ARTIFACT, not from whatever package.json happens
+//    to sit above it (#46).
+//
+//    This check used to assert the opposite — that a bundled artifact dropped
+//    into a package layout read `../package.json` (#347). #46's install layout
+//    is where that bites:
+//    `~/bin/wtft` looks up at `$HOME/package.json`, which is either absent
+//    (--version prints "unknown", on the one command you run when you already
+//    suspect you are running the wrong build) or PRESENT and unrelated
+//    (--version confidently prints someone else's version number).
+//
+//    build.ts now substitutes the version it read out of package.json at build
+//    time, so package.json is still the single source of truth and the artifact
+//    still answers alone. The neighbouring file below carries a DELIBERATELY
+//    WRONG version: if the read ever comes back, this fails instead of passing
+//    on a value that happens to match.
 // ---
-console.log("\n5. In a published layout, --version reads the package's own version");
+console.log("\n5. --version answers from the artifact, ignoring a neighbouring package.json");
 {
 	if (!NODE) {
 		skip("no `node` on PATH — the published-layout arm did not run");
@@ -161,15 +229,32 @@ console.log("\n5. In a published layout, --version reads the package's own versi
 		fs.mkdirSync(path.join(pkgRoot, "bin"));
 		for (const name of ARTIFACTS) fs.copyFileSync(path.join(REPO, "bin", name), path.join(pkgRoot, "bin", name));
 		const realPkg = JSON.parse(fs.readFileSync(path.join(REPO, "package.json"), "utf8"));
+		const DECOY_VERSION = "9.9.9-decoy";
 		fs.writeFileSync(path.join(pkgRoot, "package.json"), JSON.stringify({
-			name: realPkg.name, version: realPkg.version, type: realPkg.type, bin: realPkg.bin,
+			name: realPkg.name, version: DECOY_VERSION, type: realPkg.type, bin: realPkg.bin,
 		}));
 		let out = "", code = 0;
 		try { out = execFileSync(NODE, [path.join(pkgRoot, "bin", "wtft.mjs"), "--version"], { encoding: "utf8", stdio: "pipe" }); }
 		catch (err: any) { out = `${err.stdout || ""}${err.stderr || ""}`; code = err.status ?? 1; }
-		check(code === 0 && out.includes(realPkg.version),
-			`V5: --version prints ${realPkg.version} from the package it is installed in`,
+		check(code === 0 && out.includes(realPkg.version) && !out.includes(DECOY_VERSION),
+			`V5: --version prints the built-in ${realPkg.version}, not the neighbouring ${DECOY_VERSION}`,
 			`exit ${code}: ${out.trim().slice(0, 200)}`);
+
+		// And with NO package.json anywhere above it, which is the #46 install
+		// layout exactly. Before the injection this printed "unknown"; the
+		// `unknown` clause below is belt-and-braces rather than load-bearing:
+		// the define makes `injected` a non-empty literal, so the fallback is
+		// UNREACHABLE — it is still present in the bundle, just behind an
+		// `if (injected) return`. Remove the define and the version check above
+		// is what fails.
+		const bare = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-36-bare-")));
+		for (const name of ARTIFACTS) fs.copyFileSync(path.join(REPO, "bin", name), path.join(bare, name));
+		let bareOut = "", bareCode = 0;
+		try { bareOut = execFileSync(NODE, [path.join(bare, "wtft.mjs"), "--version"], { encoding: "utf8", stdio: "pipe" }); }
+		catch (err: any) { bareOut = `${err.stdout || ""}${err.stderr || ""}`; bareCode = err.status ?? 1; }
+		check(bareCode === 0 && bareOut.includes(realPkg.version) && !bareOut.includes("unknown"),
+			`V5b: with no package.json above it at all, --version still prints ${realPkg.version}`,
+			`exit ${bareCode}: ${bareOut.trim().slice(0, 200)}`);
 	}
 }
 

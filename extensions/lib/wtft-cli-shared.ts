@@ -517,12 +517,31 @@ export async function renderWtftWhy(src: ManifestSource, invokedAs: string): Pro
  * of the two release paths ever bumped), and the build stamp says which tree
  * produced the artifact answering (#178).
  *
+ * WHEN package.json is read has changed (#46): in a BUNDLED artifact it is read
+ * at BUILD time and substituted below, because an artifact installed into ~/bin
+ * has no package.json above it — and if one happens to be there, it is not
+ * ours. Unbundled source, where the define is undeclared, still reads it at run
+ * time. Same single source of truth, resolved at whichever moment the file is
+ * actually reachable.
+ *
+ * The substituted name is a GLOBAL, not `process.env.WTFT_BUILD_VERSION`. With
+ * an env key the source path read it live, so any environment could dictate the
+ * version this command reports about itself.
+ *
  * `moduleUrl` must be the CALLER's import.meta.url, not this module's: after
  * bundling they are the same file, but the Pi extension loads source, where
  * this lib's URL would name the lib rather than the command you invoked.
  */
+// Substituted by build.ts's `define` in a bundle, and declared nowhere else —
+// `typeof` is what keeps the source path from throwing a ReferenceError.
+declare const __WTFT_BUILD_VERSION__: string | undefined;
+
 export function renderWtftVersion(src: ManifestSource, moduleUrl: string): string {
 	const manifest = loadManifest(src);
+	// Substituted by build.ts in a bundle; undeclared in source. See the docstring.
+	const injected = typeof __WTFT_BUILD_VERSION__ === "string" ? __WTFT_BUILD_VERSION__ : "";
+	if (injected) return formatVersion(manifest.name, injected, moduleUrl);
+
 	const pkgPath = path.join(path.dirname(fileURLToPath(moduleUrl)), "..", "package.json");
 	let semver: string;
 	try {

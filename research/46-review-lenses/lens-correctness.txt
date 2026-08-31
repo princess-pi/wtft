@@ -1,0 +1,17 @@
+You are a CORRECTNESS reviewer for a pull request. The branch is `46-install-wtft` in the
+git repo at your current working directory; its base is `origin/main`.
+
+Read the diff yourself with git (`git diff origin/main..HEAD`), then read whole files where
+the diff is not enough. `bin/install-wtft`, `build.ts`, `extensions/lib/wtft-cli-shared.ts`,
+`tests/wtft-46-install-wtft.test.ts` and `tests/wtft-36-relocatable-build.test.ts` are the
+code; `docs/spec-46-install-wtft.md` states the intended contract.
+
+Find BUGS: logic that does not do what the surrounding code intends, unhandled failure
+modes, shell quoting and word-splitting hazards, state that can be observed inconsistently,
+tests that cannot fail for the reason they state, and assertions that pass vacuously.
+
+You may RUN things to check (bun tests/run.ts, bin/install-wtft --check --json --dir <tmp>).
+Prefer verifying over speculating; say which findings you verified and how.
+
+One line per finding, each with severity (High/Medium/Low), a path:line, and what actually
+happens. Do not triage or rank. Do not fix anything. If you find none, say what you checked.

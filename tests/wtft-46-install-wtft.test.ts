@@ -99,8 +99,8 @@ console.log("\n1. --check --json on an empty dir reports drift, naming both arti
 	check(doc?.mode === "check", "V1e: mode is check", JSON.stringify(doc?.mode));
 
 	const states = Object.fromEntries((doc?.artifacts ?? []).map((a: any) => [a.name, a.state]));
-	check(states["wtft"] === "missing" && states["wtft-daemon.mjs"] === "missing",
-		"V1f: both artifacts reported missing, keyed by their INSTALLED names",
+	check(states["wtft"] === "missing" && states["wtft-daemon.mjs"] === "missing" && states["wtft-daemon"] === "missing",
+		"V1f: all THREE artifacts reported missing, keyed by their INSTALLED names",
 		JSON.stringify(states));
 
 	// --check writes nothing. A doctor mode that installs is not a doctor mode.
@@ -255,6 +255,104 @@ console.log("\n5. A rebuilt artifact makes the installed copy stale, and --check
 	const s2 = Object.fromEntries((d2?.artifacts ?? []).map((a: any) => [a.name, a.state]));
 	check(r2.code === 1 && s2["wtft"] === "not-executable",
 		"V5f: a de-executable'd copy is 'not-executable', exit 1", `exit ${r2.code}: ${JSON.stringify(s2)}`);
+}
+
+// ---
+// 6. The defects a fresh-context reconcile audit found that sections 1-5 did
+//    not. Every one of them passed section 1-5 unchanged, which is the whole
+//    argument for auditing prose against code rather than trusting a green
+//    suite: these are not regressions, they are things nothing ever asserted.
+//
+//    Each check below was run against the PREVIOUS commit's script as well as
+//    this one; the before/after is recorded in docs/spec-46-install-wtft.md.
+// ---
+console.log("\n6. Defects found by the reconcile audit");
+{
+	// S1 — the doctor had a write side effect. `mkdir -p` ran during argument
+	// handling, before the mode branch, so --check CREATED its target. Three
+	// separate places claimed "writes nothing".
+	const ghostRoot = mkSandbox(path.join(os.tmpdir(), "46-ghost-"));
+	const ghost = path.join(ghostRoot, "not-yet", "deeper");
+	run(["--check", "--json", "--dir", ghost]);
+	check(!fs.existsSync(ghost), "V6a: --check does not create a missing --dir", `created ${ghost}`);
+
+	// S16 — the human drift report named no artifact at all: STATE_JSON was
+	// piped through `tr ',' '\n'`, which splits each record across three lines,
+	// so name and state never shared one and the sed matched nothing.
+	const empty = mkSandbox(path.join(os.tmpdir(), "46-humandrift-"));
+	const human = run(["--check", "--dir", empty]);
+	const said = `${human.out}${human.err}`;
+	check(/wtft:\s*missing/.test(said) && /wtft-daemon\.mjs:\s*missing/.test(said),
+		"V6b: human drift output names each artifact and its state", said.slice(0, 300));
+
+	// S20 — exit 2 is reachable under --check, where "installed into" is a lie.
+	const synced = mkSandbox(path.join(os.tmpdir(), "46-synced-"));
+	const decoyDir2 = mkSandbox(path.join(os.tmpdir(), "46-decoy2-"));
+	fs.writeFileSync(path.join(decoyDir2, "wtft"), "#!/bin/sh\n"); fs.chmodSync(path.join(decoyDir2, "wtft"), 0o755);
+	run(["--dir", synced]);
+	const chk = run(["--check", "--dir", synced], [decoyDir2]);
+	const chkSaid = `${chk.out}${chk.err}`;
+	check(chk.code === 2 && !/installed into/.test(chkSaid),
+		"V6c: --check reporting a shadow does not claim it installed anything",
+		`exit ${chk.code}: ${chkSaid.slice(0, 200)}`);
+
+	// S19 — a symlink pointing at our own copy runs our own bytes, but the
+	// comparison resolved only the parent directory, so it was reported as a
+	// foreign wtft with a remedy that would delete a working command.
+	const linkDir = mkSandbox(path.join(os.tmpdir(), "46-link-"));
+	fs.symlinkSync(path.join(synced, "wtft"), path.join(linkDir, "wtft"));
+	const viaLink = run(["--check", "--json", "--dir", synced], [linkDir]);
+	let linkDoc: any = null;
+	try { linkDoc = JSON.parse(viaLink.out); } catch { /* left null */ }
+	check(viaLink.code === 0 && linkDoc?.shadow === null && linkDoc?.onPath === true,
+		"V6d: a symlink to our own copy is not a shadow",
+		`exit ${viaLink.code}: ${viaLink.out.slice(0, 200)}`);
+
+	// S28 — `--dir --json` installed into a directory literally named "--json"
+	// and still exited 0.
+	const flagAsDir = run(["--dir", "--json"]);
+	check(flagAsDir.code === 64, "V6e: --dir followed by a flag is bad usage, not a directory name",
+		`got ${flagAsDir.code}`);
+
+	// S4 — an unset HOME aborted with bash's own "unbound variable" and no
+	// document, on a script whose whole point is a machine-readable surface.
+	let noHome = { code: -1, out: "", err: "" };
+	try {
+		execFileSync(INSTALLER, ["--check", "--json"], {
+			encoding: "utf8", stdio: "pipe",
+			env: { PATH: [BUN_DIR, "/usr/bin", "/bin"].join(":") },   // no HOME
+		});
+		noHome = { code: 0, out: "", err: "" };
+	} catch (e: any) { noHome = { code: e?.status ?? -1, out: e?.stdout ?? "", err: e?.stderr ?? "" }; }
+	check(noHome.code === 64 && /HOME is unset/.test(noHome.err),
+		"V6f: unset HOME is bad usage with a named remedy, not an unbound-variable trace",
+		`exit ${noHome.code}: ${noHome.err.slice(0, 200)}`);
+
+	// S3 — three paths exited without emitting the document --json promises.
+	const badDir = run(["--json", "--dir", "/dev/null/nope"]);
+	let badDoc: any = null;
+	try { badDoc = JSON.parse(badDir.out); } catch { /* left null */ }
+	check(badDir.code === 1 && badDoc?.status === "no-dir",
+		"V6g: an un-creatable --dir still emits a document under --json",
+		`exit ${badDir.code}: ${badDir.out.slice(0, 200)}${badDir.err.slice(0, 120)}`);
+
+	// S18 — the remedy interpolated the winner unquoted, so a path with a space
+	// produced an `rm` that does not run.
+	const spaceDir = mkSandbox(path.join(os.tmpdir(), "46-with space-"));
+	fs.writeFileSync(path.join(spaceDir, "wtft"), "#!/bin/sh\n"); fs.chmodSync(path.join(spaceDir, "wtft"), 0o755);
+	const spaced = run(["--check", "--json", "--dir", synced], [spaceDir]);
+	let spacedDoc: any = null;
+	try { spacedDoc = JSON.parse(spaced.out); } catch { /* left null */ }
+	check(typeof spacedDoc?.shadow?.remedy === "string" && spacedDoc.shadow.remedy.includes(`'${spaceDir}/wtft'`),
+		"V6h: the remedy quotes a winner path containing a space",
+		JSON.stringify(spacedDoc?.shadow?.remedy));
+
+	// S17 — onPath was in the document and in no human line, so a green run hid
+	// a command nobody can type.
+	const offPath = run(["--dir", mkSandbox(path.join(os.tmpdir(), "46-offpath-"))]);
+	check(offPath.code === 0 && /add .* to PATH/.test(`${offPath.out}${offPath.err}`),
+		"V6i: a successful install into a dir that is not on PATH says so",
+		`${offPath.out}${offPath.err}`.slice(0, 200));
 }
 
 console.log(`\n${passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ""}`);

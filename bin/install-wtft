@@ -11,19 +11,26 @@
 # the Phase-5 extraction — it copied the sources and never moved the install.
 #
 # Usage:
-#   install-wtft                     build, then install into ~/bin
+#   install-wtft                     build, then install three files into ~/bin
 #   install-wtft --check [--json]    report drift, write nothing (doctor mode)
 #   install-wtft --dir <dir>         install somewhere else (the test seam)
 #   install-wtft --json              machine-readable document, either mode
-#   install-wtft -h | --help         this text
-#   install-wtft --version           absolute path of this copy
+#   install-wtft -h | --help         this text (--json is ignored)
+#   install-wtft --version           absolute path of THIS SCRIPT, not a version
+#                                    number (--json is ignored)
 #
 # Exit codes:
-#   0   installed, or --check found this host in sync
-#   1   drift: an artifact is missing, stale, not executable, or not built
-#   2   installed correctly but SHADOWED on PATH by a different wtft
+#   0   installed, or --check found this host in sync; also --version and --help
+#   1   drift: an artifact is missing, stale, not executable, or not built;
+#       also an un-creatable --dir (status "no-dir")
+#   2   in sync but SHADOWED on PATH by a different wtft
 #   3   the build failed
-#  64   bad usage
+#  64   bad usage: unknown argument, --dir without a directory, --dir followed
+#       by a flag, or no --dir on a host with HOME unset. `--` is NOT an
+#       end-of-options marker.
+#
+# Human output goes to stdout only when STATUS is ok; every other status goes to
+# stderr. Under --json the document goes to stdout in every case.
 #
 # 1 and 64 match install-workflow-tools deliberately, so the two installers
 # never disagree about what a number means. 2 is its own code because its
@@ -41,9 +48,19 @@
 #
 # THE DAEMON KEEPS ITS .mjs EXTENSION. bin/wtft.ts computes
 # `daemonDir = dirname(fileURLToPath(import.meta.url))` and joins
-# "wtft-daemon.mjs" onto it, at four call sites. Installing the daemon as
-# `wtft-daemon` would leave --watch unable to find it while everything else
-# kept working — the failure mode hardest to notice.
+# "wtft-daemon.mjs" onto it, at four sites in that file and a fifth in
+# extensions/lib/wtft-cli-shared.ts (spawnWtftDaemon) — grepping only bin/wtft.ts
+# undercounts the dependency surface. Installing the daemon as `wtft-daemon`
+# ALONE would leave --watch unable to find it while everything else kept
+# working — the failure mode hardest to notice. It lands under both names.
+#
+# THIS SCRIPT DOES NOT INSTALL ITSELF, unlike install-workflow-tools. REPO is
+# derived from the script's own location, so a copy in ~/bin would compute
+# REPO=~ and compare the artifacts against a directory that is not this clone.
+# Run it by path: <clone>/bin/install-wtft.
+#
+# INSTALL MODE NEEDS `bun install` FIRST — build.ts imports @princess-pi/libs
+# and wcwidth, so a clone with no node_modules exits 3.
 #
 # SHADOWS ARE REPORTED, NEVER DELETED. The precedent is
 # install-workflow-tools, which reports a retired hook and prints its `rm`
@@ -61,14 +78,45 @@ JSON=0
 DEST_DIR=""
 
 self_path() { (cd "$(dirname "$0")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$0")"); }
-abspath()   { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$(basename "$1")") || printf '%s\n' "$1"; }
 json_str()  { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+
+# Absolute path, WITHOUT creating anything — --check must be able to name a
+# directory it refuses to make. A non-existent path is made absolute against
+# $PWD lexically rather than resolved, which is all a report needs.
+abs_dir() {
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    *)  printf '%s/%s' "$(pwd -P)" "$1" ;;
+  esac
+}
+
+# Absolute path with the FINAL symlink followed. The shadow comparison needs
+# this: a `ln -s` pointing at the copy we just installed runs our own bytes, and
+# resolving only the parent directory reported it as a foreign wtft (exit 2 with
+# a remedy that would delete a working command).
+resolve() {
+  local p="$1" t n=0
+  while [ -L "$p" ] && [ "$n" -lt 20 ]; do
+    t="$(readlink "$p")"
+    case "$t" in /*) p="$t" ;; *) p="$(dirname "$p")/$t" ;; esac
+    n=$((n + 1))
+  done
+  local d
+  d="$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)" || { printf '%s' "$p"; return; }
+  printf '%s/%s' "$d" "$(basename "$p")"
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --check)   MODE=check ;;
     --json)    JSON=1 ;;
-    --dir)     shift; [ $# -gt 0 ] || { echo "install-wtft: --dir needs a directory" >&2; exit 64; }; DEST_DIR="$1" ;;
+    --dir)     shift
+               [ $# -gt 0 ] || { echo "install-wtft: --dir needs a directory" >&2; exit 64; }
+               # A flag here is a forgotten value, not a directory name: `--dir
+               # --json` used to install into a directory literally called
+               # "--json" and still exit 0.
+               case "$1" in --*) echo "install-wtft: --dir needs a directory, got '$1'" >&2; exit 64 ;; esac
+               DEST_DIR="$1" ;;
     --version) self_path; exit 0 ;;
     -h|--help) sed -n '2,/^set -uo/p' "$(self_path)" | sed -e 's/^# \{0,1\}//' -e '$d'; exit 0 ;;
     *)         echo "install-wtft: unknown argument '$1'" >&2; exit 64 ;;
@@ -78,11 +126,13 @@ done
 
 REPO="$(cd "$(dirname "$(self_path)")/.." && pwd -P)"
 SRC_DIR="$REPO/bin"
-[ -n "$DEST_DIR" ] || DEST_DIR="$HOME/bin"
-# Absolute from here on: the document reports paths a caller can use directly,
-# and the shadow comparison below is only meaningful between absolute paths.
-mkdir -p "$DEST_DIR" 2>/dev/null || true
-DEST_DIR="$(cd "$DEST_DIR" 2>/dev/null && pwd -P || printf '%s' "$DEST_DIR")"
+if [ -z "$DEST_DIR" ]; then
+  # Not `$HOME/bin` under `set -u`: an unset HOME aborted with a raw bash
+  # "unbound variable" and no document at all.
+  [ -n "${HOME:-}" ] || { echo "install-wtft: HOME is unset — pass --dir <dir>" >&2; exit 64; }
+  DEST_DIR="$HOME/bin"
+fi
+DEST_DIR="$(abs_dir "$DEST_DIR")"
 
 # src-name:installed-name. The daemon lands TWICE, on purpose:
 #   wtft-daemon.mjs — the name `daemonDir` joins, load-bearing (see above)
@@ -94,14 +144,46 @@ ARTIFACTS=("wtft.mjs:wtft" "wtft-daemon.mjs:wtft-daemon.mjs" "wtft-daemon.mjs:wt
 
 STATUS=ok
 EXIT=0
-BUILD_OUT=""
+
+# Emit the document (or the human lines) and leave. Every exit after argument
+# parsing goes through here, so `--json` never has a path that exits with no
+# document — three of them used to.
+finish() {
+  if [ "$JSON" = 1 ]; then
+    printf '{"schema":"install-wtft@1","mode":"%s","dir":"%s","status":"%s","onPath":%s,"artifacts":[%s],"shadow":%s}\n' \
+      "$MODE" "$(json_str "$DEST_DIR")" "$STATUS" "${ON_PATH:-false}" "${STATE_JSON:-}" "${SHADOW_JSON:-null}"
+  else
+    case "$STATUS" in
+      build-failed) echo "❌ install-wtft: build failed — see the output above" >&2 ;;
+      no-dir)       echo "❌ install-wtft: cannot create $DEST_DIR" >&2 ;;
+      drift)        echo "❌ install-wtft: $DEST_DIR does not match $SRC_DIR" >&2
+                    printf '%s' "${STATE_LINES:-}" >&2
+                    echo "   Run: $(self_path)" >&2 ;;
+      shadowed)     if [ "$MODE" = check ]; then
+                      echo "⚠️  install-wtft: $DEST_DIR is in sync, but PATH resolves wtft to $WINNER" >&2
+                    else
+                      echo "⚠️  install-wtft: installed into $DEST_DIR, but PATH resolves wtft to $WINNER" >&2
+                    fi
+                    echo "   Run: rm '"'"'$WINNER'"'"'" >&2 ;;
+      ok)           if [ "$MODE" = check ]; then echo "✅ install-wtft: $DEST_DIR is in sync with $SRC_DIR"
+                    else echo "✅ install-wtft: installed into $DEST_DIR"; fi
+                    # Not an error: a directory that is not on PATH is a
+                    # host-wiring fact. But saying nothing let a green run hide
+                    # a command nobody can type.
+                    [ "${ON_PATH:-false}" = true ] || echo "   Note: no wtft on PATH resolves to $DEST_DIR/wtft — add $DEST_DIR to PATH." ;;
+    esac
+  fi
+  exit "$EXIT"
+}
 
 # ---
 # Build first in install mode. --check never builds: it writes nothing, and a
-# doctor that modifies the tree it is diagnosing is not a doctor.
+# doctor that modifies the tree it is diagnosing is not a doctor. Build output
+# goes straight to stderr rather than into a variable, so `--json` cannot
+# swallow the one thing an exit-3 reader needs.
 # ---
 if [ "$MODE" = install ]; then
-  if ! BUILD_OUT="$(cd "$REPO" && bun run build 2>&1)"; then
+  if ! (cd "$REPO" && bun run build >&2); then
     STATUS=build-failed
     EXIT=3
   fi
@@ -110,18 +192,30 @@ fi
 # ---
 # Install, then evaluate. Evaluating AFTER the copy means the reported state is
 # what is on disk now, not what the script intended to put there.
+#
+# mkdir lives HERE, in install mode only. It used to run unconditionally during
+# argument handling, which made `--check` create directories — a doctor mode
+# with a write side effect, and the claim "writes nothing" was false in the one
+# place it was stated three times.
 # ---
 if [ "$MODE" = install ] && [ "$STATUS" != build-failed ]; then
-  mkdir -p "$DEST_DIR" || { echo "install-wtft: cannot create $DEST_DIR" >&2; exit 1; }
+  if ! mkdir -p "$DEST_DIR" 2>/dev/null; then
+    STATUS=no-dir; EXIT=1; finish
+  fi
   for entry in "${ARTIFACTS[@]}"; do
     src="$SRC_DIR/${entry%%:*}"
     dst="$DEST_DIR/${entry##*:}"
     [ -f "$src" ] || continue
-    cp -f "$src" "$dst" && chmod 0755 "$dst"
+    # A silent cp failure used to surface only as `drift`, whose remedy is to
+    # re-run the same failing cp.
+    if ! cp -f "$src" "$dst" 2>/dev/null || ! chmod 0755 "$dst" 2>/dev/null; then
+      echo "install-wtft: cannot write $dst" >&2
+    fi
   done
 fi
 
 STATE_JSON=""
+STATE_LINES=""
 for entry in "${ARTIFACTS[@]}"; do
   name="${entry##*:}"
   src="$SRC_DIR/${entry%%:*}"
@@ -135,39 +229,30 @@ for entry in "${ARTIFACTS[@]}"; do
   [ "$state" = ok ] || { [ "$STATUS" = build-failed ] || STATUS=drift; }
   [ -z "$STATE_JSON" ] || STATE_JSON="$STATE_JSON,"
   STATE_JSON="$STATE_JSON{\"name\":\"$(json_str "$name")\",\"path\":\"$(json_str "$dst")\",\"state\":\"$state\"}"
+  # Built alongside the JSON rather than parsed back out of it. The previous
+  # version piped STATE_JSON through `tr ',' '\n'`, which splits each record
+  # across three lines so name and state never share one — the sed matched
+  # nothing and the human drift report named no artifact at all.
+  STATE_LINES="$STATE_LINES   $name: $state
+"
 done
 [ "$STATUS" = drift ] && EXIT=1
 
 # ---
 # Shadow: whichever `wtft` PATH actually resolves. `onPath` is reported but
 # never fatal — a dir that is not on PATH is a host-wiring fact, not drift.
+# Drift outranks shadow: the wrong bytes are the wrong bytes.
 # ---
 SHADOW_JSON=null
 ON_PATH=false
 WINNER="$(command -v wtft 2>/dev/null || true)"
 if [ -n "$WINNER" ]; then
-  if [ "$(abspath "$WINNER")" = "$(abspath "$DEST_DIR/wtft")" ]; then
+  if [ "$(resolve "$WINNER")" = "$(resolve "$DEST_DIR/wtft")" ]; then
     ON_PATH=true
   else
-    SHADOW_JSON="{\"found\":\"$(json_str "$WINNER")\",\"remedy\":\"rm $(json_str "$WINNER")\"}"
+    SHADOW_JSON="{\"found\":\"$(json_str "$WINNER")\",\"remedy\":\"rm '$(json_str "$WINNER")'\"}"
     if [ "$STATUS" = ok ]; then STATUS=shadowed; EXIT=2; fi
   fi
 fi
 
-if [ "$JSON" = 1 ]; then
-  printf '{"schema":"install-wtft@1","mode":"%s","dir":"%s","status":"%s","onPath":%s,"artifacts":[%s],"shadow":%s}\n' \
-    "$MODE" "$(json_str "$DEST_DIR")" "$STATUS" "$ON_PATH" "$STATE_JSON" "$SHADOW_JSON"
-else
-  case "$STATUS" in
-    build-failed) echo "❌ install-wtft: build failed" >&2; echo "$BUILD_OUT" >&2 ;;
-    drift)        echo "❌ install-wtft: $DEST_DIR does not match $SRC_DIR" >&2
-                  echo "$STATE_JSON" | tr ',' '\n' | sed -n 's/.*"name":"\([^"]*\)".*"state":"\([^"]*\)".*/   \1: \2/p' >&2
-                  echo "   Run: $(self_path)" >&2 ;;
-    shadowed)     echo "⚠️  install-wtft: installed into $DEST_DIR, but PATH resolves wtft to $WINNER" >&2
-                  echo "   Run: rm $WINNER" >&2 ;;
-    ok)           [ "$MODE" = check ] && echo "✅ install-wtft: $DEST_DIR is in sync with $SRC_DIR" \
-                                      || echo "✅ install-wtft: installed into $DEST_DIR" ;;
-  esac
-fi
-
-exit "$EXIT"
+finish

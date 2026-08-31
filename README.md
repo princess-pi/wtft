@@ -10,8 +10,8 @@
 
 ## Install
 
-From a clone. Needs [bun](https://bun.sh) on PATH to build; the two files it
-installs then run on stock node with nothing beside them.
+From a clone. Needs [bun](https://bun.sh) on PATH to build; what it installs then
+runs on stock node, with no `node_modules` anywhere.
 
 ```sh
 git clone https://github.com/princess-pi/wtft && cd wtft
@@ -20,11 +20,16 @@ bin/install-wtft            # builds, then copies into ~/bin
 bin/install-wtft --check    # later: has a rebuild left ~/bin stale?
 ```
 
-`install-wtft` copies `wtft`, `wtft-daemon` and `wtft-daemon.mjs` into `~/bin`
-(override with `--dir`), and tells you if some other `wtft` wins on your PATH —
-it prints the `rm`, it never deletes anything itself. `--json` gives the whole
-report as one document. Re-run it after every rebuild; `--check` is how you find
-out you needed to.
+`install-wtft` copies three files into `~/bin` (override with `--dir`): `wtft`,
+`wtft-daemon`, and `wtft-daemon.mjs` — the last of which is not a spare. `wtft`
+looks for its daemon under exactly that name in its own directory, so `--watch`
+needs it there. It also tells you if some other `wtft` wins on your PATH: it
+prints the `rm`, it never deletes anything itself. `--json` gives the whole
+report as one document, on every exit path. `--help` lists the rest.
+
+Re-run it after every rebuild; `--check` is how you find out you needed to. It
+exits **0** in sync, **1** drift, **2** shadowed on PATH, **3** build failed,
+**64** bad usage — so `--check` is scriptable.
 
 **Not on npm yet.** `npm install -g @princess-pi/wtft` will not work — nothing is
 published. Tracked in [#29](https://github.com/princess-pi/wtft/issues/29).

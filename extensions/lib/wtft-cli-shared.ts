@@ -529,12 +529,7 @@ export async function renderWtftWhy(src: ManifestSource, invokedAs: string): Pro
  */
 export function renderWtftVersion(src: ManifestSource, moduleUrl: string): string {
 	const manifest = loadManifest(src);
-	// Bundled artifacts answer from themselves (#46): build.ts substitutes this
-	// expression for the literal it read out of package.json, so an artifact
-	// installed anywhere — ~/bin included — reports its real version instead of
-	// walking up to whatever package.json happens to sit above it. Unbundled
-	// source leaves the define unset and falls through to the read below, which
-	// is correct there: the Pi extension runs inside this repo.
+	// Substituted by build.ts in a bundle; unset in source. See the docstring.
 	const injected = process.env.WTFT_BUILD_VERSION;
 	if (injected) return formatVersion(manifest.name, injected, moduleUrl);
 

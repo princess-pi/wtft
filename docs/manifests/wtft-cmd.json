@@ -224,7 +224,7 @@
     },
     {
       "flags": "--by-model",
-      "desc": "Alias of --tokens: per-model token+cost breakdown table. Models missing from the pricing registry are marked '?' (priced at default rates). Extend the registry without a rebuild via ~/.config/princess-pi-packages/wtft-pricing.json."
+      "desc": "Alias of --tokens: per-model token+cost breakdown table. Models missing from the pricing registry are marked '?' (priced at default rates). Extend the registry without a rebuild via ~/.config/princess-pi-tools/wtft-pricing.json."
     },
     {
       "flags": "--pad <N>",

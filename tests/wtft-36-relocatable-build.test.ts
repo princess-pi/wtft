@@ -135,15 +135,50 @@ console.log("\n3. Every self-describing command runs from the copy, on stock nod
 
 // ---
 // 4. Bundling third-party code carries its licence with it. @princess-pi/libs is
-//    MIT-0 and waives attribution; wcwidth is MIT and does not — its notice must
+//    MIT-0 and waives attribution; the rest are MIT and do not — the notice must
 //    appear "in all copies or substantial portions", and a bundle is a copy.
+//
+//    THE CHECK IS DERIVED FROM THE BUNDLE, because the previous one could not
+//    fail for its stated reason. It looked for two fixed strings from a
+//    hand-written banner that build.ts emitted unconditionally: strip wcwidth
+//    from the bundle entirely and it still passed. A reconcile audit found that,
+//    and two real gaps behind it — `clone` and `defaults` were bundled and named
+//    nowhere, and the banner reproduced the STANDARD MIT disclaimer while
+//    wcwidth's own LICENSE uses a BSD-2-style one, so it was not reproducing
+//    wcwidth's notice at all.
+//
+//    Now the notice is generated from the `// node_modules/<pkg>/` markers bun
+//    writes, with each LICENSE copied verbatim — so this reads the same markers
+//    and demands a matching entry. Bundle a new dependency and it fails.
 // ---
-console.log("\n4. The bundle carries the notice for what it bundles");
+console.log("\n4. The bundle carries the verbatim licence of every package it bundles");
 for (const name of ARTIFACTS) {
 	const code = fs.readFileSync(path.join(REPO, "bin", name), "utf8");
-	check(code.includes("Copyright (C) 2012 by Jun Woong") && code.includes("Permission is hereby granted"),
-		`V4: bin/${name} carries wcwidth's MIT notice`);
-	check(code.startsWith("#!"), `V4: …and the shebang is still line 1 of bin/${name}`);
+	const bundled = new Set<string>();
+	for (const m of code.matchAll(/^\/\/ node_modules\/((?:@[^/\n]+\/)?[^/\n]+)\//gm)) {
+		if (!m[1].startsWith("@princess-pi/")) bundled.add(m[1]);
+	}
+	check(bundled.size > 0, `V4a: bin/${name} names the packages it vendored`, [...bundled].join(","));
+	for (const pkg of [...bundled].sort()) {
+		const licPath = ["LICENSE", "LICENSE.md", "LICENCE", "license"]
+			.map(f => path.join(REPO, "node_modules", pkg, f))
+			.find(f => fs.existsSync(f));
+		if (!licPath) { check(false, `V4b: ${pkg} has a LICENSE file to reproduce`); continue; }
+		// A distinctive middle line, not the boilerplate opener: "Permission is
+		// hereby granted" appears in every MIT text and would match the wrong
+		// project's notice.
+		const distinctive = fs.readFileSync(licPath, "utf8")
+			.split("\n").map(l => l.trim())
+			.filter(l => /^Copyright/i.test(l))[0] ?? "";
+		check(distinctive !== "" && code.includes(distinctive),
+			`V4b: bin/${name} carries ${pkg}'s own notice ("${distinctive.slice(0, 46)}…")`);
+	}
+	// Flagless, and line 1. `#!/usr/bin/env -S node --experimental-strip-types`
+	// is right for the .ts entrypoint and fatal on the plain-JS bundle: node 18
+	// and 20 answer `bad option` and exit. bun copies the entrypoint's shebang
+	// through, so build.ts has to replace it.
+	check(code.split("\n")[0] === "#!/usr/bin/env node",
+		`V4c: bin/${name} line 1 is a flagless node shebang`, JSON.stringify(code.split("\n")[0]));
 }
 
 // ---
@@ -151,9 +186,8 @@ for (const name of ARTIFACTS) {
 //    to sit above it (#46).
 //
 //    This check used to assert the opposite — that a bundled artifact dropped
-//    into a package layout read `../package.json` (#347). That was true, and it
-//    was the last thing the bundle reached for outside itself, so #36's own
-//    thesis had a hole in it. #46's install layout is where the hole bites:
+//    into a package layout read `../package.json` (#347). #46's install layout
+//    is where that bites:
 //    `~/bin/wtft` looks up at `$HOME/package.json`, which is either absent
 //    (--version prints "unknown", on the one command you run when you already
 //    suspect you are running the wrong build) or PRESENT and unrelated
@@ -186,7 +220,11 @@ console.log("\n5. --version answers from the artifact, ignoring a neighbouring p
 			`exit ${code}: ${out.trim().slice(0, 200)}`);
 
 		// And with NO package.json anywhere above it, which is the #46 install
-		// layout exactly. Before the injection this printed "unknown".
+		// layout exactly. Before the injection this printed "unknown"; the
+		// `unknown` clause below is belt-and-braces rather than load-bearing,
+		// since build.ts's define compiles the fallback out of the bundle
+		// altogether — remove the define and the version check above is what
+		// fails.
 		const bare = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-36-bare-")));
 		for (const name of ARTIFACTS) fs.copyFileSync(path.join(REPO, "bin", name), path.join(bare, name));
 		let bareOut = "", bareCode = 0;

@@ -20,10 +20,12 @@ bin/install-wtft            # builds, then copies into ~/bin
 bin/install-wtft --check    # later: has a rebuild left ~/bin stale?
 ```
 
-`install-wtft` copies three files into `~/bin` (override with `--dir`): `wtft`,
-`wtft-daemon`, and `wtft-daemon.mjs` — the last of which is not a spare. `wtft`
-looks for its daemon under exactly that name in its own directory, so `--watch`
-needs it there. It also tells you if some other `wtft` wins on your PATH: it
+`install-wtft` puts four entries in `~/bin` (override with `--dir`): the two
+bundles `wtft.mjs` and `wtft-daemon.mjs`, plus `wtft` and `wtft-daemon` as
+symlinks to them. The `.mjs` names are not spares — `wtft` finds its daemon by
+that exact name in its own directory, and Node needs the extension to read the
+file as ESM at all on Node 18. It also tells you if some other `wtft` wins on
+your PATH: it
 prints the `rm`, it never deletes anything itself. `--json` gives the whole
 report as one document, on every exit path. `--help` lists the rest.
 

@@ -99,8 +99,8 @@ console.log("\n1. --check --json on an empty dir reports drift, naming both arti
 	check(doc?.mode === "check", "V1e: mode is check", JSON.stringify(doc?.mode));
 
 	const states = Object.fromEntries((doc?.artifacts ?? []).map((a: any) => [a.name, a.state]));
-	check(states["wtft"] === "missing" && states["wtft-daemon.mjs"] === "missing" && states["wtft-daemon"] === "missing",
-		"V1f: all THREE artifacts reported missing, keyed by their INSTALLED names",
+	check(["wtft.mjs", "wtft-daemon.mjs", "wtft", "wtft-daemon"].every(n => states[n] === "missing"),
+		"V1f: all FOUR artifacts reported missing, keyed by their INSTALLED names",
 		JSON.stringify(states));
 
 	// --check writes nothing. A doctor mode that installs is not a doctor mode.
@@ -122,34 +122,63 @@ console.log("\n2. Installing into an empty dir produces both artifacts, executab
 	try { doc = JSON.parse(out); } catch { /* left null */ }
 	check(doc?.status === "ok" && doc?.mode === "install", "V2b: status ok in install mode", JSON.stringify(doc?.status));
 
-	// wtft-daemon lands twice: under the name daemonDir joins, and under the
-	// human-facing name package.json's bin map and the README both use.
-	for (const [src, dst] of [["wtft.mjs", "wtft"], ["wtft-daemon.mjs", "wtft-daemon.mjs"], ["wtft-daemon.mjs", "wtft-daemon"]]) {
-		const from = path.join(REPO, "bin", src), to = path.join(dir, dst);
+	// Two payload copies…
+	for (const name of ["wtft.mjs", "wtft-daemon.mjs"]) {
+		const from = path.join(REPO, "bin", name), to = path.join(dir, name);
 		const exists = fs.existsSync(to);
-		check(exists, `V2c: ${dst} exists`, to);
+		check(exists, `V2c: ${name} exists`, to);
 		if (!exists) continue;
-		check(fs.readFileSync(from).equals(fs.readFileSync(to)), `V2d: ${dst} is byte-identical to bin/${src}`);
-		check((fs.statSync(to).mode & 0o777) === 0o755, `V2e: ${dst} is 0755`,
-			`0${(fs.statSync(to).mode & 0o777).toString(8)}`);
+		check(fs.readFileSync(from).equals(fs.readFileSync(to)), `V2d: ${name} is byte-identical to bin/${name}`);
+		check((fs.lstatSync(to).mode & 0o777) === 0o755, `V2e: ${name} is 0755`,
+			`0${(fs.lstatSync(to).mode & 0o777).toString(8)}`);
+	}
+	// …and two command names, symlinked BESIDE them with a RELATIVE target, so
+	// the directory can be moved. The extension is what tells node the file is
+	// ESM; see V3 for the failure this replaced.
+	for (const [link, target] of [["wtft", "wtft.mjs"], ["wtft-daemon", "wtft-daemon.mjs"]]) {
+		const at = path.join(dir, link);
+		const isLink = fs.existsSync(at) && fs.lstatSync(at).isSymbolicLink();
+		check(isLink, `V2f: ${link} is a symlink, not a copy`, at);
+		if (isLink) check(fs.readlinkSync(at) === target,
+			`V2g: ${link} -> ${target}, relative`, fs.readlinkSync(at));
 	}
 
 	const re = run(["--check", "--json", "--dir", dir]);
-	check(re.code === 0, "V2f: --check now exits 0", `got ${re.code}`);
+	check(re.code === 0, "V2h: --check now exits 0", `got ${re.code}`);
 }
 
 // ---
-// 3. The installed command actually RUNS, on stock node, from a directory that
-//    is not the repo — and its daemon is beside it under the exact filename
-//    bin/wtft.ts joins onto `daemonDir`. V2 proves the bytes arrived; only this
-//    proves they are usable where they landed. #36 is what makes it possible:
-//    before it, a copy of the artifact died with ERR_MODULE_NOT_FOUND.
+// 3. The installed command RUNS WHEN YOU TYPE ITS NAME — the consumer path, and
+//    the one no test in this repo had ever taken. Every other check runs
+//    `node <file>`, which hands node an explicit entry point and lets it detect
+//    the module type; typing the name goes through the shebang instead.
+//
+//    That gap hid a total failure. The command used to be an extensionless COPY
+//    of the bundle, and node only guesses module type for an extensionless file
+//    from 20.10 (flagged) and 22 (default). /usr/bin/node here is 18.19.1 —
+//    exactly the floor package.json's `engines: >=18` promises — where it dies
+//    on the first `import`. Measured before the fix: exit 1 on 18, 20 AND 22.
+//    Hence the symlink-to-.mjs layout V2 asserts.
+//
+//    A second defect hid behind it: bun copies the ENTRYPOINT's shebang through
+//    verbatim, so the plain-JS bundle carried
+//    `#!/usr/bin/env -S node --experimental-strip-types`, which node 18 and 20
+//    reject outright with `bad option`. build.ts rewrites it now.
 // ---
-console.log("\n3. The installed copy runs on stock node, with its daemon beside it");
+console.log("\n3. The installed command runs when you type its name, on every node we can find");
 {
-	let NODE = "";
-	try { NODE = execSync("command -v node", { encoding: "utf8" }).trim(); } catch { /* none */ }
-	if (!NODE) {
+	// Every node on this host, not just the first: the failure was version-
+	// dependent, so testing one version is how it stayed hidden.
+	const nodes: string[] = [];
+	try {
+		const first = execSync("command -v node", { encoding: "utf8" }).trim();
+		if (first) nodes.push(first);
+	} catch { /* none */ }
+	for (const extra of ["/usr/bin/node"]) {
+		if (fs.existsSync(extra) && !nodes.includes(extra)) nodes.push(extra);
+	}
+
+	if (nodes.length === 0) {
 		skip("##SKIP## no `node` on PATH — the stock-node arm did not run");
 	} else {
 		const dir = mkSandbox(path.join(os.tmpdir(), "46-run-"));
@@ -157,17 +186,28 @@ console.log("\n3. The installed copy runs on stock node, with its daemon beside 
 		check(inst.code === 0, "V3a: install exits 0", `got ${inst.code}`);
 
 		const version = JSON.parse(fs.readFileSync(path.join(REPO, "package.json"), "utf8")).version;
-		let out = "", code = 0;
-		try { out = execFileSync(NODE, [path.join(dir, "wtft"), "--version"], { encoding: "utf8", stdio: "pipe" }); }
-		catch (e: any) { out = `${e.stdout ?? ""}${e.stderr ?? ""}`; code = e.status ?? 1; }
-		check(code === 0 && out.includes(version),
-			`V3b: node <dir>/wtft --version exits 0 and prints ${version}`,
-			`exit ${code}: ${out.trim().slice(0, 200)}`);
+		for (const nodeBin of nodes) {
+			let nv = "?";
+			try { nv = execFileSync(nodeBin, ["--version"], { encoding: "utf8" }).trim(); } catch { /* keep ? */ }
+			let out = "", code = 0;
+			try {
+				// By NAME, through the shebang — no interpreter on the command
+				// line. `PATH` is pinned so `env node` finds this exact one.
+				out = execFileSync(path.join(dir, "wtft"), ["--version"], {
+					encoding: "utf8", stdio: "pipe",
+					env: { ...process.env, PATH: [path.dirname(nodeBin), "/usr/bin", "/bin"].join(":") },
+				});
+			} catch (e: any) { out = `${e.stdout ?? ""}${e.stderr ?? ""}`; code = e.status ?? 1; }
+			check(code === 0 && out.includes(version),
+				`V3b: <dir>/wtft --version, via its own shebang, on node ${nv}`,
+				`exit ${code}: ${out.trim().slice(0, 200)}`);
+		}
 
 		// The name, not just the presence. bin/wtft.ts joins the literal string
-		// "wtft-daemon.mjs" onto dirname(import.meta.url) at four call sites, so
-		// installing the daemon as `wtft-daemon` would leave --watch unable to
-		// find it while --version and --help kept working.
+		// "wtft-daemon.mjs" onto dirname(import.meta.url) — four sites there and
+		// a fifth in wtft-cli-shared.ts's spawnWtftDaemon. Node resolves the
+		// `wtft` symlink to its .mjs realpath, which is in this same directory,
+		// so daemonDir lands here either way.
 		check(fs.existsSync(path.join(dir, "wtft-daemon.mjs")),
 			"V3c: the daemon sits beside it as wtft-daemon.mjs, the name daemonDir joins",
 			fs.readdirSync(dir).join(","));
@@ -234,27 +274,43 @@ console.log("\n5. A rebuilt artifact makes the installed copy stale, and --check
 	const dir = mkSandbox(path.join(os.tmpdir(), "46-stale-"));
 	check(run(["--dir", dir]).code === 0, "V5a: install exits 0");
 
-	fs.appendFileSync(path.join(dir, "wtft"), "\n// drift\n");
+	// The PAYLOAD, not the command name — `<dir>/wtft` is a symlink, so writing
+	// through it lands on wtft.mjs, which is exactly where the drift belongs.
+	fs.appendFileSync(path.join(dir, "wtft.mjs"), "\n// drift\n");
 	const { code, out } = run(["--check", "--json", "--dir", dir]);
 	check(code === 1, "V5b: --check exits 1", `got ${code}`);
 
 	let doc: any = null;
 	try { doc = JSON.parse(out); } catch { /* left null */ }
 	const states = Object.fromEntries((doc?.artifacts ?? []).map((a: any) => [a.name, a.state]));
-	check(states["wtft"] === "stale", "V5c: the changed artifact is 'stale', not 'missing'", JSON.stringify(states));
-	check(states["wtft-daemon.mjs"] === "ok", "V5d: the untouched artifact is still 'ok'", JSON.stringify(states));
+	check(states["wtft.mjs"] === "stale", "V5c: the changed payload is 'stale', not 'missing'", JSON.stringify(states));
+	check(states["wtft-daemon.mjs"] === "ok", "V5d: the untouched payload is still 'ok'", JSON.stringify(states));
+
+	// A link is its own failure mode: present, executable through its target,
+	// and pointing somewhere else entirely.
+	const linkDirty = mkSandbox(path.join(os.tmpdir(), "46-badlink-"));
+	run(["--dir", linkDirty]);
+	fs.unlinkSync(path.join(linkDirty, "wtft"));
+	fs.symlinkSync("wtft-daemon.mjs", path.join(linkDirty, "wtft"));
+	const bad = run(["--check", "--json", "--dir", linkDirty]);
+	let badDoc: any = null;
+	try { badDoc = JSON.parse(bad.out); } catch { /* left null */ }
+	const badStates = Object.fromEntries((badDoc?.artifacts ?? []).map((a: any) => [a.name, a.state]));
+	check(bad.code === 1 && badStates["wtft"] === "wrong-target",
+		"V5g: a command symlink pointing at the wrong payload is 'wrong-target'",
+		`exit ${bad.code}: ${JSON.stringify(badStates)}`);
 
 	// Losing the executable bit is its own state: the file is right and the
 	// command still does not run.
 	const dir2 = mkSandbox(path.join(os.tmpdir(), "46-noexec-"));
 	check(run(["--dir", dir2]).code === 0, "V5e: second install exits 0");
-	fs.chmodSync(path.join(dir2, "wtft"), 0o644);
+	fs.chmodSync(path.join(dir2, "wtft.mjs"), 0o644);
 	const r2 = run(["--check", "--json", "--dir", dir2]);
 	let d2: any = null;
 	try { d2 = JSON.parse(r2.out); } catch { /* left null */ }
 	const s2 = Object.fromEntries((d2?.artifacts ?? []).map((a: any) => [a.name, a.state]));
-	check(r2.code === 1 && s2["wtft"] === "not-executable",
-		"V5f: a de-executable'd copy is 'not-executable', exit 1", `exit ${r2.code}: ${JSON.stringify(s2)}`);
+	check(r2.code === 1 && s2["wtft.mjs"] === "not-executable",
+		"V5f: a de-executable'd payload is 'not-executable', exit 1", `exit ${r2.code}: ${JSON.stringify(s2)}`);
 }
 
 // ---

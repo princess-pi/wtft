@@ -134,13 +134,27 @@ if [ -z "$DEST_DIR" ]; then
 fi
 DEST_DIR="$(abs_dir "$DEST_DIR")"
 
-# src-name:installed-name. The daemon lands TWICE, on purpose:
-#   wtft-daemon.mjs — the name `daemonDir` joins, load-bearing (see above)
-#   wtft-daemon     — the human-facing command, matching package.json's bin map
-#                     and `wtft-daemon start` in the README
-# A copy rather than a symlink so every artifact is checked by one rule; 111 KB
-# twice is not worth a second code path in --check.
-ARTIFACTS=("wtft.mjs:wtft" "wtft-daemon.mjs:wtft-daemon.mjs" "wtft-daemon.mjs:wtft-daemon")
+# Two copies and two symlinks. The .mjs EXTENSION IS LOAD-BEARING TWICE OVER:
+#
+#   1. bin/wtft.ts joins the literal "wtft-daemon.mjs" onto daemonDir, so the
+#      daemon must sit beside the command under exactly that name.
+#   2. NODE NEEDS IT TO SEE ESM. An extensionless copy of the bundle, run by its
+#      own shebang, dies on `import * as fs from "node:fs"` — Node only guesses
+#      module type for an extensionless file from 20.10 (flagged) and 22
+#      (default), and /usr/bin/node on this host is 18.19.1, exactly the floor
+#      package.json's `engines: >=18` promises. Measured: extensionless → exit 1
+#      on 18, 20 and 22 via shebang; symlink → works on all three.
+#
+# So the payload is a COPY (it survives the clone moving) and the command name
+# is a SYMLINK BESIDE IT (node resolves to the .mjs realpath, which is in the
+# same directory, so daemonDir still finds the daemon). Nothing points back at
+# the clone.
+#
+# The whole class was invisible because every test ran `node <file>`, which
+# takes an explicit entry point and detects the module type. No test had ever
+# invoked the artifact the way a consumer does: by typing its name.
+COPIES=("wtft.mjs" "wtft-daemon.mjs")
+LINKS=("wtft:wtft.mjs" "wtft-daemon:wtft-daemon.mjs")
 
 STATUS=ok
 EXIT=0
@@ -202,9 +216,8 @@ if [ "$MODE" = install ] && [ "$STATUS" != build-failed ]; then
   if ! mkdir -p "$DEST_DIR" 2>/dev/null; then
     STATUS=no-dir; EXIT=1; finish
   fi
-  for entry in "${ARTIFACTS[@]}"; do
-    src="$SRC_DIR/${entry%%:*}"
-    dst="$DEST_DIR/${entry##*:}"
+  for name in "${COPIES[@]}"; do
+    src="$SRC_DIR/$name"; dst="$DEST_DIR/$name"
     [ -f "$src" ] || continue
     # A silent cp failure used to surface only as `drift`, whose remedy is to
     # re-run the same failing cp.
@@ -212,15 +225,30 @@ if [ "$MODE" = install ] && [ "$STATUS" != build-failed ]; then
       echo "install-wtft: cannot write $dst" >&2
     fi
   done
+  for entry in "${LINKS[@]}"; do
+    link="$DEST_DIR/${entry%%:*}"; target="${entry##*:}"
+    # Relative target, so the whole directory can be moved or copied.
+    ln -sfn "$target" "$link" 2>/dev/null || echo "install-wtft: cannot link $link" >&2
+  done
 fi
 
 STATE_JSON=""
 STATE_LINES=""
-for entry in "${ARTIFACTS[@]}"; do
-  name="${entry##*:}"
-  src="$SRC_DIR/${entry%%:*}"
+EVAL_LIST=()
+for name in "${COPIES[@]}"; do EVAL_LIST+=("copy:$name:$name"); done
+for entry in "${LINKS[@]}"; do EVAL_LIST+=("link:${entry%%:*}:${entry##*:}"); done
+
+for spec in "${EVAL_LIST[@]}"; do
+  kind="${spec%%:*}"; rest="${spec#*:}"; name="${rest%%:*}"; target="${rest##*:}"
+  src="$SRC_DIR/$target"
   dst="$DEST_DIR/$name"
-  if   [ ! -f "$src" ]; then state=no-source
+  if [ "$kind" = link ]; then
+    if   [ ! -f "$src" ]; then state=no-source
+    elif [ ! -L "$dst" ]; then state=$( [ -e "$dst" ] && echo not-a-link || echo missing )
+    elif [ "$(readlink "$dst")" != "$target" ]; then state=wrong-target
+    else state=ok
+    fi
+  elif [ ! -f "$src" ]; then state=no-source
   elif [ ! -f "$dst" ]; then state=missing
   elif ! cmp -s "$src" "$dst"; then state=stale
   elif [ ! -x "$dst" ]; then state=not-executable

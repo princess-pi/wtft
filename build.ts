@@ -32,41 +32,50 @@ import * as path from "node:path";
 const BIN = path.join(import.meta.dir, "bin");
 
 // ---
-// Bundling third-party code carries its notice with it. `@princess-pi/libs` is
-// MIT-0, which waives attribution; `wcwidth` is MIT, which does not — its
-// notice must appear "in all copies or substantial portions", and a bundle is
-// a copy. Emitted unconditionally rather than only into the artifact that
-// happens to pull wcwidth in today: a notice present for absent code is
-// harmless, a notice absent for present code is the violation, and an
-// unconditional banner has no dependency graph to fall out of sync with.
+// THE NOTICE IS DERIVED FROM WHAT IS ACTUALLY BUNDLED, not written by hand.
+//
+// The hand-written version was wrong in three ways at once, and a reconcile
+// audit found all three:
+//
+//   - It named only wcwidth. `clone` and `defaults` (both MIT, both pulled in
+//     by wcwidth) are in the bundle too, and MIT's "shall be included in all
+//     copies" clause does not care that they arrived transitively.
+//   - Its body was the STANDARD MIT disclaimer. wcwidth's own LICENSE uses a
+//     BSD-2-style one ("ANY EXPRESS OR IMPLIED WARRANTIES … EXEMPLARY, OR
+//     CONSEQUENTIAL DAMAGES"). Reproducing the wrong disclaimer is not
+//     reproducing the notice.
+//   - It was emitted unconditionally, "harmless for absent code" — which also
+//     meant the licence test could not fail for its stated reason. Strip
+//     wcwidth entirely and the assertion still passed.
+//
+// Deriving it fixes all three and cannot drift: bun writes a `// node_modules/
+// <pkg>/…` marker above each vendored module, so the bundle names its own
+// contents, and each LICENSE is copied verbatim rather than paraphrased.
+// @princess-pi/libs is MIT-0, which waives attribution, so it is skipped by
+// name — the only hand-maintained fact left, and one this repo owns.
 // ---
-const NOTICE = `/*
- * This file is a BUNDLE. It contains, in addition to @princess-pi/wtft
- * (MIT-0), the following third-party code:
- *
- * wcwidth <https://github.com/timoxley/wcwidth> — MIT
- * A JavaScript porting of wcwidth() by Markus Kuhn.
- * Copyright (C) 2012 by Jun Woong.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
-`;
+function noticeFor(code: string): string {
+  const pkgs = new Set<string>();
+  for (const m of code.matchAll(/^\/\/ node_modules\/((?:@[^/\n]+\/)?[^/\n]+)\//gm)) {
+    if (!m[1].startsWith("@princess-pi/")) pkgs.add(m[1]);
+  }
+  if (pkgs.size === 0) return "";
+
+  const parts: string[] = [];
+  for (const name of [...pkgs].sort()) {
+    const dir = path.join(import.meta.dir, "node_modules", name);
+    const file = ["LICENSE", "LICENSE.md", "LICENCE", "license"]
+      .map(f => path.join(dir, f))
+      .find(f => fs.existsSync(f));
+    if (!file) throw new Error(`bundled package ${name} has no LICENSE file — cannot emit a notice for it`);
+    const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+    parts.push(` * ${name}@${pkg.version} — ${pkg.license ?? "see below"}\n *\n` +
+      fs.readFileSync(file, "utf8").trimEnd().split("\n").map(l => ` * ${l}`.trimEnd()).join("\n"));
+  }
+  return `/*\n * This file is a BUNDLE. Besides @princess-pi/wtft (MIT-0) it contains the\n` +
+    ` * following third-party code, with each project's licence reproduced verbatim:\n *\n` +
+    parts.join("\n *\n * ---\n *\n") + "\n */\n";
+}
 
 const entries = [
   { src: "bin/wtft.ts", out: "wtft.mjs" },
@@ -74,7 +83,13 @@ const entries = [
 ] as const;
 
 // ---
-// THE VERSION IS THE LAST THING THE BUNDLE REACHED FOR OUTSIDE ITSELF (#46).
+// THE VERSION NUMBER MOVED INTO THE BUNDLE (#46).
+//
+// Not "the last thing the bundle reached for outside itself" — an earlier draft
+// of this comment said that and it was false. `readBuildStamp` still reads
+// `build-stamp.json` beside the module, and the harness registry still
+// `import()`s whatever `wtft-harnesses.json` names. This fixes the version
+// NUMBER only; the rest is a separate question.
 //
 // `renderWtftVersion` reads `<artifactDir>/../package.json`. That resolves in a
 // package install (node_modules/@princess-pi/wtft/bin/wtft.mjs) and in this
@@ -104,7 +119,10 @@ for (const { src, out } of entries) {
     format: "esm",
     target: "node",
     naming: out,
-    define: { "process.env.WTFT_BUILD_VERSION": JSON.stringify(pkgVersion) },
+    // A global, not `process.env.X`: with an env key, an unbundled source run
+    // reads it LIVE, so `WTFT_BUILD_VERSION=13.3.7-pwned bun bin/wtft.ts
+    // --version` printed 13.3.7-pwned. A define'd global has no such reader.
+    define: { __WTFT_BUILD_VERSION__: JSON.stringify(pkgVersion) },
   });
   if (!result.success) {
     console.error(`❌ ${out}:`, result.logs);
@@ -114,10 +132,18 @@ for (const { src, out } of entries) {
 
   // The shebang has to stay on line 1 for the `bin` entries to be executable,
   // so the notice goes after it rather than at the top of the file.
+  //
+  // AND IT IS REWRITTEN. bun copies the entrypoint's shebang through verbatim,
+  // and bin/wtft.ts opens with `#!/usr/bin/env -S node --experimental-strip-types`
+  // — correct for a .ts file, fatal on the plain-JS bundle: Node 20 answers
+  // `node: bad option: --experimental-strip-types` and exits, so the installed
+  // `~/bin/wtft` was unrunnable AS A COMMAND on two of the three majors
+  // package.json's `engines: >=18` promises. Nothing caught it because every
+  // test ran the artifact as `node <file>`, never by its own shebang.
   const file = path.join(BIN, out);
   const code = fs.readFileSync(file, "utf8");
   const nl = code.startsWith("#!") ? code.indexOf("\n") + 1 : 0;
-  fs.writeFileSync(file, code.slice(0, nl) + NOTICE + code.slice(nl));
+  fs.writeFileSync(file, "#!/usr/bin/env node\n" + noticeFor(code) + code.slice(nl));
   fs.chmodSync(file, 0o755);
 
   console.log(`✅ bin/${out} (${(fs.statSync(file).size / 1024).toFixed(0)} KB)`);

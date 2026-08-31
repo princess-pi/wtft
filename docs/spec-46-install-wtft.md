@@ -40,7 +40,7 @@ install-wtft --version
 
 | Flag | Meaning |
 |---|---|
-| *(none)* | Build, then install **three** files into `--dir` |
+| *(none)* | Build, then install **four** entries into `--dir` — two copies and two symlinks |
 | `--check` | Report drift; **write nothing**. Doctor mode. |
 | `--json` | Emit the machine-readable document. Valid with or without `--check`; **ignored** by `--version` and `--help`, which exit inside the argument loop. |
 | `--dir <dir>` | Install target. Default `~/bin`. The seam the tests drive. A value beginning with `--` is rejected — `--dir --json` used to install into a directory literally named `--json`. Repeats are last-wins. |
@@ -92,8 +92,10 @@ document at all on a tool whose point is a machine-readable surface.
   "status": "ok" | "drift" | "shadowed" | "build-failed" | "no-dir",
   "onPath": true | false,
   "artifacts": [
+    { "name": "wtft.mjs", "path": "…/bin/wtft.mjs",
+      "state": "ok" | "missing" | "stale" | "not-executable" | "no-source" },
     { "name": "wtft", "path": "…/bin/wtft",
-      "state": "ok" | "missing" | "stale" | "not-executable" | "no-source" }
+      "state": "ok" | "missing" | "no-source" | "not-a-link" | "wrong-target" }
   ],
   "shadow": null | { "found": "/home/u/.bun/bin/wtft", "remedy": "rm '/home/u/.bun/bin/wtft'" }
 }
@@ -103,8 +105,10 @@ Flat, one record per artifact, stable keys. `status` is the single field a calle
 to branch; `artifacts[].state` says which file to blame, and the same list is rendered
 per-artifact in human mode.
 
-- **`artifacts` is always exactly three records, in a fixed order**: `wtft`,
-  `wtft-daemon.mjs`, `wtft-daemon`.
+- **`artifacts` is always exactly four records, in a fixed order**: the two copies
+  (`wtft.mjs`, `wtft-daemon.mjs`), then the two command symlinks (`wtft`,
+  `wtft-daemon`). The two kinds have **different state vocabularies**: a copy can be
+  `stale` or `not-executable`, a link can be `not-a-link` or `wrong-target`.
 - **`dir` and every `path` are absolute** — a relative `--dir` is made absolute against
   the cwd lexically, *without creating anything*, because `--check` must be able to name
   a directory it refuses to make.
@@ -122,42 +126,49 @@ per-artifact in human mode.
   rather than code: no path this tool is pointed at has ever contained one, and a lossy
   escaper would be a worse answer than a stated boundary.
 
-## Layout, and why it is not a symlink
+## Layout: two copies and two symlinks
 
-Installed files:
-
-| Source | Installed as | Why that name |
+| Installed as | Kind | Why |
 |---|---|---|
-| `bin/wtft.mjs` | `<dir>/wtft` | the command |
-| `bin/wtft-daemon.mjs` | `<dir>/wtft-daemon.mjs` | **the extension is load-bearing** |
-| `bin/wtft-daemon.mjs` | `<dir>/wtft-daemon` | the human-facing command — package.json's `bin` map and the README's `wtft-daemon start` both use this name, so a clone install that omitted it would differ from a registry install in a way nobody would notice until they typed it |
+| `<dir>/wtft.mjs` | copy of `bin/wtft.mjs` | the payload |
+| `<dir>/wtft-daemon.mjs` | copy of `bin/wtft-daemon.mjs` | the payload, **and** the literal name `daemonDir` joins |
+| `<dir>/wtft` | symlink → `wtft.mjs` | the command |
+| `<dir>/wtft-daemon` | symlink → `wtft-daemon.mjs` | the command, matching package.json's `bin` map and the README's `wtft-daemon start` |
 
-The daemon lands twice, as two copies rather than a file and a symlink: 111 KB twice
-is cheaper than a second code path in `--check`.
+**The `.mjs` extension is load-bearing twice over.**
 
-`bin/wtft.ts` computes `daemonDir = path.dirname(fileURLToPath(import.meta.url))` and
-then joins `"wtft-daemon.mjs"` onto it — at four sites in that file and a fifth in
-`extensions/lib/wtft-cli-shared.ts` (`spawnWtftDaemon`), so grepping only `bin/wtft.ts`
-undercounts the dependency surface. The daemon must sit
-beside the installed command **under exactly that filename**. Installing it as
-`<dir>/wtft-daemon` would leave `wtft --watch` unable to find its daemon while
-everything else kept working, which is the failure mode hardest to notice.
+1. `bin/wtft.ts` computes `daemonDir = dirname(fileURLToPath(import.meta.url))` and joins
+   the literal `"wtft-daemon.mjs"` onto it — four sites in that file and a fifth in
+   `extensions/lib/wtft-cli-shared.ts` (`spawnWtftDaemon`).
+2. **Node needs it to see ESM.** Node only guesses module type for an *extensionless*
+   file from 20.10 (flagged) and 22 (default), and `/usr/bin/node` on this host is
+   **18.19.1** — exactly the floor `package.json`'s `engines: >=18` promises.
 
-**Copy, not symlink.** A symlink into the clone was the only workable option before
-#36, because the artifact still had bare imports and only ran from a directory with
-`node_modules` in an ancestor. #36 made both files self-contained, so a copy now runs
-anywhere — asserted by `tests/wtft-36-relocatable-build.test.ts` V1–V3. What the copy
-buys and costs:
+The first layout installed the command as an extensionless copy. Measured: **exit 1 on
+node 18, 20 and 22** when invoked by name, dying on the bundle's first `import`. A
+symlink resolves to the `.mjs` realpath — which sits in the same directory, so `daemonDir`
+still finds the daemon — and works on all three.
 
-- **Buys**: survives the clone moving or being deleted; `--version` reports the real
-  version instead of a `-dev` stamp against a working tree that has since changed.
-- **Costs**: re-run `install-wtft` after each build. `--check` is what makes that
-  cost visible instead of silent.
+**The payload is a copy; only the command name is a link.** A symlink into the *clone* was
+the only workable option before #36, because the artifact still carried bare imports and
+ran only from a directory with `node_modules` in an ancestor. The copy survives the clone
+moving or being deleted and reports a real version instead of a `-dev` stamp against a
+tree that has since changed; the link targets are **relative**, so the whole install
+directory can be moved. The cost is re-running `install-wtft` after each build, which
+`--check` is what makes visible.
 
-A symlink is the road not taken; it keeps a live edit loop, at the price of a command
-whose behaviour changes when the worktree does.
+### The shebang had to be rewritten too
 
----
+`bun` copies the entrypoint's shebang through verbatim, so the plain-JS bundle carried
+`#!/usr/bin/env -S node --experimental-strip-types` — correct on `bin/wtft.ts`, fatal on
+the output: node 18 and 20 answer `node: bad option: --experimental-strip-types` and exit.
+`build.ts` replaces it with `#!/usr/bin/env node`.
+
+**Both defects were invisible for the same reason:** every test in this repo ran the
+artifact as `node <file>`, which hands node an explicit entry point. No test had ever
+invoked it the way a consumer does — by typing its name. V3 does now, against every `node`
+it can find on the host rather than the first one, because the failure was version-
+dependent and testing one version is how it stayed hidden.
 
 ## The shadow rule: report, never delete
 
@@ -183,11 +194,11 @@ Six sections, all driven through the CLI — no internal function is imported.
 
 | # | Seam | Verified by |
 |---|---|---|
-| **V1** | `--check --json` on an empty dir | exit `1`, `status: "drift"`, all **three** artifacts `missing`, and the directory still empty afterwards |
-| **V2** | install into an empty dir | exit `0`, three files present, mode `0755`, byte-identical to `bin/*.mjs`; `--check` then exits `0` |
-| **V3** | the installed command runs | `node <dir>/wtft --version` exits 0 and prints the version; `<dir>/wtft-daemon.mjs` exists beside it |
+| **V1** | `--check --json` on an empty dir | exit `1`, `status: "drift"`, all **four** artifacts `missing`, and the directory still empty afterwards |
+| **V2** | install into an empty dir | exit `0`, two copies byte-identical to `bin/*.mjs` at mode `0755`, two symlinks with the right **relative** targets; `--check` then exits `0` |
+| **V3** | the installed command runs **when you type its name** | `<dir>/wtft --version` through its own shebang, on **every** `node` on the host, exits 0 and prints the version; `<dir>/wtft-daemon.mjs` sits beside it |
 | **V4** | shadow detection | a decoy `wtft` earlier on `PATH` → exit `2`, `shadow.found` names it, the decoy is **still there**, the install still happened, and our own copy winning is exit `0` / `shadow: null` / `onPath: true` |
-| **V5** | staleness | append a byte to the installed `wtft` → `--check` exits `1`, that artifact `stale`, the untouched one still `ok`; `chmod 0644` → `not-executable` |
+| **V5** | staleness | append a byte to the installed `wtft.mjs` → `--check` exits `1`, that payload `stale`, the untouched one still `ok`; `chmod 0644` → `not-executable`; a command symlink repointed at the other payload → `wrong-target` |
 | **V6** | the nine defects a fresh-context reconcile audit found | see below |
 
 `0755` is what install *writes* and what V2 asserts; the **tool's** check is any execute

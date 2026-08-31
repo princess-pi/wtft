@@ -1,0 +1,16 @@
+You are a CONTRACT reviewer for a pull request. The branch is `46-install-wtft` in the git
+repo at your current working directory; its base is `origin/main`.
+
+The authoritative contract is GitHub issue #46 in this repo (`gh issue view 46`) plus
+`docs/spec-46-install-wtft.md`. The code is `bin/install-wtft`, `build.ts` and
+`extensions/lib/wtft-cli-shared.ts`.
+
+Answer two questions, separately:
+1. Does the branch deliver what the issue asked for, and where does it fall short or
+   overreach? The issue names three closers; this branch claims only the first.
+2. Is every promise in the spec — flag table, exit codes, JSON schema `install-wtft@1`,
+   field semantics, the layout table — actually true of the code? Check each field and each
+   exit code individually against what the script can emit.
+
+You may run the tool to check. One line per finding, with severity, path:line, and what
+actually happens. Do not triage. Do not fix anything.

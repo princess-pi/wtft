@@ -193,9 +193,19 @@ console.log("\n3. The installed command runs when you type its name, on every no
 			try {
 				// By NAME, through the shebang — no interpreter on the command
 				// line. `PATH` is pinned so `env node` finds this exact one.
+				// A private HOME as well as a pinned PATH: bin/wtft.ts reads user
+				// pricing and external harnesses before the display-flag exits,
+				// so an inherited HOME would let this box's config decide the
+				// outcome — and `import()` code it names.
+				const fakeHome = mkSandbox(path.join(os.tmpdir(), "46-home-"));
 				out = execFileSync(path.join(dir, "wtft"), ["--version"], {
 					encoding: "utf8", stdio: "pipe",
-					env: { ...process.env, PATH: [path.dirname(nodeBin), "/usr/bin", "/bin"].join(":") },
+					env: {
+						...process.env,
+						PATH: [path.dirname(nodeBin), "/usr/bin", "/bin"].join(":"),
+						HOME: fakeHome,
+						XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+					},
 				});
 			} catch (e: any) { out = `${e.stdout ?? ""}${e.stderr ?? ""}`; code = e.status ?? 1; }
 			check(code === 0 && out.includes(version),

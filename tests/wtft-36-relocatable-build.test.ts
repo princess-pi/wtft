@@ -108,26 +108,40 @@ for (const name of ARTIFACTS) fs.copyFileSync(path.join(REPO, "bin", name), path
 // ---
 // 3. The behaviour itself, on stock node.
 // ---
-console.log("\n3. Every self-describing command runs from the copy, on stock node");
+console.log("\n3. wtft's three display flags, and the daemon's --help, run from the copy on stock node");
 {
 	if (!NODE) {
 		skip("no `node` on PATH — the stock-node arm did not run");
 	} else {
+		// A PRIVATE HOME. bin/wtft.ts calls loadUserPricing() and
+		// loadExternalHarnesses() BEFORE the display-flag early exits, so with an
+		// inherited HOME these runs read the developer's ~/.config and can
+		// `import()` whatever wtft-harnesses.json names there. A relocatability
+		// check that depends on one box's config is not checking relocatability.
+		const fakeHome = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-36-home-")));
+		const env = { ...process.env, HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config") };
+
 		for (const flag of ["--help", "--why", "--version"]) {
 			let out = "", code = 0;
 			try {
-				out = execFileSync(NODE, [path.join(loose, "wtft.mjs"), flag], { encoding: "utf8", stdio: "pipe" });
+				out = execFileSync(NODE, [path.join(loose, "wtft.mjs"), flag], { encoding: "utf8", stdio: "pipe", env });
 			} catch (err: any) {
 				out = `${err.stdout || ""}${err.stderr || ""}`;
 				code = err.status ?? 1;
 			}
-			check(code === 0, `V3: \`wtft ${flag}\` exits 0 from a bare directory`,
-				code === 0 ? undefined : `exit ${code}: ${out.trim().split("\n").slice(0, 3).join(" | ").slice(0, 300)}`);
+			// Output, not just the exit code: main() is guarded on the invoked
+			// name (bin/wtft.ts), so a copy under an unexpected name exits 0
+			// having printed nothing — which a code-only check reads as success.
+			check(code === 0 && out.trim().length > 0,
+				`V3: \`wtft ${flag}\` exits 0 AND prints something from a bare directory`,
+				`exit ${code}, ${out.trim().length} bytes: ${out.trim().split("\n").slice(0, 3).join(" | ").slice(0, 300)}`);
 		}
 		// The daemon is a separate entrypoint with its own bundle, so it gets its
-		// own check rather than being assumed to travel with the CLI.
+		// own check rather than being assumed to travel with the CLI. --help
+		// only: it parses --session/--list/--cleanup/--restart/--stop/--debug and
+		// answers neither --why nor --version.
 		let dcode = 0;
-		try { execFileSync(NODE, [path.join(loose, "wtft-daemon.mjs"), "--help"], { encoding: "utf8", stdio: "pipe" }); }
+		try { execFileSync(NODE, [path.join(loose, "wtft-daemon.mjs"), "--help"], { encoding: "utf8", stdio: "pipe", env }); }
 		catch (err: any) { dcode = err.status ?? 1; }
 		check(dcode === 0, "V3: `wtft-daemon --help` exits 0 from a bare directory", `exit ${dcode}`);
 	}

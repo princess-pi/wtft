@@ -19,14 +19,24 @@
  *   follows `--help` creates a directory nothing prefers, then wonders why the
  *   override is ignored the moment the current one appears.
  *
- *   So the rule this suite pins is narrow and mechanical: the legacy name may
- *   appear in CODE (as a fallback) and in TESTS (which exercise it), never in a
- *   user-facing manifest string. That is checkable; "keep the docs current" is
- *   not.
+ *   So this suite pins two things, and only things a machine can settle. §1: no
+ *   manifest string advertises a `~/.config/<legacy>/` path. §2: the resolvers,
+ *   CALLED against a temp XDG_CONFIG_HOME, prefer the advertised directory and
+ *   still fall back to the old one when it is the only one present.
+ *
+ *   §2 replaced a check that compared where each name first appeared in the
+ *   source text. Two review lenses rejected that independently: textual order is
+ *   not execution order, and a comment saying the fallback was removed still
+ *   contains the word. It could pass on broken code and fail on correct code.
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
+import { getHarnessConfigPath, getUserPricingPath } from "../bin/wtft.mjs";
+import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+
+isolateTmpdir("46-advertised-config-dir");
 
 const RED = "\x1b[31m", GREEN = "\x1b[32m", RESET = "\x1b[0m";
 let passed = 0, failed = 0;
@@ -59,21 +69,62 @@ console.log("\n1. No manifest string advertises a config path under the pre-rena
 	}
 }
 
-console.log("\n2. The directory it does advertise is the one the resolvers prefer");
+console.log("\n2. The directory it advertises is the one the resolvers actually prefer");
 {
 	const manifest = fs.readFileSync(path.join(REPO, "docs", "manifests", "wtft-cmd.json"), "utf8");
 	check(manifest.includes(`.config/${CURRENT}/wtft-pricing.json`),
 		`the pricing override is advertised under ${CURRENT}`);
 
-	// And the fallback is still IN THE CODE, which is the half that must not be
-	// "fixed" by a search-and-replace: deleting it would strand anyone who still
-	// has only the old directory.
-	for (const rel of ["extensions/lib/wtft-pricing-config.ts", "extensions/lib/harness/registry.ts"]) {
-		const src = fs.readFileSync(path.join(REPO, rel), "utf8");
-		const legacyIdx = src.indexOf(LEGACY), currentIdx = src.indexOf(CURRENT);
-		check(legacyIdx !== -1 && currentIdx !== -1 && currentIdx < legacyIdx,
-			`${rel} reads ${CURRENT} first and still falls back to ${LEGACY}`,
-			`current@${currentIdx} legacy@${legacyIdx}`);
+	// CALL THE RESOLVERS, do not read their source. The first version of this
+	// block compared `src.indexOf(CURRENT)` against `src.indexOf(LEGACY)` and
+	// asserted the current name appeared first — textual position as a proxy for
+	// runtime precedence. Two review lenses rejected it independently, and both
+	// were right: a comment or import mentioning either name flips the result
+	// with no behaviour change, and a comment saying the fallback was REMOVED
+	// still contains the word, so the check passes on code that lost it. A test
+	// that can pass on broken code and fail on correct code enforces nothing.
+	//
+	// These call the real functions against a temp XDG_CONFIG_HOME, which is
+	// what the resolvers read. `tests/run.ts` already gives every suite a fresh
+	// one, so nothing here can see or touch a developer's real config.
+	const saved = process.env.XDG_CONFIG_HOME;
+	try {
+		for (const [label, resolve, basename] of [
+			["harness config", getHarnessConfigPath, "wtft-harnesses.json"],
+			["user pricing", getUserPricingPath, "wtft-pricing.json"],
+		] as const) {
+			// (a) Neither directory present: the CURRENT path is what it names,
+			//     so a first-time writer is told where the file should go.
+			const bare = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-46-cfg-")));
+			process.env.XDG_CONFIG_HOME = bare;
+			check(resolve() === path.join(bare, CURRENT, basename),
+				`V2a ${label}: with neither directory, it resolves to ${CURRENT}`, resolve());
+
+			// (b) ONLY the legacy directory: the fallback is live. This is the
+			//     half a search-and-replace would silently delete, stranding
+			//     anyone who never migrated.
+			const legacyOnly = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-46-cfg-")));
+			fs.mkdirSync(path.join(legacyOnly, LEGACY), { recursive: true });
+			fs.writeFileSync(path.join(legacyOnly, LEGACY, basename), "{}");
+			process.env.XDG_CONFIG_HOME = legacyOnly;
+			check(resolve() === path.join(legacyOnly, LEGACY, basename),
+				`V2b ${label}: with only ${LEGACY}, it falls back to it`, resolve());
+
+			// (c) BOTH present: current wins. This is the precedence the
+			//     advertised path depends on — advertise one directory while the
+			//     other is preferred and the reader's override is ignored.
+			const both = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-46-cfg-")));
+			for (const d of [CURRENT, LEGACY]) {
+				fs.mkdirSync(path.join(both, d), { recursive: true });
+				fs.writeFileSync(path.join(both, d, basename), "{}");
+			}
+			process.env.XDG_CONFIG_HOME = both;
+			check(resolve() === path.join(both, CURRENT, basename),
+				`V2c ${label}: with both present, ${CURRENT} wins`, resolve());
+		}
+	} finally {
+		if (saved === undefined) delete process.env.XDG_CONFIG_HOME;
+		else process.env.XDG_CONFIG_HOME = saved;
 	}
 }
 

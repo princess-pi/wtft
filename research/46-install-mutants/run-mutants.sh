@@ -25,20 +25,37 @@ trap 'rm -f "$MUT"' EXIT
 status_of() { sed -n 's/.*"status":"\([^"]*\)".*/\1/p' <<<"$1"; }
 fails=0
 
+# The verdict is computed in the PARENT. It used to be computed inside a
+# command substitution, so `fails=$((fails+1))` incremented a subshell's copy and
+# `exit $(( fails > 0 ))` was unreachable — the script printed MISMATCH and
+# exited 0, which is the same defect class the mutants themselves are hunting.
 report() { # name expected-real got-real expected-mut got-mut
-  printf '%-46s real=%-10s mutant=%-10s %s\n' "$1" "$3" "$5" \
-    "$( [ "$3" = "$2" ] && [ "$5" = "$4" ] && echo OK || { echo MISMATCH; fails=$((fails+1)); } )"
+  local verdict=OK
+  if [ "$3" != "$2" ] || [ "$5" != "$4" ]; then verdict=MISMATCH; fails=$((fails + 1)); fi
+  printf '%-46s real=%-10s mutant=%-10s %s\n' "$1" "$3" "$5" "$verdict"
+}
+
+# A sed that matches nothing produces a mutant identical to the real script,
+# which then agrees with it and reports OK — a green run that mutated nothing.
+# That is not hypothetical: refactoring the drift escalation into a `case` left
+# M1's pattern matching no line, and only the exit-code fix above surfaced it.
+mutate() { # sed-expr
+  sed "$1" "$REAL" > "$MUT"; chmod +x "$MUT"
+  if cmp -s "$REAL" "$MUT"; then
+    printf '%-46s MUTATION DID NOT APPLY: %s\n' "$2" "$1"
+    fails=$((fails + 1)); return 1
+  fi
 }
 
 # M1 — never escalate a bad artifact state to drift.
-D=$(mktemp -d); sed '/\[ "$state" = ok \] || {/d' "$REAL" > "$MUT"; chmod +x "$MUT"
+D=$(mktemp -d); mutate 's/\*) STATUS=drift ;;/*) ;;/' "M1 drift escalation deleted" || true
 R=$(PATH="$BUNDIR:/usr/bin:/bin" "$REAL" --check --json --dir "$D" 2>/dev/null)
 M=$(PATH="$BUNDIR:/usr/bin:/bin" "$MUT"  --check --json --dir "$D" 2>/dev/null)
 report "M1 drift escalation deleted" drift "$(status_of "$R")" ok "$(status_of "$M")"; rm -rf "$D"
 
 # M2 — never escalate a foreign PATH winner to shadowed.
 D=$(mktemp -d); DEC=$(mktemp -d); printf '#!/bin/sh\n' > "$DEC/wtft"; chmod +x "$DEC/wtft"
-sed '/if \[ "$STATUS" = ok \]; then STATUS=shadowed; EXIT=2; fi/d' "$REAL" > "$MUT"; chmod +x "$MUT"
+mutate '/if \[ "$STATUS" = ok \]; then STATUS=shadowed; EXIT=2; fi/d' "M2 shadow escalation deleted" || true
 R=$(PATH="$DEC:$BUNDIR:/usr/bin:/bin" "$REAL" --json --dir "$D" 2>/dev/null)
 M=$(PATH="$DEC:$BUNDIR:/usr/bin:/bin" "$MUT"  --json --dir "$D" 2>/dev/null)
 report "M2 shadow escalation deleted" shadowed "$(status_of "$R")" ok "$(status_of "$M")"; rm -rf "$D" "$DEC"
@@ -46,7 +63,7 @@ report "M2 shadow escalation deleted" shadowed "$(status_of "$R")" ok "$(status_
 # M3 — never compare source against destination.
 D=$(mktemp -d); PATH="$BUNDIR:/usr/bin:/bin" "$REAL" --dir "$D" >/dev/null 2>&1
 printf '\n// drift\n' >> "$D/wtft"
-sed 's/elif ! cmp -s "$src" "$dst"; then state=stale/elif false; then state=stale/' "$REAL" > "$MUT"; chmod +x "$MUT"
+mutate 's/elif ! cmp -s "$src" "$dst"; then state=stale/elif false; then state=stale/' "M3 content comparison deleted" || true
 R=$(PATH="$BUNDIR:/usr/bin:/bin" "$REAL" --check --json --dir "$D" 2>/dev/null)
 M=$(PATH="$BUNDIR:/usr/bin:/bin" "$MUT"  --check --json --dir "$D" 2>/dev/null)
 report "M3 content comparison deleted" drift "$(status_of "$R")" ok "$(status_of "$M")"; rm -rf "$D"

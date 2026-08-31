@@ -55,8 +55,12 @@ const BIN = path.join(import.meta.dir, "bin");
 // name — the only hand-maintained fact left, and one this repo owns.
 // ---
 function noticeFor(code: string): string {
+  // The GREEDY `.*` takes the LAST `node_modules/` on the line, so a nested
+  // `// node_modules/wcwidth/node_modules/defaults/…` marker attributes to
+  // `defaults` rather than silently crediting wcwidth and dropping a notice —
+  // the exact miss this rewrite exists to prevent.
   const pkgs = new Set<string>();
-  for (const m of code.matchAll(/^\/\/ node_modules\/((?:@[^/\n]+\/)?[^/\n]+)\//gm)) {
+  for (const m of code.matchAll(/^\/\/ .*node_modules\/((?:@[^/\n]+\/)?[^/\n]+)\//gm)) {
     if (!m[1].startsWith("@princess-pi/")) pkgs.add(m[1]);
   }
   if (pkgs.size === 0) return "";
@@ -64,9 +68,15 @@ function noticeFor(code: string): string {
   const parts: string[] = [];
   for (const name of [...pkgs].sort()) {
     const dir = path.join(import.meta.dir, "node_modules", name);
-    const file = ["LICENSE", "LICENSE.md", "LICENCE", "license"]
+    // Any file whose name starts LICENSE/LICENCE/COPYING, in any case and with
+    // any suffix — `.txt`, `.md`, `-MIT`, none. A fixed four-name list turned a
+    // dependency's filename choice into a hard build failure (and `install-wtft`
+    // exit 3), which is a large penalty for a naming convention nobody agrees on.
+    const file = (fs.existsSync(dir) ? fs.readdirSync(dir) : [])
+      .filter(f => /^(licen[cs]e|copying)/i.test(f))
+      .sort()
       .map(f => path.join(dir, f))
-      .find(f => fs.existsSync(f));
+      .find(f => fs.statSync(f).isFile());
     if (!file) throw new Error(`bundled package ${name} has no LICENSE file — cannot emit a notice for it`);
     const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
     parts.push(` * ${name}@${pkg.version} — ${pkg.license ?? "see below"}\n *\n` +

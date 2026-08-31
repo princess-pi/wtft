@@ -26,9 +26,8 @@
 #   2   in sync but SHADOWED on PATH by a different wtft
 #   3   the build failed
 #  64   bad usage: unknown argument, --dir without a directory, --dir followed
-#       by a flag or given an empty string, or no --dir on a host with HOME
-#       unset. `--` is NOT an end-of-options marker. NO JSON DOCUMENT is emitted
-#       for a usage error, even with --json.
+#       by a flag, or no --dir on a host with HOME unset. `--` is NOT an
+#       end-of-options marker.
 #
 # Human output goes to stdout only when STATUS is ok; every other status goes to
 # stderr. Under --json the document goes to stdout in every case.
@@ -78,11 +77,23 @@ MODE=install
 JSON=0
 DEST_DIR=""
 
-json_str() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+self_path() { (cd "$(dirname "$0")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$0")"); }
+json_str()  { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 
-# Absolute path with the FINAL symlink followed. Two callers need it and both
-# broke without it: the shadow comparison (a `ln -s` at our own copy runs our own
-# bytes) and self_path below.
+# Absolute path, WITHOUT creating anything — --check must be able to name a
+# directory it refuses to make. A non-existent path is made absolute against
+# $PWD lexically rather than resolved, which is all a report needs.
+abs_dir() {
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    *)  printf '%s/%s' "$(pwd -P)" "$1" ;;
+  esac
+}
+
+# Absolute path with the FINAL symlink followed. The shadow comparison needs
+# this: a `ln -s` pointing at the copy we just installed runs our own bytes, and
+# resolving only the parent directory reported it as a foreign wtft (exit 2 with
+# a remedy that would delete a working command).
 resolve() {
   local p="$1" t n=0
   while [ -L "$p" ] && [ "$n" -lt 20 ]; do
@@ -95,23 +106,6 @@ resolve() {
   printf '%s/%s' "$d" "$(basename "$p")"
 }
 
-# THROUGH the symlink, not just the directory holding it. REPO is derived from
-# this, so a symlinked install-wtft in ~/bin used to compute REPO=$HOME and
-# SRC_DIR=$HOME/bin — the DEFAULT DEST_DIR. Every artifact was then compared
-# against itself and --check reported "ok" on a payload it had just called
-# stale. A doctor that always says healthy is worse than no doctor.
-self_path() { resolve "$0"; }
-
-# Absolute path, WITHOUT creating anything — --check must be able to name a
-# directory it refuses to make. A non-existent path is made absolute against
-# $PWD lexically rather than resolved, which is all a report needs.
-abs_dir() {
-  case "$1" in
-    /*) printf '%s' "$1" ;;
-    *)  printf '%s/%s' "$(pwd -P)" "$1" ;;
-  esac
-}
-
 while [ $# -gt 0 ]; do
   case "$1" in
     --check)   MODE=check ;;
@@ -121,10 +115,7 @@ while [ $# -gt 0 ]; do
                # A flag here is a forgotten value, not a directory name: `--dir
                # --json` used to install into a directory literally called
                # "--json" and still exit 0.
-               # A flag OR an empty string: `--dir ""` (an unexpanded caller
-               # variable) used to fall through to the `-z` test below and
-               # silently retarget the real ~/bin.
-               case "$1" in --*|"") echo "install-wtft: --dir needs a directory, got '$1'" >&2; exit 64 ;; esac
+               case "$1" in --*) echo "install-wtft: --dir needs a directory, got '$1'" >&2; exit 64 ;; esac
                DEST_DIR="$1" ;;
     --version) self_path; exit 0 ;;
     -h|--help) sed -n '2,/^set -uo/p' "$(self_path)" | sed -e 's/^# \{0,1\}//' -e '$d'; exit 0 ;;
@@ -168,11 +159,9 @@ LINKS=("wtft:wtft.mjs" "wtft-daemon:wtft-daemon.mjs")
 STATUS=ok
 EXIT=0
 
-# Emit the document (or the human lines) and leave. Every exit PAST THE ARGUMENT
-# LOOP goes through here, so `--json` has no path that exits without a document —
-# three of them used to. Exit 64 is the stated exception: a usage error is
-# reported on stderr and carries no document, because the arguments that would
-# say what to report are the thing that is wrong.
+# Emit the document (or the human lines) and leave. Every exit after argument
+# parsing goes through here, so `--json` never has a path that exits with no
+# document — three of them used to.
 finish() {
   if [ "$JSON" = 1 ]; then
     printf '{"schema":"install-wtft@1","mode":"%s","dir":"%s","status":"%s","onPath":%s,"artifacts":[%s],"shadow":%s}\n' \
@@ -189,11 +178,7 @@ finish() {
                     else
                       echo "⚠️  install-wtft: installed into $DEST_DIR, but PATH resolves wtft to $WINNER" >&2
                     fi
-                    # printf, not echo: the shell-quoting idiom this used
-                    # emitted rm '"<path>"' — double quotes INSIDE the single
-                    # ones — so the printed command failed on the path it named.
-                    # Only the JSON field had been fixed.
-                    printf "   Run: rm '%s'\n" "$WINNER" >&2 ;;
+                    echo "   Run: rm '"'"'$WINNER'"'"'" >&2 ;;
       ok)           if [ "$MODE" = check ]; then echo "✅ install-wtft: $DEST_DIR is in sync with $SRC_DIR"
                     else echo "✅ install-wtft: installed into $DEST_DIR"; fi
                     # Not an error: a directory that is not on PATH is a
@@ -228,11 +213,9 @@ fi
 # place it was stated three times.
 # ---
 if [ "$MODE" = install ] && [ "$STATUS" != build-failed ]; then
-  # No early finish: it emitted "artifacts":[] against a schema that promises
-  # four records, plus the ${ON_PATH:-false}/${SHADOW_JSON:-null} DEFAULTS, which
-  # a caller reads as measurements. Falling through means every field in the
-  # no-dir document was actually measured.
-  mkdir -p "$DEST_DIR" 2>/dev/null || { STATUS=no-dir; EXIT=1; }
+  if ! mkdir -p "$DEST_DIR" 2>/dev/null; then
+    STATUS=no-dir; EXIT=1; finish
+  fi
   for name in "${COPIES[@]}"; do
     src="$SRC_DIR/$name"; dst="$DEST_DIR/$name"
     [ -f "$src" ] || continue
@@ -244,10 +227,6 @@ if [ "$MODE" = install ] && [ "$STATUS" != build-failed ]; then
   done
   for entry in "${LINKS[@]}"; do
     link="$DEST_DIR/${entry%%:*}"; target="${entry##*:}"
-    # The same source guard the copy loop has. Without it, a tree with no build
-    # still got its command names written — as DANGLING symlinks, so `wtft`
-    # existed and exited 127 with "no such file or directory".
-    [ -f "$SRC_DIR/$target" ] || continue
     # Relative target, so the whole directory can be moved or copied.
     ln -sfn "$target" "$link" 2>/dev/null || echo "install-wtft: cannot link $link" >&2
   done
@@ -275,7 +254,7 @@ for spec in "${EVAL_LIST[@]}"; do
   elif [ ! -x "$dst" ]; then state=not-executable
   else state=ok
   fi
-  case "$state:$STATUS" in ok:*|*:build-failed|*:no-dir) ;; *) STATUS=drift ;; esac
+  [ "$state" = ok ] || { [ "$STATUS" = build-failed ] || STATUS=drift; }
   [ -z "$STATE_JSON" ] || STATE_JSON="$STATE_JSON,"
   STATE_JSON="$STATE_JSON{\"name\":\"$(json_str "$name")\",\"path\":\"$(json_str "$dst")\",\"state\":\"$state\"}"
   # Built alongside the JSON rather than parsed back out of it. The previous

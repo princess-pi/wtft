@@ -39,15 +39,23 @@ function skip(label: string) { console.log(`  ${YELLOW}SKIP${RESET} ${label}`); 
 const REPO = path.resolve(import.meta.dirname, "..");
 const INSTALLER = path.join(REPO, "bin", "install-wtft");
 
-// install-wtft builds before it copies, so the PATH handed to it needs bun.
-// NOT `path.dirname(process.execPath)`: under this runner that resolves to the
-// npm package's internal `.../node_modules/bun/bin/bun.exe`, a directory that
-// contains no `bun` command at all — every install-mode check then failed with
-// status "build-failed" for a reason having nothing to do with the installer.
-// The controlled PATH exists to pin which `wtft` wins, not to sandbox bun.
+// install-wtft builds before it copies, so the PATH handed to it needs bun — but
+// handing it bun's OWN directory is a trap that arms itself the first time
+// anybody uses this tool for real. On this host `bun` is `~/bin/bun`, and `~/bin`
+// is install-wtft's DEFAULT TARGET: the moment a real run puts `~/bin/wtft`
+// there, every child in this suite sees a foreign `wtft` first on PATH and seven
+// checks start failing on a working installer.
+//
+// So the child gets a directory containing exactly one entry, a `bun` symlink,
+// and nothing else can leak in. (Not `path.dirname(process.execPath)` either:
+// under this runner that is the npm package's internal `bun.exe` directory,
+// which holds no `bun` command at all.)
 const BUN_DIR = (() => {
-	try { return path.dirname(execSync("command -v bun", { encoding: "utf8" }).trim()); }
-	catch { return ""; }
+	let real = "";
+	try { real = execSync("command -v bun", { encoding: "utf8" }).trim(); } catch { return ""; }
+	const shim = mkSandbox(path.join(os.tmpdir(), "46-bunshim-"));
+	fs.symlinkSync(real, path.join(shim, "bun"));
+	return shim;
 })();
 
 // The installer builds before it copies, so the artifacts need not pre-exist —
@@ -167,16 +175,18 @@ console.log("\n2. Installing into an empty dir produces both artifacts, executab
 // ---
 console.log("\n3. The installed command runs when you type its name, on every node we can find");
 {
-	// Every node on this host, not just the first: the failure was version-
-	// dependent, so testing one version is how it stayed hidden.
+	// EVERY node on this host, not just the first and not just two: the failure
+	// was version-dependent, so a partial sweep is how it stayed hidden. An
+	// earlier version of this block took `command -v node` plus /usr/bin/node
+	// and therefore skipped node 20 — the exact version named in build.ts and
+	// the spec for `bad option: --experimental-strip-types`.
 	const nodes: string[] = [];
-	try {
-		const first = execSync("command -v node", { encoding: "utf8" }).trim();
-		if (first) nodes.push(first);
-	} catch { /* none */ }
-	for (const extra of ["/usr/bin/node"]) {
-		if (fs.existsSync(extra) && !nodes.includes(extra)) nodes.push(extra);
-	}
+	const add = (p: string) => { if (p && fs.existsSync(p) && !nodes.includes(p)) nodes.push(p); };
+	try { add(execSync("command -v node", { encoding: "utf8" }).trim()); } catch { /* none */ }
+	add("/usr/bin/node");
+	add("/usr/local/bin/node");
+	const nvm = path.join(os.homedir(), ".nvm", "versions", "node");
+	if (fs.existsSync(nvm)) for (const v of fs.readdirSync(nvm)) add(path.join(nvm, v, "bin", "node"));
 
 	if (nodes.length === 0) {
 		skip("##SKIP## no `node` on PATH — the stock-node arm did not run");
@@ -410,8 +420,18 @@ console.log("\n6. Defects found by the reconcile audit");
 	let spacedDoc: any = null;
 	try { spacedDoc = JSON.parse(spaced.out); } catch { /* left null */ }
 	check(typeof spacedDoc?.shadow?.remedy === "string" && spacedDoc.shadow.remedy.includes(`'${spaceDir}/wtft'`),
-		"V6h: the remedy quotes a winner path containing a space",
+		"V6h: the JSON remedy quotes a winner path containing a space",
 		JSON.stringify(spacedDoc?.shadow?.remedy));
+
+	// The PRINTED line too, which is what a human actually copies — and which
+	// stayed broken through the first fix because only the JSON field was
+	// checked. It emitted rm '"<path>"', double quotes inside the single ones,
+	// so the command failed on the very path it named.
+	const spacedHuman = run(["--check", "--dir", synced], [spaceDir]);
+	const printed = `${spacedHuman.out}${spacedHuman.err}`;
+	check(printed.includes(`rm '${spaceDir}/wtft'`) && !printed.includes(`rm '"`),
+		"V6j: the PRINTED rm is single-quoted, with no stray double quotes",
+		printed.split("\n").filter(l => l.includes("rm ")).join(" | ").slice(0, 200));
 
 	// S17 — onPath was in the document and in no human line, so a green run hid
 	// a command nobody can type.

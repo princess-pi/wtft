@@ -53,9 +53,14 @@ install-wtft --version
 `wcwidth`, so a clone with no `node_modules` exits `3`.
 
 **This script does not install itself**, unlike `install-workflow-tools`. `REPO` is
-derived from the script's own location, so a copy in `~/bin` would compute `REPO=$HOME`
-and compare the artifacts against a directory that is not this clone. Invoke it by path:
-`<clone>/bin/install-wtft`.
+derived from the script's own location, so a copy in `~/bin` would compute `REPO=$HOME`,
+making `SRC_DIR` equal to the default `DEST_DIR` — every artifact compared against itself
+and `--check` reporting `ok` on a payload it had just called `stale`. A doctor that always
+says healthy is worse than no doctor. Invoke it by path: `<clone>/bin/install-wtft`.
+
+A **symlinked** copy is safe: `self_path` resolves the link itself, not just the directory
+holding it, so `<anywhere>/install-wtft -> <clone>/bin/install-wtft` still finds the clone.
+Resolving only the parent was the bug — it produced exactly the self-comparing `ok` above.
 
 ### Exit codes
 
@@ -65,7 +70,7 @@ and compare the artifacts against a directory that is not this clone. Invoke it 
 | `1` | Drift: an artifact is missing, stale, not executable, or **not built** (`no-source`); or `--dir` could not be created (`no-dir`) | run `install-wtft`, or fix the directory |
 | `2` | In sync but **shadowed** on PATH by a different `wtft` | the printed `rm` |
 | `3` | The build failed | read the build output on stderr |
-| `64` | Bad usage: unknown argument, `--dir` with no directory, `--dir` followed by a flag, or no `--dir` on a host with `HOME` unset | — |
+| `64` | Bad usage: unknown argument, `--dir` with no directory, `--dir` followed by a flag **or given an empty string**, or no `--dir` on a host with `HOME` unset | — |
 
 `1` and `64` match `install-workflow-tools` deliberately, so the two installers do not
 disagree about what a number means. `2` is separate because its remedy is a different
@@ -79,8 +84,15 @@ are in sync.
 
 Human output goes to **stdout** only when `status` is `ok`; every other status goes to
 **stderr**, as does the build's own output. Under `--json` the document goes to stdout in
-every case, including `no-dir` and `build-failed` — three paths used to exit with no
-document at all on a tool whose point is a machine-readable surface.
+every case past the argument loop, including `no-dir` and `build-failed` — three paths used
+to exit with no document at all on a tool whose point is a machine-readable surface. **Exit
+64 is the stated exception**: a usage error is reported on stderr and carries no document,
+because the arguments that would say what to report are the thing that is wrong.
+
+Every field of an error document is **measured, not defaulted**. The `no-dir` path used to
+finish early with `"artifacts":[]` — against a schema promising four records — and with
+`onPath`/`shadow` left at their initialiser values, which a caller reads as findings. It
+now falls through the same evaluation as every other exit.
 
 ### JSON document — schema `install-wtft@1`
 
@@ -227,6 +239,7 @@ the previous commit's script as well as the fixed one.
 | V6g | an un-creatable `--dir` exited 1 with **no document** under `--json`, behind raw `mkdir` stderr | 0-byte stdout | `status: "no-dir"` |
 | V6h | the printed `rm` interpolated the winner unquoted, so a path with a space produced a command that does not run | unquoted | single-quoted |
 | V6i | `onPath` lived in the document and in no human line, so a green install into an off-PATH directory said nothing | silent | prints the `add … to PATH` note |
+| V6j | the **printed** `rm` emitted `rm '"<path>"'` — double quotes inside the single ones — so the command failed on the path it named. V6h had checked only the JSON field, which is why the first fix left this green | `rm '"…"'` | `rm '…'` |
 
 ### Mutation-proofs — a script, not a paragraph
 

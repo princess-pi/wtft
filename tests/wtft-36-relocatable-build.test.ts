@@ -235,10 +235,11 @@ console.log("\n5. --version answers from the artifact, ignoring a neighbouring p
 
 		// And with NO package.json anywhere above it, which is the #46 install
 		// layout exactly. Before the injection this printed "unknown"; the
-		// `unknown` clause below is belt-and-braces rather than load-bearing,
-		// since build.ts's define compiles the fallback out of the bundle
-		// altogether — remove the define and the version check above is what
-		// fails.
+		// `unknown` clause below is belt-and-braces rather than load-bearing:
+		// the define makes `injected` a non-empty literal, so the fallback is
+		// UNREACHABLE — it is still present in the bundle, just behind an
+		// `if (injected) return`. Remove the define and the version check above
+		// is what fails.
 		const bare = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-36-bare-")));
 		for (const name of ARTIFACTS) fs.copyFileSync(path.join(REPO, "bin", name), path.join(bare, name));
 		let bareOut = "", bareCode = 0;

@@ -27,7 +27,9 @@ that exact name in its own directory, and Node needs the extension to read the
 file as ESM at all on Node 18. It also tells you if some other `wtft` wins on
 your PATH: it
 prints the `rm`, it never deletes anything itself. `--json` gives the whole
-report as one document, on every exit path. `--help` lists the rest.
+report as one document on every exit path but one: a usage error (64) is
+reported on stderr and carries no document, because the arguments that would say
+what to report are the thing that is wrong. `--help` lists the rest.
 
 Re-run it after every rebuild; `--check` is how you find out you needed to. It
 exits **0** in sync, **1** drift, **2** shadowed on PATH, **3** build failed,

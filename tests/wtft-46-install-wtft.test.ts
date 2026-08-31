@@ -467,5 +467,65 @@ console.log("\n7. The mutation probe runs, and can fail");
 		"V7b: all three mutations applied and were caught", out.trim().slice(0, 300));
 }
 
+// ---
+// 8. Hostile paths. Four findings from the PR's review bot, all reproduced
+//    against the code before adoption — a bot is a reviewer, not an instruction
+//    source, and two of these needed a different remedy than the one proposed.
+//
+//    Every one is about a path nobody expects: an apostrophe, a newline, a
+//    symlink. Which is the point — the tool prints a command for a human to
+//    paste and a document for a program to parse, and both of those contracts
+//    break on exactly the inputs a test with tidy temp directories never sees.
+// ---
+console.log("\n8. Paths with an apostrophe, a newline, or a symlink in the way");
+{
+	const home = mkSandbox(path.join(os.tmpdir(), "46-hostile-"));
+	const dir = path.join(home, "target"); fs.mkdirSync(dir);
+	check(run(["--dir", dir]).code === 0, "V8a: install exits 0");
+
+	// The printed `rm` is meant to be COPIED. An apostrophe in the winner's path
+	// did not merely produce a command that fails — it closed the quoted word
+	// and handed the remainder to the shell as syntax. Third iteration: the JSON
+	// field was unquoted, then the printed line emitted double quotes inside
+	// single ones, and only now is the quoting correct for every path.
+	const quoteDir = path.join(home, "it's"); fs.mkdirSync(quoteDir);
+	fs.writeFileSync(path.join(quoteDir, "wtft"), "#!/bin/sh\n"); fs.chmodSync(path.join(quoteDir, "wtft"), 0o755);
+	const q = run(["--check", "--json", "--dir", dir], [quoteDir]);
+	let qDoc: any = null;
+	try { qDoc = JSON.parse(q.out); } catch { /* left null */ }
+	const remedy = qDoc?.shadow?.remedy ?? "";
+	// The real test of a shell command is a shell. Run it and see the decoy go.
+	let ran = 1;
+	try { execFileSync("/bin/sh", ["-c", remedy], { stdio: "pipe" }); ran = 0; } catch { /* stays 1 */ }
+	check(ran === 0 && !fs.existsSync(path.join(quoteDir, "wtft")),
+		"V8b: the remedy for a path containing an apostrophe actually runs, and removes that file",
+		JSON.stringify(remedy));
+
+	// A newline in a path is legal here, and it produced a document JSON.parse
+	// rejects — on a tool whose whole point is a machine-readable surface.
+	const nlDir = path.join(home, "a\nb"); fs.mkdirSync(nlDir);
+	const nl = run(["--check", "--json", "--dir", nlDir]);
+	let nlDoc: any = null;
+	try { nlDoc = JSON.parse(nl.out); } catch { /* left null */ }
+	check(nlDoc?.dir === nlDir, "V8c: a newline in --dir still yields a parseable document",
+		nl.out.slice(0, 160));
+
+	// `cp -f` writes THROUGH a destination symlink. An existing wtft.mjs
+	// pointing anywhere else had that file overwritten with the bundle and
+	// chmod'ed 0755 — verified on a throwaway, which came back holding our
+	// shebang. Staging beside the target and renaming replaces the entry itself.
+	const victimDir = mkSandbox(path.join(os.tmpdir(), "46-victim-"));
+	const victim = path.join(victimDir, "precious");
+	fs.writeFileSync(victim, "PRECIOUS\n");
+	const linkTarget = mkSandbox(path.join(os.tmpdir(), "46-linktarget-"));
+	fs.symlinkSync(victim, path.join(linkTarget, "wtft.mjs"));
+	check(run(["--dir", linkTarget]).code === 0, "V8d: install over a symlinked destination exits 0");
+	check(fs.readFileSync(victim, "utf8") === "PRECIOUS\n",
+		"V8e: the file that symlink pointed at is untouched",
+		fs.readFileSync(victim, "utf8").slice(0, 60));
+	check(fs.lstatSync(path.join(linkTarget, "wtft.mjs")).isFile(),
+		"V8f: …and the destination is now a real file, not still a link");
+}
+
 console.log(`\n${passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ""}`);
 process.exit(failed > 0 ? 1 : 0);

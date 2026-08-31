@@ -140,10 +140,15 @@ per-artifact in human mode.
   hides a command nobody can type is worse than a warning.
 - **`status: "build-failed"` can still carry a populated `shadow`**: shadow detection runs
   unconditionally, and only the *status promotion* is guarded.
-- **The escaper handles backslash and double-quote only.** A control character in a path
-  (a literal tab) produces a document `JSON.parse` rejects. Left as a documented limit
-  rather than code: no path this tool is pointed at has ever contained one, and a lossy
-  escaper would be a worse answer than a stated boundary.
+- **The escaper handles every JSON control character**, not just backslash and quote. A
+  newline or tab in a path is legal on this filesystem and used to produce a document
+  `JSON.parse` rejects; this file previously carried that as a documented limit, which was
+  the wrong call — a limit that costs eight lines to remove was not worth documenting.
+- **`shadow.remedy` and the printed `rm` are shell-quoted**, apostrophes included. The
+  printed command is meant to be *pasted*, so a path containing `'` did not merely fail: it
+  closed the quoted word and handed the remainder to the shell as syntax. Three iterations
+  got here — unquoted, then double quotes inside single ones, then correct — and V8b now
+  runs the emitted command in a real shell rather than pattern-matching it.
 
 ## Layout: two copies and two symlinks
 
@@ -152,7 +157,14 @@ per-artifact in human mode.
 | `<dir>/wtft.mjs` | copy of `bin/wtft.mjs` | the payload |
 | `<dir>/wtft-daemon.mjs` | copy of `bin/wtft-daemon.mjs` | the payload, **and** the literal name `daemonDir` joins |
 | `<dir>/wtft` | symlink → `wtft.mjs` | the command |
-| `<dir>/wtft-daemon` | symlink → `wtft-daemon.mjs` | the command, matching package.json's `bin` map and the README's `wtft-daemon start` |
+| `<dir>/wtft-daemon` | symlink → `wtft-daemon.mjs` | the command, matching package.json's `bin` map. (The README used to justify it with `wtft-daemon start`, which is not a real invocation — the daemon answers `--session <path>` and friends, not a verb.) |
+
+**Every payload is staged beside its destination and renamed over it**, never written in
+place. `cp -f` writes *through* a destination symlink, so an existing `<dir>/wtft.mjs`
+pointing anywhere else had that file overwritten with the bundle and `chmod`ed `0755` —
+verified on a throwaway file, which came back holding our shebang. It also blocks forever
+on a FIFO. `mv` replaces the directory entry itself, follows nothing, and makes the swap
+atomic, which matters when the command being replaced may be running.
 
 **The `.mjs` extension is load-bearing twice over.**
 
@@ -234,6 +246,7 @@ Six sections, all driven through the CLI — no internal function is imported.
 | **V5** | staleness | append a byte to the installed `wtft.mjs` → `--check` exits `1`, that payload `stale`, the untouched one still `ok`; `chmod 0644` → `not-executable`; a command symlink repointed at the other payload → `wrong-target` |
 | **V6** | the ten defects the reconcile and review audits found | see below |
 | **V7** | the mutation probe | `run-mutants.sh` exits 0, and all three mutations applied |
+| **V8** | hostile paths | an apostrophe, a newline, and a destination symlink — the review bot's four findings, each reproduced before it was adopted |
 
 `0755` is what install *writes* and what V2 asserts; the **tool's** check is any execute
 bit, so a hand-`chmod`ed `0700` copy still reports `ok`.

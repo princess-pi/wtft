@@ -18,7 +18,11 @@
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd -P)"
 REAL="$REPO/bin/install-wtft"
-MUT="$REPO/bin/mut-install-wtft"
+# A UNIQUE name, because the EXIT trap deletes it: a fixed `bin/mut-install-wtft`
+# destroyed any pre-existing file of that name — including a concurrent probe's
+# mutant, which is not hypothetical on a box that runs several agent sessions at
+# once and now runs this from the test suite.
+MUT="$(mktemp "$REPO/bin/mut-install-wtft.XXXXXX")"
 # A ONE-ENTRY SHIM, not bun's own directory. On this host bun lives in ~/bin,
 # which is install-wtft's DEFAULT TARGET: once a real run puts ~/bin/wtft there,
 # putting bun's directory on the mutant's PATH makes every run see a foreign

@@ -21,9 +21,9 @@
  *   later needs no change here.
  *
  *   Why a fresh XDG_CONFIG_HOME per suite: `wtft --tokens/--cost` is
- *   config-persistable, so a developer's saved `~/.config/princess-pi-packages/
- *   wtft.json` was deciding test outcomes (#158 RC-4a). Isolating config here
- *   is one seam for all suites instead of a rule to remember in each of them.
+ *   config-persistable, so a developer's saved `~/.config/princess-pi-tools/
+ *   wtft.json` would decide test outcomes. Isolating config here is one seam
+ *   for all suites instead of a rule to remember in each of them.
  *
  *   Serial, not parallel: several suites spawn wtft daemons, bind ports, and
  *   share `/tmp` fixture paths. Serial is the honest default until those are

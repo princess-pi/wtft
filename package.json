@@ -13,15 +13,25 @@
     "wtft": "./bin/wtft.mjs",
     "wtft-daemon": "./bin/wtft-daemon.mjs"
   },
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./pi"
+    ]
+  },
   "files": [
     "bin/wtft.mjs",
-    "bin/wtft-daemon.mjs"
+    "bin/wtft-daemon.mjs",
+    "pi/wtft.js",
+    "pi/token-budget.js"
   ],
   "scripts": {
     "build": "bun run build.ts",
     "test": "bun run tests/run.ts",
     "typecheck": "tsc --noEmit",
-    "prepare": "bun run build"
+    "prepare": "if [ ! -d node_modules/wcwidth ] || [ ! -d node_modules/@princess-pi/libs ]; then bun install; fi && bun run build"
   },
   "engines": {
     "node": ">=18"

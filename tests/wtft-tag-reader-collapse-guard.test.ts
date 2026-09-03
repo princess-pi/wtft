@@ -20,7 +20,7 @@
  *   readClassifiedTagFile / dedupeClassifiedById, or appear in ALLOWED below with a
  *   reason and a pinning test or issue. A new unrouted reader fails this suite.
  *
- *   It found one on its first run: extensions/rate-limiter.ts (#454).
+ *   It found one on its first run: extensions/token-budget.ts (#454).
  */
 
 import * as fs from "node:fs";
@@ -47,7 +47,7 @@ const ALLOWED: Record<string, string> = {
 	// collapse — a real violation, filed as #454 rather than fixed blind,
 	// because the correct per-field reduction for tokens (vs max-cost for
 	// money) is a product decision. Removing this entry closes #454.
-	"extensions/rate-limiter.ts": "KNOWN VIOLATION, filed as #454",
+	"extensions/token-budget.ts": "KNOWN VIOLATION, filed as #454",
 	// The tag file's WRITER. It reads that file back in exactly one place —
 	// readLastMetaOffset, which scans the last 8KB for `_meta.offset` and
 	// returns a byte number. It never sums a cost or a token from a tag line,

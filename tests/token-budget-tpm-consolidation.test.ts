@@ -1,8 +1,8 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
  * @package princess-pi-tools
- * @test rate-limiter-tpm-consolidation
- * @description Validates that the rate-limiter's TPM computation, now routed
+ * @test token-budget-tpm-consolidation
+ * @description Validates that the token-budget's TPM computation, now routed
  *   through wtft-shared's parseEntryToInteraction, produces the correct
  *   per-model token counts from session .jsonl files.
  *
@@ -171,7 +171,7 @@ for (const tc of TEST_LINES) {
 		`${tc.description} → cacheReadTokens=${tc.expectedCacheRead ?? 0}`,
 		interaction?.cacheReadTokens === (tc.expectedCacheRead ?? 0)
 	);
-	// TPM input = inputTokens + cacheReadTokens (rate-limiter sums them)
+	// TPM input = inputTokens + cacheReadTokens (token-budget sums them)
 	const tpmInput = (interaction?.inputTokens ?? 0) + (interaction?.cacheReadTokens ?? 0);
 	assert(
 		`${tc.description} → TPM_input=${tc.expectedInputTokens + (tc.expectedCacheRead ?? 0)}`,
@@ -184,7 +184,7 @@ for (const tc of TEST_LINES) {
 // ---
 console.log("\n2. Cache schema contract (unchanged from #68 baseline)");
 
-// The rate-limiter writes to /tmp/pi-rate-limit-stats.json with this schema:
+// The token-budget writes to /tmp/pi-rate-limit-stats.json with this schema:
 interface CacheSchema {
 	timestamp: number;
 	stats: Record<string, { tpm: number; lastActiveAge: number }>;
@@ -211,18 +211,18 @@ assert(
 );
 
 // ---
-// No entry.usage references in rate-limiter.ts (DoD #1)
+// No entry.usage references in token-budget.ts (DoD #1)
 // ---
-console.log("\n3. No inline token parsing in rate-limiter.ts (DoD #1)");
+console.log("\n3. No inline token parsing in token-budget.ts (DoD #1)");
 
 const source = fs.readFileSync(
-	path.resolve(import.meta.dirname, "..", "extensions", "rate-limiter.ts"),
+	path.resolve(import.meta.dirname, "..", "extensions", "token-budget.ts"),
 	"utf8"
 );
 // The parser extraction logic should NOT reference entry.usage directly
 const usageRefs = (source.match(/entry\.usage/g) || []).length;
 assert(
-	"zero references to entry.usage in rate-limiter.ts",
+	"zero references to entry.usage in token-budget.ts",
 	usageRefs === 0
 );
 

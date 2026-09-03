@@ -267,6 +267,9 @@ try {
 	// interval window regardless of when the suite runs — a hardcoded past date
 	// would eventually age out of a recency-filtered default interval.
 	const fixtureTs = new Date(Date.now() - 60000).toISOString();
+	// Shape matches the -s session-file parser (bin/wtft.mjs `parse2.matchAssistant`):
+	// top-level `type: "message"` (NOT the transcript parser's `type: "assistant"`)
+	// with `timestamp`/`model`/`usage` nested under `message`.
 	fs.writeFileSync(
 		fixturePath,
 		JSON.stringify({

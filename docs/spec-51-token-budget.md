@@ -9,11 +9,13 @@ subscription quota. It budgets **velocity** — tokens per minute (TPM) — per
 model, and it is the surface the absolute-spend budget and the
 distance-to-budget visualizations will land on (princess-pi/wtft#53).
 
-It runs transparently: it intercepts provider requests, checks a sliding 120s
-window of TPM across all active local sessions, and when a model crosses its
-safety threshold (~80% of that model's subscription quota — the
-`MODEL_QUOTA_REGISTRY` ceilings are 80–83% per model), it enforces a 40s
-synchronous cooldown rather than letting the provider hard-fail.
+It intercepts provider requests, sums each model's recent TPM from the wtft
+tag files, and when a TPM-limited model crosses its ceiling (the
+`MODEL_QUOTA_REGISTRY`, sized against each model's subscription quota), it
+enforces a 40s synchronous cooldown rather than letting the provider
+hard-fail. Models that are concurrency-limited rather than TPM-limited
+(DeepSeek, short-code prefix `d`) redline the meter for visibility but never
+cooldown.
 
 ## One tool, one name
 
@@ -43,18 +45,14 @@ appears nowhere in this repo). The table records the code, not the misquote.
   The config *key* rename (`tpm` → `token-budget`) moves the on-disk file from
   `tpm.json` to `token-budget.json`; on the one host that runs this, the file
   is renamed by hand, not migrated in code.
-- **Command** — `/budget` with no flags toggles the widget panel on/off; flags
+- **Command** — `/budget` with no flags toggles the widget panel; flags
   `--widget on|off`, `--footer on|off`, `--emoji`, `--no-emoji`, `--reset`,
-  `--why`, with `-w` / `-f` aliases, toggle each display explicitly.
-- **Widget / status** — a below-editor panel plus a footer line, each showing
-  per-model TPM as a colored bar against that model's ceiling (green below 50%,
-  yellow above 50%, red above 80%; zero-TPM models are skipped in the panel and
-  grayed in the footer).
-- **Dependency on the tag format** — it scans `wtft-tags/` and parses
-  `.wtft-tag.vX.Y.Z.jsonl` filenames. That grammar is a wire-format contract,
-  not an implementation detail: it is pinned by `tests/wtft-tag-format.test.ts`
-  against `docs/wtft-tag-format.md`, so a tagger rename is a caught break, not a
-  silent one.
+  `--why` (with `-w` / `-f` aliases) toggle each display explicitly.
+- **Widget / status** — a below-editor panel and a footer line, showing
+  per-model TPM as a colored bar against that model's ceiling.
+- **Data source** — reads the wtft tag files under `wtft-tags/`, the same
+  classified records the CLI and the session selector consume; the tag wire
+  format is documented in `docs/wtft-tag-format.md`.
 
 ## Renamed, except where the name is an external contract
 

@@ -30,6 +30,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 const BIN = path.join(import.meta.dir, "bin");
+const PI = path.join(import.meta.dir, "pi");
 
 // ---
 // THE NOTICE IS DERIVED FROM WHAT IS ACTUALLY BUNDLED, not written by hand.
@@ -169,6 +170,21 @@ const entries = [
   { src: "bin/wtft-daemon.ts", out: "wtft-daemon.mjs" },
 ] as const;
 
+// The Pi extensions, bundled the same self-contained way (#60). The package
+// `pi` manifest points at ./pi, so Pi loads THESE files — never the .ts source
+// in extensions/, which imports @princess-pi/libs at runtime and therefore
+// needs a node_modules that a git/registry install cannot guarantee. The
+// bundles inline that graph (libs + wcwidth) exactly like the CLI bundles do,
+// so the npm `dependencies` can stay empty and the two channels never disagree
+// about what is vendored. See tests/wtft-60-pi-extension.test.ts.
+//
+// NO `external`: the only @earendil-works/pi-coding-agent import is TYPE-ONLY
+// (erased), so there is no peer import left to keep external.
+const extensionEntries = [
+  { src: "extensions/wtft.ts", out: "wtft.js" },
+  { src: "extensions/token-budget.ts", out: "token-budget.js" },
+] as const;
+
 // ---
 // THE VERSION NUMBER MOVED INTO THE BUNDLE (#46).
 //
@@ -243,4 +259,34 @@ for (const { src, out } of entries) {
 }
 
 if (errors > 0) process.exit(1);
+
+// ---
+// Pi extension bundles (#60). Same self-containment as the CLI, minus the
+// shebang (they are imported as modules, not executed as commands).
+// ---
+for (const { src, out } of extensionEntries) {
+  const result = await Bun.build({
+    entrypoints: [path.join(import.meta.dir, src)],
+    outdir: PI,
+    format: "esm",
+    target: "node",
+    naming: out,
+    // Same build-time version injection as the CLI so `/wtft --version` from
+    // the Pi extension answers from the artifact, not from a neighbouring
+    // package.json (the same failure #46 fixed on the CLI side).
+    define: { __WTFT_BUILD_VERSION__: JSON.stringify(pkgVersion) },
+  });
+  if (!result.success) {
+    console.error(`❌ pi/${out}:`, result.logs);
+    errors++;
+    continue;
+  }
+
+  const file = path.join(PI, out);
+  const code = fs.readFileSync(file, "utf8");
+  fs.writeFileSync(file, noticeFor(code) + code);
+
+  console.log(`✅ pi/${out} (${(fs.statSync(file).size / 1024).toFixed(0)} KB)`);
+}
+
 console.log("\n✅ build complete");

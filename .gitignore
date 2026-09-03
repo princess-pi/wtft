@@ -8,6 +8,10 @@ bun.lock
 # registry channel, which is still pending (#29).
 bin/*.mjs
 
+# Built Pi extension bundles (#60) — same self-contained build output as the
+# CLI bundles above, emitted to pi/ and loaded by Pi via the `pi` manifest.
+pi/*.js
+
 # Scratch space for test/daemon litter — never committed (Workspace Hygiene Standard).
 tmp/
 .claude/worktrees/

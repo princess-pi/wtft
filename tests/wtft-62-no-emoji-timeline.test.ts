@@ -99,5 +99,14 @@ check("emoji mode still renders ☀️ and the clock face (no regression)", () =
 	assert.ok(/[\u{1F550}-\u{1F55B}]/u.test(t), `expected a clock face, got: ${t}`);
 });
 
+// ---
+// 4. The surge badge (part of the same timeline string) also swaps ⚡ → !!.
+// ---
+check("no-emoji surge badge swaps ⚡ for !!", () => {
+	const t = buildTimelineString(new Set(), 13, "surge", undefined, true).replace(ANSI, "");
+	assert.ok(!t.includes("⚡"), `still contains ⚡: ${t}`);
+	assert.ok(t.includes("!! SURGE 2x"), `expected !! SURGE 2x, got: ${t}`);
+});
+
 console.log(`\nResults: ${GREEN}${passed} passed${RESET}, ${RED}${failed} failed${RESET}`);
 process.exit(failed > 0 ? 1 : 0);

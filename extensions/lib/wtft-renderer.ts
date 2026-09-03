@@ -811,12 +811,15 @@ export function buildTimelineString(
 	const moon = disabledEmoji ? "|" : getMoonPhase(date ?? new Date());
 	let result = `${moon}${timelineBody}${moon}`;
 
+	// The badge is part of the same timeline string, so `--no-emoji` must swap
+	// its ⚡ too — the manifest promises ASCII across the whole widget (#62).
+	const bolt = disabledEmoji ? "!!" : "⚡";
 	if (proximityStatus === 'surge') {
-		result += ` \x1b[1;38;5;208m⚡ SURGE 2x\x1b[0m`;
+		result += ` \x1b[1;38;5;208m${bolt} SURGE 2x\x1b[0m`;
 	} else if (proximityStatus === 'approaching') {
-		result += ` \x1b[1;5;38;5;208m⚡ SURGE APPROACHING\x1b[0m`;
+		result += ` \x1b[1;5;38;5;208m${bolt} SURGE APPROACHING\x1b[0m`;
 	} else if (proximityStatus === 'ending') {
-		result += ` \x1b[1;5;32m⚡ SURGE ENDING\x1b[0m`;
+		result += ` \x1b[1;5;32m${bolt} SURGE ENDING\x1b[0m`;
 	}
 
 	return result;

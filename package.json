@@ -27,7 +27,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@princess-pi/libs": "git+https://github.com/princess-pi/libs.git#22dfec6c15f704d717fefe86bd2b05d21294bb5d",
+    "@princess-pi/libs": "git+https://github.com/princess-pi/libs.git#c53fcca773053cac9f5a0705ea3217583a44cda8",
     "wcwidth": "^1.0.1"
   },
   "devDependencies": {

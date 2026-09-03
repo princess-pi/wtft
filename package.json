@@ -26,15 +26,13 @@
   "engines": {
     "node": ">=18"
   },
-  "dependencies": {
-    "@princess-pi/libs": "git+https://github.com/princess-pi/libs.git#c53fcca773053cac9f5a0705ea3217583a44cda8",
-    "wcwidth": "^1.0.1"
-  },
   "devDependencies": {
+    "@princess-pi/libs": "git+https://github.com/princess-pi/libs.git#c53fcca773053cac9f5a0705ea3217583a44cda8",
     "@types/node": "^26",
     "@types/wcwidth": "^1",
     "bun-types": "latest",
-    "typescript": "^7"
+    "typescript": "^7",
+    "wcwidth": "^1.0.1"
   },
   "trustedDependencies": [
     "@princess-pi/libs"

@@ -41,7 +41,7 @@ appears nowhere in this repo). The table records the code, not the misquote.
   `@princess-pi/libs/config`. Keys: `widget` (bool), `footer` (bool),
   `emojiDisabled` (bool). Read and written by the extension. The
   config-persistence split (the CLI reads config and never writes it) is
-  decision 3 of #51, not this rename — its guard is yet to land.
+  decision 3 of #51, not this rename — its guard is `tests/config-persistence.test.ts`.
   The config *key* rename (`tpm` → `token-budget`) moves the on-disk file from
   `tpm.json` to `token-budget.json`; on the one host that runs this, the file
   is renamed by hand, not migrated in code.

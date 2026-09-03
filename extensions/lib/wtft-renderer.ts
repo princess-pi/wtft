@@ -770,21 +770,34 @@ export function buildTimelineString(
 	const segments: { color: string; text: string }[] = [];
 	let lastColor: string | null = null;
 
+	const CLOCK_FACES = ["🕛","🕐","🕑","🕒","🕓","🕔","🕕","🕖","🕗","🕘","🕙","🕚"];
+
+	// 24 hour glyphs first; the sun is a 25th glyph spliced in below. The old
+	// code rendered ☀️ IN PLACE OF hour 12, which ate the noon hour's slot — 23
+	// hour-positions (12 left / 11 right) and no clock face during the
+	// 12:00p–12:59p hour (#7).
+	const glyphs: { color: string; char: string }[] = [];
 	for (let h = 0; h < 24; h++) {
 		const isSurge = surgeHours.has(h);
 		const isCurrent = h === currentHour;
 
 		const color = isCurrent ? "1;" + (isSurge ? "38;5;208" : "32") : (isSurge ? "38;5;208" : "32");
-		// Current hour → clock face emoji (never at noon — ☀️ owns position 12).
-		// Noon → ☀️ sun. Otherwise → ─ box-drawing rule.
-		const CLOCK_FACES = ["🕛","🕐","🕑","🕒","🕓","🕔","🕕","🕖","🕗","🕘","🕙","🕚"];
-		const char = (isCurrent && h !== 12) ? CLOCK_FACES[h % 12] : (h === 12 ? "☀️" : "─");
+		// Current hour → clock face emoji. Otherwise → ─ box-drawing rule.
+		glyphs.push({ color, char: isCurrent ? CLOCK_FACES[h % 12] : "─" });
+	}
 
-		if (color !== lastColor) {
-			segments.push({ color, text: char });
-			lastColor = color;
+	// Solar noon, between hour 11 (11am) and hour 12 (noon). It borrows hour 12's
+	// surge color so noon surge-pricing still shows, but it is never "current" —
+	// the clock face is the current-hour marker.
+	const noonSurge = surgeHours.has(12);
+	glyphs.splice(12, 0, { color: noonSurge ? "38;5;208" : "32", char: "☀️" });
+
+	for (const g of glyphs) {
+		if (g.color !== lastColor) {
+			segments.push({ color: g.color, text: g.char });
+			lastColor = g.color;
 		} else {
-			segments[segments.length - 1].text += char;
+			segments[segments.length - 1].text += g.char;
 		}
 	}
 

@@ -8,8 +8,10 @@ bun.lock
 # registry channel, which is still pending (#29).
 bin/*.mjs
 
-# Built Pi extension bundles (#60) — same self-contained build output as the
-# CLI bundles above, emitted to pi/ and loaded by Pi via the `pi` manifest.
+# Built Pi extension bundles (#60) — the same self-contained build output as the
+# CLI bundles above, emitted to pi/ and loaded by Pi via the `pi` manifest in
+# package.json. Same channel split: `prepare` builds them for the git-URL
+# install, and `files` ships them prebuilt for the registry channel.
 pi/*.js
 
 # Scratch space for test/daemon litter — never committed (Workspace Hygiene Standard).

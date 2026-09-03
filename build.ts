@@ -173,10 +173,14 @@ const entries = [
 // The Pi extensions, bundled the same self-contained way (#60). The package
 // `pi` manifest points at ./pi, so Pi loads THESE files — never the .ts source
 // in extensions/, which imports @princess-pi/libs at runtime and therefore
-// needs a node_modules that a git/registry install cannot guarantee. The
-// bundles inline that graph (libs + wcwidth) exactly like the CLI bundles do,
-// so the npm `dependencies` can stay empty and the two channels never disagree
-// about what is vendored. See tests/wtft-60-pi-extension.test.ts.
+// needs a node_modules. (A `pi` manifest REPLACES the `extensions/` convention
+// dir rather than adding to it — pi's package-manager returns early on a
+// manifest and never falls through to the convention dirs, so there is no
+// double registration.) The bundles inline that graph (libs + wcwidth) exactly
+// like the CLI bundles do, so `dependencies` stays empty and BOTH channels run
+// with no runtime deps: the registry tarball ships these prebuilt, and the
+// git-URL channel rebuilds them in `prepare` (bun on PATH, already the
+// documented git-channel requirement). See tests/wtft-60-pi-extension.test.ts.
 //
 // NO `external`: the only @earendil-works/pi-coding-agent import is TYPE-ONLY
 // (erased), so there is no peer import left to keep external.

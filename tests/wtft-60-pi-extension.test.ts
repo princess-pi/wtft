@@ -58,6 +58,13 @@ console.log("\n=== WTFT #60 PI EXTENSION ===");
 // ---
 // 1. The package declares itself a Pi package whose extensions are ./pi.
 // ---
+// 1. package.json is a Pi package pointing at ./pi. The exact ["./pi"] list is
+//    the no-double-registration guarantee: a `pi` manifest REPLACES the
+//    `extensions/` convention dir in pi's package-manager (it returns early on
+//    a manifest and never falls through to the convention dirs), so the .ts
+//    source in extensions/ is not auto-discovered alongside the ./pi bundles.
+//    Verified against pi 0.84.4 dist/core/package-manager.js resolvePackageResources.
+// ---
 console.log("\n1. package.json is a Pi package pointing at ./pi");
 check(
 	(PKG.keywords ?? []).includes("pi-package"),

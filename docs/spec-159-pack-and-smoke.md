@@ -54,11 +54,22 @@ princess-pi-tools (`docs/manifests/` missing from the `files` allowlist).
 ## Disposition of the third decision-3 guard
 
 Issue #51 decision 3 named three guards. Two land here and in
-`tests/config-persistence.test.ts`. The third — the two spec-reconcile
-backtest drift gates over `parseInterval`'s and `buildTimelineString`'s
-docstrings — is closed without a gate. Stated reason: those gates pin where
-a docstring sits (which function owns it, how adjacent it is), which is code
-organization, not a behavior contract; this repo's spec-reconcile scope is
-behavior contracts, so a docstring-placement backtest is below the bar. The
-drift those gates caught was fixed in `wtft-renderer.ts` before the move. The
-ruling is recorded on the #51 thread, not reconstructed here.
+`tests/config-persistence.test.ts`. The third is actually two distinct
+spec-reconcile backtest drift gates, disposed of differently by their kind:
+
+- `buildTimelineString` — positional: its docstring had drifted four
+  declarations above the function (misbinding to `MOON_PHASES`). Closed, per
+  Duppy's "too specific" ruling — where a docstring sits is code
+  organization, not a behavior contract.
+- `parseInterval` — content-misattribution: its docstring had come to
+  describe the `.jsonl` parser instead of interval parsing. That is a
+  content-truth concern, not mere organization. It is still closed, for a
+  different stated reason: parseInterval's accepted units are already pinned
+  *behaviorally* by `tests/wtft-spec-alignment.test.ts`, which probes the real
+  function (every single-char unit, every turn spelling) and asserts the
+  manifest matches — so a source-text gate over the docstring's prose would
+  be both redundant with that behavioral pin and brittle to any legitimate
+  reword.
+
+The drift both gates caught was fixed in `wtft-renderer.ts` before the move.
+The ruling is recorded on the #51 thread, not reconstructed here.

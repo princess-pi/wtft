@@ -270,6 +270,8 @@ try {
 			message: {
 				role: "assistant",
 				id: "msg_pack_and_smoke",
+				// Pinned pricing-table entry (see bin/wtft.mjs MODELS): the cost is
+				// deterministic ($4.50 = 1M in × $3/M + 100K out × $15/M).
 				model: "claude-sonnet-4-6",
 				timestamp: "2026-08-10T12:00:00.000Z",
 				usage: { input_tokens: 1000000, output_tokens: 100000 },

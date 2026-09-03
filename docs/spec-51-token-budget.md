@@ -11,9 +11,9 @@ distance-to-budget visualizations will land on (princess-pi/wtft#53).
 
 It runs transparently: it intercepts provider requests, checks a sliding 120s
 window of TPM across all active local sessions, and when a model crosses its
-safety threshold (80% of that model's subscription quota, from the
-`MODEL_QUOTA_REGISTRY` ceilings), it enforces a 40s synchronous cooldown rather
-than letting the provider hard-fail.
+safety threshold (~80% of that model's subscription quota — the
+`MODEL_QUOTA_REGISTRY` ceilings are 80–83% per model), it enforces a 40s
+synchronous cooldown rather than letting the provider hard-fail.
 
 ## One tool, one name
 
@@ -48,7 +48,8 @@ appears nowhere in this repo). The table records the code, not the misquote.
   with `-w` / `-f` aliases.
 - **Widget / status** — a below-editor panel plus a footer line, each showing
   per-model TPM as a colored bar against that model's ceiling (green below 50%,
-  yellow above 50%, red above 80%, gray at 0).
+  yellow above 50%, red above 80%; zero-TPM models are skipped in the panel and
+  grayed in the footer).
 - **Dependency on the tag format** — it scans `wtft-tags/` and parses
   `.wtft-tag.vX.Y.Z.jsonl` filenames. That grammar is a wire-format contract,
   not an implementation detail: it is pinned by `tests/wtft-tag-format.test.ts`

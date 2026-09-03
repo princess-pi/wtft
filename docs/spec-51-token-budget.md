@@ -30,13 +30,16 @@ Canonical term is **Token Budget**. The four pre-rename names are retired:
 as the tool's name. In a harness the short command is `/budget`; "Token Budget"
 is the name you find the tool under.
 
+The issue's quote names the old command `/tps`; the code was `/tpm` (`\btps\b`
+appears nowhere in this repo). The table records the code, not the misquote.
+
 ## Contract
 
 - **Config** — `~/.config/princess-pi-tools/token-budget.json`, resolved by
   `@princess-pi/libs/config`. Keys: `widget` (bool), `footer` (bool),
-  `emojiDisabled` (bool). Read by the extension; written only by the extension,
-  never by the CLI — config persistence is a *convention*, not a lib
-  (princess-pi/wtft#51 decision 3).
+  `emojiDisabled` (bool). Read and written by the extension. The
+  config-persistence split (the CLI reads config and never writes it) is
+  decision 3 of #51, not this rename — it is documented and enforced there.
 - **Command** — `/budget` toggles the widget and footer; flags `--widget
   on|off`, `--footer on|off`, `--emoji`, `--no-emoji`, `--reset`, `--why`,
   with `-w` / `-f` aliases.
@@ -49,9 +52,19 @@ is the name you find the tool under.
   against `docs/wtft-tag-format.md`, so a tagger rename is a caught break, not a
   silent one.
 
+## Renamed, except where the name is an external contract
+
+The `/tmp` state files keep their names — `pi-rate-limit-coffee.json` (the
+cooldown lockfile) and `pi-rate-limit-stats.json` (the stats cache). The
+lockfile is read by external tmux / status-bar integrations, so renaming it is a
+breaking change for *them*, not a rename of this tool. Treat "rate-limit" there
+as describing what the file holds, not the tool's name.
+
 ## Not this tool
 
 - The absolute-spend budget and the distance-to-budget visualization are
   princess-pi/wtft#53 — named here, not yet built.
 - Provider quota changes are out of scope: Token Budget displays and monitors;
   it cannot raise an API limit.
+- The glossary entry (closer item 1) lands with princess-pi/wtft#52, which
+  creates `CONTEXT.md`; it is not part of this rename.

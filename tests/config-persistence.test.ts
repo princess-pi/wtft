@@ -14,8 +14,10 @@
  *      are the writers — they persist the `/wtft` and `/budget` display
  *      settings. The CLI reads; the extensions write.
  *
- *   `writeConfig` MERGES rather than clobbers is covered by the libs suite
- *   (princess-pi/libs tests/config-persistence.test.ts), not re-derived here.
+ *   The `writeConfig` merge contract is owned by the libs suite
+ *   (princess-pi/libs tests/config-persistence.test.ts); the
+ *   surviving-unrelated-settings assertions here observe that merge as a
+ *   data-integrity check, they do not re-derive the contract.
  *
  *   Every check runs against a temp `XDG_CONFIG_HOME` set by this file, not by
  *   the runner — a test about config writes is the last place to rely on
@@ -180,8 +182,11 @@ check("/wtft command is registered", () => {
 async function runSlashCommand(cmd: string, args: string): Promise<void> {
 	try {
 		await registered[cmd].handler(args, permissiveMock());
-	} catch {
-		// The write happens before the render, which needs a live TUI.
+	} catch (err) {
+		// The write happens before the render, which needs a live TUI. A throw
+		// after the write is expected; log it so a genuine write-path bug is
+		// visible rather than silently discarded.
+		console.error(`  [headless] /${cmd} handler threw after write (expected render stage): ${(err as Error).message}`);
 	}
 }
 

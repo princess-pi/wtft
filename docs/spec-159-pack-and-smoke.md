@@ -16,11 +16,15 @@ for git-URL installs only, never for the registry channel (Node Toolchain
 Standard).
 
 The Pi extensions (`extensions/wtft.ts`, `extensions/token-budget.ts`) are NOT
-in the tarball — they load from a source checkout (the git channel), where
-`@princess-pi/libs` and `wcwidth` are `devDependencies` and therefore present
-under a normal `bun install`. Only the two CLI bundles are self-contained and
-shipped via npm; the extensions' runtime deps are satisfied by the dev install,
-never by the registry tarball.
+in the tarball and are NOT delivered by any npm channel (neither the registry
+tarball nor an npm git-URL install — the `files` allowlist ships only the two
+bundles, and npm git installs do not retain a dependency's devDependencies).
+They load from a SOURCE CHECKOUT of this repo, where `bun install` (dev) makes
+`@princess-pi/libs` and `wcwidth` — both devDependencies — resolvable; the
+dev install is the only place those are needed, because the bundles vendor
+them at build time (#36). The extensions' import resolution under a dev
+install is exercised by `tests/config-persistence.test.ts`, which imports both
+extensions and drives their writes.
 
 ## What it caught on arrival
 

@@ -589,12 +589,23 @@ export function formatMmmDdStr(dateStr: string): string {
 /**
  * Compute visual (monospace cell) width of a string after stripping ANSI escapes.
  * Delegates to the wcwidth library for proper Unicode East Asian Width handling
- * (#103). Formerly used a hand-rolled CJK-range + surrogate-pair heuristic that
- * mis-reported wide emoji (🕛, ⚡) as single-width.
+ * (#103), with one correction: wcwidth reports the "ambiguous"-width emoji in
+ * U+2600–U+27BF (☀️ U+2600, ⚡ U+26A1, ⚠️ U+26A0, ✅ U+2705, ❌ U+274C) as one
+ * column, but every modern terminal renders them as two. Measuring them at 1
+ * made the SURGE timeline a column short at noon — right where the current-hour
+ * clock sits after the sun (#64).
  */
 export function getVisualLength(str: string): number {
 	const clean = str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-	return wcwidth(clean);
+	let width = 0;
+	for (const ch of clean) {
+		const cp = ch.codePointAt(0)!;
+		// Variation selectors are zero-width; the preceding character's width
+		// is what they modify, so they add nothing on their own.
+		if (cp === 0xfe0f || cp === 0xfe0e) continue;
+		width += cp >= 0x2600 && cp <= 0x27bf ? 2 : wcwidth(ch);
+	}
+	return width;
 }
 
 // MAIN LAYOUT COMPILER

@@ -31,7 +31,8 @@ princess-pi-tools (`docs/manifests/` missing from the `files` allowlist).
 - **Pre-flight** — refuses to run if `bin/` has uncommitted changes, because
   `npm pack` fires `prepare`, which rebuilds that path and would clobber WIP.
 - **Pack** — `npm pack`, then restore `bin/` and assert it is clean again.
-- **Allowlist** — the tarball carries exactly the `bin/*.mjs` bundles.
+- **Allowlist** — the tarball carries the `bin/*.mjs` bundles plus npm's
+  mandatory `package.json`/`LICENSE`/`README`, and nothing else.
 - **Install** — plain node/npm with bun absent from PATH (the real node binary
   is resolved and verified not to be bun, since this suite itself runs under
   bun and `process.execPath` would lie).

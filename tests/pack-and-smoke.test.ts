@@ -141,13 +141,12 @@ try {
 	});
 
 	if (!tgzPath) {
-		console.log(`\n${RED}Cannot continue without a tarball.${RESET}`);
-		process.exit(1);
+		throw new Error("no tarball produced — cannot continue");
 	}
 
 	// ---
-	// 2. `files` allowlist coverage — the tarball carries exactly the two
-	//    bundles, nothing more.
+	// 2. `files` allowlist coverage — the tarball carries the two bundles plus
+	//    npm's mandatory package.json/LICENSE/README, and nothing else.
 	// ---
 
 	const tarballEntries = new Set(
@@ -166,6 +165,16 @@ try {
 	check(`all ${expectedBinMjs.length} bin/*.mjs files are in the tarball`, () => {
 		const missing = expectedBinMjs.filter((f) => !tarballEntries.has(f));
 		assert.deepStrictEqual(missing, [], `missing from tarball: ${missing.join(", ")}`);
+	});
+
+	// npm always adds package.json, LICENSE and README.md regardless of the
+	// `files` allowlist — those are expected. Anything beyond them and the
+	// bundles is a leak (a loose glob pulling source, tests, or node_modules).
+	const alwaysIncluded = ["package.json", "LICENSE", "README.md"];
+	const allowed = new Set([...expectedBinMjs, ...alwaysIncluded]);
+	check("the tarball carries the bundles plus npm-mandatory files, and nothing else", () => {
+		const extra = [...tarballEntries].filter((f) => !allowed.has(f));
+		assert.deepStrictEqual(extra, [], `unexpected in tarball: ${extra.join(", ")}`);
 	});
 
 	// ---

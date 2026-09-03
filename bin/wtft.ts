@@ -488,6 +488,9 @@ async function main() {
 			hasMode: opts.hasMode,
 			hasTicks: opts.hasTicks,
 			hasTimezone: opts.hasTimezone,
+			// `--no-emoji` / `--emoji` override the session-file emoji setting in
+			// watch mode too (#62). Omitted when no flag was passed.
+			disabledEmoji: typeof opts.enableEmoji === "boolean" ? !opts.enableEmoji : undefined,
 		});
 		return; // watchTagFile never returns until SIGINT
 	}

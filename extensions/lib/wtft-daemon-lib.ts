@@ -37,6 +37,12 @@ export interface WatchSettings {
 	hasMode?: boolean;
 	hasTicks?: boolean;
 	hasTimezone?: boolean;
+	/**
+	 * CLI emoji override (`--no-emoji` / `--emoji`). When set, it wins over the
+	 * session-file `emoji-settings` entry, mirroring the non-watch CLI path
+	 * (#62). Omitted (undefined) keeps the existing session-file behaviour.
+	 */
+	disabledEmoji?: boolean;
 }
 
 // CLASSIFIED TAG FILE READER (#53 — daemon output → Interaction[])
@@ -1245,9 +1251,9 @@ export async function watchTagFile(
 
 	// Read initial classified entries from tag file (daemon may have already
 	// processed part of the session before we started watching).
-	// Read emoji setting from session file (not from WatchSettings — emoji disable
-	// is only toggled via Pi, never from CLI flags)
-	let disabledEmoji = false;
+	// Emoji disable: CLI flag (--no-emoji/--emoji) wins; otherwise the session-file
+	// inline emoji-settings entry (Pi-toggled) decides (#62).
+	let disabledEmoji = typeof settings.disabledEmoji === "boolean" ? settings.disabledEmoji : false;
 	let allInteractions: Interaction[] = readClassifiedTagFile(tagPath);
 	let lastReadOffset = 0;
 	try {
@@ -1271,7 +1277,7 @@ export async function watchTagFile(
 			try {
 				const entry = JSON.parse(line);
 				if (entry.type === "custom" && entry.customType === "emoji-settings") {
-					if (entry.data && typeof entry.data.disabled === "boolean") {
+					if (entry.data && typeof entry.data.disabled === "boolean" && settings.disabledEmoji === undefined) {
 						disabledEmoji = entry.data.disabled;
 					}
 				} else if (entry.type === "custom" && entry.customType === "wtft-settings") {

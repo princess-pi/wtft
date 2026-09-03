@@ -14,7 +14,6 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { homedir } from "node:os";
 import { applyUserPricing, type ModelPricing } from "./wtft-cost.js";
-import { emitLegacyDeprecation } from "@princess-pi/libs/config";
 
 // ---
 // PATH RESOLUTION
@@ -22,19 +21,10 @@ import { emitLegacyDeprecation } from "@princess-pi/libs/config";
 
 /**
  * ~/.config/princess-pi-tools/wtft-pricing.json (repo config convention).
- * Falls back to the pre-rename princess-pi-packages/ path when only that one
- * exists, so an existing pricing file keeps working without being moved.
  */
 export function getUserPricingPath(): string {
 	const xdgHome = process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config");
-	const current = path.join(xdgHome, "princess-pi-tools", "wtft-pricing.json");
-	if (fs.existsSync(current)) return current;
-	const legacy = path.join(xdgHome, "princess-pi-packages", "wtft-pricing.json");
-	if (fs.existsSync(legacy)) {
-		emitLegacyDeprecation(legacy, current);
-		return legacy;
-	}
-	return current;
+	return path.join(xdgHome, "princess-pi-tools", "wtft-pricing.json");
 }
 
 // ---

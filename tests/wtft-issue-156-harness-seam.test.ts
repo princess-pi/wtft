@@ -391,9 +391,9 @@ console.log("\n=== PART F: a third harness needs no shared file edited ===\n");
 	// The out-of-tree channel: config points at .mjs modules, loaded at startup.
 	const cfgDir = mktmp("wtft-156-cfg-");
 	const sketch = path.join(process.cwd(), "research", "156-codex-harness-sketch");
-	fs.mkdirSync(path.join(cfgDir, "princess-pi-packages"), { recursive: true });
+	fs.mkdirSync(path.join(cfgDir, "princess-pi-tools"), { recursive: true });
 	fs.writeFileSync(
-		path.join(cfgDir, "princess-pi-packages", "wtft-harnesses.json"),
+		path.join(cfgDir, "princess-pi-tools", "wtft-harnesses.json"),
 		JSON.stringify({
 			codex: {
 				label: "Codex",
@@ -402,7 +402,7 @@ console.log("\n=== PART F: a third harness needs no shared file edited ===\n");
 			},
 		})
 	);
-	const loaded = await loadExternalHarnesses(path.join(cfgDir, "princess-pi-packages", "wtft-harnesses.json"));
+	const loaded = await loadExternalHarnesses(path.join(cfgDir, "princess-pi-tools", "wtft-harnesses.json"));
 	check(loaded.includes("codex"), "out-of-tree harness loads from config with no rebuild");
 	check(getHarnesses().some((h: any) => h.id === "codex"), "…and appears in the registry");
 	check(harnessLabel("codex") === "Codex", "…with its own selector label");

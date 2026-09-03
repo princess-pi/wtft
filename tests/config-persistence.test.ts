@@ -78,9 +78,12 @@ function readConfigFile(): Record<string, unknown> {
 	return JSON.parse(fs.readFileSync(configPath, "utf8"));
 }
 
-/** Run the CLI and report whether the config file changed byte-for-byte. */
-function cliMutatesConfig(args: string[]): boolean {
+/** Run the CLI and report mutation AND exit status. Both matter: a CLI that
+ *  fails to start also never writes, so "no mutation" alone would pass
+ *  vacuously on a broken build. */
+function cliRun(args: string[]): { mutated: boolean; exitCode: number } {
 	const before = fs.readFileSync(configPath);
+	let exitCode = 0;
 	try {
 		execFileSync(process.execPath, [CLI_BIN, ...args], {
 			cwd: REPO_ROOT,
@@ -88,10 +91,10 @@ function cliMutatesConfig(args: string[]): boolean {
 			stdio: "ignore",
 			timeout: 30_000,
 		});
-	} catch {
-		// Exit status is irrelevant — the question is only whether it wrote.
+	} catch (err) {
+		exitCode = (err as { status?: number }).status ?? 1;
 	}
-	return !fs.readFileSync(configPath).equals(before);
+	return { mutated: !fs.readFileSync(configPath).equals(before), exitCode };
 }
 
 console.log("🏃 Running config persistence tests (#51 decision 3)...\n");
@@ -104,16 +107,22 @@ console.log("1. CLI (bin/wtft.mjs) never writes config");
 
 seedConfig();
 
-check("--cost leaves config byte-identical", () => {
-	assert.strictEqual(cliMutatesConfig(["--cost", "-l", "3"]), false);
+check("--cost runs clean and leaves config byte-identical", () => {
+	const r = cliRun(["--cost", "-l", "3"]);
+	assert.strictEqual(r.exitCode, 0, `exit ${r.exitCode}`);
+	assert.strictEqual(r.mutated, false);
 });
 
-check("--tokens leaves config byte-identical", () => {
-	assert.strictEqual(cliMutatesConfig(["--tokens", "-l", "3"]), false);
+check("--tokens runs clean and leaves config byte-identical", () => {
+	const r = cliRun(["--tokens", "-l", "3"]);
+	assert.strictEqual(r.exitCode, 0, `exit ${r.exitCode}`);
+	assert.strictEqual(r.mutated, false);
 });
 
-check("--interval/--limit leave config byte-identical", () => {
-	assert.strictEqual(cliMutatesConfig(["-i", "3h", "-l", "7"]), false);
+check("--interval/--limit run clean and leave config byte-identical", () => {
+	const r = cliRun(["-i", "3h", "-l", "7"]);
+	assert.strictEqual(r.exitCode, 0, `exit ${r.exitCode}`);
+	assert.strictEqual(r.mutated, false);
 });
 
 check("persisted 'tokens: true' survives a --cost CLI run", () => {
@@ -128,18 +137,18 @@ console.log("\n2. The Pi extensions import writeConfig; the CLI source does not"
 
 const wtftExt = fs.readFileSync(path.join(REPO_ROOT, "extensions", "wtft.ts"), "utf8");
 const budgetExt = fs.readFileSync(path.join(REPO_ROOT, "extensions", "token-budget.ts"), "utf8");
-const cliSrc = fs.readFileSync(path.join(REPO_ROOT, "bin", "wtft.ts"), "utf8");
 
-check("extensions/wtft.ts imports writeConfig", () => {
-	assert.match(wtftExt, /writeConfig/);
+// The import statement, not a bare substring — a comment mentioning
+// writeConfig must not count as importing it, and a word-boundary match
+// must not miss the aliased form.
+const IMPORT_WRITE = /import\s*\{[^}]*\bwriteConfig\b[^}]*\}\s*from\s*["']@princess-pi\/libs\/config["']/;
+
+check("extensions/wtft.ts imports writeConfig from @princess-pi/libs/config", () => {
+	assert.match(wtftExt, IMPORT_WRITE);
 });
 
-check("extensions/token-budget.ts imports writeConfig", () => {
-	assert.match(budgetExt, /writeConfig/);
-});
-
-check("bin/wtft.ts (CLI source) imports no writeConfig", () => {
-	assert.doesNotMatch(cliSrc, /writeConfig/);
+check("extensions/token-budget.ts imports writeConfig from @princess-pi/libs/config", () => {
+	assert.match(budgetExt, IMPORT_WRITE);
 });
 
 // ---

@@ -267,7 +267,7 @@ try {
 				id: "msg_pack_and_smoke",
 				model: "claude-sonnet-4-6",
 				timestamp: "2026-08-10T12:00:00.000Z",
-				usage: { input_tokens: 1000, output_tokens: 100 },
+				usage: { input_tokens: 1000000, output_tokens: 100000 },
 				content: [{ type: "text", text: "smoke" }],
 			},
 		}) + "\n",
@@ -282,7 +282,7 @@ try {
 	check("wtft -s <fixture> renders a cost bar chart (exit 0, no error banner, a $-figure)", () => {
 		assert.strictEqual(renderResult.status, 0, `exit ${renderResult.status}: ${renderResult.stdout}${renderResult.stderr}`);
 		assert.ok(!/❌|System Error/.test(renderResult.stdout), `error banner in output:\n${renderResult.stdout}`);
-		assert.ok(/\$\d/.test(renderResult.stdout), `no rendered dollar figure in output:\n${renderResult.stdout}`);
+		assert.ok(/\$[1-9]\d*\.\d{2}/.test(renderResult.stdout), `no non-zero rendered cost in output:\n${renderResult.stdout}`);
 	});
 } catch (err) {
 	console.log(`${RED}Unexpected error:${RESET} ${(err as Error).stack ?? err}`);

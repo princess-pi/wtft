@@ -61,7 +61,7 @@
     </ul>
 
     <h4>2. Active Session Log aggregation</h4>
-    <p>Token Budget scans the append-only <code>.jsonl</code> logs in <code>~/.claude/projects/</code> and <code>~/.pi/agent/sessions/</code> updated within the last 2 minutes to aggregate total TPM across all parallel agent sessions.</p>
+    <p>Token Budget scans the <code>wtft-tags/</code> tag files (the <code>.wtft-tag.vX.Y.Z.jsonl</code> records) under <code>~/.claude/projects/</code> and <code>~/.pi/agent/sessions/</code>, updated within the last 2 minutes, to aggregate total TPM across all parallel agent sessions.</p>
 
     <h4>3. Schema & Token Counting (Issue #25 Fix)</h4>
     <p>To support multiple provider engines seamlessly, the token extractor parses provider-specific usage schemas from JSONL session records with robust fallbacks.</p>
@@ -142,7 +142,7 @@ if (!inputTokens && msg?.usage) {
     <h3>Architectural Scope & Quota Isolation Boundaries</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
         <p><strong>1. Single Host / Local User Limit:</strong></p>
-        <p>Because the Token Budget aggregates rolling TPM by reading append-only <code>.jsonl</code> logs stored under local home folders (<code>~/.claude/projects/</code> and <code>~/.pi/agent/sessions/</code>), rate limits are only computed and tracked for active sessions running under the <strong>same user account on the same local host machine</strong>. There is no inter-host, inter-machine, or network-level tracking for other development machines or autonomous services sharing the same model API key.</p>
+        <p>Because the Token Budget aggregates rolling TPM by reading the <code>wtft-tags/</code> tag files stored under local home folders (<code>~/.claude/projects/</code> and <code>~/.pi/agent/sessions/</code>), rate limits are only computed and tracked for active sessions running under the <strong>same user account on the same local host machine</strong>. There is no inter-host, inter-machine, or network-level tracking for other development machines or autonomous services sharing the same model API key.</p>
         
         <p><strong>2. Best Practices & Isolation Workarounds:</strong></p>
         <ul>

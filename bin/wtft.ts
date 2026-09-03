@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import wtftManifest from "../docs/manifests/wtft-cmd.json" with { type: "json" };
 import {
 	buildWtftLines,
+	buildTimelineString,
 	parseSessionFile,
 	parseEntryToInteraction,
 	classifyInteraction,
@@ -132,6 +133,7 @@ export {
 	parseEntryToInteraction,
 	classifyInteraction,
 	buildWtftLines,
+	buildTimelineString,
 	parseSessionFile,
 	deduplicateInteractions,
 	renderTokenSummary,

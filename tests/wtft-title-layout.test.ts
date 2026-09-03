@@ -11,8 +11,9 @@
  *   row. Legend goes to its own row when too wide.
  *
  *   The timeline is identified by its moon-phase bookends (🌑…🌘), not by the
- *   current-hour marker: the marker is a clock face that changes every hour and
- *   is replaced by ☀️ at noon, whereas the bookends are always present. This
+ *   current-hour marker: the marker is a clock face that changes every hour
+ *   (☀️ marks solar noon as a separate glyph, not by replacing the clock),
+ *   whereas the bookends are always present. This
  *   suite used to key off the old ◆ marker, which the renderer dropped — the
  *   replacement invariant is deliberately the one that does not depend on what
  *   time the suite happens to run (#158).

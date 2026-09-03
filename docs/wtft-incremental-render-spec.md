@@ -500,8 +500,10 @@ The 24-hour timeline on the title line shows DeepSeek peak-valley surge pricing 
   bins are still flagged. Which day the bar should describe is #496.
 - **Green segments**: All other hours (normal pricing)
 - **Clock-face marker**: The current local hour renders as a clock-face emoji
-  (`☀️` at noon), and is additionally bold — which starts its own colour segment.
-  There is no `◆` and has not been for some time; this line said there was (#503).
+  (<code>🕐</code>–<code>🕛</code>, including <code>🕛</code> at the noon hour), and is
+  additionally bold — which starts its own colour segment. Solar noon is a separate
+  `☀️` glyph between hour 11 and hour 12, never a replacement for the noon hour's slot
+  (#7). There is no `◆` and has not been for some time; this line said there was (#503).
 - **Surge badges**: Appended when in or near a surge window:
   - `⚡ SURGE 2x` — currently in a surge window (2× pricing active)
   - `⚡ SURGE APPROACHING` — within 20 minutes of surge start (blinking orange)

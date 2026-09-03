@@ -1,9 +1,9 @@
 /**
- * Tests for #89 — TPM rate-limiter model short-code registry update.
+ * Tests for #89 — TPM token-budget model short-code registry update.
  *
  * Validates that the MODEL_QUOTA_REGISTRY and getModelShortName source
  * contain entries for current Pi models (Claude Sonnet 5, Fable 5, GPT-5.x, etc).
- * Uses source-level assertions — the rate-limiter is a Pi extension module
+ * Uses source-level assertions — the token-budget is a Pi extension module
  * and can't be directly imported for unit testing.
  */
 
@@ -11,7 +11,7 @@ import * as assert from "node:assert";
 import { describe, it } from "node:test";
 import * as fs from "node:fs";
 
-const source = fs.readFileSync("extensions/rate-limiter.ts", "utf8");
+const source = fs.readFileSync("extensions/token-budget.ts", "utf8");
 
 // --- Helpers ---
 

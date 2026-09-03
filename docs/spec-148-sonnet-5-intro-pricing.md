@@ -235,7 +235,7 @@ re-price on next read.
 ```
 $ rg -n 'sonnet-5' tests/*.ts
 tests/wtft-claude5-pricing.test.ts:79-108     — dollar assertions + isModelPriced (updated here)
-extensions/rate-limiter.ts / rate-limiter-model-registry.test.ts — TPM limit lookup, not $ pricing
+extensions/token-budget.ts / token-budget-model-registry.test.ts — TPM limit lookup, not $ pricing
 tests/wtft-issue-52-tool-categories.test.ts:40,54  — tool→category classification, no cost assert
 tests/wtft-daemon-lifecycle.test.ts:71,97      — fixture cost is hardcoded `c: 0.01`, never calls
                                                    calculateClaudeCost

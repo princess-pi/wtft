@@ -2,7 +2,7 @@
 // pattern + record shape) against docs/wtft-tag-format.md.
 //
 // WHY THIS FILE EXISTS. The tag file format was an implicit shared assumption
-// between the daemon (writer), the rate-limiter (reader), and session-selector
+// between the daemon (writer), the token-budget (reader), and session-selector
 // (reader). ppp#499 single-sourced the version; this test pins the filename
 // pattern and record shape so drift from any writer or reader is caught here
 // rather than at runtime (Phase 5, btw#63).

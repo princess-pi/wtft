@@ -373,13 +373,13 @@ function getOrUpdateStats(activeFiles: FileInfo[], hostingSessionId: string | nu
 // WIDGET RENDERER
 // ---
 
-interface TpmSettings {
+interface BudgetSettings {
   widget: boolean;
   footer: boolean;
 }
 
-function getTpmSettings(ctx?: any): TpmSettings {
-  const cfg = loadConfig("tpm", { widget: true, footer: false });
+function getBudgetSettings(ctx?: any): BudgetSettings {
+  const cfg = loadConfig("token-budget", { widget: true, footer: false });
   return {
     widget: cfg.widget !== false,
     footer: cfg.footer === true,
@@ -387,19 +387,19 @@ function getTpmSettings(ctx?: any): TpmSettings {
 }
 
 function isEmojiDisabled(): boolean {
-  const cfg = loadConfig("tpm", {});
+  const cfg = loadConfig("token-budget", {});
   return cfg.emojiDisabled === true;
 }
 
-function updateRateLimiterWidget(ctx: ExtensionContext) {
-  const settings = getTpmSettings();
+function updateTokenBudgetWidget(ctx: ExtensionContext) {
+  const settings = getBudgetSettings();
 
   if (!settings.widget) {
-    ctx.ui.setWidget("rate-limiter", undefined);
+    ctx.ui.setWidget("token-budget", undefined);
   }
 
   if (!settings.footer) {
-    ctx.ui.setStatus("rate-limiter", undefined);
+    ctx.ui.setStatus("token-budget", undefined);
   }
 
   if (!settings.widget && !settings.footer) {
@@ -446,17 +446,17 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
         else if (hostingData.tpm > hostingCeiling * 0.5) hColor = "\x1b[33m"; // Yellow
         else if (hostingData.tpm === 0) hColor = "\x1b[90m"; // Gray
 
-        const sentinelIcon = emojiDisabled ? "[!]" : "🛡️";
-        footerParts.push(`\x1b[1m${sentinelIcon} [${hColor}${hBar}\x1b[0m\x1b[1m] ${hostingShortCode}: ${hColor}${hGlobalStr}\x1b[0m\x1b[1m/${hLimitStr}\x1b[0m`);
+        const budgetIcon = emojiDisabled ? "[!]" : "🛡️";
+        footerParts.push(`\x1b[1m${budgetIcon} [${hColor}${hBar}\x1b[0m\x1b[1m] ${hostingShortCode}: ${hColor}${hGlobalStr}\x1b[0m\x1b[1m/${hLimitStr}\x1b[0m`);
       }
-      ctx.ui.setStatus("rate-limiter", footerParts.join(" | "));
+      ctx.ui.setStatus("token-budget", footerParts.join(" | "));
     }
 
     // 2. Render TUI Widget if enabled
     if (settings.widget) {
       const lines: string[] = [];
-      const sentinelTitle = emojiDisabled ? "[!] Token Sentinel" : "🛡️  Token Sentinel";
-      lines.push(`\x1b[1;36m${sentinelTitle} (TPM Active Monitors) ───────────────────\x1b[0m`);
+      const budgetTitle = emojiDisabled ? "[!] Token Budget" : "🛡️  Token Budget";
+      lines.push(`\x1b[1;36m${budgetTitle} (TPM Active Monitors) ───────────────────\x1b[0m`);
 
       if (cooldownRemainingSecs !== null) {
         const remainingMs = cooldownRemainingSecs * 1000;
@@ -516,15 +516,15 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
         lines.push(`     ${bullet}${color}[${bar}] ${shortCode}: ${globalStr} glo [max ${limitStr}]`);
       }
 
-      ctx.ui.setWidget("rate-limiter", lines, { placement: "belowEditor" });
+      ctx.ui.setWidget("token-budget", lines, { placement: "belowEditor" });
     }
   } catch (err: any) {
     const warningIcon = emojiDisabled ? "[!]" : "⚠️";
     if (settings.widget) {
-      ctx.ui.setWidget("rate-limiter", [`${warningIcon} Rate Limiter Widget Error: ${err.message}`], { placement: "belowEditor" });
+      ctx.ui.setWidget("token-budget", [`${warningIcon} Token Budget Widget Error: ${err.message}`], { placement: "belowEditor" });
     }
     if (settings.footer) {
-      ctx.ui.setStatus("rate-limiter", `${warningIcon} Rate Limiter Error`);
+      ctx.ui.setStatus("token-budget", `${warningIcon} Token Budget Error`);
     }
   }
 }
@@ -533,7 +533,7 @@ function updateRateLimiterWidget(ctx: ExtensionContext) {
 // EXTENSION DEFINITION
 // ---
 
-export default function rateLimiterExtension(pi: ExtensionAPI) {
+export default function tokenBudgetExtension(pi: ExtensionAPI) {
   // Register flags for tick refresh rate
   pi.registerFlag("tick", {
     description: "Specify the refresh interval in s (seconds) or ms (milliseconds), e.g. '2' or '500ms'",
@@ -567,7 +567,7 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
 
     const tick = () => {
       if (lastCtx) {
-        updateRateLimiterWidget(lastCtx);
+        updateTokenBudgetWidget(lastCtx);
       }
       
       // Dynamic adjust: if we enter or leave cooldown, adjust the active tick rate!
@@ -591,7 +591,7 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
 
   // 1. On turn/session starts and ends, refresh the Pi status widget
   pi.on("session_start", async (_event, ctx) => {
-    updateRateLimiterWidget(ctx);
+    updateTokenBudgetWidget(ctx);
     startBackgroundRefresh(ctx);
   });
 
@@ -601,12 +601,12 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
 
   pi.on("turn_start", async (_event, ctx) => {
     lastCtx = ctx;
-    updateRateLimiterWidget(ctx);
+    updateTokenBudgetWidget(ctx);
   });
 
   pi.on("turn_end", async (_event, ctx) => {
     lastCtx = ctx;
-    updateRateLimiterWidget(ctx);
+    updateTokenBudgetWidget(ctx);
   });
 
   // 2. Intercept requests to verify rolling TPM rate-limit limits
@@ -625,7 +625,7 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
       const currentTpm = stats[shortCode]?.tpm || 0;
 
       // Update widget with pre-request metrics
-      updateRateLimiterWidget(ctx);
+      updateTokenBudgetWidget(ctx);
 
       // If our specific active model is crossing its safety threshold:
       // DeepSeek models (prefix "d") are concurrency-limited, not TPM-limited —
@@ -633,7 +633,7 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
       const isDeepseek = shortCode.startsWith("d");
       if (currentTpm > ceiling && !isDeepseek) {
         ctx.ui.notify(
-          `⚠️ [Rate Limiter] ${shortCode} sliding window has consumed ${currentTpm.toLocaleString()} input tokens. ` +
+          `⚠️ [Token Budget] ${shortCode} sliding window has consumed ${currentTpm.toLocaleString()} input tokens. ` +
           `Initiating a 40-second "coffee break" to let Gemini/Claude quota reset...`,
           "warning"
         );
@@ -651,11 +651,11 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
           const remainingMs = endTime - Date.now();
           const remainingSecs = Math.ceil(remainingMs / 1000);
           cooldownRemainingSecs = remainingSecs;
-          updateRateLimiterWidget(ctx);
+          updateTokenBudgetWidget(ctx);
           await sleep(1000);
         }
         cooldownRemainingSecs = null;
-        updateRateLimiterWidget(ctx);
+        updateTokenBudgetWidget(ctx);
 
         // Clean up the lockfile
         try {
@@ -666,61 +666,61 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
           // ignore
         }
 
-        ctx.ui.notify("☕ [Rate Limiter] Cooldown complete. Resuming turn execution.", "success");
-        updateRateLimiterWidget(ctx);
+        ctx.ui.notify("☕ [Token Budget] Cooldown complete. Resuming turn execution.", "success");
+        updateTokenBudgetWidget(ctx);
       }
     } catch (err: any) {
-      ctx.ui.notify(`⚠️ [Rate Limiter Error] Failed to compute rate limit: ${err.message}`, "error");
+      ctx.ui.notify(`⚠️ [Token Budget Error] Failed to compute rate limit: ${err.message}`, "error");
     }
   });
 
-  // 3. Register '/tpm' slash command to manually toggle widget visibility and footer status
-  pi.registerCommand("tpm", {
-    description: "Configure TPM rate-limiter display options (e.g. /tpm --widget off --footer on)",
+  // 3. Register '/budget' slash command to manually toggle widget visibility and footer status
+  pi.registerCommand("budget", {
+    description: "Configure Token Budget display options (e.g. /budget --widget off --footer on)",
     handler: async (args, ctx) => {
       const trimmed = args.trim();
-      const current = getTpmSettings(ctx);
+      const current = getBudgetSettings(ctx);
 
       if (trimmed === "--help" || trimmed === "-h") {
-        let helpText = `\x1b[1m\x1b[36m/tpm\x1b[0m - Configure TPM Rate-Limiter Display Options\n\n`;
-        helpText += `Control the visibility of the TPM floating widget box and the status bar footer.\n\n`;
+        let helpText = `\x1b[1m\x1b[36m/budget\x1b[0m - Configure Token Budget Display Options\n\n`;
+        helpText += `Control the visibility of the Token Budget floating widget box and the status bar footer.\n\n`;
 
         helpText += `\x1b[1mUsage:\x1b[0m\n`;
-        helpText += `  /tpm                                    Toggle the floating widget panel on/off\n`;
-        helpText += `  /tpm --widget [on|off]                  Explicitly enable or disable the floating widget panel\n`;
-        helpText += `  /tpm --footer [on|off]                  Explicitly enable or disable the bottom footer line 3\n`;
-        helpText += `  /tpm --emoji                            Enable emoji icons in widgets/footer\n`;
-        helpText += `  /tpm --no-emoji                         Disable emoji icons in widgets/footer\n`;
-        helpText += `  /tpm --why                              Explain why you'd run this tool, with user scenarios\n\n`;
+        helpText += `  /budget                                    Toggle the floating widget panel on/off\n`;
+        helpText += `  /budget --widget [on|off]                  Explicitly enable or disable the floating widget panel\n`;
+        helpText += `  /budget --footer [on|off]                  Explicitly enable or disable the bottom footer line 3\n`;
+        helpText += `  /budget --emoji                            Enable emoji icons in widgets/footer\n`;
+        helpText += `  /budget --no-emoji                         Disable emoji icons in widgets/footer\n`;
+        helpText += `  /budget --why                              Explain why you'd run this tool, with user scenarios\n\n`;
 
         helpText += `\x1b[1mAliases:\x1b[0m\n`;
         helpText += `  -w for --widget, -f for --footer\n\n`;
 
         helpText += `\x1b[1mExamples:\x1b[0m\n`;
-        helpText += `  /tpm --widget off --footer on\n`;
-        helpText += `  /tpm --no-emoji\n`;
+        helpText += `  /budget --widget off --footer on\n`;
+        helpText += `  /budget --no-emoji\n`;
 
         ctx.ui.notify(helpText, "info");
         return;
       }
 
       if (trimmed === "--why") {
-        let whyText = `\x1b[1m\x1b[36m/tpm\x1b[0m - Configure TPM Rate-Limiter Display Options\n\n`;
-        whyText += `Control the visibility of the TPM floating widget box and the status bar footer.\n\n`;
-        whyText += `\x1b[1mWhy run /tpm?\x1b[0m\n\n`;
+        let whyText = `\x1b[1m\x1b[36m/budget\x1b[0m - Configure Token Budget Display Options\n\n`;
+        whyText += `Control the visibility of the Token Budget floating widget box and the status bar footer.\n\n`;
+        whyText += `\x1b[1mWhy run /budget?\x1b[0m\n\n`;
         whyText += `  You're approaching your API rate limit and need to see your current usage at a glance.\n`;
-        whyText += `    \x1b[33m$ /tpm\x1b[0m\n`;
+        whyText += `    \x1b[33m$ /budget\x1b[0m\n`;
         whyText += `    \x1b[32m→ A floating widget panel appears showing the current model's TPM usage as a colored bar, updated every second.\x1b[0m\n\n`;
         whyText += `  You want the rate info in the status bar but not as a floating widget box.\n`;
-        whyText += `    \x1b[33m$ /tpm --widget off --footer on\x1b[0m\n`;
-        whyText += `    \x1b[32m→ The widget box is hidden but the TPM status line remains visible in the footer.\x1b[0m\n\n`;
+        whyText += `    \x1b[33m$ /budget --widget off --footer on\x1b[0m\n`;
+        whyText += `    \x1b[32m→ The widget box is hidden but the Token Budget status line remains visible in the footer.\x1b[0m\n\n`;
         whyText += `  Your terminal doesn't render emoji well and you need ASCII-only widgets.\n`;
-        whyText += `    \x1b[33m$ /tpm --no-emoji\x1b[0m\n`;
+        whyText += `    \x1b[33m$ /budget --no-emoji\x1b[0m\n`;
         whyText += `    \x1b[32m→ All widget icons switch to single-width ASCII characters.\x1b[0m\n\n`;
         whyText += `  You want to increase your actual API quota or change provider rate limits.\n`;
-        whyText += `    \x1b[33m$ /tpm  # won't help\x1b[0m\n`;
-        whyText += `    \x1b[32m→ The TPM tool only displays and monitors usage — it cannot change provider quotas or API limits. Contact your provider to adjust tier limits.\x1b[0m\n\n`;
-        whyText += `\x1b[2mRun \x1b[0m/tpm --help\x1b[2m for the full flag reference.\x1b[0m\n`;
+        whyText += `    \x1b[33m$ /budget  # won't help\x1b[0m\n`;
+        whyText += `    \x1b[32m→ The Token Budget tool only displays and monitors usage — it cannot change provider quotas or API limits. Contact your provider to adjust tier limits.\x1b[0m\n\n`;
+        whyText += `\x1b[2mRun \x1b[0m/budget --help\x1b[2m for the full flag reference.\x1b[0m\n`;
 
         ctx.ui.notify(whyText, "info");
         return;
@@ -731,21 +731,21 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
       let handled = false;
 
       if (trimmed === "--reset") {
-        writeConfig("tpm", { widget: null, footer: null });
-        updateRateLimiterWidget(ctx);
-        ctx.ui.notify("TPM settings reset. Edit ~/.config/princess-pi-tools/tpm.json for new defaults.", "info");
+        writeConfig("token-budget", { widget: null, footer: null });
+        updateTokenBudgetWidget(ctx);
+        ctx.ui.notify("Token Budget settings reset. Edit ~/.config/princess-pi-tools/token-budget.json for new defaults.", "info");
         return;
       }
 
       if (trimmed === "--no-emojii" || trimmed === "--no-emoji") {
-        writeConfig("tpm", { emojiDisabled: true });
-        updateRateLimiterWidget(ctx);
-        ctx.ui.notify("Emoji icons in widgets have been disabled. (Persisted to tpm.json)", "info");
+        writeConfig("token-budget", { emojiDisabled: true });
+        updateTokenBudgetWidget(ctx);
+        ctx.ui.notify("Emoji icons in widgets have been disabled. (Persisted to token-budget.json)", "info");
         return;
       } else if (trimmed === "--emojii" || trimmed === "--emoji") {
-        writeConfig("tpm", { emojiDisabled: false });
-        updateRateLimiterWidget(ctx);
-        ctx.ui.notify("Emoji icons in widgets have been enabled. (Persisted to tpm.json)", "info");
+        writeConfig("token-budget", { emojiDisabled: false });
+        updateTokenBudgetWidget(ctx);
+        ctx.ui.notify("Emoji icons in widgets have been enabled. (Persisted to token-budget.json)", "info");
         return;
       }
 
@@ -788,13 +788,13 @@ export default function rateLimiterExtension(pi: ExtensionAPI) {
         newWidget = !current.widget;
       }
 
-      writeConfig("tpm", { widget: newWidget, footer: newFooter });
-      updateRateLimiterWidget(ctx);
+      writeConfig("token-budget", { widget: newWidget, footer: newFooter });
+      updateTokenBudgetWidget(ctx);
 
       const statusMsgs: string[] = [];
       statusMsgs.push(`Widget Box: ${newWidget ? "ENABLED" : "DISABLED"}`);
       statusMsgs.push(`Footer Line 3 Status: ${newFooter ? "ENABLED" : "DISABLED"}`);
-      ctx.ui.notify(`TPM Rate Limiter display settings updated: ${statusMsgs.join(" | ")}`, "info");
+      ctx.ui.notify(`Token Budget display settings updated: ${statusMsgs.join(" | ")}`, "info");
     }
   });
 }

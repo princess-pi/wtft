@@ -48,6 +48,18 @@ function check(label: string, fn: () => void) {
 	}
 }
 
+async function checkAsync(label: string, fn: () => Promise<void>) {
+	try {
+		await fn();
+		console.log(`  ${GREEN}PASS${RESET} ${label}`);
+		passed++;
+	} catch (err) {
+		console.log(`  ${RED}FAIL${RESET} ${label}`);
+		console.log(`       ${(err as Error).message.split("\n")[0]}`);
+		failed++;
+	}
+}
+
 // ---
 // Isolation: our own XDG root, restored on the way out.
 // ---
@@ -130,23 +142,76 @@ check("persisted 'tokens: true' survives a --cost CLI run", () => {
 });
 
 // ---
-// 2. The extensions are the writers
+// 2. The Pi extension DOES persist — the writer half, exercised
+//    behaviorally. A permissive mock drives the /wtft handler; the
+//    assertion is about what landed on disk, not how far the render got
+//    (which needs a live TUI, out of scope here).
 // ---
 
-console.log("\n2. The Pi extensions import writeConfig; the CLI source does not");
+console.log("\n2. The Pi /wtft extension writes config");
 
-const wtftExt = fs.readFileSync(path.join(REPO_ROOT, "extensions", "wtft.ts"), "utf8");
-const budgetExt = fs.readFileSync(path.join(REPO_ROOT, "extensions", "token-budget.ts"), "utf8");
+function permissiveMock(): any {
+	const handler: ProxyHandler<any> = {
+		get: (_t, prop) => {
+			if (prop === "then") return undefined; // stay await-safe
+			return new Proxy(function () { return permissiveMock(); }, handler);
+		},
+		apply: () => permissiveMock(),
+	};
+	return new Proxy(function () {}, handler);
+}
 
-// The import statement, not a bare substring — a comment mentioning
-// writeConfig must not count as importing it, and a word-boundary match
-// must not miss the aliased form.
-const IMPORT_WRITE = /import\s*\{[^}]*\bwriteConfig\b[^}]*\}\s*from\s*["']@princess-pi\/libs\/config["']/;
+const registered: Record<string, { handler: (args: string, ctx: any) => Promise<void> }> = {};
+const mockPi: any = {
+	on: () => {},
+	registerCommand: (name: string, def: any) => { registered[name] = def; },
+};
 
-check("extensions/wtft.ts imports writeConfig from @princess-pi/libs/config", () => {
-	assert.match(wtftExt, IMPORT_WRITE);
+const wtftExtension = (await import("../extensions/wtft.ts")).default;
+wtftExtension(mockPi);
+
+check("/wtft command is registered", () => {
+	assert.ok(registered.wtft, "expected a 'wtft' command");
 });
 
+async function runSlashCommand(args: string): Promise<void> {
+	try {
+		await registered.wtft.handler(args, permissiveMock());
+	} catch {
+		// The write happens before the render, which needs a live TUI.
+	}
+}
+
+await checkAsync("/wtft --cost persists tokens:false", async () => {
+	seedConfig({ tokens: true });
+	await runSlashCommand("--cost");
+	assert.strictEqual(readConfigFile().tokens, false);
+	assert.strictEqual(readConfigFile().timezone, "America/Los_Angeles", "unrelated settings must survive");
+});
+
+await checkAsync("/wtft --tokens persists tokens:true", async () => {
+	seedConfig({ tokens: false });
+	await runSlashCommand("--tokens");
+	assert.strictEqual(readConfigFile().tokens, true);
+});
+
+await checkAsync("/wtft --no-emoji persists disabledEmoji:true", async () => {
+	seedConfig();
+	await runSlashCommand("--no-emoji");
+	assert.strictEqual(readConfigFile().disabledEmoji, true);
+});
+
+await checkAsync("/wtft --emoji persists disabledEmoji:false", async () => {
+	seedConfig({ disabledEmoji: true });
+	await runSlashCommand("--emoji");
+	assert.strictEqual(readConfigFile().disabledEmoji, false);
+});
+
+// The token-budget extension is the writer for its own config; the same
+// split (CLI reads only, extension writes) holds there, pinned at the
+// import level rather than re-driving a second handler.
+const budgetExt = fs.readFileSync(path.join(REPO_ROOT, "extensions", "token-budget.ts"), "utf8");
+const IMPORT_WRITE = /import\s*\{[^}]*\bwriteConfig\b[^}]*\}\s*from\s*["']@princess-pi\/libs\/config["']/;
 check("extensions/token-budget.ts imports writeConfig from @princess-pi/libs/config", () => {
 	assert.match(budgetExt, IMPORT_WRITE);
 });

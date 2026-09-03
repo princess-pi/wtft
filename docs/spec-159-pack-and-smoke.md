@@ -50,3 +50,13 @@ princess-pi-tools (`docs/manifests/` missing from the `files` allowlist).
 - **Run** — `wtft --version`, `wtft-daemon --help`, and a synthesized
   Claude-Code-shaped session rendered through `wtft -s <fixture> --cost`
   (parse → interaction → rendered cost, not just argument handling).
+
+## Disposition of the third decision-3 guard
+
+Issue #51 decision 3 named three guards. Two land here and in
+`tests/config-persistence.test.ts`. The third — spec-reconcile backtest
+drift gates pinned to `parseInterval`'s and `buildTimelineString`'s
+docstrings — is closed without a gate: Duppy ruled those docstring
+placements "too specific" to pin a backtest against. Recorded here so the
+#51 closer's "all three guards land or are disposed of" condition is met
+explicitly, rather than left implicit.

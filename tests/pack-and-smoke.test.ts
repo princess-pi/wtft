@@ -79,10 +79,11 @@ function killLingeringDaemons() {
 				const pid = parseInt(fs.readFileSync(path.join(os.tmpdir(), pf), "utf8").trim(), 10);
 				// Only signal the PID if it is actually a wtft-daemon: a stale pid
 				// file whose PID the kernel has since recycled would otherwise
-				// SIGTERM an unrelated process. On non-Linux /proc is absent, so
-				// the check fails closed (no signal) and the daemon self-exits.
+				// SIGTERM an unrelated process. `ps -o command=` is the portable
+				// equivalent of reading /proc/<pid>/cmdline (works on Linux AND
+				// macOS/BSD, where /proc does not exist).
 				let cmdline = "";
-				try { cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8"); } catch {}
+				try { cmdline = execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" }).trim(); } catch {}
 				if (pid > 0 && cmdline.includes("wtft-daemon")) process.kill(pid, "SIGTERM");
 			} catch {}
 		}

@@ -172,8 +172,10 @@ const mockPi: any = {
 	getFlag: (name: string) => flags[name],
 };
 
-const wtftExtension = (await import("../extensions/wtft.ts")).default;
-wtftExtension(mockPi);
+await checkAsync("extensions import and register without throwing", async () => {
+	const wtftExtension = (await import("../extensions/wtft.ts")).default;
+	wtftExtension(mockPi);
+});
 
 check("/wtft command is registered", () => {
 	assert.ok(registered.wtft, "expected a 'wtft' command");
@@ -217,8 +219,10 @@ await checkAsync("/wtft --emoji persists disabledEmoji:false", async () => {
 
 // The token-budget extension is the writer for its OWN config file, and it
 // is exercised the same way — drive /budget, assert token-budget.json landed.
-const tokenBudgetExtension = (await import("../extensions/token-budget.ts")).default;
-tokenBudgetExtension(mockPi);
+await checkAsync("extensions/token-budget.ts imports and registers without throwing", async () => {
+	const tokenBudgetExtension = (await import("../extensions/token-budget.ts")).default;
+	tokenBudgetExtension(mockPi);
+});
 
 check("/budget command is registered", () => {
 	assert.ok(registered.budget, "expected a 'budget' command");

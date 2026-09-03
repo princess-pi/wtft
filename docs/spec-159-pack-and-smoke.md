@@ -15,6 +15,13 @@ channel runs `prepare` and therefore needs bun on PATH; bun-on-PATH is permitted
 for git-URL installs only, never for the registry channel (Node Toolchain
 Standard).
 
+The Pi extensions (`extensions/wtft.ts`, `extensions/token-budget.ts`) are NOT
+in the tarball — they load from a source checkout (the git channel), where
+`@princess-pi/libs` and `wcwidth` are `devDependencies` and therefore present
+under a normal `bun install`. Only the two CLI bundles are self-contained and
+shipped via npm; the extensions' runtime deps are satisfied by the dev install,
+never by the registry tarball.
+
 ## What it caught on arrival
 
 The first run of the suite was red, and the reason was a real packaging defect,

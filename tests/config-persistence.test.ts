@@ -162,9 +162,12 @@ function permissiveMock(): any {
 }
 
 const registered: Record<string, { handler: (args: string, ctx: any) => Promise<void> }> = {};
+const flags: Record<string, unknown> = {};
 const mockPi: any = {
 	on: () => {},
 	registerCommand: (name: string, def: any) => { registered[name] = def; },
+	registerFlag: (name: string) => { flags[name] = undefined; },
+	getFlag: (name: string) => flags[name],
 };
 
 const wtftExtension = (await import("../extensions/wtft.ts")).default;
@@ -207,13 +210,23 @@ await checkAsync("/wtft --emoji persists disabledEmoji:false", async () => {
 	assert.strictEqual(readConfigFile().disabledEmoji, false);
 });
 
-// The token-budget extension is the writer for its own config; the same
-// split (CLI reads only, extension writes) holds there, pinned at the
-// import level rather than re-driving a second handler.
-const budgetExt = fs.readFileSync(path.join(REPO_ROOT, "extensions", "token-budget.ts"), "utf8");
-const IMPORT_WRITE = /import\s*\{[^}]*\bwriteConfig\b[^}]*\}\s*from\s*["']@princess-pi\/libs\/config["']/;
-check("extensions/token-budget.ts imports writeConfig from @princess-pi/libs/config", () => {
-	assert.match(budgetExt, IMPORT_WRITE);
+// The token-budget extension is the writer for its OWN config file, and it
+// is exercised the same way — drive /budget, assert token-budget.json landed.
+const tokenBudgetExtension = (await import("../extensions/token-budget.ts")).default;
+tokenBudgetExtension(mockPi);
+
+check("/budget command is registered", () => {
+	assert.ok(registered.budget, "expected a 'budget' command");
+});
+
+const budgetConfigPath = path.join(xdgRoot, "princess-pi-tools", "token-budget.json");
+function readBudgetConfig(): Record<string, unknown> {
+	return JSON.parse(fs.readFileSync(budgetConfigPath, "utf8"));
+}
+
+await checkAsync("/budget --widget off persists widget:false to token-budget.json", async () => {
+	await registered.budget.handler("--widget off", permissiveMock());
+	assert.strictEqual(readBudgetConfig().widget, false);
 });
 
 // ---

@@ -169,6 +169,10 @@ try {
 		.filter((f) => f.endsWith(".mjs"))
 		.map((f) => path.join("bin", f));
 
+	check("exactly two bundles ship (the files allowlist)", () => {
+		assert.deepStrictEqual([...expectedBinMjs].sort(), ["bin/wtft.mjs", "bin/wtft-daemon.mjs"].sort());
+	});
+
 	check(`all ${expectedBinMjs.length} bin/*.mjs files are in the tarball`, () => {
 		const missing = expectedBinMjs.filter((f) => !tarballEntries.has(f));
 		assert.deepStrictEqual(missing, [], `missing from tarball: ${missing.join(", ")}`);

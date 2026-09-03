@@ -11,7 +11,7 @@ Where The F\*\*\*ing Tokens?! — the cost-auditing widget and CLI for coding-ag
 
 > **Daemon vs. log parser — two registers, not a winner.** These named the same thing in two
 > layers: `daemon` throughout the code (131× in `extensions/lib/wtft-daemon-lib.ts`, 12 filenames),
-> `log parser` in user-facing text and, as it turned out, in 28 runtime strings and comments too.
+> `log parser` in user-facing text and, as it turned out, in runtime strings and comments too.
 > The first ruling (#162, 2026-08-09) picked **daemon** outright and put `log parser` on the
 > `_Avoid_` list. **Reversed 2026-08-10** by Duppy: a single word could not serve both a reader
 > meeting the process for the first time and a variable name. The standing ruling is the
@@ -233,7 +233,7 @@ _Avoid_: Agent, client, platform
 The persistent TUI panel wtft renders below the editor inside the Pi harness — auto-shown on
 session start if config exists, toggled via `-S/--show` / `-H/--hide`. Distinct from the CLI
 (below): the widget only exists inside Pi.
-_Avoid_: Panel, sidebar (reserved for `serve`'s widget in this repo's `Language — Serve` section)
+_Avoid_: Panel, sidebar (reserved for the `serve` tool's widget — `serve` is a separate tool, not part of wtft)
 
 **CLI**:
 Running `wtft` (or `./wtft`, or the npm-global install) directly from the host shell, outside

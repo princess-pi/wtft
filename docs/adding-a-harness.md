@@ -1,5 +1,9 @@
 # Adding a harness to wtft
 
+> **Provenance.** Ported from `princess-pi-tools` (removed there when wtft was
+> extracted, #584). Bare issue numbers below (#144, #145, #164, #155, #149, #31)
+> refer to **princess-pi-tools** issues; wtft's own issue numbering starts fresh.
+
 Three steps. **No shared file is edited** — not `wtft-renderer.ts`, not `wtft-cost.ts`,
 not `wtft-daemon-lib.ts`, not the selector's shared logic. If your harness needs one of
 those touched, the seam is in the wrong place; file an issue rather than widening it.

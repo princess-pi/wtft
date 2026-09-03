@@ -263,6 +263,10 @@ try {
 	// handling.
 	const fixtureDir = mkTemp("wtft-fixture-");
 	const fixturePath = path.join(fixtureDir, "pack-and-smoke-fixture.jsonl");
+	// Relative timestamp (a minute ago) so the fixture stays inside the default
+	// interval window regardless of when the suite runs — a hardcoded past date
+	// would eventually age out of a recency-filtered default interval.
+	const fixtureTs = new Date(Date.now() - 60000).toISOString();
 	fs.writeFileSync(
 		fixturePath,
 		JSON.stringify({
@@ -273,7 +277,7 @@ try {
 				// Pinned pricing-table entry (see bin/wtft.mjs MODELS): the cost is
 				// deterministic ($4.50 = 1M in × $3/M + 100K out × $15/M).
 				model: "claude-sonnet-4-6",
-				timestamp: "2026-08-10T12:00:00.000Z",
+				timestamp: fixtureTs,
 				usage: { input_tokens: 1000000, output_tokens: 100000 },
 				content: [{ type: "text", text: "smoke" }],
 			},
@@ -286,11 +290,13 @@ try {
 		mkTemp("wtft-xdg-"),
 	);
 
-	check("wtft -s <fixture> renders a cost bar chart (exit 0, no error banner, a non-zero $-figure)", () => {
+	check("wtft -s <fixture> renders the deterministic $4.50 cost (exit 0, no error banner)", () => {
 		assert.strictEqual(renderResult.status, 0, `exit ${renderResult.status}: ${renderResult.stdout}${renderResult.stderr}`);
 		assert.ok(!/❌|System Error/.test(renderResult.stdout), `error banner in output:\n${renderResult.stdout}`);
-		const figures = renderResult.stdout.match(/\$[\d,]+\.\d{2}/g) ?? [];
-		assert.ok(figures.some(f => f.replace(/[$,]/g, "") !== "0.00"), `no non-zero rendered cost in output:\n${renderResult.stdout}`);
+		// $4.50 is the deterministic total (1M in × $3/M + 100K out × $15/M) and is
+		// distinct from the axis labels ($0.00/$1.25/$2.50/$3.75/$5.00), so this
+		// pins parse → interaction → cost, not merely "some non-zero figure".
+		assert.ok(renderResult.stdout.includes("$4.50"), `expected $4.50 rendered cost, got:\n${renderResult.stdout}`);
 	});
 } catch (err) {
 	console.log(`${RED}Unexpected error:${RESET} ${(err as Error).stack ?? err}`);

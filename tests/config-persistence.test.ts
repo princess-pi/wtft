@@ -177,9 +177,9 @@ check("/wtft command is registered", () => {
 	assert.ok(registered.wtft, "expected a 'wtft' command");
 });
 
-async function runSlashCommand(args: string): Promise<void> {
+async function runSlashCommand(cmd: string, args: string): Promise<void> {
 	try {
-		await registered.wtft.handler(args, permissiveMock());
+		await registered[cmd].handler(args, permissiveMock());
 	} catch {
 		// The write happens before the render, which needs a live TUI.
 	}
@@ -187,26 +187,26 @@ async function runSlashCommand(args: string): Promise<void> {
 
 await checkAsync("/wtft --cost persists tokens:false", async () => {
 	seedConfig({ tokens: true });
-	await runSlashCommand("--cost");
+	await runSlashCommand("wtft", "--cost");
 	assert.strictEqual(readConfigFile().tokens, false);
 	assert.strictEqual(readConfigFile().timezone, "America/Los_Angeles", "unrelated settings must survive");
 });
 
 await checkAsync("/wtft --tokens persists tokens:true", async () => {
 	seedConfig({ tokens: false });
-	await runSlashCommand("--tokens");
+	await runSlashCommand("wtft", "--tokens");
 	assert.strictEqual(readConfigFile().tokens, true);
 });
 
 await checkAsync("/wtft --no-emoji persists disabledEmoji:true", async () => {
 	seedConfig();
-	await runSlashCommand("--no-emoji");
+	await runSlashCommand("wtft", "--no-emoji");
 	assert.strictEqual(readConfigFile().disabledEmoji, true);
 });
 
 await checkAsync("/wtft --emoji persists disabledEmoji:false", async () => {
 	seedConfig({ disabledEmoji: true });
-	await runSlashCommand("--emoji");
+	await runSlashCommand("wtft", "--emoji");
 	assert.strictEqual(readConfigFile().disabledEmoji, false);
 });
 
@@ -225,7 +225,7 @@ function readBudgetConfig(): Record<string, unknown> {
 }
 
 await checkAsync("/budget --widget off persists widget:false to token-budget.json", async () => {
-	await registered.budget.handler("--widget off", permissiveMock());
+	await runSlashCommand("budget", "--widget off");
 	assert.strictEqual(readBudgetConfig().widget, false);
 });
 

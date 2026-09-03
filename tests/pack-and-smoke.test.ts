@@ -284,10 +284,11 @@ try {
 		mkTemp("wtft-xdg-"),
 	);
 
-	check("wtft -s <fixture> renders a cost bar chart (exit 0, no error banner, a $-figure)", () => {
+	check("wtft -s <fixture> renders a cost bar chart (exit 0, no error banner, a non-zero $-figure)", () => {
 		assert.strictEqual(renderResult.status, 0, `exit ${renderResult.status}: ${renderResult.stdout}${renderResult.stderr}`);
 		assert.ok(!/❌|System Error/.test(renderResult.stdout), `error banner in output:\n${renderResult.stdout}`);
-		assert.ok(/\$[1-9]\d*\.\d{2}/.test(renderResult.stdout), `no non-zero rendered cost in output:\n${renderResult.stdout}`);
+		const figures = renderResult.stdout.match(/\$[\d,]+\.\d{2}/g) ?? [];
+		assert.ok(figures.some(f => f.replace(/[$,]/g, "") !== "0.00"), `no non-zero rendered cost in output:\n${renderResult.stdout}`);
 	});
 } catch (err) {
 	console.log(`${RED}Unexpected error:${RESET} ${(err as Error).stack ?? err}`);

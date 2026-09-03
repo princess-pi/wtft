@@ -174,7 +174,7 @@ const mockPi: any = {
 
 await checkAsync("extensions import and register without throwing", async () => {
 	const wtftExtension = (await import("../extensions/wtft.ts")).default;
-	wtftExtension(mockPi);
+	await wtftExtension(mockPi);
 });
 
 check("/wtft command is registered", () => {
@@ -221,7 +221,7 @@ await checkAsync("/wtft --emoji persists disabledEmoji:false", async () => {
 // is exercised the same way — drive /budget, assert token-budget.json landed.
 await checkAsync("extensions/token-budget.ts imports and registers without throwing", async () => {
 	const tokenBudgetExtension = (await import("../extensions/token-budget.ts")).default;
-	tokenBudgetExtension(mockPi);
+	await tokenBudgetExtension(mockPi);
 });
 
 check("/budget command is registered", () => {

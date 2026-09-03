@@ -168,6 +168,12 @@ const watchResult = await new Promise<string>((resolve, reject) => {
 const watchLines = extractBarLines(watchResult);
 assert("watch produces chart lines", watchLines.length >= 3);
 
+// #62: `--no-emoji` reaches the TITLE/TIMELINE in BOTH paths. Before the fix,
+// the watch branch returned before computing disabledEmoji and never passed the
+// override through WatchSettings, so the watch timeline kept its emoji.
+assert("non-watch --no-emoji strips the title emoji", !nonWatchResult.includes("💸") && !nonWatchResult.includes("☀️"));
+assert("watch --no-emoji strips the title emoji", !watchResult.includes("💸") && !watchResult.includes("☀️"));
+
 // 3. Compare bar chart lines (ticks + bars — layout-invariant content)
 console.log("\n3. Compare bar content (ticks + bars — identical between paths)");
 

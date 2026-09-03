@@ -774,13 +774,18 @@ function getMoonPhase(date: Date): string {
  * @param surgeHours - Set of local hours (0-23) that are surge-priced
  * @param currentHour - Current local hour (0-23) for the clock-face marker
  * @param proximityStatus - If set, appends the appropriate surge badge
+ * @param date - Date for moon-phase bookends — defaults to now.
+ * @param disabledEmoji - If true, swaps moon/sun/clock emoji for single-width
+ *   ASCII — `|`, `*`, `@` — so the bar renders on terminals without those
+ *   glyphs (#62).
  */
 export function buildTimelineString(
 	surgeHours: Set<number>,
 	currentHour: number,
 	proximityStatus?: 'surge' | 'approaching' | 'ending',
 	/** Date for moon-phase bookends — defaults to now. */
-	date?: Date
+	date?: Date,
+	disabledEmoji?: boolean
 ): string {
 	const segments: { color: string; text: string }[] = [];
 	let lastColor: string | null = null;
@@ -797,15 +802,16 @@ export function buildTimelineString(
 		const isCurrent = h === currentHour;
 
 		const color = isCurrent ? "1;" + (isSurge ? "38;5;208" : "32") : (isSurge ? "38;5;208" : "32");
-		// Current hour → clock face emoji. Otherwise → ─ box-drawing rule.
-		glyphs.push({ color, char: isCurrent ? CLOCK_FACES[h % 12] : "─" });
+		// Current hour → clock face emoji (or `@` when emoji is disabled).
+		// Otherwise → ─ box-drawing rule.
+		glyphs.push({ color, char: isCurrent ? (disabledEmoji ? "@" : CLOCK_FACES[h % 12]) : "─" });
 	}
 
 	// Solar noon, between hour 11 (11am) and hour 12 (noon). It borrows hour 12's
 	// surge color so noon surge-pricing still shows, but it is never "current" —
 	// the clock face is the current-hour marker.
 	const noonSurge = surgeHours.has(12);
-	glyphs.splice(12, 0, { color: noonSurge ? "38;5;208" : "32", char: "☀️" });
+	glyphs.splice(12, 0, { color: noonSurge ? "38;5;208" : "32", char: disabledEmoji ? "*" : "☀️" });
 
 	for (const g of glyphs) {
 		if (g.color !== lastColor) {
@@ -817,15 +823,18 @@ export function buildTimelineString(
 	}
 
 	const timelineBody = segments.map(s => `\x1b[${s.color}m${s.text}\x1b[0m`).join("");
-	const moon = getMoonPhase(date ?? new Date());
+	const moon = disabledEmoji ? "|" : getMoonPhase(date ?? new Date());
 	let result = `${moon}${timelineBody}${moon}`;
 
+	// The badge is part of the same timeline string, so `--no-emoji` must swap
+	// its ⚡ too — the manifest promises ASCII across the whole widget (#62).
+	const bolt = disabledEmoji ? "!!" : "⚡";
 	if (proximityStatus === 'surge') {
-		result += ` \x1b[1;38;5;208m⚡ SURGE 2x\x1b[0m`;
+		result += ` \x1b[1;38;5;208m${bolt} SURGE 2x\x1b[0m`;
 	} else if (proximityStatus === 'approaching') {
-		result += ` \x1b[1;5;38;5;208m⚡ SURGE APPROACHING\x1b[0m`;
+		result += ` \x1b[1;5;38;5;208m${bolt} SURGE APPROACHING\x1b[0m`;
 	} else if (proximityStatus === 'ending') {
-		result += ` \x1b[1;5;32m⚡ SURGE ENDING\x1b[0m`;
+		result += ` \x1b[1;5;32m${bolt} SURGE ENDING\x1b[0m`;
 	}
 
 	return result;
@@ -1126,7 +1135,7 @@ export function buildWtftLines(
 	const surgeHours = isDeepSeek ? getSurgeLocalHours(tz) : new Set<number>();
 	const currentHour = getCurrentLocalHour(tz);
 	const proximity = isDeepSeek ? checkSurgeProximity() : { status: undefined as ReturnType<typeof checkSurgeProximity>["status"], multiplier: 1.0 };
-	const timelineStr = buildTimelineString(surgeHours, currentHour, proximity.status);
+	const timelineStr = buildTimelineString(surgeHours, currentHour, proximity.status, undefined, disabledEmoji);
 	const timelineLen = getVisualLength(timelineStr);
 
 	const legendItems = CATEGORY_ORDER

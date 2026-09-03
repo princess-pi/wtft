@@ -488,6 +488,9 @@ async function main() {
 			hasMode: opts.hasMode,
 			hasTicks: opts.hasTicks,
 			hasTimezone: opts.hasTimezone,
+			// `--no-emoji` / `--emoji` override the session-file emoji setting in
+			// watch mode too (#62). Omitted when no flag was passed.
+			disabledEmoji: typeof opts.enableEmoji === "boolean" ? !opts.enableEmoji : undefined,
 		});
 		return; // watchTagFile never returns until SIGINT
 	}
@@ -592,7 +595,10 @@ async function main() {
 
 	// Read settings from harness-agnostic config file (#72).
 	const config = readConfig("wtft");
-	const disabledEmoji = isEmojiDisabled();
+	// `--no-emoji` / `--emoji` override the persisted flag for THIS RUN only
+	// (the Pi extension persists via writeConfig; the CLI should not). The flag
+	// was parsed but never applied before #62, so `--no-emoji` was a no-op here.
+	const disabledEmoji = typeof opts.enableEmoji === "boolean" ? !opts.enableEmoji : isEmojiDisabled();
 	const sessionInterval = (typeof config.interval === "string" ? config.interval : undefined) as string | undefined;
 	const sessionLimit = (typeof config.limit === "number" ? config.limit : undefined) as number | undefined;
 	const sessionMode = (config.mode === "cumulative" || config.mode === "bucket" ? config.mode : undefined) as "cumulative" | "bucket" | undefined;

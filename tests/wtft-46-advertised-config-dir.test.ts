@@ -12,17 +12,17 @@
  *   `~/.config/princess-pi-packages/wtft-pricing.json`, a directory that does
  *   not exist on this host, while ppt had already corrected it (#560/#562).
  *
- *   WHY THE CODE WAS FINE AND THE TEXT WAS NOT. `readUserPricing` and the
- *   harness registry read `princess-pi-tools` FIRST and fall back to
- *   `princess-pi-packages` only when it alone exists. That fallback is correct
- *   and stays. What is not correct is ADVERTISING the fallback: a reader who
- *   follows `--help` creates a directory nothing prefers, then wonders why the
- *   override is ignored the moment the current one appears.
+ *   WHY THE TEXT WAS WRONG (the code was fine). The resolvers used to read
+ *   `princess-pi-tools` FIRST and fall back to `princess-pi-packages` only when
+ *   it alone existed. That fallback was deleted with the one-time migration
+ *   (princess-pi/wtft#51, decision 2). ADVERTISING it was wrong even before the
+ *   deletion: a reader who followed `--help` created a directory nothing
+ *   prefers.
  *
  *   So this suite pins two things, and only things a machine can settle. §1: no
  *   manifest string advertises a `~/.config/<legacy>/` path. §2: the resolvers,
- *   CALLED against a temp XDG_CONFIG_HOME, prefer the advertised directory and
- *   still fall back to the old one when it is the only one present.
+ *   CALLED against a temp XDG_CONFIG_HOME, resolve to the advertised directory
+ *   even when the old one is the only one present — the fallback is gone.
  *
  *   §2 replaced a check that compared where each name first appeared in the
  *   source text. Two review lenses rejected that independently: textual order is
@@ -100,19 +100,16 @@ console.log("\n2. The directory it advertises is the one the resolvers actually 
 			check(resolve() === path.join(bare, CURRENT, basename),
 				`V2a ${label}: with neither directory, it resolves to ${CURRENT}`, resolve());
 
-			// (b) ONLY the legacy directory: the fallback is live. This is the
-			//     half a search-and-replace would silently delete, stranding
-			//     anyone who never migrated.
+			// (b) ONLY the legacy directory: the fallback is deleted, so the
+			//     resolver still names CURRENT.
 			const legacyOnly = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-46-cfg-")));
 			fs.mkdirSync(path.join(legacyOnly, LEGACY), { recursive: true });
 			fs.writeFileSync(path.join(legacyOnly, LEGACY, basename), "{}");
 			process.env.XDG_CONFIG_HOME = legacyOnly;
-			check(resolve() === path.join(legacyOnly, LEGACY, basename),
-				`V2b ${label}: with only ${LEGACY}, it falls back to it`, resolve());
+			check(resolve() === path.join(legacyOnly, CURRENT, basename),
+				`V2b ${label}: with only ${LEGACY}, it still resolves to ${CURRENT}`, resolve());
 
-			// (c) BOTH present: current wins. This is the precedence the
-			//     advertised path depends on — advertise one directory while the
-			//     other is preferred and the reader's override is ignored.
+			// (c) BOTH present: current wins.
 			const both = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-46-cfg-")));
 			for (const d of [CURRENT, LEGACY]) {
 				fs.mkdirSync(path.join(both, d), { recursive: true });

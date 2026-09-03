@@ -42,8 +42,7 @@ appears nowhere in this repo). The table records the code, not the misquote.
   decision 3 of #51, not this rename — its guard is yet to land.
   The config *key* rename (`tpm` → `token-budget`) moves the on-disk file from
   `tpm.json` to `token-budget.json`; on the one host that runs this, the file
-  is renamed by hand, not migrated in code (same "no fallback" decision as
-  #51 decision 2).
+  is renamed by hand, not migrated in code.
 - **Command** — `/budget` toggles the widget and footer; flags `--widget
   on|off`, `--footer on|off`, `--emoji`, `--no-emoji`, `--reset`, `--why`,
   with `-w` / `-f` aliases.

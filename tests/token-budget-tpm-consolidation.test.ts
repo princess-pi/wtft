@@ -190,7 +190,7 @@ interface CacheSchema {
 	stats: Record<string, { tpm: number; lastActiveAge: number }>;
 }
 
-// Verify the schema shape matches what tpm_meter.js expects to read
+// Verify the schema shape matches what budget_meter.js expects to read
 const schemaCheck: CacheSchema = {
 	timestamp: 1750000000000,
 	stats: {

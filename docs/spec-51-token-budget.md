@@ -43,9 +43,9 @@ appears nowhere in this repo). The table records the code, not the misquote.
   The config *key* rename (`tpm` → `token-budget`) moves the on-disk file from
   `tpm.json` to `token-budget.json`; on the one host that runs this, the file
   is renamed by hand, not migrated in code.
-- **Command** — `/budget` toggles the widget and footer; flags `--widget
-  on|off`, `--footer on|off`, `--emoji`, `--no-emoji`, `--reset`, `--why`,
-  with `-w` / `-f` aliases.
+- **Command** — `/budget` with no flags toggles the widget panel on/off; flags
+  `--widget on|off`, `--footer on|off`, `--emoji`, `--no-emoji`, `--reset`,
+  `--why`, with `-w` / `-f` aliases, toggle each display explicitly.
 - **Widget / status** — a below-editor panel plus a footer line, each showing
   per-model TPM as a colored bar against that model's ceiling (green below 50%,
   yellow above 50%, red above 80%; zero-TPM models are skipped in the panel and

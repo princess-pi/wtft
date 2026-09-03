@@ -66,10 +66,11 @@ spec-reconcile backtest drift gates, disposed of differently by their kind:
   content-truth concern, not mere organization. It is still closed, for a
   different stated reason: parseInterval's accepted units are already pinned
   *behaviorally* by `tests/wtft-spec-alignment.test.ts`, which probes the real
-  function (every single-char unit, every turn spelling) and asserts the
-  manifest matches — so a source-text gate over the docstring's prose would
-  be both redundant with that behavioral pin and brittle to any legitimate
-  reword.
+  function (every single-char unit, every turn spelling) and asserts each
+  accepted unit is mentioned in the manifest — a one-way check, not a claim
+  that the manifest lists nothing extra. A source-text gate over the
+  docstring's prose would still be redundant with that behavioral pin and
+  brittle to any legitimate reword.
 
 The drift both gates caught was fixed in `wtft-renderer.ts` before the move.
 The ruling is recorded on the #51 thread, not reconstructed here.

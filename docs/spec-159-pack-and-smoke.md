@@ -54,9 +54,11 @@ princess-pi-tools (`docs/manifests/` missing from the `files` allowlist).
 ## Disposition of the third decision-3 guard
 
 Issue #51 decision 3 named three guards. Two land here and in
-`tests/config-persistence.test.ts`. The third — spec-reconcile backtest
-drift gates pinned to `parseInterval`'s and `buildTimelineString`'s
-docstrings — is closed without a gate: Duppy ruled those docstring
-placements "too specific" to pin a backtest against. Recorded here so the
-#51 closer's "all three guards land or are disposed of" condition is met
-explicitly, rather than left implicit.
+`tests/config-persistence.test.ts`. The third — the two spec-reconcile
+backtest drift gates over `parseInterval`'s and `buildTimelineString`'s
+docstrings — is closed without a gate. Stated reason: those gates pin where
+a docstring sits (which function owns it, how adjacent it is), which is code
+organization, not a behavior contract; this repo's spec-reconcile scope is
+behavior contracts, so a docstring-placement backtest is below the bar. The
+drift those gates caught was fixed in `wtft-renderer.ts` before the move. The
+ruling is recorded on the #51 thread, not reconstructed here.

@@ -262,8 +262,6 @@ for (const { src, out } of entries) {
   console.log(`✅ bin/${out} (${(fs.statSync(file).size / 1024).toFixed(0)} KB)`);
 }
 
-if (errors > 0) process.exit(1);
-
 // ---
 // Pi extension bundles (#60). Same self-containment as the CLI, minus the
 // shebang (they are imported as modules, not executed as commands).
@@ -292,5 +290,11 @@ for (const { src, out } of extensionEntries) {
 
   console.log(`✅ pi/${out} (${(fs.statSync(file).size / 1024).toFixed(0)} KB)`);
 }
+
+// Fail on ANY bundle error — CLI or extension. An earlier draft exited after
+// the CLI loop only, so a failed pi/*.js build fell through to "build
+// complete" and exit 0: a package shipped without its extension and every
+// signal said success (#60).
+if (errors > 0) process.exit(1);
 
 console.log("\n✅ build complete");

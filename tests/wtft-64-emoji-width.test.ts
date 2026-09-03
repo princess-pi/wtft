@@ -66,6 +66,13 @@ check("ANSI escapes are stripped before measuring", () => {
 	assert.strictEqual(getVisualLength("\x1b[32m☀️\x1b[0m"), 2);
 });
 
+check("a stray control byte is skipped, not summed as -1", () => {
+	// \x07 (BEL) is a control byte wcwidth reports as -1. The old whole-line
+	// wcwidth returned -1 for the entire string; the per-codepoint pass must
+	// skip it rather than poison the sum.
+	assert.strictEqual(getVisualLength("ab\x07cd"), 4);
+});
+
 // The load-bearing case: the timeline at noon is 31 columns, not 30.
 // 2 (moon) + 12 (dashes) + 2 (☀️) + 2 (🕛) + 11 (dashes) + 2 (moon).
 check("full noon timeline measures 31 columns", () => {

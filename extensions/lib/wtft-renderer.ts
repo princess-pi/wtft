@@ -603,7 +603,11 @@ export function getVisualLength(str: string): number {
 		// Variation selectors are zero-width; the preceding character's width
 		// is what they modify, so they add nothing on their own.
 		if (cp === 0xfe0f || cp === 0xfe0e) continue;
-		width += cp >= 0x2600 && cp <= 0x27bf ? 2 : wcwidth(ch);
+		const w = cp >= 0x2600 && cp <= 0x27bf ? 2 : wcwidth(ch);
+		// wcwidth returns -1 for control bytes and 0 for combining marks —
+		// neither should be summed into a width (a stray control byte used to
+		// poison the whole-line wcwidth with -1).
+		if (w > 0) width += w;
 	}
 	return width;
 }

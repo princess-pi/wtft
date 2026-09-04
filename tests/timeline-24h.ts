@@ -39,11 +39,30 @@ function parseArgs(argv: string[]): { model?: string; tz?: string } {
 	const out: { model?: string; tz?: string } = {};
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
-		if (a === "--model" || a === "-m") out.model = argv[++i];
-		else if (a === "--tz" || a === "-t") out.tz = argv[++i];
-		else if (a === "--help" || a === "-h") { printHelp(); process.exit(0); }
-		else if (!a.startsWith("-")) out.model = a; // positional model id
-		else {
+		if (a === "--model" || a === "-m") {
+			const v = argv[i + 1];
+			if (v === undefined || v.startsWith("-")) {
+				console.error(`missing value for ${a}`);
+				printHelp();
+				process.exit(2);
+			}
+			out.model = v;
+			i++;
+		} else if (a === "--tz" || a === "-t") {
+			const v = argv[i + 1];
+			if (v === undefined || v.startsWith("-")) {
+				console.error(`missing value for ${a}`);
+				printHelp();
+				process.exit(2);
+			}
+			out.tz = v;
+			i++;
+		} else if (a === "--help" || a === "-h") {
+			printHelp();
+			process.exit(0);
+		} else if (!a.startsWith("-")) {
+			out.model = a; // positional model id
+		} else {
 			console.error(`unknown flag: ${a}`);
 			printHelp();
 			process.exit(2);

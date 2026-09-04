@@ -183,6 +183,15 @@ for (let h = 0; h < 24; h++) {
 	});
 }
 
+// The realistic surge set omits hour 12, so the sun's surge-orange branch
+// (`surge.has(12)`) is never hit above — the sun always renders green there.
+// Pin that branch: the sun borrows hour 12's surge color.
+check("sun renders surge-orange when hour 12 is surge-priced", () => {
+	const noonSurge = new Set([...SURGE_HOURS, 12]);
+	const raw = buildTimelineString(noonSurge, 13, undefined, FIXED_DATE);
+	assert.deepStrictEqual(coloredGlyphs(raw), expectedSequence(noonSurge, 13));
+});
+
 // ---
 // 3. Badge: buildTimelineString appends the surge badge for a proximityStatus.
 //    It is part of the returned string, not a separate renderer, so it is pinned

@@ -46,9 +46,17 @@ appears nowhere in this repo). The table records the code, not the misquote.
   The config *key* rename (`tpm` → `token-budget`) moves the on-disk file from
   `tpm.json` to `token-budget.json`; on the one host that runs this, the file
   is renamed by hand, not migrated in code.
-- **Command** — `/budget` with no flags toggles the widget panel; flags
-  `--widget on|off`, `--footer on|off`, `--emoji`, `--no-emoji`, `--reset`,
-  `--why` (with `-w` / `-f` aliases) toggle each display explicitly.
+- **Command** — `/budget` with no flags **toggles** the widget panel. Every
+  flag form **sets**, and none toggles (#74):
+  `--widget on|off`, `--footer on|off` (aliases `-w`, `-f`), the negating
+  `--no-widget` and `--no-footer`, `--emoji` / `--no-emoji`, `--reset`,
+  `--help` / `-h`, and `--why`.
+  `--widget`/`-f` given with no `on|off` value after it falls back to a toggle;
+  the negating forms never do. That distinction is load-bearing and was a live
+  defect until #74 — `--no-widget` matched the `--widget` arm by substring and
+  toggled, which a single run from ON is indistinguishable from. Its guard,
+  `tests/wtft-74-budget-flag-parsing.test.ts`, therefore runs every negating
+  flag twice and from both starting states.
 - **Widget / status** — a below-editor panel and a footer line, showing
   per-model TPM as a colored bar against that model's ceiling.
 - **Data source** — reads the wtft tag files under `wtft-tags/`, the same

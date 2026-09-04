@@ -674,7 +674,11 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
     }
   });
 
-  // 3. Register '/budget' slash command to manually toggle widget visibility and footer status
+  // 3. Register the '/budget' slash command: widget and footer visibility.
+  //    Bare `/budget` toggles the widget; the explicit flags SET it. Saying
+  //    "toggle" of the whole command was true when only the bare form and
+  //    valueless `--widget` existed, and became the wrong word once the
+  //    negating forms arrived — which is roughly how #74 was able to hide.
   pi.registerCommand("budget", {
     description: "Configure Token Budget display options (e.g. /budget --widget off --footer on)",
     handler: async (args, ctx) => {

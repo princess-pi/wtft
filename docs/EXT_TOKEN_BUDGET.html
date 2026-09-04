@@ -80,11 +80,13 @@
 }</code></pre>
     </div>
 
-    <p>Heartbeat lines (a top-level <code>_hb</code> key) are skipped, and a record is counted only when it carries a model (<code>m</code>) and a timestamp (<code>t</code>). Input tokens are the sum of <code>in</code> + <code>cr</code> — cache reads bill against the same quota window, so they count toward the budget.</p>
+    <p>Heartbeat lines (a top-level <code>_hb</code> key) are skipped, and a record is counted only when it carries a model (<code>m</code>) and a timestamp (<code>t</code>). Input tokens are the sum of <code>in</code> + <code>cr</code> — cache reads bill against the same quota window, so they count toward the budget. Cache-write tokens (<code>cw</code>) are recorded but deliberately excluded: they are an output-side billing line, not input-rate consumption.</p>
 
     <h4>4. Aggregation Rules</h4>
     <p>Only records from the last two minutes are considered, and only those within the last one minute accrue TPM (the sliding window). Each record maps its model name to a quota shortcode and adds its input tokens:</p>
-    <pre><code>const age = Date.now() - obj.t;
+    <pre><code>if (obj._hb) continue;                        // heartbeat — not an interaction
+if (!obj.m || !obj.t) continue;               // needs model + timestamp
+const age = Date.now() - obj.t;
 if (age &gt; 120_000) continue;                  // older than 2 min — ignore
 const shortCode = getModelShortName(obj.m);
 const inputTokens = (obj.in || 0) + (obj.cr || 0);

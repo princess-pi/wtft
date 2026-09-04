@@ -14,9 +14,17 @@
 # WHY TWO JOBS. The Node Toolchain Standard defines two install channels with
 # different requirements, and a workflow that only exercises the one we use
 # would keep passing while the other stays broken — the same blind spot #29
-# was. So the second channel gets a job that is allowed to fail, loudly, with
-# the reason in its name. An expected-red job you can see beats a green board
-# that isn't testing the thing.
+# was. So the second channel gets a job of its own.
+#
+# WHY NEITHER KNOWN-RED THING IS `continue-on-error`. The first cut made both
+# unconditionally fail-open, which is a check that cannot fail — so a daemon
+# regression, or a published tarball that would not install, would have been
+# invisible for as long as #72 and #29 stayed open. That is the same "looks
+# healthy because nothing reports" this file exists to end, rebuilt inside the
+# file that ends it. Each now names the ONE tolerated outcome — an E404, and a
+# pinned failure count — and fails on anything else. Both surface as a
+# `::warning::` naming their issue, so the state is visible without a red that
+# is always expected, which is the kind of red people learn to ignore.
 # ---
 name: CI
 
@@ -135,8 +143,10 @@ jobs:
       #
       # That cuts both ways on purpose. Fix two of the five and this goes red
       # asking for the number to come down; break a sixth and it goes red too.
-      # When #72 lands the expectation is 0 and this collapses to a plain
-      # `bash tests/wtft-daemon.test.sh`.
+      # At EXPECTED_FAILURES=0 the warning is suppressed and the step is an
+      # ordinary green gate, so closing #72 is a one-character edit here rather
+      # than a rewrite — and the step never announces a red suite that is not
+      # red (PR review round 2).
       #
       # The count is parsed from the suite's own summary line rather than
       # restated in prose, so there is one number here and it is the measured
@@ -157,7 +167,9 @@ jobs:
             echo "::error::daemon suite failed $actual assertions, pinned at $EXPECTED_FAILURES (#72). Update EXPECTED_FAILURES if this is the fix, or investigate if it is a regression."
             exit 1
           fi
-          echo "::warning::daemon suite is red at the pinned $actual assertions — expected until #72 is fixed"
+          if [ "$actual" != "0" ]; then
+            echo "::warning::daemon suite is red at the pinned $actual assertions — expected until #72 is fixed"
+          fi
 
   stock-node-registry:
     name: registry channel on stock node

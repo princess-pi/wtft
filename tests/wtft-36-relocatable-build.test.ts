@@ -79,6 +79,15 @@ const ARTIFACTS = ["wtft.mjs", "wtft-daemon.mjs"];
 const SHIPPED: string[] = JSON.parse(
 	fs.readFileSync(path.join(REPO, "package.json"), "utf8"),
 ).files ?? [];
+
+// The suite tests the BUILT artifact, so it has to exist. Building here rather
+// than requiring the caller to remember keeps `bun tests/run.ts` self-contained.
+execSync("bun run build", { cwd: REPO, stdio: "pipe" });
+
+// Validate SHIPPED only AFTER the build. Every path in `files` is build output
+// and every one is gitignored (.gitignore: `bin/*.mjs`, `pi/*.js`), so on a
+// clean checkout none of them exists yet — statting them first would fail the
+// suite for the absence the very next line exists to fix (PR review round 2).
 {
 	const notAFile = SHIPPED.filter(f => {
 		if (/[*?[\]]/.test(f)) return true;                       // a glob, not a path
@@ -92,10 +101,6 @@ const SHIPPED: string[] = JSON.parse(
 	}
 }
 
-// The suite tests the BUILT artifact, so it has to exist. Building here rather
-// than requiring the caller to remember keeps `bun tests/run.ts` self-contained.
-execSync("bun run build", { cwd: REPO, stdio: "pipe" });
-
 let NODE = "";
 try { NODE = execSync("command -v node", { encoding: "utf8" }).trim(); } catch { /* none */ }
 
@@ -105,18 +110,26 @@ try { NODE = execSync("command -v node", { encoding: "utf8" }).trim(); } catch {
 console.log("\n1. The emitted ESM reaches for nothing outside itself");
 {
 	// A specifier is "bare" unless it is relative, absolute, or a node: builtin.
+	//
+	// Four forms, because three of them reach outside the bundle just as well as
+	// the one everybody remembers. SIDE_EFFECT and REQUIRE were added after a
+	// review pointed out the guard's label — "no bare imports" — claimed more
+	// than the two regexes checked: `import "pkg";` and `require("pkg")` both
+	// sailed through, leaving CI green on an artifact that is not self-contained.
 	const BARE = /(?:^|[\s;}])(?:import|export)[^;'"]*?from\s*["']([^"'.\/][^"']*)["']/g;
 	const DYNAMIC = /\bimport\(\s*["']([^"'.\/][^"']*)["']\s*\)/g;
+	const SIDE_EFFECT = /(?:^|[\s;}])import\s*["']([^"'.\/][^"']*)["']/g;
+	const REQUIRE = /\brequire\(\s*["']([^"'.\/][^"']*)["']\s*\)/g;
 	for (const rel of SHIPPED) {
 		const code = fs.readFileSync(path.join(REPO, rel), "utf8");
 		const found = new Set<string>();
-		for (const re of [BARE, DYNAMIC]) {
+		for (const re of [BARE, DYNAMIC, SIDE_EFFECT, REQUIRE]) {
 			re.lastIndex = 0;
 			for (const m of code.matchAll(re)) {
 				if (!m[1].startsWith("node:")) found.add(m[1]);
 			}
 		}
-		check(found.size === 0, `V1: ${rel} has no bare imports`,
+		check(found.size === 0, `V1: ${rel} reaches for nothing outside itself`,
 			found.size ? `still external: ${[...found].join(", ")}` : undefined);
 	}
 }

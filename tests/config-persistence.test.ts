@@ -131,12 +131,16 @@ function readConfigFile(): Record<string, unknown> {
 // naming an existing file short-circuits discovery entirely — bin/wtft.ts:339-352
 // says so in as many words, and bin/wtft.ts:378-382 takes that branch without
 // ever calling the memoised thunk. So on the happy path the overrides do
-// nothing. They earn their place on the unhappy one: if the fixture write ever
-// fails or the path goes stale, `-s` misses, discovery runs, and without these
-// it would find the developer's corpus and pass — restoring the exact
-// green-on-one-box failure this block was added to remove. An earlier version
-// of this comment claimed discovery ran anyway "for the daemon's benefit".
-// It does not, and the daemon is handed the path directly
+// nothing. They earn their place on one specific unhappy one: a `-s` path that
+// no longer resolves — a fixture moved, a sandbox swept early — falls through
+// to discovery, which without these would find the developer's corpus and PASS,
+// restoring the exact green-on-one-box failure this block was added to remove.
+//
+// Not, as an earlier draft of this comment claimed, a failed fixture write:
+// writeFileSync runs at module top level, so a throw there takes the process
+// down before any cliRun() and the overrides are never consulted (PR review
+// round 2). And an earlier draft than THAT said discovery ran anyway "for the
+// daemon's benefit" — it does not, and the daemon is handed the path directly
 // (extensions/lib/wtft-cli-shared.ts:319).
 // ---
 const SESSION_ID = "c0f16000-1a9b-4c3d-9e8f-000000000051";

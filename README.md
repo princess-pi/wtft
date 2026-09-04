@@ -1,6 +1,6 @@
 # @princess-pi/wtft
 
-> **⚠️ Barely tested outside a single box.** This runs daily on exactly one machine. Since [#32](https://github.com/princess-pi/wtft/issues/32) every push builds and tests it on a clean Ubuntu runner, which is how the install breaks now get caught. That is a *developer* install in a checkout, not a stranger's install — the job that proves a stranger can install it is red on purpose until [#29](https://github.com/princess-pi/wtft/issues/29) publishes. Try it — no guarantees, and expect the install to be the part that breaks.
+> **⚠️ Barely tested outside a single box.** This runs daily on exactly one machine. Since [#32](https://github.com/princess-pi/wtft/issues/32) every push builds and tests it on a clean Ubuntu runner, which is how the install breaks now get caught. That is a *developer* install in a checkout, not a stranger's install — the job that would prove a stranger can install it currently gets a 404, because [#29](https://github.com/princess-pi/wtft/issues/29) has not published yet. Try it — no guarantees, and expect the install to be the part that breaks.
 
 **wtft** — _what the f**k tokens_ — a live cost tracker for [Claude Code](https://claude.ai/code) and Pi harness sessions. Shows real-time token spend, cost breakdowns, and session history.
 

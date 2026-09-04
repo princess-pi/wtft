@@ -17,7 +17,7 @@
  *   a rendering regression can drift without failing any one-fact suite, and it
  *   is deliberately NOT an emoji-width question (#64 already owns that).
  *
- *   Two sections:
+ *   Three sections:
  *     1. Structure (ANSI stripped): for every hour 0-23, the clock face is the
  *        correct emoji, on the correct side of the sun, with 24 hour-slots and
  *        moon bookends.
@@ -25,6 +25,9 @@
  *        assert the exact 25-glyph sequence (24 hours + sun) against the spec,
  *        for a realistic DeepSeek surge set. This pins placement AND coloring
  *        in one deep-equality check.
+ *     3. Badge: the surge badge (⚡ SURGE 2x / APPROACHING / ENDING) is part
+ *        of the returned string, so every proximityStatus — and the no-badge
+ *        case — is pinned in both emoji and no-emoji modes.
  *
  *   Imports the SOURCE renderer (bun resolves the .ts graph directly) so
  *   red→green needs no build step.
@@ -179,6 +182,34 @@ for (const h of [0, 3, 12, 15, 23]) {
 		assert.deepStrictEqual(coloredGlyphs(raw), expectedSequence(surge, h));
 	});
 }
+
+// ---
+// 3. Badge: buildTimelineString appends the surge badge for a proximityStatus.
+//    It is part of the returned string, not a separate renderer, so it is pinned
+//    here — emoji and no-emoji, all three statuses plus the no-badge case.
+// ---
+const BADGE_CASES: Array<{ status: 'surge' | 'approaching' | 'ending'; text: string; color: string }> = [
+	{ status: 'surge',       text: "⚡ SURGE 2x",          color: "\x1b[1;38;5;208m" },
+	{ status: 'approaching', text: "⚡ SURGE APPROACHING", color: "\x1b[1;5;38;5;208m" },
+	{ status: 'ending',      text: "⚡ SURGE ENDING",      color: "\x1b[1;5;32m" },
+];
+
+for (const { status, text, color } of BADGE_CASES) {
+	const noEmojiText = text.replace("⚡", "!!");
+	check(`badge "${text}" (emoji mode)`, () => {
+		const raw = buildTimelineString(new Set(), 0, status, FIXED_DATE);
+		assert.ok(raw.endsWith(` ${color}${text}\x1b[0m`), `expected suffix, got: ${raw.slice(-40)}`);
+	});
+	check(`badge "${noEmojiText}" (no-emoji mode)`, () => {
+		const raw = buildTimelineString(new Set(), 0, status, FIXED_DATE, true);
+		assert.ok(raw.endsWith(` ${color}${noEmojiText}\x1b[0m`), `expected suffix, got: ${raw.slice(-40)}`);
+	});
+}
+
+check("no badge when proximityStatus is undefined", () => {
+	const raw = buildTimelineString(new Set(), 0, undefined, FIXED_DATE);
+	assert.ok(!/SURGE/.test(raw), `expected no SURGE badge, got: ${raw.slice(-40)}`);
+});
 
 console.log(`\nResults: ${GREEN}${passed} passed${RESET}, ${RED}${failed} failed${RESET}`);
 process.exit(failed > 0 ? 1 : 0);

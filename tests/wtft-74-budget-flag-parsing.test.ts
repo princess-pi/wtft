@@ -166,20 +166,26 @@ await check("--widget off --no-footer sets BOTH, rather than toggling footer", a
 // ---
 // 4. `/wtft --show` — filed in #74 as a parsed no-op, which was WRONG.
 //
-//    `showWidget` really is parsed, returned by parseWtftCliArgs, and never
-//    read by the handler (extensions/wtft.ts). Reading the code, that looks
-//    like half an implemented flag pair. Running it says otherwise: `--hide`
-//    short-circuits with setWidget(undefined), and `--show` falls through to
-//    the ordinary render, which sets the widget — so it does exactly what its
-//    name says, by being the default path rather than a branch.
+//    From the source it looked like half an implemented pair: `--hide` had a
+//    branch, `--show` set a field nothing read. Running it says otherwise —
+//    `--hide` short-circuits with setWidget(undefined), and `--show` falls
+//    through to the ordinary render, which sets the widget WITH LINES. It does
+//    what its name says by being the default path rather than a branch.
 //
-//    So there is nothing to fix and something to PIN. Without an assertion the
-//    dead variable invites the same wrong bug report again, and a future early
-//    return for `--show` would break it silently. The claim asserted is the one
-//    that is actually true: `--show` is indistinguishable from bare `/wtft`,
-//    and neither hides.
+//    The dead field is now gone from the parser (the flag stays accepted, so
+//    `-S` is never an unknown-flag error), because the field was the false
+//    signal that produced the wrong report. `CONTEXT.md` still calls `-S`/`-H`
+//    a toggle pair, which is wrong in the other direction — #79.
+//
+//    THE ASSERTION IS ON A VISIBLE WIDGET, not on "not hidden". An earlier cut
+//    of this section could only see that the render THREW — the mock's Proxy
+//    reaching node:path — so it compared `--show` to bare `/wtft` and inferred
+//    the rest. A review pointed out that proves only "`--show` is not
+//    `--hide`": had both early-returned, they would still have matched. Giving
+//    the mock a real session to read lets the render finish, so the widget
+//    arriving is observed rather than deduced.
 // ---
-console.log("\n4. --show is the default render path, not a no-op and not a hide");
+console.log("\n4. --show renders the widget; --hide clears it");
 {
 	const wtftExt = (await import(path.join(REPO, "extensions", "wtft.ts"))).default;
 	const wtftRegistered: Record<string, { handler: (args: string, ctx: any) => Promise<void> }> = {};
@@ -190,63 +196,63 @@ console.log("\n4. --show is the default render path, not a no-op and not a hide"
 		getFlag: () => undefined,
 	} as any);
 
-	/** Run `/wtft <args>` and report whether it HID the widget, and whether it
-	 *  ran past the hide branch into the render.
-	 *
-	 *  `threw` is a PROXY for "did not short-circuit", and is labelled that way
-	 *  because its cause is not what it looks like. The render does throw here,
-	 *  but with `The "path" property must be of type string, got function` —
-	 *  this mock's Proxy reaching `node:path`, not the absence of a TUI. An
-	 *  earlier comment claimed the latter. The distinction matters: the useful
-	 *  assertions below are about `hid` and about `--show` matching bare
-	 *  `/wtft`, and both hold whatever the render does. If the mock is ever
-	 *  deepened so the render completes, `threw` goes false for all three of
-	 *  them together and every assertion here still means what it says. */
-	async function outcome(args: string): Promise<{ hid: boolean; threw: string }> {
-		let hid = false;
+	// One real turn, so the renderer has something to render. Without it the
+	// render aborts early and every observation below is of the abort.
+	const wtftSession = path.join(trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-74-sess-"))), "session.jsonl");
+	fs.writeFileSync(wtftSession, JSON.stringify({
+		type: "assistant",
+		message: {
+			role: "assistant", id: "msg_74_001", model: "claude-sonnet-4-20250514",
+			timestamp: new Date().toISOString(),
+			usage: { input_tokens: 1000, output_tokens: 250 },
+			content: [{ type: "tool_use", name: "bash", input: { command: "ls" } }],
+		},
+	}) + "\n");
+
+	/** Run `/wtft <args>` and report what it did to the widget: "cleared" for
+	 *  setWidget(…, undefined), "rendered" for setWidget(…, lines), "" for
+	 *  neither. A thrown error is returned rather than swallowed, so a render
+	 *  that breaks shows up as itself instead of as a missing widget. */
+	async function widgetEffect(args: string): Promise<{ effect: string; error: string }> {
+		let effect = "";
 		const recordingCtx: any = new Proxy(permissiveMock(), {
 			get: (target, prop) => {
+				if (prop === "sessionManager") {
+					return { getCurrentSession: () => ({ id: "s74", path: wtftSession, filePath: wtftSession }),
+					         getSessionPath: () => wtftSession };
+				}
 				if (prop !== "ui") return Reflect.get(target, prop);
 				return new Proxy(permissiveMock(), {
 					get: (_t, uiProp) => uiProp === "setWidget"
-						? (_name: string, lines: unknown) => { if (lines === undefined) hid = true; }
+						? (_name: string, lines: unknown) => { effect = lines === undefined ? "cleared" : "rendered"; }
 						: permissiveMock(),
 				});
 			},
 		});
-		let threw = "";
+		let error = "";
 		try { await wtftRegistered.wtft.handler(args, recordingCtx); }
-		catch (err) { threw = (err as Error).message; }
-		return { hid, threw };
+		catch (err) { error = (err as Error).message; }
+		return { effect, error };
 	}
 
-	const hide = await outcome("--hide");
-	const show = await outcome("--show");
-	const shortShow = await outcome("-S");
-	const bare = await outcome("");
+	const hide = await widgetEffect("--hide");
+	const show = await widgetEffect("--show");
+	const shortShow = await widgetEffect("-S");
+	const bare = await widgetEffect("");
 
-	await check("--hide hides the widget and returns cleanly", () => {
-		assert.strictEqual(hide.hid, true, "expected setWidget(…, undefined)");
-		assert.strictEqual(hide.threw, "", "--hide must return before the render, so it cannot throw there");
+	await check("--hide clears the widget", () => {
+		assert.strictEqual(hide.error, "", `unexpected throw: ${hide.error}`);
+		assert.strictEqual(hide.effect, "cleared");
 	});
-	await check("--show does NOT hide the widget", () => {
-		assert.strictEqual(show.hid, false);
+	await check("--show RENDERS the widget — it is not a no-op", () => {
+		assert.strictEqual(show.error, "", `unexpected throw: ${show.error}`);
+		assert.strictEqual(show.effect, "rendered", "expected setWidget(…, lines)");
 	});
-	// Equality with `bare` alone is NOT enough, and a review caught that: if the
-	// handler ever early-returned for BOTH, the two would still match and this
-	// section would certify a no-op as correct — the exact claim it exists to
-	// refute. So assert first that each one RAN ON past the hide branch (it
-	// reaches the render and this mock trips there), and only then that they
-	// are the same. Both halves have to hold.
-	await check("--show runs on past the hide branch, rather than returning early", () => {
-		assert.notStrictEqual(show.threw, "", "expected --show to reach the render");
-		assert.notStrictEqual(bare.threw, "", "expected bare /wtft to reach the render");
+	await check("-S renders it too", () => {
+		assert.strictEqual(shortShow.effect, "rendered");
 	});
-	await check("--show is indistinguishable from bare /wtft, failure included", () => {
-		assert.deepStrictEqual(show, bare, "--show must take the ordinary render path");
-	});
-	await check("-S is indistinguishable from --show", () => {
-		assert.deepStrictEqual(shortShow, show);
+	await check("--show matches bare /wtft — it is the default path, not a branch", () => {
+		assert.deepStrictEqual(show, bare);
 	});
 }
 

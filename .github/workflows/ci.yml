@@ -210,6 +210,12 @@ jobs:
       # works", which the gating job already covers.
       - name: Install @princess-pi/wtft from the registry, on stock node
         run: |
+          # pipefail, or `if ! npm install … | tee` reads TEE's status — always
+          # 0 — and the 404 branch below never fires. Measured: the first run
+          # of this job sailed past a real E404 and died two lines later on
+          # `npx`, reporting the wrong cause. The daemon step above sets it for
+          # the same reason.
+          set -o pipefail
           mkdir -p "$RUNNER_TEMP/consumer" && cd "$RUNNER_TEMP/consumer"
           npm init -y >/dev/null
           if ! npm install @princess-pi/wtft 2>&1 | tee /tmp/registry-install.log; then
@@ -225,7 +231,10 @@ jobs:
           # broke while the build stayed green, so a smoke that stops at
           # --version would let the published artifact ship with it broken.
           # --help too, since all three read the inlined manifest.
-          npx wtft --version
-          npx wtft --help
-          npx wtft --why
-          npx wtft-daemon --help
+          # --no-install: npx otherwise FETCHES a missing binary from the
+          # registry, so a package that installed without its bins would still
+          # print a version here — from a stranger's package of the same name.
+          npx --no-install wtft --version
+          npx --no-install wtft --help
+          npx --no-install wtft --why
+          npx --no-install wtft-daemon --help

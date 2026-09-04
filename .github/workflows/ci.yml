@@ -36,13 +36,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Stock node is what `pack-and-smoke` and wtft-36 §3 run the built
       # artifact on. They locate it with `command -v node`, and SKIP when it is
       # absent — so without this step those arms would silently not run and the
       # job would go green having tested less than it claims.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
 
@@ -112,7 +112,7 @@ jobs:
     continue-on-error: true
     timeout-minutes: 10
     steps:
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
 

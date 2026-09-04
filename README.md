@@ -80,12 +80,13 @@ long as that issue stays open:
 | Known red | Tolerated outcome | Everything else | Clears when |
 |---|---|---|---|
 | `registry channel on stock node` | `E404` — the package is not published | fails the job | [#29](https://github.com/princess-pi/wtft/issues/29) publishes; no edit needed here |
-| `Daemon shell suite — pinned to the #72 known-red set` | exactly the five known-failing assertions, **by name** | fails the step | [#72](https://github.com/princess-pi/wtft/issues/72) is fixed, and the pinned list empties |
+| `Daemon shell suite — pinned to the #72 known-red set` | exactly `16 passed, 5 failed`, and the five failures **by name** | fails the step | [#72](https://github.com/princess-pi/wtft/issues/72) is fixed, and the pinned list empties |
 
-The daemon pin is by **name**, not by tally — a count alone would stay green
-across a regression that swapped one known failure for a new one. It cuts both
-ways on purpose: fix one and CI goes red asking for it to be struck from the
-list; break a different one and CI goes red naming it.
+The daemon pin is by **name**, not by tally — a count alone stays green across
+a regression that swaps one known failure for a new one — and the passed count
+is pinned too, so a run that executed fewer assertions cannot look identical to
+a full one. It cuts both ways on purpose: fix one and CI goes red asking for it
+to be struck from the list; break a different one and CI goes red naming it.
 
 Once the package is on the registry, the stock-node job installs it by name and
 runs `--version`, `--help`, `--why` and `wtft-daemon --help` — `--why` because

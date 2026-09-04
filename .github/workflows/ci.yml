@@ -6,10 +6,17 @@
 # a stale relative dynamic import, a blocked `prepare`) in a public repo that
 # had a README, a LICENSE, a byline, a ruleset and merged PRs. Every one of
 # them was silent, and every one was found by a human running an install by
-# hand. Nothing here is a new assertion: `wtft-36-relocatable-build` already
-# scans the bundles for external imports and runs `--why` on stock node, and
-# `pack-and-smoke` already installs a tarball with bun stripped from PATH. The
-# gap #32 names is that NOTHING RUNS THEM. This file is that "something".
+# hand. The gap #32 names is that NOTHING RUNS THEM: `wtft-36-relocatable-build`
+# already scanned the bundles and ran `--why` on stock node, and
+# `pack-and-smoke` already installed a tarball with bun stripped from PATH.
+# This file is the "something" that runs them.
+#
+# It did not stay purely a runner, and saying so is cheaper than a reader
+# discovering it. Deciding what CI should gate turned up three gaps and closed
+# them: §1 of wtft-36 scanned two of the four shipped bundles and skipped every
+# relative specifier — so #29's own defect 2 was outside it; the daemon shell
+# suite was run by nothing at all; and the registry channel had no check
+# anywhere. The registry job and the daemon pin below are new assertions.
 #
 # WHY TWO JOBS. The Node Toolchain Standard defines two install channels with
 # different requirements, and a workflow that only exercises the one we use
@@ -21,8 +28,10 @@
 # regression, or a published tarball that would not install, would have been
 # invisible for as long as #72 and #29 stayed open. That is the same "looks
 # healthy because nothing reports" this file exists to end, rebuilt inside the
-# file that ends it. Each now names the ONE tolerated outcome — an E404, and a
-# pinned failure count — and fails on anything else. Both surface as a
+# file that ends it. Each now names the ONE tolerated outcome — an E404 for our
+# own package, and the five known-red assertions BY NAME (a count alone stays
+# green when a regression swaps one failure for another) — and fails on
+# anything else. Both surface as a
 # `::warning::` naming their issue, so the state is visible without a red that
 # is always expected, which is the kind of red people learn to ignore.
 # ---
@@ -173,8 +182,17 @@ jobs:
           sed 's/\x1b\[[0-9;]*m//g' /tmp/daemon-suite.log \
             | sed -n 's/^  FAIL //p' | sort > /tmp/daemon-actual.txt
 
-          if ! grep -q '^Results: ' <(sed 's/\x1b\[[0-9;]*m//g' /tmp/daemon-suite.log); then
-            echo "::error::the daemon suite produced no Results line — it died early, or its output changed shape"
+          # The WHOLE Results line, not merely its presence. Pinning only the
+          # FAIL labels leaves a run that executed fewer assertions looking
+          # identical to a full one — same five failures, sixteen passes
+          # silently missing — so the passed count is pinned alongside them
+          # (PR review round 3). This is also why the suite's own exit status is
+          # not the verdict: it is 1 by definition while any assertion fails,
+          # which is the state being pinned.
+          results=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/daemon-suite.log | grep '^Results: ' || true)
+          expected_results='Results: 16 passed, 5 failed'
+          if [ "$results" != "$expected_results" ]; then
+            echo "::error::daemon suite summary was '$results', pinned at '$expected_results'. A different total means assertions were added, removed, or the run stopped early."
             exit 1
           fi
 

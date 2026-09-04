@@ -1,0 +1,117 @@
+# ---
+# CI for #32 — "No CI: nothing runs an install, so a repo that cannot be
+# installed looks healthy."
+#
+# WHY THIS EXISTS. #29 was three independent defects (unresolvable dependency,
+# a stale relative dynamic import, a blocked `prepare`) in a public repo that
+# had a README, a LICENSE, a byline, a ruleset and merged PRs. Every one of
+# them was silent, and every one was found by a human running an install by
+# hand. Nothing here is a new assertion: `wtft-36-relocatable-build` already
+# scans the bundles for external imports and runs `--why` on stock node, and
+# `pack-and-smoke` already installs a tarball with bun stripped from PATH. The
+# gap #32 names is that NOTHING RUNS THEM. This file is that "something".
+#
+# WHY TWO JOBS. The Node Toolchain Standard defines two install channels with
+# different requirements, and a workflow that only exercises the one we use
+# would keep passing while the other stays broken — the same blind spot #29
+# was. So the second channel gets a job that is allowed to fail, loudly, with
+# the reason in its name. An expected-red job you can see beats a green board
+# that isn't testing the thing.
+# ---
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# A second push to the same branch makes the first run's answer worthless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  git-channel:
+    name: git-URL channel — install, build, typecheck, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # Stock node is what `pack-and-smoke` and wtft-36 §3 run the built
+      # artifact on. They locate it with `command -v node`, and SKIP when it is
+      # absent — so without this step those arms would silently not run and the
+      # job would go green having tested less than it claims.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # bun-on-PATH is permitted for the git-URL channel only (Node Toolchain
+      # Standard). `prepare` needs it; so does the test driver.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # #32's "no lockfile" clause. A consumer installing us from a git URL
+      # never sees our lockfile, so resolving fresh is what actually gets
+      # tested. `bun.lock` stays committed for reproducible dev installs (#40);
+      # this deletes it in the runner's checkout only, and never commits.
+      - name: Resolve fresh — delete the lockfiles a consumer would not have
+        run: rm -f bun.lock package-lock.json
+
+      # `prepare` runs `bun install` + `bun run build`, so this one command is
+      # the install AND the build. It is also where defect 2 now dies: with the
+      # stale relative import restored, bun fails to resolve it and the build
+      # exits 1 — one step earlier than #32's closer predicted.
+      - name: npm install (runs prepare → bun install + build)
+        run: npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # 65 suites, serial, each in its own process. Carries the CLI smoke
+      # (wtft-36 §3: --help/--why/--version exit 0 AND print, from a bare
+      # directory on stock node), the external-import guard (§1, all four
+      # shipped bundles), and the stock-node tarball channel (pack-and-smoke).
+      - name: Test suite
+        run: npm test
+
+      # Excluded from the driver ("shell suites, run by hand", which means
+      # never) and red 5-of-21 as of 68ae326 — see #72. Visible and
+      # non-blocking until that issue closes, at which point delete the
+      # continue-on-error line and this comment.
+      - name: Daemon shell suite (EXPECTED RED — #72)
+        continue-on-error: true
+        run: bash tests/wtft-daemon.test.sh
+
+  stock-node-git-url:
+    name: stock node, no bun — EXPECTED RED until #29's registry publish
+    runs-on: ubuntu-latest
+    # #32, "the harder half, worth stating rather than hiding": CI that only
+    # exercises the bun-equipped git channel keeps passing while the stock-node
+    # contract is broken. This job fails today — inside @princess-pi/libs' own
+    # `prepare`, not ours — and goes green when the registry publish lands.
+    continue-on-error: true
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Without this the job could pass on a runner image that happens to ship
+      # bun, certifying a property the package does not have — the same way
+      # wtft-36 §2 exists to stop §3 passing for the wrong reason.
+      - name: Assert bun is absent, or this job proves nothing
+        run: |
+          if command -v bun >/dev/null 2>&1; then
+            echo "::error::bun is on PATH — this job cannot test the stock-node channel"
+            exit 1
+          fi
+          echo "bun absent, as required"
+
+      - name: Install from the git URL into an empty workspace, on stock node
+        run: |
+          mkdir -p "$RUNNER_TEMP/consumer" && cd "$RUNNER_TEMP/consumer"
+          npm init -y >/dev/null
+          npm install "git+https://github.com/${{ github.repository }}.git#${{ github.sha }}"
+          npx wtft --version

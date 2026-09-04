@@ -50,6 +50,12 @@ function skip(label: string) { console.log(`  ${YELLOW}SKIP${RESET} ${label}`); 
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const ARTIFACTS = ["wtft.mjs", "wtft-daemon.mjs"];
+// Every path in package.json's `files` allowlist — the whole shipped surface.
+// §1 scans all four, because a bare import is unreachable in an install no
+// matter which bundle carries it. §2-§4 stay on ARTIFACTS: they exercise
+// RUNNING from a bare directory, which only the two CLI bins do. #60 added the
+// Pi bundles to `files` and nothing had scanned them since (#32).
+const SHIPPED = ["bin/wtft.mjs", "bin/wtft-daemon.mjs", "pi/wtft.js", "pi/token-budget.js"];
 
 // The suite tests the BUILT artifact, so it has to exist. Building here rather
 // than requiring the caller to remember keeps `bun tests/run.ts` self-contained.
@@ -66,8 +72,8 @@ console.log("\n1. The emitted ESM reaches for nothing outside itself");
 	// A specifier is "bare" unless it is relative, absolute, or a node: builtin.
 	const BARE = /(?:^|[\s;}])(?:import|export)[^;'"]*?from\s*["']([^"'.\/][^"']*)["']/g;
 	const DYNAMIC = /\bimport\(\s*["']([^"'.\/][^"']*)["']\s*\)/g;
-	for (const name of ARTIFACTS) {
-		const code = fs.readFileSync(path.join(REPO, "bin", name), "utf8");
+	for (const rel of SHIPPED) {
+		const code = fs.readFileSync(path.join(REPO, rel), "utf8");
 		const found = new Set<string>();
 		for (const re of [BARE, DYNAMIC]) {
 			re.lastIndex = 0;
@@ -75,7 +81,7 @@ console.log("\n1. The emitted ESM reaches for nothing outside itself");
 				if (!m[1].startsWith("node:")) found.add(m[1]);
 			}
 		}
-		check(found.size === 0, `V1: bin/${name} has no bare imports`,
+		check(found.size === 0, `V1: ${rel} has no bare imports`,
 			found.size ? `still external: ${[...found].join(", ")}` : undefined);
 	}
 }
@@ -168,17 +174,28 @@ console.log("\n3. wtft's three display flags, and the daemon's --help, run from 
 console.log("\n4. The bundle carries the verbatim licence of every package it bundles");
 for (const name of ARTIFACTS) {
 	const code = fs.readFileSync(path.join(REPO, "bin", name), "utf8");
-	const bundled = new Set<string>();
-	for (const m of code.matchAll(/^\/\/ node_modules\/((?:@[^/\n]+\/)?[^/\n]+)\//gm)) {
-		if (!m[1].startsWith("@princess-pi/")) bundled.add(m[1]);
+	// `.*node_modules/`, matching build.ts's noticeFor() character for
+	// character — NOT `^// node_modules/`. bun writes the marker as the path it
+	// resolved, so in any checkout whose node_modules is not a direct child the
+	// marker reads `// ../../../node_modules/clone/clone.js`. A git worktree is
+	// exactly that: it carries no node_modules of its own and resolves to the
+	// main clone's. The anchored form found zero markers there and failed V4a
+	// for a reason that has nothing to do with licences — the same
+	// two-matchers-disagreeing defect this section's own comment warns about,
+	// committed one function away from the warning (#32).
+	const bundled = new Map<string, string>();   // package name -> directory
+	for (const m of code.matchAll(/^\/\/ (.*node_modules\/((?:@[^/\n]+\/)?[^/\n]+))\//gm)) {
+		if (!m[2].startsWith("@princess-pi/")) bundled.set(m[2], path.join(REPO, m[1]));
 	}
-	check(bundled.size > 0, `V4a: bin/${name} names the packages it vendored`, [...bundled].join(","));
-	for (const pkg of [...bundled].sort()) {
+	check(bundled.size > 0, `V4a: bin/${name} names the packages it vendored`, [...bundled.keys()].join(","));
+	for (const pkg of [...bundled.keys()].sort()) {
 		// The SAME matcher build.ts uses. A fixed name list here while the build
 		// globs meant a dependency shipping COPYING would build green and fail
 		// the suite that gates the build — two matchers disagreeing about the
 		// same question.
-		const pkgDir = path.join(REPO, "node_modules", pkg);
+		// The directory the MARKER named, not REPO/node_modules/<pkg> — same
+		// reason as above: in a worktree the latter does not exist.
+		const pkgDir = bundled.get(pkg)!;
 		const licPath = (fs.existsSync(pkgDir) ? fs.readdirSync(pkgDir) : [])
 			.filter(f => /^(licen[cs]e|copying)/i.test(f))
 			.sort()

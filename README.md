@@ -1,6 +1,6 @@
 # @princess-pi/wtft
 
-> **⚠️ Barely tested outside a single box.** This runs daily on exactly one machine. Since [#32](https://github.com/princess-pi/wtft/issues/32) every push also installs it from scratch on a clean Ubuntu runner and runs the full suite there — so "never installed anywhere else" is no longer true, but two boxes is not a portability claim. Try it — no guarantees, and expect the install to be the part that breaks.
+> **⚠️ Barely tested outside a single box.** This runs daily on exactly one machine. Since [#32](https://github.com/princess-pi/wtft/issues/32) every push builds and tests it on a clean Ubuntu runner, which is how the install breaks now get caught. That is a *developer* install in a checkout, not a stranger's install — the job that proves a stranger can install it is red on purpose until [#29](https://github.com/princess-pi/wtft/issues/29) publishes. Try it — no guarantees, and expect the install to be the part that breaks.
 
 **wtft** — _what the f**k tokens_ — a live cost tracker for [Claude Code](https://claude.ai/code) and Pi harness sessions. Shows real-time token spend, cost breakdowns, and session history.
 
@@ -43,36 +43,66 @@ published. Tracked in [#29](https://github.com/princess-pi/wtft/issues/29).
 
 ## What CI gates
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and PR.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) is the only workflow here.
+It runs on **every** branch push and on pull requests, so a PR branch runs both;
+each ref gets its own concurrency group and a new push cancels the run in flight.
 
-**`git-channel` — gating.** Clean checkout with both lockfiles deleted (a
-consumer installing from a git URL never sees ours), then `npm install` →
-`prepare` → `bun install` + build, `npm run typecheck`, and all 65 suites. The
-suite is where the real assertions live: `wtft-36-relocatable-build` scans every
-bundle in the `files` allowlist for imports that reach outside it and runs
-`--help`/`--why`/`--version` from a bare directory on stock node;
-`pack-and-smoke` installs a tarball with bun stripped from PATH.
+**Job `git-channel` — gating.** Checkout, node 22, bun `latest`, then: echo the
+three toolchain versions, delete `bun.lock` so resolution comes from the
+manifest, `npm install`, `npm run typecheck`, `npm test`.
 
-**Two steps are expected red and do not block**, named for the issue that owns
-each. Hiding them would recreate the blind spot this workflow exists to close:
+`npm install` resolves with **npm**, then fires `prepare`, which builds with bun.
+`prepare`'s `bun install` branch is guarded on a missing `node_modules` and so
+never fires here — npm has already installed by then. It does fire for a
+consumer installing the git URL.
 
-| Expected red | Goes green when |
-|---|---|
-| `stock-node, no bun` — installs from the git URL on stock node | [#29](https://github.com/princess-pi/wtft/issues/29)'s registry publish lands |
-| `tests/wtft-daemon.test.sh` — 5 of 21 failing, and the driver never ran it | [#72](https://github.com/princess-pi/wtft/issues/72) is fixed |
+The suite is where the real assertions live:
+
+- `wtft-36-relocatable-build` — scans every path in the `files` allowlist for
+  imports reaching outside the bundle (`import … from "x"` and `import("x")`;
+  a side-effect `import "pkg"` is outside what it checks), proves the copy's
+  directory has no ancestor `node_modules` to cheat with, runs
+  `--help`/`--why`/`--version` plus `wtft-daemon --help` from a bare directory
+  on stock node, checks each bundled package's licence is reproduced verbatim,
+  and checks `--version` answers from the artifact rather than a neighbouring
+  `package.json`.
+- `pack-and-smoke` — `npm pack`, install the tarball, run it on plain node with
+  bun stripped from PATH.
+
+**One step and one job are expected red and do not block**, each named for the
+issue that owns it. Hiding either would recreate the blind spot this workflow
+exists to close:
+
+| Expected red | Kind | Goes green when |
+|---|---|---|
+| `registry channel on stock node — EXPECTED RED until #29's publish` | job | [#29](https://github.com/princess-pi/wtft/issues/29) publishes `@princess-pi/wtft`; it installs by name, so today it is a 404 |
+| `Daemon shell suite (EXPECTED RED — #72)` | step | [#72](https://github.com/princess-pi/wtft/issues/72) is fixed — 5 assertions failing, and `tests/run.ts` never ran this suite at all |
+
+`npm test` runs every `tests/*.test.ts`, serially, each in its own process. It
+does **not** run `tests/wtft-daemon.test.sh` — shell suites are excluded from the
+driver, which is half of what #72 is about; CI runs it as the separate step above.
 
 ## Usage
 
 ```sh
-# Watch token spend live
+# Render this session's cost breakdown
 wtft
 
-# Show session history
-wtft --history
+# Widen the window and show more buckets
+wtft --interval 3h --limit 20
 
-# Start the background daemon
-wtft-daemon --session <path>
+# Cost by model instead of by activity
+wtft --by-model
+
+# Follow a specific session's log parser daemon, or list the running ones
+wtft --session <path>
+wtft --list
 ```
+
+`--pager` is a Pi TUI overlay, not a CLI flag — the CLI tells you so and
+suggests `wtft … | less -R`. The log parser daemon starts itself on
+`session_start` and revives after an idle timeout; `wtft-daemon` exists for
+debugging, not for normal use.
 
 ## License
 

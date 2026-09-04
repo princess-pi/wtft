@@ -39,9 +39,12 @@ jobs:
       - uses: actions/checkout@v5
 
       # Stock node is what `pack-and-smoke` and wtft-36 §3 run the built
-      # artifact on. They locate it with `command -v node`, and SKIP when it is
-      # absent — so without this step those arms would silently not run and the
-      # job would go green having tested less than it claims.
+      # artifact on; both locate it with `command -v node`. They differ in what
+      # they do without it, and neither outcome is one to rely on: wtft-36 §3
+      # skips (and its local `skip()` prints a line the driver's skip summary
+      # never counts, since it emits no `##SKIP##` marker — tests/lib/skips.ts),
+      # while pack-and-smoke throws and fails the suite. So this step is what
+      # keeps the stock-node arms honest rather than absent.
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
@@ -70,27 +73,53 @@ jobs:
           echo "npm  $(npm --version)"
           echo "bun  $(bun --version)"
 
-      # #32's "no lockfile" clause. A consumer installing us from a git URL
-      # never sees our lockfile, so resolving fresh is what actually gets
-      # tested. `bun.lock` stays committed for reproducible dev installs (#40);
-      # this deletes it in the runner's checkout only, and never commits.
-      - name: Resolve fresh — delete the lockfiles a consumer would not have
+      # #32's "no lockfile" clause: resolve from the manifest, so a dependency
+      # range that has drifted out of the lock is caught here rather than on
+      # someone's first install. `bun.lock` stays committed for reproducible
+      # dev installs (#40); this deletes it in the runner's checkout only.
+      #
+      # ONE file, not two. `package-lock.json` is gitignored (.gitignore:3) and
+      # never present in a checkout, so naming it is a no-op kept only so the
+      # step still does the right thing if that ever changes. And a git-URL
+      # consumer DOES receive `bun.lock` — a git install is a clone, and the
+      # file is tracked — npm simply ignores it. An earlier version of this
+      # comment claimed the consumer never sees it, which is a different and
+      # false statement.
+      - name: Resolve fresh — delete the lockfile
         run: rm -f bun.lock package-lock.json
 
-      # `prepare` runs `bun install` + `bun run build`, so this one command is
-      # the install AND the build. It is also where defect 2 now dies: with the
-      # stale relative import restored, bun fails to resolve it and the build
-      # exits 1 — one step earlier than #32's closer predicted.
-      - name: npm install (runs prepare → bun install + build)
+      # npm resolves and installs, then fires `prepare`, which BUILDS.
+      #
+      # `prepare` reads `if [ ! -d node_modules/wcwidth ] || [ ! -d
+      # node_modules/@princess-pi/libs ]; then bun install; fi && bun run
+      # build` — and under `npm install` that guard is always false, because
+      # npm has already installed devDependencies by the time `prepare` runs.
+      # So the `bun install` branch never fires here: npm did the resolution
+      # and bun only builds. (It fires for a consumer installing the git URL,
+      # where npm has no dev tree to hand `prepare`.) Verified in the first CI
+      # run: the log goes straight from the script line to `$ bun run
+      # build.ts`. Naming this step "runs prepare → bun install + build" was
+      # wrong about which half bun does.
+      #
+      # This is also where defect 2 now dies: with the stale relative import
+      # restored, bun cannot resolve it and the build exits 1 — one step
+      # earlier than #32's closer predicted.
+      - name: npm install (resolve, then prepare → bun run build)
         run: npm install
 
       - name: Typecheck
         run: npm run typecheck
 
-      # 65 suites, serial, each in its own process. Carries the CLI smoke
+      # Every tests/*.test.ts, serial, each in its own process — see tests/run.ts
+      # for why process-per-suite. No count here on purpose: a number would
+      # re-rot on every suite added, which is the reasoning run.ts already
+      # states about its own comment. Carries the CLI smoke
       # (wtft-36 §3: --help/--why/--version exit 0 AND print, from a bare
-      # directory on stock node), the external-import guard (§1, all four
-      # shipped bundles), and the stock-node tarball channel (pack-and-smoke).
+      # directory on stock node), the external-import guard (§1, over every
+      # path in the `files` allowlist — it matches `import/export … from "x"`
+      # and `import("x")`, so a side-effect `import "pkg"` or a `require` is
+      # outside what it claims), and the stock-node tarball channel
+      # (pack-and-smoke).
       - name: Test suite
         run: npm test
 
@@ -102,13 +131,30 @@ jobs:
         continue-on-error: true
         run: bash tests/wtft-daemon.test.sh
 
-  stock-node-git-url:
-    name: stock node, no bun — EXPECTED RED until #29's registry publish
+  stock-node-registry:
+    name: registry channel on stock node — EXPECTED RED until #29's publish
     runs-on: ubuntu-latest
     # #32, "the harder half, worth stating rather than hiding": CI that only
     # exercises the bun-equipped git channel keeps passing while the stock-node
-    # contract is broken. This job fails today — inside @princess-pi/libs' own
-    # `prepare`, not ours — and goes green when the registry publish lands.
+    # contract is broken.
+    #
+    # WHICH CHANNEL THIS IS, because the first cut got it wrong. It installed
+    # the git URL on a bun-less runner and called that red "expected until the
+    # registry publish lands". It would never have gone green: npm always runs
+    # `prepare` for a git dependency, `prepare` ends in `bun run build`, and
+    # publishing to the registry does not change that. Worse, the git-URL
+    # channel is ALLOWED to require bun (Node Toolchain Standard) — so the job
+    # was failing a contract nobody claims, on a schedule that could not end.
+    #
+    # The registry channel is the one that must run on stock node: a published
+    # tarball ships the four prebuilt bundles via `files` and runs no
+    # lifecycle script. So install by NAME. Today that is a 404, and 404 is the
+    # honest state of #29. It goes green the day the package is published, with
+    # no edit here.
+    #
+    # `pack-and-smoke` already proves the tarball we would publish runs on
+    # stock node; the gap this job covers is the one no local test can — that
+    # the artifact is actually reachable by a stranger.
     continue-on-error: true
     timeout-minutes: 10
     steps:
@@ -127,9 +173,13 @@ jobs:
           fi
           echo "bun absent, as required"
 
-      - name: Install from the git URL into an empty workspace, on stock node
+      # Deliberately NOT a checkout of this branch: the claim under test is
+      # that a stranger with no clone can install the published package and run
+      # it. Anything taken from the working tree would weaken that to "the code
+      # here works", which the gating job already covers.
+      - name: Install @princess-pi/wtft from the registry, on stock node
         run: |
           mkdir -p "$RUNNER_TEMP/consumer" && cd "$RUNNER_TEMP/consumer"
           npm init -y >/dev/null
-          npm install "git+https://github.com/${{ github.repository }}.git#${{ github.sha }}"
+          npm install @princess-pi/wtft
           npx wtft --version

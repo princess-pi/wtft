@@ -5,23 +5,34 @@
  * @description The config-persistence split is a convention, not a lib
  *   (princess-pi/wtft#51 decision 3). Two halves, pinned here:
  *
- *   1. The CLI (`bin/wtft.mjs`) is READ-ONLY. Load-bearing: if it ever gains a
- *      write path, every `wtft` invocation silently persists whatever flags it
- *      was given — which is why running the suite must never mutate a
- *      developer's saved settings, and why `--cost`/`--tokens` are safe ways to
- *      state intent rather than side effects.
+ *   1. The CLI (`bin/wtft.mjs`) never writes ITS CONFIG. Not "writes nothing" —
+ *      it truncates a reap log under ~/.local/state on most runs
+ *      (bin/wtft.ts:247, :273) — and the scope matters, because the check below
+ *      compares `wtft.json` bytes and would not notice anything else. Load
+ *      bearing: if the CLI ever gained a config write path, every `wtft`
+ *      invocation would silently persist whatever flags it was given, and
+ *      `--cost`/`--tokens` would stop being safe ways to state intent for one
+ *      run. In the Pi extension those same two flags DO persist, by design —
+ *      §2 asserts exactly that.
  *   2. The Pi extensions (`extensions/wtft.ts`, `extensions/token-budget.ts`)
- *      are the writers — they persist the `/wtft` and `/budget` display
- *      settings. The CLI reads; the extensions write.
+ *      are the writers. The CLI reads; the extensions write. `/wtft` persists
+ *      more than the flag it was given — `interval`, `limit`, `showTicks`,
+ *      `mode` and `timezone` go out on every non-early-return call
+ *      (extensions/wtft.ts:522-528) as well as the flag's own write at :465,
+ *      so `/wtft --cost` writes twice.
  *
  *   The `writeConfig` merge contract is owned by the libs suite
  *   (princess-pi/libs tests/config-persistence.test.ts); the
- *   surviving-unrelated-settings assertions here observe that merge as a
- *   data-integrity check, they do not re-derive the contract.
+ *   surviving-unrelated-settings assertion here observes that merge as a
+ *   data-integrity check, it does not re-derive the contract.
  *
- *   Every check runs against a temp `XDG_CONFIG_HOME` set by this file, not by
- *   the runner — a test about config writes is the last place to rely on
- *   someone else's isolation.
+ *   Every check runs against isolation this file sets up itself, not the
+ *   runner's — a test about config writes is the last place to rely on someone
+ *   else's. That means TWO things, and for a long time it meant only the first:
+ *   a temp `XDG_CONFIG_HOME`, and a session corpus of its own. Without the
+ *   second, §1 ran the CLI against whatever sessions the machine happened to
+ *   have, so it passed on the one box with thousands of them and failed
+ *   everywhere else (#32).
  */
 
 import * as assert from "node:assert";
@@ -65,7 +76,8 @@ async function checkAsync(label: string, fn: () => Promise<void>) {
 }
 
 // ---
-// Isolation: our own XDG root, restored on the way out.
+// Isolation, part 1: our own XDG root, restored on the way out. Part 2 — our
+// own session corpus — is set up below, next to the CLI runner that needs it.
 // ---
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
@@ -76,7 +88,10 @@ const configPath = path.join(xdgRoot, "princess-pi-tools", "wtft.json");
 const prevXdg = process.env.XDG_CONFIG_HOME;
 process.env.XDG_CONFIG_HOME = xdgRoot;
 
-/** Seed a config that looks like a real user's — including keys nothing here touches. */
+/** Seed a config that looks like a real user's. Every key here is one the
+ *  `/wtft` handler writes (extensions/wtft.ts:465, :522-528), which is what
+ *  makes the byte-identical comparison in cliRun meaningful rather than a
+ *  comparison of fields nothing could have changed. */
 function seedConfig(overrides: Record<string, unknown> = {}): void {
 	fs.mkdirSync(path.dirname(configPath), { recursive: true });
 	fs.writeFileSync(configPath, JSON.stringify({
@@ -110,10 +125,19 @@ function readConfigFile(): Record<string, unknown> {
 // meant was only half of what this file needed: its own XDG root AND its own
 // corpus.
 //
-// So: an explicit two-turn session, plus empty roots for both harnesses. `-s`
-// alone would be enough for the read, but discovery still walks the default
-// roots for the daemon's benefit, and a developer's corpus leaking back in is
-// what made the difference invisible here in the first place.
+// So: an explicit two-turn session, plus empty roots for both harnesses.
+//
+// The fixture is what fixes this; the roots are what keep the fix HONEST. `-s`
+// naming an existing file short-circuits discovery entirely — bin/wtft.ts:339-352
+// says so in as many words, and bin/wtft.ts:378-382 takes that branch without
+// ever calling the memoised thunk. So on the happy path the overrides do
+// nothing. They earn their place on the unhappy one: if the fixture write ever
+// fails or the path goes stale, `-s` misses, discovery runs, and without these
+// it would find the developer's corpus and pass — restoring the exact
+// green-on-one-box failure this block was added to remove. An earlier version
+// of this comment claimed discovery ran anyway "for the daemon's benefit".
+// It does not, and the daemon is handed the path directly
+// (extensions/lib/wtft-cli-shared.ts:319).
 // ---
 const SESSION_ID = "c0f16000-1a9b-4c3d-9e8f-000000000051";
 const TS = Date.now();
@@ -151,16 +175,20 @@ process.on("exit", () => {
 	} catch { /* no daemon, or already gone */ }
 });
 
-/** Run the CLI and report mutation AND exit status. Both matter: a CLI that
+/** Run the CLI and report mutation AND a run VERDICT. Both matter: a CLI that
  *  fails to start also never writes, so "no mutation" alone would pass
  *  vacuously on a broken build.
  *
- *  Exit **9** counts as success, not as a failure to tolerate: #443 defines it
- *  as "the render happened and the total may still grow", and the CLI spawns
- *  the daemon and reads the tag immediately, so a brand-new session sometimes
- *  wins that race. tests/lib/wtft-cli.ts owns the same contract for the suites
- *  that want stdout; this one wants the code itself, so it maps rather than
- *  reusing the runner. */
+ *  `exitCode` is a verdict, not a status — 9 is folded into 0 before it is
+ *  returned, so a caller cannot tell the two apart and must not try. #443
+ *  defines 9 as "the run SUCCEEDED and the number printed is not yet final"
+ *  (bin/wtft.ts:210-215): the CLI spawns the daemon and reads the tag
+ *  immediately, so a brand-new session sometimes wins that race. Both codes
+ *  mean the render happened, which is the only thing these three checks ask.
+ *
+ *  tests/lib/wtft-cli.ts owns the same contract for suites that want stdout;
+ *  this one wants the code, and that helper returns text, so the mapping is
+ *  repeated here rather than the helper reused. */
 function cliRun(args: string[]): { mutated: boolean; exitCode: number } {
 	const before = fs.readFileSync(configPath);
 	let exitCode = 0;
@@ -197,19 +225,19 @@ seedConfig();
 
 check("--cost runs clean and leaves config byte-identical", () => {
 	const r = cliRun(["--cost", "-l", "3"]);
-	assert.strictEqual(r.exitCode, 0, `exit ${r.exitCode}`);
+	assert.strictEqual(r.exitCode, 0, `verdict ${r.exitCode} (9 is folded into 0 by cliRun)`);
 	assert.strictEqual(r.mutated, false);
 });
 
 check("--tokens runs clean and leaves config byte-identical", () => {
 	const r = cliRun(["--tokens", "-l", "3"]);
-	assert.strictEqual(r.exitCode, 0, `exit ${r.exitCode}`);
+	assert.strictEqual(r.exitCode, 0, `verdict ${r.exitCode} (9 is folded into 0 by cliRun)`);
 	assert.strictEqual(r.mutated, false);
 });
 
-check("--interval/--limit run clean and leave config byte-identical", () => {
+check("-i/-l (--interval/--limit) run clean and leave config byte-identical", () => {
 	const r = cliRun(["-i", "3h", "-l", "7"]);
-	assert.strictEqual(r.exitCode, 0, `exit ${r.exitCode}`);
+	assert.strictEqual(r.exitCode, 0, `verdict ${r.exitCode} (9 is folded into 0 by cliRun)`);
 	assert.strictEqual(r.mutated, false);
 });
 

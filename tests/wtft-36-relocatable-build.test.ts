@@ -70,15 +70,26 @@ const ARTIFACTS = ["wtft.mjs", "wtft-daemon.mjs"];
 // — one day, because CI landed the day after. With no CI it would have been
 // however long nobody happened to look, which is the number that matters.
 //
-// Plain relative paths only. npm's `files` also accepts directories and glob
-// patterns, which readFileSync cannot take — so assert the shape this relies
-// on, rather than failing later with an EISDIR nobody can place.
+// Plain files only. npm's `files` also accepts globs and DIRECTORY names —
+// a bare `"bin"` is legal and ships the whole directory — and readFileSync
+// takes neither. So check what is actually relied on: every entry resolves to
+// a readable regular file. Checking the string's shape is not enough, because
+// `"bin"` has no glob character and no trailing slash and would sail through
+// to the EISDIR this guard exists to pre-empt (PR review).
 const SHIPPED: string[] = JSON.parse(
 	fs.readFileSync(path.join(REPO, "package.json"), "utf8"),
 ).files ?? [];
-if (SHIPPED.length === 0 || SHIPPED.some(f => /[*?[\]]/.test(f) || f.endsWith("/"))) {
-	console.error(`package.json \`files\` is empty or is not a plain path list: ${JSON.stringify(SHIPPED)}`);
-	process.exit(1);
+{
+	const notAFile = SHIPPED.filter(f => {
+		if (/[*?[\]]/.test(f)) return true;                       // a glob, not a path
+		try { return !fs.statSync(path.join(REPO, f)).isFile(); }  // a directory, or absent
+		catch { return true; }
+	});
+	if (SHIPPED.length === 0 || notAFile.length > 0) {
+		console.error(`package.json \`files\` must be a non-empty list of plain files this suite can read; `
+			+ `not usable: ${JSON.stringify(notAFile)} (of ${JSON.stringify(SHIPPED)})`);
+		process.exit(1);
+	}
 }
 
 // The suite tests the BUILT artifact, so it has to exist. Building here rather

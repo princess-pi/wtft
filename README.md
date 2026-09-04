@@ -69,14 +69,24 @@ The suite is where the real assertions live:
 - `pack-and-smoke` — `npm pack`, install the tarball, run it on plain node with
   bun stripped from PATH.
 
-**One step and one job are expected red and do not block**, each named for the
-issue that owns it. Hiding either would recreate the blind spot this workflow
-exists to close:
+**Neither known-red thing is allowed to simply fail.** A step that can never
+fail is not a check, so each names the *one* tolerated outcome and fails on
+anything else — otherwise a real regression hides behind an open issue for as
+long as that issue stays open:
 
-| Expected red | Kind | Goes green when |
-|---|---|---|
-| `registry channel on stock node — EXPECTED RED until #29's publish` | job | [#29](https://github.com/princess-pi/wtft/issues/29) publishes `@princess-pi/wtft`; it installs by name, so today it is a 404 |
-| `Daemon shell suite (EXPECTED RED — #72)` | step | [#72](https://github.com/princess-pi/wtft/issues/72) is fixed — 5 assertions failing, and `tests/run.ts` never ran this suite at all |
+| Known red | Tolerated outcome | Everything else | Clears when |
+|---|---|---|---|
+| `registry channel on stock node` | `E404` — the package is not published | fails the job | [#29](https://github.com/princess-pi/wtft/issues/29) publishes; no edit needed here |
+| `Daemon shell suite — pinned at the #72 failure count` | exactly 5 failing assertions | fails the step | [#72](https://github.com/princess-pi/wtft/issues/72) is fixed, and the pin drops to 0 |
+
+The daemon pin cuts both ways on purpose: fix two of the five and CI goes red
+asking for the number to come down. The count is parsed from the suite's own
+summary line rather than restated, so there is one number and it is measured.
+
+Once the package is on the registry, the stock-node job installs it by name and
+runs `--version`, `--help`, `--why` and `wtft-daemon --help` — `--why` because
+that is the command the #29 dynamic-import defect broke while the build stayed
+green.
 
 `npm test` runs every `tests/*.test.ts`, serially, each in its own process. It
 does **not** run `tests/wtft-daemon.test.sh` — shell suites are excluded from the

@@ -124,15 +124,43 @@ jobs:
         run: npm test
 
       # Excluded from the driver ("shell suites, run by hand", which means
-      # never) and red 5-of-21 as of 68ae326 — see #72. Visible and
-      # non-blocking until that issue closes, at which point delete the
-      # continue-on-error line and this comment.
-      - name: Daemon shell suite (EXPECTED RED — #72)
-        continue-on-error: true
-        run: bash tests/wtft-daemon.test.sh
+      # never) and red as of 68ae326 — see #72.
+      #
+      # NOT `continue-on-error`. A step that can never fail is not a check, and
+      # this one would have stayed un-failable for as long as #72 stayed open —
+      # a daemon regression landing inside it would have been invisible, which
+      # is the same "looks healthy because nothing reports" that #32 exists to
+      # end. So the known-failing count is PINNED instead: exactly the current
+      # number passes, anything else fails.
+      #
+      # That cuts both ways on purpose. Fix two of the five and this goes red
+      # asking for the number to come down; break a sixth and it goes red too.
+      # When #72 lands the expectation is 0 and this collapses to a plain
+      # `bash tests/wtft-daemon.test.sh`.
+      #
+      # The count is parsed from the suite's own summary line rather than
+      # restated in prose, so there is one number here and it is the measured
+      # one. The suite exits 1 while any assertion fails, hence the `|| true`.
+      - name: Daemon shell suite — pinned at the #72 failure count
+        env:
+          EXPECTED_FAILURES: "5"
+        run: |
+          set -o pipefail
+          bash tests/wtft-daemon.test.sh 2>&1 | tee /tmp/daemon-suite.log || true
+          actual=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/daemon-suite.log \
+                   | sed -n 's/^Results: .* \([0-9][0-9]*\) failed$/\1/p' | tail -1)
+          if [ -z "$actual" ]; then
+            echo "::error::could not parse the suite's Results line — it changed shape, or the suite died early"
+            exit 1
+          fi
+          if [ "$actual" != "$EXPECTED_FAILURES" ]; then
+            echo "::error::daemon suite failed $actual assertions, pinned at $EXPECTED_FAILURES (#72). Update EXPECTED_FAILURES if this is the fix, or investigate if it is a regression."
+            exit 1
+          fi
+          echo "::warning::daemon suite is red at the pinned $actual assertions — expected until #72 is fixed"
 
   stock-node-registry:
-    name: registry channel on stock node — EXPECTED RED until #29's publish
+    name: registry channel on stock node
     runs-on: ubuntu-latest
     # #32, "the harder half, worth stating rather than hiding": CI that only
     # exercises the bun-equipped git channel keeps passing while the stock-node
@@ -142,20 +170,23 @@ jobs:
     # the git URL on a bun-less runner and called that red "expected until the
     # registry publish lands". It would never have gone green: npm always runs
     # `prepare` for a git dependency, `prepare` ends in `bun run build`, and
-    # publishing to the registry does not change that. Worse, the git-URL
-    # channel is ALLOWED to require bun (Node Toolchain Standard) — so the job
-    # was failing a contract nobody claims, on a schedule that could not end.
+    # publishing changes neither. Worse, the git-URL channel is ALLOWED to
+    # require bun (Node Toolchain Standard) — so the job was failing a contract
+    # nobody claims, on a schedule that could not end.
     #
     # The registry channel is the one that must run on stock node: a published
-    # tarball ships the four prebuilt bundles via `files` and runs no
-    # lifecycle script. So install by NAME. Today that is a 404, and 404 is the
-    # honest state of #29. It goes green the day the package is published, with
-    # no edit here.
+    # tarball ships the four prebuilt bundles via `files` and runs no lifecycle
+    # script. So install by NAME.
     #
-    # `pack-and-smoke` already proves the tarball we would publish runs on
-    # stock node; the gap this job covers is the one no local test can — that
-    # the artifact is actually reachable by a stranger.
-    continue-on-error: true
+    # NOT `continue-on-error`, for the reason the daemon step above is not
+    # either. A blanket fail-open would have swallowed a real install break for
+    # as long as #29 stayed open, and would still swallow one afterwards until
+    # somebody remembered to delete the line — a gate that never arrives. The
+    # ONE tolerated outcome is named instead: a 404, which is the honest state
+    # of an unpublished package. Anything else — a tarball that will not
+    # install, a bundle that will not run — fails the job today, unpublished or
+    # not. The day #29 publishes, the 404 stops happening and this becomes an
+    # ordinary gate with no edit here.
     timeout-minutes: 10
     steps:
       - uses: actions/setup-node@v5
@@ -173,13 +204,28 @@ jobs:
           fi
           echo "bun absent, as required"
 
-      # Deliberately NOT a checkout of this branch: the claim under test is
-      # that a stranger with no clone can install the published package and run
-      # it. Anything taken from the working tree would weaken that to "the code
-      # here works", which the gating job already covers.
+      # Deliberately NOT a checkout of this branch: the claim under test is that
+      # a stranger with no clone can install the published package and run it.
+      # Anything taken from the working tree would weaken that to "the code here
+      # works", which the gating job already covers.
       - name: Install @princess-pi/wtft from the registry, on stock node
         run: |
           mkdir -p "$RUNNER_TEMP/consumer" && cd "$RUNNER_TEMP/consumer"
           npm init -y >/dev/null
-          npm install @princess-pi/wtft
+          if ! npm install @princess-pi/wtft 2>&1 | tee /tmp/registry-install.log; then
+            if grep -q 'E404' /tmp/registry-install.log; then
+              echo "::warning::@princess-pi/wtft is not on the registry yet (E404) — expected until #29 publishes; the rest of this job is skipped"
+              exit 0
+            fi
+            echo "::error::registry install failed for a reason other than 404 — this is a real break"
+            exit 1
+          fi
+
+          # --why, not just --version. #32 names it as the command defect 2
+          # broke while the build stayed green, so a smoke that stops at
+          # --version would let the published artifact ship with it broken.
+          # --help too, since all three read the inlined manifest.
           npx wtft --version
+          npx wtft --help
+          npx wtft --why
+          npx wtft-daemon --help

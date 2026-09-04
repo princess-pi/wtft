@@ -105,32 +105,45 @@ let NODE = "";
 try { NODE = execSync("command -v node", { encoding: "utf8" }).trim(); } catch { /* none */ }
 
 // ---
-// 1. No bare import survives the bundle — the structural reason for §3.
+// 1. NOTHING survives the bundle except node: builtins — the structural reason
+//    for §3.
 // ---
-console.log("\n1. The emitted ESM reaches for nothing outside itself");
+console.log("\n1. The emitted ESM reaches for nothing but node: builtins");
 {
-	// A specifier is "bare" unless it is relative, absolute, or a node: builtin.
+	// The allowed set is `node:` and NOTHING ELSE. Not "no bare imports", which
+	// is what this checked through two review rounds while claiming more.
 	//
-	// Four forms, because three of them reach outside the bundle just as well as
-	// the one everybody remembers. SIDE_EFFECT and REQUIRE were added after a
-	// review pointed out the guard's label — "no bare imports" — claimed more
-	// than the two regexes checked: `import "pkg";` and `require("pkg")` both
-	// sailed through, leaving CI green on an artifact that is not self-contained.
-	const BARE = /(?:^|[\s;}])(?:import|export)[^;'"]*?from\s*["']([^"'.\/][^"']*)["']/g;
-	const DYNAMIC = /\bimport\(\s*["']([^"'.\/][^"']*)["']\s*\)/g;
-	const SIDE_EFFECT = /(?:^|[\s;}])import\s*["']([^"'.\/][^"']*)["']/g;
-	const REQUIRE = /\brequire\(\s*["']([^"'.\/][^"']*)["']\s*\)/g;
+	// The narrowing came from the word "bare": each pattern began `[^"'./]`, so
+	// a specifier starting with a dot or a slash was skipped by construction —
+	// and #29's defect 2 was `await import("./manifest-help.js")`, a RELATIVE
+	// import of a file that had moved into @princess-pi/libs. The exact defect
+	// this suite exists to catch was outside the only check that claimed to
+	// catch it, under a label reading "reaches for nothing outside itself".
+	//
+	// A bundle is self-contained by construction, so the honest assertion is
+	// also the simplest: every module it needed is inlined, therefore any
+	// surviving specifier of any shape is a bug — relative, absolute or bare.
+	// Measured on all four bundles at db5cc38: zero non-`node:` specifiers of
+	// any kind, so this costs nothing today and closes the whole class.
+	//
+	// Four syntactic forms, because each reaches outside just as well:
+	// `… from "x"`, `import("x")`, a side-effect `import "x"`, and
+	// `require("x")`.
+	const FROM = /(?:^|[\s;}])(?:import|export)[^;'"]*?from\s*["']([^"']+)["']/g;
+	const DYNAMIC = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
+	const SIDE_EFFECT = /(?:^|[\s;}])import\s*["']([^"']+)["']/g;
+	const REQUIRE = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
 	for (const rel of SHIPPED) {
 		const code = fs.readFileSync(path.join(REPO, rel), "utf8");
 		const found = new Set<string>();
-		for (const re of [BARE, DYNAMIC, SIDE_EFFECT, REQUIRE]) {
+		for (const re of [FROM, DYNAMIC, SIDE_EFFECT, REQUIRE]) {
 			re.lastIndex = 0;
 			for (const m of code.matchAll(re)) {
 				if (!m[1].startsWith("node:")) found.add(m[1]);
 			}
 		}
-		check(found.size === 0, `V1: ${rel} reaches for nothing outside itself`,
-			found.size ? `still external: ${[...found].join(", ")}` : undefined);
+		check(found.size === 0, `V1: ${rel} imports nothing but node: builtins`,
+			found.size ? `still reaches for: ${[...found].join(", ")}` : undefined);
 	}
 }
 

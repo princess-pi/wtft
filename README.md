@@ -58,14 +58,17 @@ consumer installing the git URL.
 
 The suite is where the real assertions live:
 
-- `wtft-36-relocatable-build` — scans every path in the `files` allowlist for
-  imports reaching outside the bundle (`import … from "x"` and `import("x")`;
-  a side-effect `import "pkg"` is outside what it checks), proves the copy's
+- `wtft-36-relocatable-build` — scans every path in the `files` allowlist and
+  requires that **`node:` builtins are the only thing any bundle imports**, in
+  all four syntactic forms (`… from "x"`, `import("x")`, side-effect
+  `import "x"`, `require("x")`). A surviving relative import fails it, which
+  matters because that is #29's defect 2 exactly. It also proves the copy's
   directory has no ancestor `node_modules` to cheat with, runs
   `--help`/`--why`/`--version` plus `wtft-daemon --help` from a bare directory
-  on stock node, checks each bundled package's licence is reproduced verbatim,
-  and checks `--version` answers from the artifact rather than a neighbouring
-  `package.json`.
+  on stock node, checks the licence of every package vendored **into the two
+  CLI bins** is reproduced verbatim (the two Pi bundles are not yet covered —
+  [#73](https://github.com/princess-pi/wtft/issues/73)), and checks `--version`
+  answers from the artifact rather than a neighbouring `package.json`.
 - `pack-and-smoke` — `npm pack`, install the tarball, run it on plain node with
   bun stripped from PATH.
 
@@ -77,11 +80,12 @@ long as that issue stays open:
 | Known red | Tolerated outcome | Everything else | Clears when |
 |---|---|---|---|
 | `registry channel on stock node` | `E404` — the package is not published | fails the job | [#29](https://github.com/princess-pi/wtft/issues/29) publishes; no edit needed here |
-| `Daemon shell suite — pinned at the #72 failure count` | exactly 5 failing assertions | fails the step | [#72](https://github.com/princess-pi/wtft/issues/72) is fixed, and the pin drops to 0 |
+| `Daemon shell suite — pinned to the #72 known-red set` | exactly the five known-failing assertions, **by name** | fails the step | [#72](https://github.com/princess-pi/wtft/issues/72) is fixed, and the pinned list empties |
 
-The daemon pin cuts both ways on purpose: fix two of the five and CI goes red
-asking for the number to come down. The count is parsed from the suite's own
-summary line rather than restated, so there is one number and it is measured.
+The daemon pin is by **name**, not by tally — a count alone would stay green
+across a regression that swapped one known failure for a new one. It cuts both
+ways on purpose: fix one and CI goes red asking for it to be struck from the
+list; break a different one and CI goes red naming it.
 
 Once the package is on the registry, the stock-node job installs it by name and
 runs `--version`, `--help`, `--why` and `wtft-daemon --help` — `--why` because

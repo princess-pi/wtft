@@ -123,10 +123,11 @@ jobs:
       # re-rot on every suite added, which is the reasoning run.ts already
       # states about its own comment. Carries the CLI smoke
       # (wtft-36 §3: --help/--why/--version exit 0 AND print, from a bare
-      # directory on stock node), the external-import guard (§1, over every
-      # path in the `files` allowlist — it matches `import/export … from "x"`
-      # and `import("x")`, so a side-effect `import "pkg"` or a `require` is
-      # outside what it claims), and the stock-node tarball channel
+      # directory on stock node), the self-containment guard (§1, over every
+      # path in the `files` allowlist: `… from "x"`, `import("x")`, a
+      # side-effect `import "x"` and `require("x")`, with `node:` the only
+      # allowed specifier — so a surviving RELATIVE import, which is #29's
+      # defect 2 exactly, fails it too), and the stock-node tarball channel
       # (pack-and-smoke).
       - name: Test suite
         run: npm test
@@ -138,37 +139,52 @@ jobs:
       # this one would have stayed un-failable for as long as #72 stayed open —
       # a daemon regression landing inside it would have been invisible, which
       # is the same "looks healthy because nothing reports" that #32 exists to
-      # end. So the known-failing count is PINNED instead: exactly the current
-      # number passes, anything else fails.
+      # end.
       #
-      # That cuts both ways on purpose. Fix two of the five and this goes red
-      # asking for the number to come down; break a sixth and it goes red too.
-      # At EXPECTED_FAILURES=0 the warning is suppressed and the step is an
-      # ordinary green gate, so closing #72 is a one-character edit here rather
-      # than a rewrite — and the step never announces a red suite that is not
-      # red (PR review round 2).
+      # PINNED BY NAME, not by count. A count-only pin has a hole a review found
+      # before it shipped: fix one known failure while breaking a different
+      # assertion and the tally is still 5, so the step stays green across a
+      # real regression. The five labels below are the known-red set; the step
+      # fails if the actual set differs in either direction.
       #
-      # The count is parsed from the suite's own summary line rather than
-      # restated in prose, so there is one number here and it is the measured
-      # one. The suite exits 1 while any assertion fails, hence the `|| true`.
-      - name: Daemon shell suite — pinned at the #72 failure count
-        env:
-          EXPECTED_FAILURES: "5"
+      # That cuts both ways on purpose. Fix one and this goes red asking for it
+      # to be struck from the list; break a sixth and it goes red naming it.
+      # When the list is empty the whole block collapses to a plain
+      # `bash tests/wtft-daemon.test.sh` — the `|| true`, the parse and the
+      # warning all become dead weight and should go with it.
+      - name: Daemon shell suite — pinned to the #72 known-red set
         run: |
           set -o pipefail
+          # The suite exits 1 while any assertion fails, which is correct and is
+          # exactly the state being pinned — so its status is deliberately not
+          # the verdict here. The comparison below is.
           bash tests/wtft-daemon.test.sh 2>&1 | tee /tmp/daemon-suite.log || true
-          actual=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/daemon-suite.log \
-                   | sed -n 's/^Results: .* \([0-9][0-9]*\) failed$/\1/p' | tail -1)
-          if [ -z "$actual" ]; then
-            echo "::error::could not parse the suite's Results line — it changed shape, or the suite died early"
+
+          # The known-red set (#72). A heredoc cannot be used here: its
+          # terminator must sit at column 0, which ends the YAML block scalar.
+          printf '%s\n' \
+            'cache-read-only turn is NOT $0' \
+            'classified has required fields (t, c, cat)' \
+            'heartbeat uses range format {first,last}' \
+            'stop heartbeat written' \
+            'tag file created (.wtft-tag.v2.7.1.jsonl)' \
+            | sort > /tmp/daemon-expected.txt
+
+          sed 's/\x1b\[[0-9;]*m//g' /tmp/daemon-suite.log \
+            | sed -n 's/^  FAIL //p' | sort > /tmp/daemon-actual.txt
+
+          if ! grep -q '^Results: ' <(sed 's/\x1b\[[0-9;]*m//g' /tmp/daemon-suite.log); then
+            echo "::error::the daemon suite produced no Results line — it died early, or its output changed shape"
             exit 1
           fi
-          if [ "$actual" != "$EXPECTED_FAILURES" ]; then
-            echo "::error::daemon suite failed $actual assertions, pinned at $EXPECTED_FAILURES (#72). Update EXPECTED_FAILURES if this is the fix, or investigate if it is a regression."
+
+          if ! diff -u /tmp/daemon-expected.txt /tmp/daemon-actual.txt; then
+            echo "::error::the daemon suite's failing set is not the #72 known-red set (- expected, + actual). If an assertion was FIXED, strike it from the PINNED list here. If a new one broke, that is a regression."
             exit 1
           fi
-          if [ "$actual" != "0" ]; then
-            echo "::warning::daemon suite is red at the pinned $actual assertions — expected until #72 is fixed"
+
+          if [ -s /tmp/daemon-actual.txt ]; then
+            echo "::warning::daemon suite is red at the $(wc -l < /tmp/daemon-actual.txt) pinned assertions — expected until #72 is fixed"
           fi
 
   stock-node-registry:
@@ -231,11 +247,15 @@ jobs:
           mkdir -p "$RUNNER_TEMP/consumer" && cd "$RUNNER_TEMP/consumer"
           npm init -y >/dev/null
           if ! npm install @princess-pi/wtft 2>&1 | tee /tmp/registry-install.log; then
-            if grep -q 'E404' /tmp/registry-install.log; then
-              echo "::warning::@princess-pi/wtft is not on the registry yet (E404) — expected until #29 publishes; the rest of this job is skipped"
+            # OUR package's 404, not any E404 in the output. A bare `grep E404`
+            # would read a 404 on some unrelated transitive dependency — or one
+            # mixed into a genuine failure — as "not published yet", which is
+            # the fail-open this job was rewritten to remove (PR review round 3).
+            if grep -qF "'@princess-pi/wtft@*' is not in this registry" /tmp/registry-install.log; then
+              echo "::warning::@princess-pi/wtft is not on the registry yet — expected until #29 publishes; the rest of this job is skipped"
               exit 0
             fi
-            echo "::error::registry install failed for a reason other than 404 — this is a real break"
+            echo "::error::registry install failed for a reason other than our package being unpublished — this is a real break"
             exit 1
           fi
 

@@ -786,10 +786,14 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
         return idx === -1 ? undefined : parts[idx + 1];
       };
 
-      // The negating form is checked FIRST. With exact-token matching the two
-      // can no longer overlap, so this is ordering for the reader rather than
-      // for the machine — but it is the order the bug came from, and stating a
-      // negation before the thing it negates is how it stays fixed.
+      // The negating form is checked FIRST, and that IS machine-visible
+      // precedence, not reader sugar. Exact-token matching stops the two
+      // MATCHING each other, but it does not stop both being present:
+      // `/budget --no-widget --widget on` takes this branch and lands on
+      // false, and swapping the arms would land on true. An earlier version of
+      // this comment called the order "for the reader rather than for the
+      // machine", which is exactly the kind of claim that lets someone reorder
+      // it safely-looking. Negation wins; #78 tracks documenting that.
       if (hasFlag("--no-widget")) {
         newWidget = false;
         handled = true;

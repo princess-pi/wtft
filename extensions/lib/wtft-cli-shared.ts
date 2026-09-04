@@ -45,7 +45,6 @@ export interface WtftCliOptions {
 	forceReparse: boolean;
 	// Extension-only
 	hideWidget: boolean;
-	showWidget: boolean;
 	pager: boolean;
 	width: number;
 	hasWidth: boolean;
@@ -88,7 +87,6 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 	let width = 80;
 	let timezone: string | undefined = undefined;
 	let hideWidget = false;
-	let showWidget = false;
 	let showTicks = true;
 	let mode: "bucket" | "cumulative" = "cumulative";
 	let pager = false;
@@ -163,7 +161,21 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 		} else if (arg === "--hide" || arg === "-H") {
 			hideWidget = true;
 		} else if (arg === "--show" || arg === "-S") {
-			showWidget = true;
+			// ACCEPTED AND INTENTIONALLY UNRECORDED. `--hide` needs a flag
+			// because it short-circuits; `--show` needs none, because the
+			// ordinary render path already sets the widget — so `/wtft --show`
+			// and bare `/wtft` do the same thing, which is what `--show` means.
+			//
+			// It used to set a `showWidget` field that nothing ever read. That
+			// dead field is what made #74 file `-S/--show` as a parsed no-op:
+			// from the source it looks like half an implemented pair, and only
+			// running it shows the behaviour is correct. Removing the field
+			// removes the false signal; the flag stays accepted so `-S` is
+			// never an unknown-flag error. Pinned by
+			// tests/wtft-74-budget-flag-parsing.test.ts §4.
+			//
+			// CONTEXT.md still calls `-S`/`-H` a toggle pair, which is wrong in
+			// the other direction — #79.
 		} else if (arg === "--no-emojii" || arg === "--no-emoji") {
 			enableEmoji = false;
 		} else if (arg === "--emojii" || arg === "--emoji") {
@@ -267,7 +279,7 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 		limit, hasLimit,
 		width, hasWidth,
 		timezone, hasTimezone,
-		hideWidget, showWidget,
+		hideWidget,
 		showTicks, hasTicks,
 		mode, hasMode,
 		pager,

@@ -202,7 +202,7 @@ console.log("\n4. --show is the default render path, not a no-op and not a hide"
 	 *  `/wtft`, and both hold whatever the render does. If the mock is ever
 	 *  deepened so the render completes, `threw` goes false for all three of
 	 *  them together and every assertion here still means what it says. */
-	async function outcome(args: string): Promise<{ hid: boolean; threw: boolean }> {
+	async function outcome(args: string): Promise<{ hid: boolean; threw: string }> {
 		let hid = false;
 		const recordingCtx: any = new Proxy(permissiveMock(), {
 			get: (target, prop) => {
@@ -214,9 +214,9 @@ console.log("\n4. --show is the default render path, not a no-op and not a hide"
 				});
 			},
 		});
-		let threw = false;
+		let threw = "";
 		try { await wtftRegistered.wtft.handler(args, recordingCtx); }
-		catch { threw = true; }
+		catch (err) { threw = (err as Error).message; }
 		return { hid, threw };
 	}
 
@@ -227,12 +227,22 @@ console.log("\n4. --show is the default render path, not a no-op and not a hide"
 
 	await check("--hide hides the widget and returns cleanly", () => {
 		assert.strictEqual(hide.hid, true, "expected setWidget(…, undefined)");
-		assert.strictEqual(hide.threw, false, "--hide must return before the render, so it cannot throw there");
+		assert.strictEqual(hide.threw, "", "--hide must return before the render, so it cannot throw there");
 	});
 	await check("--show does NOT hide the widget", () => {
 		assert.strictEqual(show.hid, false);
 	});
-	await check("--show is indistinguishable from bare /wtft", () => {
+	// Equality with `bare` alone is NOT enough, and a review caught that: if the
+	// handler ever early-returned for BOTH, the two would still match and this
+	// section would certify a no-op as correct — the exact claim it exists to
+	// refute. So assert first that each one RAN ON past the hide branch (it
+	// reaches the render and this mock trips there), and only then that they
+	// are the same. Both halves have to hold.
+	await check("--show runs on past the hide branch, rather than returning early", () => {
+		assert.notStrictEqual(show.threw, "", "expected --show to reach the render");
+		assert.notStrictEqual(bare.threw, "", "expected bare /wtft to reach the render");
+	});
+	await check("--show is indistinguishable from bare /wtft, failure included", () => {
 		assert.deepStrictEqual(show, bare, "--show must take the ordinary render path");
 	});
 	await check("-S is indistinguishable from --show", () => {

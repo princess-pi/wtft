@@ -675,10 +675,16 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
   });
 
   // 3. Register the '/budget' slash command: widget and footer visibility.
-  //    Bare `/budget` toggles the widget; the explicit flags SET it. Saying
-  //    "toggle" of the whole command was true when only the bare form and
-  //    valueless `--widget` existed, and became the wrong word once the
-  //    negating forms arrived — which is roughly how #74 was able to hide.
+  //
+  //    THREE behaviours, and conflating any two of them is how #74 hid:
+  //      - bare `/budget`                     toggles the widget
+  //      - `--widget`/`-w` with no value      toggles (same for `--footer`/`-f`)
+  //      - `--widget on|off`, `--no-widget`   SET, and never toggle
+  //
+  //    Calling the whole command a toggle was the original wrong word. Calling
+  //    every explicit flag a setter — which an earlier version of THIS comment
+  //    did, while correcting the first error — is the same mistake pointing the
+  //    other way: the valueless forms really do toggle.
   pi.registerCommand("budget", {
     description: "Configure Token Budget display options (e.g. /budget --widget off --footer on)",
     handler: async (args, ctx) => {
@@ -756,12 +762,17 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
       }
 
       // TOKENS, not substrings (#74). The previous form asked
-      // `trimmed.includes("-w")`, and `"--no-widget"` CONTAINS `-w` — so
-      // `--no-widget` entered the `--widget` arm, which then looked for an
-      // exact `--widget`/`-w` token, found none, read `parts[-1 + 1]` (the
-      // whole `"--no-widget"` string) as its value, matched neither `on` nor
-      // `off`, and fell through to the toggle. The `--no-widget` arm below it
-      // was unreachable. `--no-footer` contains `-f` and had the same defect.
+      // `trimmed.includes("--widget") || trimmed.includes("-w")`. The first
+      // disjunct is not the culprit — `--widget` is NOT a substring of
+      // `--no-widget`, which has only one dash before `widget`. The second is:
+      // `"--no-widget"` contains `-w` inside `-widget`. So `--no-widget`
+      // entered the `--widget` arm, which then looked for an EXACT
+      // `--widget`/`-w` token, found none, and read `parts[-1 + 1]` — that is
+      // `parts[0]`, the first token, which is the flag itself when it is the
+      // only one and some other flag when it is not. Either way it matched
+      // neither `on` nor `off`, so control fell through to the toggle, and the
+      // `else if (includes("--no-widget"))` arm below could never run.
+      // `--no-footer` contains `-f` inside `-footer`: same defect.
       //
       // Measured before the fix, which is the only way to tell a toggle from a
       // working `off`: `--no-widget` from ON went true -> false -> true, and

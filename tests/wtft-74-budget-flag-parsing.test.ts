@@ -2,16 +2,20 @@
 /**
  * @package @princess-pi/wtft
  * @test wtft-74-budget-flag-parsing
- * @description `/budget`'s negating flags must SET, not toggle (#74).
+ * @description `/budget`'s negating flags must SET, not toggle (#74) — plus a
+ *   pin on `/wtft --show`/`--hide` (§4), which is a different command's widget
+ *   and is here because #74 filed a claim about it that turned out to be wrong.
  *
- *   THE DEFECT. The handler decided which flag it had with
- *   `trimmed.includes("-w")` on the raw argument string. `"--no-widget"`
- *   contains the substring `-w`, so it entered the `--widget` arm; that arm
- *   then looked for an EXACT `--widget`/`-w` token, found none, took
- *   `parts[-1 + 1]` — the whole `"--no-widget"` string — as its value, matched
- *   neither `on` nor `off`, and fell to the toggle branch. The
- *   `else if (includes("--no-widget"))` arm below it was unreachable. Same
- *   shape for `--no-footer`, which contains `-f`.
+ *   THE DEFECT. The handler chose its branch with
+ *   `trimmed.includes("--widget") || trimmed.includes("-w")`. The first
+ *   disjunct is innocent — `--widget` is not a substring of `--no-widget`,
+ *   which has one dash before `widget`. The second is not: `"--no-widget"`
+ *   contains `-w` inside `-widget`. So `--no-widget` entered the `--widget`
+ *   arm, which looked for an EXACT `--widget`/`-w` token, found none, and read
+ *   `parts[-1 + 1]` — `parts[0]`, the first token, which is the flag itself
+ *   only when it is the sole one. Matching neither `on` nor `off`, it fell to
+ *   the toggle, leaving the `--no-widget` arm below unreachable.
+ *   `--no-footer` contains `-f` inside `-footer`: same defect.
  *
  *   WHY "TOGGLE" AND NOT "TURNS IT ON". Measured before the fix, twice from
  *   each starting state — the only way to tell a toggle from a set:
@@ -24,8 +28,10 @@
  *   suite runs every negating flag TWICE and from BOTH starting states: a
  *   one-run, one-direction check passes against the defect.
  *
- *   The assertion is on what lands in token-budget.json, not on the render —
- *   the render needs a live TUI, and the write happens first regardless.
+ *   The assertion is on what lands in token-budget.json, not on the render.
+ *   `updateTokenBudgetWidget` catches its own errors and degrades to an error
+ *   widget, so the handler returns normally under a mock — measured, not
+ *   assumed. The config write happens first regardless.
  */
 
 import * as assert from "node:assert";
@@ -79,9 +85,17 @@ function seed(settings: Record<string, unknown>): void {
 function read(): Record<string, unknown> {
 	return JSON.parse(fs.readFileSync(configPath, "utf8"));
 }
-/** The write precedes the render, and the render throws without a live TUI. */
+/** The write precedes the render (`writeConfig` then `updateTokenBudgetWidget`),
+ *  so the config is settled whatever the render does.
+ *
+ *  Measured: this handler returns NORMALLY under the mock — `updateTokenBudget
+ *  Widget` wraps its whole body and degrades to an error widget rather than
+ *  throwing. An earlier version of this comment said the render throws and
+ *  wrapped the call in a silent catch; the catch never fired, so it was
+ *  describing a mechanism that does not occur while also hiding any real throw
+ *  that might start to. The call is bare now, and a throw fails the check. */
 async function budget(args: string): Promise<void> {
-	try { await registered.budget.handler(args, permissiveMock()); } catch { /* render stage */ }
+	await registered.budget.handler(args, permissiveMock());
 }
 
 console.log("🏃 /budget negating flags SET rather than toggle (#74)\n");
@@ -177,8 +191,18 @@ console.log("\n4. --show is the default render path, not a no-op and not a hide"
 	} as any);
 
 	/** Run `/wtft <args>` and report whether it HID the widget, and whether it
-	 *  reached the render (which throws headless — no live TUI). */
-	async function outcome(args: string): Promise<{ hid: boolean; reachedRender: boolean }> {
+	 *  ran past the hide branch into the render.
+	 *
+	 *  `threw` is a PROXY for "did not short-circuit", and is labelled that way
+	 *  because its cause is not what it looks like. The render does throw here,
+	 *  but with `The "path" property must be of type string, got function` —
+	 *  this mock's Proxy reaching `node:path`, not the absence of a TUI. An
+	 *  earlier comment claimed the latter. The distinction matters: the useful
+	 *  assertions below are about `hid` and about `--show` matching bare
+	 *  `/wtft`, and both hold whatever the render does. If the mock is ever
+	 *  deepened so the render completes, `threw` goes false for all three of
+	 *  them together and every assertion here still means what it says. */
+	async function outcome(args: string): Promise<{ hid: boolean; threw: boolean }> {
 		let hid = false;
 		const recordingCtx: any = new Proxy(permissiveMock(), {
 			get: (target, prop) => {
@@ -190,10 +214,10 @@ console.log("\n4. --show is the default render path, not a no-op and not a hide"
 				});
 			},
 		});
-		let reachedRender = false;
+		let threw = false;
 		try { await wtftRegistered.wtft.handler(args, recordingCtx); }
-		catch { reachedRender = true; }
-		return { hid, reachedRender };
+		catch { threw = true; }
+		return { hid, threw };
 	}
 
 	const hide = await outcome("--hide");
@@ -203,7 +227,7 @@ console.log("\n4. --show is the default render path, not a no-op and not a hide"
 
 	await check("--hide hides the widget and returns cleanly", () => {
 		assert.strictEqual(hide.hid, true, "expected setWidget(…, undefined)");
-		assert.strictEqual(hide.reachedRender, false, "--hide must short-circuit before the render");
+		assert.strictEqual(hide.threw, false, "--hide must return before the render, so it cannot throw there");
 	});
 	await check("--show does NOT hide the widget", () => {
 		assert.strictEqual(show.hid, false);

@@ -1,6 +1,6 @@
 # @princess-pi/wtft
 
-> **⚠️ Untested outside a single box.** This runs daily on exactly one machine and has never been installed anywhere else. Try it — no guarantees, and expect the install to be the part that breaks. Public testing will come when the install scripts are ready.
+> **⚠️ Barely tested outside a single box.** This runs daily on exactly one machine. Since [#32](https://github.com/princess-pi/wtft/issues/32) every push also installs it from scratch on a clean Ubuntu runner and runs the full suite there — so "never installed anywhere else" is no longer true, but two boxes is not a portability claim. Try it — no guarantees, and expect the install to be the part that breaks.
 
 **wtft** — _what the f**k tokens_ — a live cost tracker for [Claude Code](https://claude.ai/code) and Pi harness sessions. Shows real-time token spend, cost breakdowns, and session history.
 
@@ -40,6 +40,26 @@ return because it never builds.
 
 **Not on npm yet.** `npm install -g @princess-pi/wtft` will not work — nothing is
 published. Tracked in [#29](https://github.com/princess-pi/wtft/issues/29).
+
+## What CI gates
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and PR.
+
+**`git-channel` — gating.** Clean checkout with both lockfiles deleted (a
+consumer installing from a git URL never sees ours), then `npm install` →
+`prepare` → `bun install` + build, `npm run typecheck`, and all 65 suites. The
+suite is where the real assertions live: `wtft-36-relocatable-build` scans every
+bundle in the `files` allowlist for imports that reach outside it and runs
+`--help`/`--why`/`--version` from a bare directory on stock node;
+`pack-and-smoke` installs a tarball with bun stripped from PATH.
+
+**Two steps are expected red and do not block**, named for the issue that owns
+each. Hiding them would recreate the blind spot this workflow exists to close:
+
+| Expected red | Goes green when |
+|---|---|
+| `stock-node, no bun` — installs from the git URL on stock node | [#29](https://github.com/princess-pi/wtft/issues/29)'s registry publish lands |
+| `tests/wtft-daemon.test.sh` — 5 of 21 failing, and the driver never ran it | [#72](https://github.com/princess-pi/wtft/issues/72) is fixed |
 
 ## Usage
 

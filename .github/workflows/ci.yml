@@ -48,9 +48,27 @@ jobs:
 
       # bun-on-PATH is permitted for the git-URL channel only (Node Toolchain
       # Standard). `prepare` needs it; so does the test driver.
+      #
+      # `latest`, NOT a pin. A pin buys a reproducible runner and pays for it by
+      # never telling us a bun release broke us — and this repo's one
+      # development box tracks bun closely, so a pin would just move that
+      # discovery to a place with no record. The cost is real (an upstream
+      # release can turn the board red with no commit here); the version echo
+      # below is what makes that diagnosable in one glance instead of an hour.
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      # The runner's bun and node versions, before anything can fail. The first
+      # CI run failed in a way that looked version-dependent (runner 1.4.1, dev
+      # box 1.3.14) and was not — it was the developer's session corpus leaking
+      # into a test. An hour went into telling those two apart with no version
+      # line in the log to start from.
+      - name: Versions under test
+        run: |
+          echo "node $(node --version)"
+          echo "npm  $(npm --version)"
+          echo "bun  $(bun --version)"
 
       # #32's "no lockfile" clause. A consumer installing us from a git URL
       # never sees our lockfile, so resolving fresh is what actually gets

@@ -176,7 +176,7 @@ for (let h = 0; h < 24; h++) {
 //    hour, surge hours orange" spec in one deep-equality assertion.
 // ---
 const surge = new Set(SURGE_HOURS);
-for (const h of [0, 3, 12, 15, 23]) {
+for (let h = 0; h < 24; h++) {
 	check(`full sequence for currentHour=${h} with surge ${SURGE_HOURS.join(",")}`, () => {
 		const raw = buildTimelineString(surge, h, undefined, FIXED_DATE);
 		assert.deepStrictEqual(coloredGlyphs(raw), expectedSequence(surge, h));

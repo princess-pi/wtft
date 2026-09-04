@@ -63,60 +63,35 @@
     <h4>2. Active Session Log aggregation</h4>
     <p>Token Budget scans the <code>wtft-tags/</code> tag files (the <code>.wtft-tag.vX.Y.Z.jsonl</code> records) under <code>~/.claude/projects/</code> and <code>~/.pi/agent/sessions/</code>, updated within the last 2 minutes, to aggregate total TPM across all parallel agent sessions.</p>
 
-    <h4>3. Schema & Token Counting (Issue #25 Fix)</h4>
-    <p>To support multiple provider engines seamlessly, the token extractor parses provider-specific usage schemas from JSONL session records with robust fallbacks.</p>
-    
-    <p>Due to Google's API integration logging structure, token usage is stored differently than Anthropic models. We aggregate both raw input tokens and cached prompt tokens (under Option B - Error on the side of more coffee breaks) to prevent exceeding active quota buckets:</p>
+    <h4>3. Schema & Token Counting</h4>
+    <p>Token Budget reads the <strong>classified</strong> wtft tag files — <code>.wtft-tag.vX.Y.Z.jsonl</code> records under <code>wtft-tags/</code> — never raw provider <code>.jsonl</code> session logs. The wtft daemon has already normalised every harness's transcript into one record shape (<code>docs/wtft-tag-format.md</code> §2a), so there are no per-provider schemas to parse:</p>
 
     <div class="diagram">
-        <strong>Google/Gemini Logging Format:</strong>
+        <strong>wtft tag interaction line (classified):</strong>
         <pre><code>{
-  "type": "message",
-  "model": "gemini-flash-latest",
-  "usage": {
-    "input": 8572,
-    "output": 405,
-    "cacheRead": 25347,
-    "totalTokens": 34324
-  }
-}</code></pre>
-        <strong>Anthropic/Claude Logging Format:</strong>
-        <pre><code>{
-  "type": "message",
-  "message": {
-    "role": "assistant",
-    "model": "claude-3-5-sonnet-20241022",
-    "usage": {
-      "input_tokens": 5472,
-      "output_tokens": 375
-    }
-  }
+  "t": 1756897200000,        // Unix ms — recency filter
+  "c": 0.004231,             // cost USD
+  "cat": "agent",            // pre-classified category
+  "m": "claude-3-5-sonnet",  // model name → quota shortcode
+  "in": 5472,                // input tokens
+  "out": 375,                // output tokens
+  "cr": 25347,               // cache-read tokens
+  "cw": 0                    // cache-write tokens
 }</code></pre>
     </div>
 
-    <h4>4. Parser Consolidation Rules</h4>
-    <p>The parser retrieves sliding-window input tokens dynamically across either structure, summing cached reads when present:</p>
-    <pre><code>let inputTokens = 0;
-if (entry.usage) {
-  if (typeof entry.usage.input === "number") {
-    inputTokens = entry.usage.input;
-    if (typeof entry.usage.cacheRead === "number") {
-      inputTokens += entry.usage.cacheRead; // Sum Gemini Cached Reads
-    }
-  } else if (typeof entry.usage.input_tokens === "number") {
-    inputTokens = entry.usage.input_tokens;
-    if (typeof entry.usage.cache_read === "number") {
-      inputTokens += entry.usage.cache_read;
-    }
-  } else if (typeof entry.usage.prompt_tokens === "number") {
-    inputTokens = entry.usage.prompt_tokens;
-  }
-}
+    <p>Heartbeat lines (a top-level <code>_hb</code> key) are skipped, and a record is counted only when it carries a model (<code>m</code>) and a timestamp (<code>t</code>). Input tokens are the sum of <code>in</code> + <code>cr</code> — cache reads bill against the same quota window, so they count toward the budget. Cache-write tokens (<code>cw</code>) are recorded but deliberately excluded: they are an output-side billing line, not input-rate consumption.</p>
 
-if (!inputTokens && msg?.usage) {
-  const baseInput = msg.usage.input || msg.usage.input_tokens || msg.usage.input_token_count || msg.usage.prompt_tokens || 0;
-  const cacheRead = msg.usage.cacheRead || msg.usage.cache_read || 0;
-  inputTokens = baseInput + cacheRead;
+    <h4>4. Aggregation Rules</h4>
+    <p>Only records from the last two minutes are considered, and only those within the last one minute accrue TPM (the sliding window). Each record maps its model name to a quota shortcode and adds its input tokens:</p>
+    <pre><code>if (obj._hb) continue;                        // heartbeat — not an interaction
+if (!obj.m || !obj.t) continue;               // needs model + timestamp
+const age = Date.now() - obj.t;
+if (age &gt; 120_000) continue;                  // older than 2 min — ignore
+const shortCode = getModelShortName(obj.m);
+const inputTokens = (obj.in || 0) + (obj.cr || 0);
+if (age &lt;= 60_000) {
+  modelStats[shortCode].tpm += inputTokens;   // 1-minute TPM window
 }</code></pre>
 
     <h4>5. Live Cooldown Countdown</h4>

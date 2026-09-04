@@ -161,21 +161,20 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 		} else if (arg === "--hide" || arg === "-H") {
 			hideWidget = true;
 		} else if (arg === "--show" || arg === "-S") {
-			// ACCEPTED AND INTENTIONALLY UNRECORDED. `--hide` needs a flag
-			// because it short-circuits; `--show` needs none, because the
-			// ordinary render path already sets the widget — so `/wtft --show`
-			// and bare `/wtft` do the same thing, which is what `--show` means.
+			// ACCEPTED AND INERT, which is the accurate description — #79 owns
+			// the decision about whether that should change.
 			//
-			// It used to set a `showWidget` field that nothing ever read. That
-			// dead field is what made #74 file `-S/--show` as a parsed no-op:
-			// from the source it looks like half an implemented pair, and only
-			// running it shows the behaviour is correct. Removing the field
-			// removes the false signal; the flag stays accepted so `-S` is
-			// never an unknown-flag error. Pinned by
-			// tests/wtft-74-budget-flag-parsing.test.ts §4.
+			// A `/wtft --show` run does end with the widget rendered, but the
+			// default path is what renders it: `--hide --show` and
+			// `--show --hide` BOTH clear the widget, so this flag carries no
+			// force of its own in either order. It used to set a `showWidget`
+			// field that nothing read; removing that removed a misleading
+			// signal, not the inertness.
 			//
-			// CONTEXT.md still calls `-S`/`-H` a toggle pair, which is wrong in
-			// the other direction — #79.
+			// Kept accepted so `-S` is never an unknown-flag error, and because
+			// CONTEXT.md documents `-S`/`-H` as a pair — dropping it is a
+			// user-facing change that belongs with that entry, not here.
+			// Behaviour pinned by tests/wtft-74-budget-flag-parsing.test.ts §4.
 		} else if (arg === "--no-emojii" || arg === "--no-emoji") {
 			enableEmoji = false;
 		} else if (arg === "--emojii" || arg === "--emoji") {

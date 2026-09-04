@@ -166,11 +166,21 @@ await check("--widget off --no-footer sets BOTH, rather than toggling footer", a
 // ---
 // 4. `/wtft --show` — filed in #74 as a parsed no-op, which was WRONG.
 //
-//    From the source it looked like half an implemented pair: `--hide` had a
-//    branch, `--show` set a field nothing read. Running it says otherwise —
-//    `--hide` short-circuits with setWidget(undefined), and `--show` falls
-//    through to the ordinary render, which sets the widget WITH LINES. It does
-//    what its name says by being the default path rather than a branch.
+//    ...and #74's WITHDRAWAL of that was an over-correction. Both things are
+//    true, and they are different claims:
+//
+//      - The widget DOES appear after `/wtft --show`. Running it shows
+//        setWidget(…, lines). That is what the withdrawal proved.
+//      - The FLAG is nonetheless inert. `--hide --show` and `--show --hide`
+//        both clear the widget, so `--show` carries no force of its own in
+//        either order; the render above is the default path's doing and would
+//        happen with no flag at all.
+//
+//    So the original report — "parses cleanly, exits 0, and does nothing" —
+//    was right about the flag, and I withdrew it for disproving a claim it had
+//    not made. What to do about that is #79's call: make `--show` real, or
+//    drop it from the parser and from CONTEXT.md, which documents `-S`/`-H` as
+//    a toggle pair. Either way it is a user-facing change, not a #74 bugfix.
 //
 //    The dead field is now gone from the parser (the flag stays accepted, so
 //    `-S` is never an unknown-flag error), because the field was the false
@@ -244,15 +254,22 @@ console.log("\n4. --show renders the widget; --hide clears it");
 		assert.strictEqual(hide.error, "", `unexpected throw: ${hide.error}`);
 		assert.strictEqual(hide.effect, "cleared");
 	});
-	await check("--show RENDERS the widget — it is not a no-op", () => {
+	await check("a --show run ends with the widget rendered", () => {
 		assert.strictEqual(show.error, "", `unexpected throw: ${show.error}`);
 		assert.strictEqual(show.effect, "rendered", "expected setWidget(…, lines)");
 	});
-	await check("-S renders it too", () => {
+	await check("-S ends the same way", () => {
 		assert.strictEqual(shortShow.effect, "rendered");
 	});
-	await check("--show matches bare /wtft — it is the default path, not a branch", () => {
+	await check("…but --show is identical to bare /wtft — the flag contributes nothing", () => {
 		assert.deepStrictEqual(show, bare);
+	});
+	// The one that settles it. If `--show` carried any force of its own, it
+	// would beat `--hide` in at least one order. It beats it in neither: the
+	// flag is inert, and the rendered widget above is the DEFAULT's doing.
+	await check("--show cannot override --hide, in either order — the flag is inert", async () => {
+		assert.strictEqual((await widgetEffect("--hide --show")).effect, "cleared", "--hide --show");
+		assert.strictEqual((await widgetEffect("--show --hide")).effect, "cleared", "--show --hide");
 	});
 }
 

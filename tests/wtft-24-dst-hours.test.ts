@@ -22,17 +22,38 @@
  * to document where it deliberately still differs from the fixed `tz`
  * branch (an ambiguous fall-back hour, see below).
  *
- * Both a spring-forward day (Asia/Jerusalem, 2026-03-27, a Friday) and a
- * fall-back day (Africa/Cairo, 2023-10-26, also a Friday) are used because
- * the US/EU transitions this repo's other tests reach for both fall on a
- * Sunday, where #495's weekend-is-off-peak rule already returns the empty
- * set and hides this class of bug entirely (see #24's own text).
+ * Three zones, on both sides of UTC, are used because the fix (see
+ * `resolveZonedLocalHour` in `extensions/lib/wtft-renderer.ts`) claims its
+ * gap/fold resolution holds regardless of the zone's offset sign, and an
+ * earlier draft of this PR shipped a two-sample refinement whose gap/fold
+ * resolution was NOT sign-independent — verified wrong by review (PR review,
+ * `Low/correctness`) against America/New_York before it merged: the earlier
+ * code resolved a spring-forward gap backwards (matching the hour BEFORE)
+ * for a negative-offset zone while matching the hour AFTER for a
+ * positive-offset one. `resolveZonedLocalHour`'s day-buffered-offset-plus-
+ * reparse approach was written to fix that, and NY is kept here as the
+ * negative-offset proof, not dropped once the immediate finding was
+ * addressed:
+ *   - Asia/Jerusalem, 2026-03-27 (Friday) — spring forward, +02:00 -> +03:00.
+ *   - Africa/Cairo, 2023-10-26 (Thursday) — fall back, +03:00 -> +02:00.
+ *   - America/New_York, 2026-03-08 and 2026-11-01 (both Sundays; the US
+ *     transition dates always are) — spring forward and fall back, both
+ *     -05:00 <-> -04:00. Local Sunday, but NOT off-peak end to end: late
+ *     local evening hours land on UTC MONDAY given the -05:00-ish offset, so
+ *     the surge set is not trivially empty even though the ambiguous hour
+ *     itself (2 for spring, 1 for fall) is not one of the surging hours.
+ *
+ * Jerusalem and Cairo are used for the spring/fall PAIR on the positive
+ * side, and reused (not re-derived) for the weekday requirement — the
+ * US/EU transitions this repo's other tests reach both fall on a Sunday,
+ * where #495's weekend-is-off-peak rule returns the empty set outright and
+ * hides this class of bug (see #24's own text); New York is kept anyway, on
+ * its real (Sunday) dates, purely to prove the negative-offset side.
  *
  * Every expected instant/hour below is derived from the real IANA tzdata
  * offsets for these zones (independently confirmed via
- * `Intl.DateTimeFormat`, bisecting for the exact transition minute — see
- * PR #<this PR> research notes), not by calling the two-sample refinement
- * under test.
+ * `Intl.DateTimeFormat`, bisecting for the exact transition minute), not by
+ * calling `resolveZonedLocalHour` under test.
  */
 
 import * as assert from "node:assert";
@@ -92,17 +113,19 @@ describe("#24 getSurgeLocalHours (tz branch) resolves each local hour with its o
 	});
 
 	it("resolves the nonexistent local hour (02:00, the spring-forward gap) to the same peak/off-peak answer as the hour after it", () => {
-		// Hour 2 never happens locally; the two-sample refinement converges on
-		// the same instant (2026-03-27T00:00Z) as hour 3. Both are off-peak
-		// here, so this pins that the gap hour is not incidentally miscounted
-		// as its OWN, different instant.
+		// Hour 2 never happens locally; `resolveZonedLocalHour` converges on
+		// the same instant (2026-03-27T00:00Z) as hour 3 — see
+		// JERUSALEM_EXPECTED_INSTANTS, and the NY block below for the same
+		// claim on the other side of UTC. Both are off-peak here, so this pins
+		// that the gap hour is not incidentally miscounted as its OWN,
+		// different instant.
 		const surge = getSurgeLocalHours(JERUSALEM, JERUSALEM_NOW_POST_TRANSITION);
 		assert.strictEqual(surge.has(2), surge.has(3));
 		assert.strictEqual(surge.has(2), false);
 	});
 });
 
-// --- Fall back: Africa/Cairo, 2023-10-26 (Friday) ---
+// --- Fall back: Africa/Cairo, 2023-10-26 (Thursday) ---
 // Real transition: local 24:00 (i.e. 2023-10-27T00:00) steps back to 23:00,
 // so LOCAL HOUR 23 OF 2023-10-26 repeats: once at offset +03:00 (the hour's
 // first pass) and again at offset +02:00 (the second pass, still reading as
@@ -142,6 +165,119 @@ describe("#24 getSurgeLocalHours (tz branch) on a fall-back day", () => {
 			);
 		}
 		assert.deepStrictEqual(sortedHours(surge), CAIRO_EXPECTED_SURGE_HOURS);
+	});
+});
+
+// --- Negative-offset proof: America/New_York, 2027-03-14 & 2026-11-01 ---
+//
+// Both are Sundays (the US transition dates always are — 2nd Sunday of
+// March, 1st Sunday of November), so unlike Jerusalem/Cairo this pair
+// cannot demonstrate the bug via a peak-window hit on the ambiguous hour
+// itself. What it proves instead: `resolveZonedLocalHour`'s gap/fold policy
+// is the SAME regardless of which side of UTC the zone sits on — an earlier
+// version of this fix got that backwards for a negative-offset zone (see
+// the file header). The surge set is not trivially empty despite the local
+// Sunday: America/New_York's offset means several LATE local evening hours
+// land on UTC MONDAY, which #495's weekday gate then charges normally.
+// 2027 (not 2026) for the spring date specifically: 2026-03-08 predates
+// #495's 2026-08-23 weekend-off-peak cutover, where a Saturday/Sunday
+// still surged all day and the oracle below would need a second, dated
+// branch to match — 2027-03-14 sidesteps that without changing anything
+// this test is actually about.
+const NEW_YORK = "America/New_York";
+const NY_SPRING_NOW_PRE_TRANSITION = Date.UTC(2027, 2, 14, 5, 0, 0);   // local 2027-03-14T00:00, offset -05:00
+const NY_SPRING_NOW_POST_TRANSITION = Date.UTC(2027, 2, 14, 20, 0, 0); // local 2027-03-14T16:00, offset -04:00
+const NY_FALL_NOW_PRE_TRANSITION = Date.UTC(2026, 10, 1, 4, 0, 0);    // local 2026-11-01T00:00, offset -04:00
+const NY_FALL_NOW_POST_TRANSITION = Date.UTC(2026, 10, 1, 20, 0, 0);  // local 2026-11-01T15:00 (2nd pass window has passed), offset -05:00
+
+// Spring forward: local 02:00 -> 03:00, offset -05:00 -> -04:00. Hour 2 does
+// not exist; resolves to the same instant as hour 3 (same rule as
+// Jerusalem's positive-offset gap).
+const NY_SPRING_EXPECTED_INSTANTS: readonly string[] = [
+	"2027-03-14T05:00:00.000Z", "2027-03-14T06:00:00.000Z", // 0, 1 (-05:00)
+	"2027-03-14T07:00:00.000Z", "2027-03-14T07:00:00.000Z", // 2 (gap, resolves with 3), 3 (-04:00)
+	"2027-03-14T08:00:00.000Z", "2027-03-14T09:00:00.000Z", "2027-03-14T10:00:00.000Z",
+	"2027-03-14T11:00:00.000Z", "2027-03-14T12:00:00.000Z", "2027-03-14T13:00:00.000Z",
+	"2027-03-14T14:00:00.000Z", "2027-03-14T15:00:00.000Z", "2027-03-14T16:00:00.000Z",
+	"2027-03-14T17:00:00.000Z", "2027-03-14T18:00:00.000Z", "2027-03-14T19:00:00.000Z",
+	"2027-03-14T20:00:00.000Z", "2027-03-14T21:00:00.000Z", "2027-03-14T22:00:00.000Z",
+	"2027-03-14T23:00:00.000Z", "2027-03-15T00:00:00.000Z", "2027-03-15T01:00:00.000Z",
+	"2027-03-15T02:00:00.000Z", "2027-03-15T03:00:00.000Z",
+];
+// Hours 21, 22, 23 land on UTC MONDAY 2027-03-15 at 01:00Z-03:00Z, inside
+// the 01:00-04:00 window — the only reason this Sunday has ANY surge hours.
+const NY_SPRING_EXPECTED_SURGE_HOURS = [21, 22, 23];
+
+// Fall back: local 02:00 -> 01:00, offset -04:00 -> -05:00. Hour 1 repeats;
+// resolves to its LATER (-05:00, post-transition) occurrence — same rule as
+// Cairo's positive-offset fold, opposite sign zone.
+const NY_FALL_EXPECTED_INSTANTS: readonly string[] = [
+	"2026-11-01T04:00:00.000Z", // 0 (-04:00)
+	"2026-11-01T06:00:00.000Z", // 1 (fold, resolves to its LATER/-05:00 occurrence, not 05:00Z)
+	"2026-11-01T07:00:00.000Z", "2026-11-01T08:00:00.000Z", "2026-11-01T09:00:00.000Z", // 2,3,4 (-05:00)
+	"2026-11-01T10:00:00.000Z", "2026-11-01T11:00:00.000Z", "2026-11-01T12:00:00.000Z",
+	"2026-11-01T13:00:00.000Z", "2026-11-01T14:00:00.000Z", "2026-11-01T15:00:00.000Z",
+	"2026-11-01T16:00:00.000Z", "2026-11-01T17:00:00.000Z", "2026-11-01T18:00:00.000Z",
+	"2026-11-01T19:00:00.000Z", "2026-11-01T20:00:00.000Z", "2026-11-01T21:00:00.000Z",
+	"2026-11-01T22:00:00.000Z", "2026-11-01T23:00:00.000Z", "2026-11-02T00:00:00.000Z",
+	"2026-11-02T01:00:00.000Z", "2026-11-02T02:00:00.000Z", "2026-11-02T03:00:00.000Z",
+	"2026-11-02T04:00:00.000Z",
+];
+// Hours 20, 21, 22 land on UTC MONDAY 2026-11-02 at 01:00Z-03:00Z.
+const NY_FALL_EXPECTED_SURGE_HOURS = [20, 21, 22];
+
+describe("#24 getSurgeLocalHours (tz branch) on America/New_York — the negative-offset proof", () => {
+	it("spring forward: same surge set on both sides of the transition, matching the tzdata oracle (including the UTC-Monday-crossing hours)", () => {
+		const pre = getSurgeLocalHours(NEW_YORK, NY_SPRING_NOW_PRE_TRANSITION);
+		const post = getSurgeLocalHours(NEW_YORK, NY_SPRING_NOW_POST_TRANSITION);
+		assert.deepStrictEqual(sortedHours(pre), sortedHours(post));
+		for (let hour = 0; hour < 24; hour++) {
+			const charged = getDeepSeekPeakMultiplier(Date.parse(NY_SPRING_EXPECTED_INSTANTS[hour])) === 2.0;
+			assert.strictEqual(post.has(hour), charged, `hour ${hour}: oracle instant ${NY_SPRING_EXPECTED_INSTANTS[hour]}`);
+		}
+		assert.deepStrictEqual(sortedHours(post), NY_SPRING_EXPECTED_SURGE_HOURS);
+	});
+
+	it("fall back: same surge set on both sides of the fold, matching the tzdata oracle, with the repeated hour resolved to its later occurrence", () => {
+		const pre = getSurgeLocalHours(NEW_YORK, NY_FALL_NOW_PRE_TRANSITION);
+		const post = getSurgeLocalHours(NEW_YORK, NY_FALL_NOW_POST_TRANSITION);
+		assert.deepStrictEqual(sortedHours(pre), sortedHours(post));
+		for (let hour = 0; hour < 24; hour++) {
+			const charged = getDeepSeekPeakMultiplier(Date.parse(NY_FALL_EXPECTED_INSTANTS[hour])) === 2.0;
+			assert.strictEqual(post.has(hour), charged, `hour ${hour}: oracle instant ${NY_FALL_EXPECTED_INSTANTS[hour]}`);
+		}
+		assert.deepStrictEqual(sortedHours(post), NY_FALL_EXPECTED_SURGE_HOURS);
+	});
+
+	it("resolves the spring-forward gap (local 02:00) the same way the else/host branch does — the gap case does NOT diverge between branches, on either side of UTC", () => {
+		const originalTz = process.env.TZ;
+		process.env.TZ = NEW_YORK;
+		try {
+			const hostSurge = getSurgeLocalHours(undefined, NY_SPRING_NOW_PRE_TRANSITION);
+			const tzSurge = getSurgeLocalHours(NEW_YORK, NY_SPRING_NOW_PRE_TRANSITION);
+			assert.deepStrictEqual(sortedHours(hostSurge), sortedHours(tzSurge));
+
+			const d = new Date(NY_SPRING_NOW_PRE_TRANSITION);
+			d.setHours(2, 0, 0, 0);
+			assert.strictEqual(d.toISOString(), NY_SPRING_EXPECTED_INSTANTS[2]);
+		} finally {
+			if (originalTz === undefined) delete process.env.TZ; else process.env.TZ = originalTz;
+		}
+	});
+
+	it("resolves the fall-back fold (local 01:00) to the OPPOSITE occurrence from the else/host branch — same divergence direction as Cairo, opposite sign zone", () => {
+		const originalTz = process.env.TZ;
+		process.env.TZ = NEW_YORK;
+		try {
+			const d = new Date(NY_FALL_NOW_PRE_TRANSITION);
+			d.setHours(1, 0, 0, 0);
+			// Host picks the EARLIER (-04:00) occurrence; the tz branch above
+			// resolved hour 1 to the LATER (-05:00) one, "2026-11-01T06:00:00.000Z".
+			assert.strictEqual(d.toISOString(), "2026-11-01T05:00:00.000Z");
+			assert.notStrictEqual(d.toISOString(), NY_FALL_EXPECTED_INSTANTS[1]);
+		} finally {
+			if (originalTz === undefined) delete process.env.TZ; else process.env.TZ = originalTz;
+		}
 	});
 });
 

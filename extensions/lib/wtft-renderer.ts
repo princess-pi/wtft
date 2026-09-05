@@ -664,6 +664,61 @@ export function getTimezoneOffsetMs(timestamp: number, tz: string): number {
 	return utcMs - timestamp;
 }
 
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Resolves one (year, month, day, hour) wall-clock reading in `tz` to the
+ * UTC instant it names — correctly on a day the zone's offset changes,
+ * where a single sampled offset is wrong for whichever side of the
+ * transition a given hour falls on (#24).
+ *
+ * Samples the offset a full day on each side of the target instant — far
+ * enough that neither sample can itself be inside the transition being
+ * resolved — then converts the wall-clock digits with each. On an ordinary
+ * day the two offsets agree and either conversion is the answer. On a
+ * transition day they disagree, and which converted instant is REAL is
+ * decided by asking `getZonedParts` whether converting it back reproduces
+ * the same (year, month, day, hour): a candidate that fails is a computed
+ * timestamp nobody's wall clock actually shows.
+ *
+ * Two ambiguous cases fall out of that check, both resolved the same way —
+ * prefer the later (post-transition) candidate when it is real, the earlier
+ * one otherwise:
+ *   - **Fall-back fold** (both candidates reproduce the hour, because it
+ *     genuinely happens twice): resolves to the LATER of the two real
+ *     instants.
+ *   - **Spring-forward gap** (NEITHER candidate reproduces the hour, because
+ *     it never happens): falls through to the earlier candidate — which
+ *     algebraically is the exact instant the FOLLOWING hour resolves to
+ *     (the earlier offset applied to hour H's digits equals the later
+ *     offset applied to (H+1)'s digits, since the digits and the offset
+ *     shift move by the same one-hour gap width). So the skipped hour reads
+ *     as the hour right after it, matching what `Date.prototype.setHours`
+ *     already does natively (verified for both directions in
+ *     `tests/wtft-24-dst-hours.test.ts`, across zones on both sides of UTC)
+ *     — this function needed the explicit rule; the host engine gets it for
+ *     free from ECMA-262's own `UTC` abstract operation.
+ *
+ * The fold case is where this function and the host engine deliberately
+ * diverge: `Date.prototype.setHours` resolves a repeated hour to its
+ * EARLIER occurrence, not its later one (also pinned by the same tests) —
+ * a documented, tested choice on each side, not a defect to reconcile.
+ */
+function resolveZonedLocalHour(year: number, month: number, day: number, hour: number, tz: string): number {
+	const wallUtcMs = Date.UTC(year, month - 1, day, hour, 0, 0, 0);
+	const earlyOffsetMs = getTimezoneOffsetMs(wallUtcMs - ONE_DAY_MS, tz);
+	const candidateEarly = wallUtcMs - earlyOffsetMs;
+
+	const lateOffsetMs = getTimezoneOffsetMs(wallUtcMs + ONE_DAY_MS, tz);
+	if (lateOffsetMs === earlyOffsetMs) return candidateEarly;
+
+	const candidateLate = wallUtcMs - lateOffsetMs;
+	const lateParts = getZonedParts(candidateLate, tz);
+	const lateIsReal = lateParts.year === year && lateParts.month === month
+		&& lateParts.day === day && lateParts.hour === hour;
+	return lateIsReal ? candidateLate : candidateEarly;
+}
+
 /**
  * Returns which local hours (0-23) fall in a surge window, in the configured
  * timezone, for the day containing `now` (default: the host clock).
@@ -682,25 +737,13 @@ export function getTimezoneOffsetMs(timestamp: number, tz: string): number {
  * a single offset applied to all 24 local hours puts the hours on the far
  * side of the transition an hour off — which the display would then colour
  * (or fail to colour) wrong. Each candidate hour below resolves its OWN
- * offset with a two-sample refinement: guess the offset as if the wall-clock
- * digits were already a UTC instant, convert, then resample the offset at
- * the converted instant and convert again. An ordinary day converges on the
- * first sample (nothing to refine); a transition day converges on the offset
- * actually in force at the converted instant.
- *
- * That refinement has no single right answer for the local hour a
- * spring-forward gap skips, or the one a fall-back fold repeats — pinned by
- * measurement in `tests/wtft-24-dst-hours.test.ts`: the skipped hour
- * resolves to the same instant as the hour after it, and a repeated hour
- * resolves to its LATER (post-transition) occurrence. The `else` branch
- * needs no equivalent change — a fresh `new Date(now)` per iteration already
- * gets per-hour resolution for free, because `Date.prototype.setHours`
- * re-derives the offset from the target local time rather than reusing one
- * (ECMA-262's `UTC` abstract operation performs the same two-sample
- * refinement on the host's own zone). It can land on the OTHER occurrence of
- * a fall-back fold hour than the branch above — the earlier one, not the
- * later one — which is a documented, tested divergence between the two
- * branches, not a defect to reconcile.
+ * offset via {@link resolveZonedLocalHour} — see its docstring for exactly
+ * how a skipped or repeated local hour resolves, and why that resolution is
+ * the same regardless of which side of UTC the zone sits on (measured for
+ * both, in `tests/wtft-24-dst-hours.test.ts`). The `else` branch needs no
+ * equivalent change — a fresh `new Date(now)` per iteration already gets
+ * per-hour resolution for free, because `Date.prototype.setHours` re-derives
+ * the offset from the target local time rather than reusing one.
  */
 export function getSurgeLocalHours(tz?: string, now: number = Date.now()): Set<number> {
 	const result = new Set<number>();
@@ -709,9 +752,7 @@ export function getSurgeLocalHours(tz?: string, now: number = Date.now()): Set<n
 	for (let localHour = 0; localHour < 24; localHour++) {
 		let ts: number;
 		if (tz && parts) {
-			const wallUtcMs = Date.UTC(parts.year, parts.month - 1, parts.day, localHour, 0, 0, 0);
-			const guessOffsetMs = getTimezoneOffsetMs(wallUtcMs, tz);
-			ts = wallUtcMs - getTimezoneOffsetMs(wallUtcMs - guessOffsetMs, tz);
+			ts = resolveZonedLocalHour(parts.year, parts.month, parts.day, localHour, tz);
 		} else {
 			const d = new Date(now);
 			d.setHours(localHour, 0, 0, 0);

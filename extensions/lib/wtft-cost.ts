@@ -81,6 +81,22 @@ export const WEB_FETCH_PRICE = 0.03;   // $0.03 per fetch request
  * Calculate the per-request cost of server-side tool usage for a given model.
  * Only Claude models are billed per-request for web search/fetch today.
  * DeepSeek, Gemini, and local models do not charge for server_tool_use.
+ *
+ * The test for "is this Claude" is a VENDOR MARKER in the id — `claude` or
+ * `anthropic` — and nothing else (#22 A). It used to also accept a bare alias,
+ * `/\b(haiku|sonnet|opus)\b/`, to catch a Claude id written without the
+ * `claude-` prefix. That arm billed DeepSeek: `claude-deepseek` exports
+ * ANTHROPIC_MODEL="opus", so a DeepSeek turn recorded as plain `opus` was
+ * charged $0.03 per web_search request against a provider this docstring says
+ * does not charge. The two cases are byte-identical at this seam — a bare
+ * `opus` from Claude Code and a bare `opus` from a DeepSeek session are the
+ * same string — so the arm cannot be narrowed, only dropped.
+ *
+ * What that costs: a genuine Anthropic turn recorded with a bare alias AND a
+ * server_tool_use block now undercounts by $0.03/request. No such turn exists
+ * in this host's corpus; Claude Code stamps the full dated id on every message,
+ * and every real Anthropic id form carries one of the two markers (dated API
+ * ids, Vertex `claude-…`, Bedrock `us.anthropic.claude-…`).
  */
 export function calculateServerToolCost(
 	model: string,
@@ -90,7 +106,7 @@ export function calculateServerToolCost(
 	const m = (model || "").toLowerCase();
 	// Only Claude charges per-request for server tools.
 	// Other providers (DeepSeek, Gemini, local) don't — return 0.
-	if (!m.includes("claude") && !/\b(haiku|sonnet|opus)\b/.test(m)) {
+	if (!m.includes("claude") && !m.includes("anthropic")) {
 		return 0;
 	}
 	return (webSearchRequests * WEB_SEARCH_PRICE) + (webFetchRequests * WEB_FETCH_PRICE);

@@ -20,6 +20,7 @@ import {
 	calculateClaudeCost,
 	lookupModelPricing,
 	isModelPriced,
+	describeFallbackPricing,
 	applyUserPricing,
 	loadUserPricing,
 	MODEL_PRICING,
@@ -163,14 +164,58 @@ describe("isModelPriced (#140)", () => {
 	});
 
 	it("is true for legacy substring-branch models not in the registry", () => {
+		// `opus` and `haiku` really do have hardcoded rate branches in
+		// calculateClaudeCost, so "priced" is honest for them.
 		assert.strictEqual(isModelPriced("claude-opus-4-0"), true);
-		assert.strictEqual(isModelPriced("deepseek-chat"), true);
+	});
+
+	it("is false for a DeepSeek id no registry key matched (#22 B / #25 B)", () => {
+		// There is no hardcoded DeepSeek branch — only a sibling GUESS, which the
+		// code's own comment calls one. Reporting that as priced meant the
+		// unpriced-model warning never fired for a DeepSeek model newer than the
+		// registry, which is the exact case the warning exists for. 527 turns on
+		// this host use `deepseek-reasoner`.
+		assert.strictEqual(isModelPriced("deepseek-reasoner"), false);
+		assert.strictEqual(isModelPriced("deepseek-chat"), false);
+		// A registry-matched DeepSeek id is still priced.
+		assert.strictEqual(isModelPriced("deepseek-v4-pro"), true);
+		assert.strictEqual(isModelPriced("deepseek/deepseek-v4-flash-vision-exp"), true);
 	});
 
 	it("is false for unknown models (the silent-default class)", () => {
 		assert.strictEqual(isModelPriced("claude-sonnet-6"), false);
 		assert.strictEqual(isModelPriced("totally-new-model"), false);
 		assert.strictEqual(isModelPriced(""), false);
+	});
+});
+
+describe("describeFallbackPricing (#22 B)", () => {
+	it("names the sibling-guess branch for an unmatched DeepSeek id", () => {
+		// The stderr warning used to claim "$3/$15" for every miss. A DeepSeek
+		// miss does not take that branch, so the text named a rate the run never
+		// used. Both real unmatched ids on this host guess with the flash card.
+		assert.match(describeFallbackPricing("deepseek-reasoner"), /deepseek-v4-flash rate card/);
+		assert.match(describeFallbackPricing("deepseek-chat"), /deepseek-v4-flash rate card/);
+	});
+
+	it("agrees with the card calculateClaudeCost actually charges", () => {
+		// The warning and the branch share deepSeekSiblingKey, so this pins that
+		// they cannot drift: the dollar figure for the unmatched id must equal
+		// the figure for the sibling the text names, on the same instant.
+		const OFF_PEAK_WEEKEND = new Date("2026-08-23T12:00:00Z").getTime();
+		const usage = { input_tokens: 1_000_000, output_tokens: 0 };
+		const guessed = calculateClaudeCost("deepseek-reasoner", usage, OFF_PEAK_WEEKEND);
+		const named = calculateClaudeCost("deepseek-v4-flash", usage, OFF_PEAK_WEEKEND);
+		assert.ok(/deepseek-v4-flash/.test(describeFallbackPricing("deepseek-reasoner")));
+		assert.strictEqual(guessed, named);
+		// Not a tautology: 0.22 is deepseek-v4-flash's current-card input rate,
+		// read from the committed manifest, not recomputed from the registry.
+		assert.strictEqual(guessed, 0.22);
+	});
+
+	it("names the Sonnet default for every other miss", () => {
+		assert.strictEqual(describeFallbackPricing("claude-sonnet-6"), "using default $3/$15 rates");
+		assert.strictEqual(describeFallbackPricing("totally-new-model"), "using default $3/$15 rates");
 	});
 });
 

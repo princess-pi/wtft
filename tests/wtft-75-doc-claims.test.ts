@@ -25,6 +25,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 
 const REPO = path.resolve(import.meta.dir, "..");
 const read = (rel: string) => fs.readFileSync(path.join(REPO, rel), "utf8");
@@ -67,6 +68,15 @@ console.log("\n1. README wtft examples name real flags");
 	const unknown = named.filter(f => !accepted.has(f));
 	check(unknown.length === 0, "every README wtft flag is accepted by parseWtftCliArgs",
 		unknown.length ? `not in parser: ${unknown.join(", ")}` : undefined);
+
+	// The closer names the manifest too: it is what `--help` and `--why` render
+	// from, so a README example naming a flag the manifest omits documents
+	// something `--help` would deny. Flags are found in the manifest's strings.
+	const manifest = read("docs/manifests/wtft-cmd.json");
+	const inManifest = new Set([...manifest.matchAll(/(?<![\w-])(-{1,2}[A-Za-z][\w-]*)/g)].map(m => m[1]));
+	const undocumented = named.filter(f => !inManifest.has(f));
+	check(undocumented.length === 0, "every README wtft flag is named in docs/manifests/wtft-cmd.json",
+		undocumented.length ? `not in manifest: ${undocumented.join(", ")}` : undefined);
 }
 
 // ---
@@ -130,6 +140,17 @@ console.log("\n4. README install-wtft exit codes match the script");
 		"README ties HOME unset to exit 64");
 	check(/--version[^.]*path/.test(section),
 		"README says install-wtft --version prints a path, not a version");
+	check(/\*\*64\*\*[^.]*relative `--dir`/.test(section),
+		"README ties a relative --dir with a vanished cwd to exit 64");
+	check(/`--` is not an end-of-options marker/.test(section),
+		"README says -- is not an end-of-options marker");
+	// The README says `--help` spells those two out. Read the help the script
+	// prints (the header comment, per its own -h arm) and hold it to that.
+	const help = execFileSync("bash", [path.join(REPO, "bin/install-wtft"), "--help"], { encoding: "utf8" });
+	check(/--version\s+absolute path of THIS SCRIPT, not a version/.test(help),
+		"install-wtft --help says --version prints the script path");
+	check(/`--` is NOT an end-of-options marker/.test(help),
+		"install-wtft --help says -- is not an end-of-options marker");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

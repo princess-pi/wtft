@@ -16,24 +16,24 @@
 # them: §1 of wtft-36 scanned two of the four shipped bundles and skipped every
 # relative specifier — so #29's own defect 2 was outside it; the daemon shell
 # suite was run by nothing at all; and the registry channel had no check
-# anywhere. The registry job and the daemon pin below are new assertions.
+# anywhere. The registry job and the daemon step below are new assertions; the
+# daemon step was a by-name pin of its known-red set until #72 fixed the suite.
 #
 # WHY TWO JOBS. The Node Toolchain Standard defines two install channels with
 # different requirements, and a workflow that only exercises the one we use
 # would keep passing while the other stays broken — the same blind spot #29
 # was. So the second channel gets a job of its own.
 #
-# WHY NEITHER KNOWN-RED THING IS `continue-on-error`. The first cut made both
-# unconditionally fail-open, which is a check that cannot fail — so a daemon
-# regression, or a published tarball that would not install, would have been
-# invisible for as long as #72 and #29 stayed open. That is the same "looks
-# healthy because nothing reports" this file exists to end, rebuilt inside the
-# file that ends it. Each now names the ONE tolerated outcome — an E404 for our
-# own package, and the five known-red assertions BY NAME (a count alone stays
-# green when a regression swaps one failure for another) — and fails on
-# anything else. Both surface as a
-# `::warning::` naming their issue, so the state is visible without a red that
-# is always expected, which is the kind of red people learn to ignore.
+# WHY THE KNOWN-RED JOB IS NOT `continue-on-error`. The first cut made it
+# unconditionally fail-open, which is a check that cannot fail — so a published
+# tarball that would not install would have been invisible for as long as #29
+# stayed open. That is the same "looks healthy because nothing reports" this
+# file exists to end, rebuilt inside the file that ends it. It now names the
+# ONE tolerated outcome — an E404 for our own package — and fails on anything
+# else, surfacing as a `::warning::` naming its issue, so the state is visible
+# without a red that is always expected, which is the kind of red people learn
+# to ignore. The daemon shell suite was the second such row, pinned to its five
+# known-red assertions BY NAME, until #72 fixed the suite; it is a plain gate now.
 # ---
 name: CI
 
@@ -141,69 +141,17 @@ jobs:
       - name: Test suite
         run: npm test
 
-      # Excluded from the driver ("shell suites, run by hand", which means
-      # never) and red as of 68ae326 — see #72.
+      # Excluded from the test driver (shell suites are not tests/*.test.ts),
+      # so this is the only thing that runs it without a human remembering to.
+      # Red 5-of-21 from the day `wtft-tags/` was introduced until #72: the
+      # suite looked for the tag file beside the session. Now a plain gate; the
+      # by-name pin that held the known-red set went with the last red
+      # assertion, as its own comment said it should.
       #
-      # NOT `continue-on-error`. A step that can never fail is not a check, and
-      # this one would have stayed un-failable for as long as #72 stayed open —
-      # a daemon regression landing inside it would have been invisible, which
-      # is the same "looks healthy because nothing reports" that #32 exists to
-      # end.
-      #
-      # PINNED BY NAME, not by count. A count-only pin has a hole a review found
-      # before it shipped: fix one known failure while breaking a different
-      # assertion and the tally is still 5, so the step stays green across a
-      # real regression. The five labels below are the known-red set; the step
-      # fails if the actual set differs in either direction.
-      #
-      # That cuts both ways on purpose. Fix one and this goes red asking for it
-      # to be struck from the list; break a sixth and it goes red naming it.
-      # When the list is empty the whole block collapses to a plain
-      # `bash tests/wtft-daemon.test.sh` — the `|| true`, the parse and the
-      # warning all become dead weight and should go with it.
-      - name: Daemon shell suite — pinned to the #72 known-red set
-        run: |
-          set -o pipefail
-          # The suite exits 1 while any assertion fails, which is correct and is
-          # exactly the state being pinned — so its status is deliberately not
-          # the verdict here. The comparison below is.
-          bash tests/wtft-daemon.test.sh 2>&1 | tee /tmp/daemon-suite.log || true
-
-          # The known-red set (#72). A heredoc cannot be used here: its
-          # terminator must sit at column 0, which ends the YAML block scalar.
-          printf '%s\n' \
-            'cache-read-only turn is NOT $0' \
-            'classified has required fields (t, c, cat)' \
-            'heartbeat uses range format {first,last}' \
-            'stop heartbeat written' \
-            'tag file created (.wtft-tag.v2.7.1.jsonl)' \
-            | sort > /tmp/daemon-expected.txt
-
-          sed 's/\x1b\[[0-9;]*m//g' /tmp/daemon-suite.log \
-            | sed -n 's/^  FAIL //p' | sort > /tmp/daemon-actual.txt
-
-          # The WHOLE Results line, not merely its presence. Pinning only the
-          # FAIL labels leaves a run that executed fewer assertions looking
-          # identical to a full one — same five failures, sixteen passes
-          # silently missing — so the passed count is pinned alongside them
-          # (PR review round 3). This is also why the suite's own exit status is
-          # not the verdict: it is 1 by definition while any assertion fails,
-          # which is the state being pinned.
-          results=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/daemon-suite.log | grep '^Results: ' || true)
-          expected_results='Results: 16 passed, 5 failed'
-          if [ "$results" != "$expected_results" ]; then
-            echo "::error::daemon suite summary was '$results', pinned at '$expected_results'. A different total means assertions were added, removed, or the run stopped early."
-            exit 1
-          fi
-
-          if ! diff -u /tmp/daemon-expected.txt /tmp/daemon-actual.txt; then
-            echo "::error::the daemon suite's failing set is not the #72 known-red set (- expected, + actual). If an assertion was FIXED, strike it from the PINNED list here. If a new one broke, that is a regression."
-            exit 1
-          fi
-
-          if [ -s /tmp/daemon-actual.txt ]; then
-            echo "::warning::daemon suite is red at the $(wc -l < /tmp/daemon-actual.txt) pinned assertions — expected until #72 is fixed"
-          fi
+      # The suite exports a private TMPDIR, so on a runner or a dev box it
+      # starts, lists and kills only its own daemons.
+      - name: Daemon shell suite
+        run: bash tests/wtft-daemon.test.sh
 
   stock-node-registry:
     name: registry channel on stock node

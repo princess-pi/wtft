@@ -24,16 +24,27 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execFileSync } from "node:child_process";
-import { WTFT_TAGGER_VERSION } from "../bin/wtft.mjs";
-import { CATEGORY_ORDER } from "../bin/wtft.mjs";
+import { spawnSync } from "node:child_process";
+import { WTFT_TAGGER_VERSION, EXIT_PROVISIONAL, WTFT_JSON_SCHEMA } from "../bin/wtft.mjs";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("26-json");
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const CLI_BIN = path.join(REPO_ROOT, "bin", "wtft.mjs");
-const EXIT_PROVISIONAL = 9;
+/** The fourteen category names, in CATEGORY_ORDER, written out INDEPENDENTLY.
+ *  Importing CATEGORY_ORDER and asserting the JSON matches it is tautological —
+ *  `computeSessionSummary` builds `categories[]` by mapping over that same
+ *  array, so a rename or a reorder moves both sides together and the assertion
+ *  can never fail. The contract is that a consumer indexes by POSITION, and only
+ *  a literal written out here can pin that. */
+const CATEGORY_NAMES = [
+	"overhead", "interrupted", "plan", "spec", "research", "web", "grep", "code",
+	"tests", "git", "agents", "prompt", "compaction", "other",
+];
+/** The schema string, likewise written out rather than compared to its own
+ *  import. `WTFT_JSON_SCHEMA` is imported so §1 can prove the CLI emits the
+ *  value the module exports, and this literal pins what that value must be. */
 const SCHEMA = "wtft/session@1";
 
 const RED = "\x1b[31m", GREEN = "\x1b[32m", RESET = "\x1b[0m";
@@ -54,19 +65,26 @@ function assert(label: string, ok: boolean, detail?: string) {
 // ---
 
 const MODEL = "claude-sonnet-4-6";
-/** Per-turn token counts, chosen so the totals cross the table's 1k abbreviation
- *  boundary in both directions — an all-small fixture would never exercise it. */
+/** A second model, deliberately one no pricing registry knows, so `priced:false`
+ *  and the table's `?` marker are exercised rather than assumed. Two models also
+ *  stop `models[0]` from being numerically identical to `total`, which would let
+ *  a JSON path that emitted the grand total in every model row pass §2. */
+const MODEL_UNPRICED = "acme-frobnicator-1";
+/** Per-turn counts, chosen so the totals cross the table's 1k abbreviation
+ *  boundary in every column INCLUDING Reasoning — an all-zero reasoning fixture
+ *  compares "0" against "0" and proves nothing about that column. */
 const TURNS = [
-	{ cat: "code",  input: 1200, output: 90,  cr: 4000, cw: 700, cost: 0.0123 },
-	{ cat: "spec",  input: 900,  output: 310, cr: 0,    cw: 250, cost: 0.0410 },
-	{ cat: "other", input: 1500, output: 640, cr: 9000, cw: 0,   cost: 0.0072 },
+	{ cat: "code",  model: MODEL,          input: 1200, output: 90,  cr: 4000, cw: 700, rs: 0,    cost: 0.0123 },
+	{ cat: "spec",  model: MODEL,          input: 900,  output: 310, cr: 0,    cw: 250, rs: 2400, cost: 0.0410 },
+	{ cat: "other", model: MODEL,          input: 1500, output: 640, cr: 9000, cw: 0,   rs: 0,    cost: 0.0072 },
+	{ cat: "git",   model: MODEL_UNPRICED, input: 300,  output: 45,  cr: 0,    cw: 0,   rs: 0,    cost: 0.0009 },
 ];
 
 function turnLine(id: string, tsMs: number, t: typeof TURNS[number]): string {
 	return JSON.stringify({
 		type: "message",
 		message: {
-			role: "assistant", id, model: MODEL,
+			role: "assistant", id, model: t.model,
 			timestamp: new Date(tsMs).toISOString(),
 			usage: {
 				input_tokens: t.input, output_tokens: t.output,
@@ -80,7 +98,7 @@ function turnLine(id: string, tsMs: number, t: typeof TURNS[number]): string {
 function classifiedLine(id: string, tsMs: number, t: typeof TURNS[number]): string {
 	return JSON.stringify({
 		t: tsMs, c: t.cost, cat: t.cat, f: [], cmd: [],
-		id, m: MODEL, in: t.input, out: t.output, cr: t.cr, cw: t.cw,
+		id, m: t.model, in: t.input, out: t.output, cr: t.cr, cw: t.cw, rs: t.rs,
 	}) + "\n";
 }
 
@@ -102,23 +120,23 @@ function makeFixture(slug: string, swept: boolean) {
 	return { dir, sessionPath, tagPath };
 }
 
-/** Run the CLI once. stdout and stderr are captured SEPARATELY — the whole
- *  contract is about which stream the prose lands on, so merging them would
- *  make the suite unable to see the thing it is testing. */
+/** Run the CLI once, capturing stdout and stderr SEPARATELY on every exit code.
+ *
+ *  `spawnSync`, not `execFileSync`, and that is the point: execFileSync returns
+ *  stdout alone on success and only concatenates stderr into the thrown error on
+ *  failure, so a suite using it can assert "the prose is not on stdout" against
+ *  a run where the prose was on neither stream and call that a pass. The whole
+ *  #26 contract is about WHICH STREAM each sentence lands on; §1 and §4 read
+ *  both fields, so the split has to survive a zero exit.
+ *  (tests/wtft-443-cli-exit-9.test.ts has the execFileSync shape and one
+ *  assertion that is vacuous for exactly this reason; it is fixed there too.) */
 function runCli(args: string[]): { code: number; stdout: string; stderr: string } {
-	try {
-		const stdout = execFileSync(process.execPath, [CLI_BIN, ...args], {
-			cwd: REPO_ROOT, encoding: "utf8", timeout: 60_000,
-			stdio: ["ignore", "pipe", "pipe"],
-			env: { ...process.env, WTFT_DAEMON_DEBUG: "" },
-		});
-		return { code: 0, stdout, stderr: "" };
-	} catch (err: any) {
-		return {
-			code: typeof err.status === "number" ? err.status : -1,
-			stdout: err.stdout ?? "", stderr: err.stderr ?? "",
-		};
-	}
+	const r = spawnSync(process.execPath, [CLI_BIN, ...args], {
+		cwd: REPO_ROOT, encoding: "utf8", timeout: 60_000,
+		stdio: ["ignore", "pipe", "pipe"],
+		env: { ...process.env, WTFT_DAEMON_DEBUG: "" },
+	});
+	return { code: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
 console.log("wtft --json (#26)");
@@ -137,9 +155,15 @@ console.log("\n1. One JSON object on stdout");
 	assert("stdout parses as exactly one JSON object", doc !== null && typeof doc === "object" && !Array.isArray(doc), r.stdout.slice(0, 800));
 	assert(`schema is "${SCHEMA}"`, doc?.schema === SCHEMA, String(doc?.schema));
 	assert("total.outputTokens is a number", typeof doc?.total?.outputTokens === "number");
-	// No ANSI anywhere: a colour code inside a JSON string still parses, so
-	// parseability alone does not carry this half of the contract.
+	// No ANSI anywhere. A colour code inside a JSON string still parses, so
+	// parseability alone would not carry this half. Weak on THIS fixture — the
+	// `--json` path writes only the document to stdout, so nothing can put an
+	// escape there — and kept as the regression guard for the next `console.log`
+	// someone adds above the return. §4 is where it does real work, on the run
+	// that has ANSI prose to misplace.
 	assert("stdout carries no ANSI escape", !/\x1b\[/.test(r.stdout));
+	assert("  ...while the run's prose really does exist, on stderr",
+		r.stderr.length > 0 || r.stdout.length > 0);
 	// "nothing else on stdout" — the session path line the human path prints
 	// above the chart is the specific thing that must not be here.
 	assert("stdout carries nothing but the object", r.stdout.trim().startsWith("{") && r.stdout.trim().endsWith("}"), r.stdout.slice(0, 400));
@@ -159,8 +183,12 @@ function abbreviate(n: number): string {
 	if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
 	return String(n);
 }
-function money(n: number): string {
-	return `$${n.toFixed(n > 0 && n < 0.01 ? 4 : 2)}`;
+/** The cost cell, including the `?` the table appends when the row's cost came
+ *  from a fallback rather than a rate card (#140). Omitting the marker made this
+ *  helper a restatement of `formatCost` rather than of the CELL, which is what
+ *  the parity claim is about. */
+function money(n: number, priced: boolean): string {
+	return `$${n.toFixed(n > 0 && n < 0.01 ? 4 : 2)}${priced ? "" : "?"}`;
 }
 /** The cells of one row of the rendered token table, by label. */
 function tableRow(rendered: string, label: string): string[] | null {
@@ -178,9 +206,12 @@ console.log("\n2. The rendered table and the JSON report the same numbers");
 
 	// Column order is the table's header: Input Output Reasoning Cache-Read Cache-Write Cost
 	const t = doc.total;
+	// The TOTAL row's `?` is the OR over the model rows, not a property of the
+	// total — the table marks the grand total as a guess if any row was one.
+	const allPriced = doc.models.every((m: any) => m.priced);
 	const expected = [
 		abbreviate(t.inputTokens), abbreviate(t.outputTokens), abbreviate(t.reasoningTokens),
-		abbreviate(t.cacheReadTokens), abbreviate(t.cacheWriteTokens), money(t.costUsd),
+		abbreviate(t.cacheReadTokens), abbreviate(t.cacheWriteTokens), money(t.costUsd, allPriced),
 	];
 	const cells = tableRow(rendered.stdout, "TOTAL");
 	assert("the rendered table has a TOTAL row", cells !== null, rendered.stdout);
@@ -188,18 +219,33 @@ console.log("\n2. The rendered table and the JSON report the same numbers");
 		JSON.stringify(cells) === JSON.stringify(expected),
 		`table: ${JSON.stringify(cells)}\njson:  ${JSON.stringify(expected)}`);
 
-	// And the per-model row, so `models[]` is held to the same standard as `total`.
-	const m = doc.models[0];
-	assert("the JSON names the full model id, not the shortened display form",
-		m.model === MODEL, String(m.model));
-	const modelCells = tableRow(rendered.stdout, "sonnet-4-6");
-	assert("every per-model cell equals the JSON model row, abbreviated",
-		JSON.stringify(modelCells) === JSON.stringify([
-			abbreviate(m.inputTokens), abbreviate(m.outputTokens), abbreviate(m.reasoningTokens),
-			abbreviate(m.cacheReadTokens), abbreviate(m.cacheWriteTokens), money(m.costUsd),
-		]),
-		`table: ${JSON.stringify(modelCells)}\njson:  ${JSON.stringify(doc.models[0])}`);
-	assert("a registry model reports priced: true", m.priced === true, JSON.stringify(m));
+	// EVERY per-model row, not just the first: with two models a JSON path that
+	// emitted the grand total in each row would still match `total` above.
+	assert("models[] has one row per model in the fixture", doc.models.length === 2, JSON.stringify(doc.models.map((m: any) => m.model)));
+	assert("the JSON names full model ids, not the shortened display form",
+		doc.models.map((m: any) => m.model).sort().join(",") === [MODEL, MODEL_UNPRICED].sort().join(","),
+		JSON.stringify(doc.models.map((m: any) => m.model)));
+	for (const m of doc.models) {
+		// The table shortens the id for display; the JSON must not.
+		const shown = m.model.replace(/^claude-/, "").replace(/-\d{8}$/, "");
+		const modelCells = tableRow(rendered.stdout, shown);
+		assert(`every cell of the ${m.model} row equals its JSON row, abbreviated`,
+			JSON.stringify(modelCells) === JSON.stringify([
+				abbreviate(m.inputTokens), abbreviate(m.outputTokens), abbreviate(m.reasoningTokens),
+				abbreviate(m.cacheReadTokens), abbreviate(m.cacheWriteTokens), money(m.costUsd, m.priced),
+			]),
+			`table: ${JSON.stringify(modelCells)}\njson:  ${JSON.stringify(m)}`);
+	}
+	// Both sides of `priced`, so the field is pinned rather than merely present.
+	const byId = Object.fromEntries(doc.models.map((m: any) => [m.model, m]));
+	assert("a registry model reports priced: true", byId[MODEL].priced === true, JSON.stringify(byId[MODEL]));
+	assert("a model no registry knows reports priced: false", byId[MODEL_UNPRICED].priced === false, JSON.stringify(byId[MODEL_UNPRICED]));
+	assert("  ...and the table marks that row with the matching `?`",
+		/acme-frobnicator-1\s.*\?$/m.test(rendered.stdout), rendered.stdout);
+	// models[] is cost-descending, which is the table's row order (#26 contract).
+	assert("models[] is sorted by costUsd descending",
+		doc.models.every((m: any, i: number) => i === 0 || doc.models[i - 1].costUsd >= m.costUsd),
+		JSON.stringify(doc.models.map((m: any) => m.costUsd)));
 }
 
 // ---
@@ -227,14 +273,14 @@ console.log("\n3. models[] and categories[] each sum to total");
 	// Positional addressability is part of the contract: a consumer indexes
 	// categories[] rather than searching it, so the array is always complete
 	// and always in CATEGORY_ORDER.
-	assert("categories[] carries every CATEGORY_ORDER entry, in order",
-		JSON.stringify(doc.categories.map((c: any) => c.category)) === JSON.stringify(CATEGORY_ORDER),
+	assert("categories[] carries all fourteen names, in the documented order",
+		JSON.stringify(doc.categories.map((c: any) => c.category)) === JSON.stringify(CATEGORY_NAMES),
 		JSON.stringify(doc.categories.map((c: any) => c.category)));
 	// The fixture puts one turn in each of three categories, so a JSON path
 	// that lost the per-category split would still sum correctly above.
 	const nonZero = doc.categories.filter((c: any) => c.costUsd > 0).map((c: any) => c.category).sort();
-	assert("the three fixture categories are the three non-zero rows",
-		JSON.stringify(nonZero) === JSON.stringify(["code", "other", "spec"]), JSON.stringify(nonZero));
+	assert("the four fixture categories are the four non-zero rows",
+		JSON.stringify(nonZero) === JSON.stringify(["code", "git", "other", "spec"]), JSON.stringify(nonZero));
 }
 
 // ---
@@ -256,15 +302,38 @@ console.log("\n4. Provisional: exit 9 AND a parseable object");
 	assert("provisional.reason names the condition", doc?.provisional?.reason === "unswept", JSON.stringify(doc?.provisional));
 	assert("the totals are reported in full anyway, not withheld",
 		doc?.total?.outputTokens > 0, JSON.stringify(doc?.total));
-	// The prose is in the object as well as on stderr, so a consumer relaying to
-	// a human never has to correlate two streams — and it branches on `code`.
+	// The provisional sentence is in the object AND on stderr, so a consumer
+	// relaying to a human need not correlate two streams, and it branches on
+	// `code` rather than on the sentence. Not every stderr line has a notice —
+	// the reap-warning block and the `--force` line are diagnostics with no
+	// document counterpart — so the claim is about THIS sentence, not about the
+	// stream as a whole.
 	const notice = (doc?.notices ?? []).find((n: any) => n.code === "provisional");
 	assert("notices[] carries a provisional entry with a typed code", !!notice, JSON.stringify(doc?.notices));
 	assert("  ...and the sentence, so stderr is not load-bearing",
 		typeof notice?.text === "string" && notice.text.length > 0, JSON.stringify(notice));
+	assert("  ...and the same sentence is on stderr, ANSI-wrapped, for the human",
+		r.stderr.includes(notice?.text ?? "\u0000"), r.stderr);
+	assert("  ...and none of it reached stdout", !r.stdout.includes("PROVISIONAL"), r.stdout);
 	// The #443 rule the rendered path is held to, held here too: the remedy
-	// never advises -F, because -F falls through to this same read path.
+	// never advises -F, because -F falls through to this same read path. Weak by
+	// construction — neither arm of describeProvisionalRemedy can emit `-F` — and
+	// kept because that is precisely the property a reword could destroy.
 	assert("the provisional notice never advises -F", !/-F/.test(notice?.text ?? ""), notice?.text);
+}
+{
+	// A SECOND reason, so `reason` is pinned as a vocabulary rather than as one
+	// string. A tag whose filename carries a version this build did not write is
+	// stale-version, which readTagProvisional decides before it reads a byte.
+	const { dir, sessionPath, tagPath } = makeFixture("stale", true);
+	fs.renameSync(tagPath, path.join(path.dirname(tagPath), path.basename(sessionPath) + ".wtft-tag.v0.0.1-ancient.jsonl"));
+	const r = runCli(["-s", sessionPath, "--json"]);
+	let doc: any = null;
+	try { doc = JSON.parse(r.stdout); } catch { /* reported below */ }
+	assert("a stale-version tag also yields one object", doc !== null, r.stdout.slice(0, 400));
+	assert(`  ...and exits ${EXIT_PROVISIONAL} (got ${r.code})`, r.code === EXIT_PROVISIONAL, r.stderr);
+	assert("  ...naming stale-version as the reason", doc?.provisional?.reason === "stale-version", JSON.stringify(doc?.provisional));
+	void dir;
 }
 
 // ---
@@ -302,16 +371,25 @@ console.log("\n5. session identity and the #149 blind spot");
 // 6. Contradictory flags must not crash, and must not break the contract.
 // ---
 // Which flag "wins" is deliberately NOT pinned — that is the human's call, and
-// pinning it would make a future decision a test failure. What IS pinned: the
-// run does not crash, and stdout stays parseable.
+// pinning it would turn a future decision into a test failure. What IS pinned:
+// the run does not crash, and stdout stays parseable. The exit code is left
+// free for the same reason: a provisional fixture would legitimately exit 9
+// here, so requiring 0 would be pinning a second thing by accident.
+//
+// Scoped to the RENDERING flags. `--help`, `--why`, `--version`, `--watch` and
+// the daemon-management commands are not contradictory flags, they are separate
+// commands that run instead of the report; §7 covers what the manifest says
+// about them.
 console.log("\n6. --json alongside rendering flags");
 {
 	const { sessionPath } = makeFixture("combo", true);
-	for (const extra of [["--tokens"], ["--other"], ["--pad", "4"], ["--no-emoji"]]) {
+	for (const extra of [["--tokens"], ["--other"], ["--pad", "4"], ["--no-emoji"], ["--bucket"], ["--interval", "5m"]]) {
 		const r = runCli(["-s", sessionPath, "--json", ...extra]);
 		let ok = false;
 		try { ok = JSON.parse(r.stdout).schema === SCHEMA; } catch { /* reported */ }
-		assert(`--json ${extra.join(" ")} still yields one object (exit ${r.code})`, ok && r.code === 0, r.stdout.slice(0, 300));
+		assert(`--json ${extra.join(" ")} still yields one object (exit ${r.code})`, ok, r.stdout.slice(0, 300));
+		assert(`  ...without crashing (exit ${r.code} is 0 or ${EXIT_PROVISIONAL})`,
+			r.code === 0 || r.code === EXIT_PROVISIONAL, r.stderr.slice(0, 300));
 	}
 }
 
@@ -326,25 +404,51 @@ console.log("\n7. the exit-code table is a contract");
 	const manifest = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "docs/manifests/wtft-cmd.json"), "utf8"));
 	const documented = new Set((manifest.exitCodes ?? []).map((c: any) => c.code));
 	assert("the manifest carries an exitCodes table", documented.size > 0, JSON.stringify(manifest.exitCodes));
-	// Read from the CLI source, so a new `process.exit(N)` fails this rather
-	// than quietly becoming an undocumented code.
-	const cli = fs.readFileSync(path.join(REPO_ROOT, "bin/wtft.ts"), "utf8")
+	// Read from source, so a new `process.exit(N)` fails this rather than quietly
+	// becoming an undocumented code.
+	//
+	// TWO files, not one: `bin/wtft.ts` calls `selectSessionPrompt`, which exits
+	// 130 on `q`/Ctrl-C from inside `session-selector.ts`. A scan of the entry
+	// point alone reported "every exit code" while missing one the tool really
+	// returns — the exact class of false green this section exists to prevent.
+	const sources = ["bin/wtft.ts", "extensions/lib/session-selector.ts"]
+		.map(rel => fs.readFileSync(path.join(REPO_ROOT, rel), "utf8"))
+		.join("\n")
 		.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
 	const used = new Set<number>();
-	for (const m of cli.matchAll(/process\.exit\((\d+)\)/g)) used.add(Number(m[1]));
-	for (const m of cli.matchAll(/process\.exitCode = (\d+)/g)) used.add(Number(m[1]));
-	if (/EXIT_PROVISIONAL/.test(cli)) used.add(EXIT_PROVISIONAL);
-	used.add(0); // every `return` from main() is an exit 0
+	for (const m of sources.matchAll(/process\.exit\((\d+)\)/g)) used.add(Number(m[1]));
+	// Both the literal and the ternary form. `process.exitCode = cond ? A : 0`
+	// is what the provisional branch actually writes, and a `= (\d+)` pattern
+	// does not see it.
+	for (const m of sources.matchAll(/process\.exitCode = ([^;]+);/g)) {
+		for (const n of m[1].matchAll(/\b(\d+)\b/g)) used.add(Number(n[1]));
+		// EXIT_PROVISIONAL by name, read from the CONSTANT rather than hardcoded:
+		// re-typing 9 here means changing the constant leaves this green.
+		if (/EXIT_PROVISIONAL/.test(m[1])) used.add(EXIT_PROVISIONAL);
+	}
+	// main() returning normally is an exit 0, and so is `process.exitCode = 0`.
+	used.add(0);
 	const undocumented = [...used].filter(c => !documented.has(c));
-	assert("every exit code bin/wtft.ts can return is in the manifest table",
+	assert(`every exit code the CLI can return is in the manifest table (found ${[...used].sort((a, b) => a - b).join(", ")})`,
 		undocumented.length === 0, `undocumented: ${undocumented.join(", ")}`);
+	assert("  ...including 130, which only the session selector can return",
+		used.has(130) && documented.has(130), `used=${used.has(130)} documented=${documented.has(130)}`);
 
 	const help = runCli(["--help"]);
 	assert("--help renders an Exit codes section", /Exit codes:/.test(help.stdout), help.stdout.slice(-400));
+	// Scoped to the section, not to the whole help text: `^\s*0\s` matches any
+	// line starting with a digit anywhere in the output, which would pass on a
+	// help page that had no exit-code block at all.
+	const plain = help.stdout.replace(/\x1b\[[0-9;]*m/g, "");
+	const section = plain.slice(plain.indexOf("Exit codes:"));
 	for (const c of documented) {
-		assert(`  ...naming exit ${c}`, new RegExp(`^\\s*${c}\\s`, "m").test(help.stdout.replace(/\x1b\[[0-9;]*m/g, "")));
+		assert(`  ...naming exit ${c} inside that section`, new RegExp(`^\\s*${c}\\s`, "m").test(section), section);
 	}
 	assert("--help names --json", /--json/.test(help.stdout));
+	// The schema string the CLI emits is the one the module exports, so a
+	// consumer pinning `wtft/session@1` and the code cannot drift apart.
+	assert("the exported schema constant is the string the CLI emits",
+		WTFT_JSON_SCHEMA === SCHEMA, String(WTFT_JSON_SCHEMA));
 }
 
 console.log("\n──────────────────────────────");

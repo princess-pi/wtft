@@ -14,7 +14,7 @@
  *   on `notices[].code`.
  */
 
-import { computeSessionSummary, type SessionSummary, type ModelTotals, type CategoryTotals, type TokenTotals } from "./wtft-renderer.js";
+import { computeSessionSummary, type ModelTotals, type CategoryTotals, type TokenTotals } from "./wtft-renderer.js";
 import type { Interaction } from "./wtft-shared.js";
 import type { UncountedBillables } from "./wtft-parser.ts";
 import type { TagProvisional } from "./wtft-daemon-lib.js";
@@ -31,7 +31,7 @@ export const WTFT_JSON_SCHEMA = "wtft/session@1";
  * correlating two streams.
  */
 export interface WtftNotice {
-	code: "pending-session" | "no-data" | "unpriced-model" | "provisional";
+	code: "pending-session" | "no-data" | "unpriced-model" | "provisional" | "auto-selected-session";
 	text: string;
 }
 
@@ -68,14 +68,11 @@ export interface BuildSessionJsonInput {
 	 *  because a caller skipped the scan. */
 	uncounted?: UncountedBillables;
 	notices?: WtftNotice[];
-	/** Test seam only — lets a caller assert the document is built from the
-	 *  aggregation rather than re-derive it. Production callers omit it. */
-	summary?: SessionSummary;
 }
 
 /** Build the `wtft/session@1` document. Pure: no I/O, no clock, no process state. */
 export function buildSessionJson(input: BuildSessionJsonInput): WtftSessionJson {
-	const summary = input.summary ?? computeSessionSummary(input.interactions);
+	const summary = computeSessionSummary(input.interactions);
 	return {
 		schema: WTFT_JSON_SCHEMA,
 		session: input.session,

@@ -340,9 +340,17 @@ tokens *freed*, a different fact from spend *not counted*.
 `bin/wtft.ts` calls `scanUncountedBillables` on the session file **and on every file
 `discoverSubagentSessionFiles` finds** (the same discovery `--tokens` already uses to fold
 subagent cost into TOTAL), summing the counts with `addUncountedBillables` before passing
-the result to `renderTokenSummary`. A compaction or recap inside a subagent transcript is
-exactly as invisible as one in the parent, so it must be counted the same way. Wired into
-the non-watch `--tokens` path only (`bin/wtft.ts`, the `if (opts.tokens)` block).
+the result to `renderTokenSummary`. A compaction or recap inside a subagent session file is
+exactly as invisible as one in the parent, so it must be counted the same way.
+
+**Where it is wired (amended by #26).** It was the non-watch `--tokens` path only. It is now
+`scanSessionUncounted` in `bin/wtft.ts` — hoisted out of that block, memoised, and called by
+**both** the `--tokens` renderer and `wtft --json`, which reports the counts as its
+`uncounted` field on every run whether or not `--tokens` was given. Hoisted rather than
+copied for a reason that is invisible in the function's name: besides counting, the scan can
+**downgrade the provisional verdict** to `subagent-unreadable` (#457) and so change the exit
+code. A second copy would have meant one of the two output modes reporting a settled total
+for a session whose subagent file could not be read.
 
 **A build constraint the code revealed (found at Step 4, not designed in).** `bin/wtft.ts`
 has an explicit `export { … }` block, and Bun tree-shakes anything absent from it out of

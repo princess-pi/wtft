@@ -1785,7 +1785,12 @@ function addInteraction(into: TokenTotals, i: Interaction): void {
  * nowhere else. That is what makes `sum(models) === sum(categories) === total`
  * exactly true, and it is deliberately a narrower population than the bar
  * chart's, which bins every interaction. A chart total and this total can
- * legitimately differ by the untagged spend; docs/spec-26-json.md says so.
+ * legitimately differ, by TWO things: the untagged spend excluded here, and
+ * `serverToolCost`, which `buildWtftLines` adds to the chart's `web` bin and
+ * which no summing of `i.cost` reaches. Both divergences predate #26 — the
+ * rendered `--tokens` table has always summed `i.cost` alone — and #26
+ * deliberately did not change the arithmetic, only gave it a second reader.
+ * docs/spec-26-json.md records both.
  */
 export function computeSessionSummary(interactions: Interaction[]): SessionSummary {
 	const deduped = deduplicateInteractions(interactions);
@@ -1822,8 +1827,18 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
 
 		// `classifyInteraction` returns the stored `_cat` for a tag-file read and
 		// re-derives it otherwise — the same call the bar chart makes.
+		//
+		// `_cat` reaches that call UNVALIDATED (`readClassifiedTagFile` does
+		// `_cat: obj.cat || undefined`), so a tag written by a future tagger — or
+		// a hand-edited one — can name a category this build has never heard of.
+		// Such a row is folded into `other`, the vocabulary's own catch-all,
+		// rather than given a row of its own. The alternative was a `categories[]`
+		// longer than CATEGORY_ORDER, which breaks the positional addressability
+		// the JSON contract sells; silently DROPPING it was the third option and
+		// the worst, because it breaks `sum(categories) === total` — a guarantee
+		// a consumer would have no way to know had failed.
 		const cat = classifyInteraction(i);
-		const c = byCategory.get(cat) ?? byCategory.set(cat, emptyTotals()).get(cat)!;
+		const c = byCategory.get(cat) ?? byCategory.get("other")!;
 		addInteraction(c, i);
 	}
 
@@ -1849,7 +1864,11 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
  */
 export function renderTokenSummary(interactions: Interaction[], maxWidth: number = 80, thinkingBudget?: number, uncounted?: UncountedBillables): string {
 	// One aggregation, two readers (#26): this table and `wtft --json` read the
-	// same object, so they cannot report different numbers.
+	// same object, so they cannot report different NUMBERS. Three things below
+	// are display-only and have no JSON counterpart, because they are ratios and
+	// legends derived here rather than aggregate facts: the per-model `Cache:`
+	// hit-rate line, the `Think:` budget-utilisation line, and the `?` fallback
+	// legend. A consumer recomputes the first two from the fields it already has.
 	const summary = computeSessionSummary(interactions);
 	const unmatched = summary.untaggedInteractions;
 

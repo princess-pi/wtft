@@ -24,10 +24,15 @@
  *   reasoning steps, costs a consumer no tokens at all, and matches the idiom
  *   this repo already uses in `pr-review` (7/8/9).
  *
- *   SAFE TO ADD, checked rather than assumed: nothing in this repo invokes the
- *   `wtft` CLI and inspects `$?` — no caller in `bin/`, `hooks/`, `statusline/`
- *   or `skills/` — and `bin/wtft.ts` only ever exits 0 or 1 today. So no
- *   existing consumer can regress on a new nonzero code.
+ *   SAFE TO ADD — and the check that said so was WRONG, which is the part worth
+ *   keeping. #511 justified the new code with "nothing in this repo invokes the
+ *   `wtft` CLI and inspects `$?`", grepping `bin/`, `hooks/`, `statusline/` and
+ *   `skills/`. Three of those four directories do not exist in this repo, and
+ *   the one place that did inspect `$?` — `tests/` — was not grepped.
+ *   `tests/wtft-auto-fit.test.ts` then failed on exit 9, on `main`,
+ *   intermittently; `tests/wtft-513-exit9-caller-guard.test.ts` is the guard
+ *   that came out of it. The CLI returns 0, 1, 9 and 130 (the selector's
+ *   Ctrl-C), all four documented in `docs/manifests/wtft-cmd.json` since #26.
  *
  *   A HUMAN LINE TOO, because the exit code is invisible to the person reading
  *   the widget, and they are the one who can decide to re-run.
@@ -39,15 +44,14 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execFileSync } from "node:child_process";
-import { WTFT_TAGGER_VERSION } from "../bin/wtft.mjs";
+import { spawnSync } from "node:child_process";
+import { WTFT_TAGGER_VERSION, EXIT_PROVISIONAL } from "../bin/wtft.mjs";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("443-cli");
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const CLI_BIN = path.join(REPO_ROOT, "bin", "wtft.mjs");
-const EXIT_PROVISIONAL = 9;
 
 const RED = "\x1b[31m", GREEN = "\x1b[32m", RESET = "\x1b[0m";
 let passed = 0, failed = 0;
@@ -104,18 +108,23 @@ function makeFixture(slug: string, swept: boolean) {
 	return { dir, sessionPath };
 }
 
-/** Run the CLI once; return its exit status and combined output. */
-function runCli(sessionPath: string): { code: number; out: string } {
-	try {
-		const out = execFileSync(process.execPath, [CLI_BIN, "-s", sessionPath, "--tokens", "--pad", "0"], {
-			cwd: REPO_ROOT, encoding: "utf8", timeout: 60_000,
-			stdio: ["ignore", "pipe", "pipe"],
-			env: { ...process.env, WTFT_DAEMON_DEBUG: "" },
-		});
-		return { code: 0, out };
-	} catch (err: any) {
-		return { code: typeof err.status === "number" ? err.status : -1, out: `${err.stdout ?? ""}${err.stderr ?? ""}` };
-	}
+/** Run the CLI once; return its exit status, the two streams, and their
+ *  concatenation.
+ *
+ *  `spawnSync`, not `execFileSync`, because the streams have to be separable on
+ *  a ZERO exit too. execFileSync returns stdout alone on success and folds
+ *  stderr in only on the thrown error, so the settled-run assertion below —
+ *  "says nothing about being provisional" — was searching stdout for a sentence
+ *  the code only ever writes to stderr. It could not have failed in any
+ *  outcome, including a broken one. (#26 review.) */
+function runCli(sessionPath: string): { code: number; out: string; stdout: string; stderr: string } {
+	const r = spawnSync(process.execPath, [CLI_BIN, "-s", sessionPath, "--tokens", "--pad", "0"], {
+		cwd: REPO_ROOT, encoding: "utf8", timeout: 60_000,
+		stdio: ["ignore", "pipe", "pipe"],
+		env: { ...process.env, WTFT_DAEMON_DEBUG: "" },
+	});
+	const stdout = r.stdout ?? "", stderr = r.stderr ?? "";
+	return { code: r.status ?? -1, out: `${stdout}${stderr}`, stdout, stderr };
 }
 
 console.log("wtft CLI reports a provisional read (#443)");
@@ -125,8 +134,11 @@ console.log("──────────────────────�
 	const { sessionPath } = makeFixture("stale", false);
 	const r = runCli(sessionPath);
 	assert(`a populated tag with no _meta.swept exits ${EXIT_PROVISIONAL} (got ${r.code})`, r.code === EXIT_PROVISIONAL, r.out);
-	assert("  ...and says so in prose, for the human who can re-run it",
-		/provisional/i.test(r.out));
+	// On STDERR specifically: the exit code is for the machine and the sentence
+	// is for the human, but neither may contaminate the report on stdout, which
+	// is the thing this branch exists to keep printing in full.
+	assert("  ...and says so in prose on stderr, for the human who can re-run it",
+		/provisional/i.test(r.stderr), r.stderr);
 	// Deliberately NOT /TOTAL/i: the crash this fixture first produced printed
 	// "bin.tokens[category].total", which matched and passed a broken run.
 	assert("  ...still printing the summary table rather than withholding it",
@@ -136,7 +148,11 @@ console.log("──────────────────────�
 	const { sessionPath } = makeFixture("settled", true);
 	const r = runCli(sessionPath);
 	assert(`the same tag carrying _meta.swept exits 0 (got ${r.code})`, r.code === 0, r.out);
-	assert("  ...and says nothing about being provisional", !/provisional/i.test(r.out));
+	// Against BOTH streams. Asserted against stdout alone this could never fail:
+	// the sentence is only ever written to stderr, so it searched for a string on
+	// a stream that could not carry it in any outcome.
+	assert("  ...and says nothing about being provisional, on either stream",
+		!/provisional/i.test(r.out), r.out);
 }
 
 // --- The remedy must never advise -F ---------------------------------------
@@ -162,7 +178,10 @@ console.log("──────────────────────�
 	// failed a correct run. It passed standalone and failed under `bun run test`
 	// purely on which suffix mkdtemp handed out, which is the worse direction:
 	// most orderings would have made it a false PASS.
-	const remedy = r.out.split("\n").find(l => l.includes("Exit 9.")) ?? "";
+	// Found by the CONSTANT, not a hardcoded 9: `Exit ${EXIT_PROVISIONAL}.` is
+	// what the code interpolates, so re-typing the number here would leave this
+	// green after the constant changed.
+	const remedy = r.out.split("\n").find(l => l.includes(`Exit ${EXIT_PROVISIONAL}.`)) ?? "";
 	assert("  (the remedy line was actually printed)", remedy !== "", r.out);
 	assert("the provisional remedy never advises -F", !/-F/.test(remedy), remedy);
 	assert("  ...it advises re-running, which is correct after -F too", /run wtft again/i.test(remedy), remedy);

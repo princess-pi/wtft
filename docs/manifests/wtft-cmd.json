@@ -144,11 +144,11 @@
     },
     {
       "flags": "-l, --limit <number>",
-      "desc": "Limit the number of interval bars displayed (default: 10)."
+      "desc": "Limit the number of interval bars displayed. Default: 100 in the CLI, 10 in the Pi extension."
     },
     {
       "flags": "-s, --session <path|filter>",
-      "desc": "Specify an explicit session .jsonl file path, or a fuzzy substring filter (e.g. 'b04c'). When the argument is not an existing file, it filters discovered sessions by basename or path substring. If exactly one match, runs immediately; if multiple, shows the session selector filtered to matching sessions."
+      "desc": "Specify an explicit session .jsonl file path, or a fuzzy substring filter (e.g. 'b04c'). When the argument is not an existing file, it filters discovered sessions by basename or path substring. If exactly one match, runs immediately; if multiple, shows the session selector filtered to matching sessions. An absolute .jsonl path that does not exist YET is accepted as a pending session (#308), reported at exit 0 rather than as an error."
     },
     {
       "flags": "--dir, --cwd <path>",
@@ -156,7 +156,7 @@
     },
     {
       "flags": "-w, --width <number>",
-      "desc": "Set the maximum character width of the TUI widget (default: 240)."
+      "desc": "Set the maximum character width of the widget (default: 240). Pi extension only — the CLI parses the flag and ignores it, sizing output from the terminal width minus --pad."
     },
     {
       "flags": "--tz, --timezone <zone>",
@@ -172,7 +172,7 @@
     },
     {
       "flags": "-p, --pager",
-      "desc": "Launch an interactive scrollable fullscreen pager overlay to view expanded cost history."
+      "desc": "Launch an interactive scrollable fullscreen pager overlay to view expanded cost history. Pi TUI only — the CLI refuses -p with exit 1 and suggests piping to a pager instead."
     },
     {
       "flags": "-o, --other",
@@ -180,11 +180,11 @@
     },
     {
       "flags": "-S, --show, -H, --hide",
-      "desc": "Show (default) or hide the WTFT cost-auditing widget below the editor."
+      "desc": "Show (default) or hide the WTFT cost-auditing widget below the editor. Pi extension only; both are accepted and inert in the CLI. -S carries no force of its own even in the extension: --hide --show and --show --hide both clear the widget."
     },
     {
       "flags": "--emoji, --no-emoji",
-      "desc": "Enable or disable emoji icons in TUI widgets. When disabled, clean single-width ASCII characters are used instead."
+      "desc": "Enable or disable emoji icons in the widget AND in CLI output, including watch mode. When disabled, clean single-width ASCII characters are used instead. Overrides the persisted setting for that run only."
     },
     {
       "flags": "-W, --watch",
@@ -220,11 +220,11 @@
     },
     {
       "flags": "--json",
-      "desc": "Emit one JSON object on stdout (schema wtft/session@1) instead of rendering: exact un-abbreviated totals, per-model rows with a 'priced' flag, per-category rows, the #149 uncounted blind spot, the provisional verdict as a field, and the session identity. No ANSI and nothing else on stdout; human prose goes to stderr and is repeated in the object's notices[]. Suppresses every rendering flag. CLI only. See docs/spec-26-json.md."
+      "desc": "Emit one JSON object on stdout (schema wtft/session@1) instead of the chart: exact un-abbreviated totals, per-model rows with a 'priced' flag, per-category rows in a fixed order, the #149 uncounted blind spot, the provisional verdict as a field, and the session identity. No ANSI and nothing else on stdout; human prose goes to stderr and the sentences that would otherwise have been stdout are repeated in the object's notices[]. Exit 9 still applies (see Exit codes). Suppresses the rendering flags (--tokens, --other, --pad, --interval, --limit, --bucket/--cumulative, --ticks, --emoji, --timezone). Does NOT apply to the commands that run instead of a report: --help/--why/--version, --watch, and --list/--cleanup/--restart/--stop all keep their own output, and -p is still refused with exit 1. With several sessions discovered and no -s, --json does not prompt: it takes the newest and says so in notices[]. CLI only. See docs/spec-26-json.md."
     },
     {
       "flags": "--tokens, -C, --cost",
-      "desc": "Switch between token-unit mode and cost-unit mode ($). --tokens shows a per-model token summary table with utilization, plus — when the session or any of its subagent transcripts contains them — an UNCOUNTED line naming compactions and away-recaps: calls the harness bills for but writes no usage record for, so they are deliberately NOT in TOTAL (#149). --cost switches back to $ mode. Config-persistable."
+      "desc": "Switch between token-unit mode and cost-unit mode ($). --tokens shows a per-model token summary table with utilization, plus — when the session or any of its subagent transcripts contains them — an UNCOUNTED line naming compactions and away-recaps (the same counts --json reports as `uncounted`, which it scans on every run): calls the harness bills for but writes no usage record for, so they are deliberately NOT in TOTAL (#149). --cost switches back to $ mode. Config-persistable."
     },
     {
       "flags": "--by-model",
@@ -298,21 +298,25 @@
     },
     {
       "cmd": "wtft --json | jq .total.costUsd",
-      "desc": "Read this session's exact cost from the machine-readable summary."
+      "desc": "Read this session's exact cost from the machine-readable summary (CLI only)."
     }
   ],
   "exitCodes": [
     {
       "code": 0,
-      "meaning": "Report produced — including when there is nothing to report yet (session file not written, or a tag with no classified data). Under --json, stdout carries one JSON object."
+      "meaning": "Report produced — including when there is nothing to report yet (session file not written, or a tag with no classified data). Under --json the report is one JSON object on stdout; the commands that run instead of a report (--help/--why/--version, --list/--cleanup/--restart/--stop) also exit 0 and print their own output."
     },
     {
       "code": 1,
-      "meaning": "Error: no session found or selected, an invalid path, a daemon that died before producing data, a refused flag (--pager), or an unhandled exception. Reason on stderr; under --json stdout carries nothing."
+      "meaning": "Error: no session found or selected, an invalid path, a daemon that could not be spawned or that died before producing data, a refused flag (-p), or an unhandled exception. Reason on stderr; under --json stdout carries nothing."
     },
     {
       "code": 9,
-      "meaning": "Provisional (#443): the report printed in full, but the total may still grow under the daemon. Under --json, provisional.provisional is true and provisional.reason names the condition."
+      "meaning": "Provisional (#443): the report was produced in full, but the total may still grow under the daemon. Under --json, provisional.provisional is true and provisional.reason names the condition, so $? and the field always agree."
+    },
+    {
+      "code": 130,
+      "meaning": "The interactive session selector was cancelled with q or Ctrl-C. SIGINT convention (128+2), not a wtft-specific code. --json never prompts, so it never returns this."
     }
   ]
 }

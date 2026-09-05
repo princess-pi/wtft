@@ -544,21 +544,50 @@ export function readUncountedBillableClass(entry: any): UncountedBillableClass |
  * is precisely what makes them invisible — and `parseSessionFile`'s signature is
  * load-bearing for the daemon tag file, watch mode and 40-odd suites.
  */
+export function scanUncountedBillables(filePath: string): UncountedBillables {
+	const counts = newUncountedBillables();
+	let content: string;
+	try {
+		content = fs.readFileSync(filePath, "utf8");
+	} catch {
+		return counts; // missing/unreadable file reports no blind spot, never throws
+	}
+	for (const line of content.split("\n")) {
+		if (!line.trim()) continue;
+		let entry: any;
+		try { entry = JSON.parse(line); } catch { continue; }
+		const kind = readUncountedBillableClass(entry);
+		if (kind) counts[kind]++;
+	}
+	return counts;
+}
+
+
 /**
- * Which harness wrote this transcript? (#26)
+ * Which harness wrote this session? (#26)
  *
  * Asked rather than assumed: `wtft -s <path>` bypasses discovery entirely, so
  * the candidate's `harness` field is not available on the path that
  * `wtft --json` is most often invoked on. The answer comes from the same
- * dispatch `parseEntryToInteraction` uses — the first registered adapter whose
- * `matchAssistant` claims an entry owns the file — so a transcript can never be
+ * adapter dispatch `parseEntryToInteraction` uses, so a session can never be
  * labelled with a harness that would not, in fact, parse it.
  *
- * Returns null when no adapter claims anything: an empty transcript, one not
- * written yet (#308), or a format no registered harness understands. That is a
- * fact worth reporting as null rather than guessing a default.
+ * ONE DIFFERENCE from that dispatch, stated because it is decidable and a
+ * reader would otherwise assume identity: `parseEntryToInteraction` picks the
+ * first adapter that claims ONE entry, and this picks the first adapter that
+ * claims the EARLIEST claimable entry. On a single-schema file — every file any
+ * harness here writes — those are the same answer. On a hypothetical
+ * mixed-schema file they can differ, and this one reports whoever wrote the
+ * first assistant turn.
  *
- * Stops at the first claimed entry, so the common case reads a few lines.
+ * Returns null when no adapter claims anything: an empty session, one not
+ * written yet (#308), a file that could not be READ at all, or a format no
+ * registered harness understands. Those four are not distinguished — null means
+ * "no claim", never "empty".
+ *
+ * Reads the whole file, like `scanUncountedBillables` above, then stops
+ * scanning at the first claimed entry. It is the only place the non-watch CLI
+ * reads the session rather than the tag file.
  */
 export function detectSessionHarness(filePath: string): string | null {
 	let content: string;
@@ -577,24 +606,6 @@ export function detectSessionHarness(filePath: string): string | null {
 		}
 	}
 	return null;
-}
-
-export function scanUncountedBillables(filePath: string): UncountedBillables {
-	const counts = newUncountedBillables();
-	let content: string;
-	try {
-		content = fs.readFileSync(filePath, "utf8");
-	} catch {
-		return counts; // missing/unreadable file reports no blind spot, never throws
-	}
-	for (const line of content.split("\n")) {
-		if (!line.trim()) continue;
-		let entry: any;
-		try { entry = JSON.parse(line); } catch { continue; }
-		const kind = readUncountedBillableClass(entry);
-		if (kind) counts[kind]++;
-	}
-	return counts;
 }
 
 // MESSAGE-ID DEDUPLICATION (#54)

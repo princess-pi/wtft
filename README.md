@@ -28,10 +28,12 @@ symlinks to them. The `.mjs` names are not spares — `wtft` finds its daemon by
 that exact name in its own directory, and Node needs the extension to read the
 file as ESM at all on Node 18. It also tells you if some other `wtft` wins on
 your PATH: it
-prints the `rm`, it never deletes anything itself. `--json` gives the whole
-report as one document on every exit path but one: a usage error (64) is
-reported on stderr and carries no document, because the arguments that would say
-what to report are the thing that is wrong. `--help` lists the rest.
+prints the `rm`, it never deletes anything itself. `install-wtft --json` gives
+the whole report as one document on every exit path but one: a usage error (64)
+is reported on stderr and carries no document, because the arguments that would
+say what to report are the thing that is wrong. `install-wtft --help` lists the
+rest. (`wtft` has its own unrelated `--json` — a session summary, and no 64;
+see [Usage](#usage) below.)
 
 Re-run it after every rebuild; `--check` is how you find out you needed to, and
 it is scriptable: **0** in sync, **1** drift, **2** shadowed on PATH, **64** bad
@@ -129,13 +131,21 @@ wtft --json | jq .total.costUsd
 
 `wtft --json` writes **exactly one JSON object** to stdout and nothing else —
 no chart, no ANSI, and no `3.6k`-style abbreviation, which is lossy. Human prose
-goes to stderr and is repeated in the object's `notices[]`, so a consumer never
-has to read two streams. The schema is `wtft/session@1`; field names and exit
-codes are versioned API, the prose inside `notices[].text` is not. Full
+goes to stderr, and every sentence that would otherwise have been on stdout is
+repeated in the object's `notices[]`. The schema is `wtft/session@1`; field names
+and exit codes are versioned API, the prose inside `notices[].text` is not. Full
 contract: [`docs/spec-26-json.md`](./docs/spec-26-json.md).
 
-The numbers come from the same aggregation the rendered `--tokens` table
-formats, so the two cannot report different totals.
+The numbers come from the same aggregation the rendered `--tokens` table formats,
+so those two cannot report different totals. The **bar chart's** total is a
+different figure on purpose: it bins every interaction, including ones carrying
+no model id, and it adds server-side tool cost that per-interaction cost does not.
+
+`--json` suppresses the rendering flags. It does **not** apply to the commands
+that run instead of a report — `--help`/`--why`/`--version`, `--watch`, and
+`--list`/`--cleanup`/`--restart`/`--stop` keep their own output, and `-p` is
+still refused with exit 1. With several sessions discovered and no `--session`,
+`--json` does not prompt: it takes the newest and says so in `notices[]`.
 
 `wtft` exits with:
 
@@ -146,17 +156,23 @@ formats, so the two cannot report different totals.
   died before producing data, or a refused flag (`--pager`). The reason is on
   stderr; under `--json`, stdout carries nothing.
 - **9** — provisional ([#443](https://github.com/princess-pi/wtft/issues/443)):
-  the report printed in full, but the total may still grow under the daemon.
+  the report was produced in full, but the total may still grow under the daemon.
   Under `--json`, `provisional.provisional` is `true` and `provisional.reason`
   names the condition, so `$?` and the field agree.
+- **130** — the interactive session selector was cancelled with `q` or Ctrl-C.
+  The SIGINT convention (128+2), not a wtft-specific code. `--json` never
+  prompts, so it never returns this.
 
 The same table is in `docs/manifests/wtft-cmd.json`, which is what `wtft --help`
 renders its **Exit codes** section from.
 
-`--pager` is a Pi TUI overlay, not a CLI flag — the CLI tells you so and
-suggests `wtft … | less -R`. The log parser daemon starts itself on
-`session_start` and revives after an idle timeout; `wtft-daemon` exists for
-debugging, not for normal use.
+`--pager` is a Pi TUI overlay, not a CLI flag — the CLI says so and exits 1,
+suggesting `wtft … | less -R`. Every `wtft` run spawns the log parser daemon if
+one is not already holding the session's lease, and the daemon revives after an
+idle timeout; `wtft-daemon` exists for debugging, not for normal use.
+
+`wtft --help` is the flag reference — the examples above are a tour, not the
+list.
 
 ## License
 

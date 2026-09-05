@@ -21,15 +21,15 @@ a statusline, `wtft -s <path>` fired at launch) was told the session did not exi
 
 | Site | Said | Truth |
 |---|---|---|
-| `bin/wtft.ts:322,344` | `does not exist as a file…` / `invalid or does not exist`, exit 1 | path is late, not missing |
-| `bin/wtft.ts:398` | `sleep(500)` before `watchTagFile` | a guess standing in for a state the lib already checks |
+| `bin/wtft.ts`, the `-s` fuzzy-filter arm and the post-selection existence check | `does not exist as a file…` / `invalid or does not exist`, exit 1 | path is late, not missing |
+| `bin/wtft.ts`, the `opts.showWatch` branch | `sleep(500)` before `watchTagFile` | a guess standing in for a state the lib already checks |
 | `wtft-daemon-lib.ts:1120-1128` | after 5 s: `did not create tag file within 5s. Is wtft-daemon installed?`, exit 1 | on a slow box: still starting; on a fast one: file already there |
 | `bin/wtft-daemon.ts:494` (`reapAndWarn`, #130) | session path absent ⇒ "gone" ⇒ SIGTERM | absent ⇒ *never written yet* is the normal launch state. The reaper runs at every daemon's startup, so it killed the parked daemon **and itself** — the #124 `waiting-session` state was unreachable by any live daemon (verified: `KILLED PID …: session gone` in `~/.local/state/wtft/reap.log` on a fresh spawn against an absent path). |
 
 ## 3. What changed
 
 1. **`isPendingSessionPath(p)`** (`wtft-cli-shared.ts`): absolute, `*.jsonl`, not a tag file. `wtft -s` accepts such a path when it does not exist. A relative fuzzy filter that matches nothing is still an error — that was never a fact.
-2. **Non-watch:** if the session file is absent, print `Session log not written yet: <path>` + one line saying why and what to do, exit 0, no wait. A spawned daemon that already exited non-zero is reported with its code, not as "no data yet".
+2. **Non-watch:** if the session file is absent, print `Session log not written yet: <path>` + one line saying why and what to do, exit 0, no wait. (Amended by #26: that is the RENDERED path. Under `--json` the same sentence goes to **stderr** and stdout carries the ordinary JSON object with a `pending-session` notice — still exit 0, because nothing went wrong. Same for the "no data yet" branch below.) A spawned daemon that already exited non-zero is reported with its code, not as "no data yet".
 3. **Watch:** the tag-file wait is on state — tag present → watch; lease alive → wait; spawned child exited **and** no lease → error with exit code. Without a child handle (no caller today) a bounded 5 s ceiling remains, documented. The view renders `Waiting for session .jsonl to be written (first prompt not completed yet)...` while the transcript is absent. The 500 ms pre-sleep is gone.
 4. **Reaper (`sessionIsGone`):** "gone" now requires evidence the session once existed — a classified line or a `_meta` offset in its tag file. Never reaps its own PID. `--cleanup` shares the predicate.
 5. **Daemon:** `SESSION_WAIT_MAX_MS = 1 h` — a never-seen session parks the daemon for at most an hour (matches `ZERO_INTERACTIONS_AGE`); shutdown reason `session never written`. A session seen once and then removed still exits on the daemon's own `sessionExisted` knowledge. A later `wtft` run respawns for free.

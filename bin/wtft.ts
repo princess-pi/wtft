@@ -1,8 +1,11 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * @package princess-pi-tools
+ * @package @princess-pi/wtft
  * @command wtft
- * @description Command-line cost auditing tool for Pi Coding Agent session logs.
+ * @description Command-line cost auditing tool for coding-agent sessions.
+ *   Harness-agnostic: `--harness auto` (the default) discovers both Claude Code
+ *   and Pi sessions, and an out-of-tree harness registered through the #156 seam
+ *   is discovered on the same footing.
  */
 
 import * as fs from "node:fs";
@@ -46,6 +49,7 @@ import {
 	detectSessionHarness,
 	buildSessionJson,
 	renderSessionJson,
+	WTFT_JSON_SCHEMA,
 	type WtftNotice,
 	type UncountedBillables,
 	getDaemonPidPath,
@@ -179,6 +183,14 @@ export {
 	// Harness seam (#156) + moved-session follow (#155)
 	discoverSessions,
 	harnessLabel,
+	// #26 — the machine-readable surface, imported by tests/wtft-26-json.test.ts
+	// from the bundle rather than re-declared there. A second copy of a contract
+	// constant is a second thing to get wrong: the suite hardcoded 9 for
+	// EXIT_PROVISIONAL, so changing the constant here would have left it green.
+	buildSessionJson,
+	renderSessionJson,
+	detectSessionHarness,
+	WTFT_JSON_SCHEMA,
 	getHarnesses,
 	getHarness,
 	getDiscoveries,
@@ -219,14 +231,24 @@ export {
  *  is not yet final. "Found nothing wrong" and "could not see everything" are
  *  different facts and need different codes — the same split pr-review draws
  *  between 7 and 8. */
-const EXIT_PROVISIONAL = 9;
+export const EXIT_PROVISIONAL = 9;
 
 // ---
 // SHARED WORDING (#26) — one sentence, two output modes.
 // ---
 // `--json` carries the same human prose in `notices[]` that the rendered path
-// prints to stderr. Two literals would be two things to reword, and the reword
-// that reached only one of them would be invisible to a reader of the other.
+// prints. Two literals would be two things to reword, and the reword that
+// reached only one of them would be invisible to a reader of the other.
+//
+// WHICH STREAM differs by mode, deliberately: the pending-session and no-data
+// sentences are the rendered path's only OUTPUT, so they go to stdout there;
+// under `--json` the object is the output, so they move to stderr and the object
+// carries them as notices. The #140 unpriced warning and the #443 provisional
+// line are stderr in both modes.
+//
+// The three `describe*`/`unpricedModelWarning` helpers below are the shared
+// literals. `collectUnpricedModels`, immediately following, is the collector
+// they are used with, not one of them.
 
 /** Distinct models in this session that priced at a fallback rather than a card (#140). */
 function collectUnpricedModels(interactions: Interaction[]): string[] {
@@ -250,7 +272,7 @@ function describeProvisionalReason(provisional: { reason: string | null }, tagPa
 		return `this tag was written by tagger v${v}, not v${WTFT_TAGGER_VERSION}`;
 	}
 	if (provisional.reason === "subagent-unreadable") {
-		return "a subagent transcript could not be read, so the token table is incomplete";
+		return "a subagent session file could not be read, so the token totals are incomplete";
 	}
 	return "no subagent transcript has been read since this tag was written";
 }
@@ -259,7 +281,7 @@ function describeProvisionalReason(provisional: { reason: string | null }, tagPa
  *  provisional branch in main() for why neither arm may mention `-F`. */
 function describeProvisionalRemedy(provisional: { reason: string | null }): string {
 	return provisional.reason === "subagent-unreadable"
-		? "restore the unreadable transcript's readability, then run wtft again — the daemon re-reads it on its next poll, and the --tokens scan reads it directly"
+		? "restore the unreadable session file's readability, then run wtft again — the daemon re-reads it on its next poll, and wtft reads it directly on the --tokens and --json paths"
 		: "The daemon is rebuilding this tag now — run wtft again in a moment to read the settled total";
 }
 
@@ -295,7 +317,9 @@ if (opts.hasCost) unit = "cost";
 
 const WARN_LOG = path.join(os.homedir(), ".local", "state", "wtft", "reap.log");
 
-/** Surface reap warnings from the last daemon spawn (#130). */
+/** Surface daemon reap warnings (#130) — every `reap.log` line written in the
+ *  last hour, whichever spawn wrote it, then TRUNCATE the log so the next run
+ *  does not repeat them. Writes to stderr, so it never pollutes `--json`. */
 function showReapWarnings() {
   try {
     if (!fs.existsSync(WARN_LOG)) return;
@@ -424,6 +448,35 @@ async function main() {
 	// state that fact instead of "does not exist". Only an absolute *.jsonl path
 	// qualifies — a fuzzy substring that matches nothing is still an error below.
 	let sessionPending = false;
+	// Notices raised BEFORE the JSON document can be built (#26). Session
+	// selection happens long before the tag file is read, so a notice from it
+	// has nowhere to live yet; `emitSessionJson` prepends these.
+	const earlyNotices: WtftNotice[] = [];
+
+	// ---
+	// SESSION SELECTION UNDER --json (#26)
+	// ---
+	// `selectSessionPrompt` writes to STDOUT — the interactive menu, and the
+	// non-interactive "Defaulting to newest session" fallback with its candidate
+	// list (extensions/lib/session-selector.ts). Under `--json` that lands ahead
+	// of the document and `JSON.parse` fails on the first byte, which is exactly
+	// the failure this flag exists to end. It also exits 130 on `q`/Ctrl-C,
+	// which a machine caller cannot answer.
+	//
+	// So `--json` does not prompt. It takes the newest candidate — the same one
+	// the non-interactive fallback already resolves to, so this is the existing
+	// behaviour with its prose moved off stdout — says so on stderr, and records
+	// an `auto-selected-session` notice naming how many it chose between. A
+	// caller that wants determinism passes `-s`, and the notice is what tells it
+	// that it should.
+	const chooseSession = async (found: ReturnType<typeof discoverSessions>): Promise<string> => {
+		if (!opts.json) return selectSessionPrompt(found);
+		const text = `${found.length} sessions match; --json does not prompt, so the newest was used: ${found[0].path}. ` +
+			`Pass -s <path|substring> to choose one.`;
+		console.error(`\x1b[33m${text}\x1b[0m`);
+		earlyNotices.push({ code: "auto-selected-session", text });
+		return found[0].path;
+	};
 	if (opts.targetSession) {
 		// Direct path — use as-is if it exists
 		if (fs.existsSync(opts.targetSession)) {
@@ -445,7 +498,7 @@ async function main() {
 			} else if (filtered.length === 1) {
 				finalSessionPath = filtered[0].path;
 			} else {
-				finalSessionPath = await selectSessionPrompt(filtered);
+				finalSessionPath = await chooseSession(filtered);
 			}
 		}
 	} else {
@@ -457,8 +510,8 @@ async function main() {
 		} else if (found.length === 1) {
 			finalSessionPath = found[0].path;
 		} else {
-			// Show select menu!
-			finalSessionPath = await selectSessionPrompt(found);
+			// Show select menu (or, under --json, take the newest without one).
+			finalSessionPath = await chooseSession(found);
 		}
 	}
 
@@ -586,122 +639,6 @@ async function main() {
 	}
 
 	// ---
-	// --json emitter (#26) — defined here, used from four places.
-	// ---
-	// Every branch below that would print a human sentence to stdout has a
-	// `--json` arm, because "exactly one JSON object on stdout" has to hold on
-	// the empty paths too: a consumer that gets a bare sentence on a
-	// not-yet-written session has to parse prose to find that out, which is the
-	// whole failure this flag exists to end. Those paths carry a `notices[]`
-	// entry with the same sentence and still exit 0 — nothing went wrong, there
-	// is simply nothing yet.
-	//
-	// Writes with `process.stdout.write` and no trailing `console.log`: the
-	// document ends in exactly one newline, and nothing else may follow it.
-	const emitSessionJson = (opt: { notices?: WtftNotice[]; uncounted?: UncountedBillables } = {}) => {
-		const doc = buildSessionJson({
-			interactions,
-			session: {
-				path: finalSessionPath,
-				harness: detectSessionHarness(finalSessionPath),
-				taggerVersion: String(WTFT_TAGGER_VERSION),
-				tagPath,
-			},
-			provisional,
-			uncounted: opt.uncounted,
-			notices: opt.notices ?? [],
-		});
-		process.stdout.write(renderSessionJson(doc));
-	};
-	// #308: nothing to wait for while the session log itself is unwritten — the
-	// daemon is parked on it (heartbeating) and will parse the first line when it
-	// lands. Say so and exit 0: a one-shot CLI must not block, and "not written yet"
-	// is the true state. Only an existing-but-unclassified session earns the short
-	// wait below.
-	if (interactions.length === 0 && !fs.existsSync(finalSessionPath)) {
-		// "The daemon is running and waiting on it" is the whole value of this
-		// message, and it was never checked (#309 review): spawnWtftDaemon only
-		// proves spawn() did not throw, so a daemon that dies during startup
-		// printed reassurance and exited 0. Nothing else in this branch ever looks
-		// at the daemon again — this is the last chance to tell the truth.
-		//
-		// State, not a stopwatch: a healthy daemon claims its lease in a poll or
-		// two, so the ceiling only bounds the case where the child is alive and has
-		// claimed nothing — and that case still exits 0, because a slow box is not
-		// a failure.
-		const DAEMON_START_CEILING_MS = 5000;
-		const startup = await awaitDaemonUp(finalSessionPath, daemonChild, DAEMON_START_CEILING_MS);
-		if (startup.state === "dead") {
-			const how = startup.signalCode ? `on ${startup.signalCode}` : `with code ${startup.exitCode}`;
-			console.error(`\x1b[31m❌ wtft-daemon exited ${how} before claiming this session — nothing is waiting on ${finalSessionPath}\x1b[0m`);
-			console.error(`\x1b[90mExpected the daemon at ${path.join(daemonDir, "wtft-daemon.mjs")}\x1b[0m`);
-			process.exit(1);
-		}
-		const pendingText = `Session log not written yet: ${finalSessionPath}. ` +
-			`Claude Code writes its first line after the first real prompt (not a /command) completes. ` +
-			`The wtft daemon is running and waiting on it — run again after the first response, or use --watch to stay attached.`;
-		if (opts.json) {
-			console.error(`\x1b[33m${pendingText}\x1b[0m`);
-			emitSessionJson({ notices: [{ code: "pending-session", text: pendingText }] });
-			return;
-		}
-		console.log(`\x1b[33mSession log not written yet: ${finalSessionPath}\x1b[0m`);
-		console.log(`\x1b[90mClaude Code writes its first line after the first real prompt (not a /command) completes. ` +
-			`The wtft daemon is running and waiting on it — run again after the first response, or use --watch to stay attached.\x1b[0m`);
-		process.exit(0);
-	}
-	if (interactions.length === 0) {
-		// Wait up to 2 daemon beats for the freshly-spawned daemon to produce the tag file.
-		const tagWaitStart = Date.now();
-		while (Date.now() - tagWaitStart < 1400) {
-			if (fs.existsSync(tagPath)) {
-				// One read, both answers — see the capture above.
-				({ interactions, provisional } = readTagFileWithVerdict(tagPath));
-				if (interactions.length > 0) break;
-			}
-			await new Promise(r => setTimeout(r, 667));
-		}
-	}
-	if (interactions.length === 0) {
-		const sessionName = path.basename(finalSessionPath).replace(/.jsonl$/, "");
-		// A daemon we spawned that already died is a fact worth more than "try again"
-		// (#308). Same proof rule as the pending branch (#309 review): the child gone
-		// by exit code OR signal, and no live lease — a child that exited 0 because an
-		// older daemon owns the session is up, not dead. Ceiling 0: the tag wait above
-		// already spent the time; this is a one-shot read of the state.
-		const startup = await awaitDaemonUp(finalSessionPath, daemonChild, 0);
-		if (startup.state === "dead") {
-			const how = startup.signalCode ? `on ${startup.signalCode}` : `with code ${startup.exitCode}`;
-			console.error(`\x1b[31m❌ wtft-daemon exited ${how} before writing any classified data for session ${sessionName.slice(0, 12)}….\x1b[0m`);
-			process.exit(1);
-		}
-		const noDataText = `Daemon started on session ${sessionName.slice(0, 12)}… — no data yet. Try again in a moment.`;
-		if (opts.json) {
-			console.error(`\x1b[33m${noDataText}\x1b[0m`);
-			emitSessionJson({ notices: [{ code: "no-data", text: noDataText }] });
-			return;
-		}
-		console.log(`\x1b[33m${noDataText}\x1b[0m`);
-		process.exit(0);
-	}
-
-	// Read settings from harness-agnostic config file (#72).
-	const config = readConfig("wtft");
-	// `--no-emoji` / `--emoji` override the persisted flag for THIS RUN only
-	// (the Pi extension persists via writeConfig; the CLI should not). The flag
-	// was parsed but never applied before #62, so `--no-emoji` was a no-op here.
-	const disabledEmoji = typeof opts.enableEmoji === "boolean" ? !opts.enableEmoji : isEmojiDisabled();
-	const sessionInterval = (typeof config.interval === "string" ? config.interval : undefined) as string | undefined;
-	const sessionLimit = (typeof config.limit === "number" ? config.limit : undefined) as number | undefined;
-	const sessionMode = (config.mode === "cumulative" || config.mode === "bucket" ? config.mode : undefined) as "cumulative" | "bucket" | undefined;
-	const sessionShowTicks = (typeof config.showTicks === "boolean" ? config.showTicks : undefined) as boolean | undefined;
-	const sessionTimezone = (typeof config.timezone === "string" ? config.timezone : undefined) as string | undefined;
-	// ---
-	// REAP WARNINGS: surface any reap.log findings from daemon spawn (#130)
-	// ---
-	showReapWarnings();
-
-	// ---
 	// THE #149 BLIND-SPOT SCAN, hoisted (#26)
 	// ---
 	// It was inline in the `--tokens` branch until `--json` needed the same
@@ -711,7 +648,13 @@ async function main() {
 	// the two output modes silently reporting a settled total for a session
 	// whose subagent transcript could not be read.
 	//
-	// Memoised: `--tokens --json` must not scan every subagent transcript twice.
+	// Memoised as insurance, not as a present saving: under `--json` the
+	// `--tokens` renderer is unreachable (that branch returns first), so no
+	// second call happens today. The memo is here so a future second call site
+	// cannot quietly add a whole second scan of every subagent session. Said as
+	// insurance rather than as a saving because a rationale that misdescribes its
+	// own control flow is how the next reader learns to distrust the comments —
+	// the same correction this file already carries at `getCandidates`.
 	let uncountedCache: UncountedBillables | null = null;
 	const scanSessionUncounted = (): UncountedBillables => {
 		if (uncountedCache) return uncountedCache;
@@ -763,6 +706,133 @@ async function main() {
 
 
 	// ---
+	// --json emitter (#26) — defined here, used from three places.
+	// ---
+	// Every branch BETWEEN HERE AND THE `--json` RETURN that would print a human
+	// sentence to stdout has a `--json` arm, because "exactly one JSON object on
+	// stdout" has to hold on the empty paths too: a consumer that gets a bare
+	// sentence on a not-yet-written session has to parse prose to find that out,
+	// which is the whole failure this flag exists to end. Those paths carry a
+	// `notices[]` entry with the same sentence and still exit 0 — nothing went
+	// wrong, there is simply nothing yet.
+	//
+	// Branches AFTER that return need no arm and have none: "No binned data found
+	// in session logs." is stdout-only and unreachable under `--json`. The scope
+	// of the rule is this window, not the function — an earlier draft of this
+	// comment claimed the function, which is a rule the code does not implement.
+	//
+	// Writes with `process.stdout.write` and no trailing `console.log`: the
+	// document ends in exactly one newline, and nothing else may follow it.
+	// `uncounted` is SCANNED on every path, never defaulted to zeros. Zeros that
+	// mean "not scanned" are indistinguishable from zeros that mean "none found",
+	// and a consumer reading `.uncounted.compaction === 0` would conclude there
+	// is no blind spot when nobody looked. The scan is a no-op on a session file
+	// that does not exist yet, which is exactly the empty paths' case.
+	const emitSessionJson = (opt: { notices?: WtftNotice[] } = {}) => {
+		const doc = buildSessionJson({
+			interactions,
+			session: {
+				path: finalSessionPath,
+				harness: detectSessionHarness(finalSessionPath),
+				taggerVersion: String(WTFT_TAGGER_VERSION),
+				tagPath,
+			},
+			provisional,
+			uncounted: scanSessionUncounted(),
+			notices: [...earlyNotices, ...(opt.notices ?? [])],
+		});
+		process.stdout.write(renderSessionJson(doc));
+	};
+	// #308: nothing to wait for while the session log itself is unwritten — the
+	// daemon is parked on it (heartbeating) and will parse the first line when it
+	// lands. Say so and exit 0: a one-shot CLI must not block, and "not written yet"
+	// is the true state. Only an existing-but-unclassified session earns the short
+	// wait below.
+	if (interactions.length === 0 && !fs.existsSync(finalSessionPath)) {
+		// "The daemon is running and waiting on it" is the whole value of this
+		// message, and it was never checked (#309 review): spawnWtftDaemon only
+		// proves spawn() did not throw, so a daemon that dies during startup
+		// printed reassurance and exited 0. Nothing else in this branch ever looks
+		// at the daemon again — this is the last chance to tell the truth.
+		//
+		// State, not a stopwatch: a healthy daemon claims its lease in a poll or
+		// two, so the ceiling only bounds the case where the child is alive and has
+		// claimed nothing — and that case still exits 0, because a slow box is not
+		// a failure.
+		const DAEMON_START_CEILING_MS = 5000;
+		const startup = await awaitDaemonUp(finalSessionPath, daemonChild, DAEMON_START_CEILING_MS);
+		if (startup.state === "dead") {
+			const how = startup.signalCode ? `on ${startup.signalCode}` : `with code ${startup.exitCode}`;
+			console.error(`\x1b[31m❌ wtft-daemon exited ${how} before claiming this session — nothing is waiting on ${finalSessionPath}\x1b[0m`);
+			console.error(`\x1b[90mExpected the daemon at ${path.join(daemonDir, "wtft-daemon.mjs")}\x1b[0m`);
+			process.exit(1);
+		}
+		const pendingText = `Session log not written yet: ${finalSessionPath}. ` +
+			`Claude Code writes its first line after the first real prompt (not a /command) completes. ` +
+			`The wtft daemon is running and waiting on it — run again after the first response, or use --watch to stay attached.`;
+		if (opts.json) {
+			console.error(`\x1b[33m${pendingText}\x1b[0m`);
+			emitSessionJson({ notices: [{ code: "pending-session", text: pendingText }] });
+			return;
+		}
+		console.log(`\x1b[33mSession log not written yet: ${finalSessionPath}\x1b[0m`);
+		console.log(`\x1b[90mClaude Code writes its first line after the first real prompt (not a /command) completes. ` +
+			`The wtft daemon is running and waiting on it — run again after the first response, or use --watch to stay attached.\x1b[0m`);
+		process.exit(0);
+	}
+	if (interactions.length === 0) {
+		// Wait up to 1400 ms — three tag reads, 667 ms apart — for the freshly-spawned daemon to produce the tag file.
+		const tagWaitStart = Date.now();
+		while (Date.now() - tagWaitStart < 1400) {
+			if (fs.existsSync(tagPath)) {
+				// One read, both answers — see the capture above.
+				({ interactions, provisional } = readTagFileWithVerdict(tagPath));
+				if (interactions.length > 0) break;
+			}
+			await new Promise(r => setTimeout(r, 667));
+		}
+	}
+	if (interactions.length === 0) {
+		const sessionName = path.basename(finalSessionPath).replace(/.jsonl$/, "");
+		// A daemon we spawned that already died is a fact worth more than "try again"
+		// (#308). Same proof rule as the pending branch (#309 review): the child gone
+		// by exit code OR signal, and no live lease — a child that exited 0 because an
+		// older daemon owns the session is up, not dead. Ceiling 0: the tag wait above
+		// already spent the time; this is a one-shot read of the state.
+		const startup = await awaitDaemonUp(finalSessionPath, daemonChild, 0);
+		if (startup.state === "dead") {
+			const how = startup.signalCode ? `on ${startup.signalCode}` : `with code ${startup.exitCode}`;
+			console.error(`\x1b[31m❌ wtft-daemon exited ${how} before writing any classified data for session ${sessionName.slice(0, 12)}….\x1b[0m`);
+			process.exit(1);
+		}
+		const noDataText = `Daemon started on session ${sessionName.slice(0, 12)}… — no data yet. Try again in a moment.`;
+		if (opts.json) {
+			console.error(`\x1b[33m${noDataText}\x1b[0m`);
+			emitSessionJson({ notices: [{ code: "no-data", text: noDataText }] });
+			return;
+		}
+		console.log(`\x1b[33m${noDataText}\x1b[0m`);
+		process.exit(0);
+	}
+
+	// Read settings from harness-agnostic config file (#72).
+	const config = readConfig("wtft");
+	// `--no-emoji` / `--emoji` override the persisted flag for THIS RUN only
+	// (the Pi extension persists via writeConfig; the CLI should not). The flag
+	// was parsed but never applied before #62, so `--no-emoji` was a no-op here.
+	const disabledEmoji = typeof opts.enableEmoji === "boolean" ? !opts.enableEmoji : isEmojiDisabled();
+	const sessionInterval = (typeof config.interval === "string" ? config.interval : undefined) as string | undefined;
+	const sessionLimit = (typeof config.limit === "number" ? config.limit : undefined) as number | undefined;
+	const sessionMode = (config.mode === "cumulative" || config.mode === "bucket" ? config.mode : undefined) as "cumulative" | "bucket" | undefined;
+	const sessionShowTicks = (typeof config.showTicks === "boolean" ? config.showTicks : undefined) as boolean | undefined;
+	const sessionTimezone = (typeof config.timezone === "string" ? config.timezone : undefined) as string | undefined;
+	// ---
+	// REAP WARNINGS: surface any reap.log findings from daemon spawn (#130)
+	// ---
+	showReapWarnings();
+
+
+	// ---
 	// --json (#26): one JSON object on stdout, and nothing else on stdout.
 	// ---
 	// Placed BEFORE the renderer, not after it, because the contract is about
@@ -778,17 +848,24 @@ async function main() {
 	// discovery, so a candidate's harness field is not available here.
 	if (opts.json) {
 		const notices: WtftNotice[] = [];
-		// The blind-spot scan can DOWNGRADE `provisional` (#457), so it runs
-		// before the verdict is read into the document.
-		const uncounted = scanSessionUncounted();
+		// The blind-spot scan can DOWNGRADE `provisional` to
+		// `subagent-unreadable` (#457), so it must run BEFORE the notices are
+		// built and before `emitSessionJson` reads the verdict. `emitSessionJson`
+		// calls it too; it is memoised, so this is one scan, not two.
+		scanSessionUncounted();
 		for (const m of collectUnpricedModels(interactions)) {
 			notices.push({ code: "unpriced-model", text: unpricedModelWarning(m) });
 			console.error(`\x1b[33m⚠ ${unpricedModelWarning(m)}\x1b[0m`);
 		}
 		if (provisional.provisional) {
-			notices.push({ code: "provisional", text: `${describeProvisionalReason(provisional, tagPath)}. ${describeProvisionalRemedy(provisional)}.` });
+			const text = `${describeProvisionalReason(provisional, tagPath)}. ${describeProvisionalRemedy(provisional)}.`;
+			notices.push({ code: "provisional", text });
+			// Also on stderr, like the unpriced-model warning above. The field is
+			// the contract; the stderr line is for the human watching a pipeline
+			// scroll past, who would otherwise see a settled-looking object.
+			console.error(`\x1b[33m⚠ PROVISIONAL: this total may still grow — ${text}\x1b[0m`);
 		}
-		emitSessionJson({ notices, uncounted });
+		emitSessionJson({ notices });
 		// Exit 9 keeps its #443 meaning under --json — the object is complete,
 		// and its `provisional` field says the same thing the code does. Set
 		// rather than `process.exit`, for the async-stdout reason spelled out at
@@ -897,8 +974,15 @@ async function main() {
 	// still prints in full — withholding it would be worse than the undercount,
 	// since the number is usually close and always better than nothing. The exit
 	// code costs an agent zero tokens and zero inference and matches pr-review's
-	// 7/8/9 idiom. Nothing in this repo invokes this CLI and inspects $?, and it
-	// only ever exited 0 or 1 before, so no consumer regressed on the new code.
+	// 7/8/9 idiom.
+	//
+	// #511 justified the new code with "nothing in this repo invokes this CLI and
+	// inspects $?". That grep covered bin/, hooks/, statusline/ and skills/ and
+	// NOT tests/ — and tests/wtft-auto-fit.test.ts then failed on exit 9, on
+	// main, intermittently. tests/wtft-513-exit9-caller-guard.test.ts is the
+	// guard that came out of it. The claim is kept here with its correction
+	// attached rather than deleted: the shape of the mistake is the useful part,
+	// an exhaustive-sounding grep that was not exhaustive.
 	//
 	// #26 added the structured field this comment once said did not exist:
 	// `--json` carries the same verdict as `provisional.provisional` /

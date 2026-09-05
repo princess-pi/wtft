@@ -43,11 +43,8 @@ const repoRoot = path.resolve(import.meta.dirname, "..");
  *  the reason it is exempt. An entry here is a claim someone can check, which is the
  *  whole difference between this and the prose rule it replaces. */
 const ALLOWED: Record<string, string> = {
-	// Reads tag lines and sums per-model TOKENS in a 120s window with no id
-	// collapse — a real violation, filed as #454 rather than fixed blind,
-	// because the correct per-field reduction for tokens (vs max-cost for
-	// money) is a product decision. Removing this entry closes #454.
-	"extensions/token-budget.ts": "KNOWN VIOLATION, filed as #454",
+	// extensions/token-budget.ts routed through readClassifiedTagFile in #17
+	// (filed as #454) — no longer needs an allowlist entry.
 	// The tag file's WRITER. It reads that file back in exactly one place —
 	// readLastMetaOffset, which scans the last 8KB for `_meta.offset` and
 	// returns a byte number. It never sums a cost or a token from a tag line,

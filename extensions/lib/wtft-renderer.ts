@@ -1746,15 +1746,27 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 		(formatCost(totalCost) + (anyUnpriced ? "?" : "")).padStart(numColW)
 	].join(" ") + "\n";
 	if (anyUnpriced) {
-		// The legend names the FALLBACK EACH MARKED MODEL ACTUALLY TOOK (#22 B).
-		// One sentence claiming "$3/$15" for every "?" went wrong the moment a
-		// DeepSeek id could carry the marker: those take the sibling-guess branch
-		// in calculateClaudeCost, not the Sonnet default.
-		const fallbacks = new Set<string>();
+		// The legend names the fallback PER MODEL, one line each (#22 B, Macroscope
+		// on PR #87). Two earlier shapes both claimed more than they knew:
+		//   - one sentence saying "$3/$15" for every "?" — wrong the moment a
+		//     DeepSeek id could carry the marker, since those take the
+		//     sibling-guess branch in calculateClaudeCost, not the Sonnet default;
+		//   - a deduplicated SET of descriptions — true of the set, but it printed
+		//     two fallbacks side by side with nothing saying which row took which.
+		//
+		// The closing caveat is the other half, and it is not pedantry: a marked
+		// model's rows can MIX provenance. `?` means "no card", not "wtft priced
+		// this" — wtft-parser prefers a harness-native per-turn cost and only falls
+		// through when that cost is 0 with tokens. Measured on this host, 1 of 527
+		// deepseek-reasoner turns carries Pi's own cost, so naming a rate card as
+		// what produced the total would be false for that turn.
+		out += `? = model not in pricing registry — where wtft priced the turn:\n`;
 		for (const [model] of sorted) {
-			if (!isModelPriced(model)) fallbacks.add(describeFallbackPricing(model));
+			if (!isModelPriced(model)) {
+				out += `    ${shortenModel(model)} — ${describeFallbackPricing(model)}\n`;
+			}
 		}
-		out += `? = model not in pricing registry — ${[...fallbacks].join("; ")}; totals may be unreliable\n`;
+		out += `  A harness-native per-turn cost is used unchanged where the transcript has one; totals may be unreliable\n`;
 	}
 
 	// Compaction summary (#90) — show how many tokens were freed by compaction

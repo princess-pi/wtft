@@ -175,9 +175,11 @@ which is itself worth knowing before quoting a mismatch percentage as coverage.
 
 ## Reconciliation record
 
-Run after GREEN, before `pr-open`. Scope: every source file the branch touched
-(`extensions/lib/wtft-cost.ts`, `bin/wtft.ts`), plus the term blast radius of the
-lines the diff removed, plus Tier 4's host-scoped set.
+Run after GREEN, before `pr-open`. Scope: every source file the branch touched —
+`extensions/lib/wtft-cost.ts`, `bin/wtft.ts`, and `extensions/lib/wtft-renderer.ts`
+(which the reconcile pass itself edited, and which the first version of this
+sentence omitted — Macroscope, PR #87) — plus the term blast radius of the lines
+the diff removed, plus Tier 4's host-scoped set.
 
 | Artifact | Claim | Contradicted by | Covered by a test? | Action |
 |---|---|---|---|---|

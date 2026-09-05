@@ -125,9 +125,8 @@ bar chart bins *every* interaction, so it includes the untagged spend this
 `total` excludes; and `buildWtftLines` adds `serverToolCost` to its `web` bin,
 which no summing of per-interaction `cost` reaches. Both predate #26 — the
 rendered `--tokens` table has always summed `cost` alone — and #26 deliberately
-did not change the arithmetic, only gave it a second reader. The gap is filed as
-its own issue rather than fixed here, because fixing it changes the human table's
-numbers.
+did not change the arithmetic, only gave it a second reader. The gap is **#90**,
+filed rather than fixed here because closing it changes the human table's numbers.
 
 ### The seam
 
@@ -193,7 +192,7 @@ covers them:
 | `-p`/`--pager` | refused on stderr, exit 1, stdout empty |
 
 Giving those five a machine-readable mode is real work with its own contract —
-`--list` in particular — and is filed separately rather than half-done here.
+`--list` in particular — and is **#92**, filed rather than half-done here.
 
 **`--force` still does its work.** `-F` kills the daemon and deletes the tag files
 before this branch is reached, so `--json -F` re-parses exactly as the rendered
@@ -276,8 +275,17 @@ file-level scope says fix or file, and the Action column says which.
 | `CONTEXT.md` | no term for the new output mode; CLI entry listed two CLI-only modes | `--json` is a third | ✅ `wtft-75-doc-claims.test.ts` | Fixed: **JSON mode** and **Provisional** entries added |
 
 **Filed rather than fixed** — pre-existing, out of this branch's scope, each with
-a consequence named in its issue: the chart-vs-summary `serverToolCost`
-divergence; unknown flags and malformed flag values being silently ignored; the
-daemon-management commands having no machine-readable mode; and a sweep of
-`wtft-renderer.ts` docstrings that bind to the wrong symbol or describe retired
-behaviour. Issue numbers are in the PR body.
+a consequence named in its issue:
+
+- **#90** — `total.costUsd` excludes `serverToolCost`, which the bar chart
+  includes, so the chart and the table/JSON disagree by the session's
+  server-side tool spend. Fixing it changes the human table's numbers, which is
+  a decision, not a patch.
+- **#91** — `parseWtftCliArgs` silently ignores unknown flags and malformed
+  values, so a typo'd `--jsonn` renders a full ANSI chart and exits 0. `--json`
+  is what makes this dangerous rather than untidy.
+- **#92** — the daemon-management commands have no machine-readable mode;
+  `--json` does not reach them, and this spec documents that rather than
+  half-implementing it.
+- **#93** — a sweep of `wtft-renderer.ts` docstrings that bind to nothing or to
+  the wrong symbol, describe retired behaviour, or keep dead fields alive.

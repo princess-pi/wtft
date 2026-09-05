@@ -81,6 +81,31 @@ export const WEB_FETCH_PRICE = 0.03;   // $0.03 per fetch request
  * Calculate the per-request cost of server-side tool usage for a given model.
  * Only Claude models are billed per-request for web search/fetch today.
  * DeepSeek, Gemini, and local models do not charge for server_tool_use.
+ *
+ * The test for "is this Claude" is a substring search for `claude` or
+ * `anthropic`, with any id that ALSO says `deepseek` excluded (#22 A).
+ *
+ * Substring, not an anchored marker, and the difference is worth stating
+ * (pr-review round 2): `notclaude` and `misanthropic` would bill. Neither is a
+ * model id anyone issues, and anchoring would break the id forms that matter —
+ * `us.anthropic.claude-sonnet-5-v1:0` carries the marker mid-string. The one
+ * collision that is not hypothetical on this host is a `claude-`-prefixed id
+ * naming a DeepSeek model, which the `deepseek` exclusion catches; measured
+ * across every Pi and Claude Code session here, ZERO ids carry both words
+ * today, so the exclusion is a guard rather than a correction. It used to also accept a bare alias,
+ * `/\b(haiku|sonnet|opus)\b/`, to catch a Claude id written without the
+ * `claude-` prefix. That arm billed DeepSeek: `claude-deepseek` exports
+ * ANTHROPIC_MODEL="opus", so a DeepSeek turn recorded as plain `opus` was
+ * charged $0.03 per web_search request against a provider this docstring says
+ * does not charge. The two cases are byte-identical at this seam — a bare
+ * `opus` from Claude Code and a bare `opus` from a DeepSeek session are the
+ * same string — so the arm cannot be narrowed, only dropped.
+ *
+ * What that costs: a genuine Anthropic turn recorded with a bare alias AND a
+ * server_tool_use block now undercounts by $0.03/request. No such turn exists
+ * in this host's corpus; Claude Code stamps the full dated id on every message,
+ * and every real Anthropic id form carries one of the two markers (dated API
+ * ids, Vertex `claude-…`, Bedrock `us.anthropic.claude-…`).
  */
 export function calculateServerToolCost(
 	model: string,
@@ -90,7 +115,8 @@ export function calculateServerToolCost(
 	const m = (model || "").toLowerCase();
 	// Only Claude charges per-request for server tools.
 	// Other providers (DeepSeek, Gemini, local) don't — return 0.
-	if (!m.includes("claude") && !/\b(haiku|sonnet|opus)\b/.test(m)) {
+	if (m.includes("deepseek")) return 0;
+	if (!m.includes("claude") && !m.includes("anthropic")) {
 		return 0;
 	}
 	return (webSearchRequests * WEB_SEARCH_PRICE) + (webFetchRequests * WEB_FETCH_PRICE);
@@ -382,16 +408,61 @@ export function applyUserPricing(overrides: Record<string, ModelPricing>): void 
 }
 
 /**
- * Whether a model resolves to real pricing (#140) — via the (user-merged)
- * registry or one of the legacy substring fallback branches in
- * calculateClaudeCost. False means calculateClaudeCost silently used the
- * hardcoded Sonnet-tier defaults and totals for this model are a guess.
+ * Whether a model resolves to REAL pricing (#140) — a (user-merged) registry
+ * entry, or one of the legacy hardcoded rate branches in calculateClaudeCost.
+ * False means the cost for this model is a fallback figure, and the caller
+ * marks it: the renderer appends "?" to the cost cell and the CLI prints one
+ * stderr warning per distinct model.
+ *
+ * `deepseek` is NOT on this list, and that is the fix in #22 B / #25 B. It was,
+ * so any id containing `deepseek` reported as priced — including one no
+ * registry key matched, which calculateClaudeCost prices by borrowing a sibling
+ * entry in a branch its own comment calls a "Guess". The warning therefore
+ * never fired for a DeepSeek model NEWER than the registry, which is precisely
+ * the case it exists for; `deepseek-reasoner` (527 turns on this host) is the
+ * live instance. `haiku` and `opus` stay because they name real hardcoded
+ * branches below, not a guess.
+ *
+ * The `deepseek` test comes FIRST and returns false, mirroring the branch order
+ * in calculateClaudeCost (pr-review, round 1). An id containing both — say
+ * `deepseek-opus` — takes the sibling-guess branch there, because that branch is
+ * tested first; checking `opus` first here would call it priced while it costs
+ * $0.22/MTok from the flash card rather than the $5.00 the `opus` branch would
+ * charge. The two functions must agree on which branch a model reaches, so they
+ * ask in the same order.
+ *
+ * See describeFallbackPricing for what the caller should say about each class.
  */
 export function isModelPriced(model: string): boolean {
 	if (!model) return false;
 	if (lookupModelPricing(model)) return true;
 	const m = model.toLowerCase();
-	return m.includes("deepseek") || m.includes("haiku") || m.includes("opus");
+	if (m.includes("deepseek")) return false;
+	return m.includes("haiku") || m.includes("opus");
+}
+
+/**
+ * The registry key calculateClaudeCost borrows when a DeepSeek id matches
+ * nothing — the "Guess" branch, named once so the warning text and the branch
+ * cannot disagree (#22 B). Both call this; neither re-types the condition.
+ */
+export function deepSeekSiblingKey(model: string): "deepseek-v4-pro" | "deepseek-v4-flash" {
+	return (model || "").toLowerCase().includes("v4-pro") ? "deepseek-v4-pro" : "deepseek-v4-flash";
+}
+
+/**
+ * What calculateClaudeCost will actually charge a model isModelPriced rejects
+ * (#22 B). The warning text used to say "using default $3/$15 rates" for every
+ * miss, which is untrue for a DeepSeek id: that takes the sibling-guess branch,
+ * not the Sonnet default. A warning that misnames the fallback is a warning a
+ * reader cannot act on.
+ */
+export function describeFallbackPricing(model: string): string {
+	const m = (model || "").toLowerCase();
+	if (m.includes("deepseek")) {
+		return `guessing with the ${deepSeekSiblingKey(m)} rate card (surge multiplier applied)`;
+	}
+	return "using default $3/$15 rates";
 }
 
 /**
@@ -457,7 +528,7 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 		// registry (#495): this branch used to hold a second hardcoded copy of
 		// the rate card, and it was still serving the pre-2026-08-16 numbers
 		// long after the registry moved on, because nothing linked the two.
-		const sibling = MODEL_PRICING[m.includes("v4-pro") ? "deepseek-v4-pro" : "deepseek-v4-flash"];
+		const sibling = MODEL_PRICING[deepSeekSiblingKey(m)];
 		const rates = resolveTieredRates(sibling, usage, timestamp);
 		const peak = getDeepSeekPeakMultiplier(timestamp);
 		inputPrice = rates.input * peak;

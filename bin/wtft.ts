@@ -59,6 +59,7 @@ import {
 	MODEL_PRICING,
 	applyUserPricing,
 	isModelPriced,
+	describeFallbackPricing,
 	loadUserPricing,
 	getUserPricingPath,
 	loadExternalHarnesses,
@@ -128,6 +129,7 @@ export {
 	// Pricing registry + miss-path (#139/#140)
 	applyUserPricing,
 	isModelPriced,
+	describeFallbackPricing,
 	loadUserPricing,
 	getUserPricingPath,
 	parseEntryToInteraction,
@@ -719,19 +721,26 @@ async function main() {
 	}
 
 	// ---
-	// UNKNOWN-MODEL WARNING (#140): one stderr line per distinct model that
-	// priced at fallback defaults. Costs are computed in the daemon process,
+	// UNPRICED-MODEL WARNING (#140): one stderr line per distinct model that
+	// priced at a fallback rather than a card (CONTEXT.md, "Priced model /
+	// unpriced model"). Costs are computed in the daemon process,
 	// so the miss is re-derived here from the tag file's model ids rather
 	// than shared in-process state.
+	//
+	// The fallback is NAMED per model (#22 B), not asserted to be $3/$15 for
+	// all of them: a DeepSeek id no registry key matched takes the sibling-guess
+	// branch instead, and a warning that misnames the fallback is one a reader
+	// cannot act on. That class only reaches here at all since #22 B — before
+	// it, isModelPriced called every `deepseek` id priced.
 	// ---
-	const unknownModels = new Set<string>();
+	const unpricedModels = new Set<string>();
 	for (const i of interactions) {
 		if (i.model && i.model !== "<synthetic>" && !isModelPriced(i.model)) {
-			unknownModels.add(i.model);
+			unpricedModels.add(i.model);
 		}
 	}
-	for (const m of unknownModels) {
-		console.error(`\x1b[33m⚠ no pricing for ${m} — using default $3/$15 rates; totals may be unreliable. Add an entry to ${getUserPricingPath()} (no rebuild needed).\x1b[0m`);
+	for (const m of unpricedModels) {
+		console.error(`\x1b[33m⚠ no pricing for ${m} — ${describeFallbackPricing(m)}; totals may be unreliable. Add an entry to ${getUserPricingPath()} (no rebuild needed).\x1b[0m`);
 	}
 
 	// ---

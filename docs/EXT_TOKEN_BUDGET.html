@@ -88,7 +88,7 @@
     <p>Only records from the last two minutes are considered, and only those within the last one minute accrue TPM (the sliding window). Each collapsed interaction maps its model name to a quota shortcode and adds its input tokens:</p>
     <pre><code>const interactions = readClassifiedTagFile(filePath); // collapses by message.id first
 for (const interaction of interactions) {
-  if (!interaction.model) continue;             // needs a model to attribute to
+  if (!interaction.model || !Number.isFinite(interaction.timestamp)) continue;
   const age = Date.now() - interaction.timestamp;
   if (age &gt; 120_000) continue;                  // older than 2 min — ignore
   const shortCode = getModelShortName(interaction.model);

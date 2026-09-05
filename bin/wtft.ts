@@ -272,7 +272,7 @@ function describeProvisionalReason(provisional: { reason: string | null }, tagPa
 		return `this tag was written by tagger v${v}, not v${WTFT_TAGGER_VERSION}`;
 	}
 	if (provisional.reason === "subagent-unreadable") {
-		return "a subagent session file could not be read, so the token totals are incomplete";
+		return "a subagent session file could not be read, so the totals may be incomplete";
 	}
 	return "no subagent transcript has been read since this tag was written";
 }
@@ -779,13 +779,22 @@ async function main() {
 		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
 	};
 
-	const emitSessionJson = (opt: { notices?: WtftNotice[] } = {}) => {
-		const uncounted = scanSessionUncounted();
+	// `pending` pins the decision the CALLER already made, rather than letting the
+	// document re-derive it later (PR review, Medium/correctness). The
+	// pending-session arm decides "file absent" and then awaits `awaitDaemonUp`;
+	// if the daemon's first write lands inside that await, a later
+	// `fs.existsSync` says present. The document would then carry a real
+	// `session.harness` and a real `uncounted` under a notice saying the session
+	// log was not written yet — internally contradictory, and contradicting the
+	// spec's pending-arm row. Skipping both re-reads makes the report a
+	// consistent snapshot of the moment the branch was taken.
+	const emitSessionJson = (opt: { notices?: WtftNotice[]; pending?: boolean } = {}) => {
+		const uncounted = opt.pending ? newUncountedBillables() : scanSessionUncounted();
 		const doc = buildSessionJson({
 			interactions,
 			session: {
 				path: finalSessionPath,
-				harness: detectSessionHarness(finalSessionPath),
+				harness: opt.pending ? null : detectSessionHarness(finalSessionPath),
 				taggerVersion: String(WTFT_TAGGER_VERSION),
 				tagPath,
 			},
@@ -831,7 +840,7 @@ async function main() {
 			`The log parser daemon is running and waiting on it — run again after the first response, or use --watch to stay attached.`;
 		if (opts.json) {
 			console.error(`\x1b[33m${pendingText}\x1b[0m`);
-			emitSessionJson({ notices: [{ code: "pending-session", text: pendingText }] });
+			emitSessionJson({ notices: [{ code: "pending-session", text: pendingText }], pending: true });
 			return;
 		}
 		console.log(`\x1b[33mSession log not written yet: ${finalSessionPath}\x1b[0m`);

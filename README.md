@@ -167,9 +167,11 @@ The same table is in `docs/manifests/wtft-cmd.json`, which is what `wtft --help`
 renders its **Exit codes** section from.
 
 `--pager` is a Pi TUI overlay, not a CLI flag — the CLI says so and exits 1,
-suggesting `wtft … | less -R`. Every `wtft` run spawns the log parser daemon if
-one is not already holding the session's lease, and the daemon revives after an
-idle timeout; `wtft-daemon` exists for debugging, not for normal use.
+suggesting `wtft … | less -R`. Any `wtft` run that produces a report spawns the log
+parser daemon if one is not already holding the session's lease, and the daemon
+revives after an idle timeout. The commands that run instead of a report —
+`--help`/`--why`/`--version` and the daemon-management group — return before
+that and spawn nothing. `wtft-daemon` exists for debugging, not for normal use.
 
 `wtft --help` is the flag reference — the examples above are a tour, not the
 list.

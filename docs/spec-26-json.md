@@ -97,7 +97,7 @@ contract.
 | `models[]` | array | One row per model id, **sorted by `costUsd` descending** — the same order and the same numbers as the rendered `--tokens` table's rows, un-abbreviated. `model` is the full id, never shortened. |
 | `models[].priced` | bool | `isModelPriced(model)` — the `?` marker in the rendered table. `false` means **no rate card**, not "wtft guessed this row": a harness-native per-turn cost is used unchanged wherever the transcript records one, so a marked row's cost can mix provenance. |
 | `categories[]` | array | One row per `CATEGORY_ORDER` entry, **always all fourteen, always in `CATEGORY_ORDER` order**, so a consumer can index by position. |
-| `uncounted` | object | The #149 blind spot: events the harness bills and writes no `usage` for. Counted, never priced, and deliberately **not** in `total`. Scanned on **every** `--json` run, so a zero always means "looked, found none", never "nobody looked". (A no-op only on the `pending-session` arm, where there is no file yet; the `no-data` arm has a real session file and can find real billables in it.) This is the one part of the document that does not come from the aggregation. |
+| `uncounted` | object | The #149 blind spot: events the harness bills and writes no `usage` for. Counted, never priced, and deliberately **not** in `total`. Scanned on **every** `--json` run, so a zero means "looked, found none" rather than "nobody looked" — with one narrower gap, **#94**: the scan drops unparseable session lines silently, so a zero can also mean "could not read part of it". Fixing that adds a field; it does not change this one. (A no-op only on the `pending-session` arm, where there is no file yet; the `no-data` arm has a real session file and can find real billables in it.) This is the one part of the document that does not come from the aggregation. |
 | `compaction` | object | Compaction events seen and the tokens they freed — the rendered table's `Compaction:` line. Counted over **every** deduped interaction, tagged or not: it describes context freed, not spend, so the model-tag exclusion below does not apply to it. |
 | `untaggedInteractions` | int | Interactions excluded from `total`/`models`/`categories` because they carry no model id (`(unknown)` or `<synthetic>`) — the rendered table's "(N untagged interactions skipped)", or, when *every* interaction is untagged, its "No model-tagged interactions found (N untagged)." |
 | `notices[]` | array | `{ code, text }`. `code` is API; `text` is prose. Codes: `pending-session`, `no-data`, `unpriced-model`, `provisional`, `auto-selected-session`. |
@@ -141,12 +141,18 @@ ratios and legends derived at render time rather than aggregate facts: the
 per-model `Cache:` hit-rate line, the `Think:` budget-utilisation line, and the
 `?` fallback legend.
 
-Two of the three are recoverable. The cache hit rate is
+Only the cache hit rate is fully recoverable:
 `cacheReadTokens / (cacheReadTokens + cacheWriteTokens + inputTokens)`, all three
-in the document; the legend is `models[].priced`. The **`Think:` percentage is
-not**, and cannot be: its denominator is `--thinking-budget`, an input flag the
-document does not carry and which `--json` ignores outright. A consumer gets
-`reasoningTokens` and supplies its own budget.
+in the document.
+
+`models[].priced` recovers **which** rows the legend marks, not the legend's
+content — the rendered version also names each fallback (`describeFallbackPricing`)
+and carries the mixed-provenance caveat, and neither is in the document.
+
+The **`Think:` percentage is not recoverable at all**, and cannot be: its
+denominator is `--thinking-budget`, an input flag the document does not carry
+and which `--json` ignores outright. A consumer gets `reasoningTokens` and
+supplies its own budget.
 
 `buildSessionJson` is otherwise a pure serialiser — every number it emits comes
 from the aggregation, with the single exception of `uncounted`, which is a
@@ -235,7 +241,7 @@ $ node bin/wtft.mjs -s <fixture> --json \
     | jq -e '.schema == "wtft/session@1" and (.total.outputTokens|type) == "number"'
 ```
 
-exits 0, and `tests/wtft-26-json.test.ts` asserts, on a fixture, in nine
+exits 0, and `tests/wtft-26-json.test.ts` asserts, on a fixture, in ten
 sections:
 
 1. **§1** stdout is exactly one parseable JSON object, carrying the schema the
@@ -264,6 +270,9 @@ sections:
 8. **§8** an *empty* report obeys the exit-code contract too: a provisional one
    exits 9 and a settled one exits 0, asserted in both directions so the claim
    cannot pass by both sides being false.
+8b. **§8b** a session file that was never written is *late, not broken* (#308):
+   one object, a `pending-session` notice, `provisional: false`, exit 0, and a
+   zeroed blind spot meaning "nothing to scan" rather than a guess.
 9. **§9** the rendered path and `--json` return the **same** code on the same
    state, empty or not — each mode against its own fresh fixture, because the
    first run's daemon repairs the tag and a second run against it would
@@ -285,7 +294,7 @@ file-level scope says fix or file, and the Action column says which.
 | `bin/wtft.ts` `@package princess-pi-tools` | *pre-existing* — names the pre-extraction package | `package.json` is `@princess-pi/wtft` | n/a | Fixed |
 | `bin/wtft.ts` "cost auditing tool for Pi Coding Agent session logs" | *pre-existing* — `--harness auto` is the default | `wtft-cli-shared.ts` defaults `harnessOption` to `auto` | ✅ `wtft-issue-156-harness-seam.test.ts` | Fixed |
 | `bin/wtft.ts` "Nothing in this repo invokes this CLI and inspects `$?`" | *pre-existing* — the grep skipped `tests/` | `tests/wtft-513-exit9-caller-guard.test.ts` exists because `wtft-auto-fit` failed on exit 9 | ✅ `wtft-513-exit9-caller-guard.test.ts` | Corrected, kept as history |
-| `bin/wtft.ts` "used from four places" / "Memoised: `--tokens --json` … twice" | this branch's own new comments, both wrong | three call sites; the `--tokens` renderer is unreachable under `--json` | n/a | Fixed |
+| `bin/wtft.ts` "used from four places" / "Memoised: `--tokens --json` … twice" | this branch's own new comments, both wrong | four call sites, none of them the `--tokens` renderer, which is unreachable under `--json` | n/a | Fixed |
 | `bin/wtft.ts` "2 daemon beats", `showReapWarnings` docstring | *pre-existing* — names an undefined unit; silent on the truncate | literal 1400 ms / 667 ms; the function truncates `reap.log` | n/a | Fixed |
 | `docs/manifests/wtft-cmd.json` `--limit` "(default: 10)" | *pre-existing* — false for the CLI | `bin/wtft.ts` substitutes 100 when `hasLimit` is false | ✅ `wtft-74-budget-flag-parsing.test.ts` | Fixed: names both |
 | `docs/manifests/wtft-cmd.json` `--width` "(default: 240)" | *pre-existing* — the CLI never reads `opts.width` | no reference to `opts.width` in `bin/wtft.ts`; parser default is 80 | ✅ `wtft-74-budget-flag-parsing.test.ts` | Fixed: marked extension-only |

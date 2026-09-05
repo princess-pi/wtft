@@ -1868,10 +1868,9 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 	// are display-only and have no JSON counterpart, because they are ratios and
 	// legends derived here rather than aggregate facts: the per-model `Cache:`
 	// hit-rate line, the `Think:` budget-utilisation line, and the `?` fallback
-	// legend. Two are recoverable from the document — the cache rate from the
-	// three token fields, the legend from `models[].priced`. The Think
-	// PERCENTAGE is not: its denominator is `--thinking-budget`, an input flag
-	// the document does not carry. See docs/spec-26-json.md, "The seam".
+	// legend. What of them a consumer can and cannot rebuild from the document is
+	// spelled out in docs/spec-26-json.md, "The seam" — not restated here, where
+	// it would be a second copy to drift.
 	const summary = computeSessionSummary(interactions);
 	const unmatched = summary.untaggedInteractions;
 
@@ -1968,7 +1967,9 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 		out += `  A harness-native per-turn cost is used unchanged where the transcript has one; totals may be unreliable\n`;
 	}
 
-	// Compaction summary (#90) — show how many tokens were freed by compaction
+	// Compaction summary (princess-pi-tools#90, pre-extraction numbering — not
+	// this repo's #90, which is the serverToolCost divergence) — show how many
+	// tokens were freed by compaction
 	if (summary.compaction.events > 0) {
 		out += `\nCompaction: ${summary.compaction.events} event(s), ${formatTokenCount(summary.compaction.tokensFreed)} total tokens freed\n`;
 	}

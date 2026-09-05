@@ -346,7 +346,10 @@ exactly as invisible as one in the parent, so it must be counted the same way.
 **Where it is wired (amended by #26).** It was the non-watch `--tokens` path only. It is now
 `scanSessionUncounted` in `bin/wtft.ts` — hoisted out of that block, memoised, and called by
 **both** the `--tokens` renderer and `wtft --json`, which reports the counts as its
-`uncounted` field on every run whether or not `--tokens` was given. Hoisted rather than
+`uncounted` field whether or not `--tokens` was given. One exception, documented in
+`docs/spec-26-json.md`: a session file that has not been written yet is not scanned
+at all — there is nothing to read — so a pending report's zeros mean "nothing to
+scan", not "scanned, found none". Hoisted rather than
 copied for a reason that is invisible in the function's name: besides counting, the scan can
 **downgrade the provisional verdict** to `subagent-unreadable` (#457) and so change the exit
 code. A second copy would have meant one of the two output modes reporting a settled total

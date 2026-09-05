@@ -254,7 +254,12 @@ export const EXIT_PROVISIONAL = 9;
 function collectUnpricedModels(interactions: Interaction[]): string[] {
 	const seen = new Set<string>();
 	for (const i of interactions) {
-		if (i.model && i.model !== "<synthetic>" && !isModelPriced(i.model)) seen.add(i.model);
+		// `(unknown)` excluded as well as `<synthetic>`: it is the placeholder
+		// `computeSessionSummary` counts as untagged, so treating it as a model
+		// here produced a `no pricing for (unknown)` warning about a model that
+		// does not exist. The two functions have to agree on what untagged means.
+		if (!i.model || i.model === "<synthetic>" || i.model === "(unknown)") continue;
+		if (!isModelPriced(i.model)) seen.add(i.model);
 	}
 	return [...seen];
 }

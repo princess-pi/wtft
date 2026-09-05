@@ -9,6 +9,12 @@
  *   `renderUncountedBillables` prints counts of billed-but-unrecorded events
  *   (#149) below TOTAL. It is the only output here that reports spend wtft
  *   cannot price, and it deliberately carries no dollar figure.
+ *
+ *   And one export renders nothing at all: `computeSessionSummary` (#26) is the
+ *   session aggregation — totals, per-model rows, per-category rows — that
+ *   `renderTokenSummary` formats for a human and `wtft-json.ts` serialises for a
+ *   machine. It lives here, beside its only in-file consumer, so the rendered
+ *   table cannot grow a second copy of the arithmetic.
  */
 
 import type { Interaction, Category } from "./wtft-shared.js";

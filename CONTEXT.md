@@ -254,9 +254,20 @@ _Avoid_: Panel, sidebar (reserved for the `serve` tool's widget — `serve` is a
 **CLI**:
 Running `wtft` (or `./wtft`, or the npm-global install) directly from the host shell, outside
 Pi — reuses the same classification engine as the widget but prints to stdout. Supports modes
-the widget does not (`--other` histogram, `--watch`). Refuses `-p/--pager`, which is the
-widget's (see **Pager**).
+the widget does not (`--other` histogram, `--watch`, `--json`). Refuses `-p/--pager`, which is
+the widget's (see **Pager**).
 _Avoid_: Standalone mode, binary (the binary is `bin/wtft.mjs`; "CLI" names the usage mode)
+
+**JSON mode** (#26):
+`--json` — the CLI's machine-readable mode. Writes exactly one JSON object (schema
+`wtft/session@1`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
+Human prose goes to stderr and is repeated in the object's `notices[]`, where `code` is the
+contract and `text` is disposable. Its numbers come from `computeSessionSummary`
+(`extensions/lib/wtft-renderer.ts`), the same aggregation the `--tokens` table formats, so
+the two cannot report different totals. Contract: `docs/spec-26-json.md`. CLI only — the
+widget has no stdout to write an object to.
+_Avoid_: Porcelain mode, machine mode, structured mode (the flag is `--json`; "JSON mode"
+names the usage mode)
 
 **Pager**:
 `-p/--pager` — a fullscreen, interactive, scrollable TUI overlay for browsing expanded cost

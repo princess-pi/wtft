@@ -676,16 +676,42 @@ export function getTimezoneOffsetMs(timestamp: number, tz: string): number {
  * `now` is a parameter rather than a `Date.now()` call so a test can pin it
  * (#96: a dated DeepSeek surge test that read the host clock went flaky near
  * a window edge). Which day it describes is #496's question, not this one's.
+ *
+ * **Per-hour offset, not per-day (#24).** `now` is sampled once to pick which
+ * calendar day (in `tz`) to describe, but on a day the zone's offset changes,
+ * a single offset applied to all 24 local hours puts the hours on the far
+ * side of the transition an hour off — which the display would then colour
+ * (or fail to colour) wrong. Each candidate hour below resolves its OWN
+ * offset with a two-sample refinement: guess the offset as if the wall-clock
+ * digits were already a UTC instant, convert, then resample the offset at
+ * the converted instant and convert again. An ordinary day converges on the
+ * first sample (nothing to refine); a transition day converges on the offset
+ * actually in force at the converted instant.
+ *
+ * That refinement has no single right answer for the local hour a
+ * spring-forward gap skips, or the one a fall-back fold repeats — pinned by
+ * measurement in `tests/wtft-24-dst-hours.test.ts`: the skipped hour
+ * resolves to the same instant as the hour after it, and a repeated hour
+ * resolves to its LATER (post-transition) occurrence. The `else` branch
+ * needs no equivalent change — a fresh `new Date(now)` per iteration already
+ * gets per-hour resolution for free, because `Date.prototype.setHours`
+ * re-derives the offset from the target local time rather than reusing one
+ * (ECMA-262's `UTC` abstract operation performs the same two-sample
+ * refinement on the host's own zone). It can land on the OTHER occurrence of
+ * a fall-back fold hour than the branch above — the earlier one, not the
+ * later one — which is a documented, tested divergence between the two
+ * branches, not a defect to reconcile.
  */
 export function getSurgeLocalHours(tz?: string, now: number = Date.now()): Set<number> {
 	const result = new Set<number>();
+	const parts = tz ? getZonedParts(now, tz) : null;
 
 	for (let localHour = 0; localHour < 24; localHour++) {
 		let ts: number;
-		if (tz) {
-			const parts = getZonedParts(now, tz);
-			const offsetMs = getTimezoneOffsetMs(now, tz);
-			ts = Date.UTC(parts.year, parts.month - 1, parts.day, localHour, 0, 0, 0) - offsetMs;
+		if (tz && parts) {
+			const wallUtcMs = Date.UTC(parts.year, parts.month - 1, parts.day, localHour, 0, 0, 0);
+			const guessOffsetMs = getTimezoneOffsetMs(wallUtcMs, tz);
+			ts = wallUtcMs - getTimezoneOffsetMs(wallUtcMs - guessOffsetMs, tz);
 		} else {
 			const d = new Date(now);
 			d.setHours(localHour, 0, 0, 0);

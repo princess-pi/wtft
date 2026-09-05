@@ -80,9 +80,11 @@ const suites = filters.length === 0
 	? allSuites
 	: allSuites.filter(f => filters.some(needle => f.includes(needle)));
 
-// Shell suites are NOT run by this driver — several need sudo or a live nginx.
-// Named here rather than silently omitted: a skipped suite you cannot see is a
-// coverage claim you cannot check.
+// Shell suites are NOT run by this driver; CI gates each as its own step
+// (`.github/workflows/ci.yml`). Named here rather than silently omitted: a
+// skipped suite you cannot see is a coverage claim you cannot check. (An
+// earlier comment said "several need sudo or a live nginx" — that was the
+// sister repo's reason, never this one's.)
 const shellSuites = fs.readdirSync(TESTS_DIR).filter(f => f.endsWith(".test.sh")).sort();
 
 if (suites.length === 0) {
@@ -161,7 +163,10 @@ if (filters.length > 0) {
 	console.log(`${DIM}filtered by: ${filters.join(", ")} (${allSuites.length} suites total)${RESET}`);
 }
 if (shellSuites.length > 0) {
-	console.log(`${DIM}not run by this driver: ${shellSuites.join(", ")} — shell suites; CI runs each as its own gating step, locally: bash tests/<name>${RESET}`);
+	// Shell suites are not tests/*.test.ts. CI runs each as its own gating step;
+	// locally the exact command is printed so it can be pasted, not inferred.
+	const local = shellSuites.map(s => `bash tests/${s}`).join("; ");
+	console.log(`${DIM}not run by this driver: ${shellSuites.join(", ")} — shell suites; CI gates each as its own step. Locally: ${local}${RESET}`);
 }
 
 // Skipped CHECKS, one level below skipped suites. A host-gated check that found

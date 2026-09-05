@@ -16,7 +16,8 @@
 # them: §1 of wtft-36 scanned two of the four shipped bundles and skipped every
 # relative specifier — so #29's own defect 2 was outside it; the daemon shell
 # suite was run by nothing at all; and the registry channel had no check
-# anywhere. The registry job and the daemon pin below are new assertions.
+# anywhere. The registry job and the daemon step below are new assertions; the
+# daemon step was a by-name pin of its known-red set until #72 fixed the suite.
 #
 # WHY TWO JOBS. The Node Toolchain Standard defines two install channels with
 # different requirements, and a workflow that only exercises the one we use

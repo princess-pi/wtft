@@ -128,14 +128,37 @@ describe("resolveTieredRates with dateTiers", () => {
 		assert.strictEqual(rates.cacheWrite, 3.75);
 	});
 
+	// The two #96 guards below use `openEnded`, NOT `dated` — and the fixture is
+	// the whole point (#22 C2/C3). They used to assert 3.00 against `dated`,
+	// whose window closed 2026-09-01. From that date the host clock ALSO
+	// resolves to 3.00, so both passed whether or not the resolver read
+	// Date.now(): they caught the bug by calendar luck and went vacuous on a
+	// known date. `openEnded`'s window does not close until 2099, so an
+	// implementation that reads the clock resolves INSIDE it and returns 2.00.
+	// Nothing about the assertion depends on today's date.
+	const openEnded: ModelPricing = {
+		input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75,
+		dateTiers: [
+			{ effectiveBefore: Date.UTC(2099, 0, 1) /* 2099-01-01T00:00:00Z */,
+			  input: 2.00, output: 10.00, cacheRead: 0.20, cacheWrite: 2.50 },
+		],
+	};
+
 	it("uses base rates when no timestamp is supplied — never falls back to Date.now() (#96)", () => {
-		const rates = resolveTieredRates(dated, {});
+		const rates = resolveTieredRates(openEnded, {});
 		assert.strictEqual(rates.input, 3.00);
 	});
 
 	it("uses base rates when timestamp is 0 (unparsed/unknown, per wtft-parser's default)", () => {
-		const rates = resolveTieredRates(dated, {}, 0);
+		const rates = resolveTieredRates(openEnded, {}, 0);
 		assert.strictEqual(rates.input, 3.00);
+	});
+
+	it("the #96 fixture is one a clock-reading resolver would fail — proves the two above are not vacuous", () => {
+		// If either guard above regressed to Date.now(), THIS is the value it
+		// would have produced. Asserting it here means the pair cannot go
+		// vacuous again without this line going red first.
+		assert.strictEqual(resolveTieredRates(openEnded, {}, Date.now()).input, 2.00);
 	});
 
 	it("leaves models without dateTiers unaffected by a timestamp argument", () => {
@@ -214,14 +237,50 @@ describe("calculateClaudeCost with tiers", () => {
 		assert.ok(Math.abs(cost - expected) < 0.0001, `cost ${cost} != expected ${expected}`);
 	});
 
-	it("GPT-5.6-sol cache writes are zero when no cache data", () => {
+	// REPLACES "GPT-5.6-sol cache writes are zero when no cache data" (#22 C4).
+	// That case passed a usage object with NO cache fields, so cacheWriteCost was
+	// 0 for every model at every rate — it asserted nothing about gpt-5.6-sol,
+	// whose cacheWrite of 6.25 is the one registry entry where a cache-write test
+	// bites. It was also a duplicate of "uses base rates for GPT-5.6-sol with
+	// input below 272K", three cases above. The two below charge that rate.
+	// 100K, deliberately under the 272K threshold: cache-creation tokens COUNT
+	// toward the size tier, so a 1M fixture here would silently be testing the
+	// tiered card instead of the base one (measured: $12.50, not $6.25). The
+	// tiered case is its own test below.
+	it("GPT-5.6-sol bills a flat cache write at its own $6.25/MTok base rate", () => {
 		const cost = calculateClaudeCost("gpt-5.6-sol", {
-			input_tokens: 100000,
-			output_tokens: 5000,
+			input_tokens: 0,
+			output_tokens: 0,
+			cache_creation_input_tokens: 100_000,
 		});
-		// No cacheCreation, no cacheRead — cost should be clean
-		const expected = (100000 * 5 / 1000000) + (5000 * 30 / 1000000);
-		assert.ok(Math.abs(cost - expected) < 0.0001);
+		// 100K at $6.25/MTok = $0.625. $6.25 is the committed manifest's value
+		// for gpt-5.6-sol, not a figure recomputed from the registry.
+		assert.strictEqual(Number(cost.toFixed(6)), 0.625);
+	});
+
+	it("GPT-5.6-sol bills a 1h-TTL cache write at 2x input ($10/MTok), not 2x the 5m rate", () => {
+		const cost = calculateClaudeCost("gpt-5.6-sol", {
+			input_tokens: 0,
+			output_tokens: 0,
+			cache_creation_input_tokens: 100_000,
+			cache_creation: { ephemeral_1h_input_tokens: 100_000 },
+		});
+		// The API rule (#146): a 1h write is 2x BASE INPUT. Doubling the 5m rate
+		// would give $1.25 and overbill by 25%.
+		assert.strictEqual(Number(cost.toFixed(6)), 1.00);
+	});
+
+	it("a cache write large enough on its own moves GPT-5.6-sol onto the tiered card", () => {
+		// 1M cache-creation tokens and nothing else: the resolver sums input +
+		// cacheRead + cacheWrite, so the write alone crosses 272K and the tier's
+		// $12.50 cacheWrite applies. This is the case the 1M fixture above would
+		// have tested by accident.
+		const cost = calculateClaudeCost("gpt-5.6-sol", {
+			input_tokens: 0,
+			output_tokens: 0,
+			cache_creation_input_tokens: 1_000_000,
+		});
+		assert.strictEqual(Number(cost.toFixed(6)), 12.50);
 	});
 
 	it("GPT-5.5 cache writes are zero (OpenAI Responses has no cache write cost)", () => {

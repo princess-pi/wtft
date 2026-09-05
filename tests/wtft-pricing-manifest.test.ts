@@ -48,12 +48,23 @@ describe("#169 the pricing manifest is committed and current", () => {
 });
 
 describe("#169 every priced model reaches the manifest", () => {
-	it("lists exactly the registry's models", () => {
-		const manifest = buildPricingManifest();
-		assert.deepStrictEqual(
-			manifest.models.map(m => m.model).sort(),
-			Object.keys(MODEL_PRICING).sort(),
-		);
+	it("the COMMITTED manifest lists exactly the registry's models", () => {
+		// Reads the file on disk, NOT buildPricingManifest() (#22 C1). The
+		// builder constructs `models` as Object.keys(MODEL_PRICING).sort().map(…),
+		// so comparing its output against Object.keys(MODEL_PRICING).sort() was
+		// an identity — it could not fail under any registry or builder state,
+		// while its failure message named a cause the builder makes impossible.
+		// Against the committed file it fails for the reason that message gives:
+		// a registry edit that skipped `bun run build`.
+		const committed = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8"));
+		const listed = committed.models.map((m: { model: string }) => m.model).sort();
+		const priced = Object.keys(MODEL_PRICING).sort();
+		for (const model of priced) {
+			assert.ok(listed.includes(model), `${model} is priced but missing from the committed manifest — run: bun run build`);
+		}
+		for (const model of listed) {
+			assert.ok(priced.includes(model), `${model} is in the committed manifest but no longer priced — run: bun run build`);
+		}
 	});
 
 	it("carries the Claude 5 family and the GPT-5.x lineup the old table omitted", () => {

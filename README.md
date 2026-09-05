@@ -119,7 +119,39 @@ wtft --session <path> --watch
 
 # List the running log parser daemons
 wtft --list
+
+# Machine-readable: one JSON object on stdout, exact numbers, no ANSI
+wtft --json
+wtft --json | jq .total.costUsd
 ```
+
+### `--json` and the exit codes
+
+`wtft --json` writes **exactly one JSON object** to stdout and nothing else —
+no chart, no ANSI, and no `3.6k`-style abbreviation, which is lossy. Human prose
+goes to stderr and is repeated in the object's `notices[]`, so a consumer never
+has to read two streams. The schema is `wtft/session@1`; field names and exit
+codes are versioned API, the prose inside `notices[].text` is not. Full
+contract: [`docs/spec-26-json.md`](./docs/spec-26-json.md).
+
+The numbers come from the same aggregation the rendered `--tokens` table
+formats, so the two cannot report different totals.
+
+`wtft` exits with:
+
+- **0** — report produced, including when there is nothing to report yet (the
+  session file is not written, or the tag holds no classified data). Under
+  `--json`, stdout carries one object.
+- **1** — error: no session found or selected, an invalid path, a daemon that
+  died before producing data, or a refused flag (`--pager`). The reason is on
+  stderr; under `--json`, stdout carries nothing.
+- **9** — provisional ([#443](https://github.com/princess-pi/wtft/issues/443)):
+  the report printed in full, but the total may still grow under the daemon.
+  Under `--json`, `provisional.provisional` is `true` and `provisional.reason`
+  names the condition, so `$?` and the field agree.
+
+The same table is in `docs/manifests/wtft-cmd.json`, which is what `wtft --help`
+renders its **Exit codes** section from.
 
 `--pager` is a Pi TUI overlay, not a CLI flag — the CLI tells you so and
 suggests `wtft … | less -R`. The log parser daemon starts itself on

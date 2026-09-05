@@ -241,7 +241,7 @@ $ node bin/wtft.mjs -s <fixture> --json \
     | jq -e '.schema == "wtft/session@1" and (.total.outputTokens|type) == "number"'
 ```
 
-exits 0, and `tests/wtft-26-json.test.ts` asserts, on a fixture, in ten
+exits 0, and `tests/wtft-26-json.test.ts` asserts, on a fixture, in eleven
 sections:
 
 1. **§1** stdout is exactly one parseable JSON object, carrying the schema the
@@ -270,6 +270,9 @@ sections:
 8. **§8** an *empty* report obeys the exit-code contract too: a provisional one
    exits 9 and a settled one exits 0, asserted in both directions so the claim
    cannot pass by both sides being false.
+8c. **§8c** the `#443` stderr line reaches every arm — the empty `--json` ones
+   included, which used to exit 9 with nothing a human could read — and appears
+   **exactly once**, never twice on a full report.
 8b. **§8b** a session file that was never written is *late, not broken* (#308):
    one object, a `pending-session` notice, `provisional: false`, exit 0, and a
    zeroed blind spot meaning "nothing to scan" rather than a guess.

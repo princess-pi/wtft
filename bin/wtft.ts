@@ -763,17 +763,35 @@ async function main() {
 	// `wtft` and 9 under `wtft --json`. The exit-code table says nothing about
 	// mode, and 9 means "the total may still grow" — which is as true of an empty
 	// report from a stale tag as of a full one. One helper, both modes.
-	const finishEmptyReport = () => {
+	// The #443 stderr line, emitted at most once per run. Both output modes and
+	// all three empty/normal arms route through here, which is what makes the
+	// "stderr in both modes" claim in the SHARED WORDING banner true: the
+	// `--json` empty arms used to skip it entirely, so an empty report from a
+	// stale tag exited 9 with no human-readable reason anywhere.
+	// (PR review, Medium/reasoning.)
+	let warnedProvisional = false;
+	const warnProvisionalOnce = () => {
+		if (warnedProvisional || !provisional.provisional) return;
+		warnedProvisional = true;
+		console.error(`\x1b[33m⚠ PROVISIONAL: ${describeProvisionalReason(provisional, tagPath)}. ${describeProvisionalRemedy(provisional)}. Exit ${EXIT_PROVISIONAL}.\x1b[0m`);
+	};
+
+	// `pending` pins the caller's decision here for the same reason
+	// `emitSessionJson` takes it (PR review, Medium/correctness): this arm decided
+	// "file absent" BEFORE `awaitDaemonUp`, and if the harness's first write lands
+	// inside that await, an unpinned scan runs on the now-present file, can
+	// downgrade to `subagent-unreadable`, and prints "session log not written yet"
+	// on stdout while exiting 9. The `--json` arm was pinned first; leaving the
+	// rendered arm unpinned reintroduced the mode disagreement one call deeper.
+	const finishEmptyReport = (opt: { pending?: boolean } = {}) => {
 		// The scan FIRST, for the same reason `emitSessionJson` does it: it can
 		// reassign `provisional` to `subagent-unreadable` (#457). Round 2 gave the
 		// rendered arms the exit rule but not the scan, so a settled tag with an
 		// unreadable subagent directory still exited 0 rendered and 9 under
 		// `--json` — the same disagreement one layer down. Memoised, so this is
-		// not a second scan. (PR review round 4, High/reasoning.)
-		scanSessionUncounted();
-		if (provisional.provisional) {
-			console.error(`\x1b[33m⚠ PROVISIONAL: ${describeProvisionalReason(provisional, tagPath)}. ${describeProvisionalRemedy(provisional)}. Exit ${EXIT_PROVISIONAL}.\x1b[0m`);
-		}
+		// not a second scan. Skipped when `pending`, per the note above.
+		if (!opt.pending) scanSessionUncounted();
+		warnProvisionalOnce();
 		// `exitCode` and return, never `process.exit()`: node's stdout is async on
 		// a pipe and `process.exit()` does not wait for pending writes.
 		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
@@ -803,6 +821,9 @@ async function main() {
 			notices: [...earlyNotices, ...(opt.notices ?? [])],
 		});
 		process.stdout.write(renderSessionJson(doc));
+		// The human line, on stderr, on every `--json` arm — the empty ones
+		// included, which used to omit it (PR review, Medium/reasoning).
+		warnProvisionalOnce();
 		// `exitCode` and return, never `process.exit()`: on Linux node's stdout is
 		// asynchronous when it is a pipe, and `process.exit()` does not wait for
 		// pending writes — `wtft --json | jq` could lose the tail of the document.
@@ -846,7 +867,7 @@ async function main() {
 		console.log(`\x1b[33mSession log not written yet: ${finalSessionPath}\x1b[0m`);
 		console.log(`\x1b[90mA harness writes its first line after the first real prompt (not a /command) completes. ` +
 			`The log parser daemon is running and waiting on it — run again after the first response, or use --watch to stay attached.\x1b[0m`);
-		finishEmptyReport();
+		finishEmptyReport({ pending: true });
 		return;
 	}
 	if (interactions.length === 0) {
@@ -934,10 +955,9 @@ async function main() {
 		if (provisional.provisional) {
 			const text = `${describeProvisionalReason(provisional, tagPath)}. ${describeProvisionalRemedy(provisional)}.`;
 			notices.push({ code: "provisional", text });
-			// Also on stderr, like the unpriced-model warning above. The field is
-			// the contract; the stderr line is for the human watching a pipeline
-			// scroll past, who would otherwise see a settled-looking object.
-			console.error(`\x1b[33m⚠ PROVISIONAL: this total may still grow — ${text}\x1b[0m`);
+			// The stderr copy is emitted by `emitSessionJson` below, through the
+			// same latch every other arm uses, so the line cannot appear twice
+			// here and cannot go missing on the empty arms.
 		}
 		// Exit 9 keeps its #443 meaning under --json — the object is complete, and
 		// its `provisional` field says the same thing the code does.

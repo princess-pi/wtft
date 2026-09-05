@@ -533,6 +533,40 @@ console.log("\n8b. a pending session is not provisional");
 	assert(`  ...so it exits 0 (got ${r.code})`, r.code === 0, r.stderr);
 	assert("  ...and reports no blind spot rather than a guessed one",
 		doc?.uncounted?.compaction === 0 && doc?.uncounted?.recap === 0, JSON.stringify(doc?.uncounted));
+	assert("  ...and session.harness is null, since there is no file to ask",
+		doc?.session?.harness === null, String(doc?.session?.harness));
+}
+
+// ---
+// 8c. The provisional stderr line reaches the EMPTY --json arms too.
+// ---
+// PR review, Medium/reasoning. The rendered empty path warned; the `--json`
+// empty arms wrote the object, set exit 9, and printed nothing a human could
+// read. Every arm now routes through one latched warner, so the line appears
+// exactly once — never zero times on an empty report, never twice on a full one.
+console.log("\n8c. the provisional line reaches every arm, exactly once");
+{
+	// Empty AND provisional: a stale-version tag with no classified lines.
+	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-26-emptywarn-")));
+	const sessionPath = path.join(dir, "session.jsonl");
+	fs.writeFileSync(sessionPath, JSON.stringify({ type: "session", version: 3, id: "emptywarn", timestamp: new Date().toISOString(), cwd: dir }) + "\n");
+	const tagsDir = path.join(dir, "wtft-tags");
+	fs.mkdirSync(tagsDir, { recursive: true });
+	fs.writeFileSync(path.join(tagsDir, "session.jsonl.wtft-tag.v0.0.1-ancient.jsonl"),
+		JSON.stringify({ _meta: { offset: 0 } }) + "\n");
+
+	const r = runCli(["-s", sessionPath, "--json"]);
+	assert(`an empty provisional --json run exits ${EXIT_PROVISIONAL} (got ${r.code})`, r.code === EXIT_PROVISIONAL, r.stderr);
+	const hits = r.stderr.split("\n").filter(l => /PROVISIONAL/.test(l)).length;
+	assert("  ...and says PROVISIONAL on stderr exactly once", hits === 1, `${hits} line(s):\n${r.stderr}`);
+	assert("  ...with none of it on stdout", !/PROVISIONAL/.test(r.stdout), r.stdout.slice(0, 200));
+}
+{
+	// A FULL provisional report: the same line, still exactly once, not twice.
+	const { sessionPath } = makeFixture("warnonce", false);
+	const r = runCli(["-s", sessionPath, "--json"]);
+	const hits = r.stderr.split("\n").filter(l => /PROVISIONAL/.test(l)).length;
+	assert("a full provisional --json run says PROVISIONAL exactly once", hits === 1, `${hits} line(s):\n${r.stderr}`);
 }
 
 // ---

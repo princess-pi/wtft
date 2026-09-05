@@ -72,21 +72,20 @@ The suite is where the real assertions live:
 - `pack-and-smoke` — `npm pack`, install the tarball, run it on plain node with
   bun stripped from PATH.
 
-**Neither known-red thing is allowed to simply fail.** A step that can never
-fail is not a check, so each names the *one* tolerated outcome and fails on
+**The known-red job is not allowed to simply fail.** A step that can never
+fail is not a check, so it names the *one* tolerated outcome and fails on
 anything else — otherwise a real regression hides behind an open issue for as
 long as that issue stays open:
 
 | Known red | Tolerated outcome | Everything else | Clears when |
 |---|---|---|---|
 | `registry channel on stock node` | `E404` — the package is not published | fails the job | [#29](https://github.com/princess-pi/wtft/issues/29) publishes; no edit needed here |
-| `Daemon shell suite — pinned to the #72 known-red set` | exactly `16 passed, 5 failed`, and the five failures **by name** | fails the step | [#72](https://github.com/princess-pi/wtft/issues/72) is fixed, and the pinned list empties |
 
-The daemon pin is by **name**, not by tally — a count alone stays green across
-a regression that swaps one known failure for a new one — and the passed count
-is pinned too, so a run that executed fewer assertions cannot look identical to
-a full one. It cuts both ways on purpose: fix one and CI goes red asking for it
-to be struck from the list; break a different one and CI goes red naming it.
+`tests/wtft-daemon.test.sh` was a second known-red row here until
+[#72](https://github.com/princess-pi/wtft/issues/72): it looked for the tag
+file beside the session, where the daemon has not written it since `wtft-tags/`
+arrived. It is a plain gating step now, and hermetic — it exports a private
+`TMPDIR`, so it never touches a daemon it did not start.
 
 Once the package is on the registry, the stock-node job installs it by name and
 runs `--version`, `--help`, `--why` and `wtft-daemon --help` — `--why` because
@@ -95,7 +94,8 @@ green.
 
 `npm test` runs every `tests/*.test.ts`, serially, each in its own process. It
 does **not** run `tests/wtft-daemon.test.sh` — shell suites are excluded from the
-driver, which is half of what #72 is about; CI runs it as the separate step above.
+driver; CI runs it as its own gating step, and locally it is
+`bash tests/wtft-daemon.test.sh`.
 
 ## Usage
 

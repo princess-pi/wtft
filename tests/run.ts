@@ -161,7 +161,7 @@ if (filters.length > 0) {
 	console.log(`${DIM}filtered by: ${filters.join(", ")} (${allSuites.length} suites total)${RESET}`);
 }
 if (shellSuites.length > 0) {
-	console.log(`${DIM}not run by this driver: ${shellSuites.join(", ")} — shell suites, run by hand${RESET}`);
+	console.log(`${DIM}not run by this driver: ${shellSuites.join(", ")} — shell suites; CI runs each as its own gating step, locally: bash tests/<name>${RESET}`);
 }
 
 // Skipped CHECKS, one level below skipped suites. A host-gated check that found

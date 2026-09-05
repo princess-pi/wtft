@@ -135,7 +135,14 @@ describe("resolveTieredRates with dateTiers", () => {
 	// Date.now(): they caught the bug by calendar luck and went vacuous on a
 	// known date. `openEnded`'s window does not close until 2099, so an
 	// implementation that reads the clock resolves INSIDE it and returns 2.00.
-	// Nothing about the assertion depends on today's date.
+	//
+	// Honest about the expiry rather than claiming immunity (pr-review round 3):
+	// this fixture is date-dependent too — it just expires in 2099 instead of six
+	// days, and the canary below is the difference that matters. When 2099 does
+	// arrive the canary fails FIRST, against correct code, with a name saying what
+	// to do; the old pair went vacuous in silence, still green, still claiming to
+	// guard #96. A guard that announces its own expiry is the most this seam can
+	// offer without injecting a fake clock.
 	const openEnded: ModelPricing = {
 		input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75,
 		dateTiers: [
@@ -154,7 +161,7 @@ describe("resolveTieredRates with dateTiers", () => {
 		assert.strictEqual(rates.input, 3.00);
 	});
 
-	it("the #96 fixture is one a clock-reading resolver would fail — proves the two above are not vacuous", () => {
+	it("CANARY: the #96 fixture still distinguishes a clock-reading resolver (re-pin the window when this fails)", () => {
 		// If either guard above regressed to Date.now(), THIS is the value it
 		// would have produced. Asserting it here means the pair cannot go
 		// vacuous again without this line going red first.

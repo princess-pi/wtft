@@ -23,6 +23,14 @@ import {
 	renderPricingManifest,
 	PRICING_MANIFEST_SCHEMA,
 } from "../extensions/lib/wtft-pricing-manifest.ts";
+// SOURCE, not `../bin/wtft.mjs`. Load-bearing, and flagged as a defect twice by
+// two different pr-review lenses (rounds 1 and 3), so it is stated here rather
+// than left to be rediscovered a third time: comparing the committed manifest
+// against the BUILT registry could not detect a skipped build, because a skipped
+// build leaves bundle and manifest equally stale. Importing the source is what
+// makes "edit the registry, skip `bun run build`" observable. Verified by
+// mutation both times — adding a model here and not rebuilding turns the
+// "lists exactly the registry's models" case red with its intended message.
 import { MODEL_PRICING } from "../extensions/lib/wtft-cost.ts";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

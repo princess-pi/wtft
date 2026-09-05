@@ -733,13 +733,13 @@ async function main() {
 	// cannot act on. That class only reaches here at all since #22 B — before
 	// it, isModelPriced called every `deepseek` id priced.
 	// ---
-	const unknownModels = new Set<string>();
+	const unpricedModels = new Set<string>();
 	for (const i of interactions) {
 		if (i.model && i.model !== "<synthetic>" && !isModelPriced(i.model)) {
-			unknownModels.add(i.model);
+			unpricedModels.add(i.model);
 		}
 	}
-	for (const m of unknownModels) {
+	for (const m of unpricedModels) {
 		console.error(`\x1b[33m⚠ no pricing for ${m} — ${describeFallbackPricing(m)}; totals may be unreliable. Add an entry to ${getUserPricingPath()} (no rebuild needed).\x1b[0m`);
 	}
 

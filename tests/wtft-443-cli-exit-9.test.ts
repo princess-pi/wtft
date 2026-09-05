@@ -13,14 +13,16 @@
  *   cost that read-then-render exists to avoid.
  *
  *   WHY AN EXIT CODE AND NOT A JSON FIELD. The issue asks for "a `provisional:
- *   true` in the structured output". There IS no structured output: `wtft` ships
- *   no `--json`, no `--porcelain`, and no documented exit-code table — every
- *   number it produces today is prose. Building that surface is a much larger
- *   piece of work than this fix and is filed separately. An exit code is the
+ *   true` in the structured output". When this suite was written there was no
+ *   structured output at all: `wtft` shipped no `--json`, no `--porcelain`, and
+ *   no documented exit-code table, so every number it produced was prose.
+ *   Building that surface was filed separately and has since shipped as #26 —
+ *   `wtft --json` now carries `provisional` as a field, and the exit code
+ *   asserted below was NOT retired by it. Both report the same verdict, which
+ *   is what tests/wtft-26-json.test.ts §4 pins. An exit code remains the
  *   minimal faithful reading of Agent-First Output: machine-readable in zero
  *   reasoning steps, costs a consumer no tokens at all, and matches the idiom
- *   this repo already uses in `pr-review` (7/8/9). It does not preempt a later
- *   `--json`, which should carry the same fact as a field.
+ *   this repo already uses in `pr-review` (7/8/9).
  *
  *   SAFE TO ADD, checked rather than assumed: nothing in this repo invokes the
  *   `wtft` CLI and inspects `$?` — no caller in `bin/`, `hooks/`, `statusline/`

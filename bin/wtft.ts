@@ -895,12 +895,16 @@ async function main() {
 	//
 	// Reported LAST and as an EXIT CODE, for two different readers. The total
 	// still prints in full — withholding it would be worse than the undercount,
-	// since the number is usually close and always better than nothing. `wtft`
-	// has no --json/--porcelain today, so an exit code is the only surface here
-	// that costs an agent zero tokens and zero inference; it matches pr-review's
-	// 7/8/9 idiom and does not preempt a later structured field carrying the
-	// same fact. Nothing in this repo invokes this CLI and inspects $?, and it
-	// only ever exited 0 or 1 before, so no consumer regresses on the new code.
+	// since the number is usually close and always better than nothing. The exit
+	// code costs an agent zero tokens and zero inference and matches pr-review's
+	// 7/8/9 idiom. Nothing in this repo invokes this CLI and inspects $?, and it
+	// only ever exited 0 or 1 before, so no consumer regressed on the new code.
+	//
+	// #26 added the structured field this comment once said did not exist:
+	// `--json` carries the same verdict as `provisional.provisional` /
+	// `provisional.reason`, and takes the branch above rather than this one. The
+	// exit code KEEPS its meaning there — a consumer reading `$?` and one
+	// reading the field get the same answer, which is why #26 did not retire it.
 	if (provisional.provisional) {
 		const why = describeProvisionalReason(provisional, tagPath);
 		// The remedy names ONE action, and deliberately does not mention -F (PR

@@ -6,25 +6,30 @@
 
 The registry/tarball install channel ships a **self-contained artifact**: `npm
 pack` the repo, install the tarball into a fresh dir with plain node/npm (bun
-excluded from PATH), then run real commands. Green here means the two bundles
-`bin/wtft.mjs` and `bin/wtft-daemon.mjs` — the whole `files` allowlist — run on
-stock node with no repo and no bun.
+excluded from PATH), then run real commands. Green here means the tarball
+carries exactly the four-entry `files` allowlist — the CLI bundles
+`bin/wtft.mjs` and `bin/wtft-daemon.mjs`, and the Pi-extension bundles
+`pi/wtft.js` and `pi/token-budget.js` (#60) — and that the two CLI bundles run
+on stock node with no repo and no bun.
 
 That is a narrower claim than "every install channel is green". The git-URL
 channel runs `prepare` and therefore needs bun on PATH; bun-on-PATH is permitted
 for git-URL installs only, never for the registry channel (Node Toolchain
 Standard).
 
-The Pi extensions (`extensions/wtft.ts`, `extensions/token-budget.ts`) are NOT
-in the tarball and are NOT delivered by any npm channel (neither the registry
-tarball nor an npm git-URL install — the `files` allowlist ships only the two
-bundles, and npm git installs do not retain a dependency's devDependencies).
-They load from a SOURCE CHECKOUT of this repo, where `bun install` (dev) makes
-`@princess-pi/libs` and `wcwidth` — both devDependencies — resolvable; the
-dev install is the only place those are needed, because the bundles vendor
-them at build time (#36). The extensions' import resolution under a dev
-install is exercised by `tests/config-persistence.test.ts`, which imports both
-extensions and drives their writes.
+The Pi extension SOURCES (`extensions/wtft.ts`, `extensions/token-budget.ts`)
+are not in the tarball; their BUILT bundles `pi/wtft.js` and
+`pi/token-budget.js` are, since #60, and this suite asserts it (`check("the two
+Pi-extension bundles ship too (#60)")`). An earlier draft of this paragraph
+said the extensions were delivered by no npm channel — written before #60 and
+never corrected, so the spec contradicted its own test (#75). This suite does
+not load the Pi bundles into Pi; it proves they ship. Running the extensions
+from a source checkout needs `bun install` (dev) to make `@princess-pi/libs`
+and `wcwidth` — both devDependencies — resolvable; the bundles vendor both at
+build time (#36), so a consumer needs neither. The extensions' import
+resolution under a dev install is exercised by
+`tests/config-persistence.test.ts`, which imports both extensions and drives
+their writes.
 
 ## What it caught on arrival
 
@@ -42,7 +47,8 @@ princess-pi-tools (`docs/manifests/` missing from the `files` allowlist).
 - **Pre-flight** — refuses to run if `bin/` has uncommitted changes, because
   `npm pack` fires `prepare`, which rebuilds that path and would clobber WIP.
 - **Pack** — `npm pack`, then restore `bin/` and assert it is clean again.
-- **Allowlist** — the tarball carries the `bin/*.mjs` bundles plus npm's
+- **Allowlist** — the tarball carries the four `files` entries (two
+  `bin/*.mjs` CLI bundles, two `pi/*.js` Pi-extension bundles) plus npm's
   mandatory `package.json`/`LICENSE`/`README`, and nothing else.
 - **Install** — plain node/npm with bun absent from PATH (the real node binary
   is resolved and verified not to be bun, since this suite itself runs under

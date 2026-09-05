@@ -23,6 +23,14 @@ import {
 	renderPricingManifest,
 	PRICING_MANIFEST_SCHEMA,
 } from "../extensions/lib/wtft-pricing-manifest.ts";
+// SOURCE, not `../bin/wtft.mjs`. Load-bearing, and flagged as a defect twice by
+// two different pr-review lenses (rounds 1 and 3), so it is stated here rather
+// than left to be rediscovered a third time: comparing the committed manifest
+// against the BUILT registry could not detect a skipped build, because a skipped
+// build leaves bundle and manifest equally stale. Importing the source is what
+// makes "edit the registry, skip `bun run build`" observable. Verified by
+// mutation both times — adding a model here and not rebuilding turns the
+// "lists exactly the registry's models" case red with its intended message.
 import { MODEL_PRICING } from "../extensions/lib/wtft-cost.ts";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -48,12 +56,28 @@ describe("#169 the pricing manifest is committed and current", () => {
 });
 
 describe("#169 every priced model reaches the manifest", () => {
-	it("lists exactly the registry's models", () => {
-		const manifest = buildPricingManifest();
-		assert.deepStrictEqual(
-			manifest.models.map(m => m.model).sort(),
-			Object.keys(MODEL_PRICING).sort(),
-		);
+	it("the COMMITTED manifest lists exactly the registry's models", () => {
+		// Reads the file on disk, NOT buildPricingManifest() (#22 C1). The
+		// builder constructs `models` as Object.keys(MODEL_PRICING).sort().map(…),
+		// so comparing its output against Object.keys(MODEL_PRICING).sort() was
+		// an identity — it could not fail under any registry or builder state,
+		// while its failure message named a cause the builder makes impossible.
+		// Against the committed file it fails for the reason that message gives:
+		// a registry edit that skipped `bun run build`.
+		const committed = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8"));
+		const listed = committed.models.map((m: { model: string }) => m.model).sort();
+		const priced = Object.keys(MODEL_PRICING).sort();
+		for (const model of priced) {
+			assert.ok(listed.includes(model), `${model} is priced but missing from the committed manifest — run: bun run build`);
+		}
+		for (const model of listed) {
+			assert.ok(priced.includes(model), `${model} is in the committed manifest but no longer priced — run: bun run build`);
+		}
+		// "exactly" means the counts match too (pr-review round 2). Inclusion in
+		// both directions is satisfied by a manifest that lists a model twice.
+		assert.strictEqual(listed.length, priced.length,
+			`the committed manifest has ${listed.length} rows for ${priced.length} priced models — a duplicate or dropped entry; run: bun run build`);
+		assert.strictEqual(new Set(listed).size, listed.length, "the committed manifest lists a model more than once");
 	});
 
 	it("carries the Claude 5 family and the GPT-5.x lineup the old table omitted", () => {

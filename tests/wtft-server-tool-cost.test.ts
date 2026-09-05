@@ -67,6 +67,41 @@ assert(
 	calculateServerToolCost("unknown-model", 5, 3) === 0
 );
 
+// A BARE ALIAS IS NOT EVIDENCE OF AN ANTHROPIC MODEL (#22 A).
+// `claude-deepseek` sets ANTHROPIC_MODEL="opus" against DeepSeek, so a turn
+// recorded as plain `opus`/`sonnet`/`haiku` may be either vendor — and the
+// string carries nothing that separates them. Billing per-request needs a
+// vendor marker in the id; a bare alias bills 0.
+assert(
+	"bare `opus` (a claude-deepseek alias) → $0.00, not $0.15",
+	calculateServerToolCost("opus", 5, 0) === 0
+);
+assert(
+	"bare `sonnet` → $0.00",
+	calculateServerToolCost("sonnet", 5, 0) === 0
+);
+assert(
+	"bare `haiku` → $0.00",
+	calculateServerToolCost("haiku", 0, 5) === 0
+);
+// The marker forms that MUST keep billing.
+assert(
+	"claude-opus-5 → 2 * $0.03",
+	Math.abs(calculateServerToolCost("claude-opus-5", 2, 0) - 0.06) < 0.001
+);
+assert(
+	"Bedrock us.anthropic.claude-sonnet-5-v1:0 → 2 * $0.03",
+	Math.abs(calculateServerToolCost("us.anthropic.claude-sonnet-5-v1:0", 2, 0) - 0.06) < 0.001
+);
+// The marker is a SUBSTRING search, so a `claude-`-prefixed id naming a DeepSeek
+// model would bill on the marker alone. `deepseek` is excluded first
+// (pr-review round 2). Zero ids on this host carry both words — a guard, not a
+// correction.
+assert(
+	"claude-deepseek-v4-pro → $0.00 (deepseek wins over the claude marker)",
+	calculateServerToolCost("claude-deepseek-v4-pro", 5, 0) === 0
+);
+
 // ---
 // Parser integration: server_tool_use from Claude Code JSONL
 // ---

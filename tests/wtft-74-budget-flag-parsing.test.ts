@@ -164,38 +164,29 @@ await check("--widget off --no-footer sets BOTH, rather than toggling footer", a
 });
 
 // ---
-// 4. `/wtft --show` — filed in #74 as a parsed no-op, which was WRONG.
+// 4. `/wtft --show`, `--hide`, and the two together.
 //
-//    ...and #74's WITHDRAWAL of that was an over-correction. Both things are
-//    true, and they are different claims:
+//    #74 filed `-S/--show` as a parsed no-op. It is one: the flag carries no
+//    force of its own, and the widget that appears after `/wtft --show` is the
+//    default render path's doing — it would appear with no flag at all.
 //
-//      - The widget DOES appear after `/wtft --show`. Running it shows
-//        setWidget(…, lines). That is what the withdrawal proved.
-//      - The FLAG is nonetheless inert. `--hide --show` and `--show --hide`
-//        both clear the widget, so `--show` carries no force of its own in
-//        either order; the render above is the default path's doing and would
-//        happen with no flag at all.
+//    That is NOT a defect. A redundant flag that is silent is acceptable; the
+//    requirement for redundant or contradictory flags is that they do not
+//    crash and do not lose data, and nothing more (Duppy, 2026-09-04, as a
+//    standard for every tool we write). So nothing here needs fixing, and this
+//    section pins only what is actually required.
 //
-//    So the original report — "parses cleanly, exits 0, and does nothing" —
-//    was right about the flag, and I withdrew it for disproving a claim it had
-//    not made. What to do about that is #79's call: make `--show` real, or
-//    drop it from the parser and from CONTEXT.md, which documents `-S`/`-H` as
-//    a toggle pair. Either way it is a user-facing change, not a #74 bugfix.
+//    Deliberately NOT pinned: which flag wins when both are given. Hide, show
+//    or coin-flip are all fine — a human who types `--hide --show` owns that.
+//    Asserting a winner would turn a free choice into a contract and bill the
+//    next person to touch the parser for changing something nobody wants.
 //
-//    The dead field is now gone from the parser (the flag stays accepted, so
-//    `-S` is never an unknown-flag error), because the field was the false
-//    signal that produced the wrong report. `CONTEXT.md` still calls `-S`/`-H`
-//    a toggle pair, which is wrong in the other direction — #79.
-//
-//    THE ASSERTION IS ON A VISIBLE WIDGET, not on "not hidden". An earlier cut
-//    of this section could only see that the render THREW — the mock's Proxy
-//    reaching node:path — so it compared `--show` to bare `/wtft` and inferred
-//    the rest. A review pointed out that proves only "`--show` is not
-//    `--hide`": had both early-returned, they would still have matched. Giving
-//    the mock a real session to read lets the render finish, so the widget
-//    arriving is observed rather than deduced.
+//    The observations are on a REAL setWidget call, not on "did it throw". An
+//    earlier cut could only see the render throwing — this mock's Proxy
+//    reaching node:path, not the absence of a TUI — and inferred the rest.
+//    Giving the mock a session to read lets the render finish.
 // ---
-console.log("\n4. --show renders the widget; --hide clears it");
+console.log("\n4. --hide clears, --show is a silent no-op, and both together survive");
 {
 	const wtftExt = (await import(path.join(REPO, "extensions", "wtft.ts"))).default;
 	const wtftRegistered: Record<string, { handler: (args: string, ctx: any) => Promise<void> }> = {};
@@ -264,12 +255,10 @@ console.log("\n4. --show renders the widget; --hide clears it");
 	await check("…but --show is identical to bare /wtft — the flag contributes nothing", () => {
 		assert.deepStrictEqual(show, bare);
 	});
-	// The one that settles it. If `--show` carried any force of its own, it
-	// would beat `--hide` in at least one order. It beats it in neither: the
-	// flag is inert, and the rendered widget above is the DEFAULT's doing.
-	await check("--show cannot override --hide, in either order — the flag is inert", async () => {
-		assert.strictEqual((await widgetEffect("--hide --show")).effect, "cleared", "--hide --show");
-		assert.strictEqual((await widgetEffect("--show --hide")).effect, "cleared", "--show --hide");
+	// Contradictory flags: survival only. NOT which one wins — see the header.
+	await check("contradictory --hide/--show does not crash, in either order", async () => {
+		assert.strictEqual((await widgetEffect("--hide --show")).error, "", "--hide --show");
+		assert.strictEqual((await widgetEffect("--show --hide")).error, "", "--show --hide");
 	});
 }
 

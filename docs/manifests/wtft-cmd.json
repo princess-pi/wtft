@@ -156,7 +156,7 @@
     },
     {
       "flags": "-w, --width <number>",
-      "desc": "Set the maximum character width of the widget (default: 240). Pi extension only — the CLI parses the flag and ignores it, sizing output from the terminal width minus --pad."
+      "desc": "Set the maximum character width of the widget (default: 80). Pi extension only — the CLI parses the flag and ignores it, sizing output from the terminal width minus --pad. With no explicit width the extension sizes to the terminal and caps at 240; 240 is that cap, not a default."
     },
     {
       "flags": "--tz, --timezone <zone>",

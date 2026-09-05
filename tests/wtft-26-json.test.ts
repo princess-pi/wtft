@@ -167,6 +167,11 @@ console.log("\n1. One JSON object on stdout");
 	// stdout term alone, so it tested nothing its label claimed. Deleted rather
 	// than repaired: this fixture is settled and priced, so it has no prose to
 	// find, and §4 asserts the stream split on the run that does. (PR review.)
+	//
+	// Deleting it took the ANSI assertion above with it for two rounds, while the
+	// spec went on claiming §1 covered ANSI — a comment outliving the assertion it
+	// described, which is the precise failure this branch keeps finding elsewhere.
+	assert("stdout carries no ANSI escape byte", !r.stdout.includes("\x1b"), JSON.stringify(r.stdout.slice(0, 200)));
 	// "nothing else on stdout" — the session path line the human path prints
 	// above the chart is the specific thing that must not be here.
 	assert("stdout carries nothing but the object", r.stdout.trim().startsWith("{") && r.stdout.trim().endsWith("}"), r.stdout.slice(0, 400));

@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
 # tests/wtft-daemon.test.sh — Integration tests for wtft-daemon
-# Run after any daemon change to verify behavior sticks.
+# Run after any daemon change to verify behavior sticks. CI runs it as a gate.
+#
+# HERMETIC (#72). The daemon keys every pid file, and every --list / --stop /
+# --restart / --cleanup scan, on os.tmpdir(), which honours TMPDIR. So this
+# suite exports a private TMPDIR and keeps its sessions inside it: no daemon
+# it starts, lists, restarts or kills belongs to anyone else, and the host's
+# live daemons (there are several on a dev box) never see it. Before this, the
+# kill_daemons loop reaped every wtft daemon on the machine.
 set -euo pipefail
+
+TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/wtft-daemon-suite.XXXXXX")"
+export TMPDIR
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -21,7 +31,7 @@ assert() {
 }
 
 kill_daemons() {
-  for pidfile in /tmp/wtft-daemon-*.pid; do
+  for pidfile in "$TMPDIR"/wtft-daemon-*.pid; do
     [ -f "$pidfile" ] || continue
     kill $(cat "$pidfile") 2>/dev/null || true
     rm -f "$pidfile"
@@ -31,7 +41,7 @@ kill_daemons() {
 
 cleanup() {
   kill_daemons
-  rm -f /tmp/wtft-daemon-test*.jsonl /tmp/wtft-daemon-*.pid
+  rm -rf "$TMPDIR"
 }
 trap cleanup EXIT
 
@@ -39,13 +49,18 @@ echo "=== wtft-daemon integration tests ==="
 echo ""
 
 DAEMON="./bin/wtft-daemon.mjs"
-SESSION="/tmp/wtft-daemon-test-session.jsonl"
+SESSION="$TMPDIR/wtft-daemon-test-session.jsonl"
 # Tag filename is versioned (.wtft-tag.v{N}.jsonl). Derive N from the one source
 # of truth rather than mirroring it here — a mirrored literal is how this suite
 # went dead against `.classified.jsonl` for months (#499).
 TAGGER_VERSION=$(grep -o 'WTFT_TAGGER_VERSION = "[0-9.]*"' extensions/lib/wtft-tagger-version.ts | grep -o '[0-9.]*')
 [ -n "$TAGGER_VERSION" ] || { echo "FATAL: could not read WTFT_TAGGER_VERSION from extensions/lib/wtft-tagger-version.ts"; exit 1; }
-CLASSIFIED="${SESSION}.wtft-tag.v${TAGGER_VERSION}.jsonl"
+# The tag file lives in a `wtft-tags/` directory BESIDE the session, not next
+# to it (getTagPath in extensions/lib/wtft-daemon-lib.ts). This suite looked
+# beside the session for five assertions — red for as long as the directory
+# has existed, and run by nothing that would have said so (#72).
+tag_path() { echo "$(dirname "$1")/wtft-tags/$(basename "$1").wtft-tag.v${TAGGER_VERSION}.jsonl"; }
+CLASSIFIED="$(tag_path "$SESSION")"
 
 # Setup: create fake session
 cat > "$SESSION" << 'JSONLEOF'
@@ -107,7 +122,7 @@ assert "--list shows session path" \
 echo ""
 echo "3. --restart re-launches"
 
-OLD_PID=$(cat /tmp/wtft-daemon-*.pid 2>/dev/null | head -1)
+OLD_PID=$(cat "$TMPDIR"/wtft-daemon-*.pid 2>/dev/null | head -1)
 assert "old daemon has PID file" \
   "[ -n '$OLD_PID' ]"
 
@@ -120,7 +135,7 @@ assert "old daemon no longer running" \
 assert "new daemon is running after restart" \
   "$DAEMON --list 2>&1 | grep -q 'RUNNING'"
 
-NEW_PID=$(cat /tmp/wtft-daemon-*.pid 2>/dev/null | head -1)
+NEW_PID=$(cat "$TMPDIR"/wtft-daemon-*.pid 2>/dev/null | head -1)
 assert "new PID differs from old" \
   "[ '$NEW_PID' != '$OLD_PID' ]"
 
@@ -135,7 +150,7 @@ assert "daemon stopped" \
   "! $DAEMON --list 2>&1 | grep -q 'RUNNING'"
 
 assert "PID file cleaned up" \
-  "[ -z \"\$(ls /tmp/wtft-daemon-*.pid 2>/dev/null || true)\" ]"
+  "[ -z \"\$(ls \"$TMPDIR\"/wtft-daemon-*.pid 2>/dev/null || true)\" ]"
 
 kill_daemons
 
@@ -164,7 +179,7 @@ kill_daemons
 echo ""
 echo "6. Recursion guard"
 
-touch "$CLASSIFIED"
+mkdir -p "$(dirname "$CLASSIFIED")" && touch "$CLASSIFIED"
 ERR=$($DAEMON --session "$CLASSIFIED" 2>&1 || true)
 if echo "$ERR" | grep -q "refusing to watch"; then
   echo -e "  ${GREEN}PASS${NC} refuses a .wtft-tag.v* file as input"
@@ -179,7 +194,7 @@ rm -f "$CLASSIFIED"
 echo ""
 echo "7. --cleanup"
 
-FAKE_SESSION="/tmp/wtft-daemon-test-fake.jsonl"
+FAKE_SESSION="$TMPDIR/wtft-daemon-test-fake.jsonl"
 touch "$FAKE_SESSION"
 
 $DAEMON --session "$FAKE_SESSION" &
@@ -211,14 +226,14 @@ kill_daemons
 echo ""
 echo "9. Cache-only turns priced correctly (#49)"
 
-CACHE_SESSION="/tmp/wtft-daemon-test-cache.jsonl"
+CACHE_SESSION="$TMPDIR/wtft-daemon-test-cache.jsonl"
 cat > "$CACHE_SESSION" << 'JSONLEOF'
 {"type":"assistant","message":{"role":"assistant","timestamp":"2026-07-04T10:00:00Z","model":"claude-sonnet-4-20250514","usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":110000}}}
 JSONLEOF
 
 $DAEMON --session "$CACHE_SESSION" &
 sleep 2
-CF="${CACHE_SESSION}.wtft-tag.v${TAGGER_VERSION}.jsonl"
+CF="$(tag_path "$CACHE_SESSION")"
 
 # Extract cost from tag output (grep a data line, not heartbeats)
 CACHE_COST=$(grep '"cat":' "$CF" | head -1 | python3 -c "import sys,json; print(json.loads(sys.stdin.readline())['c'])" 2>/dev/null || echo "0")
@@ -229,7 +244,7 @@ assert "cache-read-only turn is NOT \$0" \
   "python3 -c \"exit(0 if float('${CACHE_COST:-0}') > 0.001 else 1)\""
 
 kill_daemons
-rm -f "$CACHE_SESSION" "$CF" /tmp/wtft-daemon-*.pid 2>/dev/null || true
+rm -f "$CACHE_SESSION" "$CF" "$TMPDIR"/wtft-daemon-*.pid 2>/dev/null || true
 
 # ── Results ──
 echo ""

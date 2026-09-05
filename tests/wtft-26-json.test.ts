@@ -276,8 +276,8 @@ console.log("\n3. models[] and categories[] each sum to total");
 	assert("categories[] carries all fourteen names, in the documented order",
 		JSON.stringify(doc.categories.map((c: any) => c.category)) === JSON.stringify(CATEGORY_NAMES),
 		JSON.stringify(doc.categories.map((c: any) => c.category)));
-	// The fixture puts one turn in each of three categories, so a JSON path
-	// that lost the per-category split would still sum correctly above.
+	// The fixture puts one turn in each of four categories, so a JSON path that
+	// lost the per-category split would still sum correctly above.
 	const nonZero = doc.categories.filter((c: any) => c.costUsd > 0).map((c: any) => c.category).sort();
 	assert("the four fixture categories are the four non-zero rows",
 		JSON.stringify(nonZero) === JSON.stringify(["code", "git", "other", "spec"]), JSON.stringify(nonZero));
@@ -449,6 +449,62 @@ console.log("\n7. the exit-code table is a contract");
 	// consumer pinning `wtft/session@1` and the code cannot drift apart.
 	assert("the exported schema constant is the string the CLI emits",
 		WTFT_JSON_SCHEMA === SCHEMA, String(WTFT_JSON_SCHEMA));
+}
+
+// ---
+// 8. The empty paths obey the exit-code contract too.
+// ---
+// PR review, High/reasoning. The `pending-session` and `no-data` arms used to
+// emit the object and `return` without touching `process.exitCode`, so a tag
+// that is provisional BUT yields no classified lines printed
+// `"provisional": true` and exited 0. That breaks the single promise the
+// contract makes about the pair — that `$?` and `.provisional.provisional`
+// always agree — and it breaks it on the path a consumer is least likely to
+// have a fixture for.
+console.log("\n8. an empty report still agrees with its exit code");
+{
+	// A tag whose filename carries a version this build did not write is
+	// stale-version — decided before a byte is read — and this one has NO
+	// classified lines, so the run takes the no-data arm rather than the main one.
+	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-26-empty-")));
+	const sessionPath = path.join(dir, "session.jsonl");
+	fs.writeFileSync(sessionPath, JSON.stringify({ type: "session", version: 3, id: "empty-26", timestamp: new Date().toISOString(), cwd: dir }) + "\n");
+	const tagsDir = path.join(dir, "wtft-tags");
+	fs.mkdirSync(tagsDir, { recursive: true });
+	fs.writeFileSync(path.join(tagsDir, "session.jsonl.wtft-tag.v0.0.1-ancient.jsonl"),
+		JSON.stringify({ _meta: { offset: 0 } }) + "\n");
+
+	const r = runCli(["-s", sessionPath, "--json"]);
+	let doc: any = null;
+	try { doc = JSON.parse(r.stdout); } catch { /* reported below */ }
+	assert("an empty report is still exactly one JSON object", doc !== null, r.stdout.slice(0, 400));
+	assert("  ...with the full shape, so a consumer branches on values not shape",
+		doc?.models?.length === 0 && doc?.categories?.length === 14 && doc?.total?.costUsd === 0,
+		JSON.stringify({ models: doc?.models?.length, categories: doc?.categories?.length, total: doc?.total }));
+	assert("  ...and a notice saying why it is empty",
+		(doc?.notices ?? []).some((n: any) => n.code === "no-data" || n.code === "pending-session"),
+		JSON.stringify(doc?.notices));
+	// The claim under test.
+	assert(`$? agrees with the field on the empty path (field=${doc?.provisional?.provisional}, exit=${r.code})`,
+		(doc?.provisional?.provisional === true) === (r.code === EXIT_PROVISIONAL),
+		`${JSON.stringify(doc?.provisional)} exit=${r.code}\n${r.stderr}`);
+}
+{
+	// The other direction, so the assertion above cannot pass by both sides being
+	// false: a SETTLED empty report exits 0 and says provisional:false.
+	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-26-empty0-")));
+	const sessionPath = path.join(dir, "session.jsonl");
+	fs.writeFileSync(sessionPath, JSON.stringify({ type: "session", version: 3, id: "empty0-26", timestamp: new Date().toISOString(), cwd: dir }) + "\n");
+	const tagsDir = path.join(dir, "wtft-tags");
+	fs.mkdirSync(tagsDir, { recursive: true });
+	fs.writeFileSync(path.join(tagsDir, `session.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`),
+		JSON.stringify({ _meta: { offset: 0, swept: Date.now() } }) + "\n");
+
+	const r = runCli(["-s", sessionPath, "--json"]);
+	let doc: any = null;
+	try { doc = JSON.parse(r.stdout); } catch { /* reported below */ }
+	assert("a settled empty report exits 0", r.code === 0, `exit=${r.code}\n${r.stderr}`);
+	assert("  ...and says provisional: false", doc?.provisional?.provisional === false, JSON.stringify(doc?.provisional));
 }
 
 console.log("\n──────────────────────────────");

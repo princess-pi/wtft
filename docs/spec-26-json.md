@@ -162,10 +162,14 @@ carries. The table lives in `docs/manifests/wtft-cmd.json`, which is what
 Codes 0 and 9 both carry a complete object; a consumer that wants only settled
 numbers checks `$?` **or** `.provisional.provisional` and gets the same answer.
 
-**An empty report is still a report.** On the two exit-0 empty paths every
-`total.*` is 0, `models[]` is `[]`, `categories[]` is still all fourteen zero
-rows, `session.harness` is `null`, and `notices[]` carries `pending-session` or
-`no-data`. A consumer never has to branch on shape, only on values.
+**An empty report is still a report.** On the two empty paths every `total.*` is
+0, `models[]` is `[]`, `categories[]` is still all fourteen zero rows,
+`session.harness` is `null`, and `notices[]` carries `pending-session` or
+`no-data`. A consumer never has to branch on shape, only on values — and the
+exit code is decided there by the same rule as everywhere else, so an empty
+report whose tag is provisional exits **9**, not 0. (It did exit 0 until PR
+review caught it: those two arms returned without setting the code, which broke
+the one promise the pair makes.)
 
 **The blind-spot scan can change the verdict.** An unreadable subagent session
 file discovered during the `uncounted` scan sets `provisional.reason` to
@@ -244,6 +248,9 @@ sections:
 7. **§7** every exit code the CLI can return — scanned from `bin/wtft.ts` **and**
    `extensions/lib/session-selector.ts`, which is where 130 lives — appears in
    the manifest table, and `wtft --help` renders that table.
+8. **§8** an *empty* report obeys the exit-code contract too: a provisional one
+   exits 9 and a settled one exits 0, asserted in both directions so the claim
+   cannot pass by both sides being false.
 
 ## Reconciliation
 

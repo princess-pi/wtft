@@ -648,13 +648,16 @@ async function main() {
 	// the two output modes silently reporting a settled total for a session
 	// whose subagent transcript could not be read.
 	//
-	// Memoised as insurance, not as a present saving: under `--json` the
-	// `--tokens` renderer is unreachable (that branch returns first), so no
-	// second call happens today. The memo is here so a future second call site
-	// cannot quietly add a whole second scan of every subagent session. Said as
-	// insurance rather than as a saving because a rationale that misdescribes its
-	// own control flow is how the next reader learns to distrust the comments —
-	// the same correction this file already carries at `getCandidates`.
+	// Memoised because it IS called twice on the `--json` path — once by that
+	// branch, to let the scan downgrade `provisional` before the notices are
+	// built, and once inside `emitSessionJson` — and because `--tokens` calls it
+	// a third time on the rendered path. The memo is what makes those one scan of
+	// every subagent session instead of two or three.
+	//
+	// An earlier version of this comment claimed there was no second call today.
+	// There is; a rationale that misdescribes its own control flow is how the
+	// next reader learns to distrust the comments, which is the correction this
+	// file already carries at `getCandidates`. (PR review, Low/reasoning.)
 	let uncountedCache: UncountedBillables | null = null;
 	const scanSessionUncounted = (): UncountedBillables => {
 		if (uncountedCache) return uncountedCache;
@@ -723,12 +726,29 @@ async function main() {
 	//
 	// Writes with `process.stdout.write` and no trailing `console.log`: the
 	// document ends in exactly one newline, and nothing else may follow it.
+	//
 	// `uncounted` is SCANNED on every path, never defaulted to zeros. Zeros that
 	// mean "not scanned" are indistinguishable from zeros that mean "none found",
 	// and a consumer reading `.uncounted.compaction === 0` would conclude there
 	// is no blind spot when nobody looked. The scan is a no-op on a session file
 	// that does not exist yet, which is exactly the empty paths' case.
+	//
+	// ORDER MATTERS, and getting it wrong is invisible: `scanSessionUncounted`
+	// can REASSIGN `provisional` to `subagent-unreadable` (#457). Called from
+	// inside the object literal it ran AFTER `provisional:` had already been
+	// evaluated, so an empty path serialised the pre-scan verdict — a document
+	// reading "settled" from a run that had just discovered it was not. It is a
+	// separate statement now, above the literal, so the scan's verdict is the one
+	// that ships. (PR review, Medium/correctness.)
+	//
+	// THE EXIT CODE IS SET HERE, not at the call sites. The two empty paths used
+	// to `return` without touching it, so a stale-version tag that yields no
+	// classified lines emitted `provisional.provisional: true` and exited 0 —
+	// breaking the one promise the contract makes about the pair, that `$?` and
+	// the field always agree. One assignment beside the one `write` is the only
+	// shape in which they cannot drift. (PR review, High/reasoning.)
 	const emitSessionJson = (opt: { notices?: WtftNotice[] } = {}) => {
+		const uncounted = scanSessionUncounted();
 		const doc = buildSessionJson({
 			interactions,
 			session: {
@@ -738,10 +758,14 @@ async function main() {
 				tagPath,
 			},
 			provisional,
-			uncounted: scanSessionUncounted(),
+			uncounted,
 			notices: [...earlyNotices, ...(opt.notices ?? [])],
 		});
 		process.stdout.write(renderSessionJson(doc));
+		// `exitCode` and return, never `process.exit()`: on Linux node's stdout is
+		// asynchronous when it is a pipe, and `process.exit()` does not wait for
+		// pending writes — `wtft --json | jq` could lose the tail of the document.
+		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
 	};
 	// #308: nothing to wait for while the session log itself is unwritten — the
 	// daemon is parked on it (heartbeating) and will parse the first line when it
@@ -781,7 +805,11 @@ async function main() {
 		process.exit(0);
 	}
 	if (interactions.length === 0) {
-		// Wait up to 1400 ms — three tag reads, 667 ms apart — for the freshly-spawned daemon to produce the tag file.
+		// Wait for the freshly-spawned daemon to produce the tag file: three reads
+		// at ~0, 667 and 1334 ms. The `while` bound is 1400 ms, but the sleep is
+		// unconditional and follows the third read, so the no-data path blocks for
+		// about 2001 ms in the worst case — the loop's guard is not its duration.
+		// (PR review, Medium/reasoning; an earlier comment quoted 1400.)
 		const tagWaitStart = Date.now();
 		while (Date.now() - tagWaitStart < 1400) {
 			if (fs.existsSync(tagPath)) {
@@ -865,12 +893,11 @@ async function main() {
 			// scroll past, who would otherwise see a settled-looking object.
 			console.error(`\x1b[33m⚠ PROVISIONAL: this total may still grow — ${text}\x1b[0m`);
 		}
+		// Exit 9 keeps its #443 meaning under --json — the object is complete, and
+		// its `provisional` field says the same thing the code does.
+		// `emitSessionJson` sets the code; a second assignment here would be a
+		// second place for the two to disagree.
 		emitSessionJson({ notices });
-		// Exit 9 keeps its #443 meaning under --json — the object is complete,
-		// and its `provisional` field says the same thing the code does. Set
-		// rather than `process.exit`, for the async-stdout reason spelled out at
-		// the provisional branch below.
-		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
 		return;
 	}
 

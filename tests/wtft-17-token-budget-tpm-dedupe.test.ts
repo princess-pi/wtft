@@ -46,7 +46,12 @@ const sessionId = "tpm-dedupe-test-session";
 const tagBase = `${sessionId}.jsonl`;
 const tagPath = path.join(sandbox, `${tagBase}.wtft-tag.v9.9.9.jsonl`);
 
-const NOW = 1_800_000_000_000; // fixed clock
+// aggregateActiveTpm/getHostingSessionTpm call Date.now() internally rather than
+// taking a clock parameter, so NOW must track the real wall clock, not a fixed
+// constant — a hardcoded past/future NOW makes production's age = Date.now() -
+// interaction.timestamp diverge from this fixture's age = NOW - interaction.timestamp,
+// and the divergence changes sign as real time passes the constant (PR review).
+const NOW = Date.now();
 
 const lines = [
 	// msg-A: growing-usage re-emission, BOTH copies inside the 60s TPM window —

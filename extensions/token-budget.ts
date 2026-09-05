@@ -221,10 +221,14 @@ export function aggregateActiveTpm(activeFiles: FileInfo[], hostingSessionId: st
       const interactions = readClassifiedTagFile(filePath);
 
       for (const interaction of interactions) {
-        // Classified format carries { c, in, out, cr, cw, m, t, cat, f, cmd, ... };
-        // a line with no model recorded (e.g. a zero-token category-only entry)
-        // has nothing to attribute to a model bucket.
-        if (!interaction.model) continue;
+        // Classified format carries { c, in, out, cr, cw, m, t, cat, f, cmd, ... }.
+        // A line with no model recorded (e.g. a zero-token category-only entry)
+        // has nothing to attribute to a model bucket. The timestamp check mirrors
+        // the old raw-parse guard's `!obj.t` — classifiedToInteraction already
+        // requires a numeric `t` to produce an Interaction at all (PR review),
+        // so this is unreachable today, but it keeps `age` from silently going
+        // NaN if that contract ever loosens.
+        if (!interaction.model || typeof interaction.timestamp !== "number") continue;
 
         const age = now - interaction.timestamp;
         if (age > 120000) continue;
@@ -292,7 +296,9 @@ export function getHostingSessionTpm(hostingSessionId: string, activeFiles: File
     // re-emission an id can produce must count once, not once per line (#17).
     const interactions = readClassifiedTagFile(hostingFile.path);
     for (const interaction of interactions) {
-      if (!interaction.model) continue;
+      // See aggregateActiveTpm above for why the timestamp check is here even
+      // though classifiedToInteraction already guarantees a numeric `t`.
+      if (!interaction.model || typeof interaction.timestamp !== "number") continue;
       const age = now - interaction.timestamp;
       if (age > 60000) continue;
       const shortCode = getModelShortName(interaction.model);

@@ -747,8 +747,7 @@ async function main() {
 	// to `return` without touching it, so a stale-version tag that yields no
 	// classified lines emitted `provisional.provisional: true` and exited 0 —
 	// breaking the one promise the contract makes about the pair, that `$?` and
-	// the field always agree. One assignment beside the one `write` is the only
-	// shape in which they cannot drift. (PR review, High/reasoning.)
+	// the field always agree. (PR review, High/reasoning.)
 	// The exit code for an EMPTY report, rendered or JSON. Extracted because PR
 	// review round 2 found the two modes disagreeing: the JSON arms had just
 	// learned to honour `provisional` while the rendered arms still fell through
@@ -757,6 +756,13 @@ async function main() {
 	// mode, and 9 means "the total may still grow" — which is as true of an empty
 	// report from a stale tag as of a full one. One helper, both modes.
 	const finishEmptyReport = () => {
+		// The scan FIRST, for the same reason `emitSessionJson` does it: it can
+		// reassign `provisional` to `subagent-unreadable` (#457). Round 2 gave the
+		// rendered arms the exit rule but not the scan, so a settled tag with an
+		// unreadable subagent directory still exited 0 rendered and 9 under
+		// `--json` — the same disagreement one layer down. Memoised, so this is
+		// not a second scan. (PR review round 4, High/reasoning.)
+		scanSessionUncounted();
 		if (provisional.provisional) {
 			console.error(`\x1b[33m⚠ PROVISIONAL: ${describeProvisionalReason(provisional, tagPath)}. ${describeProvisionalRemedy(provisional)}. Exit ${EXIT_PROVISIONAL}.\x1b[0m`);
 		}

@@ -1868,7 +1868,10 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 	// are display-only and have no JSON counterpart, because they are ratios and
 	// legends derived here rather than aggregate facts: the per-model `Cache:`
 	// hit-rate line, the `Think:` budget-utilisation line, and the `?` fallback
-	// legend. A consumer recomputes the first two from the fields it already has.
+	// legend. Two are recoverable from the document — the cache rate from the
+	// three token fields, the legend from `models[].priced`. The Think
+	// PERCENTAGE is not: its denominator is `--thinking-budget`, an input flag
+	// the document does not carry. See docs/spec-26-json.md, "The seam".
 	const summary = computeSessionSummary(interactions);
 	const unmatched = summary.untaggedInteractions;
 

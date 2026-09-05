@@ -161,9 +161,12 @@ console.log("\n1. One JSON object on stdout");
 	// escape there — and kept as the regression guard for the next `console.log`
 	// someone adds above the return. §4 is where it does real work, on the run
 	// that has ANSI prose to misplace.
-	assert("stdout carries no ANSI escape", !/\x1b\[/.test(r.stdout));
-	assert("  ...while the run's prose really does exist, on stderr",
-		r.stderr.length > 0 || r.stdout.length > 0);
+	//
+	// A companion assertion here read `r.stderr.length > 0 || r.stdout.length > 0`
+	// under the label "the prose really does exist, on stderr". It passed on the
+	// stdout term alone, so it tested nothing its label claimed. Deleted rather
+	// than repaired: this fixture is settled and priced, so it has no prose to
+	// find, and §4 asserts the stream split on the run that does. (PR review.)
 	// "nothing else on stdout" — the session path line the human path prints
 	// above the chart is the specific thing that must not be here.
 	assert("stdout carries nothing but the object", r.stdout.trim().startsWith("{") && r.stdout.trim().endsWith("}"), r.stdout.slice(0, 400));
@@ -542,6 +545,53 @@ console.log("\n9. rendered and --json agree on the exit code, empty or not");
 		assert(`  ...and ${want} under --json too (got ${asJson.code})`, asJson.code === want, asJson.stderr);
 		assert("  ...so the two modes never disagree", rendered.code === asJson.code,
 			`rendered=${rendered.code} json=${asJson.code}`);
+	}
+
+	// And the case that made round 2's fix incomplete: a tag that is SETTLED, but
+	// where the blind-spot scan itself discovers an unreadable subagent directory
+	// and downgrades the verdict to `subagent-unreadable` (#457). `--json` scanned
+	// on this path from the start; the rendered arm got the exit rule but not the
+	// scan, so it kept exiting 0 while `--json` exited 9 — the same disagreement
+	// one layer down. Skipped as root, where chmod 000 does not deny.
+	{
+		const mkUnreadable = (slug: string) => {
+			const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), `wtft-26-${slug}-`)));
+			const sessionPath = path.join(dir, "session.jsonl");
+			fs.writeFileSync(sessionPath, JSON.stringify({ type: "session", version: 3, id: slug, timestamp: new Date().toISOString(), cwd: dir }) + "\n");
+			const tagsDir = path.join(dir, "wtft-tags");
+			fs.mkdirSync(tagsDir, { recursive: true });
+			// Settled by construction: current version, marker last.
+			fs.writeFileSync(path.join(tagsDir, `session.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`),
+				JSON.stringify({ _meta: { offset: 0, swept: Date.now() } }) + "\n");
+			// Claude Code's layout: <sessionDir>/<sessionBase>/subagents/
+			const subDir = path.join(dir, "session", "subagents");
+			fs.mkdirSync(subDir, { recursive: true });
+			fs.writeFileSync(path.join(subDir, "agent-26.jsonl"), "\n");
+			fs.chmodSync(subDir, 0o000);
+			return { dir, sessionPath, subDir };
+		};
+		const probe = mkUnreadable("probe");
+		let denied = false;
+		try { fs.readdirSync(probe.subDir); } catch { denied = true; }
+		fs.chmodSync(probe.subDir, 0o755); // so the sandbox can be torn down
+		if (!denied) {
+			console.log("  ##SKIP## chmod 000 does not deny reads for this user (running as root?)");
+		} else {
+			const r = mkUnreadable("unreadable-r");
+			const j = mkUnreadable("unreadable-j");
+			const rendered = runCli(["-s", r.sessionPath, "--tokens", "--pad", "0"]);
+			const asJson = runCli(["-s", j.sessionPath, "--json"]);
+			fs.chmodSync(r.subDir, 0o755);
+			fs.chmodSync(j.subDir, 0o755);
+			let doc: any = null;
+			try { doc = JSON.parse(asJson.stdout); } catch { /* reported below */ }
+			assert("an unreadable subagent dir makes --json provisional even on a settled tag",
+				doc?.provisional?.reason === "subagent-unreadable", JSON.stringify(doc?.provisional));
+			assert(`  ...exiting ${EXIT_PROVISIONAL} under --json (got ${asJson.code})`,
+				asJson.code === EXIT_PROVISIONAL, asJson.stderr);
+			assert(`  ...and ${EXIT_PROVISIONAL} on the rendered path too (got ${rendered.code})`,
+				rendered.code === EXIT_PROVISIONAL, rendered.stdout + rendered.stderr);
+		}
 	}
 }
 

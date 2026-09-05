@@ -63,10 +63,12 @@ export interface BuildSessionJsonInput {
 	interactions: Interaction[];
 	session: WtftSessionIdentity;
 	provisional: TagProvisional;
-	/** The #149 blind spot. Omitted reports a zeroed one rather than absent:
-	 *  a consumer indexing `.uncounted.compaction` must never get `undefined`
-	 *  because a caller skipped the scan. */
-	uncounted?: UncountedBillables;
+	/** The #149 blind spot. REQUIRED, and deliberately not defaulted: a zeroed
+	 *  default made "nobody scanned" indistinguishable from "scanned, found
+	 *  none", which is exactly the silent blind spot this field exists to end.
+	 *  The type is the enforcement — a caller with nothing to report passes
+	 *  `newUncountedBillables()` and means it. (PR review, Medium/contract.) */
+	uncounted: UncountedBillables;
 	notices?: WtftNotice[];
 }
 
@@ -80,7 +82,7 @@ export function buildSessionJson(input: BuildSessionJsonInput): WtftSessionJson 
 		total: summary.total,
 		models: summary.models,
 		categories: summary.categories,
-		uncounted: input.uncounted ?? { compaction: 0, recap: 0 },
+		uncounted: input.uncounted,
 		compaction: summary.compaction,
 		untaggedInteractions: summary.untaggedInteractions,
 		notices: input.notices ?? [],

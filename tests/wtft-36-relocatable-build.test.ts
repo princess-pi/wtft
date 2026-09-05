@@ -4,9 +4,11 @@
  * @test wtft-36-relocatable-build
  * @description The published artifact is self-contained (#36).
  *
- *   `files` in package.json ships `bin/wtft.mjs` and `bin/wtft-daemon.mjs` and
- *   NOTHING else, so anything those two files still reach for at runtime — a
- *   bare import, a repo-relative data file — is unreachable in every install.
+ *   `files` in package.json ships four prebuilt bundles and NOTHING else — the
+ *   two CLI bins, plus the two Pi-extension bundles #60 added — so anything any
+ *   of them still reaches for at runtime, a bare import or a repo-relative data
+ *   file, is unreachable in every install. §1 scans all four; §2-§5 exercise the
+ *   two bins, the only ones that must RUN from a bare directory.
  *   Two separate defects had that shape:
  *
  *   1. The `@princess-pi/libs` extraction added it (and `wcwidth`) to `external`
@@ -25,7 +27,10 @@
  *   at all, because no test runs the artifact from outside this repo. A property
  *   that everything depends on and nothing asserts is exactly the one that
  *   regresses, so this suite owns it: V1 says WHY it is relocatable, V3 says
- *   THAT it is, and V2 stops V3 passing for the wrong reason.
+ *   THAT it is, and V2 stops V3 passing for the wrong reason. §4 and §5 ride
+ *   along on the same artifact rather than in suites of their own — the bundled
+ *   licence notices, and #46's claim that `--version` answers from the artifact
+ *   and not from a neighbouring package.json.
  *
  *   Requires stock `node` on PATH — not `process.execPath`, which is bun under
  *   the runner. Running the artifact on the runtime consumers actually use is
@@ -50,33 +55,95 @@ function skip(label: string) { console.log(`  ${YELLOW}SKIP${RESET} ${label}`); 
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const ARTIFACTS = ["wtft.mjs", "wtft-daemon.mjs"];
+// The whole shipped surface, READ FROM package.json's `files` allowlist rather
+// than restated here. §1 scans all of it, because a bare import is unreachable
+// in an install no matter which bundle carries it. §2, §3 and §5 stay on
+// ARTIFACTS because they RUN the artifact and only the bins are runnable; §4
+// stays on ARTIFACTS for a worse reason — it predates the Pi bundles and nobody
+// widened it, so pi/wtft.js vendors clone, defaults and wcwidth and has its
+// licence notice checked by nothing (#73).
+//
+// Derived, not listed, for the reason §4's marker regex exists to teach: a
+// hand-kept copy of a fact the build already owns drifts the moment the build
+// changes and nothing says so. #60 put the two Pi bundles in `files` on
+// 2026-09-03 and the hardcoded pair here kept scanning only the bins until #32
+// — one day, because CI landed the day after. With no CI it would have been
+// however long nobody happened to look, which is the number that matters.
+//
+// Plain files only. npm's `files` also accepts globs and DIRECTORY names —
+// a bare `"bin"` is legal and ships the whole directory — and readFileSync
+// takes neither. So check what is actually relied on: every entry resolves to
+// a readable regular file. Checking the string's shape is not enough, because
+// `"bin"` has no glob character and no trailing slash and would sail through
+// to the EISDIR this guard exists to pre-empt (PR review).
+const SHIPPED: string[] = JSON.parse(
+	fs.readFileSync(path.join(REPO, "package.json"), "utf8"),
+).files ?? [];
 
 // The suite tests the BUILT artifact, so it has to exist. Building here rather
 // than requiring the caller to remember keeps `bun tests/run.ts` self-contained.
 execSync("bun run build", { cwd: REPO, stdio: "pipe" });
 
+// Validate SHIPPED only AFTER the build. Every path in `files` is build output
+// and every one is gitignored (.gitignore: `bin/*.mjs`, `pi/*.js`), so on a
+// clean checkout none of them exists yet — statting them first would fail the
+// suite for the absence the very next line exists to fix (PR review round 2).
+{
+	const notAFile = SHIPPED.filter(f => {
+		if (/[*?[\]]/.test(f)) return true;                       // a glob, not a path
+		try { return !fs.statSync(path.join(REPO, f)).isFile(); }  // a directory, or absent
+		catch { return true; }
+	});
+	if (SHIPPED.length === 0 || notAFile.length > 0) {
+		console.error(`package.json \`files\` must be a non-empty list of plain files this suite can read; `
+			+ `not usable: ${JSON.stringify(notAFile)} (of ${JSON.stringify(SHIPPED)})`);
+		process.exit(1);
+	}
+}
+
 let NODE = "";
 try { NODE = execSync("command -v node", { encoding: "utf8" }).trim(); } catch { /* none */ }
 
 // ---
-// 1. No bare import survives the bundle — the structural reason for §3.
+// 1. NOTHING survives the bundle except node: builtins — the structural reason
+//    for §3.
 // ---
-console.log("\n1. The emitted ESM reaches for nothing outside itself");
+console.log("\n1. The emitted ESM reaches for nothing but node: builtins");
 {
-	// A specifier is "bare" unless it is relative, absolute, or a node: builtin.
-	const BARE = /(?:^|[\s;}])(?:import|export)[^;'"]*?from\s*["']([^"'.\/][^"']*)["']/g;
-	const DYNAMIC = /\bimport\(\s*["']([^"'.\/][^"']*)["']\s*\)/g;
-	for (const name of ARTIFACTS) {
-		const code = fs.readFileSync(path.join(REPO, "bin", name), "utf8");
+	// The allowed set is `node:` and NOTHING ELSE. Not "no bare imports", which
+	// is what this checked through two review rounds while claiming more.
+	//
+	// The narrowing came from the word "bare": each pattern began `[^"'./]`, so
+	// a specifier starting with a dot or a slash was skipped by construction —
+	// and #29's defect 2 was `await import("./manifest-help.js")`, a RELATIVE
+	// import of a file that had moved into @princess-pi/libs. The exact defect
+	// this suite exists to catch was outside the only check that claimed to
+	// catch it, under a label reading "reaches for nothing outside itself".
+	//
+	// A bundle is self-contained by construction, so the honest assertion is
+	// also the simplest: every module it needed is inlined, therefore any
+	// surviving specifier of any shape is a bug — relative, absolute or bare.
+	// Measured on all four bundles at db5cc38: zero non-`node:` specifiers of
+	// any kind, so this costs nothing today and closes the whole class.
+	//
+	// Four syntactic forms, because each reaches outside just as well:
+	// `… from "x"`, `import("x")`, a side-effect `import "x"`, and
+	// `require("x")`.
+	const FROM = /(?:^|[\s;}])(?:import|export)[^;'"]*?from\s*["']([^"']+)["']/g;
+	const DYNAMIC = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
+	const SIDE_EFFECT = /(?:^|[\s;}])import\s*["']([^"']+)["']/g;
+	const REQUIRE = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
+	for (const rel of SHIPPED) {
+		const code = fs.readFileSync(path.join(REPO, rel), "utf8");
 		const found = new Set<string>();
-		for (const re of [BARE, DYNAMIC]) {
+		for (const re of [FROM, DYNAMIC, SIDE_EFFECT, REQUIRE]) {
 			re.lastIndex = 0;
 			for (const m of code.matchAll(re)) {
 				if (!m[1].startsWith("node:")) found.add(m[1]);
 			}
 		}
-		check(found.size === 0, `V1: bin/${name} has no bare imports`,
-			found.size ? `still external: ${[...found].join(", ")}` : undefined);
+		check(found.size === 0, `V1: ${rel} imports nothing but node: builtins`,
+			found.size ? `still reaches for: ${[...found].join(", ")}` : undefined);
 	}
 }
 
@@ -168,17 +235,34 @@ console.log("\n3. wtft's three display flags, and the daemon's --help, run from 
 console.log("\n4. The bundle carries the verbatim licence of every package it bundles");
 for (const name of ARTIFACTS) {
 	const code = fs.readFileSync(path.join(REPO, "bin", name), "utf8");
-	const bundled = new Set<string>();
-	for (const m of code.matchAll(/^\/\/ node_modules\/((?:@[^/\n]+\/)?[^/\n]+)\//gm)) {
-		if (!m[1].startsWith("@princess-pi/")) bundled.add(m[1]);
+	// `.*node_modules/`, matching build.ts noticeFor() character for character —
+	// NOT the `^// node_modules/` this was.
+	//
+	// bun writes each marker as the path it RESOLVED, so the direct-child form
+	// appears only when the build ran somewhere that has its own node_modules.
+	// Observed 2026-09-04 in a fresh git worktree that had none: every marker
+	// read `// ../../../node_modules/clone/clone.js`, resolved up to the main
+	// clone's, and the anchored form matched none of them — V4a failed for a
+	// reason with nothing to do with licences. Install into that worktree and
+	// the markers revert to the direct-child form, so the failure comes and
+	// goes with the tree's state, which is worse than one that stays.
+	//
+	// Either way the anchored form was the two-matchers-disagreeing defect this
+	// section's own comment warns about, one function away from the warning.
+	const bundled = new Map<string, string>();   // package name -> directory
+	for (const m of code.matchAll(/^\/\/ (.*node_modules\/((?:@[^/\n]+\/)?[^/\n]+))\//gm)) {
+		if (!m[2].startsWith("@princess-pi/")) bundled.set(m[2], path.join(REPO, m[1]));
 	}
-	check(bundled.size > 0, `V4a: bin/${name} names the packages it vendored`, [...bundled].join(","));
-	for (const pkg of [...bundled].sort()) {
+	check(bundled.size > 0, `V4a: bin/${name} names the packages it vendored`, [...bundled.keys()].join(","));
+	for (const pkg of [...bundled.keys()].sort()) {
 		// The SAME matcher build.ts uses. A fixed name list here while the build
 		// globs meant a dependency shipping COPYING would build green and fail
 		// the suite that gates the build — two matchers disagreeing about the
 		// same question.
-		const pkgDir = path.join(REPO, "node_modules", pkg);
+		// The directory the MARKER named, not REPO/node_modules/<pkg>: the
+		// marker's path is the one bun resolved, so it is the only one
+		// guaranteed to hold the LICENSE that actually went into the bundle.
+		const pkgDir = bundled.get(pkg)!;
 		const licPath = (fs.existsSync(pkgDir) ? fs.readdirSync(pkgDir) : [])
 			.filter(f => /^(licen[cs]e|copying)/i.test(f))
 			.sort()

@@ -95,7 +95,7 @@ console.log("\n3. CONTEXT.md pager entry agrees with the CLI");
 	check(/-p\/--pager is a Pi TUI overlay and is not available in the CLI/.test(cli),
 		"bin/wtft.ts refuses -p as a Pi TUI overlay not available in the CLI");
 	check(!/CLI-only/.test(entry), "Pager entry does not call the pager CLI-only");
-	check(/Pi/.test(entry) && /not available (in|from) the CLI/.test(entry),
+	check(/Pi/.test(entry) && /not\s+available\s+in the CLI/.test(entry),
 		"Pager entry says it is a Pi overlay not available in the CLI",
 		`entry: ${entry.replace(/\n/g, " ")}`);
 }

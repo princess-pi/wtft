@@ -238,13 +238,15 @@ _Avoid_: Panel, sidebar (reserved for the `serve` tool's widget — `serve` is a
 **CLI**:
 Running `wtft` (or `./wtft`, or the npm-global install) directly from the host shell, outside
 Pi — reuses the same classification engine as the widget but prints to stdout. Supports modes
-the widget does not (`--other` histogram, `-p` pager, `--watch`).
+the widget does not (`--other` histogram, `--watch`). Refuses `-p/--pager`, which is the
+widget's (see **Pager**).
 _Avoid_: Standalone mode, binary (the binary is `bin/wtft.mjs`; "CLI" names the usage mode)
 
 **Pager**:
 `-p/--pager` — a fullscreen, interactive, scrollable TUI overlay for browsing expanded cost
-history. A CLI-only feature (not available inside the Pi widget itself, which is not
-fullscreen).
+history. A Pi-only feature, implemented in `extensions/wtft.ts` as a TUI overlay; it is not
+available in the CLI, which refuses `-p` and suggests `wtft … | less -R` instead
+(`bin/wtft.ts`). An earlier entry had this exactly inverted (#75).
 _Avoid_: Scroll mode, viewer
 
 **Watch mode**:

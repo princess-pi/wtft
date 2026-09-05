@@ -36,7 +36,11 @@ what to report are the thing that is wrong. `--help` lists the rest.
 Re-run it after every rebuild; `--check` is how you find out you needed to, and
 it is scriptable: **0** in sync, **1** drift, **2** shadowed on PATH, **64** bad
 usage. A plain install adds **3** for a failed build, which `--check` cannot
-return because it never builds.
+return because it never builds. Two of those codes have a second cause: **1**
+is also a `--dir` that cannot be created (status `no-dir`), and **64** is also
+`HOME` unset with no `--dir`, or a relative `--dir` whose current directory is
+gone. Two surprises `--help` spells out: `--version` prints the absolute path of
+the script, not a version number, and `--` is not an end-of-options marker.
 
 **Not on npm yet.** `npm install -g @princess-pi/wtft` will not work — nothing is
 published. Tracked in [#29](https://github.com/princess-pi/wtft/issues/29).
@@ -109,8 +113,11 @@ wtft --interval 3h --limit 20
 # Cost by model instead of by activity
 wtft --by-model
 
-# Follow a specific session's log parser daemon, or list the running ones
+# Render a specific session once, or stay attached and re-render as it grows
 wtft --session <path>
+wtft --session <path> --watch
+
+# List the running log parser daemons
 wtft --list
 ```
 

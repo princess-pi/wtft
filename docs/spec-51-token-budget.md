@@ -46,9 +46,25 @@ appears nowhere in this repo). The table records the code, not the misquote.
   The config *key* rename (`tpm` → `token-budget`) moves the on-disk file from
   `tpm.json` to `token-budget.json`; on the one host that runs this, the file
   is renamed by hand, not migrated in code.
-- **Command** — `/budget` with no flags toggles the widget panel; flags
-  `--widget on|off`, `--footer on|off`, `--emoji`, `--no-emoji`, `--reset`,
-  `--why` (with `-w` / `-f` aliases) toggle each display explicitly.
+- **Command** — `/budget`. Three behaviours, and conflating any two of them is
+  how #74 hid:
+
+  | Form | Behaviour |
+  |---|---|
+  | `/budget` (no flags) | **toggles** the widget |
+  | `--widget`/`-w`, `--footer`/`-f` with **no** `on\|off` after it | **toggles** that one |
+  | `--widget on\|off`, `--footer on\|off`, `--no-widget`, `--no-footer` | **sets**, never toggles |
+
+  Other flags: `--emoji` / `--no-emoji`, `--reset`, `--help` / `-h`, `--why`.
+
+  The set-vs-toggle distinction is load-bearing. Until #74 the negating forms
+  toggled: `--no-widget` contains the substring `-w`, so it matched the
+  `--widget` **alias** — `--widget` itself is not a substring of `--no-widget` —
+  fell through to the valueless-toggle branch, and left its own arm
+  unreachable. A single run from ON is indistinguishable from a correct `off`,
+  which is why the guard, `tests/wtft-74-budget-flag-parsing.test.ts`, runs
+  every negating flag twice and from both starting states. (That suite also
+  pins `/wtft --show`/`--hide`, which is `wtft`'s widget rather than this one.)
 - **Widget / status** — a below-editor panel and a footer line, showing
   per-model TPM as a colored bar against that model's ceiling.
 - **Data source** — reads the wtft tag files under `wtft-tags/`, the same

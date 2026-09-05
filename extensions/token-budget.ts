@@ -674,7 +674,17 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
     }
   });
 
-  // 3. Register '/budget' slash command to manually toggle widget visibility and footer status
+  // 3. Register the '/budget' slash command: widget and footer visibility.
+  //
+  //    THREE behaviours, and conflating any two of them is how #74 hid:
+  //      - bare `/budget`                     toggles the widget
+  //      - `--widget`/`-w` with no value      toggles (same for `--footer`/`-f`)
+  //      - `--widget on|off`, `--no-widget`   SET, and never toggle
+  //
+  //    Calling the whole command a toggle was the original wrong word. Calling
+  //    every explicit flag a setter — which an earlier version of THIS comment
+  //    did, while correcting the first error — is the same mistake pointing the
+  //    other way: the valueless forms really do toggle.
   pi.registerCommand("budget", {
     description: "Configure Token Budget display options (e.g. /budget --widget off --footer on)",
     handler: async (args, ctx) => {
@@ -689,6 +699,8 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
         helpText += `  /budget                                    Toggle the floating widget panel on/off\n`;
         helpText += `  /budget --widget [on|off]                  Explicitly enable or disable the floating widget panel\n`;
         helpText += `  /budget --footer [on|off]                  Explicitly enable or disable the bottom footer line 3\n`;
+        helpText += `  /budget --no-widget                        Disable the floating widget panel (same as --widget off)\n`;
+        helpText += `  /budget --no-footer                        Disable the footer line (same as --footer off)\n`;
         helpText += `  /budget --emoji                            Enable emoji icons in widgets/footer\n`;
         helpText += `  /budget --no-emoji                         Disable emoji icons in widgets/footer\n`;
         helpText += `  /budget --why                              Explain why you'd run this tool, with user scenarios\n\n`;
@@ -749,10 +761,44 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
         return;
       }
 
-      if (trimmed.includes("--widget") || trimmed.includes("-w")) {
-        const parts = trimmed.split(/\s+/);
-        const idx = parts.findIndex(p => p === "--widget" || p === "-w");
-        const next = parts[idx + 1];
+      // TOKENS, not substrings (#74). The previous form asked
+      // `trimmed.includes("--widget") || trimmed.includes("-w")`. The first
+      // disjunct is not the culprit — `--widget` is NOT a substring of
+      // `--no-widget`, which has only one dash before `widget`. The second is:
+      // `"--no-widget"` contains `-w` inside `-widget`. So `--no-widget`
+      // entered the `--widget` arm, which then looked for an EXACT
+      // `--widget`/`-w` token, found none, and read `parts[-1 + 1]` — that is
+      // `parts[0]`, the first token, which is the flag itself when it is the
+      // only one and some other flag when it is not. Either way it matched
+      // neither `on` nor `off`, so control fell through to the toggle, and the
+      // `else if (includes("--no-widget"))` arm below could never run.
+      // `--no-footer` contains `-f` inside `-footer`: same defect.
+      //
+      // Measured before the fix, which is the only way to tell a toggle from a
+      // working `off`: `--no-widget` from ON went true -> false -> true, and
+      // from OFF went false -> true -> false. Run once from ON it is
+      // indistinguishable from correct, which is how it survived.
+      const parts = trimmed.split(/\s+/).filter(Boolean);
+      const hasFlag = (...names: string[]) => parts.some(p => names.includes(p));
+      /** The token after the first of `names`, or undefined if absent or last. */
+      const valueAfter = (...names: string[]) => {
+        const idx = parts.findIndex(p => names.includes(p));
+        return idx === -1 ? undefined : parts[idx + 1];
+      };
+
+      // The negating form is checked FIRST, and that IS machine-visible
+      // precedence, not reader sugar. Exact-token matching stops the two
+      // MATCHING each other, but it does not stop both being present:
+      // `/budget --no-widget --widget on` takes this branch and lands on
+      // false, and swapping the arms would land on true. An earlier version of
+      // this comment called the order "for the reader rather than for the
+      // machine", which is exactly the kind of claim that lets someone reorder
+      // it safely-looking. Negation wins; #78 tracks documenting that.
+      if (hasFlag("--no-widget")) {
+        newWidget = false;
+        handled = true;
+      } else if (hasFlag("--widget", "-w")) {
+        const next = valueAfter("--widget", "-w");
         if (next === "on" || next === "true") {
           newWidget = true;
         } else if (next === "off" || next === "false") {
@@ -761,15 +807,13 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
           newWidget = !current.widget;
         }
         handled = true;
-      } else if (trimmed.includes("--no-widget")) {
-        newWidget = false;
-        handled = true;
       }
 
-      if (trimmed.includes("--footer") || trimmed.includes("-f")) {
-        const parts = trimmed.split(/\s+/);
-        const idx = parts.findIndex(p => p === "--footer" || p === "-f");
-        const next = parts[idx + 1];
+      if (hasFlag("--no-footer")) {
+        newFooter = false;
+        handled = true;
+      } else if (hasFlag("--footer", "-f")) {
+        const next = valueAfter("--footer", "-f");
         if (next === "on" || next === "true") {
           newFooter = true;
         } else if (next === "off" || next === "false") {
@@ -777,9 +821,6 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
         } else {
           newFooter = !current.footer;
         }
-        handled = true;
-      } else if (trimmed.includes("--no-footer")) {
-        newFooter = false;
         handled = true;
       }
 

@@ -61,6 +61,10 @@ export interface WtftCliOptions {
 	daemonRestart: boolean;
 	daemonStop: string | undefined;
 	thinkingBudget: number | undefined;
+	/** `--json` (#26) — emit the machine-readable session summary instead of
+	 *  rendering. CLI-only: the Pi extension parses it and ignores it, because a
+	 *  TUI widget has no stdout to write an object to. */
+	json: boolean;
 }
 
 // ---
@@ -118,6 +122,7 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 	let daemonRestart = false;
 	let daemonStop: string | undefined = undefined;
 	let thinkingBudget: number | undefined = undefined;
+	let json = false;
 
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -200,6 +205,8 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 				pad = val;
 				hasPad = true;
 			}
+		} else if (arg === "--json") {
+			json = true;
 		} else if (arg === "--list") {
 			daemonList = true;
 		} else if (arg === "--cleanup") {
@@ -292,6 +299,7 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 		pad, hasPad,
 		daemonList, daemonCleanup, daemonRestart, daemonStop,
 		thinkingBudget,
+		json,
 	};
 }
 
@@ -445,6 +453,9 @@ export interface WtftManifest {
 	description: string;
 	usage: { flags: string; desc: string }[];
 	examples: { cmd: string; desc: string }[];
+	/** The documented exit-code table (#26). Optional so a manifest that predates
+	 *  it still renders; `--help` omits the section when it is absent. */
+	exitCodes?: { code: number; meaning: string }[];
 	why?: unknown;
 }
 
@@ -483,6 +494,16 @@ export function renderWtftHelp(src: ManifestSource, invokedAs: string): string {
 	text += `\n\x1b[1mExamples:\x1b[0m\n`;
 	for (const e of manifest.examples) {
 		text += `  ${(e.cmd).padEnd(30)} ${e.desc}\n`;
+	}
+
+	// Exit codes are API (#26). `--help` is where a human looks for them, and
+	// rendering from the manifest is what keeps this list from becoming a second
+	// copy that drifts from the one `--json` consumers read.
+	if (manifest.exitCodes && manifest.exitCodes.length > 0) {
+		text += `\n\x1b[1mExit codes:\x1b[0m\n`;
+		for (const c of manifest.exitCodes) {
+			text += `  ${String(c.code).padEnd(30)} ${c.meaning}\n`;
+		}
 	}
 
 	return text;

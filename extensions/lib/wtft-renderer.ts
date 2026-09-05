@@ -1711,55 +1711,151 @@ function shortenModel(model: string): string {
 	return model.replace(/^claude-/, "").replace(/-\d{8}$/, "");
 }
 
+// ---
+// SESSION SUMMARY (#26) — the single aggregation both readers consume.
+//
+// `renderTokenSummary` formats this for a human; `buildSessionJson`
+// (wtft-json.ts) serialises the same object for a machine. Neither does the
+// arithmetic itself, which is the whole reason the rendered table and
+// `wtft --json` cannot report different numbers. See docs/spec-26-json.md.
+// ---
+
+/** Exact token and cost totals. Never abbreviated, never rounded. */
+export interface TokenTotals {
+	costUsd: number;
+	inputTokens: number;
+	outputTokens: number;
+	reasoningTokens: number;
+	cacheReadTokens: number;
+	cacheWriteTokens: number;
+}
+
+export interface ModelTotals extends TokenTotals {
+	/** The full model id, never `shortenModel`'d — the short form is display. */
+	model: string;
+	/** `isModelPriced` — false is the `?` marker in the rendered table. */
+	priced: boolean;
+}
+
+export interface CategoryTotals extends TokenTotals {
+	category: Category;
+}
+
+export interface SessionSummary {
+	total: TokenTotals;
+	/** One row per model id, cost descending — the rendered table's row order. */
+	models: ModelTotals[];
+	/** One row per CATEGORY_ORDER entry, always all of them, always in that
+	 *  order, so a consumer can index by position. */
+	categories: CategoryTotals[];
+	/** Interactions excluded from every total above because they carry no model
+	 *  id (`(unknown)` or `<synthetic>`) — the table's "(N untagged … skipped)". */
+	untaggedInteractions: number;
+	/** Compaction events and the tokens they freed — the table's `Compaction:` line. */
+	compaction: { events: number; tokensFreed: number };
+}
+
+function emptyTotals(): TokenTotals {
+	return { costUsd: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+}
+
+function addInteraction(into: TokenTotals, i: Interaction): void {
+	into.costUsd += i.cost;
+	into.inputTokens += i.inputTokens;
+	into.outputTokens += i.outputTokens;
+	into.reasoningTokens += i.reasoningTokens;
+	into.cacheReadTokens += i.cacheReadTokens;
+	into.cacheWriteTokens += i.cacheWriteTokens;
+}
+
+/**
+ * Aggregate a session once, for both readers (#26).
+ *
+ * Dedups first — a caller may pass raw interactions, and Claude Code emits
+ * several JSONL lines per API response echoing the same message-level `usage`.
+ *
+ * Model-tagged only, in EVERY total including the per-category rows: an
+ * interaction with no model id is counted in `untaggedInteractions` and appears
+ * nowhere else. That is what makes `sum(models) === sum(categories) === total`
+ * exactly true, and it is deliberately a narrower population than the bar
+ * chart's, which bins every interaction. A chart total and this total can
+ * legitimately differ by the untagged spend; docs/spec-26-json.md says so.
+ */
+export function computeSessionSummary(interactions: Interaction[]): SessionSummary {
+	const deduped = deduplicateInteractions(interactions);
+
+	const total = emptyTotals();
+	const byModel = new Map<string, TokenTotals>();
+	const byCategory = new Map<Category, TokenTotals>();
+	for (const c of CATEGORY_ORDER) byCategory.set(c, emptyTotals());
+	let untaggedInteractions = 0;
+	let compactionEvents = 0;
+	let compactionTokensFreed = 0;
+
+	for (const i of deduped) {
+		// Compaction is counted over EVERY interaction, tagged or not: it
+		// describes context freed, not spend, so the model-tag exclusion below
+		// has nothing to do with it (this matches the rendered table, which
+		// counts its `Compaction:` line over the same deduped set).
+		if (i.compactionTokensBefore) {
+			compactionTokensFreed += i.compactionTokensBefore;
+			compactionEvents++;
+		}
+
+		const model = i.model || "(unknown)";
+		if (model === "(unknown)" || model === "<synthetic>") {
+			untaggedInteractions++;
+			continue;
+		}
+
+		addInteraction(total, i);
+
+		let m = byModel.get(model);
+		if (!m) { m = emptyTotals(); byModel.set(model, m); }
+		addInteraction(m, i);
+
+		// `classifyInteraction` returns the stored `_cat` for a tag-file read and
+		// re-derives it otherwise — the same call the bar chart makes.
+		const cat = classifyInteraction(i);
+		const c = byCategory.get(cat) ?? byCategory.set(cat, emptyTotals()).get(cat)!;
+		addInteraction(c, i);
+	}
+
+	const models: ModelTotals[] = Array.from(byModel.entries())
+		.sort((a, b) => b[1].costUsd - a[1].costUsd)
+		.map(([model, t]) => ({ model, priced: isModelPriced(model), ...t }));
+
+	const categories: CategoryTotals[] = CATEGORY_ORDER
+		.map(category => ({ category, ...(byCategory.get(category) ?? emptyTotals()) }));
+
+	return {
+		total,
+		models,
+		categories,
+		untaggedInteractions,
+		compaction: { events: compactionEvents, tokensFreed: compactionTokensFreed },
+	};
+}
+
 /**
  * @param uncounted Billed-but-unrecorded events found in the session (#149).
  *   Omitted or all-zero renders nothing new — existing output is unchanged.
  */
 export function renderTokenSummary(interactions: Interaction[], maxWidth: number = 80, thinkingBudget?: number, uncounted?: UncountedBillables): string {
-	// Dedup before aggregating (caller may pass raw, we ensure consistent counts)
-	const deduped = deduplicateInteractions(interactions);
+	// One aggregation, two readers (#26): this table and `wtft --json` read the
+	// same object, so they cannot report different numbers.
+	const summary = computeSessionSummary(interactions);
+	const unmatched = summary.untaggedInteractions;
 
-	// Group by model
-	type ModelAgg = {
-		inputTokens: number;
-		outputTokens: number;
-		cacheReadTokens: number;
-		cacheWriteTokens: number;
-		reasoningTokens: number;
-		cost: number;
-	};
-	const byModel = new Map<string, ModelAgg>();
-	let unmatched = 0;
-
-	for (const i of deduped) {
-		const model = i.model || "(unknown)";
-		// Skip synthetic/system entries (no real tokens) and untagged entries
-		if (model === "(unknown)" || model === "<synthetic>") {
-			unmatched++;
-			continue;
-		}
-		const agg = byModel.get(model) || { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, cost: 0 };
-		agg.inputTokens += i.inputTokens;
-		agg.outputTokens += i.outputTokens;
-		agg.cacheReadTokens += i.cacheReadTokens;
-		agg.cacheWriteTokens += i.cacheWriteTokens;
-		agg.reasoningTokens += i.reasoningTokens;
-		agg.cost += i.cost;
-		byModel.set(model, agg);
-	}
-
-	if (byModel.size === 0) {
+	if (summary.models.length === 0) {
 		return unmatched > 0
 			? `No model-tagged interactions found (${unmatched} untagged).`
 			: "No model-tagged interactions found.";
 	}
 
-	// Sort by cost descending
-	const sorted = Array.from(byModel.entries())
-		.sort((a, b) => b[1].cost - a[1].cost);
-
+	// Rows in the summary's order, which is cost descending.
 	// Column widths
-	const modelColW = Math.max(10, ...sorted.map(([m]) => shortenModel(m).length));
+	const modelColW = Math.max(10, ...summary.models.map(m => shortenModel(m.model).length));
 	const numColW = 10; // fixed width for numbers
 
 	const sep = "─".repeat(Math.min(maxWidth, modelColW + numColW * 5 + 24));
@@ -1780,19 +1876,17 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 
 	// Rows — a "?" on the cost marks a model priced at fallback defaults
 	// (no registry entry, no legacy branch): the figure is a guess (#140).
-	let totalInput = 0, totalOutput = 0, totalCr = 0, totalCw = 0, totalReasoning = 0, totalCost = 0;
 	let anyUnpriced = false;
-	for (const [model, agg] of sorted) {
-		const unpriced = !isModelPriced(model);
-		if (unpriced) anyUnpriced = true;
+	for (const agg of summary.models) {
+		if (!agg.priced) anyUnpriced = true;
 		out += [
-			shortenModel(model).padEnd(modelColW),
+			shortenModel(agg.model).padEnd(modelColW),
 			formatTokenCount(agg.inputTokens).padStart(numColW),
 			formatTokenCount(agg.outputTokens).padStart(numColW),
 			formatTokenCount(agg.reasoningTokens).padStart(numColW),
 			formatTokenCount(agg.cacheReadTokens).padStart(numColW),
 			formatTokenCount(agg.cacheWriteTokens).padStart(numColW),
-			(formatCost(agg.cost) + (unpriced ? "?" : "")).padStart(numColW)
+			(formatCost(agg.costUsd) + (agg.priced ? "" : "?")).padStart(numColW)
 		].join(" ") + "\n";
 		// Cache hit rate detail line (#79)
 		const cacheTotal = agg.cacheReadTokens + agg.cacheWriteTokens + agg.inputTokens;
@@ -1809,24 +1903,18 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 				out += `  Think: ${formatTokenCount(agg.reasoningTokens)} tokens\n`;
 			}
 		}
-		totalInput += agg.inputTokens;
-		totalOutput += agg.outputTokens;
-		totalCr += agg.cacheReadTokens;
-		totalCw += agg.cacheWriteTokens;
-		totalReasoning += agg.reasoningTokens;
-		totalCost += agg.cost;
 	}
 
 	// Total row
 	out += sep + "\n";
 	out += [
 		"TOTAL".padEnd(modelColW),
-		formatTokenCount(totalInput).padStart(numColW),
-		formatTokenCount(totalOutput).padStart(numColW),
-		formatTokenCount(totalReasoning).padStart(numColW),
-		formatTokenCount(totalCr).padStart(numColW),
-		formatTokenCount(totalCw).padStart(numColW),
-		(formatCost(totalCost) + (anyUnpriced ? "?" : "")).padStart(numColW)
+		formatTokenCount(summary.total.inputTokens).padStart(numColW),
+		formatTokenCount(summary.total.outputTokens).padStart(numColW),
+		formatTokenCount(summary.total.reasoningTokens).padStart(numColW),
+		formatTokenCount(summary.total.cacheReadTokens).padStart(numColW),
+		formatTokenCount(summary.total.cacheWriteTokens).padStart(numColW),
+		(formatCost(summary.total.costUsd) + (anyUnpriced ? "?" : "")).padStart(numColW)
 	].join(" ") + "\n";
 	if (anyUnpriced) {
 		// The legend names the fallback PER MODEL, one line each (#22 B, Macroscope
@@ -1844,25 +1932,17 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 		// deepseek-reasoner turns carries Pi's own cost, so naming a rate card as
 		// what produced the total would be false for that turn.
 		out += `? = model not in pricing registry — where wtft priced the turn:\n`;
-		for (const [model] of sorted) {
-			if (!isModelPriced(model)) {
-				out += `    ${shortenModel(model)} — ${describeFallbackPricing(model)}\n`;
+		for (const m of summary.models) {
+			if (!m.priced) {
+				out += `    ${shortenModel(m.model)} — ${describeFallbackPricing(m.model)}\n`;
 			}
 		}
 		out += `  A harness-native per-turn cost is used unchanged where the transcript has one; totals may be unreliable\n`;
 	}
 
 	// Compaction summary (#90) — show how many tokens were freed by compaction
-	let totalCompacted = 0;
-	let compactionCount = 0;
-	for (const i of deduped) {
-		if (i.compactionTokensBefore) {
-			totalCompacted += i.compactionTokensBefore;
-			compactionCount++;
-		}
-	}
-	if (compactionCount > 0) {
-		out += `\nCompaction: ${compactionCount} event(s), ${formatTokenCount(totalCompacted)} total tokens freed\n`;
+	if (summary.compaction.events > 0) {
+		out += `\nCompaction: ${summary.compaction.events} event(s), ${formatTokenCount(summary.compaction.tokensFreed)} total tokens freed\n`;
 	}
 
 	// Uncounted billables (#149) — the blind spot, named. Deliberately below the

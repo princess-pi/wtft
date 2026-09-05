@@ -544,6 +544,41 @@ export function readUncountedBillableClass(entry: any): UncountedBillableClass |
  * is precisely what makes them invisible — and `parseSessionFile`'s signature is
  * load-bearing for the daemon tag file, watch mode and 40-odd suites.
  */
+/**
+ * Which harness wrote this transcript? (#26)
+ *
+ * Asked rather than assumed: `wtft -s <path>` bypasses discovery entirely, so
+ * the candidate's `harness` field is not available on the path that
+ * `wtft --json` is most often invoked on. The answer comes from the same
+ * dispatch `parseEntryToInteraction` uses — the first registered adapter whose
+ * `matchAssistant` claims an entry owns the file — so a transcript can never be
+ * labelled with a harness that would not, in fact, parse it.
+ *
+ * Returns null when no adapter claims anything: an empty transcript, one not
+ * written yet (#308), or a format no registered harness understands. That is a
+ * fact worth reporting as null rather than guessing a default.
+ *
+ * Stops at the first claimed entry, so the common case reads a few lines.
+ */
+export function detectSessionHarness(filePath: string): string | null {
+	let content: string;
+	try {
+		content = fs.readFileSync(filePath, "utf8");
+	} catch {
+		return null; // missing or unreadable — no claim to make, never throws
+	}
+	const adapters = getParseAdapters();
+	for (const line of content.split("\n")) {
+		if (!line.trim()) continue;
+		let entry: any;
+		try { entry = JSON.parse(line); } catch { continue; }
+		for (const adapter of adapters) {
+			if (adapter.matchAssistant(entry)) return adapter.id;
+		}
+	}
+	return null;
+}
+
 export function scanUncountedBillables(filePath: string): UncountedBillables {
 	const counts = newUncountedBillables();
 	let content: string;

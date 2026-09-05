@@ -219,6 +219,10 @@
       "desc": "Thinking token budget for utilization percentage display in --tokens output."
     },
     {
+      "flags": "--json",
+      "desc": "Emit one JSON object on stdout (schema wtft/session@1) instead of rendering: exact un-abbreviated totals, per-model rows with a 'priced' flag, per-category rows, the #149 uncounted blind spot, the provisional verdict as a field, and the session identity. No ANSI and nothing else on stdout; human prose goes to stderr and is repeated in the object's notices[]. Suppresses every rendering flag. CLI only. See docs/spec-26-json.md."
+    },
+    {
       "flags": "--tokens, -C, --cost",
       "desc": "Switch between token-unit mode and cost-unit mode ($). --tokens shows a per-model token summary table with utilization, plus — when the session or any of its subagent transcripts contains them — an UNCOUNTED line naming compactions and away-recaps: calls the harness bills for but writes no usage record for, so they are deliberately NOT in TOTAL (#149). --cost switches back to $ mode. Config-persistable."
     },
@@ -291,6 +295,24 @@
     {
       "cmd": "/wtft --pad 0",
       "desc": "Render with zero padding (full terminal width). Default --pad 1 matches Pi widget width."
+    },
+    {
+      "cmd": "wtft --json | jq .total.costUsd",
+      "desc": "Read this session's exact cost from the machine-readable summary."
+    }
+  ],
+  "exitCodes": [
+    {
+      "code": 0,
+      "meaning": "Report produced — including when there is nothing to report yet (session file not written, or a tag with no classified data). Under --json, stdout carries one JSON object."
+    },
+    {
+      "code": 1,
+      "meaning": "Error: no session found or selected, an invalid path, a daemon that died before producing data, a refused flag (--pager), or an unhandled exception. Reason on stderr; under --json stdout carries nothing."
+    },
+    {
+      "code": 9,
+      "meaning": "Provisional (#443): the report printed in full, but the total may still grow under the daemon. Under --json, provisional.provisional is true and provisional.reason names the condition."
     }
   ]
 }

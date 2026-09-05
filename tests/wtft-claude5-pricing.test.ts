@@ -177,6 +177,16 @@ describe("isModelPriced (#140)", () => {
 		// this host use `deepseek-reasoner`.
 		assert.strictEqual(isModelPriced("deepseek-reasoner"), false);
 		assert.strictEqual(isModelPriced("deepseek-chat"), false);
+		// An id carrying BOTH `deepseek` and a legacy-branch word: calculateClaudeCost
+		// tests `deepseek` first, so this takes the sibling guess and costs
+		// $0.22/MTok, not the $5.00 the `opus` branch would charge. isModelPriced
+		// asks in the same order so the two cannot disagree about which branch a
+		// model reached (pr-review, round 1).
+		assert.strictEqual(isModelPriced("deepseek-opus"), false);
+		assert.strictEqual(
+			calculateClaudeCost("deepseek-opus", { input_tokens: 1_000_000 }, Date.UTC(2026, 7, 23, 12)),
+			0.22,
+		);
 		// A registry-matched DeepSeek id is still priced.
 		assert.strictEqual(isModelPriced("deepseek-v4-pro"), true);
 		assert.strictEqual(isModelPriced("deepseek/deepseek-v4-flash-vision-exp"), true);

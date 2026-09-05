@@ -69,11 +69,17 @@ the exact case the warning exists for. `calculateClaudeCost` still prices such a
 id by borrowing a sibling registry entry, which the code's own comment calls a
 *Guess*; the defect is that the guess was silent.
 
-**Change.** `isModelPriced` drops the `deepseek` substring arm: it is true only
-when a registry key matches, or when a legacy hardcoded branch in
-`calculateClaudeCost` really exists (`haiku`, `opus`). The sibling-guess branch
-stays — it is a better guess than the $3/$15 Sonnet default — but the turn is now
-marked with the renderer's `?` and the stderr warning.
+**Change.** `isModelPriced` no longer answers *true* for a bare `deepseek`
+substring. It is true only when a registry key matches, or when a legacy
+hardcoded branch in `calculateClaudeCost` really exists (`haiku`, `opus`) — and
+it asks in **`calculateClaudeCost`'s own order, `deepseek` first**, so an id
+carrying both words (`deepseek-opus`) is unpriced, matching the branch it
+actually reaches. Asking `opus` first would have called it priced while it costs
+$0.22/MTok from the flash card instead of the $5.00 the `opus` branch charges;
+`pr-review` round 1 found that, and it is pinned by a test that asserts both the
+predicate and the dollar figure. The sibling-guess branch stays — it is a better
+guess than the $3/$15 Sonnet default — but the turn is now marked with the
+renderer's `?` and the stderr warning.
 
 The warning's wording changes with it: it said "using default $3/$15 rates", which
 is untrue for a DeepSeek id taking the sibling-guess path. It now names the actual
@@ -114,6 +120,11 @@ imported from `wtft-cost.ts`, or the check would agree with itself by constructi
 It prints a scope line naming what it did **not** examine, a mismatch percentage,
 and `--json`. Turns whose model resolves to no card (`deepseek-reasoner`) are
 counted as `unpriced`, never silently compared.
+
+It **fails closed on an empty corpus** (`pr-review` round 1): `ok` requires
+`files > 0` and `compared > 0` as well as zero mismatches, so a run against a host
+with no Pi sessions exits 1 and says so, rather than printing `0.0000%` for a
+corpus it never read — the same dishonesty this file exists to correct.
 
 **Closer:** `corpus-check.mjs` reports `0.0000%` mismatch over the priced Pi turns
 and a non-zero `unpriced` count that matches the `deepseek-reasoner` turn count.

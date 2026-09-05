@@ -178,7 +178,9 @@ from the one surface — the rendered table — where a reader had no disambigua
 **Priced model / unpriced model** (#140, narrowed #22):
 A model is **priced** when `isModelPriced` is true: a `MODEL_PRICING` entry resolves for it
 (built-in or user-merged), or one of `calculateClaudeCost`'s legacy hardcoded rate branches
-(`haiku`, `opus`) applies. Everything else is **unpriced** — its cost is a fallback figure,
+(`haiku`, `opus`) applies. The tests run in `calculateClaudeCost`'s own order, `deepseek`
+first, so an id carrying both words — `deepseek-opus` — is unpriced, matching the branch it
+actually reaches. Everything else is **unpriced** — its cost is a fallback figure,
 marked `?` in the per-model table and announced once per run on stderr. A **sibling guess** is
 NOT priced: a DeepSeek id that matches no registry key is costed by borrowing the nearest
 sibling's card, and that was called priced until #22 B, which suppressed the warning for

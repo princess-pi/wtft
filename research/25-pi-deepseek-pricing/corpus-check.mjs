@@ -212,8 +212,15 @@ const record = {
 		"models with no transcribed card — counted as unpriced, never compared",
 	],
 	worst,
-	ok: mismatches === 0,
+	// FAILS CLOSED on an empty corpus (pr-review, round 1). `mismatches === 0`
+	// alone reports a clean check when ~/.pi/agent/sessions is missing or
+	// unreadable and nothing was examined at all — which is the same shape of
+	// dishonesty as #495's Closer printing 0.0000% for a harness it never read.
+	ok: mismatches === 0 && files > 0 && compared > 0,
 };
+if (record.ok === false && mismatches === 0) {
+	record.emptyCorpus = true;
+}
 
 if (asJson) {
 	console.log(JSON.stringify(record, null, 2));
@@ -225,6 +232,13 @@ if (asJson) {
 	console.log(`  compared against card    ${compared}`);
 	console.log(`  unpriced (no card)       ${unpriced}   ${[...unpricedModels.keys()].join(", ") || "-"}`);
 	console.log(`  mismatches               ${mismatches}  (${mismatchPercent.toFixed(4)}%)`);
+	if (record.emptyCorpus) {
+		console.log("");
+		console.log(`  EMPTY CORPUS — nothing was examined. ${files === 0
+			? `no .jsonl session files under ${SESSIONS}`
+			: "session files exist but no DeepSeek turn reached calculateClaudeCost"}.`);
+		console.log("  Exit 1: a check that read nothing is not a passing check.");
+	}
 	console.log("");
 	console.log("  NOT checked by this run:");
 	for (const s of record.outOfScope) console.log(`    - ${s}`);

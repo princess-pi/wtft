@@ -413,12 +413,21 @@ export function applyUserPricing(overrides: Record<string, ModelPricing>): void 
  * live instance. `haiku` and `opus` stay because they name real hardcoded
  * branches below, not a guess.
  *
+ * The `deepseek` test comes FIRST and returns false, mirroring the branch order
+ * in calculateClaudeCost (pr-review, round 1). An id containing both — say
+ * `deepseek-opus` — takes the sibling-guess branch there, because that branch is
+ * tested first; checking `opus` first here would call it priced while it costs
+ * $0.22/MTok from the flash card rather than the $5.00 the `opus` branch would
+ * charge. The two functions must agree on which branch a model reaches, so they
+ * ask in the same order.
+ *
  * See describeFallbackPricing for what the caller should say about each class.
  */
 export function isModelPriced(model: string): boolean {
 	if (!model) return false;
 	if (lookupModelPricing(model)) return true;
 	const m = model.toLowerCase();
+	if (m.includes("deepseek")) return false;
 	return m.includes("haiku") || m.includes("opus");
 }
 

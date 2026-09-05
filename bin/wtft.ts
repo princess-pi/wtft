@@ -661,6 +661,14 @@ async function main() {
 	let uncountedCache: UncountedBillables | null = null;
 	const scanSessionUncounted = (): UncountedBillables => {
 		if (uncountedCache) return uncountedCache;
+		// A session file that has not been written YET is not an unreadable one
+		// (#308): it is late, and the daemon is parked on it. Scanning anyway made
+		// subagent discovery fail with ENOENT on the parent, which set
+		// `subagent-unreadable` and exited 9 — turning #308's entire "absent is
+		// the normal launch state, exit 0" contract into a provisional error, in
+		// both output modes. There is also nothing to find: a file that was never
+		// written records no billables. Zeros, and the verdict left alone.
+		if (!fs.existsSync(finalSessionPath)) return (uncountedCache = newUncountedBillables());
 		// Blind-spot scan (#149) reads the raw session files, never the tag file:
 		// the events it counts leave no interaction behind, so nothing the daemon
 		// serializes could carry them. Subagent files are scanned too — a

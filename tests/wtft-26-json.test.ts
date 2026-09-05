@@ -511,6 +511,31 @@ console.log("\n8. an empty report still agrees with its exit code");
 }
 
 // ---
+// 8b. A not-yet-written session is late, not broken (#308).
+// ---
+// The round-4 fix — scan before reading the verdict on the empty paths — made
+// this regress: subagent discovery on an absent parent fails with ENOENT, which
+// set `subagent-unreadable` and exited 9, turning #308's "absent is the normal
+// launch state, exit 0" into a provisional error in BOTH modes. A file that was
+// never written also records no billables, so there is nothing to find.
+console.log("\n8b. a pending session is not provisional");
+{
+	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-26-pending-")));
+	const sessionPath = path.join(dir, "308c0de0-0000-0000-0000-000000000026.jsonl");
+	const r = runCli(["-s", sessionPath, "--json"]);
+	let doc: any = null;
+	try { doc = JSON.parse(r.stdout); } catch { /* reported below */ }
+	assert("a pending session still yields one JSON object", doc !== null, r.stdout.slice(0, 400));
+	assert("  ...carrying the pending-session notice",
+		(doc?.notices ?? []).some((n: any) => n.code === "pending-session"), JSON.stringify(doc?.notices));
+	assert("  ...and is NOT provisional — the file is late, not unreadable",
+		doc?.provisional?.provisional === false, JSON.stringify(doc?.provisional));
+	assert(`  ...so it exits 0 (got ${r.code})`, r.code === 0, r.stderr);
+	assert("  ...and reports no blind spot rather than a guessed one",
+		doc?.uncounted?.compaction === 0 && doc?.uncounted?.recap === 0, JSON.stringify(doc?.uncounted));
+}
+
+// ---
 // 9. The RENDERED empty paths obey the same exit-code rule.
 // ---
 // PR review round 2, High/correctness. §8 taught the `--json` arms to honour

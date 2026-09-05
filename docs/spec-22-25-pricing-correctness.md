@@ -117,3 +117,29 @@ counted as `unpriced`, never silently compared.
 
 **Closer:** `corpus-check.mjs` reports `0.0000%` mismatch over the priced Pi turns
 and a non-zero `unpriced` count that matches the `deepseek-reasoner` turn count.
+
+---
+
+## Result of D, measured
+
+`node research/25-pi-deepseek-pricing/corpus-check.mjs`, 2026-09-04:
+
+```
+  files                    395
+  deepseek turns           14281
+  priced by Pi natively    2358   (not checked here)
+  compared against card    11397
+  unpriced (no card)       526   deepseek-reasoner
+  mismatches               0  (0.0000%)
+```
+
+The `unpriced` count is the point, not a leftover: those 526 turns are
+`deepseek-reasoner` reaching `calculateClaudeCost` with no card, and since #22 B
+each one now carries the `?` marker and the stderr warning instead of passing as
+priced. The counts drift upward between runs because the corpus is live.
+
+**The check can fail.** Changing `deepseek-v4-pro`'s current-card `input` from
+`0.66` to `0.67` produces `328 mismatches (2.8780%)` with per-turn expected/actual
+lines. Only 2.88%, not 100%, because most v4-pro turns on this host predate
+2026-08-16T16:00Z and price from the `before` window the mutation did not touch —
+which is itself worth knowing before quoting a mismatch percentage as coverage.

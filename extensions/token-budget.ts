@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { loadConfig, writeConfig } from "@princess-pi/libs/config";
+import { readClassifiedTagFile } from "./lib/wtft-daemon-lib.ts";
 
 
 // ---
@@ -198,7 +199,7 @@ interface ModelStats {
   sessionTpm: number; // Tokens spent ONLY by the hosting session
 }
 
-function aggregateActiveTpm(activeFiles: FileInfo[], hostingSessionId: string | null): Record<string, ModelStats> {
+export function aggregateActiveTpm(activeFiles: FileInfo[], hostingSessionId: string | null): Record<string, ModelStats> {
   const modelStats: Record<string, ModelStats> = {};
   const now = Date.now();
 
@@ -211,38 +212,38 @@ function aggregateActiveTpm(activeFiles: FileInfo[], hostingSessionId: string | 
     const isHostingSession = hostingSessionId ? sessionId.includes(hostingSessionId) : false;
 
     try {
-      const content = fs.readFileSync(filePath, "utf8");
-      const lines = content.split("\n").filter(Boolean);
+      // Collapse lines that share a message.id (growing-usage re-emissions)
+      // BEFORE summing tokens — readClassifiedTagFile runs dedupeClassifiedById
+      // on every read, which is the same canonical collapse every other tag-file
+      // reader uses (#17, docs/wtft-incremental-render-spec.md). Without it a
+      // re-emitted message inside the window contributes its tokens once per
+      // line instead of once.
+      const interactions = readClassifiedTagFile(filePath);
 
-      for (const line of lines) {
-        try {
-          const obj = JSON.parse(line);
-          // Skip heartbeat lines
-          if (obj._hb) continue;
-          // Classified format: { c, in, out, cr, cw, m, t, cat, f, cmd, ... }
-          if (!obj.m || !obj.t) continue;
+      for (const interaction of interactions) {
+        // Classified format carries { c, in, out, cr, cw, m, t, cat, f, cmd, ... };
+        // a line with no model recorded (e.g. a zero-token category-only entry)
+        // has nothing to attribute to a model bucket.
+        if (!interaction.model) continue;
 
-          const age = now - obj.t;
-          if (age > 120000) continue;
+        const age = now - interaction.timestamp;
+        if (age > 120000) continue;
 
-          const shortCode = getModelShortName(obj.m);
-          const inputTokens = (obj.in || 0) + (obj.cr || 0);
+        const shortCode = getModelShortName(interaction.model);
+        const inputTokens = interaction.inputTokens + interaction.cacheReadTokens;
 
-          if (!modelStats[shortCode]) {
-            modelStats[shortCode] = { tpm: 0, lastActiveAge: 120000, sessionTpm: 0 };
+        if (!modelStats[shortCode]) {
+          modelStats[shortCode] = { tpm: 0, lastActiveAge: 120000, sessionTpm: 0 };
+        }
+
+        modelStats[shortCode].lastActiveAge = Math.min(modelStats[shortCode].lastActiveAge, age);
+
+        if (age <= 60000) {
+          modelStats[shortCode].tpm += inputTokens;
+          // If this is the hosting session, increment session-only TPM
+          if (isHostingSession) {
+            modelStats[shortCode].sessionTpm += inputTokens;
           }
-
-          modelStats[shortCode].lastActiveAge = Math.min(modelStats[shortCode].lastActiveAge, age);
-
-          if (age <= 60000) {
-            modelStats[shortCode].tpm += inputTokens;
-            // If this is the hosting session, increment session-only TPM
-            if (isHostingSession) {
-              modelStats[shortCode].sessionTpm += inputTokens;
-            }
-          }
-        } catch {
-          // Skip unparseable lines
         }
       }
     } catch {
@@ -272,7 +273,7 @@ function parseIntervalToMs(val: string): number {
   return isNaN(num) ? 1000 : num * 1000;
 }
 
-function getHostingSessionTpm(hostingSessionId: string, activeFiles: FileInfo[]): Record<string, number> {
+export function getHostingSessionTpm(hostingSessionId: string, activeFiles: FileInfo[]): Record<string, number> {
   // Find the tag file for the hosting session — identified by session ID in the
   // tag filename: <sessionDir>/wtft-tags/<sessionId>.jsonl.wtft-tag.vX.Y.Z.jsonl
   const hostingFile = activeFiles.find(f => {
@@ -287,22 +288,17 @@ function getHostingSessionTpm(hostingSessionId: string, activeFiles: FileInfo[])
   const sessionTpms: Record<string, number> = {};
   const now = Date.now();
   try {
-    const content = fs.readFileSync(hostingFile.path, "utf8");
-    const lines = content.split("\n").filter(Boolean);
-    for (const line of lines) {
-      try {
-        const obj = JSON.parse(line);
-        if (obj._hb) continue; // skip heartbeats
-        if (!obj.m || !obj.t) continue;
-        const age = now - obj.t;
-        if (age > 60000) continue;
-        const shortCode = getModelShortName(obj.m);
+    // Same canonical collapse as aggregateActiveTpm above — the growing-usage
+    // re-emission an id can produce must count once, not once per line (#17).
+    const interactions = readClassifiedTagFile(hostingFile.path);
+    for (const interaction of interactions) {
+      if (!interaction.model) continue;
+      const age = now - interaction.timestamp;
+      if (age > 60000) continue;
+      const shortCode = getModelShortName(interaction.model);
 
-        const inputTokens = (obj.in || 0) + (obj.cr || 0);
-        sessionTpms[shortCode] = (sessionTpms[shortCode] || 0) + inputTokens;
-      } catch (e) {
-        // ignore
-      }
+      const inputTokens = interaction.inputTokens + interaction.cacheReadTokens;
+      sessionTpms[shortCode] = (sessionTpms[shortCode] || 0) + inputTokens;
     }
   } catch (e) {
     // ignore

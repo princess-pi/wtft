@@ -1,0 +1,290 @@
+# ---
+# CI for #32 — "No CI: nothing runs an install, so a repo that cannot be
+# installed looks healthy."
+#
+# WHY THIS EXISTS. #29 was three independent defects (unresolvable dependency,
+# a stale relative dynamic import, a blocked `prepare`) in a public repo that
+# had a README, a LICENSE, a byline, a ruleset and merged PRs. Every one of
+# them was silent, and every one was found by a human running an install by
+# hand. The gap #32 names is that NOTHING RUNS THEM: `wtft-36-relocatable-build`
+# already scanned the bundles and ran `--why` on stock node, and
+# `pack-and-smoke` already installed a tarball with bun stripped from PATH.
+# This file is the "something" that runs them.
+#
+# It did not stay purely a runner, and saying so is cheaper than a reader
+# discovering it. Deciding what CI should gate turned up three gaps and closed
+# them: §1 of wtft-36 scanned two of the four shipped bundles and skipped every
+# relative specifier — so #29's own defect 2 was outside it; the daemon shell
+# suite was run by nothing at all; and the registry channel had no check
+# anywhere. The registry job and the daemon pin below are new assertions.
+#
+# WHY TWO JOBS. The Node Toolchain Standard defines two install channels with
+# different requirements, and a workflow that only exercises the one we use
+# would keep passing while the other stays broken — the same blind spot #29
+# was. So the second channel gets a job of its own.
+#
+# WHY NEITHER KNOWN-RED THING IS `continue-on-error`. The first cut made both
+# unconditionally fail-open, which is a check that cannot fail — so a daemon
+# regression, or a published tarball that would not install, would have been
+# invisible for as long as #72 and #29 stayed open. That is the same "looks
+# healthy because nothing reports" this file exists to end, rebuilt inside the
+# file that ends it. Each now names the ONE tolerated outcome — an E404 for our
+# own package, and the five known-red assertions BY NAME (a count alone stays
+# green when a regression swaps one failure for another) — and fails on
+# anything else. Both surface as a
+# `::warning::` naming their issue, so the state is visible without a red that
+# is always expected, which is the kind of red people learn to ignore.
+# ---
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# A second push to the same branch makes the first run's answer worthless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  git-channel:
+    name: git-URL channel — install, build, typecheck, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      # Stock node is what `pack-and-smoke` and wtft-36 §3 run the built
+      # artifact on; both locate it with `command -v node`. They differ in what
+      # they do without it, and neither outcome is one to rely on: wtft-36 §3
+      # skips (and its local `skip()` prints a line the driver's skip summary
+      # never counts, since it emits no `##SKIP##` marker — tests/lib/skips.ts),
+      # while pack-and-smoke throws and fails the suite. So this step is what
+      # keeps the stock-node arms honest rather than absent.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      # bun-on-PATH is permitted for the git-URL channel only (Node Toolchain
+      # Standard). `prepare` needs it; so does the test driver.
+      #
+      # `latest`, NOT a pin. A pin buys a reproducible runner and pays for it by
+      # never telling us a bun release broke us — and this repo's one
+      # development box tracks bun closely, so a pin would just move that
+      # discovery to a place with no record. The cost is real (an upstream
+      # release can turn the board red with no commit here); the version echo
+      # below is what makes that diagnosable in one glance instead of an hour.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # The runner's bun and node versions, before anything can fail. The first
+      # CI run failed in a way that looked version-dependent (runner 1.4.1, dev
+      # box 1.3.14) and was not — it was the developer's session corpus leaking
+      # into a test. An hour went into telling those two apart with no version
+      # line in the log to start from.
+      - name: Versions under test
+        run: |
+          echo "node $(node --version)"
+          echo "npm  $(npm --version)"
+          echo "bun  $(bun --version)"
+
+      # #32's "no lockfile" clause: resolve from the manifest, so a dependency
+      # range that has drifted out of the lock is caught here rather than on
+      # someone's first install. `bun.lock` stays committed for reproducible
+      # dev installs (#40); this deletes it in the runner's checkout only.
+      #
+      # ONE file, not two. `package-lock.json` is gitignored (.gitignore:3) and
+      # never present in a checkout, so naming it is a no-op kept only so the
+      # step still does the right thing if that ever changes. And a git-URL
+      # consumer DOES receive `bun.lock` — a git install is a clone, and the
+      # file is tracked — npm simply ignores it. An earlier version of this
+      # comment claimed the consumer never sees it, which is a different and
+      # false statement.
+      - name: Resolve fresh — delete the lockfile
+        run: rm -f bun.lock package-lock.json
+
+      # npm resolves and installs, then fires `prepare`, which BUILDS.
+      #
+      # `prepare` reads `if [ ! -d node_modules/wcwidth ] || [ ! -d
+      # node_modules/@princess-pi/libs ]; then bun install; fi && bun run
+      # build` — and under `npm install` that guard is always false, because
+      # npm has already installed devDependencies by the time `prepare` runs.
+      # So the `bun install` branch never fires here: npm did the resolution
+      # and bun only builds. (It fires for a consumer installing the git URL,
+      # where npm has no dev tree to hand `prepare`.) Verified in the first CI
+      # run: the log goes straight from the script line to `$ bun run
+      # build.ts`. Naming this step "runs prepare → bun install + build" was
+      # wrong about which half bun does.
+      #
+      # This is also where defect 2 now dies: with the stale relative import
+      # restored, bun cannot resolve it and the build exits 1 — one step
+      # earlier than #32's closer predicted.
+      - name: npm install (resolve, then prepare → bun run build)
+        run: npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Every tests/*.test.ts, serial, each in its own process — see tests/run.ts
+      # for why process-per-suite. No count here on purpose: a number would
+      # re-rot on every suite added, which is the reasoning run.ts already
+      # states about its own comment. Carries the CLI smoke
+      # (wtft-36 §3: --help/--why/--version exit 0 AND print, from a bare
+      # directory on stock node), the self-containment guard (§1, over every
+      # path in the `files` allowlist: `… from "x"`, `import("x")`, a
+      # side-effect `import "x"` and `require("x")`, with `node:` the only
+      # allowed specifier — so a surviving RELATIVE import, which is #29's
+      # defect 2 exactly, fails it too), and the stock-node tarball channel
+      # (pack-and-smoke).
+      - name: Test suite
+        run: npm test
+
+      # Excluded from the driver ("shell suites, run by hand", which means
+      # never) and red as of 68ae326 — see #72.
+      #
+      # NOT `continue-on-error`. A step that can never fail is not a check, and
+      # this one would have stayed un-failable for as long as #72 stayed open —
+      # a daemon regression landing inside it would have been invisible, which
+      # is the same "looks healthy because nothing reports" that #32 exists to
+      # end.
+      #
+      # PINNED BY NAME, not by count. A count-only pin has a hole a review found
+      # before it shipped: fix one known failure while breaking a different
+      # assertion and the tally is still 5, so the step stays green across a
+      # real regression. The five labels below are the known-red set; the step
+      # fails if the actual set differs in either direction.
+      #
+      # That cuts both ways on purpose. Fix one and this goes red asking for it
+      # to be struck from the list; break a sixth and it goes red naming it.
+      # When the list is empty the whole block collapses to a plain
+      # `bash tests/wtft-daemon.test.sh` — the `|| true`, the parse and the
+      # warning all become dead weight and should go with it.
+      - name: Daemon shell suite — pinned to the #72 known-red set
+        run: |
+          set -o pipefail
+          # The suite exits 1 while any assertion fails, which is correct and is
+          # exactly the state being pinned — so its status is deliberately not
+          # the verdict here. The comparison below is.
+          bash tests/wtft-daemon.test.sh 2>&1 | tee /tmp/daemon-suite.log || true
+
+          # The known-red set (#72). A heredoc cannot be used here: its
+          # terminator must sit at column 0, which ends the YAML block scalar.
+          printf '%s\n' \
+            'cache-read-only turn is NOT $0' \
+            'classified has required fields (t, c, cat)' \
+            'heartbeat uses range format {first,last}' \
+            'stop heartbeat written' \
+            'tag file created (.wtft-tag.v2.7.1.jsonl)' \
+            | sort > /tmp/daemon-expected.txt
+
+          sed 's/\x1b\[[0-9;]*m//g' /tmp/daemon-suite.log \
+            | sed -n 's/^  FAIL //p' | sort > /tmp/daemon-actual.txt
+
+          # The WHOLE Results line, not merely its presence. Pinning only the
+          # FAIL labels leaves a run that executed fewer assertions looking
+          # identical to a full one — same five failures, sixteen passes
+          # silently missing — so the passed count is pinned alongside them
+          # (PR review round 3). This is also why the suite's own exit status is
+          # not the verdict: it is 1 by definition while any assertion fails,
+          # which is the state being pinned.
+          results=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/daemon-suite.log | grep '^Results: ' || true)
+          expected_results='Results: 16 passed, 5 failed'
+          if [ "$results" != "$expected_results" ]; then
+            echo "::error::daemon suite summary was '$results', pinned at '$expected_results'. A different total means assertions were added, removed, or the run stopped early."
+            exit 1
+          fi
+
+          if ! diff -u /tmp/daemon-expected.txt /tmp/daemon-actual.txt; then
+            echo "::error::the daemon suite's failing set is not the #72 known-red set (- expected, + actual). If an assertion was FIXED, strike it from the PINNED list here. If a new one broke, that is a regression."
+            exit 1
+          fi
+
+          if [ -s /tmp/daemon-actual.txt ]; then
+            echo "::warning::daemon suite is red at the $(wc -l < /tmp/daemon-actual.txt) pinned assertions — expected until #72 is fixed"
+          fi
+
+  stock-node-registry:
+    name: registry channel on stock node
+    runs-on: ubuntu-latest
+    # #32, "the harder half, worth stating rather than hiding": CI that only
+    # exercises the bun-equipped git channel keeps passing while the stock-node
+    # contract is broken.
+    #
+    # WHICH CHANNEL THIS IS, because the first cut got it wrong. It installed
+    # the git URL on a bun-less runner and called that red "expected until the
+    # registry publish lands". It would never have gone green: npm always runs
+    # `prepare` for a git dependency, `prepare` ends in `bun run build`, and
+    # publishing changes neither. Worse, the git-URL channel is ALLOWED to
+    # require bun (Node Toolchain Standard) — so the job was failing a contract
+    # nobody claims, on a schedule that could not end.
+    #
+    # The registry channel is the one that must run on stock node: a published
+    # tarball ships the four prebuilt bundles via `files` and runs no lifecycle
+    # script. So install by NAME.
+    #
+    # NOT `continue-on-error`, for the reason the daemon step above is not
+    # either. A blanket fail-open would have swallowed a real install break for
+    # as long as #29 stayed open, and would still swallow one afterwards until
+    # somebody remembered to delete the line — a gate that never arrives. The
+    # ONE tolerated outcome is named instead: a 404, which is the honest state
+    # of an unpublished package. Anything else — a tarball that will not
+    # install, a bundle that will not run — fails the job today, unpublished or
+    # not. The day #29 publishes, the 404 stops happening and this becomes an
+    # ordinary gate with no edit here.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      # Without this the job could pass on a runner image that happens to ship
+      # bun, certifying a property the package does not have — the same way
+      # wtft-36 §2 exists to stop §3 passing for the wrong reason.
+      - name: Assert bun is absent, or this job proves nothing
+        run: |
+          if command -v bun >/dev/null 2>&1; then
+            echo "::error::bun is on PATH — this job cannot test the stock-node channel"
+            exit 1
+          fi
+          echo "bun absent, as required"
+
+      # Deliberately NOT a checkout of this branch: the claim under test is that
+      # a stranger with no clone can install the published package and run it.
+      # Anything taken from the working tree would weaken that to "the code here
+      # works", which the gating job already covers.
+      - name: Install @princess-pi/wtft from the registry, on stock node
+        run: |
+          # pipefail, or `if ! npm install … | tee` reads TEE's status — always
+          # 0 — and the 404 branch below never fires. Measured: the first run
+          # of this job sailed past a real E404 and died two lines later on
+          # `npx`, reporting the wrong cause. The daemon step above sets it for
+          # the same reason.
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/consumer" && cd "$RUNNER_TEMP/consumer"
+          npm init -y >/dev/null
+          if ! npm install @princess-pi/wtft 2>&1 | tee /tmp/registry-install.log; then
+            # OUR package's 404, not any E404 in the output. A bare `grep E404`
+            # would read a 404 on some unrelated transitive dependency — or one
+            # mixed into a genuine failure — as "not published yet", which is
+            # the fail-open this job was rewritten to remove (PR review round 3).
+            if grep -qF "'@princess-pi/wtft@*' is not in this registry" /tmp/registry-install.log; then
+              echo "::warning::@princess-pi/wtft is not on the registry yet — expected until #29 publishes; the rest of this job is skipped"
+              exit 0
+            fi
+            echo "::error::registry install failed for a reason other than our package being unpublished — this is a real break"
+            exit 1
+          fi
+
+          # --why, not just --version. #32 names it as the command defect 2
+          # broke while the build stayed green, so a smoke that stops at
+          # --version would let the published artifact ship with it broken.
+          # --help too, since all three read the inlined manifest.
+          # --no-install: npx otherwise FETCHES a missing binary from the
+          # registry, so a package that installed without its bins would still
+          # print a version here — from a stranger's package of the same name.
+          npx --no-install wtft --version
+          npx --no-install wtft --help
+          npx --no-install wtft --why
+          npx --no-install wtft-daemon --help

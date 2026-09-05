@@ -163,13 +163,20 @@ Codes 0 and 9 both carry a complete object; a consumer that wants only settled
 numbers checks `$?` **or** `.provisional.provisional` and gets the same answer.
 
 **An empty report is still a report.** On the two empty paths every `total.*` is
-0, `models[]` is `[]`, `categories[]` is still all fourteen zero rows,
-`session.harness` is `null`, and `notices[]` carries `pending-session` or
-`no-data`. A consumer never has to branch on shape, only on values — and the
-exit code is decided there by the same rule as everywhere else, so an empty
-report whose tag is provisional exits **9**, not 0. (It did exit 0 until PR
-review caught it: those two arms returned without setting the code, which broke
-the one promise the pair makes.)
+0, `models[]` is `[]`, `categories[]` is still all fourteen zero rows, and
+`notices[]` carries `pending-session` or `no-data`. A consumer never has to
+branch on shape, only on values.
+
+`session.harness` is `null` on the `pending-session` arm, where there is no file
+to ask. On the `no-data` arm the session file exists and may well name its
+harness, so `null` is **not** a marker of emptiness — `notices[]` is that marker.
+
+The exit code on these paths follows the same rule as everywhere else, so an
+empty report from a provisional tag exits **9**, not 0, in *both* modes. Two
+rounds of PR review were needed to get that right: the first found the `--json`
+arms returning without setting the code, the second found the rendered arms
+still falling through to `process.exit(0)` after the `--json` ones were fixed —
+so the same session exited 0 under `wtft` and 9 under `wtft --json`.
 
 **The blind-spot scan can change the verdict.** An unreadable subagent session
 file discovered during the `uncounted` scan sets `provisional.reason` to
@@ -222,7 +229,7 @@ $ node bin/wtft.mjs -s <fixture> --json \
     | jq -e '.schema == "wtft/session@1" and (.total.outputTokens|type) == "number"'
 ```
 
-exits 0, and `tests/wtft-26-json.test.ts` asserts, on a fixture, in seven
+exits 0, and `tests/wtft-26-json.test.ts` asserts, on a fixture, in nine
 sections:
 
 1. **§1** stdout is exactly one parseable JSON object, carrying the schema the
@@ -251,6 +258,10 @@ sections:
 8. **§8** an *empty* report obeys the exit-code contract too: a provisional one
    exits 9 and a settled one exits 0, asserted in both directions so the claim
    cannot pass by both sides being false.
+9. **§9** the rendered path and `--json` return the **same** code on the same
+   state, empty or not — each mode against its own fresh fixture, because the
+   first run's daemon repairs the tag and a second run against it would
+   legitimately differ.
 
 ## Reconciliation
 

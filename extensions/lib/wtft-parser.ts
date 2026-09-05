@@ -585,9 +585,9 @@ export function scanUncountedBillables(filePath: string): UncountedBillables {
  * registered harness understands. Those four are not distinguished — null means
  * "no claim", never "empty".
  *
- * Reads the whole file, like `scanUncountedBillables` above, then stops
- * scanning at the first claimed entry. It is the only place the non-watch CLI
- * reads the session rather than the tag file.
+ * Reads the whole file, like `scanUncountedBillables` above, then stops scanning
+ * at the first claimed entry. Those two are the non-watch CLI's only reads of
+ * the session itself; everything else it reports comes from the tag file.
  */
 export function detectSessionHarness(filePath: string): string | null {
 	let content: string;

@@ -98,14 +98,14 @@ does not copy the flag reference" — is **half right, checked**. `docs/EXT_WTFT
 `fetch` only renders the `why` array (the `--why` scenarios), confirmed by reading the script
 block (`:316-345`): it builds `s.scenario`/`s.commands`/`s.result` HTML and nothing else. The
 flag reference is a **separate, hand-written, hardcoded `<ul>`** at `:56-67` ("Command Reference
-→ Options") — 9 `<li>` entries duplicating a subset of the manifest's `usage` entries (25 at the time of writing; 27 since #26 added `--json`), already
+→ Options") — 9 `<li>` entries duplicating a subset of the manifest's `usage` entries, already
 stale in three ways I found by diffing it against `docs/manifests/wtft-cmd.json`:
 
 1. It has the same `<m|h|d|w>` gap as #160 (independently — this is a second copy of the same
    stale string, not a downstream consequence of the manifest one).
 2. It lists `-c, --cumulative` and `-b, --bucket` as two separate flags; the manifest has always
    documented them as one row (`"-c, --cumulative, -b, --bucket"`).
-3. It is missing 16 of the manifest's then-25 documented flags outright — `--tokens`/`--by-model`,
+3. It is missing 16 documented flags outright — `--tokens`/`--by-model`,
    `--watch`, `--emoji`, `--harness`, `--thinking-budget`, `--pad`, the daemon management group
    (`--list`/`--cleanup`/`--restart`/`--stop`/`-F`), `--help`/`--version`/`--why`.
 

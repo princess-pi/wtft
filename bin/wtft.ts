@@ -730,8 +730,10 @@ async function main() {
 	// `uncounted` is SCANNED on every path, never defaulted to zeros. Zeros that
 	// mean "not scanned" are indistinguishable from zeros that mean "none found",
 	// and a consumer reading `.uncounted.compaction === 0` would conclude there
-	// is no blind spot when nobody looked. The scan is a no-op on a session file
-	// that does not exist yet, which is exactly the empty paths' case.
+	// is no blind spot when nobody looked. On the `pending-session` arm the file
+	// does not exist yet and the scan is a no-op; on the `no-data` arm the file
+	// exists and the scan can find real billables in it, which is precisely the
+	// case where a zero would have been a lie.
 	//
 	// ORDER MATTERS, and getting it wrong is invisible: `scanSessionUncounted`
 	// can REASSIGN `provisional` to `subagent-unreadable` (#457). Called from
@@ -747,6 +749,22 @@ async function main() {
 	// breaking the one promise the contract makes about the pair, that `$?` and
 	// the field always agree. One assignment beside the one `write` is the only
 	// shape in which they cannot drift. (PR review, High/reasoning.)
+	// The exit code for an EMPTY report, rendered or JSON. Extracted because PR
+	// review round 2 found the two modes disagreeing: the JSON arms had just
+	// learned to honour `provisional` while the rendered arms still fell through
+	// to an unconditional `process.exit(0)`, so the same session exited 0 under
+	// `wtft` and 9 under `wtft --json`. The exit-code table says nothing about
+	// mode, and 9 means "the total may still grow" — which is as true of an empty
+	// report from a stale tag as of a full one. One helper, both modes.
+	const finishEmptyReport = () => {
+		if (provisional.provisional) {
+			console.error(`\x1b[33m⚠ PROVISIONAL: ${describeProvisionalReason(provisional, tagPath)}. ${describeProvisionalRemedy(provisional)}. Exit ${EXIT_PROVISIONAL}.\x1b[0m`);
+		}
+		// `exitCode` and return, never `process.exit()`: node's stdout is async on
+		// a pipe and `process.exit()` does not wait for pending writes.
+		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
+	};
+
 	const emitSessionJson = (opt: { notices?: WtftNotice[] } = {}) => {
 		const uncounted = scanSessionUncounted();
 		const doc = buildSessionJson({
@@ -765,6 +783,9 @@ async function main() {
 		// `exitCode` and return, never `process.exit()`: on Linux node's stdout is
 		// asynchronous when it is a pipe, and `process.exit()` does not wait for
 		// pending writes — `wtft --json | jq` could lose the tail of the document.
+		// Same rule as `finishEmptyReport` above, and deliberately not that helper:
+		// this path must NOT print the stderr sentence, which its callers already
+		// emitted, and must not print one at all on the empty arms.
 		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
 	};
 	// #308: nothing to wait for while the session log itself is unwritten — the
@@ -802,7 +823,8 @@ async function main() {
 		console.log(`\x1b[33mSession log not written yet: ${finalSessionPath}\x1b[0m`);
 		console.log(`\x1b[90mClaude Code writes its first line after the first real prompt (not a /command) completes. ` +
 			`The wtft daemon is running and waiting on it — run again after the first response, or use --watch to stay attached.\x1b[0m`);
-		process.exit(0);
+		finishEmptyReport();
+		return;
 	}
 	if (interactions.length === 0) {
 		// Wait for the freshly-spawned daemon to produce the tag file: three reads
@@ -840,7 +862,8 @@ async function main() {
 			return;
 		}
 		console.log(`\x1b[33m${noDataText}\x1b[0m`);
-		process.exit(0);
+		finishEmptyReport();
+		return;
 	}
 
 	// Read settings from harness-agnostic config file (#72).

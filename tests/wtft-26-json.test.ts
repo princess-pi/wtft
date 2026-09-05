@@ -507,6 +507,44 @@ console.log("\n8. an empty report still agrees with its exit code");
 	assert("  ...and says provisional: false", doc?.provisional?.provisional === false, JSON.stringify(doc?.provisional));
 }
 
+// ---
+// 9. The RENDERED empty paths obey the same exit-code rule.
+// ---
+// PR review round 2, High/correctness. §8 taught the `--json` arms to honour
+// `provisional`; the rendered arms still fell through to an unconditional
+// `process.exit(0)`, so the SAME session exited 0 under `wtft` and 9 under
+// `wtft --json`. The exit-code table says nothing about mode — 9 means "the
+// total may still grow", which is as true of an empty report from a stale tag
+// as of a full one — so the two modes have to agree.
+console.log("\n9. rendered and --json agree on the exit code, empty or not");
+{
+	const mk = (slug: string, stale: boolean) => {
+		const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), `wtft-26-${slug}-`)));
+		const sessionPath = path.join(dir, "session.jsonl");
+		fs.writeFileSync(sessionPath, JSON.stringify({ type: "session", version: 3, id: slug, timestamp: new Date().toISOString(), cwd: dir }) + "\n");
+		const tagsDir = path.join(dir, "wtft-tags");
+		fs.mkdirSync(tagsDir, { recursive: true });
+		const name = stale ? "session.jsonl.wtft-tag.v0.0.1-ancient.jsonl" : `session.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`;
+		fs.writeFileSync(path.join(tagsDir, name), JSON.stringify({ _meta: stale ? { offset: 0 } : { offset: 0, swept: Date.now() } }) + "\n");
+		return sessionPath;
+	};
+	// A FRESH fixture per mode, never one session run twice. The first run spawns
+	// the log parser daemon, which repairs the tag and writes a current-version
+	// one — so a second run against the same directory reads a settled tag and
+	// legitimately exits 0. Comparing the two modes across that repair compares
+	// two different states and fails an entirely correct build, which is what the
+	// first cut of this section did.
+	for (const [slug, stale, want] of [["renderprov", true, EXIT_PROVISIONAL], ["rendersettled", false, 0]] as const) {
+		const rendered = runCli(["-s", mk(`${slug}-r`, stale), "--pad", "0"]);
+		const asJson = runCli(["-s", mk(`${slug}-j`, stale), "--json"]);
+		assert(`an empty ${stale ? "provisional" : "settled"} session exits ${want} rendered (got ${rendered.code})`,
+			rendered.code === want, rendered.stdout + rendered.stderr);
+		assert(`  ...and ${want} under --json too (got ${asJson.code})`, asJson.code === want, asJson.stderr);
+		assert("  ...so the two modes never disagree", rendered.code === asJson.code,
+			`rendered=${rendered.code} json=${asJson.code}`);
+	}
+}
+
 console.log("\n──────────────────────────────");
 console.log(`Results: ${GREEN}${passed} passed${RESET}, ${RED}${failed} failed${RESET}`);
 process.exit(failed > 0 ? 1 : 0);

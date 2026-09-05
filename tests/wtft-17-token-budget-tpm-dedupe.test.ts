@@ -63,8 +63,13 @@ const lines = [
 	{ t: NOW - 5_000, c: 0.02, id: "msg-B", m: "claude-sonnet-4-6-20250606", in: 300, cr: 0 },
 	// no message.id at all — passes through dedupeClassifiedById untouched.
 	{ t: NOW - 3_000, c: 0.01, m: "claude-sonnet-4-6-20250606", in: 100, cr: 0 },
-	// heartbeat — every reader skips this.
-	{ _hb: true },
+	// heartbeat — every reader skips this. Carries a real model/timestamp/cost
+	// and a token count large enough to be unmissable (PR review round 2: a
+	// bare `{ _hb: true }` is already excluded by the model/timestamp guard
+	// regardless of whether `_hb` itself is honored, so it proves nothing about
+	// that path specifically — this shape fails loud if the `_hb` skip in
+	// classifiedInteractionsFromContent ever regresses).
+	{ _hb: true, t: NOW - 1_000, c: 0.001, m: "claude-sonnet-4-6-20250606", in: 999_999, cr: 0 },
 ];
 fs.writeFileSync(tagPath, lines.map(l => JSON.stringify(l)).join("\n") + "\n");
 

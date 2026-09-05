@@ -225,10 +225,13 @@ export function aggregateActiveTpm(activeFiles: FileInfo[], hostingSessionId: st
         // A line with no model recorded (e.g. a zero-token category-only entry)
         // has nothing to attribute to a model bucket. The timestamp check mirrors
         // the old raw-parse guard's `!obj.t` — classifiedToInteraction already
-        // requires a numeric `t` to produce an Interaction at all (PR review),
-        // so this is unreachable today, but it keeps `age` from silently going
-        // NaN if that contract ever loosens.
-        if (!interaction.model || typeof interaction.timestamp !== "number") continue;
+        // requires a numeric `t` to produce an Interaction at all, so this is
+        // unreachable today, but it keeps `age` from silently going NaN if that
+        // contract ever loosens. Number.isFinite, not `typeof ... === "number"`
+        // (PR review round 2): `typeof NaN === "number"` is true in JS, so the
+        // typeof form alone lets a NaN timestamp through and poisons
+        // lastActiveAge via Math.min(x, NaN) === NaN.
+        if (!interaction.model || !Number.isFinite(interaction.timestamp)) continue;
 
         const age = now - interaction.timestamp;
         if (age > 120000) continue;
@@ -297,8 +300,10 @@ export function getHostingSessionTpm(hostingSessionId: string, activeFiles: File
     const interactions = readClassifiedTagFile(hostingFile.path);
     for (const interaction of interactions) {
       // See aggregateActiveTpm above for why the timestamp check is here even
-      // though classifiedToInteraction already guarantees a numeric `t`.
-      if (!interaction.model || typeof interaction.timestamp !== "number") continue;
+      // though classifiedToInteraction already guarantees a numeric `t`, and
+      // for why it is Number.isFinite rather than typeof (typeof NaN ===
+      // "number").
+      if (!interaction.model || !Number.isFinite(interaction.timestamp)) continue;
       const age = now - interaction.timestamp;
       if (age > 60000) continue;
       const shortCode = getModelShortName(interaction.model);

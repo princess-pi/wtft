@@ -20,6 +20,7 @@ import {
 } from "./wtft-shared.js";
 import {
 	isModelPriced,
+	describeFallbackPricing,
 	getDeepSeekPeakMultiplier,
 	DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES,
 } from "./wtft-cost.js";
@@ -1745,7 +1746,15 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 		(formatCost(totalCost) + (anyUnpriced ? "?" : "")).padStart(numColW)
 	].join(" ") + "\n";
 	if (anyUnpriced) {
-		out += `? = model not in pricing registry — priced at default $3/$15 rates; totals may be unreliable\n`;
+		// The legend names the FALLBACK EACH MARKED MODEL ACTUALLY TOOK (#22 B).
+		// One sentence claiming "$3/$15" for every "?" went wrong the moment a
+		// DeepSeek id could carry the marker: those take the sibling-guess branch
+		// in calculateClaudeCost, not the Sonnet default.
+		const fallbacks = new Set<string>();
+		for (const [model] of sorted) {
+			if (!isModelPriced(model)) fallbacks.add(describeFallbackPricing(model));
+		}
+		out += `? = model not in pricing registry — ${[...fallbacks].join("; ")}; totals may be unreliable\n`;
 	}
 
 	// Compaction summary (#90) — show how many tokens were freed by compaction

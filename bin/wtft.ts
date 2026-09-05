@@ -721,8 +721,9 @@ async function main() {
 	}
 
 	// ---
-	// UNKNOWN-MODEL WARNING (#140): one stderr line per distinct model that
-	// priced at fallback defaults. Costs are computed in the daemon process,
+	// UNPRICED-MODEL WARNING (#140): one stderr line per distinct model that
+	// priced at a fallback rather than a card (CONTEXT.md, "Priced model /
+	// unpriced model"). Costs are computed in the daemon process,
 	// so the miss is re-derived here from the tag file's model ids rather
 	// than shared in-process state.
 	//

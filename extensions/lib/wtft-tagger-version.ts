@@ -25,4 +25,12 @@
 // 2.7.1 (#148): claude-sonnet-5 re-priced to intro rate ($2/$10/$0.20/$2.50,
 // derived 1h write $4.00) for interactions before 2026-09-01, was flat
 // post-intro $3/$15 — v2.7.0 tags overbill every Sonnet 5 line by 50%.
-export const WTFT_TAGGER_VERSION = "2.7.1";
+// 2.7.2 (#22 A): server-tool cost now requires a `claude`/`anthropic` marker in
+// the model id — a bare `opus`/`sonnet`/`haiku` id billed $0.03 per web_search
+// request and now bills 0. The per-turn figure is baked into the tag as `sc`
+// (wtft-daemon-lib), so a v2.7.1 tag from such a session keeps the overbill.
+// Measured on this host: ZERO affected turns — no session records an alias-only
+// model id with a server_tool_use block. The bump is for the hosts where a
+// `claude-deepseek` session (ANTHROPIC_MODEL="opus") did record one, which this
+// machine cannot rule out for anyone else.
+export const WTFT_TAGGER_VERSION = "2.7.2";

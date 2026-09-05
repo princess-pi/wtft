@@ -67,12 +67,15 @@ Notes:
    - *Deviation from issue text:* the issue suggested `~/.config/wtft/pricing.json`;
      this repo's config convention (`extensions/lib/config.ts`) is
      `~/.config/princess-pi-tools/<tool>*.json`, so the pricing file lives there too.
-2. **Warn on unknown models.** New `isModelPriced(model): boolean` in `wtft-cost.ts` —
-   true when the (user-merged) registry fuzzy-matches or a legacy fallback branch
-   (`deepseek`/`haiku`/`opus`) applies. The CLI (non-watch path) scans distinct
-   `interaction.model` values from the tag file and prints one stderr line per unknown
-   model per run:
-   `⚠ no pricing for <model> — using default $3/$15 rates; totals may be unreliable`.
+2. **Warn on unpriced models.** New `isModelPriced(model): boolean` in `wtft-cost.ts` —
+   true when the (user-merged) registry fuzzy-matches or a legacy hardcoded rate branch
+   (`haiku`/`opus`) applies. (`deepseek` was on that list until #22 B; it named a
+   sibling-borrowing GUESS rather than a real branch, which suppressed this warning for
+   exactly the models it exists for — see `spec-22-25-pricing-correctness.md`.) The CLI
+   (non-watch path) scans distinct `interaction.model` values from the tag file and
+   prints one stderr line per unpriced model per run:
+   `⚠ no pricing for <model> — <fallback>; totals may be unreliable`, where `<fallback>`
+   comes from `describeFallbackPricing` and names the branch that model actually took.
    (The daemon computes costs in a separate process, so the CLI derives the warning
    from tag data rather than sharing in-process state.)
 3. **`--by-model` breakdown.** `--by-model` is an **alias of `--tokens`** — the
@@ -113,7 +116,9 @@ Tests run against the built bundle (`bun run build` first), per repo convention:
    - Repro guard: 25M cacheRead + 1.6M cacheWrite + 100k output on `claude-fable-5`
      ≈ $50 (±5%), NOT ≈ $15.
    - `isModelPriced("claude-fable-5")` true; `isModelPriced("claude-sonnet-6")` false;
-     `isModelPriced("claude-opus-4-0")` true (legacy branch).
+     `isModelPriced("claude-opus-4-0")` true (legacy branch). Since #22 B,
+     `isModelPriced("deepseek-chat")` is **false** — it was true here when this spec
+     was written.
    - `applyUserPricing({"model-x": {...}})` makes `lookupModelPricing("model-x")`
      resolve and `isModelPriced` true (JSON entry corrects totals without rebuild).
 2. **`tests/wtft-issue-141-workflow-discovery.test.ts`** (new)

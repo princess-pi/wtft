@@ -143,3 +143,34 @@ priced. The counts drift upward between runs because the corpus is live.
 lines. Only 2.88%, not 100%, because most v4-pro turns on this host predate
 2026-08-16T16:00Z and price from the `before` window the mutation did not touch —
 which is itself worth knowing before quoting a mismatch percentage as coverage.
+
+---
+
+## Reconciliation record
+
+Run after GREEN, before `pr-open`. Scope: every source file the branch touched
+(`extensions/lib/wtft-cost.ts`, `bin/wtft.ts`), plus the term blast radius of the
+lines the diff removed, plus Tier 4's host-scoped set.
+
+| Artifact | Claim | Contradicted by | Covered by a test? | Action |
+|---|---|---|---|---|
+| `wtft-renderer.ts` (`renderTokenSummary` legend) | `? = model not in pricing registry — priced at default $3/$15 rates` | a `?`-marked DeepSeek id takes the sibling-guess branch, not the Sonnet default (`wtft-cost.ts`, `calculateClaudeCost`) | ❌ `reconciled-against-untested` — no suite renders an unpriced row | Fixed: the legend now composes `describeFallbackPricing` over the marked models |
+| `docs/manifests/wtft-cmd.json` (`--by-model`) | `marked '?' (priced at default rates)` | two different defaults exist, and this names neither | ❌ `reconciled-against-untested` | Fixed; Tier 1, so `--help` and `docs/EXT_WTFT.html` correct together |
+| `spec-139-140-141-…md` §#140 | `isModelPriced` true when a legacy branch `(deepseek/haiku/opus)` applies | `deepseek` names a guess, not a branch — `isModelPriced` (`wtft-cost.ts`) | ✅ `wtft-claude5-pricing.test.ts` | Fixed, with a pointer to this spec |
+| `spec-139-140-141-…md` §#140 | the warning reads `using default $3/$15 rates` | `bin/wtft.ts` now interpolates `describeFallbackPricing` | ✅ `wtft-claude5-pricing.test.ts` | Fixed |
+| `spec-139-140-141-…md` verification list | `isModelPriced("deepseek-chat")` true | now false | ✅ same suite | Fixed |
+| `wtft-tagger-version.ts` | `2.7.1` | `sc` (server-tool cost) is baked into every tag and its value changed for alias-only model ids | ✅ `tagger-version-single-source.test.ts` pins the single source, not the value | Bumped to `2.7.2` with the measurement (zero affected turns on this host) |
+| `bin/wtft.ts` banner | `UNKNOWN-MODEL WARNING` | a model can be well known and carry no card | n/a — comment | Renamed to `UNPRICED-MODEL WARNING`, the glossary term |
+| `CONTEXT.md` | no entry for the priced/unpriced distinction | the distinction is what `isModelPriced`, the `?` marker and the stderr line all turn on | n/a — glossary | Added *Priced model / unpriced model*, with `_Avoid_: "unknown model", "default rates" as an umbrella` |
+
+**Tier 4 (host-scoped documents), checked and declared.** All 22 paths printed by
+`ls ~/.claude/CLAUDE.md ~/git-projects/CLAUDE.md ~/.claude/settings.json
+~/git-projects/*/CLAUDE.md ~/git-projects/*/AGENTS.md` exist and were searched for
+`wtft`: **zero mentions**, so no host-scoped document asserts anything this branch
+changed. This repo has no `CLAUDE.md` or `AGENTS.md` of its own — `CONTEXT.md` carries
+the glossary and is audited above as Tier 2. A clone outside `~/git-projects/` is out of
+this scope.
+
+Two rows are `reconciled-against-untested`: the two user-facing strings that describe
+the fallback. Both are correct now and neither is asserted by a suite — a lead for the
+test process, not a reason to leave them wrong.

@@ -175,6 +175,20 @@ meant, as in `wtft-cost.ts`'s registry comments.) Narrowed in #495: the ban was 
 absolute, and then the same branch used the word three times legitimately while dropping it
 from the one surface — the rendered table — where a reader had no disambiguating sentence.
 
+**Priced model / unpriced model** (#140, narrowed #22):
+A model is **priced** when `isModelPriced` is true: a `MODEL_PRICING` entry resolves for it
+(built-in or user-merged), or one of `calculateClaudeCost`'s legacy hardcoded rate branches
+(`haiku`, `opus`) applies. Everything else is **unpriced** — its cost is a fallback figure,
+marked `?` in the per-model table and announced once per run on stderr. A **sibling guess** is
+NOT priced: a DeepSeek id that matches no registry key is costed by borrowing the nearest
+sibling's card, and that was called priced until #22 B, which suppressed the warning for
+exactly the models it exists for (a model newer than the registry). `describeFallbackPricing`
+names which fallback a given unpriced model took, so the warning and the legend never claim a
+rate the run did not use.
+_Avoid_: "unknown model" for the unpriced class (a model can be perfectly well known and still
+carry no card); "default rates" as an umbrella (there are two defaults — the Sonnet quad and
+the DeepSeek sibling guess — and naming the wrong one is the drift #22 B fixed).
+
 **Category** (the classification vocabulary):
 The `Category` union (`extensions/lib/wtft-parser.ts`) an interaction is classified into:
 `plan`, `spec`, `research`, `web`, `grep`, `code`, `tests`, `git`, `agents`, `prompt`,

@@ -36,7 +36,7 @@
  * addressed:
  *   - Asia/Jerusalem, 2026-03-27 (Friday) — spring forward, +02:00 -> +03:00.
  *   - Africa/Cairo, 2023-10-26 (Thursday) — fall back, +03:00 -> +02:00.
- *   - America/New_York, 2026-03-08 and 2026-11-01 (both Sundays; the US
+ *   - America/New_York, 2027-03-14 and 2026-11-01 (both Sundays; the US
  *     transition dates always are) — spring forward and fall back, both
  *     -05:00 <-> -04:00. Local Sunday, but NOT off-peak end to end: late
  *     local evening hours land on UTC MONDAY given the -05:00-ish offset, so
@@ -49,7 +49,8 @@
  * shift it could accept a candidate reading `HH:30` as if it matched the
  * requested `HH:00`. Verified against Australia/Lord_Howe's real 30-minute
  * shift (`Low/reasoning` on the same PR review): local hours 0 and 1 on its
- * 2026-04-05 fall-back resolved 30 minutes early. That fix is pinned
+ * 2026-04-05 fall-back resolved a wall-clock reading 30 minutes LATE — the
+ * `HH:30` instant, not the requested `HH:00` one. That fix is pinned
  * directly against `resolveZonedLocalHour` (imported from the `.ts` source,
  * not the built `bin/wtft.mjs` — the exact hours involved never surge on
  * ANY real Lord Howe date, since its transitions are permanently
@@ -133,15 +134,23 @@ describe("#24 getSurgeLocalHours (tz branch) resolves each local hour with its o
 	});
 
 	it("resolves the nonexistent local hour (02:00, the spring-forward gap) to the same peak/off-peak answer as the hour after it", () => {
-		// Hour 2 never happens locally; `resolveZonedLocalHour` converges on
-		// the same instant (2026-03-27T00:00Z) as hour 3 — see
-		// JERUSALEM_EXPECTED_INSTANTS, and the NY block below for the same
-		// claim on the other side of UTC. Both are off-peak here, so this pins
-		// that the gap hour is not incidentally miscounted as its OWN,
-		// different instant.
+		// Both are off-peak here, so this alone cannot distinguish "resolves
+		// to hour 3's instant" from "resolves to any other off-peak instant"
+		// — the next test closes that gap with a direct instant assertion.
 		const surge = getSurgeLocalHours(JERUSALEM, JERUSALEM_NOW_POST_TRANSITION);
 		assert.strictEqual(surge.has(2), surge.has(3));
 		assert.strictEqual(surge.has(2), false);
+	});
+
+	it("(direct) the gap hour resolves to the EXACT instant hour 3 does, not merely an off-peak one", () => {
+		// getSurgeLocalHours' boolean membership can't tell "same instant as
+		// hour 3" apart from "some other off-peak instant" (PR review,
+		// Medium/contract) — this asserts the actual UTC instant instead.
+		assert.strictEqual(
+			resolveZonedLocalHour(2026, 3, 27, 2, JERUSALEM),
+			resolveZonedLocalHour(2026, 3, 27, 3, JERUSALEM),
+		);
+		assert.strictEqual(resolveZonedLocalHour(2026, 3, 27, 2, JERUSALEM), Date.parse(JERUSALEM_EXPECTED_INSTANTS[2]));
 	});
 });
 
@@ -185,6 +194,16 @@ describe("#24 getSurgeLocalHours (tz branch) on a fall-back day", () => {
 			);
 		}
 		assert.deepStrictEqual(sortedHours(surge), CAIRO_EXPECTED_SURGE_HOURS);
+	});
+
+	it("(direct) the fold hour resolves to its LATER real occurrence, not merely an off-peak instant", () => {
+		// Neither occurrence of hour 23 is inside a peak window on this date,
+		// so the loop above cannot distinguish "resolved to the later
+		// occurrence" from "resolved to the earlier one" — this asserts the
+		// actual UTC instant.
+		// 21:00Z is the LATER (+02:00) occurrence; 20:00Z (+03:00) is the earlier
+		// one the else/host branch resolves to instead (see that block below).
+		assert.strictEqual(resolveZonedLocalHour(2023, 10, 26, 23, CAIRO), Date.parse("2023-10-26T21:00:00.000Z"));
 	});
 });
 
@@ -267,6 +286,18 @@ describe("#24 getSurgeLocalHours (tz branch) on America/New_York — the negativ
 			assert.strictEqual(post.has(hour), charged, `hour ${hour}: oracle instant ${NY_FALL_EXPECTED_INSTANTS[hour]}`);
 		}
 		assert.deepStrictEqual(sortedHours(post), NY_FALL_EXPECTED_SURGE_HOURS);
+	});
+
+	it("(direct) the spring-forward gap resolves to the EXACT instant hour 3 does — the zone-sign-independent claim, on its own instant, not just its peak/off-peak answer", () => {
+		assert.strictEqual(
+			resolveZonedLocalHour(2027, 3, 14, 2, NEW_YORK),
+			resolveZonedLocalHour(2027, 3, 14, 3, NEW_YORK),
+		);
+		assert.strictEqual(resolveZonedLocalHour(2027, 3, 14, 2, NEW_YORK), Date.parse(NY_SPRING_EXPECTED_INSTANTS[2]));
+	});
+
+	it("(direct) the fall-back fold resolves to its LATER real occurrence, on its own instant", () => {
+		assert.strictEqual(resolveZonedLocalHour(2026, 11, 1, 1, NEW_YORK), Date.parse(NY_FALL_EXPECTED_INSTANTS[1]));
 	});
 
 	it("resolves the spring-forward gap (local 02:00) the same way the else/host branch does — the gap case does NOT diverge between branches, on either side of UTC", () => {

@@ -672,10 +672,15 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
  * where a single sampled offset is wrong for whichever side of the
  * transition a given hour falls on (#24).
  *
- * Samples the offset a full day on each side of the target instant — far
- * enough that neither sample can itself be inside the transition being
- * resolved — then converts the wall-clock digits with each. On an ordinary
- * day the two offsets agree and either conversion is the answer. On a
+ * Samples the offset a full day on each side of the wall-clock digits'
+ * NAIVE UTC reading (`wallUtcMs` — the requested (year, month, day, hour)
+ * interpreted as if it were already a UTC instant, not the real instant
+ * being resolved, which is unknown until one of the two samples is chosen)
+ * — far enough on either side that neither sample can itself land inside
+ * the transition being resolved, even though `wallUtcMs` can sit up to an
+ * offset's width from the real answer — then converts the wall-clock
+ * digits with each. On an ordinary day the two offsets agree and either
+ * conversion is the answer. On a
  * transition day they disagree, and which converted instant is REAL is
  * decided by asking `getZonedParts` whether converting it back reproduces
  * the same (year, month, day, hour, :00:00): a candidate that fails is a

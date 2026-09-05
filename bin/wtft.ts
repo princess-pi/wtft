@@ -648,16 +648,16 @@ async function main() {
 	// the two output modes silently reporting a settled total for a session
 	// whose subagent transcript could not be read.
 	//
-	// Memoised because it IS called twice on the `--json` path — once by that
-	// branch, to let the scan downgrade `provisional` before the notices are
-	// built, and once inside `emitSessionJson` — and because `--tokens` calls it
-	// a third time on the rendered path. The memo is what makes those one scan of
-	// every subagent session instead of two or three.
+	// Memoised so that no run scans the subagent tree more than once, whichever
+	// of its call sites fire. The `--json` path really does reach it twice — once
+	// to let the scan downgrade `provisional` before the notices are built, once
+	// inside `emitSessionJson` — which is why the memo is load-bearing rather
+	// than decorative.
 	//
-	// An earlier version of this comment claimed there was no second call today.
-	// There is; a rationale that misdescribes its own control flow is how the
-	// next reader learns to distrust the comments, which is the correction this
-	// file already carries at `getCandidates`. (PR review, Low/reasoning.)
+	// Deliberately not a count of call sites: two earlier versions of this
+	// comment carried one and both were wrong, which is how a reader learns to
+	// distrust the comments. The invariant is "at most one scan per run", and
+	// that is checkable from the cache alone.
 	let uncountedCache: UncountedBillables | null = null;
 	const scanSessionUncounted = (): UncountedBillables => {
 		if (uncountedCache) return uncountedCache;
@@ -763,12 +763,17 @@ async function main() {
 	// `wtft` and 9 under `wtft --json`. The exit-code table says nothing about
 	// mode, and 9 means "the total may still grow" — which is as true of an empty
 	// report from a stale tag as of a full one. One helper, both modes.
-	// The #443 stderr line, emitted at most once per run. Both output modes and
-	// all three empty/normal arms route through here, which is what makes the
-	// "stderr in both modes" claim in the SHARED WORDING banner true: the
-	// `--json` empty arms used to skip it entirely, so an empty report from a
-	// stale tag exited 9 with no human-readable reason anywhere.
-	// (PR review, Medium/reasoning.)
+	// The #443 stderr line for the arms that would otherwise print none: both
+	// EMPTY arms in both modes, and the full `--json` report. Latched, so a
+	// `--json` run that both scans and emits says it once rather than twice.
+	//
+	// The rendered FULL report is the one arm that does not route through here.
+	// It prints its own two-line form — the warning, then a remedy line ending
+	// `Exit 9.` — whose shape `tests/wtft-443-cli-exit-9.test.ts` pins, so
+	// folding it into this one-line warner would be a user-visible change to a
+	// surface #443 deliberately designed. It already emits the line, which is
+	// what the SHARED WORDING banner claims; this helper is about the arms that
+	// did not. (PR review, Medium/reasoning.)
 	let warnedProvisional = false;
 	const warnProvisionalOnce = () => {
 		if (warnedProvisional || !provisional.provisional) return;

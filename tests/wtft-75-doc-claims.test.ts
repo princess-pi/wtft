@@ -28,6 +28,10 @@ import * as path from "node:path";
 
 const REPO = path.resolve(import.meta.dir, "..");
 const read = (rel: string) => fs.readFileSync(path.join(REPO, rel), "utf8");
+/** Source with `//` and block comments removed, so a literal quoted in prose does not count. */
+const stripTsComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+/** Shell source with `#` comment lines removed (a `#` mid-line is left alone: it may be in a string). */
+const stripShComments = (src: string) => src.split("\n").filter(l => !/^\s*#/.test(l)).join("\n");
 
 const RED = "\x1b[31m", GREEN = "\x1b[32m", RESET = "\x1b[0m";
 let passed = 0, failed = 0;
@@ -41,7 +45,7 @@ function check(ok: boolean, label: string, detail?: string) {
 // ---
 console.log("\n1. README wtft examples name real flags");
 {
-	const parser = read("extensions/lib/wtft-cli-shared.ts");
+	const parser = stripTsComments(read("extensions/lib/wtft-cli-shared.ts"));
 	const accepted = new Set<string>();
 	for (const m of parser.matchAll(/arg === "(-{1,2}[A-Za-z][\w-]*)"/g)) accepted.add(m[1]);
 	for (const m of parser.matchAll(/arg\.startsWith\("(--[\w-]+)="\)/g)) accepted.add(m[1]);
@@ -78,6 +82,8 @@ console.log("\n2. spec-159 names the whole files allowlist");
 		missing.length ? `absent from spec: ${missing.join(", ")}` : undefined);
 	check(!/two bundles[\s\S]{0,160}the whole `files` allowlist/.test(spec),
 		"spec-159 no longer calls two bundles the whole allowlist");
+	check(/four-entry `files` allowlist/.test(spec),
+		"spec-159 states the allowlist count, and it is four");
 	check(!/NOT delivered by any npm channel/.test(spec),
 		"spec-159 no longer says the Pi extensions ship via no npm channel");
 }
@@ -105,7 +111,7 @@ console.log("\n3. CONTEXT.md pager entry agrees with the CLI");
 // ---
 console.log("\n4. README install-wtft exit codes match the script");
 {
-	const script = read("bin/install-wtft");
+	const script = stripShComments(read("bin/install-wtft"));
 	const codes = new Set<string>();
 	for (const m of script.matchAll(/\bexit (\d+)\b/g)) codes.add(m[1]);
 	for (const m of script.matchAll(/\bEXIT=(\d+)\b/g)) codes.add(m[1]);
@@ -116,8 +122,12 @@ console.log("\n4. README install-wtft exit codes match the script");
 	check(codes.size >= 5, `script exits with several distinct codes (${[...codes].sort((a, b) => +a - +b).join(", ")})`);
 	check(missing.length === 0, "README bolds every exit code the script can return",
 		missing.length ? `not in README: ${missing.join(", ")}` : undefined);
-	check(/HOME/.test(section) && /no-dir|cannot be created/.test(section),
-		"README names the two extra causes: HOME unset (64) and un-creatable --dir (1)");
+	// Bound to the code, not just present: the cause must sit in the same
+	// sentence as its bolded number, so swapping the two would fail here.
+	check(/\*\*1\*\*[^.]*(no-dir|cannot be created)/.test(section),
+		"README ties an un-creatable --dir to exit 1");
+	check(/\*\*64\*\*[^.]*HOME/.test(section),
+		"README ties HOME unset to exit 64");
 	check(/--version[^.]*path/.test(section),
 		"README says install-wtft --version prints a path, not a version");
 }

@@ -735,13 +735,16 @@ async function main() {
 	// Writes with `process.stdout.write` and no trailing `console.log`: the
 	// document ends in exactly one newline, and nothing else may follow it.
 	//
-	// `uncounted` is SCANNED on every path, never defaulted to zeros. Zeros that
-	// mean "not scanned" are indistinguishable from zeros that mean "none found",
-	// and a consumer reading `.uncounted.compaction === 0` would conclude there
-	// is no blind spot when nobody looked. On the `pending-session` arm the file
-	// does not exist yet and the scan is a no-op; on the `no-data` arm the file
-	// exists and the scan can find real billables in it, which is precisely the
-	// case where a zero would have been a lie.
+	// `uncounted` is scanned wherever there is anything to scan, rather than
+	// defaulted: zeros that mean "not scanned" are indistinguishable from zeros
+	// that mean "none found", and a consumer reading `.uncounted.compaction === 0`
+	// would conclude there is no blind spot when nobody looked. The `no-data` arm
+	// has a real session file and does scan it, which is precisely the case where
+	// a zero would have been a lie.
+	//
+	// The `pending` arm is the one exception and returns zeros WITHOUT scanning:
+	// the file does not exist, so there is nothing to read and nothing to find —
+	// and re-checking would reintroduce the race the flag exists to pin.
 	//
 	// ORDER MATTERS, and getting it wrong is invisible: `scanSessionUncounted`
 	// can REASSIGN `provisional` to `subagent-unreadable` (#457). Called from
@@ -832,16 +835,23 @@ async function main() {
 		// `exitCode` and return, never `process.exit()`: on Linux node's stdout is
 		// asynchronous when it is a pipe, and `process.exit()` does not wait for
 		// pending writes — `wtft --json | jq` could lose the tail of the document.
-		// Same rule as `finishEmptyReport` above, and deliberately not that helper:
-		// this path must NOT print the stderr sentence, which its callers already
-		// emitted, and must not print one at all on the empty arms.
+		// Same rule as `finishEmptyReport` above. The stderr sentence is emitted
+		// through the shared latch just above, so it lands exactly once on every
+		// arm — including the empty ones, which printed none until round 6.
 		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
 	};
 	// #308: nothing to wait for while the session log itself is unwritten — the
 	// daemon is parked on it (heartbeating) and will parse the first line when it
-	// lands. Say so and exit 0: a one-shot CLI must not block, and "not written yet"
-	// is the true state. Only an existing-but-unclassified session earns the short
-	// wait below.
+	// lands. Say so and exit 0; "not written yet" is the true state, and only an
+	// existing-but-unclassified session earns the tag wait further down.
+	//
+	// This branch does NOT return immediately, and an earlier version of this
+	// comment said "a one-shot CLI must not block" while the code blocked: it
+	// spends up to DAEMON_START_CEILING_MS in `awaitDaemonUp` first. That wait is
+	// not for the session file — it is for the claim the message is about to
+	// make, that a daemon is waiting on the path, which #309 review found was
+	// never checked. It bounds only the alive-but-unclaimed case, and that case
+	// still exits 0.
 	if (interactions.length === 0 && !fs.existsSync(finalSessionPath)) {
 		// "The daemon is running and waiting on it" is the whole value of this
 		// message, and it was never checked (#309 review): spawnWtftDaemon only
@@ -1087,6 +1097,18 @@ async function main() {
 	// `provisional.reason`, and takes the branch above rather than this one. The
 	// exit code KEEPS its meaning there — a consumer reading `$?` and one
 	// reading the field get the same answer, which is why #26 did not retire it.
+	// WHAT THIS VERDICT IS SCOPED TO (PR review round 9, Medium/correctness).
+	// `scanSessionUncounted` is what discovers `subagent-unreadable`, and a plain
+	// `wtft` run — no `--tokens`, no `--json`, data present — never calls it. So
+	// a session whose ONLY provisional condition is an unreadable subagent
+	// directory exits 0 here and 9 under the two modes that do scan.
+	//
+	// Deliberately not "fixed" by scanning here. That would put a full read of
+	// the session and every subagent transcript on the commonest invocation of
+	// all, to detect a rare condition the run is not otherwise looking for — the
+	// exact cost #443 chose read-then-render to avoid. The exit code reports what
+	// the run actually checked, which is the only thing it can honestly report.
+	// docs/spec-26-json.md says so beside the exit-code table.
 	if (provisional.provisional) {
 		const why = describeProvisionalReason(provisional, tagPath);
 		// The remedy names ONE action, and deliberately does not mention -F (PR

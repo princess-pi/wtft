@@ -611,6 +611,14 @@ console.log("\n9. rendered and --json agree on the exit code, empty or not");
 			`rendered=${rendered.code} json=${asJson.code}`);
 	}
 
+	// Scope note, so this section is not read as a claim it does not make: the
+	// case below compares `--tokens` with `--json`, both of which run the
+	// blind-spot scan. A plain `wtft` run with data present never runs it, so a
+	// session whose only provisional condition is an unreadable subagent
+	// directory exits 0 there by design — see docs/spec-26-json.md, "The verdict
+	// is scoped to what the run checked". The EMPTY paths above have no such
+	// exception and are asserted for both modes.
+	//
 	// And the case that made round 2's fix incomplete: a tag that is SETTLED, but
 	// where the blind-spot scan itself discovers an unreadable subagent directory
 	// and downgrades the verdict to `subagent-unreadable` (#457). `--json` scanned

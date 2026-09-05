@@ -190,6 +190,17 @@ arms returning without setting the code, the second found the rendered arms
 still falling through to `process.exit(0)` after the `--json` ones were fixed —
 so the same session exited 0 under `wtft` and 9 under `wtft --json`.
 
+**The verdict is scoped to what the run checked.** The exit code is otherwise
+mode-invariant, with one honest exception: `subagent-unreadable` is discovered by
+the `uncounted` scan, and a plain `wtft` run — no `--tokens`, no `--json`, data
+present — never performs it. Such a session exits 0 there and 9 under the two
+modes that do scan. That is deliberate, not an oversight: scanning on the default
+path would put a full read of the session and every subagent transcript on the
+commonest invocation of all, to detect a rare condition the run is not otherwise
+looking for — the exact cost #443 chose read-then-render to avoid. The code
+reports what the run actually checked. The *empty* paths are unaffected, and §9
+of the suite pins that they agree.
+
 **The blind-spot scan can change the verdict.** An unreadable subagent session
 file discovered during the `uncounted` scan sets `provisional.reason` to
 `subagent-unreadable` regardless of what the tag file itself says, so
@@ -270,12 +281,12 @@ sections:
 8. **§8** an *empty* report obeys the exit-code contract too: a provisional one
    exits 9 and a settled one exits 0, asserted in both directions so the claim
    cannot pass by both sides being false.
-8c. **§8c** the `#443` stderr line reaches every arm — the empty `--json` ones
-   included, which used to exit 9 with nothing a human could read — and appears
-   **exactly once**, never twice on a full report.
 8b. **§8b** a session file that was never written is *late, not broken* (#308):
    one object, a `pending-session` notice, `provisional: false`, exit 0, and a
    zeroed blind spot meaning "nothing to scan" rather than a guess.
+8c. **§8c** the `#443` stderr line reaches every arm — the empty `--json` ones
+   included, which used to exit 9 with nothing a human could read — and appears
+   **exactly once**, never twice on a full report.
 9. **§9** the rendered path and `--json` return the **same** code on the same
    state, empty or not — each mode against its own fresh fixture, because the
    first run's daemon repairs the tag and a second run against it would

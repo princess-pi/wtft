@@ -91,8 +91,8 @@ contract.
 | `session.harness` | string \| null | Harness id whose parse adapter claims the session's first assistant turn — `"claude-code"`, `"pi"`, or an id registered out of tree through the #156 seam. `null` means **no claim**, and does not distinguish an empty session, one not written yet, a file that could not be read, and a format no registered harness understands. |
 | `session.taggerVersion` | string | `WTFT_TAGGER_VERSION` of the running binary — a dotted version such as `"2.7.2"`, which is also what appears in `tagPath`. |
 | `session.tagPath` | string | The classified tag file this run read. |
-| `provisional.provisional` | bool | The `readTagProvisional` verdict — may this total still grow? |
-| `provisional.reason` | string \| null | `"stale-version"` · `"unswept"` · `"subagent-unreadable"`, or `null` when settled. |
+| `provisional.provisional` | bool | **This run's** verdict — may this total still grow? Usually `readTagProvisional`'s answer, but the blind-spot scan can override it (see below), so do not read it as "what the tag file says". |
+| `provisional.reason` | string \| null | A **closed three-value vocabulary**, unchanged since #457 and enforced by the `TagProvisionalReason` union: `"stale-version"` · `"unswept"` · `"subagent-unreadable"`, or `null` when settled. `--json` reports it; it did not widen it. |
 | `total.*` | number | Exact session totals. Cost is USD, the rest are token counts. |
 | `models[]` | array | One row per model id, **sorted by `costUsd` descending** — the same order and the same numbers as the rendered `--tokens` table's rows, un-abbreviated. `model` is the full id, never shortened. |
 | `models[].priced` | bool | `isModelPriced(model)` — the `?` marker in the rendered table. `false` means **no rate card**, not "wtft guessed this row": a harness-native per-turn cost is used unchanged wherever the transcript records one, so a marked row's cost can mix provenance. |
@@ -139,8 +139,14 @@ different **numbers**.
 Three things the human table prints have no JSON counterpart, because they are
 ratios and legends derived at render time rather than aggregate facts: the
 per-model `Cache:` hit-rate line, the `Think:` budget-utilisation line, and the
-`?` fallback legend. A consumer recomputes the first two from fields the document
-already carries; the third is `models[].priced`.
+`?` fallback legend.
+
+Two of the three are recoverable. The cache hit rate is
+`cacheReadTokens / (cacheReadTokens + cacheWriteTokens + inputTokens)`, all three
+in the document; the legend is `models[].priced`. The **`Think:` percentage is
+not**, and cannot be: its denominator is `--thinking-budget`, an input flag the
+document does not carry and which `--json` ignores outright. A consumer gets
+`reasoningTokens` and supplies its own budget.
 
 `buildSessionJson` is otherwise a pure serialiser — every number it emits comes
 from the aggregation, with the single exception of `uncounted`, which is a

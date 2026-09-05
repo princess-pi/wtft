@@ -105,9 +105,12 @@ stale in three ways I found by diffing it against `docs/manifests/wtft-cmd.json`
    stale string, not a downstream consequence of the manifest one).
 2. It lists `-c, --cumulative` and `-b, --bucket` as two separate flags; the manifest has always
    documented them as one row (`"-c, --cumulative, -b, --bucket"`).
-3. It is missing 16 documented flags outright — `--tokens`/`--by-model`,
+3. It is missing these documented flags outright — `--tokens`/`--by-model`,
    `--watch`, `--emoji`, `--harness`, `--thinking-budget`, `--pad`, the daemon management group
-   (`--list`/`--cleanup`/`--restart`/`--stop`/`-F`), `--help`/`--version`/`--why`.
+   (`--list`/`--cleanup`/`--restart`/`--stop`/`-F`), `--help`/`--version`/`--why`, and `--json`
+   since #26. (The count that used to lead this line is gone: it was derived from a manifest
+   entry count that moves on every flag added, and it was already wrong by one before #26
+   touched it.)
 
 So the "keep and extend the fetch pattern" instruction in the issue is achievable exactly as
 framed, but the target is bigger than the issue states: the `--why` fetch is not the only thing

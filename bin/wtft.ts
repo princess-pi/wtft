@@ -813,16 +813,16 @@ async function main() {
 			process.exit(1);
 		}
 		const pendingText = `Session log not written yet: ${finalSessionPath}. ` +
-			`Claude Code writes its first line after the first real prompt (not a /command) completes. ` +
-			`The wtft daemon is running and waiting on it — run again after the first response, or use --watch to stay attached.`;
+			`A harness writes its first line after the first real prompt (not a /command) completes. ` +
+			`The log parser daemon is running and waiting on it — run again after the first response, or use --watch to stay attached.`;
 		if (opts.json) {
 			console.error(`\x1b[33m${pendingText}\x1b[0m`);
 			emitSessionJson({ notices: [{ code: "pending-session", text: pendingText }] });
 			return;
 		}
 		console.log(`\x1b[33mSession log not written yet: ${finalSessionPath}\x1b[0m`);
-		console.log(`\x1b[90mClaude Code writes its first line after the first real prompt (not a /command) completes. ` +
-			`The wtft daemon is running and waiting on it — run again after the first response, or use --watch to stay attached.\x1b[0m`);
+		console.log(`\x1b[90mA harness writes its first line after the first real prompt (not a /command) completes. ` +
+			`The log parser daemon is running and waiting on it — run again after the first response, or use --watch to stay attached.\x1b[0m`);
 		finishEmptyReport();
 		return;
 	}

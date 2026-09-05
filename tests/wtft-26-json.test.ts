@@ -74,7 +74,7 @@ const MODEL_UNPRICED = "acme-frobnicator-1";
  *  boundary in every column INCLUDING Reasoning — an all-zero reasoning fixture
  *  compares "0" against "0" and proves nothing about that column. */
 const TURNS = [
-	{ cat: "code",  model: MODEL,          input: 1200, output: 90,  cr: 4000, cw: 700, rs: 0,    cost: 0.0123 },
+	{ cat: "code",  model: MODEL,          input: 1200, output: 90,  cr: 4000, cw: 1700, rs: 0,    cost: 0.0123 },
 	{ cat: "spec",  model: MODEL,          input: 900,  output: 310, cr: 0,    cw: 250, rs: 2400, cost: 0.0410 },
 	{ cat: "other", model: MODEL,          input: 1500, output: 640, cr: 9000, cw: 0,   rs: 0,    cost: 0.0072 },
 	{ cat: "git",   model: MODEL_UNPRICED, input: 300,  output: 45,  cr: 0,    cw: 0,   rs: 0,    cost: 0.0009 },

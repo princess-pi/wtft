@@ -43,6 +43,20 @@
  *     the surge set is not trivially empty even though the ambiguous hour
  *     itself (2 for spring, 1 for fall) is not one of the surging hours.
  *
+ * A second review round then caught a second, unrelated bug in the same
+ * function: its reparse check compared only (year, month, day, hour),
+ * ignoring minute and second — so for a zone with a non-whole-hour DST
+ * shift it could accept a candidate reading `HH:30` as if it matched the
+ * requested `HH:00`. Verified against Australia/Lord_Howe's real 30-minute
+ * shift (`Low/reasoning` on the same PR review): local hours 0 and 1 on its
+ * 2026-04-05 fall-back resolved 30 minutes early. That fix is pinned
+ * directly against `resolveZonedLocalHour` (imported from the `.ts` source,
+ * not the built `bin/wtft.mjs` — the exact hours involved never surge on
+ * ANY real Lord Howe date, since its transitions are permanently
+ * Sunday-locked to the Australian mainland's calendar, so `getSurgeLocalHours`
+ * itself cannot observe this one through peak/off-peak membership the way
+ * the other zones above do).
+ *
  * Jerusalem and Cairo are used for the spring/fall PAIR on the positive
  * side, and reused (not re-derived) for the weekday requirement — the
  * US/EU transitions this repo's other tests reach both fall on a Sunday,
@@ -59,6 +73,12 @@
 import * as assert from "node:assert";
 import { describe, it } from "node:test";
 import { getSurgeLocalHours, getDeepSeekPeakMultiplier } from "../bin/wtft.mjs";
+// Imported from the `.ts` source directly (the same pattern
+// `tests/timeline-24h.ts` already uses), not the built `bin/wtft.mjs`:
+// `resolveZonedLocalHour` has no reason to be part of the CLI's public
+// bundle, and the Lord Howe case below needs it directly — see the file
+// header for why `getSurgeLocalHours` cannot observe that bug on its own.
+import { resolveZonedLocalHour } from "../extensions/lib/wtft-renderer.ts";
 
 function sortedHours(set: Set<number>): number[] {
 	return [...set].sort((a, b) => a - b);
@@ -278,6 +298,29 @@ describe("#24 getSurgeLocalHours (tz branch) on America/New_York — the negativ
 		} finally {
 			if (originalTz === undefined) delete process.env.TZ; else process.env.TZ = originalTz;
 		}
+	});
+});
+
+// --- Direct: Australia/Lord_Howe's 30-minute shift (the minute-check fix) ---
+//
+// Real fall-back (DST end), 2026-04-05: local 02:00 DST (+11:00) steps back
+// to local 01:30 standard (+10:30) — a 30-minute fold, not the usual
+// one-hour one. The fold window is local 01:30-01:59; local hours 0:00 and
+// 1:00 both occur exactly once, strictly BEFORE it, so neither is itself
+// ambiguous. That made this a clean way to isolate the minute-comparison
+// bug (see file header): a `resolveZonedLocalHour` that reparse-checks only
+// (year, month, day, hour) accepts the 01:30 instant as if it were the
+// requested 01:00, because both share `hour === 1`.
+const LORD_HOWE = "Australia/Lord_Howe";
+
+describe("#24 resolveZonedLocalHour, direct: Lord Howe's non-whole-hour shift", () => {
+	it("resolves local hours 0 and 1 to their real :00 instant, not the zone's 30-minutes-later reading", () => {
+		assert.strictEqual(resolveZonedLocalHour(2026, 4, 5, 0, LORD_HOWE), Date.parse("2026-04-04T13:00:00.000Z"));
+		assert.strictEqual(resolveZonedLocalHour(2026, 4, 5, 1, LORD_HOWE), Date.parse("2026-04-04T14:00:00.000Z"));
+	});
+
+	it("still resolves an ordinary hour on the same day correctly (regression guard on the common path)", () => {
+		assert.strictEqual(resolveZonedLocalHour(2026, 4, 5, 12, LORD_HOWE), Date.parse("2026-04-05T01:30:00.000Z"));
 	});
 });
 

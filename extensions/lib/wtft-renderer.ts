@@ -678,8 +678,18 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
  * day the two offsets agree and either conversion is the answer. On a
  * transition day they disagree, and which converted instant is REAL is
  * decided by asking `getZonedParts` whether converting it back reproduces
- * the same (year, month, day, hour): a candidate that fails is a computed
- * timestamp nobody's wall clock actually shows.
+ * the same (year, month, day, hour, :00:00): a candidate that fails is a
+ * computed timestamp nobody's wall clock actually shows. Minute and second
+ * are checked too, not just the hour (pinned in
+ * `tests/wtft-24-dst-hours.test.ts` via Australia/Lord_Howe's 30-minute
+ * shift): comparing hour alone would accept a candidate that reads
+ * `HH:30:00` as if it were the requested `HH:00:00`, since only the digit
+ * this function was asked to convert can be trusted to be exactly `:00`.
+ * The one-hour gap-width algebra a few paragraphs down assumes a whole-hour
+ * shift, which does not hold for Lord Howe's own 30-minute one — this
+ * function still resolves every ORDINARY (non-transition) hour correctly
+ * there, but the gap/fold hour's resolution loses the "same instant as the
+ * adjacent hour" property outside the common whole-hour case.
  *
  * Two ambiguous cases fall out of that check, both resolved the same way —
  * prefer the later (post-transition) candidate when it is real, the earlier
@@ -704,7 +714,7 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
  * EARLIER occurrence, not its later one (also pinned by the same tests) —
  * a documented, tested choice on each side, not a defect to reconcile.
  */
-function resolveZonedLocalHour(year: number, month: number, day: number, hour: number, tz: string): number {
+export function resolveZonedLocalHour(year: number, month: number, day: number, hour: number, tz: string): number {
 	const wallUtcMs = Date.UTC(year, month - 1, day, hour, 0, 0, 0);
 	const earlyOffsetMs = getTimezoneOffsetMs(wallUtcMs - ONE_DAY_MS, tz);
 	const candidateEarly = wallUtcMs - earlyOffsetMs;
@@ -715,7 +725,8 @@ function resolveZonedLocalHour(year: number, month: number, day: number, hour: n
 	const candidateLate = wallUtcMs - lateOffsetMs;
 	const lateParts = getZonedParts(candidateLate, tz);
 	const lateIsReal = lateParts.year === year && lateParts.month === month
-		&& lateParts.day === day && lateParts.hour === hour;
+		&& lateParts.day === day && lateParts.hour === hour
+		&& lateParts.minute === 0 && lateParts.second === 0;
 	return lateIsReal ? candidateLate : candidateEarly;
 }
 

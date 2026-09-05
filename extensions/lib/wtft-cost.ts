@@ -82,8 +82,17 @@ export const WEB_FETCH_PRICE = 0.03;   // $0.03 per fetch request
  * Only Claude models are billed per-request for web search/fetch today.
  * DeepSeek, Gemini, and local models do not charge for server_tool_use.
  *
- * The test for "is this Claude" is a VENDOR MARKER in the id — `claude` or
- * `anthropic` — and nothing else (#22 A). It used to also accept a bare alias,
+ * The test for "is this Claude" is a substring search for `claude` or
+ * `anthropic`, with any id that ALSO says `deepseek` excluded (#22 A).
+ *
+ * Substring, not an anchored marker, and the difference is worth stating
+ * (pr-review round 2): `notclaude` and `misanthropic` would bill. Neither is a
+ * model id anyone issues, and anchoring would break the id forms that matter —
+ * `us.anthropic.claude-sonnet-5-v1:0` carries the marker mid-string. The one
+ * collision that is not hypothetical on this host is a `claude-`-prefixed id
+ * naming a DeepSeek model, which the `deepseek` exclusion catches; measured
+ * across every Pi and Claude Code session here, ZERO ids carry both words
+ * today, so the exclusion is a guard rather than a correction. It used to also accept a bare alias,
  * `/\b(haiku|sonnet|opus)\b/`, to catch a Claude id written without the
  * `claude-` prefix. That arm billed DeepSeek: `claude-deepseek` exports
  * ANTHROPIC_MODEL="opus", so a DeepSeek turn recorded as plain `opus` was
@@ -106,6 +115,7 @@ export function calculateServerToolCost(
 	const m = (model || "").toLowerCase();
 	// Only Claude charges per-request for server tools.
 	// Other providers (DeepSeek, Gemini, local) don't — return 0.
+	if (m.includes("deepseek")) return 0;
 	if (!m.includes("claude") && !m.includes("anthropic")) {
 		return 0;
 	}

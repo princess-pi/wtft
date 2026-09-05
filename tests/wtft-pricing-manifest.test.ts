@@ -65,6 +65,11 @@ describe("#169 every priced model reaches the manifest", () => {
 		for (const model of listed) {
 			assert.ok(priced.includes(model), `${model} is in the committed manifest but no longer priced — run: bun run build`);
 		}
+		// "exactly" means the counts match too (pr-review round 2). Inclusion in
+		// both directions is satisfied by a manifest that lists a model twice.
+		assert.strictEqual(listed.length, priced.length,
+			`the committed manifest has ${listed.length} rows for ${priced.length} priced models — a duplicate or dropped entry; run: bun run build`);
+		assert.strictEqual(new Set(listed).size, listed.length, "the committed manifest lists a model more than once");
 	});
 
 	it("carries the Claude 5 family and the GPT-5.x lineup the old table omitted", () => {

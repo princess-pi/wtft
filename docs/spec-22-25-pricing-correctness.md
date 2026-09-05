@@ -42,8 +42,17 @@ without the `claude-` prefix. It also matches the alias names a `claude-deepseek
 session serves, which set `ANTHROPIC_MODEL="opus"` against DeepSeek — a provider
 the function's own docstring says does not bill server tools.
 
-**Decision.** Bill per-request only when the id carries a vendor marker:
-`claude` or `anthropic`. A bare alias bills `0`.
+**Decision.** Bill per-request only when the id contains `claude` or `anthropic`
+**and does not contain `deepseek`**. A bare alias bills `0`.
+
+The `deepseek` exclusion came out of `pr-review` round 2, which was right that a
+substring search is not a marker: `notclaude` and `misanthropic` would bill.
+Anchoring is not the remedy — `us.anthropic.claude-sonnet-5-v1:0` carries the
+marker mid-string — and neither of those is an id anyone issues. The collision
+that is not hypothetical is a `claude-`-prefixed id naming a DeepSeek model, and
+that is the one the exclusion catches. Measured across every Pi and Claude Code
+session on this host: **zero ids carry both words**, so it is a guard, not a
+correction.
 
 This is the least-wrong option by the registry's own annotations: every registry
 Claude key is `claude-*`, every real Anthropic id (Bedrock `us.anthropic.claude-…`,
@@ -106,9 +115,13 @@ it in this repo, and a fabricated quad is worse than an honest `?`.
 - **C4** "GPT-5.6-sol cache writes are zero when no cache data" passed a usage object
   with no cache fields, so it asserted a property of every model at every rate and
   nothing about `gpt-5.6-sol`. Deleted as a duplicate of the base-rate test three
-  cases above it, and replaced by two that bite: a flat cache-creation billing at
-  `gpt-5.6-sol`'s `cacheWrite` of `$6.25/MTok`, and a 1h-TTL write billing at
-  `2 × input`.
+  cases above it, and replaced by **three** that bite: a flat cache-creation billing
+  at `gpt-5.6-sol`'s `cacheWrite` of `$6.25/MTok`, a 1h-TTL write billing at
+  `2 × input`, and — found while writing the first two — a cache write large enough
+  to cross the 272K threshold **on its own**, which prices at the tiered `$12.50`
+  because the resolver sums input + cacheRead + cacheWrite. That third case is why
+  the first two use a 100K fixture: a 1 MTok one would have tested the tier while
+  claiming to test the base rate.
 
 ## D — the Pi corpus check (#25)
 
@@ -121,10 +134,13 @@ It prints a scope line naming what it did **not** examine, a mismatch percentage
 and `--json`. Turns whose model resolves to no card (`deepseek-reasoner`) are
 counted as `unpriced`, never silently compared.
 
-It **fails closed on an empty corpus** (`pr-review` round 1): `ok` requires
+It **fails closed on an empty corpus** (`pr-review` rounds 1 and 2): `ok` requires
 `files > 0` and `compared > 0` as well as zero mismatches, so a run against a host
-with no Pi sessions exits 1 and says so, rather than printing `0.0000%` for a
-corpus it never read — the same dishonesty this file exists to correct.
+with no Pi sessions exits 1 and says `EMPTY CORPUS`. Round 2 caught that the first
+version still *printed* `0.0000%` above that line and carried `mismatchPercent: 0`
+in `--json` — the dishonest figure, merely accompanied by a warning. A percentage
+over an empty denominator is now `null` in the record and
+`(no percentage — nothing was compared)` in the text.
 
 **Closer:** `corpus-check.mjs` reports `0.0000%` mismatch over the priced Pi turns
 and a non-zero `unpriced` count that matches the `deepseek-reasoner` turn count.
@@ -181,6 +197,17 @@ lines the diff removed, plus Tier 4's host-scoped set.
 changed. This repo has no `CLAUDE.md` or `AGENTS.md` of its own — `CONTEXT.md` carries
 the glossary and is audited above as Tier 2. A clone outside `~/git-projects/` is out of
 this scope.
+
+**`pr-review` round 2 added five more, all verified against the code:** the
+server-tool docstring claimed a "vendor marker" the code did not enforce (fixed in
+both directions — `deepseek` excluded in code, the substring named honestly in
+prose and in this spec's A section); `corpus-check.mjs` printed `0.0000%` and
+carried `mismatchPercent: 0` on a corpus it never read (now `null` and a named
+line); its header still stated the pre-fail-closed exit contract; the C1
+replacement asserted inclusion both ways but not cardinality, so a duplicated
+manifest row passed; and this spec said C4 was replaced by *two* tests when the
+diff adds three. Every one was a prose-vs-code contradiction of exactly the class
+this record exists to close.
 
 Two rows are `reconciled-against-untested`: the two user-facing strings that describe
 the fallback. Both are correct now and neither is asserted by a suite — a lead for the

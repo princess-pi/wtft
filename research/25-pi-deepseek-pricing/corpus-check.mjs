@@ -28,7 +28,10 @@
  *
  * Reads ~/.pi/agent/sessions read-only. Writes nothing. `--json` for the record.
  *
- * Exit 0 when mismatches are 0; exit 1 otherwise.
+ * Exit 0 only when the run examined something AND every compared turn matched:
+ * `files > 0`, `compared > 0`, and zero mismatches. Exit 1 otherwise — INCLUDING
+ * an empty corpus with zero mismatches, because a check that read nothing is not
+ * a passing check.
  */
 
 import fs from "node:fs";
@@ -193,7 +196,9 @@ for (const file of sessionFiles(SESSIONS)) {
 	}
 }
 
-const mismatchPercent = compared === 0 ? 0 : (mismatches / compared) * 100;
+// null, not 0, when nothing was compared (pr-review round 2). A percentage over
+// an empty denominator is the exact figure this check exists to stop printing.
+const mismatchPercent = compared === 0 ? null : (mismatches / compared) * 100;
 const record = {
 	schema: "wtft-research/pi-deepseek-corpus-check@1",
 	sessionsDir: SESSIONS,
@@ -202,7 +207,7 @@ const record = {
 	usedPiNativeCost: usedPiNative,
 	compared,
 	mismatches,
-	mismatchPercent: Number(mismatchPercent.toFixed(4)),
+	mismatchPercent: mismatchPercent === null ? null : Number(mismatchPercent.toFixed(4)),
 	unpriced,
 	unpricedModels: Object.fromEntries(unpricedModels),
 	outOfScope: [
@@ -231,7 +236,8 @@ if (asJson) {
 	console.log(`  priced by Pi natively    ${usedPiNative}   (not checked here)`);
 	console.log(`  compared against card    ${compared}`);
 	console.log(`  unpriced (no card)       ${unpriced}   ${[...unpricedModels.keys()].join(", ") || "-"}`);
-	console.log(`  mismatches               ${mismatches}  (${mismatchPercent.toFixed(4)}%)`);
+	console.log(`  mismatches               ${mismatches}  ${
+		mismatchPercent === null ? "(no percentage — nothing was compared)" : `(${mismatchPercent.toFixed(4)}%)`}`);
 	if (record.emptyCorpus) {
 		console.log("");
 		console.log(`  EMPTY CORPUS — nothing was examined. ${files === 0

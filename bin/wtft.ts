@@ -23,6 +23,7 @@ import {
 	renderTokenSummary,
 	deduplicateInteractions,
 	scanUncountedBillables,
+	scanUncountedBillablesChecked,
 	newUncountedBillables,
 	addUncountedBillables,
 	readUncountedBillableClass,
@@ -150,6 +151,7 @@ export {
 	renderTokenSummary,
 	// Uncounted billables (#149) — counted blind spot, never priced
 	scanUncountedBillables,
+	scanUncountedBillablesChecked,
 	newUncountedBillables,
 	addUncountedBillables,
 	readUncountedBillableClass,
@@ -715,7 +717,14 @@ async function main() {
 			provisional = { provisional: true, reason: "subagent-unreadable" };
 		}
 		for (const sub of subagentFiles) {
-			uncounted = addUncountedBillables(uncounted, scanUncountedBillables(sub));
+			// A listed file is not a scanned file (PR #95 review, Medium): the
+			// listing came from the directory, the read can still be refused
+			// (mode 000, or the file vanished in between). Zero counts from an
+			// unreadable sibling are a blind spot in the blind-spot scan, so the
+			// verdict degrades exactly as it does for a discovery failure above.
+			const scanned = scanUncountedBillablesChecked(sub);
+			uncounted = addUncountedBillables(uncounted, scanned.counts);
+			if (!scanned.readable) provisional = { provisional: true, reason: "subagent-unreadable" };
 		}
 		return (uncountedCache = uncounted);
 	};

@@ -150,8 +150,9 @@ still refused with exit 1. With several sessions discovered and no `--session`,
 `wtft` exits with:
 
 - **0** — report produced, including when there is nothing to report yet (the
-  session file is not written, or the tag holds no classified data). Under
-  `--json`, stdout carries one object.
+  session file is not written, or the tag holds no classified data), unless the
+  report is provisional (see **9** below). Under `--json`, stdout carries one
+  object.
 - **1** — error: no session found or selected, an invalid path, a daemon that
   died before producing data, or a refused flag (`--pager`). The reason is on
   stderr; under `--json`, stdout carries nothing.

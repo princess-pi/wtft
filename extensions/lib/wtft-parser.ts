@@ -545,12 +545,26 @@ export function readUncountedBillableClass(entry: any): UncountedBillableClass |
  * load-bearing for the daemon tag file, watch mode and 40-odd suites.
  */
 export function scanUncountedBillables(filePath: string): UncountedBillables {
+	return scanUncountedBillablesChecked(filePath).counts;
+}
+
+/**
+ * The same scan, plus whether the file could be read at all.
+ *
+ * `readable: false` is a distinct fact from "read, found nothing": a listed
+ * subagent file that cannot be opened (mode 000, a race with deletion) leaves
+ * its billables uncounted, and a caller that only sees zero counts would report
+ * a complete-looking blind-spot scan. The verdict-flipping caller in `bin/wtft.ts`
+ * reads this flag (PR #95 review, Medium); the unchecked form above keeps its
+ * signature for the daemon and the suites that never needed the distinction.
+ */
+export function scanUncountedBillablesChecked(filePath: string): { counts: UncountedBillables; readable: boolean } {
 	const counts = newUncountedBillables();
 	let content: string;
 	try {
 		content = fs.readFileSync(filePath, "utf8");
 	} catch {
-		return counts; // missing/unreadable file reports no blind spot, never throws
+		return { counts, readable: false }; // never throws; the caller decides what unreadable means
 	}
 	for (const line of content.split("\n")) {
 		if (!line.trim()) continue;
@@ -559,7 +573,7 @@ export function scanUncountedBillables(filePath: string): UncountedBillables {
 		const kind = readUncountedBillableClass(entry);
 		if (kind) counts[kind]++;
 	}
-	return counts;
+	return { counts, readable: true };
 }
 
 

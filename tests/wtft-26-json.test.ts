@@ -391,7 +391,10 @@ console.log("\n5. session identity and the #149 blind spot");
 console.log("\n6. --json alongside rendering flags");
 {
 	const { sessionPath } = makeFixture("combo", true);
-	for (const extra of [["--tokens"], ["--other"], ["--pad", "4"], ["--no-emoji"], ["--bucket"], ["--interval", "5m"]]) {
+	// Every rendering flag the manifest's --json entry names as suppressed, so the
+	// spec's "each rendering flag" claim is the loop, not a summary of it (PR #95
+	// review, Low).
+	for (const extra of [["--tokens"], ["--other"], ["--pad", "4"], ["--no-emoji"], ["--emoji"], ["--bucket"], ["--cumulative"], ["--interval", "5m"], ["--limit", "3"], ["--ticks"], ["--timezone", "UTC"]]) {
 		const r = runCli(["-s", sessionPath, "--json", ...extra]);
 		let ok = false;
 		try { ok = JSON.parse(r.stdout).schema === SCHEMA; } catch { /* reported */ }
@@ -663,6 +666,34 @@ console.log("\n9. rendered and --json agree on the exit code, empty or not");
 				asJson.code === EXIT_PROVISIONAL, asJson.stderr);
 			assert(`  ...and ${EXIT_PROVISIONAL} on the rendered path too (got ${rendered.code})`,
 				rendered.code === EXIT_PROVISIONAL, rendered.stdout + rendered.stderr);
+
+			// One layer further down (PR #95 review, Medium): the subagents DIR is
+			// readable, so discovery lists the file, but the FILE itself is mode
+			// 000. Before the fix the scan swallowed the read failure inside
+			// scanUncountedBillables and returned zero counts, so a settled tag
+			// stayed settled and the report looked complete with a sibling's
+			// billables silently missing.
+			const mkUnreadableFile = (slug: string) => {
+				const made = mkUnreadable(slug);
+				fs.chmodSync(made.subDir, 0o755);
+				const file = path.join(made.subDir, "agent-26.jsonl");
+				fs.chmodSync(file, 0o000);
+				return { ...made, file };
+			};
+			const fr = mkUnreadableFile("unreadable-file-r");
+			const fj = mkUnreadableFile("unreadable-file-j");
+			const renderedFile = runCli(["-s", fr.sessionPath, "--tokens", "--pad", "0"]);
+			const asJsonFile = runCli(["-s", fj.sessionPath, "--json"]);
+			fs.chmodSync(fr.file, 0o644);
+			fs.chmodSync(fj.file, 0o644);
+			let fileDoc: any = null;
+			try { fileDoc = JSON.parse(asJsonFile.stdout); } catch { /* reported below */ }
+			assert("an unreadable subagent FILE under a readable dir makes --json provisional too",
+				fileDoc?.provisional?.reason === "subagent-unreadable", JSON.stringify(fileDoc?.provisional));
+			assert(`  ...exiting ${EXIT_PROVISIONAL} under --json (got ${asJsonFile.code})`,
+				asJsonFile.code === EXIT_PROVISIONAL, asJsonFile.stderr);
+			assert(`  ...and ${EXIT_PROVISIONAL} on the rendered path too (got ${renderedFile.code})`,
+				renderedFile.code === EXIT_PROVISIONAL, renderedFile.stdout + renderedFile.stderr);
 		}
 	}
 }

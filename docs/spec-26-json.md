@@ -90,7 +90,7 @@ contract.
 | `session.path` | string | The session `.jsonl` this run read. |
 | `session.harness` | string \| null | Harness id whose parse adapter claims the session's first assistant turn — `"claude-code"`, `"pi"`, or an id registered out of tree through the #156 seam. `null` means **no claim**, and does not distinguish an empty session, one not written yet, a file that could not be read, and a format no registered harness understands. |
 | `session.taggerVersion` | string | `WTFT_TAGGER_VERSION` of the running binary — a dotted version such as `"2.7.2"`, which is also what appears in `tagPath`. |
-| `session.tagPath` | string | The classified tag file this run read. |
+| `session.tagPath` | string | The classified tag file path resolved for this run: read when it exists, and on the `pending-session` and `no-data` arms the *expected* path — not evidence that a file was opened. |
 | `provisional.provisional` | bool | **This run's** verdict — may this total still grow? Usually `readTagProvisional`'s answer, but the blind-spot scan can override it (see below), so do not read it as "what the tag file says". |
 | `provisional.reason` | string \| null | A **closed three-value vocabulary**, unchanged since #457 and enforced by the `TagProvisionalReason` union: `"stale-version"` · `"unswept"` · `"subagent-unreadable"`, or `null` when settled. `--json` reports it; it did not widen it. **Issue #26's own wish-list names only two**, `stale-version` and `unswept`: it was written before #457 added the third, and this spec supersedes it on that point. Repeated review lenses have cited the issue's list as the contract; it is not. |
 | `total.*` | number | Exact session totals. Cost is USD, the rest are token counts. |
@@ -276,8 +276,11 @@ sections:
    string.
 5. **§5** the session identity fields, and `uncounted`/`compaction` present with
    both members rather than absent.
-6. **§6** `--json` beside each rendering flag yields an object and does not
-   crash. Which flag wins is deliberately not pinned.
+6. **§6** `--json` beside each rendering flag the manifest's `--json` entry
+   names as suppressed (`--tokens`, `--other`, `--pad`, `--emoji`/`--no-emoji`,
+   `--bucket`/`--cumulative`, `--interval`, `--limit`, `--ticks`, `--timezone`)
+   yields an object and does not crash. Which flag wins is deliberately not
+   pinned.
 7. **§7** every exit code the CLI can return — scanned from `bin/wtft.ts` **and**
    `extensions/lib/session-selector.ts`, which is where 130 lives — appears in
    the manifest table, and `wtft --help` renders that table.

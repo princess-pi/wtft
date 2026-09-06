@@ -136,18 +136,21 @@ single aggregation. `renderTokenSummary` formats it for a human;
 Neither reimplements the arithmetic, so the prose and the JSON cannot report
 different **numbers**.
 
-Three things the human table prints have no JSON counterpart, because they are
-ratios and legends derived at render time rather than aggregate facts: the
-per-model `Cache:` hit-rate line, the `Think:` budget-utilisation line, and the
-`?` fallback legend.
+Three things the human table prints have no direct JSON counterpart, because
+they are ratios and legends derived at render time rather than aggregate facts:
+the per-model `Cache:` hit-rate line, the `Think:` budget-utilisation line, and
+the `?` fallback legend.
 
 Only the cache hit rate is fully recoverable:
 `cacheReadTokens / (cacheReadTokens + cacheWriteTokens + inputTokens)`, all three
 in the document.
 
-`models[].priced` recovers **which** rows the legend marks, not the legend's
-content — the rendered version also names each fallback (`describeFallbackPricing`)
-and carries the mixed-provenance caveat, and neither is in the document.
+`models[].priced` recovers **which** rows the legend marks. The legend's
+per-model sentences do reach the document, one `unpriced-model` entry per model
+in `notices[]`, each the same `describeFallbackPricing` text the rendered legend
+prints. What is absent is the legend's layout and its mixed-provenance caveat,
+which is a single sentence about the table as a whole and has no row to attach
+to.
 
 The **`Think:` percentage is not recoverable at all**, and cannot be: its
 denominator is `--thinking-budget`, an input flag the document does not carry

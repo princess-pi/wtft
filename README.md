@@ -158,7 +158,11 @@ still refused with exit 1. With several sessions discovered and no `--session`,
 - **9** — provisional ([#443](https://github.com/princess-pi/wtft/issues/443)):
   the report was produced in full, but the total may still grow under the daemon.
   Under `--json`, `provisional.provisional` is `true` and `provisional.reason`
-  names the condition, so `$?` and the field agree.
+  names the condition, so `$?` and the field agree. One condition is
+  mode-dependent: `subagent-unreadable` is found by the uncounted scan, which
+  runs under `--tokens` and `--json` but not on a plain `wtft` run, so a session
+  provisional for that reason alone exits 9 in those two modes and 0 on a plain
+  run.
 - **130** — the interactive session selector was cancelled with `q` or Ctrl-C.
   The SIGINT convention (128+2), not a wtft-specific code. `--json` never
   prompts, so it never returns this.

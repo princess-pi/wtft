@@ -1783,7 +1783,9 @@ function addInteraction(into: TokenTotals, i: Interaction): void {
  * Model-tagged only, in EVERY total including the per-category rows: an
  * interaction with no model id is counted in `untaggedInteractions` and appears
  * nowhere else. That is what makes `sum(models) === sum(categories) === total`
- * exactly true, and it is deliberately a narrower population than the bar
+ * hold — exactly for the token integers, within floating-point accumulation
+ * error for `costUsd` (docs/spec-26-json.md pins the tolerance) — and it is
+ * deliberately a narrower population than the bar
  * chart's, which bins every interaction. A chart total and this total can
  * legitimately differ, by TWO things: the untagged spend excluded here, and
  * `serverToolCost`, which `buildWtftLines` adds to the chart's `web` bin and

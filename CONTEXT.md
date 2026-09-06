@@ -254,9 +254,32 @@ _Avoid_: Panel, sidebar (reserved for the `serve` tool's widget — `serve` is a
 **CLI**:
 Running `wtft` (or `./wtft`, or the npm-global install) directly from the host shell, outside
 Pi — reuses the same classification engine as the widget but prints to stdout. Supports modes
-the widget does not (`--other` histogram, `--watch`). Refuses `-p/--pager`, which is the
-widget's (see **Pager**).
+the widget does not (`--other` histogram, `--watch`, `--json`). Refuses `-p/--pager`, which is
+the widget's (see **Pager**).
 _Avoid_: Standalone mode, binary (the binary is `bin/wtft.mjs`; "CLI" names the usage mode)
+
+**JSON mode** (#26):
+`--json` — the CLI's machine-readable mode. Writes exactly one JSON object (schema
+`wtft/session@1`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
+Human prose goes to stderr, and every sentence that would otherwise have been on stdout is
+repeated in the object's `notices[]`, where `code` is the contract and `text` is disposable.
+Its aggregate numbers come from `computeSessionSummary` (`extensions/lib/wtft-renderer.ts`),
+the same aggregation the `--tokens` table formats, so those two cannot report different
+totals; `session`, `provisional`, `uncounted` and `notices` come from the run instead.
+Suppresses the rendering flags, but not the commands that run instead of a report
+(`--help`/`--why`/`--version`, `--watch`, the daemon-management group). Contract:
+`docs/spec-26-json.md`. CLI only — the widget has no stdout to write an object to.
+_Avoid_: Porcelain mode, machine mode, structured mode (the flag is `--json`; "JSON mode"
+names the usage mode)
+
+**Provisional (total)** (#443, a field since #26):
+A total the log parser daemon may still grow — the CLI spawned it and read the tag file
+before it finished, so the number printed is real but not final. Reported two ways that
+always agree: **exit 9**, and `provisional.provisional` / `provisional.reason` in JSON mode.
+The reasons are a closed vocabulary — `stale-version`, `unswept`, `subagent-unreadable` —
+and `reason` here is a different field from a **daemon health reason** (above); name the
+container when both are in play. The opposite state is **settled**, never "final" or "done".
+_Avoid_: Partial, incomplete, estimated (the number is measured, just not finished)
 
 **Pager**:
 `-p/--pager` — a fullscreen, interactive, scrollable TUI overlay for browsing expanded cost

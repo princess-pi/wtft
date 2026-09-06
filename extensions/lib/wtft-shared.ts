@@ -16,6 +16,8 @@ export * from "./wtft-pricing-config.js";
 export * from "./wtft-parser.js";
 export * from "./wtft-renderer.js";
 export * from "./wtft-daemon-lib.js";
+// Machine-readable session summary (#26).
+export * from "./wtft-json.js";
 // Harness seam (#156) — registry lookups + the out-of-tree loader.
 export * from "./harness/registry.ts";
 export * from "./harness/session-cwd.ts";

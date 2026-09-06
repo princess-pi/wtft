@@ -1,8 +1,11 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * @package princess-pi-tools
+ * @package @princess-pi/wtft
  * @command wtft
- * @description Command-line cost auditing tool for Pi Coding Agent session logs.
+ * @description Command-line cost auditing tool for coding-agent sessions.
+ *   Harness-agnostic: `--harness auto` (the default) discovers both Claude Code
+ *   and Pi sessions, and an out-of-tree harness registered through the #156 seam
+ *   is discovered on the same footing.
  */
 
 import * as fs from "node:fs";
@@ -20,6 +23,7 @@ import {
 	renderTokenSummary,
 	deduplicateInteractions,
 	scanUncountedBillables,
+	scanUncountedBillablesChecked,
 	newUncountedBillables,
 	addUncountedBillables,
 	readUncountedBillableClass,
@@ -43,6 +47,12 @@ import {
 	readClassifiedTagFile,
 	readTagProvisional,
 	readTagFileWithVerdict,
+	detectSessionHarness,
+	buildSessionJson,
+	renderSessionJson,
+	WTFT_JSON_SCHEMA,
+	type WtftNotice,
+	type UncountedBillables,
 	getDaemonPidPath,
 	getTagPath,
 	awaitDaemonUp,
@@ -141,6 +151,7 @@ export {
 	renderTokenSummary,
 	// Uncounted billables (#149) — counted blind spot, never priced
 	scanUncountedBillables,
+	scanUncountedBillablesChecked,
 	newUncountedBillables,
 	addUncountedBillables,
 	readUncountedBillableClass,
@@ -174,6 +185,14 @@ export {
 	// Harness seam (#156) + moved-session follow (#155)
 	discoverSessions,
 	harnessLabel,
+	// #26 — the machine-readable surface, imported by tests/wtft-26-json.test.ts
+	// from the bundle rather than re-declared there. A second copy of a contract
+	// constant is a second thing to get wrong: the suite hardcoded 9 for
+	// EXIT_PROVISIONAL, so changing the constant here would have left it green.
+	buildSessionJson,
+	renderSessionJson,
+	detectSessionHarness,
+	WTFT_JSON_SCHEMA,
 	getHarnesses,
 	getHarness,
 	getDiscoveries,
@@ -214,7 +233,64 @@ export {
  *  is not yet final. "Found nothing wrong" and "could not see everything" are
  *  different facts and need different codes — the same split pr-review draws
  *  between 7 and 8. */
-const EXIT_PROVISIONAL = 9;
+export const EXIT_PROVISIONAL = 9;
+
+// ---
+// SHARED WORDING (#26) — one sentence, two output modes.
+// ---
+// `--json` carries the same human prose in `notices[]` that the rendered path
+// prints. Two literals would be two things to reword, and the reword that
+// reached only one of them would be invisible to a reader of the other.
+//
+// WHICH STREAM differs by mode, deliberately: the pending-session and no-data
+// sentences are the rendered path's only OUTPUT, so they go to stdout there;
+// under `--json` the object is the output, so they move to stderr and the object
+// carries them as notices. The #140 unpriced warning and the #443 provisional
+// line are stderr in both modes.
+//
+// The three `describe*`/`unpricedModelWarning` helpers below are the shared
+// literals. `collectUnpricedModels`, immediately following, is the collector
+// they are used with, not one of them.
+
+/** Distinct models in this session that priced at a fallback rather than a card (#140). */
+function collectUnpricedModels(interactions: Interaction[]): string[] {
+	const seen = new Set<string>();
+	for (const i of interactions) {
+		// `(unknown)` excluded as well as `<synthetic>`: it is the placeholder
+		// `computeSessionSummary` counts as untagged, so treating it as a model
+		// here produced a `no pricing for (unknown)` warning about a model that
+		// does not exist. The two functions have to agree on what untagged means.
+		if (!i.model || i.model === "<synthetic>" || i.model === "(unknown)") continue;
+		if (!isModelPriced(i.model)) seen.add(i.model);
+	}
+	return [...seen];
+}
+
+/** The #140 warning for one model. Prose: reword freely, it is not a contract. */
+function unpricedModelWarning(model: string): string {
+	return `no pricing for ${model} — ${describeFallbackPricing(model)}; totals may be unreliable. ` +
+		`Add an entry to ${getUserPricingPath()} (no rebuild needed).`;
+}
+
+/** Why this total may still grow (#443), for the tag at `tagPath`. */
+function describeProvisionalReason(provisional: { reason: string | null }, tagPath: string): string {
+	if (provisional.reason === "stale-version") {
+		const v = path.basename(tagPath).match(/\.wtft-tag\.v([^/]+)\.jsonl$/)?.[1] ?? "?";
+		return `this tag was written by tagger v${v}, not v${WTFT_TAGGER_VERSION}`;
+	}
+	if (provisional.reason === "subagent-unreadable") {
+		return "a subagent session file could not be read, so the totals may be incomplete";
+	}
+	return "no subagent transcript has been read since this tag was written";
+}
+
+/** The one action that ends the provisional state. See the long note at the
+ *  provisional branch in main() for why neither arm may mention `-F`. */
+function describeProvisionalRemedy(provisional: { reason: string | null }): string {
+	return provisional.reason === "subagent-unreadable"
+		? "restore the unreadable session file's readability, then run wtft again — the daemon re-reads it on its next poll, and wtft reads it directly on the --tokens and --json paths"
+		: "The daemon is rebuilding this tag now — run wtft again in a moment to read the settled total";
+}
 
 // ---
 // CONFIG + ARG PARSING
@@ -248,7 +324,9 @@ if (opts.hasCost) unit = "cost";
 
 const WARN_LOG = path.join(os.homedir(), ".local", "state", "wtft", "reap.log");
 
-/** Surface reap warnings from the last daemon spawn (#130). */
+/** Surface daemon reap warnings (#130) — every `reap.log` line written in the
+ *  last hour, whichever spawn wrote it, then TRUNCATE the log so the next run
+ *  does not repeat them. Writes to stderr, so it never pollutes `--json`. */
 function showReapWarnings() {
   try {
     if (!fs.existsSync(WARN_LOG)) return;
@@ -377,6 +455,35 @@ async function main() {
 	// state that fact instead of "does not exist". Only an absolute *.jsonl path
 	// qualifies — a fuzzy substring that matches nothing is still an error below.
 	let sessionPending = false;
+	// Notices raised BEFORE the JSON document can be built (#26). Session
+	// selection happens long before the tag file is read, so a notice from it
+	// has nowhere to live yet; `emitSessionJson` prepends these.
+	const earlyNotices: WtftNotice[] = [];
+
+	// ---
+	// SESSION SELECTION UNDER --json (#26)
+	// ---
+	// `selectSessionPrompt` writes to STDOUT — the interactive menu, and the
+	// non-interactive "Defaulting to newest session" fallback with its candidate
+	// list (extensions/lib/session-selector.ts). Under `--json` that lands ahead
+	// of the document and `JSON.parse` fails on the first byte, which is exactly
+	// the failure this flag exists to end. It also exits 130 on `q`/Ctrl-C,
+	// which a machine caller cannot answer.
+	//
+	// So `--json` does not prompt. It takes the newest candidate — the same one
+	// the non-interactive fallback already resolves to, so this is the existing
+	// behaviour with its prose moved off stdout — says so on stderr, and records
+	// an `auto-selected-session` notice naming how many it chose between. A
+	// caller that wants determinism passes `-s`, and the notice is what tells it
+	// that it should.
+	const chooseSession = async (found: ReturnType<typeof discoverSessions>): Promise<string> => {
+		if (!opts.json) return selectSessionPrompt(found);
+		const text = `${found.length} sessions match; --json does not prompt, so the newest was used: ${found[0].path}. ` +
+			`Pass -s <path|substring> to choose one.`;
+		console.error(`\x1b[33m${text}\x1b[0m`);
+		earlyNotices.push({ code: "auto-selected-session", text });
+		return found[0].path;
+	};
 	if (opts.targetSession) {
 		// Direct path — use as-is if it exists
 		if (fs.existsSync(opts.targetSession)) {
@@ -398,7 +505,7 @@ async function main() {
 			} else if (filtered.length === 1) {
 				finalSessionPath = filtered[0].path;
 			} else {
-				finalSessionPath = await selectSessionPrompt(filtered);
+				finalSessionPath = await chooseSession(filtered);
 			}
 		}
 	} else {
@@ -410,8 +517,8 @@ async function main() {
 		} else if (found.length === 1) {
 			finalSessionPath = found[0].path;
 		} else {
-			// Show select menu!
-			finalSessionPath = await selectSessionPrompt(found);
+			// Show select menu (or, under --json, take the newest without one).
+			finalSessionPath = await chooseSession(found);
 		}
 	}
 
@@ -537,11 +644,228 @@ async function main() {
 	if (fs.existsSync(tagPath)) {
 		({ interactions, provisional } = readTagFileWithVerdict(tagPath));
 	}
+
+	// ---
+	// THE #149 BLIND-SPOT SCAN, hoisted (#26)
+	// ---
+	// It was inline in the `--tokens` branch until `--json` needed the same
+	// numbers. Hoisted rather than copied, because it does two things and the
+	// second one is invisible in its name: besides counting, it can DOWNGRADE
+	// `provisional` to `subagent-unreadable`. A second copy would mean one of
+	// the two output modes silently reporting a settled total for a session
+	// whose subagent transcript could not be read.
+	//
+	// Memoised so that no run scans the subagent tree more than once, whichever
+	// of its call sites fire. The `--json` path really does reach it twice — once
+	// to let the scan downgrade `provisional` before the notices are built, once
+	// inside `emitSessionJson` — which is why the memo is load-bearing rather
+	// than decorative.
+	//
+	// Deliberately not a count of call sites: two earlier versions of this
+	// comment carried one and both were wrong, which is how a reader learns to
+	// distrust the comments. The invariant is "at most one scan per run", and
+	// that is checkable from the cache alone.
+	let uncountedCache: UncountedBillables | null = null;
+	const scanSessionUncounted = (): UncountedBillables => {
+		if (uncountedCache) return uncountedCache;
+		// A session file that has not been written YET is not an unreadable one
+		// (#308): it is late, and the daemon is parked on it. Scanning anyway made
+		// subagent discovery fail with ENOENT on the parent, which set
+		// `subagent-unreadable` and exited 9 — turning #308's entire "absent is
+		// the normal launch state, exit 0" contract into a provisional error, in
+		// both output modes. There is also nothing to find: a file that was never
+		// written records no billables. Zeros, and the verdict left alone.
+		if (!fs.existsSync(finalSessionPath)) return (uncountedCache = newUncountedBillables());
+		// Blind-spot scan (#149) reads the raw session files, never the tag file:
+		// the events it counts leave no interaction behind, so nothing the daemon
+		// serializes could carry them. Subagent files are scanned too — a
+		// compaction inside a subagent is just as invisible as one in the parent.
+		let uncounted = newUncountedBillables();
+		uncounted = addUncountedBillables(uncounted, scanUncountedBillables(finalSessionPath));
+		// Subagent discovery can throw (#457): an unreadable subagents
+		// directory drops the whole Task/agent subtree. The parser already
+		// warned (once per dir, latched); degrade the blind-spot scan rather
+		// than crash the report — the tag-based costs are unaffected.
+		let subagentFiles: string[] = [];
+		try {
+			const discovered = discoverSubagentSessionFiles(finalSessionPath);
+			subagentFiles = discovered.files;
+			if (discovered.unreadable) {
+				// #457 (round 6) — a per-file discovery failure is REPORTED,
+				// not thrown: the readable siblings still scan (partial
+				// progress), while the report degrades the blind-spot scan
+				// the same way the dir-level catch below does — the token
+				// table is missing the unreadable sibling's uncounted
+				// billables, the same class of incomplete report #443's
+				// provisional exit exists for, so the exit code says so
+				// instead of printing a complete-looking report.
+				// (round 7) Assigned unconditionally: the CLI's own discovery
+				// failure is direct evidence, fresher than any reason derived
+				// from the tag. A permanent unreadability also keeps the
+				// daemon from rebuilding the tag (its poll fails), so the
+				// tag-derived "run wtft again in a moment" remedy would loop
+				// forever — the restore-readability remedy below is the
+				// actionable one regardless of the tag verdict.
+				provisional = { provisional: true, reason: "subagent-unreadable" };
+			}
+		} catch {
+			// The DIR-level failure still throws (rounds 4/6): an unreadable
+			// subagents directory or sibling sessionDir drops a whole
+			// subtree's uncounted billables. walkSubagentDir already warned
+			// (once per dir, latched); degrade the blind-spot scan the same
+			// way (round 7) — unconditional, for the same reason as above.
+			provisional = { provisional: true, reason: "subagent-unreadable" };
+		}
+		for (const sub of subagentFiles) {
+			// A listed file is not a scanned file (PR #95 review, Medium): the
+			// listing came from the directory, the read can still be refused
+			// (mode 000, or the file vanished in between). Zero counts from an
+			// unreadable sibling are a blind spot in the blind-spot scan, so the
+			// verdict degrades exactly as it does for a discovery failure above.
+			const scanned = scanUncountedBillablesChecked(sub);
+			uncounted = addUncountedBillables(uncounted, scanned.counts);
+			if (!scanned.readable) provisional = { provisional: true, reason: "subagent-unreadable" };
+		}
+		return (uncountedCache = uncounted);
+	};
+
+
+	// ---
+	// --json emitter (#26) — defined here, used from three places.
+	// ---
+	// Every branch BETWEEN HERE AND THE `--json` RETURN that would print a human
+	// sentence to stdout has a `--json` arm, because "exactly one JSON object on
+	// stdout" has to hold on the empty paths too: a consumer that gets a bare
+	// sentence on a not-yet-written session has to parse prose to find that out,
+	// which is the whole failure this flag exists to end. Those paths carry a
+	// `notices[]` entry with the same sentence and still exit 0 — nothing went
+	// wrong, there is simply nothing yet.
+	//
+	// Branches AFTER that return need no arm and have none: "No binned data found
+	// in session logs." is stdout-only and unreachable under `--json`. The scope
+	// of the rule is this window, not the function — an earlier draft of this
+	// comment claimed the function, which is a rule the code does not implement.
+	//
+	// Writes with `process.stdout.write` and no trailing `console.log`: the
+	// document ends in exactly one newline, and nothing else may follow it.
+	//
+	// `uncounted` is scanned wherever there is anything to scan, rather than
+	// defaulted: zeros that mean "not scanned" are indistinguishable from zeros
+	// that mean "none found", and a consumer reading `.uncounted.compaction === 0`
+	// would conclude there is no blind spot when nobody looked. The `no-data` arm
+	// has a real session file and does scan it, which is precisely the case where
+	// a zero would have been a lie.
+	//
+	// The `pending` arm is the one exception and returns zeros WITHOUT scanning:
+	// the file does not exist, so there is nothing to read and nothing to find —
+	// and re-checking would reintroduce the race the flag exists to pin.
+	//
+	// ORDER MATTERS, and getting it wrong is invisible: `scanSessionUncounted`
+	// can REASSIGN `provisional` to `subagent-unreadable` (#457). Called from
+	// inside the object literal it ran AFTER `provisional:` had already been
+	// evaluated, so an empty path serialised the pre-scan verdict — a document
+	// reading "settled" from a run that had just discovered it was not. It is a
+	// separate statement now, above the literal, so the scan's verdict is the one
+	// that ships. (PR review, Medium/correctness.)
+	//
+	// THE EXIT CODE IS SET HERE, not at the call sites. The two empty paths used
+	// to `return` without touching it, so a stale-version tag that yields no
+	// classified lines emitted `provisional.provisional: true` and exited 0 —
+	// breaking the one promise the contract makes about the pair, that `$?` and
+	// the field always agree. (PR review, High/reasoning.)
+	// The exit code for an EMPTY report, rendered or JSON. Extracted because PR
+	// review round 2 found the two modes disagreeing: the JSON arms had just
+	// learned to honour `provisional` while the rendered arms still fell through
+	// to an unconditional `process.exit(0)`, so the same session exited 0 under
+	// `wtft` and 9 under `wtft --json`. The exit-code table says nothing about
+	// mode, and 9 means "the total may still grow" — which is as true of an empty
+	// report from a stale tag as of a full one. One helper, both modes.
+	// The #443 stderr line for the arms that would otherwise print none: both
+	// EMPTY arms in both modes, and the full `--json` report. Latched, so a
+	// `--json` run that both scans and emits says it once rather than twice.
+	//
+	// The rendered FULL report is the one arm that does not route through here.
+	// It prints its own two-line form — the warning, then a remedy line ending
+	// `Exit 9.` — whose shape `tests/wtft-443-cli-exit-9.test.ts` pins, so
+	// folding it into this one-line warner would be a user-visible change to a
+	// surface #443 deliberately designed. It already emits the line, which is
+	// what the SHARED WORDING banner claims; this helper is about the arms that
+	// did not. (PR review, Medium/reasoning.)
+	let warnedProvisional = false;
+	const warnProvisionalOnce = () => {
+		if (warnedProvisional || !provisional.provisional) return;
+		warnedProvisional = true;
+		console.error(`\x1b[33m⚠ PROVISIONAL: ${describeProvisionalReason(provisional, tagPath)}. ${describeProvisionalRemedy(provisional)}. Exit ${EXIT_PROVISIONAL}.\x1b[0m`);
+	};
+
+	// `pending` pins the caller's decision here for the same reason
+	// `emitSessionJson` takes it (PR review, Medium/correctness): this arm decided
+	// "file absent" BEFORE `awaitDaemonUp`, and if the harness's first write lands
+	// inside that await, an unpinned scan runs on the now-present file, can
+	// downgrade to `subagent-unreadable`, and prints "session log not written yet"
+	// on stdout while exiting 9. The `--json` arm was pinned first; leaving the
+	// rendered arm unpinned reintroduced the mode disagreement one call deeper.
+	const finishEmptyReport = (opt: { pending?: boolean } = {}) => {
+		// The scan FIRST, for the same reason `emitSessionJson` does it: it can
+		// reassign `provisional` to `subagent-unreadable` (#457). Round 2 gave the
+		// rendered arms the exit rule but not the scan, so a settled tag with an
+		// unreadable subagent directory still exited 0 rendered and 9 under
+		// `--json` — the same disagreement one layer down. Memoised, so this is
+		// not a second scan. Skipped when `pending`, per the note above.
+		if (!opt.pending) scanSessionUncounted();
+		warnProvisionalOnce();
+		// `exitCode` and return, never `process.exit()`: node's stdout is async on
+		// a pipe and `process.exit()` does not wait for pending writes.
+		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
+	};
+
+	// `pending` pins the decision the CALLER already made, rather than letting the
+	// document re-derive it later (PR review, Medium/correctness). The
+	// pending-session arm decides "file absent" and then awaits `awaitDaemonUp`;
+	// if the daemon's first write lands inside that await, a later
+	// `fs.existsSync` says present. The document would then carry a real
+	// `session.harness` and a real `uncounted` under a notice saying the session
+	// log was not written yet — internally contradictory, and contradicting the
+	// spec's pending-arm row. Skipping both re-reads makes the report a
+	// consistent snapshot of the moment the branch was taken.
+	const emitSessionJson = (opt: { notices?: WtftNotice[]; pending?: boolean } = {}) => {
+		const uncounted = opt.pending ? newUncountedBillables() : scanSessionUncounted();
+		const doc = buildSessionJson({
+			interactions,
+			session: {
+				path: finalSessionPath,
+				harness: opt.pending ? null : detectSessionHarness(finalSessionPath),
+				taggerVersion: String(WTFT_TAGGER_VERSION),
+				tagPath,
+			},
+			provisional,
+			uncounted,
+			notices: [...earlyNotices, ...(opt.notices ?? [])],
+		});
+		process.stdout.write(renderSessionJson(doc));
+		// The human line, on stderr, on every `--json` arm — the empty ones
+		// included, which used to omit it (PR review, Medium/reasoning).
+		warnProvisionalOnce();
+		// `exitCode` and return, never `process.exit()`: on Linux node's stdout is
+		// asynchronous when it is a pipe, and `process.exit()` does not wait for
+		// pending writes — `wtft --json | jq` could lose the tail of the document.
+		// Same rule as `finishEmptyReport` above. The stderr sentence is emitted
+		// through the shared latch just above, so it lands exactly once on every
+		// arm — including the empty ones, which printed none until round 6.
+		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
+	};
 	// #308: nothing to wait for while the session log itself is unwritten — the
 	// daemon is parked on it (heartbeating) and will parse the first line when it
-	// lands. Say so and exit 0: a one-shot CLI must not block, and "not written yet"
-	// is the true state. Only an existing-but-unclassified session earns the short
-	// wait below.
+	// lands. Say so and exit 0; "not written yet" is the true state, and only an
+	// existing-but-unclassified session earns the tag wait further down.
+	//
+	// This branch does NOT return immediately, and an earlier version of this
+	// comment said "a one-shot CLI must not block" while the code blocked: it
+	// spends up to DAEMON_START_CEILING_MS in `awaitDaemonUp` first. That wait is
+	// not for the session file — it is for the claim the message is about to
+	// make, that a daemon is waiting on the path, which #309 review found was
+	// never checked. It bounds only the alive-but-unclaimed case, and that case
+	// still exits 0.
 	if (interactions.length === 0 && !fs.existsSync(finalSessionPath)) {
 		// "The daemon is running and waiting on it" is the whole value of this
 		// message, and it was never checked (#309 review): spawnWtftDaemon only
@@ -561,13 +885,26 @@ async function main() {
 			console.error(`\x1b[90mExpected the daemon at ${path.join(daemonDir, "wtft-daemon.mjs")}\x1b[0m`);
 			process.exit(1);
 		}
+		const pendingText = `Session log not written yet: ${finalSessionPath}. ` +
+			`A harness writes its first line after the first real prompt (not a /command) completes. ` +
+			`The log parser daemon is running and waiting on it — run again after the first response, or use --watch to stay attached.`;
+		if (opts.json) {
+			console.error(`\x1b[33m${pendingText}\x1b[0m`);
+			emitSessionJson({ notices: [{ code: "pending-session", text: pendingText }], pending: true });
+			return;
+		}
 		console.log(`\x1b[33mSession log not written yet: ${finalSessionPath}\x1b[0m`);
-		console.log(`\x1b[90mClaude Code writes its first line after the first real prompt (not a /command) completes. ` +
-			`The wtft daemon is running and waiting on it — run again after the first response, or use --watch to stay attached.\x1b[0m`);
-		process.exit(0);
+		console.log(`\x1b[90mA harness writes its first line after the first real prompt (not a /command) completes. ` +
+			`The log parser daemon is running and waiting on it — run again after the first response, or use --watch to stay attached.\x1b[0m`);
+		finishEmptyReport({ pending: true });
+		return;
 	}
 	if (interactions.length === 0) {
-		// Wait up to 2 daemon beats for the freshly-spawned daemon to produce the tag file.
+		// Wait for the freshly-spawned daemon to produce the tag file: three reads
+		// at ~0, 667 and 1334 ms. The `while` bound is 1400 ms, but the sleep is
+		// unconditional and follows the third read, so the no-data path blocks for
+		// about 2001 ms in the worst case — the loop's guard is not its duration.
+		// (PR review, Medium/reasoning; an earlier comment quoted 1400.)
 		const tagWaitStart = Date.now();
 		while (Date.now() - tagWaitStart < 1400) {
 			if (fs.existsSync(tagPath)) {
@@ -591,8 +928,15 @@ async function main() {
 			console.error(`\x1b[31m❌ wtft-daemon exited ${how} before writing any classified data for session ${sessionName.slice(0, 12)}….\x1b[0m`);
 			process.exit(1);
 		}
-		console.log(`\x1b[33mDaemon started on session ${sessionName.slice(0, 12)}… — no data yet. Try again in a moment.\x1b[0m`);
-		process.exit(0);
+		const noDataText = `Daemon started on session ${sessionName.slice(0, 12)}… — no data yet. Try again in a moment.`;
+		if (opts.json) {
+			console.error(`\x1b[33m${noDataText}\x1b[0m`);
+			emitSessionJson({ notices: [{ code: "no-data", text: noDataText }] });
+			return;
+		}
+		console.log(`\x1b[33m${noDataText}\x1b[0m`);
+		finishEmptyReport();
+		return;
 	}
 
 	// Read settings from harness-agnostic config file (#72).
@@ -610,6 +954,48 @@ async function main() {
 	// REAP WARNINGS: surface any reap.log findings from daemon spawn (#130)
 	// ---
 	showReapWarnings();
+
+
+	// ---
+	// --json (#26): one JSON object on stdout, and nothing else on stdout.
+	// ---
+	// Placed BEFORE the renderer, not after it, because the contract is about
+	// what stdout carries: the chart, the session-path line, the histogram and
+	// the token table all write there, so a `--json` that ran alongside them
+	// would emit an object no `JSON.parse` could reach. Human prose still goes
+	// to stderr (the unpriced-model warnings below run here too) AND is repeated
+	// in `notices[]`, so a consumer never has to correlate two streams.
+	//
+	// The identity is ASKED FOR, not assumed: `detectSessionHarness` runs the
+	// same adapter dispatch the parser uses, so the reported harness is one that
+	// would in fact parse this transcript. `-s <path>` never went through
+	// discovery, so a candidate's harness field is not available here.
+	if (opts.json) {
+		const notices: WtftNotice[] = [];
+		// The blind-spot scan can DOWNGRADE `provisional` to
+		// `subagent-unreadable` (#457), so it must run BEFORE the notices are
+		// built and before `emitSessionJson` reads the verdict. `emitSessionJson`
+		// calls it too; it is memoised, so this is one scan, not two.
+		scanSessionUncounted();
+		for (const m of collectUnpricedModels(interactions)) {
+			notices.push({ code: "unpriced-model", text: unpricedModelWarning(m) });
+			console.error(`\x1b[33m⚠ ${unpricedModelWarning(m)}\x1b[0m`);
+		}
+		if (provisional.provisional) {
+			const text = `${describeProvisionalReason(provisional, tagPath)}. ${describeProvisionalRemedy(provisional)}.`;
+			notices.push({ code: "provisional", text });
+			// The stderr copy is emitted by `emitSessionJson` below, through the
+			// same latch every other arm uses, so the line cannot appear twice
+			// here and cannot go missing on the empty arms.
+		}
+		// Exit 9 keeps its #443 meaning under --json — the object is complete, and
+		// its `provisional` field says the same thing the code does.
+		// `emitSessionJson` sets the code; a second assignment here would be a
+		// second place for the two to disagree.
+		emitSessionJson({ notices });
+		return;
+	}
+
 
 	// ---
 	// COMPILING AND PRINTING
@@ -671,50 +1057,7 @@ async function main() {
 	}
 
 	if (opts.tokens) {
-		// Blind-spot scan (#149) reads the raw session files, never the tag file:
-		// the events it counts leave no interaction behind, so nothing the daemon
-		// serializes could carry them. Subagent files are scanned too — a
-		// compaction inside a subagent is just as invisible as one in the parent.
-		let uncounted = newUncountedBillables();
-		uncounted = addUncountedBillables(uncounted, scanUncountedBillables(finalSessionPath));
-		// Subagent discovery can throw (#457): an unreadable subagents
-		// directory drops the whole Task/agent subtree. The parser already
-		// warned (once per dir, latched); degrade the blind-spot scan rather
-		// than crash the report — the tag-based costs are unaffected.
-		let subagentFiles: string[] = [];
-		try {
-			const discovered = discoverSubagentSessionFiles(finalSessionPath);
-			subagentFiles = discovered.files;
-			if (discovered.unreadable) {
-				// #457 (round 6) — a per-file discovery failure is REPORTED,
-				// not thrown: the readable siblings still scan (partial
-				// progress), while the report degrades the blind-spot scan
-				// the same way the dir-level catch below does — the token
-				// table is missing the unreadable sibling's uncounted
-				// billables, the same class of incomplete report #443's
-				// provisional exit exists for, so the exit code says so
-				// instead of printing a complete-looking report.
-				// (round 7) Assigned unconditionally: the CLI's own discovery
-				// failure is direct evidence, fresher than any reason derived
-				// from the tag. A permanent unreadability also keeps the
-				// daemon from rebuilding the tag (its poll fails), so the
-				// tag-derived "run wtft again in a moment" remedy would loop
-				// forever — the restore-readability remedy below is the
-				// actionable one regardless of the tag verdict.
-				provisional = { provisional: true, reason: "subagent-unreadable" };
-			}
-		} catch {
-			// The DIR-level failure still throws (rounds 4/6): an unreadable
-			// subagents directory or sibling sessionDir drops a whole
-			// subtree's uncounted billables. walkSubagentDir already warned
-			// (once per dir, latched); degrade the blind-spot scan the same
-			// way (round 7) — unconditional, for the same reason as above.
-			provisional = { provisional: true, reason: "subagent-unreadable" };
-		}
-		for (const sub of subagentFiles) {
-			uncounted = addUncountedBillables(uncounted, scanUncountedBillables(sub));
-		}
-		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, uncounted);
+		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, scanSessionUncounted());
 		for (const line of tokenOutput.split("\n")) {
 			console.log(padStr + line);
 		}
@@ -733,14 +1076,8 @@ async function main() {
 	// cannot act on. That class only reaches here at all since #22 B — before
 	// it, isModelPriced called every `deepseek` id priced.
 	// ---
-	const unpricedModels = new Set<string>();
-	for (const i of interactions) {
-		if (i.model && i.model !== "<synthetic>" && !isModelPriced(i.model)) {
-			unpricedModels.add(i.model);
-		}
-	}
-	for (const m of unpricedModels) {
-		console.error(`\x1b[33m⚠ no pricing for ${m} — ${describeFallbackPricing(m)}; totals may be unreliable. Add an entry to ${getUserPricingPath()} (no rebuild needed).\x1b[0m`);
+	for (const m of collectUnpricedModels(interactions)) {
+		console.error(`\x1b[33m⚠ ${unpricedModelWarning(m)}\x1b[0m`);
 	}
 
 	// ---
@@ -757,18 +1094,37 @@ async function main() {
 	//
 	// Reported LAST and as an EXIT CODE, for two different readers. The total
 	// still prints in full — withholding it would be worse than the undercount,
-	// since the number is usually close and always better than nothing. `wtft`
-	// has no --json/--porcelain today, so an exit code is the only surface here
-	// that costs an agent zero tokens and zero inference; it matches pr-review's
-	// 7/8/9 idiom and does not preempt a later structured field carrying the
-	// same fact. Nothing in this repo invokes this CLI and inspects $?, and it
-	// only ever exited 0 or 1 before, so no consumer regresses on the new code.
+	// since the number is usually close and always better than nothing. The exit
+	// code costs an agent zero tokens and zero inference and matches pr-review's
+	// 7/8/9 idiom.
+	//
+	// #511 justified the new code with "nothing in this repo invokes this CLI and
+	// inspects $?". That grep covered bin/, hooks/, statusline/ and skills/ and
+	// NOT tests/ — and tests/wtft-auto-fit.test.ts then failed on exit 9, on
+	// main, intermittently. tests/wtft-513-exit9-caller-guard.test.ts is the
+	// guard that came out of it. The claim is kept here with its correction
+	// attached rather than deleted: the shape of the mistake is the useful part,
+	// an exhaustive-sounding grep that was not exhaustive.
+	//
+	// #26 added the structured field this comment once said did not exist:
+	// `--json` carries the same verdict as `provisional.provisional` /
+	// `provisional.reason`, and takes the branch above rather than this one. The
+	// exit code KEEPS its meaning there — a consumer reading `$?` and one
+	// reading the field get the same answer, which is why #26 did not retire it.
+	// WHAT THIS VERDICT IS SCOPED TO (PR review round 9, Medium/correctness).
+	// `scanSessionUncounted` is what discovers `subagent-unreadable`, and a plain
+	// `wtft` run — no `--tokens`, no `--json`, data present — never calls it. So
+	// a session whose ONLY provisional condition is an unreadable subagent
+	// directory exits 0 here and 9 under the two modes that do scan.
+	//
+	// Deliberately not "fixed" by scanning here. That would put a full read of
+	// the session and every subagent transcript on the commonest invocation of
+	// all, to detect a rare condition the run is not otherwise looking for — the
+	// exact cost #443 chose read-then-render to avoid. The exit code reports what
+	// the run actually checked, which is the only thing it can honestly report.
+	// docs/spec-26-json.md says so beside the exit-code table.
 	if (provisional.provisional) {
-		const why = provisional.reason === "stale-version"
-			? `this tag was written by tagger v${path.basename(tagPath).match(/\.wtft-tag\.v([^/]+)\.jsonl$/)?.[1] ?? "?"}, not v${WTFT_TAGGER_VERSION}`
-			: provisional.reason === "subagent-unreadable"
-				? "a subagent transcript could not be read, so the token table is incomplete"
-				: "no subagent transcript has been read since this tag was written";
+		const why = describeProvisionalReason(provisional, tagPath);
 		// The remedy names ONE action, and deliberately does not mention -F (PR
 		// review, Medium/contract). `-F` does not return early: it deletes the
 		// tag, kills the daemon, and falls through to this same read path, so a
@@ -806,9 +1162,7 @@ async function main() {
 		// The exit code stays 9 regardless: the number really is not final, and
 		// softening that under -F would be the exact lie this issue is about.
 		console.error(`\x1b[33m⚠ PROVISIONAL: this total may still grow — ${why}.\x1b[0m`);
-		const remedy = provisional.reason === "subagent-unreadable"
-			? "restore the unreadable transcript's readability, then run wtft again — the daemon re-reads it on its next poll, and the --tokens scan reads it directly"
-			: "The daemon is rebuilding this tag now — run wtft again in a moment to read the settled total";
+		const remedy = describeProvisionalRemedy(provisional);
 		console.error(`\x1b[90m  ${remedy}. Exit ${EXIT_PROVISIONAL}.\x1b[0m`);
 		// `exitCode` and return, NOT process.exit() (PR review,
 		// Medium/correctness). On Linux node's stdout is ASYNCHRONOUS when it is a

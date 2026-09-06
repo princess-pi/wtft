@@ -430,11 +430,15 @@ readability, not waiting. The daemon re-discovers on every poll, and the `--toke
 scan reads transcript files directly, so a CLI re-run picks the file up once it is
 readable.
 
-**Why an exit code and not a field.** `wtft` has no `--json`, no `--porcelain`, and no
-documented exit-code table; every number it produces is prose. An exit code is the only
-surface here that costs an agent zero tokens and zero inference. It carries one bit and
-deliberately does not preempt a structured mode — filed as **#510**, which should carry
-`provisional` as a field alongside the totals it currently cannot express at all.
+**Why an exit code and not a field — and what happened next.** When #443 landed, `wtft`
+had no `--json`, no `--porcelain`, and no documented exit-code table; every number it
+produced was prose. An exit code was the only surface that cost an agent zero tokens and
+zero inference. It carries one bit and deliberately did not preempt a structured mode,
+which was filed as **#26** (migrated from #510) and has since shipped: `wtft --json`
+carries `provisional` as a field alongside the totals — see
+[`docs/spec-26-json.md`](spec-26-json.md). The exit code was **not** retired by it. Both
+surfaces report the same verdict, so a consumer reading `$?` and one reading
+`.provisional.provisional` cannot disagree.
 
 ## `attributeClaudeSubAgentCosts`: Per-Call, Not Global
 

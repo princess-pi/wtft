@@ -259,61 +259,6 @@ for (const file of sessionFiles(SESSIONS)) {
 
 // null, not 0, when nothing was compared (pr-review round 2). A percentage over
 // an empty denominator is the exact figure this check exists to stop printing.
-const mismatchPercent = compared === 0 ? null : (mismatches / compared) * 100;
-const record = {
-	schema: "wtft-research/pi-deepseek-corpus-check@1",
-	sessionsDir: SESSIONS,
-	files,
-	deepseekTurns,
-	usedPiNativeCost: usedPiNative,
-	compared,
-	mismatches,
-	mismatchPercent: mismatchPercent === null ? null : Number(mismatchPercent.toFixed(4)),
-	unpriced,
-	unpricedModels: Object.fromEntries(unpricedModels),
-	outOfScope: [
-		"Claude Code transcripts (covered by #495's own Closer)",
-		"whether the transcribed card matches DeepSeek's actual billing",
-		"turns priced by Pi's native cost.total",
-		"models with no transcribed card — counted as unpriced, never compared",
-	],
-	worst,
-	// FAILS CLOSED on an empty corpus (pr-review, round 1). `mismatches === 0`
-	// alone reports a clean check when ~/.pi/agent/sessions is missing or
-	// unreadable and nothing was examined at all — which is the same shape of
-	// dishonesty as #495's Closer printing 0.0000% for a harness it never read.
-	ok: mismatches === 0 && files > 0 && compared > 0,
-};
-if (record.ok === false && mismatches === 0) {
-	record.emptyCorpus = true;
-}
-
-if (asJson) {
-	console.log(JSON.stringify(record, null, 2));
-} else {
-	console.log(`Pi DeepSeek corpus check — ${SESSIONS}`);
-	console.log(`  files                    ${files}`);
-	console.log(`  deepseek turns           ${deepseekTurns}`);
-	console.log(`  priced by Pi natively    ${usedPiNative}   (not checked here)`);
-	console.log(`  compared against card    ${compared}`);
-	console.log(`  unpriced (no card)       ${unpriced}   ${[...unpricedModels.keys()].join(", ") || "-"}`);
-	console.log(`  mismatches               ${mismatches}  ${
-		mismatchPercent === null ? "(no percentage — nothing was compared)" : `(${mismatchPercent.toFixed(4)}%)`}`);
-	if (record.emptyCorpus) {
-		console.log("");
-		console.log(`  EMPTY CORPUS — nothing was examined. ${files === 0
-			? `no .jsonl session files under ${SESSIONS}`
-			: "session files exist but no DeepSeek turn reached calculateClaudeCost"}.`);
-		console.log("  Exit 1: a check that read nothing is not a passing check.");
-	}
-	console.log("");
-	console.log("  NOT checked by this run:");
-	for (const s of record.outOfScope) console.log(`    - ${s}`);
-	for (const w of worst) {
-		console.log(`  MISMATCH ${w.model} @ ${w.timestamp}: expected ${w.expected} actual ${w.actual}`);
-	}
-}
-
 // ---
 // SYNTHETIC MATRIX — the periods the corpus does not contain (#100).
 //
@@ -382,17 +327,93 @@ const matrixFailures = [];
 			}
 		}
 	}
-	console.log("");
-	console.log(`  synthetic matrix         ${matrixChecked} cells, ${matrixMismatches} mismatch(es)`);
-	for (const f of matrixFailures) console.log(`    MISMATCH ${f}`);
 }
 
 // Fail closed on a matrix that did not run. Every cell is fabricated here, so
 // "zero cells" can only mean the loop was skipped — never "nothing to check".
-const matrixRan = matrixChecked === Object.keys(CARD).length * MATRIX_INSTANTS.length;
+const MATRIX_CELLS = Object.keys(CARD).length * MATRIX_INSTANTS.length;
+const matrixRan = matrixChecked === MATRIX_CELLS;
 if (!matrixRan) {
-	console.log(`  MATRIX DID NOT RUN — ${matrixChecked} cells, expected ${
-		Object.keys(CARD).length * MATRIX_INSTANTS.length}. Exit 1: a check that ran nothing is not a passing check.`);
 }
 
-process.exit(record.ok && matrixRan && matrixMismatches === 0 ? 0 : 1);
+
+const mismatchPercent = compared === 0 ? null : (mismatches / compared) * 100;
+const record = {
+	schema: "wtft-research/pi-deepseek-corpus-check@1",
+	sessionsDir: SESSIONS,
+	files,
+	deepseekTurns,
+	usedPiNativeCost: usedPiNative,
+	compared,
+	mismatches,
+	mismatchPercent: mismatchPercent === null ? null : Number(mismatchPercent.toFixed(4)),
+	unpriced,
+	unpricedModels: Object.fromEntries(unpricedModels),
+	outOfScope: [
+		"Claude Code transcripts (covered by #495's own Closer)",
+		"whether the transcribed card matches DeepSeek's actual billing",
+		"turns priced by Pi's native cost.total",
+		"models with no transcribed card — counted as unpriced, never compared",
+	],
+	worst,
+	// The synthetic matrix travels in the RECORD, not only on stdout (#100). An
+	// earlier version printed it after the JSON document, which appended text to
+	// valid JSON and made the whole `--json` contract unparseable — the exact
+	// failure the Agent-First Output standard exists to prevent, in a script
+	// whose output another program is meant to read. Suppressing the lines under
+	// --json would have met the letter and missed the point: a consumer asking
+	// for the machine-readable mode should SEE this verdict, not lose it.
+	syntheticMatrix: {
+		cells: matrixChecked,
+		expectedCells: MATRIX_CELLS,
+		ran: matrixRan,
+		mismatches: matrixMismatches,
+		failures: matrixFailures,
+	},
+	// FAILS CLOSED on an empty corpus (pr-review, round 1). `mismatches === 0`
+	// alone reports a clean check when ~/.pi/agent/sessions is missing or
+	// unreadable and nothing was examined at all — which is the same shape of
+	// dishonesty as #495's Closer printing 0.0000% for a harness it never read.
+	ok: mismatches === 0 && files > 0 && compared > 0
+		&& matrixRan && matrixMismatches === 0,
+};
+if (record.ok === false && mismatches === 0) {
+	record.emptyCorpus = true;
+}
+
+if (asJson) {
+	console.log(JSON.stringify(record, null, 2));
+} else {
+	console.log(`Pi DeepSeek corpus check — ${SESSIONS}`);
+	console.log(`  files                    ${files}`);
+	console.log(`  deepseek turns           ${deepseekTurns}`);
+	console.log(`  priced by Pi natively    ${usedPiNative}   (not checked here)`);
+	console.log(`  compared against card    ${compared}`);
+	console.log(`  unpriced (no card)       ${unpriced}   ${[...unpricedModels.keys()].join(", ") || "-"}`);
+	console.log(`  mismatches               ${mismatches}  ${
+		mismatchPercent === null ? "(no percentage — nothing was compared)" : `(${mismatchPercent.toFixed(4)}%)`}`);
+	if (record.emptyCorpus) {
+		console.log("");
+		console.log(`  EMPTY CORPUS — nothing was examined. ${files === 0
+			? `no .jsonl session files under ${SESSIONS}`
+			: "session files exist but no DeepSeek turn reached calculateClaudeCost"}.`);
+		console.log("  Exit 1: a check that read nothing is not a passing check.");
+	}
+	console.log("");
+	console.log("  NOT checked by this run:");
+	for (const s of record.outOfScope) console.log(`    - ${s}`);
+	for (const w of worst) {
+		console.log(`  MISMATCH ${w.model} @ ${w.timestamp}: expected ${w.expected} actual ${w.actual}`);
+	}
+	console.log("");
+	console.log(`  synthetic matrix         ${matrixChecked} cells, ${matrixMismatches} mismatch(es)`);
+	for (const f of matrixFailures) console.log(`    MISMATCH ${f}`);
+	if (!matrixRan) {
+		console.log(`  MATRIX DID NOT RUN — ${matrixChecked} cells, expected ${MATRIX_CELLS}.`);
+		console.log("  Exit 1: a check that ran nothing is not a passing check.");
+	}
+}
+
+// `record.ok` already folds in the matrix, so the exit code and the JSON
+// document cannot disagree about the verdict.
+process.exit(record.ok ? 0 : 1);

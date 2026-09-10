@@ -178,10 +178,16 @@ describe("isModelPriced (#140)", () => {
 		assert.strictEqual(isModelPriced("deepseek-reasoner"), false);
 		assert.strictEqual(isModelPriced("deepseek-chat"), false);
 		// An id carrying BOTH `deepseek` and a legacy-branch word: calculateClaudeCost
-		// tests `deepseek` first, so this takes the sibling guess and costs
-		// $0.22/MTok, not the $5.00 the `opus` branch would charge. isModelPriced
-		// asks in the same order so the two cannot disagree about which branch a
-		// model reached (pr-review, round 1).
+		// tests `deepseek` first, so this takes the sibling guess rather than the
+		// $5.00 the `opus` branch would charge. isModelPriced asks in the same
+		// order so the two cannot disagree about which branch a model reached
+		// (pr-review, round 1).
+		//
+		// WHICH figure the guess produces depends on the instant, and #100 is why
+		// that now has to be said: the sibling is deepseek-v4-flash, whose card
+		// moved to 0.15 on 2026-09-10T04:00Z. The instant below is 2026-08-23, so
+		// 0.22 is its dated window and NOT what this id costs today. The branch,
+		// not the number, is what this case is about.
 		assert.strictEqual(isModelPriced("deepseek-opus"), false);
 		assert.strictEqual(
 			calculateClaudeCost("deepseek-opus", { input_tokens: 1_000_000 }, Date.UTC(2026, 7, 23, 12)),
@@ -218,8 +224,12 @@ describe("describeFallbackPricing (#22 B)", () => {
 		const named = calculateClaudeCost("deepseek-v4-flash", usage, OFF_PEAK_WEEKEND);
 		assert.ok(/deepseek-v4-flash/.test(describeFallbackPricing("deepseek-reasoner")));
 		assert.strictEqual(guessed, named);
-		// Not a tautology: 0.22 is deepseek-v4-flash's current-card input rate,
-		// read from the committed manifest, not recomputed from the registry.
+		// Not a tautology: 0.22 is a rate transcribed from the committed manifest
+		// rather than recomputed from the registry. It is deepseek-v4-flash's
+		// rate on OFF_PEAK_WEEKEND (2026-08-23) — the manifest's
+		// "before 2026-09-10T04:00:00Z" row, not its standard row, which #100
+		// moved to 0.15. Said exactly, because "current-card input rate" was
+		// written here and went false without this assertion changing at all.
 		assert.strictEqual(guessed, 0.22);
 	});
 

@@ -61,26 +61,57 @@ const asJson = process.argv.includes("--json");
 // the registry's numbers across.
 // ---
 const RATE_CARD_CHANGED_AT = Date.UTC(2026, 7, 16, 16, 0, 0); // 2026-08-16T16:00:00Z
+const V41_FLASH_FROM       = Date.UTC(2026, 8, 10, 4, 0, 0);  // 2026-09-10T04:00:00Z
+const V4_PRO_REROUTE_FROM  = Date.UTC(2026, 8, 14, 4, 0, 0);  // 2026-09-14T04:00:00Z
 const WEEKEND_OFFPEAK_FROM = Date.UTC(2026, 7, 23, 0, 0, 0);  // 2026-08-23T00:00:00Z
 const PEAK_WINDOWS_UTC = [[60, 240], [360, 600]];             // 01:00–04:00, 06:00–10:00
 
+// A model's cards, NEWEST FIRST, each with the instant it took effect. Two
+// windows became three when V4.1 Flash retired the V4 Flash line (#100), which
+// is why this is a list rather than a `current`/`before` pair — the pair could
+// not express a model with two superseded cards, and v4-flash now has two.
+//
+// The V4.1 Flash numbers are transcribed from the scrape committed at
+// research/100-deepseek-v41-flash/pricing-page-2026-09-10.md, the same
+// independent route as the #495 numbers above it. NOT read from
+// extensions/lib/wtft-cost.ts — see this file's header. Copying the registry
+// across is the one edit that destroys what this file is for.
 const CARD = {
 	"deepseek-v4-pro": {
-		current: { input: 0.66, output: 1.98, cacheRead: 0.022 },
-		before:  { input: 1.74, output: 3.48, cacheRead: 0.0145 },
+		// From 2026-09-14 the NAME routes to V4.1 Flash and bills at its card.
+		cards: [
+			{ from: V4_PRO_REROUTE_FROM,  input: 0.15, output: 0.60, cacheRead: 0.003 },
+			{ from: RATE_CARD_CHANGED_AT, input: 0.66, output: 1.98, cacheRead: 0.022 },
+			{ from: 0,                    input: 1.74, output: 3.48, cacheRead: 0.0145 },
+		],
 	},
 	"deepseek-v4-flash": {
-		current: { input: 0.22, output: 0.66, cacheRead: 0.007 },
-		before:  { input: 0.14, output: 0.28, cacheRead: 0.0028 },
+		cards: [
+			{ from: V41_FLASH_FROM,       input: 0.15, output: 0.60, cacheRead: 0.003 },
+			{ from: RATE_CARD_CHANGED_AT, input: 0.22, output: 0.66, cacheRead: 0.007 },
+			{ from: 0,                    input: 0.14, output: 0.28, cacheRead: 0.0028 },
+		],
 	},
-	// Released after the card change, so no `before` window exists for it.
+	// Released after the 2026-08-16 change, so it has no card older than that
+	// one — a turn predating it would be a fiction. Retired alongside -flash.
 	"deepseek-v4-flash-vision-exp": {
-		current: { input: 0.22, output: 0.66, cacheRead: 0.007 },
-		before:  null,
+		cards: [
+			{ from: V41_FLASH_FROM,       input: 0.15, output: 0.60, cacheRead: 0.003 },
+			{ from: RATE_CARD_CHANGED_AT, input: 0.22, output: 0.66, cacheRead: 0.007 },
+		],
+	},
+	// V4.1 Flash under its own name. One card: it did not exist before it.
+	"deepseek-flash": {
+		cards: [
+			{ from: 0, input: 0.15, output: 0.60, cacheRead: 0.003 },
+		],
 	},
 };
 
-/** Longest key first — "deepseek-v4-flash" is a substring of the vision key. */
+/**
+ * Longest key first — "deepseek-v4-flash" is a substring of the vision key.
+ * "deepseek-flash" is a substring of neither, so it cannot steal a v4 lookup.
+ */
 const CARD_KEYS = Object.keys(CARD).sort((a, b) => b.length - a.length);
 
 function cardFor(model) {
@@ -103,7 +134,11 @@ function surgeMultiplier(ts) {
 }
 
 function expectedCost(entry, usage, ts) {
-	const rates = (entry.before && ts && ts < RATE_CARD_CHANGED_AT) ? entry.before : entry.current;
+	// Newest card whose `from` the turn has reached. `cards` is newest-first, so
+	// the first match wins. An unknown instant (ts 0/undefined) falls through to
+	// the oldest entry rather than being priced at today's card, which is how a
+	// turn wtft could not date is treated on the other side too.
+	const rates = entry.cards.find(c => (ts || 0) >= c.from) ?? entry.cards[entry.cards.length - 1];
 	const surge = surgeMultiplier(ts);
 	return (
 		usage.input * (rates.input * surge / 1e6) +

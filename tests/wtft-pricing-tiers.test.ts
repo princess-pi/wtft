@@ -328,8 +328,10 @@ describe("calculateClaudeCost with tiers", () => {
 			input_tokens: 100000,
 			output_tokens: 5000,
 		}, OFF_PEAK);
-		// The SUPERSEDED card (dateTiers), not the current one: the current card
-		// would give 100K*$0.66 + 5K*$1.98 = $0.0759.
+		// The OLDEST card (dateTiers), not the current one. v4-pro has two
+		// windows now: 0.66/1.98 from 2026-08-16, then the V4.1 Flash card from
+		// 2026-09-14T04:00Z when the name starts routing there (#100). On the
+		// current card this turn would cost 100K*$0.15 + 5K*$0.60 = $0.018.
 		// 100K * $1.74/1M + 5K * $3.48/1M = $0.174 + $0.0174 = $0.1914
 		const expected = (100000 * 1.74 / 1000000) + (5000 * 3.48 / 1000000);
 		assert.ok(Math.abs(cost - expected) < 0.0001);

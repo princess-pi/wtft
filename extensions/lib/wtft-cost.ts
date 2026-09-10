@@ -489,9 +489,10 @@ export function applyUserPricing(overrides: Record<string, ModelPricing>): void 
  * The `deepseek` test comes FIRST and returns false, mirroring the branch order
  * in calculateClaudeCost (pr-review, round 1). An id containing both — say
  * `deepseek-opus` — takes the sibling-guess branch there, because that branch is
- * tested first; checking `opus` first here would call it priced while it costs
- * $0.22/MTok from the flash card rather than the $5.00 the `opus` branch would
- * charge. The two functions must agree on which branch a model reaches, so they
+ * tested first; checking `opus` first here would call it priced while it is
+ * charged from the flash card rather than the $5.00 the `opus` branch would
+ * charge. (No rate quoted: the flash card has moved twice, and a figure here
+ * would have to move with it — the registry is two screens up.) The two functions must agree on which branch a model reaches, so they
  * ask in the same order.
  *
  * See describeFallbackPricing for what the caller should say about each class.

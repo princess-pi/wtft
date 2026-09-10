@@ -165,6 +165,35 @@ function generateHarnessRegistry(): void {
 	console.log(`✅ Harness registry: ${ids.join(", ")}`);
 }
 
+// ---
+// THE PRICING MANIFEST IS GENERATED HERE, because four test messages already
+// said it was (#100).
+//
+// `docs/manifests/wtft-pricing.json` is derived from MODEL_PRICING and read by
+// docs/EXT_WTFT.html's rate table. tests/wtft-pricing-manifest.test.ts asserts
+// the committed file equals a fresh render, and every one of its four failure
+// messages ends "run: bun run build" — which wrote nothing. So the one command
+// the failure told you to run left it failing, and the only way out was to
+// find renderPricingManifest and call it by hand. Measured on #100: a rate
+// change turned the suite red with an instruction that could not fix it.
+//
+// Same shape as generateHarnessRegistry above, and for the same reason: a
+// derived artifact that a human has to remember to regenerate is one that goes
+// stale, which is the whole of #169.
+const PRICING_MANIFEST = path.join(import.meta.dir, "docs", "manifests", "wtft-pricing.json");
+
+async function generatePricingManifest(): Promise<void> {
+	// Imported lazily so a broken registry fails HERE, with the manifest step
+	// named, rather than at this file's import graph before any build output.
+	const { renderPricingManifest } = await import(
+		"./extensions/lib/wtft-pricing-manifest.ts"
+	);
+	const next: string = renderPricingManifest();
+	const prev = fs.existsSync(PRICING_MANIFEST) ? fs.readFileSync(PRICING_MANIFEST, "utf8") : "";
+	if (prev !== next) fs.writeFileSync(PRICING_MANIFEST, next);
+	console.log(`✅ Pricing manifest: ${JSON.parse(next).models.length} models${prev === next ? " (unchanged)" : ""}`);
+}
+
 const entries = [
   { src: "bin/wtft.ts", out: "wtft.mjs" },
   { src: "bin/wtft-daemon.ts", out: "wtft-daemon.mjs" },
@@ -219,6 +248,7 @@ const pkgVersion = JSON.parse(
 ).version as string;
 
 generateHarnessRegistry();
+await generatePricingManifest();
 
 let errors = 0;
 for (const { src, out } of entries) {

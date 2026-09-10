@@ -9,7 +9,7 @@
       "06:00–10:00"
     ],
     "weekendOffPeakFrom": "2026-08-23T00:00:00Z",
-    "note": "DeepSeek rows are the off-peak card; peak is 2x on the windows and weekdays given here. For DeepSeek only, the Input column is the cache-MISS rate and Cache Read the cache-HIT rate — the Anthropic-format endpoint reports no cache-creation tokens and bills a miss as plain input, so its cache writes genuinely cost nothing. For every model here, reasoning tokens bill at the output rate. Cache Write is the 5-minute-TTL rate; where it is above zero, a 1-hour-TTL write bills at 2x that row's input rate, and where it is zero both TTLs are free. Where a model shows a dated row, that row applies instead of the standard one until its date passes — the standard row is not necessarily the price in force today."
+    "note": "DeepSeek rows are the off-peak card; peak is 2x on the windows and weekdays given here. For DeepSeek only, the Input column is the cache-MISS rate and Cache Read the cache-HIT rate — the Anthropic-format endpoint reports no cache-creation tokens and bills a miss as plain input, so its cache writes genuinely cost nothing. For every model here, reasoning tokens bill at the output rate. Cache Write is the 5-minute-TTL rate; where it is above zero, a 1-hour-TTL write bills at 2x that row's input rate, and where it is zero both TTLs are free. Where a model shows dated rows, the EARLIEST one whose date has not yet passed applies instead of the standard row — so the standard row is not necessarily the price in force today, and with more than one dated row it is the first, not the last, that wins. Three DeepSeek names now carry the same standard row because they are one model: V4.1 Flash retired the V4 Flash line on 2026-09-10 and takes over deepseek-v4-pro on 2026-09-14, with deepseek-flash as its own name. Their dated rows are what still differ."
   },
   "models": [
     {
@@ -164,13 +164,25 @@
       ]
     },
     {
+      "model": "deepseek-flash",
+      "rates": [
+        {
+          "condition": "",
+          "input": 0.15,
+          "output": 0.6,
+          "cacheRead": 0.003,
+          "cacheWrite": 0
+        }
+      ]
+    },
+    {
       "model": "deepseek-v4-flash",
       "rates": [
         {
           "condition": "",
-          "input": 0.22,
-          "output": 0.66,
-          "cacheRead": 0.007,
+          "input": 0.15,
+          "output": 0.6,
+          "cacheRead": 0.003,
           "cacheWrite": 0
         },
         {
@@ -178,6 +190,13 @@
           "input": 0.14,
           "output": 0.28,
           "cacheRead": 0.0028,
+          "cacheWrite": 0
+        },
+        {
+          "condition": "before 2026-09-10T04:00:00Z",
+          "input": 0.22,
+          "output": 0.66,
+          "cacheRead": 0.007,
           "cacheWrite": 0
         }
       ]
@@ -187,6 +206,20 @@
       "rates": [
         {
           "condition": "",
+          "input": 0.15,
+          "output": 0.6,
+          "cacheRead": 0.003,
+          "cacheWrite": 0
+        },
+        {
+          "condition": "before 2026-08-16T16:00:00Z",
+          "input": 0.14,
+          "output": 0.28,
+          "cacheRead": 0.0028,
+          "cacheWrite": 0
+        },
+        {
+          "condition": "before 2026-09-10T04:00:00Z",
           "input": 0.22,
           "output": 0.66,
           "cacheRead": 0.007,
@@ -199,9 +232,9 @@
       "rates": [
         {
           "condition": "",
-          "input": 0.66,
-          "output": 1.98,
-          "cacheRead": 0.022,
+          "input": 0.15,
+          "output": 0.6,
+          "cacheRead": 0.003,
           "cacheWrite": 0
         },
         {
@@ -209,6 +242,13 @@
           "input": 1.74,
           "output": 3.48,
           "cacheRead": 0.0145,
+          "cacheWrite": 0
+        },
+        {
+          "condition": "before 2026-09-14T04:00:00Z",
+          "input": 0.66,
+          "output": 1.98,
+          "cacheRead": 0.022,
           "cacheWrite": 0
         }
       ]

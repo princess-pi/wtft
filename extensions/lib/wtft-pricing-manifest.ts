@@ -144,9 +144,15 @@ export function buildPricingManifest(): PricingManifest {
 				+ "output rate. Cache Write is the 5-minute-TTL rate; where it is "
 				+ "above zero, a 1-hour-TTL write bills at 2x that row's input "
 				+ "rate, and where it is zero both TTLs are free. Where a model "
-				+ "shows a dated row, that row applies instead of the standard one "
-				+ "until its date passes — the standard row is not necessarily the "
-				+ "price in force today.",
+				+ "shows dated rows, the EARLIEST one whose date has not yet "
+				+ "passed applies instead of the standard row — so the standard "
+				+ "row is not necessarily the price in force today, and with more "
+				+ "than one dated row it is the first, not the last, that wins. "
+				+ "Three DeepSeek names now carry the same standard row because "
+				+ "they are one model: V4.1 Flash retired the V4 Flash line on "
+				+ "2026-09-10 and takes over deepseek-v4-pro on 2026-09-14, with "
+				+ "deepseek-flash as its own name. Their dated rows are what "
+				+ "still differ.",
 		},
 		models: Object.keys(MODEL_PRICING).sort().map(model => ({
 			model,

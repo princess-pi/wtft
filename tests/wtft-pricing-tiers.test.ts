@@ -187,13 +187,18 @@ describe("lookupModelPricing", () => {
 	});
 
 	it("fuzzy-matches model IDs containing a registry key", () => {
-		// DeepSeek v4-pro with provider prefix.
-		// Base rates are the CURRENT (post-2026-08-16) card; the 1.74/3.48 card
-		// this used to assert is now the dateTiers window, where #495 moved it
-		// so historical sessions keep pricing correctly.
+		// DeepSeek v4-pro with provider prefix. What this case is FOR is that
+		// the prefix does not defeat the match, so it asserts the resolved
+		// ENTRY, not a rate. It used to pin the standard row's 0.66 and broke
+		// in #100 when v4-pro's standard row became the V4.1 Flash card —
+		// red for a repricing, in a test about string matching, whose subject
+		// had not changed at all. A current rate is the one thing here
+		// guaranteed to move again.
 		const p = lookupModelPricing("deepseek/deepseek-v4-pro");
 		assert.ok(p);
-		assert.strictEqual(p!.input, 0.66);
+		assert.strictEqual(p, MODEL_PRICING["deepseek-v4-pro"]);
+		// The oldest dated window is safe to pin: a superseded card is frozen
+		// by definition, and dateTiers[0] is the earliest cutoff.
 		assert.strictEqual(p!.dateTiers?.[0].input, 1.74);
 	});
 

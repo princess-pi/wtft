@@ -234,8 +234,9 @@
              MODEL_PRICING (#169). The hand-written table this replaces was stale by an
              entire model family — no Claude 5, no GPT-5.x, no dated or size tiers, and
              DeepSeek rates from before the 2026-08-16 card — and nothing failed while it
-             was wrong. Edit extensions/lib/wtft-cost.ts and run `bun run build`; there is
-             no rate to edit on this page. -->
+             was wrong. Edit extensions/lib/wtft-cost.ts, run `bun run manifest`, and commit
+             the regenerated JSON; there is no rate to edit on this page. `bun run build`
+             only CHECKS that file and fails naming the write command (#100). -->
         <table id="wtft-pricing-table" style="width: 100%; border-collapse: collapse; margin-top: 10px;">
             <tr><td style="color: #666;"><em>Loading pricing registry...</em></td></tr>
         </table>
@@ -418,8 +419,10 @@
                 });
             });
 
-        // Model Pricing (#169) — generated at build time from MODEL_PRICING, so a
-        // rate change reaches this page by rebuilding rather than by remembering.
+        // Model Pricing (#169) — generated from MODEL_PRICING by `bun run manifest`,
+        // so a rate change reaches this page by regenerating and committing that JSON.
+        // `bun run build` verifies it and refuses on a stale one, so the step cannot be
+        // forgotten silently — but the build is deliberately not the writer (#100).
         fetch('manifests/wtft-pricing.json')
             .then(r => r.json())
             .then(renderPricingTable)
@@ -433,12 +436,16 @@
             if (!table) return;
             // Never round away a significant digit. A fixed "< 0.01 ? 4dp : 2dp"
             // cutoff rendered four-decimal cache-read rates at two decimals. Worst
-            // case measured across the committed manifest: 31% understated on
-            // deepseek-v4-pro's SUPERSEDED (dateTiers) rate, 9% on its current one —
-            // both are rows this table shows. In the very table #169/#495 built to
-            // stop hand-typed rates drifting. 4dp, trailing zeros
-            // trimmed to a 2dp floor. (No rate quoted here: tests/wtft-pricing-
-            // manifest.test.ts bans literal rates from this page, and is right to.)
+            // case when #495 measured it: 31% understated on deepseek-v4-pro's
+            // SUPERSEDED (dateTiers) rate, 9% on its then-current one. Re-measured
+            // across the committed manifest after #100 dropped the DeepSeek
+            // cache-hit rate: the worst case is now 100% — every DeepSeek cache-read
+            // rate, standard and dated alike, renders as $0.00 at a 2dp cutoff. The
+            // defect got WORSE while the fix stayed the same, which is the argument
+            // for the fix. In the very table #169/#495 built to stop hand-typed rates
+            // drifting. 4dp, trailing zeros trimmed to a 2dp floor. (No rate quoted
+            // here: tests/wtft-pricing-manifest.test.ts bans literal rates from this
+            // page, and is right to.)
             const money = n => n === 0 ? '$0'
                 : '$' + n.toFixed(4).replace(/(\.\d\d)(\d*?)0+$/, '$1$2');
             const head =

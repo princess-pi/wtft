@@ -247,6 +247,11 @@ describe("user pricing registry (#140)", () => {
 		applyUserPricing({ "model-x-9000": { input: 7, output: 21, cacheRead: 0.7, cacheWrite: 8.75 } });
 		assert.strictEqual(isModelPriced("model-x-9000"), true);
 		assert.strictEqual(calculateClaudeCost("model-x-9000", { input_tokens: MTOK }), 7);
+		// Restore. applyUserPricing MUTATES the module-global MODEL_PRICING in
+		// place, and unlike the override case below this one added a NEW key, so
+		// nothing else removes it — a fake model would otherwise survive into
+		// every later case in this process.
+		delete MODEL_PRICING["model-x-9000"];
 	});
 
 	it("applyUserPricing overrides a built-in entry", () => {

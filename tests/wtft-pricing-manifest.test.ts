@@ -7,10 +7,23 @@
  * 2026-08-16 card. Nothing failed while it was wrong.
  *
  * These tests gate the generated path end to end: the committed manifest must
- * equal a fresh render (so a registry edit that skips `bun run build` is red),
+ * equal a fresh render (so a registry edit that skips regeneration is red),
  * every registry model must appear (so a new model cannot be invisible), and
  * the page must actually read the manifest rather than carry a fourth copy of
  * the numbers in markup.
+ *
+ * THE COMMAND IN THESE MESSAGES IS `bun run manifest`, and until #100 it was
+ * `bun run build` in all five messages below — a command that wrote nothing.
+ * `renderPricingManifest()` existed and had no caller, so the only instruction
+ * a failure ever gave you left it failing. Two things had to change together, and the second is the subtle one:
+ * the build must NOT be the writer. `prepare` runs the build and CI runs
+ * `npm install` before `npm test`, so a build that regenerated this file would
+ * repair a stale COMMITTED manifest in the working tree moments before the
+ * comparison below — turning this suite green for every possible registry.
+ * Measured while making the change: staling the committed file fails this suite
+ * before a build and passes after one. So `bun run manifest` writes,
+ * `bun run build` only compares (and fails, naming that command), and nothing
+ * between checkout and assertion touches the file.
  */
 
 import * as assert from "node:assert";
@@ -28,7 +41,7 @@ import {
 // than left to be rediscovered a third time: comparing the committed manifest
 // against the BUILT registry could not detect a skipped build, because a skipped
 // build leaves bundle and manifest equally stale. Importing the source is what
-// makes "edit the registry, skip `bun run build`" observable. Verified by
+// makes "edit the registry, skip `bun run manifest`" observable. Verified by
 // mutation both times — adding a model here and not rebuilding turns the
 // "lists exactly the registry's models" case red with its intended message.
 import { MODEL_PRICING } from "../extensions/lib/wtft-cost.ts";
@@ -39,14 +52,16 @@ const DOC_PATH = path.join(REPO, "docs", "EXT_WTFT.html");
 
 describe("#169 the pricing manifest is committed and current", () => {
 	it("exists", () => {
-		assert.ok(fs.existsSync(MANIFEST_PATH), `${MANIFEST_PATH} is missing — run: bun run build`);
+		assert.ok(fs.existsSync(MANIFEST_PATH), `${MANIFEST_PATH} is missing — run: bun run manifest`);
 	});
 
 	it("matches a fresh render of the registry byte for byte", () => {
-		// The whole point: a rate edit that skips the build is caught HERE, not
-		// by a reader noticing the docs page disagrees with the CLI.
+		// The whole point: a rate edit that skips `bun run manifest` is caught
+		// HERE, not by a reader noticing the docs page disagrees with the CLI.
+		// `bun run build` also refuses on a stale file, but it only checks — it
+		// deliberately does not repair, or this assertion could never fail.
 		const committed = fs.readFileSync(MANIFEST_PATH, "utf8");
-		assert.strictEqual(committed, renderPricingManifest(), "stale manifest — run: bun run build");
+		assert.strictEqual(committed, renderPricingManifest(), "stale manifest — run: bun run manifest");
 	});
 
 	it("declares its schema", () => {
@@ -63,20 +78,20 @@ describe("#169 every priced model reaches the manifest", () => {
 		// an identity — it could not fail under any registry or builder state,
 		// while its failure message named a cause the builder makes impossible.
 		// Against the committed file it fails for the reason that message gives:
-		// a registry edit that skipped `bun run build`.
+		// a registry edit that skipped `bun run manifest`.
 		const committed = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8"));
 		const listed = committed.models.map((m: { model: string }) => m.model).sort();
 		const priced = Object.keys(MODEL_PRICING).sort();
 		for (const model of priced) {
-			assert.ok(listed.includes(model), `${model} is priced but missing from the committed manifest — run: bun run build`);
+			assert.ok(listed.includes(model), `${model} is priced but missing from the committed manifest — run: bun run manifest`);
 		}
 		for (const model of listed) {
-			assert.ok(priced.includes(model), `${model} is in the committed manifest but no longer priced — run: bun run build`);
+			assert.ok(priced.includes(model), `${model} is in the committed manifest but no longer priced — run: bun run manifest`);
 		}
 		// "exactly" means the counts match too (pr-review round 2). Inclusion in
 		// both directions is satisfied by a manifest that lists a model twice.
 		assert.strictEqual(listed.length, priced.length,
-			`the committed manifest has ${listed.length} rows for ${priced.length} priced models — a duplicate or dropped entry; run: bun run build`);
+			`the committed manifest has ${listed.length} rows for ${priced.length} priced models — a duplicate or dropped entry; run: bun run manifest`);
 		assert.strictEqual(new Set(listed).size, listed.length, "the committed manifest lists a model more than once");
 	});
 

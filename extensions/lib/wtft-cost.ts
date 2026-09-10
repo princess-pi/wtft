@@ -5,10 +5,16 @@
  *   The registry covers the Claude 4 and 5 families (including fable and
  *   mythos), DeepSeek (flash, v4-pro, v4-flash, v4-flash-vision-exp) and
  *   GPT-5.x.
- *   A rate resolves through three mechanisms, in this order: a DATED window
- *   (`dateTiers`, #148/#495 — an intro rate or a superseded card), then an
- *   input-SIZE tier (`tiers`, GPT-5.x long-context), then the entry's own
- *   unconditioned quad. On top of that, DeepSeek rates carry a peak-valley
+ *   A rate resolves through three mechanisms. The entry's own unconditioned
+ *   quad is the floor; a DATED window (`dateTiers`, #148/#495 — an intro rate
+ *   or a superseded card) replaces it for a turn old enough to reach one; and
+ *   an input-SIZE tier (`tiers`, GPT-5.x long-context) then replaces ALL FOUR
+ *   fields of whatever that produced. So size OUTRANKS date, rather than being
+ *   third in a precedence chain — see resolveTieredRates, where `tiers`
+ *   overwrites `rates` wholesale. No model carries both today (DeepSeek and
+ *   claude-sonnet-5 have only dates, GPT-5.x only sizes), so the ordering is
+ *   currently unreachable; it is stated because the first entry to carry both
+ *   would otherwise resolve the opposite way from this sentence. On top of that, DeepSeek rates carry a peak-valley
  *   surge multiplier that is time-of-day AND weekday dependent, and cache
  *   writes are TTL-split.
  *
@@ -145,7 +151,8 @@ export const DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES: ReadonlyArray<readonly [number, 
  *
  * EVIDENCE, and it is weaker than DEEPSEEK_RATE_CARD_FROM's — say so rather than
  * let the two dates borrow each other's confidence (PR #507 review). The scrape
- * at research/495-deepseek-pricing/pricing-page-2026-08-25.md confirms the rule
+ * at princess-pi-tools/research/495-deepseek-pricing/pricing-page-2026-08-25.md
+ * confirms the rule
  * IS Monday-Friday as of 2026-08-25; it does not say when that started. The date
  * here comes from a secondary report (#495's Sources), not from the vendor's own
  * changelog. If the true cutover differs, weekend interactions between the two
@@ -165,10 +172,11 @@ export const DEEPSEEK_WEEKEND_OFFPEAK_FROM = Date.UTC(2026, 7, 23, 0, 0, 0);
 /**
  * The instant the DeepSeek rate card changed (2026-08-16T16:00:00Z).
  *
- * Interactions strictly before this price at the old card, which every DeepSeek
- * entry now carries as its EARLIEST `dateTiers` window — `-vision-exp` included
+ * Interactions strictly before this price at the old card, which the three V4
+ * names carry as their EARLIEST `dateTiers` window — `-vision-exp` included
  * since #100, though for that model the window is unreachable by any observed
- * turn; see its registry entry.
+ * turn; see its registry entry. `deepseek-flash` carries none and never will:
+ * it did not exist on either side of this instant.
  *
  * v4-pro got much cheaper and v4-flash dearer, so the two errors partly cancel in a
  * TOTAL — which is exactly why nine days of wrong prices looked fine on screen (#495).
@@ -193,9 +201,13 @@ export const DEEPSEEK_V41_FLASH_FROM = Date.UTC(2026, 8, 10, 4, 0, 0);
  *
  * Four days after the Flash cutover, with no opt-out and no V4.1 Pro to route to
  * instead. A Pro turn after this bills at the FLASH card — 0.15/0.60/0.003 — so
- * charging it the Pro card would overcount input 4.4x and output 3.3x. Separate
- * from DEEPSEEK_V41_FLASH_FROM because the two dates are genuinely four days
- * apart, and a single constant would misprice one line or the other.
+ * charging it the Pro card would overcount input 4.4x, output 3.3x, and
+ * cache-HIT reads 7.3x (0.022 against 0.003). The cache-hit ratio is the
+ * largest of the three and the easiest to leave out of a summary, which is
+ * exactly why it is named: on an agent workload cache hits are most of the
+ * input. Separate from DEEPSEEK_V41_FLASH_FROM because the two dates are
+ * genuinely four days apart, and a single constant would misprice one line or
+ * the other.
  */
 export const DEEPSEEK_V4_PRO_REROUTE_FROM = Date.UTC(2026, 8, 14, 4, 0, 0);
 
@@ -286,13 +298,18 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 	//
 	// The dateTiers windows carry every superseded card so historical sessions
 	// still report what they actually cost. Rates through 2026-09-10 verified
-	// against research/495-deepseek-pricing/pricing-page-2026-08-25.md; the V4.1
-	// Flash card against research/100-deepseek-v41-flash/.
+	// against princess-pi-tools/research/495-deepseek-pricing/pricing-page-2026-08-25.md
+	// (that scrape lives in the origin repo, not this one); the V4.1 Flash card
+	// against research/100-deepseek-v41-flash/pricing-page-2026-09-10.md, which
+	// IS committed here.
 	//
-	// THREE of the four keys below now price V4.1 Flash on a current turn: V4.1
-	// Flash retired the V4 Flash line on 2026-09-10 and takes over v4-pro on
-	// 2026-09-14 (#100). Only the dated windows still differ, which is the whole
-	// reason they are kept.
+	// ALL FOUR keys below carry the same unconditioned quad, because all four
+	// names end up serving V4.1 Flash (#100). They differ only in their dated
+	// windows, which is the whole reason those are kept. WHEN each name starts
+	// billing that quad differs: the two v4-flash names from 2026-09-10T04:00Z,
+	// v4-pro not until 2026-09-14T04:00Z. Deliberately not phrased as "three of
+	// four price it today" — that sentence was here first and was true for
+	// exactly four days.
 	//
 	// Order matters below: -vision-exp must precede -flash, because the fuzzy
 	// lookup would otherwise match the shorter key inside the longer model id.
@@ -509,6 +526,16 @@ export function isModelPriced(model: string): boolean {
  * The registry key calculateClaudeCost borrows when a DeepSeek id matches
  * nothing — the "Guess" branch, named once so the warning text and the branch
  * cannot disagree (#22 B). Both call this; neither re-types the condition.
+ *
+ * KNOWN GAP since #100, deliberately not fixed here: both keys it can return
+ * are names DeepSeek RETIRED, so the warning tells a user it is guessing with
+ * "the deepseek-v4-flash rate card" for a model that no longer exists. For a
+ * CURRENT turn the figure is right anyway — every DeepSeek entry now shares one
+ * unconditioned quad — but a future `deepseek-v5-*` id would be guessed from a
+ * retired name's dated windows, which is a rate that never applied to it.
+ * Returning `deepseek-flash` instead is the obvious change and is a behaviour
+ * change with its own test and spec surface, so it is filed rather than
+ * smuggled into a repricing branch.
  */
 export function deepSeekSiblingKey(model: string): "deepseek-v4-pro" | "deepseek-v4-flash" {
 	return (model || "").toLowerCase().includes("v4-pro") ? "deepseek-v4-pro" : "deepseek-v4-flash";

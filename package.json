@@ -29,6 +29,7 @@
   ],
   "scripts": {
     "build": "bun run build.ts",
+    "manifest": "bun run pricing-manifest.ts",
     "test": "bun run tests/run.ts",
     "typecheck": "tsc --noEmit",
     "prepare": "if [ ! -d node_modules/wcwidth ] || [ ! -d node_modules/@princess-pi/libs ]; then bun install; fi && bun run build"

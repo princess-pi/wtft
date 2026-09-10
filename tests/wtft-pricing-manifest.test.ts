@@ -42,8 +42,11 @@ import {
 // against the BUILT registry could not detect a skipped build, because a skipped
 // build leaves bundle and manifest equally stale. Importing the source is what
 // makes "edit the registry, skip `bun run manifest`" observable. Verified by
-// mutation both times — adding a model here and not rebuilding turns the
+// mutation both times — adding a model here and not REGENERATING turns the
 // "lists exactly the registry's models" case red with its intended message.
+// Regenerating, not rebuilding: since #100 `bun run build` only checks this
+// file and cannot repair the comparison, so "rebuild" would name a fix that
+// does not work.
 import { MODEL_PRICING } from "../extensions/lib/wtft-cost.ts";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -133,6 +136,38 @@ describe("#169 every priced model reaches the manifest", () => {
 		assert.deepStrictEqual(surge.windowsUtc, ["01:00–04:00", "06:00–10:00"]);
 		assert.strictEqual(surge.weekendOffPeakFrom, "2026-08-23T00:00:00Z");
 		assert.strictEqual(surge.multiplier, 2.0);
+	});
+
+	it("states the same cutover instants in the note as in the dated rows", () => {
+		// The note is PROSE inside a generated artifact, which is the one place a
+		// hardcoded date survives a regeneration: `bun run manifest` would rewrite
+		// every dated row's condition from the constants and leave a stale
+		// sentence beside them, and the committed file would still match a fresh
+		// render byte-for-byte. So the byte-comparison above cannot catch it and
+		// this case must (#100 review round 2).
+		const m = buildPricingManifest();
+		const note = m.deepseekSurge.note;
+
+		// Collect the instants the ROWS carry — the generated side.
+		const rowInstants = new Set<string>();
+		for (const model of m.models) {
+			for (const r of model.rates) {
+				const hit = r.condition.match(/^before (.+)$/);
+				if (hit && model.model.startsWith("deepseek")) rowInstants.add(hit[1]);
+			}
+		}
+
+		// Every instant the note mentions must be one a row actually carries.
+		const noteInstants = note.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g) ?? [];
+		assert.ok(noteInstants.length > 0, "the note should name the cutovers it describes");
+		for (const instant of noteInstants) {
+			assert.ok(
+				rowInstants.has(instant),
+				`the note names ${instant}, which no DeepSeek dated row carries — ` +
+				`rows have ${[...rowInstants].sort().join(", ")}. A hardcoded date in the note ` +
+				`survived a constant change; derive it with isoInstant() instead.`,
+			);
+		}
 	});
 });
 

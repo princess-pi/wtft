@@ -92,12 +92,19 @@ const CARD = {
 			{ from: 0,                    input: 0.14, output: 0.28, cacheRead: 0.0028 },
 		],
 	},
-	// Released after the 2026-08-16 change, so it has no card older than that
-	// one — a turn predating it would be a fiction. Retired alongside -flash.
+	// Believed released after the 2026-08-16 change, so a turn predating it would
+	// be a fiction — but the registry carries the old card for it anyway since
+	// #100, for symmetry with -flash whose retirement it shares. This table
+	// MIRRORS that, because the two must agree about a period even when neither
+	// expects to see a turn in it: without the row, a pre-2026-08-16 vision-exp
+	// turn falls back to 0.22 here and resolves to 0.14 in wtft, and the
+	// disagreement would be reported as a pricing mismatch that is really this
+	// file being stale. Retired alongside -flash.
 	"deepseek-v4-flash-vision-exp": {
 		cards: [
 			{ from: V41_FLASH_FROM,       input: 0.15, output: 0.60, cacheRead: 0.003 },
 			{ from: RATE_CARD_CHANGED_AT, input: 0.22, output: 0.66, cacheRead: 0.007 },
+			{ from: 0,                    input: 0.14, output: 0.28, cacheRead: 0.0028 },
 		],
 	},
 	// V4.1 Flash under its own name. One card: it did not exist before it.
@@ -147,10 +154,17 @@ function expectedCost(entry, usage, ts) {
 	// for v4-pro, an 11.6x divergence that would have reported every undated
 	// turn as a mismatch — the checker's own bug wearing a finding's costume.
 	// The corpus has no undated DeepSeek turn today, so nothing went red.
-	if (!ts) return entry.cards[0];
-	// Otherwise the newest card whose `from` the turn has reached. `cards` is
-	// newest-first, so the first match wins.
-	const rates = entry.cards.find(c => ts >= c.from) ?? entry.cards[entry.cards.length - 1];
+	//
+	// Note it SELECTS a card rather than returning one: an earlier fix here
+	// `return`ed entry.cards[0], so the caller's Math.abs(actual - expected) went
+	// NaN, NaN > EPSILON is false, and an undated turn was silently neither
+	// compared nor counted while the script still exited 0. A checker that skips
+	// a turn without saying so is worse than one that gets it wrong loudly.
+	//
+	// `cards` is newest-first, so for a dated turn the first match wins.
+	const rates = !ts
+		? entry.cards[0]
+		: (entry.cards.find(c => ts >= c.from) ?? entry.cards[entry.cards.length - 1]);
 	const surge = surgeMultiplier(ts);
 	return (
 		usage.input * (rates.input * surge / 1e6) +
@@ -300,4 +314,68 @@ if (asJson) {
 	}
 }
 
-process.exit(record.ok ? 0 : 1);
+// ---
+// SYNTHETIC MATRIX — the periods the corpus does not contain (#100).
+//
+// Every card transcribed above is only exercised by a turn that happens to fall
+// in its window. The corpus has no undated DeepSeek turn and no vision-exp turn
+// before 2026-08-16, so TWO transcription bugs sat here green: an undated turn
+// priced from the oldest card instead of the standard row (11.6x on v4-pro),
+// and a missing vision-exp window that would have reported 0.22 against wtft's
+// 0.14. Both were found by a reviewer reading the diff, not by this check —
+// which is the check's own gap, since it is the thing that exists to find them.
+//
+// So: fabricate one turn per (model, period) cell and compare the same two
+// sides. This DOES import wtft-cost, and that is not the violation it looks
+// like — the expected figure still comes from the hand-transcribed CARD above,
+// exactly as it does for a corpus turn. The import supplies the ACTUAL side,
+// which is the side it has always supplied.
+const MATRIX_USAGE = { input: 1_000_000, output: 1_000_000, reasoning: 0, cacheRead: 1_000_000 };
+const MATRIX_INSTANTS = [
+	["undated", 0],
+	["2026-07-15 (pre-2026-08-16)",  Date.UTC(2026, 6, 15, 12, 0, 0)],
+	["2026-08-24 (pre-V4.1 Flash)",  Date.UTC(2026, 7, 24, 12, 0, 0)],
+	["2026-09-11 (post-Flash, pre-pro reroute)", Date.UTC(2026, 8, 11, 12, 0, 0)],
+	["2026-09-15 (post-pro reroute)", Date.UTC(2026, 8, 15, 12, 0, 0)],
+	["2026-09-15 02:00Z (peak)",      Date.UTC(2026, 8, 15, 2, 0, 0)],
+];
+
+let matrixChecked = 0, matrixMismatches = 0;
+const matrixFailures = [];
+{
+	const { calculateClaudeCost } = await import(
+		"../../extensions/lib/wtft-cost.ts"
+	).catch(() => ({ calculateClaudeCost: null }));
+
+	if (!calculateClaudeCost) {
+		console.log("");
+		console.log("  SYNTHETIC MATRIX: skipped — could not import wtft-cost.ts (run under bun).");
+	} else {
+		for (const model of Object.keys(CARD)) {
+			for (const [label, ts] of MATRIX_INSTANTS) {
+				const expected = expectedCost(CARD[model], MATRIX_USAGE, ts);
+				const actual = calculateClaudeCost(model, {
+					input_tokens: MATRIX_USAGE.input,
+					output_tokens: MATRIX_USAGE.output,
+					cache_read_input_tokens: MATRIX_USAGE.cacheRead,
+				}, ts);
+				matrixChecked++;
+				// A non-finite expected is a transcription bug, not a rate
+				// disagreement — an earlier version returned a card OBJECT here
+				// and every comparison silently went NaN.
+				if (!Number.isFinite(expected)) {
+					matrixMismatches++;
+					matrixFailures.push(`${model} @ ${label}: expected is not a number (${expected})`);
+				} else if (Math.abs(actual - expected) > EPSILON) {
+					matrixMismatches++;
+					matrixFailures.push(`${model} @ ${label}: expected ${expected.toFixed(6)} actual ${actual.toFixed(6)}`);
+				}
+			}
+		}
+		console.log("");
+		console.log(`  synthetic matrix         ${matrixChecked} cells, ${matrixMismatches} mismatch(es)`);
+		for (const f of matrixFailures) console.log(`    MISMATCH ${f}`);
+	}
+}
+
+process.exit(record.ok && matrixMismatches === 0 ? 0 : 1);

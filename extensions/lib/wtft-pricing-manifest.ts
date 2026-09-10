@@ -29,6 +29,8 @@
  */
 
 import {
+	DEEPSEEK_V41_FLASH_FROM,
+	DEEPSEEK_V4_PRO_REROUTE_FROM,
 	MODEL_PRICING,
 	DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES,
 	DEEPSEEK_WEEKEND_OFFPEAK_FROM,
@@ -160,8 +162,14 @@ export function buildPricingManifest(): PricingManifest {
 				+ "the peak multiplier applies to Input, Output and Cache Read "
 				+ "only — never to Cache Write. All four DeepSeek names carry the "
 				+ "same standard row, because all four end up serving one model: "
-				+ "V4.1 Flash retired the V4 Flash line at 2026-09-10T04:00:00Z "
-				+ "and takes over deepseek-v4-pro at 2026-09-14T04:00:00Z, with "
+				// Derived from the SAME constants the dated rows' conditions are
+				// generated from, never re-typed. A hardcoded pair here would
+				// survive a constant change that regenerated every row around it,
+				// so the page could contradict itself and still match a fresh
+				// render byte-for-byte — the one drift this manifest exists to
+				// make impossible.
+				+ `V4.1 Flash retired the V4 Flash line at ${isoInstant(DEEPSEEK_V41_FLASH_FROM)} `
+				+ `and takes over deepseek-v4-pro at ${isoInstant(DEEPSEEK_V4_PRO_REROUTE_FROM)}, with `
 				+ "deepseek-flash as its own name. Only deepseek-v4-pro's dated "
 				+ "row still differs from the other three.",
 		},

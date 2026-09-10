@@ -170,8 +170,10 @@ Three consequences worth stating, because all three are silent when wrong:
 `lookupModelPricing` resolves **longest registry key first**, because `deepseek-v4-flash` is a
 substring of `deepseek-v4-flash-vision-exp` and insertion order would otherwise decide a pricing
 question; the newer key `deepseek-flash` is exempt from that hazard rather than protected by it,
-because neither it nor `deepseek-v4-flash` is a substring of the other, so no model id matches
-both; and a **name is not a model** — from its cutover each of `deepseek-v4-flash`,
+because neither it nor `deepseek-v4-flash` is a substring of the other, so no realistic id — a
+provider prefix or a date suffix — can produce both (a contrived
+`deepseek-flash/deepseek-v4-flash` does contain both, and longest-first decides it, the same
+guarantee `-vision-exp` relies on); and a **name is not a model** — from its cutover each of `deepseek-v4-flash`,
 `deepseek-v4-flash-vision-exp` and `deepseek-v4-pro` routes to V4.1 Flash and bills at its card
 (#100), which is why all four DeepSeek entries share one standard row and differ only in their
 windows. (`-vision-exp` carried **no** `dateTiers` until #100, correctly, because it had no past

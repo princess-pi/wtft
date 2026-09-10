@@ -38,7 +38,9 @@
 // `deepseek-v4-flash-vision-exp` and `deepseek-v4-pro` gained a dated window
 // each because their names now route to V4.1 Flash. The per-turn dollar figure
 // is baked into every tag line as `c` (serializeClassified, wtft-daemon-lib),
-// so a v2.7.2 tag written after 2026-09-10T04:00Z keeps the pre-cutover price —
-// up to 1.47x on input for a name that had a card, and the full sibling-guess
-// error for `deepseek-flash`, which had no entry at all.
+// so a v2.7.2 tag written after a name's cutover keeps that name's pre-cutover
+// price. Worst case is `deepseek-v4-pro` after 2026-09-14T04:00Z: 0.66 against
+// 0.15 input, 4.4x, and 0.022 against 0.003 on cache reads, 7.3x. The two
+// v4-flash names are 1.47x on input from 2026-09-10T04:00Z, and `deepseek-flash`
+// carries the full sibling-guess error, having had no entry at all.
 export const WTFT_TAGGER_VERSION = "2.7.3";

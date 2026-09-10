@@ -318,10 +318,16 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 	//
 	// The same reader will ask whether "deepseek-flash" — SHORTER than
 	// "deepseek-v4-flash" and added beside it — can steal a v4 lookup. It cannot,
-	// and not merely because longest-first would settle a tie: neither string is
-	// a substring of the other ("deepseek-v4-flash" contains "v4-flash", not
-	// "deepseek-flash"), so no model id can match both keys at all. The ordering
-	// constraint above is about -vision-exp and -flash only.
+	// for two reasons that have to be stated together:
+	//   - neither string is a substring of the other ("deepseek-v4-flash"
+	//     contains "v4-flash", not "deepseek-flash"), so no REALISTIC id matches
+	//     both — a provider prefix and a date suffix cannot produce the other key;
+	//   - and where a contrived id does contain both (say
+	//     "deepseek-flash/deepseek-v4-flash"), longest-first decides it, which is
+	//     the same guarantee -vision-exp relies on.
+	// An earlier version of this comment claimed the first bullet alone proved
+	// "no model id can match both keys at all". It does not — that is a fact
+	// about the two keys, not about every string containing them.
 	"deepseek-v4-flash-vision-exp": {
 		input: 0.15, output: 0.60, cacheRead: 0.003, cacheWrite: 0,
 		// The standard row is the V4.1 FLASH card, not this model's own: from

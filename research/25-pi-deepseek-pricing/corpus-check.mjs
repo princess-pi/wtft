@@ -134,11 +134,23 @@ function surgeMultiplier(ts) {
 }
 
 function expectedCost(entry, usage, ts) {
-	// Newest card whose `from` the turn has reached. `cards` is newest-first, so
-	// the first match wins. An unknown instant (ts 0/undefined) falls through to
-	// the oldest entry rather than being priced at today's card, which is how a
-	// turn wtft could not date is treated on the other side too.
-	const rates = entry.cards.find(c => (ts || 0) >= c.from) ?? entry.cards[entry.cards.length - 1];
+	// An UNKNOWN instant takes the STANDARD row — the newest card — and this is
+	// the one place the transcription must copy wtft's rule rather than pick the
+	// sensible-looking one. `resolveTieredRates` gates its dated windows on
+	// `pricing.dateTiers && timestamp`, so a falsy timestamp skips every window
+	// and lands on the unconditioned quad, however old the turn looks. The
+	// caller passes 0 for a timestamp it could not parse (see below), so this
+	// path is reachable.
+	//
+	// A first draft fell through to the OLDEST card here, on the reasoning that
+	// an undated turn is probably old. Measured against wtft: 1.74 against 0.15
+	// for v4-pro, an 11.6x divergence that would have reported every undated
+	// turn as a mismatch — the checker's own bug wearing a finding's costume.
+	// The corpus has no undated DeepSeek turn today, so nothing went red.
+	if (!ts) return entry.cards[0];
+	// Otherwise the newest card whose `from` the turn has reached. `cards` is
+	// newest-first, so the first match wins.
+	const rates = entry.cards.find(c => ts >= c.from) ?? entry.cards[entry.cards.length - 1];
 	const surge = surgeMultiplier(ts);
 	return (
 		usage.input * (rates.input * surge / 1e6) +

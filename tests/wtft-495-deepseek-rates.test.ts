@@ -18,9 +18,11 @@
  * state as "off-peak rates are half of the peak rates".
  *
  * `CARD_BEFORE_2026_08_16` is NOT from that scrape and cannot be: DeepSeek
- * publishes one card, the current one. Those numbers — six of them, two models
- * by three rates — are the superseded card, transcribed from issue #495's own
- * table (which measured them against 854 live turns). Said plainly because "every number comes from the scrape"
+ * publishes one card, the current one. Those numbers are the superseded card,
+ * transcribed from issue #495's own table (which measured them against 854 live
+ * turns). Read the fixture for its extent rather than trusting a count here —
+ * this sentence has carried a stale one twice, and #100 added a third model to
+ * that table while the count above it still said two. Said plainly because "every number comes from the scrape"
  * was written here first and was false.
  *
  * #100 made the 2026-08-25 scrape a SUPERSEDED card too, so the same sentence
@@ -356,6 +358,27 @@ describe("#100 the retired names bill at the V4.1 Flash card from their cutover"
 		// file would still be green.
 		const cost = calculateClaudeCost("deepseek-v4-pro", MTOK_IN_OUT, BEFORE_PRO_REROUTE);
 		assert.ok(Math.abs(cost - 2.64) < 0.000001, `got ${cost}, want 2.64`);
+	});
+
+	it("prices an UNDATED turn at the standard row, not at the oldest card", () => {
+		// `resolveTieredRates` gates its dated windows on `pricing.dateTiers &&
+		// timestamp`, so a falsy timestamp — what wtft-parser stamps on a turn it
+		// could not date — skips EVERY window and lands on the unconditioned
+		// quad, however old the turn looks.
+		//
+		// Asserted because the independent oracle in
+		// research/25-pi-deepseek-pricing/corpus-check.mjs has to mirror this
+		// rule, and its first #100 draft mirrored the sensible-looking opposite
+		// (oldest card), diverging 11.6x on v4-pro. Nothing went red: the corpus
+		// happens to contain no undated DeepSeek turn. This case is the wtft-side
+		// pin that makes such a divergence findable.
+		for (const model of ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"]) {
+			const cost = calculateClaudeCost(model, MTOK_IN_OUT, 0);
+			assert.ok(
+				Math.abs(cost - priceMTokFromCard(CARD_V41_FLASH)) < 0.000001,
+				`${model} undated: got ${cost}, want the standard row ${priceMTokFromCard(CARD_V41_FLASH)}`,
+			);
+		}
 	});
 
 	it("still prices every entry with an old card at the pre-2026-08-16 card", () => {

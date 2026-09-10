@@ -43,6 +43,10 @@
 	// Add it back only when a genuine .js module arrives, and say which one.
 	//
 	// This glob matches bin/wtft.ts and bin/wtft-daemon.ts, the two tracked SOURCES.
+	// It matches NO build tool, and must not: build.ts and pricing-manifest.ts both use
+	// `import.meta.dir`, which the `["node"]` types above reject on purpose. A generator
+	// dropped into bin/ turns this gate red with TS2339 — #100 did exactly that and moved
+	// the file to the repo root beside build.ts, which is where a build tool belongs.
 	// The bin/*.mjs beside them are gitignored build output and package.json's `bin`
 	// map points at those, so a reader who sees only the diff can conclude this glob
 	// matches nothing — PR review did. It does not: `git ls-files bin` lists both .ts.

@@ -18,11 +18,19 @@
  * relies on a test instead).
  *
  * `tests/wtft-pricing-manifest.test.ts` compares the committed manifest against
- * a fresh render, so a registry edit that skips `bun run build` is a red test
+ * a fresh render, so a registry edit that skips regeneration is a red test
  * rather than a quietly stale page.
+ *
+ * The writer is `bun run manifest` (pricing-manifest.ts, at the repo root);
+ * `bun run build` only CHECKS and fails naming that command. That split is
+ * load-bearing rather than tidiness — a build that wrote this file would repair
+ * a stale committed copy moments before the test compared the two, and the
+ * assertion above could then never fail (#100).
  */
 
 import {
+	DEEPSEEK_V41_FLASH_FROM,
+	DEEPSEEK_V4_PRO_REROUTE_FROM,
 	MODEL_PRICING,
 	DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES,
 	DEEPSEEK_WEEKEND_OFFPEAK_FROM,
@@ -33,7 +41,7 @@ export const PRICING_MANIFEST_SCHEMA = "wtft-pricing/table@1";
 
 /** One rate quad, plus the condition under which it applies. */
 export interface ManifestRates {
-	/** Human-readable condition. "" for a model's base rates. */
+	/** Human-readable condition. "" for a model's standard (unconditioned) row. */
 	condition: string;
 	input: number;
 	output: number;
@@ -43,7 +51,7 @@ export interface ManifestRates {
 
 export interface ManifestModel {
 	model: string;
-	/** Base rates first, then any dated windows, then any size tiers. */
+	/** Standard row first, then any dated windows, then any size tiers. */
 	rates: ManifestRates[];
 }
 
@@ -144,9 +152,26 @@ export function buildPricingManifest(): PricingManifest {
 				+ "output rate. Cache Write is the 5-minute-TTL rate; where it is "
 				+ "above zero, a 1-hour-TTL write bills at 2x that row's input "
 				+ "rate, and where it is zero both TTLs are free. Where a model "
-				+ "shows a dated row, that row applies instead of the standard one "
-				+ "until its date passes — the standard row is not necessarily the "
-				+ "price in force today.",
+				+ "shows dated rows, the EARLIEST one whose date has not yet "
+				+ "passed applies instead of the standard row — so the standard "
+				+ "row is not necessarily the price in force today, and with more "
+				+ "than one dated row it is the first, not the last, that wins. "
+				+ "A dated row is compared against the INTERACTION's instant, not "
+				+ "against now, and a turn whose instant could not be read is "
+				+ "priced at the standard row however old it is. For DeepSeek, "
+				+ "the peak multiplier applies to Input, Output and Cache Read "
+				+ "only — never to Cache Write. All four DeepSeek names carry the "
+				+ "same standard row, because all four end up serving one model: "
+				// Derived from the SAME constants the dated rows' conditions are
+				// generated from, never re-typed. A hardcoded pair here would
+				// survive a constant change that regenerated every row around it,
+				// so the page could contradict itself and still match a fresh
+				// render byte-for-byte — the one drift this manifest exists to
+				// make impossible.
+				+ `V4.1 Flash retired the V4 Flash line at ${isoInstant(DEEPSEEK_V41_FLASH_FROM)} `
+				+ `and takes over deepseek-v4-pro at ${isoInstant(DEEPSEEK_V4_PRO_REROUTE_FROM)}, with `
+				+ "deepseek-flash as its own name. Only deepseek-v4-pro's dated "
+				+ "row still differs from the other three.",
 		},
 		models: Object.keys(MODEL_PRICING).sort().map(model => ({
 			model,

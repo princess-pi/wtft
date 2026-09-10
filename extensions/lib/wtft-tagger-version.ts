@@ -33,4 +33,14 @@
 // model id with a server_tool_use block. The bump is for the hosts where a
 // `claude-deepseek` session (ANTHROPIC_MODEL="opus") did record one, which this
 // machine cannot rule out for anyone else.
-export const WTFT_TAGGER_VERSION = "2.7.2";
+// 2.7.3 (#100): DeepSeek V4.1 Flash. `deepseek-flash` gained a registry entry
+// (was priced by the sibling GUESS at 0.22/0.66), and `deepseek-v4-flash`,
+// `deepseek-v4-flash-vision-exp` and `deepseek-v4-pro` gained a dated window
+// each because their names now route to V4.1 Flash. The per-turn dollar figure
+// is baked into every tag line as `c` (serializeClassified, wtft-daemon-lib),
+// so a v2.7.2 tag written after a name's cutover keeps that name's pre-cutover
+// price. Worst case is `deepseek-v4-pro` after 2026-09-14T04:00Z: 0.66 against
+// 0.15 input, 4.4x, and 0.022 against 0.003 on cache reads, 7.3x. The two
+// v4-flash names are 1.47x on input from 2026-09-10T04:00Z, and `deepseek-flash`
+// carries the full sibling-guess error, having had no entry at all.
+export const WTFT_TAGGER_VERSION = "2.7.3";

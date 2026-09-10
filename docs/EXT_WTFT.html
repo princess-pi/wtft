@@ -209,7 +209,7 @@
 
     <h3 id="architecture">Architectural Design</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
-        <p><strong>1. Log parser daemon:</strong> A persistent background daemon (<code>wtft-daemon</code>) watches the session <code>.jsonl</code> file, classifies each interaction, and writes pre-computed entries to a harness-agnostic tag file (<code>wtft-tags/*.tag.v2.3.4.jsonl</code>). Costs are rounded to 6 decimal places (micro-cent precision) before serialization to eliminate float drift between the in-memory widget and file-based CLI. In Pi, the widget reads directly from <code>ctx.sessionManager.getEntries()</code> (in-memory) but also spawns a daemon on <code>session_start</code> to keep the tag file warm for CLI use. If the daemon dies from idle timeout (24h), the <code>agent_end</code> handler checks health via <code>checkDaemonHealth</code> and auto-revives it. On version bump, the new daemon detects the old-version tag file and auto-replaces the old daemon — no manual restart needed.</p>
+        <p><strong>1. Log parser daemon:</strong> A persistent background daemon (<code>wtft-daemon</code>) watches the session <code>.jsonl</code> file, classifies each interaction, and writes pre-computed entries to a harness-agnostic tag file (<code>wtft-tags/&lt;session&gt;.wtft-tag.v&lt;WTFT_TAGGER_VERSION&gt;.jsonl</code>). Costs are rounded to 6 decimal places (micro-cent precision) before serialization to eliminate float drift between the in-memory widget and file-based CLI. In Pi, the widget reads directly from <code>ctx.sessionManager.getEntries()</code> (in-memory) but also spawns a daemon on <code>session_start</code> to keep the tag file warm for CLI use. If the daemon dies from idle timeout (24h), the <code>agent_end</code> handler checks health via <code>checkDaemonHealth</code> and auto-revives it. On version bump, the new daemon detects the old-version tag file and auto-replaces the old daemon — no manual restart needed.</p>
         <p><strong>2. Binning Engine:</strong> Groups entries by their <code>timestamp</code> into chronological bins based on the requested interval (e.g., 6-minute windows for granular auditing, or 1-day windows for multi-day tracks).</p>
         <p><strong>3. Scaling & Layout:</strong> Normalizes the absolute length of each interval's ASCII bar based on the maximum cost in any single interval (typically capped at 30-40 characters wide to fit standard terminal outputs gracefully). Each sub-segment within that bar is allocated its proportional share of characters based on its absolute cost contribution, without rendering percentages or additional trailing text.</p>
         <p><strong>4. Recursive Subagent Rollup:</strong> When a Claude Code session log is targeted, WTFT auto-detects if a subagent directory exists (e.g., <code>&lt;session-id&gt;/subagents/</code>). If present, WTFT recursively reads all subagent <code>.jsonl</code> logs and blends their interactions chronologically based on their individual timestamps. This guarantees that binned timelines and other command histograms represent the true, cumulative cost and work allocations of the entire multi-agent session tree.</p>
@@ -230,12 +230,13 @@
     <h3 id="pricing">Model Pricing</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
         <p>WTFT estimates costs using public per-model pricing. These are directional estimates, not accounting ledgers — provider billing nuances (caching discounts, free-tier credits, surge pricing) may cause minor discrepancies.</p>
-        <!-- Rendered live from manifests/wtft-pricing.json, generated at build time from
-             MODEL_PRICING (#169). The hand-written table this replaces was stale by an
+        <!-- Rendered live from manifests/wtft-pricing.json, generated from MODEL_PRICING
+             by `bun run manifest` (#169, #100). The hand-written table this replaces was stale by an
              entire model family — no Claude 5, no GPT-5.x, no dated or size tiers, and
              DeepSeek rates from before the 2026-08-16 card — and nothing failed while it
-             was wrong. Edit extensions/lib/wtft-cost.ts and run `bun run build`; there is
-             no rate to edit on this page. -->
+             was wrong. Edit extensions/lib/wtft-cost.ts, run `bun run manifest`, and commit
+             the regenerated JSON; there is no rate to edit on this page. `bun run build`
+             only CHECKS that file and fails naming the write command (#100). -->
         <table id="wtft-pricing-table" style="width: 100%; border-collapse: collapse; margin-top: 10px;">
             <tr><td style="color: #666;"><em>Loading pricing registry...</em></td></tr>
         </table>
@@ -418,8 +419,10 @@
                 });
             });
 
-        // Model Pricing (#169) — generated at build time from MODEL_PRICING, so a
-        // rate change reaches this page by rebuilding rather than by remembering.
+        // Model Pricing (#169) — generated from MODEL_PRICING by `bun run manifest`,
+        // so a rate change reaches this page by regenerating and committing that JSON.
+        // `bun run build` verifies it and refuses on a stale one, so the step cannot be
+        // forgotten silently — but the build is deliberately not the writer (#100).
         fetch('manifests/wtft-pricing.json')
             .then(r => r.json())
             .then(renderPricingTable)
@@ -432,13 +435,20 @@
             const table = document.getElementById('wtft-pricing-table');
             if (!table) return;
             // Never round away a significant digit. A fixed "< 0.01 ? 4dp : 2dp"
-            // cutoff rendered four-decimal cache-read rates at two decimals. Worst
-            // case measured across the committed manifest: 31% understated on
-            // deepseek-v4-pro's SUPERSEDED (dateTiers) rate, 9% on its current one —
-            // both are rows this table shows. In the very table #169/#495 built to
-            // stop hand-typed rates drifting. 4dp, trailing zeros
-            // trimmed to a 2dp floor. (No rate quoted here: tests/wtft-pricing-
-            // manifest.test.ts bans literal rates from this page, and is right to.)
+            // cutoff rendered four-decimal cache-read rates at two decimals. When
+            // #495 measured it the worst case was 31% understated, on a superseded
+            // deepseek-v4-pro rate. #100 made it worse rather than better: the
+            // DeepSeek cache-hit rate dropped by most of an order of magnitude, and
+            // the smallest cache-read rates in the manifest now round to $0.00
+            // outright — a 100% understatement. Not every DeepSeek cache-read rate
+            // does; the larger ones survive a 2dp cutoff. The direction is what
+            // matters, and it points the same way the fix does. In the very table
+            // #169/#495 built to stop hand-typed rates drifting. 4dp, trailing zeros
+            // trimmed to a 2dp floor. (No rate quoted here, deliberately: a live
+            // number hand-typed into this page is the drift this table replaced, and
+            // tests/wtft-pricing-manifest.test.ts bans one of them by name. An
+            // earlier version of this comment quoted five, while still claiming this
+            // sentence.)
             const money = n => n === 0 ? '$0'
                 : '$' + n.toFixed(4).replace(/(\.\d\d)(\d*?)0+$/, '$1$2');
             const head =

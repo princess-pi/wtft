@@ -187,13 +187,21 @@ describe("lookupModelPricing", () => {
 	});
 
 	it("fuzzy-matches model IDs containing a registry key", () => {
-		// DeepSeek v4-pro with provider prefix.
-		// Base rates are the CURRENT (post-2026-08-16) card; the 1.74/3.48 card
-		// this used to assert is now the dateTiers window, where #495 moved it
-		// so historical sessions keep pricing correctly.
+		// DeepSeek v4-pro with provider prefix. What this case is FOR is that
+		// the prefix does not defeat the match, so it asserts the resolved
+		// ENTRY, not a rate. It used to pin the standard row's 0.66 and broke
+		// in #100 when v4-pro's standard row became the V4.1 Flash card —
+		// red for a repricing, in a test about string matching, whose subject
+		// had not changed at all. A current rate is the one thing here
+		// guaranteed to move again.
 		const p = lookupModelPricing("deepseek/deepseek-v4-pro");
 		assert.ok(p);
-		assert.strictEqual(p!.input, 0.66);
+		assert.strictEqual(p, MODEL_PRICING["deepseek-v4-pro"]);
+		// The oldest dated window is safe to pin: a superseded card is frozen by
+		// definition. Indexed rather than searched only because this entry is
+		// written oldest-first — resolveTieredRates SORTS by effectiveBefore and
+		// does not rely on array order, so index 0 is a fact about the registry
+		// literal here, not a guarantee the code makes.
 		assert.strictEqual(p!.dateTiers?.[0].input, 1.74);
 	});
 
@@ -323,8 +331,13 @@ describe("calculateClaudeCost with tiers", () => {
 			input_tokens: 100000,
 			output_tokens: 5000,
 		}, OFF_PEAK);
-		// The SUPERSEDED card (dateTiers), not the current one: the current card
-		// would give 100K*$0.66 + 5K*$1.98 = $0.0759.
+		// The OLDEST of v4-pro's two dated windows, not its standard row. The
+		// structure since #100: dateTiers = [1.74/3.48 before 2026-08-16T16:00Z,
+		// 0.66/1.98 before 2026-09-14T04:00Z], and the V4.1 Flash card
+		// (0.15/0.60) as the UNCONDITIONED standard row — reached only once both
+		// windows are behind the turn. So this instant gets 1.74/3.48; a turn
+		// today would get 0.66/1.98 = $0.0759; one after 2026-09-14T04:00Z would
+		// get 0.15/0.60 = $0.018.
 		// 100K * $1.74/1M + 5K * $3.48/1M = $0.174 + $0.0174 = $0.1914
 		const expected = (100000 * 1.74 / 1000000) + (5000 * 3.48 / 1000000);
 		assert.ok(Math.abs(cost - expected) < 0.0001);
@@ -373,4 +386,8 @@ describe("MODEL_PRICING registry integrity", () => {
 	});
 });
 
-console.log("✅ All pricing tier tests passed.");
+// NOT a pass banner. This is top-level, so it prints during module evaluation,
+// BEFORE node:test runs a single case — an earlier version said "✅ All pricing
+// tier tests passed." and printed that whether they passed, failed, or never
+// ran. The runner's own summary is the verdict.
+console.log("pricing tier suite loaded — see the runner summary for the verdict.");

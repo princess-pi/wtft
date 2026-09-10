@@ -28,6 +28,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { checkPricingManifest, manifestModelCount } from "./pricing-manifest.ts";
 
 const BIN = path.join(import.meta.dir, "bin");
 const PI = path.join(import.meta.dir, "pi");
@@ -165,6 +166,31 @@ function generateHarnessRegistry(): void {
 	console.log(`✅ Harness registry: ${ids.join(", ")}`);
 }
 
+// ---
+// THE PRICING MANIFEST IS CHECKED HERE, NEVER WRITTEN HERE (#100).
+//
+// `docs/manifests/wtft-pricing.json` is derived from MODEL_PRICING and drives
+// docs/EXT_WTFT.html's rate table. Two facts had to be reconciled:
+//
+//   1. Nothing generated it. tests/wtft-pricing-manifest.test.ts fails in five
+//      places telling you to run a command, and that command wrote nothing:
+//      `renderPricingManifest()` was called only by that test, to COMPARE, and
+//      by nothing at all to write. Measured on #100.
+//   2. The build CANNOT be what writes it. `prepare` runs this file and CI runs
+//      `npm install` before `npm test`, so a build that rewrote the manifest
+//      would repair a stale COMMITTED file moments before the test compared the
+//      two, turning that suite green for every possible registry.
+//
+// So `bun run manifest` writes and this only compares. Both call into
+// pricing-manifest.ts, which owns the path and the comparison, so the two
+// cannot disagree about what "current" means.
+//
+// The check runs AFTER the bundles rather than before: it gates a docs artifact
+// that `files` does not even publish, and failing first would leave a tree with
+// a regenerated harness registry and no bundles at all — a partial build, for a
+// reason unrelated to the artifacts being built.
+// ---
+
 const entries = [
   { src: "bin/wtft.ts", out: "wtft.mjs" },
   { src: "bin/wtft-daemon.ts", out: "wtft-daemon.mjs" },
@@ -289,6 +315,22 @@ for (const { src, out } of extensionEntries) {
   fs.writeFileSync(file, noticeFor(code) + code);
 
   console.log(`✅ pi/${out} (${(fs.statSync(file).size / 1024).toFixed(0)} KB)`);
+}
+
+// The derived docs artifact, checked once every bundle is emitted. It feeds
+// `errors` rather than exiting on the spot, so it obeys the same one-exit rule
+// as the bundles below and cannot short-circuit a later check.
+const manifestState = checkPricingManifest();
+if (manifestState === "current") {
+  console.log(`✅ docs/manifests/wtft-pricing.json (${manifestModelCount()} models)`);
+} else {
+  errors++;
+  console.error(
+    manifestState === "missing"
+      ? `\n❌ docs/manifests/wtft-pricing.json is MISSING.`
+      : `\n❌ docs/manifests/wtft-pricing.json is STALE — it does not match MODEL_PRICING.`
+  );
+  console.error(`   Regenerate it and commit the result:  bun run manifest\n`);
 }
 
 // Fail on ANY bundle error — CLI or extension. An earlier draft exited after

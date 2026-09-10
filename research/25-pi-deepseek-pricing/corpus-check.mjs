@@ -61,26 +61,64 @@ const asJson = process.argv.includes("--json");
 // the registry's numbers across.
 // ---
 const RATE_CARD_CHANGED_AT = Date.UTC(2026, 7, 16, 16, 0, 0); // 2026-08-16T16:00:00Z
+const V41_FLASH_FROM       = Date.UTC(2026, 8, 10, 4, 0, 0);  // 2026-09-10T04:00:00Z
+const V4_PRO_REROUTE_FROM  = Date.UTC(2026, 8, 14, 4, 0, 0);  // 2026-09-14T04:00:00Z
 const WEEKEND_OFFPEAK_FROM = Date.UTC(2026, 7, 23, 0, 0, 0);  // 2026-08-23T00:00:00Z
 const PEAK_WINDOWS_UTC = [[60, 240], [360, 600]];             // 01:00–04:00, 06:00–10:00
 
+// A model's cards, NEWEST FIRST, each with the instant it took effect. Two
+// windows became three when V4.1 Flash retired the V4 Flash line (#100), which
+// is why this is a list rather than a `current`/`before` pair — the pair could
+// not express a model with two superseded cards, and v4-flash now has two.
+//
+// The V4.1 Flash numbers are transcribed from the scrape committed at
+// research/100-deepseek-v41-flash/pricing-page-2026-09-10.md, the same
+// independent route as the #495 numbers above it. NOT read from
+// extensions/lib/wtft-cost.ts — see this file's header. Copying the registry
+// across is the one edit that destroys what this file is for.
 const CARD = {
 	"deepseek-v4-pro": {
-		current: { input: 0.66, output: 1.98, cacheRead: 0.022 },
-		before:  { input: 1.74, output: 3.48, cacheRead: 0.0145 },
+		// From 2026-09-14 the NAME routes to V4.1 Flash and bills at its card.
+		cards: [
+			{ from: V4_PRO_REROUTE_FROM,  input: 0.15, output: 0.60, cacheRead: 0.003 },
+			{ from: RATE_CARD_CHANGED_AT, input: 0.66, output: 1.98, cacheRead: 0.022 },
+			{ from: 0,                    input: 1.74, output: 3.48, cacheRead: 0.0145 },
+		],
 	},
 	"deepseek-v4-flash": {
-		current: { input: 0.22, output: 0.66, cacheRead: 0.007 },
-		before:  { input: 0.14, output: 0.28, cacheRead: 0.0028 },
+		cards: [
+			{ from: V41_FLASH_FROM,       input: 0.15, output: 0.60, cacheRead: 0.003 },
+			{ from: RATE_CARD_CHANGED_AT, input: 0.22, output: 0.66, cacheRead: 0.007 },
+			{ from: 0,                    input: 0.14, output: 0.28, cacheRead: 0.0028 },
+		],
 	},
-	// Released after the card change, so no `before` window exists for it.
+	// Believed released after the 2026-08-16 change, so a turn predating it would
+	// be a fiction — but the registry carries the old card for it anyway since
+	// #100, for symmetry with -flash whose retirement it shares. This table
+	// MIRRORS that, because the two must agree about a period even when neither
+	// expects to see a turn in it: without the row, a pre-2026-08-16 vision-exp
+	// turn falls back to 0.22 here and resolves to 0.14 in wtft, and the
+	// disagreement would be reported as a pricing mismatch that is really this
+	// file being stale. Retired alongside -flash.
 	"deepseek-v4-flash-vision-exp": {
-		current: { input: 0.22, output: 0.66, cacheRead: 0.007 },
-		before:  null,
+		cards: [
+			{ from: V41_FLASH_FROM,       input: 0.15, output: 0.60, cacheRead: 0.003 },
+			{ from: RATE_CARD_CHANGED_AT, input: 0.22, output: 0.66, cacheRead: 0.007 },
+			{ from: 0,                    input: 0.14, output: 0.28, cacheRead: 0.0028 },
+		],
+	},
+	// V4.1 Flash under its own name. One card: it did not exist before it.
+	"deepseek-flash": {
+		cards: [
+			{ from: 0, input: 0.15, output: 0.60, cacheRead: 0.003 },
+		],
 	},
 };
 
-/** Longest key first — "deepseek-v4-flash" is a substring of the vision key. */
+/**
+ * Longest key first — "deepseek-v4-flash" is a substring of the vision key.
+ * "deepseek-flash" is a substring of neither, so it cannot steal a v4 lookup.
+ */
 const CARD_KEYS = Object.keys(CARD).sort((a, b) => b.length - a.length);
 
 function cardFor(model) {
@@ -103,7 +141,30 @@ function surgeMultiplier(ts) {
 }
 
 function expectedCost(entry, usage, ts) {
-	const rates = (entry.before && ts && ts < RATE_CARD_CHANGED_AT) ? entry.before : entry.current;
+	// An UNKNOWN instant takes the STANDARD row — the newest card — and this is
+	// the one place the transcription must copy wtft's rule rather than pick the
+	// sensible-looking one. `resolveTieredRates` gates its dated windows on
+	// `pricing.dateTiers && timestamp`, so a falsy timestamp skips every window
+	// and lands on the unconditioned quad, however old the turn looks. The
+	// caller passes 0 for a timestamp it could not parse (see below), so this
+	// path is reachable.
+	//
+	// A first draft fell through to the OLDEST card here, on the reasoning that
+	// an undated turn is probably old. Measured against wtft: 1.74 against 0.15
+	// for v4-pro, an 11.6x divergence that would have reported every undated
+	// turn as a mismatch — the checker's own bug wearing a finding's costume.
+	// The corpus has no undated DeepSeek turn today, so nothing went red.
+	//
+	// Note it SELECTS a card rather than returning one: an earlier fix here
+	// `return`ed entry.cards[0], so the caller's Math.abs(actual - expected) went
+	// NaN, NaN > EPSILON is false, and an undated turn was silently neither
+	// compared nor counted while the script still exited 0. A checker that skips
+	// a turn without saying so is worse than one that gets it wrong loudly.
+	//
+	// `cards` is newest-first, so for a dated turn the first match wins.
+	const rates = !ts
+		? entry.cards[0]
+		: (entry.cards.find(c => ts >= c.from) ?? entry.cards[entry.cards.length - 1]);
 	const surge = surgeMultiplier(ts);
 	return (
 		usage.input * (rates.input * surge / 1e6) +
@@ -198,6 +259,84 @@ for (const file of sessionFiles(SESSIONS)) {
 
 // null, not 0, when nothing was compared (pr-review round 2). A percentage over
 // an empty denominator is the exact figure this check exists to stop printing.
+// ---
+// SYNTHETIC MATRIX — the periods the corpus does not contain (#100).
+//
+// Every card transcribed above is only exercised by a turn that happens to fall
+// in its window. The corpus has no undated DeepSeek turn and no vision-exp turn
+// before 2026-08-16, so TWO transcription bugs sat here green: an undated turn
+// priced from the oldest card instead of the standard row (11.6x on v4-pro),
+// and a missing vision-exp window that would have reported 0.22 against wtft's
+// 0.14. Both were found by a reviewer reading the diff, not by this check —
+// which is the check's own gap, since it is the thing that exists to find them.
+//
+// So: fabricate one turn per (model, period) cell and compare the same two
+// sides. This DOES import wtft-cost, and that is not the violation it looks
+// like — the expected figure still comes from the hand-transcribed CARD above,
+// exactly as it does for a corpus turn. The import supplies the ACTUAL side,
+// which is the side it has always supplied.
+const MATRIX_USAGE = { input: 1_000_000, output: 1_000_000, reasoning: 0, cacheRead: 1_000_000 };
+const MATRIX_INSTANTS = [
+	["undated", 0],
+	["2026-07-15 (pre-2026-08-16)",  Date.UTC(2026, 6, 15, 12, 0, 0)],
+	["2026-08-24 (pre-V4.1 Flash)",  Date.UTC(2026, 7, 24, 12, 0, 0)],
+	["2026-09-11 (post-Flash, pre-pro reroute)", Date.UTC(2026, 8, 11, 12, 0, 0)],
+	["2026-09-15 (post-pro reroute)", Date.UTC(2026, 8, 15, 12, 0, 0)],
+	["2026-09-15 02:00Z (peak)",      Date.UTC(2026, 8, 15, 2, 0, 0)],
+];
+
+let matrixChecked = 0, matrixMismatches = 0;
+const matrixFailures = [];
+{
+	// Uses the SAME `calculateClaudeCost` the corpus loop uses — the one imported
+	// from bin/wtft.mjs at the top of this file. Two reasons, and the second is
+	// the one that bit:
+	//
+	//   - A separate `await import(...wtft-cost.ts)` made the matrix OPTIONAL: a
+	//     failed import left matrixMismatches at 0 and the run still exited 0, a
+	//     false green for exactly the transcription bugs this matrix exists to
+	//     catch, and against this script's own fail-closed rule (an empty corpus
+	//     exits 1).
+	//   - It also made the two halves compare against DIFFERENT BUILDS. The
+	//     corpus half read the bundle, the matrix half read the source, so a
+	//     stale bundle — precisely the state a repricing leaves the tree in until
+	//     `bun run build` — would let the matrix pass against the new registry
+	//     while the corpus reported against the old one, with no way to attribute
+	//     a mismatch to either.
+	//
+	// One actual implementation, one verdict.
+	for (const model of Object.keys(CARD)) {
+		for (const [label, ts] of MATRIX_INSTANTS) {
+			const expected = expectedCost(CARD[model], MATRIX_USAGE, ts);
+			const actual = calculateClaudeCost(model, {
+				input_tokens: MATRIX_USAGE.input,
+				output_tokens: MATRIX_USAGE.output,
+				cache_read_input_tokens: MATRIX_USAGE.cacheRead,
+			}, ts);
+			matrixChecked++;
+			// A non-finite expected is a TRANSCRIPTION bug, not a rate
+			// disagreement — an earlier version returned a card OBJECT here and
+			// every comparison silently went NaN, which `NaN > EPSILON` reports
+			// as agreement.
+			if (!Number.isFinite(expected)) {
+				matrixMismatches++;
+				matrixFailures.push(`${model} @ ${label}: expected is not a number (${expected})`);
+			} else if (Math.abs(actual - expected) > EPSILON) {
+				matrixMismatches++;
+				matrixFailures.push(`${model} @ ${label}: expected ${expected.toFixed(6)} actual ${actual.toFixed(6)}`);
+			}
+		}
+	}
+}
+
+// Fail closed on a matrix that did not run. Every cell is fabricated here, so
+// "zero cells" can only mean the loop was skipped — never "nothing to check".
+const MATRIX_CELLS = Object.keys(CARD).length * MATRIX_INSTANTS.length;
+const matrixRan = matrixChecked === MATRIX_CELLS;
+if (!matrixRan) {
+}
+
+
 const mismatchPercent = compared === 0 ? null : (mismatches / compared) * 100;
 const record = {
 	schema: "wtft-research/pi-deepseek-corpus-check@1",
@@ -217,13 +356,37 @@ const record = {
 		"models with no transcribed card — counted as unpriced, never compared",
 	],
 	worst,
+	// The synthetic matrix travels in the RECORD, not only on stdout (#100). An
+	// earlier version printed it after the JSON document, which appended text to
+	// valid JSON and made the whole `--json` contract unparseable — the exact
+	// failure the Agent-First Output standard exists to prevent, in a script
+	// whose output another program is meant to read. Suppressing the lines under
+	// --json would have met the letter and missed the point: a consumer asking
+	// for the machine-readable mode should SEE this verdict, not lose it.
+	syntheticMatrix: {
+		cells: matrixChecked,
+		expectedCells: MATRIX_CELLS,
+		ran: matrixRan,
+		mismatches: matrixMismatches,
+		failures: matrixFailures,
+	},
 	// FAILS CLOSED on an empty corpus (pr-review, round 1). `mismatches === 0`
 	// alone reports a clean check when ~/.pi/agent/sessions is missing or
 	// unreadable and nothing was examined at all — which is the same shape of
 	// dishonesty as #495's Closer printing 0.0000% for a harness it never read.
-	ok: mismatches === 0 && files > 0 && compared > 0,
+	ok: mismatches === 0 && files > 0 && compared > 0
+		&& matrixRan && matrixMismatches === 0,
 };
-if (record.ok === false && mismatches === 0) {
+// `emptyCorpus` states a fact about the CORPUS, so it is derived from the
+// corpus and from nothing else. It used to be inferred — "ok is false and there
+// were no mismatches, therefore nothing was examined" — which held only while a
+// clean corpus was the ONLY way for ok to be true. #100 added a second reason
+// for ok to be false (a synthetic-matrix mismatch), and the inference silently
+// became wrong: a matrix-only failure reported "EMPTY CORPUS — nothing was
+// examined" in the same document that said files: 2505, compared: 11397.
+// Measured, on this corpus. An inferred flag acquires a new false case every
+// time a new failure reason is added; a derived one cannot.
+if (files === 0 || compared === 0) {
 	record.emptyCorpus = true;
 }
 
@@ -251,6 +414,15 @@ if (asJson) {
 	for (const w of worst) {
 		console.log(`  MISMATCH ${w.model} @ ${w.timestamp}: expected ${w.expected} actual ${w.actual}`);
 	}
+	console.log("");
+	console.log(`  synthetic matrix         ${matrixChecked} cells, ${matrixMismatches} mismatch(es)`);
+	for (const f of matrixFailures) console.log(`    MISMATCH ${f}`);
+	if (!matrixRan) {
+		console.log(`  MATRIX DID NOT RUN — ${matrixChecked} cells, expected ${MATRIX_CELLS}.`);
+		console.log("  Exit 1: a check that ran nothing is not a passing check.");
+	}
 }
 
+// `record.ok` already folds in the matrix, so the exit code and the JSON
+// document cannot disagree about the verdict.
 process.exit(record.ok ? 0 : 1);

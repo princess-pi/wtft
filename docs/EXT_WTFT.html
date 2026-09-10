@@ -435,19 +435,20 @@
             const table = document.getElementById('wtft-pricing-table');
             if (!table) return;
             // Never round away a significant digit. A fixed "< 0.01 ? 4dp : 2dp"
-            // cutoff rendered four-decimal cache-read rates at two decimals. Worst
-            // case when #495 measured it: 31% understated on deepseek-v4-pro's
-            // SUPERSEDED (dateTiers) rate, 9% on its then-current one. Re-measured
-            // across the committed manifest after #100 dropped the DeepSeek
-            // cache-hit rate: the worst case is now 100%, because 0.003 (the standard
-            // row on all four DeepSeek entries) and 0.0028 (two dated rows) both
-            // render as $0.00 at a 2dp cutoff. NOT every DeepSeek cache-read rate —
-            // 0.007 and 0.0145 would render $0.01 and 0.022 would render $0.02. The
-            // defect got WORSE while the fix stayed the same, which is the argument
-            // for the fix; overstating it as "every rate" is not. In the very table #169/#495 built to stop hand-typed rates
-            // drifting. 4dp, trailing zeros trimmed to a 2dp floor. (No rate quoted
-            // here: tests/wtft-pricing-manifest.test.ts bans literal rates from this
-            // page, and is right to.)
+            // cutoff rendered four-decimal cache-read rates at two decimals. When
+            // #495 measured it the worst case was 31% understated, on a superseded
+            // deepseek-v4-pro rate. #100 made it worse rather than better: the
+            // DeepSeek cache-hit rate dropped by most of an order of magnitude, and
+            // the smallest cache-read rates in the manifest now round to $0.00
+            // outright — a 100% understatement. Not every DeepSeek cache-read rate
+            // does; the larger ones survive a 2dp cutoff. The direction is what
+            // matters, and it points the same way the fix does. In the very table
+            // #169/#495 built to stop hand-typed rates drifting. 4dp, trailing zeros
+            // trimmed to a 2dp floor. (No rate quoted here, deliberately: a live
+            // number hand-typed into this page is the drift this table replaced, and
+            // tests/wtft-pricing-manifest.test.ts bans one of them by name. An
+            // earlier version of this comment quoted five, while still claiming this
+            // sentence.)
             const money = n => n === 0 ? '$0'
                 : '$' + n.toFixed(4).replace(/(\.\d\d)(\d*?)0+$/, '$1$2');
             const head =

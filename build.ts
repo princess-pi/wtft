@@ -173,8 +173,9 @@ function generateHarnessRegistry(): void {
 // docs/EXT_WTFT.html's rate table. Two facts had to be reconciled:
 //
 //   1. Nothing generated it. tests/wtft-pricing-manifest.test.ts fails in five
-//      places telling you to run a command, and that command wrote nothing —
-//      `renderPricingManifest()` had no caller at all. Measured on #100.
+//      places telling you to run a command, and that command wrote nothing:
+//      `renderPricingManifest()` was called only by that test, to COMPARE, and
+//      by nothing at all to write. Measured on #100.
 //   2. The build CANNOT be what writes it. `prepare` runs this file and CI runs
 //      `npm install` before `npm test`, so a build that rewrote the manifest
 //      would repair a stale COMMITTED file moments before the test compared the

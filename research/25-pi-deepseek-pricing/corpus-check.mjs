@@ -343,39 +343,56 @@ const MATRIX_INSTANTS = [
 let matrixChecked = 0, matrixMismatches = 0;
 const matrixFailures = [];
 {
-	const { calculateClaudeCost } = await import(
-		"../../extensions/lib/wtft-cost.ts"
-	).catch(() => ({ calculateClaudeCost: null }));
-
-	if (!calculateClaudeCost) {
-		console.log("");
-		console.log("  SYNTHETIC MATRIX: skipped — could not import wtft-cost.ts (run under bun).");
-	} else {
-		for (const model of Object.keys(CARD)) {
-			for (const [label, ts] of MATRIX_INSTANTS) {
-				const expected = expectedCost(CARD[model], MATRIX_USAGE, ts);
-				const actual = calculateClaudeCost(model, {
-					input_tokens: MATRIX_USAGE.input,
-					output_tokens: MATRIX_USAGE.output,
-					cache_read_input_tokens: MATRIX_USAGE.cacheRead,
-				}, ts);
-				matrixChecked++;
-				// A non-finite expected is a transcription bug, not a rate
-				// disagreement — an earlier version returned a card OBJECT here
-				// and every comparison silently went NaN.
-				if (!Number.isFinite(expected)) {
-					matrixMismatches++;
-					matrixFailures.push(`${model} @ ${label}: expected is not a number (${expected})`);
-				} else if (Math.abs(actual - expected) > EPSILON) {
-					matrixMismatches++;
-					matrixFailures.push(`${model} @ ${label}: expected ${expected.toFixed(6)} actual ${actual.toFixed(6)}`);
-				}
+	// Uses the SAME `calculateClaudeCost` the corpus loop uses — the one imported
+	// from bin/wtft.mjs at the top of this file. Two reasons, and the second is
+	// the one that bit:
+	//
+	//   - A separate `await import(...wtft-cost.ts)` made the matrix OPTIONAL: a
+	//     failed import left matrixMismatches at 0 and the run still exited 0, a
+	//     false green for exactly the transcription bugs this matrix exists to
+	//     catch, and against this script's own fail-closed rule (an empty corpus
+	//     exits 1).
+	//   - It also made the two halves compare against DIFFERENT BUILDS. The
+	//     corpus half read the bundle, the matrix half read the source, so a
+	//     stale bundle — precisely the state a repricing leaves the tree in until
+	//     `bun run build` — would let the matrix pass against the new registry
+	//     while the corpus reported against the old one, with no way to attribute
+	//     a mismatch to either.
+	//
+	// One actual implementation, one verdict.
+	for (const model of Object.keys(CARD)) {
+		for (const [label, ts] of MATRIX_INSTANTS) {
+			const expected = expectedCost(CARD[model], MATRIX_USAGE, ts);
+			const actual = calculateClaudeCost(model, {
+				input_tokens: MATRIX_USAGE.input,
+				output_tokens: MATRIX_USAGE.output,
+				cache_read_input_tokens: MATRIX_USAGE.cacheRead,
+			}, ts);
+			matrixChecked++;
+			// A non-finite expected is a TRANSCRIPTION bug, not a rate
+			// disagreement — an earlier version returned a card OBJECT here and
+			// every comparison silently went NaN, which `NaN > EPSILON` reports
+			// as agreement.
+			if (!Number.isFinite(expected)) {
+				matrixMismatches++;
+				matrixFailures.push(`${model} @ ${label}: expected is not a number (${expected})`);
+			} else if (Math.abs(actual - expected) > EPSILON) {
+				matrixMismatches++;
+				matrixFailures.push(`${model} @ ${label}: expected ${expected.toFixed(6)} actual ${actual.toFixed(6)}`);
 			}
 		}
-		console.log("");
-		console.log(`  synthetic matrix         ${matrixChecked} cells, ${matrixMismatches} mismatch(es)`);
-		for (const f of matrixFailures) console.log(`    MISMATCH ${f}`);
 	}
+	console.log("");
+	console.log(`  synthetic matrix         ${matrixChecked} cells, ${matrixMismatches} mismatch(es)`);
+	for (const f of matrixFailures) console.log(`    MISMATCH ${f}`);
 }
 
-process.exit(record.ok && matrixMismatches === 0 ? 0 : 1);
+// Fail closed on a matrix that did not run. Every cell is fabricated here, so
+// "zero cells" can only mean the loop was skipped — never "nothing to check".
+const matrixRan = matrixChecked === Object.keys(CARD).length * MATRIX_INSTANTS.length;
+if (!matrixRan) {
+	console.log(`  MATRIX DID NOT RUN — ${matrixChecked} cells, expected ${
+		Object.keys(CARD).length * MATRIX_INSTANTS.length}. Exit 1: a check that ran nothing is not a passing check.`);
+}
+
+process.exit(record.ok && matrixRan && matrixMismatches === 0 ? 0 : 1);

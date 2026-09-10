@@ -537,8 +537,11 @@ export function isModelPriced(model: string): boolean {
  * are names DeepSeek RETIRED, so the warning tells a user it is guessing with
  * "the deepseek-v4-flash rate card" for a model that no longer exists. For a
  * CURRENT turn the figure is right anyway — every DeepSeek entry now shares one
- * unconditioned quad — but a future `deepseek-v5-*` id would be guessed from a
- * retired name's dated windows, which is a rate that never applied to it.
+ * unconditioned quad — and a future `deepseek-v5-*` turn, being after every
+ * cutoff, would land on that same standard row rather than on a dated window.
+ * The rate would still be one that never applied to a V5 model, and the sibling
+ * named in the warning would still be a model DeepSeek no longer serves; it is
+ * the NAME that is wrong there, not the resolution mechanism.
  * Returning `deepseek-flash` instead is the obvious change and is a behaviour
  * change with its own test and spec surface, so it is filed rather than
  * smuggled into a repricing branch.

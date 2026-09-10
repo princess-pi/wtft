@@ -196,9 +196,12 @@ describe("#495 DeepSeek rate card, as of 2026-08-16 and before it", () => {
 //
 // One model behind three names. `deepseek-flash` IS V4.1 Flash; the two v4-flash
 // names route to it from 2026-09-10T04:00Z and `deepseek-v4-pro` from
-// 2026-09-14T04:00Z. So on any current turn all four registry entries resolve to
-// the same quad, and every NUMERIC assertion below would also pass against the
-// wrong entry. The identity assertions are what carry the weight.
+// 2026-09-14T04:00Z. So on a CURRENT-CARD turn all four registry entries resolve
+// to the same quad, and a numeric assertion at such an instant would pass against
+// the wrong entry — which is what the identity assertions are for. The dated
+// windows still discriminate, so the before-cutover cases and the $2.64 v4-pro
+// case do bite on identity; only the current-card cases cannot. Said the same way
+// as the file header, which corrects an earlier draft that overstated it here.
 
 // 1M cache-miss input + 1M output, the shape #100's closer prices. No cache
 // reads: the cache-hit rate moved too, and mixing it in would let a wrong hit

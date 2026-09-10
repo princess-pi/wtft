@@ -138,36 +138,56 @@ describe("#169 every priced model reaches the manifest", () => {
 		assert.strictEqual(surge.multiplier, 2.0);
 	});
 
-	it("states the same cutover instants in the note as in the dated rows", () => {
+	it("attributes each cutover in the note to the model whose row carries it", () => {
 		// The note is PROSE inside a generated artifact, which is the one place a
 		// hardcoded date survives a regeneration: `bun run manifest` would rewrite
 		// every dated row's condition from the constants and leave a stale
 		// sentence beside them, and the committed file would still match a fresh
 		// render byte-for-byte. So the byte-comparison above cannot catch it and
 		// this case must (#100 review round 2).
+		//
+		// It checks ASSOCIATION, not membership. A first version collected every
+		// DeepSeek instant into a set and asked whether each date in the note was
+		// in it — which passes when the two dates are SWAPPED, or when one is
+		// replaced by another real cutover, because every candidate is in the set
+		// (#100 review round 3). What the note actually claims is that a specific
+		// event happened to a specific model, so that is what is asserted.
 		const m = buildPricingManifest();
 		const note = m.deepseekSurge.note;
 
-		// Collect the instants the ROWS carry — the generated side.
-		const rowInstants = new Set<string>();
-		for (const model of m.models) {
-			for (const r of model.rates) {
-				const hit = r.condition.match(/^before (.+)$/);
-				if (hit && model.model.startsWith("deepseek")) rowInstants.add(hit[1]);
-			}
+		/** The instant a model's NEWEST dated row ends — that model's last cutover. */
+		const newestCutoverFor = (model: string): string => {
+			const row = m.models.find(x => x.model === model);
+			assert.ok(row, `${model} is not in the manifest`);
+			const dated = row!.rates
+				.map(r => r.condition.match(/^before (.+)$/)?.[1])
+				.filter((x): x is string => !!x)
+				.sort();
+			assert.ok(dated.length > 0, `${model} carries no dated row`);
+			return dated[dated.length - 1];
+		};
+
+		// Each claim in the note, paired with the row that has to back it up.
+		const claims: Array<[RegExp, string, string]> = [
+			[/retired the V4 Flash line at (\S+?) /, newestCutoverFor("deepseek-v4-flash"),
+			 "the V4 Flash retirement should be deepseek-v4-flash's last cutover"],
+			[/takes over deepseek-v4-pro at (\S+?),/, newestCutoverFor("deepseek-v4-pro"),
+			 "the v4-pro reroute should be deepseek-v4-pro's last cutover"],
+		];
+
+		for (const [pattern, expected, why] of claims) {
+			const found = note.match(pattern);
+			assert.ok(found, `the note no longer states this claim in a readable form: ${pattern}`);
+			assert.strictEqual(found![1], expected, `${why} — note says ${found![1]}, rows say ${expected}`);
 		}
 
-		// Every instant the note mentions must be one a row actually carries.
-		const noteInstants = note.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g) ?? [];
-		assert.ok(noteInstants.length > 0, "the note should name the cutovers it describes");
-		for (const instant of noteInstants) {
-			assert.ok(
-				rowInstants.has(instant),
-				`the note names ${instant}, which no DeepSeek dated row carries — ` +
-				`rows have ${[...rowInstants].sort().join(", ")}. A hardcoded date in the note ` +
-				`survived a constant change; derive it with isoInstant() instead.`,
-			);
-		}
+		// And the two are genuinely different events, so a swap cannot pass by
+		// both sides happening to agree.
+		assert.notStrictEqual(
+			newestCutoverFor("deepseek-v4-flash"),
+			newestCutoverFor("deepseek-v4-pro"),
+			"the two cutovers must differ for the assertions above to discriminate",
+		);
 	});
 });
 

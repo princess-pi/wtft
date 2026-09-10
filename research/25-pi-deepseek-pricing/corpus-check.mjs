@@ -377,7 +377,16 @@ const record = {
 	ok: mismatches === 0 && files > 0 && compared > 0
 		&& matrixRan && matrixMismatches === 0,
 };
-if (record.ok === false && mismatches === 0) {
+// `emptyCorpus` states a fact about the CORPUS, so it is derived from the
+// corpus and from nothing else. It used to be inferred — "ok is false and there
+// were no mismatches, therefore nothing was examined" — which held only while a
+// clean corpus was the ONLY way for ok to be true. #100 added a second reason
+// for ok to be false (a synthetic-matrix mismatch), and the inference silently
+// became wrong: a matrix-only failure reported "EMPTY CORPUS — nothing was
+// examined" in the same document that said files: 2505, compared: 11397.
+// Measured, on this corpus. An inferred flag acquires a new false case every
+// time a new failure reason is added; a derived one cannot.
+if (files === 0 || compared === 0) {
 	record.emptyCorpus = true;
 }
 

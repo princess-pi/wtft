@@ -43,4 +43,34 @@
 // 0.15 input, 4.4x, and 0.022 against 0.003 on cache reads, 7.3x. The two
 // v4-flash names are 1.47x on input from 2026-09-10T04:00Z, and `deepseek-flash`
 // carries the full sibling-guess error, having had no entry at all.
-export const WTFT_TAGGER_VERSION = "2.7.3";
+// 2.8.0 (#106, with #10 and #11): classification semantics change wholesale.
+// `gh` and the pr-/git- wrappers now classify `git`; test runners `tests`;
+// build/typecheck `code`; shell file reads/writes and inline python3/node script
+// bodies classify by the PATH they touch; a bash string is segmented so every
+// command in it is read rather than only the first; and the tool map gained each
+// harness's own spellings (Pi's `search_web`, `todo_write`) plus the MCP suffix
+// rule. `other` falls by roughly three quarters on a deduplicated corpus, and
+// the reclaimed dollars land in git/spec/code/tests.
+//
+// The measured figures live in docs/spec-52-finer-grain-categories.md
+// Amendment 4 and are deliberately NOT repeated here. Two drafts of this comment
+// carried numbers that contradicted that spec — one put Pi's pair under Claude
+// Code's name, one went stale by a percentage point — because a figure copied
+// into a second file has nothing holding the copies together. This comment
+// points; the spec asserts; research/other-corpus/before-after.ts derives.
+//
+// The bump is the whole point, not bookkeeping: `_cat` is baked into every tag
+// line and `classifyInteraction` SHORT-CIRCUITS on it (wtft-parser.ts), so a
+// v2.7.3 tag keeps its old `other` attribution for the life of the file. Without
+// this bump the change is inert on every session anyone has already run — which
+// is every session that matters. Minor rather than patch: this is the largest
+// semantic move since 2.5.1.
+//
+// Costs are NOT frozen by this bump, and an earlier draft of this comment
+// claimed they were ("no cost figure changes, only the bucket"). Reclassifying
+// cannot move a dollar between sessions, but the same change widens `claude -p`
+// subagent discovery, and a subagent found for the first time adds cost that
+// was previously invisible — measured at +$0.42 across the 250-session corpus
+// (#3/#138). A session total may therefore RISE after this bump; it must never
+// fall, and research/other-corpus/before-after.ts fails if it does.
+export const WTFT_TAGGER_VERSION = "2.8.0";

@@ -136,13 +136,18 @@ assert("write docs/spec.md + write src → code (spec tweak mid-coding)",
 // --- Prompt purification ---
 console.log("\nPrompt purification:");
 
-assert("unknown tool (Monitor) alone → other, not prompt",
-	classify(claudeEntry([{ type: "tool_use", name: "Monitor", input: {} }])) === "other");
+// The example tool was `Monitor` until #106, which mapped it to `agents` along
+// with the rest of the subagent-management family. The assertion is unchanged —
+// an UNKNOWN tool must never be counted as conversation — so it needs a tool
+// that is still unknown. A fictional name is the durable choice: any real one
+// can be mapped later, which is exactly what happened here.
+assert("unknown tool (a name in no map) alone → other, not prompt",
+	classify(claudeEntry([{ type: "tool_use", name: "NoSuchToolExists", input: {} }])) === "other");
 
 assert("unknown tool + narration text → other, not prompt",
 	classify(claudeEntry([
 		{ type: "text", text: "Watching the deploy now." },
-		{ type: "tool_use", name: "Monitor", input: {} }
+		{ type: "tool_use", name: "NoSuchToolExists", input: {} }
 	])) === "other");
 
 assert("pure text reply → prompt",

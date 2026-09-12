@@ -24,6 +24,9 @@ import {
 	applyControlEntry,
 	newParseStreamState,
 	extractCwdFromBashCommand,
+	cwdForClaudeSpawn,
+	commandSpawnsAgent,
+	extractRealCommands,
 	discoverClaudeSubAgentSessionFiles,
 	discoverSubagentSessionFiles,
 	loadSubagentInteractions,
@@ -479,24 +482,35 @@ function flushPending() {
   lastWriteMs = Date.now();
 }
 
-/** Check if an interaction has a bash command that spawns `claude -p`. */
+/**
+ * Check if an interaction has a bash command that spawns `claude -p`.
+ *
+ * #106: this used to carry a hand-copied transcription of `normalizeCommand`,
+ * with the comment "Replicate … from wtft-parser.ts" standing in for an import
+ * the module graph always allowed. It had already drifted by the time it was
+ * found — and this predicate decides whether a subagent's whole cost is
+ * discovered, so drift here loses money silently. It now calls the shared
+ * segmenter.
+ *
+ * What that actually buys is NARROWER than an earlier version of this comment
+ * claimed (#106 review round 2, Low/reasoning). The old code tested the same
+ * unanchored regex against the whole remaining string, and `\s` matches a
+ * newline, so a whitespace-preceded `claude -p` anywhere in a compound or loop
+ * body was already found. By that same reasoning a spawn after an unrecognised
+ * `cd` was ALSO already found, so naming it as a gain was wrong too (#106
+ * review round 3). What genuinely changed is narrow: a spawn attached with no
+ * separating space (`;claude`), a spawn that is only heredoc TEXT no longer
+ * counting as one, and — the part that actually matters — one implementation
+ * instead of two that can silently disagree about the same string.
+ *
+ * That last claim was only HALF true when first written (#106 review round 4):
+ * the segmenter was shared but this file still embedded its own copy of the
+ * spawn REGEX, so the parser and the daemon were two hand-copied predicates for
+ * one decision — whether a subagent's cost gets discovered. Both now call
+ * `commandSpawnsAgent`.
+ */
 function hasClaudeCommand(interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>): boolean {
-  return interaction.commands.some(cmd => {
-    // Replicate normalizeCommand + regex from wtft-parser.ts classifyInteraction
-    let normalized = cmd.trim();
-    let changed = true;
-    while (changed) {
-      changed = false;
-      const stripped = normalized.replace(/^(?:\w+=(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*)+/, '');
-      if (stripped !== normalized) { normalized = stripped.trim(); changed = true; }
-      const afterSep = normalized.replace(/^(?:&&|;|\|\|?)\s*/, '');
-      if (afterSep !== normalized) { normalized = afterSep; changed = true; }
-      const afterCd = normalized.replace(/^cd\s+(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*/, '');
-      if (afterCd !== normalized) { normalized = afterCd; changed = true; }
-    }
-    if (!normalized) return false;
-    return /(?:^|\s)claude(?:\s+-|\s*\||\s*$)/.test(normalized.toLowerCase());
-  });
+  return interaction.commands.some(commandSpawnsAgent);
 }
 
 /** Bring ONE sub-agent transcript up to date in the tag file (#270).
@@ -729,11 +743,12 @@ function scanForSubAgents() {
     const stillPending: typeof pendingClaudeCommands = [];
     for (const item of pendingClaudeCommands) {
       const interaction = item.interaction;
-      let cwd: string | null = null;
-      for (const cmd of interaction.commands) {
-        cwd = extractCwdFromBashCommand(cmd);
-        if (cwd) break;
-      }
+      // Ask the command that DID the spawning. Each `commands` entry is its own
+      // Bash call with its own shell, so the old "first entry yielding any cwd"
+      // walk would happily run discovery against a `cd` from an unrelated call
+      // — for `['cd /a', 'claude -p "go"']` that is a directory the spawn never
+      // saw, and the child's whole cost is then lost (#106 review round 3).
+      const cwd = cwdForClaudeSpawn(interaction.commands);
       if (!cwd) continue;
 
       let discovered: Awaited<ReturnType<typeof discoverClaudeSubAgentSessionFiles>>;

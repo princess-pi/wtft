@@ -26,6 +26,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import { calculateClaudeCost, calculateServerToolCost, getDeepSeekPeakMultiplier } from "./wtft-cost.js";
 import { getParseAdapters } from "./harness/registry.ts";
+import { extractCommandSegments, extractJoinedSegments, extractRealCommands, splitCommandWords, stripCommandPrefixes } from "./wtft-command-shapes.js";
 import type { ControlSignal, UncountedBillableClass } from "./harness/types.ts";
 
 // ---
@@ -97,65 +98,76 @@ export interface Interaction {
 const TOOL_CATEGORY_MAP: Record<string, Category> = {
 	// Subagent orchestration — largest measured unmodeled spend (#52 measurements)
 	task: "agents", agent: "agents", workflow: "agents",
+	// …and the tools that manage a spawned agent once it exists (#106). Reading
+	// a subagent's output or stopping it is part of the orchestration, not a
+	// separate kind of work.
+	taskoutput: "agents", taskstop: "agents", sendmessage: "agents",
+	listagents: "agents", monitor: "agents",
 	// Server-side web tools — token side joins the request-cost side (#73)
 	websearch: "web", webfetch: "web",
+	// Pi spells the same tool differently, and the map only knew Claude Code's
+	// spelling — 268 corpus calls of `search_web` fell straight to "other"
+	// (#106 Finding 4). A harness's vocabulary belongs in the shared map, not in
+	// its adapter, because the adapter translates SCHEMA and this is meaning.
+	search_web: "web", web_search: "web", fetch_url: "web",
+	// Worktree navigation is repo workflow, the same as the `wt-new` it wraps.
+	enterworktree: "git", exitworktree: "git",
 	// Standalone Grep tool joins bash grep/rg in the existing category
-	grep: "grep",
+	grep: "grep", glob: "grep", find: "grep", search_files: "grep",
 	// Planning/steering tools — split out of "prompt" so prompt = pure reply
-	todowrite: "plan", taskcreate: "plan", taskupdate: "plan", taskget: "plan",
-	tasklist: "plan", askuserquestion: "plan", enterplanmode: "plan",
-	exitplanmode: "plan", skill: "plan", toolsearch: "plan",
+	todowrite: "plan", todo_write: "plan", taskcreate: "plan", taskupdate: "plan",
+	taskget: "plan", tasklist: "plan", askuserquestion: "plan", ask: "plan",
+	enterplanmode: "plan", exitplanmode: "plan", skill: "plan", toolsearch: "plan",
+	sendfeedback: "plan",
 };
+
+/**
+ * Tools that are pure navigation or bookkeeping: real calls, but not work.
+ *
+ * They must neither create an "other" turn nor poison `prompt` — Pi's
+ * `change_working_directory` (63 corpus calls) is the bash `cd` wearing a tool
+ * name, and `cd` has been stripped since #63.
+ */
+const TOOL_NOOP = new Set(["change_working_directory", "cd", "pwd", "lsdir", "listmcpresourcestool"]);
+
+/**
+ * MCP tools arrive as `mcp__<server>__<tool>`, so the vendor prefix hides what
+ * they do. The suffix is the only readable signal, and it is read narrowly:
+ * search/fetch is the one family common enough across servers to be worth a
+ * rule (#106 D2). Anything else returns null and the turn stays honest about
+ * not knowing — it just must not be counted as conversation.
+ */
+function mapMcpToolToCategory(name: string): Category | null {
+	if (!name.startsWith("mcp__")) return null;
+	const tool = name.slice(name.indexOf("__", 5) + 2);
+	if (/(?:^|_)(?:web_)?(?:search|fetch|browse|crawl)(?:_|$)/.test(tool)) return "web";
+	return null;
+}
 
 /** Route one non-file tool call into toolCats / unrecognizedTool flags (#52). */
 function mapToolToCategory(name: string, toolCats: Set<Category>): boolean {
-	const cat = TOOL_CATEGORY_MAP[name];
+	const cat = TOOL_CATEGORY_MAP[name] || mapMcpToolToCategory(name);
 	if (cat) {
 		toolCats.add(cat);
 		return true;
 	}
+	// Navigation is "handled" with no category: the turn is neither work nor
+	// disqualified from being a pure reply.
+	if (TOOL_NOOP.has(name)) return true;
 	return false;
 }
+/**
+ * Record every file a bash command touches, so a turn that read or edited a
+ * file through the shell classifies as the work it did (#11 items 2 and 3).
+ *
+ * Rebuilt in #106: the #63 version understood `cat`/`head`/`tail` and one
+ * heredoc shape, which left `sed` as the most expensive single command in the
+ * "other" bucket of BOTH sessions #10 and #11 measured. It now runs over the
+ * segmented command list, so a file read inside a loop body or after a `cd` is
+ * seen the same as one at the front of the string.
+ */
 function extractFilesFromBashCommand(command: string, files: { path: string; action: "read" | "write" }[]) {
-	// Heuristically extract the file path to ensure these turns don't fall through to "other" classification.
-	const cmdLines = command.split('\n');
-	for (const line of cmdLines) {
-		const trimmed = line.trim();
-		
-		// 1. Intercept heredoc write redirections: cat << 'EOF' > file.txt or cat <<EOF >> file.txt
-		if (trimmed.startsWith("cat ") && trimmed.includes("<<") && trimmed.includes(">")) {
-			const parts = trimmed.split(/>+/);
-			if (parts.length > 1) {
-				const possiblePath = parts[1].trim().replace(/['"]/g, '');
-				if (possiblePath && !possiblePath.startsWith("-")) {
-					files.push({ path: possiblePath, action: "write" });
-					continue; // Parsed successfully as write, skip standard read extraction
-				}
-			}
-		}
-
-		// 2. Standard read commands (cat, head, tail)
-		if (trimmed.startsWith("cat ") || trimmed.startsWith("head ") || trimmed.startsWith("tail ")) {
-			const parts = trimmed.split(/\s+/);
-			if (parts.length > 1) {
-				// parts[1] is typically the file path. Handle potential quotes.
-				const possiblePath = parts[1].replace(/['"]/g, '');
-				if (possiblePath && !possiblePath.startsWith("-")) { // Ignore flags like `cat -n`
-					files.push({ path: possiblePath, action: "read" });
-				} else if (parts.length > 2 && parts[1].startsWith("-")) {
-					// Handle `cat -n file.txt` or `tail -n 50 file.txt`
-					// We just try to find the first argument that doesn't start with '-' and isn't a number
-					for (let i = 2; i < parts.length; i++) {
-						const candidate = parts[i].replace(/['"]/g, '');
-						if (!candidate.startsWith("-") && isNaN(Number(candidate))) {
-							files.push({ path: candidate, action: "read" });
-							break;
-						}
-					}
-				}
-			}
-		}
-	}
+	for (const real of extractRealCommands(command)) collectFilesFromShellCommand(real, files);
 }
 
 export function parseEntryToInteraction(entry: any, thinkingLevel?: string, compactionTokensBefore?: number, afterCompaction?: boolean, currentModel?: string): Interaction | null {
@@ -699,46 +711,276 @@ export function deduplicateInteractions(interactions: Interaction[]): Interactio
 
 // HELPERS & PARSERS
 
-// COMMAND NORMALIZATION (#63)
-// Strips cd /path prefixes and VAR=value assignments from chained bash commands
-// so that 'cd /foo && git push' classifies as 'git', not 'other'.
+// COMMAND NORMALIZATION (#63, rebuilt on segmentation in #106)
+//
+// The PRIMARY command of a bash string — the first thing it runs that is not
+// navigation, an assignment, a wrapper or shell grammar. Empty when the string
+// runs no such command at all (a bare `cd`, a lone `export`).
+//
+// Why this is now one line over `extractRealCommands`: #63 did the job with
+// three leading-prefix regexes, which demanded a literal `&&`/`;` after `cd`
+// and could not see past the first command. Measured across the corpus in
+// `research/other-corpus/`, that left `cd` as the LARGEST single "other"
+// command — ~20% of the bucket — because the commonest real shape separates
+// with a newline. The shapes and the reasoning live in wtft-command-shapes.ts.
+//
+// Contract change (#106): this returns the primary command ALONE, where #63
+// returned the whole remaining string. Callers that scanned the remainder for a
+// later command must read `extractRealCommands` instead — which sees more than
+// the remainder ever did, because it also looks inside loop bodies.
 export function normalizeCommand(cmd: string): string {
-	let normalized = cmd.trim();
-	let changed = true;
-	while (changed) {
-		changed = false;
-		// Strip leading variable assignments: VAR=val (val is non-space, double-quoted, or single-quoted)
-		const stripped = normalized.replace(/^(?:\w+=(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*)+/, '');
-		if (stripped !== normalized) { normalized = stripped.trim(); changed = true; }
-		// Strip leading shell separators left after var stripping (&&, ;, |, ||)
-		const afterSep = normalized.replace(/^(?:&&|;|\|\|?)\s*/, '');
-		if (afterSep !== normalized) { normalized = afterSep; changed = true; }
-		// Strip leading cd <path> && / cd <path> ;
-		const afterCd = normalized.replace(/^cd\s+(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*/, '');
-		if (afterCd !== normalized) { normalized = afterCd; changed = true; }
-	}
-	return normalized;
+	return extractRealCommands(cmd)[0] || "";
 }
 
-export function classifyInteraction(interaction: Interaction): Category {
-	// When the interaction was read from a pre-classified daemon tag file,
-	// use the stored category directly (avoids re-classification which fails
-	// for "prompt" because texts are not serialized to the tag file).
-	if (interaction._cat) return interaction._cat;
+// ---
+// BASH COMMAND -> CATEGORY (#106, resolving #10 and #11)
+//
+// Each of these names a family of commands that IS a category, so a turn that
+// did its work through the shell is counted as the work it did rather than as
+// "other". The families were chosen from measured corpus spend, not guessed —
+// see `research/other-corpus/` and the tables in #106.
+// ---
 
-	// Interrupted wins whole-message (#52 Phase 3): the turn's spend was
-	// discarded work — calling it "code" would overstate useful code spend.
-	// (Compaction/recache meter-splits extract their cache_write component
-	// BEFORE this classification; see splitOverheadCost.)
-	if (interaction.interrupted) return "interrupted";
+/** Spawning another agent. Excludes `.claude/` paths and `CLAUDE.md` (#3/#138). */
+const CLAUDE_SPAWN = /(?:^|\s)claude(?:\s+-|\s*\||\s*$)/;
 
+/**
+ * Does this bash command string spawn an agent?
+ *
+ * THE one predicate. The daemon carried a hand-copied twin of the regex while
+ * this module owned `CLAUDE_SPAWN`, so a change here would not have reached it
+ * — and the two decide the same thing: whether a subagent's cost gets
+ * discovered. They disagreeing silently loses or double-counts money (#106
+ * review round 4, Low/crossfile), which is the same class of defect as the
+ * transcribed `normalizeCommand` this branch already deleted from that file.
+ *
+ * Reads each real command's HEAD, so a `claude -p` that is only text inside a
+ * heredoc body is not mistaken for a spawn.
+ */
+export function commandSpawnsAgent(cmd: string): boolean {
+	return extractRealCommands(cmd).some(real => CLAUDE_SPAWN.test(real.split("\n", 1)[0]!.toLowerCase()));
+}
+
+/**
+ * Version-control work, including the tools that only ever do version-control
+ * work. `gh` is the GitHub CLI, and `pr-*` / `git-*` / `wt-new` are this repo's
+ * own workflow wrappers — every one of them a 1:1 git or GitHub operation
+ * (#10 Findings 1 and 2), and together the second-largest reclaim measured.
+ *
+ * DESIGN NOTE — all of `gh` lands here, including `gh issue` and `gh api`.
+ * #10 flagged that as a real fork: issue and comment traffic is arguably
+ * "talking about the work" rather than doing version control. It goes to `git`
+ * because `git` already means repo-and-workflow rather than the `git` binary,
+ * and because the alternative — a new top-level category — changes the tag
+ * format, the renderer and every spec that lists the categories. Splitting it
+ * later is a one-line change here; the split is #106 D1, Duppy's call.
+ */
+const GIT_COMMAND = /^(?:git|gh|tig|hub|glab|pr-(?:open|submit|ready|watch|threads|cleanup|merge|reject|review|verdict|guard)|git-(?:checkpoint|overview|snap)|wt-new|iarts-mirror|repo-gate)(?:\s|$)/;
+
+/**
+ * `gh` subcommands that are NOT version control (#106 D1, Duppy 2026-09-12).
+ *
+ * **An issue IS the spec, so reading and writing one is spec work.** In this
+ * workflow the issue body carries the spec gate and the closer, and the comments
+ * carry the resolution, the dispositions and the design decisions — that is the
+ * normative record, not chatter. Measured over 250 sessions, `gh issue` is
+ * $189.71, the largest `gh` subcommand and nearly 3x `gh pr`; routing all of
+ * `gh` to `git` made half the git bar issue traffic.
+ *
+ * `list` and `close` stay `git` deliberately: "what is open?" is navigation and
+ * closing is a workflow action, neither touches the spec's content.
+ */
+const GH_SPEC = /^gh\s+issue\s+(?:view|comment|create|edit|reopen|develop)(?:\s|$)/;
+
+/**
+ * `gh` subcommands that are a SEARCH.
+ *
+ * A GraphQL query is a query (Duppy's amendment), and `gh search` is the same
+ * rule by its own name — that second one is inference rather than instruction,
+ * and is recorded as such in #106.
+ */
+const GH_SEARCH = /^gh\s+(?:api\s+graphql|search)(?:\s|$)/;
+
+/**
+ * Known imprecision, stated rather than hidden: `gh api` otherwise stays `git`,
+ * even though $51.06 of `repos/…` calls in the corpus is partly issue traffic.
+ * Telling an issue read from a branch-protection check needs URL parsing — real
+ * work for a murky win. If the `git` bar looks wrong, this is the thread.
+ */
+
+/** Running a test suite. `bun test x` is tests; `bun build.ts` is not. */
+const TEST_RUNNER = /^(?:(?:bun|npm|pnpm|yarn|deno)\s+(?:run\s+)?test\b|(?:bun|npx)\s+\S*tests?\/|(?:pytest|jest|vitest|mocha|ava|tap|cypress|playwright|ctest)\b|(?:go|cargo)\s+test\b|(?:bash|sh|zsh)\s+\S*tests?\/|\.?\/?tests?\/\S+\.(?:sh|ts|js|mjs|py)\b)/;
+
+/** Building, typechecking or linting the code — a code activity, not "other". */
+const BUILD_COMMAND = /^(?:(?:bun|npm|pnpm|yarn|deno)\s+run\s+(?:build|typecheck|lint|check|compile|bundle)\b|bun\s+build\S*|(?:tsc|esbuild|webpack|vite|rollup|make|cmake|ninja|gcc|g\+\+|clang|eslint|prettier|ruff|black|clippy|shellcheck)\b|(?:go|cargo)\s+(?:build|install)\b)/;
+
+// ---
+// SHELL FILE TOUCHES (#11 items 2 and 3)
+//
+// Bash commands that read or write a file are the same work as the Read/Edit
+// tools, and must classify by the same path rules. Two shapes, both measured
+// large: a plain reader/writer with the path in its arguments, and an inline
+// script whose paths are inside its body.
+// ---
+
+/**
+ * Commands whose non-flag arguments are file paths being READ.
+ *
+ * Deliberately excludes metadata commands (`stat`, `file`, `shasum`): they name
+ * a path without reading its content, and counting them as reads would move
+ * spend into `code` for turns that only looked at a file's size.
+ */
+const FILE_READER = /^(?:sed|cat|head|tail|less|more|bat|nl|od|xxd|strings|wc|awk|cut|diff|jq|yq|pdftotext)(?:\s|$)/;
+
+/**
+ * Commands whose FIRST non-flag argument is a program, not a path.
+ *
+ * `sed -n '300,350p' bin/wtft.ts` reads one file; its script is not a second
+ * one. Without this, either the script gets counted as a path or — the way the
+ * first cut of this went — the path test has to be so strict that `cat wtft`
+ * stops finding a real, extensionless wrapper script.
+ */
+const PROGRAM_FIRST_ARG = /^(?:sed|awk|gawk|nawk|perl|jq|yq)(?:\s|$)/;
+
+/** A bare number is an argument value (`tail -n 50`), never a path. */
+const NUMERIC = /^\d+$/;
+
+/**
+ * Absolute paths that are real files but are not REPOSITORY work.
+ *
+ * `classifyByFilePaths` grades a path by extension and directory, and it has no
+ * way to know a repo from a scratch dir — so `/dev/null` came back as an
+ * extensionless `code` file, `cat /etc/hosts` graded as `code`, and
+ * `echo hi > /tmp/notes.txt` turned deliberate shell noise into a code turn by
+ * way of its `.txt` extension (#106 review rounds 1 and 3).
+ *
+ * The rule is "outside any checkout", not "temporary": a scratchpad script under
+ * /tmp is genuine work, but it is not this repository's code, and calling it
+ * `code` overstates code spend — which is the number #52 exists to get right.
+ * A repo-relative path (`bin/x.ts`) is unaffected, and so is an absolute path
+ * into a checkout, because neither starts with one of these roots.
+ */
+const NOT_A_REPO_FILE = /^\/(?:dev|proc|sys|run|tmp|etc|var|boot|lib|sbin|opt)(?:\/|$)/;
+
+/** Readers that are actually writing when the flag says so (`sed -i`). */
+const IN_PLACE_EDIT = /^(?:sed\s+(?:-\S*\s+)*(?:-i\S*|--in-place(?:=\S+)?)|perl\s+(?:-\S+\s+)*-i\S*|tee)(?:\s|$)/;
+
+/** Interpreters running an inline script rather than a file. */
+const INLINE_SCRIPT = /^(?:python3?|node|bun|deno|perl|ruby|php|osascript)\s+(?:-\s*(?:$|<)|-\s|-c(?:\s|$)|-e(?:\s|$))/;
+
+/**
+ * A token that plausibly names a file rather than a flag, a glob or a number.
+ *
+ * Permissive about the extension (`cat wtft` names a real extensionless wrapper
+ * script), strict about shell metacharacters: a word carrying `*`, `?`, `$`,
+ * `{` or a quote has not been expanded yet, and recording it as a path would
+ * put a literal glob into the file list.
+ */
+const PATHLIKE = /^(?:~|\.\.?)?\/?[A-Za-z0-9_.@+][A-Za-z0-9_.@+/-]*$/;
+
+/** Split one command into its argument words, quotes respected. */
+function shellWords(cmd: string): string[] {
+	const out: string[] = [];
+	const re = /"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/g;
+	let m: RegExpExecArray | null;
+	while ((m = re.exec(cmd)) !== null) out.push(m[1] ?? m[2] ?? m[3] ?? "");
+	return out;
+}
+
+/**
+ * Record every file a single real command touches, as read or write.
+ *
+ * Conservative on purpose: a path it cannot identify contributes nothing, and
+ * the turn falls through to the command-name rules. Over-claiming a path would
+ * move spend into `code`/`tests` on a guess, which is worse than leaving it in
+ * `other` where the histogram still shows it.
+ */
+function collectFilesFromShellCommand(cmd: string, files: { path: string; action: "read" | "write" }[]): void {
+	// Inline script: the paths are string literals inside the body, and the
+	// interpreter name says nothing. `python3 - <<'PY' … open("bin/x.ts") … PY`
+	// was #11's single most expensive misfiled command family.
+	if (INLINE_SCRIPT.test(cmd)) {
+		const writes = /\b(?:open\s*\(\s*["']([^"']+)["']\s*,\s*["'][wa]|writeFileSync\s*\(\s*["']([^"']+)["']|write_text\s*\(|Path\s*\(\s*["']([^"']+)["']\s*\)\s*\.write)/g;
+		const reads = /\b(?:open\s*\(\s*["']([^"']+)["']|readFileSync\s*\(\s*["']([^"']+)["']|read_text\s*\(|loadtxt\s*\(\s*["']([^"']+)["'])/g;
+		let m: RegExpExecArray | null;
+		const seen = new Set<string>();
+		// NOT_A_REPO_FILE applies here too. This branch returns early, so an
+		// earlier cut checked it on every OTHER path shape and not on the one
+		// inside a heredoc — `open('/tmp/scratch/x.mjs')` graded `code` while the
+		// identical `echo x > /tmp/scratch/x.mjs` did not. One rule, every route.
+		while ((m = writes.exec(cmd)) !== null) {
+			const p = m[1] || m[2] || m[3];
+			if (p && !NOT_A_REPO_FILE.test(p) && PATHLIKE.test(p)) { files.push({ path: p, action: "write" }); seen.add(p); }
+		}
+		while ((m = reads.exec(cmd)) !== null) {
+			const p = m[1] || m[2] || m[3];
+			if (p && !seen.has(p) && !NOT_A_REPO_FILE.test(p) && PATHLIKE.test(p)) files.push({ path: p, action: "read" });
+		}
+		return;
+	}
+
+	// Only the command's own line carries its arguments. A heredoc body is the
+	// data being written, and every path-looking word in it belongs to the file
+	// being authored, not to files the command reads.
+	//
+	// splitCommandWords is QUOTE-AWARE, so a `>` inside a quoted argument is
+	// data rather than a redirection. The regex it replaced fabricated a file
+	// write for `git commit -m "fix > bug"` — and because path-derived
+	// categories outrank command names, that turn was reported as `code`
+	// instead of `git` (#106 review round 2, High/correctness).
+	const { words, writes, reads } = splitCommandWords(cmd);
+
+	// A redirection into a path is a write, whatever opened it — this is what
+	// makes `cat > bin/x.ts <<'EOF'` a code write rather than a `cat` read.
+	const written = new Set<string>();
+	for (const p of writes) {
+		if (!p || NOT_A_REPO_FILE.test(p) || !PATHLIKE.test(p)) continue;
+		files.push({ path: p, action: "write" });
+		written.add(p);
+	}
+
+	const isEdit = IN_PLACE_EDIT.test(cmd);
+	if (!FILE_READER.test(cmd) && !isEdit) return;
+
+	// An input redirection is a READ of that file, never a write. `tee out <
+	// /dev/null` recorded /dev/null as written, graded as an extensionless
+	// `code` file, which turned shell noise into a code turn (round 1, Low).
+	for (const p of reads) {
+		if (!p || written.has(p) || NOT_A_REPO_FILE.test(p) || !PATHLIKE.test(p)) continue;
+		files.push({ path: p, action: "read" });
+	}
+
+	// sed/awk take a program as their first non-flag argument; it is not a path.
+	let skipProgram = PROGRAM_FIRST_ARG.test(cmd);
+	for (const w of words.slice(1)) {
+		if (w.startsWith("-")) continue;
+		if (skipProgram) { skipProgram = false; continue; }
+		if (NUMERIC.test(w)) continue;
+		if (written.has(w)) continue;
+		if (NOT_A_REPO_FILE.test(w)) continue;
+		if (!PATHLIKE.test(w)) continue;
+		files.push({ path: w, action: isEdit ? "write" : "read" });
+	}
+}
+
+// ---
+// PATH -> CATEGORY (#52, extracted in #106)
+//
+// The single place a file path becomes a category. Extracted so a file touched
+// through BASH classifies exactly as one touched through Read/Edit — `sed -n
+// 300,350p bin/wtft.ts` is a read of a source file however it was spelled, and
+// the corpus measured that spelling as the largest single slice of "other".
+// A second copy of these rules would be a second place for them to drift.
+// ---
+/** Resolve a set of file touches to one category, or null when none apply. */
+function classifyByFilePaths(files: { path: string; action: "read" | "write" }[]): Category | null {
 	const specPaths = new Set<string>();
 	const codePaths = new Set<string>();
 	const testsPaths = new Set<string>();
 	const researchPaths = new Set<string>();
 	const planPaths = new Set<string>();
 
-	for (const f of interaction.files) {
+	for (const f of files) {
 		const norm = f.path.replace(/\\/g, "/");
 		let category: "spec" | "code" | "tests" | "research" | "plan" | null = null;
 
@@ -793,35 +1035,91 @@ export function classifyInteraction(interaction: Interaction): Category {
 	if (specPaths.has("read")) return "spec";
 	if (planPaths.has("read")) return "plan";
 
-	// Tool-implied categories (#52) — priority: agents (spawn cost dominates) >
-	// web (joins #73 request-cost billing) > plan > grep. Sits below file ops
-	// (a turn that edits AND spawns is still the edit) and above bash commands.
+	return null;
+}
+
+export function classifyInteraction(interaction: Interaction): Category {
+	// When the interaction was read from a pre-classified daemon tag file,
+	// use the stored category directly (avoids re-classification which fails
+	// for "prompt" because texts are not serialized to the tag file).
+	if (interaction._cat) return interaction._cat;
+
+	// Interrupted wins whole-message (#52 Phase 3): the turn's spend was
+	// discarded work — calling it "code" would overstate useful code spend.
+	// (Compaction/recache meter-splits extract their cache_write component
+	// BEFORE this classification; see splitOverheadCost.)
+	if (interaction.interrupted) return "interrupted";
+
+	const viaToolFiles = classifyByFilePaths(interaction.files);
+	if (viaToolFiles) return viaToolFiles;
+
+	// Tool-implied categories (#52, extended #106) — priority: agents (spawn cost
+	// dominates) > web (joins #73 request-cost billing) > git > plan > grep. Sits
+	// below file ops (a turn that edits AND spawns is still the edit) and above
+	// bash commands. `git` joined for the worktree tools, at the same rank its
+	// bash commands hold relative to plan and grep.
 	if (interaction.toolCats && interaction.toolCats.length > 0) {
-		for (const cat of ["agents", "web", "plan", "grep"] as Category[]) {
+		for (const cat of ["agents", "web", "git", "plan", "grep"] as Category[]) {
 			if (interaction.toolCats.includes(cat)) return cat;
 		}
 	}
 
 	if (interaction.commands.length > 0) {
+		// Every real command the turn ran, not just the first (#106). A compound
+		// command is classified on all of it: `until <cond>; do sleep 15; done;
+		// gh pr checks 277` is git work, and the old first-command-only read saw
+		// only the loop header.
+		const real = interaction.commands.flatMap(cmd => extractRealCommands(cmd));
+
 		let isGit = false;
 		let isGrep = false;
 		let isAgents = false;
-		for (const cmd of interaction.commands) {
-			const normalized = normalizeCommand(cmd);
-			if (!normalized) continue; // stripped to nothing (pure cd, pure var assignment)
-			const lower = normalized.toLowerCase().trim();
-			if (/(?:^|\s)claude(?:\s+-|\s*\||\s*$)/.test(lower)) {
-				isAgents = true;
-			} else if (lower === "git" || lower.startsWith("git ")) {
-				isGit = true;
-			} else if (lower === "grep" || lower.startsWith("grep ") || lower === "rg" || lower.startsWith("rg ") || lower === "ripgrep" || lower.startsWith("ripgrep ") || lower === "find" || lower.startsWith("find ")) {
-				isGrep = true;
-			}
+		let isTests = false;
+		let isCode = false;
+		let isSpec = false;
+		for (const normalized of real) {
+			// EVERY family is tested against the lowercased form. Testing the
+			// raw string made `Git status` and `Bun test` fall through to
+			// `other` — a regression against the case-insensitive behaviour this
+			// branch inherited (#106 review round 2, Low/correctness).
+			//
+			// …and against the command's HEAD, not its heredoc body: the body is
+			// attached to its opener, so `cat <<'EOF' … claude -p … EOF` read as
+			// an agent spawn when the text was only data (round 3).
+			const lower = normalized.split("\n", 1)[0]!.toLowerCase();
+			if (CLAUDE_SPAWN.test(lower)) isAgents = true;
+			// The two `gh` carve-outs are tested BEFORE GIT_COMMAND, which also
+			// matches `gh` — order is the whole mechanism here (#106 D1).
+			else if (GH_SPEC.test(lower)) isSpec = true;
+			else if (GH_SEARCH.test(lower)) isGrep = true;
+			else if (GIT_COMMAND.test(lower)) isGit = true;
+			else if (TEST_RUNNER.test(lower)) isTests = true;
+			else if (BUILD_COMMAND.test(lower)) isCode = true;
+			else if (/^(?:grep|rg|ripgrep|find|fd|ag|ack)(?:\s|$)/.test(lower)) isGrep = true;
 		}
+		// Priority: a spawn's cost dominates the turn; git is the workflow the
+		// turn is performing; tests/code are what it is performing it ON; grep is
+		// the weakest signal because it is so often incidental to another job.
+		//
+		// `spec` outranks `git` because it is the MORE SPECIFIC reading of the
+		// same command — `gh issue view` matches both, and the whole point of
+		// the D1 carve-out is that issue work was drowning the git bar. A turn
+		// that reads an issue AND runs a git command is counted as reading the
+		// issue; before D1 it was counted as git either way, so nothing that
+		// used to read as spec now reads as git.
 		if (isAgents) return "agents";
+		if (isSpec) return "spec";
 		if (isGit) return "git";
+		if (isTests) return "tests";
+		if (isCode) return "code";
 		if (isGrep) return "grep";
-		return "other";
+		// `real` empty means every command was navigation or an assignment — a
+		// turn that RAN something but did no work. Fall through rather than
+		// returning "other" here, so a narrated `cd` reaches the prompt rule and
+		// is counted as the reply it is. #63 has stripped `cd` from
+		// classification since it landed; this is the same rule, applied to the
+		// whole turn instead of to one command (#106 review, Medium/reasoning).
+		if (real.length > 0) return "other";
 	}
 
 	// Prompt purification (#52): a message that fired an unmodeled tool is not
@@ -1223,15 +1521,102 @@ export function loadSubagentInteractions(
 
 const CLAUDE_SUBAGENT_WINDOW_MS = 15_000; // ±15s window for timestamp matching
 
-/** Extract the CWD from a bash command's `cd <dir>` prefix.
- *  Handles: `cd /path && ...`, `cd "/path" && ...`,
- *  `cd /path 2>/dev/null || cd /tmp\n...`
- *  Returns the first cd target directory, or null if no cd found. */
+/** The directory a bash command's `claude -p` spawn ran in.
+ *
+ *  Returns the LAST `cd` target at or before the spawn — the one in effect when
+ *  it ran — or null when there is no `cd`, or when the target cannot be known.
+ *  Handles `cd /path && …`, `cd "/path" && …`, a `cd` that is not the first
+ *  command, and one inside a loop body.
+ *
+ *  `A || B` runs B only when A failed, so a `cd` to the right of `||` is a
+ *  FALLBACK and the first of the chain is kept. `$( … )` returns null rather
+ *  than a guess: the directory is invented at runtime, so any string would be
+ *  certain to be wrong, and the daemon treats a wrong directory far worse than
+ *  an unknown one. */
 export function extractCwdFromBashCommand(cmd: string): string | null {
-	const firstLine = cmd.split('\n')[0].trim();
-	const m = firstLine.match(/^cd\s+(?:"([^"]*)"|'([^']*)'|([^\s;&|]+))/);
-	if (!m) return null;
-	return m[1] || m[2] || m[3] || null;
+	// #106 review (Medium/correctness): this read only the FIRST line and only a
+	// command STARTING with `cd`, while `hasClaudeCommand` was widened to find a
+	// `claude -p` anywhere in a compound or inside a loop body. The two must
+	// agree, because the daemon drops an interaction outright when the cwd comes
+	// back null (`if (!cwd) continue`) — so a detection the extractor cannot
+	// follow loses that subagent's whole cost, which is the exact failure #3
+	// exists to prevent. Scan every segment for the LAST `cd` before the spawn,
+	// which is the directory the spawn actually ran in.
+	let found: string | null = null;
+	// "The segment immediately before this one was a `cd` I kept" — NOT "a cd
+	// appeared somewhere earlier". The weaker flag made any right-hand `cd` look
+	// like the fallback of an earlier chain: in `cd /a && false || cd /b`, the
+	// shell runs `cd /b` because `false` failed, and the stale flag suppressed it
+	// (#106 review round 3, High/crossfile).
+	let prevWasKeptCd = false;
+	for (const { text, joinedBy } of extractJoinedSegments(cmd)) {
+		const bare = stripCommandPrefixes(text);
+		// Match against the command's HEAD only. A heredoc body is attached to
+		// the segment that opened it, so testing the whole segment let a `claude
+		// -p` that is merely DATA inside a heredoc read as a spawn (round 3,
+		// Medium/crossfile).
+		const head = bare.split("\n", 1)[0]!;
+		// STOP at the spawn. The directory that matters is the one in effect when
+		// `claude -p` ran; a `cd` AFTER it is where the shell went next, and
+		// `claude -p 'x'; cd /elsewhere` was returning `/elsewhere` (round 2).
+		if (CLAUDE_SPAWN.test(head.toLowerCase())) break;
+		const m = head.match(/^cd\s+(?:"([^"]*)"|'([^']*)'|([^\s;&|]+))/);
+		if (!m) { prevWasKeptCd = false; continue; }
+		// `A || B` runs B only when A FAILED, so a `cd` on the right of `||` is a
+		// FALLBACK of the `cd` before it. Keep the first of such a chain.
+		//
+		// This is not a nicety. The real shape in the corpus is
+		//   cd <scratchpad> 2>/dev/null || cd /tmp
+		//   timeout 180 claude -p "…"
+		// and reading it as "last cd wins" returned /tmp, so discovery looked in
+		// the wrong project directory and a real subagent's $0.38 vanished from
+		// the session total. Caught by the totals invariant in
+		// research/other-corpus/before-after.ts, not by a unit test.
+		if (joinedBy === "||" && prevWasKeptCd) continue;
+		prevWasKeptCd = true;
+		const target = m[1] || m[2] || m[3] || "";
+		// A target the shell EXPANDS cannot be known statically — `cd $(mktemp
+		// -d)` is a fresh temp dir, and `cd $SCRATCH` is whatever that variable
+		// held. Checked on the EXTRACTED value so every spelling is caught at
+		// once: `$(…)`, backticks, `$VAR`, `${VAR}`, and the quoted forms of all
+		// of them, which the double-quote arm of the regex hands back as though
+		// they were literal directories (#106 review rounds 3 and 4).
+		//
+		// Returning a wrong-but-non-null string is the WORST option: the daemon
+		// accepts it, stats a path that cannot exist, and re-queues the
+		// interaction every poll while the subagent's whole cost goes missing —
+		// permanently, and with nothing raising a failure. Unknown must read as
+		// unknown, because null makes the caller take a safe path and a bad
+		// string makes it take a confident wrong one.
+		// KEEP whatever was already found rather than clearing it. An earlier cut
+		// set `found = null` here, so `cd /repo; cd "$MISSING"; claude -p 'go'`
+		// threw away the perfectly good `/repo` and dropped the subagent — an
+		// over-correction of the round-4 fix, and the shape occurs ~35 times in
+		// the corpus (#108 review). With no earlier cd, `found` is already null,
+		// so the unknown-reads-as-unknown contract is unchanged.
+		if (/[$`]/.test(target)) continue;
+		found = target || found;
+	}
+	return found;
+}
+
+/**
+ * The cwd of the bash command that actually contains the `claude -p` spawn.
+ *
+ * Each entry in `interaction.commands` is a SEPARATE Bash tool call with its own
+ * shell, so a `cd` in one entry says nothing about the working directory of a
+ * spawn in another. Both callers previously walked the flat list and took the
+ * first entry yielding any cwd at all, which for `['cd /a', 'claude -p "go"']`
+ * ran discovery against `/a` — a directory the spawn never saw (#106 review
+ * round 3, High/crossfile). Ask the command that did the spawning.
+ */
+export function cwdForClaudeSpawn(commands: string[]): string | null {
+	for (const cmd of commands) {
+		if (!commandSpawnsAgent(cmd)) continue;
+		const cwd = extractCwdFromBashCommand(cmd);
+		if (cwd) return cwd;
+	}
+	return null;
 }
 
 /** Convert a CWD path to the Claude Code project directory slug.
@@ -1355,11 +1740,15 @@ export function discoverClaudeSubAgentSessionFiles(
 /** Check if any command in an interaction invokes `claude` as a sub-agent.
  *  Uses the same regex as classifyInteraction's claude detection. */
 function interactionHasClaudeCommand(interaction: Interaction): boolean {
-	return interaction.commands.some(cmd => {
-		const normalized = normalizeCommand(cmd);
-		if (!normalized) return false;
-		return /(?:^|\s)claude(?:\s+-|\s*\||\s*$)/.test(normalized.toLowerCase());
-	});
+	// Every real command, not just the primary one (#106): normalizeCommand now
+	// returns the FIRST command alone, so a `claude -p` chained after another
+	// command would be invisible to it — and missing one loses that subagent's
+	// entire cost.
+	// The command's HEAD, not the whole segment: a heredoc body is attached to
+	// the command that opened it, so `cat <<'EOF' … claude -p "x" … EOF` matched
+	// a spawn that is only DATA, classified the turn `agents`, and enqueued a
+	// phony subagent (#106 review round 3, Medium/crossfile).
+	return interaction.commands.some(commandSpawnsAgent);
 }
 
 /** Post-processing pass: for each interaction that spawns `claude -p` via bash,
@@ -1386,12 +1775,10 @@ export function attributeClaudeSubAgentCosts(
 		// internally, and the CLI is doing a post-hoc pass on tag-file data)
 		if ((interaction as any).claudeSubAgentSessionIds) continue;
 
-		// Extract CWD from the first command that has a cd prefix
-		let cwd: string | null = null;
-		for (const cmd of interaction.commands) {
-			cwd = extractCwdFromBashCommand(cmd);
-			if (cwd) break;
-		}
+		// The cwd must come from the command that DID the spawning — each
+		// `commands` entry is its own Bash call with its own shell (#106 review
+		// round 3, High/crossfile).
+		const cwd = cwdForClaudeSpawn(interaction.commands);
 		if (!cwd) continue;
 
 		const subAgentResult = discoverClaudeSubAgentSessionFiles(

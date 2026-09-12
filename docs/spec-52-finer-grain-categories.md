@@ -56,22 +56,37 @@ definitions were lost in the #68 monolith split and the gap is invisible because
 strips types without typechecking. Fix: define and export both in `extensions/lib/wtft-parser.ts`.
 
 ```
-Category = spec | code | mixed | tests | research | git | grep
-         | web | agents | plan | prompt | compaction | interrupted | other
+Category = spec | code | tests | research | git | grep
+         | web | agents | plan | prompt | compaction | interrupted | overhead | other
 ```
 
 `compaction` and `interrupted` are **reserved now** (so the daemon tag-file version bumps once)
 and wired in Phase 3.
 
+> **Kept current, because a union is the one thing a reader takes literally.** This block listed
+> `mixed` and omitted `overhead` until #106 — telling a reader the classifier accepts a category
+> the code had removed (Amendment 2, "mixed removed") and hiding one Phase 3 added. It is the
+> single source of truth only if it tracks `Category` in `extensions/lib/wtft-parser.ts`; check it
+> against that type whenever the type changes.
+
 ### Tool → category map (`tool_use` blocks, Claude Code; `toolCall`, Pi)
+
+The map is **shared, not per-harness**, and that is deliberate: an adapter translates a
+harness's *schema*, and a tool name's meaning is not schema. Each harness's own spelling
+therefore lands here — see Amendment 4 for the 268 calls this cost while it did not.
 
 | Tool name (lowercased) | Effect |
 |---|---|
 | `task`, `agent`, `workflow` | toolCat `agents` |
+| `taskoutput`, `taskstop`, `sendmessage`, `listagents`, `monitor` | toolCat `agents` (#106 — managing a spawned agent is part of the orchestration) |
 | `websearch`, `webfetch` | toolCat `web` (token side; #73 request-cost side already bills `web`) |
-| `grep` | toolCat `grep` |
-| `todowrite`, `taskcreate`, `taskupdate`, `taskget`, `tasklist`, `askuserquestion`, `enterplanmode`, `exitplanmode`, `skill`, `toolsearch` | toolCat `plan` |
+| `search_web`, `web_search`, `fetch_url` | toolCat `web` (#106 — Pi's spelling of the same tools) |
+| `mcp__<server>__…search…` / `…fetch…` / `…browse…` / `…crawl…` | toolCat `web` (#106 — MCP hides the tool behind a vendor prefix; the suffix is the only readable signal) |
+| `enterworktree`, `exitworktree` | toolCat `git` (#106 — repo workflow, like the `wt-new` they wrap) |
+| `grep`, `glob`, `find`, `search_files` | toolCat `grep` |
+| `todowrite`/`todo_write`, `taskcreate`, `taskupdate`, `taskget`, `tasklist`, `askuserquestion`/`ask`, `enterplanmode`, `exitplanmode`, `skill`, `toolsearch`, `sendfeedback` | toolCat `plan` |
 | `notebookedit` | file write (`args.notebook_path`) — classified by path like `edit` |
+| `change_working_directory`, `cd`, `pwd`, `lsdir` | **no-op** (#106) — navigation is neither work nor a disqualification from `prompt` |
 | any other tool | marks `hasUnrecognizedTool` |
 
 ### Path rule: `docs/research/` → `plan` (Duppy decision 2026-07-13)
@@ -94,15 +109,18 @@ under `docs/` per the convention above. File-placement cleanup, separate from #5
 - `Interaction` gains `toolCats?: Category[]` (populated at parse time, serialized to the tag
   file like `files`/`commands`).
 - `classifyInteraction` precedence (top wins):
-  1. file **writes** (existing, incl. `mixed` on multi-target writes)
-  2. file **reads** (existing, incl. `mixed`)
-  3. toolCats by priority `agents` > `web` > `plan` > `grep`
-  4. bash commands (`git` / `grep` / `other`) — existing
+  1. file **writes**, resolved by latest-workflow-stage-wins — there is no `mixed` (Amendment 2
+     removed it); a multi-target write takes the furthest stage it touched
+  2. file **reads**, same resolution
+  3. toolCats by priority `agents` > `web` > `git` > `plan` > `grep`
+  4. bash commands, by priority `agents` > `git` > `tests` > `code` > `grep` > `other`
   5. texts → `prompt`
   6. fallback → `other`
 - **Prompt purification:** a message with any `tool_use`/`toolCall` block but no recognized
   mapping and no files/commands classifies `other`, never `prompt` — `prompt` becomes purely
-  "Claude replied/planned in prose".
+  "Claude replied/planned in prose". Amended in #106: a tool that is pure NAVIGATION
+  (Pi's `change_working_directory`, and the like) is recognized as a no-op — neither work nor
+  a disqualification from `prompt`, exactly as the bash `cd` has been since #63.
 
 ### Amendment 2 (Duppy decisions 2026-07-13, pre-merge testing)
 
@@ -354,3 +372,71 @@ not a competitor. (Its row-overflow rendering bug is tracked separately in #99.)
   honestly, and the matrix multiplies render complexity (13 categories × 4 meters) for a view
   no measurement showed a need for. The two axes are more legible shipped as separate views
   than crossed into one grid.
+
+---
+
+## Amendment 4 (#106, 2026-09-11) — bash is work, and it is most of the session
+
+> Numbered 4, not 3: an `Amendment 3` already exists below for Phase 3's overhead classes.
+> Two sections sharing a name is exactly the ambiguity a back-reference cannot survive.
+
+Measured across 250 Claude Code and 250 Pi transcripts — the **same** session list on both
+sides, every Interaction **deduplicated** — `other` held **54.8%** and **29.4%** of corpus spend
+respectively. Steps 1, 2 and 4 above all under-read the shell, in three separate ways:
+
+> **Read the method before quoting a figure from it.** The first version of this paragraph said
+> 35.6% and 16.4%, from scripts that summed the output of `parseSessionFile` directly. That
+> function returns RAW lines — one Interaction per content block, the same `message.id` and
+> `usage` repeated — and its own docstring says so. Summing them inflates cost, and worse for
+> *this* measurement, the duplicate blocks of one message classify **differently** (a text block
+> reads `prompt`, its `tool_use` sibling reads `other`), so an undeduped split is a different
+> shape rather than a scaled one. The draw was also random per run, so before and after were not
+> the same sessions.
+>
+> **Reproduce it with `research/other-corpus/before-after.ts --before <checkout>`**, which is the
+> script these figures come from — a sorted-and-sliced session list rather than a shuffled one,
+> deduplicated, classified by two builds. It exits non-zero on any total that **falls**, and on
+> any **rise** it cannot attribute to a newly-discovered subagent. The two directions are not
+> symmetric and the gate does not pretend they are: a reclassification moves money between
+> categories and cannot change the total, while subagent discovery legitimately ADDS cost that
+> was previously invisible. `measure-other.ts` still samples at random, deliberately: it answers
+> "what is in the bucket right now", which is a different question from "what did this change
+> do", and only the second needs a fixed list.
+
+- **A bash string is several commands, and only the first was read.** `normalizeCommand`'s
+  #63 prefix-strip required a literal `&&`/`;` after `cd`, so the commonest real shape — a `cd`
+  followed by a NEWLINE — was never stripped, and `cd` became the largest single "other"
+  command at ~20% of the bucket. Commands are now SPLIT (`wtft-command-shapes.ts`), and every
+  one of them is classified, including inside a loop body.
+- **A file touched through the shell is the same work as one touched through Read/Edit.**
+  `sed -n … <file>`, `cat > <file> <<EOF`, `head`, `tail`, `tee`, and the paths inside a
+  `python3 -`/`node -e` script body all resolve through `classifyByFilePaths` — the same rules,
+  one copy.
+- **Some command families ARE a category.** `gh` and the `pr-*`/`git-*`/`wt-new` wrappers →
+  `git`; test runners → `tests`; build, typecheck and lint → `code`.
+
+`gh` routes wholly to `git`, including `gh issue` and `gh api`. #10 flagged this as a genuine
+fork — issue traffic is arguably "talking about the work" — and it is recorded as **#106 D1**,
+open for Duppy. It sits in `git` because `git` already means repo-and-workflow rather than the
+`git` binary, and because a new top-level category would change the tag format, the renderer,
+and every spec that lists the categories.
+
+**What deliberately STAYS `other`:** `echo`, `ls`, `rm`, `sleep`, `mkdir` and the rest of the
+shell noise. Reclaiming those would be a lie, and the bucket has to keep meaning something.
+A turn that ran ONLY navigation (`cd`, an assignment, Pi's `change_working_directory`) and said
+nothing also stays `other` — it ran something, did no work, and carried no reply, so `other` is
+the honest residual. What changed is that such a turn no longer *blocks* the prompt rule: a
+narrated `cd` is counted as the reply it is.
+
+**Result on that corpus:** `other` **54.8% → 13.1%** on Claude Code and **29.4% → 6.2%** on Pi.
+The corpus total is unchanged on Pi and rises by $0.42 on Claude Code — and that rise is the
+one kind of change a reclaim is allowed to make: a subagent whose `cd` was not on the command's
+first line was previously invisible, and its cost is now discovered and attributed (#3/#138).
+`before-after.ts` names the recovered session id rather than asserting the totals match, because
+"reclassification cannot change the total" and "discovery may add to it" are different rules and
+collapsing them hides the second. On the two sessions #10 and #11 were filed against, **58.2% → 6.7%** and **67.2% → 7.2%**.
+
+**This amendment requires a tagger bump, and it got one: `WTFT_TAGGER_VERSION` 2.7.3 → 2.8.0.**
+`_cat` is baked into every tag line and `classifyInteraction` short-circuits on it, so without
+the bump every already-tagged session keeps its old `other` attribution and this entire
+amendment is inert in production.

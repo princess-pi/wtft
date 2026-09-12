@@ -109,8 +109,9 @@ under `docs/` per the convention above. File-placement cleanup, separate from #5
 - `Interaction` gains `toolCats?: Category[]` (populated at parse time, serialized to the tag
   file like `files`/`commands`).
 - `classifyInteraction` precedence (top wins):
-  1. file **writes** (existing, incl. `mixed` on multi-target writes)
-  2. file **reads** (existing, incl. `mixed`)
+  1. file **writes**, resolved by latest-workflow-stage-wins — there is no `mixed` (Amendment 2
+     removed it); a multi-target write takes the furthest stage it touched
+  2. file **reads**, same resolution
   3. toolCats by priority `agents` > `web` > `git` > `plan` > `grep`
   4. bash commands, by priority `agents` > `git` > `tests` > `code` > `grep` > `other`
   5. texts → `prompt`
@@ -394,9 +395,11 @@ respectively. Steps 1, 2 and 4 above all under-read the shell, in three separate
 >
 > **Reproduce it with `research/other-corpus/before-after.ts --before <checkout>`**, which is the
 > script these figures come from — a sorted-and-sliced session list rather than a shuffled one,
-> deduplicated, classified by two builds. It exits non-zero if the corpus totals differ, because
-> a reclaim MOVES money between categories and any change in the total is a measurement bug
-> rather than a finding. `measure-other.ts` still samples at random, deliberately: it answers
+> deduplicated, classified by two builds. It exits non-zero on any total that **falls**, and on
+> any **rise** it cannot attribute to a newly-discovered subagent. The two directions are not
+> symmetric and the gate does not pretend they are: a reclassification moves money between
+> categories and cannot change the total, while subagent discovery legitimately ADDS cost that
+> was previously invisible. `measure-other.ts` still samples at random, deliberately: it answers
 > "what is in the bucket right now", which is a different question from "what did this change
 > do", and only the second needs a fixed list.
 

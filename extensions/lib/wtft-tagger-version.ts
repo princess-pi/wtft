@@ -49,8 +49,8 @@
 // bodies classify by the PATH they touch; a bash string is segmented so every
 // command in it is read rather than only the first; and the tool map gained each
 // harness's own spellings (Pi's `search_web`, `todo_write`) plus the MCP suffix
-// rule. `other` falls by roughly four fifths on a deduplicated corpus, and the
-// reclaimed dollars land in git/code/tests.
+// rule. `other` falls by roughly three quarters on a deduplicated corpus, and
+// the reclaimed dollars land in git/spec/code/tests.
 //
 // The measured figures live in docs/spec-52-finer-grain-categories.md
 // Amendment 4 and are deliberately NOT repeated here. Two drafts of this comment

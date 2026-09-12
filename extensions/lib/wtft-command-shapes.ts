@@ -304,6 +304,24 @@ export function splitCommandWords(cmd: string): CommandWords {
 			continue;
 		}
 		if (/\s/.test(c)) { flush(); i++; continue; }
+		// A HERE-STRING (`<<<`) feeds a literal, not a file. Skipping it here
+		// left the third `<` to be read as an input redirection, so `cat <<<
+		// 'hello'` fabricated a read of a file called `hello` and could grade the
+		// turn `code` (#106 review round 4, Medium/correctness).
+		if (c === "<" && head[i + 1] === "<" && head[i + 2] === "<") {
+			flush();
+			i += 3;
+			while (i < head.length && /\s/.test(head[i]!)) i++;
+			// Consume the literal word or quoted run; it is data, not a path.
+			if (head[i] === "'" || head[i] === '"') {
+				const q = head[i]!;
+				const e = head.indexOf(q, i + 1);
+				i = e === -1 ? head.length : e + 1;
+			} else {
+				while (i < head.length && !/\s/.test(head[i]!)) i++;
+			}
+			continue;
+		}
 		// A heredoc opener is not a redirection and its delimiter is not a file.
 		if (c === "<" && head[i + 1] === "<") {
 			flush();
@@ -365,22 +383,22 @@ const WRAPPER = new RegExp(
 	"^(?:" +
 	[
 		// timeout: value-taking options, THEN the mandatory duration.
-		"timeout(?:\\s+(?:-k|--kill-after|-s|--signal)(?:=\\S+|\\s+\\S+)|\\s+(?:--preserve-status|--foreground|-[a-zA-Z]+))*\\s+\\S+",
-		"time(?:\\s+(?:-o|--output|-f|--format)(?:=\\S+|\\s+\\S+)|\\s+-[a-zA-Z]+)*",
-		"nice(?:\\s+(?:-n|--adjustment)(?:=\\S+|\\s+-?\\d+))?",
-		"ionice(?:\\s+(?:-c|-n|-p)(?:=\\S+|\\s+\\S+)|\\s+-[a-zA-Z]+)*",
+		"timeout(?:\\s+(?:-k|--kill-after|-s|--signal)(?:=\\S+|\\s+\\S+)|\\s+(?:--preserve-status|--foreground|-[a-zA-Z]\\S*))*\\s+\\S+",
+		"time(?:\\s+(?:-o|--output|-f|--format)(?:=\\S+|\\s+\\S+)|\\s+-[a-zA-Z]\\S*)*",
+		"nice(?:\\s+(?:-n|--adjustment)(?:=\\S+|\\s+-?\\d+)|\\s+-\\d+)?",
+		"ionice(?:\\s+(?:-c|-n|-p)(?:=\\S+|\\s+\\S+)|\\s+-[a-zA-Z]\\S*)*",
 		"nohup",
 		"stdbuf(?:\\s+(?:-i|-o|-e)(?:=\\S+|\\s+\\S+))*",
 		"command",
 		"builtin",
 		"exec",
 		// sudo: -u/-g/-U/-p/-C/-D/-h all take the next word.
-		"sudo(?:\\s+(?:-u|-g|-U|-p|-C|-D|-h|--user|--group|--prompt)(?:=\\S+|\\s+\\S+)|\\s+-[a-zA-Z]+)*",
-		"doas(?:\\s+-u\\s+\\S+|\\s+-[a-zA-Z]+)*",
+		"sudo(?:\\s+(?:-u|-g|-U|-p|-C|-D|-h|--user|--group|--prompt)(?:=\\S+|\\s+\\S+)|\\s+-[a-zA-Z]\\S*)*",
+		"doas(?:\\s+-u\\s+\\S+|\\s+-[a-zA-Z]\\S*)*",
 		// env: flags, `-u NAME` pairs (two words), and assignments, in any order.
 		"env(?:\\s+(?:-u|--unset)(?:=\\S+|\\s+[A-Za-z_][A-Za-z0-9_]*)|\\s+-[A-Za-z]+|\\s+[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|'[^']*'|\\S*))*",
 		// xargs: -I/-n/-P/-d/-a/-E/-s all take the next word.
-		"xargs(?:\\s+(?:-I|-i|-n|-P|-d|-a|-E|-s|--replace|--max-args|--max-procs|--delimiter)(?:=\\S+|\\s+\\S+)|\\s+-[a-zA-Z]+)*",
+		"xargs(?:\\s+(?:-I|-i|-n|-P|-d|-a|-E|-s|--replace|--max-args|--max-procs|--delimiter)(?:=\\S+|\\s+\\S+)|\\s+-[a-zA-Z]\\S*)*",
 		"script\\s+-qc",
 	].join("|") +
 	")\\s+",
@@ -393,10 +411,17 @@ const ASSIGNMENT = /^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"(?:[^"\\]|\\.)*"|'[^']*'|\$\(
 const DECLARE = /^(?:export|declare|local|readonly|typeset|set)\s+/;
 
 /** Loop/branch openers and closers — grammar, never work. */
-const KEYWORD = /^(?:for|while|until|if|elif|else|then|do|done|fi|case|esac|in|select|function|coproc|\{|\}|\(|\)|!)(?:\s|$)/;
+const KEYWORD = /^(?:for|while|until|if|elif|else|then|do|done|fi|case|esac|in|select|function|coproc|\}|\(|\)|!)(?:\s|$)/;
 
-/** A function DEFINITION: `name() {` — the body is not an invocation. */
-const FUNCTION_DEF = /^[A-Za-z_][A-Za-z0-9_-]*\s*\(\s*\)/;
+/**
+ * A function DEFINITION — the body is not an invocation.
+ *
+ * BOTH spellings: `name() { … }` and bash's `function name { … }`. Only the
+ * first was matched, so a multi-statement `function f { a; b; }` body leaked its
+ * later statements as top-level commands (#106 review round 4). The single-
+ * statement case passed by luck — the body shared a segment with the keyword.
+ */
+const FUNCTION_DEF = /^(?:[A-Za-z_][A-Za-z0-9_-]*\s*\(\s*\)|function\s+[A-Za-z_][A-Za-z0-9_-]*)/;
 
 /**
  * Net brace nesting introduced by a segment, ignoring braces inside quotes.
@@ -444,6 +469,11 @@ export function stripCommandPrefixes(segment: string): string {
 		// `elif` is NOT here: what follows it is a condition, so it stays
 		// scaffolding exactly as `if` does.
 		s = s.replace(/^(?:do|then|else|!)\s+/, "");
+		// A brace GROUP runs its body — `{ gh pr checks 277; }` is work, unlike a
+		// function definition, which runs nothing. `{` was in KEYWORD, so the
+		// whole group was discarded and a `claude -p` inside one was never seen
+		// as a spawn (#106 review round 4, Medium/correctness).
+		s = s.replace(/^\{\s+/, "");
 		s = s.replace(DECLARE, "");
 		s = s.replace(ASSIGNMENT, "");
 		s = s.replace(WRAPPER, "");

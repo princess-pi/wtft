@@ -214,7 +214,10 @@ console.log("\n#106 / 2 — classifyInteraction reclaims named work from 'other'
 // ---------------------------------------------------------------------------
 
 // #10 Finding 1/2 — gh and the shipped workflow wrappers are git operations.
-eq("gh issue view -> git", cat(bashTurn("gh issue view 84 --json comments")), "git");
+// `gh issue view` was `git` when #10's carve-out first landed, and is `spec`
+// since D1 — see section 9 for the ruling and its measurement. Kept here as the
+// pointer, so a reader of #10's section is not told the opposite of section 9.
+eq("gh issue view -> spec (D1, was git)", cat(bashTurn("gh issue view 84 --json comments")), "spec");
 eq("gh pr checks -> git", cat(bashTurn("gh pr checks 277")), "git");
 eq("gh api -> git", cat(bashTurn("gh api repos/duppypro/wtft/pulls/277")), "git");
 eq("pr-open -> git", cat(bashTurn("pr-open --json")), "git");
@@ -550,6 +553,66 @@ assert("a long genuine command is not quarantined as a parse miss",
 	!/Parse miss/.test(longOut), longOut.slice(0, 300));
 assert("…and it is still length-capped for display",
 	!longOut.split("\n").some(l => l.replace(/\x1b\[[0-9;]*m/g, "").length > 200), longOut.slice(0, 200));
+
+// ---------------------------------------------------------------------------
+console.log("\n#106 / 9 — D1: the gh split (Duppy's ruling, 2026-09-12)");
+// ---------------------------------------------------------------------------
+
+// An issue IS the spec here: its body carries the spec gate and closer, its
+// comments carry the resolution and the decisions. Reading or writing one is
+// spec work, not version control.
+eq("gh issue view -> spec", cat(bashTurn("gh issue view 106 --json body")), "spec");
+eq("gh issue comment -> spec", cat(bashTurn("gh issue comment 106 --body-file /tmp/c.md")), "spec");
+eq("gh issue create -> spec", cat(bashTurn("gh issue create --title x --body-file /tmp/b.md")), "spec");
+eq("gh issue edit -> spec", cat(bashTurn("gh issue edit 106 --body-file /tmp/b.md")), "spec");
+
+// Navigation and workflow actions on an issue are NOT its content.
+eq("gh issue list stays git", cat(bashTurn("gh issue list --state open")), "git");
+eq("gh issue close stays git", cat(bashTurn("gh issue close 3 --reason completed")), "git");
+
+// A query is a search — Duppy's amendment, plus `gh search` by the same rule.
+eq("gh api graphql -> grep", cat(bashTurn("gh api graphql -f query='{viewer{login}}'")), "grep");
+eq("gh search -> grep", cat(bashTurn("gh search code --repo x/y pattern")), "grep");
+
+// Everything else on gh is still version control.
+eq("gh pr view stays git", cat(bashTurn("gh pr view 42")), "git");
+eq("gh api repos stays git", cat(bashTurn("gh api repos/o/r/pulls/1")), "git");
+eq("gh repo view stays git", cat(bashTurn("gh repo view o/r")), "git");
+eq("plain git unaffected", cat(bashTurn("git status --short")), "git");
+
+// Specific beats general on a mixed turn: reading the issue is what it was for.
+eq("gh issue view + git log -> spec", cat(bashTurn("gh issue view 106 && git log --oneline -5")), "spec");
+
+// ---------------------------------------------------------------------------
+console.log("\n#106 / 10 — final-round regressions");
+// ---------------------------------------------------------------------------
+
+// [Medium/crossfile] ANY shell-expanded cd target is unknowable, not just $( ).
+// A wrong-but-non-null cwd is worse than null: the daemon accepts it, stats a
+// path that cannot exist, and re-queues forever while the cost goes missing.
+for (const c of ["cd $FOO && claude -p 'x'", 'cd "$SCRATCH" && claude -p \'x\'', "cd ${HOME}/x && claude -p 'y'"]) {
+	eq(`unknowable cd target -> null: ${c.slice(0, 22)}`, extractCwdFromBashCommand(c), null);
+}
+// …a literal path is still known.
+eq("a literal cd target still resolves",
+	extractCwdFromBashCommand("cd /home/p/proj && claude -p 'go'"), "/home/p/proj");
+
+// [Medium/correctness] A brace GROUP runs its body; a function DEFINITION does not.
+eq("brace group body is work", normalizeCommand("{ gh pr checks 277; }"), "gh pr checks 277");
+eq("`function f {}` body is not work",
+	normalizeCommand("function f { gh pr checks 277; gh pr view 1; }\necho done"), "echo done");
+
+// [Medium/correctness] A here-string feeds a literal, not a file.
+assert("here-string records no file read",
+	splitCommandWords("cat <<< 'hello'").reads.length === 0,
+	JSON.stringify(splitCommandWords("cat <<< 'hello'")));
+eq("here-string turn stays other", cat(bashTurn("cat <<< 'hello'")), "other");
+
+// [Medium/reasoning] A compact short option carries its value in one token, and
+// must not change the category: `-n1` and `-n 1` are the same command.
+eq("xargs -n1 unwraps", cat(bashTurn("xargs -n1 git show")), "git");
+eq("xargs -n 1 unwraps the same", cat(bashTurn("xargs -n 1 git show")), "git");
+eq("timeout -k5 unwraps", cat(bashTurn("timeout -k5 200 bun test tests/x.test.ts")), "tests");
 
 // ---------------------------------------------------------------------------
 console.log(`\n${failed === 0 ? GREEN : RED}#106: ${passed} passed, ${failed} failed${RESET}`);

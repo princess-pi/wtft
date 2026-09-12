@@ -777,6 +777,37 @@ export function commandSpawnsAgent(cmd: string): boolean {
  */
 const GIT_COMMAND = /^(?:git|gh|tig|hub|glab|pr-(?:open|submit|ready|watch|threads|cleanup|merge|reject|review|verdict|guard)|git-(?:checkpoint|overview|snap)|wt-new|iarts-mirror|repo-gate)(?:\s|$)/;
 
+/**
+ * `gh` subcommands that are NOT version control (#106 D1, Duppy 2026-09-12).
+ *
+ * **An issue IS the spec, so reading and writing one is spec work.** In this
+ * workflow the issue body carries the spec gate and the closer, and the comments
+ * carry the resolution, the dispositions and the design decisions — that is the
+ * normative record, not chatter. Measured over 250 sessions, `gh issue` is
+ * $189.71, the largest `gh` subcommand and nearly 3x `gh pr`; routing all of
+ * `gh` to `git` made half the git bar issue traffic.
+ *
+ * `list` and `close` stay `git` deliberately: "what is open?" is navigation and
+ * closing is a workflow action, neither touches the spec's content.
+ */
+const GH_SPEC = /^gh\s+issue\s+(?:view|comment|create|edit|reopen|develop)(?:\s|$)/;
+
+/**
+ * `gh` subcommands that are a SEARCH.
+ *
+ * A GraphQL query is a query (Duppy's amendment), and `gh search` is the same
+ * rule by its own name — that second one is inference rather than instruction,
+ * and is recorded as such in #106.
+ */
+const GH_SEARCH = /^gh\s+(?:api\s+graphql|search)(?:\s|$)/;
+
+/**
+ * Known imprecision, stated rather than hidden: `gh api` otherwise stays `git`,
+ * even though $51.06 of `repos/…` calls in the corpus is partly issue traffic.
+ * Telling an issue read from a branch-protection check needs URL parsing — real
+ * work for a murky win. If the `git` bar looks wrong, this is the thread.
+ */
+
 /** Running a test suite. `bun test x` is tests; `bun build.ts` is not. */
 const TEST_RUNNER = /^(?:(?:bun|npm|pnpm|yarn|deno)\s+(?:run\s+)?test\b|(?:bun|npx)\s+\S*tests?\/|(?:pytest|jest|vitest|mocha|ava|tap|cypress|playwright|ctest)\b|(?:go|cargo)\s+test\b|(?:bash|sh|zsh)\s+\S*tests?\/|\.?\/?tests?\/\S+\.(?:sh|ts|js|mjs|py)\b)/;
 
@@ -1045,6 +1076,7 @@ export function classifyInteraction(interaction: Interaction): Category {
 		let isAgents = false;
 		let isTests = false;
 		let isCode = false;
+		let isSpec = false;
 		for (const normalized of real) {
 			// EVERY family is tested against the lowercased form. Testing the
 			// raw string made `Git status` and `Bun test` fall through to
@@ -1056,6 +1088,10 @@ export function classifyInteraction(interaction: Interaction): Category {
 			// an agent spawn when the text was only data (round 3).
 			const lower = normalized.split("\n", 1)[0]!.toLowerCase();
 			if (CLAUDE_SPAWN.test(lower)) isAgents = true;
+			// The two `gh` carve-outs are tested BEFORE GIT_COMMAND, which also
+			// matches `gh` — order is the whole mechanism here (#106 D1).
+			else if (GH_SPEC.test(lower)) isSpec = true;
+			else if (GH_SEARCH.test(lower)) isGrep = true;
 			else if (GIT_COMMAND.test(lower)) isGit = true;
 			else if (TEST_RUNNER.test(lower)) isTests = true;
 			else if (BUILD_COMMAND.test(lower)) isCode = true;
@@ -1064,7 +1100,15 @@ export function classifyInteraction(interaction: Interaction): Category {
 		// Priority: a spawn's cost dominates the turn; git is the workflow the
 		// turn is performing; tests/code are what it is performing it ON; grep is
 		// the weakest signal because it is so often incidental to another job.
+		//
+		// `spec` outranks `git` because it is the MORE SPECIFIC reading of the
+		// same command — `gh issue view` matches both, and the whole point of
+		// the D1 carve-out is that issue work was drowning the git bar. A turn
+		// that reads an issue AND runs a git command is counted as reading the
+		// issue; before D1 it was counted as git either way, so nothing that
+		// used to read as spec now reads as git.
 		if (isAgents) return "agents";
+		if (isSpec) return "spec";
 		if (isGit) return "git";
 		if (isTests) return "tests";
 		if (isCode) return "code";
@@ -1531,17 +1575,20 @@ export function extractCwdFromBashCommand(cmd: string): string | null {
 		if (joinedBy === "||" && prevWasKeptCd) continue;
 		prevWasKeptCd = true;
 		const target = m[1] || m[2] || m[3] || "";
-		// A target built by command substitution cannot be known — `cd $(mktemp
-		// -d)` is a fresh temp dir chosen at runtime. Checked on the EXTRACTED
-		// value so the quoted form `cd "$(mktemp -d)"` is caught too: the
-		// double-quote arm matched first and handed back the unexpanded text as
-		// though it were a directory (round 3, Medium/correctness).
+		// A target the shell EXPANDS cannot be known statically — `cd $(mktemp
+		// -d)` is a fresh temp dir, and `cd $SCRATCH` is whatever that variable
+		// held. Checked on the EXTRACTED value so every spelling is caught at
+		// once: `$(…)`, backticks, `$VAR`, `${VAR}`, and the quoted forms of all
+		// of them, which the double-quote arm of the regex hands back as though
+		// they were literal directories (#106 review rounds 3 and 4).
 		//
-		// Returning a wrong-but-non-null string is the worst option: the daemon
+		// Returning a wrong-but-non-null string is the WORST option: the daemon
 		// accepts it, stats a path that cannot exist, and re-queues the
-		// interaction forever while the subagent's whole cost goes missing.
-		// Unknown must read as unknown.
-		if (target.includes("$(") || target.includes("`")) { found = null; continue; }
+		// interaction every poll while the subagent's whole cost goes missing —
+		// permanently, and with nothing raising a failure. Unknown must read as
+		// unknown, because null makes the caller take a safe path and a bad
+		// string makes it take a confident wrong one.
+		if (/[$`]/.test(target)) { found = null; continue; }
 		found = target || found;
 	}
 	return found;

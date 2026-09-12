@@ -176,7 +176,7 @@
     },
     {
       "flags": "-o, --other",
-      "desc": "Print a histogram of 'Other' commands grouped by semantic sub-category (Build, Lint, Test, System, etc.) with per-command counts and costs."
+      "desc": "Print a histogram of 'Other' commands grouped by semantic sub-category (Build, Lint, Test, Text & File Processing, System, etc.) with per-command counts and costs. A token that is not a plausible command name is normalizer residue, not a program that ran: those are quarantined under [Parse miss] and carry a ##PARSE-MISS## marker so misses can be counted rather than mistaken for commands. Tokens come from commands the session ran, so they are control-character-stripped and length-capped before rendering."
     },
     {
       "flags": "-S, --show, -H, --hide",

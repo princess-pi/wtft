@@ -377,5 +377,62 @@ eq("cwd found when cd is not the first command",
 eq("cwd still null when there is no cd", extractCwdFromBashCommand("claude -p 'go'"), null);
 
 // ---------------------------------------------------------------------------
+console.log("\n#106 / 6 — review-round-2 regressions (bugs introduced by round-1 fixes)");
+// ---------------------------------------------------------------------------
+
+// [High/correctness] A `>` inside a QUOTED argument is data, not a redirection.
+// The round-1 regex fabricated a file write from it, and because path-derived
+// categories outrank command names, the turn was reported as `code`.
+for (const [cmd, want] of [
+	['echo "a > b"', "other"],
+	['git commit -m "fix > bug"', "git"],
+	["grep 'x > 1' notes.txt", "grep"],
+] as const) {
+	eq(`quoted '>' is not a redirect: ${cmd}`, cat(bashTurn(cmd)), want);
+}
+assert("quoted '>' records no file at all",
+	bashTurn('git commit -m "fix > bug"')!.files.length === 0,
+	JSON.stringify(bashTurn('git commit -m "fix > bug"')!.files));
+// …while a REAL redirection is still a write.
+assert("a real redirect is still recorded",
+	bashTurn("cat > bin/new.ts <<'EOF'\nx\nEOF")!.files.some(f => f.path === "bin/new.ts" && f.action === "write"),
+	JSON.stringify(bashTurn("cat > bin/new.ts <<'EOF'\nx\nEOF")!.files));
+
+// [High/crossfile] An unknowable `cd` target must read as UNKNOWN. Returning the
+// partial `$(mktemp` was worse than null: non-null, so the daemon accepted it,
+// stat'd a path that cannot exist, and re-queued forever while the subagent's
+// whole cost went missing.
+eq("cd $( … ) yields null, not a partial match",
+	extractCwdFromBashCommand("cd $(mktemp -d) && claude -p 'go'"), null);
+
+// [Medium/crossfile] A `cd` AFTER the spawn is where the shell went next, not
+// where the spawn ran.
+eq("cd after the spawn is ignored",
+	extractCwdFromBashCommand("cd /home/p/proj && claude -p 'x'; cd /elsewhere"), "/home/p/proj");
+eq("no cd before the spawn is still null",
+	extractCwdFromBashCommand("claude -p 'x'; cd /elsewhere"), null);
+// The last cd BEFORE the spawn wins — it is the one in effect when it ran.
+eq("last cd before the spawn wins",
+	extractCwdFromBashCommand("cd /repo && cd /repo/sub && claude -p 'go'"), "/repo/sub");
+
+// …EXCEPT across `||`, which runs its right side only if the left FAILED. This
+// exact shape is in the corpus, and reading it as "last wins" sent discovery to
+// /tmp and lost a real subagent's $0.38 from the session total. It was caught by
+// the totals invariant in research/other-corpus/before-after.ts, not by a unit
+// test — which is why the invariant is in the repo and not just in a comment.
+eq("a `||` fallback cd does not beat the cd it falls back FROM",
+	extractCwdFromBashCommand(
+		"cd /tmp/scratch/b3df8f20/scratchpad 2>/dev/null || cd /tmp\ntimeout 180 claude -p \"find the bun version\""),
+	"/tmp/scratch/b3df8f20/scratchpad");
+// A `&&` chain is not a fallback: there, later really does mean later.
+eq("&& after a || chain still advances",
+	extractCwdFromBashCommand("cd /a 2>/dev/null || cd /fallback && cd /a/sub && claude -p 'go'"), "/a/sub");
+
+// [Low/correctness] Command families are matched case-insensitively, as they
+// were before this branch.
+eq("Git status -> git", cat(bashTurn("Git status")), "git");
+eq("Bun test -> tests", cat(bashTurn("Bun test tests/x.test.ts")), "tests");
+
+// ---------------------------------------------------------------------------
 console.log(`\n${failed === 0 ? GREEN : RED}#106: ${passed} passed, ${failed} failed${RESET}`);
 process.exit(failed > 0 ? 1 : 0);

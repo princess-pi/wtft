@@ -488,8 +488,16 @@ function flushPending() {
  * the module graph always allowed. It had already drifted by the time it was
  * found — and this predicate decides whether a subagent's whole cost is
  * discovered, so drift here loses money silently. It now calls the shared
- * segmenter, which additionally finds a `claude -p` that is NOT the first
- * command in a compound, or that sits inside a loop body.
+ * segmenter.
+ *
+ * What that actually buys is NARROWER than an earlier version of this comment
+ * claimed (#106 review round 2, Low/reasoning). The old code tested the same
+ * unanchored regex against the whole remaining string, and `\s` matches a
+ * newline, so a whitespace-preceded `claude -p` anywhere in a compound or loop
+ * body was already found. The genuine gain is the shapes the old prefix-strip
+ * could not reduce at all — a `;claude` with no separating space, a spawn after
+ * a `cd` that the strip did not recognise — plus the fact that there is now one
+ * implementation instead of two that can disagree.
  */
 function hasClaudeCommand(interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>): boolean {
   return interaction.commands.some(cmd =>

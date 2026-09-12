@@ -384,9 +384,15 @@ respectively. Steps 1, 2 and 4 above all under-read the shell, in three separate
 > *this* measurement, the duplicate blocks of one message classify **differently** (a text block
 > reads `prompt`, its `tool_use` sibling reads `other`), so an undeduped split is a different
 > shape rather than a scaled one. The draw was also random per run, so before and after were not
-> the same sessions. Both are fixed in `research/other-corpus/`; the figures here come from one
-> fixed, deduplicated session list measured on both sides, with the corpus total identical to
-> the cent on each.
+> the same sessions.
+>
+> **Reproduce it with `research/other-corpus/before-after.ts --before <checkout>`**, which is the
+> script these figures come from — a sorted-and-sliced session list rather than a shuffled one,
+> deduplicated, classified by two builds. It exits non-zero if the corpus totals differ, because
+> a reclaim MOVES money between categories and any change in the total is a measurement bug
+> rather than a finding. `measure-other.ts` still samples at random, deliberately: it answers
+> "what is in the bucket right now", which is a different question from "what did this change
+> do", and only the second needs a fixed list.
 
 - **A bash string is several commands, and only the first was read.** `normalizeCommand`'s
   #63 prefix-strip required a literal `&&`/`;` after `cd`, so the commonest real shape — a `cd`
@@ -413,9 +419,13 @@ nothing also stays `other` — it ran something, did no work, and carried no rep
 the honest residual. What changed is that such a turn no longer *blocks* the prompt rule: a
 narrated `cd` is counted as the reply it is.
 
-**Result on that corpus:** `other` **54.8% → 12.3%** on Claude Code and **29.4% → 6.2%** on Pi,
-with the corpus total unchanged to the cent on both — the reclaim moved money, it did not invent
-any. On the two sessions #10 and #11 were filed against, **58.2% → 6.7%** and **67.2% → 7.2%**.
+**Result on that corpus:** `other` **54.8% → 12.0%** on Claude Code and **29.4% → 6.2%** on Pi.
+The corpus total is unchanged on Pi and rises by $0.42 on Claude Code — and that rise is the
+one kind of change a reclaim is allowed to make: a subagent whose `cd` was not on the command's
+first line was previously invisible, and its cost is now discovered and attributed (#3/#138).
+`before-after.ts` names the recovered session id rather than asserting the totals match, because
+"reclassification cannot change the total" and "discovery may add to it" are different rules and
+collapsing them hides the second. On the two sessions #10 and #11 were filed against, **58.2% → 6.7%** and **67.2% → 7.2%**.
 
 **This amendment requires a tagger bump, and it got one: `WTFT_TAGGER_VERSION` 2.7.3 → 2.8.0.**
 `_cat` is baked into every tag line and `classifyInteraction` short-circuits on it, so without

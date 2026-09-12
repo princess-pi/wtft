@@ -49,8 +49,11 @@
 // bodies classify by the PATH they touch; a bash string is segmented so every
 // command in it is read rather than only the first; and the tool map gained each
 // harness's own spellings (Pi's `search_web`, `todo_write`) plus the MCP suffix
-// rule. Measured on a deduplicated 300-session corpus, `other` falls from ~29%
-// of Claude Code spend to ~7%, and the reclaimed dollars land in git/code/tests.
+// rule. Measured on a deduplicated 250-session-per-harness corpus, `other` falls
+// from 54.8% of Claude Code spend to 12.3% (Pi: 29.4% to 6.2%), and the
+// reclaimed dollars land in git/code/tests. An earlier draft of this comment
+// put Pi's pair against Claude Code's name and said 300 sessions; both were
+// wrong, and the spec's Amendment 4 is the figure of record.
 //
 // The bump is the whole point, not bookkeeping: `_cat` is baked into every tag
 // line and `classifyInteraction` SHORT-CIRCUITS on it (wtft-parser.ts), so a

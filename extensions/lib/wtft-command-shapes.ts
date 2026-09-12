@@ -57,11 +57,39 @@ const SEPARATORS = ["&&", "||", "|&", ";;", ";", "|", "\n"];
  */
 const NEEDS_SPLIT = /[;|&'"`\n#\\]|\$\(/;
 
-export function extractCommandSegments(cmd: string): string[] {
-	const trimmed = cmd.trim();
-	if (!NEEDS_SPLIT.test(trimmed)) return trimmed ? [trimmed] : [];
+/** One command, plus the operator that joined it to the one before it. */
+export interface JoinedSegment {
+	text: string;
+	/** "" for the first segment; otherwise `&&`, `||`, `;`, `|`, `|&`, `;;` or "\n". */
+	joinedBy: string;
+}
 
-	const segments: string[] = [];
+/**
+ * Like `extractCommandSegments`, but keeps the operator that preceded each
+ * command.
+ *
+ * The operator is the difference between "then" and "only if that failed", and
+ * a caller that has to know WHICH command actually ran cannot recover it from
+ * the text alone. `cd /real 2>/dev/null || cd /tmp` runs the second `cd` only
+ * when the first fails — so for a spawn that follows, the FIRST is almost
+ * always the real directory. Reading it as "last one wins" silently attributed
+ * a real subagent's cost to the wrong project directory and then lost it
+ * entirely (#106 review round 2, Medium/reasoning).
+ */
+export function extractJoinedSegments(cmd: string): JoinedSegment[] {
+	return splitSegments(cmd);
+}
+
+export function extractCommandSegments(cmd: string): string[] {
+	return splitSegments(cmd).map(s => s.text);
+}
+
+function splitSegments(cmd: string): JoinedSegment[] {
+	const trimmed = cmd.trim();
+	if (!NEEDS_SPLIT.test(trimmed)) return trimmed ? [{ text: trimmed, joinedBy: "" }] : [];
+
+	const segments: JoinedSegment[] = [];
+	let nextJoin = "";
 	let buf = "";
 	let i = 0;
 	const n = cmd.length;
@@ -78,7 +106,7 @@ export function extractCommandSegments(cmd: string): string[] {
 	const push = () => {
 		const t = buf.trim();
 		if (t) {
-			segments.push(t);
+			segments.push({ text: t, joinedBy: nextJoin });
 			if (pendingHeredocs.length > 0 && heredocOwner === -1) heredocOwner = segments.length - 1;
 		}
 		buf = "";
@@ -176,7 +204,7 @@ export function extractCommandSegments(cmd: string): string[] {
 				}
 			}
 			const body = cmd.slice(i, j);
-			if (heredocOwner >= 0) segments[heredocOwner] += body;
+			if (heredocOwner >= 0) segments[heredocOwner]!.text += body;
 			else buf += body;
 			pendingHeredocs = [];
 			heredocOwner = -1;
@@ -191,12 +219,116 @@ export function extractCommandSegments(cmd: string): string[] {
 		}
 
 		const sep = SEPARATORS.find(s => cmd.startsWith(s, i));
-		if (sep) { push(); i += sep.length; continue; }
+		if (sep) { push(); nextJoin = sep; i += sep.length; continue; }
 
 		buf += c; i++;
 	}
 	push();
 	return segments;
+}
+
+// ---
+// WORDS AND REDIRECTIONS
+// ---
+
+/** One command, taken apart: its argument words and its redirection targets. */
+export interface CommandWords {
+	/** argv, quotes removed, redirections and heredoc openers excluded. */
+	words: string[];
+	/** Targets of `>` / `>>` — files the command writes. */
+	writes: string[];
+	/** Targets of `<` — files the command reads. */
+	reads: string[];
+}
+
+/**
+ * Split one command into words and redirection targets, quote-aware.
+ *
+ * Why this is not a regex: the first cut ran `/(?:^|\s)\d?>{1,2}\s*(…)/` over
+ * the raw string, so a `>` inside a quoted argument was read as a redirection.
+ * `git commit -m "fix > bug"` fabricated a WRITE to a file called `bug`, and
+ * since path-derived categories outrank command names, that turn was reported
+ * as `code` instead of `git` (#106 review round 2, High/correctness). Quoting is
+ * exactly what decides whether `>` is an operator, so the scan has to know it.
+ *
+ * The heredoc BODY is ignored: only the opener's line carries arguments.
+ */
+export function splitCommandWords(cmd: string): CommandWords {
+	const head = cmd.split("\n", 1)[0]!;
+	const words: string[] = [];
+	const writes: string[] = [];
+	const reads: string[] = [];
+	let cur = "";
+	let quoted = false; // this word had quotes, so it is data, never an operator
+	let pending: "write" | "read" | null = null;
+	let i = 0;
+
+	const flush = () => {
+		if (!cur) { quoted = false; return; }
+		if (pending === "write") writes.push(cur);
+		else if (pending === "read") reads.push(cur);
+		else words.push(cur);
+		pending = null;
+		cur = "";
+		quoted = false;
+	};
+
+	while (i < head.length) {
+		const c = head[i]!;
+		if (c === "\\") { cur += head[i + 1] ?? ""; i += 2; continue; }
+		if (c === "'") {
+			const e = head.indexOf("'", i + 1);
+			cur += e === -1 ? head.slice(i + 1) : head.slice(i + 1, e);
+			quoted = true;
+			i = e === -1 ? head.length : e + 1;
+			continue;
+		}
+		if (c === '"') {
+			let j = i + 1, out = "";
+			while (j < head.length && head[j] !== '"') {
+				if (head[j] === "\\") { out += head[j + 1] ?? ""; j += 2; continue; }
+				out += head[j]!; j++;
+			}
+			cur += out;
+			quoted = true;
+			i = j + 1;
+			continue;
+		}
+		if (/\s/.test(c)) { flush(); i++; continue; }
+		// A heredoc opener is not a redirection and its delimiter is not a file.
+		if (c === "<" && head[i + 1] === "<") {
+			flush();
+			i += 2;
+			if (head[i] === "-") i++;
+			while (i < head.length && /\s/.test(head[i]!)) i++;
+			if (head[i] === "'" || head[i] === '"') {
+				const q = head[i]!;
+				const e = head.indexOf(q, i + 1);
+				i = e === -1 ? head.length : e + 1;
+			} else {
+				while (i < head.length && /[A-Za-z0-9_]/.test(head[i]!)) i++;
+			}
+			continue;
+		}
+		if ((c === ">" || c === "<") && !quoted) {
+			// `2>`/`1>` — the leading fd digit already landed in `cur`.
+			if (/^\d$/.test(cur)) cur = "";
+			flush();
+			pending = c === ">" ? "write" : "read";
+			i++;
+			if (head[i] === ">") i++;         // >>
+			if (head[i] === "&") {            // 2>&1 — a descriptor, not a file
+				i++;
+				while (i < head.length && /[\d-]/.test(head[i]!)) i++;
+				pending = null;
+			}
+			continue;
+		}
+		cur += c;
+		i++;
+	}
+	flush();
+	return { words, writes, reads };
 }
 
 // ---

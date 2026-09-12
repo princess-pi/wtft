@@ -26,7 +26,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import { calculateClaudeCost, calculateServerToolCost, getDeepSeekPeakMultiplier } from "./wtft-cost.js";
 import { getParseAdapters } from "./harness/registry.ts";
-import { extractCommandSegments, extractRealCommands, stripCommandPrefixes } from "./wtft-command-shapes.js";
+import { extractCommandSegments, extractJoinedSegments, extractRealCommands, splitCommandWords, stripCommandPrefixes } from "./wtft-command-shapes.js";
 import type { ControlSignal, UncountedBillableClass } from "./harness/types.ts";
 
 // ---
@@ -860,41 +860,37 @@ function collectFilesFromShellCommand(cmd: string, files: { path: string; action
 	// Only the command's own line carries its arguments. A heredoc body is the
 	// data being written, and every path-looking word in it belongs to the file
 	// being authored, not to files the command reads.
-	const head = cmd.split("\n", 1)[0]!;
+	//
+	// splitCommandWords is QUOTE-AWARE, so a `>` inside a quoted argument is
+	// data rather than a redirection. The regex it replaced fabricated a file
+	// write for `git commit -m "fix > bug"` — and because path-derived
+	// categories outrank command names, that turn was reported as `code`
+	// instead of `git` (#106 review round 2, High/correctness).
+	const { words, writes, reads } = splitCommandWords(cmd);
 
 	// A redirection into a path is a write, whatever opened it — this is what
 	// makes `cat > bin/x.ts <<'EOF'` a code write rather than a `cat` read.
-	const redirect = /(?:^|\s)\d?>{1,2}\s*("[^"]+"|'[^']+'|[^\s;&|]+)/g;
 	const written = new Set<string>();
-	let r: RegExpExecArray | null;
-	while ((r = redirect.exec(head)) !== null) {
-		const p = (r[1] || "").replace(/^["']|["']$/g, "");
-		if (p && p !== "/dev/null" && !p.startsWith("&") && PATHLIKE.test(p)) {
-			files.push({ path: p, action: "write" });
-			written.add(p);
-		}
+	for (const p of writes) {
+		if (!p || NOT_A_REPO_FILE.test(p) || !PATHLIKE.test(p)) continue;
+		files.push({ path: p, action: "write" });
+		written.add(p);
 	}
 
 	const isEdit = IN_PLACE_EDIT.test(cmd);
 	if (!FILE_READER.test(cmd) && !isEdit) return;
 
-	// Strip the redirection clauses and the heredoc opener before scanning
-	// arguments. A redirect target is already recorded as a write above, and
-	// counting it again as a read made `cat > debug/x.mjs <<'EOF'` report two
-	// touches of one file; the heredoc's delimiter word (`EOF`) is not a file at
-	// all, and is shaped exactly like an extensionless one.
-	// Strip heredoc openers BEFORE input redirections, so `<<'EOF'` is not read
-	// as a `<` redirect. An INPUT redirection is stripped too: it leaves `<` and
-	// its target in the word list, and `tee out < /dev/null` then recorded
-	// `/dev/null` as a WRITE — graded as an extensionless `code` file, which
-	// turned pure shell noise into a code turn (#106 review, Low/correctness).
-	const args = head
-		.replace(/<<-?\s*(?:"[^"]*"|'[^']*'|[A-Za-z_][A-Za-z0-9_]*)/g, " ")
-		.replace(/(?:^|\s)\d?>{1,2}\s*(?:"[^"]+"|'[^']+'|[^\s;&|]+)/g, " ")
-		.replace(/(?:^|\s)\d?<\s*(?:"[^"]+"|'[^']+'|[^\s;&|]+)/g, " ");
+	// An input redirection is a READ of that file, never a write. `tee out <
+	// /dev/null` recorded /dev/null as written, graded as an extensionless
+	// `code` file, which turned shell noise into a code turn (round 1, Low).
+	for (const p of reads) {
+		if (!p || written.has(p) || NOT_A_REPO_FILE.test(p) || !PATHLIKE.test(p)) continue;
+		files.push({ path: p, action: "read" });
+	}
 
+	// sed/awk take a program as their first non-flag argument; it is not a path.
 	let skipProgram = PROGRAM_FIRST_ARG.test(cmd);
-	for (const w of shellWords(args).slice(1)) {
+	for (const w of words.slice(1)) {
 		if (w.startsWith("-")) continue;
 		if (skipProgram) { skipProgram = false; continue; }
 		if (NUMERIC.test(w)) continue;
@@ -1019,11 +1015,15 @@ export function classifyInteraction(interaction: Interaction): Category {
 		let isTests = false;
 		let isCode = false;
 		for (const normalized of real) {
+			// EVERY family is tested against the lowercased form. Testing the
+			// raw string made `Git status` and `Bun test` fall through to
+			// `other` — a regression against the case-insensitive behaviour this
+			// branch inherited (#106 review round 2, Low/correctness).
 			const lower = normalized.toLowerCase();
 			if (CLAUDE_SPAWN.test(lower)) isAgents = true;
-			else if (GIT_COMMAND.test(normalized)) isGit = true;
-			else if (TEST_RUNNER.test(normalized)) isTests = true;
-			else if (BUILD_COMMAND.test(normalized)) isCode = true;
+			else if (GIT_COMMAND.test(lower)) isGit = true;
+			else if (TEST_RUNNER.test(lower)) isTests = true;
+			else if (BUILD_COMMAND.test(lower)) isCode = true;
 			else if (/^(?:grep|rg|ripgrep|find|fd|ag|ack)(?:\s|$)/.test(lower)) isGrep = true;
 		}
 		// Priority: a spawn's cost dominates the turn; git is the workflow the
@@ -1442,10 +1442,18 @@ export function loadSubagentInteractions(
 
 const CLAUDE_SUBAGENT_WINDOW_MS = 15_000; // ±15s window for timestamp matching
 
-/** Extract the CWD from a bash command's `cd <dir>` prefix.
- *  Handles: `cd /path && ...`, `cd "/path" && ...`,
- *  `cd /path 2>/dev/null || cd /tmp\n...`
- *  Returns the first cd target directory, or null if no cd found. */
+/** The directory a bash command's `claude -p` spawn ran in.
+ *
+ *  Returns the LAST `cd` target at or before the spawn — the one in effect when
+ *  it ran — or null when there is no `cd`, or when the target cannot be known.
+ *  Handles `cd /path && …`, `cd "/path" && …`, a `cd` that is not the first
+ *  command, and one inside a loop body.
+ *
+ *  `A || B` runs B only when A failed, so a `cd` to the right of `||` is a
+ *  FALLBACK and the first of the chain is kept. `$( … )` returns null rather
+ *  than a guess: the directory is invented at runtime, so any string would be
+ *  certain to be wrong, and the daemon treats a wrong directory far worse than
+ *  an unknown one. */
 export function extractCwdFromBashCommand(cmd: string): string | null {
 	// #106 review (Medium/correctness): this read only the FIRST line and only a
 	// command STARTING with `cd`, while `hasClaudeCommand` was widened to find a
@@ -1456,9 +1464,36 @@ export function extractCwdFromBashCommand(cmd: string): string | null {
 	// exists to prevent. Scan every segment for the LAST `cd` before the spawn,
 	// which is the directory the spawn actually ran in.
 	let found: string | null = null;
-	for (const segment of extractCommandSegments(cmd)) {
-		const m = stripCommandPrefixes(segment).match(/^cd\s+(?:"([^"]*)"|'([^']*)'|([^\s;&|]+))/);
-		if (m) found = m[1] || m[2] || m[3] || found;
+	let sawCd = false;
+	for (const { text, joinedBy } of extractJoinedSegments(cmd)) {
+		const bare = stripCommandPrefixes(text);
+		// STOP at the spawn. The directory that matters is the one in effect when
+		// `claude -p` ran; a `cd` AFTER it is where the shell went next, and
+		// `claude -p 'x'; cd /elsewhere` was returning `/elsewhere` (#106 review
+		// round 2, Medium/crossfile).
+		if (CLAUDE_SPAWN.test(bare.toLowerCase())) break;
+		const m = bare.match(/^cd\s+(?:"([^"]*)"|'([^']*)'|(\$\((?:[^()]|\([^()]*\))*\))|([^\s;&|]+))/);
+		if (!m) continue;
+		// `A || B` runs B only when A FAILED, so a `cd` on the right of `||` is a
+		// FALLBACK, not a subsequent move. Keep the first of such a chain.
+		//
+		// This is not a nicety. The real shape in the corpus is
+		//   cd <scratchpad> 2>/dev/null || cd /tmp
+		//   timeout 180 claude -p "…"
+		// and reading it as "last cd wins" returned /tmp, so discovery looked in
+		// the wrong project directory and a real subagent's $0.38 vanished from
+		// the session total. Caught by the totals invariant in
+		// research/other-corpus/before-after.ts, not by a unit test.
+		if (joinedBy === "||" && sawCd) continue;
+		sawCd = true;
+		// A `$( … )` target cannot be known — `cd $(mktemp -d)` is a fresh temp
+		// dir chosen at runtime. Returning the PARTIAL match `$(mktemp` was the
+		// worst of the three options: non-null, so the daemon accepted it,
+		// stat'd a path that cannot exist, and re-queued the interaction forever
+		// while the subagent's whole cost went missing (round 2, High/crossfile).
+		// Unknown must read as unknown.
+		if (m[3]) { found = null; continue; }
+		found = m[1] || m[2] || m[4] || found;
 	}
 	return found;
 }

@@ -1561,8 +1561,20 @@ const SEMANTIC_GROUPS: Record<string, { label: string; commands: Set<string> }> 
 		commands: new Set(["jest", "vitest", "pytest", "cypress", "playwright", "mocha", "ava", "tap", "karma"])
 	},
 	db: {
+		// `gh` was in this set and is not a database (#10 Finding 1). It now
+		// classifies as `git` at top level, so it never reaches this histogram
+		// at all — but leaving it here would make the next reader believe the
+		// GitHub CLI is infrastructure.
 		label: "Database & Infrastructure",
-		commands: new Set(["sqlite3", "psql", "mysql", "docker", "kubectl", "aws", "terraform", "gh", "fly", "railway", "mongo", "redis-cli", "pg_dump", "pg_restore"])
+		commands: new Set(["sqlite3", "psql", "mysql", "docker", "kubectl", "aws", "terraform", "fly", "railway", "mongo", "redis-cli", "pg_dump", "pg_restore"])
+	},
+	text: {
+		// #10 Finding 3: text and file processing was the largest slice of
+		// "Unclassified" purely because none of it was in any group. Most of it
+		// now classifies by path before reaching here; what is left (a pipeline
+		// stage with no file in it) belongs under its own name.
+		label: "Text & File Processing",
+		commands: new Set(["sed", "awk", "cut", "tr", "sort", "uniq", "paste", "join", "comm", "diff", "patch", "jq", "yq", "xmllint", "column", "fold", "rev", "strings", "od", "xxd", "iconv", "base64"])
 	},
 	sys: {
 		label: "System & File Utilities",
@@ -1573,12 +1585,56 @@ const SEMANTIC_GROUPS: Record<string, { label: string; commands: Set<string> }> 
 		commands: new Set(["git"])
 	},
 	session: {
+		// #11 item 3: `python3`/`node`/`bash` were listed here, which put every
+		// inline heredoc EDIT under "Session & Agent" — a bucket named for
+		// `pi`/`claude` invocations. Those now classify by the paths inside the
+		// script; what stays here is the genuinely session-shaped set, plus the
+		// agent-adjacent tools #10 Finding 3 found stranded in "Unclassified".
 		label: "Session & Agent",
-		commands: new Set(["pi", "python", "python3", "bash", "zsh", "clear", "exit", "source", ".", "exec", "env", "export", "alias", "unalias"])
+		commands: new Set(["pi", "claude", "herdr", "ax", "clear", "exit", "source", ".", "alias", "unalias", "tmux", "screen"])
 	}
 };
 
+/** The group a token lands in when it is not a command at all (#11 item 5). */
+export const PARSE_MISS_GROUP = "Parse miss";
+
+/** The stable marker prefix a parse-miss row carries, so misses are countable. */
+export const PARSE_MISS_MARKER = "##PARSE-MISS##";
+
+/** Longest command token this histogram will print. */
+const MAX_TOKEN_LEN = 48;
+
+/**
+ * Make one extracted token safe to print, and say whether it is a command.
+ *
+ * The tokens here are attacker-influenced: they come from commands an agent was
+ * induced to run, and a naive dump of them puts raw escape sequences and
+ * unbounded lines into the operator's terminal (#106 Finding 5). Control
+ * characters are stripped and the length is capped before anything reaches the
+ * screen.
+ */
+export function sanitizeCommandToken(token: string): string {
+	const clean = token.replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
+	return clean.length > MAX_TOKEN_LEN ? `${clean.slice(0, MAX_TOKEN_LEN - 1)}\u2026` : clean;
+}
+
+/**
+ * Is this token a plausible command name?
+ *
+ * A token starting with `-`, `$`, `)`, `;`, `\` or a quote is residue the
+ * normalizer could not reduce, not a program anybody ran. #11 measured $0.70 of
+ * such rows rendered as though they were commands — small in dollars, and
+ * corrosive to the histogram's only job, which is to be believed. They are
+ * quarantined under `Parse miss` with a stable marker so misses are countable
+ * across sessions instead of masquerading as commands (Agent-First Output).
+ */
+export function isPlausibleCommandToken(token: string): boolean {
+	if (!token) return false;
+	return /^[A-Za-z0-9_.~@/][A-Za-z0-9_.~@/+-]*$/.test(token);
+}
+
 export function getSemanticCommandGroup(command: string): string | null {
+	if (!isPlausibleCommandToken(command)) return PARSE_MISS_GROUP;
 	const base = command.split("/").pop() || command; // Strip path prefix e.g. /usr/bin/ls → ls
 	for (const [key, group] of Object.entries(SEMANTIC_GROUPS)) {
 		if (group.commands.has(base)) return group.label;
@@ -1609,18 +1665,8 @@ export function renderOtherHistogram(interactions: Interaction[], maxWidth: numb
 			for (const rawCmd of interaction.commands) {
 				const normalized = normalizeCommand(rawCmd);
 				if (!normalized) continue; // stripped to nothing (pure cd, pure var assignment)
-				const lines = normalized.split('\n');
-				for (const line of lines) {
-					const trimmed = line.trim();
-					if (trimmed && !trimmed.startsWith("#")) {
-						const parts = trimmed.split(" ");
-						const primary = parts[0];
-						if (primary) {
-							primaryCommands.push(primary);
-							break; // Only capture the first effective command
-						}
-					}
-				}
+				const primary = normalized.split(/\s/)[0];
+				if (primary) primaryCommands.push(sanitizeCommandToken(primary));
 			}
 
 			for (const cmd of primaryCommands) {
@@ -1659,9 +1705,11 @@ export function renderOtherHistogram(interactions: Interaction[], maxWidth: numb
 		"Linting & Formatting",
 		"Testing",
 		"Database & Infrastructure",
+		"Text & File Processing",
 		"System & File Utilities",
 		"Git Operations",
-		"Session & Agent"
+		"Session & Agent",
+		PARSE_MISS_GROUP,
 	];
 	const sortedGroups = Array.from(groups.entries()).sort((a, b) => {
 		const ai = groupOrder.indexOf(a[0]);
@@ -1683,7 +1731,14 @@ export function renderOtherHistogram(interactions: Interaction[], maxWidth: numb
 
 	for (const [groupName, group] of sortedGroups) {
 		const groupCostStr = `$${group.cost.toFixed(4)}`;
+		const isMiss = groupName === PARSE_MISS_GROUP;
 		output += `\n[${groupName}]  (${group.count} calls, ${groupCostStr})\n`;
+		if (isMiss) {
+			// Say what the rows below are, because the whole point is that they
+			// are NOT commands — a reader who takes them for programs draws the
+			// wrong conclusion, which is the failure #11 measured.
+			output += `  these tokens are normalizer residue, not commands wtft saw run\n`;
+		}
 
 		// Sort commands within group by count descending
 		const sortedCmds = Array.from(group.commands.entries()).sort((a, b) => b[1].count - a[1].count);
@@ -1695,7 +1750,11 @@ export function renderOtherHistogram(interactions: Interaction[], maxWidth: numb
 			const barWidth = Math.max(5, maxWidth - maxCmdLen - countWidth - costWidth - 10);
 			const bar = "#".repeat(Math.min(data.count, barWidth));
 
-			output += `  ${cmd.padEnd(maxCmdLen)} ${costStr} ${countStr} : ${bar}\n`;
+			// A parse miss carries a stable marker so misses are countable across
+			// sessions by a machine, not only visible to a human (Agent-First
+			// Output). The marker is the contract; the prose above is not.
+			const label = isMiss ? `${PARSE_MISS_MARKER} ${cmd}` : cmd.padEnd(maxCmdLen);
+			output += `  ${label} ${costStr} ${countStr} : ${bar}\n`;
 		}
 	}
 

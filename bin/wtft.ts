@@ -19,6 +19,7 @@ import {
 	parseSessionFile,
 	parseEntryToInteraction,
 	classifyInteraction,
+	normalizeCommand,
 	renderOtherHistogram,
 	renderTokenSummary,
 	deduplicateInteractions,
@@ -144,6 +145,10 @@ export {
 	getUserPricingPath,
 	parseEntryToInteraction,
 	classifyInteraction,
+	// #106: the 'other'-reclaim surfaces, re-exported so tests drive the BUNDLE
+	// rather than the sources — the same contract every other suite here uses.
+	normalizeCommand,
+	renderOtherHistogram,
 	buildWtftLines,
 	buildTimelineString,
 	parseSessionFile,

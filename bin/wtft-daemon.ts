@@ -24,6 +24,7 @@ import {
 	applyControlEntry,
 	newParseStreamState,
 	extractCwdFromBashCommand,
+	extractRealCommands,
 	discoverClaudeSubAgentSessionFiles,
 	discoverSubagentSessionFiles,
 	loadSubagentInteractions,
@@ -479,24 +480,21 @@ function flushPending() {
   lastWriteMs = Date.now();
 }
 
-/** Check if an interaction has a bash command that spawns `claude -p`. */
+/**
+ * Check if an interaction has a bash command that spawns `claude -p`.
+ *
+ * #106: this used to carry a hand-copied transcription of `normalizeCommand`,
+ * with the comment "Replicate … from wtft-parser.ts" standing in for an import
+ * the module graph always allowed. It had already drifted by the time it was
+ * found — and this predicate decides whether a subagent's whole cost is
+ * discovered, so drift here loses money silently. It now calls the shared
+ * segmenter, which additionally finds a `claude -p` that is NOT the first
+ * command in a compound, or that sits inside a loop body.
+ */
 function hasClaudeCommand(interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>): boolean {
-  return interaction.commands.some(cmd => {
-    // Replicate normalizeCommand + regex from wtft-parser.ts classifyInteraction
-    let normalized = cmd.trim();
-    let changed = true;
-    while (changed) {
-      changed = false;
-      const stripped = normalized.replace(/^(?:\w+=(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*)+/, '');
-      if (stripped !== normalized) { normalized = stripped.trim(); changed = true; }
-      const afterSep = normalized.replace(/^(?:&&|;|\|\|?)\s*/, '');
-      if (afterSep !== normalized) { normalized = afterSep; changed = true; }
-      const afterCd = normalized.replace(/^cd\s+(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*/, '');
-      if (afterCd !== normalized) { normalized = afterCd; changed = true; }
-    }
-    if (!normalized) return false;
-    return /(?:^|\s)claude(?:\s+-|\s*\||\s*$)/.test(normalized.toLowerCase());
-  });
+  return interaction.commands.some(cmd =>
+    extractRealCommands(cmd).some(real => /(?:^|\s)claude(?:\s+-|\s*\||\s*$)/.test(real.toLowerCase())),
+  );
 }
 
 /** Bring ONE sub-agent transcript up to date in the tag file (#270).

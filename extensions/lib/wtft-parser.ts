@@ -856,13 +856,17 @@ function collectFilesFromShellCommand(cmd: string, files: { path: string; action
 		const reads = /\b(?:open\s*\(\s*["']([^"']+)["']|readFileSync\s*\(\s*["']([^"']+)["']|read_text\s*\(|loadtxt\s*\(\s*["']([^"']+)["'])/g;
 		let m: RegExpExecArray | null;
 		const seen = new Set<string>();
+		// NOT_A_REPO_FILE applies here too. This branch returns early, so an
+		// earlier cut checked it on every OTHER path shape and not on the one
+		// inside a heredoc — `open('/tmp/scratch/x.mjs')` graded `code` while the
+		// identical `echo x > /tmp/scratch/x.mjs` did not. One rule, every route.
 		while ((m = writes.exec(cmd)) !== null) {
 			const p = m[1] || m[2] || m[3];
-			if (p && PATHLIKE.test(p)) { files.push({ path: p, action: "write" }); seen.add(p); }
+			if (p && !NOT_A_REPO_FILE.test(p) && PATHLIKE.test(p)) { files.push({ path: p, action: "write" }); seen.add(p); }
 		}
 		while ((m = reads.exec(cmd)) !== null) {
 			const p = m[1] || m[2] || m[3];
-			if (p && !seen.has(p) && PATHLIKE.test(p)) files.push({ path: p, action: "read" });
+			if (p && !seen.has(p) && !NOT_A_REPO_FILE.test(p) && PATHLIKE.test(p)) files.push({ path: p, action: "read" });
 		}
 		return;
 	}

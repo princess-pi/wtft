@@ -496,6 +496,17 @@ eq("ls > /tmp file stays other", cat(bashTurn("ls > /tmp/list.txt")), "other");
 eq("cat /etc/hosts stays other", cat(bashTurn("cat /etc/hosts")), "other");
 // …but a redirect into the REPO is still a code write.
 eq("redirect into the repo is still code", cat(bashTurn("echo x > bin/generated.ts")), "code");
+// The non-repo rule applies on EVERY route to a path, including the one inside
+// an inline script — that branch returns early and was skipping the check, so
+// the same path graded differently depending on how it was written.
+eq("inline script writing outside a checkout is not code",
+	cat(bashTurn("python3 - <<'PY'\nopen('/tmp/scratch/x.mjs','w').write(x)\nPY")), "other");
+eq("inline script writing INTO the repo is still code",
+	cat(bashTurn("python3 - <<'PY'\nopen('bin/wtft.ts','w').write(x)\nPY")), "code");
+// An absolute path into a checkout is repo work, and must not be caught by the
+// non-repo roots.
+eq("absolute path into a checkout still classifies",
+	cat(bashTurn("sed -n '1,5p' /home/princess-pi/git-projects/wtft/bin/wtft.ts")), "code");
 
 // [Low/correctness] A redirection abutting a closing quote is an operator.
 assert("echo \"a\">out records the redirect",

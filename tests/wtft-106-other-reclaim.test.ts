@@ -22,6 +22,8 @@ import {
 	parseEntryToInteraction,
 	classifyInteraction,
 	normalizeCommand,
+	extractCommandSegments,
+	extractCwdFromBashCommand,
 	renderOtherHistogram,
 } from "../bin/wtft.mjs";
 
@@ -61,6 +63,21 @@ function bashTurn(...commands: string[]) {
 			model: "claude-sonnet-5",
 			usage: { input_tokens: 10, output_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
 			content: commands.map(command => ({ type: "tool_use", name: "Bash", input: { command } })),
+		},
+	});
+}
+
+/** A Claude Code assistant turn that narrates AND runs one bash command. */
+function narratedBashTurn(text: string, command: string) {
+	return parseEntryToInteraction({
+		type: "assistant",
+		timestamp: "2026-09-11T12:00:00Z",
+		message: {
+			role: "assistant",
+			id: `msg_${++idCounter}`,
+			model: "claude-sonnet-5",
+			usage: { input_tokens: 10, output_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+			content: [{ type: "text", text }, { type: "tool_use", name: "Bash", input: { command } }],
 		},
 	});
 }
@@ -309,6 +326,55 @@ assert(
 	!nasty.split("\n").some(l => l.replace(/\x1b\[[0-9;]*m/g, "").length > 200),
 	JSON.stringify(nasty.slice(0, 200)),
 );
+
+// ---------------------------------------------------------------------------
+console.log("\n#106 / 5 — review-round-1 regressions (each one reproduced first)");
+// ---------------------------------------------------------------------------
+
+// [Medium/correctness] A wrapper option that CONSUMES the next word must not
+// leave that word standing as the command. The first cut modelled every option
+// as `-\S+`, so `-k 5` ate the flag and the duration became the command.
+eq("timeout -k 5 <dur> <cmd> -> tests", cat(bashTurn("timeout -k 5 200 bun test tests/x.test.ts")), "tests");
+eq("sudo -u root git status -> git", cat(bashTurn("sudo -u root git status")), "git");
+eq("timeout --signal=KILL <dur> -> tests", cat(bashTurn("timeout --signal=KILL 60 pytest -q")), "tests");
+eq("xargs -n 1 <cmd> -> git", cat(bashTurn("xargs -n 1 git show")), "git");
+eq("nice -n 10 still unwraps", normalizeCommand("nice -n 10 bun run build"), "bun run build");
+
+// [Medium/reasoning] A turn whose every command is navigation did no work. It
+// must not be forced to `other` before the prompt rule gets a look — otherwise a
+// narrated `cd` is billed as unclassified work rather than as the reply it is.
+eq("cd + narration -> prompt", cat(narratedBashTurn("Moving there.", "cd /home/p/x")), "prompt");
+// …and with no reply in it, a bare `cd` turn is still `other`: it ran something,
+// did no work, and said nothing. `other` is the honest residual, not a bug.
+eq("bare cd, no text -> other", cat(bashTurn("cd /home/p/x")), "other");
+
+// [Low/correctness] An INPUT redirection is not a file the command wrote, and a
+// device node is not repository work. `tee out < /dev/null` recorded /dev/null
+// as a write, which graded the turn `code`.
+const tee = bashTurn("tee out < /dev/null");
+assert("input redirection does not record /dev/null",
+	!tee!.files.some(f => f.path === "/dev/null"), JSON.stringify(tee!.files));
+eq("tee still records its own output file", tee!.files.some(f => f.path === "out" && f.action === "write"), true);
+
+// [Low/correctness] A heredoc body belongs to the command that OPENED it, even
+// when a separator pushed that command first.
+const segs = extractCommandSegments("python3 - <<'PY' | sort\nopen('bin/x.ts')\nPY");
+assert("heredoc body stays with its opener",
+	segs[0]!.includes("open('bin/x.ts')") && !segs[1]!.includes("open("), JSON.stringify(segs));
+eq("inline script after a pipe still classifies by its path",
+	cat(bashTurn("python3 - <<'PY' | sort\nopen('bin/wtft.ts','w').write(x)\nPY")), "code");
+
+// [Low/correctness] A paren inside a quoted string is text, not structure.
+eq("$( ) with a quoted paren stays one segment",
+	extractCommandSegments("echo $(grep ')' bin/x.ts) && ls").length, 2);
+
+// [Medium/correctness] The cwd extractor must reach as far as the claude-spawn
+// detector, or the daemon drops the interaction and loses the subagent's cost.
+eq("cwd found after a loop header",
+	extractCwdFromBashCommand("until [ -f /tmp/go ]; do cd /home/p/proj; claude -p 'go'; done"), "/home/p/proj");
+eq("cwd found when cd is not the first command",
+	extractCwdFromBashCommand("echo start && cd /home/p/proj && claude -p 'go'"), "/home/p/proj");
+eq("cwd still null when there is no cd", extractCwdFromBashCommand("claude -p 'go'"), null);
 
 // ---------------------------------------------------------------------------
 console.log(`\n${failed === 0 ? GREEN : RED}#106: ${passed} passed, ${failed} failed${RESET}`);

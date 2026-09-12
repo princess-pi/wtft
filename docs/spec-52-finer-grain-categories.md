@@ -373,9 +373,20 @@ not a competitor. (Its row-overflow rendering bug is tracked separately in #99.)
 > Numbered 4, not 3: an `Amendment 3` already exists below for Phase 3's overhead classes.
 > Two sections sharing a name is exactly the ambiguity a back-reference cannot survive.
 
-Measured across 300 Claude Code and 300 Pi transcripts, `other` held **35.6%** and **16.4%** of
-corpus spend respectively, against **16.3%** for every named work category combined on Claude
-Code. Steps 1, 2 and 4 above all under-read the shell, in three separate ways:
+Measured across 250 Claude Code and 250 Pi transcripts — the **same** session list on both
+sides, every Interaction **deduplicated** — `other` held **54.8%** and **29.4%** of corpus spend
+respectively. Steps 1, 2 and 4 above all under-read the shell, in three separate ways:
+
+> **Read the method before quoting a figure from it.** The first version of this paragraph said
+> 35.6% and 16.4%, from scripts that summed the output of `parseSessionFile` directly. That
+> function returns RAW lines — one Interaction per content block, the same `message.id` and
+> `usage` repeated — and its own docstring says so. Summing them inflates cost, and worse for
+> *this* measurement, the duplicate blocks of one message classify **differently** (a text block
+> reads `prompt`, its `tool_use` sibling reads `other`), so an undeduped split is a different
+> shape rather than a scaled one. The draw was also random per run, so before and after were not
+> the same sessions. Both are fixed in `research/other-corpus/`; the figures here come from one
+> fixed, deduplicated session list measured on both sides, with the corpus total identical to
+> the cent on each.
 
 - **A bash string is several commands, and only the first was read.** `normalizeCommand`'s
   #63 prefix-strip required a literal `&&`/`;` after `cd`, so the commonest real shape — a `cd`
@@ -397,3 +408,16 @@ and every spec that lists the categories.
 
 **What deliberately STAYS `other`:** `echo`, `ls`, `rm`, `sleep`, `mkdir` and the rest of the
 shell noise. Reclaiming those would be a lie, and the bucket has to keep meaning something.
+A turn that ran ONLY navigation (`cd`, an assignment, Pi's `change_working_directory`) and said
+nothing also stays `other` — it ran something, did no work, and carried no reply, so `other` is
+the honest residual. What changed is that such a turn no longer *blocks* the prompt rule: a
+narrated `cd` is counted as the reply it is.
+
+**Result on that corpus:** `other` **54.8% → 12.3%** on Claude Code and **29.4% → 6.2%** on Pi,
+with the corpus total unchanged to the cent on both — the reclaim moved money, it did not invent
+any. On the two sessions #10 and #11 were filed against, **58.2% → 6.7%** and **67.2% → 7.2%**.
+
+**This amendment requires a tagger bump, and it got one: `WTFT_TAGGER_VERSION` 2.7.3 → 2.8.0.**
+`_cat` is baked into every tag line and `classifyInteraction` short-circuits on it, so without
+the bump every already-tagged session keeps its old `other` attribution and this entire
+amendment is inert in production.

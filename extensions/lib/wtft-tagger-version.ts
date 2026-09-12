@@ -43,4 +43,19 @@
 // 0.15 input, 4.4x, and 0.022 against 0.003 on cache reads, 7.3x. The two
 // v4-flash names are 1.47x on input from 2026-09-10T04:00Z, and `deepseek-flash`
 // carries the full sibling-guess error, having had no entry at all.
-export const WTFT_TAGGER_VERSION = "2.7.3";
+// 2.8.0 (#106, with #10 and #11): classification semantics change wholesale.
+// `gh` and the pr-/git- wrappers now classify `git`; test runners `tests`;
+// build/typecheck `code`; shell file reads/writes and inline python3/node script
+// bodies classify by the PATH they touch; a bash string is segmented so every
+// command in it is read rather than only the first; and the tool map gained each
+// harness's own spellings (Pi's `search_web`, `todo_write`) plus the MCP suffix
+// rule. Measured on a deduplicated 300-session corpus, `other` falls from ~29%
+// of Claude Code spend to ~7%, and the reclaimed dollars land in git/code/tests.
+//
+// The bump is the whole point, not bookkeeping: `_cat` is baked into every tag
+// line and `classifyInteraction` SHORT-CIRCUITS on it (wtft-parser.ts), so a
+// v2.7.3 tag keeps its old `other` attribution for the life of the file. Without
+// this bump the change is inert on every session anyone has already run — which
+// is every session that matters. Minor rather than patch: this is the largest
+// semantic move since 2.5.1, and no cost figure changes, only the bucket.
+export const WTFT_TAGGER_VERSION = "2.8.0";

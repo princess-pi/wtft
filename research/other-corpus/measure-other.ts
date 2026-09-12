@@ -11,7 +11,15 @@
  */
 import * as fs from "node:fs";
 import { execSync } from "node:child_process";
-import { parseSessionFile, classifyInteraction, normalizeCommand } from "../../extensions/lib/wtft-parser.ts";
+// deduplicateInteractions is NOT optional here (#106 review, High/reasoning).
+// parseSessionFile returns RAW lines -- one Interaction per content block, the
+// same message.id and usage repeated -- and summing those inflates cost ~1.8x.
+// Worse for THIS measurement: duplicate blocks of one message classify
+// differently (a text block reads `prompt`, its tool_use sibling reads
+// `other`), so an undeduped split is not a scaled version of the truth, it is
+// a different shape. The first cut of these scripts omitted it and the
+// published percentages were wrong.
+import { parseSessionFile, deduplicateInteractions, classifyInteraction, normalizeCommand } from "../../extensions/lib/wtft-parser.ts";
 
 const args = process.argv.slice(2);
 const limit = Number(args[args.indexOf("--limit") + 1]) || 400;
@@ -38,7 +46,7 @@ for (const [harness, all] of Object.entries(sets)) {
 	let total = 0, parsed = 0;
 	for (const f of files) {
 		let interactions;
-		try { interactions = parseSessionFile(f); } catch { continue; }
+		try { interactions = deduplicateInteractions(parseSessionFile(f)); } catch { continue; }
 		parsed++;
 		for (const i of interactions) {
 			const cat = classifyInteraction(i);

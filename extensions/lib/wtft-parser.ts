@@ -26,7 +26,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import { calculateClaudeCost, calculateServerToolCost, getDeepSeekPeakMultiplier } from "./wtft-cost.js";
 import { getParseAdapters } from "./harness/registry.ts";
-import { extractRealCommands } from "./wtft-command-shapes.js";
+import { extractCommandSegments, extractRealCommands, stripCommandPrefixes } from "./wtft-command-shapes.js";
 import type { ControlSignal, UncountedBillableClass } from "./harness/types.ts";
 
 // ---
@@ -797,6 +797,13 @@ const PROGRAM_FIRST_ARG = /^(?:sed|awk|gawk|nawk|perl|jq|yq)(?:\s|$)/;
 /** A bare number is an argument value (`tail -n 50`), never a path. */
 const NUMERIC = /^\d+$/;
 
+/**
+ * Paths that exist but are not repository work: device nodes, process files, and
+ * anything under a scratch directory. Grading these as files put `/dev/null` in
+ * the file list as an extensionless — therefore `code` — path (#106 review).
+ */
+const NOT_A_REPO_FILE = /^\/(?:dev|proc|sys|run)\//;
+
 /** Readers that are actually writing when the flag says so (`sed -i`). */
 const IN_PLACE_EDIT = /^(?:sed\s+(?:-\S*\s+)*-i|perl\s+(?:-\S+\s+)*-i|tee)(?:\s|$)/;
 
@@ -876,9 +883,15 @@ function collectFilesFromShellCommand(cmd: string, files: { path: string; action
 	// counting it again as a read made `cat > debug/x.mjs <<'EOF'` report two
 	// touches of one file; the heredoc's delimiter word (`EOF`) is not a file at
 	// all, and is shaped exactly like an extensionless one.
+	// Strip heredoc openers BEFORE input redirections, so `<<'EOF'` is not read
+	// as a `<` redirect. An INPUT redirection is stripped too: it leaves `<` and
+	// its target in the word list, and `tee out < /dev/null` then recorded
+	// `/dev/null` as a WRITE — graded as an extensionless `code` file, which
+	// turned pure shell noise into a code turn (#106 review, Low/correctness).
 	const args = head
+		.replace(/<<-?\s*(?:"[^"]*"|'[^']*'|[A-Za-z_][A-Za-z0-9_]*)/g, " ")
 		.replace(/(?:^|\s)\d?>{1,2}\s*(?:"[^"]+"|'[^']+'|[^\s;&|]+)/g, " ")
-		.replace(/<<-?\s*(?:"[^"]*"|'[^']*'|[A-Za-z_][A-Za-z0-9_]*)/g, " ");
+		.replace(/(?:^|\s)\d?<\s*(?:"[^"]+"|'[^']+'|[^\s;&|]+)/g, " ");
 
 	let skipProgram = PROGRAM_FIRST_ARG.test(cmd);
 	for (const w of shellWords(args).slice(1)) {
@@ -886,6 +899,7 @@ function collectFilesFromShellCommand(cmd: string, files: { path: string; action
 		if (skipProgram) { skipProgram = false; continue; }
 		if (NUMERIC.test(w)) continue;
 		if (written.has(w)) continue;
+		if (NOT_A_REPO_FILE.test(w)) continue;
 		if (!PATHLIKE.test(w)) continue;
 		files.push({ path: w, action: isEdit ? "write" : "read" });
 	}
@@ -1020,7 +1034,13 @@ export function classifyInteraction(interaction: Interaction): Category {
 		if (isTests) return "tests";
 		if (isCode) return "code";
 		if (isGrep) return "grep";
-		return "other";
+		// `real` empty means every command was navigation or an assignment — a
+		// turn that RAN something but did no work. Fall through rather than
+		// returning "other" here, so a narrated `cd` reaches the prompt rule and
+		// is counted as the reply it is. #63 has stripped `cd` from
+		// classification since it landed; this is the same rule, applied to the
+		// whole turn instead of to one command (#106 review, Medium/reasoning).
+		if (real.length > 0) return "other";
 	}
 
 	// Prompt purification (#52): a message that fired an unmodeled tool is not
@@ -1427,10 +1447,20 @@ const CLAUDE_SUBAGENT_WINDOW_MS = 15_000; // ±15s window for timestamp matching
  *  `cd /path 2>/dev/null || cd /tmp\n...`
  *  Returns the first cd target directory, or null if no cd found. */
 export function extractCwdFromBashCommand(cmd: string): string | null {
-	const firstLine = cmd.split('\n')[0].trim();
-	const m = firstLine.match(/^cd\s+(?:"([^"]*)"|'([^']*)'|([^\s;&|]+))/);
-	if (!m) return null;
-	return m[1] || m[2] || m[3] || null;
+	// #106 review (Medium/correctness): this read only the FIRST line and only a
+	// command STARTING with `cd`, while `hasClaudeCommand` was widened to find a
+	// `claude -p` anywhere in a compound or inside a loop body. The two must
+	// agree, because the daemon drops an interaction outright when the cwd comes
+	// back null (`if (!cwd) continue`) — so a detection the extractor cannot
+	// follow loses that subagent's whole cost, which is the exact failure #3
+	// exists to prevent. Scan every segment for the LAST `cd` before the spawn,
+	// which is the directory the spawn actually ran in.
+	let found: string | null = null;
+	for (const segment of extractCommandSegments(cmd)) {
+		const m = stripCommandPrefixes(segment).match(/^cd\s+(?:"([^"]*)"|'([^']*)'|([^\s;&|]+))/);
+		if (m) found = m[1] || m[2] || m[3] || found;
+	}
+	return found;
 }
 
 /** Convert a CWD path to the Claude Code project directory slug.

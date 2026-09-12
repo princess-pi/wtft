@@ -68,10 +68,19 @@ export function extractCommandSegments(cmd: string): string[] {
 
 	// Heredoc delimiters opened on the current line, consumed at the next newline.
 	let pendingHeredocs: { delim: string; stripTabs: boolean }[] = [];
+	// Index of the already-pushed segment that opened those heredocs, or -1 when
+	// the opener is still in `buf`. `python3 - <<'PY' | sort` pushes the opener
+	// at the `|` BEFORE the body is reached, and the body was then appended to
+	// whatever came next — so the script's paths were read as `sort`'s and the
+	// inline-script rule was tested against the wrong command (#106 review).
+	let heredocOwner = -1;
 
 	const push = () => {
 		const t = buf.trim();
-		if (t) segments.push(t);
+		if (t) {
+			segments.push(t);
+			if (pendingHeredocs.length > 0 && heredocOwner === -1) heredocOwner = segments.length - 1;
+		}
 		buf = "";
 	};
 
@@ -105,11 +114,24 @@ export function extractCommandSegments(cmd: string): string[] {
 		// Command substitution: `$( … )` nests, so count depth rather than
 		// scanning for the first `)`. This is the arm that `cd $(mktemp -d)`
 		// defeated in #63 — its value contains a space AND a paren.
+		//
+		// Quote-aware, because a paren inside a quoted string is text, not
+		// structure: `$(grep ')' bin/x.ts)` closed at the quoted `)` and sliced
+		// the substitution short, feeding a wrong primary token into everything
+		// downstream (#106 review, Low/correctness).
 		if (c === "$" && cmd[i + 1] === "(") {
 			let depth = 0, j = i + 1;
 			for (; j < n; j++) {
-				if (cmd[j] === "(") depth++;
-				else if (cmd[j] === ")") { depth--; if (depth === 0) break; }
+				const d = cmd[j]!;
+				if (d === "\\") { j++; continue; }
+				if (d === "'") { const e = cmd.indexOf("'", j + 1); if (e === -1) { j = n; break; } j = e; continue; }
+				if (d === '"') {
+					let k = j + 1;
+					while (k < n && cmd[k] !== '"') { if (cmd[k] === "\\") k++; k++; }
+					j = k; continue;
+				}
+				if (d === "(") depth++;
+				else if (d === ")") { depth--; if (depth === 0) break; }
 			}
 			buf += cmd.slice(i, Math.min(j + 1, n)); i = j + 1; continue;
 		}
@@ -153,8 +175,12 @@ export function extractCommandSegments(cmd: string): string[] {
 					if (probe.trim() === delim) break;
 				}
 			}
+			const body = cmd.slice(i, j);
+			if (heredocOwner >= 0) segments[heredocOwner] += body;
+			else buf += body;
 			pendingHeredocs = [];
-			buf += cmd.slice(i, j); i = j; continue;
+			heredocOwner = -1;
+			i = j; continue;
 		}
 
 		// A `#` that starts a word begins a comment to end of line.
@@ -177,25 +203,36 @@ export function extractCommandSegments(cmd: string): string[] {
 // SCAFFOLDING
 // ---
 
-/** Wrapper commands whose argument IS the command that matters. */
+/**
+ * Wrapper commands whose argument IS the command that matters.
+ *
+ * Every option that CONSUMES A FOLLOWING WORD has to be spelled out, not folded
+ * into a generic `-\S+`. The first cut used `timeout\s+(?:-\S+\s+)*\S+`, which
+ * reads `timeout -k 5 200 bun test` as flag `-k`, duration `5` — leaving `200
+ * bun test` as the command and classifying the turn `other`, the very thing this
+ * module exists to prevent (#106 review, Medium/correctness). `sudo -u root git
+ * status` failed the same way, yielding a command named `root`.
+ */
 const WRAPPER = new RegExp(
 	"^(?:" +
 	[
-		"timeout\\s+(?:-\\S+\\s+)*\\S+",       // timeout 200 …, timeout -k 5 200 …
-		"time",
-		"nice(?:\\s+-n\\s+-?\\d+)?",
-		"ionice(?:\\s+-\\S+)*",
+		// timeout: value-taking options, THEN the mandatory duration.
+		"timeout(?:\\s+(?:-k|--kill-after|-s|--signal)(?:=\\S+|\\s+\\S+)|\\s+(?:--preserve-status|--foreground|-[a-zA-Z]+))*\\s+\\S+",
+		"time(?:\\s+(?:-o|--output|-f|--format)(?:=\\S+|\\s+\\S+)|\\s+-[a-zA-Z]+)*",
+		"nice(?:\\s+(?:-n|--adjustment)(?:=\\S+|\\s+-?\\d+))?",
+		"ionice(?:\\s+(?:-c|-n|-p)(?:=\\S+|\\s+\\S+)|\\s+-[a-zA-Z]+)*",
 		"nohup",
-		"stdbuf(?:\\s+-\\S+)*",
+		"stdbuf(?:\\s+(?:-i|-o|-e)(?:=\\S+|\\s+\\S+))*",
 		"command",
 		"builtin",
 		"exec",
-		"sudo(?:\\s+-\\S+)*",
-		"doas",
-		// `env` takes flags, `-u NAME` PAIRS (two words), and assignments — in
-		// any order — before the command it runs.
-		"env(?:\\s+(?:-u\\s+[A-Za-z_][A-Za-z0-9_]*|-[A-Za-z]+|[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|'[^']*'|\\S*)))*",
-		"xargs(?:\\s+-\\S+(?:\\s+\\S+)?)*",
+		// sudo: -u/-g/-U/-p/-C/-D/-h all take the next word.
+		"sudo(?:\\s+(?:-u|-g|-U|-p|-C|-D|-h|--user|--group|--prompt)(?:=\\S+|\\s+\\S+)|\\s+-[a-zA-Z]+)*",
+		"doas(?:\\s+-u\\s+\\S+|\\s+-[a-zA-Z]+)*",
+		// env: flags, `-u NAME` pairs (two words), and assignments, in any order.
+		"env(?:\\s+(?:-u|--unset)(?:=\\S+|\\s+[A-Za-z_][A-Za-z0-9_]*)|\\s+-[A-Za-z]+|\\s+[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|'[^']*'|\\S*))*",
+		// xargs: -I/-n/-P/-d/-a/-E/-s all take the next word.
+		"xargs(?:\\s+(?:-I|-i|-n|-P|-d|-a|-E|-s|--replace|--max-args|--max-procs|--delimiter)(?:=\\S+|\\s+\\S+)|\\s+-[a-zA-Z]+)*",
 		"script\\s+-qc",
 	].join("|") +
 	")\\s+",

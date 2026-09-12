@@ -20,6 +20,8 @@ import {
 	parseEntryToInteraction,
 	classifyInteraction,
 	normalizeCommand,
+	extractCommandSegments,
+	extractCwdFromBashCommand,
 	renderOtherHistogram,
 	renderTokenSummary,
 	deduplicateInteractions,
@@ -148,6 +150,8 @@ export {
 	// #106: the 'other'-reclaim surfaces, re-exported so tests drive the BUNDLE
 	// rather than the sources — the same contract every other suite here uses.
 	normalizeCommand,
+	extractCommandSegments,
+	extractCwdFromBashCommand,
 	renderOtherHistogram,
 	buildWtftLines,
 	buildTimelineString,

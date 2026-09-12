@@ -16,7 +16,15 @@
  * Usage: bun research/other-corpus/reclaim-estimate.ts [--limit N]
  */
 import { execSync } from "node:child_process";
-import { parseSessionFile, classifyInteraction, normalizeCommand } from "../../extensions/lib/wtft-parser.ts";
+// deduplicateInteractions is NOT optional here (#106 review, High/reasoning).
+// parseSessionFile returns RAW lines -- one Interaction per content block, the
+// same message.id and usage repeated -- and summing those inflates cost ~1.8x.
+// Worse for THIS measurement: duplicate blocks of one message classify
+// differently (a text block reads `prompt`, its tool_use sibling reads
+// `other`), so an undeduped split is not a scaled version of the truth, it is
+// a different shape. The first cut of these scripts omitted it and the
+// published percentages were wrong.
+import { parseSessionFile, deduplicateInteractions, classifyInteraction, normalizeCommand } from "../../extensions/lib/wtft-parser.ts";
 
 const argv = process.argv.slice(2);
 const limit = Number(argv[argv.indexOf("--limit") + 1]) || 300;
@@ -54,7 +62,7 @@ let otherTotal = 0, sessionTotal = 0;
 const add = (k: string, c: number) => { const e = rule.get(k) || { cost: 0, n: 0 }; e.cost += c; e.n++; rule.set(k, e); };
 
 for (const f of files) {
-	let ints; try { ints = parseSessionFile(f); } catch { continue; }
+	let ints; try { ints = deduplicateInteractions(parseSessionFile(f)); } catch { continue; }
 	for (const i of ints) {
 		sessionTotal += i.cost;
 		if (classifyInteraction(i) !== "other") continue;

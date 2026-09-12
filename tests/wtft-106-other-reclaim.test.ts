@@ -5,11 +5,22 @@
  * @description Validates #106 (with #10 and #11): the classifier reclaims work
  *   that was landing in "other".
  *
- *   Every command string in this suite is a VERBATIM shape taken from the
- *   corpus measured by `research/other-corpus/` — not an invented example. That
- *   is the point: #10 and #11 each generalised from one session, and the shapes
- *   that actually dominate (a `cd` followed by a NEWLINE, a `$( )` value, a
- *   line-continuation backslash) appear in neither issue's proposal.
+ *   Every command SHAPE in this suite was taken from the corpus measured by
+ *   `research/other-corpus/` — not invented. That is the point: #10 and #11 each
+ *   generalised from one session, and the shapes that actually dominate (a `cd`
+ *   followed by a NEWLINE, a `$( )` value, a line-continuation backslash) appear
+ *   in neither issue's proposal.
+ *
+ *   SHAPE, not byte-for-byte string. Paths and arguments are shortened, and
+ *   `#106`'s closer asked for the exact strings — a fair catch in review, and
+ *   the wrong thing to do here: the real ones are absolute paths inside private
+ *   client repositories (`~/git-projects/iarts-pantograph/…`), so pinning them
+ *   verbatim would publish directory structure into a repo intended to go
+ *   public, and would rot the moment a worktree is renamed. What must be
+ *   verbatim is the SYNTAX under test — the separator, the quoting, the
+ *   substitution, the operator — and that is preserved exactly. The corpus
+ *   itself is reachable through `research/other-corpus/sample-other.ts`, which
+ *   prints the untouched strings on demand.
  *
  *   Four surfaces, in the order the data ranks them:
  *     1. normalizeCommand  — cd/wrapper/keyword stripping (the gate on all of it)
@@ -24,6 +35,9 @@ import {
 	normalizeCommand,
 	extractCommandSegments,
 	extractCwdFromBashCommand,
+	extractRealCommands,
+	cwdForClaudeSpawn,
+	splitCommandWords,
 	renderOtherHistogram,
 } from "../bin/wtft.mjs";
 
@@ -114,6 +128,13 @@ function piToolTurn(name: string, args: any = {}) {
 }
 
 const cat = (i: any) => classifyInteraction(i);
+
+/** Does any real command in this string spawn an agent? Mirrors the predicate
+ *  the daemon uses, so a test can ask the question without a daemon. */
+function extractRealCommandsHasClaude(cmd: string): boolean {
+	return extractRealCommands(cmd).some((c: string) =>
+		/(?:^|\s)claude(?:\s+-|\s*\||\s*$)/.test(c.split("\n", 1)[0]!.toLowerCase()));
+}
 
 // ---------------------------------------------------------------------------
 console.log("\n#106 / 1 — normalizeCommand strips the shapes the corpus actually contains");
@@ -432,6 +453,58 @@ eq("&& after a || chain still advances",
 // were before this branch.
 eq("Git status -> git", cat(bashTurn("Git status")), "git");
 eq("Bun test -> tests", cat(bashTurn("Bun test tests/x.test.ts")), "tests");
+
+// ---------------------------------------------------------------------------
+console.log("\n#106 / 7 — review-round-3 regressions");
+// ---------------------------------------------------------------------------
+
+// [High/crossfile] Each `commands` entry is a SEPARATE Bash call with its own
+// shell, so a `cd` in one says nothing about the cwd of a spawn in another.
+eq("cwd is not borrowed from a different bash call",
+	cwdForClaudeSpawn(["cd /a", "claude -p 'go'"]), null);
+eq("cwd comes from the call that spawned",
+	cwdForClaudeSpawn(["cd /decoy", "cd /real && claude -p 'go'"]), "/real");
+
+// [High/crossfile] `||` only marks a fallback when the thing it falls back FROM
+// was the cd we kept. `cd /a && false || cd /b` really does run `cd /b`.
+eq("|| after a non-cd command is not a fallback chain",
+	extractCwdFromBashCommand("cd /a && false || cd /b; timeout 180 claude -p 'go'"), "/b");
+
+// [Medium/correctness] A substitution target is unknowable QUOTED too — the
+// double-quote arm matched first and handed back the unexpanded text.
+eq("cd \"$( … )\" yields null", extractCwdFromBashCommand("cd \"$(mktemp -d)\" && claude -p 'x'"), null);
+eq("cd `…` yields null", extractCwdFromBashCommand("cd `mktemp -d` && claude -p 'x'"), null);
+
+// [Medium/crossfile] A `claude -p` inside a heredoc BODY is data, not a spawn.
+eq("claude -p inside a heredoc body is not agents",
+	cat(bashTurn("cat <<'EOF' > notes.md\nrun claude -p \"go\" to start\nEOF")), "spec");
+eq("cwd ignores a spawn that is only heredoc text",
+	cwdForClaudeSpawn(["cat <<'EOF'\nclaude -p 'go'\nEOF"]), null);
+
+// [Medium/correctness] A function DEFINITION runs nothing — not its first
+// statement and not the rest of a multi-statement body.
+eq("a multi-statement function body does not leak",
+	normalizeCommand("reply() { gh api -X POST \"$1\"; gh pr checks 1; }\nreply 42"), "reply 42");
+assert("a claude -p inside a function body is not a spawn",
+	!extractRealCommandsHasClaude("spawn() { claude -p 'go'; }\necho defined"),
+	"function body registered as a spawn");
+
+// [Medium/contract] Shell noise stays other even when it redirects: the target
+// is outside any checkout, so it is not this repository's code.
+eq("echo > /tmp file stays other", cat(bashTurn("echo hi > /tmp/notes.txt")), "other");
+eq("ls > /tmp file stays other", cat(bashTurn("ls > /tmp/list.txt")), "other");
+eq("cat /etc/hosts stays other", cat(bashTurn("cat /etc/hosts")), "other");
+// …but a redirect into the REPO is still a code write.
+eq("redirect into the repo is still code", cat(bashTurn("echo x > bin/generated.ts")), "code");
+
+// [Low/correctness] A redirection abutting a closing quote is an operator.
+assert("echo \"a\">out records the redirect",
+	splitCommandWords('echo "a">out').writes.includes("out"),
+	JSON.stringify(splitCommandWords('echo "a">out')));
+// …while a `>` INSIDE the quotes is still data.
+assert("echo \"a > b\" records nothing",
+	splitCommandWords('echo "a > b"').writes.length === 0,
+	JSON.stringify(splitCommandWords('echo "a > b"')));
 
 // ---------------------------------------------------------------------------
 console.log(`\n${failed === 0 ? GREEN : RED}#106: ${passed} passed, ${failed} failed${RESET}`);

@@ -798,11 +798,21 @@ const PROGRAM_FIRST_ARG = /^(?:sed|awk|gawk|nawk|perl|jq|yq)(?:\s|$)/;
 const NUMERIC = /^\d+$/;
 
 /**
- * Paths that exist but are not repository work: device nodes, process files, and
- * anything under a scratch directory. Grading these as files put `/dev/null` in
- * the file list as an extensionless — therefore `code` — path (#106 review).
+ * Absolute paths that are real files but are not REPOSITORY work.
+ *
+ * `classifyByFilePaths` grades a path by extension and directory, and it has no
+ * way to know a repo from a scratch dir — so `/dev/null` came back as an
+ * extensionless `code` file, `cat /etc/hosts` graded as `code`, and
+ * `echo hi > /tmp/notes.txt` turned deliberate shell noise into a code turn by
+ * way of its `.txt` extension (#106 review rounds 1 and 3).
+ *
+ * The rule is "outside any checkout", not "temporary": a scratchpad script under
+ * /tmp is genuine work, but it is not this repository's code, and calling it
+ * `code` overstates code spend — which is the number #52 exists to get right.
+ * A repo-relative path (`bin/x.ts`) is unaffected, and so is an absolute path
+ * into a checkout, because neither starts with one of these roots.
  */
-const NOT_A_REPO_FILE = /^\/(?:dev|proc|sys|run)\//;
+const NOT_A_REPO_FILE = /^\/(?:dev|proc|sys|run|tmp|etc|var|boot|lib|sbin|opt)(?:\/|$)/;
 
 /** Readers that are actually writing when the flag says so (`sed -i`). */
 const IN_PLACE_EDIT = /^(?:sed\s+(?:-\S*\s+)*-i|perl\s+(?:-\S+\s+)*-i|tee)(?:\s|$)/;
@@ -1019,7 +1029,11 @@ export function classifyInteraction(interaction: Interaction): Category {
 			// raw string made `Git status` and `Bun test` fall through to
 			// `other` — a regression against the case-insensitive behaviour this
 			// branch inherited (#106 review round 2, Low/correctness).
-			const lower = normalized.toLowerCase();
+			//
+			// …and against the command's HEAD, not its heredoc body: the body is
+			// attached to its opener, so `cat <<'EOF' … claude -p … EOF` read as
+			// an agent spawn when the text was only data (round 3).
+			const lower = normalized.split("\n", 1)[0]!.toLowerCase();
 			if (CLAUDE_SPAWN.test(lower)) isAgents = true;
 			else if (GIT_COMMAND.test(lower)) isGit = true;
 			else if (TEST_RUNNER.test(lower)) isTests = true;
@@ -1464,18 +1478,27 @@ export function extractCwdFromBashCommand(cmd: string): string | null {
 	// exists to prevent. Scan every segment for the LAST `cd` before the spawn,
 	// which is the directory the spawn actually ran in.
 	let found: string | null = null;
-	let sawCd = false;
+	// "The segment immediately before this one was a `cd` I kept" — NOT "a cd
+	// appeared somewhere earlier". The weaker flag made any right-hand `cd` look
+	// like the fallback of an earlier chain: in `cd /a && false || cd /b`, the
+	// shell runs `cd /b` because `false` failed, and the stale flag suppressed it
+	// (#106 review round 3, High/crossfile).
+	let prevWasKeptCd = false;
 	for (const { text, joinedBy } of extractJoinedSegments(cmd)) {
 		const bare = stripCommandPrefixes(text);
+		// Match against the command's HEAD only. A heredoc body is attached to
+		// the segment that opened it, so testing the whole segment let a `claude
+		// -p` that is merely DATA inside a heredoc read as a spawn (round 3,
+		// Medium/crossfile).
+		const head = bare.split("\n", 1)[0]!;
 		// STOP at the spawn. The directory that matters is the one in effect when
 		// `claude -p` ran; a `cd` AFTER it is where the shell went next, and
-		// `claude -p 'x'; cd /elsewhere` was returning `/elsewhere` (#106 review
-		// round 2, Medium/crossfile).
-		if (CLAUDE_SPAWN.test(bare.toLowerCase())) break;
-		const m = bare.match(/^cd\s+(?:"([^"]*)"|'([^']*)'|(\$\((?:[^()]|\([^()]*\))*\))|([^\s;&|]+))/);
-		if (!m) continue;
+		// `claude -p 'x'; cd /elsewhere` was returning `/elsewhere` (round 2).
+		if (CLAUDE_SPAWN.test(head.toLowerCase())) break;
+		const m = head.match(/^cd\s+(?:"([^"]*)"|'([^']*)'|([^\s;&|]+))/);
+		if (!m) { prevWasKeptCd = false; continue; }
 		// `A || B` runs B only when A FAILED, so a `cd` on the right of `||` is a
-		// FALLBACK, not a subsequent move. Keep the first of such a chain.
+		// FALLBACK of the `cd` before it. Keep the first of such a chain.
 		//
 		// This is not a nicety. The real shape in the corpus is
 		//   cd <scratchpad> 2>/dev/null || cd /tmp
@@ -1484,18 +1507,44 @@ export function extractCwdFromBashCommand(cmd: string): string | null {
 		// the wrong project directory and a real subagent's $0.38 vanished from
 		// the session total. Caught by the totals invariant in
 		// research/other-corpus/before-after.ts, not by a unit test.
-		if (joinedBy === "||" && sawCd) continue;
-		sawCd = true;
-		// A `$( … )` target cannot be known — `cd $(mktemp -d)` is a fresh temp
-		// dir chosen at runtime. Returning the PARTIAL match `$(mktemp` was the
-		// worst of the three options: non-null, so the daemon accepted it,
-		// stat'd a path that cannot exist, and re-queued the interaction forever
-		// while the subagent's whole cost went missing (round 2, High/crossfile).
+		if (joinedBy === "||" && prevWasKeptCd) continue;
+		prevWasKeptCd = true;
+		const target = m[1] || m[2] || m[3] || "";
+		// A target built by command substitution cannot be known — `cd $(mktemp
+		// -d)` is a fresh temp dir chosen at runtime. Checked on the EXTRACTED
+		// value so the quoted form `cd "$(mktemp -d)"` is caught too: the
+		// double-quote arm matched first and handed back the unexpanded text as
+		// though it were a directory (round 3, Medium/correctness).
+		//
+		// Returning a wrong-but-non-null string is the worst option: the daemon
+		// accepts it, stats a path that cannot exist, and re-queues the
+		// interaction forever while the subagent's whole cost goes missing.
 		// Unknown must read as unknown.
-		if (m[3]) { found = null; continue; }
-		found = m[1] || m[2] || m[4] || found;
+		if (target.includes("$(") || target.includes("`")) { found = null; continue; }
+		found = target || found;
 	}
 	return found;
+}
+
+/**
+ * The cwd of the bash command that actually contains the `claude -p` spawn.
+ *
+ * Each entry in `interaction.commands` is a SEPARATE Bash tool call with its own
+ * shell, so a `cd` in one entry says nothing about the working directory of a
+ * spawn in another. Both callers previously walked the flat list and took the
+ * first entry yielding any cwd at all, which for `['cd /a', 'claude -p "go"']`
+ * ran discovery against `/a` — a directory the spawn never saw (#106 review
+ * round 3, High/crossfile). Ask the command that did the spawning.
+ */
+export function cwdForClaudeSpawn(commands: string[]): string | null {
+	for (const cmd of commands) {
+		const spawns = extractRealCommands(cmd).some(real =>
+			CLAUDE_SPAWN.test(real.split("\n", 1)[0]!.toLowerCase()));
+		if (!spawns) continue;
+		const cwd = extractCwdFromBashCommand(cmd);
+		if (cwd) return cwd;
+	}
+	return null;
 }
 
 /** Convert a CWD path to the Claude Code project directory slug.
@@ -1623,8 +1672,12 @@ function interactionHasClaudeCommand(interaction: Interaction): boolean {
 	// returns the FIRST command alone, so a `claude -p` chained after another
 	// command would be invisible to it — and missing one loses that subagent's
 	// entire cost.
+	// The command's HEAD, not the whole segment: a heredoc body is attached to
+	// the command that opened it, so `cat <<'EOF' … claude -p "x" … EOF` matched
+	// a spawn that is only DATA, classified the turn `agents`, and enqueued a
+	// phony subagent (#106 review round 3, Medium/crossfile).
 	return interaction.commands.some(cmd =>
-		extractRealCommands(cmd).some(real => CLAUDE_SPAWN.test(real.toLowerCase())),
+		extractRealCommands(cmd).some(real => CLAUDE_SPAWN.test(real.split("\n", 1)[0]!.toLowerCase())),
 	);
 }
 
@@ -1652,12 +1705,10 @@ export function attributeClaudeSubAgentCosts(
 		// internally, and the CLI is doing a post-hoc pass on tag-file data)
 		if ((interaction as any).claudeSubAgentSessionIds) continue;
 
-		// Extract CWD from the first command that has a cd prefix
-		let cwd: string | null = null;
-		for (const cmd of interaction.commands) {
-			cwd = extractCwdFromBashCommand(cmd);
-			if (cwd) break;
-		}
+		// The cwd must come from the command that DID the spawning — each
+		// `commands` entry is its own Bash call with its own shell (#106 review
+		// round 3, High/crossfile).
+		const cwd = cwdForClaudeSpawn(interaction.commands);
 		if (!cwd) continue;
 
 		const subAgentResult = discoverClaudeSubAgentSessionFiles(

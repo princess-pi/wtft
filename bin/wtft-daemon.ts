@@ -24,6 +24,7 @@ import {
 	applyControlEntry,
 	newParseStreamState,
 	extractCwdFromBashCommand,
+	cwdForClaudeSpawn,
 	extractRealCommands,
 	discoverClaudeSubAgentSessionFiles,
 	discoverSubagentSessionFiles,
@@ -494,14 +495,16 @@ function flushPending() {
  * claimed (#106 review round 2, Low/reasoning). The old code tested the same
  * unanchored regex against the whole remaining string, and `\s` matches a
  * newline, so a whitespace-preceded `claude -p` anywhere in a compound or loop
- * body was already found. The genuine gain is the shapes the old prefix-strip
- * could not reduce at all — a `;claude` with no separating space, a spawn after
- * a `cd` that the strip did not recognise — plus the fact that there is now one
- * implementation instead of two that can disagree.
+ * body was already found. By that same reasoning a spawn after an unrecognised
+ * `cd` was ALSO already found, so naming it as a gain was wrong too (#106
+ * review round 3). What genuinely changed is narrow: a spawn attached with no
+ * separating space (`;claude`), a spawn that is only heredoc TEXT no longer
+ * counting as one, and — the part that actually matters — one implementation
+ * instead of two that can silently disagree about the same string.
  */
 function hasClaudeCommand(interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>): boolean {
   return interaction.commands.some(cmd =>
-    extractRealCommands(cmd).some(real => /(?:^|\s)claude(?:\s+-|\s*\||\s*$)/.test(real.toLowerCase())),
+    extractRealCommands(cmd).some(real => /(?:^|\s)claude(?:\s+-|\s*\||\s*$)/.test(real.split("\n", 1)[0]!.toLowerCase())),
   );
 }
 
@@ -735,11 +738,12 @@ function scanForSubAgents() {
     const stillPending: typeof pendingClaudeCommands = [];
     for (const item of pendingClaudeCommands) {
       const interaction = item.interaction;
-      let cwd: string | null = null;
-      for (const cmd of interaction.commands) {
-        cwd = extractCwdFromBashCommand(cmd);
-        if (cwd) break;
-      }
+      // Ask the command that DID the spawning. Each `commands` entry is its own
+      // Bash call with its own shell, so the old "first entry yielding any cwd"
+      // walk would happily run discovery against a `cd` from an unrelated call
+      // — for `['cd /a', 'claude -p "go"']` that is a directory the spawn never
+      // saw, and the child's whole cost is then lost (#106 review round 3).
+      const cwd = cwdForClaudeSpawn(interaction.commands);
       if (!cwd) continue;
 
       let discovered: Awaited<ReturnType<typeof discoverClaudeSubAgentSessionFiles>>;

@@ -38,14 +38,6 @@
 const SEPARATORS = ["&&", "||", "|&", ";;", ";", "|", "\n"];
 
 /**
- * Split a bash command string into the individual commands a shell would run.
- *
- * Quote-, heredoc- and substitution-aware: separators inside `'…'`, `"…"`,
- * `$(…)`, `` `…` `` or a heredoc body are literal text, not splits. A heredoc
- * body stays attached to the command that opened it, which is what lets an
- * inline `python3 - <<'PY' … PY` be classified by the paths inside its script.
- */
-/**
  * Anything that could make a command string more than one command: a separator,
  * a quote, a substitution, a heredoc, a comment, or a line continuation.
  *
@@ -80,6 +72,17 @@ export function extractJoinedSegments(cmd: string): JoinedSegment[] {
 	return splitSegments(cmd);
 }
 
+/**
+ * Split a bash command string into the individual commands a shell would run.
+ *
+ * Quote-, heredoc- and substitution-aware: separators inside `'…'`, `"…"`,
+ * `$(…)`, `` `…` `` or a heredoc body are literal text, not splits. A heredoc
+ * body stays attached to the command that opened it, which is what lets an
+ * inline `python3 - <<'PY' … PY` be classified by the paths inside its script.
+ *
+ * Use `extractJoinedSegments` when the operator BETWEEN commands matters — it
+ * is the difference between "and then" and "only if that failed".
+ */
 export function extractCommandSegments(cmd: string): string[] {
 	return splitSegments(cmd).map(s => s.text);
 }
@@ -259,18 +262,16 @@ export function splitCommandWords(cmd: string): CommandWords {
 	const writes: string[] = [];
 	const reads: string[] = [];
 	let cur = "";
-	let quoted = false; // this word had quotes, so it is data, never an operator
 	let pending: "write" | "read" | null = null;
 	let i = 0;
 
 	const flush = () => {
-		if (!cur) { quoted = false; return; }
+		if (!cur) return;
 		if (pending === "write") writes.push(cur);
 		else if (pending === "read") reads.push(cur);
 		else words.push(cur);
 		pending = null;
 		cur = "";
-		quoted = false;
 	};
 
 	while (i < head.length) {
@@ -279,7 +280,6 @@ export function splitCommandWords(cmd: string): CommandWords {
 		if (c === "'") {
 			const e = head.indexOf("'", i + 1);
 			cur += e === -1 ? head.slice(i + 1) : head.slice(i + 1, e);
-			quoted = true;
 			i = e === -1 ? head.length : e + 1;
 			continue;
 		}
@@ -290,7 +290,6 @@ export function splitCommandWords(cmd: string): CommandWords {
 				out += head[j]!; j++;
 			}
 			cur += out;
-			quoted = true;
 			i = j + 1;
 			continue;
 		}
@@ -310,7 +309,14 @@ export function splitCommandWords(cmd: string): CommandWords {
 			}
 			continue;
 		}
-		if ((c === ">" || c === "<") && !quoted) {
+		// A `>` that is genuinely inside quotes never reaches here — the quote
+		// handlers above consume the whole quoted run, `>` included, which is
+		// what makes `echo "a > b"` data rather than a redirection. So any `>`
+		// seen at this point IS an operator, including one that directly abuts
+		// a closing quote: `echo "a">out` redirects (#106 review round 3,
+		// Low/correctness). An earlier cut carried a `quoted` flag here and
+		// swallowed that redirection into the word.
+		if (c === ">" || c === "<") {
 			// `2>`/`1>` — the leading fd digit already landed in `cur`.
 			if (/^\d$/.test(cur)) cur = "";
 			flush();
@@ -457,8 +463,28 @@ export function extractRealCommands(cmd: string): string[] {
 function computeRealCommands(cmd: string): string[] {
 	const out: string[] = [];
 	let loopDepth = 0;
+	// Brace depth inside a function DEFINITION. Dropping only the segment that
+	// carries `name() {` left the rest of a multi-statement body standing as
+	// top-level commands: `reply() { gh api …; gh pr checks 1; }` yielded
+	// `gh pr checks 1`, so a turn that merely DEFINED a function classified as
+	// git — and a `claude -p` inside a body registered as a real spawn (#106
+	// review round 3, Medium/correctness). A definition runs nothing.
+	let fnDepth = 0;
 	for (const segment of extractCommandSegments(cmd)) {
 		const raw = segment.trim();
+		if (fnDepth > 0) {
+			fnDepth += (raw.match(/\{/g) || []).length;
+			fnDepth -= (raw.match(/\}/g) || []).length;
+			continue;
+		}
+		if (FUNCTION_DEF.test(stripCommandPrefixes(raw))) {
+			// The `{` already in this segment IS the opening brace — counting an
+			// extra level for the definition itself left the depth stuck at 1
+			// after the closing `}`, so every later command was swallowed too.
+			fnDepth = (raw.match(/\{/g) || []).length - (raw.match(/\}/g) || []).length;
+			if (fnDepth < 0) fnDepth = 0;
+			continue;
+		}
 		// Depth is read off the RAW segment, before any prefix stripping: `do`
 		// and `done` are exactly what stripCommandPrefixes and reduceSegment
 		// remove, so by the time they are gone there is nothing left to count.

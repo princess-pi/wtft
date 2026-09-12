@@ -122,8 +122,17 @@ for (const [harness, files] of Object.entries(sets)) {
 	const delta = a.tot - b.tot;
 	const gained = [...a.subagents].filter(id => !b.subagents.has(id));
 	const lost = [...b.subagents].filter(id => !a.subagents.has(id));
-	// A delta is acceptable ONLY when the two sides found different subagents.
-	const explained = gained.length > 0 || lost.length > 0;
+
+	// A LOST subagent always fails, full stop. The first cut wrote
+	// `explained = gained.length > 0 || lost.length > 0`, which made a loss
+	// EXCUSE itself: a regression that hid a subagent produced a negative delta
+	// and a non-empty `lost`, so the gate called it explained and exited 0 —
+	// the precise failure this script exists to catch, and which it had already
+	// caught once by accident (#106 review round 3, Medium/reasoning). Losing
+	// visibility of real spend is never an acceptable outcome of a classifier
+	// change; gaining it is the point.
+	if (lost.length > 0) mismatch = true;
+	const explained = gained.length > 0 && lost.length === 0;
 	if (Math.abs(delta) > 0.005 && !explained) mismatch = true;
 
 	console.log(`\n===== ${harness}: ${files.length} sessions =====`);

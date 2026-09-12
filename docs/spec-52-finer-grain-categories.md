@@ -419,7 +419,7 @@ nothing also stays `other` — it ran something, did no work, and carried no rep
 the honest residual. What changed is that such a turn no longer *blocks* the prompt rule: a
 narrated `cd` is counted as the reply it is.
 
-**Result on that corpus:** `other` **54.8% → 12.0%** on Claude Code and **29.4% → 6.2%** on Pi.
+**Result on that corpus:** `other` **54.8% → 13.1%** on Claude Code and **29.4% → 6.2%** on Pi.
 The corpus total is unchanged on Pi and rises by $0.42 on Claude Code — and that rise is the
 one kind of change a reclaim is allowed to make: a subagent whose `cd` was not on the command's
 first line was previously invisible, and its cost is now discovered and attributed (#3/#138).

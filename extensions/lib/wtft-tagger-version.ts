@@ -49,16 +49,28 @@
 // bodies classify by the PATH they touch; a bash string is segmented so every
 // command in it is read rather than only the first; and the tool map gained each
 // harness's own spellings (Pi's `search_web`, `todo_write`) plus the MCP suffix
-// rule. Measured on a deduplicated 250-session-per-harness corpus, `other` falls
-// from 54.8% of Claude Code spend to 12.3% (Pi: 29.4% to 6.2%), and the
-// reclaimed dollars land in git/code/tests. An earlier draft of this comment
-// put Pi's pair against Claude Code's name and said 300 sessions; both were
-// wrong, and the spec's Amendment 4 is the figure of record.
+// rule. `other` falls by roughly four fifths on a deduplicated corpus, and the
+// reclaimed dollars land in git/code/tests.
+//
+// The measured figures live in docs/spec-52-finer-grain-categories.md
+// Amendment 4 and are deliberately NOT repeated here. Two drafts of this comment
+// carried numbers that contradicted that spec — one put Pi's pair under Claude
+// Code's name, one went stale by a percentage point — because a figure copied
+// into a second file has nothing holding the copies together. This comment
+// points; the spec asserts; research/other-corpus/before-after.ts derives.
 //
 // The bump is the whole point, not bookkeeping: `_cat` is baked into every tag
 // line and `classifyInteraction` SHORT-CIRCUITS on it (wtft-parser.ts), so a
 // v2.7.3 tag keeps its old `other` attribution for the life of the file. Without
 // this bump the change is inert on every session anyone has already run — which
 // is every session that matters. Minor rather than patch: this is the largest
-// semantic move since 2.5.1, and no cost figure changes, only the bucket.
+// semantic move since 2.5.1.
+//
+// Costs are NOT frozen by this bump, and an earlier draft of this comment
+// claimed they were ("no cost figure changes, only the bucket"). Reclassifying
+// cannot move a dollar between sessions, but the same change widens `claude -p`
+// subagent discovery, and a subagent found for the first time adds cost that
+// was previously invisible — measured at +$0.42 across the 250-session corpus
+// (#3/#138). A session total may therefore RISE after this bump; it must never
+// fall, and research/other-corpus/before-after.ts fails if it does.
 export const WTFT_TAGGER_VERSION = "2.8.0";

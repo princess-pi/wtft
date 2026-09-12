@@ -123,23 +123,32 @@ for (const [harness, files] of Object.entries(sets)) {
 	const gained = [...a.subagents].filter(id => !b.subagents.has(id));
 	const lost = [...b.subagents].filter(id => !a.subagents.has(id));
 
-	// A LOST subagent always fails, full stop. The first cut wrote
-	// `explained = gained.length > 0 || lost.length > 0`, which made a loss
-	// EXCUSE itself: a regression that hid a subagent produced a negative delta
-	// and a non-empty `lost`, so the gate called it explained and exited 0 —
-	// the precise failure this script exists to catch, and which it had already
-	// caught once by accident (#106 review round 3, Medium/reasoning). Losing
-	// visibility of real spend is never an acceptable outcome of a classifier
-	// change; gaining it is the point.
+	// THE TOTAL MAY RISE. IT MAY NEVER FALL. That is the whole rule, and it took
+	// three tries to state it as one line instead of three interacting ones:
+	//
+	//   cut 1: `explained = gained || lost` — a loss excused ITSELF.
+	//   cut 2: `explained = gained && !lost` — better, but the gate still only
+	//          fired on `Math.abs(delta)`, so a corpus total that FELL while any
+	//          new subagent was discovered came back "explained" and exited 0
+	//          (#106 review round 4, High/reasoning). A regression that loses
+	//          more than a new discovery adds was certified as fine.
+	//
+	// A reclassification cannot move a dollar; discovery can only ADD cost that
+	// was previously invisible. So a negative delta has no legitimate cause, and
+	// neither does a lost subagent id — each fails on its own, with no reference
+	// to the other.
+	if (delta < -0.005) mismatch = true;
 	if (lost.length > 0) mismatch = true;
-	const explained = gained.length > 0 && lost.length === 0;
-	if (Math.abs(delta) > 0.005 && !explained) mismatch = true;
+	// A RISE still needs a reason, and the only acceptable one is discovery.
+	const explained = gained.length > 0;
+	if (delta > 0.005 && !explained) mismatch = true;
 
 	console.log(`\n===== ${harness}: ${files.length} sessions =====`);
 	console.log(`total  BEFORE $${b.tot.toFixed(2)}  AFTER $${a.tot.toFixed(2)}  delta $${delta.toFixed(4)}` +
-		(Math.abs(delta) <= 0.005 ? "  (equal, as required)"
-			: explained ? "  (explained by subagent discovery, below)"
-			: "   <-- UNEXPLAINED; a reclassification cannot change the total"));
+		(delta < -0.005 ? "   <-- TOTAL FELL; spend became invisible, which is never acceptable"
+			: Math.abs(delta) <= 0.005 ? "  (equal, as required)"
+			: explained ? "  (a RISE explained by subagent discovery, below)"
+			: "   <-- UNEXPLAINED RISE; a reclassification cannot change the total"));
 	if (gained.length) console.log(`  subagents found only AFTER  (cost recovered): ${gained.join(", ")}`);
 	if (lost.length) console.log(`  subagents found only BEFORE (cost LOST — investigate): ${lost.join(", ")}`);
 	for (const c of [...new Set([...b.by.keys(), ...a.by.keys()])]

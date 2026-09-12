@@ -1601,6 +1601,11 @@ export const PARSE_MISS_GROUP = "Parse miss";
 /** The stable marker prefix a parse-miss row carries, so misses are countable. */
 export const PARSE_MISS_MARKER = "##PARSE-MISS##";
 
+/** Internal tag carried on a token already judged implausible, so the grouping
+ *  step does not have to re-judge a string that display-sanitising may have
+ *  changed. Never rendered — it is stripped when the row is written. */
+export const PARSE_MISS_PREFIX = "\u0000miss\u0000";
+
 /** Longest command token this histogram will print. */
 const MAX_TOKEN_LEN = 48;
 
@@ -1630,10 +1635,18 @@ export function sanitizeCommandToken(token: string): string {
  */
 export function isPlausibleCommandToken(token: string): boolean {
 	if (!token) return false;
-	return /^[A-Za-z0-9_.~@/][A-Za-z0-9_.~@/+-]*$/.test(token);
+	// A trailing ellipsis is DISPLAY truncation added by sanitizeCommandToken,
+	// not evidence about the token. Judging the truncated form put every long
+	// but genuine command under `Parse miss` (#106 review round 4). The caller
+	// judges the original; this tolerates the trimmed form for anyone who does
+	// not, so the two routes cannot disagree.
+	const bare = token.endsWith("…") ? token.slice(0, -1) : token;
+	if (!bare) return false;
+	return /^[A-Za-z0-9_.~@/][A-Za-z0-9_.~@/+-]*$/.test(bare);
 }
 
 export function getSemanticCommandGroup(command: string): string | null {
+	if (command.startsWith(PARSE_MISS_PREFIX)) return PARSE_MISS_GROUP;
 	if (!isPlausibleCommandToken(command)) return PARSE_MISS_GROUP;
 	const base = command.split("/").pop() || command; // Strip path prefix e.g. /usr/bin/ls → ls
 	for (const [key, group] of Object.entries(SEMANTIC_GROUPS)) {
@@ -1666,7 +1679,15 @@ export function renderOtherHistogram(interactions: Interaction[], maxWidth: numb
 				const normalized = normalizeCommand(rawCmd);
 				if (!normalized) continue; // stripped to nothing (pure cd, pure var assignment)
 				const primary = normalized.split(/\s/)[0];
-				if (primary) primaryCommands.push(sanitizeCommandToken(primary));
+				// Decide plausibility on the ORIGINAL token, then sanitise for
+				// display. Sanitising first appended an ellipsis to any long
+				// token, and the ellipsis is not in the plausible-name charset —
+				// so a genuine but long command was quarantined as normalizer
+				// residue (#106 review round 4, Low/correctness).
+				if (primary) {
+					const display = sanitizeCommandToken(primary);
+					primaryCommands.push(isPlausibleCommandToken(primary) ? display : `${PARSE_MISS_PREFIX}${display}`);
+				}
 			}
 
 			for (const cmd of primaryCommands) {
@@ -1724,7 +1745,8 @@ export function renderOtherHistogram(interactions: Interaction[], maxWidth: numb
 
 	// Find max command length for alignment
 	let maxCmdLen = 0;
-	for (const cmd of commandMap.keys()) maxCmdLen = Math.max(maxCmdLen, cmd.length);
+	for (const cmd of commandMap.keys())
+		maxCmdLen = Math.max(maxCmdLen, (cmd.startsWith(PARSE_MISS_PREFIX) ? cmd.slice(PARSE_MISS_PREFIX.length) : cmd).length);
 
 	const countWidth = 7;
 	const costWidth = 10;
@@ -1753,7 +1775,8 @@ export function renderOtherHistogram(interactions: Interaction[], maxWidth: numb
 			// A parse miss carries a stable marker so misses are countable across
 			// sessions by a machine, not only visible to a human (Agent-First
 			// Output). The marker is the contract; the prose above is not.
-			const label = isMiss ? `${PARSE_MISS_MARKER} ${cmd}` : cmd.padEnd(maxCmdLen);
+			const shown = cmd.startsWith(PARSE_MISS_PREFIX) ? cmd.slice(PARSE_MISS_PREFIX.length) : cmd;
+			const label = isMiss ? `${PARSE_MISS_MARKER} ${shown}` : shown.padEnd(maxCmdLen);
 			output += `  ${label} ${costStr} ${countStr} : ${bar}\n`;
 		}
 	}

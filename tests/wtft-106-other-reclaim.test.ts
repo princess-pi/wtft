@@ -518,5 +518,39 @@ assert("echo \"a > b\" records nothing",
 	JSON.stringify(splitCommandWords('echo "a > b"')));
 
 // ---------------------------------------------------------------------------
+console.log("\n#106 / 8 — review-round-4 regressions");
+// ---------------------------------------------------------------------------
+
+// [High/correctness] Consuming a heredoc body eats the newline that would have
+// ended the command, so everything after the delimiter was glued onto it — one
+// segment, classified by the `cat` head, with the real work invisible.
+eq("a command after a heredoc is its own segment",
+	extractCommandSegments("cat <<'EOF'\nbody\nEOF\ngh pr checks 277").length, 2);
+eq("work after a heredoc is classified", cat(bashTurn("cat <<'EOF'\nbody\nEOF\ngh pr checks 277")), "git");
+eq("a spawn after a heredoc is still found",
+	cat(bashTurn("cat <<'EOF'\nnotes\nEOF\nclaude -p 'go'")), "agents");
+// …and the body still belongs to its opener, which is what #11 item 3 needs.
+eq("heredoc body still classifies its opener by path",
+	cat(bashTurn("python3 - <<'PY'\nopen('bin/wtft.ts','w').write(x)\nPY")), "code");
+
+// [Medium/correctness] A brace inside a quoted string is text, not structure.
+eq("a quoted } does not close a function body",
+	normalizeCommand('die() { echo "}"; echo hi; }\ngit status'), "git status");
+
+// [Medium/correctness] `else` introduces an arm, and the arm is work.
+eq("the else arm is classified", cat(bashTurn("if false; then echo no; else gh pr checks 277; fi")), "git");
+// `elif` is followed by a CONDITION, so it stays scaffolding like `if`.
+eq("elif condition is not work", normalizeCommand("if false; then echo a; elif true; then gh pr view 1; fi"), "echo a");
+
+// [Low/correctness] A long but genuine command is not normalizer residue. The
+// plausibility call must see the ORIGINAL token, not the display-truncated one.
+const longCmd = "a".repeat(80);
+const longOut = renderOtherHistogram([bashTurn(`${longCmd} --flag`)]);
+assert("a long genuine command is not quarantined as a parse miss",
+	!/Parse miss/.test(longOut), longOut.slice(0, 300));
+assert("…and it is still length-capped for display",
+	!longOut.split("\n").some(l => l.replace(/\x1b\[[0-9;]*m/g, "").length > 200), longOut.slice(0, 200));
+
+// ---------------------------------------------------------------------------
 console.log(`\n${failed === 0 ? GREEN : RED}#106: ${passed} passed, ${failed} failed${RESET}`);
 process.exit(failed > 0 ? 1 : 0);

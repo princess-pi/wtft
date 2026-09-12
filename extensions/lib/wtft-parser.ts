@@ -745,6 +745,23 @@ export function normalizeCommand(cmd: string): string {
 const CLAUDE_SPAWN = /(?:^|\s)claude(?:\s+-|\s*\||\s*$)/;
 
 /**
+ * Does this bash command string spawn an agent?
+ *
+ * THE one predicate. The daemon carried a hand-copied twin of the regex while
+ * this module owned `CLAUDE_SPAWN`, so a change here would not have reached it
+ * — and the two decide the same thing: whether a subagent's cost gets
+ * discovered. They disagreeing silently loses or double-counts money (#106
+ * review round 4, Low/crossfile), which is the same class of defect as the
+ * transcribed `normalizeCommand` this branch already deleted from that file.
+ *
+ * Reads each real command's HEAD, so a `claude -p` that is only text inside a
+ * heredoc body is not mistaken for a spawn.
+ */
+export function commandSpawnsAgent(cmd: string): boolean {
+	return extractRealCommands(cmd).some(real => CLAUDE_SPAWN.test(real.split("\n", 1)[0]!.toLowerCase()));
+}
+
+/**
  * Version-control work, including the tools that only ever do version-control
  * work. `gh` is the GitHub CLI, and `pr-*` / `git-*` / `wt-new` are this repo's
  * own workflow wrappers — every one of them a 1:1 git or GitHub operation
@@ -1542,9 +1559,7 @@ export function extractCwdFromBashCommand(cmd: string): string | null {
  */
 export function cwdForClaudeSpawn(commands: string[]): string | null {
 	for (const cmd of commands) {
-		const spawns = extractRealCommands(cmd).some(real =>
-			CLAUDE_SPAWN.test(real.split("\n", 1)[0]!.toLowerCase()));
-		if (!spawns) continue;
+		if (!commandSpawnsAgent(cmd)) continue;
 		const cwd = extractCwdFromBashCommand(cmd);
 		if (cwd) return cwd;
 	}
@@ -1680,9 +1695,7 @@ function interactionHasClaudeCommand(interaction: Interaction): boolean {
 	// the command that opened it, so `cat <<'EOF' … claude -p "x" … EOF` matched
 	// a spawn that is only DATA, classified the turn `agents`, and enqueued a
 	// phony subagent (#106 review round 3, Medium/crossfile).
-	return interaction.commands.some(cmd =>
-		extractRealCommands(cmd).some(real => CLAUDE_SPAWN.test(real.split("\n", 1)[0]!.toLowerCase())),
-	);
+	return interaction.commands.some(commandSpawnsAgent);
 }
 
 /** Post-processing pass: for each interaction that spawns `claude -p` via bash,

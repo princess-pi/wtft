@@ -211,7 +211,17 @@ function splitSegments(cmd: string): JoinedSegment[] {
 			else buf += body;
 			pendingHeredocs = [];
 			heredocOwner = -1;
-			i = j; continue;
+			i = j;
+			// The delimiter line's terminating newline was consumed with the
+			// body, so the separator that would have ended this command is gone.
+			// Close the segment explicitly, or everything after the heredoc is
+			// glued onto it: `cat <<'EOF' … EOF\ngh pr checks 277` came back as
+			// ONE segment, classification read only the `cat` head, and the `gh`
+			// work — or a `claude -p` — was never seen at all (#106 review round
+			// 4, High/correctness).
+			push();
+			nextJoin = "\n";
+			continue;
 		}
 
 		// A `#` that starts a word begins a comment to end of line.
@@ -388,6 +398,31 @@ const KEYWORD = /^(?:for|while|until|if|elif|else|then|do|done|fi|case|esac|in|s
 /** A function DEFINITION: `name() {` — the body is not an invocation. */
 const FUNCTION_DEF = /^[A-Za-z_][A-Za-z0-9_-]*\s*\(\s*\)/;
 
+/**
+ * Net brace nesting introduced by a segment, ignoring braces inside quotes.
+ *
+ * A `}` in a string is text, not structure: `die() { echo "}"; echo hi; }`
+ * closed the body on its first segment, so `echo hi` escaped as a real command
+ * even though a definition runs nothing — and a `claude -p` in such a body
+ * would have registered as a real spawn (#106 review round 4).
+ */
+function braceDelta(segment: string): number {
+	let depth = 0;
+	for (let i = 0; i < segment.length; i++) {
+		const c = segment[i]!;
+		if (c === "\\") { i++; continue; }
+		if (c === "'") { const e = segment.indexOf("'", i + 1); i = e === -1 ? segment.length : e; continue; }
+		if (c === '"') {
+			let j = i + 1;
+			while (j < segment.length && segment[j] !== '"') { if (segment[j] === "\\") j++; j++; }
+			i = j; continue;
+		}
+		if (c === "{") depth++;
+		else if (c === "}") depth--;
+	}
+	return depth;
+}
+
 /** Navigation and test builtins: real commands, but not work worth a category. */
 const NAVIGATION = /^(?:cd|pushd|popd|dirs|\[|\[\[|test|:|true|false)(?:\s|$)/;
 
@@ -403,7 +438,12 @@ export function stripCommandPrefixes(segment: string): string {
 	let s = segment.trim();
 	for (let pass = 0; pass < 12; pass++) {
 		const before = s;
-		s = s.replace(/^(?:do|then|!)\s+/, "");
+		// `else` introduces an ARM — the command after it is work, and dropping
+		// the whole segment discarded it: `if false; then echo no; else gh pr
+		// checks 277; fi` classified from the `echo` arm (#106 review round 4).
+		// `elif` is NOT here: what follows it is a condition, so it stays
+		// scaffolding exactly as `if` does.
+		s = s.replace(/^(?:do|then|else|!)\s+/, "");
 		s = s.replace(DECLARE, "");
 		s = s.replace(ASSIGNMENT, "");
 		s = s.replace(WRAPPER, "");
@@ -473,16 +513,14 @@ function computeRealCommands(cmd: string): string[] {
 	for (const segment of extractCommandSegments(cmd)) {
 		const raw = segment.trim();
 		if (fnDepth > 0) {
-			fnDepth += (raw.match(/\{/g) || []).length;
-			fnDepth -= (raw.match(/\}/g) || []).length;
+			fnDepth += braceDelta(raw);
 			continue;
 		}
 		if (FUNCTION_DEF.test(stripCommandPrefixes(raw))) {
 			// The `{` already in this segment IS the opening brace — counting an
 			// extra level for the definition itself left the depth stuck at 1
 			// after the closing `}`, so every later command was swallowed too.
-			fnDepth = (raw.match(/\{/g) || []).length - (raw.match(/\}/g) || []).length;
-			if (fnDepth < 0) fnDepth = 0;
+			fnDepth = Math.max(0, braceDelta(raw));
 			continue;
 		}
 		// Depth is read off the RAW segment, before any prefix stripping: `do`

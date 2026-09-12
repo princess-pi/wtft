@@ -25,6 +25,7 @@ import {
 	newParseStreamState,
 	extractCwdFromBashCommand,
 	cwdForClaudeSpawn,
+	commandSpawnsAgent,
 	extractRealCommands,
 	discoverClaudeSubAgentSessionFiles,
 	discoverSubagentSessionFiles,
@@ -501,11 +502,15 @@ function flushPending() {
  * separating space (`;claude`), a spawn that is only heredoc TEXT no longer
  * counting as one, and — the part that actually matters — one implementation
  * instead of two that can silently disagree about the same string.
+ *
+ * That last claim was only HALF true when first written (#106 review round 4):
+ * the segmenter was shared but this file still embedded its own copy of the
+ * spawn REGEX, so the parser and the daemon were two hand-copied predicates for
+ * one decision — whether a subagent's cost gets discovered. Both now call
+ * `commandSpawnsAgent`.
  */
 function hasClaudeCommand(interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>): boolean {
-  return interaction.commands.some(cmd =>
-    extractRealCommands(cmd).some(real => /(?:^|\s)claude(?:\s+-|\s*\||\s*$)/.test(real.split("\n", 1)[0]!.toLowerCase())),
-  );
+  return interaction.commands.some(commandSpawnsAgent);
 }
 
 /** Bring ONE sub-agent transcript up to date in the tag file (#270).

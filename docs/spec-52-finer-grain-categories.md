@@ -56,12 +56,18 @@ definitions were lost in the #68 monolith split and the gap is invisible because
 strips types without typechecking. Fix: define and export both in `extensions/lib/wtft-parser.ts`.
 
 ```
-Category = spec | code | mixed | tests | research | git | grep
-         | web | agents | plan | prompt | compaction | interrupted | other
+Category = spec | code | tests | research | git | grep
+         | web | agents | plan | prompt | compaction | interrupted | overhead | other
 ```
 
 `compaction` and `interrupted` are **reserved now** (so the daemon tag-file version bumps once)
 and wired in Phase 3.
+
+> **Kept current, because a union is the one thing a reader takes literally.** This block listed
+> `mixed` and omitted `overhead` until #106 — telling a reader the classifier accepts a category
+> the code had removed (Amendment 2, "mixed removed") and hiding one Phase 3 added. It is the
+> single source of truth only if it tracks `Category` in `extensions/lib/wtft-parser.ts`; check it
+> against that type whenever the type changes.
 
 ### Tool → category map (`tool_use` blocks, Claude Code; `toolCall`, Pi)
 

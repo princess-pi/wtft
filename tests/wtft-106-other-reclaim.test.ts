@@ -39,6 +39,7 @@ import {
 	cwdForClaudeSpawn,
 	splitCommandWords,
 	renderOtherHistogram,
+	getSemanticCommandGroup,
 } from "../bin/wtft.mjs";
 
 const RED = "\x1b[31m";
@@ -613,6 +614,41 @@ eq("here-string turn stays other", cat(bashTurn("cat <<< 'hello'")), "other");
 eq("xargs -n1 unwraps", cat(bashTurn("xargs -n1 git show")), "git");
 eq("xargs -n 1 unwraps the same", cat(bashTurn("xargs -n 1 git show")), "git");
 eq("timeout -k5 unwraps", cat(bashTurn("timeout -k5 200 bun test tests/x.test.ts")), "tests");
+
+// ---------------------------------------------------------------------------
+console.log("\n#106 / 11 — PR #108 review: the four shapes the corpus says happen");
+// ---------------------------------------------------------------------------
+// The other nine findings were POSTPONED on measured frequency, not dismissed —
+// see #109 and research/other-corpus/shape-frequency.ts. The classifier gives
+// directional hints; a gap only matters if the shape occurs.
+
+// Not a shape question at all: the plausibility guard validated the whole
+// command line, so EVERY multi-word command was labelled normalizer residue.
+eq("git status groups as Git Operations", getSemanticCommandGroup("git status"), "Git Operations");
+eq("npm run build groups as Build", getSemanticCommandGroup("npm run build"), "Build & Bundling");
+eq("pip install groups as Deps", getSemanticCommandGroup("pip install x"), "Dependency Management");
+eq("a real miss is still a miss", getSemanticCommandGroup("-d);"), "Parse miss");
+
+// A dynamic cd must not DISCARD a good one already found (~35 corpus hits).
+eq("a later dynamic cd keeps the earlier literal one",
+	extractCwdFromBashCommand("cd /repo; cd \"$MISSING\"; claude -p 'go'"), "/repo");
+// …and with no earlier cd, unknown still reads as unknown.
+eq("a dynamic cd alone is still null", extractCwdFromBashCommand("cd $MISSING; claude -p 'go'"), null);
+
+// A subshell group runs its body, exactly as a brace group does.
+eq("subshell body is work", normalizeCommand("( gh pr checks 277; echo done )"), "gh pr checks 277");
+eq("subshell turn classifies from its body", cat(bashTurn("( gh pr checks 277; echo done )")), "git");
+
+// sed's in-place flag has three spellings and they all mean write.
+for (const c of ["sed -i.bak 's/a/b/' bin/wtft.ts", "sed --in-place 's/a/b/' bin/wtft.ts", "sed -i 's/a/b/' bin/wtft.ts"]) {
+	const t = bashTurn(c);
+	assert(`in-place sed records a write: ${c.slice(4, 18)}`,
+		t!.files.some(f => f.path === "bin/wtft.ts" && f.action === "write"), JSON.stringify(t!.files));
+}
+// A non-in-place sed is still a read.
+assert("plain sed -n is a read",
+	bashTurn("sed -n '1,5p' bin/wtft.ts")!.files.some(f => f.action === "read"),
+	JSON.stringify(bashTurn("sed -n '1,5p' bin/wtft.ts")!.files));
 
 // ---------------------------------------------------------------------------
 console.log(`\n${failed === 0 ? GREEN : RED}#106: ${passed} passed, ${failed} failed${RESET}`);

@@ -1647,7 +1647,13 @@ export function isPlausibleCommandToken(token: string): boolean {
 
 export function getSemanticCommandGroup(command: string): string | null {
 	if (command.startsWith(PARSE_MISS_PREFIX)) return PARSE_MISS_GROUP;
-	if (!isPlausibleCommandToken(command)) return PARSE_MISS_GROUP;
+	// Judge the EXECUTABLE token, not the whole command line. Validating the
+	// whole string meant `git status`, `npm run build` and `pip install` all
+	// failed the plausible-name charset (a space is not in it) and were labelled
+	// normalizer residue — so every multi-word command in the histogram was
+	// mislabelled, and the subcommand branches below could never run (#108
+	// review). The arguments still have to be there for those branches.
+	if (!isPlausibleCommandToken(command.split(/\s/)[0]!)) return PARSE_MISS_GROUP;
 	const base = command.split("/").pop() || command; // Strip path prefix e.g. /usr/bin/ls → ls
 	for (const [key, group] of Object.entries(SEMANTIC_GROUPS)) {
 		if (group.commands.has(base)) return group.label;

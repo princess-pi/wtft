@@ -474,6 +474,10 @@ export function stripCommandPrefixes(segment: string): string {
 		// whole group was discarded and a `claude -p` inside one was never seen
 		// as a spawn (#106 review round 4, Medium/correctness).
 		s = s.replace(/^\{\s+/, "");
+		// A SUBSHELL group runs its body too — `( gh pr checks 277; echo done )`
+		// was classified from `echo` because `(` was grammar. Same rule as `{`,
+		// and the closing `)` is still dropped by KEYWORD (#108 review).
+		s = s.replace(/^\(\s*/, "");
 		s = s.replace(DECLARE, "");
 		s = s.replace(ASSIGNMENT, "");
 		s = s.replace(WRAPPER, "");

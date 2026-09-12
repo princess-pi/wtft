@@ -863,7 +863,7 @@ const NUMERIC = /^\d+$/;
 const NOT_A_REPO_FILE = /^\/(?:dev|proc|sys|run|tmp|etc|var|boot|lib|sbin|opt)(?:\/|$)/;
 
 /** Readers that are actually writing when the flag says so (`sed -i`). */
-const IN_PLACE_EDIT = /^(?:sed\s+(?:-\S*\s+)*-i|perl\s+(?:-\S+\s+)*-i|tee)(?:\s|$)/;
+const IN_PLACE_EDIT = /^(?:sed\s+(?:-\S*\s+)*(?:-i\S*|--in-place(?:=\S+)?)|perl\s+(?:-\S+\s+)*-i\S*|tee)(?:\s|$)/;
 
 /** Interpreters running an inline script rather than a file. */
 const INLINE_SCRIPT = /^(?:python3?|node|bun|deno|perl|ruby|php|osascript)\s+(?:-\s*(?:$|<)|-\s|-c(?:\s|$)|-e(?:\s|$))/;
@@ -1588,7 +1588,13 @@ export function extractCwdFromBashCommand(cmd: string): string | null {
 		// permanently, and with nothing raising a failure. Unknown must read as
 		// unknown, because null makes the caller take a safe path and a bad
 		// string makes it take a confident wrong one.
-		if (/[$`]/.test(target)) { found = null; continue; }
+		// KEEP whatever was already found rather than clearing it. An earlier cut
+		// set `found = null` here, so `cd /repo; cd "$MISSING"; claude -p 'go'`
+		// threw away the perfectly good `/repo` and dropped the subagent — an
+		// over-correction of the round-4 fix, and the shape occurs ~35 times in
+		// the corpus (#108 review). With no earlier cd, `found` is already null,
+		// so the unknown-reads-as-unknown contract is unchanged.
+		if (/[$`]/.test(target)) continue;
 		found = target || found;
 	}
 	return found;

@@ -403,10 +403,19 @@ it guards is "this module has exactly one read call", which no exported interfac
 
   - **V11a** — *restated in bytes.* 60 transcripts of 256 KB each whose recorded cwd still
     exists: the tail scan runs for every one (`getCwdReadCount() >= 60`) and reads tails rather
-    than files (`getCwdBytesRead() <= 960 KB`, against the 15,360 KB a whole-file pass costs).
+    than files. The budget is **derived, not a literal** — `SESSIONS x 16 KB`, two first-windows
+    of slack per transcript — against the 60 x 256 KB a whole-file pass costs. The two are orders
+    of magnitude apart, so it is a bound a regression crosses rather than a tuned threshold.
   - **V11b** — *inverted, and the #89 assertion.* The same corpus with every cwd DEAD must cost
-    the same: `getCwdBytesRead() <= 960 KB` and no more reads than the live arm. Before #89 this
-    corpus cost 15,360 KB, so the two are orders of magnitude apart rather than a tuned threshold.
+    the same: the same derived budget, and no more reads than the live arm. Before #89 this corpus
+    cost the full 60 x 256 KB.
+  - **V11f** — *the contract's own fixture.* 200 transcripts, 150 stranded, built to the closer's
+    shape. It asserts what holds — the live half resolves, and the whole pass reads tails — and
+    **declares the clause it cannot satisfy as a `skip()`** rather than asserting its negation:
+    reads are bounded by the corpus, not by the candidate count. An earlier cut asserted
+    `strandedTail >= SESSIONS`, which would have made a future success BREAK the suite. The skip
+    is counted and listed by `tests/run.ts` on every run, so the gap is visible rather than
+    living in a comment.
   - **V11c** — a second discovery re-reads nothing and re-scans nothing. This replaces
     `warm <= cold + 50`, which **could not fail**: a broken memo inflated `warm` *and* the bound
     it was compared against.
@@ -446,8 +455,14 @@ it guards is "this module has exactly one read call", which no exported interfac
   fixtures and imports only node builtins, never the helpers #89 deleted — and it is now a record
   of what that arm cost rather than a measurement of live code.
 
-  The mutation record, since each assertion is only as good as the regression it catches:
-  short-circuiting `pathExists` fails V11a at 60 scans over 60 transcripts; disabling the
+  **The mutation record below is from before #89 and two of its mutations can no longer be
+  performed** — `pathExists` and `getCwdHistoryReadCount` do not exist. It is kept as the record
+  of what guarded the deleted arm. The mutations that gate the CURRENT assertions are: widening a
+  tail window toward the file size fails V11a/V11b on bytes while leaving the read count
+  identical; adding an `fs.readFileSync` anywhere in `session-cwd.ts` fails **V22**, which is the
+  one guard a byte counter cannot be, and which was mutation-checked when it was written.
+
+  The pre-#89 record: short-circuiting `pathExists` fails V11a at 60 scans over 60 transcripts; disabling the
   `cwdCache` read fails V11c at 60 new tail reads; dropping `wtft-tags` from `SKIP_DIRS` fails
   V11e's first half (9 vs 8) and leaves its second green; memoising the walk fails the second
   (8 vs 16) and leaves the first green.
@@ -666,6 +681,26 @@ one set lookup. The relocation records are still IN the transcripts; nothing rea
 more often than `TAIL_WINDOWS`'s original "8 KB resolves every transcript here" assumed, and a
 transcript with no `cwd` at all (every Pi one) widens through all three and then reads whole, which
 is #112. Both figures are now in that module's header, where a reader meets them.
+
+**Where that cost actually sits, which matters for the index that has to remove it**
+(`bun debug/count-picker.ts <cwd> --per-harness`, from `~/git-projects/wtft`):
+
+| harness | candidates | ms | reads | bytes | dir walks |
+|---|---:|---:|---:|---:|---:|
+| `claude-code` | 6 | 1,009 | 9,460 | 281 MB | 2,217 |
+| `pi` | 4 | 1,066 | 5,157 | 305 MB | 0 |
+| `auto` | 10 | 1,939 | 14,617 | 586 MB | 2,217 |
+
+**Pi is slightly more than half of it and walks no directories at all.** An index built for Claude
+discovery alone would leave half the cost in place — worth knowing before direction A is designed,
+and the reason the probe grew a `--per-harness` mode.
+
+**The widening loop also stopped re-reading itself** on this branch. It used to read
+`[size-window, size)` from scratch on each widening, so a transcript that needed all three windows
+cost 8 + 64 + 512 = 584 KB to scan 512 KB. It now reads only the newly exposed prefix and decodes
+the accumulated buffer (bytes once, CPU again — and bytes are what is scarce). Modelled over the
+real corpus the saving is **~2.8%**, because only 28 of 7,318 transcripts widen that far: a large
+per-file win on a rare file, stated at its measured size rather than at its headline ratio.
 
 **Identical candidate counts, ~2.2x faster warm, zero whole-file reads.** No session was lost on
 the corpus this was measured against.

@@ -240,9 +240,14 @@ console.log("\n=== PART B: stranded in a removed worktree (#164 → #89) ===\n")
 	const strandedFromWorktree = path.join(projects, cwdToStrictSlug(removedAbs), "stranded-from-worktree.jsonl");
 	writeTranscript(strandedFromWorktree, removedAbs, [clone, removedAbs, clone, removedAbs]);
 
-	// A session that never left the clone, for the no-regression arm.
+	// A session that never left the clone, for the no-regression arm. PADDED well
+	// past the 8 KB first window (PR review): with every fixture a few hundred
+	// bytes, "reads no more than the fixtures hold" was satisfiable by a
+	// whole-file read of all four — the same vacuity this branch removed
+	// elsewhere. One large fixture is what gives the budget below any teeth.
 	const homebody = path.join(projects, cwdToStrictSlug(clone), "homebody.jsonl");
 	writeTranscript(homebody, clone);
+	fs.appendFileSync(homebody, `${"x".repeat(300 * 1024)}\n`);
 
 	// A Pi-shaped transcript: no cwd, no relocated.
 	const piShaped = path.join(projects, cwdToStrictSlug(clone), "pi-shaped.jsonl");
@@ -283,9 +288,15 @@ console.log("\n=== PART B: stranded in a removed worktree (#164 → #89) ===\n")
 	const bytes = getCwdBytesRead();
 	const fixtureBytes = [strandedFromClone, strandedFromWorktree, homebody, piShaped]
 		.reduce((sum, f) => sum + fs.statSync(f).size, 0);
+	// Four transcripts, one of them 300 KB. A whole-file pass costs `fixtureBytes`;
+	// tails cost a few KB each. The budget sits between them, so it is a bound a
+	// regression can actually cross.
+	const tailBudget = 4 * 16 * 1024;
 	check(tail > 0, "V9: the tail scan did run");
-	check(bytes <= fixtureBytes,
-		`V9: reads no more than the fixtures hold (${bytes} B of ${fixtureBytes} B) — a dead cwd buys no second pass`);
+	check(fixtureBytes > tailBudget * 4,
+		`V9: the fixtures are big enough for the budget to mean something (${Math.round(fixtureBytes / 1024)} KB vs a ${tailBudget / 1024} KB budget)`);
+	check(bytes <= tailBudget,
+		`V9: a dead cwd buys no second pass (${Math.round(bytes / 1024)} KB of ${Math.round(fixtureBytes / 1024)} KB on disk)`);
 
 	// V10 — display renders under the physical slug, which is a directory the
 	// session really started in. It is no longer rewritten to the most recent
@@ -500,11 +511,11 @@ console.log("\n=== PART E: what one launch reads, counted on a test-built corpus
 	/** A transcript big enough that reading it whole is unmistakable in bytes. */
 	const bigFiller = filler.repeat(Math.ceil(FILLER_BYTES / filler.length));
 
-	const buildCorpus = (prefix: string, cwdFor: (i: number) => string): string => {
+	const buildCorpus = (prefix: string, cwdFor: (i: number) => string, count: number = SESSIONS): string => {
 		const root = mktmp(prefix);
 		const proj = path.join(root, "-home-synthetic-project");
 		fs.mkdirSync(proj, { recursive: true });
-		for (let i = 0; i < SESSIONS; i++) {
+		for (let i = 0; i < count; i++) {
 			const id = `39c0de00-1a9b-4c3d-9e8f-${String(i).padStart(12, "0")}`;
 			fs.writeFileSync(path.join(proj, `${id}.jsonl`),
 				bigFiller + JSON.stringify({ type: "user", cwd: cwdFor(i), message: { role: "user", content: "hi" } }) + "\n");
@@ -563,24 +574,44 @@ console.log("\n=== PART E: what one launch reads, counted on a test-built corpus
 	check(strandedTail <= liveTail,
 		`V11b: …and no extra reads either (${strandedTail} vs ${liveTail} live)`);
 
-	// V11f — THE BOUND #89'S CLOSER ASKS FOR, RECORDED AS UNMET (PR review).
+	// V11f — THE CONTRACT'S OWN FIXTURE, and the clause it cannot yet satisfy.
 	//
-	// The closer wants reads bounded by the CANDIDATE count, not the corpus. This
-	// corpus yields ZERO candidates and still costs one read per transcript,
-	// because every remaining arm must ask each transcript where it lives before
-	// it can rule it out. Deleting an arm cannot change that; only an on-disk
-	// index can — #89's direction A ("I" in its 2026-09-15 comment), and the
-	// reason #89 stays OPEN after this branch.
+	// #89's closer asks for 200 transcripts with 150 stranded cwds, and for reads
+	// bounded by the CANDIDATE count rather than the corpus. The shape is built
+	// here; the bound is not met, and is REPORTED rather than asserted.
 	//
-	// Asserted in the direction that is true TODAY, so the day the index lands
-	// this line fails and has to be rewritten to the stronger bound. A comment
-	// would have gone quietly stale instead.
-	const strandedCandidates = discoverSessions("claude-code", liveHome).length;
-	check(strandedCandidates === 0, `V11f: this corpus yields no candidates (${strandedCandidates})`);
-	check(
-		strandedTail >= SESSIONS,
-		`V11f: …and still costs one read per TRANSCRIPT, not per candidate (${strandedTail} reads for ${strandedCandidates} candidates) — #89's closer, unmet until the index`
-	);
+	// An earlier cut asserted the negation — `strandedTail >= SESSIONS` — which
+	// would have made a future success break the suite (PR review). A test that
+	// enforces a contract clause's opposite is worse than no test. `skip()` is
+	// this repo's mechanism for "a check that did not run, said out loud": the
+	// driver counts and lists it, so the gap is visible on every run instead of
+	// living in a comment that goes stale.
+	{
+		const MIXED = 200;
+		const STRANDED = 150;
+		const mixedCorpus = buildCorpus("wtft-89-mixed-",
+			i => (i < STRANDED ? path.join(liveHome, `gone-worktree-${i}`) : liveHome), MIXED);
+		process.env.WTFT_CLAUDE_PROJECTS_DIR = mixedCorpus;
+		resetCwdCache();
+		const mixed = discoverSessions("claude-code", liveHome);
+		const mixedTail = getCwdReadCount();
+		const mixedBytes = getCwdBytesRead();
+
+		check(mixed.length === MIXED - STRANDED,
+			`V11f: the contract's mixed corpus resolves its live half (${mixed.length} of ${MIXED}, ${STRANDED} stranded)`);
+		check(mixedBytes <= MIXED * 16 * 1024,
+			`V11f: …reading tails, not files (${Math.round(mixedBytes / 1024)} KB over ${MIXED} x ${FILLER_BYTES / 1024} KB)`);
+
+		// The clause itself. Reads scale with the corpus because every remaining
+		// arm must ask each transcript where it lives before ruling it out — no
+		// deletion changes that, only the on-disk index (#89's direction A, "I"
+		// in its 2026-09-15 comment), which is why #89 stays OPEN.
+		if (mixedTail > mixed.length) {
+			skip(`#89's closer asks reads be bounded by CANDIDATE count; measured ${mixedTail} reads for ${mixed.length} candidates — unmet until the on-disk index lands`);
+		} else {
+			check(true, `V11f: reads are bounded by candidates (${mixedTail} for ${mixed.length}) — the closer is MET; delete the skip above`);
+		}
+	}
 
 	// V11c — memoisation, asserted as state instead of `warm <= cold + 50`.
 	// The old sibling check could not fail: a broken memo inflates warm, which

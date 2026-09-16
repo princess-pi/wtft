@@ -108,7 +108,7 @@ export function getCwdReadCount(): number {
  * would move neither counter and leave every byte assertion green while the
  * launch re-read gigabytes.
  *
- * So the invariant is enforced structurally rather than trusted: V12 in
+ * So the invariant is enforced structurally rather than trusted: V22 in
  * tests/wtft-issue-144-145-164-session-discovery.test.ts reads this file's own
  * source and fails if a second read call appears in it. A counter cannot police
  * the code that declines to use it; a source assertion can.

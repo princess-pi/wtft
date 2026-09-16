@@ -16,6 +16,10 @@ import wtftManifest from "../docs/manifests/wtft-cmd.json" with { type: "json" }
 import {
 	buildWtftLines,
 	buildTimelineString,
+	// #116 — the empty-report arms render the SPAWNED block too; see
+	// `finishEmptyReport`. Without these two the rendered arms disagreed with --json.
+	renderSpawnTree,
+	emptyTotals,
 	parseSessionFile,
 	parseEntryToInteraction,
 	classifyInteraction,
@@ -907,6 +911,23 @@ async function main() {
 		// not a second scan. Skipped when `pending`, per the note above.
 		if (!opt.pending) scanSessionUncounted();
 		warnProvisionalOnce();
+		// The LINEAGE survives an empty own-total (PR review round 4,
+		// Medium/contract). `--json` reports `spawned` on both of these arms via
+		// `emitSessionJson`; the rendered arms returned before ever reaching
+		// `renderTokenSummary`, so a parent whose own tag had no classified data
+		// yet — the common case for a launcher that spawns and waits — printed
+		// nothing about children worth real money and exited 0. The two modes
+		// disagreed about the same state, and the spec promises the block still
+		// prints when the session has no model-tagged turns.
+		//
+		// `emptyTotals()` because this session's OWN total genuinely is zero here;
+		// the descendants' money is reported beside it, never folded into it.
+		// `sessionSpawnTree()` is memoised, so this is not a second ledger read,
+		// and it is read on the pending arm for the reason `emitSessionJson`
+		// gives: a session log that is not written yet says nothing about whether
+		// the ledger holds edges FOR it.
+		const emptyArmTree = renderSpawnTree(emptyTotals(), sessionSpawnTree());
+		if (emptyArmTree) process.stdout.write(emptyArmTree);
 		// `exitCode` and return, never `process.exit()`: node's stdout is async on
 		// a pipe and `process.exit()` does not wait for pending writes.
 		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;

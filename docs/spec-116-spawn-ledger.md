@@ -477,3 +477,71 @@ number that is wrong in the expensive direction. Removing it would trade ~20 lin
 total whenever a spawner records an edge for a child some other mechanism already folded in.
 Worth knowing it is there; it is the branch's remaining concentration of subtlety, and #129 is why
 it has no regression test.
+
+## Review round 4 — the round that checked whether the last three landed
+
+Nineteen findings, nine blocking. The finding that matters most is not on the list: **four of
+the corrections this document already recorded as fixed had never been written to the file.**
+Round 1 and round 2 each closed with a table row saying so, and the stale sentence was still
+there. A table row is a claim like any other, and nothing was checking it.
+
+So every correction in round 4 was grep-verified before the commit, and the grep is in the
+commit message rather than in a promise.
+
+| # | Finding | Verified | Action |
+|---|---|---|---|
+| 1 | `CONTEXT.md` glossary teaches the retired 8 MiB tail-window read | Yes | Prose — the ledger is read whole or refused |
+| 2 | `CONTEXT.md` Self/tree lists "older than the ledger's tail read" as a floor condition | Yes | Prose — the three real floor conditions, matching README and this spec |
+| 3 | `docs/EXT_WTFT.html` spec index repeats the 8 MiB claim | Yes | Prose |
+| 4 | "roughly 2.2 KiB" maximum record is not derivable from the constants | Yes | Prose — recomputed at just under 3 KiB; the "4 KiB only via escape expansion" conclusion survives |
+| 5 | Walk comment names `seen` and `alreadyCounted`, neither of which exists | Yes | Prose — `outcomeOf`, `visited`, `countedTotals`; the spec's walk section too |
+| 6 | `bin/wtft.ts` still claims spawn-record "shares nothing with the report path" | Yes | Prose — the module-scope work is admitted |
+| 7 | Widget catch names a case that cannot reach it | Yes | Prose — stated as a last-resort guard with no named reachable case |
+| 8 | Round-1 record's counts do not match its own table | Yes | Prose — eight real, seven fixed, one declared; ten advisories, not twelve |
+| 9 | `projectsDir` export rationale names a caller that does not exist | Yes | Prose — nothing outside the file imports it; the export is kept, the reason corrected |
+| 10 | `DEFAULT_MAX_DEPTH` claims the cap prevents a filesystem walk | Yes | Prose — the cap bounds chain length, not breadth, and `resolveSessionById` walks per edge |
+| 11 | Subtraction comment claims "exact" for two different summation paths | Yes | Prose — stated as expected, not guaranteed, with the `Math.max(0, …)` clamp named (#129) |
+| 12 | **The rendered empty-report arms drop the spawned lineage** | Yes | **Code** — `finishEmptyReport` renders the block; D24 |
+
+Two findings needed no change and are recorded as already-correct rather than re-fixed: the
+ordinary-record figure (already ~200 bytes, consistent with 8 MiB ≈ 40,000 spawns), and the
+three `reconciled-against-untested` rows.
+
+### Finding 12, which was a real bug
+
+`--json` reported `spawned` on the pending and no-data arms through `emitSessionJson`. The
+rendered arms returned inside `finishEmptyReport`, before `renderTokenSummary` was reached. So
+a parent whose own tag had no classified data yet — **the ordinary state of a launcher that
+spawns and then waits**, which is the whole case this issue exists for — printed nothing about
+children worth real money and exited 0. Two surfaces, one state, opposite answers, and the
+rendered one was the silence #116 was opened to end.
+
+D24 pins it end to end: an empty own-total with a recorded edge now prints
+
+```
+Daemon started on session c47f1a90-111… — no data yet. Try again in a moment.
+
+SPAWNED    1 session(s) priced from 1 recorded edge(s) (#116) —
+           NOT in TOTAL above, which is this session's own turns
+```
+
+with `total` still exactly 0 and `tree` carrying the descendant's $0.17, and `--json`
+reporting the same one descendant.
+
+**A fixture bug wearing the costume of the contract violation.** D24's first draft gave the
+empty parent the same session uuid as the populated fixture. The moved-session follow (#155)
+resolved the empty path to the populated copy, and the run reported that session's $0.0315 as
+"the empty parent's own total" — which is exactly what folding descendants into `total` would
+look like. Worth recording because the failing assertion was right and the fixture was wrong,
+and the tempting move was to relax the assertion.
+
+### Still open after round 4
+
+| Finding | Where it goes |
+|---|---|
+| The Closer's second clause — an unrecorded child is dropped, not listed as unattributed | **#128**, declared in this spec, needs a direction chosen |
+| `in-self-total` reported for an id folded into a DESCENDANT, where the money is in `spawned.total` rather than in `total` | Needs a decision: a seventh skip value, or a narrower contract for the existing one |
+| An `in-self` child is queued but never parsed, so a grandchild it folded in could be billed twice | Unverified assumption about how deep `attributeClaudeSubAgentCosts` folds; #129 blocks the test |
+| A live descendant is priced from a one-shot parse and reported as settled, with no `provisional` | Semantics to pin down; no field currently says the tree may still grow |
+| Self-attribution discovery runs eagerly even when the ledger holds no edges for the session | Advisory, performance only |
+| The widget swallows spawn-tree throws into a silence identical to "spawned nothing" | Advisory; the CLI reports `ledgerError`, the widget does not |

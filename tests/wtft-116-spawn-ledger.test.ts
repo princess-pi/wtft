@@ -812,5 +812,67 @@ let selfCostWithRecord = 0;
 }
 
 
+// --- D24: an empty own-total does not erase the lineage ---
+//
+// Round-4 review, Medium/contract. `--json` reports `spawned` on the no-data and
+// pending arms through `emitSessionJson`; the RENDERED arms returned inside
+// `finishEmptyReport`, before `renderTokenSummary` was ever reached. A parent
+// whose own tag has no classified data yet — the ordinary state of a launcher
+// that spawns and then waits — printed nothing at all about children worth real
+// money, and exited 0 saying so. Two surfaces, one state, opposite answers.
+{
+	// A session file that exists and parses to zero interactions: one user line,
+	// no assistant turn. That is the no-data arm, not the pending arm (which
+	// needs the file absent).
+	// Its OWN uuid, not PARENT's. Sharing the id made the moved-session follow
+	// (#155) resolve this path to the populated copy under run-N/ and report that
+	// session's $0.0315 as "the empty parent's own total" — a fixture bug that
+	// looked exactly like the contract violation under test.
+	const EMPTY_PARENT = "c47f1a90-1111-4222-8333-444455556666";
+	const emptyDir = path.join(cliDir, "empty-parent");
+	fs.mkdirSync(emptyDir, { recursive: true });
+	const emptyPath = path.join(emptyDir, `${EMPTY_PARENT}.jsonl`);
+	fs.writeFileSync(emptyPath, JSON.stringify({
+		type: "user",
+		timestamp: new Date(Date.UTC(2026, 8, 16, 5, 0)).toISOString(),
+		message: { role: "user", content: "no assistant turn here" },
+	}) + "\n");
+
+	// The edge is recorded, and it points at a child with real spend.
+	const rec = recordCli(["--parent", EMPTY_PARENT, "--child", CLOSER_CHILD, "--mechanism", "herdr-agent-start", "--label", "agent/824"]);
+	check(rec.status === 0, "D24 the edge is recorded before the empty-total run");
+
+	const run = (args: string[]) => spawnSync("node", [CLI_BIN, "-s", emptyPath, ...args], {
+		encoding: "utf8",
+		env: { ...process.env, XDG_STATE_HOME: stateHome, WTFT_CLAUDE_PROJECTS_DIR: cliProjects },
+	});
+
+	const rendered = run(["--tokens"]);
+	// Exit 1 here means the daemon died before writing anything — a fact about
+	// this host, not about the lineage. Skip VISIBLY rather than pass: a silent
+	// skip and a pass look identical in the summary line, which is the whole
+	// failure mode this suite was written against.
+	if (rendered.status === 1) {
+		console.log("  ⏭  D24 SKIPPED — the daemon exited before writing; nothing to render against");
+	} else {
+		const out = (rendered.stdout || "").replace(/\x1b\[[0-9;]*m/g, "");
+		check(out.includes("SPAWNED"),
+			`D24a a session with no turns of its own STILL reports its recorded children (got ${JSON.stringify(out.slice(0, 200))})`);
+		check(out.includes("herdr-agent-start"),
+			"D24b naming the mechanism, exactly as the populated arm does");
+
+		// And the two surfaces agree, which is the property that was broken.
+		const jsonRun = run(["--json"]);
+		const doc = JSON.parse(jsonRun.stdout);
+		check(doc.spawned.descendants === 1,
+			`D24c --json reports the same one descendant (got ${doc.spawned.descendants})`);
+		check(Math.abs(doc.total.costUsd) < 1e-12,
+			`D24d while this session's OWN total is still zero — the lineage is reported BESIDE it, never folded in (total=${doc.total.costUsd}, spawned=${doc.spawned.total?.costUsd}, tree=${doc.tree.costUsd})`);
+		check(doc.tree.costUsd > 0,
+			"D24e and tree carries the descendant's money, so the run is not reporting $0 overall");
+	}
+}
+
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

@@ -42,9 +42,12 @@ export const SPAWN_RECORD_SCHEMA = "wtft/spawn@1";
  *  PIPE_BUF, which is where the number comes from even though the guarantee is
  *  not the pipe one. Two spawners interleaving would lose BOTH edges, not one.
  *
- *  Reachable only through JSON escape expansion in practice: five capped text
- *  fields plus two uuids come to roughly 2.2 KiB of ordinary characters, so the
- *  field cap below normally pre-empts this one. It is the backstop. */
+ *  Reachable only through JSON escape expansion in practice: the five fields
+ *  capped at MAX_FIELD_BYTES (`ts`, `mechanism`, `cwd`, `label`, `model`) alone
+ *  sum to 2560 B (2.5 KiB); with the two session ids and the JSON punctuation
+ *  around all eight fields, the largest record buildable from ordinary
+ *  characters comes to just under 3 KiB — still short of the 4 KiB line below,
+ *  which is why escape expansion is the only way to reach it. */
 export const MAX_RECORD_BYTES = 4096;
 
 /** Per-field cap, applied to EVERY text field — `ts` and `mechanism` as well as

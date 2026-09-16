@@ -155,10 +155,15 @@ function getSettings(_ctx: any) {
  *
  *  `computeSpawnTree` reports a ledger it could not read as `ledgerError`
  *  rather than throwing, and the renderer prints that as its own block — so the
- *  widget shows the failure, it does not hide it. The catch here is for the
- *  cases that still can throw (a project dir that becomes unreadable between
- *  the listing and the stat), where a widget refresh running every turn must
- *  not take the panel down; there, the block is simply absent. */
+ *  widget shows the failure, it does not hide it. The catch here has no named
+ *  reachable case: `resolveSessionById` wraps its `statSync` in try/catch,
+ *  `resolveSessionFile` catches every harness's throw, `computeSpawnTree`
+ *  catches both the ledger read and the parse, and
+ *  `collectSelfAttributedSessionIds` catches its own discoveries — every path
+ *  below this call already turns a failure into a value. It stays as a
+ *  last-resort guard anyway, because a widget refresh running every turn must
+ *  not take the panel down if one of those guarantees turns out to be wrong;
+ *  there, the block is simply absent. */
 function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | undefined {
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	if (!sessionFile) return undefined;

@@ -321,14 +321,17 @@ exists, it was simply never written down)
 **Spawn ledger** (#116):
 The append-only `$XDG_STATE_HOME/wtft/spawns.jsonl` (`~/.local/state/wtft/spawns.jsonl` by
 default), one JSON line per parent→child spawn edge, written by the spawner at spawn time with
-`wtft spawn-record`. It is the ONLY record of a launcher-spawned edge. A reader takes the last
-8 MiB, never the whole file. "Ledger" to refer, "spawn ledger" on first use in a passage.
+`wtft spawn-record`. It is the ONLY record of a launcher-spawned edge. A reader takes the whole
+file or none of it: a ledger over 8 MiB is refused outright rather than partly read, because
+reading part of it would drop edges without saying which. "Ledger" to refer, "spawn ledger" on
+first use in a passage.
 _Avoid_: Spawn log, lineage file, parent map, edge database
 
 **Self / tree** (#116):
 **Self** is a session's own turns — what `total` has always meant and still means. **Tree** is
 self plus every RESOLVED descendant reached through the spawn ledger, so it is a floor whenever
-anything went uncounted — unattributed, past the depth cap, or older than the ledger's tail read. Both are explicit fields under `--json`; the human table shows the
+anything went uncounted — `unattributed` non-empty, `depthCapped` non-zero, or `ledgerError` set.
+Both are explicit fields under `--json`; the human table shows the
 split as `TOTAL` / `SPAWNED` / `TREE`, and shows none of the three when this session recorded no
 edges. Never write a bare "the session's cost" where the two can differ.
 _Avoid_: Rollup, grand total, inclusive cost (each hides which of the two is meant)

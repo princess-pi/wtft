@@ -30,10 +30,14 @@ export const SPAWN_TREE_SCHEMA = "wtft/spawn-tree@1";
 
 /**
  * Default recursion bound. A `pr-review` lens child spawns its own children, so
- * this genuinely nests; 5 is deep enough for every mechanism that exists today
- * and shallow enough that a runaway ledger cannot turn one `wtft` run into a
- * filesystem walk. The number in force is REPORTED, so a reader never has to
- * know this constant to interpret a truncated tree.
+ * this genuinely nests; 5 is deep enough for every mechanism that exists today.
+ * It bounds CHAIN LENGTH — how many generations of edge the walk will follow —
+ * not total filesystem work: `resolveSessionFile` calls `resolveSessionById`
+ * for every unseen edge, and the Claude Code implementation readdirs the
+ * projects root and recursively collects every `.jsonl` on EACH call, and depth
+ * does not bound breadth, so a ledger with many edges at one depth costs many
+ * such walks regardless of this cap. The number in force is REPORTED, so a
+ * reader never has to know this constant to interpret a truncated tree.
  */
 export const DEFAULT_MAX_DEPTH = 5;
 
@@ -265,17 +269,19 @@ export function computeSpawnTree(
 	// reaches every session at its MINIMUM depth, so the cap cuts what is
 	// genuinely deep and nothing else.
 	//
-	// `seen` starts holding the ROOT, which is what makes a cycle terminate and
-	// what stops a session being billed as its own descendant. `alreadyCounted`
-	// carries the ids whose cost is already inside the caller's SELF total — a
-	// `claude -p` child the parent's own transcript names, or a Task child under
-	// `<session>/subagents/`. A spawner that also records one of those as an
-	// edge would otherwise have it billed twice, once in `total` and once in
-	// `spawned.total`, and `tree` would be wrong in the expensive direction.
-	// One map, three outcomes, so a repeat edge can say what happened the first
-	// time instead of guessing. The ROOT is seeded `in-self`, because its money
-	// IS the self total — an edge pointing back at it (a cycle) is neither a
-	// gap nor a second count.
+	// `outcomeOf` starts holding the ROOT as `in-self`, which is what makes a
+	// cycle terminate and what stops a session being billed as its own
+	// descendant — its money IS the self total, so an edge pointing back at it
+	// is neither a gap nor a second count. The ids in `options.alreadyAttributed`
+	// are seeded the same way: a `claude -p` child the parent's own transcript
+	// names, or a Task child under `<session>/subagents/`, whose cost is
+	// already inside the caller's SELF total. A spawner that also records one
+	// of those as an edge would otherwise have it billed twice, once in `total`
+	// and once in `spawned.total`, and `tree` would be wrong in the expensive
+	// direction. One map, three outcomes, so a repeat edge can say what
+	// happened the first time instead of guessing. `visited` is the separate
+	// set of ids already queued, so a seeded `in-self` id is descended into
+	// exactly once however many edges point at it.
 	type Outcome = "counted" | "unresolved" | "in-self";
 	const outcomeOf = new Map<string, Outcome>([[rootSessionId, "in-self"]]);
 	for (const id of options.alreadyAttributed ?? []) outcomeOf.set(id, "in-self");
@@ -373,12 +379,20 @@ export function computeSpawnTree(
 					const already = countedTotals.get(id);
 					if (already) {
 						// Reached as its own edge FIRST, and now folded in here
-						// as well. Its cost is already in `tree.total`, so take
-						// it back out of this descendant rather than adding it
-						// twice. Both figures come from `computeSessionSummary`
-						// over the same file, so the subtraction is exact; the
-						// clamp is there because a number that went negative
-						// would be a louder lie than the one it replaced.
+						// as well. Its cost is already in `tree.total` (`already`
+						// is what `countedTotals` recorded for IT, after any
+						// subtraction applied during its own visit), so take it
+						// back out of this descendant's `total` rather than
+						// adding it twice. The two figures are NOT re-derived
+						// from the same summation: `already` came from running
+						// `computeSessionSummary` on the child's own file, while
+						// `total` here is this DESCENDANT's summary, which folded
+						// the child's cost in through `parseSessionFile` /
+						// `attributeClaudeSubAgentCosts` — a different path, not
+						// a re-run of `computeSessionSummary` on the child. The
+						// two are expected to agree, not guaranteed to; the
+						// Math.max(0, …) clamp below would silently hide a
+						// mismatch rather than report one (untested, #129).
 						subtractTotals(total, already);
 					} else if (!outcomeOf.has(id)) {
 						// Not reached yet — mark it, so its own edge reports

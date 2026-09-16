@@ -61,9 +61,10 @@ what that rests on: POSIX does not promise atomicity for a `write(2)` to a **reg
 which is what makes a single-call O_APPEND write land whole in practice; 4096 is a deliberately
 conservative bound on how much we lean on that, and is where the number comes from.
 Every text field — `ts` and `mechanism` included, not only the three optional ones — is capped at
-512 bytes to keep that true in practice, which puts the LARGEST possible record at
-roughly 2.2 KiB — an ordinary one, like the example line above, is about 200 bytes — and makes the
-4 KiB refusal a backstop reachable only through JSON escape expansion. The cap counts the
+512 bytes to keep that true in practice: five such fields alone are 2560 B (2.5 KiB), and with the
+two session ids and the JSON punctuation around all eight fields the LARGEST possible record comes
+to just under 3 KiB — an ordinary one, like the example line above, is about 200 bytes — and makes
+the 4 KiB refusal a backstop reachable only through JSON escape expansion. The cap counts the
 newline, because the newline is part of the write that has to land whole. A **short write** — a
 `write(2)` that returns fewer bytes than it was given — is reported as a failed append rather than
 retried: a retry would append the remainder as a second record.
@@ -136,7 +137,8 @@ reintroduced inside #116's fix. An *absent* ledger is not an error: nothing has 
 
 **The walk** is breadth-first from the reported session through `childrenOf`:
 
-- **A session is counted at most once.** A `seen` set over session ids means a diamond (two
+- **A session is counted at most once.** A `visited` set means a session is queued at most once,
+  and the `outcomeOf` map records what happened the first time it was reached — so a diamond (two
   recorded edges to the same child) or a cycle contributes its cost once, not twice.
 - **The walk is breadth-first**, which is a correctness property rather than a taste: it reaches
   every session at its MINIMUM depth. Depth-first marked a child seen at whatever depth ledger
@@ -357,8 +359,9 @@ Fixing them here would have buried a 600-line change in a 2,000-line one.
 
 ## PR review round 1 (2026-09-16)
 
-Eight blocking findings, each reproduced against the code before adopting. Six were real and are
-fixed in the branch; the table above's rows are unchanged, and these are additional.
+Eight blocking findings, each reproduced against the code before adopting. All eight were real:
+seven are fixed — six in code, one in prose — and one is declared rather than reworded (its own
+row below says why). The table above's rows are unchanged, and these are additional.
 
 | Finding | Verified? | Action |
 |---|---|---|
@@ -371,7 +374,7 @@ fixed in the branch; the table above's rows are unchanged, and these are additio
 | `tree` is a floor in more cases than the docs named | **Yes** — depth cuts and the tail bound too | Prose, on all four surfaces |
 | **Deleting the record makes the child disappear, not unattributed** | **Yes, and the spec had reworded the Closer to match** | **Declared, not reworded** — see *How this is verified*. The listing the clause needs is **#128** |
 
-Twelve advisory findings were taken as well, all prose: the `2 KiB` figure (that is the *maximum*
+Ten advisory findings were taken as well, all prose: the `2 KiB` figure (that is the *maximum*
 record; an ordinary one is ~200 bytes), the `--tokens` example that no renderer could produce, the
 SPAWNED headline that counted priced sessions while saying "recorded", the widget catch's named
 case that could not throw, the stale "shares nothing with the report path", the memo rationale that

@@ -363,12 +363,17 @@ const cfg = loadConfig("wtft", { interval: "1h", limit: 100, mode: "cumulative" 
 const manifest = wtftManifest;
 const daemonDir = path.dirname(fileURLToPath(import.meta.url));
 
-// `wtft spawn-record` (#116) — a POSITIONAL subcommand. It shares nothing with
-// the report path: a launcher calling it must not load a session, start a
-// daemon, or read a transcript. It is dispatched at the entry-point guard at
-// the bottom of this file INSTEAD OF `main()`, because `parseWtftCliArgs`
-// ignores arguments it does not recognise (#91) — so letting `spawn-record`
-// fall through would quietly run a full report instead of recording an edge.
+// `wtft spawn-record` (#116) — a POSITIONAL subcommand. The dispatch below
+// skips `main()` entirely, which is the report path's own work — loading a
+// session, starting a daemon, reading a transcript — none of which a launcher
+// calling `spawn-record` needs. It does NOT avoid everything upstream:
+// `loadConfig` and `parseWtftCliArgs` both run at MODULE SCOPE above, before
+// this guard is even reached, so `spawn-record` still pays for a config load
+// and an argument parse it has no use for. It is dispatched at the
+// entry-point guard at the bottom of this file INSTEAD OF `main()`, because
+// `parseWtftCliArgs` ignores arguments it does not recognise (#91) — so
+// letting `spawn-record` fall through would quietly run a full report instead
+// of recording an edge.
 const isSpawnRecord = process.argv[2] === "spawn-record";
 
 // Parse all CLI args through the shared parser (#94)

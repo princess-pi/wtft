@@ -1960,9 +1960,10 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
 		// exact. Reachable only where both halves meet: `nativeCost` is set by Pi
 		// alone (Claude Code's adapter pins it null) and `calculateServerToolCost`
 		// bills only identifiable Anthropic model ids. Measured 2026-09-16 over
-		// 400 Pi transcripts: 0 carry either field, so 0 can carry both. Pinned by
-		// TEST 5 in the #90 suite, which asserts the CURRENT behaviour on exactly
-		// that shape so the day it becomes reachable, the change is visible.
+		// 400 Pi transcripts: 0 carry either field, so 0 can carry both. TEST 5 in
+		// the #90 suite pins HOW FAR AWAY that is — a Claude Code transcript
+		// ignores a Pi-shaped cost block entirely — and not the route itself,
+		// which needs a Pi transcript no fixture here can be. Reaching it is #118.
 		if (i.serverToolCost) {
 			total.costUsd += i.serverToolCost;
 			m.costUsd += i.serverToolCost;

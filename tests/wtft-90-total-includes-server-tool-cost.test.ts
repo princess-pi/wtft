@@ -69,7 +69,9 @@ function usageLine(opts: { id: string; ts: string; cr?: number; cw?: number; web
 
 /** Two fixtures identical but for the server-tool requests on the middle turn.
  *  The PAIR is what makes the assertions non-vacuous: a difference of exactly
- *  $0.15 can only come from the meter this issue is about. */
+ *  `EXPECTED_WEB_COST` can only come from the meter this issue is about. No
+ *  figure is written here — the rule 25 lines above forbids re-typing the card,
+ *  and a docstring is exactly where such a literal goes stale unguarded. */
 function fixture(name: string, web: number): string {
 	const at = path.join(dir, name);
 	fs.writeFileSync(at, [
@@ -142,7 +144,15 @@ console.log("--- TEST 0: the gate is not vacuous ---");
 // — the model ages out of the server-tool card, the argument order changes, the
 // parser stops populating serverToolCost — every one of them holds trivially
 // with the divergence fully restored, and the suite exits 0 reporting success.
-check(EXPECTED_WEB_COST > 0, `the meter prices ${WEB_REQUESTS} web-search requests above zero ($${EXPECTED_WEB_COST})`);
+// AGAINST THE TOLERANCE IT PROTECTS, not against zero (PR review). The chart and
+// TOTAL figures are scraped from `formatCost` at two decimals and compared at
+// half a cent, so a charge below a cent leaves TEST 2 and TEST 2b holding
+// trivially with the divergence fully restored — and TEST 2 is the exact
+// comparison whose absence let this bug survive.
+check(
+	EXPECTED_WEB_COST >= 0.01,
+	`the meter prices ${WEB_REQUESTS} web-search requests at a cent or more ($${EXPECTED_WEB_COST}) — below that the scraped comparisons go vacuous`
+);
 
 console.log("--- TEST 1: the fixture really exercises the meter ---");
 const docWeb = json(withWeb);
@@ -177,10 +187,17 @@ for (const [name, session] of [["with server-tool spend", withWeb], ["without", 
 }
 
 console.log("--- TEST 2b: the rise lands on the surface the decision was about ---");
-// Asserted directly rather than inferred. TEST 2 bounds the --tokens delta only
-// transitively, at ±0.01 — two cents of slack for a claim stated in cents.
+// Asserted directly rather than inferred. TEST 2 bounds this delta only
+// transitively: |chart−tokens| < 0.005 and |doc−chart| < 0.005 give |tokens−doc|
+// < 0.01 per fixture, so the DELTA across two fixtures is bounded to ±0.02 —
+// four cents of width, not the two an earlier comment claimed.
+//
+// Tolerance is one cent, because `tokensTotal` scrapes two-decimal output: the
+// delta is always a whole number of cents, so holding it to half a cent would
+// fail on any card that priced these requests off a cent boundary — a false
+// failure in exactly the "the day the card moves" case this file is built for.
 check(
-	Math.abs(tokensTotal(withWeb) - tokensTotal(noWeb) - EXPECTED_WEB_COST) < 0.005,
+	Math.abs(tokensTotal(withWeb) - tokensTotal(noWeb) - EXPECTED_WEB_COST) <= 0.01,
 	`--tokens TOTAL itself rose by $${EXPECTED_WEB_COST.toFixed(2)}`
 );
 
@@ -204,19 +221,42 @@ console.log("--- TEST 3b: the WARM path, which is what a user actually hits ---"
 // and this is what holds it to that.
 const warmFixture = path.join(dir, "warm.jsonl");
 fs.copyFileSync(withWeb, warmFixture);
-const warmRuns = [1, 2, 3].map(() => {
+
+// SYNCHRONISED, or it proves nothing (PR review). Back-to-back runs with exit 9
+// tolerated can all three read a session whose tag file does not exist yet —
+// three COLD runs, reporting coverage of a warm path that never ran. So the
+// first run primes, and the warm runs wait for the tag file to actually carry a
+// classified line before they are allowed to mean anything.
+const warmTagsDir = path.join(dir, "wtft-tags");
+function tagLineCount(): number {
+	try {
+		return fs.readdirSync(warmTagsDir)
+			.filter(n => n.startsWith("warm.jsonl"))
+			.flatMap(n => fs.readFileSync(path.join(warmTagsDir, n), "utf8").split("\n"))
+			.filter(l => l.trim() && !l.includes('"_hb"') && !l.includes('"_meta"'))
+			.length;
+	} catch { return 0; }
+}
+function runJson(): any {
 	const r = spawnSync("node", [CLI_BIN, "-s", warmFixture, "--json"], { encoding: "utf8" });
 	if (r.status !== 0 && r.status !== 9) throw new Error(`warm run exited ${r.status}: ${r.stderr}`);
 	return JSON.parse((r.stdout || "").replace(/\x1b\[[0-9;]*m/g, ""));
-});
+}
+runJson(); // prime: spawns the daemon that writes the tag file
+const tagDeadline = Date.now() + 20_000;
+while (Date.now() < tagDeadline && tagLineCount() === 0) { /* daemon poll is 667ms */ }
+const tagged = tagLineCount();
+check(tagged > 0, `a tag file exists before the warm runs (${tagged} classified line(s)) — otherwise these are three cold runs`);
+
+const warmRuns = [1, 2, 3].map(() => runJson());
 check(
-	warmRuns.every(d => Math.abs(d.total.costUsd - docWeb.total.costUsd) < 1e-9),
-	`three runs against the SAME fixture agree with the cold one ($${warmRuns.map(d => d.total.costUsd).join(", $")})`
+	warmRuns.every(d => Math.abs(d.total.costUsd - docWeb.total.costUsd) < 0.005),
+	`three runs against the SAME, already-tagged fixture agree with the cold one ($${warmRuns.map(d => d.total.costUsd).join(", $")})`
 );
 check(
 	warmRuns.every(d => {
 		const w = d.categories.find((c: any) => c.category === "web");
-		return Math.abs(w.costUsd - EXPECTED_WEB_COST) < 1e-9;
+		return Math.abs(w.costUsd - EXPECTED_WEB_COST) < 0.005;
 	}),
 	"…and the web category still carries the server-tool cost after the round-trip"
 );
@@ -256,9 +296,27 @@ check(
 	Math.abs(webCat(docUntagged).costUsd - EXPECTED_WEB_COST) < 1e-9,
 	"…the tagged turn's server-tool cost still lands in `web`"
 );
+// SAME POPULATION, or the check is vacuous (PR review). Compared against
+// `docWeb` it was already lower by a whole extra tagged turn, with slack wider
+// than the untagged turn's own cost — so it passed whether that cost was
+// excluded (the behaviour under test) or fully included. The control is the
+// identical fixture with its third turn TAGGED: the only difference between the
+// two documents is then the model id on that one turn.
+const withTaggedThird = path.join(dir, "tagged-third.jsonl");
+fs.writeFileSync(withTaggedThird, fs.readFileSync(withUntagged, "utf8").replace('"<synthetic>"', '"claude-opus-5"'));
+const docTaggedThird = json(withTaggedThird);
+const thirdTurnCost = docTaggedThird.total.costUsd - docUntagged.total.costUsd;
 check(
-	docUntagged.total.costUsd < docWeb.total.costUsd + 0.05,
-	"…and the untagged turn's own spend stays OUT of total.costUsd, as documented"
+	docTaggedThird.untaggedInteractions === 0,
+	"the control fixture tags all three turns"
+);
+check(
+	thirdTurnCost > 0.005,
+	`…the third turn is worth something ($${thirdTurnCost.toFixed(4)}), so its exclusion is observable`
+);
+check(
+	Math.abs(docUntagged.total.costUsd - (docTaggedThird.total.costUsd - thirdTurnCost)) < 1e-9,
+	"…and untagging it removes exactly its own cost from total.costUsd, as documented"
 );
 
 // F2 — the one assumption this change makes: `i.cost` does not already contain

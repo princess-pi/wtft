@@ -142,7 +142,18 @@ equality is unaffected.
 
 **The chart's total is still a different number, legitimately, for ONE reason:**
 the bar chart bins *every* interaction, so it includes the untagged spend this
-`total` excludes. That divergence predates #26 and remains.
+`total` excludes. That divergence predates #26 and remains — and a machine
+consumer **cannot currently size it**: `untaggedInteractions` is a count, and no
+field carries the excluded cost, so on a session with untagged turns `--json`
+under-reports "what this session cost" by an amount the document does not
+expose. **#119** owns that.
+
+**`total.costUsd` changed meaning under an unchanged `schema`.** `wtft/session@1`
+shipped with the old arithmetic, and a program pinned to it now sees the number
+move with nothing to branch on — `notices[]` gains no code, and this document
+declares its own prose non-contractual. Direction A was chosen knowing it was the
+incompatible option; what it did not settle is whether the incompatibility gets a
+machine-readable marker. **#120** owns that.
 
 ### The seam
 

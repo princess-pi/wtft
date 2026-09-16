@@ -1873,14 +1873,28 @@ function addInteraction(into: TokenTotals, i: Interaction): void {
  * nowhere else. That is what makes `sum(models) === sum(categories) === total`
  * hold — exactly for the token integers, within floating-point accumulation
  * error for `costUsd` (docs/spec-26-json.md pins the tolerance) — and it is
- * deliberately a narrower population than the bar
- * chart's, which bins every interaction. A chart total and this total can
- * legitimately differ, by TWO things: the untagged spend excluded here, and
- * `serverToolCost`, which `buildWtftLines` adds to the chart's `web` bin and
- * which no summing of `i.cost` reaches. Both divergences predate #26 — the
- * rendered `--tokens` table has always summed `i.cost` alone — and #26
- * deliberately did not change the arithmetic, only gave it a second reader.
- * docs/spec-26-json.md records both.
+ * deliberately a narrower population than the bar chart's, which bins every
+ * interaction.
+ *
+ * SERVER-SIDE TOOL SPEND IS IN THESE TOTALS (#90, direction A). It did not used
+ * to be: `buildWtftLines` added `serverToolCost` to the chart's `web` bin while
+ * this function summed `i.cost` alone, so the chart's running total, the
+ * `--tokens` TOTAL row and `--json`'s `total.costUsd` disagreed by the
+ * web-search and web-fetch spend — and no test compared the chart's total to
+ * either of the others, which is how it survived. The number a reader sees under
+ * the word TOTAL now means what the word says.
+ *
+ * It is attributed the way the chart attributes it — to `web`, not to the
+ * requesting turn's own category — so `sum(categories) === total` still holds
+ * and a category row names the same category the bars do. NOT the same NUMBER,
+ * and the distinction is this function's own exclusion talking: the chart bins
+ * every interaction while these rows drop the untagged ones, and `categories[]`
+ * is session-wide where a bar is per-bin. Placement agrees; magnitude need not.
+ * Per model it goes to the model that made the request, which is the only model
+ * that could have.
+ *
+ * One divergence from the chart total remains, and it is the untagged spend
+ * excluded here. docs/spec-26-json.md records it.
  */
 export function computeSessionSummary(interactions: Interaction[]): SessionSummary {
 	const deduped = deduplicateInteractions(interactions);
@@ -1930,6 +1944,31 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
 		const cat = classifyInteraction(i);
 		const c = byCategory.get(cat) ?? byCategory.get("other")!;
 		addInteraction(c, i);
+
+		// Server-side tool requests are billed PER REQUEST, on a meter with no
+		// tokens on it (#73), so this is a cost-only addition — adding it inside
+		// `addInteraction` would have been wrong for exactly one field and right
+		// for none of the others. `web` rather than `cat` because that is where
+		// the bar chart puts it, and a category row that disagreed with the bar
+		// drawn above it would trade one divergence for a subtler one.
+		//
+		// ONE ASSUMPTION, NAMED (PR review, #118): that `i.cost` does not already
+		// contain this charge. It is a sum, not a replacement, so a harness whose
+		// native per-turn cost is its BILLED figure — which could include
+		// web-search spend — would be double-counted, and #90 moves that from an
+		// approximate chart into `--tokens` and `--json`, which programs read as
+		// exact. Reachable only where both halves meet: `nativeCost` is set by Pi
+		// alone (Claude Code's adapter pins it null) and `calculateServerToolCost`
+		// bills only identifiable Anthropic model ids. Measured 2026-09-16 over
+		// 400 Pi transcripts: 0 carry either field, so 0 can carry both. TEST 5 in
+		// the #90 suite pins HOW FAR AWAY that is — a Claude Code transcript
+		// ignores a Pi-shaped cost block entirely — and not the route itself,
+		// which needs a Pi transcript no fixture here can be. Reaching it is #118.
+		if (i.serverToolCost) {
+			total.costUsd += i.serverToolCost;
+			m.costUsd += i.serverToolCost;
+			byCategory.get("web")!.costUsd += i.serverToolCost;
+		}
 	}
 
 	const models: ModelTotals[] = Array.from(byModel.entries())
@@ -2058,8 +2097,8 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 	}
 
 	// Compaction summary (princess-pi-tools#90, pre-extraction numbering — not
-	// this repo's #90, which is the serverToolCost divergence) — show how many
-	// tokens were freed by compaction
+	// this repo's #90, which is the inclusion of serverToolCost in TOTAL) — show
+	// how many tokens were freed by compaction
 	if (summary.compaction.events > 0) {
 		out += `\nCompaction: ${summary.compaction.events} event(s), ${formatTokenCount(summary.compaction.tokensFreed)} total tokens freed\n`;
 	}

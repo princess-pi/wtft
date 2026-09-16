@@ -120,13 +120,40 @@ folded into `other`. Dropping it would have been the silent option and would hav
 broken the guarantee with nothing to signal it; giving it a row of its own would
 have broken the positional addressability `categories[]` sells.
 
-**The chart's total is a different number, legitimately, for two reasons.** The
-bar chart bins *every* interaction, so it includes the untagged spend this
-`total` excludes; and `buildWtftLines` adds `serverToolCost` to its `web` bin,
-which no summing of per-interaction `cost` reaches. Both predate #26 — the
-rendered `--tokens` table has always summed `cost` alone — and #26 deliberately
-did not change the arithmetic, only gave it a second reader. The gap is **#90**,
-filed rather than fixed here because closing it changes the human table's numbers.
+**Server-side tool spend is inside `total.costUsd` (#90, direction A).** It was
+not, until #90: `buildWtftLines` added `serverToolCost` to the chart's `web` bin
+while `computeSessionSummary` summed `cost` alone, so the chart's running total,
+the `--tokens` TOTAL row and this `total.costUsd` disagreed by the web-search and
+web-fetch spend. The number under the word TOTAL now means what the word says,
+and **the `--tokens` TOTAL a reader sees rose by the session's MODEL-TAGGED
+server-tool spend** — the accepted consequence of A, recorded here rather than
+discovered. Model-tagged, precisely: the addition sits inside the loop body an
+untagged interaction never reaches, so it carries the same exclusion every other
+number here carries.
+
+It is attributed to the **`web`** category, which is where the chart puts it, so
+the guarantee above still holds and a category row names the same category the
+bars do. **Not the same number** — the chart bins every interaction while these
+rows drop the untagged ones, and `categories[]` is session-wide where a bar is
+per-bin. Per model it goes to the model that made the request. It carries **no
+tokens**: server-side tool calls are billed per request, on a meter with no token
+counts on it (#73), so the five token fields are untouched and their exact
+equality is unaffected.
+
+**The chart's total is still a different number, legitimately, for ONE reason:**
+the bar chart bins *every* interaction, so it includes the untagged spend this
+`total` excludes. That divergence predates #26 and remains — and a machine
+consumer **cannot currently size it**: `untaggedInteractions` is a count, and no
+field carries the excluded cost, so on a session with untagged turns `--json`
+under-reports "what this session cost" by an amount the document does not
+expose. **#119** owns that.
+
+**`total.costUsd` changed meaning under an unchanged `schema`.** `wtft/session@1`
+shipped with the old arithmetic, and a program pinned to it now sees the number
+move with nothing to branch on — `notices[]` gains no code, and this document
+declares its own prose non-contractual. Direction A was chosen knowing it was the
+incompatible option; what it did not settle is whether the incompatibility gets a
+machine-readable marker. **#120** owns that.
 
 ### The seam
 
@@ -328,13 +355,16 @@ file-level scope says fix or file, and the Action column says which.
 | `tests/wtft-26-json.test.ts` | `categories[]` vs the imported `CATEGORY_ORDER`; a hardcoded `EXIT_PROVISIONAL = 9`; an exit-code scan of one file | all three compare the code to itself, or miss 130 | ✅ itself | **Test fixed** |
 | `CONTEXT.md` | no term for the new output mode; CLI entry listed two CLI-only modes | `--json` is a third | ✅ `wtft-75-doc-claims.test.ts` | Fixed: **JSON mode** and **Provisional** entries added |
 
+**#90 was filed here and has since been FIXED** (direction A, 2026-09-16):
+`computeSessionSummary` adds `serverToolCost`, so the chart's running total, the
+`--tokens` TOTAL row and `total.costUsd` are one number. Gate:
+`tests/wtft-90-total-includes-server-tool-cost.test.ts`, which drives all three
+surfaces through the CLI — the comparison whose absence let the divergence
+survive. See *The one arithmetic guarantee* above for the rule now in force.
+
 **Filed rather than fixed** — pre-existing, out of this branch's scope, each with
 a consequence named in its issue:
 
-- **#90** — `total.costUsd` excludes `serverToolCost`, which the bar chart
-  includes, so the chart and the table/JSON disagree by the session's
-  server-side tool spend. Fixing it changes the human table's numbers, which is
-  a decision, not a patch.
 - **#91** — `parseWtftCliArgs` silently ignores unknown flags and malformed
   values, so a typo'd `--jsonn` renders a full ANSI chart and exits 0. `--json`
   is what makes this dangerous rather than untidy.

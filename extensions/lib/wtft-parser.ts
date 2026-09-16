@@ -707,6 +707,18 @@ export function deduplicateInteractions(interactions: Interaction[]): Interactio
 				if (i.interrupted) merged.interrupted = true;
 				if (i.afterCompaction) merged.afterCompaction = true;
 				if (i.surgePriced) merged.surgePriced = true;
+				// isSidechain joins them for the same reason, and #115 is why
+				// it now matters: `cacheMiss` used to be a pure function of the
+				// winning copy's own usage block, so the merge could not get it
+				// wrong. It is now a function of the entry ENVELOPE, which a
+				// re-logged copy of the same message id need not carry — and if
+				// that copy won on cost, the divider fired on the very spawn the
+				// gate suppresses. One copy knowing it is a sidechain settles it
+				// for the message, and the label it drives goes with it.
+				if (i.isSidechain) {
+					merged.isSidechain = true;
+					merged.cacheMiss = undefined;
+				}
 			}
 			if (mergedToolCats.size > 0) merged.toolCats = [...mergedToolCats];
 			deduped.push(merged);
@@ -1505,6 +1517,24 @@ export function loadSubagentInteractions(
 			const raw = parseFn(file);
 			const deduped = dedupFn(raw);
 			for (const interaction of deduped) {
+				// PROVENANCE, not the envelope, settles the Cache Miss divider
+				// (#115). Claude Code stamps `isSidechain` on every turn of a
+				// subagent transcript, so the parse-time gate already catches
+				// those — but Pi marks a subagent at FILE level, with a
+				// `parentSession` header and no per-entry flag (Pattern 2 in
+				// discoverSubagentSessionFiles), and nothing stamps the nested
+				// `subagents/workflows/wf_<id>/` layout either. Every
+				// interaction reaching this loop came out of a subagent
+				// transcript whatever its harness writes, so its cold start is a
+				// fresh context rather than a lost prefix, in every harness.
+				//
+				// Only the divider's flag is cleared here, deliberately.
+				// `isSidechain` itself also gates recache detection
+				// (splitOverheadCost), and setting it from provenance would move
+				// subagent interactions between overhead buckets — a bigger
+				// change than this issue, and one that belongs with the
+				// subagent-accounting work (#15).
+				interaction.cacheMiss = undefined;
 				interaction._cat = classifyFn(interaction);
 				interactions.push(interaction);
 			}

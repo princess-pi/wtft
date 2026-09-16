@@ -136,7 +136,14 @@ Renaming makes the label state what was measured and stops the divider from maki
 new implementation deliberately gave up the ability to check. Touch points: the divider string
 at `wtft-renderer.ts:1214` and its description in `docs/EXT_WTFT.html:164`.
 
-### Subagent cold starts are marked too
+### Subagent cold starts are marked too — SUPERSEDED by Amendment 1 (#115)
+
+> **Superseded in full. Do not implement from this section.** #115 reversed the decision it
+> records: sidechains ARE gated out, at parse time and again from provenance. What follows is
+> kept as the record of what was traded away and at what measured cost — the `a578` numbers
+> below are still accurate about that session, and are the reason the reversal needed its own
+> measurement rather than an assertion. Read Amendment 1 at the end of this file for the rule
+> in force.
 
 Each subagent sidechain runs against its own cache namespace, so its first turn is a genuine
 miss and now draws a divider on the parent timeline.
@@ -148,9 +155,11 @@ miss and now draws a divider on the parent timeline.
 tag file, sees `undefined` for every interaction. Excluding sidechains therefore means adding a
 wire field *and* bumping `WTFT_TAGGER_VERSION` to re-tag every session.
 
-*Superseded in part: the bump happened anyway, for the correctness reason above. The
-measurement below still stands as the reason sidechains are **not** gated out — that decision
-was never about the bump alone, and adding an `isSidechain` wire field remains unjustified.*
+*Superseded twice, and the second time in full. First in part — the bump happened anyway, for
+the correctness reason above. Then by #115: the measurement below is no longer a reason to keep
+sidechains flagged, because it counted dividers without asking which of them a reader could act
+on. No `isSidechain` wire field was ever added, and none was needed: the gate is applied before
+the tag line is written, so the tag file still carries no such field.*
 
 Measured against that cost, on `a578` — the most subagent-heavy session on this machine, 31
 sidechain transcripts across two workflow bursts — its v2.6.1 tag file yields:
@@ -168,6 +177,8 @@ exists to make.
 
 **Decision: no `isSidechain` wire field, no sidechain gating.** Recorded so the omission is
 deliberate; revisit only if a session shows the dividers actually crowding the render.
+**Revisited and reversed — #115, Amendment 1.** The "no wire field" half held; the "no gating"
+half did not survive contact with fan-out.
 
 ### Road not taken: partial re-primes
 
@@ -339,7 +350,34 @@ to keep true.
 on every already-tagged session. Patch, not minor: no line's cost, category or bucket moves — one
 boolean stops being set on sidechain lines.
 
+**What the bump costs, stated rather than waved past.** The version is the key a reader resolves a
+tag file by, so every already-tagged session on every machine becomes `stale-version` provisional
+until the daemon re-tags it: `wtft` still prints the full total, adds a `PROVISIONAL` warning, and
+**exits 9 instead of 0** (`docs/EXT_WTFT.html`, *Provisional reads*). A scripted caller testing
+`$? -eq 0` fails during that window, over a change whose visible effect is one fewer divider. It
+is transient and inherent to any bump — but it is exactly the trade the superseded section above
+declined, so it belongs in the record next to the reversal rather than only in the section that
+lost the argument.
+
+**Two harnesses, two gates, one rule.** Claude Code stamps `isSidechain` on every turn of a
+subagent transcript, so the parse-time conjunct catches those. Pi does not — it marks a subagent
+at FILE level, with a `parentSession` header and no per-entry flag — and the nested
+`subagents/workflows/wf_<id>/` layout stamps nothing either. `loadSubagentInteractions` therefore
+clears the flag a second time, from PROVENANCE: anything that came out of a subagent transcript
+had a fresh context, whatever its harness writes in the envelope. Only the divider's flag is
+cleared there. `isSidechain` itself also gates recache detection, and setting it from provenance
+would move subagent interactions between overhead buckets — a larger change, and one that belongs
+with the subagent-accounting work (#15).
+
+**The number that differs from the issue, reconciled.** #115 asks for "zero Cache Miss dividers"
+from a session that spawns N subagents and never idles. It renders **one**: the session's own
+first turn is a real cold start, and *Why removal, not augmentation* above decided that case stays
+flagged. The rule #115 is actually asking for is "no divider a SUBAGENT caused", which is what the
+closer pins.
+
 **Closer** — `tests/wtft-115-cache-miss-sidechain.test.ts`, on a parent transcript plus a real
 `<session>/subagents/agent-*.jsonl` layout: the parent's two misses still render two dividers, the
-subagent transcript alone renders zero (it rendered one before), and both fixtures still report
-their own cost.
+subagent transcript alone renders zero (it rendered one before), an UNSTAMPED subagent transcript
+also renders zero, a merge whose max-cost copy lost the envelope flag stays suppressed, and both
+fixtures' costs are pinned to an arithmetic expectation rather than to a second parse of
+themselves.

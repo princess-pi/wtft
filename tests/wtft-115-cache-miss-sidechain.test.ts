@@ -8,8 +8,18 @@
  * into noise that grows with fan-out.
  *
  * So `cacheMiss` is decided at parse time against `isSidechain`, alongside the
- * same exclusion `splitOverheadCost` already applies to recache detection. The
- * renderer is untouched: it still just follows the flag.
+ * same exclusion `splitOverheadCost` already applies to recache detection, and
+ * again from PROVENANCE in `loadSubagentInteractions` for the harnesses that
+ * mark a subagent by file rather than by entry. The renderer is untouched: it
+ * still just follows the flag.
+ *
+ * ONE NUMBER DIFFERS FROM THE ISSUE, deliberately. #115 asks for "zero Cache
+ * Miss dividers" from a session that spawns N subagents and never idles. It
+ * renders ONE: the session's own first turn is a real cold start, and #152
+ * decided that case stays flagged (see that spec, "Why removal, not
+ * augmentation"). The rule #115 actually asks for is "no divider that a SUBAGENT
+ * caused", which is what the fixture below pins — parent misses counted
+ * exactly, subagent misses zero.
  *
  * Run: node --experimental-strip-types tests/wtft-115-cache-miss-sidechain.test.ts
  */
@@ -19,7 +29,12 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { trackSandbox } from "./lib/sandbox";
 
-import { buildWtftLines, parseSessionFile } from "../bin/wtft.mjs";
+import {
+	buildWtftLines,
+	parseSessionFile,
+	deduplicateInteractions,
+	loadSubagentInteractions,
+} from "../bin/wtft.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -59,6 +74,11 @@ function dividerCount(ix: any[]): number {
 }
 
 const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-115-")));
+
+function writeFixture(at: string, lines: string[]): string {
+	fs.writeFileSync(at, lines.join("\n") + "\n");
+	return at;
+}
 
 // The closer's fixture: a parent transcript with ONE genuine re-prime, and a
 // subagent transcript whose first turn has the same raw shape by construction.
@@ -100,16 +120,68 @@ check(
 );
 
 console.log("--- TEST 3: cost is untouched ---");
-// cacheMiss is a label on the interaction, never a term in the price. A fix that
-// moved a cost would be a different bug wearing this one's clothes.
+// cacheMiss is a label on the interaction, never a term in the price. Pinned to
+// an ARITHMETIC expectation rather than to a second parse of the same fixture:
+// comparing post-fix against post-fix can only catch non-determinism, and would
+// have passed just as happily if the fix had moved every dollar (PR review).
+// $/Mtok for claude-opus-5, from docs/manifests/wtft-pricing.json; the 1h cache
+// write is the manifest's 6.25 5m rate's 1h sibling at 2x input, which
+// tests/wtft-pricing-tiers.test.ts is the guard for. Spelled out here so this
+// suite fails loudly if a rate moves, rather than re-deriving the answer from
+// the code it is testing.
+const RATES = { input: 5, cacheWrite1h: 10, cacheRead: 0.5, output: 25 };
+function priced(cr: number, cw: number): number {
+	return (2 * RATES.input + cw * RATES.cacheWrite1h + cr * RATES.cacheRead + 300 * RATES.output) / 1e6;
+}
 const parentCost = parent.reduce((s: number, i: any) => s + i.cost, 0);
 const subCost = sub.reduce((s: number, i: any) => s + i.cost, 0);
-check(parentCost > 0 && sub.length === 2, "both fixtures priced and parsed");
+const expectedParent = priced(0, 48278) + priced(50000, 1200) + priced(0, 91000);
+const expectedSub = priced(0, 61000) + priced(61000, 900);
 check(
-	Math.abs(parentCost - parseSessionFile(parentPath).reduce((s: number, i: any) => s + i.cost, 0)) < 1e-12,
-	"parent cost is stable across parses"
+	Math.abs(parentCost - expectedParent) < 1e-9,
+	`parent cost is exactly the sum of its turns ($${parentCost.toFixed(6)})`
 );
-check(subCost > 0, "the subagent still reports its own cost — dropped flag, not dropped spend");
+check(
+	Math.abs(subCost - expectedSub) < 1e-9,
+	`subagent still reports its own cost ($${subCost.toFixed(6)}) — dropped flag, not dropped spend`
+);
+
+console.log("--- TEST 4: provenance closes the gap the envelope cannot ---");
+// Pi marks a subagent at FILE level (a parentSession header, no per-entry flag),
+// and the nested workflow layout stamps nothing either. The parse-time gate
+// cannot see either shape, so loadSubagentInteractions clears the flag for
+// anything that came out of a subagent transcript, whatever its harness writes.
+const piPath = path.join(dir, "pi-subagent.jsonl");
+fs.writeFileSync(piPath, [
+	usageLine({ id: "pi_start", ts: "2026-07-01T13:40:00Z", cr: 0, cw: 55000 }), // no isSidechain
+	usageLine({ id: "pi_hit", ts: "2026-07-01T13:45:00Z", cr: 55000, cw: 800 }),
+].join("\n") + "\n");
+
+check(
+	parseSessionFile(piPath).some((i: any) => i.cacheMiss === true),
+	"an unstamped subagent transcript DOES look like a miss at parse time (the gap)"
+);
+const viaProvenance = loadSubagentInteractions([piPath]);
+check(
+	viaProvenance.length === 2 && viaProvenance.every((i: any) => !i.cacheMiss),
+	"…and loadSubagentInteractions clears it anyway — 0 dividers"
+);
+check(dividerCount(viaProvenance) === 0, "so the unstamped subagent draws no divider either");
+
+console.log("--- TEST 5: the merge cannot resurrect the flag ---");
+// deduplicateInteractions keeps the MAX-COST copy of a message id. If a re-logged
+// copy omits the envelope's isSidechain and wins on cost, the flag came back.
+const mixed = [
+	// Same id, two copies: the cheap one knows it is a sidechain, the dear one does not.
+	...parseSessionFile(writeFixture(path.join(dir, "mixed.jsonl"), [
+		usageLine({ id: "m1", ts: "2026-07-01T15:00:00Z", cr: 0, cw: 1000, isSidechain: true }),
+		usageLine({ id: "m1", ts: "2026-07-01T15:00:00Z", cr: 0, cw: 90000 }),
+	])),
+];
+const mergedIx = deduplicateInteractions(mixed);
+check(mergedIx.length === 1, "the two copies collapse to one billed message");
+check(mergedIx[0].isSidechain === true, "isSidechain survives the merge from either copy");
+check(!mergedIx[0].cacheMiss, "…so the divider stays suppressed on the merged message");
 
 fs.rmSync(dir, { recursive: true, force: true });
 

@@ -36,6 +36,8 @@ import {
 	type SpawnRecord,
 } from "../extensions/lib/wtft-spawn-ledger.ts";
 import { computeSpawnTree } from "../extensions/lib/wtft-spawn-tree.ts";
+import { cwdForClaudeSpawn } from "../bin/wtft.mjs";
+import { spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("116-spawn-ledger");
@@ -295,6 +297,162 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 	const tree = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects });
 	check(tree.malformedLedgerLines === 1,
 		"C20 the reader's skipped-line count reaches the report");
+}
+
+
+
+// ---
+// PART D — the issue's own Closer, through the CLI
+// ---
+console.log("\nPART D — the Closer: a parent, a launcher child, one record");
+
+const REPO_ROOT = path.resolve(import.meta.dirname, "..");
+const CLI_BIN = path.join(REPO_ROOT, "bin", "wtft.mjs");
+const HERDR_LINE = 'herdr agent start ppt-824-serve-home-from-env --kind claude --pane wE:pCW -- --model sonnet';
+
+{
+	// The control from the issue's Repro, and the reason this issue exists at
+	// all: the spawning command yields NO cwd, so today's attribution pass hits
+	// its `if (!cwd) continue` and the child's whole cost is dropped.
+	check(cwdForClaudeSpawn([HERDR_LINE]) === null,
+		"D1  the launcher command still yields no cwd — nothing here re-derives an edge");
+	check(cwdForClaudeSpawn(['cd /repo && claude -p "review this"']) === "/repo",
+		"D2  the claude -p control still resolves (#138 is untouched)");
+}
+
+const cliDir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-116-cli-")));
+const cliProjects = path.join(cliDir, "projects");
+const stateHome = path.join(cliDir, "state");
+
+/** The launcher child: its own uuid, its own project dir, nothing pointing back. */
+const CLOSER_CHILD = "d38296d6-aaaa-4bbb-8ccc-ddddeeeeffff";
+{
+	const slug = "-tmp-pr-review-closer";
+	fs.mkdirSync(path.join(cliProjects, slug), { recursive: true });
+	const lines: string[] = [];
+	for (let i = 0; i < 4; i++) {
+		lines.push(JSON.stringify({
+			type: "assistant",
+			timestamp: new Date(Date.UTC(2026, 8, 16, 6, i)).toISOString(),
+			cwd: "/tmp/pr-review-closer",
+			message: {
+				role: "assistant", id: `child-${i}`, model: "claude-opus-5",
+				content: [{ type: "text", text: "x" }],
+				usage: { input_tokens: 500, output_tokens: 1200, cache_read_input_tokens: 20000, cache_creation_input_tokens: 0 },
+			},
+		}));
+	}
+	fs.writeFileSync(path.join(cliProjects, slug, `${CLOSER_CHILD}.jsonl`), lines.join("\n") + "\n");
+}
+
+/** The parent: a real bash turn carrying the launcher command, plus its own spend. */
+function parentTranscript(): string {
+	const at = path.join(cliDir, `${PARENT}.jsonl`);
+	const turn = (i: number, block: unknown) => JSON.stringify({
+		type: "assistant",
+		timestamp: new Date(Date.UTC(2026, 8, 16, 5, i)).toISOString(),
+		cwd: "/home/princess-pi/git-projects/wtft",
+		message: {
+			role: "assistant", id: `parent-${i}`, model: "claude-opus-5",
+			content: [block],
+			usage: { input_tokens: 100, output_tokens: 300, cache_read_input_tokens: 5000, cache_creation_input_tokens: 0 },
+		},
+	});
+	fs.writeFileSync(at, [
+		turn(0, { type: "text", text: "dispatching" }),
+		turn(1, { type: "tool_use", id: "t1", name: "Bash", input: { command: HERDR_LINE } }),
+		turn(2, { type: "text", text: "done" }),
+	].join("\n") + "\n");
+	return at;
+}
+
+let runSeq = 0;
+/** Each run gets its own copy of the parent transcript: the CLI's tag file is
+ *  written beside the session, and a shared fixture would let one run's repair
+ *  move the next run's number (the #90 suite hit this and fixed it the same way). */
+function cli(args: string[], env: Record<string, string> = {}): { out: string; status: number | null } {
+	const source = parentTranscript();
+	const copyDir = path.join(cliDir, `run-${runSeq++}`);
+	fs.mkdirSync(copyDir, { recursive: true });
+	const copy = path.join(copyDir, `${PARENT}.jsonl`);
+	fs.copyFileSync(source, copy);
+	const r = spawnSync("node", [CLI_BIN, "-s", copy, ...args], {
+		encoding: "utf8",
+		env: { ...process.env, XDG_STATE_HOME: stateHome, WTFT_CLAUDE_PROJECTS_DIR: cliProjects, ...env },
+	});
+	if (r.status !== 0 && r.status !== 9) {
+		throw new Error(`wtft -s <copy> ${args.join(" ")} exited ${r.status}: ${r.stderr}`);
+	}
+	return { out: (r.stdout || "").replace(/\x1b\[[0-9;]*m/g, ""), status: r.status };
+}
+
+function recordCli(args: string[]): { status: number | null; out: string; err: string } {
+	const r = spawnSync("node", [CLI_BIN, "spawn-record", ...args], {
+		encoding: "utf8",
+		env: { ...process.env, XDG_STATE_HOME: stateHome },
+	});
+	return { status: r.status, out: r.stdout || "", err: r.stderr || "" };
+}
+
+// --- the writer, as a spawner would call it ---
+{
+	const bad = recordCli(["--parent", PARENT, "--child", "not-a-uuid", "--mechanism", "herdr-agent-start"]);
+	check(bad.status === 2, `D3  a malformed child id exits 2, at the spawner (got ${bad.status})`);
+	const missing = recordCli(["--parent", PARENT, "--child", CLOSER_CHILD]);
+	check(missing.status === 2, `D4  a missing --mechanism exits 2 (got ${missing.status})`);
+	check(!fs.existsSync(path.join(stateHome, "wtft", "spawns.jsonl")),
+		"D5  neither refusal wrote a line");
+
+	const ok = recordCli(["--parent", PARENT, "--child", CLOSER_CHILD,
+		"--mechanism", "herdr-agent-start", "--label", "agent/824", "--model", "sonnet", "--json"]);
+	check(ok.status === 0, `D6  a good record exits 0 (got ${ok.status}: ${ok.err.trim()})`);
+	const echoed = JSON.parse(ok.out.trim());
+	check(echoed.child === CLOSER_CHILD && echoed.mechanism === "herdr-agent-start",
+		"D7  --json echoes the exact line written");
+	const onDisk = fs.readFileSync(path.join(stateHome, "wtft", "spawns.jsonl"), "utf8").trim();
+	check(JSON.parse(onDisk).label === "agent/824", "D8  and the ledger holds it");
+}
+
+// --- the report, with the record ---
+let selfCostWithRecord = 0;
+{
+	const doc = JSON.parse(cli(["--json"]).out);
+	check(doc.spawned?.descendants === 1,
+		`D9  the recorded child is a descendant (got ${doc.spawned?.descendants})`);
+	check(doc.spawned.edges[0].mechanism === "herdr-agent-start",
+		"D10 the edge's provenance is in the document");
+	check(doc.spawned.edges[0].total.costUsd > 0, "D11 the child's cost is read");
+	check(Math.abs(doc.tree.costUsd - (doc.total.costUsd + doc.spawned.total.costUsd)) < 1e-9,
+		"D12 tree = total + spawned, as a field, so nobody adds two numbers and guesses");
+	check(doc.total.costUsd > 0, "D13 the parent still reports its own spend");
+	selfCostWithRecord = doc.total.costUsd;
+}
+
+// --- the same run with the record deleted ---
+{
+	fs.writeFileSync(path.join(stateHome, "wtft", "spawns.jsonl"), "");
+	const doc = JSON.parse(cli(["--json"]).out);
+	check(doc.spawned.descendants === 0, "D14 delete the record and the child is not claimed");
+	check(Math.abs(doc.total.costUsd - selfCostWithRecord) < 1e-9,
+		"D15 SELF IS UNCHANGED either way — the ledger only ever adds");
+	check(Math.abs(doc.tree.costUsd - doc.total.costUsd) < 1e-9,
+		"D16 and tree collapses to self");
+}
+
+// --- the rendered surface ---
+{
+	const noEdges = cli(["--tokens"]).out;
+	check(!noEdges.includes("SPAWNED"),
+		"D17 no block for a session that spawned nothing — silence is the right report");
+
+	const r = recordCli(["--parent", PARENT, "--child", CLOSER_CHILD, "--mechanism", "herdr-agent-start", "--label", "agent/824"]);
+	check(r.status === 0, "D18 re-record the edge");
+	const withEdges = cli(["--tokens"]).out;
+	check(withEdges.includes("SPAWNED"), "D19 the block appears once there is an edge");
+	check(withEdges.includes("herdr-agent-start"), "D20 naming the mechanism");
+	check(/TREE/.test(withEdges), "D21 and a TREE line beside TOTAL");
+	check(withEdges.indexOf("TOTAL") < withEdges.indexOf("SPAWNED"),
+		"D22 below TOTAL, which still means this session's own turns");
 }
 
 

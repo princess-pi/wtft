@@ -109,6 +109,25 @@ import {
 	type ModelPricing,
 	getTerminalWidth
 } from "../extensions/lib/wtft-shared.ts";
+import {
+	runSpawnRecordCommand,
+	readSpawnLedger,
+	spawnLedgerPath,
+	serializeSpawnRecord,
+	appendSpawnRecord,
+	SPAWN_RECORD_SCHEMA,
+	SPAWN_RECORD_EXIT,
+	MAX_RECORD_BYTES,
+	MAX_FIELD_BYTES,
+	isSessionUuid,
+} from "../extensions/lib/wtft-spawn-ledger.ts";
+import {
+	computeSpawnTree,
+	treeTotals,
+	SPAWN_TREE_SCHEMA,
+	DEFAULT_MAX_DEPTH,
+	type SpawnTree,
+} from "../extensions/lib/wtft-spawn-tree.ts";
 import { execSync } from "node:child_process";
 import { loadConfig, readConfig } from "@princess-pi/libs/config";
 import {
@@ -209,6 +228,22 @@ export {
 	renderSessionJson,
 	detectSessionHarness,
 	WTFT_JSON_SCHEMA,
+	// #116 — the spawn ledger and the walk, driven through the bundle like
+	// everything else here.
+	runSpawnRecordCommand,
+	readSpawnLedger,
+	spawnLedgerPath,
+	serializeSpawnRecord,
+	appendSpawnRecord,
+	isSessionUuid,
+	SPAWN_RECORD_SCHEMA,
+	SPAWN_RECORD_EXIT,
+	MAX_RECORD_BYTES,
+	MAX_FIELD_BYTES,
+	computeSpawnTree,
+	treeTotals,
+	SPAWN_TREE_SCHEMA,
+	DEFAULT_MAX_DEPTH,
 	getHarnesses,
 	getHarness,
 	getDiscoveries,
@@ -325,6 +360,14 @@ const cfg = loadConfig("wtft", { interval: "1h", limit: 100, mode: "cumulative" 
 // is part of the file that prints it.
 const manifest = wtftManifest;
 const daemonDir = path.dirname(fileURLToPath(import.meta.url));
+
+// `wtft spawn-record` (#116) — a POSITIONAL subcommand. It shares nothing with
+// the report path: a launcher calling it must not load a session, start a
+// daemon, or read a transcript. It is dispatched at the entry-point guard at
+// the bottom of this file INSTEAD OF `main()`, because `parseWtftCliArgs`
+// ignores arguments it does not recognise (#91) — so letting `spawn-record`
+// fall through would quietly run a full report instead of recording an edge.
+const isSpawnRecord = process.argv[2] === "spawn-record";
 
 // Parse all CLI args through the shared parser (#94)
 const opts = parseWtftCliArgs(process.argv.slice(2));
@@ -679,6 +722,30 @@ async function main() {
 	// distrust the comments. The invariant is "at most one scan per run", and
 	// that is checkable from the cache alone.
 	let uncountedCache: UncountedBillables | null = null;
+	// The recorded lineage (#116), memoised: `--json` and `--tokens` both want it
+	// and the walk parses every descendant's transcript. Memoised for the same
+	// reason `scanSessionUncounted` is — not for speed alone, but so the two
+	// surfaces report the SAME tree even though they are computed at different
+	// points in this function.
+	let spawnTreeCache: SpawnTree | null = null;
+	const sessionSpawnTree = (): SpawnTree => {
+		if (spawnTreeCache) return spawnTreeCache;
+		// The session id IS the transcript's basename — the same derivation the
+		// harness discovery uses. A `-s <path>` pointing at a copy therefore has
+		// the copy's name, which is what makes the fixture in
+		// tests/wtft-116-spawn-ledger.test.ts able to drive this at all.
+		const sessionId = path.basename(finalSessionPath).replace(/\.jsonl$/i, "");
+		try {
+			return (spawnTreeCache = computeSpawnTree(sessionId));
+		} catch (err) {
+			// A ledger this process cannot read must not take the report down:
+			// the session's own numbers are unaffected, and an empty tree with
+			// the failure on stderr is a smaller loss than no report at all.
+			console.error(`⚠️  wtft: spawn ledger unreadable (${spawnLedgerPath()}): ${err instanceof Error ? err.message : String(err)}`);
+			return (spawnTreeCache = computeSpawnTree(sessionId, { ledger: { childrenOf: new Map(), malformedLines: 0 } }));
+		}
+	};
+
 	const scanSessionUncounted = (): UncountedBillables => {
 		if (uncountedCache) return uncountedCache;
 		// A session file that has not been written YET is not an unreadable one
@@ -853,6 +920,11 @@ async function main() {
 			},
 			provisional,
 			uncounted,
+			// Pending means the session log is not written yet, so nothing has
+			// spawned FROM it — but the empty tree is still computed rather
+			// than defaulted, so the document never carries a shape nobody
+			// produced (the rule BuildSessionJsonInput states for this field).
+			spawned: opt.pending ? computeSpawnTree("", { ledger: { childrenOf: new Map(), malformedLines: 0 } }) : sessionSpawnTree(),
 			notices: [...earlyNotices, ...(opt.notices ?? [])],
 		});
 		process.stdout.write(renderSessionJson(doc));
@@ -1070,7 +1142,7 @@ async function main() {
 	}
 
 	if (opts.tokens) {
-		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, scanSessionUncounted());
+		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, scanSessionUncounted(), sessionSpawnTree());
 		for (const line of tokenOutput.split("\n")) {
 			console.log(padStr + line);
 		}
@@ -1201,9 +1273,18 @@ if (process.argv[1]) {
 	const entry = fileURLToPath(import.meta.url);
 	const invoked = process.argv[1];
 	if (invoked === entry || invoked.endsWith("/wtft") || invoked.endsWith("/wtft.mjs")) {
-		main().catch(err => {
-			console.error(`❌ System Error: ${err.message}`);
-			process.exit(1);
-		});
+		if (isSpawnRecord) {
+			const result = runSpawnRecordCommand(process.argv.slice(3));
+			if (result.stdout) process.stdout.write(result.stdout);
+			if (result.stderr) process.stderr.write(result.stderr);
+			// `exitCode`, never `process.exit()` — stdout is async on a pipe,
+			// and `wtft spawn-record --json | jq` would lose the document.
+			process.exitCode = result.exitCode;
+		} else {
+			main().catch(err => {
+				console.error(`❌ System Error: ${err.message}`);
+				process.exit(1);
+			});
+		}
 	}
 }

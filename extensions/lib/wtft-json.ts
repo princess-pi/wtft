@@ -15,12 +15,19 @@
  */
 
 import { computeSessionSummary, type ModelTotals, type CategoryTotals, type TokenTotals } from "./wtft-renderer.js";
+import { treeTotals, type SpawnTree } from "./wtft-spawn-tree.js";
 import type { Interaction } from "./wtft-shared.js";
 import type { UncountedBillables } from "./wtft-parser.ts";
 import type { TagProvisional } from "./wtft-daemon-lib.js";
 
-/** Bumped when any key below changes shape. Prose changes never bump it. */
-export const WTFT_JSON_SCHEMA = "wtft/session@1";
+/** Bumped when any key below changes shape. Prose changes never bump it.
+ *
+ *  `@2` (#116) added `spawned` and `tree`, and pinned what `total` has always
+ *  meant: THIS SESSION'S OWN TURNS. Not one dollar moved into or out of it —
+ *  the launcher-spawned descendants arrive as a new, named quantity beside it,
+ *  because a number a reader has never seen before must arrive labelled rather
+ *  than folded into one they already trust. */
+export const WTFT_JSON_SCHEMA = "wtft/session@2";
 
 /**
  * A human-facing sentence that would otherwise have gone to stdout.
@@ -50,7 +57,14 @@ export interface WtftSessionJson {
 	schema: typeof WTFT_JSON_SCHEMA;
 	session: WtftSessionIdentity;
 	provisional: TagProvisional;
+	/** SELF: this session's own turns. Unchanged by #116. */
 	total: TokenTotals;
+	/** The recorded lineage (#116): every descendant reached through the spawn
+	 *  ledger, each edge's provenance, and every gap the walk could not close. */
+	spawned: SpawnTree;
+	/** SELF + descendants, as a field — so a consumer never adds two numbers
+	 *  and has to work out for itself whether it double-counted. */
+	tree: TokenTotals;
 	models: ModelTotals[];
 	categories: CategoryTotals[];
 	uncounted: UncountedBillables;
@@ -69,15 +83,24 @@ export interface BuildSessionJsonInput {
 	 *  The type is the enforcement — a caller with nothing to report passes
 	 *  `newUncountedBillables()` and means it. (PR review, Medium/contract.) */
 	uncounted: UncountedBillables;
+	/** REQUIRED, and deliberately not defaulted, for the same reason `uncounted`
+	 *  is (#149): an empty tree defaulted in would make "nobody read the spawn
+	 *  ledger" indistinguishable from "read it, this session spawned nothing" —
+	 *  and the first of those is exactly the silent gap #116 exists to end. A
+	 *  caller with nothing to report passes an empty `computeSpawnTree` result
+	 *  and means it. */
+	spawned: SpawnTree;
 	notices?: WtftNotice[];
 }
 
-/** Build the `wtft/session@1` document. Pure: no I/O, no clock, no process state. */
+/** Build the `wtft/session@2` document. Pure: no I/O, no clock, no process state. */
 export function buildSessionJson(input: BuildSessionJsonInput): WtftSessionJson {
 	const summary = computeSessionSummary(input.interactions);
 	return {
 		schema: WTFT_JSON_SCHEMA,
 		session: input.session,
+		spawned: input.spawned,
+		tree: treeTotals(summary.total, input.spawned),
 		provisional: input.provisional,
 		total: summary.total,
 		models: summary.models,

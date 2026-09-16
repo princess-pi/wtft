@@ -44,8 +44,13 @@ const ID = "claude-code";
 /** Directories that hold derived data, not sessions. */
 const SKIP_DIRS = new Set(["subagents", "tool-results", "memory", "wtft-tags"]);
 
-/** Test seam: point discovery at a fixture tree instead of the real home dir. */
-function projectsDir(): string {
+/** Test seam: point discovery at a fixture tree instead of the real home dir.
+ *
+ *  Exported since #116, because the spawn-tree walk resolves a child session by
+ *  uuid under this same root and a second spelling of it would mean a fixture
+ *  tree that discovery honours and the walk ignores. One definition, one env
+ *  var, both callers. */
+export function projectsDir(): string {
 	return process.env.WTFT_CLAUDE_PROJECTS_DIR || path.join(os.homedir(), ".claude", "projects");
 }
 

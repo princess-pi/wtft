@@ -246,3 +246,94 @@ export function readSpawnLedger(file: string = spawnLedgerPath()): SpawnLedger {
 
 	return { childrenOf, malformedLines };
 }
+
+// ---
+// `wtft spawn-record` — the one line a launcher calls
+// ---
+
+/** Exit codes, versioned API (README + docs/manifests/wtft-cmd.json). */
+export const SPAWN_RECORD_EXIT = {
+	OK: 0,
+	/** Bad arguments: missing required flag, malformed uuid, oversized field. */
+	BAD_ARGS: 2,
+	/** The ledger could not be written. */
+	UNWRITABLE: 3,
+} as const;
+
+export interface SpawnRecordCommandResult {
+	exitCode: number;
+	stdout: string;
+	stderr: string;
+}
+
+export const SPAWN_RECORD_USAGE =
+	"usage: wtft spawn-record --parent <uuid> --child <uuid> --mechanism <name>\n" +
+	"                        [--cwd <path>] [--label <text>] [--model <name>] [--json]\n";
+
+/**
+ * Parse, validate, append. Pure but for the one append, so the exit-code table
+ * above is testable without a process.
+ *
+ * Every failure names the flag that caused it. A spawner calls this from a
+ * shell script and will not read a stack trace; the whole value of validating
+ * here is that the message reaches whoever can still fix the spawn.
+ */
+export function runSpawnRecordCommand(
+	argv: string[],
+	file: string = spawnLedgerPath(),
+	now: () => string = () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+): SpawnRecordCommandResult {
+	const flags: Record<string, string> = {};
+	let json = false;
+
+	for (let i = 0; i < argv.length; i++) {
+		const arg = argv[i];
+		if (arg === "--json") { json = true; continue; }
+		if (arg === "-h" || arg === "--help") {
+			return { exitCode: SPAWN_RECORD_EXIT.OK, stdout: SPAWN_RECORD_USAGE, stderr: "" };
+		}
+		const m = /^--(parent|child|mechanism|cwd|label|model|ts)(?:=(.*))?$/.exec(arg);
+		if (!m) {
+			// Silently ignoring an unknown flag is how a typo'd `--mechansim`
+			// becomes a missing-argument error that blames the wrong flag (#91).
+			return { exitCode: SPAWN_RECORD_EXIT.BAD_ARGS, stdout: "", stderr: `wtft spawn-record: unknown argument ${arg}\n${SPAWN_RECORD_USAGE}` };
+		}
+		const value = m[2] !== undefined ? m[2] : argv[++i];
+		if (value === undefined) {
+			return { exitCode: SPAWN_RECORD_EXIT.BAD_ARGS, stdout: "", stderr: `wtft spawn-record: --${m[1]} needs a value\n${SPAWN_RECORD_USAGE}` };
+		}
+		flags[m[1]] = value;
+	}
+
+	for (const required of ["parent", "child", "mechanism"] as const) {
+		if (!flags[required]) {
+			return { exitCode: SPAWN_RECORD_EXIT.BAD_ARGS, stdout: "", stderr: `wtft spawn-record: --${required} is required\n${SPAWN_RECORD_USAGE}` };
+		}
+	}
+
+	const record: SpawnRecord = {
+		schema: SPAWN_RECORD_SCHEMA,
+		ts: flags.ts || now(),
+		parent: flags.parent,
+		child: flags.child,
+		mechanism: flags.mechanism,
+		cwd: flags.cwd,
+		label: flags.label,
+		model: flags.model,
+	};
+
+	let line: string;
+	try {
+		line = serializeSpawnRecord(record);
+	} catch (err) {
+		return { exitCode: SPAWN_RECORD_EXIT.BAD_ARGS, stdout: "", stderr: `wtft ${err instanceof Error ? err.message : String(err)}\n` };
+	}
+
+	try {
+		appendSpawnRecord(JSON.parse(line) as SpawnRecord, file);
+	} catch (err) {
+		return { exitCode: SPAWN_RECORD_EXIT.UNWRITABLE, stdout: "", stderr: `wtft spawn-record: could not write ${file}: ${err instanceof Error ? err.message : String(err)}\n` };
+	}
+
+	return { exitCode: SPAWN_RECORD_EXIT.OK, stdout: json ? line + "\n" : "", stderr: "" };
+}

@@ -32,6 +32,7 @@ import {
 } from "./wtft-cost.js";
 import { execSync } from "node:child_process";
 import wcwidth from "wcwidth";
+import { treeTotals, type SpawnTree } from "./wtft-spawn-tree.js";
 export interface Bin {
 	key?: string; // ISO bin key (e.g. "2026-07-15T18:00") — populated at creation
 	label: string;
@@ -1991,7 +1992,7 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
  * @param uncounted Billed-but-unrecorded events found in the session (#149).
  *   Omitted or all-zero renders nothing new — existing output is unchanged.
  */
-export function renderTokenSummary(interactions: Interaction[], maxWidth: number = 80, thinkingBudget?: number, uncounted?: UncountedBillables): string {
+export function renderTokenSummary(interactions: Interaction[], maxWidth: number = 80, thinkingBudget?: number, uncounted?: UncountedBillables, spawned?: SpawnTree): string {
 	// One aggregation, two readers (#26): this table and `wtft --json` read the
 	// same object, so they cannot report different NUMBERS. Three things below
 	// are display-only and have no JSON counterpart, because they are ratios and
@@ -2110,6 +2111,44 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 	// unmentioned misleads; estimating them would make TOTAL partly modelled.
 	out += renderUncountedBillables(uncounted);
 
+	// The recorded lineage (#116) — below TOTAL, for the same reason UNCOUNTED
+	// is: TOTAL means this session's own turns, and this money belongs to other
+	// sessions that this one caused. Folding it in would move a number the
+	// reader already trusts without telling them.
+	out += renderSpawnTree(summary.total, spawned);
+
+	return out;
+}
+
+/** The SPAWNED / TREE block, or "" when this session has no recorded edges.
+ *  Split out so the daemon/watch paths can reuse the exact wording (#116, the
+ *  same rule as renderUncountedBillables). */
+export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string {
+	if (!spawned || spawned.edges.length === 0) return "";
+
+	const rows: string[] = [];
+	for (const edge of spawned.edges) {
+		const name = edge.label ? `${edge.mechanism}  ${edge.label}` : edge.mechanism;
+		// A skipped edge prints its REASON where its cost would be. A dash or a
+		// $0.00 would both read as "this child was free", which is the one thing
+		// we do not know about it.
+		const money = edge.total ? formatCost(edge.total.costUsd) : `(${edge.skip})`;
+		rows.push(`           ${name.padEnd(40)} ${money.padStart(12)}`);
+	}
+
+	let out = `\nSPAWNED    ${spawned.descendants} descendant session(s) recorded in the spawn ledger (#116) —\n`;
+	out += `           NOT in TOTAL above, which is this session's own turns\n`;
+	out += rows.join("\n") + "\n";
+	if (spawned.unattributed.length > 0) {
+		out += `           ${spawned.unattributed.length} unattributed — cost unknown, deliberately not estimated\n`;
+	}
+	if (spawned.depthCapped > 0) {
+		out += `           ${spawned.depthCapped} edge(s) past the depth cap of ${spawned.maxDepth}, not walked\n`;
+	}
+	if (spawned.malformedLedgerLines > 0) {
+		out += `           ${spawned.malformedLedgerLines} unusable ledger line(s) skipped\n`;
+	}
+	out += `TREE       ${"TOTAL + SPAWNED".padEnd(40)} ${formatCost(treeTotals(self, spawned).costUsd).padStart(12)}\n`;
 	return out;
 }
 

@@ -17,10 +17,10 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 
-import { readSpawnLedger, type SpawnEdge, type SpawnLedger } from "./wtft-spawn-ledger.js";
+import { readSpawnLedger, type SpawnLedger } from "./wtft-spawn-ledger.js";
+import { projectsDir } from "./harness/claude-code/discovery.js";
 import { parseSessionFile } from "./wtft-parser.js";
 import { computeSessionSummary, type TokenTotals } from "./wtft-renderer.js";
 
@@ -165,7 +165,7 @@ export function computeSpawnTree(
 	options: SpawnTreeOptions = {},
 ): SpawnTree {
 	const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
-	const projectsRoot = options.projectsRoot ?? path.join(os.homedir(), ".claude", "projects");
+	const projectsRoot = options.projectsRoot ?? projectsDir();
 	const ledger = options.ledger ?? readSpawnLedger(options.ledgerPath);
 
 	const tree: SpawnTree = {

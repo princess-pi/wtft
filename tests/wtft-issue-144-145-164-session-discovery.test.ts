@@ -3,7 +3,7 @@
  * tests/wtft-issue-144-145-164-session-discovery.test.ts
  *   — three ways a Claude session goes missing from wtft (#144, #145, #164)
  *
- * Spec: docs/spec-144-145-164-session-discovery.md (V1–V21).
+ * Spec: docs/spec-144-145-164-session-discovery.md (V1–V22).
  *
  *   A  V1–V4    #144  slug encoding is a UNION of encodings, not a pinned class
  *   B  V5–V10   #164→#89  a session stranded in a REMOVED directory, and
@@ -208,12 +208,20 @@ console.log("\n=== PART A: slug encoding union (#144) ===\n");
 // that one is not" — and the difference is asserted, not narrated, because a
 // deletion that silently drops a case is the failure mode worth a test.
 //
-// What the real corpus says (7,287 transcripts, 2026-09-16): Claude Code files a
-// transcript under the directory its session STARTED in, and a session starts in
-// the main clone before it enters a worktree. So for all 21 relocated
-// transcripts whose last cwd was dead, every LIVE directory in their history
-// already fanned out to the transcript's own physical slug. Load-bearing
-// `(session, dir)` pairs that only the deleted arm could surface: 0.
+// What the real corpus says. Claude Code files a transcript under the directory
+// its session STARTED in, and a session usually starts in the main clone before
+// it enters a worktree — so the physical arm plus the #145 fan-out already
+// reaches it. Measured per arm over the corpus, the deleted arm contributed 0
+// candidates for all three cwds tested, and the candidate lists before and after
+// the deletion are identical.
+//
+// The relocation figures, DERIVED rather than quoted (2026-09-16, one walk of
+// ~/.claude/projects after SKIP_DIRS): 7,352 transcripts, of which **42** carry
+// a `"type":"relocated"` record and **21** of those 42 also have a last recorded
+// `cwd` that no longer exists — the subset for which the deleted arm was the
+// only arm that could have said anything. An earlier draft asserted the 21
+// without stating where it came from, in a comment whose selling point is
+// exactness.
 
 console.log("\n=== PART B: stranded in a removed worktree (#164 → #89) ===\n");
 {
@@ -450,7 +458,9 @@ console.log("\n=== PART D: worktree display compaction (#145) ===\n");
 }
 
 // ---
-// PART E — #164 cost: the gate holds, counted on a corpus the TEST owns (V11)
+// PART E — what one launch READS, counted on a corpus the TEST owns (V11, V22).
+// (#164's `pathExists` gate is deleted; these assertions now bound bytes, not
+// scans, and V22 guards the read path itself.)
 // ---
 
 console.log("\n=== PART E: what one launch reads, counted on a test-built corpus (V11, V22) ===\n");

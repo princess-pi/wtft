@@ -309,12 +309,18 @@ Both compact to `~/g-p/<repo>/w/<branch>`:
 
 # Shape of the change
 
+> **As shipped by THIS spec's branch.** #89 later removed two of the additions below and one of
+> the arms; Amendment 1 is the current state. The block is left as the record of what landed here.
+
 ```
 extensions/lib/harness/session-cwd.ts        + cwdToStrictSlug, cwdSlugVariants, slugMatchesCwd
                                              + resolveCwdHistory (memoised whole-file scan)
+                                                 — DELETED by #89
                                              + pathExists (memoised)
+                                                 — DELETED by #89
 extensions/lib/harness/worktrees.ts     NEW  findRepoRoot, listWorktreeDirs, fanOutCwd
 extensions/lib/harness/claude-code/discovery.ts   three-arm union + fan-out + live display path
+                                                 — two arms and the live display path after #89
 extensions/lib/harness/pi/discovery.ts       containment against the slug-variant union (#144)
 extensions/lib/session-path-shortener.ts     worktree compaction → <repo>/w/<branch>
 bin/wtft.ts                                  re-export the new seams for tests

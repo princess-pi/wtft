@@ -51,9 +51,15 @@ import * as fs from "node:fs";
  * corpus. It is no longer true: the module header's 2026-09-16 figures work out
  * at ~1.9 reads and ~41 KB per transcript, so the second window is reached
  * routinely — attachment-heavy tails are common now, and a transcript with no
- * `cwd` at all (every Pi one) widens through all three and then reads whole.
- * That last case is #112. The bound itself is what matters and it holds: no read
- * here can exceed the largest window.
+ * `cwd` at all (every Pi one) widens through all three and then gives up.
+ *
+ * 512 KB IS THE LAST WINDOW, NOT A STEP BEFORE A WHOLE-FILE READ (PR review).
+ * The loop ends after it: a transcript over 512 KB has its last 512 KB read and
+ * then resolves to null, unread beyond that. Only a transcript UNDER 512 KB is
+ * ever read whole, because there the third window IS the whole file. That
+ * distinction is #112's subject, and `docs/spec-156-155-…md` was amended once to
+ * remove the same wrong claim — reintroducing it here would have been the third
+ * time this sentence went wrong.
  */
 const TAIL_WINDOWS = [8 * 1024, 64 * 1024, 512 * 1024];
 

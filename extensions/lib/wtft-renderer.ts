@@ -1879,15 +1879,19 @@ function addInteraction(into: TokenTotals, i: Interaction): void {
  * SERVER-SIDE TOOL SPEND IS IN THESE TOTALS (#90, direction A). It did not used
  * to be: `buildWtftLines` added `serverToolCost` to the chart's `web` bin while
  * this function summed `i.cost` alone, so the chart's running total, the
- * `--tokens` TOTAL row and `--json`'s `total.costUsd` disagreed by exactly a
- * session's web-search and web-fetch spend — and no test compared the chart's
- * total to either of the others, which is how it survived. The number a reader
- * sees under the word TOTAL now means what the word says.
+ * `--tokens` TOTAL row and `--json`'s `total.costUsd` disagreed by the
+ * web-search and web-fetch spend — and no test compared the chart's total to
+ * either of the others, which is how it survived. The number a reader sees under
+ * the word TOTAL now means what the word says.
  *
  * It is attributed the way the chart attributes it — to `web`, not to the
  * requesting turn's own category — so `sum(categories) === total` still holds
- * AND the category rows agree with the bars above them. Per model it goes to the
- * model that made the request, which is the only model that could have.
+ * and a category row names the same category the bars do. NOT the same NUMBER,
+ * and the distinction is this function's own exclusion talking: the chart bins
+ * every interaction while these rows drop the untagged ones, and `categories[]`
+ * is session-wide where a bar is per-bin. Placement agrees; magnitude need not.
+ * Per model it goes to the model that made the request, which is the only model
+ * that could have.
  *
  * One divergence from the chart total remains, and it is the untagged spend
  * excluded here. docs/spec-26-json.md records it.
@@ -2080,8 +2084,8 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 	}
 
 	// Compaction summary (princess-pi-tools#90, pre-extraction numbering — not
-	// this repo's #90, which is the serverToolCost divergence) — show how many
-	// tokens were freed by compaction
+	// this repo's #90, which is the inclusion of serverToolCost in TOTAL) — show
+	// how many tokens were freed by compaction
 	if (summary.compaction.events > 0) {
 		out += `\nCompaction: ${summary.compaction.events} event(s), ${formatTokenCount(summary.compaction.tokensFreed)} total tokens freed\n`;
 	}

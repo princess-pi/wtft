@@ -14,7 +14,9 @@
  *
  * Direction A, decided 2026-09-15: the summary ADDS the cost, so all three
  * agree. The accepted consequence is that the `--tokens` TOTAL a reader sees
- * rises by that amount — which the deltas below pin to the cent.
+ * rises by the session's MODEL-TAGGED server-tool spend — tagged, because an
+ * interaction with no model id is excluded from this summary before the addition
+ * is reached, exactly as it is excluded from every other total here.
  *
  * Run: bun tests/wtft-90-total-includes-server-tool-cost.test.ts
  */
@@ -23,6 +25,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
+import { calculateServerToolCost } from "../bin/wtft.mjs";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("90-server-tool-total");
@@ -38,10 +41,11 @@ const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const CLI_BIN = path.join(REPO_ROOT, "bin", "wtft.mjs");
 const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-90-")));
 
-/** $0.03 per request, Anthropic server-side tools (#73). */
-const PER_REQUEST = 0.03;
 const WEB_REQUESTS = 5;
-const EXPECTED_WEB_COST = WEB_REQUESTS * PER_REQUEST; // $0.15
+/** ASKED, never re-typed (#495). A literal here would fail this suite the day the
+ *  server-tool card moves, and the message would blame the meter rather than the
+ *  stale constant — the exact duplication #495 removed from the renderer. */
+const EXPECTED_WEB_COST = calculateServerToolCost("claude-opus-5", WEB_REQUESTS, 0);
 
 function usageLine(opts: { id: string; ts: string; cr?: number; cw?: number; web?: number }): string {
 	const usage: Record<string, unknown> = {
@@ -79,11 +83,23 @@ function fixture(name: string, web: number): string {
 const withWeb = fixture("with-web.jsonl", WEB_REQUESTS);
 const noWeb = fixture("no-web.jsonl", 0);
 
-function cli(args: string[]): string {
-	const r = spawnSync("node", [CLI_BIN, ...args], { encoding: "utf8", env: { ...process.env } });
-	// Exit 9 is PROVISIONAL (a tag read at a superseded version), not a failure.
+/** Each invocation gets its OWN copy of the fixture (PR review).
+ *
+ *  Three surfaces read by three separate processes is a snapshot comparison, not
+ *  a single-state one: a provisional read is defined as one whose total MAY STILL
+ *  GROW under the daemon, and the first run's tag repair would legitimately move
+ *  the second run's number — which a 1e-9 equality forbids. A fresh file per run
+ *  means every surface reads the same state, from nothing. (The sibling #26 suite
+ *  hit this and fixed it the same way.) */
+let runSeq = 0;
+function cli(source: string, args: string[]): string {
+	const copy = path.join(dir, `run-${runSeq++}-${path.basename(source)}`);
+	fs.copyFileSync(source, copy);
+	const r = spawnSync("node", [CLI_BIN, "-s", copy, ...args], { encoding: "utf8", env: { ...process.env } });
+	// Exit 9 is PROVISIONAL — a report in full, whose total may still grow. It is
+	// not a failure, and a fresh fixture is what keeps it from being a moving one.
 	if (r.status !== 0 && r.status !== 9) {
-		throw new Error(`wtft ${args.join(" ")} exited ${r.status}: ${r.stderr}`);
+		throw new Error(`wtft -s <copy> ${args.join(" ")} exited ${r.status}: ${r.stderr}`);
 	}
 	return (r.stdout || "").replace(/\x1b\[[0-9;]*m/g, "");
 }
@@ -91,7 +107,11 @@ function cli(args: string[]): string {
 /** The chart's running total: the newest cumulative bin row, which is the
  *  rightmost number a reader's eye lands on. Rows are newest-first. */
 function chartTotal(session: string): number {
-	const out = cli(["-s", session, "-i", "1h", "-m", "cumulative"]);
+	// DOCUMENTED SPELLINGS ONLY (PR review). `-m cumulative` is not a flag:
+	// `--cumulative`/`-c` and `--bucket`/`-b` are, and `parseWtftCliArgs` ignores
+	// an unknown flag silently (#91) — so the first cut of this passed without
+	// the mode ever having been honoured, on a default that happened to match.
+	const out = cli(session, ["--interval", "1h", "--cumulative"]);
 	const row = out.split("\n").find(l => /^\s*\d\d:\d\d\s+\+\$/.test(l));
 	if (!row) throw new Error(`no cumulative bin row in:\n${out}`);
 	// "07:00  +$0.01  $0.25   ████" — the SECOND figure is the running total.
@@ -102,16 +122,19 @@ function chartTotal(session: string): number {
 
 /** The TOTAL row of `--tokens`, last column. */
 function tokensTotal(session: string): number {
-	const out = cli(["-s", session, "--tokens"]);
+	const out = cli(session, ["--tokens"]);
 	const row = out.split("\n").find(l => /^\s*TOTAL\s/.test(l));
 	if (!row) throw new Error(`no TOTAL row in:\n${out}`);
-	const m = row.match(/\$([0-9.]+)\s*$/);
+	// The cell carries a trailing `?` when any model in the session has no rate
+	// card, so the anchor accepts it — otherwise this helper THROWS and aborts the
+	// suite the day the fixture's model ages out of the registry (PR review).
+	const m = row.match(/\$([0-9.]+)\??\s*$/);
 	if (!m) throw new Error(`no cost cell in TOTAL row: ${row}`);
 	return Number(m[1]);
 }
 
 function json(session: string): any {
-	return JSON.parse(cli(["-s", session, "--json"]));
+	return JSON.parse(cli(session, ["--json"]));
 }
 
 console.log("--- TEST 1: the fixture really exercises the meter ---");
@@ -142,6 +165,14 @@ for (const [name, session] of [["with server-tool spend", withWeb], ["without", 
 		`${name}: …and --json total.costUsd ${doc.total.costUsd} agrees to the cent they print`
 	);
 }
+
+console.log("--- TEST 2b: the rise lands on the surface the decision was about ---");
+// Asserted directly rather than inferred. TEST 2 bounds the --tokens delta only
+// transitively, at ±0.01 — two cents of slack for a claim stated in cents.
+check(
+	Math.abs(tokensTotal(withWeb) - tokensTotal(noWeb) - EXPECTED_WEB_COST) < 0.005,
+	`--tokens TOTAL itself rose by $${EXPECTED_WEB_COST.toFixed(2)}`
+);
 
 console.log("--- TEST 3: the one guarantee still holds ---");
 // sum(models) === sum(categories) === total, with the cost-only addition in it.

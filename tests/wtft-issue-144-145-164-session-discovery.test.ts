@@ -3,23 +3,23 @@
  * tests/wtft-issue-144-145-164-session-discovery.test.ts
  *   — three ways a Claude session goes missing from wtft (#144, #145, #164)
  *
- * Spec: docs/spec-144-145-164-session-discovery.md (V1–V21).
+ * Spec: docs/spec-144-145-164-session-discovery.md (V1–V22).
  *
  *   A  V1–V4    #144  slug encoding is a UNION of encodings, not a pinned class
- *   B  V5–V10   #164  a session stranded in a REMOVED directory is findable
+ *   B  V5–V10   #164→#89  a session stranded in a REMOVED directory, and
+ *                     exactly which stranded shapes are reachable now that the
+ *                     whole-file relocation arm is gone
  *   C  V12–V17  #145  live sibling worktrees fan out, non-repos do not
  *   D  V18–V20  #145  worktree rows render as <repo>/w/<branch>
- *   E  V11      #164  cost: cold discovery stays within a bounded multiple
- *                     of the memoised pass, over the real history (#477)
+ *   E  V11      #89   cost: discovery reads TAILS, never whole files
  *
  * V21 is the whole-suite invariant and is not asserted here — it is what
  * `bun run test` reports across every suite.
  *
  * Everything runs through interfaces exported from bin/wtft.mjs —
- * `discoverSessions`, `resolveLastCwd`, `resolveCwdHistory`, `buildDisplayPath`,
- * `fanOutCwd`, `findRepoRoot`, the slug helpers and the read counters — against
- * fixture trees pointed at by WTFT_CLAUDE_PROJECTS_DIR. No module internals are
- * touched.
+ * `discoverSessions`, `resolveLastCwd`, `buildDisplayPath`, `fanOutCwd`,
+ * `findRepoRoot`, the slug helpers and the read counters — against fixture trees
+ * pointed at by WTFT_CLAUDE_PROJECTS_DIR. No module internals are touched.
  *
  * On clocks: NOTHING IN THIS SUITE READS ONE. Not the wall-clock date (the
  * #96 flaky pricing trap), and as of #39 not elapsed time either — Part E's
@@ -40,14 +40,20 @@
  *
  * So Part E now owns its corpus and counts, rather than borrowing the host's
  * and timing. Every claim is an exact integer from the counters this suite
- * already exported for V9: tail reads, whole-file relocation scans, and (new
- * for #39) directory reads by the tree walk. The full rationale, the mutation
+ * already exported for V9: tail reads, BYTES read (which replaced the whole-file
+ * relocation-scan counter with #89), and directory reads by the tree walk. The full rationale, the mutation
  * record for each assertion, and the measurement showing why a ratio could
  * never have guarded the walk are in Part E's own comment block.
  *
- * What a counter cannot say is what the `pathExists` gate is WORTH in time.
- * That is measured by hand in research/39-v11-corpus/measure-gate.ts, which
- * gates nothing on purpose: a ratio needs a threshold and a counter does not.
+ * #89 removed the arm those counters were built to watch. `resolveCwdHistory`
+ * and `getCwdHistoryReadCount` are gone, and so is the `pathExists` gate that
+ * decided when to pay for them — measured 2026-09-16 over 7,287 real
+ * transcripts, the arm returned 0 extra candidates for 6,952 whole-file reads
+ * per launch. Part B now records
+ * which stranded shapes survive that deletion and which one does not, and Part E
+ * counts BYTES instead of scans: a scan counter pinned at 0 guards nothing,
+ * while bytes is the quantity that goes wrong the moment a whole-file read comes
+ * back.
  *
  * tests/wtft-issue-156-harness-seam.test.ts (Part C) carried the same fixed
  * `elapsed < 500` ceiling over the same real tree, on a call already warm by
@@ -67,10 +73,9 @@ import { trackSandbox } from "./lib/sandbox";
 import {
 	discoverSessions,
 	resolveLastCwd,
-	resolveCwdHistory,
 	resetCwdCache,
 	getCwdReadCount,
-	getCwdHistoryReadCount,
+	getCwdBytesRead,
 	getDirWalkCount,
 	cwdToSlug,
 	cwdToStrictSlug,
@@ -194,10 +199,31 @@ console.log("\n=== PART A: slug encoding union (#144) ===\n");
 }
 
 // ---
-// PART B — #164: a session stranded in a REMOVED directory (V5–V10)
+// PART B — #164 → #89: a session stranded in a REMOVED directory (V5–V10)
 // ---
+//
+// #164 answered "my worktree is gone, where did this session live before?" by
+// re-reading the whole transcript for `relocated` records. #89 deleted that arm,
+// so this part changed from "every stranded session is findable" to "these are,
+// that one is not" — and the difference is asserted, not narrated, because a
+// deletion that silently drops a case is the failure mode worth a test.
+//
+// What the real corpus says. Claude Code files a transcript under the directory
+// its session STARTED in, and a session usually starts in the main clone before
+// it enters a worktree — so the physical arm plus the #145 fan-out already
+// reaches it. Measured per arm over the corpus, the deleted arm contributed 0
+// candidates for all three cwds tested, and the candidate lists before and after
+// the deletion are identical.
+//
+// The relocation figures, DERIVED rather than quoted (2026-09-16, one walk of
+// ~/.claude/projects after SKIP_DIRS): 7,352 transcripts, of which **42** carry
+// a `"type":"relocated"` record and **21** of those 42 also have a last recorded
+// `cwd` that no longer exists — the subset for which the deleted arm was the
+// only arm that could have said anything. An earlier draft asserted the 21
+// without stating where it came from, in a comment whose selling point is
+// exactness.
 
-console.log("\n=== PART B: stranded in a removed worktree (#164) ===\n");
+console.log("\n=== PART B: stranded in a removed worktree (#164 → #89) ===\n");
 {
 	const projects = mktmp("wtft-164-");
 	const clone = mktmp("wtft-164-clone-");          // exists
@@ -209,16 +235,27 @@ console.log("\n=== PART B: stranded in a removed worktree (#164) ===\n");
 
 	check(!fs.existsSync(removedAbs), "fixture precondition: the worktree directory does not exist");
 
-	// The #158 shape: filed under the removed worktree's slug, last cwd is the
-	// removed worktree, and the history also contains the main clone.
-	// Relocations are written oldest → newest, so the LAST one is the worktree:
-	// a last-wins rule would still point at the deleted directory (V6).
-	const stranded = path.join(projects, cwdToStrictSlug(removedAbs), "stranded.jsonl");
-	writeTranscript(stranded, removedAbs, [clone, removedAbs, clone, removedAbs]);
+	// THE SHAPE THAT ACTUALLY OCCURS: filed under the main clone's slug (where
+	// the session began), last cwd the removed worktree. The physical arm alone
+	// finds it, and always did — this is why the expensive arm measured 0.
+	const strandedFromClone = path.join(projects, cwdToStrictSlug(clone), "stranded-from-clone.jsonl");
+	writeTranscript(strandedFromClone, removedAbs, [clone, removedAbs]);
 
-	// A session that never left the clone, for the no-regression arm.
+	// THE SHAPE THAT IS NOW LOST: filed under the REMOVED worktree's slug, with
+	// the clone reachable only through its relocation history. 0 of these exist
+	// on the development corpus; asserted as lost so the trade is on the record
+	// rather than discovered later by someone missing a session.
+	const strandedFromWorktree = path.join(projects, cwdToStrictSlug(removedAbs), "stranded-from-worktree.jsonl");
+	writeTranscript(strandedFromWorktree, removedAbs, [clone, removedAbs, clone, removedAbs]);
+
+	// A session that never left the clone, for the no-regression arm. PADDED well
+	// past the 8 KB first window (PR review): with every fixture a few hundred
+	// bytes, "reads no more than the fixtures hold" was satisfiable by a
+	// whole-file read of all four — the same vacuity this branch removed
+	// elsewhere. One large fixture is what gives the budget below any teeth.
 	const homebody = path.join(projects, cwdToStrictSlug(clone), "homebody.jsonl");
 	writeTranscript(homebody, clone);
+	fs.appendFileSync(homebody, `${"x".repeat(300 * 1024)}\n`);
 
 	// A Pi-shaped transcript: no cwd, no relocated.
 	const piShaped = path.join(projects, cwdToStrictSlug(clone), "pi-shaped.jsonl");
@@ -226,41 +263,60 @@ console.log("\n=== PART B: stranded in a removed worktree (#164) ===\n");
 	fs.writeFileSync(piShaped, JSON.stringify({ type: "message", message: { role: "assistant", id: "m1", usage: {} } }) + "\n");
 
 	const fromClone = namesFrom(clone);
-	check(fromClone.includes("stranded.jsonl"), "V5: a session stranded in a removed worktree is found from the main clone");
+	check(fromClone.includes("stranded-from-clone.jsonl"),
+		"V5: a session that STARTED in the clone and died in a removed worktree is still found");
 	check(fromClone.includes("homebody.jsonl"), "V7: a session that never left the main clone is still found");
 
-	// V6 — the set, not the latest entry.
+	// V6 — the case #89 gave up, stated as a fact about the build rather than
+	// left to be inferred from the absence of a check.
+	check(!fromClone.includes("stranded-from-worktree.jsonl"),
+		"V6: a session filed under the REMOVED worktree's own slug is NOT found — the #89 trade, 0 on the real corpus");
 	resetCwdCache();
-	check(resolveLastCwd(stranded) === removedAbs, "V6: resolveLastCwd still reports the (removed) worktree — unchanged");
-	const history = resolveCwdHistory(stranded);
-	check(history.includes(clone) && history.includes(removedAbs), "V6: the history holds BOTH directories");
-	check(history[0] === removedAbs, "V6: history is most-recent-first, so last-wins would answer 'removed'");
+	check(resolveLastCwd(strandedFromWorktree) === removedAbs,
+		"V6: its last cwd still reads as the removed worktree — the transcript did not change, only what we pay to read it");
 
 	// V8 — Pi shape contributes nothing either way.
 	resetCwdCache();
 	check(resolveLastCwd(piShaped) === null, "V8: a transcript with no cwd resolves to null");
-	check(resolveCwdHistory(piShaped).length === 0, "V8: …and has an empty history");
 	const elsewhere = mktmp("wtft-164-elsewhere-");
 	check(!namesFrom(elsewhere).includes("pi-shaped.jsonl"), "V8: a Pi-shaped transcript is not pulled into an unrelated cwd");
 
-	// V9 — the gate: a live last-cwd must never trigger the whole-file scan.
+	// V9 — a dead cwd costs no more than a live one. This is the whole point of
+	// #89: before it, a dead cwd opened a whole-file read, and `pr-cleanup`
+	// manufactures dead cwds on every merge.
+	//
+	// AGAINST AN ABSOLUTE BUDGET, not against `tail * 512 KB` (PR review). That
+	// product holds for every possible input by construction — `readSlice` is
+	// only ever called with `len <= 512 KB` — so it is the same vacuity
+	// Amendment 1 condemns in the counter it replaced. Part E is where the
+	// budget has teeth, on 256 KB transcripts.
 	resetCwdCache();
 	discoverSessions("claude-code", clone);
-	const historyReads = getCwdHistoryReadCount();
-	check(getCwdReadCount() > 0, "V9: the cheap tail scan did run");
-	// homebody's cwd exists, so only the stranded transcript may be scanned.
-	check(historyReads <= 1, `V9: whole-file scans stay gated on a dead cwd (${historyReads} scan(s))`);
+	const tail = getCwdReadCount();
+	const bytes = getCwdBytesRead();
+	const fixtureBytes = [strandedFromClone, strandedFromWorktree, homebody, piShaped]
+		.reduce((sum, f) => sum + fs.statSync(f).size, 0);
+	// Four transcripts, one of them 300 KB. A whole-file pass costs `fixtureBytes`;
+	// tails cost a few KB each. The budget sits between them, so it is a bound a
+	// regression can actually cross.
+	const tailBudget = 4 * 16 * 1024;
+	check(tail > 0, "V9: the tail scan did run");
+	check(fixtureBytes > tailBudget * 4,
+		`V9: the fixtures are big enough for the budget to mean something (${Math.round(fixtureBytes / 1024)} KB vs a ${tailBudget / 1024} KB budget)`);
+	check(bytes <= tailBudget,
+		`V9: a dead cwd buys no second pass (${Math.round(bytes / 1024)} KB of ${Math.round(fixtureBytes / 1024)} KB on disk)`);
 
-	// V10 — display prefers a directory that still exists.
+	// V10 — display renders under the physical slug, which is a directory the
+	// session really started in. It is no longer rewritten to the most recent
+	// still-existing directory: that lookup was the deleted whole-file read.
 	resetCwdCache();
-	const strandedCandidate = discoverSessions("claude-code", clone).find((c: any) => c.name === "stranded.jsonl");
-	const shownForRemoved = buildDisplayPath("stranded.jsonl", cwdToStrictSlug(removedAbs), "claude-code");
+	const strandedCandidate = discoverSessions("claude-code", clone)
+		.find((c: any) => c.name === "stranded-from-clone.jsonl");
 	check(!!strandedCandidate, "V10: the stranded candidate is present");
 	check(
-		strandedCandidate?.displayPath === buildDisplayPath("stranded.jsonl", cwdToSlug(clone), "claude-code"),
-		"V10: it renders under the still-existing clone…"
+		strandedCandidate?.displayPath === buildDisplayPath("stranded-from-clone.jsonl", cwdToStrictSlug(clone), "claude-code"),
+		"V10: it renders under the slug it is filed under — a real directory, at no cost"
 	);
-	check(strandedCandidate?.displayPath !== shownForRemoved, "V10: …not under the removed worktree");
 
 	delete process.env.WTFT_CLAUDE_PROJECTS_DIR;
 }
@@ -402,10 +458,12 @@ console.log("\n=== PART D: worktree display compaction (#145) ===\n");
 }
 
 // ---
-// PART E — #164 cost: the gate holds, counted on a corpus the TEST owns (V11)
+// PART E — what one launch READS, counted on a corpus the TEST owns (V11, V22).
+// (#164's `pathExists` gate is deleted; these assertions now bound bytes, not
+// scans, and V22 guards the read path itself.)
 // ---
 
-console.log("\n=== PART E: the #164 gate, counted on a test-built corpus (V11) ===\n");
+console.log("\n=== PART E: what one launch reads, counted on a test-built corpus (V11, V22) ===\n");
 {
 	resetCwdCache();
 	resetHarnessRegistry();
@@ -429,20 +487,27 @@ console.log("\n=== PART E: the #164 gate, counted on a test-built corpus (V11) =
 	// failed for one underlying reason — the input was not the test's to control.
 	//
 	// So the test now owns the corpus, and asserts on STATE rather than the
-	// clock. The gate's output is countable: `getCwdHistoryReadCount()` is
-	// exactly the number of whole-file relocation scans performed. Counting them
-	// is strictly better than timing them — no host speed, no load, no jitter,
-	// no threshold to re-tune, and the assertion says what it means.
+	// clock. #89 changed WHICH state: the whole-file arm those assertions
+	// watched is gone, and a scan counter that can only read 0 is not a guard.
+	// BYTES replaced it, because bytes is what a reinstated whole-file read
+	// would move — and unlike a scan count it also catches a half-measure, such
+	// as a tail window quietly widened to the file size.
 	//
-	// live     = recorded cwd EXISTS -> gate closed -> NO whole-file scan
-	// stranded = recorded cwd gone   -> gate open   -> one whole-file scan each
+	// The corpus is built from transcripts far larger than the 8 KB tail window,
+	// so the two are orders of magnitude apart rather than a judgement call:
+	// 60 x 256 KB whole is 15.7 MB, 60 tails is under 500 KB. The `cwd` sits on
+	// the LAST line of every fixture, so one window resolves it.
 	//
-	// A wall-clock A/B was built first and is kept at
-	// research/39-v11-corpus/measure-gate.ts: 250 files x 256 KB measured the
-	// gate as a 4.9-5.6x time difference. It is retained because it calibrates
-	// what the gate is WORTH, which a counter cannot say — but it is not what
-	// gates this suite, because a ratio needs a threshold and a counter does not.
+	// live     = recorded cwd EXISTS -> one tail read
+	// stranded = recorded cwd gone   -> one tail read, the same one (#89)
+	//
+	// A wall-clock A/B is kept at research/39-v11-corpus/measure-gate.ts: 250
+	// files x 256 KB measured the deleted gate as a 4.9-5.6x time difference. It
+	// is retained because it calibrates what that arm COST, which is the
+	// measurement that justified removing it.
 	const SESSIONS = 60;
+	/** Padding per transcript — many multiples of the largest tail window. */
+	const FILLER_BYTES = 256 * 1024;
 	const liveHome = mktmp("wtft-39-livecwd-");
 	const filler = JSON.stringify({
 		type: "assistant",
@@ -453,17 +518,24 @@ console.log("\n=== PART E: the #164 gate, counted on a test-built corpus (V11) =
 		},
 	}) + "\n";
 
-	const buildCorpus = (prefix: string, cwdFor: (i: number) => string): string => {
+	/** A transcript big enough that reading it whole is unmistakable in bytes. */
+	const bigFiller = filler.repeat(Math.ceil(FILLER_BYTES / filler.length));
+
+	const buildCorpus = (prefix: string, cwdFor: (i: number) => string, count: number = SESSIONS): string => {
 		const root = mktmp(prefix);
 		const proj = path.join(root, "-home-synthetic-project");
 		fs.mkdirSync(proj, { recursive: true });
-		for (let i = 0; i < SESSIONS; i++) {
+		for (let i = 0; i < count; i++) {
 			const id = `39c0de00-1a9b-4c3d-9e8f-${String(i).padStart(12, "0")}`;
 			fs.writeFileSync(path.join(proj, `${id}.jsonl`),
-				filler + JSON.stringify({ type: "user", cwd: cwdFor(i), message: { role: "user", content: "hi" } }) + "\n");
+				bigFiller + JSON.stringify({ type: "user", cwd: cwdFor(i), message: { role: "user", content: "hi" } }) + "\n");
 		}
 		return root;
 	};
+
+	/** The ceiling every arm below is held to: one 8 KB tail per transcript,
+	 *  with slack for the JSON line that straddles the window boundary. */
+	const TAIL_BUDGET = SESSIONS * 16 * 1024;
 
 	const liveCorpus = buildCorpus("wtft-39-live-", () => liveHome);
 	const strandedCorpus = buildCorpus("wtft-39-stranded-", (i) => path.join(liveHome, `gone-worktree-${i}`));
@@ -487,26 +559,69 @@ console.log("\n=== PART E: the #164 gate, counted on a test-built corpus (V11) =
 	// owns rather than the test.
 	process.env.WTFT_PI_SESSIONS_DIR = mktmp("wtft-39-nopi-");
 
-	// V11a — every recorded cwd exists, so the gate must keep EVERY whole-file
-	// scan off. V9 proves this for a 2-transcript corpus; this proves it holds at
-	// a scale where a per-transcript leak would be visible.
+	// V11a — every recorded cwd exists: one bounded tail per transcript, and
+	// nothing like the 15.7 MB a whole-file pass would cost.
 	process.env.WTFT_CLAUDE_PROJECTS_DIR = liveCorpus;
 	resetCwdCache();
 	discoverSessions("claude-code", liveHome);
 	const liveTail = getCwdReadCount();
-	const liveHistory = getCwdHistoryReadCount();
-	check(liveTail >= SESSIONS, `V11a: the cheap tail scan ran for every transcript (${liveTail} >= ${SESSIONS})`);
-	check(liveHistory === 0, `V11a: a live cwd triggers NO whole-file scan (${liveHistory} scan(s) over ${SESSIONS} transcripts)`);
+	const liveBytes = getCwdBytesRead();
+	check(liveTail >= SESSIONS, `V11a: the tail scan ran for every transcript (${liveTail} >= ${SESSIONS})`);
+	check(liveBytes <= TAIL_BUDGET,
+		`V11a: …reading tails, not files (${Math.round(liveBytes / 1024)} KB over ${SESSIONS} x ${FILLER_BYTES / 1024} KB transcripts, budget ${TAIL_BUDGET / 1024} KB)`);
 
-	// V11b — the same corpus shape with dead cwds MUST trigger the fallback.
-	// Without this, V11a passes just as well on a corpus that could never have
-	// triggered a scan in the first place, which would make it vacuous.
+	// V11b — THE #89 ASSERTION. The same corpus with every cwd dead used to cost
+	// one whole-file read each; it must now cost exactly what the live one does.
+	// This is where a reinstated fallback shows up: 60 x 256 KB against a 960 KB
+	// budget is not a close call.
 	process.env.WTFT_CLAUDE_PROJECTS_DIR = strandedCorpus;
 	resetCwdCache();
 	discoverSessions("claude-code", liveHome);
-	const strandedHistory = getCwdHistoryReadCount();
-	check(strandedHistory === SESSIONS,
-		`V11b: …and a dead cwd triggers exactly one each, so V11a is not vacuous (${strandedHistory} of ${SESSIONS})`);
+	const strandedTail = getCwdReadCount();
+	const strandedBytes = getCwdBytesRead();
+	check(strandedBytes <= TAIL_BUDGET,
+		`V11b: a DEAD cwd costs no more than a live one (${Math.round(strandedBytes / 1024)} KB, budget ${TAIL_BUDGET / 1024} KB — it was ${SESSIONS * FILLER_BYTES / 1024} KB before #89)`);
+	check(strandedTail <= liveTail,
+		`V11b: …and no extra reads either (${strandedTail} vs ${liveTail} live)`);
+
+	// V11f — THE CONTRACT'S OWN FIXTURE, and the clause it cannot yet satisfy.
+	//
+	// #89's closer asks for 200 transcripts with 150 stranded cwds, and for reads
+	// bounded by the CANDIDATE count rather than the corpus. The shape is built
+	// here; the bound is not met, and is REPORTED rather than asserted.
+	//
+	// An earlier cut asserted the negation — `strandedTail >= SESSIONS` — which
+	// would have made a future success break the suite (PR review). A test that
+	// enforces a contract clause's opposite is worse than no test. `skip()` is
+	// this repo's mechanism for "a check that did not run, said out loud": the
+	// driver counts and lists it, so the gap is visible on every run instead of
+	// living in a comment that goes stale.
+	{
+		const MIXED = 200;
+		const STRANDED = 150;
+		const mixedCorpus = buildCorpus("wtft-89-mixed-",
+			i => (i < STRANDED ? path.join(liveHome, `gone-worktree-${i}`) : liveHome), MIXED);
+		process.env.WTFT_CLAUDE_PROJECTS_DIR = mixedCorpus;
+		resetCwdCache();
+		const mixed = discoverSessions("claude-code", liveHome);
+		const mixedTail = getCwdReadCount();
+		const mixedBytes = getCwdBytesRead();
+
+		check(mixed.length === MIXED - STRANDED,
+			`V11f: the contract's mixed corpus resolves its live half (${mixed.length} of ${MIXED}, ${STRANDED} stranded)`);
+		check(mixedBytes <= MIXED * 16 * 1024,
+			`V11f: …reading tails, not files (${Math.round(mixedBytes / 1024)} KB over ${MIXED} x ${FILLER_BYTES / 1024} KB)`);
+
+		// The clause itself. Reads scale with the corpus because every remaining
+		// arm must ask each transcript where it lives before ruling it out — no
+		// deletion changes that, only the on-disk index (#89's direction A, "I"
+		// in its 2026-09-15 comment), which is why #89 stays OPEN.
+		if (mixedTail > mixed.length) {
+			skip(`#89's closer asks reads be bounded by CANDIDATE count; measured ${mixedTail} reads for ${mixed.length} candidates — unmet until the on-disk index lands`);
+		} else {
+			check(true, `V11f: reads are bounded by candidates (${mixedTail} for ${mixed.length}) — the closer is MET; delete the skip above`);
+		}
+	}
 
 	// V11c — memoisation, asserted as state instead of `warm <= cold + 50`.
 	// The old sibling check could not fail: a broken memo inflates warm, which
@@ -514,11 +629,12 @@ console.log("\n=== PART E: the #164 gate, counted on a test-built corpus (V11) =
 	// memoisation collapse — the failure mode the previous comment admitted was
 	// never actually tested — now shows up directly as a non-zero delta.
 	const afterFirst = getCwdReadCount();
+	const bytesAfterFirst = getCwdBytesRead();
 	discoverSessions("claude-code", liveHome);
 	check(getCwdReadCount() === afterFirst,
 		`V11c: the memoised second pass re-reads nothing (${getCwdReadCount() - afterFirst} new tail read(s))`);
-	check(getCwdHistoryReadCount() === strandedHistory,
-		`V11c: …and re-scans nothing (${getCwdHistoryReadCount() - strandedHistory} new whole-file scan(s))`);
+	check(getCwdBytesRead() === bytesAfterFirst,
+		`V11c: …and reads no further bytes (${getCwdBytesRead() - bytesAfterFirst} B)`);
 
 	// V11e — THE WALK, which neither counter above can see (#39 review round 2).
 	//
@@ -574,6 +690,68 @@ console.log("\n=== PART E: the #164 gate, counted on a test-built corpus (V11) =
 
 	delete process.env.WTFT_CLAUDE_PROJECTS_DIR;
 	delete process.env.WTFT_PI_SESSIONS_DIR;
+
+	// V23 — WIDENING READS EACH BYTE ONCE (Macroscope, PR #122).
+	//
+	// This exists because the fix it guards was written, LOST to a failed edit,
+	// and then described in a commit message and a spec paragraph anyway — while
+	// this suite stayed green, because V11a/V11b use transcripts that resolve in
+	// the FIRST window and so never widen at all. A reviewer found it by reading
+	// the loop. Prose is not a guard; this is.
+	//
+	// The shape: a transcript far larger than the last window with no `cwd`
+	// anywhere, so every window is tried and none resolves. Re-reading each
+	// window from scratch costs 8 + 64 + 512 = 584 KB; reading only the newly
+	// exposed prefix costs exactly 512 KB. The two are far enough apart that the
+	// assertion is an equality, not a budget.
+	{
+		const nocwdRoot = mktmp("wtft-89-nocwd-");
+		const proj = path.join(nocwdRoot, "-home-nocwd-project");
+		fs.mkdirSync(proj, { recursive: true });
+		const line = JSON.stringify({ type: "assistant", message: { role: "assistant", id: "x", usage: {} } }) + "\n";
+		const big = path.join(proj, "8900cafe-1a9b-4c3d-9e8f-000000000023.jsonl");
+		fs.writeFileSync(big, line.repeat(Math.ceil((1024 * 1024) / line.length)));
+
+		resetCwdCache();
+		const resolved = resolveLastCwd(big);
+		const widenReads = getCwdReadCount();
+		const widenBytes = getCwdBytesRead();
+		const LAST_WINDOW = 512 * 1024;
+
+		check(resolved === null, "V23: a transcript with no cwd anywhere resolves to null");
+		check(widenReads === 3, `V23: …after trying every window (${widenReads} reads)`);
+		check(
+			widenBytes === LAST_WINDOW,
+			`V23: …reading exactly the last window, each byte once (${widenBytes} B; re-reading each window costs ${8 * 1024 + 64 * 1024 + LAST_WINDOW} B)`
+		);
+	}
+
+	// V22 — THE GUARD THE COUNTER CANNOT BE (PR review).
+	//
+	// `getCwdBytesRead` only sees reads routed through session-cwd.ts's one
+	// private `readSlice`. The arm #89 deleted did not use it — `resolveCwdHistory`
+	// called `fs.readFileSync` directly — so a re-introduction in that same style
+	// would move neither counter and leave V11a/V11b green while the launch
+	// re-read gigabytes. No counter can police the code that declines to use it.
+	//
+	// So the invariant is asserted against the SOURCE: that module has exactly
+	// one read call, and it is the bounded one.
+	{
+		const src = fs.readFileSync(
+			path.join(import.meta.dirname, "..", "extensions", "lib", "harness", "session-cwd.ts"),
+			"utf8",
+		);
+		// Comments discuss the deleted `fs.readFileSync` by name, so strip them
+		// first — the claim is about CODE, and a doc mention must not fail it.
+		const code = src
+			.replace(/\/\*[\s\S]*?\*\//g, "")
+			.replace(/^[ \t]*\/\/.*$/gm, "");
+		const reads = [...code.matchAll(/fs\.(read[A-Za-z]*Sync|createReadStream)\s*\(/g)].map(m => m[0]);
+		check(
+			reads.length === 1 && reads[0].startsWith("fs.readSync"),
+			`V22: session-cwd.ts has exactly one read call and it is the bounded one (${reads.join(", ") || "none"})`
+		);
+	}
 
 	// V11d — the real tree still gets a smoke check, minus the cost claim it
 	// could never support: discovery must not throw on whatever this host holds.

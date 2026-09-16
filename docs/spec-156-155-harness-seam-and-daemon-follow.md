@@ -53,14 +53,19 @@ Union is the whole point. A pure last-cwd match would *change* existing behaviou
 `rogue-savvy` session above would stop appearing at the repo root, where it appears today.
 Union is strictly additive: it never drops a session the current code finds.
 
-> **Extended, not replaced, by #144/#145/#164** — see
+> **Extended, not replaced, by #144/#145** — see
 > `docs/spec-144-145-164-session-discovery.md`. The two arms above are still exactly the first
 > two arms of the shipped rule, and this document's reasoning still holds; but the shipped rule is
-> now wider in three ways, and reading only this section will understate it. `slug(D)` became a
-> *set* of encodings rather than one string (#144); `D` became the set of every checkout of `D`'s
-> git repo (#145); and a third arm fires when a session's last cwd names a directory that no
-> longer exists, matching against every directory the transcript has ever recorded (#164). The
-> additive invariant this section establishes is what all three were measured against.
+> now wider in two ways, and reading only this section will understate it. `slug(D)` became a
+> *set* of encodings rather than one string (#144), and `D` became the set of every checkout of
+> `D`'s git repo (#145). The additive invariant this section establishes is what both were
+> measured against.
+>
+> A third arm (#164) also existed — a session whose last cwd had been *deleted* matched against
+> every directory its transcript had ever recorded — and **#89 deleted it** as measured dead
+> weight: 6,952 whole-file reads per launch for 0 extra candidates. That deletion is the one
+> place the union has ever narrowed, and Amendment 1 of the #144/#145/#164 spec records the shape
+> it gave up.
 
 ### Tail-scan refinements
 
@@ -84,8 +89,8 @@ it is today. That is correct rather than a gap: Pi's directory slug already enco
 cwd, and Pi has no worktree-switch mechanism that rewrites it. The resolver is wired into Pi
 discovery anyway, so the day Pi starts recording per-entry cwd, it works with no code change.
 
-Still true after #144/#145/#164 for the last-cwd, relocation-history and worktree-fan-out arms —
-Pi is touched by exactly one of the three changes: its containment match is now evaluated against
+Still true after #144/#145 for the last-cwd and worktree-fan-out arms (the relocation-history arm
+is gone, #89) — Pi is touched by exactly one of those changes: its containment match is now evaluated against
 every slug encoding rather than one (#144). Pi's own munging is unverified in the same way
 Claude Code's was, so accepting either encoding is additive and changes no Pi row that resolves
 today. Replacing Pi's encoder outright remains the road not taken.

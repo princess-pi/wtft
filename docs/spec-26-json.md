@@ -90,6 +90,7 @@ contract.
     "depthCapped": 0,
     "maxDepth": 5,
     "malformedLedgerLines": 0,
+    "ledgerError": null,
     "total": { "costUsd": 12.34, "inputTokens": 0, "outputTokens": 0,
                "reasoningTokens": 0, "cacheReadTokens": 0, "cacheWriteTokens": 0 }
   },
@@ -120,7 +121,9 @@ contract.
 | `spawned.edges[].total` | object \| null | **`null`, never a zero object**, when the edge contributed nothing. A zero would say "this child cost nothing", which is a claim; `null` says we do not have one. `skip` names why: `no-transcript`, `unreadable`, `already-counted`, `depth-capped`. |
 | `spawned.unattributed[]` | array | Edges recorded but unreadable — the gaps, with `reason`. Not the same as cost zero. |
 | `spawned.depthCapped` | number | Edges not followed because of `spawned.maxDepth`. Reported, never silently dropped. |
+| `spawned.maxDepth` | number | The recursion bound in force for this run, stated so a reader never needs the constant to interpret a truncated tree. |
 | `spawned.malformedLedgerLines` | number | Ledger lines the reader could not use. A broken spawner shows up as a number rather than an absence. |
+| `spawned.ledgerError` | string \| null | The ledger read FAILED, with the message. Without this field an unreadable ledger would serialise identically to "read it, this session spawned nothing" — the silent gap #116 exists to end, reintroduced inside its own fix. An *absent* ledger is not an error. |
 | `tree.*` | number | **SELF + descendants**, as a field, so a consumer never adds two numbers and has to work out whether it double-counted. |
 | `models[]` | array | One row per model id, **sorted by `costUsd` descending** — the same order and the same numbers as the rendered `--tokens` table's rows, un-abbreviated. `model` is the full id, never shortened. |
 | `models[].priced` | bool | `isModelPriced(model)` — the `?` marker in the rendered table. `false` means **no rate card**, not "wtft guessed this row": a harness-native per-turn cost is used unchanged wherever the transcript records one, so a marked row's cost can mix provenance. |

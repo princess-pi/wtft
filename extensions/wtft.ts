@@ -150,14 +150,14 @@ function getSettings(_ctx: any) {
 //   2. Pi (pre-emptive): sibling files with parentSession header match
 // ---
 
-/** Read interactions from the daemon's classified tag file (#92),
- *  merged with subagent session interactions (#83, #82). */
 /** The spawn tree for the session this widget is rendering (#116).
  *
- *  Degrades to an empty tree rather than throwing: a widget refresh runs on
- *  every turn, and an unreadable ledger must not take the panel down. Unlike
- *  the CLI there is no stderr to warn on, so the failure shows up the way every
- *  other widget-side failure does — as the block simply not being there. */
+ *  `computeSpawnTree` reports a ledger it could not read as `ledgerError`
+ *  rather than throwing, and the renderer prints that as its own block — so the
+ *  widget shows the failure, it does not hide it. The catch here is for the
+ *  cases that still can throw (a project dir that becomes unreadable between
+ *  the listing and the stat), where a widget refresh running every turn must
+ *  not take the panel down; there, the block is simply absent. */
 function widgetSpawnTree(ctx: any): SpawnTree | undefined {
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	if (!sessionFile) return undefined;
@@ -168,6 +168,8 @@ function widgetSpawnTree(ctx: any): SpawnTree | undefined {
 	}
 }
 
+/** Read interactions from the daemon's classified tag file (#92),
+ *  merged with subagent session interactions (#83, #82). */
 function readInteractions(ctx: any): Interaction[] {
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	if (!sessionFile) return [];

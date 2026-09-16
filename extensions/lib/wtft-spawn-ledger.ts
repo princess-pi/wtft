@@ -18,8 +18,10 @@
  *   that fact cost one line, and to make reading it back honest about what it
  *   could not use.
  *
- *   This module does FILE I/O and nothing else — no parsing of transcripts, no
- *   cost. The walk that turns edges into money is wtft-spawn-tree.ts.
+ *   This module owns the FILE and the `spawn-record` command line. It parses no
+ *   session, prices nothing, and imports no renderer — the walk that turns edges
+ *   into money is wtft-spawn-tree.ts. That separation is why a spawner's call
+ *   does no session-reading work at runtime, whatever the bundler packs.
  */
 
 import * as fs from "node:fs";
@@ -30,18 +32,33 @@ import * as path from "node:path";
  *  rather than guessing at a field it does not know. */
 export const SPAWN_RECORD_SCHEMA = "wtft/spawn@1";
 
-/** PIPE_BUF on Linux. A write at or under this size is atomic with O_APPEND, so
- *  two spawners appending at the same instant cannot interleave a line — which
- *  would lose BOTH edges, not one. Not an arbitrary limit: it is the guarantee. */
+/** Cap on one appended line, newline included.
+ *
+ *  POSIX does not promise that a `write(2)` to a regular file is atomic against
+ *  a concurrent writer; Linux takes the inode lock for the duration of one
+ *  `write`, which is what makes a single-call O_APPEND write land whole in
+ *  practice. 4096 is a deliberately conservative bound on how much we rely on
+ *  that — small enough to be one page and one call, and the same figure as
+ *  PIPE_BUF, which is where the number comes from even though the guarantee is
+ *  not the pipe one. Two spawners interleaving would lose BOTH edges, not one.
+ *
+ *  Reachable only through JSON escape expansion in practice: five capped text
+ *  fields plus two uuids come to roughly 2.2 KiB of ordinary characters, so the
+ *  field cap below normally pre-empts this one. It is the backstop. */
 export const MAX_RECORD_BYTES = 4096;
 
-/** Per-field cap for the free-text fields, so a pathological label cannot push
- *  a record past MAX_RECORD_BYTES and break the atomicity above in practice. */
+/** Per-field cap, applied to EVERY text field — `ts` and `mechanism` as well as
+ *  the three optional ones — so a pathological value cannot push a record past
+ *  MAX_RECORD_BYTES and put the single-write append above out of reach. */
 export const MAX_FIELD_BYTES = 512;
 
 export interface SpawnRecord {
 	schema: typeof SPAWN_RECORD_SCHEMA;
-	/** ISO-8601 UTC, when the EDGE was recorded — not when the child finished. */
+	/** ISO-8601 UTC, when the EDGE was recorded — not when the child finished.
+	 *  `wtft spawn-record` fills this from the clock; there is no flag for it,
+	 *  because a spawner passing its own timestamp is a way for the ledger to
+	 *  disagree with itself and buys nothing. Checked for ISO-8601 shape on
+	 *  write: an unparseable `ts` is as permanently useless as a bad uuid. */
 	ts: string;
 	/** Session uuid of the spawning session. */
 	parent: string;
@@ -59,11 +76,14 @@ export interface SpawnRecord {
 	model?: string;
 }
 
-/** One edge as read back, with the ledger line it came from for error reports. */
-export interface SpawnEdge extends SpawnRecord {
-	/** 1-based line number in the ledger. */
-	line: number;
-}
+/** One edge as read back.
+ *
+ *  Deliberately NOT carrying a ledger line number. The first version did, and it
+ *  was wrong by construction on any ledger over LEDGER_TAIL_BYTES: the tail read
+ *  starts mid-file and drops a partial first line, so the index is an offset
+ *  into the window, not into the file. A number that is right until the ledger
+ *  gets big is worse than no number. */
+export type SpawnEdge = SpawnRecord;
 
 export interface SpawnLedger {
 	/** parent session id → its recorded edges, in ledger order. */
@@ -75,9 +95,18 @@ export interface SpawnLedger {
 
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
-/** A session id that resolves to a transcript filename, or it is not one. */
+/** UUID SHAPE only — 8-4-4-4-12 hex. It says nothing about whether a session
+ *  file by that name exists, and it does not check the version or variant
+ *  nibbles, so the nil uuid passes. Shape is what a filename lookup needs. */
 export function isSessionUuid(value: unknown): value is string {
 	return typeof value === "string" && UUID_RE.test(value);
+}
+
+/** ISO-8601 shape, and a date the runtime can actually parse. */
+function isIsoTimestamp(value: unknown): value is string {
+	return typeof value === "string"
+		&& /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value)
+		&& !Number.isNaN(Date.parse(value));
 }
 
 /** `$XDG_STATE_HOME/wtft/spawns.jsonl`, defaulting to `~/.local/state/…`. */
@@ -102,7 +131,9 @@ function optionalField(value: unknown, name: string): string | undefined {
 }
 
 /**
- * One record → one line, or a throw naming what is wrong.
+ * One record → the JSON text of one line (no trailing newline; the caller adds
+ * it), or a throw naming what is wrong. The size check counts the newline,
+ * because the newline is part of the write that has to land whole.
  *
  * Validation happens HERE, at the spawner, because it is the last moment it is
  * cheap: a malformed uuid is a permanently unresolvable edge, and the report
@@ -114,6 +145,7 @@ export function serializeSpawnRecord(record: SpawnRecord): string {
 	}
 	if (!isSessionUuid(record.parent)) throw new Error(`spawn record: parent is not a session uuid: ${String(record.parent).slice(0, 64)}`);
 	if (!isSessionUuid(record.child)) throw new Error(`spawn record: child is not a session uuid: ${String(record.child).slice(0, 64)}`);
+	if (!isIsoTimestamp(record.ts)) throw new Error(`spawn record: ts is not an ISO-8601 UTC timestamp: ${String(record.ts).slice(0, 64)}`);
 
 	const out: SpawnRecord = {
 		schema: SPAWN_RECORD_SCHEMA,
@@ -150,9 +182,20 @@ export function serializeSpawnRecord(record: SpawnRecord): string {
 export function appendSpawnRecord(record: SpawnRecord, file: string = spawnLedgerPath()): void {
 	const line = serializeSpawnRecord(record) + "\n";
 	fs.mkdirSync(path.dirname(file), { recursive: true });
+	const buf = Buffer.from(line, "utf8");
 	const fd = fs.openSync(file, "a");
 	try {
-		fs.writeSync(fd, Buffer.from(line, "utf8"));
+		// ONE write, and then a check that it was one write. `writeSync` returns
+		// a byte count and a short write is legal: ignoring it leaves a
+		// truncated line in the ledger and still exits 0, which is a malformed
+		// record reported as a recorded edge. A retry would append the REST of
+		// the line as a second record, so the only honest move is to say the
+		// append failed — the caller's contract is already "an unwritten edge
+		// degrades to the old behaviour".
+		const written = fs.writeSync(fd, buf);
+		if (written !== buf.length) {
+			throw new Error(`spawn ledger: short write (${written} of ${buf.length} bytes) — the ledger now holds a partial line`);
+		}
 	} finally {
 		fs.closeSync(fd);
 	}
@@ -191,8 +234,10 @@ function readLedgerText(file: string): { text: string; truncated: boolean } | nu
 /**
  * Read the ledger into `parent → edges`.
  *
- * A line that is not JSON, carries a schema this reader does not know, or is
- * missing a required field is skipped AND COUNTED. Counting is the whole point:
+ * A line that is not JSON, carries a schema this reader does not know, is
+ * missing a required field, or carries a `parent`/`child` that is not uuid-
+ * shaped is skipped AND COUNTED. (A blank line is skipped and NOT counted — it
+ * is whitespace, not a failed record.) Counting is the whole point:
  * this file is the only record of an edge that cannot be recovered any other
  * way, so a writer quietly producing garbage must show up as a number a report
  * can print, not as an absence indistinguishable from "nothing spawned".
@@ -206,7 +251,11 @@ export function readSpawnLedger(file: string = spawnLedgerPath()): SpawnLedger {
 
 	const lines = read.text.split("\n");
 	// A tail read starts mid-line; that fragment is not a malformed record, it
-	// is half of a record whose other half we chose not to read.
+	// is half of a record whose other half we chose not to read. The drop is
+	// UNCONDITIONAL on a truncated read because the two cases are genuinely
+	// indistinguishable from inside the window — so past LEDGER_TAIL_BYTES one
+	// intact record may be dropped with it. That costs one edge out of the
+	// ~40,000 an 8 MiB ledger holds, and only once the ledger is that big.
 	if (read.truncated && lines.length > 0) lines.shift();
 
 	for (let i = 0; i < lines.length; i++) {
@@ -234,7 +283,6 @@ export function readSpawnLedger(file: string = spawnLedgerPath()): SpawnLedger {
 			parent: r.parent,
 			child: r.child,
 			mechanism: r.mechanism,
-			line: i + 1,
 		};
 		if (typeof r.cwd === "string") edge.cwd = r.cwd;
 		if (typeof r.label === "string") edge.label = r.label;
@@ -271,8 +319,12 @@ export const SPAWN_RECORD_USAGE =
 	"                        [--cwd <path>] [--label <text>] [--model <name>] [--json]\n";
 
 /**
- * Parse, validate, append. Pure but for the one append, so the exit-code table
- * above is testable without a process.
+ * Parse, validate, append.
+ *
+ * The ledger path and the clock are parameters with defaults rather than direct
+ * reads, so the exit-code table above is testable without a process — not
+ * because this function is pure (its defaults read `process.env` and the wall
+ * clock), but because a caller can supply both.
  *
  * Every failure names the flag that caused it. A spawner calls this from a
  * shell script and will not read a stack trace; the whole value of validating
@@ -292,7 +344,10 @@ export function runSpawnRecordCommand(
 		if (arg === "-h" || arg === "--help") {
 			return { exitCode: SPAWN_RECORD_EXIT.OK, stdout: SPAWN_RECORD_USAGE, stderr: "" };
 		}
-		const m = /^--(parent|child|mechanism|cwd|label|model|ts)(?:=(.*))?$/.exec(arg);
+		// `--flag value` and `--flag=value` both. No `--ts`: the clock fills it
+		// (see the SpawnRecord field doc), and a spawner-supplied timestamp is a
+		// way for the ledger to disagree with itself for no gain.
+		const m = /^--(parent|child|mechanism|cwd|label|model)(?:=(.*))?$/.exec(arg);
 		if (!m) {
 			// Silently ignoring an unknown flag is how a typo'd `--mechansim`
 			// becomes a missing-argument error that blames the wrong flag (#91).
@@ -313,7 +368,7 @@ export function runSpawnRecordCommand(
 
 	const record: SpawnRecord = {
 		schema: SPAWN_RECORD_SCHEMA,
-		ts: flags.ts || now(),
+		ts: now(),
 		parent: flags.parent,
 		child: flags.child,
 		mechanism: flags.mechanism,

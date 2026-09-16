@@ -88,6 +88,11 @@ line; past that the ledger is older than any live session's lineage.
 `~/.claude/projects/*/`. The ledger deliberately does **not** record the transcript path: a
 worktree move relocates the file (#6) and a recorded path would rot, while the UUID does not.
 
+**An unreadable ledger is not an empty one.** `computeSpawnTree` owns the read, and a failure
+comes back as `ledgerError` with an otherwise-empty tree. Without that field an EACCES would
+render and serialise exactly like "this session spawned nothing" — #116's own failure mode
+reintroduced inside #116's fix. An *absent* ledger is not an error: nothing has spawned yet.
+
 **The walk** is depth-first from the reported session through `childrenOf`:
 
 - **A session is counted at most once.** A `seen` set over session ids means a diamond (two
@@ -117,7 +122,9 @@ already trust.
              "resolved":true,"path":"/home/…/<child>.jsonl","total":{…}}],
   "unattributed": [{"child":"…","mechanism":"…","ts":"…","reason":"no-transcript"}],
   "depthCapped": 0,
+  "maxDepth": 5,
   "malformedLedgerLines": 0,
+  "ledgerError": null,
   "total": {…}
 },
 "tree": {…}
@@ -134,9 +141,12 @@ SPAWNED    3 descendant session(s) recorded in the spawn ledger (#116) — NOT i
            pr-review-lens  correctness            $12.34
            pr-review-lens  reasoning              $18.02
            herdr-agent-start  agent/824           $26.67
-           1 unattributed (no transcript) — cost unknown, not estimated
+           1 unattributed — cost unknown, deliberately not estimated
 TREE       TOTAL + SPAWNED                        $127.36
 ```
+
+When the ledger could not be read, the block says so instead and names the error — never an
+empty block, which is what a session with no descendants prints.
 
 **The Pi widget** (`extensions/wtft.ts`) renders the same block. It is a reader of the same
 report, and a Pi user seeing `TOTAL` with $69 of lens children unlisted is exactly the gap this
@@ -159,8 +169,9 @@ the ledger only ever adds.
 
 Plus, each with its own test: UUID validation on write, the 4 KiB refusal, concurrent appends not
 interleaving, a malformed line counted rather than swallowed, a diamond counted once, a cycle
-terminating, the depth cap reporting rather than dropping, and an unresolvable child reported as
-`unattributed` with a `null` cost.
+terminating, the depth cap reporting rather than dropping, an unresolvable child reported as
+`unattributed` with a `null` cost, and an unreadable ledger reporting `ledgerError` rather than an
+empty tree (skipped, visibly, when the process can read a `chmod 000` file — running as root).
 
 ## Not in this change
 

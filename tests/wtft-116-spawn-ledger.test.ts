@@ -9,13 +9,17 @@
  * OTHER. There is no edge to re-derive. So the spawner writes it down at spawn
  * time, when it is free.
  *
- * Part A — the writer refuses what it cannot resolve later (bad UUID, oversized
- *          record), and one record is one atomic append.
+ * Part A — the writer refuses what it cannot resolve later: a bad UUID, a `ts`
+ *          that is not ISO-8601, an oversized field, an oversized record. One
+ *          record is one atomic append, and a short write is a failure, not a
+ *          silent truncation.
  * Part B — the reader counts what it skips. A malformed line that vanishes
  *          silently is money that vanishes silently.
  * Part C — the walk: a diamond counts once, a cycle terminates, depth is capped
- *          and REPORTED, an unresolvable child is `unattributed` with a null
- *          cost — never a zero, which would launder a gap into a fact.
+ *          and the cut is REPORTED (what lies beyond it is not — that is what a
+ *          bound is), an unresolvable child is `unattributed` with a null cost
+ *          — never a zero, which would launder a gap into a fact — and an
+ *          unreadable ledger is `ledgerError`, never an empty tree.
  * Part D — the issue's own Closer, end to end through the CLI.
  *
  * Spec: docs/spec-116-spawn-ledger.md
@@ -101,7 +105,29 @@ for (const bad of ["", "not-a-uuid", "9f29d624531c47b0abf60790bb65180d", PARENT 
 	let threw = false;
 	try { serializeSpawnRecord(rec({ label: "x".repeat(MAX_FIELD_BYTES + 1) })); } catch { threw = true; }
 	check(threw, `A8  a label over ${MAX_FIELD_BYTES} bytes is refused`);
-	check(MAX_RECORD_BYTES === 4096, "A9  the record cap is PIPE_BUF, not an arbitrary number");
+
+	// A9 used to be `MAX_RECORD_BYTES === 4096` — a constant compared to itself,
+	// which is not a test of anything. The cap is reachable only through JSON
+	// escape expansion (a control character costs 6 bytes on the wire and 1
+	// against the field cap), which is exactly the input a hand-written ledger
+	// line or an exotic label could carry.
+	let recordThrew = "";
+	try {
+		serializeSpawnRecord(rec({
+			cwd: "\u0001".repeat(MAX_FIELD_BYTES),
+			label: "\u0001".repeat(MAX_FIELD_BYTES),
+			model: "\u0001".repeat(MAX_FIELD_BYTES),
+			mechanism: "\u0001".repeat(MAX_FIELD_BYTES),
+		}));
+	} catch (err) { recordThrew = err instanceof Error ? err.message : String(err); }
+	check(/atomic-append limit/.test(recordThrew),
+		`A9  a record past ${MAX_RECORD_BYTES} bytes is REFUSED, not merely capped per field (got ${recordThrew.slice(0, 80) || "no throw"})`);
+
+	for (const badTs of ["", "yesterday", "2026-09-16", "2026-13-99T00:00:00Z"]) {
+		let tsThrew = false;
+		try { serializeSpawnRecord(rec({ ts: badTs })); } catch { tsThrew = true; }
+		check(tsThrew, `A9b a ts that is not ISO-8601 UTC is refused: ${JSON.stringify(badTs)}`);
+	}
 }
 
 {
@@ -241,12 +267,19 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 	const tree = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects });
 	check(tree.descendants === 3, `C7  a diamond counts three sessions, not four (got ${tree.descendants})`);
 	check(tree.total.outputTokens === 900, `C8  the shared grandchild's cost lands ONCE (got ${tree.total.outputTokens})`);
+	const dup = tree.edges.filter(e => e.child === U(12));
+	check(dup.length === 2 && dup.filter(e => e.skip === "already-counted").length === 1,
+		"C8b the second edge to the shared child is REPORTED as already-counted, not dropped");
 }
 
 {
 	// A CYCLE. Nothing legitimate writes one, but a ledger is append-only text
 	// that any process may write, so the walk must terminate on one anyway.
 	childTranscript(U(20), 1); childTranscript(U(21), 1);
+	// The ROOT gets a session file too. Without it the `U(21)→PARENT` edge would
+	// come back `no-session-file` and C10 would pass with the seen-guard deleted
+	// — measuring a missing fixture, not the guard.
+	childTranscript(PARENT, 1);
 	const led = ledgerOf("cycle.jsonl", [
 		{ child: U(20) },
 		{ parent: U(20), child: U(21) },
@@ -255,8 +288,9 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 	]);
 	const tree = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects });
 	check(tree.descendants === 2, `C9  a cycle terminates and counts each session once (got ${tree.descendants})`);
-	check(!tree.edges.some(e => e.child === PARENT && e.resolved),
-		"C10 the root is never a descendant of itself");
+	const rootEdge = tree.edges.find(e => e.child === PARENT);
+	check(rootEdge !== undefined && !rootEdge.resolved && rootEdge.skip === "already-counted",
+		`C10 the root is never a descendant of itself, even with its own session file on disk (got ${rootEdge?.skip})`);
 }
 
 {
@@ -270,6 +304,8 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 	check(tree.descendants === 5, `C11 the cap admits exactly maxDepth levels (got ${tree.descendants})`);
 	check(tree.depthCapped === 1, `C12 the cut is reported, not silent (got ${tree.depthCapped})`);
 	check(tree.maxDepth === 5, "C13 the cap in force is stated in the result");
+	check(tree.edges.some(e => e.skip === "depth-capped" && e.depth === 6),
+		"C13b the cut is an edge in the report, at the depth that exceeded the cap");
 }
 
 {
@@ -278,10 +314,60 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 	const tree = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects });
 	check(tree.descendants === 0, "C14 an unresolvable child is not a descendant");
 	check(tree.unattributed.length === 1, "C15 it is reported as unattributed");
-	check(tree.unattributed[0].reason === "no-transcript", "C16 with the reason named");
+	check(tree.unattributed[0].reason === "no-session-file", "C16 with the reason named");
 	check(tree.edges[0].total === null,
 		"C17 its cost is null, never 0 — a zero would launder a gap into a fact");
 	check(tree.total.costUsd === 0, "C18 and it contributes nothing to the tree total");
+	check(tree.edges[0].skip === "no-session-file", "C18b the skip reason is on the edge too");
+}
+
+{
+	// A child we cannot read may still have recorded children of its own, and
+	// those may be perfectly readable. Dropping the subtree with the parent
+	// loses real, resolvable money over one missing file — and the grandchild
+	// is an edge in the LEDGER, not an entry in the file that is missing.
+	childTranscript(U(61), 2);
+	const led = ledgerOf("gap-subtree.jsonl", [
+		{ child: U(60) },                 // recorded, no session file
+		{ parent: U(60), child: U(61) },  // its child, which IS on disk
+	]);
+	const tree = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects });
+	check(tree.descendants === 1, `C23 the readable grandchild is still counted (got ${tree.descendants})`);
+	check(tree.total.outputTokens === 600,
+		`C23b its cost lands despite its parent being unreadable (got ${tree.total.outputTokens})`);
+	check(tree.unattributed.length === 1, "C23c and the gap in the middle is still reported");
+}
+
+{
+	// `unreadable` is the one skip class that is a bug rather than a fact, and
+	// it has its own reason so a reader can tell it from a missing file.
+	const file = childTranscript(U(70), 1);
+	fs.chmodSync(file, 0o000);
+	const led = ledgerOf("unreadable-child.jsonl", [{ child: U(70) }]);
+	const tree = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects });
+	const readable = tree.descendants === 1;
+	fs.chmodSync(file, 0o644);
+	if (readable) {
+		console.log("  ⏭  C24 SKIPPED — this process can read a chmod 000 file (root?)");
+	} else {
+		check(tree.unattributed[0]?.reason === "unreadable",
+			`C24 an unreadable session file is 'unreadable', not 'no-session-file' (got ${tree.unattributed[0]?.reason})`);
+		check(tree.edges[0].path !== null,
+			"C24b and the edge still names the file that failed, so a reader can go and look");
+	}
+}
+
+{
+	// Every optional the ledger carries has to reach the report, or recording it
+	// was wasted. `cwd` was silently dropped by the first version of this walk.
+	childTranscript(U(80), 1);
+	const led = ledgerOf("optionals.jsonl", [
+		{ child: U(80), label: "correctness", model: "opus", cwd: "/tmp/pr-review-abc" },
+	]);
+	const e = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects }).edges[0];
+	check(e.label === "correctness" && e.model === "opus" && e.cwd === "/tmp/pr-review-abc",
+		`C25 label, model and cwd all reach the edge (got ${JSON.stringify([e.label, e.model, e.cwd])})`);
+	check(e.parent === PARENT && e.path !== null, "C25b as do parent and the resolved path");
 }
 
 {
@@ -300,6 +386,30 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 }
 
 
+
+{
+	// An UNREADABLE ledger must not read like an empty one. This is #116's own
+	// failure mode reintroduced inside #116's fix: a zero that might mean
+	// "could not look" is exactly the silence the issue is about.
+	const led = path.join(dir, "unreadable.jsonl");
+	fs.writeFileSync(led, serializeSpawnRecord(rec({ child: U(1) })) + "\n");
+	fs.chmodSync(led, 0o000);
+	const tree = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects });
+	const readable = tree.ledgerError === null;
+	fs.chmodSync(led, 0o644);
+	if (readable) {
+		// Running as root, or on a filesystem that ignores the mode bits.
+		console.log("  ⏭  C21 SKIPPED — this process can read a chmod 000 file (root?)");
+	} else {
+		check(tree.descendants === 0 && tree.ledgerError !== null,
+			"C21 an unreadable ledger reports ledgerError, not an empty tree");
+		check(/EACCES|permission/i.test(tree.ledgerError!),
+			`C21b the error names the cause (got ${tree.ledgerError})`);
+	}
+	const fine = computeSpawnTree(PARENT, { ledgerPath: path.join(dir, "nope.jsonl"), projectsRoot: projects });
+	check(fine.ledgerError === null,
+		"C22 an ABSENT ledger is not an error — nothing has spawned yet");
+}
 
 // ---
 // PART D — the issue's own Closer, through the CLI
@@ -411,6 +521,40 @@ function recordCli(args: string[]): { status: number | null; out: string; err: s
 		"D7  --json echoes the exact line written");
 	const onDisk = fs.readFileSync(path.join(stateHome, "wtft", "spawns.jsonl"), "utf8").trim();
 	check(JSON.parse(onDisk).label === "agent/824", "D8  and the ledger holds it");
+
+	const unknown = recordCli(["--parent", PARENT, "--child", CLOSER_CHILD, "--mechansim", "typo"]);
+	check(unknown.status === 2 && /unknown argument --mechansim/.test(unknown.err),
+		"D8b a typo'd flag NAMES itself instead of blaming a missing one (#91)");
+	const noValue = recordCli(["--parent", PARENT, "--child", CLOSER_CHILD, "--mechanism"]);
+	check(noValue.status === 2 && /--mechanism needs a value/.test(noValue.err),
+		"D8c a flag with no value says which flag");
+	const eqForm = recordCli([`--parent=${PARENT}`, `--child=${CLOSER_CHILD}`, "--mechanism=eq-form", "--json"]);
+	check(eqForm.status === 0 && JSON.parse(eqForm.out).mechanism === "eq-form",
+		"D8d --flag=value works, and is therefore documented");
+	const help = recordCli(["--help"]);
+	check(help.status === 0 && /--parent/.test(help.out),
+		"D8e --help prints the usage");
+	check(!/--ts\b/.test(help.out) && !/--ts\b/.test(fs.readFileSync(path.join(REPO_ROOT, "README.md"), "utf8")),
+		"D8f there is no --ts: the clock fills it, so the ledger cannot disagree with itself");
+	const quiet = recordCli(["--parent", PARENT, "--child", CLOSER_CHILD, "--mechanism", "quiet"]);
+	check(quiet.status === 0 && quiet.out === "",
+		"D8g without --json the writer prints nothing at all");
+
+	// Exit 3: the record is fine and the ledger cannot be written. A spawner is
+	// told to ignore it, which only works if it is a DIFFERENT code from 2.
+	const notADir = path.join(cliDir, "not-a-dir.txt");
+	fs.writeFileSync(notADir, "i am a file\n");
+	const blocked = spawnSync("node", [CLI_BIN, "spawn-record",
+		"--parent", PARENT, "--child", CLOSER_CHILD, "--mechanism", "blocked"], {
+		encoding: "utf8",
+		env: { ...process.env, XDG_STATE_HOME: notADir },
+	});
+	check(blocked.status === 3, `D8h an unwritable ledger exits 3, not 2 (got ${blocked.status})`);
+
+	// Re-normalise the ledger for the report assertions below.
+	fs.writeFileSync(path.join(stateHome, "wtft", "spawns.jsonl"), "");
+	recordCli(["--parent", PARENT, "--child", CLOSER_CHILD,
+		"--mechanism", "herdr-agent-start", "--label", "agent/824", "--model", "sonnet"]);
 }
 
 // --- the report, with the record ---
@@ -425,6 +569,17 @@ let selfCostWithRecord = 0;
 	check(Math.abs(doc.tree.costUsd - (doc.total.costUsd + doc.spawned.total.costUsd)) < 1e-9,
 		"D12 tree = total + spawned, as a field, so nobody adds two numbers and guesses");
 	check(doc.total.costUsd > 0, "D13 the parent still reports its own spend");
+	check(doc.spawned.edges[0].model === "sonnet" && doc.spawned.edges[0].label === "agent/824",
+		"D13b the model and label the spawner recorded reach the document");
+	check(doc.spawned.schema === "wtft/spawn-tree@1" && doc.spawned.maxDepth === 5
+		&& doc.spawned.ledgerError === null && doc.spawned.malformedLedgerLines === 0
+		&& doc.spawned.depthCapped === 0 && Array.isArray(doc.spawned.unattributed),
+		"D13c every field of the tree contract is present, not just the ones with news in them");
+	check(doc.schema === "wtft/session@2",
+		"D13d the document that gained `spawned` and `tree` says so in its schema");
+	const keys = Object.keys(doc);
+	check(keys.indexOf("spawned") === keys.indexOf("uncounted") + 1 && keys.indexOf("tree") === keys.indexOf("spawned") + 1,
+		"D13e the wire order is the documented order — JSON.stringify emits this literal");
 	selfCostWithRecord = doc.total.costUsd;
 }
 
@@ -450,9 +605,46 @@ let selfCostWithRecord = 0;
 	const withEdges = cli(["--tokens"]).out;
 	check(withEdges.includes("SPAWNED"), "D19 the block appears once there is an edge");
 	check(withEdges.includes("herdr-agent-start"), "D20 naming the mechanism");
-	check(/TREE/.test(withEdges), "D21 and a TREE line beside TOTAL");
+
+	// D21 used to be /TREE/.test(...) — a substring, not the number it names.
+	// Read the three figures off the table and hold them to each other, which
+	// is the only version that fails when the arithmetic is wrong.
+	const money = (label: string): number | null => {
+		// `^\s*` — the CLI pads every rendered line by `--pad` (default 1).
+		const m = new RegExp(`^\\s*${label}\\s+.*?\\$([0-9.]+)\\s*$`, "m").exec(withEdges);
+		return m ? Number(m[1]) : null;
+	};
+	const totalRow = money("TOTAL"), spawnedRow = money("SPAWNED"), treeRow = money("TREE");
+	check(totalRow !== null && spawnedRow !== null && treeRow !== null,
+		`D21 the table prints TOTAL, SPAWNED and TREE figures (got ${JSON.stringify([totalRow, spawnedRow, treeRow])})`);
+	check(treeRow !== null && Math.abs(treeRow - (totalRow! + spawnedRow!)) < 0.01,
+		`D21b TREE is TOTAL + SPAWNED in the RENDERED table too (${totalRow} + ${spawnedRow} vs ${treeRow})`);
+
+	const jsonDoc = JSON.parse(cli(["--json"]).out);
+	check(Math.abs(totalRow! - jsonDoc.total.costUsd) < 0.01 && Math.abs(treeRow! - jsonDoc.tree.costUsd) < 0.01,
+		"D22 and the two surfaces report the same two numbers");
 	check(withEdges.indexOf("TOTAL") < withEdges.indexOf("SPAWNED"),
-		"D22 below TOTAL, which still means this session's own turns");
+		"D22b with SPAWNED below TOTAL, which still means this session's own turns");
+}
+
+{
+	// An unreadable ledger renders its own block. Rendering the same silence as
+	// "spawned nothing" is #116's failure mode wearing #116's fix as a disguise.
+	const ledger = path.join(stateHome, "wtft", "spawns.jsonl");
+	fs.chmodSync(ledger, 0o000);
+	const out = cli(["--tokens"]).out;
+	const doc = JSON.parse(cli(["--json"]).out);
+	fs.chmodSync(ledger, 0o644);
+	if (doc.spawned.ledgerError === null) {
+		console.log("  ⏭  D23 SKIPPED — this process can read a chmod 000 file (root?)");
+	} else {
+		check(/could not be read/.test(out),
+			"D23 --tokens says the ledger could not be read");
+		check(/descendants unknown, not zero/.test(out),
+			"D23b in those words — a zero would be a claim we do not have");
+		check(!/^\s*TREE\s/m.test(out),
+			"D23c and prints NO tree total, because there is no tree to total");
+	}
 }
 
 

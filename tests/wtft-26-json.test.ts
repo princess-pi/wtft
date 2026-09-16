@@ -457,7 +457,10 @@ console.log("\n7. the exit-code table is a contract");
 	}
 	assert("--help names --json", /--json/.test(help.stdout));
 	// The schema string the CLI emits is the one the module exports, so a
-	// consumer pinning `wtft/session@1` and the code cannot drift apart.
+	// consumer pinning the current version and the code cannot drift apart.
+	// The version is NOT named here: it moves (`@1` -> `@2` with #116), and a
+	// version in a comment beside a constant that carries it is a second copy
+	// with nothing to keep it honest.
 	assert("the exported schema constant is the string the CLI emits",
 		WTFT_JSON_SCHEMA === SCHEMA, String(WTFT_JSON_SCHEMA));
 }

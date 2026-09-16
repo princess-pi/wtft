@@ -272,12 +272,13 @@ _Avoid_: Standalone mode, binary (the binary is `bin/wtft.mjs`; "CLI" names the 
 
 **JSON mode** (#26):
 `--json` — the CLI's machine-readable mode. Writes exactly one JSON object (schema
-`wtft/session@1`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
+`wtft/session@2`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
 Human prose goes to stderr, and every sentence that would otherwise have been on stdout is
 repeated in the object's `notices[]`, where `code` is the contract and `text` is disposable.
 Its aggregate numbers come from `computeSessionSummary` (`extensions/lib/wtft-renderer.ts`),
 the same aggregation the `--tokens` table formats, so those two cannot report different
-totals; `session`, `provisional`, `uncounted` and `notices` come from the run instead.
+totals; `session`, `provisional`, `uncounted`, `spawned` and `notices` come from the run
+instead, and `tree` is `total` plus `spawned.total` (see **Self / tree**).
 Suppresses the rendering flags, but not the commands that run instead of a report
 (`--help`/`--why`/`--version`, `--watch`, the daemon-management group). Contract:
 `docs/spec-26-json.md`. CLI only — the widget has no stdout to write an object to.

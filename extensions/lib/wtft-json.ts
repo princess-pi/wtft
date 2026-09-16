@@ -7,7 +7,10 @@
  *   This module SERIALISES; it does not aggregate. Every number here comes from
  *   `computeSessionSummary` in wtft-renderer.ts, which is also what the rendered
  *   `--tokens` table formats. A second aggregation written for this path is the
- *   exact drift the issue exists to prevent, so there is none.
+ *   exact drift the issue exists to prevent, so there is none. That holds for
+ *   `spawned` too (#116): the walk gives each descendant's total to the same
+ *   `computeSessionSummary`, and `tree` is an addition of two of its results,
+ *   not a third way of counting.
  *
  *   Field names and exit codes are versioned API; the strings inside
  *   `notices[].text` are prose and may be reworded freely. A consumer branches
@@ -59,15 +62,17 @@ export interface WtftSessionJson {
 	provisional: TagProvisional;
 	/** SELF: this session's own turns. Unchanged by #116. */
 	total: TokenTotals;
-	/** The recorded lineage (#116): every descendant reached through the spawn
-	 *  ledger, each edge's provenance, and every gap the walk could not close. */
-	spawned: SpawnTree;
-	/** SELF + descendants, as a field — so a consumer never adds two numbers
-	 *  and has to work out for itself whether it double-counted. */
-	tree: TokenTotals;
 	models: ModelTotals[];
 	categories: CategoryTotals[];
 	uncounted: UncountedBillables;
+	/** The recorded lineage (#116): every descendant reached through the spawn
+	 *  ledger, each edge's provenance, and every gap the walk could not close. */
+	spawned: SpawnTree;
+	/** SELF + RESOLVED descendants, as a field — so a consumer never adds two
+	 *  numbers and has to work out for itself whether it double-counted. An
+	 *  unattributed child is in neither addend; `spawned.unattributed` is how
+	 *  a reader knows this number is a floor. */
+	tree: TokenTotals;
 	compaction: { events: number; tokensFreed: number };
 	untaggedInteractions: number;
 	notices: WtftNotice[];
@@ -97,15 +102,19 @@ export interface BuildSessionJsonInput {
 export function buildSessionJson(input: BuildSessionJsonInput): WtftSessionJson {
 	const summary = computeSessionSummary(input.interactions);
 	return {
+		// KEY ORDER IS THE WIRE ORDER — `renderSessionJson` is a bare
+		// JSON.stringify, so this literal is what a reader sees. It matches the
+		// example in docs/spec-26-json.md and the interface above, deliberately:
+		// three orders for one document is three chances to describe it wrong.
 		schema: WTFT_JSON_SCHEMA,
 		session: input.session,
-		spawned: input.spawned,
-		tree: treeTotals(summary.total, input.spawned),
 		provisional: input.provisional,
 		total: summary.total,
 		models: summary.models,
 		categories: summary.categories,
 		uncounted: input.uncounted,
+		spawned: input.spawned,
+		tree: treeTotals(summary.total, input.spawned),
 		compaction: summary.compaction,
 		untaggedInteractions: summary.untaggedInteractions,
 		notices: input.notices ?? [],

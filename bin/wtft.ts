@@ -701,6 +701,27 @@ async function main() {
 		({ interactions, provisional } = readTagFileWithVerdict(tagPath));
 	}
 
+	// The recorded lineage (#116), memoised: `--json` and `--tokens` both want it
+	// and the walk parses every descendant's transcript. Memoised for the same
+	// reason `scanSessionUncounted` below is — not for speed alone, but so the
+	// two surfaces report the SAME tree even though they are computed at
+	// different points in this function.
+	//
+	// No try/catch here on purpose: `computeSpawnTree` owns the ledger read and
+	// reports a failure as `ledgerError`, so an unreadable ledger renders and
+	// serialises as "descendants unknown" rather than as an empty tree that
+	// reads like "nothing spawned".
+	let spawnTreeCache: SpawnTree | null = null;
+	const sessionSpawnTree = (): SpawnTree => {
+		if (spawnTreeCache) return spawnTreeCache;
+		// The session id IS the transcript's basename — the same derivation the
+		// harness discovery uses. A `-s <path>` pointing at a copy therefore has
+		// the copy's name, which is what makes the fixture in
+		// tests/wtft-116-spawn-ledger.test.ts able to drive this at all.
+		const sessionId = path.basename(finalSessionPath).replace(/\.jsonl$/i, "");
+		return (spawnTreeCache = computeSpawnTree(sessionId));
+	};
+
 	// ---
 	// THE #149 BLIND-SPOT SCAN, hoisted (#26)
 	// ---
@@ -722,29 +743,6 @@ async function main() {
 	// distrust the comments. The invariant is "at most one scan per run", and
 	// that is checkable from the cache alone.
 	let uncountedCache: UncountedBillables | null = null;
-	// The recorded lineage (#116), memoised: `--json` and `--tokens` both want it
-	// and the walk parses every descendant's transcript. Memoised for the same
-	// reason `scanSessionUncounted` is — not for speed alone, but so the two
-	// surfaces report the SAME tree even though they are computed at different
-	// points in this function.
-	let spawnTreeCache: SpawnTree | null = null;
-	const sessionSpawnTree = (): SpawnTree => {
-		if (spawnTreeCache) return spawnTreeCache;
-		// The session id IS the transcript's basename — the same derivation the
-		// harness discovery uses. A `-s <path>` pointing at a copy therefore has
-		// the copy's name, which is what makes the fixture in
-		// tests/wtft-116-spawn-ledger.test.ts able to drive this at all.
-		const sessionId = path.basename(finalSessionPath).replace(/\.jsonl$/i, "");
-		try {
-			return (spawnTreeCache = computeSpawnTree(sessionId));
-		} catch (err) {
-			// A ledger this process cannot read must not take the report down:
-			// the session's own numbers are unaffected, and an empty tree with
-			// the failure on stderr is a smaller loss than no report at all.
-			console.error(`⚠️  wtft: spawn ledger unreadable (${spawnLedgerPath()}): ${err instanceof Error ? err.message : String(err)}`);
-			return (spawnTreeCache = computeSpawnTree(sessionId, { ledger: { childrenOf: new Map(), malformedLines: 0 } }));
-		}
-	};
 
 	const scanSessionUncounted = (): UncountedBillables => {
 		if (uncountedCache) return uncountedCache;
@@ -920,11 +918,13 @@ async function main() {
 			},
 			provisional,
 			uncounted,
-			// Pending means the session log is not written yet, so nothing has
-			// spawned FROM it — but the empty tree is still computed rather
-			// than defaulted, so the document never carries a shape nobody
-			// produced (the rule BuildSessionJsonInput states for this field).
-			spawned: opt.pending ? computeSpawnTree("", { ledger: { childrenOf: new Map(), malformedLines: 0 } }) : sessionSpawnTree(),
+			// The ledger is read on the pending arm too. A session log that is
+			// not written yet says nothing about whether the ledger holds edges
+			// FOR it — and the alternative, handing the builder a hand-made
+			// empty tree, is what produced a `ledgerError: null` for a file
+			// nobody had opened: "read it, found nothing" claimed by a run that
+			// never looked. That is the exact failure this field exists to end.
+			spawned: sessionSpawnTree(),
 			notices: [...earlyNotices, ...(opt.notices ?? [])],
 		});
 		process.stdout.write(renderSessionJson(doc));

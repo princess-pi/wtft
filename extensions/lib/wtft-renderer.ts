@@ -5,10 +5,13 @@
  *   Builds visual output from parsed Interaction arrays: binned bar charts,
  *   SURGE timeline markers, "Other" command histograms, and per-model token tables.
  *
- *   One renderer takes input that is NOT an Interaction array:
- *   `renderUncountedBillables` prints counts of billed-but-unrecorded events
- *   (#149) below TOTAL. It is the only output here that reports spend wtft
- *   cannot price, and it deliberately carries no dollar figure.
+ *   Two renderers take input that is NOT an Interaction array, and both print
+ *   BELOW the TOTAL row because both describe spend that is not in it:
+ *   `renderUncountedBillables` (#149) counts billed-but-unrecorded events — the
+ *   only output here that reports spend wtft cannot price, and it deliberately
+ *   carries no dollar figure. `renderSpawnTree` (#116) reports the sessions
+ *   this one launched: priced, known to the penny, and still not in TOTAL,
+ *   because TOTAL means this session's own turns.
  *
  *   And one export renders nothing at all: `computeSessionSummary` (#26) is the
  *   session aggregation — totals, per-model rows, per-category rows — that
@@ -1850,7 +1853,11 @@ export interface SessionSummary {
 	compaction: { events: number; tokensFreed: number };
 }
 
-function emptyTotals(): TokenTotals {
+/** A zeroed TokenTotals. Exported since #116 so wtft-spawn-tree.ts adds into the
+ *  same shape this module defines — a second copy is the drift CLAUDE.md's
+ *  "shared code is never copied in" gate exists to stop, and a hand-written one
+ *  would silently omit a field the day TokenTotals grows. */
+export function emptyTotals(): TokenTotals {
 	return { costUsd: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 }
 
@@ -1896,6 +1903,12 @@ function addInteraction(into: TokenTotals, i: Interaction): void {
  *
  * One divergence from the chart total remains, and it is the untagged spend
  * excluded here. docs/spec-26-json.md records it.
+ *
+ * WHAT THIS FUNCTION COUNTS IS ONE SESSION'S OWN TURNS — "self" (#116). A
+ * launcher-spawned descendant is a different session with a different
+ * transcript, and nothing here reaches it; `computeSpawnTree` calls this
+ * function once per descendant and the caller adds the two. So a caller after
+ * "what did this branch of work cost" wants `tree`, not this.
  */
 export function computeSessionSummary(interactions: Interaction[]): SessionSummary {
 	const deduped = deduplicateInteractions(interactions);
@@ -2003,11 +2016,20 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 	// it would be a second copy to drift.
 	const summary = computeSessionSummary(interactions);
 	const unmatched = summary.untaggedInteractions;
+	// `uncounted` and `spawned` are both optional and both render nothing when
+	// omitted or empty — a caller that passes neither gets exactly the table it
+	// got before either existed.
 
 	if (summary.models.length === 0) {
-		return unmatched > 0
+		// The below-TOTAL blocks survive this early return (#116). A session
+		// whose own turns are all untagged can still have launched children
+		// worth real money, and returning one sentence would report that as
+		// nothing at all — the precise silence this issue is about. There is no
+		// TOTAL row to sit below, so they simply follow the sentence.
+		const head = unmatched > 0
 			? `No model-tagged interactions found (${unmatched} untagged).`
 			: "No model-tagged interactions found.";
+		return head + renderUncountedBillables(uncounted) + renderSpawnTree(summary.total, spawned);
 	}
 
 	// Rows in the summary's order, which is cost descending.
@@ -2120,15 +2142,44 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 	return out;
 }
 
-/** The SPAWNED / TREE block, or "" when this session has no recorded edges.
- *  Split out so the daemon/watch paths can reuse the exact wording (#116, the
- *  same rule as renderUncountedBillables). */
+/** The spawn-tree block below TOTAL (#116). Three shapes, not two:
+ *
+ *  - `""` — this session recorded no edges. Silence is the right report.
+ *  - the ledger-error block — the ledger could not be READ, which must not
+ *    render as the same silence as "spawned nothing". No TREE line, because
+ *    there is no tree total to state.
+ *  - the SPAWNED rows plus a TREE line.
+ *
+ *  Split out from `renderTokenSummary` for the same reason
+ *  `renderUncountedBillables` is: one place owns the wording. Neither has a
+ *  second caller today; the split is about where the wording lives, not about
+ *  reuse that already exists. */
 export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string {
-	if (!spawned || spawned.edges.length === 0) return "";
+	if (!spawned) return "";
+	if (spawned.ledgerError !== null) {
+		// Loud, and NOT an empty block: an unreadable ledger must not render the
+		// same silence as a session that spawned nothing.
+		return `\nSPAWNED    spawn ledger could not be read (#116) — descendants unknown, not zero\n` +
+		       `           ${spawned.ledgerError}\n`;
+	}
+	if (spawned.edges.length === 0) {
+		// No edges FOR THIS SESSION. Say nothing — unless the reader needs to
+		// know the ledger itself is damaged, which is a fact about the ledger
+		// rather than about this session and is otherwise reported nowhere on
+		// this surface.
+		if (spawned.malformedLedgerLines > 0) {
+			return `\nSPAWNED    no descendants recorded for this session, and ` +
+			       `${spawned.malformedLedgerLines} unusable spawn-ledger line(s) were skipped (#116)\n`;
+		}
+		return "";
+	}
 
 	const rows: string[] = [];
 	for (const edge of spawned.edges) {
-		const name = edge.label ? `${edge.mechanism}  ${edge.label}` : edge.mechanism;
+		const full = edge.label ? `${edge.mechanism}  ${edge.label}` : edge.mechanism;
+		// Truncated, not padded: `label` is free text from a spawner, and one
+		// long one pushes every money figure in the block out of its column.
+		const name = full.length > 40 ? full.slice(0, 39) + "…" : full;
 		// A skipped edge prints its REASON where its cost would be. A dash or a
 		// $0.00 would both read as "this child was free", which is the one thing
 		// we do not know about it.
@@ -2148,6 +2199,10 @@ export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string 
 	if (spawned.malformedLedgerLines > 0) {
 		out += `           ${spawned.malformedLedgerLines} unusable ledger line(s) skipped\n`;
 	}
+	// The SPAWNED subtotal is printed, because TREE names it as an addend and a
+	// reader should not have to sum the rows to check the arithmetic — nor try,
+	// when some rows carry a skip reason instead of a number.
+	out += `SPAWNED    ${"subtotal".padEnd(40)} ${formatCost(spawned.total.costUsd).padStart(12)}\n`;
 	out += `TREE       ${"TOTAL + SPAWNED".padEnd(40)} ${formatCost(treeTotals(self, spawned).costUsd).padStart(12)}\n`;
 	return out;
 }

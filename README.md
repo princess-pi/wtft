@@ -203,8 +203,9 @@ One append-only line in `$XDG_STATE_HOME/wtft/spawns.jsonl`
 (`~/.local/state/wtft/spawns.jsonl` by default), written with a single `write(2)`
 so concurrent spawners cannot interleave. Each text field is capped at 512 bytes
 and the whole line at 4 KiB, which is what keeps that one write one write.
-Exit **2** is a bad call — a missing or unknown flag, a flag with no value, a
-malformed uuid, a `ts` that is not ISO-8601, an oversized field. Exit **3** is an
+Exit **2** is a bad call — a missing or unknown flag, a flag with no value (a
+bare `--label --json` is refused rather than recording the label `--json`), a
+malformed session id, an oversized field. Exit **3** is an
 unwritable ledger. A spawner is meant to ignore both, since an unrecorded edge
 simply degrades to the old behaviour.
 
@@ -221,7 +222,8 @@ Three bounds are reported rather than hidden: the walk stops at **depth 5**
 (`spawned.depthCapped` counts the cuts), the reader takes the last **8 MiB** of
 the ledger, and a ledger it cannot read comes back as `spawned.ledgerError`
 rather than as an empty tree. `tree` covers *resolved* descendants, so it is a
-floor whenever `spawned.unattributed` is non-empty.
+floor whenever anything went uncounted — `unattributed` non-empty, `depthCapped`
+non-zero, or a ledger big enough that the tail read missed older edges.
 
 `wtft --tokens` shows the same thing as a `SPAWNED` / `TREE` block below
 `TOTAL` — and prints nothing at all when this session recorded no edges. Full

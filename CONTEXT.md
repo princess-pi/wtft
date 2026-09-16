@@ -328,17 +328,20 @@ _Avoid_: Spawn log, lineage file, parent map, edge database
 **Self / tree** (#116):
 **Self** is a session's own turns — what `total` has always meant and still means. **Tree** is
 self plus every RESOLVED descendant reached through the spawn ledger, so it is a floor whenever
-anything is unattributed. Both are explicit fields under `--json`; the human table shows the
+anything went uncounted — unattributed, past the depth cap, or older than the ledger's tail read. Both are explicit fields under `--json`; the human table shows the
 split as `TOTAL` / `SPAWNED` / `TREE`, and shows none of the three when this session recorded no
 edges. Never write a bare "the session's cost" where the two can differ.
 _Avoid_: Rollup, grand total, inclusive cost (each hides which of the two is meant)
 
 **Unattributed** (#116):
-A recorded spawn edge whose child's cost could not be read: `no-session-file` (nothing by that
-uuid) or `unreadable` (a file that would not parse). Reported with its reason and a `null` cost,
+A recorded spawn edge whose child's cost could not be read: `not-found` (the lookup came back
+empty — absent, or somewhere this process cannot read, and the walk cannot tell those apart) or
+`unreadable` (a file found that would not parse). Reported with its reason and a `null` cost,
 **never a zero**: a zero says the child cost nothing, which is a claim we do not have. Distinct
-from **uncounted** (#149), a billable event the harness records no `usage` for; and from the two
-skips that are *not* gaps — `already-counted` (a diamond or cycle, whose money landed once) and
+from **uncounted** (#149), a billable event the harness records no `usage` for; and from the four
+skips that are *not* gaps — `already-counted` (a diamond or cycle, whose money landed once),
+`already-seen-unresolved` (a second edge onto a child the first visit could not read, whose gap is
+already reported), `in-self-total` (a child whose cost is already inside `total`) and
 `depth-capped` (past the walk's bound).
 _Avoid_: Missing, lost, dropped (the edge is known; only the amount is not)
 

@@ -2187,7 +2187,10 @@ export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string 
 		rows.push(`           ${name.padEnd(40)} ${money.padStart(12)}`);
 	}
 
-	let out = `\nSPAWNED    ${spawned.descendants} descendant session(s) recorded in the spawn ledger (#116) —\n`;
+	// `descendants` counts what was COUNTED, not what was recorded — a skipped
+	// edge still gets a row below. Saying "recorded in the spawn ledger" made
+	// the number claim more than it measures.
+	let out = `\nSPAWNED    ${spawned.descendants} of ${spawned.edges.length} recorded descendant session(s) priced (#116) —\n`;
 	out += `           NOT in TOTAL above, which is this session's own turns\n`;
 	out += rows.join("\n") + "\n";
 	if (spawned.unattributed.length > 0) {

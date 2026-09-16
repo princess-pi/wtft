@@ -703,11 +703,12 @@ async function main() {
 		({ interactions, provisional } = readTagFileWithVerdict(tagPath));
 	}
 
-	// The recorded lineage (#116), memoised: `--json` and `--tokens` both want it
-	// and the walk parses every descendant's transcript. Memoised for the same
-	// reason `scanSessionUncounted` below is — not for speed alone, but so the
-	// two surfaces report the SAME tree even though they are computed at
-	// different points in this function.
+	// The recorded lineage (#116), memoised. The walk parses every descendant's
+	// session file, and two call sites reach it — `emitSessionJson` and the
+	// `--tokens` renderer — on paths that are mutually exclusive within one run,
+	// so the memo is insurance rather than a load-bearing invariant. An earlier
+	// version of this comment claimed it kept two surfaces in agreement inside
+	// one run; nothing runs both.
 	//
 	// No try/catch here on purpose: `computeSpawnTree` owns the ledger read and
 	// reports a failure as `ledgerError`, so an unreadable ledger renders and

@@ -61,8 +61,9 @@ what that rests on: POSIX does not promise atomicity for a `write(2)` to a **reg
 which is what makes a single-call O_APPEND write land whole in practice; 4096 is a deliberately
 conservative bound on how much we lean on that, and is where the number comes from.
 Every text field — `ts` and `mechanism` included, not only the three optional ones — is capped at
-512 bytes to keep that true in practice, which puts an ordinary record at roughly 2 KiB and makes
-the 4 KiB refusal a backstop reachable only through JSON escape expansion. The cap counts the
+512 bytes to keep that true in practice, which puts the LARGEST possible record at
+roughly 2.2 KiB — an ordinary one, like the example line above, is about 200 bytes — and makes the
+4 KiB refusal a backstop reachable only through JSON escape expansion. The cap counts the
 newline, because the newline is part of the write that has to land whole. A **short write** — a
 `write(2)` that returns fewer bytes than it was given — is reported as a failed append rather than
 retried: a retry would append the remainder as a second record.
@@ -108,15 +109,22 @@ line is indistinguishable from a whole one from inside the window, so the first 
 unconditionally — which past 8 MiB (roughly 40,000 spawns) costs one intact record. Edges older
 than that window are not read, and appear in neither `edges` nor `malformedLedgerLines`.
 
-**Resolution** maps a child UUID to a session file by looking for `<child>.jsonl` **one level**
-under the Claude Code projects root — `~/.claude/projects/`, or `WTFT_CLAUDE_PROJECTS_DIR` where
-that is set, the same seam discovery uses. One level, because a launcher-spawned session is a
-top-level session in its own project dir; a Task-tool child under `<session>/subagents/` is a
-different mechanism with its own discovery (#82/#83) and would be double-counted if it resolved
-here.
+**Resolution goes through the harness seam** — `HarnessDiscovery.resolveSessionById`, asked of every
+registered harness in turn, so a Pi child resolves through Pi's discovery and a Claude Code child
+through its own. This is not a preference: the repo's lookup already recurses past the `sessions/`
+subdirectory older Claude Code installs use, skips the derived-data dirs, and takes the **newest**
+copy where one id exists in several project dirs — the moved-session case (#155, #6), which is
+precisely where a second implementation would price a child from a stale copy. A hand-rolled scan
+of `<root>/<slug>/<id>.jsonl` was doing exactly that until the PR review caught it.
+
+**A session id is "contains a uuid"**, the repo's own `isSessionIdBasename` rule, plus two
+constraints the ledger adds because the id becomes a filename lookup: one path component, and
+bounded at 128 bytes. A bare-uuid rule would mean a Pi session — whose basename is a timestamp
+*prefixed* to a uuid — could never be a parent, which left the Pi widget's block unreachable on the
+only harness it runs in.
 
 The ledger deliberately does **not** record the session file's path: a worktree move relocates the
-file (#6) and a recorded path would rot, while the UUID does not. A recorded `cwd` is carried into
+file (#6) and a recorded path would rot, while the id does not. A recorded `cwd` is carried into
 the report for a human to read — it is never used to find anything.
 
 **An unreadable ledger is not an empty one.** `computeSpawnTree` owns the read, and a failure
@@ -128,6 +136,11 @@ reintroduced inside #116's fix. An *absent* ledger is not an error: nothing has 
 
 - **A session is counted at most once.** A `seen` set over session ids means a diamond (two
   recorded edges to the same child) or a cycle contributes its cost once, not twice.
+- **The walk is breadth-first**, which is a correctness property rather than a taste: it reaches
+  every session at its MINIMUM depth. Depth-first marked a child seen at whatever depth ledger
+  order happened to reach it first, so a session recorded both at the end of a long chain and
+  directly under the root had its own children cut although they sit two levels down — the reported
+  tree depended on the order lines were appended in.
 - **Depth is bounded at 5** and the bound in force is reported. Direct children are depth 1, so
   five generations are walked and the sixth is cut. Each cut is an edge in the report carrying
   `skip: "depth-capped"`, and `depthCapped` counts the cuts — not the sessions behind them, which
@@ -135,15 +148,23 @@ reintroduced inside #116's fix. An *absent* ledger is not an error: nothing has 
   be partial.
 - **A child that does not resolve is `unattributed`** — the edge, its mechanism and its timestamp
   are reported with a `reason`, and its cost is `null`, never `0`. An unresolvable child is a
-  *gap*, and a zero would launder it into a fact. Two reasons, kept apart: `no-session-file` (no
-  file by that uuid) and `unreadable` (a file that would not parse — the only skip class that is a
-  bug rather than a fact).
+  *gap*, and a zero would launder it into a fact. Two reasons, kept apart: `not-found` (the lookup
+  came back empty — the file is absent, or somewhere this process cannot read, and the walk cannot
+  tell those apart, which is why the name does not claim absence) and `unreadable` (a file that
+  would not parse — the only skip class that is a bug rather than a fact). **One entry per session,
+  not per edge**: two edges onto the same missing child are one gap.
 - **The walk continues past a gap.** A child we cannot read may still have recorded children of
   its own, and those may be perfectly readable; its grandchildren are edges in the *ledger*, not
   entries in the file that is missing. Dropping the subtree with its parent loses real, resolvable
   money over one absent file.
-- **`skip` is a four-value contract**: `no-session-file`, `unreadable`, `already-counted`,
-  `depth-capped`. Only the first two are `unattributed`.
+- **`skip` is a six-value contract**: `not-found`, `unreadable`, `already-counted`,
+  `already-seen-unresolved`, `in-self-total`, `depth-capped`. Only the first two are
+  `unattributed`. `already-seen-unresolved` exists because `already-counted` asserts the money
+  landed, which is false for a second edge onto a child the first visit could not read.
+  `in-self-total` is a child whose cost is already inside `total` — a `claude -p` child the
+  parent's own turn names (#138), a Task child under `<session>/subagents/` (#82/#83), or the
+  reported session itself reached round a cycle. It is reported and never added, because billing
+  twice is the expensive direction to be wrong in.
 
 ## What gets reported
 
@@ -164,8 +185,8 @@ already trust.
              "label":"correctness","model":"opus","cwd":"/tmp/pr-review-abc","depth":1,
              "resolved":true,"path":"/home/…/<child>.jsonl","total":{…}},
             {"parent":"…","child":"…","mechanism":"pr-review-lens","ts":"…","depth":1,
-             "resolved":false,"path":null,"total":null,"skip":"no-session-file"}],
-  "unattributed": [{"child":"…","mechanism":"…","ts":"…","label":"…","reason":"no-session-file"}],
+             "resolved":false,"path":null,"total":null,"skip":"not-found"}],
+  "unattributed": [{"child":"…","mechanism":"…","ts":"…","label":"…","reason":"not-found"}],
   "depthCapped": 0,
   "maxDepth": 5,
   "malformedLedgerLines": 0,
@@ -184,18 +205,24 @@ when they apply; `label`, `ts`, `mechanism`, `child` and `reason` are the shape 
 **`--tokens`** gains a block below TOTAL, rendered only when this session has at least one edge:
 
 ```
-SPAWNED    3 descendant session(s) recorded in the spawn ledger (#116) —
+SPAWNED    3 of 6 recorded descendant session(s) priced (#116) —
            NOT in TOTAL above, which is this session's own turns
            pr-review-lens  correctness                     $12.34
            pr-review-lens  reasoning                       $18.02
            herdr-agent-start  agent/824                    $26.67
-           pr-review-lens  contract               (no-session-file)
+           pr-review-lens  contract                    (not-found)
+           pr-review-lens  crossfile                (depth-capped)
+           herdr-agent-start  agent/831         (already-counted)
            1 unattributed — cost unknown, deliberately not estimated
-           2 edge(s) past the depth cap of 5, not walked
+           1 edge(s) past the depth cap of 5, not walked
            1 unusable ledger line(s) skipped
 SPAWNED    subtotal                                        $57.03
 TREE       TOTAL + SPAWNED                                 $127.36
 ```
+
+**Every edge gets a row, skipped ones included** — the headline's `3 of 6` and the rows agree by
+construction, which is why the headline says how many were *priced* rather than how many were
+recorded.
 
 A skipped edge prints its **reason** where its cost would be. A dash or a `$0.00` would both read
 as "this child was free", which is the one thing we do not know about it. The last three
@@ -230,9 +257,31 @@ The issue's own Closer, as `tests/wtft-116-spawn-ledger.test.ts`:
 3. A spawn record for the pair.
 
 Then `wtft --json` reports the parent's self cost, the child's cost, a `tree` that is their sum,
-and the edge's `mechanism`. **Delete the record** and the same run reports `spawned.descendants`
-of 0 — and the assertion that pins the gap is that the *self* number is unchanged either way, so
-the ledger only ever adds.
+and the edge's `mechanism`. That half is met, by D9–D13e.
+
+**The second half is NOT met, and this spec is not going to reword it.** The issue's Closer says:
+
+> Delete the record and the same run reports the child as **unattributed**, with the cost still
+> visible somewhere — never dropped.
+
+Direction A deletes the record and the child becomes *invisible*, not unattributed: with nothing
+recorded, there is no id to look up and no edge to report. `unattributed` here means only "an edge
+we have, whose child we could not read" — a narrower thing than the Closer asks for.
+
+An earlier draft of this document quietly restated the clause as "reports `spawned.descendants` of
+0", which the PR review caught. Moving an acceptance criterion to meet the implementation is worse
+than missing it, because it removes the record that anything is outstanding.
+
+**What the unmet clause actually needs** is a *listing* — the report the issue sanctions for
+direction D and forbids for attribution: *"at most to **list** unattributed sessions near a parent,
+which is a report, not a claim."* Sessions whose first timestamp falls near this session's turns, in
+a project dir under this repo or its worktrees, shown with their cost and **never summed into
+`tree`**. That is a second mechanism with its own design question (what counts as "near", and how a
+peer session running at the same time is kept out of the list), so it is **#128**, not a late
+addition here.
+
+Until #128 lands, an unrecorded launcher child is **silently missing**, exactly as it is today —
+which is why #116 stays open when this merges.
 
 Plus, each with its own test: UUID and ISO-8601 validation on write; the 4 KiB refusal, *executed*
 through escape expansion rather than asserted as a constant; 24 concurrent appends making 24 intact
@@ -240,7 +289,7 @@ lines; a malformed line counted rather than swallowed; a diamond counted once **
 reported as `already-counted`**; a cycle terminating with the root on disk, so the guard is what is
 measured rather than a missing fixture; the depth cut reported as an edge at the depth that
 exceeded the cap; an unresolvable child reported as `unattributed` with a `null` cost, **and its
-readable grandchild still counted**; `unreadable` distinguished from `no-session-file`; `label`,
+readable grandchild still counted**; `unreadable` distinguished from `not-found`; `label`,
 `model` and `cwd` reaching the report; exit 2 for a typo'd flag that names itself, exit 3 for an
 unwritable ledger; and the rendered `TREE` figure read off the table and held to `TOTAL + SPAWNED`
 and to `--json`. The two chmod-000 cases skip **visibly** when the process can read such a file.
@@ -251,9 +300,8 @@ and to `--json`. The two chmod-000 cases skip **visibly** when the process can r
   `princess-pi-tools`, and this change ships first so there is something to call.
 - **Folding descendants into TOTAL.** A separate decision, and it needs the interaction-level
   attribution rework in #107 / #14 / #94 first.
-- **Pi children, and anything not one level under the projects root.** Resolution searches Claude
-  Code's project dirs, one level deep; a Pi child, or a session file nested deeper, is
-  `unattributed` with reason `no-session-file` until the harness seam grows a lookup (#156).
+- **Listing an unrecorded child.** The Closer's second clause — #128. A spawner that never calls
+  `spawn-record` is invisible here, exactly as it is today.
 - **Live growth.** A long-lived interactive child's cost is read at the moment `wtft` runs; it is a
   snapshot and will be stale, which is #14 and is not made worse here.
 
@@ -278,7 +326,7 @@ Pre-existing drift the file-level sweep surfaced is filed, not listed here; see 
 | `wtft-spawn-ledger.ts` | "`line` — 1-based line number in the ledger" | after a tail read it is an offset into the window | n/a — field deleted | **Code fixed**: `SpawnEdge.line` is gone, and nothing read it |
 | `wtft-spawn-tree.ts` | the ledger records `cwd` | the walk dropped it before the report | ✅ C25 | **Code fixed** |
 | `wtft-spawn-tree.ts` | `emptyTotals` copied from `wtft-renderer.ts` | CLAUDE.md: "Shared code goes in `@princess-pi/libs`, never copied in" | ✅ (typecheck + suite) | **Code fixed**: exported and imported |
-| `CONTEXT.md` | **Session** `_Avoid_: … transcript` | the new contract value was `no-transcript` | ✅ C24 | **Renamed** to `no-session-file` while it was still free |
+| `CONTEXT.md` | **Session** `_Avoid_: … transcript` | the new contract value was `no-transcript` | ✅ C24 | **Renamed** to `not-found` (via `no-session-file`; the PR review then showed the file may exist and simply be unreachable) |
 | this spec, `spec-26-json.md` | "`PIPE_BUF` on Linux … atomic" | PIPE_BUF is the *pipe* guarantee; a regular file relies on the inode lock | n/a | Prose fixed — the real basis is stated, and 4096 named as a conservative bound |
 | `spec-26-json.md` | example key order | `JSON.stringify` emits the literal's order, which put `spawned` 3rd | ✅ D13e | **Code fixed**: emission, interface and example all agree |
 | `spec-26-json.md` | "`computeSessionSummary` … is the single aggregation" | it is called N+1 times per run since #116 | ✅ D22 (both surfaces agree) | Prose fixed — one *implementation*, many calls |
@@ -291,11 +339,37 @@ Pre-existing drift the file-level sweep surfaced is filed, not listed here; see 
 | test suite | "C10 the root is never a descendant of itself" | passed with the guard deleted — the root had no session file on disk | ✅ C10 now puts one there | **Test fixed** |
 | test suite | "D21 a TREE line beside TOTAL" | `/TREE/.test(out)` — a substring, not the number | ✅ D21/D21b/D22 | **Test fixed** |
 
-One row is `reconciled-against-untested` three times over; each is named above. The suite went
-from 68 to 99 assertions in this pass.
+Three rows are marked `reconciled-against-untested` — the malformed-lines render, the short-write
+failure and the Pi widget's prose — and each is named in the table. The suite went from 68 to 99
+assertions in this pass, and to 112 after PR review round 1.
 
 **Filed rather than fixed** — the file-level sweep surfaced substantial drift that predates this
 branch and is not about the spawn ledger: #123 (`wtft-renderer.ts` docstrings and banners), #124
 (`docs/EXT_WTFT.html`), #125 (`CONTEXT.md` `_Avoid_` lists vs settled practice), #126 (the
 manifest's CLI-vs-Pi divergences) and #127 (two exit-code paths that report success on failure).
 Fixing them here would have buried a 600-line change in a 2,000-line one.
+
+## PR review round 1 (2026-09-16)
+
+Eight blocking findings, each reproduced against the code before adopting. Six were real and are
+fixed in the branch; the table above's rows are unchanged, and these are additional.
+
+| Finding | Verified? | Action |
+|---|---|---|
+| DFS order could depth-cap a subtree within the bound by another path | **Yes** — a session recorded both at the end of a chain and directly under the root | **Code**: breadth-first, so every session is reached at its minimum depth. C26/C26b/C26c |
+| A ledger edge could double-count a child already folded into SELF | **Yes** — `cd /tmp/x && claude -p --session-id <uuid>` is both mechanisms at once | **Code**: `alreadyAttributed`, seeded by `collectSelfAttributedSessionIds`; the edge is reported `in-self-total` and never added. C27–C27d |
+| A repeat edge onto an unreadable child claimed `already-counted` | **Yes** — `seen.add` ran before the resolve | **Code**: the repeat repeats the first visit's outcome; one missing session is one gap. C28/C28b |
+| `no-session-file` claimed absence the run cannot establish | **Yes** — an unreadable projects root produces the same outcome | **Code**: renamed `not-found`, and the name stops claiming |
+| The Pi widget's root id could never match a ledger parent | **Yes** — Pi basenames are timestamp-prefixed, and the ledger demanded a bare uuid | **Code**: a session id is "contains a uuid", the repo's own rule |
+| The child lookup disagreed with discovery's layout and duplicate rules | **Yes** — no `sessions/` recursion, no newest-mtime rule | **Code**: resolution goes through `HarnessDiscovery.resolveSessionById`. C29/C29b |
+| `tree` is a floor in more cases than the docs named | **Yes** — depth cuts and the tail bound too | Prose, on all four surfaces |
+| **Deleting the record makes the child disappear, not unattributed** | **Yes, and the spec had reworded the Closer to match** | **Declared, not reworded** — see *How this is verified*. The listing the clause needs is **#128** |
+
+Twelve advisory findings were taken as well, all prose: the `2 KiB` figure (that is the *maximum*
+record; an ordinary one is ~200 bytes), the `--tokens` example that no renderer could produce, the
+SPAWNED headline that counted priced sessions while saying "recorded", the widget catch's named
+case that could not throw, the stale "shares nothing with the report path", the memo rationale that
+described an invariant the cache does not have, the `ts` exit-2 cause that is unreachable from the
+command line (the flag is gone), and three test comments restating claims this spec had already
+retracted. One was declined: `spawned.ledgerError` having no exit code is deliberate, and
+`docs/spec-26-json.md` now says why.

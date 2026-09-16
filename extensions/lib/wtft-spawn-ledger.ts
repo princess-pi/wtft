@@ -60,9 +60,9 @@ export interface SpawnRecord {
 	 *  disagree with itself and buys nothing. Checked for ISO-8601 shape on
 	 *  write: an unparseable `ts` is as permanently useless as a bad uuid. */
 	ts: string;
-	/** Session uuid of the spawning session. */
+	/** Session id of the spawning session, as its harness spells it. */
 	parent: string;
-	/** Session uuid of the spawned session. */
+	/** Session id of the spawned session, as its harness spells it. */
 	child: string;
 	/** Who made the edge: `pr-review-lens`, `herdr-agent-start`, … */
 	mechanism: string;
@@ -93,13 +93,30 @@ export interface SpawnLedger {
 	malformedLines: number;
 }
 
-const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const UUID_ANYWHERE = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
 
-/** UUID SHAPE only — 8-4-4-4-12 hex. It says nothing about whether a session
- *  file by that name exists, and it does not check the version or variant
- *  nibbles, so the nil uuid passes. Shape is what a filename lookup needs. */
-export function isSessionUuid(value: unknown): value is string {
-	return typeof value === "string" && UUID_RE.test(value);
+/** Longest id we will record. A session id is a filename component, and a
+ *  pathological one is a way to make the ledger unreadable for everyone. */
+const MAX_SESSION_ID_BYTES = 128;
+
+/**
+ * A session id AS ITS HARNESS SPELLS IT.
+ *
+ * Claude Code names a session file for a bare uuid; Pi prefixes it with a
+ * timestamp (CONTEXT.md, **Session**). An earlier version of this required a
+ * bare uuid, which meant a Pi session could never be a parent — so the Pi
+ * widget's spawn block was unreachable code on the only harness it runs in.
+ *
+ * The rule is the repo's existing one (`isSessionIdBasename`): the id must
+ * CONTAIN a uuid. Plus two constraints this file adds, because the id becomes
+ * part of a filename lookup: one path component, and bounded.
+ */
+export function isSessionId(value: unknown): value is string {
+	if (typeof value !== "string" || value.length === 0) return false;
+	if (Buffer.byteLength(value, "utf8") > MAX_SESSION_ID_BYTES) return false;
+	if (value.includes("/") || value.includes("\\") || value.includes("\0")) return false;
+	if (value === "." || value === ".." || value.includes("..")) return false;
+	return UUID_ANYWHERE.test(value);
 }
 
 /** ISO-8601 shape, and a date the runtime can actually parse. */
@@ -143,8 +160,8 @@ export function serializeSpawnRecord(record: SpawnRecord): string {
 	if (record.schema !== SPAWN_RECORD_SCHEMA) {
 		throw new Error(`spawn record: schema must be ${SPAWN_RECORD_SCHEMA}`);
 	}
-	if (!isSessionUuid(record.parent)) throw new Error(`spawn record: parent is not a session uuid: ${String(record.parent).slice(0, 64)}`);
-	if (!isSessionUuid(record.child)) throw new Error(`spawn record: child is not a session uuid: ${String(record.child).slice(0, 64)}`);
+	if (!isSessionId(record.parent)) throw new Error(`spawn record: parent is not a session id: ${String(record.parent).slice(0, 64)}`);
+	if (!isSessionId(record.child)) throw new Error(`spawn record: child is not a session id: ${String(record.child).slice(0, 64)}`);
 	if (!isIsoTimestamp(record.ts)) throw new Error(`spawn record: ts is not an ISO-8601 UTC timestamp: ${String(record.ts).slice(0, 64)}`);
 
 	const out: SpawnRecord = {
@@ -270,8 +287,8 @@ export function readSpawnLedger(file: string = spawnLedgerPath()): SpawnLedger {
 		}
 		const r = parsed as Partial<SpawnRecord>;
 		if (r?.schema !== SPAWN_RECORD_SCHEMA
-			|| !isSessionUuid(r.parent)
-			|| !isSessionUuid(r.child)
+			|| !isSessionId(r.parent)
+			|| !isSessionId(r.child)
 			|| typeof r.ts !== "string" || !r.ts
 			|| typeof r.mechanism !== "string" || !r.mechanism) {
 			malformedLines++;
@@ -354,8 +371,14 @@ export function runSpawnRecordCommand(
 			return { exitCode: SPAWN_RECORD_EXIT.BAD_ARGS, stdout: "", stderr: `wtft spawn-record: unknown argument ${arg}\n${SPAWN_RECORD_USAGE}` };
 		}
 		const value = m[2] !== undefined ? m[2] : argv[++i];
-		if (value === undefined) {
-			return { exitCode: SPAWN_RECORD_EXIT.BAD_ARGS, stdout: "", stderr: `wtft spawn-record: --${m[1]} needs a value\n${SPAWN_RECORD_USAGE}` };
+		// A bare `--flag` followed by another flag used to swallow it: `--label
+		// --json` recorded the label "--json" and dropped the echo, and
+		// `--mechanism --parent <uuid>` then blamed `<uuid>` as the unknown
+		// argument — the opposite of naming the flag that caused the failure.
+		// `--flag=--value` still works, for a value that really does start with
+		// a dash.
+		if (value === undefined || (m[2] === undefined && value.startsWith("--"))) {
+			return { exitCode: SPAWN_RECORD_EXIT.BAD_ARGS, stdout: "", stderr: `wtft spawn-record: --${m[1]} needs a value (use --${m[1]}=<value> for one starting with --)\n${SPAWN_RECORD_USAGE}` };
 		}
 		flags[m[1]] = value;
 	}

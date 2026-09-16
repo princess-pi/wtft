@@ -40,6 +40,7 @@ import {
 	clearSubagentCacheMiss,
 	loadSubagentInteractions,
 	attributeClaudeSubAgentCosts,
+	collectSelfAttributedSessionIds,
 	parseInterval,
 	getBinInfo,
 	calculateClaudeCost,
@@ -119,7 +120,7 @@ import {
 	SPAWN_RECORD_EXIT,
 	MAX_RECORD_BYTES,
 	MAX_FIELD_BYTES,
-	isSessionUuid,
+	isSessionId,
 } from "../extensions/lib/wtft-spawn-ledger.ts";
 import {
 	computeSpawnTree,
@@ -195,6 +196,7 @@ export {
 	clearSubagentCacheMiss,
 	loadSubagentInteractions,
 	attributeClaudeSubAgentCosts,
+	collectSelfAttributedSessionIds,
 	parseInterval,
 	getBinInfo,
 	distributeHalfSlots,
@@ -235,7 +237,7 @@ export {
 	spawnLedgerPath,
 	serializeSpawnRecord,
 	appendSpawnRecord,
-	isSessionUuid,
+	isSessionId,
 	SPAWN_RECORD_SCHEMA,
 	SPAWN_RECORD_EXIT,
 	MAX_RECORD_BYTES,
@@ -719,7 +721,14 @@ async function main() {
 		// the copy's name, which is what makes the fixture in
 		// tests/wtft-116-spawn-ledger.test.ts able to drive this at all.
 		const sessionId = path.basename(finalSessionPath).replace(/\.jsonl$/i, "");
-		return (spawnTreeCache = computeSpawnTree(sessionId));
+		// The ids already inside SELF, so the walk cannot bill them twice. A
+		// spawner is free to record an edge for a child the parent's own turn
+		// already names — `cd /tmp/x && claude -p --session-id <uuid>` is both
+		// mechanisms at once — and without this the money lands in `total` and
+		// again in `spawned.total`.
+		return (spawnTreeCache = computeSpawnTree(sessionId, {
+			alreadyAttributed: collectSelfAttributedSessionIds(finalSessionPath, interactions),
+		}));
 	};
 
 	// ---

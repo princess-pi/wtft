@@ -21,7 +21,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { readSpawnLedger, type SpawnLedger } from "./wtft-spawn-ledger.js";
-import { projectsDir } from "./harness/claude-code/discovery.js";
+import { getDiscoveries } from "./harness/registry.js";
 import { parseSessionFile } from "./wtft-parser.js";
 import { computeSessionSummary, emptyTotals, type TokenTotals } from "./wtft-renderer.js";
 
@@ -40,13 +40,27 @@ export const DEFAULT_MAX_DEPTH = 5;
 /** Why an edge contributed nothing. Each is a different fact, and collapsing
  *  them would hide the only one that is a bug (`unreadable`). */
 export type SpawnEdgeSkip =
-	/** No session file by that uuid under any project dir. */
-	| "no-session-file"
+	/** The lookup did not find a session file for that id. Deliberately NOT
+	 *  "no such file": a projects root the process cannot read produces exactly
+	 *  this outcome, and the walk has no way to tell the two apart. A name that
+	 *  claimed absence would be making a factual claim the run cannot make. */
+	| "not-found"
 	/** Found, but it could not be read or parsed. THE ONLY SKIP THAT IS A BUG
 	 *  rather than a fact — the others describe the ledger or the walk. */
 	| "unreadable"
-	/** Already counted elsewhere in this tree (a diamond, or a cycle). */
+	/** Already counted elsewhere in this tree (a diamond, or a cycle). Its money
+	 *  IS in `total`; this edge is the second way in. */
 	| "already-counted"
+	/** Reached before, and that visit could not read it. Distinct from
+	 *  `already-counted`, which claims the money landed — here nothing did, and
+	 *  the gap is already in `unattributed` under the first edge. */
+	| "already-seen-unresolved"
+	/** Its cost is already inside the caller's SELF total — a `claude -p` child
+	 *  the parent's own turn names, a Task child under `<session>/subagents/`,
+	 *  or the reported session itself, reached round a cycle. Reported so the
+	 *  edge is visible, never added, because `tree` would otherwise bill it
+	 *  twice. */
+	| "in-self-total"
 	/** Past `maxDepth`; the subtree below it was not walked. */
 	| "depth-capped";
 
@@ -81,7 +95,7 @@ export interface SpawnTreeGap {
 	mechanism: string;
 	ts: string;
 	label?: string;
-	reason: Extract<SpawnEdgeSkip, "no-session-file" | "unreadable">;
+	reason: Extract<SpawnEdgeSkip, "not-found" | "unreadable">;
 }
 
 export interface SpawnTree {
@@ -91,10 +105,11 @@ export interface SpawnTree {
 	 *  elsewhere in this tree, or past the depth cap. */
 	descendants: number;
 	edges: SpawnTreeEdge[];
-	/** Edges recorded whose cost could not be read — either no session file by
-	 *  that uuid exists (`no-session-file`) or one does and could not be parsed
-	 *  (`unreadable`). Two different causes, kept apart in `reason`. NOT the
-	 *  same as "cost zero". */
+	/** Edges recorded whose cost could not be read — the lookup found nothing
+	 *  (`not-found`) or found a file that would not parse (`unreadable`). Two
+	 *  different causes, kept apart in `reason`. ONE ENTRY PER SESSION, not per
+	 *  edge: two edges to the same missing child are one gap. NOT the same as
+	 *  "cost zero". */
 	unattributed: SpawnTreeGap[];
 	/** Edges NOT FOLLOWED because of `maxDepth`. Each one is also in `edges`
 	 *  with `skip: "depth-capped"`. What lies beyond them is not enumerated —
@@ -120,12 +135,15 @@ export interface SpawnTree {
 export interface SpawnTreeOptions {
 	/** The ledger file. Defaults to `spawnLedgerPath()`. */
 	ledgerPath?: string;
-	/** Root holding `<cwd-slug>/<session>.jsonl`, ONE level deep. Defaults to
-	 *  `projectsDir()`, which honours `WTFT_CLAUDE_PROJECTS_DIR`. */
-	projectsRoot?: string;
 	/** Recursion bound. Defaults to DEFAULT_MAX_DEPTH, and is reported back in
 	 *  the result so a reader never needs this constant. */
 	maxDepth?: number;
+	/** Session ids whose cost is ALREADY in the caller's self total, so the walk
+	 *  must not add them again. The CLI passes the `claude -p` children the
+	 *  parent's own turns name (#138) and the Task children under
+	 *  `<session>/subagents/` (#82/#83) — the two mechanisms that fold a child
+	 *  into the parent before this walk ever runs. */
+	alreadyAttributed?: Set<string>;
 }
 
 /** Add every numeric field of `from` into `into`.
@@ -140,46 +158,31 @@ function addTotals(into: TokenTotals, from: TokenTotals): void {
 }
 
 /**
- * A session uuid → its session file, by scanning the project dirs.
+ * A session id → its session file, through the HARNESS SEAM.
  *
- * The LEDGER DOES NOT RECORD THE PATH on purpose. A worktree move relocates a
- * session file (#6) and a recorded path would rot silently; the uuid is the
- * filename wherever it lands, so a scan is the durable lookup. The scan is one
- * `statSync` per project dir — not `existsSync`, which a DIRECTORY named
- * `<uuid>.jsonl` would satisfy — and the dir list is read once per walk.
+ * `HarnessDiscovery.resolveSessionById` is the repo's lookup and it already
+ * knows three things a hand-rolled scan of `<root>/<slug>/<id>.jsonl` does not:
+ * it recurses past the `sessions/` subdirectory older Claude Code installs use,
+ * it skips the derived-data dirs, and where the same id exists in several
+ * project dirs it takes the NEWEST — the moved-session case (#155, #6), which
+ * is exactly where a stale copy would otherwise price the child. A second
+ * implementation of this lookup was drifting from the first on all three counts
+ * before the review caught it.
  *
- * ONE LEVEL, deliberately: a launcher-spawned session is a top-level session in
- * its own project dir. A Task-tool child under `<session>/subagents/` is a
- * different mechanism with its own discovery (#82/#83) and is not reachable
- * here — it would be double-counted if it were.
+ * Every registered harness is asked, in registration order, so a Pi child
+ * resolves through Pi's discovery and a Claude Code child through its own.
+ *
+ * The LEDGER DOES NOT RECORD THE PATH on purpose: a worktree move relocates a
+ * session file and a recorded path would rot silently, while the id does not.
  */
-export function resolveSessionFile(
-	sessionId: string,
-	projectDirs: string[],
-): string | null {
-	const name = `${sessionId}.jsonl`;
-	for (const dir of projectDirs) {
-		const candidate = path.join(dir, name);
+export function resolveSessionFile(sessionId: string): string | null {
+	for (const discovery of getDiscoveries()) {
 		try {
-			if (fs.statSync(candidate).isFile()) return candidate;
-		} catch { /* not here */ }
+			const found = discovery.resolveSessionById(sessionId);
+			if (found) return found;
+		} catch { /* a harness that cannot look is not an answer — ask the next */ }
 	}
 	return null;
-}
-
-function listProjectDirs(root: string): string[] {
-	let entries: fs.Dirent[];
-	try {
-		entries = fs.readdirSync(root, { withFileTypes: true });
-	} catch {
-		// An absent or unreadable projects root means no child resolves, which
-		// the walk reports as `no-session-file` per edge — visible, and never
-		// mistaken for "the ledger was empty".
-		return [];
-	}
-	const dirs: string[] = [];
-	for (const e of entries) if (e.isDirectory()) dirs.push(path.join(root, e.name));
-	return dirs;
 }
 
 /**
@@ -196,7 +199,6 @@ export function computeSpawnTree(
 	options: SpawnTreeOptions = {},
 ): SpawnTree {
 	const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
-	const projectsRoot = options.projectsRoot ?? projectsDir();
 
 	// The read is owned HERE, with NO way for a caller to supply its own ledger.
 	// Two earlier shapes both reintroduced the bug this function exists to fix:
@@ -227,15 +229,41 @@ export function computeSpawnTree(
 		total: emptyTotals(),
 	};
 
-	// Nothing recorded for this session: no dir listing, no stat, no parse.
+	// Nothing recorded for this session: no lookup, no parse.
 	if (!ledger.childrenOf.has(rootSessionId)) return tree;
 
-	const projectDirs = listProjectDirs(projectsRoot);
-	const seen = new Set<string>([rootSessionId]);
+	// BREADTH-FIRST, and that is a correctness property rather than a taste.
+	// Depth-first marked a child `seen` at whatever depth it was first reached,
+	// which in ledger order could be depth 5 for a session also recorded
+	// directly under the root — its own children then sat at depth 6 and were
+	// cut, although they are two levels from the root. The reported tree
+	// depended on the order lines happened to be appended in. Breadth-first
+	// reaches every session at its MINIMUM depth, so the cap cuts what is
+	// genuinely deep and nothing else.
+	//
+	// `seen` starts holding the ROOT, which is what makes a cycle terminate and
+	// what stops a session being billed as its own descendant. `alreadyCounted`
+	// carries the ids whose cost is already inside the caller's SELF total — a
+	// `claude -p` child the parent's own transcript names, or a Task child under
+	// `<session>/subagents/`. A spawner that also records one of those as an
+	// edge would otherwise have it billed twice, once in `total` and once in
+	// `spawned.total`, and `tree` would be wrong in the expensive direction.
+	// One map, three outcomes, so a repeat edge can say what happened the first
+	// time instead of guessing. The ROOT is seeded `in-self`, because its money
+	// IS the self total — an edge pointing back at it (a cycle) is neither a
+	// gap nor a second count.
+	type Outcome = "counted" | "unresolved" | "in-self";
+	const outcomeOf = new Map<string, Outcome>([[rootSessionId, "in-self"]]);
+	for (const id of options.alreadyAttributed ?? []) outcomeOf.set(id, "in-self");
 
-	const walk = (parentId: string, depth: number): void => {
+	type Visit = { parentId: string; depth: number };
+	const queue: Visit[] = [{ parentId: rootSessionId, depth: 1 }];
+
+	while (queue.length > 0) {
+		const { parentId, depth } = queue.shift()!;
 		const edges = ledger.childrenOf.get(parentId);
-		if (!edges) return;
+		if (!edges) continue;
+
 		for (const edge of edges) {
 			const base = {
 				parent: edge.parent,
@@ -248,27 +276,38 @@ export function computeSpawnTree(
 				depth,
 			};
 
+			// Seen BEFORE depth: a second edge to a session already counted is
+			// not a truncation, and counting it as one reported a complete tree
+			// as partial.
+			const prior = outcomeOf.get(edge.child);
+			if (prior !== undefined) {
+				// `already-counted` is a claim that the child's money landed.
+				// Where the first visit could not read it, nothing landed, so
+				// the edge repeats THAT outcome instead — and the gap is not
+				// reported twice, because it is one session, not two.
+				const skip = prior === "counted" ? "already-counted" as const
+					: prior === "in-self" ? "in-self-total" as const
+					: "already-seen-unresolved" as const;
+				tree.edges.push({ ...base, resolved: false, path: null, total: null, skip });
+				continue;
+			}
 			if (depth > maxDepth) {
 				tree.depthCapped++;
 				tree.edges.push({ ...base, resolved: false, path: null, total: null, skip: "depth-capped" });
 				continue;
 			}
-			if (seen.has(edge.child)) {
-				tree.edges.push({ ...base, resolved: false, path: null, total: null, skip: "already-counted" });
-				continue;
-			}
-			seen.add(edge.child);
-
-			const file = resolveSessionFile(edge.child, projectDirs);
+			const file = resolveSessionFile(edge.child);
 			if (file === null) {
-				tree.edges.push({ ...base, resolved: false, path: null, total: null, skip: "no-session-file" });
-				tree.unattributed.push({ child: edge.child, mechanism: edge.mechanism, ts: edge.ts, ...(edge.label !== undefined ? { label: edge.label } : {}), reason: "no-session-file" });
+				outcomeOf.set(edge.child, "unresolved");
+				tree.edges.push({ ...base, resolved: false, path: null, total: null, skip: "not-found" });
+				tree.unattributed.push({ child: edge.child, mechanism: edge.mechanism, ts: edge.ts, ...(edge.label !== undefined ? { label: edge.label } : {}), reason: "not-found" });
 				// KEEP WALKING. A child we cannot read may still have recorded
 				// children of its own, and those may be perfectly readable —
 				// dropping the subtree with the parent loses real, resolvable
-				// money over a missing file. Its grandchildren are edges in the
-				// ledger, not entries in a file we failed to open.
-				walk(edge.child, depth + 1);
+				// money over one lookup that came back empty. Its grandchildren
+				// are edges in the LEDGER, not entries in the file we did not
+				// find.
+				queue.push({ parentId: edge.child, depth: depth + 1 });
 				continue;
 			}
 
@@ -279,21 +318,21 @@ export function computeSpawnTree(
 				// A recorded child we CAN see and cannot read is the one skip
 				// class that is a bug rather than a fact, so it is reported as
 				// a gap with its own reason rather than folded into the others.
+				outcomeOf.set(edge.child, "unresolved");
 				tree.edges.push({ ...base, resolved: false, path: file, total: null, skip: "unreadable" });
 				tree.unattributed.push({ child: edge.child, mechanism: edge.mechanism, ts: edge.ts, ...(edge.label !== undefined ? { label: edge.label } : {}), reason: "unreadable" });
-				walk(edge.child, depth + 1);  // same reason as the arm above
+				queue.push({ parentId: edge.child, depth: depth + 1 });
 				continue;
 			}
 
 			tree.descendants++;
+			outcomeOf.set(edge.child, "counted");
 			addTotals(tree.total, total);
 			tree.edges.push({ ...base, resolved: true, path: file, total });
-
-			walk(edge.child, depth + 1);
+			queue.push({ parentId: edge.child, depth: depth + 1 });
 		}
-	};
+	}
 
-	walk(rootSessionId, 1);
 	return tree;
 }
 

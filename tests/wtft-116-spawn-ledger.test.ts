@@ -84,7 +84,13 @@ console.log("\nPART A — the writer refuses what cannot be resolved later");
 	check(!("cwd" in back) || back.cwd === undefined, "A4  an absent optional field is absent, not null");
 }
 
-for (const bad of ["", "not-a-uuid", "9f29d624531c47b0abf60790bb65180d", PARENT + "x"]) {
+// A Pi session id is a timestamp PREFIXED to a uuid, so "contains a uuid" is
+// the rule, not "is a uuid" — a bare-uuid rule made a Pi session unable to be a
+// parent at all, which left the Pi widget's block unreachable on the only
+// harness it runs in (PR review, Medium/crossfile). These are ids no lookup
+// could ever use: no uuid at all, or not one path component.
+for (const bad of ["", "not-a-uuid", "9f29d624531c47b0abf60790bb65180d",
+	`sub/${PARENT}`, `../${PARENT}`, `${PARENT}${"x".repeat(200)}`]) {
 	let threw = false;
 	try { serializeSpawnRecord(rec({ child: bad })); } catch { threw = true; }
 	check(threw, `A5  a malformed child id is refused on write: ${JSON.stringify(bad.slice(0, 20))}`);
@@ -100,8 +106,10 @@ for (const bad of ["", "not-a-uuid", "9f29d624531c47b0abf60790bb65180d", PARENT 
 	check(threw, "A7  an empty mechanism is refused — the report would name nothing");
 }
 {
-	// The 4 KiB refusal is what keeps "one line, one write(2)" true: past
-	// PIPE_BUF two concurrent appends can interleave and BOTH lines are lost.
+	// The per-field cap is what keeps "one line, one write(2)" true in practice:
+	// two concurrent appends that interleave lose BOTH lines, not one. (The
+	// basis is Linux holding the inode lock for one `write`, not PIPE_BUF —
+	// that is the pipe guarantee, and the spec retracted the claim.)
 	let threw = false;
 	try { serializeSpawnRecord(rec({ label: "x".repeat(MAX_FIELD_BYTES + 1) })); } catch { threw = true; }
 	check(threw, `A8  a label over ${MAX_FIELD_BYTES} bytes is refused`);
@@ -210,6 +218,12 @@ console.log("\nPART B — the reader counts what it skips");
 console.log("\nPART C — the walk: once each, bounded, and honest about gaps");
 
 const projects = path.join(dir, "projects");
+// Resolution goes through `HarnessDiscovery.resolveSessionById` (PR review,
+// Medium/crossfile: a second hand-rolled lookup was drifting from the repo's
+// own on three counts), so the fixture tree is pointed at by the same env seam
+// discovery uses — not by an option this module invents for itself.
+fs.mkdirSync(projects, { recursive: true });
+process.env.WTFT_CLAUDE_PROJECTS_DIR = projects;
 
 /** A transcript with `turns` identical priced assistant turns, under a project
  *  dir named for its cwd — the shape a launcher child actually lands in. */
@@ -246,7 +260,7 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 {
 	childTranscript(U(1), 3);
 	const led = ledgerOf("one.jsonl", [{ child: U(1), label: "correctness" }]);
-	const tree = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects });
+	const tree = computeSpawnTree(PARENT, { ledgerPath: led });
 	check(tree.descendants === 1, `C1  one recorded child resolves (got ${tree.descendants})`);
 	check(tree.edges[0].resolved === true, "C2  the edge says it resolved");
 	check(tree.edges[0].depth === 1, "C3  a direct child is depth 1");
@@ -264,7 +278,7 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 		{ child: U(10) }, { child: U(11) },
 		{ parent: U(10), child: U(12) }, { parent: U(11), child: U(12) },
 	]);
-	const tree = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects });
+	const tree = computeSpawnTree(PARENT, { ledgerPath: led });
 	check(tree.descendants === 3, `C7  a diamond counts three sessions, not four (got ${tree.descendants})`);
 	check(tree.total.outputTokens === 900, `C8  the shared grandchild's cost lands ONCE (got ${tree.total.outputTokens})`);
 	const dup = tree.edges.filter(e => e.child === U(12));
@@ -277,7 +291,7 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 	// that any process may write, so the walk must terminate on one anyway.
 	childTranscript(U(20), 1); childTranscript(U(21), 1);
 	// The ROOT gets a session file too. Without it the `U(21)→PARENT` edge would
-	// come back `no-session-file` and C10 would pass with the seen-guard deleted
+	// come back `not-found` and C10 would pass with the seen-guard deleted
 	// — measuring a missing fixture, not the guard.
 	childTranscript(PARENT, 1);
 	const led = ledgerOf("cycle.jsonl", [
@@ -286,21 +300,23 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 		{ parent: U(21), child: U(20) },
 		{ parent: U(21), child: PARENT },
 	]);
-	const tree = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects });
+	const tree = computeSpawnTree(PARENT, { ledgerPath: led });
 	check(tree.descendants === 2, `C9  a cycle terminates and counts each session once (got ${tree.descendants})`);
 	const rootEdge = tree.edges.find(e => e.child === PARENT);
-	check(rootEdge !== undefined && !rootEdge.resolved && rootEdge.skip === "already-counted",
-		`C10 the root is never a descendant of itself, even with its own session file on disk (got ${rootEdge?.skip})`);
+	check(rootEdge !== undefined && !rootEdge.resolved && rootEdge.skip === "in-self-total",
+		`C10 the root is never a descendant of itself — its money IS the self total, so a cycle back to it reads in-self-total, not a gap (got ${rootEdge?.skip})`);
 }
 
 {
-	// DEPTH: a chain of 7, capped at 5. The nodes past the cap are REPORTED as
-	// capped, never dropped — a silent cap is the same failure as a silent skip.
+	// DEPTH: a chain of EIGHT sessions (U(30)..U(37)), capped at 5. The CUT is
+	// reported as an edge; what lies beyond it is not enumerated, which is what
+	// a bound is. `depthCapped` therefore counts cuts, not the sessions behind
+	// them, and a non-zero value means the tree is known to be partial.
 	for (let i = 30; i <= 37; i++) childTranscript(U(i), 1);
 	const edges: Array<Partial<SpawnRecord>> = [{ child: U(30) }];
 	for (let i = 30; i < 37; i++) edges.push({ parent: U(i), child: U(i + 1) });
 	const led = ledgerOf("deep.jsonl", edges);
-	const tree = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects, maxDepth: 5 });
+	const tree = computeSpawnTree(PARENT, { ledgerPath: led, maxDepth: 5 });
 	check(tree.descendants === 5, `C11 the cap admits exactly maxDepth levels (got ${tree.descendants})`);
 	check(tree.depthCapped === 1, `C12 the cut is reported, not silent (got ${tree.depthCapped})`);
 	check(tree.maxDepth === 5, "C13 the cap in force is stated in the result");
@@ -311,14 +327,14 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 {
 	// An UNRESOLVABLE child: the edge was recorded, the transcript is not there.
 	const led = ledgerOf("missing.jsonl", [{ child: U(40), label: "vanished" }]);
-	const tree = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects });
+	const tree = computeSpawnTree(PARENT, { ledgerPath: led });
 	check(tree.descendants === 0, "C14 an unresolvable child is not a descendant");
 	check(tree.unattributed.length === 1, "C15 it is reported as unattributed");
-	check(tree.unattributed[0].reason === "no-session-file", "C16 with the reason named");
+	check(tree.unattributed[0].reason === "not-found", "C16 with the reason named");
 	check(tree.edges[0].total === null,
 		"C17 its cost is null, never 0 — a zero would launder a gap into a fact");
 	check(tree.total.costUsd === 0, "C18 and it contributes nothing to the tree total");
-	check(tree.edges[0].skip === "no-session-file", "C18b the skip reason is on the edge too");
+	check(tree.edges[0].skip === "not-found", "C18b the skip reason is on the edge too");
 }
 
 {
@@ -331,7 +347,7 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 		{ child: U(60) },                 // recorded, no session file
 		{ parent: U(60), child: U(61) },  // its child, which IS on disk
 	]);
-	const tree = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects });
+	const tree = computeSpawnTree(PARENT, { ledgerPath: led });
 	check(tree.descendants === 1, `C23 the readable grandchild is still counted (got ${tree.descendants})`);
 	check(tree.total.outputTokens === 600,
 		`C23b its cost lands despite its parent being unreadable (got ${tree.total.outputTokens})`);
@@ -344,14 +360,20 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 	const file = childTranscript(U(70), 1);
 	fs.chmodSync(file, 0o000);
 	const led = ledgerOf("unreadable-child.jsonl", [{ child: U(70) }]);
-	const tree = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects });
-	const readable = tree.descendants === 1;
+	// Ask the OS whether this process can read it, rather than inferring from
+	// the outcome: `descendants === 1` would also be true if the parser
+	// swallowed the EACCES and returned an empty interaction list, which is the
+	// zero-laundering this suite exists to forbid — and the run would print a
+	// harmless-looking SKIP instead of failing (PR review, Low/correctness).
+	let canRead = true;
+	try { fs.accessSync(file, fs.constants.R_OK); } catch { canRead = false; }
+	const tree = computeSpawnTree(PARENT, { ledgerPath: led });
 	fs.chmodSync(file, 0o644);
-	if (readable) {
+	if (canRead) {
 		console.log("  ⏭  C24 SKIPPED — this process can read a chmod 000 file (root?)");
 	} else {
 		check(tree.unattributed[0]?.reason === "unreadable",
-			`C24 an unreadable session file is 'unreadable', not 'no-session-file' (got ${tree.unattributed[0]?.reason})`);
+			`C24 an unreadable session file is 'unreadable', not 'not-found' (got ${tree.unattributed[0]?.reason})`);
 		check(tree.edges[0].path !== null,
 			"C24b and the edge still names the file that failed, so a reader can go and look");
 	}
@@ -364,7 +386,7 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 	const led = ledgerOf("optionals.jsonl", [
 		{ child: U(80), label: "correctness", model: "opus", cwd: "/tmp/pr-review-abc" },
 	]);
-	const e = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects }).edges[0];
+	const e = computeSpawnTree(PARENT, { ledgerPath: led }).edges[0];
 	check(e.label === "correctness" && e.model === "opus" && e.cwd === "/tmp/pr-review-abc",
 		`C25 label, model and cwd all reach the edge (got ${JSON.stringify([e.label, e.model, e.cwd])})`);
 	check(e.parent === PARENT && e.path !== null, "C25b as do parent and the resolved path");
@@ -372,7 +394,7 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 
 {
 	const led = ledgerOf("nobody.jsonl", [{ parent: U(50), child: U(51) }]);
-	const tree = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects });
+	const tree = computeSpawnTree(PARENT, { ledgerPath: led });
 	check(tree.descendants === 0 && tree.edges.length === 0,
 		"C19 another session's edges are not this session's descendants");
 }
@@ -380,7 +402,7 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 {
 	const led = path.join(dir, "malformed-tree.jsonl");
 	fs.writeFileSync(led, "{ nope\n" + serializeSpawnRecord(rec({ child: U(1) })) + "\n");
-	const tree = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects });
+	const tree = computeSpawnTree(PARENT, { ledgerPath: led });
 	check(tree.malformedLedgerLines === 1,
 		"C20 the reader's skipped-line count reaches the report");
 }
@@ -394,10 +416,11 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 	const led = path.join(dir, "unreadable.jsonl");
 	fs.writeFileSync(led, serializeSpawnRecord(rec({ child: U(1) })) + "\n");
 	fs.chmodSync(led, 0o000);
-	const tree = computeSpawnTree(PARENT, { ledgerPath: led, projectsRoot: projects });
-	const readable = tree.ledgerError === null;
+	let canRead = true;
+	try { fs.accessSync(led, fs.constants.R_OK); } catch { canRead = false; }
+	const tree = computeSpawnTree(PARENT, { ledgerPath: led });
 	fs.chmodSync(led, 0o644);
-	if (readable) {
+	if (canRead) {
 		// Running as root, or on a filesystem that ignores the mode bits.
 		console.log("  ⏭  C21 SKIPPED — this process can read a chmod 000 file (root?)");
 	} else {
@@ -406,9 +429,83 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 		check(/EACCES|permission/i.test(tree.ledgerError!),
 			`C21b the error names the cause (got ${tree.ledgerError})`);
 	}
-	const fine = computeSpawnTree(PARENT, { ledgerPath: path.join(dir, "nope.jsonl"), projectsRoot: projects });
+	const fine = computeSpawnTree(PARENT, { ledgerPath: path.join(dir, "nope.jsonl") });
 	check(fine.ledgerError === null,
 		"C22 an ABSENT ledger is not an error — nothing has spawned yet");
+}
+
+{
+	// BREADTH, not depth. C is recorded twice: once at the end of a long chain
+	// (which appears FIRST in the ledger) and once directly under the root.
+	// Depth-first reached it at depth 5, put its own children at depth 6, and
+	// cut them — although they are two levels from the root. The reported tree
+	// depended on the order lines happened to be appended in.
+	for (const n of [90, 91, 92, 93, 94, 95]) childTranscript(U(n), 1);
+	const led = ledgerOf("bfs.jsonl", [
+		{ child: U(90) },                 // the long chain, recorded first
+		{ parent: U(90), child: U(91) },
+		{ parent: U(91), child: U(92) },
+		{ parent: U(92), child: U(93) },
+		{ parent: U(93), child: U(94) },  // U(94) at depth 5 this way…
+		{ child: U(94) },                 // …and at depth 1 this way
+		{ parent: U(94), child: U(95) },  // depth 6 via the chain, 2 via direct
+	]);
+	const tree = computeSpawnTree(PARENT, { ledgerPath: led, maxDepth: 5 });
+	check(tree.descendants === 6,
+		`C26 every session within the bound is counted, whatever order the ledger holds (got ${tree.descendants})`);
+	check(tree.depthCapped === 0,
+		`C26b and nothing is cut, because nothing is genuinely deeper than 5 (got ${tree.depthCapped})`);
+	const deep = tree.edges.find(e => e.child === U(94) && e.resolved);
+	check(deep?.depth === 1, `C26c the shared session is reached at its MINIMUM depth (got ${deep?.depth})`);
+}
+
+{
+	// A child already inside SELF must not be billed a second time. A spawner is
+	// free to record an edge for a child the parent's own turn already names —
+	// `cd /tmp/x && claude -p --session-id <uuid>` is both mechanisms at once.
+	childTranscript(U(100), 3);
+	const led = ledgerOf("double.jsonl", [{ child: U(100) }]);
+	const billed = computeSpawnTree(PARENT, { ledgerPath: led });
+	const guarded = computeSpawnTree(PARENT, {
+		ledgerPath: led, alreadyAttributed: new Set([U(100)]),
+	});
+	check(billed.total.outputTokens === 900, "C27 without the guard the child is counted");
+	check(guarded.total.outputTokens === 0 && guarded.descendants === 0,
+		`C27b with it, nothing is added a second time (got ${guarded.total.outputTokens})`);
+	check(guarded.edges[0].skip === "in-self-total",
+		`C27c and the edge is still REPORTED, naming why (got ${guarded.edges[0].skip})`);
+	check(guarded.unattributed.length === 0,
+		"C27d it is not a gap — the money landed, just not here");
+}
+
+{
+	// A diamond onto a child that cannot be read: the second edge must not claim
+	// `already-counted`, which asserts the money landed, and the gap must be
+	// reported once, because it is one session rather than two.
+	const led = ledgerOf("gap-diamond.jsonl", [
+		{ child: U(110) }, { child: U(110) },
+	]);
+	const tree = computeSpawnTree(PARENT, { ledgerPath: led });
+	check(tree.edges.length === 2 && tree.edges[0].skip === "not-found"
+		&& tree.edges[1].skip === "already-seen-unresolved",
+		`C28 the repeat edge repeats the OUTCOME, it does not claim a count (got ${tree.edges[1].skip})`);
+	check(tree.unattributed.length === 1,
+		`C28b and one missing session is one gap, not two (got ${tree.unattributed.length})`);
+}
+
+{
+	// Resolution goes through the harness seam, which takes the NEWEST copy when
+	// a session id exists in two project dirs — the moved-session case (#155,
+	// #6). A hand-rolled scan took whichever readdir returned first.
+	const stale = childTranscript(U(120), 1, "/old/place");
+	const fresh = childTranscript(U(120), 4, "/new/place");
+	fs.utimesSync(stale, new Date(1), new Date(1));
+	const led = ledgerOf("moved.jsonl", [{ child: U(120) }]);
+	const tree = computeSpawnTree(PARENT, { ledgerPath: led });
+	check(tree.edges[0].path === fresh,
+		`C29 a moved session is priced from the newest copy, not the stale one`);
+	check(tree.total.outputTokens === 1200,
+		`C29b which is the one with the real cost in it (got ${tree.total.outputTokens})`);
 }
 
 // ---

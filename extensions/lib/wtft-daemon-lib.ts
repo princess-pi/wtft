@@ -1468,11 +1468,27 @@ export async function watchTagFile(
 	});
 
 	// fs.watch on the classified tag file (inotify on Linux).
-	// The daemon guarantees:
-	//   - Writes at most every 667ms (90bpm)
-	//   - Every line is a complete JSON + \n (atomic fs.appendFileSync)
-	//   - No partial lines, no mid-write reads
-	// Therefore every "change" event = one or more complete lines ready.
+	//
+	// WHAT THE DAEMON ACTUALLY GUARANTEES (#130), because the three bullets that
+	// used to sit here were folklore and two of them were false:
+	//   - Every write LANDS ON A LINE BOUNDARY. No write ends mid-line, and the
+	//     heartbeat truncate cuts to `lastLineStartByte`. So the file is never
+	//     left holding a severed line.
+	//   - It does NOT write at most once per beat. One poll makes several
+	//     separate writes — the classified batch, then `_meta.offset`, then a
+	//     `_meta.swept` marker, plus one append per changed subagent transcript,
+	//     and `shutdown` writes outside the cadence entirely. 667ms bounds how
+	//     often a beat comes round, not how many writes it makes.
+	//   - It does NOT make an append atomic against a concurrent read.
+	//     `syncSubagentTranscript` appends batches that run to hundreds of KB,
+	//     node may split one append across several write() calls, and inotify can
+	//     wake this callback inside that span.
+	//
+	// So a "change" event means complete lines ready PLUS, briefly, a partial one
+	// at the end — which is why the read below consumes only to the last newline
+	// and carries the remainder. A whole-file reader never sees this; an
+	// offset-tracking reader must.
+	//
 	// No debounce needed — double-fire is harmless (stat.size check is a no-op).
 	//
 	// Wait up to 5s for the daemon to create the tag file before watching.
@@ -1491,92 +1507,121 @@ export async function watchTagFile(
 					const buf = Buffer.alloc(stat.size - lastReadOffset);
 					fs.readSync(fd, buf, 0, buf.length, lastReadOffset);
 					fs.closeSync(fd);
-					lastReadOffset = stat.size;
 
-					const newContent = buf.toString("utf8");
-					const lines = newContent.split("\n");
-					let newCount = 0;
-					for (const line of lines) {
-						if (!line.trim()) continue;
-						try {
-							const obj = JSON.parse(line);
-							if (obj._hb) continue;
-							const interaction = classifiedToInteraction(obj);
-							if (interaction) {
-								allInteractions.push(interaction);
-								newCount++;
-							}
-						} catch {}
-					}
+					// CONSUME ONLY WHOLE LINES (#130 round 1, Medium/crossfile).
+					// `lastReadOffset = stat.size` was the same unconditional
+					// advance `parseNewLines` had: a fragment fails JSON.parse,
+					// the catch below drops it, and the offset has already moved
+					// past it — so those interactions never reach the live
+					// `--watch` view until something forces a whole-file re-read.
+					//
+					// AND THE WRITER CANNOT CLOSE THIS ONE. #130's writer
+					// guarantee is that no write ends mid-line, which kills the
+					// truncation welds. It does NOT make a large append atomic
+					// with respect to a concurrent reader: `syncSubagentTranscript`
+					// appends whole-transcript batches that run to hundreds of KB,
+					// node may split one append across several write() calls, and
+					// inotify can wake this watcher inside that span. So the file
+					// is always a whole number of complete lines PLUS, briefly, a
+					// partial one at the end — and the reader that tracks an offset
+					// has to carry the remainder. A whole-file reader never sees it.
+					//
+					// This is not defensive code against a writer we do not trust.
+					// It is the one place the writer provably cannot deliver, and
+					// it is the same single line as the daemon's fix.
+					const lastNl = buf.lastIndexOf(0x0a);
+					// Nothing complete yet. Leave the offset where it is and fall THROUGH to the
+					// health refresh below — an early return here would skip updateDaemonHealth
+					// and resetWatchdog, so a run of partial-line wakes would let the watchdog
+					// fire on a daemon that is writing perfectly well.
+					if (lastNl !== -1) {
+						lastReadOffset += lastNl + 1;
 
-					if (newCount > 0) {
-						// This path appends straight to the accumulator and never
-						// goes through readClassifiedTagFile, so it needs the same
-						// collapse (#270 review) — otherwise the live watch, the
-						// one surface a human is actually staring at, is the only
-						// consumer that still double-counts a re-emitted message.
-						//
-						// COST, measured rather than argued (PR review), because
-						// this is a full pass over the WHOLE accumulator on every
-						// append event, which over a session's life is O(n^2) in
-						// interactions. That is true asymptotically and negligible
-						// in practice, and the numbers are the reason this is left
-						// as a single canonical call instead of being hand-rolled
-						// into an incremental merge:
-						//
-						// Re-derive with `bun research/270-watch-dedup-bench.ts`
-						// (median of 40 passes, JIT warmed, 50% of ids re-emitted):
-						//
-						//   n =  1,184 (the largest real session measured on this
-						//                host, #270's own specimen 7c0c2b7e)
-						//                        0.255ms/pass = 0.038% of a 667ms beat
-						//   n =  4,736 (4x)      0.917ms/pass = 0.138%
-						//   n = 11,840 (10x)     2.090ms/pass = 0.313%
-						//   n = 23,680 (20x)     6.423ms/pass = 0.963%
-						//
-						// The first version of this table was a hand-run nobody
-						// saved and it was not even MONOTONIC — it put 11,840
-						// items (0.791ms) BELOW 4,736 (0.879ms), because the
-						// smallest n had absorbed the JIT compile cost and the
-						// others had not (PR review). That is the same defect
-						// research/270-subagent-parse-bench.ts exists to prevent
-						// for the parse figures, so these get the same treatment.
-						//
-						// What the corrected numbers say, stated no more strongly
-						// than they support (PR review caught the first attempt
-						// overstating this too, twice): per-item cost stays in a
-						// NARROW BAND rather than being flat. Derived from the
-						// table above and nothing else — ms/pass divided by n —
-						// that band is 0.177-0.271us: 0.215 / 0.194 / 0.177 /
-						// 0.271us at the four sizes, reliably highest at the 20x
-						// point. So 20x the items costs ~25x the time, not 20x.
-						// (Re-runs under load shift the whole band upward, to
-						// ~0.32us at the 20x point — but that is a DIFFERENT run,
-						// and quoting its peak beside this run's table is how the
-						// previous draft came to state an upper bound its own
-						// numbers did not support.) Each pass is O(n) by construction; the mild
-						// super-linearity on top is allocation and cache pressure
-						// from the larger Map, not a change in the algorithm.
-						// Absolute figures move ~25% run to run with host load, so
-						// treat the table as one representative run of the script,
-						// not a constant.
-						//
-						// The practical bound is what carries the decision, and it
-						// is unaffected: even at 20x the largest session this host
-						// has ever produced, one pass is ~1% of a poll beat, so the
-						// quadratic term over a session's life is nowhere near the
-						// thing that matters. An
-						// incremental merge would have to re-implement
-						// deduplicateInteractions' max-cost-and-union-files rule
-						// to save 0.1% of a poll, and a second implementation of
-						// that rule is precisely the drift this file's other
-						// review findings are about.
-						allInteractions = dedupeClassifiedById(allInteractions);
-						updateDaemonHealth();
-						needsRedraw = true;
-						render();
-						resetWatchdog();
-						return;
+						const newContent = buf.subarray(0, lastNl + 1).toString("utf8");
+						const lines = newContent.split("\n");
+						let newCount = 0;
+						for (const line of lines) {
+							if (!line.trim()) continue;
+							try {
+								const obj = JSON.parse(line);
+								if (obj._hb) continue;
+								const interaction = classifiedToInteraction(obj);
+								if (interaction) {
+									allInteractions.push(interaction);
+									newCount++;
+								}
+							} catch {}
+						}
+
+						if (newCount > 0) {
+							// This path appends straight to the accumulator and never
+							// goes through readClassifiedTagFile, so it needs the same
+							// collapse (#270 review) — otherwise the live watch, the
+							// one surface a human is actually staring at, is the only
+							// consumer that still double-counts a re-emitted message.
+							//
+							// COST, measured rather than argued (PR review), because
+							// this is a full pass over the WHOLE accumulator on every
+							// append event, which over a session's life is O(n^2) in
+							// interactions. That is true asymptotically and negligible
+							// in practice, and the numbers are the reason this is left
+							// as a single canonical call instead of being hand-rolled
+							// into an incremental merge:
+							//
+							// Re-derive with `bun research/270-watch-dedup-bench.ts`
+							// (median of 40 passes, JIT warmed, 50% of ids re-emitted):
+							//
+							//   n =  1,184 (the largest real session measured on this
+							//                host, #270's own specimen 7c0c2b7e)
+							//                        0.255ms/pass = 0.038% of a 667ms beat
+							//   n =  4,736 (4x)      0.917ms/pass = 0.138%
+							//   n = 11,840 (10x)     2.090ms/pass = 0.313%
+							//   n = 23,680 (20x)     6.423ms/pass = 0.963%
+							//
+							// The first version of this table was a hand-run nobody
+							// saved and it was not even MONOTONIC — it put 11,840
+							// items (0.791ms) BELOW 4,736 (0.879ms), because the
+							// smallest n had absorbed the JIT compile cost and the
+							// others had not (PR review). That is the same defect
+							// research/270-subagent-parse-bench.ts exists to prevent
+							// for the parse figures, so these get the same treatment.
+							//
+							// What the corrected numbers say, stated no more strongly
+							// than they support (PR review caught the first attempt
+							// overstating this too, twice): per-item cost stays in a
+							// NARROW BAND rather than being flat. Derived from the
+							// table above and nothing else — ms/pass divided by n —
+							// that band is 0.177-0.271us: 0.215 / 0.194 / 0.177 /
+							// 0.271us at the four sizes, reliably highest at the 20x
+							// point. So 20x the items costs ~25x the time, not 20x.
+							// (Re-runs under load shift the whole band upward, to
+							// ~0.32us at the 20x point — but that is a DIFFERENT run,
+							// and quoting its peak beside this run's table is how the
+							// previous draft came to state an upper bound its own
+							// numbers did not support.) Each pass is O(n) by construction; the mild
+							// super-linearity on top is allocation and cache pressure
+							// from the larger Map, not a change in the algorithm.
+							// Absolute figures move ~25% run to run with host load, so
+							// treat the table as one representative run of the script,
+							// not a constant.
+							//
+							// The practical bound is what carries the decision, and it
+							// is unaffected: even at 20x the largest session this host
+							// has ever produced, one pass is ~1% of a poll beat, so the
+							// quadratic term over a session's life is nowhere near the
+							// thing that matters. An
+							// incremental merge would have to re-implement
+							// deduplicateInteractions' max-cost-and-union-files rule
+							// to save 0.1% of a poll, and a second implementation of
+							// that rule is precisely the drift this file's other
+							// review findings are about.
+							allInteractions = dedupeClassifiedById(allInteractions);
+							updateDaemonHealth();
+							needsRedraw = true;
+							render();
+							resetWatchdog();
+							return;
+						}
 					}
 				}
 

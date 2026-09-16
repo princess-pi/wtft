@@ -38,8 +38,9 @@ A reader may therefore presume, without writing any code for the alternative:
 | Presumption | What makes it true |
 |---|---|
 | Every line parses as JSON | no write ever ends mid-line |
-| A reader woken by `fs.watch` sees only complete lines | every write lands on a `\n` boundary, so there is no observable mid-line state |
-| Writes arrive no faster than one beat | `POLL_MS = 667` gates the heartbeat and throttles the classified flush |
+| A WHOLE-FILE reader woken by `fs.watch` sees only complete lines | every write lands on a `\n` boundary, so there is no observable mid-line state left behind |
+| An OFFSET-TRACKING reader may see one partial line at the end | the writer guarantee kills truncation welds; it does **not** make a large append atomic against a concurrent read. Such a reader must consume to the last `\n` and carry the remainder — `watchTagFile` does |
+| Writes arrive in bursts no more often than one beat | `POLL_MS = 667` bounds how often a poll comes round — **not how many writes it makes.** One poll writes the classified batch, then `_meta.offset`, then a `_meta.swept` marker, plus one append per changed subagent transcript; `shutdown` writes outside the cadence entirely. Expect several notifications per beat |
 
 **This is not the watcher being clever, and it cannot be.** `fs.watch`/inotify report **bytes**;
 there is no "notify me on a newline" anywhere in the stack, and no watcher can be made

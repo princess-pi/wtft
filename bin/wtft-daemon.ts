@@ -73,6 +73,13 @@ let tagPath = "";
 let pidPath = "";
 let rebuildTagOnStartup = false;
 let lastSize = 0;            // bytes read from session.jsonl
+// Bytes of an unterminated trailing line seen on the PREVIOUS poll (#130). A
+// fragment that has not grown for a whole beat AND parses as JSON is a complete
+// record whose writer stopped before the newline — a killed or crashed harness.
+// `parseSessionFile` counts that record (it splits the whole file), so a daemon
+// that waited forever would drift from it, which is the divergence #156 exists
+// to prevent. One number, and it resets the moment a newline arrives.
+let pendingFragmentSize = 0;
 let lastWriteMs = 0;         // last time we flushed to the tag file
 let lastActivityMs = Date.now(); // last time we classified a new interaction
 let startupTime = Date.now();    // daemon start time (idle exit grace period)
@@ -455,7 +462,11 @@ function fatalTagMutation(filePath: string, operation: "append" | "rebuild trunc
 function appendTagFile(filePath: string, batch: string): void {
   if (batch.length > 0 && !batch.endsWith("\n")) {
     fatalTagMutation(filePath, "append", new Error(
-      `refusing to append a batch that does not end in a newline (${batch.length} bytes) — ` +
+      // Buffer.byteLength, not String.length. `batch.length` counts UTF-16 code
+      // units, so a batch carrying `→` or `—` would report fewer "bytes" than it
+      // has — the byte-versus-string-index confusion this whole issue is about,
+      // reintroduced in the message that announces it (round-1 review).
+      `refusing to append a batch that does not end in a newline (${Buffer.byteLength(batch, "utf8")} bytes) — ` +
       "a tag file is JSONL and its readers presume whole lines (#130)",
     ));
   }
@@ -1018,6 +1029,8 @@ function parseNewLines(filePath: string) {
         process.stderr.write(`[wtft-log-parser] session truncated, resetting offset\n`);
       }
       lastSize = 0;
+      // A fragment counted against the OLD file says nothing about the new one.
+      pendingFragmentSize = 0;
     }
     if (currentSize <= lastSize) return [];
     const fd = fs.openSync(filePath, "r");
@@ -1041,11 +1054,25 @@ function parseNewLines(filePath: string) {
     // discipline as `lastLineStartByte`: 0x0a can never be a UTF-8 continuation
     // byte, so a byte index is exact, while a string index is not a byte offset.
     const lastNl = buf.lastIndexOf(0x0a);
-    // Nothing complete yet. Leave `lastSize` where it is and re-read next poll;
-    // the buffer is one line, so the cost of waiting is one small re-read a beat.
-    if (lastNl === -1) return [];
-    lastSize += lastNl + 1;
-    const newContent = buf.subarray(0, lastNl + 1).toString("utf8");
+    const fragment = buf.subarray(lastNl + 1);        // empty when the read ends on a newline
+
+    // A fragment that is BYTE-IDENTICAL IN LENGTH to last poll's and parses as
+    // JSON is a finished record missing only its newline: the writer died. Take
+    // it, because parseSessionFile would, and a daemon that waited forever would
+    // report a lower total than a rebuild of the same file (#156).
+    let settledFragment = false;
+    if (fragment.length > 0 && fragment.length === pendingFragmentSize) {
+      try { JSON.parse(fragment.toString("utf8")); settledFragment = true; } catch (_) { /* still mid-record */ }
+    }
+    pendingFragmentSize = settledFragment ? 0 : fragment.length;
+
+    // Nothing complete and nothing settled. Leave `lastSize` where it is and
+    // re-read next poll; the buffer is one line, so waiting costs one small
+    // re-read a beat.
+    if (lastNl === -1 && !settledFragment) return [];
+    const consumeTo = settledFragment ? buf.length : lastNl + 1;
+    lastSize += consumeTo;
+    const newContent = buf.subarray(0, consumeTo).toString("utf8");
     // Same shape as parseSessionFile's whole-file loop (#156), threading the
     // control entries — thinking level (#77), model_change (#128), compaction
     // (#90), interrupt (#52 Phase 3) — through the session's stream state.

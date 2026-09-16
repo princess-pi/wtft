@@ -3,8 +3,16 @@
 ## The rule this issue installs
 
 **Every write the daemon makes to a `.wtft-tag.*.jsonl` file leaves the file a whole
-number of complete lines.** Not "usually", not "except on ENOSPC" — at every instant an
-outside reader can observe, the file is valid JSONL.
+number of complete lines**, and no write ever *ends* mid-line.
+
+**One honest exception, and it is not hand-waved.** `appendTagFile` uses `fs.appendFileSync`,
+which can short-write when the disk fills. #512 already owns that case and it is terminal: the
+daemon stops, poisons the singleton lease with a rebuild token, and the next owner rederives
+the tag from the transcript in full. So a failed append can leave a fragment, and it is
+resolved by rebuild rather than by parsing — which is Duppy's stated preference for
+out-of-space handling: abort, reconstruct, do not grow machinery for it. The newline check in
+`appendTagFile` rejects a batch that does not *end* in a newline; it cannot stop a partial
+write reaching disk, and this spec no longer claims it can.
 
 That is the contract Duppy asked for (2026-09-16):
 
@@ -23,7 +31,7 @@ record with `JSON.stringify(line) + "\n"`, and so does every `_meta` and `_hb` w
 |---|---|
 | Every line in the file parses as JSON | no write ever ends mid-line |
 | A reader woken by inotify sees only complete lines | every write lands on a `\n` boundary, so there is no observable mid-line state |
-| Writes arrive no faster than one beat | `POLL_MS = 667` gates the heartbeat and throttles the classified flush |
+| Writes arrive in bursts no more often than one beat | `POLL_MS = 667` bounds how often a poll comes round — **not how many writes it makes.** One poll writes the classified batch, then `_meta.offset`, then a `_meta.swept` marker, plus one append per changed subagent transcript; `shutdown` writes outside the cadence entirely. A reader gets several notifications per beat |
 
 **What no writer can deliver, stated so nobody builds on it:** `fs.watch`/inotify report
 **bytes**, never lines. There is no "notify me on a newline" anywhere in the stack. The
@@ -150,10 +158,40 @@ shapes that caused #130 — an append that bypasses the helper, and a truncate t
 did not come from `lastLineStartByte`. #130 survived months because every reader swallowed it
 silently; a check that reads the writer is the only thing that would have caught it.
 
-**Nothing is added to any reader.** `readClassifiedTagFile`, `readTagFileWithVerdict` and
-`tagProvisionalFromContent` keep their existing `catch { continue; }`, which becomes dead
-weight rather than load-bearing — and that is the point: the guarantee moves into the
-writer, where one place owns it, instead of being re-derived by every reader.
+**Nothing is added to a WHOLE-FILE reader.** `readClassifiedTagFile`,
+`readTagFileWithVerdict` and `tagProvisionalFromContent` read the file entire, so the writer
+guarantee is enough for them: their existing `catch { continue; }` becomes dead weight rather
+than load-bearing.
+
+**One OFFSET-TRACKING reader does change, and the writer provably cannot cover it.**
+`watchTagFile` reads `[lastReadOffset, size)` on every inotify wake and had the same
+unconditional `lastReadOffset = stat.size` that `parseNewLines` had. The writer guarantee kills
+*truncation welds*; it does not make a large append atomic against a concurrent read.
+`syncSubagentTranscript` appends whole-transcript batches running to hundreds of KB, node may
+split one append across several `write()` calls, and inotify can wake the watcher inside that
+span. So the file is always complete lines PLUS, briefly, a partial one at the end.
+
+That is one line of the same discipline, in the one place the writer cannot reach — not
+defensive code against a writer we do not trust. Round 1 of review caught it; the first draft
+of this spec claimed the watcher was safe because of the writer fix, and that was wrong.
+
+## The 96 files already corrupted — the bump IS the repair
+
+Fixing the writer does nothing for a file already damaged, and those files are not inert.
+1,707 of the welds destroyed a `_meta` marker, and `_meta.offset` is the resume point
+`initClassified` reads: a v2.8.1 tag therefore resumes from a stale offset or re-parses, and
+the 12 welds carrying `"t":` stay lost cost data for the life of the file. #130's Closer — a
+rescan of `wtft-tags/` reporting zero mid-file unparseable lines — **cannot pass on this host**
+without dealing with them.
+
+`WTFT_TAGGER_VERSION` goes **2.8.1 → 2.8.2**, which makes every existing tag stale and
+rederived from its transcript.
+
+A tag file is a **disposable derived cache**, so discarding it is both simpler and stricter
+than a repair pass — a repair would have to guess where a welded line was meant to split, and
+would then be a code path this repo has to keep correct forever for a defect that no longer
+happens. Round 1 of review raised this as the one High finding, and it was right: the writer
+fix alone left the Closer unmeetable.
 
 ## Tests
 
@@ -176,6 +214,11 @@ writer, where one place owns it, instead of being re-derived by every reader.
 
 The suite was run against `bin/wtft-daemon.ts` as of the spec commit, before either fix:
 
+**Method**, because the numbers are meaningless without it: only `bin/wtft-daemon.ts` was
+reverted. `extensions/lib/wtft-daemon-lib.ts` kept the `lastLineStartByte` seam, so §W still
+has a subject and still passes — the run measures the *call site*, which is where the corpus
+damage came from.
+
 ```
 FAIL E1 every one of the 16 tag lines parses as JSON
      {"_meta":{"swept":178959760425{"_hb":{"first":1789597604255,"last":1789597604925}}
@@ -184,17 +227,30 @@ FAIL E1 no line carries a second record welded onto it
 FAIL E1 no two consecutive heartbeat lines — the cut fired
 FAIL R1 the split turn is counted once the line completes   []
 FAIL R1 and counted exactly once (0)
-14 passed, 5 failed
+FAIL R2 a turn split mid-UTF-8-sequence is counted once the line completes
+FAIL R2b and counted exactly once (0)
+FAIL S2 every tag truncate cuts to zero or to a lastLineStartByte offset
+19 passed, 8 failed
 ```
 
 Those welded lines are the corpus shape, produced live by the real daemon rather than by a
 fixture: a `_meta.swept` marker severed mid-number with a heartbeat welded onto the stump.
-After the fix the same run is 19 passed, 0 failed.
+After the fix the same run is **27 passed, 0 failed**.
+
+An earlier draft of this section quoted "14 passed, 5 failed" and "19 passed, 0 failed" — real
+output from a run taken before §S existed, left standing after the suite grew. Round 1 of
+review caught that the quoted output could not have come from the suite in the diff. Recorded
+rather than silently corrected, because it is the same failure the #116 spec kept making.
 
 ## Closer
 
 Run the daemon against a transcript containing `→` and `—` for long enough to upsert the
-heartbeat at least three times, then read the tag file: **every line parses as JSON, and the
-line count equals the number of records written.** Today the file carries welded lines; when
-this closes it carries none, and `tests/wtft-130-line-safe-tag-writes.test.ts` E1 fails if
-that ever stops being true.
+heartbeat at least three times, then read the tag file: **every line parses as JSON, no line
+carries a second record welded onto it, and every turn written is still classified.** Those are
+the three things E1 actually asserts — an earlier draft promised "the line count equals the
+number of records written", which E1 never checked and which is not even well defined once
+heartbeats are upserted rather than accumulated.
+
+And on this host, after the v2.8.2 bump has let the tags rederive: a rescan of every
+`wtft-tags/*.jsonl` reports **zero** mid-file unparseable lines, against 2,562 across 96 files
+before.

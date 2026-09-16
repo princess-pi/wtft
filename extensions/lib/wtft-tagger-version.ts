@@ -86,4 +86,27 @@
 // detection on it) and flipped detection for later interactions through the
 // prevCtx chain — a semantic move that a patch bump understates. Only the
 // divider's own flag is touched. Widening isSidechain belongs with #15.
-export const WTFT_TAGGER_VERSION = "2.8.1";
+// 2.8.2 (#130): the daemon CORRUPTED its own tag files, and this bump is the
+// repair. `upsertHeartbeat` truncated to a byte offset computed from a JS string
+// index, so every multi-byte character ahead of the last line drove the cut into
+// the PRECEDING line and the fresh heartbeat was welded onto the stump. Measured
+// on this host before the fix: 96 of 327 tag files, 2,562 welded lines, 99.7%
+// with an arrow or em dash in the preceding 2 KiB.
+//
+// Fixing the writer does nothing for a file already damaged, and those files are
+// not inert: 1,707 welds destroyed a `_meta` marker, and `_meta.offset` is the
+// resume point `initClassified` reads. A v2.8.1 tag therefore resumes from a
+// stale offset or re-parses, and the 12 welds carrying `"t":` stay lost cost
+// data for the life of the file.
+//
+// So the bump IS the repair, and deliberately so: a tag file is a disposable
+// derived cache, and rederiving it from the transcript is both simpler and
+// stricter than any repair pass that has to guess where a welded line was meant
+// to split. Nothing in this repo has to grow a repair path it would then have to
+// keep correct. #130's Closer — a rescan of `wtft-tags/` reporting zero mid-file
+// unparseable lines — cannot pass on this host without it.
+//
+// Patch, not minor: no line's cost, category or bucket moves. The tag CONTENT
+// contract is unchanged; only the files written by the broken writer are
+// discarded.
+export const WTFT_TAGGER_VERSION = "2.8.2";

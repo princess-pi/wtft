@@ -298,6 +298,48 @@ console.log("\n§ R — a partial trailing line is re-read, never skipped\n");
 		assert(`R1 and counted exactly once (${rows.length})`, rows.length === 1);
 	}
 
+	// R2 — the split lands INSIDE a multi-byte sequence. R1 cuts at a UTF-16
+	// index, so each half is valid UTF-8 on its own and the test passes even for
+	// a reader that decodes before locating the newline. Cutting mid-sequence is
+	// what pins the Buffer search: decode first and the trailing bytes become
+	// U+FFFD, which never round-trips back to the original line.
+	{
+		const line = multibyteTurn("msg_130_bytesplit", Date.now());
+		const bytes = Buffer.from(line, "utf8");
+		// The first `→` in the text; cut one byte into its three.
+		const arrow = bytes.indexOf(Buffer.from("→", "utf8"));
+		assert("R2 the fixture actually contains a multi-byte sequence to split", arrow > 0);
+		fs.appendFileSync(sessionPath, bytes.subarray(0, arrow + 1));
+		await sleep(2500);
+		fs.appendFileSync(sessionPath, bytes.subarray(arrow + 1));
+
+		const landed = await pollUntil(
+			() => (readClassifiedTagFile(tagPath) as any[]).some(row => row.messageId === "msg_130_bytesplit"),
+			10000,
+		);
+		assert("R2 a turn split mid-UTF-8-sequence is counted once the line completes", landed);
+		const rows = (readClassifiedTagFile(tagPath) as any[]).filter(r => r.messageId === "msg_130_bytesplit");
+		assert(`R2b and counted exactly once (${rows.length})`, rows.length === 1);
+	}
+
+	// R3 — a record whose writer died before the newline. `parseSessionFile`
+	// splits the whole file and counts that record, so a daemon that waited for a
+	// newline forever would report a LOWER total than a rebuild of the same file
+	// — the #156 drift. The fragment is taken once it has not grown for a beat
+	// and parses as JSON.
+	{
+		const line = multibyteTurn("msg_130_no_newline", Date.now());
+		fs.appendFileSync(sessionPath, line.slice(0, -1));   // everything but the \n
+		const landed = await pollUntil(
+			() => (readClassifiedTagFile(tagPath) as any[]).some(row => row.messageId === "msg_130_no_newline"),
+			12000,
+		);
+		assert("R3 a complete record with no trailing newline is counted, as parseSessionFile counts it", landed,
+			JSON.stringify((readClassifiedTagFile(tagPath) as any[]).map(r => r.messageId)));
+		const rows = (readClassifiedTagFile(tagPath) as any[]).filter(r => r.messageId === "msg_130_no_newline");
+		assert(`R3b and counted exactly once (${rows.length})`, rows.length === 1);
+	}
+
 	child.kill("SIGTERM");
 }
 

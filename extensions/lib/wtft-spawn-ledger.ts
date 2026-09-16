@@ -224,8 +224,16 @@ export function appendSpawnRecord(record: SpawnRecord, file: string = spawnLedge
 	const line = serializeSpawnRecord(record) + "\n";
 	fs.mkdirSync(path.dirname(file), { recursive: true });
 	const buf = Buffer.from(line, "utf8");
-	const fd = fs.openSync(file, "a");
+	// O_NONBLOCK for the same reason the reader uses it (Macroscope, PR #136,
+	// High): `openSync(file, "a")` on a FIFO blocks until a reader shows up, so
+	// a named pipe at the ledger path would hang `wtft spawn-record` forever
+	// instead of letting it exit 3. With O_NONBLOCK the open returns and the
+	// fstat below refuses it. Inert on a regular file.
+	const fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT | fs.constants.O_NONBLOCK, 0o600);
 	try {
+		if (!fs.fstatSync(fd).isFile()) {
+			throw new Error(`spawn ledger is not a regular file (${file}) — refusing to append; a FIFO or device here is not a ledger`);
+		}
 		// One write, and a check that it was one write — `writeSync` returns a
 		// byte count and a short write is legal, so ignoring it would report a
 		// truncated line as a recorded edge. Throw; the caller's contract is
@@ -265,21 +273,59 @@ export function appendSpawnRecord(record: SpawnRecord, file: string = spawnLedge
  */
 export const MAX_LEDGER_BYTES = 8 * 1024 * 1024;
 
+/** Read the whole ledger, or refuse — never part of it.
+ *
+ *  OPEN FIRST, THEN ASK THE DESCRIPTOR (Macroscope, PR #136, two High findings).
+ *  The previous version did `statSync(path)` and then `readFileSync(path)`, and
+ *  that sequence is wrong twice over:
+ *
+ *   - **TOCTOU.** The size that passed the 8 MiB check belonged to a file that
+ *     no longer exists by the time the second call opens it. A ledger growing
+ *     between the two — which is the normal case, since spawners append to it
+ *     concurrently — is read IN FULL however large it got, so the advertised
+ *     refusal does not hold and the report path can consume unbounded memory.
+ *   - **A FIFO at the ledger path blocks forever.** `readFileSync` on a named
+ *     pipe with no writer never returns, so `wtft --json` hangs instead of
+ *     reporting `spawned.ledgerError`. `statSync` cheerfully describes it.
+ *
+ *  So: open once with `O_NONBLOCK` (which makes the FIFO case return instead of
+ *  hang and is inert on a regular file), `fstat` THAT descriptor, refuse
+ *  anything that is not a regular file, check the size of the thing actually
+ *  opened, and read from the same descriptor with a bounded buffer. There is no
+ *  second lookup for a race to sit inside. */
 function readLedgerText(file: string): string | null {
-	let stat: fs.Stats;
+	let fd: number;
 	try {
-		stat = fs.statSync(file);
+		fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
 	} catch (err) {
-		// ENOENT is the ordinary case: nothing has ever spawned. Any other stat
+		// ENOENT is the ordinary case: nothing has ever spawned. Any other open
 		// error is a read failure and must not read as "no edges" — that would
 		// report a complete tree built from a ledger nobody could open.
 		if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
 		throw err;
 	}
-	if (stat.size > MAX_LEDGER_BYTES) {
-		throw new Error(`spawn ledger is ${stat.size} bytes, over the ${MAX_LEDGER_BYTES}-byte limit (${file}) — prune it; reading part of it would drop edges without saying which`);
+	try {
+		const stat = fs.fstatSync(fd);
+		if (!stat.isFile()) {
+			throw new Error(`spawn ledger is not a regular file (${file}) — a FIFO, device or directory here cannot be read as a ledger, and reading it could block the report forever`);
+		}
+		if (stat.size > MAX_LEDGER_BYTES) {
+			throw new Error(`spawn ledger is ${stat.size} bytes, over the ${MAX_LEDGER_BYTES}-byte limit (${file}) — prune it; reading part of it would drop edges without saying which`);
+		}
+		// Bounded by the size we just verified on this descriptor. A concurrent
+		// append lands past it and is simply not in this snapshot, which is the
+		// correct answer for a read that happened before it.
+		const buf = Buffer.alloc(stat.size);
+		let read = 0;
+		while (read < buf.length) {
+			const n = fs.readSync(fd, buf, read, buf.length - read, read);
+			if (n === 0) break;   // truncated under us; the snapshot is what we got
+			read += n;
+		}
+		return buf.subarray(0, read).toString("utf8");
+	} finally {
+		fs.closeSync(fd);
 	}
-	return fs.readFileSync(file, "utf8");
 }
 
 /**

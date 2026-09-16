@@ -608,3 +608,64 @@ rather than spec sections so they can be listed, assigned and closed.
 **The stop rule held.** Two rounds of re-discovered findings is the signal to stop and report,
 and `PR_REVIEW_ROUND_LIMIT` is never raised to get past it.
 
+## Macroscope, on PR #136 — the ledger is untrusted input, and it was read as if it were not
+
+Six findings on the opened PR. Three restate ones already filed (#131/#132, #135, #134 B) and
+are left with their issues. Three were new, and two of those were hangs.
+
+### Terminal injection through `mechanism` and `label` (Medium)
+
+Both fields are **free text supplied by a spawner**, and the `SPAWNED` block prints them into a
+padded column. A newline round-trips through JSON perfectly — `JSON.stringify` escapes it,
+`JSON.parse` restores it — so `padEnd` emitted a row that was really two, and a spawner could
+**forge report lines showing whatever money it liked**. An `ESC` starts an OSC sequence that the
+reader's terminal executes.
+
+Neither is exotic. A label is the obvious place to put a command line, and command lines carry
+escape codes.
+
+**Two layers, because one is not enough.** The writer refuses every C0/C1/DEL character
+outright, naming the field — that is the by-construction half, and a bad record never reaches
+the file. The renderer sanitises anyway, because the ledger is *a file on disk*: it can be
+hand-edited, and it can hold records written by an older binary that had no such check. A
+renderer that trusts its input is the one place a writer guarantee cannot reach. The
+substitution is U+FFFD rather than deletion, so a reader **sees** that something was there; a
+silently shortened label reads as the spawner's own text.
+
+This is the repo's own rule arriving where it was missing: everything not authored by Duppy is
+data. The ledger is written by launchers, and the report was rendering it as if it were ours.
+
+### A FIFO at the ledger path hung the report, and the writer (High, High)
+
+`readLedgerText` did `statSync(path)` and then `readFileSync(path)`. That sequence is wrong
+twice:
+
+- **TOCTOU.** The size that passed the 8 MiB check belonged to a file that may have grown before
+  the second call opened it — and growing is the *normal* case, since spawners append
+  concurrently. The advertised refusal did not hold, and the report path could read a ledger of
+  any size into memory.
+- **A named pipe never returns.** `readFileSync` on a FIFO with no writer blocks forever, so
+  `wtft --json` **hung** rather than reporting `spawned.ledgerError`. `statSync` describes a FIFO
+  perfectly happily. The writer had the same shape: `openSync(file, "a")` blocks on a FIFO before
+  it can exit 3.
+
+Both now **open once with `O_NONBLOCK` and ask the descriptor**: `fstat` it, refuse anything that
+is not a regular file, check the size of the thing actually opened, and read from that same
+descriptor with a bounded buffer. There is no second lookup for a race to sit inside, and
+`O_NONBLOCK` makes the FIFO case return instead of hang while being inert on a regular file.
+
+**Measured, not argued.** D26 against the pre-fix code: `signal=SIGTERM, error=spawnSync node
+ETIMEDOUT` on the reader, and the same on `spawn-record`, which exited `null` instead of 3. The
+timeout *is* the assertion — a test that only checked an exit code would have passed by hanging.
+
+### One fixture that had quietly stopped testing its subject
+
+A9 reached `MAX_RECORD_BYTES` using `\u0001` as filler, 6 wire bytes per character and the
+cheapest route to 4096. The new writer check refuses control characters on a *different* branch
+first, so A9 began passing for the wrong reason and no longer exercised the record cap at all.
+The filler is now a double-quote: 2 wire bytes against 1 on the field cap, so five capped fields
+still overflow 4096 and the cap stays reachable.
+
+Worth recording because nothing failed. A guard added in one place silently retired a test in
+another, and the only signal was a changed error message inside a passing assertion.
+

@@ -927,5 +927,63 @@ let selfCostWithRecord = 0;
 }
 
 
+// --- D26: a FIFO at the ledger path is refused, not waited on ---
+//
+// Macroscope, PR #136, two High findings on the same sequence. `statSync(path)`
+// then `readFileSync(path)` is wrong twice: the size that passed the 8 MiB check
+// belonged to a file that may have grown by the time the second call opens it
+// (so the advertised refusal did not hold), and `readFileSync` on a named pipe
+// with no writer NEVER RETURNS — `wtft --json` hung instead of reporting
+// `spawned.ledgerError`. The writer had the same shape: `openSync(file, "a")`
+// blocks on a FIFO before it can exit 3.
+//
+// Both now open once with O_NONBLOCK and ask the DESCRIPTOR what it is.
+//
+// The timeout is the assertion here. A test that merely checks an exit code
+// would pass by hanging until the suite is killed, which is the bug.
+{
+	const fifoDir = path.join(cliDir, "fifo-state", "wtft");
+	fs.mkdirSync(fifoDir, { recursive: true });
+	const fifo = path.join(fifoDir, "spawns.jsonl");
+	const mk = spawnSync("mkfifo", [fifo], { encoding: "utf8" });
+
+	if (mk.status !== 0) {
+		console.log("  SKIPPED D26 - mkfifo unavailable on this host; nothing to point at");
+	} else {
+		const fifoEnv = { ...process.env, XDG_STATE_HOME: path.join(cliDir, "fifo-state"), WTFT_CLAUDE_PROJECTS_DIR: cliProjects };
+
+		// -- the reader --
+		const src = parentTranscript();
+		const copyDir = path.join(cliDir, "fifo-run");
+		fs.mkdirSync(copyDir, { recursive: true });
+		const copy = path.join(copyDir, `${PARENT}.jsonl`);
+		fs.copyFileSync(src, copy);
+
+		const read = spawnSync("node", [CLI_BIN, "-s", copy, "--json"], {
+			encoding: "utf8", env: fifoEnv, timeout: 30_000,
+		});
+		check(read.signal !== "SIGTERM" && read.error === undefined,
+			`D26 the report does not hang on a FIFO ledger (signal=${read.signal}, error=${read.error?.message})`);
+		if (read.stdout) {
+			const doc = JSON.parse(read.stdout);
+			check(doc.spawned.ledgerError !== null,
+				`D26a it reports ledgerError instead (${JSON.stringify(doc.spawned.ledgerError)})`);
+			check(/not a regular file/i.test(String(doc.spawned.ledgerError)),
+				"D26b naming what it found, so the human can go delete it");
+		}
+
+		// -- the writer --
+		const write = spawnSync("node", [CLI_BIN, "spawn-record",
+			"--parent", PARENT, "--child", CLOSER_CHILD, "--mechanism", "herdr-agent-start"], {
+			encoding: "utf8", env: fifoEnv, timeout: 30_000,
+		});
+		check(write.signal !== "SIGTERM" && write.error === undefined,
+			`D26c spawn-record does not hang on a FIFO ledger (signal=${write.signal})`);
+		check(write.status === 3,
+			`D26d it exits 3 — the unwritable-ledger code a spawner already ignores (got ${write.status})`);
+	}
+}
+
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

@@ -220,7 +220,7 @@
     },
     {
       "flags": "--json",
-      "desc": "Emit one JSON object on stdout (schema wtft/session@2) instead of the chart: exact un-abbreviated totals, per-model rows with a 'priced' flag, per-category rows in a fixed order, the #149 uncounted blind spot, the #116 spawned lineage plus a tree total, the provisional verdict as a field, and the session identity. total means THIS SESSION'S OWN TURNS; tree is total plus every launcher-spawned descendant the spawn ledger records. No ANSI and nothing else on stdout; human prose goes to stderr and the sentences that would otherwise have been stdout are repeated in the object's notices[]. Exit 9 still applies (see Exit codes). Suppresses the rendering flags (--tokens, --other, --pad, --interval, --limit, --bucket/--cumulative, --ticks, --emoji, --timezone). Does NOT apply to the commands that run instead of a report: --help/--why/--version, --watch, and --list/--cleanup/--restart/--stop all keep their own output, and -p is still refused with exit 1. With several sessions discovered and no -s, --json does not prompt: it takes the newest and says so in notices[]. CLI only. See docs/spec-26-json.md."
+      "desc": "Emit one JSON object on stdout (schema wtft/session@2) instead of the chart: exact un-abbreviated totals, per-model rows with a 'priced' flag, per-category rows in a fixed order, the #149 uncounted blind spot, the #116 spawned lineage (with spawned.ledgerError saying the ledger could not be READ, which is not the same as nothing having spawned) plus a tree total, the provisional verdict as a field, and the session identity. total means THIS SESSION'S OWN TURNS; tree is total plus every RESOLVED launcher-spawned descendant the ledger records, so it is a floor whenever spawned.unattributed is non-empty; the walk stops at depth 5 and the ledger read takes the last 8 MiB, both reported in the document. No ANSI and nothing else on stdout; human prose goes to stderr and the sentences that would otherwise have been stdout are repeated in the object's notices[]. Exit 9 still applies (see Exit codes). Suppresses the rendering flags (--tokens, --other, --pad, --interval, --limit, --bucket/--cumulative, --ticks, --emoji, --timezone). Does NOT apply to the commands that run instead of a report: --help/--why/--version, --watch, and --list/--cleanup/--restart/--stop all keep their own output, and -p is still refused with exit 1. With several sessions discovered and no -s, --json does not prompt: it takes the newest and says so in notices[]. CLI only. See docs/spec-26-json.md."
     },
     {
       "flags": "--tokens, -C, --cost",
@@ -247,8 +247,8 @@
       "desc": "Explain why you'd run this tool, with user scenarios and anti-use-cases."
     },
     {
-      "flags": "spawn-record --parent <uuid> --child <uuid> --mechanism <name> [--cwd <path>] [--label <text>] [--model <name>] [--json]",
-      "desc": "SUBCOMMAND, not a report (#116). Record one parent->child spawn edge in the append-only spawn ledger at $XDG_STATE_HOME/wtft/spawns.jsonl. A launcher-spawned session -- a pr-review lens, a `herdr agent start` child -- leaves NO trace of its parent in either transcript, so there is nothing for a later parse to re-derive; the spawner writes the edge down at spawn time, when it is free, and `claude --session-id <uuid>` means the child's id is known before the child runs. Exits 2 on a malformed uuid or a missing flag and 3 when the ledger cannot be written; a spawner is expected to ignore the failure, since an unrecorded edge degrades to exactly the old behaviour. --json echoes the exact line written. wtft --json then reports the lineage under `spawned`, with `tree` as self + descendants; `total` keeps meaning this session's own turns."
+      "flags": "spawn-record --parent <uuid> --child <uuid> --mechanism <name> [--cwd <path>] [--label <text>] [--model <name>] [--json] | spawn-record --help",
+      "desc": "SUBCOMMAND, not a report (#116), and POSITIONAL -- it must be the first argument, so `wtft --json spawn-record ...` is a report run rather than a recording. Record one parent->child spawn edge in the append-only spawn ledger at $XDG_STATE_HOME/wtft/spawns.jsonl (~/.local/state/wtft/spawns.jsonl by default). A launcher-spawned session -- a pr-review lens, a `herdr agent start` child -- leaves NO trace of its parent in either session file, so there is nothing for a later parse to re-derive; the spawner writes the edge down at spawn time, when it is free, and `claude --session-id <uuid>` means the child's id is known before the child runs. --flag value and --flag=value both work. --json echoes the exact line written; without it nothing is printed. There is no --ts: the clock fills it, so the ledger cannot disagree with itself. Every text field is capped at 512 bytes and the whole line at 4 KiB, which is what keeps one record one write(2). Exits 2 on a missing or unknown flag, a flag with no value, a malformed uuid, a ts that is not ISO-8601, or an oversized field; 3 when the ledger cannot be written; 0 on a successful append and on --help. A spawner is expected to ignore a failure, since an unrecorded edge degrades to exactly the old behaviour. wtft --json then reports the lineage under `spawned`, with `tree` as self + resolved descendants; `total` keeps meaning this session's own turns."
     }
   ],
   "examples": [
@@ -308,7 +308,7 @@
   "exitCodes": [
     {
       "code": 0,
-      "meaning": "Report produced — including when there is nothing to report yet (session file not written, or a tag with no classified data). Under --json the report is one JSON object on stdout; the commands that run instead of a report (--help/--why/--version, --list/--cleanup/--restart/--stop) also exit 0 and print their own output."
+      "meaning": "Report produced — including when there is nothing to report yet (session file not written, or a tag with no classified data). Under --json the report is one JSON object on stdout; the commands that run instead of a report (--help/--why/--version, --list/--cleanup/--restart/--stop, and spawn-record on a successful append or --help) also exit 0 and print their own output."
     },
     {
       "code": 1,
@@ -316,11 +316,11 @@
     },
     {
       "code": 2,
-      "meaning": "`wtft spawn-record` only (#116): the call was wrong -- a missing --parent/--child/--mechanism, an unknown flag, a malformed session uuid, or an oversized field. Nothing was appended. The report path never exits 2."
+      "meaning": "`wtft spawn-record` only (#116): the call was wrong -- a missing required flag, an unknown flag, a flag with no value, a malformed session uuid, a ts that is not ISO-8601, or an oversized field. Nothing was appended. The report path never exits 2."
     },
     {
       "code": 3,
-      "meaning": "`wtft spawn-record` only (#116): the record was valid but the ledger could not be written (unwritable state dir, ENOSPC). Nothing was appended, and the edge is lost -- the child's cost will be unattributed."
+      "meaning": "`wtft spawn-record` only (#116): the record was valid but the ledger could not be written (unwritable state dir, ENOSPC, a short write). Nothing usable was appended, and the edge is not recorded -- the child's cost will be unattributed."
     },
     {
       "code": 9,

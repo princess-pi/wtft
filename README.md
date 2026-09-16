@@ -154,8 +154,9 @@ still refused with exit 1. With several sessions discovered and no `--session`,
   report is provisional (see **9** below). Under `--json`, stdout carries one
   object.
 - **1** — error: no session found or selected, an invalid path, a daemon that
-  died before producing data, or a refused flag (`--pager`). The reason is on
-  stderr; under `--json`, stdout carries nothing.
+  could not be spawned or that died before producing data, a refused flag
+  (`--pager`), or an unhandled exception. The reason is on stderr; under
+  `--json`, stdout carries nothing.
 - **9** — provisional ([#443](https://github.com/princess-pi/wtft/issues/443)):
   the report was produced in full, but the total may still grow under the daemon.
   Under `--json`, `provisional.provisional` is `true` and `provisional.reason`
@@ -165,7 +166,9 @@ still refused with exit 1. With several sessions discovered and no `--session`,
   provisional for that reason alone exits 9 in those two modes and 0 on a plain
   run.
 - **2** / **3** — `wtft spawn-record` only (see below): the call was wrong, or
-  the ledger could not be written. The report path never returns either.
+  the ledger could not be written. The report path never returns either, and
+  `spawn-record` also returns **0** — on a successful append, and on `--help`,
+  which appends nothing.
 - **130** — the interactive session selector was cancelled with `q` or Ctrl-C.
   The SIGINT convention (128+2), not a wtft-specific code. `--json` never
   prompts, so it never returns this.
@@ -192,20 +195,37 @@ wtft spawn-record --parent "$PARENT_SESSION" --child "$CHILD_SESSION" \
   --mechanism pr-review-lens --label correctness --model opus
 ```
 
+`--flag value` and `--flag=value` both work, `--json` echoes the line written,
+and without it nothing is printed at all. `--help` prints the usage. There is no
+`--ts`: the clock fills it, so the ledger cannot disagree with itself.
+
 One append-only line in `$XDG_STATE_HOME/wtft/spawns.jsonl`
-(`~/.local/state/wtft/spawns.jsonl` by default), written with a single atomic
-`write(2)` so concurrent spawners cannot interleave. Exit **2** is a bad call
-(malformed uuid, missing flag), exit **3** an unwritable ledger; a spawner is
-meant to ignore both, since an unrecorded edge simply degrades to the old
-behaviour.
+(`~/.local/state/wtft/spawns.jsonl` by default), written with a single `write(2)`
+so concurrent spawners cannot interleave. Each text field is capped at 512 bytes
+and the whole line at 4 KiB, which is what keeps that one write one write.
+Exit **2** is a bad call — a missing or unknown flag, a flag with no value, a
+malformed uuid, a `ts` that is not ISO-8601, an oversized field. Exit **3** is an
+unwritable ledger. A spawner is meant to ignore both, since an unrecorded edge
+simply degrades to the old behaviour.
+
+`spawn-record` is positional: it must be the **first** argument, so
+`wtft --json spawn-record …` is a report run, not a recording.
 
 `wtft --json` then reports the lineage under `spawned` — every edge with its
 provenance, every descendant counted exactly once, and every gap named rather
 than zeroed — plus `tree`, which is self + descendants as a field so nobody adds
 two numbers and guesses. **`total` keeps meaning this session's own turns**; not
-one dollar moved into or out of it. `wtft --tokens` shows the same thing as a
-`SPAWNED` / `TREE` block below `TOTAL`. Full contract:
-[`docs/spec-116-spawn-ledger.md`](./docs/spec-116-spawn-ledger.md).
+one dollar moved into or out of it.
+
+Three bounds are reported rather than hidden: the walk stops at **depth 5**
+(`spawned.depthCapped` counts the cuts), the reader takes the last **8 MiB** of
+the ledger, and a ledger it cannot read comes back as `spawned.ledgerError`
+rather than as an empty tree. `tree` covers *resolved* descendants, so it is a
+floor whenever `spawned.unattributed` is non-empty.
+
+`wtft --tokens` shows the same thing as a `SPAWNED` / `TREE` block below
+`TOTAL` — and prints nothing at all when this session recorded no edges. Full
+contract: [`docs/spec-116-spawn-ledger.md`](./docs/spec-116-spawn-ledger.md).
 
 `--pager` is a Pi TUI overlay, not a CLI flag — the CLI says so and exits 1,
 suggesting `wtft … | less -R`. Any `wtft` run that produces a report spawns the log

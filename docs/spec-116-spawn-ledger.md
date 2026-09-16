@@ -38,7 +38,7 @@ Append-only. One JSON object per line. No rewriting, no compaction, no deletion 
 | Field | Required | Meaning |
 |---|---|---|
 | `schema` | yes | `wtft/spawn@1`. A reader skips any other value rather than guessing. |
-| `ts` | yes | ISO-8601 UTC, when the edge was recorded — **not** when the child finished. |
+| `ts` | yes | ISO-8601 UTC, when the edge was recorded — **not** when the child finished. `wtft spawn-record` fills it from the clock; there is deliberately no `--ts`, because a spawner-supplied timestamp is a way for the ledger to disagree with itself and buys nothing. Validated for ISO-8601 shape on write. |
 | `parent` | yes | Session UUID of the spawning session. |
 | `child` | yes | Session UUID of the spawned session. |
 | `mechanism` | yes | Who made the edge: `pr-review-lens`, `herdr-agent-start`, … Free text, for the report. |
@@ -54,24 +54,42 @@ id as input, and `herdr agent start --json` returns it as `agent_session.value`.
 recorded *before* the spawn, and a child that crashes on line one still leaves a recorded,
 resolvable-or-not edge instead of nothing.
 
-**One line, one `write(2)`.** A record is appended with `O_APPEND` in a single write and is refused
-above 4 KiB (`PIPE_BUF` on Linux), so two spawners appending concurrently cannot interleave a line.
-`cwd`, `label` and `model` are each capped at 512 bytes to keep that true in practice.
+**One line, one `write(2)`.** A record is appended with `O_APPEND` in a single write and refused
+above 4 KiB, so two spawners appending concurrently cannot interleave a line. To be exact about
+what that rests on: POSIX does not promise atomicity for a `write(2)` to a **regular file**, and
+`PIPE_BUF` is the *pipe* guarantee. Linux holds the inode lock for the duration of one `write`,
+which is what makes a single-call O_APPEND write land whole in practice; 4096 is a deliberately
+conservative bound on how much we lean on that, and is where the number comes from.
+Every text field — `ts` and `mechanism` included, not only the three optional ones — is capped at
+512 bytes to keep that true in practice, which puts an ordinary record at roughly 2 KiB and makes
+the 4 KiB refusal a backstop reachable only through JSON escape expansion. The cap counts the
+newline, because the newline is part of the write that has to land whole. A **short write** — a
+`write(2)` that returns fewer bytes than it was given — is reported as a failed append rather than
+retried: a retry would append the remainder as a second record.
 
 ## `wtft spawn-record` — the writer
 
 ```
 wtft spawn-record --parent <uuid> --child <uuid> --mechanism <name>
-                  [--cwd <path>] [--label <s>] [--model <s>] [--json]
+                  [--cwd <path>] [--label <text>] [--model <name>] [--json]
+wtft spawn-record --help
 ```
 
-A positional subcommand, checked before flag parsing, so it shares nothing with the report path.
+`--flag value` and `--flag=value` both work. An **unknown** flag is an error, not a shrug — the
+report path silently ignores what it does not recognise (#91), and a typo'd `--mechansim` would
+otherwise surface as "`--mechanism` is required", blaming the flag the caller did pass.
+
+A positional subcommand: `argv[2]` exactly, dispatched instead of `main()`, so no session is
+loaded, no daemon is started and no session file is read. Two things do still run first, because
+they sit at module scope: the config load and the report's own argument parse. And because the
+test is positional, `wtft --json spawn-record …` is **not** the subcommand — it is a report run
+with some flags the report parser ignores.
 
 | Exit | Meaning |
 |---|---|
-| 0 | Record appended. `--json` echoes the exact line written. |
-| 2 | Bad arguments — missing required flag, malformed UUID, oversized field. |
-| 3 | The ledger could not be written (unwritable state dir, ENOSPC). |
+| 0 | Record appended — `--json` echoes the exact line written, and without it nothing is printed at all. Also `--help`, which appends nothing. |
+| 2 | Bad arguments — a missing required flag, an unknown flag, a flag with no value, a malformed UUID, a `ts` that is not ISO-8601, or an oversized field. |
+| 3 | The record was valid and the ledger could not be written (unwritable state dir, ENOSPC, a short write). |
 
 **It never blocks a spawn.** A spawner calls it and ignores the exit code; the failure is the
 spawner's to log, and an unwritten edge degrades to exactly today's behaviour.
@@ -79,14 +97,27 @@ spawner's to log, and an unwritten edge degrades to exactly today's behaviour.
 ## Reading, resolving, walking
 
 **`readSpawnLedger()`** returns `{ childrenOf: Map<parent, SpawnEdge[]>, malformedLines: number }`.
-A line that is not JSON, or does not carry `schema: "wtft/spawn@1"`, or is missing a required
-field, is **skipped and counted** — the count is reported, so a broken writer is visible rather
-than quietly losing money. The read is bounded at 8 MiB from the tail, dropping a leading partial
-line; past that the ledger is older than any live session's lineage.
+A line that is not JSON, does not carry `schema: "wtft/spawn@1"`, is missing a required field, or
+carries a `parent`/`child` that is not uuid-shaped is **skipped and counted** — the count is
+reported, so a broken writer is visible rather than quietly losing money. A blank line is skipped
+and not counted: it is whitespace, not a failed record. **The reader enforces none of the writer's
+size caps**; those guard the append, not the file.
 
-**Resolution** maps a child UUID to a transcript by looking for `<child>.jsonl` under
-`~/.claude/projects/*/`. The ledger deliberately does **not** record the transcript path: a
-worktree move relocates the file (#6) and a recorded path would rot, while the UUID does not.
+The read is bounded at 8 MiB from the tail. A truncated read starts mid-line, and a partial first
+line is indistinguishable from a whole one from inside the window, so the first line is dropped
+unconditionally — which past 8 MiB (roughly 40,000 spawns) costs one intact record. Edges older
+than that window are not read, and appear in neither `edges` nor `malformedLedgerLines`.
+
+**Resolution** maps a child UUID to a session file by looking for `<child>.jsonl` **one level**
+under the Claude Code projects root — `~/.claude/projects/`, or `WTFT_CLAUDE_PROJECTS_DIR` where
+that is set, the same seam discovery uses. One level, because a launcher-spawned session is a
+top-level session in its own project dir; a Task-tool child under `<session>/subagents/` is a
+different mechanism with its own discovery (#82/#83) and would be double-counted if it resolved
+here.
+
+The ledger deliberately does **not** record the session file's path: a worktree move relocates the
+file (#6) and a recorded path would rot, while the UUID does not. A recorded `cwd` is carried into
+the report for a human to read — it is never used to find anything.
 
 **An unreadable ledger is not an empty one.** `computeSpawnTree` owns the read, and a failure
 comes back as `ledgerError` with an otherwise-empty tree. Without that field an EACCES would
@@ -97,11 +128,22 @@ reintroduced inside #116's fix. An *absent* ledger is not an error: nothing has 
 
 - **A session is counted at most once.** A `seen` set over session ids means a diamond (two
   recorded edges to the same child) or a cycle contributes its cost once, not twice.
-- **Depth is bounded at 5** and stated. A lens child spawning its own children nests, so this
-  recurses; a node past the cap is reported as `depth-capped`, never silently dropped.
+- **Depth is bounded at 5** and the bound in force is reported. Direct children are depth 1, so
+  five generations are walked and the sixth is cut. Each cut is an edge in the report carrying
+  `skip: "depth-capped"`, and `depthCapped` counts the cuts — not the sessions behind them, which
+  are not enumerated. That is what a bound is; a non-zero `depthCapped` means the tree is known to
+  be partial.
 - **A child that does not resolve is `unattributed`** — the edge, its mechanism and its timestamp
   are reported with a `reason`, and its cost is `null`, never `0`. An unresolvable child is a
-  *gap*, and a zero would launder it into a fact.
+  *gap*, and a zero would launder it into a fact. Two reasons, kept apart: `no-session-file` (no
+  file by that uuid) and `unreadable` (a file that would not parse — the only skip class that is a
+  bug rather than a fact).
+- **The walk continues past a gap.** A child we cannot read may still have recorded children of
+  its own, and those may be perfectly readable; its grandchildren are edges in the *ledger*, not
+  entries in the file that is missing. Dropping the subtree with its parent loses real, resolvable
+  money over one absent file.
+- **`skip` is a four-value contract**: `no-session-file`, `unreadable`, `already-counted`,
+  `depth-capped`. Only the first two are `unattributed`.
 
 ## What gets reported
 
@@ -118,9 +160,12 @@ already trust.
 "spawned": {
   "schema": "wtft/spawn-tree@1",
   "descendants": 3,
-  "edges": [{"parent":"…","child":"…","mechanism":"pr-review-lens","ts":"…","depth":1,
-             "resolved":true,"path":"/home/…/<child>.jsonl","total":{…}}],
-  "unattributed": [{"child":"…","mechanism":"…","ts":"…","reason":"no-transcript"}],
+  "edges": [{"parent":"…","child":"…","mechanism":"pr-review-lens","ts":"…",
+             "label":"correctness","model":"opus","cwd":"/tmp/pr-review-abc","depth":1,
+             "resolved":true,"path":"/home/…/<child>.jsonl","total":{…}},
+            {"parent":"…","child":"…","mechanism":"pr-review-lens","ts":"…","depth":1,
+             "resolved":false,"path":null,"total":null,"skip":"no-session-file"}],
+  "unattributed": [{"child":"…","mechanism":"…","ts":"…","label":"…","reason":"no-session-file"}],
   "depthCapped": 0,
   "maxDepth": 5,
   "malformedLedgerLines": 0,
@@ -131,27 +176,49 @@ already trust.
 ```
 
 `tree` = `total` + `spawned.total`, as a field, so a consumer never has to add two numbers and
-guess whether it double-counted.
+guess whether it double-counted. `label`, `model`, `cwd` and `skip` are present on an edge only
+when they apply; `label`, `ts`, `mechanism`, `child` and `reason` are the shape of a gap. Because
+`spawned.total` covers **resolved** descendants only, `tree` is a **floor** whenever
+`unattributed` is non-empty.
 
 **`--tokens`** gains a block below TOTAL, rendered only when this session has at least one edge:
 
 ```
-SPAWNED    3 descendant session(s) recorded in the spawn ledger (#116) — NOT in
-           TOTAL above, which is this session's own turns
-           pr-review-lens  correctness            $12.34
-           pr-review-lens  reasoning              $18.02
-           herdr-agent-start  agent/824           $26.67
+SPAWNED    3 descendant session(s) recorded in the spawn ledger (#116) —
+           NOT in TOTAL above, which is this session's own turns
+           pr-review-lens  correctness                     $12.34
+           pr-review-lens  reasoning                       $18.02
+           herdr-agent-start  agent/824                    $26.67
+           pr-review-lens  contract               (no-session-file)
            1 unattributed — cost unknown, deliberately not estimated
-TREE       TOTAL + SPAWNED                        $127.36
+           2 edge(s) past the depth cap of 5, not walked
+           1 unusable ledger line(s) skipped
+SPAWNED    subtotal                                        $57.03
+TREE       TOTAL + SPAWNED                                 $127.36
 ```
 
-When the ledger could not be read, the block says so instead and names the error — never an
-empty block, which is what a session with no descendants prints.
+A skipped edge prints its **reason** where its cost would be. A dash or a `$0.00` would both read
+as "this child was free", which is the one thing we do not know about it. The last three
+indented lines appear only when they have something to say. The `SPAWNED subtotal` row exists so
+`TREE` names an addend the block actually prints — the rows above it cannot be summed by eye once
+one of them carries a reason instead of a number.
 
-**The Pi widget** (`extensions/wtft.ts`) renders the same block. It is a reader of the same
-report, and a Pi user seeing `TOTAL` with $69 of lens children unlisted is exactly the gap this
-issue is about. It degrades to no block rather than throwing — a widget refresh runs every turn,
-there is no stderr to warn on, and an unreadable ledger must not take the panel down.
+Three other shapes the block can take, none of them the same silence:
+
+- **the ledger could not be read** — it says so, names the error, and prints **no `TREE` row**,
+  because there is no tree to total.
+- **no edges for this session, but the ledger has unusable lines** — it says that, because a
+  damaged ledger is a fact about the ledger rather than about this session and is reported nowhere
+  else on this surface.
+- **no model-tagged turns at all** — the block still prints, below the "no model-tagged
+  interactions" sentence. A session whose own turns are untagged can still have launched real
+  money, and reporting that as nothing is the silence this issue is about.
+
+**The Pi widget** (`extensions/wtft.ts`) renders the same block, including the ledger-error one.
+It is a reader of the same report, and a Pi user seeing `TOTAL` with $69 of lens children unlisted
+is exactly the gap this issue is about. It shows a failure rather than hiding it: the only case
+that degrades to no block at all is a throw, which a widget refresh running every turn must
+survive.
 
 ## How this is verified
 
@@ -167,11 +234,16 @@ and the edge's `mechanism`. **Delete the record** and the same run reports `spaw
 of 0 — and the assertion that pins the gap is that the *self* number is unchanged either way, so
 the ledger only ever adds.
 
-Plus, each with its own test: UUID validation on write, the 4 KiB refusal, concurrent appends not
-interleaving, a malformed line counted rather than swallowed, a diamond counted once, a cycle
-terminating, the depth cap reporting rather than dropping, an unresolvable child reported as
-`unattributed` with a `null` cost, and an unreadable ledger reporting `ledgerError` rather than an
-empty tree (skipped, visibly, when the process can read a `chmod 000` file — running as root).
+Plus, each with its own test: UUID and ISO-8601 validation on write; the 4 KiB refusal, *executed*
+through escape expansion rather than asserted as a constant; 24 concurrent appends making 24 intact
+lines; a malformed line counted rather than swallowed; a diamond counted once **and its second edge
+reported as `already-counted`**; a cycle terminating with the root on disk, so the guard is what is
+measured rather than a missing fixture; the depth cut reported as an edge at the depth that
+exceeded the cap; an unresolvable child reported as `unattributed` with a `null` cost, **and its
+readable grandchild still counted**; `unreadable` distinguished from `no-session-file`; `label`,
+`model` and `cwd` reaching the report; exit 2 for a typo'd flag that names itself, exit 3 for an
+unwritable ledger; and the rendered `TREE` figure read off the table and held to `TOTAL + SPAWNED`
+and to `--json`. The two chmod-000 cases skip **visibly** when the process can read such a file.
 
 ## Not in this change
 
@@ -179,7 +251,51 @@ empty tree (skipped, visibly, when the process can read a `chmod 000` file — r
   `princess-pi-tools`, and this change ships first so there is something to call.
 - **Folding descendants into TOTAL.** A separate decision, and it needs the interaction-level
   attribution rework in #107 / #14 / #94 first.
-- **Pi children.** Resolution searches Claude Code's project dirs only; a Pi child is
-  `unattributed` with reason `no-transcript` until the harness seam grows a lookup (#156).
+- **Pi children, and anything not one level under the projects root.** Resolution searches Claude
+  Code's project dirs, one level deep; a Pi child, or a session file nested deeper, is
+  `unattributed` with reason `no-session-file` until the harness seam grows a lookup (#156).
 - **Live growth.** A long-lived interactive child's cost is read at the moment `wtft` runs; it is a
   snapshot and will be stale, which is #14 and is not made worse here.
+
+---
+
+## Reconciliation record (spec-reconcile, 2026-09-16)
+
+Five auditors in fresh context, one per bounded artifact set, plus the Tier-4 host-scoped pass
+(this branch touches `bin/` and `extensions/`, so reverse scope applied). The table is the
+`#116`-scoped rows — every contradiction the audit found *in what this branch built or touched*.
+Pre-existing drift the file-level sweep surfaced is filed, not listed here; see below.
+
+| Artifact | Claim | Contradicted by | Covered by a test? | Action |
+|---|---|---|---|---|
+| this spec | "`computeSpawnTree` owns the read" | `SpawnTreeOptions.ledger` bypassed the try/catch, and `bin/wtft.ts`'s pending arm used it — emitting `ledgerError: null` for a ledger nobody opened | ✅ C21/C22, D13c | **Code fixed**: the option is deleted; the pending arm reads the ledger |
+| this spec | "a node past the cap is reported … never silently dropped" | the walk `continue`s without recursing, so the subtree beyond a cut is not enumerated | ✅ C13b | Prose fixed — `depthCapped` counts cuts, not sessions |
+| this spec | "A child that does not resolve is `unattributed`" | its whole subtree vanished with it, including readable grandchildren | ✅ C23/C23b/C23c | **Code fixed**: the walk continues past a gap |
+| `wtft-renderer.ts` | `renderTokenSummary` returns one sentence with no model-tagged turns | a session with untagged turns and $69 of children reported nothing | ✅ (suite-wide green; the block now follows the sentence) | **Code fixed** |
+| `wtft-renderer.ts` | a ledger of only malformed lines rendered as silence | `edges.length === 0` returned before the malformed-lines line | ⬜ `reconciled-against-untested` | **Code fixed** |
+| `wtft-spawn-ledger.ts` | "one record is one atomic append" | `fs.writeSync`'s return was ignored; a short write left a truncated line and exited 0 | ⬜ `reconciled-against-untested` (a short write is not reproducible on demand) | **Code fixed**: a short write is exit 3 |
+| this spec | "`ts` \| yes \| ISO-8601 UTC" | nothing validated it; `--ts banana` round-tripped | ✅ A9b | **Code fixed**: validated, and `--ts` removed |
+| `wtft-spawn-ledger.ts` | "`line` — 1-based line number in the ledger" | after a tail read it is an offset into the window | n/a — field deleted | **Code fixed**: `SpawnEdge.line` is gone, and nothing read it |
+| `wtft-spawn-tree.ts` | the ledger records `cwd` | the walk dropped it before the report | ✅ C25 | **Code fixed** |
+| `wtft-spawn-tree.ts` | `emptyTotals` copied from `wtft-renderer.ts` | CLAUDE.md: "Shared code goes in `@princess-pi/libs`, never copied in" | ✅ (typecheck + suite) | **Code fixed**: exported and imported |
+| `CONTEXT.md` | **Session** `_Avoid_: … transcript` | the new contract value was `no-transcript` | ✅ C24 | **Renamed** to `no-session-file` while it was still free |
+| this spec, `spec-26-json.md` | "`PIPE_BUF` on Linux … atomic" | PIPE_BUF is the *pipe* guarantee; a regular file relies on the inode lock | n/a | Prose fixed — the real basis is stated, and 4096 named as a conservative bound |
+| `spec-26-json.md` | example key order | `JSON.stringify` emits the literal's order, which put `spawned` 3rd | ✅ D13e | **Code fixed**: emission, interface and example all agree |
+| `spec-26-json.md` | "`computeSessionSummary` … is the single aggregation" | it is called N+1 times per run since #116 | ✅ D22 (both surfaces agree) | Prose fixed — one *implementation*, many calls |
+| `spec-26-json.md` | "the single exception of `uncounted`" | `spawned` is also passed in, and `tree` is computed inside the builder | ✅ D12/D21b | Prose fixed — three departures, named |
+| `spec-26-json.md` | exit table omits 2 and 3 | the manifest it names as the source carries both | ✅ D8f/D8i | Prose fixed |
+| this spec | "shares nothing with the report path" | `loadConfig` and `parseWtftCliArgs` run at module scope regardless | n/a | Prose fixed, and the positional-`argv[2]` rule stated |
+| `extensions/wtft.ts` | "degrades to no block rather than throwing" | `computeSpawnTree` stopped throwing; the widget shows the error block | ⬜ `reconciled-against-untested` (no Pi harness in the suite) | Prose fixed |
+| `wtft-renderer.ts` | "split out so the daemon/watch paths can reuse" | no daemon or watch path calls it — nor `renderUncountedBillables` | n/a | Prose fixed for the #116 one |
+| test suite | "A9 the record cap is PIPE_BUF" | `MAX_RECORD_BYTES === 4096`, a constant compared to itself | ✅ A9 now executes the refusal | **Test fixed** |
+| test suite | "C10 the root is never a descendant of itself" | passed with the guard deleted — the root had no session file on disk | ✅ C10 now puts one there | **Test fixed** |
+| test suite | "D21 a TREE line beside TOTAL" | `/TREE/.test(out)` — a substring, not the number | ✅ D21/D21b/D22 | **Test fixed** |
+
+One row is `reconciled-against-untested` three times over; each is named above. The suite went
+from 68 to 99 assertions in this pass.
+
+**Filed rather than fixed** — the file-level sweep surfaced substantial drift that predates this
+branch and is not about the spawn ledger: #123 (`wtft-renderer.ts` docstrings and banners), #124
+(`docs/EXT_WTFT.html`), #125 (`CONTEXT.md` `_Avoid_` lists vs settled practice), #126 (the
+manifest's CLI-vs-Pi divergences) and #127 (two exit-code paths that report success on failure).
+Fixing them here would have buried a 600-line change in a 2,000-line one.

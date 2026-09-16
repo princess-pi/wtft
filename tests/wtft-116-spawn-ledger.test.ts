@@ -534,11 +534,17 @@ function recordCli(args: string[]): { status: number | null; out: string; err: s
 	const help = recordCli(["--help"]);
 	check(help.status === 0 && /--parent/.test(help.out),
 		"D8e --help prints the usage");
-	check(!/--ts\b/.test(help.out) && !/--ts\b/.test(fs.readFileSync(path.join(REPO_ROOT, "README.md"), "utf8")),
-		"D8f there is no --ts: the clock fills it, so the ledger cannot disagree with itself");
+	// The flag is REFUSED, not merely undocumented — the previous spelling of
+	// this check searched the README for the string "--ts", which the sentence
+	// explaining its absence then made fail. Ask the code.
+	const withTs = recordCli(["--parent", PARENT, "--child", CLOSER_CHILD,
+		"--mechanism", "m", "--ts", "1999-01-01T00:00:00Z"]);
+	check(withTs.status === 2 && /unknown argument --ts/.test(withTs.err),
+		`D8f there is no --ts: the clock fills it, so the ledger cannot disagree with itself (got ${withTs.status})`);
+	check(!/--ts\b/.test(help.out), "D8g the usage does not offer it either");
 	const quiet = recordCli(["--parent", PARENT, "--child", CLOSER_CHILD, "--mechanism", "quiet"]);
 	check(quiet.status === 0 && quiet.out === "",
-		"D8g without --json the writer prints nothing at all");
+		"D8h without --json the writer prints nothing at all");
 
 	// Exit 3: the record is fine and the ledger cannot be written. A spawner is
 	// told to ignore it, which only works if it is a DIFFERENT code from 2.
@@ -549,7 +555,7 @@ function recordCli(args: string[]): { status: number | null; out: string; err: s
 		encoding: "utf8",
 		env: { ...process.env, XDG_STATE_HOME: notADir },
 	});
-	check(blocked.status === 3, `D8h an unwritable ledger exits 3, not 2 (got ${blocked.status})`);
+	check(blocked.status === 3, `D8i an unwritable ledger exits 3, not 2 (got ${blocked.status})`);
 
 	// Re-normalise the ledger for the report assertions below.
 	fs.writeFileSync(path.join(stateHome, "wtft", "spawns.jsonl"), "");

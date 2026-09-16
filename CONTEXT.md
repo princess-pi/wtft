@@ -319,21 +319,33 @@ _Avoid_: Background agent, detached session, orphan session (it is not orphaned 
 exists, it was simply never written down)
 
 **Spawn ledger** (#116):
-The append-only `$XDG_STATE_HOME/wtft/spawns.jsonl`, one JSON line per parent→child spawn
-edge, written by the spawner at spawn time with `wtft spawn-record`. It is the ONLY record of
-a launcher-spawned edge. "Ledger" to refer, "spawn ledger" on first use in a passage.
+The append-only `$XDG_STATE_HOME/wtft/spawns.jsonl` (`~/.local/state/wtft/spawns.jsonl` by
+default), one JSON line per parent→child spawn edge, written by the spawner at spawn time with
+`wtft spawn-record`. It is the ONLY record of a launcher-spawned edge. A reader takes the last
+8 MiB, never the whole file. "Ledger" to refer, "spawn ledger" on first use in a passage.
 _Avoid_: Spawn log, lineage file, parent map, edge database
 
 **Self / tree** (#116):
 **Self** is a session's own turns — what `total` has always meant and still means. **Tree** is
-self plus every descendant reached through the spawn ledger. Both are explicit fields under
-`--json`, and the human table shows the split as `TOTAL` / `SPAWNED` / `TREE`. Never write a
-bare "the session's cost" where the two can differ.
+self plus every RESOLVED descendant reached through the spawn ledger, so it is a floor whenever
+anything is unattributed. Both are explicit fields under `--json`; the human table shows the
+split as `TOTAL` / `SPAWNED` / `TREE`, and shows none of the three when this session recorded no
+edges. Never write a bare "the session's cost" where the two can differ.
 _Avoid_: Rollup, grand total, inclusive cost (each hides which of the two is meant)
 
 **Unattributed** (#116):
-A recorded spawn edge whose child's cost could not be read — the transcript is missing or
-unreadable. Reported with its reason and a `null` cost, **never a zero**: a zero says the child
-cost nothing, which is a claim we do not have. Distinct from **uncounted** (#149), which is a
-billable event the harness records no `usage` for.
+A recorded spawn edge whose child's cost could not be read: `no-session-file` (nothing by that
+uuid) or `unreadable` (a file that would not parse). Reported with its reason and a `null` cost,
+**never a zero**: a zero says the child cost nothing, which is a claim we do not have. Distinct
+from **uncounted** (#149), a billable event the harness records no `usage` for; and from the two
+skips that are *not* gaps — `already-counted` (a diamond or cycle, whose money landed once) and
+`depth-capped` (past the walk's bound).
 _Avoid_: Missing, lost, dropped (the edge is known; only the amount is not)
+
+**Descendants unknown** (#116):
+The state where the spawn ledger itself could not be READ — `spawned.ledgerError` in JSON,
+`"spawn ledger could not be read (#116) — descendants unknown, not zero"` in the table. It is
+deliberately not the same report as "this session spawned nothing", which is silence, and it is
+reported through neither exit 9 nor `provisional.reason`: those mean "may still grow under the
+daemon", a different fact.
+_Avoid_: Empty tree, no descendants, zero (each states the thing we could not determine)

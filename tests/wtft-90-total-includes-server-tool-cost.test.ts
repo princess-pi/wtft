@@ -137,6 +137,13 @@ function json(session: string): any {
 	return JSON.parse(cli(session, ["--json"]));
 }
 
+console.log("--- TEST 0: the gate is not vacuous ---");
+// Every assertion below is a DIFFERENCE. If the meter prices this fixture at $0
+// — the model ages out of the server-tool card, the argument order changes, the
+// parser stops populating serverToolCost — every one of them holds trivially
+// with the divergence fully restored, and the suite exits 0 reporting success.
+check(EXPECTED_WEB_COST > 0, `the meter prices ${WEB_REQUESTS} web-search requests above zero ($${EXPECTED_WEB_COST})`);
+
 console.log("--- TEST 1: the fixture really exercises the meter ---");
 const docWeb = json(withWeb);
 const docNone = json(noWeb);
@@ -155,14 +162,17 @@ for (const [name, session] of [["with server-tool spend", withWeb], ["without", 
 	const chart = chartTotal(session);
 	const tokens = tokensTotal(session);
 	const doc = json(session);
-	// The chart and the table both round to cents; the document does not.
+	// BOTH scraped figures carry CENT precision — `formatCost` gives two decimals
+	// — so every comparison here resolves to half a cent, and saying `1e-9` would
+	// have read as exactness the strings cannot carry (PR review). The exact
+	// arithmetic is pinned by TEST 1 and TEST 3, on the document.
 	check(
-		Math.abs(chart - tokens) < 1e-9,
-		`${name}: chart total $${chart.toFixed(2)} === --tokens TOTAL $${tokens.toFixed(2)}`
+		Math.abs(chart - tokens) < 0.005,
+		`${name}: chart total $${chart.toFixed(2)} === --tokens TOTAL $${tokens.toFixed(2)}, to the cent both print`
 	);
 	check(
 		Math.abs(doc.total.costUsd - chart) < 0.005,
-		`${name}: …and --json total.costUsd ${doc.total.costUsd} agrees to the cent they print`
+		`${name}: …and --json total.costUsd ${doc.total.costUsd} agrees with them`
 	);
 }
 
@@ -183,6 +193,34 @@ for (const [name, doc] of [["with", docWeb], ["without", docNone]] as const) {
 	check(Math.abs(cats - doc.total.costUsd) < 1e-9, `${name}: sum(categories.costUsd) === total.costUsd`);
 }
 
+console.log("--- TEST 3b: the WARM path, which is what a user actually hits ---");
+// Every run above copies the fixture first, so all of them read a session with
+// no tag file — the cold, freshly-parsed path. The steady state is the other
+// one: `readClassifiedTagFile` rebuilds an Interaction field by field from what
+// the tag writer chose to persist, so a `serverToolCost` that did not survive
+// that projection would revert to the pre-#90 numbers on every run after the
+// first, and a suite that always starts from nothing could never see it (PR
+// review). It does survive — written as `sc`, read back as `serverToolCost` —
+// and this is what holds it to that.
+const warmFixture = path.join(dir, "warm.jsonl");
+fs.copyFileSync(withWeb, warmFixture);
+const warmRuns = [1, 2, 3].map(() => {
+	const r = spawnSync("node", [CLI_BIN, "-s", warmFixture, "--json"], { encoding: "utf8" });
+	if (r.status !== 0 && r.status !== 9) throw new Error(`warm run exited ${r.status}: ${r.stderr}`);
+	return JSON.parse((r.stdout || "").replace(/\x1b\[[0-9;]*m/g, ""));
+});
+check(
+	warmRuns.every(d => Math.abs(d.total.costUsd - docWeb.total.costUsd) < 1e-9),
+	`three runs against the SAME fixture agree with the cold one ($${warmRuns.map(d => d.total.costUsd).join(", $")})`
+);
+check(
+	warmRuns.every(d => {
+		const w = d.categories.find((c: any) => c.category === "web");
+		return Math.abs(w.costUsd - EXPECTED_WEB_COST) < 1e-9;
+	}),
+	"…and the web category still carries the server-tool cost after the round-trip"
+);
+
 console.log("--- TEST 4: no token field moved ---");
 // Server-side tool calls are billed per REQUEST, on a meter with no tokens on
 // it (#73). A fix that touched a token field would be a different change.
@@ -191,6 +229,85 @@ for (const field of ["inputTokens", "outputTokens", "reasoningTokens", "cacheRea
 		docWeb.total[field] === docNone.total[field],
 		`${field} is identical with and without the web requests (${docWeb.total[field]})`
 	);
+}
+
+console.log("--- TEST 5: an untagged turn, and a harness-native cost ---");
+// F5 — every fixture above tags each turn, so the chart's population and the
+// summary's are identical and the documented remaining divergence (untagged
+// spend) is exercised at zero. This one has a `<synthetic>` turn, so the two
+// populations differ and the scope of "all three agree" becomes real.
+const withUntagged = path.join(dir, "untagged.jsonl");
+fs.writeFileSync(withUntagged, [
+	usageLine({ id: "u_a", ts: "2026-07-01T12:00:00Z", cw: 10000 }),
+	usageLine({ id: "u_b", ts: "2026-07-01T13:00:00Z", cr: 10000, web: WEB_REQUESTS }),
+	// No model id — counted in untaggedInteractions and in no total here.
+	JSON.stringify({
+		type: "assistant", timestamp: "2026-07-01T14:00:00Z", cwd: "/tmp",
+		message: {
+			role: "assistant", id: "u_untagged", model: "<synthetic>",
+			content: [{ type: "text", text: "x" }],
+			usage: { input_tokens: 100, output_tokens: 300, cache_read_input_tokens: 0, cache_creation_input_tokens: 5000 },
+		},
+	}),
+].join("\n") + "\n");
+const docUntagged = json(withUntagged);
+check(docUntagged.untaggedInteractions >= 1, `the untagged turn is counted as such (${docUntagged.untaggedInteractions})`);
+check(
+	Math.abs(webCat(docUntagged).costUsd - EXPECTED_WEB_COST) < 1e-9,
+	"…the tagged turn's server-tool cost still lands in `web`"
+);
+check(
+	docUntagged.total.costUsd < docWeb.total.costUsd + 0.05,
+	"…and the untagged turn's own spend stays OUT of total.costUsd, as documented"
+);
+
+// F2 — the one assumption this change makes: `i.cost` does not already contain
+// the server-tool charge. A harness-native per-turn cost is used UNCHANGED, so a
+// harness that bills web search inside it would be summed twice. What this pins
+// is how far away that is: `nativeCost` comes from Pi's adapter alone, Claude
+// Code's pins it `null`, and `calculateServerToolCost` bills only identifiable
+// Anthropic model ids — so a Claude Code transcript carrying a Pi-shaped cost
+// block ignores it entirely, as asserted below. Reaching the double-count needs
+// a real Pi transcript with an Anthropic model AND a server_tool_use block; 0 of
+// 400 Pi transcripts on this host carry either field. Filed as #118.
+const nativeFixture = path.join(dir, "native.jsonl");
+fs.writeFileSync(nativeFixture, [JSON.stringify({
+	type: "assistant", timestamp: "2026-07-01T12:00:00Z", cwd: "/tmp",
+	message: {
+		role: "assistant", id: "n_a", model: "claude-opus-5",
+		content: [{ type: "text", text: "x" }],
+		usage: {
+			input_tokens: 100, output_tokens: 300,
+			cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+			cost: { total: 1.0 },                       // Pi's harness-native figure
+			server_tool_use: { web_search_requests: WEB_REQUESTS },
+		},
+	},
+})].join("\n") + "\n");
+const docNative = json(nativeFixture);
+check(
+	docNative.total.costUsd > 0,
+	`a native-cost turn is still priced ($${docNative.total.costUsd})`
+);
+check(
+	docNative.total.costUsd < 1.0,
+	`…and the Pi-shaped cost block is IGNORED on a Claude Code transcript ($${docNative.total.costUsd}, not $${(1.0 + EXPECTED_WEB_COST).toFixed(3)}) — nativeCost is pinned null there`
+);
+check(
+	Math.abs(webCat(docNative).costUsd - EXPECTED_WEB_COST) < 1e-9,
+	`…while the server-tool charge is still added once ($${EXPECTED_WEB_COST}); #118 owns the Pi case, which needs a Pi transcript to reach`
+);
+
+// TEARDOWN — stop the daemons before removing the tree they write into.
+//
+// Exit 9 means "a report in full, whose total may still grow under the daemon",
+// so by definition a background process is still parsing and writing tag files
+// beside every fixture copy when the CLI returns. Removing `dir` under them is a
+// race: orphaned processes, stray files, and on an unlucky interleaving a
+// directory-removal error (PR review). `isolateTmpdir` already gives this suite
+// its own daemon lease, so stopping by session path reaps only ours.
+for (const session of fs.readdirSync(dir).filter(n => n.endsWith(".jsonl"))) {
+	spawnSync("node", [CLI_BIN, "--stop", path.join(dir, session)], { encoding: "utf8", timeout: 10_000 });
 }
 
 fs.rmSync(dir, { recursive: true, force: true });

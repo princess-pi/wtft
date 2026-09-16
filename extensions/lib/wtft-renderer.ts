@@ -1951,6 +1951,18 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
 		// for none of the others. `web` rather than `cat` because that is where
 		// the bar chart puts it, and a category row that disagreed with the bar
 		// drawn above it would trade one divergence for a subtler one.
+		//
+		// ONE ASSUMPTION, NAMED (PR review, #118): that `i.cost` does not already
+		// contain this charge. It is a sum, not a replacement, so a harness whose
+		// native per-turn cost is its BILLED figure — which could include
+		// web-search spend — would be double-counted, and #90 moves that from an
+		// approximate chart into `--tokens` and `--json`, which programs read as
+		// exact. Reachable only where both halves meet: `nativeCost` is set by Pi
+		// alone (Claude Code's adapter pins it null) and `calculateServerToolCost`
+		// bills only identifiable Anthropic model ids. Measured 2026-09-16 over
+		// 400 Pi transcripts: 0 carry either field, so 0 can carry both. Pinned by
+		// TEST 5 in the #90 suite, which asserts the CURRENT behaviour on exactly
+		// that shape so the day it becomes reachable, the change is visible.
 		if (i.serverToolCost) {
 			total.costUsd += i.serverToolCost;
 			m.costUsd += i.serverToolCost;

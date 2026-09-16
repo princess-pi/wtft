@@ -691,6 +691,41 @@ console.log("\n=== PART E: what one launch reads, counted on a test-built corpus
 	delete process.env.WTFT_CLAUDE_PROJECTS_DIR;
 	delete process.env.WTFT_PI_SESSIONS_DIR;
 
+	// V23 — WIDENING READS EACH BYTE ONCE (Macroscope, PR #122).
+	//
+	// This exists because the fix it guards was written, LOST to a failed edit,
+	// and then described in a commit message and a spec paragraph anyway — while
+	// this suite stayed green, because V11a/V11b use transcripts that resolve in
+	// the FIRST window and so never widen at all. A reviewer found it by reading
+	// the loop. Prose is not a guard; this is.
+	//
+	// The shape: a transcript far larger than the last window with no `cwd`
+	// anywhere, so every window is tried and none resolves. Re-reading each
+	// window from scratch costs 8 + 64 + 512 = 584 KB; reading only the newly
+	// exposed prefix costs exactly 512 KB. The two are far enough apart that the
+	// assertion is an equality, not a budget.
+	{
+		const nocwdRoot = mktmp("wtft-89-nocwd-");
+		const proj = path.join(nocwdRoot, "-home-nocwd-project");
+		fs.mkdirSync(proj, { recursive: true });
+		const line = JSON.stringify({ type: "assistant", message: { role: "assistant", id: "x", usage: {} } }) + "\n";
+		const big = path.join(proj, "8900cafe-1a9b-4c3d-9e8f-000000000023.jsonl");
+		fs.writeFileSync(big, line.repeat(Math.ceil((1024 * 1024) / line.length)));
+
+		resetCwdCache();
+		const resolved = resolveLastCwd(big);
+		const widenReads = getCwdReadCount();
+		const widenBytes = getCwdBytesRead();
+		const LAST_WINDOW = 512 * 1024;
+
+		check(resolved === null, "V23: a transcript with no cwd anywhere resolves to null");
+		check(widenReads === 3, `V23: …after trying every window (${widenReads} reads)`);
+		check(
+			widenBytes === LAST_WINDOW,
+			`V23: …reading exactly the last window, each byte once (${widenBytes} B; re-reading each window costs ${8 * 1024 + 64 * 1024 + LAST_WINDOW} B)`
+		);
+	}
+
 	// V22 — THE GUARD THE COUNTER CANNOT BE (PR review).
 	//
 	// `getCwdBytesRead` only sees reads routed through session-cwd.ts's one

@@ -704,9 +704,25 @@ and the reason the probe grew a `--per-harness` mode.
 **The widening loop also stopped re-reading itself** on this branch. It used to read
 `[size-window, size)` from scratch on each widening, so a transcript that needed all three windows
 cost 8 + 64 + 512 = 584 KB to scan 512 KB. It now reads only the newly exposed prefix and decodes
-the accumulated buffer (bytes once, CPU again — and bytes are what is scarce). Modelled over the
-real corpus the saving is **~2.8%**, because only 28 of 7,318 transcripts widen that far: a large
-per-file win on a rare file, stated at its measured size rather than at its headline ratio.
+the accumulated buffer (bytes once, CPU again — and bytes are what is scarce).
+
+**Measured, after an earlier draft of this paragraph claimed a figure the code did not have.** The
+change was written, lost to a failed edit, and described in prose anyway; Macroscope caught the
+discrepancy on PR #122 by reading the loop. Two measurements now, both from the shipped code:
+
+- **The shape it targets** — a 1 MB transcript with no `cwd` at all, which widens through every
+  window: **524,288 bytes, 3 reads**. Exactly 512 KB, so each byte is read once. The old loop read
+  598,016.
+- **The whole corpus**, same probe as the tables above: **586 MB → 485 MB, a 17% cut** (auto;
+  Claude 281 → 240 MB, Pi 305 → 245 MB).
+
+An earlier draft said "~2.8%, because only 28 of 7,318 transcripts widen that far". That came from
+a Python model that used "does the last 8 KB contain the substring `"cwd":"`" as a proxy for "the
+first window resolves it" — which is far too generous, because the real scan needs a *parseable
+JSON line* carrying a string `cwd`, and a substring inside a truncated line is not one. Many more
+transcripts widen than the proxy predicted. The modelled figure is recorded here as the wrong one,
+because a number from a model that was never checked against the code is exactly what this
+amendment's opening paragraph exists to prevent.
 
 **Identical candidate counts, ~2.2x faster warm, zero whole-file reads.** No session was lost on
 the corpus this was measured against.

@@ -156,21 +156,30 @@ export function resetCwdCache(): void {
 // RESOLUTION
 // ---
 
-/** Read `len` bytes of `file` starting at `start`. */
-function readSlice(file: string, start: number, len: number): string {
+/**
+ * Read `len` bytes of `file` starting at `start`, as BYTES.
+ *
+ * A Buffer rather than a string, because {@link resolveLastCwd} accumulates
+ * across widenings and decoding each chunk on its own would split any multi-byte
+ * character that straddles a chunk boundary. Concatenating first and decoding
+ * once costs CPU, never I/O — and I/O is the quantity {@link getCwdBytesRead}
+ * guards.
+ *
+ * SHORT READS ARE TRUNCATED, not padded (PR review). If the file shrank between
+ * `statSync` and `readSync`, or `read(2)` came up short, the tail of the buffer
+ * is NULs — `String.trim()` does not strip them, so the final data line becomes
+ * `…}\u0000\u0000`, fails `JSON.parse`, and that transcript silently loses its
+ * most recent `cwd`. Slicing to `got` also makes the bytes returned agree with
+ * the bytes counted.
+ */
+function readSlice(file: string, start: number, len: number): Buffer {
 	const fd = fs.openSync(file, "r");
 	try {
 		const buf = Buffer.alloc(len);
 		const got = fs.readSync(fd, buf, 0, len, start);
 		readCount++;
 		bytesRead += got;
-		// DECODE ONLY WHAT WAS READ (PR review). On a short read — the file
-		// truncated between statSync and readSync, or a short read(2) — the rest
-		// of the buffer is NULs, `String.trim()` does not strip them, and the
-		// final data line becomes `…}\u0000\u0000` and fails JSON.parse. That
-		// silently drops the most recent `cwd` for that transcript. Bounding the
-		// decode by `got` also makes the text agree with the bytes now counted.
-		return buf.toString("utf8", 0, got);
+		return got === len ? buf : buf.subarray(0, got);
 	} finally {
 		fs.closeSync(fd);
 	}
@@ -216,18 +225,29 @@ export function resolveLastCwd(filePath: string, knownStat?: fs.Stats): string |
 	const cached = cwdCache.get(key);
 	if (cached !== undefined) return cached;
 
+	// WIDENING READS ONLY WHAT IT HAS NOT READ (PR review, Macroscope). The first
+	// cut re-read `[size-window, size)` from scratch on every widening, so a
+	// transcript needing all three windows cost 8 + 64 + 512 = 584 KB to scan
+	// 512 KB — overspend in exactly the quantity getCwdBytesRead exists to guard.
+	//
+	// Each pass now reads only the newly exposed prefix and prepends it. Bytes are
+	// read once; the accumulated buffer is decoded again per pass, which is CPU
+	// and not I/O.
 	let result: string | null = null;
+	let acc: Buffer | null = null;
+	let readFrom = stat.size;
 	for (const window of TAIL_WINDOWS) {
 		const start = Math.max(0, stat.size - window);
-		const len = stat.size - start;
+		const len = readFrom - start;
 		if (len <= 0) break;
-		let text: string;
 		try {
-			text = readSlice(filePath, start, len);
+			const chunk = readSlice(filePath, start, len);
+			acc = acc === null ? chunk : Buffer.concat([chunk, acc]);
 		} catch {
 			break;
 		}
-		result = scanBackwardsForCwd(text, start > 0);
+		readFrom = start;
+		result = scanBackwardsForCwd(acc.toString("utf8"), start > 0);
 		if (result) break;
 		// Whole file already scanned — widening cannot help.
 		if (start === 0) break;

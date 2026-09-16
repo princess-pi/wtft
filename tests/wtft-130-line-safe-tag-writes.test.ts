@@ -328,17 +328,25 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	// nothing else. #130 was one ftruncateSync to an offset derived from a
 	// decoded string; an offset that does not come from lastLineStartByte is
 	// that bug wearing different arithmetic.
-	const lines = daemonSrc.split("\n");
-	const badTruncates: string[] = [];
-	lines.forEach((line, i) => {
-		if (!/f?truncateSync\(/.test(line)) return;
-		if (/truncateSync\([^,]+,\s*0\s*\)/.test(line)) return;          // to zero: no line to break
-		const window = lines.slice(Math.max(0, i - 6), i + 1).join("\n");
-		if (window.includes("lastLineStartByte")) return;                // to a line boundary
-		badTruncates.push(`${i + 1}: ${line.trim()}`);
+	//
+	// Checked by NAME, not by proximity: the first version of this check looked
+	// back six lines for the word `lastLineStartByte` and failed on the very fix
+	// it exists to protect, because the offset is bound nine lines above its use.
+	// Proximity is not the property — provenance is.
+	const truncateOffsets: { n: number; expr: string; line: string }[] = [];
+	daemonSrc.split("\n").forEach((line, i) => {
+		const m = /f?truncateSync\(\s*[^,]+,\s*([^)]+)\)/.exec(line);
+		if (m) truncateOffsets.push({ n: i + 1, expr: m[1].trim(), line: line.trim() });
 	});
-	assert("S2 every tag truncate cuts to a line boundary or to zero",
-		badTruncates.length === 0, badTruncates.join("\n"));
+	assert("S2 the daemon still truncates tag files at all — the check has a subject",
+		truncateOffsets.length > 0);
+	const badTruncates = truncateOffsets.filter(({ expr }) => {
+		if (expr === "0") return false;   // to zero: there is no line to break
+		return !new RegExp(`\\b(const|let|var)\\s+${expr}\\s*=\\s*lastLineStartByte\\(`).test(daemonSrc);
+	});
+	assert("S2 every tag truncate cuts to zero or to a lastLineStartByte offset",
+		badTruncates.length === 0,
+		badTruncates.map(({ n, line }) => `${n}: ${line}`).join("\n"));
 }
 
 for (const c of children) { try { c.kill("SIGKILL"); } catch { /* already gone */ } }

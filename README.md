@@ -184,7 +184,9 @@ parent's own transcript: a `pr-review` lens in a `/tmp` sandbox, a
 rollup, and not because the parser is missing something —
 **neither transcript contains a field naming the other**, so there is no edge to
 re-derive and no amount of re-parsing can reach the money. Measured on one real
-session: $70.33 reported, $69.68 of its own lens children unattributed.
+session: $70.33 reported, $69.68 of its own lens children INVISIBLE — not
+`unattributed`, which is the narrower thing: a RECORDED edge whose child could
+not be read. Those children had no record at all, which is why the issue exists.
 
 So the spawner writes the edge down when it is free, which is at spawn time —
 `claude --session-id <uuid>` takes the child's id as *input*, so it is known
@@ -223,11 +225,16 @@ Three bounds are reported rather than hidden: the walk stops at **depth 5**
 (`spawned.depthCapped` counts the cuts), a ledger over **8 MiB** is refused
 outright rather than partly read, and a ledger it cannot read comes back as
 `spawned.ledgerError` rather than as an empty tree. `tree` covers *resolved* descendants, so it is a
-floor whenever anything went uncounted — `unattributed` non-empty, `depthCapped`
-non-zero, or `ledgerError` set.
+floor whenever anything went uncounted, under FOUR conditions: `unattributed`
+non-empty, `depthCapped` non-zero, `ledgerError` set, or `malformedLedgerLines`
+non-zero. The last was missing until round 5 — a malformed ledger line was a
+record, so its edge is lost, and nothing else reports it.
 
 `wtft --tokens` shows the same thing as a `SPAWNED` / `TREE` block below
-`TOTAL` — and prints nothing at all when this session recorded no edges. Full
+`TOTAL`. It prints nothing when this session recorded no edges AND the ledger
+was read cleanly; an unreadable ledger, or one with skipped lines, still prints
+— saying so is the whole point, since "no edges" and "could not tell" are not
+the same report. Full
 contract: [`docs/spec-116-spawn-ledger.md`](./docs/spec-116-spawn-ledger.md).
 
 `--pager` is a Pi TUI overlay, not a CLI flag — the CLI says so and exits 1,

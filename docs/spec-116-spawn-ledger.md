@@ -21,7 +21,10 @@ that are all properties of the transcripts and none of which a parser can fix:
 
 **Neither transcript contains a field naming the other.** There is no edge to re-derive, so no
 tagger version bump can reach it — measured on session `9f29d624…180d`, which reported $70.33 while
-$69.68 of its own `pr-review` lens children sat unattributed in ten `/tmp/pr-review-*` sandboxes.
+$69.68 of its own `pr-review` lens children sat **invisible** in ten `/tmp/pr-review-*` sandboxes.
+Invisible, not `unattributed` — this document defines that term narrowly, as a RECORDED edge whose
+child could not be read, and these children had no record at all. Using the defined word for the
+undefined case is how a reader concludes the report already covers them.
 
 Direction A writes the edge down **at spawn time**, when it is free, instead of reconstructing it
 afterwards, when it is impossible.
@@ -203,11 +206,14 @@ already trust.
 `tree` = `total` + `spawned.total`, as a field, so a consumer never has to add two numbers and
 guess whether it double-counted. `label`, `model`, `cwd` and `skip` are present on an edge only
 when they apply; `label`, `ts`, `mechanism`, `child` and `reason` are the shape of a gap. Because
-`spawned.total` covers **resolved** descendants only, `tree` is a **floor** under any of THREE
+`spawned.total` covers **resolved** descendants only, `tree` is a **floor** under any of FOUR
 conditions, and checking the first alone reads a truncated tree as complete: `unattributed` is
-non-empty, `depthCapped` is non-zero, or `ledgerError` is non-null. The last is the trap: a ledger
-that could not be read sets neither of the other two, so a consumer checking only those reads a
-zeroed tree as a complete lineage.
+non-empty, `depthCapped` is non-zero, `ledgerError` is non-null, or `malformedLedgerLines` is
+non-zero. The last two are the traps. A ledger that could not be read sets none of the others, so a
+consumer checking only those reads a zeroed tree as a complete lineage. And a malformed ledger line
+**was a record**: its edge is lost, it produces no `unattributed` entry, and the count is the only
+trace it leaves — so a tree with `malformedLedgerLines > 0` and none of the other three can still be
+missing a descendant. Round 5 found this condition missing from all six surfaces that state it.
 
 **`--tokens`** gains a block below TOTAL, rendered only when this session has at least one edge:
 
@@ -300,7 +306,8 @@ exceeded the cap; an unresolvable child reported as `unattributed` with a `null`
 readable grandchild still counted**; `unreadable` distinguished from `not-found`; `label`,
 `model` and `cwd` reaching the report; exit 2 for a typo'd flag that names itself, exit 3 for an
 unwritable ledger; and the rendered `TREE` figure read off the table and held to `TOTAL + SPAWNED`
-and to `--json`. The two chmod-000 cases skip **visibly** when the process can read such a file.
+and to `--json`. The THREE chmod-000 cases — C21 (unreadable ledger), C24 (unreadable child) and
+D23 (the rendered ledger error) — skip **visibly** when the process can read such a file.
 
 ## Not in this change
 
@@ -545,3 +552,59 @@ and the tempting move was to relax the assertion.
 | A live descendant is priced from a one-shot parse and reported as settled, with no `provisional` | Semantics to pin down; no field currently says the tree may still grow |
 | Self-attribution discovery runs eagerly even when the ledger holds no edges for the session | Advisory, performance only |
 | The widget swallows spawn-tree throws into a silence identical to "spawned nothing" | Advisory; the CLI reports `ledgerError`, the widget does not |
+
+## Review round 5 — the ceiling, and the regressions round 4 shipped
+
+Sixteen findings, eight blocking. `pr-open` exited **10**: the review-round ceiling
+(`PR_REVIEW_ROUND_LIMIT`, 3 blocking rounds). **The limit was not raised.** The PR is not open,
+and that is a decision for Duppy rather than for the fix loop — which is the entire reason the
+ceiling exists.
+
+**Five of the sixteen were introduced by round 4**, hours earlier. They are fixed here because
+a defect shipped this afternoon is not a re-discovered finding; it is this round's own output.
+
+| Finding | What round 4 did |
+|---|---|
+| `bin/wtft.ts` — the empty rendered arm printed `SPAWNED` *without* `--tokens`, while the populated arm prints it only inside `if (opts.tokens)` | **The fix for a mode disagreement introduced a fresh mode disagreement.** Plain `wtft` showed the lineage while the session had no data and dropped it the moment data arrived. Now gated on `--tokens`, matching the populated path and the README |
+| `discovery.ts` — the docstring said `projectsDir` was "left exported and untouched" | The diff **created** the export. And the rationale it gave — nothing left to keep in sync — argues against having one. The export is reverted; nothing imports it |
+| `wtft-spawn-tree.ts` — `subtractTotals`' own docstring still claimed the subtraction is "exact" | Round 4 corrected the claim **at the call site** and left the function's own copy standing. This is the unwritten-correction pattern round 4 was *named for*, one round later |
+| `bin/wtft.ts` — the memo comment said "two call sites" | The same commit added the third. This file's own rule is that a wrong call-site count is how a reader learns to distrust the comments |
+| `wtft-json.ts` — "`tree` is an addition of two results, not a third way of counting" | Ignores `subtractTotals`. The surviving guarantee is "nothing counts a turn a second way"; "addition only" is not true |
+
+### The one that was a real contract gap: a fourth floor condition
+
+Six surfaces stated that `tree` is a floor under **three** conditions. A **malformed ledger
+line was a record**: its edge is lost, it produces no `unattributed` entry, and
+`malformedLedgerLines` is the only trace it leaves. So a tree with `malformedLedgerLines > 0`
+and none of the other three can still be missing a descendant, and a consumer following the
+documented check reads it as complete.
+
+Fixed in all six: `README.md`, `CONTEXT.md`, `docs/spec-26-json.md`, this file,
+`extensions/lib/wtft-json.ts`, `extensions/lib/wtft-spawn-tree.ts`.
+
+### Two more terms used against their own definitions
+
+- The headline example said `$69.68 … unattributed`. This document defines `unattributed`
+  narrowly — a **recorded** edge whose child could not be read — and those children had no
+  record at all. They were **invisible**, which is the word for the case #116 exists to close.
+  Using the defined word for the undefined case is how a reader concludes the report already
+  covers them. Fixed in `README.md` and here.
+- "The two chmod-000 cases" — the suite has three: C21, C24 and D23.
+
+### Carried forward, unfixed, each with an owner
+
+`pr-open` found these again; they are the same items round 4 recorded, and they are issues
+rather than spec sections so they can be listed, assigned and closed.
+
+| Finding | Issue |
+|---|---|
+| The Closer's second clause: an unrecorded child is invisible, not unattributed | **#128** — Duppy picks the direction |
+| `in-self-total` names `total` when the money is in `spawned.total` | **#131** — Duppy picks A or B |
+| A double-count guard that misses ids already marked `in-self`, from `alreadyAttributed` or from an earlier descendant | **#132** — Princess Pi, blocked on #129 |
+| A live descendant priced from a one-shot parse and reported as settled | **#133** — Duppy |
+| The widget's silent failure, and eager discovery on the no-edge path | **#134** — Princess Pi |
+| The in-self set re-derived at CLI time and compared against a total the daemon folded earlier; and the pending arm re-deriving what `pending` was meant to freeze | **#135** — Princess Pi |
+
+**The stop rule held.** Two rounds of re-discovered findings is the signal to stop and report,
+and `PR_REVIEW_ROUND_LIMIT` is never raised to get past it.
+

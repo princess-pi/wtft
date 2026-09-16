@@ -9,8 +9,14 @@
  *   `--tokens` table formats. A second aggregation written for this path is the
  *   exact drift the issue exists to prevent, so there is none. That holds for
  *   `spawned` too (#116): the walk gives each descendant's total to the same
- *   `computeSessionSummary`, and `tree` is an addition of two of its results,
- *   not a third way of counting.
+ *   `computeSessionSummary`, so there is no second aggregation.
+ *
+ *   `tree` is NOT a plain addition of two of those results, and an earlier
+ *   version of this paragraph said it was. `computeSpawnTree` also runs
+ *   `subtractTotals`, clamped at zero, whenever a descendant folds in a session
+ *   already counted — arithmetic performed outside the aggregation. The
+ *   guarantee that survives is the one that matters: nothing here counts a turn
+ *   a second way. The guarantee that does not is "addition only".
  *
  *   Field names and exit codes are versioned API; the strings inside
  *   `notices[].text` are prose and may be reworded freely. A consumer branches
@@ -71,11 +77,16 @@ export interface WtftSessionJson {
 	/** SELF + RESOLVED descendants, as a field — so a consumer never adds two
 	 *  numbers and has to work out for itself whether it double-counted.
 	 *
-	 *  A FLOOR whenever anything went uncounted, and there are THREE conditions,
+	 *  A FLOOR whenever anything went uncounted, and there are FOUR conditions,
 	 *  not one: `spawned.unattributed` is non-empty, `spawned.depthCapped` is
-	 *  non-zero, or `spawned.ledgerError` is non-null. The last is the trap —
-	 *  an unreadable ledger sets neither of the other two, so a consumer
-	 *  checking only those reads a zeroed tree as a complete lineage. */
+	 *  non-zero, `spawned.ledgerError` is non-null, or
+	 *  `spawned.malformedLedgerLines` is non-zero.
+	 *
+	 *  The last two are the traps. An unreadable ledger sets none of the others,
+	 *  so a consumer checking only those reads a zeroed tree as a complete
+	 *  lineage. And a malformed line WAS a record: its edge is lost, it appears
+	 *  in no `unattributed` entry, and the count is the only trace of it. The
+	 *  fourth condition was missing from every surface until round 5. */
 	tree: TokenTotals;
 	compaction: { events: number; tokensFreed: number };
 	untaggedInteractions: number;

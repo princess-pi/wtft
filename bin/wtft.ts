@@ -713,11 +713,14 @@ async function main() {
 	}
 
 	// The recorded lineage (#116), memoised. The walk parses every descendant's
-	// session file, and two call sites reach it — `emitSessionJson` and the
-	// `--tokens` renderer — on paths that are mutually exclusive within one run,
-	// so the memo is insurance rather than a load-bearing invariant. An earlier
-	// version of this comment claimed it kept two surfaces in agreement inside
-	// one run; nothing runs both.
+	// session file, and THREE call sites reach it — `emitSessionJson`, the
+	// `--tokens` renderer, and `finishEmptyReport`'s `--tokens` arm — on paths
+	// that are mutually exclusive within one run, so the memo is insurance
+	// rather than a load-bearing invariant. Two earlier versions of this comment
+	// were wrong in turn: one claimed the memo kept two surfaces in agreement
+	// inside one run (nothing runs both), and one said "two call sites" in the
+	// same commit that added the third. This file's own rule is that a wrong
+	// call-site count is how a reader learns to distrust the comments.
 	//
 	// No try/catch here on purpose: `computeSpawnTree` owns the ledger read and
 	// reports a failure as `ledgerError`, so an unreadable ledger renders and
@@ -926,8 +929,18 @@ async function main() {
 		// and it is read on the pending arm for the reason `emitSessionJson`
 		// gives: a session log that is not written yet says nothing about whether
 		// the ledger holds edges FOR it.
-		const emptyArmTree = renderSpawnTree(emptyTotals(), sessionSpawnTree());
-		if (emptyArmTree) process.stdout.write(emptyArmTree);
+		//
+		// GATED ON `--tokens`, because the POPULATED rendered path prints the block
+		// only inside `if (opts.tokens)` and the README names `wtft --tokens` as the
+		// surface that carries it. The first version of this fix wrote the block on
+		// every rendered empty arm, so a plain `wtft` printed the lineage while the
+		// session had no data and dropped it the moment data arrived — a fresh mode
+		// disagreement, introduced by the fix for a mode disagreement. Round-5
+		// review caught it; it is recorded rather than quietly corrected.
+		if (opts.tokens) {
+			const emptyArmTree = renderSpawnTree(emptyTotals(), sessionSpawnTree());
+			if (emptyArmTree) process.stdout.write(emptyArmTree);
+		}
 		// `exitCode` and return, never `process.exit()`: node's stdout is async on
 		// a pipe and `process.exit()` does not wait for pending writes.
 		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;

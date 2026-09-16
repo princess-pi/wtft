@@ -330,10 +330,12 @@ _Avoid_: Spawn log, lineage file, parent map, edge database
 **Self / tree** (#116):
 **Self** is a session's own turns — what `total` has always meant and still means. **Tree** is
 self plus every RESOLVED descendant reached through the spawn ledger, so it is a floor whenever
-anything went uncounted — `unattributed` non-empty, `depthCapped` non-zero, or `ledgerError` set.
-Both are explicit fields under `--json`; the human table shows the
-split as `TOTAL` / `SPAWNED` / `TREE`, and shows none of the three when this session recorded no
-edges. Never write a bare "the session's cost" where the two can differ.
+anything went uncounted — `unattributed` non-empty, `depthCapped` non-zero, `ledgerError` set, or
+`malformedLedgerLines` non-zero (a malformed line was a record, so its edge is lost and the count is
+its only trace). Both are explicit fields under `--json`; the human table shows the
+split as `TOTAL` / `SPAWNED` / `TREE`, and shows none of the three only when this session recorded
+no edges AND the ledger read cleanly — an unreadable ledger or a skipped line still prints, because
+"no edges" and "could not tell" are different reports. Never write a bare "the session's cost" where the two can differ.
 _Avoid_: Rollup, grand total, inclusive cost (each hides which of the two is meant)
 
 **Unattributed** (#116):

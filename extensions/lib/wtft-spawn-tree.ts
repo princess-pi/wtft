@@ -132,11 +132,13 @@ export interface SpawnTree {
 	 *  to prevent one layer up. A zero that might mean "could not look" is the
 	 *  silent gap #116 is about, reintroduced inside #116's own fix. */
 	ledgerError: string | null;
-	/** Sum over RESOLVED descendants. A floor under any of three conditions —
-	 *  `unattributed` non-empty, `depthCapped` non-zero, or `ledgerError`
-	 *  non-null. The last one is the trap: a ledger that could not be read sets
-	 *  neither of the other two, so a consumer checking only those reads a
-	 *  zeroed tree as a complete lineage. */
+	/** Sum over RESOLVED descendants. A floor under any of FOUR conditions —
+	 *  `unattributed` non-empty, `depthCapped` non-zero, `ledgerError` non-null,
+	 *  or `malformedLedgerLines` non-zero. The last two are the traps: a ledger
+	 *  that could not be read sets none of the others, so a consumer checking
+	 *  only those reads a zeroed tree as a complete lineage; and a malformed
+	 *  line WAS a record, so its edge is lost with the count as its only
+	 *  trace. */
 	total: TokenTotals;
 }
 
@@ -156,10 +158,17 @@ export interface SpawnTreeOptions {
 
 /** Subtract every numeric field of `from` from `into`, clamped at zero.
  *
- *  Both operands come from `computeSessionSummary` over the same file, so this
- *  is exact in the case it exists for — a session counted as its own edge and
- *  folded into a descendant as well. The clamp covers the case it is not: a
- *  negative token count is a louder lie than the double count it replaced. */
+ *  THE OPERANDS ARE NOT THE SAME AGGREGATION, and an earlier version of this
+ *  docstring said they were. At the only call site, `into` is the DESCENDANT's
+ *  `computeSessionSummary`, and `from` is a child's own summary as stored in
+ *  `countedTotals` — a different file, folded in through `parseSessionFile` /
+ *  `attributeClaudeSubAgentCosts`, which is a separate summation path that is
+ *  not re-run here. So the two are expected to agree, not guaranteed to, and
+ *  the clamp would hide it if they did not. Untested (#129).
+ *
+ *  Round 4 corrected the claim at the call site and left this copy standing —
+ *  the same unwritten-correction pattern that round was named for, one round
+ *  later. Recorded here rather than quietly fixed. */
 function subtractTotals(into: TokenTotals, from: TokenTotals): void {
 	for (const key of Object.keys(into) as (keyof TokenTotals)[]) {
 		into[key] = Math.max(0, into[key] - (from[key] ?? 0));

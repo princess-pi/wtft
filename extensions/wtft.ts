@@ -19,6 +19,7 @@ import {
 	getModelCacheTtlMs,
 } from "./lib/wtft-shared.js";
 import { readConfig, writeConfig, hasConfig } from "@princess-pi/libs/config";
+import { computeSpawnTree, type SpawnTree } from "./lib/wtft-spawn-tree.js";
 import {
 	parseWtftCliArgs,
 	ensureDaemonRunning,
@@ -151,6 +152,22 @@ function getSettings(_ctx: any) {
 
 /** Read interactions from the daemon's classified tag file (#92),
  *  merged with subagent session interactions (#83, #82). */
+/** The spawn tree for the session this widget is rendering (#116).
+ *
+ *  Degrades to an empty tree rather than throwing: a widget refresh runs on
+ *  every turn, and an unreadable ledger must not take the panel down. Unlike
+ *  the CLI there is no stderr to warn on, so the failure shows up the way every
+ *  other widget-side failure does — as the block simply not being there. */
+function widgetSpawnTree(ctx: any): SpawnTree | undefined {
+	const sessionFile = ctx.sessionManager.getSessionFile?.();
+	if (!sessionFile) return undefined;
+	try {
+		return computeSpawnTree(path.basename(sessionFile).replace(/\.jsonl$/i, ""));
+	} catch {
+		return undefined;
+	}
+}
+
 function readInteractions(ctx: any): Interaction[] {
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	if (!sessionFile) return [];
@@ -473,7 +490,12 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				};
 				const budget = _currentThinkingLevel ? BUDGET_MAP[_currentThinkingLevel] : undefined;
 				const interactions = readInteractions(ctx);
-				const output = renderTokenSummary(interactions, Math.max(current.width, 40), budget);
+				// The recorded lineage (#116). The widget is a reader of the
+				// same report, so it gets the same block — a Pi user reading
+				// TOTAL with $69 of lens children unlisted is exactly the gap
+				// the issue is about, and omitting it here would recreate it on
+				// the surface Duppy actually looks at.
+				const output = renderTokenSummary(interactions, Math.max(current.width, 40), budget, undefined, widgetSpawnTree(ctx));
 				ctx.ui.notify(output, "info");
 				return;
 			}

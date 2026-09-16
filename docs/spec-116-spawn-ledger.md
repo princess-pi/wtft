@@ -138,6 +138,11 @@ SPAWNED    3 descendant session(s) recorded in the spawn ledger (#116) — NOT i
 TREE       TOTAL + SPAWNED                        $127.36
 ```
 
+**The Pi widget** (`extensions/wtft.ts`) renders the same block. It is a reader of the same
+report, and a Pi user seeing `TOTAL` with $69 of lens children unlisted is exactly the gap this
+issue is about. It degrades to no block rather than throwing — a widget refresh runs every turn,
+there is no stderr to warn on, and an unreadable ledger must not take the panel down.
+
 ## How this is verified
 
 The issue's own Closer, as `tests/wtft-116-spawn-ledger.test.ts`:

@@ -206,7 +206,8 @@ and the whole line at 4 KiB, which is what keeps that one write one write.
 Exit **2** is a bad call — a missing or unknown flag, a flag with no value (a
 bare `--label --json` is refused rather than recording the label `--json`), a
 malformed session id, an oversized field. Exit **3** is an
-unwritable ledger. A spawner is meant to ignore both, since an unrecorded edge
+unwritable ledger; the edge is then not recorded at all, so the child is
+*invisible* rather than unattributed. A spawner is meant to ignore both, since an unrecorded edge
 simply degrades to the old behaviour.
 
 `spawn-record` is positional: it must be the **first** argument, so
@@ -223,7 +224,7 @@ Three bounds are reported rather than hidden: the walk stops at **depth 5**
 the ledger, and a ledger it cannot read comes back as `spawned.ledgerError`
 rather than as an empty tree. `tree` covers *resolved* descendants, so it is a
 floor whenever anything went uncounted — `unattributed` non-empty, `depthCapped`
-non-zero, or a ledger big enough that the tail read missed older edges.
+non-zero, or `ledgerTruncated` true.
 
 `wtft --tokens` shows the same thing as a `SPAWNED` / `TREE` block below
 `TOTAL` — and prints nothing at all when this session recorded no edges. Full

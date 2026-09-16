@@ -90,6 +90,7 @@ contract.
     "depthCapped": 0,
     "maxDepth": 5,
     "malformedLedgerLines": 0,
+    "ledgerTruncated": false,
     "ledgerError": null,
     "total": { "costUsd": 12.34, "inputTokens": 0, "outputTokens": 0,
                "reasoningTokens": 0, "cacheReadTokens": 0, "cacheWriteTokens": 0 }
@@ -125,6 +126,7 @@ contract.
 | `spawned.maxDepth` | number | The recursion bound in force for this run, stated so a reader never needs the constant to interpret a truncated tree. |
 | `spawned.descendants` | number | Sessions whose cost is in `spawned.total`, **each counted exactly once**: a diamond or a cycle in the ledger contributes once, not twice. Lower than `edges.length` whenever an edge was skipped. |
 | `spawned.malformedLedgerLines` | number | Ledger lines the reader could not use. A broken spawner shows up as a number rather than an absence. |
+| `spawned.ledgerTruncated` | bool | The ledger read stopped at its 8 MiB tail window, so edges older than it were never seen. They are in no other field, so this is the only thing that distinguishes a truncated read from a complete one — and one of the three conditions that make `tree` a floor. |
 | `spawned.ledgerError` | string \| null | The ledger read FAILED, with the message. Without this field an unreadable ledger would serialise identically to "read it, this session spawned nothing" — the silent gap #116 exists to end, reintroduced inside its own fix. An *absent* ledger is not an error. |
 | `tree.*` | number | **SELF + RESOLVED descendants**, as a field, so a consumer never adds two numbers and has to work out whether it double-counted. A **floor** whenever anything was not counted: `spawned.unattributed` is non-empty, `spawned.depthCapped` is non-zero, or the ledger is large enough that the 8 MiB tail read missed older edges. Checking `unattributed` alone reads a depth-truncated tree as complete. |
 | `models[]` | array | One row per model id, **sorted by `costUsd` descending** — the same order and the same numbers as the rendered `--tokens` table's rows, un-abbreviated. `model` is the full id, never shortened. |
@@ -242,7 +244,7 @@ carries. The table lives in `docs/manifests/wtft-cmd.json`, which is what
 | **0** | A report was produced, including when there is nothing to report yet — a session file not written, or a tag with no classified data. Also the exit for the commands that run *instead* of a report (`--help`/`--why`/`--version`, `--list`/`--cleanup`/`--restart`/`--stop`, and `spawn-record`). | one JSON object for a report; the command's own output for the others |
 | **1** | Error: no session found or selected, an invalid path, a daemon that could not be spawned or that died before producing data, a refused flag (`-p`), or an unhandled exception. The reason is on stderr. | nothing |
 | **2** | `wtft spawn-record` only: the call was wrong — a missing or unknown flag, a flag with no value, a malformed UUID, a `ts` that is not ISO-8601, an oversized field. Nothing was appended. The report path never returns 2. | n/a |
-| **3** | `wtft spawn-record` only: the record was valid and the ledger could not be written. The edge is not recorded, so the child's cost will be unattributed. | n/a |
+| **3** | `wtft spawn-record` only: the record was valid and the ledger could not be written. The edge is not recorded, so the child is **invisible** to the rollup — not `unattributed`, which means an edge we have whose child we could not read. | n/a |
 | **9** | Provisional (#443): a report was produced in full, but the total may still grow under the daemon. `provisional.provisional` is `true` and `provisional.reason` names the condition. | one JSON object |
 | **130** | The interactive session selector was cancelled with `q` or Ctrl-C — the SIGINT convention (128+2), not a wtft-specific code. `--json` never prompts, so it never returns this. | n/a |
 

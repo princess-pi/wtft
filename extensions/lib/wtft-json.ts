@@ -69,9 +69,12 @@ export interface WtftSessionJson {
 	 *  ledger, each edge's provenance, and every gap the walk could not close. */
 	spawned: SpawnTree;
 	/** SELF + RESOLVED descendants, as a field — so a consumer never adds two
-	 *  numbers and has to work out for itself whether it double-counted. An
-	 *  unattributed child is in neither addend; `spawned.unattributed` is how
-	 *  a reader knows this number is a floor. */
+	 *  numbers and has to work out for itself whether it double-counted.
+	 *
+	 *  A FLOOR whenever anything went uncounted, and there are THREE conditions,
+	 *  not one: `spawned.unattributed` is non-empty, `spawned.depthCapped` is
+	 *  non-zero, or `spawned.ledgerTruncated` is true. Checking `unattributed`
+	 *  alone reads a depth-truncated tree as complete. */
 	tree: TokenTotals;
 	compaction: { events: number; tokensFreed: number };
 	untaggedInteractions: number;

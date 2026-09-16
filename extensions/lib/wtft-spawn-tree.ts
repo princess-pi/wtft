@@ -22,7 +22,7 @@ import * as path from "node:path";
 
 import { readSpawnLedger, type SpawnLedger } from "./wtft-spawn-ledger.js";
 import { getDiscoveries } from "./harness/registry.js";
-import { parseSessionFile } from "./wtft-parser.js";
+import { parseSessionFile, collectSelfAttributedSessionIds } from "./wtft-parser.js";
 import { computeSessionSummary, emptyTotals, type TokenTotals } from "./wtft-renderer.js";
 
 /** Bumped when the reported tree's shape changes. */
@@ -119,6 +119,12 @@ export interface SpawnTree {
 	maxDepth: number;
 	/** Ledger lines the reader could not use (see readSpawnLedger). */
 	malformedLedgerLines: number;
+	/** The ledger read stopped at its tail window, so edges older than it were
+	 *  never seen. They are in no other field — not `edges`, not `unattributed`,
+	 *  not `malformedLedgerLines` — so this is the only thing that stops a
+	 *  truncated read from looking like a complete one, and it is one of the
+	 *  three conditions that make `total` a floor. */
+	ledgerTruncated: boolean;
 	/** The ledger read failed — message, or null when it was read (an ABSENT
 	 *  ledger reads fine and is not an error: nothing has spawned yet).
 	 *
@@ -186,13 +192,21 @@ export function resolveSessionFile(sessionId: string): string | null {
 }
 
 /**
- * Walk the recorded lineage of one session, depth-first, counting each session
- * at most once.
+ * Walk the recorded lineage of one session, BREADTH-FIRST, counting each
+ * session at most once.
  *
- * `seen` starts holding the ROOT, which is what makes a cycle terminate and
- * what stops a session being billed as its own descendant. A diamond — two
- * spawners recording the same child — hits the same guard: the money was spent
- * once, so it lands once.
+ * Breadth-first is a correctness property, not a taste: it reaches every
+ * session at its MINIMUM depth. Depth-first marked a child at whatever depth
+ * ledger order happened to reach it first, so a session recorded both at the
+ * end of a long chain and directly under the root had its own children cut as
+ * `depth-capped` although they sit two levels down — and the reported tree
+ * depended on the order lines were appended in.
+ *
+ * `outcomeOf` starts holding the ROOT as `in-self`, which is what makes a cycle
+ * terminate and what stops a session being billed as its own descendant: the
+ * root's money IS the self total, so an edge back to it is neither a gap nor a
+ * second count. A diamond hits the same map — the money was spent once, so it
+ * lands once, and the second edge reports what happened to the first.
  */
 export function computeSpawnTree(
 	rootSessionId: string,
@@ -213,7 +227,7 @@ export function computeSpawnTree(
 	try {
 		ledger = readSpawnLedger(options.ledgerPath);
 	} catch (err) {
-		ledger = { childrenOf: new Map(), malformedLines: 0 };
+		ledger = { childrenOf: new Map(), malformedLines: 0, truncated: false };
 		ledgerError = err instanceof Error ? err.message : String(err);
 	}
 
@@ -225,6 +239,7 @@ export function computeSpawnTree(
 		depthCapped: 0,
 		maxDepth,
 		malformedLedgerLines: ledger.malformedLines,
+		ledgerTruncated: ledger.truncated,
 		ledgerError,
 		total: emptyTotals(),
 	};
@@ -255,6 +270,9 @@ export function computeSpawnTree(
 	type Outcome = "counted" | "unresolved" | "in-self";
 	const outcomeOf = new Map<string, Outcome>([[rootSessionId, "in-self"]]);
 	for (const id of options.alreadyAttributed ?? []) outcomeOf.set(id, "in-self");
+	/** Sessions whose own edges have been queued, so a seeded `in-self` id is
+	 *  descended into exactly once however many edges point at it. */
+	const visited = new Set<string>([rootSessionId]);
 
 	type Visit = { parentId: string; depth: number };
 	const queue: Visit[] = [{ parentId: rootSessionId, depth: 1 }];
@@ -289,6 +307,17 @@ export function computeSpawnTree(
 					: prior === "in-self" ? "in-self-total" as const
 					: "already-seen-unresolved" as const;
 				tree.edges.push({ ...base, resolved: false, path: null, total: null, skip });
+				// A session reached a second time was already queued the first
+				// time, so there is nothing to queue — EXCEPT for the ids seeded
+				// as `in-self` before the walk began, which were never visited.
+				// Only that child's OWN transcript is inside the self total; the
+				// launcher children IT recorded are not, and dropping them loses
+				// exactly the nesting this issue expects (a `claude -p` child
+				// that dispatches its own pr-review lenses).
+				if (prior === "in-self" && !visited.has(edge.child)) {
+					visited.add(edge.child);
+					queue.push({ parentId: edge.child, depth: depth + 1 });
+				}
 				continue;
 			}
 			if (depth > maxDepth) {
@@ -307,13 +336,26 @@ export function computeSpawnTree(
 				// money over one lookup that came back empty. Its grandchildren
 				// are edges in the LEDGER, not entries in the file we did not
 				// find.
+				visited.add(edge.child);
 				queue.push({ parentId: edge.child, depth: depth + 1 });
 				continue;
 			}
 
 			let total: TokenTotals;
 			try {
-				total = computeSessionSummary(parseSessionFile(file)).total;
+				// Parse once and use it twice: for the cost, and for the ids the
+				// PARSE ITSELF folded in. `parseSessionFile` rolls this
+				// descendant's own `claude -p` and Task children into its
+				// totals, and the issue expects exactly that nesting — a
+				// launcher child dispatching its own lenses. If one of those is
+				// ALSO a ledger edge, it would be counted inside this
+				// descendant and again as its own resolved edge. The root's
+				// guard does not reach here; each descendant needs its own.
+				const parsed = parseSessionFile(file);
+				total = computeSessionSummary(parsed).total;
+				for (const id of collectSelfAttributedSessionIds(file, parsed)) {
+					if (!outcomeOf.has(id)) outcomeOf.set(id, "in-self");
+				}
 			} catch {
 				// A recorded child we CAN see and cannot read is the one skip
 				// class that is a bug rather than a fact, so it is reported as
@@ -321,6 +363,7 @@ export function computeSpawnTree(
 				outcomeOf.set(edge.child, "unresolved");
 				tree.edges.push({ ...base, resolved: false, path: file, total: null, skip: "unreadable" });
 				tree.unattributed.push({ child: edge.child, mechanism: edge.mechanism, ts: edge.ts, ...(edge.label !== undefined ? { label: edge.label } : {}), reason: "unreadable" });
+				visited.add(edge.child);
 				queue.push({ parentId: edge.child, depth: depth + 1 });
 				continue;
 			}
@@ -329,7 +372,8 @@ export function computeSpawnTree(
 			outcomeOf.set(edge.child, "counted");
 			addTotals(tree.total, total);
 			tree.edges.push({ ...base, resolved: true, path: file, total });
-			queue.push({ parentId: edge.child, depth: depth + 1 });
+			visited.add(edge.child);
+				queue.push({ parentId: edge.child, depth: depth + 1 });
 		}
 	}
 

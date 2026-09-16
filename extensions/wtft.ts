@@ -20,6 +20,7 @@ import {
 } from "./lib/wtft-shared.js";
 import { readConfig, writeConfig, hasConfig } from "@princess-pi/libs/config";
 import { computeSpawnTree, type SpawnTree } from "./lib/wtft-spawn-tree.js";
+import { collectSelfAttributedSessionIds } from "./lib/wtft-parser.js";
 import {
 	parseWtftCliArgs,
 	ensureDaemonRunning,
@@ -158,11 +159,17 @@ function getSettings(_ctx: any) {
  *  cases that still can throw (a project dir that becomes unreadable between
  *  the listing and the stat), where a widget refresh running every turn must
  *  not take the panel down; there, the block is simply absent. */
-function widgetSpawnTree(ctx: any): SpawnTree | undefined {
+function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | undefined {
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	if (!sessionFile) return undefined;
 	try {
-		return computeSpawnTree(path.basename(sessionFile).replace(/\.jsonl$/i, ""));
+		// The SAME double-count guard the CLI passes. `readInteractions` merges
+		// every subagent session into SELF, so a spawner that also records one
+		// as a ledger edge would have the widget count it in TOTAL and again in
+		// SPAWNED. This surface had no guard at all until the PR review asked.
+		return computeSpawnTree(path.basename(sessionFile).replace(/\.jsonl$/i, ""), {
+			alreadyAttributed: collectSelfAttributedSessionIds(sessionFile, interactions),
+		});
 	} catch {
 		return undefined;
 	}
@@ -497,7 +504,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				// TOTAL with $69 of lens children unlisted is exactly the gap
 				// the issue is about, and omitting it here would recreate it on
 				// the surface Duppy actually looks at.
-				const output = renderTokenSummary(interactions, Math.max(current.width, 40), budget, undefined, widgetSpawnTree(ctx));
+				const output = renderTokenSummary(interactions, Math.max(current.width, 40), budget, undefined, widgetSpawnTree(ctx, interactions));
 				ctx.ui.notify(output, "info");
 				return;
 			}

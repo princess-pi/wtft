@@ -88,6 +88,12 @@ export type SpawnEdge = SpawnRecord;
 export interface SpawnLedger {
 	/** parent session id → its recorded edges, in ledger order. */
 	childrenOf: Map<string, SpawnEdge[]>;
+	/** The read stopped at LEDGER_TAIL_BYTES, so edges older than that window
+	 *  were never seen — plus the one line the window boundary always drops.
+	 *  Reported rather than inferred: those edges are in neither `childrenOf`
+	 *  nor `malformedLines`, so without this flag a truncated read looks exactly
+	 *  like a complete one. */
+	truncated: boolean;
 	/** Lines that could not be used, COUNTED. A line dropped silently is money
 	 *  dropped silently; this number is reported so a broken writer is visible. */
 	malformedLines: number;
@@ -209,9 +215,23 @@ export function appendSpawnRecord(record: SpawnRecord, file: string = spawnLedge
 		// the line as a second record, so the only honest move is to say the
 		// append failed — the caller's contract is already "an unwritten edge
 		// degrades to the old behaviour".
-		const written = fs.writeSync(fd, buf);
+		let written = 0;
+		try {
+			written = fs.writeSync(fd, buf);
+		} finally {
+			// TERMINATE THE FRAGMENT. A partial line with no newline is not just
+			// one lost record: the next spawner's O_APPEND lands directly after
+			// those bytes and MERGES INTO them, so a second, correctly recorded
+			// edge is destroyed by the first one's failure — and that child goes
+			// invisible rather than unattributed. One best-effort newline turns
+			// two casualties into one. It runs in `finally` because the throwing
+			// case (ENOSPC mid-write) is exactly the one that leaves a fragment.
+			if (written > 0 && written !== buf.length) {
+				try { fs.writeSync(fd, Buffer.from("\n", "utf8")); } catch { /* nothing more to try */ }
+			}
+		}
 		if (written !== buf.length) {
-			throw new Error(`spawn ledger: short write (${written} of ${buf.length} bytes) — the ledger now holds a partial line`);
+			throw new Error(`spawn ledger: short write (${written} of ${buf.length} bytes) — one partial line remains, terminated so the next record stays intact`);
 		}
 	} finally {
 		fs.closeSync(fd);
@@ -264,7 +284,7 @@ export function readSpawnLedger(file: string = spawnLedgerPath()): SpawnLedger {
 	let malformedLines = 0;
 
 	const read = readLedgerText(file);
-	if (read === null) return { childrenOf, malformedLines };
+	if (read === null) return { childrenOf, malformedLines, truncated: false };
 
 	const lines = read.text.split("\n");
 	// A tail read starts mid-line; that fragment is not a malformed record, it
@@ -309,7 +329,7 @@ export function readSpawnLedger(file: string = spawnLedgerPath()): SpawnLedger {
 		if (list) list.push(edge); else childrenOf.set(edge.parent, [edge]);
 	}
 
-	return { childrenOf, malformedLines };
+	return { childrenOf, malformedLines, truncated: read.truncated };
 }
 
 // ---

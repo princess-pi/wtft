@@ -2167,9 +2167,12 @@ export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string 
 		// know the ledger itself is damaged, which is a fact about the ledger
 		// rather than about this session and is otherwise reported nowhere on
 		// this surface.
-		if (spawned.malformedLedgerLines > 0) {
-			return `\nSPAWNED    no descendants recorded for this session, and ` +
-			       `${spawned.malformedLedgerLines} unusable spawn-ledger line(s) were skipped (#116)\n`;
+		if (spawned.malformedLedgerLines > 0 || spawned.ledgerTruncated) {
+			const why = [
+				spawned.malformedLedgerLines > 0 ? `${spawned.malformedLedgerLines} unusable line(s) were skipped` : "",
+				spawned.ledgerTruncated ? "older edges were past the tail read" : "",
+			].filter(Boolean).join(", and ");
+			return `\nSPAWNED    no descendants recorded for this session, but ${why} (#116)\n`;
 		}
 		return "";
 	}
@@ -2201,6 +2204,9 @@ export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string 
 	}
 	if (spawned.malformedLedgerLines > 0) {
 		out += `           ${spawned.malformedLedgerLines} unusable ledger line(s) skipped\n`;
+	}
+	if (spawned.ledgerTruncated) {
+		out += `           ledger read stopped at its tail window — older edges not seen\n`;
 	}
 	// The SPAWNED subtotal is printed, because TREE names it as an addend and a
 	// reader should not have to sum the rows to check the arithmetic — nor try,

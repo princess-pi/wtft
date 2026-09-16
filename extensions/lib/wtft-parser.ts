@@ -1970,7 +1970,13 @@ export function collectSelfAttributedSessionIds(
 		// from a parse rather than from the tag file (the tag does not carry
 		// them).
 		const recorded = (interaction as any).claudeSubAgentSessionIds as string[] | undefined;
-		if (recorded) for (const id of recorded) ids.add(id);
+		if (recorded) {
+			for (const id of recorded) ids.add(id);
+			// The attribution pass already ran on this turn and wrote down what
+			// it found, so re-running discovery for it would re-read the same
+			// directory for the same answer.
+			continue;
+		}
 
 		if (!interaction.commands?.length) continue;
 		const cwd = cwdForClaudeSpawn(interaction.commands);

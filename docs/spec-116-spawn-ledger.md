@@ -90,7 +90,7 @@ with some flags the report parser ignores.
 |---|---|
 | 0 | Record appended — `--json` echoes the exact line written, and without it nothing is printed at all. Also `--help`, which appends nothing. |
 | 2 | Bad arguments — a missing required flag, an unknown flag, a flag with no value, a malformed UUID, a `ts` that is not ISO-8601, or an oversized field. |
-| 3 | The record was valid and the ledger could not be written (unwritable state dir, ENOSPC, a short write). |
+| 3 | The record was valid and the ledger could not be written (unwritable state dir, ENOSPC, a short write). The edge is **not recorded**, so the child is **invisible**, not `unattributed` — see *How this is verified*. A short write leaves one partial line, and the writer terminates it with a newline before failing, because otherwise the next spawner's `O_APPEND` merges into the fragment and a second, correctly recorded edge is destroyed by the first one's failure. |
 
 **It never blocks a spawn.** A spawner calls it and ignores the exit code; the failure is the
 spawner's to log, and an unwritten edge degrades to exactly today's behaviour.
@@ -127,12 +127,16 @@ The ledger deliberately does **not** record the session file's path: a worktree 
 file (#6) and a recorded path would rot, while the id does not. A recorded `cwd` is carried into
 the report for a human to read — it is never used to find anything.
 
+**A truncated ledger is not a complete one either.** Edges older than the 8 MiB window appear in
+no field — not `edges`, not `unattributed`, not `malformedLedgerLines` — so `ledgerTruncated` says
+the read stopped. Without it a truncated read is indistinguishable from a complete one.
+
 **An unreadable ledger is not an empty one.** `computeSpawnTree` owns the read, and a failure
 comes back as `ledgerError` with an otherwise-empty tree. Without that field an EACCES would
 render and serialise exactly like "this session spawned nothing" — #116's own failure mode
 reintroduced inside #116's fix. An *absent* ledger is not an error: nothing has spawned yet.
 
-**The walk** is depth-first from the reported session through `childrenOf`:
+**The walk** is breadth-first from the reported session through `childrenOf`:
 
 - **A session is counted at most once.** A `seen` set over session ids means a diamond (two
   recorded edges to the same child) or a cycle contributes its cost once, not twice.
@@ -190,6 +194,7 @@ already trust.
   "depthCapped": 0,
   "maxDepth": 5,
   "malformedLedgerLines": 0,
+  "ledgerTruncated": false,
   "ledgerError": null,
   "total": {…}
 },
@@ -199,8 +204,9 @@ already trust.
 `tree` = `total` + `spawned.total`, as a field, so a consumer never has to add two numbers and
 guess whether it double-counted. `label`, `model`, `cwd` and `skip` are present on an edge only
 when they apply; `label`, `ts`, `mechanism`, `child` and `reason` are the shape of a gap. Because
-`spawned.total` covers **resolved** descendants only, `tree` is a **floor** whenever
-`unattributed` is non-empty.
+`spawned.total` covers **resolved** descendants only, `tree` is a **floor** under any of THREE
+conditions, and checking the first alone reads a truncated tree as complete: `unattributed` is
+non-empty, `depthCapped` is non-zero, or `ledgerTruncated` is true.
 
 **`--tokens`** gains a block below TOTAL, rendered only when this session has at least one edge:
 
@@ -373,3 +379,28 @@ described an invariant the cache does not have, the `ts` exit-2 cause that is un
 command line (the flag is gone), and three test comments restating claims this spec had already
 retracted. One was declined: `spawned.ledgerError` having no exit code is deliberate, and
 `docs/spec-26-json.md` now says why.
+
+## PR review round 2 (2026-09-16)
+
+Ten blocking findings. Nine were real; one is refuted below with the code that disproves it.
+
+| Finding | Verified? | Action |
+|---|---|---|
+| Children of an `in-self-total` session were never walked | **Yes** — only that child's own transcript is inside SELF; the launcher children *it* recorded are not | **Code**: the seeded ids are descended into once. This is the nesting the issue expects — a `claude -p` child dispatching its own lenses, every one of them dropped. C30/C30b |
+| A descendant's own folded children could be billed twice | **Yes** — `parseSessionFile` rolls them into the descendant, and the root's guard does not reach a descendant | **Code**: each descendant contributes its own self-attributed ids to the walk, from the parse it already did |
+| The Pi widget passed no `alreadyAttributed` | **Yes** — `readInteractions` merges every subagent into SELF | **Code**: the widget passes the same guard the CLI does |
+| A short write corrupted the NEXT spawner's record | **Yes** — an unterminated fragment merges with the following `O_APPEND` | **Code**: the fragment is terminated with a newline before the failure is raised, so one failure costs one record rather than two. C32/C32b |
+| The 8 MiB truncation reached no field | **Yes** — and the manifest claimed it was "reported in the document" | **Code**: `ledgerTruncated`, through `SpawnLedger` → `SpawnTree` → `--json` and `--tokens`, and named as the third floor condition. C31–C31d |
+| Exit 3 said the child becomes "unattributed"; the spec says invisible | **Yes** — my own contradiction, introduced with the Closer declaration | Prose: the exit-code tables say **invisible** |
+| The spec called the walk depth-first, then breadth-first | **Yes** — plus a docstring naming two variables that no longer exist | Prose |
+| `tree` floor: two surfaces still gave the narrow guarantee | **Yes** — the round-1 table claimed "all four surfaces" and missed `wtft-json.ts` and one spec line | Prose. Stated as three named conditions everywhere now |
+| The ~2.2 KiB maximum record is not derivable | **Yes** — five 512-byte fields alone are 2.5 KiB; with two ids and keys it is under 3 | Prose |
+
+**Refuted — the self-attribution set does not lose `commands` through the tag file.**
+The finding reasons that `collectSelfAttributedSessionIds` needs `interaction.commands` for its
+`claude -p` arm, and that tag-derived interactions may not carry them. The tag-file wire format is
+`extensions/lib/wtft-daemon-lib.ts`, and it does: `serializeClassified` writes `cmd:
+interaction.commands` and `t: interaction.timestamp`, and `classifiedToInteraction` reads both back
+(`commands: obj.cmd || []`). Both fields the arm needs survive the round trip, and they are in the
+"must stay in sync" pair the file names as its single source of truth. The finding was right that
+the code assumed it — the assumption is now checked, and this paragraph is the check's record.

@@ -37,6 +37,7 @@ import {
 	appendSpawnRecord,
 	readSpawnLedger,
 	spawnLedgerPath,
+	LEDGER_TAIL_BYTES,
 	type SpawnRecord,
 } from "../extensions/lib/wtft-spawn-ledger.ts";
 import { computeSpawnTree } from "../extensions/lib/wtft-spawn-tree.ts";
@@ -506,6 +507,64 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 		`C29 a moved session is priced from the newest copy, not the stale one`);
 	check(tree.total.outputTokens === 1200,
 		`C29b which is the one with the real cost in it (got ${tree.total.outputTokens})`);
+}
+
+{
+	// A child inside SELF still has its OWN recorded children, and those are NOT
+	// inside self. This is the nesting the issue expects: a `claude -p` child
+	// that dispatches its own pr-review lenses. Reporting the edge and then
+	// dropping the subtree loses every lens.
+	childTranscript(U(130), 1);
+	childTranscript(U(131), 2);
+	const led = ledgerOf("in-self-subtree.jsonl", [
+		{ child: U(130) },
+		{ parent: U(130), child: U(131) },
+	]);
+	const tree = computeSpawnTree(PARENT, {
+		ledgerPath: led, alreadyAttributed: new Set([U(130)]),
+	});
+	check(tree.edges[0].skip === "in-self-total", "C30 the in-self child is reported, not added");
+	check(tree.descendants === 1 && tree.total.outputTokens === 600,
+		`C30b and ITS children are still walked and priced (got ${tree.descendants}, ${tree.total.outputTokens})`);
+}
+
+{
+	// The tail bound has to reach the document. Edges past it are in no other
+	// field — not edges, not unattributed, not malformedLedgerLines — so without
+	// a flag a truncated read is indistinguishable from a complete one.
+	childTranscript(U(140), 1);
+	const led = path.join(dir, "huge.jsonl");
+	const filler = serializeSpawnRecord(rec({ parent: U(999), child: U(998) })) + "\n";
+	const fd = fs.openSync(led, "w");
+	try {
+		const chunk = Buffer.from(filler.repeat(500), "utf8");
+		let written = 0;
+		while (written < LEDGER_TAIL_BYTES + 64 * 1024) { fs.writeSync(fd, chunk); written += chunk.length; }
+		fs.writeSync(fd, Buffer.from(serializeSpawnRecord(rec({ child: U(140) })) + "\n", "utf8"));
+	} finally { fs.closeSync(fd); }
+
+	const ledger = readSpawnLedger(led);
+	check(ledger.truncated === true, "C31 a ledger past the tail window reports the truncation");
+	const tree = computeSpawnTree(PARENT, { ledgerPath: led });
+	check(tree.ledgerTruncated === true, "C31b and it reaches the tree");
+	check(tree.descendants === 1, "C31c while the newest edge, which is in the window, still resolves");
+
+	const small = ledgerOf("small.jsonl", [{ child: U(140) }]);
+	check(readSpawnLedger(small).truncated === false && computeSpawnTree(PARENT, { ledgerPath: small }).ledgerTruncated === false,
+		"C31d an ordinary ledger is not truncated");
+}
+
+{
+	// A short write must not destroy the NEXT spawner's record. The fragment is
+	// terminated, so the damage is one malformed line rather than two lost
+	// edges — simulated here by writing the fragment the failure would leave.
+	const led = path.join(dir, "fragment.jsonl");
+	fs.writeFileSync(led, '{"schema":"wtft/spawn@1","ts":"2026-09-1' + "\n");
+	appendSpawnRecord(rec({ child: U(150) }), led);
+	const ledger = readSpawnLedger(led);
+	check(ledger.malformedLines === 1, `C32 the fragment is the only casualty (got ${ledger.malformedLines})`);
+	check((ledger.childrenOf.get(PARENT) ?? []).length === 1,
+		"C32b and the record appended after it survives intact");
 }
 
 // ---

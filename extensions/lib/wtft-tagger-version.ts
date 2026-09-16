@@ -73,4 +73,17 @@
 // was previously invisible — measured at +$0.42 across the 250-session corpus
 // (#3/#138). A session total may therefore RISE after this bump; it must never
 // fall, and research/other-corpus/before-after.ts fails if it does.
-export const WTFT_TAGGER_VERSION = "2.8.0";
+// 2.8.1 (#115) — `miss` is now parent-only: a sidechain's first turn reads 0 and
+// writes everything by construction, so flagging it made the Cache Miss divider
+// noise that grew with fan-out. Tag files are append-only and `miss` is baked
+// into every line, so without this bump the divider keeps firing on every
+// already-tagged session. Patch, not minor: no line's cost, category or bucket
+// moves — one boolean stops being set on sidechain lines.
+//
+// That claim is load-bearing and was nearly false. A first cut also widened
+// `isSidechain` across a dedup merge, which would have moved cache-write dollars
+// between the overhead and work buckets (splitOverheadCost gates recache
+// detection on it) and flipped detection for later interactions through the
+// prevCtx chain — a semantic move that a patch bump understates. Only the
+// divider's own flag is touched. Widening isSidechain belongs with #15.
+export const WTFT_TAGGER_VERSION = "2.8.1";

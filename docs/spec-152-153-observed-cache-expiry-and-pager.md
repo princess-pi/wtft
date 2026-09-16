@@ -136,7 +136,14 @@ Renaming makes the label state what was measured and stops the divider from maki
 new implementation deliberately gave up the ability to check. Touch points: the divider string
 at `wtft-renderer.ts:1214` and its description in `docs/EXT_WTFT.html:164`.
 
-### Subagent cold starts are marked too
+### Subagent cold starts are marked too — SUPERSEDED by Amendment 1 (#115)
+
+> **Superseded in full. Do not implement from this section.** #115 reversed the decision it
+> records: sidechains ARE gated out, at parse time and again from provenance. What follows is
+> kept as the record of what was traded away and at what measured cost — the `a578` numbers
+> below are still accurate about that session, and are the reason the reversal needed its own
+> measurement rather than an assertion. Read Amendment 1 at the end of this file for the rule
+> in force.
 
 Each subagent sidechain runs against its own cache namespace, so its first turn is a genuine
 miss and now draws a divider on the parent timeline.
@@ -148,9 +155,11 @@ miss and now draws a divider on the parent timeline.
 tag file, sees `undefined` for every interaction. Excluding sidechains therefore means adding a
 wire field *and* bumping `WTFT_TAGGER_VERSION` to re-tag every session.
 
-*Superseded in part: the bump happened anyway, for the correctness reason above. The
-measurement below still stands as the reason sidechains are **not** gated out — that decision
-was never about the bump alone, and adding an `isSidechain` wire field remains unjustified.*
+*Superseded twice, and the second time in full. First in part — the bump happened anyway, for
+the correctness reason above. Then by #115: the measurement below is no longer a reason to keep
+sidechains flagged, because it counted dividers without asking which of them a reader could act
+on. No `isSidechain` wire field was ever added, and none was needed: the gate is applied before
+the tag line is written, so the tag file still carries no such field.*
 
 Measured against that cost, on `a578` — the most subagent-heavy session on this machine, 31
 sidechain transcripts across two workflow bursts — its v2.6.1 tag file yields:
@@ -168,6 +177,8 @@ exists to make.
 
 **Decision: no `isSidechain` wire field, no sidechain gating.** Recorded so the omission is
 deliberate; revisit only if a session shows the dividers actually crowding the render.
+**Revisited and reversed — #115, Amendment 1.** The "no wire field" half held; the "no gating"
+half did not survive contact with fan-out.
 
 ### Road not taken: partial re-primes
 
@@ -304,3 +315,88 @@ seconds after the previous turn — the case that motivated the issue. `07:50:38
 re-prime, is correctly not flagged.
 
 `docs/EXT_WTFT.html` reconciled to the observed rule and the new label at Step 5.
+
+---
+
+## Amendment 1 (#115) — the divider is parent-only
+
+**What was wrong.** The rule above says `cr === 0 && cw > 0`, full stop. A Task subagent
+satisfies it on its first turn *by construction*: a fresh sidechain context reads nothing and
+writes everything. Nothing expired and nothing was lost, so the divider — whose whole meaning is
+"your cached prefix was thrown away" — fired on a routine spawn. Measured on one real session,
+3 of 4 dividers were subagent first-messages, and the ratio worsens as fan-out grows, which is
+the shape the routing rules actively encourage.
+
+**The change.** `cacheMiss` gains one conjunct at the same site, `wtft-parser.ts`:
+
+```ts
+const cacheMiss =
+    !turn.isSidechain &&
+    usage.cache_read_input_tokens === 0 && usage.cache_creation_input_tokens > 0
+        ? true : undefined;
+```
+
+**Why at the parser and not the renderer.** The same reason the original decision is made there:
+`miss` is baked into every tag line and the renderer only follows the flag (`wtft-daemon-lib.ts`
+writes `miss: 1`, reads it back as `cacheMiss`). Gating in the renderer would leave the tag files
+saying something false, and `isSidechain` is not serialized to them at all.
+
+**Why every sidechain turn, not only its first.** `splitOverheadCost` already excludes sidechains
+wholesale from recache detection, in the same file, for the same reason — a sidechain's cache
+behaviour is not the reader's conversation. A second, narrower rule here would be a second thing
+to keep true.
+
+**Tagger bump: 2.8.0 → 2.8.1.** Tag files are append-only, so without it the divider keeps firing
+on every already-tagged session. Patch, not minor: no line's cost, category or bucket moves — one
+boolean stops being set on sidechain lines.
+
+**What the bump costs, stated rather than waved past.** The version is the key a reader resolves a
+tag file by, so every already-tagged session on every machine becomes `stale-version` provisional
+until the daemon re-tags it: `wtft` still prints the full total, adds a `PROVISIONAL` warning, and
+**exits 9 instead of 0** (`docs/EXT_WTFT.html`, *Provisional reads*). A scripted caller testing
+`$? -eq 0` fails during that window, over a change whose visible effect is one fewer divider. It
+is transient and inherent to any bump — but it is exactly the trade the superseded section above
+declined, so it belongs in the record next to the reversal rather than only in the section that
+lost the argument.
+
+**Two readers, one seam.** `loadSubagentInteractions` is not the only route a subagent
+transcript takes to a rendered divider: the daemon's `syncSubagentTranscript` parses and
+serializes its own subagent tag lines, and the CLI renders from the TAG FILE. Clearing the flag
+in one reader would bake `miss: 1` into the tag file and make the Pi widget and the CLI disagree
+about the same session. So the clear is an exported seam, `clearSubagentCacheMiss`, called by
+both.
+
+**Two harnesses, two gates, one rule.** Claude Code stamps `isSidechain` on every turn of a
+subagent transcript, so the parse-time conjunct catches those. Pi does not — it marks a subagent
+at FILE level, with a `parentSession` header and no per-entry flag — and the nested
+`subagents/workflows/wf_<id>/` layout stamps nothing either. `loadSubagentInteractions` therefore
+clears the flag a second time, from PROVENANCE: anything that came out of a subagent transcript
+had a fresh context, whatever its harness writes in the envelope. Only the divider's flag is
+cleared there. `isSidechain` itself also gates recache detection, and setting it from provenance
+would move subagent interactions between overhead buckets — a larger change, and one that belongs
+with the subagent-accounting work (#15).
+
+**The one window this does not close.** `deduplicateInteractions` clears the flag when any copy
+of a message id carries `isSidechain`, but only across the copies in one array. The daemon's
+PARENT path dedups a single poll batch, so two emissions of one id that straddle a 667 ms poll
+boundary never meet — the defect class `bin/wtft-daemon.ts` already names, whose whole-file
+re-parse fix was applied to subagent transcripts only. In that window a sidechain turn could still
+write one tag line carrying `miss: 1`, and no tag reader can undo it, because `isSidechain` is
+deliberately not in the wire format. Closing it means the parent path re-parsing whole files too,
+which is #97's question. Stated here rather than left implied by a test that only exercises the
+single-array case.
+
+**The number that differs from the issue, reconciled.** #115 asks for "zero Cache Miss dividers"
+from a session that spawns N subagents and never idles. It renders **one**: the session's own
+first turn is a real cold start, and *Why removal, not augmentation* above decided that case stays
+flagged. The rule #115 is actually asking for is "no divider a SUBAGENT caused", which is what the
+closer pins.
+
+**Closer** — `tests/wtft-115-cache-miss-sidechain.test.ts`, on a parent transcript plus a real
+`<session>/subagents/agent-*.jsonl` layout: the parent's two misses still render two dividers **on
+the parent's own two bins**, with none on the bin between them that only the subagent occupies;
+the subagent transcript alone renders zero (it rendered one before); an UNSTAMPED subagent
+transcript also renders zero, and the daemon's own parse/serialize path emits no `miss=1` tag line
+for it either; a merge whose max-cost copy lost the envelope flag stays suppressed, while
+`isSidechain` itself is asserted NOT to widen, so no overhead bucket moves; and both fixtures'
+costs are pinned to an arithmetic expectation rather than to a second parse of themselves.

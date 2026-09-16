@@ -96,6 +96,14 @@ is lossless for the path shapes we render.
 
 # #164 — A session stranded in a REMOVED directory matches nothing
 
+> **SUPERSEDED by Amendment 1 (#89) — read that first, at the end of this file.**
+> The rule this section specifies was built and shipped, and then deleted: measured over 7,537
+> real transcripts the whole-file relocation arm returned **0** extra candidates for 6,637
+> whole-file reads per launch. Everything below is accurate about what was built and why, and the
+> probe numbers are still the honest cost of the design — it is the *conclusion* that did not
+> survive a second measurement. Amendment 1 carries the rule in force, the measurement that
+> replaced this one, and the one shape that is no longer found.
+
 ## Evidence
 
 `extensions/lib/harness/claude-code/discovery.ts:113` — the union filter:
@@ -364,37 +372,38 @@ Each is a concrete assertion in
   `/home/t/my_repo`, **and** so is one named `-home-t-my-repo`. Both hypotheses hold at once.
 - **V4** — no false positive: `/tmp/x.y/z` does not match a dir named `-tmp-x-y-z-w`.
 
-**Stranded sessions (#164)**
+**Stranded sessions (#164, restated by Amendment 1 / #89)**
 
-- **V5** — a transcript filed under `slug(<worktree>)`, whose entries record `cwd = <worktree>`
-  and which carries `{"type":"relocated","relocatedCwd":"<main clone>"}`, where `<worktree>`
-  **does not exist on disk**, is returned by `discoverSessions("claude-code", "<main clone>")`.
-  This is the #158 failure, reproduced.
-- **V6** — ordering: the same fixture with the *latest* relocation pointing at the worktree still
-  matches from the main clone. (Asserts the set rule, not last-wins.)
+- **V5** — *restated.* A transcript filed under `slug(<main clone>)` — where the session STARTED —
+  whose entries record `cwd = <worktree>` with `<worktree>` **not on disk**, is returned by
+  `discoverSessions("claude-code", "<main clone>")`. This is the #158 failure as it actually
+  occurs, and the physical arm alone answers it.
+- **V6** — *inverted.* A transcript filed under `slug(<worktree>)`, reachable from the main clone
+  only through its relocation history, is **NOT** returned. This is the case #89 gave up; 0 exist
+  on the 7,537-transcript corpus it was measured against. Asserted as a fact about the build so
+  the trade is on the record.
 - **V7** — no regression: a session that never left the main clone is still found, and the whole
   of `tests/wtft-issue-156-harness-seam.test.ts` Parts A–C passes unchanged.
-- **V8** — Pi shape unaffected: a transcript with no `cwd` and no `relocated` resolves to `null`
-  from `resolveLastCwd`, yields the **empty** history from `resolveCwdHistory`, and contributes
-  nothing to any target.
-- **V9** — the gate holds: in a batch with one stranded transcript (last cwd removed) and one
-  live-cwd transcript (`homebody`, last cwd exists), the whole-file history scan fires **at most
-  once** — for the stranded one — never for `homebody`. `resolveCwdHistory` is called a second
-  time during display (`displaySlugFor`), but the `(path, mtimeMs, size)` memo absorbs it, so the
-  read counter still shows one scan, not two. Concretely: `getCwdHistoryReadCount() <= 1` after
-  `discoverSessions("claude-code", clone)`, with `getCwdReadCount() > 0` confirming the cheap tail
-  scan ran at all.
-- **V10** — display prefers a live path: the V5 candidate's `displayPath` names the main clone,
-  not the removed worktree.
+- **V8** — Pi shape unaffected: a transcript with no `cwd` resolves to `null` from
+  `resolveLastCwd` and contributes nothing to any target. (The history half of this assertion
+  went with `resolveCwdHistory`.)
+- **V9** — *restated as a bound, not a gate.* There is no longer a gate to hold: a dead cwd costs
+  what a live one costs. `getCwdBytesRead() <= getCwdReadCount() * 512 KB` after
+  `discoverSessions("claude-code", clone)`, with `getCwdReadCount() > 0` confirming the tail scan
+  ran at all. Bytes rather than scans, because a scan counter that can only read 0 guards nothing.
+- **V10** — display renders under the **physical** slug, the directory the session started in.
+  The "prefer the most recent still-existing directory" rewrite went with the whole-file read that
+  produced it.
 - **V11 (cost, per #164 — restated per #477, then REPLACED per #39)** — five assertions on a
   corpus the TEST builds, not the live `~/.claude/projects` tree, and every one of them an exact
   integer rather than a duration:
 
-  - **V11a** — 60 transcripts whose recorded cwd still exists: the cheap tail scan runs for every
-    one (`getCwdReadCount() >= 60`) and the `pathExists` gate keeps the expensive tier fully off
-    (`getCwdHistoryReadCount() === 0`).
-  - **V11b** — the same corpus shape with dead cwds triggers exactly one whole-file scan each
-    (`=== 60`), so V11a cannot pass on a corpus that could never have scanned in the first place.
+  - **V11a** — *restated in bytes.* 60 transcripts of 256 KB each whose recorded cwd still
+    exists: the tail scan runs for every one (`getCwdReadCount() >= 60`) and reads tails rather
+    than files (`getCwdBytesRead() <= 960 KB`, against the 15,360 KB a whole-file pass costs).
+  - **V11b** — *inverted, and the #89 assertion.* The same corpus with every cwd DEAD must cost
+    the same: `getCwdBytesRead() <= 960 KB` and no more reads than the live arm. Before #89 this
+    corpus cost 15,360 KB, so the two are orders of magnitude apart rather than a tuned threshold.
   - **V11c** — a second discovery re-reads nothing and re-scans nothing. This replaces
     `warm <= cold + 50`, which **could not fail**: a broken memo inflated `warm` *and* the bound
     it was compared against.
@@ -580,3 +589,68 @@ or a fully-deleted repo history. They are documented as behaviour, not asserted 
 tail cap, **#171** the leaked `wtft-daemon` child in
 `tests/wtft-tree-navigation-cost-divergence.test.ts`, **#172** the worktree-build path leakage in
 generated `bin/*.mjs`. **#168** (typecheck red on clean main) predates this branch and stays open.
+
+
+---
+
+# Amendment 1 (#89) — the relocation arm is deleted
+
+**What it cost.** Re-measured 2026-09-15 on 7,537 transcripts / 2.8 GB / 1,877 project dirs, with
+`debug/count-picker.ts`:
+
+| cwd | candidates | warm ms | tail reads | whole-file reads |
+|---|---:|---:|---:|---:|
+| `~/git-projects/wtft` | 10 | 4,276 | 14,443 | **6,952** |
+| `~/git-projects/princess-pi-tools` | 88 | 3,901 | 14,421 | **6,952** |
+| `~` | 153 | 3,721 | 14,050 | **6,952** |
+
+Cold, on a quiet machine, the same scan measured 34,850 ms.
+
+**What it bought.** Split per candidate, the history arm contributed **0** of them, for all three
+cwds. Two facts explain why, and both are structural rather than incidental:
+
+- **Relocations are rare.** 42 of 6,897 transcripts contain a `"type":"relocated"` record at all.
+  The other 6,595 whole-file reads cannot match by construction — they are reading files that
+  carry nothing to match against.
+- **The physical arm already covers the shape.** Claude Code files a transcript under the
+  directory its session STARTED in, and a session starts in the main clone before it enters a
+  worktree. For all 21 relocated transcripts whose last cwd was dead, every *live* directory in
+  their history already fanned out (#145) to the transcript's own physical slug. Load-bearing
+  `(session, dir)` pairs that only the history arm could surface, machine-wide: **0**.
+
+The #158 failure this section was written for is therefore real, and was already fixed by the
+physical arm plus the fan-out — the history arm was answering a question nobody was asking.
+
+**What was deleted.** `resolveCwdHistory`, `historyCache`, `pickLiveCwd`, `pathExists`,
+`existsCache`, `getCwdHistoryReadCount`, the `RELOCATED_MARKER` pre-filter, the gate in
+`matchesRecordedCwd`, and `displaySlugFor` entirely. `matchesRecordedCwd` is now one tail read and
+one set lookup. The relocation records are still IN the transcripts; nothing reads them.
+
+**What it bought back.** Same measurement, after:
+
+| cwd | candidates | warm ms | tail reads | bytes read |
+|---|---:|---:|---:|---:|
+| `~/git-projects/wtft` | 10 | 1,791–1,962 | 14,441 | 580 MB |
+| `~/git-projects/princess-pi-tools` | 88 | 1,954–1,992 | 14,344 | 576 MB |
+| `~` | 153 | 1,559–1,595 | 14,051 | 519 MB |
+
+**Identical candidate counts, ~2.2x faster warm, zero whole-file reads.** No session was lost on
+the corpus this was measured against.
+
+**#89's own Expected is NOT met, and that is deliberate.** It asks for ≤ 200 ms. What remains is
+14k bounded tail reads plus 2,210 directory reads, which no deletion can remove — only an index
+can. That is #89's direction **I** (`~/.cache/wtft/cwd-index.jsonl`, keyed `(path, mtimeMs,
+size)`, scanning only bytes appended since the recorded size), and the decision on record is to
+build it only if the experience is still slow after this. #89 stays **open** for it; this branch
+does not close it.
+
+**The one shape given up.** A session filed under a project slug that is not a checkout of the
+target, reachable only through its relocation history, is no longer listed. Zero such sessions
+exist on the development corpus. If one ever appears, the transcript still carries its history —
+re-derive it there, ideally inside the index rather than by restoring a per-launch whole-file
+scan.
+
+**New instrument.** `getCwdHistoryReadCount()` is replaced by `getCwdBytesRead()`. A counter that
+can only ever read 0 is not a guard; bytes is the quantity a reinstated whole-file read moves, and
+it also catches the half-measure of a tail window widened to the file size. `debug/count-picker.ts`
+reports it, and V9/V11a/V11b assert on it.

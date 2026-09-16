@@ -9,15 +9,19 @@
  * never revised, so it locates where a session *began*. The union rule below is
  * what makes a moved session reachable from where it now lives.
  *
- * Three further failure modes are folded into that same union, and every one of
- * them only ever *adds* matches — no arm may become a replacement:
+ * Two further failure modes are folded into that same union, and both only ever
+ * *add* matches — no arm may become a replacement:
  *
  *   #144  the slug encoding munges more than separators, so matching accepts
  *         either encoding rather than pinning one;
- *   #164  a session whose directory has been *deleted* matches on the set of
- *         directories it has ever occupied, not just its latest one;
  *   #145  the target is a set of directories — every checkout of the cwd's
  *         repo — rather than a single one.
+ *
+ * A third arm (#164) used to whole-file-read any transcript whose recorded cwd
+ * had been deleted, looking for an earlier directory it had occupied. #89
+ * deleted it: measured over 7,537 transcripts it contributed 0 candidates and
+ * 6,637 whole-file reads per launch. See harness/session-cwd.ts for why the
+ * physical arm already covers that shape.
  */
 
 import * as fs from "node:fs";
@@ -27,11 +31,7 @@ import * as os from "node:os";
 import type { HarnessDiscovery, SessionCandidate } from "../types.ts";
 import {
 	resolveLastCwd,
-	resolveCwdHistory,
 	countDirRead,
-	pickLiveCwd,
-	pathExists,
-	cwdToSlug,
 	cwdSlugVariants,
 } from "../session-cwd.ts";
 import { fanOutCwd } from "../worktrees.ts";
@@ -75,22 +75,6 @@ function collect(dir: string, projectSlug: string, out: string[]): void {
 	}
 }
 
-/**
- * Which slug to *render* this session under (#164).
- *
- * The physical project slug is the answer in every ordinary case, and is kept
- * verbatim so no row that renders today changes. It is only wrong for a
- * stranded session, where it names a directory that has been deleted — showing
- * the user a path they cannot visit. There, the most recent still-existing
- * directory from the session's history is the honest label.
- */
-function displaySlugFor(file: string, projectSlug: string): string {
-	const last = resolveLastCwd(file);
-	if (last === null || pathExists(last)) return projectSlug;
-	const live = pickLiveCwd(resolveCwdHistory(file));
-	return live ? cwdToSlug(live) : projectSlug;
-}
-
 function toCandidate(file: string, projectSlug: string): SessionCandidate | null {
 	let stat: fs.Stats;
 	try {
@@ -104,38 +88,35 @@ function toCandidate(file: string, projectSlug: string): SessionCandidate | null
 		harness: ID,
 		timestamp: stat.mtimeMs,
 		name,
-		displayPath: buildDisplayPath(name, displaySlugFor(file, projectSlug), ID),
+		// The physical project slug, always (#89). A stranded session renders
+		// under the directory it STARTED in — a real path in every case measured,
+		// and unlike the deleted #164 lookup it costs nothing to produce.
+		displayPath: buildDisplayPath(name, projectSlug, ID),
 	};
 }
 
 /**
  * Does this transcript's own recorded location put it in one of the targets?
  *
- * Two arms, in cost order. The second is gated on the first failing *and* on the
- * session's home being gone — unconditionally it is a whole-file read
- * (research/164-relocation-scan-probe.mjs).
+ * One arm, and one bounded tail read (#89). It used to have a second: when the
+ * recorded cwd no longer existed, the transcript was re-read WHOLE for the
+ * directories it had previously occupied. That case is real — `pr-cleanup`
+ * strands a session on every merge — but the answer was already free, because
+ * a transcript is filed under the directory its session STARTED in, and a
+ * session starts in the main clone before it enters a worktree. So the
+ * physical-slug arm above already matched every session the expensive arm could
+ * reach, and the expensive arm reached nothing it did not.
  *
- * That gate is far leakier than the figure once quoted here ("~315 ms, to serve
- * 3 transcripts in 40"): the second arm opens precisely for a session whose home
- * directory is gone, which `pr-cleanup` manufactures on every merge. Re-measured
- * at 34 in 40. The current numbers live in ONE place — {@link resolveCwdHistory}
- * in session-cwd.ts — deliberately not restated here, because the last set of
- * these went stale in four artifacts at once (princess-pi/wtft#35).
- *
- * So callers gate on need, not only on cost: `discover()` is called lazily by
- * bin/wtft.ts, since running it for an explicit `-s` was 98% of that command's
- * wall clock.
+ * Discovery is still called lazily by bin/wtft.ts: running it for an explicit
+ * `-s` was 98% of that command's wall clock, and a bounded scan of thousands of
+ * files is still a scan of thousands of files.
  *
  * A transcript with no `cwd` at all resolves to null and matches nothing, which
  * is what keeps Pi transcripts out of this entirely.
  */
 function matchesRecordedCwd(file: string, targets: Set<string>): boolean {
 	const last = resolveLastCwd(file);
-	if (last === null) return false;
-	if (targets.has(last)) return true;
-	// Lives somewhere real, just not here — nothing further to ask.
-	if (pathExists(last)) return false;
-	return resolveCwdHistory(file).some(dir => targets.has(dir));
+	return last !== null && targets.has(last);
 }
 
 export const discovery: HarnessDiscovery = {

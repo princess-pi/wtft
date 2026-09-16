@@ -95,16 +95,13 @@ import {
 	newParseStreamState,
 	readControlEntry,
 	resolveLastCwd,
-	resolveCwdHistory,
-	pickLiveCwd,
-	pathExists,
 	cwdToSlug,
 	cwdToStrictSlug,
 	cwdSlugVariants,
 	slugMatchesCwd,
 	resetCwdCache,
 	getCwdReadCount,
-	getCwdHistoryReadCount,
+	getCwdBytesRead,
 	getDirWalkCount,
 	type WatchSettings,
 	type Interaction,
@@ -229,15 +226,11 @@ export {
 	cwdToSlug,
 	resetCwdCache,
 	getCwdReadCount,
-	// Session discovery: slug encodings (#144), relocation history (#164),
-	// worktree fan-out (#145)
-	resolveCwdHistory,
-	pickLiveCwd,
-	pathExists,
+	// Session discovery: slug encodings (#144), worktree fan-out (#145)
 	cwdToStrictSlug,
 	cwdSlugVariants,
 	slugMatchesCwd,
-	getCwdHistoryReadCount,
+	getCwdBytesRead,
 	getDirWalkCount,
 	buildDisplayPath,
 	findRepoRoot,
@@ -439,12 +432,11 @@ async function main() {
 	// or a pending path. Run eagerly it was a whole session-corpus scan, paid for
 	// and thrown away on the commonest invocation of all.
 	//
-	// The scan is not cheap and gets less cheap over time: discovery asks each
-	// transcript where it lives, and one whose recorded cwd no longer exists falls
-	// through to resolveCwdHistory, a whole-file read. `pr-cleanup` deletes a
-	// worktree after every merge and strands every session that lived there, so
-	// that fallback's "3 transcripts in 40" budget measured 34 in 40 on the
-	// development host — 760 MB re-read per run, 98% of wall clock.
+	// The scan is bounded but not free: discovery asks every transcript on the
+	// machine where it lives, one tail read each. #89 removed the unbounded half
+	// (a whole-file re-read of every session stranded by `pr-cleanup`, which on
+	// the development host was 6,637 files and most of a 35 s cold launch); what
+	// is left is thousands of small reads, which is still worth deferring.
 	//
 	// Memoised as well as deferred, though nothing today needs the cache: both
 	// branches call it once and reuse the result. It is here so that a future

@@ -90,7 +90,7 @@ with some flags the report parser ignores.
 |---|---|
 | 0 | Record appended — `--json` echoes the exact line written, and without it nothing is printed at all. Also `--help`, which appends nothing. |
 | 2 | Bad arguments — a missing required flag, an unknown flag, a flag with no value, a malformed session id, or an oversized field. (`ts` is validated too, but nothing on the command line can set it — the flag does not exist and the clock fills it, so that cause is reachable only through the library.) |
-| 3 | The record was valid and the ledger could not be written (unwritable state dir, ENOSPC, a short write). The edge is **not recorded**, so the child is **invisible**, not `unattributed` — see *How this is verified*. A short write leaves one partial line, and the writer terminates it with a newline before failing, because otherwise the next spawner's `O_APPEND` merges into the fragment and a second, correctly recorded edge is destroyed by the first one's failure. |
+| 3 | The record was valid and the ledger could not be written (unwritable state dir, ENOSPC, a short write). The edge is **not recorded**, so the child is **invisible**, not `unattributed` — see *How this is verified*. Nothing repairs a partial line; see *Simplification pass*. |
 
 **It never blocks a spawn.** A spawner calls it and ignores the exit code; the failure is the
 spawner's to log, and an unwritten edge degrades to exactly today's behaviour.
@@ -104,10 +104,12 @@ reported, so a broken writer is visible rather than quietly losing money. A blan
 and not counted: it is whitespace, not a failed record. **The reader enforces none of the writer's
 size caps**; those guard the append, not the file.
 
-The read is bounded at 8 MiB from the tail. A truncated read starts mid-line, and a partial first
-line is indistinguishable from a whole one from inside the window, so the first line is dropped
-unconditionally — which past 8 MiB (roughly 40,000 spawns) costs one intact record. Edges older
-than that window are not read, and appear in neither `edges` nor `malformedLedgerLines`.
+**The whole file is read, or none of it is.** A ledger over 8 MiB — roughly 40,000 spawns — is
+**refused**, and the refusal comes back as `ledgerError` with "prune it" in the message. An earlier
+version read the last 8 MiB instead and reported the truncation, which cost a boolean on every
+surface, an extra floor condition to explain, a boundary line dropped on every truncated read, and
+a silent gap for any reader who ignored the flag. Refusing is simpler *and* stricter: a refusal
+cannot omit an edge without saying so.
 
 **Resolution goes through the harness seam** — `HarnessDiscovery.resolveSessionById`, asked of every
 registered harness in turn, so a Pi child resolves through Pi's discovery and a Claude Code child
@@ -126,10 +128,6 @@ only harness it runs in.
 The ledger deliberately does **not** record the session file's path: a worktree move relocates the
 file (#6) and a recorded path would rot, while the id does not. A recorded `cwd` is carried into
 the report for a human to read — it is never used to find anything.
-
-**A truncated ledger is not a complete one either.** Edges older than the 8 MiB window appear in
-no field — not `edges`, not `unattributed`, not `malformedLedgerLines` — so `ledgerTruncated` says
-the read stopped. Without it a truncated read is indistinguishable from a complete one.
 
 **An unreadable ledger is not an empty one.** `computeSpawnTree` owns the read, and a failure
 comes back as `ledgerError` with an otherwise-empty tree. Without that field an EACCES would
@@ -194,7 +192,6 @@ already trust.
   "depthCapped": 0,
   "maxDepth": 5,
   "malformedLedgerLines": 0,
-  "ledgerTruncated": false,
   "ledgerError": null,
   "total": {…}
 },
@@ -206,9 +203,9 @@ guess whether it double-counted. `label`, `model`, `cwd` and `skip` are present 
 when they apply; `label`, `ts`, `mechanism`, `child` and `reason` are the shape of a gap. Because
 `spawned.total` covers **resolved** descendants only, `tree` is a **floor** under any of THREE
 conditions, and checking the first alone reads a truncated tree as complete: `unattributed` is
-non-empty, `depthCapped` is non-zero, `ledgerTruncated` is true, or `ledgerError` is non-null.
-The last is the trap: a ledger that could not be read sets none of the other three, so a consumer
-checking only those reads a zeroed tree as a complete lineage.
+non-empty, `depthCapped` is non-zero, or `ledgerError` is non-null. The last is the trap: a ledger
+that could not be read sets neither of the other two, so a consumer checking only those reads a
+zeroed tree as a complete lineage.
 
 **`--tokens`** gains a block below TOTAL, rendered only when this session has at least one edge:
 
@@ -392,8 +389,8 @@ Ten blocking findings. Nine were real; one is refuted below with the code that d
 | Children of an `in-self-total` session were never walked | **Yes** — only that child's own transcript is inside SELF; the launcher children *it* recorded are not | **Code**: the seeded ids are descended into once. This is the nesting the issue expects — a `claude -p` child dispatching its own lenses, every one of them dropped. C30/C30b |
 | A descendant's own folded children could be billed twice | **Yes** — `parseSessionFile` rolls them into the descendant, and the root's guard does not reach a descendant | **Code**: each descendant contributes its own self-attributed ids to the walk, from the parse it already did |
 | The Pi widget passed no `alreadyAttributed` | **Yes** — `readInteractions` merges every subagent into SELF | **Code**: the widget passes the same guard the CLI does |
-| A short write corrupted the NEXT spawner's record | **Yes** — an unterminated fragment merges with the following `O_APPEND` | **Code**: the fragment is terminated with a newline before the failure is raised, so one failure costs one record rather than two. C32/C32b |
-| The 8 MiB truncation reached no field | **Yes** — and the manifest claimed it was "reported in the document" | **Code**: `ledgerTruncated`, through `SpawnLedger` → `SpawnTree` → `--json` and `--tokens`, and named as the third floor condition. C31–C31d |
+| A short write corrupted the NEXT spawner's record | **Yes** — an unterminated fragment merges with the following `O_APPEND` | **Accepted, not repaired**: see *Simplification pass*. The merge costs one further edge and is reported as a counted malformed line. C32/C32b |
+| The 8 MiB truncation reached no field | **Yes** — and the manifest claimed it was "reported in the document" | **Code**, then SIMPLIFIED AWAY: the windowed read is gone entirely (see *Simplification pass*), so there is no truncation left to report. C31/C31b |
 | Exit 3 said the child becomes "unattributed"; the spec says invisible | **Yes** — my own contradiction, introduced with the Closer declaration | Prose: the exit-code tables say **invisible** |
 | The spec called the walk depth-first, then breadth-first | **Yes** — plus a docstring naming two variables that no longer exist | Prose |
 | `tree` floor: two surfaces still gave the narrow guarantee | **Yes** — the round-1 table claimed "all four surfaces" and missed `wtft-json.ts` and one spec line | Prose. Stated as three named conditions everywhere now |
@@ -437,3 +434,43 @@ a version bump, which is a decision rather than a fix.
 
 **Where this stops.** The remaining review state is accepted rather than argued down: the next gate
 is Macroscope's single billed round at `pr-submit`, against the finished diff.
+
+## Simplification pass (Duppy, 2026-09-16)
+
+> "For disk-out-of-space errors or even memory-out-of-space errors, I'm okay with the simplest code
+> path: abort all these tools, just reconstruct and parse files, and wait until there is enough
+> disk space and memory. I don't want to spend a lot of time trying to handle out-of-memory and
+> out-of-disk-space errors."
+
+Two things built in review rounds 2 and 3 existed only to soften a full disk. Both came out, and
+the net is **−53 lines of source** across the branch.
+
+**1. Fragment termination, gone.** A short write left a partial line, and the next spawner's
+`O_APPEND` merged into it, so one failure cost two edges. Round 2 wrote a best-effort terminating
+newline; round 3 found that the guard skipped the throwing case its own comment claimed to cover;
+the fix for that added two conditional error messages. All of it is now one `writeSync`, one count
+check, one throw.
+
+*What we accept instead:* under ENOSPC the fragment stays, and the next successful record merges
+into it. That costs one further edge, and it is **reported, not silent** — the merged line comes
+back from `readSpawnLedger` as a counted `malformedLines`, which every surface prints. Twenty lines
+of repair machinery bought the difference between one reported loss and two, at the moment the disk
+is full and the remedy is a disk with space on it.
+
+**2. The 8 MiB tail window, gone — replaced by a refusal.** The reader took the last 8 MiB of an
+oversized ledger and reported the truncation. That cost a boolean on `SpawnLedger`, another on
+`SpawnTree`, a fourth floor condition in four documents, an extra render branch, a boundary line
+dropped on every truncated read, and a silent gap for any reader who ignored the flag. Now the
+reader takes the whole file or refuses it, and the refusal arrives as `ledgerError` with "prune it"
+in the message.
+
+**Simpler *and* stricter**, which is why this one is not a trade: a refusal cannot omit an edge
+without saying so, and a window always could.
+
+**Not removed, and here is the reasoning.** The `countedTotals` / `subtractTotals` pair that makes
+descendant double-counting order-independent is the other piece of machinery this branch carries,
+and it is *not* in this class: it does not soften a resource failure, it stops `tree` reporting a
+number that is wrong in the expensive direction. Removing it would trade ~20 lines for a wrong
+total whenever a spawner records an edge for a child some other mechanism already folded in.
+Worth knowing it is there; it is the branch's remaining concentration of subtlety, and #129 is why
+it has no regression test.

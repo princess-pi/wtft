@@ -79,21 +79,16 @@ export interface SpawnRecord {
 /** One edge as read back.
  *
  *  Deliberately NOT carrying a ledger line number. The first version did, and it
- *  was wrong by construction on any ledger over LEDGER_TAIL_BYTES: the tail read
- *  starts mid-file and drops a partial first line, so the index is an offset
- *  into the window, not into the file. A number that is right until the ledger
- *  gets big is worse than no number. */
+ *  was wrong by construction on any ledger the reader did not take whole — an
+ *  offset into a window rather than into the file. The windowed read is gone
+ *  too (see MAX_LEDGER_BYTES), and the field is not coming back: nothing read
+ *  it, and a number that is right until the ledger gets big is worse than no
+ *  number. */
 export type SpawnEdge = SpawnRecord;
 
 export interface SpawnLedger {
 	/** parent session id → its recorded edges, in ledger order. */
 	childrenOf: Map<string, SpawnEdge[]>;
-	/** The read stopped at LEDGER_TAIL_BYTES, so edges older than that window
-	 *  were never seen — plus the one line the window boundary always drops.
-	 *  Reported rather than inferred: those edges are in neither `childrenOf`
-	 *  nor `malformedLines`, so without this flag a truncated read looks exactly
-	 *  like a complete one. */
-	truncated: boolean;
 	/** Lines that could not be used, COUNTED. A line dropped silently is money
 	 *  dropped silently; this number is reported so a broken writer is visible. */
 	malformedLines: number;
@@ -208,58 +203,46 @@ export function appendSpawnRecord(record: SpawnRecord, file: string = spawnLedge
 	const buf = Buffer.from(line, "utf8");
 	const fd = fs.openSync(file, "a");
 	try {
-		// ONE write, and then a check that it was one write. `writeSync` returns
-		// a byte count and a short write is legal: ignoring it leaves a
-		// truncated line in the ledger and still exits 0, which is a malformed
-		// record reported as a recorded edge. A retry would append the REST of
-		// the line as a second record, so the only honest move is to say the
-		// append failed — the caller's contract is already "an unwritten edge
-		// degrades to the old behaviour".
-		// TERMINATE THE FRAGMENT. A partial line with no newline is not one lost
-		// record but two: the next spawner's O_APPEND lands directly after those
-		// bytes and MERGES INTO them, so a second, correctly recorded edge is
-		// destroyed by the first one's failure. A newline turns two casualties
-		// into one.
+		// One write, and a check that it was one write — `writeSync` returns a
+		// byte count and a short write is legal, so ignoring it would report a
+		// truncated line as a recorded edge. Throw; the caller's contract is
+		// already "an unwritten edge degrades to the old behaviour".
 		//
-		// BEST-EFFORT, and the error says so rather than promising. Under
-		// ENOSPC — the likeliest cause of a short write — this newline will fail
-		// too. An earlier version guarded on `written > 0`, which skipped the
-		// throwing case entirely while its own comment claimed to cover it: when
-		// `writeSync` throws, `written` is still 0 and we do not know how many
-		// bytes landed, which is precisely when a fragment is most likely.
-		let written = 0;
-		let terminated = false;
-		let writeError: unknown = null;
-		try {
-			written = fs.writeSync(fd, buf);
-		} catch (err) {
-			writeError = err;
-		}
+		// NOTHING IS DONE TO REPAIR A PARTIAL LINE, deliberately (Duppy,
+		// 2026-09-16). A short write here means the disk is full, and the
+		// remedy for a full disk is a disk with space on it, not code. The
+		// damage is bounded and it is REPORTED: the fragment, and the next
+		// record that merges into it, come back from `readSpawnLedger` as one
+		// counted `malformedLines`. A previous version spent twenty lines and
+		// two conditional error messages writing a best-effort terminating
+		// newline — which, under the ENOSPC that caused the short write, would
+		// fail too.
+		const written = fs.writeSync(fd, buf);
 		if (written !== buf.length) {
-			try {
-				fs.writeSync(fd, Buffer.from("\n", "utf8"));
-				terminated = true;
-			} catch { /* nothing more to try */ }
-		}
-		if (writeError !== null) {
-			throw new Error(`spawn ledger: write failed (${writeError instanceof Error ? writeError.message : String(writeError)})` +
-				` — an unknown number of bytes may have landed; the fragment was ${terminated ? "terminated" : "NOT terminated, so the next record may merge into it"}`);
-		}
-		if (written !== buf.length) {
-			throw new Error(`spawn ledger: short write (${written} of ${buf.length} bytes)` +
-				` — one partial line remains, ${terminated ? "terminated so the next record stays intact" : "and could NOT be terminated, so the next record may merge into it"}`);
+			throw new Error(`spawn ledger: short write (${written} of ${buf.length} bytes) — the disk is probably full; one partial line remains and is reported as a malformed line on the next read`);
 		}
 	} finally {
 		fs.closeSync(fd);
 	}
 }
 
-/** Read no more than this from the tail. Past it, the ledger is older than any
- *  live session's lineage, and a whole-file read of an append-only log that
- *  nothing prunes is an unbounded cost that grows for the life of the host. */
-export const LEDGER_TAIL_BYTES = 8 * 1024 * 1024;
+/**
+ * Refuse to read a ledger larger than this.
+ *
+ * NOT a window: the reader takes the whole file or none of it. An earlier
+ * version read the last 8 MiB and reported the truncation, which meant every
+ * surface had to carry a "this tree may be missing older edges" condition, the
+ * boundary line was always dropped, and a reader who ignored the flag got a
+ * quietly incomplete lineage. Refusing is both simpler and stricter — a
+ * refusal cannot omit an edge silently, and it comes back as `ledgerError`
+ * with a remedy in it.
+ *
+ * At ~200 bytes a record, 8 MiB is around 40,000 spawns. A ledger past that is
+ * a ledger that needs pruning, which is a decision for whoever owns the host.
+ */
+export const MAX_LEDGER_BYTES = 8 * 1024 * 1024;
 
-function readLedgerText(file: string): { text: string; truncated: boolean } | null {
+function readLedgerText(file: string): string | null {
 	let stat: fs.Stats;
 	try {
 		stat = fs.statSync(file);
@@ -270,18 +253,10 @@ function readLedgerText(file: string): { text: string; truncated: boolean } | nu
 		if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
 		throw err;
 	}
-	if (stat.size <= LEDGER_TAIL_BYTES) {
-		return { text: fs.readFileSync(file, "utf8"), truncated: false };
+	if (stat.size > MAX_LEDGER_BYTES) {
+		throw new Error(`spawn ledger is ${stat.size} bytes, over the ${MAX_LEDGER_BYTES}-byte limit (${file}) — prune it; reading part of it would drop edges without saying which`);
 	}
-	const start = stat.size - LEDGER_TAIL_BYTES;
-	const fd = fs.openSync(file, "r");
-	try {
-		const buf = Buffer.alloc(LEDGER_TAIL_BYTES);
-		const got = fs.readSync(fd, buf, 0, LEDGER_TAIL_BYTES, start);
-		return { text: buf.subarray(0, got).toString("utf8"), truncated: true };
-	} finally {
-		fs.closeSync(fd);
-	}
+	return fs.readFileSync(file, "utf8");
 }
 
 /**
@@ -300,16 +275,9 @@ export function readSpawnLedger(file: string = spawnLedgerPath()): SpawnLedger {
 	let malformedLines = 0;
 
 	const read = readLedgerText(file);
-	if (read === null) return { childrenOf, malformedLines, truncated: false };
+	if (read === null) return { childrenOf, malformedLines };
 
-	const lines = read.text.split("\n");
-	// A tail read starts mid-line; that fragment is not a malformed record, it
-	// is half of a record whose other half we chose not to read. The drop is
-	// UNCONDITIONAL on a truncated read because the two cases are genuinely
-	// indistinguishable from inside the window — so past LEDGER_TAIL_BYTES one
-	// intact record may be dropped with it. That costs one edge out of the
-	// ~40,000 an 8 MiB ledger holds, and only once the ledger is that big.
-	if (read.truncated && lines.length > 0) lines.shift();
+	const lines = read.split("\n");
 
 	for (let i = 0; i < lines.length; i++) {
 		const raw = lines[i].trim();
@@ -345,7 +313,7 @@ export function readSpawnLedger(file: string = spawnLedgerPath()): SpawnLedger {
 		if (list) list.push(edge); else childrenOf.set(edge.parent, [edge]);
 	}
 
-	return { childrenOf, malformedLines, truncated: read.truncated };
+	return { childrenOf, malformedLines };
 }
 
 // ---

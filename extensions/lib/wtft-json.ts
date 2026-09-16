@@ -71,12 +71,11 @@ export interface WtftSessionJson {
 	/** SELF + RESOLVED descendants, as a field — so a consumer never adds two
 	 *  numbers and has to work out for itself whether it double-counted.
 	 *
-	 *  A FLOOR whenever anything went uncounted, and there are FOUR conditions,
+	 *  A FLOOR whenever anything went uncounted, and there are THREE conditions,
 	 *  not one: `spawned.unattributed` is non-empty, `spawned.depthCapped` is
-	 *  non-zero, `spawned.ledgerTruncated` is true, or `spawned.ledgerError` is
-	 *  non-null. The last is the trap — an unreadable ledger sets none of the
-	 *  other three, so a consumer checking only those reads a zeroed tree as a
-	 *  complete lineage. */
+	 *  non-zero, or `spawned.ledgerError` is non-null. The last is the trap —
+	 *  an unreadable ledger sets neither of the other two, so a consumer
+	 *  checking only those reads a zeroed tree as a complete lineage. */
 	tree: TokenTotals;
 	compaction: { events: number; tokensFreed: number };
 	untaggedInteractions: number;

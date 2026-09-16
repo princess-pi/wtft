@@ -119,12 +119,6 @@ export interface SpawnTree {
 	maxDepth: number;
 	/** Ledger lines the reader could not use (see readSpawnLedger). */
 	malformedLedgerLines: number;
-	/** The ledger read stopped at its tail window, so edges older than it were
-	 *  never seen. They are in no other field — not `edges`, not `unattributed`,
-	 *  not `malformedLedgerLines` — so this is the only thing that stops a
-	 *  truncated read from looking like a complete one, and it is one of the
-	 *  three conditions that make `total` a floor. */
-	ledgerTruncated: boolean;
 	/** The ledger read failed — message, or null when it was read (an ABSENT
 	 *  ledger reads fine and is not an error: nothing has spawned yet).
 	 *
@@ -134,11 +128,11 @@ export interface SpawnTree {
 	 *  to prevent one layer up. A zero that might mean "could not look" is the
 	 *  silent gap #116 is about, reintroduced inside #116's own fix. */
 	ledgerError: string | null;
-	/** Sum over RESOLVED descendants. A floor under any of four conditions —
-	 *  `unattributed` non-empty, `depthCapped` non-zero, `ledgerTruncated`, or
-	 *  `ledgerError` non-null. The last one is the trap: a ledger that could not
-	 *  be read sets none of the other three, so a consumer checking only those
-	 *  reads a zeroed tree as a complete lineage. */
+	/** Sum over RESOLVED descendants. A floor under any of three conditions —
+	 *  `unattributed` non-empty, `depthCapped` non-zero, or `ledgerError`
+	 *  non-null. The last one is the trap: a ledger that could not be read sets
+	 *  neither of the other two, so a consumer checking only those reads a
+	 *  zeroed tree as a complete lineage. */
 	total: TokenTotals;
 }
 
@@ -243,7 +237,7 @@ export function computeSpawnTree(
 	try {
 		ledger = readSpawnLedger(options.ledgerPath);
 	} catch (err) {
-		ledger = { childrenOf: new Map(), malformedLines: 0, truncated: false };
+		ledger = { childrenOf: new Map(), malformedLines: 0 };
 		ledgerError = err instanceof Error ? err.message : String(err);
 	}
 
@@ -255,7 +249,6 @@ export function computeSpawnTree(
 		depthCapped: 0,
 		maxDepth,
 		malformedLedgerLines: ledger.malformedLines,
-		ledgerTruncated: ledger.truncated,
 		ledgerError,
 		total: emptyTotals(),
 	};

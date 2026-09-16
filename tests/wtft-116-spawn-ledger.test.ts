@@ -37,7 +37,7 @@ import {
 	appendSpawnRecord,
 	readSpawnLedger,
 	spawnLedgerPath,
-	LEDGER_TAIL_BYTES,
+	MAX_LEDGER_BYTES,
 	type SpawnRecord,
 } from "../extensions/lib/wtft-spawn-ledger.ts";
 import { computeSpawnTree } from "../extensions/lib/wtft-spawn-tree.ts";
@@ -529,52 +529,45 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 }
 
 {
-	// The tail bound has to reach the document. Edges past it are in no other
-	// field — not edges, not unattributed, not malformedLedgerLines — so without
-	// a flag a truncated read is indistinguishable from a complete one.
-	childTranscript(U(140), 1);
+	// An oversized ledger is REFUSED, not windowed. A tail read reported the
+	// truncation and every surface then had to carry a "may be missing older
+	// edges" condition — a refusal cannot omit an edge silently, which is both
+	// simpler and stricter (Duppy, 2026-09-16: for disk and memory limits, take
+	// the simple path and wait for headroom).
 	const led = path.join(dir, "huge.jsonl");
 	const filler = serializeSpawnRecord(rec({ parent: U(999), child: U(998) })) + "\n";
 	const fd = fs.openSync(led, "w");
 	try {
 		const chunk = Buffer.from(filler.repeat(500), "utf8");
 		let written = 0;
-		while (written < LEDGER_TAIL_BYTES + 64 * 1024) { fs.writeSync(fd, chunk); written += chunk.length; }
-		fs.writeSync(fd, Buffer.from(serializeSpawnRecord(rec({ child: U(140) })) + "\n", "utf8"));
+		while (written <= MAX_LEDGER_BYTES) { fs.writeSync(fd, chunk); written += chunk.length; }
 	} finally { fs.closeSync(fd); }
 
-	const ledger = readSpawnLedger(led);
-	check(ledger.truncated === true, "C31 a ledger past the tail window reports the truncation");
-	const tree = computeSpawnTree(PARENT, { ledgerPath: led });
-	check(tree.ledgerTruncated === true, "C31b and it reaches the tree");
-	check(tree.descendants === 1, "C31c while the newest edge, which is in the window, still resolves");
+	let threw = "";
+	try { readSpawnLedger(led); } catch (err) { threw = err instanceof Error ? err.message : String(err); }
+	check(/over the \d+-byte limit/.test(threw) && /prune it/.test(threw),
+		`C31 an oversized ledger is refused, with the remedy in the message (got ${threw.slice(0, 90) || "no throw"})`);
 
-	const small = ledgerOf("small.jsonl", [{ child: U(140) }]);
-	check(readSpawnLedger(small).truncated === false && computeSpawnTree(PARENT, { ledgerPath: small }).ledgerTruncated === false,
-		"C31d an ordinary ledger is not truncated");
+	const tree = computeSpawnTree(PARENT, { ledgerPath: led });
+	check(tree.ledgerError !== null && tree.descendants === 0,
+		"C31b and it surfaces as ledgerError — never as a quietly shortened tree");
 }
 
 {
-	// A short write must not destroy the NEXT spawner's record. The fragment is
-	// terminated, so the damage is one malformed line rather than two lost
-	// edges — simulated here by writing the fragment the failure would leave.
+	// Nothing repairs a partial line, and nothing needs to: a short write means
+	// the disk is full, and the remedy for a full disk is a disk with space on
+	// it. What matters is that the damage is REPORTED rather than silent — the
+	// fragment and the record that merges into it come back as one counted
+	// malformed line, so `malformedLedgerLines` is non-zero and every surface
+	// says so.
 	const led = path.join(dir, "fragment.jsonl");
 	fs.writeFileSync(led, '{"schema":"wtft/spawn@1","ts":"2026-09-1' + "\n");
 	appendSpawnRecord(rec({ child: U(150) }), led);
 	const ledger = readSpawnLedger(led);
-	check(ledger.malformedLines === 1, `C32 the fragment is the only casualty (got ${ledger.malformedLines})`);
+	check(ledger.malformedLines === 1, `C32 a partial line is counted, not swallowed (got ${ledger.malformedLines})`);
 	check((ledger.childrenOf.get(PARENT) ?? []).length === 1,
-		"C32b and the record appended after it survives intact");
+		"C32b and a record appended after a TERMINATED fragment still reads");
 }
-
-// NOT TESTED HERE, and this comment is the record of why (#129). The
-// order-independence fix in `computeSpawnTree` — a session counted as its own
-// edge AND folded into a descendant by that descendant's parse — needs a
-// fixture where `parseSessionFile` actually performs the fold. The only path
-// that folds is `attributeClaudeSubAgentCosts`, whose discovery reads
-// `os.homedir() + "/.claude/projects"` directly, with no env seam. A sandboxed
-// suite cannot redirect it, so the fix ships verified by reading and by the
-// subtraction's own arithmetic, not by a regression test. #129 adds the seam.
 
 // ---
 // PART D — the issue's own Closer, through the CLI

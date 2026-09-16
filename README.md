@@ -220,11 +220,11 @@ two numbers and guesses. **`total` keeps meaning this session's own turns**; not
 one dollar moved into or out of it.
 
 Three bounds are reported rather than hidden: the walk stops at **depth 5**
-(`spawned.depthCapped` counts the cuts), the reader takes the last **8 MiB** of
-the ledger, and a ledger it cannot read comes back as `spawned.ledgerError`
-rather than as an empty tree. `tree` covers *resolved* descendants, so it is a
+(`spawned.depthCapped` counts the cuts), a ledger over **8 MiB** is refused
+outright rather than partly read, and a ledger it cannot read comes back as
+`spawned.ledgerError` rather than as an empty tree. `tree` covers *resolved* descendants, so it is a
 floor whenever anything went uncounted — `unattributed` non-empty, `depthCapped`
-non-zero, `ledgerTruncated` true, or `ledgerError` set.
+non-zero, or `ledgerError` set.
 
 `wtft --tokens` shows the same thing as a `SPAWNED` / `TREE` block below
 `TOTAL` — and prints nothing at all when this session recorded no edges. Full

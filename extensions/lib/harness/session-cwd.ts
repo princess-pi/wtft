@@ -9,14 +9,33 @@
  * written if a parser happened to be running at the moment of a switch.
  *
  * The transcripts already carry the answer: walk backwards from the tail to the
- * first entry with a `cwd`. Measured over every transcript on this machine
- * (research/156-cwd-resolution-probe.mjs): 40 files, 40 resolved, 0.5 MB read of
- * 64 MB, 11 ms total — cheap enough to run on every selector invocation.
+ * first entry with a `cwd`. Every read here is a TAIL read, bounded by
+ * {@link TAIL_WINDOWS} — that bound is the module's whole performance contract,
+ * and {@link getCwdBytesRead} is what holds it to it.
  *
- * #164 adds the one case that answer cannot cover: when a session's current
- * directory has been *deleted*, "where does it live now?" is "nowhere". The
- * transcript records every move it ever made, so the fallback question becomes
- * "where has it ever lived?" — see {@link resolveCwdHistory}.
+ * WHAT THAT COSTS TODAY, measured 2026-09-16 over 7,287 transcripts / 2.51 GB /
+ * 1,944 project dirs (`bun debug/count-picker.ts <cwd>`, discovery over both
+ * harnesses): **14,441 reads, 580 MB, 1.6-2.0 s warm** per launch. That is ~1.9
+ * reads and ~41 KB per transcript, not one 8 KB read each — the windows below
+ * widen more often than their first draft assumed. The number is here, in the
+ * header a reader of this module meets first, because the one it replaced ("40
+ * files, 0.5 MB read of 64 MB, 11 ms") outlived its corpus by 118x on file count
+ * and nobody met it anywhere else.
+ *
+ * It does not meet #89's ≤ 200 ms target and cannot: what remains scales with the
+ * corpus, and only an on-disk index (#89's direction **A**, "I" in that issue's
+ * 2026-09-15 comment) removes it. #89 stays open for that.
+ *
+ * #164 once added a second, unbounded arm: when a session's directory had been
+ * *deleted*, it re-read the WHOLE transcript hunting for `"relocated"` records
+ * to ask "where has it ever lived?". #89 deleted it. Measured 2026-09-16 on a
+ * 7,287-file / 2.51 GB corpus, it performed 6,952 whole-file reads per launch
+ * and returned **0** extra candidates for all three cwds tested — because Claude Code files a
+ * transcript under the directory it STARTED in, and a session starts in the main
+ * clone before it enters a worktree, so the physical-slug arm already covers the
+ * shape #164 was written for. Machine-wide, the `(session, dir)` pairs only that
+ * arm could surface: 0. The history is still IN the transcripts; nothing reads
+ * it. Re-derive it there if a case ever appears that the physical arm misses.
  */
 
 import * as fs from "node:fs";
@@ -26,9 +45,21 @@ import * as fs from "node:fs";
 // ---
 
 /**
- * Tail windows, widened only on a miss. 8 KB resolves every transcript here;
- * the larger windows exist for attachment-heavy tails, which are the only
- * reason a `cwd` would sit further back.
+ * Tail windows, widened only on a miss.
+ *
+ * "8 KB resolves every transcript here" is what this said, measured on a 40-file
+ * corpus. It is no longer true: the module header's 2026-09-16 figures work out
+ * at ~1.9 reads and ~41 KB per transcript, so the second window is reached
+ * routinely — attachment-heavy tails are common now, and a transcript with no
+ * `cwd` at all (every Pi one) widens through all three and then gives up.
+ *
+ * 512 KB IS THE LAST WINDOW, NOT A STEP BEFORE A WHOLE-FILE READ (PR review).
+ * The loop ends after it: a transcript over 512 KB has its last 512 KB read and
+ * then resolves to null, unread beyond that. Only a transcript UNDER 512 KB is
+ * ever read whole, because there the third window IS the whole file. That
+ * distinction is #112's subject, and `docs/spec-156-155-…md` was amended once to
+ * remove the same wrong claim — reintroducing it here would have been the third
+ * time this sentence went wrong.
  */
 const TAIL_WINDOWS = [8 * 1024, 64 * 1024, 512 * 1024];
 
@@ -39,18 +70,14 @@ const TAIL_WINDOWS = [8 * 1024, 64 * 1024, 512 * 1024];
 /** Keyed on (path, mtimeMs, size) — an unchanged transcript is never re-read. */
 const cwdCache = new Map<string, string | null>();
 
-/** Same key, for the whole-file relocation scan (#164). Separate table because
- *  the two answers have different costs and are invalidated for the same reason. */
-const historyCache = new Map<string, string[]>();
-
-/** Directory-existence memo. A stat per transcript per invocation, not per arm. */
-const existsCache = new Map<string, boolean>();
-
 /** Test seam: counts actual file reads so memoisation is observable. */
 let readCount = 0;
 
-/** Test seam: counts whole-file history scans, so the #164 gate is observable. */
-let historyReadCount = 0;
+/** Test seam: BYTES read, not calls — the quantity #89 was actually about.
+ *  A call count cannot tell a bounded tail read from a whole-file scan of a
+ *  2 MB transcript; this can, which is why it replaced the #164 scan counter
+ *  rather than simply being deleted alongside it. */
+let bytesRead = 0;
 
 /**
  * Test seam: counts directory reads during discovery, so the ONE cost neither
@@ -77,17 +104,27 @@ export function getCwdReadCount(): number {
 }
 
 /**
- * Number of whole-file relocation scans since the last {@link resetCwdCache}.
+ * Bytes read from transcripts since the last {@link resetCwdCache}.
  *
- * The point of the counter is the *gate*, and the number it counts is scans,
- * not call sites: a stranded transcript is asked for its history twice per
- * discovery (once to match, once to pick a live display path) and the
- * `(path, mtimeMs, size)` memo absorbs the second, so the counter reads 1 per
- * stranded transcript. Zero when every session's last cwd still exists. Spec
- * V9 asserts the batch form of that: one stranded + one live ⇒ at most 1.
+ * This is the guard on #89, and its SCOPE is worth stating because the first
+ * draft of this docstring overstated it (PR review): it counts what goes through
+ * {@link readSlice}, which is this module's only read path. The arm it replaced
+ * did NOT use that path — `resolveCwdHistory` called `fs.readFileSync` directly
+ * and incremented a counter of its own — so a re-introduction in that same style
+ * would move neither counter and leave every byte assertion green while the
+ * launch re-read gigabytes.
+ *
+ * So the invariant is enforced structurally rather than trusted: V22 in
+ * tests/wtft-issue-144-145-164-session-discovery.test.ts reads this file's own
+ * source and fails if a second read call appears in it. A counter cannot police
+ * the code that declines to use it; a source assertion can.
+ *
+ * What the counter itself buys, given that: `bytesRead` catches the half-measure
+ * a call count cannot see — a tail window widened toward the file size keeps the
+ * read count identical and moves the bytes.
  */
-export function getCwdHistoryReadCount(): number {
-	return historyReadCount;
+export function getCwdBytesRead(): number {
+	return bytesRead;
 }
 
 /**
@@ -110,49 +147,39 @@ export function countDirRead(): void {
  */
 export function resetCwdCache(): void {
 	cwdCache.clear();
-	historyCache.clear();
-	existsCache.clear();
 	readCount = 0;
-	historyReadCount = 0;
+	bytesRead = 0;
 	dirWalkCount = 0;
-}
-
-// ---
-// EXISTENCE
-// ---
-
-/**
- * Does this directory still exist? Memoised for the life of the process.
- *
- * This is the #164 gate: it is what separates "this session lives somewhere
- * real, just not here" (cheap, stop) from "this session's home is gone"
- * (expensive, look at its whole history).
- */
-export function pathExists(dir: string): boolean {
-	const cached = existsCache.get(dir);
-	if (cached !== undefined) return cached;
-	let ok = false;
-	try {
-		ok = fs.existsSync(dir);
-	} catch {
-		ok = false;
-	}
-	existsCache.set(dir, ok);
-	return ok;
 }
 
 // ---
 // RESOLUTION
 // ---
 
-/** Read `len` bytes of `file` starting at `start`. */
-function readSlice(file: string, start: number, len: number): string {
+/**
+ * Read `len` bytes of `file` starting at `start`, as BYTES.
+ *
+ * A Buffer rather than a string, because {@link resolveLastCwd} accumulates
+ * across widenings and decoding each chunk on its own would split any multi-byte
+ * character that straddles a chunk boundary. Concatenating first and decoding
+ * once costs CPU, never I/O — and I/O is the quantity {@link getCwdBytesRead}
+ * guards.
+ *
+ * SHORT READS ARE TRUNCATED, not padded (PR review). If the file shrank between
+ * `statSync` and `readSync`, or `read(2)` came up short, the tail of the buffer
+ * is NULs — `String.trim()` does not strip them, so the final data line becomes
+ * `…}\u0000\u0000`, fails `JSON.parse`, and that transcript silently loses its
+ * most recent `cwd`. Slicing to `got` also makes the bytes returned agree with
+ * the bytes counted.
+ */
+function readSlice(file: string, start: number, len: number): Buffer {
 	const fd = fs.openSync(file, "r");
 	try {
 		const buf = Buffer.alloc(len);
-		fs.readSync(fd, buf, 0, len, start);
+		const got = fs.readSync(fd, buf, 0, len, start);
 		readCount++;
-		return buf.toString("utf8");
+		bytesRead += got;
+		return got === len ? buf : buf.subarray(0, got);
 	} finally {
 		fs.closeSync(fd);
 	}
@@ -198,18 +225,29 @@ export function resolveLastCwd(filePath: string, knownStat?: fs.Stats): string |
 	const cached = cwdCache.get(key);
 	if (cached !== undefined) return cached;
 
+	// WIDENING READS ONLY WHAT IT HAS NOT READ (PR review, Macroscope). The first
+	// cut re-read `[size-window, size)` from scratch on every widening, so a
+	// transcript needing all three windows cost 8 + 64 + 512 = 584 KB to scan
+	// 512 KB — overspend in exactly the quantity getCwdBytesRead exists to guard.
+	//
+	// Each pass now reads only the newly exposed prefix and prepends it. Bytes are
+	// read once; the accumulated buffer is decoded again per pass, which is CPU
+	// and not I/O.
 	let result: string | null = null;
+	let acc: Buffer | null = null;
+	let readFrom = stat.size;
 	for (const window of TAIL_WINDOWS) {
 		const start = Math.max(0, stat.size - window);
-		const len = stat.size - start;
+		const len = readFrom - start;
 		if (len <= 0) break;
-		let text: string;
 		try {
-			text = readSlice(filePath, start, len);
+			const chunk = readSlice(filePath, start, len);
+			acc = acc === null ? chunk : Buffer.concat([chunk, acc]);
 		} catch {
 			break;
 		}
-		result = scanBackwardsForCwd(text, start > 0);
+		readFrom = start;
+		result = scanBackwardsForCwd(acc.toString("utf8"), start > 0);
 		if (result) break;
 		// Whole file already scanned — widening cannot help.
 		if (start === 0) break;
@@ -217,105 +255,6 @@ export function resolveLastCwd(filePath: string, knownStat?: fs.Stats): string |
 
 	cwdCache.set(key, result);
 	return result;
-}
-
-// ---
-// RELOCATION HISTORY (#164)
-// ---
-
-/** Marker Claude Code writes on every cwd change. Cheap pre-filter before JSON.parse. */
-const RELOCATED_MARKER = '"relocated"';
-
-/**
- * Every directory a session has ever occupied, most recent first.
- *
- * Claude Code writes `{"type":"relocated","relocatedCwd":"…"}` on each move.
- * `resolveLastCwd` cannot see them — it matches `entry.cwd`, and these entries
- * carry `relocatedCwd` instead — and no tail window can either: measured on this
- * machine (research/164-relocation-scan-probe.mjs) the earliest relocation sits
- * at 14–51 % of the file and even the *last* one falls outside the 8 KB tail of
- * a 2 MB transcript. So this is a whole-file read, which is why callers must
- * gate it on {@link pathExists}.
- *
- * THE GATE IS NOT THE BUDGET IT WAS WRITTEN AGAINST (#35, 2026-08-29). This
- * docstring used to cost the unconditional case at "315 ms over the 68 MB of
- * transcripts here", serving the ~3-in-40 that had actually moved. Both halves
- * have since been overtaken: the corpus measured 1.3 GB / 3,073 transcripts, and
- * 2,622 of them (85%) had a recorded cwd that no longer exists — so the gate
- * OPENS for 34 in 40 and lets 760 MB of whole-file reads through per pass.
- *
- * The cause is structural, not accidental: `pr-cleanup` deletes a worktree after
- * every merge and strands every session that lived there, permanently. So the
- * stranded fraction only rises, and any caller that runs this over the whole
- * corpus gets slower with every branch merged. Callers must therefore gate on
- * NEED as well as on {@link pathExists} — see the lazy discovery in bin/wtft.ts,
- * where running this eagerly was 98% of the CLI's wall clock.
- *
- * The *set* is the point, not the latest entry: in the #158 failure the latest
- * relocation pointed at the worktree that had been removed, and it was an
- * earlier one naming the main clone that made the session findable again.
- *
- * `relocated` is an optimisation, never a dependency — a transcript without any
- * yields a one-element history (its last `cwd`), i.e. exactly today's rule.
- */
-export function resolveCwdHistory(filePath: string, knownStat?: fs.Stats): string[] {
-	let stat: fs.Stats;
-	try {
-		stat = knownStat || fs.statSync(filePath);
-	} catch {
-		return [];
-	}
-	if (!stat.isFile() || stat.size === 0) return [];
-
-	const key = `${filePath}:${stat.mtimeMs}:${stat.size}`;
-	const cached = historyCache.get(key);
-	if (cached !== undefined) return cached;
-
-	// Most recent first: the last recorded cwd, then relocations newest-backwards.
-	const ordered: string[] = [];
-	const last = resolveLastCwd(filePath, stat);
-	if (last) ordered.push(last);
-
-	let text: string;
-	try {
-		text = fs.readFileSync(filePath, "utf8");
-		historyReadCount++;
-	} catch {
-		historyCache.set(key, ordered);
-		return ordered;
-	}
-
-	const lines = text.split("\n");
-	for (let i = lines.length - 1; i >= 0; i--) {
-		const line = lines[i];
-		// Substring pre-filter: only ~3 transcripts in 40 carry any relocation,
-		// and JSON.parse over every line of 68 MB is the whole cost otherwise.
-		if (line.indexOf(RELOCATED_MARKER) === -1) continue;
-		try {
-			const entry = JSON.parse(line.trim());
-			if (entry && entry.type === "relocated" && typeof entry.relocatedCwd === "string" && entry.relocatedCwd) {
-				ordered.push(entry.relocatedCwd);
-			}
-		} catch {
-			// Partial write or non-JSON line — keep walking back.
-		}
-	}
-
-	const history = [...new Set(ordered)];
-	historyCache.set(key, history);
-	return history;
-}
-
-/**
- * The most recent directory in a session's history that still exists, or null.
- * Used for *display*: a stranded session should render somewhere real rather
- * than name a directory the user can no longer visit.
- */
-export function pickLiveCwd(history: string[]): string | null {
-	for (const dir of history) {
-		if (pathExists(dir)) return dir;
-	}
-	return null;
 }
 
 // ---

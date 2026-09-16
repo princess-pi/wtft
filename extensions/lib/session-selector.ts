@@ -57,14 +57,18 @@ export type { SessionCandidate } from "./harness/types.ts";
  *   - its own recorded last-cwd matches, which is what makes a session that
  *     moved (worktree switch, or an ordinary `cd` into a subdir) visible from
  *     where it now lives (#156);
- *   - its last-cwd names a directory that no longer EXISTS, and some directory
- *     in its recorded relocation history matches — gated on the existence
- *     check, because it is a whole-file read (#164);
  *   - the "target cwd" is any checkout of the target's git repo, not just the
  *     one directory, so sibling worktrees are in scope in both directions.
  *     No `.git` ancestor means no fan-out, so `~` still means `~` (#145).
  *
- * Which arms apply is each harness's own call. Claude Code wires up all four.
+ * A fourth arm existed and was deleted (#89): a session whose last cwd had been
+ * DELETED used to match against every directory its transcript had ever
+ * recorded, at the cost of a whole-file read per stranded transcript. Measured
+ * 2026-09-16 it returned 0 candidates the slug arm had not, for 6,952 whole-file
+ * reads per launch. The one shape it alone could reach — a session filed under a
+ * worktree slug, with the worktree since removed — is conceded on #89.
+ *
+ * Which arms apply is each harness's own call. Claude Code wires up all three.
  * Pi wires up the first two — its slug arm accepts both encodings, and the
  * last-cwd arm is present but never fires, because Pi records `cwd` once on its
  * session_start entry and a tail scan finds nothing. That is deliberate rather

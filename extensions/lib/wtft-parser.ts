@@ -250,7 +250,14 @@ function buildInteraction(
 	// compaction/recache meter-split (#52 Phase 3) rewrites cr and cw across two
 	// lines, so by tag-read time neither line can be told apart from a partial
 	// re-prime. This is the only point where the original pair is still intact.
+	//
+	// Parent-only (#115): a sidechain starts with an empty context, so read-0 /
+	// write-everything is how it BEGINS, not something it lost. The divider means
+	// "your cached prefix was thrown away" and is actionable only about the
+	// conversation the reader is in, so it follows the same exclusion
+	// splitOverheadCost already applies to recache detection.
 	const cacheMiss =
+		!turn.isSidechain &&
 		usage.cache_read_input_tokens === 0 && usage.cache_creation_input_tokens > 0
 			? true : undefined;
 
@@ -700,6 +707,35 @@ export function deduplicateInteractions(interactions: Interaction[]): Interactio
 				if (i.interrupted) merged.interrupted = true;
 				if (i.afterCompaction) merged.afterCompaction = true;
 				if (i.surgePriced) merged.surgePriced = true;
+				// The DIVIDER's flag joins them, and #115 is why it now matters:
+				// `cacheMiss` used to be a pure function of the winning copy's
+				// own usage block, so the merge could not get it wrong. It is now
+				// a function of the entry ENVELOPE, which a re-logged copy of the
+				// same message id need not carry — and if that copy won on cost,
+				// the divider fired on the very spawn the gate suppresses.
+				//
+				// `merged.isSidechain` itself is deliberately NOT widened here.
+				// It gates `splitOverheadCost`'s recache detection and the
+				// prevCtx chain that detection walks, so ORing it would move a
+				// merged message's cache-write dollars between the overhead and
+				// work buckets — and flip recache detection for LATER
+				// interactions through prevCtx. That is a bigger change than this
+				// issue, it would falsify this bump's "no bucket moves", and it
+				// belongs with the subagent-accounting work (#15).
+				//
+				// SCOPE, stated because it is narrower than it looks (PR review
+				// round 3): this only fires when both copies are in the SAME
+				// array. The daemon's parent path dedups one poll batch at a
+				// time, so two emissions of one id that straddle a 667ms poll
+				// boundary never meet here — the known defect class named in
+				// bin/wtft-daemon.ts, whose whole-file re-parse fix was applied
+				// to subagent transcripts only. In that residual window a
+				// sidechain turn could still write one tag line carrying
+				// `miss: 1`, and no tag reader can undo it, since `isSidechain`
+				// is deliberately not in the wire format. Closing it means the
+				// parent path re-parsing whole files too, which is #97's
+				// question, not this issue's.
+				if (i.isSidechain) merged.cacheMiss = undefined;
 			}
 			if (mergedToolCats.size > 0) merged.toolCats = [...mergedToolCats];
 			deduped.push(merged);
@@ -1483,6 +1519,37 @@ function warnUnreadableSubagentDir(dir: string, err: unknown): void {
 }
 
 /**
+ * PROVENANCE, not the envelope, settles the Cache Miss divider (#115).
+ *
+ * Claude Code stamps `isSidechain` on every turn of a subagent transcript, so
+ * the parse-time gate in `parseEntryToInteraction` already catches those. Pi
+ * does not: it marks a subagent at FILE level, with a `parentSession` header and
+ * no per-entry flag (Pattern 2 in `discoverSubagentSessionFiles`), and nothing
+ * stamps the nested `subagents/workflows/wf_<id>/` layout either. Every
+ * interaction that came out of a subagent transcript had a fresh context
+ * whatever its harness writes in the envelope, so read-0 / write-everything is
+ * how it began rather than something it lost.
+ *
+ * THIS IS A SEAM, NOT A ONE-LINER, because two readers of subagent transcripts
+ * exist and only one of them is `loadSubagentInteractions` (PR review round 2):
+ * the daemon's `syncSubagentTranscript` parses and serializes its own tag lines,
+ * and the CLI renders from the TAG FILE. Clearing this in only one of them would
+ * leave `miss: 1` baked into the tag file and make the Pi widget and the CLI
+ * disagree about the same session.
+ *
+ * Only the divider's flag is cleared. `isSidechain` itself also gates
+ * `splitOverheadCost`'s recache detection, and setting it from provenance would
+ * move subagent interactions between overhead buckets — a bigger change than
+ * this issue, and one that belongs with the subagent-accounting work (#15).
+ *
+ * Mutates in place and returns the same array, for use as a pass-through.
+ */
+export function clearSubagentCacheMiss<T extends { cacheMiss?: boolean }>(interactions: T[]): T[] {
+	for (const interaction of interactions) interaction.cacheMiss = undefined;
+	return interactions;
+}
+
+/**
  * Parse and classify subagent interactions from raw session files.
  * Returns interactions stamped with _cat for downstream short-circuit.
  */
@@ -1497,6 +1564,7 @@ export function loadSubagentInteractions(
 		try {
 			const raw = parseFn(file);
 			const deduped = dedupFn(raw);
+			clearSubagentCacheMiss(deduped);
 			for (const interaction of deduped) {
 				interaction._cat = classifyFn(interaction);
 				interactions.push(interaction);

@@ -29,6 +29,7 @@ import {
 	extractRealCommands,
 	discoverClaudeSubAgentSessionFiles,
 	discoverSubagentSessionFiles,
+	clearSubagentCacheMiss,
 	loadSubagentInteractions,
 	loadUserPricing,
 	resolveMovedSession,
@@ -657,6 +658,13 @@ function syncSubagentTranscript(file: string): boolean {
     // parseSessionFile runs attributeClaudeSubAgentCosts internally over the
     // whole result — do NOT add a second call here, that is the round-3 High.
     deduped = deduplicateInteractions(parseSessionFile(file));
+    // The Cache Miss divider is parent-only (#115), and this is the OTHER
+    // reader of a subagent transcript — the one whose output the CLI actually
+    // renders from. Claude Code's own subagent turns carry `isSidechain` and are
+    // already gated at parse time; Pi marks a subagent by file instead, so
+    // without this line `miss: 1` would be baked into its tag file and the
+    // widget and the CLI would disagree about the same session.
+    clearSubagentCacheMiss(deduped);
   } catch (err) {
     // Keep polling — one bad read or parse must not stop this subagent, the
     // other subagents in this loop, or the parent session's own tag writes.

@@ -120,13 +120,24 @@ folded into `other`. Dropping it would have been the silent option and would hav
 broken the guarantee with nothing to signal it; giving it a row of its own would
 have broken the positional addressability `categories[]` sells.
 
-**The chart's total is a different number, legitimately, for two reasons.** The
-bar chart bins *every* interaction, so it includes the untagged spend this
-`total` excludes; and `buildWtftLines` adds `serverToolCost` to its `web` bin,
-which no summing of per-interaction `cost` reaches. Both predate #26 — the
-rendered `--tokens` table has always summed `cost` alone — and #26 deliberately
-did not change the arithmetic, only gave it a second reader. The gap is **#90**,
-filed rather than fixed here because closing it changes the human table's numbers.
+**Server-side tool spend is inside `total.costUsd` (#90, direction A).** It was
+not, until #90: `buildWtftLines` added `serverToolCost` to the chart's `web` bin
+while `computeSessionSummary` summed `cost` alone, so the chart's running total,
+the `--tokens` TOTAL row and this `total.costUsd` disagreed by exactly a
+session's web-search and web-fetch spend. The number under the word TOTAL now
+means what the word says, and **the `--tokens` TOTAL a reader sees rose by that
+amount** — the accepted consequence of A, recorded here rather than discovered.
+
+It is attributed to the **`web`** category, which is where the chart puts it, so
+the guarantee above still holds and a category row agrees with the bar drawn
+above it. Per model it goes to the model that made the request. It carries **no
+tokens**: server-side tool calls are billed per request, on a meter with no token
+counts on it (#73), so the five token fields are untouched and their exact
+equality is unaffected.
+
+**The chart's total is still a different number, legitimately, for ONE reason:**
+the bar chart bins *every* interaction, so it includes the untagged spend this
+`total` excludes. That divergence predates #26 and remains.
 
 ### The seam
 

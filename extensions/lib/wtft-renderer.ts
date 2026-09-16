@@ -1873,14 +1873,24 @@ function addInteraction(into: TokenTotals, i: Interaction): void {
  * nowhere else. That is what makes `sum(models) === sum(categories) === total`
  * hold — exactly for the token integers, within floating-point accumulation
  * error for `costUsd` (docs/spec-26-json.md pins the tolerance) — and it is
- * deliberately a narrower population than the bar
- * chart's, which bins every interaction. A chart total and this total can
- * legitimately differ, by TWO things: the untagged spend excluded here, and
- * `serverToolCost`, which `buildWtftLines` adds to the chart's `web` bin and
- * which no summing of `i.cost` reaches. Both divergences predate #26 — the
- * rendered `--tokens` table has always summed `i.cost` alone — and #26
- * deliberately did not change the arithmetic, only gave it a second reader.
- * docs/spec-26-json.md records both.
+ * deliberately a narrower population than the bar chart's, which bins every
+ * interaction.
+ *
+ * SERVER-SIDE TOOL SPEND IS IN THESE TOTALS (#90, direction A). It did not used
+ * to be: `buildWtftLines` added `serverToolCost` to the chart's `web` bin while
+ * this function summed `i.cost` alone, so the chart's running total, the
+ * `--tokens` TOTAL row and `--json`'s `total.costUsd` disagreed by exactly a
+ * session's web-search and web-fetch spend — and no test compared the chart's
+ * total to either of the others, which is how it survived. The number a reader
+ * sees under the word TOTAL now means what the word says.
+ *
+ * It is attributed the way the chart attributes it — to `web`, not to the
+ * requesting turn's own category — so `sum(categories) === total` still holds
+ * AND the category rows agree with the bars above them. Per model it goes to the
+ * model that made the request, which is the only model that could have.
+ *
+ * One divergence from the chart total remains, and it is the untagged spend
+ * excluded here. docs/spec-26-json.md records it.
  */
 export function computeSessionSummary(interactions: Interaction[]): SessionSummary {
 	const deduped = deduplicateInteractions(interactions);
@@ -1930,6 +1940,18 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
 		const cat = classifyInteraction(i);
 		const c = byCategory.get(cat) ?? byCategory.get("other")!;
 		addInteraction(c, i);
+
+		// Server-side tool requests are billed PER REQUEST, on a meter with no
+		// tokens on it (#73), so this is a cost-only addition — adding it inside
+		// `addInteraction` would have been wrong for exactly one field and right
+		// for none of the others. `web` rather than `cat` because that is where
+		// the bar chart puts it, and a category row that disagreed with the bar
+		// drawn above it would trade one divergence for a subtler one.
+		if (i.serverToolCost) {
+			total.costUsd += i.serverToolCost;
+			m.costUsd += i.serverToolCost;
+			byCategory.get("web")!.costUsd += i.serverToolCost;
+		}
 	}
 
 	const models: ModelTotals[] = Array.from(byModel.entries())

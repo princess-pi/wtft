@@ -108,6 +108,10 @@ and nothing counts it.
 This is the benign case above turned into a real loss: the harness is behaving correctly and
 we drop the turn anyway.
 
+**Measured, not reasoned.** R1 below writes one turn in two halves with three beats in
+between and asks the daemon what it counted. Against the pre-fix daemon the answer is `[]` —
+not a mis-priced turn, an absent one.
+
 ## The fix
 
 **Defect 1 — work in bytes, and truncate only to a line boundary.**
@@ -138,6 +142,14 @@ A partial trailing line is left for the next poll, which re-reads it whole. Sear
 `Buffer` rather than the decoded string is the same discipline as defect 1 and for the same
 reason.
 
+**And the invariant is made structural, not a habit.** `appendTagFile` is the single helper
+every tag append goes through, so it is where "whole lines" is enforced: a batch that does not
+end in a newline is a programming error at the call site, and it fails loudly there instead of
+becoming a line some reader has to tolerate. S1 and S2 then read the source and fail on the two
+shapes that caused #130 — an append that bypasses the helper, and a truncate to an offset that
+did not come from `lastLineStartByte`. #130 survived months because every reader swallowed it
+silently; a check that reads the writer is the only thing that would have caught it.
+
 **Nothing is added to any reader.** `readClassifiedTagFile`, `readTagFileWithVerdict` and
 `tagProvisionalFromContent` keep their existing `catch { continue; }`, which becomes dead
 weight rather than load-bearing — and that is the point: the guarantee moves into the
@@ -157,6 +169,27 @@ writer, where one place owns it, instead of being re-derived by every reader.
 | W6 | a line longer than one chunk is handled — the scan widens rather than giving up |
 | E1 | **the Closer.** The real daemon, driven against a session whose assistant text contains `→` and `—`, through enough beats to force several heartbeat upserts: **every line of the tag file parses as JSON**, and the classified totals survive |
 | R1 | a session file whose last line is written in two halves across two polls: the interaction is counted once, not lost |
+| S1 | no `fs.appendFileSync` reaches the tag path except through `appendTagFile` — the one helper that enforces the trailing newline |
+| S2 | every tag truncate in the daemon cuts to a line boundary (an offset from `lastLineStartByte`) or to zero |
+
+## RED, against the daemon that shipped
+
+The suite was run against `bin/wtft-daemon.ts` as of the spec commit, before either fix:
+
+```
+FAIL E1 every one of the 16 tag lines parses as JSON
+     {"_meta":{"swept":178959760425{"_hb":{"first":1789597604255,"last":1789597604925}}
+     {"_meta":{"swept":17895976{"_hb":{"first":1789597605593,"last":1789597606261}}
+FAIL E1 no line carries a second record welded onto it
+FAIL E1 no two consecutive heartbeat lines — the cut fired
+FAIL R1 the split turn is counted once the line completes   []
+FAIL R1 and counted exactly once (0)
+14 passed, 5 failed
+```
+
+Those welded lines are the corpus shape, produced live by the real daemon rather than by a
+fixture: a `_meta.swept` marker severed mid-number with a heartbeat welded onto the stump.
+After the fix the same run is 19 passed, 0 failed.
 
 ## Closer
 

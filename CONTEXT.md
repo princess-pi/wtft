@@ -127,6 +127,12 @@ _Avoid_: Child session, nested session
 The per-session output file the daemon writes classified entries to:
 `wtft-tags/<session>.wtft-tag.v{N}.jsonl`. One tag file per source session, versioned so a
 daemon upgrade can detect and replace a stale one. Read by `readClassifiedTagFile()`.
+
+It is **JSONL, and line-safe by construction** (#130): every write the daemon makes leaves the
+file a whole number of complete lines, so a reader — including one woken by `fs.watch`, which
+reports bytes and can never be made line-aware — may presume every line parses. The guarantee
+lives in the writer (`appendTagFile` refuses a batch that does not end in a newline;
+`lastLineStartByte` is the only offset a tag truncate may cut to), never in each reader.
 _Avoid_: Cache file, index file
 
 **Tags dir**:

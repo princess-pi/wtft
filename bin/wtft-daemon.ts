@@ -37,7 +37,10 @@ import {
 	isSessionIdBasename,
 	loadExternalHarnesses,
 	warnUnreadableTranscript,
-	WTFT_TAGGER_VERSION as TAGGER_VERSION
+	WTFT_TAGGER_VERSION as TAGGER_VERSION,
+	// #130 — the byte offset the heartbeat truncate cuts to. Must be a BYTE
+	// offset on a line boundary; deriving it from a decoded string is the defect.
+	lastLineStartByte,
 } from "../extensions/lib/wtft-shared.js";
 
 
@@ -344,78 +347,60 @@ process.on("SIGHUP", () => shutdown("SIGHUP"));
 /**
  * Update the heartbeat line in the tag file.
  *
- * If the last line is already a heartbeat, truncates it off and appends the
- * updated one (Fork C: no in-place overwrite, no fixed-width contract).
- * If the last line is classified data, appends a new heartbeat line.
+ * If the last line is already a heartbeat, truncate it off and append the
+ * updated one (Fork C: no in-place overwrite, no fixed-width contract). If the
+ * last line is classified data, just append.
  *
- * Scans backwards from EOF for the last newline to handle arbitrarily long
- * preceding lines (classified data lines can be large with `cmd` arrays).
+ * LINE-SAFE BY CONSTRUCTION (#130). Both writes land on a line boundary, so at
+ * every instant an outside reader can observe — including one woken by inotify
+ * in the window BETWEEN the truncate and the append — the file is a whole
+ * number of complete lines. That window is not hidden; it is made harmless. A
+ * reader that lands in it sees every earlier line intact and simply no
+ * heartbeat yet, which is a true statement about the file.
+ *
+ * WHAT THIS REPLACES. The previous scan read bytes, decoded them, and then
+ * computed `searchOffset + lastLineStart` — a byte offset plus a UTF-16
+ * code-unit index. Every multi-byte character ahead of the last line drove the
+ * truncate that many bytes INTO the preceding line, and the fresh heartbeat was
+ * welded onto the severed half: 2,562 such lines across 96 of this host's 327
+ * tag files, 99.7% of them with an arrow or em dash in the preceding 2 KiB.
+ * 1,707 destroyed a `_meta` marker, and `_meta.offset` is where the next daemon
+ * start resumes from; 12 destroyed classified cost data.
+ *
+ * So the offset comes from `lastLineStartByte`, which searches the raw Buffer
+ * and never decodes a chunk. Only the resolved line is decoded, and a complete
+ * line is complete UTF-8.
  */
 function upsertHeartbeat(now: number) {
+  const hbLine = JSON.stringify({ _hb: { first: idleStartMs, last: now } }) + "\n";
   try {
-    const hbLine = JSON.stringify({ _hb: { first: idleStartMs, last: now } }) + "\n";
     const stat = fs.statSync(tagPath);
-    if (stat.size === 0) {
-      appendTagFile(tagPath, hbLine);
-      return;
+    if (stat.size > 0) {
+      // One descriptor, opened only to look and to cut. The append goes through
+      // appendTagFile either way, which owns the #512 terminal-failure contract
+      // — and because it is unconditional, no path can append twice.
+      const fd = fs.openSync(tagPath, "r+");
+      try {
+        const lineStart = lastLineStartByte(fd, stat.size);
+        const lineBuf = Buffer.alloc(stat.size - lineStart);
+        fs.readSync(fd, lineBuf, 0, lineBuf.length, lineStart);
+        let isHb = false;
+        try {
+          const obj = JSON.parse(lineBuf.toString("utf8").trim());
+          isHb = obj !== null && typeof obj === "object" && obj._hb !== undefined;
+        } catch (_) { /* not a heartbeat we can recognise — append beside it */ }
+        // `lineStart` is a line boundary, so the cut leaves valid JSONL.
+        if (isHb) fs.ftruncateSync(fd, lineStart);
+      } finally {
+        fs.closeSync(fd);
+      }
     }
-
-    // Scan backwards from EOF in chunks to find the last complete line.
-    // A classified data line can be large (e.g. long `cmd` array), so a
-    // fixed-size read window would land mid-line.
-    const fd = fs.openSync(tagPath, "r+");
-    const CHUNK = 512;
-    let searchOffset = stat.size;
-    let tail = "";
-    let lastNl = -1;
-
-    while (searchOffset > 0 && lastNl === -1) {
-      const readSize = Math.min(CHUNK, searchOffset);
-      searchOffset -= readSize;
-      const buf = Buffer.alloc(readSize);
-      fs.readSync(fd, buf, 0, readSize, searchOffset);
-      tail = buf.toString("utf8") + tail;
-      lastNl = tail.lastIndexOf("\n");
-    }
-
-    // Resolve the last complete line. If the file ends with \n (normal),
-    // the last \n is a terminator — step back to the previous \n to find
-    // the actual last line. If the file does not end with \n (edge case),
-    // the last \n is the separator before the last line.
-    let lastLineStart: number;
-    if (lastNl === tail.length - 1) {
-      // File ends with \n — find the \n that precedes the last line
-      const prevNl = tail.lastIndexOf("\n", tail.length - 2);
-      lastLineStart = prevNl === -1 ? 0 : prevNl + 1;
-    } else if (lastNl === -1) {
-      lastLineStart = 0;
-    } else {
-      lastLineStart = lastNl + 1;
-    }
-
-    const lastLine = tail.slice(lastLineStart).trim();
-
-    let isHb = false;
-    try {
-      const obj = JSON.parse(lastLine);
-      isHb = obj._hb !== undefined;
-    } catch (_) {}
-
-    if (isHb) {
-      // Truncate the stale heartbeat line, then append the updated one.
-      // No fixed-width overwrite — the file simply shrinks by one heartbeat
-      // line and grows by one (net-zero for equal-length heartbeats).
-      const truncAt = searchOffset + lastLineStart;
-      fs.ftruncateSync(fd, truncAt);
-    }
-    appendTagFile(tagPath, hbLine);
-    fs.closeSync(fd);
   } catch (_) {
-    // Fallback: append if we can't seek/overwrite
-    try {
-      appendTagFile(tagPath, JSON.stringify({ _hb: { first: idleStartMs, last: now } }) + "\n");
-    } catch (_2) {}
+    // Could not stat, open or seek. An extra heartbeat line costs nothing —
+    // readers take the last one — and it is strictly better than skipping the
+    // beat, which is what an idle-clamp would read as a dead daemon.
   }
+  appendTagFile(tagPath, hbLine);
 }
 
 /** Atomically replace the published lease without exposing an empty file. */
@@ -457,8 +442,23 @@ function fatalTagMutation(filePath: string, operation: "append" | "rebuild trunc
   process.exit(1);
 }
 
-/** Every append to a derived tag shares the same terminal failure contract. */
+/** Every append to a derived tag shares the same terminal failure contract.
+ *
+ * And every append is WHOLE LINES (#130). A tag file is JSONL, and its readers
+ * are entitled to presume every line parses — so the one helper every append
+ * goes through is where that is enforced, rather than in each of the eight call
+ * sites or, worse, in each reader. A batch that does not end in a newline is a
+ * programming error at the call site, not a runtime condition: every caller
+ * builds its batch by appending "\n" per record. Failing loudly here is what
+ * makes the reader-side presumption safe to hold.
+ */
 function appendTagFile(filePath: string, batch: string): void {
+  if (batch.length > 0 && !batch.endsWith("\n")) {
+    fatalTagMutation(filePath, "append", new Error(
+      `refusing to append a batch that does not end in a newline (${batch.length} bytes) — ` +
+      "a tag file is JSONL and its readers presume whole lines (#130)",
+    ));
+  }
   try {
     fs.appendFileSync(filePath, batch);
   } catch (err) {
@@ -1028,8 +1028,24 @@ function parseNewLines(filePath: string) {
     } finally {
       fs.closeSync(fd);
     }
-    lastSize = currentSize;
-    const newContent = buf.toString("utf8");
+    // CONSUME ONLY WHOLE LINES (#130). `lastSize = currentSize` advanced past a
+    // trailing partial line: the poll landed while the harness was mid-append,
+    // the fragment failed JSON.parse, the loop's catch skipped it — and the
+    // offset had already moved, so the rest of that line was never re-read and
+    // the whole interaction was lost, silently, with nothing counting it. This
+    // is the ONE partial line either harness produces (measured: 7,917
+    // transcripts, 3.9M lines, zero partial lines mid-file, one file mid-append
+    // at its last line), and we were dropping the turn for it.
+    //
+    // Searching the Buffer rather than the decoded string is the same
+    // discipline as `lastLineStartByte`: 0x0a can never be a UTF-8 continuation
+    // byte, so a byte index is exact, while a string index is not a byte offset.
+    const lastNl = buf.lastIndexOf(0x0a);
+    // Nothing complete yet. Leave `lastSize` where it is and re-read next poll;
+    // the buffer is one line, so the cost of waiting is one small re-read a beat.
+    if (lastNl === -1) return [];
+    lastSize += lastNl + 1;
+    const newContent = buf.subarray(0, lastNl + 1).toString("utf8");
     // Same shape as parseSessionFile's whole-file loop (#156), threading the
     // control entries — thinking level (#77), model_change (#128), compaction
     // (#90), interrupt (#52 Phase 3) — through the session's stream state.

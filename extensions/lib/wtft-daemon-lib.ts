@@ -301,6 +301,54 @@ export function readTagProvisional(tagPath: string): TagProvisional {
 }
 
 /**
+ * The BYTE offset at which a file's last content line begins (#130).
+ *
+ * This function is the whole of #130 in one number. `upsertHeartbeat` truncates
+ * the stale heartbeat line off the tag file and appends a fresh one, and the
+ * offset it truncates to MUST be a byte offset on a line boundary. The version
+ * this replaces read bytes and then measured the result in a decoded string —
+ * `searchOffset + lastLineStart` added a byte offset to a UTF-16 code-unit
+ * index — so every multi-byte character ahead of the last line drove the
+ * truncate that many bytes INTO the preceding line. The fresh heartbeat was
+ * then welded onto the severed half. Measured on this host before the fix: 96
+ * of 327 tag files carried 2,562 such lines, 99.7% of them with `→` or `—` in
+ * the preceding 2 KiB — our own commit messages, out of the `cmd` arrays.
+ *
+ * So this never decodes. It searches the raw `Buffer` for `0x0a`, which is safe
+ * across a chunk boundary in a way a decoded chunk is not: a UTF-8 continuation
+ * byte is always >= 0x80, so 0x0a can never be part of a multi-byte sequence and
+ * a chunk cut anywhere still yields the right newline positions. Decoding a
+ * chunk in isolation, by contrast, turns a split sequence into U+FFFD and
+ * measures text the file does not contain.
+ *
+ * Scans backwards in chunks because a classified line can be large — a long
+ * `cmd` array runs well past any fixed window — and a scan that gave up would
+ * return 0 and truncate the entire file.
+ *
+ * A trailing `\n` terminates the last line rather than starting an empty one, so
+ * it is stepped over. An empty file, and a file that is one unterminated line,
+ * both answer 0: the caller truncates to whatever comes back, and -1 or a throw
+ * would be a worse answer than "the whole file is the last line".
+ */
+export function lastLineStartByte(fd: number, size: number, chunkSize = 512): number {
+	if (size <= 0) return 0;
+	const one = Buffer.alloc(1);
+	fs.readSync(fd, one, 0, 1, size - 1);
+	// A terminating newline belongs to the last line, not to a line after it.
+	let searchEnd = one[0] === 0x0a ? size - 1 : size;
+	while (searchEnd > 0) {
+		const readSize = Math.min(chunkSize, searchEnd);
+		const start = searchEnd - readSize;
+		const buf = Buffer.alloc(readSize);
+		fs.readSync(fd, buf, 0, readSize, start);
+		const nl = buf.lastIndexOf(0x0a);
+		if (nl !== -1) return start + nl + 1;
+		searchEnd = start;
+	}
+	return 0;
+}
+
+/**
  * The provisional verdict for tag content ALREADY IN HAND (#443, PR review).
  *
  * This exists because `readTagProvisional(path)` and `readClassifiedTagFile(path)`

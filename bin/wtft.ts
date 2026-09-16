@@ -55,6 +55,7 @@ import {
 	readClassifiedTagFile,
 	readTagProvisional,
 	readTagFileWithVerdict,
+	lastLineStartByte,
 	detectSessionHarness,
 	buildSessionJson,
 	renderSessionJson,
@@ -187,6 +188,9 @@ export {
 	readClassifiedTagFile,
 	readTagProvisional,
 	readTagFileWithVerdict,
+	// #130 — the byte-offset seam the heartbeat truncate depends on,
+	// pinned directly by tests/wtft-130-line-safe-tag-writes.test.ts §W.
+	lastLineStartByte,
 	getTerminalWidth,
 	WTFT_TAGGER_VERSION,
 	// Daemon lifecycle (#95) — takeover/idle-clamp/TTL tests

@@ -567,6 +567,15 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 		"C32b and the record appended after it survives intact");
 }
 
+// NOT TESTED HERE, and this comment is the record of why (#129). The
+// order-independence fix in `computeSpawnTree` — a session counted as its own
+// edge AND folded into a descendant by that descendant's parse — needs a
+// fixture where `parseSessionFile` actually performs the fold. The only path
+// that folds is `attributeClaudeSubAgentCosts`, whose discovery reads
+// `os.homedir() + "/.claude/projects"` directly, with no env seam. A sandboxed
+// suite cannot redirect it, so the fix ships verified by reading and by the
+// subtraction's own arithmetic, not by a regression test. #129 adds the seam.
+
 // ---
 // PART D — the issue's own Closer, through the CLI
 // ---

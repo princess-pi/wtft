@@ -224,7 +224,7 @@ Three bounds are reported rather than hidden: the walk stops at **depth 5**
 the ledger, and a ledger it cannot read comes back as `spawned.ledgerError`
 rather than as an empty tree. `tree` covers *resolved* descendants, so it is a
 floor whenever anything went uncounted — `unattributed` non-empty, `depthCapped`
-non-zero, or `ledgerTruncated` true.
+non-zero, `ledgerTruncated` true, or `ledgerError` set.
 
 `wtft --tokens` shows the same thing as a `SPAWNED` / `TREE` block below
 `TOTAL` — and prints nothing at all when this session recorded no edges. Full

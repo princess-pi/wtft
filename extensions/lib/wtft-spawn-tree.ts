@@ -134,7 +134,11 @@ export interface SpawnTree {
 	 *  to prevent one layer up. A zero that might mean "could not look" is the
 	 *  silent gap #116 is about, reintroduced inside #116's own fix. */
 	ledgerError: string | null;
-	/** Sum over resolved descendants. */
+	/** Sum over RESOLVED descendants. A floor under any of four conditions —
+	 *  `unattributed` non-empty, `depthCapped` non-zero, `ledgerTruncated`, or
+	 *  `ledgerError` non-null. The last one is the trap: a ledger that could not
+	 *  be read sets none of the other three, so a consumer checking only those
+	 *  reads a zeroed tree as a complete lineage. */
 	total: TokenTotals;
 }
 
@@ -150,6 +154,18 @@ export interface SpawnTreeOptions {
 	 *  `<session>/subagents/` (#82/#83) — the two mechanisms that fold a child
 	 *  into the parent before this walk ever runs. */
 	alreadyAttributed?: Set<string>;
+}
+
+/** Subtract every numeric field of `from` from `into`, clamped at zero.
+ *
+ *  Both operands come from `computeSessionSummary` over the same file, so this
+ *  is exact in the case it exists for — a session counted as its own edge and
+ *  folded into a descendant as well. The clamp covers the case it is not: a
+ *  negative token count is a louder lie than the double count it replaced. */
+function subtractTotals(into: TokenTotals, from: TokenTotals): void {
+	for (const key of Object.keys(into) as (keyof TokenTotals)[]) {
+		into[key] = Math.max(0, into[key] - (from[key] ?? 0));
+	}
 }
 
 /** Add every numeric field of `from` into `into`.
@@ -273,6 +289,13 @@ export function computeSpawnTree(
 	/** Sessions whose own edges have been queued, so a seeded `in-self` id is
 	 *  descended into exactly once however many edges point at it. */
 	const visited = new Set<string>([rootSessionId]);
+	/** What each counted session contributed, so a descendant that ALSO folds it
+	 *  in can have it subtracted back out. Without this the guard is
+	 *  order-dependent: it catches a folded child the walk has not reached yet
+	 *  (mark it `in-self`) and misses one the walk reached first (its cost is
+	 *  already in `total`, and the descendant's parse adds it again). Two
+	 *  depth-1 edges in the wrong ledger order were enough. */
+	const countedTotals = new Map<string, TokenTotals>();
 
 	type Visit = { parentId: string; depth: number };
 	const queue: Visit[] = [{ parentId: rootSessionId, depth: 1 }];
@@ -354,7 +377,21 @@ export function computeSpawnTree(
 				const parsed = parseSessionFile(file);
 				total = computeSessionSummary(parsed).total;
 				for (const id of collectSelfAttributedSessionIds(file, parsed)) {
-					if (!outcomeOf.has(id)) outcomeOf.set(id, "in-self");
+					const already = countedTotals.get(id);
+					if (already) {
+						// Reached as its own edge FIRST, and now folded in here
+						// as well. Its cost is already in `tree.total`, so take
+						// it back out of this descendant rather than adding it
+						// twice. Both figures come from `computeSessionSummary`
+						// over the same file, so the subtraction is exact; the
+						// clamp is there because a number that went negative
+						// would be a louder lie than the one it replaced.
+						subtractTotals(total, already);
+					} else if (!outcomeOf.has(id)) {
+						// Not reached yet — mark it, so its own edge reports
+						// `in-self-total` and adds nothing.
+						outcomeOf.set(id, "in-self");
+					}
 				}
 			} catch {
 				// A recorded child we CAN see and cannot read is the one skip
@@ -370,6 +407,7 @@ export function computeSpawnTree(
 
 			tree.descendants++;
 			outcomeOf.set(edge.child, "counted");
+			countedTotals.set(edge.child, { ...total });
 			addTotals(tree.total, total);
 			tree.edges.push({ ...base, resolved: true, path: file, total });
 			visited.add(edge.child);

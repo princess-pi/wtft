@@ -89,7 +89,7 @@ with some flags the report parser ignores.
 | Exit | Meaning |
 |---|---|
 | 0 | Record appended — `--json` echoes the exact line written, and without it nothing is printed at all. Also `--help`, which appends nothing. |
-| 2 | Bad arguments — a missing required flag, an unknown flag, a flag with no value, a malformed UUID, a `ts` that is not ISO-8601, or an oversized field. |
+| 2 | Bad arguments — a missing required flag, an unknown flag, a flag with no value, a malformed session id, or an oversized field. (`ts` is validated too, but nothing on the command line can set it — the flag does not exist and the clock fills it, so that cause is reachable only through the library.) |
 | 3 | The record was valid and the ledger could not be written (unwritable state dir, ENOSPC, a short write). The edge is **not recorded**, so the child is **invisible**, not `unattributed` — see *How this is verified*. A short write leaves one partial line, and the writer terminates it with a newline before failing, because otherwise the next spawner's `O_APPEND` merges into the fragment and a second, correctly recorded edge is destroyed by the first one's failure. |
 
 **It never blocks a spawn.** A spawner calls it and ignores the exit code; the failure is the
@@ -206,12 +206,14 @@ guess whether it double-counted. `label`, `model`, `cwd` and `skip` are present 
 when they apply; `label`, `ts`, `mechanism`, `child` and `reason` are the shape of a gap. Because
 `spawned.total` covers **resolved** descendants only, `tree` is a **floor** under any of THREE
 conditions, and checking the first alone reads a truncated tree as complete: `unattributed` is
-non-empty, `depthCapped` is non-zero, or `ledgerTruncated` is true.
+non-empty, `depthCapped` is non-zero, `ledgerTruncated` is true, or `ledgerError` is non-null.
+The last is the trap: a ledger that could not be read sets none of the other three, so a consumer
+checking only those reads a zeroed tree as a complete lineage.
 
 **`--tokens`** gains a block below TOTAL, rendered only when this session has at least one edge:
 
 ```
-SPAWNED    3 of 6 recorded descendant session(s) priced (#116) —
+SPAWNED    3 session(s) priced from 6 recorded edge(s) (#116) —
            NOT in TOTAL above, which is this session's own turns
            pr-review-lens  correctness                     $12.34
            pr-review-lens  reasoning                       $18.02
@@ -226,9 +228,10 @@ SPAWNED    subtotal                                        $57.03
 TREE       TOTAL + SPAWNED                                 $127.36
 ```
 
-**Every edge gets a row, skipped ones included** — the headline's `3 of 6` and the rows agree by
-construction, which is why the headline says how many were *priced* rather than how many were
-recorded.
+**Every edge gets a row, skipped ones included** — the headline's two numbers agree with the rows
+by construction, and they are deliberately in different units: sessions *priced*, from edges
+*recorded*. A diamond, a cycle, an in-self child and a depth cut each add an edge without adding a
+session.
 
 A skipped edge prints its **reason** where its cost would be. A dash or a `$0.00` would both read
 as "this child was free", which is the one thing we do not know about it. The last three
@@ -404,3 +407,33 @@ interaction.commands` and `t: interaction.timestamp`, and `classifiedToInteracti
 (`commands: obj.cmd || []`). Both fields the arm needs survive the round trip, and they are in the
 "must stay in sync" pair the file names as its single source of truth. The finding was right that
 the code assumed it — the assumption is now checked, and this paragraph is the check's record.
+
+## PR review round 3 (2026-09-16) — the round limit, and where it leaves this
+
+`PR_REVIEW_ROUND_LIMIT` is 3, and round 3 reached it (`pr-open` exit 10, no PR created). **The limit
+was not raised.** Three findings were bugs introduced by rounds 1 and 2's own fixes, so they are
+fixed here rather than handed over; the rest are recorded with their disposition.
+
+| Finding | Verified? | Action |
+|---|---|---|
+| **High** — the descendant double-count guard was order-dependent | **Yes** — a session counted as its own edge first, then folded into a later descendant, was billed twice; two depth-1 edges in the wrong ledger order were enough | **Code**: `countedTotals` remembers what each counted session contributed, and a descendant that also folds it in has it subtracted back out. Order-independent in both directions. ⬜ `reconciled-against-untested` — see #129 |
+| Fragment termination skipped the throwing case its own comment claimed to cover | **Yes** — on a throw, `written` is 0, so the `written > 0` guard was false | **Code**: termination is attempted whenever the write did not complete, and the error says whether it succeeded instead of promising that it did |
+| `tree` read as complete when the ledger could not be read | **Yes** — `ledgerError` set none of the three documented floor conditions | Prose, four surfaces: it is a **fourth** condition, and the one a consumer is likeliest to miss |
+| The `--tokens` headline's denominator counted edges while saying "sessions" | **Yes** | Prose + the rendered string: two units, named as such |
+| Both specs still listed a `ts` cause for exit 2 that no command line can reach | **Yes** — round 1 removed the flag and the manifest, not the specs | Prose |
+
+**Refuted — `unreadable` does not depend on an unverified assumption.** The finding suggested
+`parseSessionFile` might warn rather than throw on a read failure, which would classify an
+unreadable descendant as a `counted` $0 — the zero-laundering this spec forbids. It throws:
+`tests/wtft-116-spawn-ledger.test.ts` C24 chmods a descendant to 000 and asserts
+`unattributed[0].reason === "unreadable"`, and that assertion passes on this host. The behaviour is
+pinned by a test, not by an assumption.
+
+**Declined — the in-self set is re-derived rather than read back from the tag.** True, and
+deliberate: the tag file does not carry `claudeSubAgentSessionIds`, so re-running the same
+discovery over the same `cmd` and `t` fields is the only way to ask. Round 2 established that both
+fields survive the tag round trip. Making the daemon serialise the ids is a tag-format change with
+a version bump, which is a decision rather than a fix.
+
+**Where this stops.** The remaining review state is accepted rather than argued down: the next gate
+is Macroscope's single billed round at `pr-submit`, against the finished diff.

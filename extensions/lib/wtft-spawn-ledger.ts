@@ -215,23 +215,39 @@ export function appendSpawnRecord(record: SpawnRecord, file: string = spawnLedge
 		// the line as a second record, so the only honest move is to say the
 		// append failed — the caller's contract is already "an unwritten edge
 		// degrades to the old behaviour".
+		// TERMINATE THE FRAGMENT. A partial line with no newline is not one lost
+		// record but two: the next spawner's O_APPEND lands directly after those
+		// bytes and MERGES INTO them, so a second, correctly recorded edge is
+		// destroyed by the first one's failure. A newline turns two casualties
+		// into one.
+		//
+		// BEST-EFFORT, and the error says so rather than promising. Under
+		// ENOSPC — the likeliest cause of a short write — this newline will fail
+		// too. An earlier version guarded on `written > 0`, which skipped the
+		// throwing case entirely while its own comment claimed to cover it: when
+		// `writeSync` throws, `written` is still 0 and we do not know how many
+		// bytes landed, which is precisely when a fragment is most likely.
 		let written = 0;
+		let terminated = false;
+		let writeError: unknown = null;
 		try {
 			written = fs.writeSync(fd, buf);
-		} finally {
-			// TERMINATE THE FRAGMENT. A partial line with no newline is not just
-			// one lost record: the next spawner's O_APPEND lands directly after
-			// those bytes and MERGES INTO them, so a second, correctly recorded
-			// edge is destroyed by the first one's failure — and that child goes
-			// invisible rather than unattributed. One best-effort newline turns
-			// two casualties into one. It runs in `finally` because the throwing
-			// case (ENOSPC mid-write) is exactly the one that leaves a fragment.
-			if (written > 0 && written !== buf.length) {
-				try { fs.writeSync(fd, Buffer.from("\n", "utf8")); } catch { /* nothing more to try */ }
-			}
+		} catch (err) {
+			writeError = err;
 		}
 		if (written !== buf.length) {
-			throw new Error(`spawn ledger: short write (${written} of ${buf.length} bytes) — one partial line remains, terminated so the next record stays intact`);
+			try {
+				fs.writeSync(fd, Buffer.from("\n", "utf8"));
+				terminated = true;
+			} catch { /* nothing more to try */ }
+		}
+		if (writeError !== null) {
+			throw new Error(`spawn ledger: write failed (${writeError instanceof Error ? writeError.message : String(writeError)})` +
+				` — an unknown number of bytes may have landed; the fragment was ${terminated ? "terminated" : "NOT terminated, so the next record may merge into it"}`);
+		}
+		if (written !== buf.length) {
+			throw new Error(`spawn ledger: short write (${written} of ${buf.length} bytes)` +
+				` — one partial line remains, ${terminated ? "terminated so the next record stays intact" : "and could NOT be terminated, so the next record may merge into it"}`);
 		}
 	} finally {
 		fs.closeSync(fd);

@@ -79,4 +79,11 @@
 // into every line, so without this bump the divider keeps firing on every
 // already-tagged session. Patch, not minor: no line's cost, category or bucket
 // moves — one boolean stops being set on sidechain lines.
+//
+// That claim is load-bearing and was nearly false. A first cut also widened
+// `isSidechain` across a dedup merge, which would have moved cache-write dollars
+// between the overhead and work buckets (splitOverheadCost gates recache
+// detection on it) and flipped detection for later interactions through the
+// prevCtx chain — a semantic move that a patch bump understates. Only the
+// divider's own flag is touched. Widening isSidechain belongs with #15.
 export const WTFT_TAGGER_VERSION = "2.8.1";

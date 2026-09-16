@@ -21,6 +21,13 @@
  * caused", which is what the fixture below pins — parent misses counted
  * exactly, subagent misses zero.
  *
+ * Imports come from the BUILT bundle `bin/wtft.mjs`, as every suite here does.
+ * That is only trustworthy because the build is a hard gate, not a habit: the
+ * repo's CLAUDE.md forbids editing `bin/*.mjs` and requires `bun run build`
+ * after any `.ts` edit, `package.json`'s `prepare` runs it, and CI builds before
+ * testing. A stale bundle would let a reverted parse-time gate pass green, so
+ * rebuild before trusting a green run from this file alone (PR review round 2).
+ *
  * Run: node --experimental-strip-types tests/wtft-115-cache-miss-sidechain.test.ts
  */
 
@@ -34,6 +41,8 @@ import {
 	parseSessionFile,
 	deduplicateInteractions,
 	loadSubagentInteractions,
+	clearSubagentCacheMiss,
+	serializeClassified,
 } from "../bin/wtft.mjs";
 
 let passed = 0;
@@ -110,13 +119,38 @@ check(byId.get("p_reprime")?.cacheMiss === true, "parent's re-prime → still a 
 check(!byId.get("s_start")?.cacheMiss, "subagent's first turn → NOT a miss");
 check(!byId.get("s_hit")?.cacheMiss, "subagent's cache hit → not a miss");
 
-console.log("--- TEST 2: the closer — one divider, not two ---");
+console.log("--- TEST 2: no divider a SUBAGENT caused ---");
 check(dividerCount([...parent, ...sub]) === 2, "parent start + re-prime → 2 dividers");
 // The subagent sits in its OWN bin, between the two parent misses, so a leaked
 // flag would show up as a third divider rather than hiding inside an existing one.
 check(
 	dividerCount(sub) === 0,
 	"a subagent transcript alone → 0 dividers (was 1 before #115)"
+);
+
+// …and WHERE, not just how many (PR review round 2). The fixture is built so
+// placement matters — the subagent's bin sits between the parent's two misses —
+// so a divider drawn on the wrong bin, or a suppressed one resurfacing inside a
+// bin that already has one, keeps the counts at 2 and 0 and passes regardless.
+const rendered = (buildWtftLines([...parent, ...sub], DEFAULTS,
+	{ interval: "1h", mode: "bucket", width: 80 }) as string[])
+	.map((l: string) => l.replace(/\x1b\[[0-9;]*m/g, ""));
+// Bin rows are newest-first and labelled in LOCAL time, so they are matched by
+// shape rather than by hour — an assertion pinned to a clock reading is the #96
+// flaky-pricing trap in a different costume.
+const binRows = rendered
+	.map((line, i) => ({ line, i }))
+	.filter(r => /^\d\d:\d\d\s+\$/.test(r.line))
+	.map(r => r.i);
+const hasDividerAbove = (i: number) => (rendered[i - 1] || "").includes("Cache Miss");
+check(binRows.length === 3, `three bins render (${binRows.length})`);
+// Newest first: [0] is the parent's 14:00Z re-prime, [1] the subagent's 13:10Z
+// bin, [2] the parent's 12:00Z cold start.
+check(hasDividerAbove(binRows[0]), "a divider sits on the parent's re-prime bin");
+check(hasDividerAbove(binRows[2]), "…and on the parent's own cold-start bin");
+check(
+	!hasDividerAbove(binRows[1]),
+	"…and NOT on the bin between them, which only the subagent occupies"
 );
 
 console.log("--- TEST 3: cost is untouched ---");
@@ -169,6 +203,10 @@ check(
 check(dividerCount(viaProvenance) === 0, "so the unstamped subagent draws no divider either");
 
 console.log("--- TEST 5: the merge cannot resurrect the flag ---");
+// isSidechain itself is deliberately NOT widened by the merge: it gates
+// splitOverheadCost's recache detection and the prevCtx chain, so ORing it would
+// move a merged message's cache-write dollars between buckets (PR review round
+// 2). Only the label the merge can get wrong is cleared.
 // deduplicateInteractions keeps the MAX-COST copy of a message id. If a re-logged
 // copy omits the envelope's isSidechain and wins on cost, the flag came back.
 const mixed = [
@@ -180,8 +218,34 @@ const mixed = [
 ];
 const mergedIx = deduplicateInteractions(mixed);
 check(mergedIx.length === 1, "the two copies collapse to one billed message");
-check(mergedIx[0].isSidechain === true, "isSidechain survives the merge from either copy");
-check(!mergedIx[0].cacheMiss, "…so the divider stays suppressed on the merged message");
+check(!mergedIx[0].cacheMiss, "the divider stays suppressed when any copy knew it was a sidechain");
+check(
+	mergedIx[0].isSidechain !== true,
+	"…and isSidechain itself is NOT widened, so no overhead bucket moves"
+);
+
+console.log("--- TEST 6: the daemon's own reader is gated too ---");
+// The CLI renders from the TAG FILE, and the daemon writes subagent tag lines
+// through parseSessionFile + deduplicateInteractions + serializeClassified —
+// never through loadSubagentInteractions (PR review round 2, High). Clearing the
+// flag in only one reader bakes `miss: 1` into the tag file and makes the Pi
+// widget and the CLI disagree about the same session.
+const daemonSide = deduplicateInteractions(parseSessionFile(piPath));
+check(
+	daemonSide.some((i: any) => i.cacheMiss === true),
+	"the daemon's parse sees the same unstamped miss (the gap it would bake in)"
+);
+const tagLines = clearSubagentCacheMiss(daemonSide)
+	.map((i: any) => serializeClassified(i))
+	.join("\n")
+	.split("\n")
+	.filter(Boolean)
+	.map((l: string) => JSON.parse(l));
+check(tagLines.length > 0, "…it serializes tag lines for the subagent");
+check(
+	tagLines.every((l: any) => l.miss !== 1),
+	"…and not one of them carries miss=1, so the tag file cannot resurrect the divider"
+);
 
 fs.rmSync(dir, { recursive: true, force: true });
 

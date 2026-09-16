@@ -359,6 +359,13 @@ is transient and inherent to any bump — but it is exactly the trade the supers
 declined, so it belongs in the record next to the reversal rather than only in the section that
 lost the argument.
 
+**Two readers, one seam.** `loadSubagentInteractions` is not the only route a subagent
+transcript takes to a rendered divider: the daemon's `syncSubagentTranscript` parses and
+serializes its own subagent tag lines, and the CLI renders from the TAG FILE. Clearing the flag
+in one reader would bake `miss: 1` into the tag file and make the Pi widget and the CLI disagree
+about the same session. So the clear is an exported seam, `clearSubagentCacheMiss`, called by
+both.
+
 **Two harnesses, two gates, one rule.** Claude Code stamps `isSidechain` on every turn of a
 subagent transcript, so the parse-time conjunct catches those. Pi does not — it marks a subagent
 at FILE level, with a `parentSession` header and no per-entry flag — and the nested
@@ -376,8 +383,10 @@ flagged. The rule #115 is actually asking for is "no divider a SUBAGENT caused",
 closer pins.
 
 **Closer** — `tests/wtft-115-cache-miss-sidechain.test.ts`, on a parent transcript plus a real
-`<session>/subagents/agent-*.jsonl` layout: the parent's two misses still render two dividers, the
-subagent transcript alone renders zero (it rendered one before), an UNSTAMPED subagent transcript
-also renders zero, a merge whose max-cost copy lost the envelope flag stays suppressed, and both
-fixtures' costs are pinned to an arithmetic expectation rather than to a second parse of
-themselves.
+`<session>/subagents/agent-*.jsonl` layout: the parent's two misses still render two dividers **on
+the parent's own two bins**, with none on the bin between them that only the subagent occupies;
+the subagent transcript alone renders zero (it rendered one before); an UNSTAMPED subagent
+transcript also renders zero, and the daemon's own parse/serialize path emits no `miss=1` tag line
+for it either; a merge whose max-cost copy lost the envelope flag stays suppressed, while
+`isSidechain` itself is asserted NOT to widen, so no overhead bucket moves; and both fixtures'
+costs are pinned to an arithmetic expectation rather than to a second parse of themselves.

@@ -250,7 +250,14 @@ function buildInteraction(
 	// compaction/recache meter-split (#52 Phase 3) rewrites cr and cw across two
 	// lines, so by tag-read time neither line can be told apart from a partial
 	// re-prime. This is the only point where the original pair is still intact.
+	//
+	// Parent-only (#115): a sidechain starts with an empty context, so read-0 /
+	// write-everything is how it BEGINS, not something it lost. The divider means
+	// "your cached prefix was thrown away" and is actionable only about the
+	// conversation the reader is in, so it follows the same exclusion
+	// splitOverheadCost already applies to recache detection.
 	const cacheMiss =
+		!turn.isSidechain &&
 		usage.cache_read_input_tokens === 0 && usage.cache_creation_input_tokens > 0
 			? true : undefined;
 

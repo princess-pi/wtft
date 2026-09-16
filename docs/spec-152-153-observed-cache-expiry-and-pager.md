@@ -304,3 +304,42 @@ seconds after the previous turn — the case that motivated the issue. `07:50:38
 re-prime, is correctly not flagged.
 
 `docs/EXT_WTFT.html` reconciled to the observed rule and the new label at Step 5.
+
+---
+
+## Amendment 1 (#115) — the divider is parent-only
+
+**What was wrong.** The rule above says `cr === 0 && cw > 0`, full stop. A Task subagent
+satisfies it on its first turn *by construction*: a fresh sidechain context reads nothing and
+writes everything. Nothing expired and nothing was lost, so the divider — whose whole meaning is
+"your cached prefix was thrown away" — fired on a routine spawn. Measured on one real session,
+3 of 4 dividers were subagent first-messages, and the ratio worsens as fan-out grows, which is
+the shape the routing rules actively encourage.
+
+**The change.** `cacheMiss` gains one conjunct at the same site, `wtft-parser.ts`:
+
+```ts
+const cacheMiss =
+    !turn.isSidechain &&
+    usage.cache_read_input_tokens === 0 && usage.cache_creation_input_tokens > 0
+        ? true : undefined;
+```
+
+**Why at the parser and not the renderer.** The same reason the original decision is made there:
+`miss` is baked into every tag line and the renderer only follows the flag (`wtft-daemon-lib.ts`
+writes `miss: 1`, reads it back as `cacheMiss`). Gating in the renderer would leave the tag files
+saying something false, and `isSidechain` is not serialized to them at all.
+
+**Why every sidechain turn, not only its first.** `splitOverheadCost` already excludes sidechains
+wholesale from recache detection, in the same file, for the same reason — a sidechain's cache
+behaviour is not the reader's conversation. A second, narrower rule here would be a second thing
+to keep true.
+
+**Tagger bump: 2.8.0 → 2.8.1.** Tag files are append-only, so without it the divider keeps firing
+on every already-tagged session. Patch, not minor: no line's cost, category or bucket moves — one
+boolean stops being set on sidechain lines.
+
+**Closer** — `tests/wtft-115-cache-miss-sidechain.test.ts`, on a parent transcript plus a real
+`<session>/subagents/agent-*.jsonl` layout: the parent's two misses still render two dividers, the
+subagent transcript alone renders zero (it rendered one before), and both fixtures still report
+their own cost.

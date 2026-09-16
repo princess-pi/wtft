@@ -132,7 +132,7 @@ wtft --json | jq .total.costUsd
 `wtft --json` writes **exactly one JSON object** to stdout and nothing else —
 no chart, no ANSI, and no `3.6k`-style abbreviation, which is lossy. Human prose
 goes to stderr, and every sentence that would otherwise have been on stdout is
-repeated in the object's `notices[]`. The schema is `wtft/session@1`; field names
+repeated in the object's `notices[]`. The schema is `wtft/session@2`; field names
 and exit codes are versioned API, the prose inside `notices[].text` is not. Full
 contract: [`docs/spec-26-json.md`](./docs/spec-26-json.md).
 
@@ -164,12 +164,48 @@ still refused with exit 1. With several sessions discovered and no `--session`,
   runs under `--tokens` and `--json` but not on a plain `wtft` run, so a session
   provisional for that reason alone exits 9 in those two modes and 0 on a plain
   run.
+- **2** / **3** — `wtft spawn-record` only (see below): the call was wrong, or
+  the ledger could not be written. The report path never returns either.
 - **130** — the interactive session selector was cancelled with `q` or Ctrl-C.
   The SIGINT convention (128+2), not a wtft-specific code. `--json` never
   prompts, so it never returns this.
 
 The same table is in `docs/manifests/wtft-cmd.json`, which is what `wtft --help`
 renders its **Exit codes** section from.
+
+### `spawn-record` — the spawn ledger
+
+Some agent sessions are started by a *launcher*, not by a `claude` command in the
+parent's own transcript: a `pr-review` lens in a `/tmp` sandbox, a
+`herdr agent start` child in a worktree. Those children are invisible to the
+rollup, and not because the parser is missing something —
+**neither transcript contains a field naming the other**, so there is no edge to
+re-derive and no amount of re-parsing can reach the money. Measured on one real
+session: $70.33 reported, $69.68 of its own lens children unattributed.
+
+So the spawner writes the edge down when it is free, which is at spawn time —
+`claude --session-id <uuid>` takes the child's id as *input*, so it is known
+before the child runs:
+
+```sh
+wtft spawn-record --parent "$PARENT_SESSION" --child "$CHILD_SESSION" \
+  --mechanism pr-review-lens --label correctness --model opus
+```
+
+One append-only line in `$XDG_STATE_HOME/wtft/spawns.jsonl`
+(`~/.local/state/wtft/spawns.jsonl` by default), written with a single atomic
+`write(2)` so concurrent spawners cannot interleave. Exit **2** is a bad call
+(malformed uuid, missing flag), exit **3** an unwritable ledger; a spawner is
+meant to ignore both, since an unrecorded edge simply degrades to the old
+behaviour.
+
+`wtft --json` then reports the lineage under `spawned` — every edge with its
+provenance, every descendant counted exactly once, and every gap named rather
+than zeroed — plus `tree`, which is self + descendants as a field so nobody adds
+two numbers and guesses. **`total` keeps meaning this session's own turns**; not
+one dollar moved into or out of it. `wtft --tokens` shows the same thing as a
+`SPAWNED` / `TREE` block below `TOTAL`. Full contract:
+[`docs/spec-116-spawn-ledger.md`](./docs/spec-116-spawn-ledger.md).
 
 `--pager` is a Pi TUI overlay, not a CLI flag — the CLI says so and exits 1,
 suggesting `wtft … | less -R`. Any `wtft` run that produces a report spawns the log

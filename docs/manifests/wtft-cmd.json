@@ -245,6 +245,10 @@
     {
       "flags": "--why",
       "desc": "Explain why you'd run this tool, with user scenarios and anti-use-cases."
+    },
+    {
+      "flags": "spawn-record --parent <uuid> --child <uuid> --mechanism <name> [--cwd <path>] [--label <text>] [--model <name>] [--json]",
+      "desc": "SUBCOMMAND, not a report (#116). Record one parent->child spawn edge in the append-only spawn ledger at $XDG_STATE_HOME/wtft/spawns.jsonl. A launcher-spawned session -- a pr-review lens, a `herdr agent start` child -- leaves NO trace of its parent in either transcript, so there is nothing for a later parse to re-derive; the spawner writes the edge down at spawn time, when it is free, and `claude --session-id <uuid>` means the child's id is known before the child runs. Exits 2 on a malformed uuid or a missing flag and 3 when the ledger cannot be written; a spawner is expected to ignore the failure, since an unrecorded edge degrades to exactly the old behaviour. --json echoes the exact line written. wtft --json then reports the lineage under `spawned`, with `tree` as self + descendants; `total` keeps meaning this session's own turns."
     }
   ],
   "examples": [
@@ -309,6 +313,14 @@
     {
       "code": 1,
       "meaning": "Error: no session found or selected, an invalid path, a daemon that could not be spawned or that died before producing data, a refused flag (-p), or an unhandled exception. Reason on stderr; under --json stdout carries nothing."
+    },
+    {
+      "code": 2,
+      "meaning": "`wtft spawn-record` only (#116): the call was wrong -- a missing --parent/--child/--mechanism, an unknown flag, a malformed session uuid, or an oversized field. Nothing was appended. The report path never exits 2."
+    },
+    {
+      "code": 3,
+      "meaning": "`wtft spawn-record` only (#116): the record was valid but the ledger could not be written (unwritable state dir, ENOSPC). Nothing was appended, and the edge is lost -- the child's cost will be unattributed."
     },
     {
       "code": 9,

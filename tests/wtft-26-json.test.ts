@@ -5,7 +5,7 @@
  *   Spec: docs/spec-26-json.md.
  *
  *   The issue's Closer, at the CLI:
- *     `node bin/wtft.mjs -s <fixture> --json | jq -e '.schema == "wtft/session@1"
+ *     `node bin/wtft.mjs -s <fixture> --json | jq -e '.schema == "wtft/session@2"
  *      and (.total.outputTokens|type) == "number"'` exits 0, "and the value equals
  *     what the rendered table shows once un-abbreviated. A test asserts the two
  *     agree on a fixture, so the prose and the JSON cannot drift."
@@ -45,7 +45,7 @@ const CATEGORY_NAMES = [
 /** The schema string, likewise written out rather than compared to its own
  *  import. `WTFT_JSON_SCHEMA` is imported so §1 can prove the CLI emits the
  *  value the module exports, and this literal pins what that value must be. */
-const SCHEMA = "wtft/session@1";
+const SCHEMA = "wtft/session@2";
 
 const RED = "\x1b[31m", GREEN = "\x1b[32m", RESET = "\x1b[0m";
 let passed = 0, failed = 0;

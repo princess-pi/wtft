@@ -306,3 +306,33 @@ real-time as new interactions are logged, until `Ctrl+C`/`q`. Distinct from the 
 periodic refresh (which lives inside Pi); watch mode is a standalone CLI process meant to run in
 a separate pane.
 _Avoid_: Live mode, tail mode
+
+**Launcher-spawned session** (#116):
+A full agent session started by a *launcher process* the parent invoked — `herdr agent start`,
+a `pr-review` lens, a wrapper script — rather than by a `claude` command the parent's own
+transcript contains. Distinct from a **subagent session** (a Task-tool child, discovered by
+file layout) and from a **`claude -p` spawn** (discovered by cwd and time): a launcher child
+has its own session id and its own project dir, and **neither transcript contains a field
+naming the other**, so there is nothing to re-derive and no tagger bump can reach its cost.
+_Avoid_: Background agent, detached session, orphan session (it is not orphaned — the edge
+exists, it was simply never written down)
+
+**Spawn ledger** (#116):
+The append-only `$XDG_STATE_HOME/wtft/spawns.jsonl`, one JSON line per parent→child spawn
+edge, written by the spawner at spawn time with `wtft spawn-record`. It is the ONLY record of
+a launcher-spawned edge. "Ledger" to refer, "spawn ledger" on first use in a passage.
+_Avoid_: Spawn log, lineage file, parent map, edge database
+
+**Self / tree** (#116):
+**Self** is a session's own turns — what `total` has always meant and still means. **Tree** is
+self plus every descendant reached through the spawn ledger. Both are explicit fields under
+`--json`, and the human table shows the split as `TOTAL` / `SPAWNED` / `TREE`. Never write a
+bare "the session's cost" where the two can differ.
+_Avoid_: Rollup, grand total, inclusive cost (each hides which of the two is meant)
+
+**Unattributed** (#116):
+A recorded spawn edge whose child's cost could not be read — the transcript is missing or
+unreadable. Reported with its reason and a `null` cost, **never a zero**: a zero says the child
+cost nothing, which is a claim we do not have. Distinct from **uncounted** (#149), which is a
+billable event the harness records no `usage` for.
+_Avoid_: Missing, lost, dropped (the edge is known; only the amount is not)

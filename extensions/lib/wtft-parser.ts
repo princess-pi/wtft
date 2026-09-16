@@ -722,6 +722,19 @@ export function deduplicateInteractions(interactions: Interaction[]): Interactio
 				// interactions through prevCtx. That is a bigger change than this
 				// issue, it would falsify this bump's "no bucket moves", and it
 				// belongs with the subagent-accounting work (#15).
+				//
+				// SCOPE, stated because it is narrower than it looks (PR review
+				// round 3): this only fires when both copies are in the SAME
+				// array. The daemon's parent path dedups one poll batch at a
+				// time, so two emissions of one id that straddle a 667ms poll
+				// boundary never meet here — the known defect class named in
+				// bin/wtft-daemon.ts, whose whole-file re-parse fix was applied
+				// to subagent transcripts only. In that residual window a
+				// sidechain turn could still write one tag line carrying
+				// `miss: 1`, and no tag reader can undo it, since `isSidechain`
+				// is deliberately not in the wire format. Closing it means the
+				// parent path re-parsing whole files too, which is #97's
+				// question, not this issue's.
 				if (i.isSidechain) merged.cacheMiss = undefined;
 			}
 			if (mergedToolCats.size > 0) merged.toolCats = [...mergedToolCats];

@@ -34,6 +34,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { spawn } from "node:child_process";
 import { trackSandbox } from "./lib/sandbox";
 
 import {
@@ -41,8 +42,7 @@ import {
 	parseSessionFile,
 	deduplicateInteractions,
 	loadSubagentInteractions,
-	clearSubagentCacheMiss,
-	serializeClassified,
+	WTFT_TAGGER_VERSION,
 } from "../bin/wtft.mjs";
 
 let passed = 0;
@@ -226,25 +226,88 @@ check(
 
 console.log("--- TEST 6: the daemon's own reader is gated too ---");
 // The CLI renders from the TAG FILE, and the daemon writes subagent tag lines
-// through parseSessionFile + deduplicateInteractions + serializeClassified —
-// never through loadSubagentInteractions (PR review round 2, High). Clearing the
-// flag in only one reader bakes `miss: 1` into the tag file and makes the Pi
-// widget and the CLI disagree about the same session.
-const daemonSide = deduplicateInteractions(parseSessionFile(piPath));
+// through its OWN reader — parseSessionFile + deduplicateInteractions +
+// serializeClassified in syncSubagentTranscript — never through
+// loadSubagentInteractions (PR review round 2, High).
+//
+// THIS DRIVES THE REAL DAEMON, not a hand-rebuilt copy of its pipeline (PR
+// review round 3). The first cut of this test called `clearSubagentCacheMiss`
+// itself, which proved only that the seam works when called: deleting the
+// daemon's own call to it left the suite green, so the one call site round 2
+// added was unguarded by the test that claimed to cover it.
+const live = path.join(dir, "live");
+const sessionPath = path.join(live, "5aa1f33e-0000-4000-8000-000000000115.jsonl");
+fs.mkdirSync(live, { recursive: true });
+fs.writeFileSync(sessionPath, [
+	usageLine({ id: "d_parent_hit", ts: "2026-07-01T16:00:00Z", cr: 120000, cw: 1500 }),
+	// A GENUINE parent re-prime, so this test is two-sided: the daemon must
+	// still write miss=1 here. An assertion that only ever looks for the absence
+	// of a flag passes just as well on a daemon that stopped writing it at all.
+	usageLine({ id: "d_parent_miss", ts: "2026-07-01T16:30:00Z", cr: 0, cw: 88000 }),
+].join("\n") + "\n");
+
+// An UNSTAMPED subagent, in the layout the daemon's own walk discovers. This is
+// the Pi/workflow shape: no per-entry isSidechain anywhere in the file.
+const daemonSubDir = path.join(live, path.basename(sessionPath, ".jsonl"), "subagents");
+fs.mkdirSync(daemonSubDir, { recursive: true });
+fs.writeFileSync(path.join(daemonSubDir, "agent-deadbeef.jsonl"), [
+	usageLine({ id: "d_sub_start", ts: "2026-07-01T16:01:00Z", cr: 0, cw: 72000 }),
+	usageLine({ id: "d_sub_hit", ts: "2026-07-01T16:02:00Z", cr: 72000, cw: 700 }),
+].join("\n") + "\n");
+
+const tagsDir = path.join(live, "wtft-tags");
+const daemonBin = path.join(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
+const child = spawn(process.execPath, [daemonBin, "--session", sessionPath], {
+	detached: true, stdio: "ignore",
+});
+child.unref();
+
+/** Every classified tag line the daemon wrote for this session. The subagent's
+ *  lines land in the PARENT's tag file, so this reads the directory rather than
+ *  guessing a filename, and selects by message id below. */
+function tagLines(): any[] {
+	let names: string[] = [];
+	try { names = fs.readdirSync(tagsDir); } catch { return []; }
+	const out: any[] = [];
+	for (const name of names.filter(n => n.includes(`.wtft-tag.v${WTFT_TAGGER_VERSION}.`))) {
+		let text = "";
+		try { text = fs.readFileSync(path.join(tagsDir, name), "utf8"); } catch { continue; }
+		for (const line of text.split("\n")) {
+			if (!line.trim() || line.includes('"_hb"') || line.includes('"_meta"')) continue;
+			try { out.push(JSON.parse(line)); } catch { /* partial write — retry next poll */ }
+		}
+	}
+	return out;
+}
+
+// Poll cycle is 667ms. Wait for the SUBAGENT's lines specifically: the parent's
+// land first, so waiting on any line at all would end the wait too early.
+const deadline = Date.now() + 25_000;
+let written: any[] = [];
+const subIds = new Set(["d_sub_start", "d_sub_hit"]);
+while (Date.now() < deadline) {
+	written = tagLines();
+	if (written.filter(l => subIds.has(l.id)).length >= 2) break;
+}
+try { process.kill(-child.pid!, "SIGTERM"); } catch { /* already reaped */ }
+
+const subLines = written.filter(l => subIds.has(l.id));
+const parentMiss = written.find(l => l.id === "d_parent_miss");
+check(subLines.length >= 2, `the daemon tagged the unstamped subagent transcript (${subLines.length} line(s))`);
 check(
-	daemonSide.some((i: any) => i.cacheMiss === true),
-	"the daemon's parse sees the same unstamped miss (the gap it would bake in)"
+	subLines.every((l: any) => l.miss !== 1),
+	"…and not one of its tag lines carries miss=1, so the tag file cannot resurrect the divider"
 );
-const tagLines = clearSubagentCacheMiss(daemonSide)
-	.map((i: any) => serializeClassified(i))
-	.join("\n")
-	.split("\n")
-	.filter(Boolean)
-	.map((l: string) => JSON.parse(l));
-check(tagLines.length > 0, "…it serializes tag lines for the subagent");
 check(
-	tagLines.every((l: any) => l.miss !== 1),
-	"…and not one of them carries miss=1, so the tag file cannot resurrect the divider"
+	!!parentMiss && parentMiss.miss === 1,
+	"…while the PARENT's own re-prime still gets miss=1 — cleared for subagents, not for everyone"
+);
+// Not vacuous: the same transcript parsed WITHOUT the daemon's clear does look
+// like a miss, so the assertion above is about the daemon, not about the fixture.
+check(
+	parseSessionFile(path.join(daemonSubDir, "agent-deadbeef.jsonl"))
+		.some((i: any) => i.cacheMiss === true),
+	"…and its raw parse still reports one, which is the gap the daemon's call closes"
 );
 
 fs.rmSync(dir, { recursive: true, force: true });

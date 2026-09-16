@@ -433,10 +433,12 @@ async function main() {
 	// and thrown away on the commonest invocation of all.
 	//
 	// The scan is bounded but not free: discovery asks every transcript on the
-	// machine where it lives, one tail read each. #89 removed the unbounded half
-	// (a whole-file re-read of every session stranded by `pr-cleanup`, which on
-	// the development host was 6,637 files and most of a 35 s cold launch); what
-	// is left is thousands of small reads, which is still worth deferring.
+	// machine where it lives. #89 removed the unbounded half — a whole-file
+	// re-read of every session stranded by `pr-cleanup`, measured 2026-09-16 at
+	// 6,952 files per launch and most of a 35 s cold launch. What is left is
+	// ~1.9 bounded tail reads per transcript (14,441 reads / 580 MB over 7,287
+	// transcripts, both harnesses), which is still worth deferring and is why
+	// #89 stays open for an on-disk index.
 	//
 	// Memoised as well as deferred, though nothing today needs the cache: both
 	// branches call it once and reuse the result. It is here so that a future

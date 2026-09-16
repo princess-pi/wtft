@@ -13,11 +13,24 @@
  * {@link TAIL_WINDOWS} — that bound is the module's whole performance contract,
  * and {@link getCwdBytesRead} is what holds it to it.
  *
+ * WHAT THAT COSTS TODAY, measured 2026-09-16 over 7,287 transcripts / 2.51 GB /
+ * 1,944 project dirs (`bun debug/count-picker.ts <cwd>`, discovery over both
+ * harnesses): **14,441 reads, 580 MB, 1.6-2.0 s warm** per launch. That is ~1.9
+ * reads and ~41 KB per transcript, not one 8 KB read each — the windows below
+ * widen more often than their first draft assumed. The number is here, in the
+ * header a reader of this module meets first, because the one it replaced ("40
+ * files, 0.5 MB read of 64 MB, 11 ms") outlived its corpus by 118x on file count
+ * and nobody met it anywhere else.
+ *
+ * It does not meet #89's ≤ 200 ms target and cannot: what remains scales with the
+ * corpus, and only an on-disk index (#89's direction **A**, "I" in that issue's
+ * 2026-09-15 comment) removes it. #89 stays open for that.
+ *
  * #164 once added a second, unbounded arm: when a session's directory had been
  * *deleted*, it re-read the WHOLE transcript hunting for `"relocated"` records
- * to ask "where has it ever lived?". #89 deleted it. Measured on a 7,537-file /
- * 2.8 GB corpus, it opened for 6,637 transcripts per launch and returned **0**
- * extra candidates for all three cwds tested — because Claude Code files a
+ * to ask "where has it ever lived?". #89 deleted it. Measured 2026-09-16 on a
+ * 7,287-file / 2.51 GB corpus, it performed 6,952 whole-file reads per launch
+ * and returned **0** extra candidates for all three cwds tested — because Claude Code files a
  * transcript under the directory it STARTED in, and a session starts in the main
  * clone before it enters a worktree, so the physical-slug arm already covers the
  * shape #164 was written for. Machine-wide, the `(session, dir)` pairs only that
@@ -32,9 +45,15 @@ import * as fs from "node:fs";
 // ---
 
 /**
- * Tail windows, widened only on a miss. 8 KB resolves every transcript here;
- * the larger windows exist for attachment-heavy tails, which are the only
- * reason a `cwd` would sit further back.
+ * Tail windows, widened only on a miss.
+ *
+ * "8 KB resolves every transcript here" is what this said, measured on a 40-file
+ * corpus. It is no longer true: the module header's 2026-09-16 figures work out
+ * at ~1.9 reads and ~41 KB per transcript, so the second window is reached
+ * routinely — attachment-heavy tails are common now, and a transcript with no
+ * `cwd` at all (every Pi one) widens through all three and then reads whole.
+ * That last case is #112. The bound itself is what matters and it holds: no read
+ * here can exceed the largest window.
  */
 const TAIL_WINDOWS = [8 * 1024, 64 * 1024, 512 * 1024];
 
@@ -81,11 +100,22 @@ export function getCwdReadCount(): number {
 /**
  * Bytes read from transcripts since the last {@link resetCwdCache}.
  *
- * This is the guard on #89. Every read in this module goes through
- * {@link readSlice} and is capped at the largest of {@link TAIL_WINDOWS}, so
- * `bytesRead <= tailReads * 512 KB` is a structural invariant — and a
- * reintroduced whole-file scan of a multi-megabyte transcript breaks it on the
- * first oversized file rather than waiting for someone to notice a slow picker.
+ * This is the guard on #89, and its SCOPE is worth stating because the first
+ * draft of this docstring overstated it (PR review): it counts what goes through
+ * {@link readSlice}, which is this module's only read path. The arm it replaced
+ * did NOT use that path — `resolveCwdHistory` called `fs.readFileSync` directly
+ * and incremented a counter of its own — so a re-introduction in that same style
+ * would move neither counter and leave every byte assertion green while the
+ * launch re-read gigabytes.
+ *
+ * So the invariant is enforced structurally rather than trusted: V12 in
+ * tests/wtft-issue-144-145-164-session-discovery.test.ts reads this file's own
+ * source and fails if a second read call appears in it. A counter cannot police
+ * the code that declines to use it; a source assertion can.
+ *
+ * What the counter itself buys, given that: `bytesRead` catches the half-measure
+ * a call count cannot see — a tail window widened toward the file size keeps the
+ * read count identical and moves the bytes.
  */
 export function getCwdBytesRead(): number {
 	return bytesRead;
@@ -128,7 +158,13 @@ function readSlice(file: string, start: number, len: number): string {
 		const got = fs.readSync(fd, buf, 0, len, start);
 		readCount++;
 		bytesRead += got;
-		return buf.toString("utf8");
+		// DECODE ONLY WHAT WAS READ (PR review). On a short read — the file
+		// truncated between statSync and readSync, or a short read(2) — the rest
+		// of the buffer is NULs, `String.trim()` does not strip them, and the
+		// final data line becomes `…}\u0000\u0000` and fails JSON.parse. That
+		// silently drops the most recent `cwd` for that transcript. Bounding the
+		// decode by `got` also makes the text agree with the bytes now counted.
+		return buf.toString("utf8", 0, got);
 	} finally {
 		fs.closeSync(fd);
 	}

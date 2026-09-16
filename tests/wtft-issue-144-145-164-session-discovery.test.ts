@@ -40,15 +40,16 @@
  *
  * So Part E now owns its corpus and counts, rather than borrowing the host's
  * and timing. Every claim is an exact integer from the counters this suite
- * already exported for V9: tail reads, whole-file relocation scans, and (new
- * for #39) directory reads by the tree walk. The full rationale, the mutation
+ * already exported for V9: tail reads, BYTES read (which replaced the whole-file
+ * relocation-scan counter with #89), and directory reads by the tree walk. The full rationale, the mutation
  * record for each assertion, and the measurement showing why a ratio could
  * never have guarded the walk are in Part E's own comment block.
  *
  * #89 removed the arm those counters were built to watch. `resolveCwdHistory`
  * and `getCwdHistoryReadCount` are gone, and so is the `pathExists` gate that
- * decided when to pay for them — over 7,537 real transcripts the arm returned 0
- * extra candidates for 6,637 whole-file reads per launch. Part B now records
+ * decided when to pay for them — measured 2026-09-16 over 7,287 real
+ * transcripts, the arm returned 0 extra candidates for 6,952 whole-file reads
+ * per launch. Part B now records
  * which stranded shapes survive that deletion and which one does not, and Part E
  * counts BYTES instead of scans: a scan counter pinned at 0 guards nothing,
  * while bytes is the quantity that goes wrong the moment a whole-file read comes
@@ -207,7 +208,7 @@ console.log("\n=== PART A: slug encoding union (#144) ===\n");
 // that one is not" — and the difference is asserted, not narrated, because a
 // deletion that silently drops a case is the failure mode worth a test.
 //
-// What the real corpus says (7,537 transcripts, 2026-09-15): Claude Code files a
+// What the real corpus says (7,287 transcripts, 2026-09-16): Claude Code files a
 // transcript under the directory its session STARTED in, and a session starts in
 // the main clone before it enters a worktree. So for all 21 relocated
 // transcripts whose last cwd was dead, every LIVE directory in their history
@@ -270,13 +271,21 @@ console.log("\n=== PART B: stranded in a removed worktree (#164 → #89) ===\n")
 	// V9 — a dead cwd costs no more than a live one. This is the whole point of
 	// #89: before it, a dead cwd opened a whole-file read, and `pr-cleanup`
 	// manufactures dead cwds on every merge.
+	//
+	// AGAINST AN ABSOLUTE BUDGET, not against `tail * 512 KB` (PR review). That
+	// product holds for every possible input by construction — `readSlice` is
+	// only ever called with `len <= 512 KB` — so it is the same vacuity
+	// Amendment 1 condemns in the counter it replaced. Part E is where the
+	// budget has teeth, on 256 KB transcripts.
 	resetCwdCache();
 	discoverSessions("claude-code", clone);
 	const tail = getCwdReadCount();
 	const bytes = getCwdBytesRead();
+	const fixtureBytes = [strandedFromClone, strandedFromWorktree, homebody, piShaped]
+		.reduce((sum, f) => sum + fs.statSync(f).size, 0);
 	check(tail > 0, "V9: the tail scan did run");
-	check(bytes <= tail * 512 * 1024,
-		`V9: every byte read came through a bounded tail window (${bytes} B over ${tail} read(s))`);
+	check(bytes <= fixtureBytes,
+		`V9: reads no more than the fixtures hold (${bytes} B of ${fixtureBytes} B) — a dead cwd buys no second pass`);
 
 	// V10 — display renders under the physical slug, which is a directory the
 	// session really started in. It is no longer rewritten to the most recent
@@ -433,7 +442,7 @@ console.log("\n=== PART D: worktree display compaction (#145) ===\n");
 // PART E — #164 cost: the gate holds, counted on a corpus the TEST owns (V11)
 // ---
 
-console.log("\n=== PART E: the #164 gate, counted on a test-built corpus (V11) ===\n");
+console.log("\n=== PART E: what one launch reads, counted on a test-built corpus (V11, V22) ===\n");
 {
 	resetCwdCache();
 	resetHarnessRegistry();
@@ -554,6 +563,25 @@ console.log("\n=== PART E: the #164 gate, counted on a test-built corpus (V11) =
 	check(strandedTail <= liveTail,
 		`V11b: …and no extra reads either (${strandedTail} vs ${liveTail} live)`);
 
+	// V11f — THE BOUND #89'S CLOSER ASKS FOR, RECORDED AS UNMET (PR review).
+	//
+	// The closer wants reads bounded by the CANDIDATE count, not the corpus. This
+	// corpus yields ZERO candidates and still costs one read per transcript,
+	// because every remaining arm must ask each transcript where it lives before
+	// it can rule it out. Deleting an arm cannot change that; only an on-disk
+	// index can — #89's direction A ("I" in its 2026-09-15 comment), and the
+	// reason #89 stays OPEN after this branch.
+	//
+	// Asserted in the direction that is true TODAY, so the day the index lands
+	// this line fails and has to be rewritten to the stronger bound. A comment
+	// would have gone quietly stale instead.
+	const strandedCandidates = discoverSessions("claude-code", liveHome).length;
+	check(strandedCandidates === 0, `V11f: this corpus yields no candidates (${strandedCandidates})`);
+	check(
+		strandedTail >= SESSIONS,
+		`V11f: …and still costs one read per TRANSCRIPT, not per candidate (${strandedTail} reads for ${strandedCandidates} candidates) — #89's closer, unmet until the index`
+	);
+
 	// V11c — memoisation, asserted as state instead of `warm <= cold + 50`.
 	// The old sibling check could not fail: a broken memo inflates warm, which
 	// inflated the very bound it was compared against. This one counts reads, so
@@ -621,6 +649,33 @@ console.log("\n=== PART E: the #164 gate, counted on a test-built corpus (V11) =
 
 	delete process.env.WTFT_CLAUDE_PROJECTS_DIR;
 	delete process.env.WTFT_PI_SESSIONS_DIR;
+
+	// V22 — THE GUARD THE COUNTER CANNOT BE (PR review).
+	//
+	// `getCwdBytesRead` only sees reads routed through session-cwd.ts's one
+	// private `readSlice`. The arm #89 deleted did not use it — `resolveCwdHistory`
+	// called `fs.readFileSync` directly — so a re-introduction in that same style
+	// would move neither counter and leave V11a/V11b green while the launch
+	// re-read gigabytes. No counter can police the code that declines to use it.
+	//
+	// So the invariant is asserted against the SOURCE: that module has exactly
+	// one read call, and it is the bounded one.
+	{
+		const src = fs.readFileSync(
+			path.join(import.meta.dirname, "..", "extensions", "lib", "harness", "session-cwd.ts"),
+			"utf8",
+		);
+		// Comments discuss the deleted `fs.readFileSync` by name, so strip them
+		// first — the claim is about CODE, and a doc mention must not fail it.
+		const code = src
+			.replace(/\/\*[\s\S]*?\*\//g, "")
+			.replace(/^[ \t]*\/\/.*$/gm, "");
+		const reads = [...code.matchAll(/fs\.(read[A-Za-z]*Sync|createReadStream)\s*\(/g)].map(m => m[0]);
+		check(
+			reads.length === 1 && reads[0].startsWith("fs.readSync"),
+			`V22: session-cwd.ts has exactly one read call and it is the bounded one (${reads.join(", ") || "none"})`
+		);
+	}
 
 	// V11d — the real tree still gets a smoke check, minus the cost claim it
 	// could never support: discovery must not throw on whatever this host holds.

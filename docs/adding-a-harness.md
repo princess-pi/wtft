@@ -31,9 +31,18 @@ last-cwd does. `resolveLastCwd()` from `harness/session-cwd.ts` does the tail sc
 memoises it. Union, not replacement — a last-cwd-only rule silently drops sessions whose
 directory slug is a parent of their cwd.
 
-The union has grown three more arms (#144/#145/#164), each a shared helper you should reach
-for rather than re-derive. Every one is **additive** — that is the invariant the whole rule
-is measured against, and the reason none of them may be written as a replacement.
+The union has grown two more arms (#144/#145), each a shared helper you should reach for
+rather than re-derive. Every one is **additive** — that is the invariant the whole rule is
+measured against, and the reason none of them may be written as a replacement.
+
+> **A third arm (#164) existed and was deleted by #89.** It matched a session whose last cwd
+> had been *deleted* against every directory its transcript had ever recorded, which meant a
+> whole-file read. Measured 2026-09-16 over 7,287 transcripts it cost 6,952 whole-file reads
+> per launch and returned **0** candidates the physical arm had not. `resolveCwdHistory()`,
+> `pickLiveCwd()` and `pathExists()` are **gone from `harness/session-cwd.ts`** — do not write
+> a harness against them. If your transcripts record relocations and you find a case the
+> physical arm misses, re-derive it from the transcript and say so on #89; the records are
+> still there, nothing reads them.
 
 - **Match the slug, do not compute it.** `slugMatchesCwd(slug, cwd)` accepts *either* known
   encoding, because what a harness munges beyond `/` is usually only partly evidenced —
@@ -41,10 +50,6 @@ is measured against, and the reason none of them may be written as a replacement
   missing. If you need a single canonical string for *display*, that is `cwdToSlug()`; for
   *matching*, always the matcher. Pinning one encoding trades a known silent miss for an
   unknown one.
-- **A deleted directory is not "nowhere".** If your transcripts record relocations, gate
-  `resolveCwdHistory()` on `pathExists(lastCwd) === false` and match against every directory
-  the session has ever occupied. Gate it, do not run it unconditionally: it is a whole-file
-  read, measured at ~315 ms across this machine's transcripts versus ~11 ms for the tail scan.
 - **"Here" may mean a whole repo.** `fanOutCwd(target)` returns every checkout of the
   target's git repo, so a session recorded in a sibling worktree is still found. It returns
   the target alone when there is no `.git` ancestor, which is what stops `~` from meaning

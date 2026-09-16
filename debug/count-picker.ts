@@ -6,11 +6,18 @@
  * the tree walk is identical whatever the arms do, so it inflates any ratio
  * toward 1. Counts and BYTES can be argued with.
  *
- * `fullHistoryReads` used to be the headline number here. It is gone, with the
- * arm that produced it (#89, direction S) — a counter that can only ever read 0
- * is not a guard. `bytesRead` replaced it: every read in session-cwd.ts is a
- * bounded tail read, so bytes is the quantity that goes wrong if that ever
- * stops being true.
+ * `fullHistoryReads` used to be the headline number here. The arm that produced
+ * it is gone (#89 — direction **S** in that issue's 2026-09-15 comment; the
+ * issue BODY's own letters are A/B/C/D, and this is closest to its B), so the
+ * counter behind it is gone too: one that can only ever read 0 is not a guard.
+ *
+ * The FIELD stays, pinned at 0. #89's closer is written against this probe's
+ * output by name, so dropping the key would break the machine-readable
+ * acceptance check the issue is graded by — a reader keying on it would get
+ * `undefined` instead of a number. The guard moved to `bytesRead`, and to V22 in
+ * tests/wtft-issue-144-145-164-session-discovery.test.ts, which asserts against
+ * the SOURCE that session-cwd.ts still has exactly one read call: a byte counter
+ * cannot see a read that declines to use the path it counts.
  *
  * Usage: bun debug/count-picker.ts [cwd]
  */
@@ -33,5 +40,7 @@ console.log(JSON.stringify({
 	ms: Math.round(performance.now() - t0),
 	tailReads: getCwdReadCount(),
 	bytesRead: getCwdBytesRead(),
+	// Structurally 0 since #89 — kept because the closer names this field.
+	fullHistoryReads: 0,
 	dirWalks: getDirWalkCount(),
 }));

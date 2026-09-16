@@ -19,9 +19,11 @@
  *
  * A third arm (#164) used to whole-file-read any transcript whose recorded cwd
  * had been deleted, looking for an earlier directory it had occupied. #89
- * deleted it: measured over 7,537 transcripts it contributed 0 candidates and
- * 6,637 whole-file reads per launch. See harness/session-cwd.ts for why the
- * physical arm already covers that shape.
+ * deleted it. Measured 2026-09-16 over 7,287 transcripts / 2.51 GB: **6,952
+ * whole-file reads per launch, 0 candidates** — the per-arm split was 0 for all
+ * three cwds tested, and the candidate lists before and after the deletion are
+ * identical (10 / 88 / 153). docs/spec-144-145-164-session-discovery.md,
+ * Amendment 1, carries the tables.
  */
 
 import * as fs from "node:fs";
@@ -101,11 +103,22 @@ function toCandidate(file: string, projectSlug: string): SessionCandidate | null
  * One arm, and one bounded tail read (#89). It used to have a second: when the
  * recorded cwd no longer existed, the transcript was re-read WHOLE for the
  * directories it had previously occupied. That case is real — `pr-cleanup`
- * strands a session on every merge — but the answer was already free, because
- * a transcript is filed under the directory its session STARTED in, and a
- * session starts in the main clone before it enters a worktree. So the
- * physical-slug arm above already matched every session the expensive arm could
- * reach, and the expensive arm reached nothing it did not.
+ * strands a session on every merge.
+ *
+ * WHAT WAS MEASURED, and it is a measurement rather than a theorem: over the
+ * 7,287-transcript corpus of 2026-09-16 the expensive arm surfaced **0**
+ * candidates the physical arm had not, for all three cwds tested. The usual
+ * reason is that a transcript is filed under the directory its session STARTED
+ * in, and a session typically starts in the main clone before entering a
+ * worktree — so the physical arm plus the #145 fan-out already reaches it.
+ *
+ * THAT IS NOT UNIVERSAL, and this branch's own V6 constructs the exception: a
+ * session that started INSIDE a worktree is filed under that worktree's slug,
+ * and once the worktree is removed nothing but its relocation history connects
+ * it to the clone. Such a session is no longer listed. None existed on the
+ * corpus; the corpus does hold 101 `*-claude-worktrees-*` slugs, so the shape is
+ * reachable and the exception is conceded rather than argued away. See
+ * "The one shape given up" in the spec.
  *
  * Discovery is still called lazily by bin/wtft.ts: running it for an explicit
  * `-s` was 98% of that command's wall clock, and a bounded scan of thousands of

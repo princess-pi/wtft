@@ -136,12 +136,32 @@ export function spawnLedgerPath(): string {
 	return path.join(state, "wtft", "spawns.jsonl");
 }
 
+/** C0 controls, DEL, and the C1 range — every character that can move a cursor,
+ *  start an escape sequence, or forge a line break in a rendered report.
+ *
+ *  WHY THE WRITER REFUSES THESE (Macroscope, PR #136, Medium). A record's
+ *  `mechanism`, `label`, `cwd` and `model` are free text supplied by a spawner,
+ *  and the report prints them into a padded column. A `label` containing a
+ *  newline round-trips perfectly — `JSON.stringify` escapes it, `JSON.parse`
+ *  restores it — and then `padEnd` produces a row that is really two, so a
+ *  spawner can forge report lines. An `\x1b]` starts an OSC sequence that the
+ *  reader's terminal executes. Neither is exotic: a label is the obvious place
+ *  to put a command line, and command lines carry escape codes.
+ *
+ *  Refused at the WRITER, so a bad record never reaches the file — the
+ *  `by construction` half. The renderer sanitises anyway, because the file is on
+ *  disk, can be hand-edited, and can hold records written by an older binary. */
+const TERMINAL_CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+
 function requireField(value: unknown, name: string): string {
 	if (typeof value !== "string" || value.length === 0) {
 		throw new Error(`spawn record: ${name} is required and must be a non-empty string`);
 	}
 	if (Buffer.byteLength(value, "utf8") > MAX_FIELD_BYTES) {
 		throw new Error(`spawn record: ${name} exceeds ${MAX_FIELD_BYTES} bytes`);
+	}
+	if (TERMINAL_CONTROL.test(value)) {
+		throw new Error(`spawn record: ${name} contains a control character — a newline forges a report row and an escape sequence runs in the reader's terminal`);
 	}
 	return value;
 }

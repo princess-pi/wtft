@@ -2174,9 +2174,22 @@ export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string 
 		return "";
 	}
 
+	// SANITISE BEFORE MEASURING (Macroscope, PR #136, Medium). `mechanism` and
+	// `label` are free text from a spawner, and this block prints them into a
+	// padded column. A newline in a label makes `padEnd` emit a row that is
+	// really two — a spawner forging report lines — and an `\x1b]` starts an OSC
+	// sequence the reader's terminal executes. `serializeSpawnRecord` refuses
+	// both at the writer, and this is the second layer: the ledger is a file on
+	// disk, it can be hand-edited, and it can hold records written by an older
+	// binary that had no such check. A renderer that trusts its input is the one
+	// place the writer guarantee cannot reach.
+	//
+	// Replaced rather than stripped, so the reader SEES that something was there
+	// — a silently shortened label reads as the spawner's own text.
+	const safe = (v: string) => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, "\uFFFD");
 	const rows: string[] = [];
 	for (const edge of spawned.edges) {
-		const full = edge.label ? `${edge.mechanism}  ${edge.label}` : edge.mechanism;
+		const full = edge.label ? `${safe(edge.mechanism)}  ${safe(edge.label)}` : safe(edge.mechanism);
 		// Truncated, not padded: `label` is free text from a spawner, and one
 		// long one pushes every money figure in the block out of its column.
 		const name = full.length > 40 ? full.slice(0, 39) + "…" : full;

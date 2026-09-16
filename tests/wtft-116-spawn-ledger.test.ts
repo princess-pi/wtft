@@ -117,16 +117,24 @@ for (const bad of ["", "not-a-uuid", "9f29d624531c47b0abf60790bb65180d",
 
 	// A9 used to be `MAX_RECORD_BYTES === 4096` — a constant compared to itself,
 	// which is not a test of anything. The cap is reachable only through JSON
-	// escape expansion (a control character costs 6 bytes on the wire and 1
-	// against the field cap), which is exactly the input a hand-written ledger
-	// line or an exotic label could carry.
+	// escape expansion, where one input character costs more than one byte on
+	// the wire but only one against the field cap.
+	//
+	// THE FILLER CHANGED, and the reason is worth keeping. It used to be
+	// `\u0001` — 6 wire bytes per character, the cheapest way to reach 4096.
+	// Since PR #136 the writer REFUSES every control character outright (a
+	// newline in a label forges a report row; an ESC runs in the reader's
+	// terminal), so that input now fails a different check first and A9 stopped
+	// testing the record cap at all. A double-quote is the next best expansion:
+	// 2 wire bytes, 1 against the cap, so five capped fields still overflow
+	// 4096 and the cap stays reachable and therefore still worth pinning.
 	let recordThrew = "";
 	try {
 		serializeSpawnRecord(rec({
-			cwd: "\u0001".repeat(MAX_FIELD_BYTES),
-			label: "\u0001".repeat(MAX_FIELD_BYTES),
-			model: "\u0001".repeat(MAX_FIELD_BYTES),
-			mechanism: "\u0001".repeat(MAX_FIELD_BYTES),
+			cwd: '"'.repeat(MAX_FIELD_BYTES),
+			label: '"'.repeat(MAX_FIELD_BYTES),
+			model: '"'.repeat(MAX_FIELD_BYTES),
+			mechanism: '"'.repeat(MAX_FIELD_BYTES),
 		}));
 	} catch (err) { recordThrew = err instanceof Error ? err.message : String(err); }
 	check(/atomic-append limit/.test(recordThrew),
@@ -871,6 +879,51 @@ let selfCostWithRecord = 0;
 		check(doc.tree.costUsd > 0,
 			"D24e and tree carries the descendant's money, so the run is not reporting $0 overall");
 	}
+}
+
+
+// --- D25: a spawner cannot forge report rows or drive the reader's terminal ---
+//
+// Macroscope, PR #136, Medium. `mechanism` and `label` are free text from a
+// spawner, and this block prints them into a padded column. A newline
+// round-trips through JSON perfectly — stringify escapes it, parse restores it —
+// so `padEnd` would emit a row that is really two, and a spawner could forge
+// report lines showing whatever money it liked. An ESC starts a sequence the
+// reader's terminal executes.
+//
+// Two layers, tested as two: the writer REFUSES, and the renderer SANITISES
+// anyway — because the ledger is a file on disk that can be hand-edited or
+// written by an older build, which is the one case a writer guard cannot cover.
+{
+	const LEDGER = path.join(stateHome, "wtft", "spawns.jsonl");
+
+	// -- layer 1: the writer refuses --
+	const nl = recordCli(["--parent", PARENT, "--child", CLOSER_CHILD, "--mechanism", "herdr-agent-start",
+		"--label", "agent/824\nSPAWNED    forged-row                                   $99.99"]);
+	check(nl.status === 2, `D25 a label carrying a newline is refused (exit ${nl.status})`);
+	check(/control character/i.test(nl.err), `D25a and the refusal says why (${JSON.stringify(nl.err.slice(0, 140))})`);
+
+	const esc = recordCli(["--parent", PARENT, "--child", CLOSER_CHILD, "--mechanism", "herdr-agent-start",
+		"--label", "agent/824\u001b]0;pwned\u0007"]);
+	check(esc.status === 2, `D25b an OSC escape sequence is refused too (exit ${esc.status})`);
+
+	// -- layer 2: the renderer sanitises a record the writer never saw --
+	fs.writeFileSync(LEDGER, JSON.stringify({
+		schema: "wtft/spawn@1",
+		parent: PARENT,
+		child: CLOSER_CHILD,
+		ts: new Date(Date.UTC(2026, 8, 16, 6, 0)).toISOString(),
+		mechanism: "herdr-agent-start",
+		label: "agent/824\nSPAWNED    forged-row                                   $99.99",
+	}) + "\n");
+
+	const out = cli(["--tokens"]).out;
+	const forged = out.split("\n").filter(l => l.includes("forged-row"));
+	check(forged.length <= 1,
+		`D25c a hand-written newline cannot split one edge into two rendered rows (${forged.length} rows carry it)`);
+	check(!out.includes("\u001b]"), "D25d no OSC sequence survives into the rendered output");
+	check(out.includes("\uFFFD"),
+		"D25e and the replacement character is VISIBLE, so a reader can tell a label was tampered with rather than merely short");
 }
 
 

@@ -458,9 +458,16 @@ console.log("\n§ R — the Closer: `wtft --json` names its subagents\n");
 	//
 	// WHY (local audit round). R1 is labelled THE CLOSER and it was landing on
 	// the `no-data` arm: `total.costUsd` 0, `models` [], one `no-data` notice.
-	// So the spec's claim that a listed child "is counted either way" was
-	// exercised by nothing, and R1 would have kept passing if the daemon had
-	// stopped producing tags altogether.
+	// So R1's subagent rows were asserted against a document that counted
+	// nothing, and R1 would have kept passing if the daemon had stopped
+	// producing tags altogether.
+	//
+	// NOTE what this tag does and does not establish (Macroscope, PR #152). It
+	// carries `msg_parent_1` ONLY — the parent's turn. Neither child's turn is
+	// in it, so `total.costUsd > 0` below proves the REPORT path and nothing
+	// about a child's cost reaching `total`. The label on that assertion used to
+	// say it exercised "counted either way"; it never did, and the specs have
+	// stopped claiming a listed child is thereby counted at all.
 	//
 	// It was also one race from destroying the suite: the no-data arm exits 1,
 	// not 9, `runWtftCli` rethrows on an unexpected code, and an uncaught throw
@@ -492,7 +499,7 @@ console.log("\n§ R — the Closer: `wtft --json` names its subagents\n");
 		assert("R1 fixture precondition: this is the REPORT path, not the `no-data` arm",
 			!(doc.notices ?? []).some((n: any) => n.code === "no-data"),
 			`notices=${JSON.stringify(doc.notices)}`);
-		assert("R1 fixture precondition: and the session actually costs something, so \"counted either way\" is exercised",
+		assert("R1 fixture precondition: the session costs something, so the rows below are asserted against a document that counted SOMETHING (the parent; no child turn is in this tag)",
 			doc.total?.costUsd > 0, `total=${JSON.stringify(doc.total)}`);
 	}
 

@@ -177,7 +177,9 @@ reason: an empty array from a caller that never looked is indistinguishable from
 spawned nothing, and a consumer reading `subagents.length === 0` would conclude the latter.
 
 **`meta: null` is a gap, not a missing subagent.** The transcript is always present and its cost
-is counted either way; only the label is absent. Pi children, shell-spawned children, and any
+is whatever the tag file already made it; only the label is absent. Listing is
+not counting — discovery reads the filesystem now, the tag is written by the daemon on its own
+schedule, and `meta` bears on neither. Pi children, shell-spawned children, and any
 future harness release that stops writing the file all land here.
 
 ## Scope

@@ -1010,11 +1010,32 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	assert("G1a a LARGER file whose consumed prefix changed reseeds too — the case the shrink check could not see",
 		watcherAction(140, 75, false) === "reseed");
 	assert("G1b a larger file with an intact prefix is an ordinary read", watcherAction(140, 75, true) === "read");
-	assert("G1c an unreadable prefix is IDLE, never a reseed — `null` is 'could not tell', not 'changed'",
-		watcherAction(140, 75, null) === "idle");
+	// FLIPPED (#142, second Macroscope round). This asserted `idle`, on the
+	// reasoning that "could not tell" should not force a reseed. That reasoning
+	// produced a DEADLOCK: `prefixSentinel` is refreshed only where the offset
+	// moves, the offset moves only on the `read` branch, and `read` is
+	// unreachable while the comparison is `null` — so one failed sentinel read
+	// froze the watch permanently, silently, until restart.
+	assert("G1c an unreadable prefix RE-SEEDS — idling here freezes the watch forever",
+		watcherAction(140, 75, null) === "reseed");
 	assert("G1d a file that did not grow is idle", watcherAction(75, 75, true) === "idle");
 	// A shrink outranks an unreadable sentinel: the bytes are provably gone.
 	assert("G1e a shrink reseeds even when the sentinel could not be read", watcherAction(10, 50, null) === "reseed");
+
+	// G5 — the deadlock property itself, stated as a rule rather than a case.
+	// Every state that does not advance the offset must be one the NEXT event
+	// can leave. `idle` is the only non-advancing action, so `idle` must never
+	// be reachable while the file has bytes we have not read: if it were, the
+	// sentinel could never be refreshed and nothing would ever move again.
+	const stuck = ([140, 200, 1000] as const).flatMap(size =>
+		([true, false, null] as const)
+			.filter(m => watcherAction(size, 75, m) === "idle")
+			.map(m => `size=${size} matches=${String(m)}`));
+	assert("G5 no unread-bytes state resolves to `idle`, so the watch can always make progress",
+		stuck.length === 0, `states that would freeze: ${JSON.stringify(stuck)}`);
+	// The converse, so G5 cannot pass by `idle` having been deleted outright.
+	assert("G5a and a file with nothing new IS idle — the action still exists",
+		watcherAction(75, 75, true) === "idle");
 
 	// -- G2: the sentinel reads the bytes it claims to --
 	fs.writeFileSync(gtag, line("orig-1") + line("orig-2") + line("orig-3"));

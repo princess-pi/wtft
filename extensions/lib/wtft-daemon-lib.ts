@@ -537,9 +537,22 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
  * inode, so `stat.ino` is unchanged. The content at the boundary is the only
  * thing that actually distinguishes the two files.
  *
- * `null` means "could not read", which is NOT "changed" — the caller leaves its
- * offset alone rather than committing to a reseed it cannot substantiate, the
- * same discipline as `seedClassifiedTagFile`'s `read` flag.
+ * `null` means "could not read". The caller RE-SEEDS on it rather than idling
+ * (Macroscope, PR #142, second round — a deadlock this fix introduced). Idling
+ * looked like the conservative choice and was the opposite: `prefixSentinel` is
+ * only refreshed where the offset moves, and the offset only moves on the
+ * `read` branch, which is unreachable while the comparison is `null`. One failed
+ * read therefore froze the watch permanently, with no error and no recovery
+ * short of a restart.
+ *
+ * Re-seeding is the genuinely conservative answer: a whole-file re-read is
+ * always CORRECT, merely more expensive, and it refreshes the sentinel on the
+ * way through. The report proposed treating an unreadable sentinel as MATCHING
+ * so growth processing continues — that removes the deadlock by re-opening the
+ * stale-offset bug this whole mechanism exists to close, so it is fixed for the
+ * verified reason instead. A file that cannot be read at all still costs
+ * nothing: `seedClassifiedTagFile` reports `read: false` and the caller commits
+ * nothing, which is a retry, not a freeze.
  *
  * An offset of 0 has no prefix, so the sentinel is empty and always matches.
  */
@@ -581,8 +594,8 @@ export function watcherAction(
 	// Same size or larger, but the prefix we consumed is no longer there — a
 	// rebuild that happened to land at or above where we were.
 	if (prefixMatches === false) return "reseed";
-	// `null` is "could not read", not "changed". Idle beats a guess.
-	if (prefixMatches === null) return "idle";
+	// "Could not read" re-seeds. Idling here deadlocks the watch — see above.
+	if (prefixMatches === null) return "reseed";
 	if (size > lastReadOffset) return "read";
 	return "idle";
 }

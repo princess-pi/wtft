@@ -301,6 +301,64 @@ export function readTagProvisional(tagPath: string): TagProvisional {
 }
 
 /**
+ * The BYTE offset at which a file's last content line begins (#130).
+ *
+ * This function is the whole of #130 in one number. Two writers start here and
+ * both MUST start on a line boundary, in BYTES: `upsertHeartbeat` overwrites the
+ * stale heartbeat in place at this offset, and `truncatePartialTail` cuts a
+ * crashed predecessor's fragment off at it. (The heartbeat used to be truncated
+ * and re-appended; round 2 replaced that with the in-place write, but the offset
+ * it needs is the same one.) The version
+ * this replaces read bytes and then measured the result in a decoded string —
+ * `searchOffset + lastLineStart` added a byte offset to a UTF-16 code-unit
+ * index — so every multi-byte character ahead of the last line drove the
+ * truncate that many bytes INTO the preceding line. The fresh heartbeat was
+ * then welded onto the severed half. Measured on this host before the fix: 96
+ * of 327 tag files carried 2,562 such lines, 99.7% of them with `→` or `—` in
+ * the preceding 2 KiB — our own commit messages, out of the `cmd` arrays.
+ *
+ * So this never decodes. It searches the raw `Buffer` for `0x0a`, which is safe
+ * across a chunk boundary in a way a decoded chunk is not: a UTF-8 continuation
+ * byte is always >= 0x80, so 0x0a can never be part of a multi-byte sequence and
+ * a chunk cut anywhere still yields the right newline positions. Decoding a
+ * chunk in isolation, by contrast, turns a split sequence into U+FFFD and
+ * measures text the file does not contain.
+ *
+ * Scans backwards in chunks because a classified line can be large — a long
+ * `cmd` array runs well past any fixed window — and a scan that gave up would
+ * return 0, which would have the partial-tail repair truncate the entire file.
+ *
+ * A trailing `\n` terminates the last line rather than starting an empty one, so
+ * it is stepped over. An empty file, and a file that is one unterminated line,
+ * both answer 0: a caller writes or truncates at whatever comes back, and -1 or a throw
+ * would be a worse answer than "the whole file is the last line".
+ */
+export function lastLineStartByte(fd: number, size: number, chunkSize = 512): number {
+	if (size <= 0) return 0;
+	// CHECK THE READ. A short read leaves `one` zero-filled, which reads as "not a
+	// newline", and a zero-filled scan can walk all the way to 0 — where the
+	// caller truncates the ENTIRE file. Latent today (both callers hold the
+	// singleton lease, and an unlink does not shrink an open inode), but the
+	// failure is total and the guard is one comparison.
+	const one = Buffer.alloc(1);
+	if (fs.readSync(fd, one, 0, 1, size - 1) !== 1) {
+		throw new Error(`could not read the last byte of a ${size}-byte tag file — refusing to guess a line boundary`);
+	}
+	// A terminating newline belongs to the last line, not to a line after it.
+	let searchEnd = one[0] === 0x0a ? size - 1 : size;
+	while (searchEnd > 0) {
+		const readSize = Math.min(chunkSize, searchEnd);
+		const start = searchEnd - readSize;
+		const buf = Buffer.alloc(readSize);
+		fs.readSync(fd, buf, 0, readSize, start);
+		const nl = buf.lastIndexOf(0x0a);
+		if (nl !== -1) return start + nl + 1;
+		searchEnd = start;
+	}
+	return 0;
+}
+
+/**
  * The provisional verdict for tag content ALREADY IN HAND (#443, PR review).
  *
  * This exists because `readTagProvisional(path)` and `readClassifiedTagFile(path)`
@@ -437,19 +495,219 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
 	return classifiedInteractionsFromContent(content);
 }
 
+/** Seed a watcher: the interactions in the tag file, and the byte offset that
+ *  reading them consumed — both derived from ONE read of the same buffer.
+ *
+ *  The pattern this replaces was `readClassifiedTagFile(p)` followed by
+ *  `lastReadOffset = fs.statSync(p).size`, at three call sites (#130 review
+ *  round 2). Two different things go wrong with it, and both lose whole turns
+ *  from the live view rather than announcing themselves:
+ *
+ *   - **The stat sees a file the read did not.** Anything the daemon appends
+ *     between the read and the stat is counted into the offset without ever
+ *     having been parsed, so the watcher starts past it and those lines are
+ *     never read by anyone.
+ *   - **A whole-file read can land mid-append.** A large batch is not one
+ *     `write(2)`, so `readFileSync` can return the complete lines plus a
+ *     partial tail. `classifiedInteractionsFromContent` drops that tail (its
+ *     `catch` is load-bearing, not decoration) — but `stat.size` counts it, so
+ *     the offset lands inside a line that will be completed a moment later and
+ *     then never re-read.
+ *
+ *  Taking the offset from the buffer we actually parsed removes both by
+ *  construction: the offset is the end of the last COMPLETE line in that
+ *  buffer, so every byte before it has been read and every byte after it is
+ *  still waiting. There is no window for a race to sit in, because there is no
+ *  second look at the file. */
+/**
+ * A fingerprint of the prefix a reader has already consumed, used to answer one
+ * question: is what I consumed STILL what is at that position?
+ *
+ * WHERE IT SAMPLES, AND WHY NOT AT THE OFFSET (Macroscope, PR #142, third
+ * round). The first version sampled the 64 bytes immediately before the
+ * reader's offset. The reader's offset sits at EOF, and the LAST line of a tag
+ * file is the heartbeat, which `upsertHeartbeat` rewrites in place — same
+ * width, same size, new `last` timestamp — every `POLL_MS`. So the window
+ * straddled a line that mutates by design: the sentinel mismatched on every
+ * beat, and an IDLE watch re-seeded, re-reading and re-parsing the whole file
+ * on a beat that had appended nothing.
+ *
+ * Measured on this host's largest tag file (32.8 MB, 644,312 lines): 585 ms per
+ * re-seed against a 667 ms beat — 87.7% of a core, continuously, on a file that
+ * gained nothing. The report rated it Medium for growing cost; the measurement
+ * puts it a hair from failing to keep up with its own clock.
+ *
+ * So it anchors at the start of the last COMPLETE line the reader consumed, and
+ * samples the bytes BELOW that. The daemon only ever appends whole lines or
+ * replaces that final heartbeat in place, so everything below the anchor is
+ * immutable — and a truncate-and-rebuild changes it, which is the whole job.
+ *
+ * WHY (Macroscope, PR #142, Medium). `watchTagFile` re-seeded only when the file
+ * SHRANK below its offset. A daemon that truncates and rebuilds before the
+ * `fs.watch` callback runs — one coalesced event, which is the normal case —
+ * leaves the final size at or ABOVE the stale offset, so the shrink branch never
+ * fires. Measured on a 3-record file rebuilt to 5: the reader kept `orig-1..3`
+ * (records from a file that no longer exists), read from the stale offset into
+ * the MIDDLE of a line, dropped the fragment, and silently lost `rebuilt-1..3`.
+ * Both directions wrong at once — stale records retained, real records lost.
+ *
+ * A generation check cannot do this job: truncate-and-rewrite keeps the same
+ * inode, so `stat.ino` is unchanged. The content at the boundary is the only
+ * thing that actually distinguishes the two files.
+ *
+ * `null` means "could not read". The caller RE-SEEDS on it rather than idling
+ * (Macroscope, PR #142, second round — a deadlock this fix introduced). Idling
+ * looked like the conservative choice and was the opposite: `prefixSentinel` is
+ * only refreshed where the offset moves, and the offset only moves on the
+ * `read` branch, which is unreachable while the comparison is `null`. One failed
+ * read therefore froze the watch permanently, with no error and no recovery
+ * short of a restart.
+ *
+ * Re-seeding is the genuinely conservative answer: a whole-file re-read is
+ * always CORRECT, merely more expensive, and it refreshes the sentinel on the
+ * way through. The report proposed treating an unreadable sentinel as MATCHING
+ * so growth processing continues — that removes the deadlock by re-opening the
+ * stale-offset bug this whole mechanism exists to close, so it is fixed for the
+ * verified reason instead. A file that cannot be read at all still costs
+ * nothing: `seedClassifiedTagFile` reports `read: false` and the caller commits
+ * nothing, which is a retry, not a freeze.
+ *
+ * An offset of 0 has no prefix, so the sentinel is empty and always matches.
+ */
+export const PREFIX_SENTINEL_BYTES = 64;
+
+export interface PrefixSentinel {
+	/** Start byte of the last COMPLETE line at or before the reader's offset —
+	 *  the boundary below which the file is append-only. Part of the comparison,
+	 *  not bookkeeping: a rebuild that reshapes the file moves it. */
+	anchor: number;
+	/** The up-to-`PREFIX_SENTINEL_BYTES` bytes immediately BELOW `anchor`. */
+	bytes: Buffer;
+}
+
+export function readPrefixSentinel(tagPath: string, offset: number): PrefixSentinel | null {
+	if (offset <= 0) return { anchor: 0, bytes: Buffer.alloc(0) };
+	let fd: number;
+	try { fd = fs.openSync(tagPath, "r"); } catch { return null; }
+	try {
+		// Scoped to the consumed prefix, not to the file: `offset` stands in for
+		// `size`, so the anchor is the last line the READER took, never a line
+		// appended since.
+		const anchor = lastLineStartByte(fd, offset);
+		const want = Math.min(PREFIX_SENTINEL_BYTES, anchor);
+		if (want === 0) return { anchor, bytes: Buffer.alloc(0) };
+		const buf = Buffer.alloc(want);
+		const read = fs.readSync(fd, buf, 0, want, anchor - want);
+		return read === want ? { anchor, bytes: buf } : null;
+	} catch {
+		return null;
+	} finally {
+		fs.closeSync(fd);
+	}
+}
+
+/**
+ * Did the consumed prefix survive? `null` on either side means "could not read",
+ * which `watcherAction` turns into a re-seed rather than an idle.
+ *
+ * BOTH fields count. The bytes catch a rebuild that rewrote the prefix in place;
+ * the anchor catches one that kept those bytes but changed the line structure
+ * above them — including the case where the anchor is 0 because the reader has
+ * consumed a single line and there are no bytes below it to compare.
+ */
+export function sentinelMatches(a: PrefixSentinel | null, b: PrefixSentinel | null): boolean | null {
+	if (a === null || b === null) return null;
+	return a.anchor === b.anchor && a.bytes.equals(b.bytes);
+}
+
+/**
+ * What a tag-file watcher should do with the file it just saw. Pure, so the
+ * decision can be tested without a daemon, a render loop or a real `fs.watch`.
+ *
+ * `reseed` — the prefix is gone or changed underneath us; re-read the file whole.
+ * `read`   — the file grew and the prefix is intact; read from the offset.
+ * `idle`   — nothing to do, or nothing we can substantiate.
+ */
+export type WatcherAction = "reseed" | "read" | "idle";
+
+export function watcherAction(
+	size: number,
+	lastReadOffset: number,
+	prefixMatches: boolean | null,
+): WatcherAction {
+	// Shrank below the offset: the bytes are provably gone.
+	if (size < lastReadOffset) return "reseed";
+	// Same size or larger, but the prefix we consumed is no longer there — a
+	// rebuild that happened to land at or above where we were.
+	if (prefixMatches === false) return "reseed";
+	// "Could not read" re-seeds. Idling here deadlocks the watch — see above.
+	if (prefixMatches === null) return "reseed";
+	if (size > lastReadOffset) return "read";
+	return "idle";
+}
+
+export function seedClassifiedTagFile(tagPath: string): { interactions: Interaction[]; offset: number; read: boolean } {
+	let buf: Buffer;
+	try {
+		buf = fs.readFileSync(tagPath);
+	} catch {
+		// ABSENT AND UNREADABLE ARE DIFFERENT, and the caller has to be able to
+		// tell them apart (#130 local audit round). A missing tag legitimately
+		// seeds empty — the daemon has not written it yet. An EMFILE, EACCES or
+		// EIO does NOT mean the session costs nothing, and a caller that treats
+		// the two alike replaces a correct chart with an empty one on a transient
+		// failure. `read: false` says "I have no information", which is not the
+		// same claim as "there is nothing".
+		return { interactions: [], offset: 0, read: false };
+	}
+	// Byte search, never a string index: `lastIndexOf` on a Buffer counts bytes,
+	// and 0x0a can never be a UTF-8 continuation byte, so this is exact for any
+	// content. (Doing it on the decoded string is the #130 defect itself.)
+	const offset = buf.lastIndexOf(0x0a) + 1;   // -1 -> 0: no complete line yet
+	return {
+		interactions: classifiedInteractionsFromContent(buf.subarray(0, offset).toString("utf8")),
+		offset,
+		read: true,
+	};
+}
+
 // INOTIFY-BASED WATCH MODE (#53)
 // Watches the daemon's classified tag file via fs.watch. Auto-spawned by CLI.
 // tag file. Auto-spawn of the daemon happens in the CLI entry point (bin/wtft.ts).
 
 /**
  * Watch a classified tag file via inotify (fs.watch) and re-render the bar
- * chart in real time on every write. The daemon guarantees:
- *   - Writes at most every 667ms (90bpm)
- *   - Every line is a complete, valid JSON line (atomic writes)
- *   - No partial lines, no mid-write reads
+ * chart in real time on every write.
  *
- * This means the consumer can use event-driven fs.watch — no polling,
- * no throttling, no partial-line handling.
+ * WHAT THE DAEMON ACTUALLY GUARANTEES (#130). The honest list is shorter than
+ * the one that used to sit here, and the difference is why this watcher carries
+ * partial-line handling:
+ *
+ *   - **Every COMPLETED write leaves the file a whole number of lines.**
+ *     Every APPEND is enforced in one place, `appendTagFile`, rather than
+ *     re-derived per reader. The other three mutation sites each carry their own
+ *     argument — `upsertHeartbeat`'s same-width `writeSync`, `truncatePartialTail`'s
+ *     cut to a `lastLineStartByte` offset, and `initClassified`'s truncate to
+ *     zero — which is why the suite needs S2, S3 and S4 beside S1.
+ *     A crash mid-append is repaired by the next daemon at startup.
+ *   - **`fs.watch` reports BYTES, not lines.** inotify fires on the write, and a
+ *     large batch is not one `write(2)`. A reader woken mid-batch sees complete
+ *     lines plus a partial tail — so this watcher consumes only up to the last
+ *     newline and carries the remainder to the next event. That is not
+ *     defensive decoration; without it, the split line is skipped and its turn
+ *     never appears.
+ *   - **The beat is not a write budget.** 667ms bounds how often a poll comes
+ *     ROUND, not how many writes it makes: one poll can append a batch of many
+ *     lines. The old claim "writes at most every 667ms" read as a rate limit and
+ *     was never true of the byte stream.
+ *
+ * A WRITE never shrinks the file — the idle heartbeat is replaced in place at a
+ * fixed width rather than cut and re-appended — but a daemon STARTUP can, and
+ * does: `initClassified` truncates the tag to zero to rebuild it. So an
+ * offset-tracking reader must handle the file getting shorter, and this one does
+ * (the `stat.size < lastReadOffset` branch re-seeds). Do not read "replaced in
+ * place" as "the offset is always valid"; it means the BEAT cannot invalidate
+ * it.
  *
  * @param sessionPath - Path to the session.jsonl (shown in title)
  * @param tagPath - Path to the daemon's classified tag file
@@ -1254,11 +1512,13 @@ export async function watchTagFile(
 	// Emoji disable: CLI flag (--no-emoji/--emoji) wins; otherwise the session-file
 	// inline emoji-settings entry (Pi-toggled) decides (#62).
 	let disabledEmoji = typeof settings.disabledEmoji === "boolean" ? settings.disabledEmoji : false;
-	let allInteractions: Interaction[] = readClassifiedTagFile(tagPath);
-	let lastReadOffset = 0;
-	try {
-		lastReadOffset = fs.statSync(tagPath).size;
-	} catch {}
+	// One read, and the offset comes out of the same buffer (#130 review round 2).
+	let seed = seedClassifiedTagFile(tagPath);
+	let allInteractions: Interaction[] = seed.interactions;
+	let lastReadOffset = seed.offset;
+	// The bytes just before `lastReadOffset`, re-checked on every event so a
+	// truncate-and-rebuild that lands at or above it cannot pass unnoticed (#142).
+	let prefixSentinel = readPrefixSentinel(tagPath, lastReadOffset);
 
 	// Session-level settings from inline wtft-settings entries.
 	let sessionInterval: string | undefined;
@@ -1420,11 +1680,37 @@ export async function watchTagFile(
 	});
 
 	// fs.watch on the classified tag file (inotify on Linux).
-	// The daemon guarantees:
-	//   - Writes at most every 667ms (90bpm)
-	//   - Every line is a complete JSON + \n (atomic fs.appendFileSync)
-	//   - No partial lines, no mid-write reads
-	// Therefore every "change" event = one or more complete lines ready.
+	//
+	// WHAT THE DAEMON ACTUALLY GUARANTEES (#130), because the three bullets that
+	// used to sit here were folklore and two of them were false:
+	//   - Every COMPLETED write LANDS ON A LINE BOUNDARY, so the file is never
+	//     left holding a severed line. The idle heartbeat is overwritten in
+	//     place at a fixed width rather than cut and re-appended, and a crash
+	//     mid-append is repaired by the next daemon before its first write.
+	//   - THE FILE CAN STILL GET SHORTER, which is why the shrink branch below
+	//     exists and is not dead defensive code. `initClassified` truncates the
+	//     tag to zero in three cases — a rebuild lease token, no `_meta` offset,
+	//     heartbeat-only content — and a crash repair escalates to exactly that.
+	//     An earlier draft of this comment said "the file never shrinks" while
+	//     sitting fifty lines above the branch that exists because it does; that
+	//     sentence was a documented licence to delete the branch.
+	//   - It does NOT write at most once per beat. One poll makes several
+	//     separate writes — the classified batch, then `_meta.offset`, then a
+	//     `_meta.swept` marker, plus one append per changed subagent transcript,
+	//     and `shutdown` writes outside the cadence entirely. 667ms bounds how
+	//     often a beat comes round, not how many writes it makes.
+	//   - It does NOT make an append atomic against a concurrent read.
+	//     `syncSubagentTranscript` appends batches that run to hundreds of KB,
+	//     node may split one append across several write() calls, and inotify can
+	//     wake this callback inside that span.
+	//
+	// So a "change" event means complete lines ready PLUS, briefly, a partial one
+	// at the end — which is why the read below consumes only to the last newline
+	// and carries the remainder. A WHOLE-FILE READER IS NOT EXEMPT: a readFileSync
+	// landing in that same span returns the complete lines plus the fragment too,
+	// and drops it through its own catch. What the writer guarantees is only that
+	// the fragment can never be anywhere but the END of the file (#130 round 2).
+	//
 	// No debounce needed — double-fire is harmless (stat.size check is a no-op).
 	//
 	// Wait up to 5s for the daemon to create the tag file before watching.
@@ -1437,98 +1723,177 @@ export async function watchTagFile(
 			try {
 				const stat = fs.statSync(tagPath);
 
+				// THE FILE GOT SHORTER — RE-SEED, do not wait to be overtaken
+				// (#130 review round 3, Medium/correctness).
+				//
+				// This callback only ever asked whether the file GREW. The daemon
+				// truncates the tag to zero in three places (`initClassified`: a
+				// rebuild token, no `_meta` offset, heartbeat-only content), and
+				// (`truncatePartialTail` also shrinks the file, but it cannot strand
+				// an offset: it cuts to the last newline, and this reader's offset
+				// is only ever set just past a newline, so the cut lands at or
+				// after it. The three truncate-to-zero cases are what this branch
+				// is for.) A `--watch` reader stays
+				// attached across all of that — the 'r' key, a respawn, a lease
+				// rebuild — so its offset is left past the new EOF, pointing into
+				// a file that no longer has those bytes.
+				//
+				// Nothing recovers from that on its own. The reader sits idle
+				// until the rebuilt file grows PAST the stale offset, then starts
+				// reading from the middle of a line: every rebuilt line before
+				// that offset is never seen, and consume-to-last-newline only
+				// drops the leading fragment. The chart silently loses the whole
+				// early session.
+				//
+				// An earlier draft of this round's docs argued a truncate to zero
+				// was safe because "no reader can be positioned inside it". That
+				// is true of the CONTENT and false of the OFFSET, which is the
+				// thing that actually breaks.
+				// A shrink is only ONE of the two ways the prefix can go away, and
+				// it is the easy one. See `readPrefixSentinel` (#142).
+				const sentinelNow = readPrefixSentinel(tagPath, lastReadOffset);
+				const matches = sentinelMatches(sentinelNow, prefixSentinel);
+				const action = watcherAction(stat.size, lastReadOffset, matches);
+				if (action === "idle") return;
+				if (action === "reseed") {
+					const reseed = seedClassifiedTagFile(tagPath);
+					// A failed read here means the same thing it means below: no
+					// information. Leave the offset and the chart alone rather than
+					// committing an empty seed we cannot substantiate.
+					if (!reseed.read) return;
+					allInteractions = reseed.interactions;
+					lastReadOffset = reseed.offset;
+					prefixSentinel = readPrefixSentinel(tagPath, lastReadOffset);
+					updateDaemonHealth();
+					needsRedraw = true;
+					render();
+					resetWatchdog();
+					return;
+				}
+
 				// File grew — read new data and accumulate
-				if (stat.size > lastReadOffset) {
+				{
 					const fd = fs.openSync(tagPath, "r");
 					const buf = Buffer.alloc(stat.size - lastReadOffset);
 					fs.readSync(fd, buf, 0, buf.length, lastReadOffset);
 					fs.closeSync(fd);
-					lastReadOffset = stat.size;
 
-					const newContent = buf.toString("utf8");
-					const lines = newContent.split("\n");
-					let newCount = 0;
-					for (const line of lines) {
-						if (!line.trim()) continue;
-						try {
-							const obj = JSON.parse(line);
-							if (obj._hb) continue;
-							const interaction = classifiedToInteraction(obj);
-							if (interaction) {
-								allInteractions.push(interaction);
-								newCount++;
-							}
-						} catch {}
-					}
+					// CONSUME ONLY WHOLE LINES (#130 round 1, Medium/crossfile).
+					// `lastReadOffset = stat.size` was the same unconditional
+					// advance `parseNewLines` had: a fragment fails JSON.parse,
+					// the catch below drops it, and the offset has already moved
+					// past it — so those interactions never reach the live
+					// `--watch` view until something forces a whole-file re-read.
+					//
+					// AND THE WRITER CANNOT CLOSE THIS ONE. #130's writer
+					// guarantee is that no write ends mid-line, which kills the
+					// truncation welds. It does NOT make a large append atomic
+					// with respect to a concurrent reader: `syncSubagentTranscript`
+					// appends whole-transcript batches that run to hundreds of KB,
+					// node may split one append across several write() calls, and
+					// inotify can wake this watcher inside that span. So the file
+					// is always a whole number of complete lines PLUS, briefly, a
+					// partial one at the end — and the reader that tracks an offset
+					// has to carry the remainder. A whole-file reader meets the same
+					// fragment; it just drops it silently instead of desynchronising.
+					//
+					// This is not defensive code against a writer we do not trust.
+					// It is the one place the writer provably cannot deliver, and
+					// it is the same single line as the daemon's fix.
+					const lastNl = buf.lastIndexOf(0x0a);
+					// Nothing complete yet. Leave the offset where it is and fall THROUGH to the
+					// health refresh below — an early return here would skip updateDaemonHealth
+					// and resetWatchdog, so a run of partial-line wakes would let the watchdog
+					// fire on a daemon that is writing perfectly well.
+					if (lastNl !== -1) {
+						lastReadOffset += lastNl + 1;
+						prefixSentinel = readPrefixSentinel(tagPath, lastReadOffset);
 
-					if (newCount > 0) {
-						// This path appends straight to the accumulator and never
-						// goes through readClassifiedTagFile, so it needs the same
-						// collapse (#270 review) — otherwise the live watch, the
-						// one surface a human is actually staring at, is the only
-						// consumer that still double-counts a re-emitted message.
-						//
-						// COST, measured rather than argued (PR review), because
-						// this is a full pass over the WHOLE accumulator on every
-						// append event, which over a session's life is O(n^2) in
-						// interactions. That is true asymptotically and negligible
-						// in practice, and the numbers are the reason this is left
-						// as a single canonical call instead of being hand-rolled
-						// into an incremental merge:
-						//
-						// Re-derive with `bun research/270-watch-dedup-bench.ts`
-						// (median of 40 passes, JIT warmed, 50% of ids re-emitted):
-						//
-						//   n =  1,184 (the largest real session measured on this
-						//                host, #270's own specimen 7c0c2b7e)
-						//                        0.255ms/pass = 0.038% of a 667ms beat
-						//   n =  4,736 (4x)      0.917ms/pass = 0.138%
-						//   n = 11,840 (10x)     2.090ms/pass = 0.313%
-						//   n = 23,680 (20x)     6.423ms/pass = 0.963%
-						//
-						// The first version of this table was a hand-run nobody
-						// saved and it was not even MONOTONIC — it put 11,840
-						// items (0.791ms) BELOW 4,736 (0.879ms), because the
-						// smallest n had absorbed the JIT compile cost and the
-						// others had not (PR review). That is the same defect
-						// research/270-subagent-parse-bench.ts exists to prevent
-						// for the parse figures, so these get the same treatment.
-						//
-						// What the corrected numbers say, stated no more strongly
-						// than they support (PR review caught the first attempt
-						// overstating this too, twice): per-item cost stays in a
-						// NARROW BAND rather than being flat. Derived from the
-						// table above and nothing else — ms/pass divided by n —
-						// that band is 0.177-0.271us: 0.215 / 0.194 / 0.177 /
-						// 0.271us at the four sizes, reliably highest at the 20x
-						// point. So 20x the items costs ~25x the time, not 20x.
-						// (Re-runs under load shift the whole band upward, to
-						// ~0.32us at the 20x point — but that is a DIFFERENT run,
-						// and quoting its peak beside this run's table is how the
-						// previous draft came to state an upper bound its own
-						// numbers did not support.) Each pass is O(n) by construction; the mild
-						// super-linearity on top is allocation and cache pressure
-						// from the larger Map, not a change in the algorithm.
-						// Absolute figures move ~25% run to run with host load, so
-						// treat the table as one representative run of the script,
-						// not a constant.
-						//
-						// The practical bound is what carries the decision, and it
-						// is unaffected: even at 20x the largest session this host
-						// has ever produced, one pass is ~1% of a poll beat, so the
-						// quadratic term over a session's life is nowhere near the
-						// thing that matters. An
-						// incremental merge would have to re-implement
-						// deduplicateInteractions' max-cost-and-union-files rule
-						// to save 0.1% of a poll, and a second implementation of
-						// that rule is precisely the drift this file's other
-						// review findings are about.
-						allInteractions = dedupeClassifiedById(allInteractions);
-						updateDaemonHealth();
-						needsRedraw = true;
-						render();
-						resetWatchdog();
-						return;
+						const newContent = buf.subarray(0, lastNl + 1).toString("utf8");
+						const lines = newContent.split("\n");
+						let newCount = 0;
+						for (const line of lines) {
+							if (!line.trim()) continue;
+							try {
+								const obj = JSON.parse(line);
+								if (obj._hb) continue;
+								const interaction = classifiedToInteraction(obj);
+								if (interaction) {
+									allInteractions.push(interaction);
+									newCount++;
+								}
+							} catch {}
+						}
+
+						if (newCount > 0) {
+							// This path appends straight to the accumulator and never
+							// goes through readClassifiedTagFile, so it needs the same
+							// collapse (#270 review) — otherwise the live watch, the
+							// one surface a human is actually staring at, is the only
+							// consumer that still double-counts a re-emitted message.
+							//
+							// COST, measured rather than argued (PR review), because
+							// this is a full pass over the WHOLE accumulator on every
+							// append event, which over a session's life is O(n^2) in
+							// interactions. That is true asymptotically and negligible
+							// in practice, and the numbers are the reason this is left
+							// as a single canonical call instead of being hand-rolled
+							// into an incremental merge:
+							//
+							// Re-derive with `bun research/270-watch-dedup-bench.ts`
+							// (median of 40 passes, JIT warmed, 50% of ids re-emitted):
+							//
+							//   n =  1,184 (the largest real session measured on this
+							//                host, #270's own specimen 7c0c2b7e)
+							//                        0.255ms/pass = 0.038% of a 667ms beat
+							//   n =  4,736 (4x)      0.917ms/pass = 0.138%
+							//   n = 11,840 (10x)     2.090ms/pass = 0.313%
+							//   n = 23,680 (20x)     6.423ms/pass = 0.963%
+							//
+							// The first version of this table was a hand-run nobody
+							// saved and it was not even MONOTONIC — it put 11,840
+							// items (0.791ms) BELOW 4,736 (0.879ms), because the
+							// smallest n had absorbed the JIT compile cost and the
+							// others had not (PR review). That is the same defect
+							// research/270-subagent-parse-bench.ts exists to prevent
+							// for the parse figures, so these get the same treatment.
+							//
+							// What the corrected numbers say, stated no more strongly
+							// than they support (PR review caught the first attempt
+							// overstating this too, twice): per-item cost stays in a
+							// NARROW BAND rather than being flat. Derived from the
+							// table above and nothing else — ms/pass divided by n —
+							// that band is 0.177-0.271us: 0.215 / 0.194 / 0.177 /
+							// 0.271us at the four sizes, reliably highest at the 20x
+							// point. So 20x the items costs ~25x the time, not 20x.
+							// (Re-runs under load shift the whole band upward, to
+							// ~0.32us at the 20x point — but that is a DIFFERENT run,
+							// and quoting its peak beside this run's table is how the
+							// previous draft came to state an upper bound its own
+							// numbers did not support.) Each pass is O(n) by construction; the mild
+							// super-linearity on top is allocation and cache pressure
+							// from the larger Map, not a change in the algorithm.
+							// Absolute figures move ~25% run to run with host load, so
+							// treat the table as one representative run of the script,
+							// not a constant.
+							//
+							// The practical bound is what carries the decision, and it
+							// is unaffected: even at 20x the largest session this host
+							// has ever produced, one pass is ~1% of a poll beat, so the
+							// quadratic term over a session's life is nowhere near the
+							// thing that matters. An
+							// incremental merge would have to re-implement
+							// deduplicateInteractions' max-cost-and-union-files rule
+							// to save 0.1% of a poll, and a second implementation of
+							// that rule is precisely the drift this file's other
+							// review findings are about.
+							allInteractions = dedupeClassifiedById(allInteractions);
+							updateDaemonHealth();
+							needsRedraw = true;
+							render();
+							resetWatchdog();
+							return;
+						}
 					}
 				}
 
@@ -1540,16 +1905,37 @@ export async function watchTagFile(
 				render();
 				resetWatchdog();
 			} catch {
-				// Tag file may have been deleted or truncated — re-read from zero
+				// Tag file may have been deleted or truncated — re-read from zero.
+				//
+				// ASK WHETHER IT IS THERE, rather than relying on a throw (#130
+				// review round 3, Low/correctness). This recovery used to call
+				// `fs.statSync(tagPath)`, which THREW when the file was gone and
+				// so skipped the render, leaving the last good chart on screen
+				// until the file came back. `seedClassifiedTagFile` never throws:
+				// on a missing file it answers `{interactions: [], offset: 0}`.
+				// Left alone, this catch would therefore wipe the accumulator and
+				// redraw an EMPTY chart on any transient read failure, and the
+				// "wait for it to reappear" branch below would be unreachable.
 				try {
-					lastReadOffset = 0;
-					allInteractions = readClassifiedTagFile(tagPath);
-					lastReadOffset = fs.statSync(tagPath).size;
+					// Commit only on a SUCCESSFUL read. `existsSync` was the first
+					// spelling of this guard and it answers one question — is the
+					// path there — while every other read failure (EMFILE after an
+					// fd leak, EACCES after a permissions change, EIO) still came
+					// back as an empty seed and still wiped the chart. The comment
+					// claimed it covered "any transient read failure"; it covered
+					// ENOENT (#130 local audit round).
+					const fresh = seedClassifiedTagFile(tagPath);
+					if (!fresh.read) return;   // no information — keep the last good chart
+					allInteractions = fresh.interactions;
+					lastReadOffset = fresh.offset;
+					prefixSentinel = readPrefixSentinel(tagPath, lastReadOffset);
+					seed = fresh;
 					needsRedraw = true;
 					render();
 					resetWatchdog();
 				} catch {
-					// File gone — wait for it to reappear
+					// Still unreadable — wait for the next event rather than
+					// rendering a chart we cannot substantiate.
 				}
 			}
 		});
@@ -1611,8 +1997,10 @@ export async function watchTagFile(
 	// adopted sibling file already holds the whole session; without re-seeding,
 	// the first frame renders nothing and everything written before now is only
 	// picked up by luck, on whatever change event happens next.
-	allInteractions = readClassifiedTagFile(tagPath);
-	try { lastReadOffset = fs.statSync(tagPath).size; } catch { lastReadOffset = 0; }
+	seed = seedClassifiedTagFile(tagPath);
+	allInteractions = seed.interactions;
+	lastReadOffset = seed.offset;
+	prefixSentinel = readPrefixSentinel(tagPath, lastReadOffset);
 	needsRedraw = true;
 	render();
 

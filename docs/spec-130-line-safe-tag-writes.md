@@ -702,7 +702,24 @@ A generation check cannot do this job: truncate-and-rewrite keeps the same inode
 is unchanged. The bytes at the boundary are the only thing that distinguishes the two files.
 `readPrefixSentinel` keeps the last 64 bytes of the consumed prefix and re-checks them on every
 event; `watcherAction` is the pure decision it feeds. `null` means "could not read", which is
-NOT "changed" — the reader idles rather than committing to a reseed it cannot substantiate.
+NOT "changed" — and it RE-SEEDS.
+
+**That was wrong in the first cut of this fix, and Macroscope caught it on the second round.** The
+reader idled on `null`, which looked like the conservative choice and was the opposite:
+`prefixSentinel` is refreshed only where the offset moves, the offset moves only on the `read`
+branch, and `read` is unreachable while the comparison is `null`. So a single failed sentinel read
+**froze the watch permanently** — no error, no recovery short of a restart. Not transient, as the
+report framed it: terminal.
+
+The report proposed treating an unreadable sentinel as MATCHING. That removes the deadlock by
+re-opening the stale-offset bug the sentinel exists to close, so it was fixed for the verified
+reason instead: a whole-file re-read is always CORRECT, merely more expensive, and it refreshes the
+sentinel on the way through. A file that cannot be read at all still costs nothing —
+`seedClassifiedTagFile` reports `read: false`, the caller commits nothing, and that is a retry.
+
+`G5` states the rule rather than the case: **no state with unread bytes may resolve to `idle`**,
+since `idle` is the only action that does not advance the offset. `G5a` is its converse, so `G5`
+cannot pass by `idle` having been deleted outright.
 
 **This also let S4 stop lying.** S4 was two regexes over the library source requiring
 `stat.size < lastReadOffset` to sit within 1600 characters of `seedClassifiedTagFile(`. Its

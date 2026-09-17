@@ -700,9 +700,19 @@ retained and real records lost — which is worse than the report described.
 
 A generation check cannot do this job: truncate-and-rewrite keeps the same inode, so `stat.ino`
 is unchanged. The bytes at the boundary are the only thing that distinguishes the two files.
-`readPrefixSentinel` keeps the last 64 bytes of the consumed prefix and re-checks them on every
-event; `watcherAction` is the pure decision it feeds. `null` means "could not read", which is
+`readPrefixSentinel` fingerprints the consumed prefix and re-checks it on every event;
+`watcherAction` is the pure decision it feeds. `null` means "could not read", which is
 NOT "changed" — and it RE-SEEDS.
+
+**Where it samples, and why not at the offset.** It anchors at the start of the last COMPLETE line
+the reader consumed, and keeps the 64 bytes BELOW that anchor — plus the anchor itself, which is
+part of the comparison rather than bookkeeping. Both halves earn their place: the bytes catch a
+rebuild that rewrote the prefix, the anchor catches one that kept those bytes but changed the line
+structure above them, including the case where the reader has consumed a single line and there are
+no bytes below it to compare.
+
+Sampling at the OFFSET instead is what the first cut did, and it was wrong for a reason the
+rebuild case never exercised — see the third round below.
 
 **That was wrong in the first cut of this fix, and Macroscope caught it on the second round.** The
 reader idled on `null`, which looked like the conservative choice and was the opposite:
@@ -720,6 +730,37 @@ sentinel on the way through. A file that cannot be read at all still costs nothi
 `G5` states the rule rather than the case: **no state with unread bytes may resolve to `idle`**,
 since `idle` is the only action that does not advance the offset. `G5a` is its converse, so `G5`
 cannot pass by `idle` having been deleted outright.
+
+### Round 3 — the sentinel straddled the heartbeat, and an idle watch burned a core
+
+Macroscope's third round: an idle `--watch` took the `reseed` path on **every heartbeat**.
+Reproduced, and the mechanism is exactly as reported. The sentinel sampled the 64 bytes
+immediately before the reader's offset; the offset sits at EOF; the LAST line of a tag file is the
+heartbeat, which `upsertHeartbeat` rewrites in place — same width, same file size, new `last`
+timestamp — every `POLL_MS`. So the window straddled a line that mutates **by design**. It
+mismatched on every beat, and `watcherAction` correctly turned that mismatch into a re-seed: a
+synchronous whole-file re-read and re-parse of a file that had gained nothing.
+
+**The magnitude is larger than Medium.** Measured on this host's largest tag file — 32.8 MB,
+644,312 lines — a re-seed costs **585 ms against a 667 ms beat: 87.7% of a core, continuously,
+while idle**, and within a rounding error of failing to keep up with its own clock. The report
+rated it on growing cost; the number is the argument.
+
+**Fixed by moving the anchor below the mutable tail**, not by special-casing the heartbeat. The
+daemon only ever appends whole lines or replaces that final heartbeat in place, so the region
+below the last line's start is immutable — and a truncate-and-rebuild changes it, which is the job
+the sentinel exists to do. Normalising the heartbeat before comparing, the other route the report
+suggested, would have needed the comparison to parse a line and know its shape; the anchor needs
+neither.
+
+`G6` pins the regression with a real heartbeat and a real in-place beat, with three fixture
+preconditions (same width, unchanged size, and the beat actually landed) so it cannot go vacuous.
+`G6e`–`G6g` are the converse: a rebuild that keeps the file's **exact byte length** is still
+caught, so `G6` cannot pass by the sentinel having been defanged into always matching. Under
+mutation — `const anchor = offset`, the pre-fix behaviour — `G2a`, `G2a'`, `G6c` and `G6d` all go
+RED.
+
+Repro and measurement: `debug/142-heartbeat-reseed.mjs`.
 
 **This also let S4 stop lying.** S4 was two regexes over the library source requiring
 `stat.size < lastReadOffset` to sit within 1600 characters of `seedClassifiedTagFile(`. Its

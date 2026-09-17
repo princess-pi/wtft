@@ -63,6 +63,7 @@ import {
 	readTagFileWithVerdict,
 	lastLineStartByte,
 	readPrefixSentinel,
+	sentinelMatches,
 	watcherAction,
 	PREFIX_SENTINEL_BYTES,
 	detectSessionHarness,
@@ -223,6 +224,7 @@ export {
 	// pinned directly by tests/wtft-130-line-safe-tag-writes.test.ts §W.
 	lastLineStartByte,
 	readPrefixSentinel,
+	sentinelMatches,
 	watcherAction,
 	PREFIX_SENTINEL_BYTES,
 	getTerminalWidth,

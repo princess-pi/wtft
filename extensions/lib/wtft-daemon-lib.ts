@@ -520,9 +520,27 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
  *  still waiting. There is no window for a race to sit in, because there is no
  *  second look at the file. */
 /**
- * The last `PREFIX_SENTINEL_BYTES` bytes of the prefix a reader has already
- * consumed, used to answer one question: are the bytes I consumed STILL the
- * bytes at that position?
+ * A fingerprint of the prefix a reader has already consumed, used to answer one
+ * question: is what I consumed STILL what is at that position?
+ *
+ * WHERE IT SAMPLES, AND WHY NOT AT THE OFFSET (Macroscope, PR #142, third
+ * round). The first version sampled the 64 bytes immediately before the
+ * reader's offset. The reader's offset sits at EOF, and the LAST line of a tag
+ * file is the heartbeat, which `upsertHeartbeat` rewrites in place — same
+ * width, same size, new `last` timestamp — every `POLL_MS`. So the window
+ * straddled a line that mutates by design: the sentinel mismatched on every
+ * beat, and an IDLE watch re-seeded, re-reading and re-parsing the whole file
+ * on a beat that had appended nothing.
+ *
+ * Measured on this host's largest tag file (32.8 MB, 644,312 lines): 585 ms per
+ * re-seed against a 667 ms beat — 87.7% of a core, continuously, on a file that
+ * gained nothing. The report rated it Medium for growing cost; the measurement
+ * puts it a hair from failing to keep up with its own clock.
+ *
+ * So it anchors at the start of the last COMPLETE line the reader consumed, and
+ * samples the bytes BELOW that. The daemon only ever appends whole lines or
+ * replaces that final heartbeat in place, so everything below the anchor is
+ * immutable — and a truncate-and-rebuild changes it, which is the whole job.
  *
  * WHY (Macroscope, PR #142, Medium). `watchTagFile` re-seeded only when the file
  * SHRANK below its offset. A daemon that truncates and rebuilds before the
@@ -558,20 +576,48 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
  */
 export const PREFIX_SENTINEL_BYTES = 64;
 
-export function readPrefixSentinel(tagPath: string, offset: number): Buffer | null {
-	if (offset <= 0) return Buffer.alloc(0);
-	const want = Math.min(PREFIX_SENTINEL_BYTES, offset);
+export interface PrefixSentinel {
+	/** Start byte of the last COMPLETE line at or before the reader's offset —
+	 *  the boundary below which the file is append-only. Part of the comparison,
+	 *  not bookkeeping: a rebuild that reshapes the file moves it. */
+	anchor: number;
+	/** The up-to-`PREFIX_SENTINEL_BYTES` bytes immediately BELOW `anchor`. */
+	bytes: Buffer;
+}
+
+export function readPrefixSentinel(tagPath: string, offset: number): PrefixSentinel | null {
+	if (offset <= 0) return { anchor: 0, bytes: Buffer.alloc(0) };
 	let fd: number;
 	try { fd = fs.openSync(tagPath, "r"); } catch { return null; }
 	try {
+		// Scoped to the consumed prefix, not to the file: `offset` stands in for
+		// `size`, so the anchor is the last line the READER took, never a line
+		// appended since.
+		const anchor = lastLineStartByte(fd, offset);
+		const want = Math.min(PREFIX_SENTINEL_BYTES, anchor);
+		if (want === 0) return { anchor, bytes: Buffer.alloc(0) };
 		const buf = Buffer.alloc(want);
-		const read = fs.readSync(fd, buf, 0, want, offset - want);
-		return read === want ? buf : null;
+		const read = fs.readSync(fd, buf, 0, want, anchor - want);
+		return read === want ? { anchor, bytes: buf } : null;
 	} catch {
 		return null;
 	} finally {
 		fs.closeSync(fd);
 	}
+}
+
+/**
+ * Did the consumed prefix survive? `null` on either side means "could not read",
+ * which `watcherAction` turns into a re-seed rather than an idle.
+ *
+ * BOTH fields count. The bytes catch a rebuild that rewrote the prefix in place;
+ * the anchor catches one that kept those bytes but changed the line structure
+ * above them — including the case where the anchor is 0 because the reader has
+ * consumed a single line and there are no bytes below it to compare.
+ */
+export function sentinelMatches(a: PrefixSentinel | null, b: PrefixSentinel | null): boolean | null {
+	if (a === null || b === null) return null;
+	return a.anchor === b.anchor && a.bytes.equals(b.bytes);
 }
 
 /**
@@ -1706,9 +1752,7 @@ export async function watchTagFile(
 				// A shrink is only ONE of the two ways the prefix can go away, and
 				// it is the easy one. See `readPrefixSentinel` (#142).
 				const sentinelNow = readPrefixSentinel(tagPath, lastReadOffset);
-				const matches = sentinelNow === null || prefixSentinel === null
-					? null
-					: sentinelNow.equals(prefixSentinel);
+				const matches = sentinelMatches(sentinelNow, prefixSentinel);
 				const action = watcherAction(stat.size, lastReadOffset, matches);
 				if (action === "idle") return;
 				if (action === "reseed") {

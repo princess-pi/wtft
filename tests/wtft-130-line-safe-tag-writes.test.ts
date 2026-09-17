@@ -32,7 +32,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
-import { lastLineStartByte, seedClassifiedTagFile, getCurrentVersionTagPath, readClassifiedTagFile, parseSessionFile, readPrefixSentinel, watcherAction, PREFIX_SENTINEL_BYTES } from "../bin/wtft.mjs";
+import { lastLineStartByte, seedClassifiedTagFile, getCurrentVersionTagPath, readClassifiedTagFile, parseSessionFile, readPrefixSentinel, sentinelMatches, watcherAction, PREFIX_SENTINEL_BYTES } from "../bin/wtft.mjs";
 import { pollUntil, sleep } from "./lib/poll";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
@@ -1043,11 +1043,22 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	const sentinel = readPrefixSentinel(gtag, off);
 	assert("G2 the sentinel is non-null on a readable file", sentinel !== null);
 	const whole = fs.readFileSync(gtag);
-	assert("G2a it is exactly the bytes immediately before the offset",
-		sentinel !== null && sentinel.equals(whole.subarray(Math.max(0, off - PREFIX_SENTINEL_BYTES), off)));
-	assert("G2b an offset of 0 has no prefix, so the sentinel is empty and cannot mismatch",
-		readPrefixSentinel(gtag, 0)?.length === 0);
-	assert("G2c a file that cannot be opened is `null`, not an empty match",
+	// It anchors at the START OF THE LAST CONSUMED LINE, not at the offset, and
+	// samples BELOW that — the heartbeat occupies the last line and mutates in
+	// place, so a window ending at the offset straddles bytes that change by
+	// design (G6).
+	const anchorOff = whole.lastIndexOf(0x0a, off - 2) + 1;
+	assert("G2a it anchors at the start of the last consumed line, not at the offset",
+		sentinel !== null && sentinel.anchor === anchorOff,
+		`anchor=${sentinel?.anchor} expected=${anchorOff} offset=${off}`);
+	assert("G2a' and the anchor is strictly BELOW the offset — otherwise the mutable last line is still in the window",
+		sentinel !== null && sentinel.anchor < off);
+	assert("G2b the bytes are exactly those immediately below the anchor",
+		sentinel !== null && sentinel.bytes.equals(
+			whole.subarray(Math.max(0, anchorOff - PREFIX_SENTINEL_BYTES), anchorOff)));
+	assert("G2c an offset of 0 has no prefix, so the sentinel is empty and cannot mismatch",
+		readPrefixSentinel(gtag, 0)?.bytes.length === 0);
+	assert("G2d a file that cannot be opened is `null`, not an empty match",
 		readPrefixSentinel(path.join(gdir, "does-not-exist.jsonl"), 10) === null);
 
 	// -- G3: the end-to-end property, on the exact shape that was silently lossy --
@@ -1061,7 +1072,7 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 		sizeNow >= off, `size=${sizeNow} offset=${off}`);
 
 	const after = readPrefixSentinel(gtag, off);
-	const matches = after !== null && sentinel !== null ? after.equals(sentinel) : null;
+	const matches = sentinelMatches(after, sentinel);
 	assert("G3a the sentinel notices the prefix changed under it", matches === false);
 	assert("G3b so the watcher reseeds instead of reading from a stale offset",
 		watcherAction(sizeNow, off, matches) === "reseed");
@@ -1083,6 +1094,63 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	// rebuild between two events cannot slip through on a stale copy.
 	assert("G4a and recomputes the sentinel on every event, not once at attach",
 		/const sentinelNow = readPrefixSentinel\(/.test(libSrc));
+
+	// -- G6: an IDLE heartbeat is not a rebuild (Macroscope, PR #142, round 3) --
+	//
+	// The regression this pins: the sentinel used to sample the 64 bytes before
+	// the reader's OFFSET, which sits at EOF. The last line of a tag file is the
+	// heartbeat, rewritten in place at the daemon's every beat with a new `last`
+	// timestamp — same width, same file size. So the window straddled a line
+	// that mutates by design, mismatched on every beat, and an idle watch
+	// re-seeded: a whole-file re-read and re-parse of a file that gained
+	// nothing. Measured on this host's largest tag file (32.8 MB, 644,312
+	// lines): 585 ms per re-seed against a 667 ms beat.
+	//
+	// The fixture writes a REAL heartbeat, the shape `upsertHeartbeat` writes,
+	// and beats it the way the daemon does — a same-width in-place write, never
+	// a rewrite of the file.
+	const hbOf = (last: number) => JSON.stringify({ _hb: { first: 1758000000000, last } }) + "\n";
+	fs.writeFileSync(gtag, line("rec-1") + line("rec-2") + line("rec-3") + hbOf(1758000000000));
+	const hbSize = fs.statSync(gtag).size;
+	const hbOff = hbSize;                          // the reader consumed every whole line
+	const hbBefore = readPrefixSentinel(gtag, hbOff);
+
+	const beat = Buffer.from(hbOf(1758000000667), "utf8");
+	// Precondition: the beat must be the same width, or it is an APPEND and this
+	// test stops exercising the in-place case it was written for.
+	assert("G6 fixture precondition: a beat is the same width, so the file size cannot change",
+		beat.length === Buffer.byteLength(hbOf(1758000000000)));
+	const hbFd = fs.openSync(gtag, "r+");
+	fs.writeSync(hbFd, beat, 0, beat.length, hbSize - beat.length);
+	fs.closeSync(hbFd);
+	assert("G6a fixture precondition: the size really is unchanged, so the shrink branch cannot fire",
+		fs.statSync(gtag).size === hbSize);
+	// And the beat really did change bytes — otherwise a no-op write would pass
+	// this test while the bug was still there.
+	const hbTail = fs.readFileSync(gtag).subarray(hbSize - beat.length);
+	assert("G6b fixture precondition: the new beat landed, and differs from the old one",
+		hbTail.equals(beat) && !beat.equals(Buffer.from(hbOf(1758000000000), "utf8")));
+
+	const hbAfter = readPrefixSentinel(gtag, hbOff);
+	const hbMatches = sentinelMatches(hbAfter, hbBefore);
+	assert("G6c a heartbeat beat does NOT look like a rebuild — the prefix below the last line is untouched",
+		hbMatches === true);
+	assert("G6d so an idle watch idles instead of re-reading the whole file",
+		watcherAction(hbSize, hbOff, hbMatches) === "idle");
+
+	// The converse, so G6 cannot pass by the sentinel having been defanged into
+	// always matching: a real rebuild at the same size is still caught.
+	// Same-length ids on purpose: the rebuild must differ from the original in
+	// CONTENT only, so size cannot be what distinguishes it.
+	const sameSizeRebuild = line("gho-1") + line("gho-2") + line("gho-3") + hbOf(1758000000000);
+	assert("G6e fixture precondition: the rebuild is byte-identical in LENGTH, so only content can distinguish it",
+		Buffer.byteLength(sameSizeRebuild) === hbSize);
+	fs.writeFileSync(gtag, sameSizeRebuild);
+	const rebuiltSentinel = readPrefixSentinel(gtag, hbOff);
+	assert("G6f a rebuild that kept the file's SIZE is still caught",
+		sentinelMatches(rebuiltSentinel, hbBefore) === false);
+	assert("G6g and still reseeds",
+		watcherAction(hbSize, hbOff, sentinelMatches(rebuiltSentinel, hbBefore)) === "reseed");
 }
 
 

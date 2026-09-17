@@ -19,6 +19,8 @@ import {
 	getModelCacheTtlMs,
 } from "./lib/wtft-shared.js";
 import { readConfig, writeConfig, hasConfig } from "@princess-pi/libs/config";
+import { computeSpawnTree, type SpawnTree } from "./lib/wtft-spawn-tree.js";
+import { collectSelfAttributedSessionIds } from "./lib/wtft-parser.js";
 import {
 	parseWtftCliArgs,
 	ensureDaemonRunning,
@@ -148,6 +150,35 @@ function getSettings(_ctx: any) {
 //   1. Claude Code: <session>/subagents/agent-*.jsonl (recursive, depth ≤ 5)
 //   2. Pi (pre-emptive): sibling files with parentSession header match
 // ---
+
+/** The spawn tree for the session this widget is rendering (#116).
+ *
+ *  `computeSpawnTree` reports a ledger it could not read as `ledgerError`
+ *  rather than throwing, and the renderer prints that as its own block — so the
+ *  widget shows the failure, it does not hide it. The catch here has no named
+ *  reachable case: `resolveSessionById` wraps its `statSync` in try/catch,
+ *  `resolveSessionFile` catches every harness's throw, `computeSpawnTree`
+ *  catches both the ledger read and the parse, and
+ *  `collectSelfAttributedSessionIds` catches its own discoveries — every path
+ *  below this call already turns a failure into a value. It stays as a
+ *  last-resort guard anyway, because a widget refresh running every turn must
+ *  not take the panel down if one of those guarantees turns out to be wrong;
+ *  there, the block is simply absent. */
+function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | undefined {
+	const sessionFile = ctx.sessionManager.getSessionFile?.();
+	if (!sessionFile) return undefined;
+	try {
+		// The SAME double-count guard the CLI passes. `readInteractions` merges
+		// every subagent session into SELF, so a spawner that also records one
+		// as a ledger edge would have the widget count it in TOTAL and again in
+		// SPAWNED. This surface had no guard at all until the PR review asked.
+		return computeSpawnTree(path.basename(sessionFile).replace(/\.jsonl$/i, ""), {
+			alreadyAttributed: collectSelfAttributedSessionIds(sessionFile, interactions),
+		});
+	} catch {
+		return undefined;
+	}
+}
 
 /** Read interactions from the daemon's classified tag file (#92),
  *  merged with subagent session interactions (#83, #82). */
@@ -473,7 +504,12 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				};
 				const budget = _currentThinkingLevel ? BUDGET_MAP[_currentThinkingLevel] : undefined;
 				const interactions = readInteractions(ctx);
-				const output = renderTokenSummary(interactions, Math.max(current.width, 40), budget);
+				// The recorded lineage (#116). The widget is a reader of the
+				// same report, so it gets the same block — a Pi user reading
+				// TOTAL with $69 of lens children unlisted is exactly the gap
+				// the issue is about, and omitting it here would recreate it on
+				// the surface Duppy actually looks at.
+				const output = renderTokenSummary(interactions, Math.max(current.width, 40), budget, undefined, widgetSpawnTree(ctx, interactions));
 				ctx.ui.notify(output, "info");
 				return;
 			}

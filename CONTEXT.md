@@ -272,12 +272,13 @@ _Avoid_: Standalone mode, binary (the binary is `bin/wtft.mjs`; "CLI" names the 
 
 **JSON mode** (#26):
 `--json` — the CLI's machine-readable mode. Writes exactly one JSON object (schema
-`wtft/session@1`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
+`wtft/session@3`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
 Human prose goes to stderr, and every sentence that would otherwise have been on stdout is
 repeated in the object's `notices[]`, where `code` is the contract and `text` is disposable.
 Its aggregate numbers come from `computeSessionSummary` (`extensions/lib/wtft-renderer.ts`),
 the same aggregation the `--tokens` table formats, so those two cannot report different
-totals; `session`, `provisional`, `uncounted` and `notices` come from the run instead.
+totals; `session`, `provisional`, `uncounted`, `spawned` and `notices` come from the run
+instead, and `tree` is `total` plus `spawned.total` (see **Self / tree**).
 Suppresses the rendering flags, but not the commands that run instead of a report
 (`--help`/`--why`/`--version`, `--watch`, the daemon-management group). Contract:
 `docs/spec-26-json.md`. CLI only — the widget has no stdout to write an object to.
@@ -306,3 +307,53 @@ real-time as new interactions are logged, until `Ctrl+C`/`q`. Distinct from the 
 periodic refresh (which lives inside Pi); watch mode is a standalone CLI process meant to run in
 a separate pane.
 _Avoid_: Live mode, tail mode
+
+**Launcher-spawned session** (#116):
+A full agent session started by a *launcher process* the parent invoked — `herdr agent start`,
+a `pr-review` lens, a wrapper script — rather than by a `claude` command the parent's own
+transcript contains. Distinct from a **subagent session** (a Task-tool child, discovered by
+file layout) and from a **`claude -p` spawn** (discovered by cwd and time): a launcher child
+has its own session id and its own project dir, and **neither transcript contains a field
+naming the other**, so there is nothing to re-derive and no tagger bump can reach its cost.
+_Avoid_: Background agent, detached session, orphan session (it is not orphaned — the edge
+exists, it was simply never written down)
+
+**Spawn ledger** (#116):
+The append-only `$XDG_STATE_HOME/wtft/spawns.jsonl` (`~/.local/state/wtft/spawns.jsonl` by
+default), one JSON line per parent→child spawn edge, written by the spawner at spawn time with
+`wtft spawn-record`. It is the ONLY record of a launcher-spawned edge. A reader takes the whole
+file or none of it: a ledger over 8 MiB is refused outright rather than partly read, because
+reading part of it would drop edges without saying which. "Ledger" to refer, "spawn ledger" on
+first use in a passage.
+_Avoid_: Spawn log, lineage file, parent map, edge database
+
+**Self / tree** (#116):
+**Self** is a session's own turns — what `total` has always meant and still means. **Tree** is
+self plus every RESOLVED descendant reached through the spawn ledger, so it is a floor whenever
+anything went uncounted — `unattributed` non-empty, `depthCapped` non-zero, `ledgerError` set, or
+`malformedLedgerLines` non-zero (a malformed line was a record, so its edge is lost and the count is
+its only trace). Both are explicit fields under `--json`; the human table shows the
+split as `TOTAL` / `SPAWNED` / `TREE`, and shows none of the three only when this session recorded
+no edges AND the ledger read cleanly — an unreadable ledger or a skipped line still prints, because
+"no edges" and "could not tell" are different reports. Never write a bare "the session's cost" where the two can differ.
+_Avoid_: Rollup, grand total, inclusive cost (each hides which of the two is meant)
+
+**Unattributed** (#116):
+A recorded spawn edge whose child's cost could not be read: `not-found` (the lookup came back
+empty — absent, or somewhere this process cannot read, and the walk cannot tell those apart) or
+`unreadable` (a file found that would not parse). Reported with its reason and a `null` cost,
+**never a zero**: a zero says the child cost nothing, which is a claim we do not have. Distinct
+from **uncounted** (#149), a billable event the harness records no `usage` for; and from the four
+skips that are *not* gaps — `already-counted` (a diamond or cycle, whose money landed once),
+`already-seen-unresolved` (a second edge onto a child the first visit could not read, whose gap is
+already reported), `in-self-total` (a child whose cost is already inside `total`) and
+`depth-capped` (past the walk's bound).
+_Avoid_: Missing, lost, dropped (the edge is known; only the amount is not)
+
+**Descendants unknown** (#116):
+The state where the spawn ledger itself could not be READ — `spawned.ledgerError` in JSON,
+`"spawn ledger could not be read (#116) — descendants unknown, not zero"` in the table. It is
+deliberately not the same report as "this session spawned nothing", which is silence, and it is
+reported through neither exit 9 nor `provisional.reason`: those mean "may still grow under the
+daemon", a different fact.
+_Avoid_: Empty tree, no descendants, zero (each states the thing we could not determine)

@@ -16,6 +16,10 @@ import wtftManifest from "../docs/manifests/wtft-cmd.json" with { type: "json" }
 import {
 	buildWtftLines,
 	buildTimelineString,
+	// #116 — the empty-report arms render the SPAWNED block too; see
+	// `finishEmptyReport`. Without these two the rendered arms disagreed with --json.
+	renderSpawnTree,
+	emptyTotals,
 	parseSessionFile,
 	parseEntryToInteraction,
 	classifyInteraction,
@@ -41,6 +45,7 @@ import {
 	clearSubagentCacheMiss,
 	loadSubagentInteractions,
 	attributeClaudeSubAgentCosts,
+	collectSelfAttributedSessionIds,
 	parseInterval,
 	getBinInfo,
 	calculateClaudeCost,
@@ -111,6 +116,25 @@ import {
 	type ModelPricing,
 	getTerminalWidth
 } from "../extensions/lib/wtft-shared.ts";
+import {
+	runSpawnRecordCommand,
+	readSpawnLedger,
+	spawnLedgerPath,
+	serializeSpawnRecord,
+	appendSpawnRecord,
+	SPAWN_RECORD_SCHEMA,
+	SPAWN_RECORD_EXIT,
+	MAX_RECORD_BYTES,
+	MAX_FIELD_BYTES,
+	isSessionId,
+} from "../extensions/lib/wtft-spawn-ledger.ts";
+import {
+	computeSpawnTree,
+	treeTotals,
+	SPAWN_TREE_SCHEMA,
+	DEFAULT_MAX_DEPTH,
+	type SpawnTree,
+} from "../extensions/lib/wtft-spawn-tree.ts";
 import { execSync } from "node:child_process";
 import { loadConfig, readConfig } from "@princess-pi/libs/config";
 import {
@@ -179,6 +203,7 @@ export {
 	clearSubagentCacheMiss,
 	loadSubagentInteractions,
 	attributeClaudeSubAgentCosts,
+	collectSelfAttributedSessionIds,
 	parseInterval,
 	getBinInfo,
 	distributeHalfSlots,
@@ -213,6 +238,22 @@ export {
 	renderSessionJson,
 	detectSessionHarness,
 	WTFT_JSON_SCHEMA,
+	// #116 — the spawn ledger and the walk, driven through the bundle like
+	// everything else here.
+	runSpawnRecordCommand,
+	readSpawnLedger,
+	spawnLedgerPath,
+	serializeSpawnRecord,
+	appendSpawnRecord,
+	isSessionId,
+	SPAWN_RECORD_SCHEMA,
+	SPAWN_RECORD_EXIT,
+	MAX_RECORD_BYTES,
+	MAX_FIELD_BYTES,
+	computeSpawnTree,
+	treeTotals,
+	SPAWN_TREE_SCHEMA,
+	DEFAULT_MAX_DEPTH,
 	getHarnesses,
 	getHarness,
 	getDiscoveries,
@@ -329,6 +370,19 @@ const cfg = loadConfig("wtft", { interval: "1h", limit: 100, mode: "cumulative" 
 // is part of the file that prints it.
 const manifest = wtftManifest;
 const daemonDir = path.dirname(fileURLToPath(import.meta.url));
+
+// `wtft spawn-record` (#116) — a POSITIONAL subcommand. The dispatch below
+// skips `main()` entirely, which is the report path's own work — loading a
+// session, starting a daemon, reading a transcript — none of which a launcher
+// calling `spawn-record` needs. It does NOT avoid everything upstream:
+// `loadConfig` and `parseWtftCliArgs` both run at MODULE SCOPE above, before
+// this guard is even reached, so `spawn-record` still pays for a config load
+// and an argument parse it has no use for. It is dispatched at the
+// entry-point guard at the bottom of this file INSTEAD OF `main()`, because
+// `parseWtftCliArgs` ignores arguments it does not recognise (#91) — so
+// letting `spawn-record` fall through would quietly run a full report instead
+// of recording an edge.
+const isSpawnRecord = process.argv[2] === "spawn-record";
 
 // Parse all CLI args through the shared parser (#94)
 const opts = parseWtftCliArgs(process.argv.slice(2));
@@ -662,6 +716,38 @@ async function main() {
 		({ interactions, provisional } = readTagFileWithVerdict(tagPath));
 	}
 
+	// The recorded lineage (#116), memoised. The walk parses every descendant's
+	// session file, and THREE call sites reach it — `emitSessionJson`, the
+	// `--tokens` renderer, and `finishEmptyReport`'s `--tokens` arm — on paths
+	// that are mutually exclusive within one run, so the memo is insurance
+	// rather than a load-bearing invariant. Two earlier versions of this comment
+	// were wrong in turn: one claimed the memo kept two surfaces in agreement
+	// inside one run (nothing runs both), and one said "two call sites" in the
+	// same commit that added the third. This file's own rule is that a wrong
+	// call-site count is how a reader learns to distrust the comments.
+	//
+	// No try/catch here on purpose: `computeSpawnTree` owns the ledger read and
+	// reports a failure as `ledgerError`, so an unreadable ledger renders and
+	// serialises as "descendants unknown" rather than as an empty tree that
+	// reads like "nothing spawned".
+	let spawnTreeCache: SpawnTree | null = null;
+	const sessionSpawnTree = (): SpawnTree => {
+		if (spawnTreeCache) return spawnTreeCache;
+		// The session id IS the transcript's basename — the same derivation the
+		// harness discovery uses. A `-s <path>` pointing at a copy therefore has
+		// the copy's name, which is what makes the fixture in
+		// tests/wtft-116-spawn-ledger.test.ts able to drive this at all.
+		const sessionId = path.basename(finalSessionPath).replace(/\.jsonl$/i, "");
+		// The ids already inside SELF, so the walk cannot bill them twice. A
+		// spawner is free to record an edge for a child the parent's own turn
+		// already names — `cd /tmp/x && claude -p --session-id <uuid>` is both
+		// mechanisms at once — and without this the money lands in `total` and
+		// again in `spawned.total`.
+		return (spawnTreeCache = computeSpawnTree(sessionId, {
+			alreadyAttributed: collectSelfAttributedSessionIds(finalSessionPath, interactions),
+		}));
+	};
+
 	// ---
 	// THE #149 BLIND-SPOT SCAN, hoisted (#26)
 	// ---
@@ -860,6 +946,33 @@ async function main() {
 		// not a second scan. Skipped when `pending`, per the note above.
 		if (!opt.pending) scanSessionUncounted();
 		warnProvisionalOnce();
+		// The LINEAGE survives an empty own-total (PR review round 4,
+		// Medium/contract). `--json` reports `spawned` on both of these arms via
+		// `emitSessionJson`; the rendered arms returned before ever reaching
+		// `renderTokenSummary`, so a parent whose own tag had no classified data
+		// yet — the common case for a launcher that spawns and waits — printed
+		// nothing about children worth real money and exited 0. The two modes
+		// disagreed about the same state, and the spec promises the block still
+		// prints when the session has no model-tagged turns.
+		//
+		// `emptyTotals()` because this session's OWN total genuinely is zero here;
+		// the descendants' money is reported beside it, never folded into it.
+		// `sessionSpawnTree()` is memoised, so this is not a second ledger read,
+		// and it is read on the pending arm for the reason `emitSessionJson`
+		// gives: a session log that is not written yet says nothing about whether
+		// the ledger holds edges FOR it.
+		//
+		// GATED ON `--tokens`, because the POPULATED rendered path prints the block
+		// only inside `if (opts.tokens)` and the README names `wtft --tokens` as the
+		// surface that carries it. The first version of this fix wrote the block on
+		// every rendered empty arm, so a plain `wtft` printed the lineage while the
+		// session had no data and dropped it the moment data arrived — a fresh mode
+		// disagreement, introduced by the fix for a mode disagreement. Round-5
+		// review caught it; it is recorded rather than quietly corrected.
+		if (opts.tokens) {
+			const emptyArmTree = renderSpawnTree(emptyTotals(), sessionSpawnTree());
+			if (emptyArmTree) process.stdout.write(emptyArmTree);
+		}
 		// `exitCode` and return, never `process.exit()`: node's stdout is async on
 		// a pipe and `process.exit()` does not wait for pending writes.
 		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
@@ -929,6 +1042,13 @@ async function main() {
 			},
 			provisional,
 			uncounted,
+			// The ledger is read on the pending arm too. A session log that is
+			// not written yet says nothing about whether the ledger holds edges
+			// FOR it — and the alternative, handing the builder a hand-made
+			// empty tree, is what produced a `ledgerError: null` for a file
+			// nobody had opened: "read it, found nothing" claimed by a run that
+			// never looked. That is the exact failure this field exists to end.
+			spawned: sessionSpawnTree(),
 			// #137 — name the subagents from the `.meta.json` the harness already
 			// writes beside each transcript. `collectSubagentJson` returns
 			// `undefined` wherever the answer would be incomplete, and the key is
@@ -1152,7 +1272,7 @@ async function main() {
 	}
 
 	if (opts.tokens) {
-		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, scanSessionUncounted());
+		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, scanSessionUncounted(), sessionSpawnTree());
 		for (const line of tokenOutput.split("\n")) {
 			console.log(padStr + line);
 		}
@@ -1283,9 +1403,18 @@ if (process.argv[1]) {
 	const entry = fileURLToPath(import.meta.url);
 	const invoked = process.argv[1];
 	if (invoked === entry || invoked.endsWith("/wtft") || invoked.endsWith("/wtft.mjs")) {
-		main().catch(err => {
-			console.error(`❌ System Error: ${err.message}`);
-			process.exit(1);
-		});
+		if (isSpawnRecord) {
+			const result = runSpawnRecordCommand(process.argv.slice(3));
+			if (result.stdout) process.stdout.write(result.stdout);
+			if (result.stderr) process.stderr.write(result.stderr);
+			// `exitCode`, never `process.exit()` — stdout is async on a pipe,
+			// and `wtft spawn-record --json | jq` would lose the document.
+			process.exitCode = result.exitCode;
+		} else {
+			main().catch(err => {
+				console.error(`❌ System Error: ${err.message}`);
+				process.exit(1);
+			});
+		}
 	}
 }

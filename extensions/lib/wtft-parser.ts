@@ -1179,16 +1179,29 @@ const MAX_SUBAGENT_DEPTH = 5; // Claude Code hard limit
 
 /** What the harness writes beside every built-in (Task) subagent transcript.
  *
- *  Four fields are universal and are what makes a meta a meta; the rest are
- *  optional because the corpus says so, not because it felt safer. Measured
- *  2026-09-17 over 439 files on this host, zero unparseable:
- *  `agentType`/`description`/`toolUseId`/`spawnDepth` 439/439, `model` 419/439,
- *  `parentAgentId` 25/439 — on exactly the files with `spawnDepth > 1`. */
+ *  TWO fields are universal and are what makes a meta a meta; the rest are
+ *  optional because the corpus says so, not because it felt safer.
+ *
+ *  Re-measured 2026-09-17 with a RECURSIVE walk of `~/.claude/projects` — the
+ *  earlier census globbed two path segments then `subagents/`, which cannot
+ *  reach `subagents/workflows/wf_<id>/` — that is how four fields came to look
+ *  universal:
+ *    corpus 493 files, zero unparseable
+ *    `agentType`   493/493   <- universal
+ *    `spawnDepth`  493/493   <- universal
+ *    `description` 445/493   absent on Dynamic Workflow children
+ *    `toolUseId`   445/493   absent on the same 48
+ *    `model`       437/493
+ *    `parentAgentId` 25/493  — on exactly the files with `spawnDepth > 1`
+ *  The 48 that carry only `{agentType, spawnDepth}` are the whole reason the
+ *  required set is two and not four. */
 export interface SubagentMeta {
 	agentType: string;
-	description: string;
-	toolUseId: string;
 	spawnDepth: number;
+	/** Absent on workflow children — see the census above. */
+	description?: string;
+	/** Absent on workflow children — see the census above. */
+	toolUseId?: string;
 	model?: string;
 	parentAgentId?: string;
 	isFork?: boolean;
@@ -1217,9 +1230,18 @@ export interface SubagentMeta {
  *  files on this host, so a caller gets `undefined` there and must have an arm
  *  for it — a null is a gap, not a zero.
  *
- *  `tests/wtft-137-subagent-meta.test.ts` M7 pins the four required names
- *  verbatim, so a harness rename fails that suite loudly instead of quietly
- *  emptying every label in the report. */
+ *  `tests/wtft-137-subagent-meta.test.ts` pins the names in TWO halves, because
+ *  one test cannot do both jobs. M7a pins the READER's expected names against
+ *  our own fixture — it catches a wtft-side edit and says nothing about the
+ *  harness. M7b pins the HARNESS's names against the NEWEST real `.meta.json`
+ *  on this host, and is the only half that can see a rename; it is host-gated
+ *  and SKIPS VISIBLY where there is no `~/.claude`, so CI does not check it.
+ *
+ *  An earlier docstring here claimed a single M7 made a harness rename "fail
+ *  that suite loudly". It could not: it wrote its own fixture using the current
+ *  names, so a rename changed both sides together. The test file retracted that
+ *  in review round 2 and this sentence was left pointing at the retracted
+ *  claim — which is the same drift, one artifact over. */
 export function readSubagentMeta(transcriptPath: string): SubagentMeta | null {
 	if (!transcriptPath.endsWith(".jsonl")) return null;
 	const metaPath = transcriptPath.slice(0, -".jsonl".length) + ".meta.json";
@@ -1227,7 +1249,13 @@ export function readSubagentMeta(transcriptPath: string): SubagentMeta | null {
 	try {
 		raw = fs.readFileSync(metaPath, "utf8");
 	} catch {
-		return null;   // absent is the ordinary case: Pi and shell children have none
+		// Absent is the ORDINARY case — Pi and shell children have none — but this
+		// catch also swallows EACCES, EIO and EISDIR, and the caller cannot tell
+		// them apart. `null` is documented to consumers as "this harness wrote no
+		// record", so an unreadable file currently reports a confident absence.
+		// Narrowing it needs a new `notices[]` code, which is additive under
+		// `wtft/session@1`; filed rather than smuggled into this branch.
+		return null;
 	}
 	let obj: unknown;
 	try {
@@ -1238,19 +1266,31 @@ export function readSubagentMeta(transcriptPath: string): SubagentMeta | null {
 	if (obj === null || typeof obj !== "object" || Array.isArray(obj)) return null;
 	const o = obj as Record<string, unknown>;
 
-	// The four required fields, checked for TYPE and not merely for presence —
+	// TWO required fields, checked for TYPE and not merely for presence —
 	// `spawnDepth: "1"` is a harness change, not a depth.
+	//
+	// It was FOUR until the local audit round. The census that justified four
+	// globbed two path segments then `subagents/`, which cannot reach
+	// `subagents/workflows/wf_<id>/` — so it never saw the Dynamic Workflow
+	// children, which carry only `{agentType, spawnDepth}`. The spec even
+	// flagged the files the glob missed and then derived the rule from the rest.
+	// Those missed files are EXACTLY the ones the rule rejected.
+	//
+	// The cost was not a stricter reader. It was a WRONG ANSWER: every failure
+	// here returns `null`, and `null` is defined for consumers as "this harness
+	// wrote no record". Measured on one real session, 30 of 33 children reported
+	// no metadata with the file sitting on disk, readable, carrying two usable
+	// fields. Requiring what the corpus actually makes universal keeps the
+	// label where there is one and stops inventing absences where there are not.
 	if (typeof o.agentType !== "string") return null;
-	if (typeof o.description !== "string") return null;
-	if (typeof o.toolUseId !== "string") return null;
 	if (typeof o.spawnDepth !== "number" || !Number.isFinite(o.spawnDepth)) return null;
 
 	const meta: SubagentMeta = {
 		agentType: o.agentType,
-		description: o.description,
-		toolUseId: o.toolUseId,
 		spawnDepth: o.spawnDepth,
 	};
+	if (typeof o.description === "string") meta.description = o.description;
+	if (typeof o.toolUseId === "string") meta.toolUseId = o.toolUseId;
 	if (typeof o.model === "string") meta.model = o.model;
 	if (typeof o.parentAgentId === "string") meta.parentAgentId = o.parentAgentId;
 	if (typeof o.isFork === "boolean") meta.isFork = o.isFork;

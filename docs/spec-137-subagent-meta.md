@@ -106,7 +106,11 @@ universal fields are required for a meta to be considered valid; anything else m
 | M4 | unparseable JSON → `null`, no throw |
 | M5 | a meta missing a REQUIRED field (`toolUseId`) → `null`; a partial record is not a record |
 | M6 | wrong types (`spawnDepth: "1"`) → `null` |
-| M7 | **the field-name pin.** The four universal names are asserted verbatim, so a harness rename fails this suite loudly instead of silently emptying every label |
+| M7a | **the READER's names**, against our own fixture. Catches a wtft-side edit that drops or renames a required field. Says NOTHING about the harness — an earlier version claimed it did, and could not, because it wrote its own fixture using the current names |
+| M7b | **the HARNESS's names**, against the NEWEST real `.meta.json` on this host (picked by mtime over a recursive walk — an arbitrary pick kept selecting a two-day-old file while the corpus ran to today, so a rename shipped now would leave 400+ stale files keeping it green). Host-gated: it SKIPS VISIBLY where there is no `~/.claude`, so CI does not check it |
+| M5c | the `{agentType, spawnDepth}` shape — the Dynamic Workflow children, 48 of 493 files on this host, which the four-field guard declined whole |
+| R1b | the key is OMITTED, never `[]`, when discovery failed |
+| R1c | and it IS `[]` — present and empty — when discovery ran and found none. The two directions are separate tests because weakening either guard left the whole suite green |
 | M8 | `parentAgentId` is carried through the reader when present, and is `undefined` when the harness omits it |
 | R1 | **the Closer, `--json` half.** `wtft --json` on a session with a Task subagent reports that child's `description`, `model` and `toolUseId`; a subagent with NO meta is still listed, with its transcript and `meta: null` |
 
@@ -139,8 +143,11 @@ exactly the failure the Closer format exists to prevent.
 ]
 ```
 
-**The key is ABSENT, not `[]`, when discovery did not run** — the `pending` arm, where the
-session file does not yet exist. This is the same rule `uncounted` follows and for the same
+**The key is ABSENT, not `[]`, whenever the answer would be INCOMPLETE** — three cases, not one:
+the session file does not exist (the `pending` arm), the subagents directory could not be read, or
+discovery reported a per-file failure. Round 2 fixed the code for all three and this sentence was
+left describing only the first, so the two specs in this branch contradicted each other; `spec-26-json.md`
+has always had it right. This is the same rule `uncounted` follows and for the same
 reason: an empty array from a caller that never looked is indistinguishable from a session that
 spawned nothing, and a consumer reading `subagents.length === 0` would conclude the latter.
 
@@ -156,3 +163,78 @@ cwd convention. Naming that here so the next reader does not mistake a partial w
 one.
 
 — 👑π🐱 Princess Pi
+
+## The local audit round — three fresh-context auditors, 26 findings
+
+Run instead of a third billed review, because on the sibling #130 branch a local round out-found
+three billed ones. It did so again here. The blocking findings, and what they have in common.
+
+### The required set was FOUR and the corpus says TWO
+
+`readSubagentMeta` demanded `agentType`, `description`, `toolUseId` and `spawnDepth`. The census
+that justified "four universal fields" globbed two path segments then `subagents/`, which cannot
+reach `subagents/workflows/wf_<id>/` — the Dynamic Workflow children. **This spec flagged the files
+the glob missed and then derived the rule from the rest anyway.** Those missed files are exactly
+the ones the rule rejected.
+
+Re-measured with a recursive walk, and independently reproduced before adopting:
+
+| field | present | note |
+|---|---|---|
+| `agentType` | 493/493 | universal |
+| `spawnDepth` | 493/493 | universal |
+| `description` | 445/493 | absent on the 48 workflow children |
+| `toolUseId` | 445/493 | absent on the same 48 |
+| `model` | 437/493 | |
+| `parentAgentId` | 25/493 | on exactly the files with `spawnDepth > 1` |
+
+Corpus 493, zero unparseable. The earlier numbers (439/439, `model` 419/439) were the narrowed
+glob's.
+
+**The cost was not a stricter reader — it was a WRONG ANSWER.** Every failure returns `null`, and
+`null` is defined for consumers as "this harness wrote no record". On one real session **30 of 33
+children reported no metadata** while the file sat on disk, readable, carrying two usable fields.
+`M5b` and `M5c` pin both directions; RED-verified, 8 assertions fail against the four-field gate.
+
+### Four tests that could not fail
+
+Found by mutation — each edit applied, built, and run — not by reading.
+
+- **`M4` and `M6` were asserting the ABSENT case while claiming the MALFORMED one.** Making the
+  fixture helper's string-payload branch write no file left both green with no malformed file
+  anywhere on disk. Every negative here expects `null`, which is also the answer when no meta
+  exists, so a helper that silently stopped writing left them testing nothing. `fixtureWrote` now
+  asserts the bytes landed before any `null` is trusted.
+- **`R1`, labelled THE CLOSER, never reached the report path.** It ran the `no-data` arm:
+  `total.costUsd` 0, `models` `[]`, one `no-data` notice. So this spec's "the transcript is listed
+  and counted either way" was exercised by nothing. Worse, that arm exits **1**, not 9, so
+  `runWtftCli` rethrows and an uncaught throw loses every assertion in the file with no tally line
+  — observed three times, not reproducible on demand. The tag is now pre-populated and the
+  precondition asserted.
+- **The `[]` = "looked, found none" contract was pinned at NEITHER layer.** Weakening either guard
+  to omit the key on an empty list left this suite green AND thirteen json/subagent suites green.
+  `R1b` pinned only the ABSENT half — the direction round 2 fixed. `R1c` pins the other, and fails
+  on the exact mutation that used to pass.
+- **`M7b` sampled an arbitrary real `.meta.json`, not the newest.** It took `readdir` order from
+  the first session that had any, selecting a file two days old from a corpus running to that
+  morning. A rename shipped today leaves 400+ old files that keep it green while every label goes
+  blank — the same defect `M7a` was split off for, one level up. It now picks by mtime over a
+  recursive walk, and the assertion label carries the file's timestamp so a PASS says how fresh its
+  evidence was.
+
+### What the four have in common
+
+Each was a measurement taken over a narrowed population and then treated as universal: a glob that
+could not reach a directory, a fixture whose payload was never checked, a closer that never left
+the `no-data` arm, a sample that was never the newest. **The suite was green throughout.** Green
+was not evidence; the mutation was.
+
+### Filed, not fixed here
+
+#143 (the suite certifies the bundle — repo-wide: 45 of 45 suites import `bin/wtft.mjs`, 0 import
+the source), #144 (`/tmp` sandbox leak), #145 (`EXT_WTFT.html`'s on-disk table), #146 (an
+unreadable `.meta.json` reads as an absent one), #147 (discovery reads the whole parent transcript
+to look at line 1 — 885.6 MB per run on a 212 MB session), #148 (depth truncation and symlink
+loops), #149 (#137's own invariants are deletable with the suite green), #150 (no glossary entry
+for "subagent meta", while `_meta` already means something else).
+

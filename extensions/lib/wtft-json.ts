@@ -61,8 +61,10 @@ export interface WtftSessionJson {
 	notices: WtftNotice[];
 }
 
-/** One built-in (Task) subagent, named from the `.meta.json` the harness writes
- *  beside its transcript (#137).
+/** One subagent transcript this session spawned — a Claude Code Task child OR a
+ *  Pi `parentSession` sibling — named from the `.meta.json` where the harness
+ *  wrote one. Pi siblings never have one, so they are rows with `meta: null`
+ *  (#137).
  *
  *  `meta` is null wherever there is no readable meta — a Pi child, a
  *  shell-spawned child, a harness release that stopped writing the file. That
@@ -74,7 +76,9 @@ export interface WtftSubagentJson {
 	/** Always present: the transcript, which is what the cost comes from. */
 	transcript: string;
 	/** The harness's record, or null. `model` inside it is itself optional —
-	 *  419 of 439 files on this host carry one. */
+	 *  437 of 493 files on this host carry one. Only `agentType` and
+	 *  `spawnDepth` are universal (493/493); `description` and `toolUseId` are
+	 *  absent on the 48 Dynamic Workflow children. */
 	meta: SubagentMeta | null;
 }
 

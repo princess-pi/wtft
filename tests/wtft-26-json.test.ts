@@ -4,13 +4,8 @@
  * @description #26 — `wtft --json`, the machine-readable session summary.
  *   Spec: docs/spec-26-json.md.
  *
- *   The issue's Closer, at the CLI:
- *     `node bin/wtft.mjs -s <fixture> --json | jq -e '.schema == "wtft/session@2"
- *      and (.total.outputTokens|type) == "number"'` exits 0, "and the value equals
- *     what the rendered table shows once un-abbreviated. A test asserts the two
- *     agree on a fixture, so the prose and the JSON cannot drift."
- *
- *   So this suite runs the SAME fixture twice — once with `--tokens`, once with
+ *   #26's Closer: a `--json` value equals what the rendered table shows for it,
+ *   once un-abbreviated. So this suite runs the SAME fixture twice — once with `--tokens`, once with
  *   `--json` — and holds the two outputs to each other. That is the whole point:
  *   a second aggregation written for the JSON path would pass a schema check and
  *   fail this one.

@@ -1226,9 +1226,15 @@ export interface SubagentMeta {
  *  report row labelled from a partial record is worse than one labelled from a
  *  hash: it looks authoritative.
  *
- *  The optional fields are genuinely optional. `model` is absent from 20 of 439
- *  files on this host, so a caller gets `undefined` there and must have an arm
- *  for it — a null is a gap, not a zero.
+ *  The optional fields are genuinely optional. `model` is absent from **56 of
+ *  493** files on this host — 11.4%, on the RECURSIVE census the interface
+ *  above uses. So a caller gets `undefined` there and must have an arm for it:
+ *  a null is a gap, not a zero.
+ *
+ *  This line read "20 of 439" (4.6%) until review round 2. That was the narrow
+ *  glob's corpus, which the interface docstring a few lines up already said was
+ *  superseded — two numbers for one fact in one file, and the smaller one made
+ *  the field look far more reliable than it is.
  *
  *  `tests/wtft-137-subagent-meta.test.ts` pins the names in TWO halves, because
  *  one test cannot do both jobs. M7a pins the READER's expected names against

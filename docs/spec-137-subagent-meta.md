@@ -126,13 +126,21 @@ or `toolUseId`; the audit round below is where that was caught and corrected.
 ## The Closer's other half depends on #116, and the issue said it depended on nothing
 
 The issue's Closer also asks that "the rendered block shows the description in place of the
-`agent-<hash>` basename". **There is no per-subagent rendered block on `main`.** That is #116's
-`SPAWNED` block, which lives on an unmerged branch, so there is nothing here to relabel.
+`agent-<hash>` basename". That block is #116's `SPAWNED` block.
 
-So `--json` is the half that can ship independently, and it does. The render half is a two-line
-change to `renderSpawnTree` once #116 merges, and it belongs in that branch's worktree rather
-than in a merge conflict waiting to happen here. Recorded rather than quietly dropped: an issue
-that says "depends on nothing" and half-does is how a Closer stops meaning anything.
+**#116 has since merged** — `dd67217`, PR #136 — and this branch merged `origin/main` in at
+`27a9ecd`. So `renderSpawnTree` and its `SPAWNED` block are present on this branch, and the
+render half is no longer blocked by anything. An earlier draft of this section said that block
+"lives on an unmerged branch": true when written, false by the time the branch was reviewed,
+and still standing until review round 2 caught it. It was the load-bearing justification for
+the split, so it is corrected here rather than quietly reworded.
+
+**The split survives the correction, for a different reason than the one it was given.** The
+render half is a small change to `renderSpawnTree`. Pulling it in now re-opens a diff that has
+already spent its review rounds on the `--json` contract, and it would land the relabel with no
+round left to review it. So `--json` is what ships here, and the relabel is what **#137** stays
+open for. Recorded rather than quietly dropped: an issue that says "depends on nothing" and
+half-does is how a Closer stops meaning anything.
 
 **So #137 does not close on this branch, and the split is explicit.** Two review rounds both
 raised it, and both were right: a Closer with three acceptance criteria is not met by a diff

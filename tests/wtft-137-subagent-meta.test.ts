@@ -123,7 +123,9 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 	assert("M1 model", m?.model === "sonnet", JSON.stringify(m));
 }
 
-// M2 — `model` absent. 20 of 439 files on this host have none: 4.6%, which is
+// M2 — `model` absent. 20 of 439 files on the NARROW-GLOB corpus have none: 4.6%.
+// (The recursive census puts it at 56/493, 11.4% — same fact, wider population.)
+// Either way it is
 // uncommon but routine — frequent enough that any caller will meet it, and the
 // issue's Closer asked for `model` as though it were always there. The meta is
 // still valid; `model` is undefined and the caller needs an arm for it. A null

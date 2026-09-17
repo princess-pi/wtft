@@ -29,13 +29,10 @@ import type { Interaction } from "./wtft-shared.js";
 import type { UncountedBillables, SubagentMeta } from "./wtft-parser.ts";
 import type { TagProvisional } from "./wtft-daemon-lib.js";
 
-/** Bumped when any key below changes shape. Prose changes never bump it.
+/** Bumped when a top-level key is ADDED or changes shape. Prose never bumps it.
  *
- *  `@2` (#116) added `spawned` and `tree`, and pinned what `total` has always
- *  meant: THIS SESSION'S OWN TURNS. Not one dollar moved into or out of it —
- *  the launcher-spawned descendants arrive as a new, named quantity beside it,
- *  because a number a reader has never seen before must arrive labelled rather
- *  than folded into one they already trust. */
+ *  A consumer pins this string to know which keys it may rely on; the per-key
+ *  contract is docs/spec-26-json.md. */
 export const WTFT_JSON_SCHEMA = "wtft/session@3";
 
 /**
@@ -88,10 +85,8 @@ export interface WtftSessionJson {
 	 *  in no `unattributed` entry, and the count is the only trace of it. The
 	 *  fourth condition was missing from every surface until round 5. */
 	tree: TokenTotals;
-	/** #137. ABSENT rather than empty when discovery did not run, so `[]` always
-	 *  means "looked, found none". Sits here because the wire order groups the
-	 *  lineage: `spawned` is the ledger, `tree` its total, `subagents` the
-	 *  per-child detail. */
+	/** #137. ABSENT rather than empty whenever discovery could not give a
+	 *  complete answer, so `[]` always means "looked, found none". */
 	subagents?: WtftSubagentJson[];
 	compaction: { events: number; tokensFreed: number };
 	untaggedInteractions: number;
@@ -103,19 +98,14 @@ export interface WtftSessionJson {
  *  wrote one. Pi siblings never have one, so they are rows with `meta: null`
  *  (#137).
  *
- *  `meta` is null wherever there is no readable meta — a Pi child, a
- *  shell-spawned child, a harness release that stopped writing the file. That
- *  null is a GAP, not an absence of cost: the transcript is still counted, it
- *  simply has no label. A consumer that treats null as "no subagent" is reading
- *  it wrong, which is why the transcript path is always present and the meta is
- *  the optional half. */
+ *  `meta` is null wherever there is no readable meta. That null is a missing
+ *  LABEL, not a missing subagent — the row is still a real subagent. It says
+ *  nothing either way about whether the cost is in `total`. */
 export interface WtftSubagentJson {
 	/** Always present: the transcript, which is what the cost comes from. */
 	transcript: string;
-	/** The harness's record, or null. `model` inside it is itself optional —
-	 *  437 of 493 files on this host carry one. Only `agentType` and
-	 *  `spawnDepth` are universal (493/493); `description` and `toolUseId` are
-	 *  absent on the 48 Dynamic Workflow children. */
+	/** The harness's record, or null. Only `agentType` and `spawnDepth` are
+	 *  universal; see `SubagentMeta`. */
 	meta: SubagentMeta | null;
 }
 
@@ -136,9 +126,9 @@ export interface BuildSessionJsonInput {
 	 *  caller with nothing to report passes an empty `computeSpawnTree` result
 	 *  and means it. */
 	spawned: SpawnTree;
-	/** #137. Omitted (not `[]`) by a caller that did not look, for the same
-	 *  reason `uncounted` is not defaulted: an empty array from a caller that
-	 *  never ran discovery is indistinguishable from a session with no
+	/** #137. Omitted (not `[]`) whenever discovery could not give a complete
+	 *  answer, for the same reason `uncounted` is not defaulted: `[]` from a
+	 *  caller that did not look is indistinguishable from a session with no
 	 *  subagents. `buildSessionJson` emits the key only when it is given one. */
 	subagents?: WtftSubagentJson[];
 	notices?: WtftNotice[];

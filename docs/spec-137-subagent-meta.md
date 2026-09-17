@@ -160,19 +160,11 @@ exactly the failure the Closer format exists to prevent.
 ]
 ```
 
-**The key is ABSENT, not `[]`, whenever the answer would be INCOMPLETE** — four cases, not one:
-the session file does not exist (the `pending` arm); the Claude Code `<session>/subagents/`
-directory could not be read; the **sibling session directory** could not be listed, dropping every
-Pi-pattern sibling under it; or discovery reported a per-file failure. Round 2 fixed the code for
-all of them and this sentence was left describing only the first, so the two specs in this branch
-contradicted each other.
+**The key is ABSENT, not `[]`, whenever the answer would be INCOMPLETE** — for any reason.
 
-The count read THREE until the Macroscope round on PR #152, which checked the list against the
-code and found the sibling-directory throw missing from every place that enumerates this — both
-specs and the comment above `collectSubagentJson`. The behaviour was correct throughout: that
-throw reaches `discoverOnce`, is cached as `{ files: [], unreadable }`, and omits the key like
-the rest. Only the contract was under-described, in three copies at once, which is what an
-enumeration duplicated by hand does. This is the same rule `uncounted` follows and for the same
+A consumer never needs to know which reason. Absent means the answer cannot be trusted as
+complete; `[]` means discovery ran and found none. Test both directions separately — weakening
+either guard leaves the other green. This is the same rule `uncounted` follows and for the same
 reason: an empty array from a caller that never looked is indistinguishable from a session that
 spawned nothing, and a consumer reading `subagents.length === 0` would conclude the latter.
 

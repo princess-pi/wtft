@@ -100,10 +100,9 @@ function fixtureWrote(label: string, transcript: string): void {
 
 console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 
-// M1 — the richest shape the harness writes: the two universal fields
-// (`agentType`, `spawnDepth`) plus `description`, `toolUseId` and `model`.
-// "Four universal fields" was the first cut's gate and is retired — M5c pins
-// the 48 workflow children that carry only the two.
+// M1 — a full meta: the two universal fields plus `description`, `toolUseId`
+// and `model`. M5c pins the other end, a workflow child with neither
+// `description` nor `toolUseId`.
 {
 	const t = subagent("a641e532bfaae9903", {
 		agentType: "general-purpose",
@@ -123,9 +122,7 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 	assert("M1 model", m?.model === "sonnet", JSON.stringify(m));
 }
 
-// M2 — `model` absent. 20 of 439 files on the NARROW-GLOB corpus have none: 4.6%.
-// (The recursive census puts it at 56/493, 11.4% — same fact, wider population.)
-// Either way it is
+// M2 — `model` absent, which is a real and recurring shape on this host. It is
 // uncommon but routine — frequent enough that any caller will meet it, and the
 // issue's Closer asked for `model` as though it were always there. The meta is
 // still valid; `model` is undefined and the caller needs an arm for it. A null
@@ -207,7 +204,7 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 	const t = subagent("workflow-child", { agentType: "workflow-subagent", spawnDepth: 1 });
 	fixtureWrote("M5c", t);
 	const m = readSubagentMeta(t);
-	assert("M5c `{agentType, spawnDepth}` — the Dynamic Workflow shape — parses",
+	assert("M5c a meta with neither `description` nor `toolUseId` — the Dynamic Workflow shape — parses",
 		m !== null, JSON.stringify(m));
 	assert("M5c and keeps both fields it does have",
 		m?.agentType === "workflow-subagent" && m?.spawnDepth === 1);
@@ -407,12 +404,9 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 // unread for the whole life of the project: it was on disk, it parsed, and no
 // code path asked for it.
 //
-// SCOPE, stated rather than discovered later. The issue's Closer also asks the
-// RENDERED block to show the description in place of `agent-<hash>`. There is no
-// per-subagent rendered block on `main` — that is #116's SPAWNED block, on a
-// branch that has not merged — so the issue's "depends on nothing" is true of
-// this half and not of that one. This suite closes the `--json` half; the render
-// half lands with #116 and is tracked there.
+// SCOPE. This suite covers the `--json` half only. The render half — showing
+// the description in place of `agent-<hash>` in #116's SPAWNED block — is #137,
+// still open; see docs/spec-137-subagent-meta.md for why the split stands.
 
 console.log("\n§ R — the Closer: `wtft --json` names its subagents\n");
 
@@ -426,9 +420,7 @@ console.log("\n§ R — the Closer: `wtft --json` names its subagents\n");
 
 	const turn = (id: string) => JSON.stringify({
 		type: "assistant",
-		// TOP LEVEL, beside `type` — where the harness writes it and where the
-		// parser reads it. Nested inside `message` it parses and silently yields
-		// no timestamp, which is the shape tests/wtft-116-spawn-ledger.test.ts got right.
+		// Top level, beside `type` — where real transcripts put it.
 		timestamp: new Date().toISOString(),
 		message: {
 			role: "assistant", id, model: "claude-sonnet-4-6",

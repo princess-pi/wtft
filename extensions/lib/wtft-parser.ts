@@ -1179,28 +1179,20 @@ const MAX_SUBAGENT_DEPTH = 5; // Claude Code hard limit
 
 /** What the harness writes beside every built-in (Task) subagent transcript.
  *
- *  TWO fields are universal and are what makes a meta a meta; the rest are
- *  optional because the corpus says so, not because it felt safer.
+ *  `agentType` and `spawnDepth` are universal and are what makes a meta a meta.
+ *  Everything else is optional because the corpus says so: the Dynamic Workflow
+ *  children under `subagents/workflows/` carry neither `description` nor
+ *  `toolUseId`, which is why the required set is two and not four.
  *
- *  Re-measured 2026-09-17 with a RECURSIVE walk of `~/.claude/projects` — the
- *  earlier census globbed two path segments then `subagents/`, which cannot
- *  reach `subagents/workflows/wf_<id>/` — that is how four fields came to look
- *  universal:
- *    corpus 493 files, zero unparseable
- *    `agentType`   493/493   <- universal
- *    `spawnDepth`  493/493   <- universal
- *    `description` 445/493   absent on Dynamic Workflow children
- *    `toolUseId`   445/493   absent on the same 48
- *    `model`       437/493
- *    `parentAgentId` 25/493  — on exactly the files with `spawnDepth > 1`
- *  The 48 that carry only `{agentType, spawnDepth}` are the whole reason the
- *  required set is two and not four. */
+ *  Counts are not repeated here — they move every time a session spawns a
+ *  subagent. `docs/spec-137-subagent-meta.md` carries one dated census; to
+ *  re-derive, walk `~/.claude/projects` recursively for `*.meta.json`. */
 export interface SubagentMeta {
 	agentType: string;
 	spawnDepth: number;
-	/** Absent on workflow children — see the census above. */
+	/** Absent on Dynamic Workflow children. */
 	description?: string;
-	/** Absent on workflow children — see the census above. */
+	/** Absent on Dynamic Workflow children. */
 	toolUseId?: string;
 	model?: string;
 	parentAgentId?: string;
@@ -1213,8 +1205,8 @@ export interface SubagentMeta {
  *  transcript names the other and there is nothing to re-derive afterwards".
  *  That is true of launcher-spawned children and has never been true of built-in
  *  subagents: the harness has been writing `toolUseId` — the exact `tool_use`
- *  block in the parent — to disk beside every one of them, and we inferred the
- *  link from directory position instead. `description` is the other half: it is
+ *  block in the parent — to disk beside most of them, and we inferred the link
+ *  from directory position instead. `description` is the other half: it is
  *  the words a human typed at dispatch, which is the difference between a cost
  *  report and a hex dump.
  *
@@ -1226,28 +1218,11 @@ export interface SubagentMeta {
  *  report row labelled from a partial record is worse than one labelled from a
  *  hash: it looks authoritative.
  *
- *  The optional fields are genuinely optional. `model` is absent from **56 of
- *  493** files on this host — 11.4%, on the RECURSIVE census the interface
- *  above uses. So a caller gets `undefined` there and must have an arm for it:
- *  a null is a gap, not a zero.
+ *  `model` is optional too, so a caller gets `undefined` there and must have an
+ *  arm for it: a null is a gap, not a zero.
  *
- *  This line read "20 of 439" (4.6%) until review round 2. That was the narrow
- *  glob's corpus, which the interface docstring a few lines up already said was
- *  superseded — two numbers for one fact in one file, and the smaller one made
- *  the field look far more reliable than it is.
- *
- *  `tests/wtft-137-subagent-meta.test.ts` pins the names in TWO halves, because
- *  one test cannot do both jobs. M7a pins the READER's expected names against
- *  our own fixture — it catches a wtft-side edit and says nothing about the
- *  harness. M7b pins the HARNESS's names against the NEWEST real `.meta.json`
- *  on this host, and is the only half that can see a rename; it is host-gated
- *  and SKIPS VISIBLY where there is no `~/.claude`, so CI does not check it.
- *
- *  An earlier docstring here claimed a single M7 made a harness rename "fail
- *  that suite loudly". It could not: it wrote its own fixture using the current
- *  names, so a rename changed both sides together. The test file retracted that
- *  in review round 2 and this sentence was left pointing at the retracted
- *  claim — which is the same drift, one artifact over. */
+ *  `tests/wtft-137-subagent-meta.test.ts` § M7 documents what the name-pinning
+ *  does and does not cover; it is not restated here. */
 export function readSubagentMeta(transcriptPath: string): SubagentMeta | null {
 	if (!transcriptPath.endsWith(".jsonl")) return null;
 	const metaPath = transcriptPath.slice(0, -".jsonl".length) + ".meta.json";

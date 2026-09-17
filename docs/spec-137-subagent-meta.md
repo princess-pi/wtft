@@ -113,7 +113,7 @@ or `toolUseId`; the audit round below is where that was caught and corrected.
 | M2 | **`model` absent** → meta still valid, `model` undefined — the 20/439 case |
 | M3 | no `.meta.json` at all → `null`, and the caller reports exactly what it reports today |
 | M4 | unparseable JSON → `null`, no throw |
-| M5 | a meta missing a REQUIRED field (`toolUseId`) → `null`; a partial record is not a record |
+| M5 | a meta missing a REQUIRED field — `agentType` or `spawnDepth`, the only two → `null`; a partial record is not a record. This row named `toolUseId` until review round 3, which is the four-field gate surviving in a third place after the seam and the prose were both corrected |
 | M6 | wrong types (`spawnDepth: "1"`) → `null` |
 | M7a | **the READER's names**, against our own fixture. Catches a wtft-side edit that drops or renames a required field. Says NOTHING about the harness — an earlier version claimed it did, and could not, because it wrote its own fixture using the current names |
 | M7b | **the HARNESS's names**, against the NEWEST real `.meta.json` on this host (picked by mtime over a recursive walk — an arbitrary pick kept selecting a two-day-old file while the corpus ran to today, so a rename shipped now would leave 400+ stale files keeping it green). Host-gated: it SKIPS VISIBLY where there is no `~/.claude`, so CI does not check it |

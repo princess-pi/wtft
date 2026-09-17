@@ -228,10 +228,15 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 
 	const t2 = subagent("array-meta-child", [1, 2, 3]);
 	fixtureWrote("M6 array", t2);
-	// Declined because an array has no `agentType`, NOT by the `Array.isArray`
-	// guard — which the audit showed is unreachable as a distinct cause. Saying
-	// so here stops the next reader believing this case pins that clause.
-	assert("M6 a JSON array is declined — by the field checks, the array guard being belt-and-braces",
+	// Declined BY the `Array.isArray` guard, which fires first: the shape check is
+	// one short-circuited OR — `obj === null || typeof obj !== "object" ||
+	// Array.isArray(obj)` — so an array returns before any field is looked at.
+	//
+	// This comment said the exact opposite until review round 3, claiming the
+	// guard was "unreachable as a distinct cause". Both paths yield `null`, so no
+	// test ever went red over it — it would simply have told whoever next tidied
+	// this file that a live guard was dead code.
+	assert("M6 a JSON array is declined by the Array.isArray guard, before any field check",
 		readSubagentMeta(t2) === null);
 
 	// The dead `const t3 = subagent("null-meta-child", null as never); void t3;`

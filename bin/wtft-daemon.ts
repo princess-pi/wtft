@@ -81,7 +81,13 @@ let lastSize = 0;            // bytes read from session.jsonl
 // `parseSessionFile` counts that record (it splits the whole file), so a daemon
 // that waited forever would drift from it, which is the divergence #156 exists
 // to prevent. One number, and it resets the moment a newline arrives.
-let pendingFragmentSize = 0;
+// The trailing PARTIAL line carried between polls, as BYTES rather than a length
+// (#142). Holding only the length meant the offset could not advance past it, so
+// every poll re-read the whole partial record from disk: measured at 33.5x the
+// record size for a 64 MiB line written over 64 polls (2,144 MiB read to deliver
+// 64 MiB). Carrying the bytes lets the offset advance every poll, so each byte is
+// read from disk exactly once.
+let pendingFragment: Buffer = Buffer.alloc(0);
 let lastWriteMs = 0;         // last time we flushed to the tag file
 let lastActivityMs = Date.now(); // last time we classified a new interaction
 let startupTime = Date.now();    // daemon start time (idle exit grace period)
@@ -1144,17 +1150,32 @@ function parseNewLines(filePath: string) {
       }
       lastSize = 0;
       // A fragment counted against the OLD file says nothing about the new one.
-      pendingFragmentSize = 0;
+      pendingFragment = Buffer.alloc(0);
     }
-    if (currentSize <= lastSize) return [];
-    const fd = fs.openSync(filePath, "r");
-    const buf = Buffer.alloc(currentSize - lastSize);
-    // try/finally: a throwing readSync must not leak the descriptor (#270 review).
-    try {
-      fs.readSync(fd, buf, 0, buf.length, lastSize);
-    } finally {
-      fs.closeSync(fd);
+    const grew = currentSize > lastSize;
+    // No new bytes AND nothing held over: there is nothing to decide. With a
+    // fragment in hand we must still fall through, because the "writer died"
+    // check below is what releases it — and it is reached on a QUIET poll now
+    // that the offset advances. The old code got that re-evaluation for free by
+    // re-reading the same bytes forever, which is the cost this removes.
+    if (!grew && pendingFragment.length === 0) return [];
+
+    let fresh = Buffer.alloc(0);
+    if (grew) {
+      const fd = fs.openSync(filePath, "r");
+      fresh = Buffer.alloc(currentSize - lastSize);
+      // try/finally: a throwing readSync must not leak the descriptor (#270 review).
+      try {
+        fs.readSync(fd, fresh, 0, fresh.length, lastSize);
+      } finally {
+        fs.closeSync(fd);
+      }
+      // Advance unconditionally: these bytes are now OURS, held in
+      // `pendingFragment` if they do not yet form a whole line. Nothing re-reads
+      // them from disk.
+      lastSize = currentSize;
     }
+    const buf = pendingFragment.length > 0 ? Buffer.concat([pendingFragment, fresh]) : fresh;
     // CONSUME ONLY WHOLE LINES (#130). `lastSize = currentSize` advanced past a
     // trailing partial line: the poll landed while the harness was mid-append,
     // the fragment failed JSON.parse, the loop's catch skipped it — and the
@@ -1175,17 +1196,21 @@ function parseNewLines(filePath: string) {
     // it, because parseSessionFile would, and a daemon that waited forever would
     // report a lower total than a rebuild of the same file (#156).
     let settledFragment = false;
-    if (fragment.length > 0 && fragment.length === pendingFragmentSize) {
+    // Compare the BYTES, not merely the length: a same-length replacement is a
+    // different record, and length-equality called it settled.
+    if (fragment.length > 0 && fragment.equals(pendingFragment)) {
       try { JSON.parse(fragment.toString("utf8")); settledFragment = true; } catch (_) { /* still mid-record */ }
     }
-    pendingFragmentSize = settledFragment ? 0 : fragment.length;
 
     // Nothing complete and nothing settled. Leave `lastSize` where it is and
     // re-read next poll; the buffer is one line, so waiting costs one small
     // re-read a beat.
-    if (lastNl === -1 && !settledFragment) return [];
+    if (lastNl === -1 && !settledFragment) {
+      pendingFragment = Buffer.from(buf);      // copy: `fresh` is reused
+      return [];
+    }
     const consumeTo = settledFragment ? buf.length : lastNl + 1;
-    lastSize += consumeTo;
+    pendingFragment = consumeTo >= buf.length ? Buffer.alloc(0) : Buffer.from(buf.subarray(consumeTo));
     const newContent = buf.subarray(0, consumeTo).toString("utf8");
     // Same shape as parseSessionFile's whole-file loop (#156), threading the
     // control entries — thinking level (#77), model_change (#128), compaction

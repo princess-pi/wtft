@@ -32,7 +32,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
-import { lastLineStartByte, seedClassifiedTagFile, getCurrentVersionTagPath, readClassifiedTagFile, parseSessionFile } from "../bin/wtft.mjs";
+import { lastLineStartByte, seedClassifiedTagFile, getCurrentVersionTagPath, readClassifiedTagFile, parseSessionFile, readPrefixSentinel, watcherAction, PREFIX_SENTINEL_BYTES } from "../bin/wtft.mjs";
 import { pollUntil, sleep } from "./lib/poll";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
@@ -946,11 +946,35 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	// branch either exists or it does not, and its absence is the whole bug.
 	{
 		const libSrc = fs.readFileSync(path.resolve(import.meta.dirname, "..", "extensions", "lib", "wtft-daemon-lib.ts"), "utf8");
-		assert("S4 the watcher has a shrink branch, not only a grow branch",
-			/stat\.size\s*<\s*lastReadOffset/.test(libSrc), "no `stat.size < lastReadOffset` in wtft-daemon-lib.ts");
+		// REWRITTEN (#142). This pair used to be two regexes over the library
+		// source, requiring `stat.size < lastReadOffset` to sit within 1600
+		// characters of `seedClassifiedTagFile(`. Both were pinned to the SHAPE
+		// of the code rather than to what it does, and the first one passed by
+		// matching a COMMENT — the docstring above `seedClassifiedTagFile`
+		// quotes the branch by name. The #142 fix moved the comparison into
+		// `watcherAction`, the regex stopped matching, and the test failed
+		// against code that was strictly more correct.
+		//
+		// The stated excuse was that driving it "would mean standing up the
+		// interactive watch TUI and racing a daemon restart". That is no longer
+		// true: `watcherAction` is pure, so the decision can be asserted
+		// directly. G1 is the full table; these two keep S4's own claim.
+		assert("S4 the watcher re-seeds when the file shrinks below the offset",
+			watcherAction(10, 50, true) === "reseed");
+		// Its own fixture: a file that has SHRUNK under a reader whose offset is
+		// now past EOF. The re-seed must land the offset at the new EOF — the
+		// "guessing" S4 is named for was leaving it where it was.
+		const shrinkDir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-130-S4-")));
+		const shrinkFile = path.join(shrinkDir, "s.wtft-tag.v3.jsonl");
+		fs.writeFileSync(shrinkFile, JSON.stringify({ id: "a" }) + "\n" + JSON.stringify({ id: "b" }) + "\n");
+		const staleOffset = fs.statSync(shrinkFile).size;
+		fs.writeFileSync(shrinkFile, JSON.stringify({ id: "a" }) + "\n");       // shrank
+		const shrunkSize = fs.statSync(shrinkFile).size;
+		assert("S4 fixture precondition: the file is now SHORTER than the reader's offset",
+			shrunkSize < staleOffset, `size=${shrunkSize} offset=${staleOffset}`);
+		const reseed = seedClassifiedTagFile(shrinkFile);
 		assert("S4 and it re-seeds from the file rather than guessing an offset",
-			/stat\.size\s*<\s*lastReadOffset[\s\S]{0,1600}?seedClassifiedTagFile\(/.test(libSrc),
-			"the shrink branch does not reach seedClassifiedTagFile");
+			reseed.read === true && reseed.offset === shrunkSize, `read=${reseed.read} offset=${reseed.offset} size=${shrunkSize}`);
 	}
 
 	const upsertBody = /function upsertHeartbeat\([\s\S]*?\n}/.exec(daemonSrc)?.[0] ?? "";
@@ -962,6 +986,141 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 		/fs\.writeSync\(\s*fd\s*,/.test(upsertBody) && /lastLineStartByte\(/.test(upsertBody),
 		upsertBody);
 }
+
+// --- G: a rebuild that lands AT OR ABOVE the stale offset (#142) ---
+//
+// Macroscope, PR #142, Medium — and it is a gap in the shrink branch THIS
+// BRANCH added. That branch fires only on `stat.size < lastReadOffset`. A
+// daemon that truncates and rebuilds before the `fs.watch` callback runs (one
+// coalesced event — the normal case, not a race you have to engineer) leaves
+// the final size at or ABOVE the stale offset, so the check never fires.
+//
+// Reproduced before fixing: a 3-record file rebuilt to 5 records left the
+// reader holding `orig-1..3` — records from a file that no longer exists —
+// reading from the stale offset into the MIDDLE of a line, dropping the
+// fragment, and silently losing `rebuilt-1..3`. Wrong in both directions at
+// once. `stat.ino` cannot see it either: truncate-and-rewrite keeps the inode.
+{
+	const gdir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-130-G-")));
+	const gtag = path.join(gdir, "s.wtft-tag.v3.jsonl");
+	const line = (id: string) => JSON.stringify({ id }) + "\n";
+
+	// -- G1: the decision table, pure --
+	assert("G1 a file shorter than the offset reseeds", watcherAction(10, 50, true) === "reseed");
+	assert("G1a a LARGER file whose consumed prefix changed reseeds too — the case the shrink check could not see",
+		watcherAction(140, 75, false) === "reseed");
+	assert("G1b a larger file with an intact prefix is an ordinary read", watcherAction(140, 75, true) === "read");
+	assert("G1c an unreadable prefix is IDLE, never a reseed — `null` is 'could not tell', not 'changed'",
+		watcherAction(140, 75, null) === "idle");
+	assert("G1d a file that did not grow is idle", watcherAction(75, 75, true) === "idle");
+	// A shrink outranks an unreadable sentinel: the bytes are provably gone.
+	assert("G1e a shrink reseeds even when the sentinel could not be read", watcherAction(10, 50, null) === "reseed");
+
+	// -- G2: the sentinel reads the bytes it claims to --
+	fs.writeFileSync(gtag, line("orig-1") + line("orig-2") + line("orig-3"));
+	const off = fs.statSync(gtag).size;
+	const sentinel = readPrefixSentinel(gtag, off);
+	assert("G2 the sentinel is non-null on a readable file", sentinel !== null);
+	const whole = fs.readFileSync(gtag);
+	assert("G2a it is exactly the bytes immediately before the offset",
+		sentinel !== null && sentinel.equals(whole.subarray(Math.max(0, off - PREFIX_SENTINEL_BYTES), off)));
+	assert("G2b an offset of 0 has no prefix, so the sentinel is empty and cannot mismatch",
+		readPrefixSentinel(gtag, 0)?.length === 0);
+	assert("G2c a file that cannot be opened is `null`, not an empty match",
+		readPrefixSentinel(path.join(gdir, "does-not-exist.jsonl"), 10) === null);
+
+	// -- G3: the end-to-end property, on the exact shape that was silently lossy --
+	const rebuilt = ["rebuilt-1", "rebuilt-2", "rebuilt-3", "rebuilt-4", "rebuilt-5"].map(line).join("");
+	fs.writeFileSync(gtag, rebuilt);                     // truncate + rewrite, one shot
+	const sizeNow = fs.statSync(gtag).size;
+
+	// The precondition IS the bug: assert the shrink check would NOT have fired,
+	// or this test silently stops exercising the case it was written for.
+	assert("G3 fixture precondition: the rebuilt file is LARGER than the stale offset, so the shrink check cannot fire",
+		sizeNow >= off, `size=${sizeNow} offset=${off}`);
+
+	const after = readPrefixSentinel(gtag, off);
+	const matches = after !== null && sentinel !== null ? after.equals(sentinel) : null;
+	assert("G3a the sentinel notices the prefix changed under it", matches === false);
+	assert("G3b so the watcher reseeds instead of reading from a stale offset",
+		watcherAction(sizeNow, off, matches) === "reseed");
+
+	// And the reseed recovers every rebuilt record, losing none and keeping no ghosts.
+	const reseeded = seedClassifiedTagFile(gtag);
+	assert("G3c the reseed reads the file", reseeded.read);
+	assert("G3d and lands the offset at EOF, so nothing is re-read or skipped",
+		reseeded.offset === sizeNow, `offset=${reseeded.offset} size=${sizeNow}`);
+
+	// -- G4: the seam is actually wired in, not merely exported --
+	const libSrc = fs.readFileSync(path.resolve(import.meta.dirname, "..", "extensions", "lib", "wtft-daemon-lib.ts"), "utf8");
+	assert("G4 the watcher calls watcherAction — an exported decision nothing invokes is not a fix",
+		/const action = watcherAction\(/.test(libSrc));
+	// NOT a count of `lastReadOffset = ` occurrences — the first draft of this
+	// assertion did exactly that and failed, because it was counting COMMENTS
+	// and docstrings alongside statements. Pin the one thing that makes the fix
+	// work instead: the callback recomputes the sentinel on EVERY event, so a
+	// rebuild between two events cannot slip through on a stale copy.
+	assert("G4a and recomputes the sentinel on every event, not once at attach",
+		/const sentinelNow = readPrefixSentinel\(/.test(libSrc));
+}
+
+
+// --- A: a slowly-written record is read once, not once per poll (#142) ---
+//
+// Macroscope, PR #142, High. `lastSize` advanced only by WHOLE LINES, so a
+// record still missing its newline left the offset parked behind it and every
+// poll re-allocated and re-read the entire partial record from disk. Quadratic
+// in the record's size.
+//
+// MEASURED, replaying this function's exact offset arithmetic against a 64 MiB
+// record written in 1 MiB chunks, one chunk per poll:
+//   before — 2,144 MiB read to deliver 64 MiB, largest single alloc 64 MiB, 33.5x
+//   after  —    64 MiB read to deliver 64 MiB, largest single alloc  1 MiB,  1.0x
+//
+// The report also claimed it "throws at MAX_LENGTH". It cannot: `buffer.constants
+// .MAX_LENGTH` is 8,388,608 GiB on this node, so that needs an 8-PiB single line.
+// Fixed for the real reason — the quadratic re-read — and the thread says so.
+//
+// The SEMANTICS are guarded behaviourally by R3 (a complete record with no
+// trailing newline is still counted) and R4 (1,830 one-byte writes across four
+// poll intervals reach the same total). Those two are what would break if the
+// carry-forward were wrong. This block is SOURCE-LEVEL and says so: it pins the
+// offset discipline that makes the cost linear, which no observable at 667 ms
+// resolution distinguishes — the same reasoning S2 and S3 are written under.
+{
+	const src = fs.readFileSync(path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.ts"), "utf8");
+	const lines = src.split("\n");
+	const starts: number[] = [];
+	lines.forEach((l, i) => { if (/^(async )?function /.test(l)) starts.push(i + 1); });
+	const at = lines.findIndex(l => /^function parseNewLines\(/.test(l)) + 1;
+	assert("A0 parseNewLines is still in the daemon — the check has a subject", at > 0);
+	const end = starts.find(n => n > at) ?? lines.length + 1;
+	const body = lines.slice(at - 1, end - 1).join("\n");
+
+	// SELF-CHECK first, same discipline as S2: an extraction that silently
+	// returned the whole file would make every assertion below meaningless.
+	assert("A0a self-check: the extracted body is parseNewLines and not the whole file",
+		body.includes("function parseNewLines(") && body.length < src.length,
+		`body=${body.length} src=${src.length}`);
+	assert("A0b self-check: it does not swallow the next function",
+		(body.match(/^function /gm) ?? []).length === 1);
+
+	assert("A1 the offset advances to the file size on every read, so no byte is fetched twice",
+		/lastSize = currentSize;/.test(body));
+	assert("A2 and the whole-line-only advance that caused the re-read is gone",
+		!/lastSize \+=/.test(body), "`lastSize +=` is back — the offset is parked behind a partial record again");
+	assert("A3 the partial record is carried as BYTES between polls, not merely as a length",
+		/pendingFragment = Buffer\.from\(/.test(body));
+	assert("A4 a quiet poll still evaluates the held fragment, or a dead writer's last record is never released",
+		/!grew && pendingFragment\.length === 0/.test(body));
+	// The settled check must compare bytes: a same-length replacement is a
+	// DIFFERENT record, and the old length-equality test called it settled.
+	assert("A5 the writer-died check compares the fragment's bytes, not its length",
+		/fragment\.equals\(pendingFragment\)/.test(body));
+	assert("A6 a truncation clears the carried fragment — bytes from the old file say nothing about the new one",
+		/pendingFragment = Buffer\.alloc\(0\);/.test(src.slice(0, src.indexOf("const grew = currentSize > lastSize"))));
+}
+
 
 for (const c of children) { try { c.kill("SIGKILL"); } catch { /* already gone */ } }
 

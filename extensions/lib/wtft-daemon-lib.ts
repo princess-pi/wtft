@@ -519,6 +519,74 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
  *  buffer, so every byte before it has been read and every byte after it is
  *  still waiting. There is no window for a race to sit in, because there is no
  *  second look at the file. */
+/**
+ * The last `PREFIX_SENTINEL_BYTES` bytes of the prefix a reader has already
+ * consumed, used to answer one question: are the bytes I consumed STILL the
+ * bytes at that position?
+ *
+ * WHY (Macroscope, PR #142, Medium). `watchTagFile` re-seeded only when the file
+ * SHRANK below its offset. A daemon that truncates and rebuilds before the
+ * `fs.watch` callback runs — one coalesced event, which is the normal case —
+ * leaves the final size at or ABOVE the stale offset, so the shrink branch never
+ * fires. Measured on a 3-record file rebuilt to 5: the reader kept `orig-1..3`
+ * (records from a file that no longer exists), read from the stale offset into
+ * the MIDDLE of a line, dropped the fragment, and silently lost `rebuilt-1..3`.
+ * Both directions wrong at once — stale records retained, real records lost.
+ *
+ * A generation check cannot do this job: truncate-and-rewrite keeps the same
+ * inode, so `stat.ino` is unchanged. The content at the boundary is the only
+ * thing that actually distinguishes the two files.
+ *
+ * `null` means "could not read", which is NOT "changed" — the caller leaves its
+ * offset alone rather than committing to a reseed it cannot substantiate, the
+ * same discipline as `seedClassifiedTagFile`'s `read` flag.
+ *
+ * An offset of 0 has no prefix, so the sentinel is empty and always matches.
+ */
+export const PREFIX_SENTINEL_BYTES = 64;
+
+export function readPrefixSentinel(tagPath: string, offset: number): Buffer | null {
+	if (offset <= 0) return Buffer.alloc(0);
+	const want = Math.min(PREFIX_SENTINEL_BYTES, offset);
+	let fd: number;
+	try { fd = fs.openSync(tagPath, "r"); } catch { return null; }
+	try {
+		const buf = Buffer.alloc(want);
+		const read = fs.readSync(fd, buf, 0, want, offset - want);
+		return read === want ? buf : null;
+	} catch {
+		return null;
+	} finally {
+		fs.closeSync(fd);
+	}
+}
+
+/**
+ * What a tag-file watcher should do with the file it just saw. Pure, so the
+ * decision can be tested without a daemon, a render loop or a real `fs.watch`.
+ *
+ * `reseed` — the prefix is gone or changed underneath us; re-read the file whole.
+ * `read`   — the file grew and the prefix is intact; read from the offset.
+ * `idle`   — nothing to do, or nothing we can substantiate.
+ */
+export type WatcherAction = "reseed" | "read" | "idle";
+
+export function watcherAction(
+	size: number,
+	lastReadOffset: number,
+	prefixMatches: boolean | null,
+): WatcherAction {
+	// Shrank below the offset: the bytes are provably gone.
+	if (size < lastReadOffset) return "reseed";
+	// Same size or larger, but the prefix we consumed is no longer there — a
+	// rebuild that happened to land at or above where we were.
+	if (prefixMatches === false) return "reseed";
+	// `null` is "could not read", not "changed". Idle beats a guess.
+	if (prefixMatches === null) return "idle";
+	if (size > lastReadOffset) return "read";
+	return "idle";
+}
+
 export function seedClassifiedTagFile(tagPath: string): { interactions: Interaction[]; offset: number; read: boolean } {
 	let buf: Buffer;
 	try {
@@ -1389,6 +1457,9 @@ export async function watchTagFile(
 	let seed = seedClassifiedTagFile(tagPath);
 	let allInteractions: Interaction[] = seed.interactions;
 	let lastReadOffset = seed.offset;
+	// The bytes just before `lastReadOffset`, re-checked on every event so a
+	// truncate-and-rebuild that lands at or above it cannot pass unnoticed (#142).
+	let prefixSentinel = readPrefixSentinel(tagPath, lastReadOffset);
 
 	// Session-level settings from inline wtft-settings entries.
 	let sessionInterval: string | undefined;
@@ -1619,7 +1690,15 @@ export async function watchTagFile(
 				// was safe because "no reader can be positioned inside it". That
 				// is true of the CONTENT and false of the OFFSET, which is the
 				// thing that actually breaks.
-				if (stat.size < lastReadOffset) {
+				// A shrink is only ONE of the two ways the prefix can go away, and
+				// it is the easy one. See `readPrefixSentinel` (#142).
+				const sentinelNow = readPrefixSentinel(tagPath, lastReadOffset);
+				const matches = sentinelNow === null || prefixSentinel === null
+					? null
+					: sentinelNow.equals(prefixSentinel);
+				const action = watcherAction(stat.size, lastReadOffset, matches);
+				if (action === "idle") return;
+				if (action === "reseed") {
 					const reseed = seedClassifiedTagFile(tagPath);
 					// A failed read here means the same thing it means below: no
 					// information. Leave the offset and the chart alone rather than
@@ -1627,6 +1706,7 @@ export async function watchTagFile(
 					if (!reseed.read) return;
 					allInteractions = reseed.interactions;
 					lastReadOffset = reseed.offset;
+					prefixSentinel = readPrefixSentinel(tagPath, lastReadOffset);
 					updateDaemonHealth();
 					needsRedraw = true;
 					render();
@@ -1635,7 +1715,7 @@ export async function watchTagFile(
 				}
 
 				// File grew — read new data and accumulate
-				if (stat.size > lastReadOffset) {
+				{
 					const fd = fs.openSync(tagPath, "r");
 					const buf = Buffer.alloc(stat.size - lastReadOffset);
 					fs.readSync(fd, buf, 0, buf.length, lastReadOffset);
@@ -1670,6 +1750,7 @@ export async function watchTagFile(
 					// fire on a daemon that is writing perfectly well.
 					if (lastNl !== -1) {
 						lastReadOffset += lastNl + 1;
+						prefixSentinel = readPrefixSentinel(tagPath, lastReadOffset);
 
 						const newContent = buf.subarray(0, lastNl + 1).toString("utf8");
 						const lines = newContent.split("\n");
@@ -1790,6 +1871,7 @@ export async function watchTagFile(
 					if (!fresh.read) return;   // no information — keep the last good chart
 					allInteractions = fresh.interactions;
 					lastReadOffset = fresh.offset;
+					prefixSentinel = readPrefixSentinel(tagPath, lastReadOffset);
 					seed = fresh;
 					needsRedraw = true;
 					render();
@@ -1861,6 +1943,7 @@ export async function watchTagFile(
 	seed = seedClassifiedTagFile(tagPath);
 	allInteractions = seed.interactions;
 	lastReadOffset = seed.offset;
+	prefixSentinel = readPrefixSentinel(tagPath, lastReadOffset);
 	needsRedraw = true;
 	render();
 

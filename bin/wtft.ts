@@ -57,6 +57,9 @@ import {
 	readTagProvisional,
 	readTagFileWithVerdict,
 	lastLineStartByte,
+	readPrefixSentinel,
+	watcherAction,
+	PREFIX_SENTINEL_BYTES,
 	detectSessionHarness,
 	buildSessionJson,
 	renderSessionJson,
@@ -194,6 +197,9 @@ export {
 	// repair both depend on,
 	// pinned directly by tests/wtft-130-line-safe-tag-writes.test.ts §W.
 	lastLineStartByte,
+	readPrefixSentinel,
+	watcherAction,
+	PREFIX_SENTINEL_BYTES,
 	getTerminalWidth,
 	WTFT_TAGGER_VERSION,
 	// Daemon lifecycle (#95) — takeover/idle-clamp/TTL tests

@@ -680,3 +680,72 @@ loses nothing a re-parse cannot restore; `seedClassifiedTagFile` is correct at a
 
 69 assertions.
 
+## Macroscope, on PR #142 — the billed round, after three local ones
+
+Three findings, all reproduced against the code before adopting, all fixed. Two of them are
+gaps in fixes THIS SPEC already describes, which is the pattern the local audit round found
+too: a repair narrows the defect rather than closing it.
+
+### The shrink check could not see a rebuild (Medium)
+
+`watchTagFile` re-seeded only when the tag file shrank BELOW the reader's offset. A daemon that
+truncates and rebuilds before the `fs.watch` callback runs — one coalesced event, which is the
+normal case and not a race anyone has to engineer — leaves the final size at or ABOVE the stale
+offset, so the branch never fires.
+
+Reproduced on a 3-record file rebuilt to 5: the reader kept `orig-1..3` (records from a file
+that no longer exists), read from the stale offset into the MIDDLE of a line, dropped the
+fragment, and silently lost `rebuilt-1..3`. **Wrong in both directions at once** — stale records
+retained and real records lost — which is worse than the report described.
+
+A generation check cannot do this job: truncate-and-rewrite keeps the same inode, so `stat.ino`
+is unchanged. The bytes at the boundary are the only thing that distinguishes the two files.
+`readPrefixSentinel` keeps the last 64 bytes of the consumed prefix and re-checks them on every
+event; `watcherAction` is the pure decision it feeds. `null` means "could not read", which is
+NOT "changed" — the reader idles rather than committing to a reseed it cannot substantiate.
+
+**This also let S4 stop lying.** S4 was two regexes over the library source requiring
+`stat.size < lastReadOffset` to sit within 1600 characters of `seedClassifiedTagFile(`. Its
+first assertion passed by matching a COMMENT, and the second failed against code that was
+strictly more correct. Its stated excuse — driving it "would mean standing up the interactive
+watch TUI and racing a daemon restart" — stopped being true the moment the decision became a
+pure function. S4 is now behavioural, and G1 is the full decision table.
+
+### A slowly-written record was re-read once per poll (High)
+
+`lastSize` advanced only by whole lines, so a record still missing its newline left the offset
+parked behind it and every poll re-allocated and re-read the entire partial record from disk.
+
+**Measured**, replaying the function's own offset arithmetic against a 64 MiB record written in
+1 MiB chunks, one chunk per poll:
+
+| | total read | largest single allocation | amplification |
+|---|---|---|---|
+| before | 2,144 MiB | 64 MiB | **33.5x** |
+| after | 64 MiB | 1 MiB | **1.0x** |
+
+Quadratic to linear. The record is now carried between polls as BYTES rather than as a length,
+so the offset advances every poll and no byte is fetched twice.
+
+**The report's severity was wrong and the thread says so.** It claimed the daemon "throws at
+`MAX_LENGTH`"; `buffer.constants.MAX_LENGTH` is **8,388,608 GiB** on this node, so that needs an
+8-petabyte single line. Fixed for the verified reason, not the reported one.
+
+Two behaviours could have broken and did not: R3 (a complete record with no trailing newline is
+still counted) and R4 (1,830 one-byte writes across four poll intervals reach the same total,
+$0.031500). One subtlety the rewrite had to preserve: the old code got its "the writer died"
+re-evaluation **for free** by re-reading the same bytes forever. With the offset advancing, a
+quiet poll returns early — so the function now falls through on a quiet poll whenever a fragment
+is held, or a dead writer's last record would never be released. `A4` pins that.
+
+### The mid-file guarantee does not hold for legacy files (Medium)
+
+`docs/wtft-tag-format.md` told readers no mid-file line is ever malformed and that the #130
+defect "cannot recur". True of a fixed writer; false of the files `getTagPath()` reaches through
+its stale-version reader fallback, which were written by the defective one.
+
+**Measured on this host 2026-09-17: 119 of 422 tag files carry a malformed mid-file line, 2,852
+lines in total.** The guarantee is now scoped to files written at or after the fix, and names the
+fallback as the exception, so a third-party reader knows to keep a per-line tolerance rather than
+only a final-line one.
+

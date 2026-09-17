@@ -52,15 +52,37 @@ console.log("\n1. README wtft examples name real flags");
 	for (const m of parser.matchAll(/arg\.startsWith\("(--[\w-]+)="\)/g)) accepted.add(m[1]);
 	check(accepted.size > 20, `parser exposes a flag set to compare against (${accepted.size} literals)`);
 
+	// `wtft spawn-record` is a POSITIONAL SUBCOMMAND with its own parser (#116),
+	// and its flags are deliberately NOT in `parseWtftCliArgs` — the report path
+	// must never accept them. So the example lines are routed to the parser that
+	// actually handles them. Unioning the two sets instead would let a report
+	// example name `--mechanism` and still pass, which is the drift this checks
+	// for.
+	const subcommandParser = stripTsComments(read("extensions/lib/wtft-spawn-ledger.ts"));
+	const subcommandAccepted = new Set<string>(["--json", "--help", "-h"]);
+	for (const m of subcommandParser.matchAll(/\^--\(([\w|]+)\)/g)) {
+		for (const name of m[1].split("|")) subcommandAccepted.add(`--${name}`);
+	}
+	check(subcommandAccepted.size > 4,
+		`spawn-record exposes a flag set to compare against (${subcommandAccepted.size} literals)`);
+
 	const readme = read("README.md");
 	const blocks = [...readme.matchAll(/```sh\n([\s\S]*?)```/g)].map(m => m[1]);
 	const named: string[] = [];
+	const subcommandNamed: string[] = [];
 	for (const block of blocks) {
-		for (const line of block.split("\n")) {
+		// Shell line continuations first: a `\`-terminated line carries flags
+		// onto the next physical line, and splitting on "\n" left every one of
+		// them unchecked. The README's first multi-line example arrived with
+		// #116, so this had been vacuously true until then.
+		const joined = block.replace(/\\\n\s*/g, " ");
+		for (const line of joined.split("\n")) {
 			const t = line.trim();
 			if (!t.startsWith("wtft ")) continue;
+			const isSubcommand = /^wtft\s+spawn-record\b/.test(t);
 			for (const tok of t.split(/\s+/).slice(1)) {
-				if (tok.startsWith("-")) named.push(tok.replace(/=.*$/, ""));
+				if (!tok.startsWith("-")) continue;
+				(isSubcommand ? subcommandNamed : named).push(tok.replace(/=.*$/, ""));
 			}
 		}
 	}
@@ -69,12 +91,18 @@ console.log("\n1. README wtft examples name real flags");
 	check(unknown.length === 0, "every README wtft flag is accepted by parseWtftCliArgs",
 		unknown.length ? `not in parser: ${unknown.join(", ")}` : undefined);
 
+	check(subcommandNamed.length > 0,
+		`README has spawn-record examples with flags (${subcommandNamed.length} flag tokens)`);
+	const unknownSub = subcommandNamed.filter(f => !subcommandAccepted.has(f));
+	check(unknownSub.length === 0, "every README spawn-record flag is accepted by runSpawnRecordCommand",
+		unknownSub.length ? `not in subcommand parser: ${unknownSub.join(", ")}` : undefined);
+
 	// The closer names the manifest too: it is what `--help` and `--why` render
 	// from, so a README example naming a flag the manifest omits documents
 	// something `--help` would deny. Flags are found in the manifest's strings.
 	const manifest = read("docs/manifests/wtft-cmd.json");
 	const inManifest = new Set([...manifest.matchAll(/(?<![\w-])(-{1,2}[A-Za-z][\w-]*)/g)].map(m => m[1]));
-	const undocumented = named.filter(f => !inManifest.has(f));
+	const undocumented = [...named, ...subcommandNamed].filter(f => !inManifest.has(f));
 	check(undocumented.length === 0, "every README wtft flag is named in docs/manifests/wtft-cmd.json",
 		undocumented.length ? `not in manifest: ${undocumented.join(", ")}` : undefined);
 }

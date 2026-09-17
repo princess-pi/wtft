@@ -1935,3 +1935,58 @@ export function attributeClaudeSubAgentCosts(
 		}
 	}
 }
+
+/**
+ * Session ids whose cost is ALREADY folded into this session's own totals, so a
+ * later pass does not add them a second time (#116).
+ *
+ * Two mechanisms fold a child in before the spawn-ledger walk ever runs:
+ * `claude -p` spawns found by cwd and time (#138), and Task children under
+ * `<session>/subagents/` (#82/#83). Nothing stops a spawner ALSO recording one
+ * of those as a ledger edge — `cd /tmp/x && claude -p --session-id <uuid>` is
+ * both — and the tree would then bill it twice, once in `total` and once in
+ * `spawned.total`. Billing twice is the expensive direction to be wrong in.
+ *
+ * DISCOVERY ONLY, never a parse: this walks the same two discoveries the
+ * attribution pass uses and keeps the basenames, so it costs directory reads
+ * rather than transcript reads. A discovery that fails contributes nothing —
+ * a child we cannot even enumerate was not attributed to self either, so the
+ * walk treating it as fair game is the correct fallback, not a guess.
+ */
+export function collectSelfAttributedSessionIds(
+	sessionPath: string,
+	interactions: Interaction[],
+): Set<string> {
+	const ids = new Set<string>();
+
+	try {
+		for (const file of discoverSubagentSessionFiles(sessionPath).files) {
+			ids.add(path.basename(file, ".jsonl"));
+		}
+	} catch { /* an unreadable subagents dir is reported elsewhere (#457) */ }
+
+	for (const interaction of interactions) {
+		// The ids a previous attribution pass recorded, when this array came
+		// from a parse rather than from the tag file (the tag does not carry
+		// them).
+		const recorded = (interaction as any).claudeSubAgentSessionIds as string[] | undefined;
+		if (recorded) {
+			for (const id of recorded) ids.add(id);
+			// The attribution pass already ran on this turn and wrote down what
+			// it found, so re-running discovery for it would re-read the same
+			// directory for the same answer.
+			continue;
+		}
+
+		if (!interaction.commands?.length) continue;
+		const cwd = cwdForClaudeSpawn(interaction.commands);
+		if (!cwd) continue;
+		try {
+			for (const file of discoverClaudeSubAgentSessionFiles(cwd, interaction.timestamp).files) {
+				ids.add(path.basename(file, ".jsonl"));
+			}
+		} catch { /* same rule: unenumerable is not attributed */ }
+	}
+
+	return ids;
+}

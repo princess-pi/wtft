@@ -5,10 +5,13 @@
  *   Builds visual output from parsed Interaction arrays: binned bar charts,
  *   SURGE timeline markers, "Other" command histograms, and per-model token tables.
  *
- *   One renderer takes input that is NOT an Interaction array:
- *   `renderUncountedBillables` prints counts of billed-but-unrecorded events
- *   (#149) below TOTAL. It is the only output here that reports spend wtft
- *   cannot price, and it deliberately carries no dollar figure.
+ *   Two renderers take input that is NOT an Interaction array, and both print
+ *   BELOW the TOTAL row because both describe spend that is not in it:
+ *   `renderUncountedBillables` (#149) counts billed-but-unrecorded events — the
+ *   only output here that reports spend wtft cannot price, and it deliberately
+ *   carries no dollar figure. `renderSpawnTree` (#116) reports the sessions
+ *   this one launched: priced, known to the penny, and still not in TOTAL,
+ *   because TOTAL means this session's own turns.
  *
  *   And one export renders nothing at all: `computeSessionSummary` (#26) is the
  *   session aggregation — totals, per-model rows, per-category rows — that
@@ -32,6 +35,7 @@ import {
 } from "./wtft-cost.js";
 import { execSync } from "node:child_process";
 import wcwidth from "wcwidth";
+import { treeTotals, type SpawnTree } from "./wtft-spawn-tree.js";
 export interface Bin {
 	key?: string; // ISO bin key (e.g. "2026-07-15T18:00") — populated at creation
 	label: string;
@@ -617,6 +621,42 @@ export function getVisualLength(str: string): number {
 		if (w > 0) width += w;
 	}
 	return width;
+}
+
+/**
+ * Fit `str` into exactly `width` terminal COLUMNS: truncate with an ellipsis if
+ * it is too wide, pad with spaces if it is too narrow.
+ *
+ * Why this is not `slice` + `padEnd` (#136, Macroscope Medium): both of those
+ * count UTF-16 CODE UNITS. A BMP wide character — CJK, Hangul, the fullwidth
+ * forms — is ONE code unit and TWO columns, so 40 of them slip past a
+ * `length > 40` guard untouched and `padEnd(40)` adds nothing, while the
+ * terminal lays out 80 columns and every figure to the right shifts. Astral
+ * emoji hide the bug rather than showing it: a surrogate pair is two code units
+ * AND two columns, so the two measures agree by coincidence.
+ *
+ * Iterating with `for...of` walks CODE POINTS, so a surrogate pair is measured
+ * once rather than as two half-characters.
+ */
+export function fitVisual(str: string, width: number): string {
+	if (width <= 0) return "";
+	const full = getVisualLength(str);
+	if (full <= width) return str + " ".repeat(width - full);
+
+	let out = "";
+	let used = 0;
+	for (const ch of str) {
+		const w = getVisualLength(ch);
+		// Reserve the last column for the ellipsis.
+		if (used + w > width - 1) break;
+		out += ch;
+		used += w;
+	}
+	out += "\u2026";
+	used += 1;
+	// A wide character that could not fit leaves a one-column gap; pad it, so
+	// the field is exactly `width` whatever the text was.
+	return out + " ".repeat(width - used);
 }
 
 // MAIN LAYOUT COMPILER
@@ -1849,7 +1889,11 @@ export interface SessionSummary {
 	compaction: { events: number; tokensFreed: number };
 }
 
-function emptyTotals(): TokenTotals {
+/** A zeroed TokenTotals. Exported since #116 so wtft-spawn-tree.ts adds into the
+ *  same shape this module defines — a second copy is the drift CLAUDE.md's
+ *  "shared code is never copied in" gate exists to stop, and a hand-written one
+ *  would silently omit a field the day TokenTotals grows. */
+export function emptyTotals(): TokenTotals {
 	return { costUsd: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 }
 
@@ -1895,6 +1939,12 @@ function addInteraction(into: TokenTotals, i: Interaction): void {
  *
  * One divergence from the chart total remains, and it is the untagged spend
  * excluded here. docs/spec-26-json.md records it.
+ *
+ * WHAT THIS FUNCTION COUNTS IS ONE SESSION'S OWN TURNS — "self" (#116). A
+ * launcher-spawned descendant is a different session with a different
+ * transcript, and nothing here reaches it; `computeSpawnTree` calls this
+ * function once per descendant and the caller adds the two. So a caller after
+ * "what did this branch of work cost" wants `tree`, not this.
  */
 export function computeSessionSummary(interactions: Interaction[]): SessionSummary {
 	const deduped = deduplicateInteractions(interactions);
@@ -1991,7 +2041,7 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
  * @param uncounted Billed-but-unrecorded events found in the session (#149).
  *   Omitted or all-zero renders nothing new — existing output is unchanged.
  */
-export function renderTokenSummary(interactions: Interaction[], maxWidth: number = 80, thinkingBudget?: number, uncounted?: UncountedBillables): string {
+export function renderTokenSummary(interactions: Interaction[], maxWidth: number = 80, thinkingBudget?: number, uncounted?: UncountedBillables, spawned?: SpawnTree): string {
 	// One aggregation, two readers (#26): this table and `wtft --json` read the
 	// same object, so they cannot report different NUMBERS. Three things below
 	// are display-only and have no JSON counterpart, because they are ratios and
@@ -2002,11 +2052,20 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 	// it would be a second copy to drift.
 	const summary = computeSessionSummary(interactions);
 	const unmatched = summary.untaggedInteractions;
+	// `uncounted` and `spawned` are both optional and both render nothing when
+	// omitted or empty — a caller that passes neither gets exactly the table it
+	// got before either existed.
 
 	if (summary.models.length === 0) {
-		return unmatched > 0
+		// The below-TOTAL blocks survive this early return (#116). A session
+		// whose own turns are all untagged can still have launched children
+		// worth real money, and returning one sentence would report that as
+		// nothing at all — the precise silence this issue is about. There is no
+		// TOTAL row to sit below, so they simply follow the sentence.
+		const head = unmatched > 0
 			? `No model-tagged interactions found (${unmatched} untagged).`
 			: "No model-tagged interactions found.";
+		return head + renderUncountedBillables(uncounted) + renderSpawnTree(summary.total, spawned);
 	}
 
 	// Rows in the summary's order, which is cost descending.
@@ -2110,6 +2169,109 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 	// unmentioned misleads; estimating them would make TOTAL partly modelled.
 	out += renderUncountedBillables(uncounted);
 
+	// The recorded lineage (#116) — below TOTAL, for the same reason UNCOUNTED
+	// is: TOTAL means this session's own turns, and this money belongs to other
+	// sessions that this one caused. Folding it in would move a number the
+	// reader already trusts without telling them.
+	out += renderSpawnTree(summary.total, spawned);
+
+	return out;
+}
+
+/** The spawn-tree block below TOTAL (#116). Three shapes, not two:
+ *
+ *  - `""` — this session recorded no edges. Silence is the right report.
+ *  - the ledger-error block — the ledger could not be READ, which must not
+ *    render as the same silence as "spawned nothing". No TREE line, because
+ *    there is no tree total to state.
+ *  - the SPAWNED rows plus a TREE line.
+ *
+ *  Split out from `renderTokenSummary` for the same reason
+ *  `renderUncountedBillables` is: one place owns the wording. Neither has a
+ *  second caller today; the split is about where the wording lives, not about
+ *  reuse that already exists. */
+export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string {
+	if (!spawned) return "";
+	// EVERY untrusted string on this surface goes through one sanitiser, declared
+	// before the first arm that prints one (Macroscope, PR #136, Medium).
+	//
+	// The first version of this guard covered `mechanism` and `label` — the
+	// obviously spawner-supplied fields — and left `ledgerError` interpolated
+	// raw, one arm above. That message embeds the ledger PATH, which comes from
+	// `XDG_STATE_HOME`: caller-controlled, so a newline in it forges report
+	// lines and an ESC starts an OSC sequence the reader's terminal executes.
+	// Exactly the vector already fixed below, on the one code path that returns
+	// before reaching the fix.
+	//
+	// U+FFFD rather than deletion, so a reader SEES something was removed; a
+	// silently shortened path reads as the real one.
+	const safe = (v: string) => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, "\uFFFD");
+	if (spawned.ledgerError !== null) {
+		// Loud, and NOT an empty block: an unreadable ledger must not render the
+		// same silence as a session that spawned nothing.
+		return `\nSPAWNED    spawn ledger could not be read (#116) — descendants unknown, not zero\n` +
+		       `           ${safe(String(spawned.ledgerError))}\n`;
+	}
+	if (spawned.edges.length === 0) {
+		// No edges FOR THIS SESSION. Say nothing — unless the reader needs to
+		// know the ledger itself is damaged, which is a fact about the ledger
+		// rather than about this session and is otherwise reported nowhere on
+		// this surface.
+		if (spawned.malformedLedgerLines > 0) {
+			return `\nSPAWNED    no descendants recorded for this session, but ` +
+			       `${spawned.malformedLedgerLines} unusable spawn-ledger line(s) were skipped (#116)\n`;
+		}
+		return "";
+	}
+
+	// SANITISE BEFORE MEASURING (Macroscope, PR #136, Medium). `mechanism` and
+	// `label` are free text from a spawner, and this block prints them into a
+	// padded column. A newline in a label makes `padEnd` emit a row that is
+	// really two — a spawner forging report lines — and an `\x1b]` starts an OSC
+	// sequence the reader's terminal executes. `serializeSpawnRecord` refuses
+	// both at the writer, and this is the second layer: the ledger is a file on
+	// disk, it can be hand-edited, and it can hold records written by an older
+	// binary that had no such check. A renderer that trusts its input is the one
+	// place the writer guarantee cannot reach.
+	//
+	// Replaced rather than stripped, so the reader SEES that something was there
+	// — a silently shortened label reads as the spawner's own text.
+const rows: string[] = [];
+	for (const edge of spawned.edges) {
+		const full = edge.label ? `${safe(edge.mechanism)}  ${safe(edge.label)}` : safe(edge.mechanism);
+		// Fitted to 40 COLUMNS, not 40 code units: `label` is free text from a
+		// spawner, and one long or one WIDE one pushes every money figure in
+		// the block out of its column. `fitVisual` truncates and pads in the
+		// same space the terminal lays out in.
+		const name = fitVisual(full, 40);
+		// A skipped edge prints its REASON where its cost would be. A dash or a
+		// $0.00 would both read as "this child was free", which is the one thing
+		// we do not know about it.
+		const money = edge.total ? formatCost(edge.total.costUsd) : `(${edge.skip})`;
+		rows.push(`           ${name} ${money.padStart(12)}`);
+	}
+
+	// Two different units, named as such. `descendants` counts SESSIONS priced;
+	// `edges.length` counts EDGES, and a diamond, a cycle, an in-self child and
+	// a depth cut each add an edge without adding a session. "N of M sessions"
+	// made the denominator claim to measure something it does not.
+	let out = `\nSPAWNED    ${spawned.descendants} session(s) priced from ${spawned.edges.length} recorded edge(s) (#116) —\n`;
+	out += `           NOT in TOTAL above, which is this session's own turns\n`;
+	out += rows.join("\n") + "\n";
+	if (spawned.unattributed.length > 0) {
+		out += `           ${spawned.unattributed.length} unattributed — cost unknown, deliberately not estimated\n`;
+	}
+	if (spawned.depthCapped > 0) {
+		out += `           ${spawned.depthCapped} edge(s) past the depth cap of ${spawned.maxDepth}, not walked\n`;
+	}
+	if (spawned.malformedLedgerLines > 0) {
+		out += `           ${spawned.malformedLedgerLines} unusable ledger line(s) skipped\n`;
+	}
+	// The SPAWNED subtotal is printed, because TREE names it as an addend and a
+	// reader should not have to sum the rows to check the arithmetic — nor try,
+	// when some rows carry a skip reason instead of a number.
+	out += `SPAWNED    ${"subtotal".padEnd(40)} ${formatCost(spawned.total.costUsd).padStart(12)}\n`;
+	out += `TREE       ${"TOTAL + SPAWNED".padEnd(40)} ${formatCost(treeTotals(self, spawned).costUsd).padStart(12)}\n`;
 	return out;
 }
 

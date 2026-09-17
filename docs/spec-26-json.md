@@ -48,11 +48,11 @@ Changing one is a breaking change and bumps `schema`. The strings inside
 branches on `notices[].code` is safe, one that matches `notices[].text` has no
 contract.
 
-### Schema `wtft/session@1`
+### Schema `wtft/session@2`
 
 ```json
 {
-  "schema": "wtft/session@1",
+  "schema": "wtft/session@2",
   "session": {
     "path": "/home/u/.claude/projects/-x/abc.jsonl",
     "harness": "claude-code",
@@ -78,6 +78,27 @@ contract.
       "reasoningTokens": 0, "cacheReadTokens": 0, "cacheWriteTokens": 0 }
   ],
   "uncounted": { "compaction": 0, "recap": 0 },
+  "spawned": {
+    "schema": "wtft/spawn-tree@1",
+    "descendants": 1,
+    "edges": [ { "parent": "…", "child": "…", "mechanism": "pr-review-lens",
+                 "ts": "2026-09-16T05:00:00Z", "label": "correctness", "depth": 1,
+                 "resolved": true, "path": "/home/u/.claude/projects/-tmp-x/….jsonl",
+                 "total": { "costUsd": 12.34, "inputTokens": 0, "outputTokens": 0,
+                            "reasoningTokens": 0, "cacheReadTokens": 0, "cacheWriteTokens": 0 } } ],
+    "unattributed": [],
+    "depthCapped": 0,
+    "maxDepth": 5,
+    "malformedLedgerLines": 0,
+    "ledgerError": null,
+    "total": { "costUsd": 12.34, "inputTokens": 0, "outputTokens": 0,
+               "reasoningTokens": 0, "cacheReadTokens": 0, "cacheWriteTokens": 0 }
+  },
+  "tree": {
+    "costUsd": 12.3769,
+    "inputTokens": 3600, "outputTokens": 270,
+    "reasoningTokens": 0, "cacheReadTokens": 0, "cacheWriteTokens": 0
+  },
   "compaction": { "events": 0, "tokensFreed": 0 },
   "untaggedInteractions": 0,
   "notices": [ { "code": "provisional", "text": "…" } ]
@@ -86,18 +107,30 @@ contract.
 
 | Key | Type | Meaning |
 |---|---|---|
-| `schema` | string | `"wtft/session@1"`. Bumped when any key below changes shape. |
+| `schema` | string | `"wtft/session@2"`. Bumped when any key below changes shape. `@2` is #116 — see Amendment 1. |
 | `session.path` | string | The session `.jsonl` this run read. |
 | `session.harness` | string \| null | Harness id whose parse adapter claims the session's first assistant turn — `"claude-code"`, `"pi"`, or an id registered out of tree through the #156 seam. `null` means **no claim**, and does not distinguish an empty session, one not written yet, a file that could not be read, and a format no registered harness understands. |
 | `session.taggerVersion` | string | `WTFT_TAGGER_VERSION` of the running binary — a dotted version such as `"2.7.2"`, which is also what appears in `tagPath`. |
 | `session.tagPath` | string | The classified tag file path resolved for this run: read when it exists, and on the `pending-session` and `no-data` arms the *expected* path — not evidence that a file was opened. |
 | `provisional.provisional` | bool | **This run's** verdict — may this total still grow? Usually `readTagProvisional`'s answer, but the blind-spot scan can override it (see below), so do not read it as "what the tag file says". |
 | `provisional.reason` | string \| null | A **closed three-value vocabulary**, unchanged since #457 and enforced by the `TagProvisionalReason` union: `"stale-version"` · `"unswept"` · `"subagent-unreadable"`, or `null` when settled. `--json` reports it; it did not widen it. **Issue #26's own wish-list names only two**, `stale-version` and `unswept`: it was written before #457 added the third, and this spec supersedes it on that point. Repeated review lenses have cited the issue's list as the contract; it is not. |
-| `total.*` | number | Exact session totals. Cost is USD, the rest are token counts. |
+| `total.*` | number | Exact totals for **this session's own turns** — SELF. Cost is USD, the rest are token counts. Launcher-spawned descendants are never folded in here (#116). |
+| `spawned` | object | The recorded lineage (#116), schema `wtft/spawn-tree@1`. Present on every run, so an empty tree means "read the ledger, found nothing" rather than "nobody looked" — the same rule as `uncounted`. |
+| `spawned.schema` | string | `"wtft/spawn-tree@1"`. Versioned separately from the document. |
+| `spawned.edges[]` | array | One row per recorded edge reached from this session, in walk order. Always `parent`, `child`, `mechanism`, `ts`, `depth`, `resolved`, `path`, `total`; `label`, `model` and `cwd` only where the ledger line carried them, and `skip` only on an unresolved edge. `depth` is 1 for a direct child. |
+| `spawned.total` | object | The sum over RESOLVED descendants. Unattributed and depth-capped edges are not in it. |
+| `spawned.edges[].total` | object \| null | **`null`, never a zero object**, when the edge contributed nothing. A zero would say "this child cost nothing", which is a claim; `null` says we do not have one. `skip` names why: `not-found`, `unreadable`, `already-counted`, `already-seen-unresolved`, `in-self-total`, `depth-capped`. |
+| `spawned.unattributed[]` | array | The gaps: `{child, mechanism, ts, label?, reason}` — no `depth`, no `path`, unlike an edge. `reason` is `not-found` (the lookup came back empty — absent, or somewhere unreadable; the walk cannot tell) or `unreadable` (a file found that would not parse). ONE ENTRY PER SESSION, not per edge. Not the same as cost zero. |
+| `spawned.depthCapped` | number | Edges NOT FOLLOWED because of `spawned.maxDepth`, each also in `edges` with `skip: "depth-capped"`. Direct children are depth 1, so `maxDepth: 5` walks five generations and cuts the sixth. This counts the cuts, not the sessions behind them — a non-zero value means the tree is known to be partial. |
+| `spawned.maxDepth` | number | The recursion bound in force for this run, stated so a reader never needs the constant to interpret a truncated tree. |
+| `spawned.descendants` | number | Sessions whose cost is in `spawned.total`, **each counted exactly once**: a diamond or a cycle in the ledger contributes once, not twice. Lower than `edges.length` whenever an edge was skipped. |
+| `spawned.malformedLedgerLines` | number | Ledger lines the reader could not use. A broken spawner shows up as a number rather than an absence. |
+| `spawned.ledgerError` | string \| null | The ledger read FAILED, with the message. Without this field an unreadable ledger would serialise identically to "read it, this session spawned nothing" — the silent gap #116 exists to end, reintroduced inside its own fix. An *absent* ledger is not an error. |
+| `tree.*` | number | **SELF + RESOLVED descendants**, as a field, so a consumer never adds two numbers and has to work out whether it double-counted. A **floor** whenever anything was not counted, under any of FOUR conditions: `spawned.unattributed` is non-empty, `spawned.depthCapped` is non-zero, `spawned.ledgerError` is non-null, or `spawned.malformedLedgerLines` is non-zero. The last two are the traps — an unreadable ledger sets none of the others, so a consumer checking only those reads a zeroed tree as a complete lineage; and a malformed line WAS a record, so its edge is lost with the count as its only trace. Checking `unattributed` alone reads a depth-truncated tree as complete. |
 | `models[]` | array | One row per model id, **sorted by `costUsd` descending** — the same order and the same numbers as the rendered `--tokens` table's rows, un-abbreviated. `model` is the full id, never shortened. |
 | `models[].priced` | bool | `isModelPriced(model)` — the `?` marker in the rendered table. `false` means **no rate card**, not "wtft guessed this row": a harness-native per-turn cost is used unchanged wherever the transcript records one, so a marked row's cost can mix provenance. |
 | `categories[]` | array | One row per `CATEGORY_ORDER` entry, **always all fourteen, always in `CATEGORY_ORDER` order**, so a consumer can index by position. |
-| `uncounted` | object | The #149 blind spot: events the harness bills and writes no `usage` for. Counted, never priced, and deliberately **not** in `total`. Scanned on **every** `--json` run, so a zero means "looked, found none" rather than "nobody looked" — with one narrower gap, **#94**: the scan drops unparseable session lines silently, so a zero can also mean "could not read part of it". Fixing that adds a field; it does not change this one. (A no-op only on the `pending-session` arm, where there is no file yet; the `no-data` arm has a real session file and can find real billables in it.) This is the one part of the document that does not come from the aggregation. |
+| `uncounted` | object | The #149 blind spot: events the harness bills and writes no `usage` for. Counted, never priced, and deliberately **not** in `total`. Scanned on **every** `--json` run, so a zero means "looked, found none" rather than "nobody looked" — with one narrower gap, **#94**: the scan drops unparseable session lines silently, so a zero can also mean "could not read part of it". Fixing that adds a field; it does not change this one. (A no-op only on the `pending-session` arm, where there is no file yet; the `no-data` arm has a real session file and can find real billables in it.) Along with `spawned`, one of the two parts of the document that do not come from the aggregation. |
 | `compaction` | object | Compaction events seen and the tokens they freed — the rendered table's `Compaction:` line. Counted over **every** deduped interaction, tagged or not: it describes context freed, not spend, so the model-tag exclusion below does not apply to it. |
 | `untaggedInteractions` | int | Interactions excluded from `total`/`models`/`categories` because they carry no model id (`(unknown)` or `<synthetic>`) — the rendered table's "(N untagged interactions skipped)", or, when *every* interaction is untagged, its "No model-tagged interactions found (N untagged)." |
 | `notices[]` | array | `{ code, text }`. `code` is API; `text` is prose. Codes: `pending-session`, `no-data`, `unpriced-model`, `provisional`, `auto-selected-session`. |
@@ -158,15 +191,20 @@ machine-readable marker. **#120** owns that.
 ### The seam
 
 `computeSessionSummary(interactions)` in `extensions/lib/wtft-renderer.ts` is the
-single aggregation. `renderTokenSummary` formats it for a human;
-`buildSessionJson` in `extensions/lib/wtft-json.ts` serialises it for a machine.
-Neither reimplements the arithmetic, so the prose and the JSON cannot report
-different **numbers**.
+single aggregation — the only *implementation* of the arithmetic, not the only
+*call*. `renderTokenSummary` formats its result for a human; `buildSessionJson`
+in `extensions/lib/wtft-json.ts` serialises the same result for a machine.
+Neither reimplements it, so the prose and the JSON cannot report different
+**numbers**. Since #116 a run calls it N+1 times — once for this session and
+once per resolved descendant, inside `computeSpawnTree` — which is the same
+function over different inputs, and is what lets `self` and `tree` be added.
 
-Three things the human table prints have no direct JSON counterpart, because
-they are ratios and legends derived at render time rather than aggregate facts:
-the per-model `Cache:` hit-rate line, the `Think:` budget-utilisation line, and
-the `?` fallback legend.
+Some things the human table prints have no direct JSON counterpart, because they
+are ratios, labels and legends derived at render time rather than aggregate
+facts: the per-model `Cache:` hit-rate line, the `Think:` budget-utilisation
+line, the `?` fallback legend, and — since #116 — the SPAWNED block's row labels,
+its `(skip)` text where a cost would be, and the ledger-error sentence. Every
+number in that block is in `spawned`; the words around them are not.
 
 Only the cache hit rate is fully recoverable:
 `cacheReadTokens / (cacheReadTokens + cacheWriteTokens + inputTokens)`, all three
@@ -184,9 +222,14 @@ denominator is `--thinking-budget`, an input flag the document does not carry
 and which `--json` ignores outright. A consumer gets `reasoningTokens` and
 supplies its own budget.
 
-`buildSessionJson` is otherwise a pure serialiser — every number it emits comes
-from the aggregation, with the single exception of `uncounted`, which is a
-separate scan of the session files and is passed in.
+`buildSessionJson` is otherwise a thin serialiser, with three departures, all
+deliberate: `uncounted` is a separate scan of the session files and is passed in;
+`spawned` is the ledger walk and is passed in; and `tree` is the one piece of
+arithmetic the function performs itself, `treeTotals(summary.total,
+input.spawned)` — an addition of two results of the aggregation above, which is
+why it is not a fourth way of counting. `notices` is the only input with a
+default; `uncounted` and `spawned` are required-not-defaulted, so an empty one
+always means "looked, found none".
 
 ### Exit codes
 
@@ -196,18 +239,29 @@ carries. The table lives in `docs/manifests/wtft-cmd.json`, which is what
 
 | Code | Meaning | stdout under `--json` |
 |---|---|---|
-| **0** | A report was produced, including when there is nothing to report yet — a session file not written, or a tag with no classified data. Also the exit for the commands that run *instead* of a report (`--help`/`--why`/`--version`, `--list`/`--cleanup`/`--restart`/`--stop`). | one JSON object for a report; the command's own output for the others |
+| **0** | A report was produced, including when there is nothing to report yet — a session file not written, or a tag with no classified data. Also the exit for the commands that run *instead* of a report (`--help`/`--why`/`--version`, `--list`/`--cleanup`/`--restart`/`--stop`, and `spawn-record`). | one JSON object for a report; the command's own output for the others |
 | **1** | Error: no session found or selected, an invalid path, a daemon that could not be spawned or that died before producing data, a refused flag (`-p`), or an unhandled exception. The reason is on stderr. | nothing |
+| **2** | `wtft spawn-record` only: the call was wrong — a missing or unknown flag, a flag with no value, a malformed session id, an oversized field. Nothing was appended. The report path never returns 2. | n/a |
+| **3** | `wtft spawn-record` only: the record was valid and the ledger could not be written — usually a full disk. The edge is not recorded, so the child is **invisible** to the rollup, not `unattributed` (which means an edge we have whose child we could not read). Any partial line left behind is reported as a counted `malformedLedgerLines` on the next read; nothing tries to repair it. | n/a |
 | **9** | Provisional (#443): a report was produced in full, but the total may still grow under the daemon. `provisional.provisional` is `true` and `provisional.reason` names the condition. | one JSON object |
 | **130** | The interactive session selector was cancelled with `q` or Ctrl-C — the SIGINT convention (128+2), not a wtft-specific code. `--json` never prompts, so it never returns this. | n/a |
 
 Codes 0 and 9 both carry a complete object; a consumer that wants only settled
 numbers checks `$?` **or** `.provisional.provisional` and gets the same answer.
 
+**One incompleteness has no exit code**, deliberately: a `spawned.ledgerError`
+leaves `$?` at 0. Exit 9 means *this total may still grow under the daemon*, and
+`provisional.reason` is a closed three-value vocabulary — widening either to
+cover an unreadable ledger would change what a settled 0 means for every
+consumer that has one. A reader who cares about lineage branches on the field.
+
 **An empty report is still a report.** On the two empty paths every `total.*` is
 0, `models[]` is `[]`, `categories[]` is still all fourteen zero rows, and
 `notices[]` carries `pending-session` or `no-data`. A consumer never has to
-branch on shape, only on values.
+branch on shape, only on values. `spawned` is read on those paths too: a session
+log that is not written yet says nothing about whether the ledger holds edges for
+it, and handing the builder a hand-made empty tree is how a `ledgerError: null`
+gets claimed by a run that never opened the file.
 
 `session.harness` is `null` on the `pending-session` arm, where there is no file
 to ask. On the `no-data` arm the session file exists and may well name its
@@ -279,7 +333,7 @@ to write an object to.
 
 ```console
 $ node bin/wtft.mjs -s <fixture> --json \
-    | jq -e '.schema == "wtft/session@1" and (.total.outputTokens|type) == "number"'
+    | jq -e '.schema == "wtft/session@2" and (.total.outputTokens|type) == "number"'
 ```
 
 exits 0, and `tests/wtft-26-json.test.ts` asserts, on a fixture, in eleven
@@ -373,3 +427,31 @@ a consequence named in its issue:
   half-implementing it.
 - **#93** — a sweep of `wtft-renderer.ts` docstrings that bind to nothing or to
   the wrong symbol, describe retired behaviour, or keep dead fields alive.
+
+---
+
+## Amendment 1 — `wtft/session@2`: `spawned` and `tree` (#116, 2026-09-16)
+
+`@2` adds two keys and pins the meaning of one that was already there.
+
+**`total` means SELF, and always did.** #116 moved no money into or out of it.
+A launcher-spawned session — a `pr-review` lens, a `herdr agent start` child —
+has never been in it and still is not. What changed is that the document now
+*says so*, and carries the descendant money beside it under its own name.
+
+**Why beside it rather than folded in.** Measured on one real session, the
+descendants were $69.68 against a self of $70.33: folding would have roughly
+doubled a number the reader already trusts, with nothing in the document saying
+which half was which. The #149 `uncounted` block set the precedent — a quantity
+the reader has not seen before arrives labelled. Whether `total` should ever
+absorb the tree is a separate decision that needs the interaction-level
+attribution rework in #107 / #14 / #94 first.
+
+**Why this bumps `schema` when #90 did not.** #90 changed `total.costUsd`'s
+meaning under an unchanged `@1` and this spec records that as the mistake it
+was (see "**`total.costUsd` changed meaning under an unchanged `schema`**",
+above, and #120). Adding keys is the documented bump condition, and a consumer
+pinning `@1` gets to notice rather than to silently read a document with a
+shape it does not know.
+
+Ledger format, writer, walk and failure modes: `docs/spec-116-spawn-ledger.md`.

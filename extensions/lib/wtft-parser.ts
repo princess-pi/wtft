@@ -1184,6 +1184,86 @@ const MAX_SUBAGENT_DEPTH = 5; // Claude Code hard limit
  * Pattern 1 (Claude Code): <session-dir>/<session-name>/subagents/agent-*.jsonl
  * Pattern 2 (Pi, pre-emptive): sibling files with parentSession header match
  */
+/** What the harness writes beside every built-in (Task) subagent transcript.
+ *
+ *  Four fields are universal and are what makes a meta a meta; the rest are
+ *  optional because the corpus says so, not because it felt safer. Measured
+ *  2026-09-17 over 439 files on this host, zero unparseable:
+ *  `agentType`/`description`/`toolUseId`/`spawnDepth` 439/439, `model` 419/439,
+ *  `parentAgentId` 25/439 — on exactly the files with `spawnDepth > 1`. */
+export interface SubagentMeta {
+	agentType: string;
+	description: string;
+	toolUseId: string;
+	spawnDepth: number;
+	model?: string;
+	parentAgentId?: string;
+	isFork?: boolean;
+}
+
+/** The `.meta.json` beside a subagent transcript, or `null` (#137).
+ *
+ *  WHY THIS EXISTS. #116 built a spawn ledger on the premise that "neither
+ *  transcript names the other and there is nothing to re-derive afterwards".
+ *  That is true of launcher-spawned children and has never been true of built-in
+ *  subagents: the harness has been writing `toolUseId` — the exact `tool_use`
+ *  block in the parent — to disk beside every one of them, and we inferred the
+ *  link from directory position instead. `description` is the other half: it is
+ *  the words a human typed at dispatch, which is the difference between a cost
+ *  report and a hex dump.
+ *
+ *  WHY IT NEVER THROWS, AND NEVER PARTIALLY SUCCEEDS. This is UNDOCUMENTED
+ *  harness output. It may vanish, gain fields or be renamed in any release, so
+ *  every failure — absent, unreadable, unparseable, wrong shape — returns `null`
+ *  and the caller renders exactly what it rendered before #137. A meta missing
+ *  one required field is `null` rather than a half-filled record, because a
+ *  report row labelled from a partial record is worse than one labelled from a
+ *  hash: it looks authoritative.
+ *
+ *  The optional fields are genuinely optional. `model` is absent from 20 of 439
+ *  files on this host, so a caller gets `undefined` there and must have an arm
+ *  for it — a null is a gap, not a zero.
+ *
+ *  `tests/wtft-137-subagent-meta.test.ts` M7 pins the four required names
+ *  verbatim, so a harness rename fails that suite loudly instead of quietly
+ *  emptying every label in the report. */
+export function readSubagentMeta(transcriptPath: string): SubagentMeta | null {
+	if (!transcriptPath.endsWith(".jsonl")) return null;
+	const metaPath = transcriptPath.slice(0, -".jsonl".length) + ".meta.json";
+	let raw: string;
+	try {
+		raw = fs.readFileSync(metaPath, "utf8");
+	} catch {
+		return null;   // absent is the ordinary case: Pi and shell children have none
+	}
+	let obj: unknown;
+	try {
+		obj = JSON.parse(raw);
+	} catch {
+		return null;
+	}
+	if (obj === null || typeof obj !== "object" || Array.isArray(obj)) return null;
+	const o = obj as Record<string, unknown>;
+
+	// The four required fields, checked for TYPE and not merely for presence —
+	// `spawnDepth: "1"` is a harness change, not a depth.
+	if (typeof o.agentType !== "string") return null;
+	if (typeof o.description !== "string") return null;
+	if (typeof o.toolUseId !== "string") return null;
+	if (typeof o.spawnDepth !== "number" || !Number.isFinite(o.spawnDepth)) return null;
+
+	const meta: SubagentMeta = {
+		agentType: o.agentType,
+		description: o.description,
+		toolUseId: o.toolUseId,
+		spawnDepth: o.spawnDepth,
+	};
+	if (typeof o.model === "string") meta.model = o.model;
+	if (typeof o.parentAgentId === "string") meta.parentAgentId = o.parentAgentId;
+	if (typeof o.isFork === "boolean") meta.isFork = o.isFork;
+	return meta;
+}
+
 export function discoverSubagentSessionFiles(
 	sessionPath: string,
 	maxDepth: number = MAX_SUBAGENT_DEPTH,

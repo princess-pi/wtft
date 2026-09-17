@@ -1,0 +1,301 @@
+#!/usr/bin/env bun
+/**
+ * @package princess-pi-tools
+ * @test wtft-137-subagent-meta
+ * @description #137 — the harness already writes the parent link; read it.
+ *
+ *   Every built-in (Task) subagent transcript has a `.meta.json` beside it,
+ *   written by the harness, carrying the words a human typed at dispatch and the
+ *   `toolUseId` of the exact `tool_use` block that spawned it. wtft showed a hex
+ *   basename instead, and #116 built a whole ledger on the premise that "neither
+ *   transcript names the other" — true for launcher children, never true for
+ *   these.
+ *
+ *   MEASURED (2026-09-17, this host): 439 meta files, ZERO unparseable, 1:1 with
+ *   `agent-*.jsonl`. Two facts the issue did not have and this suite pins:
+ *     - `model` is NOT universal — 419/439. A null there is a gap, not a zero.
+ *     - `parentAgentId` appears on exactly the files with `spawnDepth > 1`, all
+ *       25 resolving to a sibling transcript. The harness records the WHOLE
+ *       subagent tree, not just depth-1 edges.
+ *
+ *   THIS FILE IS UNDOCUMENTED HARNESS OUTPUT. It may vanish or be renamed in any
+ *   release, so every arm degrades to `null` and the caller keeps today's
+ *   behaviour — and M7 pins the field names so a rename fails LOUDLY here rather
+ *   than silently emptying every label in the report.
+ *
+ * @usage bun run test wtft-137-subagent-meta
+ */
+
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { readSubagentMeta } from "../bin/wtft.mjs";
+import { trackSandbox } from "./lib/sandbox";
+import { runWtftCli } from "./lib/wtft-cli";
+
+const CLI_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
+
+const RED = "\x1b[31m", GREEN = "\x1b[32m", RESET = "\x1b[0m";
+let passed = 0, failed = 0;
+function assert(label: string, ok: boolean, detail?: string) {
+	if (ok) { console.log(`  ${GREEN}PASS${RESET} ${label}`); passed++; }
+	else {
+		console.log(`  ${RED}FAIL${RESET} ${label}`); failed++;
+		if (detail) console.log(detail.split("\n").map(l => `      │ ${l}`).join("\n"));
+	}
+}
+
+const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-137-")));
+
+/** Write a transcript plus (optionally) its sibling meta, as the harness lays them out. */
+function subagent(name: string, meta: unknown | null): string {
+	const dir = path.join(root, name, "subagents");
+	fs.mkdirSync(dir, { recursive: true });
+	const transcript = path.join(dir, `agent-${name}.jsonl`);
+	fs.writeFileSync(transcript, "");
+	if (meta !== null) {
+		fs.writeFileSync(path.join(dir, `agent-${name}.meta.json`),
+			typeof meta === "string" ? meta : JSON.stringify(meta));
+	}
+	return transcript;
+}
+
+console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
+
+// M1 — the shape the harness actually writes, all four universal fields plus model.
+{
+	const t = subagent("a641e532bfaae9903", {
+		agentType: "general-purpose",
+		description: "Fix 116 prose drift, grep-verified",
+		toolUseId: "toolu_014xWPgGcSUHnLejKyXB1947",
+		spawnDepth: 1,
+		model: "sonnet",
+	});
+	const m = readSubagentMeta(t);
+	assert("M1 a complete meta beside a transcript is read", m !== null);
+	assert("M1 description — the words typed at dispatch, not a hash",
+		m?.description === "Fix 116 prose drift, grep-verified", JSON.stringify(m));
+	assert("M1 toolUseId — the RECORD of the parent link #116 said did not exist",
+		m?.toolUseId === "toolu_014xWPgGcSUHnLejKyXB1947", JSON.stringify(m));
+	assert("M1 agentType", m?.agentType === "general-purpose", JSON.stringify(m));
+	assert("M1 spawnDepth", m?.spawnDepth === 1, JSON.stringify(m));
+	assert("M1 model", m?.model === "sonnet", JSON.stringify(m));
+}
+
+// M2 — `model` absent. 20 of 439 files on this host have none, so this is the
+// COMMON degraded case, not an edge. The meta is still valid; `model` is
+// undefined and the caller needs an arm for it. A null here is a gap, not a zero.
+{
+	const t = subagent("no-model-child", {
+		agentType: "Explore", description: "sweep the corpus",
+		toolUseId: "toolu_nomodel", spawnDepth: 1,
+	});
+	const m = readSubagentMeta(t);
+	assert("M2 a meta with no `model` is still a valid meta", m !== null, JSON.stringify(m));
+	assert("M2 and `model` is undefined, not the empty string",
+		m !== null && m.model === undefined, JSON.stringify(m));
+	assert("M2 the rest is intact", m?.description === "sweep the corpus", JSON.stringify(m));
+}
+
+// M3 — no `.meta.json` at all. Pi children and shell-spawned children have none,
+// and that is not a failure: it is the ordinary case for everything #137 does
+// not cover. The caller must be able to tell "no meta" from "broken meta"
+// without a try/catch, so both are `null` and neither throws.
+{
+	const t = subagent("meta-less-child", null);
+	let threw = false;
+	let m: unknown;
+	try { m = readSubagentMeta(t); } catch { threw = true; }
+	assert("M3 a transcript with no meta does not throw", !threw);
+	assert("M3 it returns null, so the caller renders what it renders today", m === null);
+}
+
+// M4 — unparseable. A meta half-written by a killed harness, or truncated.
+{
+	const t = subagent("broken-json-child", '{"agentType":"general-purpose","desc');
+	let threw = false;
+	let m: unknown;
+	try { m = readSubagentMeta(t); } catch { threw = true; }
+	assert("M4 unparseable JSON does not throw", !threw);
+	assert("M4 it returns null", m === null);
+}
+
+// M5 — a REQUIRED field missing. A partial record is not a record: a report row
+// labelled from half a meta looks authoritative while being wrong, which is
+// worse than the hash it replaced. Each required field gets its own case, so a
+// future edit that drops one check from the guard fails here by name.
+{
+	const full = {
+		agentType: "general-purpose", description: "d",
+		toolUseId: "toolu_x", spawnDepth: 1,
+	} as Record<string, unknown>;
+	for (const missing of ["agentType", "description", "toolUseId", "spawnDepth"]) {
+		const partial = { ...full };
+		delete partial[missing];
+		const t = subagent(`missing-${missing}`, partial);
+		assert(`M5 a meta with no \`${missing}\` is declined, not half-read`,
+			readSubagentMeta(t) === null, JSON.stringify(readSubagentMeta(t)));
+	}
+}
+
+// M6 — right names, wrong types. `spawnDepth: "1"` is a harness change, not a
+// depth, and a check that only tested presence would carry the string straight
+// into arithmetic.
+{
+	const t = subagent("string-depth-child", {
+		agentType: "general-purpose", description: "d",
+		toolUseId: "toolu_y", spawnDepth: "1",
+	});
+	assert("M6 `spawnDepth` as a string is declined", readSubagentMeta(t) === null);
+
+	const t2 = subagent("array-meta-child", [1, 2, 3]);
+	assert("M6 a JSON array is declined", readSubagentMeta(t2) === null);
+
+	const t3 = subagent("null-meta-child", null as never);
+	assert("M6 a bare `null` document is declined",
+		readSubagentMeta(subagent("literal-null-child", "null")) === null);
+	void t3;
+}
+
+// M7 — THE FIELD-NAME PIN, and the reason this suite is worth its length.
+//
+// `.meta.json` is UNDOCUMENTED harness output. If a release renames
+// `description` to `label`, every guard above still returns null, every caller
+// still degrades politely, and the report silently goes back to showing hashes
+// with nothing anywhere reporting that it regressed. The names are therefore
+// asserted VERBATIM, against a fixture in the exact shape the harness writes, so
+// a rename fails loudly HERE — one test naming the field that moved — instead of
+// emptying the labels in production.
+{
+	const REQUIRED = ["agentType", "description", "toolUseId", "spawnDepth"];
+	const t = subagent("pin-child", {
+		agentType: "general-purpose",
+		description: "the words typed at dispatch",
+		toolUseId: "toolu_pin",
+		spawnDepth: 1,
+	});
+	const m = readSubagentMeta(t);
+	assert("M7 the four required harness field names still parse", m !== null);
+	for (const k of REQUIRED) {
+		const dropped = {
+			agentType: "general-purpose", description: "d", toolUseId: "toolu_pin", spawnDepth: 1,
+		} as Record<string, unknown>;
+		delete dropped[k];
+		assert(`M7 \`${k}\` is load-bearing — dropping it changes the answer`,
+			readSubagentMeta(subagent(`pin-drop-${k}`, dropped)) === null);
+	}
+}
+
+// M8 — `parentAgentId`, which is the finding the issue did not have.
+//
+// It appears on exactly the files with `spawnDepth > 1` — 25 of 439 here, 0
+// mismatches either way, and all 25 resolve to a sibling `agent-*.jsonl`. So a
+// subagent's parent is a RECORD at every depth, not only at the top. That is
+// strictly more than #116's ledger reconstructs for this class of child, and it
+// was already on disk.
+{
+	const t = subagent("deep-child", {
+		agentType: "general-purpose", description: "a subagent's subagent",
+		toolUseId: "toolu_deep", spawnDepth: 2,
+		parentAgentId: "aaf0bdce9cfa3e0d6",
+	});
+	const m = readSubagentMeta(t);
+	assert("M8 `parentAgentId` is carried", m?.parentAgentId === "aaf0bdce9cfa3e0d6", JSON.stringify(m));
+	assert("M8 alongside the depth that explains it", m?.spawnDepth === 2, JSON.stringify(m));
+
+	const shallow = readSubagentMeta(subagent("shallow-child", {
+		agentType: "general-purpose", description: "top-level", toolUseId: "toolu_top", spawnDepth: 1,
+	}));
+	assert("M8 and is undefined at depth 1, where the parent is the session itself",
+		shallow !== null && shallow.parentAgentId === undefined, JSON.stringify(shallow));
+}
+
+// ---
+// § R — THE CLOSER: the real CLI, `--json`, a session with a Task subagent
+// ---
+//
+// M1-M8 pin the reader. They cannot catch a reader that is right in isolation
+// and never wired to anything, which is the failure mode that left this file
+// unread for the whole life of the project: it was on disk, it parsed, and no
+// code path asked for it.
+//
+// SCOPE, stated rather than discovered later. The issue's Closer also asks the
+// RENDERED block to show the description in place of `agent-<hash>`. There is no
+// per-subagent rendered block on `main` — that is #116's SPAWNED block, on a
+// branch that has not merged — so the issue's "depends on nothing" is true of
+// this half and not of that one. This suite closes the `--json` half; the render
+// half lands with #116 and is tracked there.
+
+console.log("\n§ R — the Closer: `wtft --json` names its subagents\n");
+
+{
+	const projects = path.join(root, "projects");
+	const slug = path.join(projects, "-home-princess-pi-demo");
+	const sessionId = "11111111-2222-3333-4444-555555555555";
+	const sessionPath = path.join(slug, `${sessionId}.jsonl`);
+	const subDir = path.join(slug, sessionId, "subagents");
+	fs.mkdirSync(subDir, { recursive: true });
+
+	const turn = (id: string) => JSON.stringify({
+		type: "assistant",
+		message: {
+			role: "assistant", id, model: "claude-sonnet-4-6",
+			timestamp: new Date().toISOString(),
+			usage: { input_tokens: 1200, output_tokens: 90 },
+			content: [{ type: "text", text: "work" }],
+		},
+	}) + "\n";
+
+	fs.writeFileSync(sessionPath, turn("msg_parent_1"));
+
+	// One child WITH a meta — the labelled case.
+	const namedChild = path.join(subDir, "agent-a641e532bfaae9903.jsonl");
+	fs.writeFileSync(namedChild, turn("msg_child_1"));
+	fs.writeFileSync(path.join(subDir, "agent-a641e532bfaae9903.meta.json"), JSON.stringify({
+		agentType: "general-purpose",
+		description: "Fix 116 prose drift, grep-verified",
+		toolUseId: "toolu_014xWPgGcSUHnLejKyXB1947",
+		spawnDepth: 1,
+		model: "sonnet",
+	}));
+
+	// One child WITHOUT — the case that must keep behaving exactly as it did.
+	const bareChild = path.join(subDir, "agent-bbbbbbbbbbbbbbbbb.jsonl");
+	fs.writeFileSync(bareChild, turn("msg_child_2"));
+
+	const out = runWtftCli(`node ${JSON.stringify(CLI_BIN)} -s ${JSON.stringify(sessionPath)} --json`, {
+		env: { ...process.env, WTFT_CLAUDE_PROJECTS_DIR: projects },
+	});
+
+	let doc: any = null;
+	try { doc = JSON.parse(out); } catch { /* R1's first assertion owns this */ }
+	assert("R1 `--json` emitted one parseable document", doc !== null, out.slice(0, 400));
+
+	if (doc) {
+		assert("R1 the document carries a `subagents` array", Array.isArray(doc.subagents),
+			JSON.stringify(Object.keys(doc)));
+		const rows: any[] = doc.subagents ?? [];
+		assert(`R1 both children are listed (${rows.length})`, rows.length === 2,
+			JSON.stringify(rows.map(r => path.basename(r.transcript))));
+
+		const named = rows.find(r => r.transcript.includes("a641e532bfaae9903"));
+		assert("R1 the labelled child carries its meta", named?.meta != null, JSON.stringify(named));
+		assert("R1 `description` — the words typed at dispatch, not a hash",
+			named?.meta?.description === "Fix 116 prose drift, grep-verified", JSON.stringify(named));
+		assert("R1 `toolUseId` — the parent link, read rather than inferred",
+			named?.meta?.toolUseId === "toolu_014xWPgGcSUHnLejKyXB1947", JSON.stringify(named));
+		assert("R1 `model` — which makes the #504 downshift auditable from the report",
+			named?.meta?.model === "sonnet", JSON.stringify(named));
+
+		// The no-meta child. `meta: null` is a GAP, not an absence of cost: the
+		// transcript is still there and still counted, it simply has no label.
+		const bare = rows.find(r => r.transcript.includes("bbbbbbbbbbbbbbbbb"));
+		assert("R1 a child with no meta is still LISTED, with its transcript",
+			bare !== undefined && typeof bare.transcript === "string", JSON.stringify(rows));
+		assert("R1 and its meta is null — a gap, not a dropped subagent",
+			bare?.meta === null, JSON.stringify(bare));
+	}
+}
+
+console.log(`\n${failed === 0 ? GREEN : RED}${passed} passed, ${failed} failed${RESET}\n`);
+if (failed > 0) process.exit(1);

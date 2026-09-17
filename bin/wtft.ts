@@ -36,6 +36,7 @@ import {
 	readUncountedBillableClass,
 	renderUncountedBillables,
 	discoverSubagentSessionFiles,
+	readSubagentMeta,
 	discoverClaudeSubAgentSessionFiles,
 	clearSubagentCacheMiss,
 	loadSubagentInteractions,
@@ -57,6 +58,7 @@ import {
 	readTagFileWithVerdict,
 	detectSessionHarness,
 	buildSessionJson,
+	type WtftSubagentJson,
 	renderSessionJson,
 	WTFT_JSON_SCHEMA,
 	type WtftNotice,
@@ -172,6 +174,7 @@ export {
 	readUncountedBillableClass,
 	renderUncountedBillables,
 	discoverSubagentSessionFiles,
+	readSubagentMeta,
 	discoverClaudeSubAgentSessionFiles,
 	clearSubagentCacheMiss,
 	loadSubagentInteractions,
@@ -206,6 +209,7 @@ export {
 	// constant is a second thing to get wrong: the suite hardcoded 9 for
 	// EXIT_PROVISIONAL, so changing the constant here would have left it green.
 	buildSessionJson,
+	type WtftSubagentJson,
 	renderSessionJson,
 	detectSessionHarness,
 	WTFT_JSON_SCHEMA,
@@ -841,6 +845,25 @@ async function main() {
 	// log was not written yet — internally contradictory, and contradicting the
 	// spec's pending-arm row. Skipping both re-reads makes the report a
 	// consistent snapshot of the moment the branch was taken.
+	/** The built-in subagents this session spawned, each with the harness's own
+	 *  record of it where one exists (#137).
+	 *
+	 *  Discovery is re-run rather than reusing `subagentFiles`, which is scoped
+	 *  to the blind-spot scan and is empty on the paths that never reach it. It
+	 *  is the same directory read either way, and a label that silently goes
+	 *  missing on some arms is worse than one that costs a readdir.
+	 *
+	 *  A discovery failure yields an empty list and NOT an error: #457 already
+	 *  routes that to `provisional.reason = "subagent-unreadable"`, which is the
+	 *  field a consumer should be reading for it. Reporting it twice, in two
+	 *  vocabularies, is how the two drift apart.
+	 */
+	const collectSubagentJson = (): WtftSubagentJson[] => {
+		let files: string[] = [];
+		try { files = discoverSubagentSessionFiles(finalSessionPath).files; } catch { return []; }
+		return files.map(transcript => ({ transcript, meta: readSubagentMeta(transcript) }));
+	};
+
 	const emitSessionJson = (opt: { notices?: WtftNotice[]; pending?: boolean } = {}) => {
 		const uncounted = opt.pending ? newUncountedBillables() : scanSessionUncounted();
 		const doc = buildSessionJson({
@@ -853,6 +876,12 @@ async function main() {
 			},
 			provisional,
 			uncounted,
+			// #137 — name the built-in subagents from the `.meta.json` the harness
+			// already writes beside each transcript. Omitted on the `pending` arm:
+			// the session file does not exist, so discovery never ran, and an
+			// empty array there would read as "this session spawned nothing"
+			// rather than "nobody looked".
+			...(opt.pending ? {} : { subagents: collectSubagentJson() }),
 			notices: [...earlyNotices, ...(opt.notices ?? [])],
 		});
 		process.stdout.write(renderSessionJson(doc));

@@ -93,7 +93,38 @@ universal fields are required for a meta to be considered valid; anything else m
 | M6 | wrong types (`spawnDepth: "1"`) → `null` |
 | M7 | **the field-name pin.** The four universal names are asserted verbatim, so a harness rename fails this suite loudly instead of silently emptying every label |
 | M8 | `parentAgentId` is carried, and is present exactly when `spawnDepth > 1` |
-| R1 | **the Closer.** `wtft --json` on a session with a Task subagent reports that child's `description`, `model` and `toolUseId`; the rendered block shows the description in place of `agent-<hash>`; a subagent with no meta renders as it does today |
+| R1 | **the Closer, `--json` half.** `wtft --json` on a session with a Task subagent reports that child's `description`, `model` and `toolUseId`; a subagent with NO meta is still listed, with its transcript and `meta: null` |
+
+## The Closer's other half depends on #116, and the issue said it depended on nothing
+
+The issue's Closer also asks that "the rendered block shows the description in place of the
+`agent-<hash>` basename". **There is no per-subagent rendered block on `main`.** That is #116's
+`SPAWNED` block, which lives on an unmerged branch, so there is nothing here to relabel.
+
+So `--json` is the half that can ship independently, and it does. The render half is a two-line
+change to `renderSpawnTree` once #116 merges, and it belongs in that branch's worktree rather
+than in a merge conflict waiting to happen here. Recorded rather than quietly dropped: an issue
+that says "depends on nothing" and half-does is how a Closer stops meaning anything.
+
+## The shape of the `--json` addition
+
+```jsonc
+"subagents": [
+  { "transcript": "…/agent-a641….jsonl",
+    "meta": { "agentType": "general-purpose", "description": "Fix 116 prose drift…",
+              "toolUseId": "toolu_014…", "spawnDepth": 1, "model": "sonnet" } },
+  { "transcript": "…/agent-bbb….jsonl", "meta": null }
+]
+```
+
+**The key is ABSENT, not `[]`, when discovery did not run** — the `pending` arm, where the
+session file does not yet exist. This is the same rule `uncounted` follows and for the same
+reason: an empty array from a caller that never looked is indistinguishable from a session that
+spawned nothing, and a consumer reading `subagents.length === 0` would conclude the latter.
+
+**`meta: null` is a gap, not a missing subagent.** The transcript is always present and its cost
+is counted either way; only the label is absent. Pi children, shell-spawned children, and any
+future harness release that stops writing the file all land here.
 
 ## Scope
 

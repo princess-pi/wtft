@@ -16,7 +16,7 @@
 
 import { computeSessionSummary, type ModelTotals, type CategoryTotals, type TokenTotals } from "./wtft-renderer.js";
 import type { Interaction } from "./wtft-shared.js";
-import type { UncountedBillables } from "./wtft-parser.ts";
+import type { UncountedBillables, SubagentMeta } from "./wtft-parser.ts";
 import type { TagProvisional } from "./wtft-daemon-lib.js";
 
 /** Bumped when any key below changes shape. Prose changes never bump it. */
@@ -48,6 +48,8 @@ export interface WtftSessionIdentity {
 
 export interface WtftSessionJson {
 	schema: typeof WTFT_JSON_SCHEMA;
+	/** #137, and ABSENT rather than empty when discovery did not run. */
+	subagents?: WtftSubagentJson[];
 	session: WtftSessionIdentity;
 	provisional: TagProvisional;
 	total: TokenTotals;
@@ -57,6 +59,23 @@ export interface WtftSessionJson {
 	compaction: { events: number; tokensFreed: number };
 	untaggedInteractions: number;
 	notices: WtftNotice[];
+}
+
+/** One built-in (Task) subagent, named from the `.meta.json` the harness writes
+ *  beside its transcript (#137).
+ *
+ *  `meta` is null wherever there is no readable meta — a Pi child, a
+ *  shell-spawned child, a harness release that stopped writing the file. That
+ *  null is a GAP, not an absence of cost: the transcript is still counted, it
+ *  simply has no label. A consumer that treats null as "no subagent" is reading
+ *  it wrong, which is why the transcript path is always present and the meta is
+ *  the optional half. */
+export interface WtftSubagentJson {
+	/** Always present: the transcript, which is what the cost comes from. */
+	transcript: string;
+	/** The harness's record, or null. `model` inside it is itself optional —
+	 *  419 of 439 files on this host carry one. */
+	meta: SubagentMeta | null;
 }
 
 export interface BuildSessionJsonInput {
@@ -69,6 +88,11 @@ export interface BuildSessionJsonInput {
 	 *  The type is the enforcement — a caller with nothing to report passes
 	 *  `newUncountedBillables()` and means it. (PR review, Medium/contract.) */
 	uncounted: UncountedBillables;
+	/** #137. Omitted (not `[]`) by a caller that did not look, for the same
+	 *  reason `uncounted` is not defaulted: an empty array from a caller that
+	 *  never ran discovery is indistinguishable from a session with no
+	 *  subagents. `buildSessionJson` emits the key only when it is given one. */
+	subagents?: WtftSubagentJson[];
 	notices?: WtftNotice[];
 }
 
@@ -85,6 +109,7 @@ export function buildSessionJson(input: BuildSessionJsonInput): WtftSessionJson 
 		uncounted: input.uncounted,
 		compaction: summary.compaction,
 		untaggedInteractions: summary.untaggedInteractions,
+		...(input.subagents ? { subagents: input.subagents } : {}),
 		notices: input.notices ?? [],
 	};
 }

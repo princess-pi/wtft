@@ -64,8 +64,6 @@ export interface WtftSessionIdentity {
 
 export interface WtftSessionJson {
 	schema: typeof WTFT_JSON_SCHEMA;
-	/** #137, and ABSENT rather than empty when discovery did not run. */
-	subagents?: WtftSubagentJson[];
 	session: WtftSessionIdentity;
 	provisional: TagProvisional;
 	/** SELF: this session's own turns. Unchanged by #116. */
@@ -90,6 +88,11 @@ export interface WtftSessionJson {
 	 *  in no `unattributed` entry, and the count is the only trace of it. The
 	 *  fourth condition was missing from every surface until round 5. */
 	tree: TokenTotals;
+	/** #137. ABSENT rather than empty when discovery did not run, so `[]` always
+	 *  means "looked, found none". Sits here because the wire order groups the
+	 *  lineage: `spawned` is the ledger, `tree` its total, `subagents` the
+	 *  per-child detail. */
+	subagents?: WtftSubagentJson[];
 	compaction: { events: number; tokensFreed: number };
 	untaggedInteractions: number;
 	notices: WtftNotice[];
@@ -158,9 +161,9 @@ export function buildSessionJson(input: BuildSessionJsonInput): WtftSessionJson 
 		uncounted: input.uncounted,
 		spawned: input.spawned,
 		tree: treeTotals(summary.total, input.spawned),
+		...(input.subagents ? { subagents: input.subagents } : {}),
 		compaction: summary.compaction,
 		untaggedInteractions: summary.untaggedInteractions,
-		...(input.subagents ? { subagents: input.subagents } : {}),
 		notices: input.notices ?? [],
 	};
 }

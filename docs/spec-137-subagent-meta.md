@@ -23,6 +23,12 @@ never parsed or field-counted. So the census below covers 439 files, and "zero u
 claim about those 439. What the equal totals do support is that meta files are not sparse —
 there is no large population of transcripts without one.
 
+**Why this section says 487 and the audit round below says 493.** Same recursive walk, two
+different moments — the corpus grows while sessions run. Between the two readings this host
+gained six subagent dispatches, and *both* methods moved by exactly six: the wider walk
+487 → 493, the narrow glob 439 → 445. Neither count is wrong; every number in this document
+is a reading with a timestamp, not a constant.
+
 | Field | Present | Type | Notes |
 |---|---:|---|---|
 | `agentType` | 439/439 | string | which agent definition ran (`general-purpose`, `Explore`, …) |
@@ -72,9 +78,11 @@ something wtft can promise.
 ```ts
 export interface SubagentMeta {
 	agentType: string;
-	description: string;
-	toolUseId: string;
 	spawnDepth: number;
+	/** Absent on workflow children — see the census above. */
+	description?: string;
+	/** Absent on workflow children — see the census above. */
+	toolUseId?: string;
 	model?: string;
 	parentAgentId?: string;
 	isFork?: boolean;
@@ -90,9 +98,10 @@ any caller may use keeps the interface small and leaves that boundary exactly wh
 
 **A missing or broken meta is never an error.** It returns `null` and the caller renders what it
 renders today. This is an **undocumented harness file**: it may vanish, gain fields, or change
-names in any release, and wtft must degrade to today's behaviour rather than fail. Only the four
-universal fields are required for a meta to be considered valid; anything else missing is a
-`undefined`, never a rejection.
+names in any release, and wtft must degrade to today's behaviour rather than fail. Only **two** fields — `agentType` and `spawnDepth` — are required for a meta to be considered
+valid; anything else missing is `undefined`, never a rejection. The first cut required all
+four, which would have silently declined the 48 workflow children that carry no `description`
+or `toolUseId`; the audit round below is where that was caught and corrected.
 
 ## Tests
 

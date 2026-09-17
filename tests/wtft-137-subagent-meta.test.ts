@@ -18,6 +18,11 @@
  *   carries the same caveat, and an earlier version of this header stated the
  *   stronger claim the spec had already retracted (#137 review round 2).
  *
+ *   The spec's later audit round counts 493, not 487. Same recursive walk, a
+ *   later moment: the corpus grew by six while the work was in flight, and the
+ *   narrow glob moved 439 -> 445 by the same six. See spec-137 § "Why this
+ *   section says 487". Every count here is a reading with a date on it.
+ *
  *   ONE fact the issue did not have, and this suite pins it:
  *     - `model` is NOT universal — 419/439. A null there is a gap, not a zero.
  *
@@ -95,7 +100,10 @@ function fixtureWrote(label: string, transcript: string): void {
 
 console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 
-// M1 — the shape the harness actually writes, all four universal fields plus model.
+// M1 — the richest shape the harness writes: the two universal fields
+// (`agentType`, `spawnDepth`) plus `description`, `toolUseId` and `model`.
+// "Four universal fields" was the first cut's gate and is retired — M5c pins
+// the 48 workflow children that carry only the two.
 {
 	const t = subagent("a641e532bfaae9903", {
 		agentType: "general-purpose",
@@ -411,9 +419,12 @@ console.log("\n§ R — the Closer: `wtft --json` names its subagents\n");
 
 	const turn = (id: string) => JSON.stringify({
 		type: "assistant",
+		// TOP LEVEL, beside `type` — where the harness writes it and where the
+		// parser reads it. Nested inside `message` it parses and silently yields
+		// no timestamp, which is the shape tests/wtft-116-spawn-ledger.test.ts got right.
+		timestamp: new Date().toISOString(),
 		message: {
 			role: "assistant", id, model: "claude-sonnet-4-6",
-			timestamp: new Date().toISOString(),
 			usage: { input_tokens: 1200, output_tokens: 90 },
 			content: [{ type: "text", text: "work" }],
 		},

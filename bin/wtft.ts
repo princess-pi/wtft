@@ -997,14 +997,20 @@ async function main() {
 	 */
 	const collectSubagentJson = (): WtftSubagentJson[] | undefined => {
 		// `undefined` — so the KEY IS OMITTED — whenever discovery did not produce
-		// a complete answer. Three cases reach that, and all three mean the same
+		// a complete answer. FOUR cases reach that, and all four mean the same
 		// thing to a consumer: nobody looked, or looked and could not see.
 		//
 		//  - the session file does not exist (the `pending` arm, handled by the
 		//    caller, and the early return in `scanSessionUncounted` which never
 		//    reaches discovery at all);
-		//  - the subagents directory threw, which `discoverOnce` caches as
-		//    `{ files: [], unreadable }`;
+		//  - the Claude Code `<session>/subagents/` directory threw, which
+		//    `discoverOnce` caches as `{ files: [], unreadable }`;
+		//  - the SIBLING SESSION DIRECTORY threw — `readdirSync(sessionDir)` in
+		//    the Pi Pattern-2 half, which drops every sibling under it. A
+		//    different directory and a different half of discovery from the one
+		//    above, and it throws where the per-file class reports. The count
+		//    said THREE until Macroscope read this list against the code on
+		//    PR #152; the behaviour was already right, the enumeration was not;
 		//  - a per-file discovery failure, which returns the readable files
 		//    ALONGSIDE `unreadable` — so the list is non-empty and still partial.
 		//

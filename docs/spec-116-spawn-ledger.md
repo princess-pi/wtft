@@ -617,7 +617,7 @@ are left with their issues. Three were new, and two of those were hangs.
 
 Both fields are **free text supplied by a spawner**, and the `SPAWNED` block prints them into a
 padded column. A newline round-trips through JSON perfectly — `JSON.stringify` escapes it,
-`JSON.parse` restores it — so `padEnd` emitted a row that was really two, and a spawner could
+`JSON.parse` restores it — so the padded row was really two, and a spawner could
 **forge report lines showing whatever money it liked**. An `ESC` starts an OSC sequence that the
 reader's terminal executes.
 
@@ -634,6 +634,32 @@ silently shortened label reads as the spawner's own text.
 
 This is the repo's own rule arriving where it was missing: everything not authored by Duppy is
 data. The ledger is written by launchers, and the report was rendering it as if it were ours.
+
+### The same column, measured in the wrong space (Medium)
+
+A later round found the row's OTHER half wrong. `full.length > 40` and `padEnd(40)` both count
+UTF-16 **code units**; a terminal lays out **columns**. A BMP wide character — CJK, Hangul, the
+fullwidth forms — is one code unit and two columns, so forty of them slipped past the width
+guard untouched, `padEnd` added nothing, and every money figure in the block shifted right by
+forty. Measured: `貓`×40 put the money column at 85 where ASCII put it at 65.
+
+This is **#130's defect wearing different clothes** — a count taken in one space and spent in
+another. There it was a byte offset used as a string index; here it is a code-unit count used
+as a column width. `getVisualLength` already existed, in the same file, for exactly this.
+
+`fitVisual(str, width)` now truncates and pads in the space the terminal actually uses, and the
+row calls it. Astral emoji are the reason a casual fixture would have missed this: a surrogate
+pair is two code units **and** two columns, so the two measures agree by coincidence and a 🐱
+label renders correctly against the broken code. The test uses CJK deliberately and asserts
+that divergence as a precondition (`D28`), so it cannot quietly stop exercising the bug.
+
+**And the test guarding the injection above could not fail.** Deleting `safe()` from the row
+left `D25c` and `D25d` GREEN — verified by mutation, not by reading. Two independent causes:
+`D25c`'s payload sat beyond the 40-column field, so *truncation* removed it rather than the
+sanitiser; and `D25d` asserted that no OSC sequence survived when the fixture **contained no
+OSC sequence at all** — the absence of something never present. Both fixtures now put the
+payload inside the visible field, and all three assertions fail under that mutation and pass
+when it is reverted. A green suite was not evidence; the mutation was.
 
 ### A FIFO at the ledger path hung the report, and the writer (High, High)
 

@@ -623,6 +623,42 @@ export function getVisualLength(str: string): number {
 	return width;
 }
 
+/**
+ * Fit `str` into exactly `width` terminal COLUMNS: truncate with an ellipsis if
+ * it is too wide, pad with spaces if it is too narrow.
+ *
+ * Why this is not `slice` + `padEnd` (#136, Macroscope Medium): both of those
+ * count UTF-16 CODE UNITS. A BMP wide character — CJK, Hangul, the fullwidth
+ * forms — is ONE code unit and TWO columns, so 40 of them slip past a
+ * `length > 40` guard untouched and `padEnd(40)` adds nothing, while the
+ * terminal lays out 80 columns and every figure to the right shifts. Astral
+ * emoji hide the bug rather than showing it: a surrogate pair is two code units
+ * AND two columns, so the two measures agree by coincidence.
+ *
+ * Iterating with `for...of` walks CODE POINTS, so a surrogate pair is measured
+ * once rather than as two half-characters.
+ */
+export function fitVisual(str: string, width: number): string {
+	if (width <= 0) return "";
+	const full = getVisualLength(str);
+	if (full <= width) return str + " ".repeat(width - full);
+
+	let out = "";
+	let used = 0;
+	for (const ch of str) {
+		const w = getVisualLength(ch);
+		// Reserve the last column for the ellipsis.
+		if (used + w > width - 1) break;
+		out += ch;
+		used += w;
+	}
+	out += "\u2026";
+	used += 1;
+	// A wide character that could not fit leaves a one-column gap; pad it, so
+	// the field is exactly `width` whatever the text was.
+	return out + " ".repeat(width - used);
+}
+
 // MAIN LAYOUT COMPILER
 
 export function getTerminalWidth(isWidget = false, disabledEmoji = false): number {
@@ -2203,14 +2239,16 @@ export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string 
 const rows: string[] = [];
 	for (const edge of spawned.edges) {
 		const full = edge.label ? `${safe(edge.mechanism)}  ${safe(edge.label)}` : safe(edge.mechanism);
-		// Truncated, not padded: `label` is free text from a spawner, and one
-		// long one pushes every money figure in the block out of its column.
-		const name = full.length > 40 ? full.slice(0, 39) + "…" : full;
+		// Fitted to 40 COLUMNS, not 40 code units: `label` is free text from a
+		// spawner, and one long or one WIDE one pushes every money figure in
+		// the block out of its column. `fitVisual` truncates and pads in the
+		// same space the terminal lays out in.
+		const name = fitVisual(full, 40);
 		// A skipped edge prints its REASON where its cost would be. A dash or a
 		// $0.00 would both read as "this child was free", which is the one thing
 		// we do not know about it.
 		const money = edge.total ? formatCost(edge.total.costUsd) : `(${edge.skip})`;
-		rows.push(`           ${name.padEnd(40)} ${money.padStart(12)}`);
+		rows.push(`           ${name} ${money.padStart(12)}`);
 	}
 
 	// Two different units, named as such. `descendants` counts SESSIONS priced;

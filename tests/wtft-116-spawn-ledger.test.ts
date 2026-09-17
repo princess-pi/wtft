@@ -41,6 +41,7 @@ import {
 	type SpawnRecord,
 } from "../extensions/lib/wtft-spawn-ledger.ts";
 import { computeSpawnTree } from "../extensions/lib/wtft-spawn-tree.ts";
+import { getVisualLength } from "../extensions/lib/wtft-renderer.ts";
 import { cwdForClaudeSpawn } from "../bin/wtft.mjs";
 import { spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
@@ -908,20 +909,37 @@ let selfCostWithRecord = 0;
 	check(esc.status === 2, `D25b an OSC escape sequence is refused too (exit ${esc.status})`);
 
 	// -- layer 2: the renderer sanitises a record the writer never saw --
-	fs.writeFileSync(LEDGER, JSON.stringify({
-		schema: "wtft/spawn@1",
-		parent: PARENT,
-		child: CLOSER_CHILD,
-		ts: new Date(Date.UTC(2026, 8, 16, 6, 0)).toISOString(),
-		mechanism: "herdr-agent-start",
-		label: "agent/824\nSPAWNED    forged-row                                   $99.99",
-	}) + "\n");
+	//
+	// The payload must land INSIDE the 40-column name field. The earlier fixture
+	// used a long `SPAWNED    forged-row ... $99.99` label, and the field own
+	// truncation cut it off before the assertions ever saw it -- so D25c passed
+	// with `safe()` DELETED from the row. Measured, not reasoned: the mutation
+	// was applied and the suite stayed green. Short payloads only, from here.
+	//
+	// D25d was worse: the old layer-2 ledger carried NO escape sequence at all,
+	// so "no OSC survives" asserted the absence of something never present. The
+	// second record below is the one that makes it a test.
+	const rec2 = (child: string, label: string, min: number) => JSON.stringify({
+		schema: "wtft/spawn@1", parent: PARENT, child,
+		ts: new Date(Date.UTC(2026, 8, 16, 6, min)).toISOString(),
+		mechanism: "herdr-agent-start", label,
+	});
+	const OSC = "b" + String.fromCharCode(27) + "]0;pwned" + String.fromCharCode(7) + "c";
+	fs.writeFileSync(LEDGER,
+		rec2(CLOSER_CHILD, "a\nFORGED $9.99", 0) + "\n" +
+		rec2(CHILD_A, OSC, 1) + "\n");
 
 	const out = cli(["--tokens"]).out;
-	const forged = out.split("\n").filter(l => l.includes("forged-row"));
-	check(forged.length <= 1,
-		`D25c a hand-written newline cannot split one edge into two rendered rows (${forged.length} rows carry it)`);
-	check(!out.includes("\u001b]"), "D25d no OSC sequence survives into the rendered output");
+	// One edge must render as ONE line. Column 0 is NOT the discriminator here:
+	// the block indents every physical line, so a split row lands at column 1,
+	// not 0 -- measured, by deleting `safe()` and watching a column-0 assertion
+	// stay green. What actually changes is that the label text leaves its own
+	// mechanism behind, so pin them together.
+	const carriesForged = out.split("\n").filter(l => l.includes("FORGED"));
+	check(carriesForged.length > 0 && carriesForged.every(l => l.includes("herdr-agent-start")),
+		`D25c a hand-written newline cannot split one edge off from its own mechanism onto a line of its own (${JSON.stringify(carriesForged.map(l => l.slice(0, 40)))})`);
+	check(!out.includes(String.fromCharCode(27) + "]"),
+		"D25d and an OSC sequence that IS present in the ledger does not survive into the rendered output");
 	check(out.includes("\uFFFD"),
 		"D25e and the replacement character is VISIBLE, so a reader can tell a label was tampered with rather than merely short");
 }
@@ -1034,6 +1052,66 @@ let selfCostWithRecord = 0;
 			`D26c spawn-record does not hang on a FIFO ledger (signal=${write.signal})`);
 		check(write.status === 3,
 			`D26d it exits 3 — the unwritable-ledger code a spawner already ignores (got ${write.status})`);
+	}
+}
+
+
+// --- D28: a wide-character label cannot shift the money column ---
+//
+// Macroscope, PR #136, Medium. The row is built with `full.length > 40` and
+// `name.padEnd(40)`. Both count UTF-16 CODE UNITS; a terminal lays out COLUMNS.
+// A BMP wide character — CJK, Hangul, the fullwidth forms — is ONE code unit and
+// TWO columns, so 40 of them pass the width check untouched, `padEnd(40)` adds
+// nothing, and every money figure in the block shifts right by 40.
+//
+// Same disease as #130's byte-offset-as-string-index: a count taken in one space
+// and spent in another. `getVisualLength` already exists for exactly this, and
+// lives in the same file as the row that does not call it.
+//
+// Astral emoji do NOT expose it — a surrogate pair is two code units AND two
+// columns, so the two measures agree by coincidence and a 🐱 fixture would pass
+// against the broken code. The fixture uses CJK deliberately and ASSERTS the
+// divergence first, so it cannot quietly stop exercising the bug.
+{
+	const LEDGER = path.join(stateHome, "wtft", "spawns.jsonl");
+	const WIDE = "貓".repeat(40);        // 40 code units, 80 columns
+	const NARROW = "cat".repeat(14);          // 42 code units, 42 columns
+
+	check(WIDE.length === 40 && getVisualLength(WIDE) === 80,
+		`D28 fixture precondition: the wide label is 40 code units and 80 columns — the gap under test (len=${WIDE.length}, visual=${getVisualLength(WIDE)})`);
+	check(NARROW.length === getVisualLength(NARROW),
+		`D28a fixture precondition: the ASCII control label measures the same in both spaces (len=${NARROW.length}, visual=${getVisualLength(NARROW)})`);
+
+	const rec = (child: string, label: string, min: number) => JSON.stringify({
+		schema: "wtft/spawn@1", parent: PARENT, child,
+		ts: new Date(Date.UTC(2026, 8, 16, 6, min)).toISOString(),
+		mechanism: "herdr-agent-start", label,
+	});
+	// Two children that BOTH fail to resolve, so both rows carry the same money
+	// text. An earlier draft used CLOSER_CHILD here, which HAS a transcript in
+	// this sandbox and rendered `$0.17` against the other row's `(not-found)` —
+	// D28c caught it, which is the whole reason that precondition is asserted.
+	const UNRESOLVABLE_A = "d38296d6-2222-4333-8444-555566667777";
+	const UNRESOLVABLE_B = "d38296d6-3333-4444-8555-666677778888";
+	fs.writeFileSync(LEDGER, rec(UNRESOLVABLE_A, NARROW, 0) + "\n" + rec(UNRESOLVABLE_B, WIDE, 1) + "\n");
+
+	const lines = cli(["--tokens"]).out.split("\n");
+	const wideRow = lines.find(l => l.includes("貓"));
+	const narrowRow = lines.find(l => l.includes("cat"));
+	check(wideRow !== undefined && narrowRow !== undefined,
+		`D28b both edges render a row (wide=${wideRow !== undefined}, narrow=${narrowRow !== undefined})`);
+	// No magic column constant here on purpose: the money field is `padStart(12)`
+	// and padStart does NOT truncate, so a long skip reason makes the TOTAL row
+	// width vary by design, and the block's own indent has been miscounted twice
+	// while writing this test. Pin the fixture instead — assert both rows carry
+	// the SAME money text, which makes equal row width mean equal name width,
+	// and nothing else.
+	const moneyOf = (row: string) => row.trim().split(/\s+/).pop()!;
+	if (wideRow && narrowRow) {
+		check(moneyOf(wideRow) === moneyOf(narrowRow),
+			`D28c fixture precondition: both edges render the same money text, so row width isolates the NAME field (narrow=${moneyOf(narrowRow)}, wide=${moneyOf(wideRow)})`);
+		check(getVisualLength(wideRow) === getVisualLength(narrowRow),
+			`D28d a wide-character label occupies the same terminal columns as an ASCII one, so the money column stays put (narrow=${getVisualLength(narrowRow)}, wide=${getVisualLength(wideRow)})`);
 	}
 }
 

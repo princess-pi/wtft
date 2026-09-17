@@ -181,8 +181,7 @@ quantity that sits beside it** — the same shape as the UNCOUNTED block (#149),
 reason: a number the reader has never seen before must arrive labelled, not folded into one they
 already trust.
 
-**`--json`** gains a `spawned` object and a `tree` total, and the document schema bumps to
-`wtft/session@2`:
+**`--json`** gains a `spawned` object and a `tree` total:
 
 ```json
 "spawned": {

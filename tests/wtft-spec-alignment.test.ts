@@ -478,3 +478,60 @@ try {
 	console.error(`❌ MANIFEST/PARSER INTERVAL-UNIT ALIGNMENT TEST FAILED: ${err.message}`);
 	process.exit(1);
 }
+
+
+// ---------------------------------------------------------------------------
+// KEY ORDER — the wire order, the interface, and the spec example (#141)
+//
+// `buildSessionJson`'s literal carries a comment claiming its key order "matches
+// the example in docs/spec-26-json.md and the interface above, deliberately:
+// three orders for one document is three chances to describe it wrong."
+//
+// Nothing checked that. #141 added `subagents` in a different position in all
+// three, and the comment went quietly false — a reviewer caught it, not a test.
+// This is the check that makes the fourth time impossible: the claim is pinned,
+// not merely corrected.
+//
+// It does NOT replace #116's D13e, and neither subsumes the other. D13e reads the
+// real CLI output and pins three keys by adjacency (uncounted -> spawned -> tree);
+// it proves the SHIPPED BINARY emits that order, and it is why the order is right
+// at runtime. This one parses the three DESCRIPTIONS and pins all of them against
+// each other; it is why they agree on paper. D13e was green throughout #141 —
+// `subagents` landed nowhere near its three keys, which is exactly the blind spot
+// a narrow pin has by construction.
+// ---------------------------------------------------------------------------
+try {
+	const jsonSrc = fs.readFileSync(path.join(import.meta.dir, "../extensions/lib/wtft-json.ts"), "utf8");
+	const specSrc = fs.readFileSync(path.join(import.meta.dir, "../docs/spec-26-json.md"), "utf8");
+
+	// 1. The interface's declaration order.
+	const ifaceBlock = jsonSrc.match(/export interface WtftSessionJson \{\n([\s\S]*?)\n\}/);
+	assert.ok(ifaceBlock, "could not locate `interface WtftSessionJson` in wtft-json.ts");
+	const ifaceKeys = [...ifaceBlock![1].matchAll(/^\t(\w+)\??:/gm)].map((m) => m[1]);
+
+	// 2. The wire order: the object literal `buildSessionJson` returns. The spread
+	//    that makes `subagents` optional counts as its key, in its position.
+	const litBlock = jsonSrc.match(/export function buildSessionJson[\s\S]*?\n\treturn \{\n([\s\S]*?)\n\t\};/);
+	assert.ok(litBlock, "could not locate the `buildSessionJson` return literal");
+	const litKeys = [...litBlock![1].matchAll(/^\t\t(?:\.\.\.\(input\.(\w+)|(\w+):)/gm)]
+		.map((m) => m[1] ?? m[2]);
+
+	// 3. The canonical example under the `wtft/session@3` heading.
+	const fences = [...specSrc.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => m[1]);
+	const example = fences.find((f) => f.includes(`"schema": "${"wtft/session@3"}"`));
+	assert.ok(example, "docs/spec-26-json.md has no ```json example carrying the @3 schema string");
+	const exampleKeys = [...example!.matchAll(/^ {2}"(\w+)":/gm)].map((m) => m[1]);
+
+	assert.ok(litKeys.length > 5, `parsed only ${litKeys.length} keys from the literal — the regex has drifted`);
+	assert.ok(litKeys.includes("subagents"), "`subagents` missing from the parsed wire order — regex drift or a real removal");
+
+	assert.deepStrictEqual(litKeys, ifaceKeys,
+		`WIRE ORDER vs INTERFACE disagree.\n  literal:   ${litKeys.join(", ")}\n  interface: ${ifaceKeys.join(", ")}`);
+	assert.deepStrictEqual(litKeys, exampleKeys,
+		`WIRE ORDER vs spec-26 EXAMPLE disagree.\n  literal: ${litKeys.join(", ")}\n  example: ${exampleKeys.join(", ")}`);
+
+	console.log(`\u2705 JSON KEY-ORDER TEST PASSED — literal, interface and spec example agree on all ${litKeys.length} keys!`);
+} catch (err: any) {
+	console.error(`\u274c JSON KEY-ORDER TEST FAILED: ${err.message}`);
+	process.exit(1);
+}

@@ -285,7 +285,7 @@ _Avoid_: Standalone mode, binary (the binary is `bin/wtft.mjs`; "CLI" names the 
 
 **JSON mode** (#26):
 `--json` — the CLI's machine-readable mode. Writes exactly one JSON object (schema
-`wtft/session@2`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
+`wtft/session@3`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
 Human prose goes to stderr, and every sentence that would otherwise have been on stdout is
 repeated in the object's `notices[]`, where `code` is the contract and `text` is disposable.
 Its aggregate numbers come from `computeSessionSummary` (`extensions/lib/wtft-renderer.ts`),

@@ -1177,6 +1177,107 @@ export function classifyInteraction(interaction: Interaction): Category {
 
 const MAX_SUBAGENT_DEPTH = 5; // Claude Code hard limit
 
+/** What the harness writes beside every built-in (Task) subagent transcript.
+ *
+ *  `agentType` and `spawnDepth` are universal and are what makes a meta a meta.
+ *  Everything else is optional because the corpus says so: the Dynamic Workflow
+ *  children under `subagents/workflows/` carry neither `description` nor
+ *  `toolUseId`, which is why the required set is two and not four.
+ *
+ *  Counts are not repeated here — they move every time a session spawns a
+ *  subagent. `docs/spec-137-subagent-meta.md` carries one dated census; to
+ *  re-derive, walk `~/.claude/projects` recursively for `*.meta.json`. */
+export interface SubagentMeta {
+	agentType: string;
+	spawnDepth: number;
+	/** Absent on Dynamic Workflow children. */
+	description?: string;
+	/** Absent on Dynamic Workflow children. */
+	toolUseId?: string;
+	model?: string;
+	parentAgentId?: string;
+	isFork?: boolean;
+}
+
+/** The `.meta.json` beside a subagent transcript, or `null` (#137).
+ *
+ *  WHY THIS EXISTS. #116 built a spawn ledger on the premise that "neither
+ *  transcript names the other and there is nothing to re-derive afterwards".
+ *  That is true of launcher-spawned children and has never been true of built-in
+ *  subagents: the harness has been writing `toolUseId` — the exact `tool_use`
+ *  block in the parent — to disk beside most of them, and we inferred the link
+ *  from directory position instead. `description` is the other half: it is
+ *  the words a human typed at dispatch, which is the difference between a cost
+ *  report and a hex dump.
+ *
+ *  WHY IT NEVER THROWS, AND NEVER PARTIALLY SUCCEEDS. This is UNDOCUMENTED
+ *  harness output. It may vanish, gain fields or be renamed in any release, so
+ *  every failure — absent, unreadable, unparseable, wrong shape — returns `null`
+ *  and the caller renders exactly what it rendered before #137. A meta missing
+ *  one required field is `null` rather than a half-filled record, because a
+ *  report row labelled from a partial record is worse than one labelled from a
+ *  hash: it looks authoritative.
+ *
+ *  `model` is optional too, so a caller gets `undefined` there and must have an
+ *  arm for it: a null is a gap, not a zero.
+ *
+ *  `tests/wtft-137-subagent-meta.test.ts` § M7 documents what the name-pinning
+ *  does and does not cover; it is not restated here. */
+export function readSubagentMeta(transcriptPath: string): SubagentMeta | null {
+	if (!transcriptPath.endsWith(".jsonl")) return null;
+	const metaPath = transcriptPath.slice(0, -".jsonl".length) + ".meta.json";
+	let raw: string;
+	try {
+		raw = fs.readFileSync(metaPath, "utf8");
+	} catch {
+		// Absent is the ORDINARY case — Pi and shell children have none — but this
+		// catch also swallows EACCES, EIO and EISDIR, and the caller cannot tell
+		// them apart. `null` is documented to consumers as "this harness wrote no
+		// record", so an unreadable file currently reports a confident absence.
+		// Narrowing it needs a new `notices[]` code, which is additive under
+		// `wtft/session@3`; filed rather than smuggled into this branch.
+		return null;
+	}
+	let obj: unknown;
+	try {
+		obj = JSON.parse(raw);
+	} catch {
+		return null;
+	}
+	if (obj === null || typeof obj !== "object" || Array.isArray(obj)) return null;
+	const o = obj as Record<string, unknown>;
+
+	// TWO required fields, checked for TYPE and not merely for presence —
+	// `spawnDepth: "1"` is a harness change, not a depth.
+	//
+	// It was FOUR until the local audit round. The census that justified four
+	// globbed two path segments then `subagents/`, which cannot reach
+	// `subagents/workflows/wf_<id>/` — so it never saw the Dynamic Workflow
+	// children, which carry only `{agentType, spawnDepth}`. The spec even
+	// flagged the files the glob missed and then derived the rule from the rest.
+	// Those missed files are EXACTLY the ones the rule rejected.
+	//
+	// The cost was not a stricter reader. It was a WRONG ANSWER: every failure
+	// here returns `null`, and `null` is defined for consumers as "this harness
+	// wrote no record". Measured on one real session, 30 of 33 children reported
+	// no metadata with the file sitting on disk, readable, carrying two usable
+	// fields. Requiring what the corpus actually makes universal keeps the
+	// label where there is one and stops inventing absences where there are not.
+	if (typeof o.agentType !== "string") return null;
+	if (typeof o.spawnDepth !== "number" || !Number.isFinite(o.spawnDepth)) return null;
+
+	const meta: SubagentMeta = {
+		agentType: o.agentType,
+		spawnDepth: o.spawnDepth,
+	};
+	if (typeof o.description === "string") meta.description = o.description;
+	if (typeof o.toolUseId === "string") meta.toolUseId = o.toolUseId;
+	if (typeof o.model === "string") meta.model = o.model;
+	if (typeof o.parentAgentId === "string") meta.parentAgentId = o.parentAgentId;
+	if (typeof o.isFork === "boolean") meta.isFork = o.isFork;
+	return meta;
+}
+
 /**
  * Discover subagent session files for a given parent session, walking
  * subdirectories recursively up to maxDepth (Claude Code convention).

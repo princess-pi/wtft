@@ -26,17 +26,14 @@
 import { computeSessionSummary, type ModelTotals, type CategoryTotals, type TokenTotals } from "./wtft-renderer.js";
 import { treeTotals, type SpawnTree } from "./wtft-spawn-tree.js";
 import type { Interaction } from "./wtft-shared.js";
-import type { UncountedBillables } from "./wtft-parser.ts";
+import type { UncountedBillables, SubagentMeta } from "./wtft-parser.ts";
 import type { TagProvisional } from "./wtft-daemon-lib.js";
 
-/** Bumped when any key below changes shape. Prose changes never bump it.
+/** Bumped when a top-level key is ADDED or changes shape. Prose never bumps it.
  *
- *  `@2` (#116) added `spawned` and `tree`, and pinned what `total` has always
- *  meant: THIS SESSION'S OWN TURNS. Not one dollar moved into or out of it —
- *  the launcher-spawned descendants arrive as a new, named quantity beside it,
- *  because a number a reader has never seen before must arrive labelled rather
- *  than folded into one they already trust. */
-export const WTFT_JSON_SCHEMA = "wtft/session@2";
+ *  A consumer pins this string to know which keys it may rely on; the per-key
+ *  contract is docs/spec-26-json.md. */
+export const WTFT_JSON_SCHEMA = "wtft/session@3";
 
 /**
  * A human-facing sentence that would otherwise have gone to stdout.
@@ -88,9 +85,28 @@ export interface WtftSessionJson {
 	 *  in no `unattributed` entry, and the count is the only trace of it. The
 	 *  fourth condition was missing from every surface until round 5. */
 	tree: TokenTotals;
+	/** #137. ABSENT rather than empty whenever discovery could not give a
+	 *  complete answer, so `[]` always means "looked, found none". */
+	subagents?: WtftSubagentJson[];
 	compaction: { events: number; tokensFreed: number };
 	untaggedInteractions: number;
 	notices: WtftNotice[];
+}
+
+/** One subagent transcript this session spawned — a Claude Code Task child OR a
+ *  Pi `parentSession` sibling — named from the `.meta.json` where the harness
+ *  wrote one. Pi siblings never have one, so they are rows with `meta: null`
+ *  (#137).
+ *
+ *  `meta` is null wherever there is no readable meta. That null is a missing
+ *  LABEL, not a missing subagent — the row is still a real subagent. It says
+ *  nothing either way about whether the cost is in `total`. */
+export interface WtftSubagentJson {
+	/** Always present: the transcript, which is what the cost comes from. */
+	transcript: string;
+	/** The harness's record, or null. Only `agentType` and `spawnDepth` are
+	 *  universal; see `SubagentMeta`. */
+	meta: SubagentMeta | null;
 }
 
 export interface BuildSessionJsonInput {
@@ -110,10 +126,15 @@ export interface BuildSessionJsonInput {
 	 *  caller with nothing to report passes an empty `computeSpawnTree` result
 	 *  and means it. */
 	spawned: SpawnTree;
+	/** #137. Omitted (not `[]`) whenever discovery could not give a complete
+	 *  answer, for the same reason `uncounted` is not defaulted: `[]` from a
+	 *  caller that did not look is indistinguishable from a session with no
+	 *  subagents. `buildSessionJson` emits the key only when it is given one. */
+	subagents?: WtftSubagentJson[];
 	notices?: WtftNotice[];
 }
 
-/** Build the `wtft/session@2` document. Pure: no I/O, no clock, no process state. */
+/** Build the `wtft/session@3` document. Pure: no I/O, no clock, no process state. */
 export function buildSessionJson(input: BuildSessionJsonInput): WtftSessionJson {
 	const summary = computeSessionSummary(input.interactions);
 	return {
@@ -130,6 +151,7 @@ export function buildSessionJson(input: BuildSessionJsonInput): WtftSessionJson 
 		uncounted: input.uncounted,
 		spawned: input.spawned,
 		tree: treeTotals(summary.total, input.spawned),
+		...(input.subagents ? { subagents: input.subagents } : {}),
 		compaction: summary.compaction,
 		untaggedInteractions: summary.untaggedInteractions,
 		notices: input.notices ?? [],

@@ -12,9 +12,16 @@ whole time.
 
 ## What is actually on disk — measured, not assumed
 
-439 meta files under `~/.claude/projects/*/*/subagents/` on this host, 2026-09-17. Every one
-parsed; **zero unparseable**. A wider `find` (which reaches nested subagent dirs the glob does
-not) counts 487 meta files against 487 `agent-*.jsonl` — **1:1**.
+439 meta files under `~/.claude/projects/*/*/subagents/` on this host, 2026-09-17. Every one of
+those 439 parsed; **zero unparseable**.
+
+**Two limits on that number, stated because the first draft of this section overstated it**
+(#137 review round 1). A wider `find` — which reaches nested subagent directories the glob does
+not — counts **487** meta files and **487** `agent-*.jsonl`. Equal totals are not a pairing:
+they are consistent with 1:1 and do not establish it, and the 48 files the glob missed were
+never parsed or field-counted. So the census below covers 439 files, and "zero unparseable" is a
+claim about those 439. What the equal totals do support is that meta files are not sparse —
+there is no large population of transcripts without one.
 
 | Field | Present | Type | Notes |
 |---|---:|---|---|
@@ -49,6 +56,14 @@ parentAgentId resolves to a sibling agent-*.jsonl:  25 / 25
 25 deep files, 25 `parentAgentId`s, 25 resolving siblings. So a subagent's parent is a RECORD at
 every depth, not only at the top — which is strictly more than #116's ledger reconstructs for
 this class of child, and it is already on disk.
+
+**That correlation is a CORPUS OBSERVATION, and the suite does not pin it** (#137 review round
+1). M8 checks the reader carries `parentAgentId` when the harness writes one and leaves it
+`undefined` when it does not — which is the reader's contract. It does not assert that the
+harness only writes it below depth 1, because that is the harness's behaviour, not ours, and a
+test that failed when a future release started writing it at depth 1 would be reporting a
+correct change as a defect. The observation is what makes the field worth reading; it is not
+something wtft can promise.
 
 ## The seam
 
@@ -92,7 +107,7 @@ universal fields are required for a meta to be considered valid; anything else m
 | M5 | a meta missing a REQUIRED field (`toolUseId`) → `null`; a partial record is not a record |
 | M6 | wrong types (`spawnDepth: "1"`) → `null` |
 | M7 | **the field-name pin.** The four universal names are asserted verbatim, so a harness rename fails this suite loudly instead of silently emptying every label |
-| M8 | `parentAgentId` is carried, and is present exactly when `spawnDepth > 1` |
+| M8 | `parentAgentId` is carried through the reader when present, and is `undefined` when the harness omits it |
 | R1 | **the Closer, `--json` half.** `wtft --json` on a session with a Task subagent reports that child's `description`, `model` and `toolUseId`; a subagent with NO meta is still listed, with its transcript and `meta: null` |
 
 ## The Closer's other half depends on #116, and the issue said it depended on nothing

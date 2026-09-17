@@ -683,6 +683,34 @@ async function main() {
 	// distrust the comments. The invariant is "at most one scan per run", and
 	// that is checkable from the cache alone.
 	let uncountedCache: UncountedBillables | null = null;
+	/** ONE discovery read, shared (#137 review round 1).
+	 *
+	 *  `scanSessionUncounted` ran discovery to find the files it must scan, and
+	 *  `collectSubagentJson` ran it a SECOND time, later, to label them. The two
+	 *  reads straddled the tag read, the notice building and the uncounted scan,
+	 *  and were then serialised as a single snapshot — the same two-reads-one-
+	 *  document class this file already fixed for the tag (`readTagFileWithVerdict`).
+	 *
+	 *  Two concrete mismatches it produced: the first read succeeds and the second
+	 *  throws, shipping `subagents: []` beside a settled `provisional`; or the
+	 *  second sees a subagent that appeared or vanished in between, so `subagents`
+	 *  lists transcripts `uncounted` never covered, or omits ones it did.
+	 *
+	 *  Memoised here so both callers get the same answer, whichever runs first.
+	 *  `unreadable` is carried too, because the scan turns it into
+	 *  `provisional.reason` and the emitter must not report it a second time in a
+	 *  different vocabulary. */
+	let discoveryCache: { files: string[]; unreadable: Error | null } | null = null;
+	const discoverOnce = (): { files: string[]; unreadable: Error | null } => {
+		if (discoveryCache) return discoveryCache;
+		try {
+			return (discoveryCache = discoverSubagentSessionFiles(finalSessionPath));
+		} catch (err) {
+			// The DIR-level throw. Cache it as "nothing discovered, and we know
+			// why", so the second caller cannot re-run it and disagree.
+			return (discoveryCache = { files: [], unreadable: err instanceof Error ? err : new Error(String(err)) });
+		}
+	};
 	const scanSessionUncounted = (): UncountedBillables => {
 		if (uncountedCache) return uncountedCache;
 		// A session file that has not been written YET is not an unreadable one
@@ -704,8 +732,8 @@ async function main() {
 		// warned (once per dir, latched); degrade the blind-spot scan rather
 		// than crash the report — the tag-based costs are unaffected.
 		let subagentFiles: string[] = [];
-		try {
-			const discovered = discoverSubagentSessionFiles(finalSessionPath);
+		{
+			const discovered = discoverOnce();
 			subagentFiles = discovered.files;
 			if (discovered.unreadable) {
 				// #457 (round 6) — a per-file discovery failure is REPORTED,
@@ -725,13 +753,14 @@ async function main() {
 				// actionable one regardless of the tag verdict.
 				provisional = { provisional: true, reason: "subagent-unreadable" };
 			}
-		} catch {
-			// The DIR-level failure still throws (rounds 4/6): an unreadable
-			// subagents directory or sibling sessionDir drops a whole
-			// subtree's uncounted billables. walkSubagentDir already warned
-			// (once per dir, latched); degrade the blind-spot scan the same
-			// way (round 7) — unconditional, for the same reason as above.
-			provisional = { provisional: true, reason: "subagent-unreadable" };
+			// The DIR-level failure (rounds 4/6) — an unreadable subagents
+			// directory or sibling sessionDir dropping a whole subtree's
+			// uncounted billables — used to arrive here as a THROW, caught
+			// separately. `discoverOnce` now catches it and reports it through
+			// the same `unreadable` field, so both failure shapes reach this one
+			// arm and cannot be handled two different ways by two callers
+			// (#137 review round 1). `walkSubagentDir` still warns, once per dir,
+			// latched.
 		}
 		for (const sub of subagentFiles) {
 			// A listed file is not a scanned file (PR #95 review, Medium): the
@@ -836,15 +865,6 @@ async function main() {
 		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
 	};
 
-	// `pending` pins the decision the CALLER already made, rather than letting the
-	// document re-derive it later (PR review, Medium/correctness). The
-	// pending-session arm decides "file absent" and then awaits `awaitDaemonUp`;
-	// if the daemon's first write lands inside that await, a later
-	// `fs.existsSync` says present. The document would then carry a real
-	// `session.harness` and a real `uncounted` under a notice saying the session
-	// log was not written yet — internally contradictory, and contradicting the
-	// spec's pending-arm row. Skipping both re-reads makes the report a
-	// consistent snapshot of the moment the branch was taken.
 	/** The built-in subagents this session spawned, each with the harness's own
 	 *  record of it where one exists (#137).
 	 *
@@ -858,12 +878,18 @@ async function main() {
 	 *  field a consumer should be reading for it. Reporting it twice, in two
 	 *  vocabularies, is how the two drift apart.
 	 */
-	const collectSubagentJson = (): WtftSubagentJson[] => {
-		let files: string[] = [];
-		try { files = discoverSubagentSessionFiles(finalSessionPath).files; } catch { return []; }
-		return files.map(transcript => ({ transcript, meta: readSubagentMeta(transcript) }));
-	};
+	const collectSubagentJson = (): WtftSubagentJson[] =>
+		discoverOnce().files.map(transcript => ({ transcript, meta: readSubagentMeta(transcript) }));
 
+	// `pending` pins the decision the CALLER already made, rather than letting the
+	// document re-derive it later (PR review, Medium/correctness). The
+	// pending-session arm decides "file absent" and then awaits `awaitDaemonUp`;
+	// if the daemon's first write lands inside that await, a later
+	// `fs.existsSync` says present. The document would then carry a real
+	// `session.harness` and a real `uncounted` under a notice saying the session
+	// log was not written yet — internally contradictory, and contradicting the
+	// spec's pending-arm row. Skipping both re-reads makes the report a
+	// consistent snapshot of the moment the branch was taken.
 	const emitSessionJson = (opt: { notices?: WtftNotice[]; pending?: boolean } = {}) => {
 		const uncounted = opt.pending ? newUncountedBillables() : scanSessionUncounted();
 		const doc = buildSessionJson({

@@ -1177,13 +1177,6 @@ export function classifyInteraction(interaction: Interaction): Category {
 
 const MAX_SUBAGENT_DEPTH = 5; // Claude Code hard limit
 
-/**
- * Discover subagent session files for a given parent session, walking
- * subdirectories recursively up to maxDepth (Claude Code convention).
- *
- * Pattern 1 (Claude Code): <session-dir>/<session-name>/subagents/agent-*.jsonl
- * Pattern 2 (Pi, pre-emptive): sibling files with parentSession header match
- */
 /** What the harness writes beside every built-in (Task) subagent transcript.
  *
  *  Four fields are universal and are what makes a meta a meta; the rest are
@@ -1264,6 +1257,13 @@ export function readSubagentMeta(transcriptPath: string): SubagentMeta | null {
 	return meta;
 }
 
+/**
+ * Discover subagent session files for a given parent session, walking
+ * subdirectories recursively up to maxDepth (Claude Code convention).
+ *
+ * Pattern 1 (Claude Code): <session-dir>/<session-name>/subagents/agent-*.jsonl
+ * Pattern 2 (Pi, pre-emptive): sibling files with parentSession header match
+ */
 export function discoverSubagentSessionFiles(
 	sessionPath: string,
 	maxDepth: number = MAX_SUBAGENT_DEPTH,

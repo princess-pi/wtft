@@ -37,7 +37,12 @@ import {
 	isSessionIdBasename,
 	loadExternalHarnesses,
 	warnUnreadableTranscript,
-	WTFT_TAGGER_VERSION as TAGGER_VERSION
+	WTFT_TAGGER_VERSION as TAGGER_VERSION,
+	// #130 — the byte offset a tag write may start at: where the last line
+	// begins. The heartbeat overwrite starts here and the partial-tail repair
+	// cuts here. Must be a BYTE
+	// offset on a line boundary; deriving it from a decoded string is the defect.
+	lastLineStartByte,
 } from "../extensions/lib/wtft-shared.js";
 
 
@@ -70,6 +75,19 @@ let tagPath = "";
 let pidPath = "";
 let rebuildTagOnStartup = false;
 let lastSize = 0;            // bytes read from session.jsonl
+// Bytes of an unterminated trailing line seen on the PREVIOUS poll (#130). A
+// fragment that has not grown for a whole beat AND parses as JSON is a complete
+// record whose writer stopped before the newline — a killed or crashed harness.
+// `parseSessionFile` counts that record (it splits the whole file), so a daemon
+// that waited forever would drift from it, which is the divergence #156 exists
+// to prevent. One number, and it resets the moment a newline arrives.
+// The trailing PARTIAL line carried between polls, as BYTES rather than a length
+// (#142). Holding only the length meant the offset could not advance past it, so
+// every poll re-read the whole partial record from disk: measured at 33.5x the
+// record size for a 64 MiB line written over 64 polls (2,144 MiB read to deliver
+// 64 MiB). Carrying the bytes lets the offset advance every poll, so each byte is
+// read from disk exactly once.
+let pendingFragment: Buffer = Buffer.alloc(0);
 let lastWriteMs = 0;         // last time we flushed to the tag file
 let lastActivityMs = Date.now(); // last time we classified a new interaction
 let startupTime = Date.now();    // daemon start time (idle exit grace period)
@@ -344,78 +362,111 @@ process.on("SIGHUP", () => shutdown("SIGHUP"));
 /**
  * Update the heartbeat line in the tag file.
  *
- * If the last line is already a heartbeat, truncates it off and appends the
- * updated one (Fork C: no in-place overwrite, no fixed-width contract).
- * If the last line is classified data, appends a new heartbeat line.
+ * If the last line is already a heartbeat of the same width, overwrite it in
+ * place. If it is anything else — classified data, a `_meta` marker, a
+ * `{"_hb":"stop"}` line, a width we do not recognise — append beside it.
  *
- * Scans backwards from EOF for the last newline to handle arbitrarily long
- * preceding lines (classified data lines can be large with `cmd` arrays).
+ * LINE-SAFE BY CONSTRUCTION (#130), AND THE FILE NEVER SHRINKS.
+ *
+ * The heartbeat line is a FIXED WIDTH — `first` and `last` are both epoch
+ * milliseconds, 13 digits each from 2001-09-09 (1e12 ms) until 2286-11-20
+ * (1e13 ms) — so replacing one with a
+ * fresher one is a single `pwrite` of exactly as many bytes as it covers, on
+ * the one descriptor already open. No truncate, no second open, no size change,
+ * and therefore no window AROUND THIS WRITE: a reader cannot catch the heartbeat
+ * half-replaced, only fully-old or fully-new.
+ *
+ * That is a claim about this WRITE, not about the file. A concurrent reader can
+ * still meet a partial line at the END of the file, because a large append is
+ * not one `write(2)` — `syncSubagentTranscript` appends batches of hundreds of
+ * KB and node may split them. `extensions/lib/wtft-daemon-lib.ts` says so where
+ * the incremental reader handles it, and an earlier draft of this sentence said
+ * the file was whole "at every instant", which makes that handling look like
+ * paranoia worth deleting.
+ *
+ * WHY THE SHRINK HAD TO GO (#130 review round 2). The previous shape truncated
+ * on an `r+` descriptor and appended on a fresh one. Both halves landed on a
+ * line boundary, so JSONL held — but the file briefly got SHORTER, and an
+ * offset-tracking reader only ever asks whether the file GREW. Its
+ * `lastReadOffset` stayed past the new EOF, so the next classified line was
+ * read starting k bytes into itself, failed `JSON.parse`, and vanished from the
+ * live view with nothing logged. A guarantee that holds for whole-file readers
+ * and quietly fails for incremental ones is not the guarantee this issue is
+ * about.
+ *
+ * A TORN WRITE IS STILL VALID. If the kernel splits the pwrite, the line holds
+ * some old digits and some new — but old and new have identical shape and
+ * identical length, so any byte-wise mix of them is still a complete, parseable
+ * heartbeat with a plausible timestamp. The width is what buys that; it is not
+ * a coincidence worth losing.
+ *
+ * WHEN THE WIDTH DOES NOT MATCH — a `{"_hb":"stop"}` line, or a tag written by
+ * some future build — it appends instead. An extra heartbeat line costs
+ * nothing, because readers take the last one, and an append never shrinks the
+ * file either.
+ *
+ * WHAT THIS REPLACES. The previous scan read bytes, decoded them, and then
+ * computed `searchOffset + lastLineStart` — a byte offset plus a UTF-16
+ * code-unit index. Every multi-byte character ahead of the last line drove the
+ * truncate that many bytes INTO the preceding line, and the fresh heartbeat was
+ * welded onto the severed half: 2,562 such lines across 96 of this host's 327
+ * tag files, 99.7% of them with an arrow or em dash in the preceding 2 KiB.
+ * 1,707 destroyed a `_meta` marker, and `_meta.offset` is where the next daemon
+ * start resumes from; 12 destroyed classified cost data.
+ *
+ * So the offset comes from `lastLineStartByte`, which searches the raw Buffer
+ * and never decodes a chunk. Only the resolved line is decoded, and a complete
+ * line is complete UTF-8.
  */
 function upsertHeartbeat(now: number) {
+  const hbLine = JSON.stringify({ _hb: { first: idleStartMs, last: now } }) + "\n";
+  const hbBuf = Buffer.from(hbLine, "utf8");
   try {
-    const hbLine = JSON.stringify({ _hb: { first: idleStartMs, last: now } }) + "\n";
-    const stat = fs.statSync(tagPath);
-    if (stat.size === 0) {
-      appendTagFile(tagPath, hbLine);
-      return;
-    }
-
-    // Scan backwards from EOF in chunks to find the last complete line.
-    // A classified data line can be large (e.g. long `cmd` array), so a
-    // fixed-size read window would land mid-line.
+    // One descriptor, and every question asked of THAT descriptor rather than
+    // of the path a second time.
     const fd = fs.openSync(tagPath, "r+");
-    const CHUNK = 512;
-    let searchOffset = stat.size;
-    let tail = "";
-    let lastNl = -1;
-
-    while (searchOffset > 0 && lastNl === -1) {
-      const readSize = Math.min(CHUNK, searchOffset);
-      searchOffset -= readSize;
-      const buf = Buffer.alloc(readSize);
-      fs.readSync(fd, buf, 0, readSize, searchOffset);
-      tail = buf.toString("utf8") + tail;
-      lastNl = tail.lastIndexOf("\n");
-    }
-
-    // Resolve the last complete line. If the file ends with \n (normal),
-    // the last \n is a terminator — step back to the previous \n to find
-    // the actual last line. If the file does not end with \n (edge case),
-    // the last \n is the separator before the last line.
-    let lastLineStart: number;
-    if (lastNl === tail.length - 1) {
-      // File ends with \n — find the \n that precedes the last line
-      const prevNl = tail.lastIndexOf("\n", tail.length - 2);
-      lastLineStart = prevNl === -1 ? 0 : prevNl + 1;
-    } else if (lastNl === -1) {
-      lastLineStart = 0;
-    } else {
-      lastLineStart = lastNl + 1;
-    }
-
-    const lastLine = tail.slice(lastLineStart).trim();
-
-    let isHb = false;
     try {
-      const obj = JSON.parse(lastLine);
-      isHb = obj._hb !== undefined;
-    } catch (_) {}
-
-    if (isHb) {
-      // Truncate the stale heartbeat line, then append the updated one.
-      // No fixed-width overwrite — the file simply shrinks by one heartbeat
-      // line and grows by one (net-zero for equal-length heartbeats).
-      const truncAt = searchOffset + lastLineStart;
-      fs.ftruncateSync(fd, truncAt);
+      const size = fs.fstatSync(fd).size;
+      const lineStart = size > 0 ? lastLineStartByte(fd, size) : 0;
+      // Same width is the precondition for replacing in place. A different
+      // width is not an error — it just means this line is not one of ours to
+      // overwrite, so we fall through and append.
+      if (size - lineStart === hbBuf.length) {
+        const lineBuf = Buffer.alloc(hbBuf.length);
+        fs.readSync(fd, lineBuf, 0, lineBuf.length, lineStart);
+        let isHb = false;
+        try {
+          const obj = JSON.parse(lineBuf.toString("utf8").trim());
+          isHb = obj !== null && typeof obj === "object" && obj._hb !== undefined;
+        } catch (_) { /* not a heartbeat we can recognise — append beside it */ }
+        if (isHb) {
+          // Exactly as many bytes as it covers, starting on a line boundary.
+          // The size does not change, so no reader's offset can go stale.
+          fs.writeSync(fd, hbBuf, 0, hbBuf.length, lineStart);
+          return;
+        }
+      }
+    } finally {
+      fs.closeSync(fd);
     }
-    appendTagFile(tagPath, hbLine);
-    fs.closeSync(fd);
   } catch (_) {
-    // Fallback: append if we can't seek/overwrite
-    try {
-      appendTagFile(tagPath, JSON.stringify({ _hb: { first: idleStartMs, last: now } }) + "\n");
-    } catch (_2) {}
+    // Could not open, stat or seek. An extra heartbeat line costs nothing —
+    // readers take the last one — and it is strictly better than skipping the
+    // beat, which is what an idle-clamp would read as a dead daemon.
+    //
+    // ONE CASE THIS SWALLOWS IS NOT MERELY AN EXTRA LINE: if the tag file has
+    // been DELETED under a live daemon (a `wtft-tags` clear, a tmp sweep), the
+    // open throws ENOENT and the append below RE-CREATES the file holding one
+    // lone heartbeat — an empty tag standing in for the session's whole cost
+    // history. The daemon does not notice, because `parseNewLines` watches the
+    // SESSION file, not the tag. Unchanged by #130 (the previous `fs.statSync`
+    // threw at the same point into the same fallback), and out of scope here,
+    // but recorded so the next reader does not take this comment as a statement
+    // that nothing can be lost on this path.
   }
+  // Not replaceable in place: append. `appendTagFile` owns the #512
+  // terminal-failure contract and the whole-lines guard.
+  appendTagFile(tagPath, hbLine);
 }
 
 /** Atomically replace the published lease without exposing an empty file. */
@@ -430,6 +481,64 @@ function replaceLease(value: string): void {
   }
 }
 
+/** Cut any unterminated tail off the tag file, and say whether it cut (#130).
+ *
+ *  THE ONE HOLE THE APPEND GUARD CANNOT COVER. `appendTagFile` refuses a batch
+ *  that does not end in a newline, which makes every write this daemon COMPLETES
+ *  leave whole lines. It says nothing about a write that never completed. A
+ *  daemon killed inside `fs.appendFileSync` — SIGKILL, the OOM killer, power
+ *  loss — cannot reach the #512 handler that would have set the `rebuild` lease
+ *  token, so it leaves a numeric PID lease that the next daemon reaps as merely
+ *  stale, and a tag file that ends mid-line.
+ *
+ *  The next daemon then resumed incrementally and appended its start heartbeat
+ *  straight onto that fragment, welding two records into one unparseable line —
+ *  which is the very corpus shape this issue was opened about, arriving by a
+ *  second route after the arithmetic defect was fixed (#130 review round 2).
+ *
+ *  So the invariant is restored at the one moment a new writer takes over the
+ *  file, rather than re-derived by every reader forever after. The fragment is
+ *  discarded rather than completed because it is not a record: nobody knows how
+ *  much of it reached the disk.
+ *
+ *  CUTTING IS NOT ENOUGH, AND THE ONLY CALLER KNOWS IT. A `true` return makes
+ *  `initClassified` set `rebuildTagOnStartup` and truncate the whole tag to
+ *  zero — there is no resume, and no offset survives. That is deliberate:
+ *  `flushPending` appends the classified batch and THEN `_meta.offset`, so a
+ *  writer killed inside the second append leaves the batch complete and the
+ *  offset line half-written. Cut the fragment and resume from the previous
+ *  offset, and that batch is re-classified on top of itself.
+ *
+ *  An earlier draft of this docstring said `dedupeClassifiedById` collapses the
+ *  replay and re-reading a turn is free. IT DOES NOT: an interaction with no
+ *  `messageId` passes straight through that function, so an id-less turn is
+ *  billed twice, permanently. The argument is recorded here as refuted because
+ *  it is exactly the argument that would justify removing the caller's
+ *  escalation as redundant. `tests/wtft-130-…` C1b fails without it. */
+function truncatePartialTail(path: string): boolean {
+  let fd: number;
+  try {
+    fd = fs.openSync(path, "r+");
+  } catch (_) {
+    return false;   // no tag file yet, or unreadable — nothing to repair
+  }
+  try {
+    const size = fs.fstatSync(fd).size;
+    if (size === 0) return false;
+    const last = Buffer.alloc(1);
+    fs.readSync(fd, last, 0, 1, size - 1);
+    if (last[0] === 0x0a) return false;   // already whole lines
+    const lineStart = lastLineStartByte(fd, size);
+    fs.ftruncateSync(fd, lineStart);
+    return true;
+  } catch (err) {
+    fatalTagMutation(path, "partial-tail truncate", err);
+    return false;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 /** Stop after an append whose on-disk extent is unknowable (#512).
  *
  * The append itself may already have left a partial fragment. Do not perform any
@@ -438,7 +547,7 @@ function replaceLease(value: string): void {
  * invalidates a live successor, which exits at its next poll's lease check; the
  * next owner consumes the token and rederives the disposable tag in full.
  */
-function fatalTagMutation(filePath: string, operation: "append" | "rebuild truncate", err: unknown): never {
+function fatalTagMutation(filePath: string, operation: "append" | "rebuild truncate" | "partial-tail truncate", err: unknown): never {
   running = false;
   let markedForRebuild = false;
   try {
@@ -457,8 +566,30 @@ function fatalTagMutation(filePath: string, operation: "append" | "rebuild trunc
   process.exit(1);
 }
 
-/** Every append to a derived tag shares the same terminal failure contract. */
+/** Every append to a derived tag shares the same terminal failure contract.
+ *
+ * And every append is WHOLE LINES (#130). A tag file is JSONL, and its readers
+ * are entitled to presume no MID-FILE line is ever malformed — a fragment can
+ * only ever be the last thing in the file, which every reader already tolerates,
+ * and never a corrupt line with valid lines after it, which none of them can.
+ * That is the presumption this helper exists to make safe, so the one append
+ * goes through is where that is enforced, rather than in each of the eight call
+ * sites or, worse, in each reader. A batch that does not end in a newline is a
+ * programming error at the call site, not a runtime condition: every caller
+ * builds its batch by appending "\n" per record. Failing loudly here is what
+ * makes the reader-side presumption safe to hold.
+ */
 function appendTagFile(filePath: string, batch: string): void {
+  if (batch.length > 0 && !batch.endsWith("\n")) {
+    fatalTagMutation(filePath, "append", new Error(
+      // Buffer.byteLength, not String.length. `batch.length` counts UTF-16 code
+      // units, so a batch carrying `→` or `—` would report fewer "bytes" than it
+      // has — the byte-versus-string-index confusion this whole issue is about,
+      // reintroduced in the message that announces it (round-1 review).
+      `refusing to append a batch that does not end in a newline (${Buffer.byteLength(batch, "utf8")} bytes) — ` +
+      "a tag file is JSONL and its readers presume whole lines (#130)",
+    ));
+  }
   try {
     fs.appendFileSync(filePath, batch);
   } catch (err) {
@@ -1018,18 +1149,69 @@ function parseNewLines(filePath: string) {
         process.stderr.write(`[wtft-log-parser] session truncated, resetting offset\n`);
       }
       lastSize = 0;
+      // A fragment counted against the OLD file says nothing about the new one.
+      pendingFragment = Buffer.alloc(0);
     }
-    if (currentSize <= lastSize) return [];
-    const fd = fs.openSync(filePath, "r");
-    const buf = Buffer.alloc(currentSize - lastSize);
-    // try/finally: a throwing readSync must not leak the descriptor (#270 review).
-    try {
-      fs.readSync(fd, buf, 0, buf.length, lastSize);
-    } finally {
-      fs.closeSync(fd);
+    const grew = currentSize > lastSize;
+    // No new bytes AND nothing held over: there is nothing to decide. With a
+    // fragment in hand we must still fall through, because the "writer died"
+    // check below is what releases it — and it is reached on a QUIET poll now
+    // that the offset advances. The old code got that re-evaluation for free by
+    // re-reading the same bytes forever, which is the cost this removes.
+    if (!grew && pendingFragment.length === 0) return [];
+
+    let fresh = Buffer.alloc(0);
+    if (grew) {
+      const fd = fs.openSync(filePath, "r");
+      fresh = Buffer.alloc(currentSize - lastSize);
+      // try/finally: a throwing readSync must not leak the descriptor (#270 review).
+      try {
+        fs.readSync(fd, fresh, 0, fresh.length, lastSize);
+      } finally {
+        fs.closeSync(fd);
+      }
+      // Advance unconditionally: these bytes are now OURS, held in
+      // `pendingFragment` if they do not yet form a whole line. Nothing re-reads
+      // them from disk.
+      lastSize = currentSize;
     }
-    lastSize = currentSize;
-    const newContent = buf.toString("utf8");
+    const buf = pendingFragment.length > 0 ? Buffer.concat([pendingFragment, fresh]) : fresh;
+    // CONSUME ONLY WHOLE LINES (#130). `lastSize = currentSize` advanced past a
+    // trailing partial line: the poll landed while the harness was mid-append,
+    // the fragment failed JSON.parse, the loop's catch skipped it — and the
+    // offset had already moved, so the rest of that line was never re-read and
+    // the whole interaction was lost, silently, with nothing counting it. This
+    // is the ONE partial line either harness produces (measured: 7,917
+    // transcripts, 3.9M lines, zero partial lines mid-file, one file mid-append
+    // at its last line), and we were dropping the turn for it.
+    //
+    // Searching the Buffer rather than the decoded string is the same
+    // discipline as `lastLineStartByte`: 0x0a can never be a UTF-8 continuation
+    // byte, so a byte index is exact, while a string index is not a byte offset.
+    const lastNl = buf.lastIndexOf(0x0a);
+    const fragment = buf.subarray(lastNl + 1);        // empty when the read ends on a newline
+
+    // A fragment that is BYTE-IDENTICAL IN LENGTH to last poll's and parses as
+    // JSON is a finished record missing only its newline: the writer died. Take
+    // it, because parseSessionFile would, and a daemon that waited forever would
+    // report a lower total than a rebuild of the same file (#156).
+    let settledFragment = false;
+    // Compare the BYTES, not merely the length: a same-length replacement is a
+    // different record, and length-equality called it settled.
+    if (fragment.length > 0 && fragment.equals(pendingFragment)) {
+      try { JSON.parse(fragment.toString("utf8")); settledFragment = true; } catch (_) { /* still mid-record */ }
+    }
+
+    // Nothing complete and nothing settled. Leave `lastSize` where it is and
+    // re-read next poll; the buffer is one line, so waiting costs one small
+    // re-read a beat.
+    if (lastNl === -1 && !settledFragment) {
+      pendingFragment = Buffer.from(buf);      // copy: `fresh` is reused
+      return [];
+    }
+    const consumeTo = settledFragment ? buf.length : lastNl + 1;
+    pendingFragment = consumeTo >= buf.length ? Buffer.alloc(0) : Buffer.from(buf.subarray(consumeTo));
+    const newContent = buf.subarray(0, consumeTo).toString("utf8");
     // Same shape as parseSessionFile's whole-file loop (#156), threading the
     // control entries — thinking level (#77), model_change (#128), compaction
     // (#90), interrupt (#52 Phase 3) — through the session's stream state.
@@ -1407,6 +1589,38 @@ function initClassified() {
   // incrementally from the recorded _meta offset (#124). If no _meta offset
   // exists, fall back to full re-parse.
   // If tag file is missing or only has heartbeats, do a full re-parse.
+
+  // A TAIL THAT ENDS MID-LINE MEANS A WRITER DIED INSIDE AN APPEND, AND SUCH A
+  // TAG IS REBUILT, NOT RESUMED (#130 rounds 2 and 3).
+  //
+  // Cutting the fragment is necessary — otherwise this daemon's first write
+  // welds onto it, which is the corpus shape the whole issue is about — but it
+  // is not sufficient, and the first version of this stopped there. `flushPending`
+  // appends the classified batch and THEN `_meta.offset`. A daemon killed inside
+  // that second append leaves the whole batch on disk with the offset line as the
+  // fragment: cut it, and the resume falls back to the PREVIOUS offset and
+  // re-classifies a batch that is already in the file.
+  //
+  // An earlier draft waved that away as free because `dedupeClassifiedById`
+  // collapses it. It does not: that function passes an interaction with no
+  // `messageId` straight through (wtft-daemon-lib.ts:187, and wtft-tag-format.md
+  // §4 states the rule), so every id-less turn in the replayed batch is counted
+  // TWICE in the session total — a permanent overcount, which is the one thing
+  // #132's priority does not excuse.
+  //
+  // So a cut tail escalates to the rebuild path. A tag is a disposable derived
+  // cache; rederiving one after a crash costs a single re-parse of a session
+  // that just lost its daemon, and it is provably correct where "resume from an
+  // offset we are no longer sure of" is a guess.
+  if (truncatePartialTail(tagPath)) {
+    // `[wtft-log-parser]` via stderr, like the other 24 sites in this file — this
+    // is the one line that explains why a session's whole accumulated tag was
+    // discarded, and it is the line a human most wants when a total drops to
+    // zero. A different prefix is a line their existing filter drops.
+    process.stderr.write(`[wtft-log-parser] ${tagPath} ended mid-line — a previous daemon was killed inside an append; rebuilding this tag from the transcript (#130)\n`);
+    rebuildTagOnStartup = true;
+  }
+
   if (rebuildTagOnStartup) {
     // A prior writer cannot know which bytes reached the shared tag. The new
     // singleton owner is the first process that can safely discard and replay.
@@ -1904,8 +2118,15 @@ if (showList || showCleanup || showRestart || stopSession) {
       scanForSubAgents();
 
       // Heartbeat: on every poll cycle when idle, update the _hb range line.
-      // First idle poll appends {"_hb":{"first":<ts>}}. Subsequent idle polls
-      // overwrite the last line in-place with {"_hb":{"first":<ts>,"last":<ts>}}.
+      //
+      // BOTH FIELDS, ALWAYS — `{"_hb":{"first":<ts>,"last":<ts>}}`, on the first
+      // idle poll as on every other (`upsertHeartbeat` builds it unconditionally).
+      // An earlier version of this comment said the first poll appends a
+      // one-field `{"_hb":{"first":<ts>}}`, and that would BREAK the design it
+      // sits eight lines above: a narrower first line fails the
+      // `size - lineStart === hbBuf.length` width check, so every later poll
+      // would append instead of overwriting and an idle daemon would grow the
+      // tag forever. The fixed width is the precondition, not a coincidence.
       // When data arrives, the idle period ends — next idle starts a new line.
       // NOTE: do NOT update lastActivityMs here — it tracks actual data activity
       // for the idle-exit check below, not heartbeat flushes.

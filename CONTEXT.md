@@ -136,7 +136,9 @@ be made line-aware — may still find the LAST line incomplete, because a large 
 corrupted line with valid lines after it. The guarantee lives in the writer (`appendTagFile`
 refuses a batch that does not end in a newline; a tag truncate may cut only to zero or to a
 `lastLineStartByte` offset; the idle heartbeat is overwritten in place at a fixed width rather
-than cut and re-appended, so the file never shrinks; a crash mid-append is repaired at the next
+than cut and re-appended, so no WRITE shrinks the file — though a daemon startup truncates it
+to zero to rebuild, so an incremental reader still needs a shrink branch; a crash mid-append is
+repaired at the next
 daemon's startup), never in each reader.
 _Avoid_: Cache file, index file
 

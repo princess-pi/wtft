@@ -367,8 +367,16 @@ process.on("SIGHUP", () => shutdown("SIGHUP"));
  * (1e13 ms) — so replacing one with a
  * fresher one is a single `pwrite` of exactly as many bytes as it covers, on
  * the one descriptor already open. No truncate, no second open, no size change,
- * and therefore no window at all: the file is a whole number of complete lines
- * at every instant, not merely at the instants between two writes.
+ * and therefore no window AROUND THIS WRITE: a reader cannot catch the heartbeat
+ * half-replaced, only fully-old or fully-new.
+ *
+ * That is a claim about this WRITE, not about the file. A concurrent reader can
+ * still meet a partial line at the END of the file, because a large append is
+ * not one `write(2)` — `syncSubagentTranscript` appends batches of hundreds of
+ * KB and node may split them. `extensions/lib/wtft-daemon-lib.ts` says so where
+ * the incremental reader handles it, and an earlier draft of this sentence said
+ * the file was whole "at every instant", which makes that handling look like
+ * paranoia worth deleting.
  *
  * WHY THE SHRINK HAD TO GO (#130 review round 2). The previous shape truncated
  * on an `r+` descriptor and appended on a fresh one. Both halves landed on a
@@ -439,6 +447,16 @@ function upsertHeartbeat(now: number) {
     // Could not open, stat or seek. An extra heartbeat line costs nothing —
     // readers take the last one — and it is strictly better than skipping the
     // beat, which is what an idle-clamp would read as a dead daemon.
+    //
+    // ONE CASE THIS SWALLOWS IS NOT MERELY AN EXTRA LINE: if the tag file has
+    // been DELETED under a live daemon (a `wtft-tags` clear, a tmp sweep), the
+    // open throws ENOENT and the append below RE-CREATES the file holding one
+    // lone heartbeat — an empty tag standing in for the session's whole cost
+    // history. The daemon does not notice, because `parseNewLines` watches the
+    // SESSION file, not the tag. Unchanged by #130 (the previous `fs.statSync`
+    // threw at the same point into the same fallback), and out of scope here,
+    // but recorded so the next reader does not take this comment as a statement
+    // that nothing can be lost on this path.
   }
   // Not replaceable in place: append. `appendTagFile` owns the #512
   // terminal-failure contract and the whole-lines guard.
@@ -475,9 +493,22 @@ function replaceLease(value: string): void {
  *  So the invariant is restored at the one moment a new writer takes over the
  *  file, rather than re-derived by every reader forever after. The fragment is
  *  discarded rather than completed because it is not a record: nobody knows how
- *  much of it reached the disk. If it carried a `_meta` marker, the resume falls
- *  back to the previous one and those turns are re-classified — `dedupeClassifiedById`
- *  already collapses that, and re-reading a turn is free where losing one is not. */
+ *  much of it reached the disk.
+ *
+ *  CUTTING IS NOT ENOUGH, AND THE ONLY CALLER KNOWS IT. A `true` return makes
+ *  `initClassified` set `rebuildTagOnStartup` and truncate the whole tag to
+ *  zero — there is no resume, and no offset survives. That is deliberate:
+ *  `flushPending` appends the classified batch and THEN `_meta.offset`, so a
+ *  writer killed inside the second append leaves the batch complete and the
+ *  offset line half-written. Cut the fragment and resume from the previous
+ *  offset, and that batch is re-classified on top of itself.
+ *
+ *  An earlier draft of this docstring said `dedupeClassifiedById` collapses the
+ *  replay and re-reading a turn is free. IT DOES NOT: an interaction with no
+ *  `messageId` passes straight through that function, so an id-less turn is
+ *  billed twice, permanently. The argument is recorded here as refuted because
+ *  it is exactly the argument that would justify removing the caller's
+ *  escalation as redundant. `tests/wtft-130-…` C1b fails without it. */
 function truncatePartialTail(path: string): boolean {
   let fd: number;
   try {
@@ -1557,7 +1588,11 @@ function initClassified() {
   // that just lost its daemon, and it is provably correct where "resume from an
   // offset we are no longer sure of" is a guess.
   if (truncatePartialTail(tagPath)) {
-    console.error(`[wtft-daemon] ${tagPath} ended mid-line — a previous daemon was killed inside an append; rebuilding this tag from the transcript (#130)`);
+    // `[wtft-log-parser]` via stderr, like the other 24 sites in this file — this
+    // is the one line that explains why a session's whole accumulated tag was
+    // discarded, and it is the line a human most wants when a total drops to
+    // zero. A different prefix is a line their existing filter drops.
+    process.stderr.write(`[wtft-log-parser] ${tagPath} ended mid-line — a previous daemon was killed inside an append; rebuilding this tag from the transcript (#130)\n`);
     rebuildTagOnStartup = true;
   }
 
@@ -2058,8 +2093,15 @@ if (showList || showCleanup || showRestart || stopSession) {
       scanForSubAgents();
 
       // Heartbeat: on every poll cycle when idle, update the _hb range line.
-      // First idle poll appends {"_hb":{"first":<ts>}}. Subsequent idle polls
-      // overwrite the last line in-place with {"_hb":{"first":<ts>,"last":<ts>}}.
+      //
+      // BOTH FIELDS, ALWAYS — `{"_hb":{"first":<ts>,"last":<ts>}}`, on the first
+      // idle poll as on every other (`upsertHeartbeat` builds it unconditionally).
+      // An earlier version of this comment said the first poll appends a
+      // one-field `{"_hb":{"first":<ts>}}`, and that would BREAK the design it
+      // sits eight lines above: a narrower first line fails the
+      // `size - lineStart === hbBuf.length` width check, so every later poll
+      // would append instead of overwriting and an idle daemon would grow the
+      // tag forever. The fixed width is the precondition, not a coincidence.
       // When data arrives, the idle period ends — next idle starts a new line.
       // NOTE: do NOT update lastActivityMs here — it tracks actual data activity
       // for the idle-exit check below, not heartbeat flushes.

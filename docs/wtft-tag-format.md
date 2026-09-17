@@ -61,7 +61,8 @@ draft of this document said a whole-file reader "sees only complete lines", and 
 called those catches "dead weight rather than load-bearing". Both were wrong, and acting on
 either would have broken every reader (#130 review round 2).
 
-**The file is not purely append-only, and it never shrinks.** The heartbeat is *upserted*:
+**The file is not purely append-only, and a WRITE never shrinks it** — a daemon *startup*
+can, and does. The heartbeat is *upserted*:
 when the last line is already a heartbeat of the same width, it is **overwritten in place** —
 one `writeSync` at a `lastLineStartByte` offset, on the one descriptor already open. The size
 does not change, so an offset-tracking reader's position can never go stale, and a torn write
@@ -73,7 +74,15 @@ future build — is not ours to overwrite, so it is appended beside instead.
 The earlier design truncated the stale heartbeat and appended a fresh one through a second
 descriptor. It left whole lines at every instant, but the file briefly got SHORTER, and an
 offset-tracking reader only ever asks whether the file GREW (#130 review round 2). The rebuild
-path still truncates, but only to zero, which no reader can be positioned inside.
+path still truncates — to zero, and a crash repair escalates to exactly that.
+
+**So an incremental reader MUST handle the file getting shorter.** Not "may": a reader that
+only asks whether the file grew is left with an offset past EOF across any daemon restart, and
+it then resumes mid-line and silently loses every rebuilt line before that offset. An earlier
+draft of this section argued a truncate to zero was harmless because "no reader can be
+positioned inside it" — true of the CONTENT, false of the OFFSET, which is the thing that
+breaks. `watchTagFile` re-seeds on `stat.size < lastReadOffset`; a third-party reader needs the
+same branch.
 
 **Where the guarantee lives.** In the writer, once: `appendTagFile` refuses a batch that does
 not end in a newline, a tag truncate may only cut to zero or to a `lastLineStartByte` offset,

@@ -335,8 +335,15 @@ export function readTagProvisional(tagPath: string): TagProvisional {
  */
 export function lastLineStartByte(fd: number, size: number, chunkSize = 512): number {
 	if (size <= 0) return 0;
+	// CHECK THE READ. A short read leaves `one` zero-filled, which reads as "not a
+	// newline", and a zero-filled scan can walk all the way to 0 — where the
+	// caller truncates the ENTIRE file. Latent today (both callers hold the
+	// singleton lease, and an unlink does not shrink an open inode), but the
+	// failure is total and the guard is one comparison.
 	const one = Buffer.alloc(1);
-	fs.readSync(fd, one, 0, 1, size - 1);
+	if (fs.readSync(fd, one, 0, 1, size - 1) !== 1) {
+		throw new Error(`could not read the last byte of a ${size}-byte tag file — refusing to guess a line boundary`);
+	}
 	// A terminating newline belongs to the last line, not to a line after it.
 	let searchEnd = one[0] === 0x0a ? size - 1 : size;
 	while (searchEnd > 0) {
@@ -512,13 +519,19 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
  *  buffer, so every byte before it has been read and every byte after it is
  *  still waiting. There is no window for a race to sit in, because there is no
  *  second look at the file. */
-export function seedClassifiedTagFile(tagPath: string): { interactions: Interaction[]; offset: number } {
+export function seedClassifiedTagFile(tagPath: string): { interactions: Interaction[]; offset: number; read: boolean } {
 	let buf: Buffer;
 	try {
 		buf = fs.readFileSync(tagPath);
 	} catch {
-		// File may not exist yet — seed empty, at zero.
-		return { interactions: [], offset: 0 };
+		// ABSENT AND UNREADABLE ARE DIFFERENT, and the caller has to be able to
+		// tell them apart (#130 local audit round). A missing tag legitimately
+		// seeds empty — the daemon has not written it yet. An EMFILE, EACCES or
+		// EIO does NOT mean the session costs nothing, and a caller that treats
+		// the two alike replaces a correct chart with an empty one on a transient
+		// failure. `read: false` says "I have no information", which is not the
+		// same claim as "there is nothing".
+		return { interactions: [], offset: 0, read: false };
 	}
 	// Byte search, never a string index: `lastIndexOf` on a Buffer counts bytes,
 	// and 0x0a can never be a UTF-8 continuation byte, so this is exact for any
@@ -527,6 +540,7 @@ export function seedClassifiedTagFile(tagPath: string): { interactions: Interact
 	return {
 		interactions: classifiedInteractionsFromContent(buf.subarray(0, offset).toString("utf8")),
 		offset,
+		read: true,
 	};
 }
 
@@ -543,7 +557,11 @@ export function seedClassifiedTagFile(tagPath: string): { interactions: Interact
  * partial-line handling:
  *
  *   - **Every COMPLETED write leaves the file a whole number of lines.**
- *     Enforced in one place, `appendTagFile`, rather than re-derived per reader.
+ *     Every APPEND is enforced in one place, `appendTagFile`, rather than
+ *     re-derived per reader. The other three mutation sites each carry their own
+ *     argument — `upsertHeartbeat`'s same-width `writeSync`, `truncatePartialTail`'s
+ *     cut to a `lastLineStartByte` offset, and `initClassified`'s truncate to
+ *     zero — which is why the suite needs S2, S3 and S4 beside S1.
  *     A crash mid-append is repaired by the next daemon at startup.
  *   - **`fs.watch` reports BYTES, not lines.** inotify fires on the write, and a
  *     large batch is not one `write(2)`. A reader woken mid-batch sees complete
@@ -556,9 +574,13 @@ export function seedClassifiedTagFile(tagPath: string): { interactions: Interact
  *     lines. The old claim "writes at most every 667ms" read as a rate limit and
  *     was never true of the byte stream.
  *
- * The file never shrinks, so an offset-tracking reader's position stays valid:
- * the idle heartbeat is replaced in place at a fixed width, never cut and
- * re-appended.
+ * A WRITE never shrinks the file — the idle heartbeat is replaced in place at a
+ * fixed width rather than cut and re-appended — but a daemon STARTUP can, and
+ * does: `initClassified` truncates the tag to zero to rebuild it. So an
+ * offset-tracking reader must handle the file getting shorter, and this one does
+ * (the `stat.size < lastReadOffset` branch re-seeds). Do not read "replaced in
+ * place" as "the offset is always valid"; it means the BEAT cannot invalidate
+ * it.
  *
  * @param sessionPath - Path to the session.jsonl (shown in title)
  * @param tagPath - Path to the daemon's classified tag file
@@ -1531,11 +1553,17 @@ export async function watchTagFile(
 	//
 	// WHAT THE DAEMON ACTUALLY GUARANTEES (#130), because the three bullets that
 	// used to sit here were folklore and two of them were false:
-	//   - Every COMPLETED write LANDS ON A LINE BOUNDARY, and the file never
-	//     shrinks: the idle heartbeat is overwritten in place at a fixed width,
-	//     never cut and re-appended, so an offset here cannot be left past EOF.
-	//     A crash mid-append is repaired by the next daemon before its first
-	//     write. So the file is never left holding a severed line.
+	//   - Every COMPLETED write LANDS ON A LINE BOUNDARY, so the file is never
+	//     left holding a severed line. The idle heartbeat is overwritten in
+	//     place at a fixed width rather than cut and re-appended, and a crash
+	//     mid-append is repaired by the next daemon before its first write.
+	//   - THE FILE CAN STILL GET SHORTER, which is why the shrink branch below
+	//     exists and is not dead defensive code. `initClassified` truncates the
+	//     tag to zero in three cases — a rebuild lease token, no `_meta` offset,
+	//     heartbeat-only content — and a crash repair escalates to exactly that.
+	//     An earlier draft of this comment said "the file never shrinks" while
+	//     sitting fifty lines above the branch that exists because it does; that
+	//     sentence was a documented licence to delete the branch.
 	//   - It does NOT write at most once per beat. One poll makes several
 	//     separate writes — the classified batch, then `_meta.offset`, then a
 	//     `_meta.swept` marker, plus one append per changed subagent transcript,
@@ -1571,7 +1599,11 @@ export async function watchTagFile(
 				// This callback only ever asked whether the file GREW. The daemon
 				// truncates the tag to zero in three places (`initClassified`: a
 				// rebuild token, no `_meta` offset, heartbeat-only content), and
-				// `truncatePartialTail` shrinks it too. A `--watch` reader stays
+				// (`truncatePartialTail` also shrinks the file, but it cannot strand
+				// an offset: it cuts to the last newline, and this reader's offset
+				// is only ever set just past a newline, so the cut lands at or
+				// after it. The three truncate-to-zero cases are what this branch
+				// is for.) A `--watch` reader stays
 				// attached across all of that — the 'r' key, a respawn, a lease
 				// rebuild — so its offset is left past the new EOF, pointing into
 				// a file that no longer has those bytes.
@@ -1589,6 +1621,10 @@ export async function watchTagFile(
 				// thing that actually breaks.
 				if (stat.size < lastReadOffset) {
 					const reseed = seedClassifiedTagFile(tagPath);
+					// A failed read here means the same thing it means below: no
+					// information. Leave the offset and the chart alone rather than
+					// committing an empty seed we cannot substantiate.
+					if (!reseed.read) return;
 					allInteractions = reseed.interactions;
 					lastReadOffset = reseed.offset;
 					updateDaemonHealth();
@@ -1743,11 +1779,18 @@ export async function watchTagFile(
 				// redraw an EMPTY chart on any transient read failure, and the
 				// "wait for it to reappear" branch below would be unreachable.
 				try {
-					if (!fs.existsSync(tagPath)) return;   // gone — keep the last good chart
-					lastReadOffset = 0;
-					seed = seedClassifiedTagFile(tagPath);
-					allInteractions = seed.interactions;
-					lastReadOffset = seed.offset;
+					// Commit only on a SUCCESSFUL read. `existsSync` was the first
+					// spelling of this guard and it answers one question — is the
+					// path there — while every other read failure (EMFILE after an
+					// fd leak, EACCES after a permissions change, EIO) still came
+					// back as an empty seed and still wiped the chart. The comment
+					// claimed it covered "any transient read failure"; it covered
+					// ENOENT (#130 local audit round).
+					const fresh = seedClassifiedTagFile(tagPath);
+					if (!fresh.read) return;   // no information — keep the last good chart
+					allInteractions = fresh.interactions;
+					lastReadOffset = fresh.offset;
+					seed = fresh;
 					needsRedraw = true;
 					render();
 					resetWatchdog();

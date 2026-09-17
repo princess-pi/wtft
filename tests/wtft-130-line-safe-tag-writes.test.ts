@@ -48,6 +48,41 @@ function assert(label: string, ok: boolean, detail?: string) {
 	}
 }
 
+// B0 — THE BUNDLE UNDER TEST MUST BE NEWER THAN THE SOURCE BEING SOURCE-CHECKED.
+//
+// This suite has two halves that can disagree without anything noticing
+// (#130 local audit round). §E/R/C spawn `bin/wtft-daemon.mjs` and §W imports
+// `bin/wtft.mjs` — gitignored BUILD OUTPUT. §S and P0 read `bin/wtft-daemon.ts`
+// and `extensions/lib/wtft-daemon-lib.ts` — SOURCE. Nothing compares them, and
+// `tests/run.ts` does not build; suites run sorted, so this one runs before the
+// only suite that does.
+//
+// Edit the daemon, run `bun run test` without building, and the behavioural half
+// green-lights the OLD daemon while the structural half certifies the NEW source.
+// That is exactly the round-1 RED procedure — revert the .ts, rebuild — happening
+// by accident, and it is the "fixture stops testing its subject" failure at the
+// largest scale available here.
+{
+	const pairs: [string, string][] = [
+		["bin/wtft-daemon.mjs", "bin/wtft-daemon.ts"],
+		["bin/wtft.mjs", "bin/wtft.ts"],
+		["bin/wtft.mjs", "extensions/lib/wtft-daemon-lib.ts"],
+	];
+	for (const [out, src] of pairs) {
+		const outPath = path.resolve(import.meta.dirname, "..", out);
+		const srcPath = path.resolve(import.meta.dirname, "..", src);
+		let ok = false, detail = "";
+		try {
+			const o = fs.statSync(outPath).mtimeMs, i = fs.statSync(srcPath).mtimeMs;
+			ok = o >= i;
+			detail = `${out} is ${Math.round((i - o) / 1000)}s older than ${src} — run \`bun run build\``;
+		} catch (err) {
+			detail = `${out} or ${src} is missing (${(err as Error).message}) — run \`bun run build\``;
+		}
+		assert(`B0 ${out} is at least as new as ${src}`, ok, detail);
+	}
+}
+
 const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-130-")));
 
 /** Write `content` and return the byte offset where its last line truly begins.
@@ -103,8 +138,23 @@ console.log("\n§ W — lastLineStartByte answers in BYTES, on a line boundary\n
 // no arithmetic to re-derive and get wrong a second time.
 {
 	const CHUNK = 512;
-	const f = fixture("w3-straddle.jsonl",
-		`{"_hb":{"first":0,"last":1}}\n{"t":1,"cmd":["${"—".repeat(200)}"]}\n`);
+	// BOTH lines carry the dashes. That is the correction, and it is the whole
+	// point of the fixture (#130 local audit round).
+	//
+	// The previous version put a short heartbeat FIRST and one long dash line
+	// last. Its two preconditions were genuinely true — last line over a chunk,
+	// boundary byte mid-sequence — and its answer was still insensitive to both,
+	// because the newline that resolves the scan sits in the chunk starting at
+	// byte 0 and everything BEFORE that newline is ASCII. All the multi-byte
+	// content was AFTER the last newline, where it cannot move the arithmetic. A
+	// decode-per-chunk scan returned the right answer anyway. Measured: truth 29,
+	// broken scan 29.
+	//
+	// With dashes in the PRECEDING line, the decoded string index and the byte
+	// index diverge before the newline, and the broken scan returns 351 against a
+	// truth of 619.
+	const line = `{"t":1,"cmd":["${"—".repeat(200)}"]}`;
+	const f = fixture("w3-straddle.jsonl", `${line}\n${line}\n`);
 	const buf = fs.readFileSync(f.file);
 	const chunkStart = (f.size - 1) - CHUNK;   // scan skips the trailing \n, then reads CHUNK back
 	assert("W3 the last line is longer than one chunk, so the scan must widen",
@@ -112,6 +162,12 @@ console.log("\n§ W — lastLineStartByte answers in BYTES, on a line boundary\n
 	assert("W3 the chunk boundary falls INSIDE a 3-byte sequence",
 		(buf[chunkStart] & 0xc0) === 0x80,
 		`byte at ${chunkStart} is 0x${buf[chunkStart].toString(16)} — not a continuation byte, so nothing is split`);
+	// The precondition that was missing: multi-byte content BEFORE the newline the
+	// scan must find. Without this, a string-index scan agrees with a byte-index
+	// one and the assertion below cannot fail.
+	assert("W3 there is multi-byte content ahead of the resolving newline — the byte and string indices must differ",
+		Buffer.byteLength(buf.subarray(0, f.truth).toString("utf8"), "utf8") > buf.subarray(0, f.truth).toString("utf8").length,
+		"everything before the last newline is ASCII, so a decoded-string scan gives the same answer");
 	const got = offsetOf(f.file, f.size, CHUNK);
 	assert("W3 multi-byte sequence across the chunk boundary", got === f.truth, `expected ${f.truth}, got ${got}`);
 }
@@ -181,6 +237,26 @@ console.log("\n§ W — lastLineStartByte answers in BYTES, on a line boundary\n
 
 	assert("W7 a missing file seeds empty, at zero, without throwing",
 		seedClassifiedTagFile(path.join(root, "w7-absent.jsonl")).offset === 0);
+
+	// W7b — ABSENT AND UNREADABLE ARE DIFFERENT. A seed that cannot read the file
+	// must say so, because the watcher's recovery path uses that answer to decide
+	// whether to replace a correct chart with an empty one. `read: false` means
+	// "no information", which is not the claim "there is nothing".
+	assert("W7b a successful read reports read: true", seedClassifiedTagFile(f1.file).read === true);
+	assert("W7b an absent file reports read: false — not an empty session",
+		seedClassifiedTagFile(path.join(root, "w7-absent.jsonl")).read === false);
+	{
+		const noPerm = fixture("w7-unreadable.jsonl", complete);
+		let chmodded = false;
+		try { fs.chmodSync(noPerm.file, 0o000); chmodded = true; } catch { /* root, or a filesystem that ignores it */ }
+		if (chmodded && (() => { try { fs.readFileSync(noPerm.file); return false; } catch { return true; } })()) {
+			assert("W7b an unreadable file reports read: false, with no throw",
+				seedClassifiedTagFile(noPerm.file).read === false);
+		} else {
+			console.log("  SKIPPED W7b unreadable case — this process can read a 000 file (running as root?)");
+		}
+		try { fs.chmodSync(noPerm.file, 0o644); } catch { /* best effort */ }
+	}
 }
 
 // ---
@@ -215,6 +291,25 @@ const children: ChildProcess[] = [];
 /** An assistant turn whose text and command carry multi-byte UTF-8. The `cmd`
  *  array is where the corpus got its arrows: tool descriptions and commit
  *  messages land there verbatim through serializeClassified. */
+/** A turn the harness wrote without a message id.
+ *
+ *  These exist, they are classified, and `dedupeClassifiedById` passes them
+ *  STRAIGHT THROUGH (`wtft-daemon-lib.ts`, the `if (!id)` arm) — which is the
+ *  entire reason a crashed tag is rebuilt rather than resumed. With ids, a
+ *  replayed batch collapses and no test can see the replay; without them it
+ *  doubles the money, which is what C1b measures. */
+function idlessTurn(tsMs: number): string {
+	return JSON.stringify({
+		type: "assistant",
+		message: {
+			role: "assistant", model: "claude-sonnet-4-6",
+			timestamp: new Date(tsMs).toISOString(),
+			usage: { input_tokens: 1500, output_tokens: 120 },
+			content: [{ type: "text", text: "no id — build → test → ship — done" }],
+		},
+	}) + "\n";
+}
+
 function multibyteTurn(id: string, tsMs: number): string {
 	return JSON.stringify({
 		type: "assistant",
@@ -571,15 +666,19 @@ console.log("\n§ C — a crash mid-append is repaired, not built upon\n");
 	assert("C1 the first daemon created a tag file", started);
 
 	if (started) {
-		// Two real turns, so the tag carries classified data and a `_meta` marker
-		// — the branch that resumes incrementally rather than rebuilding.
+		// Two identified turns, then one WITHOUT a message id — and the id-less one
+		// is what makes this test able to fail. Each turn gets its own poll, so the
+		// tag ends up carrying several `_meta.offset` markers, which is the branch
+		// that resumes incrementally rather than rebuilding.
 		const t0 = Date.now();
 		for (let i = 0; i < 2; i++) {
 			fs.appendFileSync(sessionPath, multibyteTurn(`msg_c1_${i}`, t0 + i * 1000));
 			await sleep(1500);
 		}
+		fs.appendFileSync(sessionPath, idlessTurn(t0 + 2000));
+		await sleep(1500);
 		await pollUntil(
-			() => readClassifiedTagFile(tagPath).some((row: any) => row.messageId === "msg_c1_1"),
+			() => (readClassifiedTagFile(tagPath) as any[]).length >= 3,
 			10000,
 		);
 
@@ -588,13 +687,54 @@ console.log("\n§ C — a crash mid-append is repaired, not built upon\n");
 		first.kill("SIGKILL");
 		await sleep(500);
 
-		// And the half-written append it was inside. Cut the file mid-line.
-		const before = fs.readFileSync(tagPath, "utf8");
-		const lastNl = Buffer.from(before, "utf8").lastIndexOf(0x0a);
-		const fragment = '{"t":1,"cmd":["a \u2192 b \u2014 c"],"cost';   // no closing brace, no newline
-		fs.writeFileSync(tagPath, before.slice(0, lastNl + 1) + fragment);
+		// And the half-written append it was inside.
+		//
+		// ENTIRELY IN BYTES. The first version of this fixture did
+		// `Buffer.from(before).lastIndexOf(0x0a)` and then `before.slice(0, n)` on
+		// the STRING — a byte offset used as a UTF-16 index, which is #130's own
+		// defect, reproduced inside the test that guards against it. Because every
+		// `cmd` here carries `→` and `—`, the byte index always EXCEEDED the string
+		// length, so `slice` returned the whole string and the "cut" removed zero
+		// characters. The fixture asserted it ended mid-line and it did — on the
+		// appended fragment alone, having destroyed nothing.
+		//
+		// AND IT CUTS THE `_meta.offset` LINE SPECIFICALLY, because that is the one
+		// a crash can actually destroy: `flushPending` appends the classified batch
+		// and THEN the offset marker, so a writer killed inside the second append
+		// leaves the batch complete and the offset line half-written. Cutting a
+		// trailing heartbeat instead — which is what the old fixture did when it
+		// worked at all — leaves every offset intact, and a daemon that merely cut
+		// the fragment and resumed would produce byte-identical output. The test
+		// would then pass against the very behaviour round 3 replaced.
+		const before = fs.readFileSync(tagPath);
+		const lineStarts: number[] = [0];
+		for (let i = 0; i < before.length - 1; i++) if (before[i] === 0x0a) lineStarts.push(i + 1);
+		let offsetLineStart = -1;
+		for (const start of lineStarts) {
+			const nl = before.indexOf(0x0a, start);
+			const line = before.subarray(start, nl === -1 ? before.length : nl).toString("utf8");
+			if (line.includes('"_meta"') && line.includes('"offset"')) offsetLineStart = start;
+		}
+		assert("C1 the fixture found a `_meta.offset` marker to destroy", offsetLineStart >= 0,
+			before.toString("utf8"));
+		const priorOffsets = lineStarts.filter(st => st < offsetLineStart).map(st => {
+			const nl = before.indexOf(0x0a, st);
+			return before.subarray(st, nl === -1 ? before.length : nl).toString("utf8");
+		}).filter(l => l.includes('"offset"'));
+		assert(`C1 and an EARLIER offset survives for a cut-only daemon to resume from (${priorOffsets.length})`,
+			priorOffsets.length > 0,
+			"without one, a resume and a rebuild both start from zero and C1b cannot tell them apart");
+
+		fs.writeFileSync(tagPath, Buffer.concat([
+			before.subarray(0, offsetLineStart),
+			Buffer.from('{"_meta":{"offs', "utf8"),   // killed mid-append: no close, no newline
+		]));
+		const afterCut = fs.readFileSync(tagPath);
 		assert("C1 the fixture really does end mid-line",
-			!fs.readFileSync(tagPath, "utf8").endsWith("\n"));
+			afterCut.length > 0 && afterCut[afterCut.length - 1] !== 0x0a);
+		assert(`C1 and it is SHORTER than what it cut from (${afterCut.length} < ${before.length})`,
+			afterCut.length < before.length,
+			"the cut removed nothing — a byte index was used as a string index");
 
 		// A second daemon takes over the same session.
 		const second = spawn(process.execPath, [daemonPath, "--session", sessionPath], {
@@ -626,8 +766,8 @@ console.log("\n§ C — a crash mid-append is repaired, not built upon\n");
 		// And the repair did not cost the money. The two classified turns predate
 		// the fragment and must survive it.
 		const classified = readClassifiedTagFile(tagPath) as any[];
-		assert(`C1 both earlier turns survived the repair (${classified.length} rows)`,
-			classified.length >= 2, JSON.stringify(classified.map(r => r.messageId)));
+		assert(`C1 the earlier turns survived the repair (${classified.length} rows)`,
+			classified.length >= 3, JSON.stringify(classified.map(r => r.messageId)));
 
 		// C1b — AND NEITHER IS COUNTED TWICE. This is why a cut tail escalates to
 		// a rebuild rather than merely being cut. `flushPending` appends the batch
@@ -640,7 +780,15 @@ console.log("\n§ C — a crash mid-append is repaired, not built upon\n");
 		//
 		// Exact equality, not `>=`: a double count is the failure, and `>=` is
 		// how it would go unnoticed.
+		// The id-less turn is the one that can double. With ids, a replayed batch
+		// collapses in `dedupeClassifiedById` and a resume is indistinguishable
+		// from a rebuild; without one, a resume from the surviving earlier offset
+		// re-classifies it and its money lands twice.
 		const want = (parseSessionFile(sessionPath) as any[]);
+		const idless = classified.filter(r => !r.messageId);
+		assert(`C1b the id-less turn appears exactly ONCE — a resume would replay it (${idless.length})`,
+			idless.length === 1,
+			JSON.stringify(classified.map(r => r.messageId ?? "<no id>")));
 		assert(`C1b the rebuilt tag holds exactly what the transcript holds (${classified.length} vs ${want.length})`,
 			classified.length === want.length,
 			`daemon ${JSON.stringify(classified.map(r => r.messageId))}\nwhole-file ${JSON.stringify(want.map(r => r.messageId))}`);
@@ -703,15 +851,22 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	// not at an adversary.
 	// Split the source into function bodies so a binding can be required in the
 	// SAME one as its use, rather than anywhere in the file.
-	const fnBodies = daemonSrc.split(/\nfunction /).map((b, i) => (i === 0 ? b : "function " + b));
+	// Split on a column-0 `function`/`async function`, and account for lines
+	// EXACTLY — the first version advanced by `lines - 1` while testing against
+	// `seen + lines`, drifting one line earlier per boundary (#130 local audit
+	// round). Today's only non-zero truncate is early enough that the drift did
+	// not reach it, which is precisely why it would have gone unnoticed until
+	// someone added a truncate further down.
+	const srcLines = daemonSrc.split("\n");
+	const fnStarts: number[] = [];
+	srcLines.forEach((l, i) => { if (/^(async )?function /.test(l)) fnStarts.push(i + 1); });
 	const bodyOf = (lineNo: number): string => {
-		let seen = 0;
-		for (const b of fnBodies) {
-			const lines = b.split("\n").length;
-			if (lineNo <= seen + lines) return b;
-			seen += lines - 1;
+		let start = -1, end = srcLines.length + 1;
+		for (let i = 0; i < fnStarts.length; i++) {
+			if (fnStarts[i] <= lineNo) { start = fnStarts[i]; end = fnStarts[i + 1] ?? srcLines.length + 1; }
 		}
-		return daemonSrc;
+		if (start === -1) return daemonSrc;
+		return srcLines.slice(start - 1, end - 1).join("\n");
 	};
 	const truncateOffsets: { n: number; expr: string; line: string }[] = [];
 	daemonSrc.split("\n").forEach((line, i) => {
@@ -720,8 +875,15 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	});
 	assert("S2 the daemon still truncates tag files at all — the check has a subject",
 		truncateOffsets.length > 0);
+	// An `expr` that is not a bare identifier is REJECTED rather than interpolated.
+	// `fs.ftruncateSync(fd, lastLineStartByte(fd, size))` is a legitimate
+	// refactor, and the capture at the top stops at the first `)`, so `expr`
+	// would be `lastLineStartByte(fd, size` — an unbalanced paren that makes
+	// `new RegExp` throw a SyntaxError and takes the whole suite down instead of
+	// failing one assertion (#130 local audit round).
 	const badTruncates = truncateOffsets.filter(({ expr, n }) => {
 		if (expr === "0") return false;   // to zero: there is no line to break
+		if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(expr)) return true;   // not a name we can trace — treat as unproven
 		return !new RegExp(`\\b(const|let|var)\\s+${expr}\\s*=\\s*lastLineStartByte\\(`).test(bodyOf(n));
 	});
 	assert("S2 every tag truncate cuts to zero or to a lastLineStartByte offset",
@@ -740,8 +902,20 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 		assert("S2 self-check: bodyOf returns ONE function, not the whole file",
 			body.length < daemonSrc.length && /^function /.test(body.trim()),
 			`body is ${body.length} chars of a ${daemonSrc.length}-char file`);
-		assert("S2 self-check: and a name bound in some OTHER function is rejected",
-			!new RegExp(`\\b(const|let|var)\\s+pendingFragmentSize\\s*=\\s*lastLineStartByte\\(`).test(body));
+		// The narrowing proved by CONTENT, not by a regex that matches nowhere.
+		// The first spelling of this asked whether `pendingFragmentSize` was bound
+		// from `lastLineStartByte` in the body — and `pendingFragmentSize` is bound
+		// once, as `let pendingFragmentSize = 0`, from nothing. The regex matched
+		// nowhere in the entire 104k-char file, so the assertion was true of the
+		// whole source and would have passed unchanged had `bodyOf` returned it
+		// (#130 local audit round). A check that cannot fail does not prove a
+		// narrowing.
+		assert("S2 self-check: the body contains the truncate it was looked up for",
+			body.includes(nonZero.line.slice(0, 40)),
+			`bodyOf(${nonZero.n}) does not contain its own truncate line`);
+		assert("S2 self-check: and does NOT contain other functions that also bind from lastLineStartByte",
+			!body.includes("function upsertHeartbeat"),
+			"bodyOf returned more than one function, so a binding anywhere in that span would satisfy the check");
 	}
 
 	// S3 — the heartbeat upsert holds ONE descriptor and never truncates.

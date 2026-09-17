@@ -36,8 +36,11 @@ record with `JSON.stringify(line) + "\n"`, and so does every `_meta` and `_hb` w
 
 **What no writer can deliver, stated so nobody builds on it:** `fs.watch`/inotify report
 **bytes**, never lines. There is no "notify me on a newline" anywhere in the stack. The
-guarantee above is not the watcher being clever — it is the file never being in a state
-worth hiding. A reader that is woken twice for one line still sees valid JSONL both times.
+guarantee above is not the watcher being clever — it is that a fragment can only ever be the
+LAST thing in the file, never a corrupted line with valid lines after it. A reader woken twice
+for one line sees, both times, every complete line intact and at most a trailing fragment it
+already knows to hold. (An earlier draft said it "sees valid JSONL both times", which the
+presumption table above already contradicted.)
 
 ## What was actually happening
 
@@ -46,7 +49,18 @@ Measured across this host, 2026-09-16 — 8,244 `.jsonl` files, 3,910,822 lines:
 | Source | Files | Files with a mid-file broken line | Broken lines |
 |---|---:|---:|---:|
 | Harness transcripts (Claude Code + Pi) | 7,917 | **0** | **0** |
-| wtft's own `wtft-tags/*.jsonl` | 327 | **96 (29%)** | **2,562** |
+| wtft's own `wtft-tags/*.jsonl` — `~/.claude/projects` | 328 | **96** | **2,609** |
+| wtft's own `wtft-tags/*.jsonl` — `~/.pi` | 94 | **23** | **224** |
+| wtft's own `wtft-tags/*.jsonl` — `~/git-projects` | 5 | 0 | 0 |
+| **wtft total** | **427** | **119 (28%)** | **2,833** |
+
+**The Pi root was missed on the first pass**, and the first draft of this table reported only
+`~/.claude/projects` — 327 / 96 / 2,562 — while the transcript row above it already claimed
+"Claude Code + Pi". Tag files live in a `wtft-tags/` directory beside the transcript they derive
+from, and Pi puts its transcripts under `~/.pi/agent/sessions/<slug>/`
+(`extensions/lib/harness/pi/discovery.ts`), so 94 tag files were never counted. All of them
+predate the measurement; none was created since. The conclusion is unchanged and the number is
+10% larger.
 
 One harness file had no trailing newline on its **last** line, mid-append. That is the
 benign live case, and it is the only partial line either harness produces. **No harness has
@@ -241,17 +255,25 @@ its own is the Closer's literal rescan.
 **To dispose of them now, run this from the main clone — Princess Pi, before closing #130:**
 
 ```sh
-find ~/.claude/projects ~/git-projects -type d -name wtft-tags -print0 \
+find ~/.claude/projects ~/.pi/agent/sessions ~/git-projects -type d -name wtft-tags -print0 \
   | xargs -0 -I{} find {} -name '*.wtft-tag.v2.8.1.jsonl' -delete
 ```
 
-**`~/.claude/projects` is where they actually are, and an earlier draft of this command omitted
-it** — searching only `~/git-projects` (#130 review round 3, Medium/contract). A tag file lives
-in a `wtft-tags/` directory beside the session transcript it derives from, and transcripts live
-under the harness's project root. Measured on this host: **55** `wtft-tags` directories under
-`~/.claude/projects` against **4** under `~/git-projects`. The command as first written would
-have reported success having deleted almost nothing, on the very host whose 96 corrupt files
-motivated the issue — the worst failure shape available, since it looks like the cleanup ran.
+**This command has had its roots wrong twice**, which is worth recording because both failures
+look identical from the outside: exit 0, nothing deleted.
+
+- Round 3 found it searching only `~/git-projects` — **5** `wtft-tags` directories, against
+  **56** under `~/.claude/projects`. It would have reported success having deleted almost
+  nothing on the very host whose corrupt files motivated the issue.
+- The local audit round then found `~/.pi/agent/sessions` still missing — another **22**
+  directories and **94** tag files. Currently inert for *this* glob, because Pi's newest tag
+  version on this host is v2.7.2 and there is no v2.8.1 there to match, but it is the wrong
+  scope to publish for exactly the reason round 3 gave.
+
+A tag file lives in a `wtft-tags/` directory beside the session transcript it derives from, so
+the root list is "every harness's transcript root, plus anywhere a session was run from" — one
+entry per `HarnessDiscovery`. A command that silently matches nothing is the worst shape
+available, since it looks like the cleanup ran.
 
 Per session, `wtft -s <session> --force` does the same thing plus killing that session's daemon.
 The Closer is therefore scoped to what the code guarantees: **zero mid-file unparseable lines
@@ -266,16 +288,16 @@ ships, rather than a claim about files no code will revisit.
 |---|---|
 | W1 | `lastLineStartByte` on an ASCII-only file returns the true byte offset |
 | W2 | on a file whose earlier lines carry `→` and `—`, returns the true **byte** offset — the string-index version returns a smaller number |
-| W3 | with a multi-byte sequence straddling the chunk boundary, still returns the true offset (no U+FFFD). **Both preconditions are asserted, not assumed** — the last line exceeds one chunk, and the byte at the boundary is a UTF-8 continuation byte |
+| W3 | with a multi-byte sequence straddling the chunk boundary, still returns the true offset (no U+FFFD). **Three preconditions are asserted, not assumed** — the last line exceeds one chunk, the byte at the boundary is a UTF-8 continuation byte, and there is multi-byte content AHEAD of the resolving newline. The third is what makes it discriminate: without it every multi-byte character sits after the last newline where it cannot move the arithmetic, and a decode-per-chunk scan returns the right answer anyway |
 | W4 | a file with no trailing newline: the last line starts after the last `\n` |
-| W5 | an empty file returns 0; a single line with no newline returns 0 |
+| W5 | an empty file returns 0; a single line with no newline returns 0; a single TERMINATED line also returns 0 |
 | W6 | a line longer than one chunk is handled — the scan widens rather than giving up. Asserted by the answer lying outside the first chunk, which a single read backwards from EOF could not have found |
 | E1 | **the Closer.** The real daemon, driven against a session whose assistant text contains `→` and `—`, through enough beats to force several heartbeat upserts: **every line of the tag file parses as JSON**, no line carries a second record welded onto it, and the classified totals survive |
 | E1b | across a quiet stretch, the heartbeat timestamp advances while the file size holds exactly still — replaced, not appended, so an idle daemon neither bloats the tag nor moves any reader's offset |
 | R1 | a session file whose last line is written in two halves across two polls: the interaction is counted once, not lost |
 | R2, R2b | the same, split **mid-UTF-8-sequence** — counted once the line completes, and exactly once |
 | R3, R3b | a complete record with no trailing newline is counted, matching `parseSessionFile`, and exactly once. This is the settled-fragment arm, and the guard against #156 drift |
-| R4 | **the Closer's second half.** A five-turn session dribbled in ONE-BYTE writes, so polls cut the stream at offsets nobody chose, yields exactly the turns `parseSessionFile` finds in the finished file — each once |
+| R4 | **the Closer's second half.** A five-turn session dribbled in ONE-BYTE writes, PACED against `POLL_MS` to span four beats (asserted, so it cannot silently shrink back inside one poll), yields exactly the turns `parseSessionFile` finds in the finished file — each once, **and the same total cost**, with `wantCost > 0` asserted first so the comparison cannot be vacuous |
 | C1 | a daemon SIGKILLed and left with a mid-line fragment is taken over by a second daemon: the fragment is discarded, **no heartbeat is welded onto it**, every line parses, and the earlier classified turns survive |
 | S1 | no `fs.appendFileSync` reaches the tag path except through `appendTagFile` — the one helper that enforces the trailing newline |
 | S2 | every tag truncate in the daemon cuts to a line boundary (an offset from `lastLineStartByte`) or to zero |
@@ -310,14 +332,15 @@ FAIL S2 every tag truncate cuts to zero or to a lastLineStartByte offset
 
 **That listing is ROUND 1's, against round 1's suite of 27 assertions, and it is kept as the
 historical record of the original defect — it is not a run of the suite in this branch.** The
-suite has since grown twice, to 52 assertions, and the later rounds' own RED evidence is
-recorded with each finding rather than re-quoted here:
+suite has since grown three times, to 69 assertions, and each later round's own RED evidence is
+recorded with its finding rather than re-quoted here:
 
 | Round | Suite | RED evidence for that round's fixes |
 |---|---:|---|
 | 1 | 27 | the listing above — live corruption in the corpus shape, R1 returning `[]` |
 | 2 | 42 | C1 RED on all three substantive assertions against the pre-fix daemon (fragment not discarded, heartbeat welded onto it, lines unparseable) |
-| 3 | 52 | S4 RED — no `stat.size < lastReadOffset` branch existed; R4 re-measured and shown to span 4 poll intervals where the first version finished inside one |
+| 3 | 57 | S4 RED — no `stat.size < lastReadOffset` branch existed; R4 re-measured and shown to span 4 poll intervals where the first version finished inside one |
+| local audit | 69 | C1b RED against a cut-only daemon: **4 rows vs 3, the id-less turn counted twice, the money wrong** — the first version of C1b could not fail |
 
 A label in the listing was also edited by a later round (`— the cut fired` became
 `— the replacement fired` when the truncate went away). Quoting live test output in a document
@@ -397,11 +420,8 @@ docstring and in Defect 1 above.
 defect.** The Low/crossfile finding argued a live bug: a *shorter* replacement heartbeat leaves
 an offset reader past EOF, so the next classified line is read k bytes into itself and dropped.
 The shrink is real, but it needs the two heartbeats to differ in width — and `first` and `last`
-are both 13-digit epoch milliseconds from 2001-09-09 until 2286-11-20 (1e12 to
-1e13 ms — an earlier draft said "the year 5138", which is where Unix time in
-SECONDS reaches 1e11, and round 3's own correction of it said "317,000 years",
-which is 1000x out the other way; the width guarantee was right both times and
-the arithmetic behind it was wrong both times). The finding also names
+are both 13-digit epoch milliseconds from 2001-09-09 until 2286-11-20 (1e12 to 1e13 ms; the
+round-3 section below records how that figure was got wrong twice). The finding also names
 `{"_hb":"stop"}` as a replacement; it is a plain append and always was. So the mechanism is
 sound and the instance is unreachable. The shape was fixed anyway, because it is simpler than
 what it replaced and removes the window instead of arguing it is harmless — not because the bug
@@ -540,7 +560,123 @@ know the whole file depends on that form.
 ### Where this leaves the round limit
 
 Round 3 is the ceiling. `PR_REVIEW_ROUND_LIMIT` is **not** raised — that rule exists precisely
-for a loop that keeps finding real things, which is what this is. Every finding above is fixed
-and the suite is 57 assertions, but the decision to open the PR on the current review state
-belongs to Duppy.
+for a loop that keeps finding real things, which is what this is. Every finding above is fixed,
+and a further LOCAL audit round (below) was run instead of buying a fourth billed round.
+
+## Local audit round — run instead of buying a fourth billed review
+
+Round 3 reached the review ceiling. Rather than raise `PR_REVIEW_ROUND_LIMIT`, three
+fresh-context auditors were dispatched over the same artifacts: the writer, the reader, and the
+tests-plus-spec. They found fourteen things. The pattern the earlier rounds established held —
+**most of what they found was introduced by the previous rounds' own fixes** — and two were bad
+enough that the suite was not testing what it claimed.
+
+### The fixture reproduced #130's defect inside the test that guards against it
+
+C1 built its mid-line fragment like this:
+
+```ts
+const lastNl = Buffer.from(before, "utf8").lastIndexOf(0x0a);   // a BYTE index
+fs.writeFileSync(tagPath, before.slice(0, lastNl + 1) + fragment); // a STRING slice
+```
+
+A byte offset used as a UTF-16 index — the whole of #130, in the fixture written to catch it.
+And because every `cmd` in the fixture carries `→` and `—` by construction, the byte index
+always EXCEEDED the string length, so `slice` returned the entire string and **the cut removed
+zero characters**. Measured: `byteLength 654, length 646, lastNl 653`. The assertion "the
+fixture really does end mid-line" passed on the appended fragment alone, having destroyed
+nothing.
+
+Rebuilt entirely in `Buffer` space, and the fixture now asserts it is SHORTER than what it cut
+from — a property the broken version fails.
+
+### C1b could not fail, against the exact behaviour it was written to pin
+
+Round 3 made a crashed tag REBUILD rather than resume, because a resume replays a batch and
+`dedupeClassifiedById` does not collapse id-less turns. C1b was written to pin that. It could
+not: the fixture destroyed a trailing **heartbeat**, which leaves every `_meta.offset` intact,
+so a cut-only daemon resumed from an offset equal to EOF, classified nothing new, and produced
+byte-identical output. Every C1 and C1b assertion passed against the behaviour round 3 replaced.
+
+Two changes make it discriminate, and both were needed:
+
+- the fixture now destroys the **last `_meta.offset` line** — the line a real crash destroys,
+  since `flushPending` appends the batch and then the marker — and asserts an earlier offset
+  survives for a cut-only daemon to resume from;
+- the session now carries a turn with **no message id**, because an identified turn collapses
+  in `dedupeClassifiedById` and a replay is invisible.
+
+**Measured RED** against a daemon with the escalation removed: `4 rows vs 3`, the id-less turn
+counted twice, the money wrong.
+
+### W3 still did not discriminate, after round 2 rewrote it for that reason
+
+Round 2 rebuilt W3 because it never split a UTF-8 sequence. The rebuild made both stated
+preconditions true — last line over one chunk, boundary byte a continuation byte — and the
+answer was **still** insensitive to either, because the newline that resolves the scan sits in
+the chunk starting at byte 0 and everything before it is ASCII. All the multi-byte content was
+AFTER the last newline, where it cannot move the arithmetic. A decode-per-chunk scan returns 29
+against a truth of 29.
+
+Both lines now carry the dashes, and a third precondition is asserted: multi-byte content
+**ahead of the resolving newline**. Against that fixture a decode-per-chunk scan returns 351
+where the truth is 619.
+
+### The S2 self-check added in round 3 matched nowhere in the file
+
+Round 3 added a self-check because `bodyOf` has a fallback indistinguishable from working. Its
+third assertion asked whether `pendingFragmentSize` was bound from `lastLineStartByte` — and
+`pendingFragmentSize` is bound once, from `0`, so the regex matched nowhere in 104k characters.
+True of the whole file, and it would have passed unchanged had `bodyOf` returned the whole file.
+Replaced with two content checks that cannot be vacuous.
+
+### Nothing gated the bundle against the source
+
+The suite's behavioural half drives `bin/*.mjs` — gitignored build output — and its structural
+half reads `bin/*.ts`. `tests/run.ts` does not build, and suites run sorted, so this one runs
+before the only suite that does. Edit the daemon, run `bun run test` without building, and §E/R/C
+green-light the OLD daemon while §S certifies the NEW source. That is round 1's RED procedure
+happening by accident. **B0** now compares mtimes and fails first; verified by touching the
+source and watching it fire.
+
+### Three claims that were false, and one more shrink
+
+| Claim | Where | What is true |
+|---|---|---|
+| "the file never shrinks" | `wtft-daemon-lib.ts` ×2 (one of them the `watchTagFile` JSDoc), `wtft-tag-format.md`, `CONTEXT.md` | a WRITE never shrinks it; a daemon STARTUP truncates to zero in three cases, and round 3's crash repair escalates to exactly that. The JSDoc sat fifty lines above the shrink branch and was a documented licence to delete it |
+| `dedupeClassifiedById` "already collapses" a replay, so re-reading is free | `truncatePartialTail`'s docstring | it does not, which is why the caller escalates to a rebuild — round 3 refuted this 1,070 lines below and left the argument standing in the function it argues about |
+| the first idle poll appends `{"_hb":{"first":<ts>}}` | the poll loop, eight lines above the call | both fields, always. A one-field first line would fail the width check and make an idle daemon append forever — the comment described something that would break the design beneath it |
+| the file is whole JSONL "at every instant" | `upsertHeartbeat`'s docstring | true of that write, false of the file: a large append is not one `write(2)`, as the sibling file says where the incremental reader handles it |
+
+### The disposal command had its roots wrong a second time
+
+Round 3 found it searching only `~/git-projects` and added `~/.claude/projects`. It stopped one
+root short: Pi transcripts live under `~/.pi/agent/sessions/`, so Pi tag files do too.
+Re-measured across all three roots — **427 tag files, 119 corrupt, 2,833 mid-file broken
+lines**, against the 327/96/2,562 this spec reported from one root. The conclusion is unchanged
+and the damage is 10% larger. (Inert for this particular glob — Pi's newest tag version here is
+v2.7.2, so there is no v2.8.1 to match — but it is the wrong scope to publish.)
+
+### Filed, not fixed here
+
+Two pre-existing defects the audit surfaced that are not #130's to fix:
+
+- **#139** — `--watch` never re-arms its inotify watch, so a tag file replaced at the same path
+  (`wtft --force`, or a version-bumped daemon's sweep) freezes the chart against a live daemon.
+  #130's shrink branch does not help: after an unlink there are no events at all.
+- **#140** — `initClassified` decides "has classified data" by substring, so a turn whose command
+  mentions `_hb` or `_meta` discards the tag and forces a full re-parse. Bounded and
+  self-correcting; the one place left that reads a tag line without parsing it.
+
+### What the auditors checked and cleared
+
+Recorded because "no finding" is most of the result and the reasoning is the deliverable: the
+`pwrite` is a real `pwrite` (the fd is `r+`, not `a` — under `O_APPEND` the position is ignored
+and every beat would weld); `first` is never 0 at the write (both call sites re-stamp it);
+`appendTagFile`'s #512 contract survives the in-place attempt's `catch` because the append is
+outside it; the torn-write argument holds; `lastSize` is correct on all five paths; the rebuild
+loses nothing a re-parse cannot restore; `seedClassifiedTagFile` is correct at all three edges;
+`allInteractions` has no stale capture; and `wtft-shared.ts` really is `export *`.
+
+69 assertions.
 

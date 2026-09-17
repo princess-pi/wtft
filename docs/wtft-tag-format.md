@@ -37,25 +37,41 @@ A reader may therefore presume, without writing any code for the alternative:
 
 | Presumption | What makes it true |
 |---|---|
-| Every line parses as JSON | no write ever ends mid-line |
-| A WHOLE-FILE reader woken by `fs.watch` sees only complete lines | every write lands on a `\n` boundary, so there is no observable mid-line state left behind |
-| An OFFSET-TRACKING reader may see one partial line at the end | the writer guarantee kills truncation welds; it does **not** make a large append atomic against a concurrent read. Such a reader must consume to the last `\n` and carry the remainder — `watchTagFile` does |
+| Every line in the file at rest parses as JSON | no COMPLETED write ever ends mid-line, and a crash mid-append is repaired by the next daemon at startup |
+| **No MID-FILE line is ever malformed** | the only line any reader can find incomplete is the LAST one, and only while a write is in flight. A welded or truncated line in the middle of the file is the #130 defect, and it cannot recur |
+| ANY reader concurrent with a write may see one partial line at the end | this holds for whole-file readers too, not only offset-tracking ones. A large append is not one `write(2)`, so a `readFileSync` can land inside it and return the complete lines plus a fragment. **Every reader keeps its final-line tolerance** — `classifiedInteractionsFromContent`'s `catch` is load-bearing, and `watchTagFile` consumes to the last `\n` and carries the remainder |
 | Writes arrive in bursts no more often than one beat | `POLL_MS = 667` bounds how often a poll comes round — **not how many writes it makes.** One poll writes the classified batch, then `_meta.offset`, then a `_meta.swept` marker, plus one append per changed subagent transcript; `shutdown` writes outside the cadence entirely. Expect several notifications per beat |
 
 **This is not the watcher being clever, and it cannot be.** `fs.watch`/inotify report **bytes**;
 there is no "notify me on a newline" anywhere in the stack, and no watcher can be made
-line-aware. The guarantee is that the file is never in a state worth hiding. A reader woken
-twice for one line still sees valid JSONL both times.
+line-aware. So the guarantee is deliberately not "a reader never sees a fragment" — no writer
+can deliver that against a concurrent read. It is that **a fragment can only ever be the last
+thing in the file**, which is the case every reader already handles, and never a corrupted line
+with valid lines after it, which is the case none of them can.
 
-**The file is not purely append-only.** The heartbeat is *upserted*: when the last line is
-already a heartbeat it is truncated off and a fresh one appended. That truncate cuts to a line
-boundary (`lastLineStartByte`), so a reader landing between the cut and the append sees every
-earlier line intact and simply no heartbeat yet — which is a true statement about the file. The
-rebuild path truncates to zero, which is also a whole number of lines.
+**Do not remove a reader's final-line `catch` on the strength of this contract.** An earlier
+draft of this document said a whole-file reader "sees only complete lines", and the #130 spec
+called those catches "dead weight rather than load-bearing". Both were wrong, and acting on
+either would have broken every reader (#130 review round 2).
+
+**The file is not purely append-only, and it never shrinks.** The heartbeat is *upserted*:
+when the last line is already a heartbeat of the same width, it is **overwritten in place** —
+one `writeSync` at a `lastLineStartByte` offset, on the one descriptor already open. The size
+does not change, so an offset-tracking reader's position can never go stale, and a torn write
+leaves a mix of two heartbeats that have identical shape and identical length, hence still a
+complete parseable line. The fixed width is what buys that: `first` and `last` are both
+13-digit epoch milliseconds. A line of any other width — `{"_hb":"stop"}`, or a tag from some
+future build — is not ours to overwrite, so it is appended beside instead.
+
+The earlier design truncated the stale heartbeat and appended a fresh one through a second
+descriptor. It left whole lines at every instant, but the file briefly got SHORTER, and an
+offset-tracking reader only ever asks whether the file GREW (#130 review round 2). The rebuild
+path still truncates, but only to zero, which no reader can be positioned inside.
 
 **Where the guarantee lives.** In the writer, once: `appendTagFile` refuses a batch that does
-not end in a newline, and a tag truncate may only cut to zero or to a `lastLineStartByte`
-offset. `tests/wtft-130-line-safe-tag-writes.test.ts` §S reads the daemon source and fails on
+not end in a newline, a tag truncate may only cut to zero or to a `lastLineStartByte` offset,
+and a daemon taking over a file left unterminated by a crashed predecessor cuts the fragment
+off before its first write (`truncatePartialTail`) rather than welding onto it. `tests/wtft-130-line-safe-tag-writes.test.ts` §S reads the daemon source and fails on
 either shape. It does **not** live in each reader — a guarantee re-derived by every consumer is
 a guarantee nobody owns, which is how the defect behind #130 survived 2,562 corrupt lines
 across 96 files without anything reporting it.

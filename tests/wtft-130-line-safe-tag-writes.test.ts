@@ -32,7 +32,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
-import { lastLineStartByte, getCurrentVersionTagPath, readClassifiedTagFile } from "../bin/wtft.mjs";
+import { lastLineStartByte, getCurrentVersionTagPath, readClassifiedTagFile, parseSessionFile } from "../bin/wtft.mjs";
 import { pollUntil, sleep } from "./lib/poll";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
@@ -91,11 +91,28 @@ console.log("\n§ W — lastLineStartByte answers in BYTES, on a line boundary\n
 // W3 — a multi-byte sequence straddling the chunk boundary. Decoding a chunk in
 // isolation yields U+FFFD and the scan measures text the file does not contain,
 // so this fails for a fix that works in bytes only per-chunk.
+//
+// THE LONG LINE MUST BE LAST, and the straddle is ASSERTED rather than assumed.
+// The first version of this fixture put the dashes in the FIRST line and a short
+// heartbeat after them, so the newline the scan is looking for sat inside the
+// very first chunk read from EOF — the loop returned on iteration one and never
+// touched a dash. Its boundary also happened to land character-aligned. It
+// passed while exercising neither property (#130 review round 2). So the test
+// now reads the byte at the boundary and demands it be a UTF-8 CONTINUATION
+// byte (0b10xxxxxx), which is the direct evidence that a sequence is split —
+// no arithmetic to re-derive and get wrong a second time.
 {
-	const pad = "—".repeat(200);          // 600 bytes of 3-byte characters
+	const CHUNK = 512;
 	const f = fixture("w3-straddle.jsonl",
-		`{"t":1,"cmd":["${pad}"]}\n{"_hb":{"first":0,"last":1}}\n`);
-	const got = offsetOf(f.file, f.size, 512);
+		`{"_hb":{"first":0,"last":1}}\n{"t":1,"cmd":["${"—".repeat(200)}"]}\n`);
+	const buf = fs.readFileSync(f.file);
+	const chunkStart = (f.size - 1) - CHUNK;   // scan skips the trailing \n, then reads CHUNK back
+	assert("W3 the last line is longer than one chunk, so the scan must widen",
+		f.size - f.truth > CHUNK, `last line is ${f.size - f.truth} bytes, chunk is ${CHUNK}`);
+	assert("W3 the chunk boundary falls INSIDE a 3-byte sequence",
+		(buf[chunkStart] & 0xc0) === 0x80,
+		`byte at ${chunkStart} is 0x${buf[chunkStart].toString(16)} — not a continuation byte, so nothing is split`);
+	const got = offsetOf(f.file, f.size, CHUNK);
 	assert("W3 multi-byte sequence across the chunk boundary", got === f.truth, `expected ${f.truth}, got ${got}`);
 }
 
@@ -122,12 +139,22 @@ console.log("\n§ W — lastLineStartByte answers in BYTES, on a line boundary\n
 
 // W6 — a classified line with a long `cmd` array runs past one chunk, which is
 // the case the backward scan exists for. The scan must widen, not give up at 0.
+//
+// PURE ASCII on purpose, so this isolates WIDENING from the multi-byte handling
+// W3 covers. And, as in W3, the long line has to be the LAST one: with a short
+// heartbeat after it the terminating newline sits in the first chunk and the
+// loop returns immediately. The old fixture had exactly that shape and asserted
+// only `got > 512`, which was trivially true of an unwidened scan (#130 review
+// round 2). The widening is now asserted directly: an answer below
+// `size - CHUNK` cannot have come from a single chunk read backwards from EOF.
 {
-	const long = JSON.stringify({ t: 1, cmd: Array.from({ length: 200 }, (_, i) => `cmd-${i} → arg`) });
-	const f = fixture("w6-long-line.jsonl", `${long}\n{"_hb":{"first":0,"last":1}}\n`);
-	const got = offsetOf(f.file, f.size, 512);
+	const CHUNK = 512;
+	const long = JSON.stringify({ t: 1, cmd: Array.from({ length: 200 }, (_, i) => `cmd-${i} arg`) });
+	const f = fixture("w6-long-line.jsonl", `{"_hb":{"first":0,"last":1}}\n${long}\n`);
+	const got = offsetOf(f.file, f.size, CHUNK);
 	assert("W6 line longer than one chunk: the scan widens", got === f.truth, `expected ${f.truth}, got ${got}`);
-	assert("W6 and that offset is past the long line, not 0", got > 512);
+	assert("W6 and the answer lies outside the first chunk — a single read could not have found it",
+		got < f.size - CHUNK, `got ${got}, first chunk starts at ${f.size - CHUNK}`);
 }
 
 // ---
@@ -225,25 +252,59 @@ console.log("\n§ E — the Closer: every line the daemon writes parses as JSON\
 		// correct and expected — a `_meta` marker between two runs legitimately
 		// leaves both.
 		//
-		//  - No two CONSECUTIVE `_hb` lines. That pair is exactly what the cut
-		//    prevents, and the only shape its absence would produce.
-		//  - At least one heartbeat with `last > first`, which can only exist if
-		//    an earlier heartbeat line was replaced in place of being appended.
-		let consecutive = 0, updated = 0;
+		//  - No two CONSECUTIVE `_hb` lines. That pair is exactly what the
+		//    replacement prevents, and the only shape its absence would produce.
+		let consecutive = 0;
 		let prevWasHb = false;
 		for (const line of lines) {
 			const isHb = line.includes('"_hb"');
 			if (isHb && prevWasHb) consecutive++;
-			if (isHb) {
-				try {
-					const hb = JSON.parse(line)._hb;
-					if (hb && typeof hb === "object" && hb.last > hb.first) updated++;
-				} catch { /* E1's parse assertion above owns this case */ }
-			}
 			prevWasHb = isHb;
 		}
-		assert("E1 no two consecutive heartbeat lines — the cut fired", consecutive === 0, lines.join("\n"));
-		assert("E1 a heartbeat was updated in place, not only appended", updated > 0, lines.join("\n"));
+		assert("E1 no two consecutive heartbeat lines — the replacement fired", consecutive === 0, lines.join("\n"));
+
+		// E1b — THE REPLACEMENT IS IN PLACE, observed as it happens.
+		//
+		// This assertion used to be "some heartbeat has last > first", justified
+		// as something only a replacement could produce. It was not: `initClassified`
+		// writes `first == last`, the first clean poll appends a `_meta.swept`
+		// marker after it, and `upsertHeartbeat` then finds a `_meta` last line and
+		// APPENDS a fresh heartbeat which naturally has `last > first`. The
+		// assertion passed whether or not a single byte was ever replaced (#130
+		// review round 2).
+		//
+		// What actually distinguishes replacing from appending is that the file
+		// DOES NOT GROW. So watch it directly across a quiet stretch, where the
+		// daemon writes nothing but heartbeats: the timestamp must advance while
+		// the size holds exactly still. That is also the property the offset
+		// readers depend on — a heartbeat that changed the size is the bug this
+		// round fixed — so pinning it here pins the thing that matters rather
+		// than a side effect of it.
+		const sizeOf = () => { try { return fs.statSync(tagPath).size; } catch { return -1; } };
+		const lastHbOf = () => {
+			try {
+				const hbs = fs.readFileSync(tagPath, "utf8").split("\n")
+					.filter(l => l.includes('"_hb"'));
+				const hb = JSON.parse(hbs[hbs.length - 1])._hb;
+				return hb && typeof hb === "object" ? hb.last : null;
+			} catch { return null; }
+		};
+		let replacedInPlace = false, grewWhileQuiet = false;
+		let prev = { size: sizeOf(), last: lastHbOf() };
+		for (let i = 0; i < 12 && !replacedInPlace; i++) {
+			await sleep(700);            // one 667ms beat
+			const now = { size: sizeOf(), last: lastHbOf() };
+			if (now.last !== null && prev.last !== null && now.last > prev.last) {
+				if (now.size === prev.size) replacedInPlace = true;
+				else grewWhileQuiet = true;
+			}
+			prev = now;
+		}
+		assert("E1b the heartbeat advanced without the file changing size — replaced in place, not appended",
+			replacedInPlace,
+			grewWhileQuiet
+				? "the heartbeat advanced but the file GREW: it was appended, so an idle daemon still bloats the tag"
+				: "no heartbeat advanced at all in ~8s of quiet — the beat is not running, so this proves nothing either way");
 
 		// And the money still landed. A "fix" that writes nothing also writes no
 		// broken lines.
@@ -343,6 +404,163 @@ console.log("\n§ R — a partial trailing line is re-read, never skipped\n");
 	child.kill("SIGTERM");
 }
 
+// R4 — THE CLOSER'S SECOND HALF, which nothing enforced until now.
+//
+// #130's Closer says a session written one byte at a time must end up counting
+// the same as the same session parsed whole. R1-R3 each split ONE line at one
+// chosen point; none of them exercises the poll boundary landing at an arbitrary
+// place, over and over, which is what the settled-fragment heuristic
+// (`length unchanged for a beat` + `JSON.parse` succeeds) actually has to
+// survive (#130 review round 2, Low/contract).
+//
+// So: dribble a whole multi-turn session in one-byte writes, faster than the
+// beat, so polls land at unpredictable offsets — inside JSON strings, inside
+// multi-byte sequences, between the two bytes of a `\r\n` that is not there.
+// Then compare the daemon's classified rows against `parseSessionFile` over the
+// finished file. Equal, or a turn was lost or double-counted.
+{
+	const r4Root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-130-r4-")));
+	const sessionPath = path.join(r4Root, "session.jsonl");
+	fs.writeFileSync(sessionPath, "");
+
+	const child = spawn(process.execPath, [daemonPath, "--session", sessionPath], {
+		env: { ...process.env }, stdio: ["ignore", "ignore", "pipe"],
+	});
+	children.push(child);
+
+	const tagPath = getCurrentVersionTagPath(sessionPath);
+	const started = await pollUntil(() => fs.existsSync(tagPath), 15000);
+	assert("R4 the daemon created a tag file", started);
+
+	if (started) {
+		const t0 = Date.now();
+		const payload = Buffer.from(
+			[0, 1, 2, 3, 4].map(i => multibyteTurn(`msg_r4_${i}`, t0 + i * 1000)).join(""),
+			"utf8",
+		);
+		// One byte per write. Several hundred writes across several beats, so the
+		// daemon's polls cut the stream at offsets nobody chose.
+		const fd = fs.openSync(sessionPath, "a");
+		try {
+			for (let i = 0; i < payload.length; i++) {
+				fs.writeSync(fd, payload, i, 1);
+				if (i % 64 === 0) await sleep(1);
+			}
+		} finally { fs.closeSync(fd); }
+
+		const want = (parseSessionFile(sessionPath) as any[]).map(r => r.messageId).filter(Boolean).sort();
+		const settled = await pollUntil(() => {
+			const got = (readClassifiedTagFile(tagPath) as any[]).map(r => r.messageId).filter(Boolean).sort();
+			return got.length === want.length && got.every((id, i) => id === want[i]);
+		}, 20000);
+
+		const got = (readClassifiedTagFile(tagPath) as any[]).map(r => r.messageId).filter(Boolean).sort();
+		assert(`R4 byte-at-a-time gives the same ${want.length} turns as a whole-file parse`,
+			settled, `whole-file: ${JSON.stringify(want)}\ndaemon:     ${JSON.stringify(got)}`);
+		assert("R4 and counts each of them exactly once",
+			new Set(got).size === got.length, JSON.stringify(got));
+	}
+
+	child.kill("SIGTERM");
+}
+
+// ---
+// § C — a daemon killed mid-append does not weld the next daemon's heartbeat on
+// ---
+//
+// THE SECOND ROUTE TO THE SAME CORPUS DAMAGE (#130 review round 2, Medium/crossfile).
+// `appendTagFile` makes every COMPLETED write leave whole lines. It says nothing
+// about a write that never completed. A daemon killed inside `fs.appendFileSync`
+// — SIGKILL, the OOM killer, power loss — never reaches the #512 handler that
+// would set the `rebuild` lease token, so it leaves a numeric PID lease the next
+// daemon reaps as merely stale, and a tag file ending mid-line. That daemon then
+// resumed incrementally and appended its start heartbeat straight onto the
+// fragment: one unparseable line carrying two records, which is exactly the shape
+// this issue was opened about, arriving by a route the arithmetic fix does not
+// touch.
+//
+// The fragment here is made by truncating a real tag file mid-line, which is
+// byte-for-byte what a killed append leaves behind.
+
+console.log("\n§ C — a crash mid-append is repaired, not built upon\n");
+
+{
+	const cRoot = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-130-c1-")));
+	const sessionPath = path.join(cRoot, "session.jsonl");
+	fs.writeFileSync(sessionPath, "");
+
+	const first = spawn(process.execPath, [daemonPath, "--session", sessionPath], {
+		env: { ...process.env }, stdio: ["ignore", "ignore", "pipe"],
+	});
+	children.push(first);
+
+	const tagPath = getCurrentVersionTagPath(sessionPath);
+	const started = await pollUntil(() => fs.existsSync(tagPath), 15000);
+	assert("C1 the first daemon created a tag file", started);
+
+	if (started) {
+		// Two real turns, so the tag carries classified data and a `_meta` marker
+		// — the branch that resumes incrementally rather than rebuilding.
+		const t0 = Date.now();
+		for (let i = 0; i < 2; i++) {
+			fs.appendFileSync(sessionPath, multibyteTurn(`msg_c1_${i}`, t0 + i * 1000));
+			await sleep(1500);
+		}
+		await pollUntil(
+			() => readClassifiedTagFile(tagPath).some((row: any) => row.messageId === "msg_c1_1"),
+			10000,
+		);
+
+		// SIGKILL: no handler runs, no `rebuild` token is written, the lease is
+		// left holding a plain PID. This is the crash, not a simulation of one.
+		first.kill("SIGKILL");
+		await sleep(500);
+
+		// And the half-written append it was inside. Cut the file mid-line.
+		const before = fs.readFileSync(tagPath, "utf8");
+		const lastNl = Buffer.from(before, "utf8").lastIndexOf(0x0a);
+		const fragment = '{"t":1,"cmd":["a \u2192 b \u2014 c"],"cost';   // no closing brace, no newline
+		fs.writeFileSync(tagPath, before.slice(0, lastNl + 1) + fragment);
+		assert("C1 the fixture really does end mid-line",
+			!fs.readFileSync(tagPath, "utf8").endsWith("\n"));
+
+		// A second daemon takes over the same session.
+		const second = spawn(process.execPath, [daemonPath, "--session", sessionPath], {
+			env: { ...process.env }, stdio: ["ignore", "ignore", "pipe"],
+		});
+		children.push(second);
+		await pollUntil(() => {
+			try { return fs.readFileSync(tagPath, "utf8").endsWith("\n"); } catch { return false; }
+		}, 15000);
+
+		const raw = fs.readFileSync(tagPath, "utf8");
+		const lines = raw.split("\n").filter(l => l.trim().length > 0);
+		const bad = lines.filter(l => { try { JSON.parse(l); return false; } catch { return true; } });
+		assert(`C1 every one of the ${lines.length} lines still parses after the takeover`,
+			bad.length === 0, bad.slice(0, 4).join("\n"));
+
+		// The specific damage: the new daemon's start heartbeat fused to the
+		// fragment. A weld is not merely unparseable — it is two records in one
+		// line, and it is what 2,562 lines on this host looked like.
+		const welded = lines.filter(l => l.slice(1).includes('{"_hb"') || l.slice(1).includes('{"_meta"'));
+		assert("C1 no heartbeat was welded onto the fragment", welded.length === 0,
+			welded.slice(0, 4).join("\n"));
+
+		// The fragment is gone, not completed. Nobody knows how much of it
+		// reached the disk, so it is not a record and must not be treated as one.
+		assert("C1 the fragment was discarded", !raw.includes('"cost'), raw);
+		assert("C1 the file ends on a line boundary again", raw.endsWith("\n"));
+
+		// And the repair did not cost the money. The two classified turns predate
+		// the fragment and must survive it.
+		const classified = readClassifiedTagFile(tagPath) as any[];
+		assert(`C1 both earlier turns survived the repair (${classified.length} rows)`,
+			classified.length >= 2, JSON.stringify(classified.map(r => r.messageId)));
+
+		second.kill("SIGTERM");
+	}
+}
+
 // ---
 // § S — the invariant is structural, not a habit
 // ---
@@ -389,6 +607,29 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	assert("S2 every tag truncate cuts to zero or to a lastLineStartByte offset",
 		badTruncates.length === 0,
 		badTruncates.map(({ n, line }) => `${n}: ${line}`).join("\n"));
+
+	// S3 — the heartbeat upsert holds ONE descriptor and never truncates.
+	//
+	// The shape this forbids is truncate-then-append across two descriptors: cut
+	// the stale heartbeat on an `r+` fd, close it, reopen through
+	// `appendTagFile`. It left whole lines at every instant, so E1 could not see
+	// it — but the file briefly got SHORTER, and an offset-tracking reader only
+	// ever asks whether the file GREW (#130 review round 2, Medium/contract).
+	//
+	// The replacement is a same-width `writeSync` at a `lastLineStartByte`
+	// offset, which changes no byte count at all. Pinned structurally because
+	// nothing observable at 667ms resolution can tell the two apart: with 13-digit
+	// millisecond timestamps both heartbeats are the same width, so the old shape
+	// was size-neutral end to end and the window it opened was too short to poll.
+	// A behavioural test here would have been theatre.
+	const upsertBody = /function upsertHeartbeat\([\s\S]*?\n}/.exec(daemonSrc)?.[0] ?? "";
+	assert("S3 upsertHeartbeat was found in the source — the check has a subject", upsertBody.length > 0);
+	assert("S3 the heartbeat upsert never truncates",
+		!/truncateSync/.test(upsertBody),
+		upsertBody);
+	assert("S3 it replaces the line in place, at a lastLineStartByte offset",
+		/fs\.writeSync\(\s*fd\s*,/.test(upsertBody) && /lastLineStartByte\(/.test(upsertBody),
+		upsertBody);
 }
 
 for (const c of children) { try { c.kill("SIGKILL"); } catch { /* already gone */ } }

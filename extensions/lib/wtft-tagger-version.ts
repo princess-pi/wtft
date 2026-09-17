@@ -99,14 +99,25 @@
 // stale offset or re-parses, and the 12 welds carrying `"t":` stay lost cost
 // data for the life of the file.
 //
-// So the bump IS the repair, and deliberately so: a tag file is a disposable
-// derived cache, and rederiving it from the transcript is both simpler and
-// stricter than any repair pass that has to guess where a welded line was meant
-// to split. Nothing in this repo has to grow a repair path it would then have to
-// keep correct. #130's Closer — a rescan of `wtft-tags/` reporting zero mid-file
-// unparseable lines — cannot pass on this host without it.
+// So the bump is HOW the repair reaches a damaged file: a tag file is a
+// disposable derived cache, and rederiving it from the transcript is both
+// simpler and stricter than any repair pass that has to guess where a welded
+// line was meant to split. Nothing in this repo has to grow a repair path it
+// would then have to keep correct.
 //
-// Patch, not minor: no line's cost, category or bucket moves. The tag CONTENT
-// contract is unchanged; only the files written by the broken writer are
-// discarded.
+// It reaches a file when that session's daemon next starts and sweeps it. Until
+// then `getTagPath` rule 3 serves the old file flagged provisional
+// `stale-version`, so a corrupt number is never presented as authoritative — but
+// a session nobody reopens keeps its welded tag. spec-130 § "The 96 files
+// already corrupted" has the table and the one-time find/delete. Calling the
+// bump "the repair" full stop was too strong (#130 review round 2).
+//
+// PATCH, AND A TOTAL CAN STILL RISE. No line's cost, category or bucket moves,
+// and the tag CONTENT contract is unchanged — that is what makes it a patch. But
+// this release also fixes `parseNewLines`, which used to skip a turn whose line
+// straddled a poll boundary, so a rederived tag can contain turns its v2.8.1
+// predecessor lacked and a session total can come out HIGHER. That is recovered
+// money, not moved money: no previously-counted line changes value. Recorded
+// because 2.8.0 below treats a total change as worth naming explicitly, and this
+// entry originally did not (#130 review round 2).
 export const WTFT_TAGGER_VERSION = "2.8.2";

@@ -485,19 +485,77 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
 	return classifiedInteractionsFromContent(content);
 }
 
+/** Seed a watcher: the interactions in the tag file, and the byte offset that
+ *  reading them consumed — both derived from ONE read of the same buffer.
+ *
+ *  The pattern this replaces was `readClassifiedTagFile(p)` followed by
+ *  `lastReadOffset = fs.statSync(p).size`, at three call sites (#130 review
+ *  round 2). Two different things go wrong with it, and both lose whole turns
+ *  from the live view rather than announcing themselves:
+ *
+ *   - **The stat sees a file the read did not.** Anything the daemon appends
+ *     between the read and the stat is counted into the offset without ever
+ *     having been parsed, so the watcher starts past it and those lines are
+ *     never read by anyone.
+ *   - **A whole-file read can land mid-append.** A large batch is not one
+ *     `write(2)`, so `readFileSync` can return the complete lines plus a
+ *     partial tail. `classifiedInteractionsFromContent` drops that tail (its
+ *     `catch` is load-bearing, not decoration) — but `stat.size` counts it, so
+ *     the offset lands inside a line that will be completed a moment later and
+ *     then never re-read.
+ *
+ *  Taking the offset from the buffer we actually parsed removes both by
+ *  construction: the offset is the end of the last COMPLETE line in that
+ *  buffer, so every byte before it has been read and every byte after it is
+ *  still waiting. There is no window for a race to sit in, because there is no
+ *  second look at the file. */
+export function seedClassifiedTagFile(tagPath: string): { interactions: Interaction[]; offset: number } {
+	let buf: Buffer;
+	try {
+		buf = fs.readFileSync(tagPath);
+	} catch {
+		// File may not exist yet — seed empty, at zero.
+		return { interactions: [], offset: 0 };
+	}
+	// Byte search, never a string index: `lastIndexOf` on a Buffer counts bytes,
+	// and 0x0a can never be a UTF-8 continuation byte, so this is exact for any
+	// content. (Doing it on the decoded string is the #130 defect itself.)
+	const offset = buf.lastIndexOf(0x0a) + 1;   // -1 -> 0: no complete line yet
+	return {
+		interactions: classifiedInteractionsFromContent(buf.subarray(0, offset).toString("utf8")),
+		offset,
+	};
+}
+
 // INOTIFY-BASED WATCH MODE (#53)
 // Watches the daemon's classified tag file via fs.watch. Auto-spawned by CLI.
 // tag file. Auto-spawn of the daemon happens in the CLI entry point (bin/wtft.ts).
 
 /**
  * Watch a classified tag file via inotify (fs.watch) and re-render the bar
- * chart in real time on every write. The daemon guarantees:
- *   - Writes at most every 667ms (90bpm)
- *   - Every line is a complete, valid JSON line (atomic writes)
- *   - No partial lines, no mid-write reads
+ * chart in real time on every write.
  *
- * This means the consumer can use event-driven fs.watch — no polling,
- * no throttling, no partial-line handling.
+ * WHAT THE DAEMON ACTUALLY GUARANTEES (#130). The honest list is shorter than
+ * the one that used to sit here, and the difference is why this watcher carries
+ * partial-line handling:
+ *
+ *   - **Every COMPLETED write leaves the file a whole number of lines.**
+ *     Enforced in one place, `appendTagFile`, rather than re-derived per reader.
+ *     A crash mid-append is repaired by the next daemon at startup.
+ *   - **`fs.watch` reports BYTES, not lines.** inotify fires on the write, and a
+ *     large batch is not one `write(2)`. A reader woken mid-batch sees complete
+ *     lines plus a partial tail — so this watcher consumes only up to the last
+ *     newline and carries the remainder to the next event. That is not
+ *     defensive decoration; without it, the split line is skipped and its turn
+ *     never appears.
+ *   - **The beat is not a write budget.** 667ms bounds how often a poll comes
+ *     ROUND, not how many writes it makes: one poll can append a batch of many
+ *     lines. The old claim "writes at most every 667ms" read as a rate limit and
+ *     was never true of the byte stream.
+ *
+ * The file never shrinks, so an offset-tracking reader's position stays valid:
+ * the idle heartbeat is replaced in place at a fixed width, never cut and
+ * re-appended.
  *
  * @param sessionPath - Path to the session.jsonl (shown in title)
  * @param tagPath - Path to the daemon's classified tag file
@@ -1302,11 +1360,10 @@ export async function watchTagFile(
 	// Emoji disable: CLI flag (--no-emoji/--emoji) wins; otherwise the session-file
 	// inline emoji-settings entry (Pi-toggled) decides (#62).
 	let disabledEmoji = typeof settings.disabledEmoji === "boolean" ? settings.disabledEmoji : false;
-	let allInteractions: Interaction[] = readClassifiedTagFile(tagPath);
-	let lastReadOffset = 0;
-	try {
-		lastReadOffset = fs.statSync(tagPath).size;
-	} catch {}
+	// One read, and the offset comes out of the same buffer (#130 review round 2).
+	let seed = seedClassifiedTagFile(tagPath);
+	let allInteractions: Interaction[] = seed.interactions;
+	let lastReadOffset = seed.offset;
 
 	// Session-level settings from inline wtft-settings entries.
 	let sessionInterval: string | undefined;
@@ -1471,9 +1528,11 @@ export async function watchTagFile(
 	//
 	// WHAT THE DAEMON ACTUALLY GUARANTEES (#130), because the three bullets that
 	// used to sit here were folklore and two of them were false:
-	//   - Every write LANDS ON A LINE BOUNDARY. No write ends mid-line, and the
-	//     heartbeat truncate cuts to `lastLineStartByte`. So the file is never
-	//     left holding a severed line.
+	//   - Every COMPLETED write LANDS ON A LINE BOUNDARY, and the file never
+	//     shrinks: the idle heartbeat is overwritten in place at a fixed width,
+	//     never cut and re-appended, so an offset here cannot be left past EOF.
+	//     A crash mid-append is repaired by the next daemon before its first
+	//     write. So the file is never left holding a severed line.
 	//   - It does NOT write at most once per beat. One poll makes several
 	//     separate writes — the classified batch, then `_meta.offset`, then a
 	//     `_meta.swept` marker, plus one append per changed subagent transcript,
@@ -1486,8 +1545,10 @@ export async function watchTagFile(
 	//
 	// So a "change" event means complete lines ready PLUS, briefly, a partial one
 	// at the end — which is why the read below consumes only to the last newline
-	// and carries the remainder. A whole-file reader never sees this; an
-	// offset-tracking reader must.
+	// and carries the remainder. A WHOLE-FILE READER IS NOT EXEMPT: a readFileSync
+	// landing in that same span returns the complete lines plus the fragment too,
+	// and drops it through its own catch. What the writer guarantees is only that
+	// the fragment can never be anywhere but the END of the file (#130 round 2).
 	//
 	// No debounce needed — double-fire is harmless (stat.size check is a no-op).
 	//
@@ -1524,7 +1585,8 @@ export async function watchTagFile(
 					// inotify can wake this watcher inside that span. So the file
 					// is always a whole number of complete lines PLUS, briefly, a
 					// partial one at the end — and the reader that tracks an offset
-					// has to carry the remainder. A whole-file reader never sees it.
+					// has to carry the remainder. A whole-file reader meets the same
+					// fragment; it just drops it silently instead of desynchronising.
 					//
 					// This is not defensive code against a writer we do not trust.
 					// It is the one place the writer provably cannot deliver, and
@@ -1636,8 +1698,9 @@ export async function watchTagFile(
 				// Tag file may have been deleted or truncated — re-read from zero
 				try {
 					lastReadOffset = 0;
-					allInteractions = readClassifiedTagFile(tagPath);
-					lastReadOffset = fs.statSync(tagPath).size;
+					seed = seedClassifiedTagFile(tagPath);
+					allInteractions = seed.interactions;
+					lastReadOffset = seed.offset;
 					needsRedraw = true;
 					render();
 					resetWatchdog();
@@ -1704,8 +1767,9 @@ export async function watchTagFile(
 	// adopted sibling file already holds the whole session; without re-seeding,
 	// the first frame renders nothing and everything written before now is only
 	// picked up by luck, on whatever change event happens next.
-	allInteractions = readClassifiedTagFile(tagPath);
-	try { lastReadOffset = fs.statSync(tagPath).size; } catch { lastReadOffset = 0; }
+	seed = seedClassifiedTagFile(tagPath);
+	allInteractions = seed.interactions;
+	lastReadOffset = seed.offset;
 	needsRedraw = true;
 	render();
 

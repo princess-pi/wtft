@@ -739,7 +739,7 @@ async function main() {
 				// #457 (round 6) — a per-file discovery failure is REPORTED,
 				// not thrown: the readable siblings still scan (partial
 				// progress), while the report degrades the blind-spot scan
-				// the same way the dir-level catch below does — the token
+				// the same way the dir-level failure does — the token
 				// table is missing the unreadable sibling's uncounted
 				// billables, the same class of incomplete report #443's
 				// provisional exit exists for, so the exit code says so
@@ -865,21 +865,48 @@ async function main() {
 		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
 	};
 
-	/** The built-in subagents this session spawned, each with the harness's own
-	 *  record of it where one exists (#137).
+	/** The subagents this session spawned, each with the harness's own record of
+	 *  it where one exists (#137), or `undefined` when the answer is incomplete.
 	 *
-	 *  Discovery is re-run rather than reusing `subagentFiles`, which is scoped
-	 *  to the blind-spot scan and is empty on the paths that never reach it. It
-	 *  is the same directory read either way, and a label that silently goes
-	 *  missing on some arms is worse than one that costs a readdir.
+	 *  Discovery is SHARED with the blind-spot scan through `discoverOnce`, not
+	 *  re-run. An earlier version of this docstring said the opposite — that
+	 *  discovery is re-run and costs "a readdir" — and both halves were wrong
+	 *  once the memo landed: the body calls the cache, and `discoverSubagentSessionFiles`
+	 *  does considerably more than a readdir (it walks the subtree and reads the
+	 *  parent transcript whole for the Pattern-2 header check). The memo exists
+	 *  precisely so that cost is paid once and both callers describe the same
+	 *  filesystem (#137 review rounds 1 and 2).
 	 *
-	 *  A discovery failure yields an empty list and NOT an error: #457 already
-	 *  routes that to `provisional.reason = "subagent-unreadable"`, which is the
-	 *  field a consumer should be reading for it. Reporting it twice, in two
-	 *  vocabularies, is how the two drift apart.
+	 *  A discovery failure is reported by OMITTING the key, not by an empty list —
+	 *  see the body. `provisional.reason` still carries `subagent-unreadable`;
+	 *  that stays the authoritative verdict field, and this one simply declines to
+	 *  make a claim it cannot support.
 	 */
-	const collectSubagentJson = (): WtftSubagentJson[] =>
-		discoverOnce().files.map(transcript => ({ transcript, meta: readSubagentMeta(transcript) }));
+	const collectSubagentJson = (): WtftSubagentJson[] | undefined => {
+		// `undefined` — so the KEY IS OMITTED — whenever discovery did not produce
+		// a complete answer. Three cases reach that, and all three mean the same
+		// thing to a consumer: nobody looked, or looked and could not see.
+		//
+		//  - the session file does not exist (the `pending` arm, handled by the
+		//    caller, and the early return in `scanSessionUncounted` which never
+		//    reaches discovery at all);
+		//  - the subagents directory threw, which `discoverOnce` caches as
+		//    `{ files: [], unreadable }`;
+		//  - a per-file discovery failure, which returns the readable files
+		//    ALONGSIDE `unreadable` — so the list is non-empty and still partial.
+		//
+		// The first version emitted `[]` for the throw case (#137 review round 2,
+		// Medium/contract). That is the exact confusion this document's
+		// absent-versus-empty rule exists to prevent, committed by the code that
+		// states the rule: a consumer reading `subagents.length === 0` got a
+		// partial result presented as complete. `provisional.reason` does carry
+		// `subagent-unreadable`, but nothing tells a consumer that field qualifies
+		// THIS one, and a cross-field dependency nobody documented is not a signal.
+		if (!fs.existsSync(finalSessionPath)) return undefined;
+		const discovered = discoverOnce();
+		if (discovered.unreadable) return undefined;
+		return discovered.files.map(transcript => ({ transcript, meta: readSubagentMeta(transcript) }));
+	};
 
 	// `pending` pins the decision the CALLER already made, rather than letting the
 	// document re-derive it later (PR review, Medium/correctness). The
@@ -902,12 +929,12 @@ async function main() {
 			},
 			provisional,
 			uncounted,
-			// #137 — name the built-in subagents from the `.meta.json` the harness
-			// already writes beside each transcript. Omitted on the `pending` arm:
-			// the session file does not exist, so discovery never ran, and an
-			// empty array there would read as "this session spawned nothing"
-			// rather than "nobody looked".
-			...(opt.pending ? {} : { subagents: collectSubagentJson() }),
+			// #137 — name the subagents from the `.meta.json` the harness already
+			// writes beside each transcript. `collectSubagentJson` returns
+			// `undefined` wherever the answer would be incomplete, and the key is
+			// then OMITTED rather than emitted empty: an empty array must mean
+			// "looked, found none", never "nobody looked".
+			...((() => { const s = opt.pending ? undefined : collectSubagentJson(); return s ? { subagents: s } : {}; })()),
 			notices: [...earlyNotices, ...(opt.notices ?? [])],
 		});
 		process.stdout.write(renderSessionJson(doc));

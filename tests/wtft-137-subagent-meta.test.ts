@@ -11,12 +11,23 @@
  *   transcript names the other" — true for launcher children, never true for
  *   these.
  *
- *   MEASURED (2026-09-17, this host): 439 meta files, ZERO unparseable, 1:1 with
- *   `agent-*.jsonl`. Two facts the issue did not have and this suite pins:
+ *   MEASURED (2026-09-17, this host): 439 meta files reached by the glob, all of
+ *   which parsed. A wider `find` counts 487 meta files and 487 transcripts —
+ *   equal totals, which is CONSISTENT with 1:1 and does not establish it; the 48
+ *   files the glob missed were never examined. `docs/spec-137-subagent-meta.md`
+ *   carries the same caveat, and an earlier version of this header stated the
+ *   stronger claim the spec had already retracted (#137 review round 2).
+ *
+ *   ONE fact the issue did not have, and this suite pins it:
  *     - `model` is NOT universal — 419/439. A null there is a gap, not a zero.
- *     - `parentAgentId` appears on exactly the files with `spawnDepth > 1`, all
- *       25 resolving to a sibling transcript. The harness records the WHOLE
- *       subagent tree, not just depth-1 edges.
+ *
+ *   One more the issue did not have, which this suite deliberately does NOT pin:
+ *     - `parentAgentId` appeared on exactly the files with `spawnDepth > 1`, all
+ *       25 resolving to a sibling transcript, so the harness records the WHOLE
+ *       subagent tree. That is a corpus observation about the HARNESS. M8 checks
+ *       only that the reader carries the field through, because a test that
+ *       failed when a future release wrote it at depth 1 would be reporting a
+ *       correct change as a defect.
  *
  *   THIS FILE IS UNDOCUMENTED HARNESS OUTPUT. It may vanish or be renamed in any
  *   release, so every arm degrades to `null` and the caller keeps today's
@@ -31,6 +42,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { readSubagentMeta } from "../bin/wtft.mjs";
 import { trackSandbox } from "./lib/sandbox";
+import { skip } from "./lib/skips";
 import { runWtftCli } from "./lib/wtft-cli";
 
 const CLI_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
@@ -82,9 +94,11 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 	assert("M1 model", m?.model === "sonnet", JSON.stringify(m));
 }
 
-// M2 — `model` absent. 20 of 439 files on this host have none, so this is the
-// COMMON degraded case, not an edge. The meta is still valid; `model` is
-// undefined and the caller needs an arm for it. A null here is a gap, not a zero.
+// M2 — `model` absent. 20 of 439 files on this host have none: 4.6%, which is
+// uncommon but routine — frequent enough that any caller will meet it, and the
+// issue's Closer asked for `model` as though it were always there. The meta is
+// still valid; `model` is undefined and the caller needs an arm for it. A null
+// here is a gap, not a zero.
 {
 	const t = subagent("no-model-child", {
 		agentType: "Explore", description: "sweep the corpus",
@@ -157,42 +171,100 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 	void t3;
 }
 
-// M7 — THE FIELD-NAME PIN, and the reason this suite is worth its length.
+// M7 — THE FIELD-NAME PIN, in two halves that catch two different drifts.
 //
 // `.meta.json` is UNDOCUMENTED harness output. If a release renames
 // `description` to `label`, every guard above still returns null, every caller
-// still degrades politely, and the report silently goes back to showing hashes
-// with nothing anywhere reporting that it regressed. The names are therefore
-// asserted VERBATIM, against a fixture in the exact shape the harness writes, so
-// a rename fails loudly HERE — one test naming the field that moved — instead of
-// emptying the labels in production.
+// still degrades politely, and the report goes back to showing hashes with
+// nothing reporting the regression.
+//
+// AN EARLIER VERSION OF THIS BLOCK CLAIMED TO CATCH THAT, AND COULD NOT
+// (#137 review round 2). It wrote its OWN fixture using the current names and
+// checked the reader accepted it — so a real harness rename would change
+// nothing here and M7 would still pass. What that pins is the READER's expected
+// names against a wtft-side edit, which is worth having and is not the stated
+// guarantee. Two halves now, each honest about its subject:
 {
 	const REQUIRED = ["agentType", "description", "toolUseId", "spawnDepth"];
+
+	// M7a — the READER's names, against a hand-authored fixture. Catches a
+	// wtft-side edit that drops or renames a required field. Says nothing about
+	// the harness.
 	const t = subagent("pin-child", {
 		agentType: "general-purpose",
 		description: "the words typed at dispatch",
 		toolUseId: "toolu_pin",
 		spawnDepth: 1,
 	});
-	const m = readSubagentMeta(t);
-	assert("M7 the four required harness field names still parse", m !== null);
+	assert("M7a the four required field names still parse", readSubagentMeta(t) !== null);
 	for (const k of REQUIRED) {
 		const dropped = {
 			agentType: "general-purpose", description: "d", toolUseId: "toolu_pin", spawnDepth: 1,
 		} as Record<string, unknown>;
 		delete dropped[k];
-		assert(`M7 \`${k}\` is load-bearing — dropping it changes the answer`,
+		assert(`M7a \`${k}\` is load-bearing — dropping it changes the answer`,
 			readSubagentMeta(subagent(`pin-drop-${k}`, dropped)) === null);
+	}
+
+	// M7b — THE HARNESS's names, against a REAL `.meta.json` on this host. This
+	// is the half that can see a rename, because its input is the harness's
+	// output rather than ours. It is host-gated, so it SKIPS VISIBLY where there
+	// is none (CI has no `~/.claude`): a check that silently passed having read
+	// nothing is the coverage claim this repo's skip contract exists to refuse.
+	const real = (() => {
+		const base = path.join(os.homedir(), ".claude", "projects");
+		try {
+			for (const slug of fs.readdirSync(base)) {
+				const sessions = path.join(base, slug);
+				let entries: string[] = [];
+				try { entries = fs.readdirSync(sessions); } catch { continue; }
+				for (const e of entries) {
+					const dir = path.join(sessions, e, "subagents");
+					let metas: string[] = [];
+					try { metas = fs.readdirSync(dir).filter(f => f.endsWith(".meta.json")); } catch { continue; }
+					if (metas.length) return path.join(dir, metas[0]);
+				}
+			}
+		} catch { /* no harness dir on this host */ }
+		return null;
+	})();
+
+	if (!real) {
+		skip("M7b no real .meta.json on this host — the harness field names were NOT checked against harness output");
+	} else {
+		let obj: Record<string, unknown> | null = null;
+		try { obj = JSON.parse(fs.readFileSync(real, "utf8")); } catch { /* assertion below owns it */ }
+		assert(`M7b a real harness .meta.json parses (${path.basename(real)})`, obj !== null, real);
+		if (obj) {
+			for (const k of REQUIRED) {
+				assert(`M7b the harness still writes \`${k}\` — a rename fails HERE`,
+					k in obj,
+					`${real} has keys ${JSON.stringify(Object.keys(obj))} — the harness renamed or dropped \`${k}\`, and every label in the report just went blank`);
+			}
+			// And end to end: the reader accepts the harness's OWN file, not just
+			// our fixture of it. This is the assertion that would catch a value
+			// whose TYPE changed while its name stayed — `spawnDepth: "1"`.
+			const realMeta = readSubagentMeta(real.replace(/\.meta\.json$/, ".jsonl"));
+			assert("M7b and the reader accepts the harness's own file, types and all",
+				realMeta !== null,
+				`readSubagentMeta declined ${real} although every required name is present — a value's TYPE changed`);
+		}
 	}
 }
 
 // M8 — `parentAgentId`, which is the finding the issue did not have.
 //
-// It appears on exactly the files with `spawnDepth > 1` — 25 of 439 here, 0
-// mismatches either way, and all 25 resolve to a sibling `agent-*.jsonl`. So a
-// subagent's parent is a RECORD at every depth, not only at the top. That is
-// strictly more than #116's ledger reconstructs for this class of child, and it
-// was already on disk.
+// It appeared on exactly the files with `spawnDepth > 1` — 25 of 439 here, 0
+// mismatches either way, and all 25 resolving to a sibling `agent-*.jsonl`. So a
+// subagent's parent is a RECORD at every depth, not only at the top: strictly
+// more than #116's ledger reconstructs for this class of child, and already on
+// disk.
+//
+// THAT CORRELATION IS THE HARNESS'S BEHAVIOUR, NOT OURS, and the assertions
+// below do not pin it — they pin that the READER carries the field when it is
+// there and leaves it undefined when it is not. Pinning the correlation would
+// mean failing the build when a future release starts writing `parentAgentId` at
+// depth 1, which would be reporting a correct change as a defect.
 {
 	const t = subagent("deep-child", {
 		agentType: "general-purpose", description: "a subagent's subagent",
@@ -286,6 +358,39 @@ console.log("\n§ R — the Closer: `wtft --json` names its subagents\n");
 			named?.meta?.toolUseId === "toolu_014xWPgGcSUHnLejKyXB1947", JSON.stringify(named));
 		assert("R1 `model` — which makes the #504 downshift auditable from the report",
 			named?.meta?.model === "sonnet", JSON.stringify(named));
+
+		// R1b — AN UNREADABLE SUBAGENTS DIRECTORY OMITS THE KEY, never emits `[]`.
+		//
+		// `[]` means "looked, found none". A discovery failure is "nobody looked,
+		// or looked and could not see", and emitting an empty array for it hands a
+		// consumer a partial result presented as complete — the exact confusion
+		// this document's absent-versus-empty rule exists to prevent, committed by
+		// the code that states the rule (#137 review round 2, Medium/contract).
+		{
+			const blindDir = path.join(slug, sessionId, "subagents");
+			let chmodded = false;
+			try { fs.chmodSync(blindDir, 0o000); chmodded = true; } catch { /* best effort */ }
+			const unreadable = chmodded && (() => { try { fs.readdirSync(blindDir); return false; } catch { return true; } })();
+			if (!unreadable) {
+				skip("R1b could not make the subagents dir unreadable (running as root?) — the omit-on-failure path was NOT checked");
+			} else {
+				const out2 = runWtftCli(`node ${JSON.stringify(CLI_BIN)} -s ${JSON.stringify(sessionPath)} --json`, {
+					env: { ...process.env, WTFT_CLAUDE_PROJECTS_DIR: projects },
+				});
+				let d2: any = null;
+				try { d2 = JSON.parse(out2); } catch { /* assertion owns it */ }
+				assert("R1b the document still parses with an unreadable subagents dir", d2 !== null, out2.slice(0, 300));
+				if (d2) {
+					assert("R1b `subagents` is ABSENT, not an empty array",
+						!("subagents" in d2),
+						`subagents = ${JSON.stringify(d2.subagents)} — an empty list reads as "spawned nothing"`);
+					assert("R1b and provisional still names the real reason",
+						d2.provisional?.reason === "subagent-unreadable",
+						JSON.stringify(d2.provisional));
+				}
+			}
+			try { fs.chmodSync(blindDir, 0o755); } catch { /* best effort */ }
+		}
 
 		// The no-meta child. `meta: null` is a GAP, not an absence of cost: the
 		// transcript is still there and still counted, it simply has no label.

@@ -121,6 +121,13 @@ change to `renderSpawnTree` once #116 merges, and it belongs in that branch's wo
 than in a merge conflict waiting to happen here. Recorded rather than quietly dropped: an issue
 that says "depends on nothing" and half-does is how a Closer stops meaning anything.
 
+**So #137 does not close on this branch, and the split is explicit.** Two review rounds both
+raised it, and both were right: a Closer with three acceptance criteria is not met by a diff
+that satisfies two. #137 stays open for the render half; **#141** carries the `--json` half this
+branch delivers, and is what merging it closes. The alternative — merging and calling #137 done
+— would leave the rendered report showing hex basenames with the issue marked resolved, which is
+exactly the failure the Closer format exists to prevent.
+
 ## The shape of the `--json` addition
 
 ```jsonc

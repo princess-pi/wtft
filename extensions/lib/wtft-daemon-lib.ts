@@ -303,9 +303,12 @@ export function readTagProvisional(tagPath: string): TagProvisional {
 /**
  * The BYTE offset at which a file's last content line begins (#130).
  *
- * This function is the whole of #130 in one number. `upsertHeartbeat` truncates
- * the stale heartbeat line off the tag file and appends a fresh one, and the
- * offset it truncates to MUST be a byte offset on a line boundary. The version
+ * This function is the whole of #130 in one number. Two writers start here and
+ * both MUST start on a line boundary, in BYTES: `upsertHeartbeat` overwrites the
+ * stale heartbeat in place at this offset, and `truncatePartialTail` cuts a
+ * crashed predecessor's fragment off at it. (The heartbeat used to be truncated
+ * and re-appended; round 2 replaced that with the in-place write, but the offset
+ * it needs is the same one.) The version
  * this replaces read bytes and then measured the result in a decoded string —
  * `searchOffset + lastLineStart` added a byte offset to a UTF-16 code-unit
  * index — so every multi-byte character ahead of the last line drove the
@@ -323,11 +326,11 @@ export function readTagProvisional(tagPath: string): TagProvisional {
  *
  * Scans backwards in chunks because a classified line can be large — a long
  * `cmd` array runs well past any fixed window — and a scan that gave up would
- * return 0 and truncate the entire file.
+ * return 0, which would have the partial-tail repair truncate the entire file.
  *
  * A trailing `\n` terminates the last line rather than starting an empty one, so
  * it is stepped over. An empty file, and a file that is one unterminated line,
- * both answer 0: the caller truncates to whatever comes back, and -1 or a throw
+ * both answer 0: a caller writes or truncates at whatever comes back, and -1 or a throw
  * would be a worse answer than "the whole file is the last line".
  */
 export function lastLineStartByte(fd: number, size: number, chunkSize = 512): number {
@@ -1562,6 +1565,39 @@ export async function watchTagFile(
 			try {
 				const stat = fs.statSync(tagPath);
 
+				// THE FILE GOT SHORTER — RE-SEED, do not wait to be overtaken
+				// (#130 review round 3, Medium/correctness).
+				//
+				// This callback only ever asked whether the file GREW. The daemon
+				// truncates the tag to zero in three places (`initClassified`: a
+				// rebuild token, no `_meta` offset, heartbeat-only content), and
+				// `truncatePartialTail` shrinks it too. A `--watch` reader stays
+				// attached across all of that — the 'r' key, a respawn, a lease
+				// rebuild — so its offset is left past the new EOF, pointing into
+				// a file that no longer has those bytes.
+				//
+				// Nothing recovers from that on its own. The reader sits idle
+				// until the rebuilt file grows PAST the stale offset, then starts
+				// reading from the middle of a line: every rebuilt line before
+				// that offset is never seen, and consume-to-last-newline only
+				// drops the leading fragment. The chart silently loses the whole
+				// early session.
+				//
+				// An earlier draft of this round's docs argued a truncate to zero
+				// was safe because "no reader can be positioned inside it". That
+				// is true of the CONTENT and false of the OFFSET, which is the
+				// thing that actually breaks.
+				if (stat.size < lastReadOffset) {
+					const reseed = seedClassifiedTagFile(tagPath);
+					allInteractions = reseed.interactions;
+					lastReadOffset = reseed.offset;
+					updateDaemonHealth();
+					needsRedraw = true;
+					render();
+					resetWatchdog();
+					return;
+				}
+
 				// File grew — read new data and accumulate
 				if (stat.size > lastReadOffset) {
 					const fd = fs.openSync(tagPath, "r");
@@ -1695,8 +1731,19 @@ export async function watchTagFile(
 				render();
 				resetWatchdog();
 			} catch {
-				// Tag file may have been deleted or truncated — re-read from zero
+				// Tag file may have been deleted or truncated — re-read from zero.
+				//
+				// ASK WHETHER IT IS THERE, rather than relying on a throw (#130
+				// review round 3, Low/correctness). This recovery used to call
+				// `fs.statSync(tagPath)`, which THREW when the file was gone and
+				// so skipped the render, leaving the last good chart on screen
+				// until the file came back. `seedClassifiedTagFile` never throws:
+				// on a missing file it answers `{interactions: [], offset: 0}`.
+				// Left alone, this catch would therefore wipe the accumulator and
+				// redraw an EMPTY chart on any transient read failure, and the
+				// "wait for it to reappear" branch below would be unreachable.
 				try {
+					if (!fs.existsSync(tagPath)) return;   // gone — keep the last good chart
 					lastReadOffset = 0;
 					seed = seedClassifiedTagFile(tagPath);
 					allInteractions = seed.interactions;
@@ -1705,7 +1752,8 @@ export async function watchTagFile(
 					render();
 					resetWatchdog();
 				} catch {
-					// File gone — wait for it to reappear
+					// Still unreadable — wait for the next event rather than
+					// rendering a chart we cannot substantiate.
 				}
 			}
 		});

@@ -30,8 +30,15 @@ line kinds; readers MUST handle all three.
 
 ### The line-safety guarantee (#130)
 
-**Every write the daemon makes leaves the file a whole number of complete lines.** At every
-instant an outside reader can observe, the file is valid JSONL.
+**Every write the daemon completes leaves the file a whole number of complete lines**, and a
+crash mid-append is repaired by the next daemon before its first write. So no MID-FILE line is
+ever malformed.
+
+It does **not** say a reader never meets a fragment: a large append is not one `write(2)`, so a
+read concurrent with one can return the complete lines plus a partial tail. The guarantee is
+about WHERE a fragment can be — only ever last — not about whether one exists. An earlier draft
+of this sentence claimed "at every instant an outside reader can observe, the file is valid
+JSONL", which the table immediately below it already contradicted.
 
 A reader may therefore presume, without writing any code for the alternative:
 

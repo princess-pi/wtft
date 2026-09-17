@@ -53,6 +53,7 @@ import {
 	CATEGORY_ORDER,
 	watchTagFile,
 	readClassifiedTagFile,
+	seedClassifiedTagFile,
 	readTagProvisional,
 	readTagFileWithVerdict,
 	lastLineStartByte,
@@ -186,9 +187,11 @@ export {
 	serializeClassified,
 	classifiedToInteraction,
 	readClassifiedTagFile,
+	seedClassifiedTagFile,
 	readTagProvisional,
 	readTagFileWithVerdict,
-	// #130 — the byte-offset seam the heartbeat truncate depends on,
+	// #130 — the byte-offset seam the heartbeat overwrite and the partial-tail
+	// repair both depend on,
 	// pinned directly by tests/wtft-130-line-safe-tag-writes.test.ts §W.
 	lastLineStartByte,
 	getTerminalWidth,

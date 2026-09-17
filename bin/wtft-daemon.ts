@@ -38,7 +38,9 @@ import {
 	loadExternalHarnesses,
 	warnUnreadableTranscript,
 	WTFT_TAGGER_VERSION as TAGGER_VERSION,
-	// #130 — the byte offset the heartbeat truncate cuts to. Must be a BYTE
+	// #130 — the byte offset a tag write may start at: where the last line
+	// begins. The heartbeat overwrite starts here and the partial-tail repair
+	// cuts here. Must be a BYTE
 	// offset on a line boundary; deriving it from a decoded string is the defect.
 	lastLineStartByte,
 } from "../extensions/lib/wtft-shared.js";
@@ -361,7 +363,8 @@ process.on("SIGHUP", () => shutdown("SIGHUP"));
  * LINE-SAFE BY CONSTRUCTION (#130), AND THE FILE NEVER SHRINKS.
  *
  * The heartbeat line is a FIXED WIDTH — `first` and `last` are both epoch
- * milliseconds, 13 digits each until the year 5138 — so replacing one with a
+ * milliseconds, 13 digits each from 2001-09-09 (1e12 ms) until 2286-11-20
+ * (1e13 ms) — so replacing one with a
  * fresher one is a single `pwrite` of exactly as many bytes as it covers, on
  * the one descriptor already open. No truncate, no second open, no size change,
  * and therefore no window at all: the file is a whole number of complete lines
@@ -1530,6 +1533,34 @@ function initClassified() {
   // incrementally from the recorded _meta offset (#124). If no _meta offset
   // exists, fall back to full re-parse.
   // If tag file is missing or only has heartbeats, do a full re-parse.
+
+  // A TAIL THAT ENDS MID-LINE MEANS A WRITER DIED INSIDE AN APPEND, AND SUCH A
+  // TAG IS REBUILT, NOT RESUMED (#130 rounds 2 and 3).
+  //
+  // Cutting the fragment is necessary — otherwise this daemon's first write
+  // welds onto it, which is the corpus shape the whole issue is about — but it
+  // is not sufficient, and the first version of this stopped there. `flushPending`
+  // appends the classified batch and THEN `_meta.offset`. A daemon killed inside
+  // that second append leaves the whole batch on disk with the offset line as the
+  // fragment: cut it, and the resume falls back to the PREVIOUS offset and
+  // re-classifies a batch that is already in the file.
+  //
+  // An earlier draft waved that away as free because `dedupeClassifiedById`
+  // collapses it. It does not: that function passes an interaction with no
+  // `messageId` straight through (wtft-daemon-lib.ts:187, and wtft-tag-format.md
+  // §4 states the rule), so every id-less turn in the replayed batch is counted
+  // TWICE in the session total — a permanent overcount, which is the one thing
+  // #132's priority does not excuse.
+  //
+  // So a cut tail escalates to the rebuild path. A tag is a disposable derived
+  // cache; rederiving one after a crash costs a single re-parse of a session
+  // that just lost its daemon, and it is provably correct where "resume from an
+  // offset we are no longer sure of" is a guess.
+  if (truncatePartialTail(tagPath)) {
+    console.error(`[wtft-daemon] ${tagPath} ended mid-line — a previous daemon was killed inside an append; rebuilding this tag from the transcript (#130)`);
+    rebuildTagOnStartup = true;
+  }
+
   if (rebuildTagOnStartup) {
     // A prior writer cannot know which bytes reached the shared tag. The new
     // singleton owner is the first process that can safely discard and replay.
@@ -1570,13 +1601,6 @@ function initClassified() {
       // No tag file for this version — fresh start, full reparse on next poll
       lastSize = 0;
     }
-  }
-
-  // A previous daemon may have been killed mid-append, leaving the file ending
-  // mid-line. Repair it HERE, before the first write of this daemon's life, so
-  // the heartbeat below cannot weld itself onto a fragment (#130 round 2).
-  if (truncatePartialTail(tagPath)) {
-    console.error(`[wtft-daemon] repaired an unterminated tail in ${tagPath} — a previous daemon was killed mid-append (#130)`);
   }
 
   // Write start heartbeat

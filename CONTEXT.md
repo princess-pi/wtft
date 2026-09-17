@@ -134,9 +134,10 @@ concurrent with a write — including one woken by `fs.watch`, which reports byt
 be made line-aware — may still find the LAST line incomplete, because a large append is not one
 `write(2)`; every reader keeps its final-line tolerance for that. What cannot happen is a
 corrupted line with valid lines after it. The guarantee lives in the writer (`appendTagFile`
-refuses a batch that does not end in a newline; `lastLineStartByte` is the only offset a tag
-truncate may cut to; a crash mid-append is repaired at the next daemon's startup), never in
-each reader.
+refuses a batch that does not end in a newline; a tag truncate may cut only to zero or to a
+`lastLineStartByte` offset; the idle heartbeat is overwritten in place at a fixed width rather
+than cut and re-appended, so the file never shrinks; a crash mid-append is repaired at the next
+daemon's startup), never in each reader.
 _Avoid_: Cache file, index file
 
 **Tags dir**:

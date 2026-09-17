@@ -241,9 +241,17 @@ its own is the Closer's literal rescan.
 **To dispose of them now, run this from the main clone — Princess Pi, before closing #130:**
 
 ```sh
-find ~/git-projects -type d -name wtft-tags -print0 \
+find ~/.claude/projects ~/git-projects -type d -name wtft-tags -print0 \
   | xargs -0 -I{} find {} -name '*.wtft-tag.v2.8.1.jsonl' -delete
 ```
+
+**`~/.claude/projects` is where they actually are, and an earlier draft of this command omitted
+it** — searching only `~/git-projects` (#130 review round 3, Medium/contract). A tag file lives
+in a `wtft-tags/` directory beside the session transcript it derives from, and transcripts live
+under the harness's project root. Measured on this host: **55** `wtft-tags` directories under
+`~/.claude/projects` against **4** under `~/git-projects`. The command as first written would
+have reported success having deleted almost nothing, on the very host whose 96 corrupt files
+motivated the issue — the worst failure shape available, since it looks like the cleanup ran.
 
 Per session, `wtft -s <session> --force` does the same thing plus killing that session's daemon.
 The Closer is therefore scoped to what the code guarantees: **zero mid-file unparseable lines
@@ -272,6 +280,10 @@ ships, rather than a claim about files no code will revisit.
 | S1 | no `fs.appendFileSync` reaches the tag path except through `appendTagFile` — the one helper that enforces the trailing newline |
 | S2 | every tag truncate in the daemon cuts to a line boundary (an offset from `lastLineStartByte`) or to zero |
 | S3 | `upsertHeartbeat` never truncates, and replaces the line in place at a `lastLineStartByte` offset. Structural because nothing observable at 667ms can tell in-place from same-width truncate-then-append — a behavioural test there would be theatre |
+| S4 | the watcher has a SHRINK branch, not only a grow branch, and re-seeds through `seedClassifiedTagFile` rather than guessing an offset |
+| W7 | `seedClassifiedTagFile` takes its offset from the bytes it parsed: a trailing fragment is left unconsumed, a missing file answers `{[], 0}` without throwing |
+| C1b | the rebuilt tag holds EXACTLY what the transcript holds — turn count and money — so the replayed-batch double count cannot hide behind a `>=` |
+| P0 | the daemon's `POLL_MS` is still 667, which R4's pacing depends on |
 
 ## RED, against the daemon that shipped
 
@@ -287,7 +299,7 @@ FAIL E1 every one of the 16 tag lines parses as JSON
      {"_meta":{"swept":178959760425{"_hb":{"first":1789597604255,"last":1789597604925}}
      {"_meta":{"swept":17895976{"_hb":{"first":1789597605593,"last":1789597606261}}
 FAIL E1 no line carries a second record welded onto it
-FAIL E1 no two consecutive heartbeat lines — the cut fired
+FAIL E1 no two consecutive heartbeat lines
 FAIL R1 the split turn is counted once the line completes   []
 FAIL R1 and counted exactly once (0)
 FAIL R2 a turn split mid-UTF-8-sequence is counted once the line completes
@@ -295,6 +307,24 @@ FAIL R2b and counted exactly once (0)
 FAIL S2 every tag truncate cuts to zero or to a lastLineStartByte offset
 19 passed, 8 failed
 ```
+
+**That listing is ROUND 1's, against round 1's suite of 27 assertions, and it is kept as the
+historical record of the original defect — it is not a run of the suite in this branch.** The
+suite has since grown twice, to 52 assertions, and the later rounds' own RED evidence is
+recorded with each finding rather than re-quoted here:
+
+| Round | Suite | RED evidence for that round's fixes |
+|---|---:|---|
+| 1 | 27 | the listing above — live corruption in the corpus shape, R1 returning `[]` |
+| 2 | 42 | C1 RED on all three substantive assertions against the pre-fix daemon (fragment not discarded, heartbeat welded onto it, lines unparseable) |
+| 3 | 52 | S4 RED — no `stat.size < lastReadOffset` branch existed; R4 re-measured and shown to span 4 poll intervals where the first version finished inside one |
+
+A label in the listing was also edited by a later round (`— the cut fired` became
+`— the replacement fired` when the truncate went away). Quoting live test output in a document
+rots exactly this way, which is why the table above names the evidence instead of transcribing
+it, and why this paragraph says outright which run the listing is from. Round 2's closing
+section called this class of drift fixed and round 3 found it again — recorded rather than
+quietly re-fixed.
 
 Those welded lines are the corpus shape, produced live by the real daemon rather than by a
 fixture: a `_meta.swept` marker severed mid-number with a heartbeat welded onto the stump.
@@ -367,7 +397,11 @@ docstring and in Defect 1 above.
 defect.** The Low/crossfile finding argued a live bug: a *shorter* replacement heartbeat leaves
 an offset reader past EOF, so the next classified line is read k bytes into itself and dropped.
 The shrink is real, but it needs the two heartbeats to differ in width — and `first` and `last`
-are both 13-digit epoch milliseconds until the year 5138. The finding also names
+are both 13-digit epoch milliseconds from 2001-09-09 until 2286-11-20 (1e12 to
+1e13 ms — an earlier draft said "the year 5138", which is where Unix time in
+SECONDS reaches 1e11, and round 3's own correction of it said "317,000 years",
+which is 1000x out the other way; the width guarantee was right both times and
+the arithmetic behind it was wrong both times). The finding also names
 `{"_hb":"stop"}` as a replacement; it is a plain append and always was. So the mechanism is
 sound and the instance is unreachable. The shape was fixed anyway, because it is simpler than
 what it replaced and removes the window instead of arguing it is harmless — not because the bug
@@ -405,4 +439,108 @@ as something only a replacement could produce; it is not, because `initClassifie
 heartbeat, the first clean poll appends a `_meta` marker, and the next upsert then finds a
 non-heartbeat last line and appends. E1b watches the file size across a quiet stretch instead,
 which is the property the readers actually depend on.
+
+## Review round 3 — the ceiling round, and it found a reader the writer fix left behind
+
+Thirteen findings, four blocking. One did not reproduce and is recorded as such; the rest were
+real, and three of them were defects **this branch introduced in round 2**.
+
+### A `--watch` reader never noticed the file getting shorter (Medium/correctness)
+
+The watch callback asked `stat.size > lastReadOffset` and had no other arm. The daemon truncates
+the tag to zero in three places, and round 2 added a fourth shrink. A `--watch` reader stays
+attached across a daemon restart — the `r` key, a respawn, a lease rebuild — so its offset was
+left past the new EOF, pointing at bytes the file no longer had.
+
+Nothing recovered from that. The reader sat idle until the rebuilt file grew *past* the stale
+offset and then began reading from the middle of a line: every rebuilt line before that offset
+was never seen, and round 1's consume-to-last-newline only drops the leading fragment. The chart
+silently lost the early session.
+
+Worse, **round 2's own prose asserted this was safe** — "truncating to zero is safe because no
+reader can be positioned inside it", "the file never shrinks". True of the content, false of the
+offset, which is the thing that breaks. A `stat.size < lastReadOffset` branch now re-seeds
+through `seedClassifiedTagFile`. S4 pins it.
+
+### A crashed tag is now REBUILT, not resumed (Low/correctness, and it was right)
+
+Round 2 cut the unterminated tail and stopped there. That is necessary and not sufficient.
+`flushPending` appends the classified batch and *then* `_meta.offset`; a daemon killed inside
+that second append leaves the whole batch on disk with the offset line as the fragment. Cut it,
+and the resume falls back to the previous offset and re-classifies a batch already in the file.
+
+Round 2's docstring waved this away as free because `dedupeClassifiedById` collapses it. **It
+does not** — that function passes an interaction with no `messageId` straight through
+(`wtft-daemon-lib.ts:187`, and `wtft-tag-format.md` §4 states the rule), so every id-less turn
+in the replayed batch would be billed twice, permanently. A transient double count is what
+#132's priority excuses; a permanent one is exactly what it does not.
+
+So a cut tail escalates to `rebuildTagOnStartup`. A tag is a disposable derived cache;
+rederiving one after a crash costs a single re-parse of a session that just lost its daemon, and
+it is provably correct where "resume from an offset we are no longer sure of" is a guess. C1b
+pins it with exact equality against `parseSessionFile` — turn count and money — because `>=` is
+how a double count goes unnoticed.
+
+### The watcher's recovery path had started rendering an empty chart (Low/correctness)
+
+Round 2 replaced a `fs.statSync` that THREW on a missing file with `seedClassifiedTagFile`,
+which never throws and answers `{interactions: [], offset: 0}`. The catch below it therefore
+wiped the accumulator and redrew an EMPTY chart on any transient read failure, and the "File
+gone — wait for it to reappear" branch became unreachable. It now asks `existsSync` and keeps
+the last good chart. A regression introduced by a fix, caught by a lens reading the diff.
+
+### The one-time disposal command searched the wrong tree (Medium/contract)
+
+Corrected above, with the measurement. Worth repeating here because of the failure SHAPE: the
+command would have exited 0 having deleted almost nothing, on the exact host whose 96 corrupt
+files motivated the issue. A cleanup that reports success without cleaning is worse than no
+cleanup, because nobody looks again.
+
+### R4 was finishing inside a single poll (Medium/contract)
+
+The Closer's byte-at-a-time test dribbled ~2 KB with a 1ms sleep every 64 bytes: tens of
+milliseconds, comfortably inside one 667ms beat. The daemon read the finished file in one poll
+and never saw a mid-line cut, so R4 passed against the pre-fix reader too. It now paces itself
+against `POLL_MS` to span at least four beats **and asserts the elapsed time**, so it cannot
+quietly shrink back. `POLL_MS` is copied from the daemon rather than exported for a test, and
+pinned by P0 against the daemon source.
+
+R4 also compared only message ids. It now compares cost — and the first version of THAT summed
+`r.costUsd`, a field that does not exist, reporting a confident `$0.000000 == $0.000000`. A
+comparison that cannot fail, written in the same round that deleted two other assertions for
+exactly that. It now asserts the fixture costs something before comparing.
+
+### S2 was a file-global name match calling itself provenance (Low/reasoning)
+
+Three versions, each fixing the last: proximity (failed on the fix it protects), then a
+file-global regex — which let any `const lineStart = lastLineStartByte(...)` anywhere in the
+file satisfy every truncate whose argument happened to be named `lineStart` — and now a match
+within the enclosing function body. Because that narrowing has a fallback that is
+indistinguishable from working, S2 now **self-checks**: it asserts `bodyOf` returned one
+function rather than the whole file, and that a name bound elsewhere is rejected.
+
+### Arithmetic, twice wrong in the same sentence
+
+Round 2 wrote that 13-digit epoch milliseconds hold "until the year 5138". Round 3 corrected it
+to "about 317,000 years". Both are wrong: 5138 is where Unix time in SECONDS reaches 1e11, and
+1e13 ms is 317 years after 1970, not 317,000. The real window is **2001-09-09 to 2286-11-20**.
+The width guarantee was sound every time; the arithmetic offered in support of it was not. Fixed
+in all three places that carried it.
+
+### What did not reproduce
+
+`lastLineStartByte` is imported from `wtft-shared.js`, and a lens flagged that the branch assumes
+that module re-exports `wtft-daemon-lib` wholesale — if it used a named list instead, the bundle
+would break or the symbol would be undefined at runtime, and `upsertHeartbeat`'s catch would
+swallow the TypeError on every beat. Sound reasoning, and checked: `wtft-shared.ts` line 20 is
+`export * from "./wtft-parser.js"` and its neighbours are the same form. The assumption holds.
+Recorded rather than silently dropped, because the next person to add an export there should
+know the whole file depends on that form.
+
+### Where this leaves the round limit
+
+Round 3 is the ceiling. `PR_REVIEW_ROUND_LIMIT` is **not** raised — that rule exists precisely
+for a loop that keeps finding real things, which is what this is. Every finding above is fixed
+and the suite is 57 assertions, but the decision to open the PR on the current review state
+belongs to Duppy.
 

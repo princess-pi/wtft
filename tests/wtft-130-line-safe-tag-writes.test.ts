@@ -32,7 +32,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
-import { lastLineStartByte, getCurrentVersionTagPath, readClassifiedTagFile, parseSessionFile } from "../bin/wtft.mjs";
+import { lastLineStartByte, seedClassifiedTagFile, getCurrentVersionTagPath, readClassifiedTagFile, parseSessionFile } from "../bin/wtft.mjs";
 import { pollUntil, sleep } from "./lib/poll";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
@@ -127,7 +127,7 @@ console.log("\n§ W — lastLineStartByte answers in BYTES, on a line boundary\n
 
 // W5 — the degenerate ends. An empty file has no last line; a single
 // unterminated line begins at 0. Both must answer 0 rather than -1 or throw,
-// because the caller truncates to whatever comes back.
+// because a caller writes or truncates at whatever comes back.
 {
 	const empty = fixture("w5-empty.jsonl", "");
 	const one = fixture("w5-one-line.jsonl", `{"_hb":{"first":0,"last":1}}`);
@@ -157,6 +157,32 @@ console.log("\n§ W — lastLineStartByte answers in BYTES, on a line boundary\n
 		got < f.size - CHUNK, `got ${got}, first chunk starts at ${f.size - CHUNK}`);
 }
 
+// W7 — `seedClassifiedTagFile` takes its offset from the bytes it PARSED.
+//
+// The shape it replaces was `readClassifiedTagFile(p)` then
+// `lastReadOffset = fs.statSync(p).size`, at three call sites. A whole-file read
+// landing inside a multi-write() append returns a fragment, which the parse
+// drops and the stat COUNTS — so the offset lands inside a line that completes a
+// moment later and is then never re-read (#130 review round 2).
+{
+	const complete = `{"_hb":{"first":0,"last":1}}\n{"_meta":{"swept":1788828490280}}\n`;
+	const f1 = fixture("w7-whole.jsonl", complete);
+	assert("W7 a file of whole lines seeds at its full size",
+		seedClassifiedTagFile(f1.file).offset === f1.size);
+
+	// The same file caught mid-append: complete lines plus a fragment.
+	const f2 = fixture("w7-fragment.jsonl", complete + `{"t":1,"cmd":["a \u2192 b`);
+	const seeded = seedClassifiedTagFile(f2.file);
+	assert("W7 a trailing fragment is NOT counted into the offset",
+		seeded.offset === complete.length,
+		`expected ${complete.length}, got ${seeded.offset} — the fragment's bytes were consumed without being parsed`);
+	assert("W7 so the fragment's line is still waiting to be read",
+		seeded.offset < f2.size);
+
+	assert("W7 a missing file seeds empty, at zero, without throwing",
+		seedClassifiedTagFile(path.join(root, "w7-absent.jsonl")).offset === 0);
+}
+
 // ---
 // § E — THE CLOSER: the real daemon, over a transcript full of arrows and dashes
 // ---
@@ -169,6 +195,21 @@ console.log("\n§ W — lastLineStartByte answers in BYTES, on a line boundary\n
 // then reads every byte the daemon wrote.
 
 const daemonPath = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
+
+/** The daemon's beat. It is a private const in `bin/wtft-daemon.ts`, not part of
+ *  the bundle's public surface, and R4 needs it to pace a dribble across several
+ *  polls. Copied rather than exported — widening the public API for one test is
+ *  the wrong trade — and PINNED below, so a change to the daemon's beat fails
+ *  this suite by name instead of quietly shortening R4 until it stops crossing a
+ *  poll boundary at all, which is precisely how R4 was toothless to begin with. */
+const POLL_MS = 667;
+{
+	const src = fs.readFileSync(path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.ts"), "utf8");
+	const m = /const POLL_MS = (\d+);/.exec(src);
+	assert(`P0 the daemon's POLL_MS is still ${POLL_MS} — R4's pacing depends on it`,
+		m !== null && Number(m[1]) === POLL_MS,
+		m ? `daemon says ${m[1]}, this suite assumes ${POLL_MS}` : "no `const POLL_MS = <n>;` found in bin/wtft-daemon.ts");
+}
 const children: ChildProcess[] = [];
 
 /** An assistant turn whose text and command carry multi-byte UTF-8. The `cmd`
@@ -245,8 +286,8 @@ console.log("\n§ E — the Closer: every line the daemon writes parses as JSON\
 		// last write has to see a terminated line, not a fragment.
 		assert("E1 the file ends on a line boundary", raw.length === 0 || raw.endsWith("\n"));
 
-		// The truncate must actually have fired, or this suite would pass just as
-		// well against a daemon that never cuts anything. Two properties pin it,
+		// The replacement must actually have fired, or this suite would pass just
+		// as well against a daemon that never touches the last line. Two properties pin it,
 		// and neither is "few heartbeats": the upsert replaces the last line ONLY
 		// when that line is itself a heartbeat, so one `_hb` per idle run is
 		// correct and expected — a `_meta` marker between two runs legitimately
@@ -438,15 +479,31 @@ console.log("\n§ R — a partial trailing line is re-read, never skipped\n");
 			[0, 1, 2, 3, 4].map(i => multibyteTurn(`msg_r4_${i}`, t0 + i * 1000)).join(""),
 			"utf8",
 		);
-		// One byte per write. Several hundred writes across several beats, so the
-		// daemon's polls cut the stream at offsets nobody chose.
+		// One byte per write, PACED SO THAT POLLS LAND INSIDE IT.
+		//
+		// The first version slept 1ms every 64 bytes, which ran the whole ~2 KB
+		// dribble in tens of milliseconds — comfortably inside a single 667ms
+		// beat. The daemon then read the finished file in one poll and never saw
+		// a mid-line cut, so the test passed against the pre-fix reader too and
+		// proved nothing (#130 review round 3, Medium/contract).
+		//
+		// The dribble now spans at least four beats by construction, so several
+		// polls are guaranteed to land at offsets nobody chose — inside JSON
+		// strings, inside multi-byte sequences, between a key and its value.
+		const BEATS = 4;
+		const perByteMs = Math.max(1, Math.ceil((POLL_MS * BEATS) / payload.length));
 		const fd = fs.openSync(sessionPath, "a");
+		const dribbleStart = Date.now();
 		try {
 			for (let i = 0; i < payload.length; i++) {
 				fs.writeSync(fd, payload, i, 1);
-				if (i % 64 === 0) await sleep(1);
+				await sleep(perByteMs);
 			}
 		} finally { fs.closeSync(fd); }
+		const dribbleMs = Date.now() - dribbleStart;
+		assert(`R4 the dribble spanned at least ${BEATS} poll intervals (${dribbleMs}ms over ${payload.length} one-byte writes)`,
+			dribbleMs >= POLL_MS * BEATS,
+			`${dribbleMs}ms is under ${POLL_MS * BEATS}ms — polls may never have cut the stream, so this test proves nothing`);
 
 		const want = (parseSessionFile(sessionPath) as any[]).map(r => r.messageId).filter(Boolean).sort();
 		const settled = await pollUntil(() => {
@@ -459,6 +516,21 @@ console.log("\n§ R — a partial trailing line is re-read, never skipped\n");
 			settled, `whole-file: ${JSON.stringify(want)}\ndaemon:     ${JSON.stringify(got)}`);
 		assert("R4 and counts each of them exactly once",
 			new Set(got).size === got.length, JSON.stringify(got));
+
+		// Ids alone would pass while every cost came out wrong. Compare the money
+		// the two paths arrive at (#130 review round 3).
+		// `cost`, not `costUsd`. The first spelling of this summed `undefined ?? 0`
+		// on BOTH sides and reported a confident $0.000000 == $0.000000 — a
+		// comparison that could not fail, in the same round that removed two other
+		// assertions for exactly that (#130 review round 3).
+		const sum = (rows: any[]) => rows.reduce((a, r) => a + (r.cost ?? 0), 0);
+		const wantCost = sum(parseSessionFile(sessionPath) as any[]);
+		const gotCost = sum(readClassifiedTagFile(tagPath) as any[]);
+		assert("R4 the fixture actually costs something — otherwise the comparison below is vacuous",
+			wantCost > 0, `whole-file parse totals $${wantCost}`);
+		assert(`R4 and the daemon arrives at the same total ($${wantCost.toFixed(6)})`,
+			Math.abs(wantCost - gotCost) < 1e-9,
+			`whole-file $${wantCost.toFixed(6)} vs daemon $${gotCost.toFixed(6)}`);
 	}
 
 	child.kill("SIGTERM");
@@ -557,6 +629,26 @@ console.log("\n§ C — a crash mid-append is repaired, not built upon\n");
 		assert(`C1 both earlier turns survived the repair (${classified.length} rows)`,
 			classified.length >= 2, JSON.stringify(classified.map(r => r.messageId)));
 
+		// C1b — AND NEITHER IS COUNTED TWICE. This is why a cut tail escalates to
+		// a rebuild rather than merely being cut. `flushPending` appends the batch
+		// and THEN `_meta.offset`; a daemon killed inside that second append
+		// leaves the batch on disk with the offset line as the fragment, so a
+		// resume re-classifies turns already in the file. `dedupeClassifiedById`
+		// does NOT save us — it passes an interaction with no `messageId` straight
+		// through — so an id-less turn would be billed twice, permanently
+		// (#130 review round 3, Low/correctness).
+		//
+		// Exact equality, not `>=`: a double count is the failure, and `>=` is
+		// how it would go unnoticed.
+		const want = (parseSessionFile(sessionPath) as any[]);
+		assert(`C1b the rebuilt tag holds exactly what the transcript holds (${classified.length} vs ${want.length})`,
+			classified.length === want.length,
+			`daemon ${JSON.stringify(classified.map(r => r.messageId))}\nwhole-file ${JSON.stringify(want.map(r => r.messageId))}`);
+		const cost = (rows: any[]) => rows.reduce((a, r) => a + (r.cost ?? 0), 0);
+		assert(`C1b and the same money ($${cost(want).toFixed(6)})`,
+			Math.abs(cost(want) - cost(classified)) < 1e-9,
+			`whole-file $${cost(want).toFixed(6)} vs daemon $${cost(classified).toFixed(6)}`);
+
 		second.kill("SIGTERM");
 	}
 }
@@ -567,8 +659,11 @@ console.log("\n§ C — a crash mid-append is repaired, not built upon\n");
 //
 // E1 proves the daemon that exists today writes whole lines. It cannot stop the
 // NEXT writer from reintroducing the defect, and the defect survived months
-// precisely because every reader tolerated it silently. These two checks read
-// the source and fail on the shapes that caused #130.
+// precisely because every reader tolerated it silently. These four checks read
+// the source and fail on the shapes that caused #130 — S1 an append that bypasses
+// the one guarded helper, S2 a truncate to an offset of unknown provenance, S3 a
+// heartbeat that goes back to cut-and-append, S4 a watcher that only notices the
+// file growing.
 
 console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 
@@ -589,10 +684,35 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	// decoded string; an offset that does not come from lastLineStartByte is
 	// that bug wearing different arithmetic.
 	//
-	// Checked by NAME, not by proximity: the first version of this check looked
-	// back six lines for the word `lastLineStartByte` and failed on the very fix
-	// it exists to protect, because the offset is bound nine lines above its use.
-	// Proximity is not the property — provenance is.
+	// Checked by NAME WITHIN THE ENCLOSING FUNCTION, which is as close to
+	// provenance as a source check gets. Three versions of this, each fixing the
+	// last:
+	//
+	//  1. proximity — look back six lines for `lastLineStartByte`. Failed on the
+	//     very fix it protects, because the binding sat nine lines above its use.
+	//  2. a FILE-GLOBAL name match. That is not provenance at all: any
+	//     `const lineStart = lastLineStartByte(...)` anywhere in the file
+	//     satisfied every truncate whose argument happened to be called
+	//     `lineStart`, in any other function (#130 review round 3).
+	//  3. this — the binding must appear in the SAME function body as the
+	//     truncate that uses it.
+	//
+	// Still a source check and still fallible: it cannot see a variable
+	// reassigned between binding and use. It is aimed at the shape that actually
+	// caused #130 — an offset computed some other way and handed to ftruncate —
+	// not at an adversary.
+	// Split the source into function bodies so a binding can be required in the
+	// SAME one as its use, rather than anywhere in the file.
+	const fnBodies = daemonSrc.split(/\nfunction /).map((b, i) => (i === 0 ? b : "function " + b));
+	const bodyOf = (lineNo: number): string => {
+		let seen = 0;
+		for (const b of fnBodies) {
+			const lines = b.split("\n").length;
+			if (lineNo <= seen + lines) return b;
+			seen += lines - 1;
+		}
+		return daemonSrc;
+	};
 	const truncateOffsets: { n: number; expr: string; line: string }[] = [];
 	daemonSrc.split("\n").forEach((line, i) => {
 		const m = /f?truncateSync\(\s*[^,]+,\s*([^)]+)\)/.exec(line);
@@ -600,13 +720,29 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	});
 	assert("S2 the daemon still truncates tag files at all — the check has a subject",
 		truncateOffsets.length > 0);
-	const badTruncates = truncateOffsets.filter(({ expr }) => {
+	const badTruncates = truncateOffsets.filter(({ expr, n }) => {
 		if (expr === "0") return false;   // to zero: there is no line to break
-		return !new RegExp(`\\b(const|let|var)\\s+${expr}\\s*=\\s*lastLineStartByte\\(`).test(daemonSrc);
+		return !new RegExp(`\\b(const|let|var)\\s+${expr}\\s*=\\s*lastLineStartByte\\(`).test(bodyOf(n));
 	});
 	assert("S2 every tag truncate cuts to zero or to a lastLineStartByte offset",
 		badTruncates.length === 0,
 		badTruncates.map(({ n, line }) => `${n}: ${line}`).join("\n"));
+
+	// S2 SELF-CHECK. `bodyOf` falls back to the whole file when it cannot place a
+	// line, and that fallback is indistinguishable from working: every assertion
+	// above would still pass while the scoping did nothing — which is exactly the
+	// file-global match round 3 objected to, wearing a new coat. So prove the
+	// narrowing is real, both ways.
+	const nonZero = truncateOffsets.find(({ expr }) => expr !== "0");
+	assert("S2 self-check: there is a non-zero truncate to scope", nonZero !== undefined);
+	if (nonZero) {
+		const body = bodyOf(nonZero.n);
+		assert("S2 self-check: bodyOf returns ONE function, not the whole file",
+			body.length < daemonSrc.length && /^function /.test(body.trim()),
+			`body is ${body.length} chars of a ${daemonSrc.length}-char file`);
+		assert("S2 self-check: and a name bound in some OTHER function is rejected",
+			!new RegExp(`\\b(const|let|var)\\s+pendingFragmentSize\\s*=\\s*lastLineStartByte\\(`).test(body));
+	}
 
 	// S3 — the heartbeat upsert holds ONE descriptor and never truncates.
 	//
@@ -622,6 +758,27 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	// millisecond timestamps both heartbeats are the same width, so the old shape
 	// was size-neutral end to end and the window it opened was too short to poll.
 	// A behavioural test here would have been theatre.
+	// S4 — the watcher re-seeds when the file SHRINKS.
+	//
+	// The callback only ever asked whether the file grew. The daemon truncates
+	// the tag to zero in three places, and a `--watch` reader stays attached
+	// across a daemon restart — so its offset is left past the new EOF, and
+	// nothing recovers until the rebuilt file grows past it, at which point the
+	// reader starts mid-line and every rebuilt line before that offset is lost
+	// (#130 review round 3, Medium/correctness).
+	//
+	// Structural, for the same reason as S3: driving it would mean standing up
+	// the interactive watch TUI and racing a daemon restart against it. The
+	// branch either exists or it does not, and its absence is the whole bug.
+	{
+		const libSrc = fs.readFileSync(path.resolve(import.meta.dirname, "..", "extensions", "lib", "wtft-daemon-lib.ts"), "utf8");
+		assert("S4 the watcher has a shrink branch, not only a grow branch",
+			/stat\.size\s*<\s*lastReadOffset/.test(libSrc), "no `stat.size < lastReadOffset` in wtft-daemon-lib.ts");
+		assert("S4 and it re-seeds from the file rather than guessing an offset",
+			/stat\.size\s*<\s*lastReadOffset[\s\S]{0,1600}?seedClassifiedTagFile\(/.test(libSrc),
+			"the shrink branch does not reach seedClassifiedTagFile");
+	}
+
 	const upsertBody = /function upsertHeartbeat\([\s\S]*?\n}/.exec(daemonSrc)?.[0] ?? "";
 	assert("S3 upsertHeartbeat was found in the source — the check has a subject", upsertBody.length > 0);
 	assert("S3 the heartbeat upsert never truncates",

@@ -927,6 +927,59 @@ let selfCostWithRecord = 0;
 }
 
 
+// --- D27: the ERROR message is untrusted text too ---
+//
+// Macroscope, PR #136, Medium — and it is the same vector as D25 arriving at the
+// one code path that returns BEFORE D25's sanitiser ran.
+//
+// `renderSpawnTree` prints `spawned.ledgerError` and returns early. That message
+// embeds the ledger PATH, and the path is built from `XDG_STATE_HOME`, which the
+// caller controls. So a newline in the environment variable forges report rows
+// exactly as a newline in a `label` would, and an ESC starts a sequence the
+// reader's terminal executes.
+//
+// Worth its own test rather than an extra assertion on D25, because the defect
+// was NOT a missing sanitiser — it was a sanitiser declared below the arm that
+// needed it. A test that only exercised the edge-rendering path would go on
+// passing while this arm stayed raw, which is precisely what happened.
+{
+	const evilHome = path.join(cliDir, "evil\nSPAWNED    forged-error-row                             $99.99");
+	fs.mkdirSync(path.join(evilHome, "wtft"), { recursive: true });
+	// A directory where the ledger file should be: readable path, unreadable as a
+	// ledger, so the error arm renders and the path lands in the message.
+	fs.mkdirSync(path.join(evilHome, "wtft", "spawns.jsonl"), { recursive: true });
+
+	const evil = spawnSync("node", [CLI_BIN, "-s", parentTranscript(), "--tokens"], {
+		encoding: "utf8",
+		env: { ...process.env, XDG_STATE_HOME: evilHome, WTFT_CLAUDE_PROJECTS_DIR: cliProjects },
+		timeout: 30_000,
+	});
+	const out = (evil.stdout ?? "") + (evil.stderr ?? "");
+
+	check(/could not be read/i.test(out),
+		"D27 a ledger path that is a directory renders the error arm — the arm under test");
+	// The property is NOT "the text never appears" — the sanitised path legitimately
+	// still contains it, inline, on the error-detail line. The property is that it
+	// cannot BECOME A ROW: no line may START with it, and it may not be split
+	// across two lines. An earlier spelling of this assertion demanded the text be
+	// absent entirely and failed against the correct output, which would have read
+	// as a live vulnerability.
+	const carrying = out.split("\n").filter(l => l.includes("forged-error-row"));
+	// D27a is the weak half and is labelled as such: measured against the unfixed
+	// renderer it PASSES, because the forged row replaces the detail line rather
+	// than adding one. D27a2 and D27b are the assertions with teeth — both fail
+	// RED, D27a2 reporting `SPAWNED    forged-error-row` sitting at column 0.
+	// Kept anyway, because a future defect that ADDS a line is a different shape
+	// and this is the only assertion that would catch it.
+	check(carrying.length <= 1,
+		`D27a a newline in XDG_STATE_HOME cannot split the message across lines (${carrying.length} lines carry it)`);
+	check(!carrying.some(l => /^\S/.test(l)),
+		`D27a2 and what survives stays INDENTED as error detail, never at column 0 where a report row starts (${JSON.stringify(carrying.map(l => l.slice(0, 40)))})`);
+	check(out.includes("�"),
+		"D27b the replacement character is visible, so a reader can tell the path was tampered with");
+}
+
+
 // --- D26: a FIFO at the ledger path is refused, not waited on ---
 //
 // Macroscope, PR #136, two High findings on the same sequence. `statSync(path)`

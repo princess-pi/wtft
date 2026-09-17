@@ -2156,11 +2156,25 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
  *  reuse that already exists. */
 export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string {
 	if (!spawned) return "";
+	// EVERY untrusted string on this surface goes through one sanitiser, declared
+	// before the first arm that prints one (Macroscope, PR #136, Medium).
+	//
+	// The first version of this guard covered `mechanism` and `label` — the
+	// obviously spawner-supplied fields — and left `ledgerError` interpolated
+	// raw, one arm above. That message embeds the ledger PATH, which comes from
+	// `XDG_STATE_HOME`: caller-controlled, so a newline in it forges report
+	// lines and an ESC starts an OSC sequence the reader's terminal executes.
+	// Exactly the vector already fixed below, on the one code path that returns
+	// before reaching the fix.
+	//
+	// U+FFFD rather than deletion, so a reader SEES something was removed; a
+	// silently shortened path reads as the real one.
+	const safe = (v: string) => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, "\uFFFD");
 	if (spawned.ledgerError !== null) {
 		// Loud, and NOT an empty block: an unreadable ledger must not render the
 		// same silence as a session that spawned nothing.
 		return `\nSPAWNED    spawn ledger could not be read (#116) — descendants unknown, not zero\n` +
-		       `           ${spawned.ledgerError}\n`;
+		       `           ${safe(String(spawned.ledgerError))}\n`;
 	}
 	if (spawned.edges.length === 0) {
 		// No edges FOR THIS SESSION. Say nothing — unless the reader needs to
@@ -2186,8 +2200,7 @@ export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string 
 	//
 	// Replaced rather than stripped, so the reader SEES that something was there
 	// — a silently shortened label reads as the spawner's own text.
-	const safe = (v: string) => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, "\uFFFD");
-	const rows: string[] = [];
+const rows: string[] = [];
 	for (const edge of spawned.edges) {
 		const full = edge.label ? `${safe(edge.mechanism)}  ${safe(edge.label)}` : safe(edge.mechanism);
 		// Truncated, not padded: `label` is free text from a spawner, and one

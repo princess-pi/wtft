@@ -12,28 +12,40 @@
 # This file is the "something" that runs them.
 #
 # It did not stay purely a runner, and saying so is cheaper than a reader
-# discovering it. Deciding what CI should gate turned up three gaps and closed
-# them: §1 of wtft-36 scanned two of the four shipped bundles and skipped every
-# relative specifier — so #29's own defect 2 was outside it; the daemon shell
-# suite was run by nothing at all; and the registry channel had no check
-# anywhere. The registry job and the daemon step below are new assertions; the
-# daemon step was a by-name pin of its known-red set until #72 fixed the suite.
+# discovering it. Deciding what CI should gate turned up three gaps: §1 of
+# wtft-36 scanned two of the four shipped bundles and skipped every relative
+# specifier — so #29's own defect 2 was outside it; the daemon shell suite was
+# run by nothing at all; and the registry channel had no check anywhere. The
+# daemon step below closed its gap and stayed closed (a by-name pin of its
+# known-red set until #72 fixed the suite; a plain gate since). The registry
+# job closed the registry gap the same way, but is now disabled (#77, below)
+# until #29 publishes — so today the registry channel is back to having no
+# check anywhere, the same gap this paragraph originally described.
 #
 # WHY TWO JOBS. The Node Toolchain Standard defines two install channels with
 # different requirements, and a workflow that only exercises the one we use
 # would keep passing while the other stays broken — the same blind spot #29
-# was. So the second channel gets a job of its own.
+# was. So the second channel got a job of its own — `stock-node-registry`,
+# below, currently disabled (#77), so until it is re-enabled this workflow is
+# back to exercising only the git-URL channel.
 #
 # WHY THE KNOWN-RED JOB IS NOT `continue-on-error`. The first cut made it
 # unconditionally fail-open, which is a check that cannot fail — so a published
 # tarball that would not install would have been invisible for as long as #29
 # stayed open. That is the same "looks healthy because nothing reports" this
-# file exists to end, rebuilt inside the file that ends it. It now names the
-# ONE tolerated outcome — an E404 for our own package — and fails on anything
-# else, surfacing as a `::warning::` naming its issue, so the state is visible
+# file exists to end, rebuilt inside the file that ends it. It named the ONE
+# tolerated outcome — an E404 for our own package — and failed on anything
+# else, surfacing as a `::warning::` naming its issue, so the state was visible
 # without a red that is always expected, which is the kind of red people learn
 # to ignore. The daemon shell suite was the second such row, pinned to its five
 # known-red assertions BY NAME, until #72 fixed the suite; it is a plain gate now.
+#
+# `stock-node-registry` IS DISABLED, not pass-with-warning (#77, Duppy,
+# 2026-09-18). Publishing is a future feature, so CI should not run a test and
+# emit a warning on every push for it — a green board with a warning line
+# nobody reads reads as "quietly omitted" regardless of the tolerance logic
+# behind it. The job below carries `if: false`; its body is untouched so it
+# comes back verbatim, as a plain gate, in the PR that un-parks #29.
 # ---
 name: CI
 
@@ -156,6 +168,16 @@ jobs:
   stock-node-registry:
     name: registry channel on stock node
     runs-on: ubuntu-latest
+    # DISABLED (#77, Duppy, 2026-09-18): publishing is a future feature, so
+    # this job does not run a check and emit a warning on every push for it.
+    # Re-enable as a plain gate in the same PR that un-parks #29 — delete
+    # BOTH this comment block (lines above, through this sentence) AND the
+    # `if: false` line below it; deleting only `if: false` leaves a comment
+    # asserting DISABLED above a job that runs on every push. The rationale
+    # below (from "#32, ..." on) describes the job's body, which stays as
+    # written for that day; it does not describe what runs today, which is
+    # nothing.
+    if: false
     # #32, "the harder half, worth stating rather than hiding": CI that only
     # exercises the bun-equipped git channel keeps passing while the stock-node
     # contract is broken.
@@ -178,9 +200,10 @@ jobs:
     # somebody remembered to delete the line — a gate that never arrives. The
     # ONE tolerated outcome is named instead: a 404, which is the honest state
     # of an unpublished package. Anything else — a tarball that will not
-    # install, a bundle that will not run — fails the job today, unpublished or
-    # not. The day #29 publishes, the 404 stops happening and this becomes an
-    # ordinary gate with no edit here.
+    # install, a bundle that will not run — fails the job, unpublished or not.
+    # The day #29 publishes, the 404 stops happening and this becomes an
+    # ordinary gate once `if: false` above is deleted (#77) — not with no edit
+    # here, as an earlier version of this comment claimed.
     timeout-minutes: 10
     steps:
       - uses: actions/setup-node@v5

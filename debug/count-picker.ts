@@ -40,13 +40,19 @@ const args = process.argv.slice(2);
 const perHarness = args.includes("--per-harness");
 const cwd = args.find(a => !a.startsWith("--")) || process.cwd();
 
-function measure(harness: "auto" | "claude-code" | "pi") {
+// `picker` is what a launch with no `-s` opens on (bin/wtft.ts's
+// getDefaultScoped): current worktree, 20 min. `unscoped` is the library
+// default, which `-s` still searches.
+const PICKER_DEFAULT = { scope: "worktree", windowMs: 20 * 60 * 1000 } as const;
+
+function measure(harness: "auto" | "claude-code" | "pi", path: "picker" | "unscoped") {
 	resetCwdCache();
 	const t0 = performance.now();
-	const found = discoverSessions(harness, cwd);
+	const found = discoverSessions(harness, cwd, path === "picker" ? PICKER_DEFAULT : undefined);
 	return {
 		cwd,
 		harness,
+		path,
 		candidates: found.length,
 		ms: Math.round(performance.now() - t0),
 		tailReads: getCwdReadCount(),
@@ -56,5 +62,5 @@ function measure(harness: "auto" | "claude-code" | "pi") {
 }
 
 for (const harness of perHarness ? ["claude-code", "pi", "auto"] as const : ["auto"] as const) {
-	console.log(JSON.stringify(measure(harness)));
+	for (const path of ["picker", "unscoped"] as const) console.log(JSON.stringify(measure(harness, path)));
 }

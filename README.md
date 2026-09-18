@@ -12,8 +12,8 @@
 
 From a clone. Needs [bun](https://bun.sh) on PATH to build; what it installs then
 runs on stock node with no `node_modules` anywhere — for its own code. If you
-point `wtft-harnesses.json` at an external harness, that file is `import()`ed at
-runtime and has to be reachable.
+point `~/.config/wtft/harnesses.json` at an external harness, that file is
+`import()`ed at runtime and has to be reachable.
 
 ```sh
 git clone https://github.com/princess-pi/wtft && cd wtft
@@ -28,7 +28,12 @@ symlinks to them. The `.mjs` names are not spares — `wtft` finds its daemon by
 that exact name in its own directory, and Node needs the extension to read the
 file as ESM at all on Node 18. It also tells you if some other `wtft` wins on
 your PATH: it
-prints the `rm`, it never deletes anything itself. `install-wtft --json` gives
+prints the `rm`, it never deletes anything itself. It also moves, ONCE, any
+config file it finds still sitting at the pre-#156 path
+(`~/.config/princess-pi-tools/`) into `~/.config/wtft/` — there is no runtime
+fallback read of the old location, so a file left behind stays invisible to
+wtft until this script (or a human) moves it; `--check` reports one without
+moving it. `install-wtft --json` gives
 the whole report as one document on every exit path but one: a usage error (64)
 is reported on stderr and carries no document, because the arguments that would
 say what to report are the thing that is wrong. `install-wtft --help` lists the
@@ -36,10 +41,17 @@ rest. (`wtft` has its own unrelated `--json` — a session summary, and no 64;
 see [Usage](#usage) below.)
 
 Re-run it after every rebuild; `--check` is how you find out you needed to, and
-it is scriptable: **0** in sync, **1** drift, **2** shadowed on PATH, **64** bad
+it is scriptable: **0** in sync, **1** drift, **2** shadowed on PATH, **4** a
+config file still at the old path, **64** bad
 usage. A plain install adds **3** for a failed build, which `--check` cannot
-return because it never builds. Two of those codes have a second cause: **1**
-is also a `--dir` that cannot be created (status `no-dir`), and **64** is also
+return because it never builds. Three of those codes have a second cause: **1**
+is also a `--dir` that cannot be created (status `no-dir`), **4** is also install
+mode either declining to overwrite a DIFFERENT config file already at the new
+path, a file appearing there mid-move, or the copy itself failing partway (a
+permissions problem, say) — a file that copies fine but cannot be removed from
+the old path afterward is reported as installed; a later run removes that
+identical leftover once the old directory allows it, and reports **4** until then — either way a
+human resolves which copy is authoritative, and **64** is also
 `HOME` unset with no `--dir`, or a relative `--dir` whose current directory is
 gone. Two surprises `--help` spells out: `--version` prints the absolute path of
 the script, not a version number, and `--` is not an end-of-options marker.

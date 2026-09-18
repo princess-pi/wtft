@@ -8,7 +8,7 @@
  *   1. The CLI (`bin/wtft.mjs`) never writes ITS CONFIG. Not "writes nothing" —
  *      it truncates a reap log under ~/.local/state on most runs
  *      (bin/wtft.ts:247, :273) — and the scope matters, because the check below
- *      compares `wtft.json` bytes and would not notice anything else. Load
+ *      compares `config.json` bytes and would not notice anything else. Load
  *      bearing: if the CLI ever gained a config write path, every `wtft`
  *      invocation would silently persist whatever flags it was given, and
  *      `--cost`/`--tokens` would stop being safe ways to state intent for one
@@ -84,7 +84,7 @@ const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const CLI_BIN = path.join(REPO_ROOT, "bin", "wtft.mjs");
 
 const xdgRoot = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-config-persistence-")));
-const configPath = path.join(xdgRoot, "princess-pi-tools", "wtft.json");
+const configPath = path.join(xdgRoot, "wtft", "config.json");
 const prevXdg = process.env.XDG_CONFIG_HOME;
 process.env.XDG_CONFIG_HOME = xdgRoot;
 
@@ -334,7 +334,7 @@ check("/budget command is registered", () => {
 	assert.ok(registered.budget, "expected a 'budget' command");
 });
 
-const budgetConfigPath = path.join(xdgRoot, "princess-pi-tools", "token-budget.json");
+const budgetConfigPath = path.join(xdgRoot, "wtft", "token-budget.json");
 function readBudgetConfig(): Record<string, unknown> {
 	return JSON.parse(fs.readFileSync(budgetConfigPath, "utf8"));
 }

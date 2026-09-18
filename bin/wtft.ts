@@ -143,6 +143,7 @@ import {
 } from "../extensions/lib/wtft-spawn-tree.ts";
 import { execSync } from "node:child_process";
 import { loadConfig, readConfig } from "@princess-pi/libs/config";
+import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "../extensions/lib/wtft-config-dir.ts";
 import {
 	discoverSessions,
 	harnessLabel,
@@ -369,7 +370,7 @@ function describeProvisionalRemedy(provisional: { reason: string | null }): stri
 // ---
 
 // Load config file (#20) — overrides hardcoded defaults, CLI flags override both
-const cfg = loadConfig("wtft", { interval: "1h", limit: 100, mode: "cumulative" }) as {
+const cfg = loadConfig(WTFT_CONFIG_TOOL, { interval: "1h", limit: 100, mode: "cumulative" }, WTFT_CONFIG_DIR) as {
 	interval?: string;
 	limit?: number;
 	mode?: "bucket" | "cumulative";
@@ -1165,7 +1166,7 @@ async function main() {
 	}
 
 	// Read settings from harness-agnostic config file (#72).
-	const config = readConfig("wtft");
+	const config = readConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR);
 	// `--no-emoji` / `--emoji` override the persisted flag for THIS RUN only
 	// (the Pi extension persists via writeConfig; the CLI should not). The flag
 	// was parsed but never applied before #62, so `--no-emoji` was a no-op here.

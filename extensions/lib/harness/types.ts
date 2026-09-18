@@ -160,7 +160,7 @@ export interface RegisteredHarness {
 	parse: HarnessParseAdapter;
 }
 
-/** Shape of one entry in ~/.config/princess-pi-tools/wtft-harnesses.json. */
+/** Shape of one entry in ~/.config/wtft/harnesses.json. */
 export interface HarnessConfigEntry {
 	enabled?: boolean;
 	label?: string;

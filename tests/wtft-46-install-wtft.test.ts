@@ -81,11 +81,30 @@ execSync("bun run build", { cwd: REPO, stdio: "pipe" });
  * once, while this file was being written. -1 is outside the documented
  * exit-code table, so every check that names a real code fails honestly.
  */
-function run(args: string[], pathDirs: string[] = []): { code: number; out: string; err: string } {
+/**
+ * A PRIVATE HOME/XDG_CONFIG_HOME, fresh per call, unless `env` overrides them.
+ * #156 gave install-wtft a config-migration side effect — it now READS AND
+ * MOVES files under XDG_CONFIG_HOME — so a caller that inherited the real
+ * HOME (every one of them did, before this) would touch this host's actual
+ * ~/.config the moment that landed. Never touch the real ~/.config from a
+ * test: build a throwaway one instead.
+ */
+function run(
+	args: string[],
+	pathDirs: string[] = [],
+	env: Record<string, string> = {},
+): { code: number; out: string; err: string } {
+	const fakeHome = mkSandbox(path.join(os.tmpdir(), "46-run-home-"));
 	try {
 		const out = execFileSync(INSTALLER, args, {
 			encoding: "utf8", stdio: "pipe",
-			env: { ...process.env, PATH: [...pathDirs, BUN_DIR, "/usr/bin", "/bin"].join(":") },
+			env: {
+				...process.env,
+				PATH: [...pathDirs, BUN_DIR, "/usr/bin", "/bin"].join(":"),
+				HOME: fakeHome,
+				XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+				...env,
+			},
 		});
 		return { code: 0, out, err: "" };
 	} catch (e: any) {
@@ -463,8 +482,8 @@ console.log("\n7. The mutation probe runs, and can fail");
 	catch (e: any) { out = `${e.stdout ?? ""}${e.stderr ?? ""}`; code = e.status ?? 1; }
 	check(code === 0, "V7a: run-mutants.sh exits 0 — every mutant reported ok where the real script reported a fault",
 		`exit ${code}: ${out.trim().slice(0, 400)}`);
-	check(/M1 .*OK/.test(out) && /M2 .*OK/.test(out) && /M3 .*OK/.test(out),
-		"V7b: all three mutations applied and were caught", out.trim().slice(0, 300));
+	check(/M1 .*OK/.test(out) && /M2 .*OK/.test(out) && /M3 .*OK/.test(out) && /M4 .*OK/.test(out),
+		"V7b: all four mutations applied and were caught", out.trim().slice(0, 300));
 }
 
 // ---
@@ -560,6 +579,266 @@ console.log("\n8. Paths with an apostrophe, a newline, or a symlink in the way")
 		fs.readFileSync(victim, "utf8").slice(0, 60));
 	check(fs.lstatSync(path.join(linkTarget, "wtft.mjs")).isFile(),
 		"V8f: …and the destination is now a real file, not still a link");
+}
+
+// ---
+// 9. Config migration (#156). wtft's config moved off princess-pi-tools's
+//    directory onto its own — install-wtft moves existing files ONCE, and
+//    --check reports one left behind. Every check here builds its OWN fake
+//    HOME (never the real one) via `run()`'s per-call sandbox and an explicit
+//    XDG_CONFIG_HOME override, so nothing here can see or touch this host's
+//    actual ~/.config.
+// ---
+console.log("\n9. Config migration off princess-pi-tools and onto wtft (#156)");
+{
+	const LEGACY_FILES: Array<[string, string]> = [
+		["wtft.json", "config.json"],
+		["token-budget.json", "token-budget.json"],
+		["wtft-pricing.json", "pricing.json"],
+		["wtft-harnesses.json", "harnesses.json"],
+	];
+
+	function seedLegacy(fakeHome: string, overrides: Record<string, string> = {}): void {
+		const legacyDir = path.join(fakeHome, ".config", "princess-pi-tools");
+		fs.mkdirSync(legacyDir, { recursive: true });
+		for (const [oldName] of LEGACY_FILES) {
+			fs.writeFileSync(path.join(legacyDir, oldName), overrides[oldName] ?? JSON.stringify({ from: oldName }));
+		}
+	}
+
+	// V9a — a fresh home with every legacy file present: install moves all
+	// four, in one run, alongside the bin artifacts.
+	{
+		const fakeHome = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-install-"));
+		seedLegacy(fakeHome);
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-install-dir-"));
+		const { code, out } = run(["--json", "--dir", dir], [], {
+			HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+		});
+		check(code === 0, "V9a: install exits 0 when migration succeeds and artifacts install cleanly", `got ${code}: ${out.slice(0, 300)}`);
+		let doc: any = null;
+		try { doc = JSON.parse(out); } catch { /* left null */ }
+		check(doc?.status === "ok", "V9a: status is ok, not config-left", JSON.stringify(doc?.status));
+		const states = Object.fromEntries((doc?.configMigration ?? []).map((c: any) => [c.to, c.state]));
+		check(Object.values(states).every(s => s === "moved") && Object.keys(states).length === 4,
+			"V9a: every configMigration entry reports moved", JSON.stringify(states));
+
+		for (const [oldName, newName] of LEGACY_FILES) {
+			const oldPath = path.join(fakeHome, ".config", "princess-pi-tools", oldName);
+			const newPath = path.join(fakeHome, ".config", "wtft", newName);
+			check(!fs.existsSync(oldPath), `V9a: ${oldName} no longer exists at the old path`, oldPath);
+			check(fs.existsSync(newPath) && fs.readFileSync(newPath, "utf8") === JSON.stringify({ from: oldName }),
+				`V9a: ${newName} exists at the new path with the old content`, newPath);
+		}
+
+		// V9b — re-running --check afterward finds nothing left: the move was
+		// a one-time thing, not a standing fallback.
+		const re = run(["--check", "--json", "--dir", dir], [], {
+			HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+		});
+		check(re.code === 0, "V9b: --check after a clean migration exits 0", `got ${re.code}`);
+		let reDoc: any = null;
+		try { reDoc = JSON.parse(re.out); } catch { /* left null */ }
+		const reStates = ((reDoc?.configMigration ?? []) as any[]).map(c => c.state);
+		check(reStates.length === 4 && reStates.every(s => s === "none"),
+			"V9b: every configMigration entry reports none — nothing left to move", JSON.stringify(reStates));
+	}
+
+	// V9c — a file already at the new path: install DECLINES to overwrite
+	// either copy, reports config-left, and exits 4.
+	{
+		const fakeHome = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-conflict-"));
+		seedLegacy(fakeHome, { "wtft.json": JSON.stringify({ old: true }) });
+		const newDir = path.join(fakeHome, ".config", "wtft");
+		fs.mkdirSync(newDir, { recursive: true });
+		fs.writeFileSync(path.join(newDir, "config.json"), JSON.stringify({ current: true }));
+
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-conflict-dir-"));
+		const { code, out } = run(["--json", "--dir", dir], [], {
+			HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+		});
+		check(code === 4, "V9c: install exits 4 (config-left) when the new path already has a file", `got ${code}: ${out.slice(0, 300)}`);
+		let doc: any = null;
+		try { doc = JSON.parse(out); } catch { /* left null */ }
+		check(doc?.status === "config-left", "V9c: status is config-left", JSON.stringify(doc?.status));
+		const entry = (doc?.configMigration ?? []).find((c: any) => c.to.endsWith("wtft/config.json"));
+		check(entry?.state === "left", "V9c: the conflicting entry reports left", JSON.stringify(entry));
+
+		const oldPath = path.join(fakeHome, ".config", "princess-pi-tools", "wtft.json");
+		const newPath = path.join(newDir, "config.json");
+		check(fs.readFileSync(oldPath, "utf8") === JSON.stringify({ old: true }),
+			"V9c: the old file is untouched — no partial overwrite", fs.readFileSync(oldPath, "utf8"));
+		check(fs.readFileSync(newPath, "utf8") === JSON.stringify({ current: true }),
+			"V9c: the new file is untouched — install never overwrites it", fs.readFileSync(newPath, "utf8"));
+
+		// V9d — --check on the same host reports the same leftover, and
+		// writes nothing (mode=check never migrates).
+		const chk = run(["--check", "--json", "--dir", dir], [], {
+			HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+		});
+		check(chk.code === 4, "V9d: --check also exits 4 for the same leftover", `got ${chk.code}`);
+		check(fs.existsSync(oldPath), "V9d: --check left the old file in place", oldPath);
+	}
+
+	// V9e — a byte-identical file already at the new path is a STALE
+	// DUPLICATE, not a real conflict: install removes it and reports
+	// `moved`, rather than treating two copies of the same content as
+	// something a human has to arbitrate (PR review, round 2).
+	{
+		const fakeHome = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-dup-"));
+		const same = JSON.stringify({ interval: "1h" });
+		seedLegacy(fakeHome, { "wtft.json": same });
+		const newDir = path.join(fakeHome, ".config", "wtft");
+		fs.mkdirSync(newDir, { recursive: true });
+		fs.writeFileSync(path.join(newDir, "config.json"), same);
+
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-dup-dir-"));
+		const { code, out } = run(["--json", "--dir", dir], [], {
+			HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+		});
+		check(code === 0, "V9e: a byte-identical stale duplicate is not config-left — exit 0", `got ${code}: ${out.slice(0, 300)}`);
+		let doc: any = null;
+		try { doc = JSON.parse(out); } catch { /* left null */ }
+		const entry = (doc?.configMigration ?? []).find((c: any) => c.to.endsWith("wtft/config.json"));
+		check(entry?.state === "moved", "V9e: the duplicate's entry reports moved, not left", JSON.stringify(entry));
+		check(!fs.existsSync(path.join(fakeHome, ".config", "princess-pi-tools", "wtft.json")),
+			"V9e: the stale duplicate at the old path is gone");
+	}
+
+	// V9f — a move that copies the file successfully but cannot remove the
+	// OLD copy (a directory that allows writing into it but not unlinking
+	// from it) is NOT a permanent failure: THIS run still reports `moved`
+	// (the data reached the new path, which is what the state promises),
+	// and a LATER run — once the permission is fixed, or on any host where
+	// it never broke in the first place — auto-heals the leftover via V9e's
+	// byte-identical path, rather than reporting `config-left` forever.
+	{
+		const fakeHome = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-rmfail-"));
+		seedLegacy(fakeHome, { "wtft.json": JSON.stringify({ interval: "1h" }) });
+		const oldDir = path.join(fakeHome, ".config", "princess-pi-tools");
+		const oldPath = path.join(oldDir, "wtft.json");
+		const newPath = path.join(fakeHome, ".config", "wtft", "config.json");
+
+		fs.chmodSync(oldDir, 0o555); // writable→false: cp can still READ, rm cannot unlink
+		try {
+			const dir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-rmfail-dir-"));
+			const { code, out } = run(["--json", "--dir", dir], [], {
+				HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+			});
+			check(code === 0, "V9f: the move still succeeds and reports ok even though cleanup failed", `got ${code}: ${out.slice(0, 300)}`);
+			let doc: any = null;
+			try { doc = JSON.parse(out); } catch { /* left null */ }
+			const entry = (doc?.configMigration ?? []).find((c: any) => c.to.endsWith("wtft/config.json"));
+			check(entry?.state === "moved", "V9f: reports moved, not left, despite the failed rm", JSON.stringify(entry));
+			check(fs.existsSync(newPath), "V9f: the data reached the new path");
+			check(fs.existsSync(oldPath), "V9f: the old copy is still there — rm could not remove it");
+
+			// Fix the permission and confirm the leftover self-heals, rather
+			// than reporting config-left on every subsequent run forever.
+			fs.chmodSync(oldDir, 0o755);
+			const again = run(["--check", "--json", "--dir", dir], [], {
+				HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+			});
+			check(again.code === 4, "V9f: --check still reports the leftover (it never mutates)", `got ${again.code}`);
+			let againDoc: any = null;
+			try { againDoc = JSON.parse(again.out); } catch { /* left null */ }
+			const againEntry = (againDoc?.configMigration ?? []).find((c: any) => c.to.endsWith("wtft/config.json"));
+			check(againEntry?.state === "left", "V9f: --check reports left, not moved (it never mutates)", JSON.stringify(againEntry));
+
+			const heal = run(["--json", "--dir", dir], [], {
+				HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+			});
+			check(heal.code === 0, "V9f: install with the permission fixed self-heals — exit 0", `got ${heal.code}`);
+			check(!fs.existsSync(oldPath), "V9f: the stale duplicate is finally gone");
+		} finally {
+			try { fs.chmodSync(oldDir, 0o755); } catch { /* already restored or gone */ }
+		}
+	}
+
+	// V9g — neither $HOME nor $XDG_CONFIG_HOME set, but --dir given explicitly:
+	// the HOME-unset usage refusal only fires when --dir is OMITTED (DEST_DIR
+	// then falls back to $HOME/bin), so this combination reaches config_home()
+	// with nothing to resolve. configMigration must be [], not a partial or
+	// malformed array a caller might index into (PR review, round 3).
+	{
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-nohome-"));
+		let code = -1, out = "";
+		try {
+			out = execFileSync(INSTALLER, ["--json", "--dir", dir], {
+				encoding: "utf8", stdio: "pipe",
+				env: { PATH: [BUN_DIR, "/usr/bin", "/bin"].join(":") },   // no HOME, no XDG_CONFIG_HOME
+			});
+			code = 0;
+		} catch (e: any) { code = e?.status ?? -1; out = e?.stdout ?? ""; }
+		check(code === 0, "V9g: install still succeeds with no HOME/XDG_CONFIG_HOME and an explicit --dir", `got ${code}`);
+		let doc: any = null;
+		try { doc = JSON.parse(out); } catch { /* left null */ }
+		check(Array.isArray(doc?.configMigration) && doc.configMigration.length === 0,
+			"V9g: configMigration is [], not a partial or default-filled array", JSON.stringify(doc?.configMigration));
+	}
+
+	// V9h — a coexisting PATH shadow is still reported when config-left wins
+	// the exit code, the same way `drift` already reports a coexisting shadow
+	// (PR review, round 3: this was silently dropped for config-left).
+	{
+		const fakeHome = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-shadow-"));
+		seedLegacy(fakeHome, { "wtft.json": JSON.stringify({ interval: "1h" }) });
+		const newDir = path.join(fakeHome, ".config", "wtft");
+		fs.mkdirSync(newDir, { recursive: true });
+		fs.writeFileSync(path.join(newDir, "config.json"), JSON.stringify({ interval: "2h" })); // a REAL conflict
+
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-shadow-dir-"));
+		const decoyDir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-shadow-decoy-"));
+		fs.writeFileSync(path.join(decoyDir, "wtft"), "#!/bin/sh\necho decoy\n");
+		fs.chmodSync(path.join(decoyDir, "wtft"), 0o755);
+
+		const { code, out, err } = run(["--dir", dir], [decoyDir], {
+			HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+		});
+		check(code === 4, "V9h: config-left still wins the exit code over a coexisting shadow", `got ${code}`);
+		check(/Also: PATH resolves wtft to/.test(err) && err.includes(path.join(decoyDir, "wtft")),
+			"V9h: the human report ALSO names the coexisting shadow, not just config-left",
+			`${out}${err}`.slice(0, 400));
+	}
+
+	// V9i — a config that appears at the new path AFTER the "is it free?" check
+	// and before the move is kept, never overwritten (PR #162 review). A `cp`
+	// shim on PATH creates it at exactly that moment: it fires only when the
+	// destination is the migration's staging file, so the artifact copies run
+	// untouched. A running wtft writing its settings mid-install is the real shape.
+	{
+		const fakeHome = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-race-"));
+		seedLegacy(fakeHome);
+		const shimDir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-race-shim-"));
+		fs.writeFileSync(path.join(shimDir, "cp"), [
+			"#!/bin/sh",
+			"for last; do :; done",
+			"case \"$last\" in",
+			"  */wtft/.install-wtft.*)",
+			"    d=$(dirname \"$last\")",
+			"    [ -e \"$d/config.json\" ] || printf 'CONCURRENT' > \"$d/config.json\" ;;",
+			"esac",
+			"exec /bin/cp \"$@\"",
+			"",
+		].join("\n"));
+		fs.chmodSync(path.join(shimDir, "cp"), 0o755);
+
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-race-dir-"));
+		const { code, out } = run(["--json", "--dir", dir], [shimDir], {
+			HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+		});
+		const newPath = path.join(fakeHome, ".config", "wtft", "config.json");
+		const oldPath = path.join(fakeHome, ".config", "princess-pi-tools", "wtft.json");
+		check(fs.readFileSync(newPath, "utf8") === "CONCURRENT",
+			"V9i: a config created at the new path mid-move is not overwritten",
+			fs.readFileSync(newPath, "utf8").slice(0, 60));
+		check(fs.existsSync(oldPath), "V9i: …and the old copy is kept, since it did not move", oldPath);
+		let doc: any = null;
+		try { doc = JSON.parse(out); } catch { /* left null */ }
+		const entry = (doc?.configMigration ?? []).find((c: any) => c.to === newPath);
+		check(code === 4 && entry?.state === "left",
+			"V9i: the collision reports config-left, exit 4", `exit ${code}, ${JSON.stringify(entry)}`);
+	}
 }
 
 console.log(`\n${passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ""}`);

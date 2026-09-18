@@ -4,6 +4,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { loadConfig, writeConfig } from "@princess-pi/libs/config";
 import { readClassifiedTagFile } from "./lib/wtft-daemon-lib.ts";
+import { WTFT_CONFIG_DIR } from "./lib/wtft-config-dir.ts";
 
 
 // ---
@@ -386,7 +387,7 @@ interface BudgetSettings {
 }
 
 function getBudgetSettings(ctx?: any): BudgetSettings {
-  const cfg = loadConfig("token-budget", { widget: true, footer: false });
+  const cfg = loadConfig("token-budget", { widget: true, footer: false }, WTFT_CONFIG_DIR);
   return {
     widget: cfg.widget !== false,
     footer: cfg.footer === true,
@@ -394,7 +395,7 @@ function getBudgetSettings(ctx?: any): BudgetSettings {
 }
 
 function isEmojiDisabled(): boolean {
-  const cfg = loadConfig("token-budget", {});
+  const cfg = loadConfig("token-budget", {}, WTFT_CONFIG_DIR);
   return cfg.emojiDisabled === true;
 }
 
@@ -750,19 +751,19 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
       let handled = false;
 
       if (trimmed === "--reset") {
-        writeConfig("token-budget", { widget: null, footer: null });
+        writeConfig("token-budget", { widget: null, footer: null }, undefined, WTFT_CONFIG_DIR);
         updateTokenBudgetWidget(ctx);
-        ctx.ui.notify("Token Budget settings reset. Edit ~/.config/princess-pi-tools/token-budget.json for new defaults.", "info");
+        ctx.ui.notify("Token Budget settings reset. Edit ~/.config/wtft/token-budget.json for new defaults.", "info");
         return;
       }
 
       if (trimmed === "--no-emojii" || trimmed === "--no-emoji") {
-        writeConfig("token-budget", { emojiDisabled: true });
+        writeConfig("token-budget", { emojiDisabled: true }, undefined, WTFT_CONFIG_DIR);
         updateTokenBudgetWidget(ctx);
         ctx.ui.notify("Emoji icons in widgets have been disabled. (Persisted to token-budget.json)", "info");
         return;
       } else if (trimmed === "--emojii" || trimmed === "--emoji") {
-        writeConfig("token-budget", { emojiDisabled: false });
+        writeConfig("token-budget", { emojiDisabled: false }, undefined, WTFT_CONFIG_DIR);
         updateTokenBudgetWidget(ctx);
         ctx.ui.notify("Emoji icons in widgets have been enabled. (Persisted to token-budget.json)", "info");
         return;
@@ -836,7 +837,7 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
         newWidget = !current.widget;
       }
 
-      writeConfig("token-budget", { widget: newWidget, footer: newFooter });
+      writeConfig("token-budget", { widget: newWidget, footer: newFooter }, undefined, WTFT_CONFIG_DIR);
       updateTokenBudgetWidget(ctx);
 
       const statusMsgs: string[] = [];

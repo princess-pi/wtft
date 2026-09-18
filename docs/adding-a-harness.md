@@ -16,7 +16,7 @@ those touched, the seam is in the wrong place; file an issue rather than widenin
 interface HarnessDiscovery {
   readonly id: string;     // must equal the directory name
   readonly label: string;  // selector column, e.g. "Codex"
-  discover(targetCwd: string | null): SessionCandidate[];
+  discover(targetCwd: string | null, scopeOpts?: DiscoverScopeOptions): SessionCandidate[];
   resolveSessionById(sessionId: string): string | null;
 }
 ```
@@ -24,6 +24,33 @@ interface HarnessDiscovery {
 `discover` returns candidates for a target directory. You decide what a `null` target
 means for your harness — Claude Code falls back to `process.cwd()`, Pi treats it as "no
 filter". Both are policies, and both live inside their own discovery module.
+
+`scopeOpts` is the scoped-picker seam (#89). **Omitted** means the PRE-#89 default —
+whatever `discover` already did with just `targetCwd` — and every harness must keep that
+behaviour exactly, since `discoverSessions()`'s own callers (tests, and any other tool
+consuming this module) still get it that way. When it IS supplied, `scopeOpts.scope` is
+one of `"worktree"` (folder match on `targetCwd` alone, no union arm), `"worktrees"`
+(fan-out + the union arm, bounded by `scopeOpts.windowMs`), `"all"` (ignore `targetCwd`
+entirely), or `"branch"` (the checkout of `targetCwd`'s current git branch — see
+`harness/worktrees.ts`'s `resolveBranchCheckout`). `scopeOpts.windowMs` (`number | null`)
+bounds every scope uniformly: skip a transcript whose mtime falls outside it, checked with
+one `fs.statSync` before any read the union arm would otherwise pay for. **`"branch"`'s
+fallback is a documented no-op at the DISCOVERY level, never a silent wrong scope:**
+`resolveBranchCheckout` returning `null` (no git, not a repo, detached HEAD, or no checkout
+reports that branch) means `discoverScoped` folder-matches the bare `targetCwd` instead —
+the exact same population `"worktree"` scope would return. (The picker's own displayed
+scope LABEL still reads "branch" in that case — see `docs/spec-89-scoped-picker.md`'s note
+on this — only the underlying candidate set falls back.)
+
+Both built-in harnesses split into a `discoverLegacy` function (unchanged from before #89)
+plus a new `discoverScoped` function, selected by whether `scopeOpts` was passed — but they
+are NOT otherwise identical: Pi's legacy default never fans out across worktrees (see the
+`null`-target bullet below), Pi matches by *containment* (`slug.includes(variant)`) where
+Claude Code matches by exact Set membership, and only Claude Code's directory walk calls
+`countDirRead()` (`session-cwd.ts`'s `getDirWalkCount()` counts Claude Code's tree walk
+only — Pi's `collect()` does not call it). A harness with no interest in the new scopes
+may simply ignore `scopeOpts` — the seam is additive, and the interactive picker only
+reaches the new scopes on an explicit keypress.
 
 If your harness records a `cwd` on its transcript entries, apply the **union rule**:
 include a transcript when its project-dir slug matches the target **or** its own recorded
@@ -44,21 +71,38 @@ measured against, and the reason none of them may be written as a replacement.
 > physical arm misses, re-derive it from the transcript and say so on #89; the records are
 > still there, nothing reads them.
 
-- **Match the slug, do not compute it.** `slugMatchesCwd(slug, cwd)` accepts *either* known
+- **Match the slug, do not compute it.** `cwdSlugVariants(cwd)` returns *every* known
   encoding, because what a harness munges beyond `/` is usually only partly evidenced —
   Claude Code turns `.` into `-` as well, which is how `.claude/worktrees` paths went
-  missing. If you need a single canonical string for *display*, that is `cwdToSlug()`; for
-  *matching*, always the matcher. Pinning one encoding trades a known silent miss for an
-  unknown one.
+  missing. Match against ALL of them, not one. `slugMatchesCwd(slug, cwd)` is a ready-made
+  exact-equality wrapper over `cwdSlugVariants` for a harness whose own directory name
+  equals the encoded cwd outright — write your own membership test with `cwdSlugVariants`
+  directly when your harness's naming isn't exact equality (neither built-in calls
+  `slugMatchesCwd` itself: Claude Code builds a `Set` of variants and checks membership,
+  Pi checks *containment* — `slug.includes(variant)` — because its directory name wraps
+  the cwd slug rather than equalling it). If you need a single canonical string for
+  *display*, that is `cwdToSlug()`. Pinning one encoding for matching trades a known
+  silent miss for an unknown one.
 - **"Here" may mean a whole repo.** `fanOutCwd(target)` returns every checkout of the
   target's git repo, so a session recorded in a sibling worktree is still found. It returns
   the target alone when there is no `.git` ancestor, which is what stops `~` from meaning
   the entire machine. Whether this fits your harness is a policy call, exactly like the
   `null`-target question above: Claude Code fans out, Pi does not.
 
+- **Call `countDirRead()` from your own directory walk, if you have one.** It is
+  `session-cwd.ts`'s test-seam counter (`getDirWalkCount()`) for how many directories a
+  discovery pass reads — Claude Code's `collect()` calls it once per directory visited;
+  Pi's own `collect()` does not, so the counter is Claude-Code-only today, not
+  cross-harness. Not required, but a harness that skips it makes its own directory-walk
+  cost invisible to that instrument.
+
 None of this is required to ship a harness. A harness whose transcripts carry no `cwd`
 resolves to `null` from `resolveLastCwd`, contributes nothing to any of these arms, and is
-correct — that is Pi's situation, deliberately.
+correct — that is Pi's situation when its transcript is large enough that `resolveLastCwd`'s
+widening tail read never reaches the `session_start` entry (over roughly 512&nbsp;KB, the
+last `TAIL_WINDOWS` step); a Pi transcript **under** that size gets its whole file read by
+the same widening loop and DOES resolve its recorded `cwd` — deliberate, not a design gap,
+since the union arm is a bonus find either way, but not literally "always null".
 
 `resolveSessionById` is what lets a running daemon follow a session whose transcript moved
 (#155). Return the newest match when an id appears more than once.

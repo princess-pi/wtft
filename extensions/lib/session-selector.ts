@@ -289,6 +289,13 @@ function formatTagSuffix(stats: SessionSummary): string {
 	return `\x1b[90mv${stats.tagVersion}\x1b[0m`;
 }
 
+/** Text shown after "scope:" in the picker header, keyed by `PickerState.scope`
+ *  — display-only, no behaviour reads these strings back. The "branch" label
+ *  is shown even when `resolveBranchCheckout` fell back to the bare target
+ *  directory (S4's discovery-level no-op) — the label always reflects
+ *  `state.scope`, which `applyKey` sets unconditionally on Ctrl+B; only the
+ *  candidate POPULATION silently degrades to "worktree"-equivalent when the
+ *  branch can't be resolved. */
 const SCOPE_LABEL: Record<PickerState["scope"], string> = {
 	worktree: "this worktree",
 	worktrees: "all worktrees (Ctrl+W)",
@@ -296,6 +303,10 @@ const SCOPE_LABEL: Record<PickerState["scope"], string> = {
 	branch: "this branch (Ctrl+B)",
 };
 
+/** A `SessionCandidate` reduced to what `picker-state.ts` needs to know about
+ *  a row — that module never looks inside `PickerRow.id`, so this can be any
+ *  stable key; `c.path` is used because it is already the caller's lookup
+ *  key (`byPath` below). */
 function toPickerRow(c: SessionCandidate): PickerRow {
 	return { id: c.path, harness: c.harness, timestamp: c.timestamp };
 }
@@ -326,7 +337,12 @@ export interface SelectSessionPromptOptions {
  *   - j/k, arrows: move (wraps the whole list, sliding the 11-row window)
  *   - Enter: select — also records the sticky harness order (H3)
  *   - q or Ctrl+C: exit (code 130)
- *   - Ctrl+A / Tab: scope "all"  ·  Ctrl+W: scope "worktrees"  ·  Ctrl+B: scope "branch"
+ *   - Ctrl+A / Tab: scope "all"  ·  Ctrl+W: scope "worktrees"
+ *   - Ctrl+B: scope "branch" — the candidate population falls back to
+ *     `"worktree"`-equivalent (the bare target directory) when the current
+ *     branch or a matching checkout can't be resolved, but the picker's own
+ *     `state.scope` — and so its displayed "scope:" label — still flips to
+ *     "branch" regardless; see `SCOPE_LABEL`'s own comment above.
  *   - Ctrl+T: cycle the time window (20m -> 1h -> 1d -> 1w -> all -> 20m)
  *
  * Requires an interactive terminal — the caller (`bin/wtft.ts`) is
@@ -334,9 +350,14 @@ export interface SelectSessionPromptOptions {
  * function without one; `enterRawStdin` no-ops on a non-TTY stdin, which
  * would otherwise leave this promise pending forever.
  *
- * @param initialCandidates - The picker's starting rows, already discovered
- *   by the caller at its own initial scope (`bin/wtft.ts`'s default is
- *   `{ scope: "worktree", windowMs: TIME_WINDOW_MS["20m"] }`, S1/S5).
+ * @param initialCandidates - The picker's starting rows. Nothing in THIS
+ *   function inspects, validates, or threads through whatever scope the
+ *   caller used to discover them — `bin/wtft.ts`'s default is
+ *   `{ scope: "worktree", windowMs: TIME_WINDOW_MS["20m"] }` (S1/S5), but
+ *   that is a convention the caller upholds, not a contract this function
+ *   enforces; `initPickerState()`'s own `scope`/`timeWindow` fields (always
+ *   `"worktree"`/`"20m"`) are independent of what produced `initialCandidates`
+ *   and are only ever DISPLAYED as if they describe it.
  * @returns Promise resolving to the selected session file path
  */
 export async function selectSessionPrompt(

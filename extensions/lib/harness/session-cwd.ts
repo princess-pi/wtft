@@ -62,7 +62,13 @@ import * as fs from "node:fs";
  * corpus. It is no longer true: the module header's 2026-09-16 figures work out
  * at ~1.9 reads and ~41 KB per transcript, so the second window is reached
  * routinely — attachment-heavy tails are common now, and a transcript with no
- * `cwd` at all (every Pi one) widens through all three and then gives up.
+ * `cwd` anywhere in its final 512 KB widens through all three and then gives
+ * up. That describes every Pi transcript OVER ~512 KB: Pi records `cwd` only
+ * once, on its first (`session_start`) entry, which a widen-from-the-tail scan
+ * cannot reach once the file outgrows the last window. A Pi transcript UNDER
+ * that size has its whole file read by the third window, `session_start`
+ * included, and DOES resolve — this scan finds no `cwd` only past that size,
+ * not "always".
  *
  * 512 KB IS THE LAST WINDOW, NOT A STEP BEFORE A WHOLE-FILE READ (PR review).
  * The loop ends after it: a transcript over 512 KB has its last 512 KB read and
@@ -139,15 +145,20 @@ export function getCwdBytesRead(): number {
 }
 
 /**
- * Directory reads performed by discovery's tree walk since the last
- * {@link resetCwdCache}. One per directory visited, including nested ones —
- * so a flat corpus of N project dirs reads exactly N.
+ * Directory reads since the last {@link resetCwdCache}. One per directory
+ * visited, including nested ones — so a flat corpus of N project dirs reads
+ * exactly N. CLAUDE-CODE-ONLY today, not cross-harness: only
+ * `claude-code/discovery.ts`'s `collect()` calls {@link countDirRead}; Pi's own
+ * `collect()` does not (see that function's docstring above for why a count,
+ * not a wall-clock ratio, is what this measures).
  */
 export function getDirWalkCount(): number {
 	return dirWalkCount;
 }
 
-/** Called by a harness discovery for each directory it reads. */
+/** Call once per directory a harness discovery's own tree walk reads. Opt-in,
+ *  not enforced — Claude Code's `collect()` calls this; Pi's does not, so
+ *  {@link getDirWalkCount} is silent on Pi's directory-walk cost. */
 export function countDirRead(): void {
 	dirWalkCount++;
 }

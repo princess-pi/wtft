@@ -7,11 +7,17 @@
  * directory name is the cwd slug wrapped in `--`. Matching is by containment,
  * which is why an unwrapped slug still finds the directory.
  *
- * The union half of the #156 rule is wired in but inert today: Pi records `cwd`
- * once, on its session_start entry, so a tail scan resolves null and contributes
- * nothing. That is correct rather than a gap — Pi's directory slug already
- * encodes the start cwd and Pi has no worktree switch that rewrites it. The day
- * Pi records per-entry cwd, this works with no code change.
+ * The union half of the #156 rule is wired in but mostly inert today: Pi records
+ * `cwd` once, on its session_start entry, so a tail scan finds a DIFFERENT cwd
+ * than the one the transcript is physically filed under only in the rare case
+ * where the session moved directories after that entry — the ordinary case
+ * (never moved) makes the union arm redundant with the physical-slug arm, not
+ * a null read. (`resolveLastCwd`'s own widening tail read DOES reach
+ * session_start and return its cwd for any transcript under ~512 KB, the last
+ * `TAIL_WINDOWS` step in `session-cwd.ts` — it is not literally "always null".)
+ * That is correct rather than a gap — Pi's directory slug already encodes the
+ * start cwd and Pi has no worktree switch that rewrites it. The day Pi records
+ * per-entry cwd, this arm starts catching an in-session move with no code change.
  *
  * #144 applies here only as the slug *union*: Pi's session dirs on this machine
  * contain no dot-derived name, so Pi's own munging is unverified in exactly the

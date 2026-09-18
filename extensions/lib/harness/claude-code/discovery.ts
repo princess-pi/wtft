@@ -133,8 +133,7 @@ function toCandidate(file: string, projectSlug: string): SessionCandidate | null
  * `-s` was 98% of that command's wall clock, and a bounded scan of thousands of
  * files is still a scan of thousands of files.
  *
- * A transcript with no `cwd` at all resolves to null and matches nothing, which
- * is what keeps Pi transcripts out of this entirely.
+ * A transcript with no `cwd` at all resolves to null and matches nothing.
  */
 function matchesRecordedCwd(file: string, targets: Set<string>): boolean {
 	const last = resolveLastCwd(file);
@@ -235,6 +234,13 @@ function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions
 	// is consulted at all.
 	let targetDirs: string[];
 	let useUnionArm: boolean;
+	// Only "worktrees" ever calls fanOutCwd, so only it can carry a fallback
+	// slug-prefix set (git unusable — see fanOutCwd's own CwdFanOut.usedFallback
+	// docstring in ../worktrees.ts). Checked against `slugPrefixes.length > 0`
+	// rather than `usedFallback` alone: `fanOutCwd` returns `usedFallback: false`
+	// and an empty array for "worktree"/"branch" too, but being explicit here is
+	// what stops a future scope value from silently inheriting a stale fallback.
+	let fallbackSlugPrefixes: string[] = [];
 	if (scope === "worktree") {
 		targetDirs = [target];
 		useUnionArm = false;
@@ -247,6 +253,15 @@ function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions
 		const fan = fanOutCwd(target);
 		targetDirs = fan.dirs;
 		useUnionArm = true;
+		// discoverLegacy's physical-match arm also accepts a slug PREFIX when
+		// git could not enumerate the repo's checkouts (fan.usedFallback) — the
+		// in-tree layout's own slug still starts with the main clone's, even
+		// though fanOutCwd itself couldn't confirm it via git. Omitting this
+		// here would have silently narrowed "worktrees" scope exactly when git
+		// is unusable, the one case that most needs the fallback (found in
+		// spec-reconcile for #89, a genuine coverage gap rather than a doc
+		// drift — fixed here, not just noted).
+		if (fan.usedFallback) fallbackSlugPrefixes = fan.slugPrefixes;
 	}
 
 	const targetSet = new Set(targetDirs);
@@ -256,7 +271,8 @@ function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions
 	}
 
 	for (const slug of projectDirs) {
-		const physicalMatch = targetSlugs.has(slug);
+		const physicalMatch = targetSlugs.has(slug) ||
+			fallbackSlugPrefixes.some(prefix => slug.startsWith(prefix));
 		const files: string[] = [];
 		collect(path.join(root, slug), slug, files);
 

@@ -29,11 +29,17 @@ reader does not re-litigate them)
   `worktrees.ts`), then from the repo's fanned-out checkouts pick the one
   `git worktree list --porcelain` reports checked out to that branch, and apply
   `"worktree"`-style folder matching to it alone. If git is unusable or the
-  branch can't be resolved, `Ctrl+B` is a no-op (state does not change) rather
-  than silently falling back to a different scope — a stale/no-op key press is
-  easier to notice than a silent wrong scope. This is a mechanism choice inside
-  an already-decided feature (the key and its label are pinned by the decision);
-  it is not a fork Duppy needs to pick between.
+  branch can't be resolved, the CANDIDATE POPULATION is a documented no-op —
+  `resolveBranchCheckout` returns null, and discovery folder-matches the bare
+  target directory instead, the same set `"worktree"` scope would return —
+  rather than silently falling back to a different scope's population. The
+  picker's own `scope` FIELD still updates to `"branch"` unconditionally on
+  every Ctrl+B press (`applyKey` is pure and has no git awareness, so it
+  cannot know resolution will fail), and so does the displayed "scope:" label
+  — only the underlying candidates degrade gracefully, not the label. That
+  label/population split is itself a mechanism choice inside an already-decided
+  feature (the key and its label are pinned by the decision); it is not a fork
+  Duppy needs to pick between.
 - **How the union (last-cwd) arm and the time window compose.** The decision
   specifies the time window as a first-class, always-on primitive but does not
   restate the mechanics of the #156/#164 union arm under the new scopes. The
@@ -47,11 +53,19 @@ reader does not re-litigate them)
   `Ctrl+T` all the way to "all" (an explicit, deliberate choice, per the
   decision's "a window with no sessions says so … rather than widening on its
   own").
-- **Unseen-harness ordering, plural.** "An unseen harness goes last" pins single
-  membership; when *two or more* harnesses are unseen in the sticky order (a
-  fresh install, or config wiped), they are emitted in harness-registry order
-  (`getHarnesses()`'s stable id order) rather than candidate-discovery order,
-  for determinism independent of file-system iteration order.
+- **Unseen-harness ordering, plural — and it is two tiers, not one.** "An
+  unseen harness goes last" pins single membership; when *two or more*
+  harnesses are unseen in the sticky order (a fresh install, or config
+  wiped), the ones the caller's registered-harness list names are emitted in
+  that list's order (`getHarnesses()`'s stable id order), for determinism
+  independent of file-system iteration order. A harness present in the
+  discovered candidates but absent from BOTH the sticky order AND the
+  registered-harness list — a caller that forgot to pass one, or a genuinely
+  unregistered id — falls to a second, lower tier: `Map` insertion order,
+  which IS candidate-discovery order. `orderByHarness`'s own docstring in
+  `extensions/lib/harness-order.ts` names this as the one tier the function
+  cannot make deterministic; it exists so an unexpected harness id is never
+  silently dropped, only ordered less predictably.
 
 ## Behaviour list — named, testable checks
 
@@ -104,7 +118,8 @@ reader does not re-litigate them)
   anything.
 - **H4 — unseen harness goes last.** A harness with no entry in the sticky
   order sorts after every harness the order names, in harness-registry order
-  among themselves (Interpretation notes, above).
+  among themselves when it's a registered harness, else by candidate-discovery
+  order as the lowest tier (Interpretation notes, above).
 - **H5 — empty harness group is skipped**, not rendered as a zero-row heading.
 
 ### The pure key-handling state machine (`extensions/lib/picker-state.ts`, new)
@@ -121,11 +136,15 @@ reader does not re-litigate them)
   toggle) and request a rescope; **`Ctrl+T` cycles the time window** and also
   requests a rescope. Both leave `cursor`/`windowTop` for the caller to reset
   once new rows arrive via `setRows`.
-- **K6 — 12-row windowing is a pure function of `(rows.length, cursor)`.**
-  `rows.length <= 12` → every row shown, no position line.
+- **K6 — 12-row windowing is a pure function of `(rows.length, cursor, windowTop)`.**
+  `rows.length <= 12` → every row shown (12 exactly included), no position line.
   `rows.length > 12` → an 11-row sliding window plus a position line reading
   `"<start>-<end> of <total>"` (1-based, inclusive), which always contains
-  `cursor`.
+  `cursor`. `windowTop` is carried in `PickerState`, not derived from
+  `(rows.length, cursor)` alone: a cursor move slides it from its prior value
+  (scroll hysteresis), while `setRows` always recomputes it from 0 — the same
+  `(rows.length, cursor)` pair can render two different windows depending on
+  which path produced it.
 - **K7 — cursor stays valid after `setRows`.** A rescope that shrinks the list
   clamps the cursor into range rather than pointing past the end.
 

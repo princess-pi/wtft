@@ -294,13 +294,19 @@ _Avoid_: Standalone mode, binary (the binary is `bin/wtft.mjs`; "CLI" names the 
 
 **JSON mode** (#26):
 `--json` — the CLI's machine-readable mode. Writes exactly one JSON object (schema
-`wtft/session@3`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
+`wtft/session@4`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
 Human prose goes to stderr, and every sentence that would otherwise have been on stdout is
 repeated in the object's `notices[]`, where `code` is the contract and `text` is disposable.
-Its aggregate numbers come from `computeSessionSummary` (`extensions/lib/wtft-renderer.ts`),
+With an interactive terminal it still shows the scoped session picker (#89), drawn to
+stderr so stdout stays one clean object; with no interactive terminal it selects only an
+unambiguous session and otherwise exits 10 — see `docs/spec-26-json.md` Amendment 3. Its
+aggregate numbers come from `computeSessionSummary` (`extensions/lib/wtft-renderer.ts`),
 the same aggregation the `--tokens` table formats, so those two cannot report different
 totals; `session`, `provisional`, `uncounted`, `spawned` and `notices` come from the run
-instead, and `tree` is `total` plus `spawned.total` (see **Self / tree**).
+instead, and `tree` is `total` plus `spawned.total` (see **Self / tree**). `total` also
+carries `untaggedCostUsd` beside `costUsd` (#119) — the cost of every interaction the
+chart bins but `total`'s own `costUsd` excludes for lacking a model id, so
+`total.costUsd + total.untaggedCostUsd` equals the chart's own running total.
 Suppresses the rendering flags, but not the commands that run instead of a report
 (`--help`/`--why`/`--version`, `--watch`, the daemon-management group). Contract:
 `docs/spec-26-json.md`. CLI only — the widget has no stdout to write an object to.

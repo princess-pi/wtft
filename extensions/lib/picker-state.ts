@@ -12,8 +12,14 @@
  *   long it takes.
  *
  *   Row windowing (12 rows: 11 data rows + one position line past that) is a
- *   pure function of `(rows.length, cursor)`, computed the same way whether the
- *   cursor moved by one row or a whole rescope just replaced every row.
+ *   pure function of `(rows.length, cursor, windowTop)` — see
+ *   {@link visibleWindow}. `windowTop` itself is NOT reset the same way on
+ *   every path: a cursor move slides it from wherever it already was (scroll
+ *   hysteresis), while {@link setRows} always recomputes it from 0, so a
+ *   rescope re-anchors the window at the cursor's position in the FRESH list
+ *   rather than preserving the old scroll offset. `(rows.length, cursor)`
+ *   alone is therefore not enough to predict the visible window — `windowTop`
+ *   is a real third input, carried in `PickerState` itself.
  *
  *   Spec: docs/spec-89-scoped-picker.md, K1–K7.
  */
@@ -30,8 +36,8 @@
 export type PickerScope = "worktree" | "worktrees" | "all" | "branch";
 
 /** Cycles on Ctrl+T: 20m -> 1h -> 1d -> 1w -> all -> 20m. Every launch starts
- *  at "20m" (T1) — that default lives in the caller that constructs the
- *  initial state, not here (see initPickerState). */
+ *  at "20m" (T1) — hardcoded in {@link initPickerState} below, in this same
+ *  file; a caller never supplies or overrides it. */
 export type TimeWindowLabel = "20m" | "1h" | "1d" | "1w" | "all";
 
 export const TIME_WINDOW_CYCLE: readonly TimeWindowLabel[] = ["20m", "1h", "1d", "1w", "all"];
@@ -57,7 +63,9 @@ export function nextTimeWindow(label: TimeWindowLabel): TimeWindowLabel {
 }
 
 // ---
-// ROWS AND WINDOWING (E1, K6)
+// ROWS AND WINDOWING (K6, K7) — not E1: E1 is which STREAM the picker draws
+// to (stdout vs stderr under --json), pure I/O the caller owns; nothing under
+// this banner touches a stream, consistent with this whole module doing none.
 // ---
 
 /** One row the picker can select — an opaque id the caller maps back to a
@@ -68,11 +76,16 @@ export interface PickerRow {
 	timestamp: number;
 }
 
-/** 12 rows show at once: up to 11 data rows, plus a 12th position line once the
- *  list is longer than that. */
+/** 12 rows show at once: EXACTLY 12 as plain data rows when the list fits;
+ *  past that, 11 data rows plus a 12th position line (see {@link visibleWindow}
+ *  and K6's own note on the boundary). */
 export const ROW_LIMIT = 12;
 export const VISIBLE_DATA_ROWS = 11;
 
+/** The picker's whole state: which scope/time-window is active, the current
+ *  logical row list (already ordered by the caller — see `harness-order.ts`'s
+ *  `orderByHarness`), and where the cursor/window sit within it. Immutable —
+ *  every transition in this module returns a new value, never mutates one. */
 export interface PickerState {
 	readonly scope: PickerScope;
 	readonly timeWindow: TimeWindowLabel;
@@ -143,6 +156,11 @@ export function visibleWindow(state: PickerState): PickerView {
 // KEY HANDLING (K1–K5)
 // ---
 
+/** What one key press resolves to. `"move"`/`"noop"` carry the new/unchanged
+ *  state directly; `"rescope"` carries a state whose `scope`/`timeWindow`
+ *  changed and asks the caller to re-discover and call {@link setRows} (K7
+ *  lives there, not here); `"select"` hands back the chosen row for the
+ *  caller to resolve to a path; `"quit"` carries nothing. */
 export type PickerAction =
 	| { type: "move"; state: PickerState }
 	| { type: "rescope"; state: PickerState }

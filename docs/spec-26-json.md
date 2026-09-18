@@ -259,7 +259,8 @@ carries. The table lives in `docs/manifests/wtft-cmd.json`, which is what
 | **2** | `wtft spawn-record` only: the call was wrong — a missing or unknown flag, a flag with no value, a malformed session id, an oversized field. Nothing was appended. The report path never returns 2. | n/a |
 | **3** | `wtft spawn-record` only: the record was valid and the ledger could not be written — usually a full disk. The edge is not recorded, so the child is **invisible** to the tree, not `unattributed` (which means an edge we have whose child we could not read). Any partial line left behind is reported as a counted `malformedLedgerLines` on the next read; nothing tries to repair it. | n/a |
 | **9** | Provisional (#443): a report was produced in full, but the total may still grow under the daemon. `provisional.provisional` is `true` and `provisional.reason` names the condition. | one JSON object |
-| **130** | The interactive session selector was cancelled with `q` or Ctrl-C — the SIGINT convention (128+2), not a wtft-specific code. `--json` never prompts, so it never returns this. | n/a |
+| **10** | `EXIT_SESSION_AMBIGUOUS` (#89): no interactive terminal, and either `-s <substring>` matched zero or several sessions, or no `-s` was given and more than one session was discovered. Every candidate is named on stderr. | nothing |
+| **130** | The interactive session picker was cancelled with `q` or Ctrl-C — the SIGINT convention (128+2), not a wtft-specific code. As of `@4` (#89), an interactive terminal still gets the picker under `--json` (drawn to stderr — see "Session selection" above), so `--json` DOES still return this when a human cancels it; it is exit 10 above, not 130, that `--json` cannot combine with a prompt. | n/a |
 
 Codes 0 and 9 both carry a complete object; a consumer that wants only settled
 numbers checks `$?` **or** `.provisional.provisional` and gets the same answer.
@@ -331,13 +332,18 @@ Giving those five a machine-readable mode is real work with its own contract —
 before this branch is reached, so `--json -F` re-parses exactly as the rendered
 path would.
 
-**Session selection does not prompt.** `selectSessionPrompt` writes its menu and
-its non-interactive candidate list to *stdout*, and exits 130 on `q`/Ctrl-C. Under
-`--json` neither can be allowed, so when several sessions are discovered and no
-`-s` is given, `--json` takes the newest — the same one the non-interactive
-fallback resolves to — reports that on stderr, and records an
-`auto-selected-session` notice naming how many it chose between. A caller wanting
-determinism passes `-s`; the notice is what tells it that it should.
+**Session selection, as of `@4` (#89 — see Amendment 3 for the full contract).**
+This paragraph described `@1`–`@3`'s behaviour — `--json` never prompted, and
+with several sessions discovered and no `-s` it silently took the newest,
+recording an `auto-selected-session` notice — and that behaviour is retired.
+Today: an interactive terminal still gets the scoped session picker even under
+`--json` (drawn to stderr, so stdout stays one clean object, and `q`/Ctrl-C
+still exits 130). With **no** interactive terminal, wtft selects only when the
+population is already unambiguous — exactly one `-s` match, or exactly one
+session discovered with no `-s` — and otherwise exits `EXIT_SESSION_AMBIGUOUS`
+(10), naming every candidate on stderr and nothing on stdout. A caller wanting
+determinism still passes `-s`; on a non-interactive caller it is now required
+whenever more than one session could match.
 
 **`--json` is CLI-only**, in the sense that the Pi extension never reads it: the
 parser is shared, so the flag is accepted there, but `extensions/wtft.ts` never

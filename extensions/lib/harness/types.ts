@@ -69,11 +69,18 @@ export interface HarnessDiscovery {
 	/**
 	 * Session candidates for a target directory.
 	 *
-	 * @param targetCwd absolute directory to scope to, or null for "no filter"
+	 * @param targetCwd absolute directory to scope to. What a missing/`null`
+	 *   target means is each harness's OWN policy, not a universal contract —
+	 *   Pi treats it as "no filter" (`harness/pi/discovery.ts`'s
+	 *   `discoverLegacy`); Claude Code has always been cwd-scoped and falls
+	 *   back to `process.cwd()` instead (`harness/claude-code/discovery.ts`'s
+	 *   `discover`). See `docs/adding-a-harness.md` §1.
 	 * @param scopeOpts omitted → the PRE-#89 default behaviour, preserved
-	 *   exactly for every caller that does not opt in (fan-out across
-	 *   worktrees, the #156 union arm, unbounded time) — this is what keeps
-	 *   `tests/wtft-issue-144-145-164-session-discovery.test.ts` and
+	 *   exactly for every caller that does not opt in — the #156 union arm and
+	 *   unbounded time for both built-ins, PLUS worktree fan-out for Claude
+	 *   Code specifically (Pi's legacy default has never fanned out; see
+	 *   `discoverLegacy` in each harness's own discovery.ts) — this is what
+	 *   keeps `tests/wtft-issue-144-145-164-session-discovery.test.ts` and
 	 *   `tests/wtft-issue-156-harness-seam.test.ts` passing unmodified.
 	 *   `bin/wtft.ts` is the one caller that passes `{ scope: "worktree",
 	 *   windowMs: TIME_WINDOW_MS["20m"] }` as the picker's own new default.

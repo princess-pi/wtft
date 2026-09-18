@@ -110,9 +110,14 @@ export interface OrderableCandidate {
 
 /**
  * Group `candidates` by harness (newest first within each group), then order
- * the groups by the sticky order — most-recently-opened harness first, any
- * harness the order doesn't name going last, in `knownHarnessIds` order among
- * themselves (H4). An empty harness group contributes no rows at all (H5).
+ * the groups by the sticky order — most-recently-opened harness first, then
+ * every harness `order` doesn't name, LOWEST tier first: `knownHarnessIds`
+ * order among themselves (H4), THEN — for a harness present in `candidates`
+ * but absent from both `order` and `knownHarnessIds`, e.g. a caller that
+ * forgot to pass one, or a genuinely unregistered id — `Map` insertion order,
+ * which is candidate-discovery order and the one tier this function cannot
+ * make deterministic across a filesystem re-walk. An empty harness group
+ * contributes no rows at all (H5).
  *
  * @param knownHarnessIds every registered harness id, in registry order —
  *   used only to break ties among harnesses absent from `order`.

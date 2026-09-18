@@ -72,17 +72,37 @@ Resolving only the parent was the bug — it produced exactly the self-comparing
 | `1` | Drift: an artifact is missing, stale, not executable, or **not built** (`no-source`); or `--dir` could not be created (`no-dir`) | run `install-wtft`, or fix the directory |
 | `2` | In sync but **shadowed** on PATH by a different `wtft` | the printed `rm` |
 | `3` | The build failed | read the build output on stderr |
+| `4` | In sync, but a config file is still at the old `princess-pi-tools` path (status `config-left`, #156) | in install mode, EITHER the new path already had a file (declined) OR the move was attempted and failed partway (`mkdir`/`mktemp`/`cp`/`mv`/`rm` — a "could not move" stderr line names it) — either way, resolve which copy is authoritative and remove the other by hand; in `--check` mode, run `install-wtft` |
 | `64` | Bad usage: unknown argument, `--dir` with no directory, `--dir` followed by a flag **or given an empty string**, or no `--dir` on a host with `HOME` unset | — |
 
 `1` and `64` are chosen to match `install-workflow-tools` so the two installers do not
 disagree about what a number means. **Nothing pins that correspondence**: the sibling lives
 in another clone on one host, and no test here reads it, so the two can diverge without
-either side noticing. Treat it as a convention this file states, not a guarantee it holds. `2` is separate because its remedy is a different
-verb entirely: re-running the installer cannot fix a PATH shadow.
+either side noticing. Treat it as a convention this file states, not a guarantee it holds. `2` and `4` are separate because their
+remedy is a different verb entirely: re-running the installer cannot fix a PATH shadow, and
+cannot move a config file it has already declined to overwrite once.
 
-**Drift outranks shadow** when both hold — a shadowed copy of the wrong bytes is still
-the wrong bytes, and fixing drift is the prerequisite. So exit `2` implies the artifacts
-are in sync.
+**Drift outranks a left-behind config file, which outranks shadow**, when more than one
+holds — a shadowed copy of the wrong bytes, or the right bytes with config in the wrong
+place, is still wrong, and fixing drift comes first. So exit `2` implies the artifacts are
+in sync AND no config file is left behind; exit `4` implies the artifacts are in sync.
+
+### Config migration (#156)
+
+wtft's config directory moved off `princess-pi-tools` and onto its own name — see
+`docs/spec-139-140-141-pricing-and-workflow-rollup.md`'s corrected "Roads not taken" entry
+and `princess-pi/wtft#156`. `install-wtft` carries the one-time migration: in install mode
+it moves each of `wtft.json` → `config.json`, `token-budget.json` → `token-budget.json`,
+`wtft-pricing.json` → `pricing.json`, and `wtft-harnesses.json` → `harnesses.json`, from
+`$XDG_CONFIG_HOME/princess-pi-tools/` (or `~/.config/princess-pi-tools/` when
+`XDG_CONFIG_HOME` is unset) to the equivalent path under `.../wtft/` — but only when the new
+path does not already have a file, so it never silently overwrites either copy. `--check`
+never mutates; it only reports what would move or what is already left behind. There is no
+runtime fallback read of the old path anywhere in wtft — a file left there is invisible to
+the tool until this script, or a human, moves it. The `--json` document's `configMigration`
+array carries one `{from, to, state}` record per file, `state` one of `moved` / `left` /
+`none`. Tested in `tests/wtft-46-install-wtft.test.ts` §9 (V9a–V9d) and mutation-proofed as
+M4 below.
 
 ### Streams
 
@@ -252,7 +272,9 @@ ineffective.
 
 ## Seams under test
 
-Six sections, all driven through the CLI — no internal function is imported.
+Nine sections, all driven through the CLI — no internal function is imported (V9's
+mutation-probe portion, M4, runs `research/46-install-mutants/run-mutants.sh` directly, the
+same as V7).
 
 | # | Seam | Verified by |
 |---|---|---|
@@ -262,8 +284,9 @@ Six sections, all driven through the CLI — no internal function is imported.
 | **V4** | shadow detection | a decoy `wtft` earlier on `PATH` → exit `2`, `shadow.found` names it, the decoy is **still there**, the install still happened, and our own copy winning is exit `0` / `shadow: null` / `onPath: true` |
 | **V5** | staleness | append a byte to the installed `wtft.mjs` → `--check` exits `1`, that payload `stale`, the untouched one still `ok`; `chmod 0644` → `not-executable`; a command symlink repointed at the other payload → `wrong-target` |
 | **V6** | the ten defects the reconcile and review audits found | see below |
-| **V7** | the mutation probe | `run-mutants.sh` exits 0, and all three mutations applied |
+| **V7** | the mutation probe, M1–M3 | `run-mutants.sh` exits 0, and all three original mutations applied |
 | **V8** | hostile paths | an apostrophe, a newline, and a destination symlink — the review bot's four findings, each reproduced before it was adopted |
+| **V9** | config migration (#156) | install moves every legacy file present to its new name, byte-identical, and deletes the old one; a second run (or `--check`) reports `none` for all; a file already at the new path is `left`, exit `4`, neither copy touched; `--check` reports the same leftover and writes nothing; the mutation probe's **M4** confirms the `config-left` escalation itself is caught |
 
 `0755` is what install *writes* and what V2 asserts; the **tool's** check is any execute
 bit, so a hand-`chmod`ed `0700` copy still reports `ok`.
@@ -276,7 +299,7 @@ hand the child — and an earlier draft of this paragraph claimed no test read t
 
 ### V6 — what the audit found, and the before/after
 
-Nine defects, none of which V1–V5 caught: every one passed a green 35-check suite. They
+Ten defects, none of which V1–V5 caught: every one passed a green 35-check suite. They
 are not regressions; they are things nothing ever asserted. Each check was run against
 the previous commit's script as well as the fixed one.
 
@@ -295,17 +318,22 @@ the previous commit's script as well as the fixed one.
 
 ### Mutation-proofs — a script, not a paragraph
 
-`research/46-install-mutants/run-mutants.sh` deletes three branches from a copy of the
-script and prints the real-vs-mutant status for each. **V7 runs it as part of the suite** —
-`tests/run.ts` collects only `tests/*.test.ts`, so an instruction to "run it" reached nobody
-and left three figures a reader had to re-derive by hand, which is the state committing the
-script was meant to end.
+`research/46-install-mutants/run-mutants.sh` deletes one branch at a time from a copy of the
+script and prints the real-vs-mutant status for each. **V7 and V9 run it as part of the
+suite** — `tests/run.ts` collects only `tests/*.test.ts`, so an instruction to "run it"
+reached nobody and left the figures a reader had to re-derive by hand, which is the state
+committing the script was meant to end. M4 (#156) was added alongside the config-migration
+feature, and the script isolates `HOME`/`XDG_CONFIG_HOME` to a throwaway directory for every
+mutant it runs — M2 and M3 already ran the script in INSTALL mode, which now touches config,
+so without that isolation the probe would read (and move) whoever runs it's real
+`~/.config`.
 
 | Mutation | Real | Mutant |
 |---|---|---|
-| never escalate a bad artifact state to `drift` | `drift` | `ok` |
-| never escalate a foreign PATH winner to `shadowed` | `shadowed` | `ok` |
-| never `cmp` source against destination | `drift` | `ok` |
+| M1 — never escalate a bad artifact state to `drift` | `drift` | `ok` |
+| M2 — never escalate a foreign PATH winner to `shadowed` | `shadowed` | `ok` |
+| M3 — never `cmp` source against destination | `drift` | `ok` |
+| M4 — never escalate a left-behind config file to `config-left` (#156) | `config-left` | `ok` |
 
 **The mutant must live in `bin/`.** `REPO` is derived from the script's own location, so a
 copy anywhere else computes the wrong repo, fails `build-failed`, and proves nothing about

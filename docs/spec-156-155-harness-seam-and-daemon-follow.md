@@ -177,16 +177,16 @@ copies of `#52 Phase 3` to keep in step — the opposite of the deep-module shap
 
 ### Registry: two channels, one contract
 
-Config: `~/.config/princess-pi-tools/wtft-harnesses.json` (XDG respected), same precedent as
-`wtft-pricing.json` — read at runtime, not baked at build.
+Config: `~/.config/wtft/harnesses.json` (XDG respected; princess-pi/wtft#156 moved this off
+`princess-pi-tools`), same precedent as `pricing.json` — read at runtime, not baked at build.
 
 ```json
 {
   "pi": { "enabled": false },
   "codex": {
     "label": "Codex",
-    "discovery": "~/.config/princess-pi-tools/harness/codex/discovery.mjs",
-    "parse":     "~/.config/princess-pi-tools/harness/codex/parse.mjs"
+    "discovery": "~/.config/wtft/harness/codex/discovery.mjs",
+    "parse":     "~/.config/wtft/harness/codex/parse.mjs"
   }
 }
 ```

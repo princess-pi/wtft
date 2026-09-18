@@ -11,7 +11,10 @@
 # the Phase-5 extraction — it copied the sources and never moved the install.
 #
 # Usage:
-#   install-wtft                     build, then install four entries into ~/bin
+#   install-wtft                     build, install four entries into ~/bin, and
+#                                    move any config file still at the old
+#                                    princess-pi-tools path (#156) into
+#                                    ~/.config/wtft/ (once — no fallback read)
 #   install-wtft --check [--json]    report drift, write nothing (doctor mode)
 #   install-wtft --dir <dir>         install somewhere else (the test seam)
 #   install-wtft --json              machine-readable document, either mode
@@ -25,19 +28,29 @@
 #       also an un-creatable --dir (status "no-dir")
 #   2   in sync but SHADOWED on PATH by a different wtft
 #   3   the build failed
+#   4   in sync, but a config file is still at the old princess-pi-tools path
+#       (status "config-left") — in install mode this means EITHER the move
+#       was DECLINED because a file already sat at the new path, OR the move
+#       was ATTEMPTED and failed partway (mkdir/mktemp/cp/mv/rm — a
+#       permissions problem, say), which prints "could not move" to stderr
+#       and leaves the old file in place either way; in --check mode it may
+#       also mean install has simply not run since #156
 #  64   bad usage: unknown argument, --dir without a directory, --dir followed
 #       by a flag or given an empty string, or no --dir on a host with HOME
 #       unset. `--` is NOT an end-of-options marker. NO JSON DOCUMENT is emitted
 #       for a usage error, even with --json.
 #
 # Human output goes to stdout only when STATUS is ok; every other status goes to
-# stderr. Under --json the document goes to stdout in every case.
+# stderr. Under --json the document goes to stdout in every case, carrying a
+# configMigration array (from, to, state: "moved"|"left"|"none") alongside the
+# existing artifacts/shadow fields.
 #
 # 1 and 64 match install-workflow-tools deliberately, so the two installers
-# never disagree about what a number means. 2 is its own code because its
-# remedy is a different verb: re-running this script cannot fix a PATH shadow.
-# Drift outranks shadow when both hold — a shadowed copy of the wrong bytes is
-# still the wrong bytes, and fixing drift is the prerequisite.
+# never disagree about what a number means. 2 and 4 are their own codes because
+# their remedy is a different verb: re-running this script cannot fix a PATH
+# shadow, and cannot move a config file it already declined to overwrite once.
+# Drift outranks a left-behind config file, which outranks shadow, when more
+# than one holds — the wrong bytes, wherever they are, come first.
 #
 # COPY, NOT SYMLINK. A symlink into the clone was the only workable option
 # before #36, because the artifacts still carried bare imports and only ran
@@ -232,6 +245,87 @@ LINKS=("wtft:wtft.mjs" "wtft-daemon:wtft-daemon.mjs")
 STATUS=ok
 EXIT=0
 
+# ---
+# CONFIG MIGRATION (#156). wtft moved its config off princess-pi-tools's
+# directory and onto its own: `~/.config/wtft/` instead of
+# `~/.config/princess-pi-tools/`, with new basenames inside it. Existing
+# files move ONCE — there is no runtime fallback read of the old path (the
+# code simply never looks there again), so a file left behind is invisible to
+# wtft until this script (or a human) moves it.
+#
+# Independent of DEST_DIR/REPO/the build below: config lives under
+# XDG_CONFIG_HOME, never under the clone, so this runs in EVERY mode,
+# including on a build failure — the two concerns share nothing to fail
+# together on.
+# ---
+
+OLD_CONFIG_DIR_NAME=princess-pi-tools
+NEW_CONFIG_DIR_NAME=wtft
+# old-basename:new-basename, inside their respective directories above.
+CONFIG_MIGRATIONS=(
+  "wtft.json:config.json"
+  "token-budget.json:token-budget.json"
+  "wtft-pricing.json:pricing.json"
+  "wtft-harnesses.json:harnesses.json"
+)
+
+# $XDG_CONFIG_HOME, falling back to $HOME/.config — empty if NEITHER is set,
+# which this treats as "config location unknowable" rather than a failure:
+# unlike DEST_DIR, nothing above requires HOME when --dir is given, and a
+# migration this script cannot locate is simply not attempted.
+config_home() {
+  if [ -n "${XDG_CONFIG_HOME:-}" ]; then printf '%s' "$XDG_CONFIG_HOME"
+  elif [ -n "${HOME:-}" ]; then printf '%s/.config' "$HOME"
+  fi
+}
+
+CONFIG_JSON=""
+CONFIG_LEFT=0
+CONFIG_LEFT_LINES=""
+CFG_HOME="$(config_home)"
+if [ -n "$CFG_HOME" ]; then
+  OLD_CFG_DIR="$CFG_HOME/$OLD_CONFIG_DIR_NAME"
+  NEW_CFG_DIR="$CFG_HOME/$NEW_CONFIG_DIR_NAME"
+  for pair in "${CONFIG_MIGRATIONS[@]}"; do
+    old_name="${pair%%:*}"; new_name="${pair##*:}"
+    old_path="$OLD_CFG_DIR/$old_name"
+    new_path="$NEW_CFG_DIR/$new_name"
+    if [ -f "$old_path" ]; then
+      if [ "$MODE" = install ] && [ ! -e "$new_path" ]; then
+        # WRITE BESIDE, THEN RENAME OVER — the same atomic-swap shape the
+        # artifact copy loop below uses, so a mid-move failure never leaves a
+        # half-written file at the new path.
+        mkdir -p "$NEW_CFG_DIR" 2>/dev/null
+        stage="$(mktemp "$NEW_CFG_DIR/.install-wtft.XXXXXX" 2>/dev/null)" || stage=""
+        if [ -n "$stage" ] && cp "$old_path" "$stage" 2>/dev/null && mv -f "$stage" "$new_path" 2>/dev/null && rm -f "$old_path" 2>/dev/null; then
+          cfg_state=moved
+          # >&2, matching the build output above: --json promises exactly ONE
+          # document on stdout, and this line would otherwise land ahead of
+          # it and break every caller's JSON.parse.
+          echo "install-wtft: moved $old_path -> $new_path" >&2
+        else
+          rm -f "$stage" 2>/dev/null
+          cfg_state=left
+          echo "install-wtft: could not move $old_path -> $new_path" >&2
+        fi
+      else
+        # --check never mutates; install declines to overwrite an existing
+        # new-path file rather than guess which one is authoritative.
+        cfg_state=left
+      fi
+    else
+      cfg_state=none
+    fi
+    if [ "$cfg_state" = left ]; then
+      CONFIG_LEFT=1
+      CONFIG_LEFT_LINES="$CONFIG_LEFT_LINES   $old_path (wanted at $new_path)
+"
+    fi
+    [ -z "$CONFIG_JSON" ] || CONFIG_JSON="$CONFIG_JSON,"
+    CONFIG_JSON="$CONFIG_JSON{\"from\":\"$(json_str "$old_path")\",\"to\":\"$(json_str "$new_path")\",\"state\":\"$cfg_state\"}"
+  done
+fi
+
 # Emit the document (or the human lines) and leave. Every exit PAST THE ARGUMENT
 # LOOP goes through here, so `--json` has no path that exits without a document —
 # three of them used to. Exit 64 is the stated exception: a usage error is
@@ -239,8 +333,8 @@ EXIT=0
 # say what to report are the thing that is wrong.
 finish() {
   if [ "$JSON" = 1 ]; then
-    printf '{"schema":"install-wtft@1","mode":"%s","dir":"%s","status":"%s","onPath":%s,"artifacts":[%s],"shadow":%s}\n' \
-      "$MODE" "$(json_str "$DEST_DIR")" "$STATUS" "${ON_PATH:-false}" "${STATE_JSON:-}" "${SHADOW_JSON:-null}"
+    printf '{"schema":"install-wtft@1","mode":"%s","dir":"%s","status":"%s","onPath":%s,"artifacts":[%s],"shadow":%s,"configMigration":[%s]}\n' \
+      "$MODE" "$(json_str "$DEST_DIR")" "$STATUS" "${ON_PATH:-false}" "${STATE_JSON:-}" "${SHADOW_JSON:-null}" "${CONFIG_JSON:-}"
   else
     case "$STATUS" in
       build-failed) echo "❌ install-wtft: build failed — see the output above" >&2 ;;
@@ -253,6 +347,24 @@ finish() {
                     # first), not the report — otherwise a human needs two runs
                     # to learn about two problems.
                     [ "${SHADOW_JSON:-null}" = null ] || printf '   Also: PATH resolves wtft to %s — rm %s\n' "$WINNER" "$(sh_squote "$WINNER")" >&2 ;;
+      config-left)  if [ "$MODE" = check ]; then
+                      echo "⚠️  install-wtft: $DEST_DIR is in sync, but a config file is still at the old path (#156):" >&2
+                    else
+                      echo "⚠️  install-wtft: installed into $DEST_DIR, but a config file is still at the old path (#156):" >&2
+                    fi
+                    printf '%s' "${CONFIG_LEFT_LINES:-}" >&2
+                    # In install mode this means EITHER the move was DECLINED
+                    # (a file already sat at the new path — this script never
+                    # overwrites, so a human resolves which one is
+                    # authoritative and removes the other by hand), OR it was
+                    # ATTEMPTED and failed partway (see the "could not move"
+                    # stderr line above, if this run printed one) — same
+                    # remedy either way: the old file is still there to fix
+                    # by hand. In --check mode it may also mean install has
+                    # simply not run yet: re-running it attempts the move.
+                    if [ "$MODE" = check ]; then echo "   Run: $(self_path)" >&2
+                    else echo "   Move it by hand, or delete whichever copy is stale." >&2
+                    fi ;;
       shadowed)     if [ "$MODE" = check ]; then
                       echo "⚠️  install-wtft: $DEST_DIR is in sync, but PATH resolves wtft to $WINNER" >&2
                     else
@@ -375,10 +487,17 @@ for spec in "${EVAL_LIST[@]}"; do
 done
 [ "$STATUS" = drift ] && EXIT=1
 
+# A config file left at the old path (#156) only becomes the reported status
+# when nothing worse is true — build-failed/no-dir/drift on the BIN artifacts
+# outrank it, the same precedence drift already holds over shadow below: the
+# wrong bytes, wherever they are, come first.
+[ "$STATUS" = ok ] && [ "$CONFIG_LEFT" = 1 ] && { STATUS=config-left; EXIT=4; }
+
 # ---
 # Shadow: whichever `wtft` PATH actually resolves. `onPath` is reported but
 # never fatal — a dir that is not on PATH is a host-wiring fact, not drift.
-# Drift outranks shadow: the wrong bytes are the wrong bytes.
+# Drift (and a left-behind config file) outrank shadow: the wrong bytes, or
+# the wrong config location, are still wrong.
 # ---
 SHADOW_JSON=null
 ON_PATH=false

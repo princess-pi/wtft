@@ -35,17 +35,19 @@ import type {
 	RegisteredHarness,
 } from "./types.ts";
 import { BUILTIN_HARNESSES } from "./builtins.generated.ts";
+import { WTFT_CONFIG_DIR } from "../wtft-config-dir.ts";
 
 // ---
 // CONFIG
 // ---
 
 /**
- * ~/.config/princess-pi-tools/wtft-harnesses.json (repo config convention).
+ * ~/.config/wtft/harnesses.json (#156 — wtft's own config directory, not
+ * princess-pi-tools's).
  */
 export function getHarnessConfigPath(): string {
 	const xdgHome = process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config");
-	return path.join(xdgHome, "princess-pi-tools", "wtft-harnesses.json");
+	return path.join(xdgHome, WTFT_CONFIG_DIR, "harnesses.json");
 }
 
 /** Read the harness config. Missing/unreadable/invalid → {} (never blocks wtft). */

@@ -256,7 +256,7 @@ synchronous cooldown rather than letting the provider hard-fail. Models that are
 concurrency-limited rather than TPM-limited (DeepSeek, short-code prefix `d`) redline the meter
 for visibility but never cooldown. Canonical name is **Token Budget**; "TPM" survives only as
 the *metric*, and "rate limiter"/"TPS" are retired (princess-pi/wtft#51 decision 1, spec-51).
-Config: `~/.config/princess-pi-tools/token-budget.json`.
+Config: `~/.config/wtft/token-budget.json` (princess-pi/wtft#156).
 Distinct from **Thinking budget** (above) — that flag is a token ceiling the caller supplies
 for utilization display; Token Budget is a live request-rate guard the extension enforces.
 See `docs/spec-51-token-budget.md`.

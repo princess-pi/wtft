@@ -19,6 +19,7 @@ import {
 	getModelCacheTtlMs,
 } from "./lib/wtft-shared.js";
 import { readConfig, writeConfig, hasConfig } from "@princess-pi/libs/config";
+import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "./lib/wtft-config-dir.js";
 import { computeSpawnTree, type SpawnTree } from "./lib/wtft-spawn-tree.js";
 import { collectSelfAttributedSessionIds } from "./lib/wtft-parser.js";
 import {
@@ -117,7 +118,7 @@ class PagerComponent {
  * Widget auto-shows on session_start if any config exists.
  */
 function getSettings(_ctx: any) {
-	const config = readConfig("wtft");
+	const config = readConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR);
 
 	const interval = (config.interval as string) || "1h";
 	const limit = (typeof config.limit === "number" ? config.limit : 10) as number;
@@ -131,7 +132,7 @@ function getSettings(_ctx: any) {
 	const width = Math.min(getTerminalWidth(true, disabledEmoji), 240);
 
 	// Auto-show if config exists (user has configured wtft at least once)
-	const visible = hasConfig("wtft");
+	const visible = hasConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR);
 
 	return { interval, limit, width, visible, showTicks, mode, timezone, disabledEmoji, tokens };
 }
@@ -353,7 +354,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		}
 
 		// Auto-show widget if user has configured wtft at least once (#72)
-		if (hasConfig("wtft")) {
+		if (hasConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR)) {
 			updateWtftWidget(ctx, pi);
 		}
 		// Start 1-minute timer for timeline live-updates
@@ -439,7 +440,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 
 			if (typeof enableEmoji === "boolean") {
 				// Persist to harness-agnostic config file (#72)
-				writeConfig("wtft", { disabledEmoji: !enableEmoji });
+				writeConfig(WTFT_CONFIG_TOOL, { disabledEmoji: !enableEmoji }, undefined, WTFT_CONFIG_DIR);
 				const statusText = enableEmoji ? "enabled" : "disabled";
 				ctx.ui.notify(`Emoji icons in widgets have been ${statusText}.`, "info");
 				updateWtftWidget(ctx, pi);
@@ -493,7 +494,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			if (tokens || cost) {
 			// Toggle widget token-unit mode and persist (#14).
 			// --cost explicitly switches back to $ units.
-			writeConfig("wtft", { tokens });
+			writeConfig(WTFT_CONFIG_TOOL, { tokens }, undefined, WTFT_CONFIG_DIR);
 			updateWtftWidget(ctx, pi, { visible: true });
 
 			if (tokens) {
@@ -555,13 +556,13 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			}
 
 			// Persist all settings to harness-agnostic config file (#72)
-			writeConfig("wtft", {
+			writeConfig(WTFT_CONFIG_TOOL, {
 				interval: nextInterval,
 				limit: nextLimit,
 				showTicks: nextTicks,
 				mode: nextMode,
 				timezone: nextTimezone
-			});
+			}, undefined, WTFT_CONFIG_DIR);
 
 			updateWtftWidget(ctx, pi, {
 				interval: nextInterval,

@@ -32,7 +32,15 @@ MUT="$(mktemp "$REPO/bin/mut-install-wtft.XXXXXX")"
 SHIM="$(mktemp -d)"
 ln -s "$(command -v bun)" "$SHIM/bun"
 BUNDIR="$SHIM"
-trap 'rm -f "$MUT"; rm -rf "$SHIM"' EXIT
+# #156 gave install-wtft a config-migration side effect under
+# HOME/XDG_CONFIG_HOME — M2, M3 and M4 below all run it in INSTALL mode (M4
+# is the one that plants a legacy file to trigger the escalation it tests),
+# so without this every run of this probe would read (and move) this host's
+# real ~/.config. Exported once, for every "$REAL"/"$MUT" call below.
+FAKE_HOME="$(mktemp -d)"
+export HOME="$FAKE_HOME"
+unset XDG_CONFIG_HOME
+trap 'rm -f "$MUT"; rm -rf "$SHIM" "$FAKE_HOME"' EXIT
 
 status_of() { sed -n 's/.*"status":"\([^"]*\)".*/\1/p' <<<"$1"; }
 fails=0
@@ -79,5 +87,17 @@ mutate 's/elif ! cmp -s "$src" "$dst"; then state=stale/elif false; then state=s
 R=$(PATH="$BUNDIR:/usr/bin:/bin" "$REAL" --check --json --dir "$D" 2>/dev/null)
 M=$(PATH="$BUNDIR:/usr/bin:/bin" "$MUT"  --check --json --dir "$D" 2>/dev/null)
 report "M3 content comparison deleted" drift "$(status_of "$R")" ok "$(status_of "$M")"; rm -rf "$D"
+
+# M4 — never escalate a config file left at the old path (#156) to config-left.
+# A fresh, otherwise-in-sync FAKE_HOME with exactly one legacy file present, so
+# the only thing that can make status anything but "ok" is this escalation.
+D=$(mktemp -d); PATH="$BUNDIR:/usr/bin:/bin" HOME="$FAKE_HOME" "$REAL" --dir "$D" >/dev/null 2>&1
+mkdir -p "$FAKE_HOME/.config/princess-pi-tools"
+echo '{}' > "$FAKE_HOME/.config/princess-pi-tools/wtft-pricing.json"
+mutate 's/\[ "\$STATUS" = ok \] && \[ "\$CONFIG_LEFT" = 1 \] && { STATUS=config-left; EXIT=4; }/true/' "M4 config-left escalation deleted" || true
+R=$(PATH="$BUNDIR:/usr/bin:/bin" HOME="$FAKE_HOME" "$REAL" --check --json --dir "$D" 2>/dev/null)
+M=$(PATH="$BUNDIR:/usr/bin:/bin" HOME="$FAKE_HOME" "$MUT"  --check --json --dir "$D" 2>/dev/null)
+report "M4 config-left escalation deleted" config-left "$(status_of "$R")" ok "$(status_of "$M")"; rm -rf "$D"
+rm -rf "$FAKE_HOME/.config"
 
 exit $(( fails > 0 ))

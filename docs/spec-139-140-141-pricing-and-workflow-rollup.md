@@ -56,17 +56,21 @@ Notes:
 
 1. **User pricing registry (data, not code).** New module
    `extensions/lib/wtft-pricing-config.ts`:
-   - `loadUserPricing()` reads `$XDG_CONFIG_HOME/princess-pi-tools/wtft-pricing.json`
-     (default `~/.config/princess-pi-tools/wtft-pricing.json`) and merges entries
+   - `loadUserPricing()` reads `$XDG_CONFIG_HOME/wtft/pricing.json`
+     (default `~/.config/wtft/pricing.json`) and merges entries
      **over** built-ins via `applyUserPricing(record)` exported from `wtft-cost.ts`.
    - File shape = `Record<string, ModelPricing>` (same shape as `MODEL_PRICING`,
      including optional `tiers`). Unreadable/invalid file → ignored silently (wtft
      never blocks on config).
    - Called at startup by both the CLI (`bin/wtft.ts`) and the daemon
      (`bin/wtft-daemon.ts`) — the daemon is where costs are actually computed.
-   - *Deviation from issue text:* the issue suggested `~/.config/wtft/pricing.json`;
-     this repo's config convention (`extensions/lib/config.ts`) is
-     `~/.config/princess-pi-tools/<tool>*.json`, so the pricing file lives there too.
+   - *Deviation from issue text, at the time:* the issue suggested
+     `~/.config/wtft/pricing.json`; this repo's config convention then
+     (`extensions/lib/config.ts`, while wtft still lived in princess-pi-tools) was
+     `~/.config/princess-pi-tools/<tool>*.json`, so the pricing file lived there
+     too. **princess-pi/wtft#156 later moved it to exactly the path the issue
+     originally suggested** — wtft is its own tool now, not a princess-pi-tools
+     one, so the deviation above no longer holds.
 2. **Warn on unpriced models.** New `isModelPriced(model): boolean` in `wtft-cost.ts` —
    true when the (user-merged) registry fuzzy-matches or a legacy hardcoded rate branch
    (`haiku`/`opus`) applies. (`deepseek` was on that list until #22 B; it named a
@@ -144,8 +148,11 @@ Tests run against the built bundle (`bun run build` first), per repo convention:
   semantics instead.
 - **Sharing unknown-model state daemon→CLI via tag file schema change** — the CLI can
   derive the same fact from `interaction.model`; avoids a tag-schema field.
-- **`~/.config/wtft/` config dir** — repo already standardizes on
-  `~/.config/princess-pi-tools/`.
+- ~~**`~/.config/wtft/` config dir** — repo already standardizes on
+  `~/.config/princess-pi-tools/`.~~ **Road later taken — princess-pi/wtft#156.** That was
+  true only while wtft lived inside princess-pi-tools. wtft is its own tool now, not a
+  princess-pi-tools one, so it reads and writes config under its own name:
+  `~/.config/wtft/` (global) and `<dir>/.wtft/` (walk-up).
 
 ---
 

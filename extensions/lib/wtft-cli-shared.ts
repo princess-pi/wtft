@@ -16,6 +16,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { checkDaemonHealth, getTagPath, type DaemonStatus } from "./wtft-shared.js";
 import { readConfig } from "@princess-pi/libs/config";
 import { formatVersion } from "@princess-pi/libs/build-stamp";
+import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "./wtft-config-dir.js";
 
 // ---
 // TYPES
@@ -435,7 +436,7 @@ export function getDaemonStatus(sessionPath: string): DaemonStatus {
 
 /** Read the emoji-disabled flag from the wtft config section. */
 export function isEmojiDisabled(): boolean {
-	const config = readConfig("wtft");
+	const config = readConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR);
 	return typeof config.disabledEmoji === "boolean" ? config.disabledEmoji : false;
 }
 

@@ -55,7 +55,7 @@ async function check(label: string, fn: () => Promise<void> | void) {
 const REPO = path.resolve(import.meta.dirname, "..");
 const xdgRoot = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-74-")));
 process.env.XDG_CONFIG_HOME = xdgRoot;
-const configPath = path.join(xdgRoot, "princess-pi-tools", "token-budget.json");
+const configPath = path.join(xdgRoot, "wtft", "token-budget.json");
 
 /** Everything the handler touches on ctx is proxied away; only the config write
  *  is observable, which is the half this suite is about. */

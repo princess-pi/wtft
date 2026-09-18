@@ -114,12 +114,12 @@ directory and regenerates `harness/builtins.generated.ts`; your harness is in th
 **Out-of-tree** — ship `.mjs` and point config at it. No rebuild:
 
 ```jsonc
-// ~/.config/princess-pi-tools/wtft-harnesses.json
+// ~/.config/wtft/harnesses.json
 {
   "codex": {
     "label": "Codex",
-    "discovery": "~/.config/princess-pi-tools/harness/codex/discovery.mjs",
-    "parse":     "~/.config/princess-pi-tools/harness/codex/parse.mjs"
+    "discovery": "~/.config/wtft/harness/codex/discovery.mjs",
+    "parse":     "~/.config/wtft/harness/codex/parse.mjs"
   }
 }
 ```

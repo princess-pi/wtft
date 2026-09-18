@@ -37,7 +37,7 @@ appears nowhere in this repo). The table records the code, not the misquote.
 
 ## Contract
 
-- **Config** — `~/.config/princess-pi-tools/token-budget.json`, resolved by
+- **Config** — `~/.config/wtft/token-budget.json` (princess-pi/wtft#156), resolved by
   `@princess-pi/libs/config`. Keys: `widget` (bool), `footer` (bool),
   `emojiDisabled` (bool). Read and written by the extension. The
   config-persistence split (the CLI reads and never writes; extensions write

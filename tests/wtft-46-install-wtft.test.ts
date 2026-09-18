@@ -81,11 +81,30 @@ execSync("bun run build", { cwd: REPO, stdio: "pipe" });
  * once, while this file was being written. -1 is outside the documented
  * exit-code table, so every check that names a real code fails honestly.
  */
-function run(args: string[], pathDirs: string[] = []): { code: number; out: string; err: string } {
+/**
+ * A PRIVATE HOME/XDG_CONFIG_HOME, fresh per call, unless `env` overrides them.
+ * #156 gave install-wtft a config-migration side effect — it now READS AND
+ * MOVES files under XDG_CONFIG_HOME — so a caller that inherited the real
+ * HOME (every one of them did, before this) would touch this host's actual
+ * ~/.config the moment that landed. Never touch the real ~/.config from a
+ * test: build a throwaway one instead.
+ */
+function run(
+	args: string[],
+	pathDirs: string[] = [],
+	env: Record<string, string> = {},
+): { code: number; out: string; err: string } {
+	const fakeHome = mkSandbox(path.join(os.tmpdir(), "46-run-home-"));
 	try {
 		const out = execFileSync(INSTALLER, args, {
 			encoding: "utf8", stdio: "pipe",
-			env: { ...process.env, PATH: [...pathDirs, BUN_DIR, "/usr/bin", "/bin"].join(":") },
+			env: {
+				...process.env,
+				PATH: [...pathDirs, BUN_DIR, "/usr/bin", "/bin"].join(":"),
+				HOME: fakeHome,
+				XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+				...env,
+			},
 		});
 		return { code: 0, out, err: "" };
 	} catch (e: any) {
@@ -463,8 +482,8 @@ console.log("\n7. The mutation probe runs, and can fail");
 	catch (e: any) { out = `${e.stdout ?? ""}${e.stderr ?? ""}`; code = e.status ?? 1; }
 	check(code === 0, "V7a: run-mutants.sh exits 0 — every mutant reported ok where the real script reported a fault",
 		`exit ${code}: ${out.trim().slice(0, 400)}`);
-	check(/M1 .*OK/.test(out) && /M2 .*OK/.test(out) && /M3 .*OK/.test(out),
-		"V7b: all three mutations applied and were caught", out.trim().slice(0, 300));
+	check(/M1 .*OK/.test(out) && /M2 .*OK/.test(out) && /M3 .*OK/.test(out) && /M4 .*OK/.test(out),
+		"V7b: all four mutations applied and were caught", out.trim().slice(0, 300));
 }
 
 // ---
@@ -560,6 +579,106 @@ console.log("\n8. Paths with an apostrophe, a newline, or a symlink in the way")
 		fs.readFileSync(victim, "utf8").slice(0, 60));
 	check(fs.lstatSync(path.join(linkTarget, "wtft.mjs")).isFile(),
 		"V8f: …and the destination is now a real file, not still a link");
+}
+
+// ---
+// 9. Config migration (#156). wtft's config moved off princess-pi-tools's
+//    directory onto its own — install-wtft moves existing files ONCE, and
+//    --check reports one left behind. Every check here builds its OWN fake
+//    HOME (never the real one) via `run()`'s per-call sandbox and an explicit
+//    XDG_CONFIG_HOME override, so nothing here can see or touch this host's
+//    actual ~/.config.
+// ---
+console.log("\n9. Config migration off princess-pi-tools and onto wtft (#156)");
+{
+	const LEGACY_FILES: Array<[string, string]> = [
+		["wtft.json", "config.json"],
+		["token-budget.json", "token-budget.json"],
+		["wtft-pricing.json", "pricing.json"],
+		["wtft-harnesses.json", "harnesses.json"],
+	];
+
+	function seedLegacy(fakeHome: string, overrides: Record<string, string> = {}): void {
+		const legacyDir = path.join(fakeHome, ".config", "princess-pi-tools");
+		fs.mkdirSync(legacyDir, { recursive: true });
+		for (const [oldName] of LEGACY_FILES) {
+			fs.writeFileSync(path.join(legacyDir, oldName), overrides[oldName] ?? JSON.stringify({ from: oldName }));
+		}
+	}
+
+	// V9a — a fresh home with every legacy file present: install moves all
+	// four, in one run, alongside the bin artifacts.
+	{
+		const fakeHome = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-install-"));
+		seedLegacy(fakeHome);
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-install-dir-"));
+		const { code, out } = run(["--json", "--dir", dir], [], {
+			HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+		});
+		check(code === 0, "V9a: install exits 0 when migration succeeds and artifacts install cleanly", `got ${code}: ${out.slice(0, 300)}`);
+		let doc: any = null;
+		try { doc = JSON.parse(out); } catch { /* left null */ }
+		check(doc?.status === "ok", "V9a: status is ok, not config-left", JSON.stringify(doc?.status));
+		const states = Object.fromEntries((doc?.configMigration ?? []).map((c: any) => [c.to, c.state]));
+		check(Object.values(states).every(s => s === "moved") && Object.keys(states).length === 4,
+			"V9a: every configMigration entry reports moved", JSON.stringify(states));
+
+		for (const [oldName, newName] of LEGACY_FILES) {
+			const oldPath = path.join(fakeHome, ".config", "princess-pi-tools", oldName);
+			const newPath = path.join(fakeHome, ".config", "wtft", newName);
+			check(!fs.existsSync(oldPath), `V9a: ${oldName} no longer exists at the old path`, oldPath);
+			check(fs.existsSync(newPath) && fs.readFileSync(newPath, "utf8") === JSON.stringify({ from: oldName }),
+				`V9a: ${newName} exists at the new path with the old content`, newPath);
+		}
+
+		// V9b — re-running --check afterward finds nothing left: the move was
+		// a one-time thing, not a standing fallback.
+		const re = run(["--check", "--json", "--dir", dir], [], {
+			HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+		});
+		check(re.code === 0, "V9b: --check after a clean migration exits 0", `got ${re.code}`);
+		let reDoc: any = null;
+		try { reDoc = JSON.parse(re.out); } catch { /* left null */ }
+		const reStates = ((reDoc?.configMigration ?? []) as any[]).map(c => c.state);
+		check(reStates.length === 4 && reStates.every(s => s === "none"),
+			"V9b: every configMigration entry reports none — nothing left to move", JSON.stringify(reStates));
+	}
+
+	// V9c — a file already at the new path: install DECLINES to overwrite
+	// either copy, reports config-left, and exits 4.
+	{
+		const fakeHome = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-conflict-"));
+		seedLegacy(fakeHome, { "wtft.json": JSON.stringify({ old: true }) });
+		const newDir = path.join(fakeHome, ".config", "wtft");
+		fs.mkdirSync(newDir, { recursive: true });
+		fs.writeFileSync(path.join(newDir, "config.json"), JSON.stringify({ current: true }));
+
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-conflict-dir-"));
+		const { code, out } = run(["--json", "--dir", dir], [], {
+			HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+		});
+		check(code === 4, "V9c: install exits 4 (config-left) when the new path already has a file", `got ${code}: ${out.slice(0, 300)}`);
+		let doc: any = null;
+		try { doc = JSON.parse(out); } catch { /* left null */ }
+		check(doc?.status === "config-left", "V9c: status is config-left", JSON.stringify(doc?.status));
+		const entry = (doc?.configMigration ?? []).find((c: any) => c.to.endsWith("wtft/config.json"));
+		check(entry?.state === "left", "V9c: the conflicting entry reports left", JSON.stringify(entry));
+
+		const oldPath = path.join(fakeHome, ".config", "princess-pi-tools", "wtft.json");
+		const newPath = path.join(newDir, "config.json");
+		check(fs.readFileSync(oldPath, "utf8") === JSON.stringify({ old: true }),
+			"V9c: the old file is untouched — no partial overwrite", fs.readFileSync(oldPath, "utf8"));
+		check(fs.readFileSync(newPath, "utf8") === JSON.stringify({ current: true }),
+			"V9c: the new file is untouched — install never overwrites it", fs.readFileSync(newPath, "utf8"));
+
+		// V9d — --check on the same host reports the same leftover, and
+		// writes nothing (mode=check never migrates).
+		const chk = run(["--check", "--json", "--dir", dir], [], {
+			HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+		});
+		check(chk.code === 4, "V9d: --check also exits 4 for the same leftover", `got ${chk.code}`);
+		check(fs.existsSync(oldPath), "V9d: --check left the old file in place", oldPath);
+	}
 }
 
 console.log(`\n${passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ""}`);

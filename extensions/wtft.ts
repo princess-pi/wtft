@@ -47,7 +47,7 @@ let _currentThinkingLevel: string | undefined;
 // transcript. Set by readInteractions on every render pass; read by
 // updateWtftWidget after building the lines.
 let _subagentUnreadable = false;
-const PROVISIONAL_LINE = "\x1b[33m⚠ some transcripts unreadable — total is provisional\x1b[0m";
+const PROVISIONAL_LINE = "\x1b[33m⚠ some transcripts could not be read or parsed — total is provisional\x1b[0m";
 
 /** `text` plus the provisional line when the last `readInteractions` dropped a
  *  transcript — for the surfaces that print a total outside the widget. */

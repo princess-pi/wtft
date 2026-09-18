@@ -73,29 +73,32 @@ const fakePi = {
 };
 mod.default(fakePi);
 
-function fakeCtx(sink: string[], session: string | null = sessionFile) {
+/** Each surface gets its own sink, so an assertion about one cannot be
+ *  satisfied by another (`--tokens` also re-renders the widget). */
+type Sinks = { widget: string[]; notify: string[]; pager: string[] };
+
+function fakeCtx(sinks: Sinks, session: string | null) {
 	return {
 		sessionManager: { getSessionFile: () => session ?? undefined },
 		ui: {
-			setWidget: (_id: string, lines: string[] | undefined) => { sink.push(...(lines ?? [])); },
-			notify: (text: string) => { sink.push(text); },
-			custom: async (factory: any) => { sink.push(...(factory({}, {}, {}, () => {}) as any).lines); },
+			setWidget: (_id: string, lines: string[] | undefined) => { sinks.widget.push(...(lines ?? [])); },
+			notify: (text: string) => { sinks.notify.push(text); },
+			custom: async (factory: any) => { sinks.pager.push(...(factory({}, {}, {}, () => {}) as any).lines); },
 		},
 		model: undefined,
 	};
 }
 
-async function render(): Promise<string[]> {
-	const captured: string[] = [];
-	await handlers["agent_settled"](undefined, fakeCtx(captured));
-	return captured;
+async function render(session: string | null = sessionFile): Promise<string[]> {
+	const sinks: Sinks = { widget: [], notify: [], pager: [] };
+	await handlers["agent_settled"](undefined, fakeCtx(sinks, session));
+	return sinks.widget;
 }
 
-/** Everything a `/wtft <args>` command prints: notify text, widget and pager lines. */
-async function runCommand(args: string, session: string | null = sessionFile): Promise<string[]> {
-	const captured: string[] = [];
-	await command!(args, fakeCtx(captured, session));
-	return captured;
+async function runCommand(args: string): Promise<Sinks> {
+	const sinks: Sinks = { widget: [], notify: [], pager: [] };
+	await command!(args, fakeCtx(sinks, sessionFile));
+	return sinks;
 }
 
 console.log("\n=== #165: a subagent file dropped at READ marks the widget total provisional ===\n");
@@ -113,12 +116,15 @@ try {
 	const lines = await render();
 	check(lines.some(l => l.includes(PROVISIONAL)),
 		"closer: the file dropped by loadSubagentInteractions marks the total provisional");
-	for (const args of ["--tokens", "--other", "--pager"]) {
+	for (const [args, surface] of [["--tokens", "notify"], ["--other", "notify"], ["--pager", "pager"]] as const) {
 		const out = await runCommand(args);
-		check(out.some(l => l.includes(PROVISIONAL)), `/wtft ${args} carries the provisional line too`);
+		check(out[surface].some(l => l.includes(PROVISIONAL)), `/wtft ${args} carries the provisional line on its ${surface} surface`);
 	}
-	const noSession = await runCommand("--pager", null);
-	check(!noSession.some(l => l.includes(PROVISIONAL)),
+	// The widget's empty-state branch reads the flag with no lines to show, so a
+	// flag left over from the render above would print here.
+	check((await render()).some(l => l.includes(PROVISIONAL)), "precondition: the flag is set by the render just before");
+	const noSession = await render(null);
+	check(noSession.length > 0 && !noSession.some(l => l.includes(PROVISIONAL)),
 		"a render with no session file does not inherit the previous render's flag");
 } finally {
 	fs.chmodSync(dropped, 0o644);

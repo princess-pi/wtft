@@ -1682,10 +1682,10 @@ export function loadSubagentInteractionsChecked(
 			const raw = parseFn(file);
 			const deduped = dedupFn(raw);
 			clearSubagentCacheMiss(deduped);
-			for (const interaction of deduped) {
-				interaction._cat = classifyFn(interaction);
-				interactions.push(interaction);
-			}
+			for (const interaction of deduped) interaction._cat = classifyFn(interaction);
+			// Pushed only once the whole file classified, so a file in
+			// `dropped` contributes nothing to `interactions`.
+			for (const interaction of deduped) interactions.push(interaction);
 		} catch (err) {
 			// #457 — a nested parse throw drops the WHOLE file's cost here, so
 			// the skip must not be silent: the daemon's parse handler is loud

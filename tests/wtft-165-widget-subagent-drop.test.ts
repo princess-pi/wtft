@@ -66,17 +66,35 @@ const { discoverSubagentSessionFiles } = await import("../bin/wtft.mjs");
 const mod = await import("../pi/wtft.js");
 
 const handlers: Record<string, (event: unknown, ctx: unknown) => Promise<void> | void> = {};
-const fakePi = { on: (name: string, fn: any) => { handlers[name] = fn; }, registerCommand: () => {} };
+let command: ((args: string, ctx: unknown) => Promise<void>) | null = null;
+const fakePi = {
+	on: (name: string, fn: any) => { handlers[name] = fn; },
+	registerCommand: (_name: string, def: any) => { command = def.handler; },
+};
 mod.default(fakePi);
 
-async function render(): Promise<string[]> {
-	let captured: string[] = [];
-	const ctx = {
-		sessionManager: { getSessionFile: () => sessionFile },
-		ui: { setWidget: (_id: string, lines: string[] | undefined) => { captured = lines ?? []; } },
+function fakeCtx(sink: string[], session: string | null = sessionFile) {
+	return {
+		sessionManager: { getSessionFile: () => session ?? undefined },
+		ui: {
+			setWidget: (_id: string, lines: string[] | undefined) => { sink.push(...(lines ?? [])); },
+			notify: (text: string) => { sink.push(text); },
+			custom: async (factory: any) => { sink.push(...(factory({}, {}, {}, () => {}) as any).lines); },
+		},
 		model: undefined,
 	};
-	await handlers["agent_settled"](undefined, ctx);
+}
+
+async function render(): Promise<string[]> {
+	const captured: string[] = [];
+	await handlers["agent_settled"](undefined, fakeCtx(captured));
+	return captured;
+}
+
+/** Everything a `/wtft <args>` command prints: notify text, widget and pager lines. */
+async function runCommand(args: string, session: string | null = sessionFile): Promise<string[]> {
+	const captured: string[] = [];
+	await command!(args, fakeCtx(captured, session));
 	return captured;
 }
 
@@ -95,8 +113,30 @@ try {
 	const lines = await render();
 	check(lines.some(l => l.includes(PROVISIONAL)),
 		"closer: the file dropped by loadSubagentInteractions marks the total provisional");
+	for (const args of ["--tokens", "--other", "--pager"]) {
+		const out = await runCommand(args);
+		check(out.some(l => l.includes(PROVISIONAL)), `/wtft ${args} carries the provisional line too`);
+	}
+	const noSession = await runCommand("--pager", null);
+	check(!noSession.some(l => l.includes(PROVISIONAL)),
+		"a render with no session file does not inherit the previous render's flag");
 } finally {
 	fs.chmodSync(dropped, 0o644);
+}
+
+{
+	// A file in `dropped` contributes nothing: a classify throw part-way
+	// through must not leave the file's earlier turns in `interactions`.
+	const { loadSubagentInteractionsChecked } = await import("../bin/wtft.mjs");
+	let n = 0;
+	const out = loadSubagentInteractionsChecked(
+		["/virtual/agent-x.jsonl"],
+		() => [{ timestamp: 1 }, { timestamp: 2 }] as any,
+		() => { if (++n === 2) throw new Error("classify boom"); return "other"; },
+		(x: any) => x,
+	);
+	check(out.dropped.length === 1 && out.interactions.length === 0,
+		`a file dropped part-way through classification leaves none of its turns (${out.interactions.length} kept)`);
 }
 
 const again = await render();

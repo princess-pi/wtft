@@ -47,6 +47,13 @@ let _currentThinkingLevel: string | undefined;
 // transcript. Set by readInteractions on every render pass; read by
 // updateWtftWidget after building the lines.
 let _subagentUnreadable = false;
+const PROVISIONAL_LINE = "\x1b[33m⚠ some transcripts unreadable — total is provisional\x1b[0m";
+
+/** `text` plus the provisional line when the last `readInteractions` dropped a
+ *  transcript — for the surfaces that print a total outside the widget. */
+function withProvisionalLine(text: string): string {
+	return _subagentUnreadable ? `${text}\n${PROVISIONAL_LINE}` : text;
+}
 
 // Daemon directory relative to this extension file
 const _daemonDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin");
@@ -184,6 +191,9 @@ function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | und
 /** Read interactions from the daemon's classified tag file (#92),
  *  merged with subagent session interactions (#83, #82). */
 function readInteractions(ctx: any): Interaction[] {
+	// Per-render: every pass re-reads discovery, so no earlier render's
+	// verdict survives into this one.
+	_subagentUnreadable = false;
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	if (!sessionFile) return [];
 	const tagPath = getTagPath(sessionFile);
@@ -194,8 +204,6 @@ function readInteractions(ctx: any): Interaction[] {
 	// whole Task/agent subtree. The parser warned once per dir (latched);
 	// render main interactions only rather than crash the widget on every
 	// refresh.
-	// Round 10: the flag is per-render — every pass re-reads discovery.
-	_subagentUnreadable = false;
 	let subagentFiles: string[] = [];
 	try {
 		// The readable siblings still render. stderr is not a user surface,
@@ -301,7 +309,7 @@ function updateWtftWidget(
 			? [emptyLine, parserStatusStr.trim()]
 			: [emptyLine];
 		if (_subagentUnreadable) {
-			widgetLines.push("\x1b[33m⚠ some transcripts unreadable — total is provisional\x1b[0m");
+			widgetLines.push(PROVISIONAL_LINE);
 		}
 		ctx.ui.setWidget("wtft", widgetLines, { placement: "belowEditor" });
 		return;
@@ -328,7 +336,7 @@ function updateWtftWidget(
 	}
 
 	if (_subagentUnreadable) {
-		lines.push("\x1b[33m⚠ some transcripts unreadable — total is provisional\x1b[0m");
+		lines.push(PROVISIONAL_LINE);
 	}
 
 	ctx.ui.setWidget("wtft", lines, { placement: "belowEditor" });
@@ -487,7 +495,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				const interactions = readInteractions(ctx);
 				const deduped = deduplicateInteractions(interactions);
 				const output = renderOtherHistogram(deduped, Math.max(current.width, 40));
-				ctx.ui.notify(output, "info");
+				ctx.ui.notify(withProvisionalLine(output), "info");
 				return;
 			}
 
@@ -511,7 +519,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				// the issue is about, and omitting it here would recreate it on
 				// the surface Duppy actually looks at.
 				const output = renderTokenSummary(interactions, Math.max(current.width, 40), budget, undefined, widgetSpawnTree(ctx, interactions));
-				ctx.ui.notify(output, "info");
+				ctx.ui.notify(withProvisionalLine(output), "info");
 				return;
 			}
 		}
@@ -547,6 +555,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 					ctx.ui.notify("No cost history found to display in the pager.", "warning");
 					return;
 				}
+				if (_subagentUnreadable) lines.push(PROVISIONAL_LINE);
 
 				// Launch TUI custom pager overlay
 				await ctx.ui.custom((tui, _theme, _keybindings, done) => {

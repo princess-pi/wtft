@@ -80,7 +80,11 @@ compute anything.
 
 - `matchAssistant` — return `null` unless this entry is your harness's assistant turn.
   Fill `usage` with Anthropic-compat names, and set `nativeCost` only if your harness
-  records a per-turn cost of its own (Pi does; Claude Code does not).
+  records a per-turn cost of its own (Pi does; Claude Code does not). A `nativeCost` you
+  set here MUST NOT include server-side tool charges (web search/fetch) — wtft adds
+  `serverToolCost` on top of it, so a native figure that already bills those is double
+  counted (#118). If your harness's native cost already includes them, zero
+  `server_tool_use` in `usage` instead of setting `nativeCost` around it.
 - `readBlock` — one content block. Map your tool argument names to `files` / `commands`.
   Set `handled: false` for a tool you did not branch on, so shared category mapping gets a
   shot at it.

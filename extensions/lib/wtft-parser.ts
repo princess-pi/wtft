@@ -1166,16 +1166,14 @@ export function classifyInteraction(interaction: Interaction): Category {
 
 // ---
 // SUBAGENT SESSION DISCOVERY (#82/#83)
-// Recursive walk of subagent directories up to a configurable depth.
+// Recursive walk of subagent directories, each visited once by real path.
 // Claude Code stores subagent sessions as agent-*.jsonl files under
 // <session-dir>/<session-name>/subagents/. Each subagent may itself
-// have nested subagents (depth ≤ 5 per Claude Code docs).
+// have nested subagents.
 //
 // Pi convention (pre-emptive): sibling .jsonl files with a
 // "parentSession" header matching the parent session ID.
 // ---
-
-const MAX_SUBAGENT_DEPTH = 5; // Claude Code hard limit
 
 /** What the harness writes beside every built-in (Task) subagent transcript.
  *
@@ -1314,14 +1312,14 @@ function readHeadLines(file: string, count: number, cap = 1024 * 1024): string[]
 
 /**
  * Discover subagent session files for a given parent session, walking
- * subdirectories recursively up to maxDepth (Claude Code convention).
+ * subdirectories recursively. The walk has no depth cap: each directory is
+ * visited once by real path, which is what keeps it finite (#148).
  *
  * Pattern 1 (Claude Code): <session-dir>/<session-name>/subagents/agent-*.jsonl
  * Pattern 2 (Pi, pre-emptive): sibling files with parentSession header match
  */
 export function discoverSubagentSessionFiles(
 	sessionPath: string,
-	maxDepth: number = MAX_SUBAGENT_DEPTH,
 ): { files: string[]; unreadable: Error | null } {
 	const files: string[] = [];
 	const sessionDir = path.dirname(sessionPath);
@@ -1351,7 +1349,7 @@ export function discoverSubagentSessionFiles(
 			// instead of only warning (see walkSubagentDir): report it here so
 			// the caller's fail-safe stays honest — the daemon withholds the
 			// swept marker, the CLI degrades to the subagent-unreadable reason.
-			const walkErr = walkSubagentDir(ccBaseDir, 1, maxDepth, files, new Set());
+			const walkErr = walkSubagentDir(ccBaseDir, files, new Set());
 			if (walkErr && !firstUnreadable) firstUnreadable = walkErr;
 		}
 	} catch (err) {
@@ -1519,17 +1517,9 @@ export function discoverSubagentSessionFiles(
  * readdir failures below. */
 function walkSubagentDir(
 	dir: string,
-	depth: number,
-	maxDepth: number,
 	files: string[],
 	seen: Set<string>,
 ): Error | null {
-	// A transcript below the cut is reported, not skipped: it would otherwise
-	// be missing from a list that looks complete (#148). An empty chain below
-	// the cut hides nothing and is not reported.
-	if (depth > maxDepth) {
-		return holdsTranscript(dir, seen) ? new Error(`subagent tree deeper than maxDepth ${maxDepth} at (${dir})`) : null;
-	}
 	// `seen` holds the real path of every directory and transcript already
 	// visited, so a symlink back into the tree (`loop -> .`) is walked once
 	// instead of to the kernel's ELOOP limit, and a transcript reachable by two
@@ -1578,9 +1568,7 @@ function walkSubagentDir(
 				// need no allowlist. This picks up Dynamic Workflow layouts
 				// (subagents/workflows/wf_<runId>/agent-*.jsonl) and
 				// future-proofs against the next harness layout change.
-				// Depth still counts only "subagents"/"ns" containers, so
-				// maxDepth keeps bounding NESTING depth (Claude Code limit),
-				// not raw directory depth. "wtft-tags" is our own output —
+				// "wtft-tags" is our own output —
 				// its agent-*.jsonl.wtft-tag.v*.jsonl files would match the
 				// file filter and double-count.
 				if (f !== "wtft-tags") {
@@ -1594,7 +1582,7 @@ function walkSubagentDir(
 					// is this walk's own documented norm. Round 7 — a nested
 					// frame's REPORTED per-entry failure (not a throw) rides
 					// up through the return value.
-					const childErr = walkSubagentDir(fullPath, depth + (f === "subagents" || f === "ns" ? 1 : 0), maxDepth, files, seen);
+					const childErr = walkSubagentDir(fullPath, files, seen);
 					if (childErr && !frameErr) frameErr = childErr;
 				}
 			} else if (f.startsWith("agent-") && f.endsWith(".jsonl")) {
@@ -1623,26 +1611,6 @@ function walkSubagentDir(
 		throw new Error(`subagents directory could not be read (${dir}): ${err instanceof Error ? err.message : String(err)}`);
 	}
 	return frameErr;
-}
-
-/** Whether any `agent-*.jsonl` sits anywhere under `dir`. `seen` (real paths)
- *  keeps a symlink cycle finite. Unreadable entries count as holding one:
- *  what cannot be listed cannot be ruled out. */
-function holdsTranscript(dir: string, seen: Set<string>): boolean {
-	let real: string;
-	try { real = fs.realpathSync(dir); } catch { return true; }
-	if (seen.has(real)) return false;
-	seen.add(real);
-	let entries: fs.Dirent[];
-	try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return true; }
-	for (const e of entries) {
-		const full = path.join(dir, e.name);
-		if (e.name.startsWith("agent-") && e.name.endsWith(".jsonl")) return true;
-		let isDir: boolean;
-		try { isDir = fs.statSync(full).isDirectory(); } catch { continue; }
-		if (isDir && e.name !== "wtft-tags" && holdsTranscript(full, seen)) return true;
-	}
-	return false;
 }
 
 // #457 (round 4) — the unreadable-transcript warnings in this file are latched

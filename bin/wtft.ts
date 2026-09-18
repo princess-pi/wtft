@@ -926,7 +926,7 @@ async function main() {
 	 *  second sees a subagent that appeared or vanished in between, so `subagents`
 	 *  lists transcripts `uncounted` never covered, or omits ones it did.
 	 *
-	 *  Memoised here so both callers get the same answer, whichever runs first.
+	 *  Memoised here so every caller gets the same answer, whichever runs first.
 	 *  `unreadable` is carried too, because the scan turns it into
 	 *  `provisional.reason` and the emitter must not report it a second time in a
 	 *  different vocabulary. */
@@ -1140,9 +1140,10 @@ async function main() {
 	 *  make a claim it cannot support.
 	 */
 	const collectSubagentJson = (): { rows: WtftSubagentJson[] | undefined; notices: WtftNotice[] } | undefined => {
-		// `undefined` — so the KEY IS OMITTED — whenever discovery did not produce
-		// a complete answer, whatever the reason. The two guards below are the
-		// whole rule: a missing session file, or any `unreadable` from discovery.
+		// `rows` is `undefined` — so the KEY IS OMITTED — whenever discovery did
+		// not produce a complete answer: a missing session file (the whole
+		// result is `undefined`), or any `unreadable` from discovery (`rows`
+		// alone is, and `notices` still carries any unreadable meta).
 		// A caller never needs to know which one fired — absent means the same
 		// thing in every case, and that is the point of omitting rather than
 		// returning `[]`.

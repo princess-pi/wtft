@@ -6,7 +6,7 @@
  *   § 146  an unreadable `.meta.json` gets a notice; an absent one does not.
  *   § 147  discoverSubagentSessionFiles reads a header's first line, not the
  *          whole transcript.
- *   § 148  a tree deeper than maxDepth is reported, not listed as complete;
+ *   § 148  a deeply nested transcript is listed, never cut off silently;
  *          a directory symlink cycle lists each child once.
  *   § 149  the invariants #137 shipped with nothing defending them: the
  *          `discoverOnce` memo, `isFork`, the `.jsonl` guard, the Pi row.
@@ -154,51 +154,40 @@ console.log("\n§ 147 — discovery reads line 1, not the whole transcript\n");
 // ---
 console.log("\n§ 148 — depth truncation, symlink cycle\n");
 {
-	// Depth counts `subagents`/`ns` containers; the top one is depth 1.
-	const nest = (base: string, levels: number): string => {
-		let dir = base;
-		for (let i = 1; i < levels; i++) dir = path.join(dir, `agent-l${i}`, "subagents");
-		fs.mkdirSync(dir, { recursive: true });
-		const leaf = path.join(dir, "agent-leaf.jsonl");
-		fs.writeFileSync(leaf, turn("msg_leaf"));
-		return leaf;
-	};
-
-	const atLimit = claudeSession("depth-at-limit");
-	const leafOk = nest(atLimit.subDir, 5);
-	const ok = discoverSubagentSessionFiles(atLimit.sessionPath);
-	check(ok.files.includes(leafOk) && ok.unreadable === null, "control: a leaf at depth 5 is listed and nothing is reported");
-
-	const deep = claudeSession("depth-over");
-	nest(deep.subDir, 6);
-	const over = discoverSubagentSessionFiles(deep.sessionPath);
-	check(over.unreadable !== null, "a tree deeper than maxDepth reports unreadable instead of a complete-looking list",
-		JSON.stringify({ files: over.files, unreadable: String(over.unreadable) }));
+	// No depth cap: the walk is bounded by visiting each real directory once,
+	// so a transcript nested past Claude Code's own limit is still listed
+	// rather than cut off from a list that looks complete.
+	const deep = claudeSession("depth-deep");
+	let dir = deep.subDir;
+	for (let i = 1; i < 8; i++) dir = path.join(dir, `agent-l${i}`, "subagents");
+	fs.mkdirSync(dir, { recursive: true });
+	const leaf = path.join(dir, "agent-leaf.jsonl");
+	fs.writeFileSync(leaf, turn("msg_leaf"));
+	const found = discoverSubagentSessionFiles(deep.sessionPath);
+	check(found.files.includes(leaf) && found.unreadable === null,
+		"a transcript nested eight levels deep is listed, and nothing is reported");
 	const deepRun = runJson(deep.sessionPath);
-	check(deepRun.doc !== null && !("subagents" in deepRun.doc), "--json omits the subagents key for it, never []",
-		JSON.stringify(deepRun.doc?.subagents));
-	check(deepRun.doc?.provisional?.reason === "subagent-unreadable", "…and provisional.reason is subagent-unreadable",
-		JSON.stringify(deepRun.doc?.provisional));
-
-	const emptyChain = claudeSession("depth-over-empty");
-	let chain = emptyChain.subDir;
-	for (let i = 1; i < 7; i++) chain = path.join(chain, `agent-e${i}`, "subagents");
-	fs.mkdirSync(chain, { recursive: true });
-	const quiet = discoverSubagentSessionFiles(emptyChain.sessionPath);
-	check(quiet.unreadable === null, "an over-depth chain holding no transcript is not reported");
+	check((deepRun.doc?.subagents ?? []).some((r: any) => r.transcript === leaf) && deepRun.doc?.provisional?.provisional === false,
+		"--json lists it and the report stays settled", JSON.stringify({ rows: deepRun.doc?.subagents, provisional: deepRun.doc?.provisional }));
 
 	if (!isRoot) {
-		// The meta notice survives an incomplete discovery: the rows are
-		// withheld, the unreadable meta is still named.
-		const both = claudeSession("depth-over-meta");
-		nest(both.subDir, 6);
+		// The meta notice survives an incomplete discovery. A directory that can
+		// be listed but not traversed (r--) makes its entries unstat-able: the
+		// walk reports that, the rows are withheld, and the unreadable meta
+		// beside the readable top-level child is still named.
+		const both = claudeSession("incomplete-meta");
 		fs.writeFileSync(path.join(both.subDir, "agent-top.jsonl"), turn("msg_top"));
 		const topMeta = path.join(both.subDir, "agent-top.meta.json");
 		fs.writeFileSync(topMeta, JSON.stringify({ agentType: "general-purpose", spawnDepth: 1 }));
+		const locked = path.join(both.subDir, "agent-locked");
+		fs.mkdirSync(locked);
+		fs.writeFileSync(path.join(locked, "agent-inner.jsonl"), turn("msg_inner"));
+		fs.chmodSync(locked, 0o444);
 		fs.chmodSync(topMeta, 0o000);
 		let r;
-		try { r = runJson(both.sessionPath); } finally { fs.chmodSync(topMeta, 0o644); }
-		check(r.doc !== null && !("subagents" in r.doc), "precondition: incomplete discovery withholds the rows");
+		try { r = runJson(both.sessionPath); } finally { fs.chmodSync(topMeta, 0o644); fs.chmodSync(locked, 0o755); }
+		check(r.doc !== null && !("subagents" in r.doc) && r.doc.provisional?.reason === "subagent-unreadable",
+			"precondition: incomplete discovery withholds the rows", JSON.stringify({ keys: r.doc && Object.keys(r.doc), provisional: r.doc?.provisional }));
 		check((r.doc?.notices ?? []).some((n: any) => n.code === "subagent-meta-unreadable" && String(n.text).includes(topMeta)),
 			"…and the unreadable meta's notice is still emitted", JSON.stringify(r.doc?.notices));
 	}

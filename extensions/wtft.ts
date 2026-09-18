@@ -148,7 +148,7 @@ function getSettings(_ctx: any) {
 // loadSubagentInteractions).
 //
 // Two discovery patterns:
-//   1. Claude Code: <session>/subagents/agent-*.jsonl (recursive, depth ≤ 5)
+//   1. Claude Code: <session>/subagents/agent-*.jsonl (recursive)
 //   2. Pi (pre-emptive): sibling files with parentSession header match
 // ---
 

@@ -113,9 +113,9 @@ _Avoid_: Running mode, total mode
 One coding-agent conversation's append-only `.jsonl` log — the unit wtft parses, classifies, and
 renders costs for. Identified by a UUID-bearing basename (Claude Code) or a
 timestamp-prefixed UUID basename (Pi); see `isSessionIdBasename()`.
-_Avoid_: Chat, conversation, transcript or log — when you mean the session rather than
-the file. "Transcript" and "log" both name the file, not the conversation, so either is
-fine on its own; "log" is also ambiguous with "tag file", below.
+_Avoid_: Chat, conversation — always, for the session. Transcript, log — narrower: only
+when you mean the session rather than the file. Both correctly name the file on their
+own; "log" is also ambiguous with "tag file", below.
 
 **Sidechain**:
 A subagent's own interaction stream within the *same* session file — marked

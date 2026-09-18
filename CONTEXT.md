@@ -91,12 +91,16 @@ as interchangeable in new prose.
 **Bucket (mode)**:
 One of the two render modes, set by `-b/--bucket` (the other is `-c/--cumulative`, default):
 shows each bin's own discrete total rather than a running sum. `mode: "bucket" | "cumulative"`
-in `wtft-renderer.ts`/`wtft.ts`. Not a grouping concept — see Bin above. Also overloaded once,
-harmlessly: `buildWtftLines()` in `wtft-renderer.ts` has an unrelated local variable named
-`buckets` (a `Map` used for cost-based collision resolution, positioning same-column markers)
-declared in the `else` branch of `if (mode === "cumulative")` — i.e. inside *bucket*-mode
-rendering — it is not the `-b/--bucket` flag and should not be confused with it when reading
-that function.
+in `wtft-renderer.ts`/`wtft.ts`, parsed from `-b/-c` in `wtft-cli-shared.ts`. Not a grouping
+concept — see Bin above. Also overloaded once, harmlessly: `buildWtftLines()` in
+`wtft-renderer.ts` has an unrelated local variable named `buckets` (a `Map` used for
+cost-based collision resolution, positioning same-column markers) declared in the COST MODE
+BAR RENDERING section, in the `else` branch of its `if (mode === "cumulative")` — i.e. inside
+*bucket*-mode, cost-unit rendering only; bucket-mode rendering under `--tokens` has no
+`buckets` Map, it uses `BLOCK_BUCKET` instead. `buildWtftLines()` has several
+`if (mode === "cumulative")` checks; this is the one under the cost-unit branch, not the
+first one in the function. It is not the `-b/--bucket` flag and should not be confused with
+it when reading that function.
 _Avoid_: Bin (see above), interval
 
 **Cumulative (mode)**:
@@ -122,8 +126,9 @@ _Avoid_: Sub-thread, branch, fork
 
 **Subagent session**:
 A separate `.jsonl` log for a spawned subagent, stored under `<session-id>/subagents/` (Claude
-Code). wtft recursively discovers and blends these chronologically into the parent's timeline
-(Recursive Subagent Tree, see Self / tree below). Distinct from a sidechain (above), which lives inline in the parent
+Code). wtft recursively discovers and blends these chronologically into the parent's own turns —
+folded into **self**, not into the ledger-spawned **tree** (see Self / tree below), which is a
+different join. Distinct from a sidechain (above), which lives inline in the parent
 file rather than as its own file.
 _Avoid_: Child session, nested session
 

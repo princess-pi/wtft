@@ -40,14 +40,11 @@ import {
 // ---
 let _currentThinkingLevel: string | undefined;
 
-// Round 10 (macroscope, Medium): the widget's own surface for unreadable
-// transcripts. The parser warns on stderr (latched once per file), but this
-// extension's stderr is not a user surface — the finding was that the TUI
-// showed a settled-looking total while discovery reported an unreadable
-// transcript. Set by readInteractions on every render pass; read by
-// updateWtftWidget after building the lines.
+// The widget's own surface for a transcript that went uncounted: the parser
+// warns on stderr, which the TUI never shows. Set by readInteractions on every
+// render pass; read by updateWtftWidget after building the lines.
 let _subagentUnreadable = false;
-const PROVISIONAL_LINE = "\x1b[33m⚠ some transcripts could not be read or parsed — total is provisional\x1b[0m";
+const PROVISIONAL_LINE = "\x1b[33m⚠ some transcripts could not be counted — total is provisional\x1b[0m";
 
 /** `text` plus the provisional line when the last `readInteractions` dropped a
  *  transcript — for the surfaces that print a total outside the widget. */
@@ -158,24 +155,16 @@ function getSettings(_ctx: any) {
 /** The spawn tree for the session this widget is rendering (#116).
  *
  *  `computeSpawnTree` reports a ledger it could not read as `ledgerError`
- *  rather than throwing, and the renderer prints that as its own block — so the
- *  widget shows the failure, it does not hide it. The catch here has no named
- *  reachable case: `resolveSessionById` wraps its `statSync` in try/catch,
- *  `resolveSessionFile` catches every harness's throw, `computeSpawnTree`
- *  catches both the ledger read and the parse, and
- *  `collectSelfAttributedSessionIds` catches its own discoveries — every path
- *  below this call already turns a failure into a value. It stays as a
- *  last-resort guard anyway, because a widget refresh running every turn must
- *  not take the panel down if one of those guarantees turns out to be wrong;
- *  there, the block is simply absent. */
+ *  rather than throwing, so the widget shows that failure instead of hiding it.
+ *  The catch has no reachable case left; it stays because a widget refresh
+ *  running every turn must not take the panel down. */
 function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | undefined {
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	if (!sessionFile) return undefined;
 	try {
-		// The SAME double-count guard the CLI passes. `readInteractions` merges
+		// The same double-count guard the CLI passes: `readInteractions` merges
 		// every subagent session into SELF, so a spawner that also records one
-		// as a ledger edge would have the widget count it in TOTAL and again in
-		// SPAWNED. This surface had no guard at all until the PR review asked.
+		// as a ledger edge would bill it in TOTAL and again in SPAWNED.
 		return computeSpawnTree(path.basename(sessionFile).replace(/\.jsonl$/i, ""), {
 			alreadyAttributed: collectSelfAttributedSessionIds(sessionFile, interactions),
 		});

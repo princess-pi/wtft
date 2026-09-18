@@ -425,8 +425,9 @@ function describeProvisionalReason(provisional: { reason: string | null }, tagPa
 	return "no subagent transcript has been read since this tag was written";
 }
 
-/** The one action that ends the provisional state. See the long note at the
- *  provisional branch in main() for why neither arm may mention `-F`. */
+/** The one action that ends the provisional state. Neither arm names `-F`:
+ *  it deletes the tag and falls through to this same path, so "force a full
+ *  re-parse" would be a loop told to the person who just did it. */
 function describeProvisionalRemedy(provisional: { reason: string | null }): string {
 	return provisional.reason === "subagent-unreadable"
 		? "restore the unreadable session file's readability, then run wtft again — the daemon re-reads it on its next poll, and wtft reads it directly on the --tokens and --json paths"

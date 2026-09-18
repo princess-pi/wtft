@@ -72,7 +72,7 @@ Resolving only the parent was the bug — it produced exactly the self-comparing
 | `1` | Drift: an artifact is missing, stale, not executable, or **not built** (`no-source`); or `--dir` could not be created (`no-dir`) | run `install-wtft`, or fix the directory |
 | `2` | In sync but **shadowed** on PATH by a different `wtft` | the printed `rm` |
 | `3` | The build failed | read the build output on stderr |
-| `4` | In sync, but a config file is still at the old `princess-pi-tools` path (status `config-left`, #156) | in install mode, EITHER the new path already had a DIFFERENT file (a real conflict — declined) OR a file appeared at the new path while this run was moving (kept, never overwritten — re-run), OR the copy itself failed partway (`mkdir`/`mktemp`/`cp`/`ln` — a "could not move" stderr line names it and the cause; a failure to remove the OLD file after a successful copy is reported as `moved`, not this, and self-heals on the next run) — either way, resolve which copy is authoritative and remove the other by hand; in `--check` mode, run `install-wtft` |
+| `4` | In sync, but a config file is still at the old `princess-pi-tools` path (status `config-left`, #156) | in install mode, EITHER the new path already had a DIFFERENT file (a real conflict — declined) OR a file appeared at the new path while this run was moving (kept, never overwritten — re-run), OR the copy itself failed partway (`mkdir`/`mktemp`/`cp`/`ln` — a "could not move" stderr line names it and the cause; a failure to remove the OLD file after a successful copy is reported as `moved`, not this; a later run removes the byte-identical leftover once the old directory allows unlinking, and reports this — `identical, safe to delete` — until then) — either way, resolve which copy is authoritative and remove the other by hand; in `--check` mode, run `install-wtft` |
 | `64` | Bad usage: unknown argument, `--dir` with no directory, `--dir` followed by a flag **or given an empty string**, or no `--dir` on a host with `HOME` unset | — |
 
 `1` and `64` are chosen to match `install-workflow-tools` so the two installers do not
@@ -113,9 +113,10 @@ permission shape. That is reported as `moved`, not `left`: the data is safely at
 path, which is what `moved` promises, and the failure is noted on stderr rather than
 treated as a hard failure that could never self-correct. Without this (PR review, round 2),
 the NEXT run would find the new path occupied and the two files byte-identical, hit the
-stale-duplicate case above, and retry — so in practice this self-heals on the very next run
-regardless, but the FIRST run reporting the whole migration as failed when the data had
-already safely arrived was misleading and worth fixing directly. V9f drives this exact
+stale-duplicate case above, and retry the removal: it succeeds once the old directory allows
+unlinking, and until then that run reports `left` (`identical, safe to delete`), exit `4`.
+Reporting the FIRST run as a failed migration when the data had already safely arrived
+would be misleading. V9f drives this exact
 sequence: `chmod 555` the old directory, install (reports `moved`, old file survives),
 restore the permission, install again (the stale duplicate is now gone).
 

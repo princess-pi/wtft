@@ -30,12 +30,14 @@
 #   3   the build failed
 #   4   in sync, but a config file is still at the old princess-pi-tools path
 #       (status "config-left") — in install mode this means EITHER the new
-#       path already held a DIFFERENT file (a real conflict, declined) OR
-#       the copy itself failed partway (mkdir/mktemp/cp/mv — a permissions
+#       path already held a DIFFERENT file (a real conflict, declined), OR
+#       one appeared there mid-move (kept, never overwritten), OR
+#       the copy itself failed partway (mkdir/mktemp/cp/ln — a permissions
 #       problem, say), which prints "could not move" to stderr. A file that
 #       copied fine but could not be REMOVED from the old path afterward is
-#       reported as "moved", not this — it self-heals on the next run, once
-#       the new and old copies are byte-identical (see below); in --check
+#       reported as "moved", not this. A later run removes the byte-identical
+#       leftover once the old directory allows unlinking, and exits 4 ("identical,
+#       safe to delete") until then (see below); in --check
 #       mode "config-left" may also just mean install has not run since #156
 #  64   bad usage: unknown argument, --dir without a directory, --dir followed
 #       by a flag or given an empty string, or no --dir on a host with HOME

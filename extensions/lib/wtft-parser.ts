@@ -1224,20 +1224,29 @@ export interface SubagentMeta {
  *  `tests/wtft-137-subagent-meta.test.ts` § M7 documents what the name-pinning
  *  does and does not cover; it is not restated here. */
 export function readSubagentMeta(transcriptPath: string): SubagentMeta | null {
-	if (!transcriptPath.endsWith(".jsonl")) return null;
+	return readSubagentMetaChecked(transcriptPath).meta;
+}
+
+/** {@link readSubagentMeta}, plus the read failure when the meta exists but
+ *  could not be read (EACCES, EIO, EISDIR, EMFILE). `error` is null for an
+ *  absent meta (ENOENT, ENOTDIR) — the ordinary case, since Pi and shell
+ *  children have none — so a caller can tell "no record" from "a record it
+ *  could not read" (#146). */
+export function readSubagentMetaChecked(transcriptPath: string): { meta: SubagentMeta | null; error: Error | null; metaPath: string | null } {
+	if (!transcriptPath.endsWith(".jsonl")) return { meta: null, error: null, metaPath: null };
 	const metaPath = transcriptPath.slice(0, -".jsonl".length) + ".meta.json";
 	let raw: string;
 	try {
 		raw = fs.readFileSync(metaPath, "utf8");
-	} catch {
-		// Absent is the ORDINARY case — Pi and shell children have none — but this
-		// catch also swallows EACCES, EIO and EISDIR, and the caller cannot tell
-		// them apart. `null` is documented to consumers as "this harness wrote no
-		// record", so an unreadable file currently reports a confident absence.
-		// Narrowing it needs a new `notices[]` code, which is additive under
-		// `wtft/session@4`; filed rather than smuggled into this branch.
-		return null;
+	} catch (err) {
+		const code = (err as NodeJS.ErrnoException).code;
+		const absent = code === "ENOENT" || code === "ENOTDIR";
+		return { meta: null, error: absent ? null : (err instanceof Error ? err : new Error(String(err))), metaPath };
 	}
+	return { meta: parseSubagentMeta(raw), error: null, metaPath };
+}
+
+function parseSubagentMeta(raw: string): SubagentMeta | null {
 	let obj: unknown;
 	try {
 		obj = JSON.parse(raw);
@@ -1276,6 +1285,31 @@ export function readSubagentMeta(transcriptPath: string): SubagentMeta | null {
 	if (typeof o.parentAgentId === "string") meta.parentAgentId = o.parentAgentId;
 	if (typeof o.isFork === "boolean") meta.isFork = o.isFork;
 	return meta;
+}
+
+/** The first line of `file`, read in bounded chunks rather than whole — a
+ *  header check needs nothing past the first newline, and a transcript can be
+ *  hundreds of MB (#147). Throws on a read failure, like `readFileSync`. A
+ *  line longer than `cap` is returned truncated, which fails its JSON.parse
+ *  and lands on the same silent skip as any other unparseable header. */
+function readFirstLine(file: string, cap = 1024 * 1024): string {
+	const fd = fs.openSync(file, "r");
+	try {
+		const chunk = Buffer.alloc(64 * 1024);
+		const parts: Buffer[] = [];
+		let total = 0;
+		while (total < cap) {
+			const n = fs.readSync(fd, chunk, 0, chunk.length, total);
+			if (n === 0) break;
+			const nl = chunk.subarray(0, n).indexOf(0x0a);
+			if (nl !== -1) { parts.push(Buffer.from(chunk.subarray(0, nl))); break; }
+			parts.push(Buffer.from(chunk.subarray(0, n)));
+			total += n;
+		}
+		return Buffer.concat(parts).toString("utf8");
+	} finally {
+		fs.closeSync(fd);
+	}
 }
 
 /**
@@ -1317,7 +1351,7 @@ export function discoverSubagentSessionFiles(
 			// instead of only warning (see walkSubagentDir): report it here so
 			// the caller's fail-safe stays honest — the daemon withholds the
 			// swept marker, the CLI degrades to the subagent-unreadable reason.
-			const walkErr = walkSubagentDir(ccBaseDir, 1, maxDepth, files);
+			const walkErr = walkSubagentDir(ccBaseDir, 1, maxDepth, files, new Set());
 			if (walkErr && !firstUnreadable) firstUnreadable = walkErr;
 		}
 	} catch (err) {
@@ -1348,7 +1382,7 @@ export function discoverSubagentSessionFiles(
 	let mainSessionId: string | undefined;
 	let mainHeaderRaw: string | null = null;
 	try {
-		mainHeaderRaw = fs.readFileSync(sessionPath, "utf8");
+		mainHeaderRaw = readFirstLine(sessionPath);
 	} catch (err) {
 		// #457 (round 7) — the round-4 comment claimed the caller's own read
 		// of the main file is "loud about the same failure"; it is not, on
@@ -1368,7 +1402,7 @@ export function discoverSubagentSessionFiles(
 	}
 	if (mainHeaderRaw !== null) {
 		try {
-			const mainHeader = JSON.parse(mainHeaderRaw.split("\n")[0]);
+			const mainHeader = JSON.parse(mainHeaderRaw);
 			if (mainHeader.type === "session") mainSessionId = mainHeader.id;
 		} catch {
 			// #457 (round 6/7) — a header that cannot PARSE (empty file,
@@ -1416,10 +1450,10 @@ export function discoverSubagentSessionFiles(
 				if (fullPath === sessionPath) continue;
 				if (files.includes(fullPath)) continue;
 				try {
-					const raw = fs.readFileSync(fullPath, "utf8");
+					const raw = readFirstLine(fullPath);
 					let header: unknown = null;
 					try {
-						header = JSON.parse(raw.split("\n")[0]);
+						header = JSON.parse(raw);
 					} catch {
 						// #457 (round 6) — a header that cannot PARSE (empty
 						// file, partial crash header, a non-transcript
@@ -1488,8 +1522,19 @@ function walkSubagentDir(
 	depth: number,
 	maxDepth: number,
 	files: string[],
+	seen: Set<string>,
 ): Error | null {
-	if (depth > maxDepth) return null;
+	// Reported, not skipped: transcripts below the cut would otherwise be
+	// missing from a list that looks complete (#148).
+	if (depth > maxDepth) return new Error(`subagent tree deeper than maxDepth ${maxDepth} at (${dir})`);
+	// `seen` holds the real path of every directory and transcript already
+	// visited, so a symlink back into the tree (`loop -> .`) is walked once
+	// instead of to the kernel's ELOOP limit, and a transcript reachable by two
+	// paths is listed once (#148).
+	let realDir: string;
+	try { realDir = fs.realpathSync(dir); } catch { realDir = dir; }
+	if (seen.has(realDir)) return null;
+	seen.add(realDir);
 	let frameErr: Error | null = null;
 	try {
 		for (const f of fs.readdirSync(dir)) {
@@ -1546,10 +1591,14 @@ function walkSubagentDir(
 					// is this walk's own documented norm. Round 7 — a nested
 					// frame's REPORTED per-entry failure (not a throw) rides
 					// up through the return value.
-					const childErr = walkSubagentDir(fullPath, depth + (f === "subagents" || f === "ns" ? 1 : 0), maxDepth, files);
+					const childErr = walkSubagentDir(fullPath, depth + (f === "subagents" || f === "ns" ? 1 : 0), maxDepth, files, seen);
 					if (childErr && !frameErr) frameErr = childErr;
 				}
 			} else if (f.startsWith("agent-") && f.endsWith(".jsonl")) {
+				let realFile: string;
+				try { realFile = fs.realpathSync(fullPath); } catch { realFile = fullPath; }
+				if (seen.has(realFile)) continue;
+				seen.add(realFile);
 				files.push(fullPath);
 			}
 		}
@@ -2057,14 +2106,18 @@ export function attributeClaudeSubAgentCosts(
 export function collectSelfAttributedSessionIds(
 	sessionPath: string,
 	interactions: Interaction[],
+	subagentFiles?: string[],
 ): Set<string> {
 	const ids = new Set<string>();
 
-	try {
-		for (const file of discoverSubagentSessionFiles(sessionPath).files) {
-			ids.add(path.basename(file, ".jsonl"));
-		}
-	} catch { /* an unreadable subagents dir is reported elsewhere (#457) */ }
+	// `subagentFiles` lets a caller that already ran discovery pass its answer,
+	// so one report walks the tree once and every part of it sees the same list.
+	let files = subagentFiles;
+	if (!files) {
+		try { files = discoverSubagentSessionFiles(sessionPath).files; }
+		catch { /* an unreadable subagents dir is reported elsewhere (#457) */ }
+	}
+	for (const file of files ?? []) ids.add(path.basename(file, ".jsonl"));
 
 	for (const interaction of interactions) {
 		// The ids a previous attribution pass recorded, when this array came

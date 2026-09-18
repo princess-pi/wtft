@@ -41,6 +41,7 @@ import {
 	renderUncountedBillables,
 	discoverSubagentSessionFiles,
 	readSubagentMeta,
+	readSubagentMetaChecked,
 	discoverClaudeSubAgentSessionFiles,
 	clearSubagentCacheMiss,
 	loadSubagentInteractions,
@@ -236,6 +237,7 @@ export {
 	renderUncountedBillables,
 	discoverSubagentSessionFiles,
 	readSubagentMeta,
+	readSubagentMetaChecked,
 	discoverClaudeSubAgentSessionFiles,
 	clearSubagentCacheMiss,
 	loadSubagentInteractions,
@@ -886,7 +888,7 @@ async function main() {
 		// mechanisms at once — and without this the money lands in `total` and
 		// again in `spawned.total`.
 		return (spawnTreeCache = computeSpawnTree(sessionId, {
-			alreadyAttributed: collectSelfAttributedSessionIds(finalSessionPath, interactions),
+			alreadyAttributed: collectSelfAttributedSessionIds(finalSessionPath, interactions, discoverOnce().files),
 		}));
 	};
 
@@ -1137,7 +1139,7 @@ async function main() {
 	 *  that stays the authoritative verdict field, and this one simply declines to
 	 *  make a claim it cannot support.
 	 */
-	const collectSubagentJson = (): WtftSubagentJson[] | undefined => {
+	const collectSubagentJson = (): { rows: WtftSubagentJson[]; notices: WtftNotice[] } | undefined => {
 		// `undefined` — so the KEY IS OMITTED — whenever discovery did not produce
 		// a complete answer, whatever the reason. The two guards below are the
 		// whole rule: a missing session file, or any `unreadable` from discovery.
@@ -1155,7 +1157,18 @@ async function main() {
 		if (!fs.existsSync(finalSessionPath)) return undefined;
 		const discovered = discoverOnce();
 		if (discovered.unreadable) return undefined;
-		return discovered.files.map(transcript => ({ transcript, meta: readSubagentMeta(transcript) }));
+		// A meta that exists and cannot be read is not "this harness wrote no
+		// record": the row still says `meta: null`, and a notice names the file
+		// so the two cases can be told apart (#146).
+		const notices: WtftNotice[] = [];
+		const rows = discovered.files.map(transcript => {
+			const read = readSubagentMetaChecked(transcript);
+			if (read.error) {
+				notices.push({ code: "subagent-meta-unreadable", text: `subagent metadata could not be read (${read.metaPath}): ${read.error.message}` });
+			}
+			return { transcript, meta: read.meta };
+		});
+		return { rows, notices };
 	};
 
 	// `pending` pins the decision the CALLER already made, rather than letting the
@@ -1169,6 +1182,7 @@ async function main() {
 	// consistent snapshot of the moment the branch was taken.
 	const emitSessionJson = (opt: { notices?: WtftNotice[]; pending?: boolean } = {}) => {
 		const uncounted = opt.pending ? newUncountedBillables() : scanSessionUncounted();
+		const subagentJson = opt.pending ? undefined : collectSubagentJson();
 		const doc = buildSessionJson({
 			interactions,
 			session: {
@@ -1191,8 +1205,8 @@ async function main() {
 			// `undefined` wherever the answer would be incomplete, and the key is
 			// then OMITTED rather than emitted empty: an empty array must mean
 			// "looked, found none", never "nobody looked".
-			...((() => { const s = opt.pending ? undefined : collectSubagentJson(); return s ? { subagents: s } : {}; })()),
-			notices: opt.notices ?? [],
+			...(subagentJson ? { subagents: subagentJson.rows } : {}),
+			notices: [...(opt.notices ?? []), ...(subagentJson?.notices ?? [])],
 		});
 		process.stdout.write(renderSessionJson(doc));
 		// The human line, on stderr, on every `--json` arm — the empty ones

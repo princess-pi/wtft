@@ -913,23 +913,9 @@ async function main() {
 	// distrust the comments. The invariant is "at most one scan per run", and
 	// that is checkable from the cache alone.
 	let uncountedCache: UncountedBillables | null = null;
-	/** ONE discovery read, shared (#137 review round 1).
-	 *
-	 *  `scanSessionUncounted` ran discovery to find the files it must scan, and
-	 *  `collectSubagentJson` ran it a SECOND time, later, to label them. The two
-	 *  reads straddled the tag read, the notice building and the uncounted scan,
-	 *  and were then serialised as a single snapshot — the same two-reads-one-
-	 *  document class this file already fixed for the tag (`readTagFileWithVerdict`).
-	 *
-	 *  Two concrete mismatches it produced: the first read succeeds and the second
-	 *  throws, shipping `subagents: []` beside a settled `provisional`; or the
-	 *  second sees a subagent that appeared or vanished in between, so `subagents`
-	 *  lists transcripts `uncounted` never covered, or omits ones it did.
-	 *
-	 *  Memoised here so every caller gets the same answer, whichever runs first.
-	 *  `unreadable` is carried too, because the scan turns it into
-	 *  `provisional.reason` and the emitter must not report it a second time in a
-	 *  different vocabulary. */
+	/** One discovery per run, so every part of the document describes the same
+	 *  filesystem. Carries `unreadable`, which the scan turns into
+	 *  `provisional.reason`. */
 	let discoveryCache: { files: string[]; unreadable: Error | null } | null = null;
 	const discoverOnce = (): { files: string[]; unreadable: Error | null } => {
 		if (discoveryCache) return discoveryCache;
@@ -1122,45 +1108,13 @@ async function main() {
 		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
 	};
 
-	/** The subagents this session spawned, each with the harness's own record of
-	 *  it where one exists (#137), or `undefined` when the answer is incomplete.
-	 *
-	 *  Discovery is SHARED with the blind-spot scan through `discoverOnce`, not
-	 *  re-run. An earlier version of this docstring said the opposite — that
-	 *  discovery is re-run and costs "a readdir" — and both halves were wrong
-	 *  once the memo landed: the body calls the cache, and `discoverSubagentSessionFiles`
-	 *  does considerably more than a readdir (it walks the subtree and reads the
-	 *  parent transcript whole for the Pattern-2 header check). The memo exists
-	 *  precisely so that cost is paid once and every caller describes the same
-	 *  filesystem (#137 review rounds 1 and 2).
-	 *
-	 *  A discovery failure is reported by OMITTING the key, not by an empty list —
-	 *  see the body. `provisional.reason` still carries `subagent-unreadable`;
-	 *  that stays the authoritative verdict field, and this one simply declines to
-	 *  make a claim it cannot support.
-	 */
+	/** The subagents this session spawned, with the harness's record of each
+	 *  where one exists. `rows` is `undefined` — the key is omitted, never `[]` —
+	 *  whenever discovery was incomplete; `notices` names any `.meta.json` that
+	 *  exists and could not be read. */
 	const collectSubagentJson = (): { rows: WtftSubagentJson[] | undefined; notices: WtftNotice[] } | undefined => {
-		// `rows` is `undefined` — so the KEY IS OMITTED — whenever discovery did
-		// not produce a complete answer: a missing session file (the whole
-		// result is `undefined`), or any `unreadable` from discovery (`rows`
-		// alone is, and `notices` still carries any unreadable meta).
-		// A caller never needs to know which one fired — absent means the same
-		// thing in every case, and that is the point of omitting rather than
-		// returning `[]`.
-		//
-		// The first version emitted `[]` for the throw case (#137 review round 2,
-		// Medium/contract). That is the exact confusion this document's
-		// absent-versus-empty rule exists to prevent, committed by the code that
-		// states the rule: a consumer reading `subagents.length === 0` got a
-		// partial result presented as complete. `provisional.reason` does carry
-		// `subagent-unreadable`, but nothing tells a consumer that field qualifies
-		// THIS one, and a cross-field dependency nobody documented is not a signal.
 		if (!fs.existsSync(finalSessionPath)) return undefined;
 		const discovered = discoverOnce();
-		// A meta that exists and cannot be read is not "this harness wrote no
-		// record": the row still says `meta: null`, and a notice names the file
-		// so the two cases can be told apart (#146). Read even when discovery
-		// is incomplete and the rows are withheld, so the notice is not lost.
 		const notices: WtftNotice[] = [];
 		const rows = discovered.files.map(transcript => {
 			const read = readSubagentMetaChecked(transcript);

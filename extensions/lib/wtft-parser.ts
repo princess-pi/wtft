@@ -1225,11 +1225,8 @@ export function readSubagentMeta(transcriptPath: string): SubagentMeta | null {
 	return readSubagentMetaChecked(transcriptPath).meta;
 }
 
-/** {@link readSubagentMeta}, plus the read failure when the meta exists but
- *  could not be read (EACCES, EIO, EISDIR, EMFILE). `error` is null for an
- *  absent meta (ENOENT, ENOTDIR) — the ordinary case, since Pi and shell
- *  children have none — so a caller can tell "no record" from "a record it
- *  could not read" (#146). */
+/** {@link readSubagentMeta}, plus the error when the meta exists but could
+ *  not be read. `error` is null for an absent meta (ENOENT, ENOTDIR). */
 export function readSubagentMetaChecked(transcriptPath: string): { meta: SubagentMeta | null; error: Error | null; metaPath: string | null } {
 	if (!transcriptPath.endsWith(".jsonl")) return { meta: null, error: null, metaPath: null };
 	const metaPath = transcriptPath.slice(0, -".jsonl".length) + ".meta.json";
@@ -1285,9 +1282,8 @@ function parseSubagentMeta(raw: string): SubagentMeta | null {
 	return meta;
 }
 
-/** The first `count` lines of `file`, read in chunks that stop once those
- *  lines are in — a header check needs nothing past them, and a transcript
- *  can be hundreds of MB (#147). Throws on a read failure, like `readFileSync`. */
+/** The first `count` lines of `file`, without reading the rest — a
+ *  transcript can be hundreds of MB. Throws on a read failure. */
 function readHeadLines(file: string, count: number): string[] {
 	const fd = fs.openSync(file, "r");
 	try {
@@ -1311,8 +1307,7 @@ function readHeadLines(file: string, count: number): string[] {
 
 /**
  * Discover subagent session files for a given parent session, walking
- * subdirectories recursively. The walk has no depth cap: each directory is
- * visited once by real path, which is what keeps it finite (#148).
+ * subdirectories recursively.
  *
  * Pattern 1 (Claude Code): <session-dir>/<session-name>/subagents/agent-*.jsonl
  * Pattern 2 (Pi, pre-emptive): sibling files with parentSession header match
@@ -1519,10 +1514,8 @@ function walkSubagentDir(
 	files: string[],
 	seen: Set<string>,
 ): Error | null {
-	// `seen` holds the real path of every directory and transcript already
-	// visited, so a symlink back into the tree (`loop -> .`) is walked once
-	// instead of to the kernel's ELOOP limit, and a transcript reachable by two
-	// paths is listed once (#148).
+	// Real paths already visited: a symlink cycle is walked once, and a
+	// transcript reachable by two paths is listed once.
 	let realDir: string;
 	try { realDir = fs.realpathSync(dir); } catch { realDir = dir; }
 	if (seen.has(realDir)) return null;
@@ -2100,8 +2093,6 @@ export function collectSelfAttributedSessionIds(
 ): Set<string> {
 	const ids = new Set<string>();
 
-	// `subagentFiles` lets a caller that already ran discovery pass its answer,
-	// so one report walks the tree once and every part of it sees the same list.
 	let files = subagentFiles;
 	if (!files) {
 		try { files = discoverSubagentSessionFiles(sessionPath).files; }

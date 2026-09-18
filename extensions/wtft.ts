@@ -552,7 +552,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				});
 
 				if (!lines || lines.length === 0) {
-					ctx.ui.notify("No cost history found to display in the pager.", "warning");
+					ctx.ui.notify(withProvisionalLine("No cost history found to display in the pager."), "warning");
 					return;
 				}
 				if (_subagentUnreadable) lines.push(PROVISIONAL_LINE);

@@ -515,9 +515,8 @@ export function parseSessionFile(filePath: string): Interaction[] {
 // ---
 // UNCOUNTED BILLABLES (#149) — naming the blind spot instead of estimating it
 //
-// Measured over seven status-line-logged sessions: 4.72% of Claude Code's own
-// `total_cost_usd` ($6.49 of $137.71) is spend the transcript records no `usage`
-// for. It is not an arithmetic error — #146's per-turn formula reproduces Claude
+// Part of Claude Code's own `total_cost_usd` is spend the transcript records no
+// `usage` for (measured in docs/spec-149-compaction-cost-scope.md). It is not an arithmetic error — #146's per-turn formula reproduces Claude
 // Code's counter to 4 decimal places — it is SCOPE. Two of the generating events
 // do leave a marker entry behind, so wtft can count them even though it can
 // never price them: `/compact` ($0.673267 measured on one Opus-5 compaction) and

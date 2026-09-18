@@ -120,6 +120,18 @@ try {
 		const out = await runCommand(args);
 		check(out[surface].some(l => l.includes(PROVISIONAL)), `/wtft ${args} carries the provisional line on its ${surface} surface`);
 	}
+	// With every subagent file dropped and no parent tag, the pager has no
+	// lines at all and takes its "no cost history" arm, which must still say
+	// the total is provisional.
+	const readable = path.join(subDir, "agent-a.jsonl");
+	fs.chmodSync(readable, 0o000);
+	try {
+		const empty = await runCommand("--pager");
+		check(empty.pager.length === 0 && empty.notify.some(l => l.includes(PROVISIONAL)),
+			"/wtft --pager with nothing readable says no history AND provisional", JSON.stringify(empty));
+	} finally {
+		fs.chmodSync(readable, 0o644);
+	}
 	// The widget's empty-state branch reads the flag with no lines to show, so a
 	// flag left over from the render above would print here.
 	check((await render()).some(l => l.includes(PROVISIONAL)), "precondition: the flag is set by the render just before");

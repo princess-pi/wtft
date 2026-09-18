@@ -141,7 +141,7 @@ function getSettings(_ctx: any) {
 // ---
 
 // ---
-// SUBAGENT SESSION ROLLUP (#83)
+// SUBAGENT SESSION MERGE INTO SELF (#83)
 // Subagent discovery and loading are shared with the CLI via
 // extensions/lib/wtft-parser.ts (discoverSubagentSessionFiles,
 // loadSubagentInteractions).
@@ -188,7 +188,7 @@ function readInteractions(ctx: any): Interaction[] {
 	const tagPath = getTagPath(sessionFile);
 	const mainInteractions = readClassifiedTagFile(tagPath);
 
-	// Subagent rollup: discover and parse subagent session files (#83, #82).
+	// Subagent session merge: discover and parse subagent session files (#83, #82).
 	// Discovery can throw (#457): an unreadable subagents directory drops the
 	// whole Task/agent subtree. The parser warned once per dir (latched);
 	// render main interactions only rather than crash the widget on every
@@ -300,7 +300,7 @@ function updateWtftWidget(
 			? [emptyLine, parserStatusStr.trim()]
 			: [emptyLine];
 		if (_subagentUnreadable) {
-			widgetLines.push("\x1b[33m⚠ some transcripts unreadable — total may be incomplete\x1b[0m");
+			widgetLines.push("\x1b[33m⚠ some transcripts unreadable — total is provisional\x1b[0m");
 		}
 		ctx.ui.setWidget("wtft", widgetLines, { placement: "belowEditor" });
 		return;
@@ -327,7 +327,7 @@ function updateWtftWidget(
 	}
 
 	if (_subagentUnreadable) {
-		lines.push("\x1b[33m⚠ some transcripts unreadable — total may be incomplete\x1b[0m");
+		lines.push("\x1b[33m⚠ some transcripts unreadable — total is provisional\x1b[0m");
 	}
 
 	ctx.ui.setWidget("wtft", lines, { placement: "belowEditor" });

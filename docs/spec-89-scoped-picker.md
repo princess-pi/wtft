@@ -135,7 +135,10 @@ reader does not re-litigate them)
   the repo root found by `findRepoRoot(cwd)`. When git can't answer (no repo,
   no git, or the worktree list is empty), the write is skipped — best-effort,
   matching every other config write in this codebase, and consistent with
-  "Nothing here should block wtft from producing a report."
+  "Nothing here should block wtft from producing a report." The write is
+  also skipped when `.wtft/` or `config.json` is a symlink: `.wtft/` can
+  arrive with a clone, and following the link would rewrite a file outside
+  the repo.
 - **H3 — MRU, opened only.** Opening (selecting, Enter) a session moves its
   harness to the front of the order; browsing (arrow keys) never writes
   anything.
@@ -224,8 +227,7 @@ reader does not re-litigate them)
   structurally rather than only-because-measured-zero-today.
 - **U3 — closer: `chart total === total.costUsd + total.untaggedCostUsd`,
   to half a cent** (the tolerance `tests/wtft-90-…`'s own chart/TOTAL
-  comparisons already use, since both scrape a two-decimal display — the
-  underlying arithmetic itself is exact), on a fixture with one `<synthetic>`
+  comparisons already use, since both scrape a two-decimal display), on a fixture with one `<synthetic>`
   turn among tagged ones (the shape
   `tests/wtft-90-total-includes-server-tool-cost.test.ts` TEST 5 built and
   could not yet assert).

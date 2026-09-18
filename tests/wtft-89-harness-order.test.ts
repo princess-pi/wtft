@@ -316,5 +316,41 @@ console.log("\n=== H1/H2: out-of-tree worktree reads its own repo's sticky order
 	}
 }
 
+// ---
+// H2 — recordHarnessOpened never writes THROUGH a symlink. `.wtft/` can
+// arrive with a clone, so a committed `.wtft/config.json -> ~/some.json`
+// (or a symlinked `.wtft/` itself) would otherwise have every session pick
+// rewrite a file outside the repo.
+// ---
+console.log("\n=== H2: recordHarnessOpened refuses a symlinked config path ===\n");
+{
+	const sandbox = mktmp("wtft-89-order-symlink-");
+	const repo = makeRepoWithWorktree(sandbox);
+	if (!repo) {
+		console.log("  (skip: git worktree unusable)");
+	} else {
+		const outside = path.join(sandbox, "outside");
+		fs.mkdirSync(outside);
+		const victim = path.join(outside, "victim.json");
+		const victimText = JSON.stringify({ keep: true }) + "\n";
+		fs.writeFileSync(victim, victimText);
+
+		const wtftDir = path.join(repo.clone, ".wtft");
+		fs.mkdirSync(wtftDir, { recursive: true });
+		fs.symlinkSync(victim, path.join(wtftDir, "config.json"));
+		check(fs.lstatSync(path.join(wtftDir, "config.json")).isSymbolicLink(), "H2 setup: config.json is a symlink");
+		recordHarnessOpened("pi", repo.worktree);
+		check(fs.readFileSync(victim, "utf8") === victimText,
+			"H2: a symlinked config.json's target is left byte-for-byte untouched");
+
+		fs.rmSync(wtftDir, { recursive: true });
+		fs.symlinkSync(outside, wtftDir);
+		check(fs.lstatSync(wtftDir).isSymbolicLink(), "H2 setup: .wtft is a symlink");
+		recordHarnessOpened("pi", repo.worktree);
+		check(!fs.existsSync(path.join(outside, "config.json")),
+			"H2: a symlinked .wtft directory gets no config.json written through it");
+	}
+}
+
 console.log(`\n${failed === 0 ? "✅" : "❌"} ${passed} passed, ${failed} failed\n`);
 process.exit(failed > 0 ? 1 : 0);

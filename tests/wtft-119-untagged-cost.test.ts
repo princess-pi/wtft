@@ -6,7 +6,7 @@
  * Builds on the exact fixture shape
  * tests/wtft-90-total-includes-server-tool-cost.test.ts TEST 5 introduced and
  * could not yet assert against: chart total === total.costUsd +
- * total.untaggedCostUsd, exactly (U3).
+ * total.untaggedCostUsd, to half a cent (U3).
  *
  * Run: bun tests/wtft-119-untagged-cost.test.ts
  */
@@ -122,9 +122,7 @@ console.log("\n=== U2/U3: chart total === total.costUsd + total.untaggedCostUsd 
 	// Half a cent, not 1e-9 — chartTotal() SCRAPES formatCost's two-decimal
 	// display (same convention tests/wtft-90-…'s own chartTotal/tokensTotal
 	// comparisons use), so the observable precision is bounded by that
-	// rendering, not by the internal float arithmetic itself. The internal
-	// identity IS exact (both sides sum the same per-interaction figures);
-	// this is the closest a black-box CLI test can get to observing it.
+	// rendering, not by the internal float arithmetic itself.
 	check(
 		Math.abs(chart - sum) < 0.005,
 		`U3: chart total ($${chart.toFixed(6)}) === total.costUsd + total.untaggedCostUsd ($${sum.toFixed(6)}), to half a cent`

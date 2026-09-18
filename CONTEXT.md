@@ -317,7 +317,8 @@ the run instead, and `tree` is `total` plus `spawned.total` over the six token a
 so it carries no `untaggedCostUsd` (see **Self / tree**). `total` also
 carries `untaggedCostUsd` beside `costUsd` (#119) — the cost of every interaction the
 chart bins but `total`'s own `costUsd` excludes for lacking a model id, so
-`total.costUsd + total.untaggedCostUsd` equals the chart's own running total.
+`total.costUsd + total.untaggedCostUsd` equals the chart's own running total within float
+accumulation error.
 Suppresses the rendering flags, but not the commands that run instead of a report
 (`--help`/`--why`/`--version`, `--watch`, the daemon-management group). Contract:
 `docs/spec-26-json.md`. CLI only — the widget has no stdout to write an object to.

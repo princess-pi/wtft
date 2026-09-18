@@ -122,6 +122,9 @@ export function recordHarnessOpened(harnessId: string, cwd: string = process.cwd
 	const dir = mainCloneDir(cwd);
 	if (!dir) return;
 	const file = path.join(dir, `.${WTFT_CONFIG_DIR}`, "config.json");
+	// `.wtft/` can arrive with a clone, so a symlink at either level could
+	// point this write at any file the user can write. Neither is followed.
+	if (isSymlink(path.dirname(file)) || isSymlink(file)) return;
 
 	let existing: Record<string, unknown> = {};
 	if (fs.existsSync(file)) {
@@ -159,6 +162,10 @@ export function recordHarnessOpened(harnessId: string, cwd: string = process.cwd
 		// Best-effort (H2) — an unwritable main clone must not block the
 		// session the human actually asked for.
 	}
+}
+
+function isSymlink(p: string): boolean {
+	try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; }
 }
 
 // ---

@@ -91,10 +91,16 @@ as interchangeable in new prose.
 **Bucket (mode)**:
 One of the two render modes, set by `-b/--bucket` (the other is `-c/--cumulative`, default):
 shows each bin's own discrete total rather than a running sum. `mode: "bucket" | "cumulative"`
-in `wtft-renderer.ts`/`wtft.ts`. Not a grouping concept — see Bin above. Also overloaded once,
-harmlessly: `wtft-renderer.ts:1292` has an unrelated local variable named `buckets` (a `Map`
-used only for same-column marker tie-breaking inside *cumulative*-mode rendering) — it is not
-the `-b/--bucket` flag and should not be confused with it when reading that function.
+in `wtft-renderer.ts`/`wtft.ts`, parsed from `-b/-c` in `wtft-cli-shared.ts`. Not a grouping
+concept — see Bin above. Also overloaded once, harmlessly: `buildWtftLines()` in
+`wtft-renderer.ts` has an unrelated local variable named `buckets` (a `Map` used for
+cost-based collision resolution, positioning same-column markers) declared in the COST MODE
+BAR RENDERING section, in the `else` branch of its `if (mode === "cumulative")` — i.e. inside
+*bucket*-mode, cost-unit rendering only; bucket-mode rendering under `--tokens` has no
+`buckets` Map, it uses `BLOCK_BUCKET` instead. `buildWtftLines()` has several
+`if (mode === "cumulative")` checks; this is the one under the cost-unit branch, not the
+first one in the function. It is not the `-b/--bucket` flag and should not be confused with
+it when reading that function.
 _Avoid_: Bin (see above), interval
 
 **Cumulative (mode)**:
@@ -107,7 +113,9 @@ _Avoid_: Running mode, total mode
 One coding-agent conversation's append-only `.jsonl` log — the unit wtft parses, classifies, and
 renders costs for. Identified by a UUID-bearing basename (Claude Code) or a
 timestamp-prefixed UUID basename (Pi); see `isSessionIdBasename()`.
-_Avoid_: Chat, conversation, log (ambiguous with "tag file", below), transcript
+_Avoid_: Chat, conversation — always, for the session. Transcript, log — narrower: only
+when you mean the session rather than the file. Both correctly name the file on their
+own; "log" is also ambiguous with "tag file", below.
 
 **Sidechain**:
 A subagent's own interaction stream within the *same* session file — marked
@@ -118,8 +126,9 @@ _Avoid_: Sub-thread, branch, fork
 
 **Subagent session**:
 A separate `.jsonl` log for a spawned subagent, stored under `<session-id>/subagents/` (Claude
-Code). wtft recursively discovers and blends these chronologically into the parent's timeline
-(Recursive Subagent Rollup). Distinct from a sidechain (above), which lives inline in the parent
+Code). wtft recursively discovers and blends these chronologically into the parent's own turns —
+folded into **self**, not into the ledger-spawned **tree** (see Self / tree below), which is a
+different join. Distinct from a sidechain (above), which lives inline in the parent
 file rather than as its own file.
 _Avoid_: Child session, nested session
 
@@ -300,11 +309,16 @@ names the usage mode)
 
 **Provisional (total)** (#443, a field since #26):
 A total the log parser daemon may still grow — the CLI spawned it and read the tag file
-before it finished, so the number printed is real but not final. Reported two ways that
-always agree: **exit 9**, and `provisional.provisional` / `provisional.reason` in JSON mode.
-The reasons are a closed vocabulary — `stale-version`, `unswept`, `subagent-unreadable` —
-and `reason` here is a different field from a **daemon health reason** (above); name the
-container when both are in play. The opposite state is **settled**, never "final" or "done".
+before it finished, so the number printed is real but not final. On the CLI, reported two
+ways that always agree: **exit 9**, and `provisional.provisional` / `provisional.reason` in
+JSON mode. The reasons are a closed vocabulary — `stale-version`, `unswept`,
+`subagent-unreadable` — and `reason` here is a different field from a **daemon health
+reason** (above); name the container when both are in play. The Pi widget surfaces
+this state only when its own `_subagentUnreadable` flag is set, and as a third,
+contract-less channel: prose only ("total is provisional"), no exit code, no JSON field.
+It never reads the CLI's `provisional` object. The flag comes from discovery alone,
+so a discovered subagent file that then fails to parse is dropped without it (#165). The opposite state is
+**settled**, never "final" or "done".
 _Avoid_: Partial, incomplete, estimated (the number is measured, just not finished)
 
 **Pager**:

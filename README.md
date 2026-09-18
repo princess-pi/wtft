@@ -193,7 +193,7 @@ renders its **Exit codes** section from.
 Some agent sessions are started by a *launcher*, not by a `claude` command in the
 parent's own transcript: a `pr-review` lens in a `/tmp` sandbox, a
 `herdr agent start` child in a worktree. Those children are invisible to the
-rollup, and not because the parser is missing something —
+tree, and not because the parser is missing something —
 **neither transcript contains a field naming the other**, so there is no edge to
 re-derive and no amount of re-parsing can reach the money. Measured on one real
 session: $70.33 reported, $69.68 of its own lens children INVISIBLE — not

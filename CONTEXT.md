@@ -313,10 +313,11 @@ before it finished, so the number printed is real but not final. On the CLI, rep
 ways that always agree: **exit 9**, and `provisional.provisional` / `provisional.reason` in
 JSON mode. The reasons are a closed vocabulary — `stale-version`, `unswept`,
 `subagent-unreadable` — and `reason` here is a different field from a **daemon health
-reason** (above); name the container when both are in play. The Pi widget also surfaces
-this state, but as a third, contract-less channel: prose only ("total is provisional"),
-no exit code, no JSON field — driven by its own `_subagentUnreadable` flag rather than the
-CLI's `provisional` object, so it never reads `provisional.reason`. The opposite state is
+reason** (above); name the container when both are in play. The Pi widget surfaces
+this state only when its own `_subagentUnreadable` flag is set, and as a third,
+contract-less channel: prose only ("total is provisional"), no exit code, no JSON field.
+It never reads the CLI's `provisional` object. The flag comes from discovery alone,
+so a discovered subagent file that then fails to parse is dropped without it (#165). The opposite state is
 **settled**, never "final" or "done".
 _Avoid_: Partial, incomplete, estimated (the number is measured, just not finished)
 

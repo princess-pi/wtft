@@ -66,8 +66,12 @@ import * as fs from "node:fs";
  *
  * "8 KB resolves every transcript here" is what this said, measured on a 40-file
  * corpus. It is no longer true: the module header's 2026-09-16 figures work out
- * at ~1.9 reads and ~41 KB per transcript, so the second window is reached
- * routinely — attachment-heavy tails are common now, and a transcript with no
+ * to ~1.9 reads per transcript, ~41 KB per READ (corrected, pr-review round 3:
+ * an earlier draft of this sentence attached "~41 KB" to "per transcript"
+ * instead — 580 MB / 14,441 reads ≈ 41 KB/read, while 580 MB / 7,287
+ * transcripts ≈ 80 KB/transcript; the two do not close if read as the same
+ * quantity), so the second window is reached routinely — attachment-heavy
+ * tails are common now, and a transcript with no
  * `cwd` anywhere in its final 512 KB widens through all three and then gives
  * up. That describes every Pi transcript OVER ~512 KB: Pi records `cwd` only
  * once, on its first (`session_start`) entry, which a widen-from-the-tail scan

@@ -15,14 +15,26 @@
  *   suite is only ever about the `-s` path.) So the scan was paid for and
  *   thrown away.
  *
- *   It is not a cheap scan. Discovery asks each transcript where it lives, and a
- *   transcript whose recorded `cwd` no longer exists falls through to
- *   `resolveCwdHistory`, a documented WHOLE-FILE read. That fallback was budgeted
- *   for "3 transcripts in 40"; the workflow deletes a worktree after every merge
- *   (`pr-cleanup`), which strands every session that lived there permanently, so
- *   the measured hit rate on the development host is 34 in 40 — 2,622 of 3,073
- *   transcripts, 760 MB re-read on every invocation, 3,215-4,528 ms against 86 ms
- *   with an empty corpus. It degrades monotonically with every branch merged.
+ *   It is not a cheap scan. Discovery asks each transcript where it lives —
+ *   at the time this guard was written, a transcript whose recorded `cwd` no
+ *   longer existed fell through to `resolveCwdHistory`, a documented
+ *   WHOLE-FILE read budgeted for "3 transcripts in 40"; the workflow deletes
+ *   a worktree after every merge (`pr-cleanup`), which strands every session
+ *   that lived there permanently, so the measured hit rate on the
+ *   development host was 34 in 40 — 2,622 of 3,073 transcripts, 760 MB
+ *   re-read on every invocation, 3,215-4,528 ms against 86 ms with an empty
+ *   corpus. It degraded monotonically with every branch merged.
+ *
+ *   `resolveCwdHistory` (and `pickLiveCwd`, `pathExists`) NO LONGER EXIST —
+ *   #89 deleted that arm (corrected pr-review round 3: an earlier draft of
+ *   this docstring still named it as live). The fixture below (a 6,000-file
+ *   stranded corpus) still exercises the guard this suite is actually
+ *   about — that an existing-file `-s` short-circuits BEFORE any discovery
+ *   call at all, so the corpus size cannot matter — the historical numbers
+ *   above explain why that guard was worth writing, not what today's code
+ *   still does when discovery does run (that cost is the bounded tail-read
+ *   arm `extensions/lib/harness/session-cwd.ts` documents, not a whole-file
+ *   fallback).
  *
  *   WHY THIS ONE IS TIMED, WHEN THE HOUSE RULE IS TO WAIT ON STATE. Cost IS the
  *   behaviour under test: "did not read the corpus" has no other user-visible

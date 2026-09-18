@@ -588,14 +588,16 @@ async function main() {
 	// coming down further; it is deferred here because it is still worth
 	// deferring, not because an index is pending.
 	//
-	// Memoised as well as deferred, though nothing today needs the cache: both
-	// branches call it once and reuse the result. It is here so that a future
-	// second call site cannot quietly reintroduce a whole second scan — the cost
-	// of `??=` is one null check, and the cost of getting this wrong again is
-	// everything above. Stated as insurance rather than as a present saving,
-	// because an earlier draft of this comment claimed the fuzzy branch scanned
-	// twice; it does not, and a rationale that misdescribes its own control flow
-	// is how the next reader learns to distrust the comments (PR review).
+	// Memoised as well as deferred, though nothing today needs the cache: the
+	// one reader (the fuzzy `-s` fallback) calls it once and reuses the
+	// result. It is here so that a future second call site cannot quietly
+	// reintroduce a whole second scan — the cost of `??=` is one null check,
+	// and the cost of getting this wrong again is everything above. Stated as
+	// insurance rather than as a present saving. (This paragraph used to say
+	// "both branches call it once" — leftover from before #89 moved the
+	// no-`-s` branch onto `getDefaultScoped()` below; corrected pr-review
+	// round 3, the exact "misdescribes its own control flow" failure the
+	// PARAGRAPH ITSELF warns about two sentences later.)
 	// Named `getCandidates`, not `candidates`, because the array-to-thunk change is
 	// a JS footgun worth spending a word on: `candidates.length` on a function is
 	// its ARITY — 0 — so a call site that forgot the parens would read as "no
@@ -627,10 +629,6 @@ async function main() {
 	// state that fact instead of "does not exist". Only an absolute *.jsonl path
 	// qualifies — a fuzzy substring that matches nothing is still an error below.
 	let sessionPending = false;
-	// Notices raised BEFORE the JSON document can be built (#26). Session
-	// selection happens long before the tag file is read, so a notice from it
-	// has nowhere to live yet; `emitSessionJson` prepends these.
-	const earlyNotices: WtftNotice[] = [];
 
 	// ---
 	// SESSION SELECTION (#26, #89)
@@ -1188,7 +1186,7 @@ async function main() {
 			// then OMITTED rather than emitted empty: an empty array must mean
 			// "looked, found none", never "nobody looked".
 			...((() => { const s = opt.pending ? undefined : collectSubagentJson(); return s ? { subagents: s } : {}; })()),
-			notices: [...earlyNotices, ...(opt.notices ?? [])],
+			notices: opt.notices ?? [],
 		});
 		process.stdout.write(renderSessionJson(doc));
 		// The human line, on stderr, on every `--json` arm — the empty ones

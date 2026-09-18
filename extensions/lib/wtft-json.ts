@@ -29,12 +29,16 @@ import type { Interaction } from "./wtft-shared.js";
 import type { UncountedBillables, SubagentMeta } from "./wtft-parser.ts";
 import type { TagProvisional } from "./wtft-daemon-lib.js";
 
-/** Bumped when a top-level key is ADDED or changes shape. Prose never bumps it.
+/** Bumped when a key is ADDED — top-level OR nested — or changes shape.
+ *  Prose never bumps it. (Corrected, pr-review round 3: an earlier draft of
+ *  this docstring said "top-level key", then immediately justified `@4` by a
+ *  NESTED addition — the stated rule and the stated reason for the very bump
+ *  it introduces disagreed. `@4` (#89, #119) adds `total.untaggedCostUsd`,
+ *  one level down from `total`; Amendment 1's "adding keys is the documented
+ *  bump condition" applies at any depth, per Duppy, 2026-09-18, answer Y.)
  *
  *  A consumer pins this string to know which keys it may rely on; the per-key
- *  contract is docs/spec-26-json.md. `@4` (#89, #119) adds `total.untaggedCostUsd`
- *  — a NESTED key, and Amendment 1's own "adding keys is the documented bump
- *  condition" applies just as much one level down (Duppy, 2026-09-18, answer Y). */
+ *  contract is docs/spec-26-json.md. */
 export const WTFT_JSON_SCHEMA = "wtft/session@4";
 
 /**

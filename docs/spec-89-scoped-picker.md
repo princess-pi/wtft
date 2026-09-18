@@ -113,10 +113,17 @@ reader does not re-litigate them)
 
 ### Sticky harness order (`extensions/lib/harness-order.ts`, new)
 
-- **H1 — read via config walk-up.** `harnessOrder` is read with the same
-  `loadConfig(WTFT_CONFIG_TOOL, {}, WTFT_CONFIG_DIR)` walk-up every other wtft
-  config value uses, so an in-tree worktree reaches the main clone's
-  `.wtft/config.json` with no special-case code.
+- **H1 — read via `mainCloneDir`, the same resolution the write uses.**
+  Corrected (pr-review round 3, Medium): the shipped code resolves the main
+  clone through `mainCloneDir` (`git worktree list`-based) and reads its
+  `.wtft/config.json` directly — the SAME mechanism H2 already uses to
+  write — not the plain `loadConfig` walk-up an earlier draft of this bullet
+  described. The walk-up survives only as a fallback for when there is no
+  repo/git to resolve a main clone from at all (a hand-placed
+  `.wtft/config.json` outside any repository). `harness-order.ts`'s own
+  module header and `readHarnessOrder`'s docstring carry the full story,
+  including why the walk-up alone was wrong: it only reaches an IN-TREE
+  worktree, never the out-of-tree layout `worktrees.ts` documents.
 - **H2 — write targets the main clone, not cwd.** Opening a session writes
   `harnessOrder` to `<main clone>/.wtft/config.json`, resolved via
   `git worktree list --porcelain`'s first entry (the main working tree) from
@@ -232,11 +239,13 @@ reader does not re-litigate them)
   updated for E3's new exit code, not a behavioural regression.
 - **E2–E4's exit-10 contract**: `tests/wtft-89-no-tty-exit.test.ts` (added in
   pr-review round 2, closing the gap round 1 could only name — real CLI
-  subprocesses, non-TTY by construction) covers zero and several `-s`
-  matches, zero and several default-scoped candidates with no `-s`, and the
-  `--json` empty-stdout guarantee on the same exit.
-  `tests/wtft-35-explicit-session-skips-discovery.test.ts` additionally
-  covers the zero-`-s`-match case as a side effect of its own #35 cost
+  subprocesses, non-TTY by construction) covers SEVERAL `-s` matches (not
+  zero — corrected, pr-review round 3: an earlier draft of this bullet
+  overclaimed zero-`-s`-match coverage here too), zero and several
+  default-scoped candidates with no `-s`, and the `--json` empty-stdout
+  guarantee on the same exit.
+  `tests/wtft-35-explicit-session-skips-discovery.test.ts` covers the
+  zero-`-s`-match case as a side effect of its own #35 cost
   assertion. E1 (interactive terminal still shows the picker) has no
   automated coverage — the interactive TTY render loop itself is not unit
   tested anywhere in this codebase, before or after #89; `canShowPicker`'s

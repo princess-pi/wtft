@@ -81,10 +81,16 @@ export type { SessionCandidate } from "./harness/types.ts";
  *
  * Which arms apply is each harness's own call. Claude Code wires up all three.
  * Pi wires up the first two — its slug arm accepts both encodings, and the
- * last-cwd arm is present but never fires, because Pi records `cwd` once on its
- * session_start entry and a tail scan finds nothing. That is deliberate rather
- * than a gap: the day Pi records per-entry cwd, the arm starts working with no
- * code change. See docs/adding-a-harness.md.
+ * last-cwd arm is present but mostly inert, because Pi records `cwd` once on
+ * its session_start entry: a tail scan resolves a DIFFERENT cwd than the
+ * physical slug already gives only when the session moved directories after
+ * that entry (corrected, pr-review round 3 — a surviving copy of the older,
+ * stronger "finds nothing" claim; `extensions/lib/harness/session-cwd.ts` and
+ * `extensions/lib/harness/pi/discovery.ts` both carry the full correction: a
+ * Pi transcript under ~512 KB has its whole file read by the widening tail
+ * scan and DOES resolve `session_start`'s cwd). That is deliberate rather
+ * than a gap: the day Pi records per-entry cwd, the arm starts catching an
+ * in-session move with no code change. See docs/adding-a-harness.md.
  *
  * @param harness - Target harness id, or "auto" for all enabled harnesses
  * @param cwdOverride - Directory to scope to; each harness decides what a
@@ -348,13 +354,22 @@ export interface SelectSessionPromptOptions {
 	out?: NodeJS.WritableStream;
 	/**
 	 * The `-s <substring>` the caller already filtered `initialCandidates` by
-	 * (basename or path, case-insensitive), when there was one. Re-applied
-	 * after every rescope's fresh `discoverSessions` call — WITHOUT this, a
-	 * Ctrl+A/W/B/T press silently discarded the user's own narrowing and
-	 * showed every session in the new scope instead of just the matches
-	 * (pr-review, Medium). Also shown in the picker header in place of the
-	 * scope/window line, since the row population here is `-s`-filtered on
-	 * top of a scope, not the scope alone.
+	 * (basename or path, case-insensitive), when there was one. Two things
+	 * follow from setting it, both pr-review fixes across two rounds:
+	 *
+	 *   - Re-applied after every rescope's fresh `discoverSessions` call
+	 *     (round 1, Medium) — without this, a Ctrl+A/W/B/T press silently
+	 *     discarded the user's own narrowing and showed every session in the
+	 *     new scope instead of just the matches.
+	 *   - The initial state's `scope`/`timeWindow` are seeded to `"all"`/
+	 *     `"all"` instead of `initPickerState()`'s own `"worktree"`/`"20m"`
+	 *     defaults (round 3, Medium — a real bug, not just a mislabelled
+	 *     header: `initialCandidates` here comes from the CALLER's legacy,
+	 *     unscoped discovery, so seeding the normal narrow defaults meant
+	 *     pressing Ctrl+T FIRST silently narrowed to `"worktree"` scope too,
+	 *     dropping any match outside it with no warning — `"all"`/`"all"` is
+	 *     the least-narrowing real pair, so no rescope key can lose a match
+	 *     on its first press).
 	 */
 	substringFilter?: string;
 }
@@ -425,12 +440,19 @@ export async function selectSessionPrompt(
 		// launch, but FALSE of `initialCandidates` here whenever `-s` matched
 		// several: those rows come from `bin/wtft.ts`'s LEGACY, unscoped
 		// `getCandidates()` (fan-out, the union arm, unbounded time), not from
-		// any real scope/window this state names (pr-review round 2, Medium).
-		// So the header shows the scope/window line only once it has become
-		// TRUE — after the first real rescope, which always re-discovers
-		// through `discoverSessions(..., { scope, windowMs })` and so always
-		// describes what is actually on screen from then on.
-		let hasRescoped = !opts.substringFilter;
+		// `"worktree"`/`"20m"`. Left uncorrected, this was a REAL bug, not
+		// just a mislabelled header (pr-review round 3, Medium, superseding
+		// round 2's label-only fix): `state.scope` stays `"worktree"` until
+		// the first Ctrl+A/W/B press, so pressing Ctrl+T FIRST — which the
+		// contract defines as cycling ONLY the time window — silently
+		// re-discovered with `scope: "worktree"` too, and any `-s` match
+		// living outside this directory, or older than the new window,
+		// disappeared with no warning. Seeding `"all"`/`"all"` instead is the
+		// least-narrowing real scope/window pair: it drops nothing on the
+		// first rescope no matter which key fires it, and it is also the
+		// closest single truthful description of what `-s`'s own unscoped,
+		// unbounded discovery already returned.
+		if (opts.substringFilter) state = { ...state, scope: "all", timeWindow: "all" };
 
 		hideCursor(out);
 
@@ -441,13 +463,9 @@ export async function selectSessionPrompt(
 			let text = `\x1b[1m\x1b[36m\u{1F4B8} WTFT — select session log\x1b[0m ` +
 				`\x1b[90m(j/k navigate, Enter select, q quit · Ctrl+A all · Ctrl+W worktrees · ` +
 				`Ctrl+B branch · Ctrl+T window)\x1b[0m\n`;
-			if (opts.substringFilter && !hasRescoped) {
-				text += `  \x1b[90mfiltered by -s "${opts.substringFilter}" (unscoped, no time window)\x1b[0m\n`;
-			} else if (opts.substringFilter) {
-				text += `  \x1b[90mscope: ${SCOPE_LABEL[state.scope]}  ·  window: ${state.timeWindow}  ·  filtered by -s "${opts.substringFilter}"\x1b[0m\n`;
-			} else {
-				text += `  \x1b[90mscope: ${SCOPE_LABEL[state.scope]}  ·  window: ${state.timeWindow}\x1b[0m\n`;
-			}
+			text += opts.substringFilter
+				? `  \x1b[90mscope: ${SCOPE_LABEL[state.scope]}  ·  window: ${state.timeWindow}  ·  filtered by -s "${opts.substringFilter}"\x1b[0m\n`
+				: `  \x1b[90mscope: ${SCOPE_LABEL[state.scope]}  ·  window: ${state.timeWindow}\x1b[0m\n`;
 
 			if (view.rows.length === 0) {
 				text += `  \x1b[33mNo sessions in this window. Press Ctrl+T to widen it.\x1b[0m\n`;
@@ -507,7 +525,6 @@ export async function selectSessionPrompt(
 				render();
 			} else if (action.type === "rescope") {
 				state = action.state;
-				hasRescoped = true;
 				// Ctrl+B's population falls back gracefully to "worktree"'s
 				// (bare target directory) when the branch can't be resolved —
 				// but the LABEL must say so too (pr-review round 2, Medium: the

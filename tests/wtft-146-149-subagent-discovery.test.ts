@@ -242,6 +242,24 @@ console.log("\n§ 148 — unbounded depth, symlink cycle\n");
 	check(escFound.files.length === 1 && escFound.files[0] === inside && escFound.unreadable === null,
 		`a symlinked directory is not walked (${escFound.files.length} files)`, JSON.stringify(escFound.files));
 
+	if (!isRoot) {
+		// A symlink whose TARGET cannot be stat-ed may still be a transcript
+		// holding cost, so it takes the same report path as any other entry
+		// rather than being skipped with the symlinked directories.
+		const lock = claudeSession("symlink-eacces");
+		fs.writeFileSync(path.join(lock.subDir, "agent-keep.jsonl"), turn("msg_keep"));
+		const vault = path.join(root, "vault");
+		fs.mkdirSync(vault, { recursive: true });
+		const hidden = path.join(vault, "agent-hidden.jsonl");
+		fs.writeFileSync(hidden, turn("msg_hidden"));
+		fs.symlinkSync(hidden, path.join(lock.subDir, "agent-link.jsonl"));
+		fs.chmodSync(vault, 0o000);
+		let lockFound;
+		try { lockFound = discoverSubagentSessionFiles(lock.sessionPath); } finally { fs.chmodSync(vault, 0o755); }
+		check(lockFound.unreadable !== null,
+			"a symlinked transcript whose target cannot be stat-ed is reported, not skipped", String(lockFound.unreadable));
+	}
+
 	// Both halves dedup by real path, not by the string they happened to
 	// build: a Pi sibling symlinked to an already-walked Claude child is one
 	// transcript, and listing it twice would double-count its cost.

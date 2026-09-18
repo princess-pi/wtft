@@ -1475,15 +1475,6 @@ function walkSubagentDir(
 		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
 			const f = entry.name;
 			const fullPath = path.join(dir, f);
-			// A SYMLINKED directory is never recursed into. `seen` bounds a
-			// cycle but not an acyclic foreign tree, so `subagents/all -> /`
-			// would walk the filesystem. A symlinked FILE still counts: a
-			// symlink to a transcript is a transcript.
-			if (entry.isSymbolicLink()) {
-				let target: fs.Stats;
-				try { target = fs.statSync(fullPath); } catch { continue; }
-				if (target.isDirectory()) continue;
-			}
 			let stat: fs.Stats;
 			try {
 				stat = fs.statSync(fullPath);
@@ -1505,6 +1496,12 @@ function walkSubagentDir(
 				}
 				continue;
 			}
+			// A SYMLINKED directory is never recursed into: `seen` bounds a
+			// cycle but not an acyclic foreign tree, so `subagents/all -> /`
+			// would walk the filesystem. A symlinked FILE still counts — a
+			// symlink to a transcript is a transcript — and a stat failure on
+			// either took the arm above, so none is swallowed here.
+			if (entry.isSymbolicLink() && stat.isDirectory()) continue;
 			if (stat.isDirectory()) {
 				// Recurse into ALL subdirectories (#141) — the agent-*.jsonl
 				// file filter gates what gets collected, so directory names

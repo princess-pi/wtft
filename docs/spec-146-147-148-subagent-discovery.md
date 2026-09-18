@@ -45,7 +45,9 @@ listed once and counted once.
 
 A symlinked DIRECTORY is never traversed. The `seen` set bounds a cycle, not an acyclic
 foreign tree, so `subagents/all -> /` would walk the filesystem synchronously before discovery
-returned. A symlinked FILE still counts: a symlink to a transcript is a transcript.
+returned. A symlinked FILE still counts: a symlink to a transcript is a transcript. A stat failure on
+either takes the same report path as any other entry — ENOENT and ELOOP hold no cost to miss,
+every other errno is reported through `unreadable` — so none is swallowed by the symlink rule.
 
 A directory named `*.jsonl`, or a symlink to one, holds no transcript. `isDirectory()` is false
 for the symlink, so both halves skip on the read's EISDIR instead: reporting it would brand the

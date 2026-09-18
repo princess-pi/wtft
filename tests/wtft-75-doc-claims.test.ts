@@ -3,7 +3,8 @@
  * @package @princess-pi/wtft
  * @test wtft-75-doc-claims
  * @description Four doc claims that the #32 audit found contradicting the code
- *   (#75), each pinned against the code it describes so it cannot drift back:
+ *   (#75), plus a fifth pinning a #118 decision, each pinned against the code
+ *   or doc it describes so it cannot drift back:
  *
  *   1. Every flag a README `wtft …` example names is one `parseWtftCliArgs`
  *      accepts. The audit found `wtft --history`, a flag that never existed;
@@ -16,6 +17,10 @@
  *   4. The README's `install-wtft` exit-code list carries every code the
  *      script can exit with, read from the script's own `exit N` / `EXIT=N`
  *      sites.
+ *   5. `docs/adding-a-harness.md` states the #118 rule: a harness-native
+ *      per-turn cost must not include server-side tool charges, and an
+ *      adapter whose native cost already includes them must zero
+ *      `server_tool_use`.
  *
  *   These read source files, not built output, so the suite needs no build and
  *   no session corpus. The flag set in (1) is derived from the parser's own

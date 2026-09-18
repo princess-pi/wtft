@@ -5,7 +5,8 @@
  *
  *   § 146  an unreadable `.meta.json` gets a notice; an absent one does not.
  *   § 147  discoverSubagentSessionFiles reads a header's first line, not the
- *          whole transcript.
+ *          whole transcript, and a `claude -p` scan skips a directory named
+ *          `*.jsonl` instead of reading it.
  *   § 148  a deeply nested transcript is listed, never cut off silently;
  *          a directory symlink cycle lists each child once.
  *   § 149  the invariants #137 shipped with nothing defending them: the
@@ -149,10 +150,36 @@ console.log("\n§ 147 — discovery reads line 1, not the whole transcript\n");
 	check(bytes < 1024 * 1024, `discovery reads under 1 MiB of three 4 MiB transcripts (${bytes} bytes)`);
 }
 
+{
+	// A directory named `*.jsonl` holds no transcript, and reading one throws
+	// EISDIR — which the catch below would report as an unreadable transcript,
+	// withholding the daemon's swept marker on every poll from then on.
+	const home = path.join(root, "claude-home");
+	const cwd = path.join(root, "bash-spawn-cwd");
+	const projectDir = path.join(home, ".claude", "projects", cwd.replace(/\//g, "-"));
+	fs.mkdirSync(projectDir, { recursive: true });
+	fs.mkdirSync(cwd, { recursive: true });
+	const stamp = new Date().toISOString();
+	const spawned = path.join(projectDir, "spawned.jsonl");
+	fs.writeFileSync(spawned, JSON.stringify({ type: "assistant", timestamp: stamp }) + "\n");
+	fs.mkdirSync(path.join(projectDir, "not-a-transcript.jsonl"));
+
+	const driver = path.join(root, "claude-p-driver.mjs");
+	fs.writeFileSync(driver, `import { discoverClaudeSubAgentSessionFiles } from ${JSON.stringify(CLI_BIN)};\n`
+		+ `process.stdout.write(JSON.stringify(discoverClaudeSubAgentSessionFiles(process.argv[2], Date.parse(process.argv[3]))));\n`);
+	const r = spawnSync("node", [driver, cwd, stamp], { encoding: "utf8", env: { ...process.env, HOME: home } });
+	let out: any = null;
+	try { out = JSON.parse(r.stdout); } catch { /* asserted below */ }
+	check(out !== null && out.files.length === 1 && out.files[0] === spawned,
+		"a `claude -p` transcript beside a directory named *.jsonl is still discovered", r.stdout + r.stderr);
+	check(out !== null && out.unreadable === null,
+		"…and the directory itself is not reported unreadable", JSON.stringify(out && out.unreadable));
+}
+
 // ---
-// § 148 — depth truncation and symlink cycles
+// § 148 — unbounded depth and symlink cycles
 // ---
-console.log("\n§ 148 — depth truncation, symlink cycle\n");
+console.log("\n§ 148 — unbounded depth, symlink cycle\n");
 {
 	// No depth cap: the walk is bounded by visiting each real directory once,
 	// so a transcript nested past Claude Code's own limit is still listed
@@ -198,6 +225,21 @@ console.log("\n§ 148 — depth truncation, symlink cycle\n");
 	const cycRun = runJson(cyc.sessionPath);
 	check((cycRun.doc?.subagents ?? []).length === 1, `a 'loop -> .' symlink lists the child once (${(cycRun.doc?.subagents ?? []).length} rows)`);
 	check(cycRun.doc?.uncounted?.compaction === 1, `…and its one compaction counts once (${cycRun.doc?.uncounted?.compaction})`);
+
+	// Both halves dedup by real path, not by the string they happened to
+	// build: a Pi sibling symlinked to an already-walked Claude child is one
+	// transcript, and listing it twice would double-count its cost.
+	const dualDir = path.join(projects, "-sandbox-dual");
+	const dualSession = path.join(dualDir, "dual.jsonl");
+	const dualSub = path.join(dualDir, "dual", "subagents");
+	fs.mkdirSync(dualSub, { recursive: true });
+	fs.writeFileSync(dualSession, JSON.stringify({ type: "session", id: "dual-main" }) + "\n" + turn("msg_dual_parent"));
+	const walked = path.join(dualSub, "agent-eeee.jsonl");
+	fs.writeFileSync(walked, JSON.stringify({ type: "session", id: "dual-child", parentSession: "dual-main" }) + "\n" + turn("msg_dual"));
+	fs.symlinkSync(walked, path.join(dualDir, "sibling.jsonl"));
+	const dualFound = discoverSubagentSessionFiles(dualSession);
+	check(dualFound.files.length === 1 && dualFound.files[0] === walked && dualFound.unreadable === null,
+		`a Pi sibling symlinked to a walked Claude child is listed once (${dualFound.files.length} files)`, JSON.stringify(dualFound.files));
 }
 
 // ---
@@ -214,6 +256,46 @@ console.log("\n§ 149 — #137's invariants\n");
 	const spy = JSON.parse(fs.readFileSync(spyOut, "utf8"));
 	const walks = spy.readdirCalls[memo.subDir] ?? 0;
 	check(walks === 1, `one --json run walks the subagents dir exactly once (${walks})`);
+
+	// Same invariant on the widget, the surface the guard was extracted from:
+	// one render walks the subagents dir once, not once for the interactions
+	// and again for the spawn tree.
+	{
+		const w = claudeSession("widget-memo");
+		fs.writeFileSync(path.join(w.subDir, "agent-ffff.jsonl"), turn("msg_widget_child"));
+		const home = path.join(root, "widget-home");
+		fs.mkdirSync(path.join(home, "xdg", "wtft"), { recursive: true });
+		fs.writeFileSync(path.join(home, "xdg", "wtft", "config.json"), "{}\n");
+		const widgetDriver = path.join(root, "widget-driver.mjs");
+		fs.writeFileSync(widgetDriver,
+			`import * as mod from ${JSON.stringify(path.join(REPO, "pi", "wtft.js"))};\n`
+			+ `const handlers = {};\n`
+			+ `let command;\n`
+			+ `mod.default({ on: (n, f) => { handlers[n] = f; }, registerCommand: (_n, d) => { command = d.handler; } });\n`
+			+ `const ctx = { sessionManager: { getSessionFile: () => process.argv[2] }, ui: { setWidget: () => {}, notify: () => {}, custom: () => {} }, model: undefined, width: 80 };\n`
+			+ `await handlers["agent_settled"](undefined, ctx);\n`
+			+ `if (process.argv[3]) await command(process.argv[3], ctx);\n`);
+		const widgetSpy = path.join(root, "spy-149-widget.json");
+		const wr = spawnSync("node", ["--import", SPY, widgetDriver, w.sessionPath], {
+			encoding: "utf8",
+			env: { ...process.env, HOME: home, XDG_CONFIG_HOME: path.join(home, "xdg"), FS_SPY_OUT: widgetSpy, WTFT_CLAUDE_PROJECTS_DIR: projects },
+		});
+		const wSpy = fs.existsSync(widgetSpy) ? JSON.parse(fs.readFileSync(widgetSpy, "utf8")) : { readdirCalls: {} };
+		const wWalks = wSpy.readdirCalls[w.subDir] ?? 0;
+		check(wWalks === 1, `one widget render walks the subagents dir exactly once (${wWalks})`, wr.stderr.slice(0, 300));
+
+		// `/wtft --tokens` walks three times: the settle render above, the
+		// command's own re-render, and the summary's read. The spawn tree's
+		// double-count guard adds none — it takes the list that read produced.
+		const tokensSpy = path.join(root, "spy-149-widget-tokens.json");
+		const tr = spawnSync("node", ["--import", SPY, widgetDriver, w.sessionPath, "--tokens"], {
+			encoding: "utf8",
+			env: { ...process.env, HOME: home, XDG_CONFIG_HOME: path.join(home, "xdg"), FS_SPY_OUT: tokensSpy, WTFT_CLAUDE_PROJECTS_DIR: projects },
+		});
+		const tSpy = fs.existsSync(tokensSpy) ? JSON.parse(fs.readFileSync(tokensSpy, "utf8")) : { readdirCalls: {} };
+		const tWalks = tSpy.readdirCalls[w.subDir] ?? 0;
+		check(tWalks === 3, `/wtft --tokens adds no walk for the spawn tree (${tWalks} walks, one per read)`, tr.stderr.slice(0, 300));
+	}
 
 	// isFork: carried when present, either value; undefined when absent.
 	const metaDir = path.join(root, "meta");

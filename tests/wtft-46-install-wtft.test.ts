@@ -754,6 +754,52 @@ console.log("\n9. Config migration off princess-pi-tools and onto wtft (#156)");
 			try { fs.chmodSync(oldDir, 0o755); } catch { /* already restored or gone */ }
 		}
 	}
+
+	// V9g — neither $HOME nor $XDG_CONFIG_HOME set, but --dir given explicitly:
+	// the HOME-unset usage refusal only fires when --dir is OMITTED (DEST_DIR
+	// then falls back to $HOME/bin), so this combination reaches config_home()
+	// with nothing to resolve. configMigration must be [], not a partial or
+	// malformed array a caller might index into (PR review, round 3).
+	{
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-nohome-"));
+		let code = -1, out = "";
+		try {
+			out = execFileSync(INSTALLER, ["--json", "--dir", dir], {
+				encoding: "utf8", stdio: "pipe",
+				env: { PATH: [BUN_DIR, "/usr/bin", "/bin"].join(":") },   // no HOME, no XDG_CONFIG_HOME
+			});
+			code = 0;
+		} catch (e: any) { code = e?.status ?? -1; out = e?.stdout ?? ""; }
+		check(code === 0, "V9g: install still succeeds with no HOME/XDG_CONFIG_HOME and an explicit --dir", `got ${code}`);
+		let doc: any = null;
+		try { doc = JSON.parse(out); } catch { /* left null */ }
+		check(Array.isArray(doc?.configMigration) && doc.configMigration.length === 0,
+			"V9g: configMigration is [], not a partial or default-filled array", JSON.stringify(doc?.configMigration));
+	}
+
+	// V9h — a coexisting PATH shadow is still reported when config-left wins
+	// the exit code, the same way `drift` already reports a coexisting shadow
+	// (PR review, round 3: this was silently dropped for config-left).
+	{
+		const fakeHome = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-shadow-"));
+		seedLegacy(fakeHome, { "wtft.json": JSON.stringify({ interval: "1h" }) });
+		const newDir = path.join(fakeHome, ".config", "wtft");
+		fs.mkdirSync(newDir, { recursive: true });
+		fs.writeFileSync(path.join(newDir, "config.json"), JSON.stringify({ interval: "2h" })); // a REAL conflict
+
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-shadow-dir-"));
+		const decoyDir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-shadow-decoy-"));
+		fs.writeFileSync(path.join(decoyDir, "wtft"), "#!/bin/sh\necho decoy\n");
+		fs.chmodSync(path.join(decoyDir, "wtft"), 0o755);
+
+		const { code, out, err } = run(["--dir", dir], [decoyDir], {
+			HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+		});
+		check(code === 4, "V9h: config-left still wins the exit code over a coexisting shadow", `got ${code}`);
+		check(/Also: PATH resolves wtft to/.test(err) && err.includes(path.join(decoyDir, "wtft")),
+			"V9h: the human report ALSO names the coexisting shadow, not just config-left",
+			`${out}${err}`.slice(0, 400));
+	}
 }
 
 console.log(`\n${passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ""}`);

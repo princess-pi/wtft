@@ -38,6 +38,19 @@
  *   import in that file) — it reaches config only through
  *   `loadUserPricing()`/`loadExternalHarnesses()`, both fixed here via their
  *   own resolvers, so it needed no direct change for #156.
+ *
+ *   ANOTHER KNOWN LIMITATION (PR review, round 3): the migration itself lives
+ *   entirely in `bin/install-wtft`, reachable only by cloning this repo and
+ *   running that script. `package.json`'s `pi.extensions` field is a SECOND,
+ *   independent consumption path — the Pi harness loading `pi/wtft.js` /
+ *   `pi/token-budget.js` directly as an installed package, with no
+ *   `bin/install-wtft` run at all. A user on that second path who never runs
+ *   `bin/install-wtft` would see their pre-#156 settings silently vanish (no
+ *   fallback read, by design) with no diagnostic anywhere in that path. Not
+ *   fixed here: today this repo has no OTHER documented install route — the
+ *   README's entire "Install" section is the clone-plus-`bin/install-wtft`
+ *   path, and `pi.extensions` is unused until wtft actually publishes (#29,
+ *   "Not on npm yet"). Revisit this note when #29 lands.
  */
 
 /** Passed as `dirName` to every `@princess-pi/libs/config` call in this repo. */

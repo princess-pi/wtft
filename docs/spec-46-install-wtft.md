@@ -168,9 +168,16 @@ now falls through the same evaluation as every other exit.
   `no-dir` and `build-failed`** (#156) — it is computed independently of `DEST_DIR`/the
   build, from `$XDG_CONFIG_HOME`/`$HOME` alone. It carries exactly four records, one per
   legacy file (`wtft.json`, `token-budget.json`, `wtft-pricing.json`,
-  `wtft-harnesses.json`), in that order. `status: "config-left"` (exit `4`) is reported
-  only when every artifact is otherwise `ok` — see "Config migration (#156)" above for
-  the full contract.
+  `wtft-harnesses.json`), in that order — **except when NEITHER `$XDG_CONFIG_HOME` NOR
+  `$HOME` is set**, where it is `[]`: with no directory to resolve, there is nothing to
+  name a record for. That combination bypasses the earlier `HOME is unset` usage refusal
+  when `--dir` is given explicitly (that check only fires when `--dir` is omitted and
+  `DEST_DIR` falls back to `$HOME/bin`), so `HOME= XDG_CONFIG_HOME= install-wtft --dir
+  <dir>` is a real, reachable way to see the empty array (#156 review, round 3) — a
+  minimal or sandboxed environment with an explicit `--dir` and neither variable set. A
+  caller that indexes `configMigration[0..3]` unconditionally should check `.length`
+  first. `status: "config-left"` (exit `4`) is reported only when every artifact is
+  otherwise `ok` — see "Config migration (#156)" above for the full contract.
 
 Flat, one record per artifact, stable keys. `status` is the single field a caller reads
 to branch; `artifacts[].state` says which file to blame, and the same list is rendered

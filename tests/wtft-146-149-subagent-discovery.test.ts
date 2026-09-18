@@ -229,6 +229,19 @@ console.log("\n§ 148 — unbounded depth, symlink cycle\n");
 	check((cycRun.doc?.subagents ?? []).length === 1, `a 'loop -> .' symlink lists the child once (${(cycRun.doc?.subagents ?? []).length} rows)`);
 	check(cycRun.doc?.uncounted?.compaction === 1, `…and its one compaction counts once (${cycRun.doc?.uncounted?.compaction})`);
 
+	// A symlinked DIRECTORY is not traversed: `seen` bounds a cycle but not an
+	// acyclic foreign tree, so `subagents/all -> /` would walk the filesystem.
+	const esc = claudeSession("symlink-escape");
+	const inside = path.join(esc.subDir, "agent-in.jsonl");
+	fs.writeFileSync(inside, turn("msg_in"));
+	const outside = path.join(root, "outside-tree");
+	fs.mkdirSync(outside, { recursive: true });
+	fs.writeFileSync(path.join(outside, "agent-out.jsonl"), turn("msg_out"));
+	fs.symlinkSync(outside, path.join(esc.subDir, "all"));
+	const escFound = discoverSubagentSessionFiles(esc.sessionPath);
+	check(escFound.files.length === 1 && escFound.files[0] === inside && escFound.unreadable === null,
+		`a symlinked directory is not walked (${escFound.files.length} files)`, JSON.stringify(escFound.files));
+
 	// Both halves dedup by real path, not by the string they happened to
 	// build: a Pi sibling symlinked to an already-walked Claude child is one
 	// transcript, and listing it twice would double-count its cost.

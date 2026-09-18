@@ -1472,8 +1472,18 @@ function walkSubagentDir(
 	seen.add(realDir);
 	let frameErr: Error | null = null;
 	try {
-		for (const f of fs.readdirSync(dir)) {
+		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+			const f = entry.name;
 			const fullPath = path.join(dir, f);
+			// A SYMLINKED directory is never recursed into. `seen` bounds a
+			// cycle but not an acyclic foreign tree, so `subagents/all -> /`
+			// would walk the filesystem. A symlinked FILE still counts: a
+			// symlink to a transcript is a transcript.
+			if (entry.isSymbolicLink()) {
+				let target: fs.Stats;
+				try { target = fs.statSync(fullPath); } catch { continue; }
+				if (target.isDirectory()) continue;
+			}
 			let stat: fs.Stats;
 			try {
 				stat = fs.statSync(fullPath);
@@ -1505,16 +1515,10 @@ function walkSubagentDir(
 				// its agent-*.jsonl.wtft-tag.v*.jsonl files would match the
 				// file filter and double-count.
 				if (f !== "wtft-tags") {
-					// #457 (round 5) — the recursion sits OUTSIDE the per-entry
-					// stat try: a nested unreadable directory's readdir throw
-					// must reach the outer catch below (and the caller's
-					// pollHadFailure), not be swallowed as a stat failure.
-					// Round 4's dir-level warning only ever fired for TOP-LEVEL
-					// unreadable dirs for exactly this reason, yet the nested
-					// layout (agent-<hash>/subagents/, workflows/wf_<runId>/)
-					// is this walk's own documented norm. Round 7 — a nested
-					// frame's REPORTED per-entry failure (not a throw) rides
-					// up through the return value.
+					// The recursion sits OUTSIDE the per-entry stat try: a
+					// nested unreadable directory's readdir throw must reach
+					// the outer catch below, not be swallowed as a stat
+					// failure.
 					const childErr = walkSubagentDir(fullPath, files, seen);
 					if (childErr && !frameErr) frameErr = childErr;
 				}

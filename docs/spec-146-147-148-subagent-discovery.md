@@ -43,12 +43,17 @@ paths, shared by both discovery halves: each directory is visited once, and a tr
 reachable by two paths — a symlink cycle, a Pi sibling symlinked to a walked Claude child — is
 listed once and counted once.
 
+A symlinked DIRECTORY is never traversed. The `seen` set bounds a cycle, not an acyclic
+foreign tree, so `subagents/all -> /` would walk the filesystem synchronously before discovery
+returned. A symlinked FILE still counts: a symlink to a transcript is a transcript.
+
 A directory named `*.jsonl`, or a symlink to one, holds no transcript. `isDirectory()` is false
 for the symlink, so both halves skip on the read's EISDIR instead: reporting it would brand the
 session unreadable and make the daemon withhold its swept marker on every poll from then on.
 
 **Closer:** a transcript nested eight levels deep is listed and the report stays settled; a
-`loop -> .` symlink lists its child once; a sibling symlinked to a walked child is listed once.
+`loop -> .` symlink lists its child once; a sibling symlinked to a walked child is listed once;
+a transcript reachable only through a symlinked directory is not listed.
 
 ## One walk per read
 

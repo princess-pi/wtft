@@ -1155,11 +1155,9 @@ async function main() {
 			// nobody had opened: "read it, found nothing" claimed by a run that
 			// never looked. That is the exact failure this field exists to end.
 			spawned: sessionSpawnTree(),
-			// #137 — name the subagents from the `.meta.json` the harness already
-			// writes beside each transcript. `collectSubagentJson` returns
-			// `undefined` wherever the answer would be incomplete, and the key is
-			// then OMITTED rather than emitted empty: an empty array must mean
-			// "looked, found none", never "nobody looked".
+			// The key is OMITTED rather than emitted empty wherever the answer
+			// would be incomplete: an empty array must mean "looked, found
+			// none", never "nobody looked".
 			...(subagentJson?.rows ? { subagents: subagentJson.rows } : {}),
 			notices: [...(opt.notices ?? []), ...(subagentJson?.notices ?? [])],
 		});

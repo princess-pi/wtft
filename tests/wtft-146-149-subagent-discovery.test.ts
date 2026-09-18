@@ -163,6 +163,9 @@ console.log("\n§ 147 — discovery reads line 1, not the whole transcript\n");
 	const spawned = path.join(projectDir, "spawned.jsonl");
 	fs.writeFileSync(spawned, JSON.stringify({ type: "assistant", timestamp: stamp }) + "\n");
 	fs.mkdirSync(path.join(projectDir, "not-a-transcript.jsonl"));
+	// A SYMLINK to a directory is not `isDirectory()`, so only its EISDIR says
+	// what it is.
+	fs.symlinkSync(path.join(projectDir, "not-a-transcript.jsonl"), path.join(projectDir, "linked-dir.jsonl"));
 
 	const driver = path.join(root, "claude-p-driver.mjs");
 	fs.writeFileSync(driver, `import { discoverClaudeSubAgentSessionFiles } from ${JSON.stringify(CLI_BIN)};\n`
@@ -237,6 +240,10 @@ console.log("\n§ 148 — unbounded depth, symlink cycle\n");
 	const walked = path.join(dualSub, "agent-eeee.jsonl");
 	fs.writeFileSync(walked, JSON.stringify({ type: "session", id: "dual-child", parentSession: "dual-main" }) + "\n" + turn("msg_dual"));
 	fs.symlinkSync(walked, path.join(dualDir, "sibling.jsonl"));
+	// Same in the Pi half: a sibling that is a symlink to a directory holds no
+	// cost and must not report the session unreadable.
+	fs.mkdirSync(path.join(dualDir, "a-directory"));
+	fs.symlinkSync(path.join(dualDir, "a-directory"), path.join(dualDir, "linked-dir.jsonl"));
 	const dualFound = discoverSubagentSessionFiles(dualSession);
 	check(dualFound.files.length === 1 && dualFound.files[0] === walked && dualFound.unreadable === null,
 		`a Pi sibling symlinked to a walked Claude child is listed once (${dualFound.files.length} files)`, JSON.stringify(dualFound.files));

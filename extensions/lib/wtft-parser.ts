@@ -1210,8 +1210,9 @@ export interface SubagentMeta {
  *
  *  WHY IT NEVER THROWS, AND NEVER PARTIALLY SUCCEEDS. This is UNDOCUMENTED
  *  harness output. It may vanish, gain fields or be renamed in any release, so
- *  every failure — absent, unreadable, unparseable, wrong shape — returns `null`
- *  and the caller renders exactly what it rendered before #137. A meta missing
+ *  every failure — absent, unreadable, unparseable, wrong shape — returns
+ *  `null` here; a caller that must tell an unreadable meta from an absent one
+ *  calls {@link readSubagentMetaChecked} instead. A meta missing
  *  one required field is `null` rather than a half-filled record, because a
  *  report row labelled from a partial record is worse than one labelled from a
  *  hash: it looks authoritative.
@@ -1226,7 +1227,9 @@ export function readSubagentMeta(transcriptPath: string): SubagentMeta | null {
 }
 
 /** {@link readSubagentMeta}, plus the error when the meta exists but could
- *  not be read. `error` is null for an absent meta (ENOENT, ENOTDIR). */
+ *  not be read. `error` is null for an absent meta (ENOENT, ENOTDIR) and for
+ *  one that reads but does not parse — only a read failure is observable as a
+ *  failure. */
 export function readSubagentMetaChecked(transcriptPath: string): { meta: SubagentMeta | null; error: Error | null; metaPath: string | null } {
 	if (!transcriptPath.endsWith(".jsonl")) return { meta: null, error: null, metaPath: null };
 	const metaPath = transcriptPath.slice(0, -".jsonl".length) + ".meta.json";
@@ -1419,6 +1422,9 @@ export function discoverSubagentSessionFiles(
 						files.push(fullPath);
 					}
 				} catch (err) {
+					// A symlink to a directory is not `isDirectory()`; EISDIR is
+					// how it announces itself, and it holds no cost either way.
+					if ((err as NodeJS.ErrnoException).code === "EISDIR") continue;
 					warnUnreadableTranscript(fullPath, "at discovery", err);
 					if (!firstUnreadable) {
 						firstUnreadable = new Error(
@@ -1800,6 +1806,8 @@ export function discoverClaudeSubAgentSessionFiles(
 			if (!f.endsWith('.jsonl')) continue;
 			// A directory named `*.jsonl` holds no transcript, and reading one
 			// throws EISDIR, which would latch this session unreadable forever.
+			// `isDirectory()` is false for a SYMLINK to one, so the errno is
+			// what decides — see the EISDIR arm in the catch below.
 			if (entry.isDirectory()) continue;
 			const fullPath = path.join(projectDir, f);
 			try {
@@ -1821,6 +1829,7 @@ export function discoverClaudeSubAgentSessionFiles(
 					files.push(fullPath);
 				}
 			} catch (err) {
+				if ((err as NodeJS.ErrnoException).code === "EISDIR") continue;
 				// #457 (round 4, M2) — the discovery read is a read, and an
 				// unreadable candidate must not be silently skipped. That is
 				// the COMMON case for the unreadable-transcript scenario (a

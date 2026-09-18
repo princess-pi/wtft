@@ -516,10 +516,12 @@ try {
 	const litKeys = [...litBlock![1].matchAll(/^\t\t(?:\.\.\.\(input\.(\w+)|(\w+):)/gm)]
 		.map((m) => m[1] ?? m[2]);
 
-	// 3. The canonical example under the `wtft/session@3` heading.
+	// 3. The canonical example under the `wtft/session@4` heading (#89/#119
+	//    bumped it from @3 — this anchor tracks the CURRENT schema string,
+	//    not a fact worth pinning on its own).
 	const fences = [...specSrc.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => m[1]);
-	const example = fences.find((f) => f.includes(`"schema": "${"wtft/session@3"}"`));
-	assert.ok(example, "docs/spec-26-json.md has no ```json example carrying the @3 schema string");
+	const example = fences.find((f) => f.includes(`"schema": "${"wtft/session@4"}"`));
+	assert.ok(example, "docs/spec-26-json.md has no ```json example carrying the @4 schema string");
 	const exampleKeys = [...example!.matchAll(/^ {2}"(\w+)":/gm)].map((m) => m[1]);
 
 	assert.ok(litKeys.length > 5, `parsed only ${litKeys.length} keys from the literal — the regex has drifted`);

@@ -16,7 +16,7 @@ those touched, the seam is in the wrong place; file an issue rather than widenin
 interface HarnessDiscovery {
   readonly id: string;     // must equal the directory name
   readonly label: string;  // selector column, e.g. "Codex"
-  discover(targetCwd: string | null): SessionCandidate[];
+  discover(targetCwd: string | null, scopeOpts?: DiscoverScopeOptions): SessionCandidate[];
   resolveSessionById(sessionId: string): string | null;
 }
 ```
@@ -25,9 +25,54 @@ interface HarnessDiscovery {
 means for your harness — Claude Code falls back to `process.cwd()`, Pi treats it as "no
 filter". Both are policies, and both live inside their own discovery module.
 
-If your harness records a `cwd` on its transcript entries, apply the **union rule**:
-include a transcript when its project-dir slug matches the target **or** its own recorded
-last-cwd does. `resolveLastCwd()` from `harness/session-cwd.ts` does the tail scan and
+`scopeOpts` is the scoped-picker seam (#89). **Omitted** means the PRE-#89 default —
+whatever `discover` already did with just `targetCwd` — and every harness must keep that
+behaviour exactly, since `discoverSessions()`'s own callers (tests, and any other tool
+consuming this module) still get it that way. When it IS supplied, `scopeOpts.scope` is
+one of `"worktree"` (folder match on `targetCwd` alone, no union arm), `"worktrees"`
+(fan-out + the union arm, bounded by `scopeOpts.windowMs`), `"all"` (ignore `targetCwd`
+entirely), or `"branch"` (the checkout of `targetCwd`'s current git branch — see
+`harness/worktrees.ts`'s `resolveBranchCheckout`). `scopeOpts.windowMs` (`number | null`)
+bounds every scope uniformly: skip a transcript whose mtime falls outside it, checked with
+one `fs.statSync` before any read the union arm would otherwise pay for. **`"branch"`'s
+fallback is a documented no-op at the DISCOVERY level, never a silent wrong scope:**
+`resolveBranchCheckout` returning `null` (no git, not a repo, detached HEAD, or no checkout
+reports that branch) means `discoverScoped` folder-matches the bare `targetCwd` instead —
+the exact same population `"worktree"` scope would return. The interactive picker's
+`session-selector.ts` also corrects its displayed scope LABEL back to "worktree" in that
+case — see `docs/spec-89-scoped-picker.md`'s note on this — so a caller of THIS function
+directly (not through the picker) gets the right candidates either way, but only the
+picker itself also gets a label that matches them.
+
+Both built-in harnesses split into a `discoverLegacy` function (unchanged from before #89)
+plus a new `discoverScoped` function, selected by whether `scopeOpts` was passed — but they
+are NOT otherwise identical: Pi's legacy default never fans out across worktrees (see the
+`null`-target bullet below), Pi compares exactly after unwrapping for the single-directory
+scopes and by *containment* (`slug.includes(variant)`) for `"worktrees"`, where Claude Code
+always uses exact Set membership, and only Claude Code's directory walk calls
+`countDirRead()` (`session-cwd.ts`'s `getDirWalkCount()` counts Claude Code's tree walk
+only — Pi's `collect()` does not call it). A harness with no interest in the new scopes
+should still honour `scope: "worktree"`: every bare picker launch passes
+`{ scope: "worktree", windowMs: 20 min }`, so a harness that ignores it lists its whole
+corpus in the default view. **`windowMs` is enforced
+defensively, `scope`/folder-matching is not (pr-review round 2, Medium).**
+`discoverSessions()` in `session-selector.ts` — the ONE place every
+`discover()` call is funneled through — post-filters every candidate against
+`scopeOpts.windowMs` itself, so an out-of-tree harness that ignores the
+option cannot inflate the no-TTY "exactly one candidate" check past what the
+active time window actually allows, and the picker's "window: …" header stays
+true regardless of that harness's own cooperation. There is no equivalent
+backstop for `scope` itself — a harness that returns its full UNSCOPED list
+under `"worktree"`/`"branch"` still shows sessions from outside the target
+directory, since folder-matching has no single generic rule
+`discoverSessions()` could apply on a harness's behalf. Honour `scopeOpts`
+when you can; if you cannot yet, say so in your harness's own `discover`
+docstring rather than leaving it to be discovered as a bug.
+
+If your harness records a `cwd` on its transcript entries, apply the **union rule** under
+the `"worktrees"` scope and the unscoped default (never under `"worktree"`, `"branch"` or
+`"all"`): include a transcript when its project-dir slug matches the target **or** its own
+recorded last-cwd does. `resolveLastCwd()` from `harness/session-cwd.ts` does the tail scan and
 memoises it. Union, not replacement — a last-cwd-only rule silently drops sessions whose
 directory slug is a parent of their cwd.
 
@@ -44,21 +89,39 @@ measured against, and the reason none of them may be written as a replacement.
 > physical arm misses, re-derive it from the transcript and say so on #89; the records are
 > still there, nothing reads them.
 
-- **Match the slug, do not compute it.** `slugMatchesCwd(slug, cwd)` accepts *either* known
+- **Match the slug, do not compute it.** `cwdSlugVariants(cwd)` returns *every* known
   encoding, because what a harness munges beyond `/` is usually only partly evidenced —
   Claude Code turns `.` into `-` as well, which is how `.claude/worktrees` paths went
-  missing. If you need a single canonical string for *display*, that is `cwdToSlug()`; for
-  *matching*, always the matcher. Pinning one encoding trades a known silent miss for an
-  unknown one.
+  missing. Match against ALL of them, not one. `slugMatchesCwd(slug, cwd)` is a ready-made
+  exact-equality wrapper over `cwdSlugVariants` for a harness whose own directory name
+  equals the encoded cwd outright — write your own membership test with `cwdSlugVariants`
+  directly when your harness's naming isn't exact equality (neither built-in calls
+  `slugMatchesCwd` itself: Claude Code builds a `Set` of variants and checks membership,
+  Pi unwraps its `--<slug>--` directory name and compares exactly for the single-directory
+  scopes, and checks *containment* — `slug.includes(variant)` — under `"worktrees"`). If you need a single canonical string for
+  *display*, that is `cwdToSlug()`. Pinning one encoding for matching trades a known
+  silent miss for an unknown one.
 - **"Here" may mean a whole repo.** `fanOutCwd(target)` returns every checkout of the
   target's git repo, so a session recorded in a sibling worktree is still found. It returns
   the target alone when there is no `.git` ancestor, which is what stops `~` from meaning
   the entire machine. Whether this fits your harness is a policy call, exactly like the
-  `null`-target question above: Claude Code fans out, Pi does not.
+  `null`-target question above: Claude Code fans out on its unscoped default and under
+  `"worktrees"`; Pi fans out only under `"worktrees"`.
+
+- **Call `countDirRead()` from your own directory walk, if you have one.** It is
+  `session-cwd.ts`'s test-seam counter (`getDirWalkCount()`) for how many directories a
+  discovery pass reads — Claude Code's `collect()` calls it once per directory visited;
+  Pi's own `collect()` does not, so the counter is Claude-Code-only today, not
+  cross-harness. Not required, but a harness that skips it makes its own directory-walk
+  cost invisible to that instrument.
 
 None of this is required to ship a harness. A harness whose transcripts carry no `cwd`
 resolves to `null` from `resolveLastCwd`, contributes nothing to any of these arms, and is
-correct — that is Pi's situation, deliberately.
+correct — that is Pi's situation when its transcript is large enough that `resolveLastCwd`'s
+widening tail read never reaches the `session_start` entry (over roughly 512&nbsp;KB, the
+last `TAIL_WINDOWS` step); a Pi transcript **under** that size gets its whole file read by
+the same widening loop and DOES resolve its recorded `cwd` — deliberate, not a design gap,
+since the union arm is a bonus find either way, but not literally "always null".
 
 `resolveSessionById` is what lets a running daemon follow a session whose transcript moved
 (#155). Return the newest match when an id appears more than once.

@@ -6,19 +6,35 @@
  *   corpus (#35).
  *
  *   `bin/wtft.ts` called `discoverSessions()` unconditionally, before it looked
- *   at `-s`. Its result is read in exactly two branches — the fuzzy-substring
- *   fallback and the auto-select menu — and neither is reachable once `-s`
- *   resolves to an existing file or a pending path. So the scan was paid for and
+ *   at `-s`. Its (legacy, unscoped) result is read in exactly one branch today
+ *   — the fuzzy-substring fallback — which is never reached once `-s` resolves
+ *   to an existing file or a pending path. (Before #89 the same call also fed
+ *   the no-`-s` auto-select menu; that branch now calls a separately-scoped,
+ *   separately-memoised discovery instead — see `getDefaultScoped` in
+ *   `bin/wtft.ts` — so it no longer shares this guard's cost story, and this
+ *   suite is only ever about the `-s` path.) So the scan was paid for and
  *   thrown away.
  *
- *   It is not a cheap scan. Discovery asks each transcript where it lives, and a
- *   transcript whose recorded `cwd` no longer exists falls through to
- *   `resolveCwdHistory`, a documented WHOLE-FILE read. That fallback was budgeted
- *   for "3 transcripts in 40"; the workflow deletes a worktree after every merge
- *   (`pr-cleanup`), which strands every session that lived there permanently, so
- *   the measured hit rate on the development host is 34 in 40 — 2,622 of 3,073
- *   transcripts, 760 MB re-read on every invocation, 3,215-4,528 ms against 86 ms
- *   with an empty corpus. It degrades monotonically with every branch merged.
+ *   It is not a cheap scan. Discovery asks each transcript where it lives —
+ *   at the time this guard was written, a transcript whose recorded `cwd` no
+ *   longer existed fell through to `resolveCwdHistory`, a documented
+ *   WHOLE-FILE read budgeted for "3 transcripts in 40"; the workflow deletes
+ *   a worktree after every merge (`pr-cleanup`), which strands every session
+ *   that lived there permanently, so the measured hit rate on the
+ *   development host was 34 in 40 — 2,622 of 3,073 transcripts, 760 MB
+ *   re-read on every invocation, 3,215-4,528 ms against 86 ms with an empty
+ *   corpus. It degraded monotonically with every branch merged.
+ *
+ *   `resolveCwdHistory` (and `pickLiveCwd`, `pathExists`) NO LONGER EXIST —
+ *   #89 deleted that arm (corrected pr-review round 3: an earlier draft of
+ *   this docstring still named it as live). The fixture below (a 6,000-file
+ *   stranded corpus) still exercises the guard this suite is actually
+ *   about — that an existing-file `-s` short-circuits BEFORE any discovery
+ *   call at all, so the corpus size cannot matter — the historical numbers
+ *   above explain why that guard was worth writing, not what today's code
+ *   still does when discovery does run (that cost is the bounded tail-read
+ *   arm `extensions/lib/harness/session-cwd.ts` documents, not a whole-file
+ *   fallback).
  *
  *   WHY THIS ONE IS TIMED, WHEN THE HOUSE RULE IS TO WAIT ON STATE. Cost IS the
  *   behaviour under test: "did not read the corpus" has no other user-visible
@@ -28,8 +44,9 @@
  *   corpus of unparseable transcripts renders identically. So the assertion is a
  *   RATIO against the same command in the same run with an empty corpus, never a
  *   wall-clock threshold: a threshold would encode "fast enough on this box
- *   today", while the ratio cancels box speed, load, and cold cache. Calibrated
- *   here: empty 87-100 ms, stranded 480-508 ms — 5.2x. The gate is 2x.
+ *   today", while the ratio cancels box speed, load, and cold cache. The gate is
+ *   2x; since an explicit existing path skips discovery entirely, the expected
+ *   ratio is about 1x.
  *
  *   Part 2 is the guard against fixing this by deleting the feature: on the fuzzy
  *   path discovery MUST still run, and its count must still reach the user.
@@ -162,7 +179,7 @@ console.log("0. Warm the session (daemon up, tag classified)");
 console.log("\n1. Explicit -s costs the same with or without a corpus");
 {
 	// Stranded = the state `pr-cleanup` leaves behind: a recorded cwd whose
-	// directory is gone, which is what sends discovery down the whole-file read.
+	// directory is gone, which costs discovery a tail scan per transcript.
 	const bigClaude = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-35-big-c-")));
 	const proj = path.join(bigClaude, "-home-gone-worktree");
 	fs.mkdirSync(proj, { recursive: true });
@@ -216,7 +233,10 @@ console.log("\n2. Fuzzy -s still scans the corpus");
 	const { out, code } = run(`-s zzz-matches-nothing -l 5 --no-emoji`, corpus(fuzzyClaude, emptyPi));
 	const clean = stripAnsi(out).trim();
 
-	assert("a substring matching nothing is still an error", code === 1, `exit ${code}: ${clean}`);
+	// #89, E3: with no interactive terminal (exactly what `execSync` gives this
+	// suite) a substring matching nothing is EXIT_SESSION_AMBIGUOUS (10), not
+	// the old plain exit 1 — a deliberate contract change, not a regression.
+	assert("a substring matching nothing is still an error", code === 10, `exit ${code}: ${clean}`);
 	assert("and it reports the discovered count (discovery ran)", /\(2 available\)/.test(clean), clean);
 
 	try { fs.rmSync(fuzzyClaude, { recursive: true, force: true }); } catch {}

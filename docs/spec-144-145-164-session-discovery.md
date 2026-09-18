@@ -403,7 +403,7 @@ it guards is "this module has exactly one read call", which no exported interfac
 - **V10** — display renders under the **physical** slug, the directory the session started in.
   The "prefer the most recent still-existing directory" rewrite went with the whole-file read that
   produced it.
-- **V11 (cost, per #164 — restated per #477, then REPLACED per #39)** — five assertions on a
+- **V11 (cost, per #164 — restated per #477, then REPLACED per #39)** — assertions on a
   corpus the TEST builds, not the live `~/.claude/projects` tree, and every one of them an exact
   integer rather than a duration:
 
@@ -416,12 +416,11 @@ it guards is "this module has exactly one read call", which no exported interfac
     the same: the same derived budget, and no more reads than the live arm. Before #89 this corpus
     cost the full 60 x 256 KB.
   - **V11f** — *the contract's own fixture.* 200 transcripts, 150 stranded, built to the closer's
-    shape. It asserts what holds — the live half resolves, and the whole pass reads tails — and
-    **declares the clause it cannot satisfy as a `skip()`** rather than asserting its negation:
-    reads are bounded by the corpus, not by the candidate count. An earlier cut asserted
-    `strandedTail >= SESSIONS`, which would have made a future success BREAK the suite. The skip
-    is counted and listed by `tests/run.ts` on every run, so the gap is visible rather than
-    living in a comment.
+    shape. It asserts what holds on the unscoped path — the live half resolves, and the whole pass
+    reads tails. That path's reads still scale with the corpus.
+  - **V11g** — *the closer on the picker's path.* The same 200/150 shape filed under real slugs;
+    the picker's default scope (`"worktree"`, folder-name match) finds the 50 live sessions with
+    reads bounded by the candidate count — zero tail reads (#89).
   - **V11c** — a second discovery re-reads nothing and re-scans nothing. This replaces
     `warm <= cold + 50`, which **could not fail**: a broken memo inflated `warm` *and* the bound
     it was compared against.
@@ -685,8 +684,8 @@ one set lookup. The relocation records are still IN the transcripts; nothing rea
 
 14,441 reads over 7,287 transcripts is **~1.9 reads and ~41 KB each** — the tail windows widen far
 more often than `TAIL_WINDOWS`'s original "8 KB resolves every transcript here" assumed, and a
-transcript with no `cwd` at all (every Pi one) widens through all three and then reads whole, which
-is #112. Both figures are now in that module's header, where a reader meets them.
+transcript with no `cwd` in its last ~512 KB widens through all three and resolves null (a Pi
+transcript smaller than that is read whole and resolves its `session_start` cwd), which is #112. Both figures are now in that module's header, where a reader meets them.
 
 **Where that cost actually sits, which matters for the index that has to remove it**
 (`bun debug/count-picker.ts <cwd> --per-harness`, from `~/git-projects/wtft`):
@@ -742,6 +741,11 @@ the recorded size. That is the issue BODY's direction **A**, and "I" in its 2026
 the two letter schemes are not the same and this amendment uses both names deliberately, because
 the issue does. The decision on record is to build it only if the experience is still slow after
 this deletion. It is. **#89 stays open**; this branch does not close it.
+
+**Resolved by #89's decision (2026-09-18): no on-disk index.** The picker opens on a
+folder-name scope instead, which meets both criteria (V11g; `debug/count-picker.ts` prints the
+`picker` path with 0 reads; one run on this host took 10 ms). The unscoped path above is unchanged and is
+what `-s` still searches.
 
 **The one shape given up.** A session filed under a project slug that is not a checkout of the
 target, reachable only through its relocation history, is no longer listed. Zero such sessions

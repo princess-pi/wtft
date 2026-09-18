@@ -23,17 +23,23 @@
  *   on `notices[].code`.
  */
 
-import { computeSessionSummary, type ModelTotals, type CategoryTotals, type TokenTotals } from "./wtft-renderer.js";
+import { computeSessionSummary, type ModelTotals, type CategoryTotals, type TokenTotals, type SessionTotal } from "./wtft-renderer.js";
 import { treeTotals, type SpawnTree } from "./wtft-spawn-tree.js";
 import type { Interaction } from "./wtft-shared.js";
 import type { UncountedBillables, SubagentMeta } from "./wtft-parser.ts";
 import type { TagProvisional } from "./wtft-daemon-lib.js";
 
-/** Bumped when a top-level key is ADDED or changes shape. Prose never bumps it.
+/** Bumped when a key is ADDED — top-level OR nested — or changes shape.
+ *  Prose never bumps it. (Corrected, pr-review round 3: an earlier draft of
+ *  this docstring said "top-level key", then immediately justified `@4` by a
+ *  NESTED addition — the stated rule and the stated reason for the very bump
+ *  it introduces disagreed. `@4` (#89, #119) adds `total.untaggedCostUsd`,
+ *  one level down from `total`; Amendment 1's "adding keys is the documented
+ *  bump condition" applies at any depth, per Duppy, 2026-09-18, answer Y.)
  *
  *  A consumer pins this string to know which keys it may rely on; the per-key
  *  contract is docs/spec-26-json.md. */
-export const WTFT_JSON_SCHEMA = "wtft/session@3";
+export const WTFT_JSON_SCHEMA = "wtft/session@4";
 
 /**
  * A human-facing sentence that would otherwise have gone to stdout.
@@ -44,7 +50,10 @@ export const WTFT_JSON_SCHEMA = "wtft/session@3";
  * correlating two streams.
  */
 export interface WtftNotice {
-	code: "pending-session" | "no-data" | "unpriced-model" | "provisional" | "auto-selected-session";
+	// "auto-selected-session" was retired in `@4` (#89, Amendment 3): with no
+	// interactive terminal, wtft no longer auto-picks the newest session — see
+	// EXIT_SESSION_AMBIGUOUS in bin/wtft.ts.
+	code: "pending-session" | "no-data" | "unpriced-model" | "provisional";
 	text: string;
 }
 
@@ -63,8 +72,11 @@ export interface WtftSessionJson {
 	schema: typeof WTFT_JSON_SCHEMA;
 	session: WtftSessionIdentity;
 	provisional: TagProvisional;
-	/** SELF: this session's own turns. Unchanged by #116. */
-	total: TokenTotals;
+	/** SELF: this session's own turns. Unchanged by #116. Carries
+	 *  `untaggedCostUsd` beside `costUsd` since `@4` (#119) — see
+	 *  `SessionTotal`'s own docstring in wtft-renderer.ts for why this is a
+	 *  distinct type from the `TokenTotals` every other total field reuses. */
+	total: SessionTotal;
 	models: ModelTotals[];
 	categories: CategoryTotals[];
 	uncounted: UncountedBillables;
@@ -72,7 +84,9 @@ export interface WtftSessionJson {
 	 *  ledger, each edge's provenance, and every gap the walk could not close. */
 	spawned: SpawnTree;
 	/** SELF + RESOLVED descendants, as a field — so a consumer never adds two
-	 *  numbers and has to work out for itself whether it double-counted.
+	 *  numbers and has to work out for itself whether it double-counted. Over
+	 *  the six token and cost fields only: `untaggedCostUsd` is not carried,
+	 *  for self or for descendants.
 	 *
 	 *  A FLOOR whenever anything went uncounted, and there are FOUR conditions,
 	 *  not one: `spawned.unattributed` is non-empty, `spawned.depthCapped` is
@@ -134,7 +148,7 @@ export interface BuildSessionJsonInput {
 	notices?: WtftNotice[];
 }
 
-/** Build the `wtft/session@3` document. Pure: no I/O, no clock, no process state. */
+/** Build the `wtft/session@4` document. Pure: no I/O, no clock, no process state. */
 export function buildSessionJson(input: BuildSessionJsonInput): WtftSessionJson {
 	const summary = computeSessionSummary(input.interactions);
 	return {

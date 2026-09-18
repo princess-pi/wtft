@@ -748,7 +748,7 @@ let selfCostWithRecord = 0;
 		&& doc.spawned.ledgerError === null && doc.spawned.malformedLedgerLines === 0
 		&& doc.spawned.depthCapped === 0 && Array.isArray(doc.spawned.unattributed),
 		"D13c every field of the tree contract is present, not just the ones with news in them");
-	check(doc.schema === "wtft/session@3",
+	check(doc.schema === "wtft/session@4",
 		"D13d the document that gained `spawned` and `tree` says so in its schema");
 	const keys = Object.keys(doc);
 	check(keys.indexOf("spawned") === keys.indexOf("uncounted") + 1 && keys.indexOf("tree") === keys.indexOf("spawned") + 1,

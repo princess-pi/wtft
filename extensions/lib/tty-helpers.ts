@@ -3,11 +3,18 @@
  * @module tty-helpers
  * @description Shared TTY terminal helpers extracted from session-selector and wtft-shared (#58 DRY).
  *
- * Four patterns were duplicated across selector and watch mode:
+ * Five patterns were duplicated across selector and watch mode (the fifth
+ * added since; "four" was the original count and is a stale claim once
+ * {@link showCursor}/{@link hideCursor} are counted):
  *   1. Raw stdin init (resume → setEncoding → setRawMode → listen)
  *   2. Raw stdin cleanup (removeListener → setRawMode(false) → pause)
  *   3. In-place overwrite (move cursor up visual lines → clear to end of screen)
  *   4. Visual line count (count wrapped lines for terminal-width-aware cursor math)
+ *   5. Cursor visibility (show/hide) — {@link enterRawStdin}'s own doc still
+ *      calls this the CALLER's concern to sequence, since cursor lifecycle
+ *      differs between the selector and watch mode; this module is where that
+ *      sequencing is actually implemented FROM, not where it happens
+ *      automatically.
  *
  * These are cross-harness: consumed by both the WTFT CLI (via esbuild bundle) and
  * the Pi WTFT extension (via tsx import).
@@ -51,14 +58,20 @@ export function enterRawStdin(onKey: (key: string) => void): () => void {
 // CURSOR HELPERS
 // ---
 
-/** Show the terminal cursor (DECTCEM reset). */
-export function showCursor(): void {
-	process.stdout.write("\x1b[?25h");
+/** Show the terminal cursor (DECTCEM reset).
+ *  @param out where to write — stdout by default; the scoped picker (#89)
+ *    passes stderr under `--json`, so stdout stays a clean JSON document
+ *    (E1). For the picker, `bin/wtft.ts`'s `canShowPicker` guard makes `out`
+ *    a TTY (watch mode calls these with plain stdout); it says nothing about the OTHER
+ *    stream (stdout, when `out` is stderr, or vice versa) — that one can be
+ *    a pipe, same as any ordinary redirect. */
+export function showCursor(out: NodeJS.WritableStream = process.stdout): void {
+	out.write("\x1b[?25h");
 }
 
-/** Hide the terminal cursor (DECTCEM set). */
-export function hideCursor(): void {
-	process.stdout.write("\x1b[?25l");
+/** Hide the terminal cursor (DECTCEM set). See {@link showCursor}'s `out`. */
+export function hideCursor(out: NodeJS.WritableStream = process.stdout): void {
+	out.write("\x1b[?25l");
 }
 
 // ---
@@ -68,12 +81,14 @@ export function hideCursor(): void {
 /**
  * Move the cursor up `lineCount` visual (wrapped) lines, then clear from cursor to
  * end of screen. Used before re-rendering to overwrite the previous render in-place.
+ * A no-op, writing nothing, when `lineCount <= 0` (nothing rendered yet).
  *
  * @param lineCount - Number of visual (wrapped) lines to move up
+ * @param out where to write — see {@link showCursor}'s `out`.
  */
-export function clearPreviousLines(lineCount: number): void {
+export function clearPreviousLines(lineCount: number, out: NodeJS.WritableStream = process.stdout): void {
 	if (lineCount > 0) {
-		process.stdout.write(`\x1b[${lineCount}A\x1b[J`);
+		out.write(`\x1b[${lineCount}A\x1b[J`);
 	}
 }
 

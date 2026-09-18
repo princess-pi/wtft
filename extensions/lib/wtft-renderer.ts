@@ -1875,8 +1875,27 @@ export interface CategoryTotals extends TokenTotals {
 	category: Category;
 }
 
+/**
+ * `total`'s own shape (#119) — deliberately NOT the plain `TokenTotals` every
+ * other total in this document reuses (`ModelTotals`, `CategoryTotals`,
+ * `tree`, `spawned`'s per-node totals). `untaggedCostUsd` has no model or
+ * category to attach a row to — an untagged interaction is, by definition,
+ * excluded from every one of those — so typing this any wider would let a
+ * caller write `untaggedCostUsd` onto a `ModelTotals` row where it can never
+ * mean anything.
+ */
+export interface SessionTotal extends TokenTotals {
+	/** The cost EXCLUDED from `costUsd` above because it belongs to an
+	 *  untagged interaction (`untaggedInteractions`) — the same per-interaction
+	 *  figures the bar chart bins for those turns: `i.cost` (the tag file's
+	 *  `c`) plus `i.serverToolCost` when present (#119, U2). So
+	 *  `costUsd + untaggedCostUsd` equals the chart's own running
+	 *  total within float accumulation error (docs/spec-26-json.md Amendment 3). */
+	untaggedCostUsd: number;
+}
+
 export interface SessionSummary {
-	total: TokenTotals;
+	total: SessionTotal;
 	/** One row per model id, cost descending — the rendered table's row order. */
 	models: ModelTotals[];
 	/** One row per CATEGORY_ORDER entry, always all of them, always in that
@@ -1954,6 +1973,13 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
 	const byCategory = new Map<Category, TokenTotals>();
 	for (const c of CATEGORY_ORDER) byCategory.set(c, emptyTotals());
 	let untaggedInteractions = 0;
+	// #119: the cost EXCLUDED from `total.costUsd` by the untagged-interaction
+	// skip three lines below. Summed from the SAME per-interaction figures the
+	// bar chart bins for these turns — `i.cost` (the tag file's `c`) plus
+	// `i.serverToolCost` when present — so `total.costUsd + untaggedCostUsd`
+	// equals the chart's own running total, not merely on the corpus where every
+	// untagged `c` happens to measure zero (U2, spec Amendment 3).
+	let untaggedCostUsd = 0;
 	let compactionEvents = 0;
 	let compactionTokensFreed = 0;
 
@@ -1970,6 +1996,7 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
 		const model = i.model || "(unknown)";
 		if (model === "(unknown)" || model === "<synthetic>") {
 			untaggedInteractions++;
+			untaggedCostUsd += i.cost + (i.serverToolCost || 0);
 			continue;
 		}
 
@@ -2030,7 +2057,7 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
 		.map(category => ({ category, ...(byCategory.get(category) ?? emptyTotals()) }));
 
 	return {
-		total,
+		total: { ...total, untaggedCostUsd },
 		models,
 		categories,
 		untaggedInteractions,

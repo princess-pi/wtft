@@ -28,6 +28,39 @@ export interface SessionCandidate {
 	displayPath: string; // e.g. "~/g-p/princess-pi-tools/2026-07-02...268a"
 }
 
+/**
+ * How far `discover` looks, and how it costs what it looks at (#89).
+ *
+ *   "worktree"  — the default: folder-name match on `targetCwd` ALONE. No
+ *                  fan-out, no union (last-cwd) arm. This is what makes the
+ *                  default picker ~7 ms — readdir + stat, nothing more.
+ *   "worktrees" — Ctrl+W: folder match across every checkout of the target's
+ *                  repo (`fanOutCwd`), PLUS the union arm — a session whose
+ *                  own recorded last cwd resolves into one of those checkouts,
+ *                  even though it is physically filed elsewhere.
+ *   "all"       — Ctrl+A / Tab: every session for this harness, cwd ignored
+ *                  entirely.
+ *   "branch"    — Ctrl+B: the single checkout matching `targetCwd`'s current
+ *                  git branch (see `harness/worktrees.ts`'s
+ *                  `resolveBranchCheckout`), folder-matched only, no union
+ *                  arm. Falls back to `targetCwd` itself when the branch or a
+ *                  matching checkout can't be resolved (no git, not a repo,
+ *                  detached HEAD) — a documented no-op, never a silent wrong
+ *                  scope.
+ *
+ * `windowMs` bounds EVERY scope uniformly: a candidate (and, for "worktrees",
+ * a transcript the union arm would otherwise tail-read) whose mtime falls
+ * outside the window is skipped before any read past a `stat`. `null` means
+ * unbounded — full cost, a deliberate choice once a human has cycled `Ctrl+T`
+ * all the way round.
+ */
+export type DiscoveryScope = "worktree" | "worktrees" | "all" | "branch";
+
+export interface DiscoverScopeOptions {
+	scope: DiscoveryScope;
+	windowMs: number | null;
+}
+
 export interface HarnessDiscovery {
 	/** Harness id — equals the directory name under harness/. */
 	readonly id: string;
@@ -35,9 +68,26 @@ export interface HarnessDiscovery {
 	readonly label: string;
 	/**
 	 * Session candidates for a target directory.
-	 * @param targetCwd absolute directory to scope to, or null for "no filter"
+	 *
+	 * @param targetCwd absolute directory to scope to. What a missing/`null`
+	 *   target means is each harness's OWN policy, not a universal contract —
+	 *   Pi treats it as "no filter" (`harness/pi/discovery.ts`'s
+	 *   `discoverLegacy`); Claude Code has always been cwd-scoped and falls
+	 *   back to `process.cwd()` instead (`harness/claude-code/discovery.ts`'s
+	 *   `discover`). See `docs/adding-a-harness.md` §1.
+	 * @param scopeOpts omitted → the PRE-#89 default behaviour, preserved
+	 *   exactly for every caller that does not opt in — the #156 union arm and
+	 *   unbounded time for both built-ins, PLUS worktree fan-out for Claude
+	 *   Code specifically (Pi's legacy default has never fanned out; see
+	 *   `discoverLegacy` in each harness's own discovery.ts) — this is what
+	 *   keeps `tests/wtft-issue-144-145-164-session-discovery.test.ts` and
+	 *   `tests/wtft-issue-156-harness-seam.test.ts`'s assertions about the
+	 *   default unchanged.
+	 *   `bin/wtft.ts` passes `{ scope: "worktree", windowMs: TIME_WINDOW_MS["20m"] }`
+	 *   as the picker's starting population, and the picker's rescopes pass
+	 *   their own.
 	 */
-	discover(targetCwd: string | null): SessionCandidate[];
+	discover(targetCwd: string | null, scopeOpts?: DiscoverScopeOptions): SessionCandidate[];
 	/**
 	 * Resolve a session id to its current transcript path, wherever it now
 	 * lives. This is the primitive the daemon's follow-on-move needs (#155):

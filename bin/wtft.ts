@@ -150,7 +150,14 @@ import {
 	selectSessionPrompt
 } from "../extensions/lib/session-selector.ts";
 import { buildDisplayPath } from "@princess-pi/libs/session-path-shortener";
-import { findRepoRoot, listWorktreeDirs, fanOutCwd } from "../extensions/lib/harness/worktrees.ts";
+import {
+	findRepoRoot,
+	listWorktreeDirs,
+	fanOutCwd,
+	currentBranch,
+	worktreeBranches,
+	resolveBranchCheckout,
+} from "../extensions/lib/harness/worktrees.ts";
 import {
 	parseWtftCliArgs,
 	spawnWtftDaemon,
@@ -160,6 +167,29 @@ import {
 	renderWtftWhy,
 	renderWtftVersion,
 } from "../extensions/lib/wtft-cli-shared.ts";
+import {
+	initPickerState,
+	setRows,
+	visibleWindow,
+	applyKey,
+	nextTimeWindow,
+	windowMsFor,
+	TIME_WINDOW_CYCLE,
+	TIME_WINDOW_MS,
+	ROW_LIMIT,
+	VISIBLE_DATA_ROWS,
+	type PickerState,
+	type PickerRow,
+	type PickerScope,
+	type TimeWindowLabel,
+	type PickerAction,
+} from "../extensions/lib/picker-state.ts";
+import {
+	mainCloneDir,
+	readHarnessOrder,
+	recordHarnessOpened,
+	orderByHarness,
+} from "../extensions/lib/harness-order.ts";
 
 // ---
 // Re-exports for test imports from built bin/wtft.mjs
@@ -298,7 +328,31 @@ export {
 	buildDisplayPath,
 	findRepoRoot,
 	listWorktreeDirs,
-	fanOutCwd
+	fanOutCwd,
+	currentBranch,
+	worktreeBranches,
+	resolveBranchCheckout,
+	// Scoped picker (#89) — the pure key-handling state machine
+	initPickerState,
+	setRows,
+	visibleWindow,
+	applyKey,
+	nextTimeWindow,
+	windowMsFor,
+	TIME_WINDOW_CYCLE,
+	TIME_WINDOW_MS,
+	ROW_LIMIT,
+	VISIBLE_DATA_ROWS,
+	// Scoped picker (#89) — sticky MRU harness order
+	mainCloneDir,
+	readHarnessOrder,
+	recordHarnessOpened,
+	orderByHarness,
+	type PickerState,
+	type PickerRow,
+	type PickerScope,
+	type TimeWindowLabel,
+	type PickerAction
 }
 
 /** A read whose total may still grow under the daemon (#443). Distinct from 1,
@@ -307,6 +361,18 @@ export {
  *  different facts and need different codes — the same split pr-review draws
  *  between 7 and 8. */
 export const EXIT_PROVISIONAL = 9;
+
+/** No interactive terminal, and session selection was not precise (#89, E3/E4):
+ *  `-s <substring>` matched zero or several sessions, or no `-s` was given at
+ *  all and the picker's own default-scoped population (this worktree, last
+ *  20 minutes) held zero or several candidates — ZERO included on both arms,
+ *  not just "several" (corrected, pr-review round 2: an earlier draft of
+ *  this docstring said only "more than one candidate" for the no-`-s` case,
+ *  which undersold the code below — `failAmbiguous` fires there whenever
+ *  `found.length !== 1`, zero included). Replaces the old no-prompt `--json`
+ *  auto-pick-newest behaviour, which silently guessed under a machine caller's
+ *  nose — this exit is what tells a script it must narrow the target instead. */
+export const EXIT_SESSION_AMBIGUOUS = 10;
 
 // ---
 // SHARED WORDING (#26) — one sentence, two output modes.
@@ -503,27 +569,35 @@ async function main() {
 	}
 
 	// Discovery is LAZY, and that is a cost decision, not a style one (#35).
-	// Only two branches below read it — the fuzzy-substring fallback and the
-	// auto-select menu — and neither is reachable once `-s` names an existing file
-	// or a pending path. Run eagerly it was a whole session-corpus scan, paid for
-	// and thrown away on the commonest invocation of all.
+	// `getCandidates()` below has exactly ONE reader today — the `-s`
+	// fuzzy-substring fallback — and is not reachable once `-s` names an
+	// existing file or a pending path. (Before #89 the no-`-s` auto-select
+	// menu shared this same call; it now calls the separately-memoised,
+	// separately-scoped `getDefaultScoped()` a little further down instead,
+	// so this comment describes only the fuzzy path's own cost, not a shared
+	// one.) Run eagerly it was a whole session-corpus scan, paid for and
+	// thrown away on the commonest invocation of all.
 	//
 	// The scan is bounded but not free: discovery asks every transcript on the
 	// machine where it lives. #89 removed the unbounded half — a whole-file
 	// re-read of every session stranded by `pr-cleanup`, measured 2026-09-16 at
 	// 6,952 files per launch and most of a 35 s cold launch. What is left is
 	// ~1.9 bounded tail reads per transcript (14,441 reads / 580 MB over 7,287
-	// transcripts, both harnesses), which is still worth deferring and is why
-	// #89 stays open for an on-disk index.
+	// transcripts, both harnesses) for this legacy, unscoped population — #89's
+	// own decision is explicitly "no on-disk index", so that ceiling is not
+	// coming down further; it is deferred here because it is still worth
+	// deferring, not because an index is pending.
 	//
-	// Memoised as well as deferred, though nothing today needs the cache: both
-	// branches call it once and reuse the result. It is here so that a future
-	// second call site cannot quietly reintroduce a whole second scan — the cost
-	// of `??=` is one null check, and the cost of getting this wrong again is
-	// everything above. Stated as insurance rather than as a present saving,
-	// because an earlier draft of this comment claimed the fuzzy branch scanned
-	// twice; it does not, and a rationale that misdescribes its own control flow
-	// is how the next reader learns to distrust the comments (PR review).
+	// Memoised as well as deferred, though nothing today needs the cache: the
+	// one reader (the fuzzy `-s` fallback) calls it once and reuses the
+	// result. It is here so that a future second call site cannot quietly
+	// reintroduce a whole second scan — the cost of `??=` is one null check,
+	// and the cost of getting this wrong again is everything above. Stated as
+	// insurance rather than as a present saving. (This paragraph used to say
+	// "both branches call it once" — leftover from before #89 moved the
+	// no-`-s` branch onto `getDefaultScoped()` below; corrected pr-review
+	// round 3, the exact "misdescribes its own control flow" failure the
+	// PARAGRAPH ITSELF warns about two sentences later.)
 	// Named `getCandidates`, not `candidates`, because the array-to-thunk change is
 	// a JS footgun worth spending a word on: `candidates.length` on a function is
 	// its ARITY — 0 — so a call site that forgot the parens would read as "no
@@ -534,6 +608,19 @@ async function main() {
 	const getCandidates = (): ReturnType<typeof discoverSessions> =>
 		(candidateCache ??= discoverSessions(opts.harnessOption, opts.cwdOverride));
 
+	// The picker's own default population (#89, S1/S5): folder-name-only,
+	// current worktree, T1 ("20m"). Deliberately NOT what `getCandidates()`
+	// above returns — that stays the pre-#89 full discovery, unchanged, and is
+	// what `-s`'s fuzzy substring match searches against (an explicit ask for
+	// a KNOWN session must not be narrowed by a browsing convenience window).
+	// This one is only ever consulted when no `-s` was given at all.
+	let defaultScopedCache: ReturnType<typeof discoverSessions> | null = null;
+	const getDefaultScoped = (): ReturnType<typeof discoverSessions> =>
+		(defaultScopedCache ??= discoverSessions(opts.harnessOption, opts.cwdOverride, {
+			scope: "worktree",
+			windowMs: TIME_WINDOW_MS["20m"],
+		}));
+
 	let finalSessionPath = "";
 	// #308: a session .jsonl that does not exist YET is a known-lagging path, not an
 	// error. Claude Code fixes the session id — and so the transcript path — at launch,
@@ -542,35 +629,66 @@ async function main() {
 	// state that fact instead of "does not exist". Only an absolute *.jsonl path
 	// qualifies — a fuzzy substring that matches nothing is still an error below.
 	let sessionPending = false;
-	// Notices raised BEFORE the JSON document can be built (#26). Session
-	// selection happens long before the tag file is read, so a notice from it
-	// has nowhere to live yet; `emitSessionJson` prepends these.
-	const earlyNotices: WtftNotice[] = [];
 
 	// ---
-	// SESSION SELECTION UNDER --json (#26)
+	// SESSION SELECTION (#26, #89)
 	// ---
-	// `selectSessionPrompt` writes to STDOUT — the interactive menu, and the
-	// non-interactive "Defaulting to newest session" fallback with its candidate
-	// list (extensions/lib/session-selector.ts). Under `--json` that lands ahead
-	// of the document and `JSON.parse` fails on the first byte, which is exactly
-	// the failure this flag exists to end. It also exits 130 on `q`/Ctrl-C,
-	// which a machine caller cannot answer.
+	// A human gets the picker, whether or not `--json` is set (#89, E1):
+	// `selectSessionPrompt` draws to stderr under `--json` so stdout stays one
+	// clean JSON document, and to stdout otherwise.
 	//
-	// So `--json` does not prompt. It takes the newest candidate — the same one
-	// the non-interactive fallback already resolves to, so this is the existing
-	// behaviour with its prose moved off stdout — says so on stderr, and records
-	// an `auto-selected-session` notice naming how many it chose between. A
-	// caller that wants determinism passes `-s`, and the notice is what tells it
-	// that it should.
-	const chooseSession = async (found: ReturnType<typeof discoverSessions>): Promise<string> => {
-		if (!opts.json) return selectSessionPrompt(found);
-		const text = `${found.length} sessions match; --json does not prompt, so the newest was used: ${found[0].path}. ` +
-			`Pass -s <path|substring> to choose one.`;
-		console.error(`\x1b[33m${text}\x1b[0m`);
-		earlyNotices.push({ code: "auto-selected-session", text });
-		return found[0].path;
+	// The interactivity test is BOTH `process.stdin.isTTY` AND the isTTY-ness
+	// of whichever stream the picker is about to draw to (pr-review, Medium):
+	// stdin alone is not enough — `wtft --tokens | less -R` (a flow the README
+	// itself recommends) keeps stdin on the terminal while stdout is a pipe,
+	// and drawing the picker's escape sequences and menu into that pipe would
+	// block waiting for keys the human watching `less` can never send. Under
+	// `--json` the same failure mode reaches through a redirected stderr
+	// (`2>/dev/null`). `canShowPicker` is computed once and used everywhere a
+	// TTY decision is made below, so the two checks cannot drift apart.
+	// `q`/Ctrl-C still exits 130 when the picker IS shown — a machine caller
+	// could never answer that either, which is why the no-picker branch below
+	// exists at all.
+	const pickerOut: NodeJS.WriteStream = opts.json ? process.stderr : process.stdout;
+	const canShowPicker = !!process.stdin.isTTY && !!pickerOut.isTTY;
+
+	// With NO interactive terminal — or stdin is one but the picker's own
+	// output stream is not — wtft no longer auto-picks the newest session
+	// under `--json` (the old `auto-selected-session` notice, retired in
+	// `@4`): it selects only when `-s` matches exactly one session (#89, C2:
+	// not a lone default-scoped candidate, which depends on the clock), and
+	// otherwise exits
+	// EXIT_SESSION_AMBIGUOUS (10), naming every candidate on stderr. Under
+	// `--json` that exit carries nothing on stdout, the same contract exit 1
+	// already carries for an error (#89, E3/E4).
+	const showPicker = async (found: ReturnType<typeof discoverSessions>, substringFilter?: string): Promise<string> =>
+		selectSessionPrompt(found, {
+			harnessOption: opts.harnessOption,
+			cwdOverride: opts.cwdOverride,
+			out: pickerOut,
+			substringFilter,
+		});
+
+	/** No interactive terminal: fail loudly with the new exit code rather than
+	 *  guess. `label` distinguishes the two call sites' wording only.
+	 *  `discoveredTotal` — the size of the population `found` was FILTERED
+	 *  from, when there is one — proves on stderr that discovery actually ran
+	 *  even on a zero-match filter, the same guard #35 already established for
+	 *  the old exit-1 message (never removed, just carried to the new exit
+	 *  code and wording). */
+	const failAmbiguous = (found: ReturnType<typeof discoverSessions>, label: string, discoveredTotal?: number): never => {
+		const names = found.map(c => `  - ${c.displayPath}  (${c.path})`).join("\n");
+		const availability = discoveredTotal !== undefined ? ` (${discoveredTotal} available)` : "";
+		const text = found.length === 0
+			? `Session not specified precisely enough: ${label} matched no sessions${availability}.`
+			: `Session not specified precisely enough: ${label} matched ${found.length} session${found.length === 1 ? "" : "s"}:\n${names}`;
+		// fs.writeSync, not console.error: stderr on a pipe is asynchronous on
+		// macOS, and process.exit() would cut a long match list short.
+		fs.writeSync(2, `\x1b[33m${text}\x1b[0m\n`);
+		if (found.length > 0) fs.writeSync(2, `\x1b[90mPass -s <path|substring> that matches exactly one.\x1b[0m\n`);
+		process.exit(EXIT_SESSION_AMBIGUOUS);
 	};
+
 	if (opts.targetSession) {
 		// Direct path — use as-is if it exists
 		if (fs.existsSync(opts.targetSession)) {
@@ -586,26 +704,34 @@ async function main() {
 				c.path.toLowerCase().includes(filter) ||
 				c.name.toLowerCase().includes(filter)
 			);
-			if (filtered.length === 0) {
+			if (filtered.length === 1) {
+				finalSessionPath = filtered[0].path;
+			} else if (!canShowPicker) {
+				failAmbiguous(filtered, `-s ${opts.targetSession}`, found.length);
+			} else if (filtered.length === 0) {
+				// Unchanged from pre-#89: a human still gets a clear "no match"
+				// rather than an empty picker with nothing to browse into.
 				console.error(`❌ Error: Session '${opts.targetSession}' does not exist as a file and matches no discovered sessions (${found.length} available).`);
 				process.exit(1);
-			} else if (filtered.length === 1) {
-				finalSessionPath = filtered[0].path;
 			} else {
-				finalSessionPath = await chooseSession(filtered);
+				finalSessionPath = await showPicker(filtered, opts.targetSession);
 			}
 		}
 	} else {
-		// Auto select or show selector prompt
-		const found = getCandidates();
-		if (found.length === 0) {
-			console.error("❌ Error: No active session log files found. Ensure Pi or Claude has been run, or specify an explicit session log path with -s.");
-			process.exit(1);
+		// No `-s`: the picker's own default-scoped population (#89, S1/S5).
+		// With no terminal only -s selects, even a lone candidate (#89, C2):
+		// the default scope is time-windowed, so a lone match would make the
+		// same script's answer depend on the clock.
+		const found = getDefaultScoped();
+		if (!canShowPicker) {
+			failAmbiguous(found, "no -s and no interactive terminal");
 		} else if (found.length === 1) {
 			finalSessionPath = found[0].path;
 		} else {
-			// Show select menu (or, under --json, take the newest without one).
-			finalSessionPath = await chooseSession(found);
+			// Shown even on ZERO rows (#89, S6) — the picker itself says so and
+			// names Ctrl+T, rather than this CLI widening (or erroring) on its
+			// own behalf.
+			finalSessionPath = await showPicker(found);
 		}
 	}
 
@@ -1066,7 +1192,7 @@ async function main() {
 			// then OMITTED rather than emitted empty: an empty array must mean
 			// "looked, found none", never "nobody looked".
 			...((() => { const s = opt.pending ? undefined : collectSubagentJson(); return s ? { subagents: s } : {}; })()),
-			notices: [...earlyNotices, ...(opt.notices ?? [])],
+			notices: opt.notices ?? [],
 		});
 		process.stdout.write(renderSessionJson(doc));
 		// The human line, on stderr, on every `--json` arm — the empty ones

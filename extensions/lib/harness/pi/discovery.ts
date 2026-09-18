@@ -4,14 +4,21 @@
  * @description Where Pi keeps its session logs (#156).
  *
  * Layout: ~/.pi/agent/sessions/<--slug-->/<timestamp>_<uuid>.jsonl, where the
- * directory name is the cwd slug wrapped in `--`. Matching is by containment,
- * which is why an unwrapped slug still finds the directory.
+ * directory name is the cwd slug wrapped in `--`. The single-directory scopes
+ * compare exactly after unwrapping; `"worktrees"` and the unscoped default
+ * match by containment.
  *
- * The union half of the #156 rule is wired in but inert today: Pi records `cwd`
- * once, on its session_start entry, so a tail scan resolves null and contributes
- * nothing. That is correct rather than a gap — Pi's directory slug already
- * encodes the start cwd and Pi has no worktree switch that rewrites it. The day
- * Pi records per-entry cwd, this works with no code change.
+ * The union half of the #156 rule is wired in but mostly inert today: Pi records
+ * `cwd` once, on its session_start entry, so a tail scan finds a DIFFERENT cwd
+ * than the one the transcript is physically filed under only in the rare case
+ * where the session moved directories after that entry — the ordinary case
+ * (never moved) makes the union arm redundant with the physical-slug arm, not
+ * a null read. (`resolveLastCwd`'s own widening tail read DOES reach
+ * session_start and return its cwd for any transcript under ~512 KB, the last
+ * `TAIL_WINDOWS` step in `session-cwd.ts` — it is not literally "always null".)
+ * That is correct rather than a gap — Pi's directory slug already encodes the
+ * start cwd and Pi has no worktree switch that rewrites it. The day Pi records
+ * per-entry cwd, this arm starts catching an in-session move with no code change.
  *
  * #144 applies here only as the slug *union*: Pi's session dirs on this machine
  * contain no dot-derived name, so Pi's own munging is unverified in exactly the
@@ -24,8 +31,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 
-import type { HarnessDiscovery, SessionCandidate } from "../types.ts";
+import type { DiscoverScopeOptions, HarnessDiscovery, SessionCandidate } from "../types.ts";
 import { resolveLastCwd, cwdSlugVariants } from "../session-cwd.ts";
+import { fanOutCwd, resolveBranchCheckout } from "../worktrees.ts";
 import { buildDisplayPath } from "@princess-pi/libs/session-path-shortener";
 
 const ID = "pi";
@@ -76,51 +84,172 @@ function toCandidate(file: string, projectSlug: string): SessionCandidate | null
 	};
 }
 
+function upsertCandidate(into: Map<string, SessionCandidate>, candidate: SessionCandidate | null): void {
+	if (!candidate) return;
+	const id = sessionIdOf(candidate.path);
+	const existing = into.get(id);
+	if (!existing || candidate.timestamp > existing.timestamp) into.set(id, candidate);
+}
+
+/** The pre-#89 default, preserved exactly for every caller omitting `scopeOpts`
+ *  (see the `discover` docstring in `../types.ts`). */
+function discoverLegacy(root: string, target: string | null): SessionCandidate[] {
+	const targetSlugs = target ? cwdSlugVariants(target) : null;
+
+	let projectDirs: string[];
+	try {
+		projectDirs = fs.readdirSync(root, { withFileTypes: true })
+			.filter(e => e.isDirectory())
+			.map(e => e.name);
+	} catch {
+		return [];
+	}
+
+	const bySessionId = new Map<string, SessionCandidate>();
+
+	for (const slug of projectDirs) {
+		const physicalMatch =
+			targetSlugs === null || targetSlugs.some(variant => slug.includes(variant));
+		const files: string[] = [];
+		collect(path.join(root, slug), files);
+
+		for (const file of files) {
+			if (!physicalMatch && (target === null || resolveLastCwd(file) !== target)) continue;
+			upsertCandidate(bySessionId, toCandidate(file, slug));
+		}
+	}
+
+	return [...bySessionId.values()];
+}
+
+/** The #89 scoped path — see `DiscoveryScope`'s docstring in `../types.ts`.
+ *  Pi's union arm is present here too (S2), though mostly inert: Pi records
+ *  `cwd` once, on session_start, so a tail scan resolves a different value
+ *  only for a session that moved after that entry (this module's header) —
+ *  kept wired in so the day
+ *  Pi records per-entry `cwd` this scope starts working with no further
+ *  change, exactly the existing #156 rationale. */
+function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions): SessionCandidate[] {
+	const { scope, windowMs } = opts;
+	const now = Date.now();
+	const withinWindow = (mtimeMs: number) => windowMs === null || now - mtimeMs <= windowMs;
+
+	let projectDirs: string[];
+	try {
+		projectDirs = fs.readdirSync(root, { withFileTypes: true })
+			.filter(e => e.isDirectory())
+			.map(e => e.name);
+	} catch {
+		return [];
+	}
+
+	const bySessionId = new Map<string, SessionCandidate>();
+
+	if (scope === "all") {
+		for (const slug of projectDirs) {
+			const files: string[] = [];
+			collect(path.join(root, slug), files);
+			for (const file of files) {
+				let stat: fs.Stats;
+				try { stat = fs.statSync(file); } catch { continue; }
+				if (!withinWindow(stat.mtimeMs)) continue;
+				upsertCandidate(bySessionId, toCandidate(file, slug));
+			}
+		}
+		return [...bySessionId.values()];
+	}
+
+	let targetDirs: string[];
+	let useUnionArm: boolean;
+	if (scope === "worktree") {
+		targetDirs = [target];
+		useUnionArm = false;
+	} else if (scope === "branch") {
+		targetDirs = [resolveBranchCheckout(target) ?? target];
+		useUnionArm = false;
+	} else {
+		targetDirs = fanOutCwd(target).dirs;
+		useUnionArm = true;
+	}
+
+	const targetSet = new Set(targetDirs);
+	const targetSlugs = new Set<string>();
+	for (const dir of targetDirs) for (const variant of cwdSlugVariants(dir)) targetSlugs.add(variant);
+
+	// "worktree" and "branch" name exactly one directory each (S1/S4): an
+	// EXACT match is the single-directory equivalent of Claude Code's
+	// `targetSlugs.has(slug)` Set membership. Containment (`slug.includes`)
+	// only belongs to "worktrees", where it is load-bearing: it is what lets
+	// one target slug (the main clone's) also match a sibling in-tree
+	// worktree's slug, `<mainSlug>--claude-worktrees-<branch>--`, with no
+	// directory listing of the worktree itself. Using containment for
+	// "worktree"/"branch" too over-matched any sibling project sharing a name
+	// prefix, and every in-tree worktree's own sessions, into what is supposed
+	// to be a single-directory scope (pr-review round 1, Medium).
+	//
+	// EXACT means "normalize both sides and compare", NOT "reconstruct the
+	// literal wrapped string" (pr-review round 2, High: the first cut compared
+	// `slug === "--" + variant + "--"`, but `variant` — from `cwdSlugVariants`
+	// — already carries its own leading dash from the target's leading `/`,
+	// so that built `---home-…--` (three leading dashes), which no real Pi
+	// directory has; `buildDisplayPath`'s OWN Pi-branch strip
+	// (`@princess-pi/libs/session-path-shortener`: `.replace(/^--/, "")
+	// .replace(/--$/, "")`) is the one place this module's real wrapping
+	// convention is independently evidenced, so this matches against THAT
+	// rather than re-deriving the wrap from `cwdSlugVariants` a second,
+	// disagreeing way).
+	const stripPiWrap = (s: string): string => s.replace(/^--/, "").replace(/--$/, "");
+	const matchesTarget = (slug: string, variant: string): boolean =>
+		scope === "worktrees" ? slug.includes(variant) : stripPiWrap(slug) === variant.replace(/^-/, "");
+
+	for (const slug of projectDirs) {
+		const physicalMatch = [...targetSlugs].some(variant => matchesTarget(slug, variant));
+
+		// Same skip Claude Code's discoverScoped applies, and for the same
+		// reason (pr-review, Medium): a non-matching slug under "worktree"/
+		// "branch" cannot contribute, since the union arm that could have
+		// found it anyway never runs for those two scopes.
+		if (!physicalMatch && !useUnionArm) continue;
+
+		const files: string[] = [];
+		collect(path.join(root, slug), files);
+
+		for (const file of files) {
+			let stat: fs.Stats;
+			try { stat = fs.statSync(file); } catch { continue; }
+			if (!withinWindow(stat.mtimeMs)) continue;
+
+			let matched = physicalMatch;
+			if (!matched && useUnionArm) {
+				const last = resolveLastCwd(file);
+				matched = last !== null && targetSet.has(last);
+			}
+			if (!matched) continue;
+
+			upsertCandidate(bySessionId, toCandidate(file, slug));
+		}
+	}
+
+	return [...bySessionId.values()];
+}
+
 export const discovery: HarnessDiscovery = {
 	id: ID,
 	label: "Pi",
 
-	discover(targetCwd: string | null): SessionCandidate[] {
+	discover(targetCwd: string | null, scopeOpts?: DiscoverScopeOptions): SessionCandidate[] {
 		const root = sessionsDir();
 		if (!fs.existsSync(root)) return [];
 
-		// Pi's policy differs from Claude's: no explicit target means every Pi
-		// session, not the cwd's. Preserved from the pre-seam selector.
-		const target = targetCwd ? path.resolve(targetCwd) : null;
-		const targetSlugs = target ? cwdSlugVariants(target) : null;
-
-		let projectDirs: string[];
-		try {
-			projectDirs = fs.readdirSync(root, { withFileTypes: true })
-				.filter(e => e.isDirectory())
-				.map(e => e.name);
-		} catch {
-			return [];
+		if (!scopeOpts) {
+			// Pi's policy differs from Claude's: no explicit target means every Pi
+			// session, not the cwd's. Preserved from the pre-seam selector.
+			const target = targetCwd ? path.resolve(targetCwd) : null;
+			return discoverLegacy(root, target);
 		}
 
-		const bySessionId = new Map<string, SessionCandidate>();
-
-		for (const slug of projectDirs) {
-			// Pi dir names are "--" + cwdSlug + "--", so match by containment —
-			// under any encoding the slug might have been written with (#144).
-			const physicalMatch =
-				targetSlugs === null || targetSlugs.some(variant => slug.includes(variant));
-			const files: string[] = [];
-			collect(path.join(root, slug), files);
-
-			for (const file of files) {
-				if (!physicalMatch && (target === null || resolveLastCwd(file) !== target)) continue;
-				const candidate = toCandidate(file, slug);
-				if (!candidate) continue;
-				const id = sessionIdOf(file);
-				const existing = bySessionId.get(id);
-				if (!existing || candidate.timestamp > existing.timestamp) {
-					bySessionId.set(id, candidate);
-				}
-			}
-		}
-
-		return [...bySessionId.values()];
+		if (scopeOpts.scope === "all") return discoverScoped(root, "", scopeOpts);
+		return discoverScoped(root, path.resolve(targetCwd || process.cwd()), scopeOpts);
 	},
 
 	resolveSessionById(sessionId: string): string | null {

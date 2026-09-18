@@ -584,18 +584,8 @@ console.log("\n=== PART E: what one launch reads, counted on a test-built corpus
 	check(strandedTail <= liveTail,
 		`V11b: …and no extra reads either (${strandedTail} vs ${liveTail} live)`);
 
-	// V11f — THE CONTRACT'S OWN FIXTURE, and the clause it cannot yet satisfy.
-	//
-	// #89's closer asks for 200 transcripts with 150 stranded cwds, and for reads
-	// bounded by the CANDIDATE count rather than the corpus. The shape is built
-	// here; the bound is not met, and is REPORTED rather than asserted.
-	//
-	// An earlier cut asserted the negation — `strandedTail >= SESSIONS` — which
-	// would have made a future success break the suite (PR review). A test that
-	// enforces a contract clause's opposite is worse than no test. `skip()` is
-	// this repo's mechanism for "a check that did not run, said out loud": the
-	// driver counts and lists it, so the gap is visible on every run instead of
-	// living in a comment that goes stale.
+	// V11f — #89's closer fixture (200 transcripts, 150 stranded) on the
+	// unscoped path. The closer's bound itself is asserted by V11g.
 	{
 		const MIXED = 200;
 		const STRANDED = 150;
@@ -604,7 +594,6 @@ console.log("\n=== PART E: what one launch reads, counted on a test-built corpus
 		process.env.WTFT_CLAUDE_PROJECTS_DIR = mixedCorpus;
 		resetCwdCache();
 		const mixed = discoverSessions("claude-code", liveHome);
-		const mixedTail = getCwdReadCount();
 		const mixedBytes = getCwdBytesRead();
 
 		check(mixed.length === MIXED - STRANDED,
@@ -612,15 +601,10 @@ console.log("\n=== PART E: what one launch reads, counted on a test-built corpus
 		check(mixedBytes <= MIXED * 16 * 1024,
 			`V11f: …reading tails, not files (${Math.round(mixedBytes / 1024)} KB over ${MIXED} x ${FILLER_BYTES / 1024} KB)`);
 
-		// The clause itself. Reads scale with the corpus because every remaining
-		// arm must ask each transcript where it lives before ruling it out — no
-		// deletion changes that, only the on-disk index (#89's direction A, "I"
-		// in its 2026-09-15 comment), which is why #89 stays OPEN.
-		if (mixedTail > mixed.length) {
-			skip(`#89's closer asks reads be bounded by CANDIDATE count; measured ${mixedTail} reads for ${mixed.length} candidates — unmet until the on-disk index lands`);
-		} else {
-			check(true, `V11f: reads are bounded by candidates (${mixedTail} for ${mixed.length}) — the closer is MET; delete the skip above`);
-		}
+		// The clause itself: this unscoped path still asks every transcript
+		// where it lives, so its reads scale with the corpus. #89's decision met
+		// the closer by scoping instead of indexing; V11g asserts the bound on
+		// the picker's default scope.
 	}
 
 	// V11c — memoisation, asserted as state instead of `warm <= cold + 50`.
@@ -690,6 +674,34 @@ console.log("\n=== PART E: what one launch reads, counted on a test-built corpus
 
 	delete process.env.WTFT_CLAUDE_PROJECTS_DIR;
 	delete process.env.WTFT_PI_SESSIONS_DIR;
+
+	// V11g — #89's closer on the path the picker opens on (scope "worktree",
+	// folder-name match only). 50 live transcripts sit under the target's own
+	// slug and 150 under slugs for removed worktrees; the default scope must
+	// find the 50 without a single tail read.
+	{
+		const root = mktmp("wtft-89-scoped-");
+		const target = mktmp("wtft-89-scoped-cwd-");
+		const writeUnder = (cwd: string, i: number) => {
+			const dir = path.join(root, cwdToStrictSlug(cwd));
+			fs.mkdirSync(dir, { recursive: true });
+			const id = `89c0de00-1a9b-4c3d-9e8f-${String(i).padStart(12, "0")}`;
+			fs.writeFileSync(path.join(dir, `${id}.jsonl`),
+				JSON.stringify({ type: "user", cwd, message: { role: "user", content: "hi" } }) + "\n");
+		};
+		for (let i = 0; i < 200; i++) writeUnder(i < 150 ? path.join(target, `gone-worktree-${i}`) : target, i);
+		process.env.WTFT_CLAUDE_PROJECTS_DIR = root;
+		process.env.WTFT_PI_SESSIONS_DIR = mktmp("wtft-89-scoped-nopi-");
+		resetCwdCache();
+		const scoped = discoverSessions("claude-code", target, { scope: "worktree", windowMs: null });
+		const scopedTail = getCwdReadCount();
+		check(scoped.length === 50,
+			`V11g: the picker's default scope finds the live sessions (${scoped.length} of 50)`);
+		check(scopedTail === 0,
+			`V11g: …without a single tail read (${scopedTail} for ${scoped.length}; corpus 200)`);
+		delete process.env.WTFT_CLAUDE_PROJECTS_DIR;
+		delete process.env.WTFT_PI_SESSIONS_DIR;
+	}
 
 	// V23 — WIDENING READS EACH BYTE ONCE (Macroscope, PR #122).
 	//

@@ -75,7 +75,8 @@ _Avoid_: using "reason" alone for the displayed sentence; "status string" for th
 The user-specified size+unit that decides how interactions are grouped — the `-i, --interval`
 value (e.g. `4h`, `5t`), parsed by `parseInterval()` into an `IntervalConfig`. An interval is a
 *request*; a bin (below) is the concrete result of applying one.
-_Avoid_: Bucket (see the Bin/Bucket split below), window, period
+_Avoid_: Bucket (see the Bin/Bucket split below), window, period ("window" is reserved for the
+picker's **Time window**)
 
 **Bin**:
 The concrete time-or-turn slot an interaction is grouped into, computed by `getBinInfo()` from
@@ -292,15 +293,32 @@ the widget does not (`--other` histogram, `--watch`, `--json`). Refuses `-p/--pa
 the widget's (see **Pager**).
 _Avoid_: Standalone mode, binary (the binary is `bin/wtft.mjs`; "CLI" names the usage mode)
 
+**Session picker** (#89):
+The interactive list the CLI shows when more than one session could be meant. It lists the
+sessions in one **scope** — this worktree (default), all worktrees of the repo (`Ctrl+W`), the
+current branch's checkout (`Ctrl+B`), or all projects (`Ctrl+A`/`Tab`) — filtered to one
+**time window**, the age limit `Ctrl+T` cycles through (20m, 1h, 1d, 1w, all). A picker opened
+by an ambiguous `-s` starts at window `all`. `docs/spec-89-scoped-picker.md` is the contract.
+_Avoid_: menu
+
 **JSON mode** (#26):
 `--json` — the CLI's machine-readable mode. Writes exactly one JSON object (schema
-`wtft/session@3`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
+`wtft/session@4`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
 Human prose goes to stderr, and every sentence that would otherwise have been on stdout is
 repeated in the object's `notices[]`, where `code` is the contract and `text` is disposable.
-Its aggregate numbers come from `computeSessionSummary` (`extensions/lib/wtft-renderer.ts`),
+With an interactive terminal it still shows the scoped session picker (#89) whenever the
+choice is ambiguous, drawn to stderr so stdout stays one clean object; with no interactive terminal it selects only
+when `-s` matches exactly one session and otherwise exits 10, even with no `-s` and one
+session in view — see `docs/spec-26-json.md` Amendment 3. Its
+aggregate numbers come from `computeSessionSummary` (`extensions/lib/wtft-renderer.ts`),
 the same aggregation the `--tokens` table formats, so those two cannot report different
-totals; `session`, `provisional`, `uncounted`, `spawned` and `notices` come from the run
-instead, and `tree` is `total` plus `spawned.total` (see **Self / tree**).
+totals; `session`, `provisional`, `uncounted`, `spawned`, `subagents` and `notices` come from
+the run instead, and `tree` is `total` plus `spawned.total` over the six token and cost fields,
+so it carries no `untaggedCostUsd` (see **Self / tree**). `total` also
+carries `untaggedCostUsd` beside `costUsd` (#119) — the cost of every interaction the
+chart bins but `total`'s own `costUsd` excludes for lacking a model id, so
+`total.costUsd + total.untaggedCostUsd` equals the chart's own running total within float
+accumulation error.
 Suppresses the rendering flags, but not the commands that run instead of a report
 (`--help`/`--why`/`--version`, `--watch`, the daemon-management group). Contract:
 `docs/spec-26-json.md`. CLI only — the widget has no stdout to write an object to.

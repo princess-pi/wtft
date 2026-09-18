@@ -29,7 +29,18 @@ import { formatRelativeTime } from "@princess-pi/libs/session-path-shortener";
 import { formatCost } from "./wtft-shared.ts";
 import { enterRawStdin, showCursor, hideCursor, clearPreviousLines, visualLineCount } from "./tty-helpers.ts";
 import { getDiscoveries, getHarness, getHarnesses } from "./harness/registry.ts";
-import type { SessionCandidate } from "./harness/types.ts";
+import type { DiscoverScopeOptions, SessionCandidate } from "./harness/types.ts";
+import {
+	initPickerState,
+	setRows,
+	visibleWindow,
+	applyKey,
+	windowMsFor,
+	type PickerState,
+	type PickerRow,
+} from "./picker-state.ts";
+import { readHarnessOrder, recordHarnessOpened, orderByHarness } from "./harness-order.ts";
+import { resolveBranchCheckout } from "./harness/worktrees.ts";
 
 // ---
 // TYPES
@@ -70,19 +81,30 @@ export type { SessionCandidate } from "./harness/types.ts";
  *
  * Which arms apply is each harness's own call. Claude Code wires up all three.
  * Pi wires up the first two — its slug arm accepts both encodings, and the
- * last-cwd arm is present but never fires, because Pi records `cwd` once on its
- * session_start entry and a tail scan finds nothing. That is deliberate rather
- * than a gap: the day Pi records per-entry cwd, the arm starts working with no
- * code change. See docs/adding-a-harness.md.
+ * last-cwd arm is present but mostly inert, because Pi records `cwd` once on
+ * its session_start entry: a tail scan resolves a DIFFERENT cwd than the
+ * physical slug already gives only when the session moved directories after
+ * that entry (corrected, pr-review round 3 — a surviving copy of the older,
+ * stronger "finds nothing" claim; `extensions/lib/harness/session-cwd.ts` and
+ * `extensions/lib/harness/pi/discovery.ts` both carry the full correction: a
+ * Pi transcript under ~512 KB has its whole file read by the widening tail
+ * scan and DOES resolve `session_start`'s cwd). That is deliberate rather
+ * than a gap: the day Pi records per-entry cwd, the arm starts catching an
+ * in-session move with no code change. See docs/adding-a-harness.md.
  *
  * @param harness - Target harness id, or "auto" for all enabled harnesses
- * @param cwdOverride - Directory to scope to; each harness decides what a
- *   missing override means (Claude Code: process.cwd(); Pi: no filter)
+ * @param cwdOverride - Directory to scope to. Missing means process.cwd(),
+ *   except on Pi's unscoped default, where it means no filter.
+ * @param scopeOpts - Omitted → every harness's PRE-#89 default (fan-out,
+ *   the union arm, unbounded time) — see `HarnessDiscovery.discover`'s own
+ *   docstring in `harness/types.ts`. Only `windowMs` is enforced here too;
+ *   `scope` is each harness's to honour.
  * @returns Candidates sorted by modification time descending (newest first)
  */
 export function discoverSessions(
 	harness: string = "auto",
-	cwdOverride?: string
+	cwdOverride?: string,
+	scopeOpts?: DiscoverScopeOptions
 ): SessionCandidate[] {
 	const targets = harness === "auto"
 		? getDiscoveries()
@@ -91,13 +113,35 @@ export function discoverSessions(
 	const candidates: SessionCandidate[] = [];
 	for (const discovery of targets) {
 		try {
-			candidates.push(...discovery.discover(cwdOverride ?? null));
-		} catch {
-			// A misbehaving harness must not take the selector down with it.
+			candidates.push(...discovery.discover(cwdOverride ?? null, scopeOpts));
+		} catch (err) {
+			// A misbehaving harness must not take the selector down with it —
+			// but a SILENT catch made "this harness threw" indistinguishable
+			// from "this harness genuinely found nothing" (pr-review round 2,
+			// Medium): under #89's no-TTY exit-10 path, that ambiguity used to
+			// read as "zero sessions" with no hint anything went wrong. Named
+			// on stderr now, never thrown, so the caller's candidate LIST is
+			// unchanged (still whatever the other harnesses found) but the
+			// FAILURE is no longer invisible.
+			const reason = err instanceof Error ? err.message : String(err);
+			process.stderr.write(`\x1b[33mwtft: harness '${discovery.id}' discovery failed: ${reason}\x1b[0m\n`);
 		}
 	}
 
-	return candidates.sort((a, b) => b.timestamp - a.timestamp);
+	// Defensive time-window enforcement (pr-review round 2, Medium): a
+	// harness's OWN `discover` is supposed to honour `scopeOpts.windowMs`
+	// (docs/adding-a-harness.md), but nothing enforces that — an out-of-tree
+	// harness that ignores it would otherwise inflate the no-TTY "exactly one
+	// candidate" check and make the picker's "window: …" header false for its
+	// rows. Post-filtering here makes the window a real guarantee of this
+	// function's OUTPUT regardless of whether every harness cooperated,
+	// cheaply (one timestamp compare per candidate already in memory).
+	const windowMs = scopeOpts?.windowMs ?? null;
+	const withinWindow = windowMs === null
+		? candidates
+		: candidates.filter(c => Date.now() - c.timestamp <= windowMs);
+
+	return withinWindow.sort((a, b) => b.timestamp - a.timestamp);
 }
 
 /**
@@ -274,134 +318,239 @@ function formatTagSuffix(stats: SessionSummary): string {
 	return `\x1b[90mv${stats.tagVersion}\x1b[0m`;
 }
 
+/** Text shown after "scope:" in the picker header, keyed by `PickerState.scope`
+ *  — display-only, no behaviour reads these strings back. `applyKey` sets
+ *  `state.scope` to `"branch"` unconditionally on Ctrl+B (it is pure and has
+ *  no git awareness), but the rescope handler in `selectSessionPrompt` below
+ *  corrects it BACK to `"worktree"` before this label is ever rendered, when
+ *  `resolveBranchCheckout` says the branch can't be resolved — so the label
+ *  and the actual candidate population never disagree (pr-review round 2,
+ *  Medium; round 1 of this fix left the label reading "branch" regardless). */
+const SCOPE_LABEL: Record<PickerState["scope"], string> = {
+	worktree: "this worktree",
+	worktrees: "all worktrees (Ctrl+W)",
+	all: "all projects (Ctrl+A)",
+	branch: "this branch (Ctrl+B)",
+};
+
+/** A `SessionCandidate` reduced to what `picker-state.ts` needs to know about
+ *  a row — that module never looks inside `PickerRow.id`, so this can be any
+ *  stable key; `c.path` is used because it is already the caller's lookup
+ *  key (`byPath` below). */
+function toPickerRow(c: SessionCandidate): PickerRow {
+	return { id: c.path, harness: c.harness, timestamp: c.timestamp };
+}
+
+export interface SelectSessionPromptOptions {
+	/** Passed straight to `discoverSessions` on every rescope (Ctrl+A/W/B/T). */
+	harnessOption: string;
+	cwdOverride?: string;
+	/** Where the picker draws. Defaults to stdout; `bin/wtft.ts` passes stderr
+	 *  under `--json` so stdout stays one clean JSON document (#89, E1).
+	 *  `bin/wtft.ts`'s `canShowPicker` guard (`process.stdin.isTTY &&
+	 *  <this stream>.isTTY`) guarantees THIS stream is a TTY whenever this
+	 *  function is called at all — it says nothing about the OTHER stream
+	 *  (stdout under `--json`, or stderr otherwise), which can be a pipe. */
+	out?: NodeJS.WritableStream;
+	/**
+	 * The `-s <substring>` the caller already filtered `initialCandidates` by
+	 * (basename or path, case-insensitive), when there was one. Setting it:
+	 *
+	 *   - re-applies the filter after every rescope, so Ctrl+A/W/B/T never
+	 *     discards the user's own narrowing;
+	 *   - seeds the state `"worktrees"`/`"all"`, which describes the unscoped,
+	 *     unbounded discovery the rows came from. Ctrl+T still cycles from
+	 *     `"all"` to `"20m"`, as it does everywhere (spec S5).
+	 */
+	substringFilter?: string;
+}
+
+/** The same substring predicate `bin/wtft.ts`'s fuzzy `-s` match uses — kept
+ *  here too so a rescope re-applies it identically rather than drifting into
+ *  a second, subtly different filter. */
+function matchesSubstring(c: SessionCandidate, filter: string): boolean {
+	const needle = filter.toLowerCase();
+	return c.path.toLowerCase().includes(needle) || c.name.toLowerCase().includes(needle);
+}
+
 /**
- * Render an interactive TTY session selector IN-PLACE on the main screen.
- * Uses \\x1b[N A \\x1b[J to overwrite previous output on re-render — no alt
- * screen buffer. When the selector exits, the output is cleared and the chart
- * renders starting where the selector's first line was, preserving scrollback
- * above.
+ * Render the scoped, interactive session picker IN-PLACE on the main screen
+ * (#89). Uses `\x1b[N A \x1b[J` to overwrite previous output on re-render — no
+ * alt screen buffer. When the picker exits, the output is cleared and the
+ * chart renders starting where the picker's first line was, preserving
+ * scrollback above.
  *
- *   - j/k, arrows: navigate (wraps around)
- *   - Enter: select
+ * Key handling is delegated ENTIRELY to the pure state machine in
+ * `picker-state.ts` (CLAUDE.md "test key handling through a seam") — this
+ * function's only job is turning a `PickerAction` into a terminal write or a
+ * re-discovery call:
+ *
+ *   - j/k, arrows: move (wraps the whole list, sliding the 11-row window)
+ *   - Enter: select — also records the sticky harness order (H3)
  *   - q or Ctrl+C: exit (code 130)
+ *   - Ctrl+A / Tab: scope "all"  ·  Ctrl+W: scope "worktrees"
+ *   - Ctrl+B: scope "branch" — falls back to `"worktree"` (population AND
+ *     label) when the current branch or a matching checkout can't be
+ *     resolved; see `SCOPE_LABEL`'s own comment above.
+ *   - Ctrl+T: cycle the time window (20m -> 1h -> 1d -> 1w -> all -> 20m)
  *
- * @param candidates - Sorted array of session candidates (displayed top 10)
+ * Requires an interactive terminal — the caller (`bin/wtft.ts`) is
+ * responsible for the no-TTY decision (E2-E4) and must never call this
+ * function without one; `enterRawStdin` no-ops on a non-TTY stdin, which
+ * would otherwise leave this promise pending forever.
+ *
+ * @param initialCandidates - The picker's starting rows. Nothing in THIS
+ *   function inspects, validates, or threads through whatever scope the
+ *   caller used to discover them — `bin/wtft.ts`'s default is
+ *   scope `"worktree"` with the 20-minute window (S1/S5), but
+ *   that is a convention the caller upholds, not a contract this function
+ *   enforces. The picker state starts at `"worktree"`/`"20m"`, except under
+ *   `substringFilter`, where it is seeded `"worktrees"`/`"all"` (see the body).
  * @returns Promise resolving to the selected session file path
  */
 export async function selectSessionPrompt(
-	candidates: SessionCandidate[]
+	initialCandidates: SessionCandidate[],
+	opts: SelectSessionPromptOptions
 ): Promise<string> {
 	return new Promise((resolve) => {
-		// --- Non-interactive fallback ---
-		if (!process.stdout.isTTY) {
-			console.log(
-				`\x1b[90mNon-interactive environment detected. Defaulting to newest session [1]:\x1b[0m`
-			);
-			const maxPathLen = Math.max(
-				...candidates.slice(0, 5).map((c) => c.displayPath.length),
-				10
-			);
-			for (let i = 0; i < Math.min(candidates.length, 5); i++) {
-				const c = candidates[i];
-				const stats = getSessionSummary(c.path);
-				const relTime = formatRelativeTime(c.timestamp);
-				const label = harnessLabel(c.harness);
-				const costStr = formatCostOrUnknown(stats).replace(/\x1b\[[0-9;]*m/g, "");
-				const turnStr = formatTurnsOrLines(stats);
-				const tagStr = formatTagSuffix(stats).replace(/\x1b\[[0-9;]*m/g, "");
-				console.log(
-					`  [${i + 1}] ${c.displayPath.padEnd(maxPathLen)}  ${costStr}  ${turnStr}  [${label.padEnd(6)}]  ${relTime.padEnd(6)}  ${tagStr}`
-				);
-			}
-			console.log(
-				`\x1b[90mRun 'wtft -s <substring>' to target a specific session by path or basename filter.\x1b[0m\n`
-			);
-			resolve(candidates[0].path);
-			return;
+		const out = opts.out ?? process.stdout;
+
+		const byPath = new Map<string, SessionCandidate>();
+		// One tag-file read per row per picker session, not per keystroke.
+		const summaries = new Map<string, ReturnType<typeof getSessionSummary>>();
+		const summaryFor = (p: string) => {
+			let s = summaries.get(p);
+			if (!s) { s = getSessionSummary(p); summaries.set(p, s); }
+			return s;
+		};
+		const remember = (list: SessionCandidate[]) => { for (const c of list) byPath.set(c.path, c); };
+		remember(initialCandidates);
+
+		const harnessIds = getHarnesses().map(h => h.id);
+		const toRows = (list: SessionCandidate[]): PickerRow[] =>
+			orderByHarness(list, readHarnessOrder(opts.cwdOverride), harnessIds).map(toPickerRow);
+
+		let state: PickerState = setRows(initPickerState(), toRows(initialCandidates));
+
+		// Under `-s` the rows come from the unscoped, unbounded discovery. For
+		// Claude Code that is the `"worktrees"` population; for Pi it is not
+		// (no fan-out, and every Pi session when there is no --dir). So the
+		// header names the -s search itself until the first rescope, and the
+		// state is seeded `"worktrees"`/`"all"` so Ctrl+T does not narrow to
+		// this directory. Ctrl+T still wraps `all -> 20m`, and the header then
+		// shows the scope it re-discovered with. Spec S5 records `-s` as the
+		// one exception to T1.
+		let scopeLabelOverride: string | null = null;
+		if (opts.substringFilter) {
+			state = { ...state, scope: "worktrees", timeWindow: "all" };
+			scopeLabelOverride = "everything -s searches";
 		}
 
-		// --- Interactive TTY selector ---
-		let selectedIndex = 0;
-		const limit = 10;
-		const displayCandidates = candidates.slice(0, limit);
-		const statsList = displayCandidates.map((c) => getSessionSummary(c.path));
+		hideCursor(out);
 
-		hideCursor();
-
-		const maxPathLen = Math.max(
-			...displayCandidates.map((c) => c.displayPath.length),
-			10
-		);
-
-		// Track rendered lines for precise in-place overwrite on arrow keys.
-		// logicalLineCount tracks the fixed number of logical lines (title+path+candidates)
-		// for the caller to clear when we exit.
 		let lastLineCount = 0;
-		let logicalLineCount = 0;
 
 		const render = () => {
-			const selected = displayCandidates[selectedIndex];
-			// Full path (not truncated) — wraps naturally if wider than terminal
-			const shortName = selected.name.replace(".jsonl", "").slice(-4);
-			let out = `\x1b[1m\x1b[36m\u{1F4B8} WTFT — select session log\x1b[0m \x1b[90m...${shortName}\x1b[0m (j/k or arrows navigate, Enter select, q quit):\n`;
-			out += `  \x1b[90m${selected.path}\x1b[0m\n`;
-			for (let i = 0; i < displayCandidates.length; i++) {
-				const c = displayCandidates[i];
-				const stats = statsList[i];
-				const relTime = formatRelativeTime(c.timestamp);
+			const view = visibleWindow(state);
+			let text = `\x1b[1m\x1b[36m\u{1F4B8} WTFT — select session log\x1b[0m ` +
+				`\x1b[90m(j/k navigate, Enter select, q quit · Ctrl+A/Tab all · Ctrl+W worktrees · ` +
+				`Ctrl+B branch · Ctrl+T window)\x1b[0m\n`;
+			text += opts.substringFilter
+				? `  \x1b[90mscope: ${scopeLabelOverride ?? SCOPE_LABEL[state.scope]}  ·  window: ${state.timeWindow}  ·  filtered by -s "${opts.substringFilter}"\x1b[0m\n`
+				: `  \x1b[90mscope: ${SCOPE_LABEL[state.scope]}  ·  window: ${state.timeWindow}\x1b[0m\n`;
 
-				const isSelected = i === selectedIndex;
-				const prefix = isSelected
-					? "\x1b[36m\x1b[1m > \x1b[0m"
-					: "   ";
-				const highlight = isSelected ? "\x1b[1m\x1b[36m" : "";
-				const reset = isSelected ? "\x1b[0m" : "";
+			if (view.rows.length === 0) {
+				text += `  \x1b[33mNo sessions in this window. Press Ctrl+T to widen it.\x1b[0m\n`;
+			} else {
+				const maxPathLen = Math.max(
+					...view.rows.map(r => byPath.get(r.id)?.displayPath.length ?? 0),
+					10
+				);
+				for (let i = 0; i < view.rows.length; i++) {
+					const row = view.rows[i];
+					const c = byPath.get(row.id);
+					if (!c) continue;
+					const stats = summaryFor(c.path);
+					const relTime = formatRelativeTime(c.timestamp);
 
-				const label = harnessLabel(c.harness);
-				const costStr = formatCostOrUnknown(stats);
-				const turnStr = formatTurnsOrLines(stats);
-				const tagStr = formatTagSuffix(stats);
-				out += `${prefix}${highlight}${c.displayPath.padEnd(maxPathLen)}${reset}  ${costStr}  ${turnStr}  [${label.padEnd(6)}]  \x1b[90m${relTime.padEnd(6)}\x1b[0m  ${tagStr}\n`;
+					const isSelected = i === view.cursorIndexInView;
+					const prefix = isSelected ? "\x1b[36m\x1b[1m > \x1b[0m" : "   ";
+					const highlight = isSelected ? "\x1b[1m\x1b[36m" : "";
+					const reset = isSelected ? "\x1b[0m" : "";
+
+					const label = harnessLabel(c.harness);
+					const costStr = formatCostOrUnknown(stats);
+					const turnStr = formatTurnsOrLines(stats);
+					const tagStr = formatTagSuffix(stats);
+					text += `${prefix}${highlight}${c.displayPath.padEnd(maxPathLen)}${reset}  ${costStr}  ${turnStr}  [${label.padEnd(6)}]  \x1b[90m${relTime.padEnd(6)}\x1b[0m  ${tagStr}\n`;
+				}
+				// The 12th row: a position line, never selectable (#89, K6).
+				if (view.positionLine) {
+					text += `  \x1b[90m${view.positionLine}\x1b[0m\n`;
+				}
 			}
-			// Count visual (wrapped) lines to move cursor exactly that far on re-render
-			const cols = process.stdout.columns || 80;
-			lastLineCount = visualLineCount(out, cols);
-			logicalLineCount = out.replace(/\\n$/, "").split("\\n").length;
-			process.stdout.write(out);
+
+			const cols = (out as NodeJS.WriteStream).columns || 80;
+			lastLineCount = visualLineCount(text, cols);
+			out.write(text);
 		};
 
-		// Initial render
 		render();
 
-		const onKey = (key: string) => {
-			if (key === "\u0003" || key === "q" || key === "Q") {
-				clearPreviousLines(lastLineCount);
+		const cleanupStdin = enterRawStdin((key: string) => {
+			const action = applyKey(state, key);
+
+			if (action.type === "quit") {
+				clearPreviousLines(lastLineCount, out);
 				cleanup();
 				process.exit(130);
-			} else if (key === "\r" || key === "\n") {
-				clearPreviousLines(lastLineCount);
-				const selectedPath = displayCandidates[selectedIndex].path;
+			} else if (action.type === "select") {
+				clearPreviousLines(lastLineCount, out);
+				const c = byPath.get(action.row.id);
+				if (!c) { render(); return; } // should not happen; stale row id
+				recordHarnessOpened(c.harness, opts.cwdOverride ?? process.cwd());
 				cleanup();
-				resolve(selectedPath);
-			} else if (key === "\u001b[A" || key === "k") {
-				selectedIndex =
-					(selectedIndex - 1 + displayCandidates.length) %
-					displayCandidates.length;
-				clearPreviousLines(lastLineCount);
+				resolve(c.path);
+			} else if (action.type === "move") {
+				state = action.state;
+				clearPreviousLines(lastLineCount, out);
 				render();
-			} else if (key === "\u001b[B" || key === "j") {
-				selectedIndex =
-					(selectedIndex + 1) % displayCandidates.length;
-				clearPreviousLines(lastLineCount);
+			} else if (action.type === "rescope") {
+				state = action.state;
+				scopeLabelOverride = null;
+				// Ctrl+B's population falls back gracefully to "worktree"'s
+				// (bare target directory) when the branch can't be resolved —
+				// but the LABEL must say so too (pr-review round 2, Medium: the
+				// first cut left `state.scope` as `"branch"` regardless, so the
+				// picker's header kept reading "scope: this branch" over rows
+				// that were, in fact, just the default worktree population,
+				// with no indication anywhere that resolution had failed).
+				// `applyKey` is pure and cannot know this in advance; this is
+				// the one place with both git access and the state to correct.
+				if (state.scope === "branch" && !resolveBranchCheckout(opts.cwdOverride ?? process.cwd())) {
+					state = { ...state, scope: "worktree" };
+				}
+				// Re-discover for the new scope/window, THEN re-window the fresh
+				// rows (setRows also clamps the cursor, #89 K7).
+				let fresh = discoverSessions(opts.harnessOption, opts.cwdOverride, {
+					scope: state.scope,
+					windowMs: windowMsFor(state.timeWindow),
+				});
+				// Re-apply the caller's `-s` filter (pr-review, Medium): without
+				// this, widening the scope silently discarded it and showed
+				// every session in the new scope instead of just the matches.
+				if (opts.substringFilter) fresh = fresh.filter(c => matchesSubstring(c, opts.substringFilter!));
+				remember(fresh);
+				state = setRows(state, toRows(fresh));
+				clearPreviousLines(lastLineCount, out);
 				render();
 			}
-		};
-
-		const cleanupStdin = enterRawStdin(onKey);
+			// "noop" — nothing to do.
+		});
 
 		const cleanup = () => {
 			cleanupStdin();
-			showCursor();
+			showCursor(out);
 		};
 	});
 }

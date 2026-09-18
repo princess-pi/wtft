@@ -50,11 +50,11 @@ pinned consumer cannot see is still a rename. The strings inside
 branches on `notices[].code` is safe, one that matches `notices[].text` has no
 contract.
 
-### Schema `wtft/session@3`
+### Schema `wtft/session@4`
 
 ```json
 {
-  "schema": "wtft/session@3",
+  "schema": "wtft/session@4",
   "session": {
     "path": "/home/u/.claude/projects/-x/abc.jsonl",
     "harness": "claude-code",
@@ -68,7 +68,8 @@ contract.
     "outputTokens": 270,
     "reasoningTokens": 0,
     "cacheReadTokens": 0,
-    "cacheWriteTokens": 0
+    "cacheWriteTokens": 0,
+    "untaggedCostUsd": 0
   },
   "models": [
     { "model": "claude-sonnet-4-6", "priced": true,
@@ -116,7 +117,7 @@ contract.
 
 | Key | Type | Meaning |
 |---|---|---|
-| `schema` | string | `"wtft/session@3"`. **Adding a top-level key bumps it** — Amendment 1 set that rule for #116 and this amendment follows it, so a consumer pinning a version gets to notice rather than to silently read a shape it does not know. `@2` is #116 (`spawned`, `tree`); `@3` is #141 (`subagents[]`) — see Amendment 2. A consumer that only wants to know whether a given wtft can report subagents should still test for the key, since absence is meaningful here (see below) and a version string cannot carry that. |
+| `schema` | string | `"wtft/session@4"`. **Adding a top-level key bumps it — a NESTED one too** (Duppy, 2026-09-18, answer Y). `@2` is #116 (`spawned`, `tree`); `@3` is #141 (`subagents[]`); `@4` is #119's `total.untaggedCostUsd`; #89's `-s` no-TTY contract change is not a key change but rides the same bump (see Amendment 3). A consumer that only wants to know whether a given wtft can report subagents should still test for the `subagents[]` key, since absence is meaningful there (see below) and a version string cannot carry that. |
 | `session.path` | string | The session `.jsonl` this run read. |
 | `session.harness` | string \| null | Harness id whose parse adapter claims the session's first assistant turn — `"claude-code"`, `"pi"`, or an id registered out of tree through the #156 seam. `null` means **no claim**, and does not distinguish an empty session, one not written yet, a file that could not be read, and a format no registered harness understands. |
 | `session.taggerVersion` | string | `WTFT_TAGGER_VERSION` of the running binary — a dotted version such as `"2.7.2"`, which is also what appears in `tagPath`. |
@@ -144,8 +145,9 @@ contract.
 | `subagents[].meta` | object \| null | The `.meta.json` the harness writes beside a **Claude Code Task** transcript: `agentType` and `spawnDepth` always, and optionally `description`, `toolUseId`, `model`, `parentAgentId`, `isFork`. **`null` is a GAP, not a missing subagent** — the transcript is LISTED either way; it simply has no label. **Being listed here is not evidence that its cost is in `total`.** Discovery is a live filesystem read; counting is the tag file's business, written asynchronously by the daemon, and the two are independent. A transcript the daemon has not tagged yet appears here and is not yet in any total, and `meta` has no bearing on either. Pi children (which have no such file), and any harness release that stops writing one, land here — as does a file that exists but cannot be READ, which is a different kind of gap and is not yet distinguished from an absent one. `meta.model` is itself optional, so a null there is a gap too. Only `agentType` and `spawnDepth` are universal; `description` and `toolUseId` are absent on the Dynamic Workflow children, and a meta carrying just the two universal fields is still a meta. Counts move whenever a session spawns a subagent — `docs/spec-137-subagent-meta.md` carries one dated census rather than repeating ratios here. |
 | `uncounted` | object | The #149 blind spot: events the harness bills and writes no `usage` for. Counted, never priced, and deliberately **not** in `total`. Scanned on **every** `--json` run, so a zero means "looked, found none" rather than "nobody looked" — with one narrower gap, **#94**: the scan drops unparseable session lines silently, so a zero can also mean "could not read part of it". Fixing that adds a field; it does not change this one. (A no-op only on the `pending-session` arm, where there is no file yet; the `no-data` arm has a real session file and can find real billables in it.) Along with `spawned` and `subagents[]`, one of the three parts of the document that do not come from the aggregation. |
 | `compaction` | object | Compaction events seen and the tokens they freed — the rendered table's `Compaction:` line. Counted over **every** deduped interaction, tagged or not: it describes context freed, not spend, so the model-tag exclusion below does not apply to it. |
-| `untaggedInteractions` | int | Interactions excluded from `total`/`models`/`categories` because they carry no model id (`(unknown)` or `<synthetic>`) — the rendered table's "(N untagged interactions skipped)", or, when *every* interaction is untagged, its "No model-tagged interactions found (N untagged)." |
-| `notices[]` | array | `{ code, text }`. `code` is API; `text` is prose. Codes: `pending-session`, `no-data`, `unpriced-model`, `provisional`, `auto-selected-session`. |
+| `total.untaggedCostUsd` | number | `@4` (#119). The cost EXCLUDED from `total.costUsd` because it belongs to an untagged interaction (`untaggedInteractions` below) — sourced from the same per-interaction figures the bar chart bins for those turns. `total.costUsd + total.untaggedCostUsd` equals the chart's own running total within float accumulation error, the same tolerance "The one arithmetic guarantee", below, gives `costUsd`. |
+| `untaggedInteractions` | int | Interactions excluded from `total.costUsd`/`models`/`categories` because they carry no model id (`(unknown)` or `<synthetic>`) — the rendered table's "(N untagged interactions skipped)", or, when *every* interaction is untagged, its "No model-tagged interactions found (N untagged)." Its cost is `total.untaggedCostUsd`, not zero. |
+| `notices[]` | array | `{ code, text }`. `code` is API; `text` is prose. Codes: `pending-session`, `no-data`, `unpriced-model`, `provisional`. `auto-selected-session` was retired in `@4` (#89) — see Amendment 3: a machine caller now gets exit 10 instead of a silent auto-pick. |
 
 ### The one arithmetic guarantee
 
@@ -156,7 +158,7 @@ float accumulation error on `costUsd`.
 That holds because all three come from **one** aggregation over **one**
 deduplicated interaction set, and because all three apply the same exclusion:
 interactions with no model id are counted in `untaggedInteractions` and appear in
-none of them. `compaction` is the one field that does *not* apply that exclusion,
+none of them; their cost is `total.untaggedCostUsd` (#119). `compaction` is the one field that does *not* apply that exclusion,
 and it is not part of the guarantee.
 
 A category the tag file names that this build does not know — `_cat` reaches the
@@ -187,11 +189,11 @@ equality is unaffected.
 
 **The chart's total is still a different number, legitimately, for ONE reason:**
 the bar chart bins *every* interaction, so it includes the untagged spend this
-`total` excludes. That divergence predates #26 and remains — and a machine
-consumer **cannot currently size it**: `untaggedInteractions` is a count, and no
-field carries the excluded cost, so on a session with untagged turns `--json`
-under-reports "what this session cost" by an amount the document does not
-expose. **#119** owns that.
+`total` excludes. That divergence predates #26 and remains — but as of `@4`
+a machine consumer **can size it**: `total.untaggedCostUsd` carries exactly the
+excluded cost, so `total.costUsd + total.untaggedCostUsd` equals the chart's own
+running total. **#119**, closed by Amendment 3, is what added the field;
+`untaggedInteractions` stays a plain count of how many turns contributed to it.
 
 **`total.costUsd` changed meaning under an unchanged `schema`.** `wtft/session@1`
 shipped with the old arithmetic, and a program pinned to it now sees the number
@@ -257,7 +259,8 @@ carries. The table lives in `docs/manifests/wtft-cmd.json`, which is what
 | **2** | `wtft spawn-record` only: the call was wrong — a missing or unknown flag, a flag with no value, a malformed session id, an oversized field. Nothing was appended. The report path never returns 2. | n/a |
 | **3** | `wtft spawn-record` only: the record was valid and the ledger could not be written — usually a full disk. The edge is not recorded, so the child is **invisible** to the tree, not `unattributed` (which means an edge we have whose child we could not read). Any partial line left behind is reported as a counted `malformedLedgerLines` on the next read; nothing tries to repair it. | n/a |
 | **9** | Provisional (#443): a report was produced in full, but the total may still grow under the daemon. `provisional.provisional` is `true` and `provisional.reason` names the condition. | one JSON object |
-| **130** | The interactive session selector was cancelled with `q` or Ctrl-C — the SIGINT convention (128+2), not a wtft-specific code. `--json` never prompts, so it never returns this. | n/a |
+| **10** | `EXIT_SESSION_AMBIGUOUS` (#89): no interactive terminal, and either `-s <substring>` matched zero or several sessions, or no `-s` was given at all -- even when the picker's default scope (this worktree, last 20 minutes) holds exactly one session (#89, C2). Zero is included, which replaces the OLD exit 1 "no session found" for this no-`-s`/no-TTY case. Every candidate is named on stderr. | nothing |
+| **130** | The interactive session picker was cancelled with `q` or Ctrl-C — the SIGINT convention (128+2), not a wtft-specific code. As of `@4` (#89), an interactive terminal still gets the picker under `--json` (drawn to stderr — see "Session selection" above), so `--json` DOES still return this when a human cancels it; it is exit 10 above, not 130, that `--json` cannot combine with a prompt. | n/a |
 
 Codes 0 and 9 both carry a complete object; a consumer that wants only settled
 numbers checks `$?` **or** `.provisional.provisional` and gets the same answer.
@@ -329,13 +332,18 @@ Giving those five a machine-readable mode is real work with its own contract —
 before this branch is reached, so `--json -F` re-parses exactly as the rendered
 path would.
 
-**Session selection does not prompt.** `selectSessionPrompt` writes its menu and
-its non-interactive candidate list to *stdout*, and exits 130 on `q`/Ctrl-C. Under
-`--json` neither can be allowed, so when several sessions are discovered and no
-`-s` is given, `--json` takes the newest — the same one the non-interactive
-fallback resolves to — reports that on stderr, and records an
-`auto-selected-session` notice naming how many it chose between. A caller wanting
-determinism passes `-s`; the notice is what tells it that it should.
+**Session selection, as of `@4` (#89 — see Amendment 3 for the full contract).**
+This paragraph described `@1`–`@3`'s behaviour — `--json` never prompted, and
+with several sessions discovered and no `-s` it silently took the newest,
+recording an `auto-selected-session` notice — and that behaviour is retired.
+Today: an interactive terminal still gets the scoped session picker even under
+`--json` (drawn to stderr, so stdout stays one clean object, and `q`/Ctrl-C
+still exits 130). With **no** interactive terminal, wtft selects only when
+`-s` matches exactly one session, and otherwise exits `EXIT_SESSION_AMBIGUOUS`
+(10), naming every candidate on stderr and nothing on stdout. That includes no
+`-s` with exactly one session in the default scope (#89, C2). A caller wanting
+determinism still passes `-s`; on a non-interactive caller it is now required
+whenever more than one session could match.
 
 **`--json` is CLI-only**, in the sense that the Pi extension never reads it: the
 parser is shared, so the flag is accepted there, but `extensions/wtft.ts` never
@@ -346,7 +354,7 @@ to write an object to.
 
 ```console
 $ node bin/wtft.mjs -s <fixture> --json \
-    | jq -e '.schema == "wtft/session@3" and (.total.outputTokens|type) == "number"'
+    | jq -e '.schema == "wtft/session@4" and (.total.outputTokens|type) == "number"'
 ```
 
 exits 0, and `tests/wtft-26-json.test.ts` asserts, on a fixture, in eleven
@@ -401,7 +409,7 @@ file-level scope says fix or file, and the Action column says which.
 | Artifact | Claim | Contradicted by | Covered by a test? | Action |
 |---|---|---|---|---|
 | `docs/manifests/wtft-cmd.json` | had no exit-code table at all | `bin/wtft.ts` exits 0, 1, 9; `session-selector.ts` exits 130 | ✅ `wtft-26-json.test.ts` §7 | Added `exitCodes` (0/1/9/**130**), rendered by `--help` |
-| `bin/wtft.ts` under `--json` | "exactly one JSON object on stdout" | `selectSessionPrompt` `console.log`s its candidate list to **stdout** before the object, and exits 130 on Ctrl-C | ✅ `wtft-26-json.test.ts` §1, §7 | **Code fixed**: `--json` never prompts; takes the newest, notice `auto-selected-session` |
+| `bin/wtft.ts` under `--json` | "exactly one JSON object on stdout" | `selectSessionPrompt` `console.log`s its candidate list to **stdout** before the object, and exits 130 on Ctrl-C | ✅ `wtft-26-json.test.ts` §1, §7 | **Code fixed** (`@1`, historical): `--json` never prompts; takes the newest, notice `auto-selected-session`. **Superseded by `@4` (#89) — see Amendment 3**: `--json` now DOES prompt on an ambiguous population with an interactive terminal (drawn to stderr), the `auto-selected-session` notice is retired, and the no-TTY case is exit 10, not a silent auto-pick. Left as written rather than rewritten, since this row records what `@1` actually fixed at the time (pr-review round 3, Medium: an earlier state of this row read as a current claim). |
 | `extensions/lib/wtft-renderer.ts` `computeSessionSummary` | `sum(categories) === total` | `_cat` reaches `classifyInteraction` unvalidated, so an unknown category was dropped from `categories[]` | ✅ `wtft-26-json.test.ts` §3 | **Code fixed**: folded into `other` |
 | `extensions/lib/wtft-json.ts` | `uncounted` defaulted to zeros when a caller skipped the scan | "not scanned" was indistinguishable from "none found" | ✅ `wtft-26-json.test.ts` §5 | **Code fixed**: scanned on every path |
 | `extensions/lib/wtft-parser.ts` | — | this branch inserted `detectSessionHarness`'s docstring **between** `scanUncountedBillables`'s docstring and its function, orphaning it | n/a | **Code fixed**: moved below |
@@ -503,3 +511,59 @@ Pi siblings matched by `parentSession` are real subagents with no label.
 
 Discovery, the `.meta.json` contract, and the 493-file census behind the
 required-field set: `docs/spec-137-subagent-meta.md`.
+
+## Amendment 3 — `wtft/session@4`: `total.untaggedCostUsd`, and the `-s` no-TTY contract change (#89, #119, 2026-09-18)
+
+`@4` carries two changes at once, landing in one branch and one bump — the
+scoped-picker redesign (#89) and the untagged-cost field (#119) were decided
+together and shipped together. Full behaviour list:
+`docs/spec-89-scoped-picker.md`.
+
+**`total.untaggedCostUsd` is a NESTED key, and it bumps `schema` on its own
+merits (Duppy, 2026-09-18, answer Y).** Amendment 1's "adding keys is the
+documented bump condition" did not say top-level only; this amendment is what
+makes that explicit, because #119 is the first key this document has added one
+level down rather than at the top. `total` itself was already present on every
+run, so a consumer reading an unversioned `total.costUsd` sees no shape change
+at all — only a consumer that iterates `total`'s own keys, or that assumes
+`total` is a plain `TokenTotals` (five token fields, `costUsd`), would notice
+anything moved. `schema` is the only way to ask this, same as every field
+addition before it.
+
+**Where the field's value comes from** — decided 2026-09-18, and measured the
+same day: the parser already prices every turn by model and by date (intro
+rates, surge windows) and bakes the result into the tag file's `c`. An untagged
+turn carries no real model id (`<synthetic>` or none), so it is priced at the
+default fallback rate like any unpriced model; across 55 untagged tag lines in
+25 tag files on the real corpus, every one measured `c: 0`, and the #119 test's
+fixture gives one real usage and so a non-zero `c`. `total.untaggedCostUsd` sums that same `c` (`i.cost` once parsed) for
+every untagged interaction, **plus `i.serverToolCost` when present** — the
+`serverToolCost` half is this spec's own addition to the decision's wording,
+not measured on the corpus (nothing there carries it), added so the closer
+below holds **structurally**, not merely because every measured case happens to
+be zero. `docs/spec-89-scoped-picker.md` U2 records the same reasoning.
+
+**Closer:** on a fixture with one `<synthetic>` turn among tagged ones — the
+exact shape `tests/wtft-90-total-includes-server-tool-cost.test.ts` TEST 5
+built and, at the time, could not assert against —
+`total.costUsd + total.untaggedCostUsd` equals the chart's own running total,
+to within half a cent: the comparison scrapes the chart's own two-decimal
+`formatCost` display, the same tolerance `tests/wtft-90-…`'s own chart/TOTAL
+comparisons use. `tests/wtft-119-untagged-cost.test.ts` is
+that assertion.
+
+**`untaggedInteractions` is unchanged** — still a plain count, per #119's
+direction B (the compatible, additive option; direction A would have replaced
+it with `{ interactions, costUsd }` and was not chosen).
+
+**The `-s` no-TTY contract change (#89, E3/E4).** Before `@4`, `--json` with no
+interactive terminal and more than one candidate auto-selected the newest and
+raised an `auto-selected-session` notice. `@4` retires both the notice code and
+the behaviour: with no interactive terminal, wtft selects only when `-s
+<substring>` matches EXACTLY one session; zero or several exit
+`EXIT_SESSION_AMBIGUOUS` (10) instead, naming every match on stderr, with
+nothing on stdout — the same "under `--json`, stdout carries nothing" contract
+exit 1 already carries for an error. `notices[]`'s vocabulary shrinks by one
+code as a result: `pending-session`, `no-data`, `unpriced-model`,
+`provisional`. This is a genuine behaviour change under a bumped `schema`
+rather than a silent one, which is the whole reason `@3` → `@4` exists.

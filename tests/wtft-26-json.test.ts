@@ -20,7 +20,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
-import { WTFT_TAGGER_VERSION, EXIT_PROVISIONAL, WTFT_JSON_SCHEMA } from "../bin/wtft.mjs";
+import { WTFT_TAGGER_VERSION, EXIT_PROVISIONAL, EXIT_SESSION_AMBIGUOUS, WTFT_JSON_SCHEMA } from "../bin/wtft.mjs";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("26-json");
@@ -40,7 +40,7 @@ const CATEGORY_NAMES = [
 /** The schema string, likewise written out rather than compared to its own
  *  import. `WTFT_JSON_SCHEMA` is imported so §1 can prove the CLI emits the
  *  value the module exports, and this literal pins what that value must be. */
-const SCHEMA = "wtft/session@3";
+const SCHEMA = "wtft/session@4";
 
 const RED = "\x1b[31m", GREEN = "\x1b[32m", RESET = "\x1b[0m";
 let passed = 0, failed = 0;
@@ -423,6 +423,11 @@ console.log("\n7. the exit-code table is a contract");
 		.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
 	const used = new Set<number>();
 	for (const m of sources.matchAll(/process\.exit\((\d+)\)/g)) used.add(Number(m[1]));
+	// Named-constant form too (#89): `process.exit(EXIT_SESSION_AMBIGUOUS)` is
+	// invisible to the digit-only pattern above, which would have let a real,
+	// undocumented exit code slip past this guard exactly the way the comment
+	// two lines up warns about for EXIT_PROVISIONAL's ternary form.
+	if (/process\.exit\(EXIT_SESSION_AMBIGUOUS\)/.test(sources)) used.add(EXIT_SESSION_AMBIGUOUS);
 	// Both the literal and the ternary form. `process.exitCode = cond ? A : 0`
 	// is what the provisional branch actually writes, and a `= (\d+)` pattern
 	// does not see it.

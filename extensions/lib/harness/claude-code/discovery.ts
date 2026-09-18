@@ -30,13 +30,13 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 
-import type { HarnessDiscovery, SessionCandidate } from "../types.ts";
+import type { DiscoverScopeOptions, HarnessDiscovery, SessionCandidate } from "../types.ts";
 import {
 	resolveLastCwd,
 	countDirRead,
 	cwdSlugVariants,
 } from "../session-cwd.ts";
-import { fanOutCwd } from "../worktrees.ts";
+import { fanOutCwd, resolveBranchCheckout } from "../worktrees.ts";
 import { buildDisplayPath } from "@princess-pi/libs/session-path-shortener";
 
 const ID = "claude-code";
@@ -133,19 +133,189 @@ function toCandidate(file: string, projectSlug: string): SessionCandidate | null
  * `-s` was 98% of that command's wall clock, and a bounded scan of thousands of
  * files is still a scan of thousands of files.
  *
- * A transcript with no `cwd` at all resolves to null and matches nothing, which
- * is what keeps Pi transcripts out of this entirely.
+ * A transcript with no `cwd` at all resolves to null and matches nothing.
  */
 function matchesRecordedCwd(file: string, targets: Set<string>): boolean {
 	const last = resolveLastCwd(file);
 	return last !== null && targets.has(last);
 }
 
+/** Insert-or-replace-if-newer into the dedup-by-session-id map every discover
+ *  path shares — the same session can be reachable through more than one arm
+ *  of a union rule, and the newest mtime copy wins. */
+function upsertCandidate(into: Map<string, SessionCandidate>, candidate: SessionCandidate | null): void {
+	if (!candidate) return;
+	const id = sessionIdOf(candidate.path);
+	const existing = into.get(id);
+	if (!existing || candidate.timestamp > existing.timestamp) into.set(id, candidate);
+}
+
+/**
+ * The pre-#89 default: fan out across every checkout of `target`'s repo, union
+ * the physical-slug arm with the last-cwd tail arm, no time bound. Preserved
+ * byte-for-byte in BEHAVIOUR (not literally in code shape, since it now shares
+ * `upsertCandidate`) so every caller that omits `scopeOpts` sees exactly
+ * today's candidate set — see the `discover` docstring in `../types.ts`.
+ */
+function discoverLegacy(root: string, target: string): SessionCandidate[] {
+	const fan = fanOutCwd(target);
+	const targets = new Set(fan.dirs);
+	const targetSlugs = new Set<string>();
+	for (const dir of fan.dirs) {
+		for (const variant of cwdSlugVariants(dir)) targetSlugs.add(variant);
+	}
+
+	let projectDirs: string[];
+	try {
+		projectDirs = fs.readdirSync(root, { withFileTypes: true })
+			.filter(e => e.isDirectory())
+			.map(e => e.name);
+	} catch {
+		return [];
+	}
+
+	const bySessionId = new Map<string, SessionCandidate>();
+
+	for (const slug of projectDirs) {
+		const physicalMatch =
+			targetSlugs.has(slug) ||
+			fan.slugPrefixes.some(prefix => slug.startsWith(prefix));
+		const files: string[] = [];
+		collect(path.join(root, slug), slug, files);
+
+		for (const file of files) {
+			if (!physicalMatch && !matchesRecordedCwd(file, targets)) continue;
+			upsertCandidate(bySessionId, toCandidate(file, slug));
+		}
+	}
+
+	return [...bySessionId.values()];
+}
+
+/**
+ * The #89 scoped path — see `DiscoveryScope`'s own docstring in `../types.ts`
+ * for what each scope means and costs. `windowMs` bounds every scope
+ * uniformly: a transcript outside the window is skipped after one `stat`,
+ * before any tail read the union arm would otherwise pay for.
+ */
+function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions): SessionCandidate[] {
+	const { scope, windowMs } = opts;
+	const now = Date.now();
+	const withinWindow = (mtimeMs: number) => windowMs === null || now - mtimeMs <= windowMs;
+
+	let projectDirs: string[];
+	try {
+		projectDirs = fs.readdirSync(root, { withFileTypes: true })
+			.filter(e => e.isDirectory())
+			.map(e => e.name);
+	} catch {
+		return [];
+	}
+
+	const bySessionId = new Map<string, SessionCandidate>();
+
+	if (scope === "all") {
+		for (const slug of projectDirs) {
+			const files: string[] = [];
+			collect(path.join(root, slug), slug, files);
+			for (const file of files) {
+				let stat: fs.Stats;
+				try { stat = fs.statSync(file); } catch { continue; }
+				if (!withinWindow(stat.mtimeMs)) continue;
+				upsertCandidate(bySessionId, toCandidate(file, slug));
+			}
+		}
+		return [...bySessionId.values()];
+	}
+
+	// "worktree", "worktrees" and "branch" all narrow to a target-dir set
+	// first, then apply the SAME physical-match-or-union loop below — they
+	// differ only in which directories are targets and whether the union arm
+	// is consulted at all.
+	let targetDirs: string[];
+	let useUnionArm: boolean;
+	// Only "worktrees" ever calls fanOutCwd (see the branch below), so only it
+	// can populate `fallbackSlugPrefixes` — "worktree" and "branch" never
+	// reach the `if (fan.usedFallback)` check at all, which is what actually
+	// gates this (not a `slugPrefixes.length` check; corrected, pr-review
+	// round 2 — an earlier draft of this comment described a length check
+	// this code has never performed). See fanOutCwd's own
+	// CwdFanOut.usedFallback docstring in ../worktrees.ts for what triggers
+	// the fallback (git unusable).
+	let fallbackSlugPrefixes: string[] = [];
+	if (scope === "worktree") {
+		targetDirs = [target];
+		useUnionArm = false;
+	} else if (scope === "branch") {
+		// A documented no-op (S4 / Interpretation notes): fall back to the bare
+		// target directory rather than silently widening to something else.
+		targetDirs = [resolveBranchCheckout(target) ?? target];
+		useUnionArm = false;
+	} else {
+		const fan = fanOutCwd(target);
+		targetDirs = fan.dirs;
+		useUnionArm = true;
+		// discoverLegacy's physical-match arm also accepts a slug PREFIX when
+		// git could not enumerate the repo's checkouts (fan.usedFallback) — the
+		// in-tree layout's own slug still starts with the main clone's, even
+		// though fanOutCwd itself couldn't confirm it via git. Omitting this
+		// here would have silently narrowed "worktrees" scope exactly when git
+		// is unusable, the one case that most needs the fallback (found in
+		// spec-reconcile for #89, a genuine coverage gap rather than a doc
+		// drift — fixed here, not just noted).
+		if (fan.usedFallback) fallbackSlugPrefixes = fan.slugPrefixes;
+	}
+
+	const targetSet = new Set(targetDirs);
+	const targetSlugs = new Set<string>();
+	for (const dir of targetDirs) {
+		for (const variant of cwdSlugVariants(dir)) targetSlugs.add(variant);
+	}
+
+	for (const slug of projectDirs) {
+		const physicalMatch = targetSlugs.has(slug) ||
+			fallbackSlugPrefixes.some(prefix => slug.startsWith(prefix));
+
+		// SKIP THE DIRECTORY ENTIRELY when it cannot possibly contribute
+		// (pr-review, Medium): a non-matching slug under "worktree"/"branch"
+		// (`useUnionArm` false) has no way to match — the union arm that could
+		// have found it anyway never runs for those two scopes — so reading its
+		// directory and stat-ing every file in it would cost exactly the
+		// per-transcript work S1/S5 promise a bare `wtft` launch never pays.
+		// This is what makes the ~7 ms measurement in session-cwd.ts's header
+		// (and types.ts's DiscoveryScope docstring) true of the CODE, not just
+		// of a corpus where every non-matching directory happened to be cheap.
+		if (!physicalMatch && !useUnionArm) continue;
+
+		const files: string[] = [];
+		collect(path.join(root, slug), slug, files);
+
+		for (const file of files) {
+			let stat: fs.Stats;
+			try { stat = fs.statSync(file); } catch { continue; }
+			if (!withinWindow(stat.mtimeMs)) continue;
+
+			let matched = physicalMatch;
+			// The union (last-cwd tail) arm only ever runs for a NON-physical
+			// match, and only under "worktrees" — this is the cost bound S1/S5
+			// exist for: "worktree" and "branch" scope never pay a tail read at
+			// all, and "worktrees" only pays one for a transcript already inside
+			// the active time window.
+			if (!matched && useUnionArm) matched = matchesRecordedCwd(file, targetSet);
+			if (!matched) continue;
+
+			upsertCandidate(bySessionId, toCandidate(file, slug));
+		}
+	}
+
+	return [...bySessionId.values()];
+}
+
 export const discovery: HarnessDiscovery = {
 	id: ID,
 	label: "Claude",
 
-	discover(targetCwd: string | null): SessionCandidate[] {
+	discover(targetCwd: string | null, scopeOpts?: DiscoverScopeOptions): SessionCandidate[] {
 		const root = projectsDir();
 		if (!fs.existsSync(root)) return [];
 
@@ -154,57 +324,7 @@ export const discovery: HarnessDiscovery = {
 		// here rather than in shared code so each harness keeps its own.
 		const target = path.resolve(targetCwd || process.cwd());
 
-		// #145: "here" is every checkout of this repo, not one directory. A cwd
-		// outside any repo fans out to itself alone, so `~` still means `~`.
-		// --dir picks the anchor; the policy is the same either way.
-		const fan = fanOutCwd(target);
-		const targets = new Set(fan.dirs);
-		const targetSlugs = new Set<string>();
-		for (const dir of fan.dirs) {
-			for (const variant of cwdSlugVariants(dir)) targetSlugs.add(variant);
-		}
-
-		let projectDirs: string[];
-		try {
-			projectDirs = fs.readdirSync(root, { withFileTypes: true })
-				.filter(e => e.isDirectory())
-				.map(e => e.name);
-		} catch {
-			return [];
-		}
-
-		// Dedup by session id — the same session can be reachable through both
-		// halves of the union (its own dir matches AND its last-cwd matches).
-		// Newest mtime wins.
-		const bySessionId = new Map<string, SessionCandidate>();
-
-		for (const slug of projectDirs) {
-			// Physical arm: any encoding (#144) of any checkout (#145). The
-			// prefix arm only exists when git could not enumerate the checkouts.
-			const physicalMatch =
-				targetSlugs.has(slug) ||
-				fan.slugPrefixes.some(prefix => slug.startsWith(prefix));
-			const files: string[] = [];
-			collect(path.join(root, slug), slug, files);
-
-			for (const file of files) {
-				// Union rule: physical slug match OR the transcript's own
-				// recorded location. Union, not replacement — a last-cwd-only
-				// rule would DROP the session filed under a repo-root slug whose
-				// cwd is a subdir, which is a session the current selector finds.
-				if (!physicalMatch && !matchesRecordedCwd(file, targets)) continue;
-
-				const candidate = toCandidate(file, slug);
-				if (!candidate) continue;
-				const id = sessionIdOf(file);
-				const existing = bySessionId.get(id);
-				if (!existing || candidate.timestamp > existing.timestamp) {
-					bySessionId.set(id, candidate);
-				}
-			}
-		}
-
-		return [...bySessionId.values()];
+		return scopeOpts ? discoverScoped(root, target, scopeOpts) : discoverLegacy(root, target);
 	},
 
 	resolveSessionById(sessionId: string): string | null {

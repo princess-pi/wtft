@@ -117,6 +117,83 @@ export interface CwdFanOut {
 }
 
 /**
+ * The current branch checked out at `dir`, or null when it can't be read —
+ * no git, not a repo, or a detached HEAD (`git rev-parse --abbrev-ref HEAD`
+ * prints the literal string `HEAD` there, which is not a branch name).
+ * `WTFT_NO_GIT=1` short-circuits to null, the same test seam {@link
+ * listWorktreeDirs} uses.
+ */
+export function currentBranch(dir: string): string | null {
+	if (process.env.WTFT_NO_GIT === "1") return null;
+	try {
+		const out = execFileSync("git", ["-C", dir, "rev-parse", "--abbrev-ref", "HEAD"], {
+			encoding: "utf8",
+			timeout: GIT_TIMEOUT_MS,
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		const branch = out.trim();
+		return branch && branch !== "HEAD" ? branch : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Every checkout of `repoRoot`'s repo, mapped to the branch it has checked
+ * out — the `branch` field `git worktree list --porcelain` prints per entry,
+ * stripped of its `refs/heads/` prefix. A checkout in detached HEAD carries no
+ * `branch` line at all and is simply absent from the map, same as a bare
+ * `worktree` entry `listWorktreeDirs` already treats as "answer unavailable".
+ */
+export function worktreeBranches(repoRoot: string): Map<string, string> {
+	const map = new Map<string, string>();
+	if (process.env.WTFT_NO_GIT === "1") return map;
+	let out: string;
+	try {
+		out = execFileSync("git", ["-C", repoRoot, "worktree", "list", "--porcelain"], {
+			encoding: "utf8",
+			timeout: GIT_TIMEOUT_MS,
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+	} catch {
+		return map;
+	}
+	let currentDir: string | null = null;
+	for (const line of out.split("\n")) {
+		if (line.startsWith("worktree ")) {
+			currentDir = path.resolve(line.slice("worktree ".length).trim());
+		} else if (line.startsWith("branch ") && currentDir) {
+			map.set(currentDir, line.slice("branch ".length).trim().replace(/^refs\/heads\//, ""));
+			currentDir = null;
+		} else if (line === "") {
+			currentDir = null;
+		}
+	}
+	return map;
+}
+
+/**
+ * The single checkout of `target`'s repo that has `target`'s OWN current
+ * branch checked out — the `"branch"` discovery scope (#89, Ctrl+B).
+ *
+ * Returns null — a documented no-op the caller falls back on, never a guess —
+ * whenever any step can't answer: not a repo, git unusable, a detached HEAD,
+ * or (git refusing two worktrees on the same branch, so this is a defensive
+ * case rather than one seen in practice) no checkout in the map reports that
+ * branch at all.
+ */
+export function resolveBranchCheckout(target: string): string | null {
+	const root = findRepoRoot(target);
+	if (!root) return null;
+	const branch = currentBranch(target);
+	if (!branch) return null;
+	for (const [dir, b] of worktreeBranches(root)) {
+		if (b === branch) return dir;
+	}
+	return null;
+}
+
+/**
  * Resolve one target directory into the set of directories that share its repo.
  *
  * Symmetry is the property that matters: `git worktree list` answers the same

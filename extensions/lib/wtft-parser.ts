@@ -1235,7 +1235,7 @@ export function readSubagentMeta(transcriptPath: string): SubagentMeta | null {
 		// them apart. `null` is documented to consumers as "this harness wrote no
 		// record", so an unreadable file currently reports a confident absence.
 		// Narrowing it needs a new `notices[]` code, which is additive under
-		// `wtft/session@3`; filed rather than smuggled into this branch.
+		// `wtft/session@4`; filed rather than smuggled into this branch.
 		return null;
 	}
 	let obj: unknown;

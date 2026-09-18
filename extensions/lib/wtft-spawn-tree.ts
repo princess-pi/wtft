@@ -383,7 +383,18 @@ export function computeSpawnTree(
 				// descendant and again as its own resolved edge. The root's
 				// guard does not reach here; each descendant needs its own.
 				const parsed = parseSessionFile(file);
-				total = computeSessionSummary(parsed).total;
+				// `.total` is typed `SessionTotal` (#119) — a `TokenTotals`
+				// SUPERSET carrying `untaggedCostUsd` too. TypeScript accepts
+				// the assignment structurally, but this `total` ends up
+				// serialised verbatim as `spawned.edges[].total` (below) and
+				// copied into `countedTotals` (`{...total}` a few lines down),
+				// which would leak `untaggedCostUsd` into a field the spec
+				// (docs/spec-26-json.md's `total.untaggedCostUsd` row; spec-89 U1) says never carries it — nothing
+				// else here reaches `total` through `addTotals`/`emptyTotals`,
+				// which strip an unknown key by construction, but a direct
+				// assignment does not. Drop it explicitly (pr-review, #89/#119).
+				const { untaggedCostUsd: _untaggedCostUsd, ...cleanTotal } = computeSessionSummary(parsed).total;
+				total = cleanTotal;
 				for (const id of collectSelfAttributedSessionIds(file, parsed)) {
 					const already = countedTotals.get(id);
 					if (already) {

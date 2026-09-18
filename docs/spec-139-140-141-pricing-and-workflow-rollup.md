@@ -14,8 +14,7 @@ status line (authoritative) showed **$79.43**. Two independent causes: (a) `clau
 matches nothing in `MODEL_PRICING` nor the `haiku`/`opus` substring fallbacks, so it
 silently prices at the Sonnet-tier initializer defaults ($3/$15 vs the real $10/$50) —
 and nothing warns that the number is a guess; (b) Dynamic Workflow transcripts under
-`<session>/subagents/workflows/wf_*/agent-*.jsonl` are never discovered because
-`walkSubagentDir` only recurses into directories named `subagents`/`ns`/`agent-*`.
+`<session>/subagents/workflows/wf_*/agent-*.jsonl` are never discovered.
 
 ## Scope
 
@@ -92,7 +91,7 @@ Notes:
 
 `walkSubagentDir` (`extensions/lib/wtft-parser.ts`) recurses into **all**
 subdirectories instead of only `subagents`/`ns`/`agent-*`, and the `agent-*.jsonl` file
-filter still gates what is collected. (#148 later removed the depth cap: each directory
+filter still gates what is collected. (The depth cap was later removed: each directory
 is visited once by real path, which bounds the walk without cutting transcripts off.) This picks up
 `subagents/workflows/wf_<runId>/agent-*.jsonl` and future harness layout changes.
 

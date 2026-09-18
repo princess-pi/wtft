@@ -1457,9 +1457,8 @@ export function discoverSubagentSessionFiles(
  * subagents/ subdirectory (Claude Code nested subagent convention).
  *
  * Returns the FIRST per-entry stat failure encountered (its own or a nested
- * frame's), or null when every entry was stat-able — see the per-entry catch
- * for why that class is REPORTED rather than thrown like the dir-level
- * readdir failures below. */
+ * frame's) — see the per-entry catch for why that class is REPORTED rather
+ * than thrown like the dir-level readdir failures below. */
 function walkSubagentDir(
 	dir: string,
 	files: string[],
@@ -2023,9 +2022,9 @@ export function attributeClaudeSubAgentCosts(
  * both — and the tree would then bill it twice, once in `total` and once in
  * `spawned.total`. Billing twice is the expensive direction to be wrong in.
  *
- * DISCOVERY ONLY, never a parse: this walks the same two discoveries the
- * attribution pass uses and keeps the basenames, so it costs directory reads
- * rather than transcript reads. A discovery that fails contributes nothing —
+ * DISCOVERY ONLY, never a parse: it keeps the basenames the two discoveries
+ * produce, and takes an already-discovered list when the caller has one. A
+ * discovery that fails contributes nothing —
  * a child we cannot even enumerate was not attributed to self either, so the
  * walk treating it as fair game is the correct fallback, not a guess.
  */

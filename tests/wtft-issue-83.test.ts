@@ -18,11 +18,7 @@ import {
 	deduplicateInteractions,
 } from "../bin/wtft.mjs";
 
-// --- MOCK functions (mirror extensions/wtft.ts exactly) ---
-
-// Round 6: the shared discovery helper now returns { files, unreadable } —
-// the report shape the claude half established in round 5, applied to the
-// shared function. The mock mirrors the extension's current shape.
+// --- MOCK functions ---
 function discoverSubagentSessionFiles(sessionPath: string): { files: string[]; unreadable: Error | null } {
 	const files: string[] = [];
 	const sessionDir = path.dirname(sessionPath);

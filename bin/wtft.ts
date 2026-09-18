@@ -379,9 +379,9 @@ export const EXIT_SESSION_AMBIGUOUS = 10;
 // ---
 // SHARED WORDING (#26) — one sentence, two output modes.
 // ---
-// `--json` carries the same human prose in `notices[]` that the rendered path
-// prints. Two literals would be two things to reword, and the reword that
-// reached only one of them would be invisible to a reader of the other.
+// A sentence that reaches both modes is ONE literal: two would be two things
+// to reword, and the reword that reached only one of them would be invisible
+// to a reader of the other.
 //
 // WHICH STREAM differs by mode, deliberately: the pending-session and no-data
 // sentences are the rendered path's only OUTPUT, so they go to stdout there;
@@ -923,7 +923,7 @@ async function main() {
 			return (discoveryCache = discoverSubagentSessionFiles(finalSessionPath));
 		} catch (err) {
 			// The DIR-level throw. Cache it as "nothing discovered, and we know
-			// why", so the second caller cannot re-run it and disagree.
+			// why", so a later caller cannot re-run it and disagree.
 			return (discoveryCache = { files: [], unreadable: err instanceof Error ? err : new Error(String(err)) });
 		}
 	};

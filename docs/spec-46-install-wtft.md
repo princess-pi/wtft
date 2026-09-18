@@ -72,7 +72,7 @@ Resolving only the parent was the bug — it produced exactly the self-comparing
 | `1` | Drift: an artifact is missing, stale, not executable, or **not built** (`no-source`); or `--dir` could not be created (`no-dir`) | run `install-wtft`, or fix the directory |
 | `2` | In sync but **shadowed** on PATH by a different `wtft` | the printed `rm` |
 | `3` | The build failed | read the build output on stderr |
-| `4` | In sync, but a config file is still at the old `princess-pi-tools` path (status `config-left`, #156) | in install mode, EITHER the new path already had a file (declined) OR the move was attempted and failed partway (`mkdir`/`mktemp`/`cp`/`mv`/`rm` — a "could not move" stderr line names it) — either way, resolve which copy is authoritative and remove the other by hand; in `--check` mode, run `install-wtft` |
+| `4` | In sync, but a config file is still at the old `princess-pi-tools` path (status `config-left`, #156) | in install mode, EITHER the new path already had a DIFFERENT file (a real conflict — declined) OR the copy itself failed partway (`mkdir`/`mktemp`/`cp`/`mv` — a "could not move" stderr line names it; a failure to remove the OLD file after a successful copy is reported as `moved`, not this, and self-heals on the next run) — either way, resolve which copy is authoritative and remove the other by hand; in `--check` mode, run `install-wtft` |
 | `64` | Bad usage: unknown argument, `--dir` with no directory, `--dir` followed by a flag **or given an empty string**, or no `--dir` on a host with `HOME` unset | — |
 
 `1` and `64` are chosen to match `install-workflow-tools` so the two installers do not
@@ -95,14 +95,37 @@ and `princess-pi/wtft#156`. `install-wtft` carries the one-time migration: in in
 it moves each of `wtft.json` → `config.json`, `token-budget.json` → `token-budget.json`,
 `wtft-pricing.json` → `pricing.json`, and `wtft-harnesses.json` → `harnesses.json`, from
 `$XDG_CONFIG_HOME/princess-pi-tools/` (or `~/.config/princess-pi-tools/` when
-`XDG_CONFIG_HOME` is unset) to the equivalent path under `.../wtft/` — but only when the new
-path does not already have a file, so it never silently overwrites either copy. `--check`
-never mutates; it only reports what would move or what is already left behind. There is no
-runtime fallback read of the old path anywhere in wtft — a file left there is invisible to
-the tool until this script, or a human, moves it. The `--json` document's `configMigration`
-array carries one `{from, to, state}` record per file, `state` one of `moved` / `left` /
-`none`. Tested in `tests/wtft-46-install-wtft.test.ts` §9 (V9a–V9d) and mutation-proofed as
-M4 below.
+`XDG_CONFIG_HOME` is unset) to the equivalent path under `.../wtft/`. It never overwrites a
+DIFFERENT file already at the new path — that is a real conflict, and a human decides which
+copy is authoritative. A file already at the new path that is BYTE-IDENTICAL to the old one
+is not a conflict, though: it is treated as a stale duplicate (almost always the tail of a
+previous move whose cleanup step failed, see below) and the old copy is removed. `--check`
+never mutates either way; it only reports what would move, what is a stale duplicate, or
+what is a real conflict left behind. There is no runtime fallback read of the old path
+anywhere in wtft — a file left there is invisible to the tool until this script, or a human,
+moves it. The `--json` document's `configMigration` array carries one `{from, to, state}`
+record per file, `state` one of `moved` / `left` / `none`. Tested in
+`tests/wtft-46-install-wtft.test.ts` §9 (V9a–V9f) and mutation-proofed as M4 (§V7 above).
+
+**The move can copy the file to the new path and then fail to remove the old one** — a
+directory that permits writing/renaming into it but not unlinking from it is a real
+permission shape. That is reported as `moved`, not `left`: the data is safely at the new
+path, which is what `moved` promises, and the failure is noted on stderr rather than
+treated as a hard failure that could never self-correct. Without this (PR review, round 2),
+the NEXT run would find the new path occupied and the two files byte-identical, hit the
+stale-duplicate case above, and retry — so in practice this self-heals on the very next run
+regardless, but the FIRST run reporting the whole migration as failed when the data had
+already safely arrived was misleading and worth fixing directly. V9f drives this exact
+sequence: `chmod 555` the old directory, install (reports `moved`, old file survives),
+restore the permission, install again (the stale duplicate is now gone).
+
+**Known limitation, not covered here:** only the single GLOBAL directory
+(`$XDG_CONFIG_HOME/princess-pi-tools/`) is migrated — a project-local WALK-UP override under
+the old name (`<dir>/.princess-pi-tools/wtft.json` or `.../token-budget.json`) is not
+detected or moved, matching #156's own stated scope (global only). See
+`extensions/lib/wtft-config-dir.ts`'s module docstring for the same note, load-bearing
+there because that file is the one place documenting which of the four config files walk up
+at all.
 
 ### Streams
 

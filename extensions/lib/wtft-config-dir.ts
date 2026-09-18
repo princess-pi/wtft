@@ -21,6 +21,23 @@
  *   `getHarnessConfigPath`) resolve the XDG global path directly and never
  *   walk up — a `.wtft/pricing.json` or `.wtft/harnesses.json` next to a
  *   project is silently never read.
+ *
+ *   KNOWN LIMITATION, not covered by `bin/install-wtft`'s migration: a
+ *   project-local WALK-UP override under the pre-#156 name
+ *   (`<dir>/.princess-pi-tools/wtft.json` or `.../token-budget.json`) is not
+ *   detected or moved — only the single GLOBAL directory
+ *   (`$XDG_CONFIG_HOME/princess-pi-tools/`) is, matching #156's own stated
+ *   scope. A project relying on such an override silently stops finding it
+ *   after upgrading; there is no `config-left`, no exit code, and no
+ *   `--check` line for this case, unlike the global one. Migrating an
+ *   arbitrary set of project directories is not something a one-shot,
+ *   whole-host install script can discover on its own.
+ *
+ *   `bin/wtft-daemon.ts` makes NO direct `@princess-pi/libs/config` call of
+ *   its own (verified: no `readConfig`/`loadConfig`/`writeConfig`/`hasConfig`
+ *   import in that file) — it reaches config only through
+ *   `loadUserPricing()`/`loadExternalHarnesses()`, both fixed here via their
+ *   own resolvers, so it needed no direct change for #156.
  */
 
 /** Passed as `dirName` to every `@princess-pi/libs/config` call in this repo. */

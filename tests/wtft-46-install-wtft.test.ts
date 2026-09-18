@@ -679,6 +679,81 @@ console.log("\n9. Config migration off princess-pi-tools and onto wtft (#156)");
 		check(chk.code === 4, "V9d: --check also exits 4 for the same leftover", `got ${chk.code}`);
 		check(fs.existsSync(oldPath), "V9d: --check left the old file in place", oldPath);
 	}
+
+	// V9e — a byte-identical file already at the new path is a STALE
+	// DUPLICATE, not a real conflict: install removes it and reports
+	// `moved`, rather than treating two copies of the same content as
+	// something a human has to arbitrate (PR review, round 2).
+	{
+		const fakeHome = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-dup-"));
+		const same = JSON.stringify({ interval: "1h" });
+		seedLegacy(fakeHome, { "wtft.json": same });
+		const newDir = path.join(fakeHome, ".config", "wtft");
+		fs.mkdirSync(newDir, { recursive: true });
+		fs.writeFileSync(path.join(newDir, "config.json"), same);
+
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-dup-dir-"));
+		const { code, out } = run(["--json", "--dir", dir], [], {
+			HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+		});
+		check(code === 0, "V9e: a byte-identical stale duplicate is not config-left — exit 0", `got ${code}: ${out.slice(0, 300)}`);
+		let doc: any = null;
+		try { doc = JSON.parse(out); } catch { /* left null */ }
+		const entry = (doc?.configMigration ?? []).find((c: any) => c.to.endsWith("wtft/config.json"));
+		check(entry?.state === "moved", "V9e: the duplicate's entry reports moved, not left", JSON.stringify(entry));
+		check(!fs.existsSync(path.join(fakeHome, ".config", "princess-pi-tools", "wtft.json")),
+			"V9e: the stale duplicate at the old path is gone");
+	}
+
+	// V9f — a move that copies the file successfully but cannot remove the
+	// OLD copy (a directory that allows writing into it but not unlinking
+	// from it) is NOT a permanent failure: THIS run still reports `moved`
+	// (the data reached the new path, which is what the state promises),
+	// and a LATER run — once the permission is fixed, or on any host where
+	// it never broke in the first place — auto-heals the leftover via V9e's
+	// byte-identical path, rather than reporting `config-left` forever.
+	{
+		const fakeHome = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-rmfail-"));
+		seedLegacy(fakeHome, { "wtft.json": JSON.stringify({ interval: "1h" }) });
+		const oldDir = path.join(fakeHome, ".config", "princess-pi-tools");
+		const oldPath = path.join(oldDir, "wtft.json");
+		const newPath = path.join(fakeHome, ".config", "wtft", "config.json");
+
+		fs.chmodSync(oldDir, 0o555); // writable→false: cp can still READ, rm cannot unlink
+		try {
+			const dir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-rmfail-dir-"));
+			const { code, out } = run(["--json", "--dir", dir], [], {
+				HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+			});
+			check(code === 0, "V9f: the move still succeeds and reports ok even though cleanup failed", `got ${code}: ${out.slice(0, 300)}`);
+			let doc: any = null;
+			try { doc = JSON.parse(out); } catch { /* left null */ }
+			const entry = (doc?.configMigration ?? []).find((c: any) => c.to.endsWith("wtft/config.json"));
+			check(entry?.state === "moved", "V9f: reports moved, not left, despite the failed rm", JSON.stringify(entry));
+			check(fs.existsSync(newPath), "V9f: the data reached the new path");
+			check(fs.existsSync(oldPath), "V9f: the old copy is still there — rm could not remove it");
+
+			// Fix the permission and confirm the leftover self-heals, rather
+			// than reporting config-left on every subsequent run forever.
+			fs.chmodSync(oldDir, 0o755);
+			const again = run(["--check", "--json", "--dir", dir], [], {
+				HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+			});
+			check(again.code === 4, "V9f: --check still reports the leftover (it never mutates)", `got ${again.code}`);
+			let againDoc: any = null;
+			try { againDoc = JSON.parse(again.out); } catch { /* left null */ }
+			const againEntry = (againDoc?.configMigration ?? []).find((c: any) => c.to.endsWith("wtft/config.json"));
+			check(againEntry?.state === "left", "V9f: --check reports left, not moved (it never mutates)", JSON.stringify(againEntry));
+
+			const heal = run(["--json", "--dir", dir], [], {
+				HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+			});
+			check(heal.code === 0, "V9f: install with the permission fixed self-heals — exit 0", `got ${heal.code}`);
+			check(!fs.existsSync(oldPath), "V9f: the stale duplicate is finally gone");
+		} finally {
+			try { fs.chmodSync(oldDir, 0o755); } catch { /* already restored or gone */ }
+		}
+	}
 }
 
 console.log(`\n${passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ""}`);

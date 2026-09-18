@@ -29,12 +29,14 @@
 #   2   in sync but SHADOWED on PATH by a different wtft
 #   3   the build failed
 #   4   in sync, but a config file is still at the old princess-pi-tools path
-#       (status "config-left") — in install mode this means EITHER the move
-#       was DECLINED because a file already sat at the new path, OR the move
-#       was ATTEMPTED and failed partway (mkdir/mktemp/cp/mv/rm — a
-#       permissions problem, say), which prints "could not move" to stderr
-#       and leaves the old file in place either way; in --check mode it may
-#       also mean install has simply not run since #156
+#       (status "config-left") — in install mode this means EITHER the new
+#       path already held a DIFFERENT file (a real conflict, declined) OR
+#       the copy itself failed partway (mkdir/mktemp/cp/mv — a permissions
+#       problem, say), which prints "could not move" to stderr. A file that
+#       copied fine but could not be REMOVED from the old path afterward is
+#       reported as "moved", not this — it self-heals on the next run, once
+#       the new and old copies are byte-identical (see below); in --check
+#       mode "config-left" may also just mean install has not run since #156
 #  64   bad usage: unknown argument, --dir without a directory, --dir followed
 #       by a flag or given an empty string, or no --dir on a host with HOME
 #       unset. `--` is NOT an end-of-options marker. NO JSON DOCUMENT is emitted
@@ -290,27 +292,60 @@ if [ -n "$CFG_HOME" ]; then
     old_name="${pair%%:*}"; new_name="${pair##*:}"
     old_path="$OLD_CFG_DIR/$old_name"
     new_path="$NEW_CFG_DIR/$new_name"
+    is_dup=0
     if [ -f "$old_path" ]; then
-      if [ "$MODE" = install ] && [ ! -e "$new_path" ]; then
-        # WRITE BESIDE, THEN RENAME OVER — the same atomic-swap shape the
-        # artifact copy loop below uses, so a mid-move failure never leaves a
-        # half-written file at the new path.
-        mkdir -p "$NEW_CFG_DIR" 2>/dev/null
-        stage="$(mktemp "$NEW_CFG_DIR/.install-wtft.XXXXXX" 2>/dev/null)" || stage=""
-        if [ -n "$stage" ] && cp "$old_path" "$stage" 2>/dev/null && mv -f "$stage" "$new_path" 2>/dev/null && rm -f "$old_path" 2>/dev/null; then
-          cfg_state=moved
-          # >&2, matching the build output above: --json promises exactly ONE
-          # document on stdout, and this line would otherwise land ahead of
-          # it and break every caller's JSON.parse.
-          echo "install-wtft: moved $old_path -> $new_path" >&2
+      if [ ! -e "$new_path" ]; then
+        if [ "$MODE" = install ]; then
+          # WRITE BESIDE, THEN RENAME OVER — the same atomic-swap shape the
+          # artifact copy loop below uses, so a mid-move failure never leaves a
+          # half-written file at the new path.
+          mkdir -p "$NEW_CFG_DIR" 2>/dev/null
+          stage="$(mktemp "$NEW_CFG_DIR/.install-wtft.XXXXXX" 2>/dev/null)" || stage=""
+          if [ -n "$stage" ] && cp "$old_path" "$stage" 2>/dev/null && mv -f "$stage" "$new_path" 2>/dev/null; then
+            # The data is safely at the new path now — that is what "moved"
+            # promises — regardless of whether the OLD copy can also be
+            # removed. A directory that allows writing/renaming into it but
+            # not unlinking from it is a real permission shape (#156 review),
+            # and treating that as a hard failure was worse than cosmetic:
+            # the NEXT run's `[ ! -e "$new_path" ]` guard would then be
+            # false, so it fell into the "declined, already occupied" branch
+            # forever — a config-left that no re-run could ever clear, on
+            # two copies that were actually already identical.
+            if rm -f "$old_path" 2>/dev/null; then
+              cfg_state=moved
+              # >&2, matching the build output above: --json promises
+              # exactly ONE document on stdout, and this line would
+              # otherwise land ahead of it and break every caller's
+              # JSON.parse.
+              echo "install-wtft: moved $old_path -> $new_path" >&2
+            else
+              cfg_state=moved
+              echo "install-wtft: moved $old_path -> $new_path (the old copy could not be removed — remove $old_path by hand)" >&2
+            fi
+          else
+            rm -f "$stage" 2>/dev/null
+            cfg_state=left
+            echo "install-wtft: could not move $old_path -> $new_path" >&2
+          fi
         else
-          rm -f "$stage" 2>/dev/null
+          cfg_state=left   # --check never mutates
+        fi
+      elif cmp -s "$old_path" "$new_path" 2>/dev/null; then
+        # Byte-identical: not a real conflict between two different configs —
+        # almost certainly the tail end of the case just above, a previous
+        # move whose cleanup failed. Retry removing the stale duplicate in
+        # install mode; --check still never mutates, but the report says
+        # WHY rather than implying two configs are fighting over one name.
+        if [ "$MODE" = install ] && rm -f "$old_path" 2>/dev/null; then
+          cfg_state=moved
+          echo "install-wtft: removed a stale duplicate at $old_path (identical content already lives at $new_path)" >&2
+        else
           cfg_state=left
-          echo "install-wtft: could not move $old_path -> $new_path" >&2
+          is_dup=1
         fi
       else
-        # --check never mutates; install declines to overwrite an existing
-        # new-path file rather than guess which one is authoritative.
+        # A REAL conflict — two different files. Never overwritten; a human
+        # decides which one is authoritative.
         cfg_state=left
       fi
     else
@@ -318,8 +353,13 @@ if [ -n "$CFG_HOME" ]; then
     fi
     if [ "$cfg_state" = left ]; then
       CONFIG_LEFT=1
-      CONFIG_LEFT_LINES="$CONFIG_LEFT_LINES   $old_path (wanted at $new_path)
+      if [ "$is_dup" = 1 ]; then
+        CONFIG_LEFT_LINES="$CONFIG_LEFT_LINES   $old_path (identical to $new_path — safe to delete)
 "
+      else
+        CONFIG_LEFT_LINES="$CONFIG_LEFT_LINES   $old_path (wanted at $new_path)
+"
+      fi
     fi
     [ -z "$CONFIG_JSON" ] || CONFIG_JSON="$CONFIG_JSON,"
     CONFIG_JSON="$CONFIG_JSON{\"from\":\"$(json_str "$old_path")\",\"to\":\"$(json_str "$new_path")\",\"state\":\"$cfg_state\"}"
@@ -354,13 +394,16 @@ finish() {
                     fi
                     printf '%s' "${CONFIG_LEFT_LINES:-}" >&2
                     # In install mode this means EITHER the move was DECLINED
-                    # (a file already sat at the new path — this script never
-                    # overwrites, so a human resolves which one is
-                    # authoritative and removes the other by hand), OR it was
-                    # ATTEMPTED and failed partway (see the "could not move"
-                    # stderr line above, if this run printed one) — same
-                    # remedy either way: the old file is still there to fix
-                    # by hand. In --check mode it may also mean install has
+                    # (a DIFFERENT file already sat at the new path — this
+                    # script never overwrites a real conflict, so a human
+                    # resolves which one is authoritative and removes the
+                    # other by hand), OR the copy itself failed partway (see
+                    # the "could not move" stderr line above, if this run
+                    # printed one). A copy that succeeded but could not
+                    # remove the OLD file is reported as "moved", not this —
+                    # each leftover line below says whether it is a real
+                    # conflict or just an identical stale copy safe to
+                    # delete. In --check mode it may also mean install has
                     # simply not run yet: re-running it attempts the move.
                     if [ "$MODE" = check ]; then echo "   Run: $(self_path)" >&2
                     else echo "   Move it by hand, or delete whichever copy is stale." >&2

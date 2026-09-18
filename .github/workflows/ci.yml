@@ -170,10 +170,13 @@ jobs:
     runs-on: ubuntu-latest
     # DISABLED (#77, Duppy, 2026-09-18): publishing is a future feature, so
     # this job does not run a check and emit a warning on every push for it.
-    # Re-enable as a plain gate — delete this line, nothing else — in the same
-    # PR that un-parks #29. The rationale below describes the job's body,
-    # which stays as written for that day; it does not describe what runs
-    # today, which is nothing.
+    # Re-enable as a plain gate in the same PR that un-parks #29 — delete
+    # BOTH this comment block (lines above, through this sentence) AND the
+    # `if: false` line below it; deleting only `if: false` leaves a comment
+    # asserting DISABLED above a job that runs on every push. The rationale
+    # below (from "#32, ..." on) describes the job's body, which stays as
+    # written for that day; it does not describe what runs today, which is
+    # nothing.
     if: false
     # #32, "the harder half, worth stating rather than hiding": CI that only
     # exercises the bun-equipped git channel keeps passing while the stock-node

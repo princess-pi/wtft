@@ -191,8 +191,6 @@ function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | und
 /** Read interactions from the daemon's classified tag file (#92),
  *  merged with subagent session interactions (#83, #82). */
 function readInteractions(ctx: any): Interaction[] {
-	// Per-render: every pass re-reads discovery, so no earlier render's
-	// verdict survives into this one.
 	_subagentUnreadable = false;
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	if (!sessionFile) return [];
@@ -206,11 +204,6 @@ function readInteractions(ctx: any): Interaction[] {
 	// refresh.
 	let subagentFiles: string[] = [];
 	try {
-		// The readable siblings still render. stderr is not a user surface,
-		// so an unreadable transcript sets the flag the render turns into a
-		// "total is provisional" line — whether discovery or the read below
-		// found it. Only the DIR-level failure throws, and it degrades to
-		// main interactions.
 		const discovered = discoverSubagentSessionFiles(sessionFile);
 		subagentFiles = discovered.files;
 		if (discovered.unreadable) _subagentUnreadable = true;

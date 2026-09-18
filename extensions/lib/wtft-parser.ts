@@ -516,7 +516,8 @@ export function parseSessionFile(filePath: string): Interaction[] {
 // UNCOUNTED BILLABLES (#149) — naming the blind spot instead of estimating it
 //
 // Part of Claude Code's own `total_cost_usd` is spend the transcript records no
-// `usage` for (measured in docs/spec-149-compaction-cost-scope.md). It is not an arithmetic error — #146's per-turn formula reproduces Claude
+// `usage` for (measured in docs/spec-149-compaction-cost-scope.md).
+// It is not an arithmetic error — #146's per-turn formula reproduces Claude
 // Code's counter to 4 decimal places — it is SCOPE. Two of the generating events
 // do leave a marker entry behind, so wtft can count them even though it can
 // never price them: `/compact` ($0.673267 measured on one Opus-5 compaction) and
@@ -1662,12 +1663,8 @@ export function loadSubagentInteractions(
 	return loadSubagentInteractionsChecked(subagentFiles, parseFn, classifyFn, dedupFn).interactions;
 }
 
-/**
- * {@link loadSubagentInteractions}, plus the files it dropped. Discovery lists
- * a file by stat, so a read that fails afterwards (mode 000, vanished) is
- * known only here — a caller showing a total needs `dropped` to mark it
- * provisional (#165).
- */
+/** {@link loadSubagentInteractions}, plus the files it dropped. A file
+ *  discovery listed can still fail to read, and only this call sees that. */
 export function loadSubagentInteractionsChecked(
 	subagentFiles: string[],
 	parseFn = parseSessionFile,

@@ -93,12 +93,16 @@ reader does not re-litigate them)
 - **S6 — an empty window says so, never widens itself.** Zero rows after a
   (re)discovery is a distinct render state (a message naming `Ctrl+T`), not an
   automatic scope or window change.
-- **S7 — Pi worktree/branch derivation.** A Pi row's worktree is read from its
-  transcript header `cwd`; branch is the last path segment of that `cwd` when
-  the directory name looks like a `wt-new`-created worktree (i.e. it sits
-  under a `.claude/worktrees/` or `worktrees/<repo>/` segment), else no branch
-  is shown. A Pi session recorded from a main clone (no such segment) shows no
-  branch — never a guessed one.
+- **S7 — Pi worktree/branch derivation.** Corrected from the first draft
+  (pr-review, Low): nothing reads a Pi transcript's header `cwd` for this.
+  Pi's worktree/branch label is derived from its DIRECTORY SLUG, by the same
+  shared, harness-agnostic `buildDisplayPath`/`compactWorktreeProject`
+  (`@princess-pi/libs/session-path-shortener`) that already renders Claude
+  Code's `<repo>/w/<branch>` rows (S1's own display path is the same
+  function) — no new code was needed for #89, since the marker it looks for
+  (`--claude-worktrees-`) survives Pi's `--`-wrapping unchanged. A Pi session
+  recorded from a main clone (no such marker in its slug) shows no branch —
+  never a guessed one.
 
 ### Sticky harness order (`extensions/lib/harness-order.ts`, new)
 
@@ -200,13 +204,23 @@ reader does not re-litigate them)
 
 ## Verification
 
-- `bun run test` — new suites: `tests/wtft-89-scoped-picker.test.ts` (S1–S7,
-  H1–H5), `tests/wtft-89-picker-state.test.ts` (K1–K7, pure, no fixtures),
-  `tests/wtft-89-no-tty-exit.test.ts` (E1–E5), `tests/wtft-119-untagged-cost.test.ts`
-  (U1–U4). Existing suites
+- `bun run test` — new suites, named as actually shipped (not as first
+  drafted — see below): `tests/wtft-89-scoped-discovery.test.ts` (S1–S7),
+  `tests/wtft-89-harness-order.test.ts` (H1–H5),
+  `tests/wtft-89-picker-state.test.ts` (K1–K7, pure, no fixtures),
+  `tests/wtft-119-untagged-cost.test.ts` (U1–U4). Existing suites
   (`wtft-issue-144-145-164-session-discovery`, `wtft-issue-156-harness-seam`,
-  `wtft-90-total-includes-server-tool-cost`) stay green unmodified, per the
-  library-default interpretation note above.
+  `wtft-35-explicit-session-skips-discovery`,
+  `wtft-90-total-includes-server-tool-cost`) stay green, per the
+  library-default interpretation note above — `wtft-35` needed one assertion
+  updated for E3's new exit code, not a behavioural regression.
+- **E1–E5 have no dedicated suite** — there is no
+  `tests/wtft-89-no-tty-exit.test.ts`; that file name never shipped. E3/E4's
+  no-TTY exit-10 contract is covered by the one assertion added to
+  `tests/wtft-35-explicit-session-skips-discovery.test.ts` (a real CLI
+  subprocess with no TTY), not by a dedicated suite — a gap named here rather
+  than left for a reader to discover by grepping for a file that does not
+  exist (pr-review, Low).
 - `bun run typecheck`, `bun run build`, `bash tests/wtft-daemon.test.sh`.
 - Regression closer carried forward from #89's own issue body: a fixture with
   many stranded cwds under `"worktrees"` scope does bounded reads (the existing

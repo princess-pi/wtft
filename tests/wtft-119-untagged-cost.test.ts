@@ -95,8 +95,14 @@ console.log("\n=== U2/U3: chart total === total.costUsd + total.untaggedCostUsd 
 	fs.writeFileSync(withUntagged, [
 		usageLine({ id: "a", ts: "2026-07-01T12:00:00Z" }),
 		usageLine({ id: "b", ts: "2026-07-01T13:00:00Z", web: 5 }),
-		// No model id at all — untagged, and it also carries a server-tool
-		// request, exercising U2's "plus serverToolCost when present" half.
+		// No model id at all — untagged. This one carries no server_tool_use:
+		// calculateServerToolCost only bills a model id containing "claude" or
+		// "anthropic" (extensions/lib/wtft-cost.ts), and untagged is by
+		// definition "(unknown)" or "<synthetic>" — neither ever matches, so a
+		// real untagged interaction's serverToolCost is structurally always 0.
+		// U2's "plus serverToolCost when present" is a robustness addition for
+		// exactly that reason (the field must not silently drift if that ever
+		// changes), not a behaviour this fixture can exercise as non-zero.
 		JSON.stringify({
 			type: "assistant", timestamp: "2026-07-01T14:00:00Z", cwd: "/tmp",
 			message: {

@@ -195,8 +195,13 @@ both retired in `@4`.
 - **10** — session not specified precisely enough
   ([#89](https://github.com/princess-pi/wtft/issues/89)): no interactive
   terminal, and either `-s <substring>` matched zero or several sessions, or no
-  `-s` was given and more than one session was discovered. Every match is
-  named on stderr; under `--json`, stdout carries nothing, same as exit 1.
+  `-s` was given and the picker's own default-scoped population (this
+  worktree, last 20 minutes — not machine-wide) held zero or several
+  sessions. Every match is named on stderr; under `--json`, stdout carries
+  nothing, same as exit 1. **Zero with no `-s`** is this exit too, not the old
+  exit 1 "no session found" — a script relying on that split needs to read
+  the message on stderr, since both the zero and several cases share exit
+  10.
 - **130** — the interactive session selector was cancelled with `q` or Ctrl-C.
   The SIGINT convention (128+2), not a wtft-specific code. With no interactive
   terminal wtft never shows the selector at all (see exit 10), so this exit is

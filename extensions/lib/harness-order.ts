@@ -46,15 +46,36 @@ export function mainCloneDir(cwd: string): string | null {
 
 /**
  * The sticky harness order, most-recently-opened first — read through the
- * standard config walk-up (H1), from `process.cwd()`, exactly like every
- * other wtft config read (`loadConfig` has no directory parameter of its
- * own — a caller that needs a different starting directory, such as a test,
- * uses `process.chdir()` around the call, the same pattern
- * `tests/wtft-own-config-dir.test.ts` already uses). Unknown/malformed
- * values are dropped rather than thrown on; an absent or corrupt
- * `harnessOrder` reads as `[]`, which is "every harness is unseen" (H4).
+ * standard config walk-up (H1). `loadConfig` has no directory parameter of
+ * its own (it always walks up from `process.cwd()`), so a caller that needs a
+ * DIFFERENT starting directory — `--dir`/`cwdOverride`, matching what
+ * {@link recordHarnessOpened} writes for, or a test — passes `startDir`,
+ * which temporarily `chdir`s around the read and restores the original cwd
+ * afterward, even on throw. Omitted, this read silently used the launching
+ * shell's cwd while `recordHarnessOpened` wrote under `--dir`'s target: two
+ * different repos, so a `--dir` session's sticky order was written and never
+ * seen again (pr-review, Medium). Unknown/malformed values are dropped rather
+ * than thrown on; an absent or corrupt `harnessOrder` reads as `[]`, which is
+ * "every harness is unseen" (H4).
  */
-export function readHarnessOrder(): string[] {
+export function readHarnessOrder(startDir?: string): string[] {
+	if (!startDir || path.resolve(startDir) === process.cwd()) {
+		return readHarnessOrderHere();
+	}
+	const original = process.cwd();
+	try {
+		process.chdir(startDir);
+		return readHarnessOrderHere();
+	} catch {
+		// Can't chdir there (doesn't exist, no permission) — read from where we
+		// already are rather than throwing out of a display-only lookup.
+		return readHarnessOrderHere();
+	} finally {
+		try { process.chdir(original); } catch { /* original dir gone — nothing to restore to */ }
+	}
+}
+
+function readHarnessOrderHere(): string[] {
 	const cfg = loadConfig(WTFT_CONFIG_TOOL, {}, WTFT_CONFIG_DIR) as { harnessOrder?: unknown };
 	if (!Array.isArray(cfg.harnessOrder)) return [];
 	return cfg.harnessOrder.filter((x): x is string => typeof x === "string");
@@ -72,14 +93,27 @@ export function recordHarnessOpened(harnessId: string, cwd: string = process.cwd
 	const file = path.join(dir, ".wtft", "config.json");
 
 	let existing: Record<string, unknown> = {};
-	try {
-		if (fs.existsSync(file)) {
+	if (fs.existsSync(file)) {
+		try {
 			const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) existing = parsed;
+			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+				existing = parsed;
+			} else {
+				// Valid JSON, wrong shape (an array, a scalar) — not ours to
+				// guess at; refuse rather than replace it (see the malformed-file
+				// arm below for why "refuse" beats "start fresh" here).
+				return;
+			}
+		} catch {
+			// MALFORMED JSON: refuse the write entirely rather than starting
+			// from `{}` (pr-review, Medium). Writing `{ harnessOrder: [...] }`
+			// over a file that failed to parse would SILENTLY DISCARD every
+			// other setting a human or another tool had written there
+			// (interval, limit, timezone, …) — sticky order being a
+			// convenience is the reason to skip this write, not a reason to
+			// destroy unrelated data while attempting it.
+			return;
 		}
-	} catch {
-		// Start fresh rather than block on a malformed file — sticky order is
-		// a convenience, not a report-blocking precondition.
 	}
 
 	const prevOrder: string[] = Array.isArray(existing.harnessOrder)
@@ -139,6 +173,12 @@ export function orderByHarness<T extends OrderableCandidate>(
 	const seen = new Set<string>();
 
 	for (const id of order) {
+		// `seen.has(id)` guards against a DUPLICATE in `order` itself — a
+		// hand-edited or merged config.json can hold the same id twice, and
+		// without this a harness's rows would render once per occurrence
+		// (pr-review, Low). `readHarnessOrder` only filters by type, not
+		// uniqueness, so this is the one place that enforces it.
+		if (seen.has(id)) continue;
 		const list = byHarness.get(id);
 		if (list && list.length > 0) { out.push(...list); seen.add(id); }
 	}

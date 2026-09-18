@@ -174,8 +174,29 @@ function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions
 	const targetSlugs = new Set<string>();
 	for (const dir of targetDirs) for (const variant of cwdSlugVariants(dir)) targetSlugs.add(variant);
 
+	// "worktree" and "branch" name exactly one directory each (S1/S4): a Pi
+	// slug is wrapped "--<encoded-cwd>--" (this module's own header), so an
+	// EXACT wrapped match is the single-directory equivalent of Claude Code's
+	// `targetSlugs.has(slug)` Set membership. Containment (`slug.includes`)
+	// only belongs to "worktrees", where it is load-bearing: it is what lets
+	// one target slug (the main clone's) also match a sibling in-tree
+	// worktree's slug, `<mainSlug>--claude-worktrees-<branch>--`, with no
+	// directory listing of the worktree itself. Using containment for
+	// "worktree"/"branch" too over-matched any sibling project sharing a name
+	// prefix, and every in-tree worktree's own sessions, into what is supposed
+	// to be a single-directory scope (pr-review, Medium).
+	const matchesTarget = (slug: string, variant: string): boolean =>
+		scope === "worktrees" ? slug.includes(variant) : slug === `--${variant}--`;
+
 	for (const slug of projectDirs) {
-		const physicalMatch = [...targetSlugs].some(variant => slug.includes(variant));
+		const physicalMatch = [...targetSlugs].some(variant => matchesTarget(slug, variant));
+
+		// Same skip Claude Code's discoverScoped applies, and for the same
+		// reason (pr-review, Medium): a non-matching slug under "worktree"/
+		// "branch" cannot contribute, since the union arm that could have
+		// found it anyway never runs for those two scopes.
+		if (!physicalMatch && !useUnionArm) continue;
+
 		const files: string[] = [];
 		collect(path.join(root, slug), files);
 

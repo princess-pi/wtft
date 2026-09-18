@@ -320,6 +320,25 @@ export interface SelectSessionPromptOptions {
 	 *  are the same controlling terminal whenever this function runs at all,
 	 *  since it requires `process.stdin.isTTY`. */
 	out?: NodeJS.WritableStream;
+	/**
+	 * The `-s <substring>` the caller already filtered `initialCandidates` by
+	 * (basename or path, case-insensitive), when there was one. Re-applied
+	 * after every rescope's fresh `discoverSessions` call — WITHOUT this, a
+	 * Ctrl+A/W/B/T press silently discarded the user's own narrowing and
+	 * showed every session in the new scope instead of just the matches
+	 * (pr-review, Medium). Also shown in the picker header in place of the
+	 * scope/window line, since the row population here is `-s`-filtered on
+	 * top of a scope, not the scope alone.
+	 */
+	substringFilter?: string;
+}
+
+/** The same substring predicate `bin/wtft.ts`'s fuzzy `-s` match uses — kept
+ *  here too so a rescope re-applies it identically rather than drifting into
+ *  a second, subtly different filter. */
+function matchesSubstring(c: SessionCandidate, filter: string): boolean {
+	const needle = filter.toLowerCase();
+	return c.path.toLowerCase().includes(needle) || c.name.toLowerCase().includes(needle);
 }
 
 /**
@@ -373,7 +392,7 @@ export async function selectSessionPrompt(
 
 		const harnessIds = getHarnesses().map(h => h.id);
 		const toRows = (list: SessionCandidate[]): PickerRow[] =>
-			orderByHarness(list, readHarnessOrder(), harnessIds).map(toPickerRow);
+			orderByHarness(list, readHarnessOrder(opts.cwdOverride), harnessIds).map(toPickerRow);
 
 		let state: PickerState = setRows(initPickerState(), toRows(initialCandidates));
 
@@ -386,7 +405,9 @@ export async function selectSessionPrompt(
 			let text = `\x1b[1m\x1b[36m\u{1F4B8} WTFT — select session log\x1b[0m ` +
 				`\x1b[90m(j/k navigate, Enter select, q quit · Ctrl+A all · Ctrl+W worktrees · ` +
 				`Ctrl+B branch · Ctrl+T window)\x1b[0m\n`;
-			text += `  \x1b[90mscope: ${SCOPE_LABEL[state.scope]}  ·  window: ${state.timeWindow}\x1b[0m\n`;
+			text += opts.substringFilter
+				? `  \x1b[90mscope: ${SCOPE_LABEL[state.scope]}  ·  window: ${state.timeWindow}  ·  filtered by -s "${opts.substringFilter}"\x1b[0m\n`
+				: `  \x1b[90mscope: ${SCOPE_LABEL[state.scope]}  ·  window: ${state.timeWindow}\x1b[0m\n`;
 
 			if (view.rows.length === 0) {
 				text += `  \x1b[33mNo sessions in this window. Press Ctrl+T to widen it.\x1b[0m\n`;
@@ -448,10 +469,14 @@ export async function selectSessionPrompt(
 				state = action.state;
 				// Re-discover for the new scope/window, THEN re-window the fresh
 				// rows (setRows also clamps the cursor, #89 K7).
-				const fresh = discoverSessions(opts.harnessOption, opts.cwdOverride, {
+				let fresh = discoverSessions(opts.harnessOption, opts.cwdOverride, {
 					scope: state.scope,
 					windowMs: windowMsFor(state.timeWindow),
 				});
+				// Re-apply the caller's `-s` filter (pr-review, Medium): without
+				// this, widening the scope silently discarded it and showed
+				// every session in the new scope instead of just the matches.
+				if (opts.substringFilter) fresh = fresh.filter(c => matchesSubstring(c, opts.substringFilter!));
 				remember(fresh);
 				state = setRows(state, toRows(fresh));
 				clearPreviousLines(lastLineCount, out);

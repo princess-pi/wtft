@@ -164,6 +164,95 @@ console.log("\n=== H3-H5: orderByHarness groups, orders, and skips empties ===\n
 	);
 	check(!noPi.some(c => c.harness === "pi"), "H5: a harness with zero candidates contributes zero rows");
 	check(noPi.length === 2, `H5: …and nothing else is padded in to replace it (${noPi.length})`);
+
+	// A DUPLICATE in `order` itself must not double-render a harness
+	// (pr-review, Low).
+	const dupOrder = orderByHarness(candidates, ["pi", "pi", "claude-code"], ["claude-code", "pi"]);
+	check(dupOrder.filter(c => c.harness === "pi").length === 2,
+		`orderByHarness: a duplicated id in the sticky order does not duplicate that harness's rows (${dupOrder.length} total rows for ${candidates.length} candidates)`);
+}
+
+// ---
+// H2 (real fix) — readHarnessOrder(startDir) reads from the SAME directory
+// recordHarnessOpened wrote to under --dir, not from process.cwd() (pr-review,
+// Medium: before this, the two silently diverged whenever --dir differed from
+// the launching shell's cwd).
+// ---
+console.log("\n=== H2: readHarnessOrder(startDir) matches recordHarnessOpened's --dir target ===\n");
+{
+	const sandbox = mktmp("wtft-89-order-dir-");
+	const repo = makeRepoWithWorktree(sandbox);
+	if (!repo) {
+		console.log("  (skip: git worktree unusable)");
+	} else {
+		const originalCwd = process.cwd();
+		const originalHome = process.env.HOME;
+		const originalXdg = process.env.XDG_CONFIG_HOME;
+		try {
+			process.env.HOME = sandbox;
+			process.env.XDG_CONFIG_HOME = path.join(sandbox, "xdg-config");
+
+			// Stand somewhere else entirely — an unrelated directory outside the
+			// repo — and record an --dir-style open against the worktree.
+			const elsewhere = path.join(sandbox, "elsewhere");
+			fs.mkdirSync(elsewhere, { recursive: true });
+			process.chdir(elsewhere);
+
+			check(readHarnessOrder().length === 0,
+				"H2: from an unrelated cwd, the repo's sticky order is invisible with no startDir");
+
+			recordHarnessOpened("pi", repo.worktree);
+			check(readHarnessOrder().length === 0,
+				"H2: …and stays invisible after the write, still with no startDir — proves the write went to the REPO, not here");
+			check(readHarnessOrder(repo.worktree).join(",") === "pi",
+				`H2: …but IS visible when readHarnessOrder is pointed at the same --dir target (${readHarnessOrder(repo.worktree).join(",")})`);
+
+			// process.cwd() must be restored, even though readHarnessOrder
+			// chdir'd internally.
+			check(process.cwd() === elsewhere || process.cwd() === fs.realpathSync(elsewhere),
+				"H2: readHarnessOrder(startDir) restores process.cwd() afterward");
+		} finally {
+			process.chdir(originalCwd);
+			if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+			if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = originalXdg;
+		}
+	}
+}
+
+// ---
+// H2 (real fix) — recordHarnessOpened refuses to clobber a malformed config
+// file rather than silently discarding its other settings (pr-review,
+// Medium).
+// ---
+console.log("\n=== H2: recordHarnessOpened refuses to clobber malformed config ===\n");
+{
+	const sandbox = mktmp("wtft-89-order-malformed-");
+	const repo = makeRepoWithWorktree(sandbox);
+	if (!repo) {
+		console.log("  (skip: git worktree unusable)");
+	} else {
+		const originalCwd = process.cwd();
+		const originalHome = process.env.HOME;
+		const originalXdg = process.env.XDG_CONFIG_HOME;
+		try {
+			process.env.HOME = sandbox;
+			process.env.XDG_CONFIG_HOME = path.join(sandbox, "xdg-config");
+			process.chdir(repo.worktree);
+
+			const configPath = path.join(repo.clone, ".wtft", "config.json");
+			fs.mkdirSync(path.dirname(configPath), { recursive: true });
+			fs.writeFileSync(configPath, "{ this is not valid json");
+
+			recordHarnessOpened("pi", repo.worktree);
+			const stillBroken = fs.readFileSync(configPath, "utf8");
+			check(stillBroken === "{ this is not valid json",
+				"H2: a malformed config.json is left untouched, not overwritten with just { harnessOrder }");
+		} finally {
+			process.chdir(originalCwd);
+			if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+			if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = originalXdg;
+		}
+	}
 }
 
 console.log(`\n${failed === 0 ? "✅" : "❌"} ${passed} passed, ${failed} failed\n`);

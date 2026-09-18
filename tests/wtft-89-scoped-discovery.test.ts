@@ -27,6 +27,7 @@ import {
 	getCwdReadCount,
 	resetHarnessRegistry,
 	cwdToStrictSlug,
+	cwdToSlug,
 	buildDisplayPath,
 } from "../bin/wtft.mjs";
 
@@ -137,13 +138,25 @@ console.log("\n=== S2: 'worktrees' scope fans out and unions, bounded by window 
 		const projects = path.join(sandbox, "projects");
 		fs.mkdirSync(projects, { recursive: true });
 
-		const wandered = path.join(projects, cwdToStrictSlug(repo.clone), "wandered.jsonl");
+		// Filed under a slug OUTSIDE the fan-out set entirely (pr-review, Low:
+		// the earlier fixture filed it under the CLONE's own slug, which is
+		// itself a fan-out target — a physical-slug match, not the union arm —
+		// so the assertion below passed without the arm under test ever
+		// running). Only its LAST RECORDED cwd, the worktree, is a fan-out
+		// target, so only `matchesRecordedCwd`'s tail read can find this one.
+		const elsewhereDir = path.join(sandbox, "not-a-checkout-of-this-repo");
+		const wandered = path.join(projects, cwdToStrictSlug(elsewhereDir), "wandered.jsonl");
 		writeTranscript(wandered, repo.worktree);
 
 		setEnvAndRun(projects, () => {
+			const viaWorktree = discoverSessions("claude-code", repo.worktree, { scope: "worktree", windowMs: null })
+				.map((c: any) => c.name);
+			check(!viaWorktree.includes("wandered.jsonl"),
+				"S2 sanity: 'worktree' scope (no union arm) does NOT find it — proves the fixture needs the union arm");
+
 			const found = discoverSessions("claude-code", repo.worktree, { scope: "worktrees", windowMs: null })
 				.map((c: any) => c.name);
-			check(found.includes("wandered.jsonl"), "S2: the union arm finds a session filed under a sibling checkout");
+			check(found.includes("wandered.jsonl"), "S2: the union arm finds a session filed under an unrelated slug");
 
 			// Now push the fixture's mtime outside a tiny window — the union arm
 			// must skip the tail read entirely rather than finding it anyway.
@@ -299,6 +312,57 @@ console.log("\n=== S7: Pi worktree/branch derivation ===\n");
 		!rendered.includes("/w/"),
 		`S7: a Pi session recorded from the main clone shows no branch, never a guessed one (${rendered})`
 	);
+}
+
+// ---
+// S1 (Pi) — 'worktree' scope matches EXACTLY, not by containment (pr-review,
+// Medium: the first cut reused Pi's fan-out containment test for every
+// scope, so a default-scope picker over-matched any sibling project sharing
+// a name prefix, and every in-tree worktree's own sessions).
+// ---
+console.log("\n=== S1 (Pi): 'worktree' scope is exact, not containment ===\n");
+{
+	const sandbox = mktmp("wtft-89-s1-pi-");
+	const piRoot = path.join(sandbox, "pi-sessions");
+	const target = path.join(sandbox, "repo");
+	const targetSlug = cwdToSlug(target);
+
+	// The exact target dir — must match.
+	fs.mkdirSync(path.join(piRoot, `--${targetSlug}--`), { recursive: true });
+	fs.writeFileSync(path.join(piRoot, `--${targetSlug}--`, "2026-09-18_own.jsonl"),
+		JSON.stringify({ type: "message", message: { role: "assistant", id: "m1", usage: {} } }) + "\n");
+
+	// A sibling whose slug CONTAINS the target's slug as a prefix — must NOT
+	// match under "worktree" scope (containment would have matched this).
+	const siblingSlug = cwdToSlug(target) + "-sibling";
+	fs.mkdirSync(path.join(piRoot, `--${siblingSlug}--`), { recursive: true });
+	fs.writeFileSync(path.join(piRoot, `--${siblingSlug}--`, "2026-09-18_sibling.jsonl"),
+		JSON.stringify({ type: "message", message: { role: "assistant", id: "m2", usage: {} } }) + "\n");
+
+	// An in-tree worktree of the SAME repo — must not match under "worktree"
+	// scope either (that is what Ctrl+W / "worktrees" scope is for).
+	const worktreeSlug = cwdToSlug(target) + "--claude-worktrees-99-branch";
+	fs.mkdirSync(path.join(piRoot, `--${worktreeSlug}--`), { recursive: true });
+	fs.writeFileSync(path.join(piRoot, `--${worktreeSlug}--`, "2026-09-18_worktree.jsonl"),
+		JSON.stringify({ type: "message", message: { role: "assistant", id: "m3", usage: {} } }) + "\n");
+
+	process.env.WTFT_PI_SESSIONS_DIR = piRoot;
+	resetHarnessRegistry();
+	resetCwdCache();
+	try {
+		const found = discoverSessions("pi", target, { scope: "worktree", windowMs: null }).map((c: any) => c.name);
+		check(found.includes("2026-09-18_own.jsonl"), "S1 (Pi): the exact target directory is found");
+		check(!found.includes("2026-09-18_sibling.jsonl"),
+			"S1 (Pi): a sibling whose slug merely CONTAINS the target's is NOT found under 'worktree' scope");
+		check(!found.includes("2026-09-18_worktree.jsonl"),
+			"S1 (Pi): an in-tree worktree of the same repo is NOT found under 'worktree' scope either");
+
+		const widened = discoverSessions("pi", target, { scope: "worktrees", windowMs: null }).map((c: any) => c.name);
+		check(widened.includes("2026-09-18_worktree.jsonl"),
+			"S1 (Pi) sanity: the worktree IS found once 'worktrees' scope's containment match applies");
+	} finally {
+		delete process.env.WTFT_PI_SESSIONS_DIR;
+	}
 }
 
 console.log(`\n${failed === 0 ? "✅" : "❌"} ${passed} passed, ${failed} failed\n`);

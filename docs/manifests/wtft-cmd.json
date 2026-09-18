@@ -149,11 +149,11 @@
     },
     {
       "flags": "-s, --session <path|filter>",
-      "desc": "Specify an explicit session .jsonl file path, or a fuzzy substring filter (e.g. 'b04c'). When the argument is not an existing file, it filters discovered sessions by basename or path substring, searched over EVERY discovered session on the machine (#89) -- unlike a bare launch with no -s, which searches only the picker's own scoped, time-windowed population (this worktree, last 20 minutes, by default) -- an explicit ask for a known session is never narrowed by that browsing convenience window. If exactly one match, runs immediately; with an interactive terminal and multiple matches, shows the session picker filtered to them; with no interactive terminal, zero or several matches exit 10 (#89, see Exit codes) instead of prompting. An absolute .jsonl path that does not exist YET is accepted as a pending session (#308), reported at exit 0 rather than as an error."
+      "desc": "Specify an explicit session .jsonl file path, or a fuzzy substring filter (e.g. 'b04c'). When the argument is not an existing file, it filters discovered sessions by basename or path substring, searched over the PRE-#89 discovery population (#89) -- for Claude Code, every checkout of the current repo (fan-out) plus the #156 union arm, unbounded in time; for Pi with no --dir, every Pi session on the machine -- unlike a bare launch with no -s, which searches only the picker's own scoped, time-windowed population (this worktree, last 20 minutes, by default). An explicit ask for a known session is never narrowed by that browsing convenience window, but it is not literally \"every session on the machine\" for Claude Code. If exactly one match, runs immediately; with an interactive terminal and multiple matches, shows the session picker filtered to them; with no interactive terminal, zero or several matches exit 10 (#89, see Exit codes) instead of prompting. An absolute .jsonl path that does not exist YET is accepted as a pending session (#308), reported at exit 0 rather than as an error."
     },
     {
       "flags": "--dir, --cwd <path>",
-      "desc": "Anchor directory for Claude Code session discovery (default: current directory). The flag picks the anchor, not the policy: when the anchor sits inside a git repo, discovery fans out over every checkout of that repo (main clone plus every worktree), so sibling-worktree sessions are listed too. An anchor outside any git repo means exactly that directory, so '--dir ~' still does not list every session on the machine."
+      "desc": "Anchor directory for Claude Code session discovery (default: current directory). The flag picks the anchor, not the SCOPE: with no -s, the picker's own default scope (#89) folder-matches this ONE directory alone, no fan-out. Ctrl+W widens to every checkout of the anchor's repo (main clone plus every worktree), so sibling-worktree sessions are listed only on that keypress, or under the pre-#89 legacy discovery an explicit -s still searches (see -s's own entry). An anchor outside any git repo means exactly that directory even under Ctrl+W, so '--dir ~' still does not list every session on the machine."
     },
     {
       "flags": "-w, --width <number>",
@@ -329,7 +329,7 @@
     },
     {
       "code": 10,
-      "meaning": "Session not specified precisely enough (#89): no interactive terminal, and either -s <substring> matched zero or several sessions, or no -s was given and more than one session was discovered. Every match is named on stderr; under --json, stdout carries nothing, same as exit 1."
+      "meaning": "Session not specified precisely enough (#89): no interactive terminal, and either -s <substring> matched zero or several sessions, or no -s was given and the picker's own default-scoped population (this worktree, last 20 minutes) held zero or several sessions -- zero included, replacing the old exit 1 'no session found' for this specific no--s/no-TTY case. Every match is named on stderr; under --json, stdout carries nothing, same as exit 1."
     },
     {
       "code": 130,

@@ -564,18 +564,24 @@ async function main() {
 	}
 
 	// Discovery is LAZY, and that is a cost decision, not a style one (#35).
-	// Only two branches below read it — the fuzzy-substring fallback and the
-	// auto-select menu — and neither is reachable once `-s` names an existing file
-	// or a pending path. Run eagerly it was a whole session-corpus scan, paid for
-	// and thrown away on the commonest invocation of all.
+	// `getCandidates()` below has exactly ONE reader today — the `-s`
+	// fuzzy-substring fallback — and is not reachable once `-s` names an
+	// existing file or a pending path. (Before #89 the no-`-s` auto-select
+	// menu shared this same call; it now calls the separately-memoised,
+	// separately-scoped `getDefaultScoped()` a little further down instead,
+	// so this comment describes only the fuzzy path's own cost, not a shared
+	// one.) Run eagerly it was a whole session-corpus scan, paid for and
+	// thrown away on the commonest invocation of all.
 	//
 	// The scan is bounded but not free: discovery asks every transcript on the
 	// machine where it lives. #89 removed the unbounded half — a whole-file
 	// re-read of every session stranded by `pr-cleanup`, measured 2026-09-16 at
 	// 6,952 files per launch and most of a 35 s cold launch. What is left is
 	// ~1.9 bounded tail reads per transcript (14,441 reads / 580 MB over 7,287
-	// transcripts, both harnesses), which is still worth deferring and is why
-	// #89 stays open for an on-disk index.
+	// transcripts, both harnesses) for this legacy, unscoped population — #89's
+	// own decision is explicitly "no on-disk index", so that ceiling is not
+	// coming down further; it is deferred here because it is still worth
+	// deferring, not because an index is pending.
 	//
 	// Memoised as well as deferred, though nothing today needs the cache: both
 	// branches call it once and reuse the result. It is here so that a future
@@ -626,22 +632,37 @@ async function main() {
 	// ---
 	// A human gets the picker, whether or not `--json` is set (#89, E1):
 	// `selectSessionPrompt` draws to stderr under `--json` so stdout stays one
-	// clean JSON document, and to stdout otherwise. Only `process.stdin.isTTY`
-	// decides whether a human is there to show it to — it also exits 130 on
-	// `q`/Ctrl-C, which a machine caller could never answer anyway.
+	// clean JSON document, and to stdout otherwise.
 	//
-	// With NO interactive terminal, wtft no longer auto-picks the newest
-	// session under `--json` (the old `auto-selected-session` notice, retired
-	// in `@4`): it selects only when the population is already unambiguous —
+	// The interactivity test is BOTH `process.stdin.isTTY` AND the isTTY-ness
+	// of whichever stream the picker is about to draw to (pr-review, Medium):
+	// stdin alone is not enough — `wtft --tokens | less -R` (a flow the README
+	// itself recommends) keeps stdin on the terminal while stdout is a pipe,
+	// and drawing the picker's escape sequences and menu into that pipe would
+	// block waiting for keys the human watching `less` can never send. Under
+	// `--json` the same failure mode reaches through a redirected stderr
+	// (`2>/dev/null`). `canShowPicker` is computed once and used everywhere a
+	// TTY decision is made below, so the two checks cannot drift apart.
+	// `q`/Ctrl-C still exits 130 when the picker IS shown — a machine caller
+	// could never answer that either, which is why the no-picker branch below
+	// exists at all.
+	const pickerOut: NodeJS.WriteStream = opts.json ? process.stderr : process.stdout;
+	const canShowPicker = !!process.stdin.isTTY && !!pickerOut.isTTY;
+
+	// With NO interactive terminal — or stdin is one but the picker's own
+	// output stream is not — wtft no longer auto-picks the newest session
+	// under `--json` (the old `auto-selected-session` notice, retired in
+	// `@4`): it selects only when the population is already unambiguous —
 	// exactly one candidate, `-s` given or not — and otherwise exits
 	// EXIT_SESSION_AMBIGUOUS (10), naming every candidate on stderr. Under
 	// `--json` that exit carries nothing on stdout, the same contract exit 1
 	// already carries for an error (#89, E3/E4).
-	const showPicker = async (found: ReturnType<typeof discoverSessions>): Promise<string> =>
+	const showPicker = async (found: ReturnType<typeof discoverSessions>, substringFilter?: string): Promise<string> =>
 		selectSessionPrompt(found, {
 			harnessOption: opts.harnessOption,
 			cwdOverride: opts.cwdOverride,
-			out: opts.json ? process.stderr : process.stdout,
+			out: pickerOut,
+			substringFilter,
 		});
 
 	/** No interactive terminal: fail loudly with the new exit code rather than
@@ -679,7 +700,7 @@ async function main() {
 			);
 			if (filtered.length === 1) {
 				finalSessionPath = filtered[0].path;
-			} else if (!process.stdin.isTTY) {
+			} else if (!canShowPicker) {
 				failAmbiguous(filtered, `-s ${opts.targetSession}`, found.length);
 			} else if (filtered.length === 0) {
 				// Unchanged from pre-#89: a human still gets a clear "no match"
@@ -687,7 +708,7 @@ async function main() {
 				console.error(`❌ Error: Session '${opts.targetSession}' does not exist as a file and matches no discovered sessions (${found.length} available).`);
 				process.exit(1);
 			} else {
-				finalSessionPath = await showPicker(filtered);
+				finalSessionPath = await showPicker(filtered, opts.targetSession);
 			}
 		}
 	} else {
@@ -695,7 +716,7 @@ async function main() {
 		const found = getDefaultScoped();
 		if (found.length === 1) {
 			finalSessionPath = found[0].path;
-		} else if (!process.stdin.isTTY) {
+		} else if (!canShowPicker) {
 			failAmbiguous(found, "no -s and no interactive terminal");
 		} else {
 			// Shown even on ZERO rows (#89, S6) — the picker itself says so and

@@ -50,7 +50,16 @@ Claude Code matches by exact Set membership, and only Claude Code's directory wa
 `countDirRead()` (`session-cwd.ts`'s `getDirWalkCount()` counts Claude Code's tree walk
 only — Pi's `collect()` does not call it). A harness with no interest in the new scopes
 may simply ignore `scopeOpts` — the seam is additive, and the interactive picker only
-reaches the new scopes on an explicit keypress.
+reaches the new scopes on an explicit keypress. **This has a real cost for an
+out-of-tree harness that ignores it, and nothing here tells the caller whether a
+harness honoured the option:** `bin/wtft.ts`'s own default relies on
+`{ scope: "worktree", windowMs: 20m }` actually narrowing the population — a
+harness that returns its full unscoped list regardless inflates the no-TTY
+"exactly one candidate" check (an unrelated session can make it look ambiguous,
+or worse, pick the wrong single survivor) and makes the picker's displayed
+"window: 20m" header false for that harness's own rows. Honour `scopeOpts`
+when you can; if you cannot yet, say so in your harness's own `discover`
+docstring rather than leaving it to be discovered as a bug.
 
 If your harness records a `cwd` on its transcript entries, apply the **union rule**:
 include a transcript when its project-dir slug matches the target **or** its own recorded

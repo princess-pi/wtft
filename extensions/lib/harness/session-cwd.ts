@@ -25,14 +25,20 @@
  * through this module and did not need to: the module was never the bottleneck
  * once the DEFAULT stopped calling it.
  *
- * This module's tail-read cost still exists, and still matters, for the
- * scopes that widen past the default — `"worktrees"` (Ctrl+W) and `"all"`
- * (Ctrl+A) both still consult {@link resolveLastCwd} for every transcript that
- * does not already physically match, which is exactly the population the
- * figure above describes. What bounds it now is the time window (#89, always
- * active, T1 = 20 minutes on every launch): `harness/claude-code/discovery.ts`
- * and `harness/pi/discovery.ts` both skip the tail read entirely for a
- * transcript outside the active window, via one `fs.statSync` first. The old
+ * This module's tail-read cost still exists, and still matters, for ONE scope
+ * that widens past the default — `"worktrees"` (Ctrl+W), which still consults
+ * {@link resolveLastCwd} for every transcript that does not already physically
+ * match, which is exactly the population the figure above describes.
+ * `"all"` (Ctrl+A) does NOT: it skips folder matching entirely (every session
+ * for the harness already qualifies), so there is no non-matching population
+ * for the union arm to run against, and this module is never called on that
+ * path either (spec-89 S3). What bounds `"worktrees"`'s cost now is the time
+ * window (#89, always active, T1 = 20 minutes on every launch):
+ * `harness/claude-code/discovery.ts` and `harness/pi/discovery.ts` both skip
+ * the tail read entirely for a transcript outside the active window, via one
+ * `fs.statSync` first — and, since spec-reconcile, skip the directory's
+ * `readdir`/`stat` pass ENTIRELY for `"worktree"`/`"branch"` scope, which
+ * never consult this module at all. The old
  * unbounded cost is still reachable — deliberately — the moment a human cycles
  * `Ctrl+T` all the way to "all", which is why {@link getCwdBytesRead} and
  * {@link TAIL_WINDOWS} below are unchanged.

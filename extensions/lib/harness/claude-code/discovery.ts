@@ -273,6 +273,18 @@ function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions
 	for (const slug of projectDirs) {
 		const physicalMatch = targetSlugs.has(slug) ||
 			fallbackSlugPrefixes.some(prefix => slug.startsWith(prefix));
+
+		// SKIP THE DIRECTORY ENTIRELY when it cannot possibly contribute
+		// (pr-review, Medium): a non-matching slug under "worktree"/"branch"
+		// (`useUnionArm` false) has no way to match — the union arm that could
+		// have found it anyway never runs for those two scopes — so reading its
+		// directory and stat-ing every file in it would cost exactly the
+		// per-transcript work S1/S5 promise a bare `wtft` launch never pays.
+		// This is what makes the ~7 ms measurement in this module's own header
+		// (and types.ts's DiscoveryScope docstring) true of the CODE, not just
+		// of a corpus where every non-matching directory happened to be cheap.
+		if (!physicalMatch && !useUnionArm) continue;
+
 		const files: string[] = [];
 		collect(path.join(root, slug), slug, files);
 

@@ -1890,7 +1890,7 @@ export interface SessionTotal extends TokenTotals {
 	 *  figures the bar chart bins for those turns: `i.cost` (the tag file's
 	 *  `c`) plus `i.serverToolCost` when present (#119, U2). So
 	 *  `costUsd + untaggedCostUsd` always equals the chart's own running
-	 *  total, exactly — docs/spec-26-json.md's Amendment 2 states this as the
+	 *  total, exactly — docs/spec-26-json.md's Amendment 3 states this as the
 	 *  closer. */
 	untaggedCostUsd: number;
 }
@@ -1979,7 +1979,7 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
 	// bar chart bins for these turns — `i.cost` (the tag file's `c`) plus
 	// `i.serverToolCost` when present — so `total.costUsd + untaggedCostUsd`
 	// equals the chart's own running total exactly, not merely on the corpus
-	// where every untagged `c` happens to measure zero (U2, spec Amendment 2).
+	// where every untagged `c` happens to measure zero (U2, spec Amendment 3).
 	let untaggedCostUsd = 0;
 	let compactionEvents = 0;
 	let compactionTokensFreed = 0;

@@ -320,7 +320,7 @@
     },
     {
       "code": 3,
-      "meaning": "`wtft spawn-record` only (#116): the record was valid but the ledger could not be written -- an unwritable state dir, or a full disk. The edge is NOT recorded, so the child is invisible to the rollup, not `unattributed` (which means an edge we have whose child we could not read). Any partial line left behind is reported as a counted malformed line on the next read; nothing tries to repair it."
+      "meaning": "`wtft spawn-record` only (#116): the record was valid but the ledger could not be written -- an unwritable state dir, or a full disk. The edge is NOT recorded, so the child is invisible to the tree, not `unattributed` (which means an edge we have whose child we could not read). Any partial line left behind is reported as a counted malformed line on the next read; nothing tries to repair it."
     },
     {
       "code": 9,

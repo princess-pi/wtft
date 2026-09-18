@@ -28,12 +28,19 @@
 # unconditionally fail-open, which is a check that cannot fail — so a published
 # tarball that would not install would have been invisible for as long as #29
 # stayed open. That is the same "looks healthy because nothing reports" this
-# file exists to end, rebuilt inside the file that ends it. It now names the
-# ONE tolerated outcome — an E404 for our own package — and fails on anything
-# else, surfacing as a `::warning::` naming its issue, so the state is visible
+# file exists to end, rebuilt inside the file that ends it. It named the ONE
+# tolerated outcome — an E404 for our own package — and failed on anything
+# else, surfacing as a `::warning::` naming its issue, so the state was visible
 # without a red that is always expected, which is the kind of red people learn
 # to ignore. The daemon shell suite was the second such row, pinned to its five
 # known-red assertions BY NAME, until #72 fixed the suite; it is a plain gate now.
+#
+# `stock-node-registry` IS DISABLED, not pass-with-warning (#77, Duppy,
+# 2026-09-18). Publishing is a future feature, so CI should not run a test and
+# emit a warning on every push for it — a green board with a warning line
+# nobody reads reads as "quietly omitted" regardless of the tolerance logic
+# behind it. The job below carries `if: false`; its body is untouched so it
+# comes back verbatim, as a plain gate, in the PR that un-parks #29.
 # ---
 name: CI
 
@@ -156,6 +163,13 @@ jobs:
   stock-node-registry:
     name: registry channel on stock node
     runs-on: ubuntu-latest
+    # DISABLED (#77, Duppy, 2026-09-18): publishing is a future feature, so
+    # this job does not run a check and emit a warning on every push for it.
+    # Re-enable as a plain gate — delete this line, nothing else — in the same
+    # PR that un-parks #29. The rationale below describes the job's body,
+    # which stays as written for that day; it does not describe what runs
+    # today, which is nothing.
+    if: false
     # #32, "the harder half, worth stating rather than hiding": CI that only
     # exercises the bun-equipped git channel keeps passing while the stock-node
     # contract is broken.
@@ -178,9 +192,10 @@ jobs:
     # somebody remembered to delete the line — a gate that never arrives. The
     # ONE tolerated outcome is named instead: a 404, which is the honest state
     # of an unpublished package. Anything else — a tarball that will not
-    # install, a bundle that will not run — fails the job today, unpublished or
-    # not. The day #29 publishes, the 404 stops happening and this becomes an
-    # ordinary gate with no edit here.
+    # install, a bundle that will not run — fails the job, unpublished or not.
+    # The day #29 publishes, the 404 stops happening and this becomes an
+    # ordinary gate once `if: false` above is deleted (#77) — not with no edit
+    # here, as an earlier version of this comment claimed.
     timeout-minutes: 10
     steps:
       - uses: actions/setup-node@v5

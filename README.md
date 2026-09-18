@@ -78,14 +78,14 @@ The suite is where the real assertions live:
 - `pack-and-smoke` — `npm pack`, install the tarball, run it on plain node with
   bun stripped from PATH.
 
-**The known-red job is not allowed to simply fail.** A step that can never
-fail is not a check, so it names the *one* tolerated outcome and fails on
-anything else — otherwise a real regression hides behind an open issue for as
-long as that issue stays open:
-
-| Known red | Tolerated outcome | Everything else | Clears when |
-|---|---|---|---|
-| `registry channel on stock node` | `E404` — the package is not published | fails the job | [#29](https://github.com/princess-pi/wtft/issues/29) publishes; no edit needed here |
+**Job `stock-node-registry` is disabled** (`if: false`,
+[#77](https://github.com/princess-pi/wtft/issues/77), Duppy, 2026-09-18): it
+does not run on any push. An earlier cut ran it as a *known-red* job — the one
+tolerated outcome was `E404` (the package not yet published), anything else
+failed it, surfacing as a `::warning::` — but a green board with a warning
+line nobody reads is closer to "quietly omitted" than to a real gate, so CI no
+longer runs it at all rather than keep pass-with-warning. The job's body is
+unchanged and will run once re-enabled.
 
 `tests/wtft-daemon.test.sh` was a second known-red row here until
 [#72](https://github.com/princess-pi/wtft/issues/72): it looked for the tag
@@ -93,10 +93,12 @@ file beside the session, where the daemon has not written it since `wtft-tags/`
 arrived. It is a plain gating step now, and hermetic — it exports a private
 `TMPDIR`, so it never touches a daemon it did not start.
 
-Once the package is on the registry, the stock-node job installs it by name and
-runs `--version`, `--help`, `--why` and `wtft-daemon --help` — `--why` because
-that is the command the #29 dynamic-import defect broke while the build stayed
-green.
+Once the package is on the registry, `stock-node-registry` is re-enabled — the
+`if: false` line deleted in the same PR that un-parks
+[#29](https://github.com/princess-pi/wtft/issues/29) — and installs the
+package by name, running `--version`, `--help`, `--why` and
+`wtft-daemon --help` — `--why` because that is the command the #29
+dynamic-import defect broke while the build stayed green.
 
 `npm test` runs every `tests/*.test.ts`, serially, each in its own process. It
 does **not** run `tests/wtft-daemon.test.sh` — shell suites are excluded from the

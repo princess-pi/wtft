@@ -309,11 +309,15 @@ names the usage mode)
 
 **Provisional (total)** (#443, a field since #26):
 A total the log parser daemon may still grow — the CLI spawned it and read the tag file
-before it finished, so the number printed is real but not final. Reported two ways that
-always agree: **exit 9**, and `provisional.provisional` / `provisional.reason` in JSON mode.
-The reasons are a closed vocabulary — `stale-version`, `unswept`, `subagent-unreadable` —
-and `reason` here is a different field from a **daemon health reason** (above); name the
-container when both are in play. The opposite state is **settled**, never "final" or "done".
+before it finished, so the number printed is real but not final. On the CLI, reported two
+ways that always agree: **exit 9**, and `provisional.provisional` / `provisional.reason` in
+JSON mode. The reasons are a closed vocabulary — `stale-version`, `unswept`,
+`subagent-unreadable` — and `reason` here is a different field from a **daemon health
+reason** (above); name the container when both are in play. The Pi widget also surfaces
+this state, but as a third, contract-less channel: prose only ("total is provisional"),
+no exit code, no JSON field — driven by its own `_subagentUnreadable` flag rather than the
+CLI's `provisional` object, so it never reads `provisional.reason`. The opposite state is
+**settled**, never "final" or "done".
 _Avoid_: Partial, incomplete, estimated (the number is measured, just not finished)
 
 **Pager**:

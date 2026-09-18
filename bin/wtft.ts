@@ -351,7 +351,7 @@ function describeProvisionalReason(provisional: { reason: string | null }, tagPa
 		return `this tag was written by tagger v${v}, not v${WTFT_TAGGER_VERSION}`;
 	}
 	if (provisional.reason === "subagent-unreadable") {
-		return "a subagent session file could not be read";
+		return "a subagent session file could not be read, so its cost may be missing";
 	}
 	return "no subagent transcript has been read since this tag was written";
 }

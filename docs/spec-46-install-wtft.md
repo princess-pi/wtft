@@ -125,7 +125,7 @@ now falls through the same evaluation as every other exit.
   "schema": "install-wtft@1",
   "mode": "check" | "install",
   "dir": "/home/u/bin",
-  "status": "ok" | "drift" | "shadowed" | "build-failed" | "no-dir",
+  "status": "ok" | "drift" | "shadowed" | "config-left" | "build-failed" | "no-dir",
   "onPath": true | false,
   "artifacts": [
     { "name": "wtft.mjs", "path": "…/bin/wtft.mjs",
@@ -133,9 +133,21 @@ now falls through the same evaluation as every other exit.
     { "name": "wtft", "path": "…/bin/wtft",
       "state": "ok" | "missing" | "no-source" | "not-a-link" | "wrong-target" }
   ],
-  "shadow": null | { "found": "/home/u/.bun/bin/wtft", "remedy": "rm '/home/u/.bun/bin/wtft'" }
+  "shadow": null | { "found": "/home/u/.bun/bin/wtft", "remedy": "rm '/home/u/.bun/bin/wtft'" },
+  "configMigration": [
+    { "from": "/home/u/.config/princess-pi-tools/wtft.json",
+      "to": "/home/u/.config/wtft/config.json", "state": "moved" | "left" | "none" }
+  ]
 }
 ```
+
+- **`configMigration` is present on every exit path, install or check, including
+  `no-dir` and `build-failed`** (#156) — it is computed independently of `DEST_DIR`/the
+  build, from `$XDG_CONFIG_HOME`/`$HOME` alone. It carries exactly four records, one per
+  legacy file (`wtft.json`, `token-budget.json`, `wtft-pricing.json`,
+  `wtft-harnesses.json`), in that order. `status: "config-left"` (exit `4`) is reported
+  only when every artifact is otherwise `ok` — see "Config migration (#156)" above for
+  the full contract.
 
 Flat, one record per artifact, stable keys. `status` is the single field a caller reads
 to branch; `artifacts[].state` says which file to blame, and the same list is rendered
@@ -272,9 +284,11 @@ ineffective.
 
 ## Seams under test
 
-Nine sections, all driven through the CLI — no internal function is imported (V9's
-mutation-probe portion, M4, runs `research/46-install-mutants/run-mutants.sh` directly, the
-same as V7).
+Nine sections, all driven through the CLI — no internal function is imported. V7 is the
+exception: it runs `research/46-install-mutants/run-mutants.sh` directly, which now covers
+M4 (the `config-left` escalation, #156) alongside the original M1–M3; V9 exercises the
+config-migration feature itself, end-to-end through the CLI, and never touches the mutation
+probe.
 
 | # | Seam | Verified by |
 |---|---|---|
@@ -284,9 +298,9 @@ same as V7).
 | **V4** | shadow detection | a decoy `wtft` earlier on `PATH` → exit `2`, `shadow.found` names it, the decoy is **still there**, the install still happened, and our own copy winning is exit `0` / `shadow: null` / `onPath: true` |
 | **V5** | staleness | append a byte to the installed `wtft.mjs` → `--check` exits `1`, that payload `stale`, the untouched one still `ok`; `chmod 0644` → `not-executable`; a command symlink repointed at the other payload → `wrong-target` |
 | **V6** | the ten defects the reconcile and review audits found | see below |
-| **V7** | the mutation probe, M1–M3 | `run-mutants.sh` exits 0, and all three original mutations applied |
+| **V7** | the mutation probe, M1–M4 | `run-mutants.sh` exits 0, and all four mutations applied — V7b's own check is `M1 && M2 && M3 && M4` |
 | **V8** | hostile paths | an apostrophe, a newline, and a destination symlink — the review bot's four findings, each reproduced before it was adopted |
-| **V9** | config migration (#156) | install moves every legacy file present to its new name, byte-identical, and deletes the old one; a second run (or `--check`) reports `none` for all; a file already at the new path is `left`, exit `4`, neither copy touched; `--check` reports the same leftover and writes nothing; the mutation probe's **M4** confirms the `config-left` escalation itself is caught |
+| **V9** | config migration (#156), driven directly through the CLI (V9a–V9d) | install moves every legacy file present to its new name, byte-identical, and deletes the old one; a second run (or `--check`) reports `none` for all; a file already at the new path is `left`, exit `4`, neither copy touched; `--check` reports the same leftover and writes nothing. (The `config-left` ESCALATION LOGIC ITSELF is mutation-proofed as **M4**, checked under **V7**, not here — V9 exercises the feature end-to-end and never invokes `run-mutants.sh`.) |
 
 `0755` is what install *writes* and what V2 asserts; the **tool's** check is any execute
 bit, so a hand-`chmod`ed `0700` copy still reports `ok`.

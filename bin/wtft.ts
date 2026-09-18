@@ -364,7 +364,12 @@ export const EXIT_PROVISIONAL = 9;
 
 /** No interactive terminal, and session selection was not precise (#89, E3/E4):
  *  `-s <substring>` matched zero or several sessions, or no `-s` was given at
- *  all with more than one candidate. Replaces the old no-prompt `--json`
+ *  all and the picker's own default-scoped population (this worktree, last
+ *  20 minutes) held zero or several candidates — ZERO included on both arms,
+ *  not just "several" (corrected, pr-review round 2: an earlier draft of
+ *  this docstring said only "more than one candidate" for the no-`-s` case,
+ *  which undersold the code below — `failAmbiguous` fires there whenever
+ *  `found.length !== 1`, zero included). Replaces the old no-prompt `--json`
  *  auto-pick-newest behaviour, which silently guessed under a machine caller's
  *  nose — this exit is what tells a script it must narrow the target instead. */
 export const EXIT_SESSION_AMBIGUOUS = 10;

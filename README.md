@@ -160,15 +160,17 @@ no model id, and it adds server-side tool cost that per-interaction cost does no
 `--json` suppresses the rendering flags. It does **not** apply to the commands
 that run instead of a report — `--help`/`--why`/`--version`, `--watch`, and
 `--list`/`--cleanup`/`--restart`/`--stop` keep their own output, and `-p` is
-still refused with exit 1. With an interactive terminal, `--json` still shows
-the session picker — drawn to stderr, so stdout stays one clean JSON document —
-whether or not the population is ambiguous
-([#89](https://github.com/princess-pi/wtft/issues/89)). With **no** interactive
-terminal, wtft selects only when the population is already unambiguous (`-s
-<substring>` matching exactly one session, or exactly one session discovered
-with no `-s` at all); otherwise see exit **10** below — this replaces the old
-no-prompt auto-pick-the-newest behaviour and its `auto-selected-session` notice,
-both retired in `@4`.
+still refused with exit 1. With an interactive terminal, `--json` no longer
+skips the session picker the way it used to — it still shows one whenever the
+population IS ambiguous, drawn to stderr so stdout stays one clean JSON
+document ([#89](https://github.com/princess-pi/wtft/issues/89)). An already
+unambiguous population (exactly one `-s` match, or exactly one session
+discovered with no `-s`) is selected immediately with no picker at all,
+interactive terminal or not — the same shortcut a plain, non-`--json` launch
+already took. With **no** interactive terminal and an AMBIGUOUS population
+(zero or several), see exit **10** below — this replaces the old no-prompt
+auto-pick-the-newest behaviour and its `auto-selected-session` notice, both
+retired in `@4`.
 
 `wtft` exits with:
 

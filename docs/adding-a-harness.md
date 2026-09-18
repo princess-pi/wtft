@@ -38,9 +38,11 @@ one `fs.statSync` before any read the union arm would otherwise pay for. **`"bra
 fallback is a documented no-op at the DISCOVERY level, never a silent wrong scope:**
 `resolveBranchCheckout` returning `null` (no git, not a repo, detached HEAD, or no checkout
 reports that branch) means `discoverScoped` folder-matches the bare `targetCwd` instead —
-the exact same population `"worktree"` scope would return. (The picker's own displayed
-scope LABEL still reads "branch" in that case — see `docs/spec-89-scoped-picker.md`'s note
-on this — only the underlying candidate set falls back.)
+the exact same population `"worktree"` scope would return. The interactive picker's
+`session-selector.ts` also corrects its displayed scope LABEL back to "worktree" in that
+case — see `docs/spec-89-scoped-picker.md`'s note on this — so a caller of THIS function
+directly (not through the picker) gets the right candidates either way, but only the
+picker itself also gets a label that matches them.
 
 Both built-in harnesses split into a `discoverLegacy` function (unchanged from before #89)
 plus a new `discoverScoped` function, selected by whether `scopeOpts` was passed — but they
@@ -50,14 +52,18 @@ Claude Code matches by exact Set membership, and only Claude Code's directory wa
 `countDirRead()` (`session-cwd.ts`'s `getDirWalkCount()` counts Claude Code's tree walk
 only — Pi's `collect()` does not call it). A harness with no interest in the new scopes
 may simply ignore `scopeOpts` — the seam is additive, and the interactive picker only
-reaches the new scopes on an explicit keypress. **This has a real cost for an
-out-of-tree harness that ignores it, and nothing here tells the caller whether a
-harness honoured the option:** `bin/wtft.ts`'s own default relies on
-`{ scope: "worktree", windowMs: 20m }` actually narrowing the population — a
-harness that returns its full unscoped list regardless inflates the no-TTY
-"exactly one candidate" check (an unrelated session can make it look ambiguous,
-or worse, pick the wrong single survivor) and makes the picker's displayed
-"window: 20m" header false for that harness's own rows. Honour `scopeOpts`
+reaches the new scopes on an explicit keypress. **`windowMs` is enforced
+defensively, `scope`/folder-matching is not (pr-review round 2, Medium).**
+`discoverSessions()` in `session-selector.ts` — the ONE place every
+`discover()` call is funneled through — post-filters every candidate against
+`scopeOpts.windowMs` itself, so an out-of-tree harness that ignores the
+option cannot inflate the no-TTY "exactly one candidate" check past what the
+active time window actually allows, and the picker's "window: …" header stays
+true regardless of that harness's own cooperation. There is no equivalent
+backstop for `scope` itself — a harness that returns its full UNSCOPED list
+under `"worktree"`/`"branch"` still shows sessions from outside the target
+directory, since folder-matching has no single generic rule
+`discoverSessions()` could apply on a harness's behalf. Honour `scopeOpts`
 when you can; if you cannot yet, say so in your harness's own `discover`
 docstring rather than leaving it to be discovered as a bug.
 

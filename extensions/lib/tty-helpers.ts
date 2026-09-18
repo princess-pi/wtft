@@ -60,9 +60,11 @@ export function enterRawStdin(onKey: (key: string) => void): () => void {
 
 /** Show the terminal cursor (DECTCEM reset).
  *  @param out where to write — stdout by default; the scoped picker (#89)
- *    passes stderr under `--json`, since both are the same controlling
- *    terminal whenever this path runs at all, and stdout must stay a clean
- *    JSON document (E1). */
+ *    passes stderr under `--json`, so stdout stays a clean JSON document
+ *    (E1). `bin/wtft.ts`'s `canShowPicker` guard guarantees `out` ITSELF is
+ *    a TTY whenever this runs at all; it says nothing about the OTHER
+ *    stream (stdout, when `out` is stderr, or vice versa) — that one can be
+ *    a pipe, same as any ordinary redirect. */
 export function showCursor(out: NodeJS.WritableStream = process.stdout): void {
 	out.write("\x1b[?25h");
 }

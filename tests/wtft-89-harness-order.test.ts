@@ -255,5 +255,64 @@ console.log("\n=== H2: recordHarnessOpened refuses to clobber malformed config =
 	}
 }
 
+// ---
+// H1/H2 (real fix, round 2) — an OUT-OF-TREE worktree (not nested under the
+// clone at all, `worktrees.ts`'s second documented layout) reads its own
+// sticky order correctly. The walk-up-based read this repo shipped in round
+// 1 could never reach the clone's config.json from here — only a
+// git-`mainCloneDir`-based read, which does not care where the worktree
+// physically lives, can (pr-review round 2, Medium).
+// ---
+console.log("\n=== H1/H2: out-of-tree worktree reads its own repo's sticky order ===\n");
+{
+	const sandbox = mktmp("wtft-89-order-outoftree-");
+	let outOfTree: { clone: string; worktree: string } | null = null;
+	try {
+		const clone = path.join(sandbox, "clone");
+		fs.mkdirSync(clone, { recursive: true });
+		const run = (dir: string, args: string[]) =>
+			execFileSync("git", ["-C", dir, ...args], { stdio: ["ignore", "ignore", "ignore"], timeout: 10_000 });
+		run(clone, ["init", "-q", "-b", "main"]);
+		run(clone, ["config", "user.email", "t@example.com"]);
+		run(clone, ["config", "user.name", "t"]);
+		fs.writeFileSync(path.join(clone, "README"), "x\n");
+		run(clone, ["add", "-A"]);
+		run(clone, ["commit", "-qm", "init"]);
+		// OUT-of-tree: a sibling of the clone, never nested under it — no
+		// walk-up from here is textually "under" the clone.
+		const worktree = path.join(sandbox, "worktrees", "89-branch");
+		run(clone, ["worktree", "add", "-q", "-b", "89-out-branch", worktree]);
+		outOfTree = { clone, worktree };
+	} catch {
+		outOfTree = null;
+	}
+
+	if (!outOfTree) {
+		console.log("  (skip: git worktree unusable)");
+	} else {
+		const originalCwd = process.cwd();
+		const originalHome = process.env.HOME;
+		const originalXdg = process.env.XDG_CONFIG_HOME;
+		try {
+			process.env.HOME = sandbox;
+			process.env.XDG_CONFIG_HOME = path.join(sandbox, "xdg-config");
+			process.chdir(outOfTree.worktree);
+
+			check(mainCloneDir(outOfTree.worktree) === outOfTree.clone,
+				"H2: mainCloneDir resolves the clone from an OUT-OF-TREE worktree too (git-based, not path-based)");
+
+			recordHarnessOpened("pi", outOfTree.worktree);
+			check(readHarnessOrder(outOfTree.worktree).join(",") === "pi",
+				`H1: readHarnessOrder sees the write from the out-of-tree worktree itself (${readHarnessOrder(outOfTree.worktree).join(",")})`);
+			check(readHarnessOrder().join(",") === "pi",
+				"H1: …and from process.cwd() standing right there, with no startDir needed");
+		} finally {
+			process.chdir(originalCwd);
+			if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+			if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = originalXdg;
+		}
+	}
+}
+
 console.log(`\n${failed === 0 ? "✅" : "❌"} ${passed} passed, ${failed} failed\n`);
 process.exit(failed > 0 ? 1 : 0);

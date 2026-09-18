@@ -29,25 +29,32 @@ reader does not re-litigate them)
   `worktrees.ts`), then from the repo's fanned-out checkouts pick the one
   `git worktree list --porcelain` reports checked out to that branch, and apply
   `"worktree"`-style folder matching to it alone. If git is unusable or the
-  branch can't be resolved, the CANDIDATE POPULATION is a documented no-op —
-  `resolveBranchCheckout` returns null, and discovery folder-matches the bare
-  target directory instead, the same set `"worktree"` scope would return —
-  rather than silently falling back to a different scope's population. The
-  picker's own `scope` FIELD still updates to `"branch"` unconditionally on
-  every Ctrl+B press (`applyKey` is pure and has no git awareness, so it
-  cannot know resolution will fail), and so does the displayed "scope:" label
-  — only the underlying candidates degrade gracefully, not the label. That
-  label/population split is itself a mechanism choice inside an already-decided
-  feature (the key and its label are pinned by the decision); it is not a fork
-  Duppy needs to pick between.
+  branch can't be resolved, it is a documented no-op, LABEL INCLUDED —
+  `resolveBranchCheckout` returns null, and both the candidate population
+  (discovery folder-matches the bare target directory, the same set
+  `"worktree"` scope would return) AND the picker's displayed "scope:" label
+  fall back to `"worktree"`, never leaving them disagreeing. `applyKey` itself
+  is pure and has no git awareness, so it always sets `state.scope` to
+  `"branch"` on the key press; `selectSessionPrompt`'s rescope handler in
+  `session-selector.ts` — the one place with both git access and the state —
+  is what corrects `state.scope` back to `"worktree"` before ever rendering
+  or re-discovering, so nothing downstream ever sees the two disagree (fixed
+  in pr-review round 2, after round 1 shipped the label/population split this
+  paragraph used to describe as intentional).
 - **How the union (last-cwd) arm and the time window compose.** The decision
   specifies the time window as a first-class, always-on primitive but does not
   restate the mechanics of the #156/#164 union arm under the new scopes. The
   2026-09-18 measurement comment's superseded proposal ("the wandered-in arm
   runs only inside the time window") is carried forward as the mechanism:
   `"worktree"` scope runs folder matching only, no union arm, ever — this is
-  what makes the default ~7 ms. `"worktrees"` and `"all"` scope also run the
-  union arm, but only over transcripts whose mtime falls inside the active time
+  what makes the default ~7 ms. `"worktrees"` scope ALSO runs the union arm
+  (correction, pr-review round 2: an earlier draft of this note said `"all"`
+  did too — it does not, and cannot need to: `"all"` skips folder matching
+  entirely, so there is no non-matching population left for a union arm to
+  search, and `discoverScoped` returns before reaching one on that path;
+  S3/S6, `session-cwd.ts`'s own header and `docs/EXT_WTFT.html` all already
+  said "worktrees" only, and this note is what's being brought into line with
+  them), bounded to transcripts whose mtime falls inside the active time
   window — so the arm's cost is bounded by the window the human is already
   looking through, and reverts to today's full cost only when a human cycles
   `Ctrl+T` all the way to "all" (an explicit, deliberate choice, per the
@@ -149,18 +156,27 @@ reader does not re-litigate them)
   (scroll hysteresis), while `setRows` always recomputes it from 0 — the same
   `(rows.length, cursor)` pair can render two different windows depending on
   which path produced it.
-- **K7 — cursor stays valid after `setRows`.** A rescope that shrinks the list
-  clamps the cursor into range rather than pointing past the end.
+- **K7 — cursor ALWAYS resets to the top row after `setRows`**, on every
+  rescope — not only one that shrinks the list. A rescope changes what the
+  rows ARE, not just how many; leaving the cursor at its old index would let
+  a quick rescope-then-Enter open a session the human never looked at
+  (pr-review round 2, Low — the first draft only clamped into range, which
+  left a growing or same-size rescope's cursor exactly where it was).
 
 ### No-TTY `-s` and the new exit code (`bin/wtft.ts`)
 
-- **E1 — interactive terminal always gets the picker**, `--json` included; the
+- **E1 — an interactive terminal gets the picker**, `--json` included; the
   picker draws to a stream that is never mixed into the `--json` document's
-  stdout bytes (`process.stderr`, since both stdout and stderr are the same
-  controlling terminal whenever this path is reachable at all — stdout being a
-  TTY is the precondition for the picker to run, and a TTY-stdout process
-  attached to a non-TTY stderr is not a shape this repo's own tooling
-  produces).
+  stdout bytes (`process.stderr` under `--json`, `process.stdout` otherwise).
+  **Corrected (pr-review round 2, Low): the precondition is `process.stdin
+  .isTTY` AND the picker's OWN output stream's `.isTTY` — stdout under a plain
+  launch, stderr under `--json` — not stdout alone.** An earlier draft of this
+  bullet said stdout being a TTY was the precondition and called a TTY-stdin/
+  non-TTY-stdout combination "not a shape this repo's own tooling produces" —
+  that combination is exactly `wtft --tokens | less -R`, a flow the README's
+  own Usage section recommends, and stdin stays on the terminal while stdout
+  is the pipe. `wtft --json 2>/dev/null` is the same shape under `--json`. The
+  `canShowPicker` check in `bin/wtft.ts` is what actually guards this.
 - **E2 — no TTY, `-s` matches exactly one → selects it silently**, same as
   today.
 - **E3 — no TTY, `-s` matches zero or several → new exit code, lists matches.**
@@ -214,13 +230,18 @@ reader does not re-litigate them)
   `wtft-90-total-includes-server-tool-cost`) stay green, per the
   library-default interpretation note above — `wtft-35` needed one assertion
   updated for E3's new exit code, not a behavioural regression.
-- **E1–E5 have no dedicated suite** — there is no
-  `tests/wtft-89-no-tty-exit.test.ts`; that file name never shipped. E3/E4's
-  no-TTY exit-10 contract is covered by the one assertion added to
-  `tests/wtft-35-explicit-session-skips-discovery.test.ts` (a real CLI
-  subprocess with no TTY), not by a dedicated suite — a gap named here rather
-  than left for a reader to discover by grepping for a file that does not
-  exist (pr-review, Low).
+- **E2–E4's exit-10 contract**: `tests/wtft-89-no-tty-exit.test.ts` (added in
+  pr-review round 2, closing the gap round 1 could only name — real CLI
+  subprocesses, non-TTY by construction) covers zero and several `-s`
+  matches, zero and several default-scoped candidates with no `-s`, and the
+  `--json` empty-stdout guarantee on the same exit.
+  `tests/wtft-35-explicit-session-skips-discovery.test.ts` additionally
+  covers the zero-`-s`-match case as a side effect of its own #35 cost
+  assertion. E1 (interactive terminal still shows the picker) has no
+  automated coverage — the interactive TTY render loop itself is not unit
+  tested anywhere in this codebase, before or after #89; `canShowPicker`'s
+  logic (the dual stdin/output-stream TTY check) is exercised only by code
+  review and manual verification.
 - `bun run typecheck`, `bun run build`, `bash tests/wtft-daemon.test.sh`.
 - Regression closer carried forward from #89's own issue body: a fixture with
   many stranded cwds under `"worktrees"` scope does bounded reads (the existing

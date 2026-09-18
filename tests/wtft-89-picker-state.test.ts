@@ -183,17 +183,24 @@ console.log("\n=== K6: 12-row windowing ===\n");
 }
 
 // ---
-// K7 — cursor stays valid after setRows, including a shrinking rescope.
+// K7 — cursor always resets to the top row (0) after setRows, on ANY rescope
+// (pr-review round 2, Low: an earlier draft only clamped a shrinking list,
+// which left the cursor mid-list — and so mid a DIFFERENT population — after
+// a same-size-or-growing rescope; a quick rescope-then-Enter could then open
+// a session the human never looked at).
 // ---
-console.log("\n=== K7: cursor clamps after setRows ===\n");
+console.log("\n=== K7: cursor resets to top after setRows ===\n");
 {
 	let state = setRows(initPickerState(), rows(40));
 	for (let i = 0; i < 30; i++) state = (applyKey(state, "j") as any).state;
 	check(state.cursor === 30, `K7: cursor advanced to 30 (${state.cursor})`);
 
 	const shrunk = setRows(state, rows(5));
-	check(shrunk.cursor === 4, `K7: a rescope to 5 rows clamps the cursor to the last row (${shrunk.cursor})`);
+	check(shrunk.cursor === 0, `K7: a rescope to 5 (fewer) rows resets the cursor to the top (${shrunk.cursor})`);
 	check(visibleWindow(shrunk).positionLine === null, "K7: the shrunk list fits in one page again");
+
+	const grown = setRows(state, rows(50));
+	check(grown.cursor === 0, `K7: a rescope to 50 (MORE) rows also resets the cursor to the top, not just a shrink (${grown.cursor})`);
 
 	const toEmpty = setRows(state, []);
 	check(toEmpty.cursor === 0, "K7: a rescope to zero rows resets the cursor to 0, not a negative index");

@@ -234,12 +234,14 @@ function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions
 	// is consulted at all.
 	let targetDirs: string[];
 	let useUnionArm: boolean;
-	// Only "worktrees" ever calls fanOutCwd, so only it can carry a fallback
-	// slug-prefix set (git unusable — see fanOutCwd's own CwdFanOut.usedFallback
-	// docstring in ../worktrees.ts). Checked against `slugPrefixes.length > 0`
-	// rather than `usedFallback` alone: `fanOutCwd` returns `usedFallback: false`
-	// and an empty array for "worktree"/"branch" too, but being explicit here is
-	// what stops a future scope value from silently inheriting a stale fallback.
+	// Only "worktrees" ever calls fanOutCwd (see the branch below), so only it
+	// can populate `fallbackSlugPrefixes` — "worktree" and "branch" never
+	// reach the `if (fan.usedFallback)` check at all, which is what actually
+	// gates this (not a `slugPrefixes.length` check; corrected, pr-review
+	// round 2 — an earlier draft of this comment described a length check
+	// this code has never performed). See fanOutCwd's own
+	// CwdFanOut.usedFallback docstring in ../worktrees.ts for what triggers
+	// the fallback (git unusable).
 	let fallbackSlugPrefixes: string[] = [];
 	if (scope === "worktree") {
 		targetDirs = [target];

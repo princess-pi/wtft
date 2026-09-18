@@ -174,9 +174,8 @@ function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions
 	const targetSlugs = new Set<string>();
 	for (const dir of targetDirs) for (const variant of cwdSlugVariants(dir)) targetSlugs.add(variant);
 
-	// "worktree" and "branch" name exactly one directory each (S1/S4): a Pi
-	// slug is wrapped "--<encoded-cwd>--" (this module's own header), so an
-	// EXACT wrapped match is the single-directory equivalent of Claude Code's
+	// "worktree" and "branch" name exactly one directory each (S1/S4): an
+	// EXACT match is the single-directory equivalent of Claude Code's
 	// `targetSlugs.has(slug)` Set membership. Containment (`slug.includes`)
 	// only belongs to "worktrees", where it is load-bearing: it is what lets
 	// one target slug (the main clone's) also match a sibling in-tree
@@ -184,9 +183,22 @@ function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions
 	// directory listing of the worktree itself. Using containment for
 	// "worktree"/"branch" too over-matched any sibling project sharing a name
 	// prefix, and every in-tree worktree's own sessions, into what is supposed
-	// to be a single-directory scope (pr-review, Medium).
+	// to be a single-directory scope (pr-review round 1, Medium).
+	//
+	// EXACT means "normalize both sides and compare", NOT "reconstruct the
+	// literal wrapped string" (pr-review round 2, High: the first cut compared
+	// `slug === "--" + variant + "--"`, but `variant` — from `cwdSlugVariants`
+	// — already carries its own leading dash from the target's leading `/`,
+	// so that built `---home-…--` (three leading dashes), which no real Pi
+	// directory has; `buildDisplayPath`'s OWN Pi-branch strip
+	// (`@princess-pi/libs/session-path-shortener`: `.replace(/^--/, "")
+	// .replace(/--$/, "")`) is the one place this module's real wrapping
+	// convention is independently evidenced, so this matches against THAT
+	// rather than re-deriving the wrap from `cwdSlugVariants` a second,
+	// disagreeing way).
+	const stripPiWrap = (s: string): string => s.replace(/^--/, "").replace(/--$/, "");
 	const matchesTarget = (slug: string, variant: string): boolean =>
-		scope === "worktrees" ? slug.includes(variant) : slug === `--${variant}--`;
+		scope === "worktrees" ? slug.includes(variant) : stripPiWrap(slug) === variant.replace(/^-/, "");
 
 	for (const slug of projectDirs) {
 		const physicalMatch = [...targetSlugs].some(variant => matchesTarget(slug, variant));

@@ -116,11 +116,20 @@ function computeWindowTop(cursor: number, total: number, prevWindowTop: number):
 
 /**
  * The caller's answer to a `"rescope"` action: replace the row list after
- * re-discovering for the new scope/timeWindow. Clamps the cursor into range
- * (K7) rather than leaving it pointing past a shrunk list.
+ * re-discovering for the new scope/timeWindow. ALWAYS resets the cursor to
+ * the top row (0) rather than preserving its old index into a population
+ * that no longer means the same thing (pr-review round 2, Low): a rescope
+ * changes what the rows ARE, not just how many there are, so a cursor left
+ * mid-list after Ctrl+A/W/B/T would point at a session the human never
+ * looked at — a quick rescope-then-Enter would open it by accident. Row 1
+ * on top after every rescope is also what "cursor on the top row" already
+ * promises for the picker's initial state (`initPickerState`); this is the
+ * same promise held on every subsequent rescope, not just the first. K7 is
+ * the degenerate case of this same rule: 0 already satisfies "clamped into
+ * range" for any non-empty list.
  */
 export function setRows(state: PickerState, rows: readonly PickerRow[]): PickerState {
-	const cursor = rows.length === 0 ? 0 : Math.min(state.cursor, rows.length - 1);
+	const cursor = 0;
 	const windowTop = computeWindowTop(cursor, rows.length, 0);
 	return { ...state, rows, cursor, windowTop };
 }

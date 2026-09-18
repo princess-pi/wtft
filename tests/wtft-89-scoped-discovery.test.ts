@@ -27,7 +27,6 @@ import {
 	getCwdReadCount,
 	resetHarnessRegistry,
 	cwdToStrictSlug,
-	cwdToSlug,
 	buildDisplayPath,
 } from "../bin/wtft.mjs";
 
@@ -315,43 +314,51 @@ console.log("\n=== S7: Pi worktree/branch derivation ===\n");
 }
 
 // ---
-// S1 (Pi) — 'worktree' scope matches EXACTLY, not by containment (pr-review,
-// Medium: the first cut reused Pi's fan-out containment test for every
-// scope, so a default-scope picker over-matched any sibling project sharing
-// a name prefix, and every in-tree worktree's own sessions).
+// S1 (Pi) — 'worktree' scope matches EXACTLY, not by containment (pr-review
+// round 1, Medium: the first cut reused Pi's fan-out containment test for
+// every scope, so a default-scope picker over-matched any sibling project
+// sharing a name prefix, and every in-tree worktree's own sessions).
+//
+// Directory names below are written literally — the SAME real shape
+// tests/wtft-89-scoped-discovery.test.ts's own S7 section and
+// docs/EXT_WTFT.html use (`--home-<user>-git-projects-<project>--`) — rather
+// than built from `cwdToSlug(target)` the way the matcher itself computes a
+// variant. Building the fixture and the matcher from the same expression is
+// exactly how pr-review round 1's version of this test passed against a
+// matcher that built the WRONG wrapped string (three leading dashes instead
+// of Pi's real two — round 2, High): the fixture and the bug agreed with
+// each other. A literal, independently-written real-shaped name is what
+// actually exercises the matcher against the shape it will see on disk.
 // ---
 console.log("\n=== S1 (Pi): 'worktree' scope is exact, not containment ===\n");
 {
 	const sandbox = mktmp("wtft-89-s1-pi-");
 	const piRoot = path.join(sandbox, "pi-sessions");
-	const target = path.join(sandbox, "repo");
-	const targetSlug = cwdToSlug(target);
+	const user = path.basename(os.homedir());
+	const target = path.join(os.homedir(), "git-projects", "demo89");
 
-	// The exact target dir — must match.
-	fs.mkdirSync(path.join(piRoot, `--${targetSlug}--`), { recursive: true });
-	fs.writeFileSync(path.join(piRoot, `--${targetSlug}--`, "2026-09-18_own.jsonl"),
-		JSON.stringify({ type: "message", message: { role: "assistant", id: "m1", usage: {} } }) + "\n");
+	const writeSession = (dirName: string, fileName: string, id: string) => {
+		const dir = path.join(piRoot, dirName);
+		fs.mkdirSync(dir, { recursive: true });
+		fs.writeFileSync(path.join(dir, fileName),
+			JSON.stringify({ type: "message", message: { role: "assistant", id, usage: {} } }) + "\n");
+	};
 
+	// The exact target dir, real Pi shape — must match.
+	writeSession(`--home-${user}-git-projects-demo89--`, "2026-09-18_own.jsonl", "m1");
 	// A sibling whose slug CONTAINS the target's slug as a prefix — must NOT
 	// match under "worktree" scope (containment would have matched this).
-	const siblingSlug = cwdToSlug(target) + "-sibling";
-	fs.mkdirSync(path.join(piRoot, `--${siblingSlug}--`), { recursive: true });
-	fs.writeFileSync(path.join(piRoot, `--${siblingSlug}--`, "2026-09-18_sibling.jsonl"),
-		JSON.stringify({ type: "message", message: { role: "assistant", id: "m2", usage: {} } }) + "\n");
-
+	writeSession(`--home-${user}-git-projects-demo89-sibling--`, "2026-09-18_sibling.jsonl", "m2");
 	// An in-tree worktree of the SAME repo — must not match under "worktree"
 	// scope either (that is what Ctrl+W / "worktrees" scope is for).
-	const worktreeSlug = cwdToSlug(target) + "--claude-worktrees-99-branch";
-	fs.mkdirSync(path.join(piRoot, `--${worktreeSlug}--`), { recursive: true });
-	fs.writeFileSync(path.join(piRoot, `--${worktreeSlug}--`, "2026-09-18_worktree.jsonl"),
-		JSON.stringify({ type: "message", message: { role: "assistant", id: "m3", usage: {} } }) + "\n");
+	writeSession(`--home-${user}-git-projects-demo89--claude-worktrees-99-branch--`, "2026-09-18_worktree.jsonl", "m3");
 
 	process.env.WTFT_PI_SESSIONS_DIR = piRoot;
 	resetHarnessRegistry();
 	resetCwdCache();
 	try {
 		const found = discoverSessions("pi", target, { scope: "worktree", windowMs: null }).map((c: any) => c.name);
-		check(found.includes("2026-09-18_own.jsonl"), "S1 (Pi): the exact target directory is found");
+		check(found.includes("2026-09-18_own.jsonl"), `S1 (Pi): the exact target directory is found (${found.join(",")})`);
 		check(!found.includes("2026-09-18_sibling.jsonl"),
 			"S1 (Pi): a sibling whose slug merely CONTAINS the target's is NOT found under 'worktree' scope");
 		check(!found.includes("2026-09-18_worktree.jsonl"),

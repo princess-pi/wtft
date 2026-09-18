@@ -3,11 +3,14 @@
  * @module harness-order
  * @description Sticky, MRU harness ordering for the scoped picker (#89, H1–H5).
  *
- *   Read side (H1): plain `loadConfig` walk-up — the SAME mechanism every other
- *   wtft config value already uses, so an in-tree worktree reaches the main
- *   clone's `.wtft/config.json` with no special-case code, purely because a
- *   worktree lives at `<clone>/.claude/worktrees/<branch>/`, textually under
- *   the clone.
+ *   Read side (H1): resolves the main clone via `mainCloneDir` (git
+ *   `worktree list`-based) and reads its `.wtft/config.json` directly — the
+ *   SAME resolution the write side uses, so both sides agree regardless of
+ *   whether the worktree layout is in-tree or out-of-tree (round 2 of this
+ *   module's own design; the first cut used a plain `loadConfig` walk-up,
+ *   which only reaches an in-tree worktree — see `readHarnessOrder`'s own
+ *   docstring for the full story). A plain walk-up remains the fallback only
+ *   when there is no repo/git to resolve a main clone from at all.
  *
  *   Write side (H2) needs its own code: opening a session must persist to the
  *   MAIN CLONE's `.wtft/config.json` regardless of which worktree the CLI is
@@ -45,40 +48,66 @@ export function mainCloneDir(cwd: string): string | null {
 }
 
 /**
- * The sticky harness order, most-recently-opened first — read through the
- * standard config walk-up (H1). `loadConfig` has no directory parameter of
- * its own (it always walks up from `process.cwd()`), so a caller that needs a
- * DIFFERENT starting directory — `--dir`/`cwdOverride`, matching what
- * {@link recordHarnessOpened} writes for, or a test — passes `startDir`,
- * which temporarily `chdir`s around the read and restores the original cwd
- * afterward, even on throw. Omitted, this read silently used the launching
- * shell's cwd while `recordHarnessOpened` wrote under `--dir`'s target: two
- * different repos, so a `--dir` session's sticky order was written and never
- * seen again (pr-review, Medium). Unknown/malformed values are dropped rather
- * than thrown on; an absent or corrupt `harnessOrder` reads as `[]`, which is
+ * The sticky harness order, most-recently-opened first.
+ *
+ * Resolves {@link mainCloneDir} and reads ITS `.wtft/config.json` directly —
+ * the SAME resolution {@link recordHarnessOpened} writes through, `git
+ * worktree list`-based rather than textual-path-based. This is round 2 of
+ * H1's read side: the first cut used `loadConfig`'s plain walk-up from
+ * `process.cwd()`, reasoning that a worktree living at
+ * `<clone>/.claude/worktrees/<branch>/` is textually under the clone so
+ * walk-up reaches it "with no special-case code". That reasoning is only
+ * true of the IN-TREE layout. `worktrees.ts`'s own `CwdFanOut.slugPrefixes`
+ * docstring documents a SECOND, out-of-tree layout,
+ * `…-worktrees-<repo>-<branch>` — not nested under the clone at all — where
+ * walk-up never reaches the clone's file: writes would succeed (H2 resolves
+ * the clone via git, not via path) while reads silently returned `[]`
+ * forever (pr-review round 2, Medium). Resolving both sides through
+ * `mainCloneDir` removes the asymmetry instead of special-casing the second
+ * layout.
+ *
+ * `startDir` defaults to `process.cwd()`, matching {@link recordHarnessOpened}'s
+ * own default — pass `--dir`/`cwdOverride` explicitly when discovery used one,
+ * for the same reason `recordHarnessOpened` takes a `cwd` parameter instead of
+ * assuming the launching shell's directory.
+ *
+ * Falls back to the OLD walk-up read only when `mainCloneDir` cannot resolve
+ * at all (no git, not a repo) — a local `.wtft/config.json` a human placed by
+ * hand still works outside a repo, which is the one case `mainCloneDir` was
+ * never going to answer for. Unknown/malformed values are dropped rather than
+ * thrown on; an absent or corrupt `harnessOrder` reads as `[]`, which is
  * "every harness is unseen" (H4).
  */
-export function readHarnessOrder(startDir?: string): string[] {
-	if (!startDir || path.resolve(startDir) === process.cwd()) {
-		return readHarnessOrderHere();
+export function readHarnessOrder(startDir: string = process.cwd()): string[] {
+	const dir = mainCloneDir(startDir);
+	if (dir) {
+		const file = path.join(dir, ".wtft", "config.json");
+		try {
+			if (fs.existsSync(file)) {
+				const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+				if (parsed && typeof parsed === "object" && Array.isArray(parsed.harnessOrder)) {
+					return parsed.harnessOrder.filter((x: unknown): x is string => typeof x === "string");
+				}
+			}
+			return [];
+		} catch {
+			return []; // malformed file — same posture as recordHarnessOpened: never throw
+		}
 	}
+
+	// No repo / no git — the walk-up read `mainCloneDir` cannot replace here,
+	// for a hand-placed `.wtft/config.json` outside any repository.
 	const original = process.cwd();
 	try {
-		process.chdir(startDir);
-		return readHarnessOrderHere();
+		if (path.resolve(startDir) !== original) process.chdir(startDir);
+		const cfg = loadConfig(WTFT_CONFIG_TOOL, {}, WTFT_CONFIG_DIR) as { harnessOrder?: unknown };
+		if (!Array.isArray(cfg.harnessOrder)) return [];
+		return cfg.harnessOrder.filter((x): x is string => typeof x === "string");
 	} catch {
-		// Can't chdir there (doesn't exist, no permission) — read from where we
-		// already are rather than throwing out of a display-only lookup.
-		return readHarnessOrderHere();
+		return [];
 	} finally {
-		try { process.chdir(original); } catch { /* original dir gone — nothing to restore to */ }
+		try { if (process.cwd() !== original) process.chdir(original); } catch { /* gone — nothing to restore to */ }
 	}
-}
-
-function readHarnessOrderHere(): string[] {
-	const cfg = loadConfig(WTFT_CONFIG_TOOL, {}, WTFT_CONFIG_DIR) as { harnessOrder?: unknown };
-	if (!Array.isArray(cfg.harnessOrder)) return [];
-	return cfg.harnessOrder.filter((x): x is string => typeof x === "string");
 }
 
 /**

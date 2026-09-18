@@ -40,6 +40,7 @@ import {
 	type PickerRow,
 } from "./picker-state.ts";
 import { readHarnessOrder, recordHarnessOpened, orderByHarness } from "./harness-order.ts";
+import { resolveBranchCheckout } from "./harness/worktrees.ts";
 
 // ---
 // TYPES
@@ -107,12 +108,34 @@ export function discoverSessions(
 	for (const discovery of targets) {
 		try {
 			candidates.push(...discovery.discover(cwdOverride ?? null, scopeOpts));
-		} catch {
-			// A misbehaving harness must not take the selector down with it.
+		} catch (err) {
+			// A misbehaving harness must not take the selector down with it —
+			// but a SILENT catch made "this harness threw" indistinguishable
+			// from "this harness genuinely found nothing" (pr-review round 2,
+			// Medium): under #89's no-TTY exit-10 path, that ambiguity used to
+			// read as "zero sessions" with no hint anything went wrong. Named
+			// on stderr now, never thrown, so the caller's candidate LIST is
+			// unchanged (still whatever the other harnesses found) but the
+			// FAILURE is no longer invisible.
+			const reason = err instanceof Error ? err.message : String(err);
+			process.stderr.write(`\x1b[33mwtft: harness '${discovery.id}' discovery failed: ${reason}\x1b[0m\n`);
 		}
 	}
 
-	return candidates.sort((a, b) => b.timestamp - a.timestamp);
+	// Defensive time-window enforcement (pr-review round 2, Medium): a
+	// harness's OWN `discover` is supposed to honour `scopeOpts.windowMs`
+	// (docs/adding-a-harness.md), but nothing enforces that — an out-of-tree
+	// harness that ignores it would otherwise inflate the no-TTY "exactly one
+	// candidate" check and make the picker's "window: …" header false for its
+	// rows. Post-filtering here makes the window a real guarantee of this
+	// function's OUTPUT regardless of whether every harness cooperated,
+	// cheaply (one timestamp compare per candidate already in memory).
+	const windowMs = scopeOpts?.windowMs ?? null;
+	const withinWindow = windowMs === null
+		? candidates
+		: candidates.filter(c => Date.now() - c.timestamp <= windowMs);
+
+	return withinWindow.sort((a, b) => b.timestamp - a.timestamp);
 }
 
 /**
@@ -290,12 +313,13 @@ function formatTagSuffix(stats: SessionSummary): string {
 }
 
 /** Text shown after "scope:" in the picker header, keyed by `PickerState.scope`
- *  — display-only, no behaviour reads these strings back. The "branch" label
- *  is shown even when `resolveBranchCheckout` fell back to the bare target
- *  directory (S4's discovery-level no-op) — the label always reflects
- *  `state.scope`, which `applyKey` sets unconditionally on Ctrl+B; only the
- *  candidate POPULATION silently degrades to "worktree"-equivalent when the
- *  branch can't be resolved. */
+ *  — display-only, no behaviour reads these strings back. `applyKey` sets
+ *  `state.scope` to `"branch"` unconditionally on Ctrl+B (it is pure and has
+ *  no git awareness), but the rescope handler in `selectSessionPrompt` below
+ *  corrects it BACK to `"worktree"` before this label is ever rendered, when
+ *  `resolveBranchCheckout` says the branch can't be resolved — so the label
+ *  and the actual candidate population never disagree (pr-review round 2,
+ *  Medium; round 1 of this fix left the label reading "branch" regardless). */
 const SCOPE_LABEL: Record<PickerState["scope"], string> = {
 	worktree: "this worktree",
 	worktrees: "all worktrees (Ctrl+W)",
@@ -316,9 +340,11 @@ export interface SelectSessionPromptOptions {
 	harnessOption: string;
 	cwdOverride?: string;
 	/** Where the picker draws. Defaults to stdout; `bin/wtft.ts` passes stderr
-	 *  under `--json` so stdout stays one clean JSON document (#89, E1) — both
-	 *  are the same controlling terminal whenever this function runs at all,
-	 *  since it requires `process.stdin.isTTY`. */
+	 *  under `--json` so stdout stays one clean JSON document (#89, E1).
+	 *  `bin/wtft.ts`'s `canShowPicker` guard (`process.stdin.isTTY &&
+	 *  <this stream>.isTTY`) guarantees THIS stream is a TTY whenever this
+	 *  function is called at all — it says nothing about the OTHER stream
+	 *  (stdout under `--json`, or stderr otherwise), which can be a pipe. */
 	out?: NodeJS.WritableStream;
 	/**
 	 * The `-s <substring>` the caller already filtered `initialCandidates` by
@@ -357,11 +383,9 @@ function matchesSubstring(c: SessionCandidate, filter: string): boolean {
  *   - Enter: select — also records the sticky harness order (H3)
  *   - q or Ctrl+C: exit (code 130)
  *   - Ctrl+A / Tab: scope "all"  ·  Ctrl+W: scope "worktrees"
- *   - Ctrl+B: scope "branch" — the candidate population falls back to
- *     `"worktree"`-equivalent (the bare target directory) when the current
- *     branch or a matching checkout can't be resolved, but the picker's own
- *     `state.scope` — and so its displayed "scope:" label — still flips to
- *     "branch" regardless; see `SCOPE_LABEL`'s own comment above.
+ *   - Ctrl+B: scope "branch" — falls back to `"worktree"` (population AND
+ *     label) when the current branch or a matching checkout can't be
+ *     resolved; see `SCOPE_LABEL`'s own comment above.
  *   - Ctrl+T: cycle the time window (20m -> 1h -> 1d -> 1w -> all -> 20m)
  *
  * Requires an interactive terminal — the caller (`bin/wtft.ts`) is
@@ -396,6 +420,18 @@ export async function selectSessionPrompt(
 
 		let state: PickerState = setRows(initPickerState(), toRows(initialCandidates));
 
+		// `initPickerState()` always reports `scope: "worktree", timeWindow:
+		// "20m"` (picker-state.ts's own hardcoded default) — TRUE of a bare
+		// launch, but FALSE of `initialCandidates` here whenever `-s` matched
+		// several: those rows come from `bin/wtft.ts`'s LEGACY, unscoped
+		// `getCandidates()` (fan-out, the union arm, unbounded time), not from
+		// any real scope/window this state names (pr-review round 2, Medium).
+		// So the header shows the scope/window line only once it has become
+		// TRUE — after the first real rescope, which always re-discovers
+		// through `discoverSessions(..., { scope, windowMs })` and so always
+		// describes what is actually on screen from then on.
+		let hasRescoped = !opts.substringFilter;
+
 		hideCursor(out);
 
 		let lastLineCount = 0;
@@ -405,9 +441,13 @@ export async function selectSessionPrompt(
 			let text = `\x1b[1m\x1b[36m\u{1F4B8} WTFT — select session log\x1b[0m ` +
 				`\x1b[90m(j/k navigate, Enter select, q quit · Ctrl+A all · Ctrl+W worktrees · ` +
 				`Ctrl+B branch · Ctrl+T window)\x1b[0m\n`;
-			text += opts.substringFilter
-				? `  \x1b[90mscope: ${SCOPE_LABEL[state.scope]}  ·  window: ${state.timeWindow}  ·  filtered by -s "${opts.substringFilter}"\x1b[0m\n`
-				: `  \x1b[90mscope: ${SCOPE_LABEL[state.scope]}  ·  window: ${state.timeWindow}\x1b[0m\n`;
+			if (opts.substringFilter && !hasRescoped) {
+				text += `  \x1b[90mfiltered by -s "${opts.substringFilter}" (unscoped, no time window)\x1b[0m\n`;
+			} else if (opts.substringFilter) {
+				text += `  \x1b[90mscope: ${SCOPE_LABEL[state.scope]}  ·  window: ${state.timeWindow}  ·  filtered by -s "${opts.substringFilter}"\x1b[0m\n`;
+			} else {
+				text += `  \x1b[90mscope: ${SCOPE_LABEL[state.scope]}  ·  window: ${state.timeWindow}\x1b[0m\n`;
+			}
 
 			if (view.rows.length === 0) {
 				text += `  \x1b[33mNo sessions in this window. Press Ctrl+T to widen it.\x1b[0m\n`;
@@ -467,6 +507,19 @@ export async function selectSessionPrompt(
 				render();
 			} else if (action.type === "rescope") {
 				state = action.state;
+				hasRescoped = true;
+				// Ctrl+B's population falls back gracefully to "worktree"'s
+				// (bare target directory) when the branch can't be resolved —
+				// but the LABEL must say so too (pr-review round 2, Medium: the
+				// first cut left `state.scope` as `"branch"` regardless, so the
+				// picker's header kept reading "scope: this branch" over rows
+				// that were, in fact, just the default worktree population,
+				// with no indication anywhere that resolution had failed).
+				// `applyKey` is pure and cannot know this in advance; this is
+				// the one place with both git access and the state to correct.
+				if (state.scope === "branch" && !resolveBranchCheckout(opts.cwdOverride ?? process.cwd())) {
+					state = { ...state, scope: "worktree" };
+				}
 				// Re-discover for the new scope/window, THEN re-window the fresh
 				// rows (setRows also clamps the cursor, #89 K7).
 				let fresh = discoverSessions(opts.harnessOption, opts.cwdOverride, {

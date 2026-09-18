@@ -198,7 +198,8 @@ shipped with the old arithmetic, and a program pinned to it now sees the number
 move with nothing to branch on — `notices[]` gains no code, and this document
 declares its own prose non-contractual. Direction A was chosen knowing it was the
 incompatible option; what it did not settle is whether the incompatibility gets a
-machine-readable marker. **#120** owns that.
+machine-readable marker. **#120** settles it: see "Field names are API; prose is
+not", above, and Amendment 1's note that `@2` already carries this change.
 
 ### The seam
 

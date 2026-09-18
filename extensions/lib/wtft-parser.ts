@@ -1287,26 +1287,26 @@ function parseSubagentMeta(raw: string): SubagentMeta | null {
 	return meta;
 }
 
-/** The first line of `file`, read in bounded chunks rather than whole — a
- *  header check needs nothing past the first newline, and a transcript can be
- *  hundreds of MB (#147). Throws on a read failure, like `readFileSync`. A
- *  line longer than `cap` is returned truncated, which fails its JSON.parse
- *  and lands on the same silent skip as any other unparseable header. */
-function readFirstLine(file: string, cap = 1024 * 1024): string {
+/** The first `count` lines of `file`, read in bounded chunks rather than
+ *  whole — a header check needs nothing past them, and a transcript can be
+ *  hundreds of MB (#147). Throws on a read failure, like `readFileSync`.
+ *  Reads at most `cap` bytes; a longer head is returned cut at `cap`. */
+function readHeadLines(file: string, count: number, cap = 1024 * 1024): string[] {
 	const fd = fs.openSync(file, "r");
 	try {
 		const chunk = Buffer.alloc(64 * 1024);
 		const parts: Buffer[] = [];
 		let total = 0;
-		while (total < cap) {
-			const n = fs.readSync(fd, chunk, 0, chunk.length, total);
+		let newlines = 0;
+		while (total < cap && newlines < count) {
+			const n = fs.readSync(fd, chunk, 0, Math.min(chunk.length, cap - total), total);
 			if (n === 0) break;
-			const nl = chunk.subarray(0, n).indexOf(0x0a);
-			if (nl !== -1) { parts.push(Buffer.from(chunk.subarray(0, nl))); break; }
-			parts.push(Buffer.from(chunk.subarray(0, n)));
+			const got = chunk.subarray(0, n);
+			for (let i = got.indexOf(0x0a); i !== -1 && newlines < count; i = got.indexOf(0x0a, i + 1)) newlines++;
+			parts.push(Buffer.from(got));
 			total += n;
 		}
-		return Buffer.concat(parts).toString("utf8");
+		return Buffer.concat(parts).toString("utf8").split("\n").slice(0, count);
 	} finally {
 		fs.closeSync(fd);
 	}
@@ -1382,7 +1382,7 @@ export function discoverSubagentSessionFiles(
 	let mainSessionId: string | undefined;
 	let mainHeaderRaw: string | null = null;
 	try {
-		mainHeaderRaw = readFirstLine(sessionPath);
+		mainHeaderRaw = readHeadLines(sessionPath, 1)[0];
 	} catch (err) {
 		// #457 (round 7) — the round-4 comment claimed the caller's own read
 		// of the main file is "loud about the same failure"; it is not, on
@@ -1450,7 +1450,7 @@ export function discoverSubagentSessionFiles(
 				if (fullPath === sessionPath) continue;
 				if (files.includes(fullPath)) continue;
 				try {
-					const raw = readFirstLine(fullPath);
+					const raw = readHeadLines(fullPath, 1)[0];
 					let header: unknown = null;
 					try {
 						header = JSON.parse(raw);
@@ -1524,9 +1524,12 @@ function walkSubagentDir(
 	files: string[],
 	seen: Set<string>,
 ): Error | null {
-	// Reported, not skipped: transcripts below the cut would otherwise be
-	// missing from a list that looks complete (#148).
-	if (depth > maxDepth) return new Error(`subagent tree deeper than maxDepth ${maxDepth} at (${dir})`);
+	// A transcript below the cut is reported, not skipped: it would otherwise
+	// be missing from a list that looks complete (#148). An empty chain below
+	// the cut hides nothing and is not reported.
+	if (depth > maxDepth) {
+		return holdsTranscript(dir, seen) ? new Error(`subagent tree deeper than maxDepth ${maxDepth} at (${dir})`) : null;
+	}
 	// `seen` holds the real path of every directory and transcript already
 	// visited, so a symlink back into the tree (`loop -> .`) is walked once
 	// instead of to the kernel's ELOOP limit, and a transcript reachable by two
@@ -1620,6 +1623,26 @@ function walkSubagentDir(
 		throw new Error(`subagents directory could not be read (${dir}): ${err instanceof Error ? err.message : String(err)}`);
 	}
 	return frameErr;
+}
+
+/** Whether any `agent-*.jsonl` sits anywhere under `dir`. `seen` (real paths)
+ *  keeps a symlink cycle finite. Unreadable entries count as holding one:
+ *  what cannot be listed cannot be ruled out. */
+function holdsTranscript(dir: string, seen: Set<string>): boolean {
+	let real: string;
+	try { real = fs.realpathSync(dir); } catch { return true; }
+	if (seen.has(real)) return false;
+	seen.add(real);
+	let entries: fs.Dirent[];
+	try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return true; }
+	for (const e of entries) {
+		const full = path.join(dir, e.name);
+		if (e.name.startsWith("agent-") && e.name.endsWith(".jsonl")) return true;
+		let isDir: boolean;
+		try { isDir = fs.statSync(full).isDirectory(); } catch { continue; }
+		if (isDir && e.name !== "wtft-tags" && holdsTranscript(full, seen)) return true;
+	}
+	return false;
 }
 
 // #457 (round 4) — the unreadable-transcript warnings in this file are latched
@@ -1888,7 +1911,7 @@ export function discoverClaudeSubAgentSessionFiles(
 			try {
 				// Scan first 10 lines for a timestamp — the first line may be
 				// an ai-title entry with no timestamp field.
-				const head = fs.readFileSync(fullPath, 'utf8').split('\n').slice(0, 10);
+				const head = readHeadLines(fullPath, 10);
 				let ts: string | undefined;
 				for (const line of head) {
 					if (!line.trim()) continue;

@@ -563,7 +563,7 @@ the behaviour: with no interactive terminal, wtft selects only when `-s
 <substring>` matches EXACTLY one session; zero or several exit
 `EXIT_SESSION_AMBIGUOUS` (10) instead, naming every match on stderr, with
 nothing on stdout — the same "under `--json`, stdout carries nothing" contract
-exit 1 already carries for an error. `notices[]`'s vocabulary shrinks by one
-code as a result: `pending-session`, `no-data`, `unpriced-model`,
-`provisional`. This is a genuine behaviour change under a bumped `schema`
+exit 1 already carries for an error. `notices[]`'s vocabulary loses
+`auto-selected-session` as a result; the `notices[]` row above lists the codes
+in force. This is a genuine behaviour change under a bumped `schema`
 rather than a silent one, which is the whole reason `@3` → `@4` exists.

@@ -4,7 +4,8 @@
  * reading, #146–#149.
  *
  *   § 146  an unreadable `.meta.json` gets a notice; an absent one does not.
- *   § 147  discovery reads a transcript's first line, not the whole file.
+ *   § 147  discoverSubagentSessionFiles reads a header's first line, not the
+ *          whole transcript.
  *   § 148  a tree deeper than maxDepth is reported, not listed as complete;
  *          a directory symlink cycle lists each child once.
  *   § 149  the invariants #137 shipped with nothing defending them: the
@@ -178,6 +179,29 @@ console.log("\n§ 148 — depth truncation, symlink cycle\n");
 		JSON.stringify(deepRun.doc?.subagents));
 	check(deepRun.doc?.provisional?.reason === "subagent-unreadable", "…and provisional.reason is subagent-unreadable",
 		JSON.stringify(deepRun.doc?.provisional));
+
+	const emptyChain = claudeSession("depth-over-empty");
+	let chain = emptyChain.subDir;
+	for (let i = 1; i < 7; i++) chain = path.join(chain, `agent-e${i}`, "subagents");
+	fs.mkdirSync(chain, { recursive: true });
+	const quiet = discoverSubagentSessionFiles(emptyChain.sessionPath);
+	check(quiet.unreadable === null, "an over-depth chain holding no transcript is not reported");
+
+	if (!isRoot) {
+		// The meta notice survives an incomplete discovery: the rows are
+		// withheld, the unreadable meta is still named.
+		const both = claudeSession("depth-over-meta");
+		nest(both.subDir, 6);
+		fs.writeFileSync(path.join(both.subDir, "agent-top.jsonl"), turn("msg_top"));
+		const topMeta = path.join(both.subDir, "agent-top.meta.json");
+		fs.writeFileSync(topMeta, JSON.stringify({ agentType: "general-purpose", spawnDepth: 1 }));
+		fs.chmodSync(topMeta, 0o000);
+		let r;
+		try { r = runJson(both.sessionPath); } finally { fs.chmodSync(topMeta, 0o644); }
+		check(r.doc !== null && !("subagents" in r.doc), "precondition: incomplete discovery withholds the rows");
+		check((r.doc?.notices ?? []).some((n: any) => n.code === "subagent-meta-unreadable" && String(n.text).includes(topMeta)),
+			"…and the unreadable meta's notice is still emitted", JSON.stringify(r.doc?.notices));
+	}
 
 	const cyc = claudeSession("symlink-cycle");
 	fs.writeFileSync(path.join(cyc.subDir, "agent-cccc.jsonl"), turn("msg_child") + compaction);

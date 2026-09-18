@@ -127,7 +127,7 @@ Tests run against the built bundle (`bun run build` first), per repo convention:
 2. **`tests/wtft-issue-141-workflow-discovery.test.ts`** (new)
    - Fixture `<session>/subagents/workflows/wf_abc/agent-1.jsonl` +
      `wf_def/agent-2.jsonl` → both discovered by `discoverSubagentSessionFiles`.
-   - Existing depth-5 nesting fixtures still pass (regression:
+   - Existing nesting fixtures still pass (regression:
      `tests/wtft-issue-82.test.ts`).
 3. **Existing suites** `wtft-pricing-tiers`, `wtft-issue-82`, `wtft-issue-83`,
    `wtft-server-tool-cost`, daemon cost cross-validation — all green.

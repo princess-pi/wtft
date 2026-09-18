@@ -354,22 +354,13 @@ export interface SelectSessionPromptOptions {
 	out?: NodeJS.WritableStream;
 	/**
 	 * The `-s <substring>` the caller already filtered `initialCandidates` by
-	 * (basename or path, case-insensitive), when there was one. Two things
-	 * follow from setting it, both pr-review fixes across two rounds:
+	 * (basename or path, case-insensitive), when there was one. Setting it:
 	 *
-	 *   - Re-applied after every rescope's fresh `discoverSessions` call
-	 *     (round 1, Medium) — without this, a Ctrl+A/W/B/T press silently
-	 *     discarded the user's own narrowing and showed every session in the
-	 *     new scope instead of just the matches.
-	 *   - The initial state's `scope`/`timeWindow` are seeded to `"all"`/
-	 *     `"all"` instead of `initPickerState()`'s own `"worktree"`/`"20m"`
-	 *     defaults (round 3, Medium — a real bug, not just a mislabelled
-	 *     header: `initialCandidates` here comes from the CALLER's legacy,
-	 *     unscoped discovery, so seeding the normal narrow defaults meant
-	 *     pressing Ctrl+T FIRST silently narrowed to `"worktree"` scope too,
-	 *     dropping any match outside it with no warning — `"all"`/`"all"` is
-	 *     the least-narrowing real pair, so no rescope key can lose a match
-	 *     on its first press).
+	 *   - re-applies the filter after every rescope, so Ctrl+A/W/B/T never
+	 *     discards the user's own narrowing;
+	 *   - seeds the state `"all"`/`"all"`, which describes the unscoped,
+	 *     unbounded discovery the rows came from. Ctrl+T still cycles from
+	 *     `"all"` to `"20m"`, as it does everywhere (spec S5).
 	 */
 	substringFilter?: string;
 }
@@ -413,9 +404,8 @@ function matchesSubstring(c: SessionCandidate, filter: string): boolean {
  *   caller used to discover them — `bin/wtft.ts`'s default is
  *   `{ scope: "worktree", windowMs: TIME_WINDOW_MS["20m"] }` (S1/S5), but
  *   that is a convention the caller upholds, not a contract this function
- *   enforces; `initPickerState()`'s own `scope`/`timeWindow` fields (always
- *   `"worktree"`/`"20m"`) are independent of what produced `initialCandidates`
- *   and are only ever DISPLAYED as if they describe it.
+ *   enforces. The picker state starts at `"worktree"`/`"20m"`, except under
+ *   `substringFilter`, where it is seeded `"all"`/`"all"` (see the body).
  * @returns Promise resolving to the selected session file path
  */
 export async function selectSessionPrompt(
@@ -435,23 +425,12 @@ export async function selectSessionPrompt(
 
 		let state: PickerState = setRows(initPickerState(), toRows(initialCandidates));
 
-		// `initPickerState()` always reports `scope: "worktree", timeWindow:
-		// "20m"` (picker-state.ts's own hardcoded default) — TRUE of a bare
-		// launch, but FALSE of `initialCandidates` here whenever `-s` matched
-		// several: those rows come from `bin/wtft.ts`'s LEGACY, unscoped
-		// `getCandidates()` (fan-out, the union arm, unbounded time), not from
-		// `"worktree"`/`"20m"`. Left uncorrected, this was a REAL bug, not
-		// just a mislabelled header (pr-review round 3, Medium, superseding
-		// round 2's label-only fix): `state.scope` stays `"worktree"` until
-		// the first Ctrl+A/W/B press, so pressing Ctrl+T FIRST — which the
-		// contract defines as cycling ONLY the time window — silently
-		// re-discovered with `scope: "worktree"` too, and any `-s` match
-		// living outside this directory, or older than the new window,
-		// disappeared with no warning. Seeding `"all"`/`"all"` instead is the
-		// least-narrowing real scope/window pair: it drops nothing on the
-		// first rescope no matter which key fires it, and it is also the
-		// closest single truthful description of what `-s`'s own unscoped,
-		// unbounded discovery already returned.
+		// Under `-s` the rows come from the unscoped, unbounded discovery, so
+		// the state is seeded `"all"`/`"all"` to describe them truthfully. The
+		// scope half also keeps Ctrl+T from narrowing to this directory. The
+		// window half does not survive Ctrl+T: the cycle wraps `all -> 20m`,
+		// and the header says so. That is the key doing what it says, not a
+		// silent drop. Spec S5 records `-s` as the one exception to T1.
 		if (opts.substringFilter) state = { ...state, scope: "all", timeWindow: "all" };
 
 		hideCursor(out);

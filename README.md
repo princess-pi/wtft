@@ -153,9 +153,9 @@ contract: [`docs/spec-26-json.md`](./docs/spec-26-json.md).
 The numbers come from the same aggregation the rendered `--tokens` table formats,
 so those two cannot report different totals. The **bar chart's** total is a
 different figure on purpose: it bins every interaction, including ones carrying
-no model id, and it adds server-side tool cost that per-interaction cost does not
-— though as of `@4` a consumer can size that divergence itself, via
-`total.untaggedCostUsd` ([#119](https://github.com/princess-pi/wtft/issues/119)).
+no model id. As of `@4` a consumer can size that divergence itself:
+`total.costUsd + total.untaggedCostUsd` equals the chart's total
+([#119](https://github.com/princess-pi/wtft/issues/119)).
 
 `--json` suppresses the rendering flags. It does **not** apply to the commands
 that run instead of a report — `--help`/`--why`/`--version`, `--watch`, and

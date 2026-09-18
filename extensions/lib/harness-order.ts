@@ -81,7 +81,7 @@ export function mainCloneDir(cwd: string): string | null {
 export function readHarnessOrder(startDir: string = process.cwd()): string[] {
 	const dir = mainCloneDir(startDir);
 	if (dir) {
-		const file = path.join(dir, ".wtft", "config.json");
+		const file = path.join(dir, `.${WTFT_CONFIG_DIR}`, "config.json");
 		try {
 			if (fs.existsSync(file)) {
 				const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -119,7 +119,7 @@ export function readHarnessOrder(startDir: string = process.cwd()): string[] {
 export function recordHarnessOpened(harnessId: string, cwd: string = process.cwd()): void {
 	const dir = mainCloneDir(cwd);
 	if (!dir) return;
-	const file = path.join(dir, ".wtft", "config.json");
+	const file = path.join(dir, `.${WTFT_CONFIG_DIR}`, "config.json");
 
 	let existing: Record<string, unknown> = {};
 	if (fs.existsSync(file)) {

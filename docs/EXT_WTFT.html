@@ -324,8 +324,8 @@
         nothing.</p>
         <p>Exit <code>9</code> is distinct from <code>1</code> on purpose: <em>the run failed</em> and
         <em>the run succeeded but the number is not final</em> are different facts. It carries one bit,
-        which is all <code>wtft</code> can express today &mdash; there is no <code>--json</code> yet
-        (<a href="https://github.com/duppypro/princess-pi-packages/issues/510">#510</a>).</p>
+        and <code>--json</code> carries the reason as <code>provisional.reason</code>
+        (<a href="spec-26-json.md">spec-26</a>).</p>
 
         <h4>Update Timing</h4>
         <p>Status updates are triggered by three mechanisms, from fastest to slowest:</p>

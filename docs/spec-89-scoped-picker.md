@@ -96,7 +96,10 @@ reader does not re-litigate them)
 - **S5 — time window always applies, cycles on `Ctrl+T`.** Every scope is
   additionally bounded by `windowMs`; the CLI's initial state is always `20m`
   (`T1`), regardless of which scope key was used to get there. `Ctrl+T` cycles
-  `20m → 1h → 1d → 1w → all → 20m`.
+  `20m → 1h → 1d → 1w → all → 20m`. **One exception:** a picker opened because
+  `-s` matched several sessions starts at scope `all`, window `all`, because its
+  rows are every match with no scope or time bound, and the header must describe
+  them. Its first `Ctrl+T` moves to `20m`, like any other `all`.
 - **S6 — an empty window says so, never widens itself.** Zero rows after a
   (re)discovery is a distinct render state (a message naming `Ctrl+T`), not an
   automatic scope or window change.

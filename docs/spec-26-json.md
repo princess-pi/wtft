@@ -533,9 +533,10 @@ addition before it.
 **Where the field's value comes from** — decided 2026-09-18, and measured the
 same day: the parser already prices every turn by model and by date (intro
 rates, surge windows) and bakes the result into the tag file's `c`. An untagged
-turn carries no model id, so the parser has no price for it; across 55
-untagged tag lines in 25 tag files on the real corpus, every one measured
-`c: 0`. `total.untaggedCostUsd` sums that same `c` (`i.cost` once parsed) for
+turn carries no real model id (`<synthetic>` or none), so it is priced at the
+default fallback rate like any unpriced model; across 55 untagged tag lines in
+25 tag files on the real corpus, every one measured `c: 0`, and the #119 test's
+fixture gives one real usage and so a non-zero `c`. `total.untaggedCostUsd` sums that same `c` (`i.cost` once parsed) for
 every untagged interaction, **plus `i.serverToolCost` when present** — the
 `serverToolCost` half is this spec's own addition to the decision's wording,
 not measured on the corpus (nothing there carries it), added so the closer

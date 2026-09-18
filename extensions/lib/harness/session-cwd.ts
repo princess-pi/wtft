@@ -18,7 +18,8 @@
  * "14,441 reads, 580 MB, 1.6-2.0 s warm" figure this header used to quote
  * (measured 2026-09-16 over 7,287 transcripts / 2.51 GB, discovery over both
  * harnesses). #89's `"worktree"` scope — the picker's own default — runs the
- * physical-slug match ALONE and never calls into this module at all: measured
+ * physical-slug match ALONE and never pays this module's tail reads (it still
+ * uses the slug encoder and the directory-walk counter from here): measured
  * 2026-09-18 on an 11,005-transcript corpus, folder-name matching found 7 of 7
  * Claude and 4 of 4 Pi sessions for the target cwd in **~7 ms**, zero tail
  * reads. That is what `#89`'s issue body's ≤ 200 ms closer could not meet

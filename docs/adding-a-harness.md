@@ -51,8 +51,9 @@ are NOT otherwise identical: Pi's legacy default never fans out across worktrees
 Claude Code matches by exact Set membership, and only Claude Code's directory walk calls
 `countDirRead()` (`session-cwd.ts`'s `getDirWalkCount()` counts Claude Code's tree walk
 only — Pi's `collect()` does not call it). A harness with no interest in the new scopes
-may simply ignore `scopeOpts` — the seam is additive, and the interactive picker only
-reaches the new scopes on an explicit keypress. **`windowMs` is enforced
+should still honour `scope: "worktree"`: every bare picker launch passes
+`{ scope: "worktree", windowMs: 20 min }`, so a harness that ignores it lists its whole
+corpus in the default view. **`windowMs` is enforced
 defensively, `scope`/folder-matching is not (pr-review round 2, Medium).**
 `discoverSessions()` in `session-selector.ts` — the ONE place every
 `discover()` call is funneled through — post-filters every candidate against

@@ -29,6 +29,7 @@
  */
 
 import { discoverSessions } from "../extensions/lib/session-selector.ts";
+import { TIME_WINDOW_MS } from "../extensions/lib/picker-state.ts";
 import {
 	getCwdReadCount,
 	getCwdBytesRead,
@@ -43,7 +44,7 @@ const cwd = args.find(a => !a.startsWith("--")) || process.cwd();
 // `picker` is what a launch with no `-s` opens on (bin/wtft.ts's
 // getDefaultScoped): current worktree, 20 min. `unscoped` is the library
 // default, which `-s` still searches.
-const PICKER_DEFAULT = { scope: "worktree", windowMs: 20 * 60 * 1000 } as const;
+const PICKER_DEFAULT = { scope: "worktree", windowMs: TIME_WINDOW_MS["20m"] } as const;
 
 function measure(harness: "auto" | "claude-code" | "pi", path: "picker" | "unscoped") {
 	resetCwdCache();

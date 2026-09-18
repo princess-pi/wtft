@@ -1660,7 +1660,23 @@ export function loadSubagentInteractions(
 	classifyFn = classifyInteraction,
 	dedupFn = deduplicateInteractions,
 ): Interaction[] {
+	return loadSubagentInteractionsChecked(subagentFiles, parseFn, classifyFn, dedupFn).interactions;
+}
+
+/**
+ * {@link loadSubagentInteractions}, plus the files it dropped. Discovery lists
+ * a file by stat, so a read that fails afterwards (mode 000, vanished) is
+ * known only here — a caller showing a total needs `dropped` to mark it
+ * provisional (#165).
+ */
+export function loadSubagentInteractionsChecked(
+	subagentFiles: string[],
+	parseFn = parseSessionFile,
+	classifyFn = classifyInteraction,
+	dedupFn = deduplicateInteractions,
+): { interactions: Interaction[]; dropped: string[] } {
 	const interactions: Interaction[] = [];
+	const dropped: string[] = [];
 	for (const file of subagentFiles) {
 		try {
 			const raw = parseFn(file);
@@ -1677,9 +1693,10 @@ export function loadSubagentInteractions(
 			// Same class phrase, file named, latched per file per process (the
 			// TUI re-reads interactions on every widget refresh).
 			warnUnreadableTranscript(file, "or parsed", err);
+			dropped.push(file);
 		}
 	}
-	return interactions;
+	return { interactions, dropped };
 }
 
 // ---

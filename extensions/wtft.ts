@@ -9,7 +9,7 @@ import {
 	renderTokenSummary,
 	deduplicateInteractions,
 	discoverSubagentSessionFiles,
-	loadSubagentInteractions,
+	loadSubagentInteractionsChecked,
 	getTerminalWidth,
 	getVisualLength,
 	readClassifiedTagFile,
@@ -145,7 +145,7 @@ function getSettings(_ctx: any) {
 // SUBAGENT SESSION MERGE INTO SELF (#83)
 // Subagent discovery and loading are shared with the CLI via
 // extensions/lib/wtft-parser.ts (discoverSubagentSessionFiles,
-// loadSubagentInteractions).
+// loadSubagentInteractionsChecked).
 //
 // Two discovery patterns:
 //   1. Claude Code: <session>/subagents/agent-*.jsonl (recursive, depth ≤ 5)
@@ -198,13 +198,11 @@ function readInteractions(ctx: any): Interaction[] {
 	_subagentUnreadable = false;
 	let subagentFiles: string[] = [];
 	try {
-		// Round 6: discovery returns { files, unreadable } — the readable
-		// siblings still render (partial progress); the per-file failure was
-		// already warned once by the parser (latched). Round 10: the report
-		// DOES need an action here — stderr is not a user surface, so the
-		// widget appends a warning line whenever discovery reports an
-		// unreadable transcript. Only the DIR-level failure still throws,
-		// and it degrades to main interactions below.
+		// The readable siblings still render. stderr is not a user surface,
+		// so an unreadable transcript sets the flag the render turns into a
+		// "total is provisional" line — whether discovery or the read below
+		// found it. Only the DIR-level failure throws, and it degrades to
+		// main interactions.
 		const discovered = discoverSubagentSessionFiles(sessionFile);
 		subagentFiles = discovered.files;
 		if (discovered.unreadable) _subagentUnreadable = true;
@@ -213,7 +211,9 @@ function readInteractions(ctx: any): Interaction[] {
 	}
 	if (subagentFiles.length === 0) return mainInteractions;
 
-	const subInteractions = loadSubagentInteractions(subagentFiles);
+	const loaded = loadSubagentInteractionsChecked(subagentFiles);
+	if (loaded.dropped.length > 0) _subagentUnreadable = true;
+	const subInteractions = loaded.interactions;
 	if (subInteractions.length === 0) return mainInteractions;
 
 	// Merge chronologically — subagent turns interleave with parent turns

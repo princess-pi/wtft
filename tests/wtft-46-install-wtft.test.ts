@@ -800,6 +800,45 @@ console.log("\n9. Config migration off princess-pi-tools and onto wtft (#156)");
 			"V9h: the human report ALSO names the coexisting shadow, not just config-left",
 			`${out}${err}`.slice(0, 400));
 	}
+
+	// V9i — a config that appears at the new path AFTER the "is it free?" check
+	// and before the move is kept, never overwritten (PR #162 review). A `cp`
+	// shim on PATH creates it at exactly that moment: it fires only when the
+	// destination is the migration's staging file, so the artifact copies run
+	// untouched. A running wtft writing its settings mid-install is the real shape.
+	{
+		const fakeHome = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-race-"));
+		seedLegacy(fakeHome);
+		const shimDir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-race-shim-"));
+		fs.writeFileSync(path.join(shimDir, "cp"), [
+			"#!/bin/sh",
+			"for last; do :; done",
+			"case \"$last\" in",
+			"  */wtft/.install-wtft.*)",
+			"    d=$(dirname \"$last\")",
+			"    [ -e \"$d/config.json\" ] || printf 'CONCURRENT' > \"$d/config.json\" ;;",
+			"esac",
+			"exec /bin/cp \"$@\"",
+			"",
+		].join("\n"));
+		fs.chmodSync(path.join(shimDir, "cp"), 0o755);
+
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-race-dir-"));
+		const { code, out } = run(["--json", "--dir", dir], [shimDir], {
+			HOME: fakeHome, XDG_CONFIG_HOME: path.join(fakeHome, ".config"),
+		});
+		const newPath = path.join(fakeHome, ".config", "wtft", "config.json");
+		const oldPath = path.join(fakeHome, ".config", "princess-pi-tools", "wtft.json");
+		check(fs.readFileSync(newPath, "utf8") === "CONCURRENT",
+			"V9i: a config created at the new path mid-move is not overwritten",
+			fs.readFileSync(newPath, "utf8").slice(0, 60));
+		check(fs.existsSync(oldPath), "V9i: …and the old copy is kept, since it did not move", oldPath);
+		let doc: any = null;
+		try { doc = JSON.parse(out); } catch { /* left null */ }
+		const entry = (doc?.configMigration ?? []).find((c: any) => c.to === newPath);
+		check(code === 4 && entry?.state === "left",
+			"V9i: the collision reports config-left, exit 4", `exit ${code}, ${JSON.stringify(entry)}`);
+	}
 }
 
 console.log(`\n${passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ""}`);

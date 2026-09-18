@@ -297,12 +297,15 @@ if [ -n "$CFG_HOME" ]; then
     if [ -f "$old_path" ]; then
       if [ ! -e "$new_path" ]; then
         if [ "$MODE" = install ]; then
-          # WRITE BESIDE, THEN RENAME OVER — the same atomic-swap shape the
-          # artifact copy loop below uses, so a mid-move failure never leaves a
-          # half-written file at the new path.
+          # WRITE BESIDE, THEN HARD-LINK INTO PLACE — a mid-move failure never
+          # leaves a half-written file at the new path, and `ln` refuses an
+          # existing name where `mv -f` would replace it: a config a running
+          # wtft writes between the `! -e` check above and this line is kept,
+          # never overwritten (PR #162 review).
           mkdir -p "$NEW_CFG_DIR" 2>/dev/null
           stage="$(mktemp "$NEW_CFG_DIR/.install-wtft.XXXXXX" 2>/dev/null)" || stage=""
-          if [ -n "$stage" ] && cp "$old_path" "$stage" 2>/dev/null && mv -f "$stage" "$new_path" 2>/dev/null; then
+          if [ -n "$stage" ] && cp "$old_path" "$stage" 2>/dev/null && ln "$stage" "$new_path" 2>/dev/null; then
+            rm -f "$stage" 2>/dev/null
             # The data is safely at the new path now — that is what "moved"
             # promises — regardless of whether the OLD copy can also be
             # removed. A directory that allows writing/renaming into it but
@@ -326,8 +329,12 @@ if [ -n "$CFG_HOME" ]; then
           else
             rm -f "$stage" 2>/dev/null
             cfg_state=left
-            left_reason="copy failed"
-            echo "install-wtft: could not move $old_path -> $new_path" >&2
+            if [ -e "$new_path" ]; then
+              left_reason="a file appeared at the new path during this run — re-run install-wtft"
+            else
+              left_reason="copy failed"
+            fi
+            echo "install-wtft: could not move $old_path -> $new_path ($left_reason)" >&2
           fi
         else
           cfg_state=left   # --check never mutates

@@ -72,7 +72,7 @@ Resolving only the parent was the bug — it produced exactly the self-comparing
 | `1` | Drift: an artifact is missing, stale, not executable, or **not built** (`no-source`); or `--dir` could not be created (`no-dir`) | run `install-wtft`, or fix the directory |
 | `2` | In sync but **shadowed** on PATH by a different `wtft` | the printed `rm` |
 | `3` | The build failed | read the build output on stderr |
-| `4` | In sync, but a config file is still at the old `princess-pi-tools` path (status `config-left`, #156) | in install mode, EITHER the new path already had a DIFFERENT file (a real conflict — declined) OR the copy itself failed partway (`mkdir`/`mktemp`/`cp`/`mv` — a "could not move" stderr line names it; a failure to remove the OLD file after a successful copy is reported as `moved`, not this, and self-heals on the next run) — either way, resolve which copy is authoritative and remove the other by hand; in `--check` mode, run `install-wtft` |
+| `4` | In sync, but a config file is still at the old `princess-pi-tools` path (status `config-left`, #156) | in install mode, EITHER the new path already had a DIFFERENT file (a real conflict — declined) OR a file appeared at the new path while this run was moving (kept, never overwritten — re-run), OR the copy itself failed partway (`mkdir`/`mktemp`/`cp`/`ln` — a "could not move" stderr line names it and the cause; a failure to remove the OLD file after a successful copy is reported as `moved`, not this, and self-heals on the next run) — either way, resolve which copy is authoritative and remove the other by hand; in `--check` mode, run `install-wtft` |
 | `64` | Bad usage: unknown argument, `--dir` with no directory, `--dir` followed by a flag **or given an empty string**, or no `--dir` on a host with `HOME` unset | — |
 
 `1` and `64` are chosen to match `install-workflow-tools` so the two installers do not
@@ -105,7 +105,7 @@ what is a real conflict left behind. There is no runtime fallback read of the ol
 anywhere in wtft — a file left there is invisible to the tool until this script, or a human,
 moves it. The `--json` document's `configMigration` array carries one `{from, to, state}`
 record per file, `state` one of `moved` / `left` / `none`. Tested in
-`tests/wtft-46-install-wtft.test.ts` §9 (V9a–V9f) and mutation-proofed as M4 (§V7 above).
+`tests/wtft-46-install-wtft.test.ts` §9 (V9a–V9i) and mutation-proofed as M4 (§V7 above).
 
 **The move can copy the file to the new path and then fail to remove the old one** — a
 directory that permits writing/renaming into it but not unlinking from it is a real
@@ -330,7 +330,7 @@ probe.
 | **V6** | the ten defects the reconcile and review audits found | see below |
 | **V7** | the mutation probe, M1–M4 | `run-mutants.sh` exits 0, and all four mutations applied — V7b's own check is `M1 && M2 && M3 && M4` |
 | **V8** | hostile paths | an apostrophe, a newline, and a destination symlink — the review bot's four findings, each reproduced before it was adopted |
-| **V9** | config migration (#156), driven directly through the CLI (V9a–V9d) | install moves every legacy file present to its new name, byte-identical, and deletes the old one; a second run (or `--check`) reports `none` for all; a file already at the new path is `left`, exit `4`, neither copy touched; `--check` reports the same leftover and writes nothing. (The `config-left` ESCALATION LOGIC ITSELF is mutation-proofed as **M4**, checked under **V7**, not here — V9 exercises the feature end-to-end and never invokes `run-mutants.sh`.) |
+| **V9** | config migration (#156), driven directly through the CLI (V9a–V9i) | install moves every legacy file present to its new name, byte-identical, and deletes the old one; a second run (or `--check`) reports `none` for all; a file already at the new path is `left`, exit `4`, neither copy touched — including one that appears between the check and the move (V9i, a `cp` shim on PATH creates it at that instant); `--check` reports the same leftover and writes nothing. (The `config-left` ESCALATION LOGIC ITSELF is mutation-proofed as **M4**, checked under **V7**, not here — V9 exercises the feature end-to-end and never invokes `run-mutants.sh`.) |
 
 `0755` is what install *writes* and what V2 asserts; the **tool's** check is any execute
 bit, so a hand-`chmod`ed `0700` copy still reports `ok`.
@@ -363,7 +363,7 @@ the previous commit's script as well as the fixed one.
 ### Mutation-proofs — a script, not a paragraph
 
 `research/46-install-mutants/run-mutants.sh` deletes one branch at a time from a copy of the
-script and prints the real-vs-mutant status for each. **V7 and V9 run it as part of the
+script and prints the real-vs-mutant status for each. **V7 runs it as part of the
 suite** — `tests/run.ts` collects only `tests/*.test.ts`, so an instruction to "run it"
 reached nobody and left the figures a reader had to re-derive by hand, which is the state
 committing the script was meant to end. M4 (#156) was added alongside the config-migration

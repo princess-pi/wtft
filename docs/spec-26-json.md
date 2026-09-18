@@ -43,7 +43,9 @@ accumulation error, not bit-exactly; the token fields have no such slack.
 ### Field names are API; prose is not
 
 `schema`, every key below, and every exit code are **versioned interface**.
-Changing one is a breaking change and bumps `schema`. The strings inside
+Changing one is a breaking change and bumps `schema`. A change to what a field
+**means**, with its name and type unchanged, bumps `schema` too — a rename a
+pinned consumer cannot see is still a rename. The strings inside
 `notices[].text` are **prose** and may be reworded freely — a consumer that
 branches on `notices[].code` is safe, one that matches `notices[].text` has no
 contract.
@@ -463,6 +465,12 @@ was (see "**`total.costUsd` changed meaning under an unchanged `schema`**",
 above, and #120). Adding keys is the documented bump condition, and a consumer
 pinning `@1` gets to notice rather than to silently read a document with a
 shape it does not know.
+
+**`@2` also carries #90's change of meaning to `total.costUsd`.** #90 landed
+before this amendment shipped, so no consumer ever saw the old arithmetic under
+`@2` — a program that bumps from `@1` to `@2` picks up the corrected number
+along with `spawned` and `tree`, even though the meaning change is not why `@2`
+exists.
 
 Ledger format, writer, walk and failure modes: `docs/spec-116-spawn-ledger.md`.
 

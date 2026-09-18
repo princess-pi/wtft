@@ -402,7 +402,7 @@ evidence, and a permanent unreadability also blocks the daemon's rebuild, so the
 tag-derived reasons cannot be trusted to point at an action that ends the loop.
 The TUI's degrade (main-interactions-only) has no exit surface — its reader is the
 interactive widget, and the widget appends a yellow warning line, "some transcripts
-unreadable — total may be incomplete", whenever discovery reports an unreadable
+unreadable — total is provisional", whenever discovery reports an unreadable
 transcript (round 10): the extension's stderr is not a user surface, so the
 parser's latched stderr warning alone left the degrade invisible. The prose line
 stays the whole surface — the warning appears on every render until readability

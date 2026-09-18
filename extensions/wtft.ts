@@ -300,7 +300,7 @@ function updateWtftWidget(
 			? [emptyLine, parserStatusStr.trim()]
 			: [emptyLine];
 		if (_subagentUnreadable) {
-			widgetLines.push("\x1b[33m⚠ some transcripts unreadable — total may be incomplete\x1b[0m");
+			widgetLines.push("\x1b[33m⚠ some transcripts unreadable — total is provisional\x1b[0m");
 		}
 		ctx.ui.setWidget("wtft", widgetLines, { placement: "belowEditor" });
 		return;
@@ -327,7 +327,7 @@ function updateWtftWidget(
 	}
 
 	if (_subagentUnreadable) {
-		lines.push("\x1b[33m⚠ some transcripts unreadable — total may be incomplete\x1b[0m");
+		lines.push("\x1b[33m⚠ some transcripts unreadable — total is provisional\x1b[0m");
 	}
 
 	ctx.ui.setWidget("wtft", lines, { placement: "belowEditor" });

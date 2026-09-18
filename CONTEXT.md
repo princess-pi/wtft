@@ -92,9 +92,11 @@ as interchangeable in new prose.
 One of the two render modes, set by `-b/--bucket` (the other is `-c/--cumulative`, default):
 shows each bin's own discrete total rather than a running sum. `mode: "bucket" | "cumulative"`
 in `wtft-renderer.ts`/`wtft.ts`. Not a grouping concept — see Bin above. Also overloaded once,
-harmlessly: `wtft-renderer.ts:1292` has an unrelated local variable named `buckets` (a `Map`
-used only for same-column marker tie-breaking inside *cumulative*-mode rendering) — it is not
-the `-b/--bucket` flag and should not be confused with it when reading that function.
+harmlessly: `buildWtftLines()` in `wtft-renderer.ts` has an unrelated local variable named
+`buckets` (a `Map` used for cost-based collision resolution, positioning same-column markers)
+declared in the `else` branch of `if (mode === "cumulative")` — i.e. inside *bucket*-mode
+rendering — it is not the `-b/--bucket` flag and should not be confused with it when reading
+that function.
 _Avoid_: Bin (see above), interval
 
 **Cumulative (mode)**:
@@ -107,7 +109,9 @@ _Avoid_: Running mode, total mode
 One coding-agent conversation's append-only `.jsonl` log — the unit wtft parses, classifies, and
 renders costs for. Identified by a UUID-bearing basename (Claude Code) or a
 timestamp-prefixed UUID basename (Pi); see `isSessionIdBasename()`.
-_Avoid_: Chat, conversation, log (ambiguous with "tag file", below), transcript
+_Avoid_: Chat, conversation, transcript or log — when you mean the session rather than
+the file. "Transcript" and "log" both name the file, not the conversation, so either is
+fine on its own; "log" is also ambiguous with "tag file", below.
 
 **Sidechain**:
 A subagent's own interaction stream within the *same* session file — marked
@@ -119,7 +123,7 @@ _Avoid_: Sub-thread, branch, fork
 **Subagent session**:
 A separate `.jsonl` log for a spawned subagent, stored under `<session-id>/subagents/` (Claude
 Code). wtft recursively discovers and blends these chronologically into the parent's timeline
-(Recursive Subagent Rollup). Distinct from a sidechain (above), which lives inline in the parent
+(Recursive Subagent Tree, see Self / tree below). Distinct from a sidechain (above), which lives inline in the parent
 file rather than as its own file.
 _Avoid_: Child session, nested session
 

@@ -194,7 +194,9 @@ reader does not re-litigate them)
   `EXIT_SESSION_AMBIGUOUS = 10`. Stderr names every match (path + name); under
   `--json`, stdout carries nothing (matching the existing exit-1 contract:
   "under `--json`, stdout carries nothing" for an error).
-- **E4 — no TTY, no `-s` at all → same new exit code**, not the old
+- **E4 — no TTY, no `-s` at all → same new exit code**, whatever the default
+  scope holds, one session included (Duppy, C2: a lone match in a 20-minute
+  window would make a script's answer depend on the clock). Not the old
   auto-pick-newest. This is the contract change the decision names explicitly:
   "This replaces the documented no-prompt `--json` auto-pick of the newest
   session (`auto-selected-session` notice)." The `auto-selected-session`

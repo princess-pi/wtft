@@ -680,7 +680,7 @@ async function main() {
 		const availability = discoveredTotal !== undefined ? ` (${discoveredTotal} available)` : "";
 		const text = found.length === 0
 			? `Session not specified precisely enough: ${label} matched no sessions${availability}.`
-			: `Session not specified precisely enough: ${label} matched ${found.length} sessions:\n${names}`;
+			: `Session not specified precisely enough: ${label} matched ${found.length} session${found.length === 1 ? "" : "s"}:\n${names}`;
 		// fs.writeSync, not console.error: stderr on a pipe is asynchronous on
 		// macOS, and process.exit() would cut a long match list short.
 		fs.writeSync(2, `\x1b[33m${text}\x1b[0m\n`);
@@ -718,11 +718,14 @@ async function main() {
 		}
 	} else {
 		// No `-s`: the picker's own default-scoped population (#89, S1/S5).
+		// With no terminal only -s selects, even a lone candidate (#89, C2):
+		// the default scope is time-windowed, so a lone match would make the
+		// same script's answer depend on the clock.
 		const found = getDefaultScoped();
-		if (found.length === 1) {
-			finalSessionPath = found[0].path;
-		} else if (!canShowPicker) {
+		if (!canShowPicker) {
 			failAmbiguous(found, "no -s and no interactive terminal");
+		} else if (found.length === 1) {
+			finalSessionPath = found[0].path;
 		} else {
 			// Shown even on ZERO rows (#89, S6) — the picker itself says so and
 			// names Ctrl+T, rather than this CLI widening (or erroring) on its

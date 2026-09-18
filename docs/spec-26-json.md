@@ -338,10 +338,10 @@ with several sessions discovered and no `-s` it silently took the newest,
 recording an `auto-selected-session` notice — and that behaviour is retired.
 Today: an interactive terminal still gets the scoped session picker even under
 `--json` (drawn to stderr, so stdout stays one clean object, and `q`/Ctrl-C
-still exits 130). With **no** interactive terminal, wtft selects only when the
-population is already unambiguous — exactly one `-s` match, or exactly one
-session discovered with no `-s` — and otherwise exits `EXIT_SESSION_AMBIGUOUS`
-(10), naming every candidate on stderr and nothing on stdout. A caller wanting
+still exits 130). With **no** interactive terminal, wtft selects only when
+`-s` matches exactly one session, and otherwise exits `EXIT_SESSION_AMBIGUOUS`
+(10), naming every candidate on stderr and nothing on stdout. That includes no
+`-s` with exactly one session in the default scope (#89, C2). A caller wanting
 determinism still passes `-s`; on a non-interactive caller it is now required
 whenever more than one session could match.
 

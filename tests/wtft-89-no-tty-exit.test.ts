@@ -82,6 +82,24 @@ console.log("\n=== E4: no -s, zero candidates in the default scope → exit 10 =
 }
 
 // ---
+// E4 — no `-s`, exactly ONE default-scoped candidate → still exit 10. With no
+// terminal, only -s selects (Duppy, #89, C2): a lone session in the 20-minute
+// window would make the same script's answer depend on the clock.
+// ---
+console.log("\n=== E4: no -s, one candidate in the default scope → exit 10 ===\n");
+{
+	const target = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e4-one-")));
+	const projects = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e4-one-proj-")));
+	writeSession(path.join(projects, slugOf(target), "e4-only.jsonl"), "e4only", target);
+
+	const r = run(["-l", "5"], { cwd: target, claudeProjects: projects });
+	check(r.status === EXIT_SESSION_AMBIGUOUS, `E4: exit is ${EXIT_SESSION_AMBIGUOUS} (got ${r.status})`);
+	check(/matched 1 session\b/.test(r.stderr), `E4: stderr names the count (${r.stderr.slice(0, 300)})`);
+	check(/e4-only\.jsonl/.test(r.stderr), "E4: stderr names the candidate");
+	check((r.stdout || "").trim() === "", "E4: stdout carries nothing");
+}
+
+// ---
 // E4 — no `-s`, SEVERAL default-scoped candidates → exit 10.
 // ---
 console.log("\n=== E4: no -s, several candidates in the default scope → exit 10 ===\n");

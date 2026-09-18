@@ -163,12 +163,11 @@ that run instead of a report — `--help`/`--why`/`--version`, `--watch`, and
 still refused with exit 1. With an interactive terminal, `--json` no longer
 skips the session picker the way it used to — it still shows one whenever the
 population IS ambiguous, drawn to stderr so stdout stays one clean JSON
-document ([#89](https://github.com/princess-pi/wtft/issues/89)). An already
-unambiguous population (exactly one `-s` match, or exactly one session
-discovered with no `-s`) is selected immediately with no picker at all,
-interactive terminal or not — the same shortcut a plain, non-`--json` launch
-already took. With **no** interactive terminal and an AMBIGUOUS population
-(zero or several), see exit **10** below — this replaces the old no-prompt
+document ([#89](https://github.com/princess-pi/wtft/issues/89)). Exactly one
+`-s` match is selected immediately with no picker, terminal or not; so is
+exactly one session discovered with no `-s`, but only with a terminal. With
+**no** interactive terminal, wtft selects only through `-s`: zero or several
+`-s` matches, or no `-s` at all, is exit **10** below — this replaces the old no-prompt
 auto-pick-the-newest behaviour and its `auto-selected-session` notice, both
 retired in `@4`.
 
@@ -197,9 +196,9 @@ retired in `@4`.
 - **10** — session not specified precisely enough
   ([#89](https://github.com/princess-pi/wtft/issues/89)): no interactive
   terminal, and either `-s <substring>` matched zero or several sessions, or no
-  `-s` was given and the picker's own default-scoped population (this
-  worktree, last 20 minutes — not machine-wide) held zero or several
-  sessions. Every match is named on stderr; under `--json`, stdout carries
+  `-s` was given at all — even when the picker's default scope (this worktree,
+  last 20 minutes) holds exactly one session, since that answer would depend
+  on the clock. Every match is named on stderr; under `--json`, stdout carries
   nothing, same as exit 1. **Zero with no `-s`** is this exit too, not the old
   exit 1 "no session found" — a script relying on that split needs to read
   the message on stderr, since both the zero and several cases share exit

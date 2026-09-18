@@ -595,7 +595,6 @@ console.log("\n=== PART E: what one launch reads, counted on a test-built corpus
 		process.env.WTFT_CLAUDE_PROJECTS_DIR = mixedCorpus;
 		resetCwdCache();
 		const mixed = discoverSessions("claude-code", liveHome);
-		const mixedTail = getCwdReadCount();
 		const mixedBytes = getCwdBytesRead();
 
 		check(mixed.length === MIXED - STRANDED,

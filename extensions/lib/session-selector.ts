@@ -358,7 +358,7 @@ export interface SelectSessionPromptOptions {
 	 *
 	 *   - re-applies the filter after every rescope, so Ctrl+A/W/B/T never
 	 *     discards the user's own narrowing;
-	 *   - seeds the state `"all"`/`"all"`, which describes the unscoped,
+	 *   - seeds the state `"worktrees"`/`"all"`, which describes the unscoped,
 	 *     unbounded discovery the rows came from. Ctrl+T still cycles from
 	 *     `"all"` to `"20m"`, as it does everywhere (spec S5).
 	 */
@@ -405,7 +405,7 @@ function matchesSubstring(c: SessionCandidate, filter: string): boolean {
  *   `{ scope: "worktree", windowMs: TIME_WINDOW_MS["20m"] }` (S1/S5), but
  *   that is a convention the caller upholds, not a contract this function
  *   enforces. The picker state starts at `"worktree"`/`"20m"`, except under
- *   `substringFilter`, where it is seeded `"all"`/`"all"` (see the body).
+ *   `substringFilter`, where it is seeded `"worktrees"`/`"all"` (see the body).
  * @returns Promise resolving to the selected session file path
  */
 export async function selectSessionPrompt(
@@ -416,6 +416,13 @@ export async function selectSessionPrompt(
 		const out = opts.out ?? process.stdout;
 
 		const byPath = new Map<string, SessionCandidate>();
+		// One tag-file read per row per picker session, not per keystroke.
+		const summaries = new Map<string, ReturnType<typeof getSessionSummary>>();
+		const summaryFor = (p: string) => {
+			let s = summaries.get(p);
+			if (!s) { s = getSessionSummary(p); summaries.set(p, s); }
+			return s;
+		};
 		const remember = (list: SessionCandidate[]) => { for (const c of list) byPath.set(c.path, c); };
 		remember(initialCandidates);
 
@@ -425,13 +432,13 @@ export async function selectSessionPrompt(
 
 		let state: PickerState = setRows(initPickerState(), toRows(initialCandidates));
 
-		// Under `-s` the rows come from the unscoped, unbounded discovery, so
-		// the state is seeded `"all"`/`"all"` to describe them truthfully. The
-		// scope half also keeps Ctrl+T from narrowing to this directory. The
-		// window half does not survive Ctrl+T: the cycle wraps `all -> 20m`,
-		// and the header says so. That is the key doing what it says, not a
-		// silent drop. Spec S5 records `-s` as the one exception to T1.
-		if (opts.substringFilter) state = { ...state, scope: "all", timeWindow: "all" };
+		// Under `-s` the rows come from the unscoped, unbounded discovery:
+		// every checkout of this repo plus the union arm, which is exactly the
+		// `"worktrees"` population. Seeding `"worktrees"`/`"all"` makes the
+		// header true and keeps Ctrl+T from narrowing to this directory. The
+		// window does not survive Ctrl+T: the cycle wraps `all -> 20m`, and
+		// the header says so. Spec S5 records `-s` as the one exception to T1.
+		if (opts.substringFilter) state = { ...state, scope: "worktrees", timeWindow: "all" };
 
 		hideCursor(out);
 
@@ -457,7 +464,7 @@ export async function selectSessionPrompt(
 					const row = view.rows[i];
 					const c = byPath.get(row.id);
 					if (!c) continue;
-					const stats = getSessionSummary(c.path);
+					const stats = summaryFor(c.path);
 					const relTime = formatRelativeTime(c.timestamp);
 
 					const isSelected = i === view.cursorIndexInView;

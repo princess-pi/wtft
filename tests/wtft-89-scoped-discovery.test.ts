@@ -298,14 +298,14 @@ console.log("\n=== S6: an out-of-window scope returns empty, never widens itself
 // ---
 console.log("\n=== S7: Pi worktree/branch derivation ===\n");
 {
-	const user = path.basename(os.homedir());
-	const piInTreeSlug = `--home-${user}-git-projects-demo--claude-worktrees-99-branch--`;
+	const homeSlug = os.homedir().replace(/^\//, "").replace(/\//g, "-");
+	const piInTreeSlug = `--${homeSlug}-git-projects-demo--claude-worktrees-99-branch--`;
 	check(
 		buildDisplayPath("2026-09-18_x5e9e.jsonl", piInTreeSlug, "pi") === "~/g-p/demo/w/99-branch/2026-09-18...5e9e",
 		"S7: a Pi session recorded inside a .claude/worktrees/<branch> dir shows repo/w/branch"
 	);
 
-	const piMainCloneSlug = `--home-${user}-git-projects-demo--`;
+	const piMainCloneSlug = `--${homeSlug}-git-projects-demo--`;
 	const rendered = buildDisplayPath("2026-09-18_x5e9e.jsonl", piMainCloneSlug, "pi");
 	check(
 		!rendered.includes("/w/"),
@@ -334,7 +334,7 @@ console.log("\n=== S1 (Pi): 'worktree' scope is exact, not containment ===\n");
 {
 	const sandbox = mktmp("wtft-89-s1-pi-");
 	const piRoot = path.join(sandbox, "pi-sessions");
-	const user = path.basename(os.homedir());
+	const homeSlug = os.homedir().replace(/^\//, "").replace(/\//g, "-");
 	const target = path.join(os.homedir(), "git-projects", "demo89");
 
 	const writeSession = (dirName: string, fileName: string, id: string) => {
@@ -345,13 +345,13 @@ console.log("\n=== S1 (Pi): 'worktree' scope is exact, not containment ===\n");
 	};
 
 	// The exact target dir, real Pi shape — must match.
-	writeSession(`--home-${user}-git-projects-demo89--`, "2026-09-18_own.jsonl", "m1");
+	writeSession(`--${homeSlug}-git-projects-demo89--`, "2026-09-18_own.jsonl", "m1");
 	// A sibling whose slug CONTAINS the target's slug as a prefix — must NOT
 	// match under "worktree" scope (containment would have matched this).
-	writeSession(`--home-${user}-git-projects-demo89-sibling--`, "2026-09-18_sibling.jsonl", "m2");
+	writeSession(`--${homeSlug}-git-projects-demo89-sibling--`, "2026-09-18_sibling.jsonl", "m2");
 	// An in-tree worktree of the SAME repo — must not match under "worktree"
 	// scope either (that is what Ctrl+W / "worktrees" scope is for).
-	writeSession(`--home-${user}-git-projects-demo89--claude-worktrees-99-branch--`, "2026-09-18_worktree.jsonl", "m3");
+	writeSession(`--${homeSlug}-git-projects-demo89--claude-worktrees-99-branch--`, "2026-09-18_worktree.jsonl", "m3");
 
 	process.env.WTFT_PI_SESSIONS_DIR = piRoot;
 	resetHarnessRegistry();

@@ -403,7 +403,7 @@ it guards is "this module has exactly one read call", which no exported interfac
 - **V10** — display renders under the **physical** slug, the directory the session started in.
   The "prefer the most recent still-existing directory" rewrite went with the whole-file read that
   produced it.
-- **V11 (cost, per #164 — restated per #477, then REPLACED per #39)** — five assertions on a
+- **V11 (cost, per #164 — restated per #477, then REPLACED per #39)** — assertions on a
   corpus the TEST builds, not the live `~/.claude/projects` tree, and every one of them an exact
   integer rather than a duration:
 
@@ -684,8 +684,8 @@ one set lookup. The relocation records are still IN the transcripts; nothing rea
 
 14,441 reads over 7,287 transcripts is **~1.9 reads and ~41 KB each** — the tail windows widen far
 more often than `TAIL_WINDOWS`'s original "8 KB resolves every transcript here" assumed, and a
-transcript with no `cwd` at all (every Pi one) widens through all three and then reads whole, which
-is #112. Both figures are now in that module's header, where a reader meets them.
+transcript with no `cwd` in its last ~512 KB widens through all three and resolves null (a Pi
+transcript smaller than that is read whole and resolves its `session_start` cwd), which is #112. Both figures are now in that module's header, where a reader meets them.
 
 **Where that cost actually sits, which matters for the index that has to remove it**
 (`bun debug/count-picker.ts <cwd> --per-harness`, from `~/git-projects/wtft`):
@@ -744,7 +744,7 @@ this deletion. It is. **#89 stays open**; this branch does not close it.
 
 **Resolved by #89's decision (2026-09-18): no on-disk index.** The picker opens on a
 folder-name scope instead, which meets both criteria (V11g; `debug/count-picker.ts` prints the
-`picker` path at ~10 ms and 0 reads on this host). The unscoped path above is unchanged and is
+`picker` path with 0 reads; one run on this host took 10 ms). The unscoped path above is unchanged and is
 what `-s` still searches.
 
 **The one shape given up.** A session filed under a project slug that is not a checkout of the

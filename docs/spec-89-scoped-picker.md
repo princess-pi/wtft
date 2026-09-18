@@ -18,8 +18,8 @@ reader does not re-litigate them)
   pre-#89 default behaviour (fan-out across worktrees, the #156 union arm,
   unbounded time) when called with no scope options — this is what
   `tests/wtft-issue-144-145-164-session-discovery.test.ts` and
-  `tests/wtft-issue-156-harness-seam.test.ts` already exercise, and neither
-  needed to change. `bin/wtft.ts` is the one caller that opts into the new
+  `tests/wtft-issue-156-harness-seam.test.ts` already exercise, and their
+  assertions about that default are unchanged. `bin/wtft.ts` is the one caller that opts into the new
   policy explicitly, passing `{ scope: "worktree", windowMs: TIME_WINDOW_MS["20m"] }`
   as the picker's starting state.
 - **`Ctrl+B` (current branch), mechanism.** The decision names the key and its
@@ -97,9 +97,10 @@ reader does not re-litigate them)
   additionally bounded by `windowMs`; the CLI's initial state is always `20m`
   (`T1`), regardless of which scope key was used to get there. `Ctrl+T` cycles
   `20m → 1h → 1d → 1w → all → 20m`. **One exception:** a picker opened because
-  `-s` matched several sessions starts at scope `all`, window `all`, because its
-  rows are every match with no scope or time bound, and the header must describe
-  them. Its first `Ctrl+T` moves to `20m`, like any other `all`.
+  `-s` matched several sessions starts at scope `worktrees`, window `all`,
+  because its rows come from the unscoped discovery (every checkout of the repo,
+  the union arm, no time bound), and the header must describe them. Its first
+  `Ctrl+T` moves to `20m`, like any other `all`.
 - **S6 — an empty window says so, never widens itself.** Zero rows after a
   (re)discovery is a distinct render state (a message naming `Ctrl+T`), not an
   automatic scope or window change.

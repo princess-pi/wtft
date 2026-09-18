@@ -81,7 +81,8 @@ export interface HarnessDiscovery {
 	 *   Code specifically (Pi's legacy default has never fanned out; see
 	 *   `discoverLegacy` in each harness's own discovery.ts) — this is what
 	 *   keeps `tests/wtft-issue-144-145-164-session-discovery.test.ts` and
-	 *   `tests/wtft-issue-156-harness-seam.test.ts` passing unmodified.
+	 *   `tests/wtft-issue-156-harness-seam.test.ts`'s assertions about the
+	 *   default unchanged.
 	 *   `bin/wtft.ts` is the one caller that passes `{ scope: "worktree",
 	 *   windowMs: TIME_WINDOW_MS["20m"] }` as the picker's own new default.
 	 */

@@ -37,7 +37,8 @@ export type PickerScope = "worktree" | "worktrees" | "all" | "branch";
 
 /** Cycles on Ctrl+T: 20m -> 1h -> 1d -> 1w -> all -> 20m. Every launch starts
  *  at "20m" (T1) — hardcoded in {@link initPickerState} below, in this same
- *  file; a caller never supplies or overrides it. */
+ *  file. The one override is the `-s` picker, which `selectSessionPrompt` seeds
+ *  `"all"` (spec-89 S5). */
 export type TimeWindowLabel = "20m" | "1h" | "1d" | "1w" | "all";
 
 export const TIME_WINDOW_CYCLE: readonly TimeWindowLabel[] = ["20m", "1h", "1d", "1w", "all"];

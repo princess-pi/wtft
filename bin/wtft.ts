@@ -681,8 +681,10 @@ async function main() {
 		const text = found.length === 0
 			? `Session not specified precisely enough: ${label} matched no sessions${availability}.`
 			: `Session not specified precisely enough: ${label} matched ${found.length} sessions:\n${names}`;
-		console.error(`\x1b[33m${text}\x1b[0m`);
-		if (found.length > 0) console.error(`\x1b[90mPass -s <path|substring> that matches exactly one.\x1b[0m`);
+		// fs.writeSync, not console.error: stderr on a pipe is asynchronous on
+		// macOS, and process.exit() would cut a long match list short.
+		fs.writeSync(2, `\x1b[33m${text}\x1b[0m\n`);
+		if (found.length > 0) fs.writeSync(2, `\x1b[90mPass -s <path|substring> that matches exactly one.\x1b[0m\n`);
 		process.exit(EXIT_SESSION_AMBIGUOUS);
 	};
 

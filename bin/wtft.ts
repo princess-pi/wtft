@@ -1435,86 +1435,21 @@ async function main() {
 	}
 
 	// ---
-	// PROVISIONAL READ (#443)
+	// PROVISIONAL READ
 	// ---
-	// This CLI spawns the daemon and then reads the tag immediately, so on a
-	// session the daemon is about to repair the read races it and loses. On
-	// #443's specimen that was $79.74 against a true $84.59 — a 5.7% undercount
-	// printed as a plain total, indistinguishable from a settled one.
+	// The CLI reads the tag immediately after spawning the daemon, so a total the
+	// daemon is still repairing prints in full, and the run says it is
+	// provisional rather than blocking or withholding the number.
 	//
-	// Remedy (b), not (a): say the total is provisional rather than blocking.
-	// Blocking a one-shot CLI on a repair whose length is proportional to the
-	// session's subagent volume is the cost read-then-render exists to avoid.
-	//
-	// Reported LAST and as an EXIT CODE, for two different readers. The total
-	// still prints in full — withholding it would be worse than the undercount,
-	// since the number is usually close and always better than nothing. The exit
-	// code costs an agent zero tokens and zero inference and matches pr-review's
-	// 7/8/9 idiom.
-	//
-	// #511 justified the new code with "nothing in this repo invokes this CLI and
-	// inspects $?". That grep covered bin/, hooks/, statusline/ and skills/ and
-	// NOT tests/ — and tests/wtft-auto-fit.test.ts then failed on exit 9, on
-	// main, intermittently. tests/wtft-513-exit9-caller-guard.test.ts is the
-	// guard that came out of it. The claim is kept here with its correction
-	// attached rather than deleted: the shape of the mistake is the useful part,
-	// an exhaustive-sounding grep that was not exhaustive.
-	//
-	// #26 added the structured field this comment once said did not exist:
-	// `--json` carries the same verdict as `provisional.provisional` /
-	// `provisional.reason`, and takes the branch above rather than this one. The
-	// exit code KEEPS its meaning there — a consumer reading `$?` and one
-	// reading the field get the same answer, which is why #26 did not retire it.
-	// WHAT THIS VERDICT IS SCOPED TO (PR review round 9, Medium/correctness).
-	// `scanSessionUncounted` is what discovers `subagent-unreadable`, and a plain
-	// `wtft` run — no `--tokens`, no `--json`, data present — never calls it. So
-	// a session whose ONLY provisional condition is an unreadable subagent
-	// directory exits 0 here and 9 under the two modes that do scan.
-	//
-	// Deliberately not "fixed" by scanning here. That would put a full read of
-	// the session and every subagent transcript on the commonest invocation of
-	// all, to detect a rare condition the run is not otherwise looking for — the
-	// exact cost #443 chose read-then-render to avoid. The exit code reports what
-	// the run actually checked, which is the only thing it can honestly report.
-	// docs/spec-26-json.md says so beside the exit-code table.
+	// Scope: `scanSessionUncounted` is what discovers `subagent-unreadable`, and a
+	// plain `wtft` run — no `--tokens`, no `--json`, data present — never calls
+	// it, so such a session exits 0 here and 9 under the modes that do scan.
+	// Scanning here would put a full read of every subagent transcript on the
+	// commonest invocation of all to detect a rare condition. The exit code
+	// reports what the run actually checked; docs/spec-26-json.md says so beside
+	// the exit-code table.
 	if (provisional.provisional) {
 		const why = describeProvisionalReason(provisional, tagPath);
-		// The remedy names ONE action, and deliberately does not mention -F (PR
-		// review, Medium/contract). `-F` does not return early: it deletes the
-		// tag, kills the daemon, and falls through to this same read path, so a
-		// forced run can land here too — and "use -F to force a full re-parse" is
-		// then a loop, told to the person who just did it, about the run that is
-		// supposed to be the authoritative reference.
-		//
-		// Fixed by deleting the branch rather than by branching on
-		// opts.forceReparse: a conditional remedy would have a second arm
-		// reachable only inside a race between flushPending and the first
-		// scanForSubAgents, which no test can hit reliably — and an arm that
-		// always skips is not covered, it is only untested. One sentence that is
-		// true in both cases has no such arm. Anyone who wants -F finds it in
-		// --help; re-running is the correct advice either way, since the daemon
-		// is already rebuilding.
-		//
-		// subagent-unreadable is the one reason with a remedy that is NOT the
-		// daemon-rebuild line, and the reason for the split is the same -F loop
-		// logic (rounds 6/7, PR review, Low/correctness; round 7 dropped the
-		// guard, so this reason fires whenever the CLI's own discovery fails,
-		// whatever the tag verdict): a permanent unreadability also keeps the
-		// daemon from rebuilding the tag — its poll fails, so the marker stays
-		// stale and "run wtft again in a moment" is advice that loops forever
-		// against a permanent unreadability. The one action that ends the loop
-		// is restoring the unreadable transcript's readability; the daemon
-		// re-discovers on every poll, and this CLI's --tokens scan reads the
-		// transcript files directly too, so a re-run picks the file up once it
-		// is readable. The tag total may ALSO be missing this transcript's
-		// cost: readTagProvisional cannot tell whether the swept marker
-		// predates the failure (the marker is not retracted), so the total
-		// reads settled with the cost missing — which is why the exit code
-		// stays provisional either way, and why the remedy does not claim the
-		// total is "settled".
-		//
-		// The exit code stays 9 regardless: the number really is not final, and
-		// softening that under -F would be the exact lie this issue is about.
 		console.error(`\x1b[33m⚠ PROVISIONAL: this total may still grow — ${why}.\x1b[0m`);
 		const remedy = describeProvisionalRemedy(provisional);
 		console.error(`\x1b[90m  ${remedy}. Exit ${EXIT_PROVISIONAL}.\x1b[0m`);

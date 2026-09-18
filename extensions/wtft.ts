@@ -149,13 +149,9 @@ function getSettings(_ctx: any) {
 // ---
 
 // ---
-// SUBAGENT SESSION MERGE INTO SELF (#83)
-// Subagent discovery and loading are shared with the CLI via
-// extensions/lib/wtft-parser.ts (discoverSubagentSessionFiles,
-// loadSubagentInteractionsChecked).
-//
+// SUBAGENT SESSION MERGE INTO SELF
 // Two discovery patterns:
-//   1. Claude Code: <session>/subagents/agent-*.jsonl (recursive, depth ≤ 5)
+//   1. Claude Code: <session>/subagents/agent-*.jsonl (recursive)
 //   2. Pi (pre-emptive): sibling files with parentSession header match
 // ---
 

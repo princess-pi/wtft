@@ -30,7 +30,6 @@ import {
 	discoverClaudeSubAgentSessionFiles,
 	discoverSubagentSessionFiles,
 	clearSubagentCacheMiss,
-	loadSubagentInteractions,
 	loadUserPricing,
 	resolveMovedSession,
 	getCurrentVersionTagPath,

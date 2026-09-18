@@ -13,18 +13,29 @@
  * {@link TAIL_WINDOWS} — that bound is the module's whole performance contract,
  * and {@link getCwdBytesRead} is what holds it to it.
  *
- * WHAT THAT COSTS TODAY, measured 2026-09-16 over 7,287 transcripts / 2.51 GB /
- * 1,944 project dirs (`bun debug/count-picker.ts <cwd>`, discovery over both
- * harnesses): **14,441 reads, 580 MB, 1.6-2.0 s warm** per launch. That is ~1.9
- * reads and ~41 KB per transcript, not one 8 KB read each — the windows below
- * widen more often than their first draft assumed. The number is here, in the
- * header a reader of this module meets first, because the one it replaced ("40
- * files, 0.5 MB read of 64 MB, 11 ms") outlived its corpus by 118x on file count
- * and nobody met it anywhere else.
+ * SUPERSEDED BY #89's SCOPED PICKER (2026-09-18) — this module's reads are no
+ * longer the DEFAULT cost of a launch. Before #89, every launch paid the
+ * "14,441 reads, 580 MB, 1.6-2.0 s warm" figure this header used to quote
+ * (measured 2026-09-16 over 7,287 transcripts / 2.51 GB, discovery over both
+ * harnesses). #89's `"worktree"` scope — the picker's own default — runs the
+ * physical-slug match ALONE and never calls into this module at all: measured
+ * 2026-09-18 on an 11,005-transcript corpus, folder-name matching found 7 of 7
+ * Claude and 4 of 4 Pi sessions for the target cwd in **~7 ms**, zero tail
+ * reads. That is what `#89`'s issue body's ≤ 200 ms closer could not meet
+ * through this module and did not need to: the module was never the bottleneck
+ * once the DEFAULT stopped calling it.
  *
- * It does not meet #89's ≤ 200 ms target and cannot: what remains scales with the
- * corpus, and only an on-disk index (#89's direction **A**, "I" in that issue's
- * 2026-09-15 comment) removes it. #89 stays open for that.
+ * This module's tail-read cost still exists, and still matters, for the
+ * scopes that widen past the default — `"worktrees"` (Ctrl+W) and `"all"`
+ * (Ctrl+A) both still consult {@link resolveLastCwd} for every transcript that
+ * does not already physically match, which is exactly the population the
+ * figure above describes. What bounds it now is the time window (#89, always
+ * active, T1 = 20 minutes on every launch): `harness/claude-code/discovery.ts`
+ * and `harness/pi/discovery.ts` both skip the tail read entirely for a
+ * transcript outside the active window, via one `fs.statSync` first. The old
+ * unbounded cost is still reachable — deliberately — the moment a human cycles
+ * `Ctrl+T` all the way to "all", which is why {@link getCwdBytesRead} and
+ * {@link TAIL_WINDOWS} below are unchanged.
  *
  * #164 once added a second, unbounded arm: when a session's directory had been
  * *deleted*, it re-read the WHOLE transcript hunting for `"relocated"` records

@@ -29,7 +29,17 @@ import { formatRelativeTime } from "@princess-pi/libs/session-path-shortener";
 import { formatCost } from "./wtft-shared.ts";
 import { enterRawStdin, showCursor, hideCursor, clearPreviousLines, visualLineCount } from "./tty-helpers.ts";
 import { getDiscoveries, getHarness, getHarnesses } from "./harness/registry.ts";
-import type { SessionCandidate } from "./harness/types.ts";
+import type { DiscoverScopeOptions, SessionCandidate } from "./harness/types.ts";
+import {
+	initPickerState,
+	setRows,
+	visibleWindow,
+	applyKey,
+	windowMsFor,
+	type PickerState,
+	type PickerRow,
+} from "./picker-state.ts";
+import { readHarnessOrder, recordHarnessOpened, orderByHarness } from "./harness-order.ts";
 
 // ---
 // TYPES
@@ -78,11 +88,16 @@ export type { SessionCandidate } from "./harness/types.ts";
  * @param harness - Target harness id, or "auto" for all enabled harnesses
  * @param cwdOverride - Directory to scope to; each harness decides what a
  *   missing override means (Claude Code: process.cwd(); Pi: no filter)
+ * @param scopeOpts - Omitted → every harness's PRE-#89 default (fan-out,
+ *   the union arm, unbounded time) — see `HarnessDiscovery.discover`'s own
+ *   docstring in `harness/types.ts`. `bin/wtft.ts`'s picker is the one caller
+ *   that passes this explicitly.
  * @returns Candidates sorted by modification time descending (newest first)
  */
 export function discoverSessions(
 	harness: string = "auto",
-	cwdOverride?: string
+	cwdOverride?: string,
+	scopeOpts?: DiscoverScopeOptions
 ): SessionCandidate[] {
 	const targets = harness === "auto"
 		? getDiscoveries()
@@ -91,7 +106,7 @@ export function discoverSessions(
 	const candidates: SessionCandidate[] = [];
 	for (const discovery of targets) {
 		try {
-			candidates.push(...discovery.discover(cwdOverride ?? null));
+			candidates.push(...discovery.discover(cwdOverride ?? null, scopeOpts));
 		} catch {
 			// A misbehaving harness must not take the selector down with it.
 		}
@@ -274,134 +289,159 @@ function formatTagSuffix(stats: SessionSummary): string {
 	return `\x1b[90mv${stats.tagVersion}\x1b[0m`;
 }
 
+const SCOPE_LABEL: Record<PickerState["scope"], string> = {
+	worktree: "this worktree",
+	worktrees: "all worktrees (Ctrl+W)",
+	all: "all projects (Ctrl+A)",
+	branch: "this branch (Ctrl+B)",
+};
+
+function toPickerRow(c: SessionCandidate): PickerRow {
+	return { id: c.path, harness: c.harness, timestamp: c.timestamp };
+}
+
+export interface SelectSessionPromptOptions {
+	/** Passed straight to `discoverSessions` on every rescope (Ctrl+A/W/B/T). */
+	harnessOption: string;
+	cwdOverride?: string;
+	/** Where the picker draws. Defaults to stdout; `bin/wtft.ts` passes stderr
+	 *  under `--json` so stdout stays one clean JSON document (#89, E1) — both
+	 *  are the same controlling terminal whenever this function runs at all,
+	 *  since it requires `process.stdin.isTTY`. */
+	out?: NodeJS.WritableStream;
+}
+
 /**
- * Render an interactive TTY session selector IN-PLACE on the main screen.
- * Uses \\x1b[N A \\x1b[J to overwrite previous output on re-render — no alt
- * screen buffer. When the selector exits, the output is cleared and the chart
- * renders starting where the selector's first line was, preserving scrollback
- * above.
+ * Render the scoped, interactive session picker IN-PLACE on the main screen
+ * (#89). Uses `\x1b[N A \x1b[J` to overwrite previous output on re-render — no
+ * alt screen buffer. When the picker exits, the output is cleared and the
+ * chart renders starting where the picker's first line was, preserving
+ * scrollback above.
  *
- *   - j/k, arrows: navigate (wraps around)
- *   - Enter: select
+ * Key handling is delegated ENTIRELY to the pure state machine in
+ * `picker-state.ts` (CLAUDE.md "test key handling through a seam") — this
+ * function's only job is turning a `PickerAction` into a terminal write or a
+ * re-discovery call:
+ *
+ *   - j/k, arrows: move (wraps the whole list, sliding the 11-row window)
+ *   - Enter: select — also records the sticky harness order (H3)
  *   - q or Ctrl+C: exit (code 130)
+ *   - Ctrl+A / Tab: scope "all"  ·  Ctrl+W: scope "worktrees"  ·  Ctrl+B: scope "branch"
+ *   - Ctrl+T: cycle the time window (20m -> 1h -> 1d -> 1w -> all -> 20m)
  *
- * @param candidates - Sorted array of session candidates (displayed top 10)
+ * Requires an interactive terminal — the caller (`bin/wtft.ts`) is
+ * responsible for the no-TTY decision (E2-E4) and must never call this
+ * function without one; `enterRawStdin` no-ops on a non-TTY stdin, which
+ * would otherwise leave this promise pending forever.
+ *
+ * @param initialCandidates - The picker's starting rows, already discovered
+ *   by the caller at its own initial scope (`bin/wtft.ts`'s default is
+ *   `{ scope: "worktree", windowMs: TIME_WINDOW_MS["20m"] }`, S1/S5).
  * @returns Promise resolving to the selected session file path
  */
 export async function selectSessionPrompt(
-	candidates: SessionCandidate[]
+	initialCandidates: SessionCandidate[],
+	opts: SelectSessionPromptOptions
 ): Promise<string> {
 	return new Promise((resolve) => {
-		// --- Non-interactive fallback ---
-		if (!process.stdout.isTTY) {
-			console.log(
-				`\x1b[90mNon-interactive environment detected. Defaulting to newest session [1]:\x1b[0m`
-			);
-			const maxPathLen = Math.max(
-				...candidates.slice(0, 5).map((c) => c.displayPath.length),
-				10
-			);
-			for (let i = 0; i < Math.min(candidates.length, 5); i++) {
-				const c = candidates[i];
-				const stats = getSessionSummary(c.path);
-				const relTime = formatRelativeTime(c.timestamp);
-				const label = harnessLabel(c.harness);
-				const costStr = formatCostOrUnknown(stats).replace(/\x1b\[[0-9;]*m/g, "");
-				const turnStr = formatTurnsOrLines(stats);
-				const tagStr = formatTagSuffix(stats).replace(/\x1b\[[0-9;]*m/g, "");
-				console.log(
-					`  [${i + 1}] ${c.displayPath.padEnd(maxPathLen)}  ${costStr}  ${turnStr}  [${label.padEnd(6)}]  ${relTime.padEnd(6)}  ${tagStr}`
-				);
-			}
-			console.log(
-				`\x1b[90mRun 'wtft -s <substring>' to target a specific session by path or basename filter.\x1b[0m\n`
-			);
-			resolve(candidates[0].path);
-			return;
-		}
+		const out = opts.out ?? process.stdout;
 
-		// --- Interactive TTY selector ---
-		let selectedIndex = 0;
-		const limit = 10;
-		const displayCandidates = candidates.slice(0, limit);
-		const statsList = displayCandidates.map((c) => getSessionSummary(c.path));
+		const byPath = new Map<string, SessionCandidate>();
+		const remember = (list: SessionCandidate[]) => { for (const c of list) byPath.set(c.path, c); };
+		remember(initialCandidates);
 
-		hideCursor();
+		const harnessIds = getHarnesses().map(h => h.id);
+		const toRows = (list: SessionCandidate[]): PickerRow[] =>
+			orderByHarness(list, readHarnessOrder(), harnessIds).map(toPickerRow);
 
-		const maxPathLen = Math.max(
-			...displayCandidates.map((c) => c.displayPath.length),
-			10
-		);
+		let state: PickerState = setRows(initPickerState(), toRows(initialCandidates));
 
-		// Track rendered lines for precise in-place overwrite on arrow keys.
-		// logicalLineCount tracks the fixed number of logical lines (title+path+candidates)
-		// for the caller to clear when we exit.
+		hideCursor(out);
+
 		let lastLineCount = 0;
-		let logicalLineCount = 0;
 
 		const render = () => {
-			const selected = displayCandidates[selectedIndex];
-			// Full path (not truncated) — wraps naturally if wider than terminal
-			const shortName = selected.name.replace(".jsonl", "").slice(-4);
-			let out = `\x1b[1m\x1b[36m\u{1F4B8} WTFT — select session log\x1b[0m \x1b[90m...${shortName}\x1b[0m (j/k or arrows navigate, Enter select, q quit):\n`;
-			out += `  \x1b[90m${selected.path}\x1b[0m\n`;
-			for (let i = 0; i < displayCandidates.length; i++) {
-				const c = displayCandidates[i];
-				const stats = statsList[i];
-				const relTime = formatRelativeTime(c.timestamp);
+			const view = visibleWindow(state);
+			let text = `\x1b[1m\x1b[36m\u{1F4B8} WTFT — select session log\x1b[0m ` +
+				`\x1b[90m(j/k navigate, Enter select, q quit · Ctrl+A all · Ctrl+W worktrees · ` +
+				`Ctrl+B branch · Ctrl+T window)\x1b[0m\n`;
+			text += `  \x1b[90mscope: ${SCOPE_LABEL[state.scope]}  ·  window: ${state.timeWindow}\x1b[0m\n`;
 
-				const isSelected = i === selectedIndex;
-				const prefix = isSelected
-					? "\x1b[36m\x1b[1m > \x1b[0m"
-					: "   ";
-				const highlight = isSelected ? "\x1b[1m\x1b[36m" : "";
-				const reset = isSelected ? "\x1b[0m" : "";
+			if (view.rows.length === 0) {
+				text += `  \x1b[33mNo sessions in this window. Press Ctrl+T to widen it.\x1b[0m\n`;
+			} else {
+				const maxPathLen = Math.max(
+					...view.rows.map(r => byPath.get(r.id)?.displayPath.length ?? 0),
+					10
+				);
+				for (let i = 0; i < view.rows.length; i++) {
+					const row = view.rows[i];
+					const c = byPath.get(row.id);
+					if (!c) continue;
+					const stats = getSessionSummary(c.path);
+					const relTime = formatRelativeTime(c.timestamp);
 
-				const label = harnessLabel(c.harness);
-				const costStr = formatCostOrUnknown(stats);
-				const turnStr = formatTurnsOrLines(stats);
-				const tagStr = formatTagSuffix(stats);
-				out += `${prefix}${highlight}${c.displayPath.padEnd(maxPathLen)}${reset}  ${costStr}  ${turnStr}  [${label.padEnd(6)}]  \x1b[90m${relTime.padEnd(6)}\x1b[0m  ${tagStr}\n`;
+					const isSelected = i === view.cursorIndexInView;
+					const prefix = isSelected ? "\x1b[36m\x1b[1m > \x1b[0m" : "   ";
+					const highlight = isSelected ? "\x1b[1m\x1b[36m" : "";
+					const reset = isSelected ? "\x1b[0m" : "";
+
+					const label = harnessLabel(c.harness);
+					const costStr = formatCostOrUnknown(stats);
+					const turnStr = formatTurnsOrLines(stats);
+					const tagStr = formatTagSuffix(stats);
+					text += `${prefix}${highlight}${c.displayPath.padEnd(maxPathLen)}${reset}  ${costStr}  ${turnStr}  [${label.padEnd(6)}]  \x1b[90m${relTime.padEnd(6)}\x1b[0m  ${tagStr}\n`;
+				}
+				// The 12th row: a position line, never selectable (#89, K6).
+				if (view.positionLine) {
+					text += `  \x1b[90m${view.positionLine}\x1b[0m\n`;
+				}
 			}
-			// Count visual (wrapped) lines to move cursor exactly that far on re-render
-			const cols = process.stdout.columns || 80;
-			lastLineCount = visualLineCount(out, cols);
-			logicalLineCount = out.replace(/\\n$/, "").split("\\n").length;
-			process.stdout.write(out);
+
+			const cols = (out as NodeJS.WriteStream).columns || 80;
+			lastLineCount = visualLineCount(text, cols);
+			out.write(text);
 		};
 
-		// Initial render
 		render();
 
-		const onKey = (key: string) => {
-			if (key === "\u0003" || key === "q" || key === "Q") {
-				clearPreviousLines(lastLineCount);
+		const cleanupStdin = enterRawStdin((key: string) => {
+			const action = applyKey(state, key);
+
+			if (action.type === "quit") {
+				clearPreviousLines(lastLineCount, out);
 				cleanup();
 				process.exit(130);
-			} else if (key === "\r" || key === "\n") {
-				clearPreviousLines(lastLineCount);
-				const selectedPath = displayCandidates[selectedIndex].path;
+			} else if (action.type === "select") {
+				clearPreviousLines(lastLineCount, out);
+				const c = byPath.get(action.row.id);
+				if (!c) { render(); return; } // should not happen; stale row id
+				recordHarnessOpened(c.harness, opts.cwdOverride ?? process.cwd());
 				cleanup();
-				resolve(selectedPath);
-			} else if (key === "\u001b[A" || key === "k") {
-				selectedIndex =
-					(selectedIndex - 1 + displayCandidates.length) %
-					displayCandidates.length;
-				clearPreviousLines(lastLineCount);
+				resolve(c.path);
+			} else if (action.type === "move") {
+				state = action.state;
+				clearPreviousLines(lastLineCount, out);
 				render();
-			} else if (key === "\u001b[B" || key === "j") {
-				selectedIndex =
-					(selectedIndex + 1) % displayCandidates.length;
-				clearPreviousLines(lastLineCount);
+			} else if (action.type === "rescope") {
+				state = action.state;
+				// Re-discover for the new scope/window, THEN re-window the fresh
+				// rows (setRows also clamps the cursor, #89 K7).
+				const fresh = discoverSessions(opts.harnessOption, opts.cwdOverride, {
+					scope: state.scope,
+					windowMs: windowMsFor(state.timeWindow),
+				});
+				remember(fresh);
+				state = setRows(state, toRows(fresh));
+				clearPreviousLines(lastLineCount, out);
 				render();
 			}
-		};
-
-		const cleanupStdin = enterRawStdin(onKey);
+			// "noop" — nothing to do.
+		});
 
 		const cleanup = () => {
 			cleanupStdin();
-			showCursor();
+			showCursor(out);
 		};
 	});
 }

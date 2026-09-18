@@ -6,9 +6,13 @@
  *   corpus (#35).
  *
  *   `bin/wtft.ts` called `discoverSessions()` unconditionally, before it looked
- *   at `-s`. Its result is read in exactly two branches — the fuzzy-substring
- *   fallback and the auto-select menu — and neither is reachable once `-s`
- *   resolves to an existing file or a pending path. So the scan was paid for and
+ *   at `-s`. Its (legacy, unscoped) result is read in exactly one branch today
+ *   — the fuzzy-substring fallback — which is never reached once `-s` resolves
+ *   to an existing file or a pending path. (Before #89 the same call also fed
+ *   the no-`-s` auto-select menu; that branch now calls a separately-scoped,
+ *   separately-memoised discovery instead — see `getDefaultScoped` in
+ *   `bin/wtft.ts` — so it no longer shares this guard's cost story, and this
+ *   suite is only ever about the `-s` path.) So the scan was paid for and
  *   thrown away.
  *
  *   It is not a cheap scan. Discovery asks each transcript where it lives, and a
@@ -216,7 +220,10 @@ console.log("\n2. Fuzzy -s still scans the corpus");
 	const { out, code } = run(`-s zzz-matches-nothing -l 5 --no-emoji`, corpus(fuzzyClaude, emptyPi));
 	const clean = stripAnsi(out).trim();
 
-	assert("a substring matching nothing is still an error", code === 1, `exit ${code}: ${clean}`);
+	// #89, E3: with no interactive terminal (exactly what `execSync` gives this
+	// suite) a substring matching nothing is EXIT_SESSION_AMBIGUOUS (10), not
+	// the old plain exit 1 — a deliberate contract change, not a regression.
+	assert("a substring matching nothing is still an error", code === 10, `exit ${code}: ${clean}`);
 	assert("and it reports the discovered count (discovery ran)", /\(2 available\)/.test(clean), clean);
 
 	try { fs.rmSync(fuzzyClaude, { recursive: true, force: true }); } catch {}

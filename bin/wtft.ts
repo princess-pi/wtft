@@ -150,7 +150,14 @@ import {
 	selectSessionPrompt
 } from "../extensions/lib/session-selector.ts";
 import { buildDisplayPath } from "@princess-pi/libs/session-path-shortener";
-import { findRepoRoot, listWorktreeDirs, fanOutCwd } from "../extensions/lib/harness/worktrees.ts";
+import {
+	findRepoRoot,
+	listWorktreeDirs,
+	fanOutCwd,
+	currentBranch,
+	worktreeBranches,
+	resolveBranchCheckout,
+} from "../extensions/lib/harness/worktrees.ts";
 import {
 	parseWtftCliArgs,
 	spawnWtftDaemon,
@@ -160,6 +167,29 @@ import {
 	renderWtftWhy,
 	renderWtftVersion,
 } from "../extensions/lib/wtft-cli-shared.ts";
+import {
+	initPickerState,
+	setRows,
+	visibleWindow,
+	applyKey,
+	nextTimeWindow,
+	windowMsFor,
+	TIME_WINDOW_CYCLE,
+	TIME_WINDOW_MS,
+	ROW_LIMIT,
+	VISIBLE_DATA_ROWS,
+	type PickerState,
+	type PickerRow,
+	type PickerScope,
+	type TimeWindowLabel,
+	type PickerAction,
+} from "../extensions/lib/picker-state.ts";
+import {
+	mainCloneDir,
+	readHarnessOrder,
+	recordHarnessOpened,
+	orderByHarness,
+} from "../extensions/lib/harness-order.ts";
 
 // ---
 // Re-exports for test imports from built bin/wtft.mjs
@@ -298,7 +328,31 @@ export {
 	buildDisplayPath,
 	findRepoRoot,
 	listWorktreeDirs,
-	fanOutCwd
+	fanOutCwd,
+	currentBranch,
+	worktreeBranches,
+	resolveBranchCheckout,
+	// Scoped picker (#89) — the pure key-handling state machine
+	initPickerState,
+	setRows,
+	visibleWindow,
+	applyKey,
+	nextTimeWindow,
+	windowMsFor,
+	TIME_WINDOW_CYCLE,
+	TIME_WINDOW_MS,
+	ROW_LIMIT,
+	VISIBLE_DATA_ROWS,
+	// Scoped picker (#89) — sticky MRU harness order
+	mainCloneDir,
+	readHarnessOrder,
+	recordHarnessOpened,
+	orderByHarness,
+	type PickerState,
+	type PickerRow,
+	type PickerScope,
+	type TimeWindowLabel,
+	type PickerAction
 }
 
 /** A read whose total may still grow under the daemon (#443). Distinct from 1,
@@ -307,6 +361,13 @@ export {
  *  different facts and need different codes — the same split pr-review draws
  *  between 7 and 8. */
 export const EXIT_PROVISIONAL = 9;
+
+/** No interactive terminal, and session selection was not precise (#89, E3/E4):
+ *  `-s <substring>` matched zero or several sessions, or no `-s` was given at
+ *  all with more than one candidate. Replaces the old no-prompt `--json`
+ *  auto-pick-newest behaviour, which silently guessed under a machine caller's
+ *  nose — this exit is what tells a script it must narrow the target instead. */
+export const EXIT_SESSION_AMBIGUOUS = 10;
 
 // ---
 // SHARED WORDING (#26) — one sentence, two output modes.
@@ -534,6 +595,19 @@ async function main() {
 	const getCandidates = (): ReturnType<typeof discoverSessions> =>
 		(candidateCache ??= discoverSessions(opts.harnessOption, opts.cwdOverride));
 
+	// The picker's own default population (#89, S1/S5): folder-name-only,
+	// current worktree, T1 ("20m"). Deliberately NOT what `getCandidates()`
+	// above returns — that stays the pre-#89 full discovery, unchanged, and is
+	// what `-s`'s fuzzy substring match searches against (an explicit ask for
+	// a KNOWN session must not be narrowed by a browsing convenience window).
+	// This one is only ever consulted when no `-s` was given at all.
+	let defaultScopedCache: ReturnType<typeof discoverSessions> | null = null;
+	const getDefaultScoped = (): ReturnType<typeof discoverSessions> =>
+		(defaultScopedCache ??= discoverSessions(opts.harnessOption, opts.cwdOverride, {
+			scope: "worktree",
+			windowMs: TIME_WINDOW_MS["20m"],
+		}));
+
 	let finalSessionPath = "";
 	// #308: a session .jsonl that does not exist YET is a known-lagging path, not an
 	// error. Claude Code fixes the session id — and so the transcript path — at launch,
@@ -548,29 +622,46 @@ async function main() {
 	const earlyNotices: WtftNotice[] = [];
 
 	// ---
-	// SESSION SELECTION UNDER --json (#26)
+	// SESSION SELECTION (#26, #89)
 	// ---
-	// `selectSessionPrompt` writes to STDOUT — the interactive menu, and the
-	// non-interactive "Defaulting to newest session" fallback with its candidate
-	// list (extensions/lib/session-selector.ts). Under `--json` that lands ahead
-	// of the document and `JSON.parse` fails on the first byte, which is exactly
-	// the failure this flag exists to end. It also exits 130 on `q`/Ctrl-C,
-	// which a machine caller cannot answer.
+	// A human gets the picker, whether or not `--json` is set (#89, E1):
+	// `selectSessionPrompt` draws to stderr under `--json` so stdout stays one
+	// clean JSON document, and to stdout otherwise. Only `process.stdin.isTTY`
+	// decides whether a human is there to show it to — it also exits 130 on
+	// `q`/Ctrl-C, which a machine caller could never answer anyway.
 	//
-	// So `--json` does not prompt. It takes the newest candidate — the same one
-	// the non-interactive fallback already resolves to, so this is the existing
-	// behaviour with its prose moved off stdout — says so on stderr, and records
-	// an `auto-selected-session` notice naming how many it chose between. A
-	// caller that wants determinism passes `-s`, and the notice is what tells it
-	// that it should.
-	const chooseSession = async (found: ReturnType<typeof discoverSessions>): Promise<string> => {
-		if (!opts.json) return selectSessionPrompt(found);
-		const text = `${found.length} sessions match; --json does not prompt, so the newest was used: ${found[0].path}. ` +
-			`Pass -s <path|substring> to choose one.`;
+	// With NO interactive terminal, wtft no longer auto-picks the newest
+	// session under `--json` (the old `auto-selected-session` notice, retired
+	// in `@4`): it selects only when the population is already unambiguous —
+	// exactly one candidate, `-s` given or not — and otherwise exits
+	// EXIT_SESSION_AMBIGUOUS (10), naming every candidate on stderr. Under
+	// `--json` that exit carries nothing on stdout, the same contract exit 1
+	// already carries for an error (#89, E3/E4).
+	const showPicker = async (found: ReturnType<typeof discoverSessions>): Promise<string> =>
+		selectSessionPrompt(found, {
+			harnessOption: opts.harnessOption,
+			cwdOverride: opts.cwdOverride,
+			out: opts.json ? process.stderr : process.stdout,
+		});
+
+	/** No interactive terminal: fail loudly with the new exit code rather than
+	 *  guess. `label` distinguishes the two call sites' wording only.
+	 *  `discoveredTotal` — the size of the population `found` was FILTERED
+	 *  from, when there is one — proves on stderr that discovery actually ran
+	 *  even on a zero-match filter, the same guard #35 already established for
+	 *  the old exit-1 message (never removed, just carried to the new exit
+	 *  code and wording). */
+	const failAmbiguous = (found: ReturnType<typeof discoverSessions>, label: string, discoveredTotal?: number): never => {
+		const names = found.map(c => `  - ${c.displayPath}  (${c.path})`).join("\n");
+		const availability = discoveredTotal !== undefined ? ` (${discoveredTotal} available)` : "";
+		const text = found.length === 0
+			? `Session not specified precisely enough: ${label} matched no sessions${availability}.`
+			: `Session not specified precisely enough: ${label} matched ${found.length} sessions:\n${names}`;
 		console.error(`\x1b[33m${text}\x1b[0m`);
-		earlyNotices.push({ code: "auto-selected-session", text });
-		return found[0].path;
+		if (found.length > 0) console.error(`\x1b[90mPass -s <path|substring> that matches exactly one.\x1b[0m`);
+		process.exit(EXIT_SESSION_AMBIGUOUS);
 	};
+
 	if (opts.targetSession) {
 		// Direct path — use as-is if it exists
 		if (fs.existsSync(opts.targetSession)) {
@@ -586,26 +677,31 @@ async function main() {
 				c.path.toLowerCase().includes(filter) ||
 				c.name.toLowerCase().includes(filter)
 			);
-			if (filtered.length === 0) {
+			if (filtered.length === 1) {
+				finalSessionPath = filtered[0].path;
+			} else if (!process.stdin.isTTY) {
+				failAmbiguous(filtered, `-s ${opts.targetSession}`, found.length);
+			} else if (filtered.length === 0) {
+				// Unchanged from pre-#89: a human still gets a clear "no match"
+				// rather than an empty picker with nothing to browse into.
 				console.error(`❌ Error: Session '${opts.targetSession}' does not exist as a file and matches no discovered sessions (${found.length} available).`);
 				process.exit(1);
-			} else if (filtered.length === 1) {
-				finalSessionPath = filtered[0].path;
 			} else {
-				finalSessionPath = await chooseSession(filtered);
+				finalSessionPath = await showPicker(filtered);
 			}
 		}
 	} else {
-		// Auto select or show selector prompt
-		const found = getCandidates();
-		if (found.length === 0) {
-			console.error("❌ Error: No active session log files found. Ensure Pi or Claude has been run, or specify an explicit session log path with -s.");
-			process.exit(1);
-		} else if (found.length === 1) {
+		// No `-s`: the picker's own default-scoped population (#89, S1/S5).
+		const found = getDefaultScoped();
+		if (found.length === 1) {
 			finalSessionPath = found[0].path;
+		} else if (!process.stdin.isTTY) {
+			failAmbiguous(found, "no -s and no interactive terminal");
 		} else {
-			// Show select menu (or, under --json, take the newest without one).
-			finalSessionPath = await chooseSession(found);
+			// Shown even on ZERO rows (#89, S6) — the picker itself says so and
+			// names Ctrl+T, rather than this CLI widening (or erroring) on its
+			// own behalf.
+			finalSessionPath = await showPicker(found);
 		}
 	}
 

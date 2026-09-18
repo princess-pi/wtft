@@ -146,20 +146,29 @@ wtft --json | jq .total.costUsd
 `wtft --json` writes **exactly one JSON object** to stdout and nothing else —
 no chart, no ANSI, and no `3.6k`-style abbreviation, which is lossy. Human prose
 goes to stderr, and every sentence that would otherwise have been on stdout is
-repeated in the object's `notices[]`. The schema is `wtft/session@3`; field names
+repeated in the object's `notices[]`. The schema is `wtft/session@4`; field names
 and exit codes are versioned API, the prose inside `notices[].text` is not. Full
 contract: [`docs/spec-26-json.md`](./docs/spec-26-json.md).
 
 The numbers come from the same aggregation the rendered `--tokens` table formats,
 so those two cannot report different totals. The **bar chart's** total is a
 different figure on purpose: it bins every interaction, including ones carrying
-no model id, and it adds server-side tool cost that per-interaction cost does not.
+no model id, and it adds server-side tool cost that per-interaction cost does not
+— though as of `@4` a consumer can size that divergence itself, via
+`total.untaggedCostUsd` ([#119](https://github.com/princess-pi/wtft/issues/119)).
 
 `--json` suppresses the rendering flags. It does **not** apply to the commands
 that run instead of a report — `--help`/`--why`/`--version`, `--watch`, and
 `--list`/`--cleanup`/`--restart`/`--stop` keep their own output, and `-p` is
-still refused with exit 1. With several sessions discovered and no `--session`,
-`--json` does not prompt: it takes the newest and says so in `notices[]`.
+still refused with exit 1. With an interactive terminal, `--json` still shows
+the session picker — drawn to stderr, so stdout stays one clean JSON document —
+whether or not the population is ambiguous
+([#89](https://github.com/princess-pi/wtft/issues/89)). With **no** interactive
+terminal, wtft selects only when the population is already unambiguous (`-s
+<substring>` matching exactly one session, or exactly one session discovered
+with no `-s` at all); otherwise see exit **10** below — this replaces the old
+no-prompt auto-pick-the-newest behaviour and its `auto-selected-session` notice,
+both retired in `@4`.
 
 `wtft` exits with:
 
@@ -183,9 +192,15 @@ still refused with exit 1. With several sessions discovered and no `--session`,
   the ledger could not be written. The report path never returns either, and
   `spawn-record` also returns **0** — on a successful append, and on `--help`,
   which appends nothing.
+- **10** — session not specified precisely enough
+  ([#89](https://github.com/princess-pi/wtft/issues/89)): no interactive
+  terminal, and either `-s <substring>` matched zero or several sessions, or no
+  `-s` was given and more than one session was discovered. Every match is
+  named on stderr; under `--json`, stdout carries nothing, same as exit 1.
 - **130** — the interactive session selector was cancelled with `q` or Ctrl-C.
-  The SIGINT convention (128+2), not a wtft-specific code. `--json` never
-  prompts, so it never returns this.
+  The SIGINT convention (128+2), not a wtft-specific code. With no interactive
+  terminal wtft never shows the selector at all (see exit 10), so this exit is
+  unreachable there.
 
 The same table is in `docs/manifests/wtft-cmd.json`, which is what `wtft --help`
 renders its **Exit codes** section from.

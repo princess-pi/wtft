@@ -24,8 +24,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 
-import type { HarnessDiscovery, SessionCandidate } from "../types.ts";
+import type { DiscoverScopeOptions, HarnessDiscovery, SessionCandidate } from "../types.ts";
 import { resolveLastCwd, cwdSlugVariants } from "../session-cwd.ts";
+import { fanOutCwd, resolveBranchCheckout } from "../worktrees.ts";
 import { buildDisplayPath } from "@princess-pi/libs/session-path-shortener";
 
 const ID = "pi";
@@ -76,51 +77,138 @@ function toCandidate(file: string, projectSlug: string): SessionCandidate | null
 	};
 }
 
+function upsertCandidate(into: Map<string, SessionCandidate>, candidate: SessionCandidate | null): void {
+	if (!candidate) return;
+	const id = sessionIdOf(candidate.path);
+	const existing = into.get(id);
+	if (!existing || candidate.timestamp > existing.timestamp) into.set(id, candidate);
+}
+
+/** The pre-#89 default, preserved exactly for every caller omitting `scopeOpts`
+ *  (see the `discover` docstring in `../types.ts`). */
+function discoverLegacy(root: string, target: string | null): SessionCandidate[] {
+	const targetSlugs = target ? cwdSlugVariants(target) : null;
+
+	let projectDirs: string[];
+	try {
+		projectDirs = fs.readdirSync(root, { withFileTypes: true })
+			.filter(e => e.isDirectory())
+			.map(e => e.name);
+	} catch {
+		return [];
+	}
+
+	const bySessionId = new Map<string, SessionCandidate>();
+
+	for (const slug of projectDirs) {
+		const physicalMatch =
+			targetSlugs === null || targetSlugs.some(variant => slug.includes(variant));
+		const files: string[] = [];
+		collect(path.join(root, slug), files);
+
+		for (const file of files) {
+			if (!physicalMatch && (target === null || resolveLastCwd(file) !== target)) continue;
+			upsertCandidate(bySessionId, toCandidate(file, slug));
+		}
+	}
+
+	return [...bySessionId.values()];
+}
+
+/** The #89 scoped path — see `DiscoveryScope`'s docstring in `../types.ts`.
+ *  Pi's union arm is present here too (S2), even though it is inert today —
+ *  Pi records `cwd` once, on session_start, so a tail scan never resolves a
+ *  different value (see this module's own header) — kept wired in so the day
+ *  Pi records per-entry `cwd` this scope starts working with no further
+ *  change, exactly the existing #156 rationale. */
+function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions): SessionCandidate[] {
+	const { scope, windowMs } = opts;
+	const now = Date.now();
+	const withinWindow = (mtimeMs: number) => windowMs === null || now - mtimeMs <= windowMs;
+
+	let projectDirs: string[];
+	try {
+		projectDirs = fs.readdirSync(root, { withFileTypes: true })
+			.filter(e => e.isDirectory())
+			.map(e => e.name);
+	} catch {
+		return [];
+	}
+
+	const bySessionId = new Map<string, SessionCandidate>();
+
+	if (scope === "all") {
+		for (const slug of projectDirs) {
+			const files: string[] = [];
+			collect(path.join(root, slug), files);
+			for (const file of files) {
+				let stat: fs.Stats;
+				try { stat = fs.statSync(file); } catch { continue; }
+				if (!withinWindow(stat.mtimeMs)) continue;
+				upsertCandidate(bySessionId, toCandidate(file, slug));
+			}
+		}
+		return [...bySessionId.values()];
+	}
+
+	let targetDirs: string[];
+	let useUnionArm: boolean;
+	if (scope === "worktree") {
+		targetDirs = [target];
+		useUnionArm = false;
+	} else if (scope === "branch") {
+		targetDirs = [resolveBranchCheckout(target) ?? target];
+		useUnionArm = false;
+	} else {
+		targetDirs = fanOutCwd(target).dirs;
+		useUnionArm = true;
+	}
+
+	const targetSet = new Set(targetDirs);
+	const targetSlugs = new Set<string>();
+	for (const dir of targetDirs) for (const variant of cwdSlugVariants(dir)) targetSlugs.add(variant);
+
+	for (const slug of projectDirs) {
+		const physicalMatch = [...targetSlugs].some(variant => slug.includes(variant));
+		const files: string[] = [];
+		collect(path.join(root, slug), files);
+
+		for (const file of files) {
+			let stat: fs.Stats;
+			try { stat = fs.statSync(file); } catch { continue; }
+			if (!withinWindow(stat.mtimeMs)) continue;
+
+			let matched = physicalMatch;
+			if (!matched && useUnionArm) {
+				const last = resolveLastCwd(file);
+				matched = last !== null && targetSet.has(last);
+			}
+			if (!matched) continue;
+
+			upsertCandidate(bySessionId, toCandidate(file, slug));
+		}
+	}
+
+	return [...bySessionId.values()];
+}
+
 export const discovery: HarnessDiscovery = {
 	id: ID,
 	label: "Pi",
 
-	discover(targetCwd: string | null): SessionCandidate[] {
+	discover(targetCwd: string | null, scopeOpts?: DiscoverScopeOptions): SessionCandidate[] {
 		const root = sessionsDir();
 		if (!fs.existsSync(root)) return [];
 
-		// Pi's policy differs from Claude's: no explicit target means every Pi
-		// session, not the cwd's. Preserved from the pre-seam selector.
-		const target = targetCwd ? path.resolve(targetCwd) : null;
-		const targetSlugs = target ? cwdSlugVariants(target) : null;
-
-		let projectDirs: string[];
-		try {
-			projectDirs = fs.readdirSync(root, { withFileTypes: true })
-				.filter(e => e.isDirectory())
-				.map(e => e.name);
-		} catch {
-			return [];
+		if (!scopeOpts) {
+			// Pi's policy differs from Claude's: no explicit target means every Pi
+			// session, not the cwd's. Preserved from the pre-seam selector.
+			const target = targetCwd ? path.resolve(targetCwd) : null;
+			return discoverLegacy(root, target);
 		}
 
-		const bySessionId = new Map<string, SessionCandidate>();
-
-		for (const slug of projectDirs) {
-			// Pi dir names are "--" + cwdSlug + "--", so match by containment —
-			// under any encoding the slug might have been written with (#144).
-			const physicalMatch =
-				targetSlugs === null || targetSlugs.some(variant => slug.includes(variant));
-			const files: string[] = [];
-			collect(path.join(root, slug), files);
-
-			for (const file of files) {
-				if (!physicalMatch && (target === null || resolveLastCwd(file) !== target)) continue;
-				const candidate = toCandidate(file, slug);
-				if (!candidate) continue;
-				const id = sessionIdOf(file);
-				const existing = bySessionId.get(id);
-				if (!existing || candidate.timestamp > existing.timestamp) {
-					bySessionId.set(id, candidate);
-				}
-			}
-		}
-
-		return [...bySessionId.values()];
+		if (scopeOpts.scope === "all") return discoverScoped(root, "", scopeOpts);
+		return discoverScoped(root, path.resolve(targetCwd || process.cwd()), scopeOpts);
 	},
 
 	resolveSessionById(sessionId: string): string | null {

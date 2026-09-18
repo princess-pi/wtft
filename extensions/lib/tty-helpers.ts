@@ -51,14 +51,18 @@ export function enterRawStdin(onKey: (key: string) => void): () => void {
 // CURSOR HELPERS
 // ---
 
-/** Show the terminal cursor (DECTCEM reset). */
-export function showCursor(): void {
-	process.stdout.write("\x1b[?25h");
+/** Show the terminal cursor (DECTCEM reset).
+ *  @param out where to write — stdout by default; the scoped picker (#89)
+ *    passes stderr under `--json`, since both are the same controlling
+ *    terminal whenever this path runs at all, and stdout must stay a clean
+ *    JSON document (E1). */
+export function showCursor(out: NodeJS.WritableStream = process.stdout): void {
+	out.write("\x1b[?25h");
 }
 
-/** Hide the terminal cursor (DECTCEM set). */
-export function hideCursor(): void {
-	process.stdout.write("\x1b[?25l");
+/** Hide the terminal cursor (DECTCEM set). See {@link showCursor}'s `out`. */
+export function hideCursor(out: NodeJS.WritableStream = process.stdout): void {
+	out.write("\x1b[?25l");
 }
 
 // ---
@@ -70,10 +74,11 @@ export function hideCursor(): void {
  * end of screen. Used before re-rendering to overwrite the previous render in-place.
  *
  * @param lineCount - Number of visual (wrapped) lines to move up
+ * @param out where to write — see {@link showCursor}'s `out`.
  */
-export function clearPreviousLines(lineCount: number): void {
+export function clearPreviousLines(lineCount: number, out: NodeJS.WritableStream = process.stdout): void {
 	if (lineCount > 0) {
-		process.stdout.write(`\x1b[${lineCount}A\x1b[J`);
+		out.write(`\x1b[${lineCount}A\x1b[J`);
 	}
 }
 

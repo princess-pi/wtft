@@ -168,11 +168,14 @@ reader does not re-litigate them)
   spec adds `serverToolCost` too so the closer's exact-equality assertion holds
   structurally rather than only-because-measured-zero-today.
 - **U3 — closer: `chart total === total.costUsd + total.untaggedCostUsd`,
-  exactly**, on a fixture with one `<synthetic>` turn among tagged ones (the
-  shape `tests/wtft-90-total-includes-server-tool-cost.test.ts` TEST 5 built
-  and could not yet assert).
+  to half a cent** (the tolerance `tests/wtft-90-…`'s own chart/TOTAL
+  comparisons already use, since both scrape a two-decimal display — the
+  underlying arithmetic itself is exact), on a fixture with one `<synthetic>`
+  turn among tagged ones (the shape
+  `tests/wtft-90-total-includes-server-tool-cost.test.ts` TEST 5 built and
+  could not yet assert).
 - **U4 — schema bump.** `WTFT_JSON_SCHEMA` becomes `wtft/session@4`.
-  `docs/spec-26-json.md` gets Amendment 2 recording both #89's `-s`
+  `docs/spec-26-json.md` gets Amendment 3 recording both #89's `-s`
   contract change (E3/E4 above) and #119's new field, per Amendment 1's own
   precedent ("adding keys is the documented bump condition").
 

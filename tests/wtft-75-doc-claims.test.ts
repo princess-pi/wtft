@@ -181,5 +181,17 @@ console.log("\n4. README install-wtft exit codes match the script");
 		"install-wtft --help says -- is not an end-of-options marker");
 }
 
+// ---
+// 5. adding-a-harness.md pins the native-cost / server-tool-cost rule (#118).
+// ---
+console.log("\n5. adding-a-harness.md states the native-cost/server-tool-cost rule");
+{
+	const doc = read("docs/adding-a-harness.md");
+	check(/MUST NOT include server-side tool charges/.test(doc),
+		"adding-a-harness.md says a harness-native per-turn cost MUST NOT include server-side tool charges");
+	check(/zero\s+`server_tool_use`/.test(doc),
+		"adding-a-harness.md says an adapter whose native cost already includes them must zero server_tool_use");
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

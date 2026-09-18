@@ -2013,7 +2013,8 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
 		// 400 Pi transcripts: 0 carry either field, so 0 can carry both. TEST 5 in
 		// the #90 suite pins HOW FAR AWAY that is — a Claude Code transcript
 		// ignores a Pi-shaped cost block entirely — and not the route itself,
-		// which needs a Pi transcript no fixture here can be. Reaching it is #118.
+		// which needs a Pi transcript no fixture here can be. The assumption is
+		// now pinned in the harness contract: docs/adding-a-harness.md (#118).
 		if (i.serverToolCost) {
 			total.costUsd += i.serverToolCost;
 			m.costUsd += i.serverToolCost;

@@ -97,10 +97,11 @@ reader does not re-litigate them)
   additionally bounded by `windowMs`; the CLI's initial state is always `20m`
   (`T1`), regardless of which scope key was used to get there. `Ctrl+T` cycles
   `20m → 1h → 1d → 1w → all → 20m`. **One exception:** a picker opened because
-  `-s` matched several sessions starts at scope `worktrees`, window `all`,
-  because its rows come from the unscoped discovery (every checkout of the repo,
-  the union arm, no time bound), and the header must describe them. Its first
-  `Ctrl+T` moves to `20m`, like any other `all`.
+  `-s` matched several sessions starts at window `all`, with its header scope
+  reading "everything -s searches", because its rows come from the unscoped
+  discovery (for Claude Code every checkout of the repo plus the union arm; for
+  Pi with no `--dir`, every Pi session). Its first rescope re-discovers from
+  scope `worktrees`, so the first `Ctrl+T` moves to `20m` over all worktrees.
 - **S6 — an empty window says so, never widens itself.** Zero rows after a
   (re)discovery is a distinct render state (a message naming `Ctrl+T`), not an
   automatic scope or window change.

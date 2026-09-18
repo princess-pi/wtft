@@ -655,8 +655,9 @@ async function main() {
 	// With NO interactive terminal — or stdin is one but the picker's own
 	// output stream is not — wtft no longer auto-picks the newest session
 	// under `--json` (the old `auto-selected-session` notice, retired in
-	// `@4`): it selects only when the population is already unambiguous —
-	// exactly one candidate, `-s` given or not — and otherwise exits
+	// `@4`): it selects only when `-s` matches exactly one session (#89, C2:
+	// not a lone default-scoped candidate, which depends on the clock), and
+	// otherwise exits
 	// EXIT_SESSION_AMBIGUOUS (10), naming every candidate on stderr. Under
 	// `--json` that exit carries nothing on stdout, the same contract exit 1
 	// already carries for an error (#89, E3/E4).

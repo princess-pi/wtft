@@ -432,13 +432,19 @@ export async function selectSessionPrompt(
 
 		let state: PickerState = setRows(initPickerState(), toRows(initialCandidates));
 
-		// Under `-s` the rows come from the unscoped, unbounded discovery:
-		// every checkout of this repo plus the union arm, which is exactly the
-		// `"worktrees"` population. Seeding `"worktrees"`/`"all"` makes the
-		// header true and keeps Ctrl+T from narrowing to this directory. The
-		// window does not survive Ctrl+T: the cycle wraps `all -> 20m`, and
-		// the header says so. Spec S5 records `-s` as the one exception to T1.
-		if (opts.substringFilter) state = { ...state, scope: "worktrees", timeWindow: "all" };
+		// Under `-s` the rows come from the unscoped, unbounded discovery. For
+		// Claude Code that is the `"worktrees"` population; for Pi it is not
+		// (no fan-out, and every Pi session when there is no --dir). So the
+		// header names the -s search itself until the first rescope, and the
+		// state is seeded `"worktrees"`/`"all"` so Ctrl+T does not narrow to
+		// this directory. Ctrl+T still wraps `all -> 20m`, and the header then
+		// shows the scope it re-discovered with. Spec S5 records `-s` as the
+		// one exception to T1.
+		let scopeLabelOverride: string | null = null;
+		if (opts.substringFilter) {
+			state = { ...state, scope: "worktrees", timeWindow: "all" };
+			scopeLabelOverride = "everything -s searches";
+		}
 
 		hideCursor(out);
 
@@ -450,7 +456,7 @@ export async function selectSessionPrompt(
 				`\x1b[90m(j/k navigate, Enter select, q quit · Ctrl+A all · Ctrl+W worktrees · ` +
 				`Ctrl+B branch · Ctrl+T window)\x1b[0m\n`;
 			text += opts.substringFilter
-				? `  \x1b[90mscope: ${SCOPE_LABEL[state.scope]}  ·  window: ${state.timeWindow}  ·  filtered by -s "${opts.substringFilter}"\x1b[0m\n`
+				? `  \x1b[90mscope: ${scopeLabelOverride ?? SCOPE_LABEL[state.scope]}  ·  window: ${state.timeWindow}  ·  filtered by -s "${opts.substringFilter}"\x1b[0m\n`
 				: `  \x1b[90mscope: ${SCOPE_LABEL[state.scope]}  ·  window: ${state.timeWindow}\x1b[0m\n`;
 
 			if (view.rows.length === 0) {
@@ -511,6 +517,7 @@ export async function selectSessionPrompt(
 				render();
 			} else if (action.type === "rescope") {
 				state = action.state;
+				scopeLabelOverride = null;
 				// Ctrl+B's population falls back gracefully to "worktree"'s
 				// (bare target directory) when the branch can't be resolved —
 				// but the LABEL must say so too (pr-review round 2, Medium: the

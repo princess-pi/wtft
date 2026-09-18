@@ -298,8 +298,9 @@ _Avoid_: Standalone mode, binary (the binary is `bin/wtft.mjs`; "CLI" names the 
 Human prose goes to stderr, and every sentence that would otherwise have been on stdout is
 repeated in the object's `notices[]`, where `code` is the contract and `text` is disposable.
 With an interactive terminal it still shows the scoped session picker (#89), drawn to
-stderr so stdout stays one clean object; with no interactive terminal it selects only an
-unambiguous session and otherwise exits 10 — see `docs/spec-26-json.md` Amendment 3. Its
+stderr so stdout stays one clean object; with no interactive terminal it selects only
+when `-s` matches exactly one session and otherwise exits 10, even with no `-s` and one
+session in view — see `docs/spec-26-json.md` Amendment 3. Its
 aggregate numbers come from `computeSessionSummary` (`extensions/lib/wtft-renderer.ts`),
 the same aggregation the `--tokens` table formats, so those two cannot report different
 totals; `session`, `provisional`, `uncounted`, `spawned` and `notices` come from the run

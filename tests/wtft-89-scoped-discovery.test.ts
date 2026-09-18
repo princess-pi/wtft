@@ -240,6 +240,8 @@ console.log("\n=== S4: 'branch' scope ===\n");
 				.map((c: any) => c.name);
 			check(found.includes("in-worktree.jsonl"),
 				"S4: with git unusable, 'branch' scope falls back to the target directory itself");
+			check(!found.includes("in-clone.jsonl"),
+				"S4: …and does not widen to the main clone");
 		});
 		delete process.env.WTFT_NO_GIT;
 	}

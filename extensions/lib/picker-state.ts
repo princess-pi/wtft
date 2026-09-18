@@ -125,9 +125,8 @@ function computeWindowTop(cursor: number, total: number, prevWindowTop: number):
  * looked at — a quick rescope-then-Enter would open it by accident. Row 1
  * on top after every rescope is also what "cursor on the top row" already
  * promises for the picker's initial state (`initPickerState`); this is the
- * same promise held on every subsequent rescope, not just the first. K7 is
- * the degenerate case of this same rule: 0 already satisfies "clamped into
- * range" for any non-empty list.
+ * same promise held on every subsequent rescope, not just the first. K7's
+ * empty list is the same rule: the cursor is 0 for `[]` too.
  */
 export function setRows(state: PickerState, rows: readonly PickerRow[]): PickerState {
 	const cursor = 0;
@@ -187,11 +186,8 @@ function moveCursor(state: PickerState, delta: 1 | -1): PickerAction {
 }
 
 function rescope(state: PickerState, patch: Partial<Pick<PickerState, "scope" | "timeWindow">>): PickerAction {
-	// Cursor/windowTop are left as they are — the caller re-discovers and
-	// calls setRows, which is what actually clamps them (K7). Leaving them
-	// untouched here means a rescope that returns the SAME rows (e.g. Ctrl+T
-	// cycling past "all" back onto an unchanged population) does not reset
-	// the cursor to the top for no reason.
+	// Cursor/windowTop are left as they are; the caller re-discovers and
+	// calls setRows, which resets the cursor to the top row (K7).
 	return { type: "rescope", state: { ...state, ...patch } };
 }
 

@@ -19,9 +19,9 @@ reader does not re-litigate them)
   unbounded time) when called with no scope options — this is what
   `tests/wtft-issue-144-145-164-session-discovery.test.ts` and
   `tests/wtft-issue-156-harness-seam.test.ts` already exercise, and their
-  assertions about that default are unchanged. `bin/wtft.ts` is the one caller that opts into the new
-  policy explicitly, passing `{ scope: "worktree", windowMs: TIME_WINDOW_MS["20m"] }`
-  as the picker's starting state.
+  assertions about that default are unchanged. `bin/wtft.ts` opts into the new
+  policy for the picker, passing `{ scope: "worktree", windowMs: TIME_WINDOW_MS["20m"] }`
+  as its starting state; each rescope passes the new scope and window.
 - **`Ctrl+B` (current branch), mechanism.** The decision names the key and its
   intent ("current git branch") but not its mechanics against a folder-only
   scope. Implemented as: resolve the cwd's current branch
@@ -191,6 +191,8 @@ reader does not re-litigate them)
   `canShowPicker` check in `bin/wtft.ts` is what actually guards this.
 - **E2 — no TTY, `-s` matches exactly one → selects it silently**, same as
   today.
+- **E2b — TTY, `-s` matches zero → exit 1** ("matches no discovered sessions"), unchanged
+  from before #89: an empty picker would give a human nothing to browse into.
 - **E3 — no TTY, `-s` matches zero or several → new exit code, lists matches.**
   `EXIT_SESSION_AMBIGUOUS = 10`. Stderr names every match (path + name); under
   `--json`, stdout carries nothing (matching the existing exit-1 contract:
@@ -259,7 +261,7 @@ reader does not re-litigate them)
   logic (the dual stdin/output-stream TTY check) is exercised only by code
   review and manual verification.
 - `bun run typecheck`, `bun run build`, `bash tests/wtft-daemon.test.sh`.
-- Regression closer carried forward from #89's own issue body: a fixture with
-  many stranded cwds under `"worktrees"` scope does bounded reads (the existing
-  V11f-shaped assertion, now exercised through the scope option explicitly
-  rather than implicitly through the removed default).
+- Regression closer carried forward from #89's own issue body: V11g in
+  `tests/wtft-issue-144-145-164-session-discovery.test.ts` builds 200 transcripts,
+  150 under removed-worktree slugs, and asserts the picker's default scope
+  (`"worktree"`) finds the 50 live ones with zero tail reads.

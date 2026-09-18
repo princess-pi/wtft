@@ -9,8 +9,8 @@
  *   whether the worktree layout is in-tree or out-of-tree (round 2 of this
  *   module's own design; the first cut used a plain `loadConfig` walk-up,
  *   which only reaches an in-tree worktree — see `readHarnessOrder`'s own
- *   docstring for the full story). A plain walk-up remains the fallback only
- *   when there is no repo/git to resolve a main clone from at all.
+ *   docstring for the full story). A plain walk-up is the fallback whenever
+ *   `mainCloneDir` returns null: no repo, no git, or git failing.
  *
  *   Write side (H2) needs its own code: opening a session must persist to the
  *   MAIN CLONE's `.wtft/config.json` regardless of which worktree the CLI is
@@ -71,8 +71,9 @@ export function mainCloneDir(cwd: string): string | null {
  * for the same reason `recordHarnessOpened` takes a `cwd` parameter instead of
  * assuming the launching shell's directory.
  *
- * Falls back to the OLD walk-up read only when `mainCloneDir` cannot resolve
- * at all (no git, not a repo) — a local `.wtft/config.json` a human placed by
+ * Falls back to the OLD walk-up read whenever `mainCloneDir` returns null
+ * (no git, not a repo, or git failing), temporarily chdir-ing to `startDir`
+ * and restoring it — a local `.wtft/config.json` a human placed by
  * hand still works outside a repo, which is the one case `mainCloneDir` was
  * never going to answer for. Unknown/malformed values are dropped rather than
  * thrown on; an absent or corrupt `harnessOrder` reads as `[]`, which is
@@ -114,7 +115,8 @@ export function readHarnessOrder(startDir: string = process.cwd()): string[] {
  * Move `harnessId` to the front of the main clone's sticky order (H2, H3).
  * Best-effort: a failure at any step — no main clone, unreadable/unwritable
  * config — is swallowed, never thrown, matching every other config write
- * here.
+ * here. A readable config that is not a JSON object is left untouched and
+ * not written.
  */
 export function recordHarnessOpened(harnessId: string, cwd: string = process.cwd()): void {
 	const dir = mainCloneDir(cwd);

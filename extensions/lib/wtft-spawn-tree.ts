@@ -389,7 +389,7 @@ export function computeSpawnTree(
 				// serialised verbatim as `spawned.edges[].total` (below) and
 				// copied into `countedTotals` (`{...total}` a few lines down),
 				// which would leak `untaggedCostUsd` into a field the spec
-				// (docs/spec-26-json.md U1) says never carries it — nothing
+				// (docs/spec-26-json.md's `total.untaggedCostUsd` row; spec-89 U1) says never carries it — nothing
 				// else here reaches `total` through `addTotals`/`emptyTotals`,
 				// which strip an unknown key by construction, but a direct
 				// assignment does not. Drop it explicitly (pr-review, #89/#119).

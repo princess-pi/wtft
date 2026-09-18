@@ -34,12 +34,13 @@
  * for the harness already qualifies), so there is no non-matching population
  * for the union arm to run against, and this module is never called on that
  * path either (spec-89 S3). What bounds `"worktrees"`'s cost now is the time
- * window (#89, always active, T1 = 20 minutes on every launch):
+ * window (#89, T1 = 20 minutes on every launch except an ambiguous `-s`,
+ * which opens with no window, spec-89 S5):
  * `harness/claude-code/discovery.ts` and `harness/pi/discovery.ts` both skip
  * the tail read entirely for a transcript outside the active window, via one
- * `fs.statSync` first — and, since spec-reconcile, skip the directory's
- * `readdir`/`stat` pass ENTIRELY for `"worktree"`/`"branch"` scope, which
- * never consult this module at all. The old
+ * `fs.statSync` first — and, under `"worktree"`/`"branch"` scope, skip the
+ * `readdir`/`stat` pass for every NON-matching directory, since those scopes
+ * never pay this module's tail reads. The old
  * unbounded cost is still reachable — deliberately — the moment a human cycles
  * `Ctrl+T` all the way to "all", which is why {@link getCwdBytesRead} and
  * {@link TAIL_WINDOWS} below are unchanged.
@@ -239,8 +240,9 @@ function scanBackwardsForCwd(text: string, partialFirstLine: boolean): string | 
 
 /**
  * The working directory a session log was last written from, or null when the
- * log records none (Pi writes `cwd` only on its session_start entry, so Pi
- * transcripts resolve to null and contribute nothing — see the spec).
+ * log records none within the last tail window (a Pi transcript records `cwd`
+ * only on its session_start entry, so it resolves only when under ~512 KB;
+ * see TAIL_WINDOWS).
  *
  * @param filePath absolute path to a .jsonl session log
  * @param knownStat optional pre-read stat, to avoid a second syscall

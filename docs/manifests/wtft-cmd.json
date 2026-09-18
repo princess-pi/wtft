@@ -46,9 +46,9 @@
       "commands": [
         ""
       ],
-      "result": "The session picker (#89) opens, scoped by default to THIS directory alone and to the last 20 minutes — folder-name matching, no whole-repo scan. Ctrl+W widens to every checkout of the current repo (worktree rows compact to <repo>/w/<branch>); Ctrl+A widens to every project on the machine; Ctrl+B narrows to the checkout of your current git branch; Ctrl+T cycles the time window (20m -> 1h -> 1d -> 1w -> all). Outside a git repo, Ctrl+W has nothing to widen into. Use --dir <path> to anchor the picker somewhere other than the current directory.",
+      "result": "The session picker (#89) opens, scoped by default to THIS directory alone and to the last 20 minutes — folder-name matching, no whole-repo scan. Ctrl+W widens to every checkout of the current repo (worktree rows compact to <repo>/w/<branch>); Ctrl+A widens to every project on the machine; Ctrl+B narrows to the checkout of your current git branch; Ctrl+T cycles the time window (20m -> 1h -> 1d -> 1w -> all -> 20m). Outside a git repo, Ctrl+W has nothing to widen into. Use --dir <path> to anchor the picker somewhere other than the current directory.",
       "demo": [
-        "\ud83d\udcb8 WTFT \u2014 select session log (j/k navigate, Enter select, q quit \u00b7 Ctrl+A all \u00b7 Ctrl+W worktrees \u00b7 Ctrl+B branch \u00b7 Ctrl+T window)",
+        "\ud83d\udcb8 WTFT \u2014 select session log (j/k navigate, Enter select, q quit \u00b7 Ctrl+A/Tab all \u00b7 Ctrl+W worktrees \u00b7 Ctrl+B branch \u00b7 Ctrl+T window)",
         "  scope: this worktree  \u00b7  window: 20m",
         "  [1] ~/g-p/princess-pi-packages/...4e9e                        \u001b[1;37m$12.34\u001b[0m  (48t)      [Claude]  2m ago",
         "  [2] ~/g-p/princess-pi-packages/...5e9e                        \u001b[1;37m$3.21\u001b[0m   (12t)      [Claude]  14m ago"
@@ -149,7 +149,7 @@
     },
     {
       "flags": "-s, --session <path|filter>",
-      "desc": "Specify an explicit session .jsonl file path, or a fuzzy substring filter (e.g. 'b04c'). When the argument is not an existing file, it filters discovered sessions by basename or path substring, searched over the PRE-#89 discovery population (#89) -- for Claude Code, every checkout of the current repo (fan-out) plus the #156 union arm, unbounded in time; for Pi with no --dir, every Pi session on the machine -- unlike a bare launch with no -s, which searches only the picker's own scoped, time-windowed population (this worktree, last 20 minutes, by default). An explicit ask for a known session is never narrowed by that browsing convenience window, but it is not literally \"every session on the machine\" for Claude Code. If exactly one match, runs immediately; with an interactive terminal and multiple matches, shows the session picker filtered to them; with no interactive terminal, zero or several matches exit 10 (#89, see Exit codes) instead of prompting. An absolute .jsonl path that does not exist YET is accepted as a pending session (#308), reported at exit 0 rather than as an error."
+      "desc": "Specify an explicit session .jsonl file path, or a fuzzy substring filter (e.g. 'b04c'). When the argument is not an existing file, it filters discovered sessions by basename or path substring, searched over the PRE-#89 discovery population (#89) -- for Claude Code, every checkout of the current repo (fan-out) plus the #156 union arm, unbounded in time; for Pi with no --dir, every Pi session on the machine -- unlike a bare launch with no -s, which searches only the picker's own scoped, time-windowed population (this worktree, last 20 minutes, by default). An explicit ask for a known session is never narrowed by that browsing convenience window, but it is not literally \"every session on the machine\" for Claude Code. If exactly one match, runs immediately; with an interactive terminal and multiple matches, shows the session picker filtered to them; with an interactive terminal and ZERO matches, exits 1 with 'matches no discovered sessions'; with no interactive terminal, zero or several matches exit 10 (#89, see Exit codes) instead of prompting. An absolute .jsonl path that does not exist YET is accepted as a pending session (#308), reported at exit 0 rather than as an error."
     },
     {
       "flags": "--dir, --cwd <path>",
@@ -329,7 +329,7 @@
     },
     {
       "code": 10,
-      "meaning": "Session not specified precisely enough (#89): no interactive terminal, and either -s <substring> matched zero or several sessions, or no -s was given at all -- even when the picker's default scope (this worktree, last 20 minutes) holds exactly one session, since that answer would depend on the clock. Zero is included, replacing the old exit 1 'no session found' for this no--s/no-TTY case. Every match is named on stderr; under --json, stdout carries nothing, same as exit 1."
+      "meaning": "Session not specified precisely enough (#89): no interactive terminal, and either -s <substring> matched zero or several sessions, or no -s was given at all -- even when the picker's default scope (this worktree, last 20 minutes) holds exactly one session, since that answer would depend on the clock. Zero is included, replacing the old exit 1 'no session found' for this no -s, no-TTY case. Every match is named on stderr; under --json, stdout carries nothing, same as exit 1."
     },
     {
       "code": 130,

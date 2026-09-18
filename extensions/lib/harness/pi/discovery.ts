@@ -4,8 +4,9 @@
  * @description Where Pi keeps its session logs (#156).
  *
  * Layout: ~/.pi/agent/sessions/<--slug-->/<timestamp>_<uuid>.jsonl, where the
- * directory name is the cwd slug wrapped in `--`. Matching is by containment,
- * which is why an unwrapped slug still finds the directory.
+ * directory name is the cwd slug wrapped in `--`. The single-directory scopes
+ * compare exactly after unwrapping; `"worktrees"` and the unscoped default
+ * match by containment.
  *
  * The union half of the #156 rule is wired in but mostly inert today: Pi records
  * `cwd` once, on its session_start entry, so a tail scan finds a DIFFERENT cwd
@@ -122,9 +123,10 @@ function discoverLegacy(root: string, target: string | null): SessionCandidate[]
 }
 
 /** The #89 scoped path — see `DiscoveryScope`'s docstring in `../types.ts`.
- *  Pi's union arm is present here too (S2), even though it is inert today —
- *  Pi records `cwd` once, on session_start, so a tail scan never resolves a
- *  different value (see this module's own header) — kept wired in so the day
+ *  Pi's union arm is present here too (S2), though mostly inert: Pi records
+ *  `cwd` once, on session_start, so a tail scan resolves a different value
+ *  only for a session that moved after that entry (this module's header) —
+ *  kept wired in so the day
  *  Pi records per-entry `cwd` this scope starts working with no further
  *  change, exactly the existing #156 rationale. */
 function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions): SessionCandidate[] {

@@ -584,9 +584,8 @@ console.log("\n=== PART E: what one launch reads, counted on a test-built corpus
 	check(strandedTail <= liveTail,
 		`V11b: …and no extra reads either (${strandedTail} vs ${liveTail} live)`);
 
-	// V11f — THE CONTRACT'S OWN FIXTURE: #89's closer asks for 200 transcripts
-	// with 150 stranded cwds, and for reads bounded by the CANDIDATE count
-	// rather than the corpus.
+	// V11f — #89's closer fixture (200 transcripts, 150 stranded) on the
+	// unscoped path. The closer's bound itself is asserted by V11g.
 	{
 		const MIXED = 200;
 		const STRANDED = 150;
@@ -698,8 +697,8 @@ console.log("\n=== PART E: what one launch reads, counted on a test-built corpus
 		const scopedTail = getCwdReadCount();
 		check(scoped.length === 50,
 			`V11g: the picker's default scope finds the live sessions (${scoped.length} of 50)`);
-		check(scopedTail <= scoped.length,
-			`V11g: …with reads bounded by candidates, not the corpus (${scopedTail} for ${scoped.length}; corpus 200)`);
+		check(scopedTail === 0,
+			`V11g: …without a single tail read (${scopedTail} for ${scoped.length}; corpus 200)`);
 		delete process.env.WTFT_CLAUDE_PROJECTS_DIR;
 		delete process.env.WTFT_PI_SESSIONS_DIR;
 	}

@@ -51,9 +51,9 @@ function makeRepoWithWorktree(sandbox: string): { clone: string; worktree: strin
 }
 
 // ---
-// H1/H2 — read via config walk-up, write targets the main clone.
+// H1/H2 — read and write both resolve the main clone through mainCloneDir.
 // ---
-console.log("\n=== H1/H2: read walk-up, write targets the main clone ===\n");
+console.log("\n=== H1/H2: read and write both target the main clone ===\n");
 {
 	const sandbox = mktmp("wtft-89-order-");
 	const repo = makeRepoWithWorktree(sandbox);
@@ -116,6 +116,7 @@ console.log("\n=== H2: best-effort when there is no main clone to write to ===\n
 	let threw = false;
 	try { recordHarnessOpened("pi", plain); } catch { threw = true; }
 	check(!threw, "H2: recordHarnessOpened on a non-repo cwd does not throw");
+	check(!fs.existsSync(path.join(plain, ".wtft")), "H2: …and writes nothing there");
 }
 
 // ---
@@ -156,7 +157,7 @@ console.log("\n=== H3-H5: orderByHarness groups, orders, and skips empties ===\n
 	check(withUnknown[withUnknown.length - 1].harness === "codex",
 		`H4: an unseen harness absent from both the order AND the registry list still goes last (${withUnknown.map(c => c.harness).join(",")})`);
 
-	// H5 — an empty harness group contributes no rows.
+	// H5 — a harness first in the order but with no candidates contributes no rows.
 	const noPi = orderByHarness(
 		candidates.filter(c => c.harness !== "pi"),
 		["pi", "claude-code"],
@@ -207,10 +208,11 @@ console.log("\n=== H2: readHarnessOrder(startDir) matches recordHarnessOpened's 
 			check(readHarnessOrder(repo.worktree).join(",") === "pi",
 				`H2: …but IS visible when readHarnessOrder is pointed at the same --dir target (${readHarnessOrder(repo.worktree).join(",")})`);
 
-			// process.cwd() must be restored, even though readHarnessOrder
-			// chdir'd internally.
+			// readHarnessOrder resolved through mainCloneDir here, so it must
+			// leave process.cwd() untouched (its chdir fallback runs only
+			// without git).
 			check(process.cwd() === elsewhere || process.cwd() === fs.realpathSync(elsewhere),
-				"H2: readHarnessOrder(startDir) restores process.cwd() afterward");
+				"H2: readHarnessOrder(startDir) leaves process.cwd() unchanged");
 		} finally {
 			process.chdir(originalCwd);
 			if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;

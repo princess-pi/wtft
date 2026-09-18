@@ -252,7 +252,7 @@ simply degrades to the old behaviour.
 
 `wtft --json` then reports the lineage under `spawned` — every edge with its
 provenance, every descendant counted exactly once, and every gap named rather
-than zeroed — plus `tree`, which is self + descendants as a field so nobody adds
+than zeroed — plus `tree`, which is self + descendants as a field (untagged cost excluded, as in `total.costUsd`) so nobody adds
 two numbers and guesses. **`total` keeps meaning this session's own turns**; not
 one dollar moved into or out of it.
 

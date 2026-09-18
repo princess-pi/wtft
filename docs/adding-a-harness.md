@@ -47,8 +47,9 @@ picker itself also gets a label that matches them.
 Both built-in harnesses split into a `discoverLegacy` function (unchanged from before #89)
 plus a new `discoverScoped` function, selected by whether `scopeOpts` was passed — but they
 are NOT otherwise identical: Pi's legacy default never fans out across worktrees (see the
-`null`-target bullet below), Pi matches by *containment* (`slug.includes(variant)`) where
-Claude Code matches by exact Set membership, and only Claude Code's directory walk calls
+`null`-target bullet below), Pi compares exactly after unwrapping for the single-directory
+scopes and by *containment* (`slug.includes(variant)`) for `"worktrees"`, where Claude Code
+always uses exact Set membership, and only Claude Code's directory walk calls
 `countDirRead()` (`session-cwd.ts`'s `getDirWalkCount()` counts Claude Code's tree walk
 only — Pi's `collect()` does not call it). A harness with no interest in the new scopes
 should still honour `scope: "worktree"`: every bare picker launch passes
@@ -68,9 +69,10 @@ directory, since folder-matching has no single generic rule
 when you can; if you cannot yet, say so in your harness's own `discover`
 docstring rather than leaving it to be discovered as a bug.
 
-If your harness records a `cwd` on its transcript entries, apply the **union rule**:
-include a transcript when its project-dir slug matches the target **or** its own recorded
-last-cwd does. `resolveLastCwd()` from `harness/session-cwd.ts` does the tail scan and
+If your harness records a `cwd` on its transcript entries, apply the **union rule** under
+the `"worktrees"` scope and the unscoped default (never under `"worktree"`, `"branch"` or
+`"all"`): include a transcript when its project-dir slug matches the target **or** its own
+recorded last-cwd does. `resolveLastCwd()` from `harness/session-cwd.ts` does the tail scan and
 memoises it. Union, not replacement — a last-cwd-only rule silently drops sessions whose
 directory slug is a parent of their cwd.
 
@@ -95,15 +97,16 @@ measured against, and the reason none of them may be written as a replacement.
   equals the encoded cwd outright — write your own membership test with `cwdSlugVariants`
   directly when your harness's naming isn't exact equality (neither built-in calls
   `slugMatchesCwd` itself: Claude Code builds a `Set` of variants and checks membership,
-  Pi checks *containment* — `slug.includes(variant)` — because its directory name wraps
-  the cwd slug rather than equalling it). If you need a single canonical string for
+  Pi unwraps its `--<slug>--` directory name and compares exactly for the single-directory
+  scopes, and checks *containment* — `slug.includes(variant)` — under `"worktrees"`). If you need a single canonical string for
   *display*, that is `cwdToSlug()`. Pinning one encoding for matching trades a known
   silent miss for an unknown one.
 - **"Here" may mean a whole repo.** `fanOutCwd(target)` returns every checkout of the
   target's git repo, so a session recorded in a sibling worktree is still found. It returns
   the target alone when there is no `.git` ancestor, which is what stops `~` from meaning
   the entire machine. Whether this fits your harness is a policy call, exactly like the
-  `null`-target question above: Claude Code fans out, Pi does not.
+  `null`-target question above: Claude Code fans out on its unscoped default and under
+  `"worktrees"`; Pi fans out only under `"worktrees"`.
 
 - **Call `countDirRead()` from your own directory walk, if you have one.** It is
   `session-cwd.ts`'s test-seam counter (`getDirWalkCount()`) for how many directories a

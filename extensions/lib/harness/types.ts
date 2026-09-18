@@ -83,8 +83,9 @@ export interface HarnessDiscovery {
 	 *   keeps `tests/wtft-issue-144-145-164-session-discovery.test.ts` and
 	 *   `tests/wtft-issue-156-harness-seam.test.ts`'s assertions about the
 	 *   default unchanged.
-	 *   `bin/wtft.ts` is the one caller that passes `{ scope: "worktree",
-	 *   windowMs: TIME_WINDOW_MS["20m"] }` as the picker's own new default.
+	 *   `bin/wtft.ts` passes `{ scope: "worktree", windowMs: TIME_WINDOW_MS["20m"] }`
+	 *   as the picker's starting population, and the picker's rescopes pass
+	 *   their own.
 	 */
 	discover(targetCwd: string | null, scopeOpts?: DiscoverScopeOptions): SessionCandidate[];
 	/**

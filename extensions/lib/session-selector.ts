@@ -93,12 +93,12 @@ export type { SessionCandidate } from "./harness/types.ts";
  * in-session move with no code change. See docs/adding-a-harness.md.
  *
  * @param harness - Target harness id, or "auto" for all enabled harnesses
- * @param cwdOverride - Directory to scope to; each harness decides what a
- *   missing override means (Claude Code: process.cwd(); Pi: no filter)
+ * @param cwdOverride - Directory to scope to. Missing means process.cwd(),
+ *   except on Pi's unscoped default, where it means no filter.
  * @param scopeOpts - Omitted → every harness's PRE-#89 default (fan-out,
  *   the union arm, unbounded time) — see `HarnessDiscovery.discover`'s own
- *   docstring in `harness/types.ts`. `bin/wtft.ts`'s picker is the one caller
- *   that passes this explicitly.
+ *   docstring in `harness/types.ts`. Only `windowMs` is enforced here too;
+ *   `scope` is each harness's to honour.
  * @returns Candidates sorted by modification time descending (newest first)
  */
 export function discoverSessions(
@@ -402,7 +402,7 @@ function matchesSubstring(c: SessionCandidate, filter: string): boolean {
  * @param initialCandidates - The picker's starting rows. Nothing in THIS
  *   function inspects, validates, or threads through whatever scope the
  *   caller used to discover them — `bin/wtft.ts`'s default is
- *   `{ scope: "worktree", windowMs: TIME_WINDOW_MS["20m"] }` (S1/S5), but
+ *   scope `"worktree"` with the 20-minute window (S1/S5), but
  *   that is a convention the caller upholds, not a contract this function
  *   enforces. The picker state starts at `"worktree"`/`"20m"`, except under
  *   `substringFilter`, where it is seeded `"worktrees"`/`"all"` (see the body).
@@ -453,7 +453,7 @@ export async function selectSessionPrompt(
 		const render = () => {
 			const view = visibleWindow(state);
 			let text = `\x1b[1m\x1b[36m\u{1F4B8} WTFT — select session log\x1b[0m ` +
-				`\x1b[90m(j/k navigate, Enter select, q quit · Ctrl+A all · Ctrl+W worktrees · ` +
+				`\x1b[90m(j/k navigate, Enter select, q quit · Ctrl+A/Tab all · Ctrl+W worktrees · ` +
 				`Ctrl+B branch · Ctrl+T window)\x1b[0m\n`;
 			text += opts.substringFilter
 				? `  \x1b[90mscope: ${scopeLabelOverride ?? SCOPE_LABEL[state.scope]}  ·  window: ${state.timeWindow}  ·  filtered by -s "${opts.substringFilter}"\x1b[0m\n`

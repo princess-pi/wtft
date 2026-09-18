@@ -44,8 +44,9 @@
  *   corpus of unparseable transcripts renders identically. So the assertion is a
  *   RATIO against the same command in the same run with an empty corpus, never a
  *   wall-clock threshold: a threshold would encode "fast enough on this box
- *   today", while the ratio cancels box speed, load, and cold cache. Calibrated
- *   here: empty 87-100 ms, stranded 480-508 ms — 5.2x. The gate is 2x.
+ *   today", while the ratio cancels box speed, load, and cold cache. The gate is
+ *   2x; since an explicit existing path skips discovery entirely, the expected
+ *   ratio is about 1x.
  *
  *   Part 2 is the guard against fixing this by deleting the feature: on the fuzzy
  *   path discovery MUST still run, and its count must still reach the user.
@@ -178,7 +179,7 @@ console.log("0. Warm the session (daemon up, tag classified)");
 console.log("\n1. Explicit -s costs the same with or without a corpus");
 {
 	// Stranded = the state `pr-cleanup` leaves behind: a recorded cwd whose
-	// directory is gone, which is what sends discovery down the whole-file read.
+	// directory is gone, which costs discovery a tail scan per transcript.
 	const bigClaude = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-35-big-c-")));
 	const proj = path.join(bigClaude, "-home-gone-worktree");
 	fs.mkdirSync(proj, { recursive: true });

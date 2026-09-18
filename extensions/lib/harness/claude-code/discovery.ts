@@ -282,7 +282,7 @@ function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions
 		// have found it anyway never runs for those two scopes — so reading its
 		// directory and stat-ing every file in it would cost exactly the
 		// per-transcript work S1/S5 promise a bare `wtft` launch never pays.
-		// This is what makes the ~7 ms measurement in this module's own header
+		// This is what makes the ~7 ms measurement in session-cwd.ts's header
 		// (and types.ts's DiscoveryScope docstring) true of the CODE, not just
 		// of a corpus where every non-matching directory happened to be cheap.
 		if (!physicalMatch && !useUnionArm) continue;

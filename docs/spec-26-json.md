@@ -117,7 +117,7 @@ contract.
 
 | Key | Type | Meaning |
 |---|---|---|
-| `schema` | string | `"wtft/session@4"`. **Adding a top-level key bumps it — a NESTED one too** (Duppy, 2026-09-18, answer Y). `@2` is #116 (`spawned`, `tree`); `@3` is #141 (`subagents[]`); `@4` is #89/#119 (`total.untaggedCostUsd`, and the `-s` no-TTY contract change — see Amendment 3). A consumer that only wants to know whether a given wtft can report subagents should still test for the `subagents[]` key, since absence is meaningful there (see below) and a version string cannot carry that. |
+| `schema` | string | `"wtft/session@4"`. **Adding a top-level key bumps it — a NESTED one too** (Duppy, 2026-09-18, answer Y). `@2` is #116 (`spawned`, `tree`); `@3` is #141 (`subagents[]`); `@4` is #119's `total.untaggedCostUsd`; #89's `-s` no-TTY contract change is not a key change but rides the same bump (see Amendment 3). A consumer that only wants to know whether a given wtft can report subagents should still test for the `subagents[]` key, since absence is meaningful there (see below) and a version string cannot carry that. |
 | `session.path` | string | The session `.jsonl` this run read. |
 | `session.harness` | string \| null | Harness id whose parse adapter claims the session's first assistant turn — `"claude-code"`, `"pi"`, or an id registered out of tree through the #156 seam. `null` means **no claim**, and does not distinguish an empty session, one not written yet, a file that could not be read, and a format no registered harness understands. |
 | `session.taggerVersion` | string | `WTFT_TAGGER_VERSION` of the running binary — a dotted version such as `"2.7.2"`, which is also what appears in `tagPath`. |
@@ -158,7 +158,7 @@ float accumulation error on `costUsd`.
 That holds because all three come from **one** aggregation over **one**
 deduplicated interaction set, and because all three apply the same exclusion:
 interactions with no model id are counted in `untaggedInteractions` and appear in
-none of them. `compaction` is the one field that does *not* apply that exclusion,
+none of them; their cost is `total.untaggedCostUsd` (#119). `compaction` is the one field that does *not* apply that exclusion,
 and it is not part of the guarantee.
 
 A category the tag file names that this build does not know — `_cat` reaches the

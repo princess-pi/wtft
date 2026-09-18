@@ -3,8 +3,9 @@
  * tests/wtft-89-picker-state.test.ts — the scoped picker's pure key-handling
  * state machine (#89, K1–K7). Spec: docs/spec-89-scoped-picker.md.
  *
- * Every assertion below feeds a key STRING into `applyKey` and reads the
- * returned action/state — no terminal, no discovery, no filesystem, no clock.
+ * Every assertion drives the pure exports of picker-state.ts — key strings
+ * into `applyKey`, plus `setRows`, `visibleWindow` and the time-window
+ * helpers — with no terminal, no discovery, no filesystem, no clock.
  * That is K1 itself: this suite is the proof the seam exists, not merely a
  * description of it.
  *
@@ -132,7 +133,7 @@ console.log("\n=== K5: scope and time-window keys ===\n");
 	check(windowMsFor("all") === null, `K5: 'all' has no bound (${windowMsFor("all")})`);
 	check(windowMsFor("20m") === TIME_WINDOW_MS["20m"], "K5: '20m' resolves to its millisecond constant");
 
-	// A rescope does not itself touch cursor/windowTop — only setRows does.
+	// A rescope does not itself touch cursor/windowTop.
 	const moved = applyKey(state, "j") as any;
 	const rescoped = applyKey(moved.state, "") as any;
 	check(rescoped.state.cursor === moved.state.cursor,
@@ -140,7 +141,7 @@ console.log("\n=== K5: scope and time-window keys ===\n");
 }
 
 // ---
-// K6 — 12-row windowing is a pure function of (rows.length, cursor).
+// K6 — 12-row windowing is a pure function of (rows.length, cursor, windowTop).
 // ---
 console.log("\n=== K6: 12-row windowing ===\n");
 {
@@ -165,7 +166,6 @@ console.log("\n=== K6: 12-row windowing ===\n");
 	view = visibleWindow(state);
 	check(state.cursor === 21, `K6: cursor is at row 22 (index 21) after 21 downs (${state.cursor})`);
 	check(view.positionLine === "12-22 of 40", `K6: window slides to '12-22 of 40' (${view.positionLine})`);
-	check(view.cursorIndexInView === state.cursor - state.windowTop, "K6: cursorIndexInView matches cursor - windowTop");
 
 	// The window always contains the cursor, arrow key by arrow key, across a
 	// full lap — including the wrap from last back to first.

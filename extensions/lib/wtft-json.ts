@@ -84,7 +84,9 @@ export interface WtftSessionJson {
 	 *  ledger, each edge's provenance, and every gap the walk could not close. */
 	spawned: SpawnTree;
 	/** SELF + RESOLVED descendants, as a field — so a consumer never adds two
-	 *  numbers and has to work out for itself whether it double-counted.
+	 *  numbers and has to work out for itself whether it double-counted. Over
+	 *  the six token and cost fields only: `untaggedCostUsd` is not carried,
+	 *  for self or for descendants.
 	 *
 	 *  A FLOOR whenever anything went uncounted, and there are FOUR conditions,
 	 *  not one: `spawned.unattributed` is non-empty, `spawned.depthCapped` is

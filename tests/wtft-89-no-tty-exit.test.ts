@@ -1,7 +1,7 @@
 #!/usr/bin/env -S bun
 /**
  * tests/wtft-89-no-tty-exit.test.ts — the no-TTY EXIT_SESSION_AMBIGUOUS (10)
- * contract (#89, E2–E5). Spec: docs/spec-89-scoped-picker.md.
+ * contract (#89, E3 and E4). Spec: docs/spec-89-scoped-picker.md.
  *
  * This is the file docs/spec-89-scoped-picker.md's own Verification section
  * originally named and, until now, never shipped (pr-review round 2, Low) —
@@ -11,7 +11,7 @@
  * `--json` empty-stdout guarantee) had no coverage until this suite.
  *
  * Every `spawnSync` call here is already non-TTY by construction (a spawned
- * child's stdio defaults to pipes), which is exactly the E2–E5 precondition —
+ * child's stdio defaults to pipes), which is exactly the E3/E4 precondition —
  * no pty simulation needed.
  *
  * Run: bun tests/wtft-89-no-tty-exit.test.ts
@@ -62,7 +62,7 @@ function run(args: string[], opts: { cwd: string; claudeProjects: string; pi?: s
 		env: {
 			...process.env,
 			WTFT_CLAUDE_PROJECTS_DIR: opts.claudeProjects,
-			WTFT_PI_SESSIONS_DIR: opts.pi ?? trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-nopi-"))),
+			WTFT_PI_SESSIONS_DIR: opts.pi ?? fs.realpathSync(trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-nopi-")))),
 		},
 	});
 }
@@ -72,8 +72,8 @@ function run(args: string[], opts: { cwd: string; claudeProjects: string; pi?: s
 // ---
 console.log("\n=== E4: no -s, zero candidates in the default scope → exit 10 ===\n");
 {
-	const target = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e4-zero-")));
-	const projects = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e4-zero-proj-")));
+	const target = fs.realpathSync(trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e4-zero-"))));
+	const projects = fs.realpathSync(trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e4-zero-proj-"))));
 	// Nothing written for `target`'s slug at all.
 	const r = run(["-l", "5"], { cwd: target, claudeProjects: projects });
 	check(r.status === EXIT_SESSION_AMBIGUOUS, `E4: exit is ${EXIT_SESSION_AMBIGUOUS} (got ${r.status})`);
@@ -88,8 +88,8 @@ console.log("\n=== E4: no -s, zero candidates in the default scope → exit 10 =
 // ---
 console.log("\n=== E4: no -s, one candidate in the default scope → exit 10 ===\n");
 {
-	const target = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e4-one-")));
-	const projects = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e4-one-proj-")));
+	const target = fs.realpathSync(trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e4-one-"))));
+	const projects = fs.realpathSync(trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e4-one-proj-"))));
 	writeSession(path.join(projects, slugOf(target), "e4-only.jsonl"), "e4only", target);
 
 	const r = run(["-l", "5"], { cwd: target, claudeProjects: projects });
@@ -104,8 +104,8 @@ console.log("\n=== E4: no -s, one candidate in the default scope → exit 10 ===
 // ---
 console.log("\n=== E4: no -s, several candidates in the default scope → exit 10 ===\n");
 {
-	const target = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e4-several-")));
-	const projects = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e4-several-proj-")));
+	const target = fs.realpathSync(trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e4-several-"))));
+	const projects = fs.realpathSync(trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e4-several-proj-"))));
 	const slug = slugOf(target);
 	writeSession(path.join(projects, slug, "e4-a.jsonl"), "e4a", target);
 	writeSession(path.join(projects, slug, "e4-b.jsonl"), "e4b", target);
@@ -124,8 +124,8 @@ console.log("\n=== E4: no -s, several candidates in the default scope → exit 1
 // ---
 console.log("\n=== E3: -s matches several, no TTY → exit 10 ===\n");
 {
-	const target = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e3-several-")));
-	const projects = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e3-several-proj-")));
+	const target = fs.realpathSync(trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e3-several-"))));
+	const projects = fs.realpathSync(trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e3-several-proj-"))));
 	const slug = slugOf(target);
 	writeSession(path.join(projects, slug, "e3-shared-one.jsonl"), "e3a", target);
 	writeSession(path.join(projects, slug, "e3-shared-two.jsonl"), "e3b", target);
@@ -143,8 +143,8 @@ console.log("\n=== E3: -s matches several, no TTY → exit 10 ===\n");
 // ---
 console.log("\n=== E3 + --json: exit 10, stdout carries NOTHING ===\n");
 {
-	const target = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e3json-")));
-	const projects = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e3json-proj-")));
+	const target = fs.realpathSync(trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e3json-"))));
+	const projects = fs.realpathSync(trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-89-e3json-proj-"))));
 	const slug = slugOf(target);
 	writeSession(path.join(projects, slug, "e3j-one.jsonl"), "e3j1", target);
 	writeSession(path.join(projects, slug, "e3j-two.jsonl"), "e3j2", target);

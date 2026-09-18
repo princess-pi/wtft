@@ -1131,7 +1131,7 @@ async function main() {
 	 *  once the memo landed: the body calls the cache, and `discoverSubagentSessionFiles`
 	 *  does considerably more than a readdir (it walks the subtree and reads the
 	 *  parent transcript whole for the Pattern-2 header check). The memo exists
-	 *  precisely so that cost is paid once and both callers describe the same
+	 *  precisely so that cost is paid once and every caller describes the same
 	 *  filesystem (#137 review rounds 1 and 2).
 	 *
 	 *  A discovery failure is reported by OMITTING the key, not by an empty list —

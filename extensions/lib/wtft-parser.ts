@@ -1285,19 +1285,18 @@ function parseSubagentMeta(raw: string): SubagentMeta | null {
 	return meta;
 }
 
-/** The first `count` lines of `file`, read in bounded chunks rather than
- *  whole — a header check needs nothing past them, and a transcript can be
- *  hundreds of MB (#147). Throws on a read failure, like `readFileSync`.
- *  Reads at most `cap` bytes; a longer head is returned cut at `cap`. */
-function readHeadLines(file: string, count: number, cap = 1024 * 1024): string[] {
+/** The first `count` lines of `file`, read in chunks that stop once those
+ *  lines are in — a header check needs nothing past them, and a transcript
+ *  can be hundreds of MB (#147). Throws on a read failure, like `readFileSync`. */
+function readHeadLines(file: string, count: number): string[] {
 	const fd = fs.openSync(file, "r");
 	try {
 		const chunk = Buffer.alloc(64 * 1024);
 		const parts: Buffer[] = [];
 		let total = 0;
 		let newlines = 0;
-		while (total < cap && newlines < count) {
-			const n = fs.readSync(fd, chunk, 0, Math.min(chunk.length, cap - total), total);
+		while (newlines < count) {
+			const n = fs.readSync(fd, chunk, 0, chunk.length, total);
 			if (n === 0) break;
 			const got = chunk.subarray(0, n);
 			for (let i = got.indexOf(0x0a); i !== -1 && newlines < count; i = got.indexOf(0x0a, i + 1)) newlines++;

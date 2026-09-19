@@ -178,10 +178,7 @@ function addTotals(into: TokenTotals, from: TokenTotals): void {
 	}
 }
 
-/** The `claude -p` sessions `parseSessionFile` folded into these interactions.
- *  The ids `collectSelfAttributedSessionIds` also finds by directory (Task
- *  children, Pi siblings) are loaded by the caller for the root alone, so they
- *  are inside no descendant's total. */
+/** The `claude -p` sessions `parseSessionFile` folded into these interactions. */
 function parseFoldedIds(interactions: Interaction[]): Set<string> {
 	const ids = new Set<string>();
 	for (const interaction of interactions) {

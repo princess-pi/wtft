@@ -6,7 +6,7 @@
  * get the Claude projects root from `projectsDir()`, so
  * `WTFT_CLAUDE_PROJECTS_DIR` redirects all three. Part A folds a `claude -p`
  * child through the override; Part B fails on a second production file that
- * spells out the `.claude`, `projects` path.
+ * contains the literal `".claude", "projects"` pair.
  *
  * Run:  bun tests/wtft-129-projects-root.test.ts
  */
@@ -88,7 +88,7 @@ const rederivers = [...sourcesUnder(path.join(repo, "extensions")), ...sourcesUn
 	.filter(file => /["']\.claude["']\s*,\s*["']projects["']/.test(fs.readFileSync(file, "utf8")))
 	.map(file => path.relative(repo, file));
 check(rederivers.join() === "extensions/lib/harness/claude-code/discovery.ts",
-	`B1 in extensions/ and bin/, only the harness seam spells out the projects root (got ${JSON.stringify(rederivers)})`);
+	`B1 in extensions/ and bin/, only the harness seam contains the literal ".claude", "projects" pair (got ${JSON.stringify(rederivers)})`);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

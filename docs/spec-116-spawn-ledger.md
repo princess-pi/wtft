@@ -177,9 +177,9 @@ reintroduced inside #116's fix. An *absent* ledger is not an error: nothing has 
   `spawned.total`. The walk also treats as self-attributed the `claude -p` sessions each `alreadyAttributed`
   member folded in, and marks the ones each resolved descendant folded in, by resolving and
   parsing them; that closure is not bounded by the depth cap, and a member that cannot be
-  resolved (a Task child) adds nothing deeper. Sessions found only by directory (Task
-  children, Pi siblings of a descendant) are inside no descendant's total, so their own edges are
-  priced.
+  resolved (a Task child) adds nothing deeper. A session found only by directory (a Pi
+  sibling of a descendant) that the parse did not fold is inside no descendant's total, so its own
+  edge is priced.
 
 ## What gets reported
 

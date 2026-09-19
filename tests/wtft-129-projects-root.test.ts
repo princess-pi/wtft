@@ -2,10 +2,11 @@
 /**
  * tests/wtft-129-projects-root.test.ts — one definition of the projects root (#129)
  *
- * Every reader of the Claude projects root calls `projectsDir()`, so
- * `WTFT_CLAUDE_PROJECTS_DIR` redirects `claude -p` sub-agent discovery as well
- * as session lookup. Part A folds a `claude -p` child through the override;
- * Part B keeps a second production reader from re-deriving the path.
+ * `claude -p` sub-agent discovery, session lookup and the Token Budget scan
+ * get the Claude projects root from `projectsDir()`, so
+ * `WTFT_CLAUDE_PROJECTS_DIR` redirects all three. Part A folds a `claude -p`
+ * child through the override; Part B fails on a second production file that
+ * spells out the `.claude`, `projects` path.
  *
  * Run:  bun tests/wtft-129-projects-root.test.ts
  */

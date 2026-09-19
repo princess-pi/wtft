@@ -2281,7 +2281,8 @@ const rows: string[] = [];
 
 	// Two different units, named as such. `descendants` counts SESSIONS priced;
 	// `edges.length` counts EDGES, and a diamond, a cycle, an in-self child, a
-	// folded session and a depth cut each add an edge without adding a session. "N of M sessions"
+	// session known only through a descendant's fold, and a depth cut each add
+	// an edge without adding a session. "N of M sessions"
 	// made the denominator claim to measure something it does not.
 	let out = `\nSPAWNED    ${spawned.descendants} session(s) priced from ${spawned.edges.length} recorded edge(s) (#116) —\n`;
 	out += `           NOT in TOTAL above, which is this session's own turns\n`;

@@ -11,11 +11,11 @@
  *   grandchild is inside the root's self total although the root's own turn
  *   names only the child. Its ledger edge reports `in-self-total` and adds
  *   nothing, whichever order the edges sit in.
- * Part B (#131) — a resolved descendant's parse folds in a session, so that
- *   session's money is in `spawned.total` and its edge reports
- *   `already-counted`, never `in-self-total` (which means "inside `total`").
- *   Both orders: the walk reaches the folded session after its descendant
- *   (marked, then skipped) and before it (subtracted from the descendant).
+ * Part B (#131) — a resolved descendant's parse folds in a session, whose
+ *   money is therefore in `spawned.total`. Reached after its descendant, the
+ *   session's edge reports `already-counted`, never `in-self-total` (which means
+ *   "inside `total`"); reached before, it is priced under its own edge and
+ *   subtracted from the descendant. Either order counts it once.
  *
  * Run:  bun tests/wtft-131-132-spawn-tree-accounting.test.ts
  */

@@ -173,10 +173,11 @@ reintroduced inside #116's fix. An *absent* ledger is not an error: nothing has 
   folds recursively), a Task child under `<session>/subagents/` (#82/#83), or the reported
   session itself reached round a cycle. It is reported and never added, because billing twice is
   the expensive direction to be wrong in. `already-counted` is the same claim about the tree's
-  own total, and covers a session a resolved descendant's parse folded in: its money is in
+  own total, and covers a `claude -p` session a resolved descendant's parse folded in: its money is in
   `spawned.total`. The walk widens the caller's `alreadyAttributed` set, and each resolved
-  descendant's fold set, by resolving and parsing every member and everything it folded in; that
-  closure is not bounded by the depth cap.
+  descendant's fold set, by resolving and parsing every member and the `claude -p` sessions it
+  folded in; that closure is not bounded by the depth cap, and a Task child's transcript is not
+  resolvable by id, so it adds nothing deeper.
 
 ## What gets reported
 
@@ -239,8 +240,8 @@ TREE       TOTAL + SPAWNED                                 $127.36
 
 **Every edge gets a row, skipped ones included** — the headline's two numbers agree with the rows
 by construction, and they are deliberately in different units: sessions *priced*, from edges
-*recorded*. A diamond, a cycle, an in-self child, a session a resolved descendant's parse folded in, and a
-depth cut each add an edge without adding a session.
+*recorded*. A diamond, a cycle, an in-self child, a session known only through a resolved descendant's parse
+fold, and a depth cut each add an edge without adding a session.
 
 A skipped edge prints its **reason** where its cost would be. A dash or a `$0.00` would both read
 as "this child was free", which is the one thing we do not know about it. The last three
@@ -314,9 +315,10 @@ and to `--json`. The THREE chmod-000 cases — C21 (unreadable ledger), C24 (unr
 D23 (the rendered ledger error) — skip **visibly** when the process can read such a file.
 `tests/wtft-131-132-spawn-tree-accounting.test.ts` pins the fold accounting: a grandchild folded in
 two levels down is billed once under four ledger orders, and a session folded into a resolved
-descendant reports `already-counted` with the descendant's total net of it, in both orders.
+descendant is counted once in both orders: reported `already-counted` when the descendant is
+reached first, subtracted from the descendant's total when its own edge is.
 `tests/wtft-129-projects-root.test.ts` pins that a parse folds a `claude -p` child found under
-`WTFT_CLAUDE_PROJECTS_DIR`.
+`WTFT_CLAUDE_PROJECTS_DIR`, and that no second production reader re-spells the projects root.
 
 ## Not in this change
 

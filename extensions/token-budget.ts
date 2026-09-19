@@ -13,7 +13,6 @@ import { projectsDir } from "./lib/harness/claude-code/discovery.ts";
 // ---
 
 const HOME = os.homedir();
-const CLAUDE_DIR = projectsDir();
 const PI_DIR = path.join(HOME, ".pi", "agent", "sessions");
 const COFFEE_FILE = "/tmp/pi-rate-limit-coffee.json";
 
@@ -190,7 +189,7 @@ function findActiveSessionFiles(): FileInfo[] {
   // Pi sessions dir contains per-session subdirs, each with a wtft-tags/ subdir
   scanDir(PI_DIR);
   // Claude Code projects dir contains per-project subdirs, each with session subdirs
-  scanDir(CLAUDE_DIR);
+  scanDir(projectsDir());
 
   return activeFiles;
 }

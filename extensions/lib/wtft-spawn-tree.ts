@@ -44,7 +44,8 @@ export type SpawnEdgeSkip =
 	 *  rather than a fact — the others describe the ledger or the walk. */
 	| "unreadable"
 	/** Already counted elsewhere in this tree (a diamond, a cycle among
-	 *  descendants, or a session a resolved descendant's parse folded in). Its
+	 *  descendants, or a `claude -p` session a resolved descendant's parse folded
+	 *  in). Its
 	 *  money IS in the tree's `total`; this edge is the second way in. */
 	| "already-counted"
 	/** Reached before, and that visit could not read it. Distinct from
@@ -97,9 +98,9 @@ export interface SpawnTreeGap {
 export interface SpawnTree {
 	schema: typeof SPAWN_TREE_SCHEMA;
 	/** Sessions priced from their own file, each once. Fewer than `edges.length`
-	 *  whenever an edge was skipped, whatever its `skip`. A session a resolved
-	 *  descendant's parse folded in is inside that descendant's total and is not
-	 *  counted here. */
+	 *  whenever an edge was skipped, whatever its `skip`. A session known only
+	 *  through a resolved descendant's parse fold is inside that descendant's
+	 *  total and is not counted here. */
 	descendants: number;
 	edges: SpawnTreeEdge[];
 	/** Edges recorded whose cost could not be read — the lookup found nothing
@@ -146,8 +147,9 @@ export interface SpawnTreeOptions {
 	 *  parent's own turns name (#138) and the Task children under
 	 *  `<session>/subagents/` (#82/#83) — the two mechanisms that fold a child
 	 *  into the parent before this walk ever runs. The walk widens the set
-	 *  itself: it resolves and parses each member to exclude whatever that
-	 *  member folded in too. */
+	 *  itself: it resolves and parses each member to exclude the `claude -p`
+	 *  sessions that member folded in too. A Task child's transcript is not
+	 *  resolvable by id, so it adds nothing deeper. */
 	alreadyAttributed?: Set<string>;
 }
 
@@ -313,9 +315,9 @@ export function computeSpawnTree(
 	// set of ids already queued, so a seeded `in-self` id is descended into
 	// exactly once however many edges point at it.
 	//
-	// `in-self` is money inside the caller's `total`; `folded` is money inside a
-	// resolved descendant's total, so inside the tree's. Both add nothing when
-	// their own edge is reached, and they report different buckets.
+	// `in-self` is money inside the caller's `total`; `folded` is a `claude -p`
+	// session inside a resolved descendant's total, so inside the tree's. Both
+	// add nothing when their own edge is reached, and they report different totals.
 	type Outcome = "counted" | "unresolved" | "in-self" | "folded";
 	const outcomeOf = new Map<string, Outcome>([[rootSessionId, "in-self"]]);
 	const foldCache = new Map<string, Set<string>>();
@@ -471,8 +473,7 @@ export function computeSpawnTree(
 }
 
 /** `self + descendants`, as a value, so a consumer never adds two numbers and
- *  guesses whether it double-counted. Starts from `emptyTotals()`, so the result
- *  carries no `untaggedCostUsd`. */
+ *  guesses whether it double-counted. */
 export function treeTotals(self: TokenTotals, tree: SpawnTree): TokenTotals {
 	const out = emptyTotals();
 	addTotals(out, self);

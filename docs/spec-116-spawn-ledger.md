@@ -169,9 +169,12 @@ reintroduced inside #116's fix. An *absent* ledger is not an error: nothing has 
   `unattributed`. `already-seen-unresolved` exists because `already-counted` asserts the money
   landed, which is false for a second edge onto a child the first visit could not read.
   `in-self-total` is a child whose cost is already inside `total` — a `claude -p` child the
-  parent's own turn names (#138), a Task child under `<session>/subagents/` (#82/#83), or the
-  reported session itself reached round a cycle. It is reported and never added, because billing
-  twice is the expensive direction to be wrong in.
+  parent's own turn names (#138) or one that child folded in at any depth (`parseSessionFile`
+  folds recursively), a Task child under `<session>/subagents/` (#82/#83), or the reported
+  session itself reached round a cycle. It is reported and never added, because billing twice is
+  the expensive direction to be wrong in. `already-counted` is the same claim about the tree's
+  own total, and covers a session a resolved descendant's parse folded in: its money is in
+  `spawned.total`, so it is never `in-self-total`.
 
 ## What gets reported
 
@@ -546,8 +549,8 @@ and the tempting move was to relax the assertion.
 | Finding | Where it goes |
 |---|---|
 | The Closer's second clause — an unrecorded child is dropped, not listed as unattributed | **#128**, declared in this spec, needs a direction chosen |
-| `in-self-total` reported for an id folded into a DESCENDANT, where the money is in `spawned.total` rather than in `total` | Needs a decision: a seventh skip value, or a narrower contract for the existing one |
-| An `in-self` child is queued but never parsed, so a grandchild it folded in could be billed twice | Unverified assumption about how deep `attributeClaudeSubAgentCosts` folds; #129 blocks the test |
+| `in-self-total` reported for an id folded into a DESCENDANT, where the money is in `spawned.total` rather than in `total` | **#131** — decided B: the id reports `already-counted`; fixed |
+| An `in-self` child is queued but never parsed, so a grandchild it folded in could be billed twice | **#132** — verified: the fold is recursive, so it was billed twice; the walk now closes both fold sets transitively |
 | A live descendant is priced from a one-shot parse and reported as settled, with no `provisional` | Semantics to pin down; no field currently says the tree may still grow |
 | Self-attribution discovery runs eagerly even when the ledger holds no edges for the session | Advisory, performance only |
 | The widget swallows spawn-tree throws into a silence identical to "spawned nothing" | Advisory; the CLI reports `ledgerError`, the widget does not |
@@ -598,8 +601,8 @@ rather than spec sections so they can be listed, assigned and closed.
 | Finding | Issue |
 |---|---|
 | The Closer's second clause: an unrecorded child is invisible, not unattributed | **#128** — Duppy picks the direction |
-| `in-self-total` names `total` when the money is in `spawned.total` | **#131** — Duppy picks A or B |
-| A double-count guard that misses ids already marked `in-self`, from `alreadyAttributed` or from an earlier descendant | **#132** — Princess Pi, blocked on #129 |
+| `in-self-total` names `total` when the money is in `spawned.total` | **#131** — fixed: decided B |
+| A double-count guard that misses ids already marked `in-self`, from `alreadyAttributed` or from an earlier descendant | **#132** — fixed: both fold sets are closed transitively |
 | A live descendant priced from a one-shot parse and reported as settled | **#133** — Duppy |
 | The widget's silent failure, and eager discovery on the no-edge path | **#134** — Princess Pi |
 | The in-self set re-derived at CLI time and compared against a total the daemon folded earlier; and the pending arm re-deriving what `pending` was meant to freeze | **#135** — Princess Pi |

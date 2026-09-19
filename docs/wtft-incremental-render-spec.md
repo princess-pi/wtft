@@ -402,11 +402,11 @@ evidence, and a permanent unreadability also blocks the daemon's rebuild, so the
 tag-derived reasons cannot be trusted to point at an action that ends the loop.
 The TUI's degrade (main-interactions-only) has no exit surface — its reader is the
 interactive widget, and the widget appends a yellow warning line, "some transcripts
-unreadable — total is provisional", whenever discovery reports an unreadable
-transcript (round 10): the extension's stderr is not a user surface, so the
-parser's latched stderr warning alone left the degrade invisible. The prose line
-stays the whole surface — the warning appears on every render until readability
-returns, and the widget has no exit code to set.
+could not be counted — total is provisional", whenever discovery reports an
+unreadable transcript OR the load drops one (#165): the extension's stderr is not
+a user surface, so the parser's latched stderr warning alone left the degrade
+invisible. The prose line stays the whole surface — it appears on every render
+until the transcripts count again, and the widget has no exit code to set.
 
 The remedy line names **one** action — re-run — and deliberately never mentions `-F`.
 `-F` does not return early: it deletes the tag, kills the daemon, and falls through to the

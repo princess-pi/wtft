@@ -677,19 +677,10 @@ one set lookup. The relocation records are still IN the transcripts; nothing rea
 The tail windows widen; 512 KB is the last window, not a prelude to a whole-file read.
 A transcript with no `cwd` in its last 512 KB resolves null. The widening loop reads
 only the newly exposed prefix (bytes once). Remaining discovery cost scales with the
-corpus, not the candidate count.
+corpus, not the candidate count. #89 took folder-name scope instead of an on-disk index.
 
-Both are the same cost: what remains scales with the corpus, and only an on-disk index removes it —
-`~/.cache/wtft/cwd-index.jsonl` keyed `(path, mtimeMs, size)`, scanning only bytes appended since
-the recorded size. That is the issue BODY's direction **A**, and "I" in its 2026-09-15 comment;
-the two letter schemes are not the same and this amendment uses both names deliberately, because
-the issue does. The decision on record is to build it only if the experience is still slow after
-this deletion. It is. **#89 stays open**; this branch does not close it.
-
-**Resolved by #89's decision (2026-09-18): no on-disk index.** The picker opens on a
-folder-name scope instead, which meets both criteria (V11g; `debug/count-picker.ts` prints the
-`picker` path with 0 reads; one run on this host took 10 ms). The unscoped path above is unchanged and is
-what `-s` still searches.
+**Resolved by #89: no on-disk index.** The picker opens on a folder-name scope instead.
+The unscoped path above is unchanged and is what `-s` still searches.
 
 **The one shape given up.** A session filed under a project slug that is not a checkout of the
 target, reachable only through its relocation history, is no longer listed. Zero such sessions

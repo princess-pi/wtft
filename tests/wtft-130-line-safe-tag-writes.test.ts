@@ -1075,8 +1075,6 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	// timestamp — same width, same file size. So the window straddled a line
 	// that mutates by design, mismatched on every beat, and an idle watch
 	// re-seeded: a whole-file re-read and re-parse of a file that gained
-	// nothing. 8 MB, 644,312
-	// lines): 585 ms per re-seed against a 667 ms beat.
 	//
 	// The fixture writes a REAL heartbeat, the shape `upsertHeartbeat` writes,
 	// and beats it the way the daemon does — a same-width in-place write, never

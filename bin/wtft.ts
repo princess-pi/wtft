@@ -134,7 +134,7 @@ import {
 	DEFAULT_MAX_DEPTH,
 	type SpawnTree,
 } from "../extensions/lib/wtft-spawn-tree.ts";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { loadConfig, readConfig } from "@princess-pi/libs/config";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "../extensions/lib/wtft-config-dir.ts";
 import {
@@ -334,7 +334,7 @@ export {
 /** Succeeded, but the printed total may still grow (distinct from exit 1 = failed). */
 export const EXIT_PROVISIONAL = 9;
 
-/** No interactive terminal, and `-s` / default scope did not match exactly one session. */
+/** No interactive terminal, and selection was not an exact `-s` match. */
 export const EXIT_SESSION_AMBIGUOUS = 10;
 
 // ---
@@ -476,7 +476,7 @@ async function main() {
 		if (opts.daemonRestart) daemonArgs.push("--restart");
 		if (opts.daemonStop) daemonArgs.push("--stop", opts.daemonStop);
 		try {
-			const result = execSync(`${process.execPath} ${daemonArgs.join(" ")}`, {
+			const result = execFileSync(process.execPath, daemonArgs, {
 				encoding: "utf8",
 				timeout: 10000
 			});

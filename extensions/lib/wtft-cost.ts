@@ -1,16 +1,4 @@
-/**
- * Pure cost calculation for model token pricing.
- *
- * A rate resolves through three mechanisms. The entry's own unconditioned
- * quad is the floor; a dated window (`dateTiers`) replaces it for a turn old
- * enough to reach one; an input-size tier (`tiers`) then replaces all four
- * fields of whatever that produced — size outranks date (see
- * `resolveTieredRates`). DeepSeek rates also carry a peak-valley surge
- * multiplier. web_search and web_fetch are billed per request, not per token.
- *
- * Pi's built-in usage.cost.total is authoritative when available — this
- * module is the fallback for models where Pi doesn't track cost.
- */
+/** Pure cost calculation for model token pricing. */
 
 // ---
 // TYPES

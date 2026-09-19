@@ -1,5 +1,4 @@
-// tests/tagger-version-single-source.test.ts — the tagger version has exactly one
-// definition (#499, gate E). Single source; everything imports.
+// The tagger version has exactly one definition. Everything imports it.
 
 import * as fs from "fs";
 import * as path from "path";

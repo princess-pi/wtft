@@ -371,9 +371,7 @@ export function ensureDaemonRunning(sessionPath: string, daemonDir: string): boo
 export function getDaemonStatus(sessionPath: string): DaemonStatus {
 	if (!_daemonSessionPath) return { alive: false, reason: "not-started" };
 
-	// Brief window where the daemon was spawned and hasn't claimed the PID
-	// file yet — if the session file doesn't exist, report "waiting-session"
-	// instead of "starting" → "not-found".
+	// Alive with no session file yet: daemon is polling.
 	let sessionExists = false;
 	try { sessionExists = fs.existsSync(sessionPath); } catch {}
 

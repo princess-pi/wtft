@@ -4,10 +4,10 @@
  * The project-dir slug is assigned when a session starts and never revised.
  * Walk backwards from the tail to the first entry with a `cwd`. Every read is
  * a bounded tail read ({@link TAIL_WINDOWS}); {@link getCwdBytesRead} is the
- * test seam. Default picker scope `"worktree"` never calls this — only
- * `"worktrees"` (Ctrl+W) does, and then only for transcripts that do not
- * already physically match. A transcript outside the active time window is
- * skipped with one `fs.statSync` first.
+ * test seam. Default picker scope `"worktree"` never calls this. `"worktrees"`
+ * (Ctrl+W) does, for transcripts that do not already physically match, as
+ * does unscoped discovery (`discoverLegacy`, and CLI fuzzy `-s`). A transcript
+ * outside the active time window is skipped with one `fs.statSync` first.
  */
 
 import * as fs from "node:fs";

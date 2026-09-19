@@ -15,7 +15,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { parseSessionFile, discoverClaudeSubAgentSessionFiles } from "../extensions/lib/wtft-parser.ts";
+import { parseSessionFile, discoverClaudeSubAgentSessionFiles, collectSelfAttributedSessionIds } from "../extensions/lib/wtft-parser.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("129-projects-root");
@@ -105,6 +105,10 @@ const bothFound = discoverClaudeSubAgentSessionFiles(dottedCwd, T0);
 check(bothFound.unreadable === null
 	&& bothFound.files.map(f => path.basename(f, ".jsonl")).sort().join() === [DOTTED_CHILD, SEPARATOR_ONLY_CHILD].sort().join(),
 	`A6 with a child under each slug variant, discovery returns both (got ${JSON.stringify(bothFound.files.map(f => path.basename(f)))})`);
+
+const tagFileShaped = parseSessionFile(dottedParent).map(i => { delete (i as any).claudeSubAgentSessionIds; return i; });
+check(collectSelfAttributedSessionIds(dottedParent, tagFileShaped).has(DOTTED_CHILD),
+	"A7 collectSelfAttributedSessionIds, on interactions carrying no recorded ids, discovers the dotted child too");
 
 // ---
 // PART B — no second reader re-derives the root

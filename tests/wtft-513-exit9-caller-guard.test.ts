@@ -144,12 +144,7 @@ for (const code of [0, WTFT_EXIT_PROVISIONAL]) {
 	assert(`runWtftCli returns for exit ${code}`, !threw);
 }
 
-// The return type must be a real string on BOTH paths A first cut
-
-// spread caller options after `encoding: "utf8"`, so a caller could override it
-// and get a Buffer typed as a string; the success and provisional paths then
-// disagreed for the same input. `encoding` is now pinned and off the signature,
-// so this asserts the property the type claims.
+// `encoding` is pinned so a caller cannot override it to a Buffer.
 {
 	const provisional = runWtftCli(cmd, { timeout: 60_000 });
 	const clean = runWtftCli(`${process.execPath} -e 'process.stdout.write("plain")'`, { timeout: 30_000 });

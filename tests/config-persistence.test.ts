@@ -113,7 +113,7 @@ function readConfigFile(): Record<string, unknown> {
 // A session of our own to read (#32).
 //
 // Explicit two-turn session plus empty roots for both harnesses. Own XDG root
-// AND own corpus: without them a clean checkout finds no sessions and exits 1.
+// AND own corpus: without them a clean checkout finds no sessions.
 // `-s` naming an existing file short-circuits discovery; the empty roots keep
 // a fallen-through `-s` from finding the developer's corpus.
 // ---

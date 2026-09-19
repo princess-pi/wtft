@@ -93,9 +93,7 @@ const run = (args: string, env: NodeJS.ProcessEnv, timeout = 30_000) => {
 
 /** Median of three, so one scheduler hiccup cannot decide the verdict.
  *
- * Every run's exit code is checked, not just its duration A ratio
-
- *  says nothing on its own: if a regression made `-s` fail fast under BOTH
+ *  A duration ratio says nothing on its own: if a regression made `-s` fail fast under BOTH
  *  corpora, both medians would be small and roughly equal, `ratio < 2` would
  *  hold, and this suite would certify the very contract it exists to protect
  *  while the command underneath was broken. `ok` is what stops a fast failure

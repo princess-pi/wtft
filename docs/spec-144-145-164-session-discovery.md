@@ -396,10 +396,8 @@ it guards is "this module has exactly one read call", which no exported interfac
 - **V8** — Pi shape unaffected: a transcript with no `cwd` resolves to `null` from
   `resolveLastCwd` and contributes nothing to any target. (The history half of this assertion
   went with `resolveCwdHistory`.)
-- **V9** — *restated as a bound, not a gate.* There is no longer a gate to hold: a dead cwd costs
-  what a live one costs. `getCwdBytesRead() <= getCwdReadCount() * 512 KB` after
-  `discoverSessions("claude-code", clone)`, with `getCwdReadCount() > 0` confirming the tail scan
-  ran at all. Bytes rather than scans, because a scan counter that can only read 0 guards nothing.
+- **V9** — a dead cwd costs what a live one costs. Each read is bounded by the last
+  tail window; the suite pins an absolute byte budget, not a per-read identity.
 - **V10** — display renders under the **physical** slug, the directory the session started in.
   The "prefer the most recent still-existing directory" rewrite went with the whole-file read that
   produced it.
@@ -627,44 +625,22 @@ generated `bin/*.mjs`. **#168** (typecheck red on clean main) predates this bran
 
 # Amendment 1 (#89) — the relocation arm is deleted
 
-**What it cost.** Every figure below comes from ONE measurement pass, 2026-09-16, so the
-denominators reconcile. An earlier draft of this amendment mixed two runs a day apart and its
-numbers did not add up — 6,637 against 6,952, and a "6,897 transcripts" that matched neither.
+**What it cost.** The relocation arm whole-file-read every transcript hunting for
+`"relocated"` records. A transcript with no such record cannot produce a directory the
+tail scan had not already produced.
 
-**The corpus** (one walk, `~/.claude/projects`, after `SKIP_DIRS`): **7,287 transcripts · 2.51 GB ·
-1,944 project dirs**, of which **42** contain a `"type":"relocated"` record.
+**What it bought.** The history arm contributed no extra candidates. Two structural facts:
 
-**Per launch, before the deletion** (`debug/count-picker.ts`, warm pages, `discoverSessions("auto")`
-so both harnesses run):
+- **A read of a transcript with no relocation record cannot produce a new directory.**
+- **The physical arm already covers the shape.** Claude Code files a transcript under the
+  directory its session started in, and a session usually starts in the main clone before
+  it enters a worktree, so the physical slug plus the fan-out already reaches it.
+  The history arm contributed no extra candidates; candidate lists before and after
+  the deletion are identical.
 
-| cwd | candidates | warm ms | tail reads | whole-file reads |
-|---|---:|---:|---:|---:|
-| `~/git-projects/wtft` | 10 | 4,276 | 14,443 | **6,952** |
-| `~/git-projects/princess-pi-tools` | 88 | 3,901 | 14,421 | **6,952** |
-| `~` | 153 | 3,721 | 14,050 | **6,952** |
-
-Cold, on a quiet machine, the same scan measured 34,850 ms.
-
-**What it bought.** Split per candidate, the history arm contributed **0** of them, for all three
-cwds. Two facts explain why, and both are structural rather than incidental:
-
-- **Relocations are rare.** **42** of the corpus's 7,287 transcripts carry a `"type":"relocated"`
-  record at all. So of the 6,952 whole-file reads a launch performed, **at most 42 could match
-  anything** and at least 6,910 were reading files with nothing in them to match against. That is
-  the ceiling, not an estimate: a read of a transcript with no relocation record cannot produce a
-  directory the tail scan had not already produced.
-- **The physical arm already covers the shape — measured, not proved.** Claude Code files a
-  transcript under the directory its session STARTED in, and a session *usually* starts in the main
-  clone before it enters a worktree, so the physical slug plus the #145 fan-out already reaches it.
-  Measured per arm, the history arm contributed **0** candidates for all three cwds; and the
-  candidate lists before and after the deletion are **identical** (10 / 88 / 153), which is the
-  direct evidence rather than the argument for it.
-
-  **It is not universal, and the exception is conceded below.** A session that started *inside* a
-  worktree is filed under that worktree's slug; once the worktree is gone, only its relocation
-  history connected it to the clone. The corpus holds 101 `*-claude-worktrees-*` slugs, so the
-  shape is reachable — it simply had no member that the physical arm missed on the day this was
-  measured. V6 in the suite constructs one and asserts it is not found.
+  **It is not universal.** A session that started *inside* a worktree is filed under
+  that worktree's slug; once the worktree is gone, only its relocation history
+  connected it to the clone. V6 in the suite constructs one and asserts it is not found.
 
 The #158 failure this section was written for is therefore real, and was already fixed by the
 physical arm plus the fan-out — the history arm was answering a question nobody was asking.

@@ -146,8 +146,6 @@ console.log("--- TEST 0: the gate is not vacuous ---");
 // — the model ages out of the server-tool card, the argument order changes, the
 // parser stops populating serverToolCost — every one of them holds trivially
 // with the divergence fully restored, and the suite exits 0 reporting success.
-// AGAINST THE TOLERANCE IT PROTECTS, not against zero The chart and
-
 // TOTAL figures are scraped from `formatCost` at two decimals and compared at
 // half a cent, so a charge below a cent leaves TEST 2 and TEST 2b holding
 // trivially with the divergence fully restored — and TEST 2 is the exact
@@ -226,9 +224,8 @@ console.log("--- TEST 3b: the WARM path, which is what a user actually hits ---"
 const warmFixture = path.join(dir, "warm.jsonl");
 fs.copyFileSync(withWeb, warmFixture);
 
-// SYNCHRONISED, or it proves nothing Back-to-back runs with exit 9
-
-// tolerated can all three read a session whose tag file does not exist yet —
+// Back-to-back runs with exit 9 tolerated can all three read a session whose
+// tag file does not exist yet —
 // three COLD runs, reporting coverage of a warm path that never ran. So the
 // first run primes, and the warm runs wait for the tag file to actually carry a
 // classified line before they are allowed to mean anything.
@@ -301,9 +298,7 @@ check(
 	Math.abs(webCat(docUntagged).costUsd - EXPECTED_WEB_COST) < 1e-9,
 	"…the tagged turn's server-tool cost still lands in `web`"
 );
-// SAME POPULATION, or the check is vacuous Compared against
-
-// `docWeb` it was already lower by a whole extra tagged turn, with slack wider
+// Compared against `docWeb` it was already lower by a whole extra tagged turn, with slack wider
 // than the untagged turn's own cost — so it passed whether that cost was
 // excluded (the behaviour under test) or fully included. The control is the
 // identical fixture with its third turn TAGGED: the only difference between the

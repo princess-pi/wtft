@@ -147,9 +147,8 @@ describe("#169 every priced model reaches the manifest", () => {
 		// It checks ASSOCIATION, not membership. A first version collected every
 		// DeepSeek instant into a set and asked whether each date in the note was
 		// in it — which passes when the two dates are SWAPPED, or when one is
-		// replaced by another real cutover, because every candidate is in the set
-		//. What the note actually claims is that a specific
-		// event happened to a specific model, so that is what is asserted.
+		// replaced by another real cutover, because every candidate is in the set.
+		// The note claims a specific event happened to a specific model.
 		const m = buildPricingManifest();
 		const note = m.deepseekSurge.note;
 

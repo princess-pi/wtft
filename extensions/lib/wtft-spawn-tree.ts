@@ -13,7 +13,7 @@
 
 import { readSpawnLedger, type SpawnLedger } from "./wtft-spawn-ledger.js";
 import { getDiscoveries } from "./harness/registry.js";
-import { parseSessionFile, collectSelfAttributedSessionIds } from "./wtft-parser.js";
+import { parseSessionFile, type Interaction } from "./wtft-parser.js";
 import { computeSessionSummary, emptyTotals, type TokenTotals } from "./wtft-renderer.js";
 
 /** Bumped when the reported tree's shape changes. */
@@ -146,10 +146,9 @@ export interface SpawnTreeOptions {
 	 *  must not add them again. The CLI passes the `claude -p` children the
 	 *  parent's own turns name (#138) and the Task children under
 	 *  `<session>/subagents/` (#82/#83) — the two mechanisms that fold a child
-	 *  into the parent before this walk ever runs. The walk widens the set
-	 *  itself: it resolves and parses each member to exclude the `claude -p`
-	 *  sessions that member folded in too. A Task child's transcript is not
-	 *  resolvable by id, so it adds nothing deeper. */
+	 *  into the parent before this walk ever runs. The walk also treats as
+	 *  self-attributed the `claude -p` sessions each member folded in, found by
+	 *  resolving and parsing it. */
 	alreadyAttributed?: Set<string>;
 }
 
@@ -178,6 +177,19 @@ function addTotals(into: TokenTotals, from: TokenTotals): void {
 	}
 }
 
+/** The `claude -p` sessions `parseSessionFile` folded into these interactions.
+ *  The ids `collectSelfAttributedSessionIds` also finds by directory (Task
+ *  children, Pi siblings) are loaded by the caller for the root alone, so they
+ *  are inside no descendant's total. */
+function parseFoldedIds(interactions: Interaction[]): Set<string> {
+	const ids = new Set<string>();
+	for (const interaction of interactions) {
+		const folded = (interaction as Interaction & { claudeSubAgentSessionIds?: string[] }).claudeSubAgentSessionIds;
+		for (const id of folded ?? []) ids.add(id);
+	}
+	return ids;
+}
+
 /** `direct` plus every session id folded into any of them, at any depth. The
  *  fold is not bounded by `maxDepth`, which bounds the ledger walk only.
  *
@@ -197,9 +209,7 @@ function foldedTransitively(
 }
 
 /** What one session folded in, transitively. A session that cannot be resolved
- *  or read contributes no deeper ids, the same rule
- *  `collectSelfAttributedSessionIds` applies to a directory it cannot
- *  enumerate. */
+ *  or read contributes no deeper ids. */
 function foldsOf(sessionId: string, cache: Map<string, Set<string>>): Set<string> {
 	const cached = cache.get(sessionId);
 	if (cached) return cached;
@@ -209,7 +219,7 @@ function foldsOf(sessionId: string, cache: Map<string, Set<string>>): Set<string
 	const file = resolveSessionFile(sessionId);
 	if (file !== null) {
 		try {
-			folds = foldedTransitively(collectSelfAttributedSessionIds(file, parseSessionFile(file)), cache);
+			folds = foldedTransitively(parseFoldedIds(parseSessionFile(file)), cache);
 		} catch { /* unreadable: nothing deeper is known */ }
 	}
 	cache.set(sessionId, folds);
@@ -422,7 +432,7 @@ export function computeSpawnTree(
 				// assignment does not. Drop it explicitly (pr-review, #89/#119).
 				const { untaggedCostUsd: _untaggedCostUsd, ...cleanTotal } = computeSessionSummary(parsed).total;
 				total = cleanTotal;
-				for (const id of foldedTransitively(collectSelfAttributedSessionIds(file, parsed), foldCache)) {
+				for (const id of foldedTransitively(parseFoldedIds(parsed), foldCache)) {
 					const already = countedTotals.get(id);
 					if (already) {
 						// Reached as its own edge FIRST, and now folded in here

@@ -16,6 +16,8 @@
  *   session's edge reports `already-counted`, never `in-self-total` (which means
  *   "inside `total`"); reached before, it is priced under its own edge and
  *   subtracted from the descendant. Either order counts it once.
+ * Part C — a session found only by directory (a Pi sibling of a descendant) is
+ *   not folded into the descendant's total, so its own edge is priced.
  *
  * Run:  bun tests/wtft-131-132-spawn-tree-accounting.test.ts
  */
@@ -152,6 +154,37 @@ console.log("\nPART B — a descendant's parse folds in an unreached id, which i
 	const forward = computeSpawnTree(ROOT, { ledgerPath: ledgerOf([[ROOT, DESC], [ROOT, FOLDED]]) });
 	check(forward.edges.find(e => e.child === FOLDED)?.skip === "already-counted",
 		`B3 the folded id's edge reports already-counted, which is true: its money is in spawned.total (got ${forward.edges.find(e => e.child === FOLDED)?.skip})`);
+}
+
+// ---
+// PART C — a session the parse did NOT fold in is priced under its own edge
+// ---
+console.log("\nPART C — a Pi sibling of a descendant is discovered by directory, not folded into the descendant's total");
+
+{
+	const ROOT = uuid(21), DESC = uuid(22), SIBLING = uuid(23);
+	const cwd = cwdOf(DESC);
+	const projectDir = path.join(projects, cwd.replace(/\//g, "-"));
+	fs.mkdirSync(projectDir, { recursive: true });
+	const header = (id: string, parentSession?: string) =>
+		JSON.stringify({ type: "session", version: 3, id, timestamp: new Date(T0).toISOString(), cwd, ...(parentSession ? { parentSession } : {}) }) + "\n";
+	const descPath = path.join(projectDir, `${DESC}.jsonl`);
+	fs.writeFileSync(descPath, header(DESC) + turnLine("turn-desc", T0 + 2_000, 300));
+	fs.writeFileSync(path.join(projectDir, `${SIBLING}.jsonl`), header(SIBLING, DESC) + turnLine("turn-sibling", T0 + 4_000, 700));
+
+	const parsed = parseSessionFile(descPath);
+	check(computeSessionSummary(parsed).total.outputTokens === 300 && collectSelfAttributedSessionIds(descPath, parsed).has(SIBLING),
+		"C0 fixture precondition: discovery names the sibling, but the descendant's total does not contain it");
+
+	for (const [name, edges] of Object.entries({
+		"descendant first": [[ROOT, DESC], [ROOT, SIBLING]] as Array<[string, string]>,
+		"sibling first": [[ROOT, SIBLING], [ROOT, DESC]] as Array<[string, string]>,
+	})) {
+		const tree = computeSpawnTree(ROOT, { ledgerPath: ledgerOf(edges) });
+		const siblingEdge = tree.edges.find(e => e.child === SIBLING);
+		check(tree.total.outputTokens === 1000 && siblingEdge?.resolved === true && tree.unattributed.length === 0,
+			`C1 [${name}] the sibling is priced under its own edge and nothing is subtracted from the descendant: 300 + 700 (got ${tree.total.outputTokens}, skip ${siblingEdge?.skip})`);
+	}
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

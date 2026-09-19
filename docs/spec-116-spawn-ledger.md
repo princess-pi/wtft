@@ -174,10 +174,11 @@ reintroduced inside #116's fix. An *absent* ledger is not an error: nothing has 
   session itself reached round a cycle. It is reported and never added, because billing twice is
   the expensive direction to be wrong in. `already-counted` is the same claim about the tree's
   own total, and covers a `claude -p` session a resolved descendant's parse folded in: its money is in
-  `spawned.total`. The walk widens the caller's `alreadyAttributed` set, and each resolved
-  descendant's fold set, by resolving and parsing every member and the `claude -p` sessions it
-  folded in; that closure is not bounded by the depth cap, and a Task child's transcript is not
-  resolvable by id, so it adds nothing deeper.
+  `spawned.total`. The walk also treats as self-attributed the `claude -p` sessions each `alreadyAttributed`
+  member folded in, and marks the ones each resolved descendant folded in, by resolving and
+  parsing them; that closure is not bounded by the depth cap. Sessions found only by directory (Task
+  children, Pi siblings of a descendant) are inside no descendant's total, so their own edges are
+  priced.
 
 ## What gets reported
 
@@ -315,9 +316,10 @@ D23 (the rendered ledger error) — skip **visibly** when the process can read s
 `tests/wtft-131-132-spawn-tree-accounting.test.ts` pins the fold accounting: a grandchild folded in
 two levels down is billed once under four ledger orders, and a session folded into a resolved
 descendant is counted once in both orders: reported `already-counted` when the descendant is
-reached first, subtracted from the descendant's total when its own edge is.
+reached first, subtracted from the descendant's total when its own edge is; a Pi sibling of a
+descendant, which the parse does not fold, is priced under its own edge in both orders.
 `tests/wtft-129-projects-root.test.ts` pins that a parse folds a `claude -p` child found under
-`WTFT_CLAUDE_PROJECTS_DIR`, and that no second file under `extensions/` or `bin/` spells out the projects root.
+`WTFT_CLAUDE_PROJECTS_DIR`, and that no second file under `extensions/` or `bin/` contains the literal `".claude", "projects"` pair.
 
 ## Not in this change
 

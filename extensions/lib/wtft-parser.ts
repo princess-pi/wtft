@@ -23,7 +23,6 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import { calculateClaudeCost, calculateServerToolCost, getDeepSeekPeakMultiplier } from "./wtft-cost.js";
 import { getParseAdapters } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.ts";

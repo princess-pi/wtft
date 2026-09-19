@@ -53,7 +53,7 @@ export interface WtftNotice {
 	// "auto-selected-session" was retired in `@4` (#89, Amendment 3): with no
 	// interactive terminal, wtft no longer auto-picks the newest session — see
 	// EXIT_SESSION_AMBIGUOUS in bin/wtft.ts.
-	code: "pending-session" | "no-data" | "unpriced-model" | "provisional";
+	code: "pending-session" | "no-data" | "unpriced-model" | "provisional" | "subagent-meta-unreadable";
 	text: string;
 }
 

@@ -676,6 +676,7 @@ try {
 		const cjs = req("node:fs");
 		const ppath = req("node:path");
 		const originalRead = cjs.readFileSync;
+		const originalOpen = cjs.openSync;
 		const originalReaddir = cjs.readdirSync;
 		const originalStat = cjs.statSync;
 		const [parentPath, nestedPath, secondPath, cPath, nestedCwd, TC0, libPath, projectDir, piParentPath, piSiblingGoodPath, piSiblingBadReadPath, piSiblingBadJsonPath, piBaseDir, walkParentPath, walkGoodPath, walkOtherPath, walkBadStatPath] = process.argv.slice(2);
@@ -710,6 +711,13 @@ try {
 			const sp = String(p);
 			if (fail(sp)) throw makeEacces(sp);
 			return originalRead.call(cjs, p, ...rest);
+		};
+		// Discovery reads a header through openSync (#147), so a read failure
+		// is injected there too, with the same rule.
+		cjs.openSync = function (p, ...rest) {
+			const sp = String(p);
+			if (fail(sp)) throw makeEacces(sp);
+			return originalOpen.call(cjs, p, ...rest);
 		};
 		cjs.readdirSync = function (p, ...rest) {
 			const sp = String(p);

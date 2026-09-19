@@ -14,8 +14,7 @@ status line (authoritative) showed **$79.43**. Two independent causes: (a) `clau
 matches nothing in `MODEL_PRICING` nor the `haiku`/`opus` substring fallbacks, so it
 silently prices at the Sonnet-tier initializer defaults ($3/$15 vs the real $10/$50) —
 and nothing warns that the number is a guess; (b) Dynamic Workflow transcripts under
-`<session>/subagents/workflows/wf_*/agent-*.jsonl` are never discovered because
-`walkSubagentDir` only recurses into directories named `subagents`/`ns`/`agent-*`.
+`<session>/subagents/workflows/wf_*/agent-*.jsonl` are never discovered.
 
 ## Scope
 
@@ -91,10 +90,10 @@ Notes:
 ### #141 — workflow transcript discovery
 
 `walkSubagentDir` (`extensions/lib/wtft-parser.ts`) recurses into **all**
-subdirectories instead of only `subagents`/`ns`/`agent-*`. The depth counter keeps its
-existing meaning (increments only on `subagents`/`ns` containers → `MAX_SUBAGENT_DEPTH`
-still bounds *nesting* depth, not directory depth), and the `agent-*.jsonl` file filter
-still gates what is collected. This picks up
+real subdirectories — a symlinked one is never entered — instead of only
+`subagents`/`ns`/`agent-*`, and the `agent-*.jsonl` file
+filter still gates what is collected. (The depth cap was later removed: each directory
+is visited once by real path, which bounds the walk without cutting transcripts off.) This picks up
 `subagents/workflows/wf_<runId>/agent-*.jsonl` and future harness layout changes.
 
 **Exclusion discovered during implementation:** `wtft-tags/` directories are skipped —
@@ -128,7 +127,7 @@ Tests run against the built bundle (`bun run build` first), per repo convention:
 2. **`tests/wtft-issue-141-workflow-discovery.test.ts`** (new)
    - Fixture `<session>/subagents/workflows/wf_abc/agent-1.jsonl` +
      `wf_def/agent-2.jsonl` → both discovered by `discoverSubagentSessionFiles`.
-   - Existing depth-5 nesting fixtures still pass (regression:
+   - Existing nesting fixtures still pass (regression:
      `tests/wtft-issue-82.test.ts`).
 3. **Existing suites** `wtft-pricing-tiers`, `wtft-issue-82`, `wtft-issue-83`,
    `wtft-server-tool-cost`, daemon cost cross-validation — all green.

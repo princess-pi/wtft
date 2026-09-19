@@ -302,10 +302,10 @@ an ancestor, ENOTDIR, ELOOP — as "absent" and stamped the marker over the miss
 subtree; the gate is now `statSync`, ENOENT absent, every other error a dir-level
 throw), and an unreadable Pi sibling sessionDir warn once per dir per process and
 throw; the daemon routes those into `pollHadFailure`, the TUI/CLI degrade to the
-warning. The one remaining per-entry skip is `walkSubagentDir`'s stat failure, honest
-about its carve-out (round 6): ENOENT (deleted between readdir and stat) and ELOOP hold
-no cost to miss, so they stay silent; every other stat error warns once per file per
-process. Which read
+warning. `walkSubagentDir`'s stat failure carves out ENOENT (deleted between readdir
+and stat) and ELOOP, which hold no cost to miss and stay silent; every other stat error
+warns once per file per process. Both discovery halves skip an entry whose read reports
+EISDIR the same way — a directory, or a symlink to one, named `*.jsonl` holds no cost. Which read
 failures reach the nested read, honestly: (1) the transient discovery→parse race (a
 file that vanished, or became unreadable, between the two reads); (2) a statically
 unreadable Task/agent transcript — `walkSubagentDir` discovers by name and stat only,

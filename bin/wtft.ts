@@ -41,6 +41,7 @@ import {
 	renderUncountedBillables,
 	discoverSubagentSessionFiles,
 	readSubagentMeta,
+	readSubagentMetaChecked,
 	discoverClaudeSubAgentSessionFiles,
 	clearSubagentCacheMiss,
 	loadSubagentInteractions,
@@ -237,6 +238,7 @@ export {
 	renderUncountedBillables,
 	discoverSubagentSessionFiles,
 	readSubagentMeta,
+	readSubagentMetaChecked,
 	discoverClaudeSubAgentSessionFiles,
 	clearSubagentCacheMiss,
 	loadSubagentInteractions,
@@ -379,9 +381,9 @@ export const EXIT_SESSION_AMBIGUOUS = 10;
 // ---
 // SHARED WORDING (#26) — one sentence, two output modes.
 // ---
-// `--json` carries the same human prose in `notices[]` that the rendered path
-// prints. Two literals would be two things to reword, and the reword that
-// reached only one of them would be invisible to a reader of the other.
+// A sentence that reaches both modes is ONE literal: two would be two things
+// to reword, and the reword that reached only one of them would be invisible
+// to a reader of the other.
 //
 // WHICH STREAM differs by mode, deliberately: the pending-session and no-data
 // sentences are the rendered path's only OUTPUT, so they go to stdout there;
@@ -889,7 +891,7 @@ async function main() {
 		// mechanisms at once — and without this the money lands in `total` and
 		// again in `spawned.total`.
 		return (spawnTreeCache = computeSpawnTree(sessionId, {
-			alreadyAttributed: collectSelfAttributedSessionIds(finalSessionPath, interactions),
+			alreadyAttributed: collectSelfAttributedSessionIds(finalSessionPath, interactions, discoverOnce().files),
 		}));
 	};
 
@@ -914,23 +916,9 @@ async function main() {
 	// distrust the comments. The invariant is "at most one scan per run", and
 	// that is checkable from the cache alone.
 	let uncountedCache: UncountedBillables | null = null;
-	/** ONE discovery read, shared (#137 review round 1).
-	 *
-	 *  `scanSessionUncounted` ran discovery to find the files it must scan, and
-	 *  `collectSubagentJson` ran it a SECOND time, later, to label them. The two
-	 *  reads straddled the tag read, the notice building and the uncounted scan,
-	 *  and were then serialised as a single snapshot — the same two-reads-one-
-	 *  document class this file already fixed for the tag (`readTagFileWithVerdict`).
-	 *
-	 *  Two concrete mismatches it produced: the first read succeeds and the second
-	 *  throws, shipping `subagents: []` beside a settled `provisional`; or the
-	 *  second sees a subagent that appeared or vanished in between, so `subagents`
-	 *  lists transcripts `uncounted` never covered, or omits ones it did.
-	 *
-	 *  Memoised here so both callers get the same answer, whichever runs first.
-	 *  `unreadable` is carried too, because the scan turns it into
-	 *  `provisional.reason` and the emitter must not report it a second time in a
-	 *  different vocabulary. */
+	/** One discovery per run, so every part of the document describes the same
+	 *  filesystem. Carries `unreadable`, which the scan turns into
+	 *  `provisional.reason`. */
 	let discoveryCache: { files: string[]; unreadable: Error | null } | null = null;
 	const discoverOnce = (): { files: string[]; unreadable: Error | null } => {
 		if (discoveryCache) return discoveryCache;
@@ -938,7 +926,7 @@ async function main() {
 			return (discoveryCache = discoverSubagentSessionFiles(finalSessionPath));
 		} catch (err) {
 			// The DIR-level throw. Cache it as "nothing discovered, and we know
-			// why", so the second caller cannot re-run it and disagree.
+			// why", so a later caller cannot re-run it and disagree.
 			return (discoveryCache = { files: [], unreadable: err instanceof Error ? err : new Error(String(err)) });
 		}
 	};
@@ -1123,42 +1111,22 @@ async function main() {
 		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
 	};
 
-	/** The subagents this session spawned, each with the harness's own record of
-	 *  it where one exists (#137), or `undefined` when the answer is incomplete.
-	 *
-	 *  Discovery is SHARED with the blind-spot scan through `discoverOnce`, not
-	 *  re-run. An earlier version of this docstring said the opposite — that
-	 *  discovery is re-run and costs "a readdir" — and both halves were wrong
-	 *  once the memo landed: the body calls the cache, and `discoverSubagentSessionFiles`
-	 *  does considerably more than a readdir (it walks the subtree and reads the
-	 *  parent transcript whole for the Pattern-2 header check). The memo exists
-	 *  precisely so that cost is paid once and both callers describe the same
-	 *  filesystem (#137 review rounds 1 and 2).
-	 *
-	 *  A discovery failure is reported by OMITTING the key, not by an empty list —
-	 *  see the body. `provisional.reason` still carries `subagent-unreadable`;
-	 *  that stays the authoritative verdict field, and this one simply declines to
-	 *  make a claim it cannot support.
-	 */
-	const collectSubagentJson = (): WtftSubagentJson[] | undefined => {
-		// `undefined` — so the KEY IS OMITTED — whenever discovery did not produce
-		// a complete answer, whatever the reason. The two guards below are the
-		// whole rule: a missing session file, or any `unreadable` from discovery.
-		// A caller never needs to know which one fired — absent means the same
-		// thing in every case, and that is the point of omitting rather than
-		// returning `[]`.
-		//
-		// The first version emitted `[]` for the throw case (#137 review round 2,
-		// Medium/contract). That is the exact confusion this document's
-		// absent-versus-empty rule exists to prevent, committed by the code that
-		// states the rule: a consumer reading `subagents.length === 0` got a
-		// partial result presented as complete. `provisional.reason` does carry
-		// `subagent-unreadable`, but nothing tells a consumer that field qualifies
-		// THIS one, and a cross-field dependency nobody documented is not a signal.
+	/** The subagents this session spawned, with the harness's record of each
+	 *  where one exists. `rows` is `undefined` — the key is omitted, never `[]` —
+	 *  whenever discovery was incomplete; `notices` names any `.meta.json` that
+	 *  exists and could not be read. */
+	const collectSubagentJson = (): { rows: WtftSubagentJson[] | undefined; notices: WtftNotice[] } | undefined => {
 		if (!fs.existsSync(finalSessionPath)) return undefined;
 		const discovered = discoverOnce();
-		if (discovered.unreadable) return undefined;
-		return discovered.files.map(transcript => ({ transcript, meta: readSubagentMeta(transcript) }));
+		const notices: WtftNotice[] = [];
+		const rows = discovered.files.map(transcript => {
+			const read = readSubagentMetaChecked(transcript);
+			if (read.error) {
+				notices.push({ code: "subagent-meta-unreadable", text: `subagent metadata could not be read (${read.metaPath}): ${read.error.message}` });
+			}
+			return { transcript, meta: read.meta };
+		});
+		return { rows: discovered.unreadable ? undefined : rows, notices };
 	};
 
 	// `pending` pins the decision the CALLER already made, rather than letting the
@@ -1172,6 +1140,7 @@ async function main() {
 	// consistent snapshot of the moment the branch was taken.
 	const emitSessionJson = (opt: { notices?: WtftNotice[]; pending?: boolean } = {}) => {
 		const uncounted = opt.pending ? newUncountedBillables() : scanSessionUncounted();
+		const subagentJson = opt.pending ? undefined : collectSubagentJson();
 		const doc = buildSessionJson({
 			interactions,
 			session: {
@@ -1189,13 +1158,11 @@ async function main() {
 			// nobody had opened: "read it, found nothing" claimed by a run that
 			// never looked. That is the exact failure this field exists to end.
 			spawned: sessionSpawnTree(),
-			// #137 — name the subagents from the `.meta.json` the harness already
-			// writes beside each transcript. `collectSubagentJson` returns
-			// `undefined` wherever the answer would be incomplete, and the key is
-			// then OMITTED rather than emitted empty: an empty array must mean
-			// "looked, found none", never "nobody looked".
-			...((() => { const s = opt.pending ? undefined : collectSubagentJson(); return s ? { subagents: s } : {}; })()),
-			notices: opt.notices ?? [],
+			// The key is OMITTED rather than emitted empty wherever the answer
+			// would be incomplete: an empty array must mean "looked, found
+			// none", never "nobody looked".
+			...(subagentJson?.rows ? { subagents: subagentJson.rows } : {}),
+			notices: [...(opt.notices ?? []), ...(subagentJson?.notices ?? [])],
 		});
 		process.stdout.write(renderSessionJson(doc));
 		// The human line, on stderr, on every `--json` arm — the empty ones

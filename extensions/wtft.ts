@@ -52,6 +52,10 @@ function withProvisionalLine(text: string): string {
 	return _subagentUnreadable ? `${text}\n${PROVISIONAL_LINE}` : text;
 }
 
+// The files the render's own discovery listed, so the spawn tree does not
+// walk the same directory a second time.
+let _subagentFiles: string[] = [];
+
 // Daemon directory relative to this extension file
 const _daemonDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin");
 
@@ -166,7 +170,7 @@ function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | und
 		// every subagent session into SELF, so a spawner that also records one
 		// as a ledger edge would bill it in TOTAL and again in SPAWNED.
 		return computeSpawnTree(path.basename(sessionFile).replace(/\.jsonl$/i, ""), {
-			alreadyAttributed: collectSelfAttributedSessionIds(sessionFile, interactions),
+			alreadyAttributed: collectSelfAttributedSessionIds(sessionFile, interactions, _subagentFiles),
 		});
 	} catch {
 		return undefined;
@@ -188,9 +192,11 @@ function readInteractions(ctx: any): Interaction[] {
 	// render main interactions only rather than crash the widget on every
 	// refresh.
 	let subagentFiles: string[] = [];
+	_subagentFiles = subagentFiles;
 	try {
 		const discovered = discoverSubagentSessionFiles(sessionFile);
 		subagentFiles = discovered.files;
+		_subagentFiles = subagentFiles;
 		if (discovered.unreadable) _subagentUnreadable = true;
 	} catch {
 		_subagentUnreadable = true; // walkSubagentDir already warned; degrade to main interactions

@@ -47,6 +47,9 @@ let _currentThinkingLevel: string | undefined;
 // transcript. Set by readInteractions on every render pass; read by
 // updateWtftWidget after building the lines.
 let _subagentUnreadable = false;
+// The files the render's own discovery listed, so the spawn tree does not
+// walk the same directory a second time.
+let _subagentFiles: string[] = [];
 
 // Daemon directory relative to this extension file
 const _daemonDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin");
@@ -148,7 +151,7 @@ function getSettings(_ctx: any) {
 // loadSubagentInteractions).
 //
 // Two discovery patterns:
-//   1. Claude Code: <session>/subagents/agent-*.jsonl (recursive, depth ≤ 5)
+//   1. Claude Code: <session>/subagents/agent-*.jsonl (recursive)
 //   2. Pi (pre-emptive): sibling files with parentSession header match
 // ---
 
@@ -174,7 +177,7 @@ function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | und
 		// as a ledger edge would have the widget count it in TOTAL and again in
 		// SPAWNED. This surface had no guard at all until the PR review asked.
 		return computeSpawnTree(path.basename(sessionFile).replace(/\.jsonl$/i, ""), {
-			alreadyAttributed: collectSelfAttributedSessionIds(sessionFile, interactions),
+			alreadyAttributed: collectSelfAttributedSessionIds(sessionFile, interactions, _subagentFiles),
 		});
 	} catch {
 		return undefined;
@@ -197,6 +200,7 @@ function readInteractions(ctx: any): Interaction[] {
 	// Round 10: the flag is per-render — every pass re-reads discovery.
 	_subagentUnreadable = false;
 	let subagentFiles: string[] = [];
+	_subagentFiles = subagentFiles;
 	try {
 		// Round 6: discovery returns { files, unreadable } — the readable
 		// siblings still render (partial progress); the per-file failure was
@@ -207,6 +211,7 @@ function readInteractions(ctx: any): Interaction[] {
 		// and it degrades to main interactions below.
 		const discovered = discoverSubagentSessionFiles(sessionFile);
 		subagentFiles = discovered.files;
+		_subagentFiles = subagentFiles;
 		if (discovered.unreadable) _subagentUnreadable = true;
 	} catch {
 		_subagentUnreadable = true; // walkSubagentDir already warned; degrade to main interactions

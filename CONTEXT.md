@@ -154,9 +154,8 @@ _Avoid_: Cache file, index file
 
 **Tags dir**:
 The `wtft-tags/` directory itself — one per project/session root, holding every tag file for
-sessions discovered there. `wtft-parser.ts` explicitly excludes it from session discovery
-("`wtft-tags` is our own output") so the daemon never treats its own writes as a session to
-parse.
+sessions discovered there. It is excluded from session discovery, so the daemon never treats its own
+writes as a session to parse.
 _Avoid_: Tag cache, output dir
 
 **Surge (window / pricing)**:

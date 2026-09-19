@@ -3,7 +3,7 @@
  * tests/wtft-issue-82.test.ts — Recursive subagent rollup depth test (#82)
  *
  * Verifies that discoverSubagentSessionFiles() recursively walks nested
- * subagent directories up to the Claude Code depth-5 limit.
+ * subagent directories, with no depth cap (#148).
  *
  * Run: node --experimental-strip-types tests/wtft-issue-82.test.ts
  */
@@ -85,10 +85,11 @@ try {
 	check(Math.abs(total - 0.85) < 0.001, `total subagent cost = $${total.toFixed(2)} (expected $0.85)`);
 
 	// ---
-	// TEST 2: Depth limit enforcement (depth > 5)
-	// Create a depth-6 chain and verify it stops at depth 5
+	// TEST 2: no depth cap (#148)
+	// A depth-6 chain is walked to the bottom: each directory is visited once
+	// by real path, which bounds the walk without cutting transcripts off.
 	// ---
-	console.log("--- TEST 2: Depth-5 limit enforcement ---");
+	console.log("--- TEST 2: no depth cap ---");
 
 	const deepId = "deep-limit";
 	const deepParent = path.join(tmpDir, `${deepId}.jsonl`);
@@ -110,9 +111,8 @@ try {
 	}
 
 	const { files: deepDiscovered } = discoverSubagentSessionFiles(deepParent);
-	console.log(`  Discovered: ${deepDiscovered.length} files (depth 6 chain, max depth 5)`);
-	// Depth 5 → should find only 5 files (d1-d5), not d6
-	check(deepDiscovered.length === 5, "depth-5 limit: finds exactly 5 (not 6) subagent files");
+	console.log(`  Discovered: ${deepDiscovered.length} files (depth 6 chain)`);
+	check(deepDiscovered.length === 6, "a depth-6 chain lists all 6 subagent files");
 
 	// ---
 	// TEST 3: Mixed flat + nested structure ---

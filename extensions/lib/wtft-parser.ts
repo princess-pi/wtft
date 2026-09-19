@@ -1166,16 +1166,14 @@ export function classifyInteraction(interaction: Interaction): Category {
 
 // ---
 // SUBAGENT SESSION DISCOVERY (#82/#83)
-// Recursive walk of subagent directories up to a configurable depth.
+// Recursive walk of subagent directories, each visited once by real path.
 // Claude Code stores subagent sessions as agent-*.jsonl files under
 // <session-dir>/<session-name>/subagents/. Each subagent may itself
-// have nested subagents (depth ≤ 5 per Claude Code docs).
+// have nested subagents.
 //
 // Pi convention (pre-emptive): sibling .jsonl files with a
 // "parentSession" header matching the parent session ID.
 // ---
-
-const MAX_SUBAGENT_DEPTH = 5; // Claude Code hard limit
 
 /** What the harness writes beside every built-in (Task) subagent transcript.
  *
@@ -1212,8 +1210,9 @@ export interface SubagentMeta {
  *
  *  WHY IT NEVER THROWS, AND NEVER PARTIALLY SUCCEEDS. This is UNDOCUMENTED
  *  harness output. It may vanish, gain fields or be renamed in any release, so
- *  every failure — absent, unreadable, unparseable, wrong shape — returns `null`
- *  and the caller renders exactly what it rendered before #137. A meta missing
+ *  every failure — absent, unreadable, unparseable, wrong shape — returns
+ *  `null` here; a caller that must tell an unreadable meta from an absent one
+ *  calls {@link readSubagentMetaChecked} instead. A meta missing
  *  one required field is `null` rather than a half-filled record, because a
  *  report row labelled from a partial record is worse than one labelled from a
  *  hash: it looks authoritative.
@@ -1224,20 +1223,28 @@ export interface SubagentMeta {
  *  `tests/wtft-137-subagent-meta.test.ts` § M7 documents what the name-pinning
  *  does and does not cover; it is not restated here. */
 export function readSubagentMeta(transcriptPath: string): SubagentMeta | null {
-	if (!transcriptPath.endsWith(".jsonl")) return null;
+	return readSubagentMetaChecked(transcriptPath).meta;
+}
+
+/** {@link readSubagentMeta}, plus the error when the meta exists but could
+ *  not be read. `error` is null for an absent meta (ENOENT, ENOTDIR) and for
+ *  one that reads but does not parse — only a read failure is observable as a
+ *  failure. */
+export function readSubagentMetaChecked(transcriptPath: string): { meta: SubagentMeta | null; error: Error | null; metaPath: string | null } {
+	if (!transcriptPath.endsWith(".jsonl")) return { meta: null, error: null, metaPath: null };
 	const metaPath = transcriptPath.slice(0, -".jsonl".length) + ".meta.json";
 	let raw: string;
 	try {
 		raw = fs.readFileSync(metaPath, "utf8");
-	} catch {
-		// Absent is the ORDINARY case — Pi and shell children have none — but this
-		// catch also swallows EACCES, EIO and EISDIR, and the caller cannot tell
-		// them apart. `null` is documented to consumers as "this harness wrote no
-		// record", so an unreadable file currently reports a confident absence.
-		// Narrowing it needs a new `notices[]` code, which is additive under
-		// `wtft/session@4`; filed rather than smuggled into this branch.
-		return null;
+	} catch (err) {
+		const code = (err as NodeJS.ErrnoException).code;
+		const absent = code === "ENOENT" || code === "ENOTDIR";
+		return { meta: null, error: absent ? null : (err instanceof Error ? err : new Error(String(err))), metaPath };
 	}
+	return { meta: parseSubagentMeta(raw), error: null, metaPath };
+}
+
+function parseSubagentMeta(raw: string): SubagentMeta | null {
 	let obj: unknown;
 	try {
 		obj = JSON.parse(raw);
@@ -1278,58 +1285,64 @@ export function readSubagentMeta(transcriptPath: string): SubagentMeta | null {
 	return meta;
 }
 
+/** The first `count` lines of `file`, without reading the rest — a
+ *  transcript can be hundreds of MB. Throws on a read failure. */
+function readHeadLines(file: string, count: number): string[] {
+	const fd = fs.openSync(file, "r");
+	try {
+		const chunk = Buffer.alloc(64 * 1024);
+		const parts: Buffer[] = [];
+		let total = 0;
+		let newlines = 0;
+		while (newlines < count) {
+			const n = fs.readSync(fd, chunk, 0, chunk.length, total);
+			if (n === 0) break;
+			const got = chunk.subarray(0, n);
+			for (let i = got.indexOf(0x0a); i !== -1 && newlines < count; i = got.indexOf(0x0a, i + 1)) newlines++;
+			parts.push(Buffer.from(got));
+			total += n;
+		}
+		return Buffer.concat(parts).toString("utf8").split("\n").slice(0, count);
+	} finally {
+		fs.closeSync(fd);
+	}
+}
+
 /**
  * Discover subagent session files for a given parent session, walking
- * subdirectories recursively up to maxDepth (Claude Code convention).
+ * subdirectories recursively.
  *
  * Pattern 1 (Claude Code): <session-dir>/<session-name>/subagents/agent-*.jsonl
  * Pattern 2 (Pi, pre-emptive): sibling files with parentSession header match
  */
 export function discoverSubagentSessionFiles(
 	sessionPath: string,
-	maxDepth: number = MAX_SUBAGENT_DEPTH,
 ): { files: string[]; unreadable: Error | null } {
 	const files: string[] = [];
 	const sessionDir = path.dirname(sessionPath);
 	const sessionBase = path.basename(sessionPath, ".jsonl");
 
-	// Round 7: one report slot for BOTH halves. The walk reports per-entry
-	// stat failures and the Pi half reports per-file read failures; whichever
-	// happens first wins, which is all the caller's fail-safe needs.
+	// One report slot for both halves; whichever fails first wins, which is all
+	// the caller's fail-safe needs.
 	let firstUnreadable: Error | null = null;
+	// Real paths already listed, shared by both halves: a transcript reachable
+	// by two paths — a symlinked sibling, a symlink cycle — is listed once.
+	const seen = new Set<string>();
 
-	// Pattern 1: Claude Code recursive convention. Round 6: the existsSync
-	// gate was a silent boundary — a stat error (chmod-000 <base>/subagents,
-	// an untraversable ancestor) returned false, so the whole walk was
-	// skipped with no warning and the swept marker could stamp over the
-	// missing costs. ENOENT is the absent case and stays silent (no Pattern-1
-	// subagents); any OTHER stat error is a read failure, same dir-level rule
-	// as the walk's own catch below: warn once per dir per process and throw.
-	// Round 10 (macroscope, Medium): ENOTDIR joins the absent class — it
-	// means an ancestor of <base>/subagents is a REGULAR file, so no
-	// subagent can exist below it; branding that a read failure had the
-	// daemon withhold the swept marker over a plain file name collision.
+	// Pattern 1: Claude Code recursive convention. ENOENT and ENOTDIR mean no
+	// Pattern-1 subagents can exist and stay silent; any other stat error is a
+	// read failure — warn once per dir per process and throw.
 	const ccBaseDir = path.join(sessionDir, sessionBase, "subagents");
 	try {
 		const ccStat = fs.statSync(ccBaseDir);
 		if (ccStat.isDirectory()) {
-			// Round 7 — the walk now RETURNS its first per-entry stat failure
-			// instead of only warning (see walkSubagentDir): report it here so
-			// the caller's fail-safe stays honest — the daemon withholds the
-			// swept marker, the CLI degrades to the subagent-unreadable reason.
-			const walkErr = walkSubagentDir(ccBaseDir, 1, maxDepth, files);
+			const walkErr = walkSubagentDir(ccBaseDir, files, seen);
 			if (walkErr && !firstUnreadable) firstUnreadable = walkErr;
 		}
 	} catch (err) {
-		// #457 (round 6) — the statSync gate's catch also sees the walk's
-		// throws, and every throw out of walkSubagentDir already carries the
-		// "subagents directory could not be read (" prefix AND was warned
-		// (latched) by the walk frame that failed — its message names the
-		// innermost failing dir, which is the one that matters. Rethrow those
-		// unchanged: re-wrapping here would double-warn AND name the outer
-		// ccBaseDir, which may be perfectly readable. Only the statSync-gate
-		// failure itself (no prefix) is new to this catch: warn once per dir
-		// per process and throw, the dir-level rule everywhere else.
+		// A throw out of walkSubagentDir was already warned and names the
+		// innermost failing dir: rethrow it rather than re-wrapping it around
+		// ccBaseDir, which may be perfectly readable.
 		if (err instanceof Error && err.message.startsWith("subagents directory could not be read (")) {
 			throw err;
 		}
@@ -1348,17 +1361,11 @@ export function discoverSubagentSessionFiles(
 	let mainSessionId: string | undefined;
 	let mainHeaderRaw: string | null = null;
 	try {
-		mainHeaderRaw = fs.readFileSync(sessionPath, "utf8");
+		mainHeaderRaw = readHeadLines(sessionPath, 1)[0];
 	} catch (err) {
-		// #457 (round 7) — the round-4 comment claimed the caller's own read
-		// of the main file is "loud about the same failure"; it is not, on
-		// either path it named. The daemon's main-session read is
-		// parseNewLines, whose catch silently returns [] — an unreadable main
-		// session file stalls the daemon with zero signal; the CLI never
-		// parses the main session file at all (it reads the tag). A READ
-		// failure here also means Pattern-2 discovery cannot run, so every Pi
-		// sibling's cost is silently missing from the same discovery — the
-		// #457 class. Warn + report it like any other discovery-boundary read.
+		// A read failure here also stops Pattern-2 discovery, so every Pi
+		// sibling's cost goes missing with it: warn and report, like any
+		// other discovery-boundary read.
 		warnUnreadableTranscript(sessionPath, "at discovery", err, "the session transcript");
 		if (!firstUnreadable) {
 			firstUnreadable = new Error(
@@ -1368,80 +1375,56 @@ export function discoverSubagentSessionFiles(
 	}
 	if (mainHeaderRaw !== null) {
 		try {
-			const mainHeader = JSON.parse(mainHeaderRaw.split("\n")[0]);
+			const mainHeader = JSON.parse(mainHeaderRaw);
 			if (mainHeader.type === "session") mainSessionId = mainHeader.id;
 		} catch {
-			// #457 (round 6/7) — a header that cannot PARSE (empty file,
-			// partial crash header) is skipped silently, the same carve-out
-			// as the per-line JSON swallow: it can never declare an id, so
-			// Pattern-2 siblings can never be matched to it. This is a broken
-			// MAIN file, not an unreadable one — warning here would brand the
-			// session's own transcript "unreadable" and withhold the marker
-			// over a file whose cost the daemon's own parse already misses.
-			// Only the READ failure above is reported.
+			// A header that cannot PARSE declares no id, so no sibling can match
+			// it. That is a broken main file, not an unreadable one — only the
+			// READ failure above is reported.
 		}
 	}
 
 	if (mainSessionId) {
-		// #457 (round 5/6) — this half of discovery was the last silent boundary
-		// of the unreadable-transcript class: an unreadable Pi-pattern sibling
-		// was skipped with no warning and never reached the loud parse path, so
-		// its cost vanished from the tag and the swept marker stamped over it.
-		// Same rule as the claude half: warn once per file per process, collect
-		// the first failure, and REPORT it in the result after the scan (round
-		// 6 — the round-5 throw discarded the readable siblings collected
-		// alongside it, so one unreadable file starved the whole subtree every
-		// poll; the report keeps partial progress). Callers route the failure
-		// (the daemon syncs the readable files and withholds the marker via
-		// pollHadFailure; the TUI/CLI degrade). A failure here is never
-		// recorded as discovered, so attribution recovers when readability
-		// returns. (firstUnreadable itself is hoisted to the function top —
-		// the walk's per-entry failures and the main-header read failure also
-		// report into it.)
+		// An unreadable sibling is warned once per file per process and reported
+		// after the scan, so the readable siblings collected alongside it are
+		// still returned. A failure here is never recorded as discovered, so
+		// attribution recovers when readability returns.
 		try {
-			// Round 10 (macroscope, Medium): readdirSync's bare names let a
-			// DIRECTORY named *.jsonl through to readFileSync, whose EISDIR the
-			// outer catch mislabeled "could not be read at discovery" — a dir
-			// can never declare parentSession or hold cost, yet the daemon
-			// withheld the swept marker forever over it. withFileTypes skips
-			// the dir class outright; symlinks keep flowing to readFileSync
-			// (it follows), matching the claude half's walk, where statSync
-			// follows symlinks too — a symlink to a transcript is a
-			// transcript.
+			// A DIRECTORY named *.jsonl holds no cost and cannot declare
+			// parentSession, and reading one throws EISDIR — which would brand
+			// the session unreadable forever. Symlinks keep flowing through:
+			// a symlink to a transcript is a transcript.
 			for (const entry of fs.readdirSync(sessionDir, { withFileTypes: true })) {
 				const f = entry.name;
 				if (!f.endsWith(".jsonl")) continue;
 				if (entry.isDirectory()) continue;
 				const fullPath = path.join(sessionDir, f);
 				if (fullPath === sessionPath) continue;
-				if (files.includes(fullPath)) continue;
+				let realFile: string;
+				try { realFile = fs.realpathSync(fullPath); } catch { realFile = fullPath; }
+				if (seen.has(realFile)) continue;
 				try {
-					const raw = fs.readFileSync(fullPath, "utf8");
+					const raw = readHeadLines(fullPath, 1)[0];
 					let header: unknown = null;
 					try {
-						header = JSON.parse(raw.split("\n")[0]);
+						header = JSON.parse(raw);
 					} catch {
-						// #457 (round 6) — a header that cannot PARSE (empty
-						// file, partial crash header, a non-transcript
-						// .jsonl) is skipped silently, same rule as the
-						// claude half's per-line JSON swallow: it can never
-						// declare parentSession, so it can never contribute
-						// cost to this session. Warning here would brand a
-						// harmless sibling "unreadable" and withhold the
-						// marker forever over nothing — the per-file report
-						// below is for READ failures only, where cost may
-						// genuinely be missing.
+						// A header that cannot PARSE never declares
+						// parentSession, so it can hold no cost for this
+						// session. The report below is for READ failures only.
 						continue;
 					}
-					// Round 11 (macroscope): the parse above can succeed with
-					// runtime null (the literal `null` is valid JSON), which a
-					// cast does not change — optional access keeps that
-					// harmless sibling on the same silent-skip path.
+					// The parse above can succeed with runtime null (the literal
+					// `null` is valid JSON), so the access stays optional.
 					const h = header as { type?: string; parentSession?: string };
 					if (h?.type === "session" && h.parentSession === mainSessionId) {
+						seen.add(realFile);
 						files.push(fullPath);
 					}
 				} catch (err) {
+					// A symlink to a directory is not `isDirectory()`; EISDIR is
+					// how it announces itself, and it holds no cost either way.
+					if ((err as NodeJS.ErrnoException).code === "EISDIR") continue;
 					warnUnreadableTranscript(fullPath, "at discovery", err);
 					if (!firstUnreadable) {
 						firstUnreadable = new Error(
@@ -1460,15 +1443,9 @@ export function discoverSubagentSessionFiles(
 	}
 
 	if (firstUnreadable) {
-		// #457 (rounds 6/7) — report, not throw: the readable files collected
-		// by either half are returned alongside the failure instead of being
-		// discarded with it. An unreadable sibling's parentSession header was
-		// never checkable, so it might BE this session's subagent — and an
-		// unreadable walk entry or main-session header means the same: cost
-		// may genuinely be missing. The caller owns the fail-safe — the
-		// daemon syncs the readable files and still withholds the swept
-		// marker (pollHadFailure), the CLI/TUI use the readable files and
-		// degrade loudly.
+		// Report, not throw: the readable files come back alongside the failure
+		// instead of being discarded with it, and the caller owns the fail-safe
+		// — the daemon withholds the swept marker, the CLI/TUI degrade loudly.
 		return { files, unreadable: firstUnreadable };
 	}
 
@@ -1480,39 +1457,34 @@ export function discoverSubagentSessionFiles(
  * subagents/ subdirectory (Claude Code nested subagent convention).
  *
  * Returns the FIRST per-entry stat failure encountered (its own or a nested
- * frame's), or null when every entry was stat-able — see the per-entry catch
- * for why that class is REPORTED rather than thrown like the dir-level
- * readdir failures below. */
+ * frame's) — see the per-entry catch for why that class is REPORTED rather
+ * than thrown like the dir-level readdir failures below. */
 function walkSubagentDir(
 	dir: string,
-	depth: number,
-	maxDepth: number,
 	files: string[],
+	seen: Set<string>,
 ): Error | null {
-	if (depth > maxDepth) return null;
+	// Real paths already visited: a symlink cycle is walked once, and a
+	// transcript reachable by two paths is listed once.
+	let realDir: string;
+	try { realDir = fs.realpathSync(dir); } catch { realDir = dir; }
+	if (seen.has(realDir)) return null;
+	seen.add(realDir);
 	let frameErr: Error | null = null;
 	try {
-		for (const f of fs.readdirSync(dir)) {
+		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+			const f = entry.name;
 			const fullPath = path.join(dir, f);
 			let stat: fs.Stats;
 			try {
 				stat = fs.statSync(fullPath);
 			} catch (err) {
-				// #457 (rounds 6/7) — the prose claimed "no silent-skip
-				// boundary left"; a per-entry stat failure was still one. The
-				// honest carve-out: an entry that no longer exists (ENOENT —
-				// deleted between readdir and stat) or cannot be a transcript
-				// (ELOOP) holds no cost to miss, and the next poll re-lists;
-				// every OTHER stat failure (EACCES, EIO) means a
-				// possibly-costly entry became unreadable — warn once per
-				// file per process, keep walking (the dir itself is readable;
-				// the readable siblings still land in `files`), and return
-				// the first such failure up the frame chain. Round 6's
-				// warn-only left the caller's fail-safe blind: the daemon
-				// stamped the swept marker and the CLI stayed exit 0 with
-				// that entry's cost missing from the token table. Reporting
-				// closes it — the daemon withholds via pollHadFailure, the
-				// CLI degrades to the subagent-unreadable reason.
+				// An entry that no longer exists (ENOENT) or cannot be a
+				// transcript (ELOOP) holds no cost to miss and the next poll
+				// re-lists it. Every other stat failure (EACCES, EIO) means a
+				// possibly-costly entry became unreadable: warn once per file
+				// per process, keep walking, and report the first one up the
+				// frame chain so the caller's fail-safe can act on it.
 				const statCode = (err as NodeJS.ErrnoException).code;
 				if (statCode !== "ENOENT" && statCode !== "ELOOP") {
 					warnUnreadableTranscript(fullPath, "at discovery", err);
@@ -1524,46 +1496,42 @@ function walkSubagentDir(
 				}
 				continue;
 			}
+			// A SYMLINKED directory is never recursed into: `seen` bounds a
+			// cycle but not an acyclic foreign tree, so `subagents/all -> /`
+			// would walk the filesystem. A symlinked FILE still counts — a
+			// symlink to a transcript is a transcript — and a stat failure on
+			// either took the arm above, so none is swallowed here.
+			if (entry.isSymbolicLink() && stat.isDirectory()) continue;
 			if (stat.isDirectory()) {
 				// Recurse into ALL subdirectories (#141) — the agent-*.jsonl
 				// file filter gates what gets collected, so directory names
 				// need no allowlist. This picks up Dynamic Workflow layouts
 				// (subagents/workflows/wf_<runId>/agent-*.jsonl) and
 				// future-proofs against the next harness layout change.
-				// Depth still counts only "subagents"/"ns" containers, so
-				// maxDepth keeps bounding NESTING depth (Claude Code limit),
-				// not raw directory depth. "wtft-tags" is our own output —
+				// "wtft-tags" is our own output —
 				// its agent-*.jsonl.wtft-tag.v*.jsonl files would match the
 				// file filter and double-count.
 				if (f !== "wtft-tags") {
-					// #457 (round 5) — the recursion sits OUTSIDE the per-entry
-					// stat try: a nested unreadable directory's readdir throw
-					// must reach the outer catch below (and the caller's
-					// pollHadFailure), not be swallowed as a stat failure.
-					// Round 4's dir-level warning only ever fired for TOP-LEVEL
-					// unreadable dirs for exactly this reason, yet the nested
-					// layout (agent-<hash>/subagents/, workflows/wf_<runId>/)
-					// is this walk's own documented norm. Round 7 — a nested
-					// frame's REPORTED per-entry failure (not a throw) rides
-					// up through the return value.
-					const childErr = walkSubagentDir(fullPath, depth + (f === "subagents" || f === "ns" ? 1 : 0), maxDepth, files);
+					// The recursion sits OUTSIDE the per-entry stat try: a
+					// nested unreadable directory's readdir throw must reach
+					// the outer catch below, not be swallowed as a stat
+					// failure.
+					const childErr = walkSubagentDir(fullPath, files, seen);
 					if (childErr && !frameErr) frameErr = childErr;
 				}
 			} else if (f.startsWith("agent-") && f.endsWith(".jsonl")) {
+				let realFile: string;
+				try { realFile = fs.realpathSync(fullPath); } catch { realFile = fullPath; }
+				if (seen.has(realFile)) continue;
+				seen.add(realFile);
 				files.push(fullPath);
 			}
 		}
 	} catch (err) {
-		// #457 (round 4) — the dir-level readdir catch was the last silent
-		// boundary of the unreadable-transcript class: an unreadable subagents
-		// DIRECTORY drops every Task/agent cost under it, and in the daemon the
-		// swept marker would still stamp over the loss. Warn once per dir per
-		// process and throw; callers route the failure (the daemon sets
-		// pollHadFailure, the TUI/CLI degrade to the latched warning).
-		//
-		// Round 5 — a throw from a NESTED frame is already warned (by that
-		// frame, latched on the nested dir's path): rethrow it unchanged so
-		// the dir named in the message is the one that failed, not this one.
+		// An unreadable subagents DIRECTORY drops every Task/agent cost under
+		// it: warn once per dir per process and throw, so callers can route the
+		// failure. A throw from a nested frame is already warned and names the
+		// dir that actually failed — rethrow it unchanged.
 		if (err instanceof Error && err.message.startsWith("subagents directory could not be read (")) {
 			throw err;
 		}
@@ -1833,13 +1801,19 @@ export function discoverClaudeSubAgentSessionFiles(
 	let firstUnreadable: Error | null = null;
 
 	try {
-		for (const f of fs.readdirSync(projectDir)) {
+		for (const entry of fs.readdirSync(projectDir, { withFileTypes: true })) {
+			const f = entry.name;
 			if (!f.endsWith('.jsonl')) continue;
+			// A directory named `*.jsonl` holds no transcript, and reading one
+			// throws EISDIR, which would latch this session unreadable forever.
+			// `isDirectory()` is false for a SYMLINK to one, so the errno is
+			// what decides — see the EISDIR arm in the catch below.
+			if (entry.isDirectory()) continue;
 			const fullPath = path.join(projectDir, f);
 			try {
 				// Scan first 10 lines for a timestamp — the first line may be
 				// an ai-title entry with no timestamp field.
-				const head = fs.readFileSync(fullPath, 'utf8').split('\n').slice(0, 10);
+				const head = readHeadLines(fullPath, 10);
 				let ts: string | undefined;
 				for (const line of head) {
 					if (!line.trim()) continue;
@@ -1855,6 +1829,7 @@ export function discoverClaudeSubAgentSessionFiles(
 					files.push(fullPath);
 				}
 			} catch (err) {
+				if ((err as NodeJS.ErrnoException).code === "EISDIR") continue;
 				// #457 (round 4, M2) — the discovery read is a read, and an
 				// unreadable candidate must not be silently skipped. That is
 				// the COMMON case for the unreadable-transcript scenario (a
@@ -2048,23 +2023,25 @@ export function attributeClaudeSubAgentCosts(
  * both — and the tree would then bill it twice, once in `total` and once in
  * `spawned.total`. Billing twice is the expensive direction to be wrong in.
  *
- * DISCOVERY ONLY, never a parse: this walks the same two discoveries the
- * attribution pass uses and keeps the basenames, so it costs directory reads
- * rather than transcript reads. A discovery that fails contributes nothing —
+ * DISCOVERY ONLY, never a parse: it keeps the basenames the two discoveries
+ * produce, and takes an already-discovered list when the caller has one. A
+ * discovery that fails contributes nothing —
  * a child we cannot even enumerate was not attributed to self either, so the
  * walk treating it as fair game is the correct fallback, not a guess.
  */
 export function collectSelfAttributedSessionIds(
 	sessionPath: string,
 	interactions: Interaction[],
+	subagentFiles?: string[],
 ): Set<string> {
 	const ids = new Set<string>();
 
-	try {
-		for (const file of discoverSubagentSessionFiles(sessionPath).files) {
-			ids.add(path.basename(file, ".jsonl"));
-		}
-	} catch { /* an unreadable subagents dir is reported elsewhere (#457) */ }
+	let files = subagentFiles;
+	if (!files) {
+		try { files = discoverSubagentSessionFiles(sessionPath).files; }
+		catch { /* an unreadable subagents dir is reported elsewhere (#457) */ }
+	}
+	for (const file of files ?? []) ids.add(path.basename(file, ".jsonl"));
 
 	for (const interaction of interactions) {
 		// The ids a previous attribution pass recorded, when this array came

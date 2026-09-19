@@ -148,7 +148,8 @@ export interface SpawnTreeOptions {
 	 *  `<session>/subagents/` (#82/#83) — the two mechanisms that fold a child
 	 *  into the parent before this walk ever runs. The walk also treats as
 	 *  self-attributed the `claude -p` sessions each member folded in, found by
-	 *  resolving and parsing it. */
+	 *  resolving and parsing it; a member that cannot be resolved (a Task child)
+	 *  adds nothing deeper. */
 	alreadyAttributed?: Set<string>;
 }
 

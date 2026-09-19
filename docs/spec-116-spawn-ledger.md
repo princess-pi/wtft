@@ -176,7 +176,8 @@ reintroduced inside #116's fix. An *absent* ledger is not an error: nothing has 
   own total, and covers a `claude -p` session a resolved descendant's parse folded in: its money is in
   `spawned.total`. The walk also treats as self-attributed the `claude -p` sessions each `alreadyAttributed`
   member folded in, and marks the ones each resolved descendant folded in, by resolving and
-  parsing them; that closure is not bounded by the depth cap. Sessions found only by directory (Task
+  parsing them; that closure is not bounded by the depth cap, and a member that cannot be
+  resolved (a Task child) adds nothing deeper. Sessions found only by directory (Task
   children, Pi siblings of a descendant) are inside no descendant's total, so their own edges are
   priced.
 
@@ -319,7 +320,7 @@ descendant is counted once in both orders: reported `already-counted` when the d
 reached first, subtracted from the descendant's total when its own edge is; a Pi sibling of a
 descendant, which the parse does not fold, is priced under its own edge in both orders.
 `tests/wtft-129-projects-root.test.ts` pins that a parse folds a `claude -p` child found under
-`WTFT_CLAUDE_PROJECTS_DIR`, and that no second file under `extensions/` or `bin/` contains the literal `".claude", "projects"` pair.
+`WTFT_CLAUDE_PROJECTS_DIR`, and that no second `.ts` file under `extensions/` or `bin/` contains the literal `".claude", "projects"` pair.
 
 ## Not in this change
 
@@ -577,7 +578,7 @@ a defect shipped this afternoon is not a re-discovered finding; it is this round
 | Finding | What round 4 did |
 |---|---|
 | `bin/wtft.ts` — the empty rendered arm printed `SPAWNED` *without* `--tokens`, while the populated arm prints it only inside `if (opts.tokens)` | **The fix for a mode disagreement introduced a fresh mode disagreement.** Plain `wtft` showed the lineage while the session had no data and dropped it the moment data arrived. Now gated on `--tokens`, matching the populated path and the README |
-| `discovery.ts` — the docstring said `projectsDir` was "left exported and untouched" | The diff **created** the export, and the rationale it gave argued against having one. The export was reverted |
+| `discovery.ts` — the docstring said `projectsDir` was "left exported and untouched" | The diff **created** the export, and the rationale it gave argued against having one |
 | `wtft-spawn-tree.ts` — `subtractTotals`' own docstring still claimed the subtraction is "exact" | Round 4 corrected the claim **at the call site** and left the function's own copy standing. This is the unwritten-correction pattern round 4 was *named for*, one round later |
 | `bin/wtft.ts` — the memo comment said "two call sites" | The same commit added the third. This file's own rule is that a wrong call-site count is how a reader learns to distrust the comments |
 | `wtft-json.ts` — "`tree` is an addition of two results, not a third way of counting" | Ignores `subtractTotals`. The surviving guarantee is "nothing counts a turn a second way"; "addition only" is not true |
@@ -611,7 +612,7 @@ rather than spec sections so they can be listed, assigned and closed.
 |---|---|
 | The Closer's second clause: an unrecorded child is invisible, not unattributed | **#128** — Duppy picks the direction |
 | `in-self-total` names `total` when the money is in `spawned.total` | **#131** — fixed: decided B |
-| A double-count guard that misses ids already marked `in-self`, from `alreadyAttributed` or from an earlier descendant | **#132** — fixed: both fold sets are closed transitively |
+| A double-count guard that misses ids already marked `in-self`, from `alreadyAttributed` or from an earlier descendant | **#132** — the grandchild case is fixed: both fold sets are closed transitively, for every member that resolves. A descendant folding an id already marked `in-self` or `folded` is **#180** |
 | A live descendant priced from a one-shot parse and reported as settled | **#133** — Duppy |
 | The widget's silent failure, and eager discovery on the no-edge path | **#134** — Princess Pi |
 | The in-self set re-derived at CLI time and compared against a total the daemon folded earlier; and the pending arm re-deriving what `pending` was meant to freeze | **#135** — Princess Pi |

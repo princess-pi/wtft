@@ -169,9 +169,17 @@ reintroduced inside #116's fix. An *absent* ledger is not an error: nothing has 
   `unattributed`. `already-seen-unresolved` exists because `already-counted` asserts the money
   landed, which is false for a second edge onto a child the first visit could not read.
   `in-self-total` is a child whose cost is already inside `total` — a `claude -p` child the
-  parent's own turn names (#138), a Task child under `<session>/subagents/` (#82/#83), or the
-  reported session itself reached round a cycle. It is reported and never added, because billing
-  twice is the expensive direction to be wrong in.
+  parent's own turn names (#138) or one that child folded in at any depth (`parseSessionFile`
+  folds recursively), a Task child under `<session>/subagents/` (#82/#83), or the reported
+  session itself reached round a cycle. It is reported and never added, because billing twice is
+  the expensive direction to be wrong in. `already-counted` is the same claim about the tree's
+  own total, and covers a `claude -p` session a resolved descendant's parse folded in: its money is in
+  `spawned.total`. The walk also treats as self-attributed the `claude -p` sessions each `alreadyAttributed`
+  member folded in, and marks the ones each resolved descendant folded in, by resolving and
+  parsing them; that closure is not bounded by the depth cap, and a member that cannot be
+  resolved (a Task child) adds nothing deeper. A session found only by directory (a Pi
+  sibling of a descendant) that the parse did not fold is inside no descendant's total, so its own
+  edge is priced.
 
 ## What gets reported
 
@@ -234,8 +242,7 @@ TREE       TOTAL + SPAWNED                                 $127.36
 
 **Every edge gets a row, skipped ones included** — the headline's two numbers agree with the rows
 by construction, and they are deliberately in different units: sessions *priced*, from edges
-*recorded*. A diamond, a cycle, an in-self child and a depth cut each add an edge without adding a
-session.
+*recorded*. Every skipped edge adds an edge without adding a session.
 
 A skipped edge prints its **reason** where its cost would be. A dash or a `$0.00` would both read
 as "this child was free", which is the one thing we do not know about it. The last three
@@ -307,6 +314,13 @@ readable grandchild still counted**; `unreadable` distinguished from `not-found`
 unwritable ledger; and the rendered `TREE` figure read off the table and held to `TOTAL + SPAWNED`
 and to `--json`. The THREE chmod-000 cases — C21 (unreadable ledger), C24 (unreadable child) and
 D23 (the rendered ledger error) — skip **visibly** when the process can read such a file.
+`tests/wtft-131-132-spawn-tree-accounting.test.ts` pins the fold accounting: a grandchild folded in
+two levels down is billed once under four ledger orders, and a session folded into a resolved
+descendant is counted once in both orders: reported `already-counted` when the descendant is
+reached first, subtracted from the descendant's total when its own edge is; a Pi sibling of a
+descendant, which the parse does not fold, is priced under its own edge in both orders.
+`tests/wtft-129-projects-root.test.ts` pins that a parse folds a `claude -p` child found under
+`WTFT_CLAUDE_PROJECTS_DIR`, and that no second `.ts` file under `extensions/` or `bin/` contains the literal `".claude", "projects"` pair.
 
 ## Not in this change
 
@@ -422,7 +436,7 @@ fixed here rather than handed over; the rest are recorded with their disposition
 
 | Finding | Verified? | Action |
 |---|---|---|
-| **High** — the descendant double-count guard was order-dependent | **Yes** — a session counted as its own edge first, then folded into a later descendant, was billed twice; two depth-1 edges in the wrong ledger order were enough | **Code**: `countedTotals` remembers what each counted session contributed, and a descendant that also folds it in has it subtracted back out. Order-independent in both directions. ⬜ `reconciled-against-untested` — see #129 |
+| **High** — the descendant double-count guard was order-dependent | **Yes** — a session counted as its own edge first, then folded into a later descendant, was billed twice; two depth-1 edges in the wrong ledger order were enough | **Code**: `countedTotals` remembers what each counted session contributed, and a descendant that also folds it in has it subtracted back out. Order-independent in both directions, pinned by `tests/wtft-131-132-spawn-tree-accounting.test.ts` |
 | Fragment termination skipped the throwing case its own comment claimed to cover | **Yes** — on a throw, `written` is 0, so the `written > 0` guard was false | **Code**: termination is attempted whenever the write did not complete, and the error says whether it succeeded instead of promising that it did |
 | `tree` read as complete when the ledger could not be read | **Yes** — `ledgerError` set none of the three documented floor conditions | Prose, four surfaces: it is a **fourth** condition, and the one a consumer is likeliest to miss |
 | The `--tokens` headline's denominator counted edges while saying "sessions" | **Yes** | Prose + the rendered string: two units, named as such |
@@ -481,8 +495,7 @@ descendant double-counting order-independent is the other piece of machinery thi
 and it is *not* in this class: it does not soften a resource failure, it stops `tree` reporting a
 number that is wrong in the expensive direction. Removing it would trade ~20 lines for a wrong
 total whenever a spawner records an edge for a child some other mechanism already folded in.
-Worth knowing it is there; it is the branch's remaining concentration of subtlety, and #129 is why
-it has no regression test.
+Worth knowing it is there; it is the branch's remaining concentration of subtlety.
 
 ## Review round 4 — the round that checked whether the last three landed
 
@@ -504,9 +517,9 @@ commit message rather than in a promise.
 | 6 | `bin/wtft.ts` still claims spawn-record "shares nothing with the report path" | Yes | Prose — the module-scope work is admitted |
 | 7 | Widget catch names a case that cannot reach it | Yes | Prose — stated as a last-resort guard with no named reachable case |
 | 8 | Round-1 record's counts do not match its own table | Yes | Prose — eight real, seven fixed, one declared; ten advisories, not twelve |
-| 9 | `projectsDir` export rationale names a caller that does not exist | Yes | Prose — nothing outside the file imports it; the export is kept, the reason corrected |
+| 9 | `projectsDir` export rationale names a caller that does not exist | Yes | Prose — the export rationale corrected |
 | 10 | `DEFAULT_MAX_DEPTH` claims the cap prevents a filesystem walk | Yes | Prose — the cap bounds chain length, not breadth, and `resolveSessionById` walks per edge |
-| 11 | Subtraction comment claims "exact" for two different summation paths | Yes | Prose — stated as expected, not guaranteed, with the `Math.max(0, …)` clamp named (#129) |
+| 11 | Subtraction comment claims "exact" for two different summation paths | Yes | Prose — stated as expected, not guaranteed, with the `Math.max(0, …)` clamp named |
 | 12 | **The rendered empty-report arms drop the spawned lineage** | Yes | **Code** — `finishEmptyReport` renders the block; D24 |
 
 Two findings needed no change and are recorded as already-correct rather than re-fixed: the
@@ -546,8 +559,8 @@ and the tempting move was to relax the assertion.
 | Finding | Where it goes |
 |---|---|
 | The Closer's second clause — an unrecorded child is dropped, not listed as unattributed | **#128**, declared in this spec, needs a direction chosen |
-| `in-self-total` reported for an id folded into a DESCENDANT, where the money is in `spawned.total` rather than in `total` | Needs a decision: a seventh skip value, or a narrower contract for the existing one |
-| An `in-self` child is queued but never parsed, so a grandchild it folded in could be billed twice | Unverified assumption about how deep `attributeClaudeSubAgentCosts` folds; #129 blocks the test |
+| `in-self-total` reported for an id folded into a DESCENDANT, where the money is in `spawned.total` rather than in `total` | **#131** — decided B: the id reports `already-counted`; fixed |
+| An `in-self` child is queued but never parsed, so a grandchild it folded in could be billed twice | **#132** — verified: the fold is recursive, so it was billed twice; the walk now closes both fold sets transitively |
 | A live descendant is priced from a one-shot parse and reported as settled, with no `provisional` | Semantics to pin down; no field currently says the tree may still grow |
 | Self-attribution discovery runs eagerly even when the ledger holds no edges for the session | Advisory, performance only |
 | The widget swallows spawn-tree throws into a silence identical to "spawned nothing" | Advisory; the CLI reports `ledgerError`, the widget does not |
@@ -565,7 +578,7 @@ a defect shipped this afternoon is not a re-discovered finding; it is this round
 | Finding | What round 4 did |
 |---|---|
 | `bin/wtft.ts` — the empty rendered arm printed `SPAWNED` *without* `--tokens`, while the populated arm prints it only inside `if (opts.tokens)` | **The fix for a mode disagreement introduced a fresh mode disagreement.** Plain `wtft` showed the lineage while the session had no data and dropped it the moment data arrived. Now gated on `--tokens`, matching the populated path and the README |
-| `discovery.ts` — the docstring said `projectsDir` was "left exported and untouched" | The diff **created** the export. And the rationale it gave — nothing left to keep in sync — argues against having one. The export is reverted; nothing imports it |
+| `discovery.ts` — the docstring said `projectsDir` was "left exported and untouched" | The diff **created** the export, and the rationale it gave argued against having one |
 | `wtft-spawn-tree.ts` — `subtractTotals`' own docstring still claimed the subtraction is "exact" | Round 4 corrected the claim **at the call site** and left the function's own copy standing. This is the unwritten-correction pattern round 4 was *named for*, one round later |
 | `bin/wtft.ts` — the memo comment said "two call sites" | The same commit added the third. This file's own rule is that a wrong call-site count is how a reader learns to distrust the comments |
 | `wtft-json.ts` — "`tree` is an addition of two results, not a third way of counting" | Ignores `subtractTotals`. The surviving guarantee is "nothing counts a turn a second way"; "addition only" is not true |
@@ -598,8 +611,8 @@ rather than spec sections so they can be listed, assigned and closed.
 | Finding | Issue |
 |---|---|
 | The Closer's second clause: an unrecorded child is invisible, not unattributed | **#128** — Duppy picks the direction |
-| `in-self-total` names `total` when the money is in `spawned.total` | **#131** — Duppy picks A or B |
-| A double-count guard that misses ids already marked `in-self`, from `alreadyAttributed` or from an earlier descendant | **#132** — Princess Pi, blocked on #129 |
+| `in-self-total` names `total` when the money is in `spawned.total` | **#131** — fixed: decided B |
+| A double-count guard that misses ids already marked `in-self`, from `alreadyAttributed` or from an earlier descendant | **#132** — the grandchild case is fixed: both fold sets are closed transitively, for every member that resolves. A descendant folding an id already marked `in-self` or `folded` is **#180** |
 | A live descendant priced from a one-shot parse and reported as settled | **#133** — Duppy |
 | The widget's silent failure, and eager discovery on the no-edge path | **#134** — Princess Pi |
 | The in-self set re-derived at CLI time and compared against a total the daemon folded earlier; and the pending arm re-deriving what `pending` was meant to freeze | **#135** — Princess Pi |

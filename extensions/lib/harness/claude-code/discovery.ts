@@ -44,17 +44,9 @@ const ID = "claude-code";
 /** Directories that hold derived data, not sessions. */
 const SKIP_DIRS = new Set(["subagents", "tool-results", "memory", "wtft-tags"]);
 
-/** Test seam: point discovery at a fixture tree instead of the real home dir.
- *
- *  NOT exported, and the export this branch briefly added is gone again. Both
- *  callers — `discover()` and `resolveSessionById()` — live right here. The
- *  spawn-tree walk (#116) reaches this same root only indirectly, through
- *  `getDiscoveries()` → `resolveSessionById()`, never through a second
- *  `projectsDir()` of its own, so there was nothing for the export to keep in
- *  sync. The round-4 docstring said it was "left exported and untouched"; the
- *  diff had in fact created the export, and the reason it gave — nothing left
- *  to keep in sync — is the reason not to have one. */
-function projectsDir(): string {
+/** The one definition of the projects root. `WTFT_CLAUDE_PROJECTS_DIR` points
+ *  it at a fixture tree. */
+export function projectsDir(): string {
 	return process.env.WTFT_CLAUDE_PROJECTS_DIR || path.join(os.homedir(), ".claude", "projects");
 }
 

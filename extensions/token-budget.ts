@@ -5,6 +5,7 @@ import * as os from "node:os";
 import { loadConfig, writeConfig } from "@princess-pi/libs/config";
 import { readClassifiedTagFile } from "./lib/wtft-daemon-lib.ts";
 import { WTFT_CONFIG_DIR } from "./lib/wtft-config-dir.ts";
+import { projectsDir } from "./lib/harness/claude-code/discovery.ts";
 
 
 // ---
@@ -12,7 +13,6 @@ import { WTFT_CONFIG_DIR } from "./lib/wtft-config-dir.ts";
 // ---
 
 const HOME = os.homedir();
-const CLAUDE_DIR = path.join(HOME, ".claude", "projects");
 const PI_DIR = path.join(HOME, ".pi", "agent", "sessions");
 const COFFEE_FILE = "/tmp/pi-rate-limit-coffee.json";
 
@@ -189,7 +189,7 @@ function findActiveSessionFiles(): FileInfo[] {
   // Pi sessions dir contains per-session subdirs, each with a wtft-tags/ subdir
   scanDir(PI_DIR);
   // Claude Code projects dir contains per-project subdirs, each with session subdirs
-  scanDir(CLAUDE_DIR);
+  scanDir(projectsDir());
 
   return activeFiles;
 }

@@ -388,9 +388,10 @@ empty — absent, or somewhere this process cannot read, and the walk cannot tel
 `unreadable` (a file found that would not parse). Reported with its reason and a `null` cost,
 **never a zero**: a zero says the child cost nothing, which is a claim we do not have. Distinct
 from **uncounted** (#149), a billable event the harness records no `usage` for; and from the four
-skips that are *not* gaps — `already-counted` (a diamond or cycle, whose money landed once),
+skips that are *not* gaps — `already-counted` (a diamond, a cycle among descendants, or a `claude -p`
+session a descendant's parse folded in, whose money landed once in `spawned.total`),
 `already-seen-unresolved` (a second edge onto a child the first visit could not read, whose gap is
-already reported), `in-self-total` (a child whose cost is already inside `total`) and
+already reported), `in-self-total` (a child whose cost is already inside `total`, at any fold depth) and
 `depth-capped` (past the walk's bound).
 _Avoid_: Missing, lost, dropped (the edge is known; only the amount is not)
 

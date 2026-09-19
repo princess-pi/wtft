@@ -75,7 +75,7 @@ const ARTIFACTS = ["wtft.mjs", "wtft-daemon.mjs"];
 // takes neither. So check what is actually relied on: every entry resolves to
 // a readable regular file. Checking the string's shape is not enough, because
 // `"bin"` has no glob character and no trailing slash and would sail through
-// to the EISDIR this guard exists to pre-empt (PR review).
+// to the EISDIR this guard exists to pre-empt.
 const SHIPPED: string[] = JSON.parse(
 	fs.readFileSync(path.join(REPO, "package.json"), "utf8"),
 ).files ?? [];
@@ -87,7 +87,7 @@ execSync("bun run build", { cwd: REPO, stdio: "pipe" });
 // Validate SHIPPED only AFTER the build. Every path in `files` is build output
 // and every one is gitignored (.gitignore: `bin/*.mjs`, `pi/*.js`), so on a
 // clean checkout none of them exists yet — statting them first would fail the
-// suite for the absence the very next line exists to fix (PR review round 2).
+// suite for the absence the very next line exists to fix.
 {
 	const notAFile = SHIPPED.filter(f => {
 		if (/[*?[\]]/.test(f)) return true;                       // a glob, not a path
@@ -110,8 +110,7 @@ try { NODE = execSync("command -v node", { encoding: "utf8" }).trim(); } catch {
 // ---
 console.log("\n1. The emitted ESM reaches for nothing but node: builtins");
 {
-	// The allowed set is `node:` and NOTHING ELSE. Not "no bare imports", which
-	// is what this checked through two review rounds while claiming more.
+	// The allowed set is `node:` and NOTHING ELSE.
 	//
 	// The narrowing came from the word "bare": each pattern began `[^"'./]`, so
 	// a specifier starting with a dot or a slash was skipped by construction —

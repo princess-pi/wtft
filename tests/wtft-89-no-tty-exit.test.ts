@@ -3,12 +3,10 @@
  * tests/wtft-89-no-tty-exit.test.ts — the no-TTY EXIT_SESSION_AMBIGUOUS (10)
  * contract (#89, E3 and E4). Spec: docs/spec-89-scoped-picker.md.
  *
- * This is the file docs/spec-89-scoped-picker.md's own Verification section
- * originally named and, until now, never shipped (pr-review round 2, Low) —
- * `tests/wtft-35-explicit-session-skips-discovery.test.ts` covers only the
- * `-s` zero-match case; every other arm of the exit-10 contract (several `-s`
+ * Covers the exit-10 arms beyond the `-s` zero-match case in
+ * `tests/wtft-35-explicit-session-skips-discovery.test.ts`: several `-s`
  * matches, no `-s` with zero or several default-scoped candidates, and the
- * `--json` empty-stdout guarantee) had no coverage until this suite.
+ * `--json` empty-stdout guarantee.
  *
  * Every `spawnSync` call here is already non-TTY by construction (a spawned
  * child's stdio defaults to pipes), which is exactly the E3/E4 precondition —

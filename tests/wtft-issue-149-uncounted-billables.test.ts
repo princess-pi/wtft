@@ -261,16 +261,8 @@ describe("#149 harness — surveys every real logged session", () => {
 	 *  flat key=value records — one per session, greppable, no prose to parse. */
 	// #27: bun's per-test ceiling is 5000 ms, and this survey walks EVERY logged
 	// session on the host — a corpus that grows with every session anyone runs.
-	// Measured on this machine it sat at 4.9-5.2 s, i.e. failing about one run in
-	// three for reasons that have nothing to do with the assertion. #106 made the
-	// classifier do strictly more work per turn and tipped it to failing every
-	// run, which is what forced the fix rather than another shrug.
-	//
-	// The budget is generous ON PURPOSE. A ceiling tuned to today's corpus is a
-	// test that re-rots as the corpus grows, which is the bug being fixed, not a
-	// tighter version of it. This is a wall-clock guard against a hang, not a
-	// performance assertion — if the survey's cost is worth gating, that is its
-	// own measurement with its own threshold.
+	// The budget is generous ON PURPOSE: a wall-clock guard against a hang, not
+	// a performance assertion tuned to today's corpus.
 	const SURVEY_TIMEOUT_MS = 120_000;
 
 	// `it` here is node:test's, whose per-test options are the SECOND argument —
@@ -307,7 +299,8 @@ describe("#149 harness — surveys every real logged session", () => {
 			// and this instrument is UNTESTED, so subagent-bearing sessions are
 			// surveyed but never characterised.
 			const transcriptPath = records[0]?.transcript_path;
-			// Round 6: discovery returns { files, unreadable } — the walk's
+			// discovery returns { files, unreadable } — the walk's
+
 			// readable files are the count that matters here.
 			if (transcriptPath && fs.existsSync(transcriptPath) && discoverSubagentSessionFiles(transcriptPath).files.length > 0) {
 				skippedSubagent++;

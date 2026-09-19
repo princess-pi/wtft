@@ -157,15 +157,6 @@ console.log("\n1. One JSON object on stdout");
 	// someone adds above the return. §4 is where it does real work, on the run
 	// that has ANSI prose to misplace.
 	//
-	// A companion assertion here read `r.stderr.length > 0 || r.stdout.length > 0`
-	// under the label "the prose really does exist, on stderr". It passed on the
-	// stdout term alone, so it tested nothing its label claimed. Deleted rather
-	// than repaired: this fixture is settled and priced, so it has no prose to
-	// find, and §4 asserts the stream split on the run that does. (PR review.)
-	//
-	// Deleting it took the ANSI assertion above with it for two rounds, while the
-	// spec went on claiming §1 covered ANSI — a comment outliving the assertion it
-	// described, which is the precise failure this branch keeps finding elsewhere.
 	assert("stdout carries no ANSI escape byte", !r.stdout.includes("\x1b"), JSON.stringify(r.stdout.slice(0, 200)));
 	// "nothing else on stdout" — the session path line the human path prints
 	// above the chart is the specific thing that must not be here.
@@ -388,7 +379,6 @@ console.log("\n6. --json alongside rendering flags");
 	const { sessionPath } = makeFixture("combo", true);
 	// Every rendering flag the manifest's --json entry names as suppressed, so the
 	// spec's "each rendering flag" claim is the loop, not a summary of it (PR #95
-	// review, Low).
 	for (const extra of [["--tokens"], ["--other"], ["--pad", "4"], ["--no-emoji"], ["--emoji"], ["--bucket"], ["--cumulative"], ["--interval", "5m"], ["--limit", "3"], ["--ticks"], ["--timezone", "UTC"]]) {
 		const r = runCli(["-s", sessionPath, "--json", ...extra]);
 		let ok = false;
@@ -468,13 +458,9 @@ console.log("\n7. the exit-code table is a contract");
 // ---
 // 8. The empty paths obey the exit-code contract too.
 // ---
-// PR review, High/reasoning. The `pending-session` and `no-data` arms used to
-// emit the object and `return` without touching `process.exitCode`, so a tag
-// that is provisional BUT yields no classified lines printed
-// `"provisional": true` and exited 0. That breaks the single promise the
-// contract makes about the pair — that `$?` and `.provisional.provisional`
-// always agree — and it breaks it on the path a consumer is least likely to
-// have a fixture for.
+// `$?` and `.provisional.provisional` must always agree, including when a tag
+// is provisional BUT yields no classified lines (the pending-session / no-data
+// arms).
 console.log("\n8. an empty report still agrees with its exit code");
 {
 	// A tag whose filename carries a version this build did not write is
@@ -551,7 +537,7 @@ console.log("\n8b. a pending session is not provisional");
 // ---
 // 8c. The provisional stderr line reaches the EMPTY --json arms too.
 // ---
-// PR review, Medium/reasoning. The rendered empty path warned; the `--json`
+// The rendered empty path warned; the `--json`
 // empty arms wrote the object, set exit 9, and printed nothing a human could
 // read. Every arm now routes through one latched warner, so the line appears
 // exactly once — never zero times on an empty report, never twice on a full one.
@@ -583,7 +569,7 @@ console.log("\n8c. the provisional line reaches every arm, exactly once");
 // ---
 // 9. The RENDERED empty paths obey the same exit-code rule.
 // ---
-// PR review round 2, High/correctness. §8 taught the `--json` arms to honour
+// §8 taught the `--json` arms to honour
 // `provisional`; the rendered arms still fell through to an unconditional
 // `process.exit(0)`, so the SAME session exited 0 under `wtft` and 9 under
 // `wtft --json`. The exit-code table says nothing about mode — 9 means "the

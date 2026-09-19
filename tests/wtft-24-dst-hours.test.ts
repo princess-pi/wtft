@@ -1,74 +1,17 @@
 /**
- * Tests for #24 — `getSurgeLocalHours` sampled the timezone offset once per
- * day, so a DST-transition day mapped local hours to the wrong instants. The
- * `tz` branch reused a single offset (sampled from `now`) for all 24
- * candidate hours; the `else` (no-`tz`) branch was suspected of the same
- * class of defect because it also builds all 24 hours from one `now`.
+ * Tests for #24 — on a DST-transition day, `getSurgeLocalHours` must map local
+ * hours to the correct instants for both the `tz` and no-`tz` branches.
  *
- * MEASURED BEFORE FIXING (per the repo's "measure, don't trace" standard):
- * on Asia/Jerusalem's real 2026-03-27 spring-forward (offset +02:00 -> +03:00
- * at local 02:00), sampling `now` on each side of the transition instant
- * made the OLD code return a DIFFERENT surge set for the exact same
- * calendar day:
- *   now = 2026-03-26T22:30Z (local 00:30, offset still +02:00) -> {3,4,5,8,9,10,11}
- *   now = 2026-03-27T09:00Z (local 12:00, offset now +03:00)   -> {4,5,6,9,10,11,12}
- * Reproduced against `bin/wtft.mjs` on the pre-fix commit. The `else`
- * branch's output, by contrast, measured IDENTICAL regardless of which side
- * of the transition `now` fell on (confirmed for both directions below) —
- * `Date.prototype.setHours` re-derives its offset from the target local
- * time on every call rather than reusing one, so it never had the once-
- * per-day defect. Both branches are still pinned here: the `tz` branch
- * because it needed a real fix, the `else` branch as a regression guard and
- * to document where it deliberately still differs from the fixed `tz`
- * branch (an ambiguous fall-back hour, see below).
- *
- * Three zones, on both sides of UTC, are used because the fix (see
- * `resolveZonedLocalHour` in `extensions/lib/wtft-renderer.ts`) claims its
- * gap/fold resolution holds regardless of the zone's offset sign, and an
- * earlier draft of this PR shipped a two-sample refinement whose gap/fold
- * resolution was NOT sign-independent — verified wrong by review (PR review,
- * `Low/correctness`) against America/New_York before it merged: the earlier
- * code resolved a spring-forward gap backwards (matching the hour BEFORE)
- * for a negative-offset zone while matching the hour AFTER for a
- * positive-offset one. `resolveZonedLocalHour`'s day-buffered-offset-plus-
- * reparse approach was written to fix that, and NY is kept here as the
- * negative-offset proof, not dropped once the immediate finding was
- * addressed:
- *   - Asia/Jerusalem, 2026-03-27 (Friday) — spring forward, +02:00 -> +03:00.
- *   - Africa/Cairo, 2023-10-26 (Thursday) — fall back, +03:00 -> +02:00.
- *   - America/New_York, 2027-03-14 and 2026-11-01 (both Sundays; the US
- *     transition dates always are) — spring forward and fall back, both
- *     -05:00 <-> -04:00. Local Sunday, but NOT off-peak end to end: late
- *     local evening hours land on UTC MONDAY given the -05:00-ish offset, so
- *     the surge set is not trivially empty even though the ambiguous hour
- *     itself (2 for spring, 1 for fall) is not one of the surging hours.
- *
- * A second review round then caught a second, unrelated bug in the same
- * function: its reparse check compared only (year, month, day, hour),
- * ignoring minute and second — so for a zone with a non-whole-hour DST
- * shift it could accept a candidate reading `HH:30` as if it matched the
- * requested `HH:00`. Verified against Australia/Lord_Howe's real 30-minute
- * shift (`Low/reasoning` on the same PR review): local hours 0 and 1 on its
- * 2026-04-05 fall-back resolved a wall-clock reading 30 minutes LATE — the
- * `HH:30` instant, not the requested `HH:00` one. That fix is pinned
- * directly against `resolveZonedLocalHour` (imported from the `.ts` source,
- * not the built `bin/wtft.mjs` — the exact hours involved never surge on
- * ANY real Lord Howe date, since its transitions are permanently
- * Sunday-locked to the Australian mainland's calendar, so `getSurgeLocalHours`
- * itself cannot observe this one through peak/off-peak membership the way
- * the other zones above do).
- *
- * Jerusalem and Cairo are used for the spring/fall PAIR on the positive
- * side, and reused (not re-derived) for the weekday requirement — the
- * US/EU transitions this repo's other tests reach both fall on a Sunday,
- * where #495's weekend-is-off-peak rule returns the empty set outright and
- * hides this class of bug (see #24's own text); New York is kept anyway, on
- * its real (Sunday) dates, purely to prove the negative-offset side.
+ * Zones pinned (gap/fold resolution must hold for either offset sign):
+ *   - Asia/Jerusalem, 2026-03-27 — spring forward, +02:00 -> +03:00.
+ *   - Africa/Cairo, 2023-10-26 — fall back, +03:00 -> +02:00.
+ *   - America/New_York, 2027-03-14 and 2026-11-01 — spring/fall, -05:00 <-> -04:00.
+ *   - Australia/Lord_Howe, 2026-04-05 — 30-minute fall-back, pinned via
+ *     `resolveZonedLocalHour` directly (those hours never surge on a real
+ *     Lord Howe date).
  *
  * Every expected instant/hour below is derived from the real IANA tzdata
- * offsets for these zones (independently confirmed via
- * `Intl.DateTimeFormat`, bisecting for the exact transition minute), not by
- * calling `resolveZonedLocalHour` under test.
+ * offsets for these zones, not by calling `resolveZonedLocalHour` under test.
  */
 
 import * as assert from "node:assert";
@@ -144,8 +87,8 @@ describe("#24 getSurgeLocalHours (tz branch) resolves each local hour with its o
 
 	it("(direct) the gap hour resolves to the EXACT instant hour 3 does, not merely an off-peak one", () => {
 		// getSurgeLocalHours' boolean membership can't tell "same instant as
-		// hour 3" apart from "some other off-peak instant" (PR review,
-		// Medium/contract) — this asserts the actual UTC instant instead.
+		// hour 3" apart from "some other off-peak instant" — this asserts the
+		// actual UTC instant instead.
 		assert.strictEqual(
 			resolveZonedLocalHour(2026, 3, 27, 2, JERUSALEM),
 			resolveZonedLocalHour(2026, 3, 27, 3, JERUSALEM),

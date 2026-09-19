@@ -167,17 +167,14 @@ console.log("\n=== H3-H5: orderByHarness groups, orders, and skips empties ===\n
 	check(noPi.length === 2, `H5: …and nothing else is padded in to replace it (${noPi.length})`);
 
 	// A DUPLICATE in `order` itself must not double-render a harness
-	// (pr-review, Low).
 	const dupOrder = orderByHarness(candidates, ["pi", "pi", "claude-code"], ["claude-code", "pi"]);
 	check(dupOrder.filter(c => c.harness === "pi").length === 2,
 		`orderByHarness: a duplicated id in the sticky order does not duplicate that harness's rows (${dupOrder.length} total rows for ${candidates.length} candidates)`);
 }
 
 // ---
-// H2 (real fix) — readHarnessOrder(startDir) reads from the SAME directory
-// recordHarnessOpened wrote to under --dir, not from process.cwd() (pr-review,
-// Medium: before this, the two silently diverged whenever --dir differed from
-// the launching shell's cwd).
+// H2 — readHarnessOrder(startDir) reads from the SAME directory
+// recordHarnessOpened wrote to under --dir, not from process.cwd().
 // ---
 console.log("\n=== H2: readHarnessOrder(startDir) matches recordHarnessOpened's --dir target ===\n");
 {
@@ -222,9 +219,8 @@ console.log("\n=== H2: readHarnessOrder(startDir) matches recordHarnessOpened's 
 }
 
 // ---
-// H2 (real fix) — recordHarnessOpened refuses to clobber a malformed config
-// file rather than silently discarding its other settings (pr-review,
-// Medium).
+// H2 — recordHarnessOpened refuses to clobber a malformed config
+// file rather than silently discarding its other settings.
 // ---
 console.log("\n=== H2: recordHarnessOpened refuses to clobber malformed config ===\n");
 {
@@ -258,12 +254,13 @@ console.log("\n=== H2: recordHarnessOpened refuses to clobber malformed config =
 }
 
 // ---
-// H1/H2 (real fix, round 2) — an OUT-OF-TREE worktree (not nested under the
+// H1/H2 (real fix) — an OUT-OF-TREE worktree (not nested under the
+
 // clone at all, `worktrees.ts`'s second documented layout) reads its own
 // sticky order correctly. The walk-up-based read this repo shipped in round
 // 1 could never reach the clone's config.json from here — only a
 // git-`mainCloneDir`-based read, which does not care where the worktree
-// physically lives, can (pr-review round 2, Medium).
+// physically lives, can.
 // ---
 console.log("\n=== H1/H2: out-of-tree worktree reads its own repo's sticky order ===\n");
 {

@@ -8,18 +8,8 @@
  *   file is a bug in the parser. Readers may presume every line is complete, so
  *   the guarantee has to live in the writer, in one place.
  *
- *   WHAT WAS BROKEN. `upsertHeartbeat` scanned backwards from EOF for the start
- *   of the last line, reading BYTES and then measuring in a DECODED STRING:
- *   `searchOffset + lastLineStart` adds a byte offset to a UTF-16 code-unit
- *   index. Every multi-byte character in between drove the truncate that many
- *   bytes into the PRECEDING line, and the fresh heartbeat was welded onto the
- *   severed half. Measured on this host: 96 of 327 tag files, 2,562 welded
- *   lines, 99.7% of them with `→` or `—` in the preceding 2 KiB.
- *
- *   WHY A SEAM AND NOT A PRIVATE FIX. `lastLineStartByte` is the whole defect in
- *   one function: it is the number that must be a byte offset and must land on a
- *   line boundary. Exporting it is what lets W1-W6 pin it directly instead of
- *   inferring it from a corrupted file after the fact.
+ *   `lastLineStartByte` is the number that must be a byte offset and must land
+ *   on a line boundary. Exporting it lets W1-W6 pin it directly.
  *
  *   The Closer is E1, which drives the REAL daemon — a seam that is right in
  *   isolation and miswired in `upsertHeartbeat` would pass W1-W6 and still
@@ -132,7 +122,7 @@ console.log("\n§ W — lastLineStartByte answers in BYTES, on a line boundary\n
 // heartbeat after them, so the newline the scan is looking for sat inside the
 // very first chunk read from EOF — the loop returned on iteration one and never
 // touched a dash. Its boundary also happened to land character-aligned. It
-// passed while exercising neither property (#130 review round 2). So the test
+// passed while exercising neither property. So the test
 // now reads the byte at the boundary and demands it be a UTF-8 CONTINUATION
 // byte (0b10xxxxxx), which is the direct evidence that a sequence is split —
 // no arithmetic to re-derive and get wrong a second time.
@@ -199,9 +189,7 @@ console.log("\n§ W — lastLineStartByte answers in BYTES, on a line boundary\n
 // PURE ASCII on purpose, so this isolates WIDENING from the multi-byte handling
 // W3 covers. And, as in W3, the long line has to be the LAST one: with a short
 // heartbeat after it the terminating newline sits in the first chunk and the
-// loop returns immediately. The old fixture had exactly that shape and asserted
-// only `got > 512`, which was trivially true of an unwidened scan (#130 review
-// round 2). The widening is now asserted directly: an answer below
+// loop returns immediately. The widening is asserted directly: an answer below
 // `size - CHUNK` cannot have come from a single chunk read backwards from EOF.
 {
 	const CHUNK = 512;
@@ -219,7 +207,7 @@ console.log("\n§ W — lastLineStartByte answers in BYTES, on a line boundary\n
 // `lastReadOffset = fs.statSync(p).size`, at three call sites. A whole-file read
 // landing inside a multi-write() append returns a fragment, which the parse
 // drops and the stat COUNTS — so the offset lands inside a line that completes a
-// moment later and is then never re-read (#130 review round 2).
+// moment later and is then never re-read.
 {
 	const complete = `{"_hb":{"first":0,"last":1}}\n{"_meta":{"swept":1788828490280}}\n`;
 	const f1 = fixture("w7-whole.jsonl", complete);
@@ -400,22 +388,10 @@ console.log("\n§ E — the Closer: every line the daemon writes parses as JSON\
 		assert("E1 no two consecutive heartbeat lines — the replacement fired", consecutive === 0, lines.join("\n"));
 
 		// E1b — THE REPLACEMENT IS IN PLACE, observed as it happens.
-		//
-		// This assertion used to be "some heartbeat has last > first", justified
-		// as something only a replacement could produce. It was not: `initClassified`
-		// writes `first == last`, the first clean poll appends a `_meta.swept`
-		// marker after it, and `upsertHeartbeat` then finds a `_meta` last line and
-		// APPENDS a fresh heartbeat which naturally has `last > first`. The
-		// assertion passed whether or not a single byte was ever replaced (#130
-		// review round 2).
-		//
-		// What actually distinguishes replacing from appending is that the file
-		// DOES NOT GROW. So watch it directly across a quiet stretch, where the
-		// daemon writes nothing but heartbeats: the timestamp must advance while
-		// the size holds exactly still. That is also the property the offset
-		// readers depend on — a heartbeat that changed the size is the bug this
-		// round fixed — so pinning it here pins the thing that matters rather
-		// than a side effect of it.
+		// What distinguishes replacing from appending is that the file DOES NOT
+		// GROW. Watch it across a quiet stretch where the daemon writes nothing
+		// but heartbeats: the timestamp must advance while the size holds
+		// exactly still.
 		const sizeOf = () => { try { return fs.statSync(tagPath).size; } catch { return -1; } };
 		const lastHbOf = () => {
 			try {
@@ -547,7 +523,7 @@ console.log("\n§ R — a partial trailing line is re-read, never skipped\n");
 // chosen point; none of them exercises the poll boundary landing at an arbitrary
 // place, over and over, which is what the settled-fragment heuristic
 // (`length unchanged for a beat` + `JSON.parse` succeeds) actually has to
-// survive (#130 review round 2, Low/contract).
+// survive.
 //
 // So: dribble a whole multi-turn session in one-byte writes, faster than the
 // beat, so polls land at unpredictable offsets — inside JSON strings, inside
@@ -580,7 +556,7 @@ console.log("\n§ R — a partial trailing line is re-read, never skipped\n");
 		// dribble in tens of milliseconds — comfortably inside a single 667ms
 		// beat. The daemon then read the finished file in one poll and never saw
 		// a mid-line cut, so the test passed against the pre-fix reader too and
-		// proved nothing (#130 review round 3, Medium/contract).
+		// proved nothing.
 		//
 		// The dribble now spans at least four beats by construction, so several
 		// polls are guaranteed to land at offsets nobody chose — inside JSON
@@ -613,11 +589,11 @@ console.log("\n§ R — a partial trailing line is re-read, never skipped\n");
 			new Set(got).size === got.length, JSON.stringify(got));
 
 		// Ids alone would pass while every cost came out wrong. Compare the money
-		// the two paths arrive at (#130 review round 3).
+		// the two paths arrive at.
 		// `cost`, not `costUsd`. The first spelling of this summed `undefined ?? 0`
 		// on BOTH sides and reported a confident $0.000000 == $0.000000 — a
 		// comparison that could not fail, in the same round that removed two other
-		// assertions for exactly that (#130 review round 3).
+		// assertions for exactly that.
 		const sum = (rows: any[]) => rows.reduce((a, r) => a + (r.cost ?? 0), 0);
 		const wantCost = sum(parseSessionFile(sessionPath) as any[]);
 		const gotCost = sum(readClassifiedTagFile(tagPath) as any[]);
@@ -635,7 +611,7 @@ console.log("\n§ R — a partial trailing line is re-read, never skipped\n");
 // § C — a daemon killed mid-append does not weld the next daemon's heartbeat on
 // ---
 //
-// THE SECOND ROUTE TO THE SAME CORPUS DAMAGE (#130 review round 2, Medium/crossfile).
+// THE SECOND ROUTE TO THE SAME CORPUS DAMAGE.
 // `appendTagFile` makes every COMPLETED write leave whole lines. It says nothing
 // about a write that never completed. A daemon killed inside `fs.appendFileSync`
 // — SIGKILL, the OOM killer, power loss — never reaches the #512 handler that
@@ -776,7 +752,6 @@ console.log("\n§ C — a crash mid-append is repaired, not built upon\n");
 		// resume re-classifies turns already in the file. `dedupeClassifiedById`
 		// does NOT save us — it passes an interaction with no `messageId` straight
 		// through — so an id-less turn would be billed twice, permanently
-		// (#130 review round 3, Low/correctness).
 		//
 		// Exact equality, not `>=`: a double count is the failure, and `>=` is
 		// how it would go unnoticed.
@@ -841,7 +816,7 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	//  2. a FILE-GLOBAL name match. That is not provenance at all: any
 	//     `const lineStart = lastLineStartByte(...)` anywhere in the file
 	//     satisfied every truncate whose argument happened to be called
-	//     `lineStart`, in any other function (#130 review round 3).
+	// `lineStart`, in any other function.
 	//  3. this — the binding must appear in the SAME function body as the
 	//     truncate that uses it.
 	//
@@ -924,7 +899,7 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	// the stale heartbeat on an `r+` fd, close it, reopen through
 	// `appendTagFile`. It left whole lines at every instant, so E1 could not see
 	// it — but the file briefly got SHORTER, and an offset-tracking reader only
-	// ever asks whether the file GREW (#130 review round 2, Medium/contract).
+	// ever asks whether the file GREW.
 	//
 	// The replacement is a same-width `writeSync` at a `lastLineStartByte`
 	// offset, which changes no byte count at all. Pinned structurally because
@@ -939,7 +914,6 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	// across a daemon restart — so its offset is left past the new EOF, and
 	// nothing recovers until the rebuilt file grows past it, at which point the
 	// reader starts mid-line and every rebuilt line before that offset is lost
-	// (#130 review round 3, Medium/correctness).
 	//
 	// Structural, for the same reason as S3: driving it would mean standing up
 	// the interactive watch TUI and racing a daemon restart against it. The
@@ -989,7 +963,7 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 
 // --- G: a rebuild that lands AT OR ABOVE the stale offset (#142) ---
 //
-// Macroscope, PR #142, Medium — and it is a gap in the shrink branch THIS
+// and it is a gap in the shrink branch THIS
 // BRANCH added. That branch fires only on `stat.size < lastReadOffset`. A
 // daemon that truncates and rebuilds before the `fs.watch` callback runs (one
 // coalesced event — the normal case, not a race you have to engineer) leaves
@@ -1010,12 +984,10 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	assert("G1a a LARGER file whose consumed prefix changed reseeds too — the case the shrink check could not see",
 		watcherAction(140, 75, false) === "reseed");
 	assert("G1b a larger file with an intact prefix is an ordinary read", watcherAction(140, 75, true) === "read");
-	// FLIPPED (#142, second Macroscope round). This asserted `idle`, on the
-	// reasoning that "could not tell" should not force a reseed. That reasoning
-	// produced a DEADLOCK: `prefixSentinel` is refreshed only where the offset
-	// moves, the offset moves only on the `read` branch, and `read` is
-	// unreachable while the comparison is `null` — so one failed sentinel read
-	// froze the watch permanently, silently, until restart.
+	// A null sentinel comparison must reseed, not idle: `prefixSentinel` is
+	// refreshed only where the offset moves, the offset moves only on the
+	// `read` branch, and `read` is unreachable while the comparison is `null`
+	// — so one failed sentinel read froze the watch permanently.
 	assert("G1c an unreadable prefix RE-SEEDS — idling here freezes the watch forever",
 		watcherAction(140, 75, null) === "reseed");
 	assert("G1d a file that did not grow is idle", watcherAction(75, 75, true) === "idle");
@@ -1095,7 +1067,7 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	assert("G4a and recomputes the sentinel on every event, not once at attach",
 		/const sentinelNow = readPrefixSentinel\(/.test(libSrc));
 
-	// -- G6: an IDLE heartbeat is not a rebuild (Macroscope, PR #142, round 3) --
+	// -- G6: an IDLE heartbeat is not a rebuild --
 	//
 	// The regression this pins: the sentinel used to sample the 64 bytes before
 	// the reader's OFFSET, which sits at EOF. The last line of a tag file is the
@@ -1103,8 +1075,6 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	// timestamp — same width, same file size. So the window straddled a line
 	// that mutates by design, mismatched on every beat, and an idle watch
 	// re-seeded: a whole-file re-read and re-parse of a file that gained
-	// nothing. Measured on this host's largest tag file (32.8 MB, 644,312
-	// lines): 585 ms per re-seed against a 667 ms beat.
 	//
 	// The fixture writes a REAL heartbeat, the shape `upsertHeartbeat` writes,
 	// and beats it the way the daemon does — a same-width in-place write, never
@@ -1156,7 +1126,7 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 
 // --- A: a slowly-written record is read once, not once per poll (#142) ---
 //
-// Macroscope, PR #142, High. `lastSize` advanced only by WHOLE LINES, so a
+// `lastSize` advanced only by WHOLE LINES, so a
 // record still missing its newline left the offset parked behind it and every
 // poll re-allocated and re-read the entire partial record from disk. Quadratic
 // in the record's size.

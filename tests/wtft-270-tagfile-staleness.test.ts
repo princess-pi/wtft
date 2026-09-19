@@ -227,8 +227,7 @@ try {
 	);
 
 	// Not merely "went up": the collapse must take the max, not the sum. Summing
-	// the stale line and the fresh one would also raise the total, and would be
-	// the overcount #270's review rounds kept re-introducing.
+	// the stale line and the fresh one would also raise the total.
 	assert(
 		`turn 1 collapses to ONE interaction, not one per tag line (${healed.filter(i => i.messageId === TURN1_ID).length} === 1)`,
 		healed.filter(i => i.messageId === TURN1_ID).length === 1,

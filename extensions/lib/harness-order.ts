@@ -1,18 +1,15 @@
 /**
  * @package @princess-pi/wtft
  * @module harness-order
- * @description Sticky, MRU harness ordering for the scoped picker (#89, H1–H5).
+ * @description Sticky, MRU harness ordering for the scoped picker.
  *
- *   Read side (H1): resolves the main clone via `mainCloneDir` (git
+ *   Read side: resolves the main clone via `mainCloneDir` (git
  *   `worktree list`-based) and reads its `.wtft/config.json` directly — the
- *   SAME resolution the write side uses, so both sides agree regardless of
- *   whether the worktree layout is in-tree or out-of-tree (round 2 of this
- *   module's own design; the first cut used a plain `loadConfig` walk-up,
- *   which only reaches an in-tree worktree — see `readHarnessOrder`'s own
- *   docstring for the full story). A plain walk-up is the fallback whenever
+ *   SAME resolution the write side uses, so both sides agree for in-tree and
+ *   out-of-tree worktree layouts. A plain walk-up is the fallback whenever
  *   `mainCloneDir` returns null: no repo, no git, or git failing.
  *
- *   Write side (H2) needs its own code: opening a session must persist to the
+ *   Write side needs its own code: opening a session must persist to the
  *   MAIN CLONE's `.wtft/config.json` regardless of which worktree the CLI is
  *   currently running from, and `@princess-pi/libs/config`'s `writeConfig`
  *   only ever targets `process.cwd()`'s own `.<dirName>/` — there is no
@@ -20,10 +17,9 @@
  *   the main clone directly (`git worktree list --porcelain`'s first entry —
  *   the main working tree is always listed first) and writes the file itself.
  *
- *   Best-effort throughout (H2): no git, no repo, or an unwritable file simply
- *   skips the write. Sticky ordering is a convenience, never a precondition for
- *   wtft to produce a report — the same posture every other config write in
- *   this codebase already takes.
+ *   Best-effort throughout: no git, no repo, or an unwritable file simply
+ *   skips the write. Sticky ordering is a convenience, never a precondition
+ *   for wtft to produce a report.
  */
 
 import * as fs from "node:fs";
@@ -51,33 +47,18 @@ export function mainCloneDir(cwd: string): string | null {
  * The sticky harness order, most-recently-opened first.
  *
  * Resolves {@link mainCloneDir} and reads ITS `.wtft/config.json` directly —
- * the SAME resolution {@link recordHarnessOpened} writes through, `git
- * worktree list`-based rather than textual-path-based. This is round 2 of
- * H1's read side: the first cut used `loadConfig`'s plain walk-up from
- * `process.cwd()`, reasoning that a worktree living at
- * `<clone>/.claude/worktrees/<branch>/` is textually under the clone so
- * walk-up reaches it "with no special-case code". That reasoning is only
- * true of the IN-TREE layout. `worktrees.ts`'s own `CwdFanOut.slugPrefixes`
- * docstring documents a SECOND, out-of-tree layout,
- * `…-worktrees-<repo>-<branch>` — not nested under the clone at all — where
- * walk-up never reaches the clone's file: writes would succeed (H2 resolves
- * the clone via git, not via path) while reads silently returned `[]`
- * forever (pr-review round 2, Medium). Resolving both sides through
- * `mainCloneDir` removes the asymmetry instead of special-casing the second
- * layout.
+ * the SAME resolution {@link recordHarnessOpened} writes through. Both sides
+ * go through git rather than a textual walk-up, so an out-of-tree worktree
+ * layout still finds the clone's file.
  *
  * `startDir` defaults to `process.cwd()`, matching {@link recordHarnessOpened}'s
- * own default — pass `--dir`/`cwdOverride` explicitly when discovery used one,
- * for the same reason `recordHarnessOpened` takes a `cwd` parameter instead of
- * assuming the launching shell's directory.
+ * own default — pass `--dir`/`cwdOverride` explicitly when discovery used one.
  *
- * Falls back to the OLD walk-up read whenever `mainCloneDir` returns null
- * (no git, not a repo, or git failing), temporarily chdir-ing to `startDir`
- * and restoring it — a local `.wtft/config.json` a human placed by
- * hand still works outside a repo, which is the one case `mainCloneDir` was
- * never going to answer for. Unknown/malformed values are dropped rather than
- * thrown on; an absent or corrupt `harnessOrder` reads as `[]`, which is
- * "every harness is unseen" (H4).
+ * Falls back to the walk-up read whenever `mainCloneDir` returns null (no git,
+ * not a repo, or git failing), temporarily chdir-ing to `startDir` and
+ * restoring it — a local `.wtft/config.json` a human placed by hand still
+ * works outside a repo. Unknown/malformed values are dropped rather than
+ * thrown on; an absent or corrupt `harnessOrder` reads as `[]`.
  */
 export function readHarnessOrder(startDir: string = process.cwd()): string[] {
 	const dir = mainCloneDir(startDir);
@@ -96,8 +77,7 @@ export function readHarnessOrder(startDir: string = process.cwd()): string[] {
 		}
 	}
 
-	// No repo / no git — the walk-up read `mainCloneDir` cannot replace here,
-	// for a hand-placed `.wtft/config.json` outside any repository.
+	// No repo / no git — walk-up for a hand-placed `.wtft/config.json` outside any repository.
 	const original = process.cwd();
 	try {
 		if (path.resolve(startDir) !== original) process.chdir(startDir);
@@ -112,11 +92,10 @@ export function readHarnessOrder(startDir: string = process.cwd()): string[] {
 }
 
 /**
- * Move `harnessId` to the front of the main clone's sticky order (H2, H3).
+ * Move `harnessId` to the front of the main clone's sticky order.
  * Best-effort: a failure at any step — no main clone, unreadable/unwritable
- * config — is swallowed, never thrown, matching every other config write
- * here. A readable config that is not a JSON object is left untouched and
- * not written.
+ * config — is swallowed, never thrown. A readable config that is not a JSON
+ * object is left untouched and not written.
  */
 export function recordHarnessOpened(harnessId: string, cwd: string = process.cwd()): void {
 	const dir = mainCloneDir(cwd);
@@ -133,19 +112,14 @@ export function recordHarnessOpened(harnessId: string, cwd: string = process.cwd
 			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
 				existing = parsed;
 			} else {
-				// Valid JSON, wrong shape (an array, a scalar) — not ours to
-				// guess at; refuse rather than replace it (see the malformed-file
-				// arm below for why "refuse" beats "start fresh" here).
+				// Valid JSON, wrong shape — not ours to guess at; refuse rather
+				// than replace it.
 				return;
 			}
 		} catch {
-			// MALFORMED JSON: refuse the write entirely rather than starting
-			// from `{}` (pr-review, Medium). Writing `{ harnessOrder: [...] }`
-			// over a file that failed to parse would SILENTLY DISCARD every
-			// other setting a human or another tool had written there
-			// (interval, limit, timezone, …) — sticky order being a
-			// convenience is the reason to skip this write, not a reason to
-			// destroy unrelated data while attempting it.
+			// Malformed JSON: refuse rather than starting from `{}` — writing
+			// `{ harnessOrder: [...] }` over a file that failed to parse would
+			// silently discard every other setting written there.
 			return;
 		}
 	}
@@ -159,8 +133,7 @@ export function recordHarnessOpened(harnessId: string, cwd: string = process.cwd
 		fs.mkdirSync(path.dirname(file), { recursive: true });
 		fs.writeFileSync(file, JSON.stringify({ ...existing, harnessOrder: newOrder }, null, 2) + "\n");
 	} catch {
-		// Best-effort (H2) — an unwritable main clone must not block the
-		// session the human actually asked for.
+		// Best-effort — an unwritable main clone must not block the session.
 	}
 }
 
@@ -169,7 +142,7 @@ function isSymlink(p: string): boolean {
 }
 
 // ---
-// GROUPING (H3–H5)
+// GROUPING
 // ---
 
 /** The minimal shape this module needs from a session candidate — just enough
@@ -184,12 +157,11 @@ export interface OrderableCandidate {
  * Group `candidates` by harness (newest first within each group), then order
  * the groups by the sticky order — most-recently-opened harness first, then
  * every harness `order` doesn't name, LOWEST tier first: `knownHarnessIds`
- * order among themselves (H4), THEN — for a harness present in `candidates`
- * but absent from both `order` and `knownHarnessIds`, e.g. a caller that
- * forgot to pass one, or a genuinely unregistered id — `Map` insertion order,
+ * order among themselves, THEN — for a harness present in `candidates` but
+ * absent from both `order` and `knownHarnessIds` — `Map` insertion order,
  * which is candidate-discovery order and the one tier this function cannot
  * make deterministic across a filesystem re-walk. An empty harness group
- * contributes no rows at all (H5).
+ * contributes no rows at all.
  *
  * @param knownHarnessIds every registered harness id, in registry order —
  *   used only to break ties among harnesses absent from `order`.
@@ -211,18 +183,14 @@ export function orderByHarness<T extends OrderableCandidate>(
 	const seen = new Set<string>();
 
 	for (const id of order) {
-		// `seen.has(id)` guards against a DUPLICATE in `order` itself — a
-		// hand-edited or merged config.json can hold the same id twice, and
-		// without this a harness's rows would render once per occurrence
-		// (pr-review, Low). `readHarnessOrder` only filters by type, not
-		// uniqueness, so this is the one place that enforces it.
+		// Guard against a duplicate in `order` itself — a hand-edited config
+		// can hold the same id twice.
 		if (seen.has(id)) continue;
 		const list = byHarness.get(id);
 		if (list && list.length > 0) { out.push(...list); seen.add(id); }
 	}
 
-	// Unseen harnesses: registry order first (deterministic across runs),
-	// then anything left over (an external harness the registry list omitted).
+	// Unseen harnesses: registry order first, then anything left over.
 	for (const id of knownHarnessIds) {
 		if (seen.has(id)) continue;
 		const list = byHarness.get(id);

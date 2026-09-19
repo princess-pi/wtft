@@ -183,11 +183,7 @@ console.log("\n=== K6: 12-row windowing ===\n");
 }
 
 // ---
-// K7 — cursor always resets to the top row (0) after setRows, on ANY rescope
-// (pr-review round 2, Low: an earlier draft only clamped a shrinking list,
-// which left the cursor mid-list — and so mid a DIFFERENT population — after
-// a same-size-or-growing rescope; a quick rescope-then-Enter could then open
-// a session the human never looked at).
+// K7 — cursor always resets to the top row (0) after setRows, on ANY rescope.
 // ---
 console.log("\n=== K7: cursor resets to top after setRows ===\n");
 {

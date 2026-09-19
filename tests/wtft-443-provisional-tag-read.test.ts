@@ -47,14 +47,8 @@
  *   repro's own case — it never runs again, so a piggybacked marker would never
  *   be written for the exact sessions this issue is about.
  *
- *   NO SCAN WINDOW, and the assertion below is INVERTED from its first version.
- *   The reader originally scanned only the last 8KB, justified as "matching
- *   `readLastMetaOffset`". That justification does not survive contact: that
- *   function windows because it does a PARTIAL read and never loads the file,
- *   while this one has already read the whole tag to answer has-classified-data.
- *   Windowing already-in-memory content bought no I/O and cost a real failure
- *   mode — on a busy session the marker is buried within minutes, and the read
- *   would have gone false-provisional forever.
+ *   NO SCAN WINDOW: the reader already has the whole tag in memory to answer
+ *   has-classified-data, so windowing buys no I/O and can miss a buried marker.
  *
  *   Closer: a current-version tag with classified lines and no `_meta.swept`
  *   reads provisional; the same tag with the marker reads settled; a
@@ -155,13 +149,9 @@ console.log(`tagger version under test: v${WTFT_TAGGER_VERSION}`);
 }
 
 // --- The marker is POSITIONAL: it must be the last significant record -------
-// The finding that produced this, from macroscopeapp on PR #511 and verified
-// against the daemon: `sweptAtMs` was process-local while the marker persists in
-// the FILE, and `flushPending()` runs BEFORE `scanForSubAgents()` in the same
-// poll. So a new parent turn — including one that spawns a new subagent — is
-// appended after a marker left by an earlier sweep or an earlier daemon. Reading
-// "a marker exists" as "settled" then reports exit 0 for data no sweep has
-// covered: #443's own undercount, through a narrower window.
+// `flushPending()` runs BEFORE `scanForSubAgents()` in the same poll, so a new
+// parent turn can land after a marker left by an earlier sweep. Reading "a
+// marker exists" as "settled" then reports exit 0 for data no sweep has covered.
 {
 	// Marker first, classified data after it — a stale marker, by construction.
 	let body = SWEPT;
@@ -207,7 +197,7 @@ console.log(`tagger version under test: v${WTFT_TAGGER_VERSION}`);
 }
 
 // --- One read, both answers ------------------------------------------------
-// PR review round 3. readClassifiedTagFile and readTagProvisional each opened
+// readClassifiedTagFile and readTagProvisional each opened
 // the file themselves, so a caller wanting both did TWO reads with a gap. The
 // daemon is a separate OS process appending to that same file: land the
 // repaired lines AND the marker inside the gap, and the caller gets the stale

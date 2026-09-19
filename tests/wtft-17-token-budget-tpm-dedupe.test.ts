@@ -50,7 +50,8 @@ const tagPath = path.join(sandbox, `${tagBase}.wtft-tag.v9.9.9.jsonl`);
 // taking a clock parameter, so NOW must track the real wall clock, not a fixed
 // constant — a hardcoded past/future NOW makes production's age = Date.now() -
 // interaction.timestamp diverge from this fixture's age = NOW - interaction.timestamp,
-// and the divergence changes sign as real time passes the constant (PR review).
+// and the divergence changes sign as real time passes the constant
+
 const NOW = Date.now();
 
 const lines = [
@@ -64,11 +65,8 @@ const lines = [
 	// no message.id at all — passes through dedupeClassifiedById untouched.
 	{ t: NOW - 3_000, c: 0.01, m: "claude-sonnet-4-6-20250606", in: 100, cr: 0 },
 	// heartbeat — every reader skips this. Carries a real model/timestamp/cost
-	// and a token count large enough to be unmissable (PR review round 2: a
-	// bare `{ _hb: true }` is already excluded by the model/timestamp guard
-	// regardless of whether `_hb` itself is honored, so it proves nothing about
-	// that path specifically — this shape fails loud if the `_hb` skip in
-	// classifiedInteractionsFromContent ever regresses).
+	// and a token count large enough to be unmissable if the `_hb` skip in
+	// classifiedInteractionsFromContent ever regresses.
 	{ _hb: true, t: NOW - 1_000, c: 0.001, m: "claude-sonnet-4-6-20250606", in: 999_999, cr: 0 },
 ];
 fs.writeFileSync(tagPath, lines.map(l => JSON.stringify(l)).join("\n") + "\n");

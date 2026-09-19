@@ -1,7 +1,7 @@
 /**
  * @package @princess-pi/wtft
  * @module wtft-spawn-tree
- * @description Turning recorded spawn edges into money (#116, direction A).
+ * @description Turning recorded spawn edges into money.
  *   Spec: docs/spec-116-spawn-ledger.md.
  *
  *   wtft-spawn-ledger.ts owns the file; this module owns the walk. The split is
@@ -123,8 +123,8 @@ export interface SpawnTree {
 	 *  This field exists because without it an unreadable ledger produces an
 	 *  empty tree that is INDISTINGUISHABLE from "read it, this session spawned
 	 *  nothing" — which is the exact failure `spawned` is required-not-defaulted
-	 *  to prevent one layer up. A zero that might mean "could not look" is the
-	 *  silent gap #116 is about, reintroduced inside #116's own fix. */
+	 *  to prevent one layer up. A zero that might mean "could not look" is a
+	 *  silent gap. */
 	ledgerError: string | null;
 	/** Sum over RESOLVED descendants. A floor under any of FOUR conditions —
 	 *  `unattributed` non-empty, `depthCapped` non-zero, `ledgerError` non-null,
@@ -144,9 +144,9 @@ export interface SpawnTreeOptions {
 	maxDepth?: number;
 	/** Session ids whose cost is ALREADY in the caller's self total, so the walk
 	 *  must not add them again. The CLI passes the `claude -p` children the
-	 *  parent's own turns name (#138) and the Task children under
-	 *  `<session>/subagents/` (#82/#83) — the two mechanisms that fold a child
-	 *  into the parent before this walk ever runs. The walk also treats as
+	 *  parent's own turns name and the Task children under
+	 *  `<session>/subagents/` — the two mechanisms that fold a child into the
+	 *  parent before this walk ever runs. The walk also treats as
 	 *  self-attributed the `claude -p` sessions each member folded in, found by
 	 *  resolving and parsing it; a member that cannot be resolved (a Task child)
 	 *  adds nothing deeper. */
@@ -155,13 +155,12 @@ export interface SpawnTreeOptions {
 
 /** Subtract every numeric field of `from` from `into`, clamped at zero.
  *
- *  THE OPERANDS ARE NOT THE SAME AGGREGATION, and an earlier version of this
- *  docstring said they were. At the only call site, `into` is the DESCENDANT's
- *  `computeSessionSummary`, and `from` is a child's own summary as stored in
- *  `countedTotals` — a different file, folded in through `parseSessionFile` /
- *  `attributeClaudeSubAgentCosts`, which is a separate summation path that is
- *  not re-run here. So the two are expected to agree, not guaranteed to, and
- *  the clamp would hide it if they did not. */
+ *  THE OPERANDS ARE NOT THE SAME AGGREGATION. At the only call site, `into` is
+ *  the DESCENDANT's `computeSessionSummary`, and `from` is a child's own
+ *  summary as stored in `countedTotals` — a different file, folded in through
+ *  `parseSessionFile` / `attributeClaudeSubAgentCosts`, which is a separate
+ *  summation path that is not re-run here. So the two are expected to agree,
+ *  not guaranteed to, and the clamp would hide it if they did not. */
 function subtractTotals(into: TokenTotals, from: TokenTotals): void {
 	for (const key of Object.keys(into) as (keyof TokenTotals)[]) {
 		into[key] = Math.max(0, into[key] - (from[key] ?? 0));
@@ -300,32 +299,9 @@ export function computeSpawnTree(
 	// Nothing recorded for this session: no lookup, no parse.
 	if (!ledger.childrenOf.has(rootSessionId)) return tree;
 
-	// BREADTH-FIRST, and that is a correctness property rather than a taste.
-	// Depth-first marked a child `seen` at whatever depth it was first reached,
-	// which in ledger order could be depth 5 for a session also recorded
-	// directly under the root — its own children then sat at depth 6 and were
-	// cut, although they are two levels from the root. The reported tree
-	// depended on the order lines happened to be appended in. Breadth-first
-	// reaches every session at its MINIMUM depth, so the cap cuts what is
-	// genuinely deep and nothing else.
-	//
-	// `outcomeOf` starts holding the ROOT as `in-self`, which is what makes a
-	// cycle terminate and what stops a session being billed as its own
-	// descendant — its money IS the self total, so an edge pointing back at it
-	// is neither a gap nor a second count. The ids in `options.alreadyAttributed`
-	// are seeded the same way: a `claude -p` child the parent's own transcript
-	// names, or a Task child under `<session>/subagents/`, whose cost is
-	// already inside the caller's SELF total. A spawner that also records one
-	// of those as an edge would otherwise have it billed twice, once in `total`
-	// and once in `spawned.total`, and `tree` would be wrong in the expensive
-	// direction. One map, so a repeat edge can say what happened the first time
-	// instead of guessing. `visited` is the separate set of ids already queued,
-	// so an `in-self` or `folded` id is descended into exactly once however many
-	// edges point at it.
-	//
-	// `in-self` is money inside the caller's `total`; `folded` is a `claude -p`
-	// session inside a resolved descendant's total, so inside the tree's. Both
-	// add nothing when their own edge is reached, and they report different skips.
+	// `in-self` = money inside the caller's `total`; `folded` = a `claude -p`
+	// session inside a resolved descendant's total. Both add nothing when their
+	// own edge is reached, and they report different skips. See the docstring.
 	type Outcome = "counted" | "unresolved" | "in-self" | "folded";
 	const outcomeOf = new Map<string, Outcome>([[rootSessionId, "in-self"]]);
 	const foldCache = new Map<string, Set<string>>();
@@ -335,9 +311,7 @@ export function computeSpawnTree(
 	/** What each counted session contributed, so a descendant that ALSO folds it
 	 *  in can have it subtracted back out. Without this the guard is
 	 *  order-dependent: it catches a folded child the walk has not reached yet
-	 *  (mark it `in-self`) and misses one the walk reached first (its cost is
-	 *  already in `total`, and the descendant's parse adds it again). Two
-	 *  depth-1 edges in the wrong ledger order were enough. */
+	 *  and misses one the walk reached first. */
 	const countedTotals = new Map<string, TokenTotals>();
 
 	type Visit = { parentId: string; depth: number };
@@ -365,21 +339,16 @@ export function computeSpawnTree(
 			// as partial.
 			const prior = outcomeOf.get(edge.child);
 			if (prior !== undefined) {
-				// `already-counted` is a claim that the child's money landed.
-				// Where the first visit could not read it, nothing landed, so
-				// the edge repeats THAT outcome instead — and the gap is not
-				// reported twice, because it is one session, not two.
+				// `already-counted` claims the child's money landed. Where the
+				// first visit could not read it, nothing landed — repeat THAT
+				// outcome; the gap is one session, not two.
 				const skip = prior === "counted" || prior === "folded" ? "already-counted" as const
 					: prior === "in-self" ? "in-self-total" as const
 					: "already-seen-unresolved" as const;
 				tree.edges.push({ ...base, resolved: false, path: null, total: null, skip });
-				// A session reached a second time was already queued the first
-				// time, so there is nothing to queue — EXCEPT for an `in-self` or
-				// `folded` id, which was marked without being visited.
-				// Only that child's OWN transcript is inside the self total; the
-				// launcher children IT recorded are not, and dropping them loses
-				// exactly the nesting this issue expects (a `claude -p` child
-				// that dispatches its own pr-review lenses).
+				// An `in-self`/`folded` id was marked without being visited —
+				// only that child's OWN transcript is inside the self total; its
+				// launcher children are not.
 				if ((prior === "in-self" || prior === "folded") && !visited.has(edge.child)) {
 					visited.add(edge.child);
 					queue.push({ parentId: edge.child, depth: depth + 1 });
@@ -396,12 +365,8 @@ export function computeSpawnTree(
 				outcomeOf.set(edge.child, "unresolved");
 				tree.edges.push({ ...base, resolved: false, path: null, total: null, skip: "not-found" });
 				tree.unattributed.push({ child: edge.child, mechanism: edge.mechanism, ts: edge.ts, ...(edge.label !== undefined ? { label: edge.label } : {}), reason: "not-found" });
-				// KEEP WALKING. A child we cannot read may still have recorded
-				// children of its own, and those may be perfectly readable —
-				// dropping the subtree with the parent loses real, resolvable
-				// money over one lookup that came back empty. Its grandchildren
-				// are edges in the LEDGER, not entries in the file we did not
-				// find.
+				// KEEP WALKING. Grandchildren are edges in the LEDGER, not
+				// entries in the file we did not find.
 				visited.add(edge.child);
 				queue.push({ parentId: edge.child, depth: depth + 1 });
 				continue;
@@ -409,56 +374,27 @@ export function computeSpawnTree(
 
 			let total: TokenTotals;
 			try {
-				// Parse once and use it twice: for the cost, and for the ids the
-				// PARSE ITSELF folded in. `parseSessionFile` rolls this
-				// descendant's own `claude -p` and Task children into its
-				// totals, and the issue expects exactly that nesting — a
-				// launcher child dispatching its own lenses. If one of those is
-				// ALSO a ledger edge, it would be counted inside this
-				// descendant and again as its own resolved edge. The root's
-				// guard does not reach here; each descendant needs its own.
+				// Parse once: for the cost, and for ids the parse itself folded
+				// in. If a folded child is ALSO a ledger edge, it would be
+				// counted twice — each descendant needs its own guard.
 				const parsed = parseSessionFile(file);
-				// `.total` is typed `SessionTotal` (#119) — a `TokenTotals`
-				// SUPERSET carrying `untaggedCostUsd` too. TypeScript accepts
-				// the assignment structurally, but this `total` ends up
-				// serialised verbatim as `spawned.edges[].total` (below) and
-				// copied into `countedTotals` (`{...total}` a few lines down),
-				// which would leak `untaggedCostUsd` into a field the spec
-				// (spec-89 U1) says never carries it — nothing
-				// else here reaches `total` through `addTotals`/`emptyTotals`,
-				// which strip an unknown key by construction, but a direct
-				// assignment does not. Drop it explicitly (pr-review, #89/#119).
+				// Drop `untaggedCostUsd`: a direct assignment would leak it into
+				// `spawned.edges[].total` / `countedTotals`. See subtractTotals.
 				const { untaggedCostUsd: _untaggedCostUsd, ...cleanTotal } = computeSessionSummary(parsed).total;
 				total = cleanTotal;
 				for (const id of foldedTransitively(parseFoldedIds(parsed), foldCache)) {
 					const already = countedTotals.get(id);
 					if (already) {
-						// Reached as its own edge FIRST, and now folded in here
-						// as well. Its cost is already in `tree.total` (`already`
-						// is what `countedTotals` recorded for IT, after any
-						// subtraction applied during its own visit), so take it
-						// back out of this descendant's `total` rather than
-						// adding it twice. The two figures are NOT re-derived
-						// from the same summation: `already` came from running
-						// `computeSessionSummary` on the child's own file, while
-						// `total` here is this DESCENDANT's summary, which folded
-						// the child's cost in through `parseSessionFile` /
-						// `attributeClaudeSubAgentCosts` — a different path, not
-						// a re-run of `computeSessionSummary` on the child. The
-						// two are expected to agree, not guaranteed to; the
-						// Math.max(0, …) clamp below would silently hide a
-						// mismatch rather than report one.
+						// Reached as its own edge first; take it back out rather
+						// than adding twice. Operands are not the same aggregation
+						// — see subtractTotals.
 						subtractTotals(total, already);
 					} else if (!outcomeOf.has(id)) {
-						// Not reached yet — mark it, so its own edge reports
-						// `already-counted` and adds nothing.
 						outcomeOf.set(id, "folded");
 					}
 				}
 			} catch {
-				// A recorded child we CAN see and cannot read is the one skip
-				// class that is a bug rather than a fact, so it is reported as
-				// a gap with its own reason rather than folded into the others.
+				// Seen but unreadable — the one skip class that is a bug.
 				outcomeOf.set(edge.child, "unresolved");
 				tree.edges.push({ ...base, resolved: false, path: file, total: null, skip: "unreadable" });
 				tree.unattributed.push({ child: edge.child, mechanism: edge.mechanism, ts: edge.ts, ...(edge.label !== undefined ? { label: edge.label } : {}), reason: "unreadable" });

@@ -2,25 +2,16 @@
 /**
  * @package princess-pi-tools
  * @test wtft-420-subagent-call-site
- * @description #420 review (Medium/contract, bin/wtft-daemon.ts) — the
- *   "never call `attributeClaudeSubAgentCosts` over anything less than the
- *   whole file" rule (docs/wtft-incremental-render-spec.md, "Per-Call, Not
- *   Global") was enforced by a comment only:
- *   "do NOT add a second call here, that is the round-3 High"
- *   (bin/wtft-daemon.ts, the subagent re-parse loop). `seenSessionIds` (extensions/lib/wtft-parser.ts, inside attributeClaudeSubAgentCosts)
- *   is a `Set` scoped to one call, so a second production call site over a
- *   partial slice — e.g. a byte-offset reader added for the still-one-shot
- *   `claude -p` bash sub-agent path (bin/wtft-daemon.ts, #420 review)
- *   — reintroduces exactly the silent double-attribution three review rounds
- *   spent fixing (tests/wtft-270-subagent-nested-claude-attribution.test.ts),
- *   and nothing but a maintainer re-reading the comment would catch it.
+ * @description Never call `attributeClaudeSubAgentCosts` over anything less
+ *   than the whole file (docs/wtft-incremental-render-spec.md, "Per-Call, Not
+ *   Global"). `seenSessionIds` is a `Set` scoped to one call, so a second
+ *   production call site over a partial slice double-attributes.
  *
- *   This pins the invariant as a fact about the source tree, not a promise in
- *   prose: `attributeClaudeSubAgentCosts(` appears in tracked, non-generated,
- *   non-test TypeScript exactly twice — once as the function's own
- *   `export function` definition, and once as the single call site inside
- *   `parseSessionFile`, which always hands it the WHOLE parsed file. A second
- *   call site anywhere else fails this test immediately, by name and line.
+ *   Pins the invariant on the source tree: `attributeClaudeSubAgentCosts(`
+ *   appears in tracked, non-generated, non-test TypeScript exactly twice —
+ *   once as the function's own `export function` definition, and once as the
+ *   single call site inside `parseSessionFile`, which always hands it the
+ *   WHOLE parsed file. A second call site anywhere else fails this test.
  *
  * @usage bun run test wtft-420-subagent-call-site
  */
@@ -52,7 +43,8 @@ function assert(label: string, ok: boolean, detail = ""): void {
 // NOT walked at all — that is the whole reason a test exercising the function
 // directly (none does today) cannot trip this guard. An earlier version of this
 // comment claimed tests were "walked separately below", which sent a reader
-// looking for handling that was never written (PR review, #420).
+// looking for handling that was never written
+
 function walkTsFiles(dir: string, out: string[] = []): string[] {
 	for (const entry of readdirSync(dir)) {
 		if (entry === "node_modules" || entry === ".git" || entry.startsWith(".claude")) continue;

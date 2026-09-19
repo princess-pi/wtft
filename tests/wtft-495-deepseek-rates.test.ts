@@ -19,25 +19,21 @@
  *
  * `CARD_BEFORE_2026_08_16` is NOT from that scrape and cannot be: DeepSeek
  * publishes one card, the current one. Those numbers are the superseded card,
- * transcribed from issue #495's own table (which measured them against 854 live
- * turns). Read the fixture for its extent rather than trusting a count here —
- * this sentence has carried a stale one twice, and #100 added a third model to
- * that table while the count above it still said two. Said plainly because "every number comes from the scrape"
- * was written here first and was false.
+ * transcribed from issue #495's own table. Read the fixture for its extent
+ * rather than trusting a count here.
  *
- * #100 made the 2026-08-25 scrape a SUPERSEDED card too, so the same sentence
- * now applies to it: on 2026-09-10T04:00Z V4.1 Flash retired the whole V4 Flash
- * line, and on 2026-09-14T04:00Z it takes over `deepseek-v4-pro` as well. The
- * current card comes from a second committed scrape,
+ * #100 made the 2026-08-25 scrape a SUPERSEDED card too: on 2026-09-10T04:00Z
+ * V4.1 Flash retired the whole V4 Flash line, and on 2026-09-14T04:00Z it takes
+ * over `deepseek-v4-pro` as well. The current card comes from a second
+ * committed scrape,
  * `research/100-deepseek-v41-flash/pricing-page-2026-09-10.md`, which IS in this
  * repo.
  *
  * All four entries carry ONE standard row, so a current-card numeric check would
  * pass against the wrong entry — which is why the identity assertions matter
- * more than the numeric ones here. Stated exactly, because an earlier draft said
- * "every numeric check would pass on the wrong entry": the DATED windows still
- * discriminate, so the before-cutover cases and the $2.64 v4-pro case do bite on
- * identity. It is the current-card cases that cannot.
+ * more than the numeric ones here. The DATED windows still discriminate, so the
+ * before-cutover cases and the $2.64 v4-pro case do bite on identity. It is the
+ * current-card cases that cannot.
  *
  * Every timestamp is explicit. Resolution must read the passed timestamp and
  * never the host clock (#96: a dated DeepSeek surge test that read Date.now()
@@ -200,8 +196,7 @@ describe("#495 DeepSeek rate card, as of 2026-08-16 and before it", () => {
 // to the same quad, and a numeric assertion at such an instant would pass against
 // the wrong entry — which is what the identity assertions are for. The dated
 // windows still discriminate, so the before-cutover cases and the $2.64 v4-pro
-// case do bite on identity; only the current-card cases cannot. Said the same way
-// as the file header, which corrects an earlier draft that overstated it here.
+// case do bite on identity; only the current-card cases cannot.
 
 // 1M cache-miss input + 1M output, the shape #100's closer prices. No cache
 // reads: the cache-hit rate moved too, and mixing it in would let a wrong hit
@@ -238,9 +233,7 @@ describe("#100 deepseek-flash is priced from its own entry, not guessed", () => 
 		// trusting the sort: longest-first only settles a tie between keys that
 		// BOTH match, and the point is that neither id can match both keys.
 		//
-		// Read the keys OUT OF THE REGISTRY. An earlier draft compared two string
-		// literals, which is a fact about this file rather than about the code —
-		// it passed unchanged with both entries deleted.
+		// Read the keys OUT OF THE REGISTRY, not as string literals in this file.
 		const flash = Object.keys(MODEL_PRICING).find(k => k === "deepseek-flash");
 		const v4 = Object.keys(MODEL_PRICING).find(k => k === "deepseek-v4-flash");
 		assert.ok(flash && v4, "both keys must exist for this to be testing anything");
@@ -265,9 +258,7 @@ describe("#100 deepseek-flash is priced from its own entry, not guessed", () => 
 	});
 
 	it("prices 1M cache-miss in + 1M out at $0.75 off-peak", () => {
-		// The expected figure comes from the card, not a second hardcoded 0.75 —
-		// an earlier draft asserted the literal while the failure message quoted
-		// the card, so editing the fixture desynced the two without going red.
+		// The expected figure comes from the card, not a second hardcoded 0.75.
 		const want = priceMTokFromCard(CARD_V41_FLASH);
 		assert.strictEqual(want, 0.75, "the card should still sum to the figure #100's Closer names");
 		const cost = calculateClaudeCost("deepseek-flash", MTOK_IN_OUT, AFTER_V41_FLASH);

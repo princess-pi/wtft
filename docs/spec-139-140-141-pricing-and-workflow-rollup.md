@@ -90,7 +90,8 @@ Notes:
 ### #141 — workflow transcript discovery
 
 `walkSubagentDir` (`extensions/lib/wtft-parser.ts`) recurses into **all**
-subdirectories instead of only `subagents`/`ns`/`agent-*`, and the `agent-*.jsonl` file
+real subdirectories — a symlinked one is never entered — instead of only
+`subagents`/`ns`/`agent-*`, and the `agent-*.jsonl` file
 filter still gates what is collected. (The depth cap was later removed: each directory
 is visited once by real path, which bounds the walk without cutting transcripts off.) This picks up
 `subagents/workflows/wf_<runId>/agent-*.jsonl` and future harness layout changes.

@@ -515,9 +515,9 @@ export function parseSessionFile(filePath: string): Interaction[] {
 // ---
 // UNCOUNTED BILLABLES (#149) — naming the blind spot instead of estimating it
 //
-// Measured over seven status-line-logged sessions: 4.72% of Claude Code's own
-// `total_cost_usd` ($6.49 of $137.71) is spend the transcript records no `usage`
-// for. It is not an arithmetic error — #146's per-turn formula reproduces Claude
+// Part of Claude Code's own `total_cost_usd` is spend the transcript records no
+// `usage` for (measured in docs/spec-149-compaction-cost-scope.md).
+// It is not an arithmetic error — #146's per-turn formula reproduces Claude
 // Code's counter to 4 decimal places — it is SCOPE. Two of the generating events
 // do leave a marker entry behind, so wtft can count them even though it can
 // never price them: `/compact` ($0.673267 measured on one Opus-5 compaction) and
@@ -1628,16 +1628,28 @@ export function loadSubagentInteractions(
 	classifyFn = classifyInteraction,
 	dedupFn = deduplicateInteractions,
 ): Interaction[] {
+	return loadSubagentInteractionsChecked(subagentFiles, parseFn, classifyFn, dedupFn).interactions;
+}
+
+/** {@link loadSubagentInteractions}, plus the files it dropped. A file
+ *  discovery listed can still fail to read, and only this call sees that. */
+export function loadSubagentInteractionsChecked(
+	subagentFiles: string[],
+	parseFn = parseSessionFile,
+	classifyFn = classifyInteraction,
+	dedupFn = deduplicateInteractions,
+): { interactions: Interaction[]; dropped: string[] } {
 	const interactions: Interaction[] = [];
+	const dropped: string[] = [];
 	for (const file of subagentFiles) {
 		try {
 			const raw = parseFn(file);
 			const deduped = dedupFn(raw);
 			clearSubagentCacheMiss(deduped);
-			for (const interaction of deduped) {
-				interaction._cat = classifyFn(interaction);
-				interactions.push(interaction);
-			}
+			for (const interaction of deduped) interaction._cat = classifyFn(interaction);
+			// Pushed only once the whole file classified, so a file in
+			// `dropped` contributes nothing to `interactions`.
+			for (const interaction of deduped) interactions.push(interaction);
 		} catch (err) {
 			// #457 — a nested parse throw drops the WHOLE file's cost here, so
 			// the skip must not be silent: the daemon's parse handler is loud
@@ -1645,9 +1657,10 @@ export function loadSubagentInteractions(
 			// Same class phrase, file named, latched per file per process (the
 			// TUI re-reads interactions on every widget refresh).
 			warnUnreadableTranscript(file, "or parsed", err);
+			dropped.push(file);
 		}
 	}
-	return interactions;
+	return { interactions, dropped };
 }
 
 // ---

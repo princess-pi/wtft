@@ -9,7 +9,7 @@ import {
 	renderTokenSummary,
 	deduplicateInteractions,
 	discoverSubagentSessionFiles,
-	loadSubagentInteractions,
+	loadSubagentInteractionsChecked,
 	getTerminalWidth,
 	getVisualLength,
 	readClassifiedTagFile,
@@ -40,13 +40,18 @@ import {
 // ---
 let _currentThinkingLevel: string | undefined;
 
-// Round 10 (macroscope, Medium): the widget's own surface for unreadable
-// transcripts. The parser warns on stderr (latched once per file), but this
-// extension's stderr is not a user surface — the finding was that the TUI
-// showed a settled-looking total while discovery reported an unreadable
-// transcript. Set by readInteractions on every render pass; read by
-// updateWtftWidget after building the lines.
+// The widget's own surface for a transcript that went uncounted: the parser
+// warns on stderr, which the TUI never shows. Set by readInteractions on every
+// render pass; read by updateWtftWidget after building the lines.
 let _subagentUnreadable = false;
+const PROVISIONAL_LINE = "\x1b[33m⚠ some transcripts could not be counted — total is provisional\x1b[0m";
+
+/** `text` plus the provisional line when the last `readInteractions` dropped a
+ *  transcript — for the surfaces that print a total outside the widget. */
+function withProvisionalLine(text: string): string {
+	return _subagentUnreadable ? `${text}\n${PROVISIONAL_LINE}` : text;
+}
+
 // The files the render's own discovery listed, so the spawn tree does not
 // walk the same directory a second time.
 let _subagentFiles: string[] = [];
@@ -145,11 +150,7 @@ function getSettings(_ctx: any) {
 // ---
 
 // ---
-// SUBAGENT SESSION MERGE INTO SELF (#83)
-// Subagent discovery and loading are shared with the CLI via
-// extensions/lib/wtft-parser.ts (discoverSubagentSessionFiles,
-// loadSubagentInteractions).
-//
+// SUBAGENT SESSION MERGE INTO SELF
 // Two discovery patterns:
 //   1. Claude Code: <session>/subagents/agent-*.jsonl (recursive)
 //   2. Pi (pre-emptive): sibling files with parentSession header match
@@ -158,24 +159,16 @@ function getSettings(_ctx: any) {
 /** The spawn tree for the session this widget is rendering (#116).
  *
  *  `computeSpawnTree` reports a ledger it could not read as `ledgerError`
- *  rather than throwing, and the renderer prints that as its own block — so the
- *  widget shows the failure, it does not hide it. The catch here has no named
- *  reachable case: `resolveSessionById` wraps its `statSync` in try/catch,
- *  `resolveSessionFile` catches every harness's throw, `computeSpawnTree`
- *  catches both the ledger read and the parse, and
- *  `collectSelfAttributedSessionIds` catches its own discoveries — every path
- *  below this call already turns a failure into a value. It stays as a
- *  last-resort guard anyway, because a widget refresh running every turn must
- *  not take the panel down if one of those guarantees turns out to be wrong;
- *  there, the block is simply absent. */
+ *  rather than throwing, so the widget shows that failure instead of hiding it.
+ *  The catch has no reachable case left; it stays because a widget refresh
+ *  running every turn must not take the panel down. */
 function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | undefined {
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	if (!sessionFile) return undefined;
 	try {
-		// The SAME double-count guard the CLI passes. `readInteractions` merges
+		// The same double-count guard the CLI passes: `readInteractions` merges
 		// every subagent session into SELF, so a spawner that also records one
-		// as a ledger edge would have the widget count it in TOTAL and again in
-		// SPAWNED. This surface had no guard at all until the PR review asked.
+		// as a ledger edge would bill it in TOTAL and again in SPAWNED.
 		return computeSpawnTree(path.basename(sessionFile).replace(/\.jsonl$/i, ""), {
 			alreadyAttributed: collectSelfAttributedSessionIds(sessionFile, interactions, _subagentFiles),
 		});
@@ -187,6 +180,7 @@ function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | und
 /** Read interactions from the daemon's classified tag file (#92),
  *  merged with subagent session interactions (#83, #82). */
 function readInteractions(ctx: any): Interaction[] {
+	_subagentUnreadable = false;
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	if (!sessionFile) return [];
 	const tagPath = getTagPath(sessionFile);
@@ -197,18 +191,9 @@ function readInteractions(ctx: any): Interaction[] {
 	// whole Task/agent subtree. The parser warned once per dir (latched);
 	// render main interactions only rather than crash the widget on every
 	// refresh.
-	// Round 10: the flag is per-render — every pass re-reads discovery.
-	_subagentUnreadable = false;
 	let subagentFiles: string[] = [];
 	_subagentFiles = subagentFiles;
 	try {
-		// Round 6: discovery returns { files, unreadable } — the readable
-		// siblings still render (partial progress); the per-file failure was
-		// already warned once by the parser (latched). Round 10: the report
-		// DOES need an action here — stderr is not a user surface, so the
-		// widget appends a warning line whenever discovery reports an
-		// unreadable transcript. Only the DIR-level failure still throws,
-		// and it degrades to main interactions below.
 		const discovered = discoverSubagentSessionFiles(sessionFile);
 		subagentFiles = discovered.files;
 		_subagentFiles = subagentFiles;
@@ -218,7 +203,9 @@ function readInteractions(ctx: any): Interaction[] {
 	}
 	if (subagentFiles.length === 0) return mainInteractions;
 
-	const subInteractions = loadSubagentInteractions(subagentFiles);
+	const loaded = loadSubagentInteractionsChecked(subagentFiles);
+	if (loaded.dropped.length > 0) _subagentUnreadable = true;
+	const subInteractions = loaded.interactions;
 	if (subInteractions.length === 0) return mainInteractions;
 
 	// Merge chronologically — subagent turns interleave with parent turns
@@ -306,7 +293,7 @@ function updateWtftWidget(
 			? [emptyLine, parserStatusStr.trim()]
 			: [emptyLine];
 		if (_subagentUnreadable) {
-			widgetLines.push("\x1b[33m⚠ some transcripts unreadable — total is provisional\x1b[0m");
+			widgetLines.push(PROVISIONAL_LINE);
 		}
 		ctx.ui.setWidget("wtft", widgetLines, { placement: "belowEditor" });
 		return;
@@ -333,7 +320,7 @@ function updateWtftWidget(
 	}
 
 	if (_subagentUnreadable) {
-		lines.push("\x1b[33m⚠ some transcripts unreadable — total is provisional\x1b[0m");
+		lines.push(PROVISIONAL_LINE);
 	}
 
 	ctx.ui.setWidget("wtft", lines, { placement: "belowEditor" });
@@ -492,7 +479,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				const interactions = readInteractions(ctx);
 				const deduped = deduplicateInteractions(interactions);
 				const output = renderOtherHistogram(deduped, Math.max(current.width, 40));
-				ctx.ui.notify(output, "info");
+				ctx.ui.notify(withProvisionalLine(output), "info");
 				return;
 			}
 
@@ -516,7 +503,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				// the issue is about, and omitting it here would recreate it on
 				// the surface Duppy actually looks at.
 				const output = renderTokenSummary(interactions, Math.max(current.width, 40), budget, undefined, widgetSpawnTree(ctx, interactions));
-				ctx.ui.notify(output, "info");
+				ctx.ui.notify(withProvisionalLine(output), "info");
 				return;
 			}
 		}
@@ -549,9 +536,10 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				});
 
 				if (!lines || lines.length === 0) {
-					ctx.ui.notify("No cost history found to display in the pager.", "warning");
+					ctx.ui.notify(withProvisionalLine("No cost history found to display in the pager."), "warning");
 					return;
 				}
+				if (_subagentUnreadable) lines.push(PROVISIONAL_LINE);
 
 				// Launch TUI custom pager overlay
 				await ctx.ui.custom((tui, _theme, _keybindings, done) => {

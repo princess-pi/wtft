@@ -2,19 +2,11 @@
 /**
  * @package @princess-pi/wtft
  * @test wtft-own-config-dir
- * @description wtft reads and writes its own config, not princess-pi-tools's
- *   (princess-pi/wtft#156). Named without the issue number on purpose —
- *   `tests/wtft-issue-156-harness-seam.test.ts` already claims "#156" for an
- *   unrelated, pre-extraction princess-pi-tools issue of the same number
- *   (see `extensions/lib/harness/registry.ts`'s own header); reusing the
- *   digits here would be the exact ambiguity CONTEXT.md's two-register
- *   convention exists to avoid.
+ * @description wtft reads and writes its own config, not princess-pi-tools's.
  *
- *   Four things pinned, matching the issue's Closer exactly:
  *   1. No source file under extensions/ or bin/ builds a config PATH out of
- *      "princess-pi-tools" any more (a textual scan, allowlisted for the
- *      provenance tags and the one unrelated example path that legitimately
- *      still name the string).
+ *      "princess-pi-tools" (textual scan, allowlisted for provenance tags and
+ *      unrelated example paths that legitimately still name the string).
  *   2. An XDG fixture reads wtft/config.json and ignores a
  *      princess-pi-tools/wtft.json sitting right beside it — no fallback.
  *   3. Walk-up finds `<fixture>/.wtft/config.json` from a subdirectory.

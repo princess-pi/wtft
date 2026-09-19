@@ -12,6 +12,10 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
 - **The README is tested.** `tests/wtft-75-doc-claims.test.ts` checks README flags against the
   parser, and `install-wtft` exit codes against the script, so a README edit can fail the suite.
 - **Shared code goes in `@princess-pi/libs`**, never copied in.
+- **Spec-reconcile does not treat comments as spec** (#183). Reconcile: manifests,
+  `--help`, README flags/exit codes, JSON schema, tag-format, user-facing strings.
+  Not banner comments, not test-header novels, not glossary provenance, not counts
+  in prose. A stale comment is deleted, never reworded.
 
 ## Commands
 

@@ -1,7 +1,7 @@
 /**
- * @package princess-pi-tools
+ * @package @princess-pi/wtft
  * @module harness/types
- * @description The two interfaces every harness implements (#156).
+ * @description The two interfaces every harness implements.
  *
  * This file is the seam. Everything on the far side of it — the `Interaction`
  * type, cost calculation, classification, the meter-split, dedup, tag
@@ -29,11 +29,10 @@ export interface SessionCandidate {
 }
 
 /**
- * How far `discover` looks, and how it costs what it looks at (#89).
+ * How far `discover` looks, and how it costs what it looks at.
  *
  *   "worktree"  — the default: folder-name match on `targetCwd` ALONE. No
- *                  fan-out, no union (last-cwd) arm. This is what makes the
- *                  default picker ~7 ms — readdir + stat, nothing more.
+ *                  fan-out, no union (last-cwd) arm.
  *   "worktrees" — Ctrl+W: folder match across every checkout of the target's
  *                  repo (`fanOutCwd`), PLUS the union arm — a session whose
  *                  own recorded last cwd resolves into one of those checkouts,
@@ -75,23 +74,16 @@ export interface HarnessDiscovery {
 	 *   `discoverLegacy`); Claude Code has always been cwd-scoped and falls
 	 *   back to `process.cwd()` instead (`harness/claude-code/discovery.ts`'s
 	 *   `discover`). See `docs/adding-a-harness.md` §1.
-	 * @param scopeOpts omitted → the PRE-#89 default behaviour, preserved
-	 *   exactly for every caller that does not opt in — the #156 union arm and
-	 *   unbounded time for both built-ins, PLUS worktree fan-out for Claude
-	 *   Code specifically (Pi's legacy default has never fanned out; see
-	 *   `discoverLegacy` in each harness's own discovery.ts) — this is what
-	 *   keeps `tests/wtft-issue-144-145-164-session-discovery.test.ts` and
-	 *   `tests/wtft-issue-156-harness-seam.test.ts`'s assertions about the
-	 *   default unchanged.
-	 *   `bin/wtft.ts` passes `{ scope: "worktree", windowMs: TIME_WINDOW_MS["20m"] }`
-	 *   as the picker's starting population, and the picker's rescopes pass
-	 *   their own.
+	 * @param scopeOpts omitted → each harness's legacy default (union arm and
+	 *   unbounded time for both built-ins, plus worktree fan-out for Claude
+	 *   Code; Pi's legacy default has never fanned out). `bin/wtft.ts` passes
+	 *   `{ scope: "worktree", windowMs: TIME_WINDOW_MS["20m"] }` as the
+	 *   picker's starting population, and the picker's rescopes pass their own.
 	 */
 	discover(targetCwd: string | null, scopeOpts?: DiscoverScopeOptions): SessionCandidate[];
 	/**
 	 * Resolve a session id to its current transcript path, wherever it now
-	 * lives. This is the primitive the daemon's follow-on-move needs (#155):
-	 * a moved session keeps its id and loses its path.
+	 * lives. A moved session keeps its id and loses its path.
 	 */
 	resolveSessionById(sessionId: string): string | null;
 }
@@ -106,7 +98,7 @@ export interface NormalizedUsage {
 	output_tokens: number;
 	cache_creation_input_tokens: number;
 	cache_read_input_tokens: number;
-	/** Raw cache_creation sub-object for the TTL split (#55), or null. */
+	/** Raw cache_creation sub-object for the TTL split, or null. */
 	cache_creation: any | null;
 	reasoning_tokens: number;
 	server_tool_use: { web_search_requests?: number; web_fetch_requests?: number } | null;
@@ -165,15 +157,13 @@ export type ControlSignal =
 	| { kind: "interrupt" };
 
 /**
- * A class of API call the harness BILLS FOR but writes no `usage` object for
- * (#149). Counted, never priced — see `docs/spec-149-compaction-cost-scope.md`.
+ * A class of API call the harness BILLS FOR but writes no `usage` object for.
+ * Counted, never priced — see `docs/spec-149-compaction-cost-scope.md`.
  *
- * `compaction` — the call that produces a `/compact` summary. Measured
- *   $0.673267 on one Opus-5 compaction; the transcript's `compactMetadata`
- *   describes the resulting CONTEXT, never the call that produced it.
- * `recap` — the "while you were away" summary. Every recap in the logged
- *   sessions coincided 1:1 with an unexplained step in Claude Code's own cost
- *   counter (3/3, 6/6, 3/3, 3/3 across four sessions).
+ * `compaction` — the call that produces a `/compact` summary. The transcript's
+ *   `compactMetadata` describes the resulting CONTEXT, never the call that
+ *   produced it.
+ * `recap` — the "while you were away" summary.
  */
 export type UncountedBillableClass = "compaction" | "recap";
 
@@ -187,14 +177,12 @@ export interface HarnessParseAdapter {
 	/** Recognize a stream-control entry. Null when the entry is not one. */
 	readControlEntry(entry: any): ControlSignal | null;
 	/**
-	 * Recognize an entry that stands for a billed API call carrying no `usage`
-	 * (#149). Measured: 4.72% of Claude Code's own `total_cost_usd` across seven
-	 * logged sessions is spend of this kind. wtft counts these so the omission is
-	 * NAMED rather than silent; it never prices them, because the numbers reach
-	 * no file any parser can read.
+	 * Recognize an entry that stands for a billed API call carrying no `usage`.
+	 * wtft counts these so the omission is NAMED rather than silent; it never
+	 * prices them, because the numbers reach no file any parser can read.
 	 *
-	 * Optional so out-of-tree harnesses registered through the #156 seam stay
-	 * valid unchanged — a harness that omits it simply reports no blind spot.
+	 * Optional so out-of-tree harnesses stay valid unchanged — a harness that
+	 * omits it simply reports no blind spot.
 	 */
 	readUncountedBillable?(entry: any): UncountedBillableClass | null;
 }

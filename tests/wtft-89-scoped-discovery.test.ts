@@ -137,12 +137,9 @@ console.log("\n=== S2: 'worktrees' scope fans out and unions, bounded by window 
 		const projects = path.join(sandbox, "projects");
 		fs.mkdirSync(projects, { recursive: true });
 
-		// Filed under a slug OUTSIDE the fan-out set entirely (pr-review, Low:
-		// the earlier fixture filed it under the CLONE's own slug, which is
-		// itself a fan-out target — a physical-slug match, not the union arm —
-		// so the assertion below passed without the arm under test ever
-		// running). Only its LAST RECORDED cwd, the worktree, is a fan-out
-		// target, so only `matchesRecordedCwd`'s tail read can find this one.
+		// Filed under a slug OUTSIDE the fan-out set entirely. Only its LAST
+		// RECORDED cwd, the worktree, is a fan-out target, so only
+		// `matchesRecordedCwd`'s tail read can find this one.
 		const elsewhereDir = path.join(sandbox, "not-a-checkout-of-this-repo");
 		const wandered = path.join(projects, cwdToStrictSlug(elsewhereDir), "wandered.jsonl");
 		writeTranscript(wandered, repo.worktree);
@@ -316,21 +313,12 @@ console.log("\n=== S7: Pi worktree/branch derivation ===\n");
 }
 
 // ---
-// S1 (Pi) — 'worktree' scope matches EXACTLY, not by containment (pr-review
-// round 1, Medium: the first cut reused Pi's fan-out containment test for
-// every scope, so a default-scope picker over-matched any sibling project
-// sharing a name prefix, and every in-tree worktree's own sessions).
+// S1 (Pi) — 'worktree' scope matches EXACTLY, not by containment.
 //
-// Directory names below are written literally — the SAME real shape
-// tests/wtft-89-scoped-discovery.test.ts's own S7 section and
-// docs/EXT_WTFT.html use (`--home-<user>-git-projects-<project>--`) — rather
-// than built from `cwdToSlug(target)` the way the matcher itself computes a
-// variant. Building the fixture and the matcher from the same expression is
-// exactly how pr-review round 1's version of this test passed against a
-// matcher that built the WRONG wrapped string (three leading dashes instead
-// of Pi's real two — round 2, High): the fixture and the bug agreed with
-// each other. A literal, independently-written real-shaped name is what
-// actually exercises the matcher against the shape it will see on disk.
+// Directory names below are written literally — the real shape
+// (`--home-<user>-git-projects-<project>--`) — rather than built from
+// `cwdToSlug(target)`. A literal, independently-written name exercises the
+// matcher against the shape it will see on disk.
 // ---
 console.log("\n=== S1 (Pi): 'worktree' scope is exact, not containment ===\n");
 {

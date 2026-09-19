@@ -1,26 +1,12 @@
 /**
- * @package @princess-pi/wtft
- * @module wtft-json
- * @description `wtft --json` — the machine-readable session summary (#26).
- *   Spec: docs/spec-26-json.md.
+ * `wtft --json` — serialises; does not aggregate.
+ * Spec: docs/spec-26-json.md.
  *
- *   This module SERIALISES; it does not aggregate. Every number here comes from
- *   `computeSessionSummary` in wtft-renderer.ts, which is also what the rendered
- *   `--tokens` table formats. A second aggregation written for this path is the
- *   exact drift the issue exists to prevent, so there is none. That holds for
- *   `spawned` too (#116): the walk gives each descendant's total to the same
- *   `computeSessionSummary`, so there is no second aggregation.
- *
- *   `tree` is NOT a plain addition of two of those results, and an earlier
- *   version of this paragraph said it was. `computeSpawnTree` also runs
- *   `subtractTotals`, clamped at zero, whenever a descendant folds in a session
- *   already counted — arithmetic performed outside the aggregation. The
- *   guarantee that survives is the one that matters: nothing here counts a turn
- *   a second way. The guarantee that does not is "addition only".
- *
- *   Field names and exit codes are versioned API; the strings inside
- *   `notices[].text` are prose and may be reworded freely. A consumer branches
- *   on `notices[].code`.
+ * Every number comes from `computeSessionSummary` in wtft-renderer.ts, the same
+ * aggregation the `--tokens` table formats. `tree` is not a plain addition:
+ * `computeSpawnTree` also runs `subtractTotals` when a descendant folds in a
+ * session already counted. Field names and exit codes are versioned API;
+ * `notices[].text` is disposable prose. A consumer branches on `notices[].code`.
  */
 
 import { computeSessionSummary, type ModelTotals, type CategoryTotals, type TokenTotals, type SessionTotal } from "./wtft-renderer.js";
@@ -29,16 +15,8 @@ import type { Interaction } from "./wtft-shared.js";
 import type { UncountedBillables, SubagentMeta } from "./wtft-parser.ts";
 import type { TagProvisional } from "./wtft-daemon-lib.js";
 
-/** Bumped when a key is ADDED — top-level OR nested — or changes shape.
- *  Prose never bumps it. (Corrected, pr-review round 3: an earlier draft of
- *  this docstring said "top-level key", then immediately justified `@4` by a
- *  NESTED addition — the stated rule and the stated reason for the very bump
- *  it introduces disagreed. `@4` (#89, #119) adds `total.untaggedCostUsd`,
- *  one level down from `total`; Amendment 1's "adding keys is the documented
- *  bump condition" applies at any depth, per Duppy, 2026-09-18, answer Y.)
- *
- *  A consumer pins this string to know which keys it may rely on; the per-key
- *  contract is docs/spec-26-json.md. */
+/** Bumped when a key is added — top-level or nested — or changes shape.
+ *  Prose never bumps it. Contract: docs/spec-26-json.md. */
 export const WTFT_JSON_SCHEMA = "wtft/session@4";
 
 /**
@@ -50,9 +28,6 @@ export const WTFT_JSON_SCHEMA = "wtft/session@4";
  * correlating two streams.
  */
 export interface WtftNotice {
-	// "auto-selected-session" was retired in `@4` (#89, Amendment 3): with no
-	// interactive terminal, wtft no longer auto-picks the newest session — see
-	// EXIT_SESSION_AMBIGUOUS in bin/wtft.ts.
 	code: "pending-session" | "no-data" | "unpriced-model" | "provisional" | "subagent-meta-unreadable";
 	text: string;
 }
@@ -72,49 +47,32 @@ export interface WtftSessionJson {
 	schema: typeof WTFT_JSON_SCHEMA;
 	session: WtftSessionIdentity;
 	provisional: TagProvisional;
-	/** SELF: this session's own turns. Unchanged by #116. Carries
-	 *  `untaggedCostUsd` beside `costUsd` since `@4` (#119) — see
-	 *  `SessionTotal`'s own docstring in wtft-renderer.ts for why this is a
-	 *  distinct type from the `TokenTotals` every other total field reuses. */
+	/** SELF: this session's own turns. Distinct from `TokenTotals` because it
+	 *  carries `untaggedCostUsd` beside `costUsd`. */
 	total: SessionTotal;
 	models: ModelTotals[];
 	categories: CategoryTotals[];
 	uncounted: UncountedBillables;
-	/** The recorded lineage (#116): every descendant reached through the spawn
-	 *  ledger, each edge's provenance, and every gap the walk could not close. */
+	/** Every descendant reached through the spawn ledger, each edge's
+	 *  provenance, and every gap the walk could not close. */
 	spawned: SpawnTree;
-	/** SELF + RESOLVED descendants, as a field — so a consumer never adds two
-	 *  numbers and has to work out for itself whether it double-counted. Over
-	 *  the six token and cost fields only: `untaggedCostUsd` is not carried,
-	 *  for self or for descendants.
-	 *
-	 *  A FLOOR whenever anything went uncounted, and there are FOUR conditions,
-	 *  not one: `spawned.unattributed` is non-empty, `spawned.depthCapped` is
-	 *  non-zero, `spawned.ledgerError` is non-null, or
-	 *  `spawned.malformedLedgerLines` is non-zero.
-	 *
-	 *  The last two are the traps. An unreadable ledger sets none of the others,
-	 *  so a consumer checking only those reads a zeroed tree as a complete
-	 *  lineage. And a malformed line WAS a record: its edge is lost, it appears
-	 *  in no `unattributed` entry, and the count is the only trace of it. The
-	 *  fourth condition was missing from every surface until round 5. */
+	/** SELF + resolved descendants. Over the six token and cost fields only
+	 *  (`untaggedCostUsd` is not carried). A floor whenever
+	 *  `spawned.unattributed` is non-empty, `spawned.depthCapped` is non-zero,
+	 *  `spawned.ledgerError` is non-null, or `spawned.malformedLedgerLines` is
+	 *  non-zero — the last two set none of the others, so a consumer checking
+	 *  only those reads a zeroed tree as a complete lineage. */
 	tree: TokenTotals;
-	/** #137. ABSENT rather than empty whenever discovery could not give a
-	 *  complete answer, so `[]` always means "looked, found none". */
+	/** Absent rather than empty whenever discovery could not give a complete
+	 *  answer, so `[]` always means "looked, found none". */
 	subagents?: WtftSubagentJson[];
 	compaction: { events: number; tokensFreed: number };
 	untaggedInteractions: number;
 	notices: WtftNotice[];
 }
 
-/** One subagent transcript this session spawned — a Claude Code Task child OR a
- *  Pi `parentSession` sibling — named from the `.meta.json` where the harness
- *  wrote one. Pi siblings never have one, so they are rows with `meta: null`
- *  (#137).
- *
- *  `meta` is null wherever there is no readable meta. That null is a missing
- *  LABEL, not a missing subagent — the row is still a real subagent. It says
- *  nothing either way about whether the cost is in `total`. */
+/** One subagent transcript this session spawned. `meta` null is a missing
+ *  label, not a missing subagent — the row is still real. */
 export interface WtftSubagentJson {
 	/** Always present: the transcript, which is what the cost comes from. */
 	transcript: string;
@@ -127,23 +85,13 @@ export interface BuildSessionJsonInput {
 	interactions: Interaction[];
 	session: WtftSessionIdentity;
 	provisional: TagProvisional;
-	/** The #149 blind spot. REQUIRED, and deliberately not defaulted: a zeroed
-	 *  default made "nobody scanned" indistinguishable from "scanned, found
-	 *  none", which is exactly the silent blind spot this field exists to end.
-	 *  The type is the enforcement — a caller with nothing to report passes
-	 *  `newUncountedBillables()` and means it. (PR review, Medium/contract.) */
+	/** Required, not defaulted: a zeroed default made "nobody scanned"
+	 *  indistinguishable from "scanned, found none". */
 	uncounted: UncountedBillables;
-	/** REQUIRED, and deliberately not defaulted, for the same reason `uncounted`
-	 *  is (#149): an empty tree defaulted in would make "nobody read the spawn
-	 *  ledger" indistinguishable from "read it, this session spawned nothing" —
-	 *  and the first of those is exactly the silent gap #116 exists to end. A
-	 *  caller with nothing to report passes an empty `computeSpawnTree` result
-	 *  and means it. */
+	/** Required, not defaulted: an empty default made "nobody read the spawn
+	 *  ledger" indistinguishable from "read it, spawned nothing". */
 	spawned: SpawnTree;
-	/** #137. Omitted (not `[]`) whenever discovery could not give a complete
-	 *  answer, for the same reason `uncounted` is not defaulted: `[]` from a
-	 *  caller that did not look is indistinguishable from a session with no
-	 *  subagents. `buildSessionJson` emits the key only when it is given one. */
+	/** Omitted (not `[]`) whenever discovery could not give a complete answer. */
 	subagents?: WtftSubagentJson[];
 	notices?: WtftNotice[];
 }

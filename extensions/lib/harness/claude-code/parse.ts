@@ -1,7 +1,7 @@
 /**
- * @package princess-pi-tools
+ * @package @princess-pi/wtft
  * @module harness/claude-code/parse
- * @description Claude Code transcript schema — and nothing else (#156).
+ * @description Claude Code transcript schema — and nothing else.
  *
  * Everything this file knows is where a field lives. What the numbers *mean*
  * (pricing, cache observation, classification, the meter-split) is shared and
@@ -76,7 +76,6 @@ export const parse: HarnessParseAdapter = {
 			const p = args.file_path || args.path || args.target;
 			if (p) files.push({ path: p, action: "write" });
 		} else if (name === "notebookedit") {
-			// Notebook edits classify by path like any other file write (#52)
 			if (args.notebook_path) files.push({ path: args.notebook_path, action: "write" });
 		} else if (name === "bash" || name === "run") {
 			if (args.command) commands.push(args.command);
@@ -90,11 +89,11 @@ export const parse: HarnessParseAdapter = {
 	readControlEntry(entry: any): ControlSignal | null {
 		if (!entry) return null;
 		// Compact summary marker → flag the next assistant interaction for the
-		// compaction meter-split (#52 Phase 3).
+		// compaction meter-split.
 		if (entry.isCompactSummary === true) return { kind: "after-compaction" };
 		// User interrupt marker → the PRECEDING assistant turn was killed; its
-		// whole cost is discarded work (#52 Phase 3). Only user-entry content
-		// counts — the literal inside a tool result must not reclassify anything.
+		// whole cost is discarded work. Only user-entry content counts — the
+		// literal inside a tool result must not reclassify anything.
 		if (entry.type === "user") {
 			const c = entry.message?.content;
 			const hit =
@@ -113,7 +112,7 @@ export const parse: HarnessParseAdapter = {
 		// Claude Code writes for it; the paired `isCompactSummary` user entry
 		// carries the summary text. Neither has a `usage` object — deliberately
 		// read from the boundary rather than the summary so one compaction
-		// counts once (#149).
+		// counts once.
 		if (entry.subtype === "compact_boundary") return "compaction";
 		// The "while you were away" recap. Also billed, also usage-free.
 		if (entry.subtype === "away_summary") return "recap";

@@ -683,7 +683,8 @@ console.log("\n9. Config migration off princess-pi-tools and onto wtft (#156)");
 	// V9e — a byte-identical file already at the new path is a STALE
 	// DUPLICATE, not a real conflict: install removes it and reports
 	// `moved`, rather than treating two copies of the same content as
-	// something a human has to arbitrate (PR review, round 2).
+	// something a human has to arbitrate
+
 	{
 		const fakeHome = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-dup-"));
 		const same = JSON.stringify({ interval: "1h" });
@@ -759,7 +760,8 @@ console.log("\n9. Config migration off princess-pi-tools and onto wtft (#156)");
 	// the HOME-unset usage refusal only fires when --dir is OMITTED (DEST_DIR
 	// then falls back to $HOME/bin), so this combination reaches config_home()
 	// with nothing to resolve. configMigration must be [], not a partial or
-	// malformed array a caller might index into (PR review, round 3).
+	// malformed array a caller might index into
+
 	{
 		const dir = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-nohome-"));
 		let code = -1, out = "";
@@ -779,7 +781,6 @@ console.log("\n9. Config migration off princess-pi-tools and onto wtft (#156)");
 
 	// V9h — a coexisting PATH shadow is still reported when config-left wins
 	// the exit code, the same way `drift` already reports a coexisting shadow
-	// (PR review, round 3: this was silently dropped for config-left).
 	{
 		const fakeHome = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-shadow-"));
 		seedLegacy(fakeHome, { "wtft.json": JSON.stringify({ interval: "1h" }) });

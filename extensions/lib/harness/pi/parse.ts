@@ -1,7 +1,7 @@
 /**
- * @package princess-pi-tools
+ * @package @princess-pi/wtft
  * @module harness/pi/parse
- * @description Pi transcript schema — and nothing else (#156).
+ * @description Pi transcript schema — and nothing else.
  *
  * Pi differs from Claude Code in three ways that matter here, all of them
  * schema-level: the assistant entry is `type: "message"`, tool blocks are
@@ -49,7 +49,7 @@ export const parse: HarnessParseAdapter = {
 			messageId: message.id,
 			requestId: entry.requestId,
 			// Pi does not stamp the model per message — it emits model_change
-			// entries, tracked by shared code and passed in as currentModel (#128).
+			// entries, tracked by shared code and passed in as currentModel.
 			model: message.model,
 			timestamp: message.timestamp || entry.timestamp,
 			isSidechain: entry.isSidechain === true,
@@ -84,17 +84,15 @@ export const parse: HarnessParseAdapter = {
 
 	readControlEntry(entry: any): ControlSignal | null {
 		if (!entry) return null;
-		// Thinking level changes (#77).
 		if (entry.type === "thinking_level_change" && entry.thinkingLevel) {
 			return { kind: "thinking-level", level: entry.thinkingLevel };
 		}
-		// Model tracking (#128): Pi emits provider + modelId rather than
-		// stamping the model on each message.
+		// Pi emits provider + modelId rather than stamping the model on each message.
 		if (entry.type === "model_change" && entry.modelId) {
 			return { kind: "model", modelId: entry.modelId };
 		}
-		// Compaction — stamp tokensBefore onto the next assistant interaction so
-		// summaries can surface how much context was freed (#90).
+		// Stamp tokensBefore onto the next assistant interaction so summaries
+		// can surface how much context was freed.
 		if (entry.type === "compaction" && typeof entry.tokensBefore === "number") {
 			return { kind: "compaction", tokensBefore: entry.tokensBefore };
 		}
@@ -104,8 +102,8 @@ export const parse: HarnessParseAdapter = {
 	readUncountedBillable(entry: any): UncountedBillableClass | null {
 		// Same entry the control signal reads, answering a different question:
 		// `tokensBefore` says how much context was FREED, this says the summary
-		// call itself was billed and left no usage record (#149). Pi has no
-		// away-recap feature, so no "recap" arm.
+		// call itself was billed and left no usage record. Pi has no away-recap
+		// feature, so no "recap" arm.
 		if (entry?.type === "compaction") return "compaction";
 		return null;
 	},

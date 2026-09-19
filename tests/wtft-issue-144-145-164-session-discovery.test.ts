@@ -6,9 +6,8 @@
  * Spec: docs/spec-144-145-164-session-discovery.md (V1–V22).
  *
  *   A  V1–V4    #144  slug encoding is a UNION of encodings, not a pinned class
- *   B  V5–V10   #164→#89  a session stranded in a REMOVED directory, and
- *                     exactly which stranded shapes are reachable now that the
- *                     whole-file relocation arm is gone
+ *   B  V5–V10   #164→#89  which stranded shapes remain reachable without the
+ *                     whole-file relocation arm
  *   C  V12–V17  #145  live sibling worktrees fan out, non-repos do not
  *   D  V18–V20  #145  worktree rows render as <repo>/w/<branch>
  *   E  V11      #89   cost: discovery reads TAILS, never whole files
@@ -21,44 +20,9 @@
  * `findRepoRoot`, the slug helpers and the read counters — against fixture trees
  * pointed at by WTFT_CLAUDE_PROJECTS_DIR. No module internals are touched.
  *
- * On clocks: NOTHING IN THIS SUITE READS ONE. Not the wall-clock date (the
- * #96 flaky pricing trap), and as of #39 not elapsed time either — Part E's
- * `Date.now()` calls are gone with the bound they served.
- *
- * That took three attempts, and the history is the argument for the shape
- * that survived. V11 began as `cold < 500`: a fixed ceiling over the live,
- * ever-growing `~/.claude/projects` (this host runs 5+ concurrent sessions,
- * including the one running this suite), so its input grew every session
- * while its budget never moved — not flaky in the random sense, but drifting
- * toward always-failing, and failing BECAUSE it ran. #477 replaced it with a
- * ratio against the memoised second pass, which rots the mirror-image way:
- * the memo makes `warm` cheaper as it IMPROVES, so the divisor shrinks while
- * cold still walks the whole tree. Measured on an unmodified `main`:
- * 6 failures in 6, cold ~2.1s against warm ~37ms — 53-61x against a 40x
- * bound. A CONSTANT MULTIPLE OF A MEMOISED CALL CANNOT BOUND AN UNMEMOISED
- * ONE, and no choice of multiple repairs that.
- *
- * So Part E now owns its corpus and counts, rather than borrowing the host's
- * and timing. Every claim is an exact integer from the counters this suite
- * already exported for V9: tail reads, BYTES read (which replaced the whole-file
- * relocation-scan counter with #89), and directory reads by the tree walk. The full rationale, the mutation
- * record for each assertion, and the measurement showing why a ratio could
- * never have guarded the walk are in Part E's own comment block.
- *
- * #89 removed the arm those counters were built to watch. `resolveCwdHistory`
- * and `getCwdHistoryReadCount` are gone, and so is the `pathExists` gate that
- * decided when to pay for them — measured 2026-09-16 over 7,287 real
- * transcripts, the arm returned 0 extra candidates for 6,952 whole-file reads
- * per launch. Part B now records
- * which stranded shapes survive that deletion and which one does not, and Part E
- * counts BYTES instead of scans: a scan counter pinned at 0 guards nothing,
- * while bytes is the quantity that goes wrong the moment a whole-file read comes
- * back.
- *
- * tests/wtft-issue-156-harness-seam.test.ts (Part C) carried the same fixed
- * `elapsed < 500` ceiling over the same real tree, on a call already warm by
- * the time it was timed. Tracked as #18 and fixed there the same way, on its
- * own branch.
+ * Part E owns its corpus and asserts exact integers from the counters: tail
+ * reads, BYTES read, and directory reads by the tree walk. Nothing in this
+ * suite reads a clock.
  *
  * Run: node --experimental-strip-types tests/wtft-issue-144-145-164-session-discovery.test.ts
  */
@@ -202,26 +166,10 @@ console.log("\n=== PART A: slug encoding union (#144) ===\n");
 // PART B — #164 → #89: a session stranded in a REMOVED directory (V5–V10)
 // ---
 //
-// #164 answered "my worktree is gone, where did this session live before?" by
-// re-reading the whole transcript for `relocated` records. #89 deleted that arm,
-// so this part changed from "every stranded session is findable" to "these are,
-// that one is not" — and the difference is asserted, not narrated, because a
-// deletion that silently drops a case is the failure mode worth a test.
-//
-// What the real corpus says. Claude Code files a transcript under the directory
-// its session STARTED in, and a session usually starts in the main clone before
-// it enters a worktree — so the physical arm plus the #145 fan-out already
-// reaches it. Measured per arm over the corpus, the deleted arm contributed 0
-// candidates for all three cwds tested, and the candidate lists before and after
-// the deletion are identical.
-//
-// The relocation figures, DERIVED rather than quoted (2026-09-16, one walk of
-// ~/.claude/projects after SKIP_DIRS): 7,352 transcripts, of which **42** carry
-// a `"type":"relocated"` record and **21** of those 42 also have a last recorded
-// `cwd` that no longer exists — the subset for which the deleted arm was the
-// only arm that could have said anything. An earlier draft asserted the 21
-// without stating where it came from, in a comment whose selling point is
-// exactness.
+// Claude Code files a transcript under the directory its session STARTED in.
+// Without the whole-file relocation arm, sessions filed under a removed
+// worktree's own slug are not found; sessions filed under the clone's slug
+// still are. Both shapes are asserted below.
 
 console.log("\n=== PART B: stranded in a removed worktree (#164 → #89) ===\n");
 {
@@ -248,11 +196,9 @@ console.log("\n=== PART B: stranded in a removed worktree (#164 → #89) ===\n")
 	const strandedFromWorktree = path.join(projects, cwdToStrictSlug(removedAbs), "stranded-from-worktree.jsonl");
 	writeTranscript(strandedFromWorktree, removedAbs, [clone, removedAbs, clone, removedAbs]);
 
-	// A session that never left the clone, for the no-regression arm. PADDED well
-	// past the 8 KB first window (PR review): with every fixture a few hundred
-	// bytes, "reads no more than the fixtures hold" was satisfiable by a
-	// whole-file read of all four — the same vacuity this branch removed
-	// elsewhere. One large fixture is what gives the budget below any teeth.
+	// A session that never left the clone, for the no-regression arm. Padded
+	// well past the 8 KB first window so a whole-file read of the fixtures
+	// would blow the byte budget below.
 	const homebody = path.join(projects, cwdToStrictSlug(clone), "homebody.jsonl");
 	writeTranscript(homebody, clone);
 	fs.appendFileSync(homebody, `${"x".repeat(300 * 1024)}\n`);
@@ -282,14 +228,8 @@ console.log("\n=== PART B: stranded in a removed worktree (#164 → #89) ===\n")
 	check(!namesFrom(elsewhere).includes("pi-shaped.jsonl"), "V8: a Pi-shaped transcript is not pulled into an unrelated cwd");
 
 	// V9 — a dead cwd costs no more than a live one. This is the whole point of
-	// #89: before it, a dead cwd opened a whole-file read, and `pr-cleanup`
-	// manufactures dead cwds on every merge.
-	//
-	// AGAINST AN ABSOLUTE BUDGET, not against `tail * 512 KB` (PR review). That
-	// product holds for every possible input by construction — `readSlice` is
-	// only ever called with `len <= 512 KB` — so it is the same vacuity
-	// Amendment 1 condemns in the counter it replaced. Part E is where the
-	// budget has teeth, on 256 KB transcripts.
+	// Bound against an absolute budget, not `tail * 512 KB` — that product
+	// holds for every input by construction (`readSlice` never exceeds 512 KB).
 	resetCwdCache();
 	discoverSessions("claude-code", clone);
 	const tail = getCwdReadCount();
@@ -468,43 +408,13 @@ console.log("\n=== PART E: what one launch reads, counted on a test-built corpus
 	resetCwdCache();
 	resetHarnessRegistry();
 
-	// WHY THIS NO LONGER TIMES THE LIVE ~/.claude/projects TREE (#39, 2026-08-30).
-	//
-	// V11 used to bound cold discovery by a constant multiple (40x) of the
-	// memoised pass. It failed 6 runs in 6 on a clean `main`, and the cause is
-	// structural rather than a badly chosen constant: cold scales with the live
-	// corpus while warm is pure cache hits, so cold/warm grows without bound as
-	// the corpus does. `pr-cleanup` strands every session that lived in a deleted
-	// worktree, permanently, so the corpus grows with every merge — measured
-	// 2,622 of 3,073 transcripts stranded (85%). Cold moved from the 400-650ms
-	// #477 wrote this against to ~2,100ms, warm stayed ~37ms: ~57x against a 40x
-	// bound. A CONSTANT MULTIPLE OF A MEMOISED CALL CANNOT BOUND AN UNMEMOISED
-	// ONE, and no choice of multiple repairs that.
-	//
-	// #477 had replaced a fixed 500ms ceiling with that ratio precisely to
-	// survive corpus growth. The ratio carries the mirror-image defect: the
-	// better the memo, the smaller the divisor, the tighter the bound. Both
-	// failed for one underlying reason — the input was not the test's to control.
-	//
-	// So the test now owns the corpus, and asserts on STATE rather than the
-	// clock. #89 changed WHICH state: the whole-file arm those assertions
-	// watched is gone, and a scan counter that can only read 0 is not a guard.
-	// BYTES replaced it, because bytes is what a reinstated whole-file read
-	// would move — and unlike a scan count it also catches a half-measure, such
-	// as a tail window quietly widened to the file size.
-	//
-	// The corpus is built from transcripts far larger than the 8 KB tail window,
-	// so the two are orders of magnitude apart rather than a judgement call:
-	// 60 x 256 KB whole is 15.7 MB, 60 tails is under 500 KB. The `cwd` sits on
-	// the LAST line of every fixture, so one window resolves it.
+	// Own the corpus; assert on bytes and read counts, not the clock.
+	// Transcripts are far larger than the 8 KB tail window (60 x 256 KB whole
+	// is 15.7 MB; 60 tails is under 500 KB). The `cwd` sits on the LAST line
+	// of every fixture, so one window resolves it.
 	//
 	// live     = recorded cwd EXISTS -> one tail read
 	// stranded = recorded cwd gone   -> one tail read, the same one (#89)
-	//
-	// A wall-clock A/B is kept at research/39-v11-corpus/measure-gate.ts: 250
-	// files x 256 KB measured the deleted gate as a 4.9-5.6x time difference. It
-	// is retained because it calibrates what that arm COST, which is the
-	// measurement that justified removing it.
 	const SESSIONS = 60;
 	/** Padding per transcript — many multiples of the largest tail window. */
 	const FILLER_BYTES = 256 * 1024;
@@ -540,23 +450,8 @@ console.log("\n=== PART E: what one launch reads, counted on a test-built corpus
 	const liveCorpus = buildCorpus("wtft-39-live-", () => liveHome);
 	const strandedCorpus = buildCorpus("wtft-39-stranded-", (i) => path.join(liveHome, `gone-worktree-${i}`));
 
-	// BOTH harness roots are pinned, though only the Claude one is read below.
-	//
-	// PR review called the missing Pi override a High defect that would break
-	// `liveHistory === 0` on a host carrying real stale Pi sessions. It does not:
-	// `discoverSessions("claude-code", …)` selects exactly ONE discovery, so Pi's
-	// never runs. Measured — a Pi root poisoned with 60 non-matching-slug
-	// sessions gives tail=60 history=0, and so does leaving it unset against this
-	// host's real ~/.pi; the same poisoned root under `"auto"` adds exactly 60
-	// tail reads, so the corpus was capable of leaking and the door is shut.
-	// Pi's discovery also imports only `resolveLastCwd`, never
-	// `resolveCwdHistory`, so it cannot move the history counter under ANY
-	// harness argument.
-	//
-	// Pinned anyway, for the reason the finding did not give: which harnesses
-	// `discoverSessions` routes to is an implementation detail this block does
-	// not assert, and #39 exists to stop this test depending on state the HOST
-	// owns rather than the test.
+	// Pin both harness roots so the suite does not depend on host session dirs.
+	// Only the Claude discovery runs below (`discoverSessions("claude-code", …)`).
 	process.env.WTFT_PI_SESSIONS_DIR = mktmp("wtft-39-nopi-");
 
 	// V11a — every recorded cwd exists: one bounded tail per transcript, and
@@ -570,10 +465,9 @@ console.log("\n=== PART E: what one launch reads, counted on a test-built corpus
 	check(liveBytes <= TAIL_BUDGET,
 		`V11a: …reading tails, not files (${Math.round(liveBytes / 1024)} KB over ${SESSIONS} x ${FILLER_BYTES / 1024} KB transcripts, budget ${TAIL_BUDGET / 1024} KB)`);
 
-	// V11b — THE #89 ASSERTION. The same corpus with every cwd dead used to cost
-	// one whole-file read each; it must now cost exactly what the live one does.
-	// This is where a reinstated fallback shows up: 60 x 256 KB against a 960 KB
-	// budget is not a close call.
+	// V11b — THE #89 ASSERTION. The same corpus with every cwd dead must cost
+	// no more than the live one. A reinstated whole-file fallback shows up as
+	// 60 x 256 KB against a 960 KB budget.
 	process.env.WTFT_CLAUDE_PROJECTS_DIR = strandedCorpus;
 	resetCwdCache();
 	discoverSessions("claude-code", liveHome);
@@ -607,11 +501,8 @@ console.log("\n=== PART E: what one launch reads, counted on a test-built corpus
 		// the picker's default scope.
 	}
 
-	// V11c — memoisation, asserted as state instead of `warm <= cold + 50`.
-	// The old sibling check could not fail: a broken memo inflates warm, which
-	// inflated the very bound it was compared against. This one counts reads, so
-	// memoisation collapse — the failure mode the previous comment admitted was
-	// never actually tested — now shows up directly as a non-zero delta.
+	// V11c — memoisation, asserted as read counts (a broken memo shows up as
+	// a non-zero delta on the second pass).
 	const afterFirst = getCwdReadCount();
 	const bytesAfterFirst = getCwdBytesRead();
 	discoverSessions("claude-code", liveHome);
@@ -620,24 +511,10 @@ console.log("\n=== PART E: what one launch reads, counted on a test-built corpus
 	check(getCwdBytesRead() === bytesAfterFirst,
 		`V11c: …and reads no further bytes (${getCwdBytesRead() - bytesAfterFirst} B)`);
 
-	// V11e — THE WALK, which neither counter above can see (#39 review round 2).
-	//
-	// PR review called dropping V11's wall-clock claim a High defect: with no
-	// timing left, nothing guards the unmemoised `fs.readdirSync`/`collect()`
-	// tree walk, whose cost is a floor under every call regardless of the cache.
-	// The gap is real — but restoring a ratio would not have closed it, and
-	// measurably makes it worse. The walk happens IDENTICALLY in both arms of a
-	// live-vs-stranded A/B, so it inflates numerator and denominator together:
-	// on a 200-file corpus the ratio is 3.38x with no extra directories and
-	// 1.21x with 3,000 empty ones added to BOTH sides. A `stranded > 2x live`
-	// bound therefore fires on a harmless walk regression and goes quiet as the
-	// walk gets slower — anti-correlated with what it was meant to protect.
-	//
-	// So the walk gets the same treatment as the reads: an integer. `collect()`
-	// reads one directory per call, so a flat corpus of N project dirs must cost
-	// exactly N directory reads, and a nested one exactly N + its subdirectories.
-	// An accidental re-walk — the regression that actually threatens this path —
-	// is then a wrong number, on any host, at any speed.
+	// V11e — THE WALK, which neither counter above can see.
+	// `collect()` reads one directory per call, so a flat corpus of N project
+	// dirs must cost exactly N directory reads, and a nested one exactly N +
+	// its subdirectories. An accidental re-walk is a wrong number.
 	{
 		const walkRoot = mktmp("wtft-39-walk-");
 		const PROJECTS = 7;
@@ -703,19 +580,11 @@ console.log("\n=== PART E: what one launch reads, counted on a test-built corpus
 		delete process.env.WTFT_PI_SESSIONS_DIR;
 	}
 
-	// V23 — WIDENING READS EACH BYTE ONCE (Macroscope, PR #122).
-	//
-	// This exists because the fix it guards was written, LOST to a failed edit,
-	// and then described in a commit message and a spec paragraph anyway — while
-	// this suite stayed green, because V11a/V11b use transcripts that resolve in
-	// the FIRST window and so never widen at all. A reviewer found it by reading
-	// the loop. Prose is not a guard; this is.
-	//
-	// The shape: a transcript far larger than the last window with no `cwd`
-	// anywhere, so every window is tried and none resolves. Re-reading each
-	// window from scratch costs 8 + 64 + 512 = 584 KB; reading only the newly
-	// exposed prefix costs exactly 512 KB. The two are far enough apart that the
-	// assertion is an equality, not a budget.
+	// V23 — WIDENING READS EACH BYTE ONCE.
+	// A transcript far larger than the last window with no `cwd` anywhere, so
+	// every window is tried and none resolves. Re-reading each window from
+	// scratch costs 8 + 64 + 512 = 584 KB; reading only the newly exposed
+	// prefix costs exactly 512 KB.
 	{
 		const nocwdRoot = mktmp("wtft-89-nocwd-");
 		const proj = path.join(nocwdRoot, "-home-nocwd-project");
@@ -738,16 +607,11 @@ console.log("\n=== PART E: what one launch reads, counted on a test-built corpus
 		);
 	}
 
-	// V22 — THE GUARD THE COUNTER CANNOT BE (PR review).
-	//
+	// V22 — THE GUARD THE COUNTER CANNOT BE.
 	// `getCwdBytesRead` only sees reads routed through session-cwd.ts's one
-	// private `readSlice`. The arm #89 deleted did not use it — `resolveCwdHistory`
-	// called `fs.readFileSync` directly — so a re-introduction in that same style
-	// would move neither counter and leave V11a/V11b green while the launch
-	// re-read gigabytes. No counter can police the code that declines to use it.
-	//
-	// So the invariant is asserted against the SOURCE: that module has exactly
-	// one read call, and it is the bounded one.
+	// private `readSlice`. A whole-file `fs.readFileSync` would move neither
+	// counter. Assert against the source: that module has exactly one read
+	// call, and it is the bounded one.
 	{
 		const src = fs.readFileSync(
 			path.join(import.meta.dirname, "..", "extensions", "lib", "harness", "session-cwd.ts"),

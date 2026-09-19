@@ -2,18 +2,14 @@
 /**
  * @package @princess-pi/wtft
  * @test wtft-75-doc-claims
- * @description Four doc claims that the #32 audit found contradicting the code
- *   (#75), plus a fifth pinning a #118 decision, each pinned against the code
- *   or doc it describes so it cannot drift back:
+ * @description Five doc claims pinned against the code or doc they describe:
  *
  *   1. Every flag a README `wtft …` example names is one `parseWtftCliArgs`
- *      accepts. The audit found `wtft --history`, a flag that never existed;
- *      a reader copying it got an unknown-flag error.
+ *      accepts.
  *   2. `docs/spec-159-pack-and-smoke.md` names every entry of `package.json`
- *      `files`. It said "the two bundles — the whole `files` allowlist" while
- *      `files` had four entries and the spec's own suite asserted all four.
+ *      `files`.
  *   3. `CONTEXT.md`'s Pager entry and `bin/wtft.ts`'s refusal agree on which
- *      harness has the pager. The glossary said CLI-only; the CLI said Pi-only.
+ *      harness has the pager.
  *   4. The README's `install-wtft` exit-code list carries every code the
  *      script can exit with, read from the script's own `exit N` / `EXIT=N`
  *      sites.
@@ -22,10 +18,10 @@
  *      adapter whose native cost already includes them must zero
  *      `server_tool_use`.
  *
- *   These read source files, not built output, so the suite needs no build and
- *   no session corpus. The flag set in (1) is derived from the parser's own
- *   `arg === "--x"` literals rather than from the manifest, because the
- *   manifest is prose for `--help` and the parser is what rejects a flag.
+ *   These read source files, not built output. The flag set in (1) is derived
+ *   from the parser's own `arg === "--x"` literals rather than from the
+ *   manifest, because the manifest is prose for `--help` and the parser is
+ *   what rejects a flag.
  */
 
 import * as fs from "node:fs";

@@ -11,20 +11,8 @@
  *   transcript names the other" — true for launcher children, never true for
  *   these.
  *
- *   MEASURED (2026-09-17, this host): 439 meta files reached by the glob, all of
- *   which parsed. A wider `find` counts 487 meta files and 487 transcripts —
- *   equal totals, which is CONSISTENT with 1:1 and does not establish it; the 48
- *   files the glob missed were never examined. `docs/spec-137-subagent-meta.md`
- *   carries the same caveat, and an earlier version of this header stated the
- *   stronger claim the spec had already retracted (#137 review round 2).
- *
- *   The spec's later audit round counts 493, not 487. Same recursive walk, a
- *   later moment: the corpus grew by six while the work was in flight, and the
- *   narrow glob moved 439 -> 445 by the same six. See spec-137 § "Why this
- *   section says 487". Every count here is a reading with a date on it.
- *
- *   ONE fact the issue did not have, and this suite pins it:
- *     - `model` is NOT universal — 419/439. A null there is a gap, not a zero.
+ *   ONE fact this suite pins:
+ *     - `model` is NOT universal. A null there is a gap, not a zero.
  *
  *   One more the issue did not have, which this suite deliberately does NOT pin:
  *     - `parentAgentId` appeared on exactly the files with `spawnDepth > 1`, all
@@ -228,11 +216,6 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 	// Declined BY the `Array.isArray` guard, which fires first: the shape check is
 	// one short-circuited OR — `obj === null || typeof obj !== "object" ||
 	// Array.isArray(obj)` — so an array returns before any field is looked at.
-	//
-	// This comment said the exact opposite until review round 3, claiming the
-	// guard was "unreachable as a distinct cause". Both paths yield `null`, so no
-	// test ever went red over it — it would simply have told whoever next tidied
-	// this file that a live guard was dead code.
 	assert("M6 a JSON array is declined by the Array.isArray guard, before any field check",
 		readSubagentMeta(t2) === null);
 
@@ -252,12 +235,7 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 // still degrades politely, and the report goes back to showing hashes with
 // nothing reporting the regression.
 //
-// AN EARLIER VERSION OF THIS BLOCK CLAIMED TO CATCH THAT, AND COULD NOT
-// (#137 review round 2). It wrote its OWN fixture using the current names and
-// checked the reader accepted it — so a real harness rename would change
-// nothing here and M7 would still pass. What that pins is the READER's expected
-// names against a wtft-side edit, which is worth having and is not the stated
-// guarantee. Two halves now, each honest about its subject:
+// Two halves, each honest about its subject:
 {
 	// TWO, not four — see M5. `description` and `toolUseId` are near-universal
 	// (445/493 on this host) and absent on every Dynamic Workflow child.
@@ -454,19 +432,10 @@ console.log("\n§ R — the Closer: `wtft --json` names its subagents\n");
 	// nothing, and R1 would have kept passing if the daemon had stopped
 	// producing tags altogether.
 	//
-	// NOTE what this tag does and does not establish (Macroscope, PR #152). It
-	// carries `msg_parent_1` ONLY — the parent's turn. Neither child's turn is
-	// in it, so `total.costUsd > 0` below proves the REPORT path and nothing
-	// about a child's cost reaching `total`. The label on that assertion used to
-	// say it exercised "counted either way"; it never did, and the specs have
-	// stopped claiming a listed child is thereby counted at all.
-	//
-	// It was also one race from destroying the suite: the no-data arm exits 1,
-	// not 9, `runWtftCli` rethrows on an unexpected code, and an uncaught throw
-	// here loses ALL assertions in this file with no tally line. The auditor hit
-	// that abort three times and could not reproduce it on demand — which is the
-	// worst kind, and exactly what `tests/lib/wtft-cli.ts`'s own header warns of.
-	// A populated tag removes the race rather than tolerating it.
+	// This tag carries `msg_parent_1` ONLY — the parent's turn. Neither child's
+	// turn is in it, so `total.costUsd > 0` below proves the REPORT path and
+	// nothing about a child's cost reaching `total`. A populated tag also
+	// avoids the no-data arm (exit 1), which would abort the suite.
 	const classified = (id: string, tsMs: number) => JSON.stringify({
 		t: tsMs, c: 0.0123, cat: "code", f: [], cmd: [],
 		id, m: "claude-sonnet-4-6", in: 1200, out: 90,
@@ -517,7 +486,7 @@ console.log("\n§ R — the Closer: `wtft --json` names its subagents\n");
 		// or looked and could not see", and emitting an empty array for it hands a
 		// consumer a partial result presented as complete — the exact confusion
 		// this document's absent-versus-empty rule exists to prevent, committed by
-		// the code that states the rule (#137 review round 2, Medium/contract).
+		// the code that states the rule.
 		{
 			const blindDir = path.join(slug, sessionId, "subagents");
 			let chmodded = false;
@@ -562,10 +531,8 @@ console.log("\n§ R — the Closer: `wtft --json` names its subagents\n");
 //   spec-137         "an empty array from a caller that never looked is
 //                     indistinguishable from a session that spawned nothing"
 //
-// R1b pins the ABSENT half — the direction review round 2 fixed. The local audit
-// found the opposite direction pinned NOWHERE: weakening either guard to omit
-// the key on an empty list left this suite at 46/0 AND thirteen json/subagent
-// suites green. The code honours it today; nothing was stopping it from not.
+// R1b pins the ABSENT half. This pins the PRESENT half: an empty array still
+// emits the key.
 //
 // Two shapes, because they reach the emitter differently: no `subagents/`
 // directory at all, and one that exists and is empty.

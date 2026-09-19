@@ -2,14 +2,11 @@
 /**
  * @package princess-pi-tools
  * @test wtft-270-session-summary-dedup
- * @description #270 review round 2 (Medium/contract, extensions/lib/session-selector.ts) —
- *   getSessionSummary() reimplements "collapse tag-file lines by message.id, keep max
- *   cost" by hand instead of calling the shared `dedupeClassifiedById`
- *   (extensions/lib/wtft-daemon-lib.ts), because session-selector.ts is a standalone
- *   module that deliberately does not import the daemon's internals (see the
- *   CONSTANTS comment at the top of session-selector.ts). Two independent
- *   implementations of the same rule with nothing pinning them together is exactly
- *   how they drift apart — this test is that pin.
+ * @description getSessionSummary() reimplements "collapse tag-file lines by
+ *   message.id, keep max cost" by hand instead of calling the shared
+ *   `dedupeClassifiedById`. Two independent implementations of the same rule
+ *   with nothing pinning them together is exactly how they drift apart — this
+ *   test is that pin.
  *
  *   Closer: over a synthetic tag file whose message.id "msg-A" is re-emitted at a
  *   higher cost in a later line (the growing-usage shape #270 exists to collapse),
@@ -73,19 +70,10 @@ assert(`cost is 0.10 — 0.05 (msg-A max) + 0.02 (msg-B) + 0.03 (no id), not 0.1
 
 console.log("\n2. a malformed tag file degrades the ANSWER, never throws out of getSessionSummary");
 
-// #270 review round 10 (Medium/contract) — getSessionSummary's catch was
-// deliberately narrowed to just the fs.readFileSync, so the max-cost-by-id
-// collapse now sits OUTSIDE any try. That is intentional: a defect in the
-// collapse must surface rather than masquerade as a missing tag file. But the
-// two call sites in this module have no guard of their own, and one of them is
-// a bare `displayCandidates.map((c) => getSessionSummary(c.path))` — so a throw
-// from ANY one candidate's tag file takes down the whole interactive session
-// picker, not just that row.
-//
-// The narrowed catch is only safe while the collapse genuinely has no throw
-// path. That was argued in a comment and never tested. This is the test: every
-// line shape below is hostile, and the requirement is a returned summary, not
-// an exception.
+// getSessionSummary's catch covers only fs.readFileSync; the collapse sits
+// outside any try. Call sites have no guard of their own, so a throw from any
+// candidate's tag file takes down the whole picker. Every line shape below is
+// hostile; the requirement is a returned summary, not an exception.
 const hostileLines = [
 	'null',                              // JSON.parse succeeds, yields null
 	'true',                              // a bare primitive, not an object

@@ -21,12 +21,8 @@
  * caused", which is what the fixture below pins — parent misses counted
  * exactly, subagent misses zero.
  *
- * Imports come from the BUILT bundle `bin/wtft.mjs`, as every suite here does.
- * That is only trustworthy because the build is a hard gate, not a habit: the
- * repo's CLAUDE.md forbids editing `bin/*.mjs` and requires `bun run build`
- * after any `.ts` edit, `package.json`'s `prepare` runs it, and CI builds before
- * testing. A stale bundle would let a reverted parse-time gate pass green, so
- * rebuild before trusting a green run from this file alone (PR review round 2).
+ * Imports come from the BUILT bundle `bin/wtft.mjs`. Rebuild before trusting a
+ * green run from this file alone.
  *
  * Run: node --experimental-strip-types tests/wtft-115-cache-miss-sidechain.test.ts
  */
@@ -128,7 +124,7 @@ check(
 	"a subagent transcript alone → 0 dividers (was 1 before #115)"
 );
 
-// …and WHERE, not just how many (PR review round 2). The fixture is built so
+// …and WHERE, not just how many. The fixture is built so
 // placement matters — the subagent's bin sits between the parent's two misses —
 // so a divider drawn on the wrong bin, or a suppressed one resurfacing inside a
 // bin that already has one, keeps the counts at 2 and 0 and passes regardless.
@@ -157,7 +153,7 @@ console.log("--- TEST 3: cost is untouched ---");
 // cacheMiss is a label on the interaction, never a term in the price. Pinned to
 // an ARITHMETIC expectation rather than to a second parse of the same fixture:
 // comparing post-fix against post-fix can only catch non-determinism, and would
-// have passed just as happily if the fix had moved every dollar (PR review).
+// have passed just as happily if the fix had moved every dollar.
 // $/Mtok for claude-opus-5, from docs/manifests/wtft-pricing.json; the 1h cache
 // write is the manifest's 6.25 5m rate's 1h sibling at 2x input, which
 // tests/wtft-pricing-tiers.test.ts is the guard for. Spelled out here so this
@@ -205,8 +201,8 @@ check(dividerCount(viaProvenance) === 0, "so the unstamped subagent draws no div
 console.log("--- TEST 5: the merge cannot resurrect the flag ---");
 // isSidechain itself is deliberately NOT widened by the merge: it gates
 // splitOverheadCost's recache detection and the prevCtx chain, so ORing it would
-// move a merged message's cache-write dollars between buckets (PR review round
-// 2). Only the label the merge can get wrong is cleared.
+// move a merged message's cache-write dollars between buckets. Only the label
+// the merge can get wrong is cleared.
 // deduplicateInteractions keeps the MAX-COST copy of a message id. If a re-logged
 // copy omits the envelope's isSidechain and wins on cost, the flag came back.
 const mixed = [
@@ -228,13 +224,9 @@ console.log("--- TEST 6: the daemon's own reader is gated too ---");
 // The CLI renders from the TAG FILE, and the daemon writes subagent tag lines
 // through its OWN reader — parseSessionFile + deduplicateInteractions +
 // serializeClassified in syncSubagentTranscript — never through
-// loadSubagentInteractions (PR review round 2, High).
+// loadSubagentInteractions.
 //
-// THIS DRIVES THE REAL DAEMON, not a hand-rebuilt copy of its pipeline (PR
-// review round 3). The first cut of this test called `clearSubagentCacheMiss`
-// itself, which proved only that the seam works when called: deleting the
-// daemon's own call to it left the suite green, so the one call site round 2
-// added was unguarded by the test that claimed to cover it.
+// THIS DRIVES THE REAL DAEMON, not a hand-rebuilt copy of its pipeline.
 const live = path.join(dir, "live");
 const sessionPath = path.join(live, "5aa1f33e-0000-4000-8000-000000000115.jsonl");
 fs.mkdirSync(live, { recursive: true });

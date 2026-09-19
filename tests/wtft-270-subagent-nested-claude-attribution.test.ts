@@ -2,9 +2,8 @@
 /**
  * @package princess-pi-tools
  * @test wtft-270-subagent-nested-claude-attribution
- * @description #270 review round 3 (High/correctness, bin/wtft-daemon.ts) — a
- *   SILENT OVERCOUNT of nested `claude -p` sub-agents, caused by calling
- *   attributeClaudeSubAgentCosts once per POLL BATCH.
+ * @description Silent overcount of nested `claude -p` sub-agents when
+ *   attributeClaudeSubAgentCosts is called once per POLL BATCH.
  *
  *   attributeClaudeSubAgentCosts (extensions/lib/wtft-parser.ts) opens with
  *   `const seenSessionIds = new Set<string>()` and its docstring promises

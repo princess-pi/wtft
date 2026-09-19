@@ -1,23 +1,7 @@
 /**
- * @package princess-pi-tools
- * @module tty-helpers
- * @description Shared TTY terminal helpers extracted from session-selector and wtft-shared (#58 DRY).
- *
- * Five patterns were duplicated across selector and watch mode (the fifth
- * added since; "four" was the original count and is a stale claim once
- * {@link showCursor}/{@link hideCursor} are counted):
- *   1. Raw stdin init (resume → setEncoding → setRawMode → listen)
- *   2. Raw stdin cleanup (removeListener → setRawMode(false) → pause)
- *   3. In-place overwrite (move cursor up visual lines → clear to end of screen)
- *   4. Visual line count (count wrapped lines for terminal-width-aware cursor math)
- *   5. Cursor visibility (show/hide) — {@link enterRawStdin}'s own doc still
- *      calls this the CALLER's concern to sequence, since cursor lifecycle
- *      differs between the selector and watch mode; this module is where that
- *      sequencing is actually implemented FROM, not where it happens
- *      automatically.
- *
- * These are cross-harness: consumed by both the WTFT CLI (via esbuild bundle) and
- * the Pi WTFT extension (via tsx import).
+ * Shared TTY helpers: raw stdin, cursor show/hide, in-place overwrite,
+ * visual line count. Caller sequences cursor visibility — selector and
+ * watch mode differ.
  */
 
 // ---
@@ -59,12 +43,8 @@ export function enterRawStdin(onKey: (key: string) => void): () => void {
 // ---
 
 /** Show the terminal cursor (DECTCEM reset).
- *  @param out where to write — stdout by default; the scoped picker (#89)
- *    passes stderr under `--json`, so stdout stays a clean JSON document
- *    (E1). For the picker, `bin/wtft.ts`'s `canShowPicker` guard makes `out`
- *    a TTY (watch mode calls these with plain stdout); it says nothing about the OTHER
- *    stream (stdout, when `out` is stderr, or vice versa) — that one can be
- *    a pipe, same as any ordinary redirect. */
+ *  @param out where to write — stdout by default; the scoped picker
+ *    passes stderr under `--json`, so stdout stays a clean JSON document. */
 export function showCursor(out: NodeJS.WritableStream = process.stdout): void {
 	out.write("\x1b[?25h");
 }

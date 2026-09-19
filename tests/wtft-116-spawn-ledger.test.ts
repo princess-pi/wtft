@@ -89,7 +89,7 @@ console.log("\nPART A — the writer refuses what cannot be resolved later");
 // A Pi session id is a timestamp PREFIXED to a uuid, so "contains a uuid" is
 // the rule, not "is a uuid" — a bare-uuid rule made a Pi session unable to be a
 // parent at all, which left the Pi widget's block unreachable on the only
-// harness it runs in (PR review, Medium/crossfile). These are ids no lookup
+// harness it runs in. These are ids no lookup
 // could ever use: no uuid at all, or not one path component.
 for (const bad of ["", "not-a-uuid", "9f29d624531c47b0abf60790bb65180d",
 	`sub/${PARENT}`, `../${PARENT}`, `${PARENT}${"x".repeat(200)}`]) {
@@ -228,10 +228,9 @@ console.log("\nPART B — the reader counts what it skips");
 console.log("\nPART C — the walk: once each, bounded, and honest about gaps");
 
 const projects = path.join(dir, "projects");
-// Resolution goes through `HarnessDiscovery.resolveSessionById` (PR review,
-// Medium/crossfile: a second hand-rolled lookup was drifting from the repo's
-// own on three counts), so the fixture tree is pointed at by the same env seam
-// discovery uses — not by an option this module invents for itself.
+// Resolution goes through `HarnessDiscovery.resolveSessionById`, so the
+// fixture tree is pointed at by the same env seam discovery uses — not by an
+// option this module invents for itself.
 fs.mkdirSync(projects, { recursive: true });
 process.env.WTFT_CLAUDE_PROJECTS_DIR = projects;
 
@@ -374,7 +373,7 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 	// the outcome: `descendants === 1` would also be true if the parser
 	// swallowed the EACCES and returned an empty interaction list, which is the
 	// zero-laundering this suite exists to forbid — and the run would print a
-	// harmless-looking SKIP instead of failing (PR review, Low/correctness).
+	// harmless-looking SKIP instead of failing.
 	let canRead = true;
 	try { fs.accessSync(file, fs.constants.R_OK); } catch { canRead = false; }
 	const tree = computeSpawnTree(PARENT, { ledgerPath: led });
@@ -885,7 +884,7 @@ let selfCostWithRecord = 0;
 
 // --- D25: a spawner cannot forge report rows or drive the reader's terminal ---
 //
-// Macroscope, PR #136, Medium. `mechanism` and `label` are free text from a
+// `mechanism` and `label` are free text from a
 // spawner, and this block prints them into a padded column. A newline
 // round-trips through JSON perfectly — stringify escapes it, parse restores it —
 // so `padEnd` would emit a row that is really two, and a spawner could forge
@@ -947,7 +946,7 @@ let selfCostWithRecord = 0;
 
 // --- D27: the ERROR message is untrusted text too ---
 //
-// Macroscope, PR #136, Medium — and it is the same vector as D25 arriving at the
+// and it is the same vector as D25 arriving at the
 // one code path that returns BEFORE D25's sanitiser ran.
 //
 // `renderSpawnTree` prints `spawned.ledgerError` and returns early. That message
@@ -1000,7 +999,7 @@ let selfCostWithRecord = 0;
 
 // --- D26: a FIFO at the ledger path is refused, not waited on ---
 //
-// Macroscope, PR #136, two High findings on the same sequence. `statSync(path)`
+// `statSync(path)`
 // then `readFileSync(path)` is wrong twice: the size that passed the 8 MiB check
 // belonged to a file that may have grown by the time the second call opens it
 // (so the advertised refusal did not hold), and `readFileSync` on a named pipe
@@ -1058,7 +1057,7 @@ let selfCostWithRecord = 0;
 
 // --- D28: a wide-character label cannot shift the money column ---
 //
-// Macroscope, PR #136, Medium. The row is built with `full.length > 40` and
+// The row is built with `full.length > 40` and
 // `name.padEnd(40)`. Both count UTF-16 CODE UNITS; a terminal lays out COLUMNS.
 // A BMP wide character — CJK, Hangul, the fullwidth forms — is ONE code unit and
 // TWO columns, so 40 of them pass the width check untouched, `padEnd(40)` adds
@@ -1088,9 +1087,7 @@ let selfCostWithRecord = 0;
 		mechanism: "herdr-agent-start", label,
 	});
 	// Two children that BOTH fail to resolve, so both rows carry the same money
-	// text. An earlier draft used CLOSER_CHILD here, which HAS a transcript in
-	// this sandbox and rendered `$0.17` against the other row's `(not-found)` —
-	// D28c caught it, which is the whole reason that precondition is asserted.
+	// text.
 	const UNRESOLVABLE_A = "d38296d6-2222-4333-8444-555566667777";
 	const UNRESOLVABLE_B = "d38296d6-3333-4444-8555-666677778888";
 	fs.writeFileSync(LEDGER, rec(UNRESOLVABLE_A, NARROW, 0) + "\n" + rec(UNRESOLVABLE_B, WIDE, 1) + "\n");

@@ -44,8 +44,8 @@ const ID = "claude-code";
 /** Directories that hold derived data, not sessions. */
 const SKIP_DIRS = new Set(["subagents", "tool-results", "memory", "wtft-tags"]);
 
-/** The one definition of the projects root. Test seam: point every reader at a
- *  fixture tree instead of the real home dir. */
+/** The one definition of the projects root. `WTFT_CLAUDE_PROJECTS_DIR` points
+ *  it at a fixture tree. */
 export function projectsDir(): string {
 	return process.env.WTFT_CLAUDE_PROJECTS_DIR || path.join(os.homedir(), ".claude", "projects");
 }

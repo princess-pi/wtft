@@ -1,21 +1,21 @@
 #!/usr/bin/env -S bun
 /**
- * tests/wtft-131-132-spawn-tree-accounting.test.ts — money lands in one bucket, once (#131, #132)
+ * tests/wtft-131-132-spawn-tree-accounting.test.ts — each folded session is billed once, in the right total (#131, #132)
  *
- * `total` is the caller's SELF total, `spawned.total` is the walk's. A session
- * folded into a transcript by the parser is money inside whichever bucket that
- * transcript feeds, and a ledger edge to the same session must add nothing.
+ * The caller's self total (`total`) and the walk's total (`spawned.total`)
+ * together hold each session's money exactly once. A session the parser folded
+ * into a transcript is inside whichever total that transcript feeds, and a
+ * ledger edge to the same session must not bill it a second time.
  *
  * Part A (#132) — the parser folds `claude -p` children RECURSIVELY, so a
- *   grandchild is inside the root's self total although only the child is named
- *   by the root's own turn. A ledger edge to the grandchild must not bill it a
- *   second time, whichever order the edges sit in.
- * Part B (#131) — a resolved descendant whose parse folds in an id the walk has
- *   not reached: that id's money is in `spawned.total`, so its edge reports
+ *   grandchild is inside the root's self total although the root's own turn
+ *   names only the child. Its ledger edge reports `in-self-total` and adds
+ *   nothing, whichever order the edges sit in.
+ * Part B (#131) — a resolved descendant's parse folds in a session, so that
+ *   session's money is in `spawned.total` and its edge reports
  *   `already-counted`, never `in-self-total` (which means "inside `total`").
- *
- * Every assertion pairs the skip value with the bucket totals, so the two
- * cannot drift apart.
+ *   Both orders: the walk reaches the folded session after its descendant
+ *   (marked, then skipped) and before it (subtracted from the descendant).
  *
  * Run:  bun tests/wtft-131-132-spawn-tree-accounting.test.ts
  */
@@ -26,7 +26,7 @@ import * as path from "node:path";
 import { parseSessionFile, collectSelfAttributedSessionIds } from "../extensions/lib/wtft-parser.ts";
 import { computeSessionSummary } from "../extensions/lib/wtft-renderer.ts";
 import { computeSpawnTree, treeTotals } from "../extensions/lib/wtft-spawn-tree.ts";
-import { SPAWN_RECORD_SCHEMA, serializeSpawnRecord, type SpawnRecord } from "../extensions/lib/wtft-spawn-ledger.ts";
+import { SPAWN_RECORD_SCHEMA, serializeSpawnRecord } from "../extensions/lib/wtft-spawn-ledger.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("131-132-spawn-tree");
@@ -41,6 +41,8 @@ function check(cond: boolean, msg: string) {
 const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-131-132-")));
 const projects = path.join(dir, "projects");
 process.env.WTFT_CLAUDE_PROJECTS_DIR = projects;
+process.env.WTFT_PI_SESSIONS_DIR = path.join(dir, "pi-sessions");
+process.env.XDG_CONFIG_HOME = path.join(dir, "config");
 
 const T0 = Date.UTC(2026, 8, 18, 5, 0, 0);
 const uuid = (n: number) => `aaaaaaaa-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -77,7 +79,7 @@ function ledgerOf(edges: Array<[parent: string, child: string]>): string {
 	const at = path.join(dir, `ledger-${ledgerSeq++}.jsonl`);
 	const records = edges.map(([parent, child]) => serializeSpawnRecord({
 		schema: SPAWN_RECORD_SCHEMA, ts: "2026-09-18T05:00:00Z", parent, child, mechanism: "pr-review-lens",
-	} as SpawnRecord));
+	}));
 	fs.writeFileSync(at, records.join("\n") + "\n");
 	return at;
 }
@@ -102,7 +104,7 @@ console.log("\nPART A — root → claude -p child → grandchild, the grandchil
 	check(self.outputTokens === 1100,
 		`A0 fixture precondition: the root's parse folds child AND grandchild in — 100 + 300 + 700 (got ${self.outputTokens})`);
 	check(alreadyAttributed.has(CHILD),
-		"A0b fixture precondition: the root's own turn names the child");
+		"A0b fixture precondition: the root's self-attributed set includes the child");
 
 	const orders: Record<string, Array<[string, string]>> = {
 		"root→child, child→grand": [[ROOT, CHILD], [CHILD, GRAND]],
@@ -127,8 +129,11 @@ console.log("\nPART B — a descendant's parse folds in an unreached id, which i
 
 {
 	const ROOT = uuid(11), DESC = uuid(12), FOLDED = uuid(13);
-	putSession(DESC, T0 + 2_000, 300, cwdOf(FOLDED));
+	const descPath = putSession(DESC, T0 + 2_000, 300, cwdOf(FOLDED));
 	putSession(FOLDED, T0 + 4_000, 700);
+	const descAlone = computeSessionSummary(parseSessionFile(descPath)).total.outputTokens;
+	check(descAlone === 1000,
+		`B0 fixture precondition: the descendant's own parse folds the session in — 300 + 700 (got ${descAlone})`);
 
 	for (const [name, edges] of Object.entries({
 		"descendant first": [[ROOT, DESC], [ROOT, FOLDED]] as Array<[string, string]>,
@@ -138,7 +143,11 @@ console.log("\nPART B — a descendant's parse folds in an unreached id, which i
 		check(tree.total.outputTokens === 1000,
 			`B1 [${name}] spawned.total holds the descendant and the folded id once: 300 + 700 (got ${tree.total.outputTokens})`);
 		check(!tree.edges.some(e => e.skip === "in-self-total"),
-			`B2 [${name}] no edge claims in-self-total — nothing here is inside the caller's total (got ${JSON.stringify(tree.edges.map(e => e.skip ?? "counted"))})`);
+			`B2 [${name}] no edge claims in-self-total — this walk has no self total to hold the money (got ${JSON.stringify(tree.edges.map(e => e.skip ?? "counted"))})`);
+		const descTotal = tree.edges.find(e => e.child === DESC)?.total?.outputTokens;
+		const expectedDesc = name === "folded id first" ? 300 : 1000;
+		check(descTotal === expectedDesc,
+			`B4 [${name}] the descendant's edge carries ${expectedDesc}: ${name === "folded id first" ? "the folded session's 700 was subtracted, having been counted under its own edge" : "its own 300 plus the folded 700"} (got ${descTotal})`);
 	}
 	const forward = computeSpawnTree(ROOT, { ledgerPath: ledgerOf([[ROOT, DESC], [ROOT, FOLDED]]) });
 	check(forward.edges.find(e => e.child === FOLDED)?.skip === "already-counted",

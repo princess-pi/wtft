@@ -2,11 +2,10 @@
 /**
  * tests/wtft-129-projects-root.test.ts — one definition of the projects root (#129)
  *
- * `discoverClaudeSubAgentSessionFiles` derived `~/.claude/projects` from
- * `os.homedir()` while the harness seam honoured `WTFT_CLAUDE_PROJECTS_DIR`, so
- * no sandboxed test could build a parent whose parse folds a `claude -p` child
- * in. Part A is the issue's Closer; Part B keeps a second reader from
- * re-deriving the path.
+ * Every reader of the Claude projects root calls `projectsDir()`, so
+ * `WTFT_CLAUDE_PROJECTS_DIR` redirects `claude -p` sub-agent discovery as well
+ * as session lookup. Part A folds a `claude -p` child through the override;
+ * Part B keeps a second production reader from re-deriving the path.
  *
  * Run:  bun tests/wtft-129-projects-root.test.ts
  */
@@ -64,7 +63,7 @@ fs.writeFileSync(parent,
 	+ turnLine("parent-turn", T0, 100, `cd ${childCwd} && claude -p "go"`));
 
 const found = discoverClaudeSubAgentSessionFiles(childCwd, T0);
-check(found.files.map(f => path.basename(f, ".jsonl")).join() === CHILD,
+check(found.unreadable === null && found.files.map(f => path.basename(f, ".jsonl")).join() === CHILD,
 	`A1 discovery reads the seam's root, not the home directory (got ${JSON.stringify(found.files.map(f => path.basename(f)))})`);
 
 const outputOf = (file: string) => parseSessionFile(file).reduce((sum, i) => sum + i.outputTokens, 0);
@@ -88,7 +87,7 @@ const rederivers = [...sourcesUnder(path.join(repo, "extensions")), ...sourcesUn
 	.filter(file => /["']\.claude["']\s*,\s*["']projects["']/.test(fs.readFileSync(file, "utf8")))
 	.map(file => path.relative(repo, file));
 check(rederivers.join() === "extensions/lib/harness/claude-code/discovery.ts",
-	`B1 only the harness seam spells out the projects root (got ${JSON.stringify(rederivers)})`);
+	`B1 in extensions/ and bin/, only the harness seam spells out the projects root (got ${JSON.stringify(rederivers)})`);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

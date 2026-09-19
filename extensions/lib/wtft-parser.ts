@@ -1777,7 +1777,7 @@ export function cwdToClaudeProjectSlug(cwd: string): string {
 }
 
 /** Discover sub-agent session files spawned by a bash `claude -p` command.
- *  Scans `~/.claude/projects/<slug>/` for `.jsonl` files whose first
+ *  Scans `<projects root>/<slug>/` for `.jsonl` files whose first
  *  timestamp falls within `windowMs` of `parentTimestamp`. */
 export function discoverClaudeSubAgentSessionFiles(
 	cwd: string,

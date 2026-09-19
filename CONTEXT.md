@@ -2,29 +2,11 @@
 
 Where The F\*\*\*ing Tokens?! — the cost-auditing widget and CLI for coding-agent sessions.
 
-> **Glossary provenance.** This `Language — WTFT` glossary was ported from
-> `princess-pi-tools`'s `CONTEXT.md`, removed there when wtft was extracted (#584). Bare issue
-> numbers below refer to **princess-pi-tools** issues (the source repo); wtft's own issue
-> numbering starts fresh. Where the glossary names a file, it names this repo's copy.
+> Bare issue numbers in this glossary that predate wtft's own numbering refer to
+> **princess-pi-tools** (the source repo). Where the glossary names a file, it names this
+> repo's copy.
 
 ## Language — WTFT
-
-> **Daemon vs. log parser — two registers, not a winner.** These named the same thing in two
-> layers: `daemon` throughout the code (131× in `extensions/lib/wtft-daemon-lib.ts`, 12 filenames),
-> `log parser` in user-facing text and, as it turned out, in runtime strings and comments too.
-> The first ruling (#162, 2026-08-09) picked **daemon** outright and put `log parser` on the
-> `_Avoid_` list. **Reversed 2026-08-10** by Duppy: a single word could not serve both a reader
-> meeting the process for the first time and a variable name. The standing ruling is the
-> two-register rule in the `Daemon` entry below — **"log parser daemon"** to explain, **"daemon"**
-> to refer. What stayed from the first ruling: bare **"log parser"** is still avoided.
->
-> *Why the reversal is worth recording.* The original count was taken over docs only, so the
-> ruling was made against 13 occurrences when the real surface was 69. `wtft --cleanup` printing
-> `Cleaned up 0 log parser(s).` — a runtime string no issue's scope had covered — is what exposed
-> both the miscount and the fact that one word was doing two jobs. The sweep is
-> [#165](https://github.com/duppypro/princess-pi-tools/issues/165). See
-> `docs/spec-160-161-162-wtft-spec-surfaces.md` §4.1 for the original count table and its
-> correction.
 
 **Daemon**:
 The persistent background process (`bin/wtft-daemon.ts` / `wtft-daemon.mjs`, driven by
@@ -53,8 +35,7 @@ differs.
 columns, the title-line status indicator — take the shorthand, and the surrounding prose does the
 teaching. Never widen a box or truncate a word to force the long form in. `wtft-daemon` in a
 diagram needs no gloss at all when the section heading above it already says "Log parser daemon";
-the parenthetical `(log parser)` that used to sit there existed only to bridge two unreconciled
-names, and reconciling them retired it.
+the parenthetical `(log parser)` is not a third name.
 _Avoid_: bare "log parser" (always promote to "log parser daemon"), watcher, background process,
 session parser
 

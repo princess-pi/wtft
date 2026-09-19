@@ -222,16 +222,9 @@ export function aggregateActiveTpm(activeFiles: FileInfo[], hostingSessionId: st
       const interactions = readClassifiedTagFile(filePath);
 
       for (const interaction of interactions) {
-        // Classified format carries { c, in, out, cr, cw, m, t, cat, f, cmd, ... }.
-        // A line with no model recorded (e.g. a zero-token category-only entry)
-        // has nothing to attribute to a model bucket. The timestamp check mirrors
-        // the old raw-parse guard's `!obj.t` — classifiedToInteraction already
-        // requires a numeric `t` to produce an Interaction at all, so this is
-        // unreachable today, but it keeps `age` from silently going NaN if that
-        // contract ever loosens. Number.isFinite, not `typeof ... === "number"`
-        // (PR review round 2): `typeof NaN === "number"` is true in JS, so the
-        // typeof form alone lets a NaN timestamp through and poisons
-        // lastActiveAge via Math.min(x, NaN) === NaN.
+        // A line with no model has nothing to attribute. Number.isFinite, not
+        // `typeof ... === "number"`: `typeof NaN === "number"` is true, and
+        // Math.min(x, NaN) === NaN would poison lastActiveAge.
         if (!interaction.model || !Number.isFinite(interaction.timestamp)) continue;
 
         const age = now - interaction.timestamp;
@@ -683,16 +676,8 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
   });
 
   // 3. Register the '/budget' slash command: widget and footer visibility.
-  //
-  //    THREE behaviours, and conflating any two of them is how #74 hid:
-  //      - bare `/budget`                     toggles the widget
-  //      - `--widget`/`-w` with no value      toggles (same for `--footer`/`-f`)
-  //      - `--widget on|off`, `--no-widget`   SET, and never toggle
-  //
-  //    Calling the whole command a toggle was the original wrong word. Calling
-  //    every explicit flag a setter — which an earlier version of THIS comment
-  //    did, while correcting the first error — is the same mistake pointing the
-  //    other way: the valueless forms really do toggle.
+  //    bare `/budget` and valueless `--widget`/`-w` toggle; `--widget on|off`
+  //    and `--no-widget` SET and never toggle.
   pi.registerCommand("budget", {
     description: "Configure Token Budget display options (e.g. /budget --widget off --footer on)",
     handler: async (args, ctx) => {
@@ -769,23 +754,7 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
         return;
       }
 
-      // TOKENS, not substrings (#74). The previous form asked
-      // `trimmed.includes("--widget") || trimmed.includes("-w")`. The first
-      // disjunct is not the culprit — `--widget` is NOT a substring of
-      // `--no-widget`, which has only one dash before `widget`. The second is:
-      // `"--no-widget"` contains `-w` inside `-widget`. So `--no-widget`
-      // entered the `--widget` arm, which then looked for an EXACT
-      // `--widget`/`-w` token, found none, and read `parts[-1 + 1]` — that is
-      // `parts[0]`, the first token, which is the flag itself when it is the
-      // only one and some other flag when it is not. Either way it matched
-      // neither `on` nor `off`, so control fell through to the toggle, and the
-      // `else if (includes("--no-widget"))` arm below could never run.
-      // `--no-footer` contains `-f` inside `-footer`: same defect.
-      //
-      // Measured before the fix, which is the only way to tell a toggle from a
-      // working `off`: `--no-widget` from ON went true -> false -> true, and
-      // from OFF went false -> true -> false. Run once from ON it is
-      // indistinguishable from correct, which is how it survived.
+      // TOKENS, not substrings — `"--no-widget"` contains `-w` inside `-widget`.
       const parts = trimmed.split(/\s+/).filter(Boolean);
       const hasFlag = (...names: string[]) => parts.some(p => names.includes(p));
       /** The token after the first of `names`, or undefined if absent or last. */
@@ -794,14 +763,7 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
         return idx === -1 ? undefined : parts[idx + 1];
       };
 
-      // The negating form is checked FIRST, and that IS machine-visible
-      // precedence, not reader sugar. Exact-token matching stops the two
-      // MATCHING each other, but it does not stop both being present:
-      // `/budget --no-widget --widget on` takes this branch and lands on
-      // false, and swapping the arms would land on true. An earlier version of
-      // this comment called the order "for the reader rather than for the
-      // machine", which is exactly the kind of claim that lets someone reorder
-      // it safely-looking. Negation wins; #78 tracks documenting that.
+      // Negating form first — both flags can be present; negation wins.
       if (hasFlag("--no-widget")) {
         newWidget = false;
         handled = true;

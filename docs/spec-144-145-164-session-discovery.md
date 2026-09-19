@@ -674,66 +674,10 @@ physical arm plus the fan-out — the history arm was answering a question nobod
 `matchesRecordedCwd`, and `displaySlugFor` entirely. `matchesRecordedCwd` is now one tail read and
 one set lookup. The relocation records are still IN the transcripts; nothing reads them.
 
-**What it bought back.** Same corpus, same probe, after (three runs each, warm):
-
-| cwd | candidates | warm ms | tail reads | bytes read |
-|---|---:|---:|---:|---:|
-| `~/git-projects/wtft` | 10 | 1,791–1,962 | 14,441 | 580 MB |
-| `~/git-projects/princess-pi-tools` | 88 | 1,954–1,992 | 14,344 | 576 MB |
-| `~` | 153 | 1,559–1,595 | 14,051 | 519 MB |
-
-14,441 reads over 7,287 transcripts is **~1.9 reads and ~41 KB each** — the tail windows widen far
-more often than `TAIL_WINDOWS`'s original "8 KB resolves every transcript here" assumed, and a
-transcript with no `cwd` in its last ~512 KB widens through all three and resolves null (a Pi
-transcript smaller than that is read whole and resolves its `session_start` cwd), which is #112. Both figures are now in that module's header, where a reader meets them.
-
-**Where that cost actually sits, which matters for the index that has to remove it**
-(`bun debug/count-picker.ts <cwd> --per-harness`, from `~/git-projects/wtft`):
-
-| harness | candidates | ms | reads | bytes | dir walks |
-|---|---:|---:|---:|---:|---:|
-| `claude-code` | 6 | 1,009 | 9,460 | 281 MB | 2,217 |
-| `pi` | 4 | 1,066 | 5,157 | 305 MB | 0 |
-| `auto` | 10 | 1,939 | 14,617 | 586 MB | 2,217 |
-
-**Pi is slightly more than half of it and walks no directories at all.** An index built for Claude
-discovery alone would leave half the cost in place — worth knowing before direction A is designed,
-and the reason the probe grew a `--per-harness` mode.
-
-**The widening loop also stopped re-reading itself** on this branch. It used to read
-`[size-window, size)` from scratch on each widening, so a transcript that needed all three windows
-cost 8 + 64 + 512 = 584 KB to scan 512 KB. It now reads only the newly exposed prefix and decodes
-the accumulated buffer (bytes once, CPU again — and bytes are what is scarce).
-
-**Measured, after an earlier draft of this paragraph claimed a figure the code did not have.** The
-change was written, lost to a failed edit, and described in prose anyway; Macroscope caught the
-discrepancy on PR #122 by reading the loop. Two measurements now, both from the shipped code:
-
-- **The shape it targets** — a 1 MB transcript with no `cwd` at all, which widens through every
-  window: **524,288 bytes, 3 reads**. Exactly 512 KB, so each byte is read once. The old loop read
-  598,016.
-- **The whole corpus**, same probe as the tables above: **586 MB → 485 MB, a 17% cut** (auto;
-  Claude 281 → 240 MB, Pi 305 → 245 MB).
-
-An earlier draft said "~2.8%, because only 28 of 7,318 transcripts widen that far". That came from
-a Python model that used "does the last 8 KB contain the substring `"cwd":"`" as a proxy for "the
-first window resolves it" — which is far too generous, because the real scan needs a *parseable
-JSON line* carrying a string `cwd`, and a substring inside a truncated line is not one. Many more
-transcripts widen than the proxy predicted. The modelled figure is recorded here as the wrong one,
-because a number from a model that was never checked against the code is exactly what this
-amendment's opening paragraph exists to prevent.
-
-**Identical candidate counts, ~2.2x faster warm, zero whole-file reads.** No session was lost on
-the corpus this was measured against.
-
-**TWO OF #89's ACCEPTANCE CRITERIA ARE NOT MET, and both are recorded rather than quietly
-restated.**
-
-1. **≤ 200 ms warm.** This is 1,559–1,962 ms, eight to ten times the ceiling.
-2. **Reads bounded by the CANDIDATE count, not the corpus.** They are not, and cannot be while
-   every arm must ask each transcript where it lives before ruling it out. V11f asserts this in the
-   direction that is true today — zero candidates, still one read per transcript — so the day the
-   bound is achievable that line fails and must be rewritten, rather than a comment going stale.
+The tail windows widen; 512 KB is the last window, not a prelude to a whole-file read.
+A transcript with no `cwd` in its last 512 KB resolves null. The widening loop reads
+only the newly exposed prefix (bytes once). Remaining discovery cost scales with the
+corpus, not the candidate count.
 
 Both are the same cost: what remains scales with the corpus, and only an on-disk index removes it —
 `~/.cache/wtft/cwd-index.jsonl` keyed `(path, mtimeMs, size)`, scanning only bytes appended since

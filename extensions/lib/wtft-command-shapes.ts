@@ -1,26 +1,12 @@
 /**
- * @package wtft
+ * @package @princess-pi/wtft
  * @module wtft-command-shapes
- * @description What a bash command STRING is made of (#106) — and nothing about
- *   what it means. The meaning lives in `wtft-parser.ts`'s classifier.
+ * @description What a bash command STRING is made of — and nothing about what
+ *   it means. The meaning lives in `wtft-parser.ts`'s classifier.
  *
- *   Why this is its own module: #63 handled the compound-command problem with
- *   three leading-prefix regexes on one string, and the corpus measured in
- *   `research/other-corpus/` shows what that misses. `cd` was the single largest
- *   "other" command at ~20% of the whole bucket, because its strip demanded a
- *   literal `&&` or `;` and the commonest real shape separates with a NEWLINE.
- *   A prefix-strip also cannot see past the first command, so `until …; do sleep
- *   15; done; gh pr checks 277` is a wait loop whose actual work is invisible.
- *
- *   The deep-module move is to stop rewriting the string and instead SPLIT it —
- *   once, quote/heredoc/substitution-aware — into the commands a shell would run.
- *   Everything above then reads a list instead of guessing at a prefix.
- *
- *   Deliberately NOT a shell parser. It knows quoting, `$( )`, backticks,
- *   heredocs, line continuations and the separators, because getting those wrong
- *   silently mis-splits real commands. It does not know expansion, arrays,
- *   arithmetic, or `case` patterns — a command it cannot read comes back whole,
- *   which degrades to today's behaviour rather than to a wrong answer.
+ *   Split once, quote/heredoc/substitution-aware, into the commands a shell
+ *   would run — rather than rewriting the string with leading-prefix regexes.
+ *   Deliberately NOT a shell parser. A command it cannot read comes back whole.
  */
 
 // ---
@@ -42,10 +28,8 @@ const SEPARATORS = ["&&", "||", "|&", ";;", ";", "|", "\n"];
  * a quote, a substitution, a heredoc, a comment, or a line continuation.
  *
  * A string with none of these is one command, and the character walk below can
- * be skipped entirely. Measured motivation: the walk is ~16% slower than the
- * three regexes it replaced, and `tests/wtft-issue-149-…` already sits within
- * 5% of bun's 5s per-test ceiling on this host (#27). Most real commands are
- * short and simple, so the bail is taken on the large majority of them.
+ * be skipped entirely. Most real commands are short and simple, so the bail is
+ * taken on the large majority of them.
  */
 const NEEDS_SPLIT = /[;|&'"`\n#\\]|\$\(/;
 
@@ -60,13 +44,10 @@ export interface JoinedSegment {
  * Like `extractCommandSegments`, but keeps the operator that preceded each
  * command.
  *
- * The operator is the difference between "then" and "only if that failed", and
- * a caller that has to know WHICH command actually ran cannot recover it from
- * the text alone. `cd /real 2>/dev/null || cd /tmp` runs the second `cd` only
- * when the first fails — so for a spawn that follows, the FIRST is almost
- * always the real directory. Reading it as "last one wins" silently attributed
- * a real subagent's cost to the wrong project directory and then lost it
- * entirely (#106 review round 2, Medium/reasoning).
+ * The operator is the difference between "then" and "only if that failed".
+ * `cd /real 2>/dev/null || cd /tmp` runs the second `cd` only when the first
+ * fails — so for a spawn that follows, the FIRST is almost always the real
+ * directory. "Last one wins" attributes cost to the wrong project directory.
  */
 export function extractJoinedSegments(cmd: string): JoinedSegment[] {
 	return splitSegments(cmd);
@@ -101,9 +82,7 @@ function splitSegments(cmd: string): JoinedSegment[] {
 	let pendingHeredocs: { delim: string; stripTabs: boolean }[] = [];
 	// Index of the already-pushed segment that opened those heredocs, or -1 when
 	// the opener is still in `buf`. `python3 - <<'PY' | sort` pushes the opener
-	// at the `|` BEFORE the body is reached, and the body was then appended to
-	// whatever came next — so the script's paths were read as `sort`'s and the
-	// inline-script rule was tested against the wrong command (#106 review).
+	// at the `|` BEFORE the body is reached — body must stay on the opener.
 	let heredocOwner = -1;
 
 	const push = () => {
@@ -119,7 +98,6 @@ function splitSegments(cmd: string): JoinedSegment[] {
 		const c = cmd[i]!;
 
 		// Line continuation: a backslash-newline is whitespace, not a command.
-		// Corpus: 208 calls rendered a bare `\` as though it were a program.
 		if (c === "\\" && cmd[i + 1] === "\n") { buf += " "; i += 2; continue; }
 		if (c === "\\" && i + 1 < n) { buf += c + cmd[i + 1]; i += 2; continue; }
 
@@ -143,13 +121,8 @@ function splitSegments(cmd: string): JoinedSegment[] {
 		}
 
 		// Command substitution: `$( … )` nests, so count depth rather than
-		// scanning for the first `)`. This is the arm that `cd $(mktemp -d)`
-		// defeated in #63 — its value contains a space AND a paren.
-		//
-		// Quote-aware, because a paren inside a quoted string is text, not
-		// structure: `$(grep ')' bin/x.ts)` closed at the quoted `)` and sliced
-		// the substitution short, feeding a wrong primary token into everything
-		// downstream (#106 review, Low/correctness).
+		// scanning for the first `)`. Quote-aware: a paren inside a quoted
+		// string is text, not structure.
 		if (c === "$" && cmd[i + 1] === "(") {
 			let depth = 0, j = i + 1;
 			for (; j < n; j++) {
@@ -213,12 +186,8 @@ function splitSegments(cmd: string): JoinedSegment[] {
 			heredocOwner = -1;
 			i = j;
 			// The delimiter line's terminating newline was consumed with the
-			// body, so the separator that would have ended this command is gone.
-			// Close the segment explicitly, or everything after the heredoc is
-			// glued onto it: `cat <<'EOF' … EOF\ngh pr checks 277` came back as
-			// ONE segment, classification read only the `cat` head, and the `gh`
-			// work — or a `claude -p` — was never seen at all (#106 review round
-			// 4, High/correctness).
+			// body — close the segment explicitly or everything after the heredoc
+			// is glued onto it.
 			push();
 			nextJoin = "\n";
 			continue;
@@ -257,13 +226,9 @@ export interface CommandWords {
 /**
  * Split one command into words and redirection targets, quote-aware.
  *
- * Why this is not a regex: the first cut ran `/(?:^|\s)\d?>{1,2}\s*(…)/` over
- * the raw string, so a `>` inside a quoted argument was read as a redirection.
- * `git commit -m "fix > bug"` fabricated a WRITE to a file called `bug`, and
- * since path-derived categories outrank command names, that turn was reported
- * as `code` instead of `git` (#106 review round 2, High/correctness). Quoting is
- * exactly what decides whether `>` is an operator, so the scan has to know it.
- *
+ * A regex over the raw string reads `>` inside a quoted argument as a
+ * redirection — `git commit -m "fix > bug"` would fabricate a WRITE to `bug`.
+ * Quoting decides whether `>` is an operator, so the scan has to know it.
  * The heredoc BODY is ignored: only the opener's line carries arguments.
  */
 export function splitCommandWords(cmd: string): CommandWords {
@@ -304,10 +269,8 @@ export function splitCommandWords(cmd: string): CommandWords {
 			continue;
 		}
 		if (/\s/.test(c)) { flush(); i++; continue; }
-		// A HERE-STRING (`<<<`) feeds a literal, not a file. Skipping it here
-		// left the third `<` to be read as an input redirection, so `cat <<<
-		// 'hello'` fabricated a read of a file called `hello` and could grade the
-		// turn `code` (#106 review round 4, Medium/correctness).
+		// A HERE-STRING (`<<<`) feeds a literal, not a file — skipping it left
+		// the third `<` to be read as an input redirection.
 		if (c === "<" && head[i + 1] === "<" && head[i + 2] === "<") {
 			flush();
 			i += 3;
@@ -337,13 +300,9 @@ export function splitCommandWords(cmd: string): CommandWords {
 			}
 			continue;
 		}
-		// A `>` that is genuinely inside quotes never reaches here — the quote
-		// handlers above consume the whole quoted run, `>` included, which is
-		// what makes `echo "a > b"` data rather than a redirection. So any `>`
-		// seen at this point IS an operator, including one that directly abuts
-		// a closing quote: `echo "a">out` redirects (#106 review round 3,
-		// Low/correctness). An earlier cut carried a `quoted` flag here and
-		// swallowed that redirection into the word.
+		// A `>` inside quotes never reaches here — the quote handlers consume
+		// the whole quoted run. Any `>` here IS an operator, including one that
+		// abuts a closing quote: `echo "a">out`.
 		if (c === ">" || c === "<") {
 			// `2>`/`1>` — the leading fd digit already landed in `cur`.
 			if (/^\d$/.test(cur)) cur = "";
@@ -373,11 +332,9 @@ export function splitCommandWords(cmd: string): CommandWords {
  * Wrapper commands whose argument IS the command that matters.
  *
  * Every option that CONSUMES A FOLLOWING WORD has to be spelled out, not folded
- * into a generic `-\S+`. The first cut used `timeout\s+(?:-\S+\s+)*\S+`, which
- * reads `timeout -k 5 200 bun test` as flag `-k`, duration `5` — leaving `200
- * bun test` as the command and classifying the turn `other`, the very thing this
- * module exists to prevent (#106 review, Medium/correctness). `sudo -u root git
- * status` failed the same way, yielding a command named `root`.
+ * into a generic `-\S+`. `timeout -k 5 200 bun test` must not read duration as
+ * `5` and leave `200 bun test` as the command; `sudo -u root git status` must
+ * not yield a command named `root`.
  */
 const WRAPPER = new RegExp(
 	"^(?:" +
@@ -415,21 +372,13 @@ const KEYWORD = /^(?:for|while|until|if|elif|else|then|do|done|fi|case|esac|in|s
 
 /**
  * A function DEFINITION — the body is not an invocation.
- *
- * BOTH spellings: `name() { … }` and bash's `function name { … }`. Only the
- * first was matched, so a multi-statement `function f { a; b; }` body leaked its
- * later statements as top-level commands (#106 review round 4). The single-
- * statement case passed by luck — the body shared a segment with the keyword.
+ * BOTH spellings: `name() { … }` and bash's `function name { … }`.
  */
 const FUNCTION_DEF = /^(?:[A-Za-z_][A-Za-z0-9_-]*\s*\(\s*\)|function\s+[A-Za-z_][A-Za-z0-9_-]*)/;
 
 /**
  * Net brace nesting introduced by a segment, ignoring braces inside quotes.
- *
- * A `}` in a string is text, not structure: `die() { echo "}"; echo hi; }`
- * closed the body on its first segment, so `echo hi` escaped as a real command
- * even though a definition runs nothing — and a `claude -p` in such a body
- * would have registered as a real spawn (#106 review round 4).
+ * A `}` in a string is text, not structure.
  */
 function braceDelta(segment: string): number {
 	let depth = 0;
@@ -463,20 +412,12 @@ export function stripCommandPrefixes(segment: string): string {
 	let s = segment.trim();
 	for (let pass = 0; pass < 12; pass++) {
 		const before = s;
-		// `else` introduces an ARM — the command after it is work, and dropping
-		// the whole segment discarded it: `if false; then echo no; else gh pr
-		// checks 277; fi` classified from the `echo` arm (#106 review round 4).
-		// `elif` is NOT here: what follows it is a condition, so it stays
-		// scaffolding exactly as `if` does.
+		// `else` introduces an ARM — the command after it is work. `elif` is NOT
+		// here: what follows it is a condition.
 		s = s.replace(/^(?:do|then|else|!)\s+/, "");
-		// A brace GROUP runs its body — `{ gh pr checks 277; }` is work, unlike a
-		// function definition, which runs nothing. `{` was in KEYWORD, so the
-		// whole group was discarded and a `claude -p` inside one was never seen
-		// as a spawn (#106 review round 4, Medium/correctness).
+		// A brace GROUP runs its body — unlike a function definition.
 		s = s.replace(/^\{\s+/, "");
-		// A SUBSHELL group runs its body too — `( gh pr checks 277; echo done )`
-		// was classified from `echo` because `(` was grammar. Same rule as `{`,
-		// and the closing `)` is still dropped by KEYWORD (#108 review).
+		// A SUBSHELL group runs its body too. Closing `)` still dropped by KEYWORD.
 		s = s.replace(/^\(\s*/, "");
 		s = s.replace(DECLARE, "");
 		s = s.replace(ASSIGNMENT, "");
@@ -490,12 +431,9 @@ export function stripCommandPrefixes(segment: string): string {
 /**
  * One segment, reduced to the command it runs — or `""` when it runs none.
  *
- * `inLoopBody` is why this takes a second argument rather than being pure over
- * the string: `sleep 15` is ordinary work at top level and is pure scaffolding
- * between `do` and `done`. The wait-loop idiom
- * `until <condition>; do sleep 15; done; <the real command>` is the single most
- * common `until` shape in the corpus, and treating its `sleep` as the command
- * hides the work the loop was waiting to do.
+ * `inLoopBody`: `sleep 15` is ordinary work at top level and pure scaffolding
+ * between `do` and `done`. Treating a wait-loop's `sleep` as the command hides
+ * the work the loop was waiting to do.
  */
 export function reduceSegment(segment: string, inLoopBody = false): string {
 	const s = stripCommandPrefixes(segment);
@@ -509,18 +447,11 @@ export function reduceSegment(segment: string, inLoopBody = false): string {
 
 /**
  * Every real command in a bash string, scaffolding removed, in order.
+ * This is what the classifier reads.
  *
- * This is what the classifier reads: a compound command is classified on
- * everything it runs, not on whichever command happened to come first.
- */
-/**
- * Memo for `extractRealCommands`.
- *
- * The same command string is segmented up to three times per turn — once at
- * parse time for its file touches, once by the classifier, once by the `--other`
- * histogram — and a session replays the same commands across every render. The
- * cache is bounded and cleared wholesale rather than evicted per entry: this is
- * a batch tool, and a simple ceiling is easier to reason about than an LRU.
+ * Memo: the same command string is segmented up to three times per turn, and a
+ * session replays the same commands across every render. Bounded, cleared
+ * wholesale — a simple ceiling beats an LRU for a batch tool.
  */
 const REAL_COMMAND_CACHE = new Map<string, string[]>();
 const REAL_COMMAND_CACHE_MAX = 4096;
@@ -537,12 +468,8 @@ export function extractRealCommands(cmd: string): string[] {
 function computeRealCommands(cmd: string): string[] {
 	const out: string[] = [];
 	let loopDepth = 0;
-	// Brace depth inside a function DEFINITION. Dropping only the segment that
-	// carries `name() {` left the rest of a multi-statement body standing as
-	// top-level commands: `reply() { gh api …; gh pr checks 1; }` yielded
-	// `gh pr checks 1`, so a turn that merely DEFINED a function classified as
-	// git — and a `claude -p` inside a body registered as a real spawn (#106
-	// review round 3, Medium/correctness). A definition runs nothing.
+	// Brace depth inside a function DEFINITION. A definition runs nothing —
+	// dropping only the `name() {` segment would leave the body as top-level.
 	let fnDepth = 0;
 	for (const segment of extractCommandSegments(cmd)) {
 		const raw = segment.trim();

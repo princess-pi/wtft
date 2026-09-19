@@ -95,7 +95,7 @@ assert(
 );
 // The marker is a SUBSTRING search, so a `claude-`-prefixed id naming a DeepSeek
 // model would bill on the marker alone. `deepseek` is excluded first
-// (pr-review round 2). Zero ids on this host carry both words — a guard, not a
+//. Zero ids on this host carry both words — a guard, not a
 // correction.
 assert(
 	"claude-deepseek-v4-pro → $0.00 (deepseek wins over the claude marker)",

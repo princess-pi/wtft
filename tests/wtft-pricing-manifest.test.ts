@@ -36,12 +36,10 @@ import {
 	renderPricingManifest,
 	PRICING_MANIFEST_SCHEMA,
 } from "../extensions/lib/wtft-pricing-manifest.ts";
-// SOURCE, not `../bin/wtft.mjs`. Load-bearing, and flagged as a defect twice by
-// two different pr-review lenses (rounds 1 and 3), so it is stated here rather
-// than left to be rediscovered a third time: comparing the committed manifest
-// against the BUILT registry could not detect a skipped build, because a skipped
-// build leaves bundle and manifest equally stale. Importing the source is what
-// makes "edit the registry, skip `bun run manifest`" observable. Verified by
+// SOURCE, not `../bin/wtft.mjs`. Comparing the committed manifest against the
+// BUILT registry could not detect a skipped build, because a skipped build
+// leaves bundle and manifest equally stale. Importing the source is what makes
+// "edit the registry, skip `bun run manifest`" observable. Verified by
 // mutation both times — adding a model here and not REGENERATING turns the
 // "lists exactly the registry's models" case red with its intended message.
 // Regenerating, not rebuilding: since #100 `bun run build` only checks this
@@ -91,7 +89,7 @@ describe("#169 every priced model reaches the manifest", () => {
 		for (const model of listed) {
 			assert.ok(priced.includes(model), `${model} is in the committed manifest but no longer priced — run: bun run manifest`);
 		}
-		// "exactly" means the counts match too (pr-review round 2). Inclusion in
+		// "exactly" means the counts match too. Inclusion in
 		// both directions is satisfied by a manifest that lists a model twice.
 		assert.strictEqual(listed.length, priced.length,
 			`the committed manifest has ${listed.length} rows for ${priced.length} priced models — a duplicate or dropped entry; run: bun run manifest`);
@@ -144,13 +142,13 @@ describe("#169 every priced model reaches the manifest", () => {
 		// every dated row's condition from the constants and leave a stale
 		// sentence beside them, and the committed file would still match a fresh
 		// render byte-for-byte. So the byte-comparison above cannot catch it and
-		// this case must (#100 review round 2).
+		// this case must.
 		//
 		// It checks ASSOCIATION, not membership. A first version collected every
 		// DeepSeek instant into a set and asked whether each date in the note was
 		// in it — which passes when the two dates are SWAPPED, or when one is
 		// replaced by another real cutover, because every candidate is in the set
-		// (#100 review round 3). What the note actually claims is that a specific
+		//. What the note actually claims is that a specific
 		// event happened to a specific model, so that is what is asserted.
 		const m = buildPricingManifest();
 		const note = m.deepseekSurge.note;

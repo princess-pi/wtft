@@ -1,11 +1,5 @@
 // tests/tagger-version-single-source.test.ts — the tagger version has exactly one
-// definition (#499, gate E).
-//
-// The failure this gates: session-selector.ts carried a hand-mirrored
-// `TAGGER_VERSION = "2.3.8"` that fell four bumps behind the daemon's 2.7.1 —
-// its Tier-1 tag lookup never hit, and current-version tags rendered with a
-// stale-version suffix. A mirrored constant is a comment wearing a type: nothing
-// diffs it against the original. Single source, everything imports.
+// definition (#499, gate E). Single source; everything imports.
 
 import * as fs from "fs";
 import * as path from "path";

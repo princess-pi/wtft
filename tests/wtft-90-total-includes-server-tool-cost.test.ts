@@ -85,7 +85,7 @@ function fixture(name: string, web: number): string {
 const withWeb = fixture("with-web.jsonl", WEB_REQUESTS);
 const noWeb = fixture("no-web.jsonl", 0);
 
-/** Each invocation gets its OWN copy of the fixture (PR review).
+/** Each invocation gets its OWN copy of the fixture
  *
  *  Three surfaces read by three separate processes is a snapshot comparison, not
  *  a single-state one: a provisional read is defined as one whose total MAY STILL
@@ -109,7 +109,8 @@ function cli(source: string, args: string[]): string {
 /** The chart's running total: the newest cumulative bin row, which is the
  *  rightmost number a reader's eye lands on. Rows are newest-first. */
 function chartTotal(session: string): number {
-	// DOCUMENTED SPELLINGS ONLY (PR review). `-m cumulative` is not a flag:
+	// DOCUMENTED SPELLINGS ONLY `-m cumulative` is not a flag:
+
 	// `--cumulative`/`-c` and `--bucket`/`-b` are, and `parseWtftCliArgs` ignores
 	// an unknown flag silently (#91) — so the first cut of this passed without
 	// the mode ever having been honoured, on a default that happened to match.
@@ -129,7 +130,8 @@ function tokensTotal(session: string): number {
 	if (!row) throw new Error(`no TOTAL row in:\n${out}`);
 	// The cell carries a trailing `?` when any model in the session has no rate
 	// card, so the anchor accepts it — otherwise this helper THROWS and aborts the
-	// suite the day the fixture's model ages out of the registry (PR review).
+	// suite the day the fixture's model ages out of the registry
+
 	const m = row.match(/\$([0-9.]+)\??\s*$/);
 	if (!m) throw new Error(`no cost cell in TOTAL row: ${row}`);
 	return Number(m[1]);
@@ -144,7 +146,8 @@ console.log("--- TEST 0: the gate is not vacuous ---");
 // — the model ages out of the server-tool card, the argument order changes, the
 // parser stops populating serverToolCost — every one of them holds trivially
 // with the divergence fully restored, and the suite exits 0 reporting success.
-// AGAINST THE TOLERANCE IT PROTECTS, not against zero (PR review). The chart and
+// AGAINST THE TOLERANCE IT PROTECTS, not against zero The chart and
+
 // TOTAL figures are scraped from `formatCost` at two decimals and compared at
 // half a cent, so a charge below a cent leaves TEST 2 and TEST 2b holding
 // trivially with the divergence fully restored — and TEST 2 is the exact
@@ -174,7 +177,8 @@ for (const [name, session] of [["with server-tool spend", withWeb], ["without", 
 	const doc = json(session);
 	// BOTH scraped figures carry CENT precision — `formatCost` gives two decimals
 	// — so every comparison here resolves to half a cent, and saying `1e-9` would
-	// have read as exactness the strings cannot carry (PR review). The exact
+	// have read as exactness the strings cannot carry The exact
+
 	// arithmetic is pinned by TEST 1 and TEST 3, on the document.
 	check(
 		Math.abs(chart - tokens) < 0.005,
@@ -222,7 +226,8 @@ console.log("--- TEST 3b: the WARM path, which is what a user actually hits ---"
 const warmFixture = path.join(dir, "warm.jsonl");
 fs.copyFileSync(withWeb, warmFixture);
 
-// SYNCHRONISED, or it proves nothing (PR review). Back-to-back runs with exit 9
+// SYNCHRONISED, or it proves nothing Back-to-back runs with exit 9
+
 // tolerated can all three read a session whose tag file does not exist yet —
 // three COLD runs, reporting coverage of a warm path that never ran. So the
 // first run primes, and the warm runs wait for the tag file to actually carry a
@@ -296,7 +301,8 @@ check(
 	Math.abs(webCat(docUntagged).costUsd - EXPECTED_WEB_COST) < 1e-9,
 	"…the tagged turn's server-tool cost still lands in `web`"
 );
-// SAME POPULATION, or the check is vacuous (PR review). Compared against
+// SAME POPULATION, or the check is vacuous Compared against
+
 // `docWeb` it was already lower by a whole extra tagged turn, with slack wider
 // than the untagged turn's own cost — so it passed whether that cost was
 // excluded (the behaviour under test) or fully included. The control is the
@@ -362,7 +368,8 @@ check(
 // so by definition a background process is still parsing and writing tag files
 // beside every fixture copy when the CLI returns. Removing `dir` under them is a
 // race: orphaned processes, stray files, and on an unlucky interleaving a
-// directory-removal error (PR review). `isolateTmpdir` already gives this suite
+// directory-removal error `isolateTmpdir` already gives this suite
+
 // its own daemon lease, so stopping by session path reaps only ours.
 for (const session of fs.readdirSync(dir).filter(n => n.endsWith(".jsonl"))) {
 	spawnSync("node", [CLI_BIN, "--stop", path.join(dir, session)], { encoding: "utf8", timeout: 10_000 });

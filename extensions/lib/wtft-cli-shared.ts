@@ -1,11 +1,9 @@
 /**
- * @package princess-pi-tools
+ * @package @princess-pi/wtft
  * @module wtft-cli-shared
  * @description Shared CLI/extension interface layer — argument parsing, daemon
  *   lifecycle, config reading, and manifest-driven help/why/version rendering.
  *   Consumed by both `extensions/wtft.ts` (Pi extension) and `bin/wtft.ts` (CLI).
- *
- *   #94: extracted from ~300 lines duplicated across both callers.
  */
 
 import * as fs from "node:fs";
@@ -62,7 +60,7 @@ export interface WtftCliOptions {
 	daemonRestart: boolean;
 	daemonStop: string | undefined;
 	thinkingBudget: number | undefined;
-	/** `--json` (#26) — emit the machine-readable session summary instead of
+	/** `--json` — emit the machine-readable session summary instead of
 	 *  rendering. CLI-only: the Pi extension parses it and ignores it, because a
 	 *  TUI widget has no stdout to write an object to. */
 	json: boolean;
@@ -139,7 +137,7 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 			other = true;
 			hasOther = true;
 		} else if (arg === "--tokens" || arg === "--by-model") {
-			// --by-model (#140): alias — the token summary IS the per-model
+			// --by-model: alias — the token summary IS the per-model
 			// token/cost breakdown, one row per model id plus a TOTAL row.
 			tokens = true;
 			cost = false;
@@ -167,20 +165,10 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 		} else if (arg === "--hide" || arg === "-H") {
 			hideWidget = true;
 		} else if (arg === "--show" || arg === "-S") {
-			// ACCEPTED AND INERT, which is the accurate description — #79 owns
-			// the decision about whether that should change.
-			//
-			// A `/wtft --show` run does end with the widget rendered, but the
-			// default path is what renders it: `--hide --show` and
-			// `--show --hide` BOTH clear the widget, so this flag carries no
-			// force of its own in either order. It used to set a `showWidget`
-			// field that nothing read; removing that removed a misleading
-			// signal, not the inertness.
-			//
-			// Kept accepted so `-S` is never an unknown-flag error, and because
-			// CONTEXT.md documents `-S`/`-H` as a pair — dropping it is a
-			// user-facing change that belongs with that entry, not here.
-			// Behaviour pinned by tests/wtft-74-budget-flag-parsing.test.ts §4.
+			// ACCEPTED AND INERT. `--hide --show` and `--show --hide` BOTH clear
+			// the widget — this flag carries no force of its own. Kept accepted
+			// so `-S` is never an unknown-flag error; CONTEXT.md documents
+			// `-S`/`-H` as a pair. Pinned by tests/wtft-74-budget-flag-parsing.test.ts §4.
 		} else if (arg === "--no-emojii" || arg === "--no-emoji") {
 			enableEmoji = false;
 		} else if (arg === "--emojii" || arg === "--emoji") {
@@ -309,18 +297,16 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 // ---
 
 /**
- * Is this a session .jsonl path that may simply not be written YET? (#308)
+ * Is this a session .jsonl path that may simply not be written YET?
  *
  * Claude Code fixes the session id — and so the transcript path — at launch, but
  * writes the first line only after the first real prompt (not a /command)
- * completes. A caller that knows the path early (a SessionStart hook, a
- * statusline, `wtft -s <path>` fired at launch) must not be told "not found":
- * the file is late, not missing. The daemon already parks on such a path
- * (#124/#129); this predicate is what lets the CLI accept one.
+ * completes. A caller that knows the path early must not be told "not found":
+ * the file is late, not missing. The daemon already parks on such a path; this
+ * predicate is what lets the CLI accept one.
  *
- * Deliberately narrow: absolute, ends in `.jsonl`, and is not a wtft tag file
- * (the daemon refuses those anyway). A relative fuzzy filter that matches no
- * discovered session is still an error — that path was never a fact.
+ * Deliberately narrow: absolute, ends in `.jsonl`, and is not a wtft tag file.
+ * A relative fuzzy filter that matches no discovered session is still an error.
  */
 export function isPendingSessionPath(p: string): boolean {
 	return path.isAbsolute(p) && p.endsWith(".jsonl") && !p.includes(".wtft-tag.v");
@@ -352,7 +338,7 @@ export function spawnWtftDaemon(sessionPath: string, daemonDir: string): ChildPr
 // and exits, so it naturally starts fresh every invocation.
 let _daemonSessionPath: string | null = null;
 let _daemonSpawned = false;
-let _daemonSpawnedAt = 0; // Date.now() when the last spawn was attempted (#124)
+let _daemonSpawnedAt = 0; // Date.now() when the last spawn was attempted
 
 /**
  * Ensure the wtft-daemon is running for the given session. If already
@@ -385,11 +371,9 @@ export function ensureDaemonRunning(sessionPath: string, daemonDir: string): boo
 export function getDaemonStatus(sessionPath: string): DaemonStatus {
 	if (!_daemonSessionPath) return { alive: false, reason: "not-started" };
 
-	// Session file existence (#124): the daemon now waits for the session
-	// file instead of exiting, but there's still a brief window where the
-	// daemon was spawned and hasn't claimed the PID file yet. In that gap,
-	// if the session file doesn't exist, report "waiting-session"
-	// instead of "starting" → falling through to "not-found".
+	// Brief window where the daemon was spawned and hasn't claimed the PID
+	// file yet — if the session file doesn't exist, report "waiting-session"
+	// instead of "starting" → "not-found".
 	let sessionExists = false;
 	try { sessionExists = fs.existsSync(sessionPath); } catch {}
 
@@ -407,12 +391,10 @@ export function getDaemonStatus(sessionPath: string): DaemonStatus {
 	if (!health.alive && _daemonSpawned) {
 		const elapsed = Date.now() - _daemonSpawnedAt;
 		// Within 5s of spawn: if PID file doesn't exist, daemon may still
-		// be starting. If session file doesn't exist either, the daemon is
-		// waiting for it — report that instead of a generic "starting".
-		//
-		// #179: this compares a health CODE, not a display sentence. Typo it and
-		// `tsc --noEmit` rejects the comparison instead of silently producing an
-		// always-false branch — which is exactly how #124 could have regressed.
+		// be starting. If session file doesn't exist either, report
+		// "waiting-session" instead of a generic "starting".
+		// Compare a health CODE, not a display sentence — typo it and
+		// `tsc --noEmit` rejects the comparison.
 		if (elapsed < 5000 && health.reason === "not-found") {
 			if (!sessionExists) {
 				return { alive: false, reason: "waiting-session" };
@@ -454,20 +436,18 @@ export interface WtftManifest {
 	description: string;
 	usage: { flags: string; desc: string }[];
 	examples: { cmd: string; desc: string }[];
-	/** The documented exit-code table (#26). Optional so a manifest that predates
+	/** The documented exit-code table. Optional so a manifest that predates
 	 *  it still renders; `--help` omits the section when it is absent. */
 	exitCodes?: { code: number; meaning: string }[];
 	why?: unknown;
 }
 
 /**
- * A manifest, or a path to one (#36).
+ * A manifest, or a path to one.
  *
- * Every renderer used to take only a path, which is why a published or copied
- * `bin/wtft.mjs` could not print its own help: `files` ships the bundle alone,
- * so the path pointed at a file no install contains. The CLI now hands over a
- * manifest the bundler inlined. The path form stays because the Pi extension
- * still reads the repo copy from `process.cwd()`, where the file really is.
+ * The CLI hands over a manifest the bundler inlined — a published `bin/wtft.mjs`
+ * has no package.json/manifest beside it. The path form stays because the Pi
+ * extension still reads the repo copy from `process.cwd()`.
  */
 export type ManifestSource = string | WtftManifest;
 
@@ -497,9 +477,8 @@ export function renderWtftHelp(src: ManifestSource, invokedAs: string): string {
 		text += `  ${(e.cmd).padEnd(30)} ${e.desc}\n`;
 	}
 
-	// Exit codes are API (#26). `--help` is where a human looks for them, and
-	// rendering from the manifest is what keeps this list from becoming a second
-	// copy that drifts from the one `--json` consumers read.
+	// Exit codes are API. `--help` is where a human looks for them; rendering
+	// from the manifest keeps this list from drifting from `--json` consumers.
 	if (manifest.exitCodes && manifest.exitCodes.length > 0) {
 		text += `\n\x1b[1mExit codes:\x1b[0m\n`;
 		for (const c of manifest.exitCodes) {
@@ -518,25 +497,16 @@ export async function renderWtftWhy(src: ManifestSource, invokedAs: string): Pro
 	const { renderWhy } = await import("@princess-pi/libs/manifest-help");
 	if (typeof src === "string") return renderWhy(src, invokedAs);
 
-	// libs' renderWhy reads a PATH, and this repo pins @princess-pi/libs to a
-	// commit, so widening it there is a separate release — filed as
-	// princess-pi/libs#3. Until that lands the inlined manifest is spilled to a
-	// private temp file for the length of the call. Deliberately a spill and not
-	// a second copy of the renderer: one renderer that occasionally needs a file
-	// cannot drift from itself, and two that never need one can. Delete this
-	// branch when libs#3 lands.
+	// libs' renderWhy reads a PATH; spill the inlined manifest to a private
+	// temp file for the length of the call rather than maintaining a second
+	// copy of the renderer.
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-why-"));
 	const file = path.join(dir, "wtft-cmd.json");
 	try {
 		fs.writeFileSync(file, JSON.stringify(src));
-		// `await` before returning, not `return renderWhy(...)`: `finally` runs when
-		// the try block RETURNS, not when the returned promise settles, so the bare
-		// return would delete the spill file during the read it exists for.
-		// Demonstrated with an async reader — the bare form throws ENOENT, this one
-		// returns the content. Latent rather than live today only because libs'
-		// renderWhy is synchronous (fs.readFileSync), which is a property of a
-		// PINNED external package that this call site cannot see and does not
-		// assert; the await is correct under either implementation. (Review round 1.)
+		// `await` before returning: `finally` runs when the try block RETURNS,
+		// not when the returned promise settles — a bare `return renderWhy(...)`
+		// would delete the spill file during the read.
 		const text = await renderWhy(file, invokedAs);
 		return text;
 	} finally {
@@ -545,28 +515,22 @@ export async function renderWtftWhy(src: ManifestSource, invokedAs: string): Pro
 }
 
 /**
- * Render --version. The NAME still comes from the manifest; the VERSION comes
- * from package.json (#347 — the manifest carried a second copy that only one
- * of the two release paths ever bumped), and the build stamp says which tree
- * produced the artifact answering (#178).
+ * Render --version. NAME from the manifest; VERSION from package.json; build
+ * stamp says which tree produced the artifact.
  *
- * WHEN package.json is read has changed (#46): in a BUNDLED artifact it is read
- * at BUILD time and substituted below, because an artifact installed into ~/bin
- * has no package.json above it — and if one happens to be there, it is not
- * ours. Unbundled source, where the define is undeclared, still reads it at run
- * time. Same single source of truth, resolved at whichever moment the file is
- * actually reachable.
+ * In a BUNDLED artifact package.json is read at BUILD time and substituted
+ * below — an artifact in ~/bin has no package.json above it. Unbundled source
+ * still reads it at run time.
  *
- * The substituted name is a GLOBAL, not `process.env.WTFT_BUILD_VERSION`. With
- * an env key the source path read it live, so any environment could dictate the
- * version this command reports about itself.
+ * The substituted name is a GLOBAL, not `process.env.WTFT_BUILD_VERSION` —
+ * an env key would let any environment dictate the version this command reports.
  *
- * `moduleUrl` must be the CALLER's import.meta.url, not this module's: after
- * bundling they are the same file, but the Pi extension loads source, where
- * this lib's URL would name the lib rather than the command you invoked.
+ * `moduleUrl` must be the CALLER's import.meta.url: after bundling they are the
+ * same file, but the Pi extension loads source where this lib's URL would name
+ * the lib rather than the command you invoked.
  */
 // Substituted by build.ts's `define` in a bundle, and declared nowhere else —
-// `typeof` is what keeps the source path from throwing a ReferenceError.
+// `typeof` keeps the source path from throwing a ReferenceError.
 declare const __WTFT_BUILD_VERSION__: string | undefined;
 
 export function renderWtftVersion(src: ManifestSource, moduleUrl: string): string {
@@ -580,11 +544,7 @@ export function renderWtftVersion(src: ManifestSource, moduleUrl: string): strin
 	try {
 		semver = JSON.parse(fs.readFileSync(pkgPath, "utf8")).version;
 	} catch (err) {
-		// #347: this used to fall back to `manifest.version` — a second copy of the
-		// number that only one release path ever bumped. Falling back to it made an
-		// unreadable package.json print a STALE version instead of failing, which is
-		// the worst possible behaviour for the one command you run when you already
-		// suspect you are running the wrong build. Say what is missing instead.
+		// Do not fall back to a second copy of the version — say what is missing.
 		semver = `unknown (cannot read ${pkgPath}: ${(err as Error).message})`;
 	}
 	return formatVersion(manifest.name, semver, moduleUrl);

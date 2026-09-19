@@ -112,36 +112,10 @@ function readConfigFile(): Record<string, unknown> {
 // ---
 // A session of our own to read (#32).
 //
-// These three checks used to run the CLI with no `-s` and no corpus override,
-// so it discovered whatever sessions the machine happened to have. On this
-// repo's one development box that is thousands of them and the CLI exits 0. On
-// a clean checkout — CI's first run, or any second machine — there are none,
-// the CLI prints "No active session log files found" and exits **1**, and all
-// three failed. Green on one box, red everywhere else, which is the exact
-// failure #32 added CI to surface; it surfaced this on the first run.
-//
-// The header above already says a test about config writes is the last place
-// to rely on someone else's isolation. It was right, and the isolation it
-// meant was only half of what this file needed: its own XDG root AND its own
-// corpus.
-//
-// So: an explicit two-turn session, plus empty roots for both harnesses.
-//
-// The fixture is what fixes this; the roots are what keep the fix HONEST. `-s`
-// naming an existing file short-circuits discovery entirely — bin/wtft.ts:339-352
-// says so in as many words, and bin/wtft.ts:378-382 takes that branch without
-// ever calling the memoised thunk. So on the happy path the overrides do
-// nothing. They earn their place on one specific unhappy one: a `-s` path that
-// no longer resolves — a fixture moved, a sandbox swept early — falls through
-// to discovery, which without these would find the developer's corpus and PASS,
-// restoring the exact green-on-one-box failure this block was added to remove.
-//
-// Not, as an earlier draft of this comment claimed, a failed fixture write:
-// writeFileSync runs at module top level, so a throw there takes the process
-// down before any cliRun() and the overrides are never consulted (PR review
-// round 2). And an earlier draft than THAT said discovery ran anyway "for the
-// daemon's benefit" — it does not, and the daemon is handed the path directly
-// (extensions/lib/wtft-cli-shared.ts:319).
+// Explicit two-turn session plus empty roots for both harnesses. Own XDG root
+// AND own corpus: without them a clean checkout finds no sessions and exits 1.
+// `-s` naming an existing file short-circuits discovery; the empty roots keep
+// a fallen-through `-s` from finding the developer's corpus.
 // ---
 const SESSION_ID = "c0f16000-1a9b-4c3d-9e8f-000000000051";
 const TS = Date.now();

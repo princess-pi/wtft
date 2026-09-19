@@ -144,7 +144,8 @@ for (const code of [0, WTFT_EXIT_PROVISIONAL]) {
 	assert(`runWtftCli returns for exit ${code}`, !threw);
 }
 
-// The return type must be a real string on BOTH paths (PR review). A first cut
+// The return type must be a real string on BOTH paths A first cut
+
 // spread caller options after `encoding: "utf8"`, so a caller could override it
 // and get a Buffer typed as a string; the success and provisional paths then
 // disagreed for the same input. `encoding` is now pinned and off the signature,
@@ -157,7 +158,8 @@ for (const code of [0, WTFT_EXIT_PROVISIONAL]) {
 }
 {
 	// A caller casting past the signature must not be able to defeat it either
-	// (PR review, round 2). Node returns null from execSync whenever stdio leaves
+	// Node returns null from execSync whenever stdio leaves
+
 	// stdout unpiped — regardless of encoding — and err.stdout is null on the
 	// throw path too, so the provisional branch would return "" instead of the
 	// real output. Omit binds type-checked callers only; the body strips both.

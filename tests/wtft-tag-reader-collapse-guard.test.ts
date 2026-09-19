@@ -2,25 +2,15 @@
 /**
  * @package princess-pi-tools
  * @test wtft-tag-reader-collapse-guard
- * @description #270 review round 11 (Low/contract, docs/wtft-incremental-render-spec.md) —
- *   the "every tag-file reader must collapse by message.id before summing" rule was
- *   stated only in prose, and the spec conceded outright that "nothing structural will
- *   stop" a new reader from bypassing it. An unenforced rule is a wish: this repo's own
- *   standard is that before a rule is written down, you name how a VIOLATION WOULD BE
- *   COUNTED. This test is that count.
- *
- *   A tag file legitimately holds several lines for one billed message at growing usage
- *   (see the spec, "The append filter, and what the tag file may contain"), measured at
- *   39-76% of usage-bearing ids. Any reader that sums raw `c`/`in`/`out` across those
- *   lines over-reports. The canonical collapse is `dedupeClassifiedById`, which
- *   `readClassifiedTagFile` applies on every read.
+ * @description Every tag-file reader must collapse by message.id before summing
+ *   (docs/wtft-incremental-render-spec.md). A tag file may hold several lines for
+ *   one billed message; summing raw `c`/`in`/`out` over-reports. The canonical
+ *   collapse is `dedupeClassifiedById`, which `readClassifiedTagFile` applies.
  *
  *   Closer: every source file that BOTH resolves a tag path (getTagPath / TAG_SUFFIX /
  *   a literal ".wtft-tag.") AND parses JSON must either route through
  *   readClassifiedTagFile / dedupeClassifiedById, or appear in ALLOWED below with a
  *   reason and a pinning test or issue. A new unrouted reader fails this suite.
- *
- *   It found one on its first run: extensions/token-budget.ts (#454).
  */
 
 import * as fs from "node:fs";
@@ -45,36 +35,19 @@ const repoRoot = path.resolve(import.meta.dirname, "..");
 const ALLOWED: Record<string, string> = {
 	// extensions/token-budget.ts routed through readClassifiedTagFile in #17
 	// (filed as #454) — no longer needs an allowlist entry.
-	// The tag file's WRITER. It reads that file back in exactly one place —
-	// readLastMetaOffset, which scans the last 8KB for `_meta.offset` and
-	// returns a byte number. It never sums a cost or a token from a tag line,
-	// so the collapse rule has nothing to apply to. Its two mentions of the
-	// canonical functions are both in comments, which is the OTHER file the
-	// old substring check waved through (PR review round 12).
+	// Tag WRITER: reads only `_meta.offset` via readLastMetaOffset; sums nothing.
 	"bin/wtft-daemon.ts": "tag WRITER; reads only _meta.offset, sums nothing",
-	// Deliberately does not import wtft-daemon-lib (see that file's CONSTANTS
-	// comment) and reimplements the max-cost-by-id collapse by hand. That copy
-	// is pinned value-for-value against the canonical path by
-	// tests/wtft-270-session-summary-dedup.test.ts, which is what an exemption
-	// has to buy. It passed as "routed" until PR review round 12 — on a
-	// substring match against its own explanatory comment, not on any call.
+	// Hand-rolled collapse, pinned value-for-value by
+	// tests/wtft-270-session-summary-dedup.test.ts.
 	"extensions/lib/session-selector.ts":
 		"hand-rolled collapse, pinned by tests/wtft-270-session-summary-dedup.test.ts",
-	// Only EXCLUDES tag files from transcript discovery ("wtft-tags" is our own
-	// output). Never reads their contents.
-	"extensions/lib/wtft-parser.ts": "excludes tag files from discovery; does not read them",
 	// Resolves getTagPath purely to hand it to checkDaemonHealth (liveness by
 	// mtime/PID). Reads no tag CONTENT and sums nothing.
 	"extensions/lib/wtft-cli-shared.ts": "tag path used for daemon health only; reads no tag content",
 };
 
 /** Strip line and block comments so a mention of the canonical helper INSIDE a
- *  comment cannot pass as a call to it. The first cut of this test used a bare
- *  `text.includes(...)` and session-selector.ts sailed through as "routed"
- *  purely because the comment explaining why it does NOT import
- *  dedupeClassifiedById happens to name it (PR review). That is precisely the
- *  shape this suite exists to catch, so the detector cannot be fooled by it:
- *  any future `// TODO: use dedupeClassifiedById` would have done the same. */
+ *  comment cannot pass as a call to it. */
 function stripComments(text: string): string {
 	// Order matters: block comments first, then line comments. String literals
 	// containing "//" would be over-stripped by this, which is acceptable —
@@ -88,17 +61,8 @@ const CANONICAL = String.raw`(?:readClassifiedTagFile|dedupeClassifiedById)`;
 /** Routed means the file actually IMPORTS or CALLS the canonical collapse —
  *  never merely mentions it.
  *
- *  KNOWN LIMIT, stated so a green run is not read as more than it is (PR
- *  review): this proves the canonical collapse is REACHED somewhere in the
- *  file, not that it is applied to the very array the file then sums. A reader
- *  that imports dedupeClassifiedById for an unrelated purpose, or calls it on a
- *  throwaway array and sums raw lines elsewhere, passes this guard while still
- *  over-reporting. Proving application needs dataflow analysis, not a regex.
- *  This is a tripwire on the known shape — the same caveat
- *  tests/wtft-270-single-subagent-reader.test.ts states for its own checks —
- *  and its value is that the bypass it CANNOT catch is a deliberate act,
- *  whereas the one it does catch (a new reader that simply never heard of the
- *  rule) is the one that happens by accident. */
+ *  Limit: this proves the canonical collapse is REACHED somewhere in the
+ *  file, not that it is applied to the array the file then sums. */
 function isRouted(text: string): boolean {
 	const code = stripComments(text);
 	const calls = new RegExp(String.raw`\b` + CANONICAL + String.raw`\s*\(`).test(code);
@@ -124,7 +88,7 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
 	return out;
 }
 
-console.log("wtft tag-file reader collapse guard (#270 review round 11)");
+console.log("wtft tag-file reader collapse guard");
 console.log("");
 
 const scanned = [

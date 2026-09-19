@@ -378,8 +378,9 @@ try {
 		try {
 			const daemon = spawnDaemon(sessionPath, { HOME: b2Home });
 
-			// The parser's discovery warning names the unreadable CANDIDATE
-			// (round 4), never the healthy outer transcript.
+			// The parser's discovery warning names the unreadable CANDIDATE,
+			// never the healthy outer transcript.
+
 			let warned = false;
 			for (let i = 0; i < 30 && !warned; i++) {
 				await sleep(250);
@@ -448,18 +449,12 @@ try {
 }
 
 // ---
-// PART B3 — the NESTED unreadable subagents dir in the live daemon (round 5,
-// High fix): the recursion in walkSubagentDir used to sit inside the per-entry
-// stat try, so a nested directory's readdirSync throw was swallowed as a stat
-// failure — the walk returned a partial file list normally, discovery
-// succeeded, scanForSubAgents never saw a failure, pollHadFailure stayed false,
-// and the swept marker stamped over the missing subtree. The fixture is the
-// walk's own documented nested layout:
-// <session>/subagents/agent-<hash>/subagents/agent-*.jsonl, with the INNER
-// subagents dir chmod 000. Exactly ONE warning must fire (the innermost frame
-// warns; the outer frames rethrow raw without re-warning), the parent row must
-// still land, the marker must withhold, and recovery must come back with the
-// nested cost counted.
+// PART B3 — the NESTED unreadable subagents dir in the live daemon.
+// Fixture: <session>/subagents/agent-<hash>/subagents/agent-*.jsonl, with the
+// INNER subagents dir chmod 000. Exactly ONE warning must fire (the innermost
+// frame warns; the outer frames rethrow raw without re-warning), the parent
+// row must still land, the marker must withhold, and recovery must come back
+// with the nested cost counted.
 // ---
 try {
 	if (isRoot) {
@@ -572,13 +567,13 @@ try {
 // read fails (the discovery→parse race — a file that became unreadable, or
 // vanished, between the two reads), and that failure must be loud AND never
 // recorded as attributed, so a retried pass recovers the nested cost in full.
-// Round 4 added the discovery boundary itself; round 5 reshaped it: an
-// unreadable candidate is warned once per file per process (latched) and
+// An unreadable candidate is warned once per file per process (latched) and
 // REPORTED in the discovery result instead of thrown, so a statically
 // unreadable nested transcript reaches the same loud path — the attribution
 // pass throws on the report — instead of silently skipping with the swept
 // marker stamped. The readable in-window matches are returned alongside the
-// report (partial progress, round 5), and the DIR-level failure still throws.
+// report (partial progress), and the DIR-level failure still throws.
+
 // ---
 {
 	// Part B's cleanup above removed the Part A fixture dir, so Part C uses
@@ -597,7 +592,8 @@ try {
 	const TC0 = Date.now() - 60_000;
 	const nestedPath = path.join(projectDir, "nested-session-457.jsonl");
 	fs.writeFileSync(nestedPath, turnLine("msg_457_nested_inner", TC0 + 2_000, 1000, 100));
-	// Round 4: the discovery-warning latch is per FILE per process, so the
+	// the discovery-warning latch is per FILE per process, so the
+
 	// discovery phases need candidate files whose warnings have not yet fired —
 	// nestedPath's "or parsed" warning (Phase 4) suppresses its later "at
 	// discovery" warning. secondPath carries the discovery warning-names pin;
@@ -613,7 +609,8 @@ try {
 	const parentPath = path.join(partCDir, "parent-with-claude-bash.jsonl");
 	fs.writeFileSync(parentPath, claudeBashTurnLine("msg_457_parent", TC0, 2000, 100, nestedCwd));
 
-	// Pi-pattern fixtures (round 6): discoverSubagentSessionFiles's Pattern 2
+	// Pi-pattern fixtures: discoverSubagentSessionFiles's Pattern 2
+
 	// scans <sessionDir> for .jsonl siblings whose header declares
 	// parentSession. The good sibling declares it (must be discovered), the
 	// bad-read sibling declares it but fails its discovery READ under
@@ -634,7 +631,8 @@ try {
 	fs.writeFileSync(piSiblingBadJsonPath, "this is not json\n");
 	const piBaseDir = path.join(piDir, "parent-457pi", "subagents");
 
-	// Round 7 fixtures — a claude-pattern session with three walkable
+	// fixtures — a claude-pattern session with three walkable
+
 	// entries: discovery must keep walking past a stat-failing entry
 	// (Phase 13) and must report a main-session header READ failure
 	// (Phase 14).
@@ -726,7 +724,8 @@ try {
 		};
 		cjs.statSync = function (p, ...rest) {
 			const sp = String(p);
-			// Round 6: statSync is now the existsSync replacement gate on both
+			// statSync is now the existsSync replacement gate on both
+
 			// discovery halves — ENOENT is the absent case (silent), any other
 			// error is a read failure (warn once + throw). These two flags pin
 			// the throw halves; the warning for projectDir is already latched
@@ -787,7 +786,8 @@ try {
 		failAll = true;
 		const skipped = lib.loadSubagentInteractions([nestedPath]).length;
 
-		// Phase 5 — the discovery read is a read (round 4, M2): an unreadable
+		// Phase 5 — the discovery read is a read: an unreadable
+
 		// candidate must not be silently skipped. failDiscovery fails only the
 		// candidate reads, so parsing the parent transcript reaches the
 		// discovery boundary and must THROW (it was silent before round 4), and
@@ -853,7 +853,8 @@ try {
 		}
 		dirLevelWarned = capturedStderr.includes("a subagent transcripts directory could not be read");
 
-		// Phase 9 — the Pi half of discovery (round 6): an unreadable sibling
+		// Phase 9 — the Pi half of discovery: an unreadable sibling
+
 		// is warned once and REPORTED (never thrown — the round-5 contract the
 		// claude half established), and the readable sibling that declares
 		// parentSession is still discovered alongside it (partial progress,
@@ -891,7 +892,7 @@ try {
 		} catch { piCleanThrew = true; }
 		const piBadJsonSilent = !capturedStderr.includes(piSiblingBadJsonPath);
 
-		// Phase 10b — round 11 (macroscope, Medium): a sibling whose header is
+		// a sibling whose header is
 		// the literal JSON null parses fine (null is valid JSON) but is not an
 		// object; the cast does not change runtime null, so pre-round-11 the
 		// .type access threw and the outer catch branded the harmless sibling
@@ -910,7 +911,8 @@ try {
 		} catch { piNullThrew = true; }
 		cjs.rmSync(piNullPath, { force: true });
 
-		// Phase 11 — the claude half's stat gate (round 6): existsSync
+		// Phase 11 — the claude half's stat gate: existsSync
+
 		// swallowed every stat error, so an unreadable projects tree was
 		// indistinguishable from an absent one; statSync distinguishes ENOENT
 		// (absent, silent) from every other error (a read failure: warn once
@@ -926,10 +928,9 @@ try {
 
 		// Phase 12 — the Pi half's pattern-1 stat gate, same rule: an
 		// unreadable <session>/<base>/subagents/ (chmod-000 base, ELOOP on
-		// the path) warns once naming the dir and throws. ENOTDIR was in this
-		// class until round 10 (macroscope, Medium): it means an ancestor of
-		// <base>/subagents is a REGULAR FILE, so no subagent can exist below
-		// it — absent, like ENOENT, never a read failure (Phase 15).
+		// the path) warns once naming the dir and throws. ENOTDIR means an
+		// ancestor of <base>/subagents is a REGULAR FILE, so no subagent can
+		// exist below it — absent, like ENOENT, never a read failure (Phase 15).
 		failStatPiBase = true;
 		let statPiBaseThrew = false;
 		let statPiBaseWarned = false;
@@ -939,7 +940,8 @@ try {
 		statPiBaseWarned = capturedStderr.includes("a subagent transcripts directory could not be read") && capturedStderr.includes(piBaseDir);
 		failStatPiBase = false;
 
-		// Phase 13 — the walk's per-entry stat failure (round 7): an entry
+		// Phase 13 — the walk's per-entry stat failure: an entry
+
 		// inside an otherwise-readable subagents dir that cannot be stat'ed
 		// (EACCES/EIO) is warned once, kept OUT of files, and REPORTED in the
 		// result — never thrown, and never silent. Round 6's warn-only left the
@@ -960,15 +962,10 @@ try {
 		walkEntryWarned = capturedStderr.includes(walkBadStatPath);
 		failStatWalkEntry = false;
 
-		// Phase 14 — the main-session header READ failure (round 7): the
-		// round-4 comment claimed the caller's own read of the main file is
-		// loud about the same failure; it is not — the daemon's parseNewLines
-		// used to catch silently (round 9 fixed it: warn once + pollHadFailure;
-		// the daemon-side boundary is pinned by PART D below) and the CLI never
-		// reads the main file. A read failure here also means Pattern-2
-		// discovery cannot run, so every Pi sibling's cost is silently missing
-		// — the #457 class. Warn once and report, never throw. (The walk still
-		// runs and collects its entries.)
+		// Phase 14 — the main-session header READ failure: Pattern-2 discovery
+		// cannot run, so every Pi sibling's cost is silently missing — the
+		// #457 class. Warn once and report, never throw. (The walk still runs
+		// and collects its entries.)
 		failMainHeaderRead = true;
 		let mainHeaderReported = false;
 		let mainHeaderWarned = false;
@@ -982,14 +979,12 @@ try {
 		mainHeaderWarned = capturedStderr.includes(walkParentPath);
 		process.stderr.write = origWrite;
 
-		// Phase 15 — ENOTDIR is the ABSENT case (round 10, macroscope,
-		// Medium): when <sessionDir>/<sessionBase> is a REGULAR FILE, the
-		// statSync gate on <sessionDir>/<sessionBase>/subagents fails with
-		// ENOTDIR — an ancestor is not a directory, so no subagent can exist
-		// below it, exactly like ENOENT. Pre-round-10 that code path warned
-		// and threw, so the daemon withheld the swept marker and the CLI went
-		// provisional over a plain file name collision, every scan. The gate
-		// must stay silent for both codes, and Pattern 2 must still run.
+		// Phase 15 — ENOTDIR is the ABSENT case: when
+		// <sessionDir>/<sessionBase> is a REGULAR FILE, the statSync gate on
+		// <sessionDir>/<sessionBase>/subagents fails with ENOTDIR — an
+		// ancestor is not a directory, so no subagent can exist below it,
+		// exactly like ENOENT. The gate must stay silent for both codes, and
+		// Pattern 2 must still run.
 		const enotdirDir = ppath.join(ppath.dirname(parentPath), "wtft-457f-enotdir");
 		cjs.mkdirSync(enotdirDir, { recursive: true });
 		const enotdirSessionPath = ppath.join(enotdirDir, "session.jsonl");
@@ -1037,7 +1032,7 @@ try {
 	assert("CLI/TUI path names the skipped file in the warning", childOut.warnedNamesFile);
 	assert("CLI/TUI path skips the unreadable file, returning []", childOut.skipped === 0);
 
-	// Round 4 — the discovery boundary is loud too (M2): an unreadable
+	// the discovery boundary is loud too (M2): an unreadable
 	// candidate is warned once per file per process, so the parent parse fails
 	// (via the round-5 attribution-pass throw) and the daemon withholds the
 	// swept marker instead of stamping it with the parent turn's attribution
@@ -1047,7 +1042,7 @@ try {
 	assert("discovery warning names the unreadable candidate file", childOut.discoveryWarnedNamesSecond);
 	assert("discovery warning is latched per file per process", childOut.discoveryLatchHolds);
 
-	// Round 5 — the per-file discovery failure is a REPORT, not a throw: the
+	// the per-file discovery failure is a REPORT, not a throw: the
 	// readable in-window matches are returned alongside it (partial progress —
 	// the daemon registers them so their costs land), the report names the
 	// candidate, and the attribution pass keeps the loud throw for this
@@ -1057,12 +1052,12 @@ try {
 	assert("discovery names the unreadable candidate in its report", childOut.partialReportedUnreadable);
 	assert("the parent parse still throws while any candidate is unreadable", childOut.partialParseThrew);
 
-	// Round 5 — the DIR-level failure still throws: an unreadable project dir
+	// the DIR-level failure still throws: an unreadable project dir
 	// has no matches to return, so the rule stays the round-4 one.
 	assert("an unreadable project dir still throws from a direct discovery call", childOut.dirLevelThrew);
 	assert("the dir-level throw warns once, naming the unreadable dir class", childOut.dirLevelWarned);
 
-	// Round 6 — the Pi half of discovery now matches the claude half's
+	// the Pi half of discovery now matches the claude half's
 	// round-5 contract: an unreadable sibling warns once and is REPORTED, not
 	// thrown (the round-6 report keeps the readable siblings — the round-5
 	// throw starved the whole subtree every poll), the readable sibling that
@@ -1075,7 +1070,7 @@ try {
 	assert("Pi half skips a bad-JSON sibling silently", childOut.piBadJsonSilent);
 	assert("Pi half skips a null-header sibling silently, report untouched (round 11)", childOut.piNullSilent && childOut.piNullKeptTwo && !childOut.piNullThrew);
 
-	// Round 6 — existsSync was the last silent boundary of the
+	// existsSync was the last silent boundary of the
 	// unreadable-transcript class: it swallowed every stat error, so an
 	// unreadable projects tree / subagents dir was indistinguishable from an
 	// absent one. statSync now separates ENOENT (absent, silent) from any
@@ -1084,7 +1079,7 @@ try {
 	assert("claude half stat gate throws on an unreadable projects dir", childOut.statProjectThrew);
 	assert("Pi half stat gate throws on an unreadable subagents dir, warning it by name", childOut.statPiBaseThrew && childOut.statPiBaseWarned);
 
-	// Round 7 — the walk's per-entry stat failure was the one boundary where
+	// the walk's per-entry stat failure was the one boundary where
 	// this diff's invariant ("the marker must not stamp while its cost could
 	// be missing") was enforced only by a warning: round 6 warned and kept
 	// walking, but nothing reported, so the daemon stamped the swept marker
@@ -1094,21 +1089,16 @@ try {
 	assert("walk reports an entry whose stat fails, keeping the readable siblings (round 7)", childOut.walkEntryReported && childOut.walkEntryKeptSiblings && !childOut.walkEntryThrew);
 	assert("walk entry stat failure warns once, naming the entry", childOut.walkEntryWarned);
 
-	// Round 7 — the main-session header READ failure: the round-4 comment
-	// claimed the caller's own read is loud about the same failure; it is not
-	// (the daemon's parseNewLines used to catch silently — fixed in round 9,
-	// PART D — and the CLI never reads the main file). A read failure here
-	// also means Pattern-2 discovery cannot run, so Pi siblings' cost is
-	// silently missing — the #457 class. Warn and report, never throw.
-	assert("main-session header read failure reports and warns, never throws (round 7)", childOut.mainHeaderReported && childOut.mainHeaderWarned && !childOut.mainHeaderThrew);
+	// Main-session header READ failure: Pattern-2 discovery cannot run, so
+	// Pi siblings' cost is silently missing — the #457 class. Warn and
+	// report, never throw.
+	assert("main-session header read failure reports and warns, never throws", childOut.mainHeaderReported && childOut.mainHeaderWarned && !childOut.mainHeaderThrew);
 
-	// Round 10 — ENOTDIR is the absent case (macroscope, Medium): a regular
-	// file where <sessionDir>/<sessionBase> sits makes the subagents stat
-	// gate fail with ENOTDIR, not ENOENT — but no subagent can exist below a
-	// non-directory ancestor either way, so both codes must be silent.
-	// Treating ENOTDIR as a read failure had the daemon withholding the
-	// swept marker and the CLI going provisional over a name collision.
-	assert("ENOTDIR gate stays silent and never throws (round 10)", childOut.enotdirSilent && !childOut.enotdirThrew);
+	// ENOTDIR is the absent case: a regular file where
+	// <sessionDir>/<sessionBase> sits makes the subagents stat gate fail with
+	// ENOTDIR, not ENOENT — but no subagent can exist below a non-directory
+	// ancestor either way, so both codes must be silent.
+	assert("ENOTDIR gate stays silent and never throws", childOut.enotdirSilent && !childOut.enotdirThrew);
 
 	// Parent turn: 2000 in / 100 out = $0.007500.  Nested session: 1000 in /
 	// 100 out = $0.004500.  A swallowed failure (old code) leaves $0.004500 on
@@ -1123,15 +1113,13 @@ try {
 }
 
 // ---
-// PART D — the MAIN session file's own read in the live daemon (round 9, PR
-// review, Medium): parseNewLines used to swallow EVERY read failure — EACCES,
-// EIO, a failed mid-read — into an empty batch with the comment "File may not
-// exist yet", the daemon's last silent read boundary, and the same
-// silent-empty lie the discovery read was fixed to report (rounds 4/5/8).
-// The scenario: the main session file becomes unreadable AFTER a healthy
-// baseline (content had landed and the marker had stamped), while a READABLE
-// subagent transcript keeps growing the tag. The tag must keep taking the
-// subagent rows, the main turn must not reach the tag, the warning must name
+// PART D — the MAIN session file's own read in the live daemon.
+// parseNewLines must not swallow read failures (EACCES, EIO, a failed
+// mid-read) into an empty batch. The scenario: the main session file becomes
+// unreadable AFTER a healthy baseline (content had landed and the marker had
+// stamped), while a READABLE subagent transcript keeps growing the tag. The
+// tag must keep taking the subagent rows, the main turn must not reach the
+// tag, the warning must name
 // the session transcript, and NO new swept marker may stamp over the missing
 // cost — then, once readability returns, the main turn lands and the marker
 // stamps again.
@@ -1263,17 +1251,13 @@ try {
 				markersAfter === markersAtFailure
 			);
 
-			// Round 10 (macroscope, Medium): withholding FUTURE stamps is not
-			// enough — readTagProvisional cannot see pollHadFailure, and the
-			// baseline marker stamped BEFORE the failure began would still
-			// certify the undercounted tag as settled (the positional limit the
-			// sweep comment names). The failure path retracts it: one
+			// Withholding FUTURE stamps is not enough — readTagProvisional
+			// cannot see pollHadFailure, and the baseline marker stamped BEFORE
+			// the failure began would still certify the undercounted tag as
+			// settled. The failure path retracts it: one
 			// {"_meta":{"unswept":ts}} record per episode, appended only while a
-			// swept marker is the last significant record — heartbeats are
-			// passed over exactly like the reader's scan passes them. The tag
-			// must read provisional ("unswept") for as long as the failure
-			// lasts, and because SUB2 has not landed yet, this window is the
-			// retraction record's OWN proof, not the classified-line rule's.
+			// swept marker is the last significant record. The tag must read
+			// provisional ("unswept") for as long as the failure lasts.
 			let rawHasUnswept = false;
 			for (let i = 0; i < 8 && !rawHasUnswept; i++) {
 				await sleep(250);
@@ -1314,7 +1298,8 @@ try {
 			}
 			assert("tag is swept again only after the recovered main turn is counted", sawSweptAfterRecovery);
 
-			// Round 10: the fresh marker is now the last significant record —
+			// the fresh marker is now the last significant record —
+
 			// the retraction record is BELOW it, so the tag reads settled again.
 			let settledAfterRecovery = false;
 			for (let i = 0; i < 20 && !settledAfterRecovery; i++) {

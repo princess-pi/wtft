@@ -181,7 +181,6 @@ describe("isModelPriced (#140)", () => {
 		// tests `deepseek` first, so this takes the sibling guess rather than the
 		// $5.00 the `opus` branch would charge. isModelPriced asks in the same
 		// order so the two cannot disagree about which branch a model reached
-		// (pr-review, round 1).
 		//
 		// WHICH figure the guess produces depends on the instant, and #100 is why
 		// that now has to be said: the sibling is deepseek-v4-flash, whose card

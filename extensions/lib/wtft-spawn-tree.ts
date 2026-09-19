@@ -52,18 +52,19 @@ export type SpawnEdgeSkip =
 	/** Found, but it could not be read or parsed. THE ONLY SKIP THAT IS A BUG
 	 *  rather than a fact — the others describe the ledger or the walk. */
 	| "unreadable"
-	/** Already counted elsewhere in this tree (a diamond, or a cycle). Its money
-	 *  IS in `total`; this edge is the second way in. */
+	/** Already counted elsewhere in this tree (a diamond, or a session a
+	 *  resolved descendant's parse folded in). Its money IS in the tree's
+	 *  `total`; this edge is the second way in. */
 	| "already-counted"
 	/** Reached before, and that visit could not read it. Distinct from
 	 *  `already-counted`, which claims the money landed — here nothing did, and
 	 *  the gap is already in `unattributed` under the first edge. */
 	| "already-seen-unresolved"
-	/** Its cost is already inside the caller's SELF total — a `claude -p` child
-	 *  the parent's own turn names, a Task child under `<session>/subagents/`,
-	 *  or the reported session itself, reached round a cycle. Reported so the
-	 *  edge is visible, never added, because `tree` would otherwise bill it
-	 *  twice. */
+	/** Its cost is already inside the caller's SELF total, not the tree's — a
+	 *  `claude -p` child the parent's own turn names at any depth, a Task child
+	 *  under `<session>/subagents/`, or the reported session itself, reached
+	 *  round a cycle. Reported so the edge is visible, never added, because
+	 *  `tree` would otherwise bill it twice. */
 	| "in-self-total"
 	/** Past `maxDepth`; the subtree below it was not walked. */
 	| "depth-capped";
@@ -186,6 +187,43 @@ function addTotals(into: TokenTotals, from: TokenTotals): void {
 	}
 }
 
+/** Every session id folded into `direct`'s totals at ANY depth.
+ *
+ *  `parseSessionFile` folds a `claude -p` child's own children into the child
+ *  before folding the child into its parent, but the parent's turn records only
+ *  the child, so the direct set alone misses the grandchildren.
+ *
+ *  A session that cannot be resolved or read contributes no deeper ids, the
+ *  same rule `collectSelfAttributedSessionIds` applies to a directory it cannot
+ *  enumerate. */
+function foldedTransitively(
+	direct: Iterable<string>,
+	cache: Map<string, Set<string>>,
+): Set<string> {
+	const out = new Set<string>();
+	for (const id of direct) {
+		out.add(id);
+		for (const deeper of foldsOf(id, cache)) out.add(deeper);
+	}
+	return out;
+}
+
+function foldsOf(sessionId: string, cache: Map<string, Set<string>>): Set<string> {
+	const cached = cache.get(sessionId);
+	if (cached) return cached;
+	// Set before the recursion, so a cycle in the folds terminates.
+	cache.set(sessionId, new Set());
+	let folds = new Set<string>();
+	const file = resolveSessionFile(sessionId);
+	if (file !== null) {
+		try {
+			folds = foldedTransitively(collectSelfAttributedSessionIds(file, parseSessionFile(file)), cache);
+		} catch { /* unreadable: nothing deeper is known */ }
+	}
+	cache.set(sessionId, folds);
+	return folds;
+}
+
 /**
  * A session id → its session file, through the HARNESS SEAM.
  *
@@ -291,9 +329,14 @@ export function computeSpawnTree(
 	// happened the first time instead of guessing. `visited` is the separate
 	// set of ids already queued, so a seeded `in-self` id is descended into
 	// exactly once however many edges point at it.
-	type Outcome = "counted" | "unresolved" | "in-self";
+	//
+	// `in-self` is money inside the caller's `total`; `folded` is money inside a
+	// resolved descendant's total, so inside the tree's. Both add nothing when
+	// their own edge is reached, and they report different buckets.
+	type Outcome = "counted" | "unresolved" | "in-self" | "folded";
 	const outcomeOf = new Map<string, Outcome>([[rootSessionId, "in-self"]]);
-	for (const id of options.alreadyAttributed ?? []) outcomeOf.set(id, "in-self");
+	const foldCache = new Map<string, Set<string>>();
+	for (const id of foldedTransitively(options.alreadyAttributed ?? [], foldCache)) outcomeOf.set(id, "in-self");
 	/** Sessions whose own edges have been queued, so a seeded `in-self` id is
 	 *  descended into exactly once however many edges point at it. */
 	const visited = new Set<string>([rootSessionId]);
@@ -334,7 +377,7 @@ export function computeSpawnTree(
 				// Where the first visit could not read it, nothing landed, so
 				// the edge repeats THAT outcome instead — and the gap is not
 				// reported twice, because it is one session, not two.
-				const skip = prior === "counted" ? "already-counted" as const
+				const skip = prior === "counted" || prior === "folded" ? "already-counted" as const
 					: prior === "in-self" ? "in-self-total" as const
 					: "already-seen-unresolved" as const;
 				tree.edges.push({ ...base, resolved: false, path: null, total: null, skip });
@@ -345,7 +388,7 @@ export function computeSpawnTree(
 				// launcher children IT recorded are not, and dropping them loses
 				// exactly the nesting this issue expects (a `claude -p` child
 				// that dispatches its own pr-review lenses).
-				if (prior === "in-self" && !visited.has(edge.child)) {
+				if ((prior === "in-self" || prior === "folded") && !visited.has(edge.child)) {
 					visited.add(edge.child);
 					queue.push({ parentId: edge.child, depth: depth + 1 });
 				}
@@ -395,7 +438,7 @@ export function computeSpawnTree(
 				// assignment does not. Drop it explicitly (pr-review, #89/#119).
 				const { untaggedCostUsd: _untaggedCostUsd, ...cleanTotal } = computeSessionSummary(parsed).total;
 				total = cleanTotal;
-				for (const id of collectSelfAttributedSessionIds(file, parsed)) {
+				for (const id of foldedTransitively(collectSelfAttributedSessionIds(file, parsed), foldCache)) {
 					const already = countedTotals.get(id);
 					if (already) {
 						// Reached as its own edge FIRST, and now folded in here
@@ -416,8 +459,8 @@ export function computeSpawnTree(
 						subtractTotals(total, already);
 					} else if (!outcomeOf.has(id)) {
 						// Not reached yet — mark it, so its own edge reports
-						// `in-self-total` and adds nothing.
-						outcomeOf.set(id, "in-self");
+							// `already-counted` and adds nothing.
+						outcomeOf.set(id, "folded");
 					}
 				}
 			} catch {

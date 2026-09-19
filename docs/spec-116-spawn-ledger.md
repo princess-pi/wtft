@@ -240,8 +240,7 @@ TREE       TOTAL + SPAWNED                                 $127.36
 
 **Every edge gets a row, skipped ones included** — the headline's two numbers agree with the rows
 by construction, and they are deliberately in different units: sessions *priced*, from edges
-*recorded*. A diamond, a cycle, an in-self child, a session known only through a resolved descendant's parse
-fold, and a depth cut each add an edge without adding a session.
+*recorded*. Every skipped edge adds an edge without adding a session.
 
 A skipped edge prints its **reason** where its cost would be. A dash or a `$0.00` would both read
 as "this child was free", which is the one thing we do not know about it. The last three
@@ -318,7 +317,7 @@ two levels down is billed once under four ledger orders, and a session folded in
 descendant is counted once in both orders: reported `already-counted` when the descendant is
 reached first, subtracted from the descendant's total when its own edge is.
 `tests/wtft-129-projects-root.test.ts` pins that a parse folds a `claude -p` child found under
-`WTFT_CLAUDE_PROJECTS_DIR`, and that no second production reader re-spells the projects root.
+`WTFT_CLAUDE_PROJECTS_DIR`, and that no second file under `extensions/` or `bin/` spells out the projects root.
 
 ## Not in this change
 

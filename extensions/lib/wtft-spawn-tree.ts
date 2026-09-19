@@ -317,7 +317,7 @@ export function computeSpawnTree(
 	//
 	// `in-self` is money inside the caller's `total`; `folded` is a `claude -p`
 	// session inside a resolved descendant's total, so inside the tree's. Both
-	// add nothing when their own edge is reached, and they report different totals.
+	// add nothing when their own edge is reached, and they report different skips.
 	type Outcome = "counted" | "unresolved" | "in-self" | "folded";
 	const outcomeOf = new Map<string, Outcome>([[rootSessionId, "in-self"]]);
 	const foldCache = new Map<string, Set<string>>();

@@ -26,6 +26,7 @@ import * as fs from "node:fs";
 import { calculateClaudeCost, calculateServerToolCost, getDeepSeekPeakMultiplier } from "./wtft-cost.js";
 import { getParseAdapters } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.ts";
+import { cwdSlugVariants } from "./harness/session-cwd.ts";
 import { extractCommandSegments, extractJoinedSegments, extractRealCommands, splitCommandWords, stripCommandPrefixes } from "./wtft-command-shapes.js";
 import type { ControlSignal, UncountedBillableClass } from "./harness/types.ts";
 
@@ -1769,22 +1770,32 @@ export function cwdForClaudeSpawn(commands: string[]): string | null {
 	return null;
 }
 
-/** Convert a CWD path to the Claude Code project directory slug.
- *  Replaces all `/` with `-` (the leading `/` becomes leading `-`). */
-export function cwdToClaudeProjectSlug(cwd: string): string {
-	return cwd.replace(/\//g, '-');
-}
-
 /** Discover sub-agent session files spawned by a bash `claude -p` command.
  *  Scans `<projects root>/<slug>/` for `.jsonl` files whose first
- *  timestamp falls within `windowMs` of `parentTimestamp`. */
+ *  timestamp falls within `windowMs` of `parentTimestamp`, under every slug
+ *  the cwd may be filed under (a `.` in the cwd is folded to `-`). */
 export function discoverClaudeSubAgentSessionFiles(
 	cwd: string,
 	parentTimestamp: number,
 	windowMs: number = CLAUDE_SUBAGENT_WINDOW_MS,
 ): { files: string[]; unreadable: Error | null } {
-	const slug = cwdToClaudeProjectSlug(cwd);
-	const projectDir = path.join(projectsDir(), slug);
+	const files: string[] = [];
+	let unreadable: Error | null = null;
+	for (const slug of cwdSlugVariants(cwd)) {
+		const found = scanClaudeProjectDir(
+			path.join(projectsDir(), slug), parentTimestamp - windowMs, parentTimestamp + windowMs,
+		);
+		files.push(...found.files);
+		unreadable ??= found.unreadable;
+	}
+	return { files, unreadable };
+}
+
+function scanClaudeProjectDir(
+	projectDir: string,
+	tsWindowStart: number,
+	tsWindowEnd: number,
+): { files: string[]; unreadable: Error | null } {
 	try {
 		const projectStat = fs.statSync(projectDir);
 		if (!projectStat.isDirectory()) return { files: [], unreadable: null };
@@ -1803,8 +1814,6 @@ export function discoverClaudeSubAgentSessionFiles(
 	}
 
 	const files: string[] = [];
-	const tsWindowStart = parentTimestamp - windowMs;
-	const tsWindowEnd = parentTimestamp + windowMs;
 	// First unreadable candidate, for the unreadable report at the end (round
 	// 5 — the report replaces the throw, so the readable matches are returned
 	// alongside the failure instead of being discarded with it). Collecting

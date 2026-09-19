@@ -5,7 +5,8 @@
  * `claude -p` sub-agent discovery, session lookup and the Token Budget scan
  * get the Claude projects root from `projectsDir()`, so
  * `WTFT_CLAUDE_PROJECTS_DIR` redirects all three. Part A folds a `claude -p`
- * child through the override; Part B fails on a second production file that
+ * child through the override, including one spawned from a dotted cwd (filed
+ * under the dot-folded slug); Part B fails on a second production file that
  * contains the literal `".claude", "projects"` pair.
  *
  * Run:  bun tests/wtft-129-projects-root.test.ts
@@ -72,7 +73,7 @@ check(outputOf(parent) === 800,
 	`A2 the parent's parse carries its own 100 output tokens plus the child's 700 (got ${outputOf(parent)})`);
 
 // ---
-// PART A' — a dotted cwd (every worktree) is filed under the dot-folded slug (#179)
+// PART A' — a dotted cwd (every worktree) is filed under the dot-folded slug
 // ---
 console.log("\nPART A' — a claude -p spawned from a dotted cwd is found under its dot-folded slug");
 
@@ -95,6 +96,15 @@ fs.writeFileSync(dottedParent,
 	+ turnLine("dotted-parent-turn", T0, 100, `cd ${dottedCwd} && claude -p "go"`));
 check(outputOf(dottedParent) === 400,
 	`A5 the parent's parse carries its own 100 output tokens plus the dotted child's 300 (got ${outputOf(dottedParent)})`);
+
+const SEPARATOR_ONLY_CHILD = "f5a418f8-3333-4444-8555-666677778888";
+const separatorOnlyProjectDir = path.join(projects, dottedCwd.replace(/\//g, "-"));
+fs.mkdirSync(separatorOnlyProjectDir, { recursive: true });
+fs.writeFileSync(path.join(separatorOnlyProjectDir, `${SEPARATOR_ONLY_CHILD}.jsonl`), turnLine("separator-only-child-turn", T0 + 3_000, 50));
+const bothFound = discoverClaudeSubAgentSessionFiles(dottedCwd, T0);
+check(bothFound.unreadable === null
+	&& bothFound.files.map(f => path.basename(f, ".jsonl")).sort().join() === [DOTTED_CHILD, SEPARATOR_ONLY_CHILD].sort().join(),
+	`A6 with a child under each slug variant, discovery returns both (got ${JSON.stringify(bothFound.files.map(f => path.basename(f)))})`);
 
 // ---
 // PART B — no second reader re-derives the root

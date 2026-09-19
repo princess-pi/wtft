@@ -1,31 +1,4 @@
-/**
- * @package princess-pi-tools
- * @module wtft-cost
- * @description Pure cost calculation for model token pricing.
- *   The registry covers the Claude 4 and 5 families (including fable and
- *   mythos), DeepSeek (flash, v4-pro, v4-flash, v4-flash-vision-exp) and
- *   GPT-5.x.
- *   A rate resolves through three mechanisms. The entry's own unconditioned
- *   quad is the floor; a DATED window (`dateTiers`, #148/#495 — an intro rate
- *   or a superseded card) replaces it for a turn old enough to reach one; and
- *   an input-SIZE tier (`tiers`, GPT-5.x long-context) then replaces ALL FOUR
- *   fields of whatever that produced. So size OUTRANKS date, rather than being
- *   third in a precedence chain — see resolveTieredRates, where `tiers`
- *   overwrites `rates` wholesale. No model carries both today (DeepSeek and
- *   claude-sonnet-5 have only dates, GPT-5.x only sizes), so the ordering is
- *   currently unreachable; it is stated because the first entry to carry both
- *   would otherwise resolve the opposite way from this sentence. On top of that, DeepSeek rates carry a peak-valley
- *   surge multiplier that is time-of-day AND weekday dependent, and cache
- *   writes are TTL-split.
- *
- *   A second, separate meter runs alongside tokens: web_search and web_fetch
- *   are billed per REQUEST, not per token (see WEB_SEARCH_PRICE below).
- *
- *   Pi's built-in usage.cost.total is authoritative when available — this
- *   module is the fallback for models where Pi doesn't track cost (DeepSeek,
- *   some custom providers). For Claude/GPT/Codex, Pi's cost already includes
- *   tier resolution; the tier logic here is defense-in-depth.
- */
+/** Pure cost calculation for model token pricing. */
 
 // ---
 // TYPES
@@ -42,20 +15,11 @@ export interface CostTier {
 }
 
 /**
- * A dated rate window (#148) — applies when the interaction timestamp is
- * strictly before `effectiveBefore` (epoch ms). Generalizes the DeepSeek
- * peak-multiplier idea (getDeepSeekPeakMultiplier, below) into a registry
- * field any model can carry, for launches that ship introductory pricing
- * ahead of a standard rate (Sonnet 5's $2/$10 intro through 2026-08-31 is
- * the first user). No timestamp, or no matching window, falls back to the
- * model's unconditioned rates.
- *
- * Scope of the no-host-clock guarantee (#96, sharpened #495): it covers THIS
- * resolver, which treats a missing or zero timestamp as "unknown date" and
- * returns the current card. `getDeepSeekPeakMultiplier` makes the same promise
- * separately — see its own docstring. Both are needed, because a cost is a
- * dated rate AND a surge multiplier, and either reading the clock makes the
- * same historical turn price differently on a second run.
+ * A dated rate window — applies when the interaction timestamp is strictly
+ * before `effectiveBefore` (epoch ms). No timestamp, or no matching window,
+ * falls back to the model's unconditioned rates. A missing or zero timestamp
+ * is "unknown date" and returns the current card; this resolver never reads
+ * the host clock.
  */
 export interface DateTier {
 	effectiveBefore: number;
@@ -85,34 +49,12 @@ export const WEB_SEARCH_PRICE = 0.03;  // $0.03 per search request
 export const WEB_FETCH_PRICE = 0.03;   // $0.03 per fetch request
 
 /**
- * Calculate the per-request cost of server-side tool usage for a given model.
- * Only Claude models are billed per-request for web search/fetch today.
- * DeepSeek, Gemini, and local models do not charge for server_tool_use.
+ * Per-request cost of server-side tool usage. Only Claude is billed today.
  *
- * The test for "is this Claude" is a substring search for `claude` or
- * `anthropic`, with any id that ALSO says `deepseek` excluded (#22 A).
- *
- * Substring, not an anchored marker, and the difference is worth stating
- * (pr-review round 2): `notclaude` and `misanthropic` would bill. Neither is a
- * model id anyone issues, and anchoring would break the id forms that matter —
- * `us.anthropic.claude-sonnet-5-v1:0` carries the marker mid-string. The one
- * collision that is not hypothetical on this host is a `claude-`-prefixed id
- * naming a DeepSeek model, which the `deepseek` exclusion catches; measured
- * across every Pi and Claude Code session here, ZERO ids carry both words
- * today, so the exclusion is a guard rather than a correction. It used to also accept a bare alias,
- * `/\b(haiku|sonnet|opus)\b/`, to catch a Claude id written without the
- * `claude-` prefix. That arm billed DeepSeek: `claude-deepseek` exports
- * ANTHROPIC_MODEL="opus", so a DeepSeek turn recorded as plain `opus` was
- * charged $0.03 per web_search request against a provider this docstring says
- * does not charge. The two cases are byte-identical at this seam — a bare
- * `opus` from Claude Code and a bare `opus` from a DeepSeek session are the
- * same string — so the arm cannot be narrowed, only dropped.
- *
- * What that costs: a genuine Anthropic turn recorded with a bare alias AND a
- * server_tool_use block now undercounts by $0.03/request. No such turn exists
- * in this host's corpus; Claude Code stamps the full dated id on every message,
- * and every real Anthropic id form carries one of the two markers (dated API
- * ids, Vertex `claude-…`, Bedrock `us.anthropic.claude-…`).
+ * "Is Claude" is a substring search for `claude` or `anthropic`, with any id
+ * that also says `deepseek` excluded. Anchoring would miss mid-string forms
+ * (`us.anthropic.claude-…`). A bare `opus`/`sonnet`/`haiku` alias is not
+ * accepted: the same string is what a DeepSeek session records.
  */
 export function calculateServerToolCost(
 	model: string,
@@ -133,10 +75,7 @@ export function calculateServerToolCost(
  * The DeepSeek peak windows, as minutes since UTC midnight, half-open
  * `[start, end)` — 01:00–04:00 and 06:00–10:00 UTC.
  *
- * This is the ONE definition (#495). The windows were hardcoded in four
- * places — here, and three more in wtft-renderer.ts — plus four prose copies,
- * with nothing that failed when a schedule change missed one. Everything that
- * needs the schedule imports this; nothing re-types the numbers.
+ * This is the one definition. Everything that needs the schedule imports this.
  */
 export const DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES: ReadonlyArray<readonly [number, number]> = [
 	[60, 240],   // 01:00–04:00 UTC
@@ -144,70 +83,32 @@ export const DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES: ReadonlyArray<readonly [number, 
 ];
 
 /**
- * The instant weekends stopped being peak (2026-08-23T00:00:00Z).
+ * The instant weekends stopped being peak.
  *
  * Not retroactive: a weekend session before this really was billed at the
- * surge rate, so historical sessions must keep reporting what they cost.
- *
- * EVIDENCE, and it is weaker than DEEPSEEK_RATE_CARD_FROM's — say so rather than
- * let the two dates borrow each other's confidence (PR #507 review). The scrape
- * at princess-pi-tools/research/495-deepseek-pricing/pricing-page-2026-08-25.md
- * confirms the rule
- * IS Monday-Friday as of 2026-08-25; it does not say when that started. The date
- * here comes from a secondary report (#495's Sources), not from the vendor's own
- * changelog. If the true cutover differs, weekend interactions between the two
- * dates are mispriced in one direction or the other, and no test here can catch
- * it — the tests verify the code agrees with this constant, not that the
- * constant matches DeepSeek's billing. Re-scrape before trusting it for a
- * historical audit that straddles this week.
- *
- * No Beijing-vs-UTC ambiguity, despite sources disagreeing on which calendar
- * the "weekday" belongs to: the windows are 09:00–12:00 and 14:00–18:00
- * Beijing, which sit entirely inside one Beijing daytime, so a peak window's
- * UTC date and Beijing date are always the same date. Mon–Fri UTC ≡ Mon–Fri
- * Beijing here, so resolving it in UTC is exact, not an approximation.
+ * surge rate. Peak windows sit inside one Beijing daytime, so Mon–Fri UTC
+ * is Mon–Fri Beijing here.
  */
 export const DEEPSEEK_WEEKEND_OFFPEAK_FROM = Date.UTC(2026, 7, 23, 0, 0, 0);
 
 /**
- * The instant the DeepSeek rate card changed (2026-08-16T16:00:00Z).
- *
- * Interactions strictly before this price at the old card, which the three V4
- * names carry as their EARLIEST `dateTiers` window — `-vision-exp` included
- * since #100, though for that model the window is unreachable by any observed
- * turn; see its registry entry. `deepseek-flash` carries none and never will:
- * it did not exist on either side of this instant.
- *
- * v4-pro got much cheaper and v4-flash dearer, so the two errors partly cancel in a
- * TOTAL — which is exactly why nine days of wrong prices looked fine on screen (#495).
+ * The instant the DeepSeek rate card changed. Interactions strictly before
+ * this price at the old card, which the V4 names carry as their earliest
+ * `dateTiers` window.
  */
 export const DEEPSEEK_RATE_CARD_FROM = Date.UTC(2026, 7, 16, 16, 0, 0);
 
 /**
- * The instant V4.1 Flash shipped and the whole V4 Flash line retired
- * (2026-09-10T04:00:00Z, #100).
- *
- * From here `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` no longer
- * exist as models: both names ROUTE to V4.1 Flash and bill at its card. So this
- * is not a repricing of two live models, it is two names changing what they
- * point at — which is why both keep their 0.22/0.66/0.007 card as a `dateTiers`
- * window rather than losing it. The new name is the `deepseek-flash` entry.
+ * The instant V4.1 Flash shipped. From here `deepseek-v4-flash` and
+ * `deepseek-v4-flash-vision-exp` route to V4.1 Flash and bill at its card,
+ * which is why both keep their old card as a `dateTiers` window.
  */
 export const DEEPSEEK_V41_FLASH_FROM = Date.UTC(2026, 8, 10, 4, 0, 0);
 
 /**
- * The instant `deepseek-v4-pro` starts routing to V4.1 Flash (2026-09-14T04:00:00Z,
- * #100).
- *
- * Four days after the Flash cutover, with no opt-out and no V4.1 Pro to route to
- * instead. A Pro turn after this bills at the FLASH card — 0.15/0.60/0.003 — so
- * charging it the Pro card would overcount input 4.4x, output 3.3x, and
- * cache-HIT reads 7.3x (0.022 against 0.003). The cache-hit ratio is the
- * largest of the three and the easiest to leave out of a summary, which is
- * exactly why it is named: on an agent workload cache hits are most of the
- * input. Separate from DEEPSEEK_V41_FLASH_FROM because the two dates are
- * genuinely four days apart, and a single constant would misprice one line or
- * the other.
+ * The instant `deepseek-v4-pro` starts routing to V4.1 Flash. Separate from
+ * DEEPSEEK_V41_FLASH_FROM because the two dates are four days apart; a single
+ * constant would misprice one line or the other.
  */
 export const DEEPSEEK_V4_PRO_REROUTE_FROM = Date.UTC(2026, 8, 14, 4, 0, 0);
 
@@ -215,14 +116,8 @@ export const DEEPSEEK_V4_PRO_REROUTE_FROM = Date.UTC(2026, 8, 14, 4, 0, 0);
  * The DeepSeek surge multiplier at `timestamp` — 2.0 inside a peak window on a
  * weekday, 1.0 otherwise.
  *
- * Resolution reads the PASSED instant and never the host clock (#96, #495).
- * The distinction that matters is omitted-vs-zero: `wtft-parser` stamps an
- * unparsed turn with `timestamp: 0`, and `0 || Date.now()` used to hand that
- * turn the current wall clock — so the same historical turn priced differently
- * on every run, and a re-run near a window edge flipped it. A zero timestamp
- * means "when this happened is unknown", and an unknown instant surges at 1.0,
- * matching how `resolveTieredRates` treats the same 0 (current card, no dated
- * window). Only an OMITTED argument reads the clock, for live callers.
+ * Reads the passed instant, never the host clock, except when the argument is
+ * omitted (live callers). Zero means "unknown date" and surges at 1.0.
  */
 export function getDeepSeekPeakMultiplier(timestamp?: number): number {
 	if (timestamp === 0) return 1.0;
@@ -230,8 +125,7 @@ export function getDeepSeekPeakMultiplier(timestamp?: number): number {
 	const d = new Date(ts);
 	const utcTime = d.getUTCHours() * 60 + d.getUTCMinutes(); // minutes since UTC midnight
 
-	// Since 2026-08-23 the peak schedule is Monday–Friday; Saturday and Sunday
-	// are off-peak all day, whatever the hour.
+	// After DEEPSEEK_WEEKEND_OFFPEAK_FROM, Saturday and Sunday are off-peak.
 	if (ts >= DEEPSEEK_WEEKEND_OFFPEAK_FROM) {
 		const utcDay = d.getUTCDay(); // 0 = Sunday, 6 = Saturday
 		if (utcDay === 0 || utcDay === 6) return 1.0;

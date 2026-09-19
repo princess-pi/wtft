@@ -1,17 +1,15 @@
 /**
  * @package @princess-pi/wtft
  * @module wtft-spawn-ledger
- * @description The spawn ledger (#116, direction A) — the parent→child edge,
- *   written down at spawn time because it cannot be recovered afterwards.
+ * @description The spawn ledger — the parent→child edge, written down at spawn
+ *   time because it cannot be recovered afterwards.
  *   Spec: docs/spec-116-spawn-ledger.md.
  *
- *   A launcher-spawned session (a `pr-review` lens, `herdr agent start`, any
- *   wrapper script) leaves NO trace of its parent. The parent's transcript has
- *   no `cd` and no `claude` at the command head, so `cwdForClaudeSpawn` returns
- *   null; the child's transcript lives in a project dir the parent never wrote
- *   to; and neither file contains a field naming the other. There is no edge to
- *   re-derive, so no tagger version bump can reach the money — measured at
- *   $69.68 unattributed on a session reporting $70.33.
+ *   A launcher-spawned session leaves NO trace of its parent. The parent's
+ *   transcript has no `cd` and no `claude` at the command head, so
+ *   `cwdForClaudeSpawn` returns null; the child's transcript lives in a
+ *   project dir the parent never wrote to; and neither file contains a field
+ *   naming the other. There is no edge to re-derive.
  *
  *   The spawner knows both ids before the child runs (`claude --session-id`
  *   takes the child's uuid as INPUT), so this module's job is to make writing
@@ -20,8 +18,7 @@
  *
  *   This module owns the FILE and the `spawn-record` command line. It parses no
  *   session, prices nothing, and imports no renderer — the walk that turns edges
- *   into money is wtft-spawn-tree.ts. That separation is why a spawner's call
- *   does no session-reading work at runtime, whatever the bundler packs.
+ *   into money is wtft-spawn-tree.ts.
  */
 
 import * as fs from "node:fs";
@@ -37,22 +34,17 @@ export const SPAWN_RECORD_SCHEMA = "wtft/spawn@1";
  *  POSIX does not promise that a `write(2)` to a regular file is atomic against
  *  a concurrent writer; Linux takes the inode lock for the duration of one
  *  `write`, which is what makes a single-call O_APPEND write land whole in
- *  practice. 4096 is a deliberately conservative bound on how much we rely on
- *  that — small enough to be one page and one call, and the same figure as
- *  PIPE_BUF, which is where the number comes from even though the guarantee is
- *  not the pipe one. Two spawners interleaving would lose BOTH edges, not one.
+ *  practice. 4096 is a deliberately conservative bound — small enough to be one
+ *  page and one call, and the same figure as PIPE_BUF. Two spawners
+ *  interleaving would lose BOTH edges, not one.
  *
  *  Reachable only through JSON escape expansion in practice: the five fields
- *  capped at MAX_FIELD_BYTES (`ts`, `mechanism`, `cwd`, `label`, `model`) alone
- *  sum to 2560 B (2.5 KiB); with the two session ids and the JSON punctuation
- *  around all eight fields, the largest record buildable from ordinary
- *  characters comes to just under 3 KiB — still short of the 4 KiB line below,
- *  which is why escape expansion is the only way to reach it. */
+ *  capped at MAX_FIELD_BYTES alone sum to 2560 B; with the two session ids and
+ *  JSON punctuation the largest ordinary record comes to just under 3 KiB. */
 export const MAX_RECORD_BYTES = 4096;
 
-/** Per-field cap, applied to EVERY text field — `ts` and `mechanism` as well as
- *  the three optional ones — so a pathological value cannot push a record past
- *  MAX_RECORD_BYTES and put the single-write append above out of reach. */
+/** Per-field cap on every text field, so a pathological value cannot push a
+ *  record past MAX_RECORD_BYTES. */
 export const MAX_FIELD_BYTES = 512;
 
 export interface SpawnRecord {
@@ -70,8 +62,8 @@ export interface SpawnRecord {
 	/** Who made the edge: `pr-review-lens`, `herdr-agent-start`, … */
 	mechanism: string;
 	/** The child's cwd, when the spawner knows it. Never used to FIND the child
-	 *  — a worktree move relocates the transcript (#6) and a recorded path
-	 *  would rot, while the uuid does not. */
+	 *  — a worktree move relocates the transcript and a recorded path would
+	 *  rot, while the uuid does not. */
 	cwd?: string;
 	/** A human name for the child (`correctness`, `agent/824`). */
 	label?: string;
@@ -79,14 +71,7 @@ export interface SpawnRecord {
 	model?: string;
 }
 
-/** One edge as read back.
- *
- *  Deliberately NOT carrying a ledger line number. The first version did, and it
- *  was wrong by construction on any ledger the reader did not take whole — an
- *  offset into a window rather than into the file. The windowed read is gone
- *  too (see MAX_LEDGER_BYTES), and the field is not coming back: nothing read
- *  it, and a number that is right until the ledger gets big is worse than no
- *  number. */
+/** One edge as read back. Deliberately NOT carrying a ledger line number. */
 export type SpawnEdge = SpawnRecord;
 
 export interface SpawnLedger {
@@ -99,21 +84,17 @@ export interface SpawnLedger {
 
 const UUID_ANYWHERE = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
 
-/** Longest id we will record. A session id is a filename component, and a
- *  pathological one is a way to make the ledger unreadable for everyone. */
+/** Longest id we will record. A session id is a filename component. */
 const MAX_SESSION_ID_BYTES = 128;
 
 /**
  * A session id AS ITS HARNESS SPELLS IT.
  *
  * Claude Code names a session file for a bare uuid; Pi prefixes it with a
- * timestamp (CONTEXT.md, **Session**). An earlier version of this required a
- * bare uuid, which meant a Pi session could never be a parent — so the Pi
- * widget's spawn block was unreachable code on the only harness it runs in.
- *
- * The rule is the repo's existing one (`isSessionIdBasename`): the id must
- * CONTAIN a uuid. Plus two constraints this file adds, because the id becomes
- * part of a filename lookup: one path component, and bounded.
+ * timestamp (CONTEXT.md, **Session**). The rule is the repo's existing one
+ * (`isSessionIdBasename`): the id must CONTAIN a uuid. Plus two constraints
+ * this file adds, because the id becomes part of a filename lookup: one path
+ * component, and bounded.
  */
 export function isSessionId(value: unknown): value is string {
 	if (typeof value !== "string" || value.length === 0) return false;
@@ -139,18 +120,11 @@ export function spawnLedgerPath(): string {
 /** C0 controls, DEL, and the C1 range — every character that can move a cursor,
  *  start an escape sequence, or forge a line break in a rendered report.
  *
- *  WHY THE WRITER REFUSES THESE (Macroscope, PR #136, Medium). A record's
- *  `mechanism`, `label`, `cwd` and `model` are free text supplied by a spawner,
- *  and the report prints them into a padded column. A `label` containing a
- *  newline round-trips perfectly — `JSON.stringify` escapes it, `JSON.parse`
- *  restores it — and then `padEnd` produces a row that is really two, so a
- *  spawner can forge report lines. An `\x1b]` starts an OSC sequence that the
- *  reader's terminal executes. Neither is exotic: a label is the obvious place
- *  to put a command line, and command lines carry escape codes.
- *
- *  Refused at the WRITER, so a bad record never reaches the file — the
- *  `by construction` half. The renderer sanitises anyway, because the file is on
- *  disk, can be hand-edited, and can hold records written by an older binary. */
+ *  A record's free-text fields are printed into a padded column. A `label`
+ *  containing a newline round-trips through JSON and then `padEnd` produces a
+ *  row that is really two. An `\x1b]` starts an OSC sequence the reader's
+ *  terminal executes. Refused at the WRITER so a bad record never reaches the
+ *  file; the renderer sanitises anyway because the file can be hand-edited. */
 const TERMINAL_CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
 
 function requireField(value: unknown, name: string): string {
@@ -176,9 +150,9 @@ function optionalField(value: unknown, name: string): string | undefined {
  * it), or a throw naming what is wrong. The size check counts the newline,
  * because the newline is part of the write that has to land whole.
  *
- * Validation happens HERE, at the spawner, because it is the last moment it is
- * cheap: a malformed uuid is a permanently unresolvable edge, and the report
- * that finds it months later cannot ask the spawner what it meant.
+ * Validation happens HERE, at the spawner: a malformed uuid is a permanently
+ * unresolvable edge, and the report that finds it months later cannot ask the
+ * spawner what it meant.
  */
 export function serializeSpawnRecord(record: SpawnRecord): string {
 	if (record.schema !== SPAWN_RECORD_SCHEMA) {
@@ -195,8 +169,7 @@ export function serializeSpawnRecord(record: SpawnRecord): string {
 		child: record.child,
 		mechanism: requireField(record.mechanism, "mechanism"),
 	};
-	// Omitted, never nulled: `"cwd": null` and an absent cwd say the same thing
-	// to a reader, and only one of them costs bytes in a 4 KiB budget.
+	// Omitted, never nulled: `"cwd": null` and an absent cwd say the same thing.
 	const cwd = optionalField(record.cwd, "cwd");
 	if (cwd !== undefined) out.cwd = cwd;
 	const label = optionalField(record.label, "label");
@@ -224,30 +197,19 @@ export function appendSpawnRecord(record: SpawnRecord, file: string = spawnLedge
 	const line = serializeSpawnRecord(record) + "\n";
 	fs.mkdirSync(path.dirname(file), { recursive: true });
 	const buf = Buffer.from(line, "utf8");
-	// O_NONBLOCK for the same reason the reader uses it (Macroscope, PR #136,
-	// High): `openSync(file, "a")` on a FIFO blocks until a reader shows up, so
-	// a named pipe at the ledger path would hang `wtft spawn-record` forever
-	// instead of letting it exit 3. With O_NONBLOCK the open returns and the
-	// fstat below refuses it. Inert on a regular file.
+	// O_NONBLOCK: `openSync(file, "a")` on a FIFO blocks until a reader shows
+	// up. With O_NONBLOCK the open returns and the fstat below refuses it.
+	// Inert on a regular file.
 	const fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT | fs.constants.O_NONBLOCK, 0o600);
 	try {
 		if (!fs.fstatSync(fd).isFile()) {
 			throw new Error(`spawn ledger is not a regular file (${file}) — refusing to append; a FIFO or device here is not a ledger`);
 		}
-		// One write, and a check that it was one write — `writeSync` returns a
-		// byte count and a short write is legal, so ignoring it would report a
-		// truncated line as a recorded edge. Throw; the caller's contract is
-		// already "an unwritten edge degrades to the old behaviour".
-		//
-		// NOTHING IS DONE TO REPAIR A PARTIAL LINE, deliberately (Duppy,
-		// 2026-09-16). A short write here means the disk is full, and the
-		// remedy for a full disk is a disk with space on it, not code. The
-		// damage is bounded and it is REPORTED: the fragment, and the next
-		// record that merges into it, come back from `readSpawnLedger` as one
-		// counted `malformedLines`. A previous version spent twenty lines and
-		// two conditional error messages writing a best-effort terminating
-		// newline — which, under the ENOSPC that caused the short write, would
-		// fail too.
+		// One write, and a check that it was one write — a short write is legal,
+		// so ignoring it would report a truncated line as a recorded edge.
+		// Nothing is done to repair a partial line: a short write means the
+		// disk is full. The fragment and the next record that merges into it
+		// come back from `readSpawnLedger` as one counted `malformedLines`.
 		const written = fs.writeSync(fd, buf);
 		if (written !== buf.length) {
 			throw new Error(`spawn ledger: short write (${written} of ${buf.length} bytes) — the disk is probably full; one partial line remains and is reported as a malformed line on the next read`);
@@ -260,47 +222,33 @@ export function appendSpawnRecord(record: SpawnRecord, file: string = spawnLedge
 /**
  * Refuse to read a ledger larger than this.
  *
- * NOT a window: the reader takes the whole file or none of it. An earlier
- * version read the last 8 MiB and reported the truncation, which meant every
- * surface had to carry a "this tree may be missing older edges" condition, the
- * boundary line was always dropped, and a reader who ignored the flag got a
- * quietly incomplete lineage. Refusing is both simpler and stricter — a
- * refusal cannot omit an edge silently, and it comes back as `ledgerError`
- * with a remedy in it.
+ * NOT a window: the reader takes the whole file or none of it. Refusing is
+ * both simpler and stricter — a refusal cannot omit an edge silently, and it
+ * comes back as `ledgerError` with a remedy in it.
  *
  * At ~200 bytes a record, 8 MiB is around 40,000 spawns. A ledger past that is
- * a ledger that needs pruning, which is a decision for whoever owns the host.
+ * a ledger that needs pruning.
  */
 export const MAX_LEDGER_BYTES = 8 * 1024 * 1024;
 
 /** Read the whole ledger, or refuse — never part of it.
  *
- *  OPEN FIRST, THEN ASK THE DESCRIPTOR (Macroscope, PR #136, two High findings).
- *  The previous version did `statSync(path)` and then `readFileSync(path)`, and
- *  that sequence is wrong twice over:
+ *  Open first, then ask the descriptor — not `statSync` then `readFileSync`:
  *
- *   - **TOCTOU.** The size that passed the 8 MiB check belonged to a file that
- *     no longer exists by the time the second call opens it. A ledger growing
- *     between the two — which is the normal case, since spawners append to it
- *     concurrently — is read IN FULL however large it got, so the advertised
- *     refusal does not hold and the report path can consume unbounded memory.
- *   - **A FIFO at the ledger path blocks forever.** `readFileSync` on a named
- *     pipe with no writer never returns, so `wtft --json` hangs instead of
- *     reporting `spawned.ledgerError`. `statSync` cheerfully describes it.
+ *   - TOCTOU: a ledger growing between the two is read IN FULL however large
+ *     it got, so the advertised refusal would not hold.
+ *   - A FIFO at the ledger path blocks forever on `readFileSync`.
  *
- *  So: open once with `O_NONBLOCK` (which makes the FIFO case return instead of
- *  hang and is inert on a regular file), `fstat` THAT descriptor, refuse
- *  anything that is not a regular file, check the size of the thing actually
- *  opened, and read from the same descriptor with a bounded buffer. There is no
- *  second lookup for a race to sit inside. */
+ *  Open once with `O_NONBLOCK`, `fstat` THAT descriptor, refuse anything that
+ *  is not a regular file, check the size of the thing actually opened, and
+ *  read from the same descriptor with a bounded buffer. */
 function readLedgerText(file: string): string | null {
 	let fd: number;
 	try {
 		fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
 	} catch (err) {
-		// ENOENT is the ordinary case: nothing has ever spawned. Any other open
-		// error is a read failure and must not read as "no edges" — that would
-		// report a complete tree built from a ledger nobody could open.
+		// ENOENT is ordinary: nothing has ever spawned. Any other open error
+		// must not read as "no edges".
 		if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
 		throw err;
 	}
@@ -313,8 +261,7 @@ function readLedgerText(file: string): string | null {
 			throw new Error(`spawn ledger is ${stat.size} bytes, over the ${MAX_LEDGER_BYTES}-byte limit (${file}) — prune it; reading part of it would drop edges without saying which`);
 		}
 		// Bounded by the size we just verified on this descriptor. A concurrent
-		// append lands past it and is simply not in this snapshot, which is the
-		// correct answer for a read that happened before it.
+		// append lands past it and is simply not in this snapshot.
 		const buf = Buffer.alloc(stat.size);
 		let read = 0;
 		while (read < buf.length) {
@@ -334,10 +281,8 @@ function readLedgerText(file: string): string | null {
  * A line that is not JSON, carries a schema this reader does not know, is
  * missing a required field, or carries a `parent`/`child` that is not uuid-
  * shaped is skipped AND COUNTED. (A blank line is skipped and NOT counted — it
- * is whitespace, not a failed record.) Counting is the whole point:
- * this file is the only record of an edge that cannot be recovered any other
- * way, so a writer quietly producing garbage must show up as a number a report
- * can print, not as an absence indistinguishable from "nothing spawned".
+ * is whitespace, not a failed record.) Counting is the whole point: this file
+ * is the only record of an edge that cannot be recovered any other way.
  */
 export function readSpawnLedger(file: string = spawnLedgerPath()): SpawnLedger {
 	const childrenOf = new Map<string, SpawnEdge[]>();
@@ -412,13 +357,10 @@ export const SPAWN_RECORD_USAGE =
  * Parse, validate, append.
  *
  * The ledger path and the clock are parameters with defaults rather than direct
- * reads, so the exit-code table above is testable without a process — not
- * because this function is pure (its defaults read `process.env` and the wall
- * clock), but because a caller can supply both.
+ * reads, so the exit-code table above is testable without a process.
  *
  * Every failure names the flag that caused it. A spawner calls this from a
- * shell script and will not read a stack trace; the whole value of validating
- * here is that the message reaches whoever can still fix the spawn.
+ * shell script and will not read a stack trace.
  */
 export function runSpawnRecordCommand(
 	argv: string[],
@@ -434,22 +376,16 @@ export function runSpawnRecordCommand(
 		if (arg === "-h" || arg === "--help") {
 			return { exitCode: SPAWN_RECORD_EXIT.OK, stdout: SPAWN_RECORD_USAGE, stderr: "" };
 		}
-		// `--flag value` and `--flag=value` both. No `--ts`: the clock fills it
-		// (see the SpawnRecord field doc), and a spawner-supplied timestamp is a
-		// way for the ledger to disagree with itself for no gain.
+		// `--flag value` and `--flag=value` both. No `--ts`: the clock fills it.
 		const m = /^--(parent|child|mechanism|cwd|label|model)(?:=(.*))?$/.exec(arg);
 		if (!m) {
 			// Silently ignoring an unknown flag is how a typo'd `--mechansim`
-			// becomes a missing-argument error that blames the wrong flag (#91).
+			// becomes a missing-argument error that blames the wrong flag.
 			return { exitCode: SPAWN_RECORD_EXIT.BAD_ARGS, stdout: "", stderr: `wtft spawn-record: unknown argument ${arg}\n${SPAWN_RECORD_USAGE}` };
 		}
 		const value = m[2] !== undefined ? m[2] : argv[++i];
-		// A bare `--flag` followed by another flag used to swallow it: `--label
-		// --json` recorded the label "--json" and dropped the echo, and
-		// `--mechanism --parent <uuid>` then blamed `<uuid>` as the unknown
-		// argument — the opposite of naming the flag that caused the failure.
-		// `--flag=--value` still works, for a value that really does start with
-		// a dash.
+		// A bare `--flag` followed by another flag must not swallow it.
+		// `--flag=--value` still works for a value that really starts with `--`.
 		if (value === undefined || (m[2] === undefined && value.startsWith("--"))) {
 			return { exitCode: SPAWN_RECORD_EXIT.BAD_ARGS, stdout: "", stderr: `wtft spawn-record: --${m[1]} needs a value (use --${m[1]}=<value> for one starting with --)\n${SPAWN_RECORD_USAGE}` };
 		}

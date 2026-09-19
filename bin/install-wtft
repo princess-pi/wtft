@@ -1,19 +1,10 @@
 #!/usr/bin/env bash
 # install-wtft — put THIS repo's wtft build on PATH.
 #
-# Why this exists (#46): `wtft` on the box it was written for resolved to
-# ~/.bun/bin/wtft -> the princess-pi-tools clone, reporting 1.1.0 while this
-# repo built 1.0.0 — so #36, #37, #39 and #18 were all absent from the command
-# that actually ran, and lazy session discovery got implemented twice, once in
-# each repo. `install-workflow-tools` has never contained a single wtft
-# reference: the route was `bun link` plus that repo's package.json bin map, so
-# there was nothing to remove from that installer. This is the missing half of
-# the Phase-5 extraction — it copied the sources and never moved the install.
-#
 # Usage:
 #   install-wtft                     build, install four entries into ~/bin, and
 #                                    move any config file still at the old
-#                                    princess-pi-tools path (#156) into
+#                                    princess-pi-tools path into
 #                                    ~/.config/wtft/ (once — no fallback read)
 #   install-wtft --check [--json]    report drift, write nothing (doctor mode)
 #   install-wtft --dir <dir>         install somewhere else (the test seam)
@@ -29,16 +20,7 @@
 #   2   in sync but SHADOWED on PATH by a different wtft
 #   3   the build failed
 #   4   in sync, but a config file is still at the old princess-pi-tools path
-#       (status "config-left") — in install mode this means EITHER the new
-#       path already held a DIFFERENT file (a real conflict, declined), OR
-#       one appeared there mid-move (kept, never overwritten), OR
-#       the copy itself failed partway (mkdir/mktemp/cp/ln — a permissions
-#       problem, say), which prints "could not move" to stderr. A file that
-#       copied fine but could not be REMOVED from the old path afterward is
-#       reported as "moved", not this. A later run removes the byte-identical
-#       leftover once the old directory allows unlinking, and exits 4 ("identical,
-#       safe to delete") until then (see below); in --check
-#       mode "config-left" may also just mean install has not run since #156
+#       (status "config-left")
 #  64   bad usage: unknown argument, --dir without a directory, --dir followed
 #       by a flag or given an empty string, or no --dir on a host with HOME
 #       unset. `--` is NOT an end-of-options marker. NO JSON DOCUMENT is emitted
@@ -49,45 +31,11 @@
 # configMigration array (from, to, state: "moved"|"left"|"none") alongside the
 # existing artifacts/shadow fields.
 #
-# 1 and 64 match install-workflow-tools deliberately, so the two installers
-# never disagree about what a number means. 2 and 4 are their own codes because
-# their remedy is a different verb: re-running this script cannot fix a PATH
-# shadow, and cannot move a config file it already declined to overwrite once.
-# Drift outranks a left-behind config file, which outranks shadow, when more
-# than one holds — the wrong bytes, wherever they are, come first.
-#
-# COPY, NOT SYMLINK. A symlink into the clone was the only workable option
-# before #36, because the artifacts still carried bare imports and only ran
-# from a directory with node_modules in an ancestor. #36 made them
-# self-contained, so a copy runs anywhere. The copy survives the clone moving
-# or being deleted, and reports a real version instead of a -dev stamp against
-# a working tree that has since changed; the cost is re-running this after each
-# build, which --check is what makes visible.
-#
-# THE DAEMON KEEPS ITS .mjs EXTENSION. bin/wtft.ts computes
-# `daemonDir = dirname(fileURLToPath(import.meta.url))` and joins
-# "wtft-daemon.mjs" onto it, at four sites in that file and a fifth in
-# extensions/lib/wtft-cli-shared.ts (spawnWtftDaemon) — grepping only bin/wtft.ts
-# undercounts the dependency surface. Installing the daemon as `wtft-daemon`
-# ALONE would leave --watch unable to find it while everything else kept
-# working — the failure mode hardest to notice. It lands under both names.
-#
-# THIS SCRIPT DOES NOT INSTALL ITSELF, unlike install-workflow-tools. REPO is
-# derived from the script's own location, so a copy in ~/bin would compute
-# REPO=~ and compare the artifacts against a directory that is not this clone.
-# Run it by path: <clone>/bin/install-wtft.
-#
-# INSTALL MODE NEEDS `bun install` FIRST — not because build.ts imports anything
-# beyond node:fs and node:path, but because Bun.build resolves the ENTRYPOINTS'
-# imports (@princess-pi/libs, wcwidth) and noticeFor reads each bundled
-# package's LICENSE out of node_modules. A clone without them exits 3.
-#
-# SHADOWS ARE REPORTED, NEVER DELETED. The precedent is
-# install-workflow-tools, which reports a retired hook and prints its `rm`
-# rather than removing it: silently deleting an executable another repo manages
-# is the same class of move as silently installing one. A `bun link` deleted
-# here would also return the next time anyone re-links that repo, so deleting
-# it would be both rude and ineffective.
+# COPY, NOT SYMLINK — a copy survives the clone moving. The daemon keeps its
+# .mjs extension (callers join "wtft-daemon.mjs") and also lands as `wtft-daemon`.
+# This script does not install itself: REPO is derived from the script path, so
+# run it as <clone>/bin/install-wtft. Install mode needs `bun install` first
+# (bundled imports). Shadows are reported, never deleted.
 #
 # Contract: docs/spec-46-install-wtft.md
 
@@ -97,19 +45,8 @@ MODE=install
 JSON=0
 DEST_DIR=""
 
-# EVERY JSON control character, not just backslash and quote. A newline or tab
-# in a path is legal on this filesystem and produced a document `JSON.parse`
-# rejects — on a tool whose entire point is a machine-readable surface.
-#
-# BASH, NOT AWK. The first version of this used `awk` with `RS = "^$"` to slurp
-# the whole input, which is a GNU extension: on an awk that reads `^$` as a
-# regular expression — mawk is Debian's default `awk` — every `^` in the value
-# is eaten as a record separator, so a path containing a caret came back naming
-# a different file. Latent here (this box has gawk 5.2.1, where it round-trips)
-# and live anywhere else. A bash loop has no such dialect, and no subprocess.
-#
-# Bytes above 0x7f pass through unchanged. See the spec: a path is bytes, JSON
-# is text, and the two only agree while the bytes are valid UTF-8.
+# Escape every JSON control character (not just \ and "). Bash loop — portable
+# across awk dialects. Bytes above 0x7f pass through unchanged.
 json_str() {
   local s=$1 out= c i o
   for (( i = 0; i < ${#s}; i++ )); do
@@ -130,17 +67,10 @@ json_str() {
   printf '%s' "$out"
 }
 
-# Single-quote for a shell, the way a shell actually requires: close the quote,
-# escape the apostrophe, reopen. The printed `rm` is meant to be COPIED, so a
-# path containing an apostrophe did not merely fail — it broke out of the quoted
-# word and handed the rest to the shell as syntax. Third iteration of this bug:
-# first the JSON field was unquoted, then the printed line emitted double quotes
-# inside single ones, and now the quoting is correct for every path.
+# Shell single-quote for a path meant to be copied (close, escape ', reopen).
 sh_squote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
-# Absolute path with the FINAL symlink followed. Two callers need it and both
-# broke without it: the shadow comparison (a `ln -s` at our own copy runs our own
-# bytes) and self_path below.
+# Absolute path with the final symlink followed (shadow compare + self_path).
 resolve() {
   local p="$1" t n=0
   while [ -L "$p" ] && [ "$n" -lt 20 ]; do
@@ -153,29 +83,16 @@ resolve() {
   printf '%s/%s' "$d" "$(basename "$p")"
 }
 
-# THROUGH the symlink, not just the directory holding it. REPO is derived from
-# this, so a symlinked install-wtft in ~/bin used to compute REPO=$HOME and
-# SRC_DIR=$HOME/bin — the DEFAULT DEST_DIR. Every artifact was then compared
-# against itself and --check reported "ok" on a payload it had just called
-# stale. A doctor that always says healthy is worse than no doctor.
+# Resolve through the symlink — REPO is derived from this, not from dirname alone.
 self_path() { resolve "$0"; }
 
-# Absolute path, WITHOUT creating anything — --check must be able to name a
-# directory it refuses to make. A non-existent path is made absolute against
-# $PWD lexically rather than resolved, which is all a report needs.
+# Absolute path without creating anything (--check must name a dir it refuses to make).
 abs_dir() {
   case "$1" in
     /*) printf '%s' "$1" ;;
     *)  local here
-        # `pwd -P` FAILS when the current directory has been unlinked, and its
-        # empty substitution used to leave `printf` happily emitting "/tools" —
-        # so a relative --dir silently retargeted a root-level directory that
-        # has nothing to do with the caller. An empty result is a failure, not
-        # a root.
+        # Empty pwd is a failure, not root. Return (not exit) — we are in a command subshell.
         here="$(pwd -P 2>/dev/null)" || here=""
-        # RETURN, do not exit: this runs inside a command substitution, so an
-        # `exit` here leaves only the subshell and the empty result flows on —
-        # which is how "/tools" happened in the first place. The caller checks.
         [ -n "$here" ] || return 1
         printf '%s/%s' "$here" "$1" ;;
   esac
@@ -187,12 +104,7 @@ while [ $# -gt 0 ]; do
     --json)    JSON=1 ;;
     --dir)     shift
                [ $# -gt 0 ] || { echo "install-wtft: --dir needs a directory" >&2; exit 64; }
-               # A flag here is a forgotten value, not a directory name: `--dir
-               # --json` used to install into a directory literally called
-               # "--json" and still exit 0.
-               # A flag OR an empty string: `--dir ""` (an unexpanded caller
-               # variable) used to fall through to the `-z` test below and
-               # silently retarget the real ~/bin.
+               # Reject a flag or empty string as the directory value.
                case "$1" in --*|"") echo "install-wtft: --dir needs a directory, got '$1'" >&2; exit 64 ;; esac
                DEST_DIR="$1" ;;
     --version) self_path; exit 0 ;;
@@ -205,8 +117,7 @@ done
 REPO="$(cd "$(dirname "$(self_path)")/.." && pwd -P)"
 SRC_DIR="$REPO/bin"
 if [ -z "$DEST_DIR" ]; then
-  # Not `$HOME/bin` under `set -u`: an unset HOME aborted with a raw bash
-  # "unbound variable" and no document at all.
+  # set -u: unset HOME must not abort with a raw unbound-variable message.
   [ -n "${HOME:-}" ] || { echo "install-wtft: HOME is unset — pass --dir <dir>" >&2; exit 64; }
   DEST_DIR="$HOME/bin"
 fi
@@ -215,34 +126,10 @@ DEST_DIR="$(abs_dir "$DEST_DIR")" || {
   exit 64
 }
 
-# Two copies and two symlinks. The .mjs EXTENSION IS LOAD-BEARING TWICE OVER:
-#
-#   1. bin/wtft.ts joins the literal "wtft-daemon.mjs" onto daemonDir, so the
-#      daemon must sit beside the command under exactly that name.
-#   2. NODE 18 NEEDS IT TO SEE ESM. An extensionless copy of the bundle, run by
-#      its own shebang, dies on `import * as fs from "node:fs"`. Node's
-#      extensionless module detection is unflagged from 20.19.0 and 22.7.0, so
-#      the versions that need the extension are 18.x and early 20.x — and
-#      /usr/bin/node here is 18.19.1, exactly the floor `engines: >=18`
-#      promises.
-#
-#      MEASURED, and narrower than an earlier version of this comment claimed.
-#      That one said "exit 1 on 18, 20 and 22", which conflated two causes: it
-#      was taken while the type-stripping shebang above was still in place, so
-#      it credited the missing extension with a failure the shebang caused.
-#      Re-measured against the fixed build — `cp bin/wtft.mjs $D/wtft && chmod
-#      +x $D/wtft && PATH=$(dirname $NODE):/usr/bin:/bin $D/wtft --version` —
-#      exit 1 on 18.19.1 only; 0 on 20.20.2, 22.22.3 and 24.16.0. One supported
-#      major is enough to need the symlink; overstating it was not.
-#
-# So the payload is a COPY (it survives the clone moving) and the command name
-# is a SYMLINK BESIDE IT (node resolves to the .mjs realpath, which is in the
-# same directory, so daemonDir still finds the daemon). Nothing points back at
-# the clone.
-#
-# The whole class was invisible because every test ran `node <file>`, which
-# takes an explicit entry point and detects the module type. No test had ever
-# invoked the artifact the way a consumer does: by typing its name.
+# Copies of the .mjs bundles + symlinks for the command names. The .mjs extension
+# is load-bearing: callers join "wtft-daemon.mjs", and Node 18 needs it for ESM
+# when the shebang invokes the file by name. Copy + sibling symlink — nothing
+# points back at the clone.
 COPIES=("wtft.mjs" "wtft-daemon.mjs")
 LINKS=("wtft:wtft.mjs" "wtft-daemon:wtft-daemon.mjs")
 
@@ -250,22 +137,13 @@ STATUS=ok
 EXIT=0
 
 # ---
-# CONFIG MIGRATION (#156). wtft moved its config off princess-pi-tools's
-# directory and onto its own: `~/.config/wtft/` instead of
-# `~/.config/princess-pi-tools/`, with new basenames inside it. Existing
-# files move ONCE — there is no runtime fallback read of the old path (the
-# code simply never looks there again), so a file left behind is invisible to
-# wtft until this script (or a human) moves it.
-#
-# Independent of DEST_DIR/REPO/the build below: config lives under
-# XDG_CONFIG_HOME, never under the clone, so this runs in EVERY mode,
-# including on a build failure — the two concerns share nothing to fail
-# together on.
+# CONFIG MIGRATION — move once from ~/.config/princess-pi-tools/ to ~/.config/wtft/.
+# No runtime fallback read. Runs in every mode (independent of DEST_DIR/build).
 # ---
 
 OLD_CONFIG_DIR_NAME=princess-pi-tools
 NEW_CONFIG_DIR_NAME=wtft
-# old-basename:new-basename, inside their respective directories above.
+# old-basename:new-basename
 CONFIG_MIGRATIONS=(
   "wtft.json:config.json"
   "token-budget.json:token-budget.json"
@@ -273,10 +151,7 @@ CONFIG_MIGRATIONS=(
   "wtft-harnesses.json:harnesses.json"
 )
 
-# $XDG_CONFIG_HOME, falling back to $HOME/.config — empty if NEITHER is set,
-# which this treats as "config location unknowable" rather than a failure:
-# unlike DEST_DIR, nothing above requires HOME when --dir is given, and a
-# migration this script cannot locate is simply not attempted.
+# $XDG_CONFIG_HOME, else $HOME/.config — empty if neither is set (skip migration).
 config_home() {
   if [ -n "${XDG_CONFIG_HOME:-}" ]; then printf '%s' "$XDG_CONFIG_HOME"
   elif [ -n "${HOME:-}" ]; then printf '%s/.config' "$HOME"
@@ -299,30 +174,15 @@ if [ -n "$CFG_HOME" ]; then
     if [ -f "$old_path" ]; then
       if [ ! -e "$new_path" ]; then
         if [ "$MODE" = install ]; then
-          # WRITE BESIDE, THEN HARD-LINK INTO PLACE — a mid-move failure never
-          # leaves a half-written file at the new path, and `ln` refuses an
-          # existing name where `mv -f` would replace it: a config a running
-          # wtft writes between the `! -e` check above and this line is kept,
-          # never overwritten (PR #162 review).
+          # Stage then hard-link: mid-move never half-writes; ln refuses an existing name.
           mkdir -p "$NEW_CFG_DIR" 2>/dev/null
           stage="$(mktemp "$NEW_CFG_DIR/.install-wtft.XXXXXX" 2>/dev/null)" || stage=""
           if [ -n "$stage" ] && cp "$old_path" "$stage" 2>/dev/null && ln "$stage" "$new_path" 2>/dev/null; then
             rm -f "$stage" 2>/dev/null
-            # The data is safely at the new path now — that is what "moved"
-            # promises — regardless of whether the OLD copy can also be
-            # removed. A directory that allows writing/renaming into it but
-            # not unlinking from it is a real permission shape (#156 review),
-            # and treating that as a hard failure was worse than cosmetic:
-            # the NEXT run's `[ ! -e "$new_path" ]` guard would then be
-            # false, so it fell into the "declined, already occupied" branch
-            # forever — a config-left that no re-run could ever clear, on
-            # two copies that were actually already identical.
+            # "moved" once data is at the new path — even if the old copy cannot be unlinked.
             if rm -f "$old_path" 2>/dev/null; then
               cfg_state=moved
-              # >&2, matching the build output above: --json promises
-              # exactly ONE document on stdout, and this line would
-              # otherwise land ahead of it and break every caller's
-              # JSON.parse.
+              # >&2 so --json keeps exactly one document on stdout.
               echo "install-wtft: moved $old_path -> $new_path" >&2
             else
               cfg_state=moved
@@ -343,11 +203,7 @@ if [ -n "$CFG_HOME" ]; then
           left_reason="not yet migrated"
         fi
       elif cmp -s "$old_path" "$new_path" 2>/dev/null; then
-        # Byte-identical: not a real conflict between two different configs —
-        # almost certainly the tail end of the case just above, a previous
-        # move whose cleanup failed. Retry removing the stale duplicate in
-        # install mode; --check still never mutates, but the report says
-        # WHY rather than implying two configs are fighting over one name.
+        # Identical: retry removing the stale duplicate in install mode.
         if [ "$MODE" = install ] && rm -f "$old_path" 2>/dev/null; then
           cfg_state=moved
           echo "install-wtft: removed a stale duplicate at $old_path (identical content already lives at $new_path)" >&2
@@ -357,8 +213,7 @@ if [ -n "$CFG_HOME" ]; then
           left_reason="identical, safe to delete"
         fi
       else
-        # A REAL conflict — two different files. Never overwritten; a human
-        # decides which one is authoritative.
+        # Real conflict — never overwrite; a human decides.
         cfg_state=left
         left_reason="conflicts with a DIFFERENT file already at the new path"
       fi
@@ -380,11 +235,8 @@ if [ -n "$CFG_HOME" ]; then
   done
 fi
 
-# Emit the document (or the human lines) and leave. Every exit PAST THE ARGUMENT
-# LOOP goes through here, so `--json` has no path that exits without a document —
-# three of them used to. Exit 64 is the stated exception: a usage error is
-# reported on stderr and carries no document, because the arguments that would
-# say what to report are the thing that is wrong.
+# Every exit past the argument loop goes through here. Exit 64 (usage) is the
+# exception: no JSON document.
 finish() {
   if [ "$JSON" = 1 ]; then
     printf '{"schema":"install-wtft@1","mode":"%s","dir":"%s","status":"%s","onPath":%s,"artifacts":[%s],"shadow":%s,"configMigration":[%s]}\n' \
@@ -396,10 +248,7 @@ finish() {
       drift)        echo "❌ install-wtft: $DEST_DIR does not match $SRC_DIR" >&2
                     printf '%s' "${STATE_LINES:-}" >&2
                     echo "   Run: $(self_path)" >&2
-                    # A shadow found alongside drift is still worth saying. It
-                    # loses the EXIT CODE to drift (fixing the bytes comes
-                    # first), not the report — otherwise a human needs two runs
-                    # to learn about two problems.
+                    # Report a coexisting shadow even when drift wins the exit code.
                     [ "${SHADOW_JSON:-null}" = null ] || printf '   Also: PATH resolves wtft to %s — rm %s\n' "$WINNER" "$(sh_squote "$WINNER")" >&2 ;;
       config-left)  if [ "$MODE" = check ]; then
                       echo "⚠️  install-wtft: $DEST_DIR is in sync, but a config file is still at the old path (#156):" >&2
@@ -407,42 +256,20 @@ finish() {
                       echo "⚠️  install-wtft: installed into $DEST_DIR, but a config file is still at the old path (#156):" >&2
                     fi
                     printf '%s' "${CONFIG_LEFT_LINES:-}" >&2
-                    # In install mode this means EITHER the move was DECLINED
-                    # (a DIFFERENT file already sat at the new path — this
-                    # script never overwrites a real conflict, so a human
-                    # resolves which one is authoritative and removes the
-                    # other by hand), OR the copy itself failed partway (see
-                    # the "could not move" stderr line above, if this run
-                    # printed one). A copy that succeeded but could not
-                    # remove the OLD file is reported as "moved", not this —
-                    # each leftover line below says whether it is a real
-                    # conflict or just an identical stale copy safe to
-                    # delete. In --check mode it may also mean install has
-                    # simply not run yet: re-running it attempts the move.
                     if [ "$MODE" = check ]; then echo "   Run: $(self_path)" >&2
                     else echo "   Move it by hand, or delete whichever copy is stale." >&2
                     fi
-                    # A coexisting shadow is still worth saying, the same
-                    # reason the drift) case above does it: config-left wins
-                    # the EXIT CODE (fixing config location comes first), not
-                    # the report — otherwise a human needs two runs to learn
-                    # about two unrelated problems (#156 review, round 3).
+                    # Report a coexisting shadow even when config-left wins the exit code.
                     [ "${SHADOW_JSON:-null}" = null ] || printf '   Also: PATH resolves wtft to %s — rm %s\n' "$WINNER" "$(sh_squote "$WINNER")" >&2 ;;
       shadowed)     if [ "$MODE" = check ]; then
                       echo "⚠️  install-wtft: $DEST_DIR is in sync, but PATH resolves wtft to $WINNER" >&2
                     else
                       echo "⚠️  install-wtft: installed into $DEST_DIR, but PATH resolves wtft to $WINNER" >&2
                     fi
-                    # printf, not echo: the shell-quoting idiom this used
-                    # emitted rm '"<path>"' — double quotes INSIDE the single
-                    # ones — so the printed command failed on the path it named.
-                    # Only the JSON field had been fixed.
                     printf '   Run: rm %s\n' "$(sh_squote "$WINNER")" >&2 ;;
       ok)           if [ "$MODE" = check ]; then echo "✅ install-wtft: $DEST_DIR is in sync with $SRC_DIR"
                     else echo "✅ install-wtft: installed into $DEST_DIR"; fi
-                    # Not an error: a directory that is not on PATH is a
-                    # host-wiring fact. But saying nothing let a green run hide
-                    # a command nobody can type.
+                    # Not an error, but say so — a green run must not hide an unusable PATH.
                     [ "${ON_PATH:-false}" = true ] || echo "   Note: no wtft on PATH resolves to $DEST_DIR/wtft — add $DEST_DIR to PATH." ;;
     esac
   fi
@@ -450,10 +277,8 @@ finish() {
 }
 
 # ---
-# Build first in install mode. --check never builds: it writes nothing, and a
-# doctor that modifies the tree it is diagnosing is not a doctor. Build output
-# goes straight to stderr rather than into a variable, so `--json` cannot
-# swallow the one thing an exit-3 reader needs.
+# Build first in install mode. --check never builds. Build output to stderr
+# so --json cannot swallow an exit-3 reader's only clue.
 # ---
 if [ "$MODE" = install ]; then
   if ! (cd "$REPO" && bun run build >&2); then
@@ -463,40 +288,16 @@ if [ "$MODE" = install ]; then
 fi
 
 # ---
-# Install, then evaluate. Evaluating AFTER the copy means the reported state is
-# what is on disk now, not what the script intended to put there.
-#
-# mkdir lives HERE, in install mode only. It used to run unconditionally during
-# argument handling, which made `--check` create directories — a doctor mode
-# with a write side effect, and the claim "writes nothing" was false in the one
-# place it was stated three times.
+# Install, then evaluate what is on disk. mkdir only in install mode.
 # ---
 if [ "$MODE" = install ] && [ "$STATUS" != build-failed ]; then
-  # No early finish: it emitted "artifacts":[] against a schema that promises
-  # four records, plus the ${ON_PATH:-false}/${SHADOW_JSON:-null} DEFAULTS, which
-  # a caller reads as measurements. Falling through means every field in the
-  # no-dir document was actually measured.
+  # Fall through on no-dir so every JSON field is measured (not defaulted).
   mkdir -p "$DEST_DIR" 2>/dev/null || { STATUS=no-dir; EXIT=1; }
   for name in "${COPIES[@]}"; do
     src="$SRC_DIR/$name"; dst="$DEST_DIR/$name"
     [ -f "$src" ] || continue
-    # WRITE BESIDE, THEN RENAME OVER. `cp -f` writes THROUGH a destination
-    # symlink, so an existing `<dir>/wtft.mjs` pointing anywhere else had that
-    # file overwritten with the bundle and chmod'ed 0755 — verified on a
-    # throwaway file, which came back holding our shebang. It also blocks
-    # forever on a FIFO. `mv` replaces the entry itself, follows nothing, and
-    # makes the swap atomic, which matters when the command being replaced may
-    # be running.
-    #
-    # A write failure is still only a stderr line: STATUS stays `drift` and the
-    # printed remedy is "run this again", which for a permissions problem is the
-    # wrong advice. Fixing that properly needs a write-failure state in the
-    # schema, which is more than this branch should change.
-    # `mktemp` in the destination directory, not a predictable "$dst.$$": the
-    # predictable name is a window in which anyone who can write that directory
-    # replaces it with a symlink, and `cp -f` then follows it — the same defect
-    # as the destination symlink above, one step earlier. mktemp creates with
-    # O_EXCL, so there is no name to pre-empt.
+    # Stage then mv: cp -f follows a destination symlink / blocks on a FIFO.
+    # mktemp (O_EXCL), not a predictable "$dst.$$".
     stage="$(mktemp "$DEST_DIR/.install-wtft.XXXXXX" 2>/dev/null)" || stage=""
     if [ -n "$stage" ] && cp -f "$src" "$stage" 2>/dev/null && chmod 0755 "$stage" 2>/dev/null && mv -f "$stage" "$dst" 2>/dev/null; then
       :
@@ -507,11 +308,9 @@ if [ "$MODE" = install ] && [ "$STATUS" != build-failed ]; then
   done
   for entry in "${LINKS[@]}"; do
     link="$DEST_DIR/${entry%%:*}"; target="${entry##*:}"
-    # The same source guard the copy loop has. Without it, a tree with no build
-    # still got its command names written — as DANGLING symlinks, so `wtft`
-    # existed and exited 127 with "no such file or directory".
+    # Same source guard as the copy loop — no dangling command names.
     [ -f "$SRC_DIR/$target" ] || continue
-    # Relative target, so the whole directory can be moved or copied.
+    # Relative target so the directory can be moved or copied.
     ln -sfn "$target" "$link" 2>/dev/null || echo "install-wtft: cannot link $link" >&2
   done
 fi
@@ -541,26 +340,17 @@ for spec in "${EVAL_LIST[@]}"; do
   case "$state:$STATUS" in ok:*|*:build-failed|*:no-dir) ;; *) STATUS=drift ;; esac
   [ -z "$STATE_JSON" ] || STATE_JSON="$STATE_JSON,"
   STATE_JSON="$STATE_JSON{\"name\":\"$(json_str "$name")\",\"path\":\"$(json_str "$dst")\",\"state\":\"$state\"}"
-  # Built alongside the JSON rather than parsed back out of it. The previous
-  # version piped STATE_JSON through `tr ',' '\n'`, which splits each record
-  # across three lines so name and state never share one — the sed matched
-  # nothing and the human drift report named no artifact at all.
+  # Built alongside JSON (do not re-parse STATE_JSON for the human lines).
   STATE_LINES="$STATE_LINES   $name: $state
 "
 done
 [ "$STATUS" = drift ] && EXIT=1
 
-# A config file left at the old path (#156) only becomes the reported status
-# when nothing worse is true — build-failed/no-dir/drift on the BIN artifacts
-# outrank it, the same precedence drift already holds over shadow below: the
-# wrong bytes, wherever they are, come first.
+# config-left only when nothing worse (build-failed/no-dir/drift outrank it).
 [ "$STATUS" = ok ] && [ "$CONFIG_LEFT" = 1 ] && { STATUS=config-left; EXIT=4; }
 
 # ---
-# Shadow: whichever `wtft` PATH actually resolves. `onPath` is reported but
-# never fatal — a dir that is not on PATH is a host-wiring fact, not drift.
-# Drift (and a left-behind config file) outrank shadow: the wrong bytes, or
-# the wrong config location, are still wrong.
+# Shadow: PATH's wtft. onPath is reported, never fatal. Drift/config-left outrank it.
 # ---
 SHADOW_JSON=null
 ON_PATH=false

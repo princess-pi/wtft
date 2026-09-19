@@ -3,52 +3,15 @@
  * @package @princess-pi/wtft
  * @test wtft-35-explicit-session-skips-discovery
  * @description An explicit `-s <existing session>` must not scan the session
- *   corpus (#35).
+ *   corpus (#35). An existing-file `-s` short-circuits BEFORE any discovery
+ *   call, so corpus size cannot matter.
  *
- *   `bin/wtft.ts` called `discoverSessions()` unconditionally, before it looked
- *   at `-s`. Its (legacy, unscoped) result is read in exactly one branch today
- *   — the fuzzy-substring fallback — which is never reached once `-s` resolves
- *   to an existing file or a pending path. (Before #89 the same call also fed
- *   the no-`-s` auto-select menu; that branch now calls a separately-scoped,
- *   separately-memoised discovery instead — see `getDefaultScoped` in
- *   `bin/wtft.ts` — so it no longer shares this guard's cost story, and this
- *   suite is only ever about the `-s` path.) So the scan was paid for and
- *   thrown away.
+ *   Cost IS the behaviour under test: "did not read the corpus" has no other
+ *   user-visible effect on this path. The assertion is a RATIO against the
+ *   same command in the same run with an empty corpus, never a wall-clock
+ *   threshold. The gate is 2x; expected ratio is about 1x.
  *
- *   It is not a cheap scan. Discovery asks each transcript where it lives —
- *   at the time this guard was written, a transcript whose recorded `cwd` no
- *   longer existed fell through to `resolveCwdHistory`, a documented
- *   WHOLE-FILE read budgeted for "3 transcripts in 40"; the workflow deletes
- *   a worktree after every merge (`pr-cleanup`), which strands every session
- *   that lived there permanently, so the measured hit rate on the
- *   development host was 34 in 40 — 2,622 of 3,073 transcripts, 760 MB
- *   re-read on every invocation, 3,215-4,528 ms against 86 ms with an empty
- *   corpus. It degraded monotonically with every branch merged.
- *
- *   `resolveCwdHistory` (and `pickLiveCwd`, `pathExists`) NO LONGER EXIST —
- *   #89 deleted that arm (corrected pr-review round 3: an earlier draft of
- *   this docstring still named it as live). The fixture below (a 6,000-file
- *   stranded corpus) still exercises the guard this suite is actually
- *   about — that an existing-file `-s` short-circuits BEFORE any discovery
- *   call at all, so the corpus size cannot matter — the historical numbers
- *   above explain why that guard was worth writing, not what today's code
- *   still does when discovery does run (that cost is the bounded tail-read
- *   arm `extensions/lib/harness/session-cwd.ts` documents, not a whole-file
- *   fallback).
- *
- *   WHY THIS ONE IS TIMED, WHEN THE HOUSE RULE IS TO WAIT ON STATE. Cost IS the
- *   behaviour under test: "did not read the corpus" has no other user-visible
- *   effect on this path. Three cheaper probes were tried against the real CLI and
- *   all three are invisible from outside — a FIFO is skipped by the `!isFile()`
- *   guard in `resolveCwdHistory`, a `chmod 000` project dir is swallowed, and a
- *   corpus of unparseable transcripts renders identically. So the assertion is a
- *   RATIO against the same command in the same run with an empty corpus, never a
- *   wall-clock threshold: a threshold would encode "fast enough on this box
- *   today", while the ratio cancels box speed, load, and cold cache. The gate is
- *   2x; since an explicit existing path skips discovery entirely, the expected
- *   ratio is about 1x.
- *
- *   Part 2 is the guard against fixing this by deleting the feature: on the fuzzy
+ *   Part 2 guards against fixing this by deleting the feature: on the fuzzy
  *   path discovery MUST still run, and its count must still reach the user.
  */
 
@@ -130,8 +93,7 @@ const run = (args: string, env: NodeJS.ProcessEnv, timeout = 30_000) => {
 
 /** Median of three, so one scheduler hiccup cannot decide the verdict.
  *
- *  Every run's exit code is checked, not just its duration (PR review). A ratio
- *  says nothing on its own: if a regression made `-s` fail fast under BOTH
+ *  A duration ratio says nothing on its own: if a regression made `-s` fail fast under BOTH
  *  corpora, both medians would be small and roughly equal, `ratio < 2` would
  *  hold, and this suite would certify the very contract it exists to protect
  *  while the command underneath was broken. `ok` is what stops a fast failure

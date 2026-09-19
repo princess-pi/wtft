@@ -12,30 +12,9 @@
  *   repair whose length is proportional to the session's subagent volume is the
  *   cost that read-then-render exists to avoid.
  *
- *   WHY AN EXIT CODE AND NOT A JSON FIELD. The issue asks for "a `provisional:
- *   true` in the structured output". When this suite was written there was no
- *   structured output at all: `wtft` shipped no `--json`, no `--porcelain`, and
- *   no documented exit-code table, so every number it produced was prose.
- *   Building that surface was filed separately and has since shipped as #26 —
- *   `wtft --json` now carries `provisional` as a field, and the exit code
- *   asserted below was NOT retired by it. Both report the same verdict, which
- *   is what tests/wtft-26-json.test.ts §4 pins. An exit code remains the
- *   minimal faithful reading of Agent-First Output: machine-readable in zero
- *   reasoning steps, costs a consumer no tokens at all, and matches the idiom
- *   this repo already uses in `pr-review` (7/8/9).
- *
- *   SAFE TO ADD — and the check that said so was WRONG, which is the part worth
- *   keeping. #511 justified the new code with "nothing in this repo invokes the
- *   `wtft` CLI and inspects `$?`", grepping `bin/`, `hooks/`, `statusline/` and
- *   `skills/`. Three of those four directories do not exist in this repo, and
- *   the one place that did inspect `$?` — `tests/` — was not grepped.
- *   `tests/wtft-auto-fit.test.ts` then failed on exit 9, on `main`,
- *   intermittently; `tests/wtft-513-exit9-caller-guard.test.ts` is the guard
- *   that came out of it. The CLI returns 0, 1, 9 and 130 (the selector's
- *   Ctrl-C), all four documented in `docs/manifests/wtft-cmd.json` since #26.
- *
- *   A HUMAN LINE TOO, because the exit code is invisible to the person reading
- *   the widget, and they are the one who can decide to re-run.
+ *   Exit code 9 and `wtft --json`'s `provisional` field both report the same
+ *   verdict (tests/wtft-26-json.test.ts §4). A human stderr line too, because
+ *   the exit code is invisible to the person reading the widget.
  *
  *   Closer: a populated tag with no `_meta.swept` exits 9; the same tag carrying
  *   the marker exits 0.
@@ -156,7 +135,8 @@ console.log("──────────────────────�
 }
 
 // --- The remedy must never advise -F ---------------------------------------
-// PR review, Medium/contract. `-F` does NOT return early: it deletes the tag,
+// `-F` does NOT return early: it deletes the tag,
+
 // kills the daemon, and falls through to this same read path, so a forced run
 // can reach the provisional branch too — and "use -F to force a full re-parse"
 // is then a loop, told to the person who just did it, about the run that is

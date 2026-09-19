@@ -56,7 +56,8 @@ try {
 	writeAgentFile(path.join(subagentsDir, "workflows", "wf_35102db9-a86", "agent-wf2.jsonl"), 0.25);
 	writeAgentFile(path.join(subagentsDir, "workflows", "wf_6296aeb7-4c5", "agent-wf3.jsonl"), 0.75);
 
-	// Round 6: discovery returns { files, unreadable }.
+	// discovery returns { files, unreadable }.
+
 	const { files: found } = discoverSubagentSessionFiles(parentFile);
 	const names = found.map(f => path.basename(f)).sort();
 

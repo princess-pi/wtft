@@ -136,7 +136,7 @@ describe("resolveTieredRates with dateTiers", () => {
 	// known date. `openEnded`'s window does not close until 2099, so an
 	// implementation that reads the clock resolves INSIDE it and returns 2.00.
 	//
-	// Honest about the expiry rather than claiming immunity (pr-review round 3):
+	// Honest about the expiry rather than claiming immunity:
 	// this fixture is date-dependent too — it just expires in 2099 instead of six
 	// days, and the canary below is the difference that matters. When 2099 does
 	// arrive the canary fails FIRST, against correct code, with a name saying what

@@ -68,7 +68,8 @@ try {
 		"",
 	].join("\n"));
 
-	// Round 6: discovery returns { files, unreadable }; the readable files are
+	// discovery returns { files, unreadable }; the readable files are
+
 	// what the walk contract is about, and no fixture here is unreadable.
 	const { files: discovered } = discoverSubagentSessionFiles(parentFile);
 	console.log(`  Discovered: ${discovered.length} subagent files`);

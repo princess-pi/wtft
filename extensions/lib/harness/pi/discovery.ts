@@ -1,30 +1,21 @@
 /**
- * @package princess-pi-tools
+ * @package @princess-pi/wtft
  * @module harness/pi/discovery
- * @description Where Pi keeps its session logs (#156).
+ * @description Where Pi keeps its session logs.
  *
  * Layout: ~/.pi/agent/sessions/<--slug-->/<timestamp>_<uuid>.jsonl, where the
  * directory name is the cwd slug wrapped in `--`. The single-directory scopes
  * compare exactly after unwrapping; `"worktrees"` and the unscoped default
  * match by containment.
  *
- * The union half of the #156 rule is wired in but mostly inert today: Pi records
- * `cwd` once, on its session_start entry, so a tail scan finds a DIFFERENT cwd
- * than the one the transcript is physically filed under only in the rare case
- * where the session moved directories after that entry — the ordinary case
- * (never moved) makes the union arm redundant with the physical-slug arm, not
- * a null read. (`resolveLastCwd`'s own widening tail read DOES reach
- * session_start and return its cwd for any transcript under ~512 KB, the last
- * `TAIL_WINDOWS` step in `session-cwd.ts` — it is not literally "always null".)
- * That is correct rather than a gap — Pi's directory slug already encodes the
- * start cwd and Pi has no worktree switch that rewrites it. The day Pi records
- * per-entry cwd, this arm starts catching an in-session move with no code change.
+ * The union arm is wired in but mostly inert today: Pi records `cwd` once, on
+ * its session_start entry, so a tail scan finds a DIFFERENT cwd than the one
+ * the transcript is physically filed under only when the session moved
+ * directories after that entry. Pi's directory slug already encodes the start
+ * cwd. The day Pi records per-entry cwd, this arm starts catching an
+ * in-session move with no code change.
  *
- * #144 applies here only as the slug *union*: Pi's session dirs on this machine
- * contain no dot-derived name, so Pi's own munging is unverified in exactly the
- * same way Claude Code's was. Accepting either encoding is additive under
- * containment matching and is right whichever way Pi actually behaves;
- * replacing Pi's encoder outright is the road not taken.
+ * Slug matching accepts either encoding under containment matching.
  */
 
 import * as fs from "node:fs";
@@ -91,8 +82,7 @@ function upsertCandidate(into: Map<string, SessionCandidate>, candidate: Session
 	if (!existing || candidate.timestamp > existing.timestamp) into.set(id, candidate);
 }
 
-/** The pre-#89 default, preserved exactly for every caller omitting `scopeOpts`
- *  (see the `discover` docstring in `../types.ts`). */
+/** Legacy default for every caller omitting `scopeOpts` (see `discover` in `../types.ts`). */
 function discoverLegacy(root: string, target: string | null): SessionCandidate[] {
 	const targetSlugs = target ? cwdSlugVariants(target) : null;
 
@@ -122,13 +112,7 @@ function discoverLegacy(root: string, target: string | null): SessionCandidate[]
 	return [...bySessionId.values()];
 }
 
-/** The #89 scoped path — see `DiscoveryScope`'s docstring in `../types.ts`.
- *  Pi's union arm is present here too (S2), though mostly inert: Pi records
- *  `cwd` once, on session_start, so a tail scan resolves a different value
- *  only for a session that moved after that entry (this module's header) —
- *  kept wired in so the day
- *  Pi records per-entry `cwd` this scope starts working with no further
- *  change, exactly the existing #156 rationale. */
+/** Scoped path — see `DiscoveryScope` in `../types.ts`. */
 function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions): SessionCandidate[] {
 	const { scope, windowMs } = opts;
 	const now = Date.now();
@@ -176,28 +160,12 @@ function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions
 	const targetSlugs = new Set<string>();
 	for (const dir of targetDirs) for (const variant of cwdSlugVariants(dir)) targetSlugs.add(variant);
 
-	// "worktree" and "branch" name exactly one directory each (S1/S4): an
-	// EXACT match is the single-directory equivalent of Claude Code's
-	// `targetSlugs.has(slug)` Set membership. Containment (`slug.includes`)
-	// only belongs to "worktrees", where it is load-bearing: it is what lets
-	// one target slug (the main clone's) also match a sibling in-tree
-	// worktree's slug, `<mainSlug>--claude-worktrees-<branch>--`, with no
-	// directory listing of the worktree itself. Using containment for
-	// "worktree"/"branch" too over-matched any sibling project sharing a name
-	// prefix, and every in-tree worktree's own sessions, into what is supposed
-	// to be a single-directory scope (pr-review round 1, Medium).
-	//
-	// EXACT means "normalize both sides and compare", NOT "reconstruct the
-	// literal wrapped string" (pr-review round 2, High: the first cut compared
-	// `slug === "--" + variant + "--"`, but `variant` — from `cwdSlugVariants`
-	// — already carries its own leading dash from the target's leading `/`,
-	// so that built `---home-…--` (three leading dashes), which no real Pi
-	// directory has; `buildDisplayPath`'s OWN Pi-branch strip
-	// (`@princess-pi/libs/session-path-shortener`: `.replace(/^--/, "")
-	// .replace(/--$/, "")`) is the one place this module's real wrapping
-	// convention is independently evidenced, so this matches against THAT
-	// rather than re-deriving the wrap from `cwdSlugVariants` a second,
-	// disagreeing way).
+	// "worktree"/"branch": exact match after unwrapping. Containment only for
+	// "worktrees", where one target slug must also match a sibling in-tree
+	// worktree's slug. Exact means normalize both sides — `cwdSlugVariants`
+	// already carries a leading dash from `/`, so reconstructing `"--" +
+	// variant + "--"` would build three leading dashes. Strip the wrap the
+	// same way `buildDisplayPath` does.
 	const stripPiWrap = (s: string): string => s.replace(/^--/, "").replace(/--$/, "");
 	const matchesTarget = (slug: string, variant: string): boolean =>
 		scope === "worktrees" ? slug.includes(variant) : stripPiWrap(slug) === variant.replace(/^-/, "");
@@ -205,10 +173,8 @@ function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions
 	for (const slug of projectDirs) {
 		const physicalMatch = [...targetSlugs].some(variant => matchesTarget(slug, variant));
 
-		// Same skip Claude Code's discoverScoped applies, and for the same
-		// reason (pr-review, Medium): a non-matching slug under "worktree"/
-		// "branch" cannot contribute, since the union arm that could have
-		// found it anyway never runs for those two scopes.
+		// Non-matching slug under "worktree"/"branch" cannot contribute — the
+		// union arm never runs for those scopes.
 		if (!physicalMatch && !useUnionArm) continue;
 
 		const files: string[] = [];
@@ -242,8 +208,7 @@ export const discovery: HarnessDiscovery = {
 		if (!fs.existsSync(root)) return [];
 
 		if (!scopeOpts) {
-			// Pi's policy differs from Claude's: no explicit target means every Pi
-			// session, not the cwd's. Preserved from the pre-seam selector.
+			// Pi's policy: no explicit target means every Pi session, not the cwd's.
 			const target = targetCwd ? path.resolve(targetCwd) : null;
 			return discoverLegacy(root, target);
 		}

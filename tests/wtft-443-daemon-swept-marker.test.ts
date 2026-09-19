@@ -10,20 +10,14 @@
  *   transcript has been read since the tag was written, which is exactly the
  *   5.7% undercount the issue measures on its specimen.
  *
- *   THE MARKER IS POSITIONAL AND RE-STAMPED, not written once. The first
- *   version was one-shot and that was wrong (macroscopeapp on PR #511, verified
- *   against the daemon): `sweptAtMs` was process-local while the marker persists
- *   in the FILE, and `flushPending()` runs BEFORE `scanForSubAgents()` in the
- *   same poll. So a new parent turn — including one that spawns a subagent —
- *   lands after a marker left by an earlier sweep or an earlier daemon, and a
- *   read in that window reported SETTLED for data no sweep had covered: #443's
- *   own undercount through a narrower window.
- *
- *   So the contract is: the marker must be the LAST significant record, and the
- *   daemon re-stamps whenever the tag grew since the last stamp. It still cannot
- *   ride the existing `_meta.offset` line, because that line is written only by
- *   `flushPending()`, which runs only when new PARENT interactions arrive — on a
- *   FINISHED session, this issue's own case, it never runs again.
+ *   THE MARKER IS POSITIONAL AND RE-STAMPED, not written once.
+ *   `flushPending()` runs BEFORE `scanForSubAgents()` in the same poll, so a
+ *   new parent turn can land after a marker left by an earlier sweep. The
+ *   marker must be the LAST significant record, and the daemon re-stamps
+ *   whenever the tag grew since the last stamp. It still cannot ride the
+ *   existing `_meta.offset` line, because that line is written only by
+ *   `flushPending()`, which runs only when new PARENT interactions arrive —
+ *   on a FINISHED session it never runs again.
  *
  *   WITHHELD ON A RECOVERABLE FAILED POLL. `pollHadFailure` is reset by the poll
  *   loop and set when a source transcript cannot be discovered, read, parsed,
@@ -188,12 +182,10 @@ try {
 	}
 
 	// --- A live session RE-STAMPS; it does not lean on the old marker -------
-	// The end-to-end half of the positional contract, and the fix for
-	// macroscopeapp's finding on PR #511: flushPending() runs BEFORE
-	// scanForSubAgents() in the same poll, so new parent turns land after
-	// whatever marker the tag already holds. A one-shot marker would then
-	// certify data no sweep had covered. The daemon must write a NEW marker
-	// after the new data, and the reader must refuse the old one until it does.
+	// flushPending() runs BEFORE scanForSubAgents() in the same poll, so new
+	// parent turns land after whatever marker the tag already holds. The
+	// daemon must write a NEW marker after the new data, and the reader must
+	// refuse the old one until it does.
 	{
 		const { sessionPath, tagPath } = makeSession("busy", true);
 		startDaemon(sessionPath);

@@ -23,11 +23,6 @@ export interface WatchSettings {
 	timezone?: string;
 	unit?: "cost" | "tokens";
 	daemonPath?: string; // path to wtft-daemon.mjs (CLI watch mode only)
-	/**
-	 * The daemon child this watch just spawned, when it did (#308). Lets the
-	 * tag-file wait ask a fact — "did the process we started exit?" — instead of
-	 * running a clock. Without it the wait falls back to a bounded ceiling.
-	 */
 	daemonChild?: ChildProcess | null;
 	/** Padding spaces on each side of output (default 0 = no padding). */
 	pad?: number;
@@ -37,18 +32,9 @@ export interface WatchSettings {
 	hasMode?: boolean;
 	hasTicks?: boolean;
 	hasTimezone?: boolean;
-	/**
-	 * CLI emoji override (`--no-emoji` / `--emoji`). When set, it wins over the
-	 * session-file `emoji-settings` entry, mirroring the non-watch CLI path
-	 * (#62). Omitted (undefined) keeps the existing session-file behaviour.
-	 */
 	disabledEmoji?: boolean;
 }
 
-// CLASSIFIED TAG FILE READER (#53 — daemon output → Interaction[])
-// The daemon writes pre-classified, pre-costed entries to
-// wtft-tags/<session>.wtft-tag.v{N}.jsonl. These helpers read them back
-// without re-parsing raw harness entries or re-calculating costs.
 
 /**
  * Serialize an Interaction to a classified tag-file line.
@@ -69,47 +55,27 @@ export function serializeClassified(interaction: Interaction): string {
 		f: interaction.files.map(f => ({ p: f.path, a: f.action === "write" ? "w" : "r" })),
 		cmd: interaction.commands,
 	};
-	// Include message.id for cross-run dedup in tag-file consumers (#65)
 	if (interaction.messageId) line.id = interaction.messageId;
-	// Include model/token data when available (for -T summary table)
 	if (interaction.model) line.m = interaction.model;
 	if (interaction.inputTokens > 0) line.in = interaction.inputTokens;
 	if (interaction.outputTokens > 0) line.out = interaction.outputTokens;
 	if (interaction.cacheReadTokens > 0) line.cr = interaction.cacheReadTokens;
 	if (interaction.cacheWriteTokens > 0) line.cw = interaction.cacheWriteTokens;
 	if (interaction.reasoningTokens > 0) line.rs = interaction.reasoningTokens;
-	// Server-side tool requests (per-request billed, #73)
 	if (interaction.serverToolCost) line.sc = Number(interaction.serverToolCost.toFixed(6));
 	if (interaction.webSearchRequests > 0) line.ws = interaction.webSearchRequests;
 	if (interaction.webFetchRequests > 0) line.wf = interaction.webFetchRequests;
-	// Thinking effort level (#77)
 	if (interaction.thinkingLevel) line.tl = interaction.thinkingLevel;
-	// Compaction tokens before this interaction (#90)
 	if (interaction.compactionTokensBefore) line.cb = interaction.compactionTokensBefore;
-	// Tool-implied categories + unrecognized-tool flag (#52)
 	if (interaction.toolCats && interaction.toolCats.length > 0) line.tc = interaction.toolCats;
 	if (interaction.unrecognizedTool) line.ut = 1;
-	// Observed cache TTL class — idle countdown uses data over model-name guess (#95)
 	if (interaction.cacheTtl) line.ttl = interaction.cacheTtl;
-	// Whole prefix re-primed — "Cache Miss" divider (#152). Carried as its own
-	// field because the meter-split below splits cr and cw onto separate lines,
-	// after which cr/cw alone can no longer distinguish a full miss from a
-	// partial re-prime.
 	if (interaction.cacheMiss) line.miss = 1;
-	// Interrupted turn — whole cost is discarded work (#52 Phase 3)
 	if (interaction.interrupted) line.ir = 1;
-	// DeepSeek surge-pricing tag (#119, #128)
 	if (interaction.surgePriced) line.sp = 1;
 	return JSON.stringify(line) + "\n";
 }
 
-/**
- * Convert a single classified tag-file line to an Interaction.
- * The classified format is: {t, c, cat, f: [{p, a}], cmd}
- * cost is already computed by the daemon with current pricing (#54/#55).
- * files/commands are populated so classifyInteraction produces the same
- * category the daemon already computed.
- */
 export function classifiedToInteraction(obj: any): Interaction | null {
 	if (!obj || typeof obj.t !== "number" || typeof obj.c !== "number") return null;
 	return {
@@ -140,41 +106,6 @@ export function classifiedToInteraction(obj: any): Interaction | null {
 	};
 }
 
-/**
- * Read all classified interactions from a tag file, skipping heartbeat lines.
- *
- * @param tagPath - Absolute path to the .wtft-tag.v{N}.jsonl file
- * @returns Array of Interactions (costs already computed by daemon)
- */
-/**
- * Collapse tag-file lines that share a `message.id` down to one interaction,
- * keeping the highest-cost copy (#270 review).
- *
- * The tag file is append-only and the daemon reads its sources incrementally,
- * so one billed message can reach it as more than one line: a harness re-emits
- * an assistant message with growing `usage` as it streams, and any two of those
- * emissions can land in different poll windows, where a within-batch dedup
- * cannot see them together. Measured over the twelve most recent live Claude
- * Code transcripts on this host, 39-76% of message ids carrying `usage` are
- * re-emitted at least once (117 of 293 = 39.9%, 72 of 95 = 75.8%, ...), with
- * the growing-usage form separated by `tool_result` lines and seconds of wall
- * clock — far wider than the 667ms beat. Without this, those lines are summed
- * and every consumer over-reports.
- *
- * This is the consumer half of a contract the wire format already declares:
- * serializeClassified writes `id` specifically "for cross-run dedup in tag-file
- * consumers (#65)", and until now no consumer did it.
- *
- * Max cost, never the sum and never the first — dropping the updated (higher)
- * usage would just trade the overcount for the undercount #270 exists to fix.
- * The compaction/recache meter-split is unaffected: its overhead line carries
- * `<id>#oh`, a distinct id, so the pair survives the collapse.
- *
- * First-appearance order is preserved so this is a pure subtraction — callers
- * that read the tag file in append order (bucket rendering, `limit`) see the
- * same sequence minus the duplicates. Returns the input array unchanged when
- * nothing repeats, which is the common case.
- */
 export function dedupeClassifiedById(interactions: Interaction[]): Interaction[] {
 	const groups = new Map<string, Interaction[]>();
 	// One slot per output position: an interaction with no id goes in directly,
@@ -207,16 +138,6 @@ export function dedupeClassifiedById(interactions: Interaction[]): Interaction[]
 	return out;
 }
 
-/**
- * Why a tag read is provisional. Null when it is settled.
- *
- * "unswept" is the marker verdict (a classified line landed after the sweep,
- * or no sweep ran). "subagent-unreadable" is the CLI/TUI's own verdict for a
- * render-side degrade: a subagent transcripts directory could not be read, so
- * the rendered token table is incomplete even when the tag itself is settled
- * (#457). "stale-version" outranks both — a superseded-semantics tag is
- * provisional whatever the sweep says.
- */
 export type TagProvisionalReason = "stale-version" | "unswept" | "subagent-unreadable";
 
 export interface TagProvisional {
@@ -226,68 +147,6 @@ export interface TagProvisional {
 	reason: TagProvisionalReason | null;
 }
 
-/**
- * Is the total this tag yields still subject to repair by the daemon? (#443)
- *
- * A one-shot `wtft` spawns the daemon and reads the tag immediately afterwards,
- * so the read races the daemon it just started and loses. On the issue's
- * specimen that was $79.74 against a true $84.59 — a 5.7% undercount reported as
- * a plain total, with nothing to distinguish it from a settled one. This is the
- * signal that was missing; the caller decides what to do with it.
- *
- * TWO CONDITIONS, either sufficient, checked in this order because the first
- * outranks the second — a superseded-semantics tag is provisional whatever its
- * sweep state:
- *
- *   `stale-version` — the tag is not at WTFT_TAGGER_VERSION. getTagPath's rule 3
- *     falls back to "any-version tag in the own dir, newest mtime" (#95), so a
- *     read can land on a tag written under superseded pricing or parse semantics
- *     while the daemon builds a current-version one beside it.
- *
- *   `unswept` — a current-version tag holding classified data but no
- *     `_meta.swept`. The daemon appends that marker once its first
- *     scanForSubAgents() has completed, so its absence means NO daemon has read
- *     a single subagent transcript since this tag was written.
- *
- * A tag with no classified data is NOT provisional: it yields no total, so there
- * is nothing to doubt, and bin/wtft.ts already has waits for that case gated on
- * `interactions.length === 0`. Reporting provisional there would fire on every
- * fresh session and train the reader to ignore the flag.
- *
- * NO SCAN WINDOW, and that is a correction worth recording rather than a choice.
- * This first scanned only the last 8KB, justified as "matching
- * readLastMetaOffset". That justification does not survive contact:
- * readLastMetaOffset windows because it does a PARTIAL read — open, seek, read
- * 8KB, never load the file — whereas this function has already read the whole
- * tag into `content` to answer the has-classified-data question above.
- * Windowing content that is already in memory buys no I/O and costs a whole
- * failure mode: a marker buried past 8KB by a busy session would read `unswept`
- * forever. So the scan is the whole file.
- *
- * WHAT THAT COSTS, stated correctly — an earlier version of this comment claimed
- * "on a settled tag the marker is near the end, so the backward walk stops within
- * a few lines", and that is FALSE for the sessions this feature targets (PR
- * review). The daemon writes the marker exactly once, guarded by
- * `if (sweptAtMs === 0)`, right after its FIRST sweep — early in a session's
- * life. Every classified line produced afterwards is appended AFTER it, pushing
- * it further from the end, not closer; the `busy` case in
- * `tests/wtft-443-daemon-swept-marker.test.ts` floods 160 turns and asserts
- * exactly that. So the walk is proportional to how much data accumulated since
- * the first sweep — up to the whole file. It stays cheap in absolute terms only
- * because the `includes('"_meta"')` guard skips `JSON.parse` on the classified
- * lines, which are almost all of them, and because the content is already in
- * memory. Correctness never depended on the marker's position; only this cost
- * note did, and it was wrong.
- *
- * AN UNREADABLE TAG READS AS NOT-PROVISIONAL, which is deliberate and is NOT an
- * "err toward provisional" case — an earlier draft of this comment filed it under
- * that heading and was self-contradictory as a result (PR review). The rule is
- * narrower and has no exceptions: **a read is provisional only when a total was
- * produced that could still change.** An ENOENT/EACCES tag produces no total at
- * all, and `readClassifiedTagFile` will have yielded nothing from it either, so
- * there is nothing for the flag to qualify. Read errors are therefore invisible
- * here by design, not surfaced as doubt.
- */
 export function readTagProvisional(tagPath: string): TagProvisional {
 	let content: string;
 	try {
@@ -300,46 +159,8 @@ export function readTagProvisional(tagPath: string): TagProvisional {
 	return tagProvisionalFromContent(tagPath, content);
 }
 
-/**
- * The BYTE offset at which a file's last content line begins (#130).
- *
- * This function is the whole of #130 in one number. Two writers start here and
- * both MUST start on a line boundary, in BYTES: `upsertHeartbeat` overwrites the
- * stale heartbeat in place at this offset, and `truncatePartialTail` cuts a
- * crashed predecessor's fragment off at it. (The heartbeat used to be truncated
- * and re-appended; round 2 replaced that with the in-place write, but the offset
- * it needs is the same one.) The version
- * this replaces read bytes and then measured the result in a decoded string —
- * `searchOffset + lastLineStart` added a byte offset to a UTF-16 code-unit
- * index — so every multi-byte character ahead of the last line drove the
- * truncate that many bytes INTO the preceding line. The fresh heartbeat was
- * then welded onto the severed half. Measured on this host before the fix: 96
- * of 327 tag files carried 2,562 such lines, 99.7% of them with `→` or `—` in
- * the preceding 2 KiB — our own commit messages, out of the `cmd` arrays.
- *
- * So this never decodes. It searches the raw `Buffer` for `0x0a`, which is safe
- * across a chunk boundary in a way a decoded chunk is not: a UTF-8 continuation
- * byte is always >= 0x80, so 0x0a can never be part of a multi-byte sequence and
- * a chunk cut anywhere still yields the right newline positions. Decoding a
- * chunk in isolation, by contrast, turns a split sequence into U+FFFD and
- * measures text the file does not contain.
- *
- * Scans backwards in chunks because a classified line can be large — a long
- * `cmd` array runs well past any fixed window — and a scan that gave up would
- * return 0, which would have the partial-tail repair truncate the entire file.
- *
- * A trailing `\n` terminates the last line rather than starting an empty one, so
- * it is stepped over. An empty file, and a file that is one unterminated line,
- * both answer 0: a caller writes or truncates at whatever comes back, and -1 or a throw
- * would be a worse answer than "the whole file is the last line".
- */
 export function lastLineStartByte(fd: number, size: number, chunkSize = 512): number {
 	if (size <= 0) return 0;
-	// CHECK THE READ. A short read leaves `one` zero-filled, which reads as "not a
-	// newline", and a zero-filled scan can walk all the way to 0 — where the
-	// caller truncates the ENTIRE file. Latent today (both callers hold the
-	// singleton lease, and an unlink does not shrink an open inode), but the
-	// failure is total and the guard is one comparison.
 	const one = Buffer.alloc(1);
 	if (fs.readSync(fd, one, 0, 1, size - 1) !== 1) {
 		throw new Error(`could not read the last byte of a ${size}-byte tag file — refusing to guess a line boundary`);
@@ -358,19 +179,6 @@ export function lastLineStartByte(fd: number, size: number, chunkSize = 512): nu
 	return 0;
 }
 
-/**
- * The provisional verdict for tag content ALREADY IN HAND (#443, PR review).
- *
- * This exists because `readTagProvisional(path)` and `readClassifiedTagFile(path)`
- * each opened the file themselves, and a caller wanting both did two reads with a
- * gap between them. The daemon is a separate OS process appending to that same
- * file, so it can land the repaired lines AND the `_meta.swept` marker inside the
- * gap — after which the interactions are the stale ones and the verdict says
- * settled. That is #443's silent undercount again, through a narrower window,
- * which is exactly the shape of bug this issue exists to close rather than
- * relocate. `readTagFileWithVerdict` is the one-read entry point; this is the
- * pure half it and `readTagProvisional` share, so the two can never disagree.
- */
 export function tagProvisionalFromContent(tagPath: string, content: string): TagProvisional {
 	// Version first: it needs no content at all, and it outranks the sweep state.
 	if (!path.basename(tagPath).endsWith(`.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`)) {
@@ -380,8 +188,6 @@ export function tagProvisionalFromContent(tagPath: string, content: string): Tag
 
 	const lines = content.split("\n");
 
-	// Does it yield a total at all? A classified line is one that parses and
-	// carries neither _hb nor _meta — the same rule readClassifiedTagFile uses.
 	let hasClassified = false;
 	for (const line of lines) {
 		if (!line.trim()) continue;
@@ -394,39 +200,14 @@ export function tagProvisionalFromContent(tagPath: string, content: string): Tag
 	}
 	if (!hasClassified) return { provisional: false, reason: null };
 
-	// POSITIONAL, not merely present (PR review). Scan backward and stop at the
-	// first significant record: a `_meta.swept` settles the tag, a CLASSIFIED
-	// line invalidates any marker further back.
-	//
-	// Presence alone was wrong. The daemon's `flushPending()` runs BEFORE
-	// `scanForSubAgents()` in the same poll, so a new parent turn — including one
-	// that spawns a new subagent — lands after a marker left by an earlier sweep
-	// or an earlier daemon process. Accepting that historical marker reports
-	// SETTLED for data no sweep has covered: #443's own undercount through a
-	// narrower window. Requiring the marker to be LAST makes "swept" mean "swept
-	// as of everything in this file", which is the only claim a reader can check.
-	//
-	// Heartbeats and `_meta.offset` lines are not significant either way — they
-	// carry no cost — so the walk skips them and keeps looking.
 	for (let i = lines.length - 1; i >= 0; i--) {
 		const line = lines[i];
 		if (!line.trim()) continue;
-		// Cheap reject first: a line with neither marker is still possibly
-		// classified, so only `_hb`/`_meta` candidates and non-JSON reach parse.
 		try {
 			const obj = JSON.parse(line);
 			if (obj._hb) continue;
 			if (obj._meta) {
 				if (typeof obj._meta.unswept === "number") {
-					// Round 10 (macroscope, Medium): the daemon's invalidation
-					// record. A swept marker certifies only what its own poll
-					// read; when a later poll FAILS to read the main session
-					// file (EACCES, EIO), the last marker would otherwise
-					// stand and this scan would report the stale, undercounted
-					// tag as settled. The failure path appends
-					// {"_meta":{"unswept":ts}} once per episode; this branch
-					// is what makes the reader honor it — the tag reads
-					// unswept until a fresh marker covers the recovered lines.
 					return { provisional: true, reason: "unswept" };
 				}
 				if (typeof obj._meta.swept === "number") {
@@ -434,21 +215,12 @@ export function tagProvisionalFromContent(tagPath: string, content: string): Tag
 				}
 				continue; // an offset line, or a marker shape this writer never emits
 			}
-			// A classified line, newer than any marker behind it.
 			return { provisional: true, reason: "unswept" };
 		} catch { continue; }
 	}
 	return { provisional: true, reason: "unswept" };
 }
 
-/**
- * Read a tag file ONCE and derive both the interactions and the provisional
- * verdict from that single buffer (#443, PR review).
- *
- * Any caller that needs both MUST use this rather than calling
- * `readClassifiedTagFile` and `readTagProvisional` in sequence — see
- * `tagProvisionalFromContent` for the race that pairing reopens.
- */
 export function readTagFileWithVerdict(tagPath: string): {
 	interactions: Interaction[];
 	provisional: TagProvisional;
@@ -463,10 +235,6 @@ export function readTagFileWithVerdict(tagPath: string): {
 	};
 }
 
-/** Classified interactions from tag content already in hand. The pure half that
- *  `readClassifiedTagFile` and `readTagFileWithVerdict` share, so a caller that
- *  needs interactions AND the provisional verdict can get both from one read
- *  (#443, PR review). */
 export function classifiedInteractionsFromContent(content: string): Interaction[] {
 	const interactions: Interaction[] = [];
 	for (const line of content.split("\n")) {
@@ -477,11 +245,8 @@ export function classifiedInteractionsFromContent(content: string): Interaction[
 			const interaction = classifiedToInteraction(obj);
 			if (interaction) interactions.push(interaction);
 		} catch {
-			// Skip unparseable lines
 		}
 	}
-	// One billed message can occupy several lines here — collapse before any
-	// caller sums it (#270 review).
 	return dedupeClassifiedById(interactions);
 }
 
@@ -490,90 +255,10 @@ export function readClassifiedTagFile(tagPath: string): Interaction[] {
 	try {
 		content = fs.readFileSync(tagPath, "utf8");
 	} catch {
-		// File may not exist yet
 	}
 	return classifiedInteractionsFromContent(content);
 }
 
-/** Seed a watcher: the interactions in the tag file, and the byte offset that
- *  reading them consumed — both derived from ONE read of the same buffer.
- *
- *  The pattern this replaces was `readClassifiedTagFile(p)` followed by
- *  `lastReadOffset = fs.statSync(p).size`, at three call sites (#130 review
- *  round 2). Two different things go wrong with it, and both lose whole turns
- *  from the live view rather than announcing themselves:
- *
- *   - **The stat sees a file the read did not.** Anything the daemon appends
- *     between the read and the stat is counted into the offset without ever
- *     having been parsed, so the watcher starts past it and those lines are
- *     never read by anyone.
- *   - **A whole-file read can land mid-append.** A large batch is not one
- *     `write(2)`, so `readFileSync` can return the complete lines plus a
- *     partial tail. `classifiedInteractionsFromContent` drops that tail (its
- *     `catch` is load-bearing, not decoration) — but `stat.size` counts it, so
- *     the offset lands inside a line that will be completed a moment later and
- *     then never re-read.
- *
- *  Taking the offset from the buffer we actually parsed removes both by
- *  construction: the offset is the end of the last COMPLETE line in that
- *  buffer, so every byte before it has been read and every byte after it is
- *  still waiting. There is no window for a race to sit in, because there is no
- *  second look at the file. */
-/**
- * A fingerprint of the prefix a reader has already consumed, used to answer one
- * question: is what I consumed STILL what is at that position?
- *
- * WHERE IT SAMPLES, AND WHY NOT AT THE OFFSET (Macroscope, PR #142, third
- * round). The first version sampled the 64 bytes immediately before the
- * reader's offset. The reader's offset sits at EOF, and the LAST line of a tag
- * file is the heartbeat, which `upsertHeartbeat` rewrites in place — same
- * width, same size, new `last` timestamp — every `POLL_MS`. So the window
- * straddled a line that mutates by design: the sentinel mismatched on every
- * beat, and an IDLE watch re-seeded, re-reading and re-parsing the whole file
- * on a beat that had appended nothing.
- *
- * Measured on this host's largest tag file (32.8 MB, 644,312 lines): 585 ms per
- * re-seed against a 667 ms beat — 87.7% of a core, continuously, on a file that
- * gained nothing. The report rated it Medium for growing cost; the measurement
- * puts it a hair from failing to keep up with its own clock.
- *
- * So it anchors at the start of the last COMPLETE line the reader consumed, and
- * samples the bytes BELOW that. The daemon only ever appends whole lines or
- * replaces that final heartbeat in place, so everything below the anchor is
- * immutable — and a truncate-and-rebuild changes it, which is the whole job.
- *
- * WHY (Macroscope, PR #142, Medium). `watchTagFile` re-seeded only when the file
- * SHRANK below its offset. A daemon that truncates and rebuilds before the
- * `fs.watch` callback runs — one coalesced event, which is the normal case —
- * leaves the final size at or ABOVE the stale offset, so the shrink branch never
- * fires. Measured on a 3-record file rebuilt to 5: the reader kept `orig-1..3`
- * (records from a file that no longer exists), read from the stale offset into
- * the MIDDLE of a line, dropped the fragment, and silently lost `rebuilt-1..3`.
- * Both directions wrong at once — stale records retained, real records lost.
- *
- * A generation check cannot do this job: truncate-and-rewrite keeps the same
- * inode, so `stat.ino` is unchanged. The content at the boundary is the only
- * thing that actually distinguishes the two files.
- *
- * `null` means "could not read". The caller RE-SEEDS on it rather than idling
- * (Macroscope, PR #142, second round — a deadlock this fix introduced). Idling
- * looked like the conservative choice and was the opposite: `prefixSentinel` is
- * only refreshed where the offset moves, and the offset only moves on the
- * `read` branch, which is unreachable while the comparison is `null`. One failed
- * read therefore froze the watch permanently, with no error and no recovery
- * short of a restart.
- *
- * Re-seeding is the genuinely conservative answer: a whole-file re-read is
- * always CORRECT, merely more expensive, and it refreshes the sentinel on the
- * way through. The report proposed treating an unreadable sentinel as MATCHING
- * so growth processing continues — that removes the deadlock by re-opening the
- * stale-offset bug this whole mechanism exists to close, so it is fixed for the
- * verified reason instead. A file that cannot be read at all still costs
- * nothing: `seedClassifiedTagFile` reports `read: false` and the caller commits
- * nothing, which is a retry, not a freeze.
- *
- * An offset of 0 has no prefix, so the sentinel is empty and always matches.
- */
 export const PREFIX_SENTINEL_BYTES = 64;
 
 export interface PrefixSentinel {
@@ -635,10 +320,7 @@ export function watcherAction(
 	lastReadOffset: number,
 	prefixMatches: boolean | null,
 ): WatcherAction {
-	// Shrank below the offset: the bytes are provably gone.
 	if (size < lastReadOffset) return "reseed";
-	// Same size or larger, but the prefix we consumed is no longer there — a
-	// rebuild that happened to land at or above where we were.
 	if (prefixMatches === false) return "reseed";
 	// "Could not read" re-seeds. Idling here deadlocks the watch — see above.
 	if (prefixMatches === null) return "reseed";
@@ -651,18 +333,8 @@ export function seedClassifiedTagFile(tagPath: string): { interactions: Interact
 	try {
 		buf = fs.readFileSync(tagPath);
 	} catch {
-		// ABSENT AND UNREADABLE ARE DIFFERENT, and the caller has to be able to
-		// tell them apart (#130 local audit round). A missing tag legitimately
-		// seeds empty — the daemon has not written it yet. An EMFILE, EACCES or
-		// EIO does NOT mean the session costs nothing, and a caller that treats
-		// the two alike replaces a correct chart with an empty one on a transient
-		// failure. `read: false` says "I have no information", which is not the
-		// same claim as "there is nothing".
 		return { interactions: [], offset: 0, read: false };
 	}
-	// Byte search, never a string index: `lastIndexOf` on a Buffer counts bytes,
-	// and 0x0a can never be a UTF-8 continuation byte, so this is exact for any
-	// content. (Doing it on the decoded string is the #130 defect itself.)
 	const offset = buf.lastIndexOf(0x0a) + 1;   // -1 -> 0: no complete line yet
 	return {
 		interactions: classifiedInteractionsFromContent(buf.subarray(0, offset).toString("utf8")),
@@ -671,67 +343,10 @@ export function seedClassifiedTagFile(tagPath: string): { interactions: Interact
 	};
 }
 
-// INOTIFY-BASED WATCH MODE (#53)
-// Watches the daemon's classified tag file via fs.watch. Auto-spawned by CLI.
-// tag file. Auto-spawn of the daemon happens in the CLI entry point (bin/wtft.ts).
 
-/**
- * Watch a classified tag file via inotify (fs.watch) and re-render the bar
- * chart in real time on every write.
- *
- * WHAT THE DAEMON ACTUALLY GUARANTEES (#130). The honest list is shorter than
- * the one that used to sit here, and the difference is why this watcher carries
- * partial-line handling:
- *
- *   - **Every COMPLETED write leaves the file a whole number of lines.**
- *     Every APPEND is enforced in one place, `appendTagFile`, rather than
- *     re-derived per reader. The other three mutation sites each carry their own
- *     argument — `upsertHeartbeat`'s same-width `writeSync`, `truncatePartialTail`'s
- *     cut to a `lastLineStartByte` offset, and `initClassified`'s truncate to
- *     zero — which is why the suite needs S2, S3 and S4 beside S1.
- *     A crash mid-append is repaired by the next daemon at startup.
- *   - **`fs.watch` reports BYTES, not lines.** inotify fires on the write, and a
- *     large batch is not one `write(2)`. A reader woken mid-batch sees complete
- *     lines plus a partial tail — so this watcher consumes only up to the last
- *     newline and carries the remainder to the next event. That is not
- *     defensive decoration; without it, the split line is skipped and its turn
- *     never appears.
- *   - **The beat is not a write budget.** 667ms bounds how often a poll comes
- *     ROUND, not how many writes it makes: one poll can append a batch of many
- *     lines. The old claim "writes at most every 667ms" read as a rate limit and
- *     was never true of the byte stream.
- *
- * A WRITE never shrinks the file — the idle heartbeat is replaced in place at a
- * fixed width rather than cut and re-appended — but a daemon STARTUP can, and
- * does: `initClassified` truncates the tag to zero to rebuild it. So an
- * offset-tracking reader must handle the file getting shorter, and this one does
- * (the `stat.size < lastReadOffset` branch re-seeds). Do not read "replaced in
- * place" as "the offset is always valid"; it means the BEAT cannot invalidate
- * it.
- *
- * @param sessionPath - Path to the session.jsonl (shown in title)
- * @param tagPath - Path to the daemon's classified tag file
- * @param settings - Display settings (interval, limit, width, etc.)
- */
-
-// The version and its bump changelog live in wtft-tagger-version.ts — a leaf
-// module, so tag readers that avoid daemon internals import it from there.
-// Re-exported here for the existing importers (#499).
 export { WTFT_TAGGER_VERSION } from "./wtft-tagger-version.js";
 import { WTFT_TAGGER_VERSION } from "./wtft-tagger-version.js";
 
-/**
- * Serialize one interaction to its classified tag-file line(s) (#52 Phase 3).
- * When a compaction/recache meter-split applies, emits TWO lines: the main
- * line with the work remainder (cache-write tokens zeroed) and an overhead
- * line ("<messageId>#oh") carrying the cache_write $ component under
- * "compaction"/"overhead". Message-id dedup treats "#oh" as distinct, and
- * both lines share a timestamp, so renderers need no changes — the split
- * stacks naturally in the same bucket.
- *
- * @param prevCtxTokens input+cacheRead+cacheWrite of the previous
- *   non-sidechain deduped interaction (recache signature input)
- */
 export function serializeClassifiedWithOverheadSplit(interaction: Interaction, prevCtxTokens: number): string {
 	const split = splitOverheadCost(interaction, prevCtxTokens);
 	if (!split) return serializeClassified(interaction);
@@ -759,48 +374,16 @@ export function serializeClassifiedWithOverheadSplit(interaction: Interaction, p
 	return serializeClassified(remainder) + serializeClassified(overheadLine);
 }
 
-/**
- * True when a transcript basename carries a session UUID — the shape every real
- * harness session has: `<uuid>.jsonl` (Claude Code) or `<timestamp>_<uuid>.jsonl`
- * (Pi).
- *
- * This is the gate on both cross-directory behaviours below (#157). Both were
- * introduced by #155 keyed on the basename alone, which is only a safe identity
- * when the basename is globally unique. It is not: an arbitrary path handed to
- * `-s`, or a fixture named `session.jsonl`, collides with every other file of
- * the same name in a different directory. Two unrelated sessions then shared a
- * daemon lease, and a tag lookup wandered into unrelated directories.
- *
- * Anything without a UUID keeps the pre-#155 path-keyed behaviour, which is
- * strictly safer and loses nothing: only real harness sessions move between
- * project dirs, and those always carry a UUID.
- */
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 export function isSessionIdBasename(sessionPath: string): boolean {
 	return UUID_RE.test(path.basename(sessionPath));
 }
 
-/**
- * Current-version tag file for this transcript basename in a *sibling* project
- * dir (#155). A session that moves — worktree enter/exit, or any switch that
- * changes its project dir — leaves its daemon writing to the tag path it opened
- * at startup, because `--watch` binds fs.watch once and never re-resolves. So
- * the tag file can legitimately live beside a different copy of the project dir
- * than the transcript does.
- *
- * Only the current-version filename is matched: stale-version tags elsewhere
- * are derived caches that a version bump is meant to regenerate. Basenames are
- * session UUIDs, so a cross-dir match cannot collide.
- */
 function findSiblingTagPath(sessionPath: string): string | null {
-	// Only real session transcripts move between project dirs (#157). Without
-	// this gate the scan below walks the grandparent of ANY path — for
-	// /tmp/<fixture>/session.jsonl that grandparent is /tmp itself.
 	if (!isSessionIdBasename(sessionPath)) return null;
 	const sessionBase = path.basename(sessionPath);
 	const wanted = sessionBase + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`;
-	// The project-dir parent: …/<projects-root>/<project-slug>/<session>.jsonl
 	const projectsRoot = path.dirname(path.dirname(sessionPath));
 	let best: { path: string; mtimeMs: number } | null = null;
 	try {
@@ -816,19 +399,6 @@ function findSiblingTagPath(sessionPath: string): string | null {
 	return best ? best.path : null;
 }
 
-/**
- * Where this session's tag file is, resolved in this order:
- *   1. current-version tag in the session's own dir;
- *   2. current-version tag in a sibling project dir (the moved-session case);
- *   3. any-version tag in the own dir, newest mtime — never readdir order,
- *      which made multi-version dirs a coin flip (#95);
- *   4. the default (current-version path in the own dir).
- *
- * Sibling outranks stale-own-dir deliberately: #155 measured a stale v2.6.1
- * 125-line tag in the main clone while the fuller v2.7.0 356-line tag sat in
- * the worktree's project dir. The more complete artifact should win rather than
- * be stranded.
- */
 export function getTagPath(sessionPath: string): string {
 	const sessionDir = path.dirname(sessionPath);
 	const sessionBase = path.basename(sessionPath);
@@ -856,14 +426,6 @@ export function getTagPath(sessionPath: string): string {
 	return defaultPath;                                                      // (4)
 }
 
-/**
- * The current-version tag path a *writer* should open — own dir if it already
- * holds one, else a sibling project dir's (#155), else the own-dir default.
- *
- * Never returns a stale-version filename, unlike getTagPath()'s reader
- * fallback: the daemon owns the version protocol, and writing into an old
- * version's file is exactly what the version bump exists to stop (#95).
- */
 export function getCurrentVersionTagPath(sessionPath: string): string {
 	const sessionBase = path.basename(sessionPath);
 	const own = path.join(
@@ -875,31 +437,12 @@ export function getCurrentVersionTagPath(sessionPath: string): string {
 	return findSiblingTagPath(sessionPath) || own;
 }
 
-/**
- * Singleton key for a session's daemon.
- *
- * Keyed on the transcript *basename*, not the full path (#155). A worktree
- * switch moves the transcript between project dirs; a path-keyed hash would
- * change under it, so a `wtft` run from the new directory would not recognise
- * the still-live daemon and would spawn a second one on the same transcript.
- * The basename is a session UUID (Claude Code) or `<timestamp>_<uuid>` (Pi) —
- * unique per session and invariant under a move.
- */
 export function getDaemonPidPath(sessionPath: string): string {
-	// Key on the basename only when it is a session UUID — unique across every
-	// project dir, so it survives a move. Any other path keeps the full-path key
-	// (#157): basenames like "session.jsonl" are not identities, and collapsing
-	// them onto one lease made two unrelated sessions fight over one daemon.
 	const key = isSessionIdBasename(sessionPath) ? path.basename(sessionPath) : sessionPath;
 	const sessionHash = createHash("sha256").update(key).digest("hex").slice(0, 12);
 	return path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
 }
 
-/**
- * Re-resolve a session transcript that vanished from its known path, by asking
- * every registered harness where that session id lives now (#155, #156).
- * Returns the new path, or null when the session is genuinely gone.
- */
 export function resolveMovedSession(sessionPath: string): string | null {
 	const sessionId = path.basename(sessionPath).replace(/\.jsonl$/i, "");
 	for (const discovery of getDiscoveries()) {
@@ -917,84 +460,40 @@ export const IDLE_THRESHOLD_MS = 122_000;
 /** Daemon self-exit: 24h of no new data. Polite to ps aux browsers. */
 export const IDLE_EXIT_MS = 24 * 60 * 60 * 1000;
 
-/**
- * Get the prompt cache TTL for a given model in milliseconds.
- * Returns null for local models (no remote cache) or unrecognized providers.
- *
- * NOTE: Cache TTLs are provider-dependent and can change. These are conservative
- * estimates used for the idle countdown display — not precise billing values.
- *
- * Recognized cloud providers with prompt caching:
- *   - DeepSeek:   hard-disk cache, cleared within hours-to-days. 1h display TTL.
- *   - Claude:     5-min ephemeral cache (default cache_control TTL).
- *   - Gemini:     ~1h cache TTL (varies by model, conservative).
- *   - GPT/OpenAI: variable (30m-1h). Conservative 30min display TTL.
- *   - OpenAI-compat providers (together.ai, fireworks, etc.): 30min.
- */
 export function getModelCacheTtlMs(model: string): number | null {
 	const m = model.toLowerCase();
 
-	// --- Cloud providers with known prompt caching ---
-
-	// DeepSeek first (independent of Claude substring overlap):
-	// hard-disk cache, "automatically cleared within a few hours to a few days."
 	if (m.includes("deepseek")) {
 		return 60 * 60 * 1000;
 	}
 
-	// Claude: 5-minute ephemeral cache (the default cache_control TTL).
-	// The 1-hour extended cache is opt-in and rare — default to 5 min.
 	if (m.includes("claude")) {
 		return 5 * 60 * 1000;
 	}
 
-	// Gemini: cache TTL varies — 5 min for short, ~1h for long contexts.
-	// Conservative 1h display TTL.
 	if (m.includes("gemini")) {
 		return 60 * 60 * 1000;
 	}
 
-	// GPT / OpenAI: prompt caching with variable TTL (typically 5-30 min).
-	// Conservative: 30 min display TTL.
 	if (m.includes("gpt") || m.includes("o1") || m.includes("o3")) {
 		return 30 * 60 * 1000;
 	}
 
-	// OpenAI-compat third-party providers commonly used through Pi:
-	// together.ai, fireworks, openrouter, etc. Variable caching — 30min.
 	if (m.includes("together") || m.includes("fireworks") || m.includes("openrouter")) {
 		return 30 * 60 * 1000;
 	}
 
-	// Anthropic-specific model code patterns (non-Claude branded).
-	// Covers: "haiku", "sonnet", "opus" (both standalone and in compound names).
 	if (/\b(haiku|sonnet|opus)\b/.test(m)) {
 		return 5 * 60 * 1000;
 	}
 
-	// Local models (ollama, llama.cpp, lmstudio, etc.) — no remote cache.
 	if (m.includes("ollama") || m.includes("llama") || m.includes("lmstudio") || m.includes("local")) {
 		return null;
 	}
 
-	// Unknown model — don't assume local; use a conservative 5-min display TTL
-	// so the idle countdown still shows something. The worst case is showing a
-	// short countdown for a model that has a longer cache — better than showing
-	// "No Cache (local)" for a cloud model that DOES have caching.
 	return 5 * 60 * 1000;
 }
 
-// ---
-// DAEMON HEALTH REASON — code (contract) vs. text (copy)
-//
-// WHY the split (#179): `reason` used to be one `string` carrying a human sentence,
-// read by two consumers with opposite requirements — a control comparison gating
-// #124's startup grace window (which needs the string frozen forever) and the widget's
-// display label (which wants it free to improve). #165 reworded both sides at once and
-// only a manual `rg` stood between that sweep and a silent #124 regression.
-//
-// Now the code is the contract and the sentence is derived from it. Reword the sentence
-// and nothing breaks; that is the entire point. See docs/spec-179-daemon-health-reason-codes.md.
 // ---
 
 /**
@@ -1005,7 +504,7 @@ export function getModelCacheTtlMs(model: string): number | null {
  */
 export type DaemonHealthReason =
 	| "not-started"      // no daemon spawned for this session yet
-	| "starting"         // spawned, inside the #124 startup grace window
+	| "starting"
 	| "waiting-session"  // spawned, session .jsonl not created yet
 	| "not-found"        // no live PID and no heartbeat on record
 	| "idle-timeout"     // exited after idling out (lastHbTime carries when)
@@ -1028,7 +527,6 @@ export function daemonReasonText(reason: DaemonHealthReason | undefined | null):
 
 export interface DaemonStatus {
 	alive: boolean;
-	/** Machine-readable health code (#179). Compare THIS, never the rendered text. */
 	reason?: DaemonHealthReason;
 	lastHbTime?: string; // HH:MM local time of last heartbeat
 	/** Daemon is alive but no new classified data for ≥ IDLE_THRESHOLD_MS. */
@@ -1041,10 +539,6 @@ export interface DaemonStatus {
 	idleSinceMs?: number;
 	/** Cache TTL in ms for the current model (null = local/no cache). */
 	cacheTtlMs?: number | null;
-	// NOTE (#179): the former `starting?: boolean` / `waiting?: boolean` flags are gone.
-	// Each was true exactly when `reason` held one specific value, so they were two more
-	// fields that could drift out of agreement with it. renderDaemonStatus switches on
-	// the code directly.
 }
 
 /**
@@ -1057,8 +551,6 @@ export interface DaemonStatus {
  *   "  ● restarting..." (yellow) — daemon being relaunched
  */
 export function renderDaemonStatus(status: DaemonStatus, restarting = false): string {
-	// Switch on the health CODE, then look the sentence up (#179) — the display text is
-	// derived here and nowhere else, so rewording DAEMON_REASON_TEXT is a safe edit.
 	if (status.reason === "waiting-session") {
 		return `  \x1b[33m●\x1b[0m ${daemonReasonText("waiting-session")}`;
 	}
@@ -1073,9 +565,6 @@ export function renderDaemonStatus(status: DaemonStatus, restarting = false): st
 	}
 	if (status.idle) {
 		const cacheTtlMs = status.cacheTtlMs;
-		// Always show "idle" — cache info is supplementary.
-		// Compute elapsed fresh from idleSinceMs (raw timestamp) so the
-		// countdown updates every render without re-running checkDaemonHealth.
 		const elapsedMs = status.idleSinceMs != null ? Date.now() - status.idleSinceMs : (status.idleMs || 0);
 		if (cacheTtlMs != null && elapsedMs > 0) {
 			const remainingMin = Math.ceil(Math.max(0, cacheTtlMs - elapsedMs) / 60_000);
@@ -1084,12 +573,9 @@ export function renderDaemonStatus(status: DaemonStatus, restarting = false): st
 			}
 			return `  \x1b[33m●\x1b[0m idle (cache expires in ${remainingMin}min)`;
 		}
-		// Cache TTL unknown — daemon is idle, we just don't know the cache window.
-		// Show "local model" only when we confirmed the model has no remote cache.
 		if (cacheTtlMs === null) {
 			return "  \x1b[33m●\x1b[0m idle (local model)";
 		}
-		// cacheTtlMs is undefined (not null) — model unknown, just show idle.
 		return "  \x1b[33m●\x1b[0m idle";
 	}
 	return "  \x1b[32m●\x1b[0m live";
@@ -1108,17 +594,14 @@ function getModelFromSessionFile(sessionPath: string): string | undefined {
 	try {
 		const content = fs.readFileSync(sessionPath, "utf8");
 		const lines = content.split("\n");
-		// Scan backwards for the most recent assistant message with model info.
 		for (let i = lines.length - 1; i >= 0; i--) {
 			const line = lines[i].trim();
 			if (!line) continue;
 			try {
 				const entry = JSON.parse(line);
-				// Pi schema: { type: "message", message: { role: "assistant", model: "..." } }
 				if (entry.type === "message" && entry.message?.role === "assistant" && entry.message?.model) {
 					return entry.message.model;
 				}
-				// Claude Code schema: { type: "assistant", message: { role: "assistant", model: "..." } }
 				if (entry.type === "assistant" && entry.message?.role === "assistant" && entry.message?.model) {
 					return entry.message.model;
 				}
@@ -1129,7 +612,6 @@ function getModelFromSessionFile(sessionPath: string): string | undefined {
 }
 
 export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonStatus {
-	// Fast path: check if PID file exists and process is alive.
 	const pidPath = getDaemonPidPath(sessionPath);
 	let pidAlive = false;
 	try {
@@ -1140,9 +622,6 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 	} catch {}
 
 	if (pidAlive) {
-		// Daemon is alive — check if last tag entry was a heartbeat
-		// for idle detection (no new classified data for ≥ IDLE_THRESHOLD_MS).
-		// Also extract model from last classified entry for cache TTL countdown.
 		try {
 			const stat = fs.statSync(tagPath);
 			if (stat.size > 0) {
@@ -1156,30 +635,19 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 				let idleMs: number | undefined;
 				let idleSinceMs: number | undefined;
 				let sawClassified = false;
-				// Scan backwards: heartbeats are after classified entries, so we
-				// encounter them first. Idle comes from the newest heartbeat's
-				// range start, CLAMPED by the newest classified entry's timestamp
-				// (#95) — heartbeats alone (possibly interleaved from a stale
-				// duplicate daemon) can never declare idle when classified data
-				// is fresher. Keep scanning past the newest classified entry for
-				// model (#72, #73) and observed cache TTL class (#95).
 				for (let i = lines.length - 1; i >= 0; i--) {
 					const line = lines[i].trim();
 					if (!line) continue;
 					try {
 						const obj = JSON.parse(line);
-						// Track model + TTL class from most recent entries carrying them
 						if (!lastModel && obj.m) lastModel = obj.m;
 						if (!lastTtl && (obj.ttl === "1h" || obj.ttl === "5m")) lastTtl = obj.ttl;
 						if (obj._hb) {
-							// Only the newest heartbeat, and only if no classified
-							// entry has been seen yet (i.e. it is truly the tail).
 							if (typeof obj._hb === "object" && obj._hb.first && idleSinceMs === undefined && !sawClassified) {
 								idleSinceMs = obj._hb.first;
 							}
 							continue;
 						}
-						// Classified entry — clamp the idle window start.
 						if (!sawClassified) {
 							sawClassified = true;
 							if (typeof obj.t === "number" && idleSinceMs !== undefined && obj.t > idleSinceMs) {
@@ -1191,20 +659,12 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 				}
 				if (idleSinceMs !== undefined) idleMs = Date.now() - idleSinceMs;
 				if (idleMs !== undefined && idleMs >= IDLE_THRESHOLD_MS) {
-					// If the tag file had no recent classified entry with model info
-					// (only heartbeats), fall back to the session file.
 					if (!lastModel) lastModel = getModelFromSessionFile(sessionPath);
-					// Observed TTL class beats the model-name guess (#95).
 					const cacheTtlMs = lastTtl
 						? (lastTtl === "1h" ? 3_600_000 : 300_000)
 						: (lastModel ? getModelCacheTtlMs(lastModel) : null);
 					return { alive: true, idle: true, idleMs, idleSinceMs, cacheTtlMs };
 				}
-				// Heartbeat is too fresh (< IDLE_THRESHOLD) or absent.
-				// Check the session file mtime: if the session hasn't been
-				// written to for ≥ IDLE_THRESHOLD, the daemon just (re)started
-				// on an already-idle session — report idle regardless of
-				// heartbeat freshness.
 				{
 					try {
 						const sessionStat = fs.statSync(sessionPath);
@@ -1223,11 +683,9 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 		return { alive: true };
 	}
 
-	// PID dead or missing — read last _hb heartbeat for stop reason + time.
 	let lastHbMs = 0;
 	try {
 		const stat = fs.statSync(tagPath);
-		// Read last ~8KB to find the most recent heartbeat line.
 		const readStart = Math.max(0, stat.size - 8192);
 		const fd = fs.openSync(tagPath, "r");
 		const buf = Buffer.alloc(stat.size - readStart);
@@ -1251,7 +709,6 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 		return { alive: false, reason: "not-found" };
 	}
 
-	// Format the heartbeat time as local HH:MM.
 	const d = new Date(lastHbMs);
 	const hh = String(d.getHours()).padStart(2, "0");
 	const mm = String(d.getMinutes()).padStart(2, "0");
@@ -1260,8 +717,6 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 	return { alive: false, reason: "idle-timeout", lastHbTime: timeStr };
 }
 
-// ---
-// DAEMON STARTUP PROOF (#309 review)
 // ---
 
 /**
@@ -1277,35 +732,6 @@ export interface DaemonStartupResult {
 	signalCode: NodeJS.Signals | null;
 }
 
-/**
- * Wait until the daemon we just spawned proves it came up — or proves it died.
- *
- * `spawnWtftDaemon` returning a handle means `spawn()` did not throw, nothing
- * more: a missing or broken `wtft-daemon.mjs` still yields a live-looking child
- * that exits a moment later. Any caller that goes on to TELL THE USER the daemon
- * is running owes them this check first (#309 review), or a dead daemon reads as
- * success.
- *
- * "Up" means exactly one thing: a live process holds the singleton lease
- * (`checkDaemonHealth().alive`). The daemon writes its PID file before
- * `initClassified()`, so the lease is the earliest and only proof — and it covers
- * the singleton case too: the child exits 0 immediately because an *older* daemon
- * already owns the session, which is up, not dead.
- *
- * A tag file on disk is NOT proof (#309 review, round 2). Tags outlive daemons —
- * a previous run's file, or a sibling-dir file the #155 lookup adopts — so "tag
- * exists" was reporting a dead daemon as up. Measured: a stale tag one directory
- * over under /tmp made a SIGKILLed stand-in read as "up".
- *
- * "Dead" needs both: the child is gone AND no lease is held — re-checked *after*
- * the exit is observed, because the lease can be claimed by a concurrent daemon in
- * the gap between our health check and the child's own singleton check (it then
- * exits 0 having found an owner: up, not dead).
- *
- * The ceiling bounds the ambiguous case only — a healthy daemon resolves in one
- * or two polls, so a one-shot CLI does not sit here. Hitting the ceiling returns
- * `"unknown"`, never `"dead"`: a slow box must not be reported as a failure.
- */
 export async function awaitDaemonUp(
 	sessionPath: string,
 	child: ChildProcess | null,
@@ -1333,7 +759,6 @@ export async function awaitDaemonUp(
 }
 
 export function restartDaemon(sessionPath: string, daemonPath: string): boolean {
-	// Kill existing daemon (stale or alive) for this session.
 	const pidPath = getDaemonPidPath(sessionPath);
 	try {
 		const pid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
@@ -1343,7 +768,6 @@ export function restartDaemon(sessionPath: string, daemonPath: string): boolean 
 		try { fs.unlinkSync(pidPath); } catch {}
 	} catch {}
 
-	// Spawn fresh daemon.
 	try {
 		const child = spawn(process.execPath, [daemonPath, "--session", sessionPath], {
 			detached: true,
@@ -1367,18 +791,6 @@ export async function watchTagFile(
 		process.exit(1);
 	}
 
-	// The reader's tag path is RESOLVED, never assumed (#309 review). A session
-	// that changed project dirs (#155) leaves its tag file in the old dir, and the
-	// daemon that replaces it adopts that same file (getCurrentVersionTagPath) —
-	// so an own-dir path built from the session's *current* directory can be a
-	// file nobody will ever write. The wait loop below has no exit for that state
-	// (lease alive + own file absent), which made it hang forever. Mutable because
-	// the move can also happen while we are still waiting.
-	//
-	// getCurrentVersionTagPath, not getTagPath: a watcher must bind to what the
-	// WRITER picks. getTagPath's stale-version fallback is right for a one-shot
-	// read and wrong here — the daemon deletes stale tags on startup (#95), so
-	// fs.watch would attach to a file that is about to vanish.
 	let tagPath = fs.existsSync(tagPathHint) ? tagPathHint : getCurrentVersionTagPath(sessionPath);
 
 	let totalCost = 0;
@@ -1398,21 +810,16 @@ export async function watchTagFile(
 		}
 	};
 
-	// In-place rendering — preserves scrollback above. Each re-render clears
-	// the previous render using visual-line counting (handles wrapping + resize).
 	hideCursor();
 	let lastLineCount = 0;
 	let lastBuffer: string[] = [];
 
-	// Shared exit: clear the live chart, print final copy to scrollback.
 	const exitWatch = () => {
 		if (watcher) watcher.close();
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
-		// Clear the in-place rendered chart
 		if (lastLineCount > 0) clearPreviousLines(lastLineCount);
 		showCursor();
 		cleanupStdin();
-		// Reprint final chart as static scrollback output
 		if (lastBuffer.length > 0) {
 			for (const l of lastBuffer) console.log(l);
 		}
@@ -1422,7 +829,6 @@ export async function watchTagFile(
 
 	process.on("SIGINT", exitWatch);
 
-	// DAEMON HEALTH TRACKING
 	let daemonDead = false;
 	let daemonStopReason: DaemonHealthReason | null = null;
 	let daemonStopTime = "";
@@ -1435,7 +841,6 @@ export async function watchTagFile(
 	const updateDaemonHealth = () => {
 		daemonChecked = true;
 		if (daemonRestarting) {
-			// Check if daemon came back online after restart.
 			const health = checkDaemonHealth(sessionPath, tagPath);
 			if (health.alive) {
 				daemonRestarting = false;
@@ -1448,9 +853,6 @@ export async function watchTagFile(
 		}
 		const health = checkDaemonHealth(sessionPath, tagPath);
 		if (!health.alive) {
-			// Debounce: if the PID is dead but the tag file was recently written
-			// (within 2s), a new daemon instance is spinning up — mask the restart
-			// gap by treating the state as unchanged instead of "stopped."
 			try {
 				const tagStat = fs.statSync(tagPath);
 				if (Date.now() - tagStat.mtimeMs < 2000 && tagStat.size > 0) return;
@@ -1474,7 +876,6 @@ export async function watchTagFile(
 		}
 	};
 
-	// Raw stdin for 'q'/'Q' quit and 'r' daemon restart.
 	const cleanupStdin = enterRawStdin((key: string) => {
 		if (key === "q" || key === "Q" || key === "\u0003") {
 			exitWatch();
@@ -1492,7 +893,6 @@ export async function watchTagFile(
 				}
 				needsRedraw = true;
 				render();
-				// Fast health re-check: poll every second for up to 5s after restart.
 				let pollCount = 0;
 				const postRestartPoll = setInterval(() => {
 					pollCount++;
@@ -1507,29 +907,18 @@ export async function watchTagFile(
 		}
 	});
 
-	// Read initial classified entries from tag file (daemon may have already
-	// processed part of the session before we started watching).
-	// Emoji disable: CLI flag (--no-emoji/--emoji) wins; otherwise the session-file
-	// inline emoji-settings entry (Pi-toggled) decides (#62).
 	let disabledEmoji = typeof settings.disabledEmoji === "boolean" ? settings.disabledEmoji : false;
-	// One read, and the offset comes out of the same buffer (#130 review round 2).
 	let seed = seedClassifiedTagFile(tagPath);
 	let allInteractions: Interaction[] = seed.interactions;
 	let lastReadOffset = seed.offset;
-	// The bytes just before `lastReadOffset`, re-checked on every event so a
-	// truncate-and-rebuild that lands at or above it cannot pass unnoticed (#142).
 	let prefixSentinel = readPrefixSentinel(tagPath, lastReadOffset);
 
-	// Session-level settings from inline wtft-settings entries.
 	let sessionInterval: string | undefined;
 	let sessionLimit: number | undefined;
 	let sessionMode: "cumulative" | "bucket" | undefined;
 	let sessionShowTicks: boolean | undefined;
 	let sessionTimezone: string | undefined;
 
-	// Parse inline wtft-settings from the tag file (if the daemon wrote any).
-	// wtft-settings are written as custom entries in the session.jsonl, not the
-	// classified tag file, so we read the session directly for settings only.
 	try {
 		const sessionContent = fs.readFileSync(sessionPath, "utf8");
 		for (const line of sessionContent.split("\n")) {
@@ -1550,15 +939,12 @@ export async function watchTagFile(
 					}
 				}
 			} catch {
-				// Skip unparseable lines
 			}
 		}
 	} catch {
-		// Session file may not exist or be unreadable
 	}
 
 	const render = () => {
-		// Clear previous render using visual-line count (handles wrapping + resize).
 		if (lastLineCount > 0) clearPreviousLines(lastLineCount);
 
 		const width = getTerminalWidth();
@@ -1580,23 +966,6 @@ export async function watchTagFile(
 			timezone: undefined
 		};
 
-		// Deduplicate by message.id — dedupeClassifiedById, NOT deduplicateInteractions.
-		// `allInteractions` here always came from readClassifiedTagFile or the
-		// fs.watch branch's own dedupeClassifiedById call — both already
-		// collapse tag-file lines sharing one
-		// message.id, taking max cost — so calling dedupeClassifiedById again is a
-		// true no-op here (it returns the input unchanged when nothing repeats,
-		// docs/wtft-incremental-render-spec.md#dedupeClassifiedById). Present as
-		// cheap insurance against a caller reaching this point some other way.
-		//
-		// deduplicateInteractions is NOT safe as that insurance, even against
-		// already-deduped input: it returns `[...withoutId, ...idGroups]`, so any
-		// interaction lacking a message.id is moved ahead of every id-bearing one
-		// regardless of true chronological order — the exact non-chronological
-		// hazard this spec section's "Return Order Is Not Chronological" section
-		// describes (docs/wtft-incremental-render-spec.md). dedupeClassifiedById
-		// preserves first-appearance order (`slots`/`slotIds`), so it is the only
-		// one of the two safe to call on data that's about to be rendered in order.
 		const deduped = dedupeClassifiedById(allInteractions);
 		interactionCount = deduped.length;
 
@@ -1616,7 +985,6 @@ export async function watchTagFile(
 		totalCost = deduped.reduce((sum, i) => sum + i.cost, 0);
 
 		if (lines && lines.length > 0) {
-			// Append daemon status (inline if it fits, otherwise separate line).
 			let daemonStatusStr = "";
 			if (!daemonChecked) {
 				daemonStatusStr = "  \x1b[90m●\x1b[0m reading...";
@@ -1636,21 +1004,17 @@ export async function watchTagFile(
 				if (titleVisualLen + statusVisualLen <= finalWidth - 2) {
 					lines[0] = lines[0] + daemonStatusStr;
 				} else {
-					// Doesn't fit — insert as a separate line after the title
 					lines.splice(1, 0, daemonStatusStr.trim());
 				}
 			}
 
 			for (const l of lines) buf.push(l);
 		} else if (!fs.existsSync(sessionPath)) {
-			// #308: the transcript itself is unwritten — a fact, not a fault. Claude
-			// Code writes it after the first real prompt (not a /command) completes.
 			buf.push("\x1b[90mWaiting for session .jsonl to be written (first prompt not completed yet)...\x1b[0m");
 		} else {
 			buf.push("\x1b[90mWaiting for session data...\x1b[0m");
 		}
 
-		// Footer row
 		const restartHint = settings.daemonPath
 			? `, using v${WTFT_TAGGER_VERSION}, ` + (daemonDead ? `\x1b[31m'r' to restart\x1b[0m` : `'r' to restart`)
 			: "";
@@ -1658,7 +1022,6 @@ export async function watchTagFile(
 
 		lastBuffer = [...buf];
 
-		// Write all lines, then compute visual-line count for next clear
 		const allLines = buf.map(l => padStr + l);
 		const out = allLines.map(l => l + "\n").join("");
 		process.stdout.write(out);
@@ -1667,53 +1030,14 @@ export async function watchTagFile(
 		needsRedraw = false;
 	};
 
-	// Initial render
 	render();
 	resetWatchdog();
 
-	// SIGWINCH handler — re-render on resize. clearPreviousLines uses the
-	// previous render's visual-line count (computed at the old terminal width),
-	// so it always clears the correct number of rows.
 	process.on("SIGWINCH", () => {
 		render();
 		resetWatchdog();
 	});
 
-	// fs.watch on the classified tag file (inotify on Linux).
-	//
-	// WHAT THE DAEMON ACTUALLY GUARANTEES (#130), because the three bullets that
-	// used to sit here were folklore and two of them were false:
-	//   - Every COMPLETED write LANDS ON A LINE BOUNDARY, so the file is never
-	//     left holding a severed line. The idle heartbeat is overwritten in
-	//     place at a fixed width rather than cut and re-appended, and a crash
-	//     mid-append is repaired by the next daemon before its first write.
-	//   - THE FILE CAN STILL GET SHORTER, which is why the shrink branch below
-	//     exists and is not dead defensive code. `initClassified` truncates the
-	//     tag to zero in three cases — a rebuild lease token, no `_meta` offset,
-	//     heartbeat-only content — and a crash repair escalates to exactly that.
-	//     An earlier draft of this comment said "the file never shrinks" while
-	//     sitting fifty lines above the branch that exists because it does; that
-	//     sentence was a documented licence to delete the branch.
-	//   - It does NOT write at most once per beat. One poll makes several
-	//     separate writes — the classified batch, then `_meta.offset`, then a
-	//     `_meta.swept` marker, plus one append per changed subagent transcript,
-	//     and `shutdown` writes outside the cadence entirely. 667ms bounds how
-	//     often a beat comes round, not how many writes it makes.
-	//   - It does NOT make an append atomic against a concurrent read.
-	//     `syncSubagentTranscript` appends batches that run to hundreds of KB,
-	//     node may split one append across several write() calls, and inotify can
-	//     wake this callback inside that span.
-	//
-	// So a "change" event means complete lines ready PLUS, briefly, a partial one
-	// at the end — which is why the read below consumes only to the last newline
-	// and carries the remainder. A WHOLE-FILE READER IS NOT EXEMPT: a readFileSync
-	// landing in that same span returns the complete lines plus the fragment too,
-	// and drops it through its own catch. What the writer guarantees is only that
-	// the fragment can never be anywhere but the END of the file (#130 round 2).
-	//
-	// No debounce needed — double-fire is harmless (stat.size check is a no-op).
-	//
-	// Wait up to 5s for the daemon to create the tag file before watching.
 	let watcher: fs.FSWatcher | null = null;
 
 	const startWatching = () => {
@@ -1723,43 +1047,12 @@ export async function watchTagFile(
 			try {
 				const stat = fs.statSync(tagPath);
 
-				// THE FILE GOT SHORTER — RE-SEED, do not wait to be overtaken
-				// (#130 review round 3, Medium/correctness).
-				//
-				// This callback only ever asked whether the file GREW. The daemon
-				// truncates the tag to zero in three places (`initClassified`: a
-				// rebuild token, no `_meta` offset, heartbeat-only content), and
-				// (`truncatePartialTail` also shrinks the file, but it cannot strand
-				// an offset: it cuts to the last newline, and this reader's offset
-				// is only ever set just past a newline, so the cut lands at or
-				// after it. The three truncate-to-zero cases are what this branch
-				// is for.) A `--watch` reader stays
-				// attached across all of that — the 'r' key, a respawn, a lease
-				// rebuild — so its offset is left past the new EOF, pointing into
-				// a file that no longer has those bytes.
-				//
-				// Nothing recovers from that on its own. The reader sits idle
-				// until the rebuilt file grows PAST the stale offset, then starts
-				// reading from the middle of a line: every rebuilt line before
-				// that offset is never seen, and consume-to-last-newline only
-				// drops the leading fragment. The chart silently loses the whole
-				// early session.
-				//
-				// An earlier draft of this round's docs argued a truncate to zero
-				// was safe because "no reader can be positioned inside it". That
-				// is true of the CONTENT and false of the OFFSET, which is the
-				// thing that actually breaks.
-				// A shrink is only ONE of the two ways the prefix can go away, and
-				// it is the easy one. See `readPrefixSentinel` (#142).
 				const sentinelNow = readPrefixSentinel(tagPath, lastReadOffset);
 				const matches = sentinelMatches(sentinelNow, prefixSentinel);
 				const action = watcherAction(stat.size, lastReadOffset, matches);
 				if (action === "idle") return;
 				if (action === "reseed") {
 					const reseed = seedClassifiedTagFile(tagPath);
-					// A failed read here means the same thing it means below: no
-					// information. Leave the offset and the chart alone rather than
-					// committing an empty seed we cannot substantiate.
 					if (!reseed.read) return;
 					allInteractions = reseed.interactions;
 					lastReadOffset = reseed.offset;
@@ -1771,40 +1064,13 @@ export async function watchTagFile(
 					return;
 				}
 
-				// File grew — read new data and accumulate
 				{
 					const fd = fs.openSync(tagPath, "r");
 					const buf = Buffer.alloc(stat.size - lastReadOffset);
 					fs.readSync(fd, buf, 0, buf.length, lastReadOffset);
 					fs.closeSync(fd);
 
-					// CONSUME ONLY WHOLE LINES (#130 round 1, Medium/crossfile).
-					// `lastReadOffset = stat.size` was the same unconditional
-					// advance `parseNewLines` had: a fragment fails JSON.parse,
-					// the catch below drops it, and the offset has already moved
-					// past it — so those interactions never reach the live
-					// `--watch` view until something forces a whole-file re-read.
-					//
-					// AND THE WRITER CANNOT CLOSE THIS ONE. #130's writer
-					// guarantee is that no write ends mid-line, which kills the
-					// truncation welds. It does NOT make a large append atomic
-					// with respect to a concurrent reader: `syncSubagentTranscript`
-					// appends whole-transcript batches that run to hundreds of KB,
-					// node may split one append across several write() calls, and
-					// inotify can wake this watcher inside that span. So the file
-					// is always a whole number of complete lines PLUS, briefly, a
-					// partial one at the end — and the reader that tracks an offset
-					// has to carry the remainder. A whole-file reader meets the same
-					// fragment; it just drops it silently instead of desynchronising.
-					//
-					// This is not defensive code against a writer we do not trust.
-					// It is the one place the writer provably cannot deliver, and
-					// it is the same single line as the daemon's fix.
 					const lastNl = buf.lastIndexOf(0x0a);
-					// Nothing complete yet. Leave the offset where it is and fall THROUGH to the
-					// health refresh below — an early return here would skip updateDaemonHealth
-					// and resetWatchdog, so a run of partial-line wakes would let the watchdog
-					// fire on a daemon that is writing perfectly well.
 					if (lastNl !== -1) {
 						lastReadOffset += lastNl + 1;
 						prefixSentinel = readPrefixSentinel(tagPath, lastReadOffset);
@@ -1826,67 +1092,6 @@ export async function watchTagFile(
 						}
 
 						if (newCount > 0) {
-							// This path appends straight to the accumulator and never
-							// goes through readClassifiedTagFile, so it needs the same
-							// collapse (#270 review) — otherwise the live watch, the
-							// one surface a human is actually staring at, is the only
-							// consumer that still double-counts a re-emitted message.
-							//
-							// COST, measured rather than argued (PR review), because
-							// this is a full pass over the WHOLE accumulator on every
-							// append event, which over a session's life is O(n^2) in
-							// interactions. That is true asymptotically and negligible
-							// in practice, and the numbers are the reason this is left
-							// as a single canonical call instead of being hand-rolled
-							// into an incremental merge:
-							//
-							// Re-derive with `bun research/270-watch-dedup-bench.ts`
-							// (median of 40 passes, JIT warmed, 50% of ids re-emitted):
-							//
-							//   n =  1,184 (the largest real session measured on this
-							//                host, #270's own specimen 7c0c2b7e)
-							//                        0.255ms/pass = 0.038% of a 667ms beat
-							//   n =  4,736 (4x)      0.917ms/pass = 0.138%
-							//   n = 11,840 (10x)     2.090ms/pass = 0.313%
-							//   n = 23,680 (20x)     6.423ms/pass = 0.963%
-							//
-							// The first version of this table was a hand-run nobody
-							// saved and it was not even MONOTONIC — it put 11,840
-							// items (0.791ms) BELOW 4,736 (0.879ms), because the
-							// smallest n had absorbed the JIT compile cost and the
-							// others had not (PR review). That is the same defect
-							// research/270-subagent-parse-bench.ts exists to prevent
-							// for the parse figures, so these get the same treatment.
-							//
-							// What the corrected numbers say, stated no more strongly
-							// than they support (PR review caught the first attempt
-							// overstating this too, twice): per-item cost stays in a
-							// NARROW BAND rather than being flat. Derived from the
-							// table above and nothing else — ms/pass divided by n —
-							// that band is 0.177-0.271us: 0.215 / 0.194 / 0.177 /
-							// 0.271us at the four sizes, reliably highest at the 20x
-							// point. So 20x the items costs ~25x the time, not 20x.
-							// (Re-runs under load shift the whole band upward, to
-							// ~0.32us at the 20x point — but that is a DIFFERENT run,
-							// and quoting its peak beside this run's table is how the
-							// previous draft came to state an upper bound its own
-							// numbers did not support.) Each pass is O(n) by construction; the mild
-							// super-linearity on top is allocation and cache pressure
-							// from the larger Map, not a change in the algorithm.
-							// Absolute figures move ~25% run to run with host load, so
-							// treat the table as one representative run of the script,
-							// not a constant.
-							//
-							// The practical bound is what carries the decision, and it
-							// is unaffected: even at 20x the largest session this host
-							// has ever produced, one pass is ~1% of a poll beat, so the
-							// quadratic term over a session's life is nowhere near the
-							// thing that matters. An
-							// incremental merge would have to re-implement
-							// deduplicateInteractions' max-cost-and-union-files rule
-							// to save 0.1% of a poll, and a second implementation of
-							// that rule is precisely the drift this file's other
-							// review findings are about.
 							allInteractions = dedupeClassifiedById(allInteractions);
 							updateDaemonHealth();
 							needsRedraw = true;
@@ -1905,25 +1110,7 @@ export async function watchTagFile(
 				render();
 				resetWatchdog();
 			} catch {
-				// Tag file may have been deleted or truncated — re-read from zero.
-				//
-				// ASK WHETHER IT IS THERE, rather than relying on a throw (#130
-				// review round 3, Low/correctness). This recovery used to call
-				// `fs.statSync(tagPath)`, which THREW when the file was gone and
-				// so skipped the render, leaving the last good chart on screen
-				// until the file came back. `seedClassifiedTagFile` never throws:
-				// on a missing file it answers `{interactions: [], offset: 0}`.
-				// Left alone, this catch would therefore wipe the accumulator and
-				// redraw an EMPTY chart on any transient read failure, and the
-				// "wait for it to reappear" branch below would be unreachable.
 				try {
-					// Commit only on a SUCCESSFUL read. `existsSync` was the first
-					// spelling of this guard and it answers one question — is the
-					// path there — while every other read failure (EMFILE after an
-					// fd leak, EACCES after a permissions change, EIO) still came
-					// back as an empty seed and still wiped the chart. The comment
-					// claimed it covered "any transient read failure"; it covered
-					// ENOENT (#130 local audit round).
 					const fresh = seedClassifiedTagFile(tagPath);
 					if (!fresh.read) return;   // no information — keep the last good chart
 					allInteractions = fresh.interactions;
@@ -1934,25 +1121,11 @@ export async function watchTagFile(
 					render();
 					resetWatchdog();
 				} catch {
-					// Still unreadable — wait for the next event rather than
-					// rendering a chart we cannot substantiate.
 				}
 			}
 		});
 	};
 
-	// Wait for the tag file on STATE, not the clock (#308). The daemon creates it
-	// at startup (initClassified) — before the session .jsonl even exists — so its
-	// absence means one of three things, each answerable without a stopwatch:
-	//   - the daemon is still starting → its lease is not claimed yet and the child
-	//     we spawned has not exited → keep waiting;
-	//   - another daemon owns the lease (singleton) → alive → keep waiting, its file
-	//     is coming;
-	//   - the child we spawned exited and nobody holds the lease → it is dead → say
-	//     so, with its exit code, and stop.
-	// The retired 5 s ceiling turned "still starting on a slow box" into a false
-	// "did not create tag file". Without a child handle there is no fact to ask,
-	// so that caller keeps a bounded ceiling — documented, not hidden.
 	const child = settings.daemonChild ?? null;
 	const NO_HANDLE_CEILING_MS = 5000;
 	// Leave the terminal sane before an error exit: drop the in-place render,
@@ -1966,11 +1139,6 @@ export async function watchTagFile(
 	const fileWaitStart = Date.now();
 	for (;;) {
 		if (fs.existsSync(tagPath)) break;
-		// Re-resolve before judging the lease (#309 review). A daemon that is alive
-		// but writing into a sibling project dir is not "still starting" — its file
-		// already exists, just not where we last looked. Without this, `leaseAlive`
-		// stays true and the own-dir path never appears: neither exit condition can
-		// ever fire, and the loop spins for the life of the terminal.
 		const resolved = getCurrentVersionTagPath(sessionPath);
 		if (resolved !== tagPath && fs.existsSync(resolved)) { tagPath = resolved; break; }
 		const childExited = child ? (child.exitCode !== null || child.signalCode !== null) : false;
@@ -1991,12 +1159,6 @@ export async function watchTagFile(
 		await new Promise(r => setTimeout(r, 250));
 	}
 
-	// Seed the reader from the file that actually won (#309 review). The initial
-	// read above ran before the wait, when the path was still empty or pointed at
-	// the wrong dir — so `allInteractions` is empty and `lastReadOffset` is 0. An
-	// adopted sibling file already holds the whole session; without re-seeding,
-	// the first frame renders nothing and everything written before now is only
-	// picked up by luck, on whatever change event happens next.
 	seed = seedClassifiedTagFile(tagPath);
 	allInteractions = seed.interactions;
 	lastReadOffset = seed.offset;
@@ -2006,11 +1168,7 @@ export async function watchTagFile(
 
 	startWatching();
 
-	// Initial daemon health check — run after a short settle (500ms) instead of
-	// 10s so the idle/live status updates quickly when the daemon is already idle.
 	setTimeout(() => { updateDaemonHealth(); needsRedraw = true; render(); resetWatchdog(); }, 500);
 
-	// Keep the process alive (fs.watch + watchdog are the event sources).
-	// This is an intentional infinite await — exitWatch() calls process.exit().
 	await new Promise(() => {});
 }

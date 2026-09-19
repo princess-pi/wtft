@@ -400,7 +400,8 @@ console.log("\n6. Pending session + a daemon that dies during startup");
 }
 
 // ---
-// 7. awaitDaemonUp: the lease is the proof; a tag file is not (#309 review, round 2).
+// 7. awaitDaemonUp: the lease is the proof; a tag file is not
+
 //
 // Three unit cases with the child stood in by a bare node process, so exit
 // codes and signals are chosen, not raced:

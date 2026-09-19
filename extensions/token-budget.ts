@@ -5,6 +5,7 @@ import * as os from "node:os";
 import { loadConfig, writeConfig } from "@princess-pi/libs/config";
 import { readClassifiedTagFile } from "./lib/wtft-daemon-lib.ts";
 import { WTFT_CONFIG_DIR } from "./lib/wtft-config-dir.ts";
+import { projectsDir } from "./lib/harness/claude-code/discovery.ts";
 
 
 // ---
@@ -12,7 +13,7 @@ import { WTFT_CONFIG_DIR } from "./lib/wtft-config-dir.ts";
 // ---
 
 const HOME = os.homedir();
-const CLAUDE_DIR = path.join(HOME, ".claude", "projects");
+const CLAUDE_DIR = projectsDir();
 const PI_DIR = path.join(HOME, ".pi", "agent", "sessions");
 const COFFEE_FILE = "/tmp/pi-rate-limit-coffee.json";
 

@@ -26,6 +26,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import { calculateClaudeCost, calculateServerToolCost, getDeepSeekPeakMultiplier } from "./wtft-cost.js";
 import { getParseAdapters } from "./harness/registry.ts";
+import { projectsDir } from "./harness/claude-code/discovery.ts";
 import { extractCommandSegments, extractJoinedSegments, extractRealCommands, splitCommandWords, stripCommandPrefixes } from "./wtft-command-shapes.js";
 import type { ControlSignal, UncountedBillableClass } from "./harness/types.ts";
 
@@ -1784,7 +1785,7 @@ export function discoverClaudeSubAgentSessionFiles(
 	windowMs: number = CLAUDE_SUBAGENT_WINDOW_MS,
 ): { files: string[]; unreadable: Error | null } {
 	const slug = cwdToClaudeProjectSlug(cwd);
-	const projectDir = path.join(os.homedir(), '.claude', 'projects', slug);
+	const projectDir = path.join(projectsDir(), slug);
 	try {
 		const projectStat = fs.statSync(projectDir);
 		if (!projectStat.isDirectory()) return { files: [], unreadable: null };

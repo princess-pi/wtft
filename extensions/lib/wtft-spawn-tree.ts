@@ -321,10 +321,10 @@ export function computeSpawnTree(
 	// already inside the caller's SELF total. A spawner that also records one
 	// of those as an edge would otherwise have it billed twice, once in `total`
 	// and once in `spawned.total`, and `tree` would be wrong in the expensive
-	// direction. One map, three outcomes, so a repeat edge can say what
-	// happened the first time instead of guessing. `visited` is the separate
-	// set of ids already queued, so a seeded `in-self` id is descended into
-	// exactly once however many edges point at it.
+	// direction. One map, so a repeat edge can say what happened the first time
+	// instead of guessing. `visited` is the separate set of ids already queued,
+	// so an `in-self` or `folded` id is descended into exactly once however many
+	// edges point at it.
 	//
 	// `in-self` is money inside the caller's `total`; `folded` is a `claude -p`
 	// session inside a resolved descendant's total, so inside the tree's. Both

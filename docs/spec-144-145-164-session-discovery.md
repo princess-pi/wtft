@@ -345,7 +345,7 @@ from a worktree and a build from the main clone are not byte-identical. Tracked 
 fixed here (Step 5 forbids production changes, and hand-editing generated `.mjs` is a repo hard
 gate).
 
-Test seams: `WTFT_CLAUDE_PROJECTS_DIR` (existing) points discovery, `claude -p` sub-agent discovery and the Token Budget scan at a fixture tree;
+Test seams: `WTFT_CLAUDE_PROJECTS_DIR` (existing) points discovery and `claude -p` sub-agent discovery at a fixture tree, and the Token Budget scan's Claude root;
 `WTFT_PI_SESSIONS_DIR` does the same for the Pi harness, so a suite that pins one root can pin
 both; `WTFT_NO_GIT=1` (new) forces the no-git fallback path so it can be exercised without
 uninstalling git. Three counters in `extensions/lib/harness/session-cwd.ts` make discovery's cost

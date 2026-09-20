@@ -5,8 +5,6 @@
  */
 
 // ---
-// RAW STDIN HELPERS
-// ---
 
 /**
  * Enter raw stdin mode and register a key handler.
@@ -39,8 +37,6 @@ export function enterRawStdin(onKey: (key: string) => void): () => void {
 }
 
 // ---
-// CURSOR HELPERS
-// ---
 
 /** Show the terminal cursor (DECTCEM reset).
  *  @param out where to write — stdout by default; the scoped picker
@@ -54,8 +50,6 @@ export function hideCursor(out: NodeJS.WritableStream = process.stdout): void {
 	out.write("\x1b[?25l");
 }
 
-// ---
-// IN-PLACE OVERWRITE
 // ---
 
 /**
@@ -72,8 +66,6 @@ export function clearPreviousLines(lineCount: number, out: NodeJS.WritableStream
 	}
 }
 
-// ---
-// VISUAL LINE COUNT
 // ---
 
 /**

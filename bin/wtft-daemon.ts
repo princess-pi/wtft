@@ -33,8 +33,6 @@ import {
 
 
 // ---
-// DAEMON CONFIGURATION
-// ---
 
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const POLL_MS = 667; // 90bpm throttle
@@ -42,8 +40,6 @@ const IDLE_EXIT_MS = 24 * 60 * 60 * 1000;
 // Park at most 1h on a session.jsonl that has never appeared; only the never-seen case uses this ceiling.
 const SESSION_WAIT_MAX_MS = 60 * 60 * 1000;
 
-// ---
-// DAEMON STATE
 // ---
 
 let sessionPath = "";
@@ -92,8 +88,6 @@ interface SubagentFileState {
 const discoveredSubagentFiles = new Map<string, SubagentFileState>();
 
 // ---
-// SIGNAL HANDLING
-// ---
 
 function shutdown(reason: string) {
   if (!running) return;
@@ -123,8 +117,6 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGHUP", () => shutdown("SIGHUP"));
 
-// ---
-// FILE I/O HELPERS
 // ---
 
 /** Overwrite same-width heartbeat in place (fixed-width pwrite); else append. File never shrinks. */
@@ -543,8 +535,6 @@ function invalidateStaleSweptMarker(filePath: string) {
 }
 
 // ---
-// META OFFSET TRACKING
-// ---
 
 /**
  * Read the byte offset from the last _meta line in the tag file.
@@ -574,8 +564,6 @@ function readLastMetaOffset(tagPath: string): number | null {
   return null;
 }
 
-// ---
-// FOLLOW A MOVED SESSION
 // ---
 
 /** Session move: re-point sessionPath only; keep tagPath fixed so --watch survives. */
@@ -617,8 +605,6 @@ function sessionWasEverParsed(sessionCmdlinePath: string): boolean {
   return false;
 }
 
-// ---
-// REAP & WARN
 // ---
 
 const WARN_LOG_DIR = path.join(os.homedir(), ".local", "state", "wtft");
@@ -811,16 +797,12 @@ function initClassified() {
 }
 
 // ---
-// MAIN LOOP
-// ---
 
 async function main() {
   loadUserPricing();
 
   await loadExternalHarnesses();
 
-  // ---
-  // ARG PARSING & MANAGEMENT COMMANDS
   // ---
 
   let showList = false;

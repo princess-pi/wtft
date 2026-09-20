@@ -18,8 +18,6 @@ import { extractCommandSegments, extractJoinedSegments, extractRealCommands, spl
 import type { ControlSignal, UncountedBillableClass } from "./harness/types.ts";
 
 // ---
-// TYPES
-// ---
 
 export type Category =
 	| "plan" | "spec" | "research" | "web" | "grep"
@@ -258,8 +256,6 @@ function buildInteraction(
 		unrecognizedTool: unrecognizedTool || undefined };
 }
 
-// ---
-// HARNESS-OVERHEAD DETECTION
 // ---
 
 /** Both marker spellings: plain interrupt and "for tool use". */

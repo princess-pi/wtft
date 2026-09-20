@@ -38,15 +38,11 @@ import { readHarnessOrder, recordHarnessOpened, orderByHarness } from "./harness
 import { resolveBranchCheckout } from "./harness/worktrees.ts";
 
 // ---
-// TYPES
-// ---
 
 // SessionCandidate lives behind the harness seam — re-exported so existing
 // importers of session-selector are unaffected.
 export type { SessionCandidate } from "./harness/types.ts";
 
-// ---
-// SESSION AUTO-DISCOVERY
 // ---
 
 /**
@@ -121,8 +117,6 @@ export function harnessLabel(id: string): string {
 	return id;
 }
 
-// ---
-// SESSION SUMMARY (TWO-TIER FALLBACK)
 // ---
 
 /**
@@ -241,8 +235,6 @@ export function getSessionSummary(sessionPath: string): SessionSummary {
 	return { turns: 0, cost: 0, tagVersion: null, rawLines };
 }
 
-// ---
-// INTERACTIVE SESSION SELECTOR
 // ---
 
 /** Format a cost value for the selector display.

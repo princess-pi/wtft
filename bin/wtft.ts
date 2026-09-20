@@ -381,8 +381,6 @@ function describeProvisionalRemedy(provisional: { reason: string | null }): stri
 }
 
 // ---
-// CONFIG + ARG PARSING
-// ---
 
 // Config overrides defaults; CLI flags override both.
 const cfg = loadConfig(WTFT_CONFIG_TOOL, { interval: "1h", limit: 100, mode: "cumulative" }, WTFT_CONFIG_DIR) as {
@@ -435,8 +433,6 @@ function showReapWarnings() {
   } catch (_) {}
 }
 
-// ---
-// MAIN EXECUTION FLOW
 // ---
 
 async function main() {
@@ -507,8 +503,6 @@ async function main() {
 	// Absolute *.jsonl that does not exist yet is lagging (first prompt not done), not an error.
 	let sessionPending = false;
 
-	// ---
-	// SESSION SELECTION
 	// ---
 	// Picker draws to stderr under `--json` so stdout stays one JSON document.
 	// Need stdin AND the picker's output stream both TTYs — `| less -R` keeps
@@ -845,8 +839,6 @@ async function main() {
 	const sessionShowTicks = (typeof config.showTicks === "boolean" ? config.showTicks : undefined) as boolean | undefined;
 	const sessionTimezone = (typeof config.timezone === "string" ? config.timezone : undefined) as string | undefined;
 	// ---
-	// REAP WARNINGS
-	// ---
 	showReapWarnings();
 
 
@@ -870,8 +862,6 @@ async function main() {
 	}
 
 
-	// ---
-	// COMPILING AND PRINTING
 	// ---
 
 	const termColumns = getTerminalWidth();

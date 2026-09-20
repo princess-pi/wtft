@@ -25,8 +25,6 @@
  */
 
 // ---
-// SCOPE AND TIME WINDOW
-// ---
 
 /** "worktree" is the default (#89): folder-name match on the current directory
  *  alone. "worktrees" widens to every checkout of the repo (Ctrl+W). "all"
@@ -161,8 +159,6 @@ export function visibleWindow(state: PickerState): PickerView {
 	};
 }
 
-// ---
-// KEY HANDLING (K1–K5)
 // ---
 
 /** What one key press resolves to. `"move"`/`"noop"` carry the new/unchanged

@@ -17,8 +17,6 @@ import { formatVersion } from "@princess-pi/libs/build-stamp";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "./wtft-config-dir.js";
 
 // ---
-// TYPES
-// ---
 
 export interface WtftCliOptions {
 	// Shared
@@ -66,8 +64,6 @@ export interface WtftCliOptions {
 	json: boolean;
 }
 
-// ---
-// ARGUMENT PARSING
 // ---
 
 /**
@@ -293,8 +289,6 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 }
 
 // ---
-// DAEMON LIFECYCLE
-// ---
 
 /**
  * Is this a session .jsonl path that may simply not be written YET?
@@ -411,16 +405,12 @@ export function getDaemonStatus(sessionPath: string): DaemonStatus {
 }
 
 // ---
-// CONFIG / SETTINGS
-// ---
 
 export function isEmojiDisabled(): boolean {
 	const config = readConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR);
 	return typeof config.disabledEmoji === "boolean" ? config.disabledEmoji : false;
 }
 
-// ---
-// MANIFEST-DRIVEN RENDERING (help, why, version)
 // ---
 
 /**

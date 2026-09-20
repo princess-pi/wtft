@@ -414,7 +414,6 @@ export function getDaemonStatus(sessionPath: string): DaemonStatus {
 // CONFIG / SETTINGS
 // ---
 
-/** Read the emoji-disabled flag from the wtft config section. */
 export function isEmojiDisabled(): boolean {
 	const config = readConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR);
 	return typeof config.disabledEmoji === "boolean" ? config.disabledEmoji : false;

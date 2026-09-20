@@ -67,7 +67,6 @@ export interface SpawnRecord {
 	cwd?: string;
 	/** A human name for the child (`correctness`, `agent/824`). */
 	label?: string;
-	/** The model the child was started with. */
 	model?: string;
 }
 
@@ -339,7 +338,6 @@ export const SPAWN_RECORD_EXIT = {
 	OK: 0,
 	/** Bad arguments: missing required flag, malformed uuid, oversized field. */
 	BAD_ARGS: 2,
-	/** The ledger could not be written. */
 	UNWRITABLE: 3,
 } as const;
 

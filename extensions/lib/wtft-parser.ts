@@ -292,7 +292,6 @@ export interface ParseStreamState {
 	afterCompaction: boolean;
 }
 
-/** A fresh stream state — one per transcript read. */
 export function newParseStreamState(): ParseStreamState {
 	return { afterCompaction: false };
 }
@@ -737,7 +736,6 @@ function collectFilesFromShellCommand(cmd: string, files: { path: string; action
 // PATH -> CATEGORY
 // Single place a file path becomes a category — bash and Read/Edit share it.
 // ---
-/** Resolve a set of file touches to one category, or null when none apply. */
 function classifyByFilePaths(files: { path: string; action: "read" | "write" }[]): Category | null {
 	const specPaths = new Set<string>();
 	const codePaths = new Set<string>();

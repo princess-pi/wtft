@@ -137,7 +137,6 @@ export interface SessionSummary {
 	rawLines: number | null;
 }
 
-/** Simple semver comparator for tag file version strings like "2.3.8". */
 function compareVersions(a: string, b: string): number {
 	const ap = a.split(".").map(Number);
 	const bp = b.split(".").map(Number);

@@ -18,6 +18,9 @@ function stripComments(src: string): string[] {
 	let lastSig = "";
 	const templateDepth: number[] = [];
 	let braceDepth = 0;
+	// Per open paren: did it follow if/while/for/with? Then its `)` precedes a regex.
+	const parenAfterControl: boolean[] = [];
+	const CONTROL = new Set(["if", "while", "for", "with"]);
 	while (i < src.length) {
 		const c = src[i], n = src[i + 1];
 		if (c === "/" && n === "/") {
@@ -27,6 +30,7 @@ function stripComments(src: string): string[] {
 		if (c === "/" && n === "*") {
 			const end = src.indexOf("*/", i + 2);
 			const stop = end < 0 ? src.length : end + 2;
+			out += " ";
 			for (let k = i; k < stop; k++) if (src[k] === "\n") out += "\n";
 			i = stop;
 			continue;
@@ -70,6 +74,13 @@ function stripComments(src: string): string[] {
 			lastSig = "str";
 			continue;
 		}
+		if (c === "(") parenAfterControl.push(CONTROL.has(lastSig));
+		if (c === ")" && parenAfterControl.pop()) {
+			out += c;
+			i++;
+			lastSig = "";
+			continue;
+		}
 		if (c === "{") braceDepth++;
 		if (c === "}") braceDepth--;
 		if (/[A-Za-z0-9_$]/.test(c)) {
@@ -84,7 +95,7 @@ function stripComments(src: string): string[] {
 		out += c;
 		i++;
 	}
-	return out.split("\n").map(l => l.trim()).filter(Boolean);
+	return out.split("\n").map(l => l.replace(/\s+/g, " ").trim()).filter(Boolean);
 }
 
 // ---

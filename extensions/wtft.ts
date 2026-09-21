@@ -62,8 +62,6 @@ const _daemonDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..",
 
 
 // ---
-// TUI CUSTOM PAGER OVERLAY
-// ---
 
 class PagerComponent {
 	private lines: string[];
@@ -117,8 +115,6 @@ class PagerComponent {
 }
 
 // ---
-// STATE PERSISTENCE (STORE/RETRIEVE)
-// ---
 
 /**
  * Retrieves setting configurations from the harness-agnostic config file (#72).
@@ -145,8 +141,6 @@ function getSettings(_ctx: any) {
 	return { interval, limit, width, visible, showTicks, mode, timezone, disabledEmoji, tokens };
 }
 
-// ---
-// TUI WIDGET UPDATE ENGINE & COMPILER
 // ---
 
 // ---
@@ -326,8 +320,6 @@ function updateWtftWidget(
 	ctx.ui.setWidget("wtft", lines, { placement: "belowEditor" });
 }
 
-// ---
-// MAIN EXTENSION ENTRY POINT
 // ---
 
 // Periodic refresh (1 min) so the 24hr timeline diamond and surge APPROACHING/ENDING

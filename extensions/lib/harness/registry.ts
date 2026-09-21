@@ -38,8 +38,6 @@ import { BUILTIN_HARNESSES } from "./builtins.generated.ts";
 import { WTFT_CONFIG_DIR } from "../wtft-config-dir.ts";
 
 // ---
-// CONFIG
-// ---
 
 /**
  * ~/.config/wtft/harnesses.json (#156 — wtft's own config directory, not
@@ -78,8 +76,6 @@ function expandHome(p: string): string {
 	return p;
 }
 
-// ---
-// REGISTRY STATE
 // ---
 
 /** Harnesses contributed by config-declared external modules. */

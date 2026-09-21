@@ -17,8 +17,6 @@ import { applyUserPricing, type ModelPricing } from "./wtft-cost.js";
 import { WTFT_CONFIG_DIR } from "./wtft-config-dir.js";
 
 // ---
-// PATH RESOLUTION
-// ---
 
 /**
  * ~/.config/wtft/pricing.json (#156 — wtft's own config directory, not
@@ -29,8 +27,6 @@ export function getUserPricingPath(): string {
 	return path.join(xdgHome, WTFT_CONFIG_DIR, "pricing.json");
 }
 
-// ---
-// LOADER
 // ---
 
 /**

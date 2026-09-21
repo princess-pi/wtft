@@ -13,8 +13,6 @@
 import * as fs from "node:fs";
 
 // ---
-// CONSTANTS
-// ---
 
 /**
  * Tail windows, widened only on a miss. 512 KB is the last window, not a
@@ -24,8 +22,6 @@ import * as fs from "node:fs";
  */
 const TAIL_WINDOWS = [8 * 1024, 64 * 1024, 512 * 1024];
 
-// ---
-// MEMOISATION
 // ---
 
 /** Keyed on (path, mtimeMs, size) — an unchanged transcript is never re-read. */
@@ -71,8 +67,6 @@ export function resetCwdCache(): void {
 	dirWalkCount = 0;
 }
 
-// ---
-// RESOLUTION
 // ---
 
 /**
@@ -164,8 +158,6 @@ export function resolveLastCwd(filePath: string, knownStat?: fs.Stats): string |
 	return result;
 }
 
-// ---
-// SLUG ENCODING
 // ---
 
 /**

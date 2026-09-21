@@ -1,10 +1,7 @@
 /** Pure cost calculation for model token pricing. */
 
 // ---
-// TYPES
-// ---
 
-/** Per-1M-token rates for a single pricing tier. */
 export interface CostTier {
 	/** Total input tokens (input + cacheRead + cacheWrite) must exceed this to apply. */
 	inputTokensAbove: number;
@@ -29,7 +26,6 @@ export interface DateTier {
 	cacheWrite: number;
 }
 
-/** Complete pricing config for a model (base rates + optional tier overrides). */
 export interface ModelPricing {
 	input: number;
 	output: number;
@@ -40,13 +36,9 @@ export interface ModelPricing {
 }
 
 // ---
-// PER-REQUEST TOOL PRICING (separate meter from token pricing)
-// ---
 
-/** Per-request fee for web_search tool (Claude models). */
-export const WEB_SEARCH_PRICE = 0.03;  // $0.03 per search request
-/** Per-request fee for web_fetch tool (Claude models). */
-export const WEB_FETCH_PRICE = 0.03;   // $0.03 per fetch request
+export const WEB_SEARCH_PRICE = 0.03;
+export const WEB_FETCH_PRICE = 0.03;
 
 /**
  * Per-request cost of server-side tool usage. Only Claude is billed today.
@@ -62,8 +54,6 @@ export function calculateServerToolCost(
 	webFetchRequests: number
 ): number {
 	const m = (model || "").toLowerCase();
-	// Only Claude charges per-request for server tools.
-	// Other providers (DeepSeek, Gemini, local) don't — return 0.
 	if (m.includes("deepseek")) return 0;
 	if (!m.includes("claude") && !m.includes("anthropic")) {
 		return 0;
@@ -74,8 +64,6 @@ export function calculateServerToolCost(
 /**
  * The DeepSeek peak windows, as minutes since UTC midnight, half-open
  * `[start, end)` — 01:00–04:00 and 06:00–10:00 UTC.
- *
- * This is the one definition. Everything that needs the schedule imports this.
  */
 export const DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES: ReadonlyArray<readonly [number, number]> = [
 	[60, 240],   // 01:00–04:00 UTC
@@ -138,20 +126,13 @@ export function getDeepSeekPeakMultiplier(timestamp?: number): number {
 }
 
 // ---
-// MODEL PRICING REGISTRY
-// ---
 
 /**
- * Known model pricing (including tier thresholds) for models where our
- * fallback cost calculator is used. Pi's built-in cost tracking handles
- * Claude/GPT/Codex — this registry covers DeepSeek and popular models
- * where the fallback matters.
- *
  * Prices are per-1M tokens. Tiers apply when total input tokens
  * (input + cacheRead + cacheWrite) exceed inputTokensAbove.
  */
 export const MODEL_PRICING: Record<string, ModelPricing> = {
-	// Claude (#139) — list rates per MTok. cacheWrite is the 5-min-TTL rate
+	// Claude — list rates per MTok. cacheWrite is the 5-min-TTL rate
 	// (1.25x input); the 1h-TTL rate is derived as 2x input by the cw1h
 	// handling in calculateClaudeCost. Fuzzy substring lookup resolves dated
 	// IDs (claude-haiku-4-5-20251001) to their alias key. New top-tier names
@@ -165,12 +146,6 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 	"claude-opus-4-6":   { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
 	"claude-opus-4-5":   { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
 	"claude-opus-4-1":   { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
-	// claude-sonnet-5 base rates are the standard (post-intro) quad — the
-	// permanent long-run rate. The dateTiers window is the exception: intro
-	// pricing $2/$10/$0.20/$2.50 applies for interactions strictly before
-	// 2026-09-01T00:00:00Z (epoch 1788220800000); $3/$15 from that instant on
-	// (#148). 1h-TTL cache writes derive as 2x whichever input rate resolves
-	// (calculateClaudeCost's cw1hPrice, below) — no separate dated field needed.
 	"claude-sonnet-5":   {
 		input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75,
 		dateTiers: [
@@ -181,63 +156,27 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 	"claude-sonnet-4-6": { input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
 	"claude-sonnet-4-5": { input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
 	"claude-haiku-4-5":  { input: 1.00, output: 5.00, cacheRead: 0.10, cacheWrite: 1.25 },
-	// DeepSeek (#495) — no size tiers; surge is getDeepSeekPeakMultiplier's job.
+	// DeepSeek — no size tiers; surge is getDeepSeekPeakMultiplier's job.
 	//
 	// Base rates are OFF-PEAK, which is the card DeepSeek publishes as "half of
 	// the peak rates". `input` is the CACHE-MISS rate and `cacheRead` the
 	// CACHE-HIT rate, because DeepSeek's Anthropic-format endpoint reports
 	// cache_creation_input_tokens: 0 on every turn and bills a miss as plain
-	// input_tokens — measured across 854 turns. `cacheWrite: 0` is therefore
+	// input_tokens. `cacheWrite: 0` is therefore
 	// correct and must stay.
 	//
 	// The dateTiers windows carry every superseded card so historical sessions
-	// still report what they actually cost. Rates through 2026-09-10 verified
-	// against princess-pi-tools/research/495-deepseek-pricing/pricing-page-2026-08-25.md
-	// (that scrape lives in the origin repo, not this one); the V4.1 Flash card
-	// against research/100-deepseek-v41-flash/pricing-page-2026-09-10.md, which
-	// IS committed here.
-	//
-	// ALL FOUR keys below carry the same unconditioned quad, because all four
-	// names end up serving V4.1 Flash (#100). They differ only in their dated
-	// windows, which is the whole reason those are kept. WHEN each name starts
-	// billing that quad differs: the two v4-flash names from 2026-09-10T04:00Z,
-	// v4-pro not until 2026-09-14T04:00Z. Deliberately not phrased as "three of
-	// four price it today" — that sentence was here first and was true for
-	// exactly four days.
+	// still report what they actually cost.
 	//
 	// Order matters below: -vision-exp must precede -flash, because the fuzzy
 	// lookup would otherwise match the shorter key inside the longer model id.
 	// lookupModelPricing sorts longest-first so this is belt and braces, but a
 	// reader reordering these should know the constraint exists.
-	//
-	// The same reader will ask whether "deepseek-flash" — SHORTER than
-	// "deepseek-v4-flash" and added beside it — can steal a v4 lookup. It cannot,
-	// for two reasons that have to be stated together:
-	//   - neither string is a substring of the other ("deepseek-v4-flash"
-	//     contains "v4-flash", not "deepseek-flash"), so no REALISTIC id matches
-	//     both — a provider prefix and a date suffix cannot produce the other key;
-	//   - and where a contrived id does contain both (say
-	//     "deepseek-flash/deepseek-v4-flash"), longest-first decides it, which is
-	//     the same guarantee -vision-exp relies on.
-	// An earlier version of this comment claimed the first bullet alone proved
-	// "no model id can match both keys at all". It does not — that is a fact
-	// about the two keys, not about every string containing them.
 	"deepseek-v4-flash-vision-exp": {
 		input: 0.15, output: 0.60, cacheRead: 0.003, cacheWrite: 0,
 		// The standard row is the V4.1 FLASH card, not this model's own: from
-		// 2026-09-10T04:00Z the name routes to V4.1 Flash (#100). Its real card
+		// 2026-09-10T04:00Z the name routes to V4.1 Flash. Its real card
 		// is the 0.22 window below.
-		//
-		// It DOES now carry a pre-2026-08-16 window as well, and a comment here
-		// used to say the opposite — correctly, at the time, because the model
-		// had no past card to record. Reinstated with the same caveat #507's
-		// review pinned: the release date 2026-08-21 comes from #495's Sources,
-		// NOT from the committed scrape, which lists this model with no date
-		// suffix while flash carries -0731 and pro -0813. Every vision-exp turn
-		// in this host's corpus is dated 2026-08-24, so no observed turn reaches
-		// the old-card window either way — it is carried for symmetry with
-		// -flash, whose retirement it shares, and costs nothing if the model
-		// really did ship after the cutover.
 		dateTiers: [
 			{ effectiveBefore: DEEPSEEK_RATE_CARD_FROM /* 2026-08-16T16:00:00Z */,
 			  input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 },
@@ -247,7 +186,7 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 	},
 	"deepseek-v4-flash": {
 		// Standard row is the V4.1 Flash card — the name routes there from
-		// 2026-09-10T04:00Z (#100).
+		// 2026-09-10T04:00Z.
 		input: 0.15, output: 0.60, cacheRead: 0.003, cacheWrite: 0,
 		dateTiers: [
 			{ effectiveBefore: DEEPSEEK_RATE_CARD_FROM /* 2026-08-16T16:00:00Z */,
@@ -259,7 +198,7 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 	"deepseek-v4-pro": {
 		// Standard row is the V4.1 Flash card — the name routes there from
 		// 2026-09-14T04:00Z, four days after the Flash line, and there is no
-		// opt-out and no V4.1 Pro to route to instead (#100).
+		// opt-out and no V4.1 Pro to route to instead.
 		input: 0.15, output: 0.60, cacheRead: 0.003, cacheWrite: 0,
 		dateTiers: [
 			{ effectiveBefore: DEEPSEEK_RATE_CARD_FROM /* 2026-08-16T16:00:00Z */,
@@ -268,18 +207,10 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 			  input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0 },
 		],
 	},
-	// V4.1 Flash itself (#100) — native multimodal, 1M context, 552B MoE, and
-	// the model all three keys above resolve to on a current turn.
-	//
-	// No dateTiers, and this one is the real thing rather than an omission that
-	// later needed reinstating: the model did not exist before its card did, so
-	// there is no earlier window to carry. Its rates are the OFF-PEAK card like
-	// every DeepSeek row here; peak is 2x, applied by getDeepSeekPeakMultiplier.
 	"deepseek-flash": {
 		input: 0.15, output: 0.60, cacheRead: 0.003, cacheWrite: 0,
 	},
 	// GPT-5.x — tiered pricing (short-context ≤272K, long-context >272K total input)
-	// Source: pi-ai openai.models.js (v0.80.6)
 	"gpt-5.4": {
 		input: 2.50, output: 15.00, cacheRead: 0.25, cacheWrite: 0,
 		tiers: [{ inputTokensAbove: 272000, input: 5.00, output: 22.50, cacheRead: 0.50, cacheWrite: 0 }],
@@ -309,12 +240,12 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
  * entire request. When multiple tiers match, the highest threshold wins.
  * Returns the base pricing if no tier matches.
  *
- * A dated window (#148) is resolved FIRST, before size tiering: when
+ * A dated window is resolved FIRST, before size tiering: when
  * `timestamp` is supplied and falls before one of `pricing.dateTiers`'
  * `effectiveBefore` cutoffs (earliest matching cutoff wins), that window's
  * quad becomes the base that size tiers apply on top of. No timestamp, or no
  * matching window, leaves `pricing`'s own four fields as the base — this
- * function never reads the host clock (#96).
+ * function never reads the host clock.
  */
 export function resolveTieredRates(
 	pricing: ModelPricing,
@@ -372,7 +303,7 @@ export function resolveTieredRates(
 }
 
 /**
- * Merge user-supplied pricing entries over the built-in registry (#140).
+ * Merge user-supplied pricing entries over the built-in registry.
  * Entries with the same key replace built-ins; new keys extend the registry.
  * Pure merge — reading the pricing file from disk lives in
  * wtft-pricing-config.ts so this module stays fs-free.
@@ -388,28 +319,19 @@ export function applyUserPricing(overrides: Record<string, ModelPricing>): void 
 }
 
 /**
- * Whether a model resolves to REAL pricing (#140) — a (user-merged) registry
+ * Whether a model resolves to REAL pricing — a (user-merged) registry
  * entry, or one of the legacy hardcoded rate branches in calculateClaudeCost.
  * False means the cost for this model is a fallback figure, and the caller
  * marks it: the renderer appends "?" to the cost cell and the CLI prints one
  * stderr warning per distinct model.
  *
- * `deepseek` is NOT on this list, and that is the fix in #22 B / #25 B. It was,
- * so any id containing `deepseek` reported as priced — including one no
- * registry key matched, which calculateClaudeCost prices by borrowing a sibling
- * entry in a branch its own comment calls a "Guess". The warning therefore
- * never fired for a DeepSeek model NEWER than the registry, which is precisely
- * the case it exists for; `deepseek-reasoner` (527 turns on this host) is the
- * live instance. `haiku` and `opus` stay because they name real hardcoded
- * branches below, not a guess.
- *
  * The `deepseek` test comes FIRST and returns false, mirroring the branch order
- * in calculateClaudeCost (pr-review, round 1). An id containing both — say
+ * in calculateClaudeCost. An id containing both — say
  * `deepseek-opus` — takes the sibling-guess branch there, because that branch is
  * tested first; checking `opus` first here would call it priced while it is
  * charged from the flash card rather than the $5.00 the `opus` branch would
- * charge. (No rate quoted: the flash card has moved twice, and a figure here
- * would have to move with it — the registry is two screens up.) The two functions must agree on which branch a model reaches, so they
+ * charge.
+ * The two functions must agree on which branch a model reaches, so they
  * ask in the same order.
  *
  * See describeFallbackPricing for what the caller should say about each class.
@@ -425,31 +347,18 @@ export function isModelPriced(model: string): boolean {
 /**
  * The registry key calculateClaudeCost borrows when a DeepSeek id matches
  * nothing — the "Guess" branch, named once so the warning text and the branch
- * cannot disagree (#22 B). Both call this; neither re-types the condition.
+ * cannot disagree. Both call this; neither re-types the condition.
  *
- * KNOWN GAP since #100, deliberately not fixed here: both keys it can return
+ * KNOWN GAP: both keys it can return
  * are names DeepSeek RETIRED, so the warning tells a user it is guessing with
- * "the deepseek-v4-flash rate card" for a model that no longer exists. For a
- * CURRENT turn the figure is right anyway — every DeepSeek entry now shares one
- * unconditioned quad — and a future `deepseek-v5-*` turn, being after every
- * cutoff, would land on that same standard row rather than on a dated window.
- * The rate would still be one that never applied to a V5 model, and the sibling
- * named in the warning would still be a model DeepSeek no longer serves; it is
- * the NAME that is wrong there, not the resolution mechanism.
- * Returning `deepseek-flash` instead is the obvious change and is a behaviour
- * change with its own test and spec surface, so it is filed rather than
- * smuggled into a repricing branch.
+ * "the deepseek-v4-flash rate card" for a model that no longer exists.
  */
 export function deepSeekSiblingKey(model: string): "deepseek-v4-pro" | "deepseek-v4-flash" {
 	return (model || "").toLowerCase().includes("v4-pro") ? "deepseek-v4-pro" : "deepseek-v4-flash";
 }
 
 /**
- * What calculateClaudeCost will actually charge a model isModelPriced rejects
- * (#22 B). The warning text used to say "using default $3/$15 rates" for every
- * miss, which is untrue for a DeepSeek id: that takes the sibling-guess branch,
- * not the Sonnet default. A warning that misnames the fallback is a warning a
- * reader cannot act on.
+ * What calculateClaudeCost will actually charge a model isModelPriced rejects.
  */
 export function describeFallbackPricing(model: string): string {
 	const m = (model || "").toLowerCase();
@@ -466,22 +375,16 @@ export function describeFallbackPricing(model: string): string {
  * otherwise the LONGEST registry key that is a substring of the ID wins.
  * Longest-first is load-bearing, not a tidiness preference — `deepseek-v4-flash`
  * is a substring of `deepseek-v4-flash-vision-exp`, so insertion order would
- * otherwise decide which card the longer model is priced with (#495).
+ * otherwise decide which card the longer model is priced with.
  *
  * Returns null if nothing matches; the caller falls back to defaults.
  */
 export function lookupModelPricing(model: string): ModelPricing | null {
 	if (!model) return null;
 	const m = model.toLowerCase().trim();
-	// Exact match first
 	if (MODEL_PRICING[m]) return MODEL_PRICING[m];
 	// Fuzzy: the model ID contains a registry key (a provider prefix, a date
-	// suffix). LONGEST KEY WINS (#495) — some keys are substrings of others
-	// ("deepseek-v4-flash" inside "deepseek-v4-flash-vision-exp"), and matching
-	// in registry-insertion order silently priced the longer model with the
-	// shorter one's card. That was harmless only while their rates happened to
-	// be equal; the day they diverge, insertion order is not a pricing decision
-	// anyone made.
+	// suffix). LONGEST KEY WINS.
 	const keysLongestFirst = Object.keys(MODEL_PRICING).sort((a, b) => b.length - a.length);
 	for (const key of keysLongestFirst) {
 		if (m.includes(key)) return MODEL_PRICING[key];
@@ -519,9 +422,7 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 	} else if (m.includes("deepseek")) {
 		// A DeepSeek id no registry key matched — a model newer than this
 		// registry. Guess with the closest sibling's entry, read FROM the
-		// registry (#495): this branch used to hold a second hardcoded copy of
-		// the rate card, and it was still serving the pre-2026-08-16 numbers
-		// long after the registry moved on, because nothing linked the two.
+		// registry.
 		const sibling = MODEL_PRICING[deepSeekSiblingKey(m)];
 		const rates = resolveTieredRates(sibling, usage, timestamp);
 		const peak = getDeepSeekPeakMultiplier(timestamp);
@@ -552,9 +453,8 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 	// Non-registry models: use the legacy 1.25x/2.00x input-price heuristic.
 	if (registryPricing) {
 		// 1h-TTL writes bill at 2x BASE INPUT (API rule), not 2x the 5m rate —
-		// doubling cacheWritePrice (1.25x input) overbilled 1h writes by 25%
-		// (#146; Claude Code caches on the 1h tier, so every CC session read
-		// high). Free-cache-write models stay free.
+		// doubling cacheWritePrice (1.25x input) overbilled 1h writes by 25%.
+		// Free-cache-write models stay free.
 		const cw1hPrice = cacheWritePrice === 0 ? 0 : inputPrice * 2.00;
 		cacheWriteCost =
 			cw5m * (cacheWritePrice / 1000000) +

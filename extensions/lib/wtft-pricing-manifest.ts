@@ -39,7 +39,6 @@ import {
 
 export const PRICING_MANIFEST_SCHEMA = "wtft-pricing/table@1";
 
-/** One rate quad, plus the condition under which it applies. */
 export interface ManifestRates {
 	/** Human-readable condition. "" for a model's standard (unconditioned) row. */
 	condition: string;

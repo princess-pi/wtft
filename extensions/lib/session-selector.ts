@@ -38,15 +38,11 @@ import { readHarnessOrder, recordHarnessOpened, orderByHarness } from "./harness
 import { resolveBranchCheckout } from "./harness/worktrees.ts";
 
 // ---
-// TYPES
-// ---
 
 // SessionCandidate lives behind the harness seam — re-exported so existing
 // importers of session-selector are unaffected.
 export type { SessionCandidate } from "./harness/types.ts";
 
-// ---
-// SESSION AUTO-DISCOVERY
 // ---
 
 /**
@@ -122,8 +118,6 @@ export function harnessLabel(id: string): string {
 }
 
 // ---
-// SESSION SUMMARY (TWO-TIER FALLBACK)
-// ---
 
 /**
  * Session summary with fallback metadata.
@@ -137,7 +131,6 @@ export interface SessionSummary {
 	rawLines: number | null;
 }
 
-/** Simple semver comparator for tag file version strings like "2.3.8". */
 function compareVersions(a: string, b: string): number {
 	const ap = a.split(".").map(Number);
 	const bp = b.split(".").map(Number);
@@ -242,8 +235,6 @@ export function getSessionSummary(sessionPath: string): SessionSummary {
 	return { turns: 0, cost: 0, tagVersion: null, rawLines };
 }
 
-// ---
-// INTERACTIVE SESSION SELECTOR
 // ---
 
 /** Format a cost value for the selector display.

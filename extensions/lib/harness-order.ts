@@ -142,8 +142,6 @@ function isSymlink(p: string): boolean {
 }
 
 // ---
-// GROUPING
-// ---
 
 /** The minimal shape this module needs from a session candidate — just enough
  *  to group and sort, so this file does not import the harness discovery

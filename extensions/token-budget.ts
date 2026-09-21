@@ -9,8 +9,6 @@ import { projectsDir } from "./lib/harness/claude-code/discovery.ts";
 
 
 // ---
-// CONFIGURATION
-// ---
 
 const HOME = os.homedir();
 const PI_DIR = path.join(HOME, ".pi", "agent", "sessions");
@@ -54,8 +52,6 @@ let refreshInterval: ReturnType<typeof setInterval> | null = null;
 let lastCtx: ExtensionContext | null = null;
 let currentTickMs = 1000; // Default to 1 second
 
-// ---
-// HELPERS
 // ---
 
 function getModelShortName(modelName: string): string {
@@ -371,8 +367,6 @@ function getOrUpdateStats(activeFiles: FileInfo[], hostingSessionId: string | nu
 }
 
 // ---
-// WIDGET RENDERER
-// ---
 
 interface BudgetSettings {
   widget: boolean;
@@ -530,8 +524,6 @@ function updateTokenBudgetWidget(ctx: ExtensionContext) {
   }
 }
 
-// ---
-// EXTENSION DEFINITION
 // ---
 
 export default function tokenBudgetExtension(pi: ExtensionAPI) {

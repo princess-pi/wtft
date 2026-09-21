@@ -22,14 +22,10 @@ import { execFileSync } from "node:child_process";
 import { cwdSlugVariants } from "./session-cwd.ts";
 
 // ---
-// CONSTANTS
-// ---
 
 /** git is a subprocess on the interactive path — bound it. */
 const GIT_TIMEOUT_MS = 3000;
 
-// ---
-// REPO DETECTION
 // ---
 
 /**
@@ -92,8 +88,6 @@ export function listWorktreeDirs(repoRoot: string): string[] | null {
 	return dirs.length > 0 ? dirs : null;
 }
 
-// ---
-// FAN-OUT
 // ---
 
 export interface CwdFanOut {

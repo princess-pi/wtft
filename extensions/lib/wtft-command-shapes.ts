@@ -10,8 +10,6 @@
  */
 
 // ---
-// SEGMENTATION
-// ---
 
 /**
  * Shell operators that end one command and begin the next, longest first.
@@ -210,8 +208,6 @@ function splitSegments(cmd: string): JoinedSegment[] {
 }
 
 // ---
-// WORDS AND REDIRECTIONS
-// ---
 
 /** One command, taken apart: its argument words and its redirection targets. */
 export interface CommandWords {
@@ -324,8 +320,6 @@ export function splitCommandWords(cmd: string): CommandWords {
 	return { words, writes, reads };
 }
 
-// ---
-// SCAFFOLDING
 // ---
 
 /**

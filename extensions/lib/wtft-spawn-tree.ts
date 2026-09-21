@@ -179,15 +179,6 @@ export function resolveSessionFile(sessionId: string): string | null {
 	return null;
 }
 
-/** An unstat-able file was just parsed, so it is not quiet: live. */
-function isLive(file: string, now: number): boolean {
-	try {
-		return now - fs.statSync(file).mtimeMs < IDLE_THRESHOLD_MS;
-	} catch {
-		return true;
-	}
-}
-
 /**
  * Walk the recorded lineage of one session, BREADTH-FIRST, counting each
  * session at most once.
@@ -303,7 +294,11 @@ export function computeSpawnTree(
 			}
 
 			let total: TokenTotals;
+			let live: boolean;
 			try {
+				// Stat first, inside the same try: a transcript that cannot be stat-ed
+				// is `unreadable`, never guessed live or quiet.
+				live = now - fs.statSync(file).mtimeMs < IDLE_THRESHOLD_MS;
 				// Parse once: for the cost, and for ids the parse itself folded
 				// in. If a folded child is ALSO a ledger edge, it would be
 				// counted twice — each descendant needs its own guard.
@@ -335,7 +330,7 @@ export function computeSpawnTree(
 			outcomeOf.set(edge.child, "counted");
 			countedTotals.set(edge.child, { ...total });
 			addTotals(tree.total, total);
-			tree.edges.push({ ...base, resolved: true, path: file, total, live: isLive(file, now) });
+			tree.edges.push({ ...base, resolved: true, path: file, total, live });
 			visited.add(edge.child);
 			queue.push({ parentId: edge.child, depth: depth + 1 });
 		}

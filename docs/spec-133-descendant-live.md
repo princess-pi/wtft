@@ -16,9 +16,9 @@ lines" is the requirement, so the transcript's mtime is the measurement, not a p
 ## Shape
 
 - **Liveness.** A counted edge (`resolved: true`) is `live` when its transcript's mtime is less
-  than `IDLE_THRESHOLD_MS` (122 s, the daemon's definition of idle) before now. A transcript that
-  parsed but can no longer be stat-ed also counts as live: the walk cannot tell why the stat
-  failed, and marking it settled would claim a quiet it did not measure. `computeSpawnTree`
+  than `IDLE_THRESHOLD_MS` (122 s, the daemon's definition of idle) before now. The walk stats
+  the transcript before parsing it, in the same `try`, so one that cannot be stat-ed is an
+  `unreadable` edge in `unattributed`, never guessed live or quiet. `computeSpawnTree`
   sets `live: boolean` on every counted edge and on no other edge. `SpawnTreeOptions.now` injects
   the clock.
 - **Verdict.** When the CLI computes the tree and any edge is `live`, and the run is not already
@@ -70,7 +70,7 @@ branch the same day, recorded in #196.
 | spec-26, README, manifest, CONTEXT, EXT_WTFT | `wtft/session@4`, `spawn-tree@1`, a three-value reason set | the bumps this branch made | ✅ `wtft-26-json`, `wtft-116`, `wtft-119` | Updated |
 | spec-26, README, manifest | exit 9 means the total may still grow "under the daemon" | `descendant-live` and `subagent-unreadable` are not daemon lag | `reconciled-against-untested` | Reworded to name `provisional.reason` |
 | this spec, spec-26 | a plain run "exits 0" with a live descendant | a plain run still exits 9 on a provisional tag | `reconciled-against-untested` | "does not make it provisional" |
-| this spec | liveness is an mtime test | an unstat-able transcript also counts as live | `reconciled-against-untested` | Stated, with the reason |
+| this spec | liveness is an mtime test | an unstat-able transcript counted as live, forever (Macroscope, PR #199) | `reconciled-against-untested` | **Code fixed**: stat inside the parse's `try`; the edge is `unreadable` |
 | `--json` empty arms | `notices[]` carries the provisional notice "as for every other reason" | only the populated arm built it, for any reason | ✅ this spec's test (pending arm) | **Code fixed** (pre-PR review): built once, in `emitSessionJson` |
 | this spec's test | "stderr names the live descendant"; exit checks compare against the constant | the sentence names no descendant; the constant could change | — | Message renamed; literal 9 pinned |
 

@@ -576,7 +576,8 @@ means they are not. The marker is binary. It does not estimate how much is still
 
 - **`spawned.edges[].live`** — on every resolved edge, and on no other: `true` when that
   descendant's transcript was modified less than `IDLE_THRESHOLD_MS` (122 s, the daemon's own
-  definition of idle) before now, or can no longer be stat-ed after it parsed. We cannot see whether a child process is alive, only when its transcript
+  definition of idle) before now. A transcript that cannot be stat-ed is an `unreadable` edge,
+  not a live one. We cannot see whether a child process is alive, only when its transcript
   last grew; since the requirement is "not producing lines", that is the thing itself.
 - **`provisional.reason: "descendant-live"`** — set when any edge is `live` and the run is not
   already provisional for another reason. Exit 9, the stderr line, the field and the

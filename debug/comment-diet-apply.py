@@ -37,7 +37,7 @@ def apply(path, dels, keeps):
         prefix = "// " if st.startswith("//") else ("* " if st.startswith("*") else None)
         if prefix is None or "*/" in st:
             sys.exit(f"{path}:{n}: K only rewrites a // line or a block's interior line")
-        out[n - 1] = indent + ("// " if prefix == "// " else "* ") + t
+        out[n - 1] = re.match(r"\s*(?://|\*)\s*", s).group(0) + t
     for n in dels:
         if not lines[n - 1].strip().startswith(("//", "/*", "*")) and lines[n - 1].strip():
             sys.exit(f"{path}:{n}: D on a code line: {lines[n-1]!r}")
@@ -47,17 +47,23 @@ def apply(path, dels, keeps):
     new = [out.get(k, l) for k, l in enumerate(lines)]
     for a, b in blocks(lines):
         opener, closer = lines[a].strip(), lines[b].strip()
+        indent = lines[a][: len(lines[a]) - len(lines[a].lstrip())]
+        mark = "/**" if opener.startswith("/**") else "/*"
         body = [k for k in range(a, b + 1) if keep[k] and text_of(new[k])]
         if not body:
             for k in range(a, b + 1): keep[k] = False
             continue
-        if not (keep[a] and keep[b]):
-            sys.exit(f"{path}:{a + 1}: deleted the opener or closer of a block that keeps text")
-        elif len(body) == 1 and opener in ("/**", "/*") and closer == "*/" and keep[a] and keep[b]:
+        if len(body) == 1 and (not keep[a] or not keep[b] or (opener == mark and closer == "*/")):
             k = body[0]
-            indent = lines[a][: len(lines[a]) - len(lines[a].lstrip())]
-            new[a] = f"{indent}{opener} {text_of(new[k])} */"
+            new[a] = f"{indent}{mark} {text_of(new[k])} */"
+            keep[a] = True
             for m in range(a + 1, b + 1): keep[m] = False
+            continue
+        if not keep[a]:  # the opener carried text and went: seat it on the first survivor
+            k = body[0]
+            new[k] = f"{indent}{mark} {text_of(new[k])}" + (" */" if k == b else "")
+        if not keep[b]:  # the closer carried text and went: seat it on the last survivor
+            new[body[-1]] = new[body[-1]].rstrip() + " */"
     res = []
     for k, l in enumerate(new):
         if not keep[k]: continue

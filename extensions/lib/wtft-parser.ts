@@ -1,4 +1,12 @@
-/** Session log parsing and interaction classification. */
+/**
+ * Session log parsing and interaction classification.
+ *
+ * Extracts token usage and cost per assistant message, and classifies
+ * interactions into categories. `scanUncountedBillables` counts billed API
+ * calls that have no `usage` object — counted, never priced, so TOTAL stays
+ * derived from recorded usage. Schema knowledge lives behind the harness
+ * seam; this file operates on the neutral vocabulary alone.
+ */
 
 import * as path from "node:path";
 import * as fs from "node:fs";
@@ -34,21 +42,29 @@ export interface Interaction {
 	compactionTokensBefore?: number;
 	/** Observed prompt-cache TTL class from usage.cache_creation — beats the model-name guess. */
 	cacheTtl?: "1h" | "5m";
+	/** Whole prefix re-primed instead of read (cache_read 0, cache_creation > 0).
+	 *  Set from raw usage at parse time; the meter-split otherwise destroys the signal. */
 	cacheMiss?: boolean;
+	/** Turn killed by the user — whole cost is discarded work. */
 	interrupted?: boolean;
 	/** Turn immediately follows a compact summary — its cache_write is the compaction bill. */
 	afterCompaction?: boolean;
+	/** 1h-tier share of cacheWriteTokens; recache-signature input. */
 	cacheWrite1hTokens?: number;
+	/** usage.iterations length when present; recache-signature guard. */
 	iterations?: number;
 	/** Subagent sidechain entry — excluded from prevCtx recache tracking. */
 	isSidechain?: boolean;
 	files: { path: string; action: "read" | "write" }[];
 	commands: string[];
 	texts: string[];
+	/** Categories implied by recognized non-file tools (Task→agents, WebSearch→web, …). */
 	toolCats?: Category[];
 	/** Unmodeled tool_use — classifies "other", never "prompt". */
 	unrecognizedTool?: boolean;
+	/** Pre-classified category from the daemon tag file — short-circuits classifyInteraction. */
 	_cat?: Category;
+	/** Timestamp falls within DeepSeek surge-pricing hours. Serialized to tag file as `sp`. */
 	surgePriced?: boolean;
 }
 
@@ -59,13 +75,17 @@ export interface Interaction {
 // not in adapters (schema).
 // ---
 const TOOL_CATEGORY_MAP: Record<string, Category> = {
+	// Subagent orchestration, including tools that manage a spawned agent
 	task: "agents", agent: "agents", workflow: "agents",
 	taskoutput: "agents", taskstop: "agents", sendmessage: "agents",
 	listagents: "agents", monitor: "agents",
+	// Server-side web tools — token side joins the request-cost side
 	websearch: "web", webfetch: "web",
 	search_web: "web", web_search: "web", fetch_url: "web",
+	// Worktree navigation is repo workflow
 	enterworktree: "git", exitworktree: "git",
 	grep: "grep", glob: "grep", find: "grep", search_files: "grep",
+	// Planning/steering — split out of "prompt" so prompt = pure reply
 	todowrite: "plan", todo_write: "plan", taskcreate: "plan", taskupdate: "plan",
 	taskget: "plan", tasklist: "plan", askuserquestion: "plan", ask: "plan",
 	enterplanmode: "plan", exitplanmode: "plan", skill: "plan", toolsearch: "plan",
@@ -75,6 +95,10 @@ const TOOL_CATEGORY_MAP: Record<string, Category> = {
 /** Pure navigation/bookkeeping: real calls, but not work — neither "other" nor poison `prompt`. */
 const TOOL_NOOP = new Set(["change_working_directory", "cd", "pwd", "lsdir", "listmcpresourcestool"]);
 
+/**
+ * MCP tools arrive as `mcp__<server>__<tool>`; only the search/fetch family is
+ * mapped. Anything else returns null — unknown, not conversation.
+ */
 function mapMcpToolToCategory(name: string): Category | null {
 	if (!name.startsWith("mcp__")) return null;
 	const tool = name.slice(name.indexOf("__", 5) + 2);
@@ -82,16 +106,19 @@ function mapMcpToolToCategory(name: string): Category | null {
 	return null;
 }
 
+/** Route one non-file tool call into toolCats / unrecognizedTool flags. */
 function mapToolToCategory(name: string, toolCats: Set<Category>): boolean {
 	const cat = TOOL_CATEGORY_MAP[name] || mapMcpToolToCategory(name);
 	if (cat) {
 		toolCats.add(cat);
 		return true;
 	}
+	// Navigation is "handled" with no category: neither work nor disqualified from pure reply.
 	if (TOOL_NOOP.has(name)) return true;
 	return false;
 }
 
+/** Record every file a bash command touches so shell reads/edits classify as the work they did. */
 function extractFilesFromBashCommand(command: string, files: { path: string; action: "read" | "write" }[]) {
 	for (const real of extractRealCommands(command)) collectFilesFromShellCommand(real, files);
 }
@@ -99,6 +126,7 @@ function extractFilesFromBashCommand(command: string, files: { path: string; act
 export function parseEntryToInteraction(entry: any, thinkingLevel?: string, compactionTokensBefore?: number, afterCompaction?: boolean, currentModel?: string): Interaction | null {
 	if (!entry) return null;
 
+	// First harness that recognizes this entry owns it.
 	let turn = null;
 	for (const adapter of getParseAdapters()) {
 		turn = adapter.matchAssistant(entry);
@@ -110,6 +138,7 @@ export function parseEntryToInteraction(entry: any, thinkingLevel?: string, comp
 	return null;
 }
 
+/** Shared path over normalized AssistantTurn / ParsedBlock vocabulary. */
 function buildInteraction(
 	turn: import("./harness/types.ts").AssistantTurn,
 	adapter: import("./harness/types.ts").HarnessParseAdapter,
@@ -120,6 +149,7 @@ function buildInteraction(
 ): Interaction {
 	const usage = turn.usage;
 
+	// Per-message model wins; otherwise fill from model_change tracking (Pi).
 	const effectiveModel = turn.model || currentModel || "";
 
 	let timestamp = 0;
@@ -152,6 +182,7 @@ function buildInteraction(
 		}, timestamp);
 	}
 
+	// Observed cache TTL — authoritative over any model-name guess.
 	const cacheCreation = usage.cache_creation || {};
 	const cacheTtl: "1h" | "5m" | undefined =
 		(cacheCreation.ephemeral_1h_input_tokens || 0) > 0 ? "1h"
@@ -227,6 +258,7 @@ function buildInteraction(
 
 // ---
 
+/** Both marker spellings: plain interrupt and "for tool use". */
 export const INTERRUPT_PREFIX = "[Request interrupted by user";
 
 /** User interrupt marker — stamps the PRECEDING assistant turn as interrupted. */
@@ -234,6 +266,11 @@ export function isInterruptMarker(entry: any): boolean {
 	return readControlEntry(entry)?.kind === "interrupt";
 }
 
+/**
+ * Recognize a stream-control entry (model change, thinking level, compaction,
+ * interrupt). Every registered adapter is consulted — control markers are not
+ * mutually exclusive across harnesses.
+ */
 export function readControlEntry(entry: any): ControlSignal | null {
 	if (!entry) return null;
 	for (const adapter of getParseAdapters()) {
@@ -243,6 +280,7 @@ export function readControlEntry(entry: any): ControlSignal | null {
 	return null;
 }
 
+/** Mutable per-file state threaded through a sequential transcript read. */
 export interface ParseStreamState {
 	thinkingLevel?: string;
 	model?: string;
@@ -256,7 +294,7 @@ export function newParseStreamState(): ParseStreamState {
 
 /**
  * Apply a control signal to stream state. Returns true when the entry must not
- * be parsed as an assistant turn.
+ * be parsed as an assistant turn. `onInterrupt` stamps the preceding interaction.
  */
 export function applyControlEntry(
 	entry: any,
@@ -277,10 +315,13 @@ export function applyControlEntry(
 
 /**
  * Slice of this interaction's cost that is context maintenance rather than work.
+ *
  *  - compaction: post-compact-summary turn's cache_write $ → "compaction"
  *  - overhead (recache): whole-context rewrite into the 1h cache tier → "overhead"
+ *
  * Dollar component is the rate-weighted cache_write share (conserves totals;
  * only meter ratios matter, so Pi-native costs work too).
+ *
  * @param prevCtxTokens input+cacheRead+cacheWrite of the previous non-sidechain
  *   deduped interaction (0 = unknown → no recache detection)
  */
@@ -307,6 +348,7 @@ export function splitOverheadCost(
 	}
 	if (!kind) return null;
 
+	// cache_write $ share: full cost minus the same usage with writes removed.
 	const cw1h = interaction.cacheWrite1hTokens || 0;
 	const usage = {
 		input_tokens: interaction.inputTokens,
@@ -357,9 +399,11 @@ export function parseSessionFile(filePath: string): Interaction[] {
 				state.afterCompaction = false;
 			}
 		} catch {
+			// Skip unparseable lines (partial writes, non-JSON)
 		}
 	}
 
+	// Attribute `claude -p` sub-agent costs so callers get complete data.
 	attributeClaudeSubAgentCosts(interactions);
 
 	return interactions;
@@ -373,7 +417,9 @@ export function parseSessionFile(filePath: string): Interaction[] {
 // ---
 
 export interface UncountedBillables {
+	/** `/compact` requests: billed, no `usage` written. */
 	compaction: number;
+	/** "While you were away" recaps: billed, no `usage` written. */
 	recap: number;
 }
 
@@ -394,12 +440,17 @@ export function readUncountedBillableClass(entry: any): UncountedBillableClass |
 	return null;
 }
 
+/**
+ * Count billed-but-unrecorded events in one session file.
+ * Standalone scan: these events attach to no interaction, and
+ * `parseSessionFile`'s signature is load-bearing elsewhere.
+ */
 export function scanUncountedBillables(filePath: string): UncountedBillables {
 	return scanUncountedBillablesChecked(filePath).counts;
 }
 
 /**
- * `readable: false` is distinct
+ * Same scan, plus whether the file could be read. `readable: false` is distinct
  * from "read, found nothing" — zero counts alone would look complete.
  */
 export function scanUncountedBillablesChecked(filePath: string): { counts: UncountedBillables; readable: boolean } {
@@ -421,7 +472,13 @@ export function scanUncountedBillablesChecked(filePath: string): { counts: Uncou
 }
 
 
-/** Returns null for "no claim" — empty, unreadable, or unknown format. */
+/**
+ * Which harness wrote this session?
+ *
+ * Same adapter dispatch as `parseEntryToInteraction`, but picks the first
+ * adapter that claims the earliest claimable entry (not one arbitrary entry).
+ * Returns null for "no claim" — empty, unreadable, or unknown format.
+ */
 export function detectSessionHarness(filePath: string): string | null {
 	let content: string;
 	try {
@@ -470,6 +527,7 @@ export function deduplicateInteractions(interactions: Interaction[]): Interactio
 		if (group.length === 1) {
 			deduped.push(group[0]);
 		} else {
+			// Max cost (streaming partials), merge content for classification
 			let best = group[0];
 			for (let j = 1; j < group.length; j++) {
 				if (group[j].cost > best.cost) best = group[j];
@@ -500,6 +558,7 @@ export function deduplicateInteractions(interactions: Interaction[]): Interactio
 				}
 				for (const tc of i.toolCats || []) mergedToolCats.add(tc);
 				if (i.unrecognizedTool) merged.unrecognizedTool = true;
+				// Overhead flags: any copy carrying them marks the whole message.
 				if (i.interrupted) merged.interrupted = true;
 				if (i.afterCompaction) merged.afterCompaction = true;
 				if (i.surgePriced) merged.surgePriced = true;
@@ -533,7 +592,10 @@ export function normalizeCommand(cmd: string): string {
 /** Spawning another agent. Excludes `.claude/` paths and `CLAUDE.md`. */
 const CLAUDE_SPAWN = /(?:^|\s)claude(?:\s+-|\s*\||\s*$)/;
 
-/** THE one predicate — reads each real command's HEAD so heredoc text is not a spawn. */
+/**
+ * Does this bash command string spawn an agent?
+ * THE one predicate — reads each real command's HEAD so heredoc text is not a spawn.
+ */
 export function commandSpawnsAgent(cmd: string): boolean {
 	return extractRealCommands(cmd).some(real => CLAUDE_SPAWN.test(real.split("\n", 1)[0]!.toLowerCase()));
 }
@@ -544,14 +606,19 @@ export function commandSpawnsAgent(cmd: string): boolean {
  */
 const GIT_COMMAND = /^(?:git|gh|tig|hub|glab|pr-(?:open|submit|ready|watch|threads|cleanup|merge|reject|review|verdict|guard)|git-(?:checkpoint|overview|snap)|wt-new|iarts-mirror|repo-gate)(?:\s|$)/;
 
-/** `list` and `close` stay `git`: navigation / workflow, not content. */
+/**
+ * `gh issue` subcommands that touch issue content — that is spec work.
+ * `list` and `close` stay `git`: navigation / workflow, not content.
+ */
 const GH_SPEC = /^gh\s+issue\s+(?:view|comment|create|edit|reopen|develop)(?:\s|$)/;
 
+/** `gh` search family — GraphQL query and `gh search`. */
 const GH_SEARCH = /^gh\s+(?:api\s+graphql|search)(?:\s|$)/;
 
 /** Running a test suite. `bun test x` is tests; `bun build.ts` is not. */
 const TEST_RUNNER = /^(?:(?:bun|npm|pnpm|yarn|deno)\s+(?:run\s+)?test\b|(?:bun|npx)\s+\S*tests?\/|(?:pytest|jest|vitest|mocha|ava|tap|cypress|playwright|ctest)\b|(?:go|cargo)\s+test\b|(?:bash|sh|zsh)\s+\S*tests?\/|\.?\/?tests?\/\S+\.(?:sh|ts|js|mjs|py)\b)/;
 
+/** Building, typechecking or linting — a code activity, not "other". */
 const BUILD_COMMAND = /^(?:(?:bun|npm|pnpm|yarn|deno)\s+run\s+(?:build|typecheck|lint|check|compile|bundle)\b|bun\s+build\S*|(?:tsc|esbuild|webpack|vite|rollup|make|cmake|ninja|gcc|g\+\+|clang|eslint|prettier|ruff|black|clippy|shellcheck)\b|(?:go|cargo)\s+(?:build|install)\b)/;
 
 // ---
@@ -560,6 +627,7 @@ const BUILD_COMMAND = /^(?:(?:bun|npm|pnpm|yarn|deno)\s+run\s+(?:build|typecheck
 // ---
 
 /**
+ * Commands whose non-flag arguments are file paths being READ.
  * Excludes metadata commands (`stat`, `file`, `shasum`) — they name a path
  * without reading content.
  */
@@ -571,21 +639,29 @@ const FILE_READER = /^(?:sed|cat|head|tail|less|more|bat|nl|od|xxd|strings|wc|aw
  */
 const PROGRAM_FIRST_ARG = /^(?:sed|awk|gawk|nawk|perl|jq|yq)(?:\s|$)/;
 
+/** A bare number is an argument value (`tail -n 50`), never a path. */
 const NUMERIC = /^\d+$/;
 
 /**
+ * Absolute paths that are real files but not repository work.
  * `classifyByFilePaths` grades by extension/dir and cannot tell a repo from
  * scratch — without this, `/dev/null` and `/tmp/*.txt` grade as `code`.
  */
 const NOT_A_REPO_FILE = /^\/(?:dev|proc|sys|run|tmp|etc|var|boot|lib|sbin|opt)(?:\/|$)/;
 
+/** Readers that are writing when the flag says so (`sed -i`). */
 const IN_PLACE_EDIT = /^(?:sed\s+(?:-\S*\s+)*(?:-i\S*|--in-place(?:=\S+)?)|perl\s+(?:-\S+\s+)*-i\S*|tee)(?:\s|$)/;
 
+/** Interpreters running an inline script rather than a file. */
 const INLINE_SCRIPT = /^(?:python3?|node|bun|deno|perl|ruby|php|osascript)\s+(?:-\s*(?:$|<)|-\s|-c(?:\s|$)|-e(?:\s|$))/;
 
-/** unexpanded globs must not enter the file list */
+/**
+ * Token that plausibly names a file. Permissive on extension, strict on
+ * shell metacharacters (unexpanded globs must not enter the file list).
+ */
 const PATHLIKE = /^(?:~|\.\.?)?\/?[A-Za-z0-9_.@+][A-Za-z0-9_.@+/-]*$/;
 
+/** Split one command into its argument words, quotes respected. */
 function shellWords(cmd: string): string[] {
 	const out: string[] = [];
 	const re = /"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/g;
@@ -595,10 +671,12 @@ function shellWords(cmd: string): string[] {
 }
 
 /**
+ * Record every file a single real command touches, as read or write.
  * Conservative: unidentified paths contribute nothing; over-claiming is worse
  * than leaving spend in `other`.
  */
 function collectFilesFromShellCommand(cmd: string, files: { path: string; action: "read" | "write" }[]): void {
+	// Inline script: paths are string literals inside the body.
 	if (INLINE_SCRIPT.test(cmd)) {
 		const writes = /\b(?:open\s*\(\s*["']([^"']+)["']\s*,\s*["'][wa]|writeFileSync\s*\(\s*["']([^"']+)["']|write_text\s*\(|Path\s*\(\s*["']([^"']+)["']\s*\)\s*\.write)/g;
 		const reads = /\b(?:open\s*\(\s*["']([^"']+)["']|readFileSync\s*\(\s*["']([^"']+)["']|read_text\s*\(|loadtxt\s*\(\s*["']([^"']+)["'])/g;
@@ -620,6 +698,7 @@ function collectFilesFromShellCommand(cmd: string, files: { path: string; action
 	// splitCommandWords is quote-aware (`>` inside quotes is not a redirection).
 	const { words, writes, reads } = splitCommandWords(cmd);
 
+	// Redirection into a path is a write (`cat > bin/x.ts <<'EOF'`).
 	const written = new Set<string>();
 	for (const p of writes) {
 		if (!p || NOT_A_REPO_FILE.test(p) || !PATHLIKE.test(p)) continue;
@@ -630,11 +709,13 @@ function collectFilesFromShellCommand(cmd: string, files: { path: string; action
 	const isEdit = IN_PLACE_EDIT.test(cmd);
 	if (!FILE_READER.test(cmd) && !isEdit) return;
 
+	// Input redirection is a READ, never a write.
 	for (const p of reads) {
 		if (!p || written.has(p) || NOT_A_REPO_FILE.test(p) || !PATHLIKE.test(p)) continue;
 		files.push({ path: p, action: "read" });
 	}
 
+	// sed/awk take a program as their first non-flag argument; it is not a path.
 	let skipProgram = PROGRAM_FIRST_ARG.test(cmd);
 	for (const w of words.slice(1)) {
 		if (w.startsWith("-")) continue;
@@ -663,6 +744,7 @@ function classifyByFilePaths(files: { path: string; action: "read" | "write" }[]
 		let category: "spec" | "code" | "tests" | "research" | "plan" | null = null;
 
 		if (norm.includes("node_modules/")) {
+			// Third-party docs/READMEs are reference material
 			if (path.extname(norm).toLowerCase() === ".md" || norm.includes("/docs/")) {
 				category = "research";
 			} else {
@@ -684,6 +766,7 @@ function classifyByFilePaths(files: { path: string; action: "read" | "write" }[]
 			if ([".ts", ".js", ".mjs", ".json", ".jsonl", ".css", ".tsx", ".jsx", ".py", ".rs", ".go", ".sh", ".yml", ".yaml", ".sql", ".txt"].includes(ext) || norm.endsWith(".gitignore") || norm.endsWith(".dockerignore")) {
 				category = "code";
 			} else if (ext === "") {
+				// Extensionless wrappers (wtft, serve, merge) are code
 				category = "code";
 			}
 		}
@@ -729,6 +812,7 @@ export function classifyInteraction(interaction: Interaction): Category {
 	}
 
 	if (interaction.commands.length > 0) {
+		// Every real command, not just the first.
 		const real = interaction.commands.flatMap(cmd => extractRealCommands(cmd));
 
 		let isGit = false;
@@ -772,6 +856,7 @@ export function classifyInteraction(interaction: Interaction): Category {
 // ---
 
 /**
+ * What the harness writes beside every built-in (Task) subagent transcript.
  * `agentType` and `spawnDepth` are required; everything else is optional
  * (Dynamic Workflow children under `subagents/workflows/` carry neither
  * `description` nor `toolUseId`).
@@ -779,7 +864,9 @@ export function classifyInteraction(interaction: Interaction): Category {
 export interface SubagentMeta {
 	agentType: string;
 	spawnDepth: number;
+	/** Absent on Dynamic Workflow children. */
 	description?: string;
+	/** Absent on Dynamic Workflow children. */
 	toolUseId?: string;
 	model?: string;
 	parentAgentId?: string;
@@ -787,8 +874,10 @@ export interface SubagentMeta {
 }
 
 /**
+ * The `.meta.json` beside a subagent transcript, or `null`.
  * Never throws, never partially succeeds — undocumented harness output; a
  * missing required field is `null` rather than a half-filled record.
+ * Call {@link readSubagentMetaChecked} to distinguish unreadable from absent.
  */
 export function readSubagentMeta(transcriptPath: string): SubagentMeta | null {
 	return readSubagentMetaChecked(transcriptPath).meta;
@@ -836,6 +925,7 @@ function parseSubagentMeta(raw: string): SubagentMeta | null {
 	return meta;
 }
 
+/** First `count` lines of `file` without reading the rest. Throws on read failure. */
 function readHeadLines(file: string, count: number): string[] {
 	const fd = fs.openSync(file, "r");
 	try {
@@ -857,6 +947,12 @@ function readHeadLines(file: string, count: number): string[] {
 	}
 }
 
+/**
+ * Discover subagent session files for a parent session.
+ *
+ * Pattern 1 (Claude Code): <session-dir>/<session-name>/subagents/agent-*.jsonl
+ * Pattern 2 (Pi): sibling files with parentSession header match
+ */
 export function discoverSubagentSessionFiles(
 	sessionPath: string,
 ): { files: string[]; unreadable: Error | null } {
@@ -890,6 +986,7 @@ export function discoverSubagentSessionFiles(
 		}
 	}
 
+	// Pattern 2: Pi parentSession (non-recursive)
 	let mainSessionId: string | undefined;
 	let mainHeaderRaw: string | null = null;
 	try {
@@ -961,6 +1058,7 @@ export function discoverSubagentSessionFiles(
 }
 
 /**
+ * Recursively collect agent-*.jsonl under a subagent directory.
  * Returns the first per-entry stat failure (reported, not thrown);
  * dir-level readdir failures throw.
  */
@@ -997,6 +1095,7 @@ function walkSubagentDir(
 			// Never recurse into a symlinked directory (acyclic foreign trees).
 			if (entry.isSymbolicLink() && stat.isDirectory()) continue;
 			if (stat.isDirectory()) {
+				// Recurse all dirs; agent-*.jsonl filter gates collection.
 				// Skip wtft-tags (our own output would double-count).
 				if (f !== "wtft-tags") {
 					const childErr = walkSubagentDir(fullPath, files, seen);
@@ -1024,6 +1123,7 @@ function walkSubagentDir(
 const warnedUnreadableFile = new Set<string>();
 
 /**
+ * Warn once per unreadable transcript per process.
  * `phase`: "at discovery" (head-scan) or "or parsed" (whole-file parse —
  * phrasing is load-bearing for daemon warnings and tests).
  */
@@ -1035,7 +1135,10 @@ export function warnUnreadableTranscript(file: string, phase: "at discovery" | "
 	);
 }
 
-/** An unreadable dir drops every transcript under it — skip must be loud. */
+/**
+ * Warn once per unreadable subagent directory per process.
+ * An unreadable dir drops every transcript under it — skip must be loud.
+ */
 const warnedUnreadableDir = new Set<string>();
 function warnUnreadableSubagentDir(dir: string, err: unknown): void {
 	if (warnedUnreadableDir.has(dir)) return;
@@ -1046,6 +1149,7 @@ function warnUnreadableSubagentDir(dir: string, err: unknown): void {
 }
 
 /**
+ * Clear cacheMiss on every interaction from a subagent transcript.
  * Provenance settles the divider: Pi and nested workflow layouts have no
  * per-entry isSidechain. Only the divider flag is cleared — not isSidechain
  * (that gates recache detection). Mutates in place; returns the same array.
@@ -1055,6 +1159,10 @@ export function clearSubagentCacheMiss<T extends { cacheMiss?: boolean }>(intera
 	return interactions;
 }
 
+/**
+ * Parse and classify subagent interactions from raw session files.
+ * Returns interactions stamped with _cat for downstream short-circuit.
+ */
 export function loadSubagentInteractions(
 	subagentFiles: string[],
 	parseFn = parseSessionFile,
@@ -1064,6 +1172,7 @@ export function loadSubagentInteractions(
 	return loadSubagentInteractionsChecked(subagentFiles, parseFn, classifyFn, dedupFn).interactions;
 }
 
+/** {@link loadSubagentInteractions}, plus the files it dropped. */
 export function loadSubagentInteractionsChecked(
 	subagentFiles: string[],
 	parseFn = parseSessionFile,
@@ -1097,12 +1206,14 @@ export function loadSubagentInteractionsChecked(
 const CLAUDE_SUBAGENT_WINDOW_MS = 15_000; // ±15s window for timestamp matching
 
 /**
+ * Directory a bash command's `claude -p` spawn ran in.
  * Last `cd` at or before the spawn, or null when unknown.
  * `cd` right of `||` is a fallback — keep the first of the chain.
  * Expandable targets (`$VAR`, `$(…)`) return null, not a wrong guess.
  */
 export function extractCwdFromBashCommand(cmd: string): string | null {
 	let found: string | null = null;
+	// Immediate predecessor was a kept `cd` — not "a cd appeared somewhere earlier".
 	let prevWasKeptCd = false;
 	for (const { text, joinedBy } of extractJoinedSegments(cmd)) {
 		const bare = stripCommandPrefixes(text);
@@ -1111,6 +1222,7 @@ export function extractCwdFromBashCommand(cmd: string): string | null {
 		if (CLAUDE_SPAWN.test(head.toLowerCase())) break;
 		const m = head.match(/^cd\s+(?:"([^"]*)"|'([^']*)'|([^\s;&|]+))/);
 		if (!m) { prevWasKeptCd = false; continue; }
+		// `A || B`: keep the first of a fallback chain.
 		if (joinedBy === "||" && prevWasKeptCd) continue;
 		prevWasKeptCd = true;
 		const target = m[1] || m[2] || m[3] || "";
@@ -1121,7 +1233,10 @@ export function extractCwdFromBashCommand(cmd: string): string | null {
 	return found;
 }
 
-/** Each `commands` entry is its own Bash call with its own shell. */
+/**
+ * Cwd of the command that actually contains the `claude -p` spawn.
+ * Each `commands` entry is its own Bash call with its own shell.
+ */
 export function cwdForClaudeSpawn(commands: string[]): string | null {
 	for (const cmd of commands) {
 		if (!commandSpawnsAgent(cmd)) continue;
@@ -1134,7 +1249,7 @@ export function cwdForClaudeSpawn(commands: string[]): string | null {
 /**
  * Discover `claude -p` sub-agent session files whose first timestamp falls
  * within `windowMs` of `parentTimestamp`, under every slug the cwd may be
- * filed under — a `.` in the cwd is folded to `-` as well as `/`.
+ * filed under — a `.` in the cwd is folded to `-` as well as `/` (#179).
  */
 export function discoverClaudeSubAgentSessionFiles(
 	cwd: string,
@@ -1162,6 +1277,7 @@ function scanClaudeProjectDir(
 		const projectStat = fs.statSync(projectDir);
 		if (!projectStat.isDirectory()) return { files: [], unreadable: null };
 	} catch (err) {
+		// ENOENT = absent (silent). Other stat errors = read failure (warn + throw).
 		if ((err as NodeJS.ErrnoException).code === "ENOENT") return { files: [], unreadable: null };
 		warnUnreadableSubagentDir(projectDir, err);
 		throw new Error(`claude subagent projects directory could not be read (${projectDir}): ${err instanceof Error ? err.message : String(err)}`);
@@ -1209,17 +1325,23 @@ function scanClaudeProjectDir(
 	}
 
 	if (firstUnreadable) {
+		// Return readable matches alongside the failure; caller owns the fail-safe.
 		return { files, unreadable: firstUnreadable };
 	}
 
 	return { files, unreadable: null };
 }
 
+/** Any command invokes `claude` as a sub-agent (same predicate as classification). */
 function interactionHasClaudeCommand(interaction: Interaction): boolean {
 	return interaction.commands.some(commandSpawnsAgent);
 }
 
-/** `seenSessionIds` is local to this call — re-calling over slices double-counts. */
+/**
+ * For each interaction that spawns `claude -p`, discover sub-agent sessions,
+ * parse them, and add their token totals to the parent. Mutates in place.
+ * `seenSessionIds` is local to this call — re-calling over slices double-counts.
+ */
 export function attributeClaudeSubAgentCosts(
 	interactions: Interaction[],
 ): void {
@@ -1227,6 +1349,7 @@ export function attributeClaudeSubAgentCosts(
 
 	for (const interaction of interactions) {
 		if (!interactionHasClaudeCommand(interaction)) continue;
+		// Already attributed by a prior call
 		if ((interaction as any).claudeSubAgentSessionIds) continue;
 
 		const cwd = cwdForClaudeSpawn(interaction.commands);

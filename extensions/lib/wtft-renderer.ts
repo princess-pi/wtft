@@ -1,4 +1,22 @@
-/** Bar chart rendering, histograms, token summaries, and terminal utilities. */
+/**
+ * Bar chart rendering, histograms, token summaries, and terminal utilities.
+ * Builds visual output from parsed Interaction arrays: binned bar charts,
+ * SURGE timeline markers, "Other" command histograms, and per-model token tables.
+ *
+ * Two renderers take input that is NOT an Interaction array, and both print
+ * BELOW the TOTAL row because both describe spend that is not in it:
+ * `renderUncountedBillables` counts billed-but-unrecorded events — the
+ * only output here that reports spend wtft cannot price, and it deliberately
+ * carries no dollar figure. `renderSpawnTree` reports the sessions
+ * this one launched: priced, known to the penny, and still not in TOTAL,
+ * because TOTAL means this session's own turns.
+ *
+ * And one export renders nothing at all: `computeSessionSummary` is the
+ * session aggregation — totals, per-model rows, per-category rows — that
+ * `renderTokenSummary` formats for a human and `wtft-json.ts` serialises for a
+ * machine. It lives here, beside its only in-file consumer, so the rendered
+ * table cannot grow a second copy of the arithmetic.
+ */
 
 import type { Interaction, Category } from "./wtft-shared.js";
 import type { UncountedBillables } from "./wtft-parser.ts";
@@ -77,6 +95,8 @@ export function tokenFooterSummary(interactions: { inputTokens: number; outputTo
 		reasoning += i.reasoningTokens;
 	}
 	const totalCacheOps = cr + cw + input - cr - cw;
+	// Actually: cache hit rate = cacheRead / (cacheRead + cacheWrite + inputTokens uncached)
+	// input already includes cache? No — field layout: inputTokens = non-cached, cacheRead = separate, cacheWrite = separate
 	const denom = (input - cr - cw) + cr + cw;
 	const hitRate = denom > 0 ? ((cr / denom) * 100).toFixed(0) : "0";
 	const parts: string[] = [];
@@ -109,6 +129,12 @@ export interface IntervalConfig {
 }
 
 /**
+ * Parse an `--interval` argument into a binning configuration.
+ *
+ * Two accepted shapes:
+ *   - **time**  — `<n>m` / `<n>h` / `<n>d` / `<n>w`, e.g. `7m`, `4h`, `2w`
+ *   - **turns** — `<n>t` / `<n>turn` / `<n>turns`, e.g. `7t`
+ *
  * Unparseable input does not throw: it falls back to `1h`, because an interval
  * typo should degrade to the default chart rather than kill the widget mid-render.
  */
@@ -182,6 +208,7 @@ export function getBinInfo(timestamp: number, config: IntervalConfig, turnIndex:
 	const dateStr = `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`;
 	const { size, unit, type } = config;
 
+	// Turn-based binning: bin by interaction sequence position, not time.
 	// turnIndex is 1-based (first interaction = turn 1). Label = highest turn # in bucket.
 	if (type === "turns") {
 		const binEnd = Math.ceil(turnIndex / size) * size;
@@ -264,6 +291,11 @@ export function distributeChars(costs: Record<Category, number>, barWidth: numbe
 //   ▌ (left half block) when they differ (FG=left category, BG=right category)
 // ---
 
+/**
+ * Distribute proportional counts across barWidth × 2 half-slots.
+ * Same remainder-distribution algorithm as {@link distributeChars}, but at
+ * double resolution for half-block rendering.
+ */
 export function distributeHalfSlots(costs: Record<Category, number>, barWidth: number): Record<Category, number> {
 	const total = Object.values(costs).reduce((sum, val) => sum + val, 0);
 	const result = {} as Record<Category, number>;
@@ -304,6 +336,18 @@ export function distributeHalfSlots(costs: Record<Category, number>, barWidth: n
 	return result;
 }
 
+/**
+ * Render half-slots into terminal glyphs.
+ *
+ * Walks the half-slot array left-to-right, pairing slots[2n] + slots[2n+1]
+ * into one terminal cell each:
+ * - Same category → █ (full block) with FG = category color
+ * - Different categories → ▌ (left half block) with FG = left cat, BG = right cat
+ *
+ * @param halfSlots - Array of category tags, length = barWidth × 2
+ * @param styles - CATEGORY_STYLE lookup for FG colors
+ * @returns ANSI string for the bar (barWidth cells wide)
+ */
 export function renderHalfBlockBar(
 	halfSlots: Category[],
 	styles: Record<Category, { fg: number }>
@@ -323,6 +367,12 @@ export function renderHalfBlockBar(
 	return out;
 }
 
+/**
+ * Flatten per-category half-slot counts into a half-slot array ordered by
+ * CATEGORY_ORDER, for feeding into {@link renderHalfBlockBar}.
+ *
+ * Example: { plan: 2, code: 3 } → ["plan", "plan", "code", "code", "code"]
+ */
 export function halfSlotCountsToArray(counts: Record<Category, number>): Category[] {
 	const result: Category[] = [];
 	for (const cat of CATEGORY_ORDER) {
@@ -368,6 +418,7 @@ export function buildTokenTickLine(maxTokens: number, barWidth: number, prefixWi
 		// Force one decimal place so every label has a "." to align on the tick.
 		const text = formatTokenCount(Math.round(tickValues[i]));
 		const displayStr = text.includes(".") ? ` ${text} ` : ` ${text}.0 `;
+		// Align the decimal point exactly on the tick (same strategy as buildTickLine).
 		const dotIdx = displayStr.indexOf(".");
 		const startIdx = ticks[i] - dotIdx;
 		const endIdx = startIdx + displayStr.length;
@@ -430,6 +481,7 @@ export function buildTickLine(maxCost: number, barWidth: number, prefixWidth: nu
 		const displayStr = ` ${text} `;
 		
 		const dotIdx = displayStr.indexOf(".");
+		// Align the decimal point exactly on the tick index inside the overall line
 		const startIdx = ticks[i] - dotIdx;
 		const endIdx = startIdx + displayStr.length;
 
@@ -476,7 +528,10 @@ export function padString(str: string, len: number): string {
 }
 
 export function formatCost(cost: number): string {
-	// Adaptive precision: 4 decimal places for sub-cent values, 2 otherwise
+	// Adaptive precision: 4 decimal places for sub-cent values, 2 otherwise,
+	// so DeepSeek's sub-cent per-turn costs stay readable without cluttering
+	// Claude/Gemini displays.
+	// NOTE the guard is `> 0`: a negative cost gets 2 decimals, not 4.
 	const decimals = cost > 0 && cost < 0.01 ? 4 : 2;
 	return `$${cost.toFixed(decimals)}`;
 }
@@ -496,7 +551,9 @@ export function formatMmmDdStr(dateStr: string): string {
 }
 
 /**
- * wcwidth reports the "ambiguous"-width emoji in
+ * Compute visual (monospace cell) width of a string after stripping ANSI escapes.
+ * Delegates to the wcwidth library for proper Unicode East Asian Width handling,
+ * with one correction: wcwidth reports the "ambiguous"-width emoji in
  * U+2600–U+27BF (☀️ U+2600, ⚡ U+26A1, ⚠️ U+26A0, ✅ U+2705, ❌ U+274C) as one
  * column, but every modern terminal renders them as two. Measuring them at 1
  * made the SURGE timeline a column short at noon — right where the current-hour
@@ -507,10 +564,13 @@ export function getVisualLength(str: string): number {
 	let width = 0;
 	for (const ch of clean) {
 		const cp = ch.codePointAt(0)!;
-		// Variation selectors are zero-width.
+		// Variation selectors are zero-width; the preceding character's width
+		// is what they modify, so they add nothing on their own.
 		if (cp === 0xfe0f || cp === 0xfe0e) continue;
 		const w = cp >= 0x2600 && cp <= 0x27bf ? 2 : wcwidth(ch);
-		// wcwidth returns -1 for control bytes and 0 for combining marks
+		// wcwidth returns -1 for control bytes and 0 for combining marks —
+		// neither should be summed into a width (a stray control byte used to
+		// poison the whole-line wcwidth with -1).
 		if (w > 0) width += w;
 	}
 	return width;
@@ -519,11 +579,17 @@ export function getVisualLength(str: string): number {
 /**
  * Fit `str` into exactly `width` terminal COLUMNS: truncate with an ellipsis if
  * it is too wide, pad with spaces if it is too narrow.
+ *
  * Why this is not `slice` + `padEnd`: both of those count UTF-16 CODE UNITS.
  * A BMP wide character — CJK, Hangul, the fullwidth forms — is ONE code unit
  * and TWO columns, so 40 of them slip past a `length > 40` guard untouched and
  * `padEnd(40)` adds nothing, while the terminal lays out 80 columns and every
- * figure to the right shifts.
+ * figure to the right shifts. Astral emoji hide the bug rather than showing it:
+ * a surrogate pair is two code units AND two columns, so the two measures agree
+ * by coincidence.
+ *
+ * Iterating with `for...of` walks CODE POINTS, so a surrogate pair is measured
+ * once rather than as two half-characters.
  */
 export function fitVisual(str: string, width: number): string {
 	if (width <= 0) return "";
@@ -534,6 +600,7 @@ export function fitVisual(str: string, width: number): string {
 	let used = 0;
 	for (const ch of str) {
 		const w = getVisualLength(ch);
+		// Reserve the last column for the ellipsis.
 		if (used + w > width - 1) break;
 		out += ch;
 		used += w;
@@ -570,12 +637,14 @@ export function getTerminalWidth(isWidget = false, disabledEmoji = false): numbe
 			if (!isNaN(num) && num > 0) width = num;
 		} catch (e) {}
 	}
+	// Widgets: subtract minimal breathing room (1 char per side).
 	// Pi's setWidget() does not enforce its own padding on raw line arrays,
 	// so we only need 2 chars total.
 	return isWidget ? width - 2 : width;
 }
 
 // SURGE TIMELINE: 24-hour bar showing normal (green) vs surge (orange) pricing
+// Used by both Pi TUI widget and CLI watch mode.
 
 export function getCurrentLocalHour(tz?: string): number {
 	const parts = getZonedParts(Date.now(), tz);
@@ -607,8 +676,14 @@ export function resolveZonedLocalHour(year: number, month: number, day: number, 
 }
 
 /**
+ * Returns which local hours (0-23) fall in a surge window, in the configured
+ * timezone, for the day containing `now` (default: the host clock).
+ *
  * The schedule is NOT re-typed here. This asks `getDeepSeekPeakMultiplier`
  * what each hour actually costs, so the display cannot disagree with the bill.
+ *
+ * `now` is a parameter rather than a `Date.now()` call so a test can pin it.
+ *
  * Per-hour offset, not per-day: on a day the zone's offset changes, a single
  * offset applied to all 24 local hours puts far-side hours an hour off. Each
  * candidate hour resolves its own offset via {@link resolveZonedLocalHour}.
@@ -634,6 +709,7 @@ export function getSurgeLocalHours(tz?: string, now: number = Date.now()): Set<n
 }
 
 /**
+ * Checks surge proximity (in UTC) at `at` — default the host clock.
  * Windows come from `DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES` rather than a
  * hardcoded copy; a day that is entirely off-peak reports no proximity.
  */
@@ -680,6 +756,7 @@ function getMoonPhase(date: Date): string {
 }
 
 /**
+ * Build a 24-hour surge timeline string.
  * The bookends are the only glyphs guaranteed present at every hour, so they —
  * not the clock face — are what callers and tests should key off to identify
  * the timeline.
@@ -791,6 +868,8 @@ export function buildWtftLines(
 
 	const intervalConfig = parseInterval(intervalStr);
 
+	// Deduplicate by message.id before binning: Claude Code emits multiple
+	// JSONL lines per API response, each echoing the same message-level usage.
 	interactions = deduplicateInteractions(interactions);
 
 	const binMap = new Map<string, Bin>();
@@ -847,6 +926,7 @@ export function buildWtftLines(
 		.map(entry => entry[1]);
 
 	if (mode === "cumulative") {
+		// Save per-category incremental tokens before cumulative overwrite.
 		if (unit === "tokens") {
 			for (const bin of sortedBins) {
 				if (bin.tokens) {
@@ -996,6 +1076,7 @@ export function buildWtftLines(
 	const legendStr = legendItems.join(" ");
 	
 
+	// Title + timeline on row 0, legend always on row 1.
 	// Putting the legend on its own row avoids layout flip-flop when the
 	// SURGE proximity badge appears/disappears (shifts timelineLen,
 	// potentially crossing an inline-fit threshold).
@@ -1063,6 +1144,9 @@ export function buildWtftLines(
 				for (const cat of CATEGORY_ORDER) allocated += slots[cat];
 			}
 
+			// Distribute remaining half-slots to categories furthest below their
+			// ideal proportional share. No gate on floor > 0 — the deficit formula
+			// naturally prefers categories with meaningful cost shares.
 			while (allocated < halfSlotWidth) {
 				let maxDeficit = -Infinity;
 				let maxCat: Category | null = null;
@@ -1153,6 +1237,7 @@ export function buildWtftLines(
 					if (oldChars > 0) barStr += `\x1b[38;5;${fg}m${BLOCK_OLD.repeat(oldChars)}\x1b[0m`;
 					if (newChars > 0) barStr += `\x1b[38;5;${fg}m${BLOCK_NEW.repeat(newChars)}\x1b[0m`;
 				} else {
+					// Bucket mode: full-height character (each row = a data point)
 					barStr += `\x1b[38;5;${fg}m${BLOCK_BUCKET.repeat(segChars)}\x1b[0m`;
 				}
 				allChars += segChars;
@@ -1181,6 +1266,7 @@ export function buildWtftLines(
 				const halfSlots = halfSlotCountsToArray(halfSlotCounts);
 				barStr = renderHalfBlockBar(halfSlots, CATEGORY_STYLE);
 			} else {
+				// Bucket mode: two-pass cost-based collision resolution.
 				const buckets = new Map<number, { cat: Category; cost: number }[]>();
 				for (const cat of CATEGORY_ORDER) {
 					const cost = bin.costs[cat] || 0;
@@ -1309,6 +1395,7 @@ export const PARSE_MISS_PREFIX = "\u0000miss\u0000";
 const MAX_TOKEN_LEN = 48;
 
 /**
+ * Make one extracted token safe to print.
  * Tokens are attacker-influenced: they come from commands an agent was induced
  * to run. Control characters are stripped and length is capped before anything
  * reaches the screen.
@@ -1319,6 +1406,7 @@ export function sanitizeCommandToken(token: string): string {
 }
 
 /**
+ * Is this token a plausible command name?
  * A trailing ellipsis is DISPLAY truncation added by sanitizeCommandToken,
  * not evidence about the token. The caller judges the original; this tolerates
  * the trimmed form for anyone who does not.
@@ -1332,7 +1420,12 @@ export function isPlausibleCommandToken(token: string): boolean {
 
 export function getSemanticCommandGroup(command: string): string | null {
 	if (command.startsWith(PARSE_MISS_PREFIX)) return PARSE_MISS_GROUP;
-	// Judge the EXECUTABLE token, not the whole command line.
+	// Judge the EXECUTABLE token, not the whole command line. Validating the
+	// whole string meant `git status`, `npm run build` and `pip install` all
+	// failed the plausible-name charset (a space is not in it) and were labelled
+	// normalizer residue — so every multi-word command in the histogram was
+	// mislabelled, and the subcommand branches below could never run. The
+	// arguments still have to be there for those branches.
 	if (!isPlausibleCommandToken(command.split(/\s/)[0]!)) return PARSE_MISS_GROUP;
 	const base = command.split("/").pop() || command;
 	for (const [key, group] of Object.entries(SEMANTIC_GROUPS)) {
@@ -1490,6 +1583,15 @@ export interface CategoryTotals extends TokenTotals {
 	category: Category;
 }
 
+/**
+ * `total`'s own shape — deliberately NOT the plain `TokenTotals` every
+ * other total in this document reuses (`ModelTotals`, `CategoryTotals`,
+ * `tree`, `spawned`'s per-node totals). `untaggedCostUsd` has no model or
+ * category to attach a row to — an untagged interaction is, by definition,
+ * excluded from every one of those — so typing this any wider would let a
+ * caller write `untaggedCostUsd` onto a `ModelTotals` row where it can never
+ * mean anything.
+ */
 export interface SessionTotal extends TokenTotals {
 	/** The cost EXCLUDED from `costUsd` above because it belongs to an
 	 *  untagged interaction (`untaggedInteractions`) — the same per-interaction
@@ -1532,15 +1634,25 @@ function addInteraction(into: TokenTotals, i: Interaction): void {
  * Model-tagged only, in EVERY total including the per-category rows: an
  * interaction with no model id is counted in `untaggedInteractions` and appears
  * nowhere else. That is what makes `sum(models) === sum(categories) === total`
- * hold.
+ * hold — exactly for the token integers, within floating-point accumulation
+ * error for `costUsd` (docs/spec-26-json.md pins the tolerance) — and it is
+ * deliberately a narrower population than the bar chart's, which bins every
+ * interaction.
  *
  * SERVER-SIDE TOOL SPEND IS IN THESE TOTALS.
  *
  * It is attributed the way the chart attributes it — to `web`, not to the
  * requesting turn's own category — so `sum(categories) === total` still holds
- * and a category row names the same category the bars do.
+ * and a category row names the same category the bars do. NOT the same NUMBER,
+ * and the distinction is this function's own exclusion talking: the chart bins
+ * every interaction while these rows drop the untagged ones, and `categories[]`
+ * is session-wide where a bar is per-bin. Placement agrees; magnitude need not.
  * Per model it goes to the model that made the request, which is the only model
  * that could have.
+ *
+ * One divergence from the chart total remains, and it is the untagged spend
+ * excluded here. docs/spec-26-json.md records it.
+ *
  * WHAT THIS FUNCTION COUNTS IS ONE SESSION'S OWN TURNS — "self". A
  * launcher-spawned descendant is a different session with a different
  * transcript, and nothing here reaches it; `computeSpawnTree` calls this
@@ -1555,6 +1667,10 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
 	const byCategory = new Map<Category, TokenTotals>();
 	for (const c of CATEGORY_ORDER) byCategory.set(c, emptyTotals());
 	let untaggedInteractions = 0;
+	// The cost EXCLUDED from `total.costUsd` by the untagged-interaction
+	// skip below. Summed from the same per-interaction figures the bar chart
+	// bins for these turns — `i.cost` plus `i.serverToolCost` when present —
+	// so `total.costUsd + untaggedCostUsd` equals the chart's own running total.
 	let untaggedCostUsd = 0;
 	let compactionEvents = 0;
 	let compactionTokensFreed = 0;
@@ -1562,7 +1678,8 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
 	for (const i of deduped) {
 		// Compaction is counted over EVERY interaction, tagged or not: it
 		// describes context freed, not spend, so the model-tag exclusion below
-		// has nothing to do with it.
+		// has nothing to do with it (this matches the rendered table, which
+		// counts its `Compaction:` line over the same deduped set).
 		if (i.compactionTokensBefore) {
 			compactionTokensFreed += i.compactionTokensBefore;
 			compactionEvents++;
@@ -1583,11 +1700,16 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
 
 		// `classifyInteraction` returns the stored `_cat` for a tag-file read and
 		// re-derives it otherwise — the same call the bar chart makes.
+		//
 		// `_cat` reaches that call UNVALIDATED (`readClassifiedTagFile` does
 		// `_cat: obj.cat || undefined`), so a tag written by a future tagger — or
 		// a hand-edited one — can name a category this build has never heard of.
 		// Such a row is folded into `other`, the vocabulary's own catch-all,
-		// rather than given a row of its own.
+		// rather than given a row of its own. The alternative was a `categories[]`
+		// longer than CATEGORY_ORDER, which breaks the positional addressability
+		// the JSON contract sells; silently DROPPING it was the third option and
+		// the worst, because it breaks `sum(categories) === total` — a guarantee
+		// a consumer would have no way to know had failed.
 		const cat = classifyInteraction(i);
 		const c = byCategory.get(cat) ?? byCategory.get("other")!;
 		addInteraction(c, i);
@@ -1597,6 +1719,7 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
 		// `addInteraction` would have been wrong for exactly one field and right
 		// for none of the others. `web` rather than `cat` because that is where
 		// the bar chart puts it.
+		//
 		// Assumption: `i.cost` does not already contain this charge. It is a sum,
 		// not a replacement, so a harness whose native per-turn cost is its BILLED
 		// figure — which could include web-search spend — would be double-counted.
@@ -1626,6 +1749,9 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
 export function renderTokenSummary(interactions: Interaction[], maxWidth: number = 80, thinkingBudget?: number, uncounted?: UncountedBillables, spawned?: SpawnTree): string {
 	const summary = computeSessionSummary(interactions);
 	const unmatched = summary.untaggedInteractions;
+	// `uncounted` and `spawned` are both optional and both render nothing when
+	// omitted or empty — a caller that passes neither gets exactly the table it
+	// got before either existed.
 
 	if (summary.models.length === 0) {
 		const head = unmatched > 0
@@ -1739,7 +1865,10 @@ export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string 
 const rows: string[] = [];
 	for (const edge of spawned.edges) {
 		const full = edge.label ? `${safe(edge.mechanism)}  ${safe(edge.label)}` : safe(edge.mechanism);
-		// Fitted to 40 COLUMNS, not 40 code units.
+		// Fitted to 40 COLUMNS, not 40 code units: `label` is free text from a
+		// spawner, and one long or one WIDE one pushes every money figure in
+		// the block out of its column. `fitVisual` truncates and pads in the
+		// same space the terminal lays out in.
 		const name = fitVisual(full, 40);
 		// A skipped edge prints its REASON where its cost would be. A dash or a
 		// $0.00 would both read as "this child was free", which is the one thing
@@ -1750,7 +1879,8 @@ const rows: string[] = [];
 
 	// Two different units, named as such. `descendants` counts SESSIONS priced;
 	// `edges.length` counts EDGES, and every skipped edge adds one without adding
-	// a session.
+	// a session. "N of M sessions" made the denominator claim to measure something
+	// it does not.
 	let out = `\nSPAWNED    ${spawned.descendants} session(s) priced from ${spawned.edges.length} recorded edge(s) (#116) —\n`;
 	out += `           NOT in TOTAL above, which is this session's own turns\n`;
 	out += rows.join("\n") + "\n";

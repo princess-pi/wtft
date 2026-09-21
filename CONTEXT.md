@@ -312,7 +312,7 @@ names the usage mode)
 A total that may still grow: the tag file was written by another tagger build
 (`stale-version`) or read before the log parser daemon swept it (`unswept`), or the CLI's
 scan could not list or read a subagent file (`subagent-unreadable`). The number printed is
-real, not final. On the CLI's report
+real; it is not yet **settled**. On the CLI's report
 path (not `--watch`), reported two ways that always agree: **exit 9**, and
 `provisional.provisional` / `provisional.reason` in JSON mode. The reasons are a closed vocabulary — `stale-version`, `unswept`,
 `subagent-unreadable` — and `reason` here is a different field from a **daemon health

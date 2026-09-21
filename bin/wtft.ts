@@ -638,17 +638,22 @@ async function main() {
 	}
 
 	// Memoised lineage. No try/catch: computeSpawnTree reports ledger failure as ledgerError.
-	let spawnTreeCache: SpawnTree | null = null;
+	// Keyed by mode: the pending tree excludes nothing and must never serve a full arm.
+	const spawnTreeCache = new Map<boolean, SpawnTree>();
 	// `pending`: the session log is absent, so nothing of it is in SELF to exclude.
 	const sessionSpawnTree = (opt: { pending?: boolean } = {}): SpawnTree => {
-		if (spawnTreeCache) return spawnTreeCache;
+		const pending = opt.pending === true;
+		const cached = spawnTreeCache.get(pending);
+		if (cached) return cached;
 		const sessionId = path.basename(finalSessionPath).replace(/\.jsonl$/i, "");
 		// Exclude ids already in SELF so a dual-mechanism spawn is not billed twice.
-		return (spawnTreeCache = computeSpawnTree(sessionId, {
-			alreadyAttributed: opt.pending
+		const tree = computeSpawnTree(sessionId, {
+			alreadyAttributed: pending
 				? new Set<string>()
 				: () => collectSelfAttributedSessionIds(finalSessionPath, interactions, discoverOnce().files),
-		}));
+		});
+		spawnTreeCache.set(pending, tree);
+		return tree;
 	};
 
 	// ---

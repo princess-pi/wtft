@@ -114,7 +114,7 @@ try {
 	for (let i = 0; i < 24 && !sawDiagnostic; i++) {
 		await sleep(250);
 		const log = fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, "utf8") : "";
-		sawDiagnostic = /subagent transcript truncated/.test(log);
+		sawDiagnostic = /subagent transcript rotated/.test(log);
 	}
 	assert("a truncated subagent transcript names itself on stderr under WTFT_DAEMON_DEBUG", sawDiagnostic);
 

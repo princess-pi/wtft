@@ -14,6 +14,11 @@ import {
 	serializeClassifiedWithOverheadSplit,
 	foldRecordLine,
 	foldRecordIds,
+	generationRecordLine,
+	transcriptSourceId,
+	fileStamp,
+	claudeSpawnWindowClosesAt,
+	CLAUDE_SUBAGENT_WINDOW_MS,
 	applyControlEntry,
 	newParseStreamState,
 	extractCwdFromBashCommand,
@@ -64,9 +69,6 @@ let sessionExisted = false;
 
 const pendingClaudeCommands: { interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>; prevCtx: number }[] = [];
 const discoveredClaudeFiles = new Set<string>();
-/** Session ids this daemon has written a `_fold` record for. The CLI's spawn
- *  walk skips exactly these, so a fold with no record is billed twice. */
-const recordedFolds = new Set<string>();
 // Starts true: an inherited tag's swept marker is untrusted until this daemon re-stamps after its own sweep.
 let tagGrewSinceMarker = true;
 // Set when a sweep could not read what it meant to; withholds the swept stamp.
@@ -86,7 +88,17 @@ interface SubagentFileState {
 	mtimeMs: number;
 	/** Last read time — closes the same-tick mtime window with MTIME_SETTLE_MS. */
 	readAtMs: number;
+	ino: number;
 	writtenLines: Map<string, number>;
+	/** The next write opens a generation: a `_gen` record, then every current line. */
+	newGeneration: boolean;
+	/** Fold ids this generation has recorded. The CLI's spawn walk skips exactly
+	 *  the recorded ids, so a fold with no record is billed twice. */
+	recordedFolds: Set<string>;
+	/** Each nested transcript the last parse folded, with the stamp it was read at. */
+	foldStamps: Map<string, string>;
+	/** Until then a spawning turn can still gain a `claude -p` child. */
+	spawnWindowClosesAt: number;
 }
 
 // Subagent transcripts: re-parse WHOLE on change; incremental windows break id-collapse and nested attribution.
@@ -246,16 +258,21 @@ function syncSubagentTranscript(file: string): boolean {
   const sessionId = path.basename(file, '.jsonl');
   let fileState = discoveredSubagentFiles.get(stateKey);
   if (!fileState) {
-    fileState = { size: -1, mtimeMs: -1, readAtMs: 0, writtenLines: new Map<string, number>() };
+    fileState = {
+      size: -1, mtimeMs: -1, readAtMs: 0, ino: -1, writtenLines: new Map<string, number>(),
+      newGeneration: true, recordedFolds: new Set<string>(), foldStamps: new Map<string, string>(), spawnWindowClosesAt: 0,
+    };
     discoveredSubagentFiles.set(stateKey, fileState);
   }
 
   let size: number;
   let mtimeMs: number;
+  let ino: number;
   try {
     const stat = fs.statSync(file);
     size = stat.size;
     mtimeMs = stat.mtimeMs;
+    ino = stat.ino;
   } catch (err) {
     // Stat failure: warn once per transcript; mark poll failed; retry next poll.
     pollHadFailure = true;
@@ -271,7 +288,9 @@ function syncSubagentTranscript(file: string): boolean {
     return wroteAny;
   }
   // Skip only when size+mtime unchanged AND settled past MTIME_SETTLE_MS (one clock: Date.now() since our read).
-  const changed = size !== fileState.size || mtimeMs !== fileState.mtimeMs;
+  const changed = size !== fileState.size || mtimeMs !== fileState.mtimeMs || ino !== fileState.ino
+    || foldedTranscriptChanged(fileState.foldStamps)
+    || Date.now() <= fileState.spawnWindowClosesAt + MTIME_SETTLE_MS;
   const settled = Date.now() - fileState.readAtMs > MTIME_SETTLE_MS;
   if (!changed && settled) {
     return wroteAny;
@@ -280,10 +299,12 @@ function syncSubagentTranscript(file: string): boolean {
     process.stderr.write(`[wtft-log-parser] subagent transcript unchanged but not yet settled, re-reading to close the same-tick window: ${path.basename(file)}\n`);
   }
 
-  if (size < fileState.size) {
+  if (fileState.size !== -1 && (size < fileState.size || ino !== fileState.ino)) {
     fileState.writtenLines.clear();
+    fileState.recordedFolds.clear();
+    fileState.newGeneration = true;
     if (process.env.WTFT_DAEMON_DEBUG) {
-      process.stderr.write(`[wtft-log-parser] subagent transcript truncated, re-parsing from zero: ${path.basename(file)}\n`);
+      process.stderr.write(`[wtft-log-parser] subagent transcript rotated, opening a new generation: ${path.basename(file)}\n`);
     }
   }
 
@@ -305,12 +326,13 @@ function syncSubagentTranscript(file: string): boolean {
     return wroteAny;
   }
 
-  let batch = '';
+  const source = transcriptSourceId(file);
+  let batch = fileState.newGeneration ? generationRecordLine(source, sessionId) : '';
   const freshHashes: string[] = [];
   try {
     const seenThisParse = new Map<string, number>();
     for (const si of deduped) {
-      const line = serializeClassified(si);
+      const line = serializeClassified(si, source);
       const hash = createHash('sha1').update(line).digest('hex');
       const nth = (seenThisParse.get(hash) || 0) + 1;
       seenThisParse.set(hash, nth);
@@ -336,8 +358,8 @@ function syncSubagentTranscript(file: string): boolean {
   const parent = path.basename(sessionPath, ".jsonl");
   const freshFolds: string[] = [];
   for (const id of foldRecordIds(sessionId, deduped)) {
-    if (recordedFolds.has(id)) continue;
-    batch += foldRecordLine(parent, id);
+    if (fileState.recordedFolds.has(id)) continue;
+    batch += foldRecordLine(parent, id, source);
     freshFolds.push(id);
   }
 
@@ -346,14 +368,33 @@ function syncSubagentTranscript(file: string): boolean {
     wroteAny = true;
     tagGrewSinceMarker = true;
   }
-  for (const id of freshFolds) recordedFolds.add(id);
+  fileState.newGeneration = false;
+  for (const id of freshFolds) fileState.recordedFolds.add(id);
+  fileState.foldStamps = new Map();
+  for (const si of deduped) {
+    for (const fold of si.claudeSubAgentFolds ?? []) fileState.foldStamps.set(fold.file, fold.stamp);
+  }
+  fileState.spawnWindowClosesAt = claudeSpawnWindowClosesAt(deduped);
   for (const h of freshHashes) {
     fileState.writtenLines.set(h, (fileState.writtenLines.get(h) || 0) + 1);
   }
   fileState.size = size;
   fileState.mtimeMs = mtimeMs;
+  fileState.ino = ino;
   if (changed) fileState.readAtMs = Date.now();
   return wroteAny;
+}
+
+/** A nested transcript that grew, or no longer stats, since the parse that folded it. */
+function foldedTranscriptChanged(foldStamps: Map<string, string>): boolean {
+  for (const [file, stamp] of foldStamps) {
+    try {
+      if (fileStamp(file) !== stamp) return true;
+    } catch {
+      return true;
+    }
+  }
+  return false;
 }
 
 function scanForSubAgents() {
@@ -394,6 +435,9 @@ function scanForSubAgents() {
         if (process.env.WTFT_DAEMON_DEBUG) {
           process.stderr.write(`[wtft-log-parser] claude -p discovery candidate unreadable, will retry next poll (${path.basename(cwd)}): ${discovered.unreadable.message}\n`);
         }
+      } else if (Date.now() <= interaction.timestamp + CLAUDE_SUBAGENT_WINDOW_MS + MTIME_SETTLE_MS) {
+        // A later child in the same window is not on disk yet.
+        stillPending.push(item);
       }
     }
     pendingClaudeCommands.length = 0;

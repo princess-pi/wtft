@@ -188,7 +188,9 @@ retired in `@4`.
   mode-dependent: `subagent-unreadable` is found by the uncounted scan, which
   runs under `--tokens` and `--json` but not on a plain `wtft` run, so a session
   provisional for that reason alone exits 9 in those two modes and 0 on a plain
-  run.
+  run. `descendant-live` (a counted descendant's transcript grew in the last 2
+  minutes, [#133](https://github.com/princess-pi/wtft/issues/133)) is the same:
+  only `--tokens` and `--json` read the spawn tree.
 - **2** / **3** — `wtft spawn-record` only (see below): the call was wrong, or
   the ledger could not be written. The report path never returns either, and
   `spawn-record` also returns **0** — on a successful append, and on `--help`,

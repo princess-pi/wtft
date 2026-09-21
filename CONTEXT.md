@@ -310,7 +310,7 @@ A total the log parser daemon may still grow — the CLI spawned it and read the
 before it finished, so the number printed is real but not final. On the CLI, reported two
 ways that always agree: **exit 9**, and `provisional.provisional` / `provisional.reason` in
 JSON mode. The reasons are a closed vocabulary — `stale-version`, `unswept`,
-`subagent-unreadable` — and `reason` here is a different field from a **daemon health
+`subagent-unreadable`, `descendant-live` (#133) — and `reason` here is a different field from a **daemon health
 reason** (above); name the container when both are in play. The Pi widget surfaces
 this state only when its own `_subagentUnreadable` flag is set, and as a third,
 contract-less channel: prose only ("total is provisional"), no exit code, no JSON field.

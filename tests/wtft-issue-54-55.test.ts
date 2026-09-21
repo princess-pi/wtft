@@ -1,12 +1,5 @@
 /**
  * Tests for #54 (message-id deduplication) and #55 (TTL-split cache-write pricing).
- *
- * #54: Claude Code emits multiple JSONL lines per API response (one per content block +
- *      streaming/compaction re-logging), each echoing the same message-level `usage`.
- *      Summing per line inflates costs ~1.8×. Dedup by message.id fixes this.
- *
- * #55: Cache-write tokens were priced at flat 1.25× input (5-min TTL), but 1-hour
- *      caches cost 2×. The `usage.cache_creation` object exposes the TTL breakdown.
  */
 
 import * as assert from "node:assert";

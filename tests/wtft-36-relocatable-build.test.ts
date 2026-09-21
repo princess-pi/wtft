@@ -1,40 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package @princess-pi/wtft
- * @test wtft-36-relocatable-build
- * @description The published artifact is self-contained (#36).
- *
- *   `files` in package.json ships four prebuilt bundles and NOTHING else — the
- *   two CLI bins, plus the two Pi-extension bundles #60 added — so anything any
- *   of them still reaches for at runtime, a bare import or a repo-relative data
- *   file, is unreachable in every install. §1 scans all four; §2-§5 exercise the
- *   two bins, the only ones that must RUN from a bare directory.
- *   Two separate defects had that shape:
- *
- *   1. The `@princess-pi/libs` extraction added it (and `wcwidth`) to `external`
- *      in build.ts, leaving bare imports in the emitted ESM. Node resolves those
- *      by walking up from the FILE, so the artifact only ran from a directory
- *      with the dependency in an ancestor `node_modules`. It also broke a test
- *      that RELIES on relocatability rather than asserting it — wtft-308 §6
- *      copies wtft.mjs somewhere with no wtft-daemon.mjs beside it, to inject a
- *      daemon that dies during startup structurally instead of by timing.
- *   2. --help, --why and --version read docs/manifests/wtft-cmd.json relative to
- *      the artifact. Fixing (1) is what made this one reachable: before it, the
- *      module error came first and hid the ENOENT behind it.
- *
- *   WHY A DEDICATED SUITE. Both defects were found by a test that only needed
- *   relocatability as a means to something else, and (2) had never been caught
- *   at all, because no test runs the artifact from outside this repo. A property
- *   that everything depends on and nothing asserts is exactly the one that
- *   regresses, so this suite owns it: V1 says WHY it is relocatable, V3 says
- *   THAT it is, and V2 stops V3 passing for the wrong reason. §4 and §5 ride
- *   along on the same artifact rather than in suites of their own — the bundled
- *   licence notices, and #46's claim that `--version` answers from the artifact
- *   and not from a neighbouring package.json.
- *
- *   Requires stock `node` on PATH — not `process.execPath`, which is bun under
- *   the runner. Running the artifact on the runtime consumers actually use is
- *   the whole claim.
+ * The published artifact is self-contained (#36).
  */
 
 import * as fs from "node:fs";

@@ -1,23 +1,10 @@
 /**
- * @package princess-pi-tools
- * @tool tests/lib/poll.ts — wait on a condition, never on a duration (#387)
- * @description A fixed `sleep(n)` before checking daemon/process state is a bet
+ * A fixed `sleep(n)` before checking daemon/process state is a bet
  *   on scheduling, not an assertion about behaviour: it passes by luck on a
  *   quiet host and flakes on a loaded one — proven in `wtft-issue-155-daemon-
  *   follow` (four bare sleeps, zero polling) and `wtft-308-lagging-session`
  *   (already polled, but with a few ceilings tight enough to time out under the
  *   full `bun run test` driver while passing standalone).
- *
- *   `pollUntil` retries a synchronous predicate on a short interval up to a
- *   generous ceiling, so a slow host fails *late* rather than *falsely*. It
- *   returns the predicate's own final value — re-checked once more after the
- *   ceiling elapses, not just "did we ever see true" — so a caller reporting
- *   failure detail from the same state the predicate just examined sees the
- *   REAL last state, not a stale snapshot from one interval earlier.
- *
- *   `wtft-308-lagging-session` defined this locally first (#308/#309); moved
- *   here per #387 so `wtft-issue-155-daemon-follow` gets the same primitive
- *   instead of growing a second copy.
  */
 
 export const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms));

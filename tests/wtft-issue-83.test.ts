@@ -1,11 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * tests/wtft-issue-83.test.ts — Subagent discovery + merge (#83)
- *
- * Verifies discoverSubagentSessionFiles() and loadSubagentInteractions()
- * logic against mock session files for both Claude Code and Pi conventions.
- *
- * Run: node --experimental-strip-types tests/wtft-issue-83.test.ts
+ * Subagent discovery + merge (#83)
  */
 
 import * as assert from "node:assert";

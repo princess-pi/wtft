@@ -1,31 +1,6 @@
 /**
- * @package princess-pi-tools
- * @test wtft-513-exit9-caller-guard
- * @description #513 — a test that shells out to `wtft` must not fail because the
+ * #513 — a test that shells out to `wtft` must not fail because the
  *   read was PROVISIONAL.
- *
- *   #443 gave `wtft` exit **9**: the run SUCCEEDED and everything rendered, but
- *   the total may still grow because the daemon has not yet swept this session's
- *   subagent transcripts. `execSync` throws on any nonzero exit, so
- *   `tests/wtft-auto-fit.test.ts` began failing on a correct run.
- *
- *   INTERMITTENTLY, which is the part that made it expensive. The CLI spawns the
- *   daemon and reads the tag immediately, so on a brand-new session it sometimes
- *   wins that race and finds no `_meta.swept` marker. Standalone the suite passed
- *   4 of 4; under `bun run test` on a loaded box it failed. So it passed the
- *   branch, passed CI, and surfaced only on `main` after the merge.
- *
- *   PR #511 justified the new exit code with "nothing in this repo invokes the
- *   `wtft` CLI and inspects `$?`". That grep covered `bin/`, `hooks/`,
- *   `statusline/` and `skills/` — and not `tests/`. The claim was written into a
- *   commit message and a test header as though it were exhaustive.
- *
- *   This suite pins the guard itself, deterministically, rather than waiting for
- *   the race to reappear: it builds a tag that is provisional BY CONSTRUCTION
- *   (classified lines, no `_meta.swept`), so the CLI must exit 9 every run.
- *
- *   Closer: against a tag with no marker, `execSync` throws and `runWtftCli`
- *   returns the rendered stdout; and `runWtftCli` still rethrows a real failure.
  */
 
 import * as fs from "node:fs";

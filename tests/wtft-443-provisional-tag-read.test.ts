@@ -1,58 +1,7 @@
 /**
- * @package princess-pi-tools
- * @test wtft-443-provisional-tag-read
- * @description #443 — a one-shot `wtft` read of a session whose tag the daemon
+ * #443 — a one-shot `wtft` read of a session whose tag the daemon
  *   is ABOUT to repair reports the pre-repair number as a plain total, with no
  *   indication that it is provisional.
- *
- *   Measured on the issue's specimen (session 7c0c2b7e, 15 Task subagents,
- *   finished 2026-08-13, its genuine pre-#270 v2.7.1 tag restored byte-identical
- *   before each trial, every daemon killed first):
- *
- *     run 1   $79.74   <- a 5.7% undercount, reported as a plain total
- *     run 2+  $84.59   <- equals `wtft -F` to the cent
- *
- *   The cause is statement order in `bin/wtft.ts`: the daemon is spawned, then
- *   the tag is read immediately afterwards, so the read races the daemon it just
- *   started and always loses on the first run. `awaitDaemonUp` exists on that
- *   path but is entered only when `interactions.length === 0`; a populated-but-
- *   stale tag satisfies neither condition, so nothing waits.
- *
- *   Duppy chose remedy (b) — say the total is provisional — over (a), blocking
- *   the read, because blocking a one-shot CLI for a repair whose length is
- *   proportional to the session's subagent volume is the cost that read-then-
- *   render exists to avoid.
- *
- *   This suite pins the READER PREDICATE, `readTagProvisional`. The end-to-end
- *   half of the Closer (one `wtft --tokens` invocation either equals `-F` or
- *   exits 9) lives in the CLI, and is covered separately.
- *
- *   TWO CONDITIONS, either sufficient:
- *
- *   P-a `stale-version` — the resolved tag is not at WTFT_TAGGER_VERSION.
- *     `getTagPath`'s resolution rule 3 falls back to "any-version tag in the own
- *     dir, newest mtime", so a read can legitimately land on a tag written under
- *     superseded semantics while the daemon builds a current-version one beside
- *     it. Detectable from the path alone.
- *
- *   P-b `unswept` — a current-version tag holding classified data but carrying
- *     no `_meta.swept` marker. The daemon appends that marker once its first
- *     `scanForSubAgents()` has completed, so its ABSENCE means no subagent
- *     transcript has been read by any daemon since this tag was written. That is
- *     precisely the 5.7% above.
- *
- *   WHY THE MARKER NEEDS ITS OWN APPEND, rather than riding the existing
- *   `_meta.offset` line: that line is written only by `flushPending()`, which
- *   runs only when new PARENT interactions arrive. On a finished session — the
- *   repro's own case — it never runs again, so a piggybacked marker would never
- *   be written for the exact sessions this issue is about.
- *
- *   NO SCAN WINDOW: the reader already has the whole tag in memory to answer
- *   has-classified-data, so windowing buys no I/O and can miss a buried marker.
- *
- *   Closer: a current-version tag with classified lines and no `_meta.swept`
- *   reads provisional; the same tag with the marker reads settled; a
- *   non-current-version tag reads provisional regardless of the marker.
  */
 
 import * as fs from "node:fs";

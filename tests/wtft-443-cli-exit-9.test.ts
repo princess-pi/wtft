@@ -1,23 +1,5 @@
 /**
- * @package princess-pi-tools
- * @test wtft-443-cli-exit-9
- * @description #443 slice 3 — the issue's own Closer, at the CLI.
- *
- *   "With every daemon for the session killed and a known-stale tag in place,
- *   one `wtft --tokens` invocation reports the same total as `wtft --tokens -F`
- *   — or reports a machine-readable flag saying it did not. Today the first
- *   invocation reports neither."
- *
- *   Duppy chose the flag over blocking the read. Blocking a one-shot CLI on a
- *   repair whose length is proportional to the session's subagent volume is the
- *   cost that read-then-render exists to avoid.
- *
- *   Exit code 9 and `wtft --json`'s `provisional` field both report the same
- *   verdict (tests/wtft-26-json.test.ts §4). A human stderr line too, because
- *   the exit code is invisible to the person reading the widget.
- *
- *   Closer: a populated tag with no `_meta.swept` exits 9; the same tag carrying
- *   the marker exits 0.
+ * #443 slice 3 — the issue's own Closer, at the CLI.
  */
 
 import * as fs from "node:fs";

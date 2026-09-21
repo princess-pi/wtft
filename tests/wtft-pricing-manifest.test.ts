@@ -1,29 +1,6 @@
 /**
  * Tests for #169 — docs/EXT_WTFT.html's Model Pricing table is generated from
  * MODEL_PRICING, not hand-maintained.
- *
- * The hand-maintained table listed Claude 4 and no Claude 5 family, no GPT-5.x,
- * no notion of a dated or size tier, and DeepSeek rates from before the
- * 2026-08-16 card. Nothing failed while it was wrong.
- *
- * These tests gate the generated path end to end: the committed manifest must
- * equal a fresh render (so a registry edit that skips regeneration is red),
- * every registry model must appear (so a new model cannot be invisible), and
- * the page must actually read the manifest rather than carry a fourth copy of
- * the numbers in markup.
- *
- * THE COMMAND IN THESE MESSAGES IS `bun run manifest`, and until #100 it was
- * `bun run build` in all five messages below — a command that wrote nothing.
- * `renderPricingManifest()` existed and had no caller, so the only instruction
- * a failure ever gave you left it failing. Two things had to change together, and the second is the subtle one:
- * the build must NOT be the writer. `prepare` runs the build and CI runs
- * `npm install` before `npm test`, so a build that regenerated this file would
- * repair a stale COMMITTED manifest in the working tree moments before the
- * comparison below — turning this suite green for every possible registry.
- * Measured while making the change: staling the committed file fails this suite
- * before a build and passes after one. So `bun run manifest` writes,
- * `bun run build` only compares (and fails, naming that command), and nothing
- * between checkout and assertion touches the file.
  */
 
 import * as assert from "node:assert";

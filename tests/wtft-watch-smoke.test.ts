@@ -1,18 +1,7 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * @package princess-pi-tools
- * @test wtft-watch-smoke
- * @description Verifies that `./wtft --watch` doesn't crash on startup and
- *   responds to the 'q' keystroke to exit cleanly. Catches missing-import bugs
- *   like hideCursor/showCursor/enterRawStdin being undefined in the bundle
- *   (monolith split regression from #68/#75).
- *
- *   Uses `script(1)` to provide a pseudo-TTY (required by watch mode's isTTY
- *   guard), then pipes 'q' to verify graceful exit.
- *
- *   Also checks the built bundle has no unresolved function references by
- *   verifying that all TTY-helper function declarations match their call sites
- *   (no name-collision `2`-suffixed variants).
+ * Verifies that `./wtft --watch` doesn't crash on startup and
+ *   responds to the 'q' keystroke to exit cleanly.
  */
 
 import * as fs from "node:fs";

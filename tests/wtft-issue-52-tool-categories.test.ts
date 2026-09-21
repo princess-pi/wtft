@@ -1,11 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-tools
- * @test wtft-issue-52-tool-categories
- * @description Validates #52 Phase 2: tool → category recognition.
- *   Task/Agent → agents, WebSearch/WebFetch → web, Grep tool → grep,
- *   TodoWrite/AskUserQuestion/Skill/Task* → plan, NotebookEdit → file write,
- *   and prompt purification (unrecognized tool never classifies "prompt").
+ * Validates #52 Phase 2: tool → category recognition.
  */
 
 import { parseEntryToInteraction, classifyInteraction, deduplicateInteractions } from "../bin/wtft.mjs";

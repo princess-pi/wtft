@@ -1,27 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package @princess-pi/wtft
- * @test wtft-60-pi-extension
- * @description The Pi extension face is self-contained and loadable (#60).
- *
- *   The extraction copied `extensions/wtft.ts` + `extensions/token-budget.ts`
- *   out of princess-pi-tools and never re-wired them: Pi loads the ppt package
- *   (`settings.json` → packages → `pi.extensions: ["./extensions"]`), and those
- *   two files were deleted from it by ppt#588. This repo never registered
- *   itself as a Pi package, so `/wtft` and `/budget` went dark.
- *
- *   The fix: `package.json` declares a `pi` manifest pointing at `./pi`, and
- *   `build.ts` bundles the two extensions into that directory the SAME
- *   self-contained way the CLI bundles are built (#36) — `@princess-pi/libs`
- *   and `wcwidth` are vendored in, so the npm `dependencies` stay empty and the
- *   extension needs no node_modules at runtime. The `.ts` source stays in
- *   `extensions/` and is NOT auto-discovered (a `pi` manifest replaces the
- *   convention dir), so there is no double registration.
- *
- *   This suite owns three facts: the manifest points at ./pi, the bundles are
- *   emitted and importable (default export is a function), and the bundles
- *   reach for nothing outside themselves. It mirrors wtft-36's V1 structural
- *   check rather than re-deriving a different definition of "self-contained".
+ * The Pi extension face is self-contained and loadable (#60).
  */
 
 import * as fs from "node:fs";

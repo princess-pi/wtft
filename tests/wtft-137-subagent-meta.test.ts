@@ -1,33 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-tools
- * @test wtft-137-subagent-meta
- * @description #137 — the harness already writes the parent link; read it.
- *
- *   Every built-in (Task) subagent transcript has a `.meta.json` beside it,
- *   written by the harness, carrying the words a human typed at dispatch and the
- *   `toolUseId` of the exact `tool_use` block that spawned it. wtft showed a hex
- *   basename instead, and #116 built a whole ledger on the premise that "neither
- *   transcript names the other" — true for launcher children, never true for
- *   these.
- *
- *   ONE fact this suite pins:
- *     - `model` is NOT universal. A null there is a gap, not a zero.
- *
- *   One more the issue did not have, which this suite deliberately does NOT pin:
- *     - `parentAgentId` appeared on exactly the files with `spawnDepth > 1`, all
- *       25 resolving to a sibling transcript, so the harness records the WHOLE
- *       subagent tree. That is a corpus observation about the HARNESS. M8 checks
- *       only that the reader carries the field through, because a test that
- *       failed when a future release wrote it at depth 1 would be reporting a
- *       correct change as a defect.
- *
- *   THIS FILE IS UNDOCUMENTED HARNESS OUTPUT. It may vanish or be renamed in any
- *   release, so every arm degrades to `null` and the caller keeps today's
- *   behaviour — and M7 pins the field names so a rename fails LOUDLY here rather
- *   than silently emptying every label in the report.
- *
- * @usage bun run test wtft-137-subagent-meta
+ * #137 — the harness already writes the parent link; read it.
  */
 
 import * as fs from "node:fs";

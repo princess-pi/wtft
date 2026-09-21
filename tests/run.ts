@@ -1,46 +1,7 @@
 #!/usr/bin/env -S bun
 /**
- * @package princess-pi-tools
- * @tool tests/run.ts — the declared test runner (`bun run test`)
- * @description Runs every `tests/*.test.ts` suite in its OWN process and
+ * Runs every `tests/*.test.ts` suite in its OWN process and
  *   aggregates the exit codes.
- *
- *   Why process-per-suite (#158): the large majority of suites here are
- *   standalone scripts that end in `process.exit(failed > 0 ? 1 : 0)`. Under any
- *   single-process runner — `bun test <dir>`, vitest, `node --test` — the first
- *   suite to finish tears the shared process down mid-run. Measured on `main` @
- *   `9b2a16e` (34 of 42 suites then): `bun test` ran 3 of 42 files and exited 0,
- *   a green result that never ran the tests. Giving each suite its own process
- *   makes that `process.exit` harmless. (Counts are pinned to that measurement
- *   on purpose — a live count here re-rots on every suite added, #163.)
- *
- *   Why `bun test <file>` rather than `bun <file>`: it executes both suite
- *   styles in this repo — plain assertion scripts AND the `describe`/`expect`
- *   suites (`git-guardrails-parity` imports `bun:test` and cannot run any other
- *   way). One command covers both, so converting a suite to `describe`/`expect`
- *   later needs no change here.
- *
- *   Why a fresh XDG_CONFIG_HOME per suite: `wtft --tokens/--cost` is
- *   config-persistable, so a developer's saved `~/.config/princess-pi-tools/
- *   wtft.json` would decide test outcomes. Isolating config here is one seam
- *   for all suites instead of a rule to remember in each of them.
- *
- *   Serial, not parallel: several suites spawn wtft daemons, bind ports, and
- *   share `/tmp` fixture paths. Serial is the honest default until those are
- *   isolated from each other.
- *
- *   Why it reports SKIPS as well as failures (#256): a suite that gates on host
- *   state and finds none passes without checking anything, and the note it
- *   prints scrolls away with everything else. Suites declare those checks with
- *   `##SKIP## <reason>` (`tests/lib/skips.ts`); this driver counts them per
- *   suite and lists them last. It does not fail on them — a developer laptop
- *   legitimately lacks some of this state — but "34 passed, 0 failed" must
- *   never again be the whole story.
- *
- * @usage
- *   bun run test                 Run every suite.
- *   bun run test wtft-title      Run suites whose filename matches a substring.
- *   bun run test serve wtft-auto Multiple filters are OR'd.
  */
 
 import { spawnSync } from "node:child_process";

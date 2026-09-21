@@ -1,27 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package @princess-pi/wtft
- * @test wtft-75-doc-claims
- * @description Five doc claims pinned against the code or doc they describe:
- *
- *   1. Every flag a README `wtft …` example names is one `parseWtftCliArgs`
- *      accepts.
- *   2. `docs/spec-159-pack-and-smoke.md` names every entry of `package.json`
- *      `files`.
- *   3. `CONTEXT.md`'s Pager entry and `bin/wtft.ts`'s refusal agree on which
- *      harness has the pager.
- *   4. The README's `install-wtft` exit-code list carries every code the
- *      script can exit with, read from the script's own `exit N` / `EXIT=N`
- *      sites.
- *   5. `docs/adding-a-harness.md` states the #118 rule: a harness-native
- *      per-turn cost must not include server-side tool charges, and an
- *      adapter whose native cost already includes them must zero
- *      `server_tool_use`.
- *
- *   These read source files, not built output. The flag set in (1) is derived
- *   from the parser's own `arg === "--x"` literals rather than from the
- *   manifest, because the manifest is prose for `--help` and the parser is
- *   what rejects a flag.
+ * Five doc claims pinned against the code or doc they describe
  */
 
 import * as fs from "node:fs";

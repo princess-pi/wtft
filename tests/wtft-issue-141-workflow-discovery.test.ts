@@ -1,15 +1,7 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * tests/wtft-issue-141-workflow-discovery.test.ts — Dynamic Workflow
+ * Dynamic Workflow
  * subagent transcript discovery (#141).
- *
- * Workflow transcripts live at <session>/subagents/workflows/wf_<runId>/
- * agent-*.jsonl. The old walkSubagentDir recursion allowlist (subagents/ns/
- * agent-*) never reached them; the walker now recurses into all
- * subdirectories (except our own wtft-tags output) while the agent-*.jsonl
- * file filter still gates collection.
- *
- * Run: node --experimental-strip-types tests/wtft-issue-141-workflow-discovery.test.ts
  */
 
 import * as fs from "node:fs";

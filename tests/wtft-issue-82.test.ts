@@ -1,11 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * tests/wtft-issue-82.test.ts — Recursive subagent rollup depth test (#82)
- *
- * Verifies that discoverSubagentSessionFiles() recursively walks nested
- * subagent directories, with no depth cap (#148).
- *
- * Run: node --experimental-strip-types tests/wtft-issue-82.test.ts
+ * Recursive subagent rollup depth test (#82)
  */
 
 import * as assert from "node:assert";

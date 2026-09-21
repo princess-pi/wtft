@@ -1,10 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * tests/wtft-issue-121.test.ts — Turn-based bucketing via --interval <N>t (#121)
- *
- * Verifies parseInterval, getBinInfo, and buildWtftLines with turn-based mode.
- *
- * Run: node --experimental-strip-types tests/wtft-issue-121.test.ts
+ * Turn-based bucketing via --interval <N>t (#121)
  */
 
 import * as assert from "node:assert";

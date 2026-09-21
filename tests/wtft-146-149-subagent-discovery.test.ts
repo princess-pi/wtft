@@ -1,21 +1,7 @@
 #!/usr/bin/env -S bun
 /**
- * tests/wtft-146-149-subagent-discovery.test.ts — subagent discovery and meta
+ * subagent discovery and meta
  * reading, #146–#149.
- *
- *   § 146  an unreadable `.meta.json` gets a notice; an absent one does not.
- *   § 147  discoverSubagentSessionFiles reads a header's first line, not the
- *          whole transcript, and a `claude -p` scan skips a directory named
- *          `*.jsonl` instead of reading it.
- *   § 148  a deeply nested transcript is listed, never cut off silently;
- *          a directory symlink cycle lists each child once.
- *   § 149  the invariants #137 shipped with nothing defending them: the
- *          `discoverOnce` memo, `isFork`, the `.jsonl` guard, the Pi row.
- *
- * Read counts run the bundle under stock node with tests/lib/fs-read-spy.mjs,
- * because bun does not route a bundle's `node:fs` through a patched module.
- *
- * Run: bun tests/wtft-146-149-subagent-discovery.test.ts
  */
 
 import * as fs from "node:fs";

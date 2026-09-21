@@ -1,18 +1,7 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * tests/wtft-89-scoped-discovery.test.ts — the #89 scoped picker's discovery
- * side (S1–S7). Spec: docs/spec-89-scoped-picker.md.
- *
- * Every fixture here uses WTFT_CLAUDE_PROJECTS_DIR / WTFT_PI_SESSIONS_DIR (per
- * CLAUDE.md: never read this host's real ~/.claude or ~/.pi corpus).
- *
- * `discoverSessions(harness, target, scopeOpts)` is exercised directly rather
- * than through `bin/wtft.ts`'s CLI wiring — the CLI layer is what CHOOSES
- * `{ scope: "worktree", windowMs: 20m }` as its own default (see the
- * "library default vs. CLI default" interpretation note in the spec); this
- * suite is what proves each scope option itself behaves as specified.
- *
- * Run: node --experimental-strip-types tests/wtft-89-scoped-discovery.test.ts
+ * the #89 scoped picker's discovery
+ * side (S1–S7).
  */
 
 import * as fs from "node:fs";

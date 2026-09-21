@@ -1,12 +1,6 @@
 /**
- * @package princess-pi-tools
- * @test wtft-daemon-cost-cross-validation
- * @description Validates that the daemon's classified output produces the same
+ * Validates that the daemon's classified output produces the same
  *   total cost as the direct parseSessionFile + deduplicateInteractions path.
- *   Catches drift between the daemon's inlined cost functions and wtft-shared.ts.
- *
- *   Root cause of the 2x watch-mode bug: daemon lacked #54 (message-ID dedup)
- *   and #55 (TTL-split cache-write pricing). This test would have caught both.
  */
 
 import * as fs from "node:fs";

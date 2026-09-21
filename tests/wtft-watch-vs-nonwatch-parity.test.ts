@@ -1,14 +1,7 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-tools
- * @test wtft-watch-vs-nonwatch-render-parity
- * @description Compares the bar chart output between non-watch and --watch
- *   (immediate 'q') modes to catch rendering divergence. The bar segments,
- *   tick labels, costs, and legend should be identical — only the daemon
- *   status indicator and footer line differ.
- *
- *   Regression guard for DRY violations like forceLegendRow causing
- *   different title/legend layout between the two paths.
+ * Compares the bar chart output between non-watch and --watch
+ *   (immediate 'q') modes to catch rendering divergence.
  */
 
 import * as fs from "node:fs";

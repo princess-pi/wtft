@@ -1,15 +1,7 @@
 #!/usr/bin/env -S bun
 /**
- * tests/wtft-89-picker-state.test.ts — the scoped picker's pure key-handling
- * state machine (#89, K1–K7). Spec: docs/spec-89-scoped-picker.md.
- *
- * Every assertion drives the pure exports of picker-state.ts — key strings
- * into `applyKey`, plus `setRows`, `visibleWindow` and the time-window
- * helpers — with no terminal, no discovery, no filesystem, no clock.
- * That is K1 itself: this suite is the proof the seam exists, not merely a
- * description of it.
- *
- * Run: bun tests/wtft-89-picker-state.test.ts
+ * the scoped picker's pure key-handling
+ * state machine (#89, K1–K7).
  */
 
 import {

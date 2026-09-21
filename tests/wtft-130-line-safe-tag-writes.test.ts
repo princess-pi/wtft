@@ -1,21 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-tools
- * @test wtft-130-line-safe-tag-writes
- * @description #130 — the tag file is line-safe BY CONSTRUCTION.
- *
- *   Duppy's rule: any daemon parser that writes less than a full line to a tag
- *   file is a bug in the parser. Readers may presume every line is complete, so
- *   the guarantee has to live in the writer, in one place.
- *
- *   `lastLineStartByte` is the number that must be a byte offset and must land
- *   on a line boundary. Exporting it lets W1-W6 pin it directly.
- *
- *   The Closer is E1, which drives the REAL daemon — a seam that is right in
- *   isolation and miswired in `upsertHeartbeat` would pass W1-W6 and still
- *   corrupt the file.
- *
- * @usage bun run test wtft-130-line-safe-tag-writes
+ * #130 — the tag file is line-safe BY CONSTRUCTION.
  */
 
 import * as fs from "node:fs";

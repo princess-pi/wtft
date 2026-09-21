@@ -1,10 +1,5 @@
 /**
  * Test: Thinking level tracking via thinking_level_change entries (#77)
- *
- * Validates that:
- * 1. parseSessionFile captures thinkingLevel from thinking_level_change entries
- * 2. Subsequent interactions are stamped with the active thinkingLevel
- * 3. Tag file serialization/deserialization preserves thinkingLevel
  */
 
 import * as fs from "node:fs";

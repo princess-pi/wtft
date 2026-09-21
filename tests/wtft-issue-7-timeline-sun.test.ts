@@ -1,13 +1,7 @@
 #!/usr/bin/env bun
 /**
- * @package @princess-pi/wtft
- * @test wtft-issue-7-timeline-sun
- * @description The timeline's ☀️ marker must mark solar noon as a SEPARATE
- *   glyph, not by consuming hour 12's slot. The bug (#7) made the noon hour
- *   (12:00p–12:59p) unconditionally render ☀️ instead of a `─`/clock face, so
- *   the timeline had 23 hour-positions (12 left / 11 right) and showed no clock
- *   face during the noon hour. Fixed: 24 hour-slots, 12 either side of the sun,
- *   and hour 12 shows 🕛 when it is the current hour.
+ * The timeline's ☀️ marker must mark solar noon as a SEPARATE
+ *   glyph, not by consuming hour 12's slot.
  */
 import * as assert from "node:assert";
 import { buildTimelineString } from "../bin/wtft.mjs";

@@ -1,14 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package @princess-pi/wtft
- * @test wtft-64-emoji-width
- * @description getVisualLength reports RENDERED width, not wcwidth's (#64).
- *
- *   wcwidth treats the "ambiguous"-width emoji — ☀️ (U+2600) and ⚡ (U+26A1),
- *   the block U+2600–U+27BF — as 1 column, but every modern terminal renders
- *   them as 2. The SURGE timeline was therefore measured one column short (two
- *   with a ⚡ surge badge), so any width math on the title line was off. The
- *   clock faces 🕐–🕛 and moons 🌑–🌘 are already Wide in wcwidth and must stay 2.
+ * getVisualLength reports RENDERED width, not wcwidth's (#64).
  */
 
 import * as assert from "node:assert";

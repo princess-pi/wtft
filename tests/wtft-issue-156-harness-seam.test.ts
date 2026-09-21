@@ -1,16 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * tests/wtft-issue-156-harness-seam.test.ts — cwd-aware discovery + hard harness seam (#156)
- *
- * Two things under test:
- *   A–C  Discovery can see a session whose project dir no longer matches its cwd,
- *        by the UNION rule — physical slug match OR resolved last-cwd match — so
- *        nothing the old cwd-slug-only scan found is lost.
- *   D–F  Harness code sits behind a seam: parse output is unchanged, control
- *        entries still take effect, and a third harness registers, discovers and
- *        parses with no shared file edited.
- *
- * Run: node --experimental-strip-types tests/wtft-issue-156-harness-seam.test.ts
+ * cwd-aware discovery + hard harness seam (#156)
  */
 
 import * as fs from "node:fs";

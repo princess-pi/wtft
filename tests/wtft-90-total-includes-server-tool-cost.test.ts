@@ -1,24 +1,6 @@
 #!/usr/bin/env -S bun
 /**
- * tests/wtft-90-total-includes-server-tool-cost.test.ts — TOTAL means total (#90)
- *
- * Three surfaces reported a session's cost and two of them were short by the
- * session's server-side tool spend: `buildWtftLines` added `serverToolCost` to
- * the chart's `web` bin, while `computeSessionSummary` — which both
- * `renderTokenSummary` and `buildSessionJson` consume — summed `i.cost` alone.
- *
- * THE REASON IT SURVIVED is that no test compared the chart's total to either of
- * the other two, so this suite drives all three through the CLI exactly as the
- * issue's Repro does, and holds them to each other. A unit test over
- * `computeSessionSummary` would have re-passed on the day the bug was written.
- *
- * Direction A, decided 2026-09-15: the summary ADDS the cost, so all three
- * agree. The accepted consequence is that the `--tokens` TOTAL a reader sees
- * rises by the session's MODEL-TAGGED server-tool spend — tagged, because an
- * interaction with no model id is excluded from this summary before the addition
- * is reached, exactly as it is excluded from every other total here.
- *
- * Run: bun tests/wtft-90-total-includes-server-tool-cost.test.ts
+ * TOTAL means total (#90)
  */
 
 import * as fs from "node:fs";

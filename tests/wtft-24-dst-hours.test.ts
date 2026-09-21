@@ -1,17 +1,6 @@
 /**
  * Tests for #24 — on a DST-transition day, `getSurgeLocalHours` must map local
  * hours to the correct instants for both the `tz` and no-`tz` branches.
- *
- * Zones pinned (gap/fold resolution must hold for either offset sign):
- *   - Asia/Jerusalem, 2026-03-27 — spring forward, +02:00 -> +03:00.
- *   - Africa/Cairo, 2023-10-26 — fall back, +03:00 -> +02:00.
- *   - America/New_York, 2027-03-14 and 2026-11-01 — spring/fall, -05:00 <-> -04:00.
- *   - Australia/Lord_Howe, 2026-04-05 — 30-minute fall-back, pinned via
- *     `resolveZonedLocalHour` directly (those hours never surge on a real
- *     Lord Howe date).
- *
- * Every expected instant/hour below is derived from the real IANA tzdata
- * offsets for these zones, not by calling `resolveZonedLocalHour` under test.
  */
 
 import * as assert from "node:assert";

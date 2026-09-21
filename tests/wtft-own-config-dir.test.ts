@@ -1,16 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package @princess-pi/wtft
- * @test wtft-own-config-dir
- * @description wtft reads and writes its own config, not princess-pi-tools's.
- *
- *   1. No source file under extensions/ or bin/ builds a config PATH out of
- *      "princess-pi-tools" (textual scan, allowlisted for provenance tags and
- *      unrelated example paths that legitimately still name the string).
- *   2. An XDG fixture reads wtft/config.json and ignores a
- *      princess-pi-tools/wtft.json sitting right beside it — no fallback.
- *   3. Walk-up finds `<fixture>/.wtft/config.json` from a subdirectory.
- *   4. The pricing and harness registry resolvers land under wtft/ too.
+ * wtft reads and writes its own config, not princess-pi-tools's.
  */
 
 import * as fs from "node:fs";

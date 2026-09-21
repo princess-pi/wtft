@@ -1,18 +1,7 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * @package princess-pi-tools
- * @test wtft-tree-navigation-cost-divergence
- * @description Validates that the widget (reading from tag file) and CLI
+ * Validates that the widget (reading from tag file) and CLI
  *   produce the same totals when a session has tree-navigation branches.
- *
- *   Root cause of the widget/CLI divergence (#78): getBranch() returns only
- *   the active branch, while the daemon tag file processes the entire session
- *   file (all branches). This test would have caught the $0.50 gap.
- *
- *   Fixture simulates: 3 assistant messages on main branch, then a /tree
- *   navigation to an earlier point, then 2 assistant messages on the new
- *   branch. getBranch() would only see 3 entries ($0.60). Daemon sees all
- *   5 entries ($1.50). The widget must match the daemon.
  */
 
 import * as fs from "node:fs";

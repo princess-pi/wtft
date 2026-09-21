@@ -1,22 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package @princess-pi/wtft
- * @test wtft-62-no-emoji-timeline
- * @description The SURGE timeline honors `disabledEmoji` (#62).
- *
- *   `docs/manifests/wtft-cmd.json` promises that `--no-emoji` swaps emoji for
- *   "clean single-width ASCII characters", but the timeline never did: it
- *   always emitted moon bookends (🌑–🌘), the noon sun (☀️) and the current-hour
- *   clock face (🕐–🕛). On a terminal whose font lacks the clock-face range the
- *   current-hour marker renders as a blank gap, which reads as a missing slot.
- *
- *   No-emoji mapping (single-width ASCII, colours/surge logic unchanged):
- *     moon → `|`    sun → `*`    current hour → `@`
- *
- *   This suite owns two facts: the no-emoji timeline carries none of the emoji
- *   code points AND keeps the 12-left / 12-right layout from #7; and the emoji
- *   timeline is unchanged (regression guard). It imports the SOURCE renderer
- *   (bun resolves the .ts graph directly) so red→green needs no build step.
+ * The SURGE timeline honors `disabledEmoji` (#62).
  */
 
 import * as assert from "node:assert";

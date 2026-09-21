@@ -1,20 +1,5 @@
 /**
- * @package princess-pi-tools
- * @test wtft-270-single-subagent-reader
- * @description #270 — ONE reader for sub-agent transcripts, not two.
- *
- *   The daemon discovers sub-agent transcripts two ways: Task/agent/workflow
- *   spawns (#82) and `claude -p` bash commands (#138). `syncSubagentTranscript(file)`
- *   is the single reader; both discovery paths call it every poll. Discovery
- *   stays one-shot; READING is per-poll for both kinds. This suite pins
- *   "there is no second reader."
- *
- *   Limit: the check is a regex over comment-stripped source — a tripwire on
- *   the known shape, not a proof against aliasing or wrappers.
- *
- *   Closer: `bin/wtft-daemon.ts` defines `syncSubagentTranscript` exactly once,
- *   both discovery paths call it, `writeSessionToTagFile` is gone, and nothing
- *   uses the `claude -p` registry to SKIP a read.
+ * #270 — ONE reader for sub-agent transcripts, not two.
  */
 
 import { readFileSync } from "node:fs";

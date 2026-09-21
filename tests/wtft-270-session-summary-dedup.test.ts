@@ -1,18 +1,8 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-tools
- * @test wtft-270-session-summary-dedup
- * @description getSessionSummary() reimplements "collapse tag-file lines by
+ * getSessionSummary() reimplements "collapse tag-file lines by
  *   message.id, keep max cost" by hand instead of calling the shared
- *   `dedupeClassifiedById`. Two independent implementations of the same rule
- *   with nothing pinning them together is exactly how they drift apart — this
- *   test is that pin.
- *
- *   Closer: over a synthetic tag file whose message.id "msg-A" is re-emitted at a
- *   higher cost in a later line (the growing-usage shape #270 exists to collapse),
- *   getSessionSummary()'s cost/turns must equal the cost/turns independently derived
- *   from readClassifiedTagFile() + dedupeClassifiedById() — the canonical collapse —
- *   over the same file.
+ *   `dedupeClassifiedById`.
  */
 
 import * as fs from "node:fs";

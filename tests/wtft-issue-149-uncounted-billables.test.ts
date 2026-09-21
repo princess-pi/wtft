@@ -1,31 +1,5 @@
 /**
  * Tests for #149 — transcript-invisible spend, counted but never priced.
- *
- * Three groups, matching docs/spec-149-compaction-cost-scope.md §8:
- *
- *   V2–V4  the research harness's residual instrument, on synthetic fixtures.
- *          The point of these is that the FIRST instrument (pair status records
- *          by timestamp) was wrong: transcript entries are flushed up to ~1.5s
- *          after the status record that bills them, so timestamp windows sawtooth
- *          ±$0.20. V3 is the regression guard — it builds a fixture whose
- *          transcript lags deliberately and asserts the residual is still zero.
- *
- *   V1     the same instrument against whatever real sessions this machine has
- *          logged — a SURVEY, not a characterisation (#256). It prints one flat
- *          `#149-survey key=value` record per session and asserts only what
- *          holds on unknown data: that every session lands in exactly one
- *          bucket, that `readStatusLog` returns ascending records, and that
- *          steps and dips carry the sign their names promise. It still skips
- *          subagent-bearing sessions (spec §7: untested), and emits `##SKIP##`
- *          when there is nothing to run against, so `bun run test` can say the
- *          check did not happen instead of reporting a green it did not earn.
- *
- *   V5–V10 the wtft change: count `/compact` and away-recap events per harness,
- *          render them as an UNCOUNTED line, and change no cost number.
- *
- * Everything exercises public interfaces: the harness module's exports and
- * wtft's exported parser/renderer functions. No clock is read — every timestamp
- * below is a literal (#96).
  */
 
 import * as assert from "node:assert";

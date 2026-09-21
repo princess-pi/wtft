@@ -1,10 +1,5 @@
 /**
  * #109 Half-block bar rendering tests.
- *
- * Verifies:
- *  - distributeHalfSlots: proportional distribution at double resolution
- *  - halfSlotCountsToArray: flattens counts into CATEGORY_ORDER array
- *  - renderHalfBlockBar: correct █/▌ glyphs and ANSI color codes
  */
 import {
 	distributeHalfSlots,

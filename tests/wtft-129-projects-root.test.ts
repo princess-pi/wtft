@@ -1,15 +1,6 @@
 #!/usr/bin/env -S bun
 /**
- * tests/wtft-129-projects-root.test.ts — one definition of the projects root (#129)
- *
- * `claude -p` sub-agent discovery, session lookup and the Token Budget scan
- * get the Claude projects root from `projectsDir()`, so
- * `WTFT_CLAUDE_PROJECTS_DIR` redirects all three. Part A folds a `claude -p`
- * child through the override, including one spawned from a dotted cwd (filed
- * under the dot-folded slug); Part B fails on a second production file that
- * contains the literal `".claude", "projects"` pair.
- *
- * Run:  bun tests/wtft-129-projects-root.test.ts
+ * one definition of the projects root (#129)
  */
 
 import * as fs from "node:fs";

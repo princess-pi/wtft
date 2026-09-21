@@ -1,27 +1,7 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-tools
- * @test wtft-270-subagent-tagfile-growth
- * @description #270 — the cost bound on re-parsing subagent transcripts, made
+ * #270 — the cost bound on re-parsing subagent transcripts, made
  *   into a test instead of a claim in a comment.
- *
- *   The daemon re-reads every known subagent transcript on every 667ms poll.
- *   Whatever mechanism decides what to APPEND, the tag file must grow only when
- *   the transcript grew: one new turn in the transcript means one new classified
- *   line in the tag file, and a quiet transcript means none. Re-appending what
- *   is already on disk is O(n^2) in a session's own output — the tag file is
- *   read whole by every consumer, so unbounded growth is not merely wasteful,
- *   it re-prices the same tokens on every read for any consumer that does not
- *   collapse duplicates.
- *
- *   The reader DOES collapse lines sharing a message.id (dedupeClassifiedById),
- *   which makes an unbounded tag file *correct* and *unaffordable* at the same
- *   time. That is exactly why this has to be measured on RAW lines rather than
- *   inferred from a cost total: the cost total stays right while the file runs
- *   away.
- *
- *   Closer: across ~5 polls with an unchanged transcript the raw classified
- *   line count does not move; appending ONE turn moves it by exactly one.
  */
 
 import * as fs from "node:fs";

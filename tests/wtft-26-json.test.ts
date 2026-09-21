@@ -1,19 +1,5 @@
 /**
- * @package @princess-pi/wtft
- * @test wtft-26-json
- * @description #26 — `wtft --json`, the machine-readable session summary.
- *   Spec: docs/spec-26-json.md.
- *
- *   #26's Closer: a `--json` value equals what the rendered table shows for it,
- *   once un-abbreviated. So this suite runs the SAME fixture twice — once with `--tokens`, once with
- *   `--json` — and holds the two outputs to each other. That is the whole point:
- *   a second aggregation written for the JSON path would pass a schema check and
- *   fail this one.
- *
- *   The rendered table abbreviates (`3.6k`), which is lossy, so the comparison
- *   runs the other way: the JSON's exact integer is abbreviated with the same
- *   rule and matched against the printed cell. A cell that agrees after
- *   abbreviation is the strongest claim the prose can support.
+ * #26 — `wtft --json`, the machine-readable session summary.
  */
 
 import * as fs from "node:fs";

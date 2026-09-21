@@ -1,16 +1,9 @@
 #!/usr/bin/env -S bun
 /**
- * tests/wtft-165-widget-subagent-drop.test.ts — #165.
- *
+ * #165.
  * Discovery lists a subagent transcript by stat, so a file whose READ then
  * fails (mode 000, vanished) passes discovery and is dropped later by
- * loadSubagentInteractions. The widget must mark that total provisional, the
- * same as a discovery-level unreadable file.
- *
- * Drives the built Pi widget (pi/wtft.js) through a fake `pi`/`ctx`: fire
- * `agent_settled`, capture what `setWidget` receives.
- *
- * Run: bun tests/wtft-165-widget-subagent-drop.test.ts
+ * loadSubagentInteractions.
  */
 
 import * as fs from "node:fs";

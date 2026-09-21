@@ -1,8 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-tools
- * @test wtft-daemon-lifecycle
- * @description Validates #95 daemon lifecycle fixes against the BUILT bins:
+ * Validates #95 daemon lifecycle fixes against the BUILT bins:
  *   1. Idle clamped by classified freshness (dual-daemon heartbeat fixture)
  *   2. Takeover protocol — lost PID lease → exit within 2 beats, no unlink
  *   3. Spawn-twice — exactly one surviving daemon, and it owns the PID file
@@ -11,6 +9,7 @@
  *   6. Version hygiene — old-version tag files removed at startup
  *   7. getTagPath — exact version preferred, else newest mtime
  *   8. Cache TTL derived from usage.cache_creation, not the model name
+ * /
  */
 
 import * as fs from "node:fs";

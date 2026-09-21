@@ -1,11 +1,7 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-tools
- * @test wtft-512-fatal-replay
- * @description #512 — a partial tag append is terminal, poisons the existing
+ * #512 — a partial tag append is terminal, poisons the existing
  *   singleton lease, and the next owner rederives the transient cache.
- *
- * @usage bun run test wtft-512-fatal-replay
  */
 
 import * as fs from "node:fs";

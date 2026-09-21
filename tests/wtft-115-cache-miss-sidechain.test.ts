@@ -1,30 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * tests/wtft-115-cache-miss-sidechain.test.ts — Cache Miss is parent-only (#115)
- *
- * A subagent starts with an empty context, so its first turn always reads 0 and
- * writes everything: the raw shape of a cache miss, with nothing lost. Flagging
- * it turns the divider — an actionable "your cached prefix was thrown away" —
- * into noise that grows with fan-out.
- *
- * So `cacheMiss` is decided at parse time against `isSidechain`, alongside the
- * same exclusion `splitOverheadCost` already applies to recache detection, and
- * again from PROVENANCE in `loadSubagentInteractions` for the harnesses that
- * mark a subagent by file rather than by entry. The renderer is untouched: it
- * still just follows the flag.
- *
- * ONE NUMBER DIFFERS FROM THE ISSUE, deliberately. #115 asks for "zero Cache
- * Miss dividers" from a session that spawns N subagents and never idles. It
- * renders ONE: the session's own first turn is a real cold start, and #152
- * decided that case stays flagged (see that spec, "Why removal, not
- * augmentation"). The rule #115 actually asks for is "no divider that a SUBAGENT
- * caused", which is what the fixture below pins — parent misses counted
- * exactly, subagent misses zero.
- *
- * Imports come from the BUILT bundle `bin/wtft.mjs`. Rebuild before trusting a
- * green run from this file alone.
- *
- * Run: node --experimental-strip-types tests/wtft-115-cache-miss-sidechain.test.ts
+ * Cache Miss is parent-only (#115)
  */
 
 import * as fs from "node:fs";

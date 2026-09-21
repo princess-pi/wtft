@@ -1,22 +1,8 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * @package princess-pi-tools
- * @test wtft-title-layout
- * @description Strictly validates title row layout consistency across all
+ * Strictly validates title row layout consistency across all
  *   code paths (CLI cost, CLI tokens, CLI --watch) at narrow/medium/wide
- *   terminal widths. Tests against the BUILT bin/wtft.mjs — the
- *   end-user artifact — to catch stale-build regressions.
- *
- *   Invariant: the SURGE timeline MUST be on the title row, never on its own
- *   row. Legend goes to its own row when too wide.
- *
- *   The timeline is identified by its moon-phase bookends (🌑…🌘), not by the
- *   current-hour marker: the marker is a clock face that changes every hour
- *   (☀️ marks solar noon as a separate glyph, not by replacing the clock),
- *   whereas the bookends are always present. This
- *   suite used to key off the old ◆ marker, which the renderer dropped — the
- *   replacement invariant is deliberately the one that does not depend on what
- *   time the suite happens to run (#158).
+ *   terminal widths.
  */
 
 import * as fs from "node:fs";

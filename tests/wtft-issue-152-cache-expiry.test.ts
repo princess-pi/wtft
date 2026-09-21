@@ -1,16 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * tests/wtft-issue-152-cache-expiry.test.ts — Observed cache-miss divider (#152)
- *
- * The divider used to be inferred from elapsed time vs. a 5m/1h TTL. It now comes
- * from the observation the API already records: cache_read 0 with cache_creation > 0.
- *
- * That observation is made at parse time and carried on Interaction.cacheMiss,
- * because the compaction/recache meter-split (#52 Phase 3) writes cr and cw onto
- * two separate tag lines — after which a full miss and a partial re-prime are
- * indistinguishable. PART C is the regression for exactly that.
- *
- * Run: node --experimental-strip-types tests/wtft-issue-152-cache-expiry.test.ts
+ * Observed cache-miss divider (#152)
  */
 
 import * as fs from "node:fs";

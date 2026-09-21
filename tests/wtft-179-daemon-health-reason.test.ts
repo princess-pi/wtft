@@ -1,21 +1,7 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-tools
- * @test wtft-179-daemon-health-reason
- * @description #179 — the daemon health reason is a machine code, the status text is
- *   derived from it. Verifies the spec's V1–V4:
- *
- *     V1  no bare reason sentence survives in control flow
- *     V2  a typo'd code comparison FAILS `tsc --noEmit` (negative control)
- *     V3  the #124 startup grace window actually holds — the behaviour test that
- *         did not exist, and whose absence is why #165 could have regressed it
- *     V4  every code renders the same user-facing sentence as before the split
- *
- *   V3 is the load-bearing one. V1/V2 protect the representation; V3 protects the
- *   behaviour, so it survives any future change to how the reason is represented.
- *
- * Runner: self-contained script (repo convention). Run with:
- *   bun run test wtft-179
+ * #179 — the daemon health reason is a machine code, the status text is
+ *   derived from it.
  */
 
 import { spawnSync } from "node:child_process";

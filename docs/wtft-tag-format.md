@@ -81,8 +81,9 @@ only asks whether the file grew is left with an offset past EOF across any daemo
 it then resumes mid-line and silently loses every rebuilt line before that offset. An earlier
 draft of this section argued a truncate to zero was harmless because "no reader can be
 positioned inside it" — true of the CONTENT, false of the OFFSET, which is the thing that
-breaks. `watchTagFile` re-seeds on `stat.size < lastReadOffset`; a third-party reader needs the
-same branch.
+breaks. `watchTagFile` re-seeds on `stat.size < lastReadOffset`, on a prefix that no longer matches or
+cannot be read, and on any appended `_gen` record (§2e) — an append cannot retract lines already
+read. A third-party incremental reader needs all four branches.
 
 **Where the guarantee lives.** In the writer, once: `appendTagFile` refuses a batch that does
 not end in a newline, a tag truncate may only cut to zero or to a `lastLineStartByte` offset,
@@ -166,12 +167,13 @@ model-tagged turn, at any depth. `parent` is the tag's own session id, the trans
 without `.jsonl`; readers key on `child` only. `s` is the source of the child transcript whose
 parse implied the record (§2a), so a later `_gen` for that source supersedes it (§2e). Whenever a
 child transcript parses, the daemon appends a record for each such session that source's current
-generation has not recorded yet, after the child's lines and in the same append. Two sources that
+generation has not recorded yet, after whatever lines that parse produced and in the same append. Two sources that
 fold one session each record it. A reader treats the records as a set; a repeat is not an error.
 
 A fold record is data, not a marker: a tag whose last data line is one reads unswept. The spawn
 walk skips every recorded child as `in-self-total`, because its money is already in the tag's total
-(`docs/spec-178-135-180-fold-records.md`).
+— on the arm that reads the tag; a run whose session log is absent passes an empty set instead
+(`docs/spec-178-135-180-fold-records.md`, `docs/spec-176-134-135-report-honesty.md`).
 
 ### 2e. Generation record
 
@@ -185,8 +187,10 @@ an interaction line or a fold record — counts only if no `_gen` record for the
 it.** A line with no `s` always counts.
 
 The daemon writes one on the first successful parse of a child transcript in each daemon life,
-and on the first after that transcript rotated (its size decreased or its inode changed). The
-record goes first in the append, followed by every line of that parse and every fold record it
+and on the first parse after that transcript rotated — read from the parse rather than from a
+stat: the parse no longer produces a line the generation wrote, and that line carries no `id`, or
+an `id` this parse no longer produces, so §4's dedup cannot collapse it. The record goes first in
+the append, followed by every line of that parse and every fold record it
 implies. A generation with no lines still writes its record, so a transcript rotated to empty
 drops its old lines. Like a fold record, it is data: a tag whose last data line is one reads
 unswept (`docs/spec-114-14-generation-records.md`).

@@ -1314,7 +1314,7 @@ export function attributeClaudeSubAgentCosts(
 
 export function fileStamp(file: string): string {
 	const st = fs.statSync(file);
-	return `${st.size}:${st.mtimeMs}`;
+	return `${st.size}:${st.mtimeMs}:${st.ino}`;
 }
 
 /** The last moment discovery could still find a `claude -p` child for one of

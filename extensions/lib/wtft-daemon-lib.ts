@@ -265,10 +265,11 @@ export function foldRecordLine(parent: string, child: string, source: string): s
 	return JSON.stringify({ _fold: { parent, child, s: source } }) + "\n";
 }
 
-/** The `s` a child transcript's tag lines carry. Keyed on the path, not the
- *  session id: two copies of one session are two sources. */
-export function transcriptSourceId(file: string): string {
-	return createHash("sha1").update(path.resolve(file)).digest("hex").slice(0, 8);
+/** The `s` a child transcript's tag lines carry. Keyed on its path relative to
+ *  the session directory, not on the session id: two copies of one session are
+ *  two sources, and a session that moves keeps the source of a child under it. */
+export function transcriptSourceId(file: string, sessionDir: string): string {
+	return createHash("sha1").update(path.relative(path.resolve(sessionDir), path.resolve(file))).digest("hex").slice(0, 8);
 }
 
 /** Opens a new generation for `source`: every earlier line carrying it stops counting. */

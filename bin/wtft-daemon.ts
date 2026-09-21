@@ -92,6 +92,8 @@ interface SubagentFileState {
 	writtenLines: Map<string, number>;
 	/** The next write opens a generation: a `_gen` record, then every current line. */
 	newGeneration: boolean;
+	/** Message id of each written line's hash, `null` for a line that had none. */
+	writtenIds: Map<string, string | null>;
 	/** Fold ids this generation has recorded. The CLI's spawn walk skips exactly
 	 *  the recorded ids, so a fold with no record is billed twice. */
 	recordedFolds: Set<string>;
@@ -260,7 +262,7 @@ function syncSubagentTranscript(file: string): boolean {
   if (!fileState) {
     fileState = {
       size: -1, mtimeMs: -1, readAtMs: 0, ino: -1, writtenLines: new Map<string, number>(),
-      newGeneration: true, recordedFolds: new Set<string>(), foldStamps: new Map<string, string>(), spawnWindowClosesAt: 0,
+      newGeneration: true, writtenIds: new Map<string, string | null>(), recordedFolds: new Set<string>(), foldStamps: new Map<string, string>(), spawnWindowClosesAt: 0,
     };
     discoveredSubagentFiles.set(stateKey, fileState);
   }
@@ -299,15 +301,6 @@ function syncSubagentTranscript(file: string): boolean {
     process.stderr.write(`[wtft-log-parser] subagent transcript unchanged but not yet settled, re-reading to close the same-tick window: ${path.basename(file)}\n`);
   }
 
-  if (fileState.size !== -1 && (size < fileState.size || ino !== fileState.ino)) {
-    fileState.writtenLines.clear();
-    fileState.recordedFolds.clear();
-    fileState.newGeneration = true;
-    if (process.env.WTFT_DAEMON_DEBUG) {
-      process.stderr.write(`[wtft-log-parser] subagent transcript rotated, opening a new generation: ${path.basename(file)}\n`);
-    }
-  }
-
   let deduped: ReturnType<typeof deduplicateInteractions>;
   try {
     deduped = deduplicateInteractions(parseSessionFile(file));
@@ -326,19 +319,35 @@ function syncSubagentTranscript(file: string): boolean {
     return wroteAny;
   }
 
-  const source = transcriptSourceId(file);
-  let batch = fileState.newGeneration ? generationRecordLine(source, sessionId) : '';
+  const source = transcriptSourceId(file, path.dirname(sessionPath));
   const freshHashes: string[] = [];
+  const freshIds: (string | null)[] = [];
+  let batch = '';
   try {
-    const seenThisParse = new Map<string, number>();
-    for (const si of deduped) {
+    const parsed = deduped.map(si => {
       const line = serializeClassified(si, source);
-      const hash = createHash('sha1').update(line).digest('hex');
+      return { line, hash: createHash('sha1').update(line).digest('hex'), id: si.messageId ?? null };
+    });
+
+    if (supersededWithoutDedup(fileState, parsed)) {
+      fileState.writtenLines.clear();
+      fileState.writtenIds.clear();
+      fileState.recordedFolds.clear();
+      fileState.newGeneration = true;
+      if (process.env.WTFT_DAEMON_DEBUG) {
+        process.stderr.write(`[wtft-log-parser] subagent transcript rotated, opening a new generation: ${path.basename(file)}\n`);
+      }
+    }
+    if (fileState.newGeneration) batch = generationRecordLine(source, sessionId);
+
+    const seenThisParse = new Map<string, number>();
+    for (const { line, hash, id } of parsed) {
       const nth = (seenThisParse.get(hash) || 0) + 1;
       seenThisParse.set(hash, nth);
       if (nth <= (fileState.writtenLines.get(hash) || 0)) continue;
       batch += line;
       freshHashes.push(hash);
+      freshIds.push(id);
     }
   } catch (err) {
     pollHadFailure = true;
@@ -370,6 +379,7 @@ function syncSubagentTranscript(file: string): boolean {
   }
   fileState.newGeneration = false;
   for (const id of freshFolds) fileState.recordedFolds.add(id);
+  for (let k = 0; k < freshHashes.length; k++) fileState.writtenIds.set(freshHashes[k], freshIds[k]);
   fileState.foldStamps = new Map();
   for (const si of deduped) {
     for (const fold of si.claudeSubAgentFolds ?? []) fileState.foldStamps.set(fold.file, fold.stamp);
@@ -383,6 +393,29 @@ function syncSubagentTranscript(file: string): boolean {
   fileState.ino = ino;
   if (changed) fileState.readAtMs = Date.now();
   return wroteAny;
+}
+
+/** Whether this parse drops a line already written that the reader's id dedup
+ *  cannot collapse: one with no message id, or one whose id this parse no longer
+ *  produces at all. That is a transcript rewritten, so its lines need a new
+ *  generation rather than an append beside the old ones. */
+function supersededWithoutDedup(
+  fileState: SubagentFileState,
+  parsed: { hash: string; id: string | null }[],
+): boolean {
+  if (fileState.writtenLines.size === 0) return false;
+  const counts = new Map<string, number>();
+  const ids = new Set<string>();
+  for (const { hash, id } of parsed) {
+    counts.set(hash, (counts.get(hash) || 0) + 1);
+    if (id) ids.add(id);
+  }
+  for (const [hash, written] of fileState.writtenLines) {
+    if (written <= (counts.get(hash) || 0)) continue;
+    const id = fileState.writtenIds.get(hash) ?? null;
+    if (id === null || !ids.has(id)) return true;
+  }
+  return false;
 }
 
 /** A nested transcript that grew, or no longer stats, since the parse that folded it. */

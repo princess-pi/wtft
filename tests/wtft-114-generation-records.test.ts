@@ -160,6 +160,26 @@ for (const how of ["truncate", "replace"] as const) {
 }
 
 {
+	// A rewrite of the same byte length on the same inode: neither size nor inode moves.
+	const { rootPath, child, tagPath } = taskRoot("d-same-size", uuid(14));
+	const base = Date.now() - 50_000;
+	fs.writeFileSync(child, turns("old-same", [100, 200, 400], base));
+	const before = fs.statSync(child);
+	const daemon = startDaemon(rootPath);
+	const read1 = await settle(tagPath, r => outOf(r.interactions) === 701);
+	check(outOf(read1.interactions) === 701,
+		`D6a fixture precondition: the tag holds the old run's 700 plus the root's 1 (got ${outOf(read1.interactions)})`);
+	fs.writeFileSync(child, turns("new-same", [111, 222, 444], base + 10_000));
+	const after = fs.statSync(child);
+	check(after.size === before.size && after.ino === before.ino,
+		`D6b fixture precondition: the rewrite kept the byte length and the inode (${before.size}/${after.size}, ${before.ino}/${after.ino})`);
+	const read2 = await settle(tagPath, r => outOf(r.interactions) === 778);
+	await stopDaemon(daemon);
+	check(outOf(read2.interactions) === 778,
+		`D7 #114 a rewrite that neither shrinks the file nor changes its inode still opens a new generation: 777 plus the root's 1 (got ${outOf(read2.interactions)})`);
+}
+
+{
 	// A restart re-appends every child line; an id-less line must not be billed twice.
 	const { rootPath, child, tagPath } = taskRoot("d-restart", uuid(13));
 	const iso = new Date(Date.now() - 40_000).toISOString();

@@ -11,21 +11,25 @@
 `total` is what the daemon folded into the tag. The spawn walk must skip exactly the sessions
 inside `total`, so it needs the same fact the daemon had when it folded. Rediscovering that set
 at read time against the filesystem, as it is at read time, is not the same fact. The two drift
-in both directions: a child the daemon never folded is dropped from both buckets (#135 A), and
+in both directions: a child the daemon never folded is dropped from both `total` and `spawned.total` (#135 A), and
 a child that has since moved is counted in both (#178).
 
 So **the daemon records every session it folds, and the CLI reads the record.** Nothing on the
-read path rediscovers.
+read path rediscovers which sessions were folded.
 
 ## Shape
 
 ### Tag format — the fold record
 
 - **A fourth line kind:** `{"_fold":{"parent":"<session id>","child":"<session id>"}}`.
-  `parent` is the tag's own session; `child` is a session whose cost is in this tag's lines.
+  `parent` is the tag's own session id (the transcript's filename without `.jsonl`); `child` is a
+  session whose transcript the daemon folded into this tag. Readers key on `child`; `parent` is
+  there for a human reading the file.
 - **Written by `syncSubagentTranscript`**, the daemon's one fold point, for Task children and
-  `claude -p` children alike. It is written after the first parse of a child transcript succeeds.
-  That covers the child, plus every session the child's parse folded in, at any depth. The
+  `claude -p` children alike. Whenever a parse of a child transcript succeeds, the daemon records
+  every session in `foldRecordIds` that it has not recorded yet: the child itself, plus every
+  session folded onto one of the child's deduplicated, model-tagged turns, at any depth. A fold
+  on an untagged turn lands in `untaggedCostUsd`, not in the total, so it is not recorded. The
   records go in the same append as the child's lines, after them. Each session is recorded
   once per daemon life. Readers treat the records as a set, so a restart that re-records is
   harmless.
@@ -44,10 +48,11 @@ read path rediscovers.
   interactions and the verdict. That makes the three one snapshot.
 - **CLI in-self set = `folded`.** `computeSpawnTree` adds the root itself. The pending arm still
   passes an empty set, which is P1's contract.
-- **Widget in-self set = `folded` ∪ the Task transcripts the widget merges into SELF itself, ∪
-  the sessions those transcripts' parses folded.** That is exactly what its SELF contains. No
-  discovery runs on either path. `collectSelfAttributedSessionIds` becomes a pure union of what
-  it is handed.
+- **Widget in-self set = `folded` ∪ the Task transcripts the widget merged into SELF itself
+  (not the ones that failed to load) ∪ the sessions those transcripts' parses folded.** The
+  widget's own read discovers those transcripts to merge them; building the in-self set
+  discovers nothing more. `collectSelfAttributedSessionIds` becomes a pure union of what it is
+  handed.
 
 ### Parser — folds carry their shares
 
@@ -69,7 +74,7 @@ read path rediscovers.
 - **Subtract a share, never a separately computed total.** For each session a counted
   descendant folded:
   - Already in SELF, already counted under its own edge, or already folded by an earlier
-    descendant: its `share` is subtracted from this descendant's total. This fixes #180 item 1:
+    descendant (three cases): its `share` is subtracted from this descendant's total. This fixes #180 item 1:
     in-self and folded ids used to subtract nothing.
   - Otherwise: it is marked `folded`.
   - The subtraction runs over the same interactions the total was summed from, so it cannot go
@@ -83,8 +88,7 @@ read path rediscovers.
   there is not reported as an `unreadable` edge (#180 item 5).
 - **`depthCapped` counts edges past the cap onto a session not already reached.** An edge past
   the cap onto a session seen earlier reports that session's outcome and is not a cut. The code
-  is unchanged; the wording in spec-116, spec-26, the README and `CONTEXT.md` is corrected
-  (#180 item 6).
+  is unchanged; the wording in spec-116 and spec-26 is corrected (#180 item 6).
 
 ### Schemas
 
@@ -105,21 +109,26 @@ The tag format gains a line kind, and the tagger version marks it.
 - **Parser.** A root whose turn spawns child C, which spawns grandchild G: the spawning
   interaction's `claudeSubAgentFolds` lists C and G. G's share is G's cost, and C's share is
   C's own cost without G's.
-- **Daemon.** The daemon run on that root writes `_fold` records for C and G. The tag reads
-  `swept`, and `readTagFileWithVerdict(...).folded` holds both.
-- **#178.** Take a tag that recorded C, then make C's transcript unreadable, with a ledger edge
-  root → C. C's edge is `in-self-total`, and C contributes zero to `spawned.total`.
-- **#180 item 2.** The same, with a ledger edge root → G while C is unreadable. G is
-  `in-self-total`.
-- **#135 A.** A tag with no fold record for C, C readable, and a ledger edge root → C. C is
-  counted in `spawned.total`.
+- **Record choice.** `foldRecordIds` on a child with one fold on an untagged turn and one on a
+  tagged turn returns the child and the tagged turn's fold only.
+- **Daemon.** The daemon run on that root, which also has a Task child, writes `_fold` records
+  for C, G and the Task child and nothing else. The tag reads `swept`, and
+  `readTagFileWithVerdict(...).folded` holds all three.
+- **#178.** The walk decides the skip from the in-self set before it resolves or reads anything.
+  With C and G in the set, C's transcript unreadable, and ledger edges root → C and root → G:
+  both are `in-self-total` and add nothing (#180 item 2 is the G edge). With C moved so that it
+  no longer resolves: still `in-self-total`, never a gap.
+- **#135 A.** C outside the in-self set, as a child with no fold record is, C readable, and a
+  ledger edge root → C: C is counted in `spawned.total`.
 - **#180 item 1.** In-self X, and a ledger descendant D whose parse also folds X: D's edge
   total equals D's own cost. The same holds for two ledger descendants that both fold X: X's
   cost is in `spawned.total` once.
-- **#180 item 3.** An edge to X that is `not-found` first, then a descendant whose parse folds
-  X: `unattributed` is empty.
+- **#180 item 3.** An edge to X that is `unreadable` first (its newest copy cannot be read),
+  then a descendant whose parse folds X's readable copy: `unattributed` is empty, and X's edge
+  keeps `skip: "unreadable"`.
 - **#180 item 4.** A descendant whose spawning turn is untagged, so its fold is outside its
   total, and whose folded session was counted under its own edge. The descendant keeps its own
   tagged cost; before this change the clamp zeroed it.
-- **End to end.** `wtft --json` on a fixture with a fold-recorded child moved away and a ledger
-  edge to it: `tree.costUsd` equals `total.costUsd`.
+- **End to end.** `wtft --json` on a tag that records a child since moved to another project
+  dir, with a ledger edge to it: the edge is `in-self-total`, and `tree` equals `total` in
+  `costUsd` and `outputTokens`. The same tag without the record counts the child.

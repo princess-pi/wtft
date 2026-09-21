@@ -2,8 +2,8 @@
 
 import { readSpawnLedger, type SpawnLedger } from "./wtft-spawn-ledger.js";
 import { getDiscoveries } from "./harness/registry.js";
-import { parseSessionFile, deduplicateInteractions, type Interaction } from "./wtft-parser.js";
-import { computeSessionSummary, emptyTotals, isModelTagged, type TokenTotals } from "./wtft-renderer.js";
+import { parseSessionFile, deduplicateInteractions, isModelTagged, type Interaction } from "./wtft-parser.js";
+import { computeSessionSummary, emptyTotals, type TokenTotals } from "./wtft-renderer.js";
 import { IDLE_THRESHOLD_MS } from "./wtft-daemon-lib.js";
 import * as fs from "node:fs";
 

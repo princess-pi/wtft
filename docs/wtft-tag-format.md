@@ -13,7 +13,7 @@
 ```
 
 - **`<sessionDir>`** — the directory containing the Claude Code transcript file (`.jsonl`)
-- **`<sessionBase>`** — the transcript filename without its `.jsonl` extension
+- **`<sessionBase>`** — the transcript filename, `.jsonl` extension included (so a tag is `<uuid>.jsonl.wtft-tag.v<VERSION>.jsonl`)
 - **`<VERSION>`** — the value of `WTFT_TAGGER_VERSION` exported from
   `extensions/lib/wtft-tagger-version.ts`; never hardcode this value
 
@@ -158,14 +158,15 @@ The top-level `_hb` key identifies a heartbeat. Readers MUST skip all lines that
 {"_fold": {"parent": "<session id>", "child": "<session id>"}}
 ```
 
-`child` is a session whose cost the daemon folded into this tag's lines: a Task child under
-`<session>/subagents/`, a `claude -p` child, or a session either of those folded in, at any depth.
-`parent` is the tag's own session. The daemon writes the records after the child's lines, in the
-same append, once the child's transcript first parses. A reader treats the records as a set;
-a repeat is not an error.
+`child` is a session whose transcript the daemon folded into this tag: a Task child under
+`<session>/subagents/`, a `claude -p` child, or a session either of those folded in on a
+model-tagged turn, at any depth. `parent` is the tag's own session id, the transcript filename
+without `.jsonl`; readers key on `child` only. Whenever a child transcript parses, the daemon
+appends a record for each such session not yet recorded, after the child's lines and in the same
+append. A reader treats the records as a set; a repeat is not an error.
 
 A fold record is data, not a marker: a tag whose last data line is one reads unswept. The spawn
-walk skips exactly the recorded children, because their money is already in the tag's total
+walk skips every recorded child as `in-self-total`, because its money is already in the tag's total
 (`docs/spec-178-135-180-fold-records.md`).
 
 ---

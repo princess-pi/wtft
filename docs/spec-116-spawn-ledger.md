@@ -159,7 +159,7 @@ reintroduced inside #116's fix. An *absent* ledger is not an error: nothing has 
   *gap*, and a zero would launder it into a fact. Two reasons, kept apart: `not-found` (the lookup
   came back empty — the file is absent, or somewhere this process cannot read, and the walk cannot
   tell those apart, which is why the name does not claim absence) and `unreadable` (a file that
-  would not parse — the only skip class that is a bug rather than a fact). **One entry per session,
+  would not parse or be stat-ed — the only skip class that is a bug rather than a fact). **One entry per session,
   not per edge**: two edges onto the same missing child are one gap.
 - **The walk continues past a gap.** A child we cannot read may still have recorded children of
   its own, and those may be perfectly readable; its grandchildren are edges in the *ledger*, not
@@ -170,9 +170,10 @@ reintroduced inside #116's fix. An *absent* ledger is not an error: nothing has 
   `unattributed`. `already-seen-unresolved` exists because `already-counted` asserts the money
   landed, which is false for a second edge onto a child the first visit could not read.
   `in-self-total` is a child whose cost is already inside `total`: a session the tag's fold
-  records name (`docs/spec-178-135-180-fold-records.md`), which covers `claude -p` children at
-  any depth (#138) and Task children under `<session>/subagents/` (#82/#83); or the reported
-  session itself, reached round a cycle. It is reported and never added, because billing twice is
+  records name (`docs/spec-178-135-180-fold-records.md`), which in practice means a `claude -p`
+  child at any depth (#138); or the reported session itself, reached round a cycle. The records
+  also name Task children under `<session>/subagents/` (#82/#83), but a ledger id must be a UUID
+  and a Task child's is not, so no edge reaches one. It is reported and never added, because billing twice is
   the expensive direction to be wrong in. `already-counted` is the same claim about the tree's
   own total, and covers a `claude -p` session a resolved descendant's parse folded in: its money is in
   `spawned.total`. A resolved descendant's parse lists every session it folded, at any depth,
@@ -222,7 +223,7 @@ consumer checking only those reads a zeroed tree as a complete lineage. And a ma
 trace it leaves — so a tree with `malformedLedgerLines > 0` and none of the other three can still be
 missing a descendant. Round 5 found this condition missing from all six surfaces that state it.
 
-**`--tokens`** gains a block below TOTAL, rendered only when this session has at least one edge:
+**`--tokens`** gains a block below TOTAL, rendered when this session has at least one edge, or when the ledger could not be read or had a line skipped (the block then says so instead):
 
 ```
 SPAWNED    3 session(s) priced from 6 recorded edge(s) (#116) —

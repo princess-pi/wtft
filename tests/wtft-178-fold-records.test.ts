@@ -8,8 +8,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { parseSessionFile } from "../extensions/lib/wtft-parser.ts";
-import { readTagFileWithVerdict, WTFT_TAGGER_VERSION } from "../extensions/lib/wtft-daemon-lib.ts";
-import { computeSpawnTree } from "../extensions/lib/wtft-spawn-tree.ts";
+import { readTagFileWithVerdict, foldRecordIds, WTFT_TAGGER_VERSION } from "../extensions/lib/wtft-daemon-lib.ts";
+import { computeSpawnTree, resolveSessionFile } from "../extensions/lib/wtft-spawn-tree.ts";
 import { SPAWN_RECORD_SCHEMA, serializeSpawnRecord } from "../extensions/lib/wtft-spawn-ledger.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
@@ -105,7 +105,7 @@ console.log("\nPART R — readTagFileWithVerdict returns `folded`");
 		+ line({ _fold: { parent: "r-session", child: "kid-a" } }));
 	const read = readTagFileWithVerdict(tagPath);
 	check(read.folded instanceof Set && read.folded.size === 2 && read.folded.has("kid-a") && read.folded.has("kid-b"),
-		`R1 folded is the set of recorded children, a repeat counted once (got ${JSON.stringify([...(read.folded ?? [])])})`);
+		`R1 folded is the set of recorded children, a repeat counted once (got ${JSON.stringify([...read.folded])})`);
 	check(read.interactions.length === 1,
 		`R2 a fold record is not an interaction (got ${read.interactions.length})`);
 	check(read.provisional.provisional === true && read.provisional.reason === "unswept",
@@ -114,9 +114,30 @@ console.log("\nPART R — readTagFileWithVerdict returns `folded`");
 	check(readTagFileWithVerdict(tagPath).provisional.provisional === false,
 		"R4 the sweep after it settles the tag");
 	const stale = path.join(tagsDir, "r-session.jsonl.wtft-tag.v0.0.1.jsonl");
-	fs.writeFileSync(stale, line({ t: T0, c: 0.5, cat: "code", f: [], cmd: [], id: "m1" }));
-	check(readTagFileWithVerdict(stale).folded.size === 0,
-		"R5 a tag from before fold records yields an empty set");
+	fs.writeFileSync(stale, line({ t: T0, c: 0.5, cat: "code", f: [], cmd: [], id: "m1" }) + line({ _meta: { swept: T0 } }));
+	const staleRead = readTagFileWithVerdict(stale);
+	check(staleRead.folded.size === 0 && staleRead.provisional.reason === "stale-version",
+		`R5 a tag written before fold records has no fold lines, so its set is empty, and it reads stale-version (got ${staleRead.folded.size}, ${staleRead.provisional.reason})`);
+}
+
+// ---
+// PART U — the daemon records only folds its tag's total holds
+// ---
+console.log("\nPART U — foldRecordIds: a fold on an untagged turn is not recorded");
+
+{
+	const ROOT = uuid(91), X = uuid(92), Y = uuid(93);
+	putSession(X, T0 + 4_000, 700);
+	putSession(Y, T0 + 4_000, 500);
+	const childPath = path.join(dir, `u-child.jsonl`);
+	fs.writeFileSync(childPath, turnLine("u-untagged", T0, 10, cwdOf(X), "<synthetic>") + turnLine("u-tagged", T0 + 1_000, 20, cwdOf(Y)));
+	const deduped = parseSessionFile(childPath);
+	const carriers = deduped.filter(i => foldsOf([i]).length > 0).map(i => i.model);
+	check(carriers.includes("<synthetic>") && carriers.includes("claude-sonnet-4-6"),
+		`U0 fixture precondition: one fold rides the untagged turn, one the tagged turn (got ${JSON.stringify(carriers)})`);
+	const ids = foldRecordIds(ROOT, deduped);
+	check(ids.includes(ROOT) && ids.includes(Y) && !ids.includes(X),
+		`U1 the child and the tagged turn's fold are recorded; the untagged turn's fold is not (got ${JSON.stringify(ids)})`);
 }
 
 // ---
@@ -177,22 +198,28 @@ function ledgerOf(edges: Array<[parent: string, child: string]>): string {
 	const grandPath = putSession(GRAND, T0 + 4_000, 700);
 	const recorded = new Set([CHILD, GRAND]);
 	fs.chmodSync(childPath, 0o000);
+	let childUnreadable = false;
+	try { fs.readFileSync(childPath); } catch { childUnreadable = true; }
 	const unreadableChild = computeSpawnTree(ROOT, { ledgerPath: ledgerOf([[ROOT, CHILD], [ROOT, GRAND]]), alreadyAttributed: recorded });
 	fs.chmodSync(childPath, 0o644);
+	check(childUnreadable && unreadableChild.edges.length === 2 && unreadableChild.ledgerError === null && unreadableChild.malformedLedgerLines === 0,
+		`W1a fixture precondition: the child's transcript cannot be read, and the walk reached both edges`);
 	check(unreadableChild.edges.every(e => e.skip === "in-self-total") && unreadableChild.total.outputTokens === 0 && unreadableChild.unattributed.length === 0,
-		`W1 #178 a recorded child that is unreadable now is in-self-total and adds nothing; so is its folded grandchild (#180 item 2) (skips ${JSON.stringify(unreadableChild.edges.map(e => e.skip))}, spawned ${unreadableChild.total.outputTokens})`);
+		`W1 #178 the record decides the skip without reading the transcript: an unreadable recorded child, and the grandchild the record also names (#180 item 2), are in-self-total and add nothing (skips ${JSON.stringify(unreadableChild.edges.map(e => e.skip))}, spawned ${unreadableChild.total.outputTokens})`);
 	fs.renameSync(childPath, childPath + ".moved");
 	fs.renameSync(grandPath, grandPath + ".moved");
 	const moved = computeSpawnTree(ROOT, { ledgerPath: ledgerOf([[ROOT, CHILD]]), alreadyAttributed: recorded });
+	check(resolveSessionFile(CHILD) === null && moved.edges.length === 1,
+		"W2a fixture precondition: the moved child no longer resolves");
 	check(moved.edges[0]?.skip === "in-self-total" && moved.total.outputTokens === 0,
-		`W2 #178 a recorded child that has moved away is in-self-total, never counted (skip ${moved.edges[0]?.skip})`);
+		`W2 #178 a recorded child that no longer resolves is in-self-total, never a gap (skip ${moved.edges[0]?.skip})`);
 	fs.renameSync(childPath + ".moved", childPath);
 	fs.renameSync(grandPath + ".moved", grandPath);
 
 	// #135 A: no record — the daemon never folded CHILD — so the walk counts it.
 	const late = computeSpawnTree(ROOT, { ledgerPath: ledgerOf([[ROOT, CHILD]]), alreadyAttributed: new Set() });
 	check(late.edges[0]?.resolved === true && late.total.outputTokens === 1000,
-		`W3 #135 A a child with no fold record is counted, with the grandchild its parse folds: 300 + 700 (got ${late.total.outputTokens})`);
+		`W3 #135 A a child outside the in-self set — as a child with no fold record is — is counted, with the grandchild its parse folds: 300 + 700 (got ${late.total.outputTokens})`);
 }
 
 {
@@ -207,9 +234,9 @@ function ledgerOf(edges: Array<[parent: string, child: string]>): string {
 	const twice = computeSpawnTree(ROOT, { ledgerPath: ledgerOf([[ROOT, D1], [ROOT, D2]]), alreadyAttributed: new Set() });
 	check(twice.total.outputTokens === 1200,
 		`W5 #180 item 1 two descendants folding one session hold it once: 300 + 200 + 700 (got ${twice.total.outputTokens})`);
-	const precondition = parseSessionFile(path.join(projects, cwdOf(D2).replace(/\//g, "-"), `${D2}.jsonl`));
-	check(foldsOf(precondition).some(f => f.id === X),
-		"W5b fixture precondition: D2's own parse folds X");
+	const parsedOf = (id: string) => parseSessionFile(path.join(projects, cwdOf(id).replace(/\//g, "-"), `${id}.jsonl`));
+	check(foldsOf(parsedOf(D1)).some(f => f.id === X) && foldsOf(parsedOf(D2)).some(f => f.id === X),
+		"W5b fixture precondition: D1's and D2's own parses both fold X");
 }
 
 {
@@ -226,7 +253,7 @@ function ledgerOf(edges: Array<[parent: string, child: string]>): string {
 	const tree = computeSpawnTree(ROOT, { ledgerPath: ledgerOf([[ROOT, X], [ROOT, D]]), alreadyAttributed: new Set() });
 	fs.chmodSync(newer, 0o644);
 	check(tree.edges[0]?.skip === "unreadable",
-		`W6 fixture precondition: X's own edge could not be read (skip ${tree.edges[0]?.skip})`);
+		`W6 X's own edge keeps the skip it was reported with, unreadable, after D's parse covers it (skip ${tree.edges[0]?.skip})`);
 	check(tree.unattributed.length === 0 && tree.total.outputTokens === 1000,
 		`W7 #180 item 3 once D's parse folds X, X is no longer a gap: 300 + 700 in spawned, unattributed empty (got ${tree.total.outputTokens}, ${JSON.stringify(tree.unattributed.map(g => g.child))})`);
 }
@@ -237,8 +264,8 @@ function ledgerOf(edges: Array<[parent: string, child: string]>): string {
 	putSession(X, T0 + 4_000, 700);
 	const dPath = putSession(D, T0 + 2_000, 50, cwdOf(X), "<synthetic>");
 	fs.appendFileSync(dPath, turnLine(`turn-${D}-tagged`, T0 + 6_000, 300));
-	check(foldsOf(parseSessionFile(dPath)).some(f => f.id === X),
-		"W8a fixture precondition: D's parse folds X, onto its untagged turn");
+	check(parseSessionFile(dPath).some(i => i.model === "<synthetic>" && foldsOf([i]).some(f => f.id === X)),
+		"W8a fixture precondition: D's parse folds X onto its untagged turn");
 	const tree = computeSpawnTree(ROOT, { ledgerPath: ledgerOf([[ROOT, X], [ROOT, D]]), alreadyAttributed: new Set() });
 	const dEdge = tree.edges.find(e => e.child === D);
 	check(dEdge?.total?.outputTokens === 300 && tree.total.outputTokens === 1000,
@@ -280,8 +307,8 @@ console.log("\nPART E — wtft --json with a fold-recorded child moved to anothe
 	};
 	const recorded = run(true);
 	const edge = recorded?.spawned?.edges?.[0];
-	check(edge?.skip === "in-self-total" && recorded?.tree?.outputTokens === recorded?.total?.outputTokens,
-		`E1 #178 the recorded child is in-self-total, and tree equals total (skip ${edge?.skip}, tree ${recorded?.tree?.outputTokens}, total ${recorded?.total?.outputTokens})`);
+	check(edge?.skip === "in-self-total" && recorded?.tree?.outputTokens === recorded?.total?.outputTokens && recorded?.tree?.costUsd === recorded?.total?.costUsd,
+		`E1 #178 the recorded child is in-self-total, and tree equals total in cost and tokens (skip ${edge?.skip}, tree $${recorded?.tree?.costUsd}, total $${recorded?.total?.costUsd})`);
 	const unrecorded = run(false);
 	check(unrecorded?.spawned?.edges?.[0]?.resolved === true,
 		`E2 control: the same tag without the record counts the child under its edge — the record is what E1 reads (skip ${unrecorded?.spawned?.edges?.[0]?.skip})`);

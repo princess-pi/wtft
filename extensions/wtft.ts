@@ -202,6 +202,7 @@ function readInteractions(ctx: any): Interaction[] {
 
 	const loaded = loadSubagentInteractionsChecked(subagentFiles);
 	if (loaded.dropped.length > 0) _subagentUnreadable = true;
+	_subagentFiles = subagentFiles.filter(f => !loaded.dropped.includes(f));
 	const subInteractions = loaded.interactions;
 	if (subInteractions.length === 0) return mainInteractions;
 

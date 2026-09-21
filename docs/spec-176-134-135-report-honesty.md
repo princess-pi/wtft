@@ -44,9 +44,9 @@ known to reach that path.
 ## 3. #134 B: self-attribution runs only when the ledger has an edge
 
 `SpawnTreeOptions.alreadyAttributed` also accepts a thunk, `() => Set<string>`, and
-`computeSpawnTree` calls it only after the no-edges fast path. The widget, and the CLI on every
-arm except the pending one (§4), pass a thunk, so a session with no recorded edges does no
-subagent discovery for the spawn tree.
+`computeSpawnTree` calls it only after the no-edges fast path. The widget passes a thunk. The
+CLI passes the tag's fold records as a Set, which needs no discovery at all
+(`docs/spec-178-135-180-fold-records.md`).
 
 ## 4. #135 B: the pending arm derives nothing from the file it declared absent
 

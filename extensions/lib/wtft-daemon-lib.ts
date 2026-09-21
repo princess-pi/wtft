@@ -12,7 +12,7 @@ import {
 	classifyInteraction,
 	buildWtftLines
 } from "./wtft-shared.js";
-import { splitOverheadCost } from "./wtft-parser.js";
+import { splitOverheadCost, isModelTagged } from "./wtft-parser.js";
 import { getDiscoveries } from "./harness/registry.ts";
 import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
 export interface WatchSettings {
@@ -241,6 +241,21 @@ export function readTagFileWithVerdict(tagPath: string): {
 		provisional: tagProvisionalFromContent(tagPath, content),
 		folded: foldedSessionIdsFromContent(content),
 	};
+}
+
+/** The sessions a parsed child transcript puts into the tag's total: the child
+ *  itself, and every session folded onto one of its model-tagged turns. A fold
+ *  on an untagged turn lands in `untaggedCostUsd`, not in the total, so it is
+ *  not recorded — the spawn walk would otherwise skip money no total holds. */
+export function foldRecordIds(childSessionId: string, deduped: Interaction[]): string[] {
+	const ids = [childSessionId];
+	for (const interaction of deduped) {
+		if (!isModelTagged(interaction)) continue;
+		for (const fold of interaction.claudeSubAgentFolds ?? []) {
+			if (!ids.includes(fold.id)) ids.push(fold.id);
+		}
+	}
+	return ids;
 }
 
 export function foldRecordLine(parent: string, child: string): string {

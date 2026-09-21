@@ -1306,6 +1306,12 @@ export function attributeClaudeSubAgentCosts(
 	}
 }
 
+/** Whether an interaction counts toward a session's totals: untagged turns are
+ *  reported apart, as `untaggedCostUsd`. */
+export function isModelTagged(i: Interaction): boolean {
+	return !!i.model && i.model !== "(unknown)" && i.model !== "<synthetic>";
+}
+
 const FOLD_SHARE_KEYS = ["costUsd", "inputTokens", "outputTokens", "reasoningTokens", "cacheReadTokens", "cacheWriteTokens"] as const;
 
 function emptyFoldShare(): FoldShare {

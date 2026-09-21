@@ -123,7 +123,7 @@ driver; CI runs it as its own gating step, and locally it is
 # Render this session's cost breakdown
 wtft
 
-# Widen the window and show more buckets
+# Widen the interval and show more bins
 wtft --interval 3h --limit 20
 
 # Cost by model instead of by activity

@@ -2,6 +2,7 @@
 
 import type { Interaction, Category } from "./wtft-shared.js";
 import type { UncountedBillables } from "./wtft-parser.ts";
+import { isModelTagged } from "./wtft-parser.js";
 import {
 	classifyInteraction,
 	normalizeCommand,
@@ -1512,11 +1513,6 @@ export interface SessionSummary {
 
 export function emptyTotals(): TokenTotals {
 	return { costUsd: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
-}
-
-/** Whether an interaction counts toward `computeSessionSummary`'s totals. */
-export function isModelTagged(i: Interaction): boolean {
-	return !!i.model && i.model !== "(unknown)" && i.model !== "<synthetic>";
 }
 
 function addInteraction(into: TokenTotals, i: Interaction): void {

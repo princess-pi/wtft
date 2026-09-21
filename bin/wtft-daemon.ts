@@ -13,6 +13,7 @@ import {
 	serializeClassified,
 	serializeClassifiedWithOverheadSplit,
 	foldRecordLine,
+	foldRecordIds,
 	applyControlEntry,
 	newParseStreamState,
 	extractCwdFromBashCommand,
@@ -334,8 +335,8 @@ function syncSubagentTranscript(file: string): boolean {
   // After the lines, in the same append: a reader never sees a record whose money is not yet in the tag.
   const parent = path.basename(sessionPath, ".jsonl");
   const freshFolds: string[] = [];
-  for (const id of [sessionId, ...deduped.flatMap(si => (si.claudeSubAgentFolds ?? []).map(f => f.id))]) {
-    if (recordedFolds.has(id) || freshFolds.includes(id)) continue;
+  for (const id of foldRecordIds(sessionId, deduped)) {
+    if (recordedFolds.has(id)) continue;
     batch += foldRecordLine(parent, id);
     freshFolds.push(id);
   }

@@ -1,6 +1,4 @@
 /**
- * @package @princess-pi/wtft
- * @module harness/pi/parse
  * @description Pi transcript schema — and nothing else.
  *
  * Pi differs from Claude Code in three ways that matter here, all of them
@@ -87,12 +85,9 @@ export const parse: HarnessParseAdapter = {
 		if (entry.type === "thinking_level_change" && entry.thinkingLevel) {
 			return { kind: "thinking-level", level: entry.thinkingLevel };
 		}
-		// Pi emits provider + modelId rather than stamping the model on each message.
 		if (entry.type === "model_change" && entry.modelId) {
 			return { kind: "model", modelId: entry.modelId };
 		}
-		// Stamp tokensBefore onto the next assistant interaction so summaries
-		// can surface how much context was freed.
 		if (entry.type === "compaction" && typeof entry.tokensBefore === "number") {
 			return { kind: "compaction", tokensBefore: entry.tokensBefore };
 		}

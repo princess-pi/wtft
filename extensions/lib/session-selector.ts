@@ -1,14 +1,6 @@
 /**
- * @package @princess-pi/wtft
- * @module session-selector
- * @description Cross-harness session discovery fan-out and interactive TTY selector.
- *
- * Provides session discovery (delegated to harness/<id>/discovery.ts),
- * session summary extraction (turns + cost from classified wtft-tag files),
- * and an interactive TTY keyboard-navigable session picker.
- *
- * No harness layout knowledge lives here. Adding a harness must not require
- * editing this file — see docs/adding-a-harness.md.
+ * Cross-harness session discovery fan-out and interactive TTY selector.
+ * No harness layout knowledge lives here.
  */
 
 import * as fs from "node:fs";
@@ -39,40 +31,18 @@ import { resolveBranchCheckout } from "./harness/worktrees.ts";
 
 // ---
 
-// SessionCandidate lives behind the harness seam — re-exported so existing
-// importers of session-selector are unaffected.
 export type { SessionCandidate } from "./harness/types.ts";
 
 // ---
 
 /**
  * Discover session logs across every enabled harness, newest first.
- *
  * Layout knowledge lives in harness/<id>/discovery.ts; this function only fans
  * out across harnesses and merges. Each harness applies the union rule
  * internally, and the union is strictly additive: no arm may ever become a
- * replacement. A transcript is a candidate when ANY of these holds —
- *
- *   - its project-dir slug matches the target cwd, under EITHER known slug
- *     encoding rather than one pinned guess;
- *   - its own recorded last-cwd matches, which is what makes a session that
- *     moved (worktree switch, or an ordinary `cd` into a subdir) visible from
- *     where it now lives;
- *   - the "target cwd" is any checkout of the target's git repo, not just the
- *     one directory, so sibling worktrees are in scope in both directions.
- *     No `.git` ancestor means no fan-out, so `~` still means `~`.
- *
- * Which arms apply is each harness's own call. Claude Code wires up all three.
- * Pi wires up the first two — its last-cwd arm is mostly inert because Pi
- * records `cwd` once on session_start. See docs/adding-a-harness.md.
- *
- * @param harness - Target harness id, or "auto" for all enabled harnesses
+ * replacement.
  * @param cwdOverride - Directory to scope to. Missing means process.cwd(),
  *   except on Pi's unscoped default, where it means no filter.
- * @param scopeOpts - Omitted → every harness's legacy default (fan-out, union
- *   arm, unbounded time) — see `HarnessDiscovery.discover` in `harness/types.ts`.
- *   Only `windowMs` is enforced here too; `scope` is each harness's to honour.
- * @returns Candidates sorted by modification time descending (newest first)
  */
 export function discoverSessions(
 	harness: string = "auto",
@@ -106,10 +76,7 @@ export function discoverSessions(
 	return withinWindow.sort((a, b) => b.timestamp - a.timestamp);
 }
 
-/**
- * Display label for a harness id, from the harness itself — never a literal.
- * Falls back to the raw id so an unregistered harness still renders.
- */
+/** Display label for a harness id, from the harness itself — never a literal. */
 export function harnessLabel(id: string): string {
 	for (const h of getHarnesses()) {
 		if (h.id === id) return h.discovery.label;
@@ -119,15 +86,10 @@ export function harnessLabel(id: string): string {
 
 // ---
 
-/**
- * Session summary with fallback metadata.
- */
 export interface SessionSummary {
 	turns: number;
 	cost: number;
-	/** Which tagger version was used, or null if no tag exists */
 	tagVersion: string | null;
-	/** Line count of raw .jsonl file (only set when no tag exists) */
 	rawLines: number | null;
 }
 
@@ -141,17 +103,7 @@ function compareVersions(a: string, b: string): number {
 	return 0;
 }
 
-/**
- * Read a session summary from classified tag files with two-tier fallback:
- *   1. Try the current tagger version (imported from wtft-tagger-version.ts)
- *   2. Scan wtft-tags/ for ANY matching tag file (newest version first)
- *   3. Fall back to raw .jsonl line count if no tag exists at all
- *
- * Only inspects wtft-tag contents — never parses raw .jsonl turn data.
- *
- * @param sessionPath - Path to the raw .jsonl session file
- * @returns SessionSummary with cost, turns, tag version, and optional raw line count
- */
+/** Only inspects wtft-tag contents — never parses raw .jsonl turn data. */
 export function getSessionSummary(sessionPath: string): SessionSummary {
 	const sessionDir = path.dirname(sessionPath);
 	const sessionBase = path.basename(sessionPath);
@@ -192,9 +144,7 @@ export function getSessionSummary(sessionPath: string): SessionSummary {
 		if (content !== null) {
 				const lines = content.split("\n");
 				// Collapse by message.id (max cost) before summing — same rule as
-				// dedupeClassifiedById. This module does not import the daemon lib,
-				// so the collapse is local. Pinned by
-				// tests/wtft-270-session-summary-dedup.test.ts.
+				// dedupeClassifiedById.
 				const maxCostById = new Map<string, number>();
 				const idOrder: string[] = [];
 				let noIdCost = 0;
@@ -216,9 +166,6 @@ export function getSessionSummary(sessionPath: string): SessionSummary {
 					} catch { /* skip unparseable lines */ }
 				}
 				let cost = noIdCost;
-				// `?? 0` rather than a non-null assertion: fallback is unreachable
-				// but an assertion that CAN fire would no longer be hidden by the
-				// narrowed catch above.
 				for (const id of idOrder) cost += maxCostById.get(id) ?? 0;
 				const turns = idOrder.length + noIdCount;
 				return { turns, cost, tagVersion, rawLines: null };
@@ -237,32 +184,22 @@ export function getSessionSummary(sessionPath: string): SessionSummary {
 
 // ---
 
-/** Format a cost value for the selector display.
- *  Tagged sessions show "$0.15" (green), untagged show "unknown". */
 function formatCostOrUnknown(stats: SessionSummary): string {
 	if (stats.tagVersion === null) return "unknown".padEnd(7);
 	return `\x1b[32m${formatCost(stats.cost).padStart(7)}\x1b[0m`;
 }
 
-/** Format turn count or line count for the selector display.
- *  Tagged: "(87t)", untagged: "596 lines". */
 function formatTurnsOrLines(stats: SessionSummary): string {
 	if (stats.tagVersion !== null) return `(${stats.turns}t)`.padEnd(10);
 	return `${stats.rawLines ?? "?"} lines`.padEnd(10);
 }
 
-/** Format tag version suffix or "unparsed". */
 function formatTagSuffix(stats: SessionSummary): string {
 	if (stats.tagVersion === null) return "\x1b[90munparsed\x1b[0m";
 	if (stats.tagVersion === TAGGER_VERSION) return ""; // current version — don't show
 	return `\x1b[90mv${stats.tagVersion}\x1b[0m`;
 }
 
-/** Text shown after "scope:" in the picker header, keyed by `PickerState.scope`
- *  — display-only. `applyKey` sets `state.scope` to `"branch"` unconditionally
- *  on Ctrl+B, but the rescope handler corrects it BACK to `"worktree"` when
- *  `resolveBranchCheckout` says the branch can't be resolved, so the label and
- *  the actual candidate population never disagree. */
 const SCOPE_LABEL: Record<PickerState["scope"], string> = {
 	worktree: "this worktree",
 	worktrees: "all worktrees (Ctrl+W)",
@@ -270,25 +207,17 @@ const SCOPE_LABEL: Record<PickerState["scope"], string> = {
 	branch: "this branch (Ctrl+B)",
 };
 
-/** A `SessionCandidate` reduced to what `picker-state.ts` needs. `c.path` is
- *  the caller's lookup key (`byPath` below). */
 function toPickerRow(c: SessionCandidate): PickerRow {
 	return { id: c.path, harness: c.harness, timestamp: c.timestamp };
 }
 
 export interface SelectSessionPromptOptions {
-	/** Passed straight to `discoverSessions` on every rescope (Ctrl+A/W/B/T). */
 	harnessOption: string;
 	cwdOverride?: string;
 	/** Where the picker draws. Defaults to stdout; `bin/wtft.ts` passes stderr
-	 *  under `--json` so stdout stays one clean JSON document.
-	 *  `bin/wtft.ts`'s `canShowPicker` guard guarantees THIS stream is a TTY
-	 *  whenever this function is called. */
+	 *  under `--json` so stdout stays one clean JSON document. */
 	out?: NodeJS.WritableStream;
-	/**
-	 * The `-s <substring>` the caller already filtered `initialCandidates` by.
-	 * Re-applies after every rescope, and seeds state `"worktrees"`/`"all"`.
-	 */
+	/** Re-applies after every rescope, and seeds state `"worktrees"`/`"all"`. */
 	substringFilter?: string;
 }
 
@@ -303,25 +232,8 @@ function matchesSubstring(c: SessionCandidate, filter: string): boolean {
  * Uses `\x1b[N A \x1b[J` to overwrite previous output on re-render — no alt
  * screen buffer. When the picker exits, the output is cleared and the chart
  * renders starting where the picker's first line was.
- *
- * Key handling is delegated ENTIRELY to the pure state machine in
- * `picker-state.ts` — this function turns a `PickerAction` into a terminal
- * write or a re-discovery call:
- *
- *   - j/k, arrows: move (wraps the whole list, sliding the 11-row window)
- *   - Enter: select — also records the sticky harness order
- *   - q or Ctrl+C: exit (code 130)
- *   - Ctrl+A / Tab: scope "all"  ·  Ctrl+W: scope "worktrees"
- *   - Ctrl+B: scope "branch" — falls back to `"worktree"` when the branch
- *     can't be resolved; see `SCOPE_LABEL`.
- *   - Ctrl+T: cycle the time window (20m -> 1h -> 1d -> 1w -> all -> 20m)
- *
  * Requires an interactive terminal — the caller is responsible for the no-TTY
  * decision and must never call this without one.
- *
- * @param initialCandidates - The picker's starting rows. The picker state
- *   starts at `"worktree"`/`"20m"`, except under `substringFilter`.
- * @returns Promise resolving to the selected session file path
  */
 export async function selectSessionPrompt(
 	initialCandidates: SessionCandidate[],
@@ -431,19 +343,16 @@ export async function selectSessionPrompt(
 				if (state.scope === "branch" && !resolveBranchCheckout(opts.cwdOverride ?? process.cwd())) {
 					state = { ...state, scope: "worktree" };
 				}
-				// Re-discover for the new scope/window, THEN re-window the fresh rows.
 				let fresh = discoverSessions(opts.harnessOption, opts.cwdOverride, {
 					scope: state.scope,
 					windowMs: windowMsFor(state.timeWindow),
 				});
-				// Re-apply the caller's `-s` filter.
 				if (opts.substringFilter) fresh = fresh.filter(c => matchesSubstring(c, opts.substringFilter!));
 				remember(fresh);
 				state = setRows(state, toRows(fresh));
 				clearPreviousLines(lastLineCount, out);
 				render();
 			}
-			// "noop" — nothing to do.
 		});
 
 		const cleanup = () => {

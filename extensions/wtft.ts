@@ -41,8 +41,7 @@ import {
 let _currentThinkingLevel: string | undefined;
 
 // The widget's own surface for a transcript that went uncounted: the parser
-// warns on stderr, which the TUI never shows. Set by readInteractions on every
-// render pass; read by updateWtftWidget after building the lines.
+// warns on stderr, which the TUI never shows.
 let _subagentUnreadable = false;
 const PROVISIONAL_LINE = "\x1b[33m⚠ some transcripts could not be counted — total is provisional\x1b[0m";
 
@@ -56,7 +55,6 @@ function withProvisionalLine(text: string): string {
 // walk the same directory a second time.
 let _subagentFiles: string[] = [];
 
-// Daemon directory relative to this extension file
 const _daemonDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin");
 
 
@@ -116,11 +114,6 @@ class PagerComponent {
 
 // ---
 
-/**
- * Retrieves setting configurations from the harness-agnostic config file (#72).
- * All settings (including TUI appearance) are now config-only — no .jsonl persistence.
- * Widget auto-shows on session_start if any config exists.
- */
 function getSettings(_ctx: any) {
 	const config = readConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR);
 
@@ -132,10 +125,8 @@ function getSettings(_ctx: any) {
 	const disabledEmoji = isEmojiDisabled();
 	const tokens = (typeof config.tokens === "boolean" ? config.tokens : false) as boolean;
 
-	// Width auto-fits to terminal (no separate lock/default — CLI doesn't use it either)
 	const width = Math.min(getTerminalWidth(true, disabledEmoji), 240);
 
-	// Auto-show if config exists (user has configured wtft at least once)
 	const visible = hasConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR);
 
 	return { interval, limit, width, visible, showTicks, mode, timezone, disabledEmoji, tokens };
@@ -150,9 +141,7 @@ function getSettings(_ctx: any) {
 //   2. Pi (pre-emptive): sibling files with parentSession header match
 // ---
 
-/** The spawn tree for the session this widget is rendering (#116).
- *
- *  `computeSpawnTree` reports a ledger it could not read as `ledgerError`
+/** `computeSpawnTree` reports a ledger it could not read as `ledgerError`
  *  rather than throwing, so the widget shows that failure instead of hiding it.
  *  The catch has no reachable case left; it stays because a widget refresh
  *  running every turn must not take the panel down. */
@@ -171,8 +160,6 @@ function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | und
 	}
 }
 
-/** Read interactions from the daemon's classified tag file (#92),
- *  merged with subagent session interactions (#83, #82). */
 function readInteractions(ctx: any): Interaction[] {
 	_subagentUnreadable = false;
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
@@ -180,9 +167,6 @@ function readInteractions(ctx: any): Interaction[] {
 	const tagPath = getTagPath(sessionFile);
 	const mainInteractions = readClassifiedTagFile(tagPath);
 
-	// Subagent session merge: discover and parse subagent session files (#83, #82).
-	// Discovery can throw (#457): an unreadable subagents directory drops the
-	// whole Task/agent subtree. The parser warned once per dir (latched);
 	// render main interactions only rather than crash the widget on every
 	// refresh.
 	let subagentFiles: string[] = [];
@@ -202,7 +186,6 @@ function readInteractions(ctx: any): Interaction[] {
 	const subInteractions = loaded.interactions;
 	if (subInteractions.length === 0) return mainInteractions;
 
-	// Merge chronologically — subagent turns interleave with parent turns
 	const merged = [...mainInteractions, ...subInteractions];
 	merged.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
 	return merged;
@@ -221,7 +204,6 @@ function buildWtftLines(
 		sessionNameSuffix?: string;
 	}
 ): string[] | null {
-	// Read from the classified tag file — single source of truth (#92).
 	const interactions = readInteractions(ctx);
 	const settings = getSettings(ctx);
 
@@ -231,10 +213,6 @@ function buildWtftLines(
 	});
 }
 
-/**
- * Dynamically computes costs binned by interval and updates the TUI widget
- * positioned below the editor. Operates in the configured timezone.
- */
 function updateWtftWidget(
 	ctx: any,
 	pi: ExtensionAPI,
@@ -256,20 +234,17 @@ function updateWtftWidget(
 		return;
 	}
 
-	// Detect model for SURGE timeline coloring (passed to shared buildWtftLines).
 	let modelId: string | undefined;
 	try {
 		const sessionCtx = ctx.sessionManager.buildSessionContext();
 		modelId = sessionCtx?.model?.modelId;
 	} catch (_) {}
 
-	// Force legend to its own row — SURGE timeline is appended to title line inside buildWtftLines
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	const sessionNameSuffix = sessionFile ? path.basename(sessionFile) : undefined;
 	const buildOpts = { ...opts, model: modelId, sessionNameSuffix };
 	const lines = buildWtftLines(ctx, pi, buildOpts);
 	if (!lines || lines.length === 0) {
-		// --- Show cache/empty state instead of hiding widget. ---
 		const emptyModel = modelId || "";
 		const cacheTtl = getModelCacheTtlMs(emptyModel);
 		const emptyLine = cacheTtl === null
@@ -328,7 +303,6 @@ let _wtftCtx: any = null;
 let _wtftRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
 export default function wtftExtension(pi: ExtensionAPI) {
-	// 1. Auto-restore on startup + spawn daemon
 	pi.on("session_start", async (_event, ctx) => {
 		_wtftCtx = ctx;
 		// Spawn daemon for this session to keep wtft-tag file warm for CLI use.
@@ -337,11 +311,9 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			ensureDaemonRunning(sessionFile, _daemonDir);
 		}
 
-		// Auto-show widget if user has configured wtft at least once (#72)
 		if (hasConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR)) {
 			updateWtftWidget(ctx, pi);
 		}
-		// Start 1-minute timer for timeline live-updates
 		if (!_wtftRefreshTimer) {
 			_wtftRefreshTimer = setInterval(() => {
 				if (_wtftCtx) {
@@ -354,12 +326,10 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	// 2. Track thinking level for --tokens budget display.
 	pi.on("thinking_level_select", (event) => {
 		_currentThinkingLevel = event.level;
 	});
 
-	// 3. End-of-turn: read tag file + render (#92).
 	pi.on("agent_settled", async (_event, ctx) => {
 		_wtftCtx = ctx;
 		const current = getSettings(ctx);
@@ -386,7 +356,6 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	// 6. Command registration
 	pi.registerCommand("wtft", {
 		description: "Where The F***ing Tokens?! (WTFT) - Cost Auditing Widget",
 		handler: async (args, ctx) => {
@@ -396,7 +365,6 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				hasLimit, limit, hasWidth, width, hasTicks, showTicks,
 				hasMode, mode, hasTimezone, timezone, pager } = opts;
 
-			// --force: kill daemon, delete tag file, respawn → full re-parse (#78)
 			if (forceReparse) {
 				const sessionFile = ctx.sessionManager.getSessionFile?.();
 				if (!sessionFile) {
@@ -405,7 +373,6 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				}
 				const tagPath = getTagPath(sessionFile);
 				const pidPath = getDaemonPidPath(sessionFile);
-				// Kill existing daemon
 				try {
 					const pid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
 					if (pid > 0) {
@@ -413,9 +380,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 					}
 					try { fs.unlinkSync(pidPath); } catch {}
 				} catch {}
-				// Delete tag file
 				try { fs.unlinkSync(tagPath); } catch {}
-				// Respawn daemon (reads session file from scratch, rewrites tag file)
 				ensureDaemonRunning(sessionFile, _daemonDir);
 				updateWtftWidget(ctx, pi);
 				ctx.ui.notify("Tag file deleted and log parser daemon respawned — full session re-parse in progress.", "info");
@@ -423,7 +388,6 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			}
 
 			if (typeof enableEmoji === "boolean") {
-				// Persist to harness-agnostic config file (#72)
 				writeConfig(WTFT_CONFIG_TOOL, { disabledEmoji: !enableEmoji }, undefined, WTFT_CONFIG_DIR);
 				const statusText = enableEmoji ? "enabled" : "disabled";
 				ctx.ui.notify(`Emoji icons in widgets have been ${statusText}.`, "info");
@@ -431,7 +395,6 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			// Display tool version if requested
 			if (showVersion) {
 				try {
 					const manifestPath = path.join(process.cwd(), "docs", "manifests", "wtft-cmd.json");
@@ -442,7 +405,6 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			// Render manifest help menu if requested
 			if (showHelp) {
 				try {
 					const manifestPath = path.join(process.cwd(), "docs", "manifests", "wtft-cmd.json");
@@ -453,7 +415,6 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			// Render --why scenario-driven output
 			if (showWhy) {
 				try {
 					const manifestPath = path.join(process.cwd(), "docs", "manifests", "wtft-cmd.json");
@@ -476,24 +437,17 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			}
 
 			if (tokens || cost) {
-			// Toggle widget token-unit mode and persist (#14).
 			// --cost explicitly switches back to $ units.
 			writeConfig(WTFT_CONFIG_TOOL, { tokens }, undefined, WTFT_CONFIG_DIR);
 			updateWtftWidget(ctx, pi, { visible: true });
 
 			if (tokens) {
-				// Map current thinking level to budget tokens (#79)
 				const BUDGET_MAP: Record<string, number> = {
 					minimal: 1024, low: 4096, medium: 10240,
 					high: 32768, xhigh: 65536, max: 131072
 				};
 				const budget = _currentThinkingLevel ? BUDGET_MAP[_currentThinkingLevel] : undefined;
 				const interactions = readInteractions(ctx);
-				// The recorded lineage (#116). The widget is a reader of the
-				// same report, so it gets the same block — a Pi user reading
-				// TOTAL with $69 of lens children unlisted is exactly the gap
-				// the issue is about, and omitting it here would recreate it on
-				// the surface Duppy actually looks at.
 				const output = renderTokenSummary(interactions, Math.max(current.width, 40), budget, undefined, widgetSpawnTree(ctx, interactions));
 				ctx.ui.notify(withProvisionalLine(output), "info");
 				return;
@@ -509,7 +463,6 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			const nextInterval = hasInterval ? interval : current.interval;
 			const nextLimit = hasLimit ? limit : current.limit;
 			
-			// Dynamic fallback (minus safety padding) capped at 240 if no explicit width set
 			const termColumns = getTerminalWidth(true, isEmojiDisabled());
 			const nextWidth = hasWidth ? Math.min(width, 240) : Math.min(termColumns, 240);
 
@@ -533,14 +486,12 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				}
 				if (_subagentUnreadable) lines.push(PROVISIONAL_LINE);
 
-				// Launch TUI custom pager overlay
 				await ctx.ui.custom((tui, _theme, _keybindings, done) => {
 					return new PagerComponent(lines, () => done(null));
 				}, { overlay: true });
 				return;
 			}
 
-			// Persist all settings to harness-agnostic config file (#72)
 			writeConfig(WTFT_CONFIG_TOOL, {
 				interval: nextInterval,
 				limit: nextLimit,

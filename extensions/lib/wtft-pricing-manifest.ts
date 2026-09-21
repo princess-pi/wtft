@@ -1,31 +1,7 @@
 /**
- * @package princess-pi-tools
- * @module wtft-pricing-manifest
- * @description Renders MODEL_PRICING as a manifest (#169).
- *
- * `docs/EXT_WTFT.html` used to hand-maintain its Model Pricing table. It went
- * stale the way a hand-maintained copy always does: it was still listing
- * Claude 4 and no Claude 5 family at all, no GPT-5.x, no notion of a dated or
- * size tier, and DeepSeek rates from before the 2026-08-16 card. A reader had
- * no way to know wtft prices those models at all.
- *
- * So the table is generated from the registry and the page fetches it, the same
- * shape as that page's flag reference. Stated precisely, because the looser
- * version of this sentence claimed too much: fetching removes PAGE-vs-MANIFEST
- * drift structurally — there is one copy, so there is nothing to disagree. It
- * does not remove MANIFEST-vs-CODE drift, which is a test's job. This manifest
- * gets that for free by being generated (`wtft-cmd.json` is hand-maintained and
- * relies on a test instead).
- *
- * `tests/wtft-pricing-manifest.test.ts` compares the committed manifest against
- * a fresh render, so a registry edit that skips regeneration is a red test
- * rather than a quietly stale page.
- *
+ * Renders MODEL_PRICING as a manifest.
  * The writer is `bun run manifest` (pricing-manifest.ts, at the repo root);
- * `bun run build` only CHECKS and fails naming that command. That split is
- * load-bearing rather than tidiness — a build that wrote this file would repair
- * a stale committed copy moments before the test compared the two, and the
- * assertion above could then never fail (#100).
+ * `bun run build` only CHECKS and fails naming that command.
  */
 
 import {
@@ -40,7 +16,6 @@ import {
 export const PRICING_MANIFEST_SCHEMA = "wtft-pricing/table@1";
 
 export interface ManifestRates {
-	/** Human-readable condition. "" for a model's standard (unconditioned) row. */
 	condition: string;
 	input: number;
 	output: number;
@@ -67,7 +42,6 @@ export interface PricingManifest {
 	models: ManifestModel[];
 }
 
-/** "01:00–04:00" from a [start, end) pair of minutes since UTC midnight. */
 function formatWindow([start, end]: readonly [number, number]): string {
 	const hhmm = (m: number) =>
 		`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
@@ -75,19 +49,12 @@ function formatWindow([start, end]: readonly [number, number]): string {
 }
 
 /**
- * The UTC instant as ISO-8601, seconds precision — `2026-08-23T00:00:00Z`.
- *
  * An instant, not a day: these cutovers are exact moments (the rate card moved
  * at 16:00Z, not at midnight), and rounding one to a date would misprice the
  * hours on either side of it.
  */
 function isoInstant(epochMs: number): string {
-	// Truncate to the second rather than string-replacing ".000": a plain
-	// String#replace only strips a literal ".000", so a cutover ever built with
-	// a non-zero millisecond component would ship a stray ".123" into the
-	// committed manifest instead of the documented seconds precision. Unreachable
-	// today — every caller passes a Date.UTC value with no ms — which is exactly
-	// when a guarantee stated only in prose rots unnoticed (PR #507 review).
+	// Truncate to the second rather than string-replacing ".000".
 	return new Date(Math.floor(epochMs / 1000) * 1000).toISOString().replace(".000Z", "Z");
 }
 
@@ -134,14 +101,8 @@ export function buildPricingManifest(): PricingManifest {
 			multiplier: 2.0,
 			windowsUtc: DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES.map(formatWindow),
 			weekendOffPeakFrom: isoInstant(DEEPSEEK_WEEKEND_OFFPEAK_FROM),
-			// Every sentence names who it is true of. An earlier draft folded the
-			// all-models reasoning-token rule into a DeepSeek-scoped paragraph, and
-			// the page renders this under a table of Claude and GPT rows too (#495).
 			// No backticks or markup: the page renders this through .textContent,
-			// which would print them literally. And every sentence names who it is
-			// true of — an earlier draft scoped an all-models rule to DeepSeek, and
-			// then a correction overshot the other way and claimed the 1-hour rule
-			// for models whose Cache Write is 0 (#495).
+			// which would print them literally.
 			note: "DeepSeek rows are the off-peak card; peak is 2x on the windows "
 				+ "and weekdays given here. For DeepSeek only, the Input column is "
 				+ "the cache-MISS rate and Cache Read the cache-HIT rate — the "
@@ -162,11 +123,7 @@ export function buildPricingManifest(): PricingManifest {
 				+ "only — never to Cache Write. All four DeepSeek names carry the "
 				+ "same standard row, because all four end up serving one model: "
 				// Derived from the SAME constants the dated rows' conditions are
-				// generated from, never re-typed. A hardcoded pair here would
-				// survive a constant change that regenerated every row around it,
-				// so the page could contradict itself and still match a fresh
-				// render byte-for-byte — the one drift this manifest exists to
-				// make impossible.
+				// generated from, never re-typed.
 				+ `V4.1 Flash retired the V4 Flash line at ${isoInstant(DEEPSEEK_V41_FLASH_FROM)} `
 				+ `and takes over deepseek-v4-pro at ${isoInstant(DEEPSEEK_V4_PRO_REROUTE_FROM)}, with `
 				+ "deepseek-flash as its own name. Only deepseek-v4-pro's dated "

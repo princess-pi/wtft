@@ -344,7 +344,6 @@ export const EXIT_SESSION_AMBIGUOUS = 10;
 // stdout when rendered (they are the only output); under `--json` they move to
 // stderr and `notices[]`. Unpriced and provisional lines are stderr in both.
 
-/** Distinct models in this session that priced at a fallback rather than a card. */
 function collectUnpricedModels(interactions: Interaction[]): string[] {
 	const seen = new Set<string>();
 	for (const i of interactions) {
@@ -355,13 +354,11 @@ function collectUnpricedModels(interactions: Interaction[]): string[] {
 	return [...seen];
 }
 
-/** Warning for one unpriced model. Prose, not a contract. */
 function unpricedModelWarning(model: string): string {
 	return `no pricing for ${model} — ${describeFallbackPricing(model)}; totals may be unreliable. ` +
 		`Add an entry to ${getUserPricingPath()} (no rebuild needed).`;
 }
 
-/** Why this total may still grow, for the tag at `tagPath`. */
 function describeProvisionalReason(provisional: { reason: string | null }, tagPath: string): string {
 	if (provisional.reason === "stale-version") {
 		const v = path.basename(tagPath).match(/\.wtft-tag\.v([^/]+)\.jsonl$/)?.[1] ?? "?";
@@ -382,7 +379,6 @@ function describeProvisionalRemedy(provisional: { reason: string | null }): stri
 
 // ---
 
-// Config overrides defaults; CLI flags override both.
 const cfg = loadConfig(WTFT_CONFIG_TOOL, { interval: "1h", limit: 100, mode: "cumulative" }, WTFT_CONFIG_DIR) as {
 	interval?: string;
 	limit?: number;
@@ -407,7 +403,6 @@ if (opts.hasCost) unit = "cost";
 
 const WARN_LOG = path.join(os.homedir(), ".local", "state", "wtft", "reap.log");
 
-/** Surface recent reap.log lines on stderr, then truncate so the next run does not repeat them. */
 function showReapWarnings() {
   try {
     if (!fs.existsSync(WARN_LOG)) return;
@@ -436,7 +431,6 @@ function showReapWarnings() {
 // ---
 
 async function main() {
-	// Merge ~/.config pricing before any cost math. Daemon loads it independently.
 	loadUserPricing();
 
 	// Config-declared harnesses must register before discovery.
@@ -491,7 +485,6 @@ async function main() {
 	const getCandidates = (): ReturnType<typeof discoverSessions> =>
 		(candidateCache ??= discoverSessions(opts.harnessOption, opts.cwdOverride));
 
-	// Picker default: current worktree, last 20m. Fuzzy `-s` still uses full discovery above.
 	let defaultScopedCache: ReturnType<typeof discoverSessions> | null = null;
 	const getDefaultScoped = (): ReturnType<typeof discoverSessions> =>
 		(defaultScopedCache ??= discoverSessions(opts.harnessOption, opts.cwdOverride, {
@@ -518,7 +511,6 @@ async function main() {
 			substringFilter,
 		});
 
-	/** No interactive terminal: exit 10 rather than guess. `discoveredTotal` proves discovery ran on a zero-match filter. */
 	const failAmbiguous = (found: ReturnType<typeof discoverSessions>, label: string, discoveredTotal?: number): never => {
 		const names = found.map(c => `  - ${c.displayPath}  (${c.path})`).join("\n");
 		const availability = discoveredTotal !== undefined ? ` (${discoveredTotal} available)` : "";
@@ -671,7 +663,6 @@ async function main() {
 	// Memoised: at most one scan per run.
 	// ---
 	let uncountedCache: UncountedBillables | null = null;
-	/** One discovery per run so every part of the document describes the same filesystem. */
 	let discoveryCache: { files: string[]; unreadable: Error | null } | null = null;
 	const discoverOnce = (): { files: string[]; unreadable: Error | null } => {
 		if (discoveryCache) return discoveryCache;
@@ -686,7 +677,6 @@ async function main() {
 		if (uncountedCache) return uncountedCache;
 		// Absent session file is lagging, not unreadable — zeros, verdict untouched.
 		if (!fs.existsSync(finalSessionPath)) return (uncountedCache = newUncountedBillables());
-		// Reads raw session files (events leave no interaction in the tag).
 		let uncounted = newUncountedBillables();
 		uncounted = addUncountedBillables(uncounted, scanUncountedBillables(finalSessionPath));
 		let subagentFiles: string[] = [];
@@ -723,7 +713,6 @@ async function main() {
 
 	// `pending` pins "file absent" decided before awaitDaemonUp — do not re-derive after.
 	const finishEmptyReport = (opt: { pending?: boolean } = {}) => {
-		// Scan first (may reassign provisional). Skipped when pending.
 		if (!opt.pending) scanSessionUncounted();
 		warnProvisionalOnce();
 		// SPAWNED block under `--tokens` even when own total is empty (matches populated path).
@@ -750,7 +739,6 @@ async function main() {
 		return { rows: discovered.unreadable ? undefined : rows, notices };
 	};
 
-	// `pending` pins the caller's snapshot — do not re-read existence after awaitDaemonUp.
 	const emitSessionJson = (opt: { notices?: WtftNotice[]; pending?: boolean } = {}) => {
 		const uncounted = opt.pending ? newUncountedBillables() : scanSessionUncounted();
 		const subagentJson = opt.pending ? undefined : collectSubagentJson();
@@ -772,7 +760,6 @@ async function main() {
 		});
 		process.stdout.write(renderSessionJson(doc));
 		warnProvisionalOnce();
-		// exitCode, never process.exit — stdout is async on a pipe.
 		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
 	};
 	// Unwritten session log: daemon is parked on it. Wait only to verify the claim before saying so.
@@ -800,7 +787,6 @@ async function main() {
 		return;
 	}
 	if (interactions.length === 0) {
-		// Brief wait for freshly-spawned daemon to produce the tag.
 		const tagWaitStart = Date.now();
 		while (Date.now() - tagWaitStart < 1400) {
 			if (fs.existsSync(tagPath)) {
@@ -865,7 +851,6 @@ async function main() {
 	// ---
 
 	const termColumns = getTerminalWidth();
-	// Pad default 1 (matches Pi TUI). Clamp to floor(term/2)-1.
 	let pad = opts.hasPad ? opts.pad : 1;
 	const maxPad = Math.max(0, Math.floor(termColumns / 2) - 1);
 	pad = Math.min(pad, maxPad);
@@ -940,13 +925,11 @@ async function main() {
 		console.error(`\x1b[33m⚠ PROVISIONAL: this total may still grow — ${why}.\x1b[0m`);
 		const remedy = describeProvisionalRemedy(provisional);
 		console.error(`\x1b[90m  ${remedy}. Exit ${EXIT_PROVISIONAL}.\x1b[0m`);
-		// exitCode, never process.exit — stdout is async on a pipe.
 		process.exitCode = EXIT_PROVISIONAL;
 		return;
 	}
 }
 
-// Entry-point guard: run main only when executed directly, not when imported.
 if (process.argv[1]) {
 	const entry = fileURLToPath(import.meta.url);
 	const invoked = process.argv[1];
@@ -955,7 +938,6 @@ if (process.argv[1]) {
 			const result = runSpawnRecordCommand(process.argv.slice(3));
 			if (result.stdout) process.stdout.write(result.stdout);
 			if (result.stderr) process.stderr.write(result.stderr);
-			// exitCode, never process.exit — stdout is async on a pipe.
 			process.exitCode = result.exitCode;
 		} else {
 			main().catch(err => {

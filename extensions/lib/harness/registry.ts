@@ -1,6 +1,4 @@
 /**
- * @package princess-pi-tools
- * @module harness/registry
  * @description Enumerates harnesses from runtime config (#156).
  *
  * Two channels, one contract:
@@ -39,10 +37,6 @@ import { WTFT_CONFIG_DIR } from "../wtft-config-dir.ts";
 
 // ---
 
-/**
- * ~/.config/wtft/harnesses.json (#156 — wtft's own config directory, not
- * princess-pi-tools's).
- */
 export function getHarnessConfigPath(): string {
 	const xdgHome = process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config");
 	return path.join(xdgHome, WTFT_CONFIG_DIR, "harnesses.json");
@@ -58,7 +52,6 @@ export function loadHarnessConfig(
 		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
 		const out: Record<string, HarnessConfigEntry> = {};
 		for (const [id, entry] of Object.entries(parsed)) {
-			// An unknown or malformed key is ignored, not fatal.
 			if (entry && typeof entry === "object" && !Array.isArray(entry)) {
 				out[id] = entry as HarnessConfigEntry;
 			}
@@ -69,7 +62,6 @@ export function loadHarnessConfig(
 	}
 }
 
-/** Expand a leading ~ so config files can be written the way humans write paths. */
 function expandHome(p: string): string {
 	if (p === "~") return homedir();
 	if (p.startsWith("~/") || p.startsWith("~\\")) return path.join(homedir(), p.slice(2));
@@ -78,15 +70,12 @@ function expandHome(p: string): string {
 
 // ---
 
-/** Harnesses contributed by config-declared external modules. */
 const externals = new Map<string, RegisteredHarness>();
 
-/** Ids explicitly disabled in config. */
 let disabled = new Set<string>();
 
 let configCache: Record<string, HarnessConfigEntry> | null = null;
 
-/** Memo for getHarnesses() — the parse path consults it once per entry. */
 let harnessesCache: RegisteredHarness[] | null = null;
 /** Memo for the parse halves — parseEntryToInteraction runs per transcript line. */
 let adaptersCache: HarnessParseAdapter[] | null = null;
@@ -103,7 +92,6 @@ function config(): Record<string, HarnessConfigEntry> {
 	return configCache;
 }
 
-/** Drop cached config + external modules (tests, and config hot-reload). */
 export function resetHarnessRegistry(): void {
 	configCache = null;
 	disabled = new Set();
@@ -113,8 +101,6 @@ export function resetHarnessRegistry(): void {
 }
 
 /**
- * Load config-declared out-of-tree harness modules. Async, called once at
- * startup by bin/wtft.ts and bin/wtft-daemon.ts — exactly like loadUserPricing().
  * A module that fails to load is skipped with a stderr note; wtft never blocks
  * on config.
  */
@@ -194,12 +180,10 @@ export function getHarnesses(): RegisteredHarness[] {
 	return out;
 }
 
-/** One harness by id, or null when unknown/disabled. */
 export function getHarness(id: string): RegisteredHarness | null {
 	return getHarnesses().find(h => h.id === id) || null;
 }
 
-/** Discovery halves only. */
 export function getDiscoveries(): HarnessDiscovery[] {
 	return getHarnesses().map(h => h.discovery);
 }

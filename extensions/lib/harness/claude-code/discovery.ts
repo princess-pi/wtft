@@ -1,6 +1,4 @@
 /**
- * @package @princess-pi/wtft
- * @module harness/claude-code/discovery
  * @description Where Claude Code keeps its transcripts, and how to find one
  *   whose project dir no longer matches its cwd.
  *
@@ -42,13 +40,11 @@ export function projectsDir(): string {
 	return process.env.WTFT_CLAUDE_PROJECTS_DIR || path.join(os.homedir(), ".claude", "projects");
 }
 
-/** Session id = the transcript basename without its extension (a UUID). */
 function sessionIdOf(file: string): string {
 	return path.basename(file).replace(/\.jsonl$/i, "");
 }
 
 /**
- * Collect every .jsonl under `dir`, recursing past derived-data directories.
  * `projectSlug` is the top-level project dir name — the display path is built
  * from it, not from whatever nested directory the file was found in.
  */
@@ -90,8 +86,6 @@ function toCandidate(file: string, projectSlug: string): SessionCandidate | null
 }
 
 /**
- * Does this transcript's own recorded location put it in one of the targets?
- *
  * One arm, one bounded tail read. A transcript with no `cwd` at all resolves
  * to null and matches nothing.
  */
@@ -100,7 +94,6 @@ function matchesRecordedCwd(file: string, targets: Set<string>): boolean {
 	return last !== null && targets.has(last);
 }
 
-/** Insert-or-replace-if-newer into the dedup-by-session-id map. Newest mtime wins. */
 function upsertCandidate(into: Map<string, SessionCandidate>, candidate: SessionCandidate | null): void {
 	if (!candidate) return;
 	const id = sessionIdOf(candidate.path);
@@ -184,13 +177,9 @@ function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions
 	}
 
 	// "worktree", "worktrees" and "branch" all narrow to a target-dir set
-	// first, then apply the SAME physical-match-or-union loop below — they
-	// differ only in which directories are targets and whether the union arm
-	// is consulted at all.
+	// first, then apply the SAME physical-match-or-union loop below.
 	let targetDirs: string[];
 	let useUnionArm: boolean;
-	// Only "worktrees" ever calls fanOutCwd, so only it can populate
-	// `fallbackSlugPrefixes`. See fanOutCwd's CwdFanOut.usedFallback docstring.
 	let fallbackSlugPrefixes: string[] = [];
 	if (scope === "worktree") {
 		targetDirs = [target];
@@ -219,8 +208,6 @@ function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions
 		const physicalMatch = targetSlugs.has(slug) ||
 			fallbackSlugPrefixes.some(prefix => slug.startsWith(prefix));
 
-		// Skip the directory entirely when it cannot contribute: a non-matching
-		// slug under "worktree"/"branch" has no way to match.
 		if (!physicalMatch && !useUnionArm) continue;
 
 		const files: string[] = [];

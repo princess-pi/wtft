@@ -182,14 +182,14 @@ retired in `@4`.
   (`--pager`), or an unhandled exception. The reason is on stderr; under
   `--json`, stdout carries nothing.
 - **9** — provisional ([#443](https://github.com/princess-pi/wtft/issues/443)):
-  the report was produced in full, but the total may still grow.
+  the report was produced in full, but a number in it may still change.
   Under `--json`, `provisional.provisional` is `true` and `provisional.reason`
   names the condition, so `$?` and the field agree. One condition is
   mode-dependent: `subagent-unreadable` is found by the uncounted scan, which
   runs under `--tokens` and `--json` but not on a plain `wtft` run, so a session
   provisional for that reason alone exits 9 in those two modes and 0 on a plain
-  run. `descendant-live` (a counted descendant's transcript grew in the last
-  122 s, [#133](https://github.com/princess-pi/wtft/issues/133)) is set only by
+  run. `descendant-live` (a counted descendant is still writing its transcript,
+  [#133](https://github.com/princess-pi/wtft/issues/133)) is set only by
   `--tokens` and `--json`, the runs that read the spawn tree.
 - **2** / **3** — `wtft spawn-record` only (see below): the call was wrong, or
   the ledger could not be written. The report path never returns either, and

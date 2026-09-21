@@ -258,7 +258,7 @@ carries. The table lives in `docs/manifests/wtft-cmd.json`, which is what
 | **1** | Error: no session found or selected, an invalid path, a daemon that could not be spawned or that died before producing data, a refused flag (`-p`), or an unhandled exception. The reason is on stderr. | nothing |
 | **2** | `wtft spawn-record` only: the call was wrong — a missing or unknown flag, a flag with no value, a malformed session id, an oversized field. Nothing was appended. The report path never returns 2. | n/a |
 | **3** | `wtft spawn-record` only: the record was valid and the ledger could not be written — usually a full disk. The edge is not recorded, so the child is **invisible** to the tree, not `unattributed` (which means an edge we have whose child we could not read). Any partial line left behind is reported as a counted `malformedLedgerLines` on the next read; nothing tries to repair it. | n/a |
-| **9** | Provisional (#443): a report was produced in full, but the total may still grow: under the daemon, or in a descendant still writing its transcript (#133). `provisional.provisional` is `true` and `provisional.reason` names the condition. | one JSON object |
+| **9** | Provisional (#443): a report was produced in full, but a number in it may still change; `provisional.reason` names which of the four reasons applies. `provisional.provisional` is `true` and `provisional.reason` names the condition. | one JSON object |
 | **10** | `EXIT_SESSION_AMBIGUOUS` (#89): no interactive terminal, and either `-s <substring>` matched zero or several sessions, or no `-s` was given at all -- even when the picker's default scope (this worktree, last 20 minutes) holds exactly one session (#89, C2). Zero is included, which replaces the OLD exit 1 "no session found" for this no-`-s`/no-TTY case. Every candidate is named on stderr. | nothing |
 | **130** | The interactive session picker was cancelled with `q` or Ctrl-C — the SIGINT convention (128+2), not a wtft-specific code. As of `@4` (#89), an interactive terminal still gets the picker under `--json` (drawn to stderr — see "Session selection" above), so `--json` DOES still return this when a human cancels it; it is exit 10 above, not 130, that `--json` cannot combine with a prompt. | n/a |
 
@@ -581,7 +581,7 @@ means they are not. The marker is binary. It does not estimate how much is still
   already provisional for another reason. Exit 9, the stderr line, the field and the
   `provisional` notice, as for every other reason.
 - **Mode.** Only runs that compute the spawn tree can see a descendant: `--json` and `--tokens`.
-  A plain `wtft` run never reads the ledger and exits 0 with a live descendant.
+  A plain `wtft` run never reads the ledger, so a live descendant does not make it provisional.
 - **Two bumps.** `spawned` carries its own schema, so `wtft/spawn-tree@1` becomes `@2`, and the
   document becomes `wtft/session@5`.
 

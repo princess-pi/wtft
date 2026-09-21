@@ -306,10 +306,10 @@ _Avoid_: Porcelain mode, machine mode, structured mode (the flag is `--json`; "J
 names the usage mode)
 
 **Provisional (total)** (#443, a field since #26):
-A total that may still grow — the CLI read the tag file before the log parser daemon
-finished, or a counted descendant is still writing its transcript (`descendant-live`: its
-spawn-tree edge is **live**, modified less than `IDLE_THRESHOLD_MS` ago). The number
-printed is real but not final. On the CLI, reported two
+A total in which a number may still change; `provisional.reason` names why, from the closed
+vocabulary below. For `descendant-live`, the spawn-tree edge of a counted descendant still
+writing its transcript is **live** (the exact test: `docs/spec-26-json.md`, Amendment 4). The
+number printed is real; it is not yet **settled**. On the CLI, reported two
 ways that always agree: **exit 9**, and `provisional.provisional` / `provisional.reason` in
 JSON mode. The reasons are a closed vocabulary — `stale-version`, `unswept`,
 `subagent-unreadable`, `descendant-live` (#133) — and `reason` here is a different field from a **daemon health

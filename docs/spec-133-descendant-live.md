@@ -15,28 +15,30 @@ lines" is the requirement, so the transcript's mtime is the measurement, not a p
 
 ## Shape
 
-- **Liveness.** A counted edge (`resolved: true`) is `live` when its transcript's mtime is within
-  `IDLE_THRESHOLD_MS` (122 s, the daemon's definition of idle) of now. `computeSpawnTree` sets
-  `live: boolean` on every counted edge and on no other edge. `SpawnTreeOptions.now` injects the
-  clock.
+- **Liveness.** A counted edge (`resolved: true`) is `live` when its transcript's mtime is less
+  than `IDLE_THRESHOLD_MS` (122 s, the daemon's definition of idle) before now. A transcript that
+  parsed but can no longer be stat-ed counts as live: it changed under the read. `computeSpawnTree`
+  sets `live: boolean` on every counted edge and on no other edge. `SpawnTreeOptions.now` injects
+  the clock.
 - **Verdict.** When the CLI computes the tree and any edge is `live`, and the run is not already
   provisional for another reason, `provisional` becomes `{ provisional: true, reason:
   "descendant-live" }`: exit 9, the stderr line, and the JSON field, exactly as the other reasons
-  do. An earlier reason is kept; a run reports one reason.
+  do, including the `provisional` entry in `--json`'s `notices[]`. The tree never replaces a
+  reason already set; the uncounted scan, which runs before it, can still replace the tag's.
 - **Vocabulary.** `descendant-live` is a fourth value in the closed `provisional.reason` set.
-  `describeProvisionalReason` words it "a descendant session wrote to its transcript within the
-  last 2 minutes, so the tree total may still grow"; the remedy is to run wtft again once every
-  descendant has been quiet for 2 minutes.
+  `describeProvisionalReason` words it "a descendant session wrote to its transcript in the last
+  122 s, so the tree total may still grow"; the remedy is to run wtft again once every descendant
+  has been quiet for 122 s. Both take the number from `IDLE_THRESHOLD_MS`.
 - **Schema.** `spawned.edges[].live` is a new nested key, and the reason set widens, so
   `wtft/session@4` becomes `wtft/session@5`.
-- **Where it applies.** Only runs that compute the spawn tree: `--tokens` and `--json`. A plain
-  `wtft` run never reads the ledger, so it cannot see a descendant; this is the same mode
-  dependence `subagent-unreadable` already has.
+- **Where it applies.** Only CLI runs that compute the spawn tree: `--tokens` and `--json`. A
+  plain `wtft` run never reads the ledger, so it cannot see a descendant and exits 0. The Pi
+  widget's `/wtft --tokens` renders the tree but does not read `live`; that rendering is #198.
 
 ## Not in this change
 
 The `--watch` rendering in #133's decision (one line per in-flight child) needs the watch loop to
-compute the spawn tree, which it does not do today. Filed as its own issue, named in the PR.
+compute the spawn tree, which it does not do today: [#198](https://github.com/princess-pi/wtft/issues/198).
 
 ## Closer
 

@@ -125,7 +125,7 @@ contract.
 | `provisional.provisional` | bool | **This run's** verdict — may this total still grow? Usually `readTagProvisional`'s answer, but the blind-spot scan can override it (see below), so do not read it as "what the tag file says". |
 | `provisional.reason` | string \| null | A **closed four-value vocabulary**, enforced by the `TagProvisionalReason` union: `"stale-version"` · `"unswept"` · `"subagent-unreadable"` · `"descendant-live"` (#133, Amendment 4), or `null` when settled. `--json` did not widen it; #133 did. **Issue #26's own wish-list names only two**, `stale-version` and `unswept`: it was written before #457 added the third, and this spec supersedes it on that point. Repeated review lenses have cited the issue's list as the contract; it is not. |
 | `total.*` | number | Exact totals for **this session as the daemon tagged it** — its own turns AND the Task subagents blended into its tag file. That is why the spawn walk marks such an edge `in-self-total` and never adds it: `tree` would bill it twice. The same holds for a `claude -p` session that a `claude -p` child of this session folded in, at any depth. **Launcher-spawned descendants are not in here** (#116) — those are `spawned`, and `tree` is the sum. Cost is USD, the rest are token counts. |
-| `spawned` | object | The recorded lineage (#116), schema `wtft/spawn-tree@1`. Present on every run, so an empty tree means "read the ledger, found nothing" rather than "nobody looked" — the same rule as `uncounted`. |
+| `spawned` | object | The recorded lineage (#116), schema `wtft/spawn-tree@2`. Present on every run, so an empty tree means "read the ledger, found nothing" rather than "nobody looked" — the same rule as `uncounted`. |
 | `spawned.schema` | string | `"wtft/spawn-tree@2"`. Versioned separately from the document. |
 | `spawned.edges[]` | array | One row per recorded edge reached from this session, in walk order. Always `parent`, `child`, `mechanism`, `ts`, `depth`, `resolved`, `path`, `total`; `label`, `model` and `cwd` only where the ledger line carried them, `skip` only on an unresolved edge, and `live` only on a resolved one (Amendment 4). `depth` is 1 for a direct child. |
 | `spawned.total` | object | The sum over RESOLVED descendants, net of any session a descendant's parse folded in that was already counted under its own edge. Unattributed and depth-capped edges are not in it. |
@@ -258,7 +258,7 @@ carries. The table lives in `docs/manifests/wtft-cmd.json`, which is what
 | **1** | Error: no session found or selected, an invalid path, a daemon that could not be spawned or that died before producing data, a refused flag (`-p`), or an unhandled exception. The reason is on stderr. | nothing |
 | **2** | `wtft spawn-record` only: the call was wrong — a missing or unknown flag, a flag with no value, a malformed session id, an oversized field. Nothing was appended. The report path never returns 2. | n/a |
 | **3** | `wtft spawn-record` only: the record was valid and the ledger could not be written — usually a full disk. The edge is not recorded, so the child is **invisible** to the tree, not `unattributed` (which means an edge we have whose child we could not read). Any partial line left behind is reported as a counted `malformedLedgerLines` on the next read; nothing tries to repair it. | n/a |
-| **9** | Provisional (#443): a report was produced in full, but the total may still grow under the daemon. `provisional.provisional` is `true` and `provisional.reason` names the condition. | one JSON object |
+| **9** | Provisional (#443): a report was produced in full, but the total may still grow: under the daemon, or in a descendant still writing its transcript (#133). `provisional.provisional` is `true` and `provisional.reason` names the condition. | one JSON object |
 | **10** | `EXIT_SESSION_AMBIGUOUS` (#89): no interactive terminal, and either `-s <substring>` matched zero or several sessions, or no `-s` was given at all -- even when the picker's default scope (this worktree, last 20 minutes) holds exactly one session (#89, C2). Zero is included, which replaces the OLD exit 1 "no session found" for this no-`-s`/no-TTY case. Every candidate is named on stderr. | nothing |
 | **130** | The interactive session picker was cancelled with `q` or Ctrl-C — the SIGINT convention (128+2), not a wtft-specific code. As of `@4` (#89), an interactive terminal still gets the picker under `--json` (drawn to stderr — see "Session selection" above), so `--json` DOES still return this when a human cancels it; it is exit 10 above, not 130, that `--json` cannot combine with a prompt. | n/a |
 
@@ -266,8 +266,8 @@ Codes 0 and 9 both carry a complete object; a consumer that wants only settled
 numbers checks `$?` **or** `.provisional.provisional` and gets the same answer.
 
 **One incompleteness has no exit code**, deliberately: a `spawned.ledgerError`
-leaves `$?` at 0. Exit 9 means *this total may still grow under the daemon*, and
-`provisional.reason` is a closed three-value vocabulary — widening either to
+leaves `$?` at 0. Exit 9 means *this total may still grow*, and
+`provisional.reason` is a closed four-value vocabulary — widening either to
 cover an unreadable ledger would change what a settled 0 means for every
 consumer that has one. A reader who cares about lineage branches on the field.
 
@@ -354,7 +354,7 @@ to write an object to.
 
 ```console
 $ node bin/wtft.mjs -s <fixture> --json \
-    | jq -e '.schema == "wtft/session@4" and (.total.outputTokens|type) == "number"'
+    | jq -e '.schema == "wtft/session@5" and (.total.outputTokens|type) == "number"'
 ```
 
 exits 0, and `tests/wtft-26-json.test.ts` asserts, on a fixture, in eleven
@@ -574,15 +574,14 @@ rather than a silent one, which is the whole reason `@3` → `@4` exists.
 means they are not. The marker is binary. It does not estimate how much is still moving.
 
 - **`spawned.edges[].live`** — on every resolved edge, and on no other: `true` when that
-  descendant's transcript was modified within `IDLE_THRESHOLD_MS` (122 s, the daemon's own
-  definition of idle). We cannot see whether a child process is alive, only when its transcript
+  descendant's transcript was modified less than `IDLE_THRESHOLD_MS` (122 s, the daemon's own
+  definition of idle) before now, or can no longer be stat-ed after it parsed. We cannot see whether a child process is alive, only when its transcript
   last grew; since the requirement is "not producing lines", that is the thing itself.
 - **`provisional.reason: "descendant-live"`** — set when any edge is `live` and the run is not
-  already provisional for another reason (a run reports one reason). Exit 9, the stderr line,
-  and the field, as for every other reason.
+  already provisional for another reason. Exit 9, the stderr line, the field and the
+  `provisional` notice, as for every other reason.
 - **Mode.** Only runs that compute the spawn tree can see a descendant: `--json` and `--tokens`.
-  A plain `wtft` run exits 0 with a live descendant, the same mode dependence as
-  `subagent-unreadable`.
+  A plain `wtft` run never reads the ledger and exits 0 with a live descendant.
 - **Two bumps.** `spawned` carries its own schema, so `wtft/spawn-tree@1` becomes `@2`, and the
   document becomes `wtft/session@5`.
 

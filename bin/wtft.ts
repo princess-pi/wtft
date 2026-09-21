@@ -368,7 +368,7 @@ function describeProvisionalReason(provisional: { reason: string | null }, tagPa
 		return "a subagent session file could not be read, so its cost may be missing";
 	}
 	if (provisional.reason === "descendant-live") {
-		return "a descendant session wrote to its transcript within the last 2 minutes, so the tree total may still grow";
+		return `a descendant session wrote to its transcript in the last ${IDLE_THRESHOLD_MS / 1000} s, so the tree total may still grow`;
 	}
 	return "no subagent transcript has been read since this tag was written";
 }
@@ -376,7 +376,7 @@ function describeProvisionalReason(provisional: { reason: string | null }, tagPa
 /** The one action that ends the provisional state. Does not name `-F` (that deletes the tag and falls through here). */
 function describeProvisionalRemedy(provisional: { reason: string | null }): string {
 	if (provisional.reason === "descendant-live") {
-		return "run wtft again once every descendant has been quiet for 2 minutes";
+		return `run wtft again once every descendant has been quiet for ${IDLE_THRESHOLD_MS / 1000} s`;
 	}
 	return provisional.reason === "subagent-unreadable"
 		? "restore the unreadable session file's readability, then run wtft again — the daemon re-reads it on its next poll, and wtft reads it directly on the --tokens and --json paths"
@@ -845,8 +845,9 @@ async function main() {
 	// ---
 	if (opts.json) {
 		const notices: WtftNotice[] = [];
-		// Scan before notices — may downgrade provisional. Memoised with emitSessionJson's call.
+		// Scan and tree before notices — each may set provisional. Both memoised with emitSessionJson's calls.
 		scanSessionUncounted();
+		sessionSpawnTree();
 		for (const m of collectUnpricedModels(interactions)) {
 			notices.push({ code: "unpriced-model", text: unpricedModelWarning(m) });
 			console.error(`\x1b[33m⚠ ${unpricedModelWarning(m)}\x1b[0m`);

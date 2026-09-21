@@ -283,7 +283,7 @@ _Avoid_: menu
 
 **JSON mode** (#26):
 `--json` — the CLI's machine-readable mode. Writes exactly one JSON object (schema
-`wtft/session@4`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
+`wtft/session@5`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
 Human prose goes to stderr, and every sentence that would otherwise have been on stdout is
 repeated in the object's `notices[]`, where `code` is the contract and `text` is disposable.
 With an interactive terminal it still shows the scoped session picker (#89) whenever the
@@ -306,8 +306,10 @@ _Avoid_: Porcelain mode, machine mode, structured mode (the flag is `--json`; "J
 names the usage mode)
 
 **Provisional (total)** (#443, a field since #26):
-A total the log parser daemon may still grow — the CLI spawned it and read the tag file
-before it finished, so the number printed is real but not final. On the CLI, reported two
+A total that may still grow — the CLI read the tag file before the log parser daemon
+finished, or a counted descendant is still writing its transcript (`descendant-live`: its
+spawn-tree edge is **live**, modified less than `IDLE_THRESHOLD_MS` ago). The number
+printed is real but not final. On the CLI, reported two
 ways that always agree: **exit 9**, and `provisional.provisional` / `provisional.reason` in
 JSON mode. The reasons are a closed vocabulary — `stale-version`, `unswept`,
 `subagent-unreadable`, `descendant-live` (#133) — and `reason` here is a different field from a **daemon health

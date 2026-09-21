@@ -121,6 +121,9 @@ console.log("\n=== wtft --json: a live descendant makes the tree provisional ===
 	check(live.doc?.provisional?.provisional === true && live.doc?.provisional?.reason === "descendant-live",
 		"provisional is { true, descendant-live }", JSON.stringify(live.doc?.provisional));
 	check(live.doc?.schema === "wtft/session@5", `schema is wtft/session@5 (got ${live.doc?.schema})`);
+	check((live.doc?.notices ?? []).some((n: any) => n.code === "provisional" && /descendant/.test(n.text)),
+		"notices[] carries the provisional notice, as for every other reason", JSON.stringify(live.doc?.notices));
+	check(EXIT_PROVISIONAL === 9, `the published exit code is 9 (constant is ${EXIT_PROVISIONAL})`);
 	check(live.code === EXIT_PROVISIONAL, `exits ${EXIT_PROVISIONAL} (got ${live.code})`, live.stderr);
 
 	const old = new Date(Date.now() - 10 * 60_000);
@@ -137,8 +140,8 @@ console.log("\n=== wtft --tokens: the rendered report says so, and a tag's own r
 	fs.utimesSync(childFile, new Date(), new Date());
 	const tokens = runCli(["-s", parentWithTag({ swept: now }), "--tokens"]);
 	check(tokens.stdout.includes("SPAWNED"), "precondition: --tokens rendered the spawn block", tokens.stdout.slice(-600));
-	check(/descendant session wrote to its transcript within the last 2 minutes/.test(tokens.stderr),
-		"stderr names the live descendant", tokens.stderr);
+	check(/descendant session wrote to its transcript in the last 122 s/.test(tokens.stderr),
+		"stderr carries the descendant-live sentence", tokens.stderr);
 	check(tokens.code === EXIT_PROVISIONAL, `exits ${EXIT_PROVISIONAL} (got ${tokens.code})`, tokens.stderr);
 
 	fs.utimesSync(childFile, new Date(), new Date());

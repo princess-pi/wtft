@@ -106,8 +106,6 @@ export interface SpawnTreeOptions {
 	now?: number;
 }
 
-/** Below this, a negative field is float noise from summing the same shares
- *  in a different order, and becomes 0. */
 const SUBTRACT_TOLERANCE = 1e-9;
 
 /** Subtract every numeric field of `from` from `into`. Callers subtract only a

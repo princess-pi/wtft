@@ -1327,7 +1327,7 @@ function emptyFoldShare(): FoldShare {
  * rather than for the total as it was built.
  */
 export function collectSelfAttributedSessionIds(
-	recordedFolds: Iterable<string>,
+	recordedFolds: ReadonlySet<string> | readonly string[],
 	interactions: Interaction[],
 	mergedFiles: string[] = [],
 ): Set<string> {

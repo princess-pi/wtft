@@ -498,7 +498,9 @@ descendant double-counting order-independent is the other piece of machinery thi
 and it is *not* in this class: it does not soften a resource failure, it stops `tree` reporting a
 number that is wrong in the expensive direction. Removing it would trade ~20 lines for a wrong
 total whenever a spawner records an edge for a child some other mechanism already folded in.
-Worth knowing it is there; it is the branch's remaining concentration of subtlety.
+Worth knowing it is there; it is the branch's remaining concentration of subtlety. *Superseded:*
+`countedTotals` is gone. A descendant now subtracts the share its own parse recorded for each
+session already counted, which is exact (`docs/spec-178-135-180-fold-records.md`).
 
 ## Review round 4 — the round that checked whether the last three landed
 

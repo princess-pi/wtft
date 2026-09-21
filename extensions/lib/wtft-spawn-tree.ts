@@ -298,9 +298,6 @@ export function computeSpawnTree(
 			let total: TokenTotals;
 			let live: boolean;
 			try {
-				// Stat first, inside the same try: a transcript that cannot be stat-ed
-				// is `unreadable`, never guessed live or quiet.
-				live = now - fs.statSync(file).mtimeMs < IDLE_THRESHOLD_MS;
 				// Parse once: for the cost, and for ids the parse itself folded
 				// in. If a folded child is ALSO a ledger edge, it would be
 				// counted twice — each descendant needs its own guard.
@@ -309,6 +306,11 @@ export function computeSpawnTree(
 				// `spawned.edges[].total` / `countedTotals`. See subtractTotals.
 				const { untaggedCostUsd: _untaggedCostUsd, ...cleanTotal } = computeSessionSummary(parsed).total;
 				total = cleanTotal;
+				// Stat AFTER the parse, so an append during it counts; inside the try, so a
+				// transcript that cannot be stat-ed is `unreadable`, never guessed. Bounded on
+				// both sides: a write mid-walk lands after `now`, a far-future mtime is not live.
+				const age = now - fs.statSync(file).mtimeMs;
+				live = age < IDLE_THRESHOLD_MS && age > -IDLE_THRESHOLD_MS;
 				for (const id of foldedTransitively(parseFoldedIds(parsed), foldCache)) {
 					const already = countedTotals.get(id);
 					if (already) {

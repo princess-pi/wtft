@@ -75,6 +75,11 @@ console.log("\n=== computeSpawnTree marks a counted edge live from its transcrip
 	check(quiet.edges.find(e => e.child === CHILD)?.live === false, "mtime 10 min before now -> live: false");
 
 	check(missing?.resolved === false && !("live" in (missing ?? {})), "an unresolved edge carries no live key", JSON.stringify(missing));
+
+	const skewed = computeSpawnTree(PARENT, { ledgerPath: ledger, now: childMtime - 10_000 });
+	check(skewed.edges.find(e => e.child === CHILD)?.live === true, "mtime 10 s AFTER now (skew, or written mid-walk) -> live: true");
+	const future = computeSpawnTree(PARENT, { ledgerPath: ledger, now: childMtime - 10 * 60_000 });
+	check(future.edges.find(e => e.child === CHILD)?.live === false, "mtime 10 min in the future -> live: false, not provisional until the clock catches up");
 }
 
 // ---

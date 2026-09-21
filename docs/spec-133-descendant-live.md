@@ -15,10 +15,12 @@ lines" is the requirement, so the transcript's mtime is the measurement, not a p
 
 ## Shape
 
-- **Liveness.** A counted edge (`resolved: true`) is `live` when its transcript's mtime is less
-  than `IDLE_THRESHOLD_MS` (122 s, the daemon's definition of idle) before now. The walk stats
-  the transcript before parsing it, in the same `try`, so one that cannot be stat-ed is an
-  `unreadable` edge in `unattributed`, never guessed live or quiet. `computeSpawnTree`
+- **Liveness.** A counted edge (`resolved: true`) is `live` when its transcript's mtime is within
+  `IDLE_THRESHOLD_MS` (122 s, the daemon's definition of idle) of now, on either side: a write
+  during the walk lands just after `now`, and clock skew is small, but a far-future mtime is not
+  live. The walk stats the transcript after parsing it, so an append during the parse counts, and
+  in the same `try`, so one that cannot be stat-ed is an `unreadable` edge in `unattributed`,
+  never guessed live or quiet. `computeSpawnTree`
   sets `live: boolean` on every counted edge and on no other edge. `SpawnTreeOptions.now` injects
   the clock.
 - **Verdict.** When the CLI computes the tree and any edge is `live`, and the run is not already

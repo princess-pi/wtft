@@ -25,10 +25,10 @@ read path rediscovers which sessions were folded.
 - **A fourth line kind:** `{"_fold":{"parent":"<session id>","child":"<session id>"}}`.
   `parent` is the tag's own session id (the transcript's filename without `.jsonl`). `child` is
   the filename without `.jsonl` of a transcript the daemon folded into this tag: the session id
-  for a `claude -p` child, `agent-<hex>` for a Task child. Readers key on `child`; `parent` is
+  for a `claude -p` child or a Pi sibling, `agent-<name>` for a Task child. Readers key on `child`; `parent` is
   there for a human reading the file.
-- **Written by `syncSubagentTranscript`**, the daemon's one fold point, for Task children and
-  `claude -p` children alike. Whenever a parse of a child transcript succeeds, the daemon records
+- **Written by `syncSubagentTranscript`**, the daemon's one fold point, for Task children, Pi
+  sibling sessions and `claude -p` children alike. Whenever a parse of a child transcript succeeds, the daemon records
   every session in `foldRecordIds` that it has not recorded yet: the child itself, plus every
   session folded onto one of the child's deduplicated, model-tagged turns, at any depth. A fold
   on an untagged turn lands in `untaggedCostUsd`, not in the total, so it is not recorded. The
@@ -131,6 +131,42 @@ The tag format gains a line kind, and the tagger version marks it.
 - **#180 item 4.** A descendant whose spawning turn is untagged, so its fold is outside its
   total, and whose folded session was counted under its own edge. The descendant keeps its own
   tagged cost; before this change the clamp zeroed it.
+- **Items 5 and 6 have no check here.** Item 5 is structural: the walk's fold arithmetic sits
+  outside the `try`. Item 6 is wording; its behaviour is pinned by C26b in
+  `tests/wtft-116-spawn-ledger.test.ts`.
 - **End to end.** `wtft --json` on a tag that records a child since moved to another project
   dir, with a ledger edge to it: the edge is `in-self-total`, and `tree` equals `total` in
   `costUsd` and `outputTokens`. The same tag without the record counts the child.
+
+## Reconciliation record
+
+Three `spec-reconcile` rounds, using fresh-context auditors on DeepSeek V4.1 Flash:
+- **Round 1** audited every changed source file against its documents: the walk, the tag contract and the callers. It also ran the test variant and one host-scoped pass.
+- **Round 2** re-audited what round 1 edited.
+- **Round 3** re-audited this spec and its test.
+
+The loop stopped at round 3, where the findings were re-discovered, declined, or already filed.
+
+| Artifact | Claim | Contradicted by | Covered by a test? | Action |
+|---|---|---|---|---|
+| this spec | a fold on an untagged turn is neither subtracted nor marked | the daemon recorded it, so the CLI skipped it as `in-self-total` | ✅ U1 | **Code fixed**: `foldRecordIds` records only folds on model-tagged turns |
+| this spec | the widget's in-self set is exactly its SELF | Task files that failed to load were in the set | `reconciled-against-untested` | **Code fixed**: only merged files are passed |
+| this spec | "no discovery runs on either path" | the widget discovers Task files to merge them | — | Narrowed to "which sessions were folded" |
+| this spec, tag format | `child` is a session id | a Task child's record is its `agent-<name>` filename | ✅ D1 | Stated per source |
+| this spec, spec-116, tag format, CONTEXT | fold sources are Task and `claude -p` children | Pi sibling sessions are folded and recorded too | `reconciled-against-untested` | Named as a third source |
+| spec-116, spec-26 | `depthCapped` counts every cut | an edge past the cap onto a session already reached is not a cut | ✅ C26b in `wtft-116` | Reworded (#180 item 6) |
+| spec-116, CONTEXT, spec-26 | `unreadable` means "would not parse" | a stat failure is `unreadable` too | ✅ `wtft-133` | Added |
+| spec-26 | `spawned.total` subtracts two cases | three: in SELF, counted, or folded earlier | ✅ W5 | Added the third |
+| spec-176 §3 | the CLI passes a thunk | the CLI passes the tag's fold records as a Set | — | Updated |
+| spec-116 | the `--tokens` block renders only with an edge | it also renders a ledger error or skipped lines | ✅ `wtft-176` | Updated |
+| manifest `--json` | three floor conditions | four (`malformedLedgerLines`) | ✅ `wtft-116` | Added |
+| manifest `--tokens` | UNCOUNTED line on every surface; no mention of SPAWNED/TREE | CLI only; the block exists | `reconciled-against-untested` | Scoped and added |
+| CONTEXT | no entry for "fold record" | the term is new | — | Entry added |
+| this spec's test | W1/W2 rest on the unreadable or moved transcript; P3, R3 and E1 lacked preconditions | the skip is decided before any read; each check could pass vacuously | — | Preconditions W1a, W2a, W6a, U0, E0 added; messages corrected |
+
+Declined, each checked against the code:
+- **A fold-only tag reads settled.** `hasClassified` counts a `_fold` line.
+- **An in-self id can become `folded`.** An in-self id `continue`s before the mark.
+- **The `"_fold"` substring pre-filter misses spaced JSON.** The substring survives any spacing.
+
+Older drift found in the same passes, not caused by this branch: #200.

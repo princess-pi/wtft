@@ -159,8 +159,8 @@ The top-level `_hb` key identifies a heartbeat. Readers MUST skip all lines that
 ```
 
 `child` is the filename without `.jsonl` of a transcript the daemon folded into this tag (the
-session id for a `claude -p` child, `agent-<hex>` for a Task child): a Task child under
-`<session>/subagents/`, a `claude -p` child, or a session either of those folded in on a
+session id for a `claude -p` child or a Pi sibling, `agent-<name>` for a Task child): a Task child
+under `<session>/subagents/`, a Pi sibling session, a `claude -p` child, or a session one of those folded in on a
 model-tagged turn, at any depth. `parent` is the tag's own session id, the transcript filename
 without `.jsonl`; readers key on `child` only. Whenever a child transcript parses, the daemon
 appends a record for each such session not yet recorded, after the child's lines and in the same

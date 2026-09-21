@@ -170,10 +170,11 @@ reintroduced inside #116's fix. An *absent* ledger is not an error: nothing has 
   `unattributed`. `already-seen-unresolved` exists because `already-counted` asserts the money
   landed, which is false for a second edge onto a child the first visit could not read.
   `in-self-total` is a child whose cost is already inside `total`: a session the tag's fold
-  records name (`docs/spec-178-135-180-fold-records.md`), which in practice means a `claude -p`
-  child at any depth (#138); or the reported session itself, reached round a cycle. The records
-  also name Task children under `<session>/subagents/` (#82/#83), but a ledger id must be a UUID
-  and a Task child's is not, so no edge reaches one. It is reported and never added, because billing twice is
+  records name (`docs/spec-178-135-180-fold-records.md`): a `claude -p` child at any depth
+  (#138), or a Pi sibling session whose header names this session as `parentSession`; or the
+  reported session itself, reached round a cycle. The records also name Task children under
+  `<session>/subagents/` (#82/#83), but a ledger id must contain a UUID and a Task child's
+  `agent-<name>` does not, so no edge reaches one. It is reported and never added, because billing twice is
   the expensive direction to be wrong in. `already-counted` is the same claim about the tree's
   own total, and covers a `claude -p` session a resolved descendant's parse folded in: its money is in
   `spawned.total`. A resolved descendant's parse lists every session it folded, at any depth,

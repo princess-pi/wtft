@@ -100,6 +100,7 @@ console.log("\nPART R — readTagFileWithVerdict returns `folded`");
 	const line = (o: unknown) => JSON.stringify(o) + "\n";
 	fs.writeFileSync(tagPath,
 		line({ t: T0, c: 0.5, cat: "code", f: [], cmd: [], id: "m1", m: "claude-sonnet-4-6", out: 10 })
+		+ line({ _meta: { swept: T0 } })
 		+ line({ _fold: { parent: "r-session", child: "kid-a" } })
 		+ line({ _fold: { parent: "r-session", child: "kid-b" } })
 		+ line({ _fold: { parent: "r-session", child: "kid-a" } }));
@@ -109,7 +110,7 @@ console.log("\nPART R — readTagFileWithVerdict returns `folded`");
 	check(read.interactions.length === 1,
 		`R2 a fold record is not an interaction (got ${read.interactions.length})`);
 	check(read.provisional.provisional === true && read.provisional.reason === "unswept",
-		`R3 a fold record is data: a tag ending in one reads unswept (got ${JSON.stringify(read.provisional)})`);
+		`R3 a fold record is data: a swept tag followed by fold records reads unswept (got ${JSON.stringify(read.provisional)})`);
 	fs.appendFileSync(tagPath, line({ _meta: { swept: T0 } }));
 	check(readTagFileWithVerdict(tagPath).provisional.provisional === false,
 		"R4 the sweep after it settles the tag");
@@ -177,7 +178,7 @@ console.log("\nPART D — the daemon records a claude -p child, its grandchild, 
 }
 
 // ---
-// PART W — the walk skips what the tag recorded, and only that
+// PART W — the walk skips what the in-self set holds, and only that
 // ---
 console.log("\nPART W — spawn walk against recorded folds");
 

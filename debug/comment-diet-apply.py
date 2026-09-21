@@ -38,8 +38,11 @@ def apply(path, dels, keeps):
         if prefix is None or "*/" in st:
             sys.exit(f"{path}:{n}: K only rewrites a // line or a block's interior line")
         out[n - 1] = re.match(r"\s*(?://|\*)\s*", s).group(0) + t
+    in_block = {k for a, b in blocks(lines) for k in range(a, b + 1)}
     for n in dels:
-        if not lines[n - 1].strip().startswith(("//", "/*", "*")) and lines[n - 1].strip():
+        st = lines[n - 1].strip()
+        one_line = st.startswith("/*") and st.endswith("*/")
+        if st and not st.startswith("//") and not one_line and n - 1 not in in_block:
             sys.exit(f"{path}:{n}: D on a code line: {lines[n-1]!r}")
         if "*/" in lines[n - 1] and lines[n - 1].split("*/", 1)[1].strip():
             sys.exit(f"{path}:{n}: D on a line with code after */: {lines[n-1]!r}")
@@ -49,6 +52,10 @@ def apply(path, dels, keeps):
         opener, closer = lines[a].strip(), lines[b].strip()
         indent = lines[a][: len(lines[a]) - len(lines[a].lstrip())]
         mark = "/**" if opener.startswith("/**") else "/*"
+        if all(keep[k] and new[k] == lines[k] for k in range(a, b + 1)):
+            continue  # untouched by the plan: leave it exactly as written
+        if lines[b].split("*/", 1)[1].strip():
+            sys.exit(f"{path}:{b + 1}: block closer shares its line with code; edit it by hand")
         body = [k for k in range(a, b + 1) if keep[k] and text_of(new[k])]
         if not body:
             for k in range(a, b + 1): keep[k] = False

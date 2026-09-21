@@ -138,6 +138,17 @@ export interface TagProvisional {
 	reason: TagProvisionalReason | null;
 }
 
+export function describeProvisionalReason(provisional: { reason: string | null }, tagPath: string): string {
+	if (provisional.reason === "stale-version") {
+		const v = path.basename(tagPath).match(/\.wtft-tag\.v([^/]+)\.jsonl$/)?.[1] ?? "?";
+		return `this tag was written by tagger v${v}, not v${WTFT_TAGGER_VERSION}`;
+	}
+	if (provisional.reason === "subagent-unreadable") {
+		return "a subagent session file could not be read, so its cost may be missing";
+	}
+	return "no subagent transcript has been read since this tag was written";
+}
+
 export function readTagProvisional(tagPath: string): TagProvisional {
 	let content: string;
 	try {

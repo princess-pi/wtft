@@ -26,7 +26,7 @@ expected version path is always preferred.
 ## 2. JSONL format
 
 The file is newline-delimited JSON. Each line is one complete JSON object, of one of the
-kinds in §2a–§2d or a `_meta` marker (§6). Readers MUST handle every kind.
+kinds in §2a–§2e or a `_meta` marker (§6). Readers MUST handle every kind.
 
 ### The line-safety guarantee (#130)
 
@@ -121,6 +121,7 @@ The daemon writes one interaction line per classified turn. Fields:
 | `miss` | `1` | optional | Cache miss flag (whole prefix re-primed) — set to `1` when present |
 | `ir` | `1` | optional | Interrupted turn — set to `1` when present |
 | `sp` | `1` | optional | DeepSeek surge-pricing flag — set to `1` when present |
+| `s` | string | optional | Source: set on a line the daemon wrote from a child transcript, absent on the tag's own session's lines. The first 8 hex digits of the SHA-1 of the child transcript's absolute path. A later `_gen` record for the same `s` supersedes the line (§2e) |
 
 **Optional means absent, not null.** A field absent from the JSON object means its numeric
 value is zero or its boolean value is false. Consumers must treat a missing field identically
@@ -155,20 +156,40 @@ The top-level `_hb` key identifies a heartbeat. Readers MUST skip all lines that
 ### 2d. Fold record
 
 ```json
-{"_fold": {"parent": "<session id>", "child": "<session id>"}}
+{"_fold": {"parent": "<session id>", "child": "<session id>", "s": "<source>"}}
 ```
 
 `child` is the filename without `.jsonl` of a transcript the daemon folded into this tag (the
 session id for a `claude -p` child or a Pi sibling, `agent-<name>` for a Task child): a Task child
 under `<session>/subagents/`, a Pi sibling session, a `claude -p` child, or a session one of those folded in on a
 model-tagged turn, at any depth. `parent` is the tag's own session id, the transcript filename
-without `.jsonl`; readers key on `child` only. Whenever a child transcript parses, the daemon
-appends a record for each such session not yet recorded, after the child's lines and in the same
-append. A reader treats the records as a set; a repeat is not an error.
+without `.jsonl`; readers key on `child` only. `s` is the source of the child transcript whose
+parse implied the record (§2a), so a later `_gen` for that source supersedes it (§2e). Whenever a
+child transcript parses, the daemon appends a record for each such session that source's current
+generation has not recorded yet, after the child's lines and in the same append. Two sources that
+fold one session each record it. A reader treats the records as a set; a repeat is not an error.
 
 A fold record is data, not a marker: a tag whose last data line is one reads unswept. The spawn
 walk skips every recorded child as `in-self-total`, because its money is already in the tag's total
 (`docs/spec-178-135-180-fold-records.md`).
+
+### 2e. Generation record
+
+```json
+{"_gen": {"s": "<source>", "session": "<session id>"}}
+```
+
+Opens a new generation for the child transcript whose source is `s` (§2a). `session` is that
+transcript's filename without `.jsonl`, for a human reading the file. **A line carrying `s` —
+an interaction line or a fold record — counts only if no `_gen` record for the same `s` follows
+it.** A line with no `s` always counts.
+
+The daemon writes one on the first successful parse of a child transcript in each daemon life,
+and on the first after that transcript rotated (its size decreased or its inode changed). The
+record goes first in the append, followed by every line of that parse and every fold record it
+implies. A generation with no lines still writes its record, so a transcript rotated to empty
+drops its old lines. Like a fold record, it is data: a tag whose last data line is one reads
+unswept (`docs/spec-114-14-generation-records.md`).
 
 ---
 
@@ -216,10 +237,13 @@ A bump to `WTFT_TAGGER_VERSION` signals that stale tags must be re-parsed.
 ## 6. Reader contract summary
 
 1. Open the file at the expected version path (§1).
-2. For each line:
+2. Drop every line that carries a source (`s` on an interaction line, `_fold.s` on a fold
+   record) and is followed by a `_gen` record for the same source (§2e).
+3. For each remaining line:
    - Skip if it has a `_hb` top-level key (heartbeat).
+   - Skip if it has a `_gen` top-level key (§2e).
    - Skip if it has a `_meta` top-level key (the daemon's offset and sweep markers).
    - Collect `_fold.child` if it has a `_fold` top-level key (§2d).
    - Otherwise treat as an interaction line (or overhead line if `id` ends in `#oh`).
-3. After reading all lines, apply dedup (§4) — keep the highest-cost line per bare `id`.
-4. Treat absent optional fields as zero / false (§2a).
+4. After reading all lines, apply dedup (§4) — keep the highest-cost line per bare `id`.
+5. Treat absent optional fields as zero / false (§2a).

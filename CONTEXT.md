@@ -137,12 +137,20 @@ daemon's startup), never in each reader.
 _Avoid_: Cache file, index file
 
 **Fold record** (#178):
-A `{"_fold":{"parent","child"}}` line in a tag file. The daemon writes one for every session whose
+A `{"_fold":{"parent","child","s"}}` line in a tag file. The daemon writes one for every session whose
 cost it folded into that tag: a Task child, a Pi sibling session, a `claude -p` child, or a session one of those folded in on
 a model-tagged turn, at any depth. The spawn walk skips every recorded child as
 `in-self-total`. It reads the record rather than rediscovering, because the filesystem at read
 time is not the filesystem the daemon folded from. Readers key on `child`.
 _Avoid_: Fold cache, attribution list
+
+**Generation record** (#114):
+A `{"_gen":{"s","session"}}` line in a tag file. It supersedes every earlier line — interaction
+line or fold record — whose source `s` matches: the path hash of one child transcript. The daemon
+writes one on its first parse of that transcript in each daemon life and after the transcript
+rotates, followed by the whole current parse, so the tag bills each child transcript's latest
+contents once.
+_Avoid_: Reset record, epoch
 
 **Tags dir**:
 The `wtft-tags/` directory itself — one per project/session root, holding every tag file for

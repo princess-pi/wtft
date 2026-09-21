@@ -32,9 +32,9 @@ read path rediscovers which sessions were folded.
   every session in `foldRecordIds` that it has not recorded yet: the child itself, plus every
   session folded onto one of the child's deduplicated, model-tagged turns, at any depth. A fold
   on an untagged turn lands in `untaggedCostUsd`, not in the total, so it is not recorded. The
-  records go in the same append as the child's lines, after them. Each session is recorded
-  once per daemon life. Readers treat the records as a set, so a restart that re-records is
-  harmless.
+  records go in the same append as the child's lines, after them. Readers treat the records
+  as a set, so a repeat is harmless. Since P4, records carry the child transcript's source and
+  are deduplicated per source generation (`docs/spec-114-14-generation-records.md`).
 - **A fold record is data, not a marker.** It changes the report, so it needs a sweep like an
   interaction line: the daemon sets `tagGrewSinceMarker`, and a tag whose last data line is a
   fold record reads `unswept`.
@@ -46,8 +46,6 @@ read path rediscovers which sessions were folded.
     rewrites the tag at 2.9.0. That run exits 9, and the `stale-version` remedy is to run again,
     which reads the rewritten tag. Keeping read-time rediscovery as a fallback for old tags would
     keep the code this change exists to remove.
-- **No generation field yet.** Rotation generations are P4 (#114). The record is keyed by
-  session id, so a generation can be added later without changing the key.
 
 ### Reading
 
@@ -105,8 +103,8 @@ The tag format gains a line kind, and the tagger version marks it.
 
 ## Not in this change
 
-- Generation records on rotation, and re-attributing a nested `claude -p` until it is idle:
-  P4 (#114, #14).
+- Generation records on rotation, and re-attributing a nested `claude -p`: P4 (#114, #14),
+  `docs/spec-114-14-generation-records.md`.
 - A descendant with untagged turns shows `$0.00` with no floor condition (#180 item 7):
   P9, as `descendant-untagged` (D2).
 

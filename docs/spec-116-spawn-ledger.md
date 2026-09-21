@@ -193,11 +193,11 @@ already trust.
 
 ```json
 "spawned": {
-  "schema": "wtft/spawn-tree@1",
+  "schema": "wtft/spawn-tree@2",
   "descendants": 3,
   "edges": [{"parent":"…","child":"…","mechanism":"pr-review-lens","ts":"…",
              "label":"correctness","model":"opus","cwd":"/tmp/pr-review-abc","depth":1,
-             "resolved":true,"path":"/home/…/<child>.jsonl","total":{…}},
+             "resolved":true,"path":"/home/…/<child>.jsonl","total":{…},"live":false},
             {"parent":"…","child":"…","mechanism":"pr-review-lens","ts":"…","depth":1,
              "resolved":false,"path":null,"total":null,"skip":"not-found"}],
   "unattributed": [{"child":"…","mechanism":"…","ts":"…","label":"…","reason":"not-found"}],

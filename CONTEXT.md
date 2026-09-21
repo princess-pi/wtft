@@ -286,7 +286,7 @@ _Avoid_: menu
 
 **JSON mode** (#26):
 `--json` — the CLI's machine-readable mode. Writes exactly one JSON object (schema
-`wtft/session@4`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
+`wtft/session@5`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
 Human prose goes to stderr, and every sentence that would otherwise have been on stdout is
 repeated in the object's `notices[]`, where `code` is the contract and `text` is disposable.
 With an interactive terminal it still shows the scoped session picker (#89) whenever the
@@ -309,13 +309,15 @@ _Avoid_: Porcelain mode, machine mode, structured mode (the flag is `--json`; "J
 names the usage mode)
 
 **Provisional (total)** (#443, a field since #26):
-A total that may still grow: the tag file was written by another tagger build
-(`stale-version`) or read before the log parser daemon swept it (`unswept`), or the CLI's
-scan could not list or read a subagent file (`subagent-unreadable`). The number printed is
+A total that may still change: the tag file was written by another tagger build
+(`stale-version`) or read before the log parser daemon swept it (`unswept`), the CLI's
+scan could not list or read a subagent file (`subagent-unreadable`), or a counted descendant
+is still writing its transcript (`descendant-live`: its spawn-tree edge is **live**; the exact
+test is `docs/spec-26-json.md`, Amendment 4). The number printed is
 real; it is not yet **settled**. On the CLI's report
 path (not `--watch`), reported two ways that always agree: **exit 9**, and
 `provisional.provisional` / `provisional.reason` in JSON mode. The reasons are a closed vocabulary — `stale-version`, `unswept`,
-`subagent-unreadable` — and `reason` here is a different field from a **daemon health
+`subagent-unreadable`, `descendant-live` (#133) — and `reason` here is a different field from a **daemon health
 reason** (above); name the container when both are in play. The Pi widget surfaces
 this state as a third, contract-less channel: prose only ("total is provisional"), no exit
 code, no JSON field. It prints one line per cause: the tag's own verdict, read with the
@@ -386,6 +388,6 @@ _Avoid_: Missing, lost, dropped (the edge is known; only the amount is not)
 The state where the spawn ledger itself could not be READ — `spawned.ledgerError` in JSON,
 `"spawn ledger could not be read (#116) — descendants unknown, not zero"` in the table. It is
 deliberately not the same report as "this session spawned nothing", which is silence, and it is
-reported through neither exit 9 nor `provisional.reason`: those mean "may still grow under the
-daemon", a different fact.
+reported through neither exit 9 nor `provisional.reason`: those mean "a number in this report
+may still change", a different fact.
 _Avoid_: Empty tree, no descendants, zero (each states the thing we could not determine)

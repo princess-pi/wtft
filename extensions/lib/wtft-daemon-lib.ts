@@ -131,7 +131,7 @@ export function dedupeClassifiedById(interactions: Interaction[]): Interaction[]
 	return out;
 }
 
-export type TagProvisionalReason = "stale-version" | "unswept" | "subagent-unreadable";
+export type TagProvisionalReason = "stale-version" | "unswept" | "subagent-unreadable" | "descendant-live";
 
 export interface TagProvisional {
 	provisional: boolean;
@@ -145,6 +145,9 @@ export function describeProvisionalReason(provisional: { reason: string | null }
 	}
 	if (provisional.reason === "subagent-unreadable") {
 		return "a subagent session file could not be read, so its cost may be missing";
+	}
+	if (provisional.reason === "descendant-live") {
+		return `a descendant session wrote to its transcript in the last ${IDLE_THRESHOLD_MS / 1000} s, so the tree total may still grow`;
 	}
 	return "no subagent transcript has been read since this tag was written";
 }

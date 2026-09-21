@@ -362,6 +362,9 @@ function unpricedModelWarning(model: string): string {
 
 /** The one action that ends the provisional state. Does not name `-F` (that deletes the tag and falls through here). */
 function describeProvisionalRemedy(provisional: { reason: string | null }): string {
+	if (provisional.reason === "descendant-live") {
+		return `run wtft again once every descendant has been quiet for ${IDLE_THRESHOLD_MS / 1000} s`;
+	}
 	return provisional.reason === "subagent-unreadable"
 		? "restore the unreadable session file's readability, then run wtft again — the daemon re-reads it on its next poll, and wtft reads it directly on the --tokens and --json paths"
 		: "The daemon is rebuilding this tag now — run wtft again in a moment to read the settled total";
@@ -653,6 +656,10 @@ async function main() {
 				: () => collectSelfAttributedSessionIds(finalSessionPath, interactions, discoverOnce().files),
 		});
 		spawnTreeCache.set(pending, tree);
+		// The tree never replaces a reason already set.
+		if (!provisional.provisional && tree.edges.some(e => e.live)) {
+			provisional = { provisional: true, reason: "descendant-live" };
+		}
 		return tree;
 	};
 
@@ -712,12 +719,11 @@ async function main() {
 	// `pending` pins "file absent" decided before awaitDaemonUp — do not re-derive after.
 	const finishEmptyReport = (opt: { pending?: boolean } = {}) => {
 		if (!opt.pending) scanSessionUncounted();
+		// Before the warning and the exit code: the tree can set `provisional`.
+		const emptyArmTree = opts.tokens ? renderSpawnTree(emptyTotals(), sessionSpawnTree({ pending: opt.pending })) : "";
 		warnProvisionalOnce();
 		// SPAWNED block under `--tokens` even when own total is empty (matches populated path).
-		if (opts.tokens) {
-			const emptyArmTree = renderSpawnTree(emptyTotals(), sessionSpawnTree({ pending: opt.pending }));
-			if (emptyArmTree) process.stdout.write(emptyArmTree);
-		}
+		if (emptyArmTree) process.stdout.write(emptyArmTree);
 		// exitCode, never process.exit — stdout is async on a pipe.
 		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
 	};
@@ -740,6 +746,8 @@ async function main() {
 	const emitSessionJson = (opt: { notices?: WtftNotice[]; pending?: boolean } = {}) => {
 		const uncounted = opt.pending ? newUncountedBillables() : scanSessionUncounted();
 		const subagentJson = opt.pending ? undefined : collectSubagentJson();
+		// Before `provisional` is read: the tree can set it.
+		const spawned = sessionSpawnTree({ pending: opt.pending });
 		const doc = buildSessionJson({
 			interactions,
 			session: {
@@ -751,10 +759,17 @@ async function main() {
 			provisional,
 			uncounted,
 			// Ledger read on pending too — a handmade empty tree would claim "looked, found nothing".
-			spawned: sessionSpawnTree({ pending: opt.pending }),
+			spawned,
 			// Omit key when incomplete — empty array means "looked, found none".
 			...(subagentJson?.rows ? { subagents: subagentJson.rows } : {}),
-			notices: [...(opt.notices ?? []), ...(subagentJson?.notices ?? [])],
+			notices: [
+				...(opt.notices ?? []),
+				...(subagentJson?.notices ?? []),
+				// Every arm, empty ones included: the tree can make a pending report provisional.
+				...(provisional.provisional
+					? [{ code: "provisional" as const, text: `${describeProvisionalReason(provisional, tagPath)}. ${describeProvisionalRemedy(provisional)}.` }]
+					: []),
+			],
 		});
 		process.stdout.write(renderSessionJson(doc));
 		warnProvisionalOnce();
@@ -831,15 +846,9 @@ async function main() {
 	// ---
 	if (opts.json) {
 		const notices: WtftNotice[] = [];
-		// Scan before notices — may downgrade provisional. Memoised with emitSessionJson's call.
-		scanSessionUncounted();
 		for (const m of collectUnpricedModels(interactions)) {
 			notices.push({ code: "unpriced-model", text: unpricedModelWarning(m) });
 			console.error(`\x1b[33m⚠ ${unpricedModelWarning(m)}\x1b[0m`);
-		}
-		if (provisional.provisional) {
-			const text = `${describeProvisionalReason(provisional, tagPath)}. ${describeProvisionalRemedy(provisional)}.`;
-			notices.push({ code: "provisional", text });
 		}
 		emitSessionJson({ notices });
 		return;
@@ -920,7 +929,7 @@ async function main() {
 	// ---
 	if (provisional.provisional) {
 		const why = describeProvisionalReason(provisional, tagPath);
-		console.error(`\x1b[33m⚠ PROVISIONAL: this total may still grow — ${why}.\x1b[0m`);
+		console.error(`\x1b[33m⚠ PROVISIONAL: a number in this report may still change — ${why}.\x1b[0m`);
 		const remedy = describeProvisionalRemedy(provisional);
 		console.error(`\x1b[90m  ${remedy}. Exit ${EXIT_PROVISIONAL}.\x1b[0m`);
 		process.exitCode = EXIT_PROVISIONAL;

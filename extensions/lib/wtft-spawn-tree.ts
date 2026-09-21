@@ -4,8 +4,10 @@ import { readSpawnLedger, type SpawnLedger } from "./wtft-spawn-ledger.js";
 import { getDiscoveries } from "./harness/registry.js";
 import { parseSessionFile, type Interaction } from "./wtft-parser.js";
 import { computeSessionSummary, emptyTotals, type TokenTotals } from "./wtft-renderer.js";
+import { IDLE_THRESHOLD_MS } from "./wtft-daemon-lib.js";
+import * as fs from "node:fs";
 
-export const SPAWN_TREE_SCHEMA = "wtft/spawn-tree@1";
+export const SPAWN_TREE_SCHEMA = "wtft/spawn-tree@2";
 
 /**
  * Default recursion bound. A `pr-review` lens child spawns its own children, so
@@ -56,6 +58,9 @@ export interface SpawnTreeEdge {
 	 *  unattributed report is that we do not have one. */
 	total: TokenTotals | null;
 	skip?: SpawnEdgeSkip;
+	/** Counted edges only: the transcript grew within `IDLE_THRESHOLD_MS`, so
+	 *  its total was priced mid-write and may still grow. */
+	live?: boolean;
 }
 
 export interface SpawnTreeGap {
@@ -99,6 +104,7 @@ export interface SpawnTreeOptions {
 	 *  must not add them again. A thunk is called only when the root has an edge:
 	 *  deriving the set costs subagent discovery. */
 	alreadyAttributed?: Set<string> | (() => Set<string>);
+	now?: number;
 }
 
 /** Subtract every numeric field of `from` from `into`, clamped at zero.
@@ -191,6 +197,7 @@ export function computeSpawnTree(
 	options: SpawnTreeOptions = {},
 ): SpawnTree {
 	const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
+	const now = options.now ?? Date.now();
 
 	// The read is owned HERE, with NO way for a caller to supply its own ledger:
 	// a failure becomes `ledgerError`, never an empty tree that reads as "this
@@ -289,6 +296,7 @@ export function computeSpawnTree(
 			}
 
 			let total: TokenTotals;
+			let live: boolean;
 			try {
 				// Parse once: for the cost, and for ids the parse itself folded
 				// in. If a folded child is ALSO a ledger edge, it would be
@@ -298,6 +306,11 @@ export function computeSpawnTree(
 				// `spawned.edges[].total` / `countedTotals`. See subtractTotals.
 				const { untaggedCostUsd: _untaggedCostUsd, ...cleanTotal } = computeSessionSummary(parsed).total;
 				total = cleanTotal;
+				// Stat AFTER the parse, so an append during it counts; inside the try, so a
+				// transcript that cannot be stat-ed is `unreadable`, never guessed. Bounded on
+				// both sides: a write mid-walk lands after `now`, a far-future mtime is not live.
+				const age = now - fs.statSync(file).mtimeMs;
+				live = age < IDLE_THRESHOLD_MS && age > -IDLE_THRESHOLD_MS;
 				for (const id of foldedTransitively(parseFoldedIds(parsed), foldCache)) {
 					const already = countedTotals.get(id);
 					if (already) {
@@ -321,7 +334,7 @@ export function computeSpawnTree(
 			outcomeOf.set(edge.child, "counted");
 			countedTotals.set(edge.child, { ...total });
 			addTotals(tree.total, total);
-			tree.edges.push({ ...base, resolved: true, path: file, total });
+			tree.edges.push({ ...base, resolved: true, path: file, total, live });
 			visited.add(edge.child);
 			queue.push({ parentId: edge.child, depth: depth + 1 });
 		}

@@ -12,7 +12,7 @@ import type { TagProvisional } from "./wtft-daemon-lib.js";
 
 /** Bumped when a key is added — top-level or nested — or changes shape.
  *  Prose never bumps it. Contract: docs/spec-26-json.md. */
-export const WTFT_JSON_SCHEMA = "wtft/session@4";
+export const WTFT_JSON_SCHEMA = "wtft/session@5";
 
 /** `code` is the contract; `text` is disposable prose. */
 export interface WtftNotice {
@@ -71,7 +71,7 @@ export interface BuildSessionJsonInput {
 	notices?: WtftNotice[];
 }
 
-/** Build the `wtft/session@4` document. Pure: no I/O, no clock, no process state. */
+/** Build the session document. Pure: no I/O, no clock, no process state. */
 export function buildSessionJson(input: BuildSessionJsonInput): WtftSessionJson {
 	const summary = computeSessionSummary(input.interactions);
 	return {

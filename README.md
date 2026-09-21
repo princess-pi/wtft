@@ -146,7 +146,7 @@ wtft --json | jq .total.costUsd
 `wtft --json` writes **exactly one JSON object** to stdout and nothing else —
 no chart, no ANSI, and no `3.6k`-style abbreviation, which is lossy. Human prose
 goes to stderr, and every sentence that would otherwise have been on stdout is
-repeated in the object's `notices[]`. The schema is `wtft/session@4`; field names
+repeated in the object's `notices[]`. The schema is `wtft/session@5`; field names
 and exit codes are versioned API, the prose inside `notices[].text` is not. Full
 contract: [`docs/spec-26-json.md`](./docs/spec-26-json.md).
 
@@ -182,13 +182,16 @@ retired in `@4`.
   (`--pager`), or an unhandled exception. The reason is on stderr; under
   `--json`, stdout carries nothing.
 - **9** — provisional ([#443](https://github.com/princess-pi/wtft/issues/443)):
-  the report was produced in full, but the total may still grow under the daemon.
+  the report was produced in full, but a number in it may still change.
   Under `--json`, `provisional.provisional` is `true` and `provisional.reason`
-  names the condition, so `$?` and the field agree. One condition is
+  names the condition, so `$?` and the field agree. Two conditions are
   mode-dependent: `subagent-unreadable` is found by the uncounted scan, which
   runs under `--tokens`, `--json` and on a plain run whose tag has no data yet,
   but not on a plain `wtft` run that renders bins, so a session provisional for
   that reason alone exits 9 in the modes that scan and 0 on that plain run.
+  `descendant-live` (a counted descendant is still writing its transcript,
+  [#133](https://github.com/princess-pi/wtft/issues/133)) is set only by
+  `--tokens` and `--json`, the runs that read the spawn tree.
 - **2** / **3** — `wtft spawn-record` only (see below): the call was wrong, or
   the ledger could not be written. The report path never returns either, and
   `spawn-record` also returns **0** — on a successful append, and on `--help`,

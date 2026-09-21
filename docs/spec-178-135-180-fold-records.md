@@ -41,6 +41,11 @@ read path rediscovers which sessions were folded.
 - **`WTFT_TAGGER_VERSION` 2.8.2 → 2.9.0.** A tag written before this change has no fold
   records, because its writer wrote none, so the in-self set it yields is empty. It is also a
   `stale-version` tag, so the report is provisional for that reason.
+  - **The transition, accepted.** A one-shot run that reads such a tag can count a folded child
+    under its ledger edge too, which is the #178 double count, until the daemon it just started
+    rewrites the tag at 2.9.0. That run exits 9, and the `stale-version` remedy is to run again,
+    which reads the rewritten tag. Keeping read-time rediscovery as a fallback for old tags would
+    keep the code this change exists to remove.
 - **No generation field yet.** Rotation generations are P4 (#114). The record is keyed by
   session id, so a generation can be added later without changing the key.
 

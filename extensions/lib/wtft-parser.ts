@@ -1333,7 +1333,9 @@ export function collectSelfAttributedSessionIds(
 ): Set<string> {
 	const ids = new Set<string>(recordedFolds);
 	for (const file of mergedFiles) ids.add(path.basename(file, ".jsonl"));
-	for (const interaction of interactions) {
+	// The same rule as the daemon's records: only a fold the total holds.
+	for (const interaction of deduplicateInteractions(interactions)) {
+		if (!isModelTagged(interaction)) continue;
 		for (const fold of interaction.claudeSubAgentFolds ?? []) ids.add(fold.id);
 	}
 	return ids;

@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
-import { parseSessionFile } from "../extensions/lib/wtft-parser.ts";
+import { parseSessionFile, collectSelfAttributedSessionIds } from "../extensions/lib/wtft-parser.ts";
 import { readTagFileWithVerdict, foldRecordIds, WTFT_TAGGER_VERSION } from "../extensions/lib/wtft-daemon-lib.ts";
 import { computeSpawnTree, resolveSessionFile } from "../extensions/lib/wtft-spawn-tree.ts";
 import { SPAWN_RECORD_SCHEMA, serializeSpawnRecord } from "../extensions/lib/wtft-spawn-ledger.ts";
@@ -139,6 +139,9 @@ console.log("\nPART U — foldRecordIds: a fold on an untagged turn is not recor
 	const ids = foldRecordIds("u-child", deduped);
 	check(ids[0] === "u-child" && ids.includes(Y) && !ids.includes(X),
 		`U1 the child and the tagged turn's fold are recorded; the untagged turn's fold is not (got ${JSON.stringify(ids)})`);
+	const widgetSet = collectSelfAttributedSessionIds(["recorded"], deduped, [childPath]);
+	check(widgetSet.has("recorded") && widgetSet.has("u-child") && widgetSet.has(Y) && !widgetSet.has(X),
+		`U2 the widget's in-self union follows the same rule: records, merged files, and tagged-turn folds only (got ${JSON.stringify([...widgetSet])})`);
 }
 
 // ---

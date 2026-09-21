@@ -55,9 +55,10 @@ read path rediscovers which sessions were folded.
   interactions and the verdict. That makes the three one snapshot.
 - **CLI in-self set = `folded`.** `computeSpawnTree` adds the root itself. The pending arm still
   passes an empty set, which is P1's contract.
-- **Widget in-self set = `folded` ∪ the Task transcripts the widget merged into SELF itself
-  (not the ones that failed to load) ∪ the sessions those transcripts' parses folded.** The
-  widget's own read discovers those transcripts to merge them; building the in-self set
+- **Widget in-self set = `folded` ∪ the subagent transcripts (Task children and Pi sibling
+  sessions) the widget merged into SELF itself, not the ones that failed to load, ∪ the sessions
+  those transcripts' parses folded on model-tagged turns.** The widget's own read discovers those
+  transcripts to merge them; building the in-self set
   discovers nothing more. `collectSelfAttributedSessionIds` becomes a pure union of what it is
   handed.
 

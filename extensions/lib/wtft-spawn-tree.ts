@@ -2,8 +2,8 @@
 
 import { readSpawnLedger, type SpawnLedger } from "./wtft-spawn-ledger.js";
 import { getDiscoveries } from "./harness/registry.js";
-import { parseSessionFile, type Interaction } from "./wtft-parser.js";
-import { computeSessionSummary, emptyTotals, type TokenTotals } from "./wtft-renderer.js";
+import { parseSessionFile, deduplicateInteractions, type Interaction } from "./wtft-parser.js";
+import { computeSessionSummary, emptyTotals, isModelTagged, type TokenTotals } from "./wtft-renderer.js";
 import { IDLE_THRESHOLD_MS } from "./wtft-daemon-lib.js";
 import * as fs from "node:fs";
 
@@ -101,19 +101,25 @@ export interface SpawnTreeOptions {
 	ledgerPath?: string;
 	maxDepth?: number;
 	/** Session ids whose cost is ALREADY in the caller's self total, so the walk
-	 *  must not add them again. A thunk is called only when the root has an edge:
-	 *  deriving the set costs subagent discovery. */
+	 *  must not add them again. A thunk is called only when the root has an edge. */
 	alreadyAttributed?: Set<string> | (() => Set<string>);
 	now?: number;
 }
 
-/** Subtract every numeric field of `from` from `into`, clamped at zero.
- *  THE OPERANDS ARE NOT THE SAME AGGREGATION.
- *  So the two are expected to agree,
- *  not guaranteed to, and the clamp would hide it if they did not. */
+/** Below this, a negative field is float noise from summing the same shares
+ *  in a different order, and becomes 0. */
+const SUBTRACT_TOLERANCE = 1e-9;
+
+/** Subtract every numeric field of `from` from `into`. Callers subtract only a
+ *  share summed from the interactions `into` was summed from, so a field
+ *  cannot legitimately go negative; one that does is a bug here, and throws. */
 function subtractTotals(into: TokenTotals, from: TokenTotals): void {
 	for (const key of Object.keys(into) as (keyof TokenTotals)[]) {
-		into[key] = Math.max(0, into[key] - (from[key] ?? 0));
+		const next = into[key] - (from[key] ?? 0);
+		if (next < -SUBTRACT_TOLERANCE) {
+			throw new Error(`spawn-tree subtraction went negative on ${key} (${into[key]} - ${from[key]}): a fold share outside the total it was subtracted from`);
+		}
+		into[key] = Math.max(0, next);
 	}
 }
 
@@ -126,43 +132,20 @@ function addTotals(into: TokenTotals, from: TokenTotals): void {
 	}
 }
 
-function parseFoldedIds(interactions: Interaction[]): Set<string> {
-	const ids = new Set<string>();
-	for (const interaction of interactions) {
-		const folded = (interaction as Interaction & { claudeSubAgentSessionIds?: string[] }).claudeSubAgentSessionIds;
-		for (const id of folded ?? []) ids.add(id);
+/** Each session folded into this parse's TOTAL, with the share it added. Only
+ *  folds on interactions `computeSessionSummary` counts: a fold on a dropped
+ *  duplicate or an untagged turn added nothing to the total. */
+function foldsInTotal(parsed: Interaction[]): Map<string, TokenTotals> {
+	const shares = new Map<string, TokenTotals>();
+	for (const interaction of deduplicateInteractions(parsed)) {
+		if (!isModelTagged(interaction)) continue;
+		for (const fold of interaction.claudeSubAgentFolds ?? []) {
+			const into = shares.get(fold.id) ?? emptyTotals();
+			addTotals(into, fold.share);
+			shares.set(fold.id, into);
+		}
 	}
-	return ids;
-}
-
-/** `direct` plus every session id folded into any of them, at any depth. The
- *  fold is not bounded by `maxDepth`, which bounds the ledger walk only. */
-function foldedTransitively(
-	direct: Iterable<string>,
-	cache: Map<string, Set<string>>,
-): Set<string> {
-	const out = new Set<string>();
-	for (const id of direct) {
-		out.add(id);
-		for (const deeper of foldsOf(id, cache)) out.add(deeper);
-	}
-	return out;
-}
-
-function foldsOf(sessionId: string, cache: Map<string, Set<string>>): Set<string> {
-	const cached = cache.get(sessionId);
-	if (cached) return cached;
-	// Set before the recursion, so a cycle in the folds terminates.
-	cache.set(sessionId, new Set());
-	let folds = new Set<string>();
-	const file = resolveSessionFile(sessionId);
-	if (file !== null) {
-		try {
-			folds = foldedTransitively(parseFoldedIds(parseSessionFile(file)), cache);
-		} catch { /* unreadable: nothing deeper is known */ }
-	}
-	cache.set(sessionId, folds);
-	return folds;
+	return shares;
 }
 
 /**
@@ -230,13 +213,9 @@ export function computeSpawnTree(
 	// own edge is reached, and they report different skips.
 	type Outcome = "counted" | "unresolved" | "in-self" | "folded";
 	const outcomeOf = new Map<string, Outcome>([[rootSessionId, "in-self"]]);
-	const foldCache = new Map<string, Set<string>>();
 	const attributed = typeof options.alreadyAttributed === "function" ? options.alreadyAttributed() : options.alreadyAttributed;
-	for (const id of foldedTransitively(attributed ?? [], foldCache)) outcomeOf.set(id, "in-self");
+	for (const id of attributed ?? []) outcomeOf.set(id, "in-self");
 	const visited = new Set<string>([rootSessionId]);
-	/** What each counted session contributed, so a descendant that ALSO folds it
-	 *  in can have it subtracted back out. */
-	const countedTotals = new Map<string, TokenTotals>();
 
 	type Visit = { parentId: string; depth: number };
 	const queue: Visit[] = [{ parentId: rootSessionId, depth: 1 }];
@@ -295,32 +274,15 @@ export function computeSpawnTree(
 				continue;
 			}
 
-			let total: TokenTotals;
+			let parsed: Interaction[];
 			let live: boolean;
 			try {
-				// Parse once: for the cost, and for ids the parse itself folded
-				// in. If a folded child is ALSO a ledger edge, it would be
-				// counted twice — each descendant needs its own guard.
-				const parsed = parseSessionFile(file);
-				// Drop `untaggedCostUsd`: a direct assignment would leak it into
-				// `spawned.edges[].total` / `countedTotals`. See subtractTotals.
-				const { untaggedCostUsd: _untaggedCostUsd, ...cleanTotal } = computeSessionSummary(parsed).total;
-				total = cleanTotal;
+				parsed = parseSessionFile(file);
 				// Stat AFTER the parse, so an append during it counts; inside the try, so a
 				// transcript that cannot be stat-ed is `unreadable`, never guessed. Bounded on
 				// both sides: a write mid-walk lands after `now`, a far-future mtime is not live.
 				const age = now - fs.statSync(file).mtimeMs;
 				live = age < IDLE_THRESHOLD_MS && age > -IDLE_THRESHOLD_MS;
-				for (const id of foldedTransitively(parseFoldedIds(parsed), foldCache)) {
-					const already = countedTotals.get(id);
-					if (already) {
-						// Reached as its own edge first; take it back out rather
-						// than adding twice.
-						subtractTotals(total, already);
-					} else if (!outcomeOf.has(id)) {
-						outcomeOf.set(id, "folded");
-					}
-				}
 			} catch {
 				outcomeOf.set(edge.child, "unresolved");
 				tree.edges.push({ ...base, resolved: false, path: file, total: null, skip: "unreadable" });
@@ -330,9 +292,22 @@ export function computeSpawnTree(
 				continue;
 			}
 
+			// Drop `untaggedCostUsd`: it would leak into `spawned.edges[].total`.
+			const { untaggedCostUsd: _untaggedCostUsd, ...total } = computeSessionSummary(parsed).total;
+			// A session this parse folded is either already in some total — take its
+			// share back out — or it lands here, and a gap reported for it is closed.
+			for (const [id, share] of foldsInTotal(parsed)) {
+				const prior = outcomeOf.get(id);
+				if (prior === "in-self" || prior === "counted" || prior === "folded") {
+					subtractTotals(total, share);
+					continue;
+				}
+				if (prior === "unresolved") tree.unattributed = tree.unattributed.filter(gap => gap.child !== id);
+				outcomeOf.set(id, "folded");
+			}
+
 			tree.descendants++;
 			outcomeOf.set(edge.child, "counted");
-			countedTotals.set(edge.child, { ...total });
 			addTotals(tree.total, total);
 			tree.edges.push({ ...base, resolved: true, path: file, total, live });
 			visited.add(edge.child);

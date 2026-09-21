@@ -1514,6 +1514,11 @@ export function emptyTotals(): TokenTotals {
 	return { costUsd: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 }
 
+/** Whether an interaction counts toward `computeSessionSummary`'s totals. */
+export function isModelTagged(i: Interaction): boolean {
+	return !!i.model && i.model !== "(unknown)" && i.model !== "<synthetic>";
+}
+
 function addInteraction(into: TokenTotals, i: Interaction): void {
 	into.costUsd += i.cost;
 	into.inputTokens += i.inputTokens;
@@ -1569,7 +1574,7 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
 		}
 
 		const model = i.model || "(unknown)";
-		if (model === "(unknown)" || model === "<synthetic>") {
+		if (!isModelTagged(i)) {
 			untaggedInteractions++;
 			untaggedCostUsd += i.cost + (i.serverToolCost || 0);
 			continue;

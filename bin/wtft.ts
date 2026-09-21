@@ -636,8 +636,9 @@ async function main() {
 	let interactions: Interaction[] = [];
 	// Capture verdict WITH interactions — one readFileSync; re-deriving later can straddle a daemon sweep.
 	let provisional: ReturnType<typeof readTagProvisional> = { provisional: false, reason: null };
+	let folded = new Set<string>();
 	if (fs.existsSync(tagPath)) {
-		({ interactions, provisional } = readTagFileWithVerdict(tagPath));
+		({ interactions, provisional, folded } = readTagFileWithVerdict(tagPath));
 	}
 
 	// Memoised lineage. No try/catch: computeSpawnTree reports ledger failure as ledgerError.
@@ -649,11 +650,9 @@ async function main() {
 		const cached = spawnTreeCache.get(pending);
 		if (cached) return cached;
 		const sessionId = path.basename(finalSessionPath).replace(/\.jsonl$/i, "");
-		// Exclude ids already in SELF so a dual-mechanism spawn is not billed twice.
+		// SELF is the tag, so the ids to exclude are the ones the tag recorded folding.
 		const tree = computeSpawnTree(sessionId, {
-			alreadyAttributed: pending
-				? new Set<string>()
-				: () => collectSelfAttributedSessionIds(finalSessionPath, interactions, discoverOnce().files),
+			alreadyAttributed: pending ? new Set<string>() : folded,
 		});
 		spawnTreeCache.set(pending, tree);
 		// The tree never replaces a reason already set.
@@ -803,7 +802,7 @@ async function main() {
 		const tagWaitStart = Date.now();
 		while (Date.now() - tagWaitStart < 1400) {
 			if (fs.existsSync(tagPath)) {
-				({ interactions, provisional } = readTagFileWithVerdict(tagPath));
+				({ interactions, provisional, folded } = readTagFileWithVerdict(tagPath));
 				if (interactions.length > 0) break;
 			}
 			await new Promise(r => setTimeout(r, 667));

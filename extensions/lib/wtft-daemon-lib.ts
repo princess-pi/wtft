@@ -229,15 +229,34 @@ export function tagProvisionalFromContent(tagPath: string, content: string): Tag
 export function readTagFileWithVerdict(tagPath: string): {
 	interactions: Interaction[];
 	provisional: TagProvisional;
+	/** Sessions whose cost the daemon folded into this tag's lines. */
+	folded: Set<string>;
 } {
 	let content = "";
 	try {
 		content = fs.readFileSync(tagPath, "utf8");
-	} catch { /* missing or unreadable — both halves handle "" */ }
+	} catch { /* missing or unreadable — every part handles "" */ }
 	return {
 		interactions: classifiedInteractionsFromContent(content),
 		provisional: tagProvisionalFromContent(tagPath, content),
+		folded: foldedSessionIdsFromContent(content),
 	};
+}
+
+export function foldRecordLine(parent: string, child: string): string {
+	return JSON.stringify({ _fold: { parent, child } }) + "\n";
+}
+
+export function foldedSessionIdsFromContent(content: string): Set<string> {
+	const ids = new Set<string>();
+	for (const line of content.split("\n")) {
+		if (!line.includes('"_fold"')) continue;
+		try {
+			const child = JSON.parse(line)?._fold?.child;
+			if (typeof child === "string" && child) ids.add(child);
+		} catch { /* a fragment at the end of a file being written */ }
+	}
+	return ids;
 }
 
 export function classifiedInteractionsFromContent(content: string): Interaction[] {

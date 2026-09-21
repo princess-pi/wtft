@@ -65,9 +65,10 @@ function withProvisionalLine(text: string): string {
 	return [text, ...provisionalLines()].join("\n");
 }
 
-// The files the render's own discovery listed, so the spawn tree does not
-// walk the same directory a second time.
+// What the render merged into SELF beyond the tag: the spawn tree skips these.
 let _subagentFiles: string[] = [];
+// The sessions the tag recorded folding.
+let _tagFolded = new Set<string>();
 
 const _daemonDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin");
 
@@ -167,7 +168,7 @@ function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | und
 		// every subagent session into SELF, so a spawner that also records one
 		// as a ledger edge would bill it in TOTAL and again in SPAWNED.
 		return computeSpawnTree(path.basename(sessionFile).replace(/\.jsonl$/i, ""), {
-			alreadyAttributed: () => collectSelfAttributedSessionIds(sessionFile, interactions, _subagentFiles),
+			alreadyAttributed: () => collectSelfAttributedSessionIds(_tagFolded, interactions, _subagentFiles),
 		});
 	} catch {
 		return undefined;
@@ -177,10 +178,12 @@ function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | und
 function readInteractions(ctx: any): Interaction[] {
 	_subagentUnreadable = false;
 	_tagProvisional = null;
+	_tagFolded = new Set();
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	if (!sessionFile) return [];
 	const tagPath = getTagPath(sessionFile);
-	const { interactions: mainInteractions, provisional } = readTagFileWithVerdict(tagPath);
+	const { interactions: mainInteractions, provisional, folded } = readTagFileWithVerdict(tagPath);
+	_tagFolded = folded;
 	_tagProvisional = { verdict: provisional, tagPath };
 
 	// render main interactions only rather than crash the widget on every

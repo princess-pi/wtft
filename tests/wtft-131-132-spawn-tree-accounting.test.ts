@@ -6,7 +6,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { parseSessionFile, collectSelfAttributedSessionIds } from "../extensions/lib/wtft-parser.ts";
+import { parseSessionFile, collectSelfAttributedSessionIds, discoverSubagentSessionFiles } from "../extensions/lib/wtft-parser.ts";
 import { computeSessionSummary } from "../extensions/lib/wtft-renderer.ts";
 import { computeSpawnTree, treeTotals } from "../extensions/lib/wtft-spawn-tree.ts";
 import { SPAWN_RECORD_SCHEMA, serializeSpawnRecord } from "../extensions/lib/wtft-spawn-ledger.ts";
@@ -83,7 +83,7 @@ console.log("\nPART A — root → claude -p child → grandchild, the grandchil
 
 	const interactions = parseSessionFile(rootPath);
 	const self = computeSessionSummary(interactions).total;
-	const alreadyAttributed = collectSelfAttributedSessionIds(rootPath, interactions);
+	const alreadyAttributed = collectSelfAttributedSessionIds([], interactions);
 	check(self.outputTokens === 1100,
 		`A0 fixture precondition: the root's parse folds child AND grandchild in — 100 + 300 + 700 (got ${self.outputTokens})`);
 	check(alreadyAttributed.has(CHILD),
@@ -154,7 +154,7 @@ console.log("\nPART C — a Pi sibling of a descendant is discovered by director
 	fs.writeFileSync(path.join(projectDir, `${SIBLING}.jsonl`), header(SIBLING, DESC) + turnLine("turn-sibling", T0 + 4_000, 700));
 
 	const parsed = parseSessionFile(descPath);
-	check(computeSessionSummary(parsed).total.outputTokens === 300 && collectSelfAttributedSessionIds(descPath, parsed).has(SIBLING),
+	check(computeSessionSummary(parsed).total.outputTokens === 300 && discoverSubagentSessionFiles(descPath).files.some(f => path.basename(f, ".jsonl") === SIBLING),
 		"C0 fixture precondition: discovery names the sibling, but the descendant's total does not contain it");
 
 	for (const [name, edges] of Object.entries({

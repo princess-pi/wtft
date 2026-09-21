@@ -3,7 +3,6 @@
 // ---
 
 export interface CostTier {
-	/** Total input tokens (input + cacheRead + cacheWrite) must exceed this to apply. */
 	inputTokensAbove: number;
 	input: number;
 	output: number;
@@ -113,7 +112,6 @@ export function getDeepSeekPeakMultiplier(timestamp?: number): number {
 	const d = new Date(ts);
 	const utcTime = d.getUTCHours() * 60 + d.getUTCMinutes(); // minutes since UTC midnight
 
-	// After DEEPSEEK_WEEKEND_OFFPEAK_FROM, Saturday and Sunday are off-peak.
 	if (ts >= DEEPSEEK_WEEKEND_OFFPEAK_FROM) {
 		const utcDay = d.getUTCDay(); // 0 = Sunday, 6 = Saturday
 		if (utcDay === 0 || utcDay === 6) return 1.0;
@@ -134,8 +132,8 @@ export function getDeepSeekPeakMultiplier(timestamp?: number): number {
 export const MODEL_PRICING: Record<string, ModelPricing> = {
 	// Claude — list rates per MTok. cacheWrite is the 5-min-TTL rate
 	// (1.25x input); the 1h-TTL rate is derived as 2x input by the cw1h
-	// handling in calculateClaudeCost. Fuzzy substring lookup resolves dated
-	// IDs (claude-haiku-4-5-20251001) to their alias key. New top-tier names
+	// handling in calculateClaudeCost.
+	// New top-tier names
 	// (fable, mythos) MUST be here — they match no legacy fallback branch and
 	// would otherwise silently price at Sonnet-tier defaults, ~3.3x under.
 	"claude-fable-5":    { input: 10.00, output: 50.00, cacheRead: 1.00, cacheWrite: 12.50 },
@@ -167,11 +165,6 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 	//
 	// The dateTiers windows carry every superseded card so historical sessions
 	// still report what they actually cost.
-	//
-	// Order matters below: -vision-exp must precede -flash, because the fuzzy
-	// lookup would otherwise match the shorter key inside the longer model id.
-	// lookupModelPricing sorts longest-first so this is belt and braces, but a
-	// reader reordering these should know the constraint exists.
 	"deepseek-v4-flash-vision-exp": {
 		input: 0.15, output: 0.60, cacheRead: 0.003, cacheWrite: 0,
 		// The standard row is the V4.1 FLASH card, not this model's own: from
@@ -238,7 +231,6 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
  * When total input (input + cacheRead + cacheWrite) exceeds a tier's
  * inputTokensAbove, that tier's rates replace the base rates for the
  * entire request. When multiple tiers match, the highest threshold wins.
- * Returns the base pricing if no tier matches.
  *
  * A dated window is resolved FIRST, before size tiering: when
  * `timestamp` is supplied and falls before one of `pricing.dateTiers`'
@@ -284,7 +276,6 @@ export function resolveTieredRates(
 	let rates = { ...base };
 
 	if (pricing.tiers) {
-		// Sort descending — highest threshold first so first match wins
 		const sorted = [...pricing.tiers].sort((a, b) => b.inputTokensAbove - a.inputTokensAbove);
 		for (const tier of sorted) {
 			if (totalInput > tier.inputTokensAbove) {
@@ -303,8 +294,6 @@ export function resolveTieredRates(
 }
 
 /**
- * Merge user-supplied pricing entries over the built-in registry.
- * Entries with the same key replace built-ins; new keys extend the registry.
  * Pure merge — reading the pricing file from disk lives in
  * wtft-pricing-config.ts so this module stays fs-free.
  */
@@ -334,7 +323,6 @@ export function applyUserPricing(overrides: Record<string, ModelPricing>): void 
  * The two functions must agree on which branch a model reaches, so they
  * ask in the same order.
  *
- * See describeFallbackPricing for what the caller should say about each class.
  */
 export function isModelPriced(model: string): boolean {
 	if (!model) return false;
@@ -357,9 +345,6 @@ export function deepSeekSiblingKey(model: string): "deepseek-v4-pro" | "deepseek
 	return (model || "").toLowerCase().includes("v4-pro") ? "deepseek-v4-pro" : "deepseek-v4-flash";
 }
 
-/**
- * What calculateClaudeCost will actually charge a model isModelPriced rejects.
- */
 export function describeFallbackPricing(model: string): string {
 	const m = (model || "").toLowerCase();
 	if (m.includes("deepseek")) {
@@ -369,7 +354,6 @@ export function describeFallbackPricing(model: string): string {
 }
 
 /**
- * Look up pricing for a model by matching its ID against the known registry.
  *
  * Two rules, in order: an EXACT (lower-cased, trimmed) key wins outright;
  * otherwise the LONGEST registry key that is a substring of the ID wins.
@@ -377,7 +361,6 @@ export function describeFallbackPricing(model: string): string {
  * is a substring of `deepseek-v4-flash-vision-exp`, so insertion order would
  * otherwise decide which card the longer model is priced with.
  *
- * Returns null if nothing matches; the caller falls back to defaults.
  */
 export function lookupModelPricing(model: string): ModelPricing | null {
 	if (!model) return null;
@@ -405,7 +388,6 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 	
 	const m = (model || "").toLowerCase();
 
-	// Check registry first — handles DeepSeek (surge-adjusted), GPT-5.x (tiered)
 	const registryPricing = lookupModelPricing(model);
 	if (registryPricing) {
 		const rates = resolveTieredRates(registryPricing, usage, timestamp);
@@ -453,7 +435,6 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 	// Non-registry models: use the legacy 1.25x/2.00x input-price heuristic.
 	if (registryPricing) {
 		// 1h-TTL writes bill at 2x BASE INPUT (API rule), not 2x the 5m rate —
-		// doubling cacheWritePrice (1.25x input) overbilled 1h writes by 25%.
 		// Free-cache-write models stay free.
 		const cw1hPrice = cacheWritePrice === 0 ? 0 : inputPrice * 2.00;
 		cacheWriteCost =

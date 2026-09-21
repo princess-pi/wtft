@@ -1,6 +1,4 @@
 /**
- * @package @princess-pi/wtft
- * @module harness/claude-code/parse
  * @description Claude Code transcript schema — and nothing else.
  *
  * Everything this file knows is where a field lives. What the numbers *mean*
@@ -88,8 +86,6 @@ export const parse: HarnessParseAdapter = {
 
 	readControlEntry(entry: any): ControlSignal | null {
 		if (!entry) return null;
-		// Compact summary marker → flag the next assistant interaction for the
-		// compaction meter-split.
 		if (entry.isCompactSummary === true) return { kind: "after-compaction" };
 		// User interrupt marker → the PRECEDING assistant turn was killed; its
 		// whole cost is discarded work. Only user-entry content counts — the

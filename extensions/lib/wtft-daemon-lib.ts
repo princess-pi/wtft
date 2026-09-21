@@ -24,9 +24,7 @@ export interface WatchSettings {
 	unit?: "cost" | "tokens";
 	daemonPath?: string; // path to wtft-daemon.mjs (CLI watch mode only)
 	daemonChild?: ChildProcess | null;
-	/** Padding spaces on each side of output (default 0 = no padding). */
 	pad?: number;
-	/** True when the user explicitly passed the flag from CLI (overrides file-read settings). */
 	hasInterval?: boolean;
 	hasLimit?: boolean;
 	hasMode?: boolean;
@@ -37,8 +35,6 @@ export interface WatchSettings {
 
 
 /**
- * Serialize an Interaction to a classified tag-file line.
- *
  * This is the single source of truth for the tag-file wire format.
  * Must stay in sync with classifiedToInteraction (below).
  * When adding a field, update BOTH functions in this file.
@@ -130,9 +126,6 @@ export function dedupeClassifiedById(interactions: Interaction[]): Interaction[]
 		const direct = slots[s];
 		if (direct) { out.push(direct); continue; }
 		const group = groups.get(slotIds[s]!)!;
-		// deduplicateInteractions is the single definition of "same message,
-		// keep the max-cost copy, union its files/commands". A single-id group
-		// always collapses to exactly one element.
 		out.push(group.length === 1 ? group[0] : deduplicateInteractions(group)[0]);
 	}
 	return out;
@@ -141,9 +134,7 @@ export function dedupeClassifiedById(interactions: Interaction[]): Interaction[]
 export type TagProvisionalReason = "stale-version" | "unswept" | "subagent-unreadable";
 
 export interface TagProvisional {
-	/** True when the total this tag yields may still grow under the daemon. */
 	provisional: boolean;
-	/** The condition that made it provisional; null when settled. */
 	reason: TagProvisionalReason | null;
 }
 
@@ -266,7 +257,6 @@ export interface PrefixSentinel {
 	 *  the boundary below which the file is append-only. Part of the comparison,
 	 *  not bookkeeping: a rebuild that reshapes the file moves it. */
 	anchor: number;
-	/** The up-to-`PREFIX_SENTINEL_BYTES` bytes immediately BELOW `anchor`. */
 	bytes: Buffer;
 }
 
@@ -294,7 +284,6 @@ export function readPrefixSentinel(tagPath: string, offset: number): PrefixSenti
 /**
  * Did the consumed prefix survive? `null` on either side means "could not read",
  * which `watcherAction` turns into a re-seed rather than an idle.
- *
  * BOTH fields count. The bytes catch a rebuild that rewrote the prefix in place;
  * the anchor catches one that kept those bytes but changed the line structure
  * above them — including the case where the anchor is 0 because the reader has
@@ -306,9 +295,7 @@ export function sentinelMatches(a: PrefixSentinel | null, b: PrefixSentinel | nu
 }
 
 /**
- * What a tag-file watcher should do with the file it just saw. Pure, so the
- * decision can be tested without a daemon, a render loop or a real `fs.watch`.
- *
+ * What a tag-file watcher should do with the file it just saw.
  * `reseed` — the prefix is gone or changed underneath us; re-read the file whole.
  * `read`   — the file grew and the prefix is intact; read from the offset.
  * `idle`   — nothing to do, or nothing we can substantiate.
@@ -520,7 +507,6 @@ export const DAEMON_REASON_TEXT: Record<DaemonHealthReason, string> = {
 	"restart-failed": "restart failed",
 };
 
-/** Render a health code as its human sentence. Unknown code → "unknown" (never throws). */
 export function daemonReasonText(reason: DaemonHealthReason | undefined | null): string {
 	return (reason && DAEMON_REASON_TEXT[reason]) || "unknown";
 }
@@ -529,27 +515,12 @@ export interface DaemonStatus {
 	alive: boolean;
 	reason?: DaemonHealthReason;
 	lastHbTime?: string; // HH:MM local time of last heartbeat
-	/** Daemon is alive but no new classified data for ≥ IDLE_THRESHOLD_MS. */
 	idle?: boolean;
-	/** Milliseconds since last non-heartbeat entry (when idle). */
 	idleMs?: number;
-	/** Raw timestamp (Date.now()) of the first heartbeat in the current idle
-	 *  period. Used by renderDaemonStatus to compute a real-time countdown
-	 *  without re-running checkDaemonHealth. */
 	idleSinceMs?: number;
-	/** Cache TTL in ms for the current model (null = local/no cache). */
 	cacheTtlMs?: number | null;
 }
 
-/**
- * Render a daemon status indicator string (shared by Pi widget + CLI watch modes).
- * Returns e.g.:
- *   "  ● live" (green) — daemon active, recent data
- *   "  ● idle (cache expires in 3:22)" (yellow) — daemon idle, cache TTL ticking down
- *   "  ● No Cache (local)" (green) — daemon idle, local model (no remote cache)
- *   "  ● stopped 14:30" (red) — daemon exited cleanly
- *   "  ● restarting..." (yellow) — daemon being relaunched
- */
 export function renderDaemonStatus(status: DaemonStatus, restarting = false): string {
 	if (status.reason === "waiting-session") {
 		return `  \x1b[33m●\x1b[0m ${daemonReasonText("waiting-session")}`;
@@ -583,9 +554,7 @@ export function renderDaemonStatus(status: DaemonStatus, restarting = false): st
 
 /**
  * Fallback: scan the ENTIRE session file backwards for the most recent
- * assistant message's model. Used when the daemon tag file doesn't have a
- * recent classified entry with model info (only heartbeats).
- *
+ * assistant message's model.
  * Reads the whole file — session files are typically < 1MB, so this is
  * fast enough. Using an 8KB window caused flickering because the model
  * entry could fall outside the window as the tag file grew.
@@ -1103,8 +1072,7 @@ export async function watchTagFile(
 				}
 
 				// In-place modification (heartbeat overwrite): file didn't grow
-				// but the idle timestamp changed. Refresh health status so the
-				// countdown (e.g. "idle (cache expires in 3min)") stays current.
+				// but the idle timestamp changed.
 				updateDaemonHealth();
 				needsRedraw = true;
 				render();

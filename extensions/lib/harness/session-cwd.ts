@@ -2,12 +2,7 @@
  * Resolve where a session log currently lives, from the log itself.
  *
  * The project-dir slug is assigned when a session starts and never revised.
- * Walk backwards from the tail to the first entry with a `cwd`. Every read is
- * a bounded tail read ({@link TAIL_WINDOWS}); {@link getCwdBytesRead} is the
- * test seam. Default picker scope `"worktree"` never calls this. `"worktrees"`
- * (Ctrl+W) does, for transcripts that do not already physically match, as
- * does unscoped discovery (`discoverLegacy`, and CLI fuzzy `-s`). A transcript
- * outside the active time window is skipped with one `fs.statSync` first.
+ * Walk backwards from the tail to the first entry with a `cwd`.
  */
 
 import * as fs from "node:fs";
@@ -30,26 +25,18 @@ const cwdCache = new Map<string, string | null>();
 /** Test seam: counts actual file reads so memoisation is observable. */
 let readCount = 0;
 
-/** Test seam: bytes read, not calls. */
 let bytesRead = 0;
 
-/** Test seam: directory reads during Claude Code discovery (`collect()`). */
 let dirWalkCount = 0;
 
-/** Number of tail reads performed since the last {@link resetCwdCache}. */
 export function getCwdReadCount(): number {
 	return readCount;
 }
 
-/** Bytes read from transcripts since the last {@link resetCwdCache}. */
 export function getCwdBytesRead(): number {
 	return bytesRead;
 }
 
-/**
- * Directory reads since the last {@link resetCwdCache}. Claude Code only:
- * Pi's `collect()` does not call {@link countDirRead}.
- */
 export function getDirWalkCount(): number {
 	return dirWalkCount;
 }
@@ -59,7 +46,6 @@ export function countDirRead(): void {
 	dirWalkCount++;
 }
 
-/** Drop the memo tables and every discovery counter (tests). */
 export function resetCwdCache(): void {
 	cwdCache.clear();
 	readCount = 0;
@@ -70,8 +56,6 @@ export function resetCwdCache(): void {
 // ---
 
 /**
- * Read `len` bytes of `file` starting at `start`, as bytes.
- *
  * A Buffer rather than a string, because {@link resolveLastCwd} accumulates
  * across widenings and decoding each chunk on its own would split any
  * multi-byte character that straddles a chunk boundary.
@@ -93,7 +77,6 @@ function readSlice(file: string, start: number, len: number): Buffer {
 	}
 }
 
-/** Scan lines backwards for the first parseable entry carrying a string `cwd`. */
 function scanBackwardsForCwd(text: string, partialFirstLine: boolean): string | null {
 	const lines = text.split("\n");
 	// A read that did not start at byte 0 begins mid-line — that fragment is
@@ -117,8 +100,6 @@ function scanBackwardsForCwd(text: string, partialFirstLine: boolean): string | 
  * log records none within the last tail window (a Pi transcript records `cwd`
  * only on its session_start entry, so it resolves only when under ~512 KB).
  *
- * @param filePath absolute path to a .jsonl session log
- * @param knownStat optional pre-read stat, to avoid a second syscall
  */
 export function resolveLastCwd(filePath: string, knownStat?: fs.Stats): string | null {
 	let stat: fs.Stats;
@@ -150,7 +131,6 @@ export function resolveLastCwd(filePath: string, knownStat?: fs.Stats): string |
 		readFrom = start;
 		result = scanBackwardsForCwd(acc.toString("utf8"), start > 0);
 		if (result) break;
-		// Whole file already scanned — widening cannot help.
 		if (start === 0) break;
 	}
 
@@ -160,12 +140,7 @@ export function resolveLastCwd(filePath: string, knownStat?: fs.Stats): string |
 
 // ---
 
-/**
- * Encode a directory the way the harnesses do: every separator becomes a dash.
- *
- * Canonical single-string encoding for display. For matching, use
- * {@link slugMatchesCwd}.
- */
+/** Encode a directory the way the harnesses do: every separator becomes a dash. */
 export function cwdToSlug(cwd: string): string {
 	return cwd.replace(/[/\\]/g, "-");
 }
@@ -192,7 +167,6 @@ export function cwdSlugVariants(cwd: string): string[] {
 	return strict === legacy ? [strict] : [strict, legacy];
 }
 
-/** Does a project-dir name encode this cwd under *any* known encoding? */
 export function slugMatchesCwd(slug: string, cwd: string): boolean {
 	return cwdSlugVariants(cwd).includes(slug);
 }

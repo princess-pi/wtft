@@ -30,14 +30,10 @@ const GIT_TIMEOUT_MS = 3000;
 
 /**
  * Nearest ancestor of `dir` (inclusive) holding a `.git` entry, or null.
- *
  * A filesystem walk rather than `git rev-parse`, for two reasons: it is the
  * gate that must also work when git is missing, and it costs no subprocess on
  * the common path. `.git` is checked as an *entry*, not a directory — a
  * worktree's `.git` is a regular file containing a `gitdir:` pointer.
- *
- * Returning null is what stops a non-repo cwd such as `~` from fanning out at
- * all, which is an explicit requirement of #145 rather than an optimisation.
  */
 export function findRepoRoot(dir: string): string | null {
 	let cur = path.resolve(dir);
@@ -56,16 +52,10 @@ export function findRepoRoot(dir: string): string | null {
 /**
  * Every checkout of the repo containing `repoRoot`, main clone included, or
  * null when git could not answer (absent, erroring, timed out, or suppressed).
- *
  * Null and `[]` mean different things: null means "ask the fallback", `[]` would
  * mean "this repo genuinely has no checkouts", which cannot happen — so a git
  * that answers with no `worktree` lines is also reported as null.
- *
- * `WTFT_NO_GIT=1` short-circuits to null. It is a *test* seam, not a
- * user-facing switch: a machine without git already lands on the fallback by
- * itself, because `execFileSync` throws. Its job is to make that path
- * exercisable without uninstalling git, and it is read at call time so a test
- * can set and clear it inside one process.
+ * `WTFT_NO_GIT=1` short-circuits to null.
  */
 export function listWorktreeDirs(repoRoot: string): string[] | null {
 	if (process.env.WTFT_NO_GIT === "1") return null;
@@ -93,7 +83,6 @@ export function listWorktreeDirs(repoRoot: string): string[] | null {
 export interface CwdFanOut {
 	/** Every directory to treat as "here". Always contains the target itself. */
 	dirs: string[];
-	/** Target sits inside a git repo — the precondition for any fan-out. */
 	inRepo: boolean;
 	/**
 	 * git could not enumerate the checkouts, so slug-prefix matching stands in.
@@ -114,8 +103,6 @@ export interface CwdFanOut {
  * The current branch checked out at `dir`, or null when it can't be read —
  * no git, not a repo, or a detached HEAD (`git rev-parse --abbrev-ref HEAD`
  * prints the literal string `HEAD` there, which is not a branch name).
- * `WTFT_NO_GIT=1` short-circuits to null, the same test seam {@link
- * listWorktreeDirs} uses.
  */
 export function currentBranch(dir: string): string | null {
 	if (process.env.WTFT_NO_GIT === "1") return null;
@@ -171,10 +158,7 @@ export function worktreeBranches(repoRoot: string): Map<string, string> {
  * branch checked out — the `"branch"` discovery scope (#89, Ctrl+B).
  *
  * Returns null — a documented no-op the caller falls back on, never a guess —
- * whenever any step can't answer: not a repo, git unusable, a detached HEAD,
- * or (git refusing two worktrees on the same branch, so this is a defensive
- * case rather than one seen in practice) no checkout in the map reports that
- * branch at all.
+ * whenever any step can't answer.
  */
 export function resolveBranchCheckout(target: string): string | null {
 	const root = findRepoRoot(target);

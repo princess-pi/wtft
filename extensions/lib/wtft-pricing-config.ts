@@ -1,13 +1,9 @@
 /**
- * @package princess-pi-tools
- * @module wtft-pricing-config
- * @description User-editable pricing registry loader (#140).
+ * User-editable pricing registry loader.
  *   New models are a config edit, not a rebuild: entries in
  *   ~/.config/wtft/pricing.json (XDG_CONFIG_HOME respected, #156) merge OVER
  *   the built-in MODEL_PRICING table. File shape is
- *   Record<modelKey, ModelPricing> — same shape as MODEL_PRICING, optional
- *   tiers included. Called at startup by both the CLI and the daemon (the
- *   daemon is where per-turn costs are actually computed).
+ *   Record<modelKey, ModelPricing> — same shape as MODEL_PRICING.
  */
 
 import * as fs from "node:fs";
@@ -18,10 +14,6 @@ import { WTFT_CONFIG_DIR } from "./wtft-config-dir.js";
 
 // ---
 
-/**
- * ~/.config/wtft/pricing.json (#156 — wtft's own config directory, not
- * princess-pi-tools's).
- */
 export function getUserPricingPath(): string {
 	const xdgHome = process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config");
 	return path.join(xdgHome, WTFT_CONFIG_DIR, "pricing.json");
@@ -30,10 +22,8 @@ export function getUserPricingPath(): string {
 // ---
 
 /**
- * Read the user pricing file and merge it over built-ins.
  * Missing/unreadable/invalid file → no-op (wtft never blocks on config;
  * per-entry validation lives in applyUserPricing).
- * Returns the parsed record, or null when nothing was applied.
  */
 export function loadUserPricing(filePath: string = getUserPricingPath()): Record<string, ModelPricing> | null {
 	try {

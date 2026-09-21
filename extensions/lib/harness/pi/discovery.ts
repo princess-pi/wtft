@@ -1,6 +1,4 @@
 /**
- * @package @princess-pi/wtft
- * @module harness/pi/discovery
  * @description Where Pi keeps its session logs.
  *
  * Layout: ~/.pi/agent/sessions/<--slug-->/<timestamp>_<uuid>.jsonl, where the
@@ -36,7 +34,6 @@ function sessionsDir(): string {
 	return process.env.WTFT_PI_SESSIONS_DIR || path.join(os.homedir(), ".pi", "agent", "sessions");
 }
 
-/** Session id = the transcript basename without its extension. */
 function sessionIdOf(file: string): string {
 	return path.basename(file).replace(/\.jsonl$/i, "");
 }
@@ -112,7 +109,6 @@ function discoverLegacy(root: string, target: string | null): SessionCandidate[]
 	return [...bySessionId.values()];
 }
 
-/** Scoped path — see `DiscoveryScope` in `../types.ts`. */
 function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions): SessionCandidate[] {
 	const { scope, windowMs } = opts;
 	const now = Date.now();

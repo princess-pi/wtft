@@ -1,10 +1,4 @@
-/**
- * @package @princess-pi/wtft
- * @module wtft-cli-shared
- * @description Shared CLI/extension interface layer — argument parsing, daemon
- *   lifecycle, config reading, and manifest-driven help/why/version rendering.
- *   Consumed by both `extensions/wtft.ts` (Pi extension) and `bin/wtft.ts` (CLI).
- */
+/** Shared CLI/extension interface layer. */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -19,7 +13,6 @@ import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "./wtft-config-dir.js";
 // ---
 
 export interface WtftCliOptions {
-	// Shared
 	showHelp: boolean;
 	showWhy: boolean;
 	showVersion: boolean;
@@ -67,17 +60,11 @@ export interface WtftCliOptions {
 // ---
 
 /**
- * Parse CLI arguments (union of all flags from both Pi extension and CLI).
- * Each caller passes its argv however it likes — extension passes a split
- * string, CLI passes `process.argv.slice(2)`. Returns a typed options object;
- * callers destructure only what they need.
- *
  * Breaking: `-t` and `-T` shortcuts are intentionally NOT supported.
  * `-t` was overloaded across --timezone, --tokens, --ticks, and a planned
  * --turns. Use the full `--` names instead.
  */
 export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
-	// --- defaults ---
 	let showHelp = false;
 	let showWhy = false;
 	let showVersion = false;
@@ -105,7 +92,6 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 	let hasTokens = false;
 	let hasCost = false;
 
-	// CLI-only defaults
 	let targetSession: string | undefined = undefined;
 	let cwdOverride: string | undefined = undefined;
 	let harnessOption: "auto" | "pi" | "claude-code" = "auto";
@@ -122,7 +108,6 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
 
-		// --- shared flags ---
 		if (arg === "--help" || arg === "-h") {
 			showHelp = true;
 		} else if (arg === "--version") {
@@ -157,14 +142,12 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 			mode = "bucket";
 			hasMode = true;
 
-		// --- extension-only flags ---
 		} else if (arg === "--hide" || arg === "-H") {
 			hideWidget = true;
 		} else if (arg === "--show" || arg === "-S") {
 			// ACCEPTED AND INERT. `--hide --show` and `--show --hide` BOTH clear
 			// the widget — this flag carries no force of its own. Kept accepted
-			// so `-S` is never an unknown-flag error; CONTEXT.md documents
-			// `-S`/`-H` as a pair. Pinned by tests/wtft-74-budget-flag-parsing.test.ts §4.
+			// so `-S` is never an unknown-flag error.
 		} else if (arg === "--no-emojii" || arg === "--no-emoji") {
 			enableEmoji = false;
 		} else if (arg === "--emojii" || arg === "--emoji") {
@@ -172,7 +155,6 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 		} else if (arg === "--pager" || arg === "-p") {
 			pager = true;
 
-		// --- CLI-only flags ---
 		} else if (arg === "-s" || arg === "--session") {
 			targetSession = argv[++i];
 		} else if (arg === "--dir" || arg === "--cwd") {
@@ -206,7 +188,6 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 				thinkingBudget = val;
 			}
 
-		// --- valued flags (shared) ---
 		} else if (arg === "-i" || arg === "--interval") {
 			const val = argv[i + 1];
 			if (val && /^(\d+)([mhdw]|t(?:urns?)?)$/.test(val)) {
@@ -237,7 +218,6 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 				hasTimezone = true;
 				i++;
 			}
-		// --- valued flags (= syntax, extension already supports; CLI gets for free) ---
 		} else if (arg.startsWith("--interval=")) {
 			const val = arg.split("=")[1];
 			if (val && /^(\d+)([mhdw]|t(?:urns?)?)$/.test(val)) {
@@ -307,9 +287,6 @@ export function isPendingSessionPath(p: string): boolean {
 }
 
 /**
- * Spawn the wtft-daemon for the given session. Returns the child process
- * or null on failure. Callers handle errors their own way.
- *
  * `daemonDir` is the directory containing `wtft-daemon.mjs`. Each caller
  * resolves this relative to its own location (extension: `../bin`, CLI: `.`).
  */
@@ -327,24 +304,15 @@ export function spawnWtftDaemon(sessionPath: string, daemonDir: string): ChildPr
 	}
 }
 
-// Module-level state for ensureDaemonRunning. Each caller environment
-// (Pi extension, CLI process) gets its own instance — the CLI runs once
-// and exits, so it naturally starts fresh every invocation.
 let _daemonSessionPath: string | null = null;
 let _daemonSpawned = false;
 let _daemonSpawnedAt = 0; // Date.now() when the last spawn was attempted
 
-/**
- * Ensure the wtft-daemon is running for the given session. If already
- * spawned for the same session, checks health; if dead, re-spawns.
- * Returns true if daemon is confirmed running (or was freshly spawned).
- */
 export function ensureDaemonRunning(sessionPath: string, daemonDir: string): boolean {
 	if (_daemonSpawned && _daemonSessionPath === sessionPath) {
 		const tagPath = getTagPath(sessionPath);
 		const health = checkDaemonHealth(sessionPath, tagPath);
 		if (health.alive) return true;
-		// Daemon dead — fall through to re-spawn
 		_daemonSpawned = false;
 	}
 
@@ -358,21 +326,15 @@ export function ensureDaemonRunning(sessionPath: string, daemonDir: string): boo
 	return false;
 }
 
-/**
- * Get the parser/daemon status for a session. Used by the extension's
- * widget to display daemon health inline.
- */
 export function getDaemonStatus(sessionPath: string): DaemonStatus {
 	if (!_daemonSessionPath) return { alive: false, reason: "not-started" };
 
-	// Alive with no session file yet: daemon is polling.
 	let sessionExists = false;
 	try { sessionExists = fs.existsSync(sessionPath); } catch {}
 
 	const tagPath = getTagPath(sessionPath);
 	const health = checkDaemonHealth(sessionPath, tagPath);
 
-	// Daemon is alive — if session file doesn't exist, daemon is polling.
 	if (health.alive && !sessionExists) {
 		return { alive: true, reason: "waiting-session" };
 	}
@@ -385,8 +347,6 @@ export function getDaemonStatus(sessionPath: string): DaemonStatus {
 		// Within 5s of spawn: if PID file doesn't exist, daemon may still
 		// be starting. If session file doesn't exist either, report
 		// "waiting-session" instead of a generic "starting".
-		// Compare a health CODE, not a display sentence — typo it and
-		// `tsc --noEmit` rejects the comparison.
 		if (elapsed < 5000 && health.reason === "not-found") {
 			if (!sessionExists) {
 				return { alive: false, reason: "waiting-session" };
@@ -430,8 +390,6 @@ export interface WtftManifest {
 }
 
 /**
- * A manifest, or a path to one.
- *
  * The CLI hands over a manifest the bundler inlined — a published `bin/wtft.mjs`
  * has no package.json/manifest beside it. The path form stays because the Pi
  * extension still reads the repo copy from `process.cwd()`.
@@ -444,10 +402,6 @@ function loadManifest(src: ManifestSource): WtftManifest {
 		: src;
 }
 
-/**
- * Render --help from the manifest. Returns the formatted help string;
- * callers output via ctx.ui.notify (extension) or console.log (CLI).
- */
 export function renderWtftHelp(src: ManifestSource, invokedAs: string): string {
 	const manifest = loadManifest(src);
 
@@ -476,10 +430,6 @@ export function renderWtftHelp(src: ManifestSource, invokedAs: string): string {
 	return text;
 }
 
-/**
- * Render --why from the manifest. Delegates to @princess-pi/libs/manifest-help renderWhy
- * for the scenario-driven output format.
- */
 export async function renderWtftWhy(src: ManifestSource, invokedAs: string): Promise<string> {
 	const { renderWhy } = await import("@princess-pi/libs/manifest-help");
 	if (typeof src === "string") return renderWhy(src, invokedAs);
@@ -504,14 +454,11 @@ export async function renderWtftWhy(src: ManifestSource, invokedAs: string): Pro
 /**
  * Render --version. NAME from the manifest; VERSION from package.json; build
  * stamp says which tree produced the artifact.
- *
  * In a BUNDLED artifact package.json is read at BUILD time and substituted
  * below — an artifact in ~/bin has no package.json above it. Unbundled source
  * still reads it at run time.
- *
  * The substituted name is a GLOBAL, not `process.env.WTFT_BUILD_VERSION` —
  * an env key would let any environment dictate the version this command reports.
- *
  * `moduleUrl` must be the CALLER's import.meta.url: after bundling they are the
  * same file, but the Pi extension loads source where this lib's URL would name
  * the lib rather than the command you invoked.
@@ -522,7 +469,6 @@ declare const __WTFT_BUILD_VERSION__: string | undefined;
 
 export function renderWtftVersion(src: ManifestSource, moduleUrl: string): string {
 	const manifest = loadManifest(src);
-	// Substituted by build.ts in a bundle; undeclared in source. See the docstring.
 	const injected = typeof __WTFT_BUILD_VERSION__ === "string" ? __WTFT_BUILD_VERSION__ : "";
 	if (injected) return formatVersion(manifest.name, injected, moduleUrl);
 

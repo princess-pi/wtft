@@ -32,7 +32,6 @@ const MODEL_QUOTA_REGISTRY: Record<string, number> = {
   "c3.0opu": 80000,    // claude-3-opus (Opus standard limit)
   "d4.0fla": 2500000,  // deepseek-v4-flash (concurrency limit: 2500; no TPM limit — Gemini-equivalent ceiling for redline visibility)
   "d4.0pro": 1600000,  // deepseek-v4-pro (concurrency limit: 500; no TPM limit — Gemini-equivalent ceiling for redline visibility)
-  // GPT-5.x: no hard TPM limits (RPM-limited instead), but register for visibility
   "gpt5sol": 1000000,  // gpt-5.6-sol (default ceiling for visibility)
   "gpt5ter": 1000000,  // gpt-5.6-terra
   "gpt5lun": 1000000,  // gpt-5.6-luna
@@ -58,7 +57,6 @@ function getModelShortName(modelName: string): string {
   if (!modelName) return "unknown";
   const m = modelName.toLowerCase();
 
-  // Gemini
   if (m.includes("gemini-3.5-flash")) return "g3.5fla";
   if (m.includes("gemini-3.5-pro")) return "g3.5pro";
   if (m.includes("gemini-flash-latest")) return "glatfla";
@@ -66,11 +64,9 @@ function getModelShortName(modelName: string): string {
   if (m.includes("gemini-flash-lite-latest")) return "glatfli";
   if (m.includes("gemini-1.5-pro") || m.includes("gemini-pro-latest")) return "glatpro";
 
-  // DeepSeek
   if (m.includes("deepseek-v4-pro")) return "d4.0pro";
   if (m.includes("deepseek-v4-flash") || m.includes("deepseek-chat") || m.includes("deepseek-reasoner")) return "d4.0fla";
 
-  // Claude — check from most specific to least
   if (m.includes("claude-fable-5") || m.includes("fable-5")) return "c5.0fab";
   if (m.includes("claude-sonnet-5") || m.includes("sonnet-5")) return "c5.0son";
   if (m.includes("claude-haiku-5") || m.includes("haiku-5")) return "c5.0hai";
@@ -82,12 +78,10 @@ function getModelShortName(modelName: string): string {
     return "c3.5hai";
   }
   if (m.includes("claude-3-opus") || m.includes("claude-3-0-opus")) return "c3.0opu";
-  // Generic Claude fallbacks: check specific model families before the generic opus catch-all
   if (m.includes("sonnet")) return "c3.5son"; // unknown sonnet variant → treat as Sonnet tier
   if (m.includes("haiku")) return "c3.5hai";
   if (m.includes("opus")) return "c4.0opu"; // unknown opus variant → treat as Opus 4 tier
 
-  // GPT-5.x
   if (m.includes("gpt-5.6-sol")) return "gpt5sol";
   if (m.includes("gpt-5.6-terra")) return "gpt5ter";
   if (m.includes("gpt-5.6-luna")) return "gpt5lun";
@@ -149,9 +143,7 @@ function findActiveSessionFiles(): FileInfo[] {
   const now = Date.now();
   const TWO_MINUTES_MS = 2 * 60 * 1000;
 
-  // Scan wtft-tags directories for classified tag files — harness-agnostic,
-  // same source as the CLI, widget, and session selector. No raw .jsonl
-  // parsing needed (#87 — Ports & Adapters seam).
+  // Scan wtft-tags directories for classified tag files
   function scanDir(dir: string) {
     if (!fs.existsSync(dir)) return;
     try {
@@ -160,7 +152,6 @@ function findActiveSessionFiles(): FileInfo[] {
         const fullPath = path.join(dir, f);
         const stat = fs.statSync(fullPath);
         if (stat.isDirectory()) {
-          // Look for wtft-tags subdirectory
           if (f === "wtft-tags") {
             const tagFiles = fs.readdirSync(fullPath);
             for (const tagFile of tagFiles) {
@@ -178,13 +169,10 @@ function findActiveSessionFiles(): FileInfo[] {
         }
       }
     } catch (err) {
-      // ignore
     }
   }
 
-  // Pi sessions dir contains per-session subdirs, each with a wtft-tags/ subdir
   scanDir(PI_DIR);
-  // Claude Code projects dir contains per-project subdirs, each with session subdirs
   scanDir(projectsDir());
 
   return activeFiles;
@@ -210,11 +198,7 @@ export function aggregateActiveTpm(activeFiles: FileInfo[], hostingSessionId: st
 
     try {
       // Collapse lines that share a message.id (growing-usage re-emissions)
-      // BEFORE summing tokens — readClassifiedTagFile runs dedupeClassifiedById
-      // on every read, which is the same canonical collapse every other tag-file
-      // reader uses (#17, docs/wtft-incremental-render-spec.md). Without it a
-      // re-emitted message inside the window contributes its tokens once per
-      // line instead of once.
+      // BEFORE summing tokens.
       const interactions = readClassifiedTagFile(filePath);
 
       for (const interaction of interactions) {
@@ -237,7 +221,6 @@ export function aggregateActiveTpm(activeFiles: FileInfo[], hostingSessionId: st
 
         if (age <= 60000) {
           modelStats[shortCode].tpm += inputTokens;
-          // If this is the hosting session, increment session-only TPM
           if (isHostingSession) {
             modelStats[shortCode].sessionTpm += inputTokens;
           }
@@ -271,8 +254,6 @@ function parseIntervalToMs(val: string): number {
 }
 
 export function getHostingSessionTpm(hostingSessionId: string, activeFiles: FileInfo[]): Record<string, number> {
-  // Find the tag file for the hosting session — identified by session ID in the
-  // tag filename: <sessionDir>/wtft-tags/<sessionId>.jsonl.wtft-tag.vX.Y.Z.jsonl
   const hostingFile = activeFiles.find(f => {
     const tagName = path.basename(f.path);
     const tagVersionIdx = tagName.indexOf(".wtft-tag.v");
@@ -285,14 +266,9 @@ export function getHostingSessionTpm(hostingSessionId: string, activeFiles: File
   const sessionTpms: Record<string, number> = {};
   const now = Date.now();
   try {
-    // Same canonical collapse as aggregateActiveTpm above — the growing-usage
-    // re-emission an id can produce must count once, not once per line (#17).
+    // Same canonical collapse as aggregateActiveTpm above.
     const interactions = readClassifiedTagFile(hostingFile.path);
     for (const interaction of interactions) {
-      // See aggregateActiveTpm above for why the timestamp check is here even
-      // though classifiedToInteraction already guarantees a numeric `t`, and
-      // for why it is Number.isFinite rather than typeof (typeof NaN ===
-      // "number").
       if (!interaction.model || !Number.isFinite(interaction.timestamp)) continue;
       const age = now - interaction.timestamp;
       if (age > 60000) continue;
@@ -302,7 +278,6 @@ export function getHostingSessionTpm(hostingSessionId: string, activeFiles: File
       sessionTpms[shortCode] = (sessionTpms[shortCode] || 0) + inputTokens;
     }
   } catch (e) {
-    // ignore
   }
   return sessionTpms;
 }
@@ -320,7 +295,6 @@ function getOrUpdateStats(activeFiles: FileInfo[], hostingSessionId: string | nu
         cached = data;
       }
     } catch (e) {
-      // ignore
     }
   }
 
@@ -340,7 +314,6 @@ function getOrUpdateStats(activeFiles: FileInfo[], hostingSessionId: string | nu
       };
       fs.writeFileSync(STATS_CACHE_FILE, JSON.stringify(cacheData), "utf8");
     } catch (e) {
-      // ignore
     }
   }
 
@@ -407,14 +380,12 @@ function updateTokenBudgetWidget(ctx: ExtensionContext) {
     const activeFiles = findActiveSessionFiles();
     const hostingSessionId = ctx.sessionManager.getSessionId() || null;
     
-    // Always find current model of the hosting session
     const context = ctx.sessionManager.buildSessionContext();
     const currentModel = context.model?.modelId || "unknown";
     const hostingShortCode = getModelShortName(currentModel);
 
     const stats = getOrUpdateStats(activeFiles, hostingSessionId, currentTickMs);
     
-    // Ensure hosting shortcode exists in our list even if 0 TPM
     if (!stats[hostingShortCode]) {
       stats[hostingShortCode] = { tpm: 0, lastActiveAge: 0, sessionTpm: 0 };
     }
@@ -426,7 +397,6 @@ function updateTokenBudgetWidget(ctx: ExtensionContext) {
     const hGlobalStr = getReadableSize(hostingData.tpm);
     const hLimitStr = getReadableSize(hostingCeiling);
 
-    // 1. Render Footer Status Line 3 if enabled
     if (settings.footer) {
       let footerParts: string[] = [];
       if (cooldownRemainingSecs !== null) {
@@ -447,7 +417,6 @@ function updateTokenBudgetWidget(ctx: ExtensionContext) {
       ctx.ui.setStatus("token-budget", footerParts.join(" | "));
     }
 
-    // 2. Render TUI Widget if enabled
     if (settings.widget) {
       const lines: string[] = [];
       const budgetTitle = emojiDisabled ? "[!] Token Budget" : "🛡️  Token Budget";
@@ -460,7 +429,6 @@ function updateTokenBudgetWidget(ctx: ExtensionContext) {
         lines.push(`\x1b[1;33m  [${cupsStr}] ${cooldownRemainingSecs}s remaining...\x1b[0m`);
       }
 
-      // Render hosting session's ONLY TPM
       let sFilled = Math.min(Math.ceil((hostingData.sessionTpm / hostingCeiling) * BAR_WIDTH), BAR_WIDTH);
       if (hostingData.sessionTpm > 0 && sFilled === 0) {
         sFilled = 1;
@@ -474,10 +442,8 @@ function updateTokenBudgetWidget(ctx: ExtensionContext) {
       const fingerPointer = emojiDisabled ? "-> " : "👉 ";
       lines.push(`\x1b[1m  ${fingerPointer}${sColor}[${sBar}] ${hostingShortCode} (Session): ${hSessionStr} ses [max ${hLimitStr}]\x1b[0m`);
 
-      // Render Global TPM Monitors (Non-bolded, auto-pruned)
       lines.push(`\x1b[1;36m  Global Multi-Model Status ───────────────────────\x1b[0m`);
       
-      // Render hosting model global stats first under global list
       let hFilled = Math.min(Math.ceil((hostingData.tpm / hostingCeiling) * BAR_WIDTH), BAR_WIDTH);
       const hBar = "$".repeat(hFilled) + ".".repeat(BAR_WIDTH - hFilled);
       
@@ -488,11 +454,9 @@ function updateTokenBudgetWidget(ctx: ExtensionContext) {
       const bullet = emojiDisabled ? "* " : "• ";
       lines.push(`\x1b[1m     ${bullet}${hColor}[${hBar}] ${hostingShortCode}: ${hGlobalStr} glo [max ${hLimitStr}]\x1b[0m`);
 
-      // Render other active models
       for (const [shortCode, data] of Object.entries(stats)) {
         if (shortCode === hostingShortCode) continue; // Already rendered first
 
-        // Only show global models with active non-zero TPM usage
         if (data.tpm === 0) {
           continue;
         }
@@ -527,7 +491,6 @@ function updateTokenBudgetWidget(ctx: ExtensionContext) {
 // ---
 
 export default function tokenBudgetExtension(pi: ExtensionAPI) {
-  // Register flags for tick refresh rate
   pi.registerFlag("tick", {
     description: "Specify the refresh interval in s (seconds) or ms (milliseconds), e.g. '2' or '500ms'",
     type: "string",
@@ -544,7 +507,6 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
       clearInterval(refreshInterval);
     }
 
-    // Determine configured tick rate
     let tickStr = "1s";
     const flagT = pi.getFlag("t") as string | undefined;
     const flagTick = pi.getFlag("tick") as string | undefined;
@@ -563,7 +525,6 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
         updateTokenBudgetWidget(lastCtx);
       }
       
-      // Dynamic adjust: if we enter or leave cooldown, adjust the active tick rate!
       const targetTickMs = cooldownRemainingSecs !== null ? 1000 : currentTickMs;
       if (targetTickMs !== activeTickMs) {
         activeTickMs = targetTickMs;
@@ -582,7 +543,6 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
     }
   }
 
-  // 1. On turn/session starts and ends, refresh the Pi status widget
   pi.on("session_start", async (_event, ctx) => {
     updateTokenBudgetWidget(ctx);
     startBackgroundRefresh(ctx);
@@ -602,7 +562,6 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
     updateTokenBudgetWidget(ctx);
   });
 
-  // 2. Intercept requests to verify rolling TPM rate-limit limits
   pi.on("before_provider_request", async (_event, ctx) => {
     try {
       const now = Date.now();
@@ -617,10 +576,8 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
       const stats = getOrUpdateStats(activeFiles, hostingSessionId, currentTickMs);
       const currentTpm = stats[shortCode]?.tpm || 0;
 
-      // Update widget with pre-request metrics
       updateTokenBudgetWidget(ctx);
 
-      // If our specific active model is crossing its safety threshold:
       // DeepSeek models (prefix "d") are concurrency-limited, not TPM-limited —
       // redline the meter for visibility but never trigger a cooldown.
       const isDeepseek = shortCode.startsWith("d");
@@ -635,7 +592,6 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
         try {
           fs.writeFileSync(COFFEE_FILE, JSON.stringify({ startTime: now, endTime: now + COOLDOWN_DURATION_MS }), "utf8");
         } catch (e) {
-          // ignore
         }
 
         // Sleep blocks the turn synchronously in the harness while live-refreshing the widget
@@ -650,13 +606,11 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
         cooldownRemainingSecs = null;
         updateTokenBudgetWidget(ctx);
 
-        // Clean up the lockfile
         try {
           if (fs.existsSync(COFFEE_FILE)) {
             fs.unlinkSync(COFFEE_FILE);
           }
         } catch (e) {
-          // ignore
         }
 
         ctx.ui.notify("☕ [Token Budget] Cooldown complete. Resuming turn execution.", "success");
@@ -667,7 +621,6 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
     }
   });
 
-  // 3. Register the '/budget' slash command: widget and footer visibility.
   //    bare `/budget` and valueless `--widget`/`-w` toggle; `--widget on|off`
   //    and `--no-widget` SET and never toggle.
   pi.registerCommand("budget", {
@@ -749,7 +702,6 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
       // TOKENS, not substrings — `"--no-widget"` contains `-w` inside `-widget`.
       const parts = trimmed.split(/\s+/).filter(Boolean);
       const hasFlag = (...names: string[]) => parts.some(p => names.includes(p));
-      /** The token after the first of `names`, or undefined if absent or last. */
       const valueAfter = (...names: string[]) => {
         const idx = parts.findIndex(p => names.includes(p));
         return idx === -1 ? undefined : parts[idx + 1];
@@ -787,7 +739,6 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
       }
 
       if (!handled) {
-        // Toggle widget by default if no flags passed
         newWidget = !current.widget;
       }
 

@@ -6,18 +6,7 @@
 
 // ---
 
-/**
- * Enter raw stdin mode and register a key handler.
- * Performs: resume() → setEncoding("utf8") → setRawMode(true) → on("data", handler)
- *
- * Returns a cleanup function that reverses: removeListener → setRawMode(false) → pause().
- * Caller is responsible for cursor visibility (show/hide) separately, since cursor
- * lifecycle differs between selector (hide on enter, show on exit) and watch mode
- * (managed by alt screen buffer transitions).
- *
- * @param onKey - Callback receiving the raw key string (e.g. "\r", "\x1b[A", "q", "\u0003")
- * @returns Cleanup function to restore stdin (no-op if stdin is not a TTY)
- */
+/** Enter raw stdin mode and register a key handler. */
 export function enterRawStdin(onKey: (key: string) => void): () => void {
 	const stdin = process.stdin;
 	if (!stdin.isTTY) return () => {};
@@ -45,7 +34,6 @@ export function showCursor(out: NodeJS.WritableStream = process.stdout): void {
 	out.write("\x1b[?25h");
 }
 
-/** Hide the terminal cursor (DECTCEM set). See {@link showCursor}'s `out`. */
 export function hideCursor(out: NodeJS.WritableStream = process.stdout): void {
 	out.write("\x1b[?25l");
 }
@@ -56,9 +44,6 @@ export function hideCursor(out: NodeJS.WritableStream = process.stdout): void {
  * Move the cursor up `lineCount` visual (wrapped) lines, then clear from cursor to
  * end of screen. Used before re-rendering to overwrite the previous render in-place.
  * A no-op, writing nothing, when `lineCount <= 0` (nothing rendered yet).
- *
- * @param lineCount - Number of visual (wrapped) lines to move up
- * @param out where to write — see {@link showCursor}'s `out`.
  */
 export function clearPreviousLines(lineCount: number, out: NodeJS.WritableStream = process.stdout): void {
 	if (lineCount > 0) {
@@ -71,10 +56,6 @@ export function clearPreviousLines(lineCount: number, out: NodeJS.WritableStream
 /**
  * Count how many visual (wrapped) lines the given text occupies at `termWidth`.
  * ANSI escape codes are stripped before measuring. Empty lines count as 1.
- *
- * @param text - The text to measure (may contain ANSI escape codes)
- * @param termWidth - Terminal width in columns
- * @returns Number of visual lines the text occupies
  */
 export function visualLineCount(text: string, termWidth: number): number {
 	const ansiRe = /\x1b\[[0-9;]*[a-zA-Z]/g;

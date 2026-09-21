@@ -92,7 +92,6 @@ const discoveredSubagentFiles = new Map<string, SubagentFileState>();
 function shutdown(reason: string) {
   if (!running) return;
   running = false;
-  // Shutdown reason distinguishes moved vs removed.
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] shutdown: ${reason}\n`);
   }
@@ -238,7 +237,6 @@ function hasClaudeCommand(interaction: NonNullable<ReturnType<typeof parseEntryT
 
 function syncSubagentTranscript(file: string): boolean {
   let wroteAny = false;
-  // State key is the full path — basenames are not unique across discovery sources.
   const stateKey = file;
   const sessionId = path.basename(file, '.jsonl');
   let fileState = discoveredSubagentFiles.get(stateKey);
@@ -347,7 +345,6 @@ function scanForSubAgents() {
   let wroteAny = false;
   // pollHadFailure is reset by the poll loop, not here — flushPending runs first and can fail.
 
-  // --- Claude bash sub-agents ---
   if (pendingClaudeCommands.length > 0) {
     const stillPending: typeof pendingClaudeCommands = [];
     for (const item of pendingClaudeCommands) {
@@ -371,7 +368,6 @@ function scanForSubAgents() {
         continue;
       }
       for (const file of discovered.files) {
-        // Register path; syncSubagentTranscript re-reads every poll.
         discoveredClaudeFiles.add(file);
         if (process.env.WTFT_DAEMON_DEBUG) {
           process.stderr.write(`[wtft-log-parser] claude -p subagent registered for re-parse (${path.basename(file, '.jsonl')})\n`);
@@ -389,7 +385,6 @@ function scanForSubAgents() {
     if (stillPending.length > 0) pendingClaudeCommands.push(...stillPending);
   }
 
-  // --- Task/agent/workflow sub-agents, re-parsed WHOLE on change ---
   let taskAgentFiles: string[] = [];
   try {
     const discoveredPi = discoverSubagentSessionFiles(sessionPath);
@@ -454,7 +449,6 @@ function parseNewLines(filePath: string) {
       lastSize = currentSize;
     }
     const buf = pendingFragment.length > 0 ? Buffer.concat([pendingFragment, fresh]) : fresh;
-    // Consume only whole lines; carry the trailing partial as pendingFragment.
     const lastNl = buf.lastIndexOf(0x0a);
     const fragment = buf.subarray(lastNl + 1);
 
@@ -536,10 +530,7 @@ function invalidateStaleSweptMarker(filePath: string) {
 
 // ---
 
-/**
- * Read the byte offset from the last _meta line in the tag file.
- * Returns null if no _meta line found (tag file predates offset tracking).
- */
+/** Returns null if no _meta line found (tag file predates offset tracking). */
 function readLastMetaOffset(tagPath: string): number | null {
   try {
     const stat = fs.statSync(tagPath);
@@ -585,7 +576,6 @@ function sessionIsGone(sessionCmdlinePath: string): boolean {
   return sessionWasEverParsed(sessionCmdlinePath);
 }
 
-/** Does the tag file carry evidence the session existed (a classified entry or a _meta offset)? */
 function sessionWasEverParsed(sessionCmdlinePath: string): boolean {
   try {
     const tagsDir = path.join(path.dirname(sessionCmdlinePath), "wtft-tags");
@@ -1090,11 +1080,9 @@ if (showList || showCleanup || showRestart || stopSession) {
     process.stderr.write(`[wtft-log-parser] pid: ${process.pid}\n`);
   }
 
-  // --- Main poll loop ---
   const loop = () => {
     if (!running) return;
 
-    // Takeover: if the lease is not our PID, exit before writing.
     try {
       if (fs.readFileSync(pidPath, "utf8").trim() !== String(process.pid)) {
         running = false;
@@ -1165,7 +1153,6 @@ if (showList || showCleanup || showRestart || stopSession) {
         lastWriteMs = now;
       }
 
-      // Idle exit after 24h with no new interactions; 60s startup grace.
       if (now - lastActivityMs >= IDLE_EXIT_MS && now - startupTime >= 60000) {
         if (process.env.WTFT_DAEMON_DEBUG) {
           process.stderr.write(`[wtft-log-parser] no new data for ${Math.round((now - lastActivityMs)/60000)}m, exiting\n`);

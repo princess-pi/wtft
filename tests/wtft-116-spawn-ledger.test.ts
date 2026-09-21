@@ -1,29 +1,6 @@
 #!/usr/bin/env -S bun
 /**
- * tests/wtft-116-spawn-ledger.test.ts — the spawn ledger (#116, direction A)
- *
- * A launcher-spawned session contributes ZERO to its parent today, and no
- * amount of re-parsing can change that: the parent's transcript has no `cd`
- * and no `claude` at the command head, the child lives in a project dir the
- * parent never wrote to, and NEITHER TRANSCRIPT CONTAINS A FIELD NAMING THE
- * OTHER. There is no edge to re-derive. So the spawner writes it down at spawn
- * time, when it is free.
- *
- * Part A — the writer refuses what it cannot resolve later: a bad UUID, a `ts`
- *          that is not ISO-8601, an oversized field, an oversized record. One
- *          record is one atomic append, and a short write is a failure, not a
- *          silent truncation.
- * Part B — the reader counts what it skips. A malformed line that vanishes
- *          silently is money that vanishes silently.
- * Part C — the walk: a diamond counts once, a cycle terminates, depth is capped
- *          and the cut is REPORTED (what lies beyond it is not — that is what a
- *          bound is), an unresolvable child is `unattributed` with a null cost
- *          — never a zero, which would launder a gap into a fact — and an
- *          unreadable ledger is `ledgerError`, never an empty tree.
- * Part D — the issue's own Closer, end to end through the CLI.
- *
- * Spec: docs/spec-116-spawn-ledger.md
- * Run:  bun tests/wtft-116-spawn-ledger.test.ts
+ * the spawn ledger (#116, direction A)
  */
 
 import * as fs from "node:fs";

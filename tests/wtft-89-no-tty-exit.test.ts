@@ -1,18 +1,7 @@
 #!/usr/bin/env -S bun
 /**
- * tests/wtft-89-no-tty-exit.test.ts — the no-TTY EXIT_SESSION_AMBIGUOUS (10)
- * contract (#89, E3 and E4). Spec: docs/spec-89-scoped-picker.md.
- *
- * Covers the exit-10 arms beyond the `-s` zero-match case in
- * `tests/wtft-35-explicit-session-skips-discovery.test.ts`: several `-s`
- * matches, no `-s` with zero or several default-scoped candidates, and the
- * `--json` empty-stdout guarantee.
- *
- * Every `spawnSync` call here is already non-TTY by construction (a spawned
- * child's stdio defaults to pipes), which is exactly the E3/E4 precondition —
- * no pty simulation needed.
- *
- * Run: bun tests/wtft-89-no-tty-exit.test.ts
+ * the no-TTY EXIT_SESSION_AMBIGUOUS (10)
+ * contract (#89, E3 and E4).
  */
 
 import * as fs from "node:fs";

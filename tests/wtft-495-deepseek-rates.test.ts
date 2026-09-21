@@ -1,44 +1,6 @@
 /**
  * Tests for #495 — DeepSeek rate card and peak schedule, both of which moved
  * after wtft's registry was written.
- *
- * Two independent changes, a week apart, neither of which wtft carried
- * (the NINE days is a different interval — filing to scrape, 08-16 to 08-25):
- *   - 2026-08-16 16:00 UTC — the rate card changed. v4-pro got much cheaper,
- *     v4-flash got dearer, and the two errors partly cancel in a TOTAL, which
- *     is why the readout never looked obviously broken.
- *   - 2026-08-23 — weekends became off-peak all day. Peak is now Mon–Fri only.
- *
- * Every number in the 2026-08-16 card comes from the rate card scraped on
- * 2026-08-25 and committed at
- * `princess-pi-tools/research/495-deepseek-pricing/pricing-page-2026-08-25.md`
- * — in the ORIGIN repo, not this one — never recomputed the way the code
- * computes it. That card is no longer the current one; see #100 below. The registry's unconditioned
- * rates are the off-peak card and peak is 2x, which is the same card the docs
- * state as "off-peak rates are half of the peak rates".
- *
- * `CARD_BEFORE_2026_08_16` is NOT from that scrape and cannot be: DeepSeek
- * publishes one card, the current one. Those numbers are the superseded card,
- * transcribed from issue #495's own table. Read the fixture for its extent
- * rather than trusting a count here.
- *
- * #100 made the 2026-08-25 scrape a SUPERSEDED card too: on 2026-09-10T04:00Z
- * V4.1 Flash retired the whole V4 Flash line, and on 2026-09-14T04:00Z it takes
- * over `deepseek-v4-pro` as well. The current card comes from a second
- * committed scrape,
- * `research/100-deepseek-v41-flash/pricing-page-2026-09-10.md`, which IS in this
- * repo.
- *
- * All four entries carry ONE standard row, so a current-card numeric check would
- * pass against the wrong entry — which is why the identity assertions matter
- * more than the numeric ones here. The DATED windows still discriminate, so the
- * before-cutover cases and the $2.64 v4-pro case do bite on identity. It is the
- * current-card cases that cannot.
- *
- * Every timestamp is explicit. Resolution must read the passed timestamp and
- * never the host clock (#96: a dated DeepSeek surge test that read Date.now()
- * went flaky near a window edge) — including an explicit `0`, which is what
- * wtft-parser stamps on a turn whose timestamp it could not parse.
  */
 
 import * as assert from "node:assert";

@@ -1,28 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package @princess-pi/wtft
- * @test pack-and-smoke
- * @description Tests the artifact we actually ship (#159), not the dev tree.
- *   `npm pack` the repo, install the tarball into a fresh temp dir with plain
- *   node/npm (bun excluded from PATH), then run real commands against the
- *   installed package — proving the registry/tarball channel ships a
- *   self-contained artifact that runs on stock node.
- *
- *   Why it is smaller than the princess-pi-tools original: that package ships
- *   six bins plus `docs/manifests/` read at runtime and an installer that
- *   deploys skills. This package ships exactly four bundles (`bin/wtft.mjs`,
- *   `bin/wtft-daemon.mjs`, and the two Pi-extension bundles `pi/wtft.js` +
- *   `pi/token-budget.js` added by #60, the `files` allowlist) that are
- *   self-contained by #36 — the manifest is inlined at build, and
- *   `@princess-pi/libs` + `wcwidth` are vendored into the bundle. So the
- *   tarball's correctness is "the bundles are present and run on stock node",
- *   not a docs/ allowlist.
- *
- * @limit KNOWN, STATED HERE AND IN THE OUTPUT: this suite proves the
- *   REGISTRY/TARBALL channel only (npm pack → npm install → plain node). It
- *   does not exercise the git-URL channel, which runs `prepare` and needs bun
- *   on PATH (bun-on-PATH is permitted for git-URL installs only, never for the
- *   registry channel).
+ * Tests the artifact we actually ship (#159), not the dev tree.
  */
 
 import * as assert from "node:assert";

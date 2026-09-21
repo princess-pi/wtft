@@ -1,31 +1,8 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-tools
- * @test wtft-270-subagent-crosspoll-dedup
- * @description #270 review (Medium/correctness, bin/wtft-daemon.ts) — an
+ * #270 review (Medium/correctness, bin/wtft-daemon.ts) — an
  *   OVERCOUNT introduced by the incremental subagent reader, in the same file
  *   #270 fixed an undercount in.
- *
- *   Before #270 a subagent transcript was parsed whole (parseSessionFile) and
- *   deduplicateInteractions ran over ALL of it, so a message re-emitted with
- *   growing usage across several JSONL lines sharing one `message.id` collapsed
- *   to one interaction at max cost. #270's first cut read incrementally, which
- *   deduped only WITHIN a poll batch, so the same id landing in two poll windows
- *   was appended twice and counted twice. Round 3 restored the whole-file parse
- *   and kept the read-side collapse this test drove out; the property below is
- *   what both halves have to hold, whichever way the daemon reads the file.
- *
- *   That is not a corner case. Measured over the twelve most recent live
- *   Claude Code transcripts on this host, 39-76% of message ids carrying `usage`
- *   are re-emitted (e.g. 117 of 293 = 39.9%, 72 of 95 = 75.8%), and a subagent
- *   transcript shows the growing-usage form directly: one id at output_tokens
- *   8, 8, then 457, with `tool_result` lines and 1.3-4.2s of wall clock in
- *   between — straddling the daemon's 667ms beat by construction.
- *
- *   Closer: a subagent transcript re-emitting one message.id with higher usage
- *   in a LATER poll than the first emission reads back as exactly ONE
- *   interaction, at the higher usage, matching a full parseSessionFile()+dedup
- *   of the same file.
  */
 
 import * as fs from "node:fs";

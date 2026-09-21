@@ -1,17 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * tests/wtft-issue-155-daemon-follow.test.ts — daemon follows a moved session (#155)
- *
- * A worktree switch MOVES a transcript between project dirs. The daemon polled by
- * path and exited ("session removed"); the singleton key was derived from that
- * path, so a run from the new directory would have spawned a second daemon; and
- * the reaper SIGTERMs any daemon whose cmdline session path no longer exists.
- *
- * PART C spawns a real daemon, moves its transcript out from under it, and
- * asserts it keeps parsing into the SAME tag file — one daemon, moving input,
- * fixed output.
- *
- * Run: node --experimental-strip-types tests/wtft-issue-155-daemon-follow.test.ts
+ * daemon follows a moved session (#155)
  */
 
 import * as fs from "node:fs";

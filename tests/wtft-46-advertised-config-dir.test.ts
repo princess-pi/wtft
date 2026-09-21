@@ -1,37 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package @princess-pi/wtft
- * @test wtft-46-advertised-config-dir
- * @description `--help` never advertises a legacy config directory (#46, #156).
- *
- *   FOUND BY A PARITY CHECK, not by reading. Closer 2 of #46 compared this
- *   repo's build against the princess-pi-tools build it replaced and found one
- *   `--help` line pointing at `princess-pi-packages`, a directory nothing read.
- *   The same class of drift recurred at #156: wtft's config directory moved a
- *   second time, off `princess-pi-tools` entirely and onto its own name,
- *   `wtft` — this suite now guards THAT boundary, since the #46 one is settled
- *   history no live surface can regress (nothing here still resolves under
- *   `princess-pi-tools` at all, so a legacy-vs-current comparison against it
- *   would be checking a resolver that no longer exists).
- *
- *   WHY THE TEXT WAS WRONG (the code was fine, both times). The resolvers
- *   never fall back to an old directory — #46 removed the
- *   `princess-pi-packages` fallback (princess-pi/wtft#51, decision 2), and
- *   #156 never added one for `princess-pi-tools` (a one-time MOVE lives in
- *   `bin/install-wtft` instead, tested in wtft-46-install-wtft.test.ts).
- *   ADVERTISING a legacy directory in `--help` is wrong regardless: a reader
- *   who followed it created a directory nothing prefers.
- *
- *   So this suite pins two things, and only things a machine can settle. §1: no
- *   manifest string advertises a `~/.config/<legacy>/` path, for EITHER legacy
- *   generation. §2: the resolvers, CALLED against a temp XDG_CONFIG_HOME,
- *   resolve to the CURRENT directory even when a legacy directory is the only
- *   one present — there is no fallback, for either legacy generation.
- *
- *   §2 replaced a check that compared where each name first appeared in the
- *   source text. Two review lenses rejected that independently: textual order is
- *   not execution order, and a comment saying the fallback was removed still
- *   contains the word. It could pass on broken code and fail on correct code.
+ * `--help` never advertises a legacy config directory (#46, #156).
  */
 
 import * as fs from "node:fs";

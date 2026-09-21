@@ -1,35 +1,5 @@
 /**
  * Sandbox registry (#394).
- *
- * Most of this repo's test suites build throwaway directories with `mkdtempSync`
- * and almost none removed them. Disk was not tight — the problem is unbounded
- * growth with no owner, and every suite re-deciding the question.
- *
- * `process.on("exit")` AND `afterAll`, because the repo runs suites two ways and
- * neither hook covers both (#435). Standalone (`bun <file>`) is where suites call
- * `process.exit` on failure — a sandbox is most worth removing on the run that
- * failed — and only the exit handler fires there. The runner (`bun test <file>`,
- * what tests/run.ts spawns) never emits `exit`, and only `afterAll` fires there.
- * `sweep` splices the list, so whichever fires first leaves the other nothing to
- * do and running both is harmless.
- *
- * One registry per process, which is one suite — tests/run.ts gives each suite
- * its own process, spawning `bun test <file>` per file rather than handing the
- * directory to one runner.
- *
- * That is load-bearing, so here is what breaks without it. Under a single
- * `bun test tests/` the module is cached: this file's top-level block runs for
- * the FIRST importer only, its afterAll fires when that first file finishes,
- * sweep() splices the list, and every sandbox registered by later files in the
- * same process is orphaned with no error — #394's exact bug, reintroduced.
- *
- * The repo already forbids that invocation for an unrelated and older reason:
- * most suites are standalone scripts that call process.exit, so a shared runner
- * dies after a few files and still exits 0 (CLAUDE.md, "never bare `bun test`
- * over the whole tests/ directory"; tests/run.ts's own header records the run
- * where it executed 3 of 42 files and reported success). So the precondition is
- * enforced by the rule that already exists, not by this file — and anyone who
- * breaks that rule loses far more than sandbox cleanup.
  */
 
 import { mkdtempSync, rmSync } from "node:fs";

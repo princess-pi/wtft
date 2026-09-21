@@ -1,18 +1,9 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-tools
- * @test wtft-phase3-overhead
- * @description Validates #52 Phase 3 against the BUILT bin/wtft.mjs:
+ * Validates #52 Phase 3 against the BUILT bin/wtft.mjs:
  *   1. Compaction meter-split — isCompactSummary flags next assistant turn;
  *      dual tag lines; cache_write $ → compaction, remainder → work category;
  *      the two sum to the original cost (conservation).
- *   2. Recache detection — exact 5-condition meter conjunction → overhead
- *      line; any single failed condition → no split.
- *   3. Interrupted — both marker spellings stamp the PRECEDING turn whole;
- *      literal inside assistant text does NOT reclassify.
- *   4. Pi compaction — type:"compaction" meter-splits and still carries
- *      compactionTokensBefore (#90 unaffected).
- *   5. Legend renders Ovrhd/Waste/Cmpct in CATEGORY_ORDER slots.
  */
 
 import * as fs from "node:fs";

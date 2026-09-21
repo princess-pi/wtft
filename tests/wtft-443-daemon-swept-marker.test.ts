@@ -1,37 +1,7 @@
 /**
- * @package princess-pi-tools
- * @test wtft-443-daemon-swept-marker
- * @description #443 slice 2 — the WRITER half. `readTagProvisional` (slice 1)
+ * #443 slice 2 — the WRITER half. `readTagProvisional` (slice 1)
  *   decides a tag is settled by finding `_meta.swept`; this suite pins that the
  *   daemon actually writes it, and keeps it findable.
- *
- *   The marker means: THIS daemon has completed at least one full
- *   `scanForSubAgents()` over this session. Before it exists, no subagent
- *   transcript has been read since the tag was written, which is exactly the
- *   5.7% undercount the issue measures on its specimen.
- *
- *   THE MARKER IS POSITIONAL AND RE-STAMPED, not written once.
- *   `flushPending()` runs BEFORE `scanForSubAgents()` in the same poll, so a
- *   new parent turn can land after a marker left by an earlier sweep. The
- *   marker must be the LAST significant record, and the daemon re-stamps
- *   whenever the tag grew since the last stamp. It still cannot ride the
- *   existing `_meta.offset` line, because that line is written only by
- *   `flushPending()`, which runs only when new PARENT interactions arrive —
- *   on a FINISHED session it never runs again.
- *
- *   WITHHELD ON A RECOVERABLE FAILED POLL. `pollHadFailure` is reset by the poll
- *   loop and set when a source transcript cannot be discovered, read, parsed,
- *   or serialized, so that poll does not stamp the tag as settled over a gap.
- *   A tag append failure is terminal and belongs to #512 instead.
- *
- *   A session with NO subagents still gets the marker. "Nothing to sweep" and
- *   "swept" are the same state as far as a reader is concerned, and withholding
- *   it would make every subagent-free session read provisional forever.
- *
- *   Closer: spawn a daemon on a session with a subagent transcript; the tag
- *   gains `_meta.swept` and `readTagProvisional` flips from provisional to
- *   settled; a flood of later turns returns it to settled via a NEW marker (the
- *   count must rise, since "a marker exists" is true before and after).
  */
 
 import * as fs from "node:fs";

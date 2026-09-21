@@ -1,9 +1,7 @@
 #!/usr/bin/env -S bun
 /**
- * tests/wtft-89-harness-order.test.ts — sticky, MRU harness ordering for the
- * scoped picker (#89, H1–H5). Spec: docs/spec-89-scoped-picker.md.
- *
- * Run: bun tests/wtft-89-harness-order.test.ts
+ * sticky, MRU harness ordering for the
+ * scoped picker (#89, H1–H5).
  */
 
 import * as fs from "node:fs";

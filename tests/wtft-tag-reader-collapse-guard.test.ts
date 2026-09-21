@@ -1,16 +1,7 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-tools
- * @test wtft-tag-reader-collapse-guard
- * @description Every tag-file reader must collapse by message.id before summing
- *   (docs/wtft-incremental-render-spec.md). A tag file may hold several lines for
- *   one billed message; summing raw `c`/`in`/`out` over-reports. The canonical
- *   collapse is `dedupeClassifiedById`, which `readClassifiedTagFile` applies.
- *
- *   Closer: every source file that BOTH resolves a tag path (getTagPath / TAG_SUFFIX /
- *   a literal ".wtft-tag.") AND parses JSON must either route through
- *   readClassifiedTagFile / dedupeClassifiedById, or appear in ALLOWED below with a
- *   reason and a pinning test or issue. A new unrouted reader fails this suite.
+ * Every tag-file reader must collapse by message.id before summing
+ *   (docs/wtft-incremental-render-spec.md).
  */
 
 import * as fs from "node:fs";

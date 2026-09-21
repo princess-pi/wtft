@@ -1,32 +1,7 @@
 #!/usr/bin/env bun
 /**
- * @package wtft
- * @test wtft-106-other-reclaim
- * @description Validates #106 (with #10 and #11): the classifier reclaims work
+ * Validates #106 (with #10 and #11): the classifier reclaims work
  *   that was landing in "other".
- *
- *   Every command SHAPE in this suite was taken from the corpus measured by
- *   `research/other-corpus/` — not invented. That is the point: #10 and #11 each
- *   generalised from one session, and the shapes that actually dominate (a `cd`
- *   followed by a NEWLINE, a `$( )` value, a line-continuation backslash) appear
- *   in neither issue's proposal.
- *
- *   SHAPE, not byte-for-byte string. Paths and arguments are shortened, and
- *   `#106`'s closer asked for the exact strings — a fair catch in review, and
- *   the wrong thing to do here: the real ones are absolute paths inside private
- *   client repositories (`~/git-projects/iarts-pantograph/…`), so pinning them
- *   verbatim would publish directory structure into a repo intended to go
- *   public, and would rot the moment a worktree is renamed. What must be
- *   verbatim is the SYNTAX under test — the separator, the quoting, the
- *   substitution, the operator — and that is preserved exactly. The corpus
- *   itself is reachable through `research/other-corpus/sample-other.ts`, which
- *   prints the untouched strings on demand.
- *
- *   Four surfaces, in the order the data ranks them:
- *     1. normalizeCommand  — cd/wrapper/keyword stripping (the gate on all of it)
- *     2. classifyInteraction — gh and the pr- / git- wrappers, runners, readers, inline scripts
- *     3. TOOL_CATEGORY_MAP — per-harness tool names (Pi's search_web, CC's MCP prefix)
- *     4. renderOtherHistogram — parse misses never render as commands
  */
 
 import {

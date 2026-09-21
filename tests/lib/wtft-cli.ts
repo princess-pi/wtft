@@ -1,27 +1,6 @@
 /**
- * @package princess-pi-tools
- * @module tests/lib/wtft-cli
- * @description Run the `wtft` CLI from a test and get its stdout, treating a
+ * Run the `wtft` CLI from a test and get its stdout, treating a
  *   PROVISIONAL read as success (#513).
- *
- *   WHY THIS EXISTS. #443 gave `wtft` exit **9**: the run SUCCEEDED, and the
- *   number printed may still grow because the daemon has not yet swept this
- *   session's subagent transcripts. Everything renders; only the freshness claim
- *   differs. `execSync` and `execFileSync` throw on ANY nonzero exit, so three
- *   suites that shell out to the CLI began failing on a correct run.
- *
- *   Intermittently, which is the part worth remembering. The CLI spawns the
- *   daemon and reads the tag immediately; on a brand-new session it sometimes
- *   wins that race and sees no `_meta.swept` marker. Standalone, those suites
- *   passed 4 of 4; under `bun run test` on a loaded box, one failed. So it
- *   passed the branch, passed CI, and surfaced only after merge.
- *
- *   ONE helper rather than three try/catches, because the rule is a contract
- *   ("0 and 9 both mean the render happened") and three hand-rolled copies drift
- *   — the same argument that keeps tag appends behind one failure helper.
- *
- *   It deliberately does NOT swallow other codes: exit 1 is still a failure and
- *   still throws, so this cannot quietly hide a broken CLI.
  */
 
 import { execSync, type ExecSyncOptions } from "node:child_process";

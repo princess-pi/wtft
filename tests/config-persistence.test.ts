@@ -1,38 +1,7 @@
 #!/usr/bin/env bun
 /**
- * @package @princess-pi/wtft
- * @test config-persistence
- * @description The config-persistence split is a convention, not a lib
- *   (princess-pi/wtft#51 decision 3). Two halves, pinned here:
- *
- *   1. The CLI (`bin/wtft.mjs`) never writes ITS CONFIG. Not "writes nothing" —
- *      it truncates a reap log under ~/.local/state on most runs
- *      (bin/wtft.ts:247, :273) — and the scope matters, because the check below
- *      compares `config.json` bytes and would not notice anything else. Load
- *      bearing: if the CLI ever gained a config write path, every `wtft`
- *      invocation would silently persist whatever flags it was given, and
- *      `--cost`/`--tokens` would stop being safe ways to state intent for one
- *      run. In the Pi extension those same two flags DO persist, by design —
- *      §2 asserts exactly that.
- *   2. The Pi extensions (`extensions/wtft.ts`, `extensions/token-budget.ts`)
- *      are the writers. The CLI reads; the extensions write. `/wtft` persists
- *      more than the flag it was given — `interval`, `limit`, `showTicks`,
- *      `mode` and `timezone` go out on every non-early-return call
- *      (extensions/wtft.ts:522-528) as well as the flag's own write at :465,
- *      so `/wtft --cost` writes twice.
- *
- *   The `writeConfig` merge contract is owned by the libs suite
- *   (princess-pi/libs tests/config-persistence.test.ts); the
- *   surviving-unrelated-settings assertion here observes that merge as a
- *   data-integrity check, it does not re-derive the contract.
- *
- *   Every check runs against isolation this file sets up itself, not the
- *   runner's — a test about config writes is the last place to rely on someone
- *   else's. That means TWO things, and for a long time it meant only the first:
- *   a temp `XDG_CONFIG_HOME`, and a session corpus of its own. Without the
- *   second, §1 ran the CLI against whatever sessions the machine happened to
- *   have, so it passed on the one box with thousands of them and failed
- *   everywhere else (#32).
+ * The config-persistence split is a convention, not a lib
+ *   (princess-pi/wtft#51 decision 3).
  */
 
 import * as assert from "node:assert";

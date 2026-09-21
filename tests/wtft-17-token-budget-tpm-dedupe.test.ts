@@ -1,26 +1,9 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-tools
- * @test wtft-17-token-budget-tpm-dedupe
- * @description #17 — extensions/token-budget.ts (formerly rate-limiter.ts)
+ * #17 — extensions/token-budget.ts (formerly rate-limiter.ts)
  *   read classified tag files with its own raw JSON.parse loop and summed
  *   `in`/`cr` tokens per model in a sliding window WITHOUT collapsing lines
- *   that share a `message.id` first. A tag file legitimately holds several
- *   lines for one billed message at growing usage (39-76% of usage-bearing
- *   ids across twelve live transcripts, `tests/wtft-270-subagent-crosspoll-
- *   dedup.test.ts`), so every re-emitted message inside the window was
- *   counted once per line instead of once — TPM over-reported. Every other
- *   reader collapses first via `dedupeClassifiedById`
- *   (`readClassifiedTagFile` runs it on every read); this one never did
- *   (`tests/wtft-tag-reader-collapse-guard.test.ts` caught it as #454,
- *   filed here as #17).
- *
- *   Closer: over a synthetic tag file whose `message.id` "msg-A" is
- *   re-emitted at growing usage inside the 60s TPM window, `aggregateActiveTpm`
- *   and `getHostingSessionTpm` must count msg-A ONCE, at its final (max-cost)
- *   usage — matching the token total independently derived from
- *   `readClassifiedTagFile` (the canonical collapse) over the same file, not
- *   the raw per-line sum.
+ *   that share a `message.id` first.
  */
 
 import * as fs from "node:fs";

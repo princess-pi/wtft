@@ -1,30 +1,7 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-tools
- * @test wtft-270-subagent-nested-claude-attribution
- * @description Silent overcount of nested `claude -p` sub-agents when
+ * Silent overcount of nested `claude -p` sub-agents when
  *   attributeClaudeSubAgentCosts is called once per POLL BATCH.
- *
- *   attributeClaudeSubAgentCosts (extensions/lib/wtft-parser.ts) opens with
- *   `const seenSessionIds = new Set<string>()` and its docstring promises
- *   "Sub-agent session IDs are tracked globally to prevent double-counting
- *   across multiple interactions that reference the same session." That promise
- *   holds only while the function sees the WHOLE file: the set is per-call, so
- *   its scope is exactly the scope of the array handed to it. Feed it one poll
- *   batch at a time and two claude-invoking interactions in different poll
- *   windows each attribute the same nested session — its tokens and dollars are
- *   counted twice, with nothing in the output saying so.
- *
- *   This is not hypothetical for a subagent: `cd <dir> && claude -p ...` run
- *   twice in a row against the same project resolves to the same session file
- *   whenever both invocations fall inside discoverClaudeSubAgentSessionFiles'
- *   +/-15s matching window, and two bash turns seconds apart straddle the
- *   daemon's 667ms beat by construction.
- *
- *   Closer: a subagent transcript whose two claude-invoking bash turns land in
- *   DIFFERENT poll windows and resolve to the SAME nested session reads back
- *   with that nested session's cost added exactly ONCE — matching a whole-file
- *   parseSessionFile()+dedup of the same transcript.
  */
 
 import * as fs from "node:fs";

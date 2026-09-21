@@ -1,19 +1,8 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-tools
- * @test wtft-420-subagent-call-site
- * @description Never call `attributeClaudeSubAgentCosts` over anything less
+ * Never call `attributeClaudeSubAgentCosts` over anything less
  *   than the whole file (docs/wtft-incremental-render-spec.md, "Per-Call, Not
- *   Global"). `seenSessionIds` is a `Set` scoped to one call, so a second
- *   production call site over a partial slice double-attributes.
- *
- *   Pins the invariant on the source tree: `attributeClaudeSubAgentCosts(`
- *   appears in tracked, non-generated, non-test TypeScript exactly twice —
- *   once as the function's own `export function` definition, and once as the
- *   single call site inside `parseSessionFile`, which always hands it the
- *   WHOLE parsed file. A second call site anywhere else fails this test.
- *
- * @usage bun run test wtft-420-subagent-call-site
+ *   Global").
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";

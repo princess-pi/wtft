@@ -1,18 +1,7 @@
 #!/usr/bin/env bun
 /**
- * @package @princess-pi/wtft
- * @test wtft-35-explicit-session-skips-discovery
- * @description An explicit `-s <existing session>` must not scan the session
- *   corpus (#35). An existing-file `-s` short-circuits BEFORE any discovery
- *   call, so corpus size cannot matter.
- *
- *   Cost IS the behaviour under test: "did not read the corpus" has no other
- *   user-visible effect on this path. The assertion is a RATIO against the
- *   same command in the same run with an empty corpus, never a wall-clock
- *   threshold. The gate is 2x; expected ratio is about 1x.
- *
- *   Part 2 guards against fixing this by deleting the feature: on the fuzzy
- *   path discovery MUST still run, and its count must still reach the user.
+ * An explicit `-s <existing session>` must not scan the session
+ *   corpus (#35).
  */
 
 import * as fs from "node:fs";

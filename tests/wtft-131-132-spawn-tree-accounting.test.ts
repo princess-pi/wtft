@@ -1,25 +1,6 @@
 #!/usr/bin/env -S bun
 /**
- * tests/wtft-131-132-spawn-tree-accounting.test.ts — each folded session is billed once, in the right total (#131, #132)
- *
- * The caller's self total (`total`) and the walk's total (`spawned.total`)
- * together hold each session's money exactly once. A session the parser folded
- * into a transcript is inside whichever total that transcript feeds, and a
- * ledger edge to the same session must not bill it a second time.
- *
- * Part A (#132) — the parser folds `claude -p` children RECURSIVELY, so a
- *   grandchild is inside the root's self total although the root's own turn
- *   names only the child. Its ledger edge reports `in-self-total` and adds
- *   nothing, whichever order the edges sit in.
- * Part B (#131) — a resolved descendant's parse folds in a session, whose
- *   money is therefore in `spawned.total`. Reached after its descendant, the
- *   session's edge reports `already-counted`, never `in-self-total` (which means
- *   "inside `total`"); reached before, it is priced under its own edge and
- *   subtracted from the descendant. Either order counts it once.
- * Part C — a session found only by directory (a Pi sibling of a descendant) is
- *   not folded into the descendant's total, so its own edge is priced.
- *
- * Run:  bun tests/wtft-131-132-spawn-tree-accounting.test.ts
+ * each folded session is billed once, in the right total (#131, #132)
  */
 
 import * as fs from "node:fs";

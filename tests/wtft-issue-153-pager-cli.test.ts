@@ -1,12 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * tests/wtft-issue-153-pager-cli.test.ts — CLI rejects -p/--pager (#153)
- *
- * -p opens a Pi TUI overlay (extensions/wtft.ts). The standalone CLI parsed the
- * flag into opts.pager and then never read it, so `wtft -p …` rendered exactly as
- * if -p were absent — no output, no warning, no error. It now refuses.
- *
- * Run: node --experimental-strip-types tests/wtft-issue-153-pager-cli.test.ts
+ * CLI rejects -p/--pager (#153)
  */
 
 import * as fs from "node:fs";

@@ -1,15 +1,8 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * @package princess-pi-tools
- * @test token-budget-tpm-consolidation
- * @description Validates that the token-budget's TPM computation, now routed
+ * Validates that the token-budget's TPM computation, now routed
  *   through wtft-shared's parseEntryToInteraction, produces the correct
  *   per-model token counts from session .jsonl files.
- *
- *   Regression guard for #68: verifies that the shared parser normalizes all
- *   schema variants (Pi vs Claude Code, different field names) identically
- *   to what the old inline parser did, and that the cache schema written to
- *   /tmp/pi-rate-limit-stats.json is unchanged.
  */
 
 import * as fs from "node:fs";

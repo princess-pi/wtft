@@ -1,23 +1,9 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-tools
- * @test wtft-457-unreadable-transcript
- * @description #457 — parseSessionFile's bare catch returned [] on any read
+ * #457 — parseSessionFile's bare catch returned [] on any read
  *   failure (EACCES, EISDIR, ENOMEM, a mid-read I/O error), byte-identical to
  *   a legitimately empty transcript, and syncSubagentTranscript then advanced
  *   its change detector (fileState.size/mtimeMs) as if the file had been read.
- *   If readability was restored without the file also changing size or mtime —
- *   a permissions fix, a remount, a transient FS error clearing — the
- *   transcript was never re-read and everything in it was dropped for the life
- *   of that daemon (#270's own bug class via the error path).
- *
- *   Closer: (a) parseSessionFile throws on read failure while still swallowing
- *   per-line JSON errors, (b) the daemon does not mark an unreadable subagent
- *   transcript processed — the warning fires, nothing lands in the tag file,
- *   and the transcript is picked up in full once readability returns with size
- *   and mtime unchanged — and (c) the nested attribution read is a read too:
- *   an unreadable nested transcript makes the parent parse throw and is never
- *   recorded as attributed, so a retried pass recovers it in full.
  */
 
 import * as fs from "node:fs";

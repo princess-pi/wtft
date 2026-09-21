@@ -1,14 +1,6 @@
 #!/usr/bin/env -S bun
 /**
- * tests/wtft-119-untagged-cost.test.ts — total.untaggedCostUsd (#119, U1–U4).
- * Spec: docs/spec-26-json.md Amendment 3, docs/spec-89-scoped-picker.md U1–U4.
- *
- * Builds on the exact fixture shape
- * tests/wtft-90-total-includes-server-tool-cost.test.ts TEST 5 introduced and
- * could not yet assert against: chart total === total.costUsd +
- * total.untaggedCostUsd, to half a cent (U3).
- *
- * Run: bun tests/wtft-119-untagged-cost.test.ts
+ * total.untaggedCostUsd (#119, U1–U4).
  */
 
 import * as fs from "node:fs";

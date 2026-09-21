@@ -1,55 +1,8 @@
 /**
- * @package princess-pi-tools
- * @test wtft-270-tagfile-staleness
- * @description #270's second half — "the tag-file staleness needs its own
+ * #270's second half — "the tag-file staleness needs its own
  *   answer ... a fix that only corrects live behaviour leaves every
  *   already-written tag file wrong, including the ones a future audit will
  *   read."
- *
- *   MEASURED ANSWER, and it is not the one #270's "Directions" section reaches
- *   for first: no WTFT_TAGGER_VERSION bump is required, because a stale tag file
- *   is already repaired by the NEXT DAEMON START. A fresh daemon process begins
- *   with no memory of any transcript, re-parses every subagent transcript WHOLE,
- *   and appends what it finds; the reader's dedupeClassifiedById
- *   (extensions/lib/wtft-daemon-lib.ts) then collapses the stale low-cost line
- *   against the fresh full-cost line sharing one `message.id`, keeping the max.
- *   Convergence is a property of the READER's collapse, not of the writer having
- *   been careful. #270's own text already names `--restart` as a recovery path;
- *   this is that path, measured.
- *
- *   Measured on the issue's own specimen — session 7c0c2b7e (15 Task subagents,
- *   finished 2026-08-13), starting from its genuine pre-#270 v2.7.1 tag file
- *   (1,132,374 bytes) restored byte-identical before each trial, with every
- *   daemon for that session killed first:
- *
- *     run 1   $79.74   reads the stale tag; the daemon repairs it afterwards
- *     run 2+  $84.59   tag now 1,537,246 bytes — equals `wtft -F` to the cent
- *
- *   IDENTICAL on `main` @ 5fd5570 and on this branch, down to the repaired tag's
- *   byte count. That is the point of this test, and the reason it is a CONTRACT
- *   test rather than a bug-fix regression test: restart-repair is PRE-EXISTING
- *   behaviour that #270 must not break, and #270 put it at real risk. The
- *   rewrite added a per-transcript `writtenLines` hash filter deciding what gets
- *   appended, which could have failed in two opposite directions — suppressing
- *   the repair (treating already-on-disk lines as nothing to write) or
- *   double-counting it (appending a second full copy the reader fails to
- *   collapse). Nothing pinned either direction. This does.
- *
- *   The soundness condition for re-appending, also checked below: every
- *   COST-BEARING tag line must carry a `message.id`. A line without one passes
- *   through dedupeClassifiedById uncollapsed and would double-count on repair.
- *   On the specimen tag, 3,339 of 3,409 rows carried an id, and all 70 without
- *   one were zero-cost `_meta` rows, none of them duplicated.
- *
- *   NOT covered here, because tests/wtft-270-subagent-reparse.test.ts already
- *   covers it: the live path, where ONE daemon stays alive across a subagent's
- *   growth. That is the case #270 actually fixes, and the only case a daemon
- *   restart cannot rescue.
- *
- *   Closer: leave a tag file holding a stale one-shot parse, let the subagent
- *   transcript finish unobserved, start a NEW daemon, and read the tag — the
- *   totals must equal deduplicateInteractions(parseSessionFile(...)) over the
- *   finished transcript, with no `-F` anywhere, and nothing double-counted.
  */
 
 import * as fs from "node:fs";

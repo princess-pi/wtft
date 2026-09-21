@@ -2,29 +2,6 @@
 /**
  * tests/wtft-issue-144-145-164-session-discovery.test.ts
  *   — three ways a Claude session goes missing from wtft (#144, #145, #164)
- *
- * Spec: docs/spec-144-145-164-session-discovery.md (V1–V22).
- *
- *   A  V1–V4    #144  slug encoding is a UNION of encodings, not a pinned class
- *   B  V5–V10   #164→#89  which stranded shapes remain reachable without the
- *                     whole-file relocation arm
- *   C  V12–V17  #145  live sibling worktrees fan out, non-repos do not
- *   D  V18–V20  #145  worktree rows render as <repo>/w/<branch>
- *   E  V11      #89   cost: discovery reads TAILS, never whole files
- *
- * V21 is the whole-suite invariant and is not asserted here — it is what
- * `bun run test` reports across every suite.
- *
- * Everything runs through interfaces exported from bin/wtft.mjs —
- * `discoverSessions`, `resolveLastCwd`, `buildDisplayPath`, `fanOutCwd`,
- * `findRepoRoot`, the slug helpers and the read counters — against fixture trees
- * pointed at by WTFT_CLAUDE_PROJECTS_DIR. No module internals are touched.
- *
- * Part E owns its corpus and asserts exact integers from the counters: tail
- * reads, BYTES read, and directory reads by the tree walk. Nothing in this
- * suite reads a clock.
- *
- * Run: node --experimental-strip-types tests/wtft-issue-144-145-164-session-discovery.test.ts
  */
 
 import * as fs from "node:fs";

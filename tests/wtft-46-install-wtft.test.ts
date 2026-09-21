@@ -1,30 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package @princess-pi/wtft
- * @test wtft-46-install-wtft
- * @description `bin/install-wtft` puts THIS repo's build on PATH (#46).
- *
- *   WHY THIS EXISTS. `wtft` on this host resolves to
- *   ~/.bun/bin/wtft -> the princess-pi-tools clone, reporting 1.1.0 while this
- *   repo builds 1.0.0 — so #36, #37, #39 and #18 are all absent from the binary
- *   that actually runs, and lazy session discovery got implemented twice, once
- *   in each repo. `install-workflow-tools` never installed wtft (zero
- *   references); the route is `bun link` plus ppt's package.json bin map.
- *
- *   EVERY CHECK DRIVES THE CLI, and every one of them drives a TEMP --dir and a
- *   PATH this file constructs. Nothing here writes to the real ~/bin, and no
- *   installer child inherits the real PATH — the --dir seam exists precisely so
- *   this suite never depends on how one box happens to be wired.
- *
- *   TWO READS DO GO TO THE REAL PATH, and saying so is the point: `command -v
- *   bun` and `command -v node` locate the interpreters the child needs. An
- *   earlier version of this paragraph claimed no test read the real PATH at
- *   all, which was false in exactly those two places. What the child SEES is
- *   still fully constructed: bun arrives through a one-entry shim directory,
- *   never its own, because bun lives in ~/bin here — install-wtft's default
- *   target.
- *
- *   Contract under test: docs/spec-46-install-wtft.md.
+ * `bin/install-wtft` puts THIS repo's build on PATH (#46).
  */
 
 import * as fs from "node:fs";

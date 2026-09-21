@@ -1,8 +1,5 @@
 /**
  * Tests for #90 — Compaction entry tracking in wtft-parser.
- *
- * Validates that parseSessionFile detects CompactionEntry entries
- * and stamps compactionTokensBefore onto the next assistant interaction.
  */
 
 import * as assert from "node:assert";

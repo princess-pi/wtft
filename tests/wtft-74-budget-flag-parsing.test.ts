@@ -1,37 +1,8 @@
 #!/usr/bin/env bun
 /**
- * @package @princess-pi/wtft
- * @test wtft-74-budget-flag-parsing
- * @description `/budget`'s negating flags must SET, not toggle (#74) — plus a
+ * `/budget`'s negating flags must SET, not toggle (#74) — plus a
  *   pin on `/wtft --show`/`--hide` (§4), which is a different command's widget
  *   and is here because #74 filed a claim about it that turned out to be wrong.
- *
- *   THE DEFECT. The handler chose its branch with
- *   `trimmed.includes("--widget") || trimmed.includes("-w")`. The first
- *   disjunct is innocent — `--widget` is not a substring of `--no-widget`,
- *   which has one dash before `widget`. The second is not: `"--no-widget"`
- *   contains `-w` inside `-widget`. So `--no-widget` entered the `--widget`
- *   arm, which looked for an EXACT `--widget`/`-w` token, found none, and read
- *   `parts[-1 + 1]` — `parts[0]`, the first token, which is the flag itself
- *   only when it is the sole one. Matching neither `on` nor `off`, it fell to
- *   the toggle, leaving the `--no-widget` arm below unreachable.
- *   `--no-footer` contains `-f` inside `-footer`: same defect.
- *
- *   WHY "TOGGLE" AND NOT "TURNS IT ON". Measured before the fix, twice from
- *   each starting state — the only way to tell a toggle from a set:
- *
- *     --no-widget from ON:   true -> false -> true
- *     --no-widget from OFF:  false -> true -> false
- *     --widget off from ON:  true -> false -> false   (correct, for contrast)
- *
- *   A single run from ON looks exactly like a correct `off`. That is why this
- *   suite runs every negating flag TWICE and from BOTH starting states: a
- *   one-run, one-direction check passes against the defect.
- *
- *   The assertion is on what lands in token-budget.json, not on the render.
- *   `updateTokenBudgetWidget` catches its own errors and degrades to an error
- *   widget, so the handler returns normally under a mock — measured, not
- *   assumed. The config write happens first regardless.
  */
 
 import * as assert from "node:assert";

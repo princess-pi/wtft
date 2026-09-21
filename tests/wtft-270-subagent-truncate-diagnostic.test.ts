@@ -1,23 +1,10 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-tools
- * @test wtft-270-subagent-truncate-diagnostic
- * @description #270 review (Low/contract, bin/wtft-daemon.ts) — a rotated or
+ * #270 review (Low/contract, bin/wtft-daemon.ts) — a rotated or
  *   truncated subagent transcript used to reset the daemon's position on that
  *   file SILENTLY, even with the debug switch on, while the parent session's
  *   equivalent branch has named itself on stderr since #155. That made the
  *   subagent case strictly harder to diagnose than its parent counterpart.
- *
- *   The mechanism moved in #270's round-3 rewrite — the daemon now re-parses a
- *   changed subagent transcript WHOLE and appends only lines it has not already
- *   written, so a shrink discards that file's written-line record rather than
- *   rewinding a byte offset. The requirement did not move: a shrink is a
- *   diagnosable event either way, and it must still say so.
- *
- *   Closer: with WTFT_DAEMON_DEBUG=1, truncating a subagent transcript the
- *   daemon has already read puts a named diagnostic on the daemon's stderr, the
- *   same as truncating the parent session does — and the replacement content is
- *   still picked up.
  */
 
 import * as fs from "node:fs";

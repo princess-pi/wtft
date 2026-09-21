@@ -1,36 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package @princess-pi/wtft
- * @test wtft-timeline-24h
- * @description Full-spec gate for buildTimelineString's 24-hour SURGE timeline.
- *
- *   The timeline is one line: moon bookend, 12 hour-glyphs (hours 0-11), the
- *   noon sun, 12 hour-glyphs (hours 12-23), moon bookend. One of the 24 hour
- *   glyphs is a clock face — the current hour, replaced with the face whose
- *   o'clock equals `hour % 12`. Every glyph carries a color: green (32) normal,
- *   orange (38;5;208) surge, bold when it is the current hour.
- *
- *   The existing suites each own one fact (#7: the sun is a 25th glyph, not a
- *   stolen hour slot; #62: no-emoji swaps to ASCII; #64: visual width; #495:
- *   which hours surge). None of them pins the WHOLE mapping — which clock face
- *   for which hour, on which side of the sun, in which color. That is the spec
- *   a rendering regression can drift without failing any one-fact suite, and it
- *   is deliberately NOT an emoji-width question (#64 already owns that).
- *
- *   Three sections:
- *     1. Structure (ANSI stripped): for every hour 0-23, the clock face is the
- *        correct emoji, on the correct side of the sun, with 24 hour-slots and
- *        moon bookends.
- *     2. Full sequence: parse the RAW string back into (glyph, color) pairs and
- *        assert the exact 25-glyph sequence (24 hours + sun) against the spec,
- *        for a realistic DeepSeek surge set. This pins placement AND coloring
- *        in one deep-equality check.
- *     3. Badge: the surge badge (⚡ SURGE 2x / APPROACHING / ENDING) is part
- *        of the returned string, so every proximityStatus — and the no-badge
- *        case — is pinned in both emoji and no-emoji modes.
- *
- *   Imports the SOURCE renderer (bun resolves the .ts graph directly) so
- *   red→green needs no build step.
+ * Full-spec gate for buildTimelineString's 24-hour SURGE timeline.
  */
 
 import * as assert from "node:assert";

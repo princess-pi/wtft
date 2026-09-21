@@ -1,44 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @package princess-pi-tools
- * @test wtft-308-lagging-session
- * @description A session .jsonl that does not exist YET is not "not found" (#308).
- *
- *   Claude Code knows the session id — and therefore the transcript path — at
- *   launch, but writes the first line only after the first real prompt (not a
- *   /command) completes. The daemon has waited for that file since #124/#129;
- *   the CLI still hard-failed with "does not exist" / exit 1. This suite pins
- *   the CLI's new contract on a path that is absent at the first call and
- *   appears later:
- *
- *   1. non-watch: exit 0, states the fact (log not written yet), no "not
- *      found" / "does not exist" copy, and the daemon it spawned is alive and
- *      waiting on the lease.
- *   2. once the session is written, a second non-watch run renders the chart.
- *   3. --watch on the absent path renders a waiting line (no 5 s clock-out),
- *      then renders the chart when the file appears; 'q' exits 0.
- *
- *   4. the startup reaper (#130) no longer treats "not written yet" as "gone":
- *      a daemon parked on an absent session survives another daemon's startup
- *      pass — before #308 it was SIGTERMed (and SIGTERMed itself), so the
- *      #124 "waiting for session .jsonl" state was unreachable by a live daemon.
- *      A session that once existed and was removed is still reaped.
- *
- *   PR #309 review added two more, both about waiting on daemon STATE without
- *   ever asking whether that state can arrive:
- *
- *   5. the reader must RESOLVE its tag path, not assume the own dir. A session
- *      that moved project dirs (#155) leaves its daemon writing to a sibling
- *      dir's tag file, and the daemon that replaces it adopts the same sibling
- *      path (getCurrentVersionTagPath). The own-dir path the CLI hand-built can
- *      therefore never appear, and (3)'s wait loop has no exit for "lease alive,
- *      own file never arrives" — `--watch` hung forever.
- *   6. "the daemon is running and waiting on it" must be a checked fact. The
- *      pending-session branch printed it and exited 0 straight after spawn; a
- *      daemon that dies during startup made that a false success.
- *
- *   Every wait in here is a poll on a real predicate with a generous ceiling —
- *   never a bare sleep standing in for a state.
+ * A session .jsonl that does not exist YET is not "not found" (#308).
  */
 
 import * as fs from "node:fs";

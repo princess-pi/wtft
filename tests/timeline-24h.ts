@@ -1,27 +1,7 @@
 #!/usr/bin/env bun
 /**
- * @package @princess-pi/wtft
- * @command tests/timeline-24h.ts — console renderer, NOT a test suite
- * @description Renders all 24 hours of the SURGE timeline for one model, so a
- *   human can eyeball clock-face placement and surge coloring. Deliberately NOT
- *   matched by tests/run.ts (its discovery glob is `*.test.ts`); run it by hand.
- *
- *   Model resolution, in order:
- *     1. `--model <id>` (or a positional id) — the surge schedule depends on
- *        the model: only DeepSeek ids surge.
- *     2. `$PI_MODEL` — Pi sets this for every shell command it runs, so inside
- *        a Pi session the current model resolves with no argument at all.
- *     3. `"unknown"` — renders all-green (no surge), which is the honest answer
- *        when the model cannot be known.
- *
- *   The surge windows are timezone-dependent (they are UTC windows mapped into
- *   local hours by getSurgeLocalHours). Default is host-local time; pass
- *   `--tz <IANA>` to override (e.g. `--tz UTC`, `--tz America/New_York`).
- *
- * @usage
- *   bun tests/timeline-24h.ts                    # current model via $PI_MODEL
- *   bun tests/timeline-24h.ts --model deepseek-v4-pro
- *   bun tests/timeline-24h.ts deepseek-v4-pro --tz UTC
+ * Renders all 24 hours of the SURGE timeline for one model, so a
+ *   human can eyeball clock-face placement and surge coloring.
  */
 
 import { buildTimelineString, getSurgeLocalHours } from "../extensions/lib/wtft-renderer.ts";

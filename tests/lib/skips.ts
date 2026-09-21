@@ -1,25 +1,5 @@
 /**
- * @package princess-pi-tools
- * @tool tests/lib/skips.ts — the skip contract shared by every suite and the runner
- * @description A suite that gates on host state and finds none reports PASS. It
- *   checked nothing, and nothing in the output says so once the suite's own
- *   `console.log` scrolls past. On CI that is not an edge case — CI has no
- *   `~/.claude`, no dotfiles-doctor clone, and no status-line logs, so EVERY
- *   host-gated suite goes green while running none of its checks (#256, and the
- *   reason #228 cannot just turn CI on and trust the badge).
- *
- *   `tests/run.ts` already says it, about shell suites: "a skipped suite you
- *   cannot see is a coverage claim you cannot check." This is the same rule one
- *   level down, at the level of individual checks.
- *
- *   The contract is one line of output per skipped check:
- *
- *       ##SKIP## <reason>
- *
- *   Flat, one record per line, a stable prefix token no prose rewording can
- *   break — the machine-readable mode our own Agent-First Output standard
- *   requires. The runner greps for it and reports the total; nothing parses the
- *   reason, so reasons stay free to be written for humans.
+ * A suite that gates on host state and finds none reports PASS.
  */
 
 /** The stable token. Grep for this, never for the prose after it. */

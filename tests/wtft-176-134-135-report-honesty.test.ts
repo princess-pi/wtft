@@ -157,24 +157,19 @@ console.log("\n=== #176: the widget reads the tag's own provisional verdict ===\
 	check(doc?.provisional?.provisional === true && doc?.total?.costUsd > 0,
 		"precondition: the CLI reads the unswept tag as provisional, with cost in it", JSON.stringify({ p: doc?.provisional, t: doc?.total?.costUsd }));
 
-	// The tag's own line, not the #165 subagent-read line, which shares the suffix.
 	const TAG_LINE = "no subagent transcript has been read since this tag was written — total is provisional";
-	const SUBAGENT_LINE = "some transcripts could not be counted";
 	const w = await render(unswept);
 	check(w.some(l => l.includes("+$0.25")), "precondition: the widget renders the tag's turn", JSON.stringify(w));
-	check(w.some(l => l.includes(TAG_LINE)) && !w.some(l => l.includes(SUBAGENT_LINE)),
-		"unswept tag -> the widget carries the tag's reason line, and not the #165 line", JSON.stringify(w));
+	check(w.some(l => l.includes(TAG_LINE)), "unswept tag -> the widget carries the tag's reason line", JSON.stringify(w));
 	// Before any --tokens: that command persists token units, and the $ row below would vanish.
 	const s = await render(swept);
 	check(s.some(l => l.includes("+$0.25")), "precondition: the swept widget renders the tag's turn", JSON.stringify(s));
 	check(!s.some(l => l.includes(PROVISIONAL)), "control: a swept tag renders no provisional line");
 
 	const tokens = await runCommand("--tokens", unswept);
-	check(tokens.notify.some(l => l.includes(TAG_LINE)) && !tokens.notify.some(l => l.includes(SUBAGENT_LINE)),
-		"unswept tag -> /wtft --tokens carries it, and not the #165 line", JSON.stringify(tokens.notify));
+	check(tokens.notify.some(l => l.includes(TAG_LINE)), "unswept tag -> /wtft --tokens carries it", JSON.stringify(tokens.notify));
 	const pager = await runCommand("--pager", unswept);
-	check(pager.pager.some(l => l.includes(TAG_LINE)) && !pager.pager.some(l => l.includes(SUBAGENT_LINE)),
-		"unswept tag -> /wtft --pager carries it, and not the #165 line", JSON.stringify(pager.pager.slice(-3)));
+	check(pager.pager.some(l => l.includes(TAG_LINE)), "unswept tag -> /wtft --pager carries it", JSON.stringify(pager.pager.slice(-3)));
 }
 
 console.log("\n=== #134 A: an unreadable ledger is not \"spawned nothing\" on /wtft --tokens ===\n");

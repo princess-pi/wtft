@@ -186,9 +186,9 @@ retired in `@4`.
   Under `--json`, `provisional.provisional` is `true` and `provisional.reason`
   names the condition, so `$?` and the field agree. One condition is
   mode-dependent: `subagent-unreadable` is found by the uncounted scan, which
-  runs under `--tokens` and `--json` but not on a plain `wtft` run with data
-  present, so a session provisional for that reason alone exits 9 in those two
-  modes and 0 on that plain run.
+  runs under `--tokens`, `--json` and on a plain run whose tag has no data yet,
+  but not on a plain `wtft` run that renders bins, so a session provisional for
+  that reason alone exits 9 in the modes that scan and 0 on that plain run.
 - **2** / **3** — `wtft spawn-record` only (see below): the call was wrong, or
   the ledger could not be written. The report path never returns either, and
   `spawn-record` also returns **0** — on a successful append, and on `--help`,

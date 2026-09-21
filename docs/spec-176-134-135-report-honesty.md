@@ -22,12 +22,9 @@ carries. The #165 line for a subagent file the widget could
 not read stays as it is. If both conditions hold, both lines show, because they have different
 causes and different remedies.
 
-A tag reads `unswept` when its last significant line is a classified line with no `_meta.swept`
-stamp after it, or an explicit `_meta.unswept` marker. The daemon stamps `swept` at the end of a
-clean poll whenever the tag grew or a stale `swept` was retracted since the last stamp, so a
-healthy daemon leaves that state within one poll. It persists while polls keep failing, for
-example on a permanently unreadable subagent file, and while the session file is absent. The
-widget re-reads the tag only when it renders (on `session_start`, `agent_settled`,
+`tagProvisionalFromContent` and the daemon's `swept` stamping decide when a tag reads provisional
+(`docs/wtft-incremental-render-spec.md` § `_meta.swept`); this branch changes neither.
+The widget re-reads the tag only when it renders (on `session_start`, `agent_settled`,
 `session_tree`, a `/wtft` command, or its 60-second timer), so a line stays on screen until
 the next render.
 
@@ -64,7 +61,7 @@ the same report says is not written yet.
 
 - **#176:** a tag whose last marker is `_meta.unswept` makes the widget, `/wtft --tokens` and
   `/wtft --pager` print the tag's reason line ("no subagent transcript has been read since this
-  tag was written — total is provisional"), and not the #165 line. The same tag stamped `swept`
+  tag was written — total is provisional"). The same tag stamped `swept`
   renders its turn and no provisional line. `wtft --json` on the same session reports
   `provisional.provisional: true`.
 - **#134 A:** with the ledger path unreadable, `/wtft --tokens` contains the `ledgerError` text; a
@@ -79,3 +76,24 @@ the same report says is not written yet.
 - **#135 B:** `wtft --json` on a session whose log is not written yet, with a ledger edge recorded for
   it, prints no subagent-discovery warning on stderr and still exits 0. The precondition is
   asserted: the same edge is present in the report's `spawned.edges`.
+
+## Reconciliation record
+
+Four `spec-reconcile` rounds. Round 1 audited every file the branch touched (fresh-context auditors
+on DeepSeek V4.1 Flash); rounds 2-4 re-audited only what the previous round edited.
+
+| Artifact | Claim | Contradicted by | Covered by a test? | Action |
+|---|---|---|---|---|
+| `CONTEXT.md` Provisional | the widget surfaces the state only from `_subagentUnreadable`, never reads the CLI's verdict | `readInteractions` reads `readTagFileWithVerdict` | ✅ this spec's test | Rewritten: one line per cause |
+| `CONTEXT.md` Provisional | the flag comes from discovery alone | `loadSubagentInteractionsChecked`'s `dropped` sets it (#165) | ✅ `wtft-165-widget-subagent-drop.test.ts` | Rewritten |
+| `CONTEXT.md` Provisional | "real but not final", opening on the entry's own banned word; reasons described as timing only | `stale-version` is a filename check; `subagent-unreadable` comes from the CLI scan | `reconciled-against-untested` | Rewritten per reason |
+| `CONTEXT.md` Tag file | read by `readClassifiedTagFile()` | CLI report path and widget use `readTagFileWithVerdict`; `--watch` seeds from `seedClassifiedTagFile` | `reconciled-against-untested` | Rewritten |
+| `CONTEXT.md` CLI | `--other` is a CLI-only mode | the extension implements `/wtft --other` | ✅ `wtft-165-widget-subagent-drop.test.ts` | Removed from the list |
+| README, manifest, spec-165 | the uncounted scan never runs on a plain run | the non-pending empty arms scan | `reconciled-against-untested` | "plain run that renders bins" |
+| `spec-116` | #134 A/B listed as open advisories | fixed on this branch | ✅ this spec's test | Rows marked fixed |
+| `spec-165` Scope | the widget still cannot see the tag verdict | fixed on this branch | ✅ this spec's test | Re-pointed here |
+| this spec §1 | swept/unswept mechanics, stated three ways across rounds 1-3 | each wording missed a path | — | Deleted; points to the owning spec |
+| this spec's test | four checks that could not fail (vacuous control, unasserted precondition, shared-suffix match, a conjunct no fixture reaches) | — | — | Tightened or deleted |
+
+Older drift in the same files, not caused by this branch: [#196](https://github.com/princess-pi/wtft/issues/196)
+(leads, unverified), plus #124, #126, #169 and #91 where they already cover it.

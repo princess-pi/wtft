@@ -35,9 +35,10 @@ reaches when every transcript is unreadable.
 The tag's own provisional verdict is a second cause, with its own line:
 [#176](https://github.com/princess-pi/wtft/issues/176), `docs/spec-176-134-135-report-honesty.md`.
 
-The CLI has no gap **in the modes that scan** — `--json`, `--tokens` and the empty arms. A plain
-`wtft` run with data present never calls `scanSessionUncounted`, so it exits 0 with the cost
-absent; that scope predates this branch and is stated beside the exit code.
+The CLI has no gap **in the modes that scan** — `--json`, `--tokens` and the non-pending empty
+arms. A plain `wtft` run that renders bins never calls `scanSessionUncounted`, so it cannot
+report `subagent-unreadable`, and exits 0 with the cost absent unless the tag's own verdict is
+provisional; that scope predates this branch and is stated beside the exit code.
 
 ## Closer
 

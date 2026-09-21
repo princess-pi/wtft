@@ -614,7 +614,7 @@ rather than spec sections so they can be listed, assigned and closed.
 | `in-self-total` names `total` when the money is in `spawned.total` | **#131** — fixed: decided B |
 | A double-count guard that misses ids already marked `in-self`, from `alreadyAttributed` or from an earlier descendant | **#132** — the grandchild case is fixed: both fold sets are closed transitively, for every member that resolves. A descendant folding an id already marked `in-self` or `folded` is **#180** |
 | A live descendant priced from a one-shot parse and reported as settled | **#133** — Duppy |
-| The widget's silent failure, and eager discovery on the no-edge path | **#134** — Princess Pi |
+| The widget's silent failure, and eager discovery on the no-edge path | **#134** — fixed by spec-176 |
 | The in-self set re-derived at CLI time and compared against a total the daemon folded earlier; and the pending arm re-deriving what `pending` was meant to freeze | **#135** — Princess Pi |
 
 **The stop rule held.** Two rounds of re-discovered findings is the signal to stop and report,

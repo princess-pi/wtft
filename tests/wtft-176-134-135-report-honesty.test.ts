@@ -31,27 +31,35 @@ function ledgerWith(name: string, edges: [string, string][]): string {
 	const file = path.join(sandbox, `${name}.spawns.jsonl`);
 	fs.writeFileSync(file, edges.map(([parent, child]) => serializeSpawnRecord({
 		schema: SPAWN_RECORD_SCHEMA, ts: "2026-09-21T12:00:00Z", parent, child, mechanism: "test",
-	})).join(""));
+	}) + "\n").join(""));
 	return file;
 }
 
+const OTHER = "33333333-3333-4333-8333-333333333333";
+
 // ---
-console.log("\n=== #134 B: self-attribution runs only when the ledger has an edge ===\n");
+console.log("\n=== #134 B: computeSpawnTree calls the alreadyAttributed thunk only when the root has an edge ===\n");
 {
 	let calls = 0;
 	const thunk = () => { calls++; return new Set<string>(); };
-	computeSpawnTree(ROOT, { ledgerPath: ledgerWith("empty", []), alreadyAttributed: thunk });
-	check(calls === 0, "no edge for the root -> the alreadyAttributed thunk is never called", `calls=${calls}`);
+	const other = computeSpawnTree(ROOT, { ledgerPath: ledgerWith("other", [[OTHER, CHILD], [OTHER, ROOT]]), alreadyAttributed: thunk });
+	check(other.malformedLedgerLines === 0, "precondition: a two-record ledger reads with no malformed line", `malformed=${other.malformedLedgerLines}`);
+	check(calls === 0, "edges only for another session -> the thunk is never called", `calls=${calls}`);
 
 	calls = 0;
 	const tree = computeSpawnTree(ROOT, { ledgerPath: ledgerWith("one", [[ROOT, CHILD]]), alreadyAttributed: thunk });
 	check(tree.edges.length === 1, "precondition: the one-edge ledger yields one edge", `edges=${tree.edges.length}`);
 	check(calls === 1, "an edge for the root -> the thunk is called exactly once", `calls=${calls}`);
 
-	calls = 0;
-	const inSelf = () => { calls++; return new Set<string>([CHILD]); };
-	const excluded = computeSpawnTree(ROOT, { ledgerPath: ledgerWith("inself", [[ROOT, CHILD]]), alreadyAttributed: inSelf });
-	check(excluded.descendants === 0, "a thunk's ids are honoured exactly as a Set's are", `descendants=${excluded.descendants}`);
+	const ledger = ledgerWith("inself", [[ROOT, CHILD]]);
+	const control = computeSpawnTree(ROOT, { ledgerPath: ledger });
+	check(control.edges.length === 1 && control.edges[0].skip === "not-found",
+		"control: with nothing attributed, the edge is looked up (not-found), not skipped as in-self", JSON.stringify(control.edges));
+	const viaSet = computeSpawnTree(ROOT, { ledgerPath: ledger, alreadyAttributed: new Set([CHILD]) });
+	const viaThunk = computeSpawnTree(ROOT, { ledgerPath: ledger, alreadyAttributed: () => new Set([CHILD]) });
+	check(viaSet.edges[0]?.skip === "in-self-total" && viaThunk.edges[0]?.skip === "in-self-total",
+		"a thunk's ids are honoured exactly as a Set's are: both skip the edge as in-self-total",
+		JSON.stringify({ set: viaSet.edges[0]?.skip, thunk: viaThunk.edges[0]?.skip }));
 }
 
 // ---
@@ -149,18 +157,27 @@ console.log("\n=== #176: the widget reads the tag's own provisional verdict ===\
 	check(doc?.provisional?.provisional === true && doc?.total?.costUsd > 0,
 		"precondition: the CLI reads the unswept tag as provisional, with cost in it", JSON.stringify({ p: doc?.provisional, t: doc?.total?.costUsd }));
 
+	// The tag's own line, not the #165 subagent-read line, which shares the suffix.
+	const TAG_LINE = "no subagent transcript has been read since this tag was written — total is provisional";
+	const SUBAGENT_LINE = "some transcripts could not be counted";
 	const w = await render(unswept);
 	check(w.some(l => l.includes("+$0.25")), "precondition: the widget renders the tag's turn", JSON.stringify(w));
-	check(w.some(l => l.includes(PROVISIONAL)), "unswept tag -> the widget carries the provisional line", JSON.stringify(w));
-	const tokens = await runCommand("--tokens", unswept);
-	check(tokens.notify.some(l => l.includes(PROVISIONAL)), "unswept tag -> /wtft --tokens carries it", JSON.stringify(tokens.notify));
-	const pager = await runCommand("--pager", unswept);
-	check(pager.pager.some(l => l.includes(PROVISIONAL)), "unswept tag -> /wtft --pager carries it", JSON.stringify(pager.pager.slice(-3)));
+	check(w.some(l => l.includes(TAG_LINE)) && !w.some(l => l.includes(SUBAGENT_LINE)),
+		"unswept tag -> the widget carries the tag's reason line, and not the #165 line", JSON.stringify(w));
+	// Before any --tokens: that command persists token units, and the $ row below would vanish.
+	const s = await render(swept);
+	check(s.some(l => l.includes("+$0.25")), "precondition: the swept widget renders the tag's turn", JSON.stringify(s));
+	check(!s.some(l => l.includes(PROVISIONAL)), "control: a swept tag renders no provisional line");
 
-	check(!(await render(swept)).some(l => l.includes(PROVISIONAL)), "control: a swept tag renders no provisional line");
+	const tokens = await runCommand("--tokens", unswept);
+	check(tokens.notify.some(l => l.includes(TAG_LINE)) && !tokens.notify.some(l => l.includes(SUBAGENT_LINE)),
+		"unswept tag -> /wtft --tokens carries it, and not the #165 line", JSON.stringify(tokens.notify));
+	const pager = await runCommand("--pager", unswept);
+	check(pager.pager.some(l => l.includes(TAG_LINE)) && !pager.pager.some(l => l.includes(SUBAGENT_LINE)),
+		"unswept tag -> /wtft --pager carries it, and not the #165 line", JSON.stringify(pager.pager.slice(-3)));
 }
 
-console.log("\n=== #134 A: an unreadable ledger is not \"spawned nothing\" on the widget ===\n");
+console.log("\n=== #134 A: an unreadable ledger is not \"spawned nothing\" on /wtft --tokens ===\n");
 {
 	const session = sessionWithTag("ledger", { swept: Date.now() });
 
@@ -169,6 +186,14 @@ console.log("\n=== #134 A: an unreadable ledger is not \"spawned nothing\" on th
 	const broken = await runCommand("--tokens", session);
 	check(broken.notify.some(l => l.includes("descendants unknown, not zero")),
 		"ledger unreadable -> /wtft --tokens says descendants unknown", JSON.stringify(broken.notify));
+
+	// Proves --tokens reads this ledger at all: a malformed line prints its own block.
+	process.env.XDG_STATE_HOME = path.join(sandbox, "state-malformed");
+	fs.mkdirSync(path.join(sandbox, "state-malformed", "wtft"), { recursive: true });
+	fs.writeFileSync(path.join(sandbox, "state-malformed", "wtft", "spawns.jsonl"), "not json\n");
+	const malformed = await runCommand("--tokens", session);
+	check(malformed.notify.some(l => l.includes("unusable spawn-ledger line")),
+		"precondition: /wtft --tokens reads the ledger (a malformed line is reported)", JSON.stringify(malformed.notify));
 
 	process.env.XDG_STATE_HOME = path.join(sandbox, "state-empty");
 	fs.mkdirSync(path.join(sandbox, "state-empty", "wtft"), { recursive: true });

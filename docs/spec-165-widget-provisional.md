@@ -32,14 +32,12 @@ reaches when every transcript is unreadable.
 
 ## Scope — what this does NOT close
 
-The widget reads the tag with `readClassifiedTagFile`, which discards the tag's own provisional
-verdict, while the CLI reads it with `readTagFileWithVerdict`. A tag that is provisional for a
-daemon-side reason the widget's discovery cannot see still renders a settled-looking widget.
-That is [#176](https://github.com/princess-pi/wtft/issues/176), filed, not fixed here.
+The tag's own provisional verdict is a second cause, with its own line:
+[#176](https://github.com/princess-pi/wtft/issues/176), `docs/spec-176-134-135-report-honesty.md`.
 
 The CLI has no gap **in the modes that scan** — `--json`, `--tokens` and the empty arms. A plain
-`wtft` run never calls `scanSessionUncounted`, so it exits 0 with the cost absent; that scope
-predates this branch and is stated beside the exit code.
+`wtft` run with data present never calls `scanSessionUncounted`, so it exits 0 with the cost
+absent; that scope predates this branch and is stated beside the exit code.
 
 ## Closer
 

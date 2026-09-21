@@ -117,7 +117,10 @@ _Avoid_: Child session, nested session
 **Tag file**:
 The per-session output file the daemon writes classified entries to:
 `wtft-tags/<session>.wtft-tag.v{N}.jsonl`. One tag file per source session, versioned so a
-daemon upgrade can detect and replace a stale one. Read by `readClassifiedTagFile()`.
+daemon upgrade can detect and replace a stale one. The CLI's report path and the widget read
+it with `readTagFileWithVerdict()`, which returns the provisional verdict from the same read;
+`readClassifiedTagFile()` returns the interactions alone, and `--watch` seeds from
+`seedClassifiedTagFile()`.
 
 It is **JSONL, and line-safe by construction** (#130): every write the daemon completes leaves
 the file a whole number of complete lines, so **no mid-file line is ever malformed**. A reader
@@ -269,7 +272,7 @@ _Avoid_: Panel, sidebar (reserved for the `serve` tool's widget — `serve` is a
 **CLI**:
 Running `wtft` (or `./wtft`, or the npm-global install) directly from the host shell, outside
 Pi — reuses the same classification engine as the widget but prints to stdout. Supports modes
-the widget does not (`--other` histogram, `--watch`, `--json`). Refuses `-p/--pager`, which is
+the widget does not (`--watch`, `--json`). Refuses `-p/--pager`, which is
 the widget's (see **Pager**).
 _Avoid_: Standalone mode, binary (the binary is `bin/wtft.mjs`; "CLI" names the usage mode)
 
@@ -307,15 +310,16 @@ names the usage mode)
 
 **Provisional (total)** (#443, a field since #26):
 A total the log parser daemon may still grow — the CLI spawned it and read the tag file
-before it finished, so the number printed is real but not final. On the CLI, reported two
-ways that always agree: **exit 9**, and `provisional.provisional` / `provisional.reason` in
-JSON mode. The reasons are a closed vocabulary — `stale-version`, `unswept`,
+before it finished, so the number printed is real but may still grow. On the CLI's report
+path (not `--watch`), reported two ways that always agree: **exit 9**, and
+`provisional.provisional` / `provisional.reason` in JSON mode. The reasons are a closed vocabulary — `stale-version`, `unswept`,
 `subagent-unreadable` — and `reason` here is a different field from a **daemon health
 reason** (above); name the container when both are in play. The Pi widget surfaces
-this state only when its own `_subagentUnreadable` flag is set, and as a third,
-contract-less channel: prose only ("total is provisional"), no exit code, no JSON field.
-It never reads the CLI's `provisional` object. The flag comes from discovery alone,
-so a discovered subagent file that then fails to parse is dropped without it (#165). The opposite state is
+this state as a third, contract-less channel: prose only ("total is provisional"), no exit
+code, no JSON field. It prints one line per cause: the tag's own verdict, read with the
+same `readTagFileWithVerdict()` the CLI uses and worded by the same
+`describeProvisionalReason()` (#176), and a subagent transcript, subagents directory or
+session head the widget could not read (#165). The opposite state is
 **settled**, never "final" or "done".
 _Avoid_: Partial, incomplete, estimated (the number is measured, just not finished)
 

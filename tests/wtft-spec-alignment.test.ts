@@ -516,7 +516,7 @@ try {
 	const litKeys = [...litBlock![1].matchAll(/^\t\t(?:\.\.\.\(input\.(\w+)|(\w+):)/gm)]
 		.map((m) => m[1] ?? m[2]);
 
-	// 3. The canonical example under the `wtft/session@4` heading (#89/#119
+	// 3. The canonical example under the schema heading (#89/#119
 	//    bumped it from @3 — this anchor tracks the CURRENT schema string,
 	//    not a fact worth pinning on its own).
 	const fences = [...specSrc.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => m[1]);

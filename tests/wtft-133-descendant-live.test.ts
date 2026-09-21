@@ -135,6 +135,23 @@ console.log("\n=== wtft --json: a live descendant makes the tree provisional ===
 	check(settled.code === 0, `and exits 0 (got ${settled.code})`, settled.stderr);
 }
 
+console.log("\n=== wtft --json on a not-yet-written parent: the empty arm carries the notice too ===\n");
+{
+	fs.utimesSync(childFile, new Date(), new Date());
+	// Its own id: getTagPath would otherwise find PARENT's tag in a sibling fixture dir.
+	const PENDING = "dddddddd-0000-4000-8000-000000000133";
+	fs.copyFileSync(ledgerOf("cli-pending", [[PARENT, CHILD], [PENDING, CHILD]]), path.join(state, "wtft", "spawns.jsonl"));
+	fs.mkdirSync(path.join(dir, "pending-parent"), { recursive: true });
+	const absent = path.join(dir, "pending-parent", `${PENDING}.jsonl`);
+	const pending = runCli(["-s", absent, "--json"]);
+	check((pending.doc?.notices ?? []).some((n: any) => n.code === "pending-session"),
+		"precondition: the run took the pending arm", JSON.stringify(pending.doc?.notices));
+	check(pending.doc?.provisional?.reason === "descendant-live",
+		"precondition: the live child makes the pending report provisional", JSON.stringify(pending.doc?.provisional));
+	check((pending.doc?.notices ?? []).some((n: any) => n.code === "provisional"),
+		"notices[] carries the provisional notice on the empty arm", JSON.stringify(pending.doc?.notices));
+}
+
 console.log("\n=== wtft --tokens: the rendered report says so, and a tag's own reason is kept ===\n");
 {
 	fs.utimesSync(childFile, new Date(), new Date());

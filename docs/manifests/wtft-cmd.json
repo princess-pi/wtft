@@ -325,7 +325,7 @@
     },
     {
       "code": 9,
-      "meaning": "Provisional (#443): the report was produced in full, but a number in it may still change. Under --json, provisional.provisional is true and provisional.reason names the condition, so $? and the field always agree. One condition is mode-dependent: subagent-unreadable is found by the uncounted scan, which runs under --tokens and --json but not on a plain wtft run, so a session provisional for that reason alone exits 9 in those two modes and 0 on a plain run (docs/spec-26-json.md, Exit codes). descendant-live (a counted descendant is still writing its transcript, #133; that edge carries spawned.edges[].live: true) is set only by --tokens and --json, the runs that read the spawn tree."
+      "meaning": "Provisional (#443): the report was produced in full, but a number in it may still change. Under --json, provisional.provisional is true and provisional.reason names the condition, so $? and the field always agree. Two conditions are mode-dependent: subagent-unreadable is found by the uncounted scan, which runs under --tokens and --json but not on a plain wtft run, so a session provisional for that reason alone exits 9 in those two modes and 0 on a plain run (docs/spec-26-json.md, Exit codes). descendant-live (a counted descendant is still writing its transcript, #133; that edge carries spawned.edges[].live: true) is set only by --tokens and --json, the runs that read the spawn tree."
     },
     {
       "code": 10,

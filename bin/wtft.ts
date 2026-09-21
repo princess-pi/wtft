@@ -768,7 +768,14 @@ async function main() {
 			spawned,
 			// Omit key when incomplete — empty array means "looked, found none".
 			...(subagentJson?.rows ? { subagents: subagentJson.rows } : {}),
-			notices: [...(opt.notices ?? []), ...(subagentJson?.notices ?? [])],
+			notices: [
+				...(opt.notices ?? []),
+				...(subagentJson?.notices ?? []),
+				// Every arm, empty ones included: the tree can make a pending report provisional.
+				...(provisional.provisional
+					? [{ code: "provisional" as const, text: `${describeProvisionalReason(provisional, tagPath)}. ${describeProvisionalRemedy(provisional)}.` }]
+					: []),
+			],
 		});
 		process.stdout.write(renderSessionJson(doc));
 		warnProvisionalOnce();
@@ -845,16 +852,9 @@ async function main() {
 	// ---
 	if (opts.json) {
 		const notices: WtftNotice[] = [];
-		// Scan and tree before notices — each may set provisional. Both memoised with emitSessionJson's calls.
-		scanSessionUncounted();
-		sessionSpawnTree();
 		for (const m of collectUnpricedModels(interactions)) {
 			notices.push({ code: "unpriced-model", text: unpricedModelWarning(m) });
 			console.error(`\x1b[33m⚠ ${unpricedModelWarning(m)}\x1b[0m`);
-		}
-		if (provisional.provisional) {
-			const text = `${describeProvisionalReason(provisional, tagPath)}. ${describeProvisionalRemedy(provisional)}.`;
-			notices.push({ code: "provisional", text });
 		}
 		emitSessionJson({ notices });
 		return;

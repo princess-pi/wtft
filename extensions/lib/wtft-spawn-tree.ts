@@ -179,6 +179,15 @@ export function resolveSessionFile(sessionId: string): string | null {
 	return null;
 }
 
+/** An unstat-able file was just parsed, so it is not quiet: live. */
+function isLive(file: string, now: number): boolean {
+	try {
+		return now - fs.statSync(file).mtimeMs < IDLE_THRESHOLD_MS;
+	} catch {
+		return true;
+	}
+}
+
 /**
  * Walk the recorded lineage of one session, BREADTH-FIRST, counting each
  * session at most once.
@@ -191,15 +200,6 @@ export function resolveSessionFile(sessionId: string): string | null {
  * root's money IS the self total, so an edge back to it is neither a gap nor a
  * second count.
  */
-/** An unstat-able file was just parsed, so it is not quiet: live. */
-function isLive(file: string, now: number): boolean {
-	try {
-		return now - fs.statSync(file).mtimeMs < IDLE_THRESHOLD_MS;
-	} catch {
-		return true;
-	}
-}
-
 export function computeSpawnTree(
 	rootSessionId: string,
 	options: SpawnTreeOptions = {},

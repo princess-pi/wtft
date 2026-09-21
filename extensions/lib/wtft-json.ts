@@ -71,7 +71,7 @@ export interface BuildSessionJsonInput {
 	notices?: WtftNotice[];
 }
 
-/** Build the `wtft/session@4` document. Pure: no I/O, no clock, no process state. */
+/** Build the session document. Pure: no I/O, no clock, no process state. */
 export function buildSessionJson(input: BuildSessionJsonInput): WtftSessionJson {
 	const summary = computeSessionSummary(input.interactions);
 	return {

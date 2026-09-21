@@ -149,16 +149,17 @@ reintroduced inside #116's fix. An *absent* ledger is not an error: nothing has 
   directly under the root had its own children cut although they sit two levels down — the reported
   tree depended on the order lines were appended in.
 - **Depth is bounded at 5** and the bound in force is reported. Direct children are depth 1, so
-  five generations are walked and the sixth is cut. Each cut is an edge in the report carrying
-  `skip: "depth-capped"`, and `depthCapped` counts the cuts — not the sessions behind them, which
-  are not enumerated. That is what a bound is; a non-zero `depthCapped` means the tree is known to
+  five generations are walked and the sixth is cut. A cut is an edge past the cap onto a session
+  not already reached; it is reported with `skip: "depth-capped"`, and `depthCapped` counts the
+  cuts — not the sessions behind them, which are not enumerated. An edge past the cap onto a
+  session reached earlier reports that session's outcome instead, and is not a cut. That is what a bound is; a non-zero `depthCapped` means the tree is known to
   be partial.
 - **A child that does not resolve is `unattributed`** — the edge, its mechanism and its timestamp
   are reported with a `reason`, and its cost is `null`, never `0`. An unresolvable child is a
   *gap*, and a zero would launder it into a fact. Two reasons, kept apart: `not-found` (the lookup
   came back empty — the file is absent, or somewhere this process cannot read, and the walk cannot
   tell those apart, which is why the name does not claim absence) and `unreadable` (a file that
-  would not parse — the only skip class that is a bug rather than a fact). **One entry per session,
+  would not parse or be stat-ed — the only skip class that is a bug rather than a fact). **One entry per session,
   not per edge**: two edges onto the same missing child are one gap.
 - **The walk continues past a gap.** A child we cannot read may still have recorded children of
   its own, and those may be perfectly readable; its grandchildren are edges in the *ledger*, not
@@ -168,16 +169,17 @@ reintroduced inside #116's fix. An *absent* ledger is not an error: nothing has 
   `already-seen-unresolved`, `in-self-total`, `depth-capped`. Only the first two are
   `unattributed`. `already-seen-unresolved` exists because `already-counted` asserts the money
   landed, which is false for a second edge onto a child the first visit could not read.
-  `in-self-total` is a child whose cost is already inside `total` — a `claude -p` child the
-  parent's own turn names (#138) or one that child folded in at any depth (`parseSessionFile`
-  folds recursively), a Task child under `<session>/subagents/` (#82/#83), or the reported
-  session itself reached round a cycle. It is reported and never added, because billing twice is
+  `in-self-total` is a child whose cost is already inside `total`: a session the tag's fold
+  records name (`docs/spec-178-135-180-fold-records.md`): a `claude -p` child at any depth
+  (#138), or a Pi sibling session whose header names this session as `parentSession`; or the
+  reported session itself, reached round a cycle. The records also name Task children under
+  `<session>/subagents/` (#82/#83), but a ledger id must contain a UUID and a Task child's
+  `agent-<name>` does not, so no edge reaches one. It is reported and never added, because billing twice is
   the expensive direction to be wrong in. `already-counted` is the same claim about the tree's
   own total, and covers a `claude -p` session a resolved descendant's parse folded in: its money is in
-  `spawned.total`. The walk also treats as self-attributed the `claude -p` sessions each `alreadyAttributed`
-  member folded in, and marks the ones each resolved descendant folded in, by resolving and
-  parsing them; that closure is not bounded by the depth cap, and a member that cannot be
-  resolved (a Task child) adds nothing deeper. A session found only by directory (a Pi
+  `spawned.total`. A resolved descendant's parse lists every session it folded, at any depth,
+  with that session's share. A session that is already in some total has its share subtracted
+  from the descendant's; any other is marked folded. A session found only by directory (a Pi
   sibling of a descendant) that the parse did not fold is inside no descendant's total, so its own
   edge is priced.
 
@@ -222,7 +224,7 @@ consumer checking only those reads a zeroed tree as a complete lineage. And a ma
 trace it leaves — so a tree with `malformedLedgerLines > 0` and none of the other three can still be
 missing a descendant. Round 5 found this condition missing from all six surfaces that state it.
 
-**`--tokens`** gains a block below TOTAL, rendered only when this session has at least one edge:
+**`--tokens`** gains a block below TOTAL, rendered when this session has at least one edge, or when the ledger could not be read or had a line skipped (the block then says so instead):
 
 ```
 SPAWNED    3 session(s) priced from 6 recorded edge(s) (#116) —
@@ -453,7 +455,8 @@ pinned by a test, not by an assumption.
 deliberate: the tag file does not carry `claudeSubAgentSessionIds`, so re-running the same
 discovery over the same `cmd` and `t` fields is the only way to ask. Round 2 established that both
 fields survive the tag round trip. Making the daemon serialise the ids is a tag-format change with
-a version bump, which is a decision rather than a fix.
+a version bump, which is a decision rather than a fix. *Superseded:* that decision was taken as
+D1 on #194, and the daemon now records its folds (`docs/spec-178-135-180-fold-records.md`).
 
 **Where this stops.** The remaining review state is accepted rather than argued down: the next gate
 is Macroscope's single billed round at `pr-submit`, against the finished diff.
@@ -495,7 +498,9 @@ descendant double-counting order-independent is the other piece of machinery thi
 and it is *not* in this class: it does not soften a resource failure, it stops `tree` reporting a
 number that is wrong in the expensive direction. Removing it would trade ~20 lines for a wrong
 total whenever a spawner records an edge for a child some other mechanism already folded in.
-Worth knowing it is there; it is the branch's remaining concentration of subtlety.
+Worth knowing it is there; it is the branch's remaining concentration of subtlety. *Superseded:*
+`countedTotals` is gone. A descendant now subtracts the share its own parse recorded for each
+session already counted, which is exact (`docs/spec-178-135-180-fold-records.md`).
 
 ## Review round 4 — the round that checked whether the last three landed
 

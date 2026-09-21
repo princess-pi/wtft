@@ -12,6 +12,8 @@ import {
 	deduplicateInteractions,
 	serializeClassified,
 	serializeClassifiedWithOverheadSplit,
+	foldRecordLine,
+	foldRecordIds,
 	applyControlEntry,
 	newParseStreamState,
 	extractCwdFromBashCommand,
@@ -62,6 +64,9 @@ let sessionExisted = false;
 
 const pendingClaudeCommands: { interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>; prevCtx: number }[] = [];
 const discoveredClaudeFiles = new Set<string>();
+/** Session ids this daemon has written a `_fold` record for. The CLI's spawn
+ *  walk skips exactly these, so a fold with no record is billed twice. */
+const recordedFolds = new Set<string>();
 // Starts true: an inherited tag's swept marker is untrusted until this daemon re-stamps after its own sweep.
 let tagGrewSinceMarker = true;
 // Set when a sweep could not read what it meant to; withholds the swept stamp.
@@ -327,11 +332,21 @@ function syncSubagentTranscript(file: string): boolean {
     return wroteAny;
   }
 
+  // After the lines, in the same append: a reader never sees a record whose money is not yet in the tag.
+  const parent = path.basename(sessionPath, ".jsonl");
+  const freshFolds: string[] = [];
+  for (const id of foldRecordIds(sessionId, deduped)) {
+    if (recordedFolds.has(id)) continue;
+    batch += foldRecordLine(parent, id);
+    freshFolds.push(id);
+  }
+
   if (batch) {
     appendTagFile(tagPath, batch);
     wroteAny = true;
     tagGrewSinceMarker = true;
   }
+  for (const id of freshFolds) recordedFolds.add(id);
   for (const h of freshHashes) {
     fileState.writtenLines.set(h, (fileState.writtenLines.get(h) || 0) + 1);
   }

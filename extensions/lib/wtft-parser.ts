@@ -50,6 +50,24 @@ export interface Interaction {
 	unrecognizedTool?: boolean;
 	_cat?: Category;
 	surgePriced?: boolean;
+	/** Every `claude -p` session folded into this turn, at any depth. */
+	claudeSubAgentFolds?: SubAgentFold[];
+}
+
+/** The six `TokenTotals` fields, for one folded session's OWN turns — not the
+ *  sessions it folded in turn, which are their own entries. */
+export interface FoldShare {
+	costUsd: number;
+	inputTokens: number;
+	outputTokens: number;
+	reasoningTokens: number;
+	cacheReadTokens: number;
+	cacheWriteTokens: number;
+}
+
+export interface SubAgentFold {
+	id: string;
+	share: FoldShare;
 }
 
 // ---
@@ -1227,7 +1245,7 @@ export function attributeClaudeSubAgentCosts(
 
 	for (const interaction of interactions) {
 		if (!interactionHasClaudeCommand(interaction)) continue;
-		if ((interaction as any).claudeSubAgentSessionIds) continue;
+		if (interaction.claudeSubAgentFolds) continue;
 
 		const cwd = cwdForClaudeSpawn(interaction.commands);
 		if (!cwd) continue;
@@ -1239,13 +1257,8 @@ export function attributeClaudeSubAgentCosts(
 		if (subAgentResult.unreadable) throw subAgentResult.unreadable;
 		const subAgentFiles = subAgentResult.files;
 
-		let totalInput = 0;
-		let totalOutput = 0;
-		let totalCacheRead = 0;
-		let totalCacheWrite = 0;
-		let totalReasoning = 0;
-		let totalCost = 0;
-		const sessionIds: string[] = [];
+		const added: FoldShare = emptyFoldShare();
+		const folds: SubAgentFold[] = [];
 
 		for (const file of subAgentFiles) {
 			const sessionId = path.basename(file, '.jsonl');
@@ -1261,66 +1274,69 @@ export function attributeClaudeSubAgentCosts(
 				);
 			}
 			seenSessionIds.add(sessionId);
-			sessionIds.push(sessionId);
 
-			const deduped = deduplicateInteractions(subInteractions);
-			for (const si of deduped) {
-				totalInput += si.inputTokens || 0;
-				totalOutput += si.outputTokens || 0;
-				totalCacheRead += si.cacheReadTokens || 0;
-				totalCacheWrite += si.cacheWriteTokens || 0;
-				totalReasoning += si.reasoningTokens || 0;
-				totalCost += si.cost || 0;
+			const inclusive = emptyFoldShare();
+			const nested: SubAgentFold[] = [];
+			for (const si of deduplicateInteractions(subInteractions)) {
+				inclusive.costUsd += si.cost || 0;
+				inclusive.inputTokens += si.inputTokens || 0;
+				inclusive.outputTokens += si.outputTokens || 0;
+				inclusive.reasoningTokens += si.reasoningTokens || 0;
+				inclusive.cacheReadTokens += si.cacheReadTokens || 0;
+				inclusive.cacheWriteTokens += si.cacheWriteTokens || 0;
+				nested.push(...(si.claudeSubAgentFolds ?? []));
 			}
+			const own = { ...inclusive };
+			for (const n of nested) {
+				for (const key of FOLD_SHARE_KEYS) own[key] -= n.share[key];
+			}
+			folds.push({ id: sessionId, share: own }, ...nested);
+			for (const key of FOLD_SHARE_KEYS) added[key] += inclusive[key];
 		}
 
-		if (sessionIds.length > 0) {
-			interaction.inputTokens += totalInput;
-			interaction.outputTokens += totalOutput;
-			interaction.cacheReadTokens += totalCacheRead;
-			interaction.cacheWriteTokens += totalCacheWrite;
-			interaction.reasoningTokens += totalReasoning;
-			interaction.cost += totalCost;
-			(interaction as any).claudeSubAgentSessionIds = sessionIds;
+		if (folds.length > 0) {
+			interaction.inputTokens += added.inputTokens;
+			interaction.outputTokens += added.outputTokens;
+			interaction.cacheReadTokens += added.cacheReadTokens;
+			interaction.cacheWriteTokens += added.cacheWriteTokens;
+			interaction.reasoningTokens += added.reasoningTokens;
+			interaction.cost += added.costUsd;
+			interaction.claudeSubAgentFolds = folds;
 		}
 	}
 }
 
+/** Whether an interaction counts toward a session's totals: untagged turns are
+ *  reported apart, as `untaggedCostUsd`. */
+export function isModelTagged(i: Interaction): boolean {
+	return !!i.model && i.model !== "(unknown)" && i.model !== "<synthetic>";
+}
+
+const FOLD_SHARE_KEYS = ["costUsd", "inputTokens", "outputTokens", "reasoningTokens", "cacheReadTokens", "cacheWriteTokens"] as const;
+
+function emptyFoldShare(): FoldShare {
+	return { costUsd: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+}
+
 /**
- * Session ids whose cost is already folded into this session's totals, so a
- * later spawn-ledger walk does not add them twice (`claude -p` by cwd/time,
- * and Task children under `subagents/`). Discovery only — never a parse.
+ * Session ids whose cost is already inside a SELF total built from these
+ * inputs, so a spawn-ledger walk does not add them twice: the tag's fold
+ * records, any transcripts the caller merged into SELF itself, and every
+ * session those interactions' folds name. A union of what it is handed —
+ * never a discovery, which would answer for the filesystem as it is now
+ * rather than for the total as it was built.
  */
 export function collectSelfAttributedSessionIds(
-	sessionPath: string,
+	recordedFolds: ReadonlySet<string> | readonly string[],
 	interactions: Interaction[],
-	subagentFiles?: string[],
+	mergedFiles: string[] = [],
 ): Set<string> {
-	const ids = new Set<string>();
-
-	let files = subagentFiles;
-	if (!files) {
-		try { files = discoverSubagentSessionFiles(sessionPath).files; }
-		catch { /* unreadable subagents dir is reported elsewhere */ }
+	const ids = new Set<string>(recordedFolds);
+	for (const file of mergedFiles) ids.add(path.basename(file, ".jsonl"));
+	// The same rule as the daemon's records: only a fold the total holds.
+	for (const interaction of deduplicateInteractions(interactions)) {
+		if (!isModelTagged(interaction)) continue;
+		for (const fold of interaction.claudeSubAgentFolds ?? []) ids.add(fold.id);
 	}
-	for (const file of files ?? []) ids.add(path.basename(file, ".jsonl"));
-
-	for (const interaction of interactions) {
-		const recorded = (interaction as any).claudeSubAgentSessionIds as string[] | undefined;
-		if (recorded) {
-			for (const id of recorded) ids.add(id);
-			continue;
-		}
-
-		if (!interaction.commands?.length) continue;
-		const cwd = cwdForClaudeSpawn(interaction.commands);
-		if (!cwd) continue;
-		try {
-			for (const file of discoverClaudeSubAgentSessionFiles(cwd, interaction.timestamp).files) {
-				ids.add(path.basename(file, ".jsonl"));
-			}
-		} catch { /* same rule: unenumerable is not attributed */ }
-	}
-
 	return ids;
 }

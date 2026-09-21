@@ -2,6 +2,7 @@
 
 import type { Interaction, Category } from "./wtft-shared.js";
 import type { UncountedBillables } from "./wtft-parser.ts";
+import { isModelTagged } from "./wtft-parser.js";
 import {
 	classifyInteraction,
 	normalizeCommand,
@@ -1569,7 +1570,7 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
 		}
 
 		const model = i.model || "(unknown)";
-		if (model === "(unknown)" || model === "<synthetic>") {
+		if (!isModelTagged(i)) {
 			untaggedInteractions++;
 			untaggedCostUsd += i.cost + (i.serverToolCost || 0);
 			continue;

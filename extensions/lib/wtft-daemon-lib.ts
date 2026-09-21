@@ -12,7 +12,7 @@ import {
 	classifyInteraction,
 	buildWtftLines
 } from "./wtft-shared.js";
-import { splitOverheadCost } from "./wtft-parser.js";
+import { splitOverheadCost, isModelTagged } from "./wtft-parser.js";
 import { getDiscoveries } from "./harness/registry.ts";
 import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
 export interface WatchSettings {
@@ -229,15 +229,49 @@ export function tagProvisionalFromContent(tagPath: string, content: string): Tag
 export function readTagFileWithVerdict(tagPath: string): {
 	interactions: Interaction[];
 	provisional: TagProvisional;
+	/** Sessions whose cost the daemon folded into this tag's lines. */
+	folded: Set<string>;
 } {
 	let content = "";
 	try {
 		content = fs.readFileSync(tagPath, "utf8");
-	} catch { /* missing or unreadable — both halves handle "" */ }
+	} catch { /* missing or unreadable — every part handles "" */ }
 	return {
 		interactions: classifiedInteractionsFromContent(content),
 		provisional: tagProvisionalFromContent(tagPath, content),
+		folded: foldedSessionIdsFromContent(content),
 	};
+}
+
+/** The sessions a parsed child transcript puts into the tag's total: the child
+ *  itself, and every session folded onto one of its model-tagged turns. A fold
+ *  on an untagged turn lands in `untaggedCostUsd`, not in the total, so it is
+ *  not recorded — the spawn walk would otherwise skip money no total holds. */
+export function foldRecordIds(childSessionId: string, deduped: Interaction[]): string[] {
+	const ids = [childSessionId];
+	for (const interaction of deduped) {
+		if (!isModelTagged(interaction)) continue;
+		for (const fold of interaction.claudeSubAgentFolds ?? []) {
+			if (!ids.includes(fold.id)) ids.push(fold.id);
+		}
+	}
+	return ids;
+}
+
+export function foldRecordLine(parent: string, child: string): string {
+	return JSON.stringify({ _fold: { parent, child } }) + "\n";
+}
+
+export function foldedSessionIdsFromContent(content: string): Set<string> {
+	const ids = new Set<string>();
+	for (const line of content.split("\n")) {
+		if (!line.includes('"_fold"')) continue;
+		try {
+			const child = JSON.parse(line)?._fold?.child;
+			if (typeof child === "string" && child) ids.add(child);
+		} catch { /* a fragment at the end of a file being written */ }
+	}
+	return ids;
 }
 
 export function classifiedInteractionsFromContent(content: string): Interaction[] {

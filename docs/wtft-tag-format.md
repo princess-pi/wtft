@@ -13,7 +13,7 @@
 ```
 
 - **`<sessionDir>`** — the directory containing the Claude Code transcript file (`.jsonl`)
-- **`<sessionBase>`** — the transcript filename without its `.jsonl` extension
+- **`<sessionBase>`** — the transcript filename, `.jsonl` extension included (so a tag is `<uuid>.jsonl.wtft-tag.v<VERSION>.jsonl`)
 - **`<VERSION>`** — the value of `WTFT_TAGGER_VERSION` exported from
   `extensions/lib/wtft-tagger-version.ts`; never hardcode this value
 
@@ -25,8 +25,8 @@ expected version path is always preferred.
 
 ## 2. JSONL format
 
-The file is newline-delimited JSON. Each line is one complete JSON object. There are three
-line kinds; readers MUST handle all three.
+The file is newline-delimited JSON. Each line is one complete JSON object, of one of the
+kinds in §2a–§2d or a `_meta` marker (§6). Readers MUST handle every kind.
 
 ### The line-safety guarantee (#130)
 
@@ -152,6 +152,24 @@ destructures it must handle the string.
 The top-level `_hb` key identifies a heartbeat. Readers MUST skip all lines that carry
 `_hb` — they are not interaction records.
 
+### 2d. Fold record
+
+```json
+{"_fold": {"parent": "<session id>", "child": "<session id>"}}
+```
+
+`child` is the filename without `.jsonl` of a transcript the daemon folded into this tag (the
+session id for a `claude -p` child or a Pi sibling, `agent-<name>` for a Task child): a Task child
+under `<session>/subagents/`, a Pi sibling session, a `claude -p` child, or a session one of those folded in on a
+model-tagged turn, at any depth. `parent` is the tag's own session id, the transcript filename
+without `.jsonl`; readers key on `child` only. Whenever a child transcript parses, the daemon
+appends a record for each such session not yet recorded, after the child's lines and in the same
+append. A reader treats the records as a set; a repeat is not an error.
+
+A fold record is data, not a marker: a tag whose last data line is one reads unswept. The spawn
+walk skips every recorded child as `in-self-total`, because its money is already in the tag's total
+(`docs/spec-178-135-180-fold-records.md`).
+
 ---
 
 ## 3. Category values (`cat` field)
@@ -200,7 +218,8 @@ A bump to `WTFT_TAGGER_VERSION` signals that stale tags must be re-parsed.
 1. Open the file at the expected version path (§1).
 2. For each line:
    - Skip if it has a `_hb` top-level key (heartbeat).
-   - Skip if it has a `_meta` top-level key (provisional marker written by readers).
+   - Skip if it has a `_meta` top-level key (the daemon's offset and sweep markers).
+   - Collect `_fold.child` if it has a `_fold` top-level key (§2d).
    - Otherwise treat as an interaction line (or overhead line if `id` ends in `#oh`).
 3. After reading all lines, apply dedup (§4) — keep the highest-cost line per bare `id`.
 4. Treat absent optional fields as zero / false (§2a).

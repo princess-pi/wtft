@@ -44,9 +44,9 @@ known to reach that path.
 ## 3. #134 B: self-attribution runs only when the ledger has an edge
 
 `SpawnTreeOptions.alreadyAttributed` also accepts a thunk, `() => Set<string>`, and
-`computeSpawnTree` calls it only after the no-edges fast path. The widget, and the CLI on every
-arm except the pending one (§4), pass a thunk, so a session with no recorded edges does no
-subagent discovery for the spawn tree.
+`computeSpawnTree` calls it only after the no-edges fast path. The widget passes a thunk. The
+CLI passes the tag's fold records as a Set, which needs no discovery at all
+(`docs/spec-178-135-180-fold-records.md`).
 
 ## 4. #135 B: the pending arm derives nothing from the file it declared absent
 
@@ -69,10 +69,8 @@ the same report says is not written yet.
   with a clean, empty ledger, it contains no spawn block.
 - **#134 B:** `computeSpawnTree` on a ledger holding edges only for another session never calls the
   `alreadyAttributed` thunk; with an edge for the root, it calls it exactly once; and a thunk's ids
-  skip an edge as `in-self-total` exactly as a Set's do. The two callers passing a thunk is not
-  under test. The work the thunk defers (the per-turn `claude -p` cwd-and-time search, plus a
-  subagent-directory walk the report path runs anyway) prints nothing when it succeeds, so on a
-  readable session no output tells a lazy caller from an eager one.
+  skip an edge as `in-self-total` exactly as a Set's do. The widget passes a thunk; the CLI
+  passes the tag's fold records as a Set (`docs/spec-178-135-180-fold-records.md`).
 - **#135 B:** `wtft --json` on a session whose log is not written yet, with a ledger edge recorded for
   it, prints no subagent-discovery warning on stderr and still exits 0. The precondition is
   asserted: the same edge is present in the report's `spawned.edges`.

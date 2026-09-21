@@ -59,9 +59,8 @@ a transcript reachable only through a symlinked directory is not listed.
 
 ## One walk per read
 
-`collectSelfAttributedSessionIds` takes an already-discovered file list, so the spawn tree's
-double-count guard reuses the list its caller's read produced rather than walking again. Both
-the CLI (`discoverOnce`) and the widget pass one.
+The spawn tree's double-count guard walks nothing. The CLI passes the tag's fold records
+(`docs/spec-178-135-180-fold-records.md`); the widget adds the list its own read produced.
 
 **Closer:** one `--json` run and one widget render each walk the subagents directory exactly
 once, counted by the same `fs` spy.

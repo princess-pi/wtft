@@ -136,6 +136,14 @@ repaired at the next
 daemon's startup), never in each reader.
 _Avoid_: Cache file, index file
 
+**Fold record** (#178):
+A `{"_fold":{"parent","child"}}` line in a tag file. The daemon writes one for every session whose
+cost it folded into that tag: a Task child, a Pi sibling session, a `claude -p` child, or a session one of those folded in on
+a model-tagged turn, at any depth. The spawn walk skips every recorded child as
+`in-self-total`. It reads the record rather than rediscovering, because the filesystem at read
+time is not the filesystem the daemon folded from. Readers key on `child`.
+_Avoid_: Fold cache, attribution list
+
 **Tags dir**:
 The `wtft-tags/` directory itself — one per project/session root, holding every tag file for
 sessions discovered there. It is excluded from session discovery, so the daemon never treats its own
@@ -365,7 +373,7 @@ _Avoid_: Spawn log, lineage file, parent map, edge database
 self plus every RESOLVED descendant reached through the spawn ledger, so it is a floor whenever
 anything went uncounted — `unattributed` non-empty, `depthCapped` non-zero, `ledgerError` set, or
 `malformedLedgerLines` non-zero (a malformed line was a record, so its edge is lost and the count is
-its only trace). Both are explicit fields under `--json`; the human table shows the
+its only trace). Both are explicit fields under `--json`; the `--tokens` table shows the
 split as `TOTAL` / `SPAWNED` / `TREE`, and shows none of the three only when this session recorded
 no edges AND the ledger read cleanly — an unreadable ledger or a skipped line still prints, because
 "no edges" and "could not tell" are different reports. Never write a bare "the session's cost" where the two can differ.
@@ -374,13 +382,13 @@ _Avoid_: Rollup, grand total, inclusive cost (each hides which of the two is mea
 **Unattributed** (#116):
 A recorded spawn edge whose child's cost could not be read: `not-found` (the lookup came back
 empty — absent, or somewhere this process cannot read, and the walk cannot tell those apart) or
-`unreadable` (a file found that would not parse). Reported with its reason and a `null` cost,
+`unreadable` (a file found that would not parse, or could not be stat-ed). Reported with its reason and a `null` cost,
 **never a zero**: a zero says the child cost nothing, which is a claim we do not have. Distinct
 from **uncounted** (#149), a billable event the harness records no `usage` for; and from the four
 skips that are *not* gaps — `already-counted` (a diamond, a cycle among descendants, or a `claude -p`
 session a descendant's parse folded in, whose money landed once in `spawned.total`),
 `already-seen-unresolved` (a second edge onto a child the first visit could not read, whose gap is
-already reported), `in-self-total` (a child whose cost is already inside `total`, at any fold depth) and
+already reported), `in-self-total` (a child whose cost is already inside `total`, at any fold depth, or the reported session itself reached round a cycle) and
 `depth-capped` (past the walk's bound).
 _Avoid_: Missing, lost, dropped (the edge is known; only the amount is not)
 

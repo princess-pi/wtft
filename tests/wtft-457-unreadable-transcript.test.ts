@@ -750,9 +750,7 @@ try {
 		try { lib.attributeClaudeSubAgentCosts(interactions); } catch { firstPassThrew = true; }
 
 		// Phase 3 — readability returns; the retried pass succeeds and recovers
-		// the nested cost in full. (Old code: the failed pass had already
-		// stamped claudeSubAgentSessionIds, so this pass skips the interaction
-		// and the nested cost is lost forever.)
+		// the nested cost in full.
 		failNested = false;
 		let secondPassThrew = false;
 		try { lib.attributeClaudeSubAgentCosts(interactions); } catch { secondPassThrew = true; }

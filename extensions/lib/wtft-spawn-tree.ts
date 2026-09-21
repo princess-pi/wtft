@@ -96,8 +96,9 @@ export interface SpawnTreeOptions {
 	ledgerPath?: string;
 	maxDepth?: number;
 	/** Session ids whose cost is ALREADY in the caller's self total, so the walk
-	 *  must not add them again. */
-	alreadyAttributed?: Set<string>;
+	 *  must not add them again. A thunk is called only when the root has an edge:
+	 *  deriving the set costs subagent discovery. */
+	alreadyAttributed?: Set<string> | (() => Set<string>);
 }
 
 /** Subtract every numeric field of `from` from `into`, clamped at zero.
@@ -223,7 +224,8 @@ export function computeSpawnTree(
 	type Outcome = "counted" | "unresolved" | "in-self" | "folded";
 	const outcomeOf = new Map<string, Outcome>([[rootSessionId, "in-self"]]);
 	const foldCache = new Map<string, Set<string>>();
-	for (const id of foldedTransitively(options.alreadyAttributed ?? [], foldCache)) outcomeOf.set(id, "in-self");
+	const attributed = typeof options.alreadyAttributed === "function" ? options.alreadyAttributed() : options.alreadyAttributed;
+	for (const id of foldedTransitively(attributed ?? [], foldCache)) outcomeOf.set(id, "in-self");
 	const visited = new Set<string>([rootSessionId]);
 	/** What each counted session contributed, so a descendant that ALSO folds it
 	 *  in can have it subtracted back out. */

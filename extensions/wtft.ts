@@ -12,7 +12,9 @@ import {
 	loadSubagentInteractionsChecked,
 	getTerminalWidth,
 	getVisualLength,
-	readClassifiedTagFile,
+	readTagFileWithVerdict,
+	describeProvisionalReason,
+	type TagProvisional,
 	renderDaemonStatus,
 	getTagPath,
 	getDaemonPidPath,
@@ -44,11 +46,23 @@ let _currentThinkingLevel: string | undefined;
 // warns on stderr, which the TUI never shows.
 let _subagentUnreadable = false;
 const PROVISIONAL_LINE = "\x1b[33m⚠ some transcripts could not be counted — total is provisional\x1b[0m";
+// The tag's own verdict, which the widget's discovery cannot see (daemon-side).
+let _tagProvisional: { verdict: TagProvisional; tagPath: string } | null = null;
 
-/** `text` plus the provisional line when the last `readInteractions` dropped a
- *  transcript — for the surfaces that print a total outside the widget. */
+/** One line per cause: the two have different remedies. */
+function provisionalLines(): string[] {
+	const lines: string[] = [];
+	if (_tagProvisional?.verdict.provisional) {
+		lines.push(`\x1b[33m⚠ ${describeProvisionalReason(_tagProvisional.verdict, _tagProvisional.tagPath)} — total is provisional\x1b[0m`);
+	}
+	if (_subagentUnreadable) lines.push(PROVISIONAL_LINE);
+	return lines;
+}
+
+/** `text` plus the provisional lines from the last `readInteractions` — for
+ *  the surfaces that print a total outside the widget. */
 function withProvisionalLine(text: string): string {
-	return _subagentUnreadable ? `${text}\n${PROVISIONAL_LINE}` : text;
+	return [text, ...provisionalLines()].join("\n");
 }
 
 // The files the render's own discovery listed, so the spawn tree does not
@@ -153,7 +167,7 @@ function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | und
 		// every subagent session into SELF, so a spawner that also records one
 		// as a ledger edge would bill it in TOTAL and again in SPAWNED.
 		return computeSpawnTree(path.basename(sessionFile).replace(/\.jsonl$/i, ""), {
-			alreadyAttributed: collectSelfAttributedSessionIds(sessionFile, interactions, _subagentFiles),
+			alreadyAttributed: () => collectSelfAttributedSessionIds(sessionFile, interactions, _subagentFiles),
 		});
 	} catch {
 		return undefined;
@@ -162,10 +176,12 @@ function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | und
 
 function readInteractions(ctx: any): Interaction[] {
 	_subagentUnreadable = false;
+	_tagProvisional = null;
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	if (!sessionFile) return [];
 	const tagPath = getTagPath(sessionFile);
-	const mainInteractions = readClassifiedTagFile(tagPath);
+	const { interactions: mainInteractions, provisional } = readTagFileWithVerdict(tagPath);
+	_tagProvisional = { verdict: provisional, tagPath };
 
 	// render main interactions only rather than crash the widget on every
 	// refresh.
@@ -261,9 +277,7 @@ function updateWtftWidget(
 		const widgetLines = parserStatusStr
 			? [emptyLine, parserStatusStr.trim()]
 			: [emptyLine];
-		if (_subagentUnreadable) {
-			widgetLines.push(PROVISIONAL_LINE);
-		}
+		widgetLines.push(...provisionalLines());
 		ctx.ui.setWidget("wtft", widgetLines, { placement: "belowEditor" });
 		return;
 	}
@@ -288,9 +302,7 @@ function updateWtftWidget(
 		}
 	}
 
-	if (_subagentUnreadable) {
-		lines.push(PROVISIONAL_LINE);
-	}
+	lines.push(...provisionalLines());
 
 	ctx.ui.setWidget("wtft", lines, { placement: "belowEditor" });
 }
@@ -484,7 +496,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 					ctx.ui.notify(withProvisionalLine("No cost history found to display in the pager."), "warning");
 					return;
 				}
-				if (_subagentUnreadable) lines.push(PROVISIONAL_LINE);
+				lines.push(...provisionalLines());
 
 				await ctx.ui.custom((tui, _theme, _keybindings, done) => {
 					return new PagerComponent(lines, () => done(null));

@@ -73,6 +73,7 @@ import {
 	checkDaemonHealth,
 	IDLE_THRESHOLD_MS,
 	WTFT_TAGGER_VERSION,
+	describeProvisionalReason,
 	splitOverheadCost,
 	serializeClassifiedWithOverheadSplit,
 	isInterruptMarker,
@@ -359,17 +360,6 @@ function unpricedModelWarning(model: string): string {
 		`Add an entry to ${getUserPricingPath()} (no rebuild needed).`;
 }
 
-function describeProvisionalReason(provisional: { reason: string | null }, tagPath: string): string {
-	if (provisional.reason === "stale-version") {
-		const v = path.basename(tagPath).match(/\.wtft-tag\.v([^/]+)\.jsonl$/)?.[1] ?? "?";
-		return `this tag was written by tagger v${v}, not v${WTFT_TAGGER_VERSION}`;
-	}
-	if (provisional.reason === "subagent-unreadable") {
-		return "a subagent session file could not be read, so its cost may be missing";
-	}
-	return "no subagent transcript has been read since this tag was written";
-}
-
 /** The one action that ends the provisional state. Does not name `-F` (that deletes the tag and falls through here). */
 function describeProvisionalRemedy(provisional: { reason: string | null }): string {
 	return provisional.reason === "subagent-unreadable"
@@ -648,14 +638,22 @@ async function main() {
 	}
 
 	// Memoised lineage. No try/catch: computeSpawnTree reports ledger failure as ledgerError.
-	let spawnTreeCache: SpawnTree | null = null;
-	const sessionSpawnTree = (): SpawnTree => {
-		if (spawnTreeCache) return spawnTreeCache;
+	// Keyed by mode: the pending tree excludes nothing and must never serve a full arm.
+	const spawnTreeCache = new Map<boolean, SpawnTree>();
+	// `pending`: the session log is absent, so nothing of it is in SELF to exclude.
+	const sessionSpawnTree = (opt: { pending?: boolean } = {}): SpawnTree => {
+		const pending = opt.pending === true;
+		const cached = spawnTreeCache.get(pending);
+		if (cached) return cached;
 		const sessionId = path.basename(finalSessionPath).replace(/\.jsonl$/i, "");
 		// Exclude ids already in SELF so a dual-mechanism spawn is not billed twice.
-		return (spawnTreeCache = computeSpawnTree(sessionId, {
-			alreadyAttributed: collectSelfAttributedSessionIds(finalSessionPath, interactions, discoverOnce().files),
-		}));
+		const tree = computeSpawnTree(sessionId, {
+			alreadyAttributed: pending
+				? new Set<string>()
+				: () => collectSelfAttributedSessionIds(finalSessionPath, interactions, discoverOnce().files),
+		});
+		spawnTreeCache.set(pending, tree);
+		return tree;
 	};
 
 	// ---
@@ -717,7 +715,7 @@ async function main() {
 		warnProvisionalOnce();
 		// SPAWNED block under `--tokens` even when own total is empty (matches populated path).
 		if (opts.tokens) {
-			const emptyArmTree = renderSpawnTree(emptyTotals(), sessionSpawnTree());
+			const emptyArmTree = renderSpawnTree(emptyTotals(), sessionSpawnTree({ pending: opt.pending }));
 			if (emptyArmTree) process.stdout.write(emptyArmTree);
 		}
 		// exitCode, never process.exit — stdout is async on a pipe.
@@ -753,7 +751,7 @@ async function main() {
 			provisional,
 			uncounted,
 			// Ledger read on pending too — a handmade empty tree would claim "looked, found nothing".
-			spawned: sessionSpawnTree(),
+			spawned: sessionSpawnTree({ pending: opt.pending }),
 			// Omit key when incomplete — empty array means "looked, found none".
 			...(subagentJson?.rows ? { subagents: subagentJson.rows } : {}),
 			notices: [...(opt.notices ?? []), ...(subagentJson?.notices ?? [])],

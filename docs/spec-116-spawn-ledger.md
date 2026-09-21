@@ -562,8 +562,8 @@ and the tempting move was to relax the assertion.
 | `in-self-total` reported for an id folded into a DESCENDANT, where the money is in `spawned.total` rather than in `total` | **#131** — decided B: the id reports `already-counted`; fixed |
 | An `in-self` child is queued but never parsed, so a grandchild it folded in could be billed twice | **#132** — verified: the fold is recursive, so it was billed twice; the walk now closes both fold sets transitively |
 | A live descendant is priced from a one-shot parse and reported as settled, with no `provisional` | Semantics to pin down; no field currently says the tree may still grow |
-| Self-attribution discovery runs eagerly even when the ledger holds no edges for the session | Advisory, performance only |
-| The widget swallows spawn-tree throws into a silence identical to "spawned nothing" | Advisory; the CLI reports `ledgerError`, the widget does not |
+| Self-attribution discovery runs eagerly even when the ledger holds no edges for the session | **#134 B** — fixed: `alreadyAttributed` takes a thunk, called only when the root has an edge (spec-176) |
+| The widget swallows spawn-tree throws into a silence identical to "spawned nothing" | **#134 A** — an unreadable ledger reaches the widget as `ledgerError`, pinned by spec-176's test; any other throw still renders no block |
 
 ## Review round 5 — the ceiling, and the regressions round 4 shipped
 
@@ -614,7 +614,7 @@ rather than spec sections so they can be listed, assigned and closed.
 | `in-self-total` names `total` when the money is in `spawned.total` | **#131** — fixed: decided B |
 | A double-count guard that misses ids already marked `in-self`, from `alreadyAttributed` or from an earlier descendant | **#132** — the grandchild case is fixed: both fold sets are closed transitively, for every member that resolves. A descendant folding an id already marked `in-self` or `folded` is **#180** |
 | A live descendant priced from a one-shot parse and reported as settled | **#133** — Duppy |
-| The widget's silent failure, and eager discovery on the no-edge path | **#134** — Princess Pi |
+| The widget's silent failure, and eager discovery on the no-edge path | **#134** — fixed by spec-176 |
 | The in-self set re-derived at CLI time and compared against a total the daemon folded earlier; and the pending arm re-deriving what `pending` was meant to freeze | **#135** — Princess Pi |
 
 **The stop rule held.** Two rounds of re-discovered findings is the signal to stop and report,

@@ -58,9 +58,9 @@ read path rediscovers which sessions were folded.
 - **Widget in-self set = `folded` ∪ the subagent transcripts (Task children and Pi sibling
   sessions) the widget merged into SELF itself, not the ones that failed to load, ∪ the sessions
   those transcripts' parses folded on model-tagged turns.** The widget's own read discovers those
-  transcripts to merge them; building the in-self set
-  discovers nothing more. `collectSelfAttributedSessionIds` becomes a pure union of what it is
-  handed.
+  transcripts to merge them; building the in-self set discovers nothing more.
+  `collectSelfAttributedSessionIds` is a union of what it is handed, keeping only the folds on
+  deduplicated, model-tagged turns, which is the daemon's rule.
 
 ### Parser — folds carry their shares
 
@@ -169,6 +169,10 @@ The loop stopped at round 3, where the findings were re-discovered, declined, or
 | manifest `--tokens` | UNCOUNTED line on every surface; no mention of SPAWNED/TREE | CLI only; the block exists | `reconciled-against-untested` | Scoped and added |
 | CONTEXT | no entry for "fold record" | the term is new | — | Entry added |
 | this spec's test | W1/W2 rest on the unreadable or moved transcript; P3, R3 and E1 lacked preconditions | the skip is decided before any read; each check could pass vacuously | — | Preconditions W1a, W2a, W6a, U0, E0 added; messages corrected |
+| this spec (pre-PR review) | the widget's union takes every fold its merged interactions carry | the daemon and the walk skip folds on untagged turns | ✅ U2 | **Code fixed**: same filter in `collectSelfAttributedSessionIds` |
+| `collectSelfAttributedSessionIds` (pre-PR review) | first argument typed `Iterable<string>` | a session path string type-checks and yields a set of characters | typecheck | **Code fixed**: `ReadonlySet<string> \| readonly string[]` |
+| this spec (pre-PR review) | a pre-2.9.0 tag's empty in-self set | the first run after the bump can double-count until the daemon rewrites the tag | — | Declined as code; stated under "The transition, accepted" |
+| this spec (Macroscope, PR #201) | the widget's set names Task transcripts only | Pi siblings are merged too | — | Named |
 
 Declined, each checked against the code:
 - **A fold-only tag reads settled.** `hasClassified` counts a `_fold` line.

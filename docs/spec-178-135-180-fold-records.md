@@ -9,10 +9,11 @@
 ## The contract
 
 `total` is what the daemon folded into the tag. The spawn walk must skip exactly the sessions
-inside `total`, so it needs the same fact the daemon had when it folded. Rediscovering that set
-at read time against the filesystem, as it is at read time, is not the same fact. The two drift
-in both directions: a child the daemon never folded is dropped from both `total` and `spawned.total` (#135 A), and
-a child that has since moved is counted in both (#178).
+inside `total`, so it needs the same fact the daemon had when it folded. Before this change the
+CLI rediscovered that set at read time, against the filesystem as it is at read time, which is
+not the same fact. The two drifted in both directions: a child the daemon never folded was
+dropped from both `total` and `spawned.total` (#135 A), and a child that had since moved was
+counted in both (#178).
 
 So **the daemon records every session it folds, and the CLI reads the record.** Nothing on the
 read path rediscovers which sessions were folded.
@@ -22,8 +23,9 @@ read path rediscovers which sessions were folded.
 ### Tag format — the fold record
 
 - **A fourth line kind:** `{"_fold":{"parent":"<session id>","child":"<session id>"}}`.
-  `parent` is the tag's own session id (the transcript's filename without `.jsonl`); `child` is a
-  session whose transcript the daemon folded into this tag. Readers key on `child`; `parent` is
+  `parent` is the tag's own session id (the transcript's filename without `.jsonl`). `child` is
+  the filename without `.jsonl` of a transcript the daemon folded into this tag: the session id
+  for a `claude -p` child, `agent-<hex>` for a Task child. Readers key on `child`; `parent` is
   there for a human reading the file.
 - **Written by `syncSubagentTranscript`**, the daemon's one fold point, for Task children and
   `claude -p` children alike. Whenever a parse of a child transcript succeeds, the daemon records
@@ -37,8 +39,8 @@ read path rediscovers which sessions were folded.
   interaction line: the daemon sets `tagGrewSinceMarker`, and a tag whose last data line is a
   fold record reads `unswept`.
 - **`WTFT_TAGGER_VERSION` 2.8.2 → 2.9.0.** A tag written before this change has no fold
-  records. It is already a `stale-version` tag: the report is provisional for that reason, and
-  the in-self set it yields is empty.
+  records, because its writer wrote none, so the in-self set it yields is empty. It is also a
+  `stale-version` tag, so the report is provisional for that reason.
 - **No generation field yet.** Rotation generations are P4 (#114). The record is keyed by
   session id, so a generation can be added later without changing the key.
 

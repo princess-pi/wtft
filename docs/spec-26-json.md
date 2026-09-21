@@ -242,8 +242,8 @@ supplies its own budget.
 deliberate: `uncounted` is a separate scan of the session files and is passed in;
 `spawned` is the ledger walk and is passed in; and `tree` is the one piece of
 arithmetic the function performs itself, `treeTotals(summary.total,
-input.spawned)` — an addition of two results of the aggregation above, which is
-why it is not a fourth way of counting. `notices` is the only input with a
+input.spawned)` — an addition of `total` and `spawned.total`, each already
+computed, which is why it is not a fourth way of counting. `notices` is the only input with a
 default; `uncounted` and `spawned` are required-not-defaulted, so an empty one
 always means "looked, found none".
 

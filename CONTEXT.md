@@ -388,7 +388,7 @@ from **uncounted** (#149), a billable event the harness records no `usage` for; 
 skips that are *not* gaps — `already-counted` (a diamond, a cycle among descendants, or a `claude -p`
 session a descendant's parse folded in, whose money landed once in `spawned.total`),
 `already-seen-unresolved` (a second edge onto a child the first visit could not read, whose gap is
-already reported), `in-self-total` (a child whose cost is already inside `total`, at any fold depth) and
+already reported), `in-self-total` (a child whose cost is already inside `total`, at any fold depth, or the reported session itself reached round a cycle) and
 `depth-capped` (past the walk's bound).
 _Avoid_: Missing, lost, dropped (the edge is known; only the amount is not)
 

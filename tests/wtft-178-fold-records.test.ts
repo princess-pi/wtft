@@ -84,7 +84,7 @@ console.log("\nPART P — root → claude -p child → grandchild: one fold list
 		`P2 each share is that session's own turns: child 300, grandchild 700 (got ${byId.get(CHILD)?.outputTokens}, ${byId.get(GRAND)?.outputTokens})`);
 	const spawner = parsed.find(i => foldsOf([i]).length > 0)!;
 	const shareSum = folds.reduce((n, f) => n + f.share.outputTokens, 0);
-	check(spawner.outputTokens - 100 === shareSum,
+	check(spawner.outputTokens === 1100 && spawner.outputTokens - 100 === shareSum,
 		`P3 the shares sum to exactly what the fold added to the turn (added ${spawner.outputTokens - 100}, shares ${shareSum})`);
 }
 
@@ -126,7 +126,7 @@ console.log("\nPART R — readTagFileWithVerdict returns `folded`");
 console.log("\nPART U — foldRecordIds: a fold on an untagged turn is not recorded");
 
 {
-	const ROOT = uuid(91), X = uuid(92), Y = uuid(93);
+	const X = uuid(92), Y = uuid(93);
 	putSession(X, T0 + 4_000, 700);
 	putSession(Y, T0 + 4_000, 500);
 	const childPath = path.join(dir, `u-child.jsonl`);
@@ -135,8 +135,8 @@ console.log("\nPART U — foldRecordIds: a fold on an untagged turn is not recor
 	const carriers = deduped.filter(i => foldsOf([i]).length > 0).map(i => i.model);
 	check(carriers.includes("<synthetic>") && carriers.includes("claude-sonnet-4-6"),
 		`U0 fixture precondition: one fold rides the untagged turn, one the tagged turn (got ${JSON.stringify(carriers)})`);
-	const ids = foldRecordIds(ROOT, deduped);
-	check(ids.includes(ROOT) && ids.includes(Y) && !ids.includes(X),
+	const ids = foldRecordIds("u-child", deduped);
+	check(ids[0] === "u-child" && ids.includes(Y) && !ids.includes(X),
 		`U1 the child and the tagged turn's fold are recorded; the untagged turn's fold is not (got ${JSON.stringify(ids)})`);
 }
 
@@ -250,8 +250,13 @@ function ledgerOf(edges: Array<[parent: string, child: string]>): string {
 	fs.writeFileSync(newer, turnLine(`turn-${X}-copy`, T0 + 4_000, 700));
 	fs.utimesSync(newer, new Date(), new Date(Date.now() + 60_000));
 	fs.chmodSync(newer, 0o000);
+	let newerUnreadable = false;
+	try { fs.readFileSync(newer); } catch { newerUnreadable = true; }
+	const resolvesToNewer = resolveSessionFile(X) === newer;
 	const tree = computeSpawnTree(ROOT, { ledgerPath: ledgerOf([[ROOT, X], [ROOT, D]]), alreadyAttributed: new Set() });
 	fs.chmodSync(newer, 0o644);
+	check(newerUnreadable && resolvesToNewer,
+		"W6a fixture precondition: X resolves to its newest copy, which cannot be read");
 	check(tree.edges[0]?.skip === "unreadable",
 		`W6 X's own edge keeps the skip it was reported with, unreadable, after D's parse covers it (skip ${tree.edges[0]?.skip})`);
 	check(tree.unattributed.length === 0 && tree.total.outputTokens === 1000,
@@ -292,12 +297,14 @@ console.log("\nPART E — wtft --json with a fold-recorded child moved to anothe
 		const parentDir = path.join(dir, `e-parent-${withRecord}`);
 		fs.mkdirSync(path.join(parentDir, "wtft-tags"), { recursive: true });
 		const session = path.join(parentDir, `${PARENT}.jsonl`);
-		fs.writeFileSync(session, turnLine("turn-parent-e", T0, 100, cwdOf(CHILD)));
+		const sessionContent = turnLine("turn-parent-e", T0, 100, cwdOf(CHILD));
+		fs.writeFileSync(session, sessionContent);
 		const line = (o: unknown) => JSON.stringify(o) + "\n";
 		fs.writeFileSync(path.join(parentDir, "wtft-tags", `${PARENT}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`),
 			line({ t: T0, c: 0.02, cat: "agents", f: [], cmd: [`cd ${cwdOf(CHILD)} && claude -p "go"`], id: "msg-parent-e", m: "claude-sonnet-4-6", in: 1000, out: 100 })
 			+ line({ t: T0 + 2_000, c: 0.0075, cat: "code", f: [], cmd: [], id: `turn-${CHILD}`, m: "claude-sonnet-4-6", in: 1000, out: 300 })
 			+ (withRecord ? line({ _fold: { parent: PARENT, child: CHILD } }) : "")
+			+ line({ _meta: { offset: Buffer.byteLength(sessionContent) } })
 			+ line({ _meta: { swept: T0 + 3_000 } }));
 		const r = spawnSync(process.execPath, [path.join(REPO_ROOT, "bin", "wtft.mjs"), "-s", session, "--json"], {
 			cwd: REPO_ROOT, encoding: "utf8", timeout: 60_000, stdio: ["ignore", "pipe", "pipe"],
@@ -307,6 +314,8 @@ console.log("\nPART E — wtft --json with a fold-recorded child moved to anothe
 	};
 	const recorded = run(true);
 	const edge = recorded?.spawned?.edges?.[0];
+	check(recorded?.total?.outputTokens === 400,
+		`E0 fixture precondition: the tag's total holds the parent's 100 and the child's 300 (got ${recorded?.total?.outputTokens})`);
 	check(edge?.skip === "in-self-total" && recorded?.tree?.outputTokens === recorded?.total?.outputTokens && recorded?.tree?.costUsd === recorded?.total?.costUsd,
 		`E1 #178 the recorded child is in-self-total, and tree equals total in cost and tokens (skip ${edge?.skip}, tree $${recorded?.tree?.costUsd}, total $${recorded?.total?.costUsd})`);
 	const unrecorded = run(false);

@@ -35,12 +35,14 @@ def apply(path, dels, keeps):
         indent = s[: len(s) - len(s.lstrip())]
         st = s.strip()
         prefix = "// " if st.startswith("//") else ("* " if st.startswith("*") else None)
-        if prefix is None:
-            sys.exit(f"{path}:{n}: K on a non-comment line")
+        if prefix is None or "*/" in st:
+            sys.exit(f"{path}:{n}: K only rewrites a // line or a block's interior line")
         out[n - 1] = indent + ("// " if prefix == "// " else "* ") + t
     for n in dels:
         if not lines[n - 1].strip().startswith(("//", "/*", "*")) and lines[n - 1].strip():
             sys.exit(f"{path}:{n}: D on a code line: {lines[n-1]!r}")
+        if "*/" in lines[n - 1] and lines[n - 1].split("*/", 1)[1].strip():
+            sys.exit(f"{path}:{n}: D on a line with code after */: {lines[n-1]!r}")
     keep = [k not in dels for k in range(1, len(lines) + 1)]
     new = [out.get(k, l) for k, l in enumerate(lines)]
     for a, b in blocks(lines):

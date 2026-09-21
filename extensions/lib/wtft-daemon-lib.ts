@@ -131,7 +131,7 @@ export function dedupeClassifiedById(interactions: Interaction[]): Interaction[]
 	return out;
 }
 
-export type TagProvisionalReason = "stale-version" | "unswept" | "subagent-unreadable";
+export type TagProvisionalReason = "stale-version" | "unswept" | "subagent-unreadable" | "descendant-live";
 
 export interface TagProvisional {
 	provisional: boolean;

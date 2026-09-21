@@ -367,11 +367,17 @@ function describeProvisionalReason(provisional: { reason: string | null }, tagPa
 	if (provisional.reason === "subagent-unreadable") {
 		return "a subagent session file could not be read, so its cost may be missing";
 	}
+	if (provisional.reason === "descendant-live") {
+		return "a descendant session wrote to its transcript within the last 2 minutes, so the tree total may still grow";
+	}
 	return "no subagent transcript has been read since this tag was written";
 }
 
 /** The one action that ends the provisional state. Does not name `-F` (that deletes the tag and falls through here). */
 function describeProvisionalRemedy(provisional: { reason: string | null }): string {
+	if (provisional.reason === "descendant-live") {
+		return "run wtft again once every descendant has been quiet for 2 minutes";
+	}
 	return provisional.reason === "subagent-unreadable"
 		? "restore the unreadable session file's readability, then run wtft again — the daemon re-reads it on its next poll, and wtft reads it directly on the --tokens and --json paths"
 		: "The daemon is rebuilding this tag now — run wtft again in a moment to read the settled total";
@@ -653,9 +659,14 @@ async function main() {
 		if (spawnTreeCache) return spawnTreeCache;
 		const sessionId = path.basename(finalSessionPath).replace(/\.jsonl$/i, "");
 		// Exclude ids already in SELF so a dual-mechanism spawn is not billed twice.
-		return (spawnTreeCache = computeSpawnTree(sessionId, {
+		spawnTreeCache = computeSpawnTree(sessionId, {
 			alreadyAttributed: collectSelfAttributedSessionIds(finalSessionPath, interactions, discoverOnce().files),
-		}));
+		});
+		// An earlier reason is kept: a run reports one reason.
+		if (!provisional.provisional && spawnTreeCache.edges.some(e => e.live)) {
+			provisional = { provisional: true, reason: "descendant-live" };
+		}
+		return spawnTreeCache;
 	};
 
 	// ---
@@ -714,12 +725,11 @@ async function main() {
 	// `pending` pins "file absent" decided before awaitDaemonUp — do not re-derive after.
 	const finishEmptyReport = (opt: { pending?: boolean } = {}) => {
 		if (!opt.pending) scanSessionUncounted();
+		// Before the warning and the exit code: the tree can set `provisional`.
+		const emptyArmTree = opts.tokens ? renderSpawnTree(emptyTotals(), sessionSpawnTree()) : "";
 		warnProvisionalOnce();
 		// SPAWNED block under `--tokens` even when own total is empty (matches populated path).
-		if (opts.tokens) {
-			const emptyArmTree = renderSpawnTree(emptyTotals(), sessionSpawnTree());
-			if (emptyArmTree) process.stdout.write(emptyArmTree);
-		}
+		if (emptyArmTree) process.stdout.write(emptyArmTree);
 		// exitCode, never process.exit — stdout is async on a pipe.
 		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
 	};
@@ -742,6 +752,8 @@ async function main() {
 	const emitSessionJson = (opt: { notices?: WtftNotice[]; pending?: boolean } = {}) => {
 		const uncounted = opt.pending ? newUncountedBillables() : scanSessionUncounted();
 		const subagentJson = opt.pending ? undefined : collectSubagentJson();
+		// Before `provisional` is read: the tree can set it.
+		const spawned = sessionSpawnTree();
 		const doc = buildSessionJson({
 			interactions,
 			session: {
@@ -753,7 +765,7 @@ async function main() {
 			provisional,
 			uncounted,
 			// Ledger read on pending too — a handmade empty tree would claim "looked, found nothing".
-			spawned: sessionSpawnTree(),
+			spawned,
 			// Omit key when incomplete — empty array means "looked, found none".
 			...(subagentJson?.rows ? { subagents: subagentJson.rows } : {}),
 			notices: [...(opt.notices ?? []), ...(subagentJson?.notices ?? [])],

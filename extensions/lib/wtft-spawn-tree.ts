@@ -4,8 +4,10 @@ import { readSpawnLedger, type SpawnLedger } from "./wtft-spawn-ledger.js";
 import { getDiscoveries } from "./harness/registry.js";
 import { parseSessionFile, type Interaction } from "./wtft-parser.js";
 import { computeSessionSummary, emptyTotals, type TokenTotals } from "./wtft-renderer.js";
+import { IDLE_THRESHOLD_MS } from "./wtft-daemon-lib.js";
+import * as fs from "node:fs";
 
-export const SPAWN_TREE_SCHEMA = "wtft/spawn-tree@1";
+export const SPAWN_TREE_SCHEMA = "wtft/spawn-tree@2";
 
 /**
  * Default recursion bound. A `pr-review` lens child spawns its own children, so
@@ -56,6 +58,9 @@ export interface SpawnTreeEdge {
 	 *  unattributed report is that we do not have one. */
 	total: TokenTotals | null;
 	skip?: SpawnEdgeSkip;
+	/** Counted edges only: the transcript grew within `IDLE_THRESHOLD_MS`, so
+	 *  its total was priced mid-write and may still grow. */
+	live?: boolean;
 }
 
 export interface SpawnTreeGap {
@@ -98,6 +103,7 @@ export interface SpawnTreeOptions {
 	/** Session ids whose cost is ALREADY in the caller's self total, so the walk
 	 *  must not add them again. */
 	alreadyAttributed?: Set<string>;
+	now?: number;
 }
 
 /** Subtract every numeric field of `from` from `into`, clamped at zero.
@@ -185,11 +191,21 @@ export function resolveSessionFile(sessionId: string): string | null {
  * root's money IS the self total, so an edge back to it is neither a gap nor a
  * second count.
  */
+/** An unstat-able file was just parsed, so it is not quiet: live. */
+function isLive(file: string, now: number): boolean {
+	try {
+		return now - fs.statSync(file).mtimeMs < IDLE_THRESHOLD_MS;
+	} catch {
+		return true;
+	}
+}
+
 export function computeSpawnTree(
 	rootSessionId: string,
 	options: SpawnTreeOptions = {},
 ): SpawnTree {
 	const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
+	const now = options.now ?? Date.now();
 
 	// The read is owned HERE, with NO way for a caller to supply its own ledger:
 	// a failure becomes `ledgerError`, never an empty tree that reads as "this
@@ -319,7 +335,7 @@ export function computeSpawnTree(
 			outcomeOf.set(edge.child, "counted");
 			countedTotals.set(edge.child, { ...total });
 			addTotals(tree.total, total);
-			tree.edges.push({ ...base, resolved: true, path: file, total });
+			tree.edges.push({ ...base, resolved: true, path: file, total, live: isLive(file, now) });
 			visited.add(edge.child);
 			queue.push({ parentId: edge.child, depth: depth + 1 });
 		}

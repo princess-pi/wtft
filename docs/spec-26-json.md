@@ -86,9 +86,10 @@ contract.
     "descendants": 1,
     "edges": [ { "parent": "…", "child": "…", "mechanism": "pr-review-lens",
                  "ts": "2026-09-16T05:00:00Z", "label": "correctness", "depth": 1,
-                 "resolved": true, "live": false, "path": "/home/u/.claude/projects/-tmp-x/….jsonl",
+                 "resolved": true, "path": "/home/u/.claude/projects/-tmp-x/….jsonl",
                  "total": { "costUsd": 12.34, "inputTokens": 0, "outputTokens": 0,
-                            "reasoningTokens": 0, "cacheReadTokens": 0, "cacheWriteTokens": 0 } } ],
+                            "reasoningTokens": 0, "cacheReadTokens": 0, "cacheWriteTokens": 0 },
+                 "live": false } ],
     "unattributed": [],
     "depthCapped": 0,
     "maxDepth": 5,
@@ -266,7 +267,7 @@ Codes 0 and 9 both carry a complete object; a consumer that wants only settled
 numbers checks `$?` **or** `.provisional.provisional` and gets the same answer.
 
 **One incompleteness has no exit code**, deliberately: a `spawned.ledgerError`
-leaves `$?` at 0. Exit 9 means *this total may still grow*, and
+leaves `$?` at 0. Exit 9 means *a number in this report may still change*, and
 `provisional.reason` is a closed four-value vocabulary — widening either to
 cover an unreadable ledger would change what a settled 0 means for every
 consumer that has one. A reader who cares about lineage branches on the field.

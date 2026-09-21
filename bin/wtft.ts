@@ -935,7 +935,7 @@ async function main() {
 	// ---
 	if (provisional.provisional) {
 		const why = describeProvisionalReason(provisional, tagPath);
-		console.error(`\x1b[33m⚠ PROVISIONAL: this total may still grow — ${why}.\x1b[0m`);
+		console.error(`\x1b[33m⚠ PROVISIONAL: a number in this report may still change — ${why}.\x1b[0m`);
 		const remedy = describeProvisionalRemedy(provisional);
 		console.error(`\x1b[90m  ${remedy}. Exit ${EXIT_PROVISIONAL}.\x1b[0m`);
 		process.exitCode = EXIT_PROVISIONAL;

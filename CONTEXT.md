@@ -382,6 +382,6 @@ _Avoid_: Missing, lost, dropped (the edge is known; only the amount is not)
 The state where the spawn ledger itself could not be READ — `spawned.ledgerError` in JSON,
 `"spawn ledger could not be read (#116) — descendants unknown, not zero"` in the table. It is
 deliberately not the same report as "this session spawned nothing", which is silence, and it is
-reported through neither exit 9 nor `provisional.reason`: those mean "may still grow under the
-daemon", a different fact.
+reported through neither exit 9 nor `provisional.reason`: those mean "a number in this report
+may still change", a different fact.
 _Avoid_: Empty tree, no descendants, zero (each states the thing we could not determine)

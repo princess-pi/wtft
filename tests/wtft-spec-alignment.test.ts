@@ -521,7 +521,7 @@ try {
 	//    not a fact worth pinning on its own).
 	const fences = [...specSrc.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => m[1]);
 	const example = fences.find((f) => f.includes(`"schema": "${"wtft/session@5"}"`));
-	assert.ok(example, "docs/spec-26-json.md has no ```json example carrying the @4 schema string");
+	assert.ok(example, "docs/spec-26-json.md has no ```json example carrying the current schema string");
 	const exampleKeys = [...example!.matchAll(/^ {2}"(\w+)":/gm)].map((m) => m[1]);
 
 	assert.ok(litKeys.length > 5, `parsed only ${litKeys.length} keys from the literal — the regex has drifted`);

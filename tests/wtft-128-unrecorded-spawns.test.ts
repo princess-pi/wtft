@@ -211,7 +211,7 @@ check(rows.length === 3, `T14 exactly the three expected rows (got ${rows.map(r 
 	const text = renderSpawnTree(emptyTotals(), tree);
 	check(/named\s+\/tmp\/pr-review\./.test(text),
 		"R1 a named row prints on its own, under its cwd (fitted to its column)");
-	check(/inferred\s+1 in this repo's worktrees\s+\$/.test(text) && /inferred\s+1 in temp sandboxes\s+\$/.test(text),
+	check(/inferred\s+1 in this repo's checkouts\s+\$/.test(text) && /inferred\s+1 in temp sandboxes\s+\$/.test(text),
 		`R2 inferred rows collapse to one line per basis:\n${text}`);
 	check(/UNRECORDED 3 session\(s\)/.test(text), "R3 the header counts every row");
 }

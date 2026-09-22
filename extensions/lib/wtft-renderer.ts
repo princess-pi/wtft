@@ -1735,7 +1735,7 @@ function renderUnrecordedSpawns(rows: UnrecordedSpawn[] | undefined): string {
 	for (const row of rows.filter(r => r.tier === "named")) {
 		out += line("named", row.cwd, row.total ? formatCost(row.total.costUsd) : `(${row.skip ?? "unreadable"})`);
 	}
-	const where: Record<string, string> = { worktree: "in this repo's worktrees", tmp: "in temp sandboxes" };
+	const where: Record<string, string> = { worktree: "in this repo's checkouts", tmp: "in temp sandboxes" };
 	for (const basis of ["worktree", "tmp"] as const) {
 		const group = rows.filter(r => r.tier === "inferred" && r.basis === basis);
 		if (group.length === 0) continue;

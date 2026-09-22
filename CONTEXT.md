@@ -411,7 +411,8 @@ already reported), `in-self-total` (a child whose cost is already inside `total`
 _Avoid_: Missing, lost, dropped (the edge is known; only the amount is not)
 
 **Unrecorded spawn** (#128):
-A session that looks like this session's launcher child and that no spawn-ledger edge names —
+A session that looks like this session's launcher child, that no spawn-ledger edge names, and
+whose cost is not already counted —
 `spawned.unrecorded[]` in JSON, the `UNRECORDED` block under the CLI's `--tokens` (the widget
 has none). Claude Code sessions only. Listed with its own cost — `null`, never zero, when it
 cannot be parsed — a **tier** and a **basis**: `named` (basis `cwd-names-parent`: its `cwd`

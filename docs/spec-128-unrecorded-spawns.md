@@ -14,7 +14,7 @@ mechanism the ledger does not have: with no record there is no id to look up, so
 
 This change adds that mechanism as a **list**, never a claim. `spawned.unrecorded[]` names sessions
 that look like this session's children and that no ledger edge accounts for, each with its own
-cost and the reason it was listed. **Nothing in the list is ever summed into `tree` or `total`**,
+cost (`null` when it cannot be parsed) and the reason it was listed. **Nothing in the list is ever summed into `tree` or `total`**,
 and nothing in it changes the exit code.
 
 ## Who gets listed
@@ -29,7 +29,7 @@ command — the harness prunes by mtime, not by start time. A candidate is liste
 | **`inferred`** | The harness says a program started it (`entrypoint: sdk-cli`), its `cwd` is inside this repo's worktree fan-out or a temp sandbox, and its first timestamp falls inside a **launch span** | Probable — a guess, and labelled as one |
 
 Anything else is not listed. Outside `named`, a session a human started (`entrypoint: cli`) never
-is, which is what keeps a peer session out by construction rather than by a time window: measured
+is, which is what keeps a peer session out by construction rather than by timing: measured
 on this host, 934 of 946 human-started sessions (#128's decision comment). A `named` row is listed
 whoever started it, because the name is the evidence.
 
@@ -42,9 +42,10 @@ to start the scan, so `unrecorded` is `[]` without a look.
   can run with `TMPDIR` pointing somewhere else while launchers still use `/tmp`.
 - **Worktree fan-out** is `fanOutCwd` applied to this session's **last recorded** cwd — the repo
   and every checkout of it, the same rule the picker's `Ctrl+W` scope applies to its own target.
-  A candidate whose `cwd` is one of those directories or below one is inside it. It is empty when
-  that cwd is in no git repository — a directory outside a repo has no worktrees, so a child there
-  can only be `tmp` or `named` — and when the session records no cwd at all.
+  A candidate whose `cwd` is one of those directories or below one is inside it — the main clone
+  and this session's own checkout included, which is why `--tokens` says "checkouts". It is empty
+  when that cwd is in no git repository — a directory outside a repo has no worktrees, so a child
+  there can only be `tmp` or `named` — and when no cwd can be read from the transcript.
 - **The ledger could not be read** (`spawned.ledgerError`): no edge is known, so a session some
   other parent recorded cannot be excluded, and may be listed.
 
@@ -114,7 +115,8 @@ semantics and stay on the shared side.
 
 **Claude Code** implements it. It lists every project directory under the projects root, keeps
 the ones whose mtime is at or after `sinceMs` (creating a transcript updates its directory's mtime,
-so an older directory cannot hold a newer transcript), keeps each top-level `*.jsonl` whose own
+so a directory last written before `sinceMs` holds no transcript created after it; one created
+earlier and still being written is skipped, and it began too early to be in any launch span), keeps each top-level `*.jsonl` whose own
 mtime is at or after `sinceMs`, and reads the head of each for `timestamp`, `cwd` and `entrypoint`.
 `entrypoint: "sdk-cli"` is `program`, `"cli"` is `human`, anything else is `null`. A transcript
 or project directory that cannot be read comes back in `unreadable`, and the listing warns about
@@ -165,7 +167,8 @@ interface UnrecordedSpawn {
 
 - **`--json`:** `spawned.unrecorded[]`. `wtft/spawn-tree@2` → `@3` and `wtft/session@5` → `@6`,
   because a nested key was added. `[]` means looked and found none — or, for a session that ran
-  no command (the pending and no-data arms included), that there was no launch span to look in.
+  no command (the pending and no-data arms included), that there was no launch span to look in. A path the scan could not read
+  is reported on stderr only, so it too can sit behind a `[]`.
 - **`--tokens`, CLI only:** an `UNRECORDED` block, last, after the `UNCOUNTED` line and the
   `SPAWNED` block, shown whenever the list is non-empty — whether or not a `SPAWNED` block prints.
   The widget renders the same table without it.
@@ -177,7 +180,7 @@ interface UnrecordedSpawn {
   UNRECORDED 122 session(s) no spawn record names (#128) —
              NOT in TOTAL or TREE: a list, not a claim; every row is in --json
              named     /tmp/pr-review.<id>.bugs             $0.17
-             inferred  43 in this repo's worktrees          $3.77
+             inferred  43 in this repo's checkouts          $3.77
              inferred  78 in temp sandboxes                 $1.13
   ```
 
@@ -283,3 +286,8 @@ found in text this branch did not change is filed as
 | spec-114, spec-107 | the found-nothing arm is unbounded | bounded by this change | ✅ D3 | Fixed |
 | `[wtft]` warning | "may be missing"; "a session transcript" | `_Avoid_` "missing"; directories are reported too | n/a | Fixed |
 | test file | W1–W4 move with the constant; C5 and T12 vacuous; D3 names the wrong window | — | — | W0 added; C5, T12 deleted; D3 relabelled |
+| second pass: spec-26, spec-128 | "spawn window"; "each with its own cost"; `[]` meanings | rename missed in spec-26; null cost; an unreadable path also yields `[]` | ✅ T15 | Fixed |
+| second pass: spec-128, adding-a-harness | "every transcript written at or after `sinceMs`" | the directory prune skips a transcript created earlier | ✅ C4 | Fixed: "created at or after" |
+| second pass: adding-a-harness | no method → never listed; silent on throwing | `launchedBy: null` still allows `named`; the root read may throw | reconciled-against-untested | Fixed |
+| second pass: README, manifest, renderer | "in this repo's worktrees" | the fan-out includes the main clone and the session's own checkout | ✅ R2 | Label is now "checkouts" |
+| second pass: spec-128, spec-26 | Pi records nothing | `parentSession` exists, for siblings | n/a | Fixed |

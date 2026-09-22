@@ -22,12 +22,14 @@ interface HarnessDiscovery {
 }
 ```
 
-`listSpawnCandidates` is optional. It returns every transcript written at or after `sinceMs`,
-with its path, session id, recorded `cwd`, first timestamp, and `launchedBy` — `"program"`,
-`"human"`, or `null` when the transcript does not say — plus the paths it could not read. It
-feeds `spawned.unrecorded[]` (`docs/spec-128-unrecorded-spawns.md`). Leave it out when your
-transcripts cannot say who started them: your sessions are then never listed there, which is
-Pi's situation today.
+`listSpawnCandidates` is optional. It returns the transcripts created at or after `sinceMs`
+(one created earlier may be omitted), each with its path, session id, recorded `cwd`, first
+timestamp, and `launchedBy` — `"program"`, `"human"`, or `null` when the transcript does not say
+— plus the paths it could not read. It may throw for a failure that means it could not look at
+all; the report then fails with that error. It feeds `spawned.unrecorded[]`
+(`docs/spec-128-unrecorded-spawns.md`). With `launchedBy: null` everywhere your sessions can
+still be listed as `named`, never as `inferred`; leave the method out and they are never
+listed, which is Pi's situation today.
 
 `discover` returns candidates for a target directory. You decide what a `null` target
 means for your harness — Claude Code falls back to `process.cwd()`, Pi treats it as "no

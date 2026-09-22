@@ -159,13 +159,39 @@ function foldsInTotal(parsed: Interaction[]): Map<string, TokenTotals> {
  * session file and a recorded path would rot silently, while the id does not.
  */
 export function resolveSessionFile(sessionId: string): string | null {
-	for (const discovery of getDiscoveries()) {
-		try {
-			const found = discovery.resolveSessionById(sessionId);
-			if (found) return found;
-		} catch { /* a harness that cannot look is not an answer — ask the next */ }
-	}
-	return null;
+	return makeSessionResolver()(sessionId);
+}
+
+/**
+ * A resolver for one walk: each harness's index is built on first need and
+ * kept for the resolver's life, so N children cost one tree walk per harness
+ * rather than N. First harness to know an id wins, in registry order.
+ */
+export function makeSessionResolver(): (sessionId: string) => string | null {
+	const discoveries = getDiscoveries();
+	const indexes: (Map<string, string> | null | undefined)[] = discoveries.map(() => undefined);
+	const answers = new Map<string, string | null>();
+	return (sessionId: string) => {
+		const known = answers.get(sessionId);
+		if (known !== undefined) return known;
+		let found: string | null = null;
+		for (let k = 0; k < discoveries.length && found === null; k++) {
+			const discovery = discoveries[k];
+			try {
+				if (discovery.indexSessionsById) {
+					if (indexes[k] === undefined) indexes[k] = discovery.indexSessionsById();
+					found = indexes[k]!.get(sessionId) ?? null;
+				} else {
+					found = discovery.resolveSessionById(sessionId);
+				}
+			} catch {
+				// A harness that cannot look is not an answer — ask the next.
+				indexes[k] = null;
+			}
+		}
+		answers.set(sessionId, found);
+		return found;
+	};
 }
 
 /**
@@ -248,6 +274,7 @@ function walkLedger(
 	const attributed = typeof options.alreadyAttributed === "function" ? options.alreadyAttributed() : options.alreadyAttributed;
 	for (const id of attributed ?? []) outcomeOf.set(id, "in-self");
 	if (!ledger.childrenOf.has(rootSessionId)) return outcomeOf;
+	const resolve = makeSessionResolver();
 	const visited = new Set<string>([rootSessionId]);
 
 	type Visit = { parentId: string; depth: number };
@@ -295,7 +322,7 @@ function walkLedger(
 				tree.edges.push({ ...base, resolved: false, path: null, total: null, skip: "depth-capped" });
 				continue;
 			}
-			const file = resolveSessionFile(edge.child);
+			const file = resolve(edge.child);
 			if (file === null) {
 				outcomeOf.set(edge.child, "unresolved");
 				tree.edges.push({ ...base, resolved: false, path: null, total: null, skip: "not-found" });

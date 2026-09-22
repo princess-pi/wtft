@@ -319,6 +319,37 @@ function listSpawnCandidates(sinceMs: number): SpawnCandidate[] {
 	return candidates;
 }
 
+/** Every session id → its newest transcript, from one walk of the tree. */
+function indexSessionsById(): Map<string, string> {
+	const index = new Map<string, string>();
+	const root = projectsDir();
+	if (!fs.existsSync(root)) return index;
+	let projectDirs: string[];
+	try {
+		projectDirs = fs.readdirSync(root, { withFileTypes: true })
+			.filter(e => e.isDirectory())
+			.map(e => e.name);
+	} catch {
+		return index;
+	}
+	const newest = new Map<string, number>();
+	for (const slug of projectDirs) {
+		const files: string[] = [];
+		collect(path.join(root, slug), slug, files);
+		for (const file of files) {
+			const id = sessionIdOf(file);
+			try {
+				const mtimeMs = fs.statSync(file).mtimeMs;
+				if (!newest.has(id) || mtimeMs > newest.get(id)!) {
+					newest.set(id, mtimeMs);
+					index.set(id, file);
+				}
+			} catch { /* raced with a move — skip */ }
+		}
+	}
+	return index;
+}
+
 export const discovery: HarnessDiscovery = {
 	id: ID,
 	label: "Claude",
@@ -335,34 +366,10 @@ export const discovery: HarnessDiscovery = {
 	},
 
 	resolveSessionById(sessionId: string): string | null {
-		const root = projectsDir();
-		if (!fs.existsSync(root)) return null;
-		const wanted = sessionId.replace(/\.jsonl$/i, "");
-
-		let best: { path: string; mtimeMs: number } | null = null;
-		let projectDirs: string[];
-		try {
-			projectDirs = fs.readdirSync(root, { withFileTypes: true })
-				.filter(e => e.isDirectory())
-				.map(e => e.name);
-		} catch {
-			return null;
-		}
-
-		for (const slug of projectDirs) {
-			const files: string[] = [];
-			collect(path.join(root, slug), slug, files);
-			for (const file of files) {
-				if (sessionIdOf(file) !== wanted) continue;
-				try {
-					const mtimeMs = fs.statSync(file).mtimeMs;
-					if (!best || mtimeMs > best.mtimeMs) best = { path: file, mtimeMs };
-				} catch { /* raced with a move — skip */ }
-			}
-		}
-
-		return best ? best.path : null;
+		return indexSessionsById().get(sessionId.replace(/\.jsonl$/i, "")) ?? null;
 	},
+
+	indexSessionsById,
 
 	listSpawnCandidates,
 };

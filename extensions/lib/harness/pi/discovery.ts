@@ -195,6 +195,27 @@ function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions
 	return [...bySessionId.values()];
 }
 
+/** Every session id → its newest transcript, from one walk of the tree. */
+function indexSessionsById(): Map<string, string> {
+	const index = new Map<string, string>();
+	const root = sessionsDir();
+	if (!fs.existsSync(root)) return index;
+	const files: string[] = [];
+	collect(root, files);
+	const newest = new Map<string, number>();
+	for (const file of files) {
+		const id = sessionIdOf(file);
+		try {
+			const mtimeMs = fs.statSync(file).mtimeMs;
+			if (!newest.has(id) || mtimeMs > newest.get(id)!) {
+				newest.set(id, mtimeMs);
+				index.set(id, file);
+			}
+		} catch { /* raced with a move — skip */ }
+	}
+	return index;
+}
+
 export const discovery: HarnessDiscovery = {
 	id: ID,
 	label: "Pi",
@@ -214,23 +235,10 @@ export const discovery: HarnessDiscovery = {
 	},
 
 	resolveSessionById(sessionId: string): string | null {
-		const root = sessionsDir();
-		if (!fs.existsSync(root)) return null;
-		const wanted = sessionId.replace(/\.jsonl$/i, "");
-
-		const files: string[] = [];
-		collect(root, files);
-
-		let best: { path: string; mtimeMs: number } | null = null;
-		for (const file of files) {
-			if (sessionIdOf(file) !== wanted) continue;
-			try {
-				const mtimeMs = fs.statSync(file).mtimeMs;
-				if (!best || mtimeMs > best.mtimeMs) best = { path: file, mtimeMs };
-			} catch { /* raced with a move — skip */ }
-		}
-		return best ? best.path : null;
+		return indexSessionsById().get(sessionId.replace(/\.jsonl$/i, "")) ?? null;
 	},
+
+	indexSessionsById,
 };
 
 export default discovery;

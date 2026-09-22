@@ -122,7 +122,8 @@ a silent gap for any reader who ignored the flag. Refusing is simpler *and* stri
 cannot omit an edge without saying so.
 
 **Resolution goes through the harness seam** — `HarnessDiscovery.resolveSessionById`, asked of every
-registered harness in turn, so a Pi child resolves through Pi's discovery and a Claude Code child
+registered harness in turn (since #138, through each harness's `indexSessionsById` where it has
+one, built once per walk and giving the same answers), so a Pi child resolves through Pi's discovery and a Claude Code child
 through its own. This is not a preference: the repo's lookup already recurses past the `sessions/`
 subdirectory older Claude Code installs use, skips the derived-data dirs, and takes the **newest**
 copy where one id exists in several project dirs — the moved-session case (#155, #6), which is

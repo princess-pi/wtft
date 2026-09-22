@@ -331,10 +331,20 @@ console.log("\nPART D — the daemon retries a bare spawn instead of dropping it
 	for (let i = 0; i < 60 && outputInTag() < 170; i++) await sleep(250);
 	await sleep(4_000);
 	const total = outputInTag();
-	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
-
 	check(total === 170,
 		`D5 a grandchild another transcript already folded is not also synced on its own: 100 + 50 + 20 (got ${total})`);
+
+	// The child rotates and no longer spawns, so nothing folds the grandchild
+	// any more: it must come back under its own source, not stay suppressed.
+	fs.writeFileSync(path.join(projectDir, "4444dddd-4444-4444-8444-dddddddddddd.jsonl"),
+		sessionLine("4444dddd-4444-4444-8444-dddddddddddd", now - 4_000, cwd)
+		+ turnLine("d-gc-child-2", now - 4_000, 55));
+	for (let i = 0; i < 80 && outputInTag() !== 175; i++) await sleep(250);
+	const afterRotate = outputInTag();
+	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
+
+	check(afterRotate === 175,
+		`D6 when the folder stops folding it, the grandchild is billed under its own source again: 100 + 55 + 20 (got ${afterRotate})`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

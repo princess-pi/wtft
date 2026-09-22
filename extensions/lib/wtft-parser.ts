@@ -1235,8 +1235,8 @@ export function discoverClaudeSubAgentSessionFiles(
 
 /**
  * Every `claude -p` child one turn's spawns may have written: one discovery per
- * spawning command, with the session's own cwd standing in for a command that
- * has no `cd`.
+ * distinct directory the turn's spawns name, with the session's own cwd
+ * standing in for a command that has no `cd`.
  *
  * `searched` is how many directories were looked in. Zero means there was
  * nothing to look in — never "looked and found nothing", which is the

@@ -70,9 +70,6 @@ let sessionExisted = false;
 
 const pendingClaudeCommands: { interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>; prevCtx: number }[] = [];
 const discoveredClaudeFiles = new Set<string>();
-/** Transcripts whose cost another synced transcript already folded in. Syncing
- *  one of these too would write its turns a second time, under its own source. */
-const foldedIntoAnother = new Set<string>();
 // Starts true: an inherited tag's swept marker is untrusted until this daemon re-stamps after its own sweep.
 let tagGrewSinceMarker = true;
 // Set when a sweep could not read what it meant to; withholds the swept stamp.
@@ -260,8 +257,36 @@ function hasClaudeCommand(interaction: NonNullable<ReturnType<typeof parseEntryT
   return interaction.commands.some(commandSpawnsAgent);
 }
 
-function syncSubagentTranscript(file: string): boolean {
+/** Set by {@link skipAsFoldedElsewhere} when its skip also wrote a record. */
+let retiredThisPoll = false;
+
+/**
+ * Whether another synced transcript already folds this one — in which case
+ * syncing it too would write its turns a second time, under its own source.
+ *
+ * One synced BEFORE the parse that showed who folds it has those lines on disk
+ * already, so its source opens a new generation, which retires every one.
+ */
+function skipAsFoldedElsewhere(rawFile: string, foldedElsewhere: Set<string>): boolean {
+  retiredThisPoll = false;
+  const file = canonicalTranscriptPath(rawFile);
+  if (!foldedElsewhere.has(file)) return false;
+  if (discoveredSubagentFiles.has(file)) {
+    appendTagFile(tagPath, generationRecordLine(
+      transcriptSourceId(file, path.dirname(sessionPath)), path.basename(file, ".jsonl")));
+    discoveredSubagentFiles.delete(file);
+    tagGrewSinceMarker = true;
+    retiredThisPoll = true;
+  }
+  return true;
+}
+
+function syncSubagentTranscript(rawFile: string): boolean {
   let wroteAny = false;
+  // One transcript, one state entry and one source, however the path that
+  // reached us was spelled — discovery joins paths, a fold records the path it
+  // parsed, and a symlink makes those two spellings of one file.
+  const file = canonicalTranscriptPath(rawFile);
   const stateKey = file;
   const sessionId = path.basename(file, '.jsonl');
   let fileState = discoveredSubagentFiles.get(stateKey);
@@ -403,20 +428,7 @@ function syncSubagentTranscript(file: string): boolean {
   fileState.foldStamps = new Map();
   for (const si of deduped) {
     for (const fold of si.claudeSubAgentFolds ?? []) {
-      fileState.foldStamps.set(fold.file, fold.stamp);
-      const folded = canonicalTranscriptPath(fold.file);
-      if (folded === canonicalTranscriptPath(file) || foldedIntoAnother.has(folded)) continue;
-      foldedIntoAnother.add(folded);
-      // Already synced under its own source before this parse revealed who folds
-      // it: open a generation for that source, which retires every line it wrote.
-      const prior = discoveredSubagentFiles.get(fold.file);
-      if (prior) {
-        appendTagFile(tagPath, generationRecordLine(
-          transcriptSourceId(fold.file, path.dirname(sessionPath)), path.basename(fold.file, ".jsonl")));
-        discoveredSubagentFiles.delete(fold.file);
-        wroteAny = true;
-        tagGrewSinceMarker = true;
-      }
+      fileState.foldStamps.set(canonicalTranscriptPath(fold.file), fold.stamp);
     }
   }
   fileState.spawnWindowClosesAt = claudeSpawnWindowClosesAt(deduped, resolveLastCwd(file));
@@ -545,13 +557,23 @@ function scanForSubAgents() {
       process.stderr.write(`[wtft-log-parser] subagents dir discovery failed, will retry next poll (${path.basename(sessionPath)}): ${err instanceof Error ? err.message : String(err)}\n`);
     }
   }
+  // A transcript some other synced transcript folds must not also be synced
+  // under its own source: the daemon parses each one in its own call, so the
+  // fold pass's within-one-call accounting cannot see across them. Derived from
+  // the CURRENT fold state every poll, never accumulated, so a parent that
+  // rotates and stops folding hands its child straight back.
+  const foldedElsewhere = new Set<string>();
+  for (const [holder, state] of discoveredSubagentFiles) {
+    for (const folded of state.foldStamps.keys()) if (folded !== holder) foldedElsewhere.add(folded);
+  }
+
   for (const file of taskAgentFiles) {
-    if (foldedIntoAnother.has(canonicalTranscriptPath(file))) continue;
+    if (skipAsFoldedElsewhere(file, foldedElsewhere)) { wroteAny = wroteAny || retiredThisPoll; continue; }
     wroteAny = syncSubagentTranscript(file) || wroteAny;
   }
 
   for (const file of discoveredClaudeFiles) {
-    if (foldedIntoAnother.has(canonicalTranscriptPath(file))) continue;
+    if (skipAsFoldedElsewhere(file, foldedElsewhere)) { wroteAny = wroteAny || retiredThisPoll; continue; }
     wroteAny = syncSubagentTranscript(file) || wroteAny;
   }
 

@@ -114,10 +114,17 @@ is gone, and it is one of the reasons #128 (P6) will report as `unrecorded`.
 `bin/wtft-daemon.ts`: the `pendingClaudeCommands` drain calls the per-turn discovery with
 `resolveLastCwd(sessionPath)`. It also has to undo one consequence of per-command discovery: one
 turn's window now returns both a child and the grandchild that child folds, and the daemon syncs
-each discovered transcript in its own `parseSessionFile` call, so the per-call fold dedup cannot
-see across them. A transcript another synced transcript folds is therefore skipped, and one that
-was already synced before that fold was seen has its source retired with a generation record
-(#114) — P4's mechanism, used here for what it was built for. Its `if (!cwd) continue` — which dropped the item **without
+each discovered transcript in its own `parseSessionFile` call, so the fold pass's within-one-call
+accounting cannot see across them. So a transcript some other synced transcript folds is skipped,
+and one already synced before that fold was seen has its source retired with a generation record
+(#114) — P4's mechanism, used here for what it was built for.
+
+That skip set is **derived from current fold state every poll, never accumulated**: it is rebuilt
+from each synced transcript's `foldStamps`, so when a folder rotates and its new parse no longer
+folds the child, the child is synced under its own source again on the next poll rather than
+staying suppressed for the daemon's life. Identity throughout is the canonical path —
+`syncSubagentTranscript` canonicalises the path it is handed, so one transcript has one state
+entry and one source however the path that reached it was spelled. Its `if (!cwd) continue` — which dropped the item **without
 re-queueing it**, so the turn was never retried — becomes a `searched === 0` check that keeps the
 item pending while its window is open. The arm beside it is unchanged and is NOT window-bounded:
 a turn that searched and found nothing stays pending with no time bound, which is a property #128
@@ -135,9 +142,10 @@ contract for every spawn rather than for the case #107 adds.
 
 ## What it costs
 
-One `readdirSync` per additional distinct directory per turn. A turn with one spawn and a `cd`
-searches exactly what it searches today. A no-`cd` spawn adds the session's own project dir, which
-is the directory the daemon already stats every poll for its own transcript.
+One `readdirSync` per additional distinct directory per turn — distinct, so two spawns into one
+directory search it once. A turn with one spawn and a `cd` searches exactly what it searches today.
+A no-`cd` spawn adds one directory the poll did not otherwise touch: the daemon stats the session
+transcript every poll, never its project dir.
 
 The bound is the pending queue's, not this change's, and it is not uniform: a turn that searched
 and found nothing is re-discovered every 667ms for the daemon's life, while one that found

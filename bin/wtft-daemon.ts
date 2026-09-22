@@ -520,9 +520,6 @@ function scanForSubAgents() {
         if (Date.now() <= interaction.timestamp + CLAUDE_SUBAGENT_WINDOW_MS + MTIME_SETTLE_MS) stillPending.push(item);
         continue;
       }
-      // A child's first timestamp is fixed and discovery matches on it, so one
-      // that has not appeared by the window's close never will match; #128's
-      // listing reports it instead.
       if (discovered.files.length === 0 && !discovered.unreadable) {
         if (Date.now() <= interaction.timestamp + CLAUDE_SUBAGENT_WINDOW_MS + MTIME_SETTLE_MS) stillPending.push(item);
         continue;

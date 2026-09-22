@@ -296,3 +296,18 @@ found in text this branch did not change is filed as
 | third pass: spec-26, CONTEXT, manifest | "Claude Code only" | the rule is "implements `listSpawnCandidates`" | n/a | Fixed |
 | third pass: README, manifest | "no ledger edge names"; "within 30 minutes of" | already-counted sessions are excluded too; the span runs forward only | ✅ T10, W1 | Fixed |
 | third pass: spec-128 | listing signature; sample column | `rootFile` missing; money one column left | ✅ F2 | Fixed |
+
+### pr-review round 1 (DeepSeek V4.1 Flash, 2026-09-22)
+
+| Finding | Verdict | Action |
+|---|---|---|
+| Two candidates that fold each other were both dropped | Verified — reproduced as M1, which listed neither | **Code fixed**: a mutual pair keeps the row with the first path; ✅ M1 |
+| `listSpawnCandidates` skips the older `sessions/` subdirectory layout | True, and kept: a new transcript is written top-level, and the directory-mtime prune cannot see a nested file's creation anyway | Left standing |
+| `isInside` rejected a component starting with `..` (`/tmp/..cache`) | Verified | **Code fixed**; reconciled-against-untested |
+| `alreadyAttributed` docstring promised laziness the option no longer has | Verified | Claim deleted |
+| Daemon comment's "never will match" premise | Verified: the child can match; the turn is simply not searched again | Comment deleted |
+| Duplicate sanitiser in `renderRecordedSpawns` | Verified | One `safeSpawnText` for both blocks |
+| spec-133 row names old schemas as current | Verified | "at the time" |
+| `--tokens` help implied UNCOUNTED follows UNRECORDED | Verified | Order stated |
+| adding-a-harness "created at or after" vs an mtime prune | Verified | "written at or after" |
+| Module header cites an issue number | Verified | Deleted |

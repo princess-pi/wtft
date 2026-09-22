@@ -105,7 +105,7 @@ export interface SpawnTreeOptions {
 	ledgerPath?: string;
 	maxDepth?: number;
 	/** Session ids whose cost is ALREADY in the caller's self total, so the walk
-	 *  must not add them again. A thunk is called only when the root has an edge. */
+	 *  must not add them again. */
 	alreadyAttributed?: Set<string> | (() => Set<string>);
 	now?: number;
 	/** Ask for `unrecorded`. A one-shot report's cost, not a per-poll one. */

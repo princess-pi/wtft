@@ -22,8 +22,8 @@ interface HarnessDiscovery {
 }
 ```
 
-`listSpawnCandidates` is optional. It returns the transcripts created at or after `sinceMs`
-(one created earlier may be omitted), each with its path, session id, recorded `cwd`, first
+`listSpawnCandidates` is optional. It returns the transcripts written at or after `sinceMs` (one
+created earlier may be omitted), each with its path, session id, recorded `cwd`, first
 timestamp, and `launchedBy` — `"program"`, `"human"`, or `null` when the transcript does not say
 — plus the paths it could not read. It may throw for a failure that means it could not look at
 all; the report then fails with that error. It feeds `spawned.unrecorded[]`

@@ -1749,17 +1749,11 @@ function renderUnrecordedSpawns(rows: UnrecordedSpawn[] | undefined): string {
 }
 
 function renderRecordedSpawns(self: TokenTotals, spawned: SpawnTree): string {
-	// Every untrusted string on this surface goes through one sanitiser, declared
-	// before the first arm that prints one. `mechanism`, `label`, and `ledgerError`
-	// are untrusted: a newline forges report lines and an ESC starts an OSC
-	// sequence. U+FFFD rather than deletion, so a reader sees something was
-	// removed; a silently shortened path reads as the real one.
-	const safe = (v: string) => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, "\uFFFD");
 	if (spawned.ledgerError !== null) {
 		// Loud, and NOT an empty block: an unreadable ledger must not render the
 		// same silence as a session that spawned nothing.
 		return `\nSPAWNED    spawn ledger could not be read (#116) — descendants unknown, not zero\n` +
-		       `           ${safe(String(spawned.ledgerError))}\n`;
+		       `           ${safeSpawnText(String(spawned.ledgerError))}\n`;
 	}
 	if (spawned.edges.length === 0) {
 		// No edges FOR THIS SESSION. Say nothing — unless the reader needs to
@@ -1775,7 +1769,7 @@ function renderRecordedSpawns(self: TokenTotals, spawned: SpawnTree): string {
 
 const rows: string[] = [];
 	for (const edge of spawned.edges) {
-		const full = edge.label ? `${safe(edge.mechanism)}  ${safe(edge.label)}` : safe(edge.mechanism);
+		const full = edge.label ? `${safeSpawnText(edge.mechanism)}  ${safeSpawnText(edge.label)}` : safeSpawnText(edge.mechanism);
 		// Fitted to 40 COLUMNS, not 40 code units.
 		const name = fitVisual(full, 40);
 		// A skipped edge prints its REASON where its cost would be. A dash or a

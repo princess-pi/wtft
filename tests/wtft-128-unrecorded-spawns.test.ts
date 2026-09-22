@@ -254,6 +254,26 @@ console.log("\nPART F — the root transcript is not a candidate's child");
 }
 
 // ---
+// PART M — two candidates that fold each other are listed once, not dropped
+// ---
+console.log("\nPART M — a mutual fold keeps exactly one row");
+{
+	const ROOT_M = "a3000000-0000-4000-8000-0000000000e1";
+	const shared = "/tmp/shared-m";
+	const slug = shared.replace(/[^a-zA-Z0-9]/g, "-");
+	const one = "a3000001-0000-4000-8000-0000000000e2";
+	const two = "a3000002-0000-4000-8000-0000000000e3";
+	// Each runs a bare claude -p in the shared dir 1s after it starts; each is
+	// inside the other's discovery window.
+	writeChild({ id: one, slug, cwd: shared, startedAt: at(4), entrypoint: "sdk-cli", commands: ["claude -p 'a'"] });
+	writeChild({ id: two, slug, cwd: shared, startedAt: at(4) + 1000, entrypoint: "sdk-cli", commands: ["claude -p 'b'"] });
+	const listed = computeSpawnTree(ROOT_M, { ledgerPath, unrecorded: { turns: [turn(at(3), ["pr-open"])], rootCwd: null } }).unrecorded ?? [];
+	const pair = listed.filter(r => r.child === one || r.child === two);
+	check(pair.length === 1 && pair[0].total?.outputTokens === 4000,
+		`M1 one row carries both sessions' 4000 output tokens (got ${JSON.stringify(pair.map(r => [r.child, r.total?.outputTokens]))})`);
+}
+
+// ---
 // PART E — #116's Closer, second clause, through the CLI
 // ---
 console.log("\nPART E — delete the record and the child is still reported, never summed");

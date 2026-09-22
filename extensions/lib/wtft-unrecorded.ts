@@ -1,4 +1,4 @@
-/** Sessions no spawn record names, listed with a tier — never summed (#128). */
+/** Sessions no spawn record names, listed with a tier — never summed. */
 
 import * as os from "node:os";
 import * as path from "node:path";
@@ -56,7 +56,7 @@ export interface ListUnrecordedInput {
 
 function isInside(dir: string, cwd: string): boolean {
 	const rel = path.relative(dir, cwd);
-	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+	return rel === "" || (rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel));
 }
 
 function tempRoots(): string[] {
@@ -116,7 +116,7 @@ export function listUnrecordedSpawns(input: ListUnrecordedInput): UnrecordedSpaw
 	}
 
 	const rows: UnrecordedSpawn[] = [];
-	const foldedByARow = new Set<string>();
+	const foldsOf = new Map<string, Set<string>>();
 	for (const [id, { candidate, tier, basis }] of listed) {
 		const row: UnrecordedSpawn = {
 			child: id,
@@ -133,7 +133,11 @@ export function listUnrecordedSpawns(input: ListUnrecordedInput): UnrecordedSpaw
 			row.total = total;
 			for (const interaction of deduplicateInteractions(parsed)) {
 				if (!isModelTagged(interaction)) continue;
-				for (const fold of interaction.claudeSubAgentFolds ?? []) foldedByARow.add(fold.id);
+				for (const fold of interaction.claudeSubAgentFolds ?? []) {
+					const folds = foldsOf.get(id) ?? new Set<string>();
+					folds.add(fold.id);
+					foldsOf.set(id, folds);
+				}
 			}
 		} catch (err) {
 			warnUnreadable(candidate.path, err);
@@ -141,8 +145,14 @@ export function listUnrecordedSpawns(input: ListUnrecordedInput): UnrecordedSpaw
 		}
 		rows.push(row);
 	}
-	// Its cost is inside the row that folded it; listing it again shows it twice.
+	// A folded row's cost is inside its folder's row. Two rows that fold each
+	// other keep the one with the first path, which cannot flip between runs.
+	const pathOf = new Map(rows.map(r => [r.child, r.path]));
+	const folded = (row: UnrecordedSpawn) => rows.some(other =>
+		other.child !== row.child
+		&& foldsOf.get(other.child)?.has(row.child)
+		&& (!foldsOf.get(row.child)?.has(other.child) || pathOf.get(other.child)! < row.path));
 	return rows
-		.filter(row => !foldedByARow.has(row.child))
+		.filter(row => !folded(row))
 		.sort((a, b) => a.ts.localeCompare(b.ts));
 }

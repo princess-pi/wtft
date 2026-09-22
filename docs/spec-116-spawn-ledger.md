@@ -218,7 +218,8 @@ already trust.
 "tree": {…}
 ```
 
-`unrecorded` is #128's list of sessions no edge names, never summed into anything —
+`unrecorded` is #128's list of sessions no edge names, never summed into `total`, `spawned.total`
+or `tree` —
 `docs/spec-128-unrecorded-spawns.md`.
 
 `tree` = `total` + `spawned.total`, as a field, so a consumer never has to add two numbers and

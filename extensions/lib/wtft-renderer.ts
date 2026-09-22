@@ -1714,7 +1714,7 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 
 export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string {
 	if (!spawned) return "";
-	return renderRecordedSpawns(self, spawned) + renderUnrecordedSpawns(spawned.unrecorded);
+	return renderRecordedSpawns(self, spawned) + renderUnrecordedSpawns(spawned.unrecorded, spawned.ledgerError !== null);
 }
 
 /** Every untrusted string on this surface goes through one sanitiser. A
@@ -1726,11 +1726,14 @@ const safeSpawnText = (v: string) => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, 
  *  recorded: its rows are the ones the ledger does not know. A `named` row is
  *  printed on its own; `inferred` rows collapse to one line per basis, because
  *  a busy host puts every peer's programmatic child in the window. */
-function renderUnrecordedSpawns(rows: UnrecordedSpawn[] | undefined): string {
+function renderUnrecordedSpawns(rows: UnrecordedSpawn[] | undefined, ledgerUnreadable: boolean): string {
 	if (!rows || rows.length === 0) return "";
 	const line = (tier: string, name: string, money: string) =>
 		`           ${tier.padEnd(9)} ${fitVisual(safeSpawnText(name), 30)} ${money.padStart(12)}\n`;
-	let out = `\nUNRECORDED ${rows.length} session(s) no spawn record names (#128) —\n`;
+	// With the ledger unread, a row may be a child some record does name.
+	let out = ledgerUnreadable
+		? `\nUNRECORDED ${rows.length} session(s) not in the tree — the spawn ledger could not be read, so a record may name some (#128) —\n`
+		: `\nUNRECORDED ${rows.length} session(s) no spawn record names (#128) —\n`;
 	out += `           NOT in TOTAL or TREE: a list, not a claim; every row is in --json\n`;
 	for (const row of rows.filter(r => r.tier === "named")) {
 		out += line("named", row.cwd, row.total ? formatCost(row.total.costUsd) : `(${row.skip ?? "unreadable"})`);

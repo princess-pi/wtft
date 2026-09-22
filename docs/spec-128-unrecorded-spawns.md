@@ -47,7 +47,10 @@ to start the scan, so `unrecorded` is `[]` without a look.
   when that cwd is in no git repository — a directory outside a repo has no worktrees, so a child
   there can only be `tmp` or `named` — and when no cwd can be read from the transcript.
 - **The ledger could not be read** (`spawned.ledgerError`): no edge is known, so a session some
-  other parent recorded cannot be excluded, and may be listed.
+  other parent recorded cannot be excluded, and may be listed. The `--tokens` header then says so
+  instead of "no spawn record names".
+- **One id in two project directories** is a moved session; the row is its newest copy by mtime,
+  the copy every other reader prices.
 
 ### The launch span
 
@@ -80,8 +83,8 @@ A candidate is not listed when its money is already somewhere, or someone else o
 - a candidate that another listed candidate's own parse folds — its cost is already inside that
   row, so listing it too would show it twice.
 
-The first three read state the walk already has, so the exclusion is exact for recorded edges and
-costs nothing extra.
+The first and third are the walk's own state; the second is one pass over the ledger already in
+memory. So the exclusion is exact for recorded edges and costs no extra read.
 
 ## The shape
 
@@ -326,3 +329,12 @@ found in text this branch did not change is filed as
 | spec-128 "nothing is lost by the bound" | Verified for a transcript that lands on disk late | Corrected, with the measured file-birth lag |
 | EXT_WTFT spec-176 row: the thunk runs only with a ledger edge | Verified | Corrected |
 | Docstrings citing #128 | Verified | Citation removed |
+
+### pr-review round 3 (the round limit)
+
+| Finding | Verdict | Action |
+|---|---|---|
+| A duplicate session id kept the first copy found, not the newest | Verified — reproduced as N1 | **Code fixed**: newest mtime wins; ✅ N1 |
+| With the ledger unreadable, the header still said "no spawn record names" | Verified — reproduced as R5 | **Code fixed**: the header says the ledger could not be read; ✅ R5 |
+| "The first three read state the walk already has" | Verified: the second is a pass over the ledger | Corrected |
+| spec-116: "never summed into anything" | Verified: `--tokens` sums each inferred basis | Qualified |

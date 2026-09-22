@@ -1,5 +1,6 @@
 /** Sessions no spawn record names, listed with a tier — never summed. */
 
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { canonicalTranscriptPath, deduplicateInteractions, isModelTagged, parseSessionFile, type Interaction } from "./wtft-parser.js";
@@ -59,6 +60,10 @@ function isInside(dir: string, cwd: string): boolean {
 	return rel === "" || (rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel));
 }
 
+function mtimeOf(file: string): number {
+	try { return fs.statSync(file).mtimeMs; } catch { return -Infinity; }
+}
+
 function tempRoots(): string[] {
 	return [...new Set(["/tmp", os.tmpdir()].map(d => path.resolve(d)))];
 }
@@ -109,7 +114,10 @@ export function listUnrecordedSpawns(input: ListUnrecordedInput): UnrecordedSpaw
 		for (const { path: file, error } of scan.unreadable) warnUnreadable(file, error);
 		for (const candidate of scan.candidates) {
 			if (candidate.sessionId === input.rootSessionId || input.exclude.has(candidate.sessionId)) continue;
-			if (listed.has(candidate.sessionId)) continue;
+			// One id in two project dirs is a moved session: its newest copy is
+			// the one every other reader prices.
+			const prior = listed.get(candidate.sessionId);
+			if (prior && mtimeOf(prior.candidate.path) >= mtimeOf(candidate.path)) continue;
 			const verdict = classify(candidate, input.rootSessionId, fanOut, windows);
 			if (verdict) listed.set(candidate.sessionId, { candidate, ...verdict });
 		}

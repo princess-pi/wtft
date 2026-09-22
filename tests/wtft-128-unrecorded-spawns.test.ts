@@ -274,6 +274,27 @@ console.log("\nPART M — a mutual fold keeps exactly one row");
 }
 
 // ---
+// PART N — one id in two project dirs is priced from its newest copy
+// ---
+console.log("\nPART N — a moved session's newest copy wins");
+{
+	const ROOT_N = "a4000000-0000-4000-8000-0000000000c1";
+	const dup = "a4000001-0000-4000-8000-0000000000c2";
+	const stale = writeChild({ id: dup, slug: "-tmp-n-old", cwd: "/tmp/n-old", startedAt: at(4), entrypoint: "sdk-cli", turns: 1 });
+	const fresh = writeChild({ id: dup, slug: "-tmp-n-new", cwd: "/tmp/n-new", startedAt: at(4), entrypoint: "sdk-cli", turns: 3 });
+	fs.utimesSync(stale, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+	const row = (computeSpawnTree(ROOT_N, { ledgerPath, unrecorded: { turns: [turn(at(3), ["pr-open"])], rootCwd: null } }).unrecorded ?? [])
+		.find(r => r.child === dup);
+	check(row?.path === fresh && row?.total?.outputTokens === 3000,
+		`N1 the newest copy is the row (got ${row?.path === fresh ? "newest" : row?.path === stale ? "stale" : "none"}, ${row?.total?.outputTokens})`);
+}
+{
+	const damaged = renderSpawnTree(emptyTotals(), { ...computeSpawnTree(ROOT, { ledgerPath, unrecorded: { turns: rootTurns, rootCwd: repo } }), ledgerError: "EACCES" });
+	check(/UNRECORDED \d+ session\(s\) not in the tree — the spawn ledger could not be read/.test(damaged) && !/no spawn record names/.test(damaged),
+		`R5 with the ledger unreadable the block does not claim no record names them:\n${damaged}`);
+}
+
+// ---
 // PART E — #116's Closer, second clause, through the CLI
 // ---
 console.log("\nPART E — delete the record and the child is still reported, never summed");

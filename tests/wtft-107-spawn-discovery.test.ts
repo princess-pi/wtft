@@ -57,6 +57,9 @@ check(u(["herdr agent start x --kind claude --pane wE:pCW -- --model sonnet"], "
 check(u(["timeout 180 claude -p 'go'"], "/own") === '["/own"]',
 	`U11 a prefixed direct run still inherits the shell's cwd (got ${u(["timeout 180 claude -p 'go'"], "/own")})`);
 
+check(u(["cd; claude -p 'go'"], "/own") === "[]",
+	`U12 a bare cd moves the shell somewhere we cannot name, so no fallback (got ${u(["cd; claude -p 'go'"], "/own")})`);
+
 // ---
 // PART A — the #107 A closer: a bare `claude -p` is attributed
 // ---
@@ -129,6 +132,34 @@ check(outputOf(twoParent) === 900,
 const twoFolds = parseSessionFile(twoParent).flatMap(i => i.claudeSubAgentFolds ?? []).map(f => f.id).sort();
 check(twoFolds.length === 2,
 	`B2 and both children are recorded as folds (got ${JSON.stringify(twoFolds)})`);
+
+// ---
+// PART G — a grandchild in the same directory is billed once
+// ---
+console.log("\nPART G — a grandchild the child already folded is not billed again");
+
+{
+	// child and grandchild both ran in the same cwd, so both are in-window
+	// matches for the PARENT's turn as well as for each other's.
+	const gCwd = path.join(dir, "g-project");
+	writeChild(gCwd, "1111aaaa-1111-4111-8111-aaaaaaaaaaaa", T0 + 2_000, 300);
+	const gDir = path.join(projects, gCwd.replace(/[^a-zA-Z0-9]/g, "-"));
+	// The child spawns the grandchild, bare, in the same directory.
+	fs.writeFileSync(path.join(gDir, "2222bbbb-2222-4222-8222-bbbbbbbbbbbb.jsonl"),
+		sessionLine("2222bbbb-2222-4222-8222-bbbbbbbbbbbb", T0 + 1_000, gCwd)
+		+ turnLine("g-child-turn", T0 + 1_000, 50, ["claude -p 'deeper'"]));
+
+	const gParent = path.join(dir, "g-parent.jsonl");
+	fs.writeFileSync(gParent,
+		sessionLine("parent-107-g", T0, gCwd)
+		+ turnLine("g-parent-turn", T0, 100, ["claude -p 'go'"]));
+
+	const gFolds = parseSessionFile(gParent).flatMap(i => i.claudeSubAgentFolds ?? []).map(f => f.id);
+	check(gFolds.length === new Set(gFolds).size && gFolds.length === 2,
+		`G1 each folded session is recorded once (got ${JSON.stringify(gFolds)})`);
+	check(outputOf(gParent) === 450,
+		`G2 the grandchild's 300 is billed once, not once inside the child and once on its own: 100 + 50 + 300 (got ${outputOf(gParent)})`);
+}
 
 // ---
 // PART S — a session does not fold itself, or whatever folded it

@@ -47,6 +47,12 @@ not from the transcript's path.
   than fixed: the alternative is a per-entry cwd on every interaction, which is #97/#138 territory
   and costs a field on every line.
 
+**A folded session is counted once, by its own share.** Every level of the recursion now resolves
+a real directory, so one turn's discovery returns the child AND the grandchild the child already
+folded — they share a project dir and a window. The fold loop therefore accounts per session id,
+adding each fold's OWN share rather than each file's inclusive total, which is the same number when
+nothing overlaps and the right one when something does.
+
 **A session never folds itself, or a session that folded it.** A real session's own transcript
 lives in the very directory the fallback searches, and discovery matches on a timestamp window, so
 a session that spawns within 15s of its own start is a candidate for folding itself — and two
@@ -58,10 +64,11 @@ against the session it watches, and it also hands that path to `parseSessionFile
 so a child cannot fold the session that spawned it.
 
 **A turn whose spawns yield no directory at all waits out its window, then is dropped** — an
-expandable `cd` target (`cd $(mktemp -d)`), or a launcher, has nothing to search. It stays pending
-while the window is open, because the session's own cwd may not be readable from its transcript
-yet; once the window closes it is gone, and it is one of the reasons #128 (P6) will report as
-`unrecorded`.
+expandable `cd` target (`cd $(mktemp -d)`), a bare `cd` (the shell went to `$HOME`, which the
+transcript does not name), a launcher, or a direct spawn whose session cwd is unreadable. Only the
+last of those can change on a later poll, which is why the wait is the window rather than a single
+try; the others are settled at the first look and simply cost their window. Once it closes the turn
+is gone, and it is one of the reasons #128 (P6) will report as `unrecorded`.
 
 ## The shape
 
@@ -83,7 +90,9 @@ yet; once the window closes it is gone, and it is one of the reasons #128 (P6) w
 - **`discoverClaudeSubAgentFilesForTurn(commands, parentTimestamp, ownCwd, windowMs?)`** runs one
   `discoverClaudeSubAgentSessionFiles` per entry and unions the results: files deduped by path,
   the first `unreadable` kept, and `searched` naming how many directories were looked in — 0 is
-  the "nothing to search" case a caller must not mistake for "looked and found nothing".
+  the "nothing to search" case a caller must not mistake for "looked and found nothing". A
+  directory-level throw is caught per directory and becomes that `unreadable`, so one unreadable
+  directory reports itself without discarding what the turn's other directories found.
 - **`discoverClaudeSubAgentSessionFiles(cwd, ts, windowMs?)` keeps its signature.** It is the
   per-directory scan, and three test suites and `bin/wtft.mjs` re-export it.
 - **`attributeClaudeSubAgentCosts(interactions, ownCwd?, ancestors?)`** takes the fallback cwd and
@@ -91,7 +100,9 @@ yet; once the window closes it is gone, and it is one of the reasons #128 (P6) w
   passes `resolveLastCwd(filePath)`, so a nested child's own grandchildren resolve against the
   child's cwd, not the root session's, and adds its own path to `ancestors` before recursing. The
   guard lives in the FOLD pass, not in discovery: discovery still returns the transcript, and each
-  caller decides. The daemon's own caller drops a discovered file whose path is the session it is
+  caller decides. `loadSubagentInteractionsChecked` — the CLI and widget's reader for Task-tool
+  children — takes the root session as `rootFile` for the same reason: a Task child that runs a
+  bare `claude -p` searches the root's own project dir. The daemon's own caller drops a discovered file whose path is the session it is
   watching, for the same reason and by a different route.
 - **`claudeSpawnWindowClosesAt(interactions, ownCwd?)`** filters on `claudeSpawnCwds(...).length > 0`
   rather than on a single non-null cwd, so P4's discovery window opens for a no-`cd` spawn too.

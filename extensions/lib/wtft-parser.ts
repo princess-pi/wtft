@@ -1082,21 +1082,26 @@ export function loadSubagentInteractions(
 	parseFn = parseSessionFile,
 	classifyFn = classifyInteraction,
 	dedupFn = deduplicateInteractions,
+	rootFile: string | null = null,
 ): Interaction[] {
-	return loadSubagentInteractionsChecked(subagentFiles, parseFn, classifyFn, dedupFn).interactions;
+	return loadSubagentInteractionsChecked(subagentFiles, parseFn, classifyFn, dedupFn, rootFile).interactions;
 }
 
+/** `rootFile` is the session these transcripts belong to: a child of it must
+ *  never fold it back in, and only the caller knows which session that is. */
 export function loadSubagentInteractionsChecked(
 	subagentFiles: string[],
 	parseFn = parseSessionFile,
 	classifyFn = classifyInteraction,
 	dedupFn = deduplicateInteractions,
+	rootFile: string | null = null,
 ): { interactions: Interaction[]; dropped: string[] } {
 	const interactions: Interaction[] = [];
 	const dropped: string[] = [];
+	const ancestors = new Set<string>(rootFile ? [path.resolve(rootFile)] : []);
 	for (const file of subagentFiles) {
 		try {
-			const raw = parseFn(file);
+			const raw = parseFn(file, ancestors);
 			const deduped = dedupFn(raw);
 			clearSubagentCacheMiss(deduped);
 			for (const interaction of deduped) interaction._cat = classifyFn(interaction);
@@ -1143,7 +1148,13 @@ function cdBeforeSpawn(cmd: string): { cwd: string | null; sawCd: boolean } {
 		// Stop at the spawn — a later `cd` is where the shell went next.
 		if (CLAUDE_SPAWN.test(head.toLowerCase())) break;
 		const m = head.match(/^cd\s+(?:"([^"]*)"|'([^']*)'|([^\s;&|]+))/);
-		if (!m) { prevWasKeptCd = false; continue; }
+		if (!m) {
+			// `cd` with no argument goes to $HOME — a move we cannot name, which is
+			// not the same as no move at all.
+			if (/^cd\s*$/.test(head)) { sawCd = true; prevWasKeptCd = false; continue; }
+			prevWasKeptCd = false;
+			continue;
+		}
 		if (joinedBy === "||" && prevWasKeptCd) continue;
 		prevWasKeptCd = true;
 		sawCd = true;
@@ -1156,10 +1167,11 @@ function cdBeforeSpawn(cmd: string): { cwd: string | null; sawCd: boolean } {
 }
 
 /**
- * Every directory a turn's `claude -p` spawns may have run in: one entry per
- * spawning command — its own `cd` target, or `ownCwd` when it has no `cd` —
- * deduped, in command order. Each `commands` entry is its own Bash call with
- * its own shell, so two spawns in one turn can sit in two directories.
+ * Every directory a turn's `claude -p` spawns may have run in, deduped, in
+ * command order. Each `commands` entry is its own Bash call with its own shell,
+ * so two spawns in one turn can sit in two directories. A spawn contributes its
+ * own `cd` target; `ownCwd` stands in only for one that has no `cd` and whose
+ * shell runs `claude` itself.
  */
 export function claudeSpawnCwds(commands: string[], ownCwd: string | null): string[] {
 	const cwds: string[] = [];
@@ -1210,8 +1222,8 @@ export function discoverClaudeSubAgentSessionFiles(
 
 /**
  * Every `claude -p` child one turn's spawns may have written: one discovery per
- * spawning command (§#107 B), with the session's own cwd standing in for a
- * command that has no `cd` (§#107 A).
+ * spawning command, with the session's own cwd standing in for a command that
+ * has no `cd`.
  *
  * `searched` is how many directories were looked in. Zero means there was
  * nothing to look in — never "looked and found nothing", which is the
@@ -1227,7 +1239,16 @@ export function discoverClaudeSubAgentFilesForTurn(
 	let unreadable: Error | null = null;
 	const cwds = claudeSpawnCwds(commands, ownCwd);
 	for (const cwd of cwds) {
-		const found = discoverClaudeSubAgentSessionFiles(cwd, parentTimestamp, windowMs);
+		// One unreadable directory must not discard what the others found: the
+		// caller retries on `unreadable`, and a permanently unreadable directory
+		// would otherwise keep a readable sibling's child out of the tag forever.
+		let found: { files: string[]; unreadable: Error | null };
+		try {
+			found = discoverClaudeSubAgentSessionFiles(cwd, parentTimestamp, windowMs);
+		} catch (err) {
+			unreadable ??= err instanceof Error ? err : new Error(String(err));
+			continue;
+		}
 		for (const file of found.files) if (!files.includes(file)) files.push(file);
 		unreadable ??= found.unreadable;
 	}
@@ -1342,7 +1363,6 @@ export function attributeClaudeSubAgentCosts(
 					`nested subagent transcript could not be read or parsed (${file}): ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
-			seenSessionIds.add(sessionId);
 
 			const inclusive = emptyFoldShare();
 			const nested: SubAgentFold[] = [];
@@ -1359,8 +1379,16 @@ export function attributeClaudeSubAgentCosts(
 			for (const n of nested) {
 				for (const key of FOLD_SHARE_KEYS) own[key] -= n.share[key];
 			}
-			folds.push({ id: sessionId, share: own, file, stamp }, ...nested);
-			for (const key of FOLD_SHARE_KEYS) added[key] += inclusive[key];
+			// Accounted per session id, by OWN share: a grandchild the child already
+			// folded is also an in-window match in the same directory, so the turn
+			// discovers it directly too. Summing each file's INCLUSIVE total would
+			// then bill that grandchild once inside its parent and once on its own.
+			for (const fold of [{ id: sessionId, share: own, file, stamp }, ...nested]) {
+				if (seenSessionIds.has(fold.id)) continue;
+				seenSessionIds.add(fold.id);
+				folds.push(fold);
+				for (const key of FOLD_SHARE_KEYS) added[key] += fold.share[key];
+			}
 		}
 
 		if (folds.length > 0) {

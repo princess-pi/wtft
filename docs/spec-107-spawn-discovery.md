@@ -38,10 +38,14 @@ not from the transcript's path.
   it spawns still lands under the slug of the cwd, so the cwd is the portable key and the directory
   is not. Using the directory would also make any non-Claude transcript's own siblings candidates,
   which is how an unrelated session gets billed onto this one.
-- *What it gives up:* `resolveLastCwd` reads the **last** `cwd` the transcript records. A session
-  resumed in a second directory attributes its earlier no-`cd` spawns against the later cwd and
-  misses them. Stated rather than fixed: the alternative is a per-entry cwd on every interaction,
-  which is #97/#138 territory and costs a field on every line.
+- *What it gives up, twice over:* `resolveLastCwd` reads the **last** `cwd` the transcript
+  records, so a session resumed in a second directory attributes its earlier no-`cd` spawns
+  against the later cwd and misses them. And it reads only the last 512 KB, so a transcript that
+  records `cwd` once at the top and then grows past that window resolves to `null` and gets no
+  fallback at all — which is **Pi**, whose `session_start` entry is the only one carrying `cwd`
+  (measured on this host: 254 of 3803 Pi transcripts are over 512 KB). Both are stated rather
+  than fixed: the alternative is a per-entry cwd on every interaction, which is #97/#138 territory
+  and costs a field on every line.
 
 **A session never folds itself, or a session that folded it.** A real session's own transcript
 lives in the very directory the fallback searches, and discovery matches on a timestamp window, so
@@ -111,10 +115,16 @@ contract for every spawn rather than for the case #107 adds.
 
 ## What it costs
 
-One `readdirSync` per additional distinct directory per turn, only while that turn's discovery
-window is open (15s + the 2s settle, P4's bound). A turn with one spawn and a `cd` searches exactly
-what it searches today. A no-`cd` spawn adds the session's own project dir, which is the directory
-the daemon already stats every poll for its own transcript.
+One `readdirSync` per additional distinct directory per turn. A turn with one spawn and a `cd`
+searches exactly what it searches today. A no-`cd` spawn adds the session's own project dir, which
+is the directory the daemon already stats every poll for its own transcript.
+
+The bound is the pending queue's, not this change's, and it is not uniform: a turn that searched
+and found nothing is re-discovered every 667ms for the daemon's life, while one that found
+something, and one that had nowhere to look, stop at the window plus the settle margin. So a
+no-`cd` spawn that never produces a child costs one extra `readdirSync` per poll, indefinitely —
+the same shape the `cd` arm already had, now reachable by more turns. Bounding that arm is #128's
+(P6) to do, since the bound and the `unrecorded[]` report are the same decision.
 
 `resolveLastCwd` is memoised on `(path, mtimeMs, size)`, so the fallback costs one tail read per
 transcript change, not one per turn.
@@ -135,7 +145,8 @@ Unit, over `claudeSpawnCwds`:
   such sessions fold each other exactly once rather than forever
 
 End to end, against a sandboxed projects root (`WTFT_CLAUDE_PROJECTS_DIR`, the seam #129 gave
-discovery — not a fake `HOME`, which would not reach a spawned daemon):
+discovery — not a fake `HOME`, which bun captures once at process start, so the in-process parses
+would read the real one):
 
 - **A closer:** a session whose only spawn is a bare `claude -p` reports that child's tokens.
   Fails against `main`, which reports zero.
@@ -152,8 +163,9 @@ discovery — not a fake `HOME`, which would not reach a spawned daemon):
 ## Not in this change
 
 - **#107 C** — an injectable projects root for `research/other-corpus/before-after.ts`. P9.
-- **#116's launcher-spawned sessions.** Reason 2 of that spec ("no `cd`, so the cwd is null") stops
-  being a reason here, but reason 3 — the child's cwd is a worktree or a `/tmp` sandbox the parent
-  never wrote to — still holds, so a launcher-spawned child stays invisible to the parser and the
-  spawn ledger remains its only route.
+- **#116's launcher-spawned sessions.** All three of that spec's reasons still hold for a
+  launcher, and reason 2 is now held by this change rather than by an accident: the no-`cd`
+  fallback deliberately withholds itself from a command whose shell does not run `claude`. A
+  launcher-spawned child stays invisible to the parser, and the spawn ledger remains its only
+  route.
 - **#128's `unrecorded[]` reasons** (P6). This change reduces the set; it does not report it.

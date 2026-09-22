@@ -126,3 +126,21 @@ spawning turn can still gain a subagent session.**
   inside the window; the tag folds it.
 - **Pending window:** a second `claude -p` child of the tag's own session that starts after the
   first was found is read.
+
+## Reconciliation record
+
+Four fresh-context auditors (daemon, reader, parser, host-scoped documents) and three `pr-review`
+rounds ran against this branch. Everything they raised about text or code this branch changed was
+fixed here — the source key, the session picker's summary, the watch-mode short read, and the
+claims in `docs/wtft-tag-format.md`, `CONTEXT.md`, `docs/wtft-incremental-render-spec.md` and
+`CLAUDE.md`. Drift that predates the branch is recorded as leads on
+[#200](https://github.com/princess-pi/wtft/issues/200).
+
+**Left standing here, with the reason:**
+
+| Raised | Why it stands |
+|---|---|
+| A fold record survives into a new generation of the source that wrote it, so the in-self set could name a session the new generation does not hold | It cannot: a generation re-emits the fold records of the parse that opened it, and the reader drops the earlier ones by source. A record written by a *different* source is that source's to supersede |
+| A child whose own turns are all untagged is still recorded as folded, while its money is in `untaggedCostUsd` rather than in `total` | No money moves either way — `computeSpawnTree` drops `untaggedCostUsd` from an edge's total too. It is the honesty gap [#180](https://github.com/princess-pi/wtft/issues/180) item 7 owns, P9 of #194 |
+| A folded transcript rewritten to the same byte length inside one mtime tick keeps its stamp | Stated as the residual under "The fold carries its file". The child's own transcript is covered against that case by the settle rule; a folded one is not |
+| A transcript created after its spawning turn's window closes is no longer looked for | Stated as "What the window bound gives up". The alternative is a directory scan every poll for the daemon's life |

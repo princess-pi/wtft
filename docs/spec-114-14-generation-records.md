@@ -97,7 +97,7 @@ spawning turn can still gain a subagent session.**
   poll, until its window closes. Before this change the first discovery that found any file ended
   the search, so a second child that started later in the window was never read. The two arms
   either side are unchanged: one that has found nothing stays pending with no time bound, and one
-  whose command carries no resolvable cwd is dropped at the first poll.
+  whose commands name no directory to search waits out its window (#107) and is then dropped.
 - **Road not taken: a bound at `IDLE_THRESHOLD_MS`.** #194's plan named it. Growth is tracked by
   stat, so it needs no time bound, and the window is what discovery matches against, so it is the
   bound that fits.

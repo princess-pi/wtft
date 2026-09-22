@@ -389,7 +389,7 @@ row below says why). The table above's rows are unchanged, and these are additio
 | Finding | Verified? | Action |
 |---|---|---|
 | DFS order could depth-cap a subtree within the bound by another path | **Yes** — a session recorded both at the end of a chain and directly under the root | **Code**: breadth-first, so every session is reached at its minimum depth. C26/C26b/C26c |
-| A ledger edge could double-count a child already folded into SELF | **Yes** — `cd /tmp/x && claude -p --session-id <uuid>` is both mechanisms at once | **Code**: `alreadyAttributed`, seeded by `collectSelfAttributedSessionIds`; the edge is reported `in-self-total` and never added. C27–C27d |
+| A ledger edge could double-count a child already folded into SELF | **Yes** — `cd /tmp/x && claude -p --session-id <uuid>` is both mechanisms at once | **Code**: `alreadyAttributed`; the edge is reported `in-self-total` and never added. Since #178 the CLI seeds it from the daemon's recorded fold ids and the widget from `collectSelfAttributedSessionIds`. C27–C27d |
 | A repeat edge onto an unreadable child claimed `already-counted` | **Yes** — `seen.add` ran before the resolve | **Code**: the repeat repeats the first visit's outcome; one missing session is one gap. C28/C28b |
 | `no-session-file` claimed absence the run cannot establish | **Yes** — an unreadable projects root produces the same outcome | **Code**: renamed `not-found`, and the name stops claiming |
 | The Pi widget's root id could never match a ledger parent | **Yes** — Pi basenames are timestamp-prefixed, and the ledger demanded a bare uuid | **Code**: a session id is "contains a uuid", the repo's own rule |
@@ -423,13 +423,12 @@ Ten blocking findings. Nine were real; one is refuted below with the code that d
 | The ~2.2 KiB maximum record is not derivable | **Yes** — five 512-byte fields alone are 2.5 KiB; with two ids and keys it is under 3 | Prose |
 
 **Refuted — the self-attribution set does not lose `commands` through the tag file.**
-The finding reasons that `collectSelfAttributedSessionIds` needs `interaction.commands` for its
-`claude -p` arm, and that tag-derived interactions may not carry them. The tag-file wire format is
-`extensions/lib/wtft-daemon-lib.ts`, and it does: `serializeClassified` writes `cmd:
-interaction.commands` and `t: interaction.timestamp`, and `classifiedToInteraction` reads both back
-(`commands: obj.cmd || []`). Both fields the arm needs survive the round trip, and they are in the
-"must stay in sync" pair the file names as its single source of truth. The finding was right that
-the code assumed it — the assumption is now checked, and this paragraph is the check's record.
+The finding reasoned that `collectSelfAttributedSessionIds` needed `interaction.commands` to
+rediscover `claude -p` children, and that tag-derived interactions might not carry them. Both
+fields survive the round trip — `serializeClassified` writes `cmd` and `t`, and
+`classifiedToInteraction` reads both back — so the finding was refuted on the wire format.
+It is moot as of #178: the set is now built from the daemon's recorded fold records and the folds
+already on the interactions, and nothing on the read path rediscovers a child from its commands.
 
 ## PR review round 3 (2026-09-16) — the round limit, and where it leaves this
 

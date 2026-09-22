@@ -49,9 +49,11 @@ a session that spawns within 15s of its own start is a candidate for folding its
 sessions in one directory are candidates for folding each other, forever. `parseSessionFile` now
 carries the set of transcripts it is already inside, and discovery skips every one of them.
 
-**A turn whose spawns yield no directory at all is still dropped** — an expandable `cd` target
-(`cd $(mktemp -d)`) with an unknown session cwd has nothing to search. That is unchanged, and it is
-one of the reasons #128 (P6) will report as `unrecorded`.
+**A turn whose spawns yield no directory at all waits out its window, then is dropped** — an
+expandable `cd` target (`cd $(mktemp -d)`), or a launcher, has nothing to search. It stays pending
+while the window is open, because the session's own cwd may not be readable from its transcript
+yet; once the window closes it is gone, and it is one of the reasons #128 (P6) will report as
+`unrecorded`.
 
 ## The shape
 
@@ -79,7 +81,10 @@ one of the reasons #128 (P6) will report as `unrecorded`.
 - **`attributeClaudeSubAgentCosts(interactions, ownCwd?, ancestors?)`** takes the fallback cwd and
   the transcripts the parse is already inside, and uses the per-turn discovery. `parseSessionFile`
   passes `resolveLastCwd(filePath)`, so a nested child's own grandchildren resolve against the
-  child's cwd, not the root session's, and adds its own path to `ancestors` before recursing.
+  child's cwd, not the root session's, and adds its own path to `ancestors` before recursing. The
+  guard lives in the FOLD pass, not in discovery: discovery still returns the transcript, and each
+  caller decides. The daemon's own caller drops a discovered file whose path is the session it is
+  watching, for the same reason and by a different route.
 - **`claudeSpawnWindowClosesAt(interactions, ownCwd?)`** filters on `claudeSpawnCwds(...).length > 0`
   rather than on a single non-null cwd, so P4's discovery window opens for a no-`cd` spawn too.
 
@@ -123,7 +128,8 @@ Unit, over `claudeSpawnCwds`:
 - a session whose own transcript sits in the directory it searches does not fold itself, and two
   such sessions fold each other exactly once rather than forever
 
-End to end, in a sandboxed `HOME`:
+End to end, against a sandboxed projects root (`WTFT_CLAUDE_PROJECTS_DIR`, the seam #129 gave
+discovery — not a fake `HOME`, which would not reach a spawned daemon):
 
 - **A closer:** a session whose only spawn is a bare `claude -p` reports that child's tokens.
   Fails against `main`, which reports zero.
@@ -132,7 +138,8 @@ End to end, in a sandboxed `HOME`:
 - **Daemon:** the same bare-spawn session, run through the daemon, puts the child's cost in the tag
   file — the path that also proves the pending item is retried rather than dropped.
 
-Plus the existing suites, unchanged: `tests/wtft-106-other-reclaim.test.ts` (cwd extraction),
+`tests/wtft-106-other-reclaim.test.ts` (cwd extraction) and `tests/wtft-116-spawn-ledger.test.ts`
+(the launcher control) keep their assertions and are rewritten to the new call. Unchanged:
 `tests/wtft-129-projects-root.test.ts` (slug variants), `tests/wtft-420-subagent-call-site.test.ts`
 (one production call site), `tests/wtft-114-generation-records.test.ts` (P4's windows).
 

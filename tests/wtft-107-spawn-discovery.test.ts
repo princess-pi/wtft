@@ -200,5 +200,41 @@ console.log("\nPART D — the daemon retries a bare spawn instead of dropping it
 		`D2 #107 A a bare claude -p child reaches the tag file: 100 plus 600 (got ${total})`);
 }
 
+{
+	// The session's own transcript sits in the directory its bare spawn
+	// searches, inside its own window: registering it as its own child bills
+	// the whole session twice.
+	const selfCwd = path.join(dir, "d-self-project");
+	const selfProjectDir = path.join(projects, selfCwd.replace(/[^a-zA-Z0-9]/g, "-"));
+	fs.mkdirSync(selfProjectDir, { recursive: true });
+	const sessionId = "bbbb8888-8888-4888-8888-888888888888";
+	const rootPath = path.join(selfProjectDir, `${sessionId}.jsonl`);
+	const now = Date.now();
+	fs.writeFileSync(rootPath,
+		sessionLine(sessionId, now - 3_000, selfCwd)
+		+ turnLine("d-self-turn", now - 2_000, 100, ["claude -p 'go'"]));
+
+	const daemon = spawn(process.execPath, [DAEMON_BIN, "--session", rootPath], { detached: true, stdio: "ignore", env: { ...process.env } });
+	daemon.unref();
+	const tagPath = path.join(selfProjectDir, "wtft-tags", `${sessionId}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const outputInTag = () => readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0);
+
+	for (let i = 0; i < 40 && outputInTag() < 100; i++) await sleep(250);
+	// Past the discovery window plus the settle margin, so every poll that could
+	// have registered the session as its own child has run.
+	await sleep(3_000);
+	const raw = fs.existsSync(tagPath) ? fs.readFileSync(tagPath, "utf8") : "";
+	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
+
+	// Asserted on the SOURCED lines, not on the total: this session's turns carry
+	// a message id, so the reader's id dedup would hide the second copy. A
+	// harness whose turns have no id — Pi — has nothing to collapse them with.
+	const sourced = raw.split("\n").filter(Boolean)
+		.map(l => { try { return JSON.parse(l); } catch { return null; } })
+		.filter(o => o && (typeof o.s === "string" || o._fold || o._gen));
+	check(sourced.length === 0,
+		`D3 the daemon does not register the session's own transcript as its own child — no sourced line in its tag (got ${JSON.stringify(sourced).slice(0, 160)})`);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

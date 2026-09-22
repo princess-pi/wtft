@@ -468,14 +468,22 @@ function scanForSubAgents() {
         }
         continue;
       }
-      // Nowhere to look is not a miss: the turn spawned, but no command named a
-      // directory and the session's own is unknown. Dropping it here is #107 A.
-      if (discovered.searched === 0) continue;
+      // Nowhere to look yet: no command named a directory, and the session's
+      // own cwd is not readable from its transcript. It may be on the next
+      // poll, so the turn waits out its window like any other miss.
+      if (discovered.searched === 0) {
+        if (Date.now() <= interaction.timestamp + CLAUDE_SUBAGENT_WINDOW_MS + MTIME_SETTLE_MS) stillPending.push(item);
+        continue;
+      }
       if (discovered.files.length === 0 && !discovered.unreadable) {
         stillPending.push(item);
         continue;
       }
       for (const file of discovered.files) {
+        // The searched directory holds this session's own transcript, and
+        // discovery matches on a time window: registering it as a child of
+        // itself bills the whole session twice.
+        if (path.resolve(file) === path.resolve(sessionPath)) continue;
         discoveredClaudeFiles.add(file);
         if (process.env.WTFT_DAEMON_DEBUG) {
           process.stderr.write(`[wtft-log-parser] claude -p subagent registered for re-parse (${path.basename(file, '.jsonl')})\n`);

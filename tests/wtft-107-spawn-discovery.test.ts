@@ -1,12 +1,12 @@
 #!/usr/bin/env -S bun
 /**
- * #107 A/B — discovery per spawning command, and the no-`cd` fallback.
+ * #107 A/B — discovery per spawn, and the no-`cd` fallback.
  */
 
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { claudeSpawnCwds, parseSessionFile } from "../extensions/lib/wtft-parser.ts";
+import { claudeSpawnCwds, discoverSubagentSessionFiles, loadSubagentInteractionsChecked, parseSessionFile } from "../extensions/lib/wtft-parser.ts";
 import { spawn } from "node:child_process";
 import { readClassifiedTagFile, WTFT_TAGGER_VERSION } from "../bin/wtft.mjs";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
@@ -28,9 +28,9 @@ const projects = path.join(dir, "projects");
 process.env.WTFT_CLAUDE_PROJECTS_DIR = projects;
 
 // ---
-// PART U — every spawning command contributes a directory to search
+// PART U — every spawn contributes a directory to search
 // ---
-console.log("\nPART U — claudeSpawnCwds, one entry per spawning command");
+console.log("\nPART U — claudeSpawnCwds, one entry per spawn");
 
 const u = (commands: string[], ownCwd: string | null) => JSON.stringify(claudeSpawnCwds(commands, ownCwd));
 
@@ -63,6 +63,16 @@ check(u(["which claude && cd /repo && claude -p 'x'"], "/own") === '["/repo"]',
 	`U13 a segment that only NAMES claude does not end the cd scan (got ${u(["which claude && cd /repo && claude -p 'x'"], "/own")})`);
 check(u(["cd; claude -p 'go'"], "/own") === "[]",
 	`U12 a bare cd moves the shell somewhere we cannot name, so no fallback (got ${u(["cd; claude -p 'go'"], "/own")})`);
+
+const U15 = ["cd /a && claude -p 'x' && cd /b && claude -p 'y'"];
+check(u(U15, "/own") === '["/a","/b"]',
+	`U15 two spawns in ONE command, either side of a cd, yield both directories (got ${u(U15, "/own")})`);
+const U16 = ["herdr agent start x --kind claude --pane wE:pCW && cd /repo"];
+check(u(U16, "/own") === "[]",
+	`U16 a cd AFTER a launcher is where the shell went next, not where the child ran (got ${u(U16, "/own")})`);
+const U17 = ["claude -p 'x' && cd /b && claude -p 'y'"];
+check(u(U17, "/own") === '["/own","/b"]',
+	`U17 a bare spawn takes the own cwd and a later cd moves only the spawn after it (got ${u(U17, "/own")})`);
 
 // ---
 // PART A — the #107 A closer: a bare `claude -p` is attributed
@@ -421,6 +431,86 @@ console.log("\nPART D — the daemon retries a bare spawn instead of dropping it
 
 	check(first === 190 && second === 190,
 		`D8 a nested child two sibling transcripts both discover is billed once: 100 + 40 + 30 + 20 (got ${first} then ${second})`);
+}
+
+{
+	// A chain: a Task subagent folds a project-dir transcript, which folds a
+	// third. The root discovers the middle and the leaf on its own too, so each
+	// one is reachable by two routes and must still be billed once.
+	const cwd = path.join(dir, "d-chain-project");
+	const projectDir = path.join(projects, cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+	const rootId = "bbbb0002-0002-4002-8002-000000000002";
+	const subagentDir = path.join(projectDir, rootId, "subagents");
+	fs.mkdirSync(subagentDir, { recursive: true });
+	const rootPath = path.join(projectDir, `${rootId}.jsonl`);
+	const now = Date.now();
+	fs.writeFileSync(rootPath,
+		sessionLine(rootId, now - 30_000, cwd)
+		+ turnLine("d-chain-root", now - 20_000, 100, ["claude -p 'go'"]));
+	fs.writeFileSync(path.join(subagentDir, "agent-one.jsonl"),
+		sessionLine("agent-one", now - 30_000, cwd)
+		+ turnLine("d-chain-agent", now - 30_000, 40, ["claude -p 'deeper'"]));
+	fs.writeFileSync(path.join(projectDir, "cccc0003-0003-4003-8003-000000000003.jsonl"),
+		sessionLine("cccc0003-0003-4003-8003-000000000003", now - 30_000, cwd)
+		+ turnLine("d-chain-mid", now - 16_000, 50, ["claude -p 'deepest'"]));
+	fs.writeFileSync(path.join(projectDir, "dddd0004-0004-4004-8004-000000000004.jsonl"),
+		sessionLine("dddd0004-0004-4004-8004-000000000004", now - 10_000, cwd)
+		+ turnLine("d-chain-leaf", now - 10_000, 20));
+
+	const foldsOf = (file: string) => parseSessionFile(file).flatMap(i => i.claudeSubAgentFolds ?? []).map(f => f.id);
+	check(foldsOf(path.join(subagentDir, "agent-one.jsonl")).includes("cccc0003-0003-4003-8003-000000000003")
+		&& foldsOf(path.join(projectDir, "cccc0003-0003-4003-8003-000000000003.jsonl")).includes("dddd0004-0004-4004-8004-000000000004"),
+		"D9 fixture precondition: the subagent folds the middle transcript, which folds the leaf");
+
+	const daemon = spawn(process.execPath, [DAEMON_BIN, "--session", rootPath], { detached: true, stdio: "ignore", env: { ...process.env } });
+	daemon.unref();
+	const tagPath = path.join(projectDir, "wtft-tags", `${rootId}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const outputInTag = () => readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0);
+
+	for (let i = 0; i < 80 && outputInTag() !== 210; i++) await sleep(250);
+	const first = outputInTag();
+	await sleep(4_000);
+	const second = outputInTag();
+	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
+
+	check(first === 210 && second === 210,
+		`D9 a chain of folds bills each transcript once, and stays there: 100 + 40 + 50 + 20 (got ${first} then ${second})`);
+}
+
+// ---
+// PART L — the one-shot path counts each listed transcript once
+// ---
+console.log("\nPART L — a listed transcript is not also folded into its sibling");
+
+{
+	// Both siblings are children of the root, so both are in the list the CLI and
+	// the widget parse; one spawns bare and discovers the other in their shared
+	// project dir.
+	const cwd = path.join(dir, "l-sibling-project");
+	const projectDir = path.join(projects, cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+	fs.mkdirSync(projectDir, { recursive: true });
+	const rootId = "eeee0005-0005-4005-8005-000000000005";
+	const rootPath = path.join(projectDir, `${rootId}.jsonl`);
+	const now = Date.now();
+	const childLine = (id: string, tsMs: number) => JSON.stringify({
+		type: "session", version: 3, id, timestamp: new Date(tsMs).toISOString(), cwd, parentSession: rootId,
+	}) + "\n";
+	fs.writeFileSync(rootPath,
+		sessionLine(rootId, now - 30_000, cwd) + turnLine("l-root", now - 30_000, 100));
+	fs.writeFileSync(path.join(projectDir, "ffff0006-0006-4006-8006-000000000006.jsonl"),
+		childLine("ffff0006-0006-4006-8006-000000000006", now - 20_000)
+		+ turnLine("l-one", now - 20_000, 40, ["claude -p 'go'"]));
+	fs.writeFileSync(path.join(projectDir, "aaaa0007-0007-4007-8007-000000000007.jsonl"),
+		childLine("aaaa0007-0007-4007-8007-000000000007", now - 18_000)
+		+ turnLine("l-two", now - 18_000, 20));
+
+	const discovered = discoverSubagentSessionFiles(rootPath);
+	check(discovered.files.length === 2,
+		`L1 fixture precondition: both siblings are listed for one parse (got ${discovered.files.length})`);
+	const loaded = loadSubagentInteractionsChecked(discovered.files, undefined, undefined, undefined, rootPath);
+	const total = loaded.interactions.reduce((sum, i) => sum + (i.outputTokens || 0), 0);
+	check(total === 60,
+		`L2 a sibling one listed transcript folds is not billed twice: 40 + 20 (got ${total})`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

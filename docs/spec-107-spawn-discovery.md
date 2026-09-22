@@ -1,4 +1,4 @@
-# Spec — #107 A/B: discovery per spawning command, and the no-`cd` fallback
+# Spec — #107 A/B: discovery per spawn, and the no-`cd` fallback
 
 > **Issue:** [#107](https://github.com/princess-pi/wtft/issues/107) — findings **A** and **B**.
 > **P5 of** [#194](https://github.com/princess-pi/wtft/issues/194). Finding **C** (an injectable
@@ -25,8 +25,12 @@ Both end the same way: the session total silently under-reports and nothing rais
 
 ## The contract
 
-**Discovery is per spawning command, not per turn.** Every command in the turn that spawns
-contributes one search directory; the turn searches all of them and sums every child it finds.
+**Discovery is per spawn, not per turn.** Every spawn in the turn contributes one search
+directory; the turn searches all of them and sums every child it finds. One Bash call is one
+shell, so the unit is the segment rather than the command string: a `cd` between two spawns moves
+the second and not the first, and a `cd` after the last spawn is where the shell went next, not
+where anything ran. Each spawn takes the `cd` state standing when the shell reached it, which is
+also what keeps a segment that merely names claude (`which claude`) from ending the scan.
 
 **A spawn with no `cd` searches the session's own working directory.** "Own working directory" is
 resolved from the session's own transcript with `resolveLastCwd` (`extensions/lib/harness/session-cwd.ts`),
@@ -62,6 +66,13 @@ every caller that folds what it gets adds its own guard — the daemon's is a pa
 against the session it watches, and it also hands that path to `parseSessionFile` as an ancestor,
 so a child cannot fold the session that spawned it.
 
+**A transcript the caller already lists is never folded into a sibling.** The one-shot CLI and
+the widget parse a list of a session's children — its Task subagents and its Pi siblings — and
+append every one of them, so a sibling that one of them folds is that sibling's cost twice.
+`loadSubagentInteractionsChecked` therefore hands every path in the list to every parse as
+`doNotFold`, which is the same rule the daemon states as one child, one holder, in the one place
+where a single call can see the whole list.
+
 **A turn whose spawns yield no directory at all waits out its window, then is dropped** — an
 expandable `cd` target (`cd $(mktemp -d)`), a bare `cd` (the shell went to `$HOME`, which the
 transcript does not name), a launcher with no `cd` of its own, or a direct spawn whose session cwd
@@ -76,8 +87,9 @@ is gone, and it is one of the reasons #128 (P6) will report as `unrecorded`.
 `extensions/lib/wtft-parser.ts`:
 
 - **`claudeSpawnCwds(commands, ownCwd): string[]`** replaces `cwdForClaudeSpawn(commands)`. One
-  entry per spawning command — its own `cd` target, or `ownCwd` when it has none — deduped, in
-  command order. Empty when nothing spawns, or when every spawn's directory is unknown.
+  entry per spawning segment — the `cd` standing when the shell reached it, or `ownCwd` when no
+  `cd` preceded it — deduped, in command order. Empty when nothing spawns, or when every spawn's
+  directory is unknown.
   `cwdForClaudeSpawn` is **deleted**: returning a single cwd is finding B.
   - **Only a direct run inherits the session's cwd.** `commandSpawnsAgent` also fires on a launcher
     that merely names claude in a flag (`herdr agent start … --kind claude`), and that child starts
@@ -183,6 +195,9 @@ Unit, over `claudeSpawnCwds`:
   change must not reopen it)
 - a launcher that only names claude in a flag yields nothing, while `timeout 180 claude -p` still
   inherits the cwd
+- two spawns either side of a `cd` in ONE command yield both directories, a `cd` after a launcher
+  yields nothing, and a `cd` after a bare spawn moves only the spawn that follows it
+- a sibling in the caller's own parse list is billed once, not once on its own and once folded
 - a session whose own transcript sits in the directory it searches does not fold itself, and two
   such sessions fold each other exactly once rather than forever
 

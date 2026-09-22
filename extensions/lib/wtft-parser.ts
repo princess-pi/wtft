@@ -1101,7 +1101,12 @@ export function loadSubagentInteractionsChecked(
 ): { interactions: Interaction[]; dropped: string[] } {
 	const interactions: Interaction[] = [];
 	const dropped: string[] = [];
-	const doNotFold = new Set<string>(rootFile ? [canonicalTranscriptPath(rootFile)] : []);
+	// Every file in this list is appended at top level, so a fold of one into
+	// another is that file's cost a second time, under its sibling's turns.
+	const doNotFold = new Set<string>([
+		...(rootFile ? [canonicalTranscriptPath(rootFile)] : []),
+		...subagentFiles.map(canonicalTranscriptPath),
+	]);
 	for (const file of subagentFiles) {
 		try {
 			const raw = parseFn(file, doNotFold);
@@ -1173,20 +1178,56 @@ function cdBeforeSpawn(cmd: string): { cwd: string | null; sawCd: boolean } {
 
 /**
  * Every directory a turn's `claude -p` spawns may have run in, deduped, in
- * command order. Each `commands` entry is its own Bash call with its own shell,
- * so two spawns in one turn can sit in two directories. A spawn contributes its
- * own `cd` target; `ownCwd` stands in only for one that has no `cd` and whose
- * shell runs `claude` itself.
+ * command order. One Bash call is one shell, so a `cd` between two spawns moves
+ * the second and not the first, and each spawn takes the `cd` state standing
+ * when the shell reached it. `ownCwd` stands in only for a spawn with no `cd`
+ * before it whose own segment runs `claude` itself.
  */
 export function claudeSpawnCwds(commands: string[], ownCwd: string | null): string[] {
 	const cwds: string[] = [];
 	for (const cmd of commands) {
-		if (!commandSpawnsAgent(cmd)) continue;
-		const { cwd, sawCd } = cdBeforeSpawn(cmd);
-		const resolved = cwd || (!sawCd && runsClaudeDirectly(cmd) ? ownCwd : null);
-		if (resolved && !cwds.includes(resolved)) cwds.push(resolved);
+		for (const resolved of spawnCwdsInCommand(cmd, ownCwd)) {
+			if (resolved && !cwds.includes(resolved)) cwds.push(resolved);
+		}
 	}
 	return cwds;
+}
+
+/** One entry per spawning segment, null where the shell's directory is unknowable. */
+function spawnCwdsInCommand(cmd: string, ownCwd: string | null): (string | null)[] {
+	const out: (string | null)[] = [];
+	let found: string | null = null;
+	let sawCd = false;
+	let prevWasKeptCd = false;
+	for (const { text, joinedBy } of extractJoinedSegments(cmd)) {
+		const bare = stripCommandPrefixes(text);
+		const head = bare.split("\n", 1)[0]!;
+		// A segment that RUNS a spawn takes the directory standing now. One that
+		// merely names it (`which claude`) runs no agent, and a launcher runs one
+		// somewhere this cannot name — neither takes the session's own cwd.
+		if (commandSpawnsAgent(text)) {
+			const direct = CLAUDE_HEAD.test(head.trim().toLowerCase());
+			out.push(found || (!sawCd && direct ? ownCwd : null));
+			prevWasKeptCd = false;
+			continue;
+		}
+		const m = head.match(/^cd\s+(?:"([^"]*)"|'([^']*)'|([^\s;&|]+))/);
+		if (!m) {
+			// `cd` with no argument goes to $HOME — a move we cannot name, which is
+			// not the same as no move at all.
+			if (/^cd\s*$/.test(head)) { sawCd = true; found = null; prevWasKeptCd = false; continue; }
+			prevWasKeptCd = false;
+			continue;
+		}
+		if (joinedBy === "||" && prevWasKeptCd) continue;
+		prevWasKeptCd = true;
+		sawCd = true;
+		const target = m[1] || m[2] || m[3] || "";
+		// Expandable target: keep prior `found`, do not clear it.
+		if (/[$`]/.test(target)) continue;
+		found = target || found;
+	}
+	return out;
 }
 
 const CLAUDE_HEAD = /^claude(?:\s|$)/;
@@ -1200,18 +1241,6 @@ export function canonicalTranscriptPath(file: string): string {
 	} catch {
 		return path.resolve(file);
 	}
-}
-
-/**
- * Whether the shell itself runs `claude` — as opposed to a launcher that merely
- * names it in a flag (`herdr agent start … --kind claude`). Only a direct run
- * inherits the shell's working directory; a launcher starts its child in a
- * worktree or a sandbox, so the shell's cwd says nothing about where that
- * child's transcript landed.
- */
-function runsClaudeDirectly(cmd: string): boolean {
-	return extractRealCommands(cmd)
-		.some(real => CLAUDE_HEAD.test(stripCommandPrefixes(real).split("\n", 1)[0]!.trim().toLowerCase()));
 }
 
 /**

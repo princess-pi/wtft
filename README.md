@@ -248,8 +248,8 @@ Exit **2** is a bad call — a missing or unknown flag, a flag with no value (a
 bare `--label --json` is refused rather than recording the label `--json`), a
 malformed session id, an oversized field. Exit **3** is an
 unwritable ledger; the edge is then not recorded at all, so the child is
-*invisible* rather than unattributed. A spawner is meant to ignore both, since an unrecorded edge
-simply degrades to the old behaviour.
+outside the tree rather than unattributed. A spawner is meant to ignore both: the child
+then shows up only in `spawned.unrecorded[]`, if it matches a tier there.
 
 `spawn-record` is positional: it must be the **first** argument, so
 `wtft --json spawn-record …` is a report run, not a recording.

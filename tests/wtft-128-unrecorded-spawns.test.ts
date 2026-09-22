@@ -289,6 +289,17 @@ console.log("\nPART N — a moved session's newest copy wins");
 		`N1 the newest copy is the row (got ${row?.path === fresh ? "newest" : row?.path === stale ? "stale" : "none"}, ${row?.total?.outputTokens})`);
 }
 {
+	// The newest copy decides, eligible or not: an older eligible copy is stale.
+	const ROOT_O = "a5000000-0000-4000-8000-0000000000b1";
+	const dup = "a5000001-0000-4000-8000-0000000000b2";
+	const stale = writeChild({ id: dup, slug: "-tmp-o-old", cwd: "/tmp/o-old", startedAt: at(4), entrypoint: "sdk-cli" });
+	writeChild({ id: dup, slug: "-home-o-new", cwd: "/home/o-new", startedAt: at(4), entrypoint: "sdk-cli" });
+	fs.utimesSync(stale, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+	const rows = computeSpawnTree(ROOT_O, { ledgerPath, unrecorded: { turns: [turn(at(3), ["pr-open"])], rootCwd: null } }).unrecorded ?? [];
+	check(!rows.some(r => r.child === dup),
+		`N2 a newer ineligible copy is not replaced by an older eligible one (got ${JSON.stringify(rows.filter(r => r.child === dup).map(r => r.path))})`);
+}
+{
 	const damaged = renderSpawnTree(emptyTotals(), { ...computeSpawnTree(ROOT, { ledgerPath, unrecorded: { turns: rootTurns, rootCwd: repo } }), ledgerError: "EACCES" });
 	check(/UNRECORDED \d+ session\(s\) not in the tree — the spawn ledger could not be read/.test(damaged) && !/no spawn record names/.test(damaged),
 		`R5 with the ledger unreadable the block does not claim no record names them:\n${damaged}`);

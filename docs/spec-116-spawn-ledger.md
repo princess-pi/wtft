@@ -102,7 +102,8 @@ with some flags the report parser ignores.
 | 3 | The record was valid and the ledger could not be written (unwritable state dir, ENOSPC, a short write). The edge is **not recorded**, so the child is **invisible**, not `unattributed` — see *How this is verified*. Nothing repairs a partial line; see *Simplification pass*. |
 
 **It never blocks a spawn.** A spawner calls it and ignores the exit code; the failure is the
-spawner's to log, and an unwritten edge degrades to exactly today's behaviour.
+spawner's to log, and an unwritten edge leaves the child outside the tree — reported, since #128,
+only in `spawned.unrecorded[]` when it matches a tier there.
 
 ## Reading, resolving, walking
 

@@ -49,8 +49,8 @@ to start the scan, so `unrecorded` is `[]` without a look.
 - **The ledger could not be read** (`spawned.ledgerError`): no edge is known, so a session some
   other parent recorded cannot be excluded, and may be listed. The `--tokens` header then says so
   instead of "no spawn record names".
-- **One id in two project directories** is a moved session; the row is its newest copy by mtime,
-  the copy every other reader prices.
+- **One id in two project directories** is a moved session; only its newest copy by mtime is
+  classified — the copy every other reader prices — so an older copy is never listed in its place.
 
 ### The launch span
 
@@ -338,3 +338,11 @@ found in text this branch did not change is filed as
 | With the ledger unreadable, the header still said "no spawn record names" | Verified — reproduced as R5 | **Code fixed**: the header says the ledger could not be read; ✅ R5 |
 | "The first three read state the walk already has" | Verified: the second is a pass over the ledger | Corrected |
 | spec-116: "never summed into anything" | Verified: `--tokens` sums each inferred basis | Qualified |
+
+### Macroscope, on the Draft (PR #211)
+
+| Finding | Verdict | Action |
+|---|---|---|
+| Medium: a newer ineligible copy let an older eligible copy through | Verified — reproduced as N2 | **Code fixed**: newest copy chosen before classifying; ✅ N2 |
+| Low: `spawn-record` help said a failed append degrades to exactly the old behaviour | Verified | Corrected |
+| Low: "no ledger edge names" is unqualified when the ledger could not be read | Verified | Qualified in spec-26 and the manifest |

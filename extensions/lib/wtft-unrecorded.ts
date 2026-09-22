@@ -107,20 +107,25 @@ export function listUnrecordedSpawns(input: ListUnrecordedInput): UnrecordedSpaw
 	const fanOut = fan?.inRepo ? fan.dirs.map(d => path.resolve(d)) : [];
 	const doNotFold = new Set(input.rootFile ? [canonicalTranscriptPath(input.rootFile)] : []);
 
-	const listed = new Map<string, { candidate: SpawnCandidate; tier: UnrecordedTier; basis: UnrecordedBasis }>();
+	// One id in two project dirs is a moved session: its newest copy is the one
+	// every other reader prices, so it alone is classified — an older copy that
+	// would pass the tiers is stale.
+	const newest = new Map<string, SpawnCandidate>();
 	for (const discovery of getDiscoveries()) {
 		if (!discovery.listSpawnCandidates) continue;
 		const scan = discovery.listSpawnCandidates(windows[0][0]);
 		for (const { path: file, error } of scan.unreadable) warnUnreadable(file, error);
 		for (const candidate of scan.candidates) {
 			if (candidate.sessionId === input.rootSessionId || input.exclude.has(candidate.sessionId)) continue;
-			// One id in two project dirs is a moved session: its newest copy is
-			// the one every other reader prices.
-			const prior = listed.get(candidate.sessionId);
-			if (prior && mtimeOf(prior.candidate.path) >= mtimeOf(candidate.path)) continue;
-			const verdict = classify(candidate, input.rootSessionId, fanOut, windows);
-			if (verdict) listed.set(candidate.sessionId, { candidate, ...verdict });
+			const prior = newest.get(candidate.sessionId);
+			if (prior && mtimeOf(prior.path) >= mtimeOf(candidate.path)) continue;
+			newest.set(candidate.sessionId, candidate);
 		}
+	}
+	const listed = new Map<string, { candidate: SpawnCandidate; tier: UnrecordedTier; basis: UnrecordedBasis }>();
+	for (const [id, candidate] of newest) {
+		const verdict = classify(candidate, input.rootSessionId, fanOut, windows);
+		if (verdict) listed.set(id, { candidate, ...verdict });
 	}
 
 	const rows: UnrecordedSpawn[] = [];

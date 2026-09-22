@@ -306,7 +306,10 @@ function syncSubagentTranscript(file: string): boolean {
 
   let deduped: ReturnType<typeof deduplicateInteractions>;
   try {
-    deduped = deduplicateInteractions(parseSessionFile(file));
+    // The watched session is an ancestor of every transcript discovered from
+    // it: without it here, a child whose own spawn window catches the session
+    // folds the session into itself, and those lines land in the session's tag.
+    deduped = deduplicateInteractions(parseSessionFile(file, new Set([path.resolve(sessionPath)])));
     clearSubagentCacheMiss(deduped);
   } catch (err) {
     pollHadFailure = true;

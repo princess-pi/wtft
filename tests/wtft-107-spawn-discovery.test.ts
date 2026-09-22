@@ -236,5 +236,37 @@ console.log("\nPART D — the daemon retries a bare spawn instead of dropping it
 		`D3 the daemon does not register the session's own transcript as its own child — no sourced line in its tag (got ${JSON.stringify(sourced).slice(0, 160)})`);
 }
 
+{
+	// The child runs in the session's own cwd, so its transcript lands in the
+	// same project dir — and its own bare spawn searches that dir and finds the
+	// session that spawned it.
+	const cwd = path.join(dir, "d-cycle-project");
+	const projectDir = path.join(projects, cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+	fs.mkdirSync(projectDir, { recursive: true });
+	const sessionId = "cccc9999-9999-4999-8999-999999999999";
+	const childId = "dddd0000-0000-4000-8000-000000000000";
+	const rootPath = path.join(projectDir, `${sessionId}.jsonl`);
+	const now = Date.now();
+	fs.writeFileSync(rootPath,
+		sessionLine(sessionId, now - 6_000, cwd)
+		+ turnLine("d-cycle-root", now - 5_000, 100, ["claude -p 'go'"]));
+	fs.writeFileSync(path.join(projectDir, `${childId}.jsonl`),
+		sessionLine(childId, now - 4_000, cwd)
+		+ turnLine("d-cycle-child", now - 4_000, 60, ["claude -p 'deeper'"]));
+
+	const daemon = spawn(process.execPath, [DAEMON_BIN, "--session", rootPath], { detached: true, stdio: "ignore", env: { ...process.env } });
+	daemon.unref();
+	const tagPath = path.join(projectDir, "wtft-tags", `${sessionId}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const outputInTag = () => readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0);
+
+	for (let i = 0; i < 60 && outputInTag() < 160; i++) await sleep(250);
+	await sleep(3_000);
+	const total = outputInTag();
+	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
+
+	check(total === 160,
+		`D4 a discovered child does not fold the session that spawned it back in: 100 plus 60 (got ${total})`);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

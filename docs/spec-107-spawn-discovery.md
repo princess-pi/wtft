@@ -47,7 +47,11 @@ not from the transcript's path.
 lives in the very directory the fallback searches, and discovery matches on a timestamp window, so
 a session that spawns within 15s of its own start is a candidate for folding itself — and two
 sessions in one directory are candidates for folding each other, forever. `parseSessionFile` now
-carries the set of transcripts it is already inside, and discovery skips every one of them.
+carries the set of transcripts it is already inside, and the FOLD pass skips every one of them.
+Discovery itself still returns them: it answers "what is in this directory in this window", and
+every caller that folds what it gets adds its own guard — the daemon's is a path comparison
+against the session it watches, and it also hands that path to `parseSessionFile` as an ancestor,
+so a child cannot fold the session that spawned it.
 
 **A turn whose spawns yield no directory at all waits out its window, then is dropped** — an
 expandable `cd` target (`cd $(mktemp -d)`), or a launcher, has nothing to search. It stays pending
@@ -91,7 +95,9 @@ yet; once the window closes it is gone, and it is one of the reasons #128 (P6) w
 `bin/wtft-daemon.ts`: the `pendingClaudeCommands` drain calls the per-turn discovery with
 `resolveLastCwd(sessionPath)`. Its `if (!cwd) continue` — which dropped the item **without
 re-queueing it**, so the turn was never retried — becomes a `searched === 0` check that keeps the
-item pending while its window is open, the same rule every other miss follows.
+item pending while its window is open. The arm beside it is unchanged and is NOT window-bounded:
+a turn that searched and found nothing stays pending with no time bound, which is a property #128
+(P6) has to report on rather than one this change touches.
 
 **The residual this leaves: a sibling, not a child.** Discovery's rule is "a session that started
 in that directory within ±15s of the spawning turn", and the directory the fallback searches also

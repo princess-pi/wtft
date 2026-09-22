@@ -13,7 +13,10 @@ A launcher-spawned session is a full `claude` started by a *launcher process* th
 parent's own transcript contains. Today it contributes **zero** to the parent, for three reasons
 that are all properties of the transcripts and none of which a parser can fix:
 
-1. The command head is the launcher, not `claude`, so `commandSpawnsAgent` never fires.
+1. The shell runs the launcher, not `claude`. `commandSpawnsAgent` does fire — it matches
+   `claude` anywhere in the command, including the `--kind claude` flag — but the child did not
+   inherit the shell's working directory, so since #107 A the no-`cd` fallback deliberately does
+   not stand in for it.
 2. There is no `cd` on the spawning command. Since #107 A a spawn with no `cd` falls back to the
    session's own working directory, but only when the shell runs `claude` itself — a launcher
    starts its child somewhere the parent's cwd does not name, so nothing is searched for it.

@@ -371,7 +371,9 @@ a `pr-review` lens, a wrapper script — rather than by a `claude` command the p
 transcript contains. Distinct from a **subagent session** (a Task-tool child, discovered by
 file layout) and from a **`claude -p` spawn** (discovered by cwd and time): a launcher child
 has its own session id and its own project dir, and **neither transcript contains a field
-naming the other**, so there is nothing to re-derive and no tagger bump can reach its cost.
+naming the other** — unless the launcher put the parent's id in the child's cwd, which is what
+an **unrecorded spawn**'s `named` tier reads — so there is nothing to re-derive and no tagger
+bump can reach its cost.
 _Avoid_: Background agent, detached session, orphan session (it is not orphaned — the edge
 exists, it was simply never written down)
 
@@ -410,12 +412,15 @@ _Avoid_: Missing, lost, dropped (the edge is known; only the amount is not)
 
 **Unrecorded spawn** (#128):
 A session that looks like this session's launcher child and that no spawn-ledger edge names —
-`spawned.unrecorded[]` in JSON, the `UNRECORDED` block under `--tokens`. Listed with its own cost
-and a **tier**: `named` (its `cwd` contains this session's id, so the launcher named the parent)
-or `inferred` (a program started it, in this repo's worktree fan-out or a temp sandbox, inside a
-**spawn window** — 30 minutes after any turn of this session that ran a command). A LIST, never a
-claim: nothing in it reaches `total`, `spawned.total` or `tree`. Distinct from **unattributed**,
-which is a recorded edge whose child could not be read.
+`spawned.unrecorded[]` in JSON, the `UNRECORDED` block under the CLI's `--tokens` (the widget
+has none). Claude Code sessions only. Listed with its own cost — `null`, never zero, when it
+cannot be parsed — a **tier** and a **basis**: `named` (basis `cwd-names-parent`: its `cwd`
+contains this session's id, so the launcher named the parent, whoever started it) or `inferred`
+(basis `worktree` or `tmp`: a program started it, in this repo's worktree fan-out or a temp
+sandbox, inside a **launch span** — 30 minutes after any turn in this session's tag file that ran
+a command, a Task subagent's turns included). A LIST, never a claim: nothing in it reaches
+`total`, `spawned.total` or `tree`. Distinct from **unattributed**, which is a recorded edge
+whose child could not be read.
 _Avoid_: Orphan, unattributed child, probable descendant (each reads as a claim about the money)
 
 **Descendants unknown** (#116):

@@ -220,8 +220,9 @@ Some agent sessions are started by a *launcher*, not by a `claude` command in th
 parent's own transcript: a `pr-review` lens in a `/tmp` sandbox, a
 `herdr agent start` child in a worktree. Those children are invisible to the
 tree, and not because the parser is missing something —
-**neither transcript contains a field naming the other**, so there is no edge to
-re-derive and no amount of re-parsing can reach the money. Measured on one real
+**neither transcript contains a field naming the other** (unless the launcher put
+the parent's id in the child's cwd, which #128's `named` tier reads), so there is
+no edge to re-derive and no amount of re-parsing can reach the money. Measured on one real
 session: $70.33 reported, $69.68 of its own lens children INVISIBLE — not
 `unattributed`, which is the narrower thing: a RECORDED edge whose child could
 not be read. Those children had no record at all, which is why the issue exists.
@@ -275,15 +276,19 @@ was read cleanly; an unreadable ledger, or one with skipped lines, still prints
 the same report. Full
 contract: [`docs/spec-116-spawn-ledger.md`](./docs/spec-116-spawn-ledger.md).
 
-A child nobody recorded is not dropped either. `spawned.unrecorded[]` lists the
+A child nobody recorded is still reported. `spawned.unrecorded[]` lists the
 sessions that look like this session's children and that no ledger edge names,
-each with its own cost and a `tier`: **`named`** when the child's `cwd` contains
-this session's id, **`inferred`** when a program started it (Claude Code's
-`entrypoint: sdk-cli`) in this repo's worktrees or a `/tmp` sandbox within 30
-minutes of a command this session ran. `inferred` is a guess, and says so. A
-session a human started is never listed. **Nothing in the list is summed** into
-`total`, `spawned.total` or `tree`, and it never causes exit 9. `--tokens` prints
-it as an `UNRECORDED` block. Pi sessions are not listed yet
+each with its own cost (`null`, with `skip: "unreadable"`, when it cannot be
+parsed), a `tier` and a `basis`: **`named`** (basis `cwd-names-parent`) when the
+child's `cwd` contains this session's id, whoever started it; **`inferred`**
+(basis `worktree` or `tmp`) when a program started it (Claude Code's
+`entrypoint: sdk-cli`) in this repo's worktrees or a temp sandbox (`/tmp` or
+`$TMPDIR`) within 30 minutes of a command this session ran. `inferred` is a
+guess, and says so; apart from `named`, a session a human started is never
+listed. **Nothing in the list is summed** into `total`, `spawned.total` or
+`tree`, and it never causes exit 9. `--tokens` prints it as an `UNRECORDED`
+block: a `named` row each, and one line per basis for the `inferred` rows with
+their count and summed cost. Pi sessions are not listed yet
 ([#209](https://github.com/princess-pi/wtft/issues/209)). Full contract:
 [`docs/spec-128-unrecorded-spawns.md`](./docs/spec-128-unrecorded-spawns.md).
 

@@ -109,7 +109,7 @@ export interface SpawnTreeOptions {
 	alreadyAttributed?: Set<string> | (() => Set<string>);
 	now?: number;
 	/** Ask for `unrecorded`. A one-shot report's cost, not a per-poll one. */
-	unrecorded?: { turns: Interaction[]; rootCwd: string | null };
+	unrecorded?: { turns: Interaction[]; rootCwd: string | null; rootFile?: string };
 }
 
 const SUBTRACT_TOLERANCE = 1e-9;
@@ -219,6 +219,7 @@ export function computeSpawnTree(
 			rootSessionId,
 			rootCwd: options.unrecorded.rootCwd,
 			turns: options.unrecorded.turns,
+			rootFile: options.unrecorded.rootFile,
 			exclude,
 		});
 	}

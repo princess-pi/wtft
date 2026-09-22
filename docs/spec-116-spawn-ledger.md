@@ -199,7 +199,7 @@ already trust.
 
 ```json
 "spawned": {
-  "schema": "wtft/spawn-tree@2",
+  "schema": "wtft/spawn-tree@3",
   "descendants": 3,
   "edges": [{"parent":"…","child":"…","mechanism":"pr-review-lens","ts":"…",
              "label":"correctness","model":"opus","cwd":"/tmp/pr-review-abc","depth":1,
@@ -211,10 +211,14 @@ already trust.
   "maxDepth": 5,
   "malformedLedgerLines": 0,
   "ledgerError": null,
-  "total": {…}
+  "total": {…},
+  "unrecorded": []
 },
 "tree": {…}
 ```
+
+`unrecorded` is #128's list of sessions no edge names, never summed into anything —
+`docs/spec-128-unrecorded-spawns.md`.
 
 `tree` = `total` + `spawned.total`, as a field, so a consumer never has to add two numbers and
 guess whether it double-counted. `label`, `model`, `cwd` and `skip` are present on an edge only

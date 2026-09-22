@@ -96,8 +96,9 @@ spawning turn can still gain a subagent session.**
   whose discovery has found a transcript stays in `pendingClaudeCommands`, re-discovered every
   poll, until its window closes. Before this change the first discovery that found any file ended
   the search, so a second child that started later in the window was never read. The two arms
-  either side are unchanged: one that has found nothing, and one whose discovery hit an unreadable
-  directory, both stay pending with no time bound. Only a turn with nothing to search waits out its
+  either side were unchanged here: one that has found nothing, and one whose discovery hit an
+  unreadable directory, both stayed pending with no time bound. #128 has since bounded the first
+  to the same window; the unreadable arm still retries until the read succeeds. Only a turn with nothing to search waits out its
   window (#107) and is then dropped.
 - **Road not taken: a bound at `IDLE_THRESHOLD_MS`.** #194's plan named it. Growth is tracked by
   stat, so it needs no time bound, and the window is what discovery matches against, so it is the

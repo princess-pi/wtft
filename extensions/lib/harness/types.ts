@@ -109,7 +109,6 @@ export interface SpawnCandidate {
 
 export interface SpawnCandidateScan {
 	candidates: SpawnCandidate[];
-	/** Transcripts whose head could not be read — reported, never guessed. */
 	unreadable: { path: string; error: unknown }[];
 }
 

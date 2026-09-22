@@ -2,7 +2,7 @@
 
 import * as os from "node:os";
 import * as path from "node:path";
-import { deduplicateInteractions, isModelTagged, parseSessionFile, type Interaction } from "./wtft-parser.js";
+import { canonicalTranscriptPath, deduplicateInteractions, isModelTagged, parseSessionFile, type Interaction } from "./wtft-parser.js";
 import { computeSessionSummary, type TokenTotals } from "./wtft-renderer.js";
 import { getDiscoveries } from "./harness/registry.js";
 import { fanOutCwd } from "./harness/worktrees.js";
@@ -50,6 +50,8 @@ export interface ListUnrecordedInput {
 	turns: Interaction[];
 	/** Sessions whose money is already somewhere, or that someone else recorded. */
 	exclude: ReadonlySet<string>;
+	/** This session's own transcript: a candidate's parse must never fold it. */
+	rootFile?: string;
 }
 
 function isInside(dir: string, cwd: string): boolean {
@@ -67,7 +69,7 @@ function warnUnreadable(file: string, err: unknown): void {
 	if (warnedUnreadable.has(file)) return;
 	warnedUnreadable.add(file);
 	process.stderr.write(
-		`[wtft] WARNING: a session transcript could not be read while listing unrecorded spawns, so it may be missing from spawned.unrecorded (${file}): ${err instanceof Error ? err.message : String(err)}\n`,
+		`[wtft] WARNING: a path could not be read while listing unrecorded spawns, so a session under it may be absent from spawned.unrecorded (${file}): ${err instanceof Error ? err.message : String(err)}\n`,
 	);
 }
 
@@ -94,7 +96,11 @@ function classify(
 export function listUnrecordedSpawns(input: ListUnrecordedInput): UnrecordedSpawn[] {
 	const windows = spawnWindows(input.turns);
 	if (windows.length === 0) return [];
-	const fanOut = input.rootCwd ? fanOutCwd(input.rootCwd).dirs.map(d => path.resolve(d)) : [];
+	// Outside a repo there are no worktrees, and the session's own directory is
+	// not a fan-out.
+	const fan = input.rootCwd ? fanOutCwd(input.rootCwd) : null;
+	const fanOut = fan?.inRepo ? fan.dirs.map(d => path.resolve(d)) : [];
+	const doNotFold = new Set(input.rootFile ? [canonicalTranscriptPath(input.rootFile)] : []);
 
 	const listed = new Map<string, { candidate: SpawnCandidate; tier: UnrecordedTier; basis: UnrecordedBasis }>();
 	for (const discovery of getDiscoveries()) {
@@ -122,7 +128,7 @@ export function listUnrecordedSpawns(input: ListUnrecordedInput): UnrecordedSpaw
 			total: null,
 		};
 		try {
-			const parsed = parseSessionFile(candidate.path);
+			const parsed = parseSessionFile(candidate.path, doNotFold);
 			const { untaggedCostUsd: _untaggedCostUsd, ...total } = computeSessionSummary(parsed).total;
 			row.total = total;
 			for (const interaction of deduplicateInteractions(parsed)) {

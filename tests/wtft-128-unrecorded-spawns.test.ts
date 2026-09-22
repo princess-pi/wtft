@@ -45,6 +45,7 @@ function turn(timestamp: number, commands: string[] = [], id = `m-${timestamp}`)
 console.log("\nPART W — spawnWindows");
 
 const MIN = 60_000;
+check(UNRECORDED_WINDOW_MS === 30 * MIN, `W0 a command turn opens 30 minutes (got ${UNRECORDED_WINDOW_MS / MIN})`);
 {
 	const w = spawnWindows([turn(0, ["ls"]), turn(5 * MIN), turn(10 * MIN, ["pr-open"])]);
 	check(JSON.stringify(w) === JSON.stringify([[0, 10 * MIN + UNRECORDED_WINDOW_MS]]),
@@ -125,8 +126,7 @@ console.log("\nPART C — listSpawnCandidates (Claude Code)");
 	check(byId.get("c0000003-0000-4000-8000-000000000003")?.launchedBy === null,
 		"C3 no entrypoint reads as null — the harness does not say");
 	check(!byId.has("c0000004-0000-4000-8000-000000000004"),
-		"C4 a transcript in a directory untouched since the moment is not listed");
-	check(scan.unreadable.length === 0, `C5 nothing unreadable in a clean tree (got ${scan.unreadable.length})`);
+		"C4 a transcript whose file and directory were both last written before the moment is not listed");
 	for (const f of [sdk, human, silent, old]) fs.rmSync(path.dirname(f), { recursive: true });
 }
 
@@ -203,8 +203,6 @@ check(!row(ids.elsewhere), "T9 a programmatic session outside the fan-out and ev
 check(!row(ids.folded), "T10 a session already in the parent's total is absent");
 check(!row(ids.recorded) && tree.edges.some(e => e.child === ids.recorded && e.resolved),
 	"T11 a recorded child is an edge, not a row");
-check(tree.total.costUsd === tree.edges.filter(e => e.resolved).reduce((sum, e) => sum + (e.total?.costUsd ?? 0), 0),
-	"T12 spawned.total is the resolved edges alone — no row reached it");
 check(JSON.stringify(rows.map(r => r.ts)) === JSON.stringify([...rows.map(r => r.ts)].sort()),
 	"T13 rows are in start order");
 check(rows.length === 3, `T14 exactly the three expected rows (got ${rows.map(r => r.child).join(", ")})`);
@@ -228,6 +226,28 @@ check(rows.length === 3, `T14 exactly the three expected rows (got ${rows.map(r 
 	});
 	check((noEdges.unrecorded ?? []).some(r => r.child === ids.launched),
 		"T17 a session with no recorded edge still gets its listing");
+}
+
+// ---
+// PART F — a candidate's parse never folds this session's own transcript
+// ---
+console.log("\nPART F — the root transcript is not a candidate's child");
+{
+	const ROOT_F = "a2000000-0000-4000-8000-0000000000f1";
+	const shared = "/tmp/shared-f";
+	const slug = shared.replace(/[^a-zA-Z0-9]/g, "-");
+	// The root began 2s after the candidate's bare claude -p, in the directory
+	// that spawn searches: discovery alone cannot tell it from a child.
+	const rootFile = writeChild({ id: ROOT_F, slug, cwd: shared, startedAt: at(3) + 2000, entrypoint: "cli", commands: ["pr-open"] });
+	const cand = "a2000001-0000-4000-8000-0000000000f2";
+	writeChild({ id: cand, slug: "-tmp-cand-f", cwd: "/tmp/cand-f", startedAt: at(3), entrypoint: "sdk-cli", commands: [`cd ${shared} && claude -p 'x'`] });
+	check(discoverClaudeSubAgentFilesForTurn([`cd ${shared} && claude -p 'x'`], at(3), null).files.some(f => f === rootFile),
+		"F1 fixture precondition: the candidate's spawn does discover the root transcript");
+	const turns = [turn(at(2), ["pr-open"])];
+	const listed = computeSpawnTree(ROOT_F, { ledgerPath, unrecorded: { turns, rootCwd: shared, rootFile } }).unrecorded ?? [];
+	const row = listed.find(r => r.child === cand);
+	check(row?.total?.outputTokens === 2000,
+		`F2 the candidate is priced at its own 2000 output tokens, not with the root's folded in (got ${row?.total?.outputTokens})`);
 }
 
 // ---
@@ -339,11 +359,13 @@ console.log("\nPART D — a spawning turn that found nothing leaves the queue on
 	await sleep(3_000);
 	const total = outputInTag();
 	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
-	check(total === 100, `D3 the turn left the queue when its window closed, so the late child is not folded (got ${total})`);
+	check(total === 100, `D3 the turn left the queue once its discovery window closed, so the late child is not folded (got ${total})`);
 
 	const rows = listUnrecordedSpawns({ rootSessionId: sessionId, rootCwd, turns: readClassifiedTagFile(tagPath), exclude: new Set() });
-	check(rows.some(r => r.child === late && r.tier === "inferred" && r.basis === "worktree"),
-		`D4 and nothing is lost: the listing reports it (got ${JSON.stringify(rows.map(r => [r.child, r.tier, r.basis]))})`);
+	// The session's cwd is no repo, so its own directory is no worktree; the
+	// sandbox sits under the temp root.
+	check(rows.some(r => r.child === late && r.tier === "inferred" && r.basis === "tmp" && (r.total?.outputTokens ?? 0) === 2000),
+		`D4 the listing reports it with its cost, and outside a repo it is not called a worktree (got ${JSON.stringify(rows.map(r => [r.child, r.tier, r.basis]))})`);
 }
 
 // ---

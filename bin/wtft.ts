@@ -657,7 +657,7 @@ async function main() {
 			alreadyAttributed: pending ? new Set<string>() : folded,
 			unrecorded: pending
 				? { turns: [], rootCwd: null }
-				: { turns: interactions, rootCwd: resolveLastCwd(finalSessionPath) },
+				: { turns: interactions, rootCwd: resolveLastCwd(finalSessionPath), rootFile: finalSessionPath },
 		});
 		spawnTreeCache.set(pending, tree);
 		// The tree never replaces a reason already set.

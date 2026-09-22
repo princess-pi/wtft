@@ -173,10 +173,11 @@ directory search it once. A turn with one spawn and a `cd` searches exactly what
 A no-`cd` spawn adds one directory the poll did not otherwise touch: the daemon stats the session
 transcript every poll, never its project dir.
 
-The bound is the pending queue's, not this change's, and it is not uniform: a turn that searched
-and found nothing is re-discovered every 667ms for the daemon's life, while one that found
-something, and one that had nowhere to look, stop at the window plus the settle margin. So a
-no-`cd` spawn that never produces a child costs one extra `readdirSync` per poll, indefinitely —
+The bound is the pending queue's, not this change's, and as this change left it, it was not
+uniform: a turn that searched and found nothing was re-discovered every 667ms for the daemon's
+life, while one that found something, and one that had nowhere to look, stopped at the window
+plus the settle margin. So a
+no-`cd` spawn that never produced a child cost one extra `readdirSync` per poll, indefinitely —
 the same shape the `cd` arm already had, now reachable by more turns. #128 (P6) has since bounded
 that arm to the window plus the settle margin, since the bound and the `unrecorded[]` report are
 the same decision.

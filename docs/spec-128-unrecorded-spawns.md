@@ -19,40 +19,51 @@ and nothing in it changes the exit code.
 
 ## Who gets listed
 
-A session is a **candidate** when its transcript began after this session's first command. A
-candidate is listed under one of two **tiers**:
+A session is a **candidate** when its transcript was written to at or after this session's first
+command — the harness prunes by mtime, not by start time. A candidate is listed under one of two
+**tiers**:
 
 | Tier | Rule | Confidence |
 |---|---|---|
-| **`named`** | The candidate's recorded `cwd` contains this session's id | Certain — the launcher named the parent |
-| **`inferred`** | The harness says a program started it (`entrypoint: sdk-cli`), its `cwd` is inside this repo's worktree fan-out or a temp sandbox, and it began inside a **spawn window** | Probable — a guess, and labelled as one |
+| **`named`** | The candidate's recorded `cwd` contains this session's id. No start-time test and no `entrypoint` test | Certain — the launcher named the parent |
+| **`inferred`** | The harness says a program started it (`entrypoint: sdk-cli`), its `cwd` is inside this repo's worktree fan-out or a temp sandbox, and its first timestamp falls inside a **launch span** | Probable — a guess, and labelled as one |
 
-Anything else is not listed. In particular a session a human started (`entrypoint: cli`) never is,
-which is what keeps a peer session out by construction rather than by a time window: measured on
-this host, 934 of 946 human-started sessions (#128's decision comment).
+Anything else is not listed. Outside `named`, a session a human started (`entrypoint: cli`) never
+is, which is what keeps a peer session out by construction rather than by a time window: measured
+on this host, 934 of 946 human-started sessions (#128's decision comment). A `named` row is listed
+whoever started it, because the name is the evidence.
+
+Nothing is listed at all for a session that ran no command: with no launch span there is nowhere
+to start the scan, so `unrecorded` is `[]` without a look.
 
 - **`basis`** says which arm listed a row: `cwd-names-parent` for `named`; `worktree` or `tmp` for
   `inferred`.
 - **Temp sandbox** means a `cwd` under `/tmp` or under `os.tmpdir()`. Both, because the harness
   can run with `TMPDIR` pointing somewhere else while launchers still use `/tmp`.
-- **Worktree fan-out** is `fanOutCwd(<this session's cwd>)` — the repo and every checkout of it,
-  the same set the picker's `Ctrl+W` scope uses. A candidate whose `cwd` is one of those
-  directories or below one is inside it.
+- **Worktree fan-out** is `fanOutCwd` applied to this session's **last recorded** cwd — the repo
+  and every checkout of it, the same rule the picker's `Ctrl+W` scope applies to its own target.
+  A candidate whose `cwd` is one of those directories or below one is inside it. It is empty when
+  that cwd is in no git repository — a directory outside a repo has no worktrees, so a child there
+  can only be `tmp` or `named` — and when the session records no cwd at all.
+- **The ledger could not be read** (`spawned.ledgerError`): no edge is known, so a session some
+  other parent recorded cannot be excluded, and may be listed.
 
-### The spawn window
+### The launch span
 
 A launcher only runs from a command, and a child cannot start before the command that launched
-it. So the window opens at every turn of this session that ran a command, and stays open for
+it. So a launch span opens at every turn of this session that ran a command, and stays open for
 **`UNRECORDED_WINDOW_MS` = 30 minutes** — long enough to cover a whole `pr-review` run, which takes
-6 to 23 minutes on this host. The windows of all such turns are merged.
+6 to 23 minutes on this host. Overlapping spans are merged. "Span", not "window": the glossary
+reserves "window" for the picker's time window, and the daemon's 15-second discovery window is a
+different thing again.
 
 - Turns come from the **tag file**, so a Task subagent's turns count too: a subagent that runs a
   launcher spawns on this session's behalf.
 - A session's first timestamp is fixed, and Claude Code writes the transcript from its first line
   (measured: file birth within 200 ms of the first timestamp), so a candidate either began inside
-  a window or never will.
+  a span or never will.
 
-**Road not taken — closing the window at the next turn.** A foreground command blocks the session,
+**Road not taken — closing the span at the next turn.** A foreground command blocks the session,
 so its child starts before the next turn. A backgrounded one does not: the turn after it is often
 a text-only "waiting" reply, and the child starts during the idle gap that follows. Closing at the
 next turn would drop exactly the children of backgrounded launchers.
@@ -98,7 +109,7 @@ interface SpawnCandidate {
 ```
 
 It answers a location-and-schema question — where transcripts live and what their fields mean —
-which is exactly what the seam exists to hold. The tier rules, the window and the exclusions are
+which is exactly what the seam exists to hold. The tier rules, the launch span and the exclusions are
 semantics and stay on the shared side.
 
 **Claude Code** implements it. It lists every project directory under the projects root, keeps
@@ -106,9 +117,12 @@ the ones whose mtime is at or after `sinceMs` (creating a transcript updates its
 so an older directory cannot hold a newer transcript), keeps each top-level `*.jsonl` whose own
 mtime is at or after `sinceMs`, and reads the head of each for `timestamp`, `cwd` and `entrypoint`.
 `entrypoint: "sdk-cli"` is `program`, `"cli"` is `human`, anything else is `null`. A transcript
-or directory that cannot be read comes back in `unreadable`, and the listing warns about each on
-stderr, once per path per process. A transcript whose first 20 lines carry no timestamp or no
-`cwd` cannot be classified and is not a candidate.
+or project directory that cannot be read comes back in `unreadable`, and the listing warns about
+each on stderr, once per path per process. The head read is the first 20 lines within the first
+64 KiB; a transcript with no timestamp or no `cwd` there cannot be classified and is not a
+candidate. The projects root is different: an absent one is an empty scan (no Claude Code
+sessions), and any other failure to read it is thrown, so the report fails with that error
+rather than printing a list that did not look.
 
 **Pi** does not implement it: Pi's session header carries no field that separates a programmatic
 start from a human one. A Pi child is therefore never listed. Filed as
@@ -118,14 +132,16 @@ start from a human one. A Pi child is therefore never listed. Filed as
 
 `extensions/lib/wtft-unrecorded.ts`:
 
-- **`spawnWindows(turns)`** — the merged `[start, end]` windows, from deduplicated turns carrying
+- **`spawnWindows(turns)`** — the merged `[start, end]` launch spans, from deduplicated turns carrying
   at least one command.
 - **`listUnrecordedSpawns({ rootSessionId, rootCwd, turns, exclude })`** — asks every discovery
   that has `listSpawnCandidates`, applies the tiers, drops the exclusions, prices each survivor
   with `parseSessionFile` and `computeSessionSummary` (`untaggedCostUsd` dropped, as for an edge),
-  drops what another row folds, and returns the rows sorted by `ts`.
+  drops what another row folds, and returns the rows sorted by `ts`. The pricing parse is handed
+  this session's own transcript as never-foldable: a candidate's own `claude -p` discovery
+  matches on time and place, and could otherwise find the parent itself.
 
-`computeSpawnTree` takes a new option, `unrecorded: { turns, rootCwd }`. When given, the tree
+`computeSpawnTree` takes a new option, `unrecorded: { turns, rootCwd, rootFile? }`. When given, the tree
 carries `unrecorded: UnrecordedSpawn[]`, listed after the walk so the walk's outcomes feed the
 exclusion. The early return for a session with no edges now skips only the walk. The widget does
 not pass the option: the scan is a one-shot report's cost, not a per-poll one.
@@ -148,9 +164,11 @@ interface UnrecordedSpawn {
 ### Surfaces
 
 - **`--json`:** `spawned.unrecorded[]`. `wtft/spawn-tree@2` → `@3` and `wtft/session@5` → `@6`,
-  because a nested key was added. `[]` means looked and found none.
-- **`--tokens`:** an `UNRECORDED` block after the `SPAWNED` block, shown whenever the list is
-  non-empty — including for a session with no recorded edges, where no `SPAWNED` block prints.
+  because a nested key was added. `[]` means looked and found none — or, for a session that ran
+  no command (the pending and no-data arms included), that there was no launch span to look in.
+- **`--tokens`, CLI only:** an `UNRECORDED` block, last, after the `UNCOUNTED` line and the
+  `SPAWNED` block, shown whenever the list is non-empty — whether or not a `SPAWNED` block prints.
+  The widget renders the same table without it.
   A `named` row prints on its own, under its `cwd` fitted to 30 columns, with `(unreadable)` where
   its cost would be when it could not be parsed. `inferred` rows collapse to **one line per
   basis**, carrying the count and the rows' own summed cost, plus how many were unreadable:
@@ -171,11 +189,13 @@ interface UnrecordedSpawn {
 ### The daemon's unbounded arm
 
 #107's spec left one arm for this change: a `pendingClaudeCommands` turn that searched and found
-nothing was re-discovered every poll for the daemon's life. It is now bounded like its neighbours,
-by the discovery window plus the settle margin. Nothing is lost by the bound: a child's first
-timestamp is fixed, discovery matches on it, and a child that begins after the window could never
-have matched. A child that writes nothing until after the window closes — none is known — would
-now be listed here instead of being retried forever.
+nothing was re-discovered every poll for the daemon's life. It is now bounded like the found and
+nothing-to-search arms, by the 15-second discovery window plus the 2-second settle margin. The two
+failure arms — discovery threw, or a candidate was unreadable — still retry until the read
+succeeds. Nothing is lost by the bound: a child's first timestamp is fixed, discovery matches on
+it, and a child that begins after the discovery window could never have matched. A child whose
+first line lands after the discovery window but inside a launch span is listed here, if it is
+programmatic and in the fan-out or a temp sandbox, instead of being retried forever.
 
 ## What it measured on this host
 
@@ -187,14 +207,14 @@ Run against the session that shipped P1–P5 of #194 (2026-09-21 to 22):
 - **78 `inferred`/`tmp` rows**, mostly under `/tmp/pp-test-*`, `/tmp/help-contract-*` and
   `/tmp/pr-review-probe-*` — `claude -p` children of another repo's test suite running at the same
   time. This arm is mostly peer noise on a busy host, which is what the `inferred` label is for.
-  The fix for it is the `named` tier, not a tighter window: time and place cannot tell two
+  The fix for it is the `named` tier, not a tighter span: time and place cannot tell two
   concurrent sessions' children apart.
 
 ## What it costs
 
-One `stat` per project directory (2,243 on this host, 2026-09-22), then one `readdir` and one `stat`
-per file only in directories touched since the session's first command, and one head read per
-recent transcript. Pricing is one `parseSessionFile` per listed row. Paid only by `--json` and
+One `stat` per project directory (2,243 on this host, 2026-09-22); then, only for directories
+touched since the session's first command, one `readdir` per directory and one `stat` per
+transcript in it; and one head read per recent transcript. Pricing is one `parseSessionFile` per listed row. Paid only by `--json` and
 `--tokens`.
 
 ## Verification
@@ -206,17 +226,20 @@ recent transcript. Pricing is one `parseSessionFile` per listed row. Paid only b
   a launcher child in `/tmp` with `entrypoint: sdk-cli`. With the record, the child is an edge and
   `unrecorded` is empty. With the record deleted, the child is in `unrecorded` as `inferred`/`tmp`
   with its cost, and `tree` equals `total`.
-- A human-started peer (`entrypoint: cli`) in the same window and directory is absent.
-- A programmatic peer outside every window is absent.
+- A human-started peer (`entrypoint: cli`) inside the launch span is absent.
+- A programmatic peer outside every launch span is absent.
 - A candidate recorded under a *different* parent in the ledger is absent.
 - A candidate whose `cwd` contains the parent's id is `named`, even with `entrypoint: cli`.
-- A candidate in a worktree of the parent's repo is `inferred`/`worktree`.
-- A `claude -p` child the parent's own parse folded is absent — its cost is in `total`.
+- A candidate in a worktree of the parent's repo is `inferred`/`worktree`; a child in a directory
+  that is no repo is not called a worktree.
+- A session the tag's fold records name (`alreadyAttributed`) is absent.
+- A candidate's price never folds the parent's own transcript.
 - A grandchild folded by a listed candidate is listed once, inside its parent's row.
 - `--tokens` prints the `UNRECORDED` block for a session with no recorded edges, and nothing
   when the list is empty.
-- Unit: `spawnWindows` merges overlapping windows and ignores turns with no command.
-- Daemon: a spawning turn that found nothing leaves the pending queue once its window has closed.
+- Unit: `spawnWindows` opens 30 minutes, merges overlapping spans, and ignores turns with no command.
+- Daemon: a spawning turn that found nothing leaves the pending queue once its discovery window
+  has closed, and the child that appears later is listed with its cost.
 
 ## Not in this change
 
@@ -225,3 +248,38 @@ recent transcript. Pricing is one `parseSessionFile` per listed row. Paid only b
   [duppypro/princess-pi-tools#883](https://github.com/duppypro/princess-pi-tools/issues/883).
   `named` lights up for each launcher as it adopts the convention.
 - **The widget** — no `UNRECORDED` line; its polling budget is not the report's.
+
+---
+
+## Reconciliation record (spec-reconcile, 2026-09-22)
+
+Six fresh-context auditors: listing and tree, harness seam, CLI and renderer, daemon, the test
+file, and the host-scoped documents (none of which makes a #128 claim). Pre-existing drift they
+found in text this branch did not change is filed as
+[#210](https://github.com/princess-pi/wtft/issues/210).
+
+| Artifact | Claim | Contradicted by | Covered by a test? | Action |
+|---|---|---|---|---|
+| spec-128, README, spec-26 | a human-started session is never listed | `classify` tests `named` before `launchedBy` | ✅ T7 | Fixed: "outside `named`" |
+| spec-128 | a candidate began after the first command | the harness prunes by mtime; `named` has no time test | ✅ C4, T7 | Fixed |
+| spec-128, spec-26 | `[]` means looked and found none | no command turn → `[]` before any scan | ✅ T15 | Fixed: both meanings stated |
+| spec-128 | every unreadable path is reported | the projects root: absent → empty, other errors thrown | reconciled-against-untested | Fixed |
+| spec-128 | first 20 lines | also capped at 64 KiB | reconciled-against-untested | Fixed |
+| spec-128 | fan-out = the picker's `Ctrl+W` set | built from the session's last recorded cwd | ✅ T8 | Fixed |
+| spec-128 | (silent) null cwd / non-repo cwd | a session's own dir counted as a worktree outside a repo | ✅ D4 | **Code fixed**: fan-out only inside a repo |
+| spec-128 | (silent) the pricing parse | a candidate's `claude -p` discovery could fold the parent's transcript | ✅ F2 | **Code fixed**: root passed as never-foldable |
+| spec-128 | (silent) ledger unreadable | other parents' children cannot be excluded | reconciled-against-untested | Fixed |
+| spec-128 | UNRECORDED prints where no SPAWNED block does | SPAWNED prints for a damaged ledger with no edges; UNCOUNTED comes first; widget has none | ✅ E7 | Fixed |
+| spec-128 | the arm is bounded like its neighbours | the two failure arms still retry | ✅ D3 | Fixed |
+| spec-128 | a late-writing child is listed | only if inside a launch span and programmatic | ✅ D4 | Fixed |
+| spec-128, CONTEXT | "spawn window" | Interval's `_Avoid_` reserves "window" | n/a | Renamed "launch span" |
+| spec-26 Amendment 5 | none of them is summed anywhere | `--tokens` sums each inferred basis | ✅ E8 | Fixed |
+| README, manifest, CONTEXT, spec-26 | each with its own cost | an unreadable row has `total: null` | reconciled-against-untested | Fixed |
+| README, manifest | a `/tmp` sandbox | `/tmp` or `os.tmpdir()` | reconciled-against-untested | Fixed |
+| README, manifest, CONTEXT | one row per session under `--tokens` | inferred rows collapse per basis | ✅ R2 | Fixed |
+| README, CONTEXT | `tier` only | every row carries `basis` too | ✅ T1, T8 | Fixed |
+| README, CONTEXT (Launcher-spawned session) | neither transcript names the other | a `named` child's cwd does | ✅ T7 | Fixed |
+| `docs/adding-a-harness.md` | the interface block | omits `listSpawnCandidates` | ✅ C1 | Fixed |
+| spec-114, spec-107 | the found-nothing arm is unbounded | bounded by this change | ✅ D3 | Fixed |
+| `[wtft]` warning | "may be missing"; "a session transcript" | `_Avoid_` "missing"; directories are reported too | n/a | Fixed |
+| test file | W1–W4 move with the constant; C5 and T12 vacuous; D3 names the wrong window | — | — | W0 added; C5, T12 deleted; D3 relabelled |

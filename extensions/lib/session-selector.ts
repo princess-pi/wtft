@@ -170,9 +170,10 @@ export function getSessionSummary(sessionPath: string): SessionSummary {
 					if (!line.trim()) continue;
 					try {
 						const obj = JSON.parse(line);
-						if (obj._hb || obj._gen) continue;
+						// Interaction lines only — the same test as classifiedToInteraction.
+						if (typeof obj?.t !== "number" || typeof obj?.c !== "number") continue;
 						if (typeof obj.s === "string" && at < (lastGenAt.get(obj.s) ?? -1)) continue;
-						const lineCost = typeof obj.c === "number" ? obj.c : 0;
+						const lineCost = obj.c;
 						if (typeof obj.id === "string" && obj.id) {
 							const prev = maxCostById.get(obj.id);
 							if (prev === undefined) idOrder.push(obj.id);

@@ -304,11 +304,18 @@ console.log("\nPART S — the session picker's summary, and the source key");
 		i("s-own-1", 0.5)
 		+ line({ _gen: { s: "aaaa0001", session: "kid" } })
 		+ i("s-old", 4, "aaaa0001")
+		+ line({ _fold: { parent: "sess", child: "kid", s: "aaaa0001" } })
 		+ line({ _gen: { s: "aaaa0001", session: "kid" } })
-		+ i("s-new", 0.25, "aaaa0001"));
+		+ i("s-new", 0.25, "aaaa0001")
+		+ line({ _fold: { parent: "sess", child: "kid", s: "aaaa0001" } })
+		+ line({ _meta: { swept: T0 } }));
 	const summary = getSessionSummary(sessionPath);
-	check(Math.abs(summary.cost - 0.75) < 1e-9 && summary.turns === 2,
-		`S1 the session picker's summary counts the latest generation only: $0.50 + $0.25 (got $${summary.cost}, ${summary.turns} turns)`);
+	check(Math.abs(summary.cost - 0.75) < 1e-9,
+		`S1 the session picker's summary counts the latest generation only: $0.50 + $0.25 (got $${summary.cost})`);
+	check(summary.turns === 2,
+		`S1b and a fold, generation or meta record is not a turn (got ${summary.turns})`);
+	check(readTagFileWithVerdict(tagPath).interactions.length === summary.turns,
+		"S1c the picker's turn count matches the canonical reader's over the same tag");
 }
 
 {

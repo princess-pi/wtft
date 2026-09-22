@@ -22,7 +22,8 @@ read path rediscovers which sessions were folded.
 
 ### Tag format — the fold record
 
-- **A fourth line kind:** `{"_fold":{"parent":"<session id>","child":"<session id>"}}`.
+- **A fourth line kind:** `{"_fold":{"parent":"<session id>","child":"<session id>","s":"<source>"}}`
+  (`s` since P4).
   `parent` is the tag's own session id (the transcript's filename without `.jsonl`). `child` is
   the filename without `.jsonl` of a transcript the daemon folded into this tag: the session id
   for a `claude -p` child or a Pi sibling, `agent-<name>` for a Task child. Readers key on `child`; `parent` is

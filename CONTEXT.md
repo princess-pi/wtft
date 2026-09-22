@@ -153,8 +153,9 @@ latest contents once.
 _Avoid_: Reset record, epoch
 
 **Source** (tag line `s`, #114):
-Which transcript a tag line came from: the hash of a child transcript's path relative to the
-session directory, written as `s` on the line and inside a fold record. A line with no `s` came
+Which transcript a tag line came from: the hash of a child transcript's path — relative to the
+session directory when it lies under it, absolute when it does not — written as `s` on the line
+and inside a fold record. A line with no `s` came
 from the tag's own session. It is what a generation record (above) supersedes lines by, so two
 copies of one session, or two children, never drop each other's lines.
 _Avoid_: Origin, provenance

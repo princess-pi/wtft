@@ -139,7 +139,7 @@ const turns = (prefix: string, outs: number[], base: number) =>
 for (const how of ["truncate", "replace"] as const) {
 	const { rootPath, child, tagPath } = taskRoot(`d-${how}`, uuid(how === "truncate" ? 11 : 12));
 	const base = Date.now() - 50_000;
-	// Old run: N = 3 interactions, 700 output tokens. New run: M = 2 different ones, 40.
+	// Old run: 3 interactions, 700 output tokens. New run: different ones totalling 40.
 	fs.writeFileSync(child, turns(`old-${how}`, [100, 200, 400], base));
 	const daemon = startDaemon(rootPath);
 	const before = await settle(tagPath, r => outOf(r.interactions) === 701);

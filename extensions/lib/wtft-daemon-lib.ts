@@ -38,8 +38,8 @@ export interface WatchSettings {
  * This is the single source of truth for the tag-file wire format.
  * Must stay in sync with classifiedToInteraction (below).
  * When adding a field, update BOTH functions in this file.
+ * `source` is set for a child transcript's lines: see `transcriptSourceId`.
  */
-/** `source` is set for a child transcript's lines: see `transcriptSourceId`. */
 export function serializeClassified(interaction: Interaction, source?: string): string {
 	// Round cost to 6 decimal places — the daemon cost calculator
 	// produces a slightly different float than the in-memory widget.

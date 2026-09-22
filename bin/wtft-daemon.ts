@@ -377,17 +377,19 @@ function syncSubagentTranscript(file: string): boolean {
     wroteAny = true;
     tagGrewSinceMarker = true;
   }
+  // What is on disk is recorded first: a throw below must not leave a line
+  // written and unrecorded, which re-appends it with no id to collapse it.
   fileState.newGeneration = false;
   for (const id of freshFolds) fileState.recordedFolds.add(id);
-  for (let k = 0; k < freshHashes.length; k++) fileState.writtenIds.set(freshHashes[k], freshIds[k]);
+  for (let k = 0; k < freshHashes.length; k++) {
+    fileState.writtenIds.set(freshHashes[k], freshIds[k]);
+    fileState.writtenLines.set(freshHashes[k], (fileState.writtenLines.get(freshHashes[k]) || 0) + 1);
+  }
   fileState.foldStamps = new Map();
   for (const si of deduped) {
     for (const fold of si.claudeSubAgentFolds ?? []) fileState.foldStamps.set(fold.file, fold.stamp);
   }
   fileState.spawnWindowClosesAt = claudeSpawnWindowClosesAt(deduped);
-  for (const h of freshHashes) {
-    fileState.writtenLines.set(h, (fileState.writtenLines.get(h) || 0) + 1);
-  }
   fileState.size = size;
   fileState.mtimeMs = mtimeMs;
   fileState.ino = ino;

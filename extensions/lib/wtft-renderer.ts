@@ -1723,14 +1723,26 @@ export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string 
 const safeSpawnText = (v: string) => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, "\uFFFD");
 
 /** The #128 list. Printed after SPAWNED, and on its own when nothing was
- *  recorded: its rows are the ones the ledger does not know. */
+ *  recorded: its rows are the ones the ledger does not know. A `named` row is
+ *  printed on its own; `inferred` rows collapse to one line per basis, because
+ *  a busy host puts every peer's programmatic child in the window. */
 function renderUnrecordedSpawns(rows: UnrecordedSpawn[] | undefined): string {
 	if (!rows || rows.length === 0) return "";
+	const line = (tier: string, name: string, money: string) =>
+		`           ${tier.padEnd(9)} ${fitVisual(safeSpawnText(name), 30)} ${money.padStart(12)}\n`;
 	let out = `\nUNRECORDED ${rows.length} session(s) no spawn record names (#128) —\n`;
-	out += `           NOT in TOTAL or TREE: a list, not a claim\n`;
-	for (const row of rows) {
-		const money = row.total ? formatCost(row.total.costUsd) : `(${row.skip ?? "unreadable"})`;
-		out += `           ${row.tier.padEnd(9)} ${fitVisual(safeSpawnText(row.cwd), 30)} ${money.padStart(12)}\n`;
+	out += `           NOT in TOTAL or TREE: a list, not a claim; every row is in --json\n`;
+	for (const row of rows.filter(r => r.tier === "named")) {
+		out += line("named", row.cwd, row.total ? formatCost(row.total.costUsd) : `(${row.skip ?? "unreadable"})`);
+	}
+	const where: Record<string, string> = { worktree: "in this repo's worktrees", tmp: "in temp sandboxes" };
+	for (const basis of ["worktree", "tmp"] as const) {
+		const group = rows.filter(r => r.tier === "inferred" && r.basis === basis);
+		if (group.length === 0) continue;
+		const unreadable = group.filter(r => !r.total).length;
+		const cost = group.reduce((sum, r) => sum + (r.total?.costUsd ?? 0), 0);
+		const name = `${group.length} ${where[basis]}` + (unreadable > 0 ? `, ${unreadable} unreadable` : "");
+		out += line("inferred", name, formatCost(cost));
 	}
 	return out;
 }

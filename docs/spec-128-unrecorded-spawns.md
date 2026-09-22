@@ -78,7 +78,13 @@ costs nothing extra.
 `HarnessDiscovery` gains one **optional** method:
 
 ```ts
-listSpawnCandidates?(sinceMs: number): SpawnCandidate[];
+listSpawnCandidates?(sinceMs: number): SpawnCandidateScan;
+
+interface SpawnCandidateScan {
+	candidates: SpawnCandidate[];
+	/** Transcripts or directories that could not be read — reported, never guessed. */
+	unreadable: { path: string; error: unknown }[];
+}
 
 interface SpawnCandidate {
 	path: string;
@@ -100,8 +106,9 @@ the ones whose mtime is at or after `sinceMs` (creating a transcript updates its
 so an older directory cannot hold a newer transcript), keeps each top-level `*.jsonl` whose own
 mtime is at or after `sinceMs`, and reads the head of each for `timestamp`, `cwd` and `entrypoint`.
 `entrypoint: "sdk-cli"` is `program`, `"cli"` is `human`, anything else is `null`. A transcript
-whose head cannot be read is warned about on stderr through the existing
-`warnUnreadableTranscript` and skipped.
+or directory that cannot be read comes back in `unreadable`, and the listing warns about each on
+stderr, once per path per process. A transcript whose first 20 lines carry no timestamp or no
+`cwd` cannot be classified and is not a candidate.
 
 **Pi** does not implement it: Pi's session header carries no field that separates a programmatic
 start from a human one. A Pi child is therefore never listed. Filed as
@@ -143,17 +150,21 @@ interface UnrecordedSpawn {
 - **`--json`:** `spawned.unrecorded[]`. `wtft/spawn-tree@2` → `@3` and `wtft/session@5` → `@6`,
   because a nested key was added. `[]` means looked and found none.
 - **`--tokens`:** an `UNRECORDED` block after the `SPAWNED` block, shown whenever the list is
-  non-empty — including for a session with no recorded edges, where no `SPAWNED` block prints:
+  non-empty — including for a session with no recorded edges, where no `SPAWNED` block prints.
+  A `named` row prints on its own, under its `cwd` fitted to 30 columns, with `(unreadable)` where
+  its cost would be when it could not be parsed. `inferred` rows collapse to **one line per
+  basis**, carrying the count and the rows' own summed cost, plus how many were unreadable:
 
   ```
-  UNRECORDED 2 session(s) no spawn record names (#128) —
-             NOT in TOTAL or TREE: a list, not a claim
-             inferred  /tmp/pr-review-az2eci2a                $0.42
-             named     /tmp/pr-review.<id>.bugs               $0.17
+  UNRECORDED 122 session(s) no spawn record names (#128) —
+             NOT in TOTAL or TREE: a list, not a claim; every row is in --json
+             named     /tmp/pr-review.<id>.bugs             $0.17
+             inferred  43 in this repo's worktrees          $3.77
+             inferred  78 in temp sandboxes                 $1.13
   ```
 
-  The `cwd` is the row's name, fitted to 40 columns. An unreadable row prints `(unreadable)` where
-  its cost would be.
+  **Why collapse:** measured on this host 2026-09-22, one long session listed 121 `inferred` rows.
+  A row per session would bury the `TOTAL` table. `--json` keeps every row.
 - **Exit 9** is untouched. The list is a report; nothing in it can make a number in the report
   change.
 
@@ -165,6 +176,19 @@ by the discovery window plus the settle margin. Nothing is lost by the bound: a 
 timestamp is fixed, discovery matches on it, and a child that begins after the window could never
 have matched. A child that writes nothing until after the window closes — none is known — would
 now be listed here instead of being retried forever.
+
+## What it measured on this host
+
+Run against the session that shipped P1–P5 of #194 (2026-09-21 to 22):
+
+- **43 `inferred`/`worktree` rows**, in bursts of 4 to 13 inside one second, each burst in one of
+  that session's own feature worktrees. That is the shape of a `spec-reconcile` auditor fan-out,
+  which records no spawn edge. This arm reads as the session's own spend.
+- **78 `inferred`/`tmp` rows**, mostly under `/tmp/pp-test-*`, `/tmp/help-contract-*` and
+  `/tmp/pr-review-probe-*` — `claude -p` children of another repo's test suite running at the same
+  time. This arm is mostly peer noise on a busy host, which is what the `inferred` label is for.
+  The fix for it is the `named` tier, not a tighter window: time and place cannot tell two
+  concurrent sessions' children apart.
 
 ## What it costs
 

@@ -16,6 +16,7 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { discoverClaudeSubAgentFilesForTurn } from "../extensions/lib/wtft-parser.ts";
 import { listUnrecordedSpawns } from "../extensions/lib/wtft-unrecorded.ts";
 import { readClassifiedTagFile, WTFT_TAGGER_VERSION } from "../bin/wtft.mjs";
+import { renderSpawnTree, emptyTotals } from "../extensions/lib/wtft-renderer.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("128-unrecorded-spawns");
@@ -209,6 +210,14 @@ check(JSON.stringify(rows.map(r => r.ts)) === JSON.stringify([...rows.map(r => r
 check(rows.length === 3, `T14 exactly the three expected rows (got ${rows.map(r => r.child).join(", ")})`);
 
 {
+	const text = renderSpawnTree(emptyTotals(), tree);
+	check(/named\s+\/tmp\/pr-review\./.test(text),
+		"R1 a named row prints on its own, under its cwd (fitted to its column)");
+	check(/inferred\s+1 in this repo's worktrees\s+\$/.test(text) && /inferred\s+1 in temp sandboxes\s+\$/.test(text),
+		`R2 inferred rows collapse to one line per basis:\n${text}`);
+	check(/UNRECORDED 3 session\(s\)/.test(text), "R3 the header counts every row");
+}
+{
 	const noCommands = computeSpawnTree(ROOT, { ledgerPath, unrecorded: { turns: [turn(at(0))], rootCwd: repo } });
 	check(Array.isArray(noCommands.unrecorded) && noCommands.unrecorded.length === 0,
 		"T15 a session that ran no command lists nothing, and says so with []");
@@ -283,9 +292,9 @@ function cli(args: string[]): { out: string; status: number | null } {
 	check(run.status === 0, `E6 a listed row does not make the report provisional (exit ${run.status})`);
 
 	const tokens = cli(["--tokens"]).out;
-	check(/UNRECORDED 1 session\(s\)/.test(tokens) && tokens.includes("/tmp/pr-review-closer") && !tokens.includes("SPAWNED"),
+	check(/UNRECORDED 1 session\(s\)/.test(tokens) && !tokens.includes("SPAWNED"),
 		`E7 --tokens prints the UNRECORDED block for a session with no recorded edge:\n${tokens.split("\n").filter(l => /UNRECORDED|inferred/.test(l)).join("\n")}`);
-	check(/inferred\s+\/tmp\/pr-review-closer\s+\$\d/.test(tokens), "E8 each row names its tier, its cwd and its cost");
+	check(/inferred\s+1 in temp sandboxes\s+\$0\.\d/.test(tokens), "E8 inferred rows collapse to one line per basis, with the list's own cost");
 
 	appendSpawnRecord({ schema: SPAWN_RECORD_SCHEMA, ts: new Date(at(1)).toISOString(), parent: PARENT, child: CLOSER_CHILD, mechanism: "herdr-agent-start" }, cliLedger);
 	check(!cli(["--tokens"]).out.includes("UNRECORDED"), "E9 no block when the list is empty");

@@ -80,7 +80,7 @@ function warnUnreadable(file: string, err: unknown): void {
 	if (warnedUnreadable.has(file)) return;
 	warnedUnreadable.add(file);
 	process.stderr.write(
-		`[wtft] WARNING: a path could not be read while listing unrecorded spawns, so a session under it may be absent from spawned.unrecorded (${file}): ${err instanceof Error ? err.message : String(err)}\n`,
+		`[wtft] WARNING: a path could not be read while listing unrecorded spawns, so its row in spawned.unrecorded carries no cost (${file}): ${err instanceof Error ? err.message : String(err)}\n`,
 	);
 }
 

@@ -328,22 +328,8 @@ console.log("\nPART L — loud read errors, quiet absences");
 
 	const canBypass = (() => { try { const probe = path.join(dir, "l-probe"); fs.writeFileSync(probe, "x"); fs.chmodSync(probe, 0); fs.readFileSync(probe); return true; } catch { return false; } })();
 	if (canBypass) {
-		skip("L3-L5 need a process that chmod 000 can stop (running as root?)");
+		skip("L3-L5b need a process that chmod 000 can stop (running as root?)");
 	} else {
-		const lockedDir = path.join(root, "-tmp-l-locked");
-		fs.mkdirSync(lockedDir);
-		fs.chmodSync(lockedDir, 0);
-		let err: unknown = null;
-		try { claudeDiscovery.listSpawnCandidates!(0); } catch (e) { err = e; }
-		check(err instanceof Error && (err as NodeJS.ErrnoException).code === "EACCES" && String((err as Error).message).includes(lockedDir),
-			`L3 an unreadable project dir throws, naming it (got ${String(err)})`);
-		fs.chmodSync(lockedDir, 0o755);
-		fs.chmodSync(ok, 0);
-		err = null;
-		try { claudeDiscovery.listSpawnCandidates!(0); } catch (e) { err = e; }
-		check(err instanceof Error && (err as NodeJS.ErrnoException).code === "EACCES" && String((err as Error).message).includes(ok),
-			`L4 an unreadable transcript throws, naming it (got ${String(err)})`);
-
 		// Through the CLI: exit 1 and no document, never a quiet [].
 		const session = path.join(dir, "l-session.jsonl");
 		fs.writeFileSync(session, JSON.stringify({
@@ -351,9 +337,32 @@ console.log("\nPART L — loud read errors, quiet absences");
 			message: { role: "assistant", id: "l-1", model: "claude-opus-5", content: [{ type: "tool_use", id: "t", name: "Bash", input: { command: "pr-open" } }],
 				usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } },
 		}) + "\n");
-		const r = spawnSync("node", [CLI_BIN_L, "-s", session, "--json"], { encoding: "utf8", env: { ...process.env, WTFT_CLAUDE_PROJECTS_DIR: root, XDG_STATE_HOME: path.join(dir, "l-state") } });
-		check(r.status === 1 && r.stdout === "" && r.stderr.includes("EACCES") && r.stderr.includes(root),
-			`L5 --json exits 1 with the unreadable path and prints no document (got exit ${r.status}, stdout ${r.stdout.length} bytes, stderr ${r.stderr.slice(0, 300)})`);
+		const cliJson = () => spawnSync("node", [CLI_BIN_L, "-s", session, "--json"], { encoding: "utf8", env: { ...process.env, WTFT_CLAUDE_PROJECTS_DIR: root, XDG_STATE_HOME: path.join(dir, "l-state") } });
+
+		const lockedDir = path.join(root, "-tmp-l-locked");
+		fs.mkdirSync(lockedDir);
+		fs.chmodSync(lockedDir, 0);
+		let err: unknown = null;
+		try { claudeDiscovery.listSpawnCandidates!(0); } catch (e) { err = e; }
+		check(err instanceof Error && (err as NodeJS.ErrnoException).code === "EACCES" && String((err as Error).message).includes(lockedDir),
+			`L3 an unreadable project dir throws, naming it (got ${String(err)})`);
+		const dirRun = cliJson();
+		check(dirRun.status === 1 && dirRun.stdout === "" && dirRun.stderr.includes(lockedDir),
+			`L5a --json exits 1 naming the unreadable project dir, and prints no document (got exit ${dirRun.status}, stdout ${dirRun.stdout.length} bytes)`);
+		fs.chmodSync(lockedDir, 0o755);
+
+		// The locked file is reachable two ways — directly and through the
+		// symlink — and readdir order decides which the scan meets first.
+		const viaLink = path.join(linked, "a6000002-0000-4000-8000-0000000000a2.jsonl");
+		fs.chmodSync(ok, 0);
+		err = null;
+		try { claudeDiscovery.listSpawnCandidates!(0); } catch (e) { err = e; }
+		const named = String((err as Error)?.message);
+		check(err instanceof Error && (err as NodeJS.ErrnoException).code === "EACCES" && (named.includes(ok) || named.includes(viaLink)),
+			`L4 an unreadable transcript throws, naming it or the symlink to it (got ${String(err)})`);
+		const fileRun = cliJson();
+		check(fileRun.status === 1 && fileRun.stdout === "" && (fileRun.stderr.includes(ok) || fileRun.stderr.includes(viaLink)),
+			`L5b --json exits 1 naming the unreadable transcript, and prints no document (got exit ${fileRun.status}, stdout ${fileRun.stdout.length} bytes)`);
 		fs.chmodSync(ok, 0o644);
 	}
 	process.env.WTFT_CLAUDE_PROJECTS_DIR = saved;

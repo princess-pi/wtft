@@ -348,13 +348,14 @@ found in text this branch did not change is filed as
 
 Macroscope's High on PR #211 asked for a read failure to be caught and skipped. Duppy's decision
 went the other way, and further: `[]` must only ever mean "looked and found none", so every read
-error in the scan fails the run, not only the root's; only ENOENT is quiet. Pinned by L1–L5 in
-`tests/wtft-128-unrecorded-spawns.test.ts`, including `--json` exiting 1 with no document.
+error in the scan fails the run, not only the root's; only ENOENT is quiet. Pinned by L1–L5b in
+`tests/wtft-128-unrecorded-spawns.test.ts`, including `--json` exiting 1 with no document for an
+unreadable project directory and for an unreadable transcript.
 
 | Artifact | Claim | Contradicted by | Covered by a test? | Action |
 |---|---|---|---|---|
 | spec-128, spec-26, README, manifest | a read error anywhere is loud | the newest-copy stat swallowed every error | reconciled-against-untested (reachable only by a race) | **Code fixed**: only ENOENT is quiet there too |
-| spec-128 | a still-written older transcript is skipped | only when its directory is older too | ✅ C4 | Corrected |
+| spec-128 | a still-written older transcript is skipped | only when its directory is older too | reconciled-against-untested (C4 sets both mtimes old) | Corrected |
 | spec-128 | `[]` meanings | a disabled harness, or one without the method, is not looked in | n/a | Stated |
 | README, manifest | "the Claude projects tree" | any harness implementing the method can throw | n/a | Generalised |
 | (pre-existing) | the auditor's other findings | — | — | Filed on #210 as AJ–AN |

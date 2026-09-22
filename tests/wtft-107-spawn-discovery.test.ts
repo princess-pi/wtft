@@ -347,5 +347,43 @@ console.log("\nPART D — the daemon retries a bare spawn instead of dropping it
 		`D6 when the folder stops folding it, the grandchild is billed under its own source again: 100 + 55 + 20 (got ${afterRotate})`);
 }
 
+{
+	// Two children of one turn, both in the shared project dir, both spawning:
+	// each folds the other. Retiring both would empty the tag and re-adding both
+	// would double it, so the total must be stable across polls.
+	const cwd = path.join(dir, "d-mutual-project");
+	const projectDir = path.join(projects, cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+	fs.mkdirSync(projectDir, { recursive: true });
+	const rootId = "6666ffff-6666-4666-8666-ffffffffffff";
+	const rootPath = path.join(projectDir, `${rootId}.jsonl`);
+	const now = Date.now();
+	fs.writeFileSync(rootPath,
+		sessionLine(rootId, now - 6_000, cwd)
+		+ turnLine("d-mut-root", now - 5_000, 100, ["claude -p 'go'"]));
+	fs.writeFileSync(path.join(projectDir, "7777aaaa-7777-4777-8777-aaaaaaaaaaaa.jsonl"),
+		sessionLine("7777aaaa-7777-4777-8777-aaaaaaaaaaaa", now - 4_000, cwd)
+		+ turnLine("d-mut-one", now - 4_000, 40, ["claude -p 'x'"]));
+	fs.writeFileSync(path.join(projectDir, "8888bbbb-8888-4888-8888-bbbbbbbbbbbb.jsonl"),
+		sessionLine("8888bbbb-8888-4888-8888-bbbbbbbbbbbb", now - 3_500, cwd)
+		+ turnLine("d-mut-two", now - 3_500, 30, ["claude -p 'y'"]));
+
+	const daemon = spawn(process.execPath, [DAEMON_BIN, "--session", rootPath], { detached: true, stdio: "ignore", env: { ...process.env } });
+	daemon.unref();
+	const tagPath = path.join(projectDir, "wtft-tags", `${rootId}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const outputInTag = () => readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0);
+
+	// Both children are synced before either parse reveals the mutual fold, so
+	// the tag passes through 240 on the way; what matters is where it lands and
+	// that it stays there.
+	for (let i = 0; i < 80 && outputInTag() !== 170; i++) await sleep(250);
+	const first = outputInTag();
+	await sleep(4_000);
+	const second = outputInTag();
+	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
+
+	check(first === 170 && second === 170,
+		`D7 two transcripts that fold each other settle at one of them, and the total does not oscillate: 100 + 40 + 30 (got ${first} then ${second})`);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

@@ -564,7 +564,16 @@ function scanForSubAgents() {
   // rotates and stops folding hands its child straight back.
   const foldedElsewhere = new Set<string>();
   for (const [holder, state] of discoveredSubagentFiles) {
-    for (const folded of state.foldStamps.keys()) if (folded !== holder) foldedElsewhere.add(folded);
+    for (const folded of state.foldStamps.keys()) {
+      if (folded === holder) continue;
+      // Two transcripts that fold each other would each retire the other, and
+      // the poll after would find nothing folding either and re-sync both, for
+      // a total that alternates between double and none. Exactly one of the
+      // pair survives, chosen by path so the choice cannot flip.
+      const other = discoveredSubagentFiles.get(folded);
+      if (other?.foldStamps.has(holder) && holder > folded) continue;
+      foldedElsewhere.add(folded);
+    }
   }
 
   for (const file of taskAgentFiles) {

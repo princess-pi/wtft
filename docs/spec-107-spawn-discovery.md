@@ -122,7 +122,15 @@ and one already synced before that fold was seen has its source retired with a g
 That skip set is **derived from current fold state every poll, never accumulated**: it is rebuilt
 from each synced transcript's `foldStamps`, so when a folder rotates and its new parse no longer
 folds the child, the child is synced under its own source again on the next poll rather than
-staying suppressed for the daemon's life. Identity throughout is the canonical path —
+staying suppressed for the daemon's life.
+
+**A mutual fold keeps exactly one of the pair, chosen by path.** Two children of one turn in the
+shared project dir each fold the other, so a rule that retired everything folded elsewhere would
+retire both — and the poll after, with nothing left folding either, would re-sync both. The total
+would alternate between double and none forever. The tie-break is the canonical path, which cannot
+flip between polls. It converges rather than being instantaneous: both children are synced before
+either parse reveals the fold, so the tag passes through the doubled total and is corrected by the
+generation record that retires the loser (pinned by D7). Identity throughout is the canonical path —
 `syncSubagentTranscript` canonicalises the path it is handed, so one transcript has one state
 entry and one source however the path that reached it was spelled. Its `if (!cwd) continue` — which dropped the item **without
 re-queueing it**, so the turn was never retried — becomes a `searched === 0` check that keeps the

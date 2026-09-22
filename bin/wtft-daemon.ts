@@ -22,10 +22,11 @@ import {
 	applyControlEntry,
 	newParseStreamState,
 	extractCwdFromBashCommand,
-	cwdForClaudeSpawn,
+	resolveLastCwd,
 	commandSpawnsAgent,
 	extractRealCommands,
-	discoverClaudeSubAgentSessionFiles,
+	discoverClaudeSubAgentFilesForTurn,
+	canonicalTranscriptPath,
 	discoverSubagentSessionFiles,
 	clearSubagentCacheMiss,
 	loadUserPricing,
@@ -103,6 +104,13 @@ interface SubagentFileState {
 	foldStamps: Map<string, string>;
 	/** Until then a spawning turn can still gain a `claude -p` child. */
 	spawnWindowClosesAt: number;
+	/** Which children another holder owned at the last parse — when that set
+	 *  changes this transcript's own total does too, so the gate must fire. */
+	foldedByAnother: string;
+}
+
+function foldSetSignature(files: ReadonlySet<string>): string {
+	return [...files].sort().join("\u0000");
 }
 
 // Subagent transcripts: re-parse WHOLE on change; incremental windows break id-collapse and nested attribution.
@@ -256,8 +264,36 @@ function hasClaudeCommand(interaction: NonNullable<ReturnType<typeof parseEntryT
   return interaction.commands.some(commandSpawnsAgent);
 }
 
-function syncSubagentTranscript(file: string): boolean {
+/** Set by {@link skipAsFoldedElsewhere} when its skip also wrote a record. */
+let retiredThisPoll = false;
+
+/**
+ * Whether another synced transcript already folds this one — in which case
+ * syncing it too would write its turns a second time, under its own source.
+ *
+ * One synced BEFORE the parse that showed who folds it has those lines on disk
+ * already, so its source opens a new generation, which retires every one.
+ */
+function skipAsFoldedElsewhere(rawFile: string, foldedElsewhere: Set<string>): boolean {
+  retiredThisPoll = false;
+  const file = canonicalTranscriptPath(rawFile);
+  if (!foldedElsewhere.has(file)) return false;
+  if (discoveredSubagentFiles.has(file)) {
+    appendTagFile(tagPath, generationRecordLine(
+      transcriptSourceId(file, path.dirname(sessionPath)), path.basename(file, ".jsonl")));
+    discoveredSubagentFiles.delete(file);
+    tagGrewSinceMarker = true;
+    retiredThisPoll = true;
+  }
+  return true;
+}
+
+function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<string> = new Set()): boolean {
   let wroteAny = false;
+  // One transcript, one state entry and one source, however the path that
+  // reached us was spelled — discovery joins paths, a fold records the path it
+  // parsed, and a symlink makes those two spellings of one file.
+  const file = canonicalTranscriptPath(rawFile);
   const stateKey = file;
   const sessionId = path.basename(file, '.jsonl');
   let fileState = discoveredSubagentFiles.get(stateKey);
@@ -266,6 +302,7 @@ function syncSubagentTranscript(file: string): boolean {
       size: -1, mtimeMs: -1, readAtMs: 0, ino: -1, writtenLines: new Map<string, number>(),
       newGeneration: true, writtenIds: new Map<string, string | null>(), writtenCostById: new Map<string, number>(),
       recordedFolds: new Set<string>(), foldStamps: new Map<string, string>(), spawnWindowClosesAt: 0,
+      foldedByAnother: "",
     };
     discoveredSubagentFiles.set(stateKey, fileState);
   }
@@ -295,6 +332,7 @@ function syncSubagentTranscript(file: string): boolean {
   // Skip only when size+mtime unchanged AND settled past MTIME_SETTLE_MS (one clock: Date.now() since our read).
   const changed = size !== fileState.size || mtimeMs !== fileState.mtimeMs || ino !== fileState.ino
     || foldedTranscriptChanged(fileState.foldStamps)
+    || fileState.foldedByAnother !== foldSetSignature(foldedByAnother)
     || Date.now() <= fileState.spawnWindowClosesAt + MTIME_SETTLE_MS;
   const settled = Date.now() - fileState.readAtMs > MTIME_SETTLE_MS;
   if (!changed && settled) {
@@ -306,7 +344,10 @@ function syncSubagentTranscript(file: string): boolean {
 
   let deduped: ReturnType<typeof deduplicateInteractions>;
   try {
-    deduped = deduplicateInteractions(parseSessionFile(file));
+    // The watched session is an ancestor of every transcript discovered from
+    // it: without it here, a child whose own spawn window catches the session
+    // folds the session into itself, and those lines land in the session's tag.
+    deduped = deduplicateInteractions(parseSessionFile(file, new Set([canonicalTranscriptPath(sessionPath), ...foldedByAnother])));
     clearSubagentCacheMiss(deduped);
   } catch (err) {
     pollHadFailure = true;
@@ -395,9 +436,12 @@ function syncSubagentTranscript(file: string): boolean {
   }
   fileState.foldStamps = new Map();
   for (const si of deduped) {
-    for (const fold of si.claudeSubAgentFolds ?? []) fileState.foldStamps.set(fold.file, fold.stamp);
+    for (const fold of si.claudeSubAgentFolds ?? []) {
+      fileState.foldStamps.set(canonicalTranscriptPath(fold.file), fold.stamp);
+    }
   }
-  fileState.spawnWindowClosesAt = claudeSpawnWindowClosesAt(deduped);
+  fileState.foldedByAnother = foldSetSignature(foldedByAnother);
+  fileState.spawnWindowClosesAt = claudeSpawnWindowClosesAt(deduped, resolveLastCwd(file));
   fileState.size = size;
   fileState.mtimeMs = mtimeMs;
   fileState.ino = ino;
@@ -455,18 +499,25 @@ function scanForSubAgents() {
     const stillPending: typeof pendingClaudeCommands = [];
     for (const item of pendingClaudeCommands) {
       const interaction = item.interaction;
-      const cwd = cwdForClaudeSpawn(interaction.commands);
-      if (!cwd) continue;
+      const ownCwd = resolveLastCwd(sessionPath);
 
-      let discovered: Awaited<ReturnType<typeof discoverClaudeSubAgentSessionFiles>>;
+      let discovered: ReturnType<typeof discoverClaudeSubAgentFilesForTurn>;
       try {
-        discovered = discoverClaudeSubAgentSessionFiles(cwd, interaction.timestamp);
+        discovered = discoverClaudeSubAgentFilesForTurn(interaction.commands, interaction.timestamp, ownCwd);
       } catch (err) {
         pollHadFailure = true;
         stillPending.push(item);
         if (process.env.WTFT_DAEMON_DEBUG) {
-          process.stderr.write(`[wtft-log-parser] claude -p discovery failed, will retry next poll (${path.basename(cwd)}): ${err instanceof Error ? err.message : String(err)}\n`);
+          process.stderr.write(`[wtft-log-parser] claude -p discovery failed, will retry next poll (${path.basename(sessionPath, '.jsonl')}): ${err instanceof Error ? err.message : String(err)}\n`);
         }
+        continue;
+      }
+      // Nothing to search. One cause can change — a session cwd not yet
+      // readable from the transcript — and the rest (a launcher, an unknowable
+      // or bare `cd`) cannot, so the turn waits out its window rather than
+      // being dropped at the first look or retried forever.
+      if (discovered.searched === 0) {
+        if (Date.now() <= interaction.timestamp + CLAUDE_SUBAGENT_WINDOW_MS + MTIME_SETTLE_MS) stillPending.push(item);
         continue;
       }
       if (discovered.files.length === 0 && !discovered.unreadable) {
@@ -474,6 +525,12 @@ function scanForSubAgents() {
         continue;
       }
       for (const file of discovered.files) {
+        // The searched directory holds this session's own transcript, and
+        // discovery matches on a time window. A sourced second copy of the
+        // session's own turns then competes with the originals in the reader's
+        // max-cost collapse, and for a harness whose turns carry no id there is
+        // nothing to collapse them with at all.
+        if (canonicalTranscriptPath(file) === canonicalTranscriptPath(sessionPath)) continue;
         discoveredClaudeFiles.add(file);
         if (process.env.WTFT_DAEMON_DEBUG) {
           process.stderr.write(`[wtft-log-parser] claude -p subagent registered for re-parse (${path.basename(file, '.jsonl')})\n`);
@@ -483,7 +540,7 @@ function scanForSubAgents() {
         pollHadFailure = true;
         stillPending.push(item);
         if (process.env.WTFT_DAEMON_DEBUG) {
-          process.stderr.write(`[wtft-log-parser] claude -p discovery candidate unreadable, will retry next poll (${path.basename(cwd)}): ${discovered.unreadable.message}\n`);
+          process.stderr.write(`[wtft-log-parser] claude -p discovery candidate unreadable, will retry next poll (${path.basename(sessionPath, '.jsonl')}): ${discovered.unreadable.message}\n`);
         }
       } else if (Date.now() <= interaction.timestamp + CLAUDE_SUBAGENT_WINDOW_MS + MTIME_SETTLE_MS) {
         // A later child in the same window is not on disk yet.
@@ -510,12 +567,45 @@ function scanForSubAgents() {
       process.stderr.write(`[wtft-log-parser] subagents dir discovery failed, will retry next poll (${path.basename(sessionPath)}): ${err instanceof Error ? err.message : String(err)}\n`);
     }
   }
+  // A transcript some other synced transcript folds must not also be synced
+  // under its own source: the daemon parses each one in its own call, so the
+  // fold pass's within-one-call accounting cannot see across them. Derived from
+  // the CURRENT fold state every poll, never accumulated, so a parent that
+  // rotates and stops folding hands its child straight back.
+  // One child, one holder. Two in-window transcripts in a shared project dir
+  // each discover the other's children, and each parse bakes what it folds into
+  // its own turns, so without an owner the same child's cost lands in both. The
+  // owner is the lexicographically first holder, which cannot flip between polls.
+  const holderOf = new Map<string, string>();
+  for (const [holder, state] of discoveredSubagentFiles) {
+    for (const folded of state.foldStamps.keys()) {
+      if (folded === holder) continue;
+      // Two transcripts that fold each other would each retire the other, and
+      // the poll after would find nothing folding either and re-sync both, for
+      // a total that alternates between double and none.
+      const other = discoveredSubagentFiles.get(folded);
+      if (other?.foldStamps.has(holder) && holder > folded) continue;
+      const current = holderOf.get(folded);
+      if (current === undefined || holder < current) holderOf.set(folded, holder);
+    }
+  }
+  const foldedElsewhere = new Set(holderOf.keys());
+  /** What one transcript must leave alone: every child another holder owns. */
+  const notMine = (file: string): Set<string> => {
+    const me = canonicalTranscriptPath(file);
+    const out = new Set<string>();
+    for (const [folded, holder] of holderOf) if (holder !== me) out.add(folded);
+    return out;
+  };
+
   for (const file of taskAgentFiles) {
-    wroteAny = syncSubagentTranscript(file) || wroteAny;
+    if (skipAsFoldedElsewhere(file, foldedElsewhere)) { wroteAny = wroteAny || retiredThisPoll; continue; }
+    wroteAny = syncSubagentTranscript(file, notMine(file)) || wroteAny;
   }
 
   for (const file of discoveredClaudeFiles) {
-    wroteAny = syncSubagentTranscript(file) || wroteAny;
+    if (skipAsFoldedElsewhere(file, foldedElsewhere)) { wroteAny = wroteAny || retiredThisPoll; continue; }
+    wroteAny = syncSubagentTranscript(file, notMine(file)) || wroteAny;
   }
 
   if (wroteAny) {

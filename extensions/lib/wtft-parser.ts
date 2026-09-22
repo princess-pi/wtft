@@ -5,7 +5,7 @@ import * as fs from "node:fs";
 import { calculateClaudeCost, calculateServerToolCost, getDeepSeekPeakMultiplier } from "./wtft-cost.js";
 import { getParseAdapters } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.ts";
-import { cwdSlugVariants } from "./harness/session-cwd.ts";
+import { cwdSlugVariants, resolveLastCwd } from "./harness/session-cwd.ts";
 import { extractCommandSegments, extractJoinedSegments, extractRealCommands, splitCommandWords, stripCommandPrefixes } from "./wtft-command-shapes.js";
 import type { ControlSignal, UncountedBillableClass } from "./harness/types.ts";
 
@@ -357,7 +357,10 @@ export function splitOverheadCost(
 // Read a .jsonl session into Interaction[] (raw, undeduped).
 // ---
 
-export function parseSessionFile(filePath: string): Interaction[] {
+/** `doNotFold` holds canonical transcript paths this parse must not fold in:
+ *  the transcripts it is already inside, and any a different source is already
+ *  counting. */
+export function parseSessionFile(filePath: string, doNotFold: ReadonlySet<string> = new Set()): Interaction[] {
 	const interactions: Interaction[] = [];
 	const state = newParseStreamState();
 	// Unreadable transcript throws (never returns [] as "empty"). Per-line
@@ -382,7 +385,7 @@ export function parseSessionFile(filePath: string): Interaction[] {
 		}
 	}
 
-	attributeClaudeSubAgentCosts(interactions);
+	attributeClaudeSubAgentCosts(interactions, resolveLastCwd(filePath), new Set([...doNotFold, canonicalTranscriptPath(filePath)]));
 
 	return interactions;
 }
@@ -1082,21 +1085,31 @@ export function loadSubagentInteractions(
 	parseFn = parseSessionFile,
 	classifyFn = classifyInteraction,
 	dedupFn = deduplicateInteractions,
+	rootFile: string | null = null,
 ): Interaction[] {
-	return loadSubagentInteractionsChecked(subagentFiles, parseFn, classifyFn, dedupFn).interactions;
+	return loadSubagentInteractionsChecked(subagentFiles, parseFn, classifyFn, dedupFn, rootFile).interactions;
 }
 
+/** `rootFile` is the session these transcripts belong to: a child of it must
+ *  never fold it back in, and only the caller knows which session that is. */
 export function loadSubagentInteractionsChecked(
 	subagentFiles: string[],
 	parseFn = parseSessionFile,
 	classifyFn = classifyInteraction,
 	dedupFn = deduplicateInteractions,
+	rootFile: string | null = null,
 ): { interactions: Interaction[]; dropped: string[] } {
 	const interactions: Interaction[] = [];
 	const dropped: string[] = [];
+	// Every file in this list is appended at top level, so a fold of one into
+	// another is that file's cost a second time, under its sibling's turns.
+	const doNotFold = new Set<string>([
+		...(rootFile ? [canonicalTranscriptPath(rootFile)] : []),
+		...subagentFiles.map(canonicalTranscriptPath),
+	]);
 	for (const file of subagentFiles) {
 		try {
-			const raw = parseFn(file);
+			const raw = parseFn(file, doNotFold);
 			const deduped = dedupFn(raw);
 			clearSubagentCacheMiss(deduped);
 			for (const interaction of deduped) interaction._cat = classifyFn(interaction);
@@ -1124,33 +1137,110 @@ export const CLAUDE_SUBAGENT_WINDOW_MS = 15_000; // ±15s window for timestamp m
  * Expandable targets (`$VAR`, `$(…)`) return null, not a wrong guess.
  */
 export function extractCwdFromBashCommand(cmd: string): string | null {
+	return cdBeforeSpawn(cmd).cwd;
+}
+
+/**
+ * `sawCd` is what separates "ran where the session runs" from "ran somewhere we
+ * cannot name": a command with no `cd` at all inherits the session's own cwd,
+ * while one whose `cd` target is expandable ran elsewhere, so falling back to
+ * the session's cwd for it would be a wrong guess, not a missing one.
+ */
+function cdBeforeSpawn(cmd: string): { cwd: string | null; sawCd: boolean } {
 	let found: string | null = null;
+	let sawCd = false;
 	let prevWasKeptCd = false;
 	for (const { text, joinedBy } of extractJoinedSegments(cmd)) {
 		const bare = stripCommandPrefixes(text);
 		const head = bare.split("\n", 1)[0]!;
-		// Stop at the spawn — a later `cd` is where the shell went next.
-		if (CLAUDE_SPAWN.test(head.toLowerCase())) break;
+		// Stop at the segment that RUNS the spawn — a later `cd` is where the
+		// shell went next. Not at one that merely names it (`which claude`, a
+		// launcher's `--kind claude`), whose own `cd` still applies.
+		if (CLAUDE_HEAD.test(head.trim().toLowerCase())) break;
 		const m = head.match(/^cd\s+(?:"([^"]*)"|'([^']*)'|([^\s;&|]+))/);
-		if (!m) { prevWasKeptCd = false; continue; }
+		if (!m) {
+			// `cd` with no argument goes to $HOME — a move we cannot name, which is
+			// not the same as no move at all.
+			if (/^cd\s*$/.test(head)) { sawCd = true; found = null; prevWasKeptCd = false; continue; }
+			prevWasKeptCd = false;
+			continue;
+		}
 		if (joinedBy === "||" && prevWasKeptCd) continue;
 		prevWasKeptCd = true;
+		sawCd = true;
 		const target = m[1] || m[2] || m[3] || "";
 		// Expandable target: keep prior `found`, do not clear it.
 		if (/[$`]/.test(target)) continue;
 		found = target || found;
 	}
-	return found;
+	return { cwd: found, sawCd };
 }
 
-/** Each `commands` entry is its own Bash call with its own shell. */
-export function cwdForClaudeSpawn(commands: string[]): string | null {
+/**
+ * Every directory a turn's `claude -p` spawns may have run in, deduped, in
+ * command order. One Bash call is one shell, so a `cd` between two spawns moves
+ * the second and not the first, and each spawn takes the `cd` state standing
+ * when the shell reached it. `ownCwd` stands in only for a spawn with no `cd`
+ * before it whose own segment runs `claude` itself.
+ */
+export function claudeSpawnCwds(commands: string[], ownCwd: string | null): string[] {
+	const cwds: string[] = [];
 	for (const cmd of commands) {
-		if (!commandSpawnsAgent(cmd)) continue;
-		const cwd = extractCwdFromBashCommand(cmd);
-		if (cwd) return cwd;
+		for (const resolved of spawnCwdsInCommand(cmd, ownCwd)) {
+			if (resolved && !cwds.includes(resolved)) cwds.push(resolved);
+		}
 	}
-	return null;
+	return cwds;
+}
+
+/** One entry per spawning segment, null where the shell's directory is unknowable. */
+function spawnCwdsInCommand(cmd: string, ownCwd: string | null): (string | null)[] {
+	const out: (string | null)[] = [];
+	let found: string | null = null;
+	let sawCd = false;
+	let prevWasKeptCd = false;
+	for (const { text, joinedBy } of extractJoinedSegments(cmd)) {
+		const bare = stripCommandPrefixes(text);
+		const head = bare.split("\n", 1)[0]!;
+		// A segment that RUNS a spawn takes the directory standing now. One that
+		// merely names it (`which claude`) runs no agent, and a launcher runs one
+		// somewhere this cannot name — neither takes the session's own cwd.
+		if (commandSpawnsAgent(text)) {
+			const direct = CLAUDE_HEAD.test(head.trim().toLowerCase());
+			out.push(found || (!sawCd && direct ? ownCwd : null));
+			prevWasKeptCd = false;
+			continue;
+		}
+		const m = head.match(/^cd\s+(?:"([^"]*)"|'([^']*)'|([^\s;&|]+))/);
+		if (!m) {
+			// `cd` with no argument goes to $HOME — a move we cannot name, which is
+			// not the same as no move at all.
+			if (/^cd\s*$/.test(head)) { sawCd = true; found = null; prevWasKeptCd = false; continue; }
+			prevWasKeptCd = false;
+			continue;
+		}
+		if (joinedBy === "||" && prevWasKeptCd) continue;
+		prevWasKeptCd = true;
+		sawCd = true;
+		const target = m[1] || m[2] || m[3] || "";
+		// Expandable target: keep prior `found`, do not clear it.
+		if (/[$`]/.test(target)) continue;
+		found = target || found;
+	}
+	return out;
+}
+
+const CLAUDE_HEAD = /^claude(?:\s|$)/;
+
+/** Identity for the self/ancestor guards: discovery builds paths by joining, so
+ *  a symlinked transcript or project dir reaches them spelled differently from
+ *  the session's own path, and a guard that compared spellings would miss it. */
+export function canonicalTranscriptPath(file: string): string {
+	try {
+		return fs.realpathSync(path.resolve(file));
+	} catch {
+		return path.resolve(file);
+	}
 }
 
 /**
@@ -1173,6 +1263,41 @@ export function discoverClaudeSubAgentSessionFiles(
 		unreadable ??= found.unreadable;
 	}
 	return { files, unreadable };
+}
+
+/**
+ * Every `claude -p` child one turn's spawns may have written: one discovery per
+ * distinct directory the turn's spawns name, with the session's own cwd
+ * standing in for a command that has no `cd`.
+ *
+ * `searched` is how many directories were looked in. Zero means there was
+ * nothing to look in — never "looked and found nothing", which is the
+ * distinction a caller needs to decide whether to keep retrying.
+ */
+export function discoverClaudeSubAgentFilesForTurn(
+	commands: string[],
+	parentTimestamp: number,
+	ownCwd: string | null,
+	windowMs: number = CLAUDE_SUBAGENT_WINDOW_MS,
+): { files: string[]; unreadable: Error | null; searched: number } {
+	const files: string[] = [];
+	let unreadable: Error | null = null;
+	const cwds = claudeSpawnCwds(commands, ownCwd);
+	for (const cwd of cwds) {
+		// One unreadable directory must not discard what the others found: the
+		// caller retries on `unreadable`, and a permanently unreadable directory
+		// would otherwise keep a readable sibling's child out of the tag forever.
+		let found: { files: string[]; unreadable: Error | null };
+		try {
+			found = discoverClaudeSubAgentSessionFiles(cwd, parentTimestamp, windowMs);
+		} catch (err) {
+			unreadable ??= err instanceof Error ? err : new Error(String(err));
+			continue;
+		}
+		for (const file of found.files) if (!files.includes(file)) files.push(file);
+		unreadable ??= found.unreadable;
+	}
+	return { files, unreadable, searched: cwds.length };
 }
 
 function scanClaudeProjectDir(
@@ -1244,6 +1369,8 @@ function interactionHasClaudeCommand(interaction: Interaction): boolean {
 /** `seenSessionIds` is local to this call — re-calling over slices double-counts. */
 export function attributeClaudeSubAgentCosts(
 	interactions: Interaction[],
+	ownCwd: string | null = null,
+	doNotFold: ReadonlySet<string> = new Set(),
 ): void {
 	const seenSessionIds = new Set<string>();
 
@@ -1251,12 +1378,10 @@ export function attributeClaudeSubAgentCosts(
 		if (!interactionHasClaudeCommand(interaction)) continue;
 		if (interaction.claudeSubAgentFolds) continue;
 
-		const cwd = cwdForClaudeSpawn(interaction.commands);
-		if (!cwd) continue;
-
-		const subAgentResult = discoverClaudeSubAgentSessionFiles(
-			cwd, interaction.timestamp,
+		const subAgentResult = discoverClaudeSubAgentFilesForTurn(
+			interaction.commands, interaction.timestamp, ownCwd,
 		);
+		if (subAgentResult.searched === 0) continue;
 		// This pass has no cross-session ambiguity — throw so the report stays loud.
 		if (subAgentResult.unreadable) throw subAgentResult.unreadable;
 		const subAgentFiles = subAgentResult.files;
@@ -1265,6 +1390,10 @@ export function attributeClaudeSubAgentCosts(
 		const folds: SubAgentFold[] = [];
 
 		for (const file of subAgentFiles) {
+			// Discovery matches on a timestamp window, so what it returns can be
+			// this session, one that folded it, or one another source is already
+			// counting — none of which this parse may fold.
+			if (doNotFold.has(canonicalTranscriptPath(file))) continue;
 			const sessionId = path.basename(file, '.jsonl');
 			if (seenSessionIds.has(sessionId)) continue;
 
@@ -1273,13 +1402,12 @@ export function attributeClaudeSubAgentCosts(
 			let stamp: string;
 			try {
 				stamp = fileStamp(file);
-				subInteractions = parseSessionFile(file);
+				subInteractions = parseSessionFile(file, doNotFold);
 			} catch (err) {
 				throw new Error(
 					`nested subagent transcript could not be read or parsed (${file}): ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
-			seenSessionIds.add(sessionId);
 
 			const inclusive = emptyFoldShare();
 			const nested: SubAgentFold[] = [];
@@ -1296,8 +1424,16 @@ export function attributeClaudeSubAgentCosts(
 			for (const n of nested) {
 				for (const key of FOLD_SHARE_KEYS) own[key] -= n.share[key];
 			}
-			folds.push({ id: sessionId, share: own, file, stamp }, ...nested);
-			for (const key of FOLD_SHARE_KEYS) added[key] += inclusive[key];
+			// Accounted per session id, by OWN share: a grandchild the child already
+			// folded is also an in-window match in the same directory, so the turn
+			// discovers it directly too. Summing each file's INCLUSIVE total would
+			// then bill that grandchild once inside its parent and once on its own.
+			for (const fold of [{ id: sessionId, share: own, file, stamp }, ...nested]) {
+				if (seenSessionIds.has(fold.id)) continue;
+				seenSessionIds.add(fold.id);
+				folds.push(fold);
+				for (const key of FOLD_SHARE_KEYS) added[key] += fold.share[key];
+			}
 		}
 
 		if (folds.length > 0) {
@@ -1320,11 +1456,11 @@ export function fileStamp(file: string): string {
 /** The last moment discovery could still find a `claude -p` child for one of
  *  these turns — its window runs from the spawning turn's timestamp. 0 when
  *  none spawns. */
-export function claudeSpawnWindowClosesAt(interactions: Interaction[]): number {
+export function claudeSpawnWindowClosesAt(interactions: Interaction[], ownCwd: string | null = null): number {
 	let closes = 0;
 	for (const interaction of interactions) {
 		if (!interactionHasClaudeCommand(interaction)) continue;
-		if (!cwdForClaudeSpawn(interaction.commands)) continue;
+		if (claudeSpawnCwds(interaction.commands, ownCwd).length === 0) continue;
 		closes = Math.max(closes, interaction.timestamp + CLAUDE_SUBAGENT_WINDOW_MS);
 	}
 	return closes;

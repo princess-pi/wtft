@@ -57,6 +57,8 @@ check(u(["herdr agent start x --kind claude --pane wE:pCW -- --model sonnet"], "
 check(u(["timeout 180 claude -p 'go'"], "/own") === '["/own"]',
 	`U11 a prefixed direct run still inherits the shell's cwd (got ${u(["timeout 180 claude -p 'go'"], "/own")})`);
 
+check(u(["which claude && cd /repo && claude -p 'x'"], "/own") === '["/repo"]',
+	`U13 a segment that only NAMES claude does not end the cd scan (got ${u(["which claude && cd /repo && claude -p 'x'"], "/own")})`);
 check(u(["cd; claude -p 'go'"], "/own") === "[]",
 	`U12 a bare cd moves the shell somewhere we cannot name, so no fallback (got ${u(["cd; claude -p 'go'"], "/own")})`);
 

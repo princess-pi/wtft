@@ -65,7 +65,9 @@ so a child cannot fold the session that spawned it.
 
 **A turn whose spawns yield no directory at all waits out its window, then is dropped** — an
 expandable `cd` target (`cd $(mktemp -d)`), a bare `cd` (the shell went to `$HOME`, which the
-transcript does not name), a launcher, or a direct spawn whose session cwd is unreadable. Only the
+transcript does not name), a launcher with no `cd` of its own, or a direct spawn whose session cwd
+is unreadable. A launcher that does `cd` first is searched under that target like any other
+command — what the fallback withholds is the session's cwd, not the one the command named. Only the
 last of those can change on a later poll, which is why the wait is the window rather than a single
 try; the others are settled at the first look and simply cost their window. Once it closes the turn
 is gone, and it is one of the reasons #128 (P6) will report as `unrecorded`.
@@ -100,7 +102,9 @@ is gone, and it is one of the reasons #128 (P6) will report as `unrecorded`.
   passes `resolveLastCwd(filePath)`, so a nested child's own grandchildren resolve against the
   child's cwd, not the root session's, and adds its own path to `ancestors` before recursing. The
   guard lives in the FOLD pass, not in discovery: discovery still returns the transcript, and each
-  caller decides. `loadSubagentInteractionsChecked` — the CLI and widget's reader for Task-tool
+  caller decides. Identity is the canonical path (`canonicalTranscriptPath`, a `realpathSync` that
+  falls back to `resolve`), because discovery builds its paths by joining and a symlinked
+  transcript or project dir would otherwise reach the guard spelled differently. `loadSubagentInteractionsChecked` — the CLI and widget's reader for Task-tool
   children — takes the root session as `rootFile` for the same reason: a Task child that runs a
   bare `claude -p` searches the root's own project dir. The daemon's own caller drops a discovered file whose path is the session it is
   watching, for the same reason and by a different route.

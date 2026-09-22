@@ -382,7 +382,7 @@ export function parseSessionFile(filePath: string, ancestors: ReadonlySet<string
 		}
 	}
 
-	attributeClaudeSubAgentCosts(interactions, resolveLastCwd(filePath), new Set([...ancestors, path.resolve(filePath)]));
+	attributeClaudeSubAgentCosts(interactions, resolveLastCwd(filePath), new Set([...ancestors, canonicalTranscriptPath(filePath)]));
 
 	return interactions;
 }
@@ -1098,7 +1098,7 @@ export function loadSubagentInteractionsChecked(
 ): { interactions: Interaction[]; dropped: string[] } {
 	const interactions: Interaction[] = [];
 	const dropped: string[] = [];
-	const ancestors = new Set<string>(rootFile ? [path.resolve(rootFile)] : []);
+	const ancestors = new Set<string>(rootFile ? [canonicalTranscriptPath(rootFile)] : []);
 	for (const file of subagentFiles) {
 		try {
 			const raw = parseFn(file, ancestors);
@@ -1145,8 +1145,10 @@ function cdBeforeSpawn(cmd: string): { cwd: string | null; sawCd: boolean } {
 	for (const { text, joinedBy } of extractJoinedSegments(cmd)) {
 		const bare = stripCommandPrefixes(text);
 		const head = bare.split("\n", 1)[0]!;
-		// Stop at the spawn — a later `cd` is where the shell went next.
-		if (CLAUDE_SPAWN.test(head.toLowerCase())) break;
+		// Stop at the segment that RUNS the spawn — a later `cd` is where the
+		// shell went next. Not at one that merely names it (`which claude`, a
+		// launcher's `--kind claude`), whose own `cd` still applies.
+		if (CLAUDE_HEAD.test(head.trim().toLowerCase())) break;
 		const m = head.match(/^cd\s+(?:"([^"]*)"|'([^']*)'|([^\s;&|]+))/);
 		if (!m) {
 			// `cd` with no argument goes to $HOME — a move we cannot name, which is
@@ -1185,6 +1187,17 @@ export function claudeSpawnCwds(commands: string[], ownCwd: string | null): stri
 }
 
 const CLAUDE_HEAD = /^claude(?:\s|$)/;
+
+/** Identity for the self/ancestor guards: discovery builds paths by joining, so
+ *  a symlinked transcript or project dir reaches them spelled differently from
+ *  the session's own path, and a guard that compared spellings would miss it. */
+export function canonicalTranscriptPath(file: string): string {
+	try {
+		return fs.realpathSync(path.resolve(file));
+	} catch {
+		return path.resolve(file);
+	}
+}
 
 /**
  * Whether the shell itself runs `claude` — as opposed to a launcher that merely
@@ -1348,7 +1361,7 @@ export function attributeClaudeSubAgentCosts(
 			// A session never folds itself or one that folded it: discovery matches
 			// on a timestamp window, and a transcript in the directory it searches
 			// can be its own, or an ancestor's.
-			if (ancestors.has(path.resolve(file))) continue;
+			if (ancestors.has(canonicalTranscriptPath(file))) continue;
 			const sessionId = path.basename(file, '.jsonl');
 			if (seenSessionIds.has(sessionId)) continue;
 

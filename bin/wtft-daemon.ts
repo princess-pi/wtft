@@ -26,6 +26,7 @@ import {
 	commandSpawnsAgent,
 	extractRealCommands,
 	discoverClaudeSubAgentFilesForTurn,
+	canonicalTranscriptPath,
 	discoverSubagentSessionFiles,
 	clearSubagentCacheMiss,
 	loadUserPricing,
@@ -309,7 +310,7 @@ function syncSubagentTranscript(file: string): boolean {
     // The watched session is an ancestor of every transcript discovered from
     // it: without it here, a child whose own spawn window catches the session
     // folds the session into itself, and those lines land in the session's tag.
-    deduped = deduplicateInteractions(parseSessionFile(file, new Set([path.resolve(sessionPath)])));
+    deduped = deduplicateInteractions(parseSessionFile(file, new Set([canonicalTranscriptPath(sessionPath)])));
     clearSubagentCacheMiss(deduped);
   } catch (err) {
     pollHadFailure = true;
@@ -471,9 +472,10 @@ function scanForSubAgents() {
         }
         continue;
       }
-      // Nowhere to look yet: no command named a directory, and the session's
-      // own cwd is not readable from its transcript. It may be on the next
-      // poll, so the turn waits out its window like any other miss.
+      // Nothing to search. One cause can change — a session cwd not yet
+      // readable from the transcript — and the rest (a launcher, an unknowable
+      // or bare `cd`) cannot, so the turn waits out its window rather than
+      // being dropped at the first look or retried forever.
       if (discovered.searched === 0) {
         if (Date.now() <= interaction.timestamp + CLAUDE_SUBAGENT_WINDOW_MS + MTIME_SETTLE_MS) stillPending.push(item);
         continue;
@@ -484,9 +486,11 @@ function scanForSubAgents() {
       }
       for (const file of discovered.files) {
         // The searched directory holds this session's own transcript, and
-        // discovery matches on a time window: registering it as a child of
-        // itself bills the whole session twice.
-        if (path.resolve(file) === path.resolve(sessionPath)) continue;
+        // discovery matches on a time window. A sourced second copy of the
+        // session's own turns then competes with the originals in the reader's
+        // max-cost collapse, and for a harness whose turns carry no id there is
+        // nothing to collapse them with at all.
+        if (canonicalTranscriptPath(file) === canonicalTranscriptPath(sessionPath)) continue;
         discoveredClaudeFiles.add(file);
         if (process.env.WTFT_DAEMON_DEBUG) {
           process.stderr.write(`[wtft-log-parser] claude -p subagent registered for re-parse (${path.basename(file, '.jsonl')})\n`);

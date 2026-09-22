@@ -521,7 +521,7 @@ function scanForSubAgents() {
         continue;
       }
       if (discovered.files.length === 0 && !discovered.unreadable) {
-        stillPending.push(item);
+        if (Date.now() <= interaction.timestamp + CLAUDE_SUBAGENT_WINDOW_MS + MTIME_SETTLE_MS) stillPending.push(item);
         continue;
       }
       for (const file of discovered.files) {

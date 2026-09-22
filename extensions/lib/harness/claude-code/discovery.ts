@@ -20,7 +20,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 
-import type { DiscoverScopeOptions, HarnessDiscovery, SessionCandidate } from "../types.ts";
+import type { DiscoverScopeOptions, HarnessDiscovery, SessionCandidate, SpawnCandidate, SpawnCandidateScan } from "../types.ts";
 import {
 	resolveLastCwd,
 	countDirRead,
@@ -231,6 +231,81 @@ function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions
 	return [...bySessionId.values()];
 }
 
+/** Head lines searched for the first timestamp, cwd and entrypoint. The
+ *  first line is often a title or snapshot carrying none of them. */
+const CANDIDATE_HEAD_LINES = 20;
+const CANDIDATE_HEAD_BYTES = 64 * 1024;
+
+function readCandidateHead(file: string): Omit<SpawnCandidate, "path" | "sessionId"> | null {
+	const fd = fs.openSync(file, "r");
+	let text: string;
+	try {
+		const buf = Buffer.alloc(CANDIDATE_HEAD_BYTES);
+		const n = fs.readSync(fd, buf, 0, buf.length, 0);
+		text = buf.subarray(0, n).toString("utf8");
+	} finally {
+		fs.closeSync(fd);
+	}
+	let startedAt: number | null = null;
+	let cwd: string | null = null;
+	let entrypoint: unknown;
+	for (const line of text.split("\n").slice(0, CANDIDATE_HEAD_LINES)) {
+		let entry: any;
+		try { entry = JSON.parse(line); } catch { continue; }
+		if (startedAt === null && typeof entry?.timestamp === "string") {
+			const ms = Date.parse(entry.timestamp);
+			if (!Number.isNaN(ms)) startedAt = ms;
+		}
+		if (cwd === null && typeof entry?.cwd === "string" && entry.cwd) cwd = entry.cwd;
+		if (entrypoint === undefined && typeof entry?.entrypoint === "string") entrypoint = entry.entrypoint;
+		if (startedAt !== null && cwd !== null && entrypoint !== undefined) break;
+	}
+	if (startedAt === null || cwd === null) return null;
+	const launchedBy = entrypoint === "sdk-cli" ? "program" : entrypoint === "cli" ? "human" : null;
+	return { cwd, startedAt, launchedBy };
+}
+
+/**
+ * Top-level transcripts only, pruned by mtime twice: a project dir's mtime
+ * moves when a transcript is created in it, so an older directory cannot
+ * hold a transcript that began after `sinceMs`.
+ */
+function listSpawnCandidates(sinceMs: number): SpawnCandidateScan {
+	const scan: SpawnCandidateScan = { candidates: [], unreadable: [] };
+	const root = projectsDir();
+	let slugs: fs.Dirent[];
+	try {
+		slugs = fs.readdirSync(root, { withFileTypes: true });
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ENOENT") return scan;
+		throw err;
+	}
+	for (const slug of slugs) {
+		if (!slug.isDirectory()) continue;
+		const dir = path.join(root, slug.name);
+		let entries: fs.Dirent[];
+		try {
+			if (fs.statSync(dir).mtimeMs < sinceMs) continue;
+			entries = fs.readdirSync(dir, { withFileTypes: true });
+		} catch (err) {
+			scan.unreadable.push({ path: dir, error: err });
+			continue;
+		}
+		for (const entry of entries) {
+			if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+			const file = path.join(dir, entry.name);
+			try {
+				if (fs.statSync(file).mtimeMs < sinceMs) continue;
+				const head = readCandidateHead(file);
+				if (head) scan.candidates.push({ path: file, sessionId: sessionIdOf(file), ...head });
+			} catch (err) {
+				scan.unreadable.push({ path: file, error: err });
+			}
+		}
+	}
+	return scan;
+}
+
 export const discovery: HarnessDiscovery = {
 	id: ID,
 	label: "Claude",
@@ -275,6 +350,8 @@ export const discovery: HarnessDiscovery = {
 
 		return best ? best.path : null;
 	},
+
+	listSpawnCandidates,
 };
 
 export default discovery;

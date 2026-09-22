@@ -310,7 +310,7 @@ _Avoid_: menu
 
 **JSON mode** (#26):
 `--json` — the CLI's machine-readable mode. Writes exactly one JSON object (schema
-`wtft/session@5`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
+`wtft/session@6`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
 Human prose goes to stderr, and every sentence that would otherwise have been on stdout is
 repeated in the object's `notices[]`, where `code` is the contract and `text` is disposable.
 With an interactive terminal it still shows the scoped session picker (#89) whenever the
@@ -371,7 +371,9 @@ a `pr-review` lens, a wrapper script — rather than by a `claude` command the p
 transcript contains. Distinct from a **subagent session** (a Task-tool child, discovered by
 file layout) and from a **`claude -p` spawn** (discovered by cwd and time): a launcher child
 has its own session id and its own project dir, and **neither transcript contains a field
-naming the other**, so there is nothing to re-derive and no tagger bump can reach its cost.
+naming the other** — unless the launcher put the parent's id in the child's cwd, which is what
+an **unrecorded spawn**'s `named` tier reads — so there is nothing to re-derive and no tagger
+bump can reach its cost.
 _Avoid_: Background agent, detached session, orphan session (it is not orphaned — the edge
 exists, it was simply never written down)
 
@@ -407,6 +409,20 @@ session a descendant's parse folded in, whose money landed once in `spawned.tota
 already reported), `in-self-total` (a child whose cost is already inside `total`, at any fold depth, or the reported session itself reached round a cycle) and
 `depth-capped` (past the walk's bound).
 _Avoid_: Missing, lost, dropped (the edge is known; only the amount is not)
+
+**Unrecorded spawn** (#128):
+A session that looks like this session's launcher child, that no spawn-ledger edge names, and
+whose cost is not already counted —
+`spawned.unrecorded[]` in JSON, the `UNRECORDED` block under the CLI's `--tokens` (the widget
+has none). Only harnesses that implement `listSpawnCandidates` — Claude Code, today. Listed with its own cost — `null`, never zero, when it
+cannot be parsed — a **tier** and a **basis**: `named` (basis `cwd-names-parent`: its `cwd`
+contains this session's id, so the launcher named the parent, whoever started it) or `inferred`
+(basis `worktree` or `tmp`: a program started it, in this repo's worktree fan-out or a temp
+sandbox, inside a **launch span** — 30 minutes after any turn in this session's tag file that ran
+a command, a Task subagent's turns included). A LIST, never a claim: nothing in it reaches
+`total`, `spawned.total` or `tree`. Distinct from **unattributed**, which is a recorded edge
+whose child could not be read.
+_Avoid_: Orphan, unattributed child, probable descendant (each reads as a claim about the money)
 
 **Descendants unknown** (#116):
 The state where the spawn ledger itself could not be READ — `spawned.ledgerError` in JSON,

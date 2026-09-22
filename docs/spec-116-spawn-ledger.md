@@ -23,7 +23,8 @@ that are all properties of the transcripts and none of which a parser can fix:
 3. The child's cwd is a worktree or a `/tmp` sandbox, so its transcript lands in a project dir the
    parent never wrote to.
 
-**Neither transcript contains a field naming the other.** There is no edge to re-derive, so no
+**Neither transcript contains a field naming the other** — unless a launcher puts the parent's id
+in the child's cwd, which #128's `named` tier reads. There is no edge to re-derive, so no
 tagger version bump can reach it — measured on session `9f29d624…180d`, which reported $70.33 while
 $69.68 of its own `pr-review` lens children sat **invisible** in ten `/tmp/pr-review-*` sandboxes.
 Invisible, not `unattributed` — this document defines that term narrowly, as a RECORDED edge whose
@@ -101,7 +102,8 @@ with some flags the report parser ignores.
 | 3 | The record was valid and the ledger could not be written (unwritable state dir, ENOSPC, a short write). The edge is **not recorded**, so the child is **invisible**, not `unattributed` — see *How this is verified*. Nothing repairs a partial line; see *Simplification pass*. |
 
 **It never blocks a spawn.** A spawner calls it and ignores the exit code; the failure is the
-spawner's to log, and an unwritten edge degrades to exactly today's behaviour.
+spawner's to log, and an unwritten edge leaves the child outside the tree — reported, since #128,
+only in `spawned.unrecorded[]` when it matches a tier there.
 
 ## Reading, resolving, walking
 
@@ -199,7 +201,7 @@ already trust.
 
 ```json
 "spawned": {
-  "schema": "wtft/spawn-tree@2",
+  "schema": "wtft/spawn-tree@3",
   "descendants": 3,
   "edges": [{"parent":"…","child":"…","mechanism":"pr-review-lens","ts":"…",
              "label":"correctness","model":"opus","cwd":"/tmp/pr-review-abc","depth":1,
@@ -211,10 +213,15 @@ already trust.
   "maxDepth": 5,
   "malformedLedgerLines": 0,
   "ledgerError": null,
-  "total": {…}
+  "total": {…},
+  "unrecorded": []
 },
 "tree": {…}
 ```
+
+`unrecorded` is #128's list of sessions no edge names, never summed into `total`, `spawned.total`
+or `tree` —
+`docs/spec-128-unrecorded-spawns.md`.
 
 `tree` = `total` + `spawned.total`, as a field, so a consumer never has to add two numbers and
 guess whether it double-counted. `label`, `model`, `cwd` and `skip` are present on an edge only
@@ -306,8 +313,9 @@ a project dir under this repo or its worktrees, shown with their cost and **neve
 peer session running at the same time is kept out of the list), so it is **#128**, not a late
 addition here.
 
-Until #128 lands, an unrecorded launcher child is **silently missing**, exactly as it is today —
-which is why #116 stays open when this merges.
+#128 has since landed: an unrecorded launcher child is listed in `spawned.unrecorded[]` with its
+cost and a tier, never summed — `docs/spec-128-unrecorded-spawns.md`, whose Closer is this clause
+run against the same kind of fixture.
 
 Plus, each with its own test: UUID and ISO-8601 validation on write; the 4 KiB refusal, *executed*
 through escape expansion rather than asserted as a constant; 24 concurrent appends making 24 intact
@@ -334,8 +342,9 @@ descendant, which the parse does not fold, is priced under its own edge in both 
   `princess-pi-tools`, and this change ships first so there is something to call.
 - **Folding descendants into TOTAL.** A separate decision, and it needs the interaction-level
   attribution rework in #107 / #14 / #94 first.
-- **Listing an unrecorded child.** The Closer's second clause — #128. A spawner that never calls
-  `spawn-record` is invisible here, exactly as it is today.
+- **Listing an unrecorded child.** The Closer's second clause — #128, since landed
+  (`docs/spec-128-unrecorded-spawns.md`). A spawner that never calls
+  `spawn-record` is invisible to the walk; #128's listing reports it instead.
 - **Live growth.** A long-lived interactive child's cost is read at the moment `wtft` runs; it is a
   snapshot and will be stale, which is #14 and is not made worse here.
 

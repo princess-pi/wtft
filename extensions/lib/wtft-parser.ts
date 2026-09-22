@@ -5,7 +5,7 @@ import * as fs from "node:fs";
 import { calculateClaudeCost, calculateServerToolCost, getDeepSeekPeakMultiplier } from "./wtft-cost.js";
 import { getParseAdapters } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.ts";
-import { cwdSlugVariants } from "./harness/session-cwd.ts";
+import { cwdSlugVariants, resolveLastCwd } from "./harness/session-cwd.ts";
 import { extractCommandSegments, extractJoinedSegments, extractRealCommands, splitCommandWords, stripCommandPrefixes } from "./wtft-command-shapes.js";
 import type { ControlSignal, UncountedBillableClass } from "./harness/types.ts";
 
@@ -357,7 +357,7 @@ export function splitOverheadCost(
 // Read a .jsonl session into Interaction[] (raw, undeduped).
 // ---
 
-export function parseSessionFile(filePath: string): Interaction[] {
+export function parseSessionFile(filePath: string, ancestors: ReadonlySet<string> = new Set()): Interaction[] {
 	const interactions: Interaction[] = [];
 	const state = newParseStreamState();
 	// Unreadable transcript throws (never returns [] as "empty"). Per-line
@@ -382,7 +382,7 @@ export function parseSessionFile(filePath: string): Interaction[] {
 		}
 	}
 
-	attributeClaudeSubAgentCosts(interactions);
+	attributeClaudeSubAgentCosts(interactions, resolveLastCwd(filePath), new Set([...ancestors, path.resolve(filePath)]));
 
 	return interactions;
 }
@@ -1124,7 +1124,18 @@ export const CLAUDE_SUBAGENT_WINDOW_MS = 15_000; // ±15s window for timestamp m
  * Expandable targets (`$VAR`, `$(…)`) return null, not a wrong guess.
  */
 export function extractCwdFromBashCommand(cmd: string): string | null {
+	return cdBeforeSpawn(cmd).cwd;
+}
+
+/**
+ * `sawCd` is what separates "ran where the session runs" from "ran somewhere we
+ * cannot name": a command with no `cd` at all inherits the session's own cwd,
+ * while one whose `cd` target is expandable ran elsewhere, so falling back to
+ * the session's cwd for it would be a wrong guess, not a missing one.
+ */
+function cdBeforeSpawn(cmd: string): { cwd: string | null; sawCd: boolean } {
 	let found: string | null = null;
+	let sawCd = false;
 	let prevWasKeptCd = false;
 	for (const { text, joinedBy } of extractJoinedSegments(cmd)) {
 		const bare = stripCommandPrefixes(text);
@@ -1135,22 +1146,44 @@ export function extractCwdFromBashCommand(cmd: string): string | null {
 		if (!m) { prevWasKeptCd = false; continue; }
 		if (joinedBy === "||" && prevWasKeptCd) continue;
 		prevWasKeptCd = true;
+		sawCd = true;
 		const target = m[1] || m[2] || m[3] || "";
 		// Expandable target: keep prior `found`, do not clear it.
 		if (/[$`]/.test(target)) continue;
 		found = target || found;
 	}
-	return found;
+	return { cwd: found, sawCd };
 }
 
-/** Each `commands` entry is its own Bash call with its own shell. */
-export function cwdForClaudeSpawn(commands: string[]): string | null {
+/**
+ * Every directory a turn's `claude -p` spawns may have run in: one entry per
+ * spawning command — its own `cd` target, or `ownCwd` when it has no `cd` —
+ * deduped, in command order. Each `commands` entry is its own Bash call with
+ * its own shell, so two spawns in one turn can sit in two directories.
+ */
+export function claudeSpawnCwds(commands: string[], ownCwd: string | null): string[] {
+	const cwds: string[] = [];
 	for (const cmd of commands) {
 		if (!commandSpawnsAgent(cmd)) continue;
-		const cwd = extractCwdFromBashCommand(cmd);
-		if (cwd) return cwd;
+		const { cwd, sawCd } = cdBeforeSpawn(cmd);
+		const resolved = cwd || (!sawCd && runsClaudeDirectly(cmd) ? ownCwd : null);
+		if (resolved && !cwds.includes(resolved)) cwds.push(resolved);
 	}
-	return null;
+	return cwds;
+}
+
+const CLAUDE_HEAD = /^claude(?:\s|$)/;
+
+/**
+ * Whether the shell itself runs `claude` — as opposed to a launcher that merely
+ * names it in a flag (`herdr agent start … --kind claude`). Only a direct run
+ * inherits the shell's working directory; a launcher starts its child in a
+ * worktree or a sandbox, so the shell's cwd says nothing about where that
+ * child's transcript landed.
+ */
+function runsClaudeDirectly(cmd: string): boolean {
+	return extractRealCommands(cmd)
+		.some(real => CLAUDE_HEAD.test(stripCommandPrefixes(real).split("\n", 1)[0]!.trim().toLowerCase()));
 }
 
 /**
@@ -1173,6 +1206,32 @@ export function discoverClaudeSubAgentSessionFiles(
 		unreadable ??= found.unreadable;
 	}
 	return { files, unreadable };
+}
+
+/**
+ * Every `claude -p` child one turn's spawns may have written: one discovery per
+ * spawning command (§#107 B), with the session's own cwd standing in for a
+ * command that has no `cd` (§#107 A).
+ *
+ * `searched` is how many directories were looked in. Zero means there was
+ * nothing to look in — never "looked and found nothing", which is the
+ * distinction a caller needs to decide whether to keep retrying.
+ */
+export function discoverClaudeSubAgentFilesForTurn(
+	commands: string[],
+	parentTimestamp: number,
+	ownCwd: string | null,
+	windowMs: number = CLAUDE_SUBAGENT_WINDOW_MS,
+): { files: string[]; unreadable: Error | null; searched: number } {
+	const files: string[] = [];
+	let unreadable: Error | null = null;
+	const cwds = claudeSpawnCwds(commands, ownCwd);
+	for (const cwd of cwds) {
+		const found = discoverClaudeSubAgentSessionFiles(cwd, parentTimestamp, windowMs);
+		for (const file of found.files) if (!files.includes(file)) files.push(file);
+		unreadable ??= found.unreadable;
+	}
+	return { files, unreadable, searched: cwds.length };
 }
 
 function scanClaudeProjectDir(
@@ -1244,6 +1303,8 @@ function interactionHasClaudeCommand(interaction: Interaction): boolean {
 /** `seenSessionIds` is local to this call — re-calling over slices double-counts. */
 export function attributeClaudeSubAgentCosts(
 	interactions: Interaction[],
+	ownCwd: string | null = null,
+	ancestors: ReadonlySet<string> = new Set(),
 ): void {
 	const seenSessionIds = new Set<string>();
 
@@ -1251,12 +1312,10 @@ export function attributeClaudeSubAgentCosts(
 		if (!interactionHasClaudeCommand(interaction)) continue;
 		if (interaction.claudeSubAgentFolds) continue;
 
-		const cwd = cwdForClaudeSpawn(interaction.commands);
-		if (!cwd) continue;
-
-		const subAgentResult = discoverClaudeSubAgentSessionFiles(
-			cwd, interaction.timestamp,
+		const subAgentResult = discoverClaudeSubAgentFilesForTurn(
+			interaction.commands, interaction.timestamp, ownCwd,
 		);
+		if (subAgentResult.searched === 0) continue;
 		// This pass has no cross-session ambiguity — throw so the report stays loud.
 		if (subAgentResult.unreadable) throw subAgentResult.unreadable;
 		const subAgentFiles = subAgentResult.files;
@@ -1265,6 +1324,10 @@ export function attributeClaudeSubAgentCosts(
 		const folds: SubAgentFold[] = [];
 
 		for (const file of subAgentFiles) {
+			// A session never folds itself or one that folded it: discovery matches
+			// on a timestamp window, and a transcript in the directory it searches
+			// can be its own, or an ancestor's.
+			if (ancestors.has(path.resolve(file))) continue;
 			const sessionId = path.basename(file, '.jsonl');
 			if (seenSessionIds.has(sessionId)) continue;
 
@@ -1273,7 +1336,7 @@ export function attributeClaudeSubAgentCosts(
 			let stamp: string;
 			try {
 				stamp = fileStamp(file);
-				subInteractions = parseSessionFile(file);
+				subInteractions = parseSessionFile(file, ancestors);
 			} catch (err) {
 				throw new Error(
 					`nested subagent transcript could not be read or parsed (${file}): ${err instanceof Error ? err.message : String(err)}`,
@@ -1320,11 +1383,11 @@ export function fileStamp(file: string): string {
 /** The last moment discovery could still find a `claude -p` child for one of
  *  these turns — its window runs from the spawning turn's timestamp. 0 when
  *  none spawns. */
-export function claudeSpawnWindowClosesAt(interactions: Interaction[]): number {
+export function claudeSpawnWindowClosesAt(interactions: Interaction[], ownCwd: string | null = null): number {
 	let closes = 0;
 	for (const interaction of interactions) {
 		if (!interactionHasClaudeCommand(interaction)) continue;
-		if (!cwdForClaudeSpawn(interaction.commands)) continue;
+		if (claudeSpawnCwds(interaction.commands, ownCwd).length === 0) continue;
 		closes = Math.max(closes, interaction.timestamp + CLAUDE_SUBAGENT_WINDOW_MS);
 	}
 	return closes;

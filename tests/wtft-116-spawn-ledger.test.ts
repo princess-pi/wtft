@@ -19,7 +19,7 @@ import {
 } from "../extensions/lib/wtft-spawn-ledger.ts";
 import { computeSpawnTree } from "../extensions/lib/wtft-spawn-tree.ts";
 import { getVisualLength } from "../extensions/lib/wtft-renderer.ts";
-import { cwdForClaudeSpawn } from "../bin/wtft.mjs";
+import { claudeSpawnCwds } from "../bin/wtft.mjs";
 import { spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
@@ -564,12 +564,11 @@ const CLI_BIN = path.join(REPO_ROOT, "bin", "wtft.mjs");
 const HERDR_LINE = 'herdr agent start ppt-824-serve-home-from-env --kind claude --pane wE:pCW -- --model sonnet';
 
 {
-	// The control from the issue's Repro, and the reason this issue exists at
-	// all: the spawning command yields NO cwd, so today's attribution pass hits
-	// its `if (!cwd) continue` and the child's whole cost is dropped.
-	check(cwdForClaudeSpawn([HERDR_LINE]) === null,
-		"D1  the launcher command still yields no cwd — nothing here re-derives an edge");
-	check(cwdForClaudeSpawn(['cd /repo && claude -p "review this"']) === "/repo",
+	// The control from the issue's Repro: the launcher command does not spawn a
+	// `claude` the parser can see, so no directory is searched for it at all.
+	check(claudeSpawnCwds([HERDR_LINE], "/own").length === 0,
+		"D1  the launcher command still yields nothing to search — nothing here re-derives an edge");
+	check(claudeSpawnCwds(['cd /repo && claude -p "review this"'], null).join() === "/repo",
 		"D2  the claude -p control still resolves (#138 is untouched)");
 }
 

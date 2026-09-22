@@ -43,6 +43,12 @@ not from the transcript's path.
   misses them. Stated rather than fixed: the alternative is a per-entry cwd on every interaction,
   which is #97/#138 territory and costs a field on every line.
 
+**A session never folds itself, or a session that folded it.** A real session's own transcript
+lives in the very directory the fallback searches, and discovery matches on a timestamp window, so
+a session that spawns within 15s of its own start is a candidate for folding itself — and two
+sessions in one directory are candidates for folding each other, forever. `parseSessionFile` now
+carries the set of transcripts it is already inside, and discovery skips every one of them.
+
 **A turn whose spawns yield no directory at all is still dropped** — an expandable `cd` target
 (`cd $(mktemp -d)`) with an unknown session cwd has nothing to search. That is unchanged, and it is
 one of the reasons #128 (P6) will report as `unrecorded`.
@@ -55,15 +61,25 @@ one of the reasons #128 (P6) will report as `unrecorded`.
   entry per spawning command — its own `cd` target, or `ownCwd` when it has none — deduped, in
   command order. Empty when nothing spawns, or when every spawn's directory is unknown.
   `cwdForClaudeSpawn` is **deleted**: returning a single cwd is finding B.
+  - **Only a direct run inherits the session's cwd.** `commandSpawnsAgent` also fires on a launcher
+    that merely names claude in a flag (`herdr agent start … --kind claude`), and that child starts
+    in a worktree or a sandbox, so the shell's cwd says nothing about where its transcript landed.
+    The fallback therefore applies only when the shell itself runs `claude`, after prefixes like
+    `timeout 180` are stripped. This is what keeps #116's control — a launcher-spawned session is
+    still invisible to the parser, and the spawn ledger is still its only route.
+  - **An unknowable `cd` target does not fall back either.** `cd $(mktemp -d) && claude -p` ran
+    somewhere the transcript does not name; the session's own cwd would be a wrong guess, not a
+    missing one.
 - **`discoverClaudeSubAgentFilesForTurn(commands, parentTimestamp, ownCwd, windowMs?)`** runs one
   `discoverClaudeSubAgentSessionFiles` per entry and unions the results: files deduped by path,
   the first `unreadable` kept, and `searched` naming how many directories were looked in — 0 is
   the "nothing to search" case a caller must not mistake for "looked and found nothing".
 - **`discoverClaudeSubAgentSessionFiles(cwd, ts, windowMs?)` keeps its signature.** It is the
   per-directory scan, and three test suites and `bin/wtft.mjs` re-export it.
-- **`attributeClaudeSubAgentCosts(interactions, ownCwd?)`** takes the fallback cwd and uses the
-  per-turn discovery. `parseSessionFile` passes `resolveLastCwd(filePath)`, so a nested child's own
-  grandchildren resolve against the child's cwd, not the root session's.
+- **`attributeClaudeSubAgentCosts(interactions, ownCwd?, ancestors?)`** takes the fallback cwd and
+  the transcripts the parse is already inside, and uses the per-turn discovery. `parseSessionFile`
+  passes `resolveLastCwd(filePath)`, so a nested child's own grandchildren resolve against the
+  child's cwd, not the root session's, and adds its own path to `ancestors` before recursing.
 - **`claudeSpawnWindowClosesAt(interactions, ownCwd?)`** filters on `claudeSpawnCwds(...).length > 0`
   rather than on a single non-null cwd, so P4's discovery window opens for a no-`cd` spawn too.
 
@@ -71,6 +87,16 @@ one of the reasons #128 (P6) will report as `unrecorded`.
 `resolveLastCwd(sessionPath)`. Its `if (!cwd) continue` — which dropped the item **without
 re-queueing it**, so the turn was never retried — becomes a `searched === 0` check that keeps the
 item pending while its window is open, the same rule every other miss follows.
+
+**The residual this leaves: a sibling, not a child.** Discovery's rule is "a session that started
+in that directory within ±15s of the spawning turn", and the directory the fallback searches also
+holds the session's own siblings — every other session started in that repo. A sibling that starts
+inside the window is folded as though it were the child. That hazard is not new (a `cd`-target
+directory has the same rule) but the fallback raises how often the searched directory is a busy
+one. It is not narrowed here: the honest fix is a spawn-time edge, which is #116's ledger, and
+reporting the uncertainty is #128 (P6). A child cannot start before the command that spawned it, so
+a one-sided window would halve the hazard — a road not taken here, because it changes the discovery
+contract for every spawn rather than for the case #107 adds.
 
 ## What it costs
 
@@ -92,6 +118,10 @@ Unit, over `claudeSpawnCwds`:
 - a bare spawn with no known own cwd yields nothing
 - a `cd` in a **non-spawning** command still supplies nothing (the #106 finding B guard — this
   change must not reopen it)
+- a launcher that only names claude in a flag yields nothing, while `timeout 180 claude -p` still
+  inherits the cwd
+- a session whose own transcript sits in the directory it searches does not fold itself, and two
+  such sessions fold each other exactly once rather than forever
 
 End to end, in a sandboxed `HOME`:
 

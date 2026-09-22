@@ -11,7 +11,7 @@ import {
 	extractCommandSegments,
 	extractCwdFromBashCommand,
 	extractRealCommands,
-	cwdForClaudeSpawn,
+	claudeSpawnCwds,
 	splitCommandWords,
 	renderOtherHistogram,
 	getSemanticCommandGroup,
@@ -440,9 +440,9 @@ console.log("\n#106 / 7 — review-round-3 regressions");
 // [High/crossfile] Each `commands` entry is a SEPARATE Bash call with its own
 // shell, so a `cd` in one says nothing about the cwd of a spawn in another.
 eq("cwd is not borrowed from a different bash call",
-	cwdForClaudeSpawn(["cd /a", "claude -p 'go'"]), null);
+	claudeSpawnCwds(["cd /a", "claude -p 'go'"], null).join(), "");
 eq("cwd comes from the call that spawned",
-	cwdForClaudeSpawn(["cd /decoy", "cd /real && claude -p 'go'"]), "/real");
+	claudeSpawnCwds(["cd /decoy", "cd /real && claude -p 'go'"], null).join(), "/real");
 
 // [High/crossfile] `||` only marks a fallback when the thing it falls back FROM
 // was the cd we kept. `cd /a && false || cd /b` really does run `cd /b`.
@@ -458,7 +458,7 @@ eq("cd `…` yields null", extractCwdFromBashCommand("cd `mktemp -d` && claude -
 eq("claude -p inside a heredoc body is not agents",
 	cat(bashTurn("cat <<'EOF' > notes.md\nrun claude -p \"go\" to start\nEOF")), "spec");
 eq("cwd ignores a spawn that is only heredoc text",
-	cwdForClaudeSpawn(["cat <<'EOF'\nclaude -p 'go'\nEOF"]), null);
+	claudeSpawnCwds(["cat <<'EOF'\nclaude -p 'go'\nEOF"], "/own").join(), "");
 
 // [Medium/correctness] A function DEFINITION runs nothing — not its first
 // statement and not the rest of a multi-statement body.

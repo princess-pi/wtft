@@ -22,10 +22,10 @@ import {
 	applyControlEntry,
 	newParseStreamState,
 	extractCwdFromBashCommand,
-	cwdForClaudeSpawn,
+	resolveLastCwd,
 	commandSpawnsAgent,
 	extractRealCommands,
-	discoverClaudeSubAgentSessionFiles,
+	discoverClaudeSubAgentFilesForTurn,
 	discoverSubagentSessionFiles,
 	clearSubagentCacheMiss,
 	loadUserPricing,
@@ -397,7 +397,7 @@ function syncSubagentTranscript(file: string): boolean {
   for (const si of deduped) {
     for (const fold of si.claudeSubAgentFolds ?? []) fileState.foldStamps.set(fold.file, fold.stamp);
   }
-  fileState.spawnWindowClosesAt = claudeSpawnWindowClosesAt(deduped);
+  fileState.spawnWindowClosesAt = claudeSpawnWindowClosesAt(deduped, resolveLastCwd(file));
   fileState.size = size;
   fileState.mtimeMs = mtimeMs;
   fileState.ino = ino;
@@ -455,20 +455,22 @@ function scanForSubAgents() {
     const stillPending: typeof pendingClaudeCommands = [];
     for (const item of pendingClaudeCommands) {
       const interaction = item.interaction;
-      const cwd = cwdForClaudeSpawn(interaction.commands);
-      if (!cwd) continue;
+      const ownCwd = resolveLastCwd(sessionPath);
 
-      let discovered: Awaited<ReturnType<typeof discoverClaudeSubAgentSessionFiles>>;
+      let discovered: ReturnType<typeof discoverClaudeSubAgentFilesForTurn>;
       try {
-        discovered = discoverClaudeSubAgentSessionFiles(cwd, interaction.timestamp);
+        discovered = discoverClaudeSubAgentFilesForTurn(interaction.commands, interaction.timestamp, ownCwd);
       } catch (err) {
         pollHadFailure = true;
         stillPending.push(item);
         if (process.env.WTFT_DAEMON_DEBUG) {
-          process.stderr.write(`[wtft-log-parser] claude -p discovery failed, will retry next poll (${path.basename(cwd)}): ${err instanceof Error ? err.message : String(err)}\n`);
+          process.stderr.write(`[wtft-log-parser] claude -p discovery failed, will retry next poll (${path.basename(sessionPath, '.jsonl')}): ${err instanceof Error ? err.message : String(err)}\n`);
         }
         continue;
       }
+      // Nowhere to look is not a miss: the turn spawned, but no command named a
+      // directory and the session's own is unknown. Dropping it here is #107 A.
+      if (discovered.searched === 0) continue;
       if (discovered.files.length === 0 && !discovered.unreadable) {
         stillPending.push(item);
         continue;
@@ -483,7 +485,7 @@ function scanForSubAgents() {
         pollHadFailure = true;
         stillPending.push(item);
         if (process.env.WTFT_DAEMON_DEBUG) {
-          process.stderr.write(`[wtft-log-parser] claude -p discovery candidate unreadable, will retry next poll (${path.basename(cwd)}): ${discovered.unreadable.message}\n`);
+          process.stderr.write(`[wtft-log-parser] claude -p discovery candidate unreadable, will retry next poll (${path.basename(sessionPath, '.jsonl')}): ${discovered.unreadable.message}\n`);
         }
       } else if (Date.now() <= interaction.timestamp + CLAUDE_SUBAGENT_WINDOW_MS + MTIME_SETTLE_MS) {
         // A later child in the same window is not on disk yet.

@@ -14,8 +14,9 @@ parent's own transcript contains. Today it contributes **zero** to the parent, f
 that are all properties of the transcripts and none of which a parser can fix:
 
 1. The command head is the launcher, not `claude`, so `commandSpawnsAgent` never fires.
-2. There is no `cd` on the spawning command, so `cwdForClaudeSpawn` returns null and
-   `attributeClaudeSubAgentCosts` hits its `if (!cwd) continue`.
+2. There is no `cd` on the spawning command. Since #107 A a spawn with no `cd` falls back to the
+   session's own working directory, but only when the shell runs `claude` itself — a launcher
+   starts its child somewhere the parent's cwd does not name, so nothing is searched for it.
 3. The child's cwd is a worktree or a `/tmp` sandbox, so its transcript lands in a project dir the
    parent never wrote to.
 
@@ -274,7 +275,7 @@ survive.
 The issue's own Closer, as `tests/wtft-116-spawn-ledger.test.ts`:
 
 1. A parent transcript whose bash command is the `herdr agent start …` line — the one measured to
-   return `null` from `cwdForClaudeSpawn`.
+   yield no directory to search, since the shell runs the launcher rather than `claude`.
 2. A child transcript with its own UUID in a different project dir.
 3. A spawn record for the pair.
 

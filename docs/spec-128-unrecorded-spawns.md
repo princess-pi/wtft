@@ -113,7 +113,7 @@ semantics and stay on the shared side.
 **Claude Code** implements it. It lists every project directory under the projects root, keeps
 the ones whose mtime is at or after `sinceMs` (creating a transcript updates its directory's mtime,
 so a directory last written before `sinceMs` holds no transcript created after it; one created
-earlier and still being written is skipped, and it began too early to be in any launch span), keeps each top-level `*.jsonl` whose own
+earlier and still being written is skipped only when its directory is that old), keeps each top-level `*.jsonl` whose own
 mtime is at or after `sinceMs` (a symlinked directory or transcript counts, followed to its target), and reads the head of each for `timestamp`, `cwd` and `entrypoint`.
 `entrypoint: "sdk-cli"` is `program`, `"cli"` is `human`, anything else is `null`. **A read error is loud;
 only a path that is gone is quiet** (#212). ENOENT — no projects root on a host without Claude
@@ -167,7 +167,8 @@ interface UnrecordedSpawn {
 - **`--json`:** `spawned.unrecorded[]`. `wtft/spawn-tree@2` → `@3` and `wtft/session@5` → `@6`,
   because a nested key was added. `[]` means looked and found none — or, for a session that ran
   no command (the pending and no-data arms included), that there was no launch span to look in. A read error never sits behind
-  a `[]`: it fails the run.
+  a `[]`: it fails the run. A harness that is disabled, or that does not implement
+  `listSpawnCandidates`, is not looked in at all.
 - **`--tokens`, CLI only:** an `UNRECORDED` block, last, after the `UNCOUNTED` line and the
   `SPAWNED` block, shown whenever the list is non-empty — whether or not a `SPAWNED` block prints.
   The widget renders the same table without it.
@@ -349,3 +350,11 @@ Macroscope's High on PR #211 asked for a read failure to be caught and skipped. 
 went the other way, and further: `[]` must only ever mean "looked and found none", so every read
 error in the scan fails the run, not only the root's; only ENOENT is quiet. Pinned by L1–L5 in
 `tests/wtft-128-unrecorded-spawns.test.ts`, including `--json` exiting 1 with no document.
+
+| Artifact | Claim | Contradicted by | Covered by a test? | Action |
+|---|---|---|---|---|
+| spec-128, spec-26, README, manifest | a read error anywhere is loud | the newest-copy stat swallowed every error | reconciled-against-untested (reachable only by a race) | **Code fixed**: only ENOENT is quiet there too |
+| spec-128 | a still-written older transcript is skipped | only when its directory is older too | ✅ C4 | Corrected |
+| spec-128 | `[]` meanings | a disabled harness, or one without the method, is not looked in | n/a | Stated |
+| README, manifest | "the Claude projects tree" | any harness implementing the method can throw | n/a | Generalised |
+| (pre-existing) | the auditor's other findings | — | — | Filed on #210 as AJ–AN |

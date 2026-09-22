@@ -61,7 +61,13 @@ function isInside(dir: string, cwd: string): boolean {
 }
 
 function mtimeOf(file: string): number {
-	try { return fs.statSync(file).mtimeMs; } catch { return -Infinity; }
+	try {
+		return fs.statSync(file).mtimeMs;
+	} catch (err) {
+		// Gone since the scan: it cannot be the newest. Anything else is loud.
+		if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return -Infinity;
+		throw err;
+	}
 }
 
 function tempRoots(): string[] {

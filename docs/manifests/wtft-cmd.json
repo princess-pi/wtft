@@ -313,7 +313,7 @@
     },
     {
       "code": 1,
-      "meaning": "Error: no session found or selected, an invalid path, a daemon that could not be spawned or that died before producing data, a refused flag (-p), a read error other than a missing path in the Claude projects tree while --json or --tokens lists unrecorded spawns (#212: never a quiet []), or an unhandled exception. Reason on stderr; under --json stdout carries nothing."
+      "meaning": "Error: no session found or selected, an invalid path, a daemon that could not be spawned or that died before producing data, a refused flag (-p), a read error other than a missing path in a harness's session tree (Claude Code's projects directory today) while --json or --tokens lists unrecorded spawns (#212: never a quiet []), or an unhandled exception. Reason on stderr; under --json stdout carries nothing."
     },
     {
       "code": 2,

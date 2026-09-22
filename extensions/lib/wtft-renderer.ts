@@ -1742,7 +1742,8 @@ function renderUnrecordedSpawns(rows: UnrecordedSpawn[] | undefined): string {
 		const unreadable = group.filter(r => !r.total).length;
 		const cost = group.reduce((sum, r) => sum + (r.total?.costUsd ?? 0), 0);
 		const name = `${group.length} ${where[basis]}` + (unreadable > 0 ? `, ${unreadable} unreadable` : "");
-		out += line("inferred", name, formatCost(cost));
+		// A $0.00 would claim these sessions were free.
+		out += line("inferred", name, unreadable === group.length ? "(unreadable)" : formatCost(cost));
 	}
 	return out;
 }

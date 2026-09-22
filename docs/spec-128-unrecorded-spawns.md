@@ -136,7 +136,7 @@ start from a human one. A Pi child is therefore never listed. Filed as
 
 - **`spawnWindows(turns)`** — the merged `[start, end]` launch spans, from deduplicated turns carrying
   at least one command.
-- **`listUnrecordedSpawns({ rootSessionId, rootCwd, turns, exclude })`** — asks every discovery
+- **`listUnrecordedSpawns({ rootSessionId, rootCwd, turns, exclude, rootFile? })`** — asks every discovery
   that has `listSpawnCandidates`, applies the tiers, drops the exclusions, prices each survivor
   with `parseSessionFile` and `computeSessionSummary` (`untaggedCostUsd` dropped, as for an edge),
   drops what another row folds, and returns the rows sorted by `ts`. The pricing parse is handed
@@ -174,14 +174,15 @@ interface UnrecordedSpawn {
   The widget renders the same table without it.
   A `named` row prints on its own, under its `cwd` fitted to 30 columns, with `(unreadable)` where
   its cost would be when it could not be parsed. `inferred` rows collapse to **one line per
-  basis**, carrying the count and the rows' own summed cost, plus how many were unreadable:
+  basis**, carrying the count and the readable rows' summed cost, plus how many were unreadable; a group
+  with no readable row prints `(unreadable)`, never `$0.00`:
 
   ```
   UNRECORDED 122 session(s) no spawn record names (#128) —
              NOT in TOTAL or TREE: a list, not a claim; every row is in --json
-             named     /tmp/pr-review.<id>.bugs             $0.17
-             inferred  43 in this repo's checkouts          $3.77
-             inferred  78 in temp sandboxes                 $1.13
+             named     /tmp/pr-review.<id>.bugs              $0.17
+             inferred  43 in this repo's checkouts           $3.77
+             inferred  78 in temp sandboxes                  $1.13
   ```
 
   **Why collapse:** measured on this host 2026-09-22, one long session listed 121 `inferred` rows.
@@ -291,3 +292,7 @@ found in text this branch did not change is filed as
 | second pass: adding-a-harness | no method → never listed; silent on throwing | `launchedBy: null` still allows `named`; the root read may throw | reconciled-against-untested | Fixed |
 | second pass: README, manifest, renderer | "in this repo's worktrees" | the fan-out includes the main clone and the session's own checkout | ✅ R2 | Label is now "checkouts" |
 | second pass: spec-128, spec-26 | Pi records nothing | `parentSession` exists, for siblings | n/a | Fixed |
+| third pass: renderer | "summed cost" per inferred basis | a group with no readable row printed `$0.00` | ✅ R4 | **Code fixed**: prints `(unreadable)` |
+| third pass: spec-26, CONTEXT, manifest | "Claude Code only" | the rule is "implements `listSpawnCandidates`" | n/a | Fixed |
+| third pass: README, manifest | "no ledger edge names"; "within 30 minutes of" | already-counted sessions are excluded too; the span runs forward only | ✅ T10, W1 | Fixed |
+| third pass: spec-128 | listing signature; sample column | `rootFile` missing; money one column left | ✅ F2 | Fixed |

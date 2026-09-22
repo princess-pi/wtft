@@ -277,19 +277,20 @@ the same report. Full
 contract: [`docs/spec-116-spawn-ledger.md`](./docs/spec-116-spawn-ledger.md).
 
 A child nobody recorded is still reported. `spawned.unrecorded[]` lists the
-sessions that look like this session's children and that no ledger edge names,
+sessions that look like this session's children, that no ledger edge names and
+whose cost is not already counted,
 each with its own cost (`null`, with `skip: "unreadable"`, when it cannot be
 parsed), a `tier` and a `basis`: **`named`** (basis `cwd-names-parent`) when the
 child's `cwd` contains this session's id, whoever started it; **`inferred`**
 (basis `worktree` or `tmp`) when a program started it (Claude Code's
 `entrypoint: sdk-cli`) in this repo's checkouts or a temp sandbox (`/tmp` or
-`$TMPDIR`) within 30 minutes of a command this session ran. `inferred` is a
+`$TMPDIR`) in the 30 minutes after a command this session ran. `inferred` is a
 guess, and says so; apart from `named`, a session a human started is never
 listed. **Nothing in the list is summed** into `total`, `spawned.total` or
 `tree`, and it never causes exit 9. `--tokens` prints it as an `UNRECORDED`
 block: a `named` row each (`(unreadable)` in place of a cost it could not read),
-and one line per basis for the `inferred` rows with their count, summed cost
-and how many were unreadable. Pi sessions are not listed yet
+and one line per basis for the `inferred` rows with their count, the readable
+rows' summed cost and how many were unreadable. Pi sessions are not listed yet
 ([#209](https://github.com/princess-pi/wtft/issues/209)). Full contract:
 [`docs/spec-128-unrecorded-spawns.md`](./docs/spec-128-unrecorded-spawns.md).
 

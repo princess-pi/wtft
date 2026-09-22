@@ -414,7 +414,7 @@ _Avoid_: Missing, lost, dropped (the edge is known; only the amount is not)
 A session that looks like this session's launcher child, that no spawn-ledger edge names, and
 whose cost is not already counted —
 `spawned.unrecorded[]` in JSON, the `UNRECORDED` block under the CLI's `--tokens` (the widget
-has none). Claude Code sessions only. Listed with its own cost — `null`, never zero, when it
+has none). Only harnesses that implement `listSpawnCandidates` — Claude Code, today. Listed with its own cost — `null`, never zero, when it
 cannot be parsed — a **tier** and a **basis**: `named` (basis `cwd-names-parent`: its `cwd`
 contains this session's id, so the launcher named the parent, whoever started it) or `inferred`
 (basis `worktree` or `tmp`: a program started it, in this repo's worktree fan-out or a temp

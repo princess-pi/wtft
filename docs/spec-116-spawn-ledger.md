@@ -108,6 +108,8 @@ only in `spawned.unrecorded[]` when it matches a tier there.
 ## Reading, resolving, walking
 
 **`readSpawnLedger()`** returns `{ childrenOf: Map<parent, SpawnEdge[]>, malformedLines: number }`.
+It strips a trailing `.jsonl` from `parent` and `child`, so a session recorded once by id and once by
+file name is one node (#138).
 A line that is not JSON, does not carry `schema: "wtft/spawn@1"`, is missing a required field, or
 carries a `parent`/`child` that is not uuid-shaped is **skipped and counted** — the count is
 reported, so a broken writer is visible rather than quietly losing money. A blank line is skipped

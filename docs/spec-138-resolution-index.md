@@ -23,14 +23,20 @@ indexSessionsById?(): Map<string, string>;  // session id → its newest transcr
 
 It walks the tree once, with the same rules `resolveSessionById` uses: the same files, and the
 newest by mtime when one id has two files. The resolver strips a trailing `.jsonl` from the id
-first, as every `resolveSessionById` does, so a child recorded as `<uuid>.jsonl` still resolves. Both built-ins implement it and define
-`resolveSessionById` as a lookup in a fresh index, so the two cannot disagree.
+first, as every `resolveSessionById` does, so a child recorded as `<uuid>.jsonl` still resolves. Both built-ins implement it. Their
+`resolveSessionById` stays a single-id scan that stats only the matching files, because a running
+daemon calls it to follow a moved session; a test holds the two to the same answer for every id.
+
+**One spelling per session in the ledger.** The writer accepts a session id with or without a
+`.jsonl` suffix, and the reader now strips it from `parent` and `child`, so one session recorded
+under both spellings is one node in the walk, counted once.
 
 `computeSpawnTree` builds a resolver when its walk first needs one. For each harness, in registry
 order: the index when the harness has the method, else that harness's `resolveSessionById`,
 asked per id. The first harness that knows an id wins, which is the order `resolveSessionFile`
-already uses. Answers are memoised for the walk. A harness that throws while indexing is treated
-the way a throwing `resolveSessionById` is today: it cannot answer, so the next one is asked.
+already uses. Answers are memoised for the walk. A harness that throws while indexing, or returns anything
+other than a `Map`, is treated the way a throwing `resolveSessionById` is today: it cannot answer
+for the rest of the walk, so the next one is asked.
 
 **Scope of the cache: one walk.** The index is thrown away when `computeSpawnTree` returns, so it
 can never serve a stale path to a later report. A child that moves during one walk is found where
@@ -49,13 +55,15 @@ money being counted, not waste.
 
 - **The Closer, as the issue states it:** a ledger with 10,000 distinct child edges under one
   parent, and `wtft --tokens` on that parent renders the tree naming all 10,000 gaps. Measured
-  2026-09-22: the tree walk takes about 40 ms in-process, down from 3.1 s on the same fixture, and
-  the whole CLI run, start to exit (process start and the daemon spawn included), takes about
-  1 s, against about 11 minutes before. The tests hold both to a loose 5 s so a
+  2026-09-22: the tree walk takes about 40 ms in-process, down from 3.1 s on the same 100-transcript
+  fixture, and the whole CLI run, start to exit (process start and the daemon spawn included),
+  takes about 1 s. At this host's measured per-id cost (66 ms, a tree of ~7,000 transcripts) the
+  same 10,000 edges would have taken about 11 minutes. The tests hold both to a loose 5 s so a
   loaded host cannot make them flaky.
 - **One walk, not one per child:** the directory-walk counter (`getDirWalkCount`) moves by the
   same amount for a 1-edge tree and a 10,000-edge tree. This, not the clock, is what pins the fix.
-- **A `.jsonl` suffix:** a child recorded as `<uuid>.jsonl` resolves as `resolveSessionById` would.
+- **A `.jsonl` suffix:** a child recorded as `<uuid>.jsonl` resolves as `resolveSessionById` would,
+  and one recorded under both spellings is counted once.
 - **Same answers:** a resolvable child still resolves and is priced; with the same id in two
   project directories, the newer copy wins, as before.
 - **Seam agreement:** for every id in a fixture tree, `resolveSessionById(id)` equals
@@ -77,3 +85,13 @@ money being counted, not waste.
 | A 1 s wall-clock bound is flaky under load | Verified | 5 s bound; the walk count pins the fix |
 | The adding-a-harness interface line cites an issue number | Verified | Removed |
 | 70,000 vs spec-116's ~40,000 edges at the 8 MiB limit | Verified | Uses spec-116's figure |
+
+## pr-review round 2
+
+| Finding | Verdict | Action |
+|---|---|---|
+| One session under both spellings was walked twice and counted twice | Verified — reproduced as R3; the double count predates this change | **Code fixed**: the ledger reader strips `.jsonl`; ✅ R3 |
+| `resolveSessionById` now statted every transcript on each single lookup | Verified: the daemon's moved-session follow calls it | **Code fixed**: single lookups scan matches only again; ✅ S1 holds agreement |
+| An index that returns a non-Map was rebuilt for every id | Verified | Treated as a failed index for the walk |
+| Pre-fix CLI figure mixed the fixture and the host | Verified | Both figures stated, each with its scale |
+| Test banner said "under a second" | Verified | Corrected |

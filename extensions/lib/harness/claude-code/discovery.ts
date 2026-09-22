@@ -366,7 +366,33 @@ export const discovery: HarnessDiscovery = {
 	},
 
 	resolveSessionById(sessionId: string): string | null {
-		return indexSessionsById().get(sessionId.replace(/\.jsonl$/i, "")) ?? null;
+		const root = projectsDir();
+		if (!fs.existsSync(root)) return null;
+		const wanted = sessionId.replace(/\.jsonl$/i, "");
+
+		let best: { path: string; mtimeMs: number } | null = null;
+		let projectDirs: string[];
+		try {
+			projectDirs = fs.readdirSync(root, { withFileTypes: true })
+				.filter(e => e.isDirectory())
+				.map(e => e.name);
+		} catch {
+			return null;
+		}
+
+		for (const slug of projectDirs) {
+			const files: string[] = [];
+			collect(path.join(root, slug), slug, files);
+			for (const file of files) {
+				if (sessionIdOf(file) !== wanted) continue;
+				try {
+					const mtimeMs = fs.statSync(file).mtimeMs;
+					if (!best || mtimeMs > best.mtimeMs) best = { path: file, mtimeMs };
+				} catch { /* raced with a move — skip */ }
+			}
+		}
+
+		return best ? best.path : null;
 	},
 
 	indexSessionsById,

@@ -60,7 +60,7 @@ function ledgerWith(children: string[]): string {
 }
 
 // ---
-// PART C — the Closer: 10,000 distinct edges, under a second
+// PART C — 10,000 distinct edges through the walk itself
 // ---
 console.log("\nPART C — 10,000 distinct child edges");
 {
@@ -110,6 +110,9 @@ console.log("\nPART R — resolution still finds, prices, and prefers the newest
 	const suffixed = computeSpawnTree(PARENT, { ledgerPath: ledgerWith([`${child}.jsonl`]) }).edges[0];
 	check(suffixed?.resolved === true && suffixed.path === fresh,
 		`R2 a child recorded with a .jsonl suffix resolves as resolveSessionById would (got ${suffixed?.skip ?? suffixed?.path})`);
+	const both = computeSpawnTree(PARENT, { ledgerPath: ledgerWith([child, `${child}.jsonl`]) });
+	check(both.descendants === 1 && both.total.outputTokens === 700,
+		`R3 one session recorded under both spellings is counted once (got ${both.descendants} descendants, ${both.total.outputTokens} tokens)`);
 }
 
 // ---

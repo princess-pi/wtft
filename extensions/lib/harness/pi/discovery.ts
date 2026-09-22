@@ -235,7 +235,22 @@ export const discovery: HarnessDiscovery = {
 	},
 
 	resolveSessionById(sessionId: string): string | null {
-		return indexSessionsById().get(sessionId.replace(/\.jsonl$/i, "")) ?? null;
+		const root = sessionsDir();
+		if (!fs.existsSync(root)) return null;
+		const wanted = sessionId.replace(/\.jsonl$/i, "");
+
+		const files: string[] = [];
+		collect(root, files);
+
+		let best: { path: string; mtimeMs: number } | null = null;
+		for (const file of files) {
+			if (sessionIdOf(file) !== wanted) continue;
+			try {
+				const mtimeMs = fs.statSync(file).mtimeMs;
+				if (!best || mtimeMs > best.mtimeMs) best = { path: file, mtimeMs };
+			} catch { /* raced with a move — skip */ }
+		}
+		return best ? best.path : null;
 	},
 
 	indexSessionsById,

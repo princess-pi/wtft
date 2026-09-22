@@ -90,6 +90,7 @@ export interface HarnessDiscovery {
 	 * Every session id this harness holds → its current transcript path, from
 	 * one walk: the answer `resolveSessionById` gives for each id. Optional; a
 	 * caller resolving many ids uses it to walk the tree once, not once per id.
+	 * Keep `resolveSessionById` cheap for one id: a running daemon calls it.
 	 */
 	indexSessionsById?(): Map<string, string>;
 	/**

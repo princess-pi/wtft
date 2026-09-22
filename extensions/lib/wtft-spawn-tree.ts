@@ -159,7 +159,13 @@ function foldsInTotal(parsed: Interaction[]): Map<string, TokenTotals> {
  * session file and a recorded path would rot silently, while the id does not.
  */
 export function resolveSessionFile(sessionId: string): string | null {
-	return makeSessionResolver()(sessionId);
+	for (const discovery of getDiscoveries()) {
+		try {
+			const found = discovery.resolveSessionById(sessionId);
+			if (found) return found;
+		} catch { /* a harness that cannot look is not an answer — ask the next */ }
+	}
+	return null;
 }
 
 /**
@@ -183,7 +189,11 @@ export function makeSessionResolver(): (sessionId: string) => string | null {
 				if (discovery.indexSessionsById) {
 					// null: this harness's index failed once, so it cannot answer this walk.
 					if (indexes[k] === null) continue;
-					if (indexes[k] === undefined) indexes[k] = discovery.indexSessionsById();
+					if (indexes[k] === undefined) {
+						const built = discovery.indexSessionsById();
+						indexes[k] = built instanceof Map ? built : null;
+						if (indexes[k] === null) continue;
+					}
 					found = indexes[k]?.get(sessionId) ?? null;
 				} else {
 					found = discovery.resolveSessionById(sessionId);

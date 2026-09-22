@@ -70,6 +70,9 @@ let sessionExisted = false;
 
 const pendingClaudeCommands: { interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>; prevCtx: number }[] = [];
 const discoveredClaudeFiles = new Set<string>();
+/** Transcripts whose cost another synced transcript already folded in. Syncing
+ *  one of these too would write its turns a second time, under its own source. */
+const foldedIntoAnother = new Set<string>();
 // Starts true: an inherited tag's swept marker is untrusted until this daemon re-stamps after its own sweep.
 let tagGrewSinceMarker = true;
 // Set when a sweep could not read what it meant to; withholds the swept stamp.
@@ -399,7 +402,22 @@ function syncSubagentTranscript(file: string): boolean {
   }
   fileState.foldStamps = new Map();
   for (const si of deduped) {
-    for (const fold of si.claudeSubAgentFolds ?? []) fileState.foldStamps.set(fold.file, fold.stamp);
+    for (const fold of si.claudeSubAgentFolds ?? []) {
+      fileState.foldStamps.set(fold.file, fold.stamp);
+      const folded = canonicalTranscriptPath(fold.file);
+      if (folded === canonicalTranscriptPath(file) || foldedIntoAnother.has(folded)) continue;
+      foldedIntoAnother.add(folded);
+      // Already synced under its own source before this parse revealed who folds
+      // it: open a generation for that source, which retires every line it wrote.
+      const prior = discoveredSubagentFiles.get(fold.file);
+      if (prior) {
+        appendTagFile(tagPath, generationRecordLine(
+          transcriptSourceId(fold.file, path.dirname(sessionPath)), path.basename(fold.file, ".jsonl")));
+        discoveredSubagentFiles.delete(fold.file);
+        wroteAny = true;
+        tagGrewSinceMarker = true;
+      }
+    }
   }
   fileState.spawnWindowClosesAt = claudeSpawnWindowClosesAt(deduped, resolveLastCwd(file));
   fileState.size = size;
@@ -528,10 +546,12 @@ function scanForSubAgents() {
     }
   }
   for (const file of taskAgentFiles) {
+    if (foldedIntoAnother.has(canonicalTranscriptPath(file))) continue;
     wroteAny = syncSubagentTranscript(file) || wroteAny;
   }
 
   for (const file of discoveredClaudeFiles) {
+    if (foldedIntoAnother.has(canonicalTranscriptPath(file))) continue;
     wroteAny = syncSubagentTranscript(file) || wroteAny;
   }
 

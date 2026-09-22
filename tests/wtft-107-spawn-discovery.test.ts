@@ -57,6 +57,8 @@ check(u(["herdr agent start x --kind claude --pane wE:pCW -- --model sonnet"], "
 check(u(["timeout 180 claude -p 'go'"], "/own") === '["/own"]',
 	`U11 a prefixed direct run still inherits the shell's cwd (got ${u(["timeout 180 claude -p 'go'"], "/own")})`);
 
+check(u(["cd /repo; cd; claude -p 'go'"], "/own") === "[]",
+	`U14 a bare cd after a resolved one clears it — the shell left /repo (got ${u(["cd /repo; cd; claude -p 'go'"], "/own")})`);
 check(u(["which claude && cd /repo && claude -p 'x'"], "/own") === '["/repo"]',
 	`U13 a segment that only NAMES claude does not end the cd scan (got ${u(["which claude && cd /repo && claude -p 'x'"], "/own")})`);
 check(u(["cd; claude -p 'go'"], "/own") === "[]",
@@ -299,6 +301,40 @@ console.log("\nPART D — the daemon retries a bare spawn instead of dropping it
 
 	check(total === 160,
 		`D4 a discovered child does not fold the session that spawned it back in: 100 plus 60 (got ${total})`);
+}
+
+{
+	// Root spawns bare in D; child C (in D) spawns bare too and folds grandchild
+	// G (also in D). The root's own discovery returns BOTH C and G, so the daemon
+	// would sync G on its own AND through C's fold of it.
+	const cwd = path.join(dir, "d-grandchild-project");
+	const projectDir = path.join(projects, cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+	fs.mkdirSync(projectDir, { recursive: true });
+	const rootId = "3333cccc-3333-4333-8333-cccccccccccc";
+	const rootPath = path.join(projectDir, `${rootId}.jsonl`);
+	const now = Date.now();
+	fs.writeFileSync(rootPath,
+		sessionLine(rootId, now - 6_000, cwd)
+		+ turnLine("d-gc-root", now - 5_000, 100, ["claude -p 'go'"]));
+	fs.writeFileSync(path.join(projectDir, "4444dddd-4444-4444-8444-dddddddddddd.jsonl"),
+		sessionLine("4444dddd-4444-4444-8444-dddddddddddd", now - 4_000, cwd)
+		+ turnLine("d-gc-child", now - 4_000, 50, ["claude -p 'deeper'"]));
+	fs.writeFileSync(path.join(projectDir, "5555eeee-5555-4555-8555-eeeeeeeeeeee.jsonl"),
+		sessionLine("5555eeee-5555-4555-8555-eeeeeeeeeeee", now - 3_000, cwd)
+		+ turnLine("d-gc-grand", now - 3_000, 20));
+
+	const daemon = spawn(process.execPath, [DAEMON_BIN, "--session", rootPath], { detached: true, stdio: "ignore", env: { ...process.env } });
+	daemon.unref();
+	const tagPath = path.join(projectDir, "wtft-tags", `${rootId}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const outputInTag = () => readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0);
+
+	for (let i = 0; i < 60 && outputInTag() < 170; i++) await sleep(250);
+	await sleep(4_000);
+	const total = outputInTag();
+	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
+
+	check(total === 170,
+		`D5 a grandchild another transcript already folded is not also synced on its own: 100 + 50 + 20 (got ${total})`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

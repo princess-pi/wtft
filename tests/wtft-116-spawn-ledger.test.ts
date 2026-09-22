@@ -564,8 +564,9 @@ const CLI_BIN = path.join(REPO_ROOT, "bin", "wtft.mjs");
 const HERDR_LINE = 'herdr agent start ppt-824-serve-home-from-env --kind claude --pane wE:pCW -- --model sonnet';
 
 {
-	// The control from the issue's Repro: the launcher command does not spawn a
-	// `claude` the parser can see, so no directory is searched for it at all.
+	// The control from the issue's Repro. `commandSpawnsAgent` does fire on this
+	// line — it matches the `--kind claude` flag — but the shell runs the
+	// launcher, so no directory is searched for it and no edge is re-derived.
 	check(claudeSpawnCwds([HERDR_LINE], "/own").length === 0,
 		"D1  the launcher command still yields nothing to search — nothing here re-derives an edge");
 	check(claudeSpawnCwds(['cd /repo && claude -p "review this"'], null).join() === "/repo",

@@ -112,7 +112,12 @@ is gone, and it is one of the reasons #128 (P6) will report as `unrecorded`.
   rather than on a single non-null cwd, so P4's discovery window opens for a no-`cd` spawn too.
 
 `bin/wtft-daemon.ts`: the `pendingClaudeCommands` drain calls the per-turn discovery with
-`resolveLastCwd(sessionPath)`. Its `if (!cwd) continue` — which dropped the item **without
+`resolveLastCwd(sessionPath)`. It also has to undo one consequence of per-command discovery: one
+turn's window now returns both a child and the grandchild that child folds, and the daemon syncs
+each discovered transcript in its own `parseSessionFile` call, so the per-call fold dedup cannot
+see across them. A transcript another synced transcript folds is therefore skipped, and one that
+was already synced before that fold was seen has its source retired with a generation record
+(#114) — P4's mechanism, used here for what it was built for. Its `if (!cwd) continue` — which dropped the item **without
 re-queueing it**, so the turn was never retried — becomes a `searched === 0` check that keeps the
 item pending while its window is open. The arm beside it is unchanged and is NOT window-bounded:
 a turn that searched and found nothing stays pending with no time bound, which is a property #128

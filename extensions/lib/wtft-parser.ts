@@ -1153,7 +1153,7 @@ function cdBeforeSpawn(cmd: string): { cwd: string | null; sawCd: boolean } {
 		if (!m) {
 			// `cd` with no argument goes to $HOME — a move we cannot name, which is
 			// not the same as no move at all.
-			if (/^cd\s*$/.test(head)) { sawCd = true; prevWasKeptCd = false; continue; }
+			if (/^cd\s*$/.test(head)) { sawCd = true; found = null; prevWasKeptCd = false; continue; }
 			prevWasKeptCd = false;
 			continue;
 		}

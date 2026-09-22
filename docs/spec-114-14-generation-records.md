@@ -29,19 +29,21 @@ spawning turn can still gain a subagent session.**
 
 - **Source field `s`** on every interaction line the daemon writes from a child transcript, and
   inside every fold record: `{"_fold":{"parent","child","s"}}`. `s` is the first 8 hex digits of
-  the SHA-1 of the child transcript's absolute path. Lines from the tag's own session carry no
-  `s`.
+  the SHA-1 of the child transcript's path: relative to the session directory when it lies under
+  it, absolute when it does not. Lines from the tag's own session carry no `s`.
   - **Why a path hash, not the session id D1 named:** two copies of one session in two project
     dirs are two transcripts. Keyed on the session id, one copy's generation would drop the other
-    copy's lines. The path is taken relative to the session directory, so a Task child keeps its
-    source when the session moves (`followMovedSession`), and the hash is shorter than a session
-    id.
+    copy's lines. A child under the session directory is keyed relative to it and one outside is
+    keyed absolutely, so `followMovedSession` changes neither: a Task child moves with the session
+    and keeps its relative path, a `claude -p` child does not move at all. The hash is also
+    shorter than a session id.
 - **Generation record, a line kind of its own:** `{"_gen":{"s":"<hash>","session":"<id>"}}`. It opens
   a new generation for that source. `session` is the transcript's filename without `.jsonl`, for
   a human reading the file.
 - **Reader rule:** a line carrying `s` counts only if no `_gen` record for the same `s` follows
   it in the file. This covers interaction lines and fold records alike. A line with no `s` always
-  counts.
+  counts. Every tag reader applies it, including the session picker's summary, which keeps its own
+  collapse rather than importing the daemon library.
 - **A generation record is data, not a marker**, like a fold record: a tag whose last data line
   is one reads unswept.
 - **`WTFT_TAGGER_VERSION` 2.9.0 → 2.10.0.** A 2.9.0 tag reads `stale-version`; the daemon

@@ -68,8 +68,8 @@ export interface FoldShare {
 export interface SubAgentFold {
 	id: string;
 	share: FoldShare;
-	/** The transcript parsed, and its `size:mtimeMs` taken before the read —
-	 *  a later stat that differs means this share is out of date. */
+	/** The transcript parsed, and its stat taken before the read — a later stat
+	 *  that differs means this share is out of date. */
 	file: string;
 	stamp: string;
 }

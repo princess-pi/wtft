@@ -8,7 +8,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
 import { deduplicateInteractions, parseSessionFile } from "../extensions/lib/wtft-parser.ts";
-import { readTagFileWithVerdict, WTFT_TAGGER_VERSION } from "../extensions/lib/wtft-daemon-lib.ts";
+import { readTagFileWithVerdict, transcriptSourceId, WTFT_TAGGER_VERSION } from "../extensions/lib/wtft-daemon-lib.ts";
+import { getSessionSummary } from "../extensions/lib/session-selector.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("114-generation-records");
@@ -284,6 +285,45 @@ const spawnCostReparsed = (child: string, id: string) =>
 	await stopDaemon(daemon);
 	check(late.folded.has(KID2) && outOf(late.interactions) === 121,
 		`N4 #14 a second child in the same window is read too: 1 + 50 + 70 (got ${outOf(late.interactions)}, folded ${JSON.stringify([...late.folded])})`);
+}
+
+// ---
+// PART S — every tag reader honours a generation, and a source survives a session move
+// ---
+console.log("\nPART S — the session picker's summary, and the source key");
+
+{
+	const sessionDir = path.join(dir, "s-picker");
+	fs.mkdirSync(path.join(sessionDir, "wtft-tags"), { recursive: true });
+	const sessionPath = path.join(sessionDir, `${uuid(31)}.jsonl`);
+	fs.writeFileSync(sessionPath, turnLine("s-own", T0, 1));
+	const tagPath = path.join(sessionDir, "wtft-tags", `${path.basename(sessionPath)}.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const i = (id: string, c: number, s?: string) =>
+		line({ t: T0, c, cat: "code", f: [], cmd: [], id, m: "claude-sonnet-4-6", out: 1, ...(s ? { s } : {}) });
+	fs.writeFileSync(tagPath,
+		i("s-own-1", 0.5)
+		+ line({ _gen: { s: "aaaa0001", session: "kid" } })
+		+ i("s-old", 4, "aaaa0001")
+		+ line({ _gen: { s: "aaaa0001", session: "kid" } })
+		+ i("s-new", 0.25, "aaaa0001"));
+	const summary = getSessionSummary(sessionPath);
+	check(Math.abs(summary.cost - 0.75) < 1e-9 && summary.turns === 2,
+		`S1 the session picker's summary counts the latest generation only: $0.50 + $0.25 (got $${summary.cost}, ${summary.turns} turns)`);
+}
+
+{
+	// A session that moves: a child under it keeps its source, a claude -p child elsewhere keeps its own.
+	const before = path.join(dir, "s-move", "projects-a", "sess");
+	const after = path.join(dir, "s-move", "projects-b", "deeper", "sess");
+	const taskChildBefore = path.join(before, "kid", "subagents", "agent-x.jsonl");
+	const taskChildAfter = path.join(after, "kid", "subagents", "agent-x.jsonl");
+	const elsewhere = path.join(dir, "s-move", "other", "claude-kid.jsonl");
+	check(transcriptSourceId(taskChildBefore, before) === transcriptSourceId(taskChildAfter, after),
+		"S2 a child under the session directory keeps its source when the session moves");
+	check(transcriptSourceId(elsewhere, before) === transcriptSourceId(elsewhere, after),
+		"S3 a claude -p child outside it keeps its source too");
+	check(transcriptSourceId(taskChildBefore, before) !== transcriptSourceId(elsewhere, before),
+		"S4 two transcripts are two sources");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

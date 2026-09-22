@@ -265,11 +265,16 @@ export function foldRecordLine(parent: string, child: string, source: string): s
 	return JSON.stringify({ _fold: { parent, child, s: source } }) + "\n";
 }
 
-/** The `s` a child transcript's tag lines carry. Keyed on its path relative to
- *  the session directory, not on the session id: two copies of one session are
- *  two sources, and a session that moves keeps the source of a child under it. */
+/** The `s` a child transcript's tag lines carry. Keyed on the path, not on the
+ *  session id: two copies of one session are two sources. A child under the
+ *  session directory is keyed on its path relative to it, so a session that
+ *  moves keeps it; one outside is keyed on its absolute path, which the move
+ *  does not change either. */
 export function transcriptSourceId(file: string, sessionDir: string): string {
-	return createHash("sha1").update(path.relative(path.resolve(sessionDir), path.resolve(file))).digest("hex").slice(0, 8);
+	const target = path.resolve(file);
+	const rel = path.relative(path.resolve(sessionDir), target);
+	const key = rel.startsWith("..") || path.isAbsolute(rel) ? target : rel;
+	return createHash("sha1").update(key).digest("hex").slice(0, 8);
 }
 
 /** Opens a new generation for `source`: every earlier line carrying it stops counting. */
@@ -409,8 +414,9 @@ function appendedGeneration(tagPath: string, offset: number, size: number): bool
 	const fd = fs.openSync(tagPath, "r");
 	try {
 		const buf = Buffer.alloc(size - offset);
-		fs.readSync(fd, buf, 0, buf.length, offset);
-		return buf.includes('"_gen"');
+		const read = fs.readSync(fd, buf, 0, buf.length, offset);
+		// A short read leaves the tail zero-filled: reseed rather than miss a record.
+		return read < buf.length || buf.subarray(0, read).includes('"_gen"');
 	} finally {
 		fs.closeSync(fd);
 	}

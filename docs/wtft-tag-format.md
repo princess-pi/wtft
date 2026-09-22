@@ -122,7 +122,7 @@ The daemon writes one interaction line per classified turn. Fields:
 | `miss` | `1` | optional | Cache miss flag (whole prefix re-primed) — set to `1` when present |
 | `ir` | `1` | optional | Interrupted turn — set to `1` when present |
 | `sp` | `1` | optional | DeepSeek surge-pricing flag — set to `1` when present |
-| `s` | string | optional | Source: set on a line the daemon wrote from a child transcript, absent on the tag's own session's lines. The first 8 hex digits of the SHA-1 of the child transcript's absolute path. A later `_gen` record for the same `s` supersedes the line (§2e) |
+| `s` | string | optional | Source: set on a line the daemon wrote from a child transcript, absent on the tag's own session's lines. The first 8 hex digits of the SHA-1 of the child transcript's path — relative to the session directory when it lies under it, absolute when it does not. A later `_gen` record for the same `s` supersedes the line (§2e) |
 
 **Optional means absent, not null.** A field absent from the JSON object means its numeric
 value is zero or its boolean value is false. Consumers must treat a missing field identically

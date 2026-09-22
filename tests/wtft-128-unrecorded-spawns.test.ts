@@ -18,6 +18,8 @@ import { listUnrecordedSpawns } from "../extensions/lib/wtft-unrecorded.ts";
 import { readClassifiedTagFile, WTFT_TAGGER_VERSION } from "../bin/wtft.mjs";
 import { renderSpawnTree, emptyTotals } from "../extensions/lib/wtft-renderer.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+import { skip } from "./lib/skips.ts";
+const CLI_BIN_L = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
 
 isolateTmpdir("128-unrecorded-spawns");
 
@@ -116,8 +118,7 @@ console.log("\nPART C — listSpawnCandidates (Claude Code)");
 	for (const f of [sdk, human, silent]) fs.utimesSync(f, new Date(T0 + 120_000), new Date(T0 + 120_000));
 	for (const f of [sdk, human, silent]) fs.utimesSync(path.dirname(f), new Date(T0 + 120_000), new Date(T0 + 120_000));
 
-	const scan = claudeDiscovery.listSpawnCandidates!(since);
-	const byId = new Map(scan.candidates.map(c => [c.sessionId, c]));
+	const byId = new Map(claudeDiscovery.listSpawnCandidates!(since).map(c => [c.sessionId, c]));
 	const a = byId.get("c0000001-0000-4000-8000-000000000001");
 	check(a?.launchedBy === "program" && a.cwd === "/tmp/pr-review-c1" && a.startedAt === T0 + 60_000 && a.path === sdk,
 		`C1 entrypoint sdk-cli reads as program, with its recorded cwd, first timestamp and path (got ${JSON.stringify(a)})`);
@@ -303,6 +304,59 @@ console.log("\nPART N — a moved session's newest copy wins");
 	const damaged = renderSpawnTree(emptyTotals(), { ...computeSpawnTree(ROOT, { ledgerPath, unrecorded: { turns: rootTurns, rootCwd: repo } }), ledgerError: "EACCES" });
 	check(/UNRECORDED \d+ session\(s\) not in the tree — the spawn ledger could not be read/.test(damaged) && !/no spawn record names/.test(damaged),
 		`R5 with the ledger unreadable the block does not claim no record names them:\n${damaged}`);
+}
+
+// ---
+// PART L — a read error anywhere in the scan is loud; only a missing path is quiet
+// ---
+console.log("\nPART L — loud read errors, quiet absences");
+{
+	const root = path.join(dir, "l-projects");
+	const saved = process.env.WTFT_CLAUDE_PROJECTS_DIR;
+	process.env.WTFT_CLAUDE_PROJECTS_DIR = root;
+	const ok = writeChild({ id: "a6000001-0000-4000-8000-0000000000a1", slug: "-tmp-l-ok", cwd: "/tmp/l-ok", startedAt: at(4), entrypoint: "sdk-cli", root });
+	// A symlinked transcript is a transcript; a dangling one is a file that went away.
+	const linked = path.join(root, "-tmp-l-link");
+	fs.mkdirSync(linked);
+	fs.symlinkSync(ok, path.join(linked, "a6000002-0000-4000-8000-0000000000a2.jsonl"));
+	fs.symlinkSync(path.join(root, "missing.jsonl"), path.join(linked, "a6000003-0000-4000-8000-0000000000a3.jsonl"));
+	fs.symlinkSync(path.join(root, "missing-dir"), path.join(root, "-tmp-l-gone"));
+
+	const ids = claudeDiscovery.listSpawnCandidates!(0).map(c => c.sessionId);
+	check(ids.includes("a6000002-0000-4000-8000-0000000000a2"), `L1 a symlinked transcript is listed (got ${ids.join(", ")})`);
+	check(ids.length === 2, `L2 a dangling transcript and a dangling project dir are skipped quietly — gone, not unreadable (got ${ids.length})`);
+
+	const canBypass = (() => { try { const probe = path.join(dir, "l-probe"); fs.writeFileSync(probe, "x"); fs.chmodSync(probe, 0); fs.readFileSync(probe); return true; } catch { return false; } })();
+	if (canBypass) {
+		skip("L3-L5 need a process that chmod 000 can stop (running as root?)");
+	} else {
+		const lockedDir = path.join(root, "-tmp-l-locked");
+		fs.mkdirSync(lockedDir);
+		fs.chmodSync(lockedDir, 0);
+		let err: unknown = null;
+		try { claudeDiscovery.listSpawnCandidates!(0); } catch (e) { err = e; }
+		check(err instanceof Error && (err as NodeJS.ErrnoException).code === "EACCES" && String((err as Error).message).includes(lockedDir),
+			`L3 an unreadable project dir throws, naming it (got ${String(err)})`);
+		fs.chmodSync(lockedDir, 0o755);
+		fs.chmodSync(ok, 0);
+		err = null;
+		try { claudeDiscovery.listSpawnCandidates!(0); } catch (e) { err = e; }
+		check(err instanceof Error && (err as NodeJS.ErrnoException).code === "EACCES" && String((err as Error).message).includes(ok),
+			`L4 an unreadable transcript throws, naming it (got ${String(err)})`);
+
+		// Through the CLI: exit 1 and no document, never a quiet [].
+		const session = path.join(dir, "l-session.jsonl");
+		fs.writeFileSync(session, JSON.stringify({
+			type: "assistant", timestamp: new Date(at(1)).toISOString(), cwd: "/nonexistent/l", entrypoint: "cli",
+			message: { role: "assistant", id: "l-1", model: "claude-opus-5", content: [{ type: "tool_use", id: "t", name: "Bash", input: { command: "pr-open" } }],
+				usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } },
+		}) + "\n");
+		const r = spawnSync("node", [CLI_BIN_L, "-s", session, "--json"], { encoding: "utf8", env: { ...process.env, WTFT_CLAUDE_PROJECTS_DIR: root, XDG_STATE_HOME: path.join(dir, "l-state") } });
+		check(r.status === 1 && r.stdout === "" && r.stderr.includes("EACCES") && r.stderr.includes(root),
+			`L5 --json exits 1 with the unreadable path and prints no document (got exit ${r.status}, stdout ${r.stdout.length} bytes, stderr ${r.stderr.slice(0, 300)})`);
+		fs.chmodSync(ok, 0o644);
+	}
+	process.env.WTFT_CLAUDE_PROJECTS_DIR = saved;
 }
 
 // ---

@@ -90,8 +90,10 @@ export interface HarnessDiscovery {
 	 * Every session transcript written at or after `sinceMs` (one created
 	 * earlier may be omitted), with the facts the unrecorded-spawn listing
 	 * needs. Optional: a harness that omits it never has its sessions listed.
+	 * Throw on a read error, other than a path that is gone: an empty result
+	 * must only mean "looked, found none".
 	 */
-	listSpawnCandidates?(sinceMs: number): SpawnCandidateScan;
+	listSpawnCandidates?(sinceMs: number): SpawnCandidate[];
 }
 
 /** One transcript `listSpawnCandidates` found. Facts only — the tier rules
@@ -105,12 +107,6 @@ export interface SpawnCandidate {
 	startedAt: number;
 	/** null: the harness does not say. */
 	launchedBy: "program" | "human" | null;
-}
-
-export interface SpawnCandidateScan {
-	candidates: SpawnCandidate[];
-	/** Transcripts or project directories that could not be read. */
-	unreadable: { path: string; error: unknown }[];
 }
 
 // ---

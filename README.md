@@ -179,7 +179,9 @@ retired in `@4`.
   object.
 - **1** — error: no session found or selected, an invalid path, a daemon that
   could not be spawned or that died before producing data, a refused flag
-  (`--pager`), or an unhandled exception. The reason is on stderr; under
+  (`--pager`), a read error other than a missing path in the Claude projects
+  tree while `--json` or `--tokens` lists unrecorded spawns (so `unrecorded: []`
+  never hides one), or an unhandled exception. The reason is on stderr; under
   `--json`, stdout carries nothing.
 - **9** — provisional ([#443](https://github.com/princess-pi/wtft/issues/443)):
   the report was produced in full, but a number in it may still change.

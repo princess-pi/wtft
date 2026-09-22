@@ -113,9 +113,7 @@ export function listUnrecordedSpawns(input: ListUnrecordedInput): UnrecordedSpaw
 	const newest = new Map<string, SpawnCandidate>();
 	for (const discovery of getDiscoveries()) {
 		if (!discovery.listSpawnCandidates) continue;
-		const scan = discovery.listSpawnCandidates(windows[0][0]);
-		for (const { path: file, error } of scan.unreadable) warnUnreadable(file, error);
-		for (const candidate of scan.candidates) {
+		for (const candidate of discovery.listSpawnCandidates(windows[0][0])) {
 			if (candidate.sessionId === input.rootSessionId || input.exclude.has(candidate.sessionId)) continue;
 			const prior = newest.get(candidate.sessionId);
 			if (prior && mtimeOf(prior.path) >= mtimeOf(candidate.path)) continue;

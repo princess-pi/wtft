@@ -93,13 +93,7 @@ memory. So the exclusion is exact for recorded edges and costs no extra read.
 `HarnessDiscovery` gains one **optional** method:
 
 ```ts
-listSpawnCandidates?(sinceMs: number): SpawnCandidateScan;
-
-interface SpawnCandidateScan {
-	candidates: SpawnCandidate[];
-	/** Transcripts or directories that could not be read — reported, never guessed. */
-	unreadable: { path: string; error: unknown }[];
-}
+listSpawnCandidates?(sinceMs: number): SpawnCandidate[];
 
 interface SpawnCandidate {
 	path: string;
@@ -119,15 +113,17 @@ semantics and stay on the shared side.
 **Claude Code** implements it. It lists every project directory under the projects root, keeps
 the ones whose mtime is at or after `sinceMs` (creating a transcript updates its directory's mtime,
 so a directory last written before `sinceMs` holds no transcript created after it; one created
-earlier and still being written is skipped, and it began too early to be in any launch span), keeps each top-level `*.jsonl` whose own
-mtime is at or after `sinceMs`, and reads the head of each for `timestamp`, `cwd` and `entrypoint`.
-`entrypoint: "sdk-cli"` is `program`, `"cli"` is `human`, anything else is `null`. A transcript
-or project directory that cannot be read comes back in `unreadable`, and the listing warns about
-each on stderr, once per path per process. The head read is the first 20 lines within the first
+earlier and still being written is skipped only when its directory is that old), keeps each top-level `*.jsonl` whose own
+mtime is at or after `sinceMs` (a symlinked directory or transcript counts, followed to its target), and reads the head of each for `timestamp`, `cwd` and `entrypoint`.
+`entrypoint: "sdk-cli"` is `program`, `"cli"` is `human`, anything else is `null`. **A read error is loud;
+only a path that is gone is quiet** (#212). ENOENT — no projects root on a host without Claude
+Code, or a directory or transcript deleted mid-scan, or a dangling symlink — is skipped: nothing
+is there to list. Any other error, at the root, a project directory or a transcript, is thrown,
+and the report fails with exit 1 and the OS error naming the path. So `[]` never hides an
+access error. Measured 2026-09-22, a full scan of this host's tree (2,290 directories, 6,753
+transcripts) met no unreadable entry, so in normal use the rule costs nothing. The head read is the first 20 lines within the first
 64 KiB; a transcript with no timestamp or no `cwd` there cannot be classified and is not a
-candidate. The projects root is different: an absent one is an empty scan (no Claude Code
-sessions), and any other failure to read it is thrown, so the report fails with that error
-rather than printing a list that did not look.
+candidate.
 
 **Pi** does not implement it: Pi's session header carries no field that separates a programmatic
 start from a human one. A Pi child is therefore never listed. Filed as
@@ -170,8 +166,9 @@ interface UnrecordedSpawn {
 
 - **`--json`:** `spawned.unrecorded[]`. `wtft/spawn-tree@2` → `@3` and `wtft/session@5` → `@6`,
   because a nested key was added. `[]` means looked and found none — or, for a session that ran
-  no command (the pending and no-data arms included), that there was no launch span to look in. A path the scan could not read
-  is reported on stderr only, so it too can sit behind a `[]`.
+  no command (the pending and no-data arms included), that there was no launch span to look in. A read error never sits behind
+  a `[]`: it fails the run. A harness that is disabled, or that does not implement
+  `listSpawnCandidates`, is not looked in at all.
 - **`--tokens`, CLI only:** an `UNRECORDED` block, last, after the `UNCOUNTED` line and the
   `SPAWNED` block, shown whenever the list is non-empty — whether or not a `SPAWNED` block prints.
   The widget renders the same table without it.
@@ -346,3 +343,19 @@ found in text this branch did not change is filed as
 | Medium: a newer ineligible copy let an older eligible copy through | Verified — reproduced as N2 | **Code fixed**: newest copy chosen before classifying; ✅ N2 |
 | Low: `spawn-record` help said a failed append degrades to exactly the old behaviour | Verified | Corrected |
 | Low: "no ledger edge names" is unqualified when the ledger could not be read | Verified | Qualified in spec-26 and the manifest |
+
+### #212 — loud read errors (Duppy, 2026-09-22)
+
+Macroscope's High on PR #211 asked for a read failure to be caught and skipped. Duppy's decision
+went the other way, and further: `[]` must only ever mean "looked and found none", so every read
+error in the scan fails the run, not only the root's; only ENOENT is quiet. Pinned by L1–L5b in
+`tests/wtft-128-unrecorded-spawns.test.ts`, including `--json` exiting 1 with no document for an
+unreadable project directory and for an unreadable transcript.
+
+| Artifact | Claim | Contradicted by | Covered by a test? | Action |
+|---|---|---|---|---|
+| spec-128, spec-26, README, manifest | a read error anywhere is loud | the newest-copy stat swallowed every error | reconciled-against-untested (reachable only by a race) | **Code fixed**: only ENOENT is quiet there too |
+| spec-128 | a still-written older transcript is skipped | only when its directory is older too | reconciled-against-untested (C4 sets both mtimes old) | Corrected |
+| spec-128 | `[]` meanings | a disabled harness, or one without the method, is not looked in | n/a | Stated |
+| README, manifest | "the Claude projects tree" | any harness implementing the method can throw | n/a | Generalised |
+| (pre-existing) | the auditor's other findings | — | — | Filed on #210 as AJ–AN |

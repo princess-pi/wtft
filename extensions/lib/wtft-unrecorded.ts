@@ -61,7 +61,13 @@ function isInside(dir: string, cwd: string): boolean {
 }
 
 function mtimeOf(file: string): number {
-	try { return fs.statSync(file).mtimeMs; } catch { return -Infinity; }
+	try {
+		return fs.statSync(file).mtimeMs;
+	} catch (err) {
+		// Gone since the scan: it cannot be the newest. Anything else is loud.
+		if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return -Infinity;
+		throw err;
+	}
 }
 
 function tempRoots(): string[] {
@@ -74,7 +80,7 @@ function warnUnreadable(file: string, err: unknown): void {
 	if (warnedUnreadable.has(file)) return;
 	warnedUnreadable.add(file);
 	process.stderr.write(
-		`[wtft] WARNING: a path could not be read while listing unrecorded spawns, so a session under it may be absent from spawned.unrecorded (${file}): ${err instanceof Error ? err.message : String(err)}\n`,
+		`[wtft] WARNING: a path could not be read while listing unrecorded spawns, so its row in spawned.unrecorded carries no cost (${file}): ${err instanceof Error ? err.message : String(err)}\n`,
 	);
 }
 
@@ -113,9 +119,7 @@ export function listUnrecordedSpawns(input: ListUnrecordedInput): UnrecordedSpaw
 	const newest = new Map<string, SpawnCandidate>();
 	for (const discovery of getDiscoveries()) {
 		if (!discovery.listSpawnCandidates) continue;
-		const scan = discovery.listSpawnCandidates(windows[0][0]);
-		for (const { path: file, error } of scan.unreadable) warnUnreadable(file, error);
-		for (const candidate of scan.candidates) {
+		for (const candidate of discovery.listSpawnCandidates(windows[0][0])) {
 			if (candidate.sessionId === input.rootSessionId || input.exclude.has(candidate.sessionId)) continue;
 			const prior = newest.get(candidate.sessionId);
 			if (prior && mtimeOf(prior.path) >= mtimeOf(candidate.path)) continue;

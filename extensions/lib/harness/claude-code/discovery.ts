@@ -20,7 +20,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 
-import type { DiscoverScopeOptions, HarnessDiscovery, SessionCandidate, SpawnCandidate, SpawnCandidateScan } from "../types.ts";
+import type { DiscoverScopeOptions, HarnessDiscovery, SessionCandidate, SpawnCandidate } from "../types.ts";
 import {
 	resolveLastCwd,
 	countDirRead,
@@ -265,45 +265,58 @@ function readCandidateHead(file: string): Omit<SpawnCandidate, "path" | "session
 	return { cwd, startedAt, launchedBy };
 }
 
+/** A path that went away — a transcript or project dir deleted mid-scan, or
+ *  no projects root at all. Nothing is there to list. */
+function isGone(err: unknown): boolean {
+	return (err as NodeJS.ErrnoException)?.code === "ENOENT";
+}
+
 /**
  * Top-level transcripts only, pruned by mtime twice: a project dir's mtime
  * moves when a transcript is created in it, so an older directory cannot
- * hold a transcript that began after `sinceMs`.
+ * hold a transcript that began after `sinceMs`. Symlinks count: `statSync`
+ * follows them.
+ *
+ * Any read error other than a path that went away is THROWN, so the report
+ * fails loudly: an empty listing must only ever mean "looked, found none".
  */
-function listSpawnCandidates(sinceMs: number): SpawnCandidateScan {
-	const scan: SpawnCandidateScan = { candidates: [], unreadable: [] };
+function listSpawnCandidates(sinceMs: number): SpawnCandidate[] {
+	const candidates: SpawnCandidate[] = [];
 	const root = projectsDir();
 	let slugs: fs.Dirent[];
 	try {
 		slugs = fs.readdirSync(root, { withFileTypes: true });
 	} catch (err) {
-		if ((err as NodeJS.ErrnoException).code === "ENOENT") return scan;
+		if (isGone(err)) return candidates;
 		throw err;
 	}
 	for (const slug of slugs) {
-		if (!slug.isDirectory()) continue;
+		if (!slug.isDirectory() && !slug.isSymbolicLink()) continue;
 		const dir = path.join(root, slug.name);
 		let entries: fs.Dirent[];
 		try {
-			if (fs.statSync(dir).mtimeMs < sinceMs) continue;
+			const stat = fs.statSync(dir);
+			if (!stat.isDirectory() || stat.mtimeMs < sinceMs) continue;
 			entries = fs.readdirSync(dir, { withFileTypes: true });
 		} catch (err) {
-			scan.unreadable.push({ path: dir, error: err });
-			continue;
+			if (isGone(err)) continue;
+			throw err;
 		}
 		for (const entry of entries) {
-			if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+			if ((!entry.isFile() && !entry.isSymbolicLink()) || !entry.name.endsWith(".jsonl")) continue;
 			const file = path.join(dir, entry.name);
 			try {
-				if (fs.statSync(file).mtimeMs < sinceMs) continue;
+				const stat = fs.statSync(file);
+				if (!stat.isFile() || stat.mtimeMs < sinceMs) continue;
 				const head = readCandidateHead(file);
-				if (head) scan.candidates.push({ path: file, sessionId: sessionIdOf(file), ...head });
+				if (head) candidates.push({ path: file, sessionId: sessionIdOf(file), ...head });
 			} catch (err) {
-				scan.unreadable.push({ path: file, error: err });
+				if (isGone(err)) continue;
+				throw err;
 			}
 		}
 	}
-	return scan;
+	return candidates;
 }
 
 export const discovery: HarnessDiscovery = {

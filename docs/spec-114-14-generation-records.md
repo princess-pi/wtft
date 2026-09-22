@@ -28,7 +28,7 @@ spawning turn can still gain a subagent session.**
 ### Tag format
 
 - **Source field `s`** on every interaction line the daemon writes from a child transcript, and
-  inside every fold record: `{"_fold":{"parent","child","s"}}`. `s` is the first 8 hex digits of
+  inside every fold record: `{"_fold":{"parent","child","s"}}`. `s` is the first 16 hex digits of
   the SHA-1 of the child transcript's path: relative to the session directory when it lies under
   it, absolute when it does not. Lines from the tag's own session carry no `s`.
   - **Why a path hash, not the session id D1 named:** two copies of one session in two project

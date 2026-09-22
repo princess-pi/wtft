@@ -122,7 +122,7 @@ The daemon writes one interaction line per classified turn. Fields:
 | `miss` | `1` | optional | Cache miss flag (whole prefix re-primed) — set to `1` when present |
 | `ir` | `1` | optional | Interrupted turn — set to `1` when present |
 | `sp` | `1` | optional | DeepSeek surge-pricing flag — set to `1` when present |
-| `s` | string | optional | Source: set on a line the daemon wrote from a child transcript, absent on the tag's own session's lines. The first 8 hex digits of the SHA-1 of the child transcript's path — relative to the session directory when it lies under it, absolute when it does not. A later `_gen` record for the same `s` supersedes the line (§2e) |
+| `s` | string | optional | Source: set on a line the daemon wrote from a child transcript, absent on the tag's own session's lines. The first 16 hex digits of the SHA-1 of the child transcript's path — relative to the session directory when it lies under it, absolute when it does not. A later `_gen` record for the same `s` supersedes the line (§2e) |
 
 **Optional means absent, not null.** A field absent from the JSON object means its numeric
 value is zero or its boolean value is false. Consumers must treat a missing field identically
@@ -243,7 +243,8 @@ A bump to `WTFT_TAGGER_VERSION` signals that stale tags must be re-parsed.
 1. Open the file at the expected version path (§1).
 2. Drop every line that carries a source (`s` on an interaction line, `_fold.s` on a fold
    record) and is followed by a `_gen` record for the same source (§2e).
-3. For each remaining line:
+3. For each remaining line — a line that fails to parse, or whose fields are the wrong
+   shape, is skipped on its own and never fails the read (the per-line tolerance §1 requires):
    - Skip if it has a `_hb` top-level key (heartbeat).
    - Skip if it has a `_gen` top-level key (§2e).
    - Skip if it has a `_meta` top-level key (the daemon's offset and sweep markers).

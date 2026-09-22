@@ -7,6 +7,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("138-resolution-index");
@@ -70,7 +71,8 @@ console.log("\nPART C — 10,000 distinct child edges");
 	const ms = performance.now() - t0;
 	check(tree.edges.length === 10_000 && tree.unattributed.length === 10_000 && tree.edges.every(e => e.skip === "not-found"),
 		`C1 every edge is reported not-found (got ${tree.edges.length} edges, ${tree.unattributed.length} gaps)`);
-	check(ms < 1000, `C2 the walk completes in under a second (took ${Math.round(ms)} ms)`);
+	// A loose bound: the algorithm is pinned by PART W's walk count, not by the clock.
+	check(ms < 5000, `C2 the walk completes well inside 5 s (took ${Math.round(ms)} ms)`);
 }
 
 // ---
@@ -79,7 +81,7 @@ console.log("\nPART C — 10,000 distinct child edges");
 console.log("\nPART W — directory reads do not scale with children");
 {
 	const one = ledgerWith([uuid(1)]);
-	const many = ledgerWith(Array.from({ length: 200 }, (_, i) => uuid(i)));
+	const many = ledgerWith(Array.from({ length: 10_000 }, (_, i) => uuid(i)));
 	let before = getDirWalkCount();
 	computeSpawnTree(PARENT, { ledgerPath: one });
 	const forOne = getDirWalkCount() - before;
@@ -87,7 +89,7 @@ console.log("\nPART W — directory reads do not scale with children");
 	computeSpawnTree(PARENT, { ledgerPath: many });
 	const forMany = getDirWalkCount() - before;
 	check(forOne > 0, `W1 fixture precondition: a walk reads the tree at all (got ${forOne})`);
-	check(forMany === forOne, `W2 200 children cost the same directory reads as 1 (got ${forMany} vs ${forOne})`);
+	check(forMany === forOne, `W2 10,000 children cost the same directory reads as 1 (got ${forMany} vs ${forOne})`);
 }
 
 // ---
@@ -105,6 +107,30 @@ console.log("\nPART R — resolution still finds, prices, and prefers the newest
 	const edge = tree.edges[0];
 	check(edge?.resolved === true && edge.path === fresh && edge.total?.outputTokens === 700,
 		`R1 a child in two project dirs resolves to the newer copy and is priced from it (got ${edge?.path === fresh ? "newer" : edge?.path}, ${edge?.total?.outputTokens})`);
+	const suffixed = computeSpawnTree(PARENT, { ledgerPath: ledgerWith([`${child}.jsonl`]) }).edges[0];
+	check(suffixed?.resolved === true && suffixed.path === fresh,
+		`R2 a child recorded with a .jsonl suffix resolves as resolveSessionById would (got ${suffixed?.skip ?? suffixed?.path})`);
+}
+
+// ---
+// PART E — the Closer as the issue states it: `wtft --tokens` over 10,000 edges
+// ---
+console.log("\nPART E — the rendered report");
+{
+	const stateHome = path.join(dir, "state");
+	fs.mkdirSync(path.join(stateHome, "wtft"), { recursive: true });
+	fs.copyFileSync(ledgerWith(Array.from({ length: 10_000 }, (_, i) => uuid(i, "e138"))), path.join(stateHome, "wtft", "spawns.jsonl"));
+	const session = path.join(dir, "e-session", `${PARENT}.jsonl`);
+	transcript(session, PARENT, 50);
+	const t0 = performance.now();
+	const r = spawnSync("node", [path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs"), "-s", session, "--tokens"], {
+		encoding: "utf8", env: { ...process.env, XDG_STATE_HOME: stateHome },
+	});
+	const ms = performance.now() - t0;
+	const out = (r.stdout || "").replace(/\x1b\[[0-9;]*m/g, "");
+	check((r.status === 0 || r.status === 9) && /10000 unattributed/.test(out),
+		`E1 --tokens renders the tree and names all 10,000 gaps (exit ${r.status}): ${out.split("\n").filter(l => /SPAWNED|unattributed|TREE|PROVISIONAL/.test(l)).join(" | ")} ${(r.stderr || "").slice(0, 200)}`);
+	check(ms < 5000, `E2 the whole report, CLI start to exit, stays well inside 5 s (took ${Math.round(ms)} ms)`);
 }
 
 // ---

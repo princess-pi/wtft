@@ -171,7 +171,9 @@ export function makeSessionResolver(): (sessionId: string) => string | null {
 	const discoveries = getDiscoveries();
 	const indexes: (Map<string, string> | null | undefined)[] = discoveries.map(() => undefined);
 	const answers = new Map<string, string | null>();
-	return (sessionId: string) => {
+	return (rawId: string) => {
+		// The same normalisation every `resolveSessionById` applies.
+		const sessionId = rawId.replace(/\.jsonl$/i, "");
 		const known = answers.get(sessionId);
 		if (known !== undefined) return known;
 		let found: string | null = null;
@@ -179,14 +181,16 @@ export function makeSessionResolver(): (sessionId: string) => string | null {
 			const discovery = discoveries[k];
 			try {
 				if (discovery.indexSessionsById) {
+					// null: this harness's index failed once, so it cannot answer this walk.
+					if (indexes[k] === null) continue;
 					if (indexes[k] === undefined) indexes[k] = discovery.indexSessionsById();
-					found = indexes[k]!.get(sessionId) ?? null;
+					found = indexes[k]?.get(sessionId) ?? null;
 				} else {
 					found = discovery.resolveSessionById(sessionId);
 				}
 			} catch {
 				// A harness that cannot look is not an answer — ask the next.
-				indexes[k] = null;
+				if (discovery.indexSessionsById) indexes[k] = null;
 			}
 		}
 		answers.set(sessionId, found);

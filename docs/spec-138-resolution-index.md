@@ -10,7 +10,7 @@
 harness's `resolveSessionById`. Both built-ins answer that by walking their **whole** session tree
 and keeping the newest file named for the id. So one walk costs one full tree scan per distinct
 child. Measured on this host 2026-09-22: **66 ms per unresolved id**. A ledger at its 8 MiB
-limit holds on the order of 70,000 edges, which is over an hour of synchronous scanning on the
+limit holds roughly 40,000 edges (spec-116), which is about 44 minutes of synchronous scanning on the
 `--json`/`--tokens` path; #138's 10,000-edge Closer case alone is about 11 minutes.
 
 ## The change
@@ -22,7 +22,8 @@ indexSessionsById?(): Map<string, string>;  // session id → its newest transcr
 ```
 
 It walks the tree once, with the same rules `resolveSessionById` uses: the same files, and the
-newest by mtime when one id has two files. Both built-ins implement it and define
+newest by mtime when one id has two files. The resolver strips a trailing `.jsonl` from the id
+first, as every `resolveSessionById` does, so a child recorded as `<uuid>.jsonl` still resolves. Both built-ins implement it and define
 `resolveSessionById` as a lookup in a fresh index, so the two cannot disagree.
 
 `computeSpawnTree` builds a resolver when its walk first needs one. For each harness, in registry
@@ -46,10 +47,14 @@ money being counted, not waste.
 
 `tests/wtft-138-resolution-index.test.ts`, with sandboxed session roots and a sandboxed ledger:
 
-- **The Closer:** a ledger with 10,000 distinct child edges under one parent: `computeSpawnTree`
-  completes in under a second and reports all 10,000 as `not-found`.
+- **The Closer, as the issue states it:** a ledger with 10,000 distinct child edges under one
+  parent, and `wtft --tokens` on that parent renders the tree naming all 10,000 gaps. Measured
+  2026-09-22: the tree walk takes about 40 ms in-process, down from 3.1 s on the same fixture, and
+  the whole CLI run, start to exit, is under a second. The tests hold both to a loose 5 s so a
+  loaded host cannot make them flaky.
 - **One walk, not one per child:** the directory-walk counter (`getDirWalkCount`) moves by the
-  same amount for a 1-edge tree and a 10,000-edge tree.
+  same amount for a 1-edge tree and a 10,000-edge tree. This, not the clock, is what pins the fix.
+- **A `.jsonl` suffix:** a child recorded as `<uuid>.jsonl` resolves as `resolveSessionById` would.
 - **Same answers:** a resolvable child still resolves and is priced; with the same id in two
   project directories, the newer copy wins, as before.
 - **Seam agreement:** for every id in a fixture tree, `resolveSessionById(id)` equals
@@ -59,3 +64,15 @@ money being counted, not waste.
 
 - **A work bound.** Road not taken, above.
 - **#97** — reading subagent transcripts by offset in the daemon. P7's other half.
+
+## pr-review round 1 (DeepSeek V4.1 Flash, 2026-09-22)
+
+| Finding | Verdict | Action |
+|---|---|---|
+| The index lookup skipped the `.jsonl` normalisation `resolveSessionById` applies | Verified — reproduced as R2 | **Code fixed**; ✅ R2 |
+| A failed index was marked `null` but only `undefined` was checked | Verified: it worked only by swallowing a TypeError | **Code fixed**: `null` skips the harness |
+| The spec restated the Closer over `computeSpawnTree`, not `wtft --tokens` | Verified | ✅ E1, E2 run the CLI |
+| The walk-count test used 200 children, not the 10,000 the spec claims | Verified | Now 10,000 |
+| A 1 s wall-clock bound is flaky under load | Verified | 5 s bound; the walk count pins the fix |
+| The adding-a-harness interface line cites an issue number | Verified | Removed |
+| 70,000 vs spec-116's ~40,000 edges at the 8 MiB limit | Verified | Uses spec-116's figure |

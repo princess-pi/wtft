@@ -18,7 +18,7 @@ interface HarnessDiscovery {
   readonly label: string;  // selector column, e.g. "Codex"
   discover(targetCwd: string | null, scopeOpts?: DiscoverScopeOptions): SessionCandidate[];
   resolveSessionById(sessionId: string): string | null;
-  indexSessionsById?(): Map<string, string>;  // optional, #138
+  indexSessionsById?(): Map<string, string>;  // optional
   listSpawnCandidates?(sinceMs: number): SpawnCandidate[];  // optional, #128
 }
 ```

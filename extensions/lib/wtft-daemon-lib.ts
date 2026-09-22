@@ -273,7 +273,8 @@ export function foldRecordLine(parent: string, child: string, source: string): s
 export function transcriptSourceId(file: string, sessionDir: string): string {
 	const target = path.resolve(file);
 	const rel = path.relative(path.resolve(sessionDir), target);
-	const key = rel.startsWith("..") || path.isAbsolute(rel) ? target : rel;
+	const escapes = rel === ".." || rel.startsWith(".." + path.sep);
+	const key = escapes || path.isAbsolute(rel) ? target : rel;
 	return createHash("sha1").update(key).digest("hex").slice(0, 16);
 }
 

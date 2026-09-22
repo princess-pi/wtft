@@ -343,6 +343,11 @@ console.log("\nPART S — the session picker's summary, and the source key");
 		"S3 a claude -p child outside it keeps its source too");
 	check(transcriptSourceId(taskChildBefore, before) !== transcriptSourceId(elsewhere, before),
 		"S4 two transcripts are two sources");
+	// A directory whose own name starts with ".." is still inside the session.
+	const dottedBefore = path.join(before, "..kid", "agent-y.jsonl");
+	const dottedAfter = path.join(after, "..kid", "agent-y.jsonl");
+	check(transcriptSourceId(dottedBefore, before) === transcriptSourceId(dottedAfter, after),
+		"S5 a child under a directory named ..something is inside, and keeps its source across a move");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

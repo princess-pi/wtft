@@ -17,6 +17,7 @@ import {
 import { execSync } from "node:child_process";
 import wcwidth from "wcwidth";
 import { treeTotals, type SpawnTree } from "./wtft-spawn-tree.js";
+import type { UnrecordedSpawn } from "./wtft-unrecorded.js";
 export interface Bin {
 	key?: string;
 	label: string;
@@ -1713,6 +1714,28 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 
 export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string {
 	if (!spawned) return "";
+	return renderRecordedSpawns(self, spawned) + renderUnrecordedSpawns(spawned.unrecorded);
+}
+
+/** Every untrusted string on this surface goes through one sanitiser. A
+ *  newline forges report lines and an ESC starts an OSC sequence. U+FFFD
+ *  rather than deletion, so a reader sees something was removed. */
+const safeSpawnText = (v: string) => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, "\uFFFD");
+
+/** The #128 list. Printed after SPAWNED, and on its own when nothing was
+ *  recorded: its rows are the ones the ledger does not know. */
+function renderUnrecordedSpawns(rows: UnrecordedSpawn[] | undefined): string {
+	if (!rows || rows.length === 0) return "";
+	let out = `\nUNRECORDED ${rows.length} session(s) no spawn record names (#128) —\n`;
+	out += `           NOT in TOTAL or TREE: a list, not a claim\n`;
+	for (const row of rows) {
+		const money = row.total ? formatCost(row.total.costUsd) : `(${row.skip ?? "unreadable"})`;
+		out += `           ${row.tier.padEnd(9)} ${fitVisual(safeSpawnText(row.cwd), 30)} ${money.padStart(12)}\n`;
+	}
+	return out;
+}
+
+function renderRecordedSpawns(self: TokenTotals, spawned: SpawnTree): string {
 	// Every untrusted string on this surface goes through one sanitiser, declared
 	// before the first arm that prints one. `mechanism`, `label`, and `ledgerError`
 	// are untrusted: a newline forges report lines and an ESC starts an OSC

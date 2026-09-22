@@ -86,6 +86,31 @@ export interface HarnessDiscovery {
 	 * lives. A moved session keeps its id and loses its path.
 	 */
 	resolveSessionById(sessionId: string): string | null;
+	/**
+	 * Every session transcript that began at or after `sinceMs`, with the
+	 * facts #128's listing needs. Optional: a harness whose transcripts do not
+	 * say who started them omits it, and its sessions are never listed.
+	 */
+	listSpawnCandidates?(sinceMs: number): SpawnCandidateScan;
+}
+
+/** One transcript `listSpawnCandidates` found. Facts only — the tier rules
+ *  live on the shared side (`wtft-unrecorded.ts`). */
+export interface SpawnCandidate {
+	path: string;
+	sessionId: string;
+	/** The cwd the transcript records. */
+	cwd: string;
+	/** First timestamp in the transcript, epoch ms. */
+	startedAt: number;
+	/** null: the harness does not say. */
+	launchedBy: "program" | "human" | null;
+}
+
+export interface SpawnCandidateScan {
+	candidates: SpawnCandidate[];
+	/** Transcripts whose head could not be read — reported, never guessed. */
+	unreadable: { path: string; error: unknown }[];
 }
 
 // ---

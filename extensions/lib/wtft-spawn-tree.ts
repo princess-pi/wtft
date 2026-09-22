@@ -5,9 +5,10 @@ import { getDiscoveries } from "./harness/registry.js";
 import { parseSessionFile, deduplicateInteractions, isModelTagged, type Interaction } from "./wtft-parser.js";
 import { computeSessionSummary, emptyTotals, type TokenTotals } from "./wtft-renderer.js";
 import { IDLE_THRESHOLD_MS } from "./wtft-daemon-lib.js";
+import { listUnrecordedSpawns, type UnrecordedSpawn } from "./wtft-unrecorded.js";
 import * as fs from "node:fs";
 
-export const SPAWN_TREE_SCHEMA = "wtft/spawn-tree@2";
+export const SPAWN_TREE_SCHEMA = "wtft/spawn-tree@3";
 
 /**
  * Default recursion bound. A `pr-review` lens child spawns its own children, so
@@ -95,6 +96,9 @@ export interface SpawnTree {
 	 *  `unattributed` non-empty, `depthCapped` non-zero, `ledgerError` non-null,
 	 *  or `malformedLedgerLines` non-zero. */
 	total: TokenTotals;
+	/** Sessions no ledger edge names that look like this session's children
+	 *  (#128). NEVER in `total` or `tree`. Absent when the caller did not ask. */
+	unrecorded?: UnrecordedSpawn[];
 }
 
 export interface SpawnTreeOptions {
@@ -104,6 +108,8 @@ export interface SpawnTreeOptions {
 	 *  must not add them again. A thunk is called only when the root has an edge. */
 	alreadyAttributed?: Set<string> | (() => Set<string>);
 	now?: number;
+	/** Ask for `unrecorded`. A one-shot report's cost, not a per-poll one. */
+	unrecorded?: { turns: Interaction[]; rootCwd: string | null };
 }
 
 const SUBTRACT_TOLERANCE = 1e-9;
@@ -204,15 +210,42 @@ export function computeSpawnTree(
 		total: emptyTotals(),
 	};
 
-	if (!ledger.childrenOf.has(rootSessionId)) return tree;
+	const outcomeOf = walkLedger(rootSessionId, ledger, tree, options, maxDepth, now);
 
+	if (options.unrecorded) {
+		const exclude = new Set<string>(outcomeOf.keys());
+		for (const edges of ledger.childrenOf.values()) for (const edge of edges) exclude.add(edge.child);
+		tree.unrecorded = listUnrecordedSpawns({
+			rootSessionId,
+			rootCwd: options.unrecorded.rootCwd,
+			turns: options.unrecorded.turns,
+			exclude,
+		});
+	}
+	return tree;
+}
+
+/** The breadth-first walk. Returns every session it reached or was told is
+ *  already attributed, keyed to its outcome. */
+function walkLedger(
+	rootSessionId: string,
+	ledger: SpawnLedger,
+	tree: SpawnTree,
+	options: SpawnTreeOptions,
+	maxDepth: number,
+	now: number,
+): Map<string, string> {
 	// `in-self` = money inside the caller's `total`; `folded` = a `claude -p`
 	// session inside a resolved descendant's total. Both add nothing when their
 	// own edge is reached, and they report different skips.
 	type Outcome = "counted" | "unresolved" | "in-self" | "folded";
 	const outcomeOf = new Map<string, Outcome>([[rootSessionId, "in-self"]]);
+	if (!ledger.childrenOf.has(rootSessionId) && !options.unrecorded) return outcomeOf;
+	// The thunk is the lazy path: called only when the root has an edge, or when
+	// `unrecorded` needs the ids to exclude.
 	const attributed = typeof options.alreadyAttributed === "function" ? options.alreadyAttributed() : options.alreadyAttributed;
 	for (const id of attributed ?? []) outcomeOf.set(id, "in-self");
+	if (!ledger.childrenOf.has(rootSessionId)) return outcomeOf;
 	const visited = new Set<string>([rootSessionId]);
 
 	type Visit = { parentId: string; depth: number };
@@ -313,7 +346,7 @@ export function computeSpawnTree(
 		}
 	}
 
-	return tree;
+	return outcomeOf;
 }
 
 /** `self + descendants`, as a value, so a consumer never adds two numbers and

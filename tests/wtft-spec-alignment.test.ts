@@ -520,7 +520,7 @@ try {
 	//    bumped it from @3 — this anchor tracks the CURRENT schema string,
 	//    not a fact worth pinning on its own).
 	const fences = [...specSrc.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => m[1]);
-	const example = fences.find((f) => f.includes(`"schema": "${"wtft/session@5"}"`));
+	const example = fences.find((f) => f.includes(`"schema": "${"wtft/session@6"}"`));
 	assert.ok(example, "docs/spec-26-json.md has no ```json example carrying the current schema string");
 	const exampleKeys = [...example!.matchAll(/^ {2}"(\w+)":/gm)].map((m) => m[1]);
 

@@ -38,8 +38,9 @@ export interface WatchSettings {
  * This is the single source of truth for the tag-file wire format.
  * Must stay in sync with classifiedToInteraction (below).
  * When adding a field, update BOTH functions in this file.
+ * `source` is set for a child transcript's lines: see `transcriptSourceId`.
  */
-export function serializeClassified(interaction: Interaction): string {
+export function serializeClassified(interaction: Interaction, source?: string): string {
 	// Round cost to 6 decimal places — the daemon cost calculator
 	// produces a slightly different float than the in-memory widget.
 	// Without rounding, accumulated drift causes $0.02-0.04 mismatches.
@@ -69,6 +70,7 @@ export function serializeClassified(interaction: Interaction): string {
 	if (interaction.cacheMiss) line.miss = 1;
 	if (interaction.interrupted) line.ir = 1;
 	if (interaction.surgePriced) line.sp = 1;
+	if (source) line.s = source;
 	return JSON.stringify(line) + "\n";
 }
 
@@ -236,10 +238,11 @@ export function readTagFileWithVerdict(tagPath: string): {
 	try {
 		content = fs.readFileSync(tagPath, "utf8");
 	} catch { /* missing or unreadable — every part handles "" */ }
+	const records = currentGenerationRecords(content);
 	return {
-		interactions: classifiedInteractionsFromContent(content),
+		interactions: interactionsFromRecords(records),
 		provisional: tagProvisionalFromContent(tagPath, content),
-		folded: foldedSessionIdsFromContent(content),
+		folded: foldedIdsFromRecords(records),
 	};
 }
 
@@ -258,35 +261,80 @@ export function foldRecordIds(childSessionId: string, deduped: Interaction[]): s
 	return ids;
 }
 
-export function foldRecordLine(parent: string, child: string): string {
-	return JSON.stringify({ _fold: { parent, child } }) + "\n";
+export function foldRecordLine(parent: string, child: string, source: string): string {
+	return JSON.stringify({ _fold: { parent, child, s: source } }) + "\n";
 }
 
-export function foldedSessionIdsFromContent(content: string): Set<string> {
-	const ids = new Set<string>();
+/** The `s` a child transcript's tag lines carry. Keyed on the path, not on the
+ *  session id: two copies of one session are two sources. A child under the
+ *  session directory is keyed on its path relative to it, so a session that
+ *  moves keeps it; one outside is keyed on its absolute path, which the move
+ *  does not change either. */
+export function transcriptSourceId(file: string, sessionDir: string): string {
+	const target = path.resolve(file);
+	const rel = path.relative(path.resolve(sessionDir), target);
+	const escapes = rel === ".." || rel.startsWith(".." + path.sep);
+	const key = escapes || path.isAbsolute(rel) ? target : rel;
+	return createHash("sha1").update(key).digest("hex").slice(0, 16);
+}
+
+/** Opens a new generation for `source`: every earlier line carrying it stops counting. */
+export function generationRecordLine(source: string, session: string): string {
+	return JSON.stringify({ _gen: { s: source, session } }) + "\n";
+}
+
+/** Every parsed line of a tag, minus those a later `_gen` record for the same
+ *  source superseded. A line with no `s` belongs to the tag's own session and
+ *  is never superseded. */
+export function currentGenerationRecords(content: string): any[] {
+	const records: any[] = [];
+	const lastGenAt = new Map<string, number>();
 	for (const line of content.split("\n")) {
-		if (!line.includes('"_fold"')) continue;
-		try {
-			const child = JSON.parse(line)?._fold?.child;
-			if (typeof child === "string" && child) ids.add(child);
-		} catch { /* a fragment at the end of a file being written */ }
+		if (!line.trim()) continue;
+		let obj: any;
+		try { obj = JSON.parse(line); } catch { continue; }
+		if (!obj || typeof obj !== "object") continue;
+		const gen = obj._gen?.s;
+		if (typeof gen === "string") lastGenAt.set(gen, records.length);
+		records.push(obj);
+	}
+	if (lastGenAt.size === 0) return records;
+	return records.filter((obj, at) => {
+		const s = obj._fold ? obj._fold.s : obj.s;
+		if (typeof s !== "string") return true;
+		const genAt = lastGenAt.get(s);
+		return genAt === undefined || at > genAt;
+	});
+}
+
+function foldedIdsFromRecords(records: any[]): Set<string> {
+	const ids = new Set<string>();
+	for (const obj of records) {
+		const child = obj._fold?.child;
+		if (typeof child === "string" && child) ids.add(child);
 	}
 	return ids;
 }
 
-export function classifiedInteractionsFromContent(content: string): Interaction[] {
+function interactionsFromRecords(records: any[]): Interaction[] {
 	const interactions: Interaction[] = [];
-	for (const line of content.split("\n")) {
-		if (!line.trim()) continue;
+	for (const obj of records) {
+		if (obj._hb) continue;
 		try {
-			const obj = JSON.parse(line);
-			if (obj._hb) continue; // skip heartbeat lines
 			const interaction = classifiedToInteraction(obj);
 			if (interaction) interactions.push(interaction);
 		} catch {
 		}
 	}
 	return dedupeClassifiedById(interactions);
+}
+
+export function foldedSessionIdsFromContent(content: string): Set<string> {
+	return foldedIdsFromRecords(currentGenerationRecords(content));
+}
+
+export function classifiedInteractionsFromContent(content: string): Interaction[] {
+	return interactionsFromRecords(currentGenerationRecords(content));
 }
 
 export function readClassifiedTagFile(tagPath: string): Interaction[] {
@@ -361,6 +409,21 @@ export function watcherAction(
 	if (prefixMatches === null) return "reseed";
 	if (size > lastReadOffset) return "read";
 	return "idle";
+}
+
+/** Whether the bytes appended since `offset` open a new generation, which can
+ *  drop lines already read — an incremental append cannot express that. */
+function appendedGeneration(tagPath: string, offset: number, size: number): boolean {
+	if (size <= offset) return false;
+	const fd = fs.openSync(tagPath, "r");
+	try {
+		const buf = Buffer.alloc(size - offset);
+		const read = fs.readSync(fd, buf, 0, buf.length, offset);
+		// A short read leaves the tail zero-filled: reseed rather than miss a record.
+		return read < buf.length || buf.subarray(0, read).includes('"_gen"');
+	} finally {
+		fs.closeSync(fd);
+	}
 }
 
 export function seedClassifiedTagFile(tagPath: string): { interactions: Interaction[]; offset: number; read: boolean } {
@@ -1068,7 +1131,7 @@ export async function watchTagFile(
 				const matches = sentinelMatches(sentinelNow, prefixSentinel);
 				const action = watcherAction(stat.size, lastReadOffset, matches);
 				if (action === "idle") return;
-				if (action === "reseed") {
+				if (action === "reseed" || appendedGeneration(tagPath, lastReadOffset, stat.size)) {
 					const reseed = seedClassifiedTagFile(tagPath);
 					if (!reseed.read) return;
 					allInteractions = reseed.interactions;

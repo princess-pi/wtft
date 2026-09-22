@@ -103,6 +103,16 @@ function compareVersions(a: string, b: string): number {
 	return 0;
 }
 
+/** The source a generation record opens a generation for, or null. */
+function parseGenSource(line: string): string | null {
+	try {
+		const s = JSON.parse(line)?._gen?.s;
+		return typeof s === "string" && s ? s : null;
+	} catch {
+		return null;
+	}
+}
+
 /** Only inspects wtft-tag contents — never parses raw .jsonl turn data. */
 export function getSessionSummary(sessionPath: string): SessionSummary {
 	const sessionDir = path.dirname(sessionPath);
@@ -144,17 +154,28 @@ export function getSessionSummary(sessionPath: string): SessionSummary {
 		if (content !== null) {
 				const lines = content.split("\n");
 				// Collapse by message.id (max cost) before summing — same rule as
-				// dedupeClassifiedById.
+				// dedupeClassifiedById — over the lines a later generation record
+				// has not superseded, the same rule as currentGenerationRecords.
+				const lastGenAt = new Map<string, number>();
+				for (let at = 0; at < lines.length; at++) {
+					const gen = lines[at].includes('"_gen"') ? parseGenSource(lines[at]) : null;
+					if (gen) lastGenAt.set(gen, at);
+				}
 				const maxCostById = new Map<string, number>();
 				const idOrder: string[] = [];
 				let noIdCost = 0;
 				let noIdCount = 0;
-				for (const line of lines) {
+				for (let at = 0; at < lines.length; at++) {
+					const line = lines[at];
 					if (!line.trim()) continue;
 					try {
 						const obj = JSON.parse(line);
-						if (obj._hb) continue;
-						const lineCost = typeof obj.c === "number" ? obj.c : 0;
+						// Interaction lines only — marker keys first, then the same test
+						// as classifiedToInteraction.
+						if (obj?._hb) continue;
+						if (typeof obj?.t !== "number" || typeof obj?.c !== "number") continue;
+						if (typeof obj.s === "string" && at < (lastGenAt.get(obj.s) ?? -1)) continue;
+						const lineCost = obj.c;
 						if (typeof obj.id === "string" && obj.id) {
 							const prev = maxCostById.get(obj.id);
 							if (prev === undefined) idOrder.push(obj.id);

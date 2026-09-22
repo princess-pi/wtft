@@ -5,15 +5,19 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
 
 ## Hard gates
 
-- **Never edit build output.** `bin/*.mjs` and `pi/*.js` are gitignored bundles. Edit the `.ts`,
-  run `bun run build`, then `bin/install-wtft` — otherwise `~/bin` keeps running the old build.
+- **Never edit build output.** `bin/*.mjs` and `pi/*.js` are gitignored bundles, and
+  `extensions/lib/harness/builtins.generated.ts` is a tracked one. Edit the `.ts`, run
+  `bun run build`, then `bin/install-wtft` — otherwise `~/bin` keeps running the old build.
 - **Bundles import only `node:` builtins.** bun builds them; stock node runs them. The relocatable-build
   test fails on any other import.
 - **The README is tested.** `tests/wtft-75-doc-claims.test.ts` checks README flags against the
-  parser, and `install-wtft` exit codes against the script, so a README edit can fail the suite.
+  parser and the manifest, and `install-wtft` exit codes against the script, so a README edit can
+  fail the suite. It pins `CONTEXT.md` and `docs/adding-a-harness.md` too, so an edit there can
+  fail it as well.
 - **Shared code goes in `@princess-pi/libs`**, never copied in.
 - **Spec-reconcile does not treat comments as spec** (#183). Reconcile: manifests,
-  `--help`, README flags/exit codes, JSON schema, tag-format, user-facing strings.
+  `--help`, README flags/exit codes, JSON schema, tag-format, `CONTEXT.md`,
+  `docs/wtft-incremental-render-spec.md`, user-facing strings.
   Not banner comments, not test-header novels, not glossary provenance, not counts
   in prose. A stale comment is deleted, never reworded.
 

@@ -68,6 +68,10 @@ export interface FoldShare {
 export interface SubAgentFold {
 	id: string;
 	share: FoldShare;
+	/** The transcript parsed, and its stat taken before the read — a later stat
+	 *  that differs means this share is out of date. */
+	file: string;
+	stamp: string;
 }
 
 // ---
@@ -1112,7 +1116,7 @@ export function loadSubagentInteractionsChecked(
 // attribute its tokens to the parent turn.
 // ---
 
-const CLAUDE_SUBAGENT_WINDOW_MS = 15_000; // ±15s window for timestamp matching
+export const CLAUDE_SUBAGENT_WINDOW_MS = 15_000; // ±15s window for timestamp matching
 
 /**
  * Last `cd` at or before the spawn, or null when unknown.
@@ -1266,7 +1270,9 @@ export function attributeClaudeSubAgentCosts(
 
 			// Mark seen only after parse succeeds, so a failure retries later.
 			let subInteractions: Interaction[];
+			let stamp: string;
 			try {
+				stamp = fileStamp(file);
 				subInteractions = parseSessionFile(file);
 			} catch (err) {
 				throw new Error(
@@ -1290,7 +1296,7 @@ export function attributeClaudeSubAgentCosts(
 			for (const n of nested) {
 				for (const key of FOLD_SHARE_KEYS) own[key] -= n.share[key];
 			}
-			folds.push({ id: sessionId, share: own }, ...nested);
+			folds.push({ id: sessionId, share: own, file, stamp }, ...nested);
 			for (const key of FOLD_SHARE_KEYS) added[key] += inclusive[key];
 		}
 
@@ -1304,6 +1310,24 @@ export function attributeClaudeSubAgentCosts(
 			interaction.claudeSubAgentFolds = folds;
 		}
 	}
+}
+
+export function fileStamp(file: string): string {
+	const st = fs.statSync(file);
+	return `${st.size}:${st.mtimeMs}:${st.ino}`;
+}
+
+/** The last moment discovery could still find a `claude -p` child for one of
+ *  these turns — its window runs from the spawning turn's timestamp. 0 when
+ *  none spawns. */
+export function claudeSpawnWindowClosesAt(interactions: Interaction[]): number {
+	let closes = 0;
+	for (const interaction of interactions) {
+		if (!interactionHasClaudeCommand(interaction)) continue;
+		if (!cwdForClaudeSpawn(interaction.commands)) continue;
+		closes = Math.max(closes, interaction.timestamp + CLAUDE_SUBAGENT_WINDOW_MS);
+	}
+	return closes;
 }
 
 /** Whether an interaction counts toward a session's totals: untagged turns are

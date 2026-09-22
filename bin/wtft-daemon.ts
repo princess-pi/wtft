@@ -94,6 +94,8 @@ interface SubagentFileState {
 	newGeneration: boolean;
 	/** Message id of each written line's hash, `null` for a line that had none. */
 	writtenIds: Map<string, string | null>;
+	/** Highest cost written for a message id: a parse below it is a rewrite, not growth. */
+	writtenCostById: Map<string, number>;
 	/** Fold ids this generation has recorded. The CLI's spawn walk skips exactly
 	 *  the recorded ids, so a fold with no record is billed twice. */
 	recordedFolds: Set<string>;
@@ -262,7 +264,8 @@ function syncSubagentTranscript(file: string): boolean {
   if (!fileState) {
     fileState = {
       size: -1, mtimeMs: -1, readAtMs: 0, ino: -1, writtenLines: new Map<string, number>(),
-      newGeneration: true, writtenIds: new Map<string, string | null>(), recordedFolds: new Set<string>(), foldStamps: new Map<string, string>(), spawnWindowClosesAt: 0,
+      newGeneration: true, writtenIds: new Map<string, string | null>(), writtenCostById: new Map<string, number>(),
+      recordedFolds: new Set<string>(), foldStamps: new Map<string, string>(), spawnWindowClosesAt: 0,
     };
     discoveredSubagentFiles.set(stateKey, fileState);
   }
@@ -326,12 +329,16 @@ function syncSubagentTranscript(file: string): boolean {
   try {
     const parsed = deduped.map(si => {
       const line = serializeClassified(si, source);
-      return { line, hash: createHash('sha1').update(line).digest('hex'), id: si.messageId ?? null };
+      return {
+        line, hash: createHash('sha1').update(line).digest('hex'),
+        id: si.messageId ?? null, cost: Number((si.cost || 0).toFixed(6)),
+      };
     });
 
     if (supersededWithoutDedup(fileState, parsed)) {
       fileState.writtenLines.clear();
       fileState.writtenIds.clear();
+      fileState.writtenCostById.clear();
       fileState.recordedFolds.clear();
       fileState.newGeneration = true;
       if (process.env.WTFT_DAEMON_DEBUG) {
@@ -341,7 +348,8 @@ function syncSubagentTranscript(file: string): boolean {
     if (fileState.newGeneration) batch = generationRecordLine(source, sessionId);
 
     const seenThisParse = new Map<string, number>();
-    for (const { line, hash, id } of parsed) {
+    for (const { line, hash, id, cost } of parsed) {
+      if (id) fileState.writtenCostById.set(id, Math.max(fileState.writtenCostById.get(id) ?? 0, cost));
       const nth = (seenThisParse.get(hash) || 0) + 1;
       seenThisParse.set(hash, nth);
       if (nth <= (fileState.writtenLines.get(hash) || 0)) continue;
@@ -398,24 +406,31 @@ function syncSubagentTranscript(file: string): boolean {
 }
 
 /** Whether this parse drops a line already written that the reader's id dedup
- *  cannot collapse: one with no message id, or one whose id this parse no longer
- *  produces at all. That is a transcript rewritten, so its lines need a new
- *  generation rather than an append beside the old ones. */
+ *  cannot collapse: one with no message id, one whose id this parse no longer
+ *  produces at all, or one whose id now costs LESS than what was written —
+ *  dedup keeps the highest-cost copy, so it would keep the retracted price.
+ *  That is a transcript rewritten, so its lines need a new generation rather
+ *  than an append beside the old ones. A turn re-emitted with GROWING usage is
+ *  the ordinary case and takes the append. */
 function supersededWithoutDedup(
   fileState: SubagentFileState,
-  parsed: { hash: string; id: string | null }[],
+  parsed: { hash: string; id: string | null; cost: number }[],
 ): boolean {
   if (fileState.writtenLines.size === 0) return false;
   const counts = new Map<string, number>();
-  const ids = new Set<string>();
-  for (const { hash, id } of parsed) {
+  const costById = new Map<string, number>();
+  for (const { hash, id, cost } of parsed) {
     counts.set(hash, (counts.get(hash) || 0) + 1);
-    if (id) ids.add(id);
+    if (id) costById.set(id, Math.max(costById.get(id) ?? 0, cost));
+  }
+  for (const [id, written] of fileState.writtenCostById) {
+    const now = costById.get(id);
+    if (now === undefined || now < written) return true;
   }
   for (const [hash, written] of fileState.writtenLines) {
     if (written <= (counts.get(hash) || 0)) continue;
     const id = fileState.writtenIds.get(hash) ?? null;
-    if (id === null || !ids.has(id)) return true;
+    if (id === null || !costById.has(id)) return true;
   }
   return false;
 }

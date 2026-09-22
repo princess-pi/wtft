@@ -274,7 +274,7 @@ export function transcriptSourceId(file: string, sessionDir: string): string {
 	const target = path.resolve(file);
 	const rel = path.relative(path.resolve(sessionDir), target);
 	const key = rel.startsWith("..") || path.isAbsolute(rel) ? target : rel;
-	return createHash("sha1").update(key).digest("hex").slice(0, 8);
+	return createHash("sha1").update(key).digest("hex").slice(0, 16);
 }
 
 /** Opens a new generation for `source`: every earlier line carrying it stops counting. */

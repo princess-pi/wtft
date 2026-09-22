@@ -89,8 +89,9 @@ spawning turn can still gain a subagent session.**
   subagent session whose first timestamp is within `CLAUDE_SUBAGENT_WINDOW_MS` of the spawning
   turn, so until that window plus `MTIME_SETTLE_MS` has passed, a later parse can find one this
   parse did not. Each such child is re-parsed every poll until then. Since #107 A a bare `claude -p` opens a window
-  too, against the session's own cwd — unless that cwd is unreadable from the transcript, which is
-  the third case that opens none, beside an unknowable `cd` target and a launcher.
+  too, against the session's own cwd. What opens none is a turn whose spawns name no directory the
+  fallback stands in for: an unknowable `cd` target, a bare `cd`, a launcher, or a session whose
+  own cwd is unreadable.
 - **The tag's own session gets the same window.** A `claude -p` command in the tag's own session
   whose discovery has found a transcript stays in `pendingClaudeCommands`, re-discovered every
   poll, until its window closes. Before this change the first discovery that found any file ended

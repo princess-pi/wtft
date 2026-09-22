@@ -104,6 +104,13 @@ interface SubagentFileState {
 	foldStamps: Map<string, string>;
 	/** Until then a spawning turn can still gain a `claude -p` child. */
 	spawnWindowClosesAt: number;
+	/** Which children another holder owned at the last parse — when that set
+	 *  changes this transcript's own total does too, so the gate must fire. */
+	foldedByAnother: string;
+}
+
+function foldSetSignature(files: ReadonlySet<string>): string {
+	return [...files].sort().join("\u0000");
 }
 
 // Subagent transcripts: re-parse WHOLE on change; incremental windows break id-collapse and nested attribution.
@@ -281,7 +288,7 @@ function skipAsFoldedElsewhere(rawFile: string, foldedElsewhere: Set<string>): b
   return true;
 }
 
-function syncSubagentTranscript(rawFile: string): boolean {
+function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<string> = new Set()): boolean {
   let wroteAny = false;
   // One transcript, one state entry and one source, however the path that
   // reached us was spelled — discovery joins paths, a fold records the path it
@@ -295,6 +302,7 @@ function syncSubagentTranscript(rawFile: string): boolean {
       size: -1, mtimeMs: -1, readAtMs: 0, ino: -1, writtenLines: new Map<string, number>(),
       newGeneration: true, writtenIds: new Map<string, string | null>(), writtenCostById: new Map<string, number>(),
       recordedFolds: new Set<string>(), foldStamps: new Map<string, string>(), spawnWindowClosesAt: 0,
+      foldedByAnother: "",
     };
     discoveredSubagentFiles.set(stateKey, fileState);
   }
@@ -324,6 +332,7 @@ function syncSubagentTranscript(rawFile: string): boolean {
   // Skip only when size+mtime unchanged AND settled past MTIME_SETTLE_MS (one clock: Date.now() since our read).
   const changed = size !== fileState.size || mtimeMs !== fileState.mtimeMs || ino !== fileState.ino
     || foldedTranscriptChanged(fileState.foldStamps)
+    || fileState.foldedByAnother !== foldSetSignature(foldedByAnother)
     || Date.now() <= fileState.spawnWindowClosesAt + MTIME_SETTLE_MS;
   const settled = Date.now() - fileState.readAtMs > MTIME_SETTLE_MS;
   if (!changed && settled) {
@@ -338,7 +347,7 @@ function syncSubagentTranscript(rawFile: string): boolean {
     // The watched session is an ancestor of every transcript discovered from
     // it: without it here, a child whose own spawn window catches the session
     // folds the session into itself, and those lines land in the session's tag.
-    deduped = deduplicateInteractions(parseSessionFile(file, new Set([canonicalTranscriptPath(sessionPath)])));
+    deduped = deduplicateInteractions(parseSessionFile(file, new Set([canonicalTranscriptPath(sessionPath), ...foldedByAnother])));
     clearSubagentCacheMiss(deduped);
   } catch (err) {
     pollHadFailure = true;
@@ -431,6 +440,7 @@ function syncSubagentTranscript(rawFile: string): boolean {
       fileState.foldStamps.set(canonicalTranscriptPath(fold.file), fold.stamp);
     }
   }
+  fileState.foldedByAnother = foldSetSignature(foldedByAnother);
   fileState.spawnWindowClosesAt = claudeSpawnWindowClosesAt(deduped, resolveLastCwd(file));
   fileState.size = size;
   fileState.mtimeMs = mtimeMs;
@@ -562,28 +572,40 @@ function scanForSubAgents() {
   // fold pass's within-one-call accounting cannot see across them. Derived from
   // the CURRENT fold state every poll, never accumulated, so a parent that
   // rotates and stops folding hands its child straight back.
-  const foldedElsewhere = new Set<string>();
+  // One child, one holder. Two in-window transcripts in a shared project dir
+  // each discover the other's children, and each parse bakes what it folds into
+  // its own turns, so without an owner the same child's cost lands in both. The
+  // owner is the lexicographically first holder, which cannot flip between polls.
+  const holderOf = new Map<string, string>();
   for (const [holder, state] of discoveredSubagentFiles) {
     for (const folded of state.foldStamps.keys()) {
       if (folded === holder) continue;
       // Two transcripts that fold each other would each retire the other, and
       // the poll after would find nothing folding either and re-sync both, for
-      // a total that alternates between double and none. Exactly one of the
-      // pair survives, chosen by path so the choice cannot flip.
+      // a total that alternates between double and none.
       const other = discoveredSubagentFiles.get(folded);
       if (other?.foldStamps.has(holder) && holder > folded) continue;
-      foldedElsewhere.add(folded);
+      const current = holderOf.get(folded);
+      if (current === undefined || holder < current) holderOf.set(folded, holder);
     }
   }
+  const foldedElsewhere = new Set(holderOf.keys());
+  /** What one transcript must leave alone: every child another holder owns. */
+  const notMine = (file: string): Set<string> => {
+    const me = canonicalTranscriptPath(file);
+    const out = new Set<string>();
+    for (const [folded, holder] of holderOf) if (holder !== me) out.add(folded);
+    return out;
+  };
 
   for (const file of taskAgentFiles) {
     if (skipAsFoldedElsewhere(file, foldedElsewhere)) { wroteAny = wroteAny || retiredThisPoll; continue; }
-    wroteAny = syncSubagentTranscript(file) || wroteAny;
+    wroteAny = syncSubagentTranscript(file, notMine(file)) || wroteAny;
   }
 
   for (const file of discoveredClaudeFiles) {
     if (skipAsFoldedElsewhere(file, foldedElsewhere)) { wroteAny = wroteAny || retiredThisPoll; continue; }
-    wroteAny = syncSubagentTranscript(file) || wroteAny;
+    wroteAny = syncSubagentTranscript(file, notMine(file)) || wroteAny;
   }
 
   if (wroteAny) {

@@ -357,7 +357,10 @@ export function splitOverheadCost(
 // Read a .jsonl session into Interaction[] (raw, undeduped).
 // ---
 
-export function parseSessionFile(filePath: string, ancestors: ReadonlySet<string> = new Set()): Interaction[] {
+/** `doNotFold` holds canonical transcript paths this parse must not fold in:
+ *  the transcripts it is already inside, and any a different source is already
+ *  counting. */
+export function parseSessionFile(filePath: string, doNotFold: ReadonlySet<string> = new Set()): Interaction[] {
 	const interactions: Interaction[] = [];
 	const state = newParseStreamState();
 	// Unreadable transcript throws (never returns [] as "empty"). Per-line
@@ -382,7 +385,7 @@ export function parseSessionFile(filePath: string, ancestors: ReadonlySet<string
 		}
 	}
 
-	attributeClaudeSubAgentCosts(interactions, resolveLastCwd(filePath), new Set([...ancestors, canonicalTranscriptPath(filePath)]));
+	attributeClaudeSubAgentCosts(interactions, resolveLastCwd(filePath), new Set([...doNotFold, canonicalTranscriptPath(filePath)]));
 
 	return interactions;
 }
@@ -1098,10 +1101,10 @@ export function loadSubagentInteractionsChecked(
 ): { interactions: Interaction[]; dropped: string[] } {
 	const interactions: Interaction[] = [];
 	const dropped: string[] = [];
-	const ancestors = new Set<string>(rootFile ? [canonicalTranscriptPath(rootFile)] : []);
+	const doNotFold = new Set<string>(rootFile ? [canonicalTranscriptPath(rootFile)] : []);
 	for (const file of subagentFiles) {
 		try {
-			const raw = parseFn(file, ancestors);
+			const raw = parseFn(file, doNotFold);
 			const deduped = dedupFn(raw);
 			clearSubagentCacheMiss(deduped);
 			for (const interaction of deduped) interaction._cat = classifyFn(interaction);
@@ -1338,7 +1341,7 @@ function interactionHasClaudeCommand(interaction: Interaction): boolean {
 export function attributeClaudeSubAgentCosts(
 	interactions: Interaction[],
 	ownCwd: string | null = null,
-	ancestors: ReadonlySet<string> = new Set(),
+	doNotFold: ReadonlySet<string> = new Set(),
 ): void {
 	const seenSessionIds = new Set<string>();
 
@@ -1358,10 +1361,10 @@ export function attributeClaudeSubAgentCosts(
 		const folds: SubAgentFold[] = [];
 
 		for (const file of subAgentFiles) {
-			// A session never folds itself or one that folded it: discovery matches
-			// on a timestamp window, and a transcript in the directory it searches
-			// can be its own, or an ancestor's.
-			if (ancestors.has(canonicalTranscriptPath(file))) continue;
+			// Discovery matches on a timestamp window, so what it returns can be
+			// this session, one that folded it, or one another source is already
+			// counting — none of which this parse may fold.
+			if (doNotFold.has(canonicalTranscriptPath(file))) continue;
 			const sessionId = path.basename(file, '.jsonl');
 			if (seenSessionIds.has(sessionId)) continue;
 
@@ -1370,7 +1373,7 @@ export function attributeClaudeSubAgentCosts(
 			let stamp: string;
 			try {
 				stamp = fileStamp(file);
-				subInteractions = parseSessionFile(file, ancestors);
+				subInteractions = parseSessionFile(file, doNotFold);
 			} catch (err) {
 				throw new Error(
 					`nested subagent transcript could not be read or parsed (${file}): ${err instanceof Error ? err.message : String(err)}`,

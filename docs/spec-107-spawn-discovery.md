@@ -42,9 +42,8 @@ not from the transcript's path.
   records, so a session resumed in a second directory attributes its earlier no-`cd` spawns
   against the later cwd and misses them. And it reads only the last 512 KB, so a transcript that
   records `cwd` once at the top and then grows past that window resolves to `null` and gets no
-  fallback at all — which is **Pi**, whose `session_start` entry is the only one carrying `cwd`
-  (measured on this host: 254 of 3803 Pi transcripts are over 512 KB). Both are stated rather
-  than fixed: the alternative is a per-entry cwd on every interaction, which is #97/#138 territory
+  fallback at all — which is **Pi**, whose `session_start` entry is the only one carrying `cwd`.
+  Both are stated rather than fixed: the alternative is a per-entry cwd on every interaction, which is #97/#138 territory
   and costs a field on every line.
 
 **A folded session is counted once, by its own share.** Every level of the recursion now resolves
@@ -123,6 +122,13 @@ That skip set is **derived from current fold state every poll, never accumulated
 from each synced transcript's `foldStamps`, so when a folder rotates and its new parse no longer
 folds the child, the child is synced under its own source again on the next poll rather than
 staying suppressed for the daemon's life.
+
+**One child, one holder.** Two in-window transcripts in a shared project dir each discover the
+other's children, and each parse bakes what it folds into its own turns — so the same child's cost
+lands in both, and retiring the child's own source does not remove either copy. The daemon
+therefore names an owner for every folded transcript, the lexicographically first holder, and hands
+every other holder that child in its `doNotFold` set. The set is part of the change gate, so a
+transcript re-parses when what it may fold changes (pinned by D8).
 
 **A mutual fold keeps exactly one of the pair, chosen by path.** Two children of one turn in the
 shared project dir each fold the other, so a rule that retired everything folded elsewhere would

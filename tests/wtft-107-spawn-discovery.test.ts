@@ -385,5 +385,43 @@ console.log("\nPART D — the daemon retries a bare spawn instead of dropping it
 		`D7 two transcripts that fold each other settle at one of them, and the total does not oscillate: 100 + 40 + 30 (got ${first} then ${second})`);
 }
 
+{
+	// Two Task children of one session, each running a bare `claude -p` in the
+	// session's cwd: both discover the same nested child B in the shared project
+	// dir, and each parse bakes what it folds into its own turns.
+	const cwd = path.join(dir, "d-sibling-project");
+	const projectDir = path.join(projects, cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+	const rootId = "9999cccc-9999-4999-8999-cccccccccccc";
+	const subagentDir = path.join(projectDir, rootId, "subagents");
+	fs.mkdirSync(subagentDir, { recursive: true });
+	const rootPath = path.join(projectDir, `${rootId}.jsonl`);
+	const now = Date.now();
+	fs.writeFileSync(rootPath,
+		sessionLine(rootId, now - 6_000, cwd)
+		+ turnLine("d-sib-root", now - 5_000, 100));
+	for (const [name, out] of [["agent-one", 40], ["agent-two", 30]] as const) {
+		fs.writeFileSync(path.join(subagentDir, `${name}.jsonl`),
+			sessionLine(name, now - 4_000, cwd)
+			+ turnLine(`d-sib-${name}`, now - 4_000, out, ["claude -p 'go'"]));
+	}
+	fs.writeFileSync(path.join(projectDir, "aaaa0001-0001-4001-8001-000000000001.jsonl"),
+		sessionLine("aaaa0001-0001-4001-8001-000000000001", now - 3_500, cwd)
+		+ turnLine("d-sib-nested", now - 3_500, 20));
+
+	const daemon = spawn(process.execPath, [DAEMON_BIN, "--session", rootPath], { detached: true, stdio: "ignore", env: { ...process.env } });
+	daemon.unref();
+	const tagPath = path.join(projectDir, "wtft-tags", `${rootId}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const outputInTag = () => readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0);
+
+	for (let i = 0; i < 80 && outputInTag() !== 190; i++) await sleep(250);
+	const first = outputInTag();
+	await sleep(4_000);
+	const second = outputInTag();
+	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
+
+	check(first === 190 && second === 190,
+		`D8 a nested child two sibling transcripts both discover is billed once: 100 + 40 + 30 + 20 (got ${first} then ${second})`);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

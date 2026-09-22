@@ -96,8 +96,8 @@ export interface SpawnTree {
 	 *  `unattributed` non-empty, `depthCapped` non-zero, `ledgerError` non-null,
 	 *  or `malformedLedgerLines` non-zero. */
 	total: TokenTotals;
-	/** Sessions no ledger edge names that look like this session's children
-	 *  (#128). NEVER in `total` or `tree`. Absent when the caller did not ask. */
+	/** Sessions no ledger edge names that look like this session's children.
+	 *  NEVER in `total` or `tree`. Absent when the caller did not ask. */
 	unrecorded?: UnrecordedSpawn[];
 }
 
@@ -105,7 +105,8 @@ export interface SpawnTreeOptions {
 	ledgerPath?: string;
 	maxDepth?: number;
 	/** Session ids whose cost is ALREADY in the caller's self total, so the walk
-	 *  must not add them again. */
+	 *  must not add them again. A thunk is called only when the root has an
+	 *  edge, or when `unrecorded` is asked for. */
 	alreadyAttributed?: Set<string> | (() => Set<string>);
 	now?: number;
 	/** Ask for `unrecorded`. A one-shot report's cost, not a per-poll one. */

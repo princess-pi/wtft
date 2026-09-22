@@ -87,9 +87,9 @@ export interface HarnessDiscovery {
 	 */
 	resolveSessionById(sessionId: string): string | null;
 	/**
-	 * Every session transcript that began at or after `sinceMs`, with the
-	 * facts #128's listing needs. Optional: a harness whose transcripts do not
-	 * say who started them omits it, and its sessions are never listed.
+	 * Every session transcript written at or after `sinceMs` (one created
+	 * earlier may be omitted), with the facts the unrecorded-spawn listing
+	 * needs. Optional: a harness that omits it never has its sessions listed.
 	 */
 	listSpawnCandidates?(sinceMs: number): SpawnCandidateScan;
 }
@@ -109,6 +109,7 @@ export interface SpawnCandidate {
 
 export interface SpawnCandidateScan {
 	candidates: SpawnCandidate[];
+	/** Transcripts or project directories that could not be read. */
 	unreadable: { path: string; error: unknown }[];
 }
 

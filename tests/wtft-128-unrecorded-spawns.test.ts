@@ -215,7 +215,7 @@ check(rows.length === 3, `T14 exactly the three expected rows (got ${rows.map(r 
 		`R2 inferred rows collapse to one line per basis:\n${text}`);
 	check(/UNRECORDED 3 session\(s\)/.test(text), "R3 the header counts every row");
 	const unreadableOnly = renderSpawnTree(emptyTotals(), { ...tree, unrecorded: [{ ...rows.find(r => r.basis === "tmp")!, total: null, skip: "unreadable" as const }] });
-	check(/inferred\s+1 in temp sandboxes, 1 unr.*\s\(unreadable\)$/m.test(unreadableOnly) && !/\$0\.00/.test(unreadableOnly.split("UNRECORDED")[1] ?? "$0.00"),
+	check(/inferred\s+1 in temp sandboxes\s+\(unreadable\)\n\s+1 of them unreadable, not in that sum/.test(unreadableOnly) && !/\$0\.00/.test(unreadableOnly.split("UNRECORDED")[1] ?? "$0.00"),
 		`R4 a group with no readable row prints (unreadable), never $0.00:\n${unreadableOnly}`);
 }
 {

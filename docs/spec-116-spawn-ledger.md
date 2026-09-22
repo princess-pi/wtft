@@ -23,7 +23,8 @@ that are all properties of the transcripts and none of which a parser can fix:
 3. The child's cwd is a worktree or a `/tmp` sandbox, so its transcript lands in a project dir the
    parent never wrote to.
 
-**Neither transcript contains a field naming the other.** There is no edge to re-derive, so no
+**Neither transcript contains a field naming the other** — unless a launcher puts the parent's id
+in the child's cwd, which #128's `named` tier reads. There is no edge to re-derive, so no
 tagger version bump can reach it — measured on session `9f29d624…180d`, which reported $70.33 while
 $69.68 of its own `pr-review` lens children sat **invisible** in ten `/tmp/pr-review-*` sandboxes.
 Invisible, not `unattributed` — this document defines that term narrowly, as a RECORDED edge whose
@@ -341,7 +342,7 @@ descendant, which the parse does not fold, is priced under its own edge in both 
   attribution rework in #107 / #14 / #94 first.
 - **Listing an unrecorded child.** The Closer's second clause — #128, since landed
   (`docs/spec-128-unrecorded-spawns.md`). A spawner that never calls
-  `spawn-record` is invisible here, exactly as it is today.
+  `spawn-record` is invisible to the walk; #128's listing reports it instead.
 - **Live growth.** A long-lived interactive child's cost is read at the moment `wtft` runs; it is a
   snapshot and will be stale, which is #14 and is not made worse here.
 

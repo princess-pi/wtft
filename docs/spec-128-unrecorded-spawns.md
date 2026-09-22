@@ -174,8 +174,9 @@ interface UnrecordedSpawn {
   The widget renders the same table without it.
   A `named` row prints on its own, under its `cwd` fitted to 30 columns, with `(unreadable)` where
   its cost would be when it could not be parsed. `inferred` rows collapse to **one line per
-  basis**, carrying the count and the readable rows' summed cost, plus how many were unreadable; a group
-  with no readable row prints `(unreadable)`, never `$0.00`:
+  basis**, carrying the count and the readable rows' summed cost, with a second line saying how many were
+  unreadable and so are not in that sum; a group with no readable row prints `(unreadable)`, never
+  `$0.00`:
 
   ```
   UNRECORDED 122 session(s) no spawn record names (#128) —
@@ -196,8 +197,10 @@ interface UnrecordedSpawn {
 nothing was re-discovered every poll for the daemon's life. It is now bounded like the found and
 nothing-to-search arms, by the 15-second discovery window plus the 2-second settle margin. The two
 failure arms — discovery threw, or a candidate was unreadable — still retry until the read
-succeeds. Nothing is lost by the bound: a child's first timestamp is fixed, discovery matches on
-it, and a child that begins after the discovery window could never have matched. A child whose
+succeeds. The bound drops a child from the tag only when its transcript reaches disk more than
+the 2-second settle margin after its own first timestamp — measured, Claude Code creates the
+file within 200 ms of it. A child that begins after the discovery window could never have matched
+anyway. A child whose
 first line lands after the discovery window but inside a launch span is listed here, if it is
 programmatic and in the fan-out or a temp sandbox, instead of being retried forever.
 
@@ -311,3 +314,15 @@ found in text this branch did not change is filed as
 | `--tokens` help implied UNCOUNTED follows UNRECORDED | Verified | Order stated |
 | adding-a-harness "created at or after" vs an mtime prune | Verified | "written at or after" |
 | Module header cites an issue number | Verified | Deleted |
+
+### pr-review round 2
+
+| Finding | Verdict | Action |
+|---|---|---|
+| The unreadable count was clipped by the 30-column name fit | Verified: `121 in this repo's checkouts, ` | **Code fixed**: its own line; ✅ R4 |
+| `spawned.unrecorded` may not reach `--json` | Refuted: `buildSessionJson` emits `spawned: input.spawned`, and E1–E3 read the key from real `--json` output | Declined |
+| `listSpawnCandidates` docstring said "began at or after" | Verified | Corrected |
+| spec-116, the `spawn-record` help: a never-recorded child is invisible / leaves no trace | Verified | Corrected for the listing and the `named` tier |
+| spec-128 "nothing is lost by the bound" | Verified for a transcript that lands on disk late | Corrected, with the measured file-birth lag |
+| EXT_WTFT spec-176 row: the thunk runs only with a ledger edge | Verified | Corrected |
+| Docstrings citing #128 | Verified | Citation removed |

@@ -1722,7 +1722,7 @@ export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string 
  *  rather than deletion, so a reader sees something was removed. */
 const safeSpawnText = (v: string) => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, "\uFFFD");
 
-/** The #128 list. Printed after SPAWNED, and on its own when nothing was
+/** The unrecorded-spawn list. Printed after SPAWNED, and on its own when nothing was
  *  recorded: its rows are the ones the ledger does not know. A `named` row is
  *  printed on its own; `inferred` rows collapse to one line per basis, because
  *  a busy host puts every peer's programmatic child in the window. */
@@ -1741,9 +1741,11 @@ function renderUnrecordedSpawns(rows: UnrecordedSpawn[] | undefined): string {
 		if (group.length === 0) continue;
 		const unreadable = group.filter(r => !r.total).length;
 		const cost = group.reduce((sum, r) => sum + (r.total?.costUsd ?? 0), 0);
-		const name = `${group.length} ${where[basis]}` + (unreadable > 0 ? `, ${unreadable} unreadable` : "");
 		// A $0.00 would claim these sessions were free.
-		out += line("inferred", name, unreadable === group.length ? "(unreadable)" : formatCost(cost));
+		out += line("inferred", `${group.length} ${where[basis]}`, unreadable === group.length ? "(unreadable)" : formatCost(cost));
+		// Its own line: fitted into the name column it would be clipped, and the
+		// sum would read as complete.
+		if (unreadable > 0) out += `                     ${unreadable} of them unreadable, not in that sum\n`;
 	}
 	return out;
 }

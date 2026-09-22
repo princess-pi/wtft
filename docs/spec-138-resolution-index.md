@@ -50,7 +50,8 @@ money being counted, not waste.
 - **The Closer, as the issue states it:** a ledger with 10,000 distinct child edges under one
   parent, and `wtft --tokens` on that parent renders the tree naming all 10,000 gaps. Measured
   2026-09-22: the tree walk takes about 40 ms in-process, down from 3.1 s on the same fixture, and
-  the whole CLI run, start to exit, is under a second. The tests hold both to a loose 5 s so a
+  the whole CLI run, start to exit (process start and the daemon spawn included), takes about
+  1 s, against about 11 minutes before. The tests hold both to a loose 5 s so a
   loaded host cannot make them flaky.
 - **One walk, not one per child:** the directory-walk counter (`getDirWalkCount`) moves by the
   same amount for a 1-edge tree and a 10,000-edge tree. This, not the clock, is what pins the fix.

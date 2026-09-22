@@ -94,6 +94,18 @@ console.log("\nPART R — readTagFileWithVerdict honours `_gen`");
 	const genRead = readTagFileWithVerdict(genLast);
 	check(genRead.provisional.provisional === true && genRead.provisional.reason === "unswept",
 		`R4 a generation record is data: a swept tag followed by one reads unswept (got ${JSON.stringify(genRead.provisional)})`);
+
+	// A record that parses as JSON but whose fields are the wrong shape must not
+	// take the whole tag down with it.
+	const malformed = path.join(tagsDir, `m-session.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	fs.writeFileSync(malformed,
+		i("m-1", 5)
+		+ line({ t: T0, c: 0.5, f: { p: "not-an-array" }, id: "m-bad", m: "claude-sonnet-4-6", out: 500 })
+		+ i("m-2", 7));
+	let mRead: any = null;
+	try { mRead = readTagFileWithVerdict(malformed); } catch { mRead = null; }
+	check(mRead !== null && outOf(mRead.interactions) === 12,
+		`R5 a malformed record is skipped, not fatal: the lines around it still count (got ${mRead === null ? "throw" : outOf(mRead.interactions)})`);
 }
 
 // ---

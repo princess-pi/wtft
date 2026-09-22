@@ -319,8 +319,11 @@ function interactionsFromRecords(records: any[]): Interaction[] {
 	const interactions: Interaction[] = [];
 	for (const obj of records) {
 		if (obj._hb) continue;
-		const interaction = classifiedToInteraction(obj);
-		if (interaction) interactions.push(interaction);
+		try {
+			const interaction = classifiedToInteraction(obj);
+			if (interaction) interactions.push(interaction);
+		} catch {
+		}
 	}
 	return dedupeClassifiedById(interactions);
 }

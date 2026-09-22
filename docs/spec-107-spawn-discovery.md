@@ -80,7 +80,7 @@ is unreadable. A launcher that does `cd` first is searched under that target lik
 command — what the fallback withholds is the session's cwd, not the one the command named. Only the
 last of those can change on a later poll, which is why the wait is the window rather than a single
 try; the others are settled at the first look and simply cost their window. Once it closes the turn
-is gone, and it is one of the reasons #128 (P6) will report as `unrecorded`.
+is gone, and #128 (P6) lists its child in `spawned.unrecorded[]` when one appears.
 
 ## The shape
 
@@ -152,9 +152,9 @@ generation record that retires the loser (pinned by D7). Identity throughout is 
 `syncSubagentTranscript` canonicalises the path it is handed, so one transcript has one state
 entry and one source however the path that reached it was spelled. Its `if (!cwd) continue` — which dropped the item **without
 re-queueing it**, so the turn was never retried — becomes a `searched === 0` check that keeps the
-item pending while its window is open. The arm beside it is unchanged and is NOT window-bounded:
-a turn that searched and found nothing stays pending with no time bound, which is a property #128
-(P6) has to report on rather than one this change touches.
+item pending while its window is open. The arm beside it was left unchanged here:
+a turn that searched and found nothing stayed pending with no time bound; #128 (P6) bounded it by
+the same window, since its listing reports any child that appears too late.
 
 **The residual this leaves: a sibling, not a child.** Discovery's rule is "a session that started
 in that directory within ±15s of the spawning turn", and the directory the fallback searches also
@@ -177,8 +177,9 @@ The bound is the pending queue's, not this change's, and it is not uniform: a tu
 and found nothing is re-discovered every 667ms for the daemon's life, while one that found
 something, and one that had nowhere to look, stop at the window plus the settle margin. So a
 no-`cd` spawn that never produces a child costs one extra `readdirSync` per poll, indefinitely —
-the same shape the `cd` arm already had, now reachable by more turns. Bounding that arm is #128's
-(P6) to do, since the bound and the `unrecorded[]` report are the same decision.
+the same shape the `cd` arm already had, now reachable by more turns. #128 (P6) has since bounded
+that arm to the window plus the settle margin, since the bound and the `unrecorded[]` report are
+the same decision.
 
 `resolveLastCwd` is memoised on `(path, mtimeMs, size)`, so the fallback costs one tail read per
 transcript change, not one per turn.

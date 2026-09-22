@@ -310,7 +310,7 @@ _Avoid_: menu
 
 **JSON mode** (#26):
 `--json` — the CLI's machine-readable mode. Writes exactly one JSON object (schema
-`wtft/session@5`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
+`wtft/session@6`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
 Human prose goes to stderr, and every sentence that would otherwise have been on stdout is
 repeated in the object's `notices[]`, where `code` is the contract and `text` is disposable.
 With an interactive terminal it still shows the scoped session picker (#89) whenever the
@@ -407,6 +407,16 @@ session a descendant's parse folded in, whose money landed once in `spawned.tota
 already reported), `in-self-total` (a child whose cost is already inside `total`, at any fold depth, or the reported session itself reached round a cycle) and
 `depth-capped` (past the walk's bound).
 _Avoid_: Missing, lost, dropped (the edge is known; only the amount is not)
+
+**Unrecorded spawn** (#128):
+A session that looks like this session's launcher child and that no spawn-ledger edge names —
+`spawned.unrecorded[]` in JSON, the `UNRECORDED` block under `--tokens`. Listed with its own cost
+and a **tier**: `named` (its `cwd` contains this session's id, so the launcher named the parent)
+or `inferred` (a program started it, in this repo's worktree fan-out or a temp sandbox, inside a
+**spawn window** — 30 minutes after any turn of this session that ran a command). A LIST, never a
+claim: nothing in it reaches `total`, `spawned.total` or `tree`. Distinct from **unattributed**,
+which is a recorded edge whose child could not be read.
+_Avoid_: Orphan, unattributed child, probable descendant (each reads as a claim about the money)
 
 **Descendants unknown** (#116):
 The state where the spawn ledger itself could not be READ — `spawned.ledgerError` in JSON,

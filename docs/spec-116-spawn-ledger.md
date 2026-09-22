@@ -306,8 +306,9 @@ a project dir under this repo or its worktrees, shown with their cost and **neve
 peer session running at the same time is kept out of the list), so it is **#128**, not a late
 addition here.
 
-Until #128 lands, an unrecorded launcher child is **silently missing**, exactly as it is today —
-which is why #116 stays open when this merges.
+#128 has since landed: an unrecorded launcher child is listed in `spawned.unrecorded[]` with its
+cost and a tier, never summed — `docs/spec-128-unrecorded-spawns.md`, whose Closer is this clause
+run against the same kind of fixture.
 
 Plus, each with its own test: UUID and ISO-8601 validation on write; the 4 KiB refusal, *executed*
 through escape expansion rather than asserted as a constant; 24 concurrent appends making 24 intact
@@ -334,7 +335,8 @@ descendant, which the parse does not fold, is priced under its own edge in both 
   `princess-pi-tools`, and this change ships first so there is something to call.
 - **Folding descendants into TOTAL.** A separate decision, and it needs the interaction-level
   attribution rework in #107 / #14 / #94 first.
-- **Listing an unrecorded child.** The Closer's second clause — #128. A spawner that never calls
+- **Listing an unrecorded child.** The Closer's second clause — #128, since landed
+  (`docs/spec-128-unrecorded-spawns.md`). A spawner that never calls
   `spawn-record` is invisible here, exactly as it is today.
 - **Live growth.** A long-lived interactive child's cost is read at the moment `wtft` runs; it is a
   snapshot and will be stale, which is #14 and is not made worse here.

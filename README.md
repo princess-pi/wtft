@@ -146,7 +146,7 @@ wtft --json | jq .total.costUsd
 `wtft --json` writes **exactly one JSON object** to stdout and nothing else —
 no chart, no ANSI, and no `3.6k`-style abbreviation, which is lossy. Human prose
 goes to stderr, and every sentence that would otherwise have been on stdout is
-repeated in the object's `notices[]`. The schema is `wtft/session@5`; field names
+repeated in the object's `notices[]`. The schema is `wtft/session@6`; field names
 and exit codes are versioned API, the prose inside `notices[].text` is not. Full
 contract: [`docs/spec-26-json.md`](./docs/spec-26-json.md).
 
@@ -274,6 +274,18 @@ was read cleanly; an unreadable ledger, or one with skipped lines, still prints
 — saying so is the whole point, since "no edges" and "could not tell" are not
 the same report. Full
 contract: [`docs/spec-116-spawn-ledger.md`](./docs/spec-116-spawn-ledger.md).
+
+A child nobody recorded is not dropped either. `spawned.unrecorded[]` lists the
+sessions that look like this session's children and that no ledger edge names,
+each with its own cost and a `tier`: **`named`** when the child's `cwd` contains
+this session's id, **`inferred`** when a program started it (Claude Code's
+`entrypoint: sdk-cli`) in this repo's worktrees or a `/tmp` sandbox within 30
+minutes of a command this session ran. `inferred` is a guess, and says so. A
+session a human started is never listed. **Nothing in the list is summed** into
+`total`, `spawned.total` or `tree`, and it never causes exit 9. `--tokens` prints
+it as an `UNRECORDED` block. Pi sessions are not listed yet
+([#209](https://github.com/princess-pi/wtft/issues/209)). Full contract:
+[`docs/spec-128-unrecorded-spawns.md`](./docs/spec-128-unrecorded-spawns.md).
 
 `--pager` is a Pi TUI overlay, not a CLI flag — the CLI says so and exits 1,
 suggesting `wtft … | less -R`. Any `wtft` run that produces a report spawns the log

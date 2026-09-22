@@ -12,7 +12,10 @@ import type { Interaction } from "../extensions/lib/wtft-parser.ts";
 import claudeDiscovery from "../extensions/lib/harness/claude-code/discovery.ts";
 import { computeSpawnTree } from "../extensions/lib/wtft-spawn-tree.ts";
 import { appendSpawnRecord, SPAWN_RECORD_SCHEMA } from "../extensions/lib/wtft-spawn-ledger.ts";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { discoverClaudeSubAgentFilesForTurn } from "../extensions/lib/wtft-parser.ts";
+import { listUnrecordedSpawns } from "../extensions/lib/wtft-unrecorded.ts";
+import { readClassifiedTagFile, WTFT_TAGGER_VERSION } from "../bin/wtft.mjs";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("128-unrecorded-spawns");
@@ -286,6 +289,52 @@ function cli(args: string[]): { out: string; status: number | null } {
 
 	appendSpawnRecord({ schema: SPAWN_RECORD_SCHEMA, ts: new Date(at(1)).toISOString(), parent: PARENT, child: CLOSER_CHILD, mechanism: "herdr-agent-start" }, cliLedger);
 	check(!cli(["--tokens"]).out.includes("UNRECORDED"), "E9 no block when the list is empty");
+}
+
+// ---
+// PART D — the daemon stops re-searching a turn whose window has closed
+// ---
+console.log("\nPART D — a spawning turn that found nothing leaves the queue once its window closes");
+{
+	const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+	const DAEMON_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
+	const rootCwd = path.join(dir, "d-own");
+	fs.mkdirSync(rootCwd, { recursive: true });
+	const rootDir = path.join(dir, "d-root");
+	fs.mkdirSync(rootDir, { recursive: true });
+	const sessionId = "a1000000-0000-4000-8000-0000000000d1";
+	const rootPath = path.join(rootDir, `${sessionId}.jsonl`);
+	const spawnedAt = Date.now() - 30_000;
+	const commands = ["claude -p 'go'"];
+	fs.writeFileSync(rootPath, JSON.stringify({
+		type: "assistant", timestamp: new Date(spawnedAt).toISOString(), cwd: rootCwd, entrypoint: "cli",
+		message: {
+			role: "assistant", id: "d-root-turn", model: "claude-opus-5",
+			content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: commands[0] } }],
+			usage: { input_tokens: 10, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+		},
+	}) + "\n");
+
+	const daemon = spawn(process.execPath, [DAEMON_BIN, "--session", rootPath], { detached: true, stdio: "ignore", env: { ...process.env } });
+	daemon.unref();
+	const tagPath = path.join(rootDir, "wtft-tags", `${sessionId}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const outputInTag = () => readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0);
+	for (let i = 0; i < 40 && outputInTag() < 100; i++) await sleep(250);
+	check(outputInTag() === 100, `D1 fixture precondition: the tag holds the root turn alone (got ${outputInTag()})`);
+
+	// Begins inside the discovery window, but is written after it closed.
+	const late = "a1000001-0000-4000-8000-0000000000d2";
+	writeChild({ id: late, slug: rootCwd.replace(/[^a-zA-Z0-9]/g, "-"), cwd: rootCwd, startedAt: spawnedAt + 5_000, entrypoint: "sdk-cli" });
+	check(discoverClaudeSubAgentFilesForTurn(commands, spawnedAt, rootCwd).files.some(f => f.endsWith(`${late}.jsonl`)),
+		"D2 fixture precondition: discovery for the turn does find the late child — only the queue can drop it");
+	await sleep(3_000);
+	const total = outputInTag();
+	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
+	check(total === 100, `D3 the turn left the queue when its window closed, so the late child is not folded (got ${total})`);
+
+	const rows = listUnrecordedSpawns({ rootSessionId: sessionId, rootCwd, turns: readClassifiedTagFile(tagPath), exclude: new Set() });
+	check(rows.some(r => r.child === late && r.tier === "inferred" && r.basis === "worktree"),
+		`D4 and nothing is lost: the listing reports it (got ${JSON.stringify(rows.map(r => [r.child, r.tier, r.basis]))})`);
 }
 
 // ---

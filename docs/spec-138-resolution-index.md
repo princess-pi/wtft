@@ -22,8 +22,8 @@ indexSessionsById?(): Map<string, string>;  // session id → its newest transcr
 ```
 
 It walks the tree once, with the same rules `resolveSessionById` uses: the same files, and the
-newest by mtime when one id has two files — but only a SECOND file for the same id costs a `stat`
-at all; the common case, one file per id, records the path on first sight and never stats it.
+newest by mtime when one id has two files. It stats every copy, as `resolveSessionById` does, so
+a copy that cannot be stat-ed is never indexed and the walk asks the next harness instead.
 The resolver strips a trailing `.jsonl` from the id
 first, as every `resolveSessionById` does, so a child recorded as `<uuid>.jsonl` still resolves. Both built-ins implement it. Their
 `resolveSessionById` stays a single-id scan that stats only the matching files, because a running
@@ -82,16 +82,16 @@ being counted, and `--tokens` rendering one row per edge, which is #216.
   each stripped of a trailing `.jsonl` before being compared against the ledger's (already
   stripped) ids.
 - **Same answers:** a resolvable child still resolves and is priced; with the same id in two
-  project directories, the newer copy wins, as before. Correct over a tree with no duplicate ids
-  too, which is the case the stat-avoidance above changes the most; this bun runtime does not let a
-  test spy on `fs.statSync` call counts through `import * as fs`, so that specific case is checked
-  for correctness rather than for the number of `stat` calls it made.
+  project directories, the newer copy wins, as before, and a tree with no duplicate ids indexes
+  correctly too.
 - **Seam agreement:** for every id in a fixture tree, `resolveSessionById(id)` equals
   `indexSessionsById().get(id)`, for both built-in harnesses.
 - **A loud index failure:** a harness root made unreadable makes `indexSessionsById` throw, and
   the walk fails with that error rather than reporting the affected children `not-found` (Q1, Q2).
 - **A dead first copy:** an id whose first-seen copy is a dangling symlink still indexes to its
   live copy, in agreement with `resolveSessionById` (D1, S1).
+- **A dead only copy:** an id whose only copy is a dangling symlink is not indexed, in agreement
+  with `resolveSessionById`'s `null`, so the next harness is asked (D2, S1).
 - **A work bound.** Road not taken, above.
 - **#97** — reading subagent transcripts by offset in the daemon. P7's other half.
 
@@ -153,3 +153,9 @@ being counted, and `--tokens` rendering one row per edge, which is #216.
 | Docstring said "same as before this change" | Verified | Rewritten without history |
 | A per-id throw was said to skip to the next id | Verified: it asks the next harness | Corrected |
 | "Never pays for its index" overstated the laziness | Verified | Corrected |
+
+## Macroscope, on the ready PR (#217)
+
+| Finding | Verdict | Action |
+|---|---|---|
+| Medium: a single copy that cannot be stat-ed was indexed, so the walk stopped at that harness and reported `unreadable` instead of asking the next one | Verified — reproduced as D2 and by S1; introduced by round 4's stat-avoidance | **Code fixed**: every copy is stat-ed, as `resolveSessionById` does, and an un-stat-able one is never indexed. This reverts round 4's stat-avoidance: agreement with the single lookup outranks the stats, which cost tens of milliseconds on a walk that has edges |

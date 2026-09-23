@@ -206,10 +206,8 @@ function mtimeOrNull(file: string): number | null {
 }
 
 /**
- * Every session id → its newest transcript, from one walk of the tree. The
- * common case — one file per id — never pays a `stat`: a path is recorded on
- * first sight, and only a SECOND file for the same id triggers the `stat`
- * pair needed to keep the newer one.
+ * Every session id → its newest readable transcript, from one walk of the
+ * tree: the answer `resolveSessionById` gives for each id.
  */
 function indexSessionsById(): Map<string, string> {
 	const index = new Map<string, string>();
@@ -236,16 +234,12 @@ function indexSessionsById(): Map<string, string> {
 	const newest = new Map<string, number>();
 	for (const file of files) {
 		const id = sessionIdOf(file);
-		const existing = index.get(id);
-		if (!existing) {
-			index.set(id, file);
-			continue;
-		}
-		// A copy that cannot be stat-ed (a dangling symlink, a file gone
-		// mid-walk) never beats one that can, whichever the walk met first.
-		if (!newest.has(id)) newest.set(id, mtimeOrNull(existing) ?? -Infinity);
+		// Stat every copy, as `resolveSessionById` does: one that cannot be
+		// stat-ed (a dangling symlink, a file gone mid-walk) is never indexed,
+		// so the walk asks the next harness rather than stopping on a dead path.
 		const mtimeMs = mtimeOrNull(file);
-		if (mtimeMs !== null && mtimeMs > newest.get(id)!) {
+		if (mtimeMs === null) continue;
+		if (!newest.has(id) || mtimeMs > newest.get(id)!) {
 			newest.set(id, mtimeMs);
 			index.set(id, file);
 		}

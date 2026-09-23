@@ -159,6 +159,11 @@ console.log("\nPART D — a dangling copy of an id does not win the index");
 	}
 	check(claude.indexSessionsById!().get(id) === live && claude.resolveSessionById(id) === live,
 		`D1 the index and the single lookup both answer the live copy, whatever order the walk meets them in (got ${claude.indexSessionsById!().get(id)})`);
+	const lonely = uuid(8102, "a138");
+	fs.mkdirSync(path.join(claudeRoot, "-tmp-d-lonely"), { recursive: true });
+	fs.symlinkSync(path.join(dir, "gone", `${lonely}.jsonl`), path.join(claudeRoot, "-tmp-d-lonely", `${lonely}.jsonl`));
+	check(!claude.indexSessionsById!().has(lonely) && claude.resolveSessionById(lonely) === null,
+		`D2 an id whose only copy cannot be stat-ed is not indexed, so the next harness is asked (got ${claude.indexSessionsById!().get(lonely)})`);
 }
 
 // ---

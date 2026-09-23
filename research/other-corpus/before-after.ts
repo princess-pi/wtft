@@ -26,137 +26,235 @@
  * subagent discovery to /tmp, and $0.38 of a real subagent's cost disappeared
  * from a session total with every unit test still green.
  *
+ * The frozen corpus is a projects-shaped tree, not a flat directory: each
+ * selected transcript keeps its path relative to its harness's sessions root
+ * (`<snap>/projects/...` for Claude Code, `<snap>/pi/...` for Pi), so a
+ * discovered `claude -p` child transcript can be copied to the same relative
+ * location its own root would place it at. Both BEFORE and AFTER parse the
+ * live selection once before anything is copied — a discovery pass, then the
+ * freeze — so a child only one build's classifier discovers is still in the
+ * frozen corpus, and the gained/lost subagent check below can still fire on
+ * it. Both measured passes then read the frozen tree through
+ * `WTFT_CLAUDE_PROJECTS_DIR` (the #129 seam), never the live projects root —
+ * a child transcript still being written between the two passes would
+ * otherwise move the totals with no classifier change involved. `HOME` is not
+ * the seam: bun caches `os.homedir()` at process start, so a fake `HOME` set
+ * after the process is already running does not move `projectsDir()`'s
+ * default.
+ *
  * Usage:
  *   bun research/other-corpus/before-after.ts --before <path-to-other-checkout>
  *                                             [--sessions N]
  *
  * `--before` is a checkout of the build to compare against (e.g. the main
- * clone); this worktree is always the "after" side.
+ * clone); this worktree is always the "after" side. Selection honours
+ * `WTFT_CLAUDE_PROJECTS_DIR` / `WTFT_PI_SESSIONS_DIR` for the live roots to
+ * pick from, so a test can point both at a fixture. Selection keeps the
+ * `-size +40k -newermt '-60 days'` filter unconditionally — a fixture must
+ * satisfy it (write files over 40 KB with a fresh mtime) rather than the
+ * script relaxing it for tests.
  */
 import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-const argv = process.argv.slice(2);
-const arg = (name: string) => {
-	const i = argv.indexOf(name);
-	return i === -1 ? null : argv[i + 1] ?? null;
-};
-
-const BEFORE = arg("--before");
-const AFTER = path.resolve(import.meta.dirname, "..", "..");
-const N = Number(arg("--sessions")) || 250;
-
-if (!BEFORE) {
-	console.error("usage: bun research/other-corpus/before-after.ts --before <checkout> [--sessions N]");
-	console.error("  --before  a checkout of the build to compare against (e.g. the main clone)");
-	process.exit(2);
-}
+interface SubAgentBearing { claudeSubAgentFolds?: { id: string; file: string }[]; claudeSubAgentSessionIds?: string[] }
 
 /** Sorted, never shuffled — the same directory yields the same list. */
-function pick(root: string, n: number): string[] {
+export function pickTranscripts(root: string, n: number): string[] {
 	try {
 		return execSync(`find ${root} -name '*.jsonl' -size +40k -newermt '-60 days'`, { encoding: "utf8", maxBuffer: 1e9 })
 			.trim().split("\n").filter(Boolean).sort().slice(0, n);
 	} catch { return []; }
 }
 
+/** Every subagent transcript path folded into any of these interactions, at
+ *  any depth — `claudeSubAgentFolds` is already flattened across depths, so a
+ *  single pass over the top-level interactions names them all. */
+export function foldFilesOf(interactions: readonly SubAgentBearing[]): string[] {
+	return interactions.flatMap(i => (i.claudeSubAgentFolds ?? []).map(f => f.file));
+}
+
+/** The subagent ids these interactions report, from `claudeSubAgentFolds[].id`.
+ *  Falls back to `claudeSubAgentSessionIds` per interaction for a BEFORE build
+ *  old enough to carry only that field. */
+export function subagentIdsOf(interactions: readonly SubAgentBearing[]): string[] {
+	return interactions.flatMap(i =>
+		i.claudeSubAgentFolds ? i.claudeSubAgentFolds.map(f => f.id) : (i.claudeSubAgentSessionIds ?? []));
+}
+
 /**
- * Copy the selected transcripts to a snapshot directory, and measure THAT.
+ * Copy the selected transcripts, plus every subagent file either build's
+ * discovery pass named, into a projects-shaped snapshot directory, and
+ * measure THAT.
  *
- * Without this, the two passes read the live files at different instants, and a
- * session still being written to grows between them — so the "after" side sees
- * turns the "before" side never saw, and the totals invariant below compares
- * two different corpora.
+ * Without this, the passes read the live files at different instants, and a
+ * session still being written to grows between them — so the "after" side
+ * sees turns the "before" side never saw, and the totals invariant below
+ * compares two different corpora.
  *
  * Honest note on how this was arrived at: a $0.0379 difference on Claude Code
- * against an exactly-matching idle Pi corpus LOOKED like live appends, and this
- * snapshot was written on that theory. It was wrong — the snapshot reproduced
- * the same delta to the cent, which is what proved the difference was real and
- * sent the investigation to the `||` defect the header describes. The snapshot
- * stays because the confound is real and cheap to remove, not because it was
- * the explanation.
+ * against an exactly-matching idle Pi corpus LOOKED like live appends, and a
+ * flat-copy snapshot was written on that theory. It was wrong — the snapshot
+ * reproduced the same delta to the cent, which is what proved the difference
+ * was real and sent the investigation to the `||` defect the header
+ * describes. The snapshot stays because the confound is real and cheap to
+ * remove, not because it was the explanation.
  */
-function snapshot(files: string[], tag: string): string[] {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), `wtft-ab-${tag}-`));
-	return files.map((f, n) => {
-		// Keep the basename: discovery and session-id logic read it.
-		const dest = path.join(dir, `${n}-${path.basename(f)}`);
-		try { fs.copyFileSync(f, dest); return dest; } catch { return ""; }
-	}).filter(Boolean);
-}
+export function snapshotCorpus(opts: {
+	snapDir: string;
+	ccRoot: string;
+	piRoot: string;
+	ccFiles: readonly string[];
+	piFiles: readonly string[];
+	foldFiles: readonly string[];
+}): { projects: string; pi: string } {
+	const projectsOut = path.join(opts.snapDir, "projects");
+	const piOut = path.join(opts.snapDir, "pi");
+	fs.mkdirSync(projectsOut, { recursive: true });
+	fs.mkdirSync(piOut, { recursive: true });
 
-const home = process.env.HOME!;
-const sets: Record<string, string[]> = {
-	"claude-code": snapshot(pick(path.join(home, ".claude", "projects"), N), "cc"),
-	pi: snapshot(pick(path.join(home, ".pi", "agent", "sessions"), N), "pi"),
-};
-
-let mismatch = false;
-
-for (const [harness, files] of Object.entries(sets)) {
-	if (files.length === 0) { console.log(`\n===== ${harness}: no sessions found, skipped =====`); continue; }
-	const side: Record<string, { by: Map<string, number>; tot: number; subagents: Set<string> }> = {};
-
-	for (const [label, root] of [["BEFORE", BEFORE], ["AFTER", AFTER]] as const) {
-		// Cache-busting query so both builds load as distinct modules.
-		const mod = await import(`${root}/extensions/lib/wtft-parser.ts?${label}${harness}`);
-		const by = new Map<string, number>();
-		const subagents = new Set<string>();
-		let tot = 0;
-		for (const f of files) {
-			let ints;
-			try { ints = mod.deduplicateInteractions(mod.parseSessionFile(f)); } catch { continue; }
-			for (const i of ints) {
-				const c = mod.classifyInteraction(i);
-				by.set(c, (by.get(c) || 0) + i.cost);
-				tot += i.cost;
-				for (const id of (i as any).claudeSubAgentSessionIds ?? []) subagents.add(id);
-			}
+	const copyUnder = (file: string, root: string, outRoot: string): void => {
+		const rel = path.relative(root, file);
+		if (rel.startsWith("..") || path.isAbsolute(rel)) {
+			console.error(`before-after: fold file outside its root, skipped: ${file}`);
+			return;
 		}
-		side[label] = { by, tot, subagents };
-	}
+		const dest = path.join(outRoot, rel);
+		fs.mkdirSync(path.dirname(dest), { recursive: true });
+		try { fs.copyFileSync(file, dest); } catch { /* source vanished between discovery and freeze */ }
+	};
 
-	const b = side.BEFORE!, a = side.AFTER!;
-	const delta = a.tot - b.tot;
-	const gained = [...a.subagents].filter(id => !b.subagents.has(id));
-	const lost = [...b.subagents].filter(id => !a.subagents.has(id));
+	for (const f of opts.foldFiles) copyUnder(f, opts.ccRoot, projectsOut);
+	for (const f of opts.ccFiles) copyUnder(f, opts.ccRoot, projectsOut);
+	for (const f of opts.piFiles) copyUnder(f, opts.piRoot, piOut);
 
-	// THE TOTAL MAY RISE. IT MAY NEVER FALL. That is the whole rule, and it took
-	// three tries to state it as one line instead of three interacting ones:
-	//
-	//   cut 1: `explained = gained || lost` — a loss excused ITSELF.
-	//   cut 2: `explained = gained && !lost` — better, but the gate still only
-	//          fired on `Math.abs(delta)`, so a corpus total that FELL while any
-	//          new subagent was discovered came back "explained" and exited 0
-	//          (#106 review round 4, High/reasoning). A regression that loses
-	//          more than a new discovery adds was certified as fine.
-	//
-	// A reclassification cannot move a dollar; discovery can only ADD cost that
-	// was previously invisible. So a negative delta has no legitimate cause, and
-	// neither does a lost subagent id — each fails on its own, with no reference
-	// to the other.
-	if (delta < -0.005) mismatch = true;
-	if (lost.length > 0) mismatch = true;
-	// A RISE still needs a reason, and the only acceptable one is discovery.
-	const explained = gained.length > 0;
-	if (delta > 0.005 && !explained) mismatch = true;
-
-	console.log(`\n===== ${harness}: ${files.length} sessions =====`);
-	console.log(`total  BEFORE $${b.tot.toFixed(2)}  AFTER $${a.tot.toFixed(2)}  delta $${delta.toFixed(4)}` +
-		(delta < -0.005 ? "   <-- TOTAL FELL; spend became invisible, which is never acceptable"
-			: Math.abs(delta) <= 0.005 ? "  (equal, as required)"
-			: explained ? "  (a RISE explained by subagent discovery, below)"
-			: "   <-- UNEXPLAINED RISE; a reclassification cannot change the total"));
-	if (gained.length) console.log(`  subagents found only AFTER  (cost recovered): ${gained.join(", ")}`);
-	if (lost.length) console.log(`  subagents found only BEFORE (cost LOST — investigate): ${lost.join(", ")}`);
-	for (const c of [...new Set([...b.by.keys(), ...a.by.keys()])]
-		.sort((x, y) => (a.by.get(y) || 0) - (a.by.get(x) || 0))) {
-		const bv = b.by.get(c) || 0, av = a.by.get(c) || 0;
-		if (bv < 0.01 && av < 0.01) continue;
-		console.log(`${c.padEnd(13)}$${bv.toFixed(2).padStart(9)} ${(bv / b.tot * 100).toFixed(1).padStart(5)}%  ->  $${av.toFixed(2).padStart(9)} ${(av / a.tot * 100).toFixed(1).padStart(5)}%`);
-	}
+	return { projects: projectsOut, pi: piOut };
 }
 
-process.exit(mismatch ? 1 : 0);
+async function main(): Promise<void> {
+	const argv = process.argv.slice(2);
+	const arg = (name: string) => {
+		const i = argv.indexOf(name);
+		return i === -1 ? null : argv[i + 1] ?? null;
+	};
+
+	const BEFORE = arg("--before");
+	const AFTER = path.resolve(import.meta.dirname, "..", "..");
+	const N = Number(arg("--sessions")) || 250;
+
+	if (!BEFORE) {
+		console.error("usage: bun research/other-corpus/before-after.ts --before <checkout> [--sessions N]");
+		console.error("  --before  a checkout of the build to compare against (e.g. the main clone)");
+		process.exit(2);
+	}
+
+	const home = process.env.HOME!;
+	const ccRoot = process.env.WTFT_CLAUDE_PROJECTS_DIR || path.join(home, ".claude", "projects");
+	const piRoot = process.env.WTFT_PI_SESSIONS_DIR || path.join(home, ".pi", "agent", "sessions");
+
+	const picked: Record<string, string[]> = {
+		"claude-code": pickTranscripts(ccRoot, N),
+		pi: pickTranscripts(piRoot, N),
+	};
+
+	// Cache-busting query so both builds load as distinct modules.
+	const modBEFORE = await import(`${BEFORE}/extensions/lib/wtft-parser.ts?BEFORE`);
+	const modAFTER = await import(`${AFTER}/extensions/lib/wtft-parser.ts?AFTER`);
+
+	// Discovery pass: both builds parse the LIVE selection once, with the real
+	// projects root still in effect, before anything is frozen. Errors are
+	// swallowed here — an unreadable file just contributes no fold files; the
+	// measured pass below is where a read failure has to be visible.
+	const liveFiles = [...picked["claude-code"], ...picked.pi];
+	const foldFiles = new Set<string>();
+	for (const mod of [modBEFORE, modAFTER]) {
+		for (const f of liveFiles) {
+			try { for (const file of foldFilesOf(mod.parseSessionFile(f))) foldFiles.add(file); }
+			catch { continue; }
+		}
+	}
+
+	const snapDir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-ab-"));
+	const { projects: snapProjects, pi: snapPi } = snapshotCorpus({
+		snapDir, ccRoot, piRoot,
+		ccFiles: picked["claude-code"], piFiles: picked.pi,
+		foldFiles: [...foldFiles],
+	});
+
+	process.env.WTFT_CLAUDE_PROJECTS_DIR = snapProjects;
+
+	const sets: Record<string, string[]> = {
+		"claude-code": picked["claude-code"].map(f => path.join(snapProjects, path.relative(ccRoot, f))),
+		pi: picked.pi.map(f => path.join(snapPi, path.relative(piRoot, f))),
+	};
+
+	let mismatch = false;
+
+	for (const [harness, files] of Object.entries(sets)) {
+		if (files.length === 0) { console.log(`\n===== ${harness}: no sessions found, skipped =====`); continue; }
+		const side: Record<string, { by: Map<string, number>; tot: number; subagents: Set<string> }> = {};
+
+		for (const [label, mod] of [["BEFORE", modBEFORE], ["AFTER", modAFTER]] as const) {
+			const by = new Map<string, number>();
+			const subagents = new Set<string>();
+			let tot = 0;
+			for (const f of files) {
+				let ints;
+				try { ints = mod.deduplicateInteractions(mod.parseSessionFile(f)); } catch { continue; }
+				for (const id of subagentIdsOf(ints)) subagents.add(id);
+				for (const i of ints) {
+					const c = mod.classifyInteraction(i);
+					by.set(c, (by.get(c) || 0) + i.cost);
+					tot += i.cost;
+				}
+			}
+			side[label] = { by, tot, subagents };
+		}
+
+		const b = side.BEFORE!, a = side.AFTER!;
+		const delta = a.tot - b.tot;
+		const gained = [...a.subagents].filter(id => !b.subagents.has(id));
+		const lost = [...b.subagents].filter(id => !a.subagents.has(id));
+
+		// THE TOTAL MAY RISE. IT MAY NEVER FALL. That is the whole rule, and it took
+		// three tries to state it as one line instead of three interacting ones:
+		//
+		//   cut 1: `explained = gained || lost` — a loss excused ITSELF.
+		//   cut 2: `explained = gained && !lost` — better, but the gate still only
+		//          fired on `Math.abs(delta)`, so a corpus total that FELL while any
+		//          new subagent was discovered came back "explained" and exited 0
+		//          (#106 review round 4, High/reasoning). A regression that loses
+		//          more than a new discovery adds was certified as fine.
+		//
+		// A reclassification cannot move a dollar; discovery can only ADD cost that
+		// was previously invisible. So a negative delta has no legitimate cause, and
+		// neither does a lost subagent id — each fails on its own, with no reference
+		// to the other.
+		if (delta < -0.005) mismatch = true;
+		if (lost.length > 0) mismatch = true;
+		// A RISE still needs a reason, and the only acceptable one is discovery.
+		const explained = gained.length > 0;
+		if (delta > 0.005 && !explained) mismatch = true;
+
+		console.log(`\n===== ${harness}: ${files.length} sessions =====`);
+		console.log(`total  BEFORE $${b.tot.toFixed(2)}  AFTER $${a.tot.toFixed(2)}  delta $${delta.toFixed(4)}` +
+			(delta < -0.005 ? "   <-- TOTAL FELL; spend became invisible, which is never acceptable"
+				: Math.abs(delta) <= 0.005 ? "  (equal, as required)"
+				: explained ? "  (a RISE explained by subagent discovery, below)"
+				: "   <-- UNEXPLAINED RISE; a reclassification cannot change the total"));
+		if (gained.length) console.log(`  subagents found only AFTER  (cost recovered): ${gained.join(", ")}`);
+		if (lost.length) console.log(`  subagents found only BEFORE (cost LOST — investigate): ${lost.join(", ")}`);
+		for (const c of [...new Set([...b.by.keys(), ...a.by.keys()])]
+			.sort((x, y) => (a.by.get(y) || 0) - (a.by.get(x) || 0))) {
+			const bv = b.by.get(c) || 0, av = a.by.get(c) || 0;
+			if (bv < 0.01 && av < 0.01) continue;
+			console.log(`${c.padEnd(13)}$${bv.toFixed(2).padStart(9)} ${(bv / b.tot * 100).toFixed(1).padStart(5)}%  ->  $${av.toFixed(2).padStart(9)} ${(av / a.tot * 100).toFixed(1).padStart(5)}%`);
+		}
+	}
+
+	process.exit(mismatch ? 1 : 0);
+}
+
+if (import.meta.main) await main();

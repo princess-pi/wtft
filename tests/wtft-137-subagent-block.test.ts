@@ -164,6 +164,15 @@ console.log("\nPART E — wtft --tokens and --json on a session with a built-in 
 
 	// A nested directory whose entries cannot be stat'ed (readable, not searchable): the top-level
 	// subagent is still listed, so the list is partial rather than empty.
+	const hostile = path.join(path.dirname(agent), "agent-e2e\n\x1b[31mX.jsonl");
+	fs.writeFileSync(hostile, "");
+	fs.writeFileSync(hostile.replace(/\.jsonl$/, ".meta.json"), "{}");
+	fs.chmodSync(hostile.replace(/\.jsonl$/, ".meta.json"), 0o000);
+	const hostileErr = cli(["--tokens"]).stderr ?? "";
+	fs.rmSync(hostile); fs.rmSync(hostile.replace(/\.jsonl$/, ".meta.json"), { force: true });
+	check(/agent-e2e\uFFFD\uFFFD\[31mX\.meta\.json/.test(hostileErr) && !hostileErr.includes("\x1b[31mX"),
+		`E5b a notice's path cannot put a raw newline or escape sequence on stderr (stderr: ${JSON.stringify(hostileErr.slice(0, 300))})`);
+
 	const subDir = path.join(path.dirname(agent), "workflows");
 	fs.mkdirSync(subDir);
 	fs.writeFileSync(path.join(subDir, "agent-w.jsonl"), "");

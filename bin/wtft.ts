@@ -727,7 +727,7 @@ async function main() {
 		if (!opt.pending) scanSessionUncounted();
 		// Before the warning and the exit code: the tree can set `provisional`.
 		const emptyArmSubagents = opts.tokens && !opt.pending ? collectSubagentJson() : undefined;
-		for (const n of emptyArmSubagents?.notices ?? []) console.error(`\x1b[33m⚠ ${n.text}\x1b[0m`);
+		for (const n of emptyArmSubagents?.notices ?? []) warnNotice(n);
 		const emptyArmBlock = emptyArmSubagents ? renderSubagentBlock(emptyArmSubagents.block) : "";
 		const emptyArmTree = opts.tokens ? renderSpawnTree(emptyTotals(), sessionSpawnTree({ pending: opt.pending })) : "";
 		warnProvisionalOnce();
@@ -740,6 +740,9 @@ async function main() {
 		// exitCode, never process.exit — stdout is async on a pipe.
 		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
 	};
+
+	/** A notice names a file path, which can hold a newline or an escape sequence. */
+	const warnNotice = (n: WtftNotice) => console.error(`\x1b[33m⚠ ${n.text.replace(/[\u0000-\u001f\u007f-\u009f]/g, "\uFFFD")}\x1b[0m`);
 
 	/** Subagents this session spawned. `rows` omitted (not `[]`) when discovery was incomplete. */
 	const collectSubagentJson = (): { rows: WtftSubagentJson[] | undefined; notices: WtftNotice[]; block: SubagentRow[] } | undefined => {
@@ -938,7 +941,7 @@ async function main() {
 
 	if (opts.tokens) {
 		const subagents = collectSubagentJson();
-		for (const n of subagents?.notices ?? []) console.error(`\x1b[33m⚠ ${n.text}\x1b[0m`);
+		for (const n of subagents?.notices ?? []) warnNotice(n);
 		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, scanSessionUncounted(), sessionSpawnTree(), subagents?.block);
 		for (const line of tokenOutput.split("\n")) {
 			console.log(padStr + line);

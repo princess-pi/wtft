@@ -4,6 +4,10 @@ Status: **Code and Spec Approved** (2026-07-14) — implemented on branch
 `95-daemon-lifecycle`, verified 24/24 (see Verification results below)
 Issue: [#95](https://github.com/duppypro/princess-pi-tools/issues/95)
 
+Since #205, a session under a harness root shares one process. Fix A's immediate
+exit is the path for a session outside those roots. The shared-process note is in
+Verification, under the manual count.
+
 ## Problem
 
 Observed live (2026-07-13, during #52 pre-merge testing): five daemons attached to one
@@ -127,7 +131,13 @@ daemon per session across repeated `wtft` invocations and a forced version bump.
 That manual count is the 2026-07-14 measurement. Since #205, sessions under the Claude
 projects root or the Pi sessions root share one process per root. Each session still has
 its own pid lease, and that lease names the shared process. A session outside those roots
-still gets the per-session process this spec's spawn-twice test covers.
+still gets the per-session process this spec's spawn-twice test covers. On the shared
+process, a lost session lease or an idle session drops that session's slot and leaves the
+process running. Fix A's immediate exit is the outside-the-root path. The shared process
+also holds `wtft-harness-<claude|pi>-<12 hex chars of sha256(root)>.pid` in the temp
+directory. A second start that finds a live log parser daemon there points the session's
+lease at that pid and exits. Taking over a per-session lease signals a live daemon holder
+and retries the claim; a holder that is not the log parser daemon is replaced without a signal.
 
 ## Verification results (2026-07-14, Code Approved)
 

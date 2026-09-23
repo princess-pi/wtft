@@ -188,7 +188,8 @@ it.** A line with no `s` always counts.
 
 The daemon writes one on the first successful read of a child transcript in each daemon life,
 and on the first read after that transcript rotated. Rotation is a new inode, a shrink, a
-content-hash mismatch on a same-size file, or an attributed cost that dropped
+content-hash mismatch on a same-size file, a prefix-hash mismatch when the file grew, an
+attributed cost that dropped, or a lower cost on a plain message id already tagged
 (`docs/spec-114-14-generation-records.md`). The record goes first in
 the append, followed by every line of that read and every fold record it
 implies. A generation with no lines still writes its record, so a transcript rotated to empty

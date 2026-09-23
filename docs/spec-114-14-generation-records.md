@@ -59,11 +59,12 @@ when the file grew or rotated.
   The record goes first in the append, followed by every line of that read and every
   fold record it implies. A generation with no lines still writes its record, so a transcript
   rotated to empty drops its old lines.
-- **Rotation is an inode change, a shrink, a content-hash mismatch, or an attributed cost
-  that dropped.** A same-length rewrite on the same inode matches neither size nor inode.
-  While `readAtMs` is inside `MTIME_SETTLE_MS`, and again when `mtimeMs` moves and `size` does
-  not, the whole file is hashed against the bytes already consumed. A mismatch resets the
-  offset and opens a generation. A turn re-emitted with growing usage is an ordinary append:
+- **Rotation is an inode change, a shrink, a same-size content-hash mismatch, a prefix-hash
+  mismatch when the file grew, an attributed cost that dropped, or a lower cost on a plain
+  message id already tagged.** A same-length rewrite on the same inode matches neither size nor inode.
+  While `readAtMs` is inside `MTIME_SETTLE_MS` and the size is unchanged, and again when `mtimeMs`
+  moves and `size` does not, the whole file is hashed against the bytes already consumed. Growth
+  hashes that same prefix. A mismatch resets the offset and opens a generation. A turn re-emitted with growing usage is an ordinary append:
   the new line sits beside the old one, and id dedup keeps the higher cost. A larger
   replacement on a new inode is the rename case. A smaller replacement is the shrink.
 - **Per-source fold records.** Fold records are deduplicated per source per generation, not per

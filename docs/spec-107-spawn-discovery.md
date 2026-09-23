@@ -62,9 +62,12 @@ a session that spawns within 15s of its own start is a candidate for folding its
 sessions in one directory are candidates for folding each other, forever. `parseSessionFile` now
 carries the set of transcripts it is already inside, and the FOLD pass skips every one of them.
 Discovery itself still returns them: it answers "what is in this directory in this window", and
-every caller that folds what it gets adds its own guard — the daemon's is a path comparison
-against the session it watches, and it also hands that path to `parseSessionFile` as an ancestor,
-so a child cannot fold the session that spawned it.
+every caller that folds what it gets adds its own guard. The daemon drops a discovered file
+whose path is the session it watches. `syncSubagentTranscript` passes that session, the child
+transcript, and every child another holder owns to `attributeClaudeSubAgentCosts` as `doNotFold`.
+A nested file inside that call is still read by `parseSessionFile`, which adds the file it is
+parsing to the same set. A child does not fold the session that spawned it, and does not fold
+its own transcript.
 
 **A transcript the caller already lists is never folded into a sibling.** The one-shot CLI and
 the widget parse a list of a session's children — its Task subagents and its Pi siblings — and
@@ -125,8 +128,10 @@ is gone, and #128 (P6) lists its child in `spawned.unrecorded[]` when one appear
 `bin/wtft-daemon.ts`: the `pendingClaudeCommands` drain calls the per-turn discovery with
 `resolveLastCwd(sessionPath)`. It also has to undo one consequence of per-command discovery: one
 turn's window now returns both a child and the grandchild that child folds, and the daemon syncs
-each discovered transcript in its own `parseSessionFile` call, so the fold pass's within-one-call
-accounting cannot see across them. So a transcript some other synced transcript folds is skipped,
+each discovered transcript in its own `syncSubagentTranscript` call. That call reads the new bytes
+and attributes the retained fold-capable turns together. It does not hand the child to
+`parseSessionFile`. The fold pass's within-one-call accounting still cannot see across two of
+those calls. So a transcript some other synced transcript folds is skipped,
 and one already synced before that fold was seen has its source retired with a generation record
 (#114) — P4's mechanism, used here for what it was built for.
 
@@ -140,7 +145,7 @@ other's children, and each parse bakes what it folds into its own turns — so t
 lands in both, and retiring the child's own source does not remove either copy. The daemon
 therefore names an owner for every folded transcript, the lexicographically first holder, and hands
 every other holder that child in its `doNotFold` set. The set is part of the change gate, so a
-transcript re-parses when what it may fold changes (pinned by D8).
+transcript's retained turns are attributed again when what it may fold changes (pinned by D8). The child's own bytes are read when the file grew or a fragment is still held, not because the set changed.
 
 **A mutual fold keeps exactly one of the pair, chosen by path.** Two children of one turn in the
 shared project dir each fold the other, so a rule that retired everything folded elsewhere would
@@ -228,3 +233,16 @@ would read the real one):
   launcher-spawned child stays invisible to the parser, and the spawn ledger remains its only
   route.
 - **#128's `unrecorded[]` reasons** (P6). This change reduces the set; it does not report it.
+
+## Reconciliation record (2026-09-22, before offering #219)
+
+The code is the authority. These rows are the claims this pass changed. Widget status
+text that does not match `renderDaemonStatus` stays [#218](https://github.com/princess-pi/wtft/issues/218).
+
+| Artifact | Claim | Contradicted by | Covered by a test? | Action |
+|---|---|---|---|---|
+| `docs/wtft-incremental-render-spec.md` fold call | the daemon passes only children another holder owns | `syncSubagentTranscript` also passes the transcript and the watched session | D4, D5, D7 in `tests/wtft-107-spawn-discovery.test.ts` | Fixed |
+| `docs/spec-107-spawn-discovery.md` | the daemon hands the watched session to `parseSessionFile`, and syncs each child with that function | the wake calls `attributeClaudeSubAgentCosts` with `doNotFold`; `parseSessionFile` is the nested read | D4 in the same suite; `tests/wtft-420-subagent-call-site.test.ts` | Fixed |
+| `docs/wtft-incremental-render-spec.md` discovery row | a search that found nothing is retried for the daemon's life | that turn is dropped once the window plus the settle margin has passed | `reconciled-against-untested` — U4 covers an empty search result, not the later drop | Fixed |
+| `docs/spec-114-14-generation-records.md`, `docs/wtft-tag-format.md`, incremental spec | rotation is inode, shrink, content hash, or an attributed cost drop | a grown file whose prefix hash mismatches, and a lower cost on a plain message id already tagged, also open a generation | `reconciled-against-untested` — `tests/wtft-97-subagent-offset.test.ts` covers the offset read, not these two triggers | Fixed |
+| `docs/spec-95-daemon-lifecycle.md`, `CONTEXT.md`, `README.md` | one daemon per session, and a version bump replaces it | a harness root shares one process; a live one is left running and the session lease is pointed at it | shared process and idle drop: `tests/wtft-205-one-daemon-per-harness.test.ts`. The version-bump sentence is `reconciled-against-untested` | Fixed |

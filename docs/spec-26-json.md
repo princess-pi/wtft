@@ -50,11 +50,11 @@ pinned consumer cannot see is still a rename. The strings inside
 branches on `notices[].code` is safe, one that matches `notices[].text` has no
 contract.
 
-### Schema `wtft/session@7`
+### Schema `wtft/session@8`
 
 ```json
 {
-  "schema": "wtft/session@7",
+  "schema": "wtft/session@8",
   "session": {
     "path": "/home/u/.claude/projects/-x/abc.jsonl",
     "harness": "claude-code",
@@ -82,7 +82,7 @@ contract.
   ],
   "uncounted": { "compaction": 0, "recap": 0 },
   "spawned": {
-    "schema": "wtft/spawn-tree@3",
+    "schema": "wtft/spawn-tree@4",
     "descendants": 1,
     "edges": [ { "parent": "…", "child": "…", "mechanism": "pr-review-lens",
                  "ts": "2026-09-16T05:00:00Z", "label": "correctness", "depth": 1,
@@ -95,6 +95,7 @@ contract.
     "maxDepth": 5,
     "malformedLedgerLines": 0,
     "ledgerError": null,
+    "descendantUntagged": [],
     "total": { "costUsd": 12.34, "inputTokens": 0, "outputTokens": 0,
                "reasoningTokens": 0, "cacheReadTokens": 0, "cacheWriteTokens": 0 },
     "unrecorded": [ { "child": "…", "path": "/home/u/.claude/projects/-tmp-pr-review-y/….jsonl",
@@ -125,7 +126,7 @@ contract.
 
 | Key | Type | Meaning |
 |---|---|---|
-| `schema` | string | `"wtft/session@7"`. **Adding a top-level key bumps it — a NESTED one too** (Duppy, 2026-09-18, answer Y). `@2` is #116 (`spawned`, `tree`); `@3` is #141 (`subagents[]`); `@4` is #119's `total.untaggedCostUsd`; #89's `-s` no-TTY contract change is not a key change but rides the same bump (see Amendment 3); `@5` is #133's `spawned.edges[].live` and the fourth `provisional.reason` (Amendment 4); `@6` is #128's `spawned.unrecorded[]` (Amendment 5); `@7` is #137's `subagents[].total` (Amendment 6). A consumer that only wants to know whether a given wtft can report subagents should still test for the `subagents[]` key, since absence is meaningful there (see below) and a version string cannot carry that. |
+| `schema` | string | `"wtft/session@8"`. **Adding a top-level key bumps it — a NESTED one too** (Duppy, 2026-09-18, answer Y). `@2` is #116 (`spawned`, `tree`); `@3` is #141 (`subagents[]`); `@4` is #119's `total.untaggedCostUsd`; #89's `-s` no-TTY contract change is not a key change but rides the same bump (see Amendment 3); `@5` is #133's `spawned.edges[].live` and the fourth `provisional.reason` (Amendment 4); `@6` is #128's `spawned.unrecorded[]` (Amendment 5); `@7` is #137's `subagents[].total` (Amendment 6); `@8` is #180's `spawned.descendantUntagged[]` (Amendment 7). A consumer that only wants to know whether a given wtft can report subagents should still test for the `subagents[]` key, since absence is meaningful there (see below) and a version string cannot carry that. |
 | `session.path` | string | The session `.jsonl` this run read. |
 | `session.harness` | string \| null | Harness id whose parse adapter claims the session's first assistant turn — `"claude-code"`, `"pi"`, or an id registered out of tree through the #156 seam. `null` means **no claim**, and does not distinguish an empty session, one not written yet, a file that could not be read, and a format no registered harness understands. |
 | `session.taggerVersion` | string | `WTFT_TAGGER_VERSION` of the running binary. Not necessarily the version in `tagPath`: a stale-version read lands on an older tag. |
@@ -133,8 +134,8 @@ contract.
 | `provisional.provisional` | bool | **This run's** verdict — may a number in this report still change? Usually `readTagProvisional`'s answer, but the blind-spot scan and the spawn-tree walk can set it too (see below and Amendment 4), so do not read it as "what the tag file says". For `descendant-live` only `spawned` and `tree` can move; `total` is settled. |
 | `provisional.reason` | string \| null | A **closed four-value vocabulary**, enforced by the `TagProvisionalReason` union: `"stale-version"` · `"unswept"` · `"subagent-unreadable"` · `"descendant-live"` (#133, Amendment 4), or `null` when settled. `--json` did not widen it; #133 did. **Issue #26's own wish-list names only two**, `stale-version` and `unswept`: it was written before #457 added the third, and this spec supersedes it on that point. Repeated review lenses have cited the issue's list as the contract; it is not. |
 | `total.*` | number | Exact totals for **this session as the daemon tagged it** — its own turns AND the Task subagents blended into its tag file. The spawn walk marks an edge to any session the tag's fold records name `in-self-total` and never adds it: `tree` would bill it twice. The same holds for a `claude -p` session that a `claude -p` child of this session folded in, at any depth. The tag's fold records name each such session, and those records are what the walk reads (`docs/spec-178-135-180-fold-records.md`). **Launcher-spawned descendants are not in here** (#116) — those are `spawned`, and `tree` is the sum. Cost is USD, the rest are token counts. |
-| `spawned` | object | The recorded lineage (#116), schema `wtft/spawn-tree@3`. Present on every run, so an empty tree means "read the ledger, found nothing" rather than "nobody looked" — the same rule as `uncounted`. |
-| `spawned.schema` | string | `"wtft/spawn-tree@3"`. Versioned separately from the document. |
+| `spawned` | object | The recorded lineage (#116), schema `wtft/spawn-tree@4`. Present on every run, so an empty tree means "read the ledger, found nothing" rather than "nobody looked" — the same rule as `uncounted`. |
+| `spawned.schema` | string | `"wtft/spawn-tree@4"`. Versioned separately from the document. |
 | `spawned.edges[]` | array | One row per recorded edge reached from this session, in walk order. Always `parent`, `child`, `mechanism`, `ts`, `depth`, `resolved`, `path`, `total`; `label`, `model` and `cwd` only where the ledger line carried them, `skip` only on an unresolved edge, and `live` only on a resolved one (Amendment 4). `depth` is 1 for a direct child. |
 | `spawned.total` | object | The sum over RESOLVED descendants. Where a descendant's parse folded in a session that is already in `total`, already counted under its own edge, or already folded by an earlier descendant, that session's share is subtracted from the descendant's total. Unattributed and depth-capped edges are not in it. |
 | `spawned.edges[].total` | object \| null | **`null`, never a zero object**, when the edge contributed nothing. A zero would say "this child cost nothing", which is a claim; `null` says we do not have one. `skip` names why: `not-found`, `unreadable`, `already-counted`, `already-seen-unresolved`, `in-self-total`, `depth-capped`. `already-counted` also covers a `claude -p` session a resolved descendant's parse folded in. |
@@ -144,8 +145,9 @@ contract.
 | `spawned.descendants` | number | Sessions priced from their own file, **each counted exactly once**: a diamond or a cycle in the ledger contributes once, not twice. Lower than `edges.length` whenever an edge was skipped. A session known only through a resolved descendant's parse fold is inside that descendant's total and is not counted here. |
 | `spawned.malformedLedgerLines` | number | Ledger lines the reader could not use. A broken spawner shows up as a number rather than an absence. |
 | `spawned.ledgerError` | string \| null | The ledger read FAILED, with the message. Without this field an unreadable ledger would serialise identically to "read it, this session spawned nothing" — the silent gap #116 exists to end, reintroduced inside its own fix. An *absent* ledger is not an error. |
+| `spawned.descendantUntagged[]` | array | `{child, untaggedInteractions, untaggedCostUsd}`, one per counted descendant (a `resolved` edge) whose own parse holds untagged turns — no model id, as `untaggedInteractions` counts them for this session (#180, Amendment 7). Their cost is **not** in that edge's `total`, `spawned.total` or `tree`, exactly as this session's own untagged cost is not in `total.costUsd`. `untaggedCostUsd` is often `0`; the entry is there because the turns exist. `[]` when no counted descendant has any. |
 | `spawned.unrecorded[]` | array | Sessions other than this one that look like this session's launcher children and that **no ledger edge names** — when `spawned.ledgerError` is set no edge is known, so a recorded child may be listed — (#128, Amendment 5): `{child, path, cwd, ts, tier, basis, total, skip?}`. `tier` is `named` (the child's `cwd` contains this session's id — certain) or `inferred` (started by a program, in this repo's worktree fan-out or a temp sandbox, inside a launch span — a guess). `basis` is `cwd-names-parent`, `worktree` or `tmp`. `total` is the child's own cost, `null` with `skip: "unreadable"` when it could not be parsed. **Never in `spawned.total`, `tree` or `total`**, and never a reason for exit 9. `[]` means looked and found none, or that the session ran no command and so had nothing to look near; a read error in the scan fails the run (exit 1) instead of emitting `[]`; only a path that is gone is skipped. A session already counted — in `total` through the tag's fold records, or inside another row — is not listed either. A `named` row is listed whoever started it; outside `named`, a human-started session never is. |
-| `tree.*` | number | **SELF + RESOLVED descendants**, as a field, so a consumer never adds two numbers and has to work out whether it double-counted. A **floor** whenever anything was not counted, under any of FOUR conditions: `spawned.unattributed` is non-empty, `spawned.depthCapped` is non-zero, `spawned.ledgerError` is non-null, or `spawned.malformedLedgerLines` is non-zero. The last two are the traps — an unreadable ledger sets none of the others, so a consumer checking only those reads a zeroed tree as a complete lineage; and a malformed line WAS a record, so its edge is lost with the count as its only trace. Checking `unattributed` alone reads a depth-truncated tree as complete. |
+| `tree.*` | number | **SELF + RESOLVED descendants**, as a field, so a consumer never adds two numbers and has to work out whether it double-counted. A **floor** whenever anything was not counted, under any of FIVE conditions: `spawned.unattributed` is non-empty, `spawned.depthCapped` is non-zero, `spawned.ledgerError` is non-null, `spawned.malformedLedgerLines` is non-zero, or `spawned.descendantUntagged` is non-empty. The last two are the traps — an unreadable ledger sets none of the others, so a consumer checking only those reads a zeroed tree as a complete lineage; and a malformed line WAS a record, so its edge is lost with the count as its only trace. Checking `unattributed` alone reads a depth-truncated tree as complete. |
 | `models[]` | array | One row per model id, **sorted by `costUsd` descending** — the same order and the same numbers as the rendered `--tokens` table's rows, un-abbreviated. `model` is the full id, never shortened. |
 | `models[].priced` | bool | `isModelPriced(model)` — the `?` marker in the rendered table. `false` means **no rate card**, not "wtft guessed this row": a harness-native per-turn cost is used unchanged wherever the transcript records one, so a marked row's cost can mix provenance. |
 | `categories[]` | array | One row per `CATEGORY_ORDER` entry, **always all fourteen, always in `CATEGORY_ORDER` order**, so a consumer can index by position. |
@@ -364,7 +366,7 @@ to write an object to.
 
 ```console
 $ node bin/wtft.mjs -s <fixture> --json \
-    | jq -e '.schema == "wtft/session@7" and (.total.outputTokens|type) == "number"'
+    | jq -e '.schema == "wtft/session@8" and (.total.outputTokens|type) == "number"'
 ```
 
 exits 0, and `tests/wtft-26-json.test.ts` asserts, on a fixture, in eleven
@@ -624,3 +626,15 @@ the `--tokens` SUBAGENTS block renders is also machine-readable. The figure is m
 means no model-tagged line carries that subagent's source yet.
 
 **Closer:** `tests/wtft-137-subagent-block.test.ts`. Full record: `docs/spec-137-150-subagent-block.md`.
+
+## Amendment 7 — `wtft/session@8`: `spawned.descendantUntagged[]` (#180, 2026-09-23)
+
+A counted descendant's untagged turns are dropped from its edge total, so a descendant whose turns
+are all untagged rendered `$0.00` with no floor condition set. `spawned.descendantUntagged[]` names
+each such descendant with its untagged turn count and cost, and it is the fifth condition under
+which `tree` is a floor (Duppy's decision D2 on #194). Nothing moves into or out of any total.
+
+- **Two bumps.** `wtft/spawn-tree@3` becomes `@4`, and the document becomes `wtft/session@8`.
+- **`--tokens`** prints one line under the SPAWNED rows when the list is non-empty.
+
+**Closer:** `tests/wtft-180-descendant-untagged.test.ts`. Full record: `docs/spec-194-p9-housekeeping.md` § H1.

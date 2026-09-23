@@ -1821,6 +1821,10 @@ const rows: string[] = [];
 	if (spawned.malformedLedgerLines > 0) {
 		out += `           ${spawned.malformedLedgerLines} unusable ledger line(s) skipped\n`;
 	}
+	if (spawned.descendantUntagged.length > 0) {
+		const cost = spawned.descendantUntagged.reduce((sum, d) => sum + d.untaggedCostUsd, 0);
+		out += `           ${spawned.descendantUntagged.length} descendant(s) with untagged turns — ${formatCost(cost)} not in SPAWNED (#180)\n`;
+	}
 	// The SPAWNED subtotal is printed, because TREE names it as an addend and a
 	// reader should not have to sum the rows to check the arithmetic — nor try,
 	// when some rows carry a skip reason instead of a number.

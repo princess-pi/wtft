@@ -332,7 +332,7 @@ _Avoid_: menu
 
 **JSON mode** (#26):
 `--json` — the CLI's machine-readable mode. Writes exactly one JSON object (schema
-`wtft/session@7`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
+`wtft/session@8`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
 Human prose goes to stderr, and every sentence that would otherwise have been on stdout is
 repeated in the object's `notices[]`, where `code` is the contract and `text` is disposable.
 With an interactive terminal it still shows the scoped session picker (#89) whenever the
@@ -411,9 +411,10 @@ _Avoid_: Spawn log, lineage file, parent map, edge database
 **Self / tree** (#116):
 **Self** is a session's own turns — what `total` has always meant and still means. **Tree** is
 self plus every RESOLVED descendant reached through the spawn ledger, so it is a floor whenever
-anything went uncounted — `unattributed` non-empty, `depthCapped` non-zero, `ledgerError` set, or
+anything went uncounted — `unattributed` non-empty, `depthCapped` non-zero, `ledgerError` set,
 `malformedLedgerLines` non-zero (a malformed line was a record, so its edge is lost and the count is
-its only trace). Both are explicit fields under `--json`; the `--tokens` table shows the
+its only trace), or `descendantUntagged` non-empty (a counted descendant's untagged turns, left out
+of its total). Both are explicit fields under `--json`; the `--tokens` table shows the
 split as `TOTAL` / `SPAWNED` / `TREE`, and shows none of the three only when this session recorded
 no edges AND the ledger read cleanly — an unreadable ledger or a skipped line still prints, because
 "no edges" and "could not tell" are different reports. Never write a bare "the session's cost" where the two can differ.

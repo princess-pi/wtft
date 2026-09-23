@@ -8,7 +8,7 @@ import { IDLE_THRESHOLD_MS } from "./wtft-daemon-lib.js";
 import { listUnrecordedSpawns, type UnrecordedSpawn } from "./wtft-unrecorded.js";
 import * as fs from "node:fs";
 
-export const SPAWN_TREE_SCHEMA = "wtft/spawn-tree@3";
+export const SPAWN_TREE_SCHEMA = "wtft/spawn-tree@4";
 
 /**
  * Default recursion bound. A `pr-review` lens child spawns its own children, so
@@ -72,6 +72,16 @@ export interface SpawnTreeGap {
 	reason: Extract<SpawnEdgeSkip, "not-found" | "unreadable">;
 }
 
+/** A counted descendant whose own parse holds untagged turns (no model id).
+ *  Their cost is outside that edge's total, as a session's own untagged cost is
+ *  outside `total.costUsd`. Often $0 — the turns still exist, and none of their
+ *  tokens is in the tree. */
+export interface SpawnTreeUntagged {
+	child: string;
+	untaggedInteractions: number;
+	untaggedCostUsd: number;
+}
+
 export interface SpawnTree {
 	schema: typeof SPAWN_TREE_SCHEMA;
 	/** Sessions priced from their own file, each once. Fewer than `edges.length`
@@ -92,9 +102,11 @@ export interface SpawnTree {
 	/** The ledger read failed — message, or null when it was read (an ABSENT
 	 *  ledger reads fine and is not an error: nothing has spawned yet). */
 	ledgerError: string | null;
-	/** Sum over RESOLVED descendants. A floor under any of FOUR conditions —
+	/** Never added to `total`. Non-empty makes `total` a floor. */
+	descendantUntagged: SpawnTreeUntagged[];
+	/** Sum over RESOLVED descendants. A floor under any of FIVE conditions —
 	 *  `unattributed` non-empty, `depthCapped` non-zero, `ledgerError` non-null,
-	 *  or `malformedLedgerLines` non-zero. */
+	 *  `malformedLedgerLines` non-zero, or `descendantUntagged` non-empty. */
 	total: TokenTotals;
 	/** Sessions no ledger edge names that look like this session's children.
 	 *  NEVER in `total` or `tree`. Absent when the caller did not ask. */
@@ -256,6 +268,7 @@ export function computeSpawnTree(
 		maxDepth,
 		malformedLedgerLines: ledger.malformedLines,
 		ledgerError,
+		descendantUntagged: [],
 		total: emptyTotals(),
 	};
 
@@ -377,7 +390,11 @@ function walkLedger(
 			}
 
 			// Drop `untaggedCostUsd`: it would leak into `spawned.edges[].total`.
-			const { untaggedCostUsd: _untaggedCostUsd, ...total } = computeSessionSummary(parsed).total;
+			const summary = computeSessionSummary(parsed);
+			const { untaggedCostUsd, ...total } = summary.total;
+			if (summary.untaggedInteractions > 0) {
+				tree.descendantUntagged.push({ child: edge.child, untaggedInteractions: summary.untaggedInteractions, untaggedCostUsd });
+			}
 			// A session this parse folded is either already in some total — take its
 			// share back out — or it lands here, and a gap reported for it is closed.
 			for (const [id, share] of foldsInTotal(parsed)) {

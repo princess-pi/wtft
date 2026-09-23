@@ -204,7 +204,7 @@ already trust.
 
 ```json
 "spawned": {
-  "schema": "wtft/spawn-tree@3",
+  "schema": "wtft/spawn-tree@4",
   "descendants": 3,
   "edges": [{"parent":"…","child":"…","mechanism":"pr-review-lens","ts":"…",
              "label":"correctness","model":"opus","cwd":"/tmp/pr-review-abc","depth":1,
@@ -229,10 +229,10 @@ or `tree` —
 `tree` = `total` + `spawned.total`, as a field, so a consumer never has to add two numbers and
 guess whether it double-counted. `label`, `model`, `cwd` and `skip` are present on an edge only
 when they apply; `label`, `ts`, `mechanism`, `child` and `reason` are the shape of a gap. Because
-`spawned.total` covers **resolved** descendants only, `tree` is a **floor** under any of FOUR
+`spawned.total` covers **resolved** descendants only, `tree` is a **floor** under any of FIVE
 conditions, and checking the first alone reads a truncated tree as complete: `unattributed` is
-non-empty, `depthCapped` is non-zero, `ledgerError` is non-null, or `malformedLedgerLines` is
-non-zero. The last two are the traps. A ledger that could not be read sets none of the others, so a
+non-empty, `depthCapped` is non-zero, `ledgerError` is non-null, `malformedLedgerLines` is
+non-zero, or `descendantUntagged` is non-empty (`docs/spec-194-p9-housekeeping.md` § H1). The last two are the traps. A ledger that could not be read sets none of the others, so a
 consumer checking only those reads a zeroed tree as a complete lineage. And a malformed ledger line
 **was a record**: its edge is lost, it produces no `unattributed` entry, and the count is the only
 trace it leaves — so a tree with `malformedLedgerLines > 0` and none of the other three can still be

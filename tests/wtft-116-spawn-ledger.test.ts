@@ -720,11 +720,11 @@ let selfCostWithRecord = 0;
 	check(doc.total.costUsd > 0, "D13 the parent still reports its own spend");
 	check(doc.spawned.edges[0].model === "sonnet" && doc.spawned.edges[0].label === "agent/824",
 		"D13b the model and label the spawner recorded reach the document");
-	check(doc.spawned.schema === "wtft/spawn-tree@3" && doc.spawned.maxDepth === 5
+	check(doc.spawned.schema === "wtft/spawn-tree@4" && doc.spawned.maxDepth === 5
 		&& doc.spawned.ledgerError === null && doc.spawned.malformedLedgerLines === 0
 		&& doc.spawned.depthCapped === 0 && Array.isArray(doc.spawned.unattributed),
 		"D13c every field of the tree contract is present, not just the ones with news in them");
-	check(doc.schema === "wtft/session@7",
+	check(doc.schema === "wtft/session@8",
 		"D13d the document that gained `spawned` and `tree` says so in its schema");
 	const keys = Object.keys(doc);
 	check(keys.indexOf("spawned") === keys.indexOf("uncounted") + 1 && keys.indexOf("tree") === keys.indexOf("spawned") + 1,

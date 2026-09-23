@@ -141,7 +141,7 @@ console.log("\nPART E — wtft --tokens and --json on a session with a built-in 
 		spawnSync("sleep", ["0.5"]);
 	}
 	const row = doc?.subagents?.find((r: any) => r.transcript.endsWith("agent-e2e0001.jsonl"));
-	check(doc?.schema === "wtft/session@7", `E1 the document is wtft/session@7 (got ${doc?.schema})`);
+	check(doc?.schema === "wtft/session@8", `E1 the document is wtft/session@8 (got ${doc?.schema})`);
 	check(row?.meta?.description === "Measure the daemon" && Math.abs((row?.total?.costUsd ?? -1) - expected) < 1e-6,
 		`E2 subagents[].total is what the subagent's own turns cost (got ${row?.total?.costUsd}, expected ${expected})`);
 	check(!!row?.total && Math.abs(doc.total.costUsd - (row.total.costUsd + computeSessionSummary(parseSessionFile(session)).total.costUsd)) < 1e-6,

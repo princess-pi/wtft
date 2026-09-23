@@ -1589,6 +1589,13 @@ function runHarness(which: string, focus: string) {
     process.stderr.write(`wtft-daemon: harness root does not exist: ${root}\n`);
     process.exit(1);
   }
+  if (focus) {
+    const focusKey = path.resolve(focus);
+    if (focusKey !== root && !focusKey.startsWith(root + path.sep)) {
+      process.stderr.write(`wtft-daemon: --session is outside the harness root: ${focusKey}\n`);
+      process.exit(2);
+    }
+  }
   const hash = createHash("sha256").update(root).digest("hex").slice(0, 12);
   harnessPidFile = path.join(os.tmpdir(), `wtft-harness-${which}-${hash}.pid`);
   if (claimPidFile(harnessPidFile) === "busy") {

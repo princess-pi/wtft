@@ -17,3 +17,6 @@ pi/*.js
 # Scratch space for test/daemon litter — never committed (Workspace Hygiene Standard).
 tmp/
 .claude/worktrees/
+
+# Per-clone config the CLI writes beside the repo (harness order, emoji).
+.wtft/

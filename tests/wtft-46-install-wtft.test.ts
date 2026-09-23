@@ -827,8 +827,6 @@ console.log("\n10. The claude-nsp-guard shim: ok, shadowed (exit 5), absent, mid
 {
 	const SENTINEL = "# nsp-guard-identity: 9a1c-claude-nsp-guard-sentinel";
 
-	// The sentinel on line 3, matching the spec's "carrying the sentinel line
-	// at line 3" closer.
 	function writeGuard(dir: string): string {
 		const p = path.join(dir, "claude");
 		fs.writeFileSync(p, `#!/bin/sh\n# not the sentinel\n${SENTINEL}\necho guard\n`);
@@ -955,6 +953,24 @@ console.log("\n10. The claude-nsp-guard shim: ok, shadowed (exit 5), absent, mid
 		check(err.includes(decoy) && err.includes(guard),
 			"V10f: the remedy on stderr names both the winner and the guard",
 			err.slice(0, 400));
+	}
+
+	// V10g — the sentinel early in a guard whose first 160 lines are bigger
+	// than a pipe buffer is still found: an early grep exit must not read as
+	// no match.
+	{
+		const guardDir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-big-"));
+		const guard = path.join(guardDir, "claude");
+		const filler = Array.from({ length: 158 }, (_, n) => `# ${String(n).padEnd(2000, "x")}`).join("\n");
+		fs.writeFileSync(guard, `#!/bin/sh\n${SENTINEL}\n${filler}\necho guard\n`);
+		fs.chmodSync(guard, 0o755);
+		check(fs.statSync(guard).size > 256 * 1024, "V10g: fixture precondition: the file is past a pipe buffer");
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-big-dir-"));
+		const { out } = run(["--check", "--json", "--dir", dir], [guardDir]);
+		let doc: any = null;
+		try { doc = JSON.parse(out); } catch { /* left null */ }
+		check(doc?.nspGuard?.state === "ok" && doc?.nspGuard?.guard === guard,
+			"V10g: a large guard with an early sentinel is still recognised", JSON.stringify(doc?.nspGuard));
 	}
 }
 

@@ -320,7 +320,9 @@ function corpusFiles(): string[] {
 				realMeta !== null,
 				`readSubagentMeta declined ${realFile} although every required name is present — a value's TYPE changed`);
 			// The corpus M7c reads everywhere is a snapshot; this is what says it aged.
-			const corpusKeys = new Set(corpusFiles().flatMap(f => Object.keys(JSON.parse(fs.readFileSync(f, "utf8")))));
+			const corpusKeys = new Set(corpusFiles().flatMap(f => {
+				try { return Object.keys(JSON.parse(fs.readFileSync(f, "utf8"))); } catch { return []; }
+			}));
 			const uncovered = Object.keys(obj).filter(k => !corpusKeys.has(k));
 			assert(`M7b the committed corpus carries every key the newest real file does (${JSON.stringify(Object.keys(obj))})`,
 				uncovered.length === 0,
@@ -345,8 +347,13 @@ function corpusFiles(): string[] {
 			const missing = NEAR_UNIVERSAL.filter(k => !(k in (obj as Record<string, unknown>)));
 			assert(`M7c ${name} carries the near-universal pair`, missing.length === 0, `missing ${JSON.stringify(missing)}`);
 		}
-		assert(`M7c ${name} is accepted by the reader, types and all`,
-			readSubagentMeta(file.replace(/\.meta\.json$/, ".jsonl")) !== null, file);
+		const meta = readSubagentMeta(file.replace(/\.meta\.json$/, ".jsonl")) as Record<string, unknown> | null;
+		assert(`M7c ${name} is accepted by the reader, types and all`, meta !== null, file);
+		for (const k of ["description", "toolUseId", "model", "parentAgentId", "isFork"]) {
+			if (!(k in obj)) continue;
+			assert(`M7c ${name} \`${k}\` survives the reader`, meta?.[k] === obj[k],
+				`corpus ${JSON.stringify(obj[k])}, reader ${JSON.stringify(meta?.[k])}`);
+		}
 	}
 }
 

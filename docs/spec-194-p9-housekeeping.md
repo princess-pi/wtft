@@ -45,12 +45,13 @@ four siblings:
   the cost.
 - `--tokens`, and the Pi widget, which renders the same block, print one line under the
   SPAWNED rows when the list is non-empty:
-  `N descendant(s) with untagged turns — $X not in SPAWNED (#180)`.
+  `N descendant(s) with untagged turns — $X left out of their edge totals (#180)`. It says
+  edge totals, not SPAWNED, because of the overlap above.
 - **Schemas.** `wtft/spawn-tree@3` → `@4`, and `wtft/session@7` → `@8`, per spec-26's
   rule that a nested key bumps the document too.
 
 **Closer** (`tests/wtft-180-descendant-untagged.test.ts`): a root with three ledger
-children: one whose only turn is `<synthetic>` with no usage, one with a tagged turn plus
+children: one whose only turn is `<synthetic>` with all-zero usage, one with a tagged turn plus
 an untagged turn carrying a harness-native cost of $0.25, and one tagged-only. The test
 drives `computeSpawnTree`, `renderSpawnTree` and `buildSessionJson` directly, the
 functions behind `--tokens` and `--json`. The first two children are listed in
@@ -73,7 +74,9 @@ them records where they came from, when, and how to refresh them.
 
 - **`M7c`** runs everywhere. For every corpus file, the two required names are present,
   the near-universal pair is present unless `agentType` is `workflow-subagent`, and
-  `readSubagentMeta` accepts the file. The presence checks guard the committed data;
+  `readSubagentMeta` accepts the file with every optional field it carries (`description`,
+  `toolUseId`, `model`, `parentAgentId`, `isFork`) intact. The presence checks guard the
+  committed data;
   the reader check is the one that exercises code. M7c sees the harness as it was when
   the corpus was captured, not as it is today.
 - **`M7b`** stays host-gated and gains one assertion: every key the newest real file
@@ -249,3 +252,4 @@ producer-side gap is duppypro/princess-pi-tools#1021.
 | third pass, round-2 lines | exit 5 dropped the "no wtft on PATH" note; the discovery-parse note did not say which build failed; "exits normally" narrower than the handler; the record's own coverage column | `finish()`, the discovery pass, `process.on("exit")` | reconciled-against-untested | Fixed. The pass's remaining findings are about wording added by the pass before it (glossary words used for the script's own "lost" label and the `fork` agent type, host measurements quoted with their date, the partly-driven layout clauses, and manifest text already filed in #233). Per the review-loop stop rule the reconcile stops here |
 | spec-26 "every number in that block" | could be read as covering UNRECORDED | "that block" is SPAWNED | — | Left standing: UNRECORDED is its own block, listed separately above it |
 | `nsp-guard-shadowed` | contains the avoided "nsp guard" | a status code | — | Left standing: a machine string keeps its spelling; the glossary says so |
+| `pr-review` round 1 | 13 findings (2 Medium): `head \| grep -q` under `pipefail` read a large guard as absent (reproduced: exit 141); M7c blind to a rename of an optional field; the untagged line saying "not in SPAWNED" despite the overlap; an unquoted `find` root; `--help` splitting the sentinel; stale pointers in comments | `is_nsp_guard`, M7c, `renderRecordedSpawns`, `pickTranscripts` | ✅ V10g, M7c optional fields, R1 | Fixed; the line now reads "left out of their edge totals". Declined: the claim that `parseSubagentMeta` may not exist — it is the private parser `readSubagentMetaChecked` calls |

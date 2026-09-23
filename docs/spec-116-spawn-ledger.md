@@ -253,7 +253,7 @@ SPAWNED    3 session(s) priced from 6 recorded edge(s) (#116) —
            1 unattributed — cost unknown, deliberately not estimated
            1 edge(s) past the depth cap of 5, not walked
            1 unusable ledger line(s) skipped
-           1 descendant(s) with untagged turns — $0.00 not in SPAWNED (#180)
+           1 descendant(s) with untagged turns — $0.00 left out of their edge totals (#180)
 SPAWNED    subtotal                                        $57.03
 TREE       TOTAL + SPAWNED                                 $127.36
 ```

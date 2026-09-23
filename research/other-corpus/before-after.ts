@@ -54,7 +54,7 @@
  * satisfy it (write files over 40 KB with a fresh mtime) rather than the
  * script relaxing it for tests.
  */
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -64,7 +64,7 @@ interface SubAgentBearing { claudeSubAgentFolds?: { id: string; file?: string }[
 /** Sorted, never shuffled — the same directory yields the same list. */
 export function pickTranscripts(root: string, n: number): string[] {
 	try {
-		return execSync(`find ${root} -name '*.jsonl' -size +40k -newermt '-60 days'`, { encoding: "utf8", maxBuffer: 1e9 })
+		return execFileSync("find", [root, "-name", "*.jsonl", "-size", "+40k", "-newermt", "-60 days"], { encoding: "utf8", maxBuffer: 1e9 })
 			.trim().split("\n").filter(Boolean).sort().slice(0, n);
 	} catch { return []; }
 }

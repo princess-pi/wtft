@@ -33,9 +33,8 @@ SHIM="$(mktemp -d)"
 ln -s "$(command -v bun)" "$SHIM/bun"
 BUNDIR="$SHIM"
 # #156 gave install-wtft a config-migration side effect under
-# HOME/XDG_CONFIG_HOME — M2, M3 and M4 below all run it in INSTALL mode (M4
-# is the one that plants a legacy file to trigger the escalation it tests),
-# so without this every run of this probe would read (and move) this host's
+# HOME/XDG_CONFIG_HOME, and the mutants below run it in INSTALL mode, so
+# without this every run of this probe would read (and move) this host's
 # real ~/.config. Exported once, for every "$REAL"/"$MUT" call below.
 FAKE_HOME="$(mktemp -d)"
 export HOME="$FAKE_HOME"

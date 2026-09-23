@@ -57,7 +57,6 @@ function putSession(id: string, lines: string): void {
 }
 
 const ROOT = uuid(1), ALL_UNTAGGED = uuid(2), MIXED = uuid(3), TAGGED = uuid(4);
-// A real `<synthetic>` turn carries no usage at all.
 putSession(ALL_UNTAGGED, turn("u-1", T0 + 1_000, "<synthetic>", 0, undefined, 0));
 putSession(MIXED, turn("m-1", T0 + 2_000, "claude-sonnet-4-6", 300) + turn("m-2", T0 + 3_000, null, 50, 0.25));
 putSession(TAGGED, turn("t-1", T0 + 4_000, "claude-sonnet-4-6", 400));
@@ -114,7 +113,7 @@ check(Array.isArray((empty as any).descendantUntagged) && (empty as any).descend
 console.log("\nR — --tokens");
 const self = emptyTotals();
 const rendered = renderSpawnTree(self, tree);
-check(/2 descendant\(s\) with untagged turns — \$0\.25 not in SPAWNED \(#180\)/.test(rendered),
+check(/2 descendant\(s\) with untagged turns — \$0\.25 left out of their edge totals \(#180\)/.test(rendered),
 	`R1 SPAWNED names the untagged descendants and their cost:\n${rendered}`);
 const taggedOnly = computeSpawnTree(ROOT, {
 	ledgerPath: (() => {

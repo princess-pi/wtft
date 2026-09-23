@@ -37,9 +37,10 @@
 # existing artifacts/shadow fields.
 #
 # The claude-nsp-guard shim (princess-pi-tools, deployed as ~/bin/claude) is
-# recognised by its identity line, "# nsp-guard-identity: 9a1c-claude-nsp-guard-
-# sentinel" as a whole line in its first 160 lines. PATH is walked in order,
-# skipping empty entries; a claude run by absolute path bypasses the guard.
+# recognised by this identity line, whole, within its first 160 lines:
+#   # nsp-guard-identity: 9a1c-claude-nsp-guard-sentinel
+# PATH is walked in order, skipping empty entries; a claude run by absolute
+# path bypasses the guard.
 #
 # COPY, NOT SYMLINK — a copy survives the clone moving. The daemon keeps its
 # .mjs extension (callers join "wtft-daemon.mjs") and also lands as `wtft-daemon`.
@@ -391,8 +392,8 @@ fi
 # every other status, so it is scanned last and only escalates an "ok".
 # ---
 
-# install-workflow-tools (princess-pi-tools docs/dev-workflow-spec.md) matches
-# this exact line before it overwrites ~/bin/claude with the guard.
+# princess-pi-tools' bin/install-workflow-tools matches this exact line before
+# it overwrites ~/bin/claude with the guard (duppypro/princess-pi-tools#1021).
 NSP_GUARD_SENTINEL='# nsp-guard-identity: 9a1c-claude-nsp-guard-sentinel'
 
 # The sentinel must be a whole line, not a substring — a script that merely
@@ -400,7 +401,8 @@ NSP_GUARD_SENTINEL='# nsp-guard-identity: 9a1c-claude-nsp-guard-sentinel'
 # only the first 160 lines rather than slurping the whole file.
 is_nsp_guard() {
   [ -f "$1" ] && [ -x "$1" ] || return 1
-  head -n 160 "$1" 2>/dev/null | grep -aqxF -- "$NSP_GUARD_SENTINEL"
+  # No -q: an early grep exit would SIGPIPE head, and pipefail reads that as no match.
+  head -n 160 "$1" 2>/dev/null | grep -axF -- "$NSP_GUARD_SENTINEL" >/dev/null
 }
 
 NSP_FOUND=""

@@ -245,11 +245,13 @@ export function readSpawnLedger(file: string = spawnLedgerPath()): SpawnLedger {
 			malformedLines++;
 			continue;
 		}
+		// A session file's basename and its id are both accepted by the writer;
+		// the walk keys on one spelling, or one session is counted twice.
 		const edge: SpawnEdge = {
 			schema: SPAWN_RECORD_SCHEMA,
 			ts: r.ts,
-			parent: r.parent,
-			child: r.child,
+			parent: r.parent.replace(/\.jsonl$/i, ""),
+			child: r.child.replace(/\.jsonl$/i, ""),
 			mechanism: r.mechanism,
 		};
 		if (typeof r.cwd === "string") edge.cwd = r.cwd;

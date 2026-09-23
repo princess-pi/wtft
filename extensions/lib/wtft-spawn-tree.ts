@@ -139,15 +139,18 @@ function addTotals(into: TokenTotals, from: TokenTotals): void {
 
 /** Each session folded into this parse's TOTAL, with the share it added. Only
  *  folds on interactions `computeSessionSummary` counts: a fold on a dropped
- *  duplicate or an untagged turn added nothing to the total. */
+ *  duplicate or an untagged turn added nothing to the total. Keyed by the
+ *  same normalised id the ledger and the walk use, so a fold id spelled with
+ *  a `.jsonl` suffix still matches. */
 function foldsInTotal(parsed: Interaction[]): Map<string, TokenTotals> {
 	const shares = new Map<string, TokenTotals>();
 	for (const interaction of deduplicateInteractions(parsed)) {
 		if (!isModelTagged(interaction)) continue;
 		for (const fold of interaction.claudeSubAgentFolds ?? []) {
-			const into = shares.get(fold.id) ?? emptyTotals();
+			const id = fold.id.replace(/\.jsonl$/i, "");
+			const into = shares.get(id) ?? emptyTotals();
 			addTotals(into, fold.share);
-			shares.set(fold.id, into);
+			shares.set(id, into);
 		}
 	}
 	return shares;
@@ -169,6 +172,49 @@ export function resolveSessionFile(sessionId: string): string | null {
 }
 
 /**
+ * A resolver for one walk: each harness's index is built on first need and
+ * kept for the resolver's life, so N children cost one tree walk per harness
+ * rather than N. First harness to know an id wins, in registry order.
+ *
+ * An index that throws, or that is not a `Map`, fails the walk: the report
+ * must not read "could not look" as "looked, found nothing". A harness with
+ * no index is asked per id, and a throw there costs only that id's answer
+ * from that harness.
+ */
+export function makeSessionResolver(): (sessionId: string) => string | null {
+	const discoveries = getDiscoveries();
+	const indexes: (Map<string, string> | undefined)[] = discoveries.map(() => undefined);
+	const answers = new Map<string, string | null>();
+	return (rawId: string) => {
+		// The same normalisation every `resolveSessionById` applies.
+		const sessionId = rawId.replace(/\.jsonl$/i, "");
+		const known = answers.get(sessionId);
+		if (known !== undefined) return known;
+		let found: string | null = null;
+		for (let k = 0; k < discoveries.length && found === null; k++) {
+			const discovery = discoveries[k];
+			if (discovery.indexSessionsById) {
+				if (indexes[k] === undefined) {
+					const built = discovery.indexSessionsById();
+					if (!(built instanceof Map)) {
+						throw new TypeError(`${discovery.id}: indexSessionsById returned ${built === null ? "null" : typeof built}, not a Map`);
+					}
+					indexes[k] = built;
+				}
+				found = indexes[k]!.get(sessionId) ?? null;
+				continue;
+			}
+			try {
+				const single = discovery.resolveSessionById(sessionId);
+				found = typeof single === "string" && single ? single : null;
+			} catch { /* a harness that cannot look is not an answer — ask the next */ }
+		}
+		answers.set(sessionId, found);
+		return found;
+	};
+}
+
+/**
  * Walk the recorded lineage of one session, BREADTH-FIRST, counting each
  * session at most once.
  *
@@ -184,6 +230,8 @@ export function computeSpawnTree(
 	rootSessionId: string,
 	options: SpawnTreeOptions = {},
 ): SpawnTree {
+	// The ledger reader strips `.jsonl`; the root must match it.
+	rootSessionId = rootSessionId.replace(/\.jsonl$/i, "");
 	const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
 	const now = options.now ?? Date.now();
 
@@ -246,8 +294,11 @@ function walkLedger(
 	// The thunk is the lazy path: called only when the root has an edge, or when
 	// `unrecorded` needs the ids to exclude.
 	const attributed = typeof options.alreadyAttributed === "function" ? options.alreadyAttributed() : options.alreadyAttributed;
-	for (const id of attributed ?? []) outcomeOf.set(id, "in-self");
+	// Normalised the same way the ledger and the root id are: a caller may hand
+	// back an id spelled with its file's `.jsonl` suffix.
+	for (const id of attributed ?? []) outcomeOf.set(id.replace(/\.jsonl$/i, ""), "in-self");
 	if (!ledger.childrenOf.has(rootSessionId)) return outcomeOf;
+	const resolve = makeSessionResolver();
 	const visited = new Set<string>([rootSessionId]);
 
 	type Visit = { parentId: string; depth: number };
@@ -295,7 +346,7 @@ function walkLedger(
 				tree.edges.push({ ...base, resolved: false, path: null, total: null, skip: "depth-capped" });
 				continue;
 			}
-			const file = resolveSessionFile(edge.child);
+			const file = resolve(edge.child);
 			if (file === null) {
 				outcomeOf.set(edge.child, "unresolved");
 				tree.edges.push({ ...base, resolved: false, path: null, total: null, skip: "not-found" });

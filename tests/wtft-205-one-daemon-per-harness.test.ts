@@ -6,7 +6,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { deduplicateInteractions, parseSessionFile } from "../extensions/lib/wtft-parser.ts";
 import { getCurrentVersionTagPath, readClassifiedTagFile, WTFT_TAGGER_VERSION } from "../extensions/lib/wtft-daemon-lib.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
@@ -196,6 +196,15 @@ try {
 	);
 	assert("a deleted fixture drops that session and the process stays", deleted && alive(claudePid));
 
+	const stop = spawnSync(process.execPath, [DAEMON, "--stop", claudeFiles[4]], { encoding: "utf8", env });
+	const stopDropped = await waitFor("stop drops one harness session", () =>
+		fs.readFileSync(claudeErr, "utf8").includes("session drop s-4.jsonl"),
+	);
+	assert(
+		"stopping one session leaves the harness process up",
+		stop.status === 0 && stopDropped && alive(claudePid) && stop.stdout.includes("dropped from harness"),
+	);
+
 	const src = fs.readFileSync(path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.ts"), "utf8");
 	assert("no per-line writtenLines map", !src.includes("writtenLines"));
 
@@ -221,6 +230,13 @@ try {
 	);
 	const fastIds = readClassifiedTagFile(getCurrentVersionTagPath(fast)).map((row: { messageId?: string }) => row.messageId);
 	assert("reparse classifies the fixture", fastIds.includes("fast-0") && fastIds.includes("fast-39"));
+	const fastCost = readClassifiedTagFile(getCurrentVersionTagPath(fast)).reduce((sum: number, row: { cost: number }) => sum + row.cost, 0);
+	const again = spawnSync(process.execPath, [DAEMON, "--reparse", fast], { encoding: "utf8", env });
+	const fastCostAgain = readClassifiedTagFile(getCurrentVersionTagPath(fast)).reduce((sum: number, row: { cost: number }) => sum + row.cost, 0);
+	assert(
+		"a second reparse replaces the tag instead of appending",
+		again.status === 0 && Math.abs(fastCostAgain - fastCost) < 0.000001,
+	);
 
 	const rangeDir = path.join(claudeRoot, "range");
 	fs.mkdirSync(rangeDir, { recursive: true });

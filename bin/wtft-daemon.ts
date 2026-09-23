@@ -673,6 +673,8 @@ function parseNewLines(filePath: string) {
     if (sessionIno !== -1 && stat.ino !== sessionIno) {
       lastSize = 0;
       pendingFragment = Buffer.alloc(0);
+      streamState = newParseStreamState();
+      prevCtxTokens = 0;
       if (process.env.WTFT_DAEMON_DEBUG) {
         process.stderr.write(`[wtft-log-parser] session inode changed, resetting offset ${path.basename(filePath)}\n`);
       }
@@ -684,6 +686,8 @@ function parseNewLines(filePath: string) {
       }
       lastSize = 0;
       pendingFragment = Buffer.alloc(0);
+      streamState = newParseStreamState();
+      prevCtxTokens = 0;
     }
     const grew = currentSize > lastSize;
     // With a held fragment, still run — quiet poll is when a dead-writer fragment can settle.
@@ -1486,15 +1490,39 @@ function dropHarnessSlot(key: string) {
   }
 }
 
+function slotNeedsChildScan(slot: Slot, now: number): boolean {
+  if (slot.pendingClaudeCommands.length > 0) return true;
+  for (const state of slot.discoveredSubagentFiles.values()) {
+    if (now <= state.spawnWindowClosesAt + MTIME_SETTLE_MS) return true;
+  }
+  return false;
+}
+
+function leaseStillOurs(slot: Slot): boolean {
+  if (!slot.pidPath) return true;
+  try {
+    return fs.readFileSync(slot.pidPath, "utf8").trim() === String(process.pid);
+  } catch {
+    return false;
+  }
+}
+
 function sweepIdleSlots() {
   if (!running) return;
   const now = Date.now();
   for (const key of [...harnessSlots.keys()]) {
     const slot = harnessSlots.get(key);
     if (!slot) continue;
-    if (slot.pendingItems.length > 0) continue;
-    if (now - slot.startupTime < STARTUP_GRACE_MS) continue;
-    if (now - slot.lastActivityMs < IDLE_EXIT_MS) continue;
+    if (!leaseStillOurs(slot)) {
+      dropHarnessSlot(key);
+      continue;
+    }
+    if (slotNeedsChildScan(slot, now)) withSlot(slot, () => scanForSubAgents());
+    const current = harnessSlots.get(key);
+    if (!current) continue;
+    if (current.pendingItems.length > 0) continue;
+    if (now - current.startupTime < STARTUP_GRACE_MS) continue;
+    if (now - current.lastActivityMs < IDLE_EXIT_MS) continue;
     dropHarnessSlot(key);
   }
 }
@@ -1583,20 +1611,22 @@ function reparseOne(file: string) {
   sessionPath = file;
   tagPath = getCurrentVersionTagPath(file);
   try { fs.mkdirSync(path.dirname(tagPath), { recursive: true }); } catch { /* exists */ }
+  fs.writeFileSync(tagPath, "");
   const raw = deduplicateInteractions(parseSessionFile(file));
   let prev = 0;
   let batch = "";
+  pendingClaudeCommands = [];
   for (const interaction of raw) {
     batch += serializeClassifiedWithOverheadSplit(interaction, prev);
     if (!interaction.isSidechain) {
       prev = interaction.inputTokens + interaction.cacheReadTokens + interaction.cacheWriteTokens;
     }
+    if (hasClaudeCommand(interaction)) pendingClaudeCommands.push({ interaction, prevCtx: prev });
   }
   if (batch) appendTagFile(tagPath, batch);
   appendTagFile(tagPath, JSON.stringify({ _meta: { offset: fs.statSync(file).size, swept: Date.now() } }) + "\n");
   discoveredSubagentFiles = new Map();
   discoveredClaudeFiles = new Set();
-  pendingClaudeCommands = [];
   scanForSubAgents();
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] reparse end ${file}\n`);
@@ -1699,6 +1729,34 @@ Environment:
 
 // --- Management commands (no session required) ---
 
+function procCmdline(pid: number): string {
+  try { return fs.readFileSync(`/proc/${pid}/cmdline`, "utf8"); } catch { return ""; }
+}
+
+function procIsHarness(pid: number): boolean {
+  return procCmdline(pid).split("\0").includes("--harness");
+}
+
+function procEnvValue(pid: number, key: string): string | null {
+  try {
+    const row = fs.readFileSync(`/proc/${pid}/environ`, "utf8").split("\0").find(item => item.startsWith(`${key}=`));
+    return row ? row.slice(key.length + 1) : null;
+  } catch {
+    return null;
+  }
+}
+
+if (stopSession) {
+  const lease = getDaemonPidPath(path.resolve(stopSession));
+  let holder = 0;
+  try { holder = Number(fs.readFileSync(lease, "utf8").trim()); } catch { holder = 0; }
+  if (holder > 0 && procIsHarness(holder)) {
+    try { fs.unlinkSync(lease); } catch { /* already gone */ }
+    console.log(`Stopped: PID ${holder} — session dropped from harness: ${stopSession}`);
+    process.exit(0);
+  }
+}
+
 if (showList || showCleanup || showRestart || stopSession) {
   const pidDir = os.tmpdir();
   let pidFiles: string[] = [];
@@ -1748,7 +1806,12 @@ if (showList || showCleanup || showRestart || stopSession) {
     }
 
     if (showRestart) {
+      const restartEnv = { ...process.env };
       if (alive) {
+        for (const key of ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR"]) {
+          const value = procEnvValue(pid, key);
+          if (value) restartEnv[key] = value;
+        }
         process.kill(pid, "SIGTERM");
       }
       try { fs.unlinkSync(fullPath); } catch (_) {}
@@ -1756,7 +1819,8 @@ if (showList || showCleanup || showRestart || stopSession) {
         try {
           const child = spawn(process.execPath, [process.argv[1], ...daemonLaunchArgs(sessionFound)], {
             detached: true,
-            stdio: "ignore"
+            stdio: "ignore",
+            env: restartEnv,
           });
           child.unref();
         } catch (_2) {}
@@ -1772,20 +1836,28 @@ if (showList || showCleanup || showRestart || stopSession) {
         continue;
       }
       if (sessionFound && sessionIsGone(sessionFound)) {
-        process.kill(pid, "SIGTERM");
-        try { fs.unlinkSync(fullPath); } catch (_) {}
-        console.log(`Cleaned up: PID ${pid} — session gone: ${sessionFound}`);
+        if (procIsHarness(pid)) {
+          try { fs.unlinkSync(fullPath); } catch (_) {}
+          console.log(`Cleaned up: PID ${pid} — session dropped from harness: ${sessionFound}`);
+        } else {
+          process.kill(pid, "SIGTERM");
+          try { fs.unlinkSync(fullPath); } catch (_) {}
+          console.log(`Cleaned up: PID ${pid} — session gone: ${sessionFound}`);
+        }
         found++;
         continue;
       }
     }
 
     if (stopSession && sessionFound === stopSession) {
-      if (alive) {
-        process.kill(pid, "SIGTERM");
+      if (alive && procIsHarness(pid)) {
+        try { fs.unlinkSync(fullPath); } catch (_) {}
+        console.log(`Stopped: PID ${pid} — session dropped from harness: ${sessionFound}`);
+      } else {
+        if (alive) process.kill(pid, "SIGTERM");
+        try { fs.unlinkSync(fullPath); } catch (_) {}
+        console.log(`Stopped: PID ${pid} — ${sessionFound}`);
       }
-      try { fs.unlinkSync(fullPath); } catch (_) {}
-      console.log(`Stopped: PID ${pid} — ${sessionFound}`);
       found++;
       continue;
     }

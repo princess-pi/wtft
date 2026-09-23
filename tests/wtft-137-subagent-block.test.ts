@@ -141,11 +141,32 @@ console.log("\nPART E — wtft --tokens and --json on a session with a built-in 
 	check(doc?.schema === "wtft/session@7", `E1 the document is wtft/session@7 (got ${doc?.schema})`);
 	check(row?.meta?.description === "Measure the daemon" && Math.abs((row?.total?.costUsd ?? -1) - expected) < 1e-6,
 		`E2 subagents[].total is what the subagent's own turns cost (got ${row?.total?.costUsd}, expected ${expected})`);
-	check(doc && Math.abs(doc.total.costUsd - (row.total.costUsd + computeSessionSummary(parseSessionFile(session)).total.costUsd)) < 1e-6,
+	check(!!row?.total && Math.abs(doc.total.costUsd - (row.total.costUsd + computeSessionSummary(parseSessionFile(session)).total.costUsd)) < 1e-6,
 		"E3 and it is inside total: the session's own turns plus the subagent equal total");
 	const tokens = (cli(["--tokens"]).stdout || "").replace(/\x1b\[[0-9;]*m/g, "");
 	check(/SUBAGENTS\s+1 built-in subagent\(s\) — INSIDE TOTAL above/.test(tokens) && /Measure the daemon\s+sonnet\s+\$/.test(tokens),
 		`E4 --tokens prints the block with the description in place of agent-<hash>\n${tokens.split("\n").filter(l => /SUBAGENTS|Measure/.test(l)).join("\n")}`);
+
+	const meta = agent.replace(/\.jsonl$/, ".meta.json");
+	fs.chmodSync(meta, 0o000);
+	const noMeta = cli(["--tokens"]);
+	fs.chmodSync(meta, 0o644);
+	check(/Measure the daemon/.test(tokens) && /subagent metadata could not be read/.test(noMeta.stderr ?? ""),
+		`E5 an unreadable .meta.json is reported on stderr under --tokens, as --json reports it in notices (stderr: ${(noMeta.stderr ?? "").trim().slice(0, 200)})`);
+
+	// A nested directory whose entries cannot be stat'ed (readable, not searchable): the top-level
+	// subagent is still listed, so the list is partial rather than empty.
+	const subDir = path.join(path.dirname(agent), "workflows");
+	fs.mkdirSync(subDir);
+	fs.writeFileSync(path.join(subDir, "agent-w.jsonl"), "");
+	fs.chmodSync(subDir, 0o444);
+	const partial = cli(["--tokens"]);
+	const partialJson = cli(["--json"]);
+	fs.chmodSync(subDir, 0o755);
+	let partialDoc: any = null;
+	try { partialDoc = JSON.parse(partialJson.stdout); } catch {}
+	check(partialDoc !== null && !("subagents" in partialDoc) && !/SUBAGENTS/.test(partial.stdout ?? ""),
+		`E6 when discovery cannot complete, --json omits subagents and --tokens prints no block (json keys: ${partialDoc && Object.keys(partialDoc).join(",")})`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

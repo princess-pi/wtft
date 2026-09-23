@@ -277,7 +277,7 @@ its model and the cost `TOTAL` already holds for it. Those rows are **inside**
 `TOTAL`, never added to it; `--json` carries the same figure as
 `subagents[].total`.
 
-`wtft --tokens` shows the same thing as a `SPAWNED` / `TREE` block below
+`wtft --tokens` shows the spawn tree as a `SPAWNED` / `TREE` block below
 `TOTAL`. It prints nothing when this session recorded no edges AND the ledger
 was read cleanly; an unreadable ledger, or one with skipped lines, still prints
 — saying so is the whole point, since "no edges" and "could not tell" are not

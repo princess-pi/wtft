@@ -14,12 +14,14 @@ which subagents that money came from, or what each one was for. `--json` lists t
 ## The change
 
 **`--tokens` gains a `SUBAGENTS` block**, printed after TOTAL and the UNCOUNTED line and before
-SPAWNED, whenever the session has at least one built-in subagent:
+SPAWNED, whenever the session has at least one built-in subagent, i.e. a transcript under
+`<session>/subagents/`. A Pi sibling session is not one (Pi subagent tracking is deferred, #209),
+and when discovery could not complete the block is not printed, as `--json` omits `subagents`:
 
 ```
 SUBAGENTS  3 built-in subagent(s) — INSIDE TOTAL above, not added to it
-           Fix 116 prose drift, grep-verified        sonnet       $0.42
            Audit the 116 test suite                  opus         $1.10
+           Fix 116 prose drift, grep-verified        sonnet       $0.42
            agent-b7c2e910442d1f88                    —            $0.03
 ```
 
@@ -68,4 +70,6 @@ a pointer here.
 - A superseded generation's lines, and untagged turns, are not counted, as in TOTAL.
 - `--json` `subagents[].total` equals the rendered row, and the schema is `wtft/session@7`.
 - A session with no built-in subagent prints no block.
+- An unreadable `.meta.json` prints its `subagent-meta-unreadable` notice to stderr under `--tokens`,
+  as `--json` carries it in `notices[]`.
 - More than 20 subagents: 20 rows plus the "not shown" line.

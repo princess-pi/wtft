@@ -747,10 +747,13 @@ async function main() {
 		});
 		// One computation for both surfaces, so the rendered row and the JSON
 		// field cannot disagree.
-		const block = subagentRows(interactions, listed, path.dirname(finalSessionPath));
+		// Built-in means Claude Code's `<session>/subagents/` layout; a Pi sibling is not one.
+		const builtinDir = path.join(path.dirname(finalSessionPath), path.basename(finalSessionPath, ".jsonl"), "subagents") + path.sep;
+		const block = subagentRows(interactions, listed.filter(r => r.transcript.startsWith(builtinDir)), path.dirname(finalSessionPath));
 		const totalOf = new Map(block.map(r => [r.transcript, r.total]));
 		const rows = listed.map(r => ({ ...r, total: totalOf.get(r.transcript) ?? null }));
-		return { rows: discovered.unreadable ? undefined : rows, notices, block };
+		// A partial list is never shown as whole, on either surface.
+		return discovered.unreadable ? { rows: undefined, notices, block: [] } : { rows, notices, block };
 	};
 
 	const emitSessionJson = (opt: { notices?: WtftNotice[]; pending?: boolean } = {}) => {
@@ -920,7 +923,9 @@ async function main() {
 	}
 
 	if (opts.tokens) {
-		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, scanSessionUncounted(), sessionSpawnTree(), collectSubagentJson()?.block);
+		const subagents = collectSubagentJson();
+		for (const n of subagents?.notices ?? []) console.error(`\x1b[33m⚠ ${n.text}\x1b[0m`);
+		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, scanSessionUncounted(), sessionSpawnTree(), subagents?.block);
 		for (const line of tokenOutput.split("\n")) {
 			console.log(padStr + line);
 		}

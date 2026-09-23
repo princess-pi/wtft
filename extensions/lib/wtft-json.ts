@@ -78,8 +78,6 @@ export interface BuildSessionJsonInput {
 export function buildSessionJson(input: BuildSessionJsonInput): WtftSessionJson {
 	const summary = computeSessionSummary(input.interactions);
 	return {
-		// KEY ORDER IS THE WIRE ORDER — `renderSessionJson` is a bare
-		// JSON.stringify, so this literal is what a reader sees. It matches the
 		schema: WTFT_JSON_SCHEMA,
 		session: input.session,
 		provisional: input.provisional,

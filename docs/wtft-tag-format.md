@@ -186,11 +186,11 @@ transcript's filename without `.jsonl`, for a human reading the file. **A line c
 an interaction line or a fold record — counts only if no `_gen` record for the same `s` follows
 it.** A line with no `s` always counts.
 
-The daemon writes one on the first successful parse of a child transcript in each daemon life,
-and on the first parse after that transcript rotated — read from the parse rather than from a
-stat: the parse no longer produces a line the generation wrote, and that line carries no `id`, or
-an `id` this parse no longer produces, so §4's dedup cannot collapse it. The record goes first in
-the append, followed by every line of that parse and every fold record it
+The daemon writes one on the first successful read of a child transcript in each daemon life,
+and on the first read after that transcript rotated. Rotation is a new inode, a shrink, a
+content-hash mismatch on a same-size file, or an attributed cost that dropped
+(`docs/spec-114-14-generation-records.md`). The record goes first in
+the append, followed by every line of that read and every fold record it
 implies. A generation with no lines still writes its record, so a transcript rotated to empty
 drops its old lines. Like a fold record, it is data: a tag whose last data line is one reads
 unswept (`docs/spec-114-14-generation-records.md`).

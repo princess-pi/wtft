@@ -10,6 +10,7 @@ import {
 	parseEntryToInteraction,
 	parseSessionFile,
 	deduplicateInteractions,
+	attributeClaudeSubAgentCosts,
 	serializeClassified,
 	serializeClassifiedWithOverheadSplit,
 	foldRecordLine,
@@ -82,30 +83,34 @@ const warnedSubagentStatFailure = new Set<string>();
 const warnedSubagentParseFailure = new Set<string>();
 const warnedSubagentSerializeFailure = new Set<string>();
 
-/** Per-transcript change detector + multiset of written line hashes (append filter). */
+interface FoldOwner {
+	base: NonNullable<ReturnType<typeof parseEntryToInteraction>>;
+	lastLine: string;
+	lastCost: number;
+}
+
 interface SubagentFileState {
-	size: number;
+	lastSize: number;
 	mtimeMs: number;
-	/** Last read time — closes the same-tick mtime window with MTIME_SETTLE_MS. */
+	/** Stamped when new bytes were read. A same-size rewrite can hide inside MTIME_SETTLE_MS. */
 	readAtMs: number;
 	ino: number;
-	writtenLines: Map<string, number>;
+	contentHash: ReturnType<typeof createHash>;
+	fragment: Buffer;
+	stream: ReturnType<typeof newParseStreamState>;
 	/** The next write opens a generation: a `_gen` record, then every current line. */
 	newGeneration: boolean;
-	/** Message id of each written line's hash, `null` for a line that had none. */
-	writtenIds: Map<string, string | null>;
-	/** Highest cost written for a message id: a parse below it is a rewrite, not growth. */
-	writtenCostById: Map<string, number>;
 	/** Fold ids this generation has recorded. The CLI's spawn walk skips exactly
 	 *  the recorded ids, so a fold with no record is billed twice. */
 	recordedFolds: Set<string>;
-	/** Each nested transcript the last parse folded, with the stamp it was read at. */
+	/** Each nested transcript the last attribution folded, with the stamp it was read at. */
 	foldStamps: Map<string, string>;
 	/** Until then a spawning turn can still gain a `claude -p` child. */
 	spawnWindowClosesAt: number;
+	owners: FoldOwner[];
+	stampInterrupt: boolean;
 }
 
-// Subagent transcripts: re-parse WHOLE on change; incremental windows break id-collapse and nested attribution.
 const discoveredSubagentFiles = new Map<string, SubagentFileState>();
 
 // ---
@@ -256,183 +261,293 @@ function hasClaudeCommand(interaction: NonNullable<ReturnType<typeof parseEntryT
   return interaction.commands.some(commandSpawnsAgent);
 }
 
+function freshSubagentState(): SubagentFileState {
+  return {
+    lastSize: 0,
+    mtimeMs: -1,
+    readAtMs: 0,
+    ino: -1,
+    contentHash: createHash("sha1"),
+    fragment: Buffer.alloc(0),
+    stream: newParseStreamState(),
+    newGeneration: true,
+    recordedFolds: new Set<string>(),
+    foldStamps: new Map<string, string>(),
+    spawnWindowClosesAt: 0,
+    owners: [],
+    stampInterrupt: false,
+  };
+}
+
+function hashFileBytes(file: string): string {
+  const hash = createHash("sha1");
+  const fd = fs.openSync(file, "r");
+  try {
+    const buf = Buffer.alloc(64 * 1024);
+    let pos = 0;
+    for (;;) {
+      const n = fs.readSync(fd, buf, 0, buf.length, pos);
+      if (n <= 0) break;
+      hash.update(buf.subarray(0, n));
+      pos += n;
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return hash.digest("hex");
+}
+
+function parseAppendedBytes(
+  state: SubagentFileState,
+  fresh: Buffer,
+): {
+  interactions: NonNullable<ReturnType<typeof parseEntryToInteraction>>[];
+  fragment: Buffer;
+  stream: ReturnType<typeof newParseStreamState>;
+  stampInterrupt: boolean;
+} {
+  const stream = { ...state.stream };
+  const buf = state.fragment.length > 0 ? Buffer.concat([state.fragment, fresh]) : fresh;
+  const lastNl = buf.lastIndexOf(0x0a);
+  const tail = buf.subarray(lastNl + 1);
+  let settledFragment = false;
+  if (tail.length > 0 && tail.equals(state.fragment) && fresh.length === 0) {
+    try { JSON.parse(tail.toString("utf8")); settledFragment = true; } catch { /* still mid-record */ }
+  }
+  if (lastNl === -1 && !settledFragment) {
+    return { interactions: [], fragment: Buffer.from(buf), stream, stampInterrupt: state.stampInterrupt };
+  }
+  const consumeTo = settledFragment ? buf.length : lastNl + 1;
+  const fragment = consumeTo >= buf.length ? Buffer.alloc(0) : Buffer.from(buf.subarray(consumeTo));
+  const newContent = buf.subarray(0, consumeTo).toString("utf8");
+  const interactions: NonNullable<ReturnType<typeof parseEntryToInteraction>>[] = [];
+  let stampInterrupt = state.stampInterrupt;
+  for (const line of newContent.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line);
+      const isControl = applyControlEntry(entry, stream, () => {
+        if (interactions.length > 0) interactions[interactions.length - 1].interrupted = true;
+        else stampInterrupt = true;
+      });
+      if (isControl) continue;
+      const interaction = parseEntryToInteraction(entry, stream.thinkingLevel, stream.compactionTokensBefore, stream.afterCompaction, stream.model);
+      if (interaction) {
+        if (stampInterrupt) {
+          interaction.interrupted = true;
+          stampInterrupt = false;
+        }
+        interactions.push(interaction);
+        stream.compactionTokensBefore = undefined;
+        stream.afterCompaction = false;
+      }
+    } catch { /* one bad line is not a file failure */ }
+  }
+  return { interactions, fragment, stream, stampInterrupt };
+}
+
 function syncSubagentTranscript(file: string): boolean {
   let wroteAny = false;
   const stateKey = file;
-  const sessionId = path.basename(file, '.jsonl');
+  const sessionId = path.basename(file, ".jsonl");
   let fileState = discoveredSubagentFiles.get(stateKey);
   if (!fileState) {
-    fileState = {
-      size: -1, mtimeMs: -1, readAtMs: 0, ino: -1, writtenLines: new Map<string, number>(),
-      newGeneration: true, writtenIds: new Map<string, string | null>(), writtenCostById: new Map<string, number>(),
-      recordedFolds: new Set<string>(), foldStamps: new Map<string, string>(), spawnWindowClosesAt: 0,
-    };
+    fileState = freshSubagentState();
     discoveredSubagentFiles.set(stateKey, fileState);
   }
 
-  let size: number;
-  let mtimeMs: number;
-  let ino: number;
-  try {
-    const stat = fs.statSync(file);
-    size = stat.size;
-    mtimeMs = stat.mtimeMs;
-    ino = stat.ino;
-  } catch (err) {
-    // Stat failure: warn once per transcript; mark poll failed; retry next poll.
-    pollHadFailure = true;
-    if (!warnedSubagentStatFailure.has(stateKey)) {
-      warnedSubagentStatFailure.add(stateKey);
-      process.stderr.write(
-        `[wtft-log-parser] WARNING: a subagent transcript could not be stat'd, so its cost may be missing from this session's total (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`,
-      );
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let size: number;
+    let mtimeMs: number;
+    let ino: number;
+    try {
+      const stat = fs.statSync(file);
+      size = stat.size;
+      mtimeMs = stat.mtimeMs;
+      ino = stat.ino;
+    } catch (err) {
+      pollHadFailure = true;
+      if (!warnedSubagentStatFailure.has(stateKey)) {
+        warnedSubagentStatFailure.add(stateKey);
+        process.stderr.write(
+          `[wtft-log-parser] WARNING: a subagent transcript could not be stat'd, so its cost may be missing from this session's total (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+      }
+      if (process.env.WTFT_DAEMON_DEBUG) {
+        process.stderr.write(`[wtft-log-parser] subagent stat failed, will retry next poll (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`);
+      }
+      return wroteAny;
     }
-    if (process.env.WTFT_DAEMON_DEBUG) {
-      process.stderr.write(`[wtft-log-parser] subagent stat failed, will retry next poll (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`);
-    }
-    return wroteAny;
-  }
-  // Skip only when size+mtime unchanged AND settled past MTIME_SETTLE_MS (one clock: Date.now() since our read).
-  const changed = size !== fileState.size || mtimeMs !== fileState.mtimeMs || ino !== fileState.ino
-    || foldedTranscriptChanged(fileState.foldStamps)
-    || Date.now() <= fileState.spawnWindowClosesAt + MTIME_SETTLE_MS;
-  const settled = Date.now() - fileState.readAtMs > MTIME_SETTLE_MS;
-  if (!changed && settled) {
-    return wroteAny;
-  }
-  if (!changed && process.env.WTFT_DAEMON_DEBUG) {
-    process.stderr.write(`[wtft-log-parser] subagent transcript unchanged but not yet settled, re-reading to close the same-tick window: ${path.basename(file)}\n`);
-  }
 
-  let deduped: ReturnType<typeof deduplicateInteractions>;
-  try {
-    deduped = deduplicateInteractions(parseSessionFile(file));
-    clearSubagentCacheMiss(deduped);
-  } catch (err) {
-    pollHadFailure = true;
-    if (!warnedSubagentParseFailure.has(stateKey)) {
-      warnedSubagentParseFailure.add(stateKey);
-      process.stderr.write(
-        `[wtft-log-parser] WARNING: a subagent transcript could not be read or parsed, so its cost may be missing from this session's total until it succeeds (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`,
-      );
+    const settled = Date.now() - fileState.readAtMs > MTIME_SETTLE_MS;
+    let rotate = fileState.mtimeMs !== -1 && (ino !== fileState.ino || size < fileState.lastSize);
+    if (!rotate && fileState.mtimeMs !== -1 && size === fileState.lastSize && (mtimeMs !== fileState.mtimeMs || !settled)) {
+      try {
+        if (hashFileBytes(file) !== fileState.contentHash.copy().digest("hex")) rotate = true;
+        else {
+          fileState.mtimeMs = mtimeMs;
+          fileState.ino = ino;
+        }
+      } catch (err) {
+        pollHadFailure = true;
+        if (!warnedSubagentParseFailure.has(stateKey)) {
+          warnedSubagentParseFailure.add(stateKey);
+          process.stderr.write(
+            `[wtft-log-parser] WARNING: a subagent transcript could not be read or parsed, so its cost may be missing from this session's total until it succeeds (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+        }
+        return wroteAny;
+      }
     }
-    if (process.env.WTFT_DAEMON_DEBUG) {
-      process.stderr.write(`[wtft-log-parser] subagent read or parse error (${sessionId}), will retry next poll: ${err instanceof Error ? err.message : String(err)}\n`);
-    }
-    return wroteAny;
-  }
-
-  const source = transcriptSourceId(file, path.dirname(sessionPath));
-  const freshHashes: string[] = [];
-  const freshIds: (string | null)[] = [];
-  let batch = '';
-  try {
-    const parsed = deduped.map(si => {
-      const line = serializeClassified(si, source);
-      return {
-        line, hash: createHash('sha1').update(line).digest('hex'),
-        id: si.messageId ?? null, cost: Number((si.cost || 0).toFixed(6)),
-      };
-    });
-
-    if (supersededWithoutDedup(fileState, parsed)) {
-      fileState.writtenLines.clear();
-      fileState.writtenIds.clear();
-      fileState.writtenCostById.clear();
-      fileState.recordedFolds.clear();
-      fileState.newGeneration = true;
+    if (rotate) {
       if (process.env.WTFT_DAEMON_DEBUG) {
         process.stderr.write(`[wtft-log-parser] subagent transcript rotated, opening a new generation: ${path.basename(file)}\n`);
       }
+      fileState = freshSubagentState();
+      discoveredSubagentFiles.set(stateKey, fileState);
     }
-    if (fileState.newGeneration) batch = generationRecordLine(source, sessionId);
 
-    const seenThisParse = new Map<string, number>();
-    for (const { line, hash, id, cost } of parsed) {
-      if (id) fileState.writtenCostById.set(id, Math.max(fileState.writtenCostById.get(id) ?? 0, cost));
-      const nth = (seenThisParse.get(hash) || 0) + 1;
-      seenThisParse.set(hash, nth);
-      if (nth <= (fileState.writtenLines.get(hash) || 0)) continue;
-      batch += line;
-      freshHashes.push(hash);
-      freshIds.push(id);
+    const grew = size > fileState.lastSize;
+    let fresh = Buffer.alloc(0);
+    let parsed: ReturnType<typeof parseAppendedBytes> | null = null;
+    if (grew || fileState.fragment.length > 0) {
+      try {
+        if (grew) {
+          const fd = fs.openSync(file, "r");
+          fresh = Buffer.alloc(size - fileState.lastSize);
+          try {
+            fs.readSync(fd, fresh, 0, fresh.length, fileState.lastSize);
+          } finally {
+            fs.closeSync(fd);
+          }
+          if (process.env.WTFT_DAEMON_DEBUG) {
+            process.stderr.write(`[wtft-log-parser] subagent delta ${fresh.length} bytes ${path.basename(file)}\n`);
+          }
+        }
+        parsed = parseAppendedBytes(fileState, fresh);
+      } catch (err) {
+        pollHadFailure = true;
+        if (!warnedSubagentParseFailure.has(stateKey)) {
+          warnedSubagentParseFailure.add(stateKey);
+          process.stderr.write(
+            `[wtft-log-parser] WARNING: a subagent transcript could not be read or parsed, so its cost may be missing from this session's total until it succeeds (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+        }
+        if (process.env.WTFT_DAEMON_DEBUG) {
+          process.stderr.write(`[wtft-log-parser] subagent read or parse error (${sessionId}), will retry next poll: ${err instanceof Error ? err.message : String(err)}\n`);
+        }
+        return wroteAny;
+      }
     }
-  } catch (err) {
-    pollHadFailure = true;
-    if (!warnedSubagentSerializeFailure.has(stateKey)) {
-      warnedSubagentSerializeFailure.add(stateKey);
-      process.stderr.write(
-        `[wtft-log-parser] WARNING: a subagent's interactions could not be serialized for the tag file, so its cost is missing from this session's total until it succeeds (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`,
-      );
+
+    const deduped = parsed ? clearSubagentCacheMiss(deduplicateInteractions(parsed.interactions)) : [];
+    const plain: typeof deduped = [];
+    const newOwners: FoldOwner[] = [];
+    for (const interaction of deduped) {
+      if (hasClaudeCommand(interaction)) {
+        newOwners.push({ base: structuredClone(interaction), lastLine: "", lastCost: 0 });
+      } else {
+        plain.push(interaction);
+      }
     }
-    if (process.env.WTFT_DAEMON_DEBUG) {
-      process.stderr.write(`[wtft-log-parser] subagent serialize error (${sessionId}), will retry next poll: ${err instanceof Error ? err.message : String(err)}\n`);
+    const owners = [...fileState.owners, ...newOwners];
+    const windowOpen = Date.now() <= fileState.spawnWindowClosesAt + MTIME_SETTLE_MS;
+    const needAttr = owners.length > 0 && (
+      newOwners.length > 0 || foldedTranscriptChanged(fileState.foldStamps) || windowOpen || owners.some(o => o.lastLine === "")
+    );
+
+    let clones: NonNullable<ReturnType<typeof parseEntryToInteraction>>[] = [];
+    if (needAttr) {
+      try {
+        clones = owners.map(o => structuredClone(o.base));
+        attributeClaudeSubAgentCosts(clones);
+      } catch (err) {
+        pollHadFailure = true;
+        if (!warnedSubagentParseFailure.has(stateKey)) {
+          warnedSubagentParseFailure.add(stateKey);
+          process.stderr.write(
+            `[wtft-log-parser] WARNING: a subagent transcript could not be read or parsed, so its cost may be missing from this session's total until it succeeds (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+        }
+        return wroteAny;
+      }
+      const shrunk = owners.some((o, i) => o.lastCost > 0 && clones[i].cost + 1e-9 < o.lastCost);
+      if (shrunk && attempt === 0) {
+        fileState = freshSubagentState();
+        discoveredSubagentFiles.set(stateKey, fileState);
+        if (process.env.WTFT_DAEMON_DEBUG) {
+          process.stderr.write(`[wtft-log-parser] subagent transcript rotated, opening a new generation: ${path.basename(file)}\n`);
+        }
+        continue;
+      }
+    }
+
+    const source = transcriptSourceId(file, path.dirname(sessionPath));
+    let batch = "";
+    const nextOwners: FoldOwner[] = owners.map((o, i) => ({ ...o }));
+    try {
+      if (fileState.newGeneration && (plain.length > 0 || clones.length > 0 || rotate)) {
+        batch = generationRecordLine(source, sessionId);
+      }
+      for (const interaction of plain) batch += serializeClassified(interaction, source);
+      clones.forEach((interaction, i) => {
+        const line = serializeClassified(interaction, source);
+        if (line === nextOwners[i].lastLine) return;
+        batch += line;
+        nextOwners[i].lastLine = line;
+        nextOwners[i].lastCost = interaction.cost;
+      });
+    } catch (err) {
+      pollHadFailure = true;
+      if (!warnedSubagentSerializeFailure.has(stateKey)) {
+        warnedSubagentSerializeFailure.add(stateKey);
+        process.stderr.write(
+          `[wtft-log-parser] WARNING: a subagent's interactions could not be serialized for the tag file, so its cost is missing from this session's total until it succeeds (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+      }
+      return wroteAny;
+    }
+
+    const parent = path.basename(sessionPath, ".jsonl");
+    const freshFolds: string[] = [];
+    const foldFrom = clones.length > 0 ? clones : plain;
+    if (foldFrom.length > 0) {
+      for (const id of foldRecordIds(sessionId, foldFrom)) {
+        if (fileState.recordedFolds.has(id)) continue;
+        batch += foldRecordLine(parent, id, source);
+        freshFolds.push(id);
+      }
+    }
+
+    if (batch) {
+      appendTagFile(tagPath, batch);
+      wroteAny = true;
+      tagGrewSinceMarker = true;
+    }
+
+    if (parsed) {
+      fileState.fragment = parsed.fragment;
+      fileState.stream = parsed.stream;
+      fileState.stampInterrupt = parsed.stampInterrupt;
+      if (fresh.length > 0) fileState.contentHash.update(fresh);
+      fileState.lastSize = size;
+      fileState.readAtMs = Date.now();
+    }
+    fileState.mtimeMs = mtimeMs;
+    fileState.ino = ino;
+    fileState.owners = nextOwners;
+    for (const id of freshFolds) fileState.recordedFolds.add(id);
+    if (plain.length > 0 || clones.length > 0 || rotate) fileState.newGeneration = false;
+    if (clones.length > 0) {
+      fileState.foldStamps = new Map();
+      for (const interaction of clones) {
+        for (const fold of interaction.claudeSubAgentFolds ?? []) fileState.foldStamps.set(fold.file, fold.stamp);
+      }
+      fileState.spawnWindowClosesAt = claudeSpawnWindowClosesAt(clones);
     }
     return wroteAny;
   }
-
-  // After the lines, in the same append: a reader never sees a record whose money is not yet in the tag.
-  const parent = path.basename(sessionPath, ".jsonl");
-  const freshFolds: string[] = [];
-  for (const id of foldRecordIds(sessionId, deduped)) {
-    if (fileState.recordedFolds.has(id)) continue;
-    batch += foldRecordLine(parent, id, source);
-    freshFolds.push(id);
-  }
-
-  if (batch) {
-    appendTagFile(tagPath, batch);
-    wroteAny = true;
-    tagGrewSinceMarker = true;
-  }
-  // What is on disk is recorded first: a throw below must not leave a line
-  // written and unrecorded, which re-appends it with no id to collapse it.
-  fileState.newGeneration = false;
-  for (const id of freshFolds) fileState.recordedFolds.add(id);
-  for (let k = 0; k < freshHashes.length; k++) {
-    fileState.writtenIds.set(freshHashes[k], freshIds[k]);
-    fileState.writtenLines.set(freshHashes[k], (fileState.writtenLines.get(freshHashes[k]) || 0) + 1);
-  }
-  fileState.foldStamps = new Map();
-  for (const si of deduped) {
-    for (const fold of si.claudeSubAgentFolds ?? []) fileState.foldStamps.set(fold.file, fold.stamp);
-  }
-  fileState.spawnWindowClosesAt = claudeSpawnWindowClosesAt(deduped);
-  fileState.size = size;
-  fileState.mtimeMs = mtimeMs;
-  fileState.ino = ino;
-  if (changed) fileState.readAtMs = Date.now();
   return wroteAny;
-}
-
-/** Whether this parse drops a line already written that the reader's id dedup
- *  cannot collapse: one with no message id, one whose id this parse no longer
- *  produces at all, or one whose id now costs LESS than what was written —
- *  dedup keeps the highest-cost copy, so it would keep the retracted price.
- *  That is a transcript rewritten, so its lines need a new generation rather
- *  than an append beside the old ones. A turn re-emitted with GROWING usage is
- *  the ordinary case and takes the append. */
-function supersededWithoutDedup(
-  fileState: SubagentFileState,
-  parsed: { hash: string; id: string | null; cost: number }[],
-): boolean {
-  if (fileState.writtenLines.size === 0) return false;
-  const counts = new Map<string, number>();
-  const costById = new Map<string, number>();
-  for (const { hash, id, cost } of parsed) {
-    counts.set(hash, (counts.get(hash) || 0) + 1);
-    if (id) costById.set(id, Math.max(costById.get(id) ?? 0, cost));
-  }
-  for (const [id, written] of fileState.writtenCostById) {
-    const now = costById.get(id);
-    if (now === undefined || now < written) return true;
-  }
-  for (const [hash, written] of fileState.writtenLines) {
-    if (written <= (counts.get(hash) || 0)) continue;
-    const id = fileState.writtenIds.get(hash) ?? null;
-    if (id === null || !costById.has(id)) return true;
-  }
-  return false;
 }
 
 /** A nested transcript that grew, or no longer stats, since the parse that folded it. */

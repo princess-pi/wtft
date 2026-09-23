@@ -1,8 +1,7 @@
 #!/usr/bin/env bun
 /**
- * Never call `attributeClaudeSubAgentCosts` over anything less
- *   than the whole file (docs/wtft-incremental-render-spec.md, "Per-Call, Not
- *   Global").
+ * #420 / #97 — attributeClaudeSubAgentCosts runs on a whole transcript's
+ * fold-capable turns in one call, never on a poll-sized slice.
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -81,29 +80,29 @@ assert(
 	`found: ${JSON.stringify(definitions)}`,
 );
 
+const parserCalls = calls.filter((c) => c.file === "extensions/lib/wtft-parser.ts");
+const daemonCalls = calls.filter((c) => c.file === "bin/wtft-daemon.ts");
+const elsewhere = calls.filter((c) => c.file !== "extensions/lib/wtft-parser.ts" && c.file !== "bin/wtft-daemon.ts");
+
 assert(
-	"exactly one production call site",
-	calls.length === 1,
-	calls.length === 0
-		? "no call site found at all — attributeClaudeSubAgentCosts is now dead code, or this test's file walk is broken"
-		: `found ${calls.length}: ${JSON.stringify(calls)}\n` +
-			"A second call site means something is handing attributeClaudeSubAgentCosts a\n" +
-			"slice of a file rather than the whole thing — seenSessionIds only guards\n" +
-			"double-counting WITHIN one call. Fold the new call into parseSessionFile's\n" +
-			"existing whole-file call, or update this test with the reviewed reason the\n" +
-			"invariant no longer holds.",
+	"parseSessionFile is the only parser call site",
+	parserCalls.length === 1,
+	`found ${parserCalls.length}: ${JSON.stringify(parserCalls)}`,
+);
+assert(
+	"the daemon calls it once, on every fold-capable turn of that transcript together (#97)",
+	daemonCalls.length === 1,
+	`found ${daemonCalls.length}: ${JSON.stringify(daemonCalls)}\n` +
+		"A poll-sized slice double-counts a nested session. The daemon call has to pass every\n" +
+		"retained fold-capable turn of one transcript, cloned from its pre-fold base.",
+);
+assert(
+	"no other production call site",
+	elsewhere.length === 0,
+	`found: ${JSON.stringify(elsewhere)}`,
 );
 
-if (calls.length === 1) {
-	assert(
-		"the one call site is inside parseSessionFile, in wtft-parser.ts",
-		calls[0].file === "extensions/lib/wtft-parser.ts",
-		`call site is in ${calls[0].file}:${calls[0].line} instead`,
-	);
-
-	// Confirm the call is textually inside parseSessionFile's body — between its
-	// `export function` line and the next top-level `export function` after it —
-	// rather than merely in the same file.
+if (parserCalls.length === 1) {
 	const content = readFileSync(PARSER_FILE, "utf8");
 	const lines = content.split("\n");
 	const startIdx = lines.findIndex((l) => /^export function parseSessionFile\(/.test(l));
@@ -111,11 +110,11 @@ if (calls.length === 1) {
 	for (let i = startIdx + 1; i < lines.length; i++) {
 		if (/^export function /.test(lines[i])) { endIdx = i; break; }
 	}
-	const callLineIdx = calls[0].line - 1;
+	const callLineIdx = parserCalls[0].line - 1;
 	assert(
-		"the call site sits inside parseSessionFile's body (whole-file scope)",
+		"the parser call site sits inside parseSessionFile's body (whole-file scope)",
 		startIdx !== -1 && callLineIdx > startIdx && callLineIdx < endIdx,
-		`parseSessionFile spans lines ${startIdx + 1}-${endIdx}, call site is line ${calls[0].line}`,
+		`parseSessionFile spans lines ${startIdx + 1}-${endIdx}, call site is line ${parserCalls[0].line}`,
 	);
 }
 

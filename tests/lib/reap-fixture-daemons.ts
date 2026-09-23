@@ -13,7 +13,12 @@ export function pathIsUnderTmp(file: string): boolean {
 	return resolved === tmp || resolved.startsWith(tmp + path.sep) || resolved.startsWith("/tmp/");
 }
 
-export function reapFixtureDaemons(): number {
+/** `under`: reap only daemons whose session or harness root lies under this
+ *  directory — one suite's own, when suites run side by side. */
+export function reapFixtureDaemons(under?: string): number {
+	const inScope = under === undefined
+		? pathIsUnderTmp
+		: (file: string) => { const r = path.relative(path.resolve(under), path.resolve(file)); return r === "" || (!r.startsWith("..") && !path.isAbsolute(r)); };
 	let killed = 0;
 	let entries: string[];
 	try {
@@ -46,7 +51,7 @@ export function reapFixtureDaemons(): number {
 				.map(row => row.slice(row.indexOf("=") + 1))
 				.filter(row => row.length > 0);
 		} catch { /* environ unreadable */ }
-		const fixture = (session.length > 0 && pathIsUnderTmp(session)) || roots.some(pathIsUnderTmp);
+		const fixture = (session.length > 0 && inScope(session)) || roots.some(inScope);
 		if (!fixture) continue;
 		try {
 			process.kill(pid, "SIGTERM");

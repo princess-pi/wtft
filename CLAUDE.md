@@ -27,7 +27,7 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
 |---|---|
 | Install deps | `bun install` |
 | Build | `bun run build` |
-| Test | `bun run test` — each suite in its own process; skips shell suites |
+| Test | `bun run test` — each suite in its own process, 2 × CPUs at a time (`WTFT_TEST_JOBS=1` for serial); skips shell suites |
 | Shell suite | `bash tests/wtft-daemon.test.sh` |
 | Typecheck | `bun run typecheck` |
 | Pricing manifest | `bun run manifest` |

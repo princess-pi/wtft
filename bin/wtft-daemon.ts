@@ -516,7 +516,7 @@ function syncSubagentTranscript(file: string): boolean {
         continue;
       }
     }
-    const holdBack = Date.now() - mtimeMs <= MTIME_SETTLE_MS && plain.length > 0;
+    const holdBack = size > fileState.lastSize && plain.length > 0;
     if (holdBack) fileState.pendingTurn = plain.pop() ?? null;
     const owners = [...fileState.owners, ...newOwners];
     const windowOpen = Date.now() <= fileState.spawnWindowClosesAt + MTIME_SETTLE_MS;

@@ -1,6 +1,7 @@
 #!/usr/bin/env -S node --experimental-strip-types
 
 
+import { daemonSpawnArgs } from "../extensions/lib/wtft-daemon-spawn.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -1086,7 +1087,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       try { fs.unlinkSync(fullPath); } catch (_) {}
       if (sessionFound) {
         try {
-          const child = spawn(process.execPath, [process.argv[1], "--session", sessionFound], {
+          const child = spawn(process.execPath, daemonSpawnArgs(process.argv[1], sessionFound), {
             detached: true,
             stdio: "ignore"
           });

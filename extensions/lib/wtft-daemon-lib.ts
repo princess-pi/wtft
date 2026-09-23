@@ -1,4 +1,5 @@
 import * as path from "node:path";
+import { daemonSpawnArgs } from "./wtft-daemon-spawn.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import { createHash } from "node:crypto";
@@ -849,7 +850,7 @@ export function restartDaemon(sessionPath: string, daemonPath: string): boolean 
 	} catch {}
 
 	try {
-		const child = spawn(process.execPath, [daemonPath, "--session", sessionPath], {
+		const child = spawn(process.execPath, daemonSpawnArgs(daemonPath, sessionPath), {
 			detached: true,
 			stdio: "ignore"
 		});

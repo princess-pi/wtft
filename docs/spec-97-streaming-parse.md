@@ -25,14 +25,23 @@ interactions kept, instead of the file three ways over.
 Every caller benefits, not only the daemon: the CLI's and the widget's subagent reads and every
 nested fold parse go through the same function.
 
+**A 1 MB young generation for the daemon under node.** Measured below, the chunked parse alone
+removes the per-parse peak but not the daemon's resident growth: re-parsing a changed transcript
+whole churns short-lived objects, and V8's default young generation lets that churn inflate the
+heap. `daemonSpawnArgs` (`extensions/lib/wtft-daemon-spawn.ts`) starts every long-lived daemon —
+from the CLI, the widget, watch mode and the daemon's own restart — with
+`--max-semi-space-size=1` when the runtime is node. bun is not V8 and gets no flag. The old
+generation is **not** capped: a cap small enough to matter could crash the daemon out of memory
+on a genuinely large session, which is worse than a large resident size.
+
 **Road not taken, for now — offset reads in the daemon (the issue's direction A).** Reading only the
 bytes appended since the last poll would also remove the CPU cost of re-parsing a changed
 transcript. But the daemon's subagent path relies on the full parse for three things that were
 built on it: rotation detection (#114's generation records, which compare the whole parse with what
 was written), nested `claude -p` re-attribution when a folded transcript changes (#14), and the
 one-child-one-holder rule (#107). Rebuilding those on offsets is a large change to the hot path.
-This change fixes the memory, which is the issue's Closer, without touching any of them. If the
-measurement below still shows CPU mattering, the offset half gets its own issue.
+This change reduces the memory without touching any of them. The measurement below shows the
+offset half is still needed to reach the Closer, so it has its own issue: #222.
 
 ## Verification
 
@@ -46,6 +55,21 @@ measurement below still shows CPU mattering, the offset half gets its own issue.
 - **The existing suites are unchanged.** Every test of `parseSessionFile`'s behaviour (the daemon,
   the CLI parity and the fold suites) passes as it did.
 
-**The Closer — measured, recorded here.** A daemon watching a synthetic session whose subagent
-transcripts total ≥25 MB: PSS sampled after start-up and after 30 minutes of appends. Target from
-the issue: both under 30 MB, the second no more than a few MB above the first.
+- **The daemon's flag:** under node the spawn argv starts with `--max-semi-space-size=1`; under
+  bun it does not (D1, D2).
+
+**The Closer — measured 2026-09-22, and not yet met.** A daemon watching a synthetic session whose
+three subagent transcripts total about 28 MB, sampled after start-up and after 3 minutes of
+appends every 5 s (a scratch script, not a suite; the issue's own Closer asks for 30 minutes):
+
+| Build | PSS after start-up | after 3 min of appends |
+|---|---|---|
+| before this change | 20.5 MB | 55.5 MB |
+| chunked parse only | 18.9 MB | 55.3 MB |
+| chunked parse + 1 MB young generation (this change) | 21.0 MB | 38.3 MB |
+| road not taken: also capping the old generation at 24 MB | 22.2 MB | 34.2 MB |
+
+So this change takes the daemon from about 55 MB to about 38 MB on this workload. That misses
+the issue's 30 MB and still grows with each re-parse. The rest is the whole-file re-parse itself,
+which #222 removes by reading only appended bytes. #97 closes with this change; #222 carries the
+Closer's remaining half.

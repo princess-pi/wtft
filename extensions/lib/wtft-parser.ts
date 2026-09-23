@@ -2,6 +2,7 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs";
+import { StringDecoder } from "node:string_decoder";
 import { calculateClaudeCost, calculateServerToolCost, getDeepSeekPeakMultiplier } from "./wtft-cost.js";
 import { getParseAdapters } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.ts";
@@ -360,13 +361,42 @@ export function splitOverheadCost(
 /** `doNotFold` holds canonical transcript paths this parse must not fold in:
  *  the transcripts it is already inside, and any a different source is already
  *  counting. */
-export function parseSessionFile(filePath: string, doNotFold: ReadonlySet<string> = new Set()): Interaction[] {
+/** Bytes read per chunk: a transcript is never held whole, so a re-parse
+ *  peaks at one chunk and one line, not at the file several times over. */
+const PARSE_CHUNK_BYTES = 1024 * 1024;
+
+/** Every line of a file, in order, read in chunks — the same lines
+ *  `readFileSync(...).split("\n")` gives, including a last one with no newline. */
+function* fileLines(filePath: string, chunkBytes: number): Generator<string> {
+	const fd = fs.openSync(filePath, "r");
+	try {
+		const decoder = new StringDecoder("utf8");
+		const buf = Buffer.alloc(chunkBytes);
+		let carry = "";
+		for (;;) {
+			const n = fs.readSync(fd, buf, 0, buf.length, null);
+			if (n === 0) break;
+			const text = carry + decoder.write(buf.subarray(0, n));
+			const parts = text.split("\n");
+			carry = parts.pop()!;
+			yield* parts;
+		}
+		yield carry + decoder.end();
+	} finally {
+		fs.closeSync(fd);
+	}
+}
+
+export function parseSessionFile(
+	filePath: string,
+	doNotFold: ReadonlySet<string> = new Set(),
+	chunkBytes: number = PARSE_CHUNK_BYTES,
+): Interaction[] {
 	const interactions: Interaction[] = [];
 	const state = newParseStreamState();
 	// Unreadable transcript throws (never returns [] as "empty"). Per-line
 	// errors stay swallowed — bad line, not file-level failure.
-	const content = fs.readFileSync(filePath, "utf8");
-	for (const line of content.split("\n")) {
+	for (const line of fileLines(filePath, chunkBytes)) {
 		if (!line.trim()) continue;
 		try {
 			const entry = JSON.parse(line);

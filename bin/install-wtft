@@ -21,6 +21,9 @@
 #   3   the build failed
 #   4   in sync, but a config file is still at the old princess-pi-tools path
 #       (status "config-left")
+#   5   in sync, but the claude PATH guard is SHADOWED by a different claude
+#       first on PATH (status "nsp-guard-shadowed"); an ABSENT guard is not
+#       a failure
 #  64   bad usage: unknown argument, --dir without a directory, --dir followed
 #       by a flag or given an empty string, or no --dir on a host with HOME
 #       unset. `--` is NOT an end-of-options marker. NO JSON DOCUMENT is emitted
@@ -239,8 +242,9 @@ fi
 # exception: no JSON document.
 finish() {
   if [ "$JSON" = 1 ]; then
-    printf '{"schema":"install-wtft@1","mode":"%s","dir":"%s","status":"%s","onPath":%s,"artifacts":[%s],"shadow":%s,"configMigration":[%s]}\n' \
-      "$MODE" "$(json_str "$DEST_DIR")" "$STATUS" "${ON_PATH:-false}" "${STATE_JSON:-}" "${SHADOW_JSON:-null}" "${CONFIG_JSON:-}"
+    printf '{"schema":"install-wtft@1","mode":"%s","dir":"%s","status":"%s","onPath":%s,"artifacts":[%s],"shadow":%s,"configMigration":[%s],"nspGuard":{"state":"%s","found":%s,"guard":%s}}\n' \
+      "$MODE" "$(json_str "$DEST_DIR")" "$STATUS" "${ON_PATH:-false}" "${STATE_JSON:-}" "${SHADOW_JSON:-null}" "${CONFIG_JSON:-}" \
+      "${NSP_GUARD_STATE:-absent}" "${NSPGUARD_FOUND_JSON:-null}" "${NSPGUARD_GUARD_JSON:-null}"
   else
     case "$STATUS" in
       build-failed) echo "❌ install-wtft: build failed — see the output above" >&2 ;;
@@ -267,10 +271,15 @@ finish() {
                       echo "⚠️  install-wtft: installed into $DEST_DIR, but PATH resolves wtft to $WINNER" >&2
                     fi
                     printf '   Run: rm %s\n' "$(sh_squote "$WINNER")" >&2 ;;
+      nsp-guard-shadowed)
+                    echo "⚠️  install-wtft: PATH resolves claude to $NSP_FOUND before the nsp guard at $NSP_GUARD" >&2
+                    echo "   Put $(dirname "$NSP_GUARD")'s PATH entry before $(dirname "$NSP_FOUND")'s. Nothing is deleted." >&2 ;;
       ok)           if [ "$MODE" = check ]; then echo "✅ install-wtft: $DEST_DIR is in sync with $SRC_DIR"
                     else echo "✅ install-wtft: installed into $DEST_DIR"; fi
                     # Not an error, but say so — a green run must not hide an unusable PATH.
-                    [ "${ON_PATH:-false}" = true ] || echo "   Note: no wtft on PATH resolves to $DEST_DIR/wtft — add $DEST_DIR to PATH." ;;
+                    [ "${ON_PATH:-false}" = true ] || echo "   Note: no wtft on PATH resolves to $DEST_DIR/wtft — add $DEST_DIR to PATH."
+                    # The guard ships from a private repo — absence is a normal host, not drift.
+                    [ "${NSP_GUARD_STATE:-absent}" != absent ] || echo "   Note: no claude-nsp-guard on PATH (ships from princess-pi-tools; absent is not a failure)." ;;
     esac
   fi
   exit "$EXIT"
@@ -363,5 +372,50 @@ if [ -n "$WINNER" ]; then
     if [ "$STATUS" = ok ]; then STATUS=shadowed; EXIT=2; fi
   fi
 fi
+
+# ---
+# NSP GUARD: does `claude` on PATH resolve to princess-pi-tools'
+# claude-nsp-guard? Never fatal on its own — absent is a normal host, not
+# drift — but a guard that loses the PATH race guards nothing. Outranked by
+# every other status, so it is scanned last and only escalates an "ok".
+# ---
+
+# install-workflow-tools (princess-pi-tools docs/dev-workflow-spec.md) matches
+# this exact line before it overwrites ~/bin/claude with the guard.
+NSP_GUARD_SENTINEL='# nsp-guard-identity: 9a1c-claude-nsp-guard-sentinel'
+
+# The sentinel must be a whole line, not a substring — a script that merely
+# echoes it is not the guard. A real `claude` can be a large binary, so read
+# only the first 160 lines rather than slurping the whole file.
+is_nsp_guard() {
+  [ -f "$1" ] && [ -x "$1" ] || return 1
+  head -n 160 "$1" 2>/dev/null | grep -aqxF -- "$NSP_GUARD_SENTINEL"
+}
+
+NSP_FOUND=""
+NSP_GUARD=""
+IFS=: read -r -a NSP_PATH_DIRS <<< "$PATH"
+for d in "${NSP_PATH_DIRS[@]}"; do
+  [ -n "$d" ] || continue
+  f="$d/claude"
+  [ -f "$f" ] && [ -x "$f" ] || continue
+  [ -n "$NSP_FOUND" ] || NSP_FOUND="$f"
+  [ -n "$NSP_GUARD" ] || { is_nsp_guard "$f" && NSP_GUARD="$f"; }
+done
+
+if [ -z "$NSP_GUARD" ]; then NSP_GUARD_STATE=absent
+elif [ "$NSP_FOUND" = "$NSP_GUARD" ]; then NSP_GUARD_STATE=ok
+else NSP_GUARD_STATE=shadowed
+fi
+
+if [ "$NSP_GUARD_STATE" = shadowed ] && [ "$STATUS" = ok ]; then
+  STATUS=nsp-guard-shadowed
+  EXIT=5
+fi
+
+NSPGUARD_FOUND_JSON=null
+[ -z "$NSP_FOUND" ] || NSPGUARD_FOUND_JSON="\"$(json_str "$NSP_FOUND")\""
+NSPGUARD_GUARD_JSON=null
+[ -z "$NSP_GUARD" ] || NSPGUARD_GUARD_JSON="\"$(json_str "$NSP_GUARD")\""
 
 finish

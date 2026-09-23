@@ -100,4 +100,13 @@ M=$(PATH="$BUNDIR:/usr/bin:/bin" HOME="$FAKE_HOME" "$MUT"  --check --json --dir 
 report "M4 config-left escalation deleted" config-left "$(status_of "$R")" ok "$(status_of "$M")"; rm -rf "$D"
 rm -rf "$FAKE_HOME/.config"
 
+# M5 — never escalate a shadowed claude PATH guard (#30) to nsp-guard-shadowed.
+D=$(mktemp -d)
+GUARDDIR=$(mktemp -d); printf '#!/bin/sh\n# not the sentinel\n# nsp-guard-identity: 9a1c-claude-nsp-guard-sentinel\necho guard\n' > "$GUARDDIR/claude"; chmod +x "$GUARDDIR/claude"
+DECOYDIR=$(mktemp -d); printf '#!/bin/sh\necho decoy-claude\n' > "$DECOYDIR/claude"; chmod +x "$DECOYDIR/claude"
+mutate '/if \[ "\$NSP_GUARD_STATE" = shadowed \] && \[ "\$STATUS" = ok \]; then/,/^fi$/d' "M5 nsp-guard escalation deleted" || true
+R=$(PATH="$DECOYDIR:$GUARDDIR:$BUNDIR:/usr/bin:/bin" "$REAL" --json --dir "$D" 2>/dev/null)
+M=$(PATH="$DECOYDIR:$GUARDDIR:$BUNDIR:/usr/bin:/bin" "$MUT"  --json --dir "$D" 2>/dev/null)
+report "M5 nsp-guard escalation deleted" nsp-guard-shadowed "$(status_of "$R")" ok "$(status_of "$M")"; rm -rf "$D" "$GUARDDIR" "$DECOYDIR"
+
 exit $(( fails > 0 ))

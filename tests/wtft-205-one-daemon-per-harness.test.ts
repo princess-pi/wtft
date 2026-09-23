@@ -327,6 +327,26 @@ try {
 		50,
 	);
 	assert("idle drop leaves the harness process up", idleDropped && alive(idlePid));
+
+	const emptyClaude = path.join(root, "empty-claude");
+	const emptyPi = path.join(root, "empty-pi");
+	fs.mkdirSync(emptyClaude, { recursive: true });
+	fs.mkdirSync(emptyPi, { recursive: true });
+	const emptyPid = start(["--harness", "claude"], "empty.err", {
+		WTFT_CLAUDE_PROJECTS_DIR: emptyClaude,
+		WTFT_PI_SESSIONS_DIR: emptyPi,
+	});
+	const emptyErr = path.join(root, "empty.err");
+	const emptyUp = await waitFor(
+		"an empty harness publishes its pid",
+		() => fs.existsSync(emptyErr) && fs.readFileSync(emptyErr, "utf8").includes("harness pid "),
+	);
+	const restart = spawnSync(process.execPath, [DAEMON, "--restart"], { encoding: "utf8", env });
+	await sleep(400);
+	assert(
+		"restart stops a harness that holds no session lease",
+		emptyUp && restart.status === 0 && !alive(emptyPid) && restart.stdout.includes("harness wtft-harness-"),
+	);
 } finally {
 	for (const pid of pids) {
 		try { process.kill(pid, "SIGTERM"); } catch { /* gone */ }

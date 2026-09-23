@@ -197,7 +197,7 @@
     },
     {
       "flags": "--cleanup",
-      "desc": "Kill log parser daemons whose source session no longer exists."
+      "desc": "Kill log parser daemons whose source session no longer exists. A harness session is dropped from that process instead of killing it, and a fixture daemon under the tmp dir is killed too."
     },
     {
       "flags": "--restart",
@@ -205,7 +205,7 @@
     },
     {
       "flags": "--stop <session>",
-      "desc": "Stop the log parser daemon for a specific session path."
+      "desc": "Stop the log parser daemon for a specific session path. A harness session is dropped from the shared process, which stays up."
     },
     {
       "flags": "-F, --force",

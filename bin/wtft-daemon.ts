@@ -651,7 +651,9 @@ function scanForSubAgents() {
   }
 
   if (wroteAny) {
-    lastWriteMs = Date.now();
+    const now = Date.now();
+    lastWriteMs = now;
+    lastActivityMs = now;
     idleStartMs = 0;
   }
 
@@ -1347,6 +1349,10 @@ function scheduleFlush(key: string) {
     harnessFlushTimers.delete(key);
     const current = harnessSlots.get(key);
     if (!current) return;
+    if (!leaseStillOurs(current)) {
+      dropHarnessSlot(key);
+      return;
+    }
     withSlot(current, () => {
       if (pendingItems.length > 0) flushPending();
       scanForSubAgents();
@@ -1389,6 +1395,10 @@ function watchDir(dir: string) {
     try {
       if (fs.statSync(key).isDirectory()) watchDir(key);
     } catch { /* directory is gone */ }
+    for (const [file, slot] of harnessSlots) {
+      if (file !== key && !file.startsWith(key + path.sep)) continue;
+      wake(file, slot.displayed);
+    }
   });
   harnessWatchers.set(key, watcher);
   let entries: fs.Dirent[];
@@ -1468,6 +1478,7 @@ function pointSessionAt(livePid: number, file: string) {
   const replacement = `${lease}.replace-${process.pid}`;
   fs.writeFileSync(replacement, String(livePid));
   fs.renameSync(replacement, lease);
+  try { fs.writeFileSync(`${lease}.display`, ""); } catch { /* the live process still has the old focus */ }
 }
 
 function runHarness(which: string, focus: string) {
@@ -1537,6 +1548,11 @@ function sweepIdleSlots() {
     if (!leaseStillOurs(slot)) {
       dropHarnessSlot(key);
       continue;
+    }
+    if (slot.pidPath && fs.existsSync(`${slot.pidPath}.display`)) {
+      slot.displayed = true;
+      try { fs.unlinkSync(`${slot.pidPath}.display`); } catch { /* already gone */ }
+      withSlot(slot, () => upsertHeartbeat(Date.now()));
     }
     if (slotNeedsChildScan(slot, now)) withSlot(slot, () => scanForSubAgents());
     const current = harnessSlots.get(key);
@@ -1732,7 +1748,7 @@ Management:
   --list, -l            List every running wtft-daemon, including fixture processes
   --cleanup             Kill daemons whose session is gone, and fixture daemons under the tmp dir
   --restart             Kill all running daemons (fresh spawn on next wtft)
-  --stop <session>      Stop the daemon for a specific session path
+  --stop <session>      Drop that session. A per-session process exits. A harness process stays up.
 
 Daemon mode:
   -s, --session <path>  Path to session.jsonl to watch
@@ -1923,6 +1939,24 @@ if (showList || showCleanup || showRestart || stopSession) {
   }
 
   if (showRestart) {
+    let harnessPidFiles: string[] = [];
+    try {
+      harnessPidFiles = fs.readdirSync(pidDir).filter(f => f.startsWith("wtft-harness-") && f.endsWith(".pid"));
+    } catch { /* tmp dir unreadable */ }
+    for (const pidFile of harnessPidFiles) {
+      const fullPath = path.join(pidDir, pidFile);
+      let pid = 0;
+      try { pid = parseInt(fs.readFileSync(fullPath, "utf8").trim(), 10); } catch { continue; }
+      if (pid <= 0 || seenPids.has(pid) || pid === process.pid) {
+        try { fs.unlinkSync(fullPath); } catch { /* already gone */ }
+        continue;
+      }
+      seenPids.add(pid);
+      try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ }
+      try { fs.unlinkSync(fullPath); } catch { /* already gone */ }
+      console.log(`Restarted: PID ${pid} — harness ${pidFile}`);
+      found++;
+    }
     console.log(`Restarted ${found} daemon(s). Run wtft to spawn fresh instances.`);
   }
   if (showCleanup) {

@@ -279,7 +279,7 @@ contract: [`docs/spec-116-spawn-ledger.md`](./docs/spec-116-spawn-ledger.md).
 suggesting `wtft … | less -R`. Any `wtft` run that produces a report spawns the log
 parser daemon if one is not already holding the session's lease, and the daemon
 revives after an idle timeout. A session under the Claude projects directory or the
-Pi sessions directory is served by that directory's one log parser daemon. A session
+Pi sessions directory is served by that directory's one daemon. A session
 outside those directories keeps its own. The commands that run instead of a report —
 `--help`/`--why`/`--version` and the daemon-management group — return before
 that and spawn nothing. `wtft-daemon` exists for debugging, not for normal use.

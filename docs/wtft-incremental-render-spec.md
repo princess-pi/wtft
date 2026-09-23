@@ -50,7 +50,7 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 
 | Event | Behavior |
 |---|---|
-| `session_start` (Pi) or `wtft` / `wtft --watch` invoked (CLI) | Starts the log parser daemon if that session's pid lease is not already held. A session under a harness root attaches to that root's one process. |
+| `session_start` (Pi) or `wtft` / `wtft --watch` invoked (CLI) | Starts the daemon if that session's pid lease is not already held. A session under a harness root attaches to that root's one process. |
 | New session data arrives | Classifies and flushes that session's tag. Flushes for one session are at least 667ms apart. |
 | No new data for 24h | That session is dropped ("idle timeout"). A `--session` process exits. A harness process stays up. It decides from in-memory timestamps on a timer and does not stat the file. A later write adopts the session again. |
 | Daemon just spawned (< 60s) | Idle drop suppressed (startup grace period) |

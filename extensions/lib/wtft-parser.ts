@@ -365,6 +365,9 @@ const PARSE_CHUNK_BYTES = 1024 * 1024;
 /** Every line of a file, in order, read in chunks — the same lines
  *  `readFileSync(...).split("\n")` gives, including a last one with no newline. */
 function* fileLines(filePath: string, chunkBytes: number): Generator<string> {
+	if (!Number.isSafeInteger(chunkBytes) || chunkBytes <= 0) {
+		throw new RangeError(`fileLines: chunkBytes must be a positive safe integer, got ${chunkBytes}`);
+	}
 	const fd = fs.openSync(filePath, "r");
 	try {
 		const decoder = new StringDecoder("utf8");

@@ -8,9 +8,14 @@
 
 `parseSessionFile` reads the whole transcript into one string, splits it into an array of every
 line, and parses them all while both are still alive. Its peak is the file's bytes as a string,
-plus the line array, plus every parsed entry: 4–5× the file. The daemon re-reaches that peak each
-time a subagent transcript changes, and V8 does not hand the freed heap back, so the peak becomes
-the resident size. Measured in the issue: a daemon watching a 25.3 MB session sat at 113.9 MB PSS.
+plus the line array, plus every parsed entry. The issue's own measurement on real transcripts put
+that peak at 4–5× the file: a daemon watching a 25.3 MB session sat at 113.9 MB PSS. The daemon
+re-reaches that peak each time a subagent transcript changes, and V8 does not hand the freed heap
+back, so the peak becomes the resident size.
+
+This change's own measurement (`tests/wtft-97-streaming-parse.test.ts`'s PART M, under bun): one
+parse of a 40 MB fixture grew peak RSS by about 49 MB with the old whole-string read and about
+4 MB with the chunked read.
 
 That account needs one qualification, shown by the measurement below: removing the peak by itself
 (chunked parsing, no V8 flag) left resident size close to unchanged (55.5 → 55.3 MB on the
@@ -56,13 +61,22 @@ offset half is still needed to reach the Closer; it stays open in #97.
 
 `tests/wtft-97-streaming-parse.test.ts`:
 
-- **Same output as before.** Over a set of fixture transcripts, including a multi-byte character
-  that straddles a chunk boundary, a final line with no trailing newline, a truncated last line,
-  blank lines and malformed lines: the chunked parse returns exactly the interactions the
-  whole-string parse did. Run with a deliberately small chunk size, so the boundaries fall inside
-  lines.
+- **Same output as before (PART E).** One mixed fixture — a plain turn, a blank line, a malformed
+  line, a multi-byte character straddling a chunk boundary, a `model_change` control entry, a wide
+  multi-byte turn, and a final line with no trailing newline — is parsed at five chunk sizes (1, 3,
+  7, 64, 1000 bytes), plus once more from a truncated copy whose last line is cut mid-write. All
+  six match a single-chunk parse of the whole fixture byte for byte. Equivalence with the removed
+  `readFileSync(...).split("\n")` path rests on that single-chunk case — it is what the old path
+  did — plus the existing suites that pin `parseSessionFile`'s output (the daemon, the CLI parity
+  and the fold suites), which pass unchanged.
 - **The existing suites are unchanged.** Every test of `parseSessionFile`'s behaviour (the daemon,
   the CLI parity and the fold suites) passes as it did.
+- **Peak memory does not scale with the file (PART M).** Parsing a 40 MB fixture in a fresh
+  process: peak RSS grows by well under half the file's size, not several times over. This runs
+  under bun, so the number it prints is JavaScriptCore's, not V8's — the daemon's V8 behaviour
+  under node is covered only by `debug/97-daemon-pss.sh`, not by this suite.
+- **An invalid `chunkBytes` throws, never a silent empty parse (PART R).** 0, -1, `NaN` and 1.5
+  each raise a `RangeError` naming the value.
 
 - **The daemon's flag:** under node the spawn argv starts with `--max-semi-space-size=1`; under
   bun it does not (D1, D2).
@@ -86,5 +100,24 @@ So this change takes the daemon from about 55 MB to about 38 MB on this workload
 #97, not its close — the issue's Closer (under 30 MB, not growing) is not met by it. What remains
 in #97 is direction A above — reading only the bytes appended since the last poll, instead of
 re-parsing a changed transcript whole — and the per-transcript `writtenLines`, `writtenIds` and
-`writtenCostById` maps in `bin/wtft-daemon.ts`'s `SubagentFileState`, which grow with every line
-ever emitted and are cleared only on rotation.
+`writtenCostById` maps in `bin/wtft-daemon.ts`'s `SubagentFileState`: they grow with every line
+emitted, are cleared when a rewrite is detected (`supersededWithoutDedup`), and the whole
+`SubagentFileState` is dropped when another transcript folds this one (`skipAsFoldedElsewhere`).
+
+## Review record
+
+Review round 2 — 11 findings:
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | `debug/97-daemon-pss.sh` could report a falsely low PSS, or exit 0, on a hidden failure | Fixed: `set -euo pipefail`; legitimate non-zero returns (a `kill` of an already-dead pid) guarded with `\|\| true`. |
+| 2 | The python fixture generator used `datetime.UTC` (3.11+ only), had no exit-status check, and no floor on fixture size | Fixed: `datetime.timezone.utc`; exit status checked; subagents directory asserted ≥25 MiB, measured in bytes via `du -sb`. |
+| 3 | An interrupted run could orphan the daemon process or leave its temp tree behind | Fixed: `trap 'kill "$PID" 2>/dev/null \|\| true; rm -rf "$ROOT"' EXIT`, set right after the daemon starts. |
+| 4 | `pss()`/`sample()` could report a non-numeric or non-positive reading as if it were a real measurement | Fixed: `sample()` validates the value is a positive number before printing it, exiting non-zero with a labelled error otherwise. |
+| 5 | The first sample could be taken before the daemon had read any subagent transcript, measuring an idle process instead of the thing under test | Fixed: `wait_for_tags` blocks, bounded to 60 s, until the tag file carries an `"s":` line, or exits with a labelled error. |
+| 6 | `chunkBytes` of 0, a negative number, `NaN`, or a non-integer produced a silent empty parse | Fixed: `fileLines` throws a `RangeError` naming the value; covered by PART R. |
+| 7 | `docs/EXT_WTFT.html`'s spec-97 row cited "4–5×" as this change's own result | Fixed: the row now states only measured figures (49 → 4 MB peak parse; 55 → 38 MB daemon PSS). |
+| 8 | This spec's "4–5×" line, its verification wording, and its `writtenLines`/`writtenIds`/`writtenCostById` claim were imprecise or wrong | Fixed: the 4–5× figure is re-attributed to the issue's own measurement ("The gap" above); Verification states exactly what PART E, M and R prove; the maps' clearing rules are corrected (the Closer section above). |
+| 9 | Pi host may not be the node CLI | Declined: verified 2026-09-22 that the Pi host and the CLI both run as the nvm node binary (`/home/princess-pi/.nvm/versions/node/v22.22.3/bin/node`), which accepts V8 flags. |
+| 10 | Spec asserts facts about unshown files | Verified: `bin/wtft.ts` spawns the daemon only through `spawnWtftDaemon` (lines ~598 and ~632), and the built `bin/wtft-daemon.mjs`'s shebang is `#!/usr/bin/env node`. |
+| 11 | PART M measures JSC, not V8 | Accepted, documented: Verification above (PART M) says so directly — the daemon's V8 behaviour under node is covered only by `debug/97-daemon-pss.sh`. |

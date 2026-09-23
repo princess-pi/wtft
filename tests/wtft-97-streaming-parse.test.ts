@@ -68,6 +68,20 @@ console.log("\nPART E — output does not depend on where chunks fall");
 }
 
 // ---
+// PART R — an invalid chunkBytes throws, never a silent empty parse
+// ---
+console.log("\nPART R — chunkBytes must be a positive safe integer");
+{
+	const file = path.join(dir, "reject.jsonl");
+	fs.writeFileSync(file, turn(0, "x"));
+	for (const bad of [0, -1, NaN, 1.5]) {
+		let threw: unknown = null;
+		try { parseSessionFile(file, new Set(), bad); } catch (e) { threw = e; }
+		check(threw instanceof RangeError, `R chunkBytes ${bad} throws RangeError (got ${threw})`);
+	}
+}
+
+// ---
 // PART M — peak memory does not scale with the file
 // ---
 console.log("\nPART M — a ~40 MB transcript parses without holding it several times over");

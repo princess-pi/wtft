@@ -20,7 +20,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 
-import type { DiscoverScopeOptions, HarnessDiscovery, SessionCandidate } from "../types.ts";
+import type { DiscoverScopeOptions, HarnessDiscovery, SessionCandidate, SpawnCandidate } from "../types.ts";
 import {
 	resolveLastCwd,
 	countDirRead,
@@ -231,6 +231,137 @@ function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions
 	return [...bySessionId.values()];
 }
 
+/** Head lines searched for the first timestamp, cwd and entrypoint. The
+ *  first line is often a title or snapshot carrying none of them. */
+const CANDIDATE_HEAD_LINES = 20;
+const CANDIDATE_HEAD_BYTES = 64 * 1024;
+
+function readCandidateHead(file: string): Omit<SpawnCandidate, "path" | "sessionId"> | null {
+	const fd = fs.openSync(file, "r");
+	let text: string;
+	try {
+		const buf = Buffer.alloc(CANDIDATE_HEAD_BYTES);
+		const n = fs.readSync(fd, buf, 0, buf.length, 0);
+		text = buf.subarray(0, n).toString("utf8");
+	} finally {
+		fs.closeSync(fd);
+	}
+	let startedAt: number | null = null;
+	let cwd: string | null = null;
+	let entrypoint: unknown;
+	for (const line of text.split("\n").slice(0, CANDIDATE_HEAD_LINES)) {
+		let entry: any;
+		try { entry = JSON.parse(line); } catch { continue; }
+		if (startedAt === null && typeof entry?.timestamp === "string") {
+			const ms = Date.parse(entry.timestamp);
+			if (!Number.isNaN(ms)) startedAt = ms;
+		}
+		if (cwd === null && typeof entry?.cwd === "string" && entry.cwd) cwd = entry.cwd;
+		if (entrypoint === undefined && typeof entry?.entrypoint === "string") entrypoint = entry.entrypoint;
+		if (startedAt !== null && cwd !== null && entrypoint !== undefined) break;
+	}
+	if (startedAt === null || cwd === null) return null;
+	const launchedBy = entrypoint === "sdk-cli" ? "program" : entrypoint === "cli" ? "human" : null;
+	return { cwd, startedAt, launchedBy };
+}
+
+/** A path that went away — a transcript or project dir deleted mid-scan, or
+ *  no projects root at all. Nothing is there to list. */
+function isGone(err: unknown): boolean {
+	return (err as NodeJS.ErrnoException)?.code === "ENOENT";
+}
+
+/**
+ * Top-level transcripts only, pruned by mtime twice: a project dir's mtime
+ * moves when a transcript is created in it, so an older directory cannot
+ * hold a transcript that began after `sinceMs`. Symlinks count: `statSync`
+ * follows them.
+ *
+ * Any read error other than a path that went away is THROWN, so the report
+ * fails loudly: an empty listing must only ever mean "looked, found none".
+ */
+function listSpawnCandidates(sinceMs: number): SpawnCandidate[] {
+	const candidates: SpawnCandidate[] = [];
+	const root = projectsDir();
+	let slugs: fs.Dirent[];
+	try {
+		slugs = fs.readdirSync(root, { withFileTypes: true });
+	} catch (err) {
+		if (isGone(err)) return candidates;
+		throw err;
+	}
+	for (const slug of slugs) {
+		if (!slug.isDirectory() && !slug.isSymbolicLink()) continue;
+		const dir = path.join(root, slug.name);
+		let entries: fs.Dirent[];
+		try {
+			const stat = fs.statSync(dir);
+			if (!stat.isDirectory() || stat.mtimeMs < sinceMs) continue;
+			entries = fs.readdirSync(dir, { withFileTypes: true });
+		} catch (err) {
+			if (isGone(err)) continue;
+			throw err;
+		}
+		for (const entry of entries) {
+			if ((!entry.isFile() && !entry.isSymbolicLink()) || !entry.name.endsWith(".jsonl")) continue;
+			const file = path.join(dir, entry.name);
+			try {
+				const stat = fs.statSync(file);
+				if (!stat.isFile() || stat.mtimeMs < sinceMs) continue;
+				const head = readCandidateHead(file);
+				if (head) candidates.push({ path: file, sessionId: sessionIdOf(file), ...head });
+			} catch (err) {
+				if (isGone(err)) continue;
+				throw err;
+			}
+		}
+	}
+	return candidates;
+}
+
+function mtimeOrNull(file: string): number | null {
+	try { return fs.statSync(file).mtimeMs; } catch { return null; }
+}
+
+/**
+ * Every session id → its newest readable transcript, from one walk of the
+ * tree: the answer `resolveSessionById` gives for each id.
+ */
+function indexSessionsById(): Map<string, string> {
+	const index = new Map<string, string>();
+	const root = projectsDir();
+	let projectDirs: string[];
+	try {
+		projectDirs = fs.readdirSync(root, { withFileTypes: true })
+			.filter(e => e.isDirectory())
+			.map(e => e.name);
+	} catch (err) {
+		// ENOENT (raced away between the existsSync above and here) is ordinary:
+		// nothing to index. Anything else — permission denied, most commonly —
+		// must be LOUD: a caller cannot tell "no sessions" from "could not look".
+		if (isGone(err)) return index;
+		throw err;
+	}
+	const newest = new Map<string, number>();
+	for (const slug of projectDirs) {
+		const files: string[] = [];
+		collect(path.join(root, slug), slug, files);
+		for (const file of files) {
+			const id = sessionIdOf(file);
+			// Stat every copy, as `resolveSessionById` does: one that cannot be
+			// stat-ed (a dangling symlink, a file gone mid-walk) is never indexed,
+			// so the walk asks the next harness rather than stopping on a dead path.
+			const mtimeMs = mtimeOrNull(file);
+			if (mtimeMs === null) continue;
+			if (!newest.has(id) || mtimeMs > newest.get(id)!) {
+				newest.set(id, mtimeMs);
+				index.set(id, file);
+			}
+		}
+	}
+	return index;
+}
+
 export const discovery: HarnessDiscovery = {
 	id: ID,
 	label: "Claude",
@@ -275,6 +406,10 @@ export const discovery: HarnessDiscovery = {
 
 		return best ? best.path : null;
 	},
+
+	indexSessionsById,
+
+	listSpawnCandidates,
 };
 
 export default discovery;

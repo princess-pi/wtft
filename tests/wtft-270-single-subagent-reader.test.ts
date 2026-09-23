@@ -38,7 +38,7 @@ assert(
 	defs.length === 1,
 );
 
-const calls = code.match(/syncSubagentTranscript\s*\(\s*file\s*\)/g) || [];
+const calls = code.match(/syncSubagentTranscript\s*\(\s*file\b[^)]*\)/g) || [];
 assert(
 	`both discovery paths call it — at least 2 call sites (found ${calls.length})`,
 	calls.length >= 2,

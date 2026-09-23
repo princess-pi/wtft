@@ -17,6 +17,7 @@ import {
 import { execSync } from "node:child_process";
 import wcwidth from "wcwidth";
 import { treeTotals, type SpawnTree } from "./wtft-spawn-tree.js";
+import type { UnrecordedSpawn } from "./wtft-unrecorded.js";
 export interface Bin {
 	key?: string;
 	label: string;
@@ -1713,17 +1714,51 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 
 export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string {
 	if (!spawned) return "";
-	// Every untrusted string on this surface goes through one sanitiser, declared
-	// before the first arm that prints one. `mechanism`, `label`, and `ledgerError`
-	// are untrusted: a newline forges report lines and an ESC starts an OSC
-	// sequence. U+FFFD rather than deletion, so a reader sees something was
-	// removed; a silently shortened path reads as the real one.
-	const safe = (v: string) => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, "\uFFFD");
+	return renderRecordedSpawns(self, spawned) + renderUnrecordedSpawns(spawned.unrecorded, spawned.ledgerError !== null);
+}
+
+/** Every untrusted string on this surface goes through one sanitiser. A
+ *  newline forges report lines and an ESC starts an OSC sequence. U+FFFD
+ *  rather than deletion, so a reader sees something was removed. */
+const safeSpawnText = (v: string) => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, "\uFFFD");
+
+/** The unrecorded-spawn list. Printed after SPAWNED, and on its own when nothing was
+ *  recorded: its rows are the ones the ledger does not know. A `named` row is
+ *  printed on its own; `inferred` rows collapse to one line per basis, because
+ *  a busy host puts every peer's programmatic child in the window. */
+function renderUnrecordedSpawns(rows: UnrecordedSpawn[] | undefined, ledgerUnreadable: boolean): string {
+	if (!rows || rows.length === 0) return "";
+	const line = (tier: string, name: string, money: string) =>
+		`           ${tier.padEnd(9)} ${fitVisual(safeSpawnText(name), 30)} ${money.padStart(12)}\n`;
+	// With the ledger unread, a row may be a child some record does name.
+	let out = ledgerUnreadable
+		? `\nUNRECORDED ${rows.length} session(s) not in the tree — the spawn ledger could not be read, so a record may name some (#128) —\n`
+		: `\nUNRECORDED ${rows.length} session(s) no spawn record names (#128) —\n`;
+	out += `           NOT in TOTAL or TREE: a list, not a claim; every row is in --json\n`;
+	for (const row of rows.filter(r => r.tier === "named")) {
+		out += line("named", row.cwd, row.total ? formatCost(row.total.costUsd) : `(${row.skip ?? "unreadable"})`);
+	}
+	const where: Record<string, string> = { worktree: "in this repo's checkouts", tmp: "in temp sandboxes" };
+	for (const basis of ["worktree", "tmp"] as const) {
+		const group = rows.filter(r => r.tier === "inferred" && r.basis === basis);
+		if (group.length === 0) continue;
+		const unreadable = group.filter(r => !r.total).length;
+		const cost = group.reduce((sum, r) => sum + (r.total?.costUsd ?? 0), 0);
+		// A $0.00 would claim these sessions were free.
+		out += line("inferred", `${group.length} ${where[basis]}`, unreadable === group.length ? "(unreadable)" : formatCost(cost));
+		// Its own line: fitted into the name column it would be clipped, and the
+		// sum would read as complete.
+		if (unreadable > 0) out += `                     ${unreadable} of them unreadable, not in that sum\n`;
+	}
+	return out;
+}
+
+function renderRecordedSpawns(self: TokenTotals, spawned: SpawnTree): string {
 	if (spawned.ledgerError !== null) {
 		// Loud, and NOT an empty block: an unreadable ledger must not render the
 		// same silence as a session that spawned nothing.
 		return `\nSPAWNED    spawn ledger could not be read (#116) — descendants unknown, not zero\n` +
-		       `           ${safe(String(spawned.ledgerError))}\n`;
+		       `           ${safeSpawnText(String(spawned.ledgerError))}\n`;
 	}
 	if (spawned.edges.length === 0) {
 		// No edges FOR THIS SESSION. Say nothing — unless the reader needs to
@@ -1739,7 +1774,7 @@ export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string 
 
 const rows: string[] = [];
 	for (const edge of spawned.edges) {
-		const full = edge.label ? `${safe(edge.mechanism)}  ${safe(edge.label)}` : safe(edge.mechanism);
+		const full = edge.label ? `${safeSpawnText(edge.mechanism)}  ${safeSpawnText(edge.label)}` : safeSpawnText(edge.mechanism);
 		// Fitted to 40 COLUMNS, not 40 code units.
 		const name = fitVisual(full, 40);
 		// A skipped edge prints its REASON where its cost would be. A dash or a

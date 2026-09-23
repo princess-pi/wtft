@@ -92,14 +92,18 @@ when the file grew or rotated.
 - **The daemon re-attributes a child while a spawning turn is still open.** Discovery matches a
   subagent session whose first timestamp is within `CLAUDE_SUBAGENT_WINDOW_MS` of the spawning
   turn, so until that window plus `MTIME_SETTLE_MS` has passed, a later attribution can find one this
-  pass did not. Each such child is re-attributed every poll until then. A spawning turn whose
-  command carries no `cd` has no cwd to discover under, so it opens no window.
+  pass did not. Each such child is re-attributed every poll until then. Since #107 A a bare `claude -p` opens a window
+  too, against the session's own cwd. What opens none is a turn whose spawns name no directory the
+  fallback stands in for: an unknowable `cd` target, a bare `cd`, a launcher, or a session whose
+  own cwd is unreadable.
 - **The tag's own session gets the same window.** A `claude -p` command in the tag's own session
   whose discovery has found a transcript stays in `pendingClaudeCommands`, re-discovered every
   poll, until its window closes. Before this change the first discovery that found any file ended
   the search, so a second child that started later in the window was never read. The two arms
-  either side are unchanged: one that has found nothing stays pending with no time bound, and one
-  whose command carries no resolvable cwd is dropped at the first poll.
+  either side were unchanged here: one that has found nothing, and one whose discovery hit an
+  unreadable directory, both stayed pending with no time bound. #128 has since bounded the first
+  to the same window; the unreadable arm still retries until the read succeeds. Only a turn with nothing to search waits out its
+  window (#107) and is then dropped.
 - **Road not taken: a bound at `IDLE_THRESHOLD_MS`.** #194's plan named it. Growth is tracked by
   stat, so it needs no time bound, and the window is what discovery matches against, so it is the
   bound that fits.

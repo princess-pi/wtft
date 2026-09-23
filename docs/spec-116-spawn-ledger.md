@@ -13,13 +13,18 @@ A launcher-spawned session is a full `claude` started by a *launcher process* th
 parent's own transcript contains. Today it contributes **zero** to the parent, for three reasons
 that are all properties of the transcripts and none of which a parser can fix:
 
-1. The command head is the launcher, not `claude`, so `commandSpawnsAgent` never fires.
-2. There is no `cd` on the spawning command, so `cwdForClaudeSpawn` returns null and
-   `attributeClaudeSubAgentCosts` hits its `if (!cwd) continue`.
+1. The shell runs the launcher, not `claude`. `commandSpawnsAgent` does fire — it matches
+   `claude` anywhere in the command, including the `--kind claude` flag — but the child did not
+   inherit the shell's working directory, so since #107 A the no-`cd` fallback deliberately does
+   not stand in for it.
+2. There is no `cd` on the spawning command. Since #107 A a spawn with no `cd` falls back to the
+   session's own working directory, but only when the shell runs `claude` itself — a launcher
+   starts its child somewhere the parent's cwd does not name, so nothing is searched for it.
 3. The child's cwd is a worktree or a `/tmp` sandbox, so its transcript lands in a project dir the
    parent never wrote to.
 
-**Neither transcript contains a field naming the other.** There is no edge to re-derive, so no
+**Neither transcript contains a field naming the other** — unless a launcher puts the parent's id
+in the child's cwd, which #128's `named` tier reads. There is no edge to re-derive, so no
 tagger version bump can reach it — measured on session `9f29d624…180d`, which reported $70.33 while
 $69.68 of its own `pr-review` lens children sat **invisible** in ten `/tmp/pr-review-*` sandboxes.
 Invisible, not `unattributed` — this document defines that term narrowly, as a RECORDED edge whose
@@ -97,11 +102,14 @@ with some flags the report parser ignores.
 | 3 | The record was valid and the ledger could not be written (unwritable state dir, ENOSPC, a short write). The edge is **not recorded**, so the child is **invisible**, not `unattributed` — see *How this is verified*. Nothing repairs a partial line; see *Simplification pass*. |
 
 **It never blocks a spawn.** A spawner calls it and ignores the exit code; the failure is the
-spawner's to log, and an unwritten edge degrades to exactly today's behaviour.
+spawner's to log, and an unwritten edge leaves the child outside the tree — reported, since #128,
+only in `spawned.unrecorded[]` when it matches a tier there.
 
 ## Reading, resolving, walking
 
 **`readSpawnLedger()`** returns `{ childrenOf: Map<parent, SpawnEdge[]>, malformedLines: number }`.
+It strips a trailing `.jsonl` from `parent` and `child`, so a session recorded once by id and once by
+file name is one node (#138).
 A line that is not JSON, does not carry `schema: "wtft/spawn@1"`, is missing a required field, or
 carries a `parent`/`child` that is not uuid-shaped is **skipped and counted** — the count is
 reported, so a broken writer is visible rather than quietly losing money. A blank line is skipped
@@ -116,7 +124,8 @@ a silent gap for any reader who ignored the flag. Refusing is simpler *and* stri
 cannot omit an edge without saying so.
 
 **Resolution goes through the harness seam** — `HarnessDiscovery.resolveSessionById`, asked of every
-registered harness in turn, so a Pi child resolves through Pi's discovery and a Claude Code child
+registered harness in turn (since #138, through each harness's `indexSessionsById` where it has
+one, built once per walk and giving the same answers), so a Pi child resolves through Pi's discovery and a Claude Code child
 through its own. This is not a preference: the repo's lookup already recurses past the `sessions/`
 subdirectory older Claude Code installs use, skips the derived-data dirs, and takes the **newest**
 copy where one id exists in several project dirs — the moved-session case (#155, #6), which is
@@ -195,7 +204,7 @@ already trust.
 
 ```json
 "spawned": {
-  "schema": "wtft/spawn-tree@2",
+  "schema": "wtft/spawn-tree@3",
   "descendants": 3,
   "edges": [{"parent":"…","child":"…","mechanism":"pr-review-lens","ts":"…",
              "label":"correctness","model":"opus","cwd":"/tmp/pr-review-abc","depth":1,
@@ -207,10 +216,15 @@ already trust.
   "maxDepth": 5,
   "malformedLedgerLines": 0,
   "ledgerError": null,
-  "total": {…}
+  "total": {…},
+  "unrecorded": []
 },
 "tree": {…}
 ```
+
+`unrecorded` is #128's list of sessions no edge names, never summed into `total`, `spawned.total`
+or `tree` —
+`docs/spec-128-unrecorded-spawns.md`.
 
 `tree` = `total` + `spawned.total`, as a field, so a consumer never has to add two numbers and
 guess whether it double-counted. `label`, `model`, `cwd` and `skip` are present on an edge only
@@ -274,7 +288,7 @@ survive.
 The issue's own Closer, as `tests/wtft-116-spawn-ledger.test.ts`:
 
 1. A parent transcript whose bash command is the `herdr agent start …` line — the one measured to
-   return `null` from `cwdForClaudeSpawn`.
+   yield no directory to search, since the shell runs the launcher rather than `claude`.
 2. A child transcript with its own UUID in a different project dir.
 3. A spawn record for the pair.
 
@@ -302,8 +316,9 @@ a project dir under this repo or its worktrees, shown with their cost and **neve
 peer session running at the same time is kept out of the list), so it is **#128**, not a late
 addition here.
 
-Until #128 lands, an unrecorded launcher child is **silently missing**, exactly as it is today —
-which is why #116 stays open when this merges.
+#128 has since landed: an unrecorded launcher child is listed in `spawned.unrecorded[]` with its
+cost and a tier, never summed — `docs/spec-128-unrecorded-spawns.md`, whose Closer is this clause
+run against the same kind of fixture.
 
 Plus, each with its own test: UUID and ISO-8601 validation on write; the 4 KiB refusal, *executed*
 through escape expansion rather than asserted as a constant; 24 concurrent appends making 24 intact
@@ -330,8 +345,9 @@ descendant, which the parse does not fold, is priced under its own edge in both 
   `princess-pi-tools`, and this change ships first so there is something to call.
 - **Folding descendants into TOTAL.** A separate decision, and it needs the interaction-level
   attribution rework in #107 / #14 / #94 first.
-- **Listing an unrecorded child.** The Closer's second clause — #128. A spawner that never calls
-  `spawn-record` is invisible here, exactly as it is today.
+- **Listing an unrecorded child.** The Closer's second clause — #128, since landed
+  (`docs/spec-128-unrecorded-spawns.md`). A spawner that never calls
+  `spawn-record` is invisible to the walk; #128's listing reports it instead.
 - **Live growth.** A long-lived interactive child's cost is read at the moment `wtft` runs; it is a
   snapshot and will be stale, which is #14 and is not made worse here.
 
@@ -388,7 +404,7 @@ row below says why). The table above's rows are unchanged, and these are additio
 | Finding | Verified? | Action |
 |---|---|---|
 | DFS order could depth-cap a subtree within the bound by another path | **Yes** — a session recorded both at the end of a chain and directly under the root | **Code**: breadth-first, so every session is reached at its minimum depth. C26/C26b/C26c |
-| A ledger edge could double-count a child already folded into SELF | **Yes** — `cd /tmp/x && claude -p --session-id <uuid>` is both mechanisms at once | **Code**: `alreadyAttributed`, seeded by `collectSelfAttributedSessionIds`; the edge is reported `in-self-total` and never added. C27–C27d |
+| A ledger edge could double-count a child already folded into SELF | **Yes** — `cd /tmp/x && claude -p --session-id <uuid>` is both mechanisms at once | **Code**: `alreadyAttributed`; the edge is reported `in-self-total` and never added. Since #178 the CLI seeds it from the daemon's recorded fold ids and the widget from `collectSelfAttributedSessionIds`. C27–C27d |
 | A repeat edge onto an unreadable child claimed `already-counted` | **Yes** — `seen.add` ran before the resolve | **Code**: the repeat repeats the first visit's outcome; one missing session is one gap. C28/C28b |
 | `no-session-file` claimed absence the run cannot establish | **Yes** — an unreadable projects root produces the same outcome | **Code**: renamed `not-found`, and the name stops claiming |
 | The Pi widget's root id could never match a ledger parent | **Yes** — Pi basenames are timestamp-prefixed, and the ledger demanded a bare uuid | **Code**: a session id is "contains a uuid", the repo's own rule |
@@ -422,13 +438,12 @@ Ten blocking findings. Nine were real; one is refuted below with the code that d
 | The ~2.2 KiB maximum record is not derivable | **Yes** — five 512-byte fields alone are 2.5 KiB; with two ids and keys it is under 3 | Prose |
 
 **Refuted — the self-attribution set does not lose `commands` through the tag file.**
-The finding reasons that `collectSelfAttributedSessionIds` needs `interaction.commands` for its
-`claude -p` arm, and that tag-derived interactions may not carry them. The tag-file wire format is
-`extensions/lib/wtft-daemon-lib.ts`, and it does: `serializeClassified` writes `cmd:
-interaction.commands` and `t: interaction.timestamp`, and `classifiedToInteraction` reads both back
-(`commands: obj.cmd || []`). Both fields the arm needs survive the round trip, and they are in the
-"must stay in sync" pair the file names as its single source of truth. The finding was right that
-the code assumed it — the assumption is now checked, and this paragraph is the check's record.
+The finding reasoned that `collectSelfAttributedSessionIds` needed `interaction.commands` to
+rediscover `claude -p` children, and that tag-derived interactions might not carry them. Both
+fields survive the round trip — `serializeClassified` writes `cmd` and `t`, and
+`classifiedToInteraction` reads both back — so the finding was refuted on the wire format.
+It is moot as of #178: the set is now built from the daemon's recorded fold records and the folds
+already on the interactions, and nothing on the read path rediscovers a child from its commands.
 
 ## PR review round 3 (2026-09-16) — the round limit, and where it leaves this
 

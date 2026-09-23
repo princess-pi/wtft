@@ -195,6 +195,58 @@ function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions
 	return [...bySessionId.values()];
 }
 
+/** A path that went away between the `existsSync` check and the read that
+ *  follows it — the only read failure that means "nothing to index". */
+function isGone(err: unknown): boolean {
+	return (err as NodeJS.ErrnoException)?.code === "ENOENT";
+}
+
+function mtimeOrNull(file: string): number | null {
+	try { return fs.statSync(file).mtimeMs; } catch { return null; }
+}
+
+/**
+ * Every session id → its newest readable transcript, from one walk of the
+ * tree: the answer `resolveSessionById` gives for each id.
+ */
+function indexSessionsById(): Map<string, string> {
+	const index = new Map<string, string>();
+	const root = sessionsDir();
+	// Read the root directly, so a permission failure on it — as opposed to on
+	// some nested directory `collect` walks into and quietly skips — is LOUD:
+	// a caller cannot tell "no sessions" from "could not look".
+	let rootEntries: fs.Dirent[];
+	try {
+		rootEntries = fs.readdirSync(root, { withFileTypes: true });
+	} catch (err) {
+		if (isGone(err)) return index;
+		throw err;
+	}
+	const files: string[] = [];
+	for (const entry of rootEntries) {
+		const full = path.join(root, entry.name);
+		if (entry.isDirectory()) {
+			if (!SKIP_DIRS.has(entry.name)) collect(full, files);
+		} else if (entry.name.endsWith(".jsonl")) {
+			files.push(full);
+		}
+	}
+	const newest = new Map<string, number>();
+	for (const file of files) {
+		const id = sessionIdOf(file);
+		// Stat every copy, as `resolveSessionById` does: one that cannot be
+		// stat-ed (a dangling symlink, a file gone mid-walk) is never indexed,
+		// so the walk asks the next harness rather than stopping on a dead path.
+		const mtimeMs = mtimeOrNull(file);
+		if (mtimeMs === null) continue;
+		if (!newest.has(id) || mtimeMs > newest.get(id)!) {
+			newest.set(id, mtimeMs);
+			index.set(id, file);
+		}
+	}
+	return index;
+}
+
 export const discovery: HarnessDiscovery = {
 	id: ID,
 	label: "Pi",
@@ -231,6 +283,8 @@ export const discovery: HarnessDiscovery = {
 		}
 		return best ? best.path : null;
 	},
+
+	indexSessionsById,
 };
 
 export default discovery;

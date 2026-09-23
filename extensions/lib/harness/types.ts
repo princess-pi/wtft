@@ -86,6 +86,34 @@ export interface HarnessDiscovery {
 	 * lives. A moved session keeps its id and loses its path.
 	 */
 	resolveSessionById(sessionId: string): string | null;
+	/**
+	 * Every session id this harness holds → its current transcript path, from
+	 * one walk: the answer `resolveSessionById` gives for each id. Optional; a
+	 * caller resolving many ids uses it to walk the tree once, not once per id.
+	 * Keep `resolveSessionById` cheap for one id: a running daemon calls it.
+	 */
+	indexSessionsById?(): Map<string, string>;
+	/**
+	 * Every session transcript written at or after `sinceMs` (one created
+	 * earlier may be omitted), with the facts the unrecorded-spawn listing
+	 * needs. Optional: a harness that omits it never has its sessions listed.
+	 * Throw on a read error, other than a path that is gone: an empty result
+	 * must only mean "looked, found none".
+	 */
+	listSpawnCandidates?(sinceMs: number): SpawnCandidate[];
+}
+
+/** One transcript `listSpawnCandidates` found. Facts only — the tier rules
+ *  live on the shared side (`wtft-unrecorded.ts`). */
+export interface SpawnCandidate {
+	path: string;
+	sessionId: string;
+	/** The cwd the transcript records. */
+	cwd: string;
+	/** First timestamp in the transcript, epoch ms. */
+	startedAt: number;
+	/** null: the harness does not say. */
+	launchedBy: "program" | "human" | null;
 }
 
 // ---

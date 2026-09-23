@@ -146,7 +146,7 @@ wtft --json | jq .total.costUsd
 `wtft --json` writes **exactly one JSON object** to stdout and nothing else —
 no chart, no ANSI, and no `3.6k`-style abbreviation, which is lossy. Human prose
 goes to stderr, and every sentence that would otherwise have been on stdout is
-repeated in the object's `notices[]`. The schema is `wtft/session@5`; field names
+repeated in the object's `notices[]`. The schema is `wtft/session@6`; field names
 and exit codes are versioned API, the prose inside `notices[].text` is not. Full
 contract: [`docs/spec-26-json.md`](./docs/spec-26-json.md).
 
@@ -179,7 +179,9 @@ retired in `@4`.
   object.
 - **1** — error: no session found or selected, an invalid path, a daemon that
   could not be spawned or that died before producing data, a refused flag
-  (`--pager`), or an unhandled exception. The reason is on stderr; under
+  (`--pager`), a read error other than a missing path in a harness's session
+  tree (Claude Code's projects directory today) while `--json` or `--tokens` lists unrecorded spawns (so `unrecorded: []`
+  never hides one), or an unhandled exception. The reason is on stderr; under
   `--json`, stdout carries nothing.
 - **9** — provisional ([#443](https://github.com/princess-pi/wtft/issues/443)):
   the report was produced in full, but a number in it may still change.
@@ -220,8 +222,9 @@ Some agent sessions are started by a *launcher*, not by a `claude` command in th
 parent's own transcript: a `pr-review` lens in a `/tmp` sandbox, a
 `herdr agent start` child in a worktree. Those children are invisible to the
 tree, and not because the parser is missing something —
-**neither transcript contains a field naming the other**, so there is no edge to
-re-derive and no amount of re-parsing can reach the money. Measured on one real
+**neither transcript contains a field naming the other** (unless the launcher put
+the parent's id in the child's cwd, which #128's `named` tier reads), so there is
+no edge to re-derive and no amount of re-parsing can reach the money. Measured on one real
 session: $70.33 reported, $69.68 of its own lens children INVISIBLE — not
 `unattributed`, which is the narrower thing: a RECORDED edge whose child could
 not be read. Those children had no record at all, which is why the issue exists.
@@ -247,8 +250,8 @@ Exit **2** is a bad call — a missing or unknown flag, a flag with no value (a
 bare `--label --json` is refused rather than recording the label `--json`), a
 malformed session id, an oversized field. Exit **3** is an
 unwritable ledger; the edge is then not recorded at all, so the child is
-*invisible* rather than unattributed. A spawner is meant to ignore both, since an unrecorded edge
-simply degrades to the old behaviour.
+outside the tree rather than unattributed. A spawner is meant to ignore both: the child
+then shows up only in `spawned.unrecorded[]`, if it matches a tier there.
 
 `spawn-record` is positional: it must be the **first** argument, so
 `wtft --json spawn-record …` is a report run, not a recording.
@@ -274,6 +277,24 @@ was read cleanly; an unreadable ledger, or one with skipped lines, still prints
 — saying so is the whole point, since "no edges" and "could not tell" are not
 the same report. Full
 contract: [`docs/spec-116-spawn-ledger.md`](./docs/spec-116-spawn-ledger.md).
+
+A child nobody recorded is still reported. `spawned.unrecorded[]` lists the
+sessions that look like this session's children, that no ledger edge names and
+whose cost is not already counted,
+each with its own cost (`null`, with `skip: "unreadable"`, when it cannot be
+parsed), a `tier` and a `basis`: **`named`** (basis `cwd-names-parent`) when the
+child's `cwd` contains this session's id, whoever started it; **`inferred`**
+(basis `worktree` or `tmp`) when a program started it (Claude Code's
+`entrypoint: sdk-cli`) in this repo's checkouts or a temp sandbox (`/tmp` or
+`$TMPDIR`) in the 30 minutes after a command this session ran. `inferred` is a
+guess, and says so; apart from `named`, a session a human started is never
+listed. **Nothing in the list is summed** into `total`, `spawned.total` or
+`tree`, and it never causes exit 9. `--tokens` prints it as an `UNRECORDED`
+block: a `named` row each (`(unreadable)` in place of a cost it could not read),
+and one line per basis for the `inferred` rows with their count, the readable
+rows' summed cost and how many were unreadable. Pi sessions are not listed yet
+([#209](https://github.com/princess-pi/wtft/issues/209)). Full contract:
+[`docs/spec-128-unrecorded-spawns.md`](./docs/spec-128-unrecorded-spawns.md).
 
 `--pager` is a Pi TUI overlay, not a CLI flag — the CLI says so and exits 1,
 suggesting `wtft … | less -R`. Any `wtft` run that produces a report spawns the log

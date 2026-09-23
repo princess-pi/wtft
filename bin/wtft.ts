@@ -18,7 +18,7 @@ import {
 	extractCommandSegments,
 	extractCwdFromBashCommand,
 	extractRealCommands,
-	cwdForClaudeSpawn,
+	claudeSpawnCwds,
 	splitCommandWords,
 	renderOtherHistogram,
 	getSemanticCommandGroup,
@@ -34,6 +34,7 @@ import {
 	readSubagentMeta,
 	readSubagentMetaChecked,
 	discoverClaudeSubAgentSessionFiles,
+	discoverClaudeSubAgentFilesForTurn,
 	clearSubagentCacheMiss,
 	loadSubagentInteractions,
 	loadSubagentInteractionsChecked,
@@ -209,7 +210,7 @@ export {
 	extractCommandSegments,
 	extractCwdFromBashCommand,
 	extractRealCommands,
-	cwdForClaudeSpawn,
+	claudeSpawnCwds,
 	splitCommandWords,
 	renderOtherHistogram,
 	getSemanticCommandGroup,
@@ -228,6 +229,7 @@ export {
 	readSubagentMeta,
 	readSubagentMetaChecked,
 	discoverClaudeSubAgentSessionFiles,
+	discoverClaudeSubAgentFilesForTurn,
 	clearSubagentCacheMiss,
 	loadSubagentInteractions,
 	loadSubagentInteractionsChecked,
@@ -653,6 +655,9 @@ async function main() {
 		// SELF is the tag, so the ids to exclude are the ones the tag recorded folding.
 		const tree = computeSpawnTree(sessionId, {
 			alreadyAttributed: pending ? new Set<string>() : folded,
+			unrecorded: pending
+				? { turns: [], rootCwd: null }
+				: { turns: interactions, rootCwd: resolveLastCwd(finalSessionPath), rootFile: finalSessionPath },
 		});
 		spawnTreeCache.set(pending, tree);
 		// The tree never replaces a reason already set.

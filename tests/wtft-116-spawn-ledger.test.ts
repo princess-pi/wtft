@@ -19,7 +19,7 @@ import {
 } from "../extensions/lib/wtft-spawn-ledger.ts";
 import { computeSpawnTree } from "../extensions/lib/wtft-spawn-tree.ts";
 import { getVisualLength } from "../extensions/lib/wtft-renderer.ts";
-import { cwdForClaudeSpawn } from "../bin/wtft.mjs";
+import { claudeSpawnCwds } from "../bin/wtft.mjs";
 import { spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
@@ -564,12 +564,12 @@ const CLI_BIN = path.join(REPO_ROOT, "bin", "wtft.mjs");
 const HERDR_LINE = 'herdr agent start ppt-824-serve-home-from-env --kind claude --pane wE:pCW -- --model sonnet';
 
 {
-	// The control from the issue's Repro, and the reason this issue exists at
-	// all: the spawning command yields NO cwd, so today's attribution pass hits
-	// its `if (!cwd) continue` and the child's whole cost is dropped.
-	check(cwdForClaudeSpawn([HERDR_LINE]) === null,
-		"D1  the launcher command still yields no cwd — nothing here re-derives an edge");
-	check(cwdForClaudeSpawn(['cd /repo && claude -p "review this"']) === "/repo",
+	// The control from the issue's Repro. `commandSpawnsAgent` does fire on this
+	// line — it matches the `--kind claude` flag — but the shell runs the
+	// launcher, so no directory is searched for it and no edge is re-derived.
+	check(claudeSpawnCwds([HERDR_LINE], "/own").length === 0,
+		"D1  the launcher command still yields nothing to search — nothing here re-derives an edge");
+	check(claudeSpawnCwds(['cd /repo && claude -p "review this"'], null).join() === "/repo",
 		"D2  the claude -p control still resolves (#138 is untouched)");
 }
 
@@ -720,11 +720,11 @@ let selfCostWithRecord = 0;
 	check(doc.total.costUsd > 0, "D13 the parent still reports its own spend");
 	check(doc.spawned.edges[0].model === "sonnet" && doc.spawned.edges[0].label === "agent/824",
 		"D13b the model and label the spawner recorded reach the document");
-	check(doc.spawned.schema === "wtft/spawn-tree@2" && doc.spawned.maxDepth === 5
+	check(doc.spawned.schema === "wtft/spawn-tree@3" && doc.spawned.maxDepth === 5
 		&& doc.spawned.ledgerError === null && doc.spawned.malformedLedgerLines === 0
 		&& doc.spawned.depthCapped === 0 && Array.isArray(doc.spawned.unattributed),
 		"D13c every field of the tree contract is present, not just the ones with news in them");
-	check(doc.schema === "wtft/session@5",
+	check(doc.schema === "wtft/session@6",
 		"D13d the document that gained `spawned` and `tree` says so in its schema");
 	const keys = Object.keys(doc);
 	check(keys.indexOf("spawned") === keys.indexOf("uncounted") + 1 && keys.indexOf("tree") === keys.indexOf("spawned") + 1,

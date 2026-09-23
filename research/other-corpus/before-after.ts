@@ -83,10 +83,16 @@ export async function honoursProjectsSeam(checkout: string): Promise<boolean> {
 
 /** Every subagent transcript path folded into any of these interactions, at
  *  any depth — `claudeSubAgentFolds` is already flattened across depths, so a
- *  single pass over the top-level interactions names them all. */
-export function foldFilesOf(interactions: readonly SubAgentBearing[]): string[] {
-	// A build from before folds carried `file` names none.
-	return interactions.flatMap(i => (i.claudeSubAgentFolds ?? []).flatMap(f => typeof f.file === "string" ? [f.file] : []));
+ *  single pass over the top-level interactions names them all. An id an older
+ *  build reports without a path is looked up through `resolve`. */
+export function foldFilesOf(
+	interactions: readonly SubAgentBearing[],
+	resolve: (id: string) => string | null = () => null,
+): string[] {
+	return interactions.flatMap(i => {
+		if (!i.claudeSubAgentFolds) return (i.claudeSubAgentSessionIds ?? []).flatMap(id => resolve(id) ?? []);
+		return i.claudeSubAgentFolds.flatMap(f => typeof f.file === "string" ? [f.file] : (resolve(f.id) ?? []));
+	});
 }
 
 /** The subagent ids these interactions report, from `claudeSubAgentFolds[].id`.
@@ -130,7 +136,7 @@ export function snapshotCorpus(opts: {
 
 	const copyUnder = (file: string, root: string, outRoot: string): void => {
 		const rel = path.relative(root, file);
-		if (rel.startsWith("..") || path.isAbsolute(rel)) {
+		if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
 			console.error(`before-after: fold file outside its root, skipped: ${file}`);
 			return;
 		}
@@ -194,10 +200,13 @@ async function main(): Promise<void> {
 	// Discovery pass: both builds parse the LIVE selection once, with the real
 	// projects root still in effect, before anything is frozen.
 	const liveFiles = [...picked["claude-code"], ...picked.pi];
+	// AFTER's resolver finds the transcript for an id an older build names without a path.
+	const { makeSessionResolver } = await import(`${AFTER}/extensions/lib/wtft-spawn-tree.ts`);
+	const resolveId: (id: string) => string | null = makeSessionResolver();
 	const foldFiles = new Set<string>();
 	for (const [label, mod] of [["BEFORE", modBEFORE], ["AFTER", modAFTER]] as const) {
 		for (const f of liveFiles) {
-			try { for (const file of foldFilesOf(mod.parseSessionFile(f))) foldFiles.add(file); }
+			try { for (const file of foldFilesOf(mod.parseSessionFile(f), resolveId)) foldFiles.add(file); }
 			catch (err) {
 				console.error(`before-after: ${label}'s discovery parse failed, so the children only it would find are not frozen: ${f} (${err instanceof Error ? err.message : String(err)})`);
 			}

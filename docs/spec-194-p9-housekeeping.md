@@ -194,9 +194,9 @@ reported.
   root, the #129 seam. A fake `HOME` does not work, because bun caches `os.homedir()` at
   process start.
 - Subagent ids come from `claudeSubAgentFolds[].id`, falling back to
-  `claudeSubAgentSessionIds` for a BEFORE build old enough to carry only that. Such a
-  build, and one whose folds carry no `file` yet, names no fold files, so its children
-  are frozen only when AFTER finds them too. A BEFORE build older than the #129 seam would
+  `claudeSubAgentSessionIds` for a BEFORE build old enough to carry only that. An id such
+  a build, or one whose folds carry no `file` yet, reports without a path is looked up
+  through AFTER's session resolver and frozen like any other child. A BEFORE build older than the #129 seam would
   read the live projects root in its measured pass, so the script refuses it with exit 2:
   it probes the checkout's `projectsDir` with the variable set before measuring anything.
 - A `find` failure other than a missing root throws instead of selecting nothing, so the
@@ -258,3 +258,4 @@ producer-side gap is duppypro/princess-pi-tools#1021.
 | `pr-review` round 2 | 9 findings (1 Medium): M7c still blind to a key renamed by a refresh; the corpus floor of 5; an unset `PATH` aborting with no JSON document; fold paths compared against a non-canonical root; L5's Claude Code arm unable to fail; the untagged docstring and H1 bullet contradicting the overlap; two comment wordings | M7c, `NSP_PATH_DIRS`, `ccRoot`, the L5 fixture | ✅ M7c key check, L5 with a session-id-shaped file; the unset-`PATH` case untested | Fixed |
 | `pr-review` round 3 and Macroscope | 8 Low, plus 1 Medium thread: a BEFORE build without the projects-root seam measures the live root, not the snapshot; `find` failures selecting nothing and exiting 0; M5 failing on a host with a `wtft` in `/usr/bin`; L4–L6 vacuous without an id index; two stale comments; the auditor count; fallback pricing as an untagged-cost source | `main`, `pickTranscripts`, M5's PATH, the L4 fixture | ✅ E8–E10, L4a | Fixed: the script probes `--before`'s `projectsDir` and refuses a build without the seam (exit 2). Declined: `descendantUntagged` read unguarded in the renderer — `SpawnTree` requires the field, and `tsc --noEmit` passes, so every constructor sets it |
 | Macroscope, ready round | 2 Medium threads: a failed snapshot copy let the gate certify a smaller corpus; an unchecked `mktemp -d` in the mutation probe | `copyUnder`; `run-mutants.sh` | reconciled-against-untested | Fixed: a failed copy now fails the run; every probe `mktemp -d` exits on failure |
+| Macroscope, second ready round | 2 Medium threads: an older BEFORE build's path-less child ids were never frozen, so a subagent AFTER lost went undetected; a root-relative path like `..archive/…` read as outside the root | `foldFilesOf`; `copyUnder` | ✅ E11 for the lookup; the `..`-prefixed name untested | Fixed |

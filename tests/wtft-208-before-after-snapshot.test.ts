@@ -231,6 +231,10 @@ const refused = spawnSync("bun", [SCRIPT, "--before", seamless], {
 check(refused.status === 2 && /predates the WTFT_CLAUDE_PROJECTS_DIR seam/.test(refused.stderr ?? ""),
 	`E10 the script refuses such a --before with exit 2 (got ${refused.status})`);
 
+// An older build's path-less ids are looked up, not dropped.
+check(JSON.stringify(foldFilesOf([{ claudeSubAgentSessionIds: ["kid"] }], id => id === "kid" ? "/p/kid.jsonl" : null)) === '["/p/kid.jsonl"]',
+	"E11 an id reported without a path is resolved to its transcript");
+
 // A build whose folds carry no `file` names no fold files instead of throwing.
 check(JSON.stringify(foldFilesOf([{ claudeSubAgentFolds: [{ id: "x" } as { id: string; file?: string }] }])) === "[]",
 	"E7 a fold with no file contributes nothing to the freeze");

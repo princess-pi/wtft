@@ -18,6 +18,7 @@ interface HarnessDiscovery {
   readonly label: string;  // selector column, e.g. "Codex"
   discover(targetCwd: string | null, scopeOpts?: DiscoverScopeOptions): SessionCandidate[];
   resolveSessionById(sessionId: string): string | null;
+  indexSessionsById?(): Map<string, string>;  // optional
   listSpawnCandidates?(sinceMs: number): SpawnCandidate[];  // optional, #128
 }
 ```
@@ -135,6 +136,13 @@ since the union arm is a bonus find either way, but not literally "always null".
 
 `resolveSessionById` is what lets a running daemon follow a session whose transcript moved
 (#155). Return the newest match when an id appears more than once.
+
+`indexSessionsById` is optional: every id your harness holds, mapped to the path
+`resolveSessionById` would return for it, from one walk of your tree. A spawn-tree walk uses it to
+resolve thousands of children for the price of one scan; without it each child costs a
+`resolveSessionById` call. Keep `resolveSessionById` a cheap single-id scan rather than a lookup
+in a fresh index: a running daemon calls it to follow a moved session. The two must give the same
+answer for every id; the built-ins are held to that by a test.
 
 ## 2. `parse` — what does this harness's entry schema mean?
 

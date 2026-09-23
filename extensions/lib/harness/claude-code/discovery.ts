@@ -319,6 +319,49 @@ function listSpawnCandidates(sinceMs: number): SpawnCandidate[] {
 	return candidates;
 }
 
+function mtimeOrNull(file: string): number | null {
+	try { return fs.statSync(file).mtimeMs; } catch { return null; }
+}
+
+/**
+ * Every session id → its newest readable transcript, from one walk of the
+ * tree: the answer `resolveSessionById` gives for each id.
+ */
+function indexSessionsById(): Map<string, string> {
+	const index = new Map<string, string>();
+	const root = projectsDir();
+	let projectDirs: string[];
+	try {
+		projectDirs = fs.readdirSync(root, { withFileTypes: true })
+			.filter(e => e.isDirectory())
+			.map(e => e.name);
+	} catch (err) {
+		// ENOENT (raced away between the existsSync above and here) is ordinary:
+		// nothing to index. Anything else — permission denied, most commonly —
+		// must be LOUD: a caller cannot tell "no sessions" from "could not look".
+		if (isGone(err)) return index;
+		throw err;
+	}
+	const newest = new Map<string, number>();
+	for (const slug of projectDirs) {
+		const files: string[] = [];
+		collect(path.join(root, slug), slug, files);
+		for (const file of files) {
+			const id = sessionIdOf(file);
+			// Stat every copy, as `resolveSessionById` does: one that cannot be
+			// stat-ed (a dangling symlink, a file gone mid-walk) is never indexed,
+			// so the walk asks the next harness rather than stopping on a dead path.
+			const mtimeMs = mtimeOrNull(file);
+			if (mtimeMs === null) continue;
+			if (!newest.has(id) || mtimeMs > newest.get(id)!) {
+				newest.set(id, mtimeMs);
+				index.set(id, file);
+			}
+		}
+	}
+	return index;
+}
+
 export const discovery: HarnessDiscovery = {
 	id: ID,
 	label: "Claude",
@@ -363,6 +406,8 @@ export const discovery: HarnessDiscovery = {
 
 		return best ? best.path : null;
 	},
+
+	indexSessionsById,
 
 	listSpawnCandidates,
 };

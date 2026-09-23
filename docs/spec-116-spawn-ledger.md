@@ -108,6 +108,8 @@ only in `spawned.unrecorded[]` when it matches a tier there.
 ## Reading, resolving, walking
 
 **`readSpawnLedger()`** returns `{ childrenOf: Map<parent, SpawnEdge[]>, malformedLines: number }`.
+It strips a trailing `.jsonl` from `parent` and `child`, so a session recorded once by id and once by
+file name is one node (#138).
 A line that is not JSON, does not carry `schema: "wtft/spawn@1"`, is missing a required field, or
 carries a `parent`/`child` that is not uuid-shaped is **skipped and counted** — the count is
 reported, so a broken writer is visible rather than quietly losing money. A blank line is skipped
@@ -122,7 +124,8 @@ a silent gap for any reader who ignored the flag. Refusing is simpler *and* stri
 cannot omit an edge without saying so.
 
 **Resolution goes through the harness seam** — `HarnessDiscovery.resolveSessionById`, asked of every
-registered harness in turn, so a Pi child resolves through Pi's discovery and a Claude Code child
+registered harness in turn (since #138, through each harness's `indexSessionsById` where it has
+one, built once per walk and giving the same answers), so a Pi child resolves through Pi's discovery and a Claude Code child
 through its own. This is not a preference: the repo's lookup already recurses past the `sessions/`
 subdirectory older Claude Code installs use, skips the derived-data dirs, and takes the **newest**
 copy where one id exists in several project dirs — the moved-session case (#155, #6), which is

@@ -53,6 +53,9 @@ export interface Interaction {
 	surgePriced?: boolean;
 	/** Every `claude -p` session folded into this turn, at any depth. */
 	claudeSubAgentFolds?: SubAgentFold[];
+	/** The tag line's source key: set on a child transcript's lines, unset on
+	 *  the session's own (docs/wtft-tag-format.md). */
+	source?: string;
 }
 
 /** The six `TokenTotals` fields, for one folded session's OWN turns — not the

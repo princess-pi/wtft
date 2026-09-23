@@ -101,6 +101,7 @@ export function classifiedToInteraction(obj: any): Interaction | null {
 		cacheMiss: obj.miss ? true : undefined,
 		interrupted: obj.ir ? true : undefined,
 		surgePriced: obj.sp ? true : undefined,
+		source: typeof obj.s === "string" ? obj.s : undefined,
 		_cat: obj.cat || undefined,
 	};
 }

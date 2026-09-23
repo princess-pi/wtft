@@ -122,31 +122,11 @@ or `toolUseId`; the audit round below is where that was caught and corrected.
 | M8 | `parentAgentId` is carried through the reader when present, and is `undefined` when the harness omits it |
 | R1 | **the Closer, `--json` half.** `wtft --json` on a session with a Task subagent reports that child's `description`, `model` and `toolUseId`; a subagent with NO meta is still listed, with its transcript and `meta: null` |
 
-## The Closer's other half depends on #116, and the issue said it depended on nothing
+## The Closer's other half
 
-The issue's Closer also asks that "the rendered block shows the description in place of the
-`agent-<hash>` basename". That block is #116's `SPAWNED` block.
-
-**#116 has since merged** — `dd67217`, PR #136 — and this branch merged `origin/main` in at
-`27a9ecd`. So `renderSpawnTree` and its `SPAWNED` block are present on this branch, and the
-render half is no longer blocked by anything. An earlier draft of this section said that block
-"lives on an unmerged branch": true when written, false by the time the branch was reviewed,
-and still standing until review round 2 caught it. It was the load-bearing justification for
-the split, so it is corrected here rather than quietly reworded.
-
-**The split survives the correction, for a different reason than the one it was given.** The
-render half is a small change to `renderSpawnTree`. Pulling it in now re-opens a diff that has
-already spent its review rounds on the `--json` contract, and it would land the relabel with no
-round left to review it. So `--json` is what ships here, and the relabel is what **#137** stays
-open for. Recorded rather than quietly dropped: an issue that says "depends on nothing" and
-half-does is how a Closer stops meaning anything.
-
-**So #137 does not close on this branch, and the split is explicit.** Two review rounds both
-raised it, and both were right: a Closer with three acceptance criteria is not met by a diff
-that satisfies two. #137 stays open for the render half; **#141** carries the `--json` half this
-branch delivers, and is what merging it closes. The alternative — merging and calling #137 done
-— would leave the rendered report showing hex basenames with the issue marked resolved, which is
-exactly the failure the Closer format exists to prevent.
+The render half — the rendered block naming each subagent by its description — is specified and
+delivered separately: `docs/spec-137-150-subagent-block.md`. It is its own `SUBAGENTS` block, not
+a section of SPAWNED, because a built-in subagent's money is inside TOTAL.
 
 ## The shape of the `--json` addition
 

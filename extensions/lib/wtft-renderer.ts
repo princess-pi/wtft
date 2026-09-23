@@ -18,6 +18,7 @@ import { execSync } from "node:child_process";
 import wcwidth from "wcwidth";
 import { treeTotals, type SpawnTree } from "./wtft-spawn-tree.js";
 import type { UnrecordedSpawn } from "./wtft-unrecorded.js";
+import { SUBAGENT_ROW_LIMIT, type SubagentRow } from "./wtft-subagent-block.js";
 export interface Bin {
 	key?: string;
 	label: string;
@@ -1629,7 +1630,7 @@ export function computeSessionSummary(interactions: Interaction[]): SessionSumma
 	};
 }
 
-export function renderTokenSummary(interactions: Interaction[], maxWidth: number = 80, thinkingBudget?: number, uncounted?: UncountedBillables, spawned?: SpawnTree): string {
+export function renderTokenSummary(interactions: Interaction[], maxWidth: number = 80, thinkingBudget?: number, uncounted?: UncountedBillables, spawned?: SpawnTree, subagents?: SubagentRow[]): string {
 	const summary = computeSessionSummary(interactions);
 	const unmatched = summary.untaggedInteractions;
 
@@ -1637,7 +1638,7 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 		const head = unmatched > 0
 			? `No model-tagged interactions found (${unmatched} untagged).`
 			: "No model-tagged interactions found.";
-		return head + renderUncountedBillables(uncounted) + renderSpawnTree(summary.total, spawned);
+		return head + renderUncountedBillables(uncounted) + renderSubagentBlock(subagents) + renderSpawnTree(summary.total, spawned);
 	}
 
 	const modelColW = Math.max(10, ...summary.models.map(m => shortenModel(m.model).length));
@@ -1711,8 +1712,25 @@ export function renderTokenSummary(interactions: Interaction[], maxWidth: number
 
 	out += renderUncountedBillables(uncounted);
 
+	out += renderSubagentBlock(subagents);
 	out += renderSpawnTree(summary.total, spawned);
 
+	return out;
+}
+
+/** The built-in subagents behind TOTAL. Not a section of SPAWNED: SPAWNED's
+ *  money is outside TOTAL, and this block's is already inside it. */
+export function renderSubagentBlock(rows: SubagentRow[] | undefined): string {
+	if (!rows || rows.length === 0) return "";
+	const safe = (v: string) => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, "\uFFFD");
+	let out = `\nSUBAGENTS  ${rows.length} built-in subagent(s) — INSIDE TOTAL above, not added to it\n`;
+	for (const row of rows.slice(0, SUBAGENT_ROW_LIMIT)) {
+		const money = row.total ? formatCost(row.total.costUsd) : "(not yet tagged)";
+		out += `           ${fitVisual(safe(row.label), 40)} ${fitVisual(safe(row.model ?? "—"), 12)} ${money.padStart(16)}\n`;
+	}
+	if (rows.length > SUBAGENT_ROW_LIMIT) {
+		out += `           ${rows.length - SUBAGENT_ROW_LIMIT} more not shown — every row is in --json\n`;
+	}
 	return out;
 }
 

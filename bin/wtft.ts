@@ -23,6 +23,7 @@ import {
 	renderOtherHistogram,
 	getSemanticCommandGroup,
 	renderTokenSummary,
+	renderSubagentBlock,
 	deduplicateInteractions,
 	scanUncountedBillables,
 	scanUncountedBillablesChecked,
@@ -136,6 +137,7 @@ import {
 	DEFAULT_MAX_DEPTH,
 	type SpawnTree,
 } from "../extensions/lib/wtft-spawn-tree.ts";
+import { subagentRows, type SubagentRow } from "../extensions/lib/wtft-subagent-block.ts";
 import { execSync } from "node:child_process";
 import { loadConfig, readConfig } from "@princess-pi/libs/config";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "../extensions/lib/wtft-config-dir.ts";
@@ -724,27 +726,51 @@ async function main() {
 	const finishEmptyReport = (opt: { pending?: boolean } = {}) => {
 		if (!opt.pending) scanSessionUncounted();
 		// Before the warning and the exit code: the tree can set `provisional`.
+		const emptyArmSubagents = opts.tokens && !opt.pending ? collectSubagentJson() : undefined;
+		for (const n of emptyArmSubagents?.notices ?? []) warnNotice(n);
+		const emptyArmBlock = emptyArmSubagents ? renderSubagentBlock(emptyArmSubagents.block) : "";
 		const emptyArmTree = opts.tokens ? renderSpawnTree(emptyTotals(), sessionSpawnTree({ pending: opt.pending })) : "";
 		warnProvisionalOnce();
-		// SPAWNED block under `--tokens` even when own total is empty (matches populated path).
-		if (emptyArmTree) process.stdout.write(emptyArmTree);
+		// SUBAGENTS and SPAWNED under `--tokens` even when own total is empty (matches populated path).
+		// Same --pad as the populated path.
+		const emptyPad = " ".repeat(Math.min(opts.hasPad ? opts.pad : 1, Math.max(0, Math.floor(getTerminalWidth() / 2) - 1)));
+		const padded = (s: string) => s.split("\n").map(l => (l ? emptyPad + l : l)).join("\n");
+		if (emptyArmBlock) process.stdout.write(padded(emptyArmBlock));
+		if (emptyArmTree) process.stdout.write(padded(emptyArmTree));
 		// exitCode, never process.exit — stdout is async on a pipe.
 		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
 	};
 
+	/** A notice names a file path, which can hold a newline or an escape sequence. */
+	const warnNotice = (n: WtftNotice) => console.error(`\x1b[33m⚠ ${n.text.replace(/[\u0000-\u001f\u007f-\u009f]/g, "\uFFFD")}\x1b[0m`);
+
 	/** Subagents this session spawned. `rows` omitted (not `[]`) when discovery was incomplete. */
-	const collectSubagentJson = (): { rows: WtftSubagentJson[] | undefined; notices: WtftNotice[] } | undefined => {
+	const collectSubagentJson = (): { rows: WtftSubagentJson[] | undefined; notices: WtftNotice[]; block: SubagentRow[] } | undefined => {
 		if (!fs.existsSync(finalSessionPath)) return undefined;
 		const discovered = discoverOnce();
 		const notices: WtftNotice[] = [];
-		const rows = discovered.files.map(transcript => {
+		const listed = discovered.files.map(transcript => {
 			const read = readSubagentMetaChecked(transcript);
 			if (read.error) {
 				notices.push({ code: "subagent-meta-unreadable", text: `subagent metadata could not be read (${read.metaPath}): ${read.error.message}` });
 			}
 			return { transcript, meta: read.meta };
 		});
-		return { rows: discovered.unreadable ? undefined : rows, notices };
+		// One computation for both surfaces, so the rendered row and the JSON
+		// field cannot disagree.
+		// An older tagger's lines carry no source key, so no line can be attributed:
+		// the totals are unknown, not null.
+		if (tagPath !== getCurrentVersionTagPath(finalSessionPath)) {
+			return discovered.unreadable ? { rows: undefined, notices, block: [] } : { rows: listed, notices, block: [] };
+		}
+		// Built-in means Claude Code's `<session>/subagents/` layout; a Pi sibling is not one.
+		const builtinDir = path.join(path.resolve(path.dirname(finalSessionPath)), path.basename(finalSessionPath, ".jsonl"), "subagents") + path.sep;
+		const all = subagentRows(interactions, listed, path.dirname(finalSessionPath));
+		const block = all.filter(r => path.resolve(r.transcript).startsWith(builtinDir));
+		const totalOf = new Map(all.map(r => [r.transcript, r.total]));
+		const rows = listed.map(r => ({ ...r, total: totalOf.get(r.transcript) ?? null }));
+		// A partial list is never shown as whole, on either surface.
+		return discovered.unreadable ? { rows: undefined, notices, block: [] } : { rows, notices, block };
 	};
 
 	const emitSessionJson = (opt: { notices?: WtftNotice[]; pending?: boolean } = {}) => {
@@ -914,7 +940,9 @@ async function main() {
 	}
 
 	if (opts.tokens) {
-		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, scanSessionUncounted(), sessionSpawnTree());
+		const subagents = collectSubagentJson();
+		for (const n of subagents?.notices ?? []) warnNotice(n);
+		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, scanSessionUncounted(), sessionSpawnTree(), subagents?.block);
 		for (const line of tokenOutput.split("\n")) {
 			console.log(padStr + line);
 		}

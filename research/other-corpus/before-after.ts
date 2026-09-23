@@ -59,7 +59,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-interface SubAgentBearing { claudeSubAgentFolds?: { id: string; file: string }[]; claudeSubAgentSessionIds?: string[] }
+interface SubAgentBearing { claudeSubAgentFolds?: { id: string; file?: string }[]; claudeSubAgentSessionIds?: string[] }
 
 /** Sorted, never shuffled — the same directory yields the same list. */
 export function pickTranscripts(root: string, n: number): string[] {
@@ -73,7 +73,8 @@ export function pickTranscripts(root: string, n: number): string[] {
  *  any depth — `claudeSubAgentFolds` is already flattened across depths, so a
  *  single pass over the top-level interactions names them all. */
 export function foldFilesOf(interactions: readonly SubAgentBearing[]): string[] {
-	return interactions.flatMap(i => (i.claudeSubAgentFolds ?? []).map(f => f.file));
+	// A build from before folds carried `file` names none.
+	return interactions.flatMap(i => (i.claudeSubAgentFolds ?? []).flatMap(f => typeof f.file === "string" ? [f.file] : []));
 }
 
 /** The subagent ids these interactions report, from `claudeSubAgentFolds[].id`.
@@ -122,8 +123,12 @@ export function snapshotCorpus(opts: {
 			return;
 		}
 		const dest = path.join(outRoot, rel);
-		fs.mkdirSync(path.dirname(dest), { recursive: true });
-		try { fs.copyFileSync(file, dest); } catch { /* source vanished between discovery and freeze */ }
+		try {
+			fs.mkdirSync(path.dirname(dest), { recursive: true });
+			fs.copyFileSync(file, dest);
+		} catch (err) {
+			console.error(`before-after: could not copy into the snapshot, left out: ${file} (${err instanceof Error ? err.message : String(err)})`);
+		}
 	};
 
 	for (const f of opts.foldFiles) copyUnder(f, opts.ccRoot, projectsOut);
@@ -166,15 +171,15 @@ async function main(): Promise<void> {
 	const modAFTER = await import(`${AFTER}/extensions/lib/wtft-parser.ts?AFTER`);
 
 	// Discovery pass: both builds parse the LIVE selection once, with the real
-	// projects root still in effect, before anything is frozen. Errors are
-	// swallowed here — an unreadable file just contributes no fold files; the
-	// measured pass below is where a read failure has to be visible.
+	// projects root still in effect, before anything is frozen.
 	const liveFiles = [...picked["claude-code"], ...picked.pi];
 	const foldFiles = new Set<string>();
 	for (const mod of [modBEFORE, modAFTER]) {
 		for (const f of liveFiles) {
 			try { for (const file of foldFilesOf(mod.parseSessionFile(f))) foldFiles.add(file); }
-			catch { continue; }
+			catch (err) {
+				console.error(`before-after: discovery parse failed, its children are not frozen: ${f} (${err instanceof Error ? err.message : String(err)})`);
+			}
 		}
 	}
 

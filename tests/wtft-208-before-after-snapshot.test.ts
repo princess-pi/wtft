@@ -192,9 +192,13 @@ fs.mkdirSync(emptyHome, { recursive: true });
 const REPO = path.resolve(import.meta.dirname, "..");
 const SCRIPT = path.join(REPO, "research", "other-corpus", "before-after.ts");
 
-const result = spawnSync("bun", [SCRIPT, "--before", REPO], {
+const childTmp = path.join(dir, "e2e-tmp");
+fs.mkdirSync(childTmp, { recursive: true });
+// `--before .` from the checkout: a relative path, resolved against the cwd.
+const result = spawnSync("bun", [SCRIPT, "--before", "."], {
+	cwd: REPO,
 	encoding: "utf8",
-	env: { ...process.env, HOME: emptyHome, WTFT_CLAUDE_PROJECTS_DIR: e2eRoot, WTFT_PI_SESSIONS_DIR: emptyPiRootE2e },
+	env: { ...process.env, HOME: emptyHome, TMPDIR: childTmp, WTFT_CLAUDE_PROJECTS_DIR: e2eRoot, WTFT_PI_SESSIONS_DIR: emptyPiRootE2e },
 });
 
 const stdout = result.stdout || "";
@@ -209,6 +213,14 @@ check(afterTotal >= 0.015,
 	`E4 the reported total includes the frozen child's cost, so discovery ran on the snapshot (AFTER $${afterTotal}, parent alone is under $0.005)`);
 check(/claude-code: \d+ sessions =====/.test(stdout),
 	`E3 the fixture was actually selected — output names 1+ sessions for claude-code, not "no sessions found" (stdout head: ${stdout.slice(0, 300)})`);
+check(result.status === 0 && result.error === undefined,
+	"E5 a relative --before resolves against the cwd, not the script's directory");
+const leftover = fs.readdirSync(childTmp).filter(f => f.startsWith("wtft-ab-"));
+check(leftover.length === 0, `E6 the snapshot directory is removed on exit (left: ${JSON.stringify(leftover)})`);
+
+// A build whose folds carry no `file` names no fold files instead of throwing.
+check(JSON.stringify(foldFilesOf([{ claudeSubAgentFolds: [{ id: "x" } as { id: string; file?: string }] }])) === "[]",
+	"E7 a fold with no file contributes nothing to the freeze");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

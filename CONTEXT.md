@@ -414,7 +414,7 @@ self plus every RESOLVED descendant reached through the spawn ledger, so it is a
 anything went uncounted — `unattributed` non-empty, `depthCapped` non-zero, `ledgerError` set,
 `malformedLedgerLines` non-zero (a malformed line was a record, so its edge is lost and the count is
 its only trace), or `descendantUntagged` non-empty (a counted descendant's untagged turns, left out
-of its total, and named on one `--tokens` line under SPAWNED). Both are explicit fields under `--json`; the `--tokens` table shows the
+of its total; `--tokens` counts them, with their summed untagged cost, on one line under SPAWNED). Both are explicit fields under `--json`; the `--tokens` table shows the
 split as `TOTAL` / `SPAWNED` / `TREE`, and shows none of the three only when this session recorded
 no edges AND the ledger read cleanly — an unreadable ledger or a skipped line still prints, because
 "no edges" and "could not tell" are different reports. Never write a bare "the session's cost" where the two can differ.
@@ -457,8 +457,10 @@ _Avoid_: Empty tree, no descendants, zero (each states the thing we could not de
 
 **claude-nsp-guard** (#30):
 princess-pi-tools' `claude` wrapper, deployed as `~/bin/claude` in front of the real CLI. It
-strips `--no-session-persistence` so every `claude` child writes a transcript wtft can read.
-wtft does not ship it; `install-wtft` only reports whether it wins the PATH race for `claude`
-(`nspGuard` in its JSON, exit 5 when another `claude` comes first). Say "the guard" once it has
-been named in a passage.
-_Avoid_: nsp guard, PATH shim, claude shim (each hides which wrapper is meant)
+strips `--no-session-persistence` and unsets `CLAUDE_CODE_SKIP_PROMPT_HISTORY`, so a `claude`
+child started through PATH writes a transcript wtft can read; one run by absolute path bypasses
+it. wtft does not ship it; `install-wtft` only reports whether it wins the PATH race for
+`claude` (`nspGuard` in its JSON; exit 5 when a guard is on PATH, another `claude` comes first,
+and nothing worse is wrong). Say "the guard" once it has been named in a passage.
+_Avoid_: nsp guard, PATH shim, claude shim (each hides which wrapper is meant). The status code
+`nsp-guard-shadowed` is a machine string and keeps its spelling.

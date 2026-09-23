@@ -22,8 +22,8 @@ harness still writes those names is § M7b's job, on a host that has sidecars. W
 
 ## Refreshing it
 
-`M7b`, on a host with sidecars, fails when the newest real sidecar carries a key that no file here
-has, or lacks a required one. When that happens:
+`M7b`, on a host with sidecars, fails when the newest real sidecar no longer matches what the reader
+expects, or carries a key that no file here has. When that happens:
 
 1. Find a recent sidecar of the new shape: any `agent-*.meta.json` under `~/.claude/projects` whose keys
    include the new one. Choose one from a repo that is not a client's, and read its `description`
@@ -31,5 +31,6 @@ has, or lacks a required one. When that happens:
 2. Copy it here unchanged, add a row to the table, and update the capture line above.
 3. If the harness renamed a field rather than adding one, fix the reader in
    `extensions/lib/wtft-parser.ts` (`parseSubagentMeta`) and run `bun run build`, since the test
-   reads the built bundle. `M7c` then fails on the older files here if the reader stopped accepting
-   the old name; decide whether to keep both names, then refresh.
+   reads the built bundle, and update `REQUIRED` / `NEAR_UNIVERSAL` in the test. `M7c` then fails on
+   the older files here if the reader stopped accepting the old name; decide whether to keep both
+   names, then refresh.

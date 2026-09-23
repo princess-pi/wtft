@@ -142,7 +142,7 @@ console.log("\nD — deduplicateInteractions: return order is not chronological"
 // ---
 console.log("\nL — on-disk layout");
 {
-	const L1 = "`discoverSubagentSessionFiles` walks that directory and every directory under it (the `workflows/wf_<id>/` children are two levels down), except a symlinked directory and one named `wtft-tags`, and under it lists only files named `agent-*.jsonl`.";
+	const L1 = "`discoverSubagentSessionFiles` walks that directory and every directory under it (the `workflows/wf_<id>/` children are two levels down), except a symlinked directory below it and one named `wtft-tags`, and under it lists only files named `agent-*.jsonl`.";
 	const L2 = "**Session discovery skips a directory named `subagents` below a project directory in both harnesses**";
 	const L2b = "Pi session discovery does list it as a session of its own.";
 	check(quoted(L1), "L1 the spec states what subagent discovery lists");

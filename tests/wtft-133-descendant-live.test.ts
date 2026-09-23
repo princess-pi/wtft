@@ -125,7 +125,7 @@ console.log("\n=== wtft --json: a live descendant makes the tree provisional ===
 	check(edge?.live === true, "the counted edge reports live: true", JSON.stringify(edge));
 	check(live.doc?.provisional?.provisional === true && live.doc?.provisional?.reason === "descendant-live",
 		"provisional is { true, descendant-live }", JSON.stringify(live.doc?.provisional));
-	check(live.doc?.schema === "wtft/session@6", `schema is wtft/session@6 (got ${live.doc?.schema})`);
+	check(live.doc?.schema === "wtft/session@7", `schema is wtft/session@7 (got ${live.doc?.schema})`);
 	check((live.doc?.notices ?? []).some((n: any) => n.code === "provisional" && /descendant/.test(n.text)),
 		"notices[] carries the provisional notice, as for every other reason", JSON.stringify(live.doc?.notices));
 	check(EXIT_PROVISIONAL === 9, `the published exit code is 9 (constant is ${EXIT_PROVISIONAL})`);

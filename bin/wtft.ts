@@ -136,6 +136,7 @@ import {
 	DEFAULT_MAX_DEPTH,
 	type SpawnTree,
 } from "../extensions/lib/wtft-spawn-tree.ts";
+import { subagentRows, type SubagentRow } from "../extensions/lib/wtft-subagent-block.ts";
 import { execSync } from "node:child_process";
 import { loadConfig, readConfig } from "@princess-pi/libs/config";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "../extensions/lib/wtft-config-dir.ts";
@@ -733,18 +734,23 @@ async function main() {
 	};
 
 	/** Subagents this session spawned. `rows` omitted (not `[]`) when discovery was incomplete. */
-	const collectSubagentJson = (): { rows: WtftSubagentJson[] | undefined; notices: WtftNotice[] } | undefined => {
+	const collectSubagentJson = (): { rows: WtftSubagentJson[] | undefined; notices: WtftNotice[]; block: SubagentRow[] } | undefined => {
 		if (!fs.existsSync(finalSessionPath)) return undefined;
 		const discovered = discoverOnce();
 		const notices: WtftNotice[] = [];
-		const rows = discovered.files.map(transcript => {
+		const listed = discovered.files.map(transcript => {
 			const read = readSubagentMetaChecked(transcript);
 			if (read.error) {
 				notices.push({ code: "subagent-meta-unreadable", text: `subagent metadata could not be read (${read.metaPath}): ${read.error.message}` });
 			}
 			return { transcript, meta: read.meta };
 		});
-		return { rows: discovered.unreadable ? undefined : rows, notices };
+		// One computation for both surfaces, so the rendered row and the JSON
+		// field cannot disagree.
+		const block = subagentRows(interactions, listed, path.dirname(finalSessionPath));
+		const totalOf = new Map(block.map(r => [r.transcript, r.total]));
+		const rows = listed.map(r => ({ ...r, total: totalOf.get(r.transcript) ?? null }));
+		return { rows: discovered.unreadable ? undefined : rows, notices, block };
 	};
 
 	const emitSessionJson = (opt: { notices?: WtftNotice[]; pending?: boolean } = {}) => {
@@ -914,7 +920,7 @@ async function main() {
 	}
 
 	if (opts.tokens) {
-		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, scanSessionUncounted(), sessionSpawnTree());
+		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, scanSessionUncounted(), sessionSpawnTree(), collectSubagentJson()?.block);
 		for (const line of tokenOutput.split("\n")) {
 			console.log(padStr + line);
 		}

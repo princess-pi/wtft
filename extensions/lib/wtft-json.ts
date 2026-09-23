@@ -12,7 +12,7 @@ import type { TagProvisional } from "./wtft-daemon-lib.js";
 
 /** Bumped when a key is added — top-level or nested — or changes shape.
  *  Prose never bumps it. Contract: docs/spec-26-json.md. */
-export const WTFT_JSON_SCHEMA = "wtft/session@6";
+export const WTFT_JSON_SCHEMA = "wtft/session@7";
 
 /** `code` is the contract; `text` is disposable prose. */
 export interface WtftNotice {
@@ -55,6 +55,9 @@ export interface WtftSessionJson {
 export interface WtftSubagentJson {
 	transcript: string;
 	meta: SubagentMeta | null;
+	/** What TOTAL holds for this subagent — already inside `total`, never to be
+	 *  added to it. Null, never zero, when no model-tagged line is its yet. */
+	total: TokenTotals | null;
 }
 
 export interface BuildSessionJsonInput {

@@ -50,11 +50,11 @@ pinned consumer cannot see is still a rename. The strings inside
 branches on `notices[].code` is safe, one that matches `notices[].text` has no
 contract.
 
-### Schema `wtft/session@6`
+### Schema `wtft/session@7`
 
 ```json
 {
-  "schema": "wtft/session@6",
+  "schema": "wtft/session@7",
   "session": {
     "path": "/home/u/.claude/projects/-x/abc.jsonl",
     "harness": "claude-code",
@@ -112,8 +112,10 @@ contract.
     { "transcript": "…/subagents/agent-a641e532bfaae9903.jsonl",
       "meta": { "agentType": "general-purpose", "spawnDepth": 1,
                 "description": "Audit the 116 test suite", "toolUseId": "toolu_01…",
-                "model": "claude-sonnet-5" } },
-    { "transcript": "…/subagents/agent-b7c2e910442d1f88.jsonl", "meta": null }
+                "model": "claude-sonnet-5" },
+      "total": { "costUsd": 0.42, "inputTokens": 0, "outputTokens": 0,
+                 "reasoningTokens": 0, "cacheReadTokens": 0, "cacheWriteTokens": 0 } },
+    { "transcript": "…/subagents/agent-b7c2e910442d1f88.jsonl", "meta": null, "total": null }
   ],
   "compaction": { "events": 0, "tokensFreed": 0 },
   "untaggedInteractions": 0,
@@ -123,7 +125,7 @@ contract.
 
 | Key | Type | Meaning |
 |---|---|---|
-| `schema` | string | `"wtft/session@6"`. **Adding a top-level key bumps it — a NESTED one too** (Duppy, 2026-09-18, answer Y). `@2` is #116 (`spawned`, `tree`); `@3` is #141 (`subagents[]`); `@4` is #119's `total.untaggedCostUsd`; #89's `-s` no-TTY contract change is not a key change but rides the same bump (see Amendment 3); `@5` is #133's `spawned.edges[].live` and the fourth `provisional.reason` (Amendment 4); `@6` is #128's `spawned.unrecorded[]` (Amendment 5). A consumer that only wants to know whether a given wtft can report subagents should still test for the `subagents[]` key, since absence is meaningful there (see below) and a version string cannot carry that. |
+| `schema` | string | `"wtft/session@7"`. **Adding a top-level key bumps it — a NESTED one too** (Duppy, 2026-09-18, answer Y). `@2` is #116 (`spawned`, `tree`); `@3` is #141 (`subagents[]`); `@4` is #119's `total.untaggedCostUsd`; #89's `-s` no-TTY contract change is not a key change but rides the same bump (see Amendment 3); `@5` is #133's `spawned.edges[].live` and the fourth `provisional.reason` (Amendment 4); `@6` is #128's `spawned.unrecorded[]` (Amendment 5); `@7` is #137's `subagents[].total` (Amendment 6). A consumer that only wants to know whether a given wtft can report subagents should still test for the `subagents[]` key, since absence is meaningful there (see below) and a version string cannot carry that. |
 | `session.path` | string | The session `.jsonl` this run read. |
 | `session.harness` | string \| null | Harness id whose parse adapter claims the session's first assistant turn — `"claude-code"`, `"pi"`, or an id registered out of tree through the #156 seam. `null` means **no claim**, and does not distinguish an empty session, one not written yet, a file that could not be read, and a format no registered harness understands. |
 | `session.taggerVersion` | string | `WTFT_TAGGER_VERSION` of the running binary. Not necessarily the version in `tagPath`: a stale-version read lands on an older tag. |
@@ -148,7 +150,8 @@ contract.
 | `models[].priced` | bool | `isModelPriced(model)` — the `?` marker in the rendered table. `false` means **no rate card**, not "wtft guessed this row": a harness-native per-turn cost is used unchanged wherever the transcript records one, so a marked row's cost can mix provenance. |
 | `categories[]` | array | One row per `CATEGORY_ORDER` entry, **always all fourteen, always in `CATEGORY_ORDER` order**, so a consumer can index by position. |
 | `subagents[]` | array \| **absent** | #137. One row per subagent transcript `discoverSubagentSessionFiles` finds for this session — which is **both** patterns it knows: Claude Code Task children under `<session>/subagents/`, and Pi siblings claimed by a matching `parentSession` header. Only the first kind has a `.meta.json`, so a Pi row is a real subagent with `meta: null`. **Absent, not `[]`, whenever the answer would be incomplete** — whether discovery never ran, could not read a directory, or could not read a transcript. An unreadable `.meta.json` is not one of these: it alone never withholds the array, and the row is listed with `meta: null`. Its `subagent-meta-unreadable` notice is emitted independently of whether the rows survive — when discovery is ALSO incomplete for another reason, the notice names the file and there is no `subagents` key at all, so a notice is never evidence that a row is listed. A consumer never needs to know which: absent means the answer cannot be trusted as complete. A partial answer omits the key too, so an array that is present is never partial. An empty array therefore always means "looked, found none" — never "nobody looked". Same rule as `uncounted`, opposite spelling, because this one has a meaningful absent state and that one does not. |
-| `subagents[].transcript` | string | Always present. The child's `.jsonl`. **Listing a row is not a claim that its cost is in `total`** — this array is the CLI's own discovery of the session's children, independent of what the daemon tagged, so on the `no-data` arm the document can name children while `total.costUsd` is 0. Read `notices[]` before treating a row as priced. |
+| `subagents[].transcript` | string | Always present. The child's `.jsonl`. **Listing a row is not by itself a claim that its cost is in `total`** — this array is the CLI's own discovery of the session's children, independent of what the daemon tagged; `subagents[].total` is what says whether, and how much, `total` holds for it. |
+| `subagents[].total` | object \| null | #137, Amendment 6. What `total` already holds for this subagent: the same six fields, summed from the tag file's model-tagged lines whose source key is this transcript's, after the same generation filter and id dedup `total` uses. **Already inside `total` — never add it.** `null`, never zero, when no such line exists yet. The `--tokens` SUBAGENTS block shows the same figure. |
 | `subagents[].meta` | object \| null | The `.meta.json` the harness writes beside a **Claude Code Task** transcript: `agentType` and `spawnDepth` always, and optionally `description`, `toolUseId`, `model`, `parentAgentId`, `isFork`. **`null` is a GAP, not a missing subagent** — the transcript is LISTED either way; it simply has no label. **Being listed here is not evidence that its cost is in `total`.** Discovery is a live filesystem read; counting is the tag file's business, written asynchronously by the daemon, and the two are independent. A transcript the daemon has not tagged yet appears here and is not yet in any total, and `meta` has no bearing on either. Pi children (which have no such file), and any harness release that stops writing one, land here — as does a file that exists but cannot be READ — that one also adds a `subagent-meta-unreadable` notice naming the file (#146), so an absent meta and an unreadable one can be told apart. A meta that reads but does not PARSE, or that omits `agentType`/`spawnDepth`, is `null` too and adds no notice — it stays indistinguishable from an absent one, because only the read failure is observable as a failure. `meta.model` is itself optional, so a null there is a gap too. Only `agentType` and `spawnDepth` are universal; `description` and `toolUseId` are absent on the Dynamic Workflow children, and a meta carrying just the two universal fields is still a meta. Counts move whenever a session spawns a subagent — `docs/spec-137-subagent-meta.md` carries one dated census rather than repeating ratios here. |
 | `uncounted` | object | The #149 blind spot: events the harness bills and writes no `usage` for. Counted, never priced, and deliberately **not** in `total`. Scanned on **every** `--json` run, so a zero means "looked, found none" rather than "nobody looked" — with one narrower gap, **#94**: the scan drops unparseable session lines silently, so a zero can also mean "could not read part of it". Fixing that adds a field; it does not change this one. (A no-op only on the `pending-session` arm, where there is no file yet; the `no-data` arm has a real session file and can find real billables in it.) Along with `spawned` and `subagents[]`, one of the three parts of the document that do not come from the aggregation. |
 | `compaction` | object | Compaction events seen and the tokens they freed — the rendered table's `Compaction:` line. Counted over **every** deduped interaction, tagged or not: it describes context freed, not spend, so the model-tag exclusion below does not apply to it. |
@@ -361,7 +364,7 @@ to write an object to.
 
 ```console
 $ node bin/wtft.mjs -s <fixture> --json \
-    | jq -e '.schema == "wtft/session@6" and (.total.outputTokens|type) == "number"'
+    | jq -e '.schema == "wtft/session@7" and (.total.outputTokens|type) == "number"'
 ```
 
 exits 0, and `tests/wtft-26-json.test.ts` asserts, on a fixture, in eleven
@@ -612,3 +615,12 @@ and a `basis` saying which rule listed it — and none of them is summed into `t
   for a session whose header names no parent; #209.
 
 **Closer:** `tests/wtft-128-unrecorded-spawns.test.ts`. Full record: `docs/spec-128-unrecorded-spawns.md`.
+
+## Amendment 6 — `wtft/session@7`: `subagents[].total` (#137, 2026-09-23)
+
+Each built-in subagent row carries what `total` already holds for it, so the per-subagent cost
+the `--tokens` SUBAGENTS block renders is also machine-readable. The figure is money **inside**
+`total`, not beside it: summing `subagents[].total` and adding it to `total` double-counts. `null`
+means no model-tagged line carries that subagent's source yet.
+
+**Closer:** `tests/wtft-137-subagent-block.test.ts`. Full record: `docs/spec-137-150-subagent-block.md`.

@@ -65,7 +65,7 @@ console.log("\n=== U1/U4: schema bump, field shape ===\n");
 	const allTagged = path.join(dir, "all-tagged.jsonl");
 	fs.writeFileSync(allTagged, [usageLine({ id: "a", ts: "2026-07-01T12:00:00Z" })].join("\n") + "\n");
 	const doc = json(allTagged);
-	check(doc.schema === "wtft/session@6", `U4: schema is wtft/session@6 (${doc.schema})`);
+	check(doc.schema === "wtft/session@7", `U4: schema is wtft/session@7 (${doc.schema})`);
 	check(typeof doc.total.untaggedCostUsd === "number", "U1: total.untaggedCostUsd is a number");
 	check(doc.total.untaggedCostUsd === 0, "U1: an all-tagged session has zero untagged cost");
 	check(!doc.notices.some((n: any) => n.code === "auto-selected-session"),

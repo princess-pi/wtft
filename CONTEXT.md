@@ -122,6 +122,20 @@ different join. Distinct from a sidechain (above), which lives inline in the par
 file rather than as its own file.
 _Avoid_: Child session, nested session
 
+**Subagent meta** (#137, #150):
+The `.meta.json` the harness writes beside a Claude Code built-in subagent transcript
+(`agent-<hash>.meta.json`): `agentType`, `spawnDepth`, and usually `description`, `toolUseId` and
+`model`. `subagents[].meta` in JSON. **Not the tag file's `_meta` record** — that is always spelled
+with the underscore and is the daemon's own offset/sweep control line, an unrelated thing.
+_Avoid_: bare "meta" (say which), "the meta record"
+
+**Subagents block** (#137):
+The `--tokens` block listing each built-in subagent with its subagent-meta description, model and
+cost — the cost TOTAL **already holds** for it, summed from the tag lines carrying its source key.
+**Inside TOTAL, never added to it**, which is why it is its own block and not a section of
+**SPAWNED**, whose money is outside TOTAL. `subagents[].total` in JSON is the same figure.
+_Avoid_: Children block, spawned subagents (SPAWNED means the ledger's launcher children)
+
 **Tag file**:
 The per-session output file the daemon writes classified entries to:
 `wtft-tags/<session>.wtft-tag.v{N}.jsonl`. One tag file per source session, versioned so a
@@ -318,7 +332,7 @@ _Avoid_: menu
 
 **JSON mode** (#26):
 `--json` — the CLI's machine-readable mode. Writes exactly one JSON object (schema
-`wtft/session@6`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
+`wtft/session@7`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
 Human prose goes to stderr, and every sentence that would otherwise have been on stdout is
 repeated in the object's `notices[]`, where `code` is the contract and `text` is disposable.
 With an interactive terminal it still shows the scoped session picker (#89) whenever the

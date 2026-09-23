@@ -146,7 +146,7 @@ wtft --json | jq .total.costUsd
 `wtft --json` writes **exactly one JSON object** to stdout and nothing else —
 no chart, no ANSI, and no `3.6k`-style abbreviation, which is lossy. Human prose
 goes to stderr, and every sentence that would otherwise have been on stdout is
-repeated in the object's `notices[]`. The schema is `wtft/session@6`; field names
+repeated in the object's `notices[]`. The schema is `wtft/session@7`; field names
 and exit codes are versioned API, the prose inside `notices[].text` is not. Full
 contract: [`docs/spec-26-json.md`](./docs/spec-26-json.md).
 
@@ -270,6 +270,12 @@ floor whenever anything went uncounted, under FOUR conditions: `unattributed`
 non-empty, `depthCapped` non-zero, `ledgerError` set, or `malformedLedgerLines`
 non-zero. The last was missing until round 5 — a malformed ledger line was a
 record, so its edge is lost, and nothing else reports it.
+
+A session's built-in (Task) subagents get their own `SUBAGENTS` block under
+`--tokens`: one row each, named by the harness's `.meta.json` description, with
+its model and the cost `TOTAL` already holds for it. Those rows are **inside**
+`TOTAL`, never added to it; `--json` carries the same figure as
+`subagents[].total`.
 
 `wtft --tokens` shows the same thing as a `SPAWNED` / `TREE` block below
 `TOTAL`. It prints nothing when this session recorded no edges AND the ledger

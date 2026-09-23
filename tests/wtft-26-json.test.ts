@@ -26,7 +26,7 @@ const CATEGORY_NAMES = [
 /** The schema string, likewise written out rather than compared to its own
  *  import. `WTFT_JSON_SCHEMA` is imported so §1 can prove the CLI emits the
  *  value the module exports, and this literal pins what that value must be. */
-const SCHEMA = "wtft/session@6";
+const SCHEMA = "wtft/session@7";
 
 const RED = "\x1b[31m", GREEN = "\x1b[32m", RESET = "\x1b[0m";
 let passed = 0, failed = 0;

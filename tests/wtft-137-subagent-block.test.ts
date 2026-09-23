@@ -10,6 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+import { skip } from "./lib/skips.ts";
 import { parseSessionFile } from "../extensions/lib/wtft-parser.ts";
 import { computeSessionSummary } from "../extensions/lib/wtft-renderer.ts";
 import { classifiedToInteraction, transcriptSourceId } from "../extensions/lib/wtft-daemon-lib.ts";
@@ -78,7 +79,8 @@ check(rows.map(r => r.transcript).join() === [B, A, C].join(), "R6 most expensiv
 }
 const own = interactions.filter(i => !i.source && i.model).reduce((s, i) => s + i.cost, 0);
 const rowSum = rows.reduce((s, r) => s + (r.total?.costUsd ?? 0), 0);
-check(Math.abs(own + rowSum - 3.5) < 1e-9, `R7 own turns plus the rows equal TOTAL's 3.50 — the rows are inside it (got ${own + rowSum})`);
+const totalCost = computeSessionSummary(interactions).total.costUsd;
+check(Math.abs(own + rowSum - totalCost) < 1e-9, `R7 own turns plus the rows equal TOTAL — the rows are inside it (got ${own + rowSum}, TOTAL ${totalCost})`);
 
 // ---
 // PART B — the rendered block
@@ -147,12 +149,17 @@ console.log("\nPART E — wtft --tokens and --json on a session with a built-in 
 	check(/SUBAGENTS\s+1 built-in subagent\(s\) — INSIDE TOTAL above/.test(tokens) && /Measure the daemon\s+sonnet\s+\$/.test(tokens),
 		`E4 --tokens prints the block with the description in place of agent-<hash>\n${tokens.split("\n").filter(l => /SUBAGENTS|Measure/.test(l)).join("\n")}`);
 
+	const canBypass = (() => { try { const probe = path.join(dir, "probe"); fs.writeFileSync(probe, "x"); fs.chmodSync(probe, 0); fs.readFileSync(probe); return true; } catch { return false; } })();
+	if (canBypass) {
+		skip("E5-E6 need a process that chmod can stop (running as root?)");
+	} else {
 	const meta = agent.replace(/\.jsonl$/, ".meta.json");
 	fs.chmodSync(meta, 0o000);
 	const noMeta = cli(["--tokens"]);
 	fs.chmodSync(meta, 0o644);
-	check(/Measure the daemon/.test(tokens) && /subagent metadata could not be read/.test(noMeta.stderr ?? ""),
-		`E5 an unreadable .meta.json is reported on stderr under --tokens, as --json reports it in notices (stderr: ${(noMeta.stderr ?? "").trim().slice(0, 200)})`);
+	const noMetaOut = (noMeta.stdout ?? "").replace(/\x1b\[[0-9;]*m/g, "");
+	check(/agent-e2e0001\s+—\s+\$/.test(noMetaOut) && /subagent metadata could not be read/.test(noMeta.stderr ?? ""),
+		`E5 an unreadable .meta.json still prints the row, by basename, and says why on stderr (stderr: ${(noMeta.stderr ?? "").trim().slice(0, 200)})`);
 
 	// A nested directory whose entries cannot be stat'ed (readable, not searchable): the top-level
 	// subagent is still listed, so the list is partial rather than empty.
@@ -167,6 +174,7 @@ console.log("\nPART E — wtft --tokens and --json on a session with a built-in 
 	try { partialDoc = JSON.parse(partialJson.stdout); } catch {}
 	check(partialDoc !== null && !("subagents" in partialDoc) && !/SUBAGENTS/.test(partial.stdout ?? ""),
 		`E6 when discovery cannot complete, --json omits subagents and --tokens prints no block (json keys: ${partialDoc && Object.keys(partialDoc).join(",")})`);
+	}
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

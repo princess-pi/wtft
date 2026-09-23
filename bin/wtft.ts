@@ -749,8 +749,9 @@ async function main() {
 		// field cannot disagree.
 		// Built-in means Claude Code's `<session>/subagents/` layout; a Pi sibling is not one.
 		const builtinDir = path.join(path.dirname(finalSessionPath), path.basename(finalSessionPath, ".jsonl"), "subagents") + path.sep;
-		const block = subagentRows(interactions, listed.filter(r => r.transcript.startsWith(builtinDir)), path.dirname(finalSessionPath));
-		const totalOf = new Map(block.map(r => [r.transcript, r.total]));
+		const all = subagentRows(interactions, listed, path.dirname(finalSessionPath));
+		const block = all.filter(r => r.transcript.startsWith(builtinDir));
+		const totalOf = new Map(all.map(r => [r.transcript, r.total]));
 		const rows = listed.map(r => ({ ...r, total: totalOf.get(r.transcript) ?? null }));
 		// A partial list is never shown as whole, on either surface.
 		return discovered.unreadable ? { rows: undefined, notices, block: [] } : { rows, notices, block };

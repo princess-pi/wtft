@@ -14,12 +14,12 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 │  fs.watch. Flushes for one session are ≥667ms apart.    │
 │  A session outside the roots keeps its own 667ms poll.  │
 │  Tag format includes message.id for cross-run dedup.    │
-│  Heartbeats: single _hb line updated in-place per idle  │
-│  cycle (consolidated, not appended).                     │
+│  Heartbeats: one _hb line, in place. Harness mode       │
+│  writes it only for a session a consumer is displaying. │
 │  Poll loop wrapped in try/catch: transient errors       │
 │  (disk full, bad JSON) are logged, daemon survives.     │
-│  Idle exit: 24h of no new data → clean shutdown.        │
-│  Startup grace: 60s before idle exit can fire.          │
+│  Idle 24h drops that session. A --session process exits.│
+│  A harness process stays up. Grace: 60s after startup.  │
 │  Costs rounded to 6 decimal places before JSON write    │
 │  (eliminates float drift vs in-memory widget).          │
 │  Version-aware singleton: detects old tag file, kills    │
@@ -50,12 +50,12 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 
 | Event | Behavior |
 |---|---|
-| `session_start` (Pi) or `wtft` / `wtft --watch` invoked (CLI) | Auto-spawns daemon if not already running (singleton via PID file) |
-| New session data arrives | Daemon parses, classifies, flushes to tag file at 90bpm throttle |
-| No new data for 24h | Daemon cleanly exits ("idle timeout") |
-| Daemon just spawned (< 60s) | Idle exit suppressed (startup grace period) |
-| Session file deleted | Daemon exits ("session removed") |
-| Session file not yet created | Daemon waits (no exit), writes heartbeats so widget shows "waiting for session .jsonl..." (#124) |
+| `session_start` (Pi) or `wtft` / `wtft --watch` invoked (CLI) | Starts the log parser daemon if that session's pid lease is not already held. A session under a harness root attaches to that root's one process. |
+| New session data arrives | Classifies and flushes that session's tag. Flushes for one session are at least 667ms apart. |
+| No new data for 24h | That session is dropped ("idle timeout"). A `--session` process exits. A harness process stays up and adopts the session again on a later write. |
+| Daemon just spawned (< 60s) | Idle drop suppressed (startup grace period) |
+| Session file deleted | A `--session` process exits ("session removed") unless the transcript moved. A harness process drops that session and stays up. |
+| Session file not yet created | Waits, and writes a heartbeat when this process is the per-session daemon or the session is the one a consumer is displaying, so the widget can show "waiting for session .jsonl..." (#124). Past the wait cap, a `--session` process exits ("session never written") and a harness process drops the slot. |
 | Press `r` in `--watch` | Kills stale daemon, spawns fresh, fast-polls health at 1s × 5 |
 | **New activity after idle timeout** | Pi's `agent_end` handler calls `ensureParserRunning`, which checks daemon health via `checkDaemonHealth` and re-spawns if dead |
 

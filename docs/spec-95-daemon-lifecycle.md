@@ -124,6 +124,11 @@ Automated (new `tests/wtft-daemon-lifecycle.test.ts`, run against built `bin/*.m
 Manual: run `wtft --watch` on the live session, `wtft-daemon --list` shows exactly one
 daemon per session across repeated `wtft` invocations and a forced version bump.
 
+That manual count is the 2026-07-14 measurement. Since #205, sessions under the Claude
+projects root or the Pi sessions root share one process per root. Each session still has
+its own pid lease, and that lease names the shared process. A session outside those roots
+still gets the per-session process this spec's spawn-twice test covers.
+
 ## Verification results (2026-07-14, Code Approved)
 
 - `tests/wtft-daemon-lifecycle.test.ts`: **24/24 pass, zero-shot** (first run after

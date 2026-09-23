@@ -1646,7 +1646,7 @@ Daemon mode:
   --reparse <path>      Classify one session at disk speed and exit. No watch.
   --reparse-range <from> <to>
                         Reparse sessions under both harness roots whose mtime is in [from, to),
-                        one at a time, and only when the current tag is missing. No watch.
+                        one at a time, and only when the current tag is missing or empty. No watch.
   --debug               Enable debug logging to stderr
   -h, --help            Show this help`);
       process.exit(0);

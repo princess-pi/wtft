@@ -72,7 +72,7 @@ a pointer here.
   also inside TOTAL, under its own source, and is not a built-in subagent, so it gets no row.)
 - A subagent transcript with no tagged lines shows `(not yet tagged)` and `total: null`.
 - Untagged turns are not counted, as in TOTAL.
-- `--json` `subagents[].total` equals the rendered row, and the schema is `wtft/session@7`.
+- `--json` `subagents[].total` equals the rendered row, and the schema is `wtft/session@7` (`@8` since #180 added `spawned.descendantUntagged`).
 - A session with no built-in subagent prints no block.
 - An unreadable `.meta.json` prints its `subagent-meta-unreadable` notice to stderr under `--tokens`,
   as `--json` carries it in `notices[]`.

@@ -140,7 +140,9 @@ async function main(): Promise<void> {
 		return i === -1 ? null : argv[i + 1] ?? null;
 	};
 
-	const BEFORE = arg("--before");
+	const beforeArg = arg("--before");
+	// The import below resolves a relative specifier against this file, not the cwd.
+	const BEFORE = beforeArg === null ? null : path.resolve(beforeArg);
 	const AFTER = path.resolve(import.meta.dirname, "..", "..");
 	const N = Number(arg("--sessions")) || 250;
 
@@ -177,6 +179,7 @@ async function main(): Promise<void> {
 	}
 
 	const snapDir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-ab-"));
+	process.on("exit", () => fs.rmSync(snapDir, { recursive: true, force: true }));
 	const { projects: snapProjects, pi: snapPi } = snapshotCorpus({
 		snapDir, ccRoot, piRoot,
 		ccFiles: picked["claude-code"], piFiles: picked.pi,

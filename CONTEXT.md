@@ -414,7 +414,7 @@ self plus every RESOLVED descendant reached through the spawn ledger, so it is a
 anything went uncounted — `unattributed` non-empty, `depthCapped` non-zero, `ledgerError` set,
 `malformedLedgerLines` non-zero (a malformed line was a record, so its edge is lost and the count is
 its only trace), or `descendantUntagged` non-empty (a counted descendant's untagged turns, left out
-of its total). Both are explicit fields under `--json`; the `--tokens` table shows the
+of its total, and named on one `--tokens` line under SPAWNED). Both are explicit fields under `--json`; the `--tokens` table shows the
 split as `TOTAL` / `SPAWNED` / `TREE`, and shows none of the three only when this session recorded
 no edges AND the ledger read cleanly — an unreadable ledger or a skipped line still prints, because
 "no edges" and "could not tell" are different reports. Never write a bare "the session's cost" where the two can differ.
@@ -454,3 +454,11 @@ deliberately not the same report as "this session spawned nothing", which is sil
 reported through neither exit 9 nor `provisional.reason`: those mean "a number in this report
 may still change", a different fact.
 _Avoid_: Empty tree, no descendants, zero (each states the thing we could not determine)
+
+**claude-nsp-guard** (#30):
+princess-pi-tools' `claude` wrapper, deployed as `~/bin/claude` in front of the real CLI. It
+strips `--no-session-persistence` so every `claude` child writes a transcript wtft can read.
+wtft does not ship it; `install-wtft` only reports whether it wins the PATH race for `claude`
+(`nspGuard` in its JSON, exit 5 when another `claude` comes first). Say "the guard" once it has
+been named in a passage.
+_Avoid_: nsp guard, PATH shim, claude shim (each hides which wrapper is meant)

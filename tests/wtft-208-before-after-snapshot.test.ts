@@ -204,6 +204,9 @@ check(result.status === 0,
 	`E1 the script exits 0 (got ${result.status}, stderr tail: ${stderr.slice(-400)})`);
 check(!stdout.includes("cost LOST"),
 	`E2 stdout does not contain "cost LOST" (stdout tail: ${stdout.slice(-400)})`);
+const afterTotal = Number(/AFTER \$(\d+\.\d+)/.exec(stdout)?.[1] ?? "NaN");
+check(afterTotal >= 0.015,
+	`E4 the reported total includes the frozen child's cost, so discovery ran on the snapshot (AFTER $${afterTotal}, parent alone is under $0.005)`);
 check(/claude-code: \d+ sessions =====/.test(stdout),
 	`E3 the fixture was actually selected — output names 1+ sessions for claude-code, not "no sessions found" (stdout head: ${stdout.slice(0, 300)})`);
 

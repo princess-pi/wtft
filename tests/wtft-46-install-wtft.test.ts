@@ -823,7 +823,7 @@ console.log("\n9. Config migration off princess-pi-tools and onto wtft (#156)");
 //    `claude` is never executed by install-wtft — only read (head + grep) —
 //    so its body need not be valid shell past the shebang line.
 // ---
-console.log("\n10. The claude PATH guard: ok, shadowed (exit 5), absent, mid-line non-match, precedence");
+console.log("\n10. The claude-nsp-guard shim: ok, shadowed (exit 5), absent, mid-line non-match, precedence");
 {
 	const SENTINEL = "# nsp-guard-identity: 9a1c-claude-nsp-guard-sentinel";
 
@@ -934,6 +934,13 @@ console.log("\n10. The claude PATH guard: ok, shadowed (exit 5), absent, mid-lin
 			JSON.stringify(doc?.nspGuard));
 		check(doc?.nspGuard?.found === claudeDecoy && doc?.nspGuard?.guard === guard,
 			"V10e: nspGuard still names both paths", JSON.stringify(doc?.nspGuard));
+
+		// Outranked is not silent: human mode adds an "Also:" line naming both.
+		const human = run(["--dir", dir], [wtftDecoyDir, claudeDecoyDir, guardDir]);
+		check(human.code === 2 && /Also: PATH resolves claude to /.test(human.err)
+			&& human.err.includes(claudeDecoy) && human.err.includes(guard),
+			"V10e: an outranked shadowed guard still gets an Also: line naming both paths",
+			`exit ${human.code}: ${human.err.slice(0, 400)}`);
 	}
 
 	// V10f — human mode names both paths on stderr, with no --json.

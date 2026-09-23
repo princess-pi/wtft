@@ -73,7 +73,7 @@ Resolving only the parent was the bug — it produced exactly the self-comparing
 | `2` | In sync but **shadowed** on PATH by a different `wtft` | the printed `rm` |
 | `3` | The build failed | read the build output on stderr |
 | `4` | In sync, but a config file is still at the old `princess-pi-tools` path (status `config-left`, #156) | in install mode, EITHER the new path already had a DIFFERENT file (a real conflict — declined) OR a file appeared at the new path while this run was moving (kept, never overwritten — re-run), OR the copy itself failed partway (`mkdir`/`mktemp`/`cp`/`ln` — a "could not move" stderr line names it and the cause; a failure to remove the OLD file after a successful copy is reported as `moved`, not this; a later run removes the byte-identical leftover once the old directory allows unlinking, and reports this — `identical, safe to delete` — until then) — either way, resolve which copy is authoritative and remove the other by hand; in `--check` mode, run `install-wtft` |
-| `5` | In sync, but the `claude` PATH guard is **shadowed**: a guard exists on PATH, but a different `claude` comes first (status `nsp-guard-shadowed`) | put the guard's directory before the winner's on PATH — nothing is deleted |
+| `5` | In sync, no config file left behind and wtft not shadowed, but the `claude-nsp-guard` shim is **shadowed**: a guard exists on PATH, but a different `claude` comes first (status `nsp-guard-shadowed`) | put the guard's directory before the winner's on PATH — nothing is deleted. When another status wins the exit code, human mode names a shadowed guard on an `Also:` line |
 | `64` | Bad usage: unknown argument, `--dir` with no directory, `--dir` followed by a flag **or given an empty string**, or no `--dir` on a host with `HOME` unset | — |
 
 `1` and `64` are chosen to match `install-workflow-tools` so the two installers do not
@@ -83,8 +83,8 @@ either side noticing. Treat it as a convention this file states, not a guarantee
 remedy is a different verb entirely: re-running the installer cannot fix a PATH shadow, and
 cannot move a config file it has already declined to overwrite once.
 
-**Drift outranks a left-behind config file, which outranks shadow, which outranks the `claude`
-PATH guard**, when more than one holds — a shadowed copy of the wrong bytes, or the right
+**Drift outranks a left-behind config file, which outranks shadow, which outranks the
+`claude-nsp-guard` shim**, when more than one holds — a shadowed copy of the wrong bytes, or the right
 bytes with config in the wrong place, is still wrong, and fixing drift comes first. So exit
 `2` implies the artifacts are in sync AND no config file is left behind; exit `4` implies the
 artifacts are in sync; exit `5` implies the artifacts are in sync, no config file is left
@@ -188,7 +188,10 @@ now falls through the same evaluation as every other exit.
   otherwise `ok` — see "Config migration (#156)" above for the full contract.
 - **`nspGuard` is present on every exit path**, computed independently of `DEST_DIR`/the
   build. `found` is the first executable `claude` on `PATH`, `guard` the first one
-  carrying the sentinel identity line; either is `null` when no such file exists.
+  carrying the sentinel identity line; either is `null` when no such file exists. Each is
+  `<PATH entry>/claude` as written, so a relative PATH entry gives a relative path. Empty
+  PATH entries are skipped, as the guard itself skips them, although a shell would search
+  the current directory there.
   `status: "nsp-guard-shadowed"` (exit `5`) is reported only when every other check is
   `ok`. Full reasoning, the sentinel, and the scan: `docs/spec-194-p9-housekeeping.md` § H3.
 
@@ -345,7 +348,7 @@ probe.
 | **V7** | the mutation probe, M1–M5 | `run-mutants.sh` exits 0, and all five mutations applied — V7b's own check is `M1 && M2 && M3 && M4 && M5` |
 | **V8** | hostile paths | an apostrophe, a newline, and a destination symlink — the review bot's four findings, each reproduced before it was adopted |
 | **V9** | config migration (#156), driven directly through the CLI (V9a–V9i) | install moves every legacy file present to its new name, byte-identical, and deletes the old one; a second run (or `--check`) reports `none` for all; a file already at the new path is `left`, exit `4`, neither copy touched — including one that appears between the check and the move (V9i, a `cp` shim on PATH creates it at that instant); `--check` reports the same leftover and writes nothing. (The `config-left` ESCALATION LOGIC ITSELF is mutation-proofed as **M4**, checked under **V7**, not here — V9 exercises the feature end-to-end and never invokes `run-mutants.sh`.) |
-| **V10** | the `claude` PATH guard (#30, spec-194 § H3) | the guard first on `PATH` → exit `0`, `nspGuard.state: "ok"`; a decoy `claude` before the guard → exit `5`, `status: "nsp-guard-shadowed"`, both paths named; no `claude` anywhere → exit `0`, `state: "absent"`; a file that only mentions the sentinel mid-line is not a guard; a coexisting wtft shadow outranks the guard check, which still reports `shadowed` in the document; human mode prints the remedy on stderr |
+| **V10** | the `claude-nsp-guard` shim (#30, spec-194 § H3) | the guard first on `PATH` → exit `0`, `nspGuard.state: "ok"`; a decoy `claude` before the guard → exit `5`, `status: "nsp-guard-shadowed"`, both paths named; no `claude` anywhere → exit `0`, `state: "absent"`; a file that only mentions the sentinel mid-line is not a guard; a coexisting wtft shadow outranks the guard check, which still reports `shadowed` in the document and on an `Also:` line; human mode prints the remedy on stderr |
 
 `0755` is what install *writes* and what V2 asserts; the **tool's** check is any execute
 bit, so a hand-`chmod`ed `0700` copy still reports `ok`.
@@ -393,7 +396,7 @@ so without that isolation the probe would read (and move) whoever runs it's real
 | M2 — never escalate a foreign PATH winner to `shadowed` | `shadowed` | `ok` |
 | M3 — never `cmp` source against destination | `drift` | `ok` |
 | M4 — never escalate a left-behind config file to `config-left` (#156) | `config-left` | `ok` |
-| M5 — never escalate a shadowed `claude` PATH guard to `nsp-guard-shadowed` (spec-194 § H3) | `nsp-guard-shadowed` | `ok` |
+| M5 — never escalate a shadowed `claude-nsp-guard` shim to `nsp-guard-shadowed` (spec-194 § H3) | `nsp-guard-shadowed` | `ok` |
 
 **The mutant must live in `bin/`.** `REPO` is derived from the script's own location, so a
 copy anywhere else computes the wrong repo, fails `build-failed`, and proves nothing about

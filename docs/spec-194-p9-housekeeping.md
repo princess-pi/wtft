@@ -9,8 +9,9 @@ its decision, its surfaces, and the test that closes it.
 **Observed.** A counted descendant's untagged turns (no model id: `(unknown)` or
 `<synthetic>`) are dropped from its edge total. `computeSpawnTree` strips
 `untaggedCostUsd` so it cannot leak into `spawned.edges[].total`, as spec-89 U1 requires.
-A descendant whose turns are all untagged therefore renders `$0.00`, and no floor
-condition says that anything was left out.
+A descendant whose turns are all untagged therefore renders `$0.00`, and before this
+change no floor condition said that anything was left out. The row still renders `$0.00`;
+what changes is that the omission is named.
 
 **Decision (Duppy, D2 on #194):** a named floor condition. Spelled as a JSON key like its
 four siblings:
@@ -27,24 +28,33 @@ four siblings:
   `untaggedInteractions` and `total.untaggedCostUsd`.
 - Never added to `spawned.total`, `tree`, or any edge total. The money stays outside,
   exactly as a session's own untagged cost stays outside `total.costUsd`.
+- **One overlap, stated.** An untagged turn that spawned a `claude -p` child carries that
+  child's share in its cost, so the child's share is inside `untaggedCostUsd`. The walk
+  does not mark such a child folded, so if the ledger also records it, the child is priced
+  again under its own edge and is inside `spawned.total` too. `untaggedCostUsd` can
+  therefore overstate what is missing.
 - `tree` is a floor under **five** conditions: `unattributed` non-empty, `depthCapped`
   non-zero, `ledgerError` non-null, `malformedLedgerLines` non-zero, or
   `descendantUntagged` non-empty.
-- `untaggedCostUsd` is often `0`, because untagged lines on the measured corpus carry
-  `c: 0`. The condition still holds then, because the turns exist and none of their
+- `untaggedCostUsd` is often `0`, because a real `<synthetic>` turn carries no usage. The
+  condition still holds then, because the turns exist and none of their
   tokens is in the tree. A consumer that wants to know whether *money* is missing reads
   the cost.
-- `--tokens` prints one line under the SPAWNED rows when the list is non-empty:
+- `--tokens`, and the Pi widget, which renders the same block, print one line under the
+  SPAWNED rows when the list is non-empty:
   `N descendant(s) with untagged turns — $X not in SPAWNED (#180)`.
 - **Schemas.** `wtft/spawn-tree@3` → `@4`, and `wtft/session@7` → `@8`, per spec-26's
   rule that a nested key bumps the document too.
 
-**Closer** (`tests/wtft-180-descendant-untagged.test.ts`): a root with one ledger child
-whose only turn is `<synthetic>`, and one child with a tagged turn plus an untagged turn
-that has a non-zero `c`. `--json` lists both children in `descendantUntagged` with
-their counts and cost. `spawned.total` excludes the untagged cost. A tagged-only child
-is not listed. `--tokens` prints the line. The fixture's precondition is asserted too:
-the all-untagged child's edge total is `$0`.
+**Closer** (`tests/wtft-180-descendant-untagged.test.ts`): a root with three ledger
+children: one whose only turn is `<synthetic>` with no usage, one with a tagged turn plus
+an untagged turn carrying a harness-native cost of $0.25, and one tagged-only. The test
+drives `computeSpawnTree`, `renderSpawnTree` and `buildSessionJson` directly, the
+functions behind `--tokens` and `--json`. The first two children are listed in
+`descendantUntagged` with their counts and cost, and the tagged-only one is not.
+Neither the mixed child's edge total nor `spawned.total` holds the $0.25. The SPAWNED
+block prints the line. The fixture's precondition is asserted too: the all-untagged
+child's edge total is `$0`.
 
 ## H2 — a committed `.meta.json` corpus (#151, direction A)
 
@@ -52,23 +62,28 @@ the all-untagged child's edge total is `$0`.
 field, and it skips wherever `~/.claude` is absent, including CI.
 
 **Decision (#194, A):** commit a small corpus of real harness `.meta.json` files at
-`tests/fixtures/meta-corpus/`, one per shape the reader distinguishes: a depth-1
-`general-purpose` child, a named agent type, a depth-2 child carrying `parentAgentId`,
-and a Dynamic Workflow child (no `description`, no `toolUseId`). A `README.md` beside
+`tests/fixtures/meta-corpus/`, one per key set seen on this host: two Dynamic Workflow
+children (no `description`, no `toolUseId`), a depth-2 child carrying `parentAgentId`, a
+fork, a named agent type, a named dispatch, and one carrying `cwd`. The reader itself
+branches on none of these; the spread is there so the corpus carries every key the
+harness writes today. A `README.md` beside
 them records where they came from, when, and how to refresh them.
 
 - **`M7c`** runs everywhere. For every corpus file, the two required names are present,
   the near-universal pair is present unless `agentType` is `workflow-subagent`, and
-  `readSubagentMeta` accepts the file.
+  `readSubagentMeta` accepts the file. The presence checks guard the committed data;
+  the reader check is the one that exercises code. M7c sees the harness as it was when
+  the corpus was captured, not as it is today.
 - **`M7b`** stays host-gated and gains one assertion: every key the newest real file
-  carries appears somewhere in the corpus. A harness that adds or renames a key then
-  fails on a host that has one, naming the refresh steps. That is the ageing check
+  carries appears somewhere in the corpus. A harness that adds or renames a key, on the
+  newest sidecar, then fails on a host that has one, naming the refresh steps. A key the
+  harness stops writing is not caught by this check. That is the ageing check
   direction A needs.
 
 **Closer:** rename `spawnDepth` in one corpus file, run the suite with `HOME` pointing at
 an empty directory, and `M7c` FAILs rather than skipping.
 
-## H3 — `install-wtft` checks the `claude` PATH guard (#30, narrowed)
+## H3 — `install-wtft` checks the `claude-nsp-guard` shim (#30, narrowed)
 
 **Context.** The shim #30 asked for shipped as princess-pi-tools' `claude-nsp-guard`,
 deployed as `~/bin/claude` by `install-workflow-tools`. What #30 still owes wtft is the
@@ -77,12 +92,15 @@ guards nothing.
 
 **Identity.** A file is the guard when one of its first 160 lines is exactly
 `# nsp-guard-identity: 9a1c-claude-nsp-guard-sentinel`. That is the sentinel
-`install-workflow-tools` itself matches before it overwrites `~/bin/claude`. It is
-documented in princess-pi-tools `docs/dev-workflow-spec.md`, which makes it the
-producer's contract rather than prose scraped here.
+`install-workflow-tools` itself matches before it overwrites `~/bin/claude`. The full
+string and the whole-line, first-160-lines rule live in princess-pi-tools'
+`bin/install-workflow-tools`; its `docs/dev-workflow-spec.md` names the check but abbreviates
+the string, and does not yet say wtft reads it too (duppypro/princess-pi-tools#1021). wtft also
+requires the file to be executable, which the producer's check does not.
 
-**The scan** walks `PATH` in order, skipping empty components as the guard itself does,
-and looks at each executable file named `claude`:
+**The scan** walks `PATH` in order and looks at each executable file named `claude`. It
+skips empty components as the guard itself does, although a shell would search the current
+directory there, so a `claude` in the cwd that a shell would run first is not seen:
 
 | `nspGuard.state` | Meaning | Exit |
 |---|---|---|
@@ -91,14 +109,17 @@ and looks at each executable file named `claude`:
 | `absent` | no guard anywhere on PATH, including no `claude` at all | unchanged |
 
 - **`absent` is not a failure.** The guard ships from princess-pi-tools, which is
-  private, so a host without it is a normal wtft install, not drift. Human mode prints
-  a one-line note. Presence on this host is `install-workflow-tools --check`'s job.
+  private, so a host without it is a normal wtft install, not drift. On an `ok` run
+  human mode prints a one-line note. Presence on this host is
+  `install-workflow-tools --check`'s job.
 - **`shadowed` is exit 5**, with the remedy printed: put the guard's directory before
   the winner's on PATH. Nothing is deleted.
 - **Precedence:** it is set only when every other check is `ok`. Drift, build failure,
-  `no-dir`, `config-left` and a wtft PATH shadow all outrank it.
+  `no-dir`, `config-left` and a wtft PATH shadow all outrank it. When one of drift,
+  `config-left` or a wtft shadow wins, human mode still names a shadowed guard on an
+  `Also:` line, as it already does for a wtft shadow.
 - **JSON:** `nspGuard: { "state", "found", "guard" }`. `found` is the first `claude` on
-  PATH, or `null`. `guard` is the first guard on PATH, or `null`. `install-wtft@1` is kept:
+  PATH, or `null`, and is set even when `state` is `absent`. `guard` is the first guard on PATH, or `null`. `install-wtft@1` is kept:
   `configMigration` was added the same way, as an additive key, without a bump.
 - **Limit, stated:** a caller that runs a `claude` binary by absolute path bypasses the
   guard. The guard's own `--help` says so.
@@ -106,43 +127,50 @@ and looks at each executable file named `claude`:
 **Closer** (`tests/wtft-46-install-wtft.test.ts` §10): a fake guard (a file carrying the
 sentinel) with a decoy `claude` earlier on PATH exits 5, `nspGuard.state` is `shadowed`,
 and both paths are named. The guard first is exit 0, `ok`. No guard is exit 0, `absent`.
-A file that only *mentions* the sentinel mid-line does not count as a guard.
+A file that only *mentions* the sentinel mid-line does not count as a guard. With a wtft
+shadow as well, the exit is 2 and the guard is named on an `Also:` line.
 
 ## H4 — the subagent read path is pinned (#15)
 
 **Observed.** #15 asked for a paragraph stating the subagent read path's invariants.
 That paragraph now exists: `docs/wtft-incremental-render-spec.md` § Sub-Agent Transcript
 Read Path, with § `attributeClaudeSubAgentCosts`: Per-Call, Not Global and
-§ `deduplicateInteractions`: Return Order Is Not Chronological. The producer half of the
-tag contract is `docs/wtft-tag-format.md` §4. What is still missing is #15's Closer: a
+§ `deduplicateInteractions`: Return Order Is Not Chronological. `docs/wtft-tag-format.md`
+§4 states both halves of the tag contract: the producer may write one message id more than
+once, and a consumer collapses them. What is still missing is #15's Closer: a
 test that pins the sentences to the code they describe.
 
 **Added.**
 - A short **on-disk layout** subsection in the read-path section, from the evidence on
   #15: the `<session>/subagents/agent-*.jsonl` shape, the parent transcript holding no
-  sidechain records, and the two harnesses treating a directory named `subagents`
-  oppositely.
-- **`tests/wtft-15-read-path-doc-claims.test.ts`** quotes each sentence from the spec, then
-  drives the real code to prove it:
-  - the per-call rule: one call over two turns that name the same nested child
-    attributes it once, and two calls over the halves attribute it twice;
+  sidechain records, the Pi sibling pattern, and session discovery skipping a directory
+  named `subagents` in both harnesses (so a Pi subagent sibling, which is not in one, is
+  listed as a session).
+- **`tests/wtft-15-read-path-doc-claims.test.ts`** quotes the pinned sentences from the
+  spec, then drives the real code behind each:
+  - the per-call rule: one call over two turns that name the same `claude -p` child
+    attributes it once, two calls over the halves attribute it twice, and a second call
+    over the same objects attributes it again;
   - the order rule: `deduplicateInteractions` on an id-bearing turn followed by a later
     id-less one returns the id-less turn first;
   - the layout rule: `discoverSubagentSessionFiles` finds `agent-*.jsonl` under
-    `<session>/subagents/`, not a sibling `.meta.json` or a non-`agent-` file, and Claude
-    Code's session discovery never lists a transcript under `subagents/`.
+    `<session>/subagents/`, not a sibling `.meta.json`, a non-`agent-` file or anything
+    under `wtft-tags/`; it finds a Pi sibling by `parentSession`; and neither harness's
+    session index lists a transcript under a `subagents/` directory below a project
+    directory, while Pi's does list the sibling.
 
 Rewording a pinned sentence fails the suite, so it cannot quietly drift from the code.
 #15 closes with this PR. Its resolution goes in its body.
 
 ## H5 — `before-after.ts` reads a frozen corpus (#208)
 
-**Observed.** `research/other-corpus/before-after.ts` snapshots the transcripts it
-selects, but `parseSessionFile` discovers nested `claude -p` children live, from the
-real projects root. A child still being written between the BEFORE and AFTER passes
-moves the totals with no classifier change. Found while reading it: the gained/lost
-subagent check reads `claudeSubAgentSessionIds`, a field no current `Interaction`
-carries. Both sets are always empty, so a lost subagent is never reported.
+**Observed, before this change.** `research/other-corpus/before-after.ts` snapshotted the
+transcripts it selected, but `parseSessionFile` discovers `claude -p` children live, from
+the projects root `projectsDir()` names. A child still being written between the BEFORE
+and AFTER passes moved the totals with no classifier change. Found while reading it: the
+gained/lost subagent check read `claudeSubAgentSessionIds`, a field no current
+`Interaction` carries, so both sets were always empty and a lost subagent was never
+reported.
 
 **Changes.**
 - The snapshot is a **projects-shaped tree**: each selected Claude Code transcript keeps
@@ -151,12 +179,19 @@ carries. Both sets are always empty, so a lost subagent is never reported.
 - **Discovery pass, then freeze.** Both builds parse the live selection once. Every
   `claudeSubAgentFolds[].file` either build names, at any depth, is copied into the
   snapshot at its own relative path. A child only one build finds is still in the
-  snapshot, so the lost check can still fire.
+  snapshot, so the lost check can still fire. Three things stay out: the children of a
+  transcript whose discovery parse throws; a fold file outside the Claude Code projects
+  root, skipped with a stderr note; and a copy that fails.
 - Both measured passes run with `WTFT_CLAUDE_PROJECTS_DIR` set to the snapshot's projects
   root, the #129 seam. A fake `HOME` does not work, because bun caches `os.homedir()` at
   process start.
 - Subagent ids come from `claudeSubAgentFolds[].id`, falling back to
-  `claudeSubAgentSessionIds` for a BEFORE build old enough to carry only that.
+  `claudeSubAgentSessionIds` for a BEFORE build old enough to carry only that. Such a
+  build names no fold files, so its children are frozen only when AFTER finds them too,
+  and a build older than the #129 seam reads the live projects root in its measured pass
+  anyway. The freeze holds when both builds carry `claudeSubAgentFolds[].file`.
+- The snapshot directory is removed when the script exits, and `--before` is resolved
+  against the current directory, so a relative checkout path works.
 - The selection roots honour `WTFT_CLAUDE_PROJECTS_DIR` and `WTFT_PI_SESSIONS_DIR`, so
   the script can run against a fixture.
 
@@ -165,6 +200,39 @@ with a parent whose turn spawns a `claude -p` child.
 - **Snapshot:** the child is copied into the snapshot. After the live child grows, the
   snapshot parent's cost is unchanged. The precondition is asserted too: the live
   parent's cost did move.
-- **End to end:** the script run with `--before` set to this same checkout exits 0, and
-  names no subagent as lost.
+- **End to end:** the script run with `--before` set to this same checkout exits 0,
+  names no subagent as lost, and reports a total that includes the frozen child's cost.
 - **Ids:** the fold id is the reported subagent id.
+
+## Reconciliation record (2026-09-23)
+
+Seven fresh-context auditors, one per changed source file plus the read-path tests and one for
+host-scoped documents. Every finding this branch caused is fixed below. Findings about text that
+was already on `main` are #233. The three that move money are #230, #231 and #232, and one
+producer-side gap is duppypro/princess-pi-tools#1021.
+
+| Artifact | Claim | Contradicted by | Covered by a test? | Action |
+|---|---|---|---|---|
+| `install-wtft --help` | nothing on `nspGuard`, on how the guard is recognised, or on exit 5's precedence | `finish()`, `is_nsp_guard` | ✅ §10 | Fixed |
+| `install-wtft` human mode | a shadowed guard is silent when another status wins | `finish()` | ✅ V10e | Fixed in code: an `Also:` line, like a wtft shadow |
+| user-facing strings | three names for one shim | `finish()` | — | Fixed: `claude-nsp-guard`; glossary entry added |
+| spec-194 H3 | the sentinel "documented in dev-workflow-spec" | the spec abbreviates it | — | Fixed; producer gap filed as ppt#1021 |
+| spec-194 H3 | empty PATH components skipped "as the guard does" | a shell searches the cwd there | reconciled-against-untested | Fixed: stated as a limit |
+| spec-26 `tree.*`, spec-116 | "the last two are the traps", "the other three" | five conditions now | — | Fixed |
+| spec-26 Amendment 7 | "each such descendant" (all-untagged) | any untagged turn qualifies | ✅ D3/D4 | Fixed |
+| spec-26 | "every number in that block is in `spawned`" | the untagged-cost line is a sum | ✅ R1 | Fixed |
+| spec-116 example, sample | no `descendantUntagged`; "the last three" lines | `@4` carries it; four lines | ✅ D8, R1 | Fixed |
+| README, CONTEXT, manifest | the `--tokens` untagged line is undocumented | `renderRecordedSpawns` | ✅ R1 | Fixed |
+| spec-26 row, H1, README | untagged cost "never in `spawned.total`" | an untagged turn's `claude -p` share can be counted under that child's own edge | reconciled-against-untested | Fixed: overlap stated |
+| spec-194 H1 | `c: 0`, two children, "`--json` lists" | native cost, three children, library calls | ✅ | Fixed |
+| `tests/wtft-180` D7, J3 | "the untagged $0.25 is not added" | both passed whatever the edge held | — | Fixed: now fail if it leaks |
+| read-path layout | `wf_<id>` "one level down"; "only `agent-*.jsonl`"; "only reader"; subagent "never listed" | two levels; Pi siblings; meta reader and daemon watch; Pi lists siblings | ✅ L3–L7 | Fixed |
+| read-path per-call | the invariant, unqualified | an attributed turn is skipped and seeds nothing | ✅ A5–A7 | Fixed; the second-call double count is now stated and pinned |
+| spec-194 H2/H4, corpus README, spec-137 | "shape the reader distinguishes"; M7c "checks the harness"; "harness treats `subagents` oppositely"; "producer half is §4" | the reader has no shapes; M7c reads a snapshot; both skip it; §4 states both halves | ✅ M7b/M7c | Fixed |
+| spec-194 H5, EXT_WTFT | "every fold file is copied" | three exclusions; old BEFORE builds | reconciled-against-untested | Fixed: stated |
+| `before-after.ts` | a relative `--before` fails; the snapshot is never removed | the import specifier; `mkdtemp` | ✅ E1–E4 | Fixed in code |
+| `tests/wtft-208` E | passes with discovery broken | never checked the child | — | Fixed: E4 |
+| spec-107, spec-52 | #107 C "is P9, not in this change"; command without `bun` | shipped; needs `bun` | — | Fixed |
+| `nspGuard` | no `remedy` key, unlike `shadow` | — | — | Left standing: `found` and `guard` carry both paths; a remedy string would be prose in a field |
+| `tests/wtft-208` fixture | Pi-format lines only | — | — | Left standing: the `claude -p` path does not depend on the transcript format |
+| M7c presence checks | exercise no production code | — | — | Left standing: they guard the committed data; the reader check exercises code |

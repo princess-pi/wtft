@@ -2,7 +2,8 @@
 
 > **Issue:** [#107](https://github.com/princess-pi/wtft/issues/107) — findings **A** and **B**.
 > **P5 of** [#194](https://github.com/princess-pi/wtft/issues/194). Finding **C** (an injectable
-> root for `before-after.ts`) is P9 and is not in this change.
+> root for `before-after.ts`) was split out as #208 and shipped in P9
+> (`docs/spec-194-p9-housekeeping.md` § H5); it is not in this change.
 > **Waits on:** P3's fold records and P4's generation records, both merged.
 
 ## The gap this closes
@@ -226,7 +227,7 @@ would read the real one):
 
 ## Not in this change
 
-- **#107 C** — an injectable projects root for `research/other-corpus/before-after.ts`. P9.
+- **#107 C** — an injectable projects root for `research/other-corpus/before-after.ts`. Shipped in P9 as #208 (`docs/spec-194-p9-housekeeping.md` § H5).
 - **#116's launcher-spawned sessions.** All three of that spec's reasons still hold for a
   launcher, and reason 2 is now held by this change rather than by an accident: the no-`cd`
   fallback deliberately withholds itself from a command whose shell does not run `claude`. A

@@ -104,6 +104,21 @@ console.log("\nA — attributeClaudeSubAgentCosts: per call, not global");
 	attributeClaudeSubAgentCosts(second, dir);
 	check(outputOf([...first, ...second]) === 20 + 700 + 700,
 		`A4 two calls over the halves attribute it twice, without an error (output ${outputOf([...first, ...second])}, want 1420)`);
+
+	const A5 = "a turn that already carries `claudeSubAgentFolds` is skipped, and its folds do not seed the set";
+	check(quoted(A5), "A5 the spec states what an already-attributed turn does");
+	const A6 = "A turn whose only child was already counted earlier in the call is left with no folds, so a second call over the same objects attributes that child again.";
+	check(quoted(A6), "A6 the spec states what a second call over the same objects does");
+	const again = clone(whole);
+	check(!!again[0].claudeSubAgentFolds && !again[1].claudeSubAgentFolds,
+		"A6b fixture precondition: the first turn carries the fold, the second none");
+	attributeClaudeSubAgentCosts(again, dir);
+	check(outputOf(again) === 20 + 700 + 700,
+		`A6c a second call skips the first turn and folds the child into the second (output ${outputOf(again)}, want 1420)`);
+	const mixed = [whole[0], clone(base)[1]];
+	attributeClaudeSubAgentCosts(mixed, dir);
+	check(outputOf(mixed) === 20 + 700 + 700,
+		`A7 an unattributed turn after an attributed one folds the same child again (output ${outputOf(mixed)}, want 1420)`);
 }
 
 // ---
@@ -127,10 +142,12 @@ console.log("\nD — deduplicateInteractions: return order is not chronological"
 // ---
 console.log("\nL — on-disk layout");
 {
-	const L1 = "`discoverSubagentSessionFiles` walks that directory and every directory under it (the `workflows/wf_<id>/` children are one level down), and lists only files named `agent-*.jsonl`.";
-	const L2 = "**Session discovery skips a directory named `subagents` in both harnesses**";
+	const L1 = "`discoverSubagentSessionFiles` walks that directory and every directory under it (the `workflows/wf_<id>/` children are two levels down), except a symlinked directory and one named `wtft-tags`, and under it lists only files named `agent-*.jsonl`.";
+	const L2 = "**Session discovery skips a directory named `subagents` below a project directory in both harnesses**";
+	const L2b = "Pi session discovery does list it as a session of its own.";
 	check(quoted(L1), "L1 the spec states what subagent discovery lists");
 	check(quoted(L2), "L2 the spec states that session discovery skips `subagents`");
+	check(quoted(L2b), "L2b the spec states that a Pi subagent sibling is listed as a session");
 
 	const cwd = path.join(dir, "layout-cwd");
 	const projectDir = path.join(projects, slugOf(cwd));
@@ -139,19 +156,23 @@ console.log("\nL — on-disk layout");
 	const subagents = path.join(projectDir, sessionId, "subagents");
 	fs.mkdirSync(path.join(subagents, "workflows", "wf_1"), { recursive: true });
 	fs.writeFileSync(session, turnLine("s-1", T0, 10));
-	for (const f of ["agent-aaaa.jsonl", "agent-aaaa.meta.json", "notes.jsonl", path.join("workflows", "wf_1", "agent-bbbb.jsonl")]) {
+	fs.mkdirSync(path.join(subagents, "wtft-tags"), { recursive: true });
+	for (const f of ["agent-aaaa.jsonl", "agent-aaaa.meta.json", "notes.jsonl", path.join("workflows", "wf_1", "agent-bbbb.jsonl"), path.join("wtft-tags", "agent-cccc.jsonl")]) {
 		fs.writeFileSync(path.join(subagents, f), turnLine(`x-${path.basename(f)}`, T0, 5));
 	}
 
 	const found = discoverSubagentSessionFiles(session).files.map(f => path.relative(subagents, f)).sort();
 	check(JSON.stringify(found) === JSON.stringify(["agent-aaaa.jsonl", path.join("workflows", "wf_1", "agent-bbbb.jsonl")]),
-		`L3 subagent discovery lists agent-*.jsonl at every depth and nothing else (got ${JSON.stringify(found)})`);
+		`L3 under subagents/, discovery lists agent-*.jsonl two levels down too, and not a sidecar, a non-agent- file or anything under wtft-tags (got ${JSON.stringify(found)})`);
 
 	// A Pi session tree with a `subagents` directory in it.
 	const piDir = path.join(piSessions, "--pi-cwd--");
 	fs.mkdirSync(path.join(piDir, "subagents"), { recursive: true });
 	fs.writeFileSync(path.join(piDir, "pi-top.jsonl"), sessionLine("pi-top-15", T0, "/pi-cwd") + turnLine("pt-1", T0, 10));
 	fs.writeFileSync(path.join(piDir, "subagents", "pi-nested.jsonl"), sessionLine("pi-nested-15", T0, "/pi-cwd") + turnLine("pn-1", T0, 10));
+	fs.writeFileSync(path.join(piDir, "pi-sibling.jsonl"),
+		JSON.stringify({ type: "session", version: 3, id: "pi-sibling-15", parentSession: "pi-top-15", timestamp: new Date(T0).toISOString(), cwd: "/pi-cwd" }) + "\n"
+		+ turnLine("sib-1", T0, 10));
 
 	for (const discovery of getDiscoveries()) {
 		if (!discovery.indexSessionsById) continue;
@@ -160,8 +181,15 @@ console.log("\nL — on-disk layout");
 		check(listedTop, `L4 [${discovery.id}] fixture precondition: the top-level session is indexed`);
 		const underSubagents = paths.filter(p => p.split(path.sep).includes("subagents"));
 		check(underSubagents.length === 0,
-			`L5 [${discovery.id}] session discovery lists nothing under a subagents directory (got ${JSON.stringify(underSubagents)})`);
+			`L5 [${discovery.id}] session discovery lists nothing under a subagents directory below a project dir (got ${JSON.stringify(underSubagents)})`);
+		if (discovery.id === "pi") {
+			check(paths.some(p => p.endsWith("pi-sibling.jsonl")),
+				`L6 [pi] a subagent sibling naming its parent in parentSession is listed as a session of its own`);
+		}
 	}
+	const piTop = path.join(piDir, "pi-top.jsonl");
+	check(discoverSubagentSessionFiles(piTop).files.some(f => f.endsWith("pi-sibling.jsonl")),
+		"L7 [pi] and subagent discovery lists the same sibling for its parent");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

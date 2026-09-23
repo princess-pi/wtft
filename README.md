@@ -36,7 +36,8 @@ wtft until this script (or a human) moves it; `--check` reports one without
 moving it. It also reports whether the `claude-nsp-guard` shim (princess-pi-tools,
 deployed as `~/bin/claude`) wins the PATH race for `claude` — an absent guard is
 a normal host, not a failure, and a caller that runs a `claude` binary by
-absolute path bypasses the check entirely. `install-wtft --json` gives
+absolute path bypasses the guard entirely. When a worse problem wins the exit
+code, a shadowed guard is still named on an `Also:` line. `install-wtft --json` gives
 the whole report as one document on every exit path but one: a usage error (64)
 is reported on stderr and carries no document, because the arguments that would
 say what to report are the thing that is wrong. `install-wtft --help` lists the
@@ -45,8 +46,8 @@ see [Usage](#usage) below.)
 
 Re-run it after every rebuild; `--check` is how you find out you needed to, and
 it is scriptable: **0** in sync, **1** drift, **2** shadowed on PATH, **4** a
-config file still at the old path, **5** the claude PATH guard is on PATH but
-loses to another claude, **64** bad
+config file still at the old path, **5** the `claude-nsp-guard` shim is on PATH
+but another `claude` comes first, **64** bad
 usage. A plain install adds **3** for a failed build, which `--check` cannot
 return because it never builds. Three of those codes have a second cause: **1**
 is also a `--dir` that cannot be created (status `no-dir`), **4** is also install
@@ -278,7 +279,10 @@ non-empty, `depthCapped` non-zero, `ledgerError` set, `malformedLedgerLines`
 non-zero, or `descendantUntagged` non-empty. A malformed ledger line was a
 record, so its edge is lost, and nothing else reports it. `descendantUntagged`
 names each counted descendant whose untagged turns (no model id) are left out
-of its total, just as this session's own are left out of `total.costUsd`.
+of its total, just as this session's own are left out of `total.costUsd`, and
+`--tokens` prints their count and summed cost on one line under SPAWNED. That
+sum can include a `claude -p` child the untagged turn spawned, which the ledger
+may also record and `spawned.total` then counts.
 
 A session's built-in (Task) subagents get their own `SUBAGENTS` block under
 `--tokens`: one row each, up to 20 and then a count of the rest, named by the harness's `.meta.json` description, with

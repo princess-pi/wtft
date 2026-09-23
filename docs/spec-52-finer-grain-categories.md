@@ -393,7 +393,7 @@ respectively. Steps 1, 2 and 4 above all under-read the shell, in three separate
 > shape rather than a scaled one. The draw was also random per run, so before and after were not
 > the same sessions.
 >
-> **Reproduce it with `research/other-corpus/before-after.ts --before <checkout>`**, which is the
+> **Reproduce it with `bun research/other-corpus/before-after.ts --before <checkout>`**, which is the
 > script these figures come from — a sorted-and-sliced session list rather than a shuffled one,
 > deduplicated, classified by two builds. It exits non-zero on any total that **falls**, and on
 > any **rise** it cannot attribute to a newly-discovered subagent. The two directions are not

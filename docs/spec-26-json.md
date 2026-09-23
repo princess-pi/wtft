@@ -145,9 +145,9 @@ contract.
 | `spawned.descendants` | number | Sessions priced from their own file, **each counted exactly once**: a diamond or a cycle in the ledger contributes once, not twice. Lower than `edges.length` whenever an edge was skipped. A session known only through a resolved descendant's parse fold is inside that descendant's total and is not counted here. |
 | `spawned.malformedLedgerLines` | number | Ledger lines the reader could not use. A broken spawner shows up as a number rather than an absence. |
 | `spawned.ledgerError` | string \| null | The ledger read FAILED, with the message. Without this field an unreadable ledger would serialise identically to "read it, this session spawned nothing" — the silent gap #116 exists to end, reintroduced inside its own fix. An *absent* ledger is not an error. |
-| `spawned.descendantUntagged[]` | array | `{child, untaggedInteractions, untaggedCostUsd}`, one per counted descendant (a `resolved` edge) whose own parse holds untagged turns — no model id, as `untaggedInteractions` counts them for this session (#180, Amendment 7). Their cost is **not** in that edge's `total`, `spawned.total` or `tree`, exactly as this session's own untagged cost is not in `total.costUsd`. `untaggedCostUsd` is often `0`; the entry is there because the turns exist. `[]` when no counted descendant has any. |
+| `spawned.descendantUntagged[]` | array | `{child, untaggedInteractions, untaggedCostUsd}`, one per counted descendant (a `resolved` edge) whose own parse holds untagged turns — no model id, as `untaggedInteractions` counts them for this session (#180, Amendment 7). Their cost is **not** in that edge's `total`, `spawned.total` or `tree`, exactly as this session's own untagged cost is not in `total.costUsd`. `untaggedCostUsd` is often `0`; the entry is there because the turns exist. It is that descendant's `total.untaggedCostUsd`, so an untagged turn that spawned a `claude -p` child carries that child's share; such a child is not marked folded, so if the ledger also records it, its cost is in `spawned.total` as well. `[]` when no counted descendant has any. |
 | `spawned.unrecorded[]` | array | Sessions other than this one that look like this session's launcher children and that **no ledger edge names** — when `spawned.ledgerError` is set no edge is known, so a recorded child may be listed — (#128, Amendment 5): `{child, path, cwd, ts, tier, basis, total, skip?}`. `tier` is `named` (the child's `cwd` contains this session's id — certain) or `inferred` (started by a program, in this repo's worktree fan-out or a temp sandbox, inside a launch span — a guess). `basis` is `cwd-names-parent`, `worktree` or `tmp`. `total` is the child's own cost, `null` with `skip: "unreadable"` when it could not be parsed. **Never in `spawned.total`, `tree` or `total`**, and never a reason for exit 9. `[]` means looked and found none, or that the session ran no command and so had nothing to look near; a read error in the scan fails the run (exit 1) instead of emitting `[]`; only a path that is gone is skipped. A session already counted — in `total` through the tag's fold records, or inside another row — is not listed either. A `named` row is listed whoever started it; outside `named`, a human-started session never is. |
-| `tree.*` | number | **SELF + RESOLVED descendants**, as a field, so a consumer never adds two numbers and has to work out whether it double-counted. A **floor** whenever anything was not counted, under any of FIVE conditions: `spawned.unattributed` is non-empty, `spawned.depthCapped` is non-zero, `spawned.ledgerError` is non-null, `spawned.malformedLedgerLines` is non-zero, or `spawned.descendantUntagged` is non-empty. The last two are the traps — an unreadable ledger sets none of the others, so a consumer checking only those reads a zeroed tree as a complete lineage; and a malformed line WAS a record, so its edge is lost with the count as its only trace. Checking `unattributed` alone reads a depth-truncated tree as complete. |
+| `tree.*` | number | **SELF + RESOLVED descendants**, as a field, so a consumer never adds two numbers and has to work out whether it double-counted. A **floor** whenever anything was not counted, under any of FIVE conditions: `spawned.unattributed` is non-empty, `spawned.depthCapped` is non-zero, `spawned.ledgerError` is non-null, `spawned.malformedLedgerLines` is non-zero, or `spawned.descendantUntagged` is non-empty. `ledgerError` and `malformedLedgerLines` are the traps — an unreadable ledger sets none of the others, so a consumer checking only those reads a zeroed tree as a complete lineage; and a malformed line WAS a record, so its edge is lost with the count as its only trace. Checking `unattributed` alone reads a depth-truncated tree as complete. |
 | `models[]` | array | One row per model id, **sorted by `costUsd` descending** — the same order and the same numbers as the rendered `--tokens` table's rows, un-abbreviated. `model` is the full id, never shortened. |
 | `models[].priced` | bool | `isModelPriced(model)` — the `?` marker in the rendered table. `false` means **no rate card**, not "wtft guessed this row": a harness-native per-turn cost is used unchanged wherever the transcript records one, so a marked row's cost can mix provenance. |
 | `categories[]` | array | One row per `CATEGORY_ORDER` entry, **always all fourteen, always in `CATEGORY_ORDER` order**, so a consumer can index by position. |
@@ -231,7 +231,8 @@ are ratios, labels and legends derived at render time rather than aggregate
 facts: the per-model `Cache:` hit-rate line, the `Think:` budget-utilisation
 line, the `?` fallback legend, and — since #116 — the SPAWNED block's row labels,
 its `(skip)` text where a cost would be, and the ledger-error sentence. Every
-number in that block is in `spawned`; the words around them are not.
+number in that block is in `spawned` or `tree`, or is a sum over `spawned.descendantUntagged[]`
+(its untagged-cost line); the words around them are not.
 
 Only the cache hit rate is fully recoverable:
 `cacheReadTokens / (cacheReadTokens + cacheWriteTokens + inputTokens)`, all three
@@ -630,11 +631,14 @@ means no model-tagged line carries that subagent's source yet.
 ## Amendment 7 — `wtft/session@8`: `spawned.descendantUntagged[]` (#180, 2026-09-23)
 
 A counted descendant's untagged turns are dropped from its edge total, so a descendant whose turns
-are all untagged rendered `$0.00` with no floor condition set. `spawned.descendantUntagged[]` names
-each such descendant with its untagged turn count and cost, and it is the fifth condition under
-which `tree` is a floor (Duppy's decision D2 on #194). Nothing moves into or out of any total.
+are all untagged shows `$0.00` on its edge row, and before this change no floor condition said so.
+`spawned.descendantUntagged[]` names every counted descendant with at least one untagged turn, with
+its untagged turn count and cost, and it is the fifth condition under which `tree` is a floor
+(Duppy's decision D2 on #194). The edge row still shows `$0.00`. Nothing moves into or out of any
+total.
 
 - **Two bumps.** `wtft/spawn-tree@3` becomes `@4`, and the document becomes `wtft/session@8`.
-- **`--tokens`** prints one line under the SPAWNED rows when the list is non-empty.
+- **`--tokens`**, and the Pi widget, which renders the same block, print one line under the SPAWNED
+  rows when the list is non-empty: `N descendant(s) with untagged turns — $X not in SPAWNED (#180)`.
 
 **Closer:** `tests/wtft-180-descendant-untagged.test.ts`. Full record: `docs/spec-194-p9-housekeeping.md` § H1.

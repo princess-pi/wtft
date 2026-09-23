@@ -7,7 +7,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { computeSpawnTree, treeTotals, SPAWN_TREE_SCHEMA } from "../extensions/lib/wtft-spawn-tree.ts";
+import { computeSpawnTree, SPAWN_TREE_SCHEMA } from "../extensions/lib/wtft-spawn-tree.ts";
 import { SPAWN_RECORD_SCHEMA, serializeSpawnRecord } from "../extensions/lib/wtft-spawn-ledger.ts";
 import { emptyTotals, renderSpawnTree } from "../extensions/lib/wtft-renderer.ts";
 import { buildSessionJson, WTFT_JSON_SCHEMA } from "../extensions/lib/wtft-json.ts";
@@ -99,8 +99,10 @@ check(Object.keys(byChild.get(MIXED) ?? {}).sort().join(",") === "child,untagged
 	`D6 each entry carries exactly child, untaggedInteractions, untaggedCostUsd (got ${Object.keys(byChild.get(MIXED) ?? {}).join(",")})`);
 
 const edgeSum = tree.edges.reduce((sum, e) => sum + (e.total?.costUsd ?? 0), 0);
-check(Math.abs(tree.total.costUsd - edgeSum) < 1e-9,
-	`D7 spawned.total is the sum of the edge totals — the untagged $0.25 is not added (total ${tree.total.costUsd}, edges ${edgeSum})`);
+check((edgeOf(MIXED)?.total?.costUsd ?? 1) < 0.25,
+	`D7 the mixed child's edge total leaves out its untagged $0.25 (got ${edgeOf(MIXED)?.total?.costUsd})`);
+check(Math.abs(tree.total.costUsd - edgeSum) < 1e-9 && tree.total.costUsd < 0.25,
+	`D7b spawned.total is the sum of the edge totals, and holds none of the $0.25 (total ${tree.total.costUsd}, edges ${edgeSum})`);
 
 const empty = computeSpawnTree(uuid(9), { ledgerPath, alreadyAttributed: new Set() });
 check(Array.isArray((empty as any).descendantUntagged) && (empty as any).descendantUntagged.length === 0,
@@ -139,8 +141,8 @@ check(doc.schema === WTFT_JSON_SCHEMA && WTFT_JSON_SCHEMA === "wtft/session@8",
 	`J1 the session schema is wtft/session@8 (got ${doc.schema})`);
 check(Array.isArray((doc.spawned as any).descendantUntagged) && (doc.spawned as any).descendantUntagged.length === 2,
 	"J2 spawned.descendantUntagged reaches the document");
-check(Math.abs(doc.tree.costUsd - treeTotals(emptyTotals(), tree).costUsd) < 1e-9,
-	"J3 tree excludes the untagged cost too");
+check(Math.abs(doc.tree.costUsd - edgeSum) < 1e-9 && doc.tree.costUsd < 0.25,
+	`J3 tree is the counted edges alone, none of the untagged $0.25 (tree ${doc.tree.costUsd}, edges ${edgeSum})`);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

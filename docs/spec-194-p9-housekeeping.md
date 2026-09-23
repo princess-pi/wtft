@@ -183,8 +183,10 @@ reported.
   `claudeSubAgentFolds[].file` either build names, at any depth, is copied into the
   snapshot at its own relative path. A child only one build finds is still in the
   snapshot, so the lost check can still fire. Three things stay out, each with a stderr
-  note: the children of a transcript whose discovery parse throws; a fold file outside
-  the Claude Code projects root; and a file whose copy fails.
+  note: children only a build whose discovery parse throws would have found; a fold file
+  outside the Claude Code projects root; and a file whose copy fails (a selected
+  transcript that fails to copy is still counted in the session header and contributes
+  nothing).
 - Both measured passes run with `WTFT_CLAUDE_PROJECTS_DIR` set to the snapshot's projects
   root, the #129 seam. A fake `HOME` does not work, because bun caches `os.homedir()` at
   process start.
@@ -194,8 +196,8 @@ reported.
   are frozen only when AFTER finds them too; a build older than the #129 seam reads the
   live projects root in its measured pass anyway. The freeze holds when both builds carry
   `claudeSubAgentFolds[].file`.
-- The snapshot directory is removed when the script exits normally; an interrupted run
-  leaves its `wtft-ab-*` directory behind. `--before` is resolved against the current
+- The snapshot directory is removed when the script exits, including on an error; a run
+  killed by a signal leaves its `wtft-ab-*` directory behind. `--before` is resolved against the current
   directory, so a relative checkout path works.
 - The selection roots honour `WTFT_CLAUDE_PROJECTS_DIR` and `WTFT_PI_SESSIONS_DIR`, so
   the script can run against a fixture.
@@ -237,12 +239,13 @@ producer-side gap is duppypro/princess-pi-tools#1021.
 | read-path per-call | the invariant, unqualified | an attributed turn is skipped and seeds nothing | ✅ A5–A7 | Fixed; the second-call double count is now stated and pinned |
 | spec-194 H2/H4, corpus README, spec-137 | "shape the reader distinguishes"; M7c "checks the harness"; "harness treats `subagents` oppositely"; "producer half is §4" | the reader has no shapes; M7c reads a snapshot; both skip it; §4 states both halves | ✅ M7b/M7c | Fixed |
 | spec-194 H5, EXT_WTFT | "every fold file is copied" | three exclusions; old BEFORE builds | reconciled-against-untested | Fixed: stated |
-| `before-after.ts` | a relative `--before` fails; the snapshot is never removed; a fold with no `file` crashes; a failed `mkdir` aborts the run | the import specifier; `mkdtemp`; `foldFilesOf`; `copyUnder` | ✅ E1–E6 for the first two | Fixed in code |
+| `before-after.ts` | a relative `--before` fails; the snapshot is never removed; a fold with no `file` crashes; a failed per-file `mkdir` aborts the run | the import specifier; `mkdtemp`; `foldFilesOf`; `copyUnder` | ✅ E5–E7 for the first three; the per-file `mkdir` untested | Fixed in code |
 | `tests/wtft-208` E | passes with discovery broken | never checked the child | — | Fixed: E4 |
 | spec-107, spec-52 | #107 C "is P9, not in this change"; command without `bun` | shipped; needs `bun` | — | Fixed |
 | `nspGuard` | no `remedy` key, unlike `shadow` | — | — | Left standing: `found` and `guard` carry both paths; a remedy string would be prose in a field |
 | `tests/wtft-208` fixture | Pi-format lines only | — | — | Left standing: the `claude -p` path does not depend on the transcript format |
 | M7c presence checks | exercise no production code | — | — | Left standing: they guard the committed data; the reader check exercises code |
-| second pass, round-1 lines | 32 findings: precedence left out of exit-5 sentences, `Also:` overclaimed for `build-failed`/`no-dir`, "names" where `--tokens` only counts, the corpus key-set count, `--help` coverage marked tested, and a `before-after.ts` crash on folds with no `file` | `finish()`, `renderRecordedSpawns`, `foldFilesOf` | ✅ E5–E7 for the code | Fixed |
+| second pass, round-1 lines | precedence left out of exit-5 sentences, `Also:` overclaimed for `build-failed`/`no-dir`, "names" where `--tokens` only counts, the corpus key-set count, `--help` coverage marked tested, and a `before-after.ts` crash on folds with no `file` | `finish()`, `renderRecordedSpawns`, `foldFilesOf` | ✅ E7 for the crash; the new stderr notes untested | Fixed |
+| third pass, round-2 lines | exit 5 dropped the "no wtft on PATH" note; the discovery-parse note did not say which build failed; "exits normally" narrower than the handler; the record's own coverage column | `finish()`, the discovery pass, `process.on("exit")` | reconciled-against-untested | Fixed. The pass's remaining findings are about wording added by the pass before it (glossary words used for the script's own "lost" label and the `fork` agent type, host measurements quoted with their date, the partly-driven layout clauses, and manifest text already filed in #233). Per the review-loop stop rule the reconcile stops here |
 | spec-26 "every number in that block" | could be read as covering UNRECORDED | "that block" is SPAWNED | — | Left standing: UNRECORDED is its own block, listed separately above it |
 | `nsp-guard-shadowed` | contains the avoided "nsp guard" | a status code | — | Left standing: a machine string keeps its spelling; the glossary says so |

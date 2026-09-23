@@ -283,7 +283,8 @@ finish() {
                     [ "${NSP_GUARD_STATE:-absent}" != shadowed ] || printf '   Also: PATH resolves claude to %s before claude-nsp-guard at %s\n' "$NSP_FOUND" "$NSP_GUARD" >&2 ;;
       nsp-guard-shadowed)
                     echo "⚠️  install-wtft: PATH resolves claude to $NSP_FOUND before claude-nsp-guard at $NSP_GUARD" >&2
-                    echo "   Put $(dirname "$NSP_GUARD")'s PATH entry before $(dirname "$NSP_FOUND")'s. Nothing is deleted." >&2 ;;
+                    echo "   Put $(dirname "$NSP_GUARD")'s PATH entry before $(dirname "$NSP_FOUND")'s. Nothing is deleted." >&2
+                    [ "${ON_PATH:-false}" = true ] || echo "   Also: no wtft on PATH resolves to $DEST_DIR/wtft — add $DEST_DIR to PATH." >&2 ;;
       ok)           if [ "$MODE" = check ]; then echo "✅ install-wtft: $DEST_DIR is in sync with $SRC_DIR"
                     else echo "✅ install-wtft: installed into $DEST_DIR"; fi
                     # Not an error, but say so — a green run must not hide an unusable PATH.

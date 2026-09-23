@@ -174,11 +174,11 @@ async function main(): Promise<void> {
 	// projects root still in effect, before anything is frozen.
 	const liveFiles = [...picked["claude-code"], ...picked.pi];
 	const foldFiles = new Set<string>();
-	for (const mod of [modBEFORE, modAFTER]) {
+	for (const [label, mod] of [["BEFORE", modBEFORE], ["AFTER", modAFTER]] as const) {
 		for (const f of liveFiles) {
 			try { for (const file of foldFilesOf(mod.parseSessionFile(f))) foldFiles.add(file); }
 			catch (err) {
-				console.error(`before-after: discovery parse failed, its children are not frozen: ${f} (${err instanceof Error ? err.message : String(err)})`);
+				console.error(`before-after: ${label}'s discovery parse failed, so the children only it would find are not frozen: ${f} (${err instanceof Error ? err.message : String(err)})`);
 			}
 		}
 	}

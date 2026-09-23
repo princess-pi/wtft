@@ -37,8 +37,8 @@ moving it. It also reports whether the `claude-nsp-guard` shim (princess-pi-tool
 deployed as `~/bin/claude`) wins the PATH race for `claude` — an absent guard is
 a normal host, not a failure, and a caller that runs a `claude` binary by
 absolute path bypasses the guard entirely. When drift, a config file left
-behind, or a wtft shadow wins the exit code, a shadowed guard is still named
-on an `Also:` line. `install-wtft --json` gives
+behind, or a wtft shadow wins the exit code, human mode still names a shadowed
+guard on an `Also:` line (`--json` carries it in `nspGuard`). `install-wtft --json` gives
 the whole report as one document on every exit path but one: a usage error (64)
 is reported on stderr and carries no document, because the arguments that would
 say what to report are the thing that is wrong. `install-wtft --help` lists the

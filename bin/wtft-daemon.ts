@@ -1751,7 +1751,25 @@ function tagIsCurrent(file: string): boolean {
   }
 }
 
-function reparseOne(file: string) {
+function sessionDaemonLive(file: string): boolean {
+  let holder = 0;
+  try { holder = Number(fs.readFileSync(getDaemonPidPath(file), "utf8").trim()); } catch { return false; }
+  return procIsDaemon(holder);
+}
+
+function waitUntilExited(pid: number) {
+  const until = Date.now() + 2000;
+  while (Date.now() < until) {
+    try { process.kill(pid, 0); } catch { return; }
+  }
+  try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+}
+
+function reparseOne(file: string): boolean {
+  if (sessionDaemonLive(file)) {
+    process.stderr.write(`wtft-daemon: --reparse refused while a daemon holds ${file}\n`);
+    return false;
+  }
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] reparse begin ${file}\n`);
   }
@@ -1779,11 +1797,12 @@ function reparseOne(file: string) {
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] reparse end ${file}\n`);
   }
+  return true;
 }
 
 function runReparse(one: string, from: string, to: string) {
   if (one) {
-    reparseOne(path.resolve(one));
+    if (!reparseOne(path.resolve(one))) process.exit(1);
     return;
   }
   const fromMs = Date.parse(`${from}T00:00:00Z`);
@@ -1914,6 +1933,7 @@ if (showList || showCleanup || showRestart || stopSession) {
 
   let found = 0;
   const seenPids = new Set<number>();
+  const restarted = new Set<number>();
   for (const pidFile of pidFiles) {
     const fullPath = path.join(pidDir, pidFile);
     let pid = 0;
@@ -1954,6 +1974,11 @@ if (showList || showCleanup || showRestart || stopSession) {
     }
 
     if (showRestart) {
+      if (restarted.has(pid)) {
+        try { fs.unlinkSync(fullPath); } catch { /* already gone */ }
+        continue;
+      }
+      restarted.add(pid);
       const restartEnv = { ...process.env };
       if (alive) {
         for (const key of ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR"]) {
@@ -1961,6 +1986,7 @@ if (showList || showCleanup || showRestart || stopSession) {
           if (value) restartEnv[key] = value;
         }
         process.kill(pid, "SIGTERM");
+        waitUntilExited(pid);
       }
       try { fs.unlinkSync(fullPath); } catch (_) {}
       if (sessionFound) {

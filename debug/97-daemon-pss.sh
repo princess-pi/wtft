@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# usage: measure.sh <daemon.mjs> <label> <append-seconds>
+# usage: debug/97-daemon-pss.sh <daemon.mjs> <label> <append-seconds> [node-flags]
 set -u
-DAEMON=$1; LABEL=$2; APPEND=$3
+DAEMON=$1; LABEL=$2; APPEND=$3; NODE_FLAGS=${4:-}
 ROOT=$(mktemp -d)
 export WTFT_CLAUDE_PROJECTS_DIR=$ROOT/projects XDG_STATE_HOME=$ROOT/state
+# Isolated so the daemon's home-relative reap.log (os.homedir()) and its
+# tmp-relative pid lease (os.tmpdir(), which it also scans to reap other
+# daemons' leases at startup) never touch the caller's real ones.
+export HOME=$ROOT/home TMPDIR=$ROOT/tmp
+mkdir -p "$HOME" "$TMPDIR"
 SID=f0970000-0000-4000-8000-000000000097
 PROJ=$ROOT/projects/-tmp-pss; mkdir -p $PROJ/$SID/subagents
 turn() { printf '{"type":"assistant","timestamp":"%s","cwd":"/tmp/pss","message":{"role":"assistant","id":"%s","model":"claude-opus-5","content":[{"type":"text","text":"t"}],"usage":{"input_tokens":10,"output_tokens":100,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}\n' "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" "$1"; }
@@ -24,15 +29,26 @@ for a in range(3):
             f.write(line+"\n"); size+=len(line)+1; i+=1
 PY
 du -sh $PROJ/$SID/subagents | cut -f1 | sed "s/^/[$LABEL] subagents total: /"
-node $DAEMON --session $PROJ/$SID.jsonl >/dev/null 2>&1 &
+node $NODE_FLAGS $DAEMON --session $PROJ/$SID.jsonl >/dev/null 2>&1 &
 PID=$!
+alive() { kill -0 "$PID" 2>/dev/null; }
 pss() { awk '/^Pss:/{s+=$2} END{printf "%.1f", s/1024}' /proc/$PID/smaps_rollup 2>/dev/null; }
-sleep 25; echo "[$LABEL] PSS after startup: $(pss) MB"
+# Never report a PSS number for a dead daemon — a 0.0/empty reading would
+# otherwise pass silently as a (falsely low) measurement.
+sample() {
+  if ! alive; then
+    echo "[$LABEL] ERROR: daemon (pid $PID) is not running — cannot sample PSS ($1)" >&2
+    rm -rf "$ROOT"
+    exit 1
+  fi
+  echo "[$LABEL] PSS $1: $(pss) MB"
+}
+sleep 25; sample "after startup"
 end=$((SECONDS+APPEND)); n=0
 while [ $SECONDS -lt $end ]; do
   for a in 0 1 2; do for k in 1 2 3 4 5; do echo "$USERLINE" >> $PROJ/$SID/subagents/agent-$a.jsonl; done; turn "a$a-live-$n" | sed 's/"cwd"/"isSidechain":true,"cwd"/' >> $PROJ/$SID/subagents/agent-$a.jsonl; done
   n=$((n+1)); sleep 5
 done
-echo "[$LABEL] PSS after ${APPEND}s of appends ($n rounds): $(pss) MB"
+sample "after ${APPEND}s of appends ($n rounds)"
 kill $PID 2>/dev/null; wait $PID 2>/dev/null
 rm -rf $ROOT

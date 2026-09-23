@@ -53,11 +53,13 @@ console.log("\nPART E — output does not depend on where chunks fall");
 		turn(3, "last line has no newline"),
 	];
 	fs.writeFileSync(file, lines.join("\n"));
-	const whole = JSON.stringify(parseSessionFile(file));
-	check(JSON.parse(whole).length === 4, `E1 fixture precondition: the whole-file parse finds the 4 turns (got ${JSON.parse(whole).length})`);
+	// The baseline: one chunk holding the whole fixture (well under 1 MiB), i.e. a single
+	// read of the entire file split on newlines — what the old whole-string read did.
+	const baseline = JSON.stringify(parseSessionFile(file));
+	check(JSON.parse(baseline).length === 4, `E1 fixture precondition: the single-chunk baseline finds the 4 turns (got ${JSON.parse(baseline).length})`);
 	for (const chunk of [1, 3, 7, 64, 1000]) {
 		const chunked = JSON.stringify(parseSessionFile(file, new Set(), chunk));
-		check(chunked === whole, `E2 chunk size ${chunk}: identical interactions to the whole-file parse`);
+		check(chunked === baseline, `E2 chunk size ${chunk}: identical interactions to the single-chunk baseline`);
 	}
 	const truncated = path.join(dir, "truncated.jsonl");
 	fs.writeFileSync(truncated, lines.slice(0, 4).join("\n") + "\n" + turn(9, "cut off").slice(0, 40));

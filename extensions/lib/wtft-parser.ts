@@ -358,9 +358,6 @@ export function splitOverheadCost(
 // Read a .jsonl session into Interaction[] (raw, undeduped).
 // ---
 
-/** `doNotFold` holds canonical transcript paths this parse must not fold in:
- *  the transcripts it is already inside, and any a different source is already
- *  counting. */
 /** Bytes read per chunk: a transcript is never held whole, so a re-parse
  *  peaks at one chunk and one line, not at the file several times over. */
 const PARSE_CHUNK_BYTES = 1024 * 1024;
@@ -387,6 +384,9 @@ function* fileLines(filePath: string, chunkBytes: number): Generator<string> {
 	}
 }
 
+/** `doNotFold` holds canonical transcript paths this parse must not fold in:
+ *  the transcripts it is already inside, and any a different source is already
+ *  counting. */
 export function parseSessionFile(
 	filePath: string,
 	doNotFold: ReadonlySet<string> = new Set(),

@@ -56,8 +56,9 @@ export interface WtftSubagentJson {
 	transcript: string;
 	meta: SubagentMeta | null;
 	/** What TOTAL holds for this subagent — already inside `total`, never to be
-	 *  added to it. Null, never zero, when no model-tagged line is its yet. */
-	total: TokenTotals | null;
+	 *  added to it. Null, never zero, when no model-tagged line is its yet;
+	 *  absent when the tag is an older tagger's and carries no source keys. */
+	total?: TokenTotals | null;
 }
 
 export interface BuildSessionJsonInput {

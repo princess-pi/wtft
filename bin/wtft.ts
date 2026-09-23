@@ -23,6 +23,7 @@ import {
 	renderOtherHistogram,
 	getSemanticCommandGroup,
 	renderTokenSummary,
+	renderSubagentBlock,
 	deduplicateInteractions,
 	scanUncountedBillables,
 	scanUncountedBillablesChecked,
@@ -725,9 +726,13 @@ async function main() {
 	const finishEmptyReport = (opt: { pending?: boolean } = {}) => {
 		if (!opt.pending) scanSessionUncounted();
 		// Before the warning and the exit code: the tree can set `provisional`.
+		const emptyArmSubagents = opts.tokens && !opt.pending ? collectSubagentJson() : undefined;
+		for (const n of emptyArmSubagents?.notices ?? []) console.error(`\x1b[33m⚠ ${n.text}\x1b[0m`);
+		const emptyArmBlock = emptyArmSubagents ? renderSubagentBlock(emptyArmSubagents.block) : "";
 		const emptyArmTree = opts.tokens ? renderSpawnTree(emptyTotals(), sessionSpawnTree({ pending: opt.pending })) : "";
 		warnProvisionalOnce();
-		// SPAWNED block under `--tokens` even when own total is empty (matches populated path).
+		// SUBAGENTS and SPAWNED under `--tokens` even when own total is empty (matches populated path).
+		if (emptyArmBlock) process.stdout.write(emptyArmBlock);
 		if (emptyArmTree) process.stdout.write(emptyArmTree);
 		// exitCode, never process.exit — stdout is async on a pipe.
 		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
@@ -747,10 +752,15 @@ async function main() {
 		});
 		// One computation for both surfaces, so the rendered row and the JSON
 		// field cannot disagree.
+		// An older tagger's lines carry no source key, so no line can be attributed:
+		// the totals are unknown, not null.
+		if (tagPath !== getCurrentVersionTagPath(finalSessionPath)) {
+			return discovered.unreadable ? { rows: undefined, notices, block: [] } : { rows: listed, notices, block: [] };
+		}
 		// Built-in means Claude Code's `<session>/subagents/` layout; a Pi sibling is not one.
-		const builtinDir = path.join(path.dirname(finalSessionPath), path.basename(finalSessionPath, ".jsonl"), "subagents") + path.sep;
+		const builtinDir = path.join(path.resolve(path.dirname(finalSessionPath)), path.basename(finalSessionPath, ".jsonl"), "subagents") + path.sep;
 		const all = subagentRows(interactions, listed, path.dirname(finalSessionPath));
-		const block = all.filter(r => r.transcript.startsWith(builtinDir));
+		const block = all.filter(r => path.resolve(r.transcript).startsWith(builtinDir));
 		const totalOf = new Map(all.map(r => [r.transcript, r.total]));
 		const rows = listed.map(r => ({ ...r, total: totalOf.get(r.transcript) ?? null }));
 		// A partial list is never shown as whole, on either surface.

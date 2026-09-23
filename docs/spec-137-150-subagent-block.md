@@ -36,6 +36,10 @@ SUBAGENTS  3 built-in subagent(s) — INSIDE TOTAL above, not added to it
   file's lines whose source key `s` is that subagent's, after the same generation filter and id
   dedup TOTAL uses, over model-tagged turns only. A subagent with no tagged lines yet shows
   `(not yet tagged)`, never `$0.00`.
+- **A row shows description and model only.** `agentType`, `spawnDepth` and `toolUseId` stay in
+  `--json` `subagents[].meta`; the block is for reading cost at a glance.
+- **A stale-version tag prints no block**, and `subagents[].total` is absent: an older tagger's
+  lines carry no source key, so no line can be attributed to a subagent.
 - **The widget is unchanged.** It is a Pi surface, and Pi subagent tracking is deferred (#209).
 
 **`--json`: `subagents[].total`**, the same number: a `TokenTotals` or `null` when no line is

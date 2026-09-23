@@ -14,6 +14,7 @@ import { skip } from "./lib/skips.ts";
 import { parseSessionFile } from "../extensions/lib/wtft-parser.ts";
 import { computeSessionSummary } from "../extensions/lib/wtft-renderer.ts";
 import { classifiedToInteraction, transcriptSourceId } from "../extensions/lib/wtft-daemon-lib.ts";
+import { WTFT_TAGGER_VERSION } from "../extensions/lib/wtft-tagger-version.ts";
 import { subagentRows, SUBAGENT_ROW_LIMIT } from "../extensions/lib/wtft-subagent-block.ts";
 import { renderTokenSummary } from "../extensions/lib/wtft-renderer.ts";
 
@@ -175,6 +176,44 @@ console.log("\nPART E — wtft --tokens and --json on a session with a built-in 
 	check(partialDoc !== null && !("subagents" in partialDoc) && !/SUBAGENTS/.test(partial.stdout ?? ""),
 		`E6 when discovery cannot complete, --json omits subagents and --tokens prints no block (json keys: ${partialDoc && Object.keys(partialDoc).join(",")})`);
 	}
+}
+
+// ---
+// PART F — hand-written tags: a stale-version tag, and a tag with no lines yet
+// ---
+console.log("\nPART F — an older tagger's tag, and the empty report");
+{
+	/** A session with one built-in subagent and a hand-written tag named `tagVersion`. Fresh per
+	 *  case: a daemon the CLI starts writes a current-version tag into the fixture. */
+	const fixture = (slug: string, tagVersion: string, withLine: boolean) => {
+		const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), `wtft-137-${slug}-`)));
+		const session = path.join(dir, "session.jsonl");
+		const T0 = Date.now() - 120_000;
+		fs.writeFileSync(session, JSON.stringify({ type: "user", timestamp: new Date(T0).toISOString(), cwd: dir, message: { role: "user", content: "hi" } }) + "\n");
+		const agentF = path.join(dir, "session", "subagents", "agent-f0001.jsonl");
+		fs.mkdirSync(path.dirname(agentF), { recursive: true });
+		fs.writeFileSync(agentF, "");
+		fs.writeFileSync(agentF.replace(/\.jsonl$/, ".meta.json"), JSON.stringify({ agentType: "general-purpose", spawnDepth: 1, description: "Hand-tagged helper" }));
+		fs.mkdirSync(path.join(dir, "wtft-tags"));
+		const metaLine = JSON.stringify({ _meta: { offset: fs.statSync(session).size, swept: T0 } }) + "\n";
+		const subLine = JSON.stringify({ t: T0, c: 0.25, cat: "code", f: [], cmd: [], id: "f-1", in: 10, out: 100, m: "claude-opus-5", s: transcriptSourceId(agentF, dir) }) + "\n";
+		fs.writeFileSync(path.join(dir, "wtft-tags", `session.jsonl.wtft-tag.v${tagVersion}.jsonl`), (withLine ? subLine : "") + metaLine);
+		return (args: string[]) => spawnSync(process.execPath, [path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs"), "-s", session, ...args],
+			{ encoding: "utf8", timeout: 60_000, env: { ...process.env, WTFT_DAEMON_DEBUG: "" } });
+	};
+
+	const stale = fixture("stale", "0.0.1-ancient", true);
+	let staleDoc: any = null;
+	try { staleDoc = JSON.parse(stale(["--json"]).stdout); } catch {}
+	const staleRow = staleDoc?.subagents?.[0];
+	check(staleDoc?.provisional?.reason === "stale-version", `F1 fixture precondition: the tag reads as stale-version (got ${JSON.stringify(staleDoc?.provisional)})`);
+	check(!!staleRow && !("total" in staleRow), `F2 on a stale-version tag the row is listed and total is absent, not null (got ${JSON.stringify(staleRow)})`);
+	const staleTokens = fixture("stale-t", "0.0.1-ancient", true);
+	check(!/SUBAGENTS/.test(plain(staleTokens(["--tokens"]).stdout ?? "")), "F3 and --tokens prints no block");
+
+	const empty = plain(fixture("empty", WTFT_TAGGER_VERSION, false)(["--tokens"]).stdout ?? "");
+	check(/SUBAGENTS\s+1 built-in subagent/.test(empty) && /Hand-tagged helper\s+\S+\s+\(not yet tagged\)/.test(empty),
+		`F4 a tag with no lines yet still prints the block, every row not yet tagged\n${empty.split("\n").filter(l => /SUBAGENTS|Hand/.test(l)).join("\n")}`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

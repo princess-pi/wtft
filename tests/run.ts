@@ -26,7 +26,7 @@ const SUITE_TIMEOUT_MS = 180_000;
  *  count: most suites spend their time waiting on a daemon, not computing. */
 const JOBS = (() => {
 	const raw = process.env.WTFT_TEST_JOBS;
-	if (raw === undefined || raw === "") return os.cpus().length * 2;
+	if (raw === undefined || raw === "") return Math.max(1, os.availableParallelism() * 2);
 	const n = Number(raw);
 	if (!Number.isInteger(n) || n < 1) {
 		console.error(`WTFT_TEST_JOBS must be a positive integer, got ${JSON.stringify(raw)}`);
@@ -93,6 +93,8 @@ interface Result {
 	output: string;
 	/** Checks the suite declared it did NOT run — see tests/lib/skips.ts. */
 	skips: string[];
+	/** Fixture daemons still running when the suite ended, stopped by the runner. */
+	leaked: number;
 }
 
 const nameWidth = Math.max(...suites.map(s => s.replace(/\.test\.ts$/, "").length));
@@ -120,7 +122,7 @@ function runSuite(file: string): Promise<Result> {
 		suiteTmp = fs.mkdtempSync(path.join(os.tmpdir(), `wtft-suite-${name}-`));
 	} catch (err) {
 		const output = `runner: could not create the suite's directories: ${(err as Error).message}\n`;
-		return Promise.resolve({ name, ok: false, ms: 0, timedOut: false, output, skips: [] });
+		return Promise.resolve({ name, ok: false, ms: 0, timedOut: false, output, skips: [], leaked: 0 });
 	}
 	// Its own state root too: the spawn ledger and daemon state live there.
 	const stateHome = path.join(suiteTmp, "state");
@@ -157,11 +159,11 @@ function runSuite(file: string): Promise<Result> {
 			child.stdout.destroy();
 			child.stderr.destroy();
 			const ms = Date.now() - started;
-			reapFixtureDaemons(suiteTmp);
+			const leaked = reapFixtureDaemons(suiteTmp);
 			for (const dir of [configHome, suiteTmp]) {
 				try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
 			}
-			resolve({ name, ok: ok && !timedOut, ms, timedOut, output, skips: collectSkips(output) });
+			resolve({ name, ok: ok && !timedOut, ms, timedOut, output, skips: collectSkips(output), leaked });
 		};
 		child.on("error", err => { output += `\nrunner: could not start the suite: ${err.message}\n`; finish(false); });
 		child.on("close", code => finish(code === 0));
@@ -174,7 +176,8 @@ function report(r: Result): void {
 	const badge = r.ok ? `${GREEN}PASS${RESET}` : `${RED}FAIL${RESET}`;
 	const note = r.timedOut ? ` ${RED}(timed out after ${SUITE_TIMEOUT_MS / 1000}s)${RESET}` : "";
 	const skipNote = r.skips.length > 0 ? ` ${DIM}(${r.skips.length} skipped)${RESET}` : "";
-	console.log(`  ${badge}  ${r.name.padEnd(nameWidth)}  ${DIM}${(r.ms / 1000).toFixed(1)}s${RESET}${note}${skipNote}`);
+	const leakNote = r.leaked > 0 ? ` ${DIM}(stopped ${r.leaked} daemon(s) it left running)${RESET}` : "";
+	console.log(`  ${badge}  ${r.name.padEnd(nameWidth)}  ${DIM}${(r.ms / 1000).toFixed(1)}s${RESET}${note}${skipNote}${leakNote}`);
 }
 
 const queue = [...pooled];
@@ -184,7 +187,8 @@ await Promise.all(Array.from({ length: Math.min(JOBS, queue.length) }, async () 
 for (const file of solo) report(await runSuite(file));
 // Nothing is running now, so the host-wide reaper is safe: it catches a daemon
 // a suite started outside its own TMPDIR.
-reapFixtureDaemons();
+const stray = reapFixtureDaemons();
+if (stray > 0) console.log(`${DIM}stopped ${stray} fixture daemon(s) left outside any suite's tmp dir${RESET}`);
 
 try {
 	const times = { ...lastTimes };

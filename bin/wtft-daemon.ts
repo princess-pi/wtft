@@ -534,7 +534,15 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
     const newOwners: FoldOwner[] = [];
     for (const interaction of deduped) {
       if (hasClaudeCommand(interaction)) {
-        newOwners.push({ base: structuredClone(interaction), lastLine: "", lastCost: 0 });
+        const prior = interaction.messageId
+          ? fileState.owners.find(owner => owner.base.messageId === interaction.messageId)
+          : undefined;
+        if (prior) {
+          prior.base = structuredClone(interaction);
+          prior.lastLine = "";
+        } else {
+          newOwners.push({ base: structuredClone(interaction), lastLine: "", lastCost: 0 });
+        }
       } else {
         plain.push(interaction);
       }

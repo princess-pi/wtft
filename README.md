@@ -112,7 +112,10 @@ package by name, running `--version`, `--help`, `--why` and
 `wtft-daemon --help` — `--why` because that is the command the #29
 dynamic-import defect broke while the build stayed green.
 
-`npm test` runs every `tests/*.test.ts`, serially, each in its own process. It
+`npm test` runs every `tests/*.test.ts`, each in its own process, twice as many
+at a time as the host has CPUs (`WTFT_TEST_JOBS=1` runs them one by one). Each
+suite gets its own tmp directory, and the few that reach outside it run alone at
+the end. It
 does **not** run `tests/wtft-daemon.test.sh` — shell suites are excluded from the
 driver; CI runs it as its own gating step, and locally it is
 `bash tests/wtft-daemon.test.sh`.

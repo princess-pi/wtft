@@ -379,12 +379,13 @@ with the subagent-accounting work (#15).
 **The one window this does not close.** `deduplicateInteractions` clears the flag when any copy
 of a message id carries `isSidechain`, but only across the copies in one array. The daemon's
 PARENT path dedups a single poll batch, so two emissions of one id that straddle a 667 ms poll
-boundary never meet — the defect class `bin/wtft-daemon.ts` already names, whose whole-file
-re-parse fix was applied to subagent transcripts only. In that window a sidechain turn could still
+boundary never meet. In that window a sidechain turn could still
 write one tag line carrying `miss: 1`, and no tag reader can undo it, because `isSidechain` is
-deliberately not in the wire format. Closing it means the parent path re-parsing whole files too,
-which is #97's question. Stated here rather than left implied by a test that only exercises the
-single-array case.
+deliberately not in the wire format. The subagent path does not close this either: it reads
+new bytes from an offset, and a later emission is a second tag line. Cost collapse on read
+does not help, because the flag is not on the wire. #97 made that path offset-based. It did
+not switch the parent to a whole-file re-parse. Stated here rather than left implied by a test
+that only exercises the single-array case.
 
 **The number that differs from the issue, reconciled.** #115 asks for "zero Cache Miss dividers"
 from a session that spawns N subagents and never idles. It renders **one**: the session's own

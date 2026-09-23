@@ -10,6 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { collectSkips, renderSkipSummary } from "./lib/skips.ts";
+import { reapFixtureDaemons } from "./lib/reap-fixture-daemons.ts";
 
 // ---
 // Layout
@@ -90,6 +91,7 @@ for (const file of suites) {
 	const ms = Date.now() - started;
 
 	try { fs.rmSync(configHome, { recursive: true, force: true }); } catch {}
+	reapFixtureDaemons();
 
 	const timedOut = proc.signal === "SIGTERM" && ms >= SUITE_TIMEOUT_MS;
 	const ok = !timedOut && proc.status === 0;

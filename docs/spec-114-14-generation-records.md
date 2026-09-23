@@ -7,21 +7,23 @@
 
 ## The contract
 
-A tag file is append-only. The daemon re-parses a child transcript whole whenever it changes and
-appends only the lines it has not written before. Two things break that:
+A tag file is append-only. The daemon reads a child transcript from a stored byte offset and
+appends the lines in the new bytes. A rotation resets that offset and appends the replacement
+behind a new generation. Two things break a reader that counts every appended line:
 
 - **#114, rotation.** When a child transcript shrinks or is replaced, the daemon forgets what it
   wrote and appends the new content. The old lines stay. The new run's message ids differ, so
   id dedup cannot merge them: N old interactions plus M new ones are billed N + M.
 - **#14, nested `claude -p`.** A child's turn that runs `claude -p` has the spawned subagent
-  session's cost folded onto it at parse time. The child is re-parsed only when the child's own
-  transcript changes. A subagent session that keeps writing after the child's last write (a
-  backgrounded command, or a child that finished first) stays at the cost it had at that parse.
-  One whose transcript did not exist yet at that parse is not folded at all.
+  session's cost folded onto it at attribution time. Before this contract, that fold was taken
+  only when the child's own transcript changed. A subagent session that kept writing after the
+  child's last write (a backgrounded command, or a child that finished first) stayed at the cost
+  it had then. One whose transcript did not exist yet was not folded at all.
 
 So: **each child transcript's lines belong to a generation, and the reader counts only the
-latest one. A child is re-parsed whenever a transcript folded into it changes, and while a
-spawning turn can still gain a subagent session.**
+latest one. A child is re-attributed whenever a transcript folded into it changes, and while a
+spawning turn can still gain a subagent session.** The child's own bytes are read again only
+when the file grew or rotated.
 
 ## Shape
 
@@ -52,23 +54,26 @@ spawning turn can still gain a subagent session.**
 
 ### Writing
 
-- **When the daemon writes a generation record:** on the first successful parse of a child
-  transcript in a daemon life, and on the first successful parse after the transcript rotated.
-  The record goes first in the append, followed by every line of the current parse and every
-  fold record it implies. A generation with no lines still writes its record, so a transcript
-  rotated to empty drops its old lines.
-- **Rotation is read from the parse, not from the stat.** A parse rotated when it no longer
-  produces a line this generation wrote AND the reader's id dedup cannot cover the loss: the
-  written line carried no message id, or it carried one this parse no longer produces at all. A
-  written line whose id is still produced is superseded by dedup, which is the ordinary case of a
-  turn re-emitted with growing usage. Reading it from the parse covers a replacement of any
-  shape, including one rewritten in place to the same byte length under the same inode, which
-  neither a size nor an inode test sees.
+- **When the daemon writes a generation record:** on the first successful read of a child
+  transcript in a daemon life, and on the first successful read after the transcript rotated.
+  The record goes first in the append, followed by every line of that read and every
+  fold record it implies. A generation with no lines still writes its record: a transcript
+  rotated to empty, and a first read that consumed a nonempty file and produced no interaction
+  lines. Either one drops the old lines for that source. A held fragment, or the one plain
+  turn held back on a growth read, waits for a later poll.
+- **Rotation is an inode change, a shrink, a same-size content-hash mismatch, a prefix-hash
+  mismatch when the file grew, an attributed cost that dropped, or a lower cost on a plain
+  message id already tagged.** A same-length rewrite on the same inode matches neither size nor inode.
+  While `readAtMs` is inside `MTIME_SETTLE_MS` and the size is unchanged, and again when `mtimeMs`
+  moves and `size` does not, the whole file is hashed against the bytes already consumed. Growth
+  hashes that same prefix. A mismatch resets the offset and opens a generation. A turn re-emitted with growing usage is an ordinary append:
+  the new line sits beside the old one, and id dedup keeps the higher cost. A larger
+  replacement on a new inode is the rename case. A smaller replacement is the shrink.
 - **Per-source fold records.** Fold records are deduplicated per source per generation, not per
   daemon life. Two children that both fold one session each record it, so one child's new
   generation cannot drop the only record of a session the other child still holds.
-- **Cost.** A daemon restart already re-appended every child line, because the set of written
-  lines lives only in memory. It now also writes one generation record per child. That record
+- **Cost.** A daemon restart already re-appended every child line, because the read offset
+  lives only in memory. It now also writes one generation record per child. That record
   is what makes the restart correct: a restart that re-appended an id-less line used to bill it
   twice.
 
@@ -80,15 +85,17 @@ spawning turn can still gain a subagent session.**
   - **Residual:** a folded transcript rewritten to the same byte length inside one mtime tick
     has the same stamp, so that rewrite is not seen. The child's own transcript is covered
     against the same case by the settle rule; a folded one is not.
-- **The daemon re-parses a child when any folded file changed.** Each poll stats the files the
-  child's last parse folded. A changed stamp, or a file that no longer stats, counts as a change
-  to the child, under the same settle rule as the child's own transcript. Re-parsing puts the
+- **The daemon re-attributes a child when any folded file changed.** Each poll stats the files the
+  child's last attribution folded. A changed stamp, or a file that no longer stats, counts as a change.
+  `attributeClaudeSubAgentCosts` runs again on every retained fold-capable turn. That puts the
   grown cost on the spawning turn's line; the tag's id dedup keeps the highest-cost copy (§4 of
-  `docs/wtft-tag-format.md`), so the grown line supersedes the old one.
-- **The daemon re-parses a child while a spawning turn is still open.** Discovery matches a
+  `docs/wtft-tag-format.md`), so the grown line supersedes the old one. The child's own bytes
+  are not read again unless the child grew or rotated. An attributed cost that dropped rotates
+  the child, so the old higher line falls into a superseded generation instead of winning the max.
+- **The daemon re-attributes a child while a spawning turn is still open.** Discovery matches a
   subagent session whose first timestamp is within `CLAUDE_SUBAGENT_WINDOW_MS` of the spawning
-  turn, so until that window plus `MTIME_SETTLE_MS` has passed, a later parse can find one this
-  parse did not. Each such child is re-parsed every poll until then. Since #107 A a bare `claude -p` opens a window
+  turn, so until that window plus `MTIME_SETTLE_MS` has passed, a later attribution can find one this
+  pass did not. Each such child is re-attributed every poll until then. Since #107 A a bare `claude -p` opens a window
   too, against the session's own cwd. What opens none is a turn whose spawns name no directory the
   fallback stands in for: an unknowable `cd` target, a bare `cd`, a launcher, or a session whose
   own cwd is unreadable.

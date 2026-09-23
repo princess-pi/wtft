@@ -9,12 +9,20 @@ Where The F\*\*\*ing Tokens?! — the cost-auditing widget and CLI for coding-ag
 ## Language — WTFT
 
 **Daemon**:
-The persistent background process (`bin/wtft-daemon.ts` / `wtft-daemon.mjs`, driven by
-`extensions/lib/wtft-daemon-lib.ts`) that watches a session's `.jsonl` file, classifies each
-interaction, and writes pre-computed entries to a tag file so the CLI and Pi widget don't
-re-parse the whole log on every read. Spawned on `session_start`, auto-revived on idle-timeout
-death, auto-replaced on a version bump. Health is exposed via `checkDaemonHealth()` and rendered
-via `renderDaemonStatus()`.
+The log parser daemon (`bin/wtft-daemon.ts` / `wtft-daemon.mjs`, launched by
+`extensions/lib/wtft-daemon-lib.ts`) that classifies each interaction and writes
+pre-computed entries to a tag file so the CLI and Pi widget don't re-parse the whole
+log on every read. A session under the Claude projects root (`WTFT_CLAUDE_PROJECTS_DIR`,
+default `~/.claude/projects`) or the Pi sessions root (`WTFT_PI_SESSIONS_DIR`, default
+`~/.pi/agent/sessions`) is served by that root's one process. A session outside those
+roots keeps its own process, polling every 667ms. The tag file and the pid lease stay
+per session. After 24h with no new lines, that session is dropped: the per-session
+process exits, and the harness process stays up and adopts the session again on a later
+write. Spawned on Pi `session_start` and on a CLI report. A per-session process is
+revived after an idle exit and replaced on a version bump. On Linux, a live harness
+process is left running; a later start points the session's lease at it, because
+that check reads `/proc/<pid>/cmdline`. Health is exposed via `checkDaemonHealth()` and
+rendered via `renderDaemonStatus()`.
 
 *Two registers, one concept.* Say **"log parser daemon"** in high-level user-facing prose — doc
 headings, the first mention in any `--help` or manifest description, anywhere a reader is meeting

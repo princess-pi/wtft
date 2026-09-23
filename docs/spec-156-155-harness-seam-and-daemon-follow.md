@@ -236,6 +236,9 @@ At both `shutdown("session removed")` branches, first re-resolve the session by 
 project dirs via the harness registry. Only shut down when it is genuinely gone. On a hit:
 re-point `sessionPath`, log the move under `WTFT_DAEMON_DEBUG`, continue.
 
+In harness mode (`serviceSession`), a session that is genuinely gone drops that session's
+slot and leaves the process up. A `--session` process still calls `shutdown("session removed")`.
+
 Incremental parsing survives untouched: `parseNewLines` keys off `lastSize`, and a move
 preserves both inode and size — the next poll reads from exactly where it left off.
 

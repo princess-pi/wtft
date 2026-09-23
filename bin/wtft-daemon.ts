@@ -487,7 +487,10 @@ function syncSubagentTranscript(file: string): boolean {
 
     const deduped = parsed ? clearSubagentCacheMiss(deduplicateInteractions(parsed.interactions)) : [];
     const plain: typeof deduped = [];
-    if (parsed?.stampInterrupt && fileState.pendingTurn) fileState.pendingTurn.interrupted = true;
+    if (parsed?.stampInterrupt && fileState.pendingTurn) {
+      fileState.pendingTurn.interrupted = true;
+      parsed = { ...parsed, stampInterrupt: false };
+    }
     if (fileState.pendingTurn) {
       plain.push(fileState.pendingTurn);
       fileState.pendingTurn = null;

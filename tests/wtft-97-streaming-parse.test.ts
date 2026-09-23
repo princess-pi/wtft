@@ -107,7 +107,7 @@ console.log("\nPART M — a ~40 MB transcript parses without holding it several 
 	const out = JSON.parse((r.stdout || "{}").trim().split("\n").pop() || "{}");
 	const grewMb = (out.afterKb - out.beforeKb) / 1024;
 	check(out.n > 0, `M1 fixture precondition: the parse found turns (got ${out.n}; stderr ${(r.stderr || "").slice(0, 200)})`);
-	check(grewMb < 20, `M2 peak RSS grows by under half the file's size, not 4–5× it (grew ${grewMb.toFixed(1)} MB for a 40 MB file)`);
+	check(grewMb < 20, `M2 peak RSS grows by under half the file's size (the old whole-string read grew about 49 MB; this grew ${grewMb.toFixed(1)} MB for a 40 MB file)`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

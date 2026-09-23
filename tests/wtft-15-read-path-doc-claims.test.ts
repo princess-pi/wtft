@@ -157,6 +157,8 @@ console.log("\nL — on-disk layout");
 	fs.mkdirSync(path.join(subagents, "workflows", "wf_1"), { recursive: true });
 	fs.writeFileSync(session, turnLine("s-1", T0, 10));
 	fs.mkdirSync(path.join(subagents, "wtft-tags"), { recursive: true });
+	// A session-id-shaped name too, so only the skip keeps it out of the index.
+	fs.writeFileSync(path.join(subagents, "eeeeeeee-0000-4000-8000-000000000015.jsonl"), turnLine("x-uuid", T0, 5));
 	for (const f of ["agent-aaaa.jsonl", "agent-aaaa.meta.json", "notes.jsonl", path.join("workflows", "wf_1", "agent-bbbb.jsonl"), path.join("wtft-tags", "agent-cccc.jsonl")]) {
 		fs.writeFileSync(path.join(subagents, f), turnLine(`x-${path.basename(f)}`, T0, 5));
 	}

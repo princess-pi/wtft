@@ -40,8 +40,7 @@ four siblings:
 - `untaggedCostUsd` is often `0`: the untagged turns on this host's corpus are mostly
   `<synthetic>` ones carrying no usage. An `(unknown)` or model-less turn can carry a
   harness-native cost, and server-tool cost is included too. The condition still holds
-  when it is `0`, because the turns exist and none of their
-  tokens is in the tree. A consumer that wants to know whether *money* is missing reads
+  when it is `0`, because the turns exist and none of their own usage is in the tree. A consumer that wants to know whether *money* is missing reads
   the cost.
 - `--tokens`, and the Pi widget, which renders the same block, print one line under the
   SPAWNED rows when the list is non-empty:
@@ -75,8 +74,10 @@ them records where they came from, when, and how to refresh them.
 - **`M7c`** runs everywhere. For every corpus file, the two required names are present,
   the near-universal pair is present unless `agentType` is `workflow-subagent`, and
   `readSubagentMeta` accepts the file with every optional field it carries (`description`,
-  `toolUseId`, `model`, `parentAgentId`, `isFork`) intact. The presence checks guard the
-  committed data;
+  `toolUseId`, `model`, `parentAgentId`, `isFork`) intact. It also checks that the corpus is
+  exactly the seven documented files, and that every key in it is one the reader carries or
+  one the test lists as knowingly ignored, so a renamed key brought in by a refresh fails
+  instead of going unread. The presence checks guard the committed data;
   the reader check is the one that exercises code. M7c sees the harness as it was when
   the corpus was captured, not as it is today.
 - **`M7b`** stays host-gated and gains one assertion: every key the newest real file
@@ -253,3 +254,4 @@ producer-side gap is duppypro/princess-pi-tools#1021.
 | spec-26 "every number in that block" | could be read as covering UNRECORDED | "that block" is SPAWNED | — | Left standing: UNRECORDED is its own block, listed separately above it |
 | `nsp-guard-shadowed` | contains the avoided "nsp guard" | a status code | — | Left standing: a machine string keeps its spelling; the glossary says so |
 | `pr-review` round 1 | 13 findings (2 Medium): `head \| grep -q` under `pipefail` read a large guard as absent (reproduced: exit 141); M7c blind to a rename of an optional field; the untagged line saying "not in SPAWNED" despite the overlap; an unquoted `find` root; `--help` splitting the sentinel; stale pointers in comments | `is_nsp_guard`, M7c, `renderRecordedSpawns`, `pickTranscripts` | ✅ V10g, M7c optional fields, R1 | Fixed; the line now reads "left out of their edge totals". Declined: the claim that `parseSubagentMeta` may not exist — it is the private parser `readSubagentMetaChecked` calls |
+| `pr-review` round 2 | 9 findings (1 Medium): M7c still blind to a key renamed by a refresh; the corpus floor of 5; an unset `PATH` aborting with no JSON document; fold paths compared against a non-canonical root; L5's Claude Code arm unable to fail; the untagged docstring and H1 bullet contradicting the overlap; two comment wordings | M7c, `NSP_PATH_DIRS`, `ccRoot`, the L5 fixture | ✅ M7c key check, L5 with a session-id-shaped file; the unset-`PATH` case untested | Fixed |

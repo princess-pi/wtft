@@ -158,8 +158,10 @@ async function main(): Promise<void> {
 	}
 
 	const home = process.env.HOME!;
-	const ccRoot = process.env.WTFT_CLAUDE_PROJECTS_DIR || path.join(home, ".claude", "projects");
-	const piRoot = process.env.WTFT_PI_SESSIONS_DIR || path.join(home, ".pi", "agent", "sessions");
+	// Canonical, because the parser names fold files by their real path.
+	const real = (p: string) => { try { return fs.realpathSync(p); } catch { return p; } };
+	const ccRoot = real(process.env.WTFT_CLAUDE_PROJECTS_DIR || path.join(home, ".claude", "projects"));
+	const piRoot = real(process.env.WTFT_PI_SESSIONS_DIR || path.join(home, ".pi", "agent", "sessions"));
 
 	const picked: Record<string, string[]> = {
 		"claude-code": pickTranscripts(ccRoot, N),

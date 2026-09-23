@@ -393,7 +393,7 @@ fi
 # ---
 
 # princess-pi-tools' bin/install-workflow-tools matches this exact line before
-# it overwrites ~/bin/claude with the guard (duppypro/princess-pi-tools#1021).
+# it overwrites ~/bin/claude with the guard.
 NSP_GUARD_SENTINEL='# nsp-guard-identity: 9a1c-claude-nsp-guard-sentinel'
 
 # The sentinel must be a whole line, not a substring — a script that merely
@@ -407,8 +407,9 @@ is_nsp_guard() {
 
 NSP_FOUND=""
 NSP_GUARD=""
-IFS=: read -r -a NSP_PATH_DIRS <<< "$PATH"
-for d in "${NSP_PATH_DIRS[@]}"; do
+NSP_PATH_DIRS=()
+[ -z "${PATH:-}" ] || IFS=: read -r -a NSP_PATH_DIRS <<< "$PATH"
+for d in ${NSP_PATH_DIRS[@]+"${NSP_PATH_DIRS[@]}"}; do
   [ -n "$d" ] || continue
   f="$d/claude"
   [ -f "$f" ] && [ -x "$f" ] || continue

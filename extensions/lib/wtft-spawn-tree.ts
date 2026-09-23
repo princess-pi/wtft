@@ -74,8 +74,8 @@ export interface SpawnTreeGap {
 
 /** A counted descendant whose own parse holds untagged turns (no model id).
  *  Their cost is outside that edge's total, as a session's own untagged cost is
- *  outside `total.costUsd`. Often $0 — the turns still exist, and none of their
- *  tokens is in the tree. */
+ *  outside `total.costUsd`. A `claude -p` child such a turn folded is not marked
+ *  folded, so its share can also be counted under that child's own edge. */
 export interface SpawnTreeUntagged {
 	child: string;
 	untaggedInteractions: number;

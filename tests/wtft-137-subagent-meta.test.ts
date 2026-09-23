@@ -333,7 +333,23 @@ function corpusFiles(): string[] {
 	// M7c — THE HARNESS's names, against the committed corpus of real files.
 	// Runs on every host, CI included, which M7b cannot.
 	const corpus = corpusFiles();
-	assert(`M7c the committed corpus is present (${corpus.length} files)`, corpus.length >= 5, CORPUS_DIR);
+	const CORPUS = ["agent-a12b520b52dfc5d2a", "agent-a170388e12a7fa3bc", "agent-a20ea0d14166e9999", "agent-a9b6ca6692517846a",
+		"agent-ab7a653fd7de39292", "agent-ace7ef5933e128a87", "agent-aed7cbd64d6f241d1"].map(b => `${b}.meta.json`);
+	assert(`M7c the committed corpus is the documented seven files`,
+		JSON.stringify(corpus.map(f => path.basename(f))) === JSON.stringify(CORPUS),
+		JSON.stringify(corpus.map(f => path.basename(f))));
+	// Every key in the corpus is one the reader carries or one it knowingly
+	// ignores, so a rename brought in by a refresh fails here rather than
+	// leaving a field silently unread.
+	const CARRIED = [...REQUIRED, "description", "toolUseId", "model", "parentAgentId", "isFork"];
+	const IGNORED = ["requestShape", "requestNonInteractive", "name", "cwd"];
+	for (const file of corpus) {
+		let keys: string[] = [];
+		try { keys = Object.keys(JSON.parse(fs.readFileSync(file, "utf8"))); } catch { /* M7c parse check owns it */ }
+		const unknown = keys.filter(k => !CARRIED.includes(k) && !IGNORED.includes(k));
+		assert(`M7c ${path.basename(file)} has no key the reader neither carries nor knowingly ignores`,
+			unknown.length === 0, `unknown ${JSON.stringify(unknown)} — carry it in parseSubagentMeta or add it to IGNORED`);
+	}
 	for (const file of corpus) {
 		const name = path.basename(file);
 		let obj: Record<string, unknown> | null = null;

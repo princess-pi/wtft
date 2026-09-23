@@ -32,10 +32,9 @@ MUT="$(mktemp "$REPO/bin/mut-install-wtft.XXXXXX")"
 SHIM="$(mktemp -d)"
 ln -s "$(command -v bun)" "$SHIM/bun"
 BUNDIR="$SHIM"
-# #156 gave install-wtft a config-migration side effect under
-# HOME/XDG_CONFIG_HOME, and the mutants below run it in INSTALL mode, so
-# without this every run of this probe would read (and move) this host's
-# real ~/.config. Exported once, for every "$REAL"/"$MUT" call below.
+# install-wtft reads config under HOME/XDG_CONFIG_HOME in every mode and moves
+# it in install mode, so without this every run of this probe would read (and
+# move) this host's real ~/.config. Exported once, for every "$REAL"/"$MUT" call below.
 FAKE_HOME="$(mktemp -d)"
 export HOME="$FAKE_HOME"
 unset XDG_CONFIG_HOME

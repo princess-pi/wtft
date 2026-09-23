@@ -308,7 +308,8 @@ console.log("\n6. Version hygiene at startup");
 
 	assert("old-version tag file removed", !fs.existsSync(oldTag));
 	const currentTag = path.join(tagsDir, currentTagFileName(sessionPath));
-	assert("current-version tag file exists", fs.existsSync(currentTag));
+	// The removal and the first write are separate steps; a loaded host can observe the gap.
+	assert("current-version tag file exists", await pollUntil(() => fs.existsSync(currentTag), 15_000));
 	const remaining = fs.readdirSync(tagsDir).filter(f => f.includes(".wtft-tag.v"));
 	assert("exactly one tag file remains", remaining.length === 1);
 

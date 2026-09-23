@@ -372,16 +372,23 @@ function* fileLines(filePath: string, chunkBytes: number): Generator<string> {
 	try {
 		const decoder = new StringDecoder("utf8");
 		const buf = Buffer.alloc(chunkBytes);
-		let carry = "";
+		// The unfinished line, kept in pieces: re-joining and re-scanning it on
+		// every chunk would make one long line cost quadratic time.
+		let carry: string[] = [];
 		for (;;) {
 			const n = fs.readSync(fd, buf, 0, buf.length, null);
 			if (n === 0) break;
-			const text = carry + decoder.write(buf.subarray(0, n));
+			const text = decoder.write(buf.subarray(0, n));
+			if (!text.includes("\n")) {
+				carry.push(text);
+				continue;
+			}
 			const parts = text.split("\n");
-			carry = parts.pop()!;
+			parts[0] = carry.join("") + parts[0];
+			carry = [parts.pop()!];
 			yield* parts;
 		}
-		yield carry + decoder.end();
+		yield carry.join("") + decoder.end();
 	} finally {
 		fs.closeSync(fd);
 	}

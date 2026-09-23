@@ -51,6 +51,9 @@ reads, and every nested fold parse.
   case plus the existing suites that pin `parseSessionFile`'s output (the daemon, CLI parity and
   fold suites), which pass unchanged.
 - **PART R — an invalid `chunkBytes` throws.** 0, −1, `NaN` and 1.5 each throw a `RangeError`.
+- **PART L — one very long line costs linear time.** The unfinished line is kept as a list of
+  pieces and joined once, when its newline arrives, rather than re-joined and re-scanned on every
+  chunk. A 4 MB line read in 1 KB chunks parses in about 18 ms (it took 4.4 s before the fix).
 - **PART M — one parse of a ~40 MB fixture grows peak RSS by less than 20 MB.** Measured
   2026-09-22 under bun: about 4 MB with this change. The same fixture grew about 49 MB with the old
   whole-string read (measured once, before the change, with the same script; the suite now runs
@@ -98,3 +101,6 @@ which spawners pass the flag, the Pi host's runtime, and a daemon started by han
 script became loud about every failure. The docs now state only measured figures, with the issue's
 4–5× figure attributed to the issue. The Closer is recorded as not met, and #97 stays open for the
 rest.
+
+Macroscope, on the PR (#223): the unfinished-line carry was quadratic on a long line (High) —
+verified, reproduced as PART L, fixed.

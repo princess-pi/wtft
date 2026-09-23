@@ -110,5 +110,19 @@ console.log("\nPART M — a ~40 MB transcript parses without holding it several 
 	check(grewMb < 20, `M2 peak RSS grows by under half the file's size (the old whole-string read grew about 49 MB; this grew ${grewMb.toFixed(1)} MB for a 40 MB file)`);
 }
 
+// ---
+// PART L — one very long line costs linear time, not quadratic
+// ---
+console.log("\nPART L — a 4 MB single line at a 1 KB chunk size");
+{
+	const long = path.join(dir, "long-line.jsonl");
+	fs.writeFileSync(long, turn(0, "y".repeat(4 * 1024 * 1024)) + "\n" + turn(1, "after"));
+	const t0 = performance.now();
+	const out = parseSessionFile(long, new Set(), 1024);
+	const ms = performance.now() - t0;
+	check(out.length === 2, `L1 both turns parse, the long one intact (got ${out.length})`);
+	check(ms < 3000, `L2 a 4 MB line read in 1 KB chunks parses in linear time, well inside 3 s (took ${Math.round(ms)} ms)`);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

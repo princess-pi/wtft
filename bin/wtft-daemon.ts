@@ -1350,7 +1350,20 @@ function claimPidFile(file: string): "claimed" | "busy" {
       fs.linkSync(candidate, file);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-      const holder = Number(fs.readFileSync(file, "utf8").trim());
+      let holderText = "";
+      try {
+        holderText = fs.readFileSync(file, "utf8").trim();
+      } catch (readErr) {
+        if ((readErr as NodeJS.ErrnoException).code !== "ENOENT") throw readErr;
+        try {
+          fs.linkSync(candidate, file);
+        } catch (linkErr) {
+          if ((linkErr as NodeJS.ErrnoException).code === "EEXIST") return "busy";
+          throw linkErr;
+        }
+        return "claimed";
+      }
+      const holder = Number(holderText);
       if (holder === process.pid) return "claimed";
       if (aliveDaemon(holder)) return "busy";
       try { fs.unlinkSync(file); } catch { /* raced */ }
@@ -1625,6 +1638,12 @@ function runHarness(which: string, focus: string) {
 }
 
 function dropHarnessSlot(key: string) {
+  const slot = harnessSlots.get(key);
+  if (slot && slot.pendingItems.length > 0) {
+    withSlot(slot, () => {
+      if (pendingItems.length > 0) flushPending();
+    });
+  }
   const timer = harnessFlushTimers.get(key);
   if (timer) clearTimeout(timer);
   harnessFlushTimers.delete(key);

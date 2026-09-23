@@ -523,9 +523,10 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
 
     const deduped = parsed ? clearSubagentCacheMiss(deduplicateInteractions(parsed.interactions)) : [];
     const plain: typeof deduped = [];
+    const state = fileState;
     const absorbIntoOwner = (interaction: (typeof deduped)[number]): boolean => {
       if (!interaction.messageId) return false;
-      const prior = fileState.owners.find(owner => owner.base.messageId === interaction.messageId);
+      const prior = state.owners.find(owner => owner.base.messageId === interaction.messageId);
       if (!prior) return false;
       if (interaction.cost + 1e-9 >= prior.base.cost) {
         prior.base.timestamp = interaction.timestamp;

@@ -9,7 +9,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { parseSessionFile } from "../extensions/lib/wtft-parser.ts";
-import { daemonSpawnArgs } from "../extensions/lib/wtft-cli-shared.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("97-streaming-parse");
@@ -109,19 +108,6 @@ console.log("\nPART M — a ~40 MB transcript parses without holding it several 
 	const grewMb = (out.afterKb - out.beforeKb) / 1024;
 	check(out.n > 0, `M1 fixture precondition: the parse found turns (got ${out.n}; stderr ${(r.stderr || "").slice(0, 200)})`);
 	check(grewMb < 20, `M2 peak RSS grows by under half the file's size, not 4–5× it (grew ${grewMb.toFixed(1)} MB for a 40 MB file)`);
-}
-
-// ---
-// PART D — the daemon starts with a small young generation under node
-// ---
-console.log("\nPART D — the daemon's V8 flag");
-{
-	const underNode = daemonSpawnArgs("/d/wtft-daemon.mjs", "/s.jsonl", { node: "22.0.0" });
-	check(underNode[0] === "--max-semi-space-size=1" && underNode.slice(1).join(" ") === "/d/wtft-daemon.mjs --session /s.jsonl",
-		`D1 under node the daemon gets --max-semi-space-size=1 before its script (got ${underNode.join(" ")})`);
-	const underBun = daemonSpawnArgs("/d/wtft-daemon.mjs", "/s.jsonl", { node: "22.0.0", bun: "1.3.14" });
-	check(underBun.join(" ") === "/d/wtft-daemon.mjs --session /s.jsonl",
-		`D2 under bun, which is not V8, no flag is passed (got ${underBun.join(" ")})`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

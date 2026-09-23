@@ -1,5 +1,4 @@
 import * as path from "node:path";
-import { daemonSpawnArgs } from "./wtft-daemon-spawn.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import { createHash } from "node:crypto";
@@ -15,6 +14,7 @@ import {
 } from "./wtft-shared.js";
 import { splitOverheadCost, isModelTagged } from "./wtft-parser.js";
 import { getDiscoveries } from "./harness/registry.ts";
+import { projectsDir } from "./harness/claude-code/discovery.js";
 import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
 export interface WatchSettings {
 	interval: string;
@@ -542,6 +542,21 @@ export function getDaemonPidPath(sessionPath: string): string {
 	return path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
 }
 
+function pathIsUnder(file: string, root: string): boolean {
+	const resolvedFile = path.resolve(file);
+	const resolvedRoot = path.resolve(root);
+	return resolvedFile === resolvedRoot || resolvedFile.startsWith(resolvedRoot + path.sep);
+}
+
+/** A session under a harness root is served by that root's one daemon. */
+export function daemonLaunchArgs(sessionPath: string, env: NodeJS.ProcessEnv = process.env): string[] {
+	const claude = projectsDir(env);
+	const pi = env.WTFT_PI_SESSIONS_DIR || path.join(os.homedir(), ".pi", "agent", "sessions");
+	if (pathIsUnder(sessionPath, claude)) return ["--harness", "claude", "--session", sessionPath];
+	if (pathIsUnder(sessionPath, pi)) return ["--harness", "pi", "--session", sessionPath];
+	return ["--session", sessionPath];
+}
+
 export function resolveMovedSession(sessionPath: string): string | null {
 	const sessionId = path.basename(sessionPath).replace(/\.jsonl$/i, "");
 	for (const discovery of getDiscoveries()) {
@@ -850,7 +865,7 @@ export function restartDaemon(sessionPath: string, daemonPath: string): boolean 
 	} catch {}
 
 	try {
-		const child = spawn(process.execPath, daemonSpawnArgs(daemonPath, sessionPath), {
+		const child = spawn(process.execPath, [daemonPath, ...daemonLaunchArgs(sessionPath)], {
 			detached: true,
 			stdio: "ignore"
 		});

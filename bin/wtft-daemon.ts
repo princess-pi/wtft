@@ -1491,6 +1491,45 @@ function stopHarness(reason: string) {
   process.exit(0);
 }
 
+function pathIsUnderTmp(file: string): boolean {
+  const resolved = path.resolve(file);
+  const tmp = path.resolve(os.tmpdir());
+  return resolved === tmp || resolved.startsWith(tmp + path.sep) || resolved.startsWith("/tmp/");
+}
+
+function daemonProcs(): { pid: number; session: string | null; harness: boolean; roots: string[] }[] {
+  const out: { pid: number; session: string | null; harness: boolean; roots: string[] }[] = [];
+  let entries: string[];
+  try {
+    entries = fs.readdirSync("/proc");
+  } catch {
+    return out;
+  }
+  for (const ent of entries) {
+    if (!/^[1-9]\d*$/.test(ent)) continue;
+    const pid = Number(ent);
+    let cmd = "";
+    try {
+      cmd = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
+    } catch {
+      continue;
+    }
+    if (!cmd.includes("wtft-daemon")) continue;
+    const args = cmd.split("\0");
+    const sessIdx = args.indexOf("--session");
+    const session = sessIdx >= 0 && sessIdx + 1 < args.length ? args[sessIdx + 1] : null;
+    let roots: string[] = [];
+    try {
+      roots = fs.readFileSync(`/proc/${pid}/environ`, "utf8").split("\0")
+        .filter(row => row.startsWith("WTFT_CLAUDE_PROJECTS_DIR=") || row.startsWith("WTFT_PI_SESSIONS_DIR="))
+        .map(row => row.slice(row.indexOf("=") + 1))
+        .filter(row => row.length > 0);
+    } catch { /* environ unreadable */ }
+    out.push({ pid, session, harness: args.includes("--harness"), roots });
+  }
+  return out;
+}
+
 function tagIsCurrent(file: string): boolean {
   try {
     return fs.statSync(getCurrentVersionTagPath(file)).size > 0;
@@ -1596,8 +1635,8 @@ Usage: wtft-daemon --session <path> [--debug]
        wtft-daemon --reparse-range <YYYY-MM-DD> <YYYY-MM-DD>
 
 Management:
-  --list, -l            List all running daemons (session, PID, idle time)
-  --cleanup             Kill daemons whose source session no longer exists
+  --list, -l            List every running wtft-daemon, including fixture processes
+  --cleanup             Kill daemons whose session is gone, and fixture daemons under the tmp dir
   --restart             Kill all running daemons (fresh spawn on next wtft)
   --stop <session>      Stop the daemon for a specific session path
 
@@ -1626,6 +1665,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   } catch (_) {}
 
   let found = 0;
+  const seenPids = new Set<number>();
   for (const pidFile of pidFiles) {
     const fullPath = path.join(pidDir, pidFile);
     let pid = 0;
@@ -1633,6 +1673,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       pid = parseInt(fs.readFileSync(fullPath, "utf8").trim(), 10);
     } catch (_) { continue; }
     if (pid <= 0) continue;
+    seenPids.add(pid);
 
     let alive = false;
     try { process.kill(pid, 0); alive = true; } catch (_) {}
@@ -1719,6 +1760,25 @@ if (showList || showCleanup || showRestart || stopSession) {
       }
       const sessionDisplay = sessionFound || `(hash: ${pidFile.replace(/^wtft-daemon-/, "").replace(/\.pid$/, "")})`;
       console.log(`PID ${String(pid).padEnd(7)} ${status.padEnd(20)} v${taggerVersion.padEnd(7)} idle: ${idleStr.padEnd(5)} ${sessionDisplay}`);
+    }
+  }
+
+  if (showList || showCleanup) {
+    for (const proc of daemonProcs()) {
+      if (seenPids.has(proc.pid) || proc.pid === process.pid) continue;
+      const fixture = (proc.session !== null && pathIsUnderTmp(proc.session)) || proc.roots.some(pathIsUnderTmp);
+      if (showCleanup && fixture) {
+        try { process.kill(proc.pid, "SIGTERM"); } catch { /* already gone */ }
+        const where = proc.session || proc.roots.join(",");
+        console.log(`Cleaned up: PID ${proc.pid} — fixture daemon: ${where}`);
+        found++;
+        continue;
+      }
+      if (showList) {
+        found++;
+        const where = proc.session || (proc.harness ? `harness ${proc.roots.join(",") || "(unknown root)"}` : "(no session arg)");
+        console.log(`PID ${String(proc.pid).padEnd(7)} ${"RUNNING".padEnd(20)} v${"?".padEnd(7)} idle: ${"?".padEnd(5)} ${where}`);
+      }
     }
   }
 

@@ -31,8 +31,12 @@ export function reapFixtureDaemons(): number {
 		} catch {
 			continue;
 		}
-		if (!cmd.includes("wtft-daemon")) continue;
-		const args = cmd.split("\0");
+		const args = cmd.split("\0").filter(arg => arg.length > 0);
+		const isDaemon = args.some(arg => {
+			const base = path.basename(arg);
+			return base === "wtft-daemon.mjs" || base === "wtft-daemon.js" || base === "wtft-daemon" || base === "wtft-daemon.ts";
+		});
+		if (!isDaemon) continue;
 		const sessIdx = args.indexOf("--session");
 		const session = sessIdx >= 0 && sessIdx + 1 < args.length ? args[sessIdx + 1] : "";
 		let roots: string[] = [];

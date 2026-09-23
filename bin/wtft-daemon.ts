@@ -6,6 +6,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { projectsDir } from "../extensions/lib/harness/claude-code/discovery.js";
 import {
 	parseEntryToInteraction,
 	parseSessionFile,
@@ -1296,7 +1297,7 @@ function claimPidFile(file: string): "claimed" | "busy" {
 
 function harnessRoot(which: string): string {
   if (which === "claude") {
-    return process.env.WTFT_CLAUDE_PROJECTS_DIR || path.join(os.homedir(), ".claude", "projects");
+    return projectsDir();
   }
   if (which === "pi") {
     return process.env.WTFT_PI_SESSIONS_DIR || path.join(os.homedir(), ".pi", "agent", "sessions");

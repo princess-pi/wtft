@@ -19,8 +19,9 @@ roots keeps its own process, polling every 667ms. The tag file and the pid lease
 per session. After 24h with no new lines, that session is dropped: the per-session
 process exits, and the harness process stays up and adopts the session again on a later
 write. Spawned on Pi `session_start` and on a CLI report. A per-session process is
-revived after an idle exit and replaced on a version bump. A live harness process
-is left running; a later start points the session's lease at it. Health is exposed via `checkDaemonHealth()` and
+revived after an idle exit and replaced on a version bump. On Linux, a live harness
+process is left running; a later start points the session's lease at it, because
+that check reads `/proc/<pid>/cmdline`. Health is exposed via `checkDaemonHealth()` and
 rendered via `renderDaemonStatus()`.
 
 *Two registers, one concept.* Say **"log parser daemon"** in high-level user-facing prose — doc

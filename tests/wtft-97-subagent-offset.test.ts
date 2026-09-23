@@ -14,6 +14,7 @@ import {
 	deduplicateInteractions,
 	WTFT_TAGGER_VERSION,
 } from "../bin/wtft.mjs";
+import { transcriptSourceId } from "../extensions/lib/wtft-daemon-lib.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("subagent-offset");
@@ -143,6 +144,56 @@ try {
 	for (const pf of cleanupPidFiles) { try { fs.unlinkSync(pf); } catch { /* gone */ } }
 	await sleep(200);
 	for (const d of fixtureDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* gone */ } }
+}
+
+{
+	const junkDir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-97-junk-")));
+	fixtureDirs.push(junkDir);
+	const junkSession = path.join(junkDir, "session.jsonl");
+	fs.writeFileSync(junkSession, JSON.stringify({
+		type: "session", version: 3, id: "parent-97-junk", timestamp: new Date().toISOString(), cwd: junkDir,
+	}) + "\n");
+	fs.mkdirSync(path.join(junkDir, "wtft-tags"), { recursive: true });
+	const junkPid = getDaemonPidPath(junkSession);
+	cleanupPidFiles.push(junkPid);
+	const junkSubDir = path.join(junkDir, "session", "subagents");
+	fs.mkdirSync(junkSubDir, { recursive: true });
+	const junkSub = path.join(junkSubDir, "agent-junk.jsonl");
+	fs.writeFileSync(junkSub, "not-json\n");
+	const junkTag = path.join(junkDir, "wtft-tags", path.basename(junkSession) + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const source = transcriptSourceId(junkSub, path.dirname(junkSession));
+	const staleId = "msg_97_stale";
+	fs.writeFileSync(junkTag, JSON.stringify({
+		t: Date.now(), c: 1, cat: "code", f: [], cmd: [], id: staleId, m: "claude-sonnet-4-6", out: 10, s: source,
+	}) + "\n");
+	assert(
+		"fixture: the stale line counts before the junk read",
+		readClassifiedTagFile(junkTag).some((int: { messageId?: string }) => int.messageId === staleId),
+	);
+	const junkErr = fs.openSync(path.join(junkDir, "daemon-stderr.log"), "a");
+	try {
+		const child = spawn(process.execPath, [DAEMON_BIN, "--session", junkSession], {
+			detached: true,
+			stdio: ["ignore", "ignore", junkErr],
+			env: { ...process.env, WTFT_DAEMON_DEBUG: "1" },
+		});
+		child.unref();
+		if (child.pid) cleanupPids.push(child.pid);
+		let retired = false;
+		for (let i = 0; i < 24 && !retired; i++) {
+			await sleep(250);
+			const raw = fs.existsSync(junkTag) ? fs.readFileSync(junkTag, "utf8") : "";
+			retired = raw.includes('"_gen"')
+				&& !readClassifiedTagFile(junkTag).some((int: { messageId?: string }) => int.messageId === staleId);
+		}
+		assert("a junk transcript still opens a generation, so the stale line is gone", retired);
+	} finally {
+		try { fs.closeSync(junkErr); } catch { /* already closed */ }
+		for (const pid of cleanupPids) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
+		for (const pf of cleanupPidFiles) { try { fs.unlinkSync(pf); } catch { /* gone */ } }
+		await sleep(200);
+		for (const d of fixtureDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* gone */ } }
+	}
 }
 
 console.log("\n──────────────────────────────");

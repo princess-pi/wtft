@@ -135,9 +135,11 @@ still gets the per-session process this spec's spawn-twice test covers. On the s
 process, a lost session lease or an idle session drops that session's slot and leaves the
 process running. Fix A's immediate exit is the outside-the-root path. The shared process
 also holds `wtft-harness-<claude|pi>-<12 hex chars of sha256(root)>.pid` in the temp
-directory. A second start that finds a live log parser daemon there points the session's
-lease at that pid and exits. Taking over a per-session lease signals a live daemon holder
-and retries the claim; a holder that is not the log parser daemon is replaced without a signal.
+directory. A second start that can read `/proc/<pid>/cmdline` and finds the log parser
+daemon there points the session's lease at that pid and exits. Without that file, a live
+pid is not identified, and the claim can start another process. Taking over a per-session
+lease signals a live daemon holder and retries the claim; a holder that is not the log
+parser daemon is replaced without a signal.
 
 ## Verification results (2026-07-14, Code Approved)
 

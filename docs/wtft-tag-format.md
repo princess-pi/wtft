@@ -192,7 +192,8 @@ content-hash mismatch on a same-size file, a prefix-hash mismatch when the file 
 attributed cost that dropped, or a lower cost on a plain message id already tagged
 (`docs/spec-114-14-generation-records.md`). The record goes first in
 the append, followed by every line of that read and every fold record it
-implies. A generation with no lines still writes its record, so a transcript rotated to empty
+implies. A generation with no lines still writes its record, so a transcript rotated to empty,
+or a first read that consumed a nonempty file and produced no interaction lines,
 drops its old lines. Like a fold record, it is data: a tag whose last data line is one reads
 unswept (`docs/spec-114-14-generation-records.md`).
 

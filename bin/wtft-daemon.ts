@@ -604,8 +604,15 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
     const source = transcriptSourceId(file, path.dirname(sessionPath));
     let batch = "";
     const nextOwners: FoldOwner[] = owners.map((o, i) => ({ ...o }));
+    const consumedQuiet = parsed !== null
+      && parsed.fragment.length === 0
+      && size > 0
+      && fileState.pendingTurn === null;
+    const emitGeneration = fileState.newGeneration && (
+      plain.length > 0 || clones.length > 0 || rotate || consumedQuiet
+    );
     try {
-      if (fileState.newGeneration && (plain.length > 0 || clones.length > 0 || rotate)) {
+      if (emitGeneration) {
         batch = generationRecordLine(source, sessionId);
       }
       for (const interaction of plain) {
@@ -659,7 +666,7 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
     fileState.ino = ino;
     fileState.owners = nextOwners;
     for (const id of freshFolds) fileState.recordedFolds.add(id);
-    if (plain.length > 0 || clones.length > 0 || rotate) fileState.newGeneration = false;
+    if (emitGeneration) fileState.newGeneration = false;
     if (clones.length > 0) {
       fileState.foldStamps = new Map();
       for (const interaction of clones) {

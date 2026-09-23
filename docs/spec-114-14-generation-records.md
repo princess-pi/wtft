@@ -57,8 +57,10 @@ when the file grew or rotated.
 - **When the daemon writes a generation record:** on the first successful read of a child
   transcript in a daemon life, and on the first successful read after the transcript rotated.
   The record goes first in the append, followed by every line of that read and every
-  fold record it implies. A generation with no lines still writes its record, so a transcript
-  rotated to empty drops its old lines.
+  fold record it implies. A generation with no lines still writes its record: a transcript
+  rotated to empty, and a first read that consumed a nonempty file and produced no interaction
+  lines. Either one drops the old lines for that source. A held fragment, or the one plain
+  turn held back on a growth read, waits for a later poll.
 - **Rotation is an inode change, a shrink, a same-size content-hash mismatch, a prefix-hash
   mismatch when the file grew, an attributed cost that dropped, or a lower cost on a plain
   message id already tagged.** A same-length rewrite on the same inode matches neither size nor inode.

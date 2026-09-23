@@ -17,11 +17,11 @@ This change's own measurement (`tests/wtft-97-streaming-parse.test.ts`'s PART M,
 parse of a 40 MB fixture grew peak RSS by about 49 MB with the old whole-string read and about
 4 MB with the chunked read.
 
-That account needs one qualification, shown by the measurement below: removing the peak by itself
-(chunked parsing, no V8 flag) left resident size close to unchanged (55.5 → 55.3 MB on the
-measurement workload). The growth is short-lived object churn inflating V8's young generation on
-every re-parse, not the size of the peak alone — the semi-space flag below is what brings resident
-size down.
+The daemon measurement below bears that out: removing the peak by itself (chunked parsing, no V8
+flag) takes the daemon from 98 MB to 50 MB once its subagents are read, and from 57 MB to 39 MB
+after 3 minutes of appends. The rest of the growth is short-lived objects churned by re-parsing a
+changed transcript whole, which V8's default young generation lets inflate the heap. The
+semi-space flag below takes that down further.
 
 ## The change
 
@@ -81,23 +81,31 @@ offset half is still needed to reach the Closer; it stays open in #97.
 - **The daemon's flag:** under node the spawn argv starts with `--max-semi-space-size=1`; under
   bun it does not (D1, D2).
 
-**The Closer — measured 2026-09-22, and not yet met.** A daemon watching a synthetic session whose
-three subagent transcripts total about 28 MB, sampled after start-up and after 3 minutes of
-appends every 5 s (`debug/97-daemon-pss.sh <daemon.mjs> <label> <seconds> [node-flags]`, not a
-suite; the issue's own Closer asks for 30 minutes; the script invokes node directly against the
-built `.mjs`, not through `daemonSpawnArgs`). The "this change" row was measured with
-`NODE_OPTIONS=--max-semi-space-size=1`, equivalent to the flag `daemonSpawnArgs` passes when the
-daemon is started the normal way:
+**The Closer — measured 2026-09-22, and not met.** A daemon watching a synthetic session whose
+three subagent transcripts total 28.3 MB, appended to every 5 s
+(`debug/97-daemon-pss.sh <daemon.mjs> <label> <seconds> [node-flags]`, not a suite). The script
+samples only once the daemon's tag file carries subagent lines, so the first sample is taken after
+the transcripts have been read. The script invokes node directly against the built `.mjs`, so the
+flag rows pass `--max-semi-space-size=1` as its fourth argument, the flag `daemonSpawnArgs` passes
+when the daemon is started the normal way.
 
-| Build | PSS after start-up | after 3 min of appends |
+| Build | PSS once the subagents are read | after appends |
 |---|---|---|
-| before this change | 20.5 MB | 55.5 MB |
-| chunked parse only | 18.9 MB | 55.3 MB |
-| chunked parse + 1 MB semi-space (this change) | 21.0 MB | 38.3 MB |
-| road not taken: also capping the old generation at 24 MB | 22.2 MB | 34.2 MB |
+| before this change (`main`) | 98.0 MB | 56.9 MB after 3 min |
+| chunked parse only | 49.9 MB | 38.7 MB after 3 min |
+| chunked parse + 1 MB semi-space (this change) | 18.9 MB | 23.0 MB after 3 min |
+| the same, the issue's full 30 minutes | 47.2 MB | 33.5 MB after 30 min |
 
-So this change takes the daemon from about 55 MB to about 38 MB on this workload. That is part of
-#97, not its close — the issue's Closer (under 30 MB, not growing) is not met by it. What remains
+An earlier version of the script sampled on a fixed 25 s timer, often before the daemon had
+finished reading. Its figures (about 20 MB at start-up for every build) were wrong and are not
+reproduced here.
+
+**What the numbers support.** The whole-string parse's peak was real: 98 MB for 28 MB of
+transcripts. Chunking halves it, and the semi-space flag takes the daemon to roughly 20–47 MB. The
+spread between the two runs of the same build (18.9 MB and 47.2 MB once read) is where garbage
+collection happens to be when a single sample is taken, so one sample is weak evidence. The
+30-minute run ends at 33.5 MB, above the issue's 30 MB, and the issue also asks that the daemon
+not grow. So this change is part of #97, not its close. What remains
 in #97 is direction A above — reading only the bytes appended since the last poll, instead of
 re-parsing a changed transcript whole — and the per-transcript `writtenLines`, `writtenIds` and
 `writtenCostById` maps in `bin/wtft-daemon.ts`'s `SubagentFileState`: they grow with every line

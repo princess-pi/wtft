@@ -201,6 +201,13 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 	assert("M6 a bare `null` document is declined", readSubagentMeta(tNull) === null);
 }
 
+const CORPUS_DIR = path.join(import.meta.dirname, "fixtures", "meta-corpus");
+function corpusFiles(): string[] {
+	try {
+		return fs.readdirSync(CORPUS_DIR).filter(f => f.endsWith(".meta.json")).sort().map(f => path.join(CORPUS_DIR, f));
+	} catch { return []; }
+}
+
 // M7 — THE FIELD-NAME PIN, in two halves that catch two different drifts.
 //
 // `.meta.json` is UNDOCUMENTED harness output. If a release renames
@@ -312,7 +319,34 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 			assert("M7b and the reader accepts the harness's own file, types and all",
 				realMeta !== null,
 				`readSubagentMeta declined ${realFile} although every required name is present — a value's TYPE changed`);
+			// The corpus M7c reads everywhere is a snapshot; this is what says it aged.
+			const corpusKeys = new Set(corpusFiles().flatMap(f => Object.keys(JSON.parse(fs.readFileSync(f, "utf8")))));
+			const uncovered = Object.keys(obj).filter(k => !corpusKeys.has(k));
+			assert(`M7b the committed corpus carries every key the newest real file does (${JSON.stringify(Object.keys(obj))})`,
+				uncovered.length === 0,
+				`${realFile} carries ${JSON.stringify(uncovered)}, which no file in tests/fixtures/meta-corpus/ has — refresh the corpus: tests/fixtures/meta-corpus/README.md`);
 		}
+	}
+
+	// M7c — THE HARNESS's names, against the committed corpus of real files.
+	// Runs on every host, CI included, which M7b cannot.
+	const corpus = corpusFiles();
+	assert(`M7c the committed corpus is present (${corpus.length} files)`, corpus.length >= 5, CORPUS_DIR);
+	for (const file of corpus) {
+		const name = path.basename(file);
+		let obj: Record<string, unknown> | null = null;
+		try { obj = JSON.parse(fs.readFileSync(file, "utf8")); } catch { /* assertion below owns it */ }
+		assert(`M7c ${name} parses as JSON`, obj !== null, file);
+		if (!obj) continue;
+		for (const k of REQUIRED) {
+			assert(`M7c ${name} carries \`${k}\``, k in obj, `keys ${JSON.stringify(Object.keys(obj))}`);
+		}
+		if (obj.agentType !== "workflow-subagent") {
+			const missing = NEAR_UNIVERSAL.filter(k => !(k in (obj as Record<string, unknown>)));
+			assert(`M7c ${name} carries the near-universal pair`, missing.length === 0, `missing ${JSON.stringify(missing)}`);
+		}
+		assert(`M7c ${name} is accepted by the reader, types and all`,
+			readSubagentMeta(file.replace(/\.meta\.json$/, ".jsonl")) !== null, file);
 	}
 }
 

@@ -732,8 +732,11 @@ async function main() {
 		const emptyArmTree = opts.tokens ? renderSpawnTree(emptyTotals(), sessionSpawnTree({ pending: opt.pending })) : "";
 		warnProvisionalOnce();
 		// SUBAGENTS and SPAWNED under `--tokens` even when own total is empty (matches populated path).
-		if (emptyArmBlock) process.stdout.write(emptyArmBlock);
-		if (emptyArmTree) process.stdout.write(emptyArmTree);
+		// Same --pad as the populated path.
+		const emptyPad = " ".repeat(Math.min(opts.hasPad ? opts.pad : 1, Math.max(0, Math.floor(getTerminalWidth() / 2) - 1)));
+		const padded = (s: string) => s.split("\n").map(l => (l ? emptyPad + l : l)).join("\n");
+		if (emptyArmBlock) process.stdout.write(padded(emptyArmBlock));
+		if (emptyArmTree) process.stdout.write(padded(emptyArmTree));
 		// exitCode, never process.exit — stdout is async on a pipe.
 		process.exitCode = provisional.provisional ? EXIT_PROVISIONAL : 0;
 	};

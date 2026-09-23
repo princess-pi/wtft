@@ -214,6 +214,8 @@ console.log("\nPART F — an older tagger's tag, and the empty report");
 	const empty = plain(fixture("empty", WTFT_TAGGER_VERSION, false)(["--tokens"]).stdout ?? "");
 	check(/SUBAGENTS\s+1 built-in subagent/.test(empty) && /Hand-tagged helper\s+\S+\s+\(not yet tagged\)/.test(empty),
 		`F4 a tag with no lines yet still prints the block, every row not yet tagged\n${empty.split("\n").filter(l => /SUBAGENTS|Hand/.test(l)).join("\n")}`);
+	const padded = plain(fixture("empty-pad", WTFT_TAGGER_VERSION, false)(["--tokens", "--pad", "5"]).stdout ?? "");
+	check(/^ {5}SUBAGENTS/m.test(padded), `F5 --pad indents the block on the empty report too\n${padded.split("\n").filter(l => /SUBAGENTS/.test(l)).join("\n")}`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

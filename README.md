@@ -272,7 +272,7 @@ non-zero. The last was missing until round 5 — a malformed ledger line was a
 record, so its edge is lost, and nothing else reports it.
 
 A session's built-in (Task) subagents get their own `SUBAGENTS` block under
-`--tokens`: one row each, named by the harness's `.meta.json` description, with
+`--tokens`: one row each, up to 20 and then a count of the rest, named by the harness's `.meta.json` description, with
 its model and the cost `TOTAL` already holds for it. Those rows are **inside**
 `TOTAL`, never added to it; `--json` carries the same figure as
 `subagents[].total`.

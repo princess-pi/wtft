@@ -147,7 +147,7 @@ $DAEMON --stop "$SESSION" >/dev/null 2>&1
 sleep 1
 
 assert "daemon stopped" \
-  "! $DAEMON --list 2>&1 | grep -q 'RUNNING'"
+  "! $DAEMON --list 2>&1 | grep -q 'wtft-daemon-test-session'"
 
 assert "PID file cleaned up" \
   "[ -z \"\$(ls \"$TMPDIR\"/wtft-daemon-*.pid 2>/dev/null || true)\" ]"

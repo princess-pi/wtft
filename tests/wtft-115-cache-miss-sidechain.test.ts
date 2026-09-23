@@ -114,15 +114,15 @@ const binRows = rendered
 	.map((line, i) => ({ line, i }))
 	.filter(r => /^\d\d:\d\d\s+\$/.test(r.line))
 	.map(r => r.i);
-const hasDividerAbove = (i: number) => (rendered[i - 1] || "").includes("Cache Miss");
+const hasDividerBelow = (i: number) => (rendered[i + 1] || "").includes("Cache Miss");
 check(binRows.length === 3, `three bins render (${binRows.length})`);
 // Newest first: [0] is the parent's 14:00Z re-prime, [1] the subagent's 13:10Z
 // bin, [2] the parent's 12:00Z cold start.
-check(hasDividerAbove(binRows[0]), "a divider sits on the parent's re-prime bin");
-check(hasDividerAbove(binRows[2]), "…and on the parent's own cold-start bin");
+check(hasDividerBelow(binRows[0]), "a divider sits directly below the parent's re-prime bin");
+check(hasDividerBelow(binRows[2]), "…and below the parent's own cold-start bin");
 check(
-	!hasDividerAbove(binRows[1]),
-	"…and NOT on the bin between them, which only the subagent occupies"
+	!hasDividerBelow(binRows[1]),
+	"…and NOT below the bin between them, which only the subagent occupies"
 );
 
 console.log("--- TEST 3: cost is untouched ---");

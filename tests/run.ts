@@ -1,10 +1,10 @@
 #!/usr/bin/env -S bun
 /**
- * Runs every `tests/*.test.ts` suite in its OWN process and
- *   aggregates the exit codes.
+ * Runs every `tests/*.test.ts` suite in its OWN process, several at a time,
+ *   and aggregates the exit codes.
  */
 
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -21,6 +21,25 @@ const REPO_ROOT = path.resolve(TESTS_DIR, "..");
 
 /** Per-suite wall-clock ceiling. Generous: some suites spawn daemons and wait on them. */
 const SUITE_TIMEOUT_MS = 180_000;
+
+/** Suites run at once. `WTFT_TEST_JOBS=1` is the serial runner. Twice the CPU
+ *  count: most suites spend their time waiting on a daemon, not computing. */
+const JOBS = Math.max(1, Number(process.env.WTFT_TEST_JOBS) || os.cpus().length * 2);
+
+/** Run alone, after the pool, because they reach outside their own sandbox:
+ *  one rebuilds `bin/` mid-run, which every suite importing a bundle would see
+ *  half-written; the others stop daemons host-wide (the unscoped fixture reaper,
+ *  `wtft-daemon --cleanup`, `wtft-daemon --restart`), which would kill a
+ *  neighbour's daemon mid-test. */
+const SOLO = new Set([
+	"wtft-46-install-wtft.test.ts",
+	"wtft-96-fixture-daemons.test.ts",
+	"wtft-205-one-daemon-per-harness.test.ts",
+]);
+
+/** Last run's per-suite times, so the slowest start first and the pool's tail
+ *  is not one long suite started last. Scratch: `tmp/` is gitignored. */
+const TIMES_FILE = path.join(REPO_ROOT, "tmp", "test-times.json");
 
 const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";
@@ -71,46 +90,72 @@ interface Result {
 
 const nameWidth = Math.max(...suites.map(s => s.replace(/\.test\.ts$/, "").length));
 
-console.log(`${BOLD}Running ${suites.length} suite${suites.length === 1 ? "" : "s"}${RESET} ${DIM}(process-per-suite, serial)${RESET}\n`);
+let lastTimes: Record<string, number> = {};
+try { lastTimes = JSON.parse(fs.readFileSync(TIMES_FILE, "utf8")); } catch { /* first run: no order to reuse */ }
+const pooled = suites.filter(f => !SOLO.has(f)).sort((a, b) => (lastTimes[b] ?? 0) - (lastTimes[a] ?? 0));
+const solo = suites.filter(f => SOLO.has(f));
+
+console.log(`${BOLD}Running ${suites.length} suite${suites.length === 1 ? "" : "s"}${RESET} ${DIM}(process-per-suite, jobs=${JOBS})${RESET}\n`);
 
 const results: Result[] = [];
 
-for (const file of suites) {
+function runSuite(file: string): Promise<Result> {
 	const name = file.replace(/\.test\.ts$/, "");
-
 	// Fresh config root per suite — no developer config can reach the code under test.
 	const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "pp-test-config-"));
-
+	// Its own tmp root, so its fixture daemons can be reaped without touching a
+	// neighbour's.
+	const suiteTmp = fs.mkdtempSync(path.join(os.tmpdir(), `wtft-suite-${name}-`));
 	const started = Date.now();
-	const proc = spawnSync("bun", ["test", path.join("tests", file)], {
-		cwd: REPO_ROOT,
-		encoding: "utf8",
-		timeout: SUITE_TIMEOUT_MS,
-		env: { ...process.env, XDG_CONFIG_HOME: configHome },
+	return new Promise(resolve => {
+		const child = spawn("bun", ["test", path.join("tests", file)], {
+			cwd: REPO_ROOT,
+			env: { ...process.env, XDG_CONFIG_HOME: configHome, TMPDIR: suiteTmp },
+		});
+		let output = "";
+		child.stdout.on("data", d => { output += d; });
+		child.stderr.on("data", d => { output += d; });
+		let timedOut = false;
+		const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, SUITE_TIMEOUT_MS);
+		child.on("close", code => {
+			clearTimeout(timer);
+			const ms = Date.now() - started;
+			reapFixtureDaemons(suiteTmp);
+			for (const dir of [configHome, suiteTmp]) {
+				try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+			}
+			const ok = !timedOut && code === 0;
+			resolve({ name, ok, ms, timedOut, output, skips: collectSkips(output) });
+		});
 	});
-	const ms = Date.now() - started;
-
-	try { fs.rmSync(configHome, { recursive: true, force: true }); } catch {}
-	reapFixtureDaemons();
-
-	const timedOut = proc.signal === "SIGTERM" && ms >= SUITE_TIMEOUT_MS;
-	const ok = !timedOut && proc.status === 0;
-	const output = `${proc.stdout ?? ""}${proc.stderr ?? ""}`;
-
-	results.push({ name, ok, ms, timedOut, output, skips: collectSkips(output) });
-
-	const badge = ok ? `${GREEN}PASS${RESET}` : `${RED}FAIL${RESET}`;
-	const note = timedOut ? ` ${RED}(timed out after ${SUITE_TIMEOUT_MS / 1000}s)${RESET}` : "";
-	const skipped = results[results.length - 1].skips.length;
-	const skipNote = skipped > 0 ? ` ${DIM}(${skipped} skipped)${RESET}` : "";
-	console.log(`  ${badge}  ${name.padEnd(nameWidth)}  ${DIM}${(ms / 1000).toFixed(1)}s${RESET}${note}${skipNote}`);
 }
+
+function report(r: Result): void {
+	results.push(r);
+	const badge = r.ok ? `${GREEN}PASS${RESET}` : `${RED}FAIL${RESET}`;
+	const note = r.timedOut ? ` ${RED}(timed out after ${SUITE_TIMEOUT_MS / 1000}s)${RESET}` : "";
+	const skipNote = r.skips.length > 0 ? ` ${DIM}(${r.skips.length} skipped)${RESET}` : "";
+	console.log(`  ${badge}  ${r.name.padEnd(nameWidth)}  ${DIM}${(r.ms / 1000).toFixed(1)}s${RESET}${note}${skipNote}`);
+}
+
+const queue = [...pooled];
+await Promise.all(Array.from({ length: Math.min(JOBS, queue.length) }, async () => {
+	for (let file = queue.shift(); file !== undefined; file = queue.shift()) report(await runSuite(file));
+}));
+for (const file of solo) report(await runSuite(file));
+
+try {
+	const times = { ...lastTimes };
+	for (const r of results) times[`${r.name}.test.ts`] = r.ms;
+	fs.mkdirSync(path.dirname(TIMES_FILE), { recursive: true });
+	fs.writeFileSync(TIMES_FILE, JSON.stringify(times, null, "\t") + "\n");
+} catch { /* the order hint is an optimisation; a run never fails over it */ }
 
 // ---
 // Report
 // ---
 
-const failed = results.filter(r => !r.ok);
+const failed = results.filter(r => !r.ok).sort((a, b) => a.name.localeCompare(b.name));
 
 for (const r of failed) {
 	console.log(`\n${RED}${"─".repeat(60)}${RESET}`);

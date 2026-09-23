@@ -2,6 +2,7 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs";
+import { StringDecoder } from "node:string_decoder";
 import { calculateClaudeCost, calculateServerToolCost, getDeepSeekPeakMultiplier } from "./wtft-cost.js";
 import { getParseAdapters } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.ts";
@@ -357,16 +358,55 @@ export function splitOverheadCost(
 // Read a .jsonl session into Interaction[] (raw, undeduped).
 // ---
 
+/** Bytes read per chunk: a transcript is never held whole, so a re-parse
+ *  peaks at one chunk and one line, not at the file several times over. */
+const PARSE_CHUNK_BYTES = 1024 * 1024;
+
+/** Every line of a file, in order, read in chunks — the same lines
+ *  `readFileSync(...).split("\n")` gives, including a last one with no newline. */
+function* fileLines(filePath: string, chunkBytes: number): Generator<string> {
+	if (!Number.isSafeInteger(chunkBytes) || chunkBytes <= 0) {
+		throw new RangeError(`fileLines: chunkBytes must be a positive safe integer, got ${chunkBytes}`);
+	}
+	const fd = fs.openSync(filePath, "r");
+	try {
+		const decoder = new StringDecoder("utf8");
+		const buf = Buffer.alloc(chunkBytes);
+		// The unfinished line, kept in pieces: re-joining and re-scanning it on
+		// every chunk would make one long line cost quadratic time.
+		let carry: string[] = [];
+		for (;;) {
+			const n = fs.readSync(fd, buf, 0, buf.length, null);
+			if (n === 0) break;
+			const text = decoder.write(buf.subarray(0, n));
+			if (!text.includes("\n")) {
+				carry.push(text);
+				continue;
+			}
+			const parts = text.split("\n");
+			parts[0] = carry.join("") + parts[0];
+			carry = [parts.pop()!];
+			yield* parts;
+		}
+		yield carry.join("") + decoder.end();
+	} finally {
+		fs.closeSync(fd);
+	}
+}
+
 /** `doNotFold` holds canonical transcript paths this parse must not fold in:
  *  the transcripts it is already inside, and any a different source is already
  *  counting. */
-export function parseSessionFile(filePath: string, doNotFold: ReadonlySet<string> = new Set()): Interaction[] {
+export function parseSessionFile(
+	filePath: string,
+	doNotFold: ReadonlySet<string> = new Set(),
+	chunkBytes: number = PARSE_CHUNK_BYTES,
+): Interaction[] {
 	const interactions: Interaction[] = [];
 	const state = newParseStreamState();
 	// Unreadable transcript throws (never returns [] as "empty"). Per-line
 	// errors stay swallowed — bad line, not file-level failure.
-	const content = fs.readFileSync(filePath, "utf8");
-	for (const line of content.split("\n")) {
+	for (const line of fileLines(filePath, chunkBytes)) {
 		if (!line.trim()) continue;
 		try {
 			const entry = JSON.parse(line);

@@ -1454,8 +1454,8 @@ function wake(file: string, displayed: boolean) {
     harnessSlots.set(movedTo, slot);
     const timer = harnessFlushTimers.get(key);
     if (timer) {
+      clearTimeout(timer);
       harnessFlushTimers.delete(key);
-      harnessFlushTimers.set(movedTo, timer);
     }
   }
   if (slot.pendingItems.length > 0) scheduleFlush(movedTo);
@@ -1741,8 +1741,8 @@ function reparseOne(file: string) {
   tagPath = getCurrentVersionTagPath(file);
   try { fs.mkdirSync(path.dirname(tagPath), { recursive: true }); } catch { /* exists */ }
   const parsedSize = fs.statSync(file).size;
-  fs.writeFileSync(tagPath, "");
   const raw = deduplicateInteractions(parseSessionFile(file));
+  fs.writeFileSync(tagPath, "");
   let prev = 0;
   let batch = "";
   pendingClaudeCommands = [];

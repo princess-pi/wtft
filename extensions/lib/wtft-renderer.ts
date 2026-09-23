@@ -1109,17 +1109,20 @@ export function buildWtftLines(
 		return prefix + chars.join("");
 	};
 
+	// Labelled "Miss" not "Expired": the usage block proves the re-prime happened,
+	// but says nothing about why, and TTL is only one of the causes.
+	// Drawn BELOW the missed row: rows are newest-first, so below is earlier in
+	// time, between the missed turn and the older turns it could not reuse.
+	const cacheMissLine = `\x1b[90m${buildDividerLine("Cache Miss")}\x1b[0m`;
+	const missed = (b: typeof displayedBins[number] | undefined) => !!b?.key && cacheMissBins.has(b.key);
+
 	for (let i = 0; i < displayedBins.length; i++) {
 		const bin = displayedBins[i];
 
+		if (i > 0 && missed(displayedBins[i - 1])) widgetLines.push(cacheMissLine);
+
 		if (showTicks && i > 0 && bin.dateStr !== displayedBins[i - 1].dateStr) {
 			widgetLines.push(`\x1b[90m${buildDividerLine(formatMmmDdStr(bin.dateStr))}\x1b[0m`);
-		}
-
-		// Labelled "Miss" not "Expired": the usage block proves the re-prime happened,
-		// but says nothing about why, and TTL is only one of the causes.
-		if (bin.key && cacheMissBins.has(bin.key)) {
-			widgetLines.push(`\x1b[90m${buildDividerLine("Cache Miss")}\x1b[0m`);
 		}
 
 		const labelPart = padString(bin.label, labelWidth);
@@ -1225,6 +1228,7 @@ export function buildWtftLines(
 			}
 		}
 	}
+	if (missed(displayedBins[displayedBins.length - 1])) widgetLines.push(cacheMissLine);
 
 	if (unit === "cost") {
 		const totalOtherCost = interactions

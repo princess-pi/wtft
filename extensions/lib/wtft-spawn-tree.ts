@@ -176,22 +176,15 @@ export function resolveSessionFile(sessionId: string): string | null {
  * kept for the resolver's life, so N children cost one tree walk per harness
  * rather than N. First harness to know an id wins, in registry order.
  *
- * A harness whose `indexSessionsById` throws, or returns anything other than
- * a `Map`, is warned about ONCE (stderr, naming the harness and the failure)
- * and cannot answer for the rest of THIS walk — the next harness is asked. A
- * harness with no index method is asked per id instead, and a throw there
- * costs only that one id, same as before this change.
+ * An index that throws, or that is not a `Map`, fails the walk: the report
+ * must not read "could not look" as "looked, found nothing". A harness with
+ * no index is asked per id, and a throw there costs only that id's answer
+ * from that harness.
  */
 export function makeSessionResolver(): (sessionId: string) => string | null {
 	const discoveries = getDiscoveries();
-	const indexes: (Map<string, string> | null | undefined)[] = discoveries.map(() => undefined);
+	const indexes: (Map<string, string> | undefined)[] = discoveries.map(() => undefined);
 	const answers = new Map<string, string | null>();
-	const warned = new Set<string>();
-	const warnIndexFailure = (harnessId: string, detail: string) => {
-		if (warned.has(harnessId)) return;
-		warned.add(harnessId);
-		console.error(`wtft: ${harnessId} session index failed (${detail}) — that harness cannot answer the rest of this walk`);
-	};
 	return (rawId: string) => {
 		// The same normalisation every `resolveSessionById` applies.
 		const sessionId = rawId.replace(/\.jsonl$/i, "");
@@ -200,32 +193,21 @@ export function makeSessionResolver(): (sessionId: string) => string | null {
 		let found: string | null = null;
 		for (let k = 0; k < discoveries.length && found === null; k++) {
 			const discovery = discoveries[k];
-			try {
-				if (discovery.indexSessionsById) {
-					// null: this harness's index failed once, so it cannot answer this walk.
-					if (indexes[k] === null) continue;
-					if (indexes[k] === undefined) {
-						const built = discovery.indexSessionsById();
-						if (built instanceof Map) {
-							indexes[k] = built;
-						} else {
-							indexes[k] = null;
-							warnIndexFailure(discovery.id, `indexSessionsById did not return a Map (got ${built === null ? "null" : typeof built})`);
-							continue;
-						}
+			if (discovery.indexSessionsById) {
+				if (indexes[k] === undefined) {
+					const built = discovery.indexSessionsById();
+					if (!(built instanceof Map)) {
+						throw new TypeError(`${discovery.id}: indexSessionsById returned ${built === null ? "null" : typeof built}, not a Map`);
 					}
-					found = indexes[k]?.get(sessionId) ?? null;
-				} else {
-					const single = discovery.resolveSessionById(sessionId);
-					found = typeof single === "string" && single ? single : null;
+					indexes[k] = built;
 				}
-			} catch (err) {
-				// A harness that cannot look is not an answer — ask the next.
-				if (discovery.indexSessionsById) {
-					indexes[k] = null;
-					warnIndexFailure(discovery.id, err instanceof Error ? err.message : String(err));
-				}
+				found = indexes[k]!.get(sessionId) ?? null;
+				continue;
 			}
+			try {
+				const single = discovery.resolveSessionById(sessionId);
+				found = typeof single === "string" && single ? single : null;
+			} catch { /* a harness that cannot look is not an answer — ask the next */ }
 		}
 		answers.set(sessionId, found);
 		return found;

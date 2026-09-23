@@ -36,47 +36,42 @@ under both spellings is one node in the walk, counted once.
 `computeSpawnTree` builds a resolver when its walk first needs one. For each harness, in registry
 order: the index when the harness has the method, else that harness's `resolveSessionById`,
 asked per id. The first harness that knows an id wins, which is the order `resolveSessionFile`
-already uses. Answers are memoised for the walk. A failed or non-`Map` index **disables that
-harness's index for the rest of this walk** and writes one stderr warning naming the harness and
-the failure; the next harness in registry order is asked instead. A harness with no index method
-is asked per id, and a throw there costs only that one id — the walk moves on to the next id, not
-the next harness. Each built-in's `indexSessionsById` also makes its root-directory read loud: an
-ENOENT (the root went away) is an empty index, same as always, but any other read failure —
-permission denied is the common case — is thrown rather than swallowed, so a caller cannot mistake
-"could not look" for "looked, found nothing".
+already uses. Answers are memoised for the walk. **An index that throws, or is not a `Map`,
+fails the walk** — the error leaves `computeSpawnTree`, so `wtft --json`/`--tokens` exits 1 with it
+(the rule #212 set for the unrecorded scan) and the widget shows no spawn block. A harness with no
+index method is asked per id, and a throw there costs only that harness's answer for that id; the
+next harness is asked. Each built-in's `indexSessionsById` reads its root directly: ENOENT is an
+empty index, and any other failure — permission denied on the root or on a directory above it — is
+thrown, so "could not look" never reads as "looked, found nothing". A copy of an id that cannot
+be stat-ed (a dangling symlink, a file gone mid-walk) never beats one that can, whichever the walk
+meets first.
 
 **Scope of the cache: one walk, built lazily.** Each harness's index is built on first need within
-the walk, not up front, so a walk that never resolves through a given harness never pays for its
-index at all. The index is thrown away when `computeSpawnTree` returns, so it can never serve a
+the walk, in registry order: an id no harness knows builds every index, and only a harness after
+the one that answers every id is spared. The index is thrown away when `computeSpawnTree` returns, so it can never serve a
 stale path to a later report. A child that MOVES after its harness's index was already built is
 reported `unreadable`, not silently found: the index still holds the old path, and that path no
 longer parses.
 
 **Road not taken — a work bound.** The issue asked for a cache *plus* a bound that degrades
 loudly. Its Closer accepts either outcome — resolve everything, or report a bounded-work skip.
-With resolution now one scan per walk, 10,000 edges resolve in well under a second, so the bound
-would buy nothing today. It would also add a fifth "tree is a floor" condition that every surface
-describing `tree` would have to carry. The remaining cost is a real child's parse, and that is
-money being counted, not waste.
+With resolution now one scan per walk (about 40–65 ms for 10,000 edges), a bound on resolution
+would buy nothing. It would also add a fifth "tree is a floor" condition that every surface
+describing `tree` would have to carry. What remains is a resolved child's parse, which is money
+being counted, and `--tokens` rendering one row per edge, which is #216.
 
 ## Verification
 
 `tests/wtft-138-resolution-index.test.ts`, with sandboxed session roots and a sandboxed ledger:
 
-- **The Closer, as the issue states it:** a ledger with 10,000 distinct child edges under one
-  parent, and `wtft --tokens` on that parent renders the tree naming all 10,000 gaps. Measured
-  2026-09-22: the tree walk takes about 40–65 ms in-process, down from 3.1 s on the same
-  100-transcript fixture. The Closer is stated as the TREE's own added cost, isolated from CLI
-  start-up (process start and the daemon spawn) by running the same CLI command twice — once over
-  the 10,000-edge ledger, once over an empty one — and diffing the two: measured 2026-09-22,
-  10,000-edge run ~1.16–1.36 s, empty-ledger run ~0.16–0.33 s, difference ~950–1,140 ms. The test
-  asserts that difference is under a second; on this host it holds most runs but has been observed
-  to land just over the line under load, since most of the difference is the report's existing
-  per-edge row rendering (one line per edge, `fitVisual`/`safeSpawnText`), not resolution — the
-  resolution itself is the ~40–65 ms figure above. At this host's PRE-#138 measured per-id cost
-  (66 ms, a tree of ~7,000 transcripts) the same 10,000 edges would have taken about 11 minutes.
-  `wtft --tokens`'s own total wall-clock time (E2) is held to a loose 5 s so a loaded host cannot
-  make it flaky.
+- **The Closer — met for resolution, not yet end to end.** A ledger with 10,000 distinct child
+  edges under one parent: `wtft --tokens` renders the tree naming all 10,000 gaps (E1), and the walk
+  itself takes about 40–65 ms in-process, down from 3.1 s on the same 100-transcript fixture (C2);
+  at this host's pre-change per-id cost it would have been about 11 minutes. End to end the CLI run
+  takes about 1.2–1.4 s against about 0.2–0.3 s over an empty ledger (measured 2026-09-22): most of
+  that second is rendering one SPAWNED row per edge. The issue's "renders in under a second" is
+  therefore not met end to end; that half is #216. C2 and E2 hold loose 5 s bounds so a loaded host
+  cannot make them flaky; the fix itself is pinned by W2's walk count, not by the clock.
 - **One walk, not one per child:** the directory-walk counter (`getDirWalkCount`) moves by the
   same amount for a 1-edge tree and a 10,000-edge tree. This, not the clock, is what pins the fix.
   It pins the one-scan property for Claude Code only — Pi's own `collect()` never calls
@@ -93,13 +88,10 @@ money being counted, not waste.
   for correctness rather than for the number of `stat` calls it made.
 - **Seam agreement:** for every id in a fixture tree, `resolveSessionById(id)` equals
   `indexSessionsById().get(id)`, for both built-in harnesses.
-- **A loud index failure:** a harness root made unreadable makes `indexSessionsById` throw rather
-  than return an empty index, and the walk writes exactly one stderr warning naming that harness
-  and the failure, then falls back to reporting the affected children `not-found` rather than
-  going silent.
-
-## Not in this change
-
+- **A loud index failure:** a harness root made unreadable makes `indexSessionsById` throw, and
+  the walk fails with that error rather than reporting the affected children `not-found` (Q1, Q2).
+- **A dead first copy:** an id whose first-seen copy is a dangling symlink still indexes to its
+  live copy, in agreement with `resolveSessionById` (D1, S1).
 - **A work bound.** Road not taken, above.
 - **#97** — reading subagent transcripts by offset in the daemon. P7's other half.
 
@@ -147,3 +139,17 @@ money being counted, not waste.
 | No work bound on the walk | Declined | Road not taken — see "Road not taken — a work bound" above; the issue's Closer accepts either outcome, and a bound would buy nothing at today's per-walk cost |
 | `docs/EXT_WTFT.html`'s spec-138 row claims the whole ledger resolves in well under a second | Verified | Corrected: the claim is limited to resolution cost — a ledger of thousands of unresolvable or already-counted edges resolves in well under a second; each resolvable child is still parsed |
 | `alreadyAttributed` ids and `claudeSubAgentFolds` fold ids were compared without the `.jsonl` normalisation the ledger and root id already get | Verified | **Code fixed**: both are stripped of a trailing `.jsonl` before being compared; test N1 |
+
+## pr-review round 5 (Claude Opus, the last authorised)
+
+| Finding | Verdict | Action |
+|---|---|---|
+| A first-seen copy that cannot be stat-ed kept its dead path over a live one (both indexes) | Verified — reproduced as D1 and by S1's agreement check; introduced by round 4's stat-avoidance | **Code fixed**: an un-stat-able copy never wins; ✅ D1, S1 |
+| E3's 1 s bound is flaky by the spec's own numbers | Verified | E3 removed; W2 pins the fix |
+| The spec declared the Closer met after restating it | Verified | Stated as met for resolution, not end to end; the rendering half filed as #216 |
+| An index failure reached only stderr, once per walk, and repeated on every widget refresh | Verified | **Code changed**: an index failure fails the walk (exit 1 in the CLI, no spawn block in the widget); no stderr printing from the library; ✅ Q2 |
+| `--json` could not tell a failed index from not-found | Verified | Resolved by the same change: the walk no longer reports not-found for a harness it could not search |
+| `existsSync` hid a permission failure above the root | Verified | **Code fixed**: the root is read directly; only ENOENT is empty |
+| Docstring said "same as before this change" | Verified | Rewritten without history |
+| A per-id throw was said to skip to the next id | Verified: it asks the next harness | Corrected |
+| "Never pays for its index" overstated the laziness | Verified | Corrected |

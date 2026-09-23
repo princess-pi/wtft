@@ -319,6 +319,10 @@ function listSpawnCandidates(sinceMs: number): SpawnCandidate[] {
 	return candidates;
 }
 
+function mtimeOrNull(file: string): number | null {
+	try { return fs.statSync(file).mtimeMs; } catch { return null; }
+}
+
 /**
  * Every session id → its newest transcript, from one walk of the tree. The
  * common case — one file per id — never pays a `stat`: a path is recorded on
@@ -328,7 +332,6 @@ function listSpawnCandidates(sinceMs: number): SpawnCandidate[] {
 function indexSessionsById(): Map<string, string> {
 	const index = new Map<string, string>();
 	const root = projectsDir();
-	if (!fs.existsSync(root)) return index;
 	let projectDirs: string[];
 	try {
 		projectDirs = fs.readdirSync(root, { withFileTypes: true })
@@ -352,14 +355,14 @@ function indexSessionsById(): Map<string, string> {
 				index.set(id, file);
 				continue;
 			}
-			try {
-				if (!newest.has(id)) newest.set(id, fs.statSync(existing).mtimeMs);
-				const mtimeMs = fs.statSync(file).mtimeMs;
-				if (mtimeMs > newest.get(id)!) {
-					newest.set(id, mtimeMs);
-					index.set(id, file);
-				}
-			} catch { /* raced with a move — skip */ }
+			// A copy that cannot be stat-ed (a dangling symlink, a file gone
+			// mid-walk) never beats one that can, whichever the walk met first.
+			if (!newest.has(id)) newest.set(id, mtimeOrNull(existing) ?? -Infinity);
+			const mtimeMs = mtimeOrNull(file);
+			if (mtimeMs !== null && mtimeMs > newest.get(id)!) {
+				newest.set(id, mtimeMs);
+				index.set(id, file);
+			}
 		}
 	}
 	return index;

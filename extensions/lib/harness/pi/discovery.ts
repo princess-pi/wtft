@@ -201,6 +201,10 @@ function isGone(err: unknown): boolean {
 	return (err as NodeJS.ErrnoException)?.code === "ENOENT";
 }
 
+function mtimeOrNull(file: string): number | null {
+	try { return fs.statSync(file).mtimeMs; } catch { return null; }
+}
+
 /**
  * Every session id → its newest transcript, from one walk of the tree. The
  * common case — one file per id — never pays a `stat`: a path is recorded on
@@ -210,7 +214,6 @@ function isGone(err: unknown): boolean {
 function indexSessionsById(): Map<string, string> {
 	const index = new Map<string, string>();
 	const root = sessionsDir();
-	if (!fs.existsSync(root)) return index;
 	// Read the root directly, so a permission failure on it — as opposed to on
 	// some nested directory `collect` walks into and quietly skips — is LOUD:
 	// a caller cannot tell "no sessions" from "could not look".
@@ -238,14 +241,14 @@ function indexSessionsById(): Map<string, string> {
 			index.set(id, file);
 			continue;
 		}
-		try {
-			if (!newest.has(id)) newest.set(id, fs.statSync(existing).mtimeMs);
-			const mtimeMs = fs.statSync(file).mtimeMs;
-			if (mtimeMs > newest.get(id)!) {
-				newest.set(id, mtimeMs);
-				index.set(id, file);
-			}
-		} catch { /* raced with a move — skip */ }
+		// A copy that cannot be stat-ed (a dangling symlink, a file gone
+		// mid-walk) never beats one that can, whichever the walk met first.
+		if (!newest.has(id)) newest.set(id, mtimeOrNull(existing) ?? -Infinity);
+		const mtimeMs = mtimeOrNull(file);
+		if (mtimeMs !== null && mtimeMs > newest.get(id)!) {
+			newest.set(id, mtimeMs);
+			index.set(id, file);
+		}
 	}
 	return index;
 }

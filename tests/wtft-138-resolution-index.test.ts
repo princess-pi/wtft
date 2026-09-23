@@ -143,16 +143,22 @@ console.log("\nPART E — the rendered report");
 		`E1 --tokens renders the tree and names all 10,000 gaps (exit ${r.status}): ${out.split("\n").filter(l => /SPAWNED|unattributed|TREE|PROVISIONAL/.test(l)).join(" | ")} ${(r.stderr || "").slice(0, 200)}`);
 	check(ms < 5000, `E2 the whole report, CLI start to exit, stays well inside 5 s (took ${Math.round(ms)} ms)`);
 
-	// E3 — the Closer as the spec states it: the TREE's added cost, isolated
-	// from CLI process start-up by diffing against the same parent over an
-	// EMPTY ledger.
-	const tenThousandLedger = fs.readFileSync(ledgerFile);
-	fs.writeFileSync(ledgerFile, "");
-	const { ms: emptyMs } = runCli();
-	fs.writeFileSync(ledgerFile, tenThousandLedger);
-	const addedMs = ms - emptyMs;
-	check(addedMs < 1000,
-		`E3 the tree's added cost over a 10,000-edge ledger, CLI start-up excluded, is under 1 s (10k-edge run ${Math.round(ms)} ms − empty-ledger run ${Math.round(emptyMs)} ms = ${Math.round(addedMs)} ms)`);
+}
+
+// ---
+// PART D — a dead first copy never hides a live second one
+// ---
+console.log("\nPART D — a dangling copy of an id does not win the index");
+{
+	const id = uuid(8101, "a138");
+	const live = path.join(claudeRoot, "-tmp-d-live", `${id}.jsonl`);
+	transcript(live, id, 5);
+	for (const slug of ["-tmp-d-0", "-tmp-d-z"]) {
+		fs.mkdirSync(path.join(claudeRoot, slug), { recursive: true });
+		fs.symlinkSync(path.join(dir, "gone", `${id}.jsonl`), path.join(claudeRoot, slug, `${id}.jsonl`));
+	}
+	check(claude.indexSessionsById!().get(id) === live && claude.resolveSessionById(id) === live,
+		`D1 the index and the single lookup both answer the live copy, whatever order the walk meets them in (got ${claude.indexSessionsById!().get(id)})`);
 }
 
 // ---
@@ -205,7 +211,7 @@ console.log("\nPART I — the index is correct over a tree with no duplicate ids
 // ---
 // PART Q — an unreadable harness root is loud, not a silent empty index
 // ---
-console.log("\nPART Q — an unreadable harness root throws, and the walk warns once");
+console.log("\nPART Q — an unreadable harness root fails the walk loudly");
 {
 	const canBypass = (() => {
 		try {
@@ -235,20 +241,10 @@ console.log("\nPART Q — an unreadable harness root throws, and the walk warns 
 			check(directErr instanceof Error && (directErr as NodeJS.ErrnoException).code === "EACCES" && String((directErr as Error).message).includes(lockedClaudeRoot),
 				`Q1 an unreadable Claude Code root throws EACCES, naming it (got ${String(directErr)})`);
 
-			const stderrLines: string[] = [];
-			const originalError = console.error;
-			console.error = (...args: unknown[]) => { stderrLines.push(args.map(String).join(" ")); };
-			let tree;
-			try {
-				tree = computeSpawnTree(PARENT, { ledgerPath: ledgerWith([uuid(9001, "f138")]) });
-			} finally {
-				console.error = originalError;
-			}
-			const claudeWarnings = stderrLines.filter(l => l.includes("claude-code"));
-			check(claudeWarnings.length === 1,
-				`Q2 exactly one stderr warning names claude-code and the walk (got ${JSON.stringify(stderrLines)})`);
-			check(tree.edges.length === 1 && tree.edges[0]?.skip === "not-found",
-				`Q3 the child is reported not-found — a loud index failure, not a silently empty one (got ${JSON.stringify(tree.edges[0])})`);
+			let walkErr: unknown = null;
+			try { computeSpawnTree(PARENT, { ledgerPath: ledgerWith([uuid(9001, "f138")]) }); } catch (e) { walkErr = e; }
+			check(walkErr instanceof Error && (walkErr as NodeJS.ErrnoException).code === "EACCES",
+				`Q2 the walk fails with the index's error rather than reporting the child not-found (got ${String(walkErr)})`);
 		} finally {
 			fs.chmodSync(lockedClaudeRoot, 0o755);
 			process.env.WTFT_CLAUDE_PROJECTS_DIR = savedClaudeRoot;

@@ -8,7 +8,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { deduplicateInteractions, parseSessionFile } from "../extensions/lib/wtft-parser.ts";
-import { getCurrentVersionTagPath, readClassifiedTagFile, WTFT_TAGGER_VERSION } from "../extensions/lib/wtft-daemon-lib.ts";
+import { daemonLaunchArgs, getCurrentVersionTagPath, readClassifiedTagFile, WTFT_TAGGER_VERSION } from "../extensions/lib/wtft-daemon-lib.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("205-harness");
@@ -101,6 +101,14 @@ async function waitFor(label: string, pred: () => boolean, tries = 80): Promise<
 }
 
 console.log("wtft one daemon per harness (#205)");
+
+{
+	const custom = "/tmp/wtft-custom-projects-root";
+	const under = daemonLaunchArgs(`${custom}/proj/session.jsonl`, { WTFT_CLAUDE_PROJECTS_DIR: custom } as NodeJS.ProcessEnv);
+	const plain = daemonLaunchArgs(`${custom}/proj/session.jsonl`, {} as NodeJS.ProcessEnv);
+	assert("restart env keeps a custom projects root on --harness", under[0] === "--harness" && under[1] === "claude");
+	assert("without that root the same path stays a per-session daemon", plain.length === 2 && plain[0] === "--session");
+}
 
 try {
 	const claudePid = start(["--harness", "claude"], "claude.err");

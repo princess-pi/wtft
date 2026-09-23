@@ -123,6 +123,10 @@ interface SubagentFileState {
 	spawnWindowClosesAt: number;
 	owners: FoldOwner[];
 	stampInterrupt: boolean;
+	/** Last turn not yet written, so a following interrupt can still mark it. */
+	pendingTurn: NonNullable<ReturnType<typeof parseEntryToInteraction>> | null;
+	/** Cost already tagged for an ordinary id. A lower correction opens a new generation. */
+	plainCost: Map<string, number>;
 }
 
 let discoveredSubagentFiles = new Map<string, SubagentFileState>();
@@ -293,7 +297,27 @@ function freshSubagentState(): SubagentFileState {
     spawnWindowClosesAt: 0,
     owners: [],
     stampInterrupt: false,
+    pendingTurn: null,
+    plainCost: new Map(),
   };
+}
+
+function hashFilePrefix(file: string, length: number): string {
+  const hash = createHash("sha1");
+  const fd = fs.openSync(file, "r");
+  try {
+    const buf = Buffer.alloc(64 * 1024);
+    let pos = 0;
+    while (pos < length) {
+      const n = fs.readSync(fd, buf, 0, Math.min(buf.length, length - pos), pos);
+      if (n <= 0) break;
+      hash.update(buf.subarray(0, n));
+      pos += n;
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return hash.digest("hex");
 }
 
 function hashFileBytes(file: string): string {
@@ -350,10 +374,6 @@ function parseAppendedBytes(
       if (isControl) continue;
       const interaction = parseEntryToInteraction(entry, stream.thinkingLevel, stream.compactionTokensBefore, stream.afterCompaction, stream.model);
       if (interaction) {
-        if (stampInterrupt) {
-          interaction.interrupted = true;
-          stampInterrupt = false;
-        }
         interactions.push(interaction);
         stream.compactionTokensBefore = undefined;
         stream.afterCompaction = false;
@@ -416,6 +436,14 @@ function syncSubagentTranscript(file: string): boolean {
         return wroteAny;
       }
     }
+    if (!rotate && fileState.lastSize > 0 && size > fileState.lastSize) {
+      try {
+        if (hashFilePrefix(file, fileState.lastSize) !== fileState.contentHash.copy().digest("hex")) rotate = true;
+      } catch (err) {
+        pollHadFailure = true;
+        return wroteAny;
+      }
+    }
     if (rotate) {
       if (process.env.WTFT_DAEMON_DEBUG) {
         process.stderr.write(`[wtft-log-parser] subagent transcript rotated, opening a new generation: ${path.basename(file)}\n`);
@@ -459,6 +487,11 @@ function syncSubagentTranscript(file: string): boolean {
 
     const deduped = parsed ? clearSubagentCacheMiss(deduplicateInteractions(parsed.interactions)) : [];
     const plain: typeof deduped = [];
+    if (parsed?.stampInterrupt && fileState.pendingTurn) fileState.pendingTurn.interrupted = true;
+    if (fileState.pendingTurn) {
+      plain.push(fileState.pendingTurn);
+      fileState.pendingTurn = null;
+    }
     const newOwners: FoldOwner[] = [];
     for (const interaction of deduped) {
       if (hasClaudeCommand(interaction)) {
@@ -467,6 +500,20 @@ function syncSubagentTranscript(file: string): boolean {
         plain.push(interaction);
       }
     }
+    if (attempt === 0) {
+      const retracted = plain.some(interaction => {
+        if (!interaction.messageId) return false;
+        const prev = fileState.plainCost.get(interaction.messageId);
+        return prev !== undefined && interaction.cost + 1e-9 < prev;
+      });
+      if (retracted) {
+        fileState = freshSubagentState();
+        discoveredSubagentFiles.set(stateKey, fileState);
+        continue;
+      }
+    }
+    const holdBack = Date.now() - mtimeMs <= MTIME_SETTLE_MS && plain.length > 0;
+    if (holdBack) fileState.pendingTurn = plain.pop() ?? null;
     const owners = [...fileState.owners, ...newOwners];
     const windowOpen = Date.now() <= fileState.spawnWindowClosesAt + MTIME_SETTLE_MS;
     const needAttr = owners.length > 0 && (
@@ -506,7 +553,10 @@ function syncSubagentTranscript(file: string): boolean {
       if (fileState.newGeneration && (plain.length > 0 || clones.length > 0 || rotate)) {
         batch = generationRecordLine(source, sessionId);
       }
-      for (const interaction of plain) batch += serializeClassified(interaction, source);
+      for (const interaction of plain) {
+        batch += serializeClassified(interaction, source);
+        if (interaction.messageId) fileState.plainCost.set(interaction.messageId, interaction.cost);
+      }
       clones.forEach((interaction, i) => {
         const line = serializeClassified(interaction, source);
         if (line === nextOwners[i].lastLine) return;
@@ -1335,9 +1385,27 @@ function adoptSession(): boolean {
   tagPath = getCurrentVersionTagPath(sessionPath);
   try { fs.mkdirSync(path.dirname(tagPath), { recursive: true }); } catch { /* exists */ }
   pidPath = getDaemonPidPath(sessionPath);
-  if (claimPidFile(pidPath) === "busy") return false;
+  try {
+    if (fs.readFileSync(pidPath, "utf8").trim() === "rebuild") rebuildTagOnStartup = true;
+  } catch { /* no lease yet */ }
+  if (!takeOverLease(pidPath)) return false;
   initClassified();
   return true;
+}
+
+function takeOverLease(pidPath: string): boolean {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (claimPidFile(pidPath) === "claimed") return true;
+    let holder = 0;
+    try { holder = Number(fs.readFileSync(pidPath, "utf8").trim()); } catch { holder = 0; }
+    if (holder === process.pid) return true;
+    if (holder > 0) {
+      try { process.kill(holder, "SIGTERM"); } catch { /* already gone */ }
+    }
+    const until = Date.now() + 50;
+    while (Date.now() < until) { /* the previous daemon exits on SIGTERM */ }
+  }
+  return claimPidFile(pidPath) === "claimed";
 }
 
 function scheduleFlush(key: string) {
@@ -1377,7 +1445,19 @@ function wake(file: string, displayed: boolean) {
     dropHarnessSlot(key);
     return;
   }
-  if (slot.pendingItems.length > 0) scheduleFlush(key);
+  const movedTo = slot.sessionPath;
+  if (movedTo !== key) {
+    const other = harnessSlots.get(movedTo);
+    if (other && other !== slot) dropHarnessSlot(movedTo);
+    harnessSlots.delete(key);
+    harnessSlots.set(movedTo, slot);
+    const timer = harnessFlushTimers.get(key);
+    if (timer) {
+      harnessFlushTimers.delete(key);
+      harnessFlushTimers.set(movedTo, timer);
+    }
+  }
+  if (slot.pendingItems.length > 0) scheduleFlush(movedTo);
 }
 
 function watchDir(dir: string) {
@@ -1407,10 +1487,16 @@ function watchDir(dir: string) {
   } catch {
     return;
   }
+  const insideSubagents = key.includes(`${path.sep}subagents${path.sep}`) || key.endsWith(`${path.sep}subagents`);
   for (const ent of entries) {
-    if (!ent.isDirectory()) continue;
-    if (HARNESS_SKIP_DIRS.has(ent.name) && ent.name !== "subagents") continue;
-    watchDir(path.resolve(key, ent.name));
+    const child = path.resolve(key, ent.name);
+    if (ent.isDirectory()) {
+      if (HARNESS_SKIP_DIRS.has(ent.name) && ent.name !== "subagents") continue;
+      watchDir(child);
+      continue;
+    }
+    if (insideSubagents) continue;
+    if (ent.name.endsWith(".jsonl") && !ent.name.includes(".wtft-tag.")) wake(child, false);
   }
 }
 
@@ -1525,6 +1611,7 @@ function dropHarnessSlot(key: string) {
 function slotNeedsChildScan(slot: Slot, now: number): boolean {
   if (slot.pendingClaudeCommands.length > 0) return true;
   for (const state of slot.discoveredSubagentFiles.values()) {
+    if (state.pendingTurn) return true;
     if (now <= state.spawnWindowClosesAt + MTIME_SETTLE_MS) return true;
   }
   return false;
@@ -1859,7 +1946,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       try { fs.unlinkSync(fullPath); } catch (_) {}
       if (sessionFound) {
         try {
-          const child = spawn(process.execPath, [process.argv[1], ...daemonLaunchArgs(sessionFound)], {
+          const child = spawn(process.execPath, [process.argv[1], ...daemonLaunchArgs(sessionFound, restartEnv)], {
             detached: true,
             stdio: "ignore",
             env: restartEnv,

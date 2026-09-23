@@ -36,8 +36,8 @@ const SKIP_DIRS = new Set(["subagents", "tool-results", "memory", "wtft-tags"]);
 
 /** The one definition of the projects root. `WTFT_CLAUDE_PROJECTS_DIR` points
  *  it at a fixture tree. */
-export function projectsDir(): string {
-	return process.env.WTFT_CLAUDE_PROJECTS_DIR || path.join(os.homedir(), ".claude", "projects");
+export function projectsDir(env: NodeJS.ProcessEnv = process.env): string {
+	return env.WTFT_CLAUDE_PROJECTS_DIR || path.join(os.homedir(), ".claude", "projects");
 }
 
 function sessionIdOf(file: string): string {

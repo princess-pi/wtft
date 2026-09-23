@@ -549,9 +549,9 @@ function pathIsUnder(file: string, root: string): boolean {
 }
 
 /** A session under a harness root is served by that root's one daemon. */
-export function daemonLaunchArgs(sessionPath: string): string[] {
-	const claude = projectsDir();
-	const pi = process.env.WTFT_PI_SESSIONS_DIR || path.join(os.homedir(), ".pi", "agent", "sessions");
+export function daemonLaunchArgs(sessionPath: string, env: NodeJS.ProcessEnv = process.env): string[] {
+	const claude = projectsDir(env);
+	const pi = env.WTFT_PI_SESSIONS_DIR || path.join(os.homedir(), ".pi", "agent", "sessions");
 	if (pathIsUnder(sessionPath, claude)) return ["--harness", "claude", "--session", sessionPath];
 	if (pathIsUnder(sessionPath, pi)) return ["--harness", "pi", "--session", sessionPath];
 	return ["--session", sessionPath];

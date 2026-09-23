@@ -574,7 +574,12 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
     if (needAttr) {
       try {
         clones = owners.map(o => structuredClone(o.base));
-        attributeClaudeSubAgentCosts(clones, resolveLastCwd(file), foldedByAnother);
+        const doNotFold = new Set([
+          canonicalTranscriptPath(sessionPath),
+          canonicalTranscriptPath(file),
+          ...foldedByAnother,
+        ]);
+        attributeClaudeSubAgentCosts(clones, resolveLastCwd(file), doNotFold);
       } catch (err) {
         pollHadFailure = true;
         if (!warnedSubagentParseFailure.has(stateKey)) {

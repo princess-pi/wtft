@@ -46,7 +46,15 @@ import {
 
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const POLL_MS = 667; // 90bpm throttle
-const IDLE_EXIT_MS = 24 * 60 * 60 * 1000;
+function envMs(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  if (!/^\d+$/.test(raw)) return fallback;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) ? n : fallback;
+}
+const IDLE_EXIT_MS = envMs("WTFT_DAEMON_IDLE_MS", 24 * 60 * 60 * 1000);
+const STARTUP_GRACE_MS = envMs("WTFT_DAEMON_STARTUP_GRACE_MS", 60 * 1000);
 // Park at most 1h on a session.jsonl that has never appeared; only the never-seen case uses this ceiling.
 const SESSION_WAIT_MAX_MS = 60 * 60 * 1000;
 
@@ -1105,7 +1113,7 @@ function serviceSession(): "continue" | "stop" | "drop" {
       lastWriteMs = now;
     }
 
-    if (now - lastActivityMs >= IDLE_EXIT_MS && now - startupTime >= 60000) {
+    if (now - lastActivityMs >= IDLE_EXIT_MS && now - startupTime >= STARTUP_GRACE_MS) {
       if (process.env.WTFT_DAEMON_DEBUG) {
         process.stderr.write(`[wtft-log-parser] no new data for ${Math.round((now - lastActivityMs) / 60000)}m, exiting\n`);
       }
@@ -1161,6 +1169,7 @@ const harnessSlots = new Map<string, Slot>();
 const harnessWatchers = new Map<string, fs.FSWatcher>();
 const harnessFlushTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let harnessPidFile = "";
+let harnessIdleTimer: ReturnType<typeof setInterval> | null = null;
 
 function freshSlot(file: string, displayed: boolean): Slot {
   const now = Date.now();
@@ -1354,7 +1363,7 @@ function wake(file: string, displayed: boolean) {
   }
   const status = withSlot(slot, () => serviceSession());
   if (status === "drop") {
-    harnessSlots.delete(key);
+    dropHarnessSlot(key);
     return;
   }
   if (slot.pendingItems.length > 0) scheduleFlush(key);
@@ -1420,7 +1429,8 @@ function onWatch(dir: string, filename: string | null) {
     let now: fs.Stats;
     try {
       now = fs.statSync(file);
-    } catch {
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") wake(file, slot.displayed);
       continue;
     }
     if (now.ino !== slot.sessionIno || now.size !== slot.lastSize) wake(file, slot.displayed);
@@ -1461,11 +1471,38 @@ function runHarness(which: string, focus: string) {
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] harness settled ${which}\n`);
   }
+  harnessIdleTimer = setInterval(sweepIdleSlots, 250);
+  harnessIdleTimer.unref();
+}
+
+function dropHarnessSlot(key: string) {
+  const timer = harnessFlushTimers.get(key);
+  if (timer) clearTimeout(timer);
+  harnessFlushTimers.delete(key);
+  harnessSlots.delete(key);
+  if (process.env.WTFT_DAEMON_DEBUG) {
+    process.stderr.write(`[wtft-log-parser] session drop ${path.basename(key)}\n`);
+  }
+}
+
+function sweepIdleSlots() {
+  if (!running) return;
+  const now = Date.now();
+  for (const key of [...harnessSlots.keys()]) {
+    const slot = harnessSlots.get(key);
+    if (!slot) continue;
+    if (slot.pendingItems.length > 0) continue;
+    if (now - slot.startupTime < STARTUP_GRACE_MS) continue;
+    if (now - slot.lastActivityMs < IDLE_EXIT_MS) continue;
+    dropHarnessSlot(key);
+  }
 }
 
 function stopHarness(reason: string) {
   if (!running) return;
   running = false;
+  if (harnessIdleTimer) clearInterval(harnessIdleTimer);
+  harnessIdleTimer = null;
   for (const timer of harnessFlushTimers.values()) clearTimeout(timer);
   for (const slot of harnessSlots.values()) {
     withSlot(slot, () => {
@@ -1648,7 +1685,11 @@ Daemon mode:
                         Reparse sessions under both harness roots whose mtime is in [from, to),
                         one at a time, and only when the current tag is missing or empty. No watch.
   --debug               Enable debug logging to stderr
-  -h, --help            Show this help`);
+  -h, --help            Show this help
+
+Environment:
+  WTFT_DAEMON_IDLE_MS          Milliseconds with no new lines before a session is dropped (default 86400000)
+  WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after start before that drop can fire (default 60000)`);
       process.exit(0);
     } else if (arg === "--debug") {
       process.env.WTFT_DAEMON_DEBUG = "1";

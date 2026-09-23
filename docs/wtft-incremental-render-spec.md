@@ -16,8 +16,8 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 │  Tag format includes message.id for cross-run dedup.    │
 │  Heartbeats: one _hb line, in place. Harness mode       │
 │  writes it only for a session a consumer is displaying. │
-│  Poll loop wrapped in try/catch: transient errors       │
-│  (disk full, bad JSON) are logged, daemon survives.     │
+│  A failed tag write exits the process. A bad session    │
+│  line is skipped. Other poll errors log in debug mode.  │
 │  Idle 24h drops that session. A --session process exits.│
 │  A harness process stays up. Grace: 60s after startup.  │
 │  Costs rounded to 6 decimal places before JSON write    │
@@ -52,7 +52,7 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 |---|---|
 | `session_start` (Pi) or `wtft` / `wtft --watch` invoked (CLI) | Starts the log parser daemon if that session's pid lease is not already held. A session under a harness root attaches to that root's one process. |
 | New session data arrives | Classifies and flushes that session's tag. Flushes for one session are at least 667ms apart. |
-| No new data for 24h | That session is dropped ("idle timeout"). A `--session` process exits. A harness process stays up and adopts the session again on a later write. |
+| No new data for 24h | That session is dropped ("idle timeout"). A `--session` process exits. A harness process stays up. It decides from in-memory timestamps on a timer and does not stat the file. A later write adopts the session again. |
 | Daemon just spawned (< 60s) | Idle drop suppressed (startup grace period) |
 | Session file deleted | A `--session` process exits ("session removed") unless the transcript moved. A harness process drops that session and stays up. |
 | Session file not yet created | Waits, and writes a heartbeat when this process is the per-session daemon or the session is the one a consumer is displaying, so the widget can show "waiting for session .jsonl..." (#124). Past the wait cap, a `--session` process exits ("session never written") and a harness process drops the slot. |

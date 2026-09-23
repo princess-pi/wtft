@@ -75,14 +75,14 @@ const env = {
 const pids: number[] = [];
 const stderrPaths: string[] = [];
 
-function start(args: string[], stderrName: string): number {
+function start(args: string[], stderrName: string, extraEnv?: Record<string, string>): number {
 	const stderrPath = path.join(root, stderrName);
 	stderrPaths.push(stderrPath);
 	const fd = fs.openSync(stderrPath, "a");
 	const child = spawn(process.execPath, [DAEMON, ...args], {
 		detached: true,
 		stdio: ["ignore", "ignore", fd],
-		env,
+		env: extraEnv ? { ...env, ...extraEnv } : env,
 	});
 	child.unref();
 	fs.closeSync(fd);
@@ -119,7 +119,15 @@ try {
 	const lastPiTag = getCurrentVersionTagPath(piFiles[N - 1]);
 	const settled = await waitFor(
 		"both harnesses classify their last fixture",
-		() => fs.existsSync(lastClaudeTag) && fs.existsSync(lastPiTag),
+		() => {
+			try {
+				const claudeHit = readClassifiedTagFile(lastClaudeTag).some((row: { messageId?: string }) => row.messageId === `c-${N - 1}`);
+				const piHit = readClassifiedTagFile(lastPiTag).some((row: { messageId?: string }) => row.messageId === `p-${N - 1}`);
+				return claudeHit && piHit;
+			} catch {
+				return false;
+			}
+		},
 		120,
 	);
 	assert("100 claude files and 100 pi files are classified", settled);
@@ -168,7 +176,7 @@ try {
 	const gaps = flushTimes.slice(1).map((t, i) => t - flushTimes[i]);
 	assert(
 		`flushes for one file stay at least POLL_MS apart (${flushTimes.join(",")})`,
-		firstFlush && flushTimes.length >= 1 && gaps.every(gap => gap >= POLL_MS - 50),
+		firstFlush && flushTimes.length >= 2 && gaps.every(gap => gap >= POLL_MS - 50),
 	);
 	const burstIds = readClassifiedTagFile(getCurrentVersionTagPath(burst)).map((row: { messageId?: string }) => row.messageId);
 	assert("both burst turns are classified", burstIds.includes("burst-a") && burstIds.includes("burst-b"));
@@ -181,6 +189,12 @@ try {
 		readClassifiedTagFile(getCurrentVersionTagPath(replaced)).some((row: { messageId?: string }) => row.messageId === "replaced"),
 	);
 	assert("renaming a new file onto the path still classifies it", sawReplaced);
+
+	fs.unlinkSync(claudeFiles[3]);
+	const deleted = await waitFor("a deleted fixture is dropped", () =>
+		fs.readFileSync(claudeErr, "utf8").includes("session drop s-3.jsonl"),
+	);
+	assert("a deleted fixture drops that session and the process stays", deleted && alive(claudePid));
 
 	const src = fs.readFileSync(path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.ts"), "utf8");
 	assert("no per-line writtenLines map", !src.includes("writtenLines"));
@@ -203,7 +217,7 @@ try {
 	const elapsed = Date.now() - started;
 	assert(
 		`one-session reparse has no POLL_MS delay per line (${elapsed} ms, exit ${reparseCode})`,
-		reparseCode === 0 && elapsed < 40 * POLL_MS,
+		reparseCode === 0 && elapsed < 5000,
 	);
 	const fastIds = readClassifiedTagFile(getCurrentVersionTagPath(fast)).map((row: { messageId?: string }) => row.messageId);
 	assert("reparse classifies the fixture", fastIds.includes("fast-0") && fastIds.includes("fast-39"));
@@ -271,6 +285,22 @@ try {
 		readClassifiedTagFile(getCurrentVersionTagPath(stale)).some((row: { messageId?: string }) => row.messageId === "range-stale"),
 	);
 	assert("a session outside the range is not parsed", !fs.existsSync(getCurrentVersionTagPath(outside)));
+
+	const idleDir = path.join(claudeRoot, "idleproj");
+	fs.mkdirSync(idleDir, { recursive: true });
+	const idleFile = path.join(idleDir, "idle.jsonl");
+	fs.writeFileSync(idleFile, turnLine("idle-0", T0, 10));
+	const idlePid = start(["--harness", "claude"], "idle.err", {
+		WTFT_DAEMON_IDLE_MS: "400",
+		WTFT_DAEMON_STARTUP_GRACE_MS: "0",
+	});
+	const idleErr = path.join(root, "idle.err");
+	const idleDropped = await waitFor(
+		"an idle session is dropped",
+		() => fs.existsSync(idleErr) && fs.readFileSync(idleErr, "utf8").includes("session drop idle.jsonl"),
+		50,
+	);
+	assert("idle drop leaves the harness process up", idleDropped && alive(idlePid));
 } finally {
 	for (const pid of pids) {
 		try { process.kill(pid, "SIGTERM"); } catch { /* gone */ }

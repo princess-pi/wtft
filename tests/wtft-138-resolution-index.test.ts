@@ -113,6 +113,9 @@ console.log("\nPART R — resolution still finds, prices, and prefers the newest
 	const both = computeSpawnTree(PARENT, { ledgerPath: ledgerWith([child, `${child}.jsonl`]) });
 	check(both.descendants === 1 && both.total.outputTokens === 700,
 		`R3 one session recorded under both spellings is counted once (got ${both.descendants} descendants, ${both.total.outputTokens} tokens)`);
+	const suffixedRoot = computeSpawnTree(`${PARENT}.jsonl`, { ledgerPath: ledgerWith([child]) });
+	check(suffixedRoot.descendants === 1,
+		`R4 a root named by its file name finds the edges recorded under its id (got ${suffixedRoot.descendants} descendants)`);
 }
 
 // ---

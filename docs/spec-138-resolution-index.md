@@ -95,3 +95,11 @@ money being counted, not waste.
 | An index that returns a non-Map was rebuilt for every id | Verified | Treated as a failed index for the walk |
 | Pre-fix CLI figure mixed the fixture and the host | Verified | Both figures stated, each with its scale |
 | Test banner said "under a second" | Verified | Corrected |
+
+## pr-review round 3 (the round limit)
+
+| Finding | Verdict | Action |
+|---|---|---|
+| adding-a-harness still said the built-ins' single lookup is an index lookup | Verified — round 2 reverted that | Corrected |
+| A root passed as `<uuid>.jsonl` matched no edge once the reader stripped the suffix | Verified — a regression from round 2, reproduced as R4 | **Code fixed**: the root id is stripped too; ✅ R4 |
+| A harness returning `undefined` from `resolveSessionById` stopped the search as found | Verified | Any non-string is not found |

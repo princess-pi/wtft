@@ -140,8 +140,9 @@ since the union arm is a bonus find either way, but not literally "always null".
 `indexSessionsById` is optional: every id your harness holds, mapped to the path
 `resolveSessionById` would return for it, from one walk of your tree. A spawn-tree walk uses it to
 resolve thousands of children for the price of one scan; without it each child costs a
-`resolveSessionById` call. The built-ins define `resolveSessionById` as a lookup in a fresh index,
-so the two cannot disagree.
+`resolveSessionById` call. Keep `resolveSessionById` a cheap single-id scan rather than a lookup
+in a fresh index: a running daemon calls it to follow a moved session. The two must give the same
+answer for every id; the built-ins are held to that by a test.
 
 ## 2. `parse` — what does this harness's entry schema mean?
 

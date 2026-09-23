@@ -196,7 +196,8 @@ export function makeSessionResolver(): (sessionId: string) => string | null {
 					}
 					found = indexes[k]?.get(sessionId) ?? null;
 				} else {
-					found = discovery.resolveSessionById(sessionId);
+					const single = discovery.resolveSessionById(sessionId);
+					found = typeof single === "string" && single ? single : null;
 				}
 			} catch {
 				// A harness that cannot look is not an answer — ask the next.
@@ -224,6 +225,8 @@ export function computeSpawnTree(
 	rootSessionId: string,
 	options: SpawnTreeOptions = {},
 ): SpawnTree {
+	// The ledger reader strips `.jsonl`; the root must match it.
+	rootSessionId = rootSessionId.replace(/\.jsonl$/i, "");
 	const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
 	const now = options.now ?? Date.now();
 

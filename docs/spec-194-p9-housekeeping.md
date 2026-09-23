@@ -186,11 +186,10 @@ reported.
 - **Discovery pass, then freeze.** Both builds parse the live selection once. Every
   `claudeSubAgentFolds[].file` either build names, at any depth, is copied into the
   snapshot at its own relative path. A child only one build finds is still in the
-  snapshot, so the lost check can still fire. Three things stay out, each with a stderr
-  note: children only a build whose discovery parse throws would have found; a fold file
-  outside the Claude Code projects root; and a file whose copy fails (a selected
-  transcript that fails to copy is still counted in the session header and contributes
-  nothing).
+  snapshot, so the lost check can still fire. Two things stay out, each with a stderr
+  note: children only a build whose discovery parse throws would have found, and a fold
+  file outside the Claude Code projects root. A file that fails to copy fails the run,
+  since both measured passes would otherwise skip it and certify a smaller corpus.
 - Both measured passes run with `WTFT_CLAUDE_PROJECTS_DIR` set to the snapshot's projects
   root, the #129 seam. A fake `HOME` does not work, because bun caches `os.homedir()` at
   process start.
@@ -258,3 +257,4 @@ producer-side gap is duppypro/princess-pi-tools#1021.
 | `pr-review` round 1 | 13 findings (2 Medium): `head \| grep -q` under `pipefail` read a large guard as absent (reproduced: exit 141); M7c blind to a rename of an optional field; the untagged line saying "not in SPAWNED" despite the overlap; an unquoted `find` root; `--help` splitting the sentinel; stale pointers in comments | `is_nsp_guard`, M7c, `renderRecordedSpawns`, `pickTranscripts` | ✅ V10g, M7c optional fields, R1 | Fixed; the line now reads "left out of their edge totals". Declined: the claim that `parseSubagentMeta` may not exist — it is the private parser `readSubagentMetaChecked` calls |
 | `pr-review` round 2 | 9 findings (1 Medium): M7c still blind to a key renamed by a refresh; the corpus floor of 5; an unset `PATH` aborting with no JSON document; fold paths compared against a non-canonical root; L5's Claude Code arm unable to fail; the untagged docstring and H1 bullet contradicting the overlap; two comment wordings | M7c, `NSP_PATH_DIRS`, `ccRoot`, the L5 fixture | ✅ M7c key check, L5 with a session-id-shaped file; the unset-`PATH` case untested | Fixed |
 | `pr-review` round 3 and Macroscope | 8 Low, plus 1 Medium thread: a BEFORE build without the projects-root seam measures the live root, not the snapshot; `find` failures selecting nothing and exiting 0; M5 failing on a host with a `wtft` in `/usr/bin`; L4–L6 vacuous without an id index; two stale comments; the auditor count; fallback pricing as an untagged-cost source | `main`, `pickTranscripts`, M5's PATH, the L4 fixture | ✅ E8–E10, L4a | Fixed: the script probes `--before`'s `projectsDir` and refuses a build without the seam (exit 2). Declined: `descendantUntagged` read unguarded in the renderer — `SpawnTree` requires the field, and `tsc --noEmit` passes, so every constructor sets it |
+| Macroscope, ready round | 2 Medium threads: a failed snapshot copy let the gate certify a smaller corpus; an unchecked `mktemp -d` in the mutation probe | `copyUnder`; `run-mutants.sh` | reconciled-against-untested | Fixed: a failed copy now fails the run; every probe `mktemp -d` exits on failure |

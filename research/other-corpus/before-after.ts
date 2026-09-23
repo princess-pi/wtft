@@ -139,7 +139,9 @@ export function snapshotCorpus(opts: {
 			fs.mkdirSync(path.dirname(dest), { recursive: true });
 			fs.copyFileSync(file, dest);
 		} catch (err) {
-			console.error(`before-after: could not copy into the snapshot, left out: ${file} (${err instanceof Error ? err.message : String(err)})`);
+			// Fatal: a file missing from the snapshot would be skipped by both
+			// measured passes, and the comparison would certify a smaller corpus.
+			throw new Error(`before-after: could not copy into the snapshot: ${file} (${err instanceof Error ? err.message : String(err)})`);
 		}
 	};
 

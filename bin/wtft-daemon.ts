@@ -501,9 +501,10 @@ function syncSubagentTranscript(file: string): boolean {
       }
     }
     if (attempt === 0) {
+      const seenCost = fileState.plainCost;
       const retracted = plain.some(interaction => {
         if (!interaction.messageId) return false;
-        const prev = fileState.plainCost.get(interaction.messageId);
+        const prev = seenCost.get(interaction.messageId);
         return prev !== undefined && interaction.cost + 1e-9 < prev;
       });
       if (retracted) {

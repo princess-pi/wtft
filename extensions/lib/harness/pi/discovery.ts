@@ -195,19 +195,53 @@ function discoverScoped(root: string, target: string, opts: DiscoverScopeOptions
 	return [...bySessionId.values()];
 }
 
-/** Every session id → its newest transcript, from one walk of the tree. */
+/** A path that went away between the `existsSync` check and the read that
+ *  follows it — the only read failure that means "nothing to index". */
+function isGone(err: unknown): boolean {
+	return (err as NodeJS.ErrnoException)?.code === "ENOENT";
+}
+
+/**
+ * Every session id → its newest transcript, from one walk of the tree. The
+ * common case — one file per id — never pays a `stat`: a path is recorded on
+ * first sight, and only a SECOND file for the same id triggers the `stat`
+ * pair needed to keep the newer one.
+ */
 function indexSessionsById(): Map<string, string> {
 	const index = new Map<string, string>();
 	const root = sessionsDir();
 	if (!fs.existsSync(root)) return index;
+	// Read the root directly, so a permission failure on it — as opposed to on
+	// some nested directory `collect` walks into and quietly skips — is LOUD:
+	// a caller cannot tell "no sessions" from "could not look".
+	let rootEntries: fs.Dirent[];
+	try {
+		rootEntries = fs.readdirSync(root, { withFileTypes: true });
+	} catch (err) {
+		if (isGone(err)) return index;
+		throw err;
+	}
 	const files: string[] = [];
-	collect(root, files);
+	for (const entry of rootEntries) {
+		const full = path.join(root, entry.name);
+		if (entry.isDirectory()) {
+			if (!SKIP_DIRS.has(entry.name)) collect(full, files);
+		} else if (entry.name.endsWith(".jsonl")) {
+			files.push(full);
+		}
+	}
 	const newest = new Map<string, number>();
 	for (const file of files) {
 		const id = sessionIdOf(file);
+		const existing = index.get(id);
+		if (!existing) {
+			index.set(id, file);
+			continue;
+		}
 		try {
+			if (!newest.has(id)) newest.set(id, fs.statSync(existing).mtimeMs);
 			const mtimeMs = fs.statSync(file).mtimeMs;
-			if (!newest.has(id) || mtimeMs > newest.get(id)!) {
+			if (mtimeMs > newest.get(id)!) {
 				newest.set(id, mtimeMs);
 				index.set(id, file);
 			}

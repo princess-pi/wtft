@@ -1,6 +1,6 @@
 #!/usr/bin/env -S bun
 /**
- * #138 — one session index per spawn-tree walk.
+ * one session index per spawn-tree walk.
  * Spec: docs/spec-138-resolution-index.md.
  */
 
@@ -9,6 +9,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+import { skip } from "./lib/skips";
 
 isolateTmpdir("138-resolution-index");
 
@@ -128,15 +129,30 @@ console.log("\nPART E — the rendered report");
 	fs.copyFileSync(ledgerWith(Array.from({ length: 10_000 }, (_, i) => uuid(i, "e138"))), path.join(stateHome, "wtft", "spawns.jsonl"));
 	const session = path.join(dir, "e-session", `${PARENT}.jsonl`);
 	transcript(session, PARENT, 50);
-	const t0 = performance.now();
-	const r = spawnSync("node", [path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs"), "-s", session, "--tokens"], {
-		encoding: "utf8", env: { ...process.env, XDG_STATE_HOME: stateHome },
-	});
-	const ms = performance.now() - t0;
+	const ledgerFile = path.join(stateHome, "wtft", "spawns.jsonl");
+	const runCli = () => {
+		const t0 = performance.now();
+		const r = spawnSync("node", [path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs"), "-s", session, "--tokens"], {
+			encoding: "utf8", env: { ...process.env, XDG_STATE_HOME: stateHome },
+		});
+		return { r, ms: performance.now() - t0 };
+	};
+	const { r, ms } = runCli();
 	const out = (r.stdout || "").replace(/\x1b\[[0-9;]*m/g, "");
 	check((r.status === 0 || r.status === 9) && /10000 unattributed/.test(out),
 		`E1 --tokens renders the tree and names all 10,000 gaps (exit ${r.status}): ${out.split("\n").filter(l => /SPAWNED|unattributed|TREE|PROVISIONAL/.test(l)).join(" | ")} ${(r.stderr || "").slice(0, 200)}`);
 	check(ms < 5000, `E2 the whole report, CLI start to exit, stays well inside 5 s (took ${Math.round(ms)} ms)`);
+
+	// E3 — the Closer as the spec states it: the TREE's added cost, isolated
+	// from CLI process start-up by diffing against the same parent over an
+	// EMPTY ledger.
+	const tenThousandLedger = fs.readFileSync(ledgerFile);
+	fs.writeFileSync(ledgerFile, "");
+	const { ms: emptyMs } = runCli();
+	fs.writeFileSync(ledgerFile, tenThousandLedger);
+	const addedMs = ms - emptyMs;
+	check(addedMs < 1000,
+		`E3 the tree's added cost over a 10,000-edge ledger, CLI start-up excluded, is under 1 s (10k-edge run ${Math.round(ms)} ms − empty-ledger run ${Math.round(emptyMs)} ms = ${Math.round(addedMs)} ms)`);
 }
 
 // ---
@@ -153,6 +169,107 @@ console.log("\nPART S — seam agreement");
 		check(ids.length > 0 && disagree.length === 0,
 			`S1 ${name}: resolveSessionById agrees with indexSessionsById on all ${ids.length} ids (disagree: ${disagree.slice(0, 3).join(", ")})`);
 	}
+}
+
+// ---
+// PART I — indexSessionsById is correct when no id repeats
+// ---
+// This bun runtime's `import * as fs from "node:fs"` does not bind live to a
+// patched `require("node:fs")`, so a spy on `statSync` call counts is not
+// observable here (confirmed by hand, not asserted below) — the fallback is
+// correctness over a tree with no duplicate ids, where the fix's whole point
+// (skip the stat until a SECOND file for an id appears) can never fire.
+console.log("\nPART I — the index is correct over a tree with no duplicate ids");
+{
+	const uniqueRoot = path.join(dir, "i-claude-unique");
+	fs.mkdirSync(uniqueRoot, { recursive: true });
+	const saved = process.env.WTFT_CLAUDE_PROJECTS_DIR;
+	process.env.WTFT_CLAUDE_PROJECTS_DIR = uniqueRoot;
+	try {
+		const want = new Map<string, string>();
+		for (let n = 0; n < 50; n++) {
+			const id = uuid(n, "a138");
+			const file = path.join(uniqueRoot, `-tmp-i-${n}`, `${id}.jsonl`);
+			transcript(file, id, 1);
+			want.set(id, file);
+		}
+		const index = claude.indexSessionsById!();
+		const mismatches = [...want].filter(([id, file]) => index.get(id) !== file);
+		check(index.size === want.size && mismatches.length === 0,
+			`I1 every one of ${want.size} unique-id files is indexed to its own path (got ${index.size} entries, ${mismatches.length} mismatches)`);
+	} finally {
+		process.env.WTFT_CLAUDE_PROJECTS_DIR = saved;
+	}
+}
+
+// ---
+// PART Q — an unreadable harness root is loud, not a silent empty index
+// ---
+console.log("\nPART Q — an unreadable harness root throws, and the walk warns once");
+{
+	const canBypass = (() => {
+		try {
+			const probe = path.join(dir, "q-probe");
+			fs.writeFileSync(probe, "x");
+			fs.chmodSync(probe, 0);
+			fs.readFileSync(probe);
+			return true;
+		} catch { return false; }
+	})();
+	if (canBypass) {
+		skip("PART Q needs a process that chmod 000 can stop (running as root?)");
+	} else {
+		const lockedClaudeRoot = path.join(dir, "q-locked-claude");
+		fs.mkdirSync(lockedClaudeRoot, { recursive: true });
+		fs.chmodSync(lockedClaudeRoot, 0);
+		const emptyPiRoot = path.join(dir, "q-empty-pi");
+		fs.mkdirSync(emptyPiRoot, { recursive: true });
+
+		const savedClaudeRoot = process.env.WTFT_CLAUDE_PROJECTS_DIR;
+		const savedPiRoot = process.env.WTFT_PI_SESSIONS_DIR;
+		process.env.WTFT_CLAUDE_PROJECTS_DIR = lockedClaudeRoot;
+		process.env.WTFT_PI_SESSIONS_DIR = emptyPiRoot;
+		try {
+			let directErr: unknown = null;
+			try { claude.indexSessionsById!(); } catch (e) { directErr = e; }
+			check(directErr instanceof Error && (directErr as NodeJS.ErrnoException).code === "EACCES" && String((directErr as Error).message).includes(lockedClaudeRoot),
+				`Q1 an unreadable Claude Code root throws EACCES, naming it (got ${String(directErr)})`);
+
+			const stderrLines: string[] = [];
+			const originalError = console.error;
+			console.error = (...args: unknown[]) => { stderrLines.push(args.map(String).join(" ")); };
+			let tree;
+			try {
+				tree = computeSpawnTree(PARENT, { ledgerPath: ledgerWith([uuid(9001, "f138")]) });
+			} finally {
+				console.error = originalError;
+			}
+			const claudeWarnings = stderrLines.filter(l => l.includes("claude-code"));
+			check(claudeWarnings.length === 1,
+				`Q2 exactly one stderr warning names claude-code and the walk (got ${JSON.stringify(stderrLines)})`);
+			check(tree.edges.length === 1 && tree.edges[0]?.skip === "not-found",
+				`Q3 the child is reported not-found — a loud index failure, not a silently empty one (got ${JSON.stringify(tree.edges[0])})`);
+		} finally {
+			fs.chmodSync(lockedClaudeRoot, 0o755);
+			process.env.WTFT_CLAUDE_PROJECTS_DIR = savedClaudeRoot;
+			process.env.WTFT_PI_SESSIONS_DIR = savedPiRoot;
+		}
+	}
+}
+
+// ---
+// PART N — ids are normalised everywhere the walk compares them, not just in
+// the ledger reader
+// ---
+console.log("\nPART N — alreadyAttributed and fold ids are normalised like the ledger");
+{
+	const child = uuid(9201, "1138");
+	const tree = computeSpawnTree(PARENT, {
+		ledgerPath: ledgerWith([child]),
+		alreadyAttributed: new Set([`${child}.jsonl`]),
+	});
+	check(tree.edges.length === 1 && tree.edges[0]?.skip === "in-self-total",
+		`N1 an alreadyAttributed id given as <uuid>.jsonl still marks the edge to <uuid> as in-self-total (got ${JSON.stringify(tree.edges[0])})`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

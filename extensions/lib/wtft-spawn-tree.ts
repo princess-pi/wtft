@@ -139,15 +139,18 @@ function addTotals(into: TokenTotals, from: TokenTotals): void {
 
 /** Each session folded into this parse's TOTAL, with the share it added. Only
  *  folds on interactions `computeSessionSummary` counts: a fold on a dropped
- *  duplicate or an untagged turn added nothing to the total. */
+ *  duplicate or an untagged turn added nothing to the total. Keyed by the
+ *  same normalised id the ledger and the walk use, so a fold id spelled with
+ *  a `.jsonl` suffix still matches. */
 function foldsInTotal(parsed: Interaction[]): Map<string, TokenTotals> {
 	const shares = new Map<string, TokenTotals>();
 	for (const interaction of deduplicateInteractions(parsed)) {
 		if (!isModelTagged(interaction)) continue;
 		for (const fold of interaction.claudeSubAgentFolds ?? []) {
-			const into = shares.get(fold.id) ?? emptyTotals();
+			const id = fold.id.replace(/\.jsonl$/i, "");
+			const into = shares.get(id) ?? emptyTotals();
 			addTotals(into, fold.share);
-			shares.set(fold.id, into);
+			shares.set(id, into);
 		}
 	}
 	return shares;
@@ -172,11 +175,23 @@ export function resolveSessionFile(sessionId: string): string | null {
  * A resolver for one walk: each harness's index is built on first need and
  * kept for the resolver's life, so N children cost one tree walk per harness
  * rather than N. First harness to know an id wins, in registry order.
+ *
+ * A harness whose `indexSessionsById` throws, or returns anything other than
+ * a `Map`, is warned about ONCE (stderr, naming the harness and the failure)
+ * and cannot answer for the rest of THIS walk — the next harness is asked. A
+ * harness with no index method is asked per id instead, and a throw there
+ * costs only that one id, same as before this change.
  */
 export function makeSessionResolver(): (sessionId: string) => string | null {
 	const discoveries = getDiscoveries();
 	const indexes: (Map<string, string> | null | undefined)[] = discoveries.map(() => undefined);
 	const answers = new Map<string, string | null>();
+	const warned = new Set<string>();
+	const warnIndexFailure = (harnessId: string, detail: string) => {
+		if (warned.has(harnessId)) return;
+		warned.add(harnessId);
+		console.error(`wtft: ${harnessId} session index failed (${detail}) — that harness cannot answer the rest of this walk`);
+	};
 	return (rawId: string) => {
 		// The same normalisation every `resolveSessionById` applies.
 		const sessionId = rawId.replace(/\.jsonl$/i, "");
@@ -191,17 +206,25 @@ export function makeSessionResolver(): (sessionId: string) => string | null {
 					if (indexes[k] === null) continue;
 					if (indexes[k] === undefined) {
 						const built = discovery.indexSessionsById();
-						indexes[k] = built instanceof Map ? built : null;
-						if (indexes[k] === null) continue;
+						if (built instanceof Map) {
+							indexes[k] = built;
+						} else {
+							indexes[k] = null;
+							warnIndexFailure(discovery.id, `indexSessionsById did not return a Map (got ${built === null ? "null" : typeof built})`);
+							continue;
+						}
 					}
 					found = indexes[k]?.get(sessionId) ?? null;
 				} else {
 					const single = discovery.resolveSessionById(sessionId);
 					found = typeof single === "string" && single ? single : null;
 				}
-			} catch {
+			} catch (err) {
 				// A harness that cannot look is not an answer — ask the next.
-				if (discovery.indexSessionsById) indexes[k] = null;
+				if (discovery.indexSessionsById) {
+					indexes[k] = null;
+					warnIndexFailure(discovery.id, err instanceof Error ? err.message : String(err));
+				}
 			}
 		}
 		answers.set(sessionId, found);
@@ -289,7 +312,9 @@ function walkLedger(
 	// The thunk is the lazy path: called only when the root has an edge, or when
 	// `unrecorded` needs the ids to exclude.
 	const attributed = typeof options.alreadyAttributed === "function" ? options.alreadyAttributed() : options.alreadyAttributed;
-	for (const id of attributed ?? []) outcomeOf.set(id, "in-self");
+	// Normalised the same way the ledger and the root id are: a caller may hand
+	// back an id spelled with its file's `.jsonl` suffix.
+	for (const id of attributed ?? []) outcomeOf.set(id.replace(/\.jsonl$/i, ""), "in-self");
 	if (!ledger.childrenOf.has(rootSessionId)) return outcomeOf;
 	const resolve = makeSessionResolver();
 	const visited = new Set<string>([rootSessionId]);

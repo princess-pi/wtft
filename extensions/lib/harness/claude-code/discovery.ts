@@ -319,7 +319,12 @@ function listSpawnCandidates(sinceMs: number): SpawnCandidate[] {
 	return candidates;
 }
 
-/** Every session id → its newest transcript, from one walk of the tree. */
+/**
+ * Every session id → its newest transcript, from one walk of the tree. The
+ * common case — one file per id — never pays a `stat`: a path is recorded on
+ * first sight, and only a SECOND file for the same id triggers the `stat`
+ * pair needed to keep the newer one.
+ */
 function indexSessionsById(): Map<string, string> {
 	const index = new Map<string, string>();
 	const root = projectsDir();
@@ -329,8 +334,12 @@ function indexSessionsById(): Map<string, string> {
 		projectDirs = fs.readdirSync(root, { withFileTypes: true })
 			.filter(e => e.isDirectory())
 			.map(e => e.name);
-	} catch {
-		return index;
+	} catch (err) {
+		// ENOENT (raced away between the existsSync above and here) is ordinary:
+		// nothing to index. Anything else — permission denied, most commonly —
+		// must be LOUD: a caller cannot tell "no sessions" from "could not look".
+		if (isGone(err)) return index;
+		throw err;
 	}
 	const newest = new Map<string, number>();
 	for (const slug of projectDirs) {
@@ -338,9 +347,15 @@ function indexSessionsById(): Map<string, string> {
 		collect(path.join(root, slug), slug, files);
 		for (const file of files) {
 			const id = sessionIdOf(file);
+			const existing = index.get(id);
+			if (!existing) {
+				index.set(id, file);
+				continue;
+			}
 			try {
+				if (!newest.has(id)) newest.set(id, fs.statSync(existing).mtimeMs);
 				const mtimeMs = fs.statSync(file).mtimeMs;
-				if (!newest.has(id) || mtimeMs > newest.get(id)!) {
+				if (mtimeMs > newest.get(id)!) {
 					newest.set(id, mtimeMs);
 					index.set(id, file);
 				}

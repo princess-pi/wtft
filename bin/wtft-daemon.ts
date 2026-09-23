@@ -1322,16 +1322,26 @@ function withSlot<T>(slot: Slot, fn: () => T): T {
   }
 }
 
+function procIsDaemon(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  let cmd = "";
+  try { cmd = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8"); } catch { return false; }
+  return cmd.split("\0").some(arg => {
+    const base = path.basename(arg);
+    return base === "wtft-daemon.mjs" || base === "wtft-daemon.js" || base === "wtft-daemon" || base === "wtft-daemon.ts";
+  });
+}
+
 function claimPidFile(file: string): "claimed" | "busy" {
+  const aliveDaemon = (pid: number): boolean => {
+    if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) return false;
+    try { process.kill(pid, 0); } catch { return false; }
+    return procIsDaemon(pid);
+  };
   try {
     const existing = Number(fs.readFileSync(file, "utf8").trim());
     if (existing === process.pid) return "claimed";
-    if (existing > 0) {
-      try {
-        process.kill(existing, 0);
-        return "busy";
-      } catch { /* dead lease */ }
-    }
+    if (aliveDaemon(existing)) return "busy";
   } catch { /* no lease yet */ }
   const candidate = `${file}.claim-${process.pid}`;
   try {
@@ -1342,12 +1352,14 @@ function claimPidFile(file: string): "claimed" | "busy" {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
       const holder = Number(fs.readFileSync(file, "utf8").trim());
       if (holder === process.pid) return "claimed";
-      try {
-        process.kill(holder, 0);
-        return "busy";
-      } catch { /* dead lease */ }
+      if (aliveDaemon(holder)) return "busy";
       try { fs.unlinkSync(file); } catch { /* raced */ }
-      fs.linkSync(candidate, file);
+      try {
+        fs.linkSync(candidate, file);
+      } catch (linkErr) {
+        if ((linkErr as NodeJS.ErrnoException).code === "EEXIST") return "busy";
+        throw linkErr;
+      }
     }
   } finally {
     try { fs.unlinkSync(candidate); } catch { /* already gone */ }
@@ -1403,7 +1415,7 @@ function takeOverLease(pidPath: string): boolean {
     let holder = 0;
     try { holder = Number(fs.readFileSync(pidPath, "utf8").trim()); } catch { holder = 0; }
     if (holder === process.pid) return true;
-    if (holder > 0) {
+    if (holder > 0 && procIsDaemon(holder)) {
       try { process.kill(holder, "SIGTERM"); } catch { /* already gone */ }
     }
     const until = Date.now() + 50;
@@ -1581,8 +1593,11 @@ function runHarness(which: string, focus: string) {
   harnessPidFile = path.join(os.tmpdir(), `wtft-harness-${which}-${hash}.pid`);
   if (claimPidFile(harnessPidFile) === "busy") {
     const live = Number(fs.readFileSync(harnessPidFile, "utf8").trim());
-    if (focus) pointSessionAt(live, focus);
-    process.exit(0);
+    if (procIsDaemon(live)) {
+      if (focus) pointSessionAt(live, focus);
+      process.exit(0);
+    }
+    if (claimPidFile(harnessPidFile) !== "claimed") process.exit(1);
   }
   harnessMode = true;
   if (process.env.WTFT_DAEMON_DEBUG) {

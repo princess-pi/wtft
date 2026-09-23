@@ -176,6 +176,9 @@ console.log("\nL — on-disk layout");
 		JSON.stringify({ type: "session", version: 3, id: "pi-sibling-15", parentSession: "pi-top-15", timestamp: new Date(T0).toISOString(), cwd: "/pi-cwd" }) + "\n"
 		+ turnLine("sib-1", T0, 10));
 
+	const indexed = getDiscoveries().filter(d => d.indexSessionsById).map(d => d.id).sort();
+	check(JSON.stringify(indexed) === '["claude-code","pi"]',
+		`L4a fixture precondition: both harnesses have an id index to check (got ${JSON.stringify(indexed)})`);
 	for (const discovery of getDiscoveries()) {
 		if (!discovery.indexSessionsById) continue;
 		const paths = [...discovery.indexSessionsById().values()];

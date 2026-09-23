@@ -39,7 +39,7 @@ four siblings:
   `descendantUntagged` non-empty.
 - `untaggedCostUsd` is often `0`: the untagged turns on this host's corpus are mostly
   `<synthetic>` ones carrying no usage. An `(unknown)` or model-less turn can carry a
-  harness-native cost, and server-tool cost is included too. The condition still holds
+  harness-native cost or be priced at a fallback rate, and server-tool cost is included too. The condition still holds
   when it is `0`, because the turns exist and none of their own usage is in the tree. A consumer that wants to know whether *money* is missing reads
   the cost.
 - `--tokens`, and the Pi widget, which renders the same block, print one line under the
@@ -197,9 +197,11 @@ reported.
 - Subagent ids come from `claudeSubAgentFolds[].id`, falling back to
   `claudeSubAgentSessionIds` for a BEFORE build old enough to carry only that. Such a
   build, and one whose folds carry no `file` yet, names no fold files, so its children
-  are frozen only when AFTER finds them too; a build older than the #129 seam reads the
-  live projects root in its measured pass anyway. The freeze holds when both builds carry
-  `claudeSubAgentFolds[].file`.
+  are frozen only when AFTER finds them too. A BEFORE build older than the #129 seam would
+  read the live projects root in its measured pass, so the script refuses it with exit 2:
+  it probes the checkout's `projectsDir` with the variable set before measuring anything.
+- A `find` failure other than a missing root throws instead of selecting nothing, so the
+  gate never exits 0 having compared nothing.
 - The snapshot directory is removed when the script exits, including on an error; a run
   killed by a signal leaves its `wtft-ab-*` directory behind. `--before` is resolved against the current
   directory, so a relative checkout path works.
@@ -218,8 +220,8 @@ with a parent whose turn spawns a `claude -p` child.
 
 ## Reconciliation record (2026-09-23)
 
-Seven fresh-context auditors, one per changed source file plus the read-path tests and one for
-host-scoped documents, then a second pass over the lines the first fix round changed. Every
+Seven fresh-context auditors — five for the changed source files, one for the read-path tests,
+one for host-scoped documents — then a second pass over the lines the first fix round changed. Every
 finding this branch caused is fixed below, or left standing with its reason. Findings about text that
 was already on `main` are #233. The three that move money are #230, #231 and #232, and one
 producer-side gap is duppypro/princess-pi-tools#1021.
@@ -255,3 +257,4 @@ producer-side gap is duppypro/princess-pi-tools#1021.
 | `nsp-guard-shadowed` | contains the avoided "nsp guard" | a status code | — | Left standing: a machine string keeps its spelling; the glossary says so |
 | `pr-review` round 1 | 13 findings (2 Medium): `head \| grep -q` under `pipefail` read a large guard as absent (reproduced: exit 141); M7c blind to a rename of an optional field; the untagged line saying "not in SPAWNED" despite the overlap; an unquoted `find` root; `--help` splitting the sentinel; stale pointers in comments | `is_nsp_guard`, M7c, `renderRecordedSpawns`, `pickTranscripts` | ✅ V10g, M7c optional fields, R1 | Fixed; the line now reads "left out of their edge totals". Declined: the claim that `parseSubagentMeta` may not exist — it is the private parser `readSubagentMetaChecked` calls |
 | `pr-review` round 2 | 9 findings (1 Medium): M7c still blind to a key renamed by a refresh; the corpus floor of 5; an unset `PATH` aborting with no JSON document; fold paths compared against a non-canonical root; L5's Claude Code arm unable to fail; the untagged docstring and H1 bullet contradicting the overlap; two comment wordings | M7c, `NSP_PATH_DIRS`, `ccRoot`, the L5 fixture | ✅ M7c key check, L5 with a session-id-shaped file; the unset-`PATH` case untested | Fixed |
+| `pr-review` round 3 and Macroscope | 8 Low, plus 1 Medium thread: a BEFORE build without the projects-root seam measures the live root, not the snapshot; `find` failures selecting nothing and exiting 0; M5 failing on a host with a `wtft` in `/usr/bin`; L4–L6 vacuous without an id index; two stale comments; the auditor count; fallback pricing as an untagged-cost source | `main`, `pickTranscripts`, M5's PATH, the L4 fixture | ✅ E8–E10, L4a | Fixed: the script probes `--before`'s `projectsDir` and refuses a build without the seam (exit 2). Declined: `descendantUntagged` read unguarded in the renderer — `SpawnTree` requires the field, and `tsc --noEmit` passes, so every constructor sets it |

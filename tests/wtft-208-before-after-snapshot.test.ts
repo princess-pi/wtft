@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
-import { foldFilesOf, pickTranscripts, snapshotCorpus, subagentIdsOf } from "../research/other-corpus/before-after.ts";
+import { foldFilesOf, honoursProjectsSeam, pickTranscripts, snapshotCorpus, subagentIdsOf } from "../research/other-corpus/before-after.ts";
 import { parseSessionFile } from "../extensions/lib/wtft-parser.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
@@ -42,7 +42,7 @@ function sessionLine(id: string, tsMs: number, cwd: string): string {
 	return JSON.stringify({ type: "session", version: 3, id, timestamp: new Date(tsMs).toISOString(), cwd }) + "\n";
 }
 
-/** A large, zero-cost filler turn — pads a transcript past `pick`'s 40 KB gate
+/** A large, zero-cost filler turn — pads a transcript past `pickTranscripts`'s 40 KB gate
  *  without moving the dollar totals it is used alongside. */
 function paddingLine(bytes: number): string {
 	const iso = new Date(T0).toISOString();
@@ -217,6 +217,19 @@ check(result.status === 0 && result.error === undefined,
 	"E5 a relative --before resolves against the cwd, not the script's directory");
 const leftover = fs.readdirSync(childTmp).filter(f => f.startsWith("wtft-ab-"));
 check(leftover.length === 0, `E6 the snapshot directory is removed on exit (left: ${JSON.stringify(leftover)})`);
+
+check(await honoursProjectsSeam(REPO), "E8 this checkout honours the projects-root seam");
+const seamless = path.join(dir, "seamless-checkout");
+fs.mkdirSync(path.join(seamless, "extensions", "lib", "harness", "claude-code"), { recursive: true });
+fs.writeFileSync(path.join(seamless, "extensions", "lib", "harness", "claude-code", "discovery.ts"),
+	"export function projectsDir(): string { return '/home/x/.claude/projects'; }\n");
+check(!(await honoursProjectsSeam(seamless)), "E9 a checkout whose projectsDir ignores the seam is detected");
+const refused = spawnSync("bun", [SCRIPT, "--before", seamless], {
+	cwd: REPO, encoding: "utf8",
+	env: { ...process.env, HOME: emptyHome, TMPDIR: childTmp, WTFT_CLAUDE_PROJECTS_DIR: e2eRoot, WTFT_PI_SESSIONS_DIR: emptyPiRootE2e },
+});
+check(refused.status === 2 && /predates the WTFT_CLAUDE_PROJECTS_DIR seam/.test(refused.stderr ?? ""),
+	`E10 the script refuses such a --before with exit 2 (got ${refused.status})`);
 
 // A build whose folds carry no `file` names no fold files instead of throwing.
 check(JSON.stringify(foldFilesOf([{ claudeSubAgentFolds: [{ id: "x" } as { id: string; file?: string }] }])) === "[]",

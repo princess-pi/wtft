@@ -63,10 +63,22 @@ interface SubAgentBearing { claudeSubAgentFolds?: { id: string; file?: string }[
 
 /** Sorted, never shuffled — the same directory yields the same list. */
 export function pickTranscripts(root: string, n: number): string[] {
+	// A missing root is a harness this host does not have; any other find
+	// failure throws, so the gate never exits 0 having compared nothing.
+	if (!fs.existsSync(root)) return [];
+	return execFileSync("find", [root, "-name", "*.jsonl", "-size", "+40k", "-newermt", "-60 days"], { encoding: "utf8", maxBuffer: 1e9 })
+		.trim().split("\n").filter(Boolean).sort().slice(0, n);
+}
+
+/** Whether a checkout's Claude Code discovery honours `WTFT_CLAUDE_PROJECTS_DIR`.
+ *  A build without it reads the live projects root in its measured pass, so
+ *  the two sides would classify different corpora. */
+export async function honoursProjectsSeam(checkout: string): Promise<boolean> {
 	try {
-		return execFileSync("find", [root, "-name", "*.jsonl", "-size", "+40k", "-newermt", "-60 days"], { encoding: "utf8", maxBuffer: 1e9 })
-			.trim().split("\n").filter(Boolean).sort().slice(0, n);
-	} catch { return []; }
+		const mod = await import(`${checkout}/extensions/lib/harness/claude-code/discovery.ts?seam`);
+		return typeof mod.projectsDir === "function"
+			&& mod.projectsDir({ WTFT_CLAUDE_PROJECTS_DIR: "/seam-probe" }) === "/seam-probe";
+	} catch { return false; }
 }
 
 /** Every subagent transcript path folded into any of these interactions, at
@@ -167,6 +179,11 @@ async function main(): Promise<void> {
 		"claude-code": pickTranscripts(ccRoot, N),
 		pi: pickTranscripts(piRoot, N),
 	};
+
+	if (!(await honoursProjectsSeam(BEFORE))) {
+		console.error(`before-after: ${BEFORE} predates the WTFT_CLAUDE_PROJECTS_DIR seam, so its measured pass would read the live projects root, not the frozen corpus. Compare against a newer checkout.`);
+		process.exit(2);
+	}
 
 	// Cache-busting query so both builds load as distinct modules.
 	const modBEFORE = await import(`${BEFORE}/extensions/lib/wtft-parser.ts?BEFORE`);

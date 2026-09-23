@@ -103,8 +103,9 @@ D=$(mktemp -d)
 GUARDDIR=$(mktemp -d); printf '#!/bin/sh\n# not the sentinel\n# nsp-guard-identity: 9a1c-claude-nsp-guard-sentinel\necho guard\n' > "$GUARDDIR/claude"; chmod +x "$GUARDDIR/claude"
 DECOYDIR=$(mktemp -d); printf '#!/bin/sh\necho decoy-claude\n' > "$DECOYDIR/claude"; chmod +x "$DECOYDIR/claude"
 mutate '/if \[ "\$NSP_GUARD_STATE" = shadowed \] && \[ "\$STATUS" = ok \]; then/,/^fi$/d' "M5 nsp-guard escalation deleted" || true
-R=$(PATH="$DECOYDIR:$GUARDDIR:$BUNDIR:/usr/bin:/bin" "$REAL" --json --dir "$D" 2>/dev/null)
-M=$(PATH="$DECOYDIR:$GUARDDIR:$BUNDIR:/usr/bin:/bin" "$MUT"  --json --dir "$D" 2>/dev/null)
+# "$D" first, so the wtft just installed wins over any in /usr/bin or /bin.
+R=$(PATH="$D:$DECOYDIR:$GUARDDIR:$BUNDIR:/usr/bin:/bin" "$REAL" --json --dir "$D" 2>/dev/null)
+M=$(PATH="$D:$DECOYDIR:$GUARDDIR:$BUNDIR:/usr/bin:/bin" "$MUT"  --json --dir "$D" 2>/dev/null)
 report "M5 nsp-guard escalation deleted" nsp-guard-shadowed "$(status_of "$R")" ok "$(status_of "$M")"; rm -rf "$D" "$GUARDDIR" "$DECOYDIR"
 
 exit $(( fails > 0 ))

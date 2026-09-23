@@ -32,7 +32,7 @@ const T0 = Date.UTC(2026, 8, 23, 5, 0, 0);
 const uuid = (n: number) => `bbbbbbbb-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
 /** `model: null` writes a turn with no model id — an untagged turn. `cost` is
- *  the harness-native cost, which is how an untagged turn carries money. */
+ *  the harness-native cost. */
 function turn(id: string, tsMs: number, model: string | null, outputTokens: number, cost?: number, inputTokens = 1000): string {
 	const iso = new Date(tsMs).toISOString();
 	return JSON.stringify({

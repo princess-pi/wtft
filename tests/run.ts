@@ -24,18 +24,27 @@ const SUITE_TIMEOUT_MS = 180_000;
 
 /** Suites run at once. `WTFT_TEST_JOBS=1` is the serial runner. Twice the CPU
  *  count: most suites spend their time waiting on a daemon, not computing. */
-const JOBS = Math.max(1, Number(process.env.WTFT_TEST_JOBS) || os.cpus().length * 2);
+const JOBS = (() => {
+	const raw = process.env.WTFT_TEST_JOBS;
+	if (raw === undefined || raw === "") return os.cpus().length * 2;
+	const n = Number(raw);
+	if (!Number.isInteger(n) || n < 1) {
+		console.error(`WTFT_TEST_JOBS must be a positive integer, got ${JSON.stringify(raw)}`);
+		process.exit(2);
+	}
+	return n;
+})();
 
-/** Run alone, after the pool, because they reach outside their own sandbox:
- *  one rebuilds `bin/` mid-run, which every suite importing a bundle would see
- *  half-written; the others stop daemons host-wide (the unscoped fixture reaper,
+/** Run alone, after the pool, in this order, because they reach outside their
+ *  own sandbox: two stop daemons host-wide (the unscoped fixture reaper,
  *  `wtft-daemon --cleanup`, `wtft-daemon --restart`), which would kill a
- *  neighbour's daemon mid-test. */
-const SOLO = new Set([
-	"wtft-46-install-wtft.test.ts",
+ *  neighbour's daemon mid-test; the last rebuilds `bin/`, which every suite
+ *  importing a bundle would see half-written. */
+const SOLO = [
 	"wtft-96-fixture-daemons.test.ts",
 	"wtft-205-one-daemon-per-harness.test.ts",
-]);
+	"wtft-46-install-wtft.test.ts",
+];
 
 /** Last run's per-suite times, so the slowest start first and the pool's tail
  *  is not one long suite started last. Scratch: `tmp/` is gitignored. */
@@ -93,8 +102,8 @@ try {
 	const parsed = JSON.parse(fs.readFileSync(TIMES_FILE, "utf8"));
 	if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) lastTimes = parsed;
 } catch { /* first run: no order to reuse */ }
-const pooled = suites.filter(f => !SOLO.has(f)).sort((a, b) => (lastTimes[b] ?? 0) - (lastTimes[a] ?? 0));
-const solo = suites.filter(f => SOLO.has(f));
+const pooled = suites.filter(f => !SOLO.includes(f)).sort((a, b) => (lastTimes[b] ?? 0) - (lastTimes[a] ?? 0));
+const solo = SOLO.filter(f => suites.includes(f));
 
 console.log(`${BOLD}Running ${suites.length} suite${suites.length === 1 ? "" : "s"}${RESET} ${DIM}(process-per-suite, jobs=${JOBS})${RESET}\n`);
 
@@ -102,11 +111,17 @@ const results: Result[] = [];
 
 function runSuite(file: string): Promise<Result> {
 	const name = file.replace(/\.test\.ts$/, "");
-	// Fresh config root per suite — no developer config can reach the code under test.
-	const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "pp-test-config-"));
-	// Its own tmp root, so its fixture daemons can be reaped without touching a
-	// neighbour's.
-	const suiteTmp = fs.mkdtempSync(path.join(os.tmpdir(), `wtft-suite-${name}-`));
+	let configHome: string, suiteTmp: string;
+	try {
+		// Fresh config root per suite — no developer config can reach the code under test.
+		configHome = fs.mkdtempSync(path.join(os.tmpdir(), "pp-test-config-"));
+		// Its own tmp root, so its fixture daemons can be reaped without touching a
+		// neighbour's.
+		suiteTmp = fs.mkdtempSync(path.join(os.tmpdir(), `wtft-suite-${name}-`));
+	} catch (err) {
+		const output = `runner: could not create the suite's directories: ${(err as Error).message}\n`;
+		return Promise.resolve({ name, ok: false, ms: 0, timedOut: false, output, skips: [] });
+	}
 	// Its own state root too: the spawn ledger and daemon state live there.
 	const stateHome = path.join(suiteTmp, "state");
 	const started = Date.now();
@@ -121,12 +136,26 @@ function runSuite(file: string): Promise<Result> {
 		child.stdout.on("data", d => { output += d; });
 		child.stderr.on("data", d => { output += d; });
 		let timedOut = false;
-		const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, SUITE_TIMEOUT_MS);
+		// A grandchild that inherited the pipes can hold 'close' back forever, so
+		// 'exit' settles too, after a grace for the last output; a suite that
+		// ignores SIGTERM gets SIGKILL.
+		const GRACE_MS = 2_000;
+		let kill: NodeJS.Timeout | undefined;
+		let grace: NodeJS.Timeout | undefined;
+		const timer = setTimeout(() => {
+			timedOut = true;
+			child.kill("SIGTERM");
+			kill = setTimeout(() => child.kill("SIGKILL"), 5_000);
+		}, SUITE_TIMEOUT_MS);
 		let settled = false;
 		const finish = (ok: boolean) => {
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
+			clearTimeout(kill);
+			clearTimeout(grace);
+			child.stdout.destroy();
+			child.stderr.destroy();
 			const ms = Date.now() - started;
 			reapFixtureDaemons(suiteTmp);
 			for (const dir of [configHome, suiteTmp]) {
@@ -136,6 +165,7 @@ function runSuite(file: string): Promise<Result> {
 		};
 		child.on("error", err => { output += `\nrunner: could not start the suite: ${err.message}\n`; finish(false); });
 		child.on("close", code => finish(code === 0));
+		child.on("exit", code => { grace = setTimeout(() => finish(code === 0), GRACE_MS); });
 	});
 }
 

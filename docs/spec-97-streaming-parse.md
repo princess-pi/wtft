@@ -60,7 +60,8 @@ offset half is still needed to reach the Closer, so it has its own issue: #222.
 
 **The Closer — measured 2026-09-22, and not yet met.** A daemon watching a synthetic session whose
 three subagent transcripts total about 28 MB, sampled after start-up and after 3 minutes of
-appends every 5 s (a scratch script, not a suite; the issue's own Closer asks for 30 minutes):
+appends every 5 s (`debug/97-daemon-pss.sh <daemon.mjs> <label> <seconds>`, not a suite; the issue's
+own Closer asks for 30 minutes):
 
 | Build | PSS after start-up | after 3 min of appends |
 |---|---|---|

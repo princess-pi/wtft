@@ -1398,9 +1398,17 @@ function watchDir(dir: string) {
     return;
   }
   for (const ent of entries) {
-    if (!ent.isDirectory() || HARNESS_SKIP_DIRS.has(ent.name)) continue;
+    if (!ent.isDirectory()) continue;
+    if (HARNESS_SKIP_DIRS.has(ent.name) && ent.name !== "subagents") continue;
     watchDir(path.resolve(key, ent.name));
   }
+}
+
+function parentSessionFile(child: string): string | null {
+  const marker = `${path.sep}subagents${path.sep}`;
+  const at = child.lastIndexOf(marker);
+  if (at < 0) return null;
+  return `${child.slice(0, at)}.jsonl`;
 }
 
 function onWatch(dir: string, filename: string | null) {
@@ -1411,8 +1419,21 @@ function onWatch(dir: string, filename: string | null) {
     for (const [file, slot] of harnessSlots) wake(file, slot.displayed);
     return;
   }
-  if (HARNESS_SKIP_DIRS.has(filename)) return;
+  if (HARNESS_SKIP_DIRS.has(filename) && filename !== "subagents") return;
   const full = path.resolve(dir, filename);
+  if (filename === "subagents" || full.includes(`${path.sep}subagents${path.sep}`)) {
+    if (filename === "subagents") {
+      try {
+        if (fs.statSync(full).isDirectory()) watchDir(full);
+      } catch { /* gone */ }
+    }
+    const parent = parentSessionFile(full.endsWith(path.sep) ? full : `${full}${path.sep}`);
+    if (parent) {
+      const slot = harnessSlots.get(parent);
+      if (slot) wake(parent, slot.displayed);
+    }
+    return;
+  }
   let st: fs.Stats | null = null;
   try {
     st = fs.statSync(full);

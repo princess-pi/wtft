@@ -65,6 +65,7 @@ for (let i = 0; i < N; i++) {
 	claudeFiles.push(claude);
 	piFiles.push(pi);
 }
+fs.mkdirSync(path.join(claudeRoot, "proj", "s-0", "subagents"), { recursive: true });
 
 const env = {
 	...process.env,
@@ -163,6 +164,15 @@ try {
 		"classified cost matches a straight parse",
 		Math.abs(cost(seen) - cost(reference)) < 0.000001,
 	);
+
+	fs.writeFileSync(
+		path.join(claudeRoot, "proj", "s-0", "subagents", "agent-late.jsonl"),
+		turnLine("child-late", T0 + 900_000, 9),
+	);
+	const sawChild = await waitFor("a late subagent transcript is folded", () =>
+		readClassifiedTagFile(getCurrentVersionTagPath(target)).some((row: { messageId?: string }) => row.messageId === "child-late"),
+	);
+	assert("a subagent file written after the parent is quiet is still classified", sawChild);
 
 	const burst = claudeFiles[1];
 	const burstErrAt = fs.statSync(claudeErr).size;

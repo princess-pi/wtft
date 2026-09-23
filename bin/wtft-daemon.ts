@@ -523,12 +523,31 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
 
     const deduped = parsed ? clearSubagentCacheMiss(deduplicateInteractions(parsed.interactions)) : [];
     const plain: typeof deduped = [];
+    const absorbIntoOwner = (interaction: (typeof deduped)[number]): boolean => {
+      if (!interaction.messageId) return false;
+      const prior = fileState.owners.find(owner => owner.base.messageId === interaction.messageId);
+      if (!prior) return false;
+      if (interaction.cost + 1e-9 >= prior.base.cost) {
+        prior.base.timestamp = interaction.timestamp;
+        prior.base.cost = interaction.cost;
+        prior.base.model = interaction.model ?? prior.base.model;
+        prior.base.inputTokens = interaction.inputTokens;
+        prior.base.outputTokens = interaction.outputTokens;
+        prior.base.cacheReadTokens = interaction.cacheReadTokens;
+        prior.base.cacheWriteTokens = interaction.cacheWriteTokens;
+        prior.base.reasoningTokens = interaction.reasoningTokens;
+        prior.base.serverToolCost = interaction.serverToolCost;
+        prior.lastLine = "";
+        prior.lastCost = 0;
+      }
+      return true;
+    };
     if (parsed?.stampInterrupt && fileState.pendingTurn) {
       fileState.pendingTurn.interrupted = true;
       parsed = { ...parsed, stampInterrupt: false };
     }
     if (fileState.pendingTurn) {
-      plain.push(fileState.pendingTurn);
+      if (!absorbIntoOwner(fileState.pendingTurn)) plain.push(fileState.pendingTurn);
       fileState.pendingTurn = null;
     }
     const newOwners: FoldOwner[] = [];
@@ -543,7 +562,7 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
         } else {
           newOwners.push({ base: structuredClone(interaction), lastLine: "", lastCost: 0 });
         }
-      } else {
+      } else if (!absorbIntoOwner(interaction)) {
         plain.push(interaction);
       }
     }

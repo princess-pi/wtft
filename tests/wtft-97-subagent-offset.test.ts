@@ -196,6 +196,90 @@ try {
 	}
 }
 
+{
+	const reDir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-97-reemit-")));
+	fixtureDirs.push(reDir);
+	const reSession = path.join(reDir, "session.jsonl");
+	fs.writeFileSync(reSession, JSON.stringify({
+		type: "session", version: 3, id: "parent-97-reemit", timestamp: new Date().toISOString(), cwd: reDir,
+	}) + "\n");
+	fs.mkdirSync(path.join(reDir, "wtft-tags"), { recursive: true });
+	cleanupPidFiles.push(getDaemonPidPath(reSession));
+	const reSubDir = path.join(reDir, "session", "subagents");
+	fs.mkdirSync(reSubDir, { recursive: true });
+	const reSub = path.join(reSubDir, "agent-reemit.jsonl");
+	const reId = "msg_97_reemit";
+	const reTs = Date.now() - 60_000;
+	const withCommand = (out: number) => {
+		const iso = new Date(reTs).toISOString();
+		return JSON.stringify({
+			type: "message",
+			timestamp: iso,
+			message: {
+				role: "assistant", id: reId, model: "claude-sonnet-4-6", timestamp: iso,
+				usage: { input_tokens: 1000, output_tokens: out, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+				content: [{ type: "toolCall", name: "bash", arguments: { command: "claude -p 'go'" } }],
+			},
+		}) + "\n";
+	};
+	const withoutCommand = (out: number) => {
+		const iso = new Date(reTs).toISOString();
+		return JSON.stringify({
+			type: "message",
+			timestamp: iso,
+			message: {
+				role: "assistant", id: reId, model: "claude-sonnet-4-6", timestamp: iso,
+				usage: { input_tokens: 1000, output_tokens: out, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+				content: [{ type: "text", text: "later" }],
+			},
+		}) + "\n";
+	};
+	fs.writeFileSync(reSub, withCommand(10));
+	const reTag = path.join(reDir, "wtft-tags", path.basename(reSession) + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const reErr = fs.openSync(path.join(reDir, "daemon-stderr.log"), "a");
+	const linesForId = () => {
+		if (!fs.existsSync(reTag)) return [] as { id?: string; cmd?: string[]; out?: number }[];
+		return fs.readFileSync(reTag, "utf8").split("\n").filter(Boolean).flatMap(line => {
+			try {
+				const obj = JSON.parse(line);
+				return obj.id === reId ? [obj] : [];
+			} catch { return []; }
+		});
+	};
+	try {
+		const child = spawn(process.execPath, [DAEMON_BIN, "--session", reSession], {
+			detached: true,
+			stdio: ["ignore", "ignore", reErr],
+			env: { ...process.env, WTFT_DAEMON_DEBUG: "1" },
+		});
+		child.unref();
+		if (child.pid) cleanupPids.push(child.pid);
+		let sawCommand = false;
+		for (let i = 0; i < 24 && !sawCommand; i++) {
+			await sleep(250);
+			sawCommand = linesForId().some(obj => Array.isArray(obj.cmd) && obj.cmd.length > 0 && obj.out === 10);
+		}
+		assert("fixture: the command-bearing copy is tagged", sawCommand);
+		fs.appendFileSync(reSub, withoutCommand(50));
+		let sawGrown = false;
+		for (let i = 0; i < 24 && !sawGrown; i++) {
+			await sleep(250);
+			sawGrown = linesForId().some(obj => obj.out === 50);
+		}
+		const tagged = linesForId();
+		assert(
+			"a higher re-emit that omits the command keeps the command on that id",
+			sawGrown && tagged.every(obj => Array.isArray(obj.cmd) && obj.cmd.length > 0),
+		);
+	} finally {
+		try { fs.closeSync(reErr); } catch { /* already closed */ }
+		for (const pid of cleanupPids) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
+		for (const pf of cleanupPidFiles) { try { fs.unlinkSync(pf); } catch { /* gone */ } }
+		await sleep(200);
+		for (const d of fixtureDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* gone */ } }
+	}
+}
+
 console.log("\n──────────────────────────────");
 console.log(`Results: ${GREEN}${passed} passed${RESET}, ${RED}${failed} failed${RESET}`);
 process.exit(failed > 0 ? 1 : 0);

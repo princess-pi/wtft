@@ -63,9 +63,7 @@ const suites = filters.length === 0
 
 // Shell suites are NOT run by this driver; CI gates each as its own step
 // (`.github/workflows/ci.yml`). Named here rather than silently omitted: a
-// skipped suite you cannot see is a coverage claim you cannot check. (An
-// earlier comment said "several need sudo or a live nginx" — that was the
-// sister repo's reason, never this one's.)
+// skipped suite you cannot see is a coverage claim you cannot check.
 const shellSuites = fs.readdirSync(TESTS_DIR).filter(f => f.endsWith(".test.sh")).sort();
 
 if (suites.length === 0) {
@@ -91,7 +89,10 @@ interface Result {
 const nameWidth = Math.max(...suites.map(s => s.replace(/\.test\.ts$/, "").length));
 
 let lastTimes: Record<string, number> = {};
-try { lastTimes = JSON.parse(fs.readFileSync(TIMES_FILE, "utf8")); } catch { /* first run: no order to reuse */ }
+try {
+	const parsed = JSON.parse(fs.readFileSync(TIMES_FILE, "utf8"));
+	if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) lastTimes = parsed;
+} catch { /* first run: no order to reuse */ }
 const pooled = suites.filter(f => !SOLO.has(f)).sort((a, b) => (lastTimes[b] ?? 0) - (lastTimes[a] ?? 0));
 const solo = suites.filter(f => SOLO.has(f));
 
@@ -106,27 +107,35 @@ function runSuite(file: string): Promise<Result> {
 	// Its own tmp root, so its fixture daemons can be reaped without touching a
 	// neighbour's.
 	const suiteTmp = fs.mkdtempSync(path.join(os.tmpdir(), `wtft-suite-${name}-`));
+	// Its own state root too: the spawn ledger and daemon state live there.
+	const stateHome = path.join(suiteTmp, "state");
 	const started = Date.now();
 	return new Promise(resolve => {
 		const child = spawn("bun", ["test", path.join("tests", file)], {
 			cwd: REPO_ROOT,
-			env: { ...process.env, XDG_CONFIG_HOME: configHome, TMPDIR: suiteTmp },
+			env: { ...process.env, XDG_CONFIG_HOME: configHome, XDG_STATE_HOME: stateHome, TMPDIR: suiteTmp },
 		});
 		let output = "";
+		child.stdout.setEncoding("utf8");
+		child.stderr.setEncoding("utf8");
 		child.stdout.on("data", d => { output += d; });
 		child.stderr.on("data", d => { output += d; });
 		let timedOut = false;
 		const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, SUITE_TIMEOUT_MS);
-		child.on("close", code => {
+		let settled = false;
+		const finish = (ok: boolean) => {
+			if (settled) return;
+			settled = true;
 			clearTimeout(timer);
 			const ms = Date.now() - started;
 			reapFixtureDaemons(suiteTmp);
 			for (const dir of [configHome, suiteTmp]) {
 				try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
 			}
-			const ok = !timedOut && code === 0;
-			resolve({ name, ok, ms, timedOut, output, skips: collectSkips(output) });
-		});
+			resolve({ name, ok: ok && !timedOut, ms, timedOut, output, skips: collectSkips(output) });
+		};
+		child.on("error", err => { output += `\nrunner: could not start the suite: ${err.message}\n`; finish(false); });
+		child.on("close", code => finish(code === 0));
 	});
 }
 
@@ -143,6 +152,9 @@ await Promise.all(Array.from({ length: Math.min(JOBS, queue.length) }, async () 
 	for (let file = queue.shift(); file !== undefined; file = queue.shift()) report(await runSuite(file));
 }));
 for (const file of solo) report(await runSuite(file));
+// Nothing is running now, so the host-wide reaper is safe: it catches a daemon
+// a suite started outside its own TMPDIR.
+reapFixtureDaemons();
 
 try {
 	const times = { ...lastTimes };
@@ -178,8 +190,7 @@ if (shellSuites.length > 0) {
 }
 
 // Skipped CHECKS, one level below skipped suites. A host-gated check that found
-// no host state passes without testing anything, and on CI that is every one of
-// them at once (#256). Printed after the pass/fail line so it is the last thing
+// no host state passes without testing anything. Printed after the pass/fail line so it is the last thing
 // on screen, and unconditionally — the renderer returns "" when there is
 // nothing to report.
 const skipSummary = renderSkipSummary(

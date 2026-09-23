@@ -45,6 +45,6 @@ const killed = reapFixtureDaemons(suiteA);
 check(killed === 1 && await until(() => !alive(a.pid!)), `R1 reaping suite A's directory stops suite A's daemon (killed ${killed})`);
 check(alive(b.pid!), "R2 and leaves suite B's daemon running");
 
-try { process.kill(b.pid!, "SIGTERM"); } catch {}
+for (const p of [a.pid!, b.pid!]) try { process.kill(p, "SIGTERM"); } catch {}
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

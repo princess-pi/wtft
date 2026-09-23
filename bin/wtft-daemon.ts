@@ -32,6 +32,8 @@ import {
 	loadUserPricing,
 	resolveMovedSession,
 	getCurrentVersionTagPath,
+	getDaemonPidPath,
+	daemonLaunchArgs,
 	isSessionIdBasename,
 	loadExternalHarnesses,
 	warnUnreadableTranscript,
@@ -62,14 +64,17 @@ let lastActivityMs = Date.now(); // last time we classified a new interaction
 let startupTime = Date.now();
 let pendingItems: { interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>; prevCtx: number }[] = [];
 let idleStartMs = 0;
-const streamState = newParseStreamState();
+let streamState = newParseStreamState();
 let stampInterruptOnPending = false;
 let prevCtxTokens = 0;
 let running = true;
 let sessionExisted = false;
+let sessionIno = -1;
+let harnessMode = false;
+let displayedSession = true;
 
-const pendingClaudeCommands: { interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>; prevCtx: number }[] = [];
-const discoveredClaudeFiles = new Set<string>();
+let pendingClaudeCommands: { interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>; prevCtx: number }[] = [];
+let discoveredClaudeFiles = new Set<string>();
 // Starts true: an inherited tag's swept marker is untrusted until this daemon re-stamps after its own sweep.
 let tagGrewSinceMarker = true;
 // Set when a sweep could not read what it meant to; withholds the swept stamp.
@@ -111,7 +116,7 @@ interface SubagentFileState {
 	stampInterrupt: boolean;
 }
 
-const discoveredSubagentFiles = new Map<string, SubagentFileState>();
+let discoveredSubagentFiles = new Map<string, SubagentFileState>();
 
 // ---
 
@@ -138,9 +143,9 @@ function shutdown(reason: string) {
   process.exit(0);
 }
 
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGHUP", () => shutdown("SIGHUP"));
+process.on("SIGTERM", () => { if (harnessMode) stopHarness("SIGTERM"); else shutdown("SIGTERM"); });
+process.on("SIGINT", () => { if (harnessMode) stopHarness("SIGINT"); else shutdown("SIGINT"); });
+process.on("SIGHUP", () => { if (harnessMode) stopHarness("SIGHUP"); else shutdown("SIGHUP"); });
 
 // ---
 
@@ -250,6 +255,9 @@ function flushPending() {
   if (pendingItems.length === 0) return;
   const batch = pendingItems.map(it => serializeClassifiedWithOverheadSplit(it.interaction, it.prevCtx)).join("");
   appendTagFile(tagPath, batch);
+  if (process.env.WTFT_DAEMON_DEBUG) {
+    process.stderr.write(`[wtft-log-parser] session flush ${Date.now()} ${path.basename(sessionPath)}\n`);
+  }
   tagGrewSinceMarker = true;
   appendTagFile(tagPath, JSON.stringify({ _meta: { offset: lastSize } }) + "\n");
   pendingItems = [];
@@ -649,7 +657,18 @@ function scanForSubAgents() {
 function parseNewLines(filePath: string) {
   try {
     const stat = fs.statSync(filePath);
+    if (process.env.WTFT_DAEMON_DEBUG) {
+      process.stderr.write(`[wtft-log-parser] session stat ${path.basename(filePath)}\n`);
+    }
     const currentSize = stat.size;
+    if (sessionIno !== -1 && stat.ino !== sessionIno) {
+      lastSize = 0;
+      pendingFragment = Buffer.alloc(0);
+      if (process.env.WTFT_DAEMON_DEBUG) {
+        process.stderr.write(`[wtft-log-parser] session inode changed, resetting offset ${path.basename(filePath)}\n`);
+      }
+    }
+    sessionIno = stat.ino;
     if (currentSize < lastSize) {
       if (process.env.WTFT_DAEMON_DEBUG) {
         process.stderr.write(`[wtft-log-parser] session truncated, resetting offset\n`);
@@ -669,6 +688,9 @@ function parseNewLines(filePath: string) {
         fs.readSync(fd, fresh, 0, fresh.length, lastSize);
       } finally {
         fs.closeSync(fd);
+      }
+      if (process.env.WTFT_DAEMON_DEBUG) {
+        process.stderr.write(`[wtft-log-parser] session delta ${fresh.length} bytes ${path.basename(filePath)}\n`);
       }
       lastSize = currentSize;
     }
@@ -1012,6 +1034,525 @@ function initClassified() {
 
 // ---
 
+function serviceSession(): "continue" | "stop" | "drop" {
+  try {
+    if (fs.readFileSync(pidPath, "utf8").trim() !== String(process.pid)) {
+      if (harnessMode) return "drop";
+      running = false;
+      process.exit(0);
+    }
+  } catch (_) {
+    if (harnessMode) return "drop";
+    running = false;
+    process.exit(0);
+  }
+
+  if (!fs.existsSync(sessionPath)) {
+    if (sessionExisted) {
+      if (!followMovedSession()) {
+        if (harnessMode) return "drop";
+        shutdown("session removed");
+        return "stop";
+      }
+    }
+    const now = Date.now();
+    if (!sessionExisted && now - startupTime >= SESSION_WAIT_MAX_MS) {
+      if (harnessMode) return "drop";
+      shutdown("session never written");
+      return "stop";
+    }
+    if (idleStartMs === 0) idleStartMs = now;
+    if (!harnessMode || displayedSession) upsertHeartbeat(now);
+    lastWriteMs = now;
+    lastActivityMs = now;
+    return "continue";
+  }
+  sessionExisted = true;
+
+  try {
+    pollHadFailure = false;
+    const rawInteractions = parseNewLines(sessionPath);
+    if (stampInterruptOnPending) {
+      if (pendingItems.length > 0) {
+        pendingItems[pendingItems.length - 1].interaction.interrupted = true;
+      }
+      stampInterruptOnPending = false;
+    }
+    const newInteractions = deduplicateInteractions(rawInteractions);
+    if (newInteractions.length > 0) {
+      lastActivityMs = Date.now();
+      for (const interaction of newInteractions) {
+        pendingItems.push({ interaction, prevCtx: prevCtxTokens });
+        if (!interaction.isSidechain) {
+          prevCtxTokens = interaction.inputTokens + interaction.cacheReadTokens + interaction.cacheWriteTokens;
+        }
+        if (hasClaudeCommand(interaction)) {
+          pendingClaudeCommands.push({ interaction, prevCtx: prevCtxTokens });
+        }
+      }
+    }
+
+    const now = Date.now();
+    if (pendingItems.length > 0 && (now - lastWriteMs) >= POLL_MS) {
+      flushPending();
+    }
+
+    scanForSubAgents();
+
+    if (pendingItems.length === 0 && (!harnessMode || displayedSession)) {
+      if (idleStartMs === 0) idleStartMs = now;
+      upsertHeartbeat(now);
+      lastWriteMs = now;
+    }
+
+    if (now - lastActivityMs >= IDLE_EXIT_MS && now - startupTime >= 60000) {
+      if (process.env.WTFT_DAEMON_DEBUG) {
+        process.stderr.write(`[wtft-log-parser] no new data for ${Math.round((now - lastActivityMs) / 60000)}m, exiting\n`);
+      }
+      if (harnessMode) return "drop";
+      shutdown("idle timeout");
+      return "stop";
+    }
+
+    if (!fs.existsSync(sessionPath) && !followMovedSession()) {
+      if (harnessMode) return "drop";
+      shutdown("session removed");
+      return "stop";
+    }
+  } catch (err) {
+    if (process.env.WTFT_DAEMON_DEBUG) {
+      process.stderr.write(`[wtft-log-parser] poll error: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+  }
+  return "continue";
+}
+
+const HARNESS_SKIP_DIRS = new Set(["subagents", "tool-results", "memory", "wtft-tags"]);
+
+type PendingItem = { interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>; prevCtx: number };
+
+interface Slot {
+  sessionPath: string;
+  tagPath: string;
+  pidPath: string;
+  rebuildTagOnStartup: boolean;
+  lastSize: number;
+  pendingFragment: Buffer;
+  lastWriteMs: number;
+  lastActivityMs: number;
+  startupTime: number;
+  pendingItems: PendingItem[];
+  idleStartMs: number;
+  streamState: ReturnType<typeof newParseStreamState>;
+  stampInterruptOnPending: boolean;
+  prevCtxTokens: number;
+  sessionExisted: boolean;
+  sessionIno: number;
+  displayed: boolean;
+  pendingClaudeCommands: PendingItem[];
+  discoveredClaudeFiles: Set<string>;
+  discoveredSubagentFiles: Map<string, SubagentFileState>;
+  tagGrewSinceMarker: boolean;
+  pollHadFailure: boolean;
+  sweptRetracted: boolean;
+}
+
+const harnessSlots = new Map<string, Slot>();
+const harnessWatchers = new Map<string, fs.FSWatcher>();
+const harnessFlushTimers = new Map<string, ReturnType<typeof setTimeout>>();
+let harnessPidFile = "";
+
+function freshSlot(file: string, displayed: boolean): Slot {
+  const now = Date.now();
+  return {
+    sessionPath: file,
+    tagPath: "",
+    pidPath: "",
+    rebuildTagOnStartup: false,
+    lastSize: 0,
+    pendingFragment: Buffer.alloc(0),
+    lastWriteMs: 0,
+    lastActivityMs: now,
+    startupTime: now,
+    pendingItems: [],
+    idleStartMs: 0,
+    streamState: newParseStreamState(),
+    stampInterruptOnPending: false,
+    prevCtxTokens: 0,
+    sessionExisted: false,
+    sessionIno: -1,
+    displayed,
+    pendingClaudeCommands: [],
+    discoveredClaudeFiles: new Set(),
+    discoveredSubagentFiles: new Map(),
+    tagGrewSinceMarker: true,
+    pollHadFailure: false,
+    sweptRetracted: false,
+  };
+}
+
+function install(slot: Slot) {
+  sessionPath = slot.sessionPath;
+  tagPath = slot.tagPath;
+  pidPath = slot.pidPath;
+  rebuildTagOnStartup = slot.rebuildTagOnStartup;
+  lastSize = slot.lastSize;
+  pendingFragment = slot.pendingFragment;
+  lastWriteMs = slot.lastWriteMs;
+  lastActivityMs = slot.lastActivityMs;
+  startupTime = slot.startupTime;
+  pendingItems = slot.pendingItems;
+  idleStartMs = slot.idleStartMs;
+  streamState = slot.streamState;
+  stampInterruptOnPending = slot.stampInterruptOnPending;
+  prevCtxTokens = slot.prevCtxTokens;
+  sessionExisted = slot.sessionExisted;
+  sessionIno = slot.sessionIno;
+  displayedSession = slot.displayed;
+  pendingClaudeCommands = slot.pendingClaudeCommands;
+  discoveredClaudeFiles = slot.discoveredClaudeFiles;
+  discoveredSubagentFiles = slot.discoveredSubagentFiles;
+  tagGrewSinceMarker = slot.tagGrewSinceMarker;
+  pollHadFailure = slot.pollHadFailure;
+  sweptRetracted = slot.sweptRetracted;
+}
+
+function save(slot: Slot) {
+  slot.sessionPath = sessionPath;
+  slot.tagPath = tagPath;
+  slot.pidPath = pidPath;
+  slot.rebuildTagOnStartup = rebuildTagOnStartup;
+  slot.lastSize = lastSize;
+  slot.pendingFragment = pendingFragment;
+  slot.lastWriteMs = lastWriteMs;
+  slot.lastActivityMs = lastActivityMs;
+  slot.startupTime = startupTime;
+  slot.pendingItems = pendingItems;
+  slot.idleStartMs = idleStartMs;
+  slot.streamState = streamState;
+  slot.stampInterruptOnPending = stampInterruptOnPending;
+  slot.prevCtxTokens = prevCtxTokens;
+  slot.sessionExisted = sessionExisted;
+  slot.sessionIno = sessionIno;
+  slot.displayed = displayedSession;
+  slot.pendingClaudeCommands = pendingClaudeCommands;
+  slot.discoveredClaudeFiles = discoveredClaudeFiles;
+  slot.discoveredSubagentFiles = discoveredSubagentFiles;
+  slot.tagGrewSinceMarker = tagGrewSinceMarker;
+  slot.pollHadFailure = pollHadFailure;
+  slot.sweptRetracted = sweptRetracted;
+}
+
+function withSlot<T>(slot: Slot, fn: () => T): T {
+  install(slot);
+  try {
+    return fn();
+  } finally {
+    save(slot);
+  }
+}
+
+function claimPidFile(file: string): "claimed" | "busy" {
+  try {
+    const existing = Number(fs.readFileSync(file, "utf8").trim());
+    if (existing === process.pid) return "claimed";
+    if (existing > 0) {
+      try {
+        process.kill(existing, 0);
+        return "busy";
+      } catch { /* dead lease */ }
+    }
+  } catch { /* no lease yet */ }
+  const candidate = `${file}.claim-${process.pid}`;
+  try {
+    fs.writeFileSync(candidate, String(process.pid));
+    try {
+      fs.linkSync(candidate, file);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      const holder = Number(fs.readFileSync(file, "utf8").trim());
+      if (holder === process.pid) return "claimed";
+      try {
+        process.kill(holder, 0);
+        return "busy";
+      } catch { /* dead lease */ }
+      try { fs.unlinkSync(file); } catch { /* raced */ }
+      fs.linkSync(candidate, file);
+    }
+  } finally {
+    try { fs.unlinkSync(candidate); } catch { /* already gone */ }
+  }
+  return "claimed";
+}
+
+function harnessRoot(which: string): string {
+  if (which === "claude") {
+    return process.env.WTFT_CLAUDE_PROJECTS_DIR || path.join(os.homedir(), ".claude", "projects");
+  }
+  if (which === "pi") {
+    return process.env.WTFT_PI_SESSIONS_DIR || path.join(os.homedir(), ".pi", "agent", "sessions");
+  }
+  process.stderr.write("wtft-daemon: --harness must be claude or pi\n");
+  process.exit(2);
+}
+
+function walkSessions(dir: string, out: string[]) {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const ent of entries) {
+    const full = path.resolve(dir, ent.name);
+    if (ent.isDirectory()) {
+      if (HARNESS_SKIP_DIRS.has(ent.name)) continue;
+      walkSessions(full, out);
+    } else if (ent.name.endsWith(".jsonl") && !ent.name.includes(".wtft-tag.")) {
+      out.push(full);
+    }
+  }
+}
+
+function adoptSession(): boolean {
+  if (sessionPath.includes(".wtft-tag.v")) return false;
+  tagPath = getCurrentVersionTagPath(sessionPath);
+  try { fs.mkdirSync(path.dirname(tagPath), { recursive: true }); } catch { /* exists */ }
+  pidPath = getDaemonPidPath(sessionPath);
+  if (claimPidFile(pidPath) === "busy") return false;
+  initClassified();
+  return true;
+}
+
+function scheduleFlush(key: string) {
+  if (harnessFlushTimers.has(key)) return;
+  const slot = harnessSlots.get(key);
+  if (!slot || slot.pendingItems.length === 0) return;
+  const wait = Math.max(0, POLL_MS - (Date.now() - slot.lastWriteMs));
+  const timer = setTimeout(() => {
+    harnessFlushTimers.delete(key);
+    const current = harnessSlots.get(key);
+    if (!current) return;
+    withSlot(current, () => {
+      if (pendingItems.length > 0) flushPending();
+      scanForSubAgents();
+    });
+  }, wait);
+  timer.unref();
+  harnessFlushTimers.set(key, timer);
+}
+
+function wake(file: string, displayed: boolean) {
+  const key = path.resolve(file);
+  let slot = harnessSlots.get(key);
+  if (!slot) {
+    slot = freshSlot(key, displayed);
+    if (!withSlot(slot, () => adoptSession())) return;
+    harnessSlots.set(key, slot);
+  } else if (displayed) {
+    slot.displayed = true;
+  }
+  const status = withSlot(slot, () => serviceSession());
+  if (status === "drop") {
+    harnessSlots.delete(key);
+    return;
+  }
+  if (slot.pendingItems.length > 0) scheduleFlush(key);
+}
+
+function watchDir(dir: string) {
+  const key = path.resolve(dir);
+  if (harnessWatchers.has(key)) return;
+  let watcher: fs.FSWatcher;
+  try {
+    watcher = fs.watch(key, (event, filename) => onWatch(key, filename ? String(filename) : null));
+  } catch {
+    return;
+  }
+  watcher.on("error", () => {
+    harnessWatchers.delete(key);
+    try { watcher.close(); } catch { /* already closed */ }
+    try {
+      if (fs.statSync(key).isDirectory()) watchDir(key);
+    } catch { /* directory is gone */ }
+  });
+  harnessWatchers.set(key, watcher);
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(key, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const ent of entries) {
+    if (!ent.isDirectory() || HARNESS_SKIP_DIRS.has(ent.name)) continue;
+    watchDir(path.resolve(key, ent.name));
+  }
+}
+
+function onWatch(dir: string, filename: string | null) {
+  if (!filename) {
+    if (process.env.WTFT_DAEMON_DEBUG) {
+      process.stderr.write("[wtft-log-parser] watch overflow, rescanning offsets once\n");
+    }
+    for (const [file, slot] of harnessSlots) wake(file, slot.displayed);
+    return;
+  }
+  if (HARNESS_SKIP_DIRS.has(filename)) return;
+  const full = path.resolve(dir, filename);
+  let st: fs.Stats | null = null;
+  try {
+    st = fs.statSync(full);
+  } catch {
+    st = null;
+  }
+  if (st?.isDirectory()) {
+    watchDir(full);
+    return;
+  }
+  if (st && filename.endsWith(".jsonl") && !filename.includes(".wtft-tag.")) {
+    wake(full, false);
+    return;
+  }
+  // A replace-via-rename often reports only the path that disappeared.
+  const watched = path.resolve(dir);
+  for (const [file, slot] of harnessSlots) {
+    if (path.dirname(file) !== watched) continue;
+    let now: fs.Stats;
+    try {
+      now = fs.statSync(file);
+    } catch {
+      continue;
+    }
+    if (now.ino !== slot.sessionIno || now.size !== slot.lastSize) wake(file, slot.displayed);
+  }
+}
+
+function pointSessionAt(livePid: number, file: string) {
+  const lease = getDaemonPidPath(file);
+  const replacement = `${lease}.replace-${process.pid}`;
+  fs.writeFileSync(replacement, String(livePid));
+  fs.renameSync(replacement, lease);
+}
+
+function runHarness(which: string, focus: string) {
+  const root = path.resolve(harnessRoot(which));
+  if (!fs.existsSync(root)) {
+    process.stderr.write(`wtft-daemon: harness root does not exist: ${root}\n`);
+    process.exit(1);
+  }
+  const hash = createHash("sha256").update(root).digest("hex").slice(0, 12);
+  harnessPidFile = path.join(os.tmpdir(), `wtft-harness-${which}-${hash}.pid`);
+  if (claimPidFile(harnessPidFile) === "busy") {
+    const live = Number(fs.readFileSync(harnessPidFile, "utf8").trim());
+    if (focus) pointSessionAt(live, focus);
+    process.exit(0);
+  }
+  harnessMode = true;
+  if (process.env.WTFT_DAEMON_DEBUG) {
+    process.stderr.write(`[wtft-log-parser] harness pid ${harnessPidFile}\n`);
+    process.stderr.write(`[wtft-log-parser] harness root ${root}\n`);
+  }
+  watchDir(root);
+  const files: string[] = [];
+  walkSessions(root, files);
+  const focusKey = focus ? path.resolve(focus) : "";
+  for (const file of files) wake(file, file === focusKey);
+  if (focusKey && !harnessSlots.has(focusKey)) wake(focusKey, true);
+  if (process.env.WTFT_DAEMON_DEBUG) {
+    process.stderr.write(`[wtft-log-parser] harness settled ${which}\n`);
+  }
+}
+
+function stopHarness(reason: string) {
+  if (!running) return;
+  running = false;
+  for (const timer of harnessFlushTimers.values()) clearTimeout(timer);
+  for (const slot of harnessSlots.values()) {
+    withSlot(slot, () => {
+      if (pendingItems.length > 0) flushPending();
+    });
+    try {
+      if (slot.pidPath && fs.readFileSync(slot.pidPath, "utf8").trim() === String(process.pid)) {
+        fs.unlinkSync(slot.pidPath);
+      }
+    } catch { /* lease already gone */ }
+  }
+  for (const watcher of harnessWatchers.values()) {
+    try { watcher.close(); } catch { /* already closed */ }
+  }
+  if (harnessPidFile) {
+    try {
+      if (fs.readFileSync(harnessPidFile, "utf8").trim() === String(process.pid)) fs.unlinkSync(harnessPidFile);
+    } catch { /* already gone */ }
+  }
+  if (process.env.WTFT_DAEMON_DEBUG) {
+    process.stderr.write(`[wtft-log-parser] harness shutdown: ${reason}\n`);
+  }
+  process.exit(0);
+}
+
+function tagIsCurrent(file: string): boolean {
+  try {
+    return fs.statSync(getCurrentVersionTagPath(file)).size > 0;
+  } catch {
+    return false;
+  }
+}
+
+function reparseOne(file: string) {
+  if (process.env.WTFT_DAEMON_DEBUG) {
+    process.stderr.write(`[wtft-log-parser] reparse begin ${file}\n`);
+  }
+  sessionPath = file;
+  tagPath = getCurrentVersionTagPath(file);
+  try { fs.mkdirSync(path.dirname(tagPath), { recursive: true }); } catch { /* exists */ }
+  const raw = deduplicateInteractions(parseSessionFile(file));
+  let prev = 0;
+  let batch = "";
+  for (const interaction of raw) {
+    batch += serializeClassifiedWithOverheadSplit(interaction, prev);
+    if (!interaction.isSidechain) {
+      prev = interaction.inputTokens + interaction.cacheReadTokens + interaction.cacheWriteTokens;
+    }
+  }
+  if (batch) appendTagFile(tagPath, batch);
+  appendTagFile(tagPath, JSON.stringify({ _meta: { offset: fs.statSync(file).size, swept: Date.now() } }) + "\n");
+  discoveredSubagentFiles = new Map();
+  discoveredClaudeFiles = new Set();
+  pendingClaudeCommands = [];
+  scanForSubAgents();
+  if (process.env.WTFT_DAEMON_DEBUG) {
+    process.stderr.write(`[wtft-log-parser] reparse end ${file}\n`);
+  }
+}
+
+function runReparse(one: string, from: string, to: string) {
+  if (one) {
+    reparseOne(path.resolve(one));
+    return;
+  }
+  const fromMs = Date.parse(`${from}T00:00:00Z`);
+  const toMs = Date.parse(`${to}T00:00:00Z`);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) {
+    process.stderr.write("wtft-daemon: --reparse-range needs two YYYY-MM-DD dates\n");
+    process.exit(2);
+  }
+  const files: string[] = [];
+  walkSessions(path.resolve(harnessRoot("claude")), files);
+  walkSessions(path.resolve(harnessRoot("pi")), files);
+  for (const file of files) {
+    let mtime = 0;
+    try { mtime = fs.statSync(file).mtimeMs; } catch { continue; }
+    if (mtime < fromMs || mtime >= toMs) continue;
+    if (tagIsCurrent(file)) continue;
+    try {
+      reparseOne(file);
+    } catch (err) {
+      process.stderr.write(`[wtft-log-parser] reparse failed ${file}: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+  }
+}
+
 async function main() {
   loadUserPricing();
 
@@ -1023,11 +1564,22 @@ async function main() {
   let showCleanup = false;
   let showRestart = false;
   let stopSession = null;
+  let harnessName = "";
+  let reparsePath = "";
+  let reparseFrom = "";
+  let reparseTo = "";
 
   for (let i = 2; i < process.argv.length; i++) {
     const arg = process.argv[i];
     if (arg === "--session" || arg === "-s") {
       sessionPath = process.argv[++i];
+    } else if (arg === "--harness") {
+      harnessName = process.argv[++i] || "";
+    } else if (arg === "--reparse") {
+      reparsePath = process.argv[++i] || "";
+    } else if (arg === "--reparse-range") {
+      reparseFrom = process.argv[++i] || "";
+      reparseTo = process.argv[++i] || "";
     } else if (arg === "--list" || arg === "-l") {
       showList = true;
     } else if (arg === "--cleanup") {
@@ -1039,6 +1591,9 @@ async function main() {
     } else if (arg === "--help" || arg === "-h") {
       console.log(`wtft-daemon — Log parser daemon for WTFT
 Usage: wtft-daemon --session <path> [--debug]
+       wtft-daemon --harness <claude|pi> [--session <path>] [--debug]
+       wtft-daemon --reparse <session.jsonl>
+       wtft-daemon --reparse-range <YYYY-MM-DD> <YYYY-MM-DD>
 
 Management:
   --list, -l            List all running daemons (session, PID, idle time)
@@ -1048,6 +1603,11 @@ Management:
 
 Daemon mode:
   -s, --session <path>  Path to session.jsonl to watch
+  --harness <claude|pi> One process for that harness root (WTFT_CLAUDE_PROJECTS_DIR or WTFT_PI_SESSIONS_DIR)
+  --reparse <path>      Classify one session at disk speed and exit. No watch.
+  --reparse-range <from> <to>
+                        Reparse sessions under both harness roots whose mtime is in [from, to),
+                        one at a time, and only when the current tag is missing. No watch.
   --debug               Enable debug logging to stderr
   -h, --help            Show this help`);
       process.exit(0);
@@ -1111,7 +1671,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       try { fs.unlinkSync(fullPath); } catch (_) {}
       if (sessionFound) {
         try {
-          const child = spawn(process.execPath, [process.argv[1], "--session", sessionFound], {
+          const child = spawn(process.execPath, [process.argv[1], ...daemonLaunchArgs(sessionFound)], {
             detached: true,
             stdio: "ignore"
           });
@@ -1178,6 +1738,15 @@ if (showList || showCleanup || showRestart || stopSession) {
 }
 
 // --- Daemon mode (session required) ---
+
+  if (reparsePath || reparseFrom) {
+    runReparse(reparsePath, reparseFrom, reparseTo);
+    return;
+  }
+  if (harnessName) {
+    runHarness(harnessName, sessionPath);
+    return;
+  }
 
   if (!sessionPath) {
     process.stderr.write("wtft-daemon: --session <path> is required\n");
@@ -1306,95 +1875,7 @@ if (showList || showCleanup || showRestart || stopSession) {
 
   const loop = () => {
     if (!running) return;
-
-    try {
-      if (fs.readFileSync(pidPath, "utf8").trim() !== String(process.pid)) {
-        running = false;
-        process.exit(0);
-      }
-    } catch (_) {
-      running = false;
-      process.exit(0);
-    }
-
-    if (!fs.existsSync(sessionPath)) {
-      // Previously seen and missing: follow a move before treating as removed.
-      if (sessionExisted) {
-        if (!followMovedSession()) {
-          shutdown("session removed");
-          return;
-        }
-      }
-      const now = Date.now();
-      if (!sessionExisted && now - startupTime >= SESSION_WAIT_MAX_MS) {
-        shutdown("session never written");
-        return;
-      }
-      if (idleStartMs === 0) idleStartMs = now;
-      upsertHeartbeat(now);
-      lastWriteMs = now;
-      lastActivityMs = now;
-      setTimeout(loop, POLL_MS);
-      return;
-    }
-    sessionExisted = true;
-
-    try {
-      // Reset pollHadFailure per poll (flushPending can fail before scanForSubAgents).
-      pollHadFailure = false;
-      const rawInteractions = parseNewLines(sessionPath);
-      if (stampInterruptOnPending) {
-        if (pendingItems.length > 0) {
-          pendingItems[pendingItems.length - 1].interaction.interrupted = true;
-        }
-        stampInterruptOnPending = false;
-      }
-      const newInteractions = deduplicateInteractions(rawInteractions);
-      if (newInteractions.length > 0) {
-        lastActivityMs = Date.now();
-        for (const interaction of newInteractions) {
-          pendingItems.push({ interaction, prevCtx: prevCtxTokens });
-          if (!interaction.isSidechain) {
-            prevCtxTokens = interaction.inputTokens + interaction.cacheReadTokens + interaction.cacheWriteTokens;
-          }
-          if (hasClaudeCommand(interaction)) {
-            pendingClaudeCommands.push({ interaction, prevCtx: prevCtxTokens });
-          }
-        }
-      }
-
-      const now = Date.now();
-      if (pendingItems.length > 0 && (now - lastWriteMs) >= POLL_MS) {
-        flushPending();
-      }
-
-      scanForSubAgents();
-
-      // Idle heartbeat always full-width {first,last} so in-place overwrite stays same size.
-      if (pendingItems.length === 0) {
-        if (idleStartMs === 0) idleStartMs = now;
-        upsertHeartbeat(now);
-        lastWriteMs = now;
-      }
-
-      if (now - lastActivityMs >= IDLE_EXIT_MS && now - startupTime >= 60000) {
-        if (process.env.WTFT_DAEMON_DEBUG) {
-          process.stderr.write(`[wtft-log-parser] no new data for ${Math.round((now - lastActivityMs)/60000)}m, exiting\n`);
-        }
-        shutdown("idle timeout");
-        return;
-      }
-
-      if (!fs.existsSync(sessionPath) && !followMovedSession()) {
-        shutdown("session removed");
-        return;
-      }
-    } catch (err) {
-      if (process.env.WTFT_DAEMON_DEBUG) {
-        process.stderr.write(`[wtft-log-parser] poll error: ${err instanceof Error ? err.message : String(err)}\n`);
-      }
-    }
-
+    if (serviceSession() === "stop") return;
     setTimeout(loop, POLL_MS);
   };
 

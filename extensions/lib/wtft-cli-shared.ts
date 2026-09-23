@@ -5,7 +5,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn, type ChildProcess } from "node:child_process";
-import { checkDaemonHealth, getTagPath, type DaemonStatus } from "./wtft-shared.js";
+import { checkDaemonHealth, daemonLaunchArgs, getTagPath, type DaemonStatus } from "./wtft-shared.js";
 import { readConfig } from "@princess-pi/libs/config";
 import { formatVersion } from "@princess-pi/libs/build-stamp";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "./wtft-config-dir.js";
@@ -293,7 +293,7 @@ export function isPendingSessionPath(p: string): boolean {
 export function spawnWtftDaemon(sessionPath: string, daemonDir: string): ChildProcess | null {
 	const daemonPath = path.join(daemonDir, "wtft-daemon.mjs");
 	try {
-		const child = spawn(process.execPath, [daemonPath, "--session", sessionPath], {
+		const child = spawn(process.execPath, [daemonPath, ...daemonLaunchArgs(sessionPath)], {
 			detached: true,
 			stdio: "ignore",
 		});

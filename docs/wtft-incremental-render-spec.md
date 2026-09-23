@@ -10,9 +10,9 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  wtft-daemon — detached, singleton per                  │
-│  session. Polls session.jsonl every 667ms, classifies   │
-│  entries, writes to wtft-tags/<session>.tag.v2.3.4.jsonl│
+│  wtft-daemon — one process per harness root, woken by   │
+│  fs.watch. Flushes for one session are ≥667ms apart.    │
+│  A session outside the roots keeps its own 667ms poll.  │
 │  Tag format includes message.id for cross-run dedup.    │
 │  Heartbeats: single _hb line updated in-place per idle  │
 │  cycle (consolidated, not appended).                     │

@@ -1054,14 +1054,23 @@ function reapAndWarn() {
 
   const warnings: string[] = [];
 
+  // One process can hold many leases (a harness daemon holds one per session),
+  // so each distinct pid is examined once and its outcome applied to all of them.
+  const leasesOf = new Map<number, string[]>();
   for (const pidFile of pidFiles) {
     const fullPath = path.join(pidDir, pidFile);
     let pid = 0;
     try {
       pid = parseInt(fs.readFileSync(fullPath, "utf8").trim(), 10);
     } catch (_) { continue; }
-    if (pid <= 0) continue;
+    if (!(pid > 0)) continue;
+    const leases = leasesOf.get(pid);
+    if (leases) leases.push(fullPath);
+    else leasesOf.set(pid, [fullPath]);
+  }
+  const sessionOf = new Map<number, string | null>();
 
+  for (const [pid, leases] of leasesOf) {
     let alive = false;
     try { process.kill(pid, 0); alive = true; } catch (_) {}
 
@@ -1074,16 +1083,17 @@ function reapAndWarn() {
         sessionFound = args[sessIdx + 1];
       }
     } catch (_) {}
+    sessionOf.set(pid, alive ? sessionFound : null);
 
     if (!alive) {
-      try { fs.unlinkSync(fullPath); } catch (_) {}
+      for (const lease of leases) { try { fs.unlinkSync(lease); } catch (_) {} }
       continue;
     }
 
     // HARD: session gone (not moved, not never-written). Never our own PID.
     if (pid !== process.pid && sessionFound && sessionIsGone(sessionFound)) {
       process.kill(pid, "SIGTERM");
-      try { fs.unlinkSync(fullPath); } catch (_) {}
+      for (const lease of leases) { try { fs.unlinkSync(lease); } catch (_) {} }
       warnings.push(`[${new Date().toISOString()}] KILLED PID ${pid}: session gone — ${sessionFound}`);
       continue;
     }
@@ -1144,20 +1154,7 @@ function reapAndWarn() {
   try {
     const tmpEntries = fs.readdirSync(os.tmpdir());
     const liveSessions = new Set<string>();
-    for (const pidFile of pidFiles) {
-      try {
-        const fullPath = path.join(pidDir, pidFile);
-        const pid = parseInt(fs.readFileSync(fullPath, "utf8").trim(), 10);
-        if (pid > 0) {
-          const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
-          const args = cmdline.split("\0");
-          const sessIdx = args.indexOf("--session");
-          if (sessIdx >= 0 && sessIdx + 1 < args.length) {
-            liveSessions.add(args[sessIdx + 1]);
-          }
-        }
-      } catch (_) {}
-    }
+    for (const session of sessionOf.values()) if (session) liveSessions.add(session);
     for (const entry of tmpEntries) {
       if (!entry.startsWith("wtft-")) continue;
       const fullDir = path.join(os.tmpdir(), entry);

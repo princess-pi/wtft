@@ -138,7 +138,8 @@ try {
 		"both harnesses classify their last fixture",
 		() => {
 			try {
-				const claudeHit = readClassifiedTagFile(lastClaudeTag).some((row: { messageId?: string }) => row.messageId === `c-${N - 1}`);
+				const asked = [0, 1, 2, 3, 4].every(i => readClassifiedTagFile(getCurrentVersionTagPath(claudeFiles[i])).some((row: { messageId?: string }) => row.messageId === `c-${i}`));
+				const claudeHit = asked && readClassifiedTagFile(lastClaudeTag).some((row: { messageId?: string }) => row.messageId === `c-${N - 1}`);
 				const piHit = readClassifiedTagFile(lastPiTag).some((row: { messageId?: string }) => row.messageId === `p-${N - 1}`);
 				return claudeHit && piHit;
 			} catch {

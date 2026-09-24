@@ -49,15 +49,15 @@ to a later read.
 
 Both already match a full parse on `c7864c0`. #220 was filed from a review round of #219, and by
 the time #219 merged it carried the prefix hash taken on growth, which catches a same-inode rewrite
-that is not an append, and the per-id cost map. The fixtures for these two pass without this
-change. So the fail-before half of #220's Closer is shown here for case 1 only; cases 2 and 3 are
+that is not an append. Case 3 matches because every reader keeps the highest cost per id, as a
+full parse does. The fixtures for these two pass without this change. So the fail-before half of #220's Closer is shown here for case 1 only; cases 2 and 3 are
 pinned so they stay true.
 
 **Case 3 against #220's Expected.** #220 asks both that the tag match a full parse and that a
 reader keeping the max cost per id not keep the retracted, higher figure. Those two conflict. A
 full parse keeps the higher-cost copy of an id (`deduplicateInteractions`), as every wtft reader
 does. This change follows the Closer: the tag matches a full parse, so the higher figure stands.
-The per-id cost map's new generation re-derives that same answer. Whether that branch should be
-kept is #242.
+The per-id cost map that opened a new generation on a lower copy re-derived that same answer, and
+#242 removed it (`docs/spec-242-drop-noop-retraction.md`).
 
 A prefix hash that cannot be read now warns once per transcript, as the other read failures do.

@@ -69,7 +69,13 @@ async function runCase(
 	const sub = path.join(subDir, "agent-case.jsonl");
 	fs.writeFileSync(sub, initial);
 	const tag = path.join(dir, "wtft-tags", `session.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
-	const child = spawn(process.execPath, [DAEMON_BIN, "--session", session], { detached: true, stdio: "ignore" });
+	const stderrFd = fs.openSync(path.join(dir, "daemon-stderr.log"), "a");
+	const child = spawn(process.execPath, [DAEMON_BIN, "--session", session], {
+		detached: true,
+		stdio: ["ignore", "ignore", stderrFd],
+		env: { ...process.env, WTFT_DAEMON_DEBUG: "1" },
+	});
+	fs.closeSync(stderrFd);
 	child.unref();
 	try {
 		let initialTagged = false;
@@ -162,15 +168,23 @@ const T0 = Date.now() - 60_000;
 }
 
 {
+	let readLower = false;
 	const r = await runCase("lower-cost", turn("msg_a", T0, 5000), async file => {
-		fs.appendFileSync(file, turn("msg_a", T0, 100));
+		const lower = turn("msg_a", T0, 100);
+		fs.appendFileSync(file, lower);
 		// The tag already matches a full parse before the daemon reads the
-		// lower copy, so wait until it has: its retraction opens a new generation.
-		const tag = path.join(path.dirname(path.dirname(path.dirname(file))), "wtft-tags", `session.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
-		for (let i = 0; i < 40 && (fs.readFileSync(tag, "utf8").match(/"_gen"/g) ?? []).length < 2; i++) await sleep(250);
+		// lower copy, so wait until its debug log shows that read.
+		const log = path.join(path.dirname(path.dirname(path.dirname(file))), "daemon-stderr.log");
+		const read = () => fs.readFileSync(log, "utf8").includes(`subagent delta ${Buffer.byteLength(lower)} bytes`);
+		for (let i = 0; i < 40 && !read(); i++) await sleep(250);
+		readLower = read();
+		// A new generation would land a poll or two after that read: a turn is
+		// held back one poll before it is written.
+		await sleep(2000);
 	});
 	assert("fixture: the first copy was tagged before the lower one", r.initialTagged);
-	assert(`fixture: the daemon read the lower copy and opened a new generation (${r.generations} generation records)`, r.generations === 2);
+	assert("fixture: the daemon read the lower copy", readLower);
+	assert(`a lower copy does not write the transcript again (${r.generations} generation record(s))`, r.generations === 1);
 	assert("an ordinary turn re-emitted at a lower cost matches a full parse", r.tag === r.full, `tag:  ${r.tag}\n       full: ${r.full}`);
 }
 

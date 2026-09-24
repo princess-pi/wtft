@@ -128,8 +128,6 @@ interface SubagentFileState {
 	/** The last turn read, of any kind, and whether a Claude command made it an
 	 *  owner: the turn an interrupt at the head of the next read follows. */
 	lastTurn: { turn: NonNullable<ReturnType<typeof parseEntryToInteraction>>; owner: boolean } | null;
-	/** Cost already tagged for an ordinary id. A lower correction opens a new generation. */
-	plainCost: Map<string, number>;
 	/** Which children another holder owned at the last parse — when that set
 	 *  changes this transcript's own total does too, so the gate must fire. */
 	foldedByAnother: string;
@@ -308,7 +306,6 @@ function freshSubagentState(): SubagentFileState {
     owners: [],
     pendingTurn: null,
     lastTurn: null,
-    plainCost: new Map(),
     foldedByAnother: "",
   };
 }
@@ -600,19 +597,6 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
         plain.push(interaction);
       }
     }
-    if (attempt === 0) {
-      const seenCost = fileState.plainCost;
-      const retracted = plain.some(interaction => {
-        if (!interaction.messageId) return false;
-        const prev = seenCost.get(interaction.messageId);
-        return prev !== undefined && interaction.cost + 1e-9 < prev;
-      });
-      if (retracted) {
-        fileState = freshSubagentState();
-        discoveredSubagentFiles.set(stateKey, fileState);
-        continue;
-      }
-    }
     const holdBack = size > fileState.lastSize && plain.length > 0;
     // Which turns are held and last is committed with the offset below. A mark
     // set on them before a failure is set again, identically, by the re-read.
@@ -680,7 +664,6 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
       }
       for (const interaction of plain) {
         batch += serializeClassified(interaction, source);
-        if (interaction.messageId) fileState.plainCost.set(interaction.messageId, interaction.cost);
       }
       for (const interaction of reinterrupted) batch += serializeClassified(interaction, source);
       clones.forEach((interaction, i) => {

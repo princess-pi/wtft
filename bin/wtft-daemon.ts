@@ -543,8 +543,17 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
       }
       return true;
     };
-    if (parsed?.stampInterrupt && fileState.pendingTurn) {
-      fileState.pendingTurn.interrupted = true;
+    // An interrupt marks the turn it follows and never a later one. When that
+    // turn is already in the tag, the transcript is written again as a new
+    // generation, so the full parse's marking replaces the line already there.
+    if (parsed?.stampInterrupt) {
+      if (fileState.pendingTurn) {
+        fileState.pendingTurn.interrupted = true;
+      } else if (attempt === 0 && !fileState.newGeneration) {
+        fileState = freshSubagentState();
+        discoveredSubagentFiles.set(stateKey, fileState);
+        continue;
+      }
       parsed = { ...parsed, stampInterrupt: false };
     }
     if (fileState.pendingTurn) {

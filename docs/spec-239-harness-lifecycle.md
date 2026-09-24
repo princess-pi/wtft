@@ -53,7 +53,9 @@
   from being stamped swept when the pass ends, and dropping a session forgets its pass. `WTFT_HARNESS_SCAN_YIELD_MS` (default 0) pauses
   between slices; the suite sets it to make a scan outlast a report. A one-shot `wtft` that finds turns in the tag reports them at once, marked
   provisional (exit 9, "no subagent transcript has been read since this tag was written") until
-  the scan finishes and stamps the tag swept; `--watch` shows the sum grow.
+  the scan finishes and stamps the tag swept; `--watch` shows the sum grow. A session adopted on
+  a tag an earlier daemon wrote has that tag's swept verdict retracted first, since whatever was
+  written while nothing served it has not been read yet.
 - **A session is dropped after `WTFT_DAEMON_IDLE_MS` (24 h) with no new lines** in it or its
   subagent transcripts, once `WTFT_DAEMON_STARTUP_GRACE_MS` has passed since it was adopted, as before, and
   dropping a slot now removes its lease, unless another slot shares that lease or another
@@ -73,6 +75,10 @@
   a reparse to take a lease: asked for a session a reparse holds, it tries again every 667 ms
   until the reparse lets go. Any other failed adoption is retried up to five times. A reparse
   whose lease was taken while it parsed gives up before it rewrites the tag. `--reparse` of a session a daemon is serving is refused, exit 1.
+  A reparse stamps the tag swept only after a clean subagent scan; one that could not read a
+  subagent transcript exits 1. A per-session daemon started for a session a reparse holds waits
+  for it to let go, and a focus request never overwrites a `rebuild` lease, so a session handed
+  to a live harness after a failed tag write is rebuilt, not resumed.
   `--reparse-range` exits 1, naming how many sessions it left unreparsed, when any was refused,
   failed or could not be stat'd, and exits 2 when the second date is missing or a date does not parse.
 - **A harness whose pid file no longer names it stops.** The sweep reads the harness pid file;
@@ -103,10 +109,16 @@
   subagent transcript is read. `--reparse` runs beside the harness on a session it does not
   serve and is refused on one it does. The issue asked for RSS; RSS keeps heap a parse freed
   and did not return (#97), so the test measures live heap.
-- A session with 20 subagent transcripts, scanned one transcript per slice with 300 ms between
-  slices: the first `wtft --json` returns in under 3 s with the session's own sum, marked provisional
+- A session with 20 subagent transcripts, scanned in 0 ms slices with 300 ms between them: the first `wtft --json` returns in under 3 s with the session's own sum, marked provisional
   (exit 9); a later report is complete (exit 0) and counts the subagent turns the first did not.
   A second session handed to that running harness gets its sum on its first report.
+- A `--reparse` that cannot read a subagent transcript exits 1 and leaves the tag unswept.
+- A session adopted again after its harness stopped has its old swept verdict retracted, then
+  its subagent written while nothing served it is read.
+- A session with a `rebuild` lease, handed to a harness already serving another session, is
+  rebuilt: a row its transcript does not hold is gone.
+- A per-session daemon whose lease a `--reparse` holds stays up without taking it, then claims it
+  and classifies the session once the reparse lets go.
 - Removing the harness pid file stops the harness.
 - With 40,000 leases naming the running harness, `--restart` followed by a `wtft`-style spawn
   leaves exactly one harness after 5 s: the one `--restart` started, holding the pid file.

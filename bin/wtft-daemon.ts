@@ -1322,6 +1322,8 @@ function initClassified() {
         const metaOffset = readLastMetaOffset(tagPath);
         if (metaOffset !== null) {
           lastSize = metaOffset;
+          // Written by an earlier life; what changed since is not read yet.
+          invalidateStaleSweptMarker(sessionPath);
         } else {
           try { fs.truncateSync(tagPath, 0); } catch { /* best effort */ }
           lastSize = 0;
@@ -1828,6 +1830,10 @@ function retryAdoptionLater(key: string, displayed: boolean) {
   timer.unref();
 }
 
+function sleepMs(ms: number) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function procIsReparse(pid: number): boolean {
   if (!procIsDaemon(pid)) return false;
   let args: string[] = [];
@@ -1919,12 +1925,14 @@ function taggerIsOlder(a: string, b: string): boolean {
 function pointSessionAt(livePid: number, file: string): boolean {
   const lease = getDaemonPidPath(file);
   let held = false;
-  let holder = 0;
-  try { holder = Number(fs.readFileSync(lease, "utf8").trim()); } catch { /* no lease yet */ }
+  let leaseText = "";
+  try { leaseText = fs.readFileSync(lease, "utf8").trim(); } catch { /* no lease yet */ }
+  const holder = Number(leaseText);
   held = holder === livePid;
   // A --reparse rewriting this session's tag keeps its lease; the harness is
-  // only asked, and adopts the session once the reparse lets go.
-  if (!procIsReparse(holder)) {
+  // only asked, and adopts the session once the reparse lets go. A rebuild
+  // token stays for the harness to read when it adopts.
+  if (leaseText !== "rebuild" && !procIsReparse(holder)) {
     const replacement = `${lease}.replace-${process.pid}`;
     fs.writeFileSync(replacement, String(livePid));
     fs.renameSync(replacement, lease);
@@ -2287,6 +2295,9 @@ function reparseHeld(file: string): boolean {
     return false;
   }
   fs.writeFileSync(tagPath, "");
+  pollHadFailure = false;
+  tagGrewSinceMarker = true;
+  sweptRetracted = false;
   let prev = 0;
   let batch = "";
   pendingClaudeCommands = [];
@@ -2298,10 +2309,15 @@ function reparseHeld(file: string): boolean {
     if (hasClaudeCommand(interaction)) pendingClaudeCommands.push({ interaction, prevCtx: prev });
   }
   if (batch) appendTagFile(tagPath, batch);
-  appendTagFile(tagPath, JSON.stringify({ _meta: { offset: parsedSize, swept: Date.now() } }) + "\n");
+  appendTagFile(tagPath, JSON.stringify({ _meta: { offset: parsedSize } }) + "\n");
   discoveredSubagentFiles = new Map();
   discoveredClaudeFiles = new Set();
+  // Stamps swept only after a clean scan.
   scanForSubAgents();
+  if (pollHadFailure) {
+    process.stderr.write(`wtft-daemon: --reparse could not read every subagent transcript of ${file}\n`);
+    return false;
+  }
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] reparse end ${file}\n`);
   }
@@ -2678,6 +2694,14 @@ if (showList || showCleanup || showRestart || stopSession) {
   ).digest("hex").slice(0, 12);
   pidPath = path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
 
+  // A --reparse rewriting this session's tag holds its lease until it is done.
+  for (;;) {
+    let leaseHolder = 0;
+    try { leaseHolder = Number(fs.readFileSync(pidPath, "utf8").trim()); } catch { /* no lease */ }
+    if (!procIsReparse(leaseHolder)) break;
+    sleepMs(200);
+  }
+
   // Old-version tag: claim the lease; old daemon exits on lost lease (no SIGTERM race).
   const prefix = sessionBase + ".wtft-tag.v";
   let claimedByTakeover = false;
@@ -2732,6 +2756,10 @@ if (showList || showCleanup || showRestart || stopSession) {
       if (lease === "rebuild") {
         rebuildTagOnStartup = true;
       } else if (Number.isSafeInteger(existingPid) && existingPid > 0) {
+        if (procIsReparse(existingPid)) {
+          sleepMs(200);
+          continue;
+        }
         try {
           process.kill(existingPid, 0);
           process.exit(0);

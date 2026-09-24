@@ -104,7 +104,7 @@ try {
 		check(others === 0, `no other session was rebuilt: ${others} of ${SESSIONS - 1}`);
 	}
 
-	console.log("\nA session asked for from another process is served next");
+	console.log("\nA session asked for from another process is served");
 	{
 		const { root, files } = makeRoot("b");
 		start(root, ["--session", files[0]]);

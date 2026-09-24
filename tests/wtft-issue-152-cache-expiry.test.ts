@@ -165,7 +165,7 @@ const byId = new Map<string, any>(parsed.map((i: any) => [i.messageId, i]));
 
 console.log("--- TEST 7: cacheMiss set from raw usage ---");
 check(byId.get("msg_full_miss")?.cacheMiss === true, "cr=0, cw>0 → cacheMiss true");
-check(!byId.get("msg_partial")?.cacheMiss, "partial re-prime (cr>0) → not a miss");
+check(!byId.get("msg_partial")?.cacheMiss, "partial re-prime (cr>0) → not a miss at parse time; the split decides it (TEST 9)");
 check(!byId.get("msg_hit")?.cacheMiss, "cache hit → not a miss");
 check(!byId.get("msg_no_cache")?.cacheMiss, "no cache activity → not a miss");
 

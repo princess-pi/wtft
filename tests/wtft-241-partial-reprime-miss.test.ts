@@ -5,8 +5,15 @@
  * tool result is not.
  */
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { spawn } from "node:child_process";
 import { parseEntryToInteraction } from "../extensions/lib/wtft-parser.ts";
+import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { serializeClassifiedWithOverheadSplit, classifiedInteractionsFromContent } from "../extensions/lib/wtft-daemon-lib.ts";
+
+isolateTmpdir("241-partial-reprime-miss");
 
 let passed = 0;
 let failed = 0;
@@ -68,6 +75,47 @@ console.log("\nNot a miss");
 		"an ordinary turn reading its cache is not a miss");
 	check(!missAfterTag(turn("msg_first", 4, 9_487, 448_641), 0).miss,
 		"with no previous context to compare against, a partial prefix is not called a miss");
+}
+
+console.log("\nThrough the daemon: the session's own re-prime is flagged, a subagent's is not");
+{
+	const DAEMON_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
+	const { WTFT_TAGGER_VERSION } = await import("../extensions/lib/wtft-tagger-version.ts");
+	const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-241-daemon-")));
+	const line = (id: string, t: number, cr: number, cw: number) => JSON.stringify({
+		type: "message",
+		message: {
+			role: "assistant", id, model: "claude-opus-5-5", timestamp: new Date(T0 + t).toISOString(),
+			usage: { input_tokens: 4, output_tokens: 300, cache_read_input_tokens: cr, cache_creation_input_tokens: cw },
+			content: [{ type: "text", text: "t" }],
+		},
+	}) + "\n";
+	// The same shape in both: a warm turn, then 9,487 read / 448,641 written.
+	const body = line("warm", 0, 456_145, 809) + line("reprime", 5_400_000, 9_487, 448_641);
+	const session = path.join(dir, "session.jsonl");
+	fs.writeFileSync(session, JSON.stringify({ type: "session", version: 3, id: "p241", timestamp: new Date(T0).toISOString(), cwd: dir }) + "\n"
+		+ body.replace(/"id":"warm"/, '"id":"own-warm"').replace(/"id":"reprime"/, '"id":"own-reprime"'));
+	fs.mkdirSync(path.join(dir, "session", "subagents"), { recursive: true });
+	fs.writeFileSync(path.join(dir, "session", "subagents", "agent-241.jsonl"),
+		body.replace(/"id":"warm"/, '"id":"sub-warm"').replace(/"id":"reprime"/, '"id":"sub-reprime"'));
+	fs.mkdirSync(path.join(dir, "wtft-tags"), { recursive: true });
+	const tag = path.join(dir, "wtft-tags", `session.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const child = spawn(process.execPath, [DAEMON_BIN, "--session", session], { detached: true, stdio: "ignore" });
+	child.unref();
+	const lines = () => (fs.existsSync(tag) ? fs.readFileSync(tag, "utf8") : "").split("\n").filter(Boolean).map(l => JSON.parse(l));
+	try {
+		for (let i = 0; i < 60 && !(lines().some(l => l.id === "own-reprime") && lines().some(l => l.id === "sub-reprime")); i++) await sleep(250);
+		const all = lines();
+		check(all.some(l => l.id === "own-reprime") && all.some(l => l.id === "sub-reprime"),
+			"fixture: the daemon tagged both the session's and the subagent's re-prime turn");
+		check(all.some(l => l.id === "own-reprime" && l.miss === 1), "the session's own re-prime carries miss: 1");
+		check(!all.some(l => typeof l.id === "string" && l.id.startsWith("sub-") && l.miss === 1),
+			"no subagent line carries miss: 1, although the same shape re-primes");
+	} finally {
+		try { process.kill(child.pid!, "SIGTERM"); } catch { /* gone */ }
+		await sleep(200);
+	}
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

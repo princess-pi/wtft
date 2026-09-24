@@ -318,7 +318,7 @@ Manual, divider counts cross-checked against `miss` flags in the regenerated v2.
 
 The `d730d9c3` set includes `2026-08-05T19:59:55Z`, the `opus-4-8` → `opus-5` switch 539
 seconds after the previous turn — the case that motivated the issue. `07:50:38Z`, the partial
-re-prime, is correctly not flagged. *(Since #241 it is flagged; that result is from before.)*
+re-prime, is correctly not flagged. *(Since #241 it is flagged: re-measured 2026-09-24, it meets the recache rule against a previous context of 179,375 tokens.)*
 
 `docs/EXT_WTFT.html` reconciled to the observed rule and the new label at Step 5.
 

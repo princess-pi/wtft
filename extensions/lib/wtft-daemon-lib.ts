@@ -456,8 +456,7 @@ export function serializeClassifiedWithOverheadSplit(interaction: Interaction, p
 		cacheWriteTokens: 0,
 		afterCompaction: undefined,
 		// A recache is a Cache Miss even when a small prefix stayed cached, so
-		// every Ovrhd recache also gets a divider. Only the session's own lines
-		// come through this split; subagent lines are serialized without it.
+		// every Ovrhd recache also gets a divider.
 		cacheMiss: split.kind === "overhead" ? true : interaction.cacheMiss,
 	};
 	const overheadLine: Interaction = {

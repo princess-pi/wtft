@@ -2,8 +2,8 @@
 
 > **Issue:** [#97](https://github.com/princess-pi/wtft/issues/97) — *Daemon re-parses every
 > subagent transcript in full on every poll — 4.2× file size resident.* Part of **P7** of
-> [#194](https://github.com/princess-pi/wtft/issues/194). **This change is part of #97, not its
-> close:** the issue's Closer is not met by it (see *The Closer*), and #97 stays open for the rest.
+> [#194](https://github.com/princess-pi/wtft/issues/194). This change was part one. #97 closes on
+> the Closer restated below (*The Closer, restated*): it measures live heap, not PSS.
 
 ## The gap
 
@@ -29,11 +29,9 @@ reads, and every nested fold parse.
 
 **Roads not taken, for now:**
 
-- **Offset reads in the daemon (the issue's direction A).** Reading only the bytes appended since
-  the last poll would also remove the CPU cost of re-parsing a changed transcript. But the daemon's
-  subagent path rests on the full parse for rotation detection (#114's generation records), nested
-  `claude -p` re-attribution (#14) and the one-child-one-holder rule (#107). Rebuilding those on
-  offsets is a large change to the hot path, and it is the rest of #97.
+- **Offset reads in the daemon (the issue's direction A).** Not in this change: the daemon's
+  subagent path rested on the full parse for rotation detection (#114's generation records), nested
+  `claude -p` re-attribution (#14) and the one-child-one-holder rule (#107). #219 later shipped it.
 - **A V8 young-generation flag for the daemon (`--max-semi-space-size=1`).** It was tried and
   measured (below) and left out: its benefit was not established. One 3-minute run with it read
   23.0 MB, but a 30-minute run read 33.5 MB, and a flagged run once its subagents were read
@@ -67,9 +65,9 @@ reads, and every nested fold parse.
 A daemon watching a synthetic session whose three subagent transcripts total 28.3 MB, appended to
 every 5 s: `debug/97-daemon-pss.sh <daemon.mjs> <label> <seconds> [node-flags]` (not a suite). The
 script fails loudly rather than report a false reading: it checks the fixture, validates every
-sample, and cleans up on exit. It samples once the daemon's tag file carries a subagent line. That
-can be as soon as the **first** of the three transcripts is written, so the "once read" column may
-land mid-sweep.
+sample, and cleans up on exit. The script used for this table sampled once the daemon's tag file
+carried a subagent line, which could be as soon as the **first** of the three transcripts was
+written, so the "once read" column may have landed mid-sweep.
 
 | Build | PSS once a subagent is read | after appends |
 |---|---|---|
@@ -84,15 +82,45 @@ anything. Its figures (about 20 MB at start-up for every build) were wrong and a
 **These figures predate #219** (one daemon per harness), which merged while this change was in
 review and changes how a daemon holds sessions. A smoke run of the script on the merged build
 read 77.3 MB once read and 14.2 MB after 20 s of appends. The parser result (chunking halves the
-parse peak) does not depend on that, but the daemon-level figures must be re-measured under #219
-as part of the rest of #97.
+parse peak) does not depend on that; the re-measurement under #219 is *The Closer, restated*.
 
 **What the numbers support.** The whole-string parse's peak was real: 98 MB for 28 MB of
-transcripts. Chunking halves it. Neither build meets the issue's Closer (under 30 MB, not
-growing). What remains in #97 is direction A, plus the per-transcript `writtenLines`, `writtenIds`
-and `writtenCostById` maps in `bin/wtft-daemon.ts`'s `SubagentFileState`. Those grow with every
-line emitted, are cleared when a rewrite is detected (`supersededWithoutDedup`), and are dropped
-with the whole state when another transcript folds this one (`skipAsFoldedElsewhere`).
+transcripts. Chunking halves it. Neither build met the issue's first Closer (under 30 MB of PSS,
+not growing). Direction A, reading only appended bytes, and dropping the per-line maps both
+shipped in #219 alongside its one daemon per harness.
+
+## The Closer, restated — 2026-09-24
+
+#97's body carries this Closer; the PSS Closer it replaces is kept there under *Was*.
+
+**PSS was measuring the allocator, not wtft.** On `main` at `c7864c0` a daemon started at
+23.1 MiB of PSS and was at 33.1 MiB after 30 minutes. Across four startups of one build, PSS read
+77.2, 79.1, 23.1 and 77.7 MiB, depending on garbage-collection timing. A heap snapshot of one of
+those startups held 5.83 MiB live, against 77.7 MiB of PSS.
+
+**The Closer is now the live heap:** what a heap snapshot (which collects garbage first) holds.
+It must be at most 10 MiB once all three subagent transcripts are read and grow by at most 1 MiB
+over at least 30 minutes of appends. `debug/97-daemon-pss.sh` prints it beside PSS after each
+sample, both in MiB, then a `closer heap_start_mib=… heap_end_mib=… append_s=… met=0|1` line, and
+exits 3 when the Closer is not met, including when the appends ran under 1,800 s. It takes the
+first sample once the daemon's tag holds the last turn of all three transcripts, and the second
+once it holds the last appended turn of each; both times the session lease in its isolated
+`TMPDIR` must name the daemon it measures. It times the appends itself and compares the heap in
+bytes. It
+keeps its fixture under `${XDG_CACHE_HOME:-~/.cache}/wtft-97`, outside `/tmp`, where a test
+suite's `wtft-daemon --cleanup` kills fixture daemons.
+
+**Measured 2026-09-24, `main` at `76d887c`**, 28.3 MB of subagent transcripts, 1,800 s of appends
+(359 rounds), printing `closer heap_start_mib=5.80 heap_end_mib=6.32 append_s=1801 met=1`:
+
+| | PSS | live heap |
+|---|---|---|
+| after startup | 77.2 MiB | **5.80 MiB** |
+| after 1,801 s | 71.2 MiB | **6.32 MiB** |
+
+The live heap grew 0.52 MiB, so the Closer is met. The second PSS reading follows the first heap
+snapshot, which allocates inside the daemon, so it is not a clean PSS measurement. The resident
+cost that matters on this host is the harness daemon's (#239).
 
 ## Review record
 
@@ -101,8 +129,8 @@ round 3, Duppy chose to ship the chunked parse only and drop the V8 flag, whose 
 measurements did not establish. That removed the flag's spawn helper and the findings about it:
 which spawners pass the flag, the Pi host's runtime, and a daemon started by hand. The measurement
 script became loud about every failure. The docs now state only measured figures, with the issue's
-4–5× figure attributed to the issue. The Closer is recorded as not met, and #97 stays open for the
-rest.
+4–5× figure attributed to the issue. The PSS Closer was recorded as not met, and #97 stayed open
+until the restatement above.
 
 Macroscope, on the PR (#223): the unfinished-line carry was quadratic on a long line (High) —
 verified, reproduced as PART L, fixed.

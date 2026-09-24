@@ -1789,6 +1789,8 @@ function taggerIsOlder(a: string, b: string): boolean {
  *  posted (the harness is usually stopping), with the lease it wrote removed. */
 function pointSessionAt(livePid: number, file: string): boolean {
   const lease = getDaemonPidPath(file);
+  let held = false;
+  try { held = fs.readFileSync(lease, "utf8").trim() === String(livePid); } catch { /* no lease yet */ }
   const replacement = `${lease}.replace-${process.pid}`;
   fs.writeFileSync(replacement, String(livePid));
   fs.renameSync(replacement, lease);
@@ -1803,13 +1805,14 @@ function pointSessionAt(livePid: number, file: string): boolean {
     fs.writeFileSync(request, `${livePid}\n${path.resolve(file)}`);
     fs.renameSync(request, path.join(dir, `${process.pid}.request`));
   } catch (err) {
-    // With no request the harness may never adopt this session, so the lease
-    // must not claim it is served.
-    try { if (fs.readFileSync(lease, "utf8").trim() === String(livePid)) fs.unlinkSync(lease); } catch { /* already gone */ }
-    if (process.env.WTFT_DAEMON_DEBUG) {
-      process.stderr.write(`[wtft-log-parser] could not ask harness ${livePid} to serve ${file}: ${err instanceof Error ? err.message : String(err)}\n`);
+    // With no request the harness may never adopt this session, so a lease
+    // this call pointed at it must not claim it is served. One the harness
+    // already held is its own and stays.
+    if (!held) {
+      try { if (fs.readFileSync(lease, "utf8").trim() === String(livePid)) fs.unlinkSync(lease); } catch { /* already gone */ }
     }
-    return false;
+    process.stderr.write(`wtft-daemon: could not ask the running harness (pid ${livePid}) to serve ${file}: ${err instanceof Error ? err.message : String(err)}\n`);
+    return held;
   }
   return true;
 }
@@ -1955,10 +1958,23 @@ function releaseLease(slot: Slot) {
   } catch { /* already gone */ }
 }
 
+/** The newest mtime of the transcript and of every file under its session
+ *  directory (`subagents/`, nested ones included): a directory's own mtime
+ *  does not move when a file in it is appended to. */
 function lastWrittenMs(file: string): number {
   let newest = 0;
   try { newest = fs.statSync(file).mtimeMs; } catch { /* gone */ }
-  try { newest = Math.max(newest, fs.statSync(path.join(file.slice(0, -".jsonl".length), "subagents")).mtimeMs); } catch { /* no subagents */ }
+  const visit = (dir: string, depth: number) => {
+    if (depth > 4) return;
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const ent of entries) {
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) { visit(full, depth + 1); continue; }
+      try { newest = Math.max(newest, fs.statSync(full).mtimeMs); } catch { /* gone */ }
+    }
+  };
+  visit(file.slice(0, -".jsonl".length), 0);
   return newest;
 }
 
@@ -2150,10 +2166,22 @@ function waitUntilExited(pid: number) {
 }
 
 function reparseOne(file: string): boolean {
-  if (sessionDaemonLive(file)) {
+  // Held while the tag is rewritten: a harness releases a long-idle session's
+  // lease, and one that adopts it again mid-reparse must take it over (stopping
+  // this process) rather than append to the same tag beside it.
+  const lease = getDaemonPidPath(file);
+  if (sessionDaemonLive(file) || claimPidFile(lease) !== "claimed") {
     process.stderr.write(`wtft-daemon: --reparse refused while a daemon holds ${file}\n`);
     return false;
   }
+  try {
+    return reparseHeld(file);
+  } finally {
+    try { if (fs.readFileSync(lease, "utf8").trim() === String(process.pid)) fs.unlinkSync(lease); } catch { /* taken over */ }
+  }
+}
+
+function reparseHeld(file: string): boolean {
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] reparse begin ${file}\n`);
   }

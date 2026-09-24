@@ -23,8 +23,8 @@
 - **#250 — the #205 suite ran its daemons under bun.** The suite spawned the daemon with the test
   runner's own runtime. Under bun 1.3.14 on a loaded host, `fs.watch` lost events: an append, a
   rename onto a session and an unlink each went unseen for 30 s or more, until a later event in the
-  same directory. The same suite with the daemon under node, the runtime it ships on, passed 12
-  of 12 loaded runs where bun passed 7 of 10.
+  same directory. Loaded, with the daemon under bun the suite passed 7 of 10 runs; under node,
+  the runtime it ships on, 12 of 12, and 10 of 10 in the Closer run below.
 
 ## The change
 
@@ -32,8 +32,8 @@
   already there: after `WTFT_DAEMON_IDLE_MS` (24 h) with no new lines, a slot is dropped. It
   counted from the harness's start, so every session under the root was held for a day. The
   catch-up now counts from the last write instead: right after it serves a session whose
-  transcript and `subagents/` directory were both last written more than `WTFT_DAEMON_IDLE_MS`
-  ago, that no reader asked for, with nothing pending, no partial line held and no child still
+  transcript and every file under its session directory (`subagents/`, nested ones included)
+  were last written more than `WTFT_DAEMON_IDLE_MS` ago, that no reader asked for, with nothing pending, no partial line held and no child still
   in its discovery window, it drops the slot. The idle threshold is unchanged, so a session is
   released only when the running daemon would have dropped it anyway; the in-memory state a
   drop loses (stream state, discovered `claude -p` children) is lost at the same point as
@@ -43,8 +43,13 @@
   or another process has replaced it since it was read.
 - **After a watch overflow** the harness also adopts any session written within
   `WTFT_DAEMON_IDLE_MS` that holds no slot, since events for it may have been lost.
-- **A focus request that cannot be posted** removes the lease it pointed at the harness and
-  exits 1, so the reader is not told a session is served when nothing will adopt it.
+- **A focus request that cannot be posted** is reported on stderr. A lease the call pointed at
+  the harness is removed, so the reader is not told a session is served when nothing will
+  adopt it; a lease the harness already held stays. The spawn then waits up to 2 s for that
+  harness to exit and tries to claim the root itself, exiting 1 after five attempts.
+- **`--reparse` holds the session's lease while it rewrites the tag**, since a released
+  session no longer has one. A harness that adopts it again mid-reparse takes the lease over
+  and stops the reparse, rather than appending to the same tag beside it.
 - **A harness whose pid file no longer names it stops.** The sweep reads the harness pid file;
   if it was removed or names another process, the harness stops and releases its leases, so two
   harnesses never contend for one root.
@@ -64,9 +69,10 @@
   catch-up, the harness holds at most 5 leases, the live session is still classified, and its
   live heap (a heap snapshot) is within 1 MiB of a harness on a root of 10 sessions. The issue
   asked for RSS; RSS keeps heap the parse freed and did not return (#97), so it could not tell the
-  two builds apart. Directory watchers still grow with the number of session directories (#253). Measured on this branch: 6.22 against 5.95 MiB; on `main`, 8.67 against
-  5.94 MiB with 2,001 leases held. A quiet session written again is adopted,
-  classified, and holds a lease.
+  two builds apart. Measured on this branch: 6.21 against 5.94 MiB; on `main`, 8.67 against
+  5.94 MiB with 2,001 leases held. A session whose subagent transcript was just appended to
+  keeps its lease. A released session written again is adopted, classified, and holds its own
+  lease. Directory watchers still grow with the number of session directories (#253).
 - Removing the harness pid file stops the harness.
 - With 40,000 leases naming the running harness, `--restart` followed by a `wtft`-style spawn
   leaves exactly one harness after 5 s: the one `--restart` started, holding the pid file.

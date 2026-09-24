@@ -37,7 +37,7 @@ function turnLine(id: string, ts: number): string {
 	}) + "\n";
 }
 
-const HOUR_AGO = new Date(Date.now() - 2 * 86_400_000);
+const TWO_DAYS_AGO = new Date(Date.now() - 2 * 86_400_000);
 
 /** A root of `count` sessions last written two days ago, past the 24 h idle drop. */
 function makeRoot(label: string, count: number): { root: string; files: string[] } {
@@ -47,8 +47,8 @@ function makeRoot(label: string, count: number): { root: string; files: string[]
 		const dir = path.join(root, `proj-${i % 20}`);
 		fs.mkdirSync(dir, { recursive: true });
 		const file = path.join(dir, `s-${label}-${i}.jsonl`);
-		fs.writeFileSync(file, turnLine(`${label}-${i}`, HOUR_AGO.getTime()));
-		fs.utimesSync(file, HOUR_AGO, HOUR_AGO);
+		fs.writeFileSync(file, turnLine(`${label}-${i}`, TWO_DAYS_AGO.getTime()));
+		fs.utimesSync(file, TWO_DAYS_AGO, TWO_DAYS_AGO);
 		files.push(file);
 	}
 	return { root, files };
@@ -135,6 +135,13 @@ try {
 		const { root, files } = makeRoot("q", 2000);
 		const live = path.join(root, "proj-0", "live.jsonl");
 		fs.writeFileSync(live, turnLine("live-0", Date.now()));
+		// Old transcript and directories, but a subagent transcript appended to
+		// just now: the directory mtimes do not show the append.
+		const parent = files[3];
+		const subDir = path.join(parent.slice(0, -".jsonl".length), "subagents");
+		fs.mkdirSync(subDir, { recursive: true });
+		fs.writeFileSync(path.join(subDir, "agent-a.jsonl"), turnLine("sub-a", Date.now()));
+		for (const d of [subDir, path.dirname(subDir)]) fs.utimesSync(d, TWO_DAYS_AGO, TWO_DAYS_AGO);
 		const small = makeRoot("small", 10);
 		const bigSnaps = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-snap-")));
 		const smallSnaps = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-snap-")));
@@ -147,6 +154,7 @@ try {
 		check(classified(files[files.length - 1], `q-${files.length - 1}`), "fixture: the last quiet session was classified");
 		await sleep(1500);
 		const held = leasesNaming(h.pid);
+		check(read(getDaemonPidPath(parent)).trim() === String(h.pid), "a session whose subagent transcript was just appended to keeps its lease");
 		check(held <= 5, `after catch-up the harness holds a handful of leases, not one per session: ${held} for ${files.length + 1} sessions`);
 		const target = `live-${n}`;
 		check(await until(() => classified(live, target), 10_000) !== Infinity, "the session being appended to is still classified");

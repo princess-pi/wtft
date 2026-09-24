@@ -862,10 +862,12 @@ export function restartDaemon(sessionPath: string, daemonPath: string): boolean 
 	const pidPath = getDaemonPidPath(sessionPath);
 	try {
 		const pid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
-		if (pid > 0) {
+		// A harness process serves every session under its root, so it is asked
+		// to serve this one (the spawn below points it here), never stopped.
+		if (pid > 0 && !isHarnessProcess(pid)) {
 			try { process.kill(pid, "SIGTERM"); } catch {}
+			try { fs.unlinkSync(pidPath); } catch {}
 		}
-		try { fs.unlinkSync(pidPath); } catch {}
 	} catch {}
 
 	try {
@@ -880,6 +882,35 @@ export function restartDaemon(sessionPath: string, daemonPath: string): boolean 
 	}
 }
 
+
+function isHarnessProcess(pid: number): boolean {
+	try {
+		return fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").includes("--harness");
+	} catch {
+		return false;
+	}
+}
+
+/** What `--watch` shows before the current tag has any turns. When a tag for
+ *  another tagger version is on disk, the reader is told that this version's
+ *  is still to be built, rather than left looking at an empty screen. */
+export function waitingForDataLine(sessionPath: string): string {
+	if (!fs.existsSync(sessionPath)) return "Waiting for session .jsonl to be written (first prompt not completed yet)...";
+	// Once this version's tag exists it is built; an older one beside it is
+	// only left over, and says nothing about what the reader waits on.
+	if (fs.existsSync(getCurrentVersionTagPath(sessionPath))) return "Waiting for session data...";
+	const prefix = path.basename(sessionPath) + ".wtft-tag.v";
+	let stale: string | undefined;
+	try {
+		for (const f of fs.readdirSync(path.join(path.dirname(sessionPath), "wtft-tags"))) {
+			if (!f.startsWith(prefix) || !f.endsWith(".jsonl")) continue;
+			const version = f.slice(prefix.length, -".jsonl".length);
+			if (version !== WTFT_TAGGER_VERSION) stale = version;
+		}
+	} catch { /* no tags dir yet */ }
+	if (stale) return `The tag on disk was written by tagger v${stale}; waiting for the log parser daemon to build this session's v${WTFT_TAGGER_VERSION} tag...`;
+	return "Waiting for session data...";
+}
 
 export async function watchTagFile(
 	sessionPath: string,
@@ -1109,10 +1140,8 @@ export async function watchTagFile(
 			}
 
 			for (const l of lines) buf.push(l);
-		} else if (!fs.existsSync(sessionPath)) {
-			buf.push("\x1b[90mWaiting for session .jsonl to be written (first prompt not completed yet)...\x1b[0m");
 		} else {
-			buf.push("\x1b[90mWaiting for session data...\x1b[0m");
+			buf.push(`\x1b[90m${waitingForDataLine(sessionPath)}\x1b[0m`);
 		}
 
 		const restartHint = settings.daemonPath

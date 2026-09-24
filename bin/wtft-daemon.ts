@@ -48,6 +48,8 @@ import {
 
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const POLL_MS = 667; // 90bpm throttle
+/** How long the startup catch-up runs before it yields to the event loop. */
+const HARNESS_CATCH_UP_SLICE_MS = 25;
 function envMs(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw === "") return fallback;
@@ -128,8 +130,6 @@ interface SubagentFileState {
 	/** The last turn read, of any kind, and whether a Claude command made it an
 	 *  owner: the turn an interrupt at the head of the next read follows. */
 	lastTurn: { turn: NonNullable<ReturnType<typeof parseEntryToInteraction>>; owner: boolean } | null;
-	/** Cost already tagged for an ordinary id. A lower correction opens a new generation. */
-	plainCost: Map<string, number>;
 	/** Which children another holder owned at the last parse — when that set
 	 *  changes this transcript's own total does too, so the gate must fire. */
 	foldedByAnother: string;
@@ -308,7 +308,6 @@ function freshSubagentState(): SubagentFileState {
     owners: [],
     pendingTurn: null,
     lastTurn: null,
-    plainCost: new Map(),
     foldedByAnother: "",
   };
 }
@@ -600,19 +599,6 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
         plain.push(interaction);
       }
     }
-    if (attempt === 0) {
-      const seenCost = fileState.plainCost;
-      const retracted = plain.some(interaction => {
-        if (!interaction.messageId) return false;
-        const prev = seenCost.get(interaction.messageId);
-        return prev !== undefined && interaction.cost + 1e-9 < prev;
-      });
-      if (retracted) {
-        fileState = freshSubagentState();
-        discoveredSubagentFiles.set(stateKey, fileState);
-        continue;
-      }
-    }
     const holdBack = size > fileState.lastSize && plain.length > 0;
     // Which turns are held and last is committed with the offset below. A mark
     // set on them before a failure is set again, identically, by the re-read.
@@ -680,7 +666,6 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
       }
       for (const interaction of plain) {
         batch += serializeClassified(interaction, source);
-        if (interaction.messageId) fileState.plainCost.set(interaction.messageId, interaction.cost);
       }
       for (const interaction of reinterrupted) batch += serializeClassified(interaction, source);
       clones.forEach((interaction, i) => {
@@ -1680,7 +1665,8 @@ function wake(file: string, displayed: boolean) {
   if (slot.pendingItems.length > 0) scheduleFlush(movedTo);
 }
 
-function watchDir(dir: string) {
+/** `wakeFiles` false at startup: the catch-up walk serves those, focus first. */
+function watchDir(dir: string, wakeFiles = true) {
   const key = path.resolve(dir);
   if (harnessWatchers.has(key)) return;
   let watcher: fs.FSWatcher;
@@ -1712,10 +1698,10 @@ function watchDir(dir: string) {
     const child = path.resolve(key, ent.name);
     if (ent.isDirectory()) {
       if (HARNESS_SKIP_DIRS.has(ent.name) && ent.name !== "subagents") continue;
-      watchDir(child);
+      watchDir(child, wakeFiles);
       continue;
     }
-    if (insideSubagents) continue;
+    if (insideSubagents || !wakeFiles) continue;
     if (ent.name.endsWith(".jsonl") && !ent.name.includes(".wtft-tag.")) wake(child, false);
   }
 }
@@ -1779,12 +1765,66 @@ function onWatch(dir: string, filename: string | null) {
   }
 }
 
+/** Whether dotted version `a` is older than `b`; an empty `a` (no version
+ *  file, so a build from before it existed) is older than anything. */
+function taggerIsOlder(a: string, b: string): boolean {
+  if (!a) return true;
+  const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
+  for (let k = 0; k < Math.max(pa.length, pb.length); k++) {
+    const x = pa[k] || 0, y = pb[k] || 0;
+    if (x !== y) return x < y;
+  }
+  return false;
+}
+
 function pointSessionAt(livePid: number, file: string) {
   const lease = getDaemonPidPath(file);
   const replacement = `${lease}.replace-${process.pid}`;
   fs.writeFileSync(replacement, String(livePid));
   fs.renameSync(replacement, lease);
   try { fs.writeFileSync(`${lease}.display`, ""); } catch { /* the live process still has the old focus */ }
+  // The live process may hold no slot for this session yet, or be part-way
+  // through its startup rebuild: ask it by name to serve this one next. One
+  // file per requester, so two requests never overwrite each other.
+  try {
+    const dir = `${harnessPidFile}.focus.d`;
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const request = path.join(dir, `${process.pid}.tmp`);
+    fs.writeFileSync(request, `${livePid}\n${path.resolve(file)}`);
+    fs.renameSync(request, path.join(dir, `${process.pid}.request`));
+  } catch (err) {
+    process.stderr.write(`wtft-daemon: could not ask the running harness (pid ${livePid}) to serve ${file} next, so it is served in walk order: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
+}
+
+let harnessRootKey = "";
+
+/** Serves the sessions other processes asked for (`pointSessionAt`) ahead of
+ *  the rest. A request is claimed by renaming it before it is read. One
+ *  addressed to another harness pid, or outside this root, is dropped. */
+function takeFocusRequests() {
+  if (!harnessPidFile) return;
+  const dir = `${harnessPidFile}.focus.d`;
+  let names: string[];
+  try { names = fs.readdirSync(dir).filter(n => n.endsWith(".request")); } catch { return; }
+  for (const name of names) {
+    const claimed = path.join(dir, `${name}.${process.pid}.claimed`);
+    let text = "";
+    try {
+      fs.renameSync(path.join(dir, name), claimed);
+      text = fs.readFileSync(claimed, "utf8");
+    } catch { /* taken by another reader, or unreadable */ }
+    try { fs.unlinkSync(claimed); } catch { /* never claimed */ }
+    const [to, requested] = text.split("\n");
+    if (to !== String(process.pid) || !requested) continue;
+    const file = path.resolve(requested.trim());
+    if (!file.startsWith(harnessRootKey + path.sep)) continue;
+    wake(file, true);
+  }
+}
+
+function harnessVersionFile(pid: number): string {
+  return `${harnessPidFile}.${pid}.version`;
 }
 
 function runHarness(which: string, focus: string) {
@@ -1802,30 +1842,64 @@ function runHarness(which: string, focus: string) {
   }
   const hash = createHash("sha256").update(root).digest("hex").slice(0, 12);
   harnessPidFile = path.join(os.tmpdir(), `wtft-harness-${which}-${hash}.pid`);
-  if (claimPidFile(harnessPidFile) === "busy") {
-    const live = Number(fs.readFileSync(harnessPidFile, "utf8").trim());
-    if (procIsDaemon(live)) {
-      if (focus) pointSessionAt(live, focus);
-      process.exit(0);
+  // Written before the claim, so a harness that holds the pid file always has
+  // one; keyed by pid, so one left by a killed harness names nobody live.
+  fs.writeFileSync(harnessVersionFile(process.pid), TAGGER_VERSION);
+  const leave = (code: number): never => {
+    try { fs.unlinkSync(harnessVersionFile(process.pid)); } catch { /* already gone */ }
+    process.exit(code);
+  };
+  for (let attempt = 1; claimPidFile(harnessPidFile) === "busy"; attempt++) {
+    if (attempt > 5) {
+      process.stderr.write(`wtft-daemon: could not claim ${harnessPidFile} after replacing an older harness\n`);
+      leave(1);
     }
-    if (claimPidFile(harnessPidFile) !== "claimed") process.exit(1);
+    let live = 0;
+    try { live = Number(fs.readFileSync(harnessPidFile, "utf8").trim()); } catch { continue; }
+    if (!procIsDaemon(live)) continue;
+    let liveVersion = "";
+    try { liveVersion = fs.readFileSync(harnessVersionFile(live), "utf8").trim(); } catch { /* a build from before version files */ }
+    if (!taggerIsOlder(liveVersion, TAGGER_VERSION)) {
+      if (focus) pointSessionAt(live, focus);
+      leave(0);
+    }
+    try { process.kill(live, "SIGTERM"); } catch { /* already gone */ }
+    waitUntilExited(live);
   }
   harnessMode = true;
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] harness pid ${harnessPidFile}\n`);
     process.stderr.write(`[wtft-log-parser] harness root ${root}\n`);
   }
-  watchDir(root);
+  watchDir(root, false);
   const files: string[] = [];
   walkSessions(root, files);
   const focusKey = focus ? path.resolve(focus) : "";
-  for (const file of files) wake(file, file === focusKey);
-  if (focusKey && !harnessSlots.has(focusKey)) wake(focusKey, true);
-  if (process.env.WTFT_DAEMON_DEBUG) {
-    process.stderr.write(`[wtft-log-parser] harness settled ${which}\n`);
-  }
+  harnessRootKey = root;
+  // The session a reader is waiting on first; then the rest, yielding after
+  // each slice, so a watch event or a reader's request is served between
+  // sessions rather than after the whole walk.
+  if (focusKey) wake(focusKey, true);
   harnessIdleTimer = setInterval(sweepIdleSlots, 250);
   harnessIdleTimer.unref();
+  let next = 0;
+  const catchUp = () => {
+    if (!running) return;
+    const sliceStart = Date.now();
+    while (next < files.length && Date.now() - sliceStart < HARNESS_CATCH_UP_SLICE_MS) {
+      takeFocusRequests();
+      const file = files[next++];
+      if (file !== focusKey) wake(file, false);
+    }
+    if (next < files.length) {
+      setImmediate(catchUp);
+      return;
+    }
+    if (process.env.WTFT_DAEMON_DEBUG) {
+      process.stderr.write(`[wtft-log-parser] harness settled ${which}\n`);
+    }
+  };
+  catchUp();
 }
 
 function dropHarnessSlot(key: string) {
@@ -1864,6 +1938,7 @@ function leaseStillOurs(slot: Slot): boolean {
 
 function sweepIdleSlots() {
   if (!running) return;
+  takeFocusRequests();
   const now = Date.now();
   for (const key of [...harnessSlots.keys()]) {
     const slot = harnessSlots.get(key);
@@ -1908,8 +1983,12 @@ function stopHarness(reason: string) {
   }
   if (harnessPidFile) {
     try {
-      if (fs.readFileSync(harnessPidFile, "utf8").trim() === String(process.pid)) fs.unlinkSync(harnessPidFile);
+      if (fs.readFileSync(harnessPidFile, "utf8").trim() === String(process.pid)) {
+        fs.rmSync(`${harnessPidFile}.focus.d`, { recursive: true, force: true });
+        fs.unlinkSync(harnessPidFile);
+      }
     } catch { /* already gone */ }
+    fs.rmSync(harnessVersionFile(process.pid), { force: true });
   }
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] harness shutdown: ${reason}\n`);
@@ -1979,7 +2058,9 @@ function waitUntilExited(pid: number) {
   while (Date.now() < until) {
     try { process.kill(pid, 0); } catch { return; }
   }
-  try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+  try { process.kill(pid, "SIGKILL"); } catch { return; }
+  const killed = Date.now() + 2000;
+  while (Date.now() < killed && procIsDaemon(pid)) { /* until the kernel has it */ }
 }
 
 function reparseOne(file: string): boolean {

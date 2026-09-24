@@ -40,7 +40,7 @@ function turnLine(id: string, ts: number): string {
 
 const TWO_DAYS_AGO = new Date(Date.now() - 2 * 86_400_000);
 
-/** A root of `count` sessions last written two days ago, past the 24 h idle drop. */
+/** A root of `count` sessions last written two days ago. */
 function makeRoot(label: string, count: number): { root: string; files: string[] } {
 	const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), `wtft-239-${label}-`)));
 	const files: string[] = [];

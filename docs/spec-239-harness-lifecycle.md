@@ -43,7 +43,8 @@
   within 667 ms of the last flush holds new own turns for the next flush, as before). In a
   harness the subagent scan runs in slices: each reads at least one transcript, stops once it
   has run 25 ms (`WTFT_HARNESS_SCAN_SLICE_MS`), and the next slice, on the next turn of the event
-  loop, resumes after the last transcript read. `WTFT_HARNESS_SCAN_YIELD_MS` (default 0) pauses
+  loop, resumes after the last transcript read. A failure in any slice of a pass keeps the tag
+  from being stamped swept when the pass ends, and dropping a session forgets its pass. `WTFT_HARNESS_SCAN_YIELD_MS` (default 0) pauses
   between slices; the suite sets it to make a scan outlast a report. A one-shot `wtft` that finds turns in the tag reports them at once, marked
   provisional (exit 9, "no subagent transcript has been read since this tag was written") until
   the scan finishes and stamps the tag swept; `--watch` shows the sum grow.
@@ -61,7 +62,8 @@
   that harness to exit and tries to claim the root itself, exiting 1 after five attempts.
 - **`--reparse` holds the session's lease while it rewrites the tag**, and a harness never stops
   a reparse to take a lease: asked for a session a reparse holds, it tries again every 667 ms
-  until the reparse lets go. Any other failed adoption is retried up to five times. `--reparse` of a session a daemon is serving is refused.
+  until the reparse lets go. Any other failed adoption is retried up to five times. A reparse
+  whose lease was taken while it parsed gives up before it rewrites the tag. `--reparse` of a session a daemon is serving is refused.
   `--reparse-range` exits 1, naming how many sessions it left unreparsed, when any was refused,
   failed or could not be stat'd.
 - **A harness whose pid file no longer names it stops.** The sweep reads the harness pid file;
@@ -71,8 +73,9 @@
 - **`--restart` never stops or unlinks what it started.** A lease or pid file naming a process
   this `--restart` started is skipped, and a lease or pid file is removed only if it still names
   the process that was stopped.
-- **Neither the startup reaper nor `--cleanup` acts on a harness daemon for a gone
-  `--session`.** The harness drops a gone session itself.
+- **Neither the startup reaper, `--cleanup` nor `--stop` acts on a harness daemon for its
+  start-up `--session`.** `--stop` drops a session from a harness only through that session's
+  own lease. The harness drops a gone session itself.
 - **The #205 and #239 suites run their long-lived daemons under node** (the #239 suite runs
   every daemon command under node; the #205 suite's one-shot `--stop`, `--reparse` and
   `--restart` still run under the test runner's bun), and the #205 suite waits for the event it

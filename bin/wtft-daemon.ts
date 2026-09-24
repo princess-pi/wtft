@@ -754,6 +754,7 @@ const subagentScansContinuing = new Set<string>();
 /** Transcripts a cut scan already read in its current pass, so the next slice
  *  resumes after them. */
 const subagentScanPass = new Map<string, Set<string>>();
+const subagentScanPassFailed = new Set<string>();
 
 function scanForSubAgents() {
   let wroteAny = false;
@@ -765,6 +766,8 @@ function scanForSubAgents() {
   let readThisSlice = 0;
   const scanKey = path.resolve(sessionPath);
   const readThisPass = subagentScanPass.get(scanKey) ?? new Set<string>();
+  // A failure in an earlier slice of this pass still counts when the pass ends.
+  if (subagentScanPassFailed.has(scanKey)) pollHadFailure = true;
   // pollHadFailure is reset by the poll loop, not here — flushPending runs first and can fail.
 
   if (pendingClaudeCommands.length > 0) {
@@ -892,8 +895,13 @@ function scanForSubAgents() {
     if (skipAsFoldedElsewhere(file, foldedElsewhere)) { wroteAny = wroteAny || retiredThisPoll; continue; }
     wroteAny = syncSubagentTranscript(file, notMine(file)) || wroteAny;
   }
-  if (cut) subagentScanPass.set(scanKey, readThisPass);
-  else subagentScanPass.delete(scanKey);
+  if (cut) {
+    subagentScanPass.set(scanKey, readThisPass);
+    if (pollHadFailure) subagentScanPassFailed.add(scanKey);
+  } else {
+    subagentScanPass.delete(scanKey);
+    subagentScanPassFailed.delete(scanKey);
+  }
 
   if (wroteAny) {
     const now = Date.now();
@@ -2064,6 +2072,8 @@ function dropHarnessSlot(key: string) {
   if (timer) clearTimeout(timer);
   harnessFlushTimers.delete(key);
   harnessSlots.delete(key);
+  subagentScanPass.delete(key);
+  subagentScanPassFailed.delete(key);
   unwatchSession(key);
   if (slot) releaseLease(slot);
   if (process.env.WTFT_DAEMON_DEBUG) {
@@ -2268,6 +2278,14 @@ function reparseHeld(file: string): boolean {
   try { fs.mkdirSync(path.dirname(tagPath), { recursive: true }); } catch { /* exists */ }
   const parsedSize = fs.statSync(file).size;
   const raw = deduplicateInteractions(parseSessionFile(file));
+  // A harness asked for the session while it was parsed may have taken the
+  // lease; the tag is then its to write.
+  let owner = "";
+  try { owner = fs.readFileSync(getDaemonPidPath(file), "utf8").trim(); } catch { /* removed */ }
+  if (owner !== String(process.pid)) {
+    process.stderr.write(`wtft-daemon: --reparse gave up ${file}: another daemon took its lease\n`);
+    return false;
+  }
   fs.writeFileSync(tagPath, "");
   let prev = 0;
   let batch = "";
@@ -2536,10 +2554,10 @@ if (showList || showCleanup || showRestart || stopSession) {
     }
 
     if (stopSession && sessionFound === stopSession) {
-      if (alive && procIsHarness(pid)) {
-        try { fs.unlinkSync(fullPath); } catch (_) {}
-        console.log(`Stopped: PID ${pid} — session dropped from harness: ${sessionFound}`);
-      } else {
+      // A harness's --session is only the one it was started for; a session it
+      // serves was handled above, through that session's own lease.
+      if (alive && procIsHarness(pid)) continue;
+      {
         if (alive) { try { process.kill(pid, "SIGTERM"); } catch (_) { /* already gone */ } }
         try { fs.unlinkSync(fullPath); } catch (_) {}
         console.log(`Stopped: PID ${pid} — ${sessionFound}`);

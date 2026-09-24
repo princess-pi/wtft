@@ -163,6 +163,7 @@ try {
 		await sleep(1500);
 		const held = leasesNaming(h.pid);
 		check(read(getDaemonPidPath(parent)).trim() === String(h.pid), "a session whose subagent transcript was just appended to keeps its lease");
+		check(classified(oldParent, "q-9") && classified(oldParent, "old-a"), "fixture: the long-idle session with a subagent transcript was adopted and classified");
 		check(await until(() => read(getDaemonPidPath(oldParent)) === "", 70_000) !== Infinity, "a long-idle session with a subagent transcript is released too");
 		check(held <= 5, `after catch-up the harness holds a handful of leases, not one per session: ${held} for ${files.length + 1} sessions`);
 		const reparse = spawnSync("node", [DAEMON, "--reparse", files[5]], { encoding: "utf8", env: envFor(root) });

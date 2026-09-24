@@ -17,9 +17,9 @@ default `~/.claude/projects`) or the Pi sessions root (`WTFT_PI_SESSIONS_DIR`, d
 `~/.pi/agent/sessions`) is served by that root's one process. A session outside those
 roots keeps its own process, polling every 667ms. The tag file and the pid lease stay
 per session. After 24h with no new lines, the per-session process exits, and the harness
-process drops that session and its lease; a session last written more than 24h ago is
-dropped as soon as the harness's startup catch-up has served it. Its next write adopts it
-again. Spawned on Pi `session_start` and on
+process drops that session and its lease; a session no reader asked for, last written more
+than 24h ago, is dropped once the harness's startup catch-up has served it and nothing it
+read is still held. Its next write adopts it again. Spawned on Pi `session_start` and on
 a CLI report. A per-session process is revived after an idle exit and replaced on a
 version bump, and a harness process from an older tagger is replaced by the next start
 from a newer one. On Linux, a live harness

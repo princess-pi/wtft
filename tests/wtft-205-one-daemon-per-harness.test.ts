@@ -14,8 +14,7 @@ import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 isolateTmpdir("205-harness");
 
 const DAEMON = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
-// The runtime the daemon ships on. Under bun 1.3.14 its fs.watch loses events
-// on a loaded host, which is not what a user's daemon does.
+// The runtime the daemon ships on (docs/spec-239-harness-lifecycle.md).
 const DAEMON_RUNTIME = "node";
 const POLL_MS = 667;
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));

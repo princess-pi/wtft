@@ -1807,9 +1807,10 @@ function pointSessionAt(livePid: number, file: string): boolean {
   // through its startup rebuild: ask it by name to serve this one next. One
   // file per requester, so two requests never overwrite each other.
   try {
-    // Created by the harness when it claims the root and removed as it stops,
-    // so a missing directory means that harness is going away.
+    // A posted request counts only if the harness still holds the root after
+    // it was written; one it gave up meanwhile would never read it.
     const dir = `${harnessPidFile}.focus.d`;
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     const request = path.join(dir, `${process.pid}.tmp`);
     fs.writeFileSync(request, `${livePid}\n${path.resolve(file)}`);
     fs.renameSync(request, path.join(dir, `${process.pid}.request`));
@@ -1907,7 +1908,6 @@ function runHarness(which: string, focus: string) {
     waitUntilExited(live);
   }
   harnessMode = true;
-  fs.mkdirSync(`${harnessPidFile}.focus.d`, { recursive: true, mode: 0o700 });
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] harness pid ${harnessPidFile}\n`);
     process.stderr.write(`[wtft-log-parser] harness root ${root}\n`);
@@ -2321,7 +2321,7 @@ Usage: wtft-daemon --session <path> [--debug]
 
 Management:
   --list, -l            List every running wtft-daemon, including fixture processes
-  --cleanup             Kill daemons whose session is gone, and fixture daemons under the tmp dir
+  --cleanup             Kill per-session daemons whose session is gone, and fixture daemons under the tmp dir
   --restart             Kill all running daemons (fresh spawn on next wtft)
   --stop <session>      Drop that session. A per-session process exits. A harness process stays up.
 

@@ -46,10 +46,8 @@
   or another process has replaced it since it was read.
 - **After a watch overflow** the harness also adopts any session written within
   `WTFT_DAEMON_IDLE_MS` that holds no slot, since events for it may have been lost.
-- **A focus request goes only to a harness that still holds the root.** The harness creates
-  its request directory when it claims the root and removes it as it stops, and a requester no
-  longer creates it; after posting, the requester checks the harness pid file still names that
-  harness. A request that cannot be posted is reported on stderr. Unless the harness still holds
+- **A focus request goes only to a harness that still holds the root.** After posting, the
+  requester checks the harness pid file still names that harness. A request that cannot be posted is reported on stderr. Unless the harness still holds
   the root and already held this session's lease, the lease and `.display` the call pointed at
   it are removed, so the reader is not told a session is served when nothing will adopt it. The
   spawn then waits up to 2 s for that harness to exit and tries to claim the root itself,
@@ -61,7 +59,8 @@
   stat'd.
 - **A harness whose pid file no longer names it stops.** The sweep reads the harness pid file;
   if it was removed or names another process, the harness stops and releases its leases, so two
-  harnesses contend for one root for at most one 250 ms sweep.
+  harnesses contend for one root only until the displaced one's next sweep, which the event
+  loop reaches after whatever wake it is running.
 - **`--restart` never stops or unlinks what it started.** A lease or pid file naming a process
   this `--restart` started is skipped, and a lease or pid file is removed only if it still names
   the process that was stopped.

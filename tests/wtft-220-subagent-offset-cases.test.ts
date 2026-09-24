@@ -14,6 +14,7 @@ import {
 	readClassifiedTagFile,
 	parseSessionFile,
 	deduplicateInteractions,
+	classifyInteraction,
 	WTFT_TAGGER_VERSION,
 } from "../bin/wtft.mjs";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
@@ -47,7 +48,7 @@ function turn(id: string, tsMs: number, outputTokens: number): string {
 const INTERRUPT = JSON.stringify({ type: "user", message: { content: "[Request interrupted by user]" } }) + "\n";
 
 const rows = (list: any[]) => JSON.stringify(list
-	.map(i => ({ id: i.messageId ?? "-", cost: Number(i.cost.toFixed(9)), interrupted: !!i.interrupted }))
+	.map(i => ({ id: i.messageId ?? "-", cost: Number(i.cost.toFixed(9)), interrupted: !!i.interrupted, cat: i._cat ?? classifyInteraction(i) }))
 	.sort((a, b) => a.id.localeCompare(b.id) || a.cost - b.cost));
 
 /** Starts a daemon on a fresh session whose one subagent transcript holds

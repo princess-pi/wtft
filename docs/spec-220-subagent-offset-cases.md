@@ -27,7 +27,9 @@ next read marks exactly that turn:
 - **an ordinary turn already written** → a second copy with the mark is written. Every reader of
   the tag goes through `dedupeClassifiedById` (`interactionsFromRecords`, and the `--watch`
   paths), which keeps one copy per id and ORs `interrupted` across copies
-  (`deduplicateInteractions`), so the turn reads as interrupted and its cost is counted once;
+  (`deduplicateInteractions`), so the turn reads as interrupted and its cost is counted once. The
+  merged copy's category is `interrupted` too: a category read from a tag line was decided for
+  that line alone, and interrupted wins the whole message, as `classifyInteraction` decides it;
 - **a turn with no id** → there is nothing to match a second copy to, so the transcript is
   written again as a new generation, the move the reader makes for a rotation.
 

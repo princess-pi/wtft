@@ -611,6 +611,9 @@ export function deduplicateInteractions(interactions: Interaction[]): Interactio
 				if (i.isSidechain) merged.cacheMiss = undefined;
 			}
 			if (mergedToolCats.size > 0) merged.toolCats = [...mergedToolCats];
+			// A category read from a tag line was decided for that line alone;
+			// interrupted wins whole-message, as `classifyInteraction` decides it.
+			if (merged.interrupted && merged._cat) merged._cat = "interrupted";
 			deduped.push(merged);
 		}
 	}

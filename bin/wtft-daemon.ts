@@ -124,8 +124,11 @@ interface SubagentFileState {
 	spawnWindowClosesAt: number;
 	owners: FoldOwner[];
 	stampInterrupt: boolean;
-	/** Last turn not yet written, so a following interrupt can still mark it. */
+	/** Last ordinary turn not yet written, so a following interrupt can still mark it. */
 	pendingTurn: NonNullable<ReturnType<typeof parseEntryToInteraction>> | null;
+	/** Whether `pendingTurn` was the last turn of its read, of any kind. Only then is
+	 *  it the turn an interrupt at the head of the next read follows. */
+	pendingIsLast: boolean;
 	/** Cost already tagged for an ordinary id. A lower correction opens a new generation. */
 	plainCost: Map<string, number>;
 	/** Which children another holder owned at the last parse — when that set
@@ -306,6 +309,7 @@ function freshSubagentState(): SubagentFileState {
     owners: [],
     stampInterrupt: false,
     pendingTurn: null,
+    pendingIsLast: false,
     plainCost: new Map(),
     foldedByAnother: "",
   };
@@ -477,6 +481,12 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
         if (hashFilePrefix(file, fileState.lastSize) !== fileState.contentHash.copy().digest("hex")) rotate = true;
       } catch (err) {
         pollHadFailure = true;
+        if (!warnedSubagentParseFailure.has(stateKey)) {
+          warnedSubagentParseFailure.add(stateKey);
+          process.stderr.write(
+            `[wtft-log-parser] WARNING: a subagent transcript could not be read or parsed, so its cost may be missing from this session's total until it succeeds (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+        }
         return wroteAny;
       }
     }
@@ -547,9 +557,9 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
     // turn is already in the tag, the transcript is written again as a new
     // generation, so the full parse's marking replaces the line already there.
     if (parsed?.stampInterrupt) {
-      if (fileState.pendingTurn) {
+      if (fileState.pendingTurn && fileState.pendingIsLast) {
         fileState.pendingTurn.interrupted = true;
-      } else if (attempt === 0 && !fileState.newGeneration) {
+      } else if (attempt === 0 && (fileState.pendingTurn || !fileState.newGeneration)) {
         fileState = freshSubagentState();
         discoveredSubagentFiles.set(stateKey, fileState);
         continue;
@@ -590,7 +600,13 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
       }
     }
     const holdBack = size > fileState.lastSize && plain.length > 0;
-    if (holdBack) fileState.pendingTurn = plain.pop() ?? null;
+    if (holdBack) {
+      fileState.pendingTurn = plain.pop() ?? null;
+      const lastRead = parsed?.interactions[parsed.interactions.length - 1];
+      fileState.pendingIsLast = !!fileState.pendingTurn && !!lastRead && (
+        lastRead === fileState.pendingTurn
+        || (!!lastRead.messageId && lastRead.messageId === fileState.pendingTurn.messageId));
+    }
     const owners = [...fileState.owners, ...newOwners];
     const windowOpen = Date.now() <= fileState.spawnWindowClosesAt + MTIME_SETTLE_MS;
     const foldSig = foldSetSignature(foldedByAnother);

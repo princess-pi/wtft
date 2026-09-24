@@ -52,9 +52,14 @@ const rows = (list: any[]) => JSON.stringify(list
 	.sort((a, b) => a.id.localeCompare(b.id)));
 
 /** Starts a daemon on a fresh session whose one subagent transcript holds
- *  `initial`, waits until that is tagged, runs `mutate`, then waits for the
- *  tag to match a full parse of the transcript. Returns both, as rows. */
-async function runCase(name: string, initial: string, mutate: (file: string) => Promise<void>): Promise<{ tag: string; full: string; initialTagged: boolean }> {
+ *  `initial`, waits until `ready` holds for the tag, runs `mutate`, then waits
+ *  for the tag to match a full parse of the transcript. Returns both, as rows. */
+async function runCase(
+	name: string,
+	initial: string,
+	mutate: (file: string) => Promise<void>,
+	ready: (tagged: any[]) => boolean = tagged => tagged.length > 0,
+): Promise<{ tag: string; full: string; initialTagged: boolean }> {
 	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), `wtft-220-${name}-`)));
 	const session = path.join(dir, "session.jsonl");
 	fs.writeFileSync(session, JSON.stringify({ type: "session", version: 3, id: `parent-220-${name}`, timestamp: new Date().toISOString(), cwd: dir }) + "\n");
@@ -68,9 +73,9 @@ async function runCase(name: string, initial: string, mutate: (file: string) => 
 	child.unref();
 	try {
 		let initialTagged = false;
-		for (let i = 0; i < 40 && !initialTagged; i++) {
-			await sleep(250);
-			initialTagged = readClassifiedTagFile(tag).length > 0;
+		for (let i = 0; i < 200 && !initialTagged; i++) {
+			await sleep(50);
+			initialTagged = ready(readClassifiedTagFile(tag));
 		}
 		await mutate(sub);
 		const full = rows(deduplicateInteractions(parseSessionFile(sub)));
@@ -101,6 +106,25 @@ const T0 = Date.now() - 60_000;
 	});
 	assert("fixture: the turn before the interrupt was tagged before the interrupt was written", r.initialTagged);
 	assert("an interrupt after a turn already written marks that turn, and no later one", r.tag === r.full, `tag:  ${r.tag}\n       full: ${r.full}`);
+}
+
+{
+	const owner = JSON.stringify({
+		type: "assistant",
+		timestamp: new Date(T0 + 500).toISOString(),
+		message: {
+			role: "assistant", id: "msg_owner", model: "claude-sonnet-4-6",
+			usage: { input_tokens: 1000, output_tokens: 150, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+			content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "claude -p 'go'" } }],
+		},
+	}) + "\n";
+	// Appended the moment the owner turn is tagged, while the ordinary turn
+	// before it is most likely still held back.
+	const r = await runCase("interrupt-after-owner", turn("msg_plain", T0, 100) + owner, async file => {
+		fs.appendFileSync(file, INTERRUPT);
+	}, tagged => tagged.some((i: any) => i.messageId === "msg_owner"));
+	assert("fixture: the turn a Claude command started was tagged before the interrupt", r.initialTagged);
+	assert("an interrupt after a command turn marks that turn, not the ordinary turn before it", r.tag === r.full, `tag:  ${r.tag}\n       full: ${r.full}`);
 }
 
 {

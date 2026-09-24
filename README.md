@@ -269,7 +269,7 @@ then shows up only in `spawned.unrecorded[]`, if it matches a tier there.
 
 `wtft --json` then reports the lineage under `spawned` — every edge with its
 provenance, every descendant counted exactly once (with the subagent and
-`claude -p` sessions it holds that no other total counts, each billed once), and every gap named rather
+`claude -p` sessions it holds that no other total counts), and every gap named rather
 than zeroed — plus `tree`, which is self + descendants as a field (untagged cost excluded, as in `total.costUsd`) so nobody adds
 two numbers and guesses. **`total` keeps meaning this session's own turns**; not
 one dollar moved into or out of it.

@@ -32,8 +32,9 @@ child's `descendantUntagged` entry, not added to `spawned.total`, so a later edg
 `unattributed` entry from an earlier edge has that entry removed, and the earlier edge keeps its
 skip. A Pi sibling session with a `parentSession` header is one such transcript: before this
 change it was priced only under its own edge. Now it is priced once: in SELF when the caller
-names it in `alreadyAttributed` (the tag's fold records name Pi siblings),
-else inside whichever reaches it first, the descendant or its own edge.
+names it in `alreadyAttributed` (the tag's fold records name Pi siblings), else inside the
+descendant or under its own edge, whichever prices it first. An own edge that could not price it
+(unresolved, or depth-capped) leaves it to the descendant.
 
 **Whole or null.** If that discovery reports a file it could not read or throws, or any listed
 transcript cannot be read, has non-blank lines and not one that parses (§3), or cannot be
@@ -42,7 +43,8 @@ discovery fails, the edge is
 `skip: "unreadable"`, `total: null`, with an `unattributed` entry, the same as a child transcript
 that cannot be opened. An edge total never leaves out a listed file it could not read, because
 nothing in the report would say it had; the only file it leaves out is one already in a total.
-Untagged cost is outside the edge total as it always was, counted in `descendantUntagged`. Inside one file, a bad line is still skipped and the good lines priced, as
+Every listed file is read before that exclusion, so one that cannot be read makes the edge
+`unreadable` even when its money would have been left out. Inside one file, a bad line is still skipped and the good lines priced, as
 everywhere else.
 
 **`live`** is true when any of those files, not only the child's own, has an mtime within
@@ -101,3 +103,26 @@ has a parseable line and the strict parse could never fire there.
 - **#232** S → C where every line of `C.jsonl` fails `JSON.parse`: the edge is
   `skip: "unreadable"`, `total: null`, and `unattributed` names C. An empty `C.jsonl` is still
   a counted $0 edge.
+
+## Reconcile record
+
+Four fresh-context audit passes, each against `wtft-spawn-tree.ts` and the parse and discovery
+functions of `wtft-parser.ts`.
+
+| Pass | Scope | Outcome |
+|---|---|---|
+| 1 | README, `CONTEXT.md`, manifest, `EXT_WTFT.html`, twelve specs, host documents | Every claim this branch made stale was fixed. Older drift is filed as #236. |
+| 2 | Prose changed by pass 1 | Found a code bug: a folded session reached later by a shallower edge kept the deeper depth. Fixed and tested (I12). The rest was wording, fixed. #235 widened to folded `claude -p` transcripts. |
+| 3 | Prose changed by pass 2 | Found a code bug: two parts of one descendant folding one session billed it twice. Fixed and tested (H10). The rest was wording, fixed. #237 filed for the same shape in the widget's SELF. |
+| 4 | Prose changed by pass 3 | Two contradictions in this spec and three partial summaries, all fixed. The rest are noted below. |
+
+**Noted, not changed.** Each is a finer point of a summary that points at this spec, or a
+behaviour older than this branch:
+
+- The discovery exceptions (`wtft-tags`, symlinked directories, ENOENT/ELOOP) live in
+  `docs/wtft-incremental-render-spec.md`; the glossary entry summarises and does not repeat them.
+- A fold on an untagged or de-duplicated turn is neither marked folded nor queued. Its cost
+  sits in `descendantUntagged`, as `CONTEXT.md` § Self / tree already says.
+- "Minimum depth" is the smallest of the assigned queue depths (§2), not a position in the ledger.
+- One unreadable unrelated transcript in a `claude -p` child's project directory fails the fold
+  discovery, and with it the edge. That behaviour predates this branch; it is on #236.

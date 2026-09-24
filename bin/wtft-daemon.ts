@@ -48,8 +48,12 @@ import {
 
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const POLL_MS = 667; // 90bpm throttle
-/** How long the startup catch-up runs before it yields to the event loop. */
-const HARNESS_CATCH_UP_SLICE_MS = 25;
+/** How long one slice of a harness's subagent scan runs before it yields to the event loop. */
+const HARNESS_SCAN_SLICE_MS = envMs("WTFT_HARNESS_SCAN_SLICE_MS", 25);
+/** Pause between slices; 0 in use. A test sets it, with a slice of 0 (one
+ *  transcript per slice), to make a scan outlast a report without writing
+ *  hundreds of MB of fixture. */
+const HARNESS_SCAN_YIELD_MS = envMs("WTFT_HARNESS_SCAN_YIELD_MS", 0);
 function envMs(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw === "") return fallback;
@@ -747,14 +751,20 @@ function foldedTranscriptChanged(foldStamps: Map<string, string>): boolean {
 /** Harness sessions whose subagent scan ran out of its slice and continues on
  *  the next turn of the event loop. */
 const subagentScansContinuing = new Set<string>();
+/** Transcripts a cut scan already read in its current pass, so the next slice
+ *  resumes after them. */
+const subagentScanPass = new Map<string, Set<string>>();
 
 function scanForSubAgents() {
   let wroteAny = false;
-  // In a harness, one slice at a time: the session's own turns are already in
-  // the tag, so a reader sees a partial sum at once, and other sessions' events
-  // and requests are served between slices.
-  const deadline = harnessMode ? Date.now() + HARNESS_CATCH_UP_SLICE_MS : Infinity;
+  // In a harness, one slice at a time, so other sessions' events and requests
+  // are served between slices and a reader sees the sum grow. Each slice reads
+  // at least one transcript and resumes after the last one it read.
+  let deadline = Infinity;
   let cut = false;
+  let readThisSlice = 0;
+  const scanKey = path.resolve(sessionPath);
+  const readThisPass = subagentScanPass.get(scanKey) ?? new Set<string>();
   // pollHadFailure is reset by the poll loop, not here — flushPending runs first and can fail.
 
   if (pendingClaudeCommands.length > 0) {
@@ -860,17 +870,30 @@ function scanForSubAgents() {
     return out;
   };
 
+  if (harnessMode) deadline = Date.now() + HARNESS_SCAN_SLICE_MS;
+  const due = (file: string): boolean => {
+    if (readThisPass.has(file)) return false;
+    if (readThisSlice > 0 && Date.now() > deadline) { cut = true; return false; }
+    readThisSlice++;
+    readThisPass.add(file);
+    return true;
+  };
+
   for (const file of taskAgentFiles) {
-    if (Date.now() > deadline) { cut = true; break; }
+    if (cut) break;
+    if (!due(file)) continue;
     if (skipAsFoldedElsewhere(file, foldedElsewhere)) { wroteAny = wroteAny || retiredThisPoll; continue; }
     wroteAny = syncSubagentTranscript(file, notMine(file)) || wroteAny;
   }
 
   for (const file of discoveredClaudeFiles) {
-    if (cut || Date.now() > deadline) { cut = true; break; }
+    if (cut) break;
+    if (!due(file)) continue;
     if (skipAsFoldedElsewhere(file, foldedElsewhere)) { wroteAny = wroteAny || retiredThisPoll; continue; }
     wroteAny = syncSubagentTranscript(file, notMine(file)) || wroteAny;
   }
+  if (cut) subagentScanPass.set(scanKey, readThisPass);
+  else subagentScanPass.delete(scanKey);
 
   if (wroteAny) {
     const now = Date.now();
@@ -883,11 +906,13 @@ function scanForSubAgents() {
     const key = path.resolve(sessionPath);
     if (!subagentScansContinuing.has(key)) {
       subagentScansContinuing.add(key);
-      setImmediate(() => {
+      const next = () => {
         subagentScansContinuing.delete(key);
         const slot = harnessSlots.get(key);
         if (slot && running) withSlot(slot, () => scanForSubAgents());
-      });
+      };
+      if (HARNESS_SCAN_YIELD_MS > 0) setTimeout(next, HARNESS_SCAN_YIELD_MS);
+      else setImmediate(next);
     }
     return;
   }
@@ -1776,16 +1801,21 @@ function servedSessionOver(dir: string): string | null {
 
 /** A session whose lease a `--reparse` holds is adopted once the reparse lets
  *  it go, not taken from it mid-rewrite. */
-const adoptionRetries = new Set<string>();
+const adoptionRetries = new Map<string, number>();
 function retryAdoptionLater(key: string, displayed: boolean) {
-  if (adoptionRetries.has(key) || !running) return;
+  if (!running || !fs.existsSync(key)) return;
   let holder = 0;
-  try { holder = Number(fs.readFileSync(getDaemonPidPath(key), "utf8").trim()); } catch { return; }
-  if (!procIsReparse(holder)) return;
-  adoptionRetries.add(key);
-  const timer = setTimeout(() => {
+  try { holder = Number(fs.readFileSync(getDaemonPidPath(key), "utf8").trim()); } catch { /* released */ }
+  // A reparse lets go when it finishes; any other failure gets a few tries.
+  const tries = (adoptionRetries.get(key) ?? 0) + 1;
+  if (!procIsReparse(holder) && tries > 5) {
     adoptionRetries.delete(key);
-    if (running) wake(key, displayed);
+    return;
+  }
+  adoptionRetries.set(key, tries);
+  const timer = setTimeout(() => {
+    if (running && !harnessSlots.has(key)) wake(key, displayed);
+    if (harnessSlots.has(key)) adoptionRetries.delete(key);
   }, POLL_MS);
   timer.unref();
 }
@@ -1881,14 +1911,19 @@ function taggerIsOlder(a: string, b: string): boolean {
 function pointSessionAt(livePid: number, file: string): boolean {
   const lease = getDaemonPidPath(file);
   let held = false;
-  try { held = fs.readFileSync(lease, "utf8").trim() === String(livePid); } catch { /* no lease yet */ }
-  const replacement = `${lease}.replace-${process.pid}`;
-  fs.writeFileSync(replacement, String(livePid));
-  fs.renameSync(replacement, lease);
+  let holder = 0;
+  try { holder = Number(fs.readFileSync(lease, "utf8").trim()); } catch { /* no lease yet */ }
+  held = holder === livePid;
+  // A --reparse rewriting this session's tag keeps its lease; the harness is
+  // only asked, and adopts the session once the reparse lets go.
+  if (!procIsReparse(holder)) {
+    const replacement = `${lease}.replace-${process.pid}`;
+    fs.writeFileSync(replacement, String(livePid));
+    fs.renameSync(replacement, lease);
+  }
   try { fs.writeFileSync(`${lease}.display`, ""); } catch { /* the live process still has the old focus */ }
-  // The live process may hold no slot for this session yet, or be part-way
-  // through its startup rebuild: ask it by name to serve this one next. One
-  // file per requester, so two requests never overwrite each other.
+  // The live process may hold no slot for this session yet: ask it by name.
+  // One file per requester, so two requests never overwrite each other.
   try {
     // A posted request counts only if the harness still holds the root after
     // it was written; one it gave up meanwhile would never read it.
@@ -1920,8 +1955,7 @@ function pointSessionAt(livePid: number, file: string): boolean {
 let harnessRootKey = "";
 let harnessWhich = "";
 
-/** Serves the sessions other processes asked for (`pointSessionAt`) ahead of
- *  the rest. A request is claimed by renaming it before it is read. One
+/** Serves the sessions other processes asked for (`pointSessionAt`). A request is claimed by renaming it before it is read. One
  *  addressed to another harness pid, or outside this root, is dropped. */
 function takeFocusRequests() {
   if (!harnessPidFile) return;
@@ -1942,6 +1976,17 @@ function takeFocusRequests() {
     if (!file.startsWith(harnessRootKey + path.sep)) continue;
     wake(file, true);
   }
+}
+
+/** A request is served as soon as it is posted, not at the next sweep. The
+ *  sweep still reads the directory, so a lost event only delays one. */
+function watchFocusRequests() {
+  const dir = `${harnessPidFile}.focus.d`;
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const watcher = fs.watch(dir, () => { if (running) takeFocusRequests(); });
+    watcher.on("error", () => { try { watcher.close(); } catch { /* closed */ } });
+  } catch { /* the sweep still serves requests */ }
 }
 
 function harnessVersionFile(pid: number): string {
@@ -1985,7 +2030,7 @@ function runHarness(which: string, focus: string) {
       // Not posted: that harness is usually stopping, so try to claim the root
       // once it has gone.
       const until = Date.now() + 2000;
-      while (Date.now() < until && procIsDaemon(live)) { /* spin; it removes its request dir as it exits */ }
+      while (Date.now() < until && procIsDaemon(live)) { /* spin until it has gone */ }
       continue;
     }
     try { process.kill(live, "SIGTERM"); } catch { /* already gone */ }
@@ -2001,6 +2046,7 @@ function runHarness(which: string, focus: string) {
   // Serves only the sessions readers ask for: this one, and later ones named
   // by focus requests. Nothing else under the root is read or watched.
   if (focus) wake(path.resolve(focus), true);
+  watchFocusRequests();
   harnessIdleTimer = setInterval(sweepIdleSlots, 250);
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] harness settled ${which}\n`);
@@ -2038,9 +2084,6 @@ function releaseLease(slot: Slot) {
   } catch { /* already gone */ }
 }
 
-/** The newest mtime of the transcript and of every file under its session
- *  directory (`subagents/`, nested ones included): a directory's own mtime
- *  does not move when a file in it is appended to. */
 function slotNeedsChildScan(slot: Slot, now: number): boolean {
   if (slot.pendingClaudeCommands.length > 0) return true;
   for (const state of slot.discoveredSubagentFiles.values()) {

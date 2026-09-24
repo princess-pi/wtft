@@ -40,8 +40,7 @@ function turnLine(id: string, ts: number): string {
 }
 
 /** A fresh root of `SESSIONS` sessions whose only tags are an older version,
- *  so the harness rebuilds all of them. `files` is in the harness's walk order:
- *  directory by directory, each in `readdir` order. */
+ *  so any session the harness serves is rebuilt. */
 function makeRoot(label: string): { root: string; files: string[] } {
 	const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), `wtft-248-${label}-`)));
 	const files: string[] = [];

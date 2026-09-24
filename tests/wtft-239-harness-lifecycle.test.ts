@@ -187,16 +187,18 @@ try {
 		fs.writeFileSync(session, turnLine("main-0", Date.now() - 60_000));
 		const sub = path.join(session.slice(0, -".jsonl".length), "subagents");
 		fs.mkdirSync(sub, { recursive: true });
-		// Enough subagent transcript that reading it takes well over one 667 ms beat.
 		const pad = JSON.stringify({ type: "user", message: { content: "x".repeat(4000) } }) + "\n";
-		for (let a = 0; a < 40; a++) {
+		for (let a = 0; a < 20; a++) {
 			let body = "";
-			for (let i = 0; i < 600; i++) body += i % 50 === 0 ? turnLine(`a${a}-${i}`, Date.now() - 50_000) : pad;
+			for (let i = 0; i < 300; i++) body += i % 50 === 0 ? turnLine(`a${a}-${i}`, Date.now() - 50_000) : pad;
 			fs.writeFileSync(path.join(sub, `agent-${a}.jsonl`), body);
 		}
 		const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
+		// One transcript per slice and 300 ms between slices makes reading the 20
+		// subagent transcripts outlast the first report by several 667 ms beats.
+		const slow = { ...envFor(root), WTFT_HARNESS_SCAN_SLICE_MS: "0", WTFT_HARNESS_SCAN_YIELD_MS: "300" };
 		const t0 = Date.now();
-		const first = spawnSync("node", [cli, "--json", "-s", session], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+		const first = spawnSync("node", [cli, "--json", "-s", session], { encoding: "utf8", env: slow, timeout: 30_000 });
 		const took = Date.now() - t0;
 		let doc: any = null;
 		try { doc = JSON.parse(first.stdout); } catch { /* checked below */ }
@@ -212,6 +214,14 @@ try {
 		check(settledAll !== Infinity, "a later report is complete, not provisional");
 		const full = readClassifiedTagFile(getCurrentVersionTagPath(session)).length;
 		check(full > mainOnly, `and it counts the subagent turns the first did not (${full} rows against ${mainOnly})`);
+		// A second session under the same root, handed to the harness already
+		// running: the first report on it must find its turns, not an empty tag.
+		const other = path.join(dir, "66666666-7777-4888-8999-000000000000.jsonl");
+		fs.writeFileSync(other, turnLine("other-0", Date.now() - 30_000));
+		const handed = spawnSync("node", [cli, "--json", "-s", other], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+		let otherDoc: any = null;
+		try { otherDoc = JSON.parse(handed.stdout); } catch { /* checked below */ }
+		check((otherDoc?.total?.costUsd ?? 0) > 0, `the first report on a session handed to the running harness has its sum ($${otherDoc?.total?.costUsd}, exit ${handed.status})`);
 		for (const pid of harnessesFor(root)) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 	}
 
@@ -226,10 +236,7 @@ try {
 
 	console.log("\n--restart followed at once by a CLI spawn leaves one harness");
 	{
-		// Live sessions, so the first harness holds a lease for each and
-		// --restart spends seconds walking them before it reaches the pid file.
 		const { root, files } = makeRoot("r", 2000);
-		for (const f of files) fs.utimesSync(f, new Date(), new Date());
 		const h = start(root, ["--harness", "claude", "--session", files[0]], "r.err");
 		check(await until(() => read(h.err).includes("harness settled claude"), 30_000) !== Infinity, "fixture: the first harness settled");
 		// Leases as many as a busy host's, so --restart is still walking them

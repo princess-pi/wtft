@@ -38,24 +38,30 @@
   file no one asked for is ignored, except that under the Pi root a new or growing sibling file
   wakes the served sessions in its directory, since a Pi child session is a sibling. Dropping a
   session closes its watchers, and a project directory's once no served session is left in it.
-- **A reader gets the session's own sum first, then its subagents.** The session's own turns are
-  flushed to the tag before any subagent transcript is read, and in a harness the subagent scan
-  runs in slices of at least 25 ms (`HARNESS_CATCH_UP_SLICE_MS`), continuing on the next turn
-  of the event loop. A one-shot `wtft` that finds turns in the tag reports them at once, marked
+- **A reader gets the session's own sum first, then its subagents.** When a session is adopted,
+  its own turns are flushed to the tag before any subagent transcript is read (a later wake
+  within 667 ms of the last flush holds new own turns for the next flush, as before). In a
+  harness the subagent scan runs in slices: each reads at least one transcript, stops once it
+  has run 25 ms (`WTFT_HARNESS_SCAN_SLICE_MS`), and the next slice, on the next turn of the event
+  loop, resumes after the last transcript read. `WTFT_HARNESS_SCAN_YIELD_MS` (default 0) pauses
+  between slices; the suite sets it to make a scan outlast a report. A one-shot `wtft` that finds turns in the tag reports them at once, marked
   provisional (exit 9, "no subagent transcript has been read since this tag was written") until
   the scan finishes and stamps the tag swept; `--watch` shows the sum grow.
 - **A session is dropped after `WTFT_DAEMON_IDLE_MS` (24 h) with no new lines**, as before, and
   dropping a slot now removes its lease, unless another slot shares that lease or another
   process has replaced it since it was read.
 - **A focus request goes only to a harness that still holds the root.** After posting, the
-  requester checks the harness pid file still names that harness. A request that cannot be
+  requester checks the harness pid file still names that harness. The harness watches its
+  request directory, so a request is served when it is posted, not at the next 250 ms sweep; a
+  one-shot `wtft` on a session handed to a running harness finds its turns in the tag. A request
+  never overwrites a lease a `--reparse` holds. A request that cannot be
   posted is reported on stderr. Unless the harness still holds the root and already held this
   session's lease, the lease and `.display` the call pointed at it are removed, so the reader is
   not told a session is served when nothing will adopt it. The spawn then waits up to 2 s for
   that harness to exit and tries to claim the root itself, exiting 1 after five attempts.
 - **`--reparse` holds the session's lease while it rewrites the tag**, and a harness never stops
   a reparse to take a lease: asked for a session a reparse holds, it tries again every 667 ms
-  until the reparse lets go. `--reparse` of a session a daemon is serving is refused.
+  until the reparse lets go. Any other failed adoption is retried up to five times. `--reparse` of a session a daemon is serving is refused.
   `--reparse-range` exits 1, naming how many sessions it left unreparsed, when any was refused,
   failed or could not be stat'd.
 - **A harness whose pid file no longer names it stops.** The sweep reads the harness pid file;
@@ -84,9 +90,10 @@
   subagent transcript is read. `--reparse` runs beside the harness on a session it does not
   serve and is refused on one it does. The issue asked for RSS; RSS keeps heap a parse freed
   and did not return (#97), so the test measures live heap.
-- A session with 40 subagent transcripts (about 96 MB): the first `wtft --json` returns in
-  under 3 s with the session's own sum, marked provisional (exit 9); a later report is complete
-  (exit 0) and counts the subagent turns the first did not.
+- A session with 20 subagent transcripts, scanned one transcript per slice with 300 ms between
+  slices: the first `wtft --json` returns in under 3 s with a partial sum, marked provisional
+  (exit 9); a later report is complete (exit 0) and counts the subagent turns the first did not.
+  A second session handed to that running harness gets its sum on its first report.
 - Removing the harness pid file stops the harness.
 - With 40,000 leases naming the running harness, `--restart` followed by a `wtft`-style spawn
   leaves exactly one harness after 5 s: the one `--restart` started, holding the pid file.

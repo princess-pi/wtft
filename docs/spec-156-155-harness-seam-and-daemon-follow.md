@@ -329,7 +329,8 @@ swallowed it. The flag is what keeps the refactor a refactor.
 **Shared control-entry state machine.** The design said harnesses recognize control entries;
 what shipped also unified how they are *applied*. `wtft-parser.ts` now exports
 `newParseStreamState()`, `applyControlEntry()` and `readControlEntry()`, and both
-`parseSessionFile` and the daemon's `parseNewLines` drive the same state object. That deletes
+the whole-file parse (`parseSessionFileCounted`, behind `parseSessionFile` and
+`parseSessionFileStrict`) and the daemon's `parseNewLines` drive the same state object. That deletes
 the duplicated marker block the entanglement table called out (`wtft-parser.ts:418-447` **and**
 `bin/wtft-daemon.ts:327-357`) instead of merely relocating it — the incremental and whole-file
 paths can no longer drift.

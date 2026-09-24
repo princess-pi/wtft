@@ -116,9 +116,13 @@ _Avoid_: Sub-thread, branch, fork
 
 **Subagent session**:
 A separate `.jsonl` log for a spawned subagent, stored under `<session-id>/subagents/` (Claude
-Code). wtft recursively discovers and blends these chronologically into the parent's own turns —
-folded into **self**, not into the ledger-spawned **tree** (see Self / tree below), which is a
-different join. Distinct from a sidechain (above), which lives inline in the parent
+Code, `agent-*.jsonl`), or a Pi sibling file in the same directory whose first-line session header
+names, as `parentSession`, the `id` in the parent's own first-line session header. wtft discovers
+them (the `subagents/` tree recursively, Pi siblings one level) and blends these chronologically into the parent's own turns — folded into **self**. A
+ledger-spawned descendant's own subagent sessions, and theirs in turn, other than one already in a total, are priced
+inside that descendant's edge total (their untagged turns in the descendant's `descendantUntagged`
+entry), and so in **tree** (see Self / tree below;
+`docs/spec-230-231-232-spawn-tree-gaps.md`). Distinct from a sidechain (above), which lives inline in the parent
 file rather than as its own file.
 _Avoid_: Child session, nested session
 
@@ -162,7 +166,7 @@ _Avoid_: Cache file, index file
 A `{"_fold":{"parent","child","s"}}` line in a tag file. The daemon writes one for every session whose
 cost it folded into that tag: a Task child, a Pi sibling session, a `claude -p` child, or a session one of those folded in on
 a model-tagged turn, at any depth. The spawn walk that reads the tag skips every recorded child as
-`in-self-total`. It reads the record rather than rediscovering, because the filesystem at read
+`in-self-total`, and still walks that child's own ledger children (#231). It reads the record rather than rediscovering, because the filesystem at read
 time is not the filesystem the daemon folded from. Readers key on `child`.
 _Avoid_: Fold cache, attribution list
 
@@ -358,7 +362,8 @@ names the usage mode)
 A total that may still change: the tag file was written by another tagger build
 (`stale-version`) or read before the log parser daemon swept it (`unswept`), the CLI's
 scan could not list or read a subagent file (`subagent-unreadable`), or a counted descendant
-is still writing its transcript (`descendant-live`: its spawn-tree edge is **live**; the exact
+is still writing its transcript or one of its subagent transcripts (`descendant-live`: its
+spawn-tree edge is **live**; the exact
 test is `docs/spec-26-json.md`, Amendment 4). The number printed is
 real; it is not yet **settled**. On the CLI's report
 path (not `--watch`), reported two ways that always agree: **exit 9**, and
@@ -410,26 +415,30 @@ _Avoid_: Spawn log, lineage file, parent map, edge database
 
 **Self / tree** (#116):
 **Self** is a session's own turns — what `total` has always meant and still means. **Tree** is
-self plus every RESOLVED descendant reached through the spawn ledger, so it is a floor whenever
+self plus every RESOLVED descendant reached through the spawn ledger, each priced with the
+subagent sessions and `claude -p` sessions it holds that no other total counts (spec-230), so it is a floor whenever
 anything went uncounted — `unattributed` non-empty, `depthCapped` non-zero, `ledgerError` set,
 `malformedLedgerLines` non-zero (a malformed line was a record, so its edge is lost and the count is
 its only trace), or `descendantUntagged` non-empty (a counted descendant's untagged turns, left out
 of its total; `--tokens` counts them, with their summed untagged cost, on one line under SPAWNED.
 That sum can include a `claude -p` child's share that `spawned.total` also counts, when the
 ledger records the child too). Both are explicit fields under `--json`; the `--tokens` table shows the
-split as `TOTAL` / `SPAWNED` / `TREE`, and shows none of the three only when this session recorded
-no edges AND the ledger read cleanly — an unreadable ledger or a skipped line still prints, because
+split as `TOTAL` / `SPAWNED` / `TREE`, and shows none of the three only when the walk found no
+edge (none from this session, nor from a session already inside its total) AND the ledger read cleanly — an unreadable ledger or a skipped line still prints, because
 "no edges" and "could not tell" are different reports. Never write a bare "the session's cost" where the two can differ.
 _Avoid_: Rollup, grand total, inclusive cost (each hides which of the two is meant)
 
 **Unattributed** (#116):
 A recorded spawn edge whose child's cost could not be read: `not-found` (the lookup came back
 empty — absent, or somewhere this process cannot read, and the walk cannot tell those apart) or
-`unreadable` (a file found that would not parse, or could not be stat-ed). Reported with its reason and a `null` cost,
+`unreadable` (a file found that could not be read, has complete (newline-ended) non-blank lines and not one that parses as JSON, or
+could not be stat-ed — the child's transcript, a subagent transcript of it, or that discovery; or
+a `claude -p` transcript their parses fold could not be read or stat-ed, or its discovery failed; a file with only some bad lines is priced from the good
+ones, and a blank-only file is an empty session). Reported with its reason and a `null` cost,
 **never a zero**: a zero says the child cost nothing, which is a claim we do not have. Distinct
 from **uncounted** (#149), a billable event the harness records no `usage` for; and from the four
 skips that are *not* gaps — `already-counted` (a diamond, a cycle among descendants, or a `claude -p`
-session a descendant's parse folded in, whose money landed once in `spawned.total`),
+session or subagent session priced inside a descendant, whose money landed once in `spawned.total`),
 `already-seen-unresolved` (a second edge onto a child the first visit could not read, whose gap is
 already reported), `in-self-total` (a child whose cost is already inside `total`, at any fold depth, or the reported session itself reached round a cycle) and
 `depth-capped` (past the walk's bound).

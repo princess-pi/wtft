@@ -38,13 +38,16 @@ function ledgerWith(name: string, edges: [string, string][]): string {
 const OTHER = "33333333-3333-4333-8333-333333333333";
 
 // ---
-console.log("\n=== #134 B: computeSpawnTree calls the alreadyAttributed thunk only when the root has an edge ===\n");
+console.log("\n=== #134 B: computeSpawnTree calls the alreadyAttributed thunk only when the ledger has an edge ===\n");
 {
 	let calls = 0;
 	const thunk = () => { calls++; return new Set<string>(); };
+	const none = computeSpawnTree(ROOT, { ledgerPath: ledgerWith("none", []), alreadyAttributed: thunk });
+	check(none.edges.length === 0 && calls === 0, "a ledger with no edges -> the thunk is never called", `calls=${calls}`);
+	// Any session may be an in-self parent, so another session's edge is enough.
 	const other = computeSpawnTree(ROOT, { ledgerPath: ledgerWith("other", [[OTHER, CHILD], [OTHER, ROOT]]), alreadyAttributed: thunk });
 	check(other.malformedLedgerLines === 0, "precondition: a two-record ledger reads with no malformed line", `malformed=${other.malformedLedgerLines}`);
-	check(calls === 0, "edges only for another session -> the thunk is never called", `calls=${calls}`);
+	check(calls === 1 && other.edges.length === 0, "edges only for another session -> the thunk is called once, and no edge is walked", `calls=${calls}`);
 
 	calls = 0;
 	const tree = computeSpawnTree(ROOT, { ledgerPath: ledgerWith("one", [[ROOT, CHILD]]), alreadyAttributed: thunk });

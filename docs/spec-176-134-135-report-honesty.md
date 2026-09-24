@@ -44,7 +44,9 @@ known to reach that path.
 ## 3. #134 B: self-attribution runs only when the ledger has an edge
 
 `SpawnTreeOptions.alreadyAttributed` also accepts a thunk, `() => Set<string>`, and
-`computeSpawnTree` calls it only after the no-edges fast path. The widget passes a thunk. The
+`computeSpawnTree` calls it only after the no-edges fast path: a ledger with no edge at all, when
+`unrecorded` was not asked for. Since spec-230 that is the whole ledger, not the root's edges,
+because any in-self session may be a parent. The widget passes a thunk. The
 CLI passes the tag's fold records as a Set, which needs no discovery at all
 (`docs/spec-178-135-180-fold-records.md`).
 
@@ -67,8 +69,9 @@ the same report says is not written yet.
 - **#134 A:** with the ledger path unreadable, `/wtft --tokens` contains the `ledgerError` text; a
   ledger with one malformed line prints the skipped-line block, which proves the ledger is read;
   with a clean, empty ledger, it contains no spawn block.
-- **#134 B:** `computeSpawnTree` on a ledger holding edges only for another session never calls the
-  `alreadyAttributed` thunk; with an edge for the root, it calls it exactly once; and a thunk's ids
+- **#134 B:** `computeSpawnTree` on a ledger with no edges never calls the `alreadyAttributed`
+  thunk; with edges only for another session, or with an edge for the root, it calls it exactly
+  once (spec-230); and a thunk's ids
   skip an edge as `in-self-total` exactly as a Set's do. The widget passes a thunk; the CLI
   passes the tag's fold records as a Set (`docs/spec-178-135-180-fold-records.md`).
 - **#135 B:** `wtft --json` on a session whose log is not written yet, with a ledger edge recorded for

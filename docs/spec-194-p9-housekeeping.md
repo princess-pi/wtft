@@ -23,8 +23,8 @@ four siblings:
 ]
 ```
 
-- One entry per **counted** descendant (an edge with `resolved: true`) whose own parse
-  holds at least one untagged interaction. The counts come from the same
+- One entry per **counted** descendant (an edge with `resolved: true`) whose own parse, or a
+  subagent transcript priced inside it (spec-230), holds at least one untagged interaction. The counts come from the same
   `computeSessionSummary` call that prices the edge. They are that summary's
   `untaggedInteractions` and `total.untaggedCostUsd`.
 - Never added to `spawned.total`, `tree`, or any edge total. The money stays outside,

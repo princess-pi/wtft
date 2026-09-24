@@ -16,8 +16,10 @@ transcripts.
 
 ## The change
 
-**`parseSessionFile` reads the file in 1 MiB chunks** and hands each complete line to the same
-per-line body as before. A `StringDecoder` carries a UTF-8 character that is split across two
+**`parseSessionFile` reads the file in 1 MiB chunks** (the default of its `chunkBytes`
+parameter) and hands each complete line to the same per-line body as before. That body now lives
+in `parseSessionFileCounted`, shared with `parseSessionFileStrict` (spec-230), which always reads
+at the default chunk size. A `StringDecoder` carries a UTF-8 character that is split across two
 chunks, and the text after the last newline is carried into the next chunk. The final line is
 parsed whether or not it ends in a newline, as `content.split("\n")` did. The same lines, in the
 same order, go through the same control-entry, interaction and nested `claude -p` attribution

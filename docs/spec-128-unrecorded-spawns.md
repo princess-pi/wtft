@@ -83,7 +83,7 @@ A candidate is not listed when its money is already somewhere, or someone else o
 - a candidate that another listed candidate's own parse folds — its cost is already inside that
   row, so listing it too would show it twice.
 
-The first and third are the walk's own state; the second is one pass over the ledger already in
+The first, third and fourth are the walk's own state; the second is one pass over the ledger already in
 memory. So the exclusion is exact for recorded edges and costs no extra read.
 
 ## The shape
@@ -144,7 +144,8 @@ start from a human one. A Pi child is therefore never listed. Filed as
 
 `computeSpawnTree` takes a new option, `unrecorded: { turns, rootCwd, rootFile? }`. When given, the tree
 carries `unrecorded: UnrecordedSpawn[]`, listed after the walk so the walk's outcomes feed the
-exclusion. The early return for a session with no edges now skips only the walk. The widget does
+exclusion. The early return for a session with no edges now skips only the walk, and the
+`alreadyAttributed` thunk is still called to feed the exclusion. The widget does
 not pass the option: the scan is a one-shot report's cost, not a per-poll one.
 
 ```ts

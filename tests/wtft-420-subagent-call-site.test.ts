@@ -105,16 +105,16 @@ assert(
 if (parserCalls.length === 1) {
 	const content = readFileSync(PARSER_FILE, "utf8");
 	const lines = content.split("\n");
-	const startIdx = lines.findIndex((l) => /^export function parseSessionFile\(/.test(l));
+	const startIdx = lines.findIndex((l) => /^function parseSessionFileCounted\(/.test(l));
 	let endIdx = lines.length;
 	for (let i = startIdx + 1; i < lines.length; i++) {
-		if (/^export function /.test(lines[i])) { endIdx = i; break; }
+		if (/^(export )?function /.test(lines[i])) { endIdx = i; break; }
 	}
 	const callLineIdx = parserCalls[0].line - 1;
 	assert(
-		"the parser call site sits inside parseSessionFile's body (whole-file scope)",
+		"the parser call site sits inside parseSessionFileCounted's body, the whole-file parse behind parseSessionFile",
 		startIdx !== -1 && callLineIdx > startIdx && callLineIdx < endIdx,
-		`parseSessionFile spans lines ${startIdx + 1}-${endIdx}, call site is line ${parserCalls[0].line}`,
+		`parseSessionFileCounted spans lines ${startIdx + 1}-${endIdx}, call site is line ${parserCalls[0].line}`,
 	);
 }
 

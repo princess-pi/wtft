@@ -33,7 +33,12 @@ config file it finds still sitting at the pre-#156 path
 (`~/.config/princess-pi-tools/`) into `~/.config/wtft/` — there is no runtime
 fallback read of the old location, so a file left behind stays invisible to
 wtft until this script (or a human) moves it; `--check` reports one without
-moving it. `install-wtft --json` gives
+moving it. It also reports whether the `claude-nsp-guard` shim (princess-pi-tools,
+deployed as `~/bin/claude`) wins the PATH race for `claude` — an absent guard is
+a normal host, not a failure, and a caller that runs a `claude` binary by
+absolute path bypasses the guard entirely. When drift, a config file left
+behind, or a wtft shadow wins the exit code, human mode still names a shadowed
+guard on an `Also:` line (`--json` carries it in `nspGuard`). `install-wtft --json` gives
 the whole report as one document on every exit path but one: a usage error (64)
 is reported on stderr and carries no document, because the arguments that would
 say what to report are the thing that is wrong. `install-wtft --help` lists the
@@ -42,13 +47,15 @@ see [Usage](#usage) below.)
 
 Re-run it after every rebuild; `--check` is how you find out you needed to, and
 it is scriptable: **0** in sync, **1** drift, **2** shadowed on PATH, **4** a
-config file still at the old path, **64** bad
+config file still at the old path, **5** the `claude-nsp-guard` shim is on PATH
+but another `claude` comes first and nothing else is wrong, **64** bad
 usage. A plain install adds **3** for a failed build, which `--check` cannot
 return because it never builds. Three of those codes have a second cause: **1**
 is also a `--dir` that cannot be created (status `no-dir`), **4** is also install
 mode either declining to overwrite a DIFFERENT config file already at the new
-path, a file appearing there mid-move, or the copy itself failing partway (a
-permissions problem, say) — a file that copies fine but cannot be removed from
+path, a file appearing there mid-move, the new path already being the old file
+under another name (a symlinked file or directory — one copy, so remove the
+link, never the file), or the copy itself failing partway (a permissions problem, say) — a file that copies fine but cannot be removed from
 the old path afterward is reported as installed; a later run removes that
 identical leftover once the old directory allows it, and reports **4** until then — either way a
 human resolves which copy is authoritative, and **64** is also
@@ -149,7 +156,7 @@ wtft --json | jq .total.costUsd
 `wtft --json` writes **exactly one JSON object** to stdout and nothing else —
 no chart, no ANSI, and no `3.6k`-style abbreviation, which is lossy. Human prose
 goes to stderr, and every sentence that would otherwise have been on stdout is
-repeated in the object's `notices[]`. The schema is `wtft/session@7`; field names
+repeated in the object's `notices[]`. The schema is `wtft/session@8`; field names
 and exit codes are versioned API, the prose inside `notices[].text` is not. Full
 contract: [`docs/spec-26-json.md`](./docs/spec-26-json.md).
 
@@ -269,10 +276,16 @@ Three bounds are reported rather than hidden: the walk stops at **depth 5**
 (`spawned.depthCapped` counts the cuts), a ledger over **8 MiB** is refused
 outright rather than partly read, and a ledger it cannot read comes back as
 `spawned.ledgerError` rather than as an empty tree. `tree` covers *resolved* descendants, so it is a
-floor whenever anything went uncounted, under FOUR conditions: `unattributed`
-non-empty, `depthCapped` non-zero, `ledgerError` set, or `malformedLedgerLines`
-non-zero. The last was missing until round 5 — a malformed ledger line was a
-record, so its edge is lost, and nothing else reports it.
+floor whenever anything went uncounted, under FIVE conditions: `unattributed`
+non-empty, `depthCapped` non-zero, `ledgerError` set, `malformedLedgerLines`
+non-zero, or `descendantUntagged` non-empty. A malformed ledger line was a
+record, so its edge is lost, and nothing else reports it. `descendantUntagged`
+names each counted descendant whose untagged turns (no model id) are left out
+of its total, just as this session's own are left out of `total.costUsd`, and
+`--tokens` prints how many such descendants there are, and their summed
+untagged cost, on one line under SPAWNED. That
+sum can include a `claude -p` child the untagged turn spawned, which the ledger
+may also record and `spawned.total` then counts.
 
 A session's built-in (Task) subagents get their own `SUBAGENTS` block under
 `--tokens`: one row each, up to 20 and then a count of the rest, named by the harness's `.meta.json` description, with

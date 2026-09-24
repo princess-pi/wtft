@@ -22,25 +22,23 @@ REAL="$REPO/bin/install-wtft"
 # destroyed any pre-existing file of that name — including a concurrent probe's
 # mutant, which is not hypothetical on a box that runs several agent sessions at
 # once and now runs this from the test suite.
-MUT="$(mktemp "$REPO/bin/mut-install-wtft.XXXXXX")"
+MUT="$(mktemp "$REPO/bin/mut-install-wtft.XXXXXX")" || { echo "run-mutants: mktemp failed" >&2; exit 1; }
+trap 'rm -f "$MUT"; rm -rf "${SHIM:-}" "${FAKE_HOME:-}"' EXIT
 # A ONE-ENTRY SHIM, not bun's own directory. On this host bun lives in ~/bin,
 # which is install-wtft's DEFAULT TARGET: once a real run puts ~/bin/wtft there,
 # putting bun's directory on the mutant's PATH makes every run see a foreign
 # wtft, report `shadowed` instead of `ok`, and fail on a correct mutation. The
 # suite that drives install-wtft defends against exactly this; the script the
 # spec tells you to trust over its own table has to as well.
-SHIM="$(mktemp -d)"
+SHIM="$(mktemp -d)" || { echo "run-mutants: mktemp -d failed" >&2; exit 1; }
 ln -s "$(command -v bun)" "$SHIM/bun"
 BUNDIR="$SHIM"
-# #156 gave install-wtft a config-migration side effect under
-# HOME/XDG_CONFIG_HOME — M2, M3 and M4 below all run it in INSTALL mode (M4
-# is the one that plants a legacy file to trigger the escalation it tests),
-# so without this every run of this probe would read (and move) this host's
-# real ~/.config. Exported once, for every "$REAL"/"$MUT" call below.
-FAKE_HOME="$(mktemp -d)"
+# install-wtft reads config under HOME/XDG_CONFIG_HOME in every mode and moves
+# it in install mode, so without this every run of this probe would read (and
+# move) this host's real ~/.config. Exported once, for every "$REAL"/"$MUT" call below.
+FAKE_HOME="$(mktemp -d)" || { echo "run-mutants: mktemp -d failed" >&2; exit 1; }
 export HOME="$FAKE_HOME"
 unset XDG_CONFIG_HOME
-trap 'rm -f "$MUT"; rm -rf "$SHIM" "$FAKE_HOME"' EXIT
 
 status_of() { sed -n 's/.*"status":"\([^"]*\)".*/\1/p' <<<"$1"; }
 fails=0
@@ -68,20 +66,20 @@ mutate() { # sed-expr
 }
 
 # M1 — never escalate a bad artifact state to drift.
-D=$(mktemp -d); mutate 's/\*) STATUS=drift ;;/*) ;;/' "M1 drift escalation deleted" || true
+D=$(mktemp -d) || exit 1; mutate 's/\*) STATUS=drift ;;/*) ;;/' "M1 drift escalation deleted" || true
 R=$(PATH="$BUNDIR:/usr/bin:/bin" "$REAL" --check --json --dir "$D" 2>/dev/null)
 M=$(PATH="$BUNDIR:/usr/bin:/bin" "$MUT"  --check --json --dir "$D" 2>/dev/null)
 report "M1 drift escalation deleted" drift "$(status_of "$R")" ok "$(status_of "$M")"; rm -rf "$D"
 
 # M2 — never escalate a foreign PATH winner to shadowed.
-D=$(mktemp -d); DEC=$(mktemp -d); printf '#!/bin/sh\n' > "$DEC/wtft"; chmod +x "$DEC/wtft"
+D=$(mktemp -d) || exit 1; DEC=$(mktemp -d) || exit 1; printf '#!/bin/sh\n' > "$DEC/wtft"; chmod +x "$DEC/wtft"
 mutate '/if \[ "$STATUS" = ok \]; then STATUS=shadowed; EXIT=2; fi/d' "M2 shadow escalation deleted" || true
 R=$(PATH="$DEC:$BUNDIR:/usr/bin:/bin" "$REAL" --json --dir "$D" 2>/dev/null)
 M=$(PATH="$DEC:$BUNDIR:/usr/bin:/bin" "$MUT"  --json --dir "$D" 2>/dev/null)
 report "M2 shadow escalation deleted" shadowed "$(status_of "$R")" ok "$(status_of "$M")"; rm -rf "$D" "$DEC"
 
 # M3 — never compare source against destination.
-D=$(mktemp -d); PATH="$BUNDIR:/usr/bin:/bin" "$REAL" --dir "$D" >/dev/null 2>&1
+D=$(mktemp -d) || exit 1; PATH="$BUNDIR:/usr/bin:/bin" "$REAL" --dir "$D" >/dev/null 2>&1
 printf '\n// drift\n' >> "$D/wtft"
 mutate 's/elif ! cmp -s "$src" "$dst"; then state=stale/elif false; then state=stale/' "M3 content comparison deleted" || true
 R=$(PATH="$BUNDIR:/usr/bin:/bin" "$REAL" --check --json --dir "$D" 2>/dev/null)
@@ -91,7 +89,7 @@ report "M3 content comparison deleted" drift "$(status_of "$R")" ok "$(status_of
 # M4 — never escalate a config file left at the old path (#156) to config-left.
 # A fresh, otherwise-in-sync FAKE_HOME with exactly one legacy file present, so
 # the only thing that can make status anything but "ok" is this escalation.
-D=$(mktemp -d); PATH="$BUNDIR:/usr/bin:/bin" HOME="$FAKE_HOME" "$REAL" --dir "$D" >/dev/null 2>&1
+D=$(mktemp -d) || exit 1; PATH="$BUNDIR:/usr/bin:/bin" HOME="$FAKE_HOME" "$REAL" --dir "$D" >/dev/null 2>&1
 mkdir -p "$FAKE_HOME/.config/princess-pi-tools"
 echo '{}' > "$FAKE_HOME/.config/princess-pi-tools/wtft-pricing.json"
 mutate 's/\[ "\$STATUS" = ok \] && \[ "\$CONFIG_LEFT" = 1 \] && { STATUS=config-left; EXIT=4; }/true/' "M4 config-left escalation deleted" || true
@@ -99,5 +97,15 @@ R=$(PATH="$BUNDIR:/usr/bin:/bin" HOME="$FAKE_HOME" "$REAL" --check --json --dir 
 M=$(PATH="$BUNDIR:/usr/bin:/bin" HOME="$FAKE_HOME" "$MUT"  --check --json --dir "$D" 2>/dev/null)
 report "M4 config-left escalation deleted" config-left "$(status_of "$R")" ok "$(status_of "$M")"; rm -rf "$D"
 rm -rf "$FAKE_HOME/.config"
+
+# M5 — never escalate a shadowed claude PATH guard (#30) to nsp-guard-shadowed.
+D=$(mktemp -d) || exit 1
+GUARDDIR=$(mktemp -d) || exit 1; printf '#!/bin/sh\n# not the sentinel\n# nsp-guard-identity: 9a1c-claude-nsp-guard-sentinel\necho guard\n' > "$GUARDDIR/claude"; chmod +x "$GUARDDIR/claude"
+DECOYDIR=$(mktemp -d) || exit 1; printf '#!/bin/sh\necho decoy-claude\n' > "$DECOYDIR/claude"; chmod +x "$DECOYDIR/claude"
+mutate '/if \[ "\$NSP_GUARD_STATE" = shadowed \] && \[ "\$STATUS" = ok \]; then/,/^fi$/d' "M5 nsp-guard escalation deleted" || true
+# "$D" first, so the wtft just installed wins over any in /usr/bin or /bin.
+R=$(PATH="$D:$DECOYDIR:$GUARDDIR:$BUNDIR:/usr/bin:/bin" "$REAL" --json --dir "$D" 2>/dev/null)
+M=$(PATH="$D:$DECOYDIR:$GUARDDIR:$BUNDIR:/usr/bin:/bin" "$MUT"  --json --dir "$D" 2>/dev/null)
+report "M5 nsp-guard escalation deleted" nsp-guard-shadowed "$(status_of "$R")" ok "$(status_of "$M")"; rm -rf "$D" "$GUARDDIR" "$DECOYDIR"
 
 exit $(( fails > 0 ))

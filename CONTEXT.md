@@ -332,7 +332,7 @@ _Avoid_: menu
 
 **JSON mode** (#26):
 `--json` — the CLI's machine-readable mode. Writes exactly one JSON object (schema
-`wtft/session@7`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
+`wtft/session@8`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
 Human prose goes to stderr, and every sentence that would otherwise have been on stdout is
 repeated in the object's `notices[]`, where `code` is the contract and `text` is disposable.
 With an interactive terminal it still shows the scoped session picker (#89) whenever the
@@ -411,9 +411,12 @@ _Avoid_: Spawn log, lineage file, parent map, edge database
 **Self / tree** (#116):
 **Self** is a session's own turns — what `total` has always meant and still means. **Tree** is
 self plus every RESOLVED descendant reached through the spawn ledger, so it is a floor whenever
-anything went uncounted — `unattributed` non-empty, `depthCapped` non-zero, `ledgerError` set, or
+anything went uncounted — `unattributed` non-empty, `depthCapped` non-zero, `ledgerError` set,
 `malformedLedgerLines` non-zero (a malformed line was a record, so its edge is lost and the count is
-its only trace). Both are explicit fields under `--json`; the `--tokens` table shows the
+its only trace), or `descendantUntagged` non-empty (a counted descendant's untagged turns, left out
+of its total; `--tokens` counts them, with their summed untagged cost, on one line under SPAWNED.
+That sum can include a `claude -p` child's share that `spawned.total` also counts, when the
+ledger records the child too). Both are explicit fields under `--json`; the `--tokens` table shows the
 split as `TOTAL` / `SPAWNED` / `TREE`, and shows none of the three only when this session recorded
 no edges AND the ledger read cleanly — an unreadable ledger or a skipped line still prints, because
 "no edges" and "could not tell" are different reports. Never write a bare "the session's cost" where the two can differ.
@@ -453,3 +456,13 @@ deliberately not the same report as "this session spawned nothing", which is sil
 reported through neither exit 9 nor `provisional.reason`: those mean "a number in this report
 may still change", a different fact.
 _Avoid_: Empty tree, no descendants, zero (each states the thing we could not determine)
+
+**claude-nsp-guard** (#30):
+princess-pi-tools' `claude` wrapper, deployed as `~/bin/claude` in front of the real CLI. It
+strips `--no-session-persistence` and unsets `CLAUDE_CODE_SKIP_PROMPT_HISTORY`, so a `claude`
+child started through PATH writes a transcript wtft can read; one run by absolute path bypasses
+it. wtft does not ship it; `install-wtft` only reports whether it wins the PATH race for
+`claude` (`nspGuard` in its JSON; exit 5 when a guard is on PATH, another `claude` comes first,
+and nothing worse is wrong). Say "the guard" once it has been named in a passage.
+_Avoid_: nsp guard, PATH shim, claude shim (each hides which wrapper is meant). The status code
+`nsp-guard-shadowed` is a machine string and keeps its spelling.

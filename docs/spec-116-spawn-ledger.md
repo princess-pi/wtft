@@ -204,7 +204,7 @@ already trust.
 
 ```json
 "spawned": {
-  "schema": "wtft/spawn-tree@3",
+  "schema": "wtft/spawn-tree@4",
   "descendants": 3,
   "edges": [{"parent":"…","child":"…","mechanism":"pr-review-lens","ts":"…",
              "label":"correctness","model":"opus","cwd":"/tmp/pr-review-abc","depth":1,
@@ -216,6 +216,7 @@ already trust.
   "maxDepth": 5,
   "malformedLedgerLines": 0,
   "ledgerError": null,
+  "descendantUntagged": [],
   "total": {…},
   "unrecorded": []
 },
@@ -229,13 +230,13 @@ or `tree` —
 `tree` = `total` + `spawned.total`, as a field, so a consumer never has to add two numbers and
 guess whether it double-counted. `label`, `model`, `cwd` and `skip` are present on an edge only
 when they apply; `label`, `ts`, `mechanism`, `child` and `reason` are the shape of a gap. Because
-`spawned.total` covers **resolved** descendants only, `tree` is a **floor** under any of FOUR
+`spawned.total` covers **resolved** descendants only, `tree` is a **floor** under any of FIVE
 conditions, and checking the first alone reads a truncated tree as complete: `unattributed` is
-non-empty, `depthCapped` is non-zero, `ledgerError` is non-null, or `malformedLedgerLines` is
-non-zero. The last two are the traps. A ledger that could not be read sets none of the others, so a
+non-empty, `depthCapped` is non-zero, `ledgerError` is non-null, `malformedLedgerLines` is
+non-zero, or `descendantUntagged` is non-empty (`docs/spec-194-p9-housekeeping.md` § H1). `ledgerError` and `malformedLedgerLines` are the traps. A ledger that could not be read sets none of the others, so a
 consumer checking only those reads a zeroed tree as a complete lineage. And a malformed ledger line
 **was a record**: its edge is lost, it produces no `unattributed` entry, and the count is the only
-trace it leaves — so a tree with `malformedLedgerLines > 0` and none of the other three can still be
+trace it leaves — so a tree with `malformedLedgerLines > 0` and none of the other four can still be
 missing a descendant. Round 5 found this condition missing from all six surfaces that state it.
 
 **`--tokens`** gains a block below TOTAL, rendered when this session has at least one edge, or when the ledger could not be read or had a line skipped (the block then says so instead):
@@ -252,6 +253,7 @@ SPAWNED    3 session(s) priced from 6 recorded edge(s) (#116) —
            1 unattributed — cost unknown, deliberately not estimated
            1 edge(s) past the depth cap of 5, not walked
            1 unusable ledger line(s) skipped
+           1 descendant(s) with untagged turns — $0.00 left out of their edge totals (#180)
 SPAWNED    subtotal                                        $57.03
 TREE       TOTAL + SPAWNED                                 $127.36
 ```
@@ -261,7 +263,7 @@ by construction, and they are deliberately in different units: sessions *priced*
 *recorded*. Every skipped edge adds an edge without adding a session.
 
 A skipped edge prints its **reason** where its cost would be. A dash or a `$0.00` would both read
-as "this child was free", which is the one thing we do not know about it. The last three
+as "this child was free", which is the one thing we do not know about it. The last four
 indented lines appear only when they have something to say. The `SPAWNED subtotal` row exists so
 `TREE` names an addend the block actually prints — the rows above it cannot be summed by eye once
 one of them carries a reason instead of a number.

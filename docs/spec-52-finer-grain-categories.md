@@ -393,10 +393,11 @@ respectively. Steps 1, 2 and 4 above all under-read the shell, in three separate
 > shape rather than a scaled one. The draw was also random per run, so before and after were not
 > the same sessions.
 >
-> **Reproduce it with `research/other-corpus/before-after.ts --before <checkout>`**, which is the
+> **Reproduce it with `bun research/other-corpus/before-after.ts --before <checkout>`**, which is the
 > script these figures come from — a sorted-and-sliced session list rather than a shuffled one,
-> deduplicated, classified by two builds. It exits non-zero on any total that **falls**, and on
-> any **rise** it cannot attribute to a newly-discovered subagent. The two directions are not
+> deduplicated, classified by two builds. It exits non-zero unless the delta is exactly what the
+> newly-discovered subagents cost, within half a cent, and on any subagent only the BEFORE build
+> found (its full exit table is in the script's header, `docs/spec-194-p9-housekeeping.md` § H5). The two directions are not
 > symmetric and the gate does not pretend they are: a reclassification moves money between
 > categories and cannot change the total, while subagent discovery legitimately ADDS cost that
 > was previously invisible. `measure-other.ts` still samples at random, deliberately: it answers
@@ -432,7 +433,7 @@ narrated `cd` is counted as the reply it is.
 The corpus total is unchanged on Pi and rises by $0.42 on Claude Code — and that rise is the
 one kind of change a reclaim is allowed to make: a subagent whose `cd` was not on the command's
 first line was previously invisible, and its cost is now discovered and attributed (#3/#138).
-`before-after.ts` names the recovered session id rather than asserting the totals match, because
+`before-after.ts` names the recovered session id and checks the rise against its cost, rather than asserting the totals match, because
 "reclassification cannot change the total" and "discovery may add to it" are different rules and
 collapsing them hides the second. On the two sessions #10 and #11 were filed against, **58.2% → 6.7%** and **67.2% → 7.2%**.
 

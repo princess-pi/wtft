@@ -21,6 +21,10 @@
 #   3   the build failed
 #   4   in sync, but a config file is still at the old princess-pi-tools path
 #       (status "config-left")
+#   5   in sync, no config file left and wtft not shadowed, but the
+#       claude-nsp-guard shim is SHADOWED: a different claude comes first on
+#       PATH (status "nsp-guard-shadowed"). An ABSENT guard is not a failure.
+#       Every other non-zero code outranks 5.
 #  64   bad usage: unknown argument, --dir without a directory, --dir followed
 #       by a flag or given an empty string, or no --dir on a host with HOME
 #       unset. `--` is NOT an end-of-options marker. NO JSON DOCUMENT is emitted
@@ -28,8 +32,16 @@
 #
 # Human output goes to stdout only when STATUS is ok; every other status goes to
 # stderr. Under --json the document goes to stdout in every case, carrying a
-# configMigration array (from, to, state: "moved"|"left"|"none") alongside the
+# configMigration array (from, to, state: "moved"|"left"|"none") and an nspGuard
+# object (state: "ok"|"shadowed"|"absent", found, guard) alongside the
 # existing artifacts/shadow fields.
+#
+# The claude-nsp-guard shim (princess-pi-tools, deployed as ~/bin/claude) is
+# recognised as an executable regular file carrying this identity line, whole,
+# within its first 160 lines:
+#   # nsp-guard-identity: 9a1c-claude-nsp-guard-sentinel
+# PATH is walked in order, skipping empty entries; a claude run by absolute
+# path bypasses the guard.
 #
 # COPY, NOT SYMLINK — a copy survives the clone moving. The daemon keeps its
 # .mjs extension (callers join "wtft-daemon.mjs") and also lands as `wtft-daemon`.
@@ -202,6 +214,14 @@ if [ -n "$CFG_HOME" ]; then
           cfg_state=left   # --check never mutates
           left_reason="not yet migrated"
         fi
+      elif [ "$old_path" -ef "$new_path" ] && [ ! -L "$old_path" ] \
+           && { [ -L "$new_path" ] || [ "$(resolve "$old_path")" = "$(resolve "$new_path")" ]; }; then
+        # Unlinking the old name would delete the only copy (one directory entry
+        # reached through a linked directory) or leave the new name dangling (it
+        # links to the old file). An old name that is itself a symlink, or a
+        # separate hardlink, is safe to remove and falls through.
+        cfg_state=left
+        left_reason="the new path is the old file under another name (a symlinked file or directory); there is one copy, so remove the link by hand, never the file"
       elif cmp -s "$old_path" "$new_path" 2>/dev/null; then
         # Identical: retry removing the stale duplicate in install mode.
         if [ "$MODE" = install ] && rm -f "$old_path" 2>/dev/null; then
@@ -239,8 +259,9 @@ fi
 # exception: no JSON document.
 finish() {
   if [ "$JSON" = 1 ]; then
-    printf '{"schema":"install-wtft@1","mode":"%s","dir":"%s","status":"%s","onPath":%s,"artifacts":[%s],"shadow":%s,"configMigration":[%s]}\n' \
-      "$MODE" "$(json_str "$DEST_DIR")" "$STATUS" "${ON_PATH:-false}" "${STATE_JSON:-}" "${SHADOW_JSON:-null}" "${CONFIG_JSON:-}"
+    printf '{"schema":"install-wtft@1","mode":"%s","dir":"%s","status":"%s","onPath":%s,"artifacts":[%s],"shadow":%s,"configMigration":[%s],"nspGuard":{"state":"%s","found":%s,"guard":%s}}\n' \
+      "$MODE" "$(json_str "$DEST_DIR")" "$STATUS" "${ON_PATH:-false}" "${STATE_JSON:-}" "${SHADOW_JSON:-null}" "${CONFIG_JSON:-}" \
+      "${NSP_GUARD_STATE:-absent}" "${NSPGUARD_FOUND_JSON:-null}" "${NSPGUARD_GUARD_JSON:-null}"
   else
     case "$STATUS" in
       build-failed) echo "❌ install-wtft: build failed — see the output above" >&2 ;;
@@ -249,7 +270,8 @@ finish() {
                     printf '%s' "${STATE_LINES:-}" >&2
                     echo "   Run: $(self_path)" >&2
                     # Report a coexisting shadow even when drift wins the exit code.
-                    [ "${SHADOW_JSON:-null}" = null ] || printf '   Also: PATH resolves wtft to %s — rm %s\n' "$WINNER" "$(sh_squote "$WINNER")" >&2 ;;
+                    [ "${SHADOW_JSON:-null}" = null ] || printf '   Also: PATH resolves wtft to %s — rm %s\n' "$WINNER" "$(sh_squote "$WINNER")" >&2
+                    [ "${NSP_GUARD_STATE:-absent}" != shadowed ] || printf '   Also: PATH resolves claude to %s before claude-nsp-guard at %s\n' "$NSP_FOUND" "$NSP_GUARD" >&2 ;;
       config-left)  if [ "$MODE" = check ]; then
                       echo "⚠️  install-wtft: $DEST_DIR is in sync, but a config file is still at the old path (#156):" >&2
                     else
@@ -260,17 +282,25 @@ finish() {
                     else echo "   Move it by hand, or delete whichever copy is stale." >&2
                     fi
                     # Report a coexisting shadow even when config-left wins the exit code.
-                    [ "${SHADOW_JSON:-null}" = null ] || printf '   Also: PATH resolves wtft to %s — rm %s\n' "$WINNER" "$(sh_squote "$WINNER")" >&2 ;;
+                    [ "${SHADOW_JSON:-null}" = null ] || printf '   Also: PATH resolves wtft to %s — rm %s\n' "$WINNER" "$(sh_squote "$WINNER")" >&2
+                    [ "${NSP_GUARD_STATE:-absent}" != shadowed ] || printf '   Also: PATH resolves claude to %s before claude-nsp-guard at %s\n' "$NSP_FOUND" "$NSP_GUARD" >&2 ;;
       shadowed)     if [ "$MODE" = check ]; then
                       echo "⚠️  install-wtft: $DEST_DIR is in sync, but PATH resolves wtft to $WINNER" >&2
                     else
                       echo "⚠️  install-wtft: installed into $DEST_DIR, but PATH resolves wtft to $WINNER" >&2
                     fi
-                    printf '   Run: rm %s\n' "$(sh_squote "$WINNER")" >&2 ;;
+                    printf '   Run: rm %s\n' "$(sh_squote "$WINNER")" >&2
+                    [ "${NSP_GUARD_STATE:-absent}" != shadowed ] || printf '   Also: PATH resolves claude to %s before claude-nsp-guard at %s\n' "$NSP_FOUND" "$NSP_GUARD" >&2 ;;
+      nsp-guard-shadowed)
+                    echo "⚠️  install-wtft: PATH resolves claude to $NSP_FOUND before claude-nsp-guard at $NSP_GUARD" >&2
+                    echo "   Put $(dirname "$NSP_GUARD")'s PATH entry before $(dirname "$NSP_FOUND")'s. Nothing is deleted." >&2
+                    [ "${ON_PATH:-false}" = true ] || echo "   Also: no wtft on PATH resolves to $DEST_DIR/wtft — add $DEST_DIR to PATH." >&2 ;;
       ok)           if [ "$MODE" = check ]; then echo "✅ install-wtft: $DEST_DIR is in sync with $SRC_DIR"
                     else echo "✅ install-wtft: installed into $DEST_DIR"; fi
                     # Not an error, but say so — a green run must not hide an unusable PATH.
-                    [ "${ON_PATH:-false}" = true ] || echo "   Note: no wtft on PATH resolves to $DEST_DIR/wtft — add $DEST_DIR to PATH." ;;
+                    [ "${ON_PATH:-false}" = true ] || echo "   Note: no wtft on PATH resolves to $DEST_DIR/wtft — add $DEST_DIR to PATH."
+                    # The guard ships from a private repo — absence is a normal host, not drift.
+                    [ "${NSP_GUARD_STATE:-absent}" != absent ] || echo "   Note: no claude-nsp-guard on PATH (ships from princess-pi-tools; absent is not a failure)." ;;
     esac
   fi
   exit "$EXIT"
@@ -363,5 +393,52 @@ if [ -n "$WINNER" ]; then
     if [ "$STATUS" = ok ]; then STATUS=shadowed; EXIT=2; fi
   fi
 fi
+
+# ---
+# NSP GUARD: does `claude` on PATH resolve to princess-pi-tools'
+# claude-nsp-guard? Never fatal on its own — absent is a normal host, not
+# drift — but a guard that loses the PATH race guards nothing. Outranked by
+# every other status, so it is scanned last and only escalates an "ok".
+# ---
+
+# princess-pi-tools' bin/install-workflow-tools matches this exact line before
+# it overwrites ~/bin/claude with the guard.
+NSP_GUARD_SENTINEL='# nsp-guard-identity: 9a1c-claude-nsp-guard-sentinel'
+
+# The sentinel must be a whole line, not a substring — a script that merely
+# echoes it is not the guard. A real `claude` can be a large binary, so read
+# only the first 160 lines rather than slurping the whole file.
+is_nsp_guard() {
+  [ -f "$1" ] && [ -x "$1" ] || return 1
+  # No -q: an early grep exit would SIGPIPE head, and pipefail reads that as no match.
+  head -n 160 "$1" 2>/dev/null | grep -axF -- "$NSP_GUARD_SENTINEL" >/dev/null
+}
+
+NSP_FOUND=""
+NSP_GUARD=""
+NSP_PATH_DIRS=()
+[ -z "${PATH:-}" ] || IFS=: read -r -a NSP_PATH_DIRS <<< "$PATH"
+for d in ${NSP_PATH_DIRS[@]+"${NSP_PATH_DIRS[@]}"}; do
+  [ -n "$d" ] || continue
+  f="$d/claude"
+  [ -f "$f" ] && [ -x "$f" ] || continue
+  [ -n "$NSP_FOUND" ] || NSP_FOUND="$f"
+  [ -n "$NSP_GUARD" ] || { is_nsp_guard "$f" && NSP_GUARD="$f"; }
+done
+
+if [ -z "$NSP_GUARD" ]; then NSP_GUARD_STATE=absent
+elif [ "$NSP_FOUND" = "$NSP_GUARD" ]; then NSP_GUARD_STATE=ok
+else NSP_GUARD_STATE=shadowed
+fi
+
+if [ "$NSP_GUARD_STATE" = shadowed ] && [ "$STATUS" = ok ]; then
+  STATUS=nsp-guard-shadowed
+  EXIT=5
+fi
+
+NSPGUARD_FOUND_JSON=null
+[ -z "$NSP_FOUND" ] || NSPGUARD_FOUND_JSON="\"$(json_str "$NSP_FOUND")\""
+NSPGUARD_GUARD_JSON=null
+[ -z "$NSP_GUARD" ] || NSPGUARD_GUARD_JSON="\"$(json_str "$NSP_GUARD")\""
 
 finish

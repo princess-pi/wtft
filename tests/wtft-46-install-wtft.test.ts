@@ -458,8 +458,8 @@ console.log("\n7. The mutation probe runs, and can fail");
 	catch (e: any) { out = `${e.stdout ?? ""}${e.stderr ?? ""}`; code = e.status ?? 1; }
 	check(code === 0, "V7a: run-mutants.sh exits 0 — every mutant reported ok where the real script reported a fault",
 		`exit ${code}: ${out.trim().slice(0, 400)}`);
-	check(/M1 .*OK/.test(out) && /M2 .*OK/.test(out) && /M3 .*OK/.test(out) && /M4 .*OK/.test(out),
-		"V7b: all four mutations applied and were caught", out.trim().slice(0, 300));
+	check(/M1 .*OK/.test(out) && /M2 .*OK/.test(out) && /M3 .*OK/.test(out) && /M4 .*OK/.test(out) && /M5 .*OK/.test(out),
+		"V7b: all five mutations applied and were caught", out.trim().slice(0, 300));
 }
 
 // ---
@@ -815,6 +815,212 @@ console.log("\n9. Config migration off princess-pi-tools and onto wtft (#156)");
 		const entry = (doc?.configMigration ?? []).find((c: any) => c.to === newPath);
 		check(code === 4 && entry?.state === "left",
 			"V9i: the collision reports config-left, exit 4", `exit ${code}, ${JSON.stringify(entry)}`);
+	}
+
+	// V9j — one file under two names is never unlinked. (a) the new path is a
+	// symlink to the old file; (b) the old directory is a symlink to the new one.
+	{
+		const homeA = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-linkfile-"));
+		const legacyA = path.join(homeA, ".config", "princess-pi-tools");
+		fs.mkdirSync(legacyA, { recursive: true });
+		fs.writeFileSync(path.join(legacyA, "wtft.json"), JSON.stringify({ interval: "1h" }));
+		const newA = path.join(homeA, ".config", "wtft");
+		fs.mkdirSync(newA, { recursive: true });
+		fs.symlinkSync(path.join("..", "princess-pi-tools", "wtft.json"), path.join(newA, "config.json"));
+		const a = run(["--json", "--dir", mkSandbox(path.join(os.tmpdir(), "46-cfgmig-linkfile-dir-"))], [],
+			{ HOME: homeA, XDG_CONFIG_HOME: path.join(homeA, ".config") });
+		check(fs.existsSync(path.join(legacyA, "wtft.json")) && fs.existsSync(path.join(newA, "config.json")),
+			"V9j(a): a new path that links to the old file keeps both names, and the link does not dangle");
+		check(a.code === 4, `V9j(a): reported as config-left, exit 4 (got ${a.code})`);
+
+		const homeB = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-linkdir-"));
+		const newB = path.join(homeB, ".config", "wtft");
+		fs.mkdirSync(newB, { recursive: true });
+		fs.writeFileSync(path.join(newB, "token-budget.json"), JSON.stringify({ budget: 1 }));
+		fs.symlinkSync("wtft", path.join(homeB, ".config", "princess-pi-tools"));
+		const b = run(["--json", "--dir", mkSandbox(path.join(os.tmpdir(), "46-cfgmig-linkdir-dir-"))], [],
+			{ HOME: homeB, XDG_CONFIG_HOME: path.join(homeB, ".config") });
+		check(fs.existsSync(path.join(newB, "token-budget.json")),
+			"V9j(b): an old directory that links to the new one does not lose token-budget.json");
+		check(b.code === 4, `V9j(b): reported as config-left, exit 4 (got ${b.code})`);
+	}
+
+	// V9k — the safe same-file shapes still migrate: an old name that is a
+	// symlink to the new file, and a separate hardlink. Removing either name
+	// leaves the new file whole.
+	for (const shape of ["old-symlink", "hardlink"] as const) {
+		const home = mkSandbox(path.join(os.tmpdir(), `46-cfgmig-${shape}-`));
+		const legacy = path.join(home, ".config", "princess-pi-tools");
+		const neu = path.join(home, ".config", "wtft");
+		fs.mkdirSync(legacy, { recursive: true });
+		fs.mkdirSync(neu, { recursive: true });
+		fs.writeFileSync(path.join(neu, "config.json"), JSON.stringify({ interval: "1h" }));
+		if (shape === "old-symlink") fs.symlinkSync(path.join("..", "wtft", "config.json"), path.join(legacy, "wtft.json"));
+		else fs.linkSync(path.join(neu, "config.json"), path.join(legacy, "wtft.json"));
+		const r = run(["--json", "--dir", mkSandbox(path.join(os.tmpdir(), `46-cfgmig-${shape}-dir-`))], [],
+			{ HOME: home, XDG_CONFIG_HOME: path.join(home, ".config") });
+		let doc: any = null;
+		try { doc = JSON.parse(r.out); } catch { /* left null */ }
+		const entry = (doc?.configMigration ?? []).find((c: any) => c.to === path.join(neu, "config.json"));
+		check(entry?.state === "moved" && !fs.existsSync(path.join(legacy, "wtft.json"))
+			&& fs.readFileSync(path.join(neu, "config.json"), "utf8").includes("1h"),
+			`V9k(${shape}): the old name is removed, the new file is intact, state moved`, JSON.stringify(entry));
+	}
+}
+
+// ---
+// 10. The `claude` PATH guard (#30, spec-194-p9-housekeeping.md § H3). A fake
+//    `claude` is never executed by install-wtft — only read (head + grep) —
+//    so its body need not be valid shell past the shebang line.
+// ---
+console.log("\n10. The claude-nsp-guard shim: ok, shadowed (exit 5), absent, mid-line non-match, precedence");
+{
+	const SENTINEL = "# nsp-guard-identity: 9a1c-claude-nsp-guard-sentinel";
+
+	function writeGuard(dir: string): string {
+		const p = path.join(dir, "claude");
+		fs.writeFileSync(p, `#!/bin/sh\n# not the sentinel\n${SENTINEL}\necho guard\n`);
+		fs.chmodSync(p, 0o755);
+		return p;
+	}
+	function writeDecoyClaude(dir: string): string {
+		const p = path.join(dir, "claude");
+		fs.writeFileSync(p, "#!/bin/sh\necho decoy-claude\n");
+		fs.chmodSync(p, 0o755);
+		return p;
+	}
+
+	// V10a — the guard first on PATH: ok, found === guard.
+	{
+		const guardDir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-ok-"));
+		const guard = writeGuard(guardDir);
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-ok-dir-"));
+		const { code, out } = run(["--json", "--dir", dir], [guardDir]);
+		let doc: any = null;
+		try { doc = JSON.parse(out); } catch { /* left null */ }
+		check(code === 0, "V10a: guard first on PATH exits 0", `got ${code}`);
+		check(doc?.nspGuard?.state === "ok", "V10a: nspGuard.state is ok", JSON.stringify(doc?.nspGuard));
+		check(doc?.nspGuard?.found === guard && doc?.nspGuard?.guard === guard,
+			"V10a: found and guard both name the guard", JSON.stringify(doc?.nspGuard));
+	}
+
+	// V10b — a decoy claude earlier than the guard: exit 5, both paths named,
+	// neither file touched.
+	{
+		const decoyDir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-shadow-decoy-"));
+		const guardDir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-shadow-guard-"));
+		const decoy = writeDecoyClaude(decoyDir);
+		const guard = writeGuard(guardDir);
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-shadow-dir-"));
+		const { code, out } = run(["--json", "--dir", dir], [decoyDir, guardDir]);
+		let doc: any = null;
+		try { doc = JSON.parse(out); } catch { /* left null */ }
+		check(code === 5, "V10b: a shadowed guard exits 5", `got ${code}`);
+		check(doc?.status === "nsp-guard-shadowed", "V10b: status is nsp-guard-shadowed", JSON.stringify(doc?.status));
+		check(doc?.nspGuard?.state === "shadowed", "V10b: nspGuard.state is shadowed", JSON.stringify(doc?.nspGuard));
+		check(doc?.nspGuard?.found === decoy, "V10b: found names the decoy", JSON.stringify(doc?.nspGuard));
+		check(doc?.nspGuard?.guard === guard, "V10b: guard names the guard", JSON.stringify(doc?.nspGuard));
+		check(fs.existsSync(decoy) && fs.existsSync(guard), "V10b: both files still exist — reported, never deleted");
+	}
+
+	// V10c — no claude anywhere on PATH. run() always appends /usr/bin and
+	// /bin, so the precondition (neither holds a claude) must be asserted
+	// first, not assumed.
+	{
+		if (fs.existsSync("/usr/bin/claude") || fs.existsSync("/bin/claude")) {
+			skip("V10c: skipped — /usr/bin or /bin has a claude on this host, so 'no claude anywhere' cannot be reproduced");
+		} else {
+			const dir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-absent-dir-"));
+			const { code, out } = run(["--json", "--dir", dir], []);
+			let doc: any = null;
+			try { doc = JSON.parse(out); } catch { /* left null */ }
+			check(code === 0, "V10c: no claude anywhere exits 0", `got ${code}`);
+			check(doc?.nspGuard?.state === "absent", "V10c: nspGuard.state is absent", JSON.stringify(doc?.nspGuard));
+			check(doc?.nspGuard?.found === null, "V10c: found is null", JSON.stringify(doc?.nspGuard));
+			check(doc?.nspGuard?.guard === null, "V10c: guard is null", JSON.stringify(doc?.nspGuard));
+		}
+	}
+
+	// V10d — the sentinel text appearing mid-line (inside an echo) is not a
+	// whole-line match, so this file is not the guard.
+	{
+		const fakeDir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-midline-"));
+		const fake = path.join(fakeDir, "claude");
+		fs.writeFileSync(fake, `#!/bin/sh\necho "${SENTINEL}"\n`);
+		fs.chmodSync(fake, 0o755);
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-midline-dir-"));
+		const { code, out } = run(["--json", "--dir", dir], [fakeDir]);
+		let doc: any = null;
+		try { doc = JSON.parse(out); } catch { /* left null */ }
+		check(code === 0, "V10d: a mid-line mention alone exits 0", `got ${code}`);
+		check(doc?.nspGuard?.state === "absent", "V10d: a mid-line mention is not a guard — state is absent",
+			JSON.stringify(doc?.nspGuard));
+		check(doc?.nspGuard?.found === fake, "V10d: found still names the file (it IS a claude, just not the guard)",
+			JSON.stringify(doc?.nspGuard));
+		check(doc?.nspGuard?.guard === null, "V10d: guard is null", JSON.stringify(doc?.nspGuard));
+	}
+
+	// V10e — precedence: a wtft PATH shadow (exit 2) outranks a shadowed nsp
+	// guard. The exit code stays 2, but nspGuard still reports its own state
+	// in the document — the escalation is suppressed, not the measurement.
+	{
+		const wtftDecoyDir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-prec-wtftdecoy-"));
+		fs.writeFileSync(path.join(wtftDecoyDir, "wtft"), "#!/bin/sh\necho decoy\n");
+		fs.chmodSync(path.join(wtftDecoyDir, "wtft"), 0o755);
+		const claudeDecoyDir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-prec-claudedecoy-"));
+		const guardDir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-prec-guard-"));
+		const claudeDecoy = writeDecoyClaude(claudeDecoyDir);
+		const guard = writeGuard(guardDir);
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-prec-dir-"));
+		const { code, out } = run(["--json", "--dir", dir], [wtftDecoyDir, claudeDecoyDir, guardDir]);
+		let doc: any = null;
+		try { doc = JSON.parse(out); } catch { /* left null */ }
+		check(code === 2, "V10e: the wtft PATH shadow wins the exit code, not the guard", `got ${code}`);
+		check(doc?.status === "shadowed", "V10e: status is the wtft shadow, not nsp-guard-shadowed",
+			JSON.stringify(doc?.status));
+		check(doc?.nspGuard?.state === "shadowed", "V10e: nspGuard.state is STILL shadowed in the document",
+			JSON.stringify(doc?.nspGuard));
+		check(doc?.nspGuard?.found === claudeDecoy && doc?.nspGuard?.guard === guard,
+			"V10e: nspGuard still names both paths", JSON.stringify(doc?.nspGuard));
+
+		// Outranked is not silent: human mode adds an "Also:" line naming both.
+		const human = run(["--dir", dir], [wtftDecoyDir, claudeDecoyDir, guardDir]);
+		check(human.code === 2 && /Also: PATH resolves claude to /.test(human.err)
+			&& human.err.includes(claudeDecoy) && human.err.includes(guard),
+			"V10e: an outranked shadowed guard still gets an Also: line naming both paths",
+			`exit ${human.code}: ${human.err.slice(0, 400)}`);
+	}
+
+	// V10f — human mode names both paths on stderr, with no --json.
+	{
+		const decoyDir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-human-decoy-"));
+		const guardDir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-human-guard-"));
+		const decoy = writeDecoyClaude(decoyDir);
+		const guard = writeGuard(guardDir);
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-human-dir-"));
+		const { code, err } = run(["--dir", dir], [decoyDir, guardDir]);
+		check(code === 5, "V10f: human mode also exits 5", `got ${code}`);
+		check(err.includes(decoy) && err.includes(guard),
+			"V10f: the remedy on stderr names both the winner and the guard",
+			err.slice(0, 400));
+	}
+
+	// V10g — the sentinel early in a guard whose first 160 lines are bigger
+	// than a pipe buffer is still found: an early grep exit must not read as
+	// no match.
+	{
+		const guardDir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-big-"));
+		const guard = path.join(guardDir, "claude");
+		const filler = Array.from({ length: 158 }, (_, n) => `# ${String(n).padEnd(2000, "x")}`).join("\n");
+		fs.writeFileSync(guard, `#!/bin/sh\n${SENTINEL}\n${filler}\necho guard\n`);
+		fs.chmodSync(guard, 0o755);
+		check(fs.statSync(guard).size > 256 * 1024, "V10g: fixture precondition: the file is past a pipe buffer");
+		const dir = mkSandbox(path.join(os.tmpdir(), "46-nspguard-big-dir-"));
+		const { out } = run(["--check", "--json", "--dir", dir], [guardDir]);
+		let doc: any = null;
+		try { doc = JSON.parse(out); } catch { /* left null */ }
+		check(doc?.nspGuard?.state === "ok" && doc?.nspGuard?.guard === guard,
+			"V10g: a large guard with an early sentinel is still recognised", JSON.stringify(doc?.nspGuard));
 	}
 }
 

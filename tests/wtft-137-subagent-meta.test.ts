@@ -201,6 +201,13 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 	assert("M6 a bare `null` document is declined", readSubagentMeta(tNull) === null);
 }
 
+const CORPUS_DIR = path.join(import.meta.dirname, "fixtures", "meta-corpus");
+function corpusFiles(): string[] {
+	try {
+		return fs.readdirSync(CORPUS_DIR).filter(f => f.endsWith(".meta.json")).sort().map(f => path.join(CORPUS_DIR, f));
+	} catch { return []; }
+}
+
 // M7 — THE FIELD-NAME PIN, in two halves that catch two different drifts.
 //
 // `.meta.json` is UNDOCUMENTED harness output. If a release renames
@@ -312,6 +319,57 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 			assert("M7b and the reader accepts the harness's own file, types and all",
 				realMeta !== null,
 				`readSubagentMeta declined ${realFile} although every required name is present — a value's TYPE changed`);
+			// The corpus M7c reads everywhere is a snapshot; this is what says it aged.
+			const corpusKeys = new Set(corpusFiles().flatMap(f => {
+				try { return Object.keys(JSON.parse(fs.readFileSync(f, "utf8"))); } catch { return []; }
+			}));
+			const uncovered = Object.keys(obj).filter(k => !corpusKeys.has(k));
+			assert(`M7b the committed corpus carries every key the newest real file does (${JSON.stringify(Object.keys(obj))})`,
+				uncovered.length === 0,
+				`${realFile} carries ${JSON.stringify(uncovered)}, which no file in tests/fixtures/meta-corpus/ has — refresh the corpus: tests/fixtures/meta-corpus/README.md`);
+		}
+	}
+
+	// M7c — THE HARNESS's names, against the committed corpus of real files.
+	// Runs on every host, CI included, which M7b cannot.
+	const corpus = corpusFiles();
+	const OPTIONAL_CARRIED = ["description", "toolUseId", "model", "parentAgentId", "isFork"];
+	const CORPUS = ["agent-a12b520b52dfc5d2a", "agent-a170388e12a7fa3bc", "agent-a20ea0d14166e9999", "agent-a9b6ca6692517846a",
+		"agent-ab7a653fd7de39292", "agent-ace7ef5933e128a87", "agent-aed7cbd64d6f241d1"].map(b => `${b}.meta.json`);
+	assert(`M7c the committed corpus is the seven files CORPUS lists`,
+		JSON.stringify(corpus.map(f => path.basename(f))) === JSON.stringify(CORPUS),
+		JSON.stringify(corpus.map(f => path.basename(f))));
+	// Every key in the corpus is one the reader carries or one it knowingly
+	// ignores, so a rename brought in by a refresh fails here rather than
+	// leaving a field silently unread.
+	const CARRIED = [...REQUIRED, ...OPTIONAL_CARRIED];
+	const IGNORED = ["requestShape", "requestNonInteractive", "name", "cwd"];
+	for (const file of corpus) {
+		let keys: string[] = [];
+		try { keys = Object.keys(JSON.parse(fs.readFileSync(file, "utf8"))); } catch { /* M7c parse check owns it */ }
+		const unknown = keys.filter(k => !CARRIED.includes(k) && !IGNORED.includes(k));
+		assert(`M7c ${path.basename(file)} has no key the reader neither carries nor knowingly ignores`,
+			unknown.length === 0, `unknown ${JSON.stringify(unknown)} — carry it in parseSubagentMeta or add it to IGNORED`);
+	}
+	for (const file of corpus) {
+		const name = path.basename(file);
+		let obj: Record<string, unknown> | null = null;
+		try { obj = JSON.parse(fs.readFileSync(file, "utf8")); } catch { /* assertion below owns it */ }
+		assert(`M7c ${name} parses as JSON`, obj !== null, file);
+		if (!obj) continue;
+		for (const k of REQUIRED) {
+			assert(`M7c ${name} carries \`${k}\``, k in obj, `keys ${JSON.stringify(Object.keys(obj))}`);
+		}
+		if (obj.agentType !== "workflow-subagent") {
+			const missing = NEAR_UNIVERSAL.filter(k => !(k in (obj as Record<string, unknown>)));
+			assert(`M7c ${name} carries the near-universal pair`, missing.length === 0, `missing ${JSON.stringify(missing)}`);
+		}
+		const meta = readSubagentMeta(file.replace(/\.meta\.json$/, ".jsonl")) as Record<string, unknown> | null;
+		assert(`M7c ${name} is accepted by the reader, types and all`, meta !== null, file);
+		for (const k of OPTIONAL_CARRIED) {
+			if (!(k in obj)) continue;
+			assert(`M7c ${name} \`${k}\` survives the reader`, meta?.[k] === obj[k],
+				`corpus ${JSON.stringify(obj[k])}, reader ${JSON.stringify(meta?.[k])}`);
 		}
 	}
 }

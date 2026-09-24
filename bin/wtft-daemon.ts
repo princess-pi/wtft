@@ -123,9 +123,11 @@ interface SubagentFileState {
 	/** Until then a spawning turn can still gain a `claude -p` child. */
 	spawnWindowClosesAt: number;
 	owners: FoldOwner[];
-	stampInterrupt: boolean;
-	/** Last turn not yet written, so a following interrupt can still mark it. */
+	/** Last ordinary turn not yet written, so a following interrupt can still mark it. */
 	pendingTurn: NonNullable<ReturnType<typeof parseEntryToInteraction>> | null;
+	/** The last turn read, of any kind, and whether a Claude command made it an
+	 *  owner: the turn an interrupt at the head of the next read follows. */
+	lastTurn: { turn: NonNullable<ReturnType<typeof parseEntryToInteraction>>; owner: boolean } | null;
 	/** Cost already tagged for an ordinary id. A lower correction opens a new generation. */
 	plainCost: Map<string, number>;
 	/** Which children another holder owned at the last parse — when that set
@@ -304,8 +306,8 @@ function freshSubagentState(): SubagentFileState {
     foldStamps: new Map<string, string>(),
     spawnWindowClosesAt: 0,
     owners: [],
-    stampInterrupt: false,
     pendingTurn: null,
+    lastTurn: null,
     plainCost: new Map(),
     foldedByAnother: "",
   };
@@ -365,13 +367,13 @@ function parseAppendedBytes(
     try { JSON.parse(tail.toString("utf8")); settledFragment = true; } catch { /* still mid-record */ }
   }
   if (lastNl === -1 && !settledFragment) {
-    return { interactions: [], fragment: Buffer.from(buf), stream, stampInterrupt: state.stampInterrupt };
+    return { interactions: [], fragment: Buffer.from(buf), stream, stampInterrupt: false };
   }
   const consumeTo = settledFragment ? buf.length : lastNl + 1;
   const fragment = consumeTo >= buf.length ? Buffer.alloc(0) : Buffer.from(buf.subarray(consumeTo));
   const newContent = buf.subarray(0, consumeTo).toString("utf8");
   const interactions: NonNullable<ReturnType<typeof parseEntryToInteraction>>[] = [];
-  let stampInterrupt = state.stampInterrupt;
+  let stampInterrupt = false;
   for (const line of newContent.split("\n")) {
     if (!line.trim()) continue;
     try {
@@ -477,6 +479,12 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
         if (hashFilePrefix(file, fileState.lastSize) !== fileState.contentHash.copy().digest("hex")) rotate = true;
       } catch (err) {
         pollHadFailure = true;
+        if (!warnedSubagentParseFailure.has(stateKey)) {
+          warnedSubagentParseFailure.add(stateKey);
+          process.stderr.write(
+            `[wtft-log-parser] WARNING: a subagent transcript could not be read or parsed, so its cost may be missing from this session's total until it succeeds (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+        }
         return wroteAny;
       }
     }
@@ -528,6 +536,11 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
       if (!interaction.messageId) return false;
       const prior = state.owners.find(owner => owner.base.messageId === interaction.messageId);
       if (!prior) return false;
+      // A full parse ORs `interrupted` across the copies of one id.
+      if (interaction.interrupted && !prior.base.interrupted) {
+        prior.base.interrupted = true;
+        prior.lastLine = "";
+      }
       if (interaction.cost + 1e-9 >= prior.base.cost) {
         prior.base.timestamp = interaction.timestamp;
         prior.base.cost = interaction.cost;
@@ -543,14 +556,32 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
       }
       return true;
     };
-    if (parsed?.stampInterrupt && fileState.pendingTurn) {
-      fileState.pendingTurn.interrupted = true;
+    // An interrupt marks the turn it follows and never a later one. A turn
+    // already in the tag gets a second copy with the mark, which a reader ORs
+    // across copies of one id; one with no id cannot be matched, so the
+    // transcript is written again as a new generation.
+    const reinterrupted: typeof deduped = [];
+    if (parsed?.stampInterrupt) {
+      const last = fileState.lastTurn;
+      const ownerOfLast = last?.owner && last.turn.messageId
+        ? fileState.owners.find(o => o.base.messageId === last.turn.messageId)
+        : undefined;
+      if (last && !last.owner && fileState.pendingTurn
+        && (!last.turn.messageId || fileState.pendingTurn.messageId === last.turn.messageId)) {
+        fileState.pendingTurn.interrupted = true;
+      } else if (ownerOfLast) {
+        ownerOfLast.base.interrupted = true;
+        ownerOfLast.lastLine = "";
+      } else if (last && !last.owner && last.turn.messageId) {
+        reinterrupted.push(...clearSubagentCacheMiss([{ ...last.turn, interrupted: true }]));
+      } else if (last && attempt === 0) {
+        fileState = freshSubagentState();
+        discoveredSubagentFiles.set(stateKey, fileState);
+        continue;
+      }
       parsed = { ...parsed, stampInterrupt: false };
     }
-    if (fileState.pendingTurn) {
-      if (!absorbIntoOwner(fileState.pendingTurn)) plain.push(fileState.pendingTurn);
-      fileState.pendingTurn = null;
-    }
+    if (fileState.pendingTurn && !absorbIntoOwner(fileState.pendingTurn)) plain.push(fileState.pendingTurn);
     const newOwners: FoldOwner[] = [];
     for (const interaction of deduped) {
       if (hasClaudeCommand(interaction)) {
@@ -558,7 +589,9 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
           ? fileState.owners.find(owner => owner.base.messageId === interaction.messageId)
           : undefined;
         if (prior) {
+          const interrupted = prior.base.interrupted || interaction.interrupted;
           prior.base = structuredClone(interaction);
+          if (interrupted) prior.base.interrupted = true;
           prior.lastLine = "";
         } else {
           newOwners.push({ base: structuredClone(interaction), lastLine: "", lastCost: 0 });
@@ -581,8 +614,18 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
       }
     }
     const holdBack = size > fileState.lastSize && plain.length > 0;
-    if (holdBack) fileState.pendingTurn = plain.pop() ?? null;
+    // Which turns are held and last is committed with the offset below. A mark
+    // set on them before a failure is set again, identically, by the re-read.
+    const nextPending = holdBack ? plain.pop() ?? null : null;
     const owners = [...fileState.owners, ...newOwners];
+    const lastRead = parsed?.interactions[parsed.interactions.length - 1];
+    const nextLastTurn = lastRead
+      ? {
+        turn: lastRead,
+        owner: hasClaudeCommand(lastRead)
+          || (!!lastRead.messageId && owners.some(o => o.base.messageId === lastRead.messageId)),
+      }
+      : fileState.lastTurn;
     const windowOpen = Date.now() <= fileState.spawnWindowClosesAt + MTIME_SETTLE_MS;
     const foldSig = foldSetSignature(foldedByAnother);
     const needAttr = owners.length > 0 && (
@@ -627,7 +670,7 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
     const consumedQuiet = parsed !== null
       && parsed.fragment.length === 0
       && size > 0
-      && fileState.pendingTurn === null;
+      && nextPending === null;
     const emitGeneration = fileState.newGeneration && (
       plain.length > 0 || clones.length > 0 || rotate || consumedQuiet
     );
@@ -639,6 +682,7 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
         batch += serializeClassified(interaction, source);
         if (interaction.messageId) fileState.plainCost.set(interaction.messageId, interaction.cost);
       }
+      for (const interaction of reinterrupted) batch += serializeClassified(interaction, source);
       clones.forEach((interaction, i) => {
         const line = serializeClassified(interaction, source);
         if (line === nextOwners[i].lastLine) return;
@@ -677,7 +721,6 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
     if (parsed) {
       fileState.fragment = parsed.fragment;
       fileState.stream = parsed.stream;
-      fileState.stampInterrupt = parsed.stampInterrupt;
       if (fresh.length > 0) fileState.contentHash.update(fresh);
       fileState.lastSize = size;
       fileState.readAtMs = Date.now();
@@ -685,6 +728,8 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
     fileState.mtimeMs = mtimeMs;
     fileState.ino = ino;
     fileState.owners = nextOwners;
+    fileState.pendingTurn = nextPending;
+    fileState.lastTurn = nextLastTurn;
     for (const id of freshFolds) fileState.recordedFolds.add(id);
     if (emitGeneration) fileState.newGeneration = false;
     if (clones.length > 0) {

@@ -40,7 +40,7 @@ descendant or under its own edge, whichever prices it first. An own edge that co
 (unresolved, or depth-capped) leaves it to the descendant.
 
 **Whole or null.** If that discovery reports a file it could not read or throws, or any listed
-transcript cannot be read, has non-blank lines and not one that parses (§3), or cannot be
+transcript cannot be read, has complete non-blank lines and not one that parses (§3), or cannot be
 stat-ed, or a `claude -p` transcript one of those parses folds cannot be read or stat-ed, or its
 discovery fails, the edge is
 `skip: "unreadable"`, `total: null`, with an `unattributed` entry, the same as a child transcript

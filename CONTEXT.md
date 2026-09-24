@@ -431,7 +431,7 @@ _Avoid_: Rollup, grand total, inclusive cost (each hides which of the two is mea
 **Unattributed** (#116):
 A recorded spawn edge whose child's cost could not be read: `not-found` (the lookup came back
 empty — absent, or somewhere this process cannot read, and the walk cannot tell those apart) or
-`unreadable` (a file found that could not be read, has lines and not one that parses as JSON, or
+`unreadable` (a file found that could not be read, has complete (newline-ended) non-blank lines and not one that parses as JSON, or
 could not be stat-ed — the child's transcript, a subagent transcript of it, or that discovery; or
 a `claude -p` transcript their parses fold could not be read or stat-ed, or its discovery failed; a file with only some bad lines is priced from the good
 ones, and a blank-only file is an empty session). Reported with its reason and a `null` cost,

@@ -174,7 +174,7 @@ descendant folds on a model-tagged turn or prices as a subagent
   *gap*, and a zero would launder it into a fact. Two reasons, kept apart: `not-found` (the lookup
   came back empty — the file is absent, or somewhere this process cannot read, and the walk cannot
   tell those apart, which is why the name does not claim absence) and `unreadable` (a file that
-  cannot be read, has non-blank lines and not one that parses, or cannot be stat-ed — the child's
+  cannot be read, has complete (newline-ended) non-blank lines and not one that parses, or cannot be stat-ed — the child's
   own transcript, any subagent transcript discovery lists for it, or that discovery itself; or a
   `claude -p` transcript one of those parses folds could not be read or stat-ed, or its discovery
   failed; the only

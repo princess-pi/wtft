@@ -54,11 +54,13 @@
  * satisfy it (write files over 40 KB with a fresh mtime) rather than the
  * script relaxing it for tests.
  *
- * Exit codes: 0 the totals agree, or a rise is covered by newly found
- * subagents; 1 they disagree; 2 bad usage, or a --before build that ignores
- * the projects-root variable; 3 could not compare — nothing was selected, a
- * transcript could not be read or copied, a child could not be frozen, or a
- * total is not a finite number.
+ * Exit codes: 0 the totals agree, or differ by exactly what newly found
+ * subagents cost; 1 they disagree; 2 bad usage (including a --before that is
+ * empty or cannot be loaded), or a --before build that ignores the
+ * projects-root variable; 3 could not compare — nothing was selected, a
+ * harness's selection parsed to no interactions, a transcript could not be
+ * read or copied, a child could not be frozen, or a total is not a finite
+ * number.
  */
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
@@ -156,6 +158,9 @@ export function subagentIdsOf(interactions: readonly SubAgentBearing[]): string[
 export function snapshotCorpus(opts: {
 	snapDir: string;
 	ccRoot: string;
+	/** Other spellings of `ccRoot` (the path as given, before `realpath`), so a
+	 *  file under a symlinked root or a symlinked project folder is inside it. */
+	ccRootAliases?: readonly string[];
 	piRoot: string;
 	ccFiles: readonly string[];
 	piFiles: readonly string[];
@@ -166,11 +171,12 @@ export function snapshotCorpus(opts: {
 	fs.mkdirSync(projectsOut, { recursive: true });
 	fs.mkdirSync(piOut, { recursive: true });
 
-	const copyUnder = (file: string, root: string, outRoot: string): void => {
-		const rel = path.relative(root, file);
-		if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
+	const inside = (rel: string) => !(rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel));
+	const copyUnder = (file: string, roots: readonly string[], outRoot: string): void => {
+		const rel = roots.map(r => path.relative(r, file)).find(inside);
+		if (rel === undefined) {
 			// Fatal for the same reason as a failed copy: the snapshot would lack it.
-			throw new Error(`before-after: ${file} is outside ${root}, so it cannot be frozen`);
+			throw new Error(`before-after: ${file} is outside ${roots.join(" and ")}, so it cannot be frozen`);
 		}
 		const dest = path.join(outRoot, rel);
 		try {
@@ -183,9 +189,10 @@ export function snapshotCorpus(opts: {
 		}
 	};
 
-	for (const f of opts.foldFiles) copyUnder(f, opts.ccRoot, projectsOut);
-	for (const f of opts.ccFiles) copyUnder(f, opts.ccRoot, projectsOut);
-	for (const f of opts.piFiles) copyUnder(f, opts.piRoot, piOut);
+	const ccRoots = [opts.ccRoot, ...(opts.ccRootAliases ?? [])];
+	for (const f of opts.foldFiles) copyUnder(f, ccRoots, projectsOut);
+	for (const f of opts.ccFiles) copyUnder(f, ccRoots, projectsOut);
+	for (const f of opts.piFiles) copyUnder(f, [opts.piRoot], piOut);
 
 	return { projects: projectsOut, pi: piOut };
 }
@@ -209,19 +216,22 @@ async function main(): Promise<void> {
 	}
 
 	const beforeArg = arg("--before");
+	if (beforeArg === "") usage("--before is empty");
 	// The import below resolves a relative specifier against this file, not the cwd.
 	const BEFORE = beforeArg === null ? null : path.resolve(beforeArg);
 	const AFTER = path.resolve(import.meta.dirname, "..", "..");
 	const sessionsArg = arg("--sessions");
-	if (sessionsArg !== null && !/^[1-9]\d*$/.test(sessionsArg)) usage(`--sessions needs a positive integer, got ${sessionsArg}`);
+	if (sessionsArg !== null && !(/^\d+$/.test(sessionsArg) && Number(sessionsArg) > 0)) usage(`--sessions needs a positive integer, got ${sessionsArg}`);
 	const N = sessionsArg === null ? 250 : Number(sessionsArg);
 
 	if (!BEFORE) usage("--before is required");
 
 	const home = process.env.HOME!;
-	// Canonical, because the parser names fold files by their real path.
+	// Canonical for selection; the path as given stays an alias, because a fold
+	// file can be named through either spelling.
 	const real = (p: string) => { try { return fs.realpathSync(p); } catch { return p; } };
-	const ccRoot = real(process.env.WTFT_CLAUDE_PROJECTS_DIR || path.join(home, ".claude", "projects"));
+	const ccRootGiven = process.env.WTFT_CLAUDE_PROJECTS_DIR || path.join(home, ".claude", "projects");
+	const ccRoot = real(ccRootGiven);
 	const piRoot = real(process.env.WTFT_PI_SESSIONS_DIR || path.join(home, ".pi", "agent", "sessions"));
 
 	const picked: Record<string, string[]> = {
@@ -229,7 +239,10 @@ async function main(): Promise<void> {
 		pi: pickTranscripts(piRoot, N),
 	};
 
-	if (!(await honoursProjectsSeam(BEFORE))) {
+	let seamOk: boolean;
+	try { seamOk = await honoursProjectsSeam(BEFORE); }
+	catch (err) { return usage(`cannot load --before ${BEFORE} (${err instanceof Error ? err.message : String(err)})`); }
+	if (!seamOk) {
 		console.error(`before-after: ${BEFORE} predates the WTFT_CLAUDE_PROJECTS_DIR seam, so its measured pass would read the live projects root, not the frozen corpus. Compare against a newer checkout.`);
 		process.exit(2);
 	}
@@ -253,8 +266,7 @@ async function main(): Promise<void> {
 				throw new Error(`${label}'s discovery parse failed, so its children cannot be frozen: ${f} (${err instanceof Error ? err.message : String(err)})`);
 			}
 			const unresolved: string[] = [];
-			// Canonical, like the roots, so a symlinked projects root does not read as "outside".
-			for (const file of foldFilesOf(parsed, resolveId, unresolved)) foldFiles.add(real(file));
+			for (const file of foldFilesOf(parsed, resolveId, unresolved)) foldFiles.add(file);
 			if (unresolved.length > 0) throw new Error(`${label} names subagent(s) ${unresolved.join(", ")} in ${f}, and no transcript was found to freeze`);
 		}
 	}
@@ -262,7 +274,7 @@ async function main(): Promise<void> {
 	const snapDir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-ab-"));
 	process.on("exit", () => fs.rmSync(snapDir, { recursive: true, force: true }));
 	const { projects: snapProjects, pi: snapPi } = snapshotCorpus({
-		snapDir, ccRoot, piRoot,
+		snapDir, ccRoot, ccRootAliases: [ccRootGiven], piRoot,
 		ccFiles: picked["claude-code"], piFiles: picked.pi,
 		foldFiles: [...foldFiles],
 	});
@@ -287,7 +299,7 @@ async function main(): Promise<void> {
 			const by = new Map<string, number>();
 			const subagents = new Set<string>();
 			const costs = new Map<string, number>();
-			let tot = 0;
+			let tot = 0, interactions = 0;
 			for (const f of files) {
 				let ints;
 				try { ints = mod.deduplicateInteractions(mod.parseSessionFile(f)); }
@@ -295,7 +307,10 @@ async function main(): Promise<void> {
 					throw new Error(`${label}'s measured pass could not read ${f} (${err instanceof Error ? err.message : String(err)})`);
 				}
 				for (const id of subagentIdsOf(ints)) subagents.add(id);
-				for (const [id, c] of subagentCostsOf(ints)) costs.set(id, Math.max(costs.get(id) ?? 0, c));
+				interactions += ints.length;
+				// Summed across sessions: a subagent two selected sessions fold is
+				// in the corpus total twice.
+				for (const [id, c] of subagentCostsOf(ints)) costs.set(id, (costs.get(id) ?? 0) + c);
 				for (const i of ints) {
 					const c = mod.classifyInteraction(i);
 					by.set(c, (by.get(c) || 0) + i.cost);
@@ -303,6 +318,7 @@ async function main(): Promise<void> {
 				}
 			}
 			if (!Number.isFinite(tot)) throw new Error(`${label}'s ${harness} total is not a finite number (${tot})`);
+			if (interactions === 0) throw new Error(`${label}'s ${harness} selection parsed to no interactions, so nothing was compared`);
 			side[label] = { by, tot, subagents, costs };
 		}
 
@@ -325,20 +341,21 @@ async function main(): Promise<void> {
 		// was previously invisible. So a negative delta has no legitimate cause, and
 		// neither does a lost subagent id — each fails on its own, with no reference
 		// to the other.
-		if (delta < -0.005) mismatch = true;
 		if (lost.length > 0) mismatch = true;
-		// A RISE still needs a reason, and the only acceptable one is discovery —
-		// and no more of a rise than the newly found subagents cost.
+		// A difference needs a reason, and the only acceptable one is discovery:
+		// the total may differ by exactly what the newly found subagents cost. A
+		// smaller rise would hide a fall elsewhere; a larger one is unexplained.
 		const gainedCost = gained.reduce((sum, id) => sum + (a.costs.get(id) ?? 0), 0);
-		const explained = gained.length > 0 && delta <= gainedCost + 0.005;
-		if (delta > 0.005 && !explained) mismatch = true;
+		const matches = Math.abs(delta - gainedCost) <= 0.005;
+		const explained = gained.length > 0 && matches;
+		if (!matches) mismatch = true;
 
 		console.log(`\n===== ${harness}: ${files.length} sessions =====`);
 		console.log(`total  BEFORE $${b.tot.toFixed(2)}  AFTER $${a.tot.toFixed(2)}  delta $${delta.toFixed(4)}` +
-			(delta < -0.005 ? "   <-- TOTAL FELL; spend became invisible, which is never acceptable"
+			(explained ? "  (a RISE explained by subagent discovery, below)"
+				: gained.length > 0 ? `   <-- the delta does not match the $${gainedCost.toFixed(4)} the newly found subagents cost`
+				: delta < -0.005 ? "   <-- TOTAL FELL; spend became invisible, which is never acceptable"
 				: Math.abs(delta) <= 0.005 ? "  (equal, as required)"
-				: explained ? "  (a RISE explained by subagent discovery, below)"
-				: gained.length > 0 ? `   <-- RISE larger than the $${gainedCost.toFixed(4)} the newly found subagents cost`
 				: "   <-- UNEXPLAINED RISE; a reclassification cannot change the total"));
 		if (gained.length) console.log(`  subagents found only AFTER  (cost recovered, $${gainedCost.toFixed(4)}): ${gained.join(", ")}`);
 		if (lost.length) console.log(`  subagents found only BEFORE (cost LOST — investigate): ${lost.join(", ")}`);

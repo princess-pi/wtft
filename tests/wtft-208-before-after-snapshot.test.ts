@@ -245,6 +245,9 @@ check(JSON.stringify(foldFilesOf([{ claudeSubAgentSessionIds: ["kid"] }], id => 
 	"E11 an id reported without a path is resolved to its transcript");
 
 // A fold with no `file` and no resolver answer is reported as unresolved, not thrown on.
+const unresolvedIds: string[] = [];
+foldFilesOf([{ claudeSubAgentFolds: [{ id: "y" } as { id: string; file?: string }] }], () => null, unresolvedIds);
+check(JSON.stringify(unresolvedIds) === '["y"]', "E7b an id with no file and no resolver answer is reported in unresolved");
 check(JSON.stringify(foldFilesOf([{ claudeSubAgentFolds: [{ id: "x" } as { id: string; file?: string }] }])) === "[]",
 	"E7 a fold with no file contributes nothing to the freeze");
 
@@ -304,8 +307,47 @@ import * as real from REAL;
 export function parseSessionFile(...a: any[]) { const xs = (real.parseSessionFile as any)(...a); for (const i of xs) { delete i.claudeSubAgentFolds; i.cost = i.cost / 2; } return xs; }
 `);
 const rise = runScript(["--before", halfBuild], { WTFT_CLAUDE_PROJECTS_DIR: riseRoot });
-check(rise.status === 1 && /RISE larger than/.test(rise.stdout ?? ""),
+check(rise.status === 1 && /does not match the \$/.test(rise.stdout ?? ""),
 	`G6 a rise larger than the newly found subagent's cost fails, not "explained" (got ${rise.status})`);
+
+// BEFORE that simply does not find the child: the rise is exactly the child's share.
+const missesChild = fakeBefore("misses", `export * from REAL;
+import * as real from REAL;
+export function parseSessionFile(...a: any[]) {
+	const xs = (real.parseSessionFile as any)(...a);
+	for (const i of xs) { for (const f of i.claudeSubAgentFolds ?? []) i.cost -= f.share.costUsd; delete i.claudeSubAgentFolds; }
+	return xs;
+}
+`);
+const exact = runScript(["--before", missesChild], { WTFT_CLAUDE_PROJECTS_DIR: riseRoot });
+check(exact.status === 0 && /explained by subagent discovery/.test(exact.stdout ?? ""),
+	`G10 a rise of exactly the newly found subagent's cost passes (got ${exact.status}: ${(exact.stdout ?? "").slice(-300)})`);
+
+// A smaller rise than the new subagent's cost hides a fall elsewhere.
+const masksFall = fakeBefore("masks", `export * from REAL;
+import * as real from REAL;
+export function parseSessionFile(...a: any[]) {
+	const xs = (real.parseSessionFile as any)(...a);
+	for (const i of xs) { for (const f of i.claudeSubAgentFolds ?? []) i.cost -= f.share.costUsd; delete i.claudeSubAgentFolds; }
+	if (xs[0]) xs[0].cost += 0.1;
+	return xs;
+}
+`);
+const masked = runScript(["--before", masksFall], { WTFT_CLAUDE_PROJECTS_DIR: riseRoot });
+check(masked.status === 1, `G11 a fall hidden under a discovery gain fails (got ${masked.status})`);
+
+const throwsBuild = fakeBefore("throws", `export * from REAL;
+export function parseSessionFile(): never { throw new Error("boom"); }
+`);
+const threw = runScript(["--before", throwsBuild]);
+check(threw.status === 3 && /discovery parse failed/.test(threw.stderr ?? ""), `G12 a discovery parse that throws exits 3 (got ${threw.status})`);
+check(runScript(["--before", ""]).status === 2, "G13 an empty --before exits 2, not a self-comparison");
+check(runScript(["--before", path.join(dir, "no-such-checkout")]).status === 2, "G14 a --before that cannot be loaded exits 2");
+check(runScript(["--before", ".", "--sessions", "010"]).status === 0, "G15 --sessions with a leading zero is read as decimal");
+const noFn = path.join(dir, "nofn-checkout");
+fs.mkdirSync(path.join(noFn, "extensions", "lib", "harness", "claude-code"), { recursive: true });
+fs.writeFileSync(path.join(noFn, "extensions", "lib", "harness", "claude-code", "discovery.ts"), "export const unrelated = 1;\n");
+check(!(await honoursProjectsSeam(noFn)), "G16 a checkout with no projectsDir is refused");
 
 // snapshotCorpus: a file that cannot be copied, or lies outside its root, fails; a `..`-named one inside it is copied.
 const snapRoot = path.join(dir, "snap-fail");
@@ -323,6 +365,19 @@ let outsideThrew = false;
 try { snapshotCorpus({ snapDir: path.join(dir, "snap-out-3"), ccRoot: snapRoot, piRoot: path.join(dir, "no-pi"), ccFiles: [], piFiles: [], foldFiles: [path.join(dir, "elsewhere.jsonl")] }); }
 catch { outsideThrew = true; }
 check(outsideThrew, "G9 a fold file outside the projects root fails the snapshot");
+
+// A project folder that is a symlink out of the root: the path as given is inside it.
+const realRoot = path.join(dir, "real-root"), elsewhere = path.join(dir, "elsewhere-slug");
+fs.mkdirSync(realRoot, { recursive: true }); fs.mkdirSync(elsewhere, { recursive: true });
+fs.writeFileSync(path.join(elsewhere, "kid.jsonl"), "{}\n");
+fs.symlinkSync(elsewhere, path.join(realRoot, "-slug"));
+const linkRoot = path.join(dir, "link-root");
+fs.symlinkSync(realRoot, linkRoot);
+const aliasOut = path.join(dir, "snap-alias");
+snapshotCorpus({ snapDir: aliasOut, ccRoot: fs.realpathSync(linkRoot), ccRootAliases: [linkRoot], piRoot: path.join(dir, "no-pi"),
+	ccFiles: [], piFiles: [], foldFiles: [path.join(linkRoot, "-slug", "kid.jsonl"), path.join(realRoot, "-slug", "kid.jsonl")] });
+check(fs.existsSync(path.join(aliasOut, "projects", "-slug", "kid.jsonl")),
+	"G17 a fold file under a symlinked project folder or a symlinked root is frozen");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

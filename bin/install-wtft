@@ -214,11 +214,14 @@ if [ -n "$CFG_HOME" ]; then
           cfg_state=left   # --check never mutates
           left_reason="not yet migrated"
         fi
-      elif [ "$old_path" -ef "$new_path" ]; then
-        # One file under two names (a symlink): unlinking the old name can
-        # delete the only copy or leave the new name dangling.
+      elif [ "$old_path" -ef "$new_path" ] && [ ! -L "$old_path" ] \
+           && { [ -L "$new_path" ] || [ "$(resolve "$old_path")" = "$(resolve "$new_path")" ]; }; then
+        # Unlinking the old name would delete the only copy (one directory entry
+        # reached through a linked directory) or leave the new name dangling (it
+        # links to the old file). An old name that is itself a symlink, or a
+        # separate hardlink, is safe to remove and falls through.
         cfg_state=left
-        left_reason="the old and new paths are the same file through a symlink; remove the link by hand"
+        left_reason="the new path is the old file under another name (a symlink); remove the link by hand"
       elif cmp -s "$old_path" "$new_path" 2>/dev/null; then
         # Identical: retry removing the stale duplicate in install mode.
         if [ "$MODE" = install ] && rm -f "$old_path" 2>/dev/null; then

@@ -844,6 +844,28 @@ console.log("\n9. Config migration off princess-pi-tools and onto wtft (#156)");
 			"V9j(b): an old directory that links to the new one does not lose token-budget.json");
 		check(b.code === 4, `V9j(b): reported as config-left, exit 4 (got ${b.code})`);
 	}
+
+	// V9k — the safe same-file shapes still migrate: an old name that is a
+	// symlink to the new file, and a separate hardlink. Removing either name
+	// leaves the new file whole.
+	for (const shape of ["old-symlink", "hardlink"] as const) {
+		const home = mkSandbox(path.join(os.tmpdir(), `46-cfgmig-${shape}-`));
+		const legacy = path.join(home, ".config", "princess-pi-tools");
+		const neu = path.join(home, ".config", "wtft");
+		fs.mkdirSync(legacy, { recursive: true });
+		fs.mkdirSync(neu, { recursive: true });
+		fs.writeFileSync(path.join(neu, "config.json"), JSON.stringify({ interval: "1h" }));
+		if (shape === "old-symlink") fs.symlinkSync(path.join("..", "wtft", "config.json"), path.join(legacy, "wtft.json"));
+		else fs.linkSync(path.join(neu, "config.json"), path.join(legacy, "wtft.json"));
+		const r = run(["--json", "--dir", mkSandbox(path.join(os.tmpdir(), `46-cfgmig-${shape}-dir-`))], [],
+			{ HOME: home, XDG_CONFIG_HOME: path.join(home, ".config") });
+		let doc: any = null;
+		try { doc = JSON.parse(r.out); } catch { /* left null */ }
+		const entry = (doc?.configMigration ?? []).find((c: any) => c.to === path.join(neu, "config.json"));
+		check(entry?.state === "moved" && !fs.existsSync(path.join(legacy, "wtft.json"))
+			&& fs.readFileSync(path.join(neu, "config.json"), "utf8").includes("1h"),
+			`V9k(${shape}): the old name is removed, the new file is intact, state moved`, JSON.stringify(entry));
+	}
 }
 
 // ---

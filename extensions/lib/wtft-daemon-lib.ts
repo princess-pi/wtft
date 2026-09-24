@@ -862,10 +862,12 @@ export function restartDaemon(sessionPath: string, daemonPath: string): boolean 
 	const pidPath = getDaemonPidPath(sessionPath);
 	try {
 		const pid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
-		if (pid > 0) {
+		// A harness process serves every session under its root, so it is asked
+		// to serve this one (the spawn below points it here), never stopped.
+		if (pid > 0 && !isHarnessProcess(pid)) {
 			try { process.kill(pid, "SIGTERM"); } catch {}
+			try { fs.unlinkSync(pidPath); } catch {}
 		}
-		try { fs.unlinkSync(pidPath); } catch {}
 	} catch {}
 
 	try {
@@ -880,6 +882,25 @@ export function restartDaemon(sessionPath: string, daemonPath: string): boolean 
 	}
 }
 
+
+function isHarnessProcess(pid: number): boolean {
+	try {
+		return fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").includes("--harness");
+	} catch {
+		return false;
+	}
+}
+
+/** What `--watch` shows before the current tag has any turns. A stale-version
+ *  tag means the log parser daemon is rebuilding it, which a reader should be
+ *  told rather than left looking at an empty screen. */
+export function waitingForDataLine(sessionPath: string, currentTagPath: string): string {
+	if (!fs.existsSync(sessionPath)) return "Waiting for session .jsonl to be written (first prompt not completed yet)...";
+	const newest = getTagPath(sessionPath);
+	const stale = newest !== currentTagPath && fs.existsSync(newest) ? newest.match(/\.wtft-tag\.v([^/]+)\.jsonl$/)?.[1] : undefined;
+	if (stale) return `Rebuilding this session's tag for tagger v${WTFT_TAGGER_VERSION} (the v${stale} tag is stale); its turns appear here when the log parser daemon reaches it...`;
+	return "Waiting for session data...";
+}
 
 export async function watchTagFile(
 	sessionPath: string,
@@ -1109,10 +1130,8 @@ export async function watchTagFile(
 			}
 
 			for (const l of lines) buf.push(l);
-		} else if (!fs.existsSync(sessionPath)) {
-			buf.push("\x1b[90mWaiting for session .jsonl to be written (first prompt not completed yet)...\x1b[0m");
 		} else {
-			buf.push("\x1b[90mWaiting for session data...\x1b[0m");
+			buf.push(`\x1b[90m${waitingForDataLine(sessionPath, tagPath)}\x1b[0m`);
 		}
 
 		const restartHint = settings.daemonPath

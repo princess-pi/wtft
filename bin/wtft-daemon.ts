@@ -48,6 +48,8 @@ import {
 
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const POLL_MS = 667; // 90bpm throttle
+/** Sessions caught up per turn of the event loop at harness startup. */
+const HARNESS_CATCH_UP_BATCH = 20;
 function envMs(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw === "") return fallback;
@@ -1663,7 +1665,8 @@ function wake(file: string, displayed: boolean) {
   if (slot.pendingItems.length > 0) scheduleFlush(movedTo);
 }
 
-function watchDir(dir: string) {
+/** `wakeFiles` false at startup: the catch-up walk serves those, focus first. */
+function watchDir(dir: string, wakeFiles = true) {
   const key = path.resolve(dir);
   if (harnessWatchers.has(key)) return;
   let watcher: fs.FSWatcher;
@@ -1695,10 +1698,10 @@ function watchDir(dir: string) {
     const child = path.resolve(key, ent.name);
     if (ent.isDirectory()) {
       if (HARNESS_SKIP_DIRS.has(ent.name) && ent.name !== "subagents") continue;
-      watchDir(child);
+      watchDir(child, wakeFiles);
       continue;
     }
-    if (insideSubagents) continue;
+    if (insideSubagents || !wakeFiles) continue;
     if (ent.name.endsWith(".jsonl") && !ent.name.includes(".wtft-tag.")) wake(child, false);
   }
 }
@@ -1768,6 +1771,25 @@ function pointSessionAt(livePid: number, file: string) {
   fs.writeFileSync(replacement, String(livePid));
   fs.renameSync(replacement, lease);
   try { fs.writeFileSync(`${lease}.display`, ""); } catch { /* the live process still has the old focus */ }
+  // The live process may hold no slot for this session yet, or be part-way
+  // through its startup rebuild: ask it by name to serve this one next.
+  try {
+    const request = `${harnessPidFile}.focus-${process.pid}`;
+    fs.writeFileSync(request, path.resolve(file));
+    fs.renameSync(request, `${harnessPidFile}.focus`);
+  } catch { /* the live process keeps its own order */ }
+}
+
+/** Serves a session another process asked for (`pointSessionAt`) ahead of the rest. */
+function takeFocusRequest() {
+  if (!harnessPidFile) return;
+  const request = `${harnessPidFile}.focus`;
+  let file = "";
+  try {
+    file = fs.readFileSync(request, "utf8").trim();
+    fs.unlinkSync(request);
+  } catch { return; }
+  if (file) wake(file, true);
 }
 
 function runHarness(which: string, focus: string) {
@@ -1798,17 +1820,30 @@ function runHarness(which: string, focus: string) {
     process.stderr.write(`[wtft-log-parser] harness pid ${harnessPidFile}\n`);
     process.stderr.write(`[wtft-log-parser] harness root ${root}\n`);
   }
-  watchDir(root);
+  watchDir(root, false);
   const files: string[] = [];
   walkSessions(root, files);
   const focusKey = focus ? path.resolve(focus) : "";
-  for (const file of files) wake(file, file === focusKey);
-  if (focusKey && !harnessSlots.has(focusKey)) wake(focusKey, true);
-  if (process.env.WTFT_DAEMON_DEBUG) {
-    process.stderr.write(`[wtft-log-parser] harness settled ${which}\n`);
-  }
+  // The session a reader is waiting on first; then the rest, a few at a time,
+  // so a watch event or a reader's request is served between them.
+  if (focusKey) wake(focusKey, true);
   harnessIdleTimer = setInterval(sweepIdleSlots, 250);
   harnessIdleTimer.unref();
+  let next = 0;
+  const catchUp = () => {
+    if (!running) return;
+    takeFocusRequest();
+    const end = Math.min(files.length, next + HARNESS_CATCH_UP_BATCH);
+    for (; next < end; next++) if (files[next] !== focusKey) wake(files[next], false);
+    if (next < files.length) {
+      setImmediate(catchUp);
+      return;
+    }
+    if (process.env.WTFT_DAEMON_DEBUG) {
+      process.stderr.write(`[wtft-log-parser] harness settled ${which}\n`);
+    }
+  };
+  catchUp();
 }
 
 function dropHarnessSlot(key: string) {
@@ -1847,6 +1882,7 @@ function leaseStillOurs(slot: Slot): boolean {
 
 function sweepIdleSlots() {
   if (!running) return;
+  takeFocusRequest();
   const now = Date.now();
   for (const key of [...harnessSlots.keys()]) {
     const slot = harnessSlots.get(key);

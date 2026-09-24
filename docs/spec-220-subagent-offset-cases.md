@@ -57,7 +57,7 @@ pinned so they stay true.
 reader keeping the max cost per id not keep the retracted, higher figure. Those two conflict. A
 full parse keeps the higher-cost copy of an id (`deduplicateInteractions`), as every wtft reader
 does. This change follows the Closer: the tag matches a full parse, so the higher figure stands.
-The per-id cost map's new generation re-derives that same answer. Whether that branch should be
-kept is #242.
+The per-id cost map that opened a new generation on a lower copy re-derived that same answer, and
+#242 removed it (`docs/spec-242-drop-noop-retraction.md`).
 
 A prefix hash that cannot be read now warns once per transcript, as the other read failures do.

@@ -171,22 +171,44 @@ function foldsInTotal(parsed: Interaction[]): Map<string, TokenTotals> {
 }
 
 /**
- * A descendant's cost as its own SELF would hold it: its transcript plus every
- * subagent transcript discovery lists for it, each part kept apart so the walk
- * can leave out one it already counted. Whole or not at all — any part that
- * cannot be read throws, because a partial total would read as the edge's
- * whole cost. `files` is every transcript read, for the live check.
+ * A descendant's cost: its transcript plus every subagent transcript discovery
+ * lists for it, and for those in turn, so a Pi sibling's own siblings are
+ * priced whichever session reaches them first. A part `isElsewhere` names is
+ * already in some total: it is read, but left out of `parts`. Whole or not at
+ * all — any part that cannot be read throws, because a partial total would
+ * read as the edge's whole cost. `files` is every transcript read, for the
+ * live check.
  */
-function parseDescendant(file: string): { own: Interaction[]; subagents: { id: string; interactions: Interaction[] }[]; files: string[] } {
-	const discovered = discoverSubagentSessionFiles(file);
-	if (discovered.unreadable) throw discovered.unreadable;
-	// Every part is priced at top level, so a fold of one into another is a second count.
-	const doNotFold = new Set([file, ...discovered.files].map(canonicalTranscriptPath));
-	return {
-		own: parseSessionFileStrict(file, doNotFold),
-		subagents: discovered.files.map(sub => ({ id: path.basename(sub).replace(/\.jsonl$/i, ""), interactions: parseSessionFileStrict(sub, doNotFold) })),
-		files: [file, ...discovered.files],
-	};
+function parseDescendant(file: string, isElsewhere: (id: string) => boolean): { parts: Interaction[][]; subagentIds: string[]; files: string[] } {
+	const files = [file];
+	const seen = new Set([canonicalTranscriptPath(file)]);
+	for (let k = 0; k < files.length; k++) {
+		const discovered = discoverSubagentSessionFiles(files[k]);
+		if (discovered.unreadable) throw discovered.unreadable;
+		for (const sub of discovered.files) {
+			const canonical = canonicalTranscriptPath(sub);
+			if (seen.has(canonical)) continue;
+			seen.add(canonical);
+			files.push(sub);
+		}
+	}
+	// Every part is priced at top level, so a fold of one into another is a
+	// second count; and a session one kept part folds is not folded by a later
+	// one, so each is billed once.
+	const doNotFold = new Set(seen);
+	const parts: Interaction[][] = [];
+	const subagentIds: string[] = [];
+	for (const [k, f] of files.entries()) {
+		const id = path.basename(f).replace(/\.jsonl$/i, "");
+		const interactions = parseSessionFileStrict(f, doNotFold);
+		if (k > 0 && isElsewhere(id)) continue;
+		parts.push(interactions);
+		if (k > 0) subagentIds.push(id);
+		for (const interaction of interactions) {
+			for (const fold of interaction.claudeSubAgentFolds ?? []) doNotFold.add(canonicalTranscriptPath(fold.file));
+		}
+	}
+	return { parts, subagentIds, files };
 }
 
 /**
@@ -319,9 +341,6 @@ function walkLedger(
 	maxDepth: number,
 	now: number,
 ): Map<string, string> {
-	// `in-self` = money inside the caller's `total`; `folded` = a `claude -p`
-	// session inside a resolved descendant's total. Both add nothing when their
-	// own edge is reached, and they report different skips.
 	type Outcome = "counted" | "unresolved" | "in-self" | "folded";
 	const outcomeOf = new Map<string, Outcome>([[rootSessionId, "in-self"]]);
 	if (ledger.childrenOf.size === 0 && !options.unrecorded) return outcomeOf;
@@ -399,14 +418,16 @@ function walkLedger(
 			let descendant: ReturnType<typeof parseDescendant>;
 			let live: boolean;
 			try {
-				descendant = parseDescendant(file);
-				// Stat AFTER the parse, so an append during it counts; inside the try, so a
-				// transcript that cannot be stat-ed is `unreadable`, never guessed. Bounded on
-				// both sides: a write mid-walk lands after `now`, a far-future mtime is not live.
-				live = descendant.files.some(f => {
-					const age = now - fs.statSync(f).mtimeMs;
-					return age < IDLE_THRESHOLD_MS && age > -IDLE_THRESHOLD_MS;
+				descendant = parseDescendant(file, id => {
+					const prior = outcomeOf.get(id);
+					return prior === "in-self" || prior === "counted" || prior === "folded";
 				});
+				// Stat AFTER the parse, so an append during it counts; inside the try, so a
+				// transcript that cannot be stat-ed is `unreadable`, never guessed. Every file
+				// is stat-ed before any is judged. Bounded on both sides: a write mid-walk
+				// lands after `now`, a far-future mtime is not live.
+				const ages = descendant.files.map(f => now - fs.statSync(f).mtimeMs);
+				live = ages.some(age => age < IDLE_THRESHOLD_MS && age > -IDLE_THRESHOLD_MS);
 			} catch {
 				outcomeOf.set(edge.child, "unresolved");
 				tree.edges.push({ ...base, resolved: false, path: file, total: null, skip: "unreadable" });
@@ -416,35 +437,22 @@ function walkLedger(
 			}
 
 			// Drop `untaggedCostUsd`: it would leak into `spawned.edges[].total`.
-			// A subagent session already in some total is left out whole; one that
-			// lands here is folded, as a `claude -p` session this parse folds is.
-			const parts = [descendant.own];
-			for (const sub of descendant.subagents) {
-				const prior = outcomeOf.get(sub.id);
-				if (prior === "in-self" || prior === "counted" || prior === "folded") continue;
-				parts.push(sub.interactions);
-				if (prior === "unresolved") tree.unattributed = tree.unattributed.filter(gap => gap.child !== sub.id);
-				outcomeOf.set(sub.id, "folded");
-				enqueue(sub.id, depth + 2);
+			// A subagent session that lands here is folded, as a `claude -p` session
+			// this parse folds is.
+			for (const id of descendant.subagentIds) {
+				if (outcomeOf.get(id) === "unresolved") tree.unattributed = tree.unattributed.filter(gap => gap.child !== id);
+				outcomeOf.set(id, "folded");
+				enqueue(id, depth + 2);
 			}
-			const parsed = parts.flat();
+			const parsed = descendant.parts.flat();
 			const summary = computeSessionSummary(parsed);
 			const { untaggedCostUsd, ...total } = summary.total;
-			// Each part is its own parse, so two parts can fold the same session:
-			// its first share stands, and every later one comes back out.
-			const folds = new Map<string, TokenTotals>();
-			for (const part of parts) {
-				for (const [id, share] of foldsInTotal(part)) {
-					if (folds.has(id)) subtractTotals(total, share);
-					else folds.set(id, share);
-				}
-			}
 			if (summary.untaggedInteractions > 0) {
 				tree.descendantUntagged.push({ child: edge.child, untaggedInteractions: summary.untaggedInteractions, untaggedCostUsd });
 			}
 			// A session this parse folded is either already in some total — take its
 			// share back out — or it lands here, and a gap reported for it is closed.
-			for (const [id, share] of folds) {
+			for (const [id, share] of foldsInTotal(parsed)) {
 				const prior = outcomeOf.get(id);
 				if (prior === "in-self" || prior === "counted" || prior === "folded") {
 					subtractTotals(total, share);

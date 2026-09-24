@@ -260,7 +260,8 @@ consumer checking only those reads a zeroed tree as a complete lineage. And a ma
 trace it leaves — so a tree with `malformedLedgerLines > 0` and none of the other four can still be
 missing a descendant. Round 5 found this condition missing from all six surfaces that state it.
 
-**`--tokens`** gains a block below TOTAL, rendered when this session has at least one edge, or when the ledger could not be read or had a line skipped (the block then says so instead):
+**`--tokens`** gains a block below TOTAL, rendered when the walk found at least one edge (this
+session's, or one from a session already inside its total, spec-230), or when the ledger could not be read or had a line skipped (the block then says so instead):
 
 ```
 SPAWNED    3 session(s) priced from 6 recorded edge(s) (#116) —

@@ -1,6 +1,6 @@
 #!/usr/bin/env -S bun
 /**
- * Spend the spawn tree walked past, or priced as $0 (#230, #231, #232).
+ * Spend the spawn tree walked past, or priced as $0.
  * Spec: docs/spec-230-231-232-spawn-tree-gaps.md.
  */
 
@@ -157,6 +157,26 @@ console.log("\n#230 — a launcher descendant's Task subagents are in its edge t
 	const tree = computeSpawnTree(S, { ledgerPath: ledgerOf([[S, C]]), alreadyAttributed: new Set() });
 	check(tree.edges.find(e => e.child === C)?.total?.outputTokens === 550,
 		`H10 two parts of one descendant that fold the same session bill it once: 300 + 50 + 200 (got ${tree.edges.find(e => e.child === C)?.total?.outputTokens})`);
+}
+
+{
+	const S = uuid(91), D = uuid(92), X = uuid(93), Y = uuid(94);
+	const header = (id: string, parentSession?: string) =>
+		JSON.stringify({ type: "session", version: 3, id, timestamp: new Date(T0).toISOString(), cwd: cwdOf(D), ...(parentSession ? { parentSession } : {}) }) + "\n";
+	putSession(D, header(D) + turnLine("d-91", T0 + 1_000, 300));
+	fs.writeFileSync(path.join(projectDirOf(D), `${X}.jsonl`), header(X, D) + turnLine("x-91", T0 + 2_000, 700));
+	fs.writeFileSync(path.join(projectDirOf(D), `${Y}.jsonl`), header(Y, X) + turnLine("y-91", T0 + 3_000, 40));
+	const listed = discoverSubagentSessionFiles(path.join(projectDirOf(D), `${D}.jsonl`)).files.map(f => path.basename(f, ".jsonl"));
+	check(listed.includes(X) && !listed.includes(Y),
+		`H11a fixture precondition: D's own discovery lists X but not X's sibling Y (got ${JSON.stringify(listed)})`);
+	for (const [name, edges] of Object.entries({
+		"descendant first": [[S, D], [S, X]] as Array<[string, string]>,
+		"sibling first": [[S, X], [S, D]] as Array<[string, string]>,
+	})) {
+		const tree = computeSpawnTree(S, { ledgerPath: ledgerOf(edges), alreadyAttributed: new Set() });
+		check(tree.total.outputTokens === 1040 && tree.unattributed.length === 0,
+			`H11 [${name}] a Pi sibling's own sibling is priced once, whichever edge is reached first: 300 + 700 + 40 (got ${tree.total.outputTokens})`);
+	}
 }
 
 // ---

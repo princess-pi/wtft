@@ -119,7 +119,7 @@ A separate `.jsonl` log for a spawned subagent, stored under `<session-id>/subag
 Code, `agent-*.jsonl`), or a Pi sibling file in the same directory whose first-line session header
 names, as `parentSession`, the `id` in the parent's own first-line session header. wtft discovers
 them (the `subagents/` tree recursively, Pi siblings one level) and blends these chronologically into the parent's own turns — folded into **self**. A
-ledger-spawned descendant's own subagent sessions, other than one already in a total, are priced
+ledger-spawned descendant's own subagent sessions, and theirs in turn, other than one already in a total, are priced
 inside that descendant's edge total (their untagged turns in the descendant's `descendantUntagged`
 entry), and so in **tree** (see Self / tree below;
 `docs/spec-230-231-232-spawn-tree-gaps.md`). Distinct from a sidechain (above), which lives inline in the parent

@@ -13,11 +13,13 @@ are walked, and whether a child reads as $0 or as a gap. None was a doc fix. No 
 ## 1. #230: a descendant is priced with its Task subagents
 
 A counted edge's `total` is the child's own transcript **plus every transcript
-`discoverSubagentSessionFiles(<child>.jsonl)` lists** — the same set a root session's SELF merges.
+`discoverSubagentSessionFiles(<child>.jsonl)` lists, and every transcript it lists for those in
+turn**. The root session's SELF takes the first level only; the walk follows the chain so that a
+Pi sibling's own sibling is priced whichever session the walk reaches first.
 The folds those subagent parses make count toward the edge exactly as the child's own folds do.
 Every part is parsed with the child and all its subagent transcripts as `doNotFold`, so no part
-folds another. Each part is still its own parse, so two parts can fold the same `claude -p`
-session: its first share stands and every later one is subtracted, so it is billed once. Which files discovery lists, and which it skips without reporting, is
+folds another. The parts are parsed in order, and a `claude -p` session a kept part folds is added
+to `doNotFold` for the parts after it, so two parts never fold the same session. Which files discovery lists, and which it skips without reporting, is
 `discoverSubagentSessionFiles`'s contract (`docs/wtft-incremental-render-spec.md` § *Where the
 transcripts are on disk*; its unreported skips are listed in #236); this change prices what it
 lists.
@@ -84,7 +86,9 @@ the daemon, the root's own parse, the root's subagent loads, the `unrecorded` pr
 line. So a root subagent transcript, or a folded `claude -p` transcript, with no parseable line
 still reads as $0: #235.
 
-**`unrecorded` is left as it is.** #232 named it too, but a transcript is listed as a candidate
+**`unrecorded` is left as it is.** Its rows still price a candidate's transcript alone, without
+the subagent transcripts an edge now adds, so a launcher child can read cheaper there than once
+recorded. It is a list, never summed. #232 named it too, but a transcript is listed as a candidate
 only when a line of its head parses and carries a timestamp and a cwd, so a listed file always
 has a parseable line and the strict parse could never fire there.
 
@@ -95,7 +99,8 @@ has a parseable line and the strict parse could never fire there.
 - **#230** S → C, C with one Task subagent transcript carrying 500 output tokens:
   `edges[0].total.outputTokens` includes the 500. An unreadable subagent transcript under C makes
   the edge `unreadable` with `total: null`. When C's transcript and its subagent each fold the
-  same `claude -p` session F, the edge bills F once.
+  same `claude -p` session F, the edge bills F once. A Pi sibling's own sibling is priced once
+  in both edge orders (H11).
 - **#231** S with no ledger edge, P in S's `alreadyAttributed`, and a ledger edge P → G: G is in
   `edges[]`, counted, and in `total`. The same holds when P is folded by a counted descendant
   rather than being in-self. With edges S → D, S → F, F → G, where D folds F, and `maxDepth` 2:
@@ -115,6 +120,24 @@ functions of `wtft-parser.ts`.
 | 2 | Prose changed by pass 1 | Found a code bug: a folded session reached later by a shallower edge kept the deeper depth. Fixed and tested (I12). The rest was wording, fixed. #235 widened to folded `claude -p` transcripts. |
 | 3 | Prose changed by pass 2 | Found a code bug: two parts of one descendant folding one session billed it twice. Fixed and tested (H10). The rest was wording, fixed. #237 filed for the same shape in the widget's SELF. |
 | 4 | Prose changed by pass 3 | Two contradictions in this spec and three partial summaries, all fixed. The rest are noted below. |
+
+`pr-review` round 1 (before the PR opened) found two Medium and eight Low:
+
+- **Fixed:**
+  - A Pi sibling's own sibling was lost when the descendant was reached first. Discovery is now
+    followed transitively (H11).
+  - Live-check stats stopped at the first live file; every file is now stat-ed.
+  - Per-part fold shares disagreed with the cross-part deduplication. Parts are now parsed in
+    order, and each skips what an earlier kept part folded.
+  - A stale `Outcome` comment was deleted, and issue numbers were removed from test comments.
+  - spec-116's `--tokens` trigger and spec-26's `descendantUntagged` and `live` rows are updated.
+- **Declined:**
+  - "A Pi child recorded under its bare UUID is double-counted": both harnesses resolve an id
+    only by exact file basename, so such an edge is `not-found` and nothing is priced twice.
+  - "`agent-<hash>` ids may collide across sessions": the harness names a Task transcript by a
+    random hash, and no collision has been seen.
+  - "spec-128's *as for an edge* is stale": that phrase is about dropping `untaggedCostUsd`,
+    which still holds. The subagent difference is stated above.
 
 **Noted, not changed.** Each is a finer point of a summary that points at this spec, or a
 behaviour older than this branch:

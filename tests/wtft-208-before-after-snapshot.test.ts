@@ -237,7 +237,7 @@ const refused = spawnSync("bun", [SCRIPT, "--before", seamless], {
 	cwd: REPO, encoding: "utf8",
 	env: { ...process.env, HOME: emptyHome, TMPDIR: childTmp, WTFT_CLAUDE_PROJECTS_DIR: e2eRoot, WTFT_PI_SESSIONS_DIR: emptyPiRootE2e },
 });
-check(refused.status === 2 && /predates the WTFT_CLAUDE_PROJECTS_DIR seam/.test(refused.stderr ?? ""),
+check(refused.status === 2 && /ignores WTFT_CLAUDE_PROJECTS_DIR/.test(refused.stderr ?? ""),
 	`E10 the script refuses such a --before with exit 2 (got ${refused.status})`);
 
 // An older build's path-less ids are looked up, not dropped.
@@ -320,7 +320,7 @@ export function parseSessionFile(...a: any[]) {
 }
 `);
 const exact = runScript(["--before", missesChild], { WTFT_CLAUDE_PROJECTS_DIR: riseRoot });
-check(exact.status === 0 && /explained by subagent discovery/.test(exact.stdout ?? ""),
+check(exact.status === 0 && /is what the newly found subagents cost/.test(exact.stdout ?? ""),
 	`G10 a rise of exactly the newly found subagent's cost passes (got ${exact.status}: ${(exact.stdout ?? "").slice(-300)})`);
 
 // A smaller rise than the new subagent's cost hides a fall elsewhere.

@@ -72,7 +72,7 @@ Resolving only the parent was the bug — it produced exactly the self-comparing
 | `1` | Drift: an artifact is missing, stale, not executable, or **not built** (`no-source`); or `--dir` could not be created (`no-dir`) | run `install-wtft`, or fix the directory |
 | `2` | In sync but **shadowed** on PATH by a different `wtft` | the printed `rm` |
 | `3` | The build failed | read the build output on stderr |
-| `4` | In sync, but a config file is still at the old `princess-pi-tools` path (status `config-left`, #156) | in install mode, EITHER the new path already had a DIFFERENT file (a real conflict — declined) OR a file appeared at the new path while this run was moving (kept, never overwritten — re-run), OR the copy itself failed partway (`mkdir`/`mktemp`/`cp`/`ln` — a "could not move" stderr line names it and the cause; a failure to remove the OLD file after a successful copy is reported as `moved`, not this; a later run removes the byte-identical leftover once the old directory allows unlinking, and reports this — `identical, safe to delete` — until then) — either way, resolve which copy is authoritative and remove the other by hand; in `--check` mode, run `install-wtft` |
+| `4` | In sync, but a config file is still at the old `princess-pi-tools` path (status `config-left`, #156) | in install mode, EITHER the new path already had a DIFFERENT file (a real conflict — declined) OR a file appeared at the new path while this run was moving (kept, never overwritten — re-run), OR the copy itself failed partway (`mkdir`/`mktemp`/`cp`/`ln` — a "could not move" stderr line names it and the cause; a failure to remove the OLD file after a successful copy is reported as `moved`, not this; a later run removes the byte-identical leftover once the old directory allows unlinking, and reports this — `identical, safe to delete` — until then) — either way, resolve which copy is authoritative and remove the other by hand; in `--check` mode, run `install-wtft`. OR, in either mode, the new path is already the old file under another name: there is one copy, so remove the link, never the file (re-running does not clear it) |
 | `5` | In sync, no config file left behind and wtft not shadowed, but the `claude-nsp-guard` shim is **shadowed**: a guard exists on PATH, but a different `claude` comes first (status `nsp-guard-shadowed`) | put the guard's directory before the winner's on PATH — nothing is deleted. When drift, `config-left` or a wtft shadow wins the exit code, human mode names a shadowed guard on an `Also:` line; `build-failed` and `no-dir` print only their own line |
 | `64` | Bad usage: unknown argument, `--dir` with no directory, `--dir` followed by a flag **or given an empty string**, or no `--dir` on a host with `HOME` unset | — |
 
@@ -103,9 +103,12 @@ it moves each of `wtft.json` → `config.json`, `token-budget.json` → `token-b
 `XDG_CONFIG_HOME` is unset) to the equivalent path under `.../wtft/`. It never overwrites a
 DIFFERENT file already at the new path — that is a real conflict, and a human decides which
 copy is authoritative. A new path that is the old file under another name — a symlink to it, or
-the same directory entry reached through a linked old directory — is left alone and reported
-`left`, since unlinking the old name would delete the only copy or leave the new one dangling. An
-old name that is itself a symlink to the new file, or a separate hardlink, is removed as usual. A file already at the new path that is BYTE-IDENTICAL to the old one
+the same directory entry reached through a linked directory in either direction — is left alone
+and reported `left` in both modes, since unlinking the old name would delete the only copy or leave
+the new one dangling. There is one copy, so the remedy is to remove the link, never the file;
+re-running does not clear it. An old name that is itself a symlink to the new file, or a separate
+hardlink, is removed as usual (a new-path symlink to a separate hardlink is also left, which is
+conservative). `--check` reports this as a fourth kind of `left`, with its own reason. A file already at the new path that is BYTE-IDENTICAL to the old one
 is not a conflict, though: it is treated as a stale duplicate (almost always the tail of a
 previous move whose cleanup step failed, see below) and the old copy is removed. `--check`
 never mutates either way; it only reports what would move, what is a stale duplicate, or
@@ -113,7 +116,7 @@ what is a real conflict left behind. There is no runtime fallback read of the ol
 anywhere in wtft — a file left there is invisible to the tool until this script, or a human,
 moves it. The `--json` document's `configMigration` array carries one `{from, to, state}`
 record per file, `state` one of `moved` / `left` / `none`. Tested in
-`tests/wtft-46-install-wtft.test.ts` §9 (V9a–V9i) and mutation-proofed as M4 (§V7 above).
+`tests/wtft-46-install-wtft.test.ts` §9 (V9a–V9k) and mutation-proofed as M4 (§V7 above).
 
 **The move can copy the file to the new path and then fail to remove the old one** — a
 directory that permits writing/renaming into it but not unlinking from it is a real
@@ -350,7 +353,7 @@ probe.
 | **V6** | the ten defects the reconcile and review audits found | see below |
 | **V7** | the mutation probe, M1–M5 | `run-mutants.sh` exits 0, and all five mutations applied — V7b's own check is `M1 && M2 && M3 && M4 && M5` |
 | **V8** | hostile paths | an apostrophe, a newline, and a destination symlink — the review bot's four findings, each reproduced before it was adopted |
-| **V9** | config migration (#156), driven directly through the CLI (V9a–V9i) | install moves every legacy file present to its new name, byte-identical, and deletes the old one; a second run (or `--check`) reports `none` for all; a file already at the new path is `left`, exit `4`, neither copy touched — including one that appears between the check and the move (V9i, a `cp` shim on PATH creates it at that instant); `--check` reports the same leftover and writes nothing. (The `config-left` ESCALATION LOGIC ITSELF is mutation-proofed as **M4**, checked under **V7**, not here — V9 exercises the feature end-to-end and never invokes `run-mutants.sh`.) |
+| **V9** | config migration (#156), driven directly through the CLI (V9a–V9k) | install moves every legacy file present to its new name, byte-identical, and deletes the old one; a second run (or `--check`) reports `none` for all; a file already at the new path is `left`, exit `4`, neither copy touched — including one that appears between the check and the move (V9i, a `cp` shim on PATH creates it at that instant); `--check` reports the same leftover and writes nothing; a new path that is the old file under another name is `left` and never unlinked, while an old-name symlink or hardlink migrates (V9j, V9k). (The `config-left` ESCALATION LOGIC ITSELF is mutation-proofed as **M4**, checked under **V7**, not here — V9 exercises the feature end-to-end and never invokes `run-mutants.sh`.) |
 | **V10** | the `claude-nsp-guard` shim (#30, spec-194 § H3) | the guard first on `PATH` → exit `0`, `nspGuard.state: "ok"`; a decoy `claude` before the guard → exit `5`, `status: "nsp-guard-shadowed"`, both paths named; no `claude` anywhere → exit `0`, `state: "absent"`; a file that only mentions the sentinel mid-line is not a guard; a coexisting wtft shadow outranks the guard check, which still reports `shadowed` in the document and on an `Also:` line; human mode prints the remedy on stderr; a guard whose first 160 lines pass a pipe buffer is still recognised (V10g) |
 
 `0755` is what install *writes* and what V2 asserts; the **tool's** check is any execute

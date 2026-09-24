@@ -189,8 +189,10 @@ reported.
   `claudeSubAgentFolds[].file` either build names, at any depth, is copied into the
   snapshot at its own relative path. A child only one build finds is still in the
   snapshot, so the lost check can still fire. A fold path counts as inside the Claude Code
-  projects root under either spelling of it, as given or after `realpath`, so a symlinked
-  root and a symlinked project folder both work. Anything that would leave the snapshot incomplete fails the run with exit 3
+  projects root under either spelling of it, as given or after `realpath`, so a fold file
+  named under a symlinked root or a symlinked project folder is frozen. (Selection runs
+  `find` without following links, so a transcript inside a symlinked project folder is not
+  selected in the first place.) Anything that would leave the snapshot incomplete fails the run with exit 3
   instead of being skipped: a discovery parse that throws, a fold file outside the Claude
   Code projects root, a path-less id the resolver cannot find, a resolver that throws, and a
   file that fails to copy. Otherwise both measured passes would skip it and certify a
@@ -206,17 +208,18 @@ reported.
   projects root in its measured pass, so the script refuses it with exit 2. The probe sets
   the variable in `process.env` and calls `projectsDir()` with no argument, the way the
   measured pass relies on it, so an older build that reads the variable from the
-  environment is accepted. A `--before` that cannot be loaded fails the run instead.
+  environment is accepted. A `--before` whose discovery or parser cannot be loaded, or whose
+  `projectsDir()` throws, exits 2.
 - A root that does not exist selects nothing, and a harness with nothing selected is
-  reported as skipped. When nothing at all is selected the script exits 3. Any other
-  failure to read a root, or of `find`, fails the run.
-- **Exit codes.** 0: the totals agree, or differ by exactly what the newly found subagents
-  cost. 1: they disagree. 2: bad usage (an unknown flag, `--sessions` that is not a positive
-  integer, a missing or empty `--before`, a `--before` that cannot be loaded) or a `--before`
-  build that ignores the projects-root variable. 3: could not compare — nothing selected, a
-  harness's selection that parses to no interactions, a transcript unreadable in either
-  pass, a child that cannot be frozen, or a total that is not a finite number. Before this
-  change a failure and a mismatch both exited 1, and several of these exited 0.
+  reported as skipped. When nothing at all is selected the script exits 3, and so does any
+  other failure to read a root, or of `find`. Selection runs before the `--before` checks, so
+  a root failure exits 3 even when `--before` is also bad.
+- **Exit codes** — the script's header states them; in short: 0 after subtracting what newly
+  found subagents cost (summed over every selected session that folds them), the totals agree
+  within half a cent and no subagent only BEFORE found; 1 otherwise; 2 bad usage, a
+  `--before` whose modules cannot be loaded, or one whose discovery ignores the projects-root
+  variable; 3 could not compare — any other error once the arguments are accepted. Before
+  this change a failure and a mismatch both exited 1, and several of these exited 0.
 - **A difference must equal what the new subagents cost.** The delta may differ from the
   newly found subagents' fold shares, summed across every selected session that folds them,
   by at most half a cent. A larger rise is unexplained; a smaller one would hide a fall
@@ -293,3 +296,4 @@ producer-side gap is duppypro/princess-pi-tools#1021.
 | final reconcile (the review-round commits) | the seam probe refused every build that reads the variable from `process.env` (a regression the Macroscope fix introduced); a bad `--before` misreported as an old build; an unfound path-less id and a throwing resolver silent or misattributed; resolved paths not canonical; "never exits 0"; closer lists missing E8–E11 and V10g; the overlap missing from CONTEXT, Amendment 7 and the manifest | `honoursProjectsSeam`, `foldFilesOf`, the discovery loop | ✅ E9b, E9c | Fixed with the PR back in Draft (duppypro/princess-pi-tools#1027) |
 | sibling sweep (#1027), seeded by Macroscope's five findings | 19 findings, 5 High: nothing selected, a NaN total and a measured-pass throw all exited 0; any one new subagent excused a rise of any size; a failed discovery parse froze an incomplete corpus; the config migration unlinked the only copy when the old and new paths are one file through a symlink; unchecked `mktemp` in the probe's setup | `main`, `snapshotCorpus`, the install-wtft migration, `run-mutants.sh` | ✅ G1–G9, V9j | Fixed. Filed, pre-existing: the migration's dangling-link and unreadable-new-file messages, human output dropping a left config under drift, an exec-only guard, and M7b's skip cause (#233). Left standing: two builds that price differently fail as "reclassification" (the pricing config path predates the seam, so every accepted build reads the same one); a resolver that answers with a different copy of a moved session; E4/E6 cannot see a live read in `main()` (Z2 pins the freeze itself) |
 | second sibling sweep | 17 findings, 1 High: a rise smaller than the new subagents' cost hid a fall (the bound was one-sided); a subagent two selected sessions fold was costed once; `realpath` on fold paths refused a symlinked project folder; an empty or unloadable `--before`; a selection with no interactions exiting 0; `--sessions 010` refused; the same-file refusal also blocking a safe old-name symlink or hardlink; six untested fixes | `main`, `snapshotCorpus`, the install-wtft migration | ✅ G10–G17, E7b, V9k | Fixed. Left standing: the two-sessions-fold-one-subagent sum has no end-to-end test (it needs a nested fixture a BEFORE build half-finds); the migration's dangling-link and unreadable-file messages are in #233 |
+| pre-submit reconcile of the sweep commits | 36 findings, all wording against the sweep's own changes, plus one code gap: an unloadable BEFORE parser exited 3, not 2 | the exit-code table, `main`, the migration docs | ✅ G14 | Fixed: the exit table now lives in the script's header and H5 points at it; the error prefix no longer doubles; the stale rise-rule comment is deleted. Per the review-loop stop rule, the reconcile stops here and the PR goes to its one billed round |

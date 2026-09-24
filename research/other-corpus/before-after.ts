@@ -14,12 +14,12 @@
  * Two invariants make the result checkable rather than merely plausible:
  *   - the session list is sorted and sliced, never shuffled, so two runs on an
  *     unchanged transcript directory select the same sessions;
- *   - the corpus TOTAL must be identical on both sides to the cent, EXCEPT for
- *     cost carried in by newly-discovered subagents. A reclassification moves
- *     money between categories and cannot change the total; subagent discovery
- *     legitimately ADDS cost that was previously invisible (#3/#138), so a
- *     delta is only acceptable when the two sides disagree about which subagent
- *     sessions they found. The script says which, so the reader can check.
+ *   - the corpus TOTAL must agree on both sides, EXCEPT for cost carried in by
+ *     newly-discovered subagents. A reclassification moves money between
+ *     categories and cannot change the total; subagent discovery legitimately
+ *     ADDS cost that was previously invisible (#3/#138), so the delta must be
+ *     exactly what the newly found subagents cost. The script names them, so
+ *     the reader can check.
  *
  * That second rule is not theoretical. It caught a real defect this branch
  * introduced: reading `cd /real 2>/dev/null || cd /tmp` as "last cd wins" sent
@@ -54,13 +54,19 @@
  * satisfy it (write files over 40 KB with a fresh mtime) rather than the
  * script relaxing it for tests.
  *
- * Exit codes: 0 the totals agree, or differ by exactly what newly found
- * subagents cost; 1 they disagree; 2 bad usage (including a --before that is
- * empty or cannot be loaded), or a --before build that ignores the
- * projects-root variable; 3 could not compare — nothing was selected, a
- * harness's selection parsed to no interactions, a transcript could not be
- * read or copied, a child could not be frozen, or a total is not a finite
- * number.
+ * Exit codes:
+ *   0  after subtracting what newly found subagents cost (their fold shares,
+ *      summed over every selected session that folds them), the totals agree
+ *      within half a cent, and no subagent only BEFORE found;
+ *   1  otherwise — the totals disagree, or a subagent is lost;
+ *   2  bad usage: an unknown flag, a flag with no value, `--sessions` that is
+ *      not a positive integer (default 250), a missing or empty `--before`, a
+ *      `--before` whose modules cannot be loaded, or a `--before` build whose
+ *      discovery ignores the projects-root variable;
+ *   3  could not compare: any other error once the arguments are accepted —
+ *      a root, transcript or module that cannot be read, a child that cannot
+ *      be frozen, nothing selected, a selection with no interactions, or a
+ *      total that is not a finite number.
  */
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
@@ -176,7 +182,7 @@ export function snapshotCorpus(opts: {
 		const rel = roots.map(r => path.relative(r, file)).find(inside);
 		if (rel === undefined) {
 			// Fatal for the same reason as a failed copy: the snapshot would lack it.
-			throw new Error(`before-after: ${file} is outside ${roots.join(" and ")}, so it cannot be frozen`);
+			throw new Error(`${file} is outside ${roots.join(" and ")}, so it cannot be frozen`);
 		}
 		const dest = path.join(outRoot, rel);
 		try {
@@ -185,7 +191,7 @@ export function snapshotCorpus(opts: {
 		} catch (err) {
 			// Fatal: a file missing from the snapshot would be skipped by both
 			// measured passes, and the comparison would certify a smaller corpus.
-			throw new Error(`before-after: could not copy into the snapshot: ${file} (${err instanceof Error ? err.message : String(err)})`);
+			throw new Error(`could not copy into the snapshot: ${file} (${err instanceof Error ? err.message : String(err)})`);
 		}
 	};
 
@@ -207,7 +213,9 @@ async function main(): Promise<void> {
 	const usage = (why: string): never => {
 		console.error(`before-after: ${why}`);
 		console.error("usage: bun research/other-corpus/before-after.ts --before <checkout> [--sessions N]");
-		console.error("  --before  a checkout of the build to compare against (e.g. the main clone)");
+		console.error("  --before    a checkout of the build to compare against (e.g. the main clone)");
+		console.error("  --sessions  transcripts to select per harness, a positive integer (default 250)");
+		console.error("  exit: 0 agree, 1 disagree, 2 usage or unusable --before, 3 could not compare");
 		process.exit(2);
 	};
 	for (let k = 0; k < argv.length; k += 2) {
@@ -241,14 +249,16 @@ async function main(): Promise<void> {
 
 	let seamOk: boolean;
 	try { seamOk = await honoursProjectsSeam(BEFORE); }
-	catch (err) { return usage(`cannot load --before ${BEFORE} (${err instanceof Error ? err.message : String(err)})`); }
+	catch (err) { return usage(`--before ${BEFORE}: its projects-root discovery could not be loaded or called (${err instanceof Error ? err.message : String(err)})`); }
 	if (!seamOk) {
-		console.error(`before-after: ${BEFORE} predates the WTFT_CLAUDE_PROJECTS_DIR seam, so its measured pass would read the live projects root, not the frozen corpus. Compare against a newer checkout.`);
+		console.error(`before-after: ${BEFORE}'s discovery ignores WTFT_CLAUDE_PROJECTS_DIR, so its measured pass would read the live projects root, not the frozen corpus. Compare against a newer checkout.`);
 		process.exit(2);
 	}
 
 	// Cache-busting query so both builds load as distinct modules.
-	const modBEFORE = await import(`${BEFORE}/extensions/lib/wtft-parser.ts?BEFORE`);
+	let modBEFORE;
+	try { modBEFORE = await import(`${BEFORE}/extensions/lib/wtft-parser.ts?BEFORE`); }
+	catch (err) { return usage(`--before ${BEFORE}: its parser could not be loaded (${err instanceof Error ? err.message : String(err)})`); }
 	const modAFTER = await import(`${AFTER}/extensions/lib/wtft-parser.ts?AFTER`);
 
 	// Discovery pass: both builds parse the LIVE selection once, with the real
@@ -327,20 +337,6 @@ async function main(): Promise<void> {
 		const gained = [...a.subagents].filter(id => !b.subagents.has(id));
 		const lost = [...b.subagents].filter(id => !a.subagents.has(id));
 
-		// THE TOTAL MAY RISE. IT MAY NEVER FALL. That is the whole rule, and it took
-		// three tries to state it as one line instead of three interacting ones:
-		//
-		//   cut 1: `explained = gained || lost` — a loss excused ITSELF.
-		//   cut 2: `explained = gained && !lost` — better, but the gate still only
-		//          fired on `Math.abs(delta)`, so a corpus total that FELL while any
-		//          new subagent was discovered came back "explained" and exited 0
-		//          (#106 review round 4, High/reasoning). A regression that loses
-		//          more than a new discovery adds was certified as fine.
-		//
-		// A reclassification cannot move a dollar; discovery can only ADD cost that
-		// was previously invisible. So a negative delta has no legitimate cause, and
-		// neither does a lost subagent id — each fails on its own, with no reference
-		// to the other.
 		if (lost.length > 0) mismatch = true;
 		// A difference needs a reason, and the only acceptable one is discovery:
 		// the total may differ by exactly what the newly found subagents cost. A
@@ -352,7 +348,7 @@ async function main(): Promise<void> {
 
 		console.log(`\n===== ${harness}: ${files.length} sessions =====`);
 		console.log(`total  BEFORE $${b.tot.toFixed(2)}  AFTER $${a.tot.toFixed(2)}  delta $${delta.toFixed(4)}` +
-			(explained ? "  (a RISE explained by subagent discovery, below)"
+			(explained ? "  (the delta is what the newly found subagents cost, below)"
 				: gained.length > 0 ? `   <-- the delta does not match the $${gainedCost.toFixed(4)} the newly found subagents cost`
 				: delta < -0.005 ? "   <-- TOTAL FELL; spend became invisible, which is never acceptable"
 				: Math.abs(delta) <= 0.005 ? "  (equal, as required)"

@@ -221,7 +221,7 @@ if [ -n "$CFG_HOME" ]; then
         # links to the old file). An old name that is itself a symlink, or a
         # separate hardlink, is safe to remove and falls through.
         cfg_state=left
-        left_reason="the new path is the old file under another name (a symlink); remove the link by hand"
+        left_reason="the new path is the old file under another name (a symlinked file or directory); there is one copy, so remove the link by hand, never the file"
       elif cmp -s "$old_path" "$new_path" 2>/dev/null; then
         # Identical: retry removing the stale duplicate in install mode.
         if [ "$MODE" = install ] && rm -f "$old_path" 2>/dev/null; then

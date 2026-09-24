@@ -53,8 +53,9 @@ usage. A plain install adds **3** for a failed build, which `--check` cannot
 return because it never builds. Three of those codes have a second cause: **1**
 is also a `--dir` that cannot be created (status `no-dir`), **4** is also install
 mode either declining to overwrite a DIFFERENT config file already at the new
-path, a file appearing there mid-move, the new path being the old file under
-another name (a symlink), or the copy itself failing partway (a permissions problem, say) — a file that copies fine but cannot be removed from
+path, a file appearing there mid-move, the new path already being the old file
+under another name (a symlinked file or directory — one copy, so remove the
+link, never the file), or the copy itself failing partway (a permissions problem, say) — a file that copies fine but cannot be removed from
 the old path afterward is reported as installed; a later run removes that
 identical leftover once the old directory allows it, and reports **4** until then — either way a
 human resolves which copy is authoritative, and **64** is also

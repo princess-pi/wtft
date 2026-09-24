@@ -119,7 +119,7 @@ The daemon writes one interaction line per classified turn. Fields:
 | `tc` | array | optional | Tool-implied categories (subset of §3 values) |
 | `ut` | `1` | optional | Unrecognized tool flag — set to `1` when present, absent otherwise |
 | `ttl` | `"1h"\|"5m"` | optional | Observed prompt-cache TTL class |
-| `miss` | `1` | optional | Cache miss flag (whole prefix re-primed) — set to `1` when present |
+| `miss` | `1` | optional | Cache miss flag — set to `1` when present: a parent turn that read no cache and wrote some, or one the overhead split classifies as a recache (a small prefix still cached, the rest re-primed; `docs/spec-241-partial-reprime-miss.md`). On a split turn it is on the remainder line, never the `#oh` line |
 | `ir` | `1` | optional | Interrupted turn — set to `1` when present |
 | `sp` | `1` | optional | DeepSeek surge-pricing flag — set to `1` when present |
 | `s` | string | optional | Source: set on a line the daemon wrote from a child transcript, absent on the tag's own session's lines. The first 16 hex digits of the SHA-1 of the child transcript's path — relative to the session directory when it lies under it, absolute when it does not. A later `_gen` record for the same `s` supersedes the line (§2e) |

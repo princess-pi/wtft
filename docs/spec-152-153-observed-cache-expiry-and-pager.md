@@ -99,7 +99,8 @@ destroyed the signal, so the signal has to be captured before it reaches the wir
 
 Hence `cacheMiss` is set in `parseEntryToInteraction` from raw usage, propagates onto the
 remainder line via the `{...interaction}` spread, and is explicitly cleared on the `#oh` line so
-one event is reported once.
+one event is reported once. *(Since #241 the split also sets it on the remainder line of any
+recache it finds: `docs/spec-241-partial-reprime-miss.md`.)*
 
 ### Version bump — reversing the Step-2 decision
 
@@ -182,6 +183,10 @@ half did not survive contact with fan-out.
 
 ### Road not taken: partial re-primes
 
+**Taken since — #241, `docs/spec-241-partial-reprime-miss.md`.** Real expiries on this host now
+keep a small cached prefix, so the zero-read rule alone missed them. A recache the overhead split
+finds is now a Cache Miss too. The text below is the reasoning at the time.
+
 The rule does not flag a *partial* re-prime, where a small prefix survives and the bulk is
 rewritten:
 
@@ -225,6 +230,8 @@ the Step-4 defect:
   the `#oh` line.
 - A partial re-prime splits into two lines, **does** emit a `cr=0/cw>0` line (asserted
   explicitly, so the trap stays documented in executable form), and yet no line is flagged.
+  *Since #241, TEST 9 asserts the opposite: exactly one line, the remainder, is flagged
+  (`docs/spec-241-partial-reprime-miss.md`).*
 - A split full miss round-tripped through tag lines into `buildWtftLines` renders exactly one
   divider — covering the serialize → restore → render path the CLI actually uses.
 
@@ -306,13 +313,13 @@ Manual, divider counts cross-checked against `miss` flags in the regenerated v2.
 
 | session | render | dividers | ground truth |
 |---|---|---:|---|
-| `b1f54c2f` | `-i 1h` | 2 | 2 flagged misses in 2 distinct 1h bins; 5 lines carry `cr=0/cw>0`, so the 3 phantoms are gone |
+| `b1f54c2f` | `-i 1h` | 2 | 2 flagged misses in 2 distinct 1h bins; 5 lines carry `cr=0/cw>0`, so the 3 phantoms are gone. *Since #241 the `08:01:07Z` partial re-prime (cr 17,266, cw 333,021, previous context 347,814) is flagged too, re-measured 2026-09-24* |
 | `b1f54c2f` | `-i 3t` | present | previously zero — the #121 gate |
 | `d730d9c3` | `-i 1d` | 3 | 5 flagged misses across 3 distinct local days (PDT) |
 
 The `d730d9c3` set includes `2026-08-05T19:59:55Z`, the `opus-4-8` → `opus-5` switch 539
 seconds after the previous turn — the case that motivated the issue. `07:50:38Z`, the partial
-re-prime, is correctly not flagged.
+re-prime, is correctly not flagged. *(Since #241 it is flagged: re-measured 2026-09-24, it meets the recache rule against a previous context of 179,375 tokens.)*
 
 `docs/EXT_WTFT.html` reconciled to the observed rule and the new label at Step 5.
 

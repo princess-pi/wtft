@@ -154,8 +154,7 @@ function usageLine(id: string, ts: string, cr: number, cw: number, model = "clau
 const sessionPath = path.join(dir, "fixture-152.jsonl");
 fs.writeFileSync(sessionPath, [
 	usageLine("msg_full_miss", "2026-07-01T12:00:00Z", 0, 48278),
-	// Partial re-prime: a small prefix survived. Measured shape from session
-	// b1f54c2f — NOT a miss, and the case a cr/cw check on tag lines gets wrong.
+	// Partial re-prime: a small prefix survived.
 	usageLine("msg_partial", "2026-07-01T13:00:00Z", 17266, 333021),
 	usageLine("msg_hit", "2026-07-01T14:00:00Z", 350000, 2000),
 	usageLine("msg_no_cache", "2026-07-01T15:00:00Z", 0, 0),
@@ -166,7 +165,7 @@ const byId = new Map<string, any>(parsed.map((i: any) => [i.messageId, i]));
 
 console.log("--- TEST 7: cacheMiss set from raw usage ---");
 check(byId.get("msg_full_miss")?.cacheMiss === true, "cr=0, cw>0 → cacheMiss true");
-check(!byId.get("msg_partial")?.cacheMiss, "partial re-prime (cr>0) → not a miss");
+check(!byId.get("msg_partial")?.cacheMiss, "partial re-prime (cr>0) → not a miss at parse time; the split decides it (TEST 9)");
 check(!byId.get("msg_hit")?.cacheMiss, "cache hit → not a miss");
 check(!byId.get("msg_no_cache")?.cacheMiss, "no cache activity → not a miss");
 
@@ -200,15 +199,16 @@ check(
 	"the flag rides the remainder line, not the #oh line"
 );
 
-console.log("--- TEST 9: partial re-prime is NOT flagged, despite its #oh line ---");
+console.log("--- TEST 9: partial re-prime is flagged once, on the remainder line (#241) ---");
 check(partialLines.length === 2, "partial re-prime → split into 2 lines");
 check(
 	partialLines.some(l => (l.cr ?? 0) === 0 && (l.cw ?? 0) > 0),
 	"partial re-prime does emit a cr=0/cw>0 line (the trap)"
 );
 check(
-	partialLines.every(l => l.miss !== 1),
-	"…but no line is flagged as a miss"
+	partialLines.filter(l => l.miss === 1).length === 1
+		&& partialLines.filter(l => l.miss === 1).every(l => !String(l.id ?? "").endsWith("#oh")),
+	"one line is flagged as a miss, and it is not the #oh line"
 );
 
 console.log("--- TEST 10: a flagged tag line renders a divider end-to-end ---");

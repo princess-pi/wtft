@@ -2252,7 +2252,9 @@ Daemon mode:
 
 Environment:
   WTFT_DAEMON_IDLE_MS          Milliseconds with no new lines before a session is dropped (default 86400000)
-  WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after start before that drop can fire (default 60000)`);
+  WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after start before that drop can fire (default 60000)
+  WTFT_HARNESS_QUIET_MS        Milliseconds with no write before a harness daemon releases a session no reader
+                               asked for; its next write adopts it again (default 300000)`);
       process.exit(0);
     } else if (arg === "--debug") {
       process.env.WTFT_DAEMON_DEBUG = "1";

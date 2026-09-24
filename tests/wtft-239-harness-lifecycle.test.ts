@@ -61,10 +61,12 @@ const envFor = (root: string) => ({
 });
 
 const pids: number[] = [];
-function start(root: string, args: string[], errName: string): { pid: number; err: string } {
+/** `snapDir`: the daemon writes a heap snapshot there on SIGUSR2. */
+function start(root: string, args: string[], errName: string, snapDir?: string): { pid: number; err: string } {
 	const err = path.join(root, errName);
 	const fd = fs.openSync(err, "a");
-	const child = spawn(process.execPath, [DAEMON, ...args], { detached: true, stdio: ["ignore", "ignore", fd], env: envFor(root) });
+	const flags = snapDir ? ["--heapsnapshot-signal=SIGUSR2"] : [];
+	const child = spawn("node", [...flags, DAEMON, ...args], { detached: true, stdio: ["ignore", "ignore", fd], env: envFor(root), cwd: snapDir });
 	child.unref();
 	fs.closeSync(fd);
 	if (child.pid) pids.push(child.pid);
@@ -77,7 +79,28 @@ const harnessPidFile = (root: string) =>
 	path.join(TMP, `wtft-harness-claude-${createHash("sha256").update(path.resolve(root)).digest("hex").slice(0, 12)}.pid`);
 const leasesNaming = (pid: number) =>
 	fs.readdirSync(TMP).filter(n => /^wtft-daemon-.*\.pid$/.test(n) && read(path.join(TMP, n)).trim() === String(pid)).length;
-const rssKb = (pid: number) => Number(/VmRSS:\s+(\d+)/.exec(read(`/proc/${pid}/status`))?.[1] ?? -1);
+/** Live heap in MiB: a heap snapshot collects garbage first, so this is what
+ *  the daemon retains, which RSS is not. */
+async function liveHeapMiB(pid: number, dir: string): Promise<number> {
+	for (const f of fs.readdirSync(dir)) fs.unlinkSync(path.join(dir, f));
+	process.kill(pid, "SIGUSR2");
+	let size = -1;
+	for (let i = 0; i < 300; i++) {
+		await sleep(200);
+		const snap = fs.readdirSync(dir).find(f => f.endsWith(".heapsnapshot"));
+		if (!snap) continue;
+		const now = fs.statSync(path.join(dir, snap)).size;
+		if (now > 0 && now === size) {
+			const d = JSON.parse(fs.readFileSync(path.join(dir, snap), "utf8"));
+			const fields = d.snapshot.meta.node_fields, n = fields.length, at = fields.indexOf("self_size");
+			let t = 0;
+			for (let k = at; k < d.nodes.length; k += n) t += d.nodes[k];
+			return t / 1048576;
+		}
+		size = now;
+	}
+	return NaN;
+}
 const classified = (file: string, id: string) => {
 	try { return readClassifiedTagFile(getCurrentVersionTagPath(file)).some((r: { messageId?: string }) => r.messageId === id); }
 	catch { return false; }
@@ -112,8 +135,10 @@ try {
 		const live = path.join(root, "proj-0", "live.jsonl");
 		fs.writeFileSync(live, turnLine("live-0", Date.now()));
 		const small = makeRoot("small", 10);
-		const h = start(root, ["--harness", "claude"], "q.err");
-		const s = start(small.root, ["--harness", "claude"], "small.err");
+		const bigSnaps = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-snap-")));
+		const smallSnaps = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-snap-")));
+		const h = start(root, ["--harness", "claude"], "q.err", bigSnaps);
+		const s = start(small.root, ["--harness", "claude"], "small.err", smallSnaps);
 		let n = 0;
 		const appender = setInterval(() => fs.appendFileSync(live, turnLine(`live-${++n}`, Date.now())), 400);
 		const settled = await until(() => read(h.err).includes("harness settled claude") && read(s.err).includes("harness settled claude"), 60_000);
@@ -124,9 +149,9 @@ try {
 		check(held <= 5, `after catch-up the harness holds a handful of leases, not one per session: ${held} for ${files.length + 1} sessions`);
 		const target = `live-${n}`;
 		check(await until(() => classified(live, target), 10_000) !== Infinity, "the session being appended to is still classified");
-		const big = rssKb(h.pid), base = rssKb(s.pid);
-		check(big > 0 && base > 0 && big - base < 15 * 1024, `RSS with 2,001 sessions is within 15 MB of the RSS with 10 (${big} kB vs ${base} kB)`);
 		clearInterval(appender);
+		const big = await liveHeapMiB(h.pid, bigSnaps), base = await liveHeapMiB(s.pid, smallSnaps);
+		check(big > 0 && base > 0 && big - base < 1, `live heap with 2,001 sessions is within 1 MiB of the heap with 10 (${big.toFixed(2)} vs ${base.toFixed(2)} MiB)`);
 
 		const woken = files[7];
 		fs.appendFileSync(woken, turnLine("woken", Date.now()));
@@ -156,7 +181,7 @@ try {
 		// Leases as many as a busy host's, so --restart is still walking them
 		// after the harness it started has claimed the root.
 		for (let i = 0; i < 40_000; i++) fs.writeFileSync(path.join(TMP, `wtft-daemon-fake${i}.pid`), String(h.pid));
-		const restart = spawnSync(process.execPath, [DAEMON, "--restart"], { encoding: "utf8", env: envFor(root) });
+		const restart = spawnSync("node", [DAEMON, "--restart"], { encoding: "utf8", env: envFor(root) });
 		check(restart.status === 0, `fixture: --restart exited 0 (${restart.status})`);
 		check((restart.stdout.match(/^Restarted: PID/gm) ?? []).length >= 1, "fixture: --restart stopped the harness");
 		start(root, ["--harness", "claude", "--session", files[1]], "r-cli.err");

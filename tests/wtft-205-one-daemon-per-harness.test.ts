@@ -14,6 +14,9 @@ import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 isolateTmpdir("205-harness");
 
 const DAEMON = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
+// The runtime the daemon ships on. Under bun 1.3.14 its fs.watch loses events
+// on a loaded host, which is not what a user's daemon does.
+const DAEMON_RUNTIME = "node";
 const POLL_MS = 667;
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -80,7 +83,7 @@ function start(args: string[], stderrName: string, extraEnv?: Record<string, str
 	const stderrPath = path.join(root, stderrName);
 	stderrPaths.push(stderrPath);
 	const fd = fs.openSync(stderrPath, "a");
-	const child = spawn(process.execPath, [DAEMON, ...args], {
+	const child = spawn(DAEMON_RUNTIME, [DAEMON, ...args], {
 		detached: true,
 		stdio: ["ignore", "ignore", fd],
 		env: extraEnv ? { ...env, ...extraEnv } : env,
@@ -91,8 +94,11 @@ function start(args: string[], stderrName: string, extraEnv?: Record<string, str
 	return child.pid ?? 0;
 }
 
-async function waitFor(label: string, pred: () => boolean, tries = 80): Promise<boolean> {
-	for (let i = 0; i < tries; i++) {
+/** Waits for the event itself, up to `tries` × 100 ms of wall time, so a
+ *  loaded host is slower but not failed. */
+async function waitFor(label: string, pred: () => boolean, tries = 300): Promise<boolean> {
+	const deadline = Date.now() + tries * 100;
+	while (Date.now() < deadline) {
 		if (pred()) return true;
 		await sleep(100);
 	}
@@ -137,7 +143,7 @@ try {
 				return false;
 			}
 		},
-		120,
+		300,
 	);
 	assert("100 claude files and 100 pi files are classified", settled);
 
@@ -189,7 +195,10 @@ try {
 		fs.readFileSync(claudeErr, "utf8").slice(burstErrAt).includes("session flush "),
 	);
 	fs.appendFileSync(burst, turnLine("burst-b", T0 + 601_000, 4));
-	await sleep(POLL_MS + 800);
+	await waitFor("the second burst wave flushes", () =>
+		[...fs.readFileSync(claudeErr, "utf8").slice(burstErrAt).matchAll(/session flush \d+ s-1\.jsonl/g)].length >= 2
+		&& readClassifiedTagFile(getCurrentVersionTagPath(burst)).some((row: { messageId?: string }) => row.messageId === "burst-b"),
+	);
 	const flushTimes = [...fs.readFileSync(claudeErr, "utf8").slice(burstErrAt).matchAll(/session flush (\d+) s-1\.jsonl/g)].map(m => Number(m[1]));
 	const gaps = flushTimes.slice(1).map((t, i) => t - flushTimes[i]);
 	assert(
@@ -332,7 +341,7 @@ try {
 	const idleDropped = await waitFor(
 		"an idle session is dropped",
 		() => fs.existsSync(idleErr) && fs.readFileSync(idleErr, "utf8").includes("session drop idle.jsonl"),
-		50,
+		300,
 	);
 	assert("idle drop leaves the harness process up", idleDropped && alive(idlePid));
 
@@ -350,10 +359,10 @@ try {
 		() => fs.existsSync(emptyErr) && fs.readFileSync(emptyErr, "utf8").includes("harness pid "),
 	);
 	const restart = spawnSync(process.execPath, [DAEMON, "--restart"], { encoding: "utf8", env });
-	await sleep(400);
+	const emptyGone = await waitFor("the empty harness exits after restart", () => !alive(emptyPid));
 	assert(
 		"restart stops a harness that holds no session lease",
-		emptyUp && restart.status === 0 && !alive(emptyPid) && restart.stdout.includes("harness wtft-harness-"),
+		emptyUp && restart.status === 0 && emptyGone && restart.stdout.includes("harness wtft-harness-"),
 	);
 } finally {
 	for (const pid of pids) {

@@ -35,7 +35,9 @@
   transcript and every file under its session directory (`subagents/`, at any depth)
   were last written more than `WTFT_DAEMON_IDLE_MS` ago, that no reader asked for, with nothing pending, no partial line held and no child still
   in its discovery window, it drops the slot. A directory that appears later, or is watched again
-  after a watcher error, is walked the same way. The idle threshold is unchanged, so a session is
+  after a watcher error, is walked the same way, and the 250 ms sweep checks each slot once a
+  minute, which releases one whose last subagent turn was still held back when the walk served
+  it. The idle threshold is unchanged, so a session is
   released only when the running daemon would have dropped it anyway; the in-memory state a
   drop loses (stream state, discovered `claude -p` children) is lost at the same point as
   before. A Claude Code session's next write, or a write to one of its `subagents/`
@@ -44,24 +46,31 @@
   or another process has replaced it since it was read.
 - **After a watch overflow** the harness also adopts any session written within
   `WTFT_DAEMON_IDLE_MS` that holds no slot, since events for it may have been lost.
-- **A focus request that cannot be posted** is reported on stderr. A lease the call pointed at
-  the harness is removed, so the reader is not told a session is served when nothing will
-  adopt it; a lease the harness already held stays. The spawn then waits up to 2 s for that
-  harness to exit and tries to claim the root itself, exiting 1 after five attempts.
+- **A focus request goes only to a harness that still holds the root.** The harness creates
+  its request directory when it claims the root and removes it as it stops, and a requester no
+  longer creates it; after posting, the requester checks the harness pid file still names that
+  harness. A request that cannot be posted is reported on stderr. Unless the harness still holds
+  the root and already held this session's lease, the lease and `.display` the call pointed at
+  it are removed, so the reader is not told a session is served when nothing will adopt it. The
+  spawn then waits up to 2 s for that harness to exit and tries to claim the root itself,
+  exiting 1 after five attempts.
 - **`--reparse` is refused for a session under a root whose harness is running**, not only for
   one whose lease is held: a released session has no lease, and the harness may adopt it again
   at any write and append to the tag the reparse is rewriting. `--reparse-range` exits 1,
-  naming how many sessions it left unreparsed, when any was refused or failed.
+  naming how many sessions it left unreparsed, when any was refused, failed or could not be
+  stat'd.
 - **A harness whose pid file no longer names it stops.** The sweep reads the harness pid file;
   if it was removed or names another process, the harness stops and releases its leases, so two
-  harnesses never contend for one root.
+  harnesses contend for one root for at most one 250 ms sweep.
 - **`--restart` never stops or unlinks what it started.** A lease or pid file naming a process
   this `--restart` started is skipped, and a lease or pid file is removed only if it still names
   the process that was stopped.
 - **Neither the startup reaper nor `--cleanup` acts on a harness daemon for a gone
   `--session`.** The harness drops a gone session itself.
-- **The #205 and #239 suites run their daemons under node**, and the #205 suite waits for the
-  event it measures, with wall-time limits of 30 s, instead of a fixed sleep.
+- **The #205 and #239 suites run their long-lived daemons under node** (the #239 suite runs
+  every daemon command under node; the #205 suite's one-shot `--stop`, `--reparse` and
+  `--restart` still run under the test runner's bun), and the #205 suite waits for the event it
+  measures, with wall-time limits of 30 s, instead of a fixed sleep.
 
 ## Closer
 

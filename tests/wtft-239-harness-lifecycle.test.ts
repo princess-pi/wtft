@@ -142,6 +142,14 @@ try {
 		fs.mkdirSync(subDir, { recursive: true });
 		fs.writeFileSync(path.join(subDir, "agent-a.jsonl"), turnLine("sub-a", Date.now()));
 		for (const d of [subDir, path.dirname(subDir)]) fs.utimesSync(d, TWO_DAYS_AGO, TWO_DAYS_AGO);
+		// Long idle, subagent transcript included: the catch-up holds its last
+		// subagent turn back, and the release must still happen once it settles.
+		const oldParent = files[9];
+		const oldSub = path.join(oldParent.slice(0, -".jsonl".length), "subagents");
+		fs.mkdirSync(oldSub, { recursive: true });
+		const oldAgent = path.join(oldSub, "agent-old.jsonl");
+		fs.writeFileSync(oldAgent, turnLine("old-a", TWO_DAYS_AGO.getTime()) + turnLine("old-b", TWO_DAYS_AGO.getTime()));
+		for (const f of [oldAgent, oldSub, path.dirname(oldSub)]) fs.utimesSync(f, TWO_DAYS_AGO, TWO_DAYS_AGO);
 		const small = makeRoot("small", 10);
 		const bigSnaps = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-snap-")));
 		const smallSnaps = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-snap-")));
@@ -155,6 +163,7 @@ try {
 		await sleep(1500);
 		const held = leasesNaming(h.pid);
 		check(read(getDaemonPidPath(parent)).trim() === String(h.pid), "a session whose subagent transcript was just appended to keeps its lease");
+		check(await until(() => read(getDaemonPidPath(oldParent)) === "", 70_000) !== Infinity, "a long-idle session with a subagent transcript is released too");
 		check(held <= 5, `after catch-up the harness holds a handful of leases, not one per session: ${held} for ${files.length + 1} sessions`);
 		const reparse = spawnSync("node", [DAEMON, "--reparse", files[5]], { encoding: "utf8", env: envFor(root) });
 		check(reparse.status === 1 && reparse.stderr.includes("refused"), `--reparse of a released session is refused while its harness runs (exit ${reparse.status})`);

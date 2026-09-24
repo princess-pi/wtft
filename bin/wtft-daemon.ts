@@ -1406,6 +1406,7 @@ interface Slot {
   tagGrewSinceMarker: boolean;
   pollHadFailure: boolean;
   sweptRetracted: boolean;
+  releaseCheckAtMs: number;
 }
 
 const harnessSlots = new Map<string, Slot>();
@@ -1440,6 +1441,7 @@ function freshSlot(file: string, displayed: boolean): Slot {
     tagGrewSinceMarker: true,
     pollHadFailure: false,
     sweptRetracted: false,
+    releaseCheckAtMs: 0,
   };
 }
 
@@ -1788,11 +1790,11 @@ function taggerIsOlder(a: string, b: string): boolean {
   return false;
 }
 
-/** Hands `file` to the live harness. When the request cannot be posted (the
- *  harness is usually stopping), a lease and `.display` this call pointed at
- *  the harness are removed and it returns false; if the harness already held
- *  the lease, that lease stays and it returns true, since the harness is
- *  serving the session. */
+/** Hands `file` to the live harness. When the request cannot be posted, it
+ *  returns true only if that harness still holds the root and already held
+ *  this session's lease (it is serving it); otherwise a lease and `.display`
+ *  naming it are removed and it returns false, so the caller can claim the
+ *  root once that harness has gone. */
 function pointSessionAt(livePid: number, file: string): boolean {
   const lease = getDaemonPidPath(file);
   let held = false;
@@ -1805,21 +1807,28 @@ function pointSessionAt(livePid: number, file: string): boolean {
   // through its startup rebuild: ask it by name to serve this one next. One
   // file per requester, so two requests never overwrite each other.
   try {
+    // Created by the harness when it claims the root and removed as it stops,
+    // so a missing directory means that harness is going away.
     const dir = `${harnessPidFile}.focus.d`;
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     const request = path.join(dir, `${process.pid}.tmp`);
     fs.writeFileSync(request, `${livePid}\n${path.resolve(file)}`);
     fs.renameSync(request, path.join(dir, `${process.pid}.request`));
+    if (fs.readFileSync(harnessPidFile, "utf8").trim() !== String(livePid)) {
+      try { fs.unlinkSync(path.join(dir, `${process.pid}.request`)); } catch { /* taken */ }
+      throw new Error("the harness gave up the root");
+    }
   } catch (err) {
     // With no request the harness may never adopt this session, so a lease
     // this call pointed at it must not claim it is served. One the harness
     // already held is its own and stays.
-    if (!held) {
+    let stillHarness = false;
+    try { stillHarness = fs.readFileSync(harnessPidFile, "utf8").trim() === String(livePid); } catch { /* removed */ }
+    if (!held || !stillHarness) {
       try { if (fs.readFileSync(lease, "utf8").trim() === String(livePid)) fs.unlinkSync(lease); } catch { /* already gone */ }
       try { fs.unlinkSync(`${lease}.display`); } catch { /* already gone */ }
     }
     process.stderr.write(`wtft-daemon: could not ask the running harness (pid ${livePid}) to serve ${file}: ${err instanceof Error ? err.message : String(err)}\n`);
-    return held;
+    return held && stillHarness;
   }
   return true;
 }
@@ -1898,6 +1907,7 @@ function runHarness(which: string, focus: string) {
     waitUntilExited(live);
   }
   harnessMode = true;
+  fs.mkdirSync(`${harnessPidFile}.focus.d`, { recursive: true, mode: 0o700 });
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] harness pid ${harnessPidFile}\n`);
     process.stderr.write(`[wtft-log-parser] harness root ${root}\n`);
@@ -1984,15 +1994,19 @@ function lastWrittenMs(file: string): number {
   return newest;
 }
 
-/** Right after the catch-up serves a session whose transcript (or subagents
- *  directory) was last written more than WTFT_DAEMON_IDLE_MS ago, and that no
- *  reader asked for and has nothing held, its slot and lease are released: the
- *  same drop the idle sweep makes, measured from the last write rather than
- *  from this process's start. Its next write adopts it again. */
+/** A session whose transcript and every file under its session directory
+ *  were last written more than WTFT_DAEMON_IDLE_MS ago, that no reader asked
+ *  for and that has nothing held, gives up its slot and lease: the same drop
+ *  the idle sweep makes, measured from the last write rather than from this
+ *  process's start. Checked when a walk (the catch-up, or a directory watched
+ *  anew) serves it, and by the sweep once a minute per slot, which also
+ *  catches one whose held subagent turn settles after the walk. Its next write
+ *  adopts it again. */
 function releaseIfLongIdle(file: string) {
   const key = path.resolve(file);
   const slot = harnessSlots.get(key);
   if (!slot || slot.displayed) return;
+  slot.releaseCheckAtMs = Date.now() + 60_000;
   if (slot.pendingItems.length > 0 || harnessFlushTimers.has(key) || slot.pendingFragment.length > 0) return;
   const now = Date.now();
   if (slotNeedsChildScan(slot, now)) return;
@@ -2063,6 +2077,10 @@ function sweepIdleSlots() {
     if (slotNeedsChildScan(slot, now)) withSlot(slot, () => scanForSubAgents());
     const current = harnessSlots.get(key);
     if (!current) continue;
+    if (now >= current.releaseCheckAtMs) {
+      releaseIfLongIdle(key);
+      if (!harnessSlots.has(key)) continue;
+    }
     if (current.pendingItems.length > 0) continue;
     if (now - current.startupTime < STARTUP_GRACE_MS) continue;
     if (now - current.lastActivityMs < IDLE_EXIT_MS) continue;
@@ -2237,7 +2255,13 @@ function runReparse(one: string, from: string, to: string) {
   let failed = 0;
   for (const file of files) {
     let mtime = 0;
-    try { mtime = fs.statSync(file).mtimeMs; } catch { continue; }
+    try {
+      mtime = fs.statSync(file).mtimeMs;
+    } catch (err) {
+      failed++;
+      process.stderr.write(`[wtft-log-parser] reparse could not stat ${file}: ${err instanceof Error ? err.message : String(err)}\n`);
+      continue;
+    }
     if (mtime < fromMs || mtime >= toMs) continue;
     if (tagIsCurrent(file)) continue;
     try {

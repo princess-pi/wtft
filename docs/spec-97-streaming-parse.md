@@ -65,9 +65,9 @@ reads, and every nested fold parse.
 A daemon watching a synthetic session whose three subagent transcripts total 28.3 MB, appended to
 every 5 s: `debug/97-daemon-pss.sh <daemon.mjs> <label> <seconds> [node-flags]` (not a suite). The
 script fails loudly rather than report a false reading: it checks the fixture, validates every
-sample, and cleans up on exit. It samples once the daemon's tag file carries a subagent line. That
-can be as soon as the **first** of the three transcripts is written, so the "once read" column may
-land mid-sweep.
+sample, and cleans up on exit. The script used for this table sampled once the daemon's tag file
+carried a subagent line, which could be as soon as the **first** of the three transcripts was
+written, so the "once read" column may have landed mid-sweep.
 
 | Build | PSS once a subagent is read | after appends |
 |---|---|---|
@@ -94,27 +94,29 @@ shipped in #219 alongside its one daemon per harness.
 #97's body carries this Closer; the PSS Closer it replaces is kept there under *Was*.
 
 **PSS was measuring the allocator, not wtft.** On `main` at `c7864c0` a daemon started at
-23.1 MB of PSS and was at 33.1 MB after 30 minutes. Across four startups of one build, PSS read
-77.2, 79.1, 23.1 and 77.7 MB, depending on garbage-collection timing. A heap snapshot of one of
-those startups held 5.83 MB live, against 77.7 MB of PSS.
+23.1 MiB of PSS and was at 33.1 MiB after 30 minutes. Across four startups of one build, PSS read
+77.2, 79.1, 23.1 and 77.7 MiB, depending on garbage-collection timing. A heap snapshot of one of
+those startups held 5.83 MiB live, against 77.7 MiB of PSS.
 
 **The Closer is now the live heap:** what a heap snapshot (which collects garbage first) holds.
 It must be at most 10 MiB once all three subagent transcripts are read and grow by at most 1 MiB
 over at least 30 minutes of appends. `debug/97-daemon-pss.sh` prints it beside PSS after each
 sample, both in MiB, then a `closer heap_start_mib=… heap_end_mib=… append_s=… met=0|1` line, and
 exits 3 when the Closer is not met, including when the appends ran under 1,800 s. It takes the
-first sample once the daemon's tag holds turns from all three transcripts and the session lease
-in its isolated `TMPDIR` names the daemon it measures. It
+first sample once the daemon's tag holds the last turn of all three transcripts, and the second
+once it holds the last appended turn of each; both times the session lease in its isolated
+`TMPDIR` must name the daemon it measures. It times the appends itself and compares the heap in
+bytes. It
 keeps its fixture under `${XDG_CACHE_HOME:-~/.cache}/wtft-97`, outside `/tmp`, where a test
 suite's `wtft-daemon --cleanup` kills fixture daemons.
 
 **Measured 2026-09-24, `main` at `76d887c`**, 28.3 MB of subagent transcripts, 1,800 s of appends
-(360 rounds), printing `closer heap_start_mib=5.80 heap_end_mib=6.32 append_s=1800 met=1`:
+(359 rounds), printing `closer heap_start_mib=5.80 heap_end_mib=6.32 append_s=1801 met=1`:
 
 | | PSS | live heap |
 |---|---|---|
-| after startup | 77.4 MiB | **5.80 MiB** |
-| after 1,800 s | 69.9 MiB | **6.32 MiB** |
+| after startup | 77.2 MiB | **5.80 MiB** |
+| after 1,801 s | 71.2 MiB | **6.32 MiB** |
 
 The live heap grew 0.52 MiB, so the Closer is met. The second PSS reading follows the first heap
 snapshot, which allocates inside the daemon, so it is not a clean PSS measurement. The resident

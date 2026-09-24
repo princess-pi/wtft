@@ -90,7 +90,8 @@ has a parseable line and the strict parse could never fire there.
   the edge `unreadable` with `total: null`.
 - **#231** S with no ledger edge, P in S's `alreadyAttributed`, and a ledger edge P → G: G is in
   `edges[]`, counted, and in `total`. The same holds when P is folded by a counted descendant
-  rather than being in-self.
+  rather than being in-self. With edges S → D, S → F, F → G, where D folds F, and `maxDepth` 2:
+  G is counted at depth 2, not cut, because F's own edges are walked at F's minimum depth.
 - **#232** S → C where every line of `C.jsonl` fails `JSON.parse`: the edge is
   `skip: "unreadable"`, `total: null`, and `unattributed` names C. An empty `C.jsonl` is still
   a counted $0 edge.

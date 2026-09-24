@@ -22,7 +22,7 @@ function check(cond: boolean, msg: string) {
 	else { failed++; console.error(`  ❌ FAIL: ${msg}`); }
 }
 
-const LEASES = 2000;
+const LEASES = 10_000;
 const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-240-")));
 const home = path.join(dir, "home");
 const leaseDir = path.join(dir, "leases");
@@ -35,7 +35,7 @@ const heldSession = path.join(dir, "held", "held.jsonl");
 fs.mkdirSync(path.join(dir, "held", "wtft-tags"), { recursive: true });
 fs.writeFileSync(heldSession, "{}\n");
 fs.writeFileSync(path.join(dir, "held", "wtft-tags", "held.jsonl.wtft-tag.v0.jsonl"),
-	(JSON.stringify({ t: 1, c: 0.01, cat: "code", f: [], cmd: [] }) + "\n").repeat(30_000));
+	(JSON.stringify({ _hb: { first: 1, last: 2 } }) + "\n").repeat(40_000));
 const holder = spawn(process.execPath, ["-e", "setInterval(() => {}, 1e6)", "--session", heldSession], { stdio: "ignore" });
 
 const session = path.join(dir, "watched", "session.jsonl");
@@ -51,7 +51,7 @@ try {
 		fs.writeFileSync(path.join(leaseDir, `wtft-daemon-${k.toString(16).padStart(12, "0")}.pid`), String(holder.pid));
 	}
 	check(fs.statSync(path.join(dir, "held", "wtft-tags", "held.jsonl.wtft-tag.v0.jsonl")).size > 1_000_000,
-		"fixture: the holder's tag is over the 1 MB warning size");
+		"fixture: the holder's tag is over the 1 MB warning size, and all heartbeats");
 
 	const started = Date.now();
 	let log = "";
@@ -67,11 +67,13 @@ try {
 		if (log.includes("started, watching")) startedAt = Date.now();
 	}
 	const elapsed = startedAt ? startedAt - started : Infinity;
-	check(elapsed < 1500, `a per-session daemon starts within 1.5 s beside ${LEASES} leases of one live pid (took ${elapsed} ms)`);
+	check(elapsed < 1000, `a per-session daemon starts within 1 s beside ${LEASES} leases of one live pid (took ${elapsed} ms)`);
 
 	const reapLog = path.join(home, ".local", "state", "wtft", "reap.log");
 	const lines = fs.existsSync(reapLog) ? fs.readFileSync(reapLog, "utf8").split("\n").filter(l => l.includes(`PID ${holder.pid}`)) : [];
 	check(lines.length === 1, `reap.log gains one line about that pid, not one per lease (got ${lines.length})`);
+	check(/tag file large/.test(lines[0] ?? "") && /heartbeats/.test(lines[0] ?? "") && /zombie/.test(lines[0] ?? ""),
+		`that one line carries all three findings: large tag, heartbeat ratio, no interactions (got ${lines[0]})`);
 } finally {
 	if (daemonPid) { try { process.kill(daemonPid, "SIGTERM"); } catch { /* gone */ } }
 	try { holder.kill("SIGKILL"); } catch { /* gone */ }

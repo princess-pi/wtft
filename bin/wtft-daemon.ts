@@ -1069,6 +1069,13 @@ function reapAndWarn() {
     else leasesOf.set(pid, [fullPath]);
   }
   const sessionOf = new Map<number, string | null>();
+  // Re-proved before unlinking: a lease read at the start may have been
+  // claimed by a new owner while the pids before it were examined.
+  const unlinkIfStill = (lease: string, pid: number) => {
+    try {
+      if (parseInt(fs.readFileSync(lease, "utf8").trim(), 10) === pid) fs.unlinkSync(lease);
+    } catch (_) {}
+  };
 
   for (const [pid, leases] of leasesOf) {
     let alive = false;
@@ -1083,20 +1090,20 @@ function reapAndWarn() {
         sessionFound = args[sessIdx + 1];
       }
     } catch (_) {}
-    sessionOf.set(pid, alive ? sessionFound : null);
-
     if (!alive) {
-      for (const lease of leases) { try { fs.unlinkSync(lease); } catch (_) {} }
+      for (const lease of leases) unlinkIfStill(lease, pid);
       continue;
     }
 
     // HARD: session gone (not moved, not never-written). Never our own PID.
     if (pid !== process.pid && sessionFound && sessionIsGone(sessionFound)) {
       process.kill(pid, "SIGTERM");
-      for (const lease of leases) { try { fs.unlinkSync(lease); } catch (_) {} }
+      for (const lease of leases) unlinkIfStill(lease, pid);
       warnings.push(`[${new Date().toISOString()}] KILLED PID ${pid}: session gone — ${sessionFound}`);
       continue;
     }
+    sessionOf.set(pid, sessionFound);
+    const findings: string[] = [];
 
     if (sessionFound) {
       let tagFound: string | null = null;
@@ -1122,12 +1129,12 @@ function reapAndWarn() {
 
           if (stat.size > TAG_SIZE_WARN) {
             const mb = (stat.size / (1024 * 1024)).toFixed(1);
-            warnings.push(`[${new Date().toISOString()}] WARN PID ${pid}: tag file large (${mb} MB) — ${tagFound}`);
+            findings.push(`tag file large (${mb} MB) — ${tagFound}`);
           }
 
           if (lines.length > 10 && hbRatio >= HB_RATIO_WARN) {
             const pct = Math.round(hbRatio * 100);
-            warnings.push(`[${new Date().toISOString()}] WARN PID ${pid}: ${pct}% heartbeats (${hbLines.length}/${lines.length} lines) — possible malfunction — ${tagFound}`);
+            findings.push(`${pct}% heartbeats (${hbLines.length}/${lines.length} lines) — possible malfunction — ${tagFound}`);
           }
 
           const hasInteractions = lines.some(l => {
@@ -1141,13 +1148,16 @@ function reapAndWarn() {
                 const startTime = hb._hb?.first;
                 if (startTime && (Date.now() - startTime) > ZERO_INTERACTIONS_AGE) {
                   const ageH = Math.round((Date.now() - startTime) / 3600000);
-                  warnings.push(`[${new Date().toISOString()}] WARN PID ${pid}: ${ageH}h old with zero real interactions — zombie daemon? — ${sessionFound}`);
+                  findings.push(`${ageH}h old with zero real interactions — zombie daemon? — ${sessionFound}`);
                 }
               } catch (_) {}
             }
           }
         } catch (_) {}
       }
+    }
+    if (findings.length > 0) {
+      warnings.push(`[${new Date().toISOString()}] WARN PID ${pid}: ${findings.join("; ")}`);
     }
   }
 
@@ -2090,7 +2100,7 @@ if (showList || showCleanup || showRestart || stopSession) {
     try {
       pid = parseInt(fs.readFileSync(fullPath, "utf8").trim(), 10);
     } catch (_) { continue; }
-    if (pid <= 0) continue;
+    if (!(pid > 0)) continue;
     seenPids.add(pid);
 
     let alive = false;

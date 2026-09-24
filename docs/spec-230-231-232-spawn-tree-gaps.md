@@ -16,7 +16,8 @@ A counted edge's `total` is the child's own transcript **plus every transcript
 `discoverSubagentSessionFiles(<child>.jsonl)` lists** — the same set a root session's SELF merges.
 The folds those subagent parses make count toward the edge exactly as the child's own folds do.
 Every part is parsed with the child and all its subagent transcripts as `doNotFold`, so no part
-folds another. Which files discovery lists, and which it skips without reporting, is
+folds another. Each part is still its own parse, so two parts can fold the same `claude -p`
+session: its first share stands and every later one is subtracted, so it is billed once. Which files discovery lists, and which it skips without reporting, is
 `discoverSubagentSessionFiles`'s contract (`docs/wtft-incremental-render-spec.md` § *Where the
 transcripts are on disk*; its unreported skips are listed in #236); this change prices what it
 lists.
@@ -30,15 +31,18 @@ child's `descendantUntagged` entry, not added to `spawned.total`, so a later edg
 `already-counted` although that untagged cost is outside the total. A subagent session with an
 `unattributed` entry from an earlier edge has that entry removed, and the earlier edge keeps its
 skip. A Pi sibling session with a `parentSession` header is one such transcript: before this
-change it was priced only under its own edge. Now it is priced once: in SELF when it is in-self,
+change it was priced only under its own edge. Now it is priced once: in SELF when the caller
+names it in `alreadyAttributed` (the tag's fold records name Pi siblings),
 else inside whichever reaches it first, the descendant or its own edge.
 
 **Whole or null.** If that discovery reports a file it could not read or throws, or any listed
 transcript cannot be read, has non-blank lines and not one that parses (§3), or cannot be
-stat-ed, or a `claude -p` transcript one of those parses folds cannot be read, the edge is
+stat-ed, or a `claude -p` transcript one of those parses folds cannot be read or stat-ed, or its
+discovery fails, the edge is
 `skip: "unreadable"`, `total: null`, with an `unattributed` entry, the same as a child transcript
 that cannot be opened. An edge total never leaves out a listed file it could not read, because
-nothing in the report would say it had; the only file it leaves out is one already in a total. Inside one file, a bad line is still skipped and the good lines priced, as
+nothing in the report would say it had; the only file it leaves out is one already in a total.
+Untagged cost is outside the edge total as it always was, counted in `descendantUntagged`. Inside one file, a bad line is still skipped and the good lines priced, as
 everywhere else.
 
 **`live`** is true when any of those files, not only the child's own, has an mtime within
@@ -49,7 +53,8 @@ those files, so its writes do not set `live`.
 ## 2. #231: the ledger children of an in-self or folded session are walked
 
 The walk no longer starts from the root alone. Every id in `alreadyAttributed` is queued as a
-parent at depth 2, as if it were a depth-1 child, and an id a descendant's parse folds, or a
+parent at depth 2, as if it were a depth-1 child, and an id a descendant's parse folds on a
+model-tagged turn, or a
 subagent session priced inside it (§1), is queued when it is folded, at that descendant's
 depth + 2. Only that session's own transcript is inside
 the total; its ledger children are priced like any other edge.
@@ -87,7 +92,8 @@ has a parseable line and the strict parse could never fire there.
 
 - **#230** S → C, C with one Task subagent transcript carrying 500 output tokens:
   `edges[0].total.outputTokens` includes the 500. An unreadable subagent transcript under C makes
-  the edge `unreadable` with `total: null`.
+  the edge `unreadable` with `total: null`. When C's transcript and its subagent each fold the
+  same `claude -p` session F, the edge bills F once.
 - **#231** S with no ledger edge, P in S's `alreadyAttributed`, and a ledger edge P → G: G is in
   `edges[]`, counted, and in `total`. The same holds when P is folded by a counted descendant
   rather than being in-self. With edges S → D, S → F, F → G, where D folds F, and `maxDepth` 2:

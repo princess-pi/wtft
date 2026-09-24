@@ -93,7 +93,8 @@ read path rediscovers which sessions were folded.
     −1e-9; values between that and zero are float noise and become 0. A throw here is a bug
     in this module, not a fact about a transcript (#180 item 4).
 - **A gap later covered is not a gap.** A session in `unattributed` that a later descendant's
-  parse folds, or lists as a subagent, has landed (untagged turns apart, which `descendantUntagged` counts) in `spawned.total`. Its `unattributed` entry is removed, and its
+  parse folds on a model-tagged turn, or lists as a subagent, has landed (a subagent session's
+  untagged turns apart, which `descendantUntagged` counts) in `spawned.total`. Its `unattributed` entry is removed, and its
   outcome becomes `folded`. Its edge row keeps the skip it was reported with (#180 item 3).
 - **The `try` covers reading the descendant only:** subagent discovery, the parse of its
   transcript and of each subagent transcript (including any `claude -p` transcript those parses

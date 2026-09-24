@@ -149,10 +149,11 @@ reintroduced inside #116's fix. An *absent* ledger is not an error: nothing has 
 
 **The walk** is breadth-first through `childrenOf`, from the reported session, from every session
 the caller names as already in its total (`alreadyAttributed`), and from every session a
-descendant folds or prices as a subagent (`docs/spec-230-231-232-spawn-tree-gaps.md` §2):
+descendant folds on a model-tagged turn or prices as a subagent
+(`docs/spec-230-231-232-spawn-tree-gaps.md` §2):
 
-- **A session is counted at most once.** A `visited` set means a session is queued at most once,
-  and the `outcomeOf` map records what happened the first time it was reached — except that an
+- **A session is counted at most once.** Each session's own edges are walked once, from its
+  shallowest queue entry, and the `outcomeOf` map records what happened the first time it was reached — except that an
   `unresolved` session becomes `folded` when a later descendant covers it — so a diamond (two
   recorded edges to the same child) or a cycle contributes its cost once, not twice.
 - **The walk is breadth-first**, which is a correctness property rather than a taste: it reaches
@@ -174,12 +175,14 @@ descendant folds or prices as a subagent (`docs/spec-230-231-232-spawn-tree-gaps
   came back empty — the file is absent, or somewhere this process cannot read, and the walk cannot
   tell those apart, which is why the name does not claim absence) and `unreadable` (a file that
   cannot be read, has non-blank lines and not one that parses, or cannot be stat-ed — the child's
-  own transcript, any subagent transcript discovery lists for it, that discovery itself, or a
-  `claude -p` transcript one of those parses folds; the only
+  own transcript, any subagent transcript discovery lists for it, or that discovery itself; or a
+  `claude -p` transcript one of those parses folds could not be read or stat-ed, or its discovery
+  failed; the only
   skip class that is a bug rather than a fact). **One entry per session, not per edge**: two edges
   onto the same unresolved child are one gap. An entry is removed when a later descendant folds that
-  session or lists it as a subagent, because its money has then landed (its untagged turns in
-  `descendantUntagged`, as for any descendant).
+  session on a model-tagged turn or lists it as a subagent, because its money has then landed (a
+  subagent session's untagged turns in `descendantUntagged`; a folded session's whole share,
+  untagged turns included, in the folding turn's cost).
 - **The walk continues past a gap.** A child we cannot read may still have recorded children of
   its own, and those may be perfectly readable; its grandchildren are edges in the *ledger*, not
   entries in the file that is missing. Dropping the subtree with its parent loses real, resolvable
@@ -198,7 +201,8 @@ descendant folds or prices as a subagent (`docs/spec-230-231-232-spawn-tree-gaps
   the expensive direction to be wrong in. `already-counted` is the same claim about the tree's
   own total, and covers a `claude -p` session a resolved descendant's parse folded in, or a
   subagent transcript discovery lists for that descendant and does not leave out: its money is in
-  `spawned.total`, apart from untagged turns, which `descendantUntagged` counts. A
+  `spawned.total` (a subagent transcript's untagged turns apart, which `descendantUntagged`
+  counts). Two parts of one descendant that fold the same session bill it once. A
   resolved descendant's parse lists every session it folded on a deduplicated, model-tagged turn,
   at any depth, with that session's share. A session that is already in some total has its share
   subtracted from the descendant's; a subagent transcript already in some total is left out of the

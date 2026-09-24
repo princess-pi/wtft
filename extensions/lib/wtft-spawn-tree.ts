@@ -418,23 +418,33 @@ function walkLedger(
 			// Drop `untaggedCostUsd`: it would leak into `spawned.edges[].total`.
 			// A subagent session already in some total is left out whole; one that
 			// lands here is folded, as a `claude -p` session this parse folds is.
-			const parsed = [...descendant.own];
+			const parts = [descendant.own];
 			for (const sub of descendant.subagents) {
 				const prior = outcomeOf.get(sub.id);
 				if (prior === "in-self" || prior === "counted" || prior === "folded") continue;
-				parsed.push(...sub.interactions);
+				parts.push(sub.interactions);
 				if (prior === "unresolved") tree.unattributed = tree.unattributed.filter(gap => gap.child !== sub.id);
 				outcomeOf.set(sub.id, "folded");
 				enqueue(sub.id, depth + 2);
 			}
+			const parsed = parts.flat();
 			const summary = computeSessionSummary(parsed);
 			const { untaggedCostUsd, ...total } = summary.total;
+			// Each part is its own parse, so two parts can fold the same session:
+			// its first share stands, and every later one comes back out.
+			const folds = new Map<string, TokenTotals>();
+			for (const part of parts) {
+				for (const [id, share] of foldsInTotal(part)) {
+					if (folds.has(id)) subtractTotals(total, share);
+					else folds.set(id, share);
+				}
+			}
 			if (summary.untaggedInteractions > 0) {
 				tree.descendantUntagged.push({ child: edge.child, untaggedInteractions: summary.untaggedInteractions, untaggedCostUsd });
 			}
 			// A session this parse folded is either already in some total — take its
 			// share back out — or it lands here, and a gap reported for it is closed.
-			for (const [id, share] of foldsInTotal(parsed)) {
+			for (const [id, share] of folds) {
 				const prior = outcomeOf.get(id);
 				if (prior === "in-self" || prior === "counted" || prior === "folded") {
 					subtractTotals(total, share);

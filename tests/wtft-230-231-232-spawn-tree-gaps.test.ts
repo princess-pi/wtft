@@ -146,6 +146,19 @@ console.log("\n#230 — a launcher descendant's Task subagents are in its edge t
 		"H8 a child whose own transcript is old but whose subagent was just written is live");
 }
 
+{
+	const S = uuid(81), C = uuid(82), F = uuid(83);
+	const cFile = putSession(C, turnLine("c-81", T0 + 1_000, 300, cwdOf(F)));
+	const subFile = putSubagent(C, "twin", turnLine("c-sub-81", T0 + 1_500, 50, cwdOf(F)));
+	putSession(F, turnLine("f-81", T0 + 2_000, 200));
+	check(computeSessionSummary(parseSessionFile(cFile)).total.outputTokens === 500
+		&& computeSessionSummary(parseSessionFile(subFile)).total.outputTokens === 250,
+		"H9 fixture precondition: C's transcript and its subagent each fold F on their own");
+	const tree = computeSpawnTree(S, { ledgerPath: ledgerOf([[S, C]]), alreadyAttributed: new Set() });
+	check(tree.edges.find(e => e.child === C)?.total?.outputTokens === 550,
+		`H10 two parts of one descendant that fold the same session bill it once: 300 + 50 + 200 (got ${tree.edges.find(e => e.child === C)?.total?.outputTokens})`);
+}
+
 // ---
 // #231 — ledger children of a session already inside a total are walked
 // ---

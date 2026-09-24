@@ -116,11 +116,11 @@ _Avoid_: Sub-thread, branch, fork
 
 **Subagent session**:
 A separate `.jsonl` log for a spawned subagent, stored under `<session-id>/subagents/` (Claude
-Code), or a Pi sibling file in the same directory whose first-line session header names the
-parent's session id as `parentSession`. wtft discovers (the `subagents/` tree recursively, Pi
-siblings one level) and blends these chronologically into the parent's own turns — folded into **self**. A
+Code, `agent-*.jsonl`), or a Pi sibling file in the same directory whose first-line session header
+names, as `parentSession`, the `id` in the parent's own first-line session header. wtft discovers
+them (the `subagents/` tree recursively, Pi siblings one level) and blends these chronologically into the parent's own turns — folded into **self**. A
 ledger-spawned descendant's own subagent sessions, other than one already counted, are priced
-inside that descendant's edge total, and so in **tree** (see Self / tree below;
+inside that descendant's edge total (their untagged turns in `descendantUntagged`), and so in **tree** (see Self / tree below;
 `docs/spec-230-231-232-spawn-tree-gaps.md`). Distinct from a sidechain (above), which lives inline in the parent
 file rather than as its own file.
 _Avoid_: Child session, nested session
@@ -431,8 +431,8 @@ _Avoid_: Rollup, grand total, inclusive cost (each hides which of the two is mea
 A recorded spawn edge whose child's cost could not be read: `not-found` (the lookup came back
 empty — absent, or somewhere this process cannot read, and the walk cannot tell those apart) or
 `unreadable` (a file found that could not be read, has lines and not one that parses as JSON, or
-could not be stat-ed — the child's transcript, a subagent transcript of it, that discovery, or a
-`claude -p` transcript their parses fold; a file with only some bad lines is priced from the good
+could not be stat-ed — the child's transcript, a subagent transcript of it, or that discovery; or
+a `claude -p` transcript their parses fold could not be read or stat-ed, or its discovery failed; a file with only some bad lines is priced from the good
 ones, and a blank-only file is an empty session). Reported with its reason and a `null` cost,
 **never a zero**: a zero says the child cost nothing, which is a claim we do not have. Distinct
 from **uncounted** (#149), a billable event the harness records no `usage` for; and from the four

@@ -59,7 +59,6 @@ function envMs(name: string, fallback: number): number {
 }
 const IDLE_EXIT_MS = envMs("WTFT_DAEMON_IDLE_MS", 24 * 60 * 60 * 1000);
 const STARTUP_GRACE_MS = envMs("WTFT_DAEMON_STARTUP_GRACE_MS", 60 * 1000);
-const HARNESS_QUIET_MS = envMs("WTFT_HARNESS_QUIET_MS", 5 * 60 * 1000);
 // Park at most 1h on a session.jsonl that has never appeared; only the never-seen case uses this ceiling.
 const SESSION_WAIT_MAX_MS = 60 * 60 * 1000;
 
@@ -1089,8 +1088,8 @@ function reapAndWarn() {
 
   const warnings: string[] = [];
 
-  // One process can hold many leases (a harness daemon holds one per session),
-  // so each distinct pid is examined once and its outcome applied to all of them.
+  // One process can hold many leases (a harness daemon holds one per session
+  // it serves), so each distinct pid is examined once and its outcome applied to all of them.
   type Lease = { path: string; dev: number; ino: number };
   const leasesOf = new Map<number, Lease[]>();
   for (const pidFile of pidFiles) {
@@ -1407,7 +1406,6 @@ interface Slot {
   tagGrewSinceMarker: boolean;
   pollHadFailure: boolean;
   sweptRetracted: boolean;
-  lastEventMs: number;
 }
 
 const harnessSlots = new Map<string, Slot>();
@@ -1442,7 +1440,6 @@ function freshSlot(file: string, displayed: boolean): Slot {
     tagGrewSinceMarker: true,
     pollHadFailure: false,
     sweptRetracted: false,
-    lastEventMs: now,
   };
 }
 
@@ -1644,21 +1641,15 @@ function scheduleFlush(key: string) {
   harnessFlushTimers.set(key, timer);
 }
 
-/** `fromWalk`: a catch-up visit, not news of a write, so a session adopted by
- *  it counts as last written when its file was. */
-function wake(file: string, displayed: boolean, fromWalk = false) {
+function wake(file: string, displayed: boolean) {
   const key = path.resolve(file);
   let slot = harnessSlots.get(key);
   if (!slot) {
     slot = freshSlot(key, displayed);
-    if (fromWalk) {
-      try { slot.lastEventMs = fs.statSync(key).mtimeMs; } catch { /* gone: the service below drops it */ }
-    }
     if (!withSlot(slot, () => adoptSession())) return;
     harnessSlots.set(key, slot);
-  } else {
-    if (displayed) slot.displayed = true;
-    if (!fromWalk) slot.lastEventMs = Date.now();
+  } else if (displayed) {
+    slot.displayed = true;
   }
   const status = withSlot(slot, () => serviceSession());
   if (status === "drop") {
@@ -1810,7 +1801,11 @@ function pointSessionAt(livePid: number, file: string) {
     fs.writeFileSync(request, `${livePid}\n${path.resolve(file)}`);
     fs.renameSync(request, path.join(dir, `${process.pid}.request`));
   } catch (err) {
-    process.stderr.write(`wtft-daemon: could not ask the running harness (pid ${livePid}) to serve ${file} next, so it is served in walk order: ${err instanceof Error ? err.message : String(err)}\n`);
+    // With no request the harness may never adopt this session, so the lease
+    // must not claim it is served.
+    try { if (fs.readFileSync(lease, "utf8").trim() === String(livePid)) fs.unlinkSync(lease); } catch { /* already gone */ }
+    process.stderr.write(`wtft-daemon: could not ask the running harness (pid ${livePid}) to serve ${file}: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.exit(1);
   }
 }
 
@@ -1907,8 +1902,8 @@ function runHarness(which: string, focus: string) {
       takeFocusRequests();
       const file = files[next++];
       if (file === focusKey) continue;
-      wake(file, false, true);
-      releaseIfQuiet(file, Date.now());
+      wake(file, false);
+      releaseIfLongIdle(file);
     }
     if (next < files.length) {
       setImmediate(catchUp);
@@ -1938,38 +1933,51 @@ function dropHarnessSlot(key: string) {
   }
 }
 
-/** A lease that still names this process is removed; one another process
- *  has taken is left alone. */
+/** A lease that still names this process, and that no other slot shares, is
+ *  removed; one another process has taken since it was read is left alone. */
 function releaseLease(slot: Slot) {
   if (!slot.pidPath) return;
+  for (const other of harnessSlots.values()) if (other !== slot && other.pidPath === slot.pidPath) return;
   try {
-    if (fs.readFileSync(slot.pidPath, "utf8").trim() === String(process.pid)) fs.unlinkSync(slot.pidPath);
+    const before = fs.statSync(slot.pidPath);
+    if (fs.readFileSync(slot.pidPath, "utf8").trim() !== String(process.pid)) return;
+    const now = fs.statSync(slot.pidPath);
+    if (now.dev === before.dev && now.ino === before.ino) fs.unlinkSync(slot.pidPath);
   } catch { /* already gone */ }
 }
 
-/** A session nobody is reading, with nothing pending and no write for
- *  HARNESS_QUIET_MS, gives up its slot and lease; its next write adopts it again. */
-function releaseIfQuiet(file: string, now: number) {
+function lastWrittenMs(file: string): number {
+  let newest = 0;
+  try { newest = fs.statSync(file).mtimeMs; } catch { /* gone */ }
+  try { newest = Math.max(newest, fs.statSync(path.join(file.slice(0, -".jsonl".length), "subagents")).mtimeMs); } catch { /* no subagents */ }
+  return newest;
+}
+
+/** Right after the catch-up serves a session whose transcript (or subagents
+ *  directory) was last written more than WTFT_DAEMON_IDLE_MS ago, and that no
+ *  reader asked for and has nothing held, its slot and lease are released: the
+ *  same drop the idle sweep makes, measured from the last write rather than
+ *  from this process's start. Its next write adopts it again. */
+function releaseIfLongIdle(file: string) {
   const key = path.resolve(file);
   const slot = harnessSlots.get(key);
   if (!slot || slot.displayed) return;
-  if (slot.pendingItems.length > 0 || harnessFlushTimers.has(key)) return;
-  if (now - slot.lastEventMs < HARNESS_QUIET_MS) return;
+  if (slot.pendingItems.length > 0 || harnessFlushTimers.has(key) || slot.pendingFragment.length > 0) return;
+  const now = Date.now();
   if (slotNeedsChildScan(slot, now)) return;
+  if (now - lastWrittenMs(key) < IDLE_EXIT_MS) return;
   dropHarnessSlot(key);
 }
 
 /** After a watch overflow, events may have been lost for sessions that hold
- *  no slot: adopt any written within HARNESS_QUIET_MS. */
+ *  no slot: adopt any written within WTFT_DAEMON_IDLE_MS. */
 function wakeRecentlyWritten() {
   const files: string[] = [];
   walkSessions(harnessRootKey, files);
-  const since = Date.now() - HARNESS_QUIET_MS;
+  const since = Date.now() - IDLE_EXIT_MS;
   for (const file of files) {
     if (harnessSlots.has(file)) continue;
-    try {
-      if (fs.statSync(file).mtimeMs >= since) wake(file, false);
-    } catch { /* gone */ }
+    if (lastWrittenMs(file) >= since) wake(file, false);
   }
 }
 
@@ -1996,8 +2004,12 @@ function sweepIdleSlots() {
   // Removed (--restart) or taken by another harness: this one is no longer the
   // root's harness, and two would contend for every session's lease.
   if (harnessPidFile) {
-    let holder = "";
-    try { holder = fs.readFileSync(harnessPidFile, "utf8").trim(); } catch { /* removed */ }
+    let holder = String(process.pid);
+    try {
+      holder = fs.readFileSync(harnessPidFile, "utf8").trim();
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") holder = "";
+    }
     if (holder !== String(process.pid)) {
       stopHarness(holder ? `harness pid file names ${holder}` : "harness pid file removed");
       return;
@@ -2021,8 +2033,6 @@ function sweepIdleSlots() {
     const current = harnessSlots.get(key);
     if (!current) continue;
     if (current.pendingItems.length > 0) continue;
-    releaseIfQuiet(key, now);
-    if (!harnessSlots.has(key)) continue;
     if (now - current.startupTime < STARTUP_GRACE_MS) continue;
     if (now - current.lastActivityMs < IDLE_EXIT_MS) continue;
     dropHarnessSlot(key);
@@ -2252,9 +2262,7 @@ Daemon mode:
 
 Environment:
   WTFT_DAEMON_IDLE_MS          Milliseconds with no new lines before a session is dropped (default 86400000)
-  WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after start before that drop can fire (default 60000)
-  WTFT_HARNESS_QUIET_MS        Milliseconds with no write before a harness daemon releases a session no reader
-                               asked for; its next write adopts it again (default 300000)`);
+  WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after start before that drop can fire (default 60000)`);
       process.exit(0);
     } else if (arg === "--debug") {
       process.env.WTFT_DAEMON_DEBUG = "1";
@@ -2387,10 +2395,10 @@ if (showList || showCleanup || showRestart || stopSession) {
         continue;
       }
       if (sessionFound && sessionIsGone(sessionFound)) {
-        if (procIsHarness(pid)) {
-          try { fs.unlinkSync(fullPath); } catch (_) {}
-          console.log(`Cleaned up: PID ${pid} — session dropped from harness: ${sessionFound}`);
-        } else {
+        // A harness's --session is only the one it was started for; it drops
+        // a gone session itself.
+        if (procIsHarness(pid)) continue;
+        {
           try { process.kill(pid, "SIGTERM"); } catch (_) { /* already gone */ }
           try { fs.unlinkSync(fullPath); } catch (_) {}
           console.log(`Cleaned up: PID ${pid} — session gone: ${sessionFound}`);

@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 /**
- * The harness daemon's lifecycle: quiet sessions hold no slot or lease (#239),
- * one harness per root after --restart (#249), and the startup reaper never
- * kills a harness for its start-up --session (#243).
+ * The harness daemon's lifecycle: long-idle sessions hold no slot or lease, one
+ * harness per root after --restart, and neither the startup reaper nor
+ * --cleanup acts on a harness for its start-up --session.
  */
 
 import * as fs from "node:fs";
@@ -10,7 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { getCurrentVersionTagPath, readClassifiedTagFile } from "../extensions/lib/wtft-daemon-lib.ts";
+import { getCurrentVersionTagPath, getDaemonPidPath, readClassifiedTagFile } from "../extensions/lib/wtft-daemon-lib.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 const TMP = isolateTmpdir("239-lifecycle");
@@ -36,9 +36,9 @@ function turnLine(id: string, ts: number): string {
 	}) + "\n";
 }
 
-const HOUR_AGO = new Date(Date.now() - 3_600_000);
+const HOUR_AGO = new Date(Date.now() - 2 * 86_400_000);
 
-/** A root of `count` sessions last written an hour ago. */
+/** A root of `count` sessions last written two days ago, past the 24 h idle drop. */
 function makeRoot(label: string, count: number): { root: string; files: string[] } {
 	const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), `wtft-239-${label}-`)));
 	const files: string[] = [];
@@ -129,7 +129,7 @@ async function until(pred: () => boolean, limitMs: number): Promise<number> {
 }
 
 try {
-	console.log("\nQuiet sessions hold no slot and no lease once caught up (#239)");
+	console.log("\nLong-idle sessions hold no slot and no lease once caught up");
 	{
 		const { root, files } = makeRoot("q", 2000);
 		const live = path.join(root, "proj-0", "live.jsonl");
@@ -156,12 +156,12 @@ try {
 		const woken = files[7];
 		fs.appendFileSync(woken, turnLine("woken", Date.now()));
 		check(await until(() => classified(woken, "woken"), 10_000) !== Infinity, "a quiet session written again is adopted and classified");
-		check(leasesNaming(h.pid) >= 1, "and it holds a lease while it is live");
+		check(read(getDaemonPidPath(woken)).trim() === String(h.pid), "and it holds its own lease while it is live");
 		for (const pid of [h.pid, s.pid]) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 		await until(() => !alive(h.pid) && !alive(s.pid), 5_000);
 	}
 
-	console.log("\nA harness whose pid file no longer names it stops (#249)");
+	console.log("\nA harness whose pid file no longer names it stops");
 	{
 		const { root, files } = makeRoot("p", 5);
 		const h = start(root, ["--harness", "claude", "--session", files[0]], "p.err");
@@ -170,7 +170,7 @@ try {
 		check(await until(() => !alive(h.pid), 5_000) !== Infinity, "with its pid file removed, the harness exits");
 	}
 
-	console.log("\n--restart and a CLI spawn within 1 s leave one harness (#249)");
+	console.log("\n--restart followed at once by a CLI spawn leaves one harness");
 	{
 		// Live sessions, so the first harness holds a lease for each and
 		// --restart spends seconds walking them before it reaches the pid file.
@@ -196,7 +196,7 @@ try {
 		await until(() => living.every(p => !alive(p)), 5_000);
 	}
 
-	console.log("\nThe startup reaper leaves a harness whose --session is gone (#243)");
+	console.log("\nThe startup reaper and --cleanup leave a harness whose --session is gone");
 	{
 		const { root, files } = makeRoot("g", 3);
 		for (const f of files) fs.utimesSync(f, new Date(), new Date());
@@ -213,7 +213,10 @@ try {
 		check(await until(() => classified(outside, "outside"), 15_000) !== Infinity, "fixture: the per-session daemon started and classified its session");
 		await sleep(500);
 		check(alive(h.pid), "the harness is still running");
-		check(leasesNaming(h.pid) >= 1, "and still holds its live session's lease");
+		check(read(getDaemonPidPath(files[1])).trim() === String(h.pid), "and still holds its live session's lease");
+		const cleanup = spawnSync("node", [DAEMON, "--cleanup"], { encoding: "utf8", env: envFor(root) });
+		check(cleanup.status === 0, `fixture: --cleanup exited 0 (${cleanup.status})`);
+		check(alive(h.pid) && read(getDaemonPidPath(files[1])).trim() === String(h.pid), "--cleanup leaves the harness and that lease too");
 		for (const pid of [h.pid, per.pid]) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 	}
 } finally {

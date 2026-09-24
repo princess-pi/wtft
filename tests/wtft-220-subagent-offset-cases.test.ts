@@ -69,11 +69,13 @@ async function runCase(
 	const sub = path.join(subDir, "agent-case.jsonl");
 	fs.writeFileSync(sub, initial);
 	const tag = path.join(dir, "wtft-tags", `session.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const stderrFd = fs.openSync(path.join(dir, "daemon-stderr.log"), "a");
 	const child = spawn(process.execPath, [DAEMON_BIN, "--session", session], {
 		detached: true,
-		stdio: ["ignore", "ignore", fs.openSync(path.join(dir, "daemon-stderr.log"), "a")],
+		stdio: ["ignore", "ignore", stderrFd],
 		env: { ...process.env, WTFT_DAEMON_DEBUG: "1" },
 	});
+	fs.closeSync(stderrFd);
 	child.unref();
 	try {
 		let initialTagged = false;

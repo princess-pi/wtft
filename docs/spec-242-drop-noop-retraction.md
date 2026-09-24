@@ -10,7 +10,9 @@ up where it started: one full re-read and one full rewrite of that source's line
 
 **Decided (direction A of #242):** the branch and the map are gone. A lower copy is written as a
 line of its own, and every tag reader collapses copies of one id to the highest cost
-(`dedupeClassifiedById`), which is what a full parse gives.
+(`dedupeClassifiedById`), which is what a full parse gives. Costs in the tag are rounded to six
+decimals, and on a tie the reader keeps the first line, so a lower copy that rounds to the same
+cost leaves the written one standing, as the full parse does.
 
 **Closer:** a lower copy of a turn already in the tag adds no `_gen` record, and the tag still
 matches a full parse of the transcript.

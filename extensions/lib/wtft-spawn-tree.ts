@@ -184,7 +184,7 @@ function parseDescendant(file: string): { own: Interaction[]; subagents: { id: s
 	const doNotFold = new Set([file, ...discovered.files].map(canonicalTranscriptPath));
 	return {
 		own: parseSessionFileStrict(file, doNotFold),
-		subagents: discovered.files.map(sub => ({ id: path.basename(sub, ".jsonl"), interactions: parseSessionFileStrict(sub, doNotFold) })),
+		subagents: discovered.files.map(sub => ({ id: path.basename(sub).replace(/\.jsonl$/i, ""), interactions: parseSessionFileStrict(sub, doNotFold) })),
 		files: [file, ...discovered.files],
 	};
 }

@@ -201,7 +201,8 @@ retired in `@4`.
   runs under `--tokens`, `--json` and on a plain run whose tag has no data yet,
   but not on a plain `wtft` run that renders bins, so a session provisional for
   that reason alone exits 9 in the modes that scan and 0 on that plain run.
-  `descendant-live` (a counted descendant is still writing its transcript,
+  `descendant-live` (a counted descendant is still writing its transcript or
+  one of its subagent transcripts,
   [#133](https://github.com/princess-pi/wtft/issues/133)) is set only by
   `--tokens` and `--json`, the runs that read the spawn tree.
 - **2** / **3** — `wtft spawn-record` only (see below): the call was wrong, or
@@ -267,20 +268,23 @@ then shows up only in `spawned.unrecorded[]`, if it matches a tier there.
 `wtft --json spawn-record …` is a report run, not a recording.
 
 `wtft --json` then reports the lineage under `spawned` — every edge with its
-provenance, every descendant counted exactly once, and every gap named rather
+provenance, every descendant counted exactly once (with its own subagent
+sessions and the `claude -p` sessions it folded), and every gap named rather
 than zeroed — plus `tree`, which is self + descendants as a field (untagged cost excluded, as in `total.costUsd`) so nobody adds
 two numbers and guesses. **`total` keeps meaning this session's own turns**; not
 one dollar moved into or out of it.
 
-Three bounds are reported rather than hidden: the walk stops at **depth 5**
-(`spawned.depthCapped` counts the cuts), a ledger over **8 MiB** is refused
+Three bounds are reported rather than hidden: the walk stops at **depth 5**,
+counted from this session's own edges at depth 1 (`spawned.depthCapped` counts
+the cuts), a ledger over **8 MiB** is refused
 outright rather than partly read, and a ledger it cannot read comes back as
 `spawned.ledgerError` rather than as an empty tree. `tree` covers *resolved* descendants, so it is a
 floor whenever anything went uncounted, under FIVE conditions: `unattributed`
 non-empty, `depthCapped` non-zero, `ledgerError` set, `malformedLedgerLines`
 non-zero, or `descendantUntagged` non-empty. A malformed ledger line was a
 record, so its edge is lost, and nothing else reports it. `descendantUntagged`
-names each counted descendant whose untagged turns (no model id) are left out
+names each counted descendant whose untagged turns (no model id), its own or its
+subagent sessions', are left out
 of its total, just as this session's own are left out of `total.costUsd`, and
 `--tokens` prints how many such descendants there are, and their summed
 untagged cost, on one line under SPAWNED. That
@@ -294,8 +298,8 @@ its model and the cost `TOTAL` already holds for it. Those rows are **inside**
 `subagents[].total`.
 
 `wtft --tokens` shows the spawn tree as a `SPAWNED` / `TREE` block below
-`TOTAL`. It prints nothing when this session recorded no edges AND the ledger
-was read cleanly; an unreadable ledger, or one with skipped lines, still prints
+`TOTAL`. It prints nothing when the walk found no edge — none from this session,
+nor from a session already inside its total — AND the ledger was read cleanly; an unreadable ledger, or one with skipped lines, still prints
 — saying so is the whole point, since "no edges" and "could not tell" are not
 the same report. Full
 contract: [`docs/spec-116-spawn-ledger.md`](./docs/spec-116-spawn-ledger.md).

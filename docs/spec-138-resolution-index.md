@@ -33,7 +33,7 @@ daemon calls it to follow a moved session; a test holds the two to the same answ
 `.jsonl` suffix, and the reader now strips it from `parent` and `child`, so one session recorded
 under both spellings is one node in the walk, counted once.
 
-`computeSpawnTree` builds a resolver when its walk first needs one. For each harness, in registry
+`computeSpawnTree` builds a resolver once the root or an in-self session has an edge (spec-230), and each harness's index on its first lookup. For each harness, in registry
 order: the index when the harness has the method, else that harness's `resolveSessionById`,
 asked per id. The first harness that knows an id wins, which is the order `resolveSessionFile`
 already uses. Answers are memoised for the walk. **An index that throws, or is not a `Map`,
@@ -78,8 +78,8 @@ being counted, and `--tokens` rendering one row per edge, which is #216.
   `countDirRead()`, so the counter cannot see Pi's walk count at all (`docs/adding-a-harness.md`).
 - **A `.jsonl` suffix:** a child recorded as `<uuid>.jsonl` resolves as `resolveSessionById` would,
   and one recorded under both spellings is counted once. The same normalisation applies wherever
-  else the walk compares ids: an `alreadyAttributed` id and a `claudeSubAgentFolds` fold id are
-  each stripped of a trailing `.jsonl` before being compared against the ledger's (already
+  else the walk compares ids: an `alreadyAttributed` id, a `claudeSubAgentFolds` fold id and a
+  descendant's subagent transcript id (its file name) are each stripped of a trailing `.jsonl` before being compared against the ledger's (already
   stripped) ids.
 - **Same answers:** a resolvable child still resolves and is priced; with the same id in two
   project directories, the newer copy wins, as before, and a tree with no duplicate ids indexes

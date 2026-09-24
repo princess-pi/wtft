@@ -744,8 +744,17 @@ function foldedTranscriptChanged(foldStamps: Map<string, string>): boolean {
   return false;
 }
 
+/** Harness sessions whose subagent scan ran out of its slice and continues on
+ *  the next turn of the event loop. */
+const subagentScansContinuing = new Set<string>();
+
 function scanForSubAgents() {
   let wroteAny = false;
+  // In a harness, one slice at a time: the session's own turns are already in
+  // the tag, so a reader sees a partial sum at once, and other sessions' events
+  // and requests are served between slices.
+  const deadline = harnessMode ? Date.now() + HARNESS_CATCH_UP_SLICE_MS : Infinity;
+  let cut = false;
   // pollHadFailure is reset by the poll loop, not here — flushPending runs first and can fail.
 
   if (pendingClaudeCommands.length > 0) {
@@ -852,11 +861,13 @@ function scanForSubAgents() {
   };
 
   for (const file of taskAgentFiles) {
+    if (Date.now() > deadline) { cut = true; break; }
     if (skipAsFoldedElsewhere(file, foldedElsewhere)) { wroteAny = wroteAny || retiredThisPoll; continue; }
     wroteAny = syncSubagentTranscript(file, notMine(file)) || wroteAny;
   }
 
   for (const file of discoveredClaudeFiles) {
+    if (cut || Date.now() > deadline) { cut = true; break; }
     if (skipAsFoldedElsewhere(file, foldedElsewhere)) { wroteAny = wroteAny || retiredThisPoll; continue; }
     wroteAny = syncSubagentTranscript(file, notMine(file)) || wroteAny;
   }
@@ -866,6 +877,19 @@ function scanForSubAgents() {
     lastWriteMs = now;
     lastActivityMs = now;
     idleStartMs = 0;
+  }
+
+  if (cut) {
+    const key = path.resolve(sessionPath);
+    if (!subagentScansContinuing.has(key)) {
+      subagentScansContinuing.add(key);
+      setImmediate(() => {
+        subagentScansContinuing.delete(key);
+        const slot = harnessSlots.get(key);
+        if (slot && running) withSlot(slot, () => scanForSubAgents());
+      });
+    }
+    return;
   }
 
   // Stamp _meta.swept when the poll was clean and the tag grew (or an unswept was retracted).
@@ -1406,7 +1430,6 @@ interface Slot {
   tagGrewSinceMarker: boolean;
   pollHadFailure: boolean;
   sweptRetracted: boolean;
-  releaseCheckAtMs: number;
 }
 
 const harnessSlots = new Map<string, Slot>();
@@ -1441,7 +1464,6 @@ function freshSlot(file: string, displayed: boolean): Slot {
     tagGrewSinceMarker: true,
     pollHadFailure: false,
     sweptRetracted: false,
-    releaseCheckAtMs: 0,
   };
 }
 
@@ -1612,6 +1634,7 @@ function takeOverLease(pidPath: string): boolean {
     let holder = 0;
     try { holder = Number(fs.readFileSync(pidPath, "utf8").trim()); } catch { holder = 0; }
     if (holder === process.pid) return true;
+    if (holder > 0 && procIsReparse(holder)) return false;
     if (holder > 0 && procIsDaemon(holder)) {
       try { process.kill(holder, "SIGTERM"); } catch { /* already gone */ }
     }
@@ -1648,8 +1671,12 @@ function wake(file: string, displayed: boolean) {
   let slot = harnessSlots.get(key);
   if (!slot) {
     slot = freshSlot(key, displayed);
-    if (!withSlot(slot, () => adoptSession())) return;
+    if (!withSlot(slot, () => adoptSession())) {
+      retryAdoptionLater(key, displayed);
+      return;
+    }
     harnessSlots.set(key, slot);
+    watchSession(key);
   } else if (displayed) {
     slot.displayed = true;
   }
@@ -1664,6 +1691,8 @@ function wake(file: string, displayed: boolean) {
     if (other && other !== slot) dropHarnessSlot(movedTo);
     harnessSlots.delete(key);
     harnessSlots.set(movedTo, slot);
+    unwatchSession(key);
+    watchSession(movedTo);
     const timer = harnessFlushTimers.get(key);
     if (timer) {
       clearTimeout(timer);
@@ -1673,8 +1702,11 @@ function wake(file: string, displayed: boolean) {
   if (slot.pendingItems.length > 0) scheduleFlush(movedTo);
 }
 
-/** `wakeFiles` false at startup: the catch-up walk serves those, focus first. */
-function watchDir(dir: string, wakeFiles = true) {
+/** Watches `dir`, and with `recurse` every directory below it that is not a
+ *  skip directory. Only the directories of sessions being served are watched:
+ *  the project directory holding the transcript, and the session's own
+ *  directory tree (`<id>/`, `<id>/subagents/`, nested ones). */
+function watchDir(dir: string, recurse: boolean) {
   const key = path.resolve(dir);
   if (harnessWatchers.has(key)) return;
   let watcher: fs.FSWatcher;
@@ -1687,34 +1719,82 @@ function watchDir(dir: string, wakeFiles = true) {
     harnessWatchers.delete(key);
     try { watcher.close(); } catch { /* already closed */ }
     try {
-      if (fs.statSync(key).isDirectory()) watchDir(key);
+      if (fs.statSync(key).isDirectory()) watchDir(key, recurse);
     } catch { /* directory is gone */ }
     for (const [file, slot] of harnessSlots) {
-      if (file !== key && !file.startsWith(key + path.sep)) continue;
-      wake(file, slot.displayed);
+      if (path.dirname(file) === key || file.slice(0, -".jsonl".length) === key || key.startsWith(file.slice(0, -".jsonl".length) + path.sep)) {
+        wake(file, slot.displayed);
+      }
     }
   });
   harnessWatchers.set(key, watcher);
+  if (!recurse) return;
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(key, { withFileTypes: true });
   } catch {
     return;
   }
-  const insideSubagents = key.includes(`${path.sep}subagents${path.sep}`) || key.endsWith(`${path.sep}subagents`);
   for (const ent of entries) {
-    const child = path.resolve(key, ent.name);
-    if (ent.isDirectory()) {
-      if (HARNESS_SKIP_DIRS.has(ent.name) && ent.name !== "subagents") continue;
-      watchDir(child, wakeFiles);
-      continue;
-    }
-    if (insideSubagents || !wakeFiles) continue;
-    if (ent.name.endsWith(".jsonl") && !ent.name.includes(".wtft-tag.")) {
-      wake(child, false);
-      releaseIfLongIdle(child);
-    }
+    if (!ent.isDirectory()) continue;
+    if (HARNESS_SKIP_DIRS.has(ent.name) && ent.name !== "subagents") continue;
+    watchDir(path.resolve(key, ent.name), true);
   }
+}
+
+function sessionDirOf(file: string): string {
+  return file.slice(0, -".jsonl".length);
+}
+
+function watchSession(file: string) {
+  watchDir(path.dirname(file), false);
+  if (fs.existsSync(sessionDirOf(file))) watchDir(sessionDirOf(file), true);
+}
+
+/** Closes what only `file` needed: its session directory tree, and its
+ *  project directory once no served session is left in it. */
+function unwatchSession(file: string) {
+  const own = sessionDirOf(file);
+  const project = path.dirname(file);
+  const projectInUse = [...harnessSlots.keys()].some(k => k !== file && path.dirname(k) === project);
+  for (const [dir, watcher] of harnessWatchers) {
+    const mine = dir === own || dir.startsWith(own + path.sep);
+    if (!mine && !(dir === project && !projectInUse)) continue;
+    try { watcher.close(); } catch { /* already closed */ }
+    harnessWatchers.delete(dir);
+  }
+}
+
+/** A served session whose directory tree holds `dir`, if any. */
+function servedSessionOver(dir: string): string | null {
+  for (const file of harnessSlots.keys()) {
+    const own = sessionDirOf(file);
+    if (dir === own || dir.startsWith(own + path.sep)) return file;
+  }
+  return null;
+}
+
+/** A session whose lease a `--reparse` holds is adopted once the reparse lets
+ *  it go, not taken from it mid-rewrite. */
+const adoptionRetries = new Set<string>();
+function retryAdoptionLater(key: string, displayed: boolean) {
+  if (adoptionRetries.has(key) || !running) return;
+  let holder = 0;
+  try { holder = Number(fs.readFileSync(getDaemonPidPath(key), "utf8").trim()); } catch { return; }
+  if (!procIsReparse(holder)) return;
+  adoptionRetries.add(key);
+  const timer = setTimeout(() => {
+    adoptionRetries.delete(key);
+    if (running) wake(key, displayed);
+  }, POLL_MS);
+  timer.unref();
+}
+
+function procIsReparse(pid: number): boolean {
+  if (!procIsDaemon(pid)) return false;
+  let args: string[] = [];
+  try { args = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0"); } catch { return false; }
+  return args.includes("--reparse") || args.includes("--reparse-range");
 }
 
 function parentSessionFile(child: string): string | null {
@@ -1730,37 +1810,40 @@ function onWatch(dir: string, filename: string | null) {
       process.stderr.write("[wtft-log-parser] watch overflow, rescanning offsets once\n");
     }
     for (const [file, slot] of harnessSlots) wake(file, slot.displayed);
-    wakeRecentlyWritten();
     return;
   }
   if (HARNESS_SKIP_DIRS.has(filename) && filename !== "subagents") return;
   const full = path.resolve(dir, filename);
-  if (filename === "subagents" || full.includes(`${path.sep}subagents${path.sep}`)) {
-    if (filename === "subagents") {
-      try {
-        if (fs.statSync(full).isDirectory()) watchDir(full);
-      } catch { /* gone */ }
-    }
-    const parent = parentSessionFile(full.endsWith(path.sep) ? full : `${full}${path.sep}`);
-    if (parent) {
-      const slot = harnessSlots.get(parent);
-      if (slot) wake(parent, slot.displayed);
-      else if (fs.existsSync(parent)) wake(parent, false);
-    }
-    return;
-  }
   let st: fs.Stats | null = null;
   try {
     st = fs.statSync(full);
   } catch {
     st = null;
   }
+  const over = servedSessionOver(full);
   if (st?.isDirectory()) {
-    watchDir(full);
+    // A session directory or a subagents directory appearing under a served
+    // session; any other directory is not being served.
+    if (over || harnessSlots.has(`${full}.jsonl`)) watchDir(full, true);
+    const parent = over ?? (harnessSlots.has(`${full}.jsonl`) ? `${full}.jsonl` : null);
+    if (parent) wake(parent, harnessSlots.get(parent)?.displayed ?? true);
+    return;
+  }
+  if (over) {
+    wake(over, harnessSlots.get(over)?.displayed ?? true);
     return;
   }
   if (st && filename.endsWith(".jsonl") && !filename.includes(".wtft-tag.")) {
-    wake(full, false);
+    const slot = harnessSlots.get(full);
+    if (slot) {
+      wake(full, slot.displayed);
+      return;
+    }
+    // A Pi child session is a sibling file naming its parent inside it, so a
+    // new or growing sibling may belong to a served session in this directory.
+    if (harnessWhich === "pi") {
+      for (const [file, other] of harnessSlots) if (path.dirname(file) === dir) wake(file, other.displayed);
+    }
     return;
   }
   // A replace-via-rename often reports only the path that disappeared.
@@ -1835,6 +1918,7 @@ function pointSessionAt(livePid: number, file: string): boolean {
 }
 
 let harnessRootKey = "";
+let harnessWhich = "";
 
 /** Serves the sessions other processes asked for (`pointSessionAt`) ahead of
  *  the rest. A request is claimed by renaming it before it is read. One
@@ -1912,37 +1996,15 @@ function runHarness(which: string, focus: string) {
     process.stderr.write(`[wtft-log-parser] harness pid ${harnessPidFile}\n`);
     process.stderr.write(`[wtft-log-parser] harness root ${root}\n`);
   }
-  watchDir(root, false);
-  const files: string[] = [];
-  walkSessions(root, files);
-  const focusKey = focus ? path.resolve(focus) : "";
   harnessRootKey = root;
-  // The session a reader is waiting on first; then the rest, yielding after
-  // each slice, so a watch event or a reader's request is served between
-  // sessions rather than after the whole walk.
-  if (focusKey) wake(focusKey, true);
+  harnessWhich = which;
+  // Serves only the sessions readers ask for: this one, and later ones named
+  // by focus requests. Nothing else under the root is read or watched.
+  if (focus) wake(path.resolve(focus), true);
   harnessIdleTimer = setInterval(sweepIdleSlots, 250);
-  harnessIdleTimer.unref();
-  let next = 0;
-  const catchUp = () => {
-    if (!running) return;
-    const sliceStart = Date.now();
-    while (next < files.length && Date.now() - sliceStart < HARNESS_CATCH_UP_SLICE_MS) {
-      takeFocusRequests();
-      const file = files[next++];
-      if (file === focusKey) continue;
-      wake(file, false);
-      releaseIfLongIdle(file);
-    }
-    if (next < files.length) {
-      setImmediate(catchUp);
-      return;
-    }
-    if (process.env.WTFT_DAEMON_DEBUG) {
-      process.stderr.write(`[wtft-log-parser] harness settled ${which}\n`);
-    }
-  };
-  catchUp();
+  if (process.env.WTFT_DAEMON_DEBUG) {
+    process.stderr.write(`[wtft-log-parser] harness settled ${which}\n`);
+  }
 }
 
 function dropHarnessSlot(key: string) {
@@ -1956,6 +2018,7 @@ function dropHarnessSlot(key: string) {
   if (timer) clearTimeout(timer);
   harnessFlushTimers.delete(key);
   harnessSlots.delete(key);
+  unwatchSession(key);
   if (slot) releaseLease(slot);
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] session drop ${path.basename(key)}\n`);
@@ -1978,54 +2041,6 @@ function releaseLease(slot: Slot) {
 /** The newest mtime of the transcript and of every file under its session
  *  directory (`subagents/`, nested ones included): a directory's own mtime
  *  does not move when a file in it is appended to. */
-function lastWrittenMs(file: string): number {
-  let newest = 0;
-  try { newest = fs.statSync(file).mtimeMs; } catch { /* gone */ }
-  const visit = (dir: string) => {
-    let entries: fs.Dirent[];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const ent of entries) {
-      const full = path.join(dir, ent.name);
-      if (ent.isDirectory()) { visit(full); continue; }
-      try { newest = Math.max(newest, fs.statSync(full).mtimeMs); } catch { /* gone */ }
-    }
-  };
-  visit(file.slice(0, -".jsonl".length));
-  return newest;
-}
-
-/** A session whose transcript and every file under its session directory
- *  were last written more than WTFT_DAEMON_IDLE_MS ago, that no reader asked
- *  for and that has nothing held, gives up its slot and lease: the same drop
- *  the idle sweep makes, measured from the last write rather than from this
- *  process's start. Checked when a walk (the catch-up, or a directory watched
- *  anew) serves it, and by the sweep once a minute per slot, which also
- *  catches one whose held subagent turn settles after the walk. Its next write
- *  adopts it again. */
-function releaseIfLongIdle(file: string) {
-  const key = path.resolve(file);
-  const slot = harnessSlots.get(key);
-  if (!slot || slot.displayed) return;
-  slot.releaseCheckAtMs = Date.now() + 60_000;
-  if (slot.pendingItems.length > 0 || harnessFlushTimers.has(key) || slot.pendingFragment.length > 0) return;
-  const now = Date.now();
-  if (slotNeedsChildScan(slot, now)) return;
-  if (now - lastWrittenMs(key) < IDLE_EXIT_MS) return;
-  dropHarnessSlot(key);
-}
-
-/** After a watch overflow, events may have been lost for sessions that hold
- *  no slot: adopt any written within WTFT_DAEMON_IDLE_MS. */
-function wakeRecentlyWritten() {
-  const files: string[] = [];
-  walkSessions(harnessRootKey, files);
-  const since = Date.now() - IDLE_EXIT_MS;
-  for (const file of files) {
-    if (harnessSlots.has(file)) continue;
-    if (lastWrittenMs(file) >= since) wake(file, false);
-  }
-}
-
 function slotNeedsChildScan(slot: Slot, now: number): boolean {
   if (slot.pendingClaudeCommands.length > 0) return true;
   for (const state of slot.discoveredSubagentFiles.values()) {
@@ -2077,10 +2092,6 @@ function sweepIdleSlots() {
     if (slotNeedsChildScan(slot, now)) withSlot(slot, () => scanForSubAgents());
     const current = harnessSlots.get(key);
     if (!current) continue;
-    if (now >= current.releaseCheckAtMs) {
-      releaseIfLongIdle(key);
-      if (!harnessSlots.has(key)) continue;
-    }
     if (current.pendingItems.length > 0) continue;
     if (now - current.startupTime < STARTUP_GRACE_MS) continue;
     if (now - current.lastActivityMs < IDLE_EXIT_MS) continue;
@@ -2189,25 +2200,23 @@ function waitUntilExited(pid: number) {
   while (Date.now() < killed && procIsDaemon(pid)) { /* until the kernel has it */ }
 }
 
-/** A live harness process serving the root `file` sits under. It holds no
- *  lease for a session it released, and may adopt it again at any write. */
-function liveHarnessFor(file: string): number {
-  for (const which of ["claude", "pi"]) {
-    const root = path.resolve(harnessRoot(which));
-    if (!file.startsWith(root + path.sep)) continue;
-    const hash = createHash("sha256").update(root).digest("hex").slice(0, 12);
-    let pid = 0;
-    try { pid = Number(fs.readFileSync(path.join(os.tmpdir(), `wtft-harness-${which}-${hash}.pid`), "utf8").trim()); } catch { continue; }
-    if (procIsDaemon(pid)) return pid;
-  }
-  return 0;
-}
-
+/** Holds the session's lease while the tag is rewritten, so a harness asked
+ *  for the session meanwhile waits for it (retryAdoptionLater) instead of
+ *  appending beside it. */
 function reparseOne(file: string): boolean {
-  if (sessionDaemonLive(file) || liveHarnessFor(file)) {
-    process.stderr.write(`wtft-daemon: --reparse refused while a daemon serves ${file}\n`);
+  const lease = getDaemonPidPath(file);
+  if (sessionDaemonLive(file) || claimPidFile(lease) !== "claimed") {
+    process.stderr.write(`wtft-daemon: --reparse refused while a daemon holds ${file}\n`);
     return false;
   }
+  try {
+    return reparseHeld(file);
+  } finally {
+    try { if (fs.readFileSync(lease, "utf8").trim() === String(process.pid)) fs.unlinkSync(lease); } catch { /* already gone */ }
+  }
+}
+
+function reparseHeld(file: string): boolean {
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] reparse begin ${file}\n`);
   }

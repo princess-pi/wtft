@@ -128,6 +128,9 @@ try {
 	const piPid = start(["--harness", "pi"], "pi.err");
 	const piErr = path.join(root, "pi.err");
 	await waitFor("pi harness settles", () => fs.readFileSync(piErr, "utf8").includes("harness settled pi"));
+	// A harness serves only the sessions it is asked for.
+	for (const f of [...claudeFiles.slice(0, 5), claudeFiles[N - 1]]) start(["--harness", "claude", "--session", f], `ask-${path.basename(f)}.err`);
+	start(["--harness", "pi", "--session", piFiles[N - 1]], "ask-pi.err");
 
 	const lastClaudeTag = getCurrentVersionTagPath(claudeFiles[N - 1]);
 	const lastPiTag = getCurrentVersionTagPath(piFiles[N - 1]);
@@ -144,7 +147,11 @@ try {
 		},
 		300,
 	);
-	assert("100 claude files and 100 pi files are classified", settled);
+	assert("the requested claude and pi sessions are classified", settled);
+	assert(
+		"a claude session nobody asked for is not",
+		!fs.existsSync(getCurrentVersionTagPath(claudeFiles[50])),
+	);
 
 	const living = [claudePid, piPid].filter(alive);
 	assert(`process count for 200 files is 2 (saw ${living.length})`, living.length === 2 && alive(claudePid) && alive(piPid));
@@ -332,7 +339,7 @@ try {
 	fs.mkdirSync(idleDir, { recursive: true });
 	const idleFile = path.join(idleDir, "idle.jsonl");
 	fs.writeFileSync(idleFile, turnLine("idle-0", T0, 10));
-	const idlePid = start(["--harness", "claude"], "idle.err", {
+	const idlePid = start(["--harness", "claude", "--session", idleFile], "idle.err", {
 		WTFT_DAEMON_IDLE_MS: "400",
 		WTFT_DAEMON_STARTUP_GRACE_MS: "0",
 	});

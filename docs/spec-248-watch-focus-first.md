@@ -3,6 +3,12 @@
 **Issue:** [#248](https://github.com/princess-pi/wtft/issues/248) ·
 **Test:** `tests/wtft-248-focus-first.test.ts`
 
+> **Superseded in part by [spec-239](spec-239-harness-lifecycle.md).** The harness no longer
+> walks or catches up the root: it serves only the sessions it is asked for. The startup walk,
+> the catch-up slices and the walk-order Closer below are kept as history. Still live: focus
+> requests, `r` never stopping a harness, a newer build replacing an older harness, and the
+> `--watch` waiting line.
+
 ## What went wrong
 
 After the tagger went to 2.11.0 and `wtft-daemon --restart` ran, `wtft --watch` on a live session

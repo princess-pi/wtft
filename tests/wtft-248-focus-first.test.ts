@@ -1,8 +1,7 @@
 #!/usr/bin/env bun
 /**
- * A harness daemon with many sessions to rebuild serves the session a reader
- * asked for first, whether it was asked for at startup or while the rebuild
- * was running.
+ * A harness daemon serves the session a reader asks for, whether asked at its
+ * startup or later from another process, and rebuilds nothing else.
  */
 
 import * as fs from "node:fs";
@@ -94,42 +93,34 @@ async function until(pred: () => boolean, limitMs: number): Promise<number> {
 const countTagged = (files: string[]) => files.filter(tagged).length;
 
 try {
-	console.log("\nA session named at startup is rebuilt first");
+	console.log("\nOnly the session named at startup is rebuilt");
 	{
 		const { root, files } = makeRoot("a");
 		const target = files[files.length - 1];
 		start(root, ["--session", target]);
 		const took = await until(() => tagged(target), 30_000);
+		await sleep(1000);
 		const others = countTagged(files.filter(f => f !== target));
-		check(took !== Infinity, `the focused session was tagged (${took} ms after start)`);
-		check(others < 50, `it came first, not last in walk order: ${others} of ${SESSIONS - 1} others had a tag then`);
+		check(took !== Infinity, `the named session was tagged (${took} ms after start)`);
+		check(others === 0, `no other session was rebuilt: ${others} of ${SESSIONS - 1}`);
+	}
+
+	console.log("\nA session asked for from another process is served next");
+	{
+		const { root, files } = makeRoot("b");
+		start(root, ["--session", files[0]]);
+		check(await until(() => tagged(files[0]), 20_000) !== Infinity, "fixture: the harness served its first session");
+		const target = files[files.length - 1];
+		start(root, ["--session", target]);
+		const took = await until(() => tagged(target), 30_000);
+		check(took !== Infinity, `the requested session was tagged (${took} ms after the request was spawned)`);
+		check(countTagged(files) === 2, `and nothing else was: ${countTagged(files)} tagged of ${SESSIONS}`);
 		for (const pid of pids.splice(0)) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 		await sleep(300);
 	}
 
-	console.log("\nA session asked for while the rebuild runs is served next");
-	{
-		const { root, files } = makeRoot("b");
-		start(root, []);
-		const warm = await until(() => countTagged(files) > 100, 20_000);
-		check(warm !== Infinity, "fixture: the harness started its rebuild");
-		const target = [...files].reverse().find(f => !tagged(f))!;
-		const before = countTagged(files);
-		const remaining = files.length - files.indexOf(target) - 1;
-		check(before < SESSIONS - 200, `fixture: the rebuild was still running at the request (${before} of ${SESSIONS})`);
-		start(root, ["--session", target]);
-		const took = await until(() => tagged(target), 30_000);
-		const between = countTagged(files) - before;
-		check(took !== Infinity, `the requested session was tagged (${took} ms after the request was spawned)`);
-		// A second process makes the request, so a node start-up passes first.
-		check(between < (files.indexOf(target) - before) / 2,
-			`it was served ahead of its walk position: ${between} others were rebuilt meanwhile, of ${files.indexOf(target) - before} ahead of it (${remaining} after it)`);
-	}
-
 	console.log("\nA newer build replaces a harness from an older tagger");
 	{
-		for (const pid of pids.splice(0)) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
-		await sleep(500);
 		const { root, files } = makeRoot("c");
 		const first = start(root, []);
 		const read = (f: string) => { try { return fs.readFileSync(f, "utf8").trim(); } catch { return ""; } };

@@ -1,4 +1,4 @@
-# Spec 239 — the harness daemon holds only the sessions that are live
+# Spec 239 — the harness daemon serves only the sessions it is asked for
 
 **Issues:** [#239](https://github.com/princess-pi/wtft/issues/239),
 [#249](https://github.com/princess-pi/wtft/issues/249),
@@ -11,7 +11,8 @@
 - **#239 — every session stayed adopted.** The harness daemon's startup catch-up adopted every
   session under its root: a slot in memory and a lease in the tmp dir each. A quiet session kept
   both until `WTFT_DAEMON_IDLE_MS` (24 h), and dropping a slot left its lease behind. On
-  `overcity` that was 10,866 leases, 215 MB RSS and a 504 MB peak.
+  `overcity` that was 10,866 leases, 215 MB RSS and a 504 MB peak. Nothing needed it: every
+  report and widget names one session, and that session's own records find what it spawned.
 - **#249 — `--restart` stopped the harness it had just started.** `--restart` walks every lease
   in the tmp dir. For the first lease of a harness it stops that harness and starts a new one.
   While it was still walking thousands of leases, the new harness claimed the root, and the walk
@@ -28,35 +29,35 @@
 
 ## The change
 
-- **A long-idle session is released as soon as the catch-up has served it.** The idle drop was
-  already there: after `WTFT_DAEMON_IDLE_MS` (24 h) with no new lines, a slot is dropped. It
-  counted from the harness's start, so every session under the root was held for a day. The
-  catch-up now counts from the last write instead: right after it serves a session whose
-  transcript and every file under its session directory (`subagents/`, at any depth)
-  were last written more than `WTFT_DAEMON_IDLE_MS` ago, that no reader asked for, with nothing pending, no partial line held and no child still
-  in its discovery window, it drops the slot. A directory that appears later, or is watched again
-  after a watcher error, is walked the same way, and the 250 ms sweep checks each slot once a
-  minute, which releases one whose last subagent turn was still held back when the walk served
-  it. The idle threshold is unchanged, so a session is
-  released only when the running daemon would have dropped it anyway; the in-memory state a
-  drop loses (stream state, discovered `claude -p` children) is lost at the same point as
-  before. A Claude Code session's next write, or a write to one of its `subagents/`
-  transcripts, adopts it again, resuming from the offset in its tag.
-- **Dropping a slot removes its lease**, for any reason, unless another slot shares that lease
-  or another process has replaced it since it was read.
-- **After a watch overflow** the harness also adopts any session written within
-  `WTFT_DAEMON_IDLE_MS` that holds no slot, since events for it may have been lost.
+- **The harness daemon serves only the sessions it is asked for.** It adopts a session when a
+  reader names it: its own `--session` at startup, or a focus request from a later `wtft`, Pi
+  widget or `--watch` start (`pointSessionAt`). It no longer walks the root at startup, and a
+  session nobody asked for is never read, tagged or leased. There is no catch-up to wait behind.
+- **It watches only what it serves**: the project directory holding each served transcript, and
+  that session's own directory tree (`<id>/`, `<id>/subagents/`, nested ones). An event for a
+  file no one asked for is ignored, except that under the Pi root a new or growing sibling file
+  wakes the served sessions in its directory, since a Pi child session is a sibling. Dropping a
+  session closes its watchers, and a project directory's once no served session is left in it.
+- **A reader gets the session's own sum first, then its subagents.** The session's own turns are
+  flushed to the tag before any subagent transcript is read, and in a harness the subagent scan
+  runs in slices of at least 25 ms (`HARNESS_CATCH_UP_SLICE_MS`), continuing on the next turn
+  of the event loop. A one-shot `wtft` that finds turns in the tag reports them at once, marked
+  provisional (exit 9, "no subagent transcript has been read since this tag was written") until
+  the scan finishes and stamps the tag swept; `--watch` shows the sum grow.
+- **A session is dropped after `WTFT_DAEMON_IDLE_MS` (24 h) with no new lines**, as before, and
+  dropping a slot now removes its lease, unless another slot shares that lease or another
+  process has replaced it since it was read.
 - **A focus request goes only to a harness that still holds the root.** After posting, the
-  requester checks the harness pid file still names that harness. A request that cannot be posted is reported on stderr. Unless the harness still holds
-  the root and already held this session's lease, the lease and `.display` the call pointed at
-  it are removed, so the reader is not told a session is served when nothing will adopt it. The
-  spawn then waits up to 2 s for that harness to exit and tries to claim the root itself,
-  exiting 1 after five attempts.
-- **`--reparse` is refused for a session under a root whose harness is running**, not only for
-  one whose lease is held: a released session has no lease, and the harness may adopt it again
-  at any write and append to the tag the reparse is rewriting. `--reparse-range` exits 1,
-  naming how many sessions it left unreparsed, when any was refused, failed or could not be
-  stat'd.
+  requester checks the harness pid file still names that harness. A request that cannot be
+  posted is reported on stderr. Unless the harness still holds the root and already held this
+  session's lease, the lease and `.display` the call pointed at it are removed, so the reader is
+  not told a session is served when nothing will adopt it. The spawn then waits up to 2 s for
+  that harness to exit and tries to claim the root itself, exiting 1 after five attempts.
+- **`--reparse` holds the session's lease while it rewrites the tag**, and a harness never stops
+  a reparse to take a lease: asked for a session a reparse holds, it tries again every 667 ms
+  until the reparse lets go. `--reparse` of a session a daemon is serving is refused.
+  `--reparse-range` exits 1, naming how many sessions it left unreparsed, when any was refused,
+  failed or could not be stat'd.
 - **A harness whose pid file no longer names it stops.** The sweep reads the harness pid file;
   if it was removed or names another process, the harness stops and releases its leases, so two
   harnesses contend for one root only until the displaced one's next sweep, which the event
@@ -75,20 +76,26 @@
 
 `tests/wtft-239-harness-lifecycle.test.ts`:
 
-- A root of 2,000 sessions last written two days ago and one being appended to: after the
-  catch-up, the harness holds at most 5 leases, the live session is still classified, and its
-  live heap (a heap snapshot) is within 1 MiB of a harness on a root of 10 sessions. The issue
-  asked for RSS; RSS keeps heap the parse freed and did not return (#97), so it could not tell the
-  two builds apart. Measured on this branch: 6.21 against 5.94 MiB; on `main`, 8.67 against
-  5.94 MiB with 2,001 leases held. A session whose subagent transcript was just appended to
-  keeps its lease. A released session written again is adopted, classified, and holds its own
-  lease. Directory watchers still grow with the number of session directories (#253).
+- A root of 2,000 sessions and one being appended to, with the harness started for that one:
+  no other session gets a tag, the harness holds one lease, the live session stays classified,
+  and the harness's live heap (a heap snapshot) is within 1 MiB of a harness on a root of 10
+  sessions. A write to a session nobody asked for is not read. A session asked for later from
+  another process is served, its subagent transcript included, and a later write to that
+  subagent transcript is read. `--reparse` runs beside the harness on a session it does not
+  serve and is refused on one it does. The issue asked for RSS; RSS keeps heap a parse freed
+  and did not return (#97), so the test measures live heap.
+- A session with 40 subagent transcripts (about 96 MB): the first `wtft --json` returns in
+  under 3 s with the session's own sum, marked provisional (exit 9); a later report is complete
+  (exit 0) and counts the subagent turns the first did not.
 - Removing the harness pid file stops the harness.
 - With 40,000 leases naming the running harness, `--restart` followed by a `wtft`-style spawn
   leaves exactly one harness after 5 s: the one `--restart` started, holding the pid file.
 - A harness whose `--session` was deleted survives a per-session daemon's startup and keeps its
   live session's lease. The `--cleanup` half is not in the suite: `--cleanup` stops every
   fixture daemon under `/tmp`, including those of suites running beside it.
+
+`tests/wtft-248-focus-first.test.ts`: of 1,500 sessions, only the one named at startup and one
+asked for later are rebuilt.
 
 #250: `tests/wtft-205-one-daemon-per-harness.test.ts` passes ten consecutive runs while a
 CPU-bound process occupies every core.

@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 /**
- * The harness daemon's lifecycle: long-idle sessions hold no slot or lease, one
- * harness per root after --restart, and the startup reaper never acts on a
- * harness for its start-up --session. --cleanup is not run here: it stops
+ * The harness daemon's lifecycle: it serves only the sessions it is asked for,
+ * a report shows a partial sum before subagents are read, one harness per root
+ * after --restart, and the startup reaper never acts on a harness for its
+ * start-up --session. --cleanup is not run here: it stops
  * every fixture daemon under /tmp, including other suites'.
  */
 
@@ -130,56 +131,88 @@ async function until(pred: () => boolean, limitMs: number): Promise<number> {
 }
 
 try {
-	console.log("\nLong-idle sessions hold no slot and no lease once caught up");
+	console.log("\nThe harness serves only the sessions it is asked for");
 	{
 		const { root, files } = makeRoot("q", 2000);
 		const live = path.join(root, "proj-0", "live.jsonl");
 		fs.writeFileSync(live, turnLine("live-0", Date.now()));
-		// Old transcript and directories, but a subagent transcript appended to
-		// just now: the directory mtimes do not show the append.
 		const parent = files[3];
 		const subDir = path.join(parent.slice(0, -".jsonl".length), "subagents");
 		fs.mkdirSync(subDir, { recursive: true });
 		fs.writeFileSync(path.join(subDir, "agent-a.jsonl"), turnLine("sub-a", Date.now()));
-		for (const d of [subDir, path.dirname(subDir)]) fs.utimesSync(d, TWO_DAYS_AGO, TWO_DAYS_AGO);
-		// Long idle, subagent transcript included: the catch-up holds its last
-		// subagent turn back, and the release must still happen once it settles.
-		const oldParent = files[9];
-		const oldSub = path.join(oldParent.slice(0, -".jsonl".length), "subagents");
-		fs.mkdirSync(oldSub, { recursive: true });
-		const oldAgent = path.join(oldSub, "agent-old.jsonl");
-		fs.writeFileSync(oldAgent, turnLine("old-a", TWO_DAYS_AGO.getTime()) + turnLine("old-b", TWO_DAYS_AGO.getTime()));
-		for (const f of [oldAgent, oldSub, path.dirname(oldSub)]) fs.utimesSync(f, TWO_DAYS_AGO, TWO_DAYS_AGO);
 		const small = makeRoot("small", 10);
 		const bigSnaps = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-snap-")));
 		const smallSnaps = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-snap-")));
-		const h = start(root, ["--harness", "claude"], "q.err", bigSnaps);
-		const s = start(small.root, ["--harness", "claude"], "small.err", smallSnaps);
+		const h = start(root, ["--harness", "claude", "--session", live], "q.err", bigSnaps);
+		const s = start(small.root, ["--harness", "claude", "--session", small.files[0]], "small.err", smallSnaps);
 		let n = 0;
 		const appender = setInterval(() => fs.appendFileSync(live, turnLine(`live-${++n}`, Date.now())), 400);
-		const settled = await until(() => read(h.err).includes("harness settled claude") && read(s.err).includes("harness settled claude"), 60_000);
-		check(settled !== Infinity, "fixture: both harnesses finished their startup catch-up");
-		check(classified(files[files.length - 1], `q-${files.length - 1}`), "fixture: the last quiet session was classified");
+		const settled = await until(() => read(h.err).includes("harness settled claude") && read(s.err).includes("harness settled claude"), 30_000);
+		check(settled !== Infinity, "fixture: both harnesses started");
+		check(await until(() => classified(live, "live-0"), 10_000) !== Infinity, "the session it was started for is classified");
 		await sleep(1500);
-		const held = leasesNaming(h.pid);
-		check(read(getDaemonPidPath(parent)).trim() === String(h.pid), "a session whose subagent transcript was just appended to keeps its lease");
-		check(classified(oldParent, "q-9") && classified(oldParent, "old-a"), "fixture: the long-idle session with a subagent transcript was adopted and classified");
-		check(await until(() => read(getDaemonPidPath(oldParent)) === "", 70_000) !== Infinity, "a long-idle session with a subagent transcript is released too");
-		check(held <= 5, `after catch-up the harness holds a handful of leases, not one per session: ${held} for ${files.length + 1} sessions`);
-		const reparse = spawnSync("node", [DAEMON, "--reparse", files[5]], { encoding: "utf8", env: envFor(root) });
-		check(reparse.status === 1 && reparse.stderr.includes("refused"), `--reparse of a released session is refused while its harness runs (exit ${reparse.status})`);
+		const unasked = files.filter(f => fs.existsSync(getCurrentVersionTagPath(f))).length;
+		check(unasked === 0, `no session it was not asked for has a tag: ${unasked} of ${files.length}`);
+		check(leasesNaming(h.pid) === 1, `it holds one lease, for that session (${leasesNaming(h.pid)})`);
 		const target = `live-${n}`;
-		check(await until(() => classified(live, target), 10_000) !== Infinity, "the session being appended to is still classified");
+		check(await until(() => classified(live, target), 10_000) !== Infinity, "the session being appended to stays classified");
 		clearInterval(appender);
 		const big = await liveHeapMiB(h.pid, bigSnaps), base = await liveHeapMiB(s.pid, smallSnaps);
-		check(big > 0 && base > 0 && big - base < 1, `live heap with 2,001 sessions is within 1 MiB of the heap with 10 (${big.toFixed(2)} vs ${base.toFixed(2)} MiB)`);
+		check(big > 0 && base > 0 && big - base < 1, `live heap with 2,001 sessions on disk is within 1 MiB of the heap with 10 (${big.toFixed(2)} vs ${base.toFixed(2)} MiB)`);
 
-		const woken = files[7];
-		fs.appendFileSync(woken, turnLine("woken", Date.now()));
-		check(await until(() => classified(woken, "woken"), 10_000) !== Infinity, "a quiet session written again is adopted and classified");
-		check(read(getDaemonPidPath(woken)).trim() === String(h.pid), "and it holds its own lease while it is live");
+		fs.appendFileSync(files[7], turnLine("unasked-write", Date.now()));
+		await sleep(1500);
+		check(!fs.existsSync(getCurrentVersionTagPath(files[7])), "a write to a session nobody asked for is not read");
+
+		start(root, ["--harness", "claude", "--session", parent], "ask.err");
+		check(await until(() => classified(parent, "q-3") && classified(parent, "sub-a"), 10_000) !== Infinity, "a session asked for later is served, subagent included");
+		check(read(getDaemonPidPath(parent)).trim() === String(h.pid), "and the running harness holds its lease");
+		fs.appendFileSync(path.join(subDir, "agent-a.jsonl"), turnLine("sub-b", Date.now()));
+		check(await until(() => classified(parent, "sub-b"), 10_000) !== Infinity, "a later write to its subagent transcript is read");
+
+		const reparse = spawnSync("node", [DAEMON, "--reparse", files[5]], { encoding: "utf8", env: envFor(root) });
+		check(reparse.status === 0, `--reparse of a session nobody is serving runs beside the harness (exit ${reparse.status})`);
+		const refused = spawnSync("node", [DAEMON, "--reparse", parent], { encoding: "utf8", env: envFor(root) });
+		check(refused.status === 1, `--reparse of a session the harness serves is refused (exit ${refused.status})`);
 		for (const pid of [h.pid, s.pid]) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 		await until(() => !alive(h.pid) && !alive(s.pid), 5_000);
+	}
+
+	console.log("\nA report shows the session's own sum before its subagents are read");
+	{
+		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-partial-")));
+		const dir = path.join(root, "proj");
+		fs.mkdirSync(dir, { recursive: true });
+		const session = path.join(dir, "11111111-2222-4333-8444-555555555555.jsonl");
+		fs.writeFileSync(session, turnLine("main-0", Date.now() - 60_000));
+		const sub = path.join(session.slice(0, -".jsonl".length), "subagents");
+		fs.mkdirSync(sub, { recursive: true });
+		// Enough subagent transcript that reading it takes well over one 667 ms beat.
+		const pad = JSON.stringify({ type: "user", message: { content: "x".repeat(4000) } }) + "\n";
+		for (let a = 0; a < 40; a++) {
+			let body = "";
+			for (let i = 0; i < 600; i++) body += i % 50 === 0 ? turnLine(`a${a}-${i}`, Date.now() - 50_000) : pad;
+			fs.writeFileSync(path.join(sub, `agent-${a}.jsonl`), body);
+		}
+		const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
+		const t0 = Date.now();
+		const first = spawnSync("node", [cli, "--json", "-s", session], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+		const took = Date.now() - t0;
+		let doc: any = null;
+		try { doc = JSON.parse(first.stdout); } catch { /* checked below */ }
+		const mainOnly = readClassifiedTagFile(getCurrentVersionTagPath(session)).length;
+		check(doc !== null, `fixture: the first report printed JSON (exit ${first.status})`);
+		check(took < 3_000, `the first report returned in ${took} ms, without waiting for the subagents`);
+		check(first.status === 9 && doc?.provisional?.provisional === true, `it is marked provisional while subagents are still being read (exit ${first.status})`);
+		check((doc?.total?.costUsd ?? 0) > 0, `it already carries the session's own sum ($${doc?.total?.costUsd})`);
+		const settledAll = await until(() => {
+			const r = spawnSync("node", [cli, "--json", "-s", session], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+			return r.status === 0;
+		}, 60_000);
+		check(settledAll !== Infinity, "a later report is complete, not provisional");
+		const full = readClassifiedTagFile(getCurrentVersionTagPath(session)).length;
+		check(full > mainOnly, `and it counts the subagent turns the first did not (${full} rows against ${mainOnly})`);
+		for (const pid of harnessesFor(root)) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 	}
 
 	console.log("\nA harness whose pid file no longer names it stops");
@@ -223,6 +256,8 @@ try {
 		for (const f of files) fs.utimesSync(f, new Date(), new Date());
 		const gone = files[0];
 		const h = start(root, ["--harness", "claude", "--session", gone], "g.err");
+		await until(() => read(h.err).includes("harness settled claude"), 10_000);
+		start(root, ["--harness", "claude", "--session", files[1]], "g-ask.err");
 		check(await until(() => classified(gone, "g-0") && classified(files[1], "g-1"), 15_000) !== Infinity, "fixture: the harness classified its sessions");
 		fs.unlinkSync(gone);
 		const other = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-outside-")));

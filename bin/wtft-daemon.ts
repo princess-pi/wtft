@@ -1099,16 +1099,40 @@ function reapAndWarn() {
 
   const warnings: string[] = [];
 
+  // One process can hold many leases (a harness daemon holds one per session),
+  // so each distinct pid is examined once and its outcome applied to all of them.
+  type Lease = { path: string; dev: number; ino: number };
+  const leasesOf = new Map<number, Lease[]>();
   for (const pidFile of pidFiles) {
     const fullPath = path.join(pidDir, pidFile);
     let pid = 0;
+    let lease: Lease;
     try {
+      const stat = fs.statSync(fullPath);
+      lease = { path: fullPath, dev: stat.dev, ino: stat.ino };
       pid = parseInt(fs.readFileSync(fullPath, "utf8").trim(), 10);
     } catch (_) { continue; }
-    if (pid <= 0) continue;
+    if (!(pid > 0)) continue;
+    const leases = leasesOf.get(pid);
+    if (leases) leases.push(lease);
+    else leasesOf.set(pid, [lease]);
+  }
+  const sessionOf = new Map<number, string | null>();
+  // Re-proved (same file, same pid) before unlinking, as the claim loop does:
+  // a lease read at the start may have been claimed by a new owner since.
+  const unlinkIfStill = (lease: Lease, pid: number) => {
+    try {
+      const now = fs.statSync(lease.path);
+      if (now.dev !== lease.dev || now.ino !== lease.ino) return;
+      if (parseInt(fs.readFileSync(lease.path, "utf8").trim(), 10) === pid) fs.unlinkSync(lease.path);
+    } catch (_) {}
+  };
 
-    let alive = false;
-    try { process.kill(pid, 0); alive = true; } catch (_) {}
+  for (const [pid, leases] of leasesOf) {
+    // Only ESRCH means gone, as in the claim loop: EPERM is a live process
+    // this user cannot signal, and its leases stay.
+    let alive = true;
+    try { process.kill(pid, 0); } catch (err) { alive = (err as NodeJS.ErrnoException).code !== "ESRCH"; }
 
     let sessionFound: string | null = null;
     try {
@@ -1119,19 +1143,24 @@ function reapAndWarn() {
         sessionFound = args[sessIdx + 1];
       }
     } catch (_) {}
-
     if (!alive) {
-      try { fs.unlinkSync(fullPath); } catch (_) {}
+      for (const lease of leases) unlinkIfStill(lease, pid);
       continue;
     }
 
     // HARD: session gone (not moved, not never-written). Never our own PID.
     if (pid !== process.pid && sessionFound && sessionIsGone(sessionFound)) {
-      process.kill(pid, "SIGTERM");
-      try { fs.unlinkSync(fullPath); } catch (_) {}
-      warnings.push(`[${new Date().toISOString()}] KILLED PID ${pid}: session gone — ${sessionFound}`);
+      // A process that refuses the signal is still alive, so its leases stay.
+      let gone = true;
+      try { process.kill(pid, "SIGTERM"); } catch (err) { gone = (err as NodeJS.ErrnoException).code === "ESRCH"; }
+      if (gone) {
+        for (const lease of leases) unlinkIfStill(lease, pid);
+        warnings.push(`[${new Date().toISOString()}] KILLED PID ${pid}: session gone — ${sessionFound}`);
+      }
       continue;
     }
+    sessionOf.set(pid, sessionFound);
+    const findings: string[] = [];
 
     if (sessionFound) {
       let tagFound: string | null = null;
@@ -1157,12 +1186,12 @@ function reapAndWarn() {
 
           if (stat.size > TAG_SIZE_WARN) {
             const mb = (stat.size / (1024 * 1024)).toFixed(1);
-            warnings.push(`[${new Date().toISOString()}] WARN PID ${pid}: tag file large (${mb} MB) — ${tagFound}`);
+            findings.push(`tag file large (${mb} MB) — ${tagFound}`);
           }
 
           if (lines.length > 10 && hbRatio >= HB_RATIO_WARN) {
             const pct = Math.round(hbRatio * 100);
-            warnings.push(`[${new Date().toISOString()}] WARN PID ${pid}: ${pct}% heartbeats (${hbLines.length}/${lines.length} lines) — possible malfunction — ${tagFound}`);
+            findings.push(`${pct}% heartbeats (${hbLines.length}/${lines.length} lines) — possible malfunction — ${tagFound}`);
           }
 
           const hasInteractions = lines.some(l => {
@@ -1176,7 +1205,7 @@ function reapAndWarn() {
                 const startTime = hb._hb?.first;
                 if (startTime && (Date.now() - startTime) > ZERO_INTERACTIONS_AGE) {
                   const ageH = Math.round((Date.now() - startTime) / 3600000);
-                  warnings.push(`[${new Date().toISOString()}] WARN PID ${pid}: ${ageH}h old with zero real interactions — zombie daemon? — ${sessionFound}`);
+                  findings.push(`${ageH}h old with zero real interactions — zombie daemon? — ${sessionFound}`);
                 }
               } catch (_) {}
             }
@@ -1184,25 +1213,15 @@ function reapAndWarn() {
         } catch (_) {}
       }
     }
+    if (findings.length > 0) {
+      warnings.push(`[${new Date().toISOString()}] WARN PID ${pid}: ${findings.join("; ")}`);
+    }
   }
 
   try {
     const tmpEntries = fs.readdirSync(os.tmpdir());
     const liveSessions = new Set<string>();
-    for (const pidFile of pidFiles) {
-      try {
-        const fullPath = path.join(pidDir, pidFile);
-        const pid = parseInt(fs.readFileSync(fullPath, "utf8").trim(), 10);
-        if (pid > 0) {
-          const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
-          const args = cmdline.split("\0");
-          const sessIdx = args.indexOf("--session");
-          if (sessIdx >= 0 && sessIdx + 1 < args.length) {
-            liveSessions.add(args[sessIdx + 1]);
-          }
-        }
-      } catch (_) {}
-    }
+    for (const session of sessionOf.values()) if (session) liveSessions.add(session);
     for (const entry of tmpEntries) {
       if (!entry.startsWith("wtft-")) continue;
       const fullDir = path.join(os.tmpdir(), entry);
@@ -2138,7 +2157,7 @@ if (showList || showCleanup || showRestart || stopSession) {
     try {
       pid = parseInt(fs.readFileSync(fullPath, "utf8").trim(), 10);
     } catch (_) { continue; }
-    if (pid <= 0) continue;
+    if (!(pid > 0)) continue;
     seenPids.add(pid);
 
     let alive = false;
@@ -2183,7 +2202,7 @@ if (showList || showCleanup || showRestart || stopSession) {
           const value = procEnvValue(pid, key);
           if (value) restartEnv[key] = value;
         }
-        process.kill(pid, "SIGTERM");
+        try { process.kill(pid, "SIGTERM"); } catch (_) { /* already gone */ }
         waitUntilExited(pid);
       }
       try { fs.unlinkSync(fullPath); } catch (_) {}
@@ -2212,7 +2231,7 @@ if (showList || showCleanup || showRestart || stopSession) {
           try { fs.unlinkSync(fullPath); } catch (_) {}
           console.log(`Cleaned up: PID ${pid} — session dropped from harness: ${sessionFound}`);
         } else {
-          process.kill(pid, "SIGTERM");
+          try { process.kill(pid, "SIGTERM"); } catch (_) { /* already gone */ }
           try { fs.unlinkSync(fullPath); } catch (_) {}
           console.log(`Cleaned up: PID ${pid} — session gone: ${sessionFound}`);
         }
@@ -2226,7 +2245,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         try { fs.unlinkSync(fullPath); } catch (_) {}
         console.log(`Stopped: PID ${pid} — session dropped from harness: ${sessionFound}`);
       } else {
-        if (alive) process.kill(pid, "SIGTERM");
+        if (alive) { try { process.kill(pid, "SIGTERM"); } catch (_) { /* already gone */ } }
         try { fs.unlinkSync(fullPath); } catch (_) {}
         console.log(`Stopped: PID ${pid} — ${sessionFound}`);
       }

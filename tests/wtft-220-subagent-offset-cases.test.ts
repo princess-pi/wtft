@@ -130,6 +130,27 @@ const T0 = Date.now() - 60_000;
 }
 
 {
+	const ownerCopy = (text: boolean) => JSON.stringify({
+		type: "assistant",
+		timestamp: new Date(T0 + 700).toISOString(),
+		message: {
+			role: "assistant", id: "msg_split", model: "claude-sonnet-4-6",
+			usage: { input_tokens: 1000, output_tokens: 150, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+			content: text
+				? [{ type: "text", text: "and then" }]
+				: [{ type: "tool_use", id: "tu_2", name: "Bash", input: { command: "claude -p 'go'" } }],
+		},
+	}) + "\n";
+	// One message written as two lines, its command first; the second line and
+	// the interrupt that follows it arrive in a later read.
+	const r = await runCase("interrupt-on-owner-copy", ownerCopy(false), async file => {
+		fs.appendFileSync(file, ownerCopy(true) + INTERRUPT);
+	}, tagged => tagged.some((i: any) => i.messageId === "msg_split"));
+	assert("fixture: the command line of the message was tagged first", r.initialTagged);
+	assert("an interrupt after a later line of a command message marks that message", r.tag === r.full, `tag:  ${r.tag}\n       full: ${r.full}`);
+}
+
+{
 	const r = await runCase("rewrite", turn("msg_a", T0, 100), async file => {
 		const body = turn("msg_b", T0 + 1000, 200) + turn("msg_c", T0 + 2000, 300);
 		const fd = fs.openSync(file, "r+");

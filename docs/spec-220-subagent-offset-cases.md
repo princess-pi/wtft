@@ -24,15 +24,22 @@ next read marks exactly that turn:
 
 - **still held** → it is marked before it is written;
 - **a command turn** → it is marked and written again;
-- **an ordinary turn already written** → a second copy with the mark is written. A reader of the
-  tag keeps one copy per id and ORs `interrupted` across copies (`deduplicateInteractions`), so
-  the turn reads as interrupted and its cost is counted once;
+- **an ordinary turn already written** → a second copy with the mark is written. Every reader of
+  the tag goes through `dedupeClassifiedById` (`interactionsFromRecords`, and the `--watch`
+  paths), which keeps one copy per id and ORs `interrupted` across copies
+  (`deduplicateInteractions`), so the turn reads as interrupted and its cost is counted once;
 - **a turn with no id** → there is nothing to match a second copy to, so the transcript is
   written again as a new generation, the move the reader makes for a rotation.
 
 A read that adds no turns (a tool result, a control line) leaves the remembered turn as it was.
-The held and remembered turns are committed together with the read offset, so a read that fails
-after parsing is re-read against the turns as they were before it.
+Which turn is held and which is last is committed together with the read offset, so a read that
+fails after parsing is re-read against the same turns. A mark set before the failure is set again,
+the same way, by the re-read.
+
+**One message, several lines.** A message can arrive as several lines with one id, for example
+the line that runs a Claude command and a later text line. A full parse ORs `interrupted` across
+those copies. So does the reader now: a later copy folded into the command turn carries its mark
+onto it, and a later command copy that replaces the stored one keeps a mark already set.
 An interrupt with no turn before it marks nothing, as in a full parse. The stamp is never carried
 to a later read.
 

@@ -538,6 +538,11 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
       if (!interaction.messageId) return false;
       const prior = state.owners.find(owner => owner.base.messageId === interaction.messageId);
       if (!prior) return false;
+      // A full parse ORs `interrupted` across the copies of one id.
+      if (interaction.interrupted && !prior.base.interrupted) {
+        prior.base.interrupted = true;
+        prior.lastLine = "";
+      }
       if (interaction.cost + 1e-9 >= prior.base.cost) {
         prior.base.timestamp = interaction.timestamp;
         prior.base.cost = interaction.cost;
@@ -586,7 +591,9 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
           ? fileState.owners.find(owner => owner.base.messageId === interaction.messageId)
           : undefined;
         if (prior) {
+          const interrupted = prior.base.interrupted || interaction.interrupted;
           prior.base = structuredClone(interaction);
+          if (interrupted) prior.base.interrupted = true;
           prior.lastLine = "";
         } else {
           newOwners.push({ base: structuredClone(interaction), lastLine: "", lastCost: 0 });
@@ -609,8 +616,8 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
       }
     }
     const holdBack = size > fileState.lastSize && plain.length > 0;
-    // Staged, and committed with the offset below: a failure before then
-    // re-reads these bytes, and must find the held and last turns as they were.
+    // Which turns are held and last is committed with the offset below. A mark
+    // set on them before a failure is set again, identically, by the re-read.
     const nextPending = holdBack ? plain.pop() ?? null : null;
     const owners = [...fileState.owners, ...newOwners];
     const lastRead = parsed?.interactions[parsed.interactions.length - 1];

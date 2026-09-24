@@ -78,12 +78,15 @@ in memory, so no discovery runs either way; the CLI passes a plain Set of the ta
 ## 3. #232: a transcript with no parseable line is unreadable, not $0
 
 `parseSessionFileStrict` is `parseSessionFile`, at the default chunk size, that throws when the
-file has non-blank lines and not one of them passes `JSON.parse`. That is the whole test: a file
-of JSON lines that are not transcript entries (`{}`, `42`) parses to no turns and is a $0 edge.
-The text after the last newline is not counted when it does not parse: that is a line still being
-written, so a descendant whose first line is half-flushed is a live $0 edge, not a gap. The walk uses it for the child and its subagent transcripts, so
-such a file is `skip: "unreadable"`, `total: null`, with an `unattributed` entry. An empty file,
-or one with only blank lines, is still an empty session. `parseSessionFile` itself is unchanged:
+file has complete (newline-ended) non-blank lines and not one of them passes `JSON.parse`. The walk
+uses it for the child and its subagent transcripts, so such a file is `skip: "unreadable"`,
+`total: null`, with an `unattributed` entry.
+
+What the test does not catch: a file of JSON lines that are not transcript entries (`{}`, `42`)
+parses to no turns and is a $0 edge. What it deliberately lets through: the text after the last
+newline, when it does not parse, is a line still being written, not a bad one, so a descendant
+whose first line is half-flushed is a live $0 edge, not a gap. An empty file, or one with only
+blank lines, is also still an empty session. `parseSessionFile` itself is unchanged:
 the daemon, the root's own parse, the root's subagent loads, the `unrecorded` pricing, and the
 `claude -p` transcripts a parse folds (inside the walk too) keep treating a bad line as a bad
 line. So a root subagent transcript, or a folded `claude -p` transcript, with no parseable line

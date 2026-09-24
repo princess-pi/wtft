@@ -1056,24 +1056,30 @@ function reapAndWarn() {
 
   // One process can hold many leases (a harness daemon holds one per session),
   // so each distinct pid is examined once and its outcome applied to all of them.
-  const leasesOf = new Map<number, string[]>();
+  type Lease = { path: string; dev: number; ino: number };
+  const leasesOf = new Map<number, Lease[]>();
   for (const pidFile of pidFiles) {
     const fullPath = path.join(pidDir, pidFile);
     let pid = 0;
+    let lease: Lease;
     try {
+      const stat = fs.statSync(fullPath);
+      lease = { path: fullPath, dev: stat.dev, ino: stat.ino };
       pid = parseInt(fs.readFileSync(fullPath, "utf8").trim(), 10);
     } catch (_) { continue; }
     if (!(pid > 0)) continue;
     const leases = leasesOf.get(pid);
-    if (leases) leases.push(fullPath);
-    else leasesOf.set(pid, [fullPath]);
+    if (leases) leases.push(lease);
+    else leasesOf.set(pid, [lease]);
   }
   const sessionOf = new Map<number, string | null>();
-  // Re-proved before unlinking: a lease read at the start may have been
-  // claimed by a new owner while the pids before it were examined.
-  const unlinkIfStill = (lease: string, pid: number) => {
+  // Re-proved (same file, same pid) before unlinking, as the claim loop does:
+  // a lease read at the start may have been claimed by a new owner since.
+  const unlinkIfStill = (lease: Lease, pid: number) => {
     try {
-      if (parseInt(fs.readFileSync(lease, "utf8").trim(), 10) === pid) fs.unlinkSync(lease);
+      const now = fs.statSync(lease.path);
+      if (now.dev !== lease.dev || now.ino !== lease.ino) return;
+      if (parseInt(fs.readFileSync(lease.path, "utf8").trim(), 10) === pid) fs.unlinkSync(lease.path);
     } catch (_) {}
   };
 
@@ -1097,7 +1103,7 @@ function reapAndWarn() {
 
     // HARD: session gone (not moved, not never-written). Never our own PID.
     if (pid !== process.pid && sessionFound && sessionIsGone(sessionFound)) {
-      process.kill(pid, "SIGTERM");
+      try { process.kill(pid, "SIGTERM"); } catch (_) { /* already gone, or not ours to signal */ }
       for (const lease of leases) unlinkIfStill(lease, pid);
       warnings.push(`[${new Date().toISOString()}] KILLED PID ${pid}: session gone — ${sessionFound}`);
       continue;

@@ -14,6 +14,14 @@ A counted edge's `total` is the child's own transcript **plus every transcript
 `discoverSubagentSessionFiles(<child>.jsonl)` lists** — the same set a root session's SELF merges.
 The folds those subagent parses make count toward the edge exactly as the child's own folds do.
 
+**Each subagent session is billed once.** A subagent transcript's id is its file name without
+`.jsonl`. One already in a total (in-self, counted under its own edge, or folded) is left out of
+the child's total whole. Any other is marked folded, like a `claude -p` session the child's parse
+folds, so a later ledger edge to it reads `already-counted` and its own ledger children are
+walked (§2). A Pi sub-session with a `parentSession` header is one such transcript: before this
+change it was priced only under its own edge, and now it is priced inside whichever reaches it
+first.
+
 **Whole or null.** If that discovery reports a file it could not read, throws, or any listed
 subagent transcript fails to parse, the edge is `skip: "unreadable"`, `total: null`, with an
 `unattributed` entry, the same as a child transcript that cannot be opened. An edge total is

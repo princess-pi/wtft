@@ -455,6 +455,9 @@ export function serializeClassifiedWithOverheadSplit(interaction: Interaction, p
 		cost: Math.max(0, interaction.cost - split.overheadCost),
 		cacheWriteTokens: 0,
 		afterCompaction: undefined,
+		// A recache is a Cache Miss even when a small prefix stayed cached: the
+		// divider and the Ovrhd attribution answer one question with one rule.
+		cacheMiss: split.kind === "overhead" ? true : interaction.cacheMiss,
 	};
 	const overheadLine: Interaction = {
 		timestamp: interaction.timestamp,

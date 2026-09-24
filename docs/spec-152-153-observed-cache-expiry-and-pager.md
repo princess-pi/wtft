@@ -182,6 +182,10 @@ half did not survive contact with fan-out.
 
 ### Road not taken: partial re-primes
 
+**Taken since — #241, `docs/spec-241-partial-reprime-miss.md`.** Real expiries on this host now
+keep a small cached prefix, so the zero-read rule alone missed them. A recache the overhead split
+finds is now a Cache Miss too. The text below is the reasoning at the time.
+
 The rule does not flag a *partial* re-prime, where a small prefix survives and the bulk is
 rewritten:
 

@@ -6,8 +6,9 @@
 **Found by:** the P9 spec-reconcile of [#194](https://github.com/princess-pi/wtft/issues/194) ·
 **Test:** `tests/wtft-230-231-232-spawn-tree-gaps.test.ts`
 
-All three change what `spawned.total` holds, which is money, so none was a doc fix. No schema
-moves: `wtft/spawn-tree@4` keeps its shape, and only the amounts an edge carries change.
+All three change what the spawn tree reports about money: what an edge total holds, which edges
+are walked, and whether a child reads as $0 or as a gap. None was a doc fix. No schema moves:
+`wtft/spawn-tree@4` gains no field and loses none.
 
 ## 1. #230: a descendant is priced with its Task subagents
 
@@ -17,24 +18,27 @@ The folds those subagent parses make count toward the edge exactly as the child'
 Every part is parsed with the child and all its subagent transcripts as `doNotFold`, so no part
 folds another. Which files discovery lists, and which it skips without reporting, is
 `discoverSubagentSessionFiles`'s contract (`docs/wtft-incremental-render-spec.md` § *Where the
-transcripts are on disk*); this change prices what it lists.
+transcripts are on disk*; its unreported skips are listed in #236); this change prices what it
+lists.
 
 **Each subagent session is billed once.** A subagent transcript's id is its file name without
 `.jsonl`. One already in a total (in-self, counted under its own edge, or folded) is left out of
 the child's total whole. Any other is marked folded, like a `claude -p` session the child's parse
 folds, so a later ledger edge to it reads `already-counted` and its own ledger children are
-walked (§2). It is marked folded whatever its turns are: an untagged turn in it is named in the
-child's `descendantUntagged` entry, not added to `spawned.total`. A subagent session with an
+walked (§2). It is marked folded whatever its turns are: an untagged turn in it is counted in the
+child's `descendantUntagged` entry, not added to `spawned.total`, so a later edge onto it reads
+`already-counted` although that untagged cost is outside the total. A subagent session with an
 `unattributed` entry from an earlier edge has that entry removed, and the earlier edge keeps its
 skip. A Pi sibling session with a `parentSession` header is one such transcript: before this
-change it was priced only under its own edge, and now it is priced inside whichever reaches it
-first.
+change it was priced only under its own edge. Now it is priced once: in SELF when it is in-self,
+else inside whichever reaches it first, the descendant or its own edge.
 
 **Whole or null.** If that discovery reports a file it could not read or throws, or any listed
-transcript cannot be read, has no parseable line (§3), or cannot be stat-ed, the edge is
+transcript cannot be read, has non-blank lines and not one that parses (§3), or cannot be
+stat-ed, or a `claude -p` transcript one of those parses folds cannot be read, the edge is
 `skip: "unreadable"`, `total: null`, with an `unattributed` entry, the same as a child transcript
-that cannot be opened. An edge total never leaves out a listed file, because nothing in the report
-would say it had. Inside one file, a bad line is still skipped and the good lines priced, as
+that cannot be opened. An edge total never leaves out a listed file it could not read, because
+nothing in the report would say it had; the only file it leaves out is one already in a total. Inside one file, a bad line is still skipped and the good lines priced, as
 everywhere else.
 
 **`live`** is true when any of those files, not only the child's own, has an mtime within
@@ -50,14 +54,16 @@ subagent session priced inside it (§1), is queued when it is folded, at that de
 depth + 2. Only that session's own transcript is inside
 the total; its ledger children are priced like any other edge.
 
-The walk runs **level by level**, so a session queued at depth `d` is visited after every
-shallower one and each is still reached at its minimum depth.
+The walk runs **level by level**. A session queued deeper (a fold queues two levels down) and
+then reached by a shallower edge is queued again at the shallower depth, and only that entry is
+walked, so each session's edges are walked once, at its minimum depth.
 
-**`alreadyAttributed` thunk:** it is now called whenever the ledger holds any edge (or
-`unrecorded` is asked for), not only when the root has one, since any in-self id may be a
+**`alreadyAttributed` thunk:** it is now called whenever the ledger holds any edge, or whenever
+`unrecorded` is asked for (even on an empty ledger), not only when the root has one, since any in-self id may be a
 parent. The walk still returns before resolving anything when neither the root nor an in-self id
 has an edge. The widget's thunk is `collectSelfAttributedSessionIds`, a union over data already
-in memory, so no discovery runs either way; the CLI passes a plain Set of the tag's fold records.
+in memory, so no discovery runs either way; the CLI passes a plain Set of the tag's fold records
+(an empty Set on the pending arm).
 
 ## 3. #232: a transcript with no parseable line is unreadable, not $0
 
@@ -66,9 +72,10 @@ file has non-blank lines and not one of them passes `JSON.parse`. That is the wh
 of JSON lines that are not transcript entries (`{}`, `42`) parses to no turns and is a $0 edge. The walk uses it for the child and its subagent transcripts, so
 such a file is `skip: "unreadable"`, `total: null`, with an `unattributed` entry. An empty file,
 or one with only blank lines, is still an empty session. `parseSessionFile` itself is unchanged:
-the daemon, the root's own parse and the root's subagent loads keep treating a bad line as a bad
-line, so a root subagent transcript with no parseable line still reads as $0 in SELF. That is
-outside this change, which is about the spawn tree.
+the daemon, the root's own parse, the root's subagent loads, the `unrecorded` pricing, and the
+`claude -p` transcripts a parse folds (inside the walk too) keep treating a bad line as a bad
+line. So a root subagent transcript, or a folded `claude -p` transcript, with no parseable line
+still reads as $0: #235.
 
 **`unrecorded` is left as it is.** #232 named it too, but a transcript is listed as a candidate
 only when a line of its head parses and carries a timestamp and a cwd, so a listed file always

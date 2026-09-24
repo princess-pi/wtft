@@ -190,6 +190,21 @@ console.log("\n#231 — ledger children of in-self and folded sessions are walke
 }
 
 {
+	const S = uuid(71), D = uuid(72), F = uuid(73), G = uuid(74);
+	putSession(D, turnLine("d-71", T0 + 1_000, 300, cwdOf(F)));
+	putSession(F, turnLine("f-71", T0 + 2_000, 200));
+	putSession(G, turnLine("g-71", T0 + 3_000, 700));
+	// D folds F while level 1 is walked, which queues F two levels down; the
+	// later edge S → F puts F at depth 1, so F's own edge F → G sits at depth 2.
+	const tree = computeSpawnTree(S, { ledgerPath: ledgerOf([[S, D], [S, F], [F, G]]), alreadyAttributed: new Set(), maxDepth: 2 });
+	check(tree.edges.find(e => e.child === F)?.skip === "already-counted",
+		"I11 fixture precondition: S → F reads already-counted, F having been folded by D first");
+	const edge = tree.edges.find(e => e.child === G);
+	check(edge?.resolved === true && edge.depth === 2 && tree.depthCapped === 0,
+		`I12 a folded session reached later by a shallower edge has its children at the shallower depth (got ${JSON.stringify({ depth: edge?.depth, skip: edge?.skip, capped: tree.depthCapped })})`);
+}
+
+{
 	const S = uuid(51);
 	let calls = 0;
 	const empty = path.join(dir, "empty-ledger.jsonl");

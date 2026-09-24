@@ -33,7 +33,7 @@ daemon calls it to follow a moved session; a test holds the two to the same answ
 `.jsonl` suffix, and the reader now strips it from `parent` and `child`, so one session recorded
 under both spellings is one node in the walk, counted once.
 
-`computeSpawnTree` builds a resolver once the root or an in-self session has an edge (spec-230), and each harness's index on its first lookup. For each harness, in registry
+`computeSpawnTree` builds a resolver once the root or an in-self session has an edge (spec-230), and a harness's index the first time a lookup reaches that harness, which is when no earlier harness answered that id. For each harness, in registry
 order: the index when the harness has the method, else that harness's `resolveSessionById`,
 asked per id. The first harness that knows an id wins, which is the order `resolveSessionFile`
 already uses. Answers are memoised for the walk. **An index that throws, or is not a `Map`,

@@ -334,13 +334,14 @@ function walkLedger(
 	const resolve = makeSessionResolver();
 
 	// `parentsAt[d]` holds the sessions whose edges sit at depth `d`. Walked
-	// level by level, a session is reached at its minimum depth even when it
-	// is queued out of order — a fold queues two levels down.
+	// level by level, and re-queued shallower when a later edge reaches a
+	// session queued deeper (a fold queues two levels down), so each session's
+	// edges are walked once, at its minimum depth.
 	const parentsAt: string[][] = [];
-	const visited = new Set<string>();
+	const edgeDepthOf = new Map<string, number>();
 	const enqueue = (parentId: string, depth: number) => {
-		if (visited.has(parentId)) return;
-		visited.add(parentId);
+		if ((edgeDepthOf.get(parentId) ?? Infinity) <= depth) return;
+		edgeDepthOf.set(parentId, depth);
 		(parentsAt[depth] ??= []).push(parentId);
 	};
 	enqueue(rootSessionId, 1);
@@ -349,6 +350,7 @@ function walkLedger(
 	for (const id of inSelf) enqueue(id, 2);
 
 	for (let depth = 1; depth < parentsAt.length; depth++) for (const parentId of parentsAt[depth] ?? []) {
+		if (edgeDepthOf.get(parentId) !== depth) continue;
 		const edges = ledger.childrenOf.get(parentId);
 		if (!edges) continue;
 
@@ -375,6 +377,7 @@ function walkLedger(
 					: prior === "in-self" ? "in-self-total" as const
 					: "already-seen-unresolved" as const;
 				tree.edges.push({ ...base, resolved: false, path: null, total: null, skip });
+				enqueue(edge.child, depth + 1);
 				continue;
 			}
 			if (depth > maxDepth) {

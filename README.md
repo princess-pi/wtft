@@ -268,16 +268,17 @@ then shows up only in `spawned.unrecorded[]`, if it matches a tier there.
 `wtft --json spawn-record …` is a report run, not a recording.
 
 `wtft --json` then reports the lineage under `spawned` — every edge with its
-provenance, every descendant counted exactly once (with its own subagent
-sessions and the `claude -p` sessions it folded), and every gap named rather
+provenance, every descendant counted exactly once (with the subagent and
+`claude -p` sessions it holds that no other total counts), and every gap named rather
 than zeroed — plus `tree`, which is self + descendants as a field (untagged cost excluded, as in `total.costUsd`) so nobody adds
 two numbers and guesses. **`total` keeps meaning this session's own turns**; not
 one dollar moved into or out of it.
 
 Three bounds are reported rather than hidden: the walk stops at **depth 5**,
-counted from this session's own edges at depth 1 (`spawned.depthCapped` counts
-the cuts), a ledger over **8 MiB** is refused
-outright rather than partly read, and a ledger it cannot read comes back as
+counted from this session's own edges at depth 1
+([spec-230](./docs/spec-230-231-232-spawn-tree-gaps.md) §2 covers the sessions
+it walks from below that), with `spawned.depthCapped` counting the cuts; a
+ledger over **8 MiB** is refused outright rather than partly read; and a ledger it cannot read comes back as
 `spawned.ledgerError` rather than as an empty tree. `tree` covers *resolved* descendants, so it is a
 floor whenever anything went uncounted, under FIVE conditions: `unattributed`
 non-empty, `depthCapped` non-zero, `ledgerError` set, `malformedLedgerLines`

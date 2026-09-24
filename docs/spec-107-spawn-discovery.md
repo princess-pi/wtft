@@ -77,7 +77,7 @@ append every one of them, so a sibling that one of them folds is that sibling's 
 `doNotFold`, which is the same rule the daemon states as one child, one holder, in the one place
 where a single call can see the whole list. The spawn walk prices a descendant the same way
 (spec-230): its transcript and every subagent transcript are parsed with all of those paths as
-`doNotFold`.
+`doNotFold`, through the strict parse (spec-230 §3).
 
 **A turn whose spawns yield no directory at all waits out its window, then is dropped** — an
 expandable `cd` target (`cd $(mktemp -d)`), a bare `cd` (the shell went to `$HOME`, which the

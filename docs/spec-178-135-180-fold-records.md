@@ -73,7 +73,7 @@ read path rediscovers which sessions were folded.
 ### Spawn walk
 
 - **No re-parse of folded sessions.** A counted descendant's fold ids and shares come from its
-  own parse and the parses of its subagent transcripts (spec-230). `foldsOf` and its swallowed throw (#180 item 2) are deleted.
+  own parse and the parses of the subagent transcripts it prices (spec-230). `foldsOf` and its swallowed throw (#180 item 2) are deleted.
 - **What a descendant folded** means the folds carried by the interactions that `total` counts:
   deduplicated and model-tagged, the same set `computeSessionSummary` sums. A fold on an
   interaction outside that set added nothing to the descendant's total, so it is neither
@@ -93,10 +93,11 @@ read path rediscovers which sessions were folded.
     −1e-9; values between that and zero are float noise and become 0. A throw here is a bug
     in this module, not a fact about a transcript (#180 item 4).
 - **A gap later covered is not a gap.** A session in `unattributed` that a later descendant's
-  parse folds, or lists as a subagent, has landed in `spawned.total`. Its `unattributed` entry is removed, and its
+  parse folds, or lists as a subagent, has landed (untagged turns apart, which `descendantUntagged` counts) in `spawned.total`. Its `unattributed` entry is removed, and its
   outcome becomes `folded`. Its edge row keeps the skip it was reported with (#180 item 3).
 - **The `try` covers reading the descendant only:** subagent discovery, the parse of its
-  transcript and of each subagent transcript, and the stat of each. Fold arithmetic runs outside it, so a throw
+  transcript and of each subagent transcript (including any `claude -p` transcript those parses
+  fold), and the stat of each. Fold arithmetic runs outside it, so a throw
   there is not reported as an `unreadable` edge (#180 item 5).
 - **`depthCapped` counts edges past the cap onto a session not already reached.** An edge past
   the cap onto a session seen earlier reports that session's outcome and is not a cut. The code

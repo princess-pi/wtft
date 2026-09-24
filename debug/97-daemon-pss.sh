@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # usage: debug/97-daemon-pss.sh <daemon.mjs> <label> <append-seconds> [node-flags]
 # Prints PSS and the live heap (a heap snapshot, which collects garbage first)
-# after startup and after the appends, then a closer line:
-#   closer heap_start_mb=<n> heap_end_mb=<n> met=<0|1>
-# and exits 3 when the live heap is over 10 MB at start or grows more than 1 MB.
+# after startup and after the appends, in MiB, then a closer line:
+#   closer heap_start_mib=<n> heap_end_mib=<n> append_s=<n> met=<0|1>
+# and exits 3 unless the appends ran at least 1,800 s, the live heap is at most
+# 10 MiB at start, and it grew at most 1 MiB.
 set -euo pipefail
 DAEMON=$(realpath "$1"); LABEL=$2; APPEND=$3; NODE_FLAGS=${4:-}
 # Not under /tmp: a test suite's `wtft-daemon --cleanup` kills fixture daemons there.
@@ -11,7 +12,7 @@ CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/wtft-97
 mkdir -p "$CACHE"
 ROOT=$(mktemp -d "$CACHE/run.XXXXXX")
 PID=""
-trap '[ -n "$PID" ] && kill "$PID" 2>/dev/null; rm -rf "$ROOT"' EXIT
+trap 'if [ -n "$PID" ]; then kill "$PID" 2>/dev/null || true; wait "$PID" 2>/dev/null || true; fi; rm -rf "$ROOT"' EXIT
 export WTFT_CLAUDE_PROJECTS_DIR=$ROOT/projects XDG_STATE_HOME=$ROOT/state
 # Isolated so the daemon's home-relative reap.log (os.homedir()) and its
 # tmp-relative pid lease (os.tmpdir(), which it also scans to reap other
@@ -73,7 +74,7 @@ sample() {
     echo "[$LABEL] ERROR: PSS sample ($1) is not a positive number: '$val'" >&2
     exit 1
   fi
-  echo "[$LABEL] PSS $1: $val MB"
+  echo "[$LABEL] PSS $1: $val MiB"
   heap "$1"
 }
 HEAP=
@@ -84,7 +85,7 @@ heap() {
   kill -USR2 "$PID"
   for _ in $(seq 1 60); do
     sleep 1
-    snap=$(ls -t "$SNAPS"/*.heapsnapshot 2>/dev/null | head -1)
+    snap=$(ls -t "$SNAPS"/*.heapsnapshot 2>/dev/null | head -1 || true)
     [ -n "$snap" ] || continue
     now=$(stat -c %s "$snap")
     # Written once the size holds still for a second.
@@ -104,7 +105,7 @@ heap() {
     echo "[$LABEL] ERROR: live heap ($1) is not a positive number: '$HEAP'" >&2
     exit 1
   fi
-  echo "[$LABEL] live heap $1: $HEAP MB"
+  echo "[$LABEL] live heap $1: $HEAP MiB"
   rm -f "$snap"
 }
 
@@ -120,11 +121,13 @@ wait_for_tags() {
       echo "[$LABEL] ERROR: daemon (pid $PID) is not running — cannot wait for subagent tags" >&2
       exit 1
     fi
-    if ls $TAG_GLOB >/dev/null 2>&1 && grep -q '"s":' $TAG_GLOB 2>/dev/null; then
+    # Every transcript read, by this process: the lease in the isolated TMPDIR names it.
+    if ls $TAG_GLOB >/dev/null 2>&1 && grep -q '"a0-' $TAG_GLOB && grep -q '"a1-' $TAG_GLOB && grep -q '"a2-' $TAG_GLOB \
+      && grep -qx "$PID" "$TMPDIR"/wtft-daemon-*.pid 2>/dev/null; then
       return 0
     fi
     if [ "$waited" -ge 60 ]; then
-      echo "[$LABEL] ERROR: daemon never read the subagent transcripts (no \"s\": tag lines within 60s)" >&2
+      echo "[$LABEL] ERROR: within 60 s, pid $PID did not hold the session lease with all three subagent transcripts tagged" >&2
       exit 1
     fi
     sleep 1
@@ -141,6 +144,6 @@ while [ $SECONDS -lt $end ]; do
 done
 sample "after ${APPEND}s of appends ($n rounds)"
 HEAP_END=$HEAP
-MET=$(awk -v a="$HEAP_START" -v b="$HEAP_END" 'BEGIN{print (a <= 10 && b - a <= 1) ? 1 : 0}')
-echo "closer heap_start_mb=$HEAP_START heap_end_mb=$HEAP_END met=$MET"
+MET=$(awk -v a="$HEAP_START" -v b="$HEAP_END" -v s="$APPEND" 'BEGIN{print (s >= 1800 && a <= 10 && b - a <= 1) ? 1 : 0}')
+echo "closer heap_start_mib=$HEAP_START heap_end_mib=$HEAP_END append_s=$APPEND met=$MET"
 [ "$MET" = 1 ] || exit 3

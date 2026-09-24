@@ -29,11 +29,9 @@ reads, and every nested fold parse.
 
 **Roads not taken, for now:**
 
-- **Offset reads in the daemon (the issue's direction A).** Reading only the bytes appended since
-  the last poll would also remove the CPU cost of re-parsing a changed transcript. But the daemon's
-  subagent path rests on the full parse for rotation detection (#114's generation records), nested
-  `claude -p` re-attribution (#14) and the one-child-one-holder rule (#107). Rebuilding those on
-  offsets is a large change to the hot path, and it is the rest of #97.
+- **Offset reads in the daemon (the issue's direction A).** Not in this change: the daemon's
+  subagent path rested on the full parse for rotation detection (#114's generation records), nested
+  `claude -p` re-attribution (#14) and the one-child-one-holder rule (#107). #219 later shipped it.
 - **A V8 young-generation flag for the daemon (`--max-semi-space-size=1`).** It was tried and
   measured (below) and left out: its benefit was not established. One 3-minute run with it read
   23.0 MB, but a 30-minute run read 33.5 MB, and a flagged run once its subagents were read
@@ -84,8 +82,7 @@ anything. Its figures (about 20 MB at start-up for every build) were wrong and a
 **These figures predate #219** (one daemon per harness), which merged while this change was in
 review and changes how a daemon holds sessions. A smoke run of the script on the merged build
 read 77.3 MB once read and 14.2 MB after 20 s of appends. The parser result (chunking halves the
-parse peak) does not depend on that, but the daemon-level figures must be re-measured under #219
-as part of the rest of #97.
+parse peak) does not depend on that; the re-measurement under #219 is *The Closer, restated*.
 
 **What the numbers support.** The whole-string parse's peak was real: 98 MB for 28 MB of
 transcripts. Chunking halves it. Neither build met the issue's first Closer (under 30 MB of PSS,
@@ -102,21 +99,24 @@ shipped in #219 alongside its one daemon per harness.
 those startups held 5.83 MB live, against 77.7 MB of PSS.
 
 **The Closer is now the live heap:** what a heap snapshot (which collects garbage first) holds.
-It must be at most 10 MB after startup and grow by at most 1 MB over 30 minutes of appends.
-`debug/97-daemon-pss.sh` prints it beside PSS after each sample, then a
-`closer heap_start_mb=… heap_end_mb=… met=0|1` line, and exits 3 when the Closer is not met. It
+It must be at most 10 MiB once all three subagent transcripts are read and grow by at most 1 MiB
+over at least 30 minutes of appends. `debug/97-daemon-pss.sh` prints it beside PSS after each
+sample, both in MiB, then a `closer heap_start_mib=… heap_end_mib=… append_s=… met=0|1` line, and
+exits 3 when the Closer is not met, including when the appends ran under 1,800 s. It takes the
+first sample once the daemon's tag holds turns from all three transcripts and the session lease
+in its isolated `TMPDIR` names the daemon it measures. It
 keeps its fixture under `${XDG_CACHE_HOME:-~/.cache}/wtft-97`, outside `/tmp`, where a test
 suite's `wtft-daemon --cleanup` kills fixture daemons.
 
 **Measured 2026-09-24, `main` at `76d887c`**, 28.3 MB of subagent transcripts, 1,800 s of appends
-(359 rounds):
+(360 rounds), printing `closer heap_start_mib=5.80 heap_end_mib=6.32 append_s=1800 met=1`:
 
 | | PSS | live heap |
 |---|---|---|
-| after startup | 23.4 MB | **5.80 MB** |
-| after 1,800 s | 75.8 MB | **6.32 MB** |
+| after startup | 77.4 MiB | **5.80 MiB** |
+| after 1,800 s | 69.9 MiB | **6.32 MiB** |
 
-The live heap grew 0.52 MB, so the Closer is met. The second PSS reading follows the first heap
+The live heap grew 0.52 MiB, so the Closer is met. The second PSS reading follows the first heap
 snapshot, which allocates inside the daemon, so it is not a clean PSS measurement. The resident
 cost that matters on this host is the harness daemon's (#239).
 

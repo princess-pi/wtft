@@ -22,23 +22,23 @@ REAL="$REPO/bin/install-wtft"
 # destroyed any pre-existing file of that name — including a concurrent probe's
 # mutant, which is not hypothetical on a box that runs several agent sessions at
 # once and now runs this from the test suite.
-MUT="$(mktemp "$REPO/bin/mut-install-wtft.XXXXXX")"
+MUT="$(mktemp "$REPO/bin/mut-install-wtft.XXXXXX")" || { echo "run-mutants: mktemp failed" >&2; exit 1; }
+trap 'rm -f "$MUT"; rm -rf "${SHIM:-}" "${FAKE_HOME:-}"' EXIT
 # A ONE-ENTRY SHIM, not bun's own directory. On this host bun lives in ~/bin,
 # which is install-wtft's DEFAULT TARGET: once a real run puts ~/bin/wtft there,
 # putting bun's directory on the mutant's PATH makes every run see a foreign
 # wtft, report `shadowed` instead of `ok`, and fail on a correct mutation. The
 # suite that drives install-wtft defends against exactly this; the script the
 # spec tells you to trust over its own table has to as well.
-SHIM="$(mktemp -d)"
+SHIM="$(mktemp -d)" || { echo "run-mutants: mktemp -d failed" >&2; exit 1; }
 ln -s "$(command -v bun)" "$SHIM/bun"
 BUNDIR="$SHIM"
 # install-wtft reads config under HOME/XDG_CONFIG_HOME in every mode and moves
 # it in install mode, so without this every run of this probe would read (and
 # move) this host's real ~/.config. Exported once, for every "$REAL"/"$MUT" call below.
-FAKE_HOME="$(mktemp -d)"
+FAKE_HOME="$(mktemp -d)" || { echo "run-mutants: mktemp -d failed" >&2; exit 1; }
 export HOME="$FAKE_HOME"
 unset XDG_CONFIG_HOME
-trap 'rm -f "$MUT"; rm -rf "$SHIM" "$FAKE_HOME"' EXIT
 
 status_of() { sed -n 's/.*"status":"\([^"]*\)".*/\1/p' <<<"$1"; }
 fails=0

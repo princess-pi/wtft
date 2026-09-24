@@ -53,13 +53,19 @@
  * `-size +40k -newermt '-60 days'` filter unconditionally — a fixture must
  * satisfy it (write files over 40 KB with a fresh mtime) rather than the
  * script relaxing it for tests.
+ *
+ * Exit codes: 0 the totals agree, or a rise is covered by newly found
+ * subagents; 1 they disagree; 2 bad usage, or a --before build that ignores
+ * the projects-root variable; 3 could not compare — nothing was selected, a
+ * transcript could not be read or copied, a child could not be frozen, or a
+ * total is not a finite number.
  */
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-interface SubAgentBearing { claudeSubAgentFolds?: { id: string; file?: string }[]; claudeSubAgentSessionIds?: string[] }
+interface SubAgentBearing { claudeSubAgentFolds?: { id: string; file?: string; share?: { costUsd?: number } }[]; claudeSubAgentSessionIds?: string[] }
 
 /** Sorted, never shuffled — the same directory yields the same list. */
 export function pickTranscripts(root: string, n: number): string[] {
@@ -97,16 +103,28 @@ export async function honoursProjectsSeam(checkout: string): Promise<boolean> {
 export function foldFilesOf(
 	interactions: readonly SubAgentBearing[],
 	resolve: (id: string) => string | null = () => null,
+	unresolved: string[] = [],
 ): string[] {
 	const lookUp = (id: string): string[] => {
 		const found = resolve(id);
-		if (found === null) console.error(`before-after: no transcript found for subagent id ${id}, so it is not frozen`);
+		if (found === null) unresolved.push(id);
 		return found === null ? [] : [found];
 	};
 	return interactions.flatMap(i => {
 		if (!i.claudeSubAgentFolds) return (i.claudeSubAgentSessionIds ?? []).flatMap(lookUp);
 		return i.claudeSubAgentFolds.flatMap(f => typeof f.file === "string" ? [f.file] : lookUp(f.id));
 	});
+}
+
+/** What each subagent these interactions fold added, from its fold share. */
+export function subagentCostsOf(interactions: readonly SubAgentBearing[]): Map<string, number> {
+	const costs = new Map<string, number>();
+	for (const i of interactions) {
+		for (const f of i.claudeSubAgentFolds ?? []) {
+			costs.set(f.id, Math.max(costs.get(f.id) ?? 0, f.share?.costUsd ?? 0));
+		}
+	}
+	return costs;
 }
 
 /** The subagent ids these interactions report, from `claudeSubAgentFolds[].id`.
@@ -151,8 +169,8 @@ export function snapshotCorpus(opts: {
 	const copyUnder = (file: string, root: string, outRoot: string): void => {
 		const rel = path.relative(root, file);
 		if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
-			console.error(`before-after: fold file outside its root, skipped: ${file}`);
-			return;
+			// Fatal for the same reason as a failed copy: the snapshot would lack it.
+			throw new Error(`before-after: ${file} is outside ${root}, so it cannot be frozen`);
 		}
 		const dest = path.join(outRoot, rel);
 		try {
@@ -179,17 +197,26 @@ async function main(): Promise<void> {
 		return i === -1 ? null : argv[i + 1] ?? null;
 	};
 
+	const usage = (why: string): never => {
+		console.error(`before-after: ${why}`);
+		console.error("usage: bun research/other-corpus/before-after.ts --before <checkout> [--sessions N]");
+		console.error("  --before  a checkout of the build to compare against (e.g. the main clone)");
+		process.exit(2);
+	};
+	for (let k = 0; k < argv.length; k += 2) {
+		if (argv[k] !== "--before" && argv[k] !== "--sessions") usage(`unknown argument ${argv[k]}`);
+		if (argv[k + 1] === undefined) usage(`${argv[k]} needs a value`);
+	}
+
 	const beforeArg = arg("--before");
 	// The import below resolves a relative specifier against this file, not the cwd.
 	const BEFORE = beforeArg === null ? null : path.resolve(beforeArg);
 	const AFTER = path.resolve(import.meta.dirname, "..", "..");
-	const N = Number(arg("--sessions")) || 250;
+	const sessionsArg = arg("--sessions");
+	if (sessionsArg !== null && !/^[1-9]\d*$/.test(sessionsArg)) usage(`--sessions needs a positive integer, got ${sessionsArg}`);
+	const N = sessionsArg === null ? 250 : Number(sessionsArg);
 
-	if (!BEFORE) {
-		console.error("usage: bun research/other-corpus/before-after.ts --before <checkout> [--sessions N]");
-		console.error("  --before  a checkout of the build to compare against (e.g. the main clone)");
-		process.exit(2);
-	}
+	if (!BEFORE) usage("--before is required");
 
 	const home = process.env.HOME!;
 	// Canonical, because the parser names fold files by their real path.
@@ -223,11 +250,12 @@ async function main(): Promise<void> {
 			let parsed;
 			try { parsed = mod.parseSessionFile(f); }
 			catch (err) {
-				console.error(`before-after: ${label}'s discovery parse failed, so the children only it would find are not frozen: ${f} (${err instanceof Error ? err.message : String(err)})`);
-				continue;
+				throw new Error(`${label}'s discovery parse failed, so its children cannot be frozen: ${f} (${err instanceof Error ? err.message : String(err)})`);
 			}
+			const unresolved: string[] = [];
 			// Canonical, like the roots, so a symlinked projects root does not read as "outside".
-			for (const file of foldFilesOf(parsed, resolveId)) foldFiles.add(real(file));
+			for (const file of foldFilesOf(parsed, resolveId, unresolved)) foldFiles.add(real(file));
+			if (unresolved.length > 0) throw new Error(`${label} names subagent(s) ${unresolved.join(", ")} in ${f}, and no transcript was found to freeze`);
 		}
 	}
 
@@ -247,26 +275,35 @@ async function main(): Promise<void> {
 	};
 
 	let mismatch = false;
+	if (Object.values(sets).every(files => files.length === 0)) {
+		throw new Error("no sessions were selected, so nothing was compared");
+	}
 
 	for (const [harness, files] of Object.entries(sets)) {
 		if (files.length === 0) { console.log(`\n===== ${harness}: no sessions found, skipped =====`); continue; }
-		const side: Record<string, { by: Map<string, number>; tot: number; subagents: Set<string> }> = {};
+		const side: Record<string, { by: Map<string, number>; tot: number; subagents: Set<string>; costs: Map<string, number> }> = {};
 
 		for (const [label, mod] of [["BEFORE", modBEFORE], ["AFTER", modAFTER]] as const) {
 			const by = new Map<string, number>();
 			const subagents = new Set<string>();
+			const costs = new Map<string, number>();
 			let tot = 0;
 			for (const f of files) {
 				let ints;
-				try { ints = mod.deduplicateInteractions(mod.parseSessionFile(f)); } catch { continue; }
+				try { ints = mod.deduplicateInteractions(mod.parseSessionFile(f)); }
+				catch (err) {
+					throw new Error(`${label}'s measured pass could not read ${f} (${err instanceof Error ? err.message : String(err)})`);
+				}
 				for (const id of subagentIdsOf(ints)) subagents.add(id);
+				for (const [id, c] of subagentCostsOf(ints)) costs.set(id, Math.max(costs.get(id) ?? 0, c));
 				for (const i of ints) {
 					const c = mod.classifyInteraction(i);
 					by.set(c, (by.get(c) || 0) + i.cost);
 					tot += i.cost;
 				}
 			}
-			side[label] = { by, tot, subagents };
+			if (!Number.isFinite(tot)) throw new Error(`${label}'s ${harness} total is not a finite number (${tot})`);
+			side[label] = { by, tot, subagents, costs };
 		}
 
 		const b = side.BEFORE!, a = side.AFTER!;
@@ -290,8 +327,10 @@ async function main(): Promise<void> {
 		// to the other.
 		if (delta < -0.005) mismatch = true;
 		if (lost.length > 0) mismatch = true;
-		// A RISE still needs a reason, and the only acceptable one is discovery.
-		const explained = gained.length > 0;
+		// A RISE still needs a reason, and the only acceptable one is discovery —
+		// and no more of a rise than the newly found subagents cost.
+		const gainedCost = gained.reduce((sum, id) => sum + (a.costs.get(id) ?? 0), 0);
+		const explained = gained.length > 0 && delta <= gainedCost + 0.005;
 		if (delta > 0.005 && !explained) mismatch = true;
 
 		console.log(`\n===== ${harness}: ${files.length} sessions =====`);
@@ -299,8 +338,9 @@ async function main(): Promise<void> {
 			(delta < -0.005 ? "   <-- TOTAL FELL; spend became invisible, which is never acceptable"
 				: Math.abs(delta) <= 0.005 ? "  (equal, as required)"
 				: explained ? "  (a RISE explained by subagent discovery, below)"
+				: gained.length > 0 ? `   <-- RISE larger than the $${gainedCost.toFixed(4)} the newly found subagents cost`
 				: "   <-- UNEXPLAINED RISE; a reclassification cannot change the total"));
-		if (gained.length) console.log(`  subagents found only AFTER  (cost recovered): ${gained.join(", ")}`);
+		if (gained.length) console.log(`  subagents found only AFTER  (cost recovered, $${gainedCost.toFixed(4)}): ${gained.join(", ")}`);
 		if (lost.length) console.log(`  subagents found only BEFORE (cost LOST — investigate): ${lost.join(", ")}`);
 		for (const c of [...new Set([...b.by.keys(), ...a.by.keys()])]
 			.sort((x, y) => (a.by.get(y) || 0) - (a.by.get(x) || 0))) {
@@ -313,4 +353,10 @@ async function main(): Promise<void> {
 	process.exit(mismatch ? 1 : 0);
 }
 
-if (import.meta.main) await main();
+if (import.meta.main) {
+	try { await main(); }
+	catch (err) {
+		console.error(`before-after: could not compare: ${err instanceof Error ? err.message : String(err)}`);
+		process.exit(3);
+	}
+}

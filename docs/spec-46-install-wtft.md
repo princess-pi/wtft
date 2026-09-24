@@ -102,7 +102,9 @@ it moves each of `wtft.json` → `config.json`, `token-budget.json` → `token-b
 `$XDG_CONFIG_HOME/princess-pi-tools/` (or `~/.config/princess-pi-tools/` when
 `XDG_CONFIG_HOME` is unset) to the equivalent path under `.../wtft/`. It never overwrites a
 DIFFERENT file already at the new path — that is a real conflict, and a human decides which
-copy is authoritative. A file already at the new path that is BYTE-IDENTICAL to the old one
+copy is authoritative. A new path that is the SAME FILE as the old one — one a symlink to the other,
+or the old directory a link to the new one — is left alone and reported `left`, since unlinking
+either name can delete the only copy. A file already at the new path that is BYTE-IDENTICAL to the old one
 is not a conflict, though: it is treated as a stale duplicate (almost always the tail of a
 previous move whose cleanup step failed, see below) and the old copy is removed. `--check`
 never mutates either way; it only reports what would move, what is a stale duplicate, or

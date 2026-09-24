@@ -189,11 +189,11 @@ reported.
   `claudeSubAgentFolds[].file` either build names, at any depth, is copied into the
   snapshot at its own relative path. A child only one build finds is still in the
   snapshot, so the lost check can still fire. Every fold path is made canonical first, like
-  the roots. Three things stay out, each with a stderr note: children only a build whose
-  discovery parse throws would have found; a fold file outside the Claude Code projects
-  root; and a path-less id the resolver cannot find. A file that fails to copy fails the
-  run, since both measured passes would otherwise skip it and certify a smaller corpus, and
-  so does a resolver that throws.
+  the roots. Anything that would leave the snapshot incomplete fails the run with exit 3
+  instead of being skipped: a discovery parse that throws, a fold file outside the Claude
+  Code projects root, a path-less id the resolver cannot find, a resolver that throws, and a
+  file that fails to copy. Otherwise both measured passes would skip it and certify a
+  smaller corpus.
 - Both measured passes run with `WTFT_CLAUDE_PROJECTS_DIR` set to the snapshot's projects
   root, the #129 seam. A fake `HOME` does not work, because bun caches `os.homedir()` at
   process start.
@@ -207,8 +207,17 @@ reported.
   measured pass relies on it, so an older build that reads the variable from the
   environment is accepted. A `--before` that cannot be loaded fails the run instead.
 - A root that does not exist selects nothing, and a harness with nothing selected is
-  reported as skipped; when both are, the script still exits 0. Any other failure to read a
-  root, or of `find`, fails the run.
+  reported as skipped. When nothing at all is selected the script exits 3. Any other
+  failure to read a root, or of `find`, fails the run.
+- **Exit codes.** 0: the totals agree, or a rise is covered by newly found subagents. 1: they
+  disagree. 2: bad usage (an unknown flag, `--sessions` that is not a positive integer, no
+  `--before`) or a `--before` build that ignores the projects-root variable. 3: could not
+  compare — nothing selected, a transcript unreadable in either pass, a child that cannot be
+  frozen, or a total that is not a finite number. Before this change a failure and a
+  mismatch both exited 1, and several of these exited 0.
+- **A rise is bounded by what the new subagents cost.** A rise counts as explained only when
+  it is no larger than the newly found subagents' fold shares plus half a cent. Before, any
+  one new subagent excused a rise of any size.
 - The snapshot directory is removed when the script exits, including on an error; a run
   killed by a signal leaves its `wtft-ab-*` directory behind. `--before` is resolved against the current
   directory, so a relative checkout path works.
@@ -228,6 +237,10 @@ with a parent whose turn spawns a `claude -p` child.
 - **Seam probe:** this checkout passes; a build whose `projectsDir` ignores the variable is
   refused with exit 2; a build that reads it from `process.env` with no argument passes; a
   checkout that cannot be loaded throws (E8–E10, E9b, E9c).
+- **Could not compare:** nothing selected exits 3; an unknown flag and `--sessions -1` exit
+  2; a BEFORE build reporting a NaN cost, or one whose measured pass throws, exits 3; a rise
+  larger than the new subagent's cost exits 1; a snapshot copy failure and a fold file
+  outside the root throw, and an in-root `..archive` name is copied (G1–G9).
 
 ## Reconciliation record (2026-09-23)
 
@@ -272,3 +285,4 @@ producer-side gap is duppypro/princess-pi-tools#1021.
 | Macroscope, ready round | 2 Medium threads: a failed snapshot copy let the gate certify a smaller corpus; an unchecked `mktemp -d` in the mutation probe | `copyUnder`; `run-mutants.sh` | reconciled-against-untested | Fixed: a failed copy now fails the run; every probe `mktemp -d` exits on failure |
 | Macroscope, second ready round | 2 Medium threads: an older BEFORE build's path-less child ids were never frozen, so a subagent AFTER lost went undetected; a root-relative path like `..archive/…` read as outside the root | `foldFilesOf`; `copyUnder` | ✅ E11 for the lookup; the `..`-prefixed name untested | Fixed |
 | final reconcile (the review-round commits) | the seam probe refused every build that reads the variable from `process.env` (a regression the Macroscope fix introduced); a bad `--before` misreported as an old build; an unfound path-less id and a throwing resolver silent or misattributed; resolved paths not canonical; "never exits 0"; closer lists missing E8–E11 and V10g; the overlap missing from CONTEXT, Amendment 7 and the manifest | `honoursProjectsSeam`, `foldFilesOf`, the discovery loop | ✅ E9b, E9c | Fixed with the PR back in Draft (duppypro/princess-pi-tools#1027) |
+| sibling sweep (#1027), seeded by Macroscope's five findings | 19 findings, 5 High: nothing selected, a NaN total and a measured-pass throw all exited 0; any one new subagent excused a rise of any size; a failed discovery parse froze an incomplete corpus; the config migration unlinked the only copy when the old and new paths are one file through a symlink; unchecked `mktemp` in the probe's setup | `main`, `snapshotCorpus`, the install-wtft migration, `run-mutants.sh` | ✅ G1–G9, V9j | Fixed. Filed, pre-existing: the migration's dangling-link and unreadable-new-file messages, human output dropping a left config under drift, an exec-only guard, and M7b's skip cause (#233). Left standing: two builds that price differently fail as "reclassification" (the pricing config path predates the seam, so every accepted build reads the same one); a resolver that answers with a different copy of a moved session; E4/E6 cannot see a live read in `main()` (Z2 pins the freeze itself) |

@@ -244,9 +244,85 @@ check(refused.status === 2 && /predates the WTFT_CLAUDE_PROJECTS_DIR seam/.test(
 check(JSON.stringify(foldFilesOf([{ claudeSubAgentSessionIds: ["kid"] }], id => id === "kid" ? "/p/kid.jsonl" : null)) === '["/p/kid.jsonl"]',
 	"E11 an id reported without a path is resolved to its transcript");
 
-// A build whose folds carry no `file` names no fold files instead of throwing.
+// A fold with no `file` and no resolver answer is reported as unresolved, not thrown on.
 check(JSON.stringify(foldFilesOf([{ claudeSubAgentFolds: [{ id: "x" } as { id: string; file?: string }] }])) === "[]",
 	"E7 a fold with no file contributes nothing to the freeze");
+
+// ---
+// PART G — every way the gate could pass without comparing fails instead
+// ---
+console.log("\nPART G — exit codes when the comparison cannot be trusted");
+
+const runScript = (args: string[], env: Record<string, string> = {}) => spawnSync("bun", [SCRIPT, ...args], {
+	cwd: REPO, encoding: "utf8",
+	env: { ...process.env, HOME: emptyHome, TMPDIR: childTmp, WTFT_CLAUDE_PROJECTS_DIR: e2eRoot, WTFT_PI_SESSIONS_DIR: emptyPiRootE2e, ...env },
+});
+
+const empty = runScript(["--before", "."], { WTFT_CLAUDE_PROJECTS_DIR: path.join(dir, "no-cc"), WTFT_PI_SESSIONS_DIR: path.join(dir, "no-pi") });
+check(empty.status === 3 && /nothing was compared/.test(empty.stderr ?? ""),
+	`G1 nothing selected exits 3, not 0 (got ${empty.status})`);
+check(runScript(["--before", ".", "--session", "10"]).status === 2, "G2 an unknown flag exits 2");
+check(runScript(["--before", ".", "--sessions", "-1"]).status === 2, "G3 a non-positive --sessions exits 2");
+
+/** A checkout whose parser wraps this one's, changing what BEFORE reports. */
+function fakeBefore(name: string, parserBody: string): string {
+	const root = path.join(dir, `fake-${name}`);
+	const lib = path.join(root, "extensions", "lib");
+	fs.mkdirSync(path.join(lib, "harness", "claude-code"), { recursive: true });
+	fs.writeFileSync(path.join(lib, "harness", "claude-code", "discovery.ts"),
+		`export * from ${JSON.stringify(path.join(REPO, "extensions", "lib", "harness", "claude-code", "discovery.ts"))};\n`);
+	fs.writeFileSync(path.join(lib, "wtft-parser.ts"), parserBody.replaceAll("REAL", JSON.stringify(path.join(REPO, "extensions", "lib", "wtft-parser.ts"))));
+	return root;
+}
+const nanBuild = fakeBefore("nan", `export * from REAL;
+import * as real from REAL;
+export function parseSessionFile(...a: any[]) { const xs = (real.parseSessionFile as any)(...a); if (xs[0]) xs[0].cost = NaN; return xs; }
+`);
+const nan = runScript(["--before", nanBuild]);
+check(nan.status === 3 && /not a finite number/.test(nan.stderr ?? ""), `G4 a NaN total exits 3 (got ${nan.status})`);
+
+const noApi = fakeBefore("noapi", `import * as real from REAL;
+export const parseSessionFile = real.parseSessionFile;
+export const classifyInteraction = real.classifyInteraction;
+`);
+const noapi = runScript(["--before", noApi]);
+check(noapi.status === 3 && /measured pass could not read/.test(noapi.stderr ?? ""),
+	`G5 a measured pass that throws exits 3, instead of reading as an explained rise (got ${noapi.status})`);
+
+// A rise bigger than the newly found subagent: BEFORE loses its folds and half its cost.
+const riseRoot = path.join(dir, "rise-projects");
+const riseParentCwd = path.join(dir, "rise-parent"), riseChildCwd = path.join(dir, "rise-child");
+writeTranscript(riseRoot, riseParentCwd, "ffffffff-6666-4666-8666-666666666666",
+	sessionLine("ffffffff-6666-4666-8666-666666666666", T0, riseParentCwd)
+	+ turnLine("rise-parent-turn", T0, 20_000, [`cd ${riseChildCwd} && claude -p 'go'`])
+	+ paddingLine(60_000));
+writeTranscript(riseRoot, riseChildCwd, "abababab-7777-4777-8777-777777777777",
+	sessionLine("abababab-7777-4777-8777-777777777777", T0 + 2_000, riseChildCwd)
+	+ turnLine("rise-child-turn", T0 + 2_000, 700));
+const halfBuild = fakeBefore("half", `export * from REAL;
+import * as real from REAL;
+export function parseSessionFile(...a: any[]) { const xs = (real.parseSessionFile as any)(...a); for (const i of xs) { delete i.claudeSubAgentFolds; i.cost = i.cost / 2; } return xs; }
+`);
+const rise = runScript(["--before", halfBuild], { WTFT_CLAUDE_PROJECTS_DIR: riseRoot });
+check(rise.status === 1 && /RISE larger than/.test(rise.stdout ?? ""),
+	`G6 a rise larger than the newly found subagent's cost fails, not "explained" (got ${rise.status})`);
+
+// snapshotCorpus: a file that cannot be copied, or lies outside its root, fails; a `..`-named one inside it is copied.
+const snapRoot = path.join(dir, "snap-fail");
+fs.mkdirSync(path.join(snapRoot, "..archive"), { recursive: true });
+const dotted = path.join(snapRoot, "..archive", "s.jsonl");
+fs.writeFileSync(dotted, "{}\n");
+const snapOut = path.join(dir, "snap-out");
+snapshotCorpus({ snapDir: snapOut, ccRoot: snapRoot, piRoot: path.join(dir, "no-pi"), ccFiles: [dotted], piFiles: [], foldFiles: [] });
+check(fs.existsSync(path.join(snapOut, "projects", "..archive", "s.jsonl")), "G7 an in-root name starting with .. is copied");
+let copyThrew = false;
+try { snapshotCorpus({ snapDir: path.join(dir, "snap-out-2"), ccRoot: snapRoot, piRoot: path.join(dir, "no-pi"), ccFiles: [path.join(snapRoot, "gone.jsonl")], piFiles: [], foldFiles: [] }); }
+catch { copyThrew = true; }
+check(copyThrew, "G8 a file that cannot be copied fails the snapshot");
+let outsideThrew = false;
+try { snapshotCorpus({ snapDir: path.join(dir, "snap-out-3"), ccRoot: snapRoot, piRoot: path.join(dir, "no-pi"), ccFiles: [], piFiles: [], foldFiles: [path.join(dir, "elsewhere.jsonl")] }); }
+catch { outsideThrew = true; }
+check(outsideThrew, "G9 a fold file outside the projects root fails the snapshot");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

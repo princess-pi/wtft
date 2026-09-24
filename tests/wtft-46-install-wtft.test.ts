@@ -816,6 +816,34 @@ console.log("\n9. Config migration off princess-pi-tools and onto wtft (#156)");
 		check(code === 4 && entry?.state === "left",
 			"V9i: the collision reports config-left, exit 4", `exit ${code}, ${JSON.stringify(entry)}`);
 	}
+
+	// V9j — one file under two names is never unlinked. (a) the new path is a
+	// symlink to the old file; (b) the old directory is a symlink to the new one.
+	{
+		const homeA = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-linkfile-"));
+		const legacyA = path.join(homeA, ".config", "princess-pi-tools");
+		fs.mkdirSync(legacyA, { recursive: true });
+		fs.writeFileSync(path.join(legacyA, "wtft.json"), JSON.stringify({ interval: "1h" }));
+		const newA = path.join(homeA, ".config", "wtft");
+		fs.mkdirSync(newA, { recursive: true });
+		fs.symlinkSync(path.join("..", "princess-pi-tools", "wtft.json"), path.join(newA, "config.json"));
+		const a = run(["--json", "--dir", mkSandbox(path.join(os.tmpdir(), "46-cfgmig-linkfile-dir-"))], [],
+			{ HOME: homeA, XDG_CONFIG_HOME: path.join(homeA, ".config") });
+		check(fs.existsSync(path.join(legacyA, "wtft.json")) && fs.existsSync(path.join(newA, "config.json")),
+			"V9j(a): a new path that links to the old file keeps both names, and the link does not dangle");
+		check(a.code === 4, `V9j(a): reported as config-left, exit 4 (got ${a.code})`);
+
+		const homeB = mkSandbox(path.join(os.tmpdir(), "46-cfgmig-linkdir-"));
+		const newB = path.join(homeB, ".config", "wtft");
+		fs.mkdirSync(newB, { recursive: true });
+		fs.writeFileSync(path.join(newB, "token-budget.json"), JSON.stringify({ budget: 1 }));
+		fs.symlinkSync("wtft", path.join(homeB, ".config", "princess-pi-tools"));
+		const b = run(["--json", "--dir", mkSandbox(path.join(os.tmpdir(), "46-cfgmig-linkdir-dir-"))], [],
+			{ HOME: homeB, XDG_CONFIG_HOME: path.join(homeB, ".config") });
+		check(fs.existsSync(path.join(newB, "token-budget.json")),
+			"V9j(b): an old directory that links to the new one does not lose token-budget.json");
+		check(b.code === 4, `V9j(b): reported as config-left, exit 4 (got ${b.code})`);
+	}
 }
 
 // ---

@@ -163,8 +163,13 @@ const T0 = Date.now() - 60_000;
 {
 	const r = await runCase("lower-cost", turn("msg_a", T0, 5000), async file => {
 		fs.appendFileSync(file, turn("msg_a", T0, 100));
+		// The tag already matches a full parse before the daemon reads the
+		// lower copy, so wait until it has: its retraction opens a new generation.
+		const tag = path.join(path.dirname(path.dirname(path.dirname(file))), "wtft-tags", `session.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+		for (let i = 0; i < 40 && (fs.readFileSync(tag, "utf8").match(/"_gen"/g) ?? []).length < 2; i++) await sleep(250);
 	});
 	assert("fixture: the first copy was tagged before the lower one", r.initialTagged);
+	assert(`fixture: the daemon read the lower copy and opened a new generation (${r.generations} generation records)`, r.generations === 2);
 	assert("an ordinary turn re-emitted at a lower cost matches a full parse", r.tag === r.full, `tag:  ${r.tag}\n       full: ${r.full}`);
 }
 

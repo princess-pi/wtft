@@ -123,7 +123,6 @@ interface SubagentFileState {
 	/** Until then a spawning turn can still gain a `claude -p` child. */
 	spawnWindowClosesAt: number;
 	owners: FoldOwner[];
-	stampInterrupt: boolean;
 	/** Last ordinary turn not yet written, so a following interrupt can still mark it. */
 	pendingTurn: NonNullable<ReturnType<typeof parseEntryToInteraction>> | null;
 	/** The last turn read, of any kind, and whether a Claude command made it an
@@ -307,7 +306,6 @@ function freshSubagentState(): SubagentFileState {
     foldStamps: new Map<string, string>(),
     spawnWindowClosesAt: 0,
     owners: [],
-    stampInterrupt: false,
     pendingTurn: null,
     lastTurn: null,
     plainCost: new Map(),
@@ -369,13 +367,13 @@ function parseAppendedBytes(
     try { JSON.parse(tail.toString("utf8")); settledFragment = true; } catch { /* still mid-record */ }
   }
   if (lastNl === -1 && !settledFragment) {
-    return { interactions: [], fragment: Buffer.from(buf), stream, stampInterrupt: state.stampInterrupt };
+    return { interactions: [], fragment: Buffer.from(buf), stream, stampInterrupt: false };
   }
   const consumeTo = settledFragment ? buf.length : lastNl + 1;
   const fragment = consumeTo >= buf.length ? Buffer.alloc(0) : Buffer.from(buf.subarray(consumeTo));
   const newContent = buf.subarray(0, consumeTo).toString("utf8");
   const interactions: NonNullable<ReturnType<typeof parseEntryToInteraction>>[] = [];
-  let stampInterrupt = state.stampInterrupt;
+  let stampInterrupt = false;
   for (const line of newContent.split("\n")) {
     if (!line.trim()) continue;
     try {
@@ -575,7 +573,7 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
         ownerOfLast.base.interrupted = true;
         ownerOfLast.lastLine = "";
       } else if (last && !last.owner && last.turn.messageId) {
-        reinterrupted.push({ ...last.turn, interrupted: true, cacheMiss: undefined });
+        reinterrupted.push(...clearSubagentCacheMiss([{ ...last.turn, interrupted: true }]));
       } else if (last && attempt === 0) {
         fileState = freshSubagentState();
         discoveredSubagentFiles.set(stateKey, fileState);
@@ -723,7 +721,6 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
     if (parsed) {
       fileState.fragment = parsed.fragment;
       fileState.stream = parsed.stream;
-      fileState.stampInterrupt = parsed.stampInterrupt;
       if (fresh.length > 0) fileState.contentHash.update(fresh);
       fileState.lastSize = size;
       fileState.readAtMs = Date.now();

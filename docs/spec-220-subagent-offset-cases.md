@@ -10,8 +10,8 @@ each one against `deduplicateInteractions(parseSessionFile(file))`.
 ## 1. An interrupt marks the turn it follows, and no other
 
 An interrupt control record stamps the assistant turn before it as interrupted. The reader holds
-the last ordinary turn of a read back for one poll, so that an interrupt arriving next can still
-mark it before it is written. Two cases used to go wrong:
+the last ordinary turn of a read back until a poll reads no new bytes or a later ordinary turn
+takes its place, so that an interrupt arriving meanwhile can still mark it before it is written. Two cases used to go wrong:
 
 - **The turn is already written.** The reader carried the stamp forward, so it could land on a
   later turn, and the turn the interrupt followed stayed unmarked.
@@ -31,6 +31,8 @@ next read marks exactly that turn:
   written again as a new generation, the move the reader makes for a rotation.
 
 A read that adds no turns (a tool result, a control line) leaves the remembered turn as it was.
+The held and remembered turns are committed together with the read offset, so a read that fails
+after parsing is re-read against the turns as they were before it.
 An interrupt with no turn before it marks nothing, as in a full parse. The stamp is never carried
 to a later read.
 

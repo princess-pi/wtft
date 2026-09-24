@@ -563,7 +563,8 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
       const ownerOfLast = last?.owner && last.turn.messageId
         ? fileState.owners.find(o => o.base.messageId === last.turn.messageId)
         : undefined;
-      if (last && !last.owner && fileState.pendingTurn) {
+      if (last && !last.owner && fileState.pendingTurn
+        && (!last.turn.messageId || fileState.pendingTurn.messageId === last.turn.messageId)) {
         fileState.pendingTurn.interrupted = true;
       } else if (ownerOfLast) {
         ownerOfLast.base.interrupted = true;
@@ -577,10 +578,7 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
       }
       parsed = { ...parsed, stampInterrupt: false };
     }
-    if (fileState.pendingTurn) {
-      if (!absorbIntoOwner(fileState.pendingTurn)) plain.push(fileState.pendingTurn);
-      fileState.pendingTurn = null;
-    }
+    if (fileState.pendingTurn && !absorbIntoOwner(fileState.pendingTurn)) plain.push(fileState.pendingTurn);
     const newOwners: FoldOwner[] = [];
     for (const interaction of deduped) {
       if (hasClaudeCommand(interaction)) {
@@ -611,16 +609,18 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
       }
     }
     const holdBack = size > fileState.lastSize && plain.length > 0;
-    if (holdBack) fileState.pendingTurn = plain.pop() ?? null;
+    // Staged, and committed with the offset below: a failure before then
+    // re-reads these bytes, and must find the held and last turns as they were.
+    const nextPending = holdBack ? plain.pop() ?? null : null;
     const owners = [...fileState.owners, ...newOwners];
     const lastRead = parsed?.interactions[parsed.interactions.length - 1];
-    if (lastRead) {
-      fileState.lastTurn = {
+    const nextLastTurn = lastRead
+      ? {
         turn: lastRead,
         owner: hasClaudeCommand(lastRead)
           || (!!lastRead.messageId && owners.some(o => o.base.messageId === lastRead.messageId)),
-      };
-    }
+      }
+      : fileState.lastTurn;
     const windowOpen = Date.now() <= fileState.spawnWindowClosesAt + MTIME_SETTLE_MS;
     const foldSig = foldSetSignature(foldedByAnother);
     const needAttr = owners.length > 0 && (
@@ -665,7 +665,7 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
     const consumedQuiet = parsed !== null
       && parsed.fragment.length === 0
       && size > 0
-      && fileState.pendingTurn === null;
+      && nextPending === null;
     const emitGeneration = fileState.newGeneration && (
       plain.length > 0 || clones.length > 0 || rotate || consumedQuiet
     );
@@ -724,6 +724,8 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
     fileState.mtimeMs = mtimeMs;
     fileState.ino = ino;
     fileState.owners = nextOwners;
+    fileState.pendingTurn = nextPending;
+    fileState.lastTurn = nextLastTurn;
     for (const id of freshFolds) fileState.recordedFolds.add(id);
     if (emitGeneration) fileState.newGeneration = false;
     if (clones.length > 0) {

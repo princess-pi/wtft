@@ -2,8 +2,8 @@
 
 > **Issue:** [#97](https://github.com/princess-pi/wtft/issues/97) — *Daemon re-parses every
 > subagent transcript in full on every poll — 4.2× file size resident.* Part of **P7** of
-> [#194](https://github.com/princess-pi/wtft/issues/194). **This change is part of #97, not its
-> close:** the issue's Closer is not met by it (see *The Closer*), and #97 stays open for the rest.
+> [#194](https://github.com/princess-pi/wtft/issues/194). This change was part one. #97 closes on
+> the Closer restated below (*The Closer, restated*): it measures live heap, not PSS.
 
 ## The gap
 
@@ -88,11 +88,34 @@ parse peak) does not depend on that, but the daemon-level figures must be re-mea
 as part of the rest of #97.
 
 **What the numbers support.** The whole-string parse's peak was real: 98 MB for 28 MB of
-transcripts. Chunking halves it. Neither build meets the issue's Closer (under 30 MB, not
-growing). What remains in #97 is direction A, plus the per-transcript `writtenLines`, `writtenIds`
-and `writtenCostById` maps in `bin/wtft-daemon.ts`'s `SubagentFileState`. Those grow with every
-line emitted, are cleared when a rewrite is detected (`supersededWithoutDedup`), and are dropped
-with the whole state when another transcript folds this one (`skipAsFoldedElsewhere`).
+transcripts. Chunking halves it. Neither build met the issue's first Closer (under 30 MB of PSS,
+not growing). Direction A, reading only appended bytes, and dropping the per-line maps both
+shipped in #219.
+
+## The Closer, restated — 2026-09-24 (Duppy chose A on #97)
+
+**PSS was measuring the allocator, not wtft.** On `main` at `c7864c0` a daemon started at
+23.1 MB of PSS and was at 33.1 MB after 30 minutes. Across four startups of one build, PSS read
+77.2, 79.1, 23.1 and 77.7 MB, depending on garbage-collection timing. A heap snapshot of one of
+those startups held 5.83 MB live, against 77.7 MB of PSS.
+
+**The Closer is now the live heap:** what a heap snapshot (which collects garbage first) holds.
+It must be at most 10 MB after startup and grow by at most 1 MB over 30 minutes of appends.
+`debug/97-daemon-pss.sh` prints it beside PSS after each sample, and it keeps its fixture under
+`~/.cache/wtft-97`, where a test suite's `wtft-daemon --cleanup` cannot kill the daemon mid-run.
+
+**Measured 2026-09-24, `main` at `76d887c`**, 28.3 MB of subagent transcripts, 1,800 s of appends
+(359 rounds):
+
+| | PSS | live heap |
+|---|---|---|
+| after startup | 23.4 MB | **5.80 MB** |
+| after 1,800 s | 75.8 MB | **6.32 MB** |
+
+The live heap grew 0.52 MB, so the Closer is met. In an earlier two-snapshot run most of that
+growth (0.48 of 0.60 MB) was compiled code. No object type grows with the transcripts. The daemon's
+resident size is V8 heap it has freed and not returned; the resident cost that matters on this
+host is the harness daemon's (#239).
 
 ## Review record
 

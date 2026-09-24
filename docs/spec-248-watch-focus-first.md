@@ -12,8 +12,9 @@ v2.10.0 tag, so only `--watch` was affected.
 - **Every session was served first, in directory order.** `watchDir(root)` registered the
   watchers and, while it walked the root, woke every session it passed, synchronously. The
   session the reader named with `--session` came after the walk. On this host that meant 11,180
-  tag rebuilds, at roughly 250 to 900 a minute as two harness processes contended (#249). A
-  one-session `--reparse` of this 6.7 MB session took 0.36 s (measured 2026-09-24).
+  tag rebuilds. Two harness processes were contending (#249), and they got through 1,991 in the
+  first 2 minutes and all 11,179 in about 14. A one-session `--reparse` of this 6.7 MB session
+  took 0.36 s (measured 2026-09-24).
 - **A request made during the walk was not heard.** The walk held the event loop, so a
   `--watch` that started meanwhile, and whose spawned daemon pointed the lease at the live harness
   (`pointSessionAt`), waited for the walk to end.
@@ -32,13 +33,23 @@ v2.10.0 tag, so only `--watch` was affected.
   requester, so two never overwrite each other. The live harness checks that directory before
   every catch-up session and on its 250 ms sweep. It claims each request by renaming it before
   reading it. It drops a request older than its own start or naming a path outside its root, and
-  removes the directory when it stops. A request therefore waits at most for the one session being
-  rebuilt when it arrives.
+  removes the directory when it stops. Its start is stamped before it claims its pid file, so a
+  request posted during its startup walk is not taken for an old one. A request therefore waits at
+  most for the one session being rebuilt when it arrives. A requester that cannot post one says
+  so on stderr.
+- **A newer build replaces an older harness.** The harness records its tagger version beside its
+  pid file (`<harness pid file>.version`). A spawn from a newer build that finds a live harness
+  of an older tagger version, or one with no version file (a build from before this change),
+  stops it and takes over. It does not hand that harness the session. So after an upgrade that
+  bumps the tagger, the next `wtft` replaces the old harness, and no `wtft-daemon --restart` is
+  needed.
 - **`r` never stops a harness.** When the lease names a `--harness` process, `restartDaemon`
   leaves it and the lease alone. Its spawn then points the harness at this session.
-- **`--watch` says what it is waiting for.** While the watch has no turns to show and a tag for
-  another tagger version is on disk, the waiting line names both versions and says it is waiting
-  for the log parser daemon to build this version's tag (`waitingForDataLine`).
+- **`--watch` says what it is waiting for.** While the watch has no turns to show, this version's
+  tag does not exist yet, and a tag for another tagger version is on disk, the waiting line names
+  both versions and says it is waiting for the log parser daemon to build this version's tag
+  (`waitingForDataLine`). Once this version's tag exists, the plain line is shown. The harness
+  does not remove older tags, so one left beside it says nothing about what the reader waits on.
 
 ## Closer
 
@@ -49,7 +60,10 @@ listed in the harness's walk order:
 - Mid-walk, the last untagged session in walk order is requested by a second process. It is
   served ahead of its walk position: fewer than half the sessions ahead of it are rebuilt
   meanwhile.
-- The waiting line with a stale-version tag, and `r` against a lease held by a harness.
+- A harness whose recorded version is older is replaced by a newer spawn, which then serves its
+  `--session`.
+- The waiting line with and without a stale-version tag, and `r` against a lease held by a
+  harness.
 
 #248's own Closer asked for a timed bound, 2 s. On a fixture small enough for the suite, the whole
 rebuild finishes in about 2 s, so the time alone could not tell focus-first from walk order.

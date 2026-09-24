@@ -896,6 +896,9 @@ function isHarnessProcess(pid: number): boolean {
  *  is still to be built, rather than left looking at an empty screen. */
 export function waitingForDataLine(sessionPath: string): string {
 	if (!fs.existsSync(sessionPath)) return "Waiting for session .jsonl to be written (first prompt not completed yet)...";
+	// Once this version's tag exists it is built; an older one beside it is
+	// only left over, and says nothing about what the reader waits on.
+	if (fs.existsSync(getCurrentVersionTagPath(sessionPath))) return "Waiting for session data...";
 	const prefix = path.basename(sessionPath) + ".wtft-tag.v";
 	let stale: string | undefined;
 	try {

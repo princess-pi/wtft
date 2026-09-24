@@ -126,6 +126,25 @@ try {
 			`it was served ahead of its walk position: ${between} others were rebuilt meanwhile, of ${files.indexOf(target) - before} ahead of it (${remaining} after it)`);
 	}
 
+	console.log("\nA newer build replaces a harness from an older tagger");
+	{
+		for (const pid of pids.splice(0)) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
+		await sleep(500);
+		const { root, files } = makeRoot("c");
+		const first = start(root, []);
+		const pidFile = () => fs.readdirSync(os.tmpdir()).filter(n => /^wtft-harness-claude-[0-9a-f]+\.pid$/.test(n)).map(n => path.join(os.tmpdir(), n));
+		await until(() => pidFile().some(f => { try { return fs.readFileSync(f, "utf8").trim() === String(first); } catch { return false; } }), 10_000);
+		const owned = pidFile().find(f => fs.readFileSync(f, "utf8").trim() === String(first))!;
+		check(!!owned && fs.readFileSync(`${owned}.version`, "utf8").trim() === WTFT_TAGGER_VERSION, "fixture: the running harness recorded its tagger version");
+		fs.writeFileSync(`${owned}.version`, "0.0.1");
+		const target = files[files.length - 1];
+		const second = start(root, ["--session", target]);
+		const replaced = await until(() => { try { process.kill(first, 0); return false; } catch { return true; } }, 10_000);
+		check(replaced !== Infinity, "the older harness is stopped");
+		check(await until(() => fs.readFileSync(owned, "utf8").trim() === String(second), 10_000) !== Infinity, "the newer one holds the harness lease");
+		check(await until(() => tagged(target), 30_000) !== Infinity, "and it serves the session it was started for");
+	}
+
 	console.log("\n--watch says a stale tag is being rebuilt");
 	{
 		const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-248-line-")));
@@ -138,7 +157,7 @@ try {
 		check(line.includes("v0.9.0") && line.includes(`v${WTFT_TAGGER_VERSION}`) && line.includes("log parser daemon"),
 			`a stale-version tag: the line names both versions and the daemon it waits on (got ${line})`);
 		fs.writeFileSync(path.join(dir, "wtft-tags", `s.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`), "{}\n");
-		check(waitingForDataLine(session).includes("v0.9.0"), "a current tag with no turns yet beside the stale one: still named");
+		check(waitingForDataLine(session) === "Waiting for session data...", "once this version's tag exists, the older one beside it is not mentioned");
 	}
 
 	console.log("\n'r' in --watch never stops a harness daemon");

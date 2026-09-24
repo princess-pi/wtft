@@ -59,7 +59,7 @@ async function runCase(
 	initial: string,
 	mutate: (file: string) => Promise<void>,
 	ready: (tagged: any[]) => boolean = tagged => tagged.length > 0,
-): Promise<{ tag: string; full: string; initialTagged: boolean }> {
+): Promise<{ tag: string; full: string; initialTagged: boolean; generations: number }> {
 	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), `wtft-220-${name}-`)));
 	const session = path.join(dir, "session.jsonl");
 	fs.writeFileSync(session, JSON.stringify({ type: "session", version: 3, id: `parent-220-${name}`, timestamp: new Date().toISOString(), cwd: dir }) + "\n");
@@ -84,7 +84,8 @@ async function runCase(
 			await sleep(250);
 			got = rows(readClassifiedTagFile(tag));
 		}
-		return { tag: got, full, initialTagged };
+		const generations = (fs.readFileSync(tag, "utf8").match(/"_gen"/g) ?? []).length;
+		return { tag: got, full, initialTagged, generations };
 	} finally {
 		try { process.kill(child.pid!, "SIGTERM"); } catch { /* gone */ }
 		await sleep(200);
@@ -106,6 +107,7 @@ const T0 = Date.now() - 60_000;
 	});
 	assert("fixture: the turn before the interrupt was tagged before the interrupt was written", r.initialTagged);
 	assert("an interrupt after a turn already written marks that turn, and no later one", r.tag === r.full, `tag:  ${r.tag}\n       full: ${r.full}`);
+	assert(`marking a written turn does not write the transcript again (${r.generations} generation record(s))`, r.generations === 1);
 }
 
 {
@@ -125,6 +127,7 @@ const T0 = Date.now() - 60_000;
 	}, tagged => tagged.some((i: any) => i.messageId === "msg_owner"));
 	assert("fixture: the turn a Claude command started was tagged before the interrupt", r.initialTagged);
 	assert("an interrupt after a command turn marks that turn, not the ordinary turn before it", r.tag === r.full, `tag:  ${r.tag}\n       full: ${r.full}`);
+	assert(`marking a command turn does not write the transcript again (${r.generations} generation record(s))`, r.generations === 1);
 }
 
 {

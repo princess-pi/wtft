@@ -15,15 +15,24 @@ mark it before it is written. Two cases used to go wrong:
 
 - **The turn is already written.** The reader carried the stamp forward, so it could land on a
   later turn, and the turn the interrupt followed stayed unmarked.
-- **The held turn is not the last turn of its read.** A turn that runs a Claude command, or one
-  folded into such a turn, is never held back. So when a read ended with one, the held turn was
-  an earlier ordinary turn, and the interrupt marked that one.
+- **The turn is not the held one.** A turn that runs a Claude command, or one folded into such a
+  turn, is never held back. So when a read ended with one, the held turn was an earlier ordinary
+  turn, and the interrupt marked that one.
 
-Now the held turn is marked only when it was the last turn of its read, of any kind. In every
-other case where a turn precedes the interrupt, the reader writes the transcript again as a new
-generation, the same move it makes for a rotation, so the full parse's marking replaces what was
-written. An interrupt with no turn before it marks nothing, as in a full parse. The stamp is
-never carried to a later read.
+Now the reader remembers the last turn it read, of any kind, and an interrupt at the head of the
+next read marks exactly that turn:
+
+- **still held** → it is marked before it is written;
+- **a command turn** → it is marked and written again;
+- **an ordinary turn already written** → a second copy with the mark is written. A reader of the
+  tag keeps one copy per id and ORs `interrupted` across copies (`deduplicateInteractions`), so
+  the turn reads as interrupted and its cost is counted once;
+- **a turn with no id** → there is nothing to match a second copy to, so the transcript is
+  written again as a new generation, the move the reader makes for a rotation.
+
+A read that adds no turns (a tool result, a control line) leaves the remembered turn as it was.
+An interrupt with no turn before it marks nothing, as in a full parse. The stamp is never carried
+to a later read.
 
 ## 2. A longer in-place rewrite and 3. a lower ordinary cost
 
@@ -33,8 +42,11 @@ that is not an append, and the per-id cost map. The fixtures for these two pass 
 change. So the fail-before half of #220's Closer is shown here for case 1 only; cases 2 and 3 are
 pinned so they stay true.
 
-A full parse keeps the higher-cost copy of an id (`deduplicateInteractions`), and so does a reader
-of the tag. A lower copy that arrives while the first is still held back leaves the tag with both,
-and the reader keeps the higher one: the same answer as a full parse.
+**Case 3 against #220's Expected.** #220 asks both that the tag match a full parse and that a
+reader keeping the max cost per id not keep the retracted, higher figure. Those two conflict. A
+full parse keeps the higher-cost copy of an id (`deduplicateInteractions`), as every wtft reader
+does. This change follows the Closer: the tag matches a full parse, so the higher figure stands.
+The per-id cost map's new generation re-derives that same answer. Whether that branch should be
+kept is #242.
 
 A prefix hash that cannot be read now warns once per transcript, as the other read failures do.

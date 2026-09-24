@@ -126,9 +126,9 @@ interface SubagentFileState {
 	stampInterrupt: boolean;
 	/** Last ordinary turn not yet written, so a following interrupt can still mark it. */
 	pendingTurn: NonNullable<ReturnType<typeof parseEntryToInteraction>> | null;
-	/** Whether `pendingTurn` was the last turn of its read, of any kind. Only then is
-	 *  it the turn an interrupt at the head of the next read follows. */
-	pendingIsLast: boolean;
+	/** The last turn read, of any kind, and whether a Claude command made it an
+	 *  owner: the turn an interrupt at the head of the next read follows. */
+	lastTurn: { turn: NonNullable<ReturnType<typeof parseEntryToInteraction>>; owner: boolean } | null;
 	/** Cost already tagged for an ordinary id. A lower correction opens a new generation. */
 	plainCost: Map<string, number>;
 	/** Which children another holder owned at the last parse — when that set
@@ -309,7 +309,7 @@ function freshSubagentState(): SubagentFileState {
     owners: [],
     stampInterrupt: false,
     pendingTurn: null,
-    pendingIsLast: false,
+    lastTurn: null,
     plainCost: new Map(),
     foldedByAnother: "",
   };
@@ -553,13 +553,24 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
       }
       return true;
     };
-    // An interrupt marks the turn it follows and never a later one. When that
-    // turn is already in the tag, the transcript is written again as a new
-    // generation, so the full parse's marking replaces the line already there.
+    // An interrupt marks the turn it follows and never a later one. A turn
+    // already in the tag gets a second copy with the mark, which a reader ORs
+    // across copies of one id; one with no id cannot be matched, so the
+    // transcript is written again as a new generation.
+    const reinterrupted: typeof deduped = [];
     if (parsed?.stampInterrupt) {
-      if (fileState.pendingTurn && fileState.pendingIsLast) {
+      const last = fileState.lastTurn;
+      const ownerOfLast = last?.owner && last.turn.messageId
+        ? fileState.owners.find(o => o.base.messageId === last.turn.messageId)
+        : undefined;
+      if (last && !last.owner && fileState.pendingTurn) {
         fileState.pendingTurn.interrupted = true;
-      } else if (attempt === 0 && (fileState.pendingTurn || !fileState.newGeneration)) {
+      } else if (ownerOfLast) {
+        ownerOfLast.base.interrupted = true;
+        ownerOfLast.lastLine = "";
+      } else if (last && !last.owner && last.turn.messageId) {
+        reinterrupted.push({ ...last.turn, interrupted: true, cacheMiss: undefined });
+      } else if (last && attempt === 0) {
         fileState = freshSubagentState();
         discoveredSubagentFiles.set(stateKey, fileState);
         continue;
@@ -600,14 +611,16 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
       }
     }
     const holdBack = size > fileState.lastSize && plain.length > 0;
-    if (holdBack) {
-      fileState.pendingTurn = plain.pop() ?? null;
-      const lastRead = parsed?.interactions[parsed.interactions.length - 1];
-      fileState.pendingIsLast = !!fileState.pendingTurn && !!lastRead && (
-        lastRead === fileState.pendingTurn
-        || (!!lastRead.messageId && lastRead.messageId === fileState.pendingTurn.messageId));
-    }
+    if (holdBack) fileState.pendingTurn = plain.pop() ?? null;
     const owners = [...fileState.owners, ...newOwners];
+    const lastRead = parsed?.interactions[parsed.interactions.length - 1];
+    if (lastRead) {
+      fileState.lastTurn = {
+        turn: lastRead,
+        owner: hasClaudeCommand(lastRead)
+          || (!!lastRead.messageId && owners.some(o => o.base.messageId === lastRead.messageId)),
+      };
+    }
     const windowOpen = Date.now() <= fileState.spawnWindowClosesAt + MTIME_SETTLE_MS;
     const foldSig = foldSetSignature(foldedByAnother);
     const needAttr = owners.length > 0 && (
@@ -664,6 +677,7 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
         batch += serializeClassified(interaction, source);
         if (interaction.messageId) fileState.plainCost.set(interaction.messageId, interaction.cost);
       }
+      for (const interaction of reinterrupted) batch += serializeClassified(interaction, source);
       clones.forEach((interaction, i) => {
         const line = serializeClassified(interaction, source);
         if (line === nextOwners[i].lastLine) return;

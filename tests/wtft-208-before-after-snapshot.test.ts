@@ -344,6 +344,22 @@ check(threw.status === 3 && /discovery parse failed/.test(threw.stderr ?? ""), `
 check(runScript(["--before", ""]).status === 2, "G13 an empty --before exits 2, not a self-comparison");
 check(runScript(["--before", path.join(dir, "no-such-checkout")]).status === 2, "G14 a --before that cannot be loaded exits 2");
 check(runScript(["--before", ".", "--sessions", "010"]).status === 0, "G15 --sessions with a leading zero is read as decimal");
+// A child that is itself selected and also folded into a selected parent is
+// measured only inside the parent, so a newly found fold is not counted twice.
+const dupRoot = path.join(dir, "dup-projects");
+const dupParentCwd = path.join(dir, "dup-parent"), dupChildCwd = path.join(dir, "dup-child");
+writeTranscript(dupRoot, dupParentCwd, "cdcdcdcd-8888-4888-8888-888888888888",
+	sessionLine("cdcdcdcd-8888-4888-8888-888888888888", T0, dupParentCwd)
+	+ turnLine("dup-parent-turn", T0, 700, [`cd ${dupChildCwd} && claude -p 'go'`])
+	+ paddingLine(60_000));
+writeTranscript(dupRoot, dupChildCwd, "efefefef-9999-4999-8999-999999999999",
+	sessionLine("efefefef-9999-4999-8999-999999999999", T0 + 2_000, dupChildCwd)
+	+ turnLine("dup-child-turn", T0 + 2_000, 20_000)
+	+ paddingLine(60_000));
+const dup = runScript(["--before", missesChild], { WTFT_CLAUDE_PROJECTS_DIR: dupRoot });
+check(dup.status === 0 && /measured there only/.test(dup.stderr ?? "") && /claude-code: 1 sessions/.test(dup.stdout ?? ""),
+	`G18 a selected child that a selected parent folds is measured once, inside the parent (got ${dup.status}: ${(dup.stdout ?? "").slice(-200)})`);
+
 const noFn = path.join(dir, "nofn-checkout");
 fs.mkdirSync(path.join(noFn, "extensions", "lib", "harness", "claude-code"), { recursive: true });
 fs.writeFileSync(path.join(noFn, "extensions", "lib", "harness", "claude-code", "discovery.ts"), "export const unrelated = 1;\n");

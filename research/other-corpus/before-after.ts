@@ -281,6 +281,17 @@ async function main(): Promise<void> {
 		}
 	}
 
+	// A selected transcript that a selected parent folds would be counted twice —
+	// once as itself and once inside the parent — so it is measured only there.
+	const folded = new Set([...foldFiles].map(real));
+	for (const harness of Object.keys(picked)) {
+		const kept = picked[harness].filter(f => !folded.has(real(f)));
+		if (kept.length < picked[harness].length) {
+			console.error(`before-after: ${picked[harness].length - kept.length} ${harness} transcript(s) are folded into another selected session, so they are measured there only`);
+		}
+		picked[harness] = kept;
+	}
+
 	const snapDir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-ab-"));
 	process.on("exit", () => fs.rmSync(snapDir, { recursive: true, force: true }));
 	const { projects: snapProjects, pi: snapPi } = snapshotCorpus({

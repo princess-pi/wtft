@@ -410,7 +410,9 @@ export function parseSessionFile(
 
 /** `parseSessionFile` for a caller that would report its `[]` as a $0 claim:
  *  a file with non-blank lines and not one that parses as JSON throws, as a
- *  file that cannot be opened does. Blank lines only is still an empty session. */
+ *  file that cannot be opened does. Blank lines only is still an empty session,
+ *  and so is a file whose one line has no newline yet and does not parse: that
+ *  is a first line still being written. */
 export function parseSessionFileStrict(
 	filePath: string,
 	doNotFold: ReadonlySet<string> = new Set(),
@@ -431,13 +433,17 @@ function parseSessionFileCounted(
 	const state = newParseStreamState();
 	let lines = 0;
 	let jsonLines = 0;
+	let yielded = 0;
+	let lastUnparsedAt = -1;
 	// Unreadable transcript throws (never returns [] as "empty"). Per-line
 	// errors stay swallowed — bad line, not file-level failure.
 	for (const line of fileLines(filePath, chunkBytes)) {
+		const at = yielded++;
 		if (!line.trim()) continue;
 		lines++;
+		let entry: any;
+		try { entry = JSON.parse(line); } catch { lastUnparsedAt = at; continue; }
 		try {
-			const entry = JSON.parse(line);
 			jsonLines++;
 			const isControl = applyControlEntry(entry, state, () => {
 				if (interactions.length > 0) interactions[interactions.length - 1].interrupted = true;
@@ -453,6 +459,9 @@ function parseSessionFileCounted(
 		} catch {
 		}
 	}
+	// `fileLines` yields the text after the last newline last: unparsed, it is
+	// a line still being written, not a bad one.
+	if (lastUnparsedAt === yielded - 1) lines--;
 
 	attributeClaudeSubAgentCosts(interactions, resolveLastCwd(filePath), new Set([...doNotFold, canonicalTranscriptPath(filePath)]));
 

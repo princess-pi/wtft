@@ -26,8 +26,9 @@ export type SpawnEdgeSkip =
 	| "unreadable"
 	/** Already counted elsewhere in this tree (a diamond, a cycle among
 	 *  descendants, or a `claude -p` or subagent session priced inside a resolved
-	 *  descendant's total). Its money IS in the tree's `total`; this edge is the
-	 *  second way in. */
+	 *  descendant's total). Its money IS in the tree's `total`, apart from a
+	 *  subagent session's untagged turns, which `descendantUntagged` counts; this
+	 *  edge is the second way in. */
 	| "already-counted"
 	/** Reached before, and that visit could not read it. Distinct from
 	 *  `already-counted`, which claims the money landed — here nothing did, and
@@ -204,7 +205,10 @@ function parseDescendant(file: string, isElsewhere: (id: string) => boolean): { 
 		if (k > 0 && isElsewhere(id)) continue;
 		parts.push(interactions);
 		if (k > 0) subagentIds.push(id);
-		for (const interaction of interactions) {
+		// The same folds `foldsInTotal` counts: one on a dropped or untagged turn
+		// landed in no total, so a later part may still fold that session.
+		for (const interaction of deduplicateInteractions(interactions)) {
+			if (!isModelTagged(interaction)) continue;
 			for (const fold of interaction.claudeSubAgentFolds ?? []) doNotFold.add(canonicalTranscriptPath(fold.file));
 		}
 	}
@@ -436,7 +440,6 @@ function walkLedger(
 				continue;
 			}
 
-			// Drop `untaggedCostUsd`: it would leak into `spawned.edges[].total`.
 			// A subagent session that lands here is folded, as a `claude -p` session
 			// this parse folds is.
 			for (const id of descendant.subagentIds) {
@@ -446,6 +449,7 @@ function walkLedger(
 			}
 			const parsed = descendant.parts.flat();
 			const summary = computeSessionSummary(parsed);
+			// Drop `untaggedCostUsd`: it would leak into `spawned.edges[].total`.
 			const { untaggedCostUsd, ...total } = summary.total;
 			if (summary.untaggedInteractions > 0) {
 				tree.descendantUntagged.push({ child: edge.child, untaggedInteractions: summary.untaggedInteractions, untaggedCostUsd });

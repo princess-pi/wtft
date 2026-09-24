@@ -80,7 +80,7 @@ function ledgerOf(edges: Array<[parent: string, child: string]>): string {
 const GARBAGE = "{not json\n{\"truncated\": \n]]]\n";
 
 // ---
-// #230 — a descendant is priced with its Task subagents
+// A descendant is priced with its Task subagents
 // ---
 console.log("\n#230 — a launcher descendant's Task subagents are in its edge total");
 
@@ -180,7 +180,7 @@ console.log("\n#230 — a launcher descendant's Task subagents are in its edge t
 }
 
 // ---
-// #231 — ledger children of a session already inside a total are walked
+// Ledger children of a session already inside a total are walked
 // ---
 console.log("\n#231 — ledger children of in-self and folded sessions are walked");
 
@@ -247,7 +247,7 @@ console.log("\n#231 — ledger children of in-self and folded sessions are walke
 }
 
 // ---
-// #232 — a transcript with no parseable line is unreadable, not $0
+// A transcript with no parseable line is unreadable, not $0
 // ---
 console.log("\n#232 — a descendant transcript with no parseable line");
 
@@ -271,6 +271,11 @@ console.log("\n#232 — a descendant transcript with no parseable line");
 		`J3 the edge is unreadable, total null, with the path that failed (got ${JSON.stringify(edge ?? null)})`);
 	check(tree.unattributed.some(g => g.child === C && g.reason === "unreadable"),
 		`J4 unattributed names C as unreadable (got ${JSON.stringify(tree.unattributed)})`);
+	const FLUSHING = uuid(64);
+	putSession(FLUSHING, turnLine("fl-1", T0, 100).slice(0, 40));
+	const flushing = computeSpawnTree(S, { ledgerPath: ledgerOf([[S, FLUSHING]]), alreadyAttributed: new Set() }).edges[0];
+	check(flushing?.resolved === true && flushing.total?.costUsd === 0 && flushing.live === true,
+		`J6 a first line still being written (no newline yet) is a live $0 edge, not unreadable (got ${JSON.stringify(flushing ?? null)})`);
 	const emptyEdge = tree.edges.find(e => e.child === EMPTY);
 	check(emptyEdge?.resolved === true && emptyEdge.total?.costUsd === 0 && tree.descendants === 1,
 		`J5 an empty transcript is still a counted $0 edge (got ${JSON.stringify(emptyEdge ?? null)}, descendants ${tree.descendants})`);

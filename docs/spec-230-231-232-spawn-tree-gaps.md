@@ -18,8 +18,9 @@ turn**. The root session's SELF takes the first level only; the walk follows the
 Pi sibling's own sibling is priced whichever session the walk reaches first.
 The folds those subagent parses make count toward the edge exactly as the child's own folds do.
 Every part is parsed with the child and all its subagent transcripts as `doNotFold`, so no part
-folds another. The parts are parsed in order, and a `claude -p` session a kept part folds is added
-to `doNotFold` for the parts after it, so two parts never fold the same session. Which files discovery lists, and which it skips without reporting, is
+folds another. The parts are parsed in order, and a `claude -p` session a kept part folds on a
+deduplicated, model-tagged turn (the folds `spawned.total` counts) is added to `doNotFold` for the
+parts after it, so no session lands in the edge total twice. Which files discovery lists, and which it skips without reporting, is
 `discoverSubagentSessionFiles`'s contract (`docs/wtft-incremental-render-spec.md` § *Where the
 transcripts are on disk*; its unreported skips are listed in #236); this change prices what it
 lists.
@@ -78,7 +79,9 @@ in memory, so no discovery runs either way; the CLI passes a plain Set of the ta
 
 `parseSessionFileStrict` is `parseSessionFile`, at the default chunk size, that throws when the
 file has non-blank lines and not one of them passes `JSON.parse`. That is the whole test: a file
-of JSON lines that are not transcript entries (`{}`, `42`) parses to no turns and is a $0 edge. The walk uses it for the child and its subagent transcripts, so
+of JSON lines that are not transcript entries (`{}`, `42`) parses to no turns and is a $0 edge.
+The text after the last newline is not counted when it does not parse: that is a line still being
+written, so a descendant whose first line is half-flushed is a live $0 edge, not a gap. The walk uses it for the child and its subagent transcripts, so
 such a file is `skip: "unreadable"`, `total: null`, with an `unattributed` entry. An empty file,
 or one with only blank lines, is still an empty session. `parseSessionFile` itself is unchanged:
 the daemon, the root's own parse, the root's subagent loads, the `unrecorded` pricing, and the
@@ -100,7 +103,7 @@ has a parseable line and the strict parse could never fire there.
   `edges[0].total.outputTokens` includes the 500. An unreadable subagent transcript under C makes
   the edge `unreadable` with `total: null`. When C's transcript and its subagent each fold the
   same `claude -p` session F, the edge bills F once. A Pi sibling's own sibling is priced once
-  in both edge orders (H11).
+  in both edge orders (H11). A first line with no newline yet is a live $0 edge (J6).
 - **#231** S with no ledger edge, P in S's `alreadyAttributed`, and a ledger edge P → G: G is in
   `edges[]`, counted, and in `total`. The same holds when P is folded by a counted descendant
   rather than being in-self. With edges S → D, S → F, F → G, where D folds F, and `maxDepth` 2:
@@ -138,6 +141,15 @@ functions of `wtft-parser.ts`.
     random hash, and no collision has been seen.
   - "spec-128's *as for an edge* is stale": that phrase is about dropping `untaggedCostUsd`,
     which still holds. The subagent difference is stated above.
+
+The opened-PR loop on #238 (Draft, before `pr-submit`) found six Low. All six are fixed:
+
+- A fold on an untagged turn no longer bars a later part's tagged fold.
+- A half-flushed first line is a line still being written, not an unreadable transcript (J6).
+- spec-26's `edges[].total` and `unattributed[]` rows now match the code.
+- The `already-counted` docstring is corrected.
+- The issue numbers are gone from the section comments in the test.
+- The `untaggedCostUsd` comment is back above the line it describes.
 
 **Noted, not changed.** Each is a finer point of a summary that points at this spec, or a
 behaviour older than this branch:

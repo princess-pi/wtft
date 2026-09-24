@@ -160,9 +160,11 @@ try {
 		const big = await liveHeapMiB(h.pid, bigSnaps), base = await liveHeapMiB(s.pid, smallSnaps);
 		check(big > 0 && base > 0 && big - base < 1, `live heap with 2,001 sessions on disk is within 1 MiB of the heap with 10 (${big.toFixed(2)} vs ${base.toFixed(2)} MiB)`);
 
-		fs.appendFileSync(files[7], turnLine("unasked-write", Date.now()));
+		const beside = files[20];
+		check(path.dirname(beside) === path.dirname(live), "fixture: the unasked session shares the served session's directory");
+		fs.appendFileSync(beside, turnLine("unasked-write", Date.now()));
 		await sleep(1500);
-		check(!fs.existsSync(getCurrentVersionTagPath(files[7])), "a write to a session nobody asked for is not read");
+		check(!fs.existsSync(getCurrentVersionTagPath(beside)), "a write to a session nobody asked for, beside one it serves, is not read");
 
 		start(root, ["--harness", "claude", "--session", parent], "ask.err");
 		check(await until(() => classified(parent, "q-3") && classified(parent, "sub-a"), 10_000) !== Infinity, "a session asked for later is served, subagent included");
@@ -253,6 +255,30 @@ try {
 		check(living.length === 1 && read(harnessPidFile(root)).trim() === String(living[0]), "and it holds the harness pid file");
 		const focus = living.length === 1 ? read(`/proc/${living[0]}/cmdline`).split("\0") : [];
 		check(focus[focus.indexOf("--session") + 1] === files[0], "it is the one --restart started, which the CLI spawn handed its session");
+		for (const pid of living) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
+		await until(() => living.every(p => !alive(p)), 5_000);
+	}
+
+	console.log("\nA harness a spawn starts while --restart is walking is left running");
+	{
+		const { root, files } = makeRoot("w", 20);
+		// Started with no session, so --restart starts no replacement and the root
+		// is free for the spawn while the walk goes on.
+		const h = start(root, ["--harness", "claude"], "w.err");
+		check(await until(() => read(harnessPidFile(root)).trim() === String(h.pid), 30_000) !== Infinity, "fixture: the first harness holds the root");
+		for (let i = 0; i < 40_000; i++) fs.writeFileSync(path.join(TMP, `wtft-daemon-fakew${i}.pid`), String(h.pid));
+		const restart = spawn("node", [DAEMON, "--restart"], { stdio: "ignore", env: envFor(root) });
+		const restartDone = new Promise<void>(resolve => restart.on("exit", () => resolve()));
+		await until(() => !alive(h.pid), 10_000);
+		const w = start(root, ["--harness", "claude", "--session", files[1]], "w-cli.err");
+		const claimed = await until(() => read(harnessPidFile(root)).trim() === String(w.pid), 10_000);
+		check(claimed !== Infinity && alive(restart.pid!), "fixture: the spawn claimed the root while --restart was still walking");
+		await restartDone;
+		await sleep(2_000);
+		const living = harnessesFor(root);
+		for (const pid of living) if (!pids.includes(pid)) pids.push(pid);
+		check(living.length === 1, `exactly one harness serves the root after --restart (saw ${living.length}: ${living.join(",")})`);
+		check(alive(w.pid) && read(harnessPidFile(root)).trim() === String(w.pid), "it is the harness the spawn started");
 		for (const pid of living) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 		await until(() => living.every(p => !alive(p)), 5_000);
 	}

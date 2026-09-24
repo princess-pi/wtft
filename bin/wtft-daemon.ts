@@ -2407,7 +2407,9 @@ Daemon mode:
 
 Environment:
   WTFT_DAEMON_IDLE_MS          Milliseconds with no new lines before a session is dropped (default 86400000)
-  WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after start before that drop can fire (default 60000)`);
+  WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after start before that drop can fire (default 60000)
+  WTFT_HARNESS_SCAN_SLICE_MS   Milliseconds one slice of a harness's subagent scan runs before it yields (default 25)
+  WTFT_HARNESS_SCAN_YIELD_MS   Milliseconds a harness pauses between those slices (default 0)`);
       process.exit(0);
     } else if (arg === "--debug") {
       process.env.WTFT_DAEMON_DEBUG = "1";
@@ -2450,6 +2452,19 @@ if (showList || showCleanup || showRestart || stopSession) {
   try {
     pidFiles = fs.readdirSync(pidDir).filter(f => f.startsWith("wtft-daemon-") && f.endsWith(".pid"));
   } catch (_) {}
+  // Read before anything is stopped: a process that claims a lease or the root
+  // after this point started after the command, and is not one it stops.
+  const readPid = (file: string): number => {
+    try { return parseInt(fs.readFileSync(path.join(pidDir, file), "utf8").trim(), 10); } catch { return NaN; }
+  };
+  const leaseHolders = new Map(pidFiles.map(f => [f, readPid(f)] as const));
+  let harnessPidFiles: string[] = [];
+  if (showRestart) {
+    try {
+      harnessPidFiles = fs.readdirSync(pidDir).filter(f => f.startsWith("wtft-harness-") && f.endsWith(".pid"));
+    } catch { /* tmp dir unreadable */ }
+  }
+  const harnessHolders = new Map(harnessPidFiles.map(f => [f, readPid(f)] as const));
 
   let found = 0;
   const seenPids = new Set<number>();
@@ -2459,15 +2474,15 @@ if (showList || showCleanup || showRestart || stopSession) {
   const respawned = new Set<number>();
   const unlinkIfNames = (file: string, pid: number) => {
     try {
-      if (parseInt(fs.readFileSync(file, "utf8").trim(), 10) === pid) fs.unlinkSync(file);
+      const before = fs.statSync(file);
+      if (parseInt(fs.readFileSync(file, "utf8").trim(), 10) !== pid) return;
+      const now = fs.statSync(file);
+      if (now.dev === before.dev && now.ino === before.ino) fs.unlinkSync(file);
     } catch { /* already gone */ }
   };
   for (const pidFile of pidFiles) {
     const fullPath = path.join(pidDir, pidFile);
-    let pid = 0;
-    try {
-      pid = parseInt(fs.readFileSync(fullPath, "utf8").trim(), 10);
-    } catch (_) { continue; }
+    const pid = leaseHolders.get(pidFile) ?? NaN;
     if (!(pid > 0)) continue;
     if (respawned.has(pid)) continue;
     seenPids.add(pid);
@@ -2601,14 +2616,10 @@ if (showList || showCleanup || showRestart || stopSession) {
   }
 
   if (showRestart) {
-    let harnessPidFiles: string[] = [];
-    try {
-      harnessPidFiles = fs.readdirSync(pidDir).filter(f => f.startsWith("wtft-harness-") && f.endsWith(".pid"));
-    } catch { /* tmp dir unreadable */ }
     for (const pidFile of harnessPidFiles) {
       const fullPath = path.join(pidDir, pidFile);
-      let pid = 0;
-      try { pid = parseInt(fs.readFileSync(fullPath, "utf8").trim(), 10); } catch { continue; }
+      const pid = harnessHolders.get(pidFile) ?? NaN;
+      if (Number.isNaN(pid)) continue;
       if (respawned.has(pid)) continue;
       if (pid <= 0 || seenPids.has(pid) || pid === process.pid) {
         unlinkIfNames(fullPath, pid);

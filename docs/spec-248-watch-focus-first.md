@@ -11,9 +11,9 @@ v2.10.0 tag, so only `--watch` was affected.
 
 - **Every session was served first, in directory order.** `watchDir(root)` registered the
   watchers and, while it walked the root, woke every session it passed, synchronously. The
-  session the reader named with `--session` came after the walk. On this host that meant 11,180
-  tag rebuilds. Two harness processes were contending (#249), and they got through 1,991 in the
-  first 2 minutes and all 11,179 in about 14. A one-session `--reparse` of this 6.7 MB session
+  session the reader named with `--session` came after the walk. On this host that meant about
+  11,000 tag rebuilds. Two harness processes were contending (#249), and they got through 1,991 in
+  the first 2 minutes and the rest in about 14. A one-session `--reparse` of this 6.7 MB session
   took 0.36 s (measured 2026-09-24).
 - **A request made during the walk was not heard.** The walk held the event loop, so a
   `--watch` that started meanwhile, and whose spawned daemon pointed the lease at the live harness
@@ -26,21 +26,26 @@ v2.10.0 tag, so only `--watch` was affected.
 ## The change
 
 - **Focus first.** At startup the harness serves its `--session` before anything else. Only then
-  does it catch the rest up, yielding to the event loop every 25 ms. `watchDir` no longer wakes
+  does it catch the rest up in slices: it starts sessions for at least 25 ms, then yields to the
+  event loop after the one in progress. `watchDir` no longer wakes
   files at startup; it still does for a directory that appears later.
 - **A request mid-walk is served next.** `pointSessionAt` also drops a request file,
-  `<harness pid file>.focus.d/<requester pid>.request`, holding the session's path; one file per
-  requester, so two never overwrite each other. The live harness checks that directory before
-  every catch-up session and on its 250 ms sweep. It claims each request by renaming it before
-  reading it. It drops a request older than its own start or naming a path outside its root, and
-  removes the directory when it stops. Its start is stamped before it claims its pid file, so a
-  request posted during its startup walk is not taken for an old one. A request therefore waits at
-  most for the one session being rebuilt when it arrives. A requester that cannot post one says
-  so on stderr.
+  `<harness pid file>.focus.d/<requester pid>.request`, holding the live harness's pid and the
+  session's path; one file per requester, so two never overwrite each other. The live harness
+  checks that directory before every catch-up session and on its 250 ms sweep. It claims each
+  request by renaming it before reading it. It drops a request addressed to another pid or naming
+  a path outside its root, and removes the directory when it stops. A request that arrives
+  mid-walk waits for the session being rebuilt when it arrives, then its own rebuild; one that
+  arrives during the harness's startup also waits for the directory walk and the focus rebuild,
+  and one that arrives after the walk waits up to one 250 ms sweep. A requester that cannot post
+  one says so on stderr.
 - **A newer build replaces an older harness.** The harness records its tagger version beside its
-  pid file (`<harness pid file>.version`). A spawn from a newer build that finds a live harness
-  of an older tagger version, or one with no version file (a build from before this change),
-  stops it and takes over. It does not hand that harness the session. So after an upgrade that
+  pid file, keyed by its own pid (`<harness pid file>.<pid>.version`), before it claims the pid
+  file, so a harness that holds the pid file always has one. A spawn from a newer build that finds
+  a live harness of an older tagger version, or one with no version file (a build from before this
+  change), stops it and takes over. It does not hand that harness the session. A spawn that loses
+  the claim to another spawn after the stop hands the winner its session, as a same-version spawn
+  does. So after an upgrade that
   bumps the tagger, the next `wtft` replaces the old harness, and no `wtft-daemon --restart` is
   needed.
 - **`r` never stops a harness.** When the lease names a `--harness` process, `restartDaemon`
@@ -61,14 +66,15 @@ listed in the harness's walk order:
   served ahead of its walk position: fewer than half the sessions ahead of it are rebuilt
   meanwhile.
 - A harness whose recorded version is older is replaced by a newer spawn, which then serves its
-  `--session`.
+  `--session`. A same-version spawn after that leaves the new harness running and holding the
+  lease.
 - The waiting line with and without a stale-version tag, and `r` against a lease held by a
   harness.
 
 #248's own Closer asked for a timed bound, 2 s. On a fixture small enough for the suite, the whole
 rebuild finishes in about 2 s, so the time alone could not tell focus-first from walk order.
-Order is what the test asserts. The time follows from it: one session's rebuild plus a process
-start.
+Order is what the test asserts. The time follows from it: the rebuild in progress, then this
+session's, plus a process start.
 
 Not changed here: at startup the harness still adopts every session under its root (#239), and
 two harness processes can still race after `--restart` (#249).

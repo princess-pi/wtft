@@ -1790,7 +1790,7 @@ function pointSessionAt(livePid: number, file: string) {
     const dir = `${harnessPidFile}.focus.d`;
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     const request = path.join(dir, `${process.pid}.tmp`);
-    fs.writeFileSync(request, path.resolve(file));
+    fs.writeFileSync(request, `${livePid}\n${path.resolve(file)}`);
     fs.renameSync(request, path.join(dir, `${process.pid}.request`));
   } catch (err) {
     process.stderr.write(`wtft-daemon: could not ask the running harness (pid ${livePid}) to serve ${file} next, so it is served in walk order: ${err instanceof Error ? err.message : String(err)}\n`);
@@ -1798,11 +1798,10 @@ function pointSessionAt(livePid: number, file: string) {
 }
 
 let harnessRootKey = "";
-let harnessStartedMs = 0;
 
 /** Serves the sessions other processes asked for (`pointSessionAt`) ahead of
  *  the rest. A request is claimed by renaming it before it is read. One
- *  older than this process, or outside its root, is dropped. */
+ *  addressed to another harness pid, or outside this root, is dropped. */
 function takeFocusRequests() {
   if (!harnessPidFile) return;
   const dir = `${harnessPidFile}.focus.d`;
@@ -1810,18 +1809,22 @@ function takeFocusRequests() {
   try { names = fs.readdirSync(dir).filter(n => n.endsWith(".request")); } catch { return; }
   for (const name of names) {
     const claimed = path.join(dir, `${name}.${process.pid}.claimed`);
-    let file = "";
-    let mtimeMs = 0;
+    let text = "";
     try {
       fs.renameSync(path.join(dir, name), claimed);
-      mtimeMs = fs.statSync(claimed).mtimeMs;
-      file = path.resolve(fs.readFileSync(claimed, "utf8").trim());
-    } catch { continue; }
-    try { fs.unlinkSync(claimed); } catch { /* removed with the directory on stop */ }
-    if (mtimeMs < harnessStartedMs) continue;
+      text = fs.readFileSync(claimed, "utf8");
+    } catch { /* taken by another reader, or unreadable */ }
+    try { fs.unlinkSync(claimed); } catch { /* never claimed */ }
+    const [to, requested] = text.split("\n");
+    if (to !== String(process.pid) || !requested) continue;
+    const file = path.resolve(requested.trim());
     if (!file.startsWith(harnessRootKey + path.sep)) continue;
     wake(file, true);
   }
+}
+
+function harnessVersionFile(pid: number): string {
+  return `${harnessPidFile}.${pid}.version`;
 }
 
 function runHarness(which: string, focus: string) {
@@ -1839,27 +1842,30 @@ function runHarness(which: string, focus: string) {
   }
   const hash = createHash("sha256").update(root).digest("hex").slice(0, 12);
   harnessPidFile = path.join(os.tmpdir(), `wtft-harness-${which}-${hash}.pid`);
-  // Stamped before the claim: a request posted the moment the pid file is
-  // claimed is newer than this, however long the walk below takes.
-  harnessStartedMs = Date.now();
-  const versionFile = `${harnessPidFile}.version`;
-  if (claimPidFile(harnessPidFile) === "busy") {
-    const live = Number(fs.readFileSync(harnessPidFile, "utf8").trim());
-    if (procIsDaemon(live)) {
-      let liveVersion = "";
-      try { liveVersion = fs.readFileSync(versionFile, "utf8").trim(); } catch { /* a build older than the version file */ }
-      if (!taggerIsOlder(liveVersion, TAGGER_VERSION)) {
-        if (focus) pointSessionAt(live, focus);
-        process.exit(0);
-      }
-      // A harness from an older tagger writes tags no current reader reads, so
-      // a newer build replaces it rather than handing it this session.
-      try { process.kill(live, "SIGTERM"); } catch { /* already gone */ }
-      waitUntilExited(live);
+  // Written before the claim, so a harness that holds the pid file always has
+  // one; keyed by pid, so one left by a killed harness names nobody live.
+  fs.writeFileSync(harnessVersionFile(process.pid), TAGGER_VERSION);
+  const leave = (code: number): never => {
+    try { fs.unlinkSync(harnessVersionFile(process.pid)); } catch { /* already gone */ }
+    process.exit(code);
+  };
+  for (let attempt = 1; claimPidFile(harnessPidFile) === "busy"; attempt++) {
+    if (attempt > 5) {
+      process.stderr.write(`wtft-daemon: could not claim ${harnessPidFile} after replacing an older harness\n`);
+      leave(1);
     }
-    if (claimPidFile(harnessPidFile) !== "claimed") process.exit(1);
+    let live = 0;
+    try { live = Number(fs.readFileSync(harnessPidFile, "utf8").trim()); } catch { continue; }
+    if (!procIsDaemon(live)) continue;
+    let liveVersion = "";
+    try { liveVersion = fs.readFileSync(harnessVersionFile(live), "utf8").trim(); } catch { /* a build from before version files */ }
+    if (!taggerIsOlder(liveVersion, TAGGER_VERSION)) {
+      if (focus) pointSessionAt(live, focus);
+      leave(0);
+    }
+    try { process.kill(live, "SIGTERM"); } catch { /* already gone */ }
+    waitUntilExited(live);
   }
-  try { fs.writeFileSync(versionFile, TAGGER_VERSION); } catch { /* read as older; a newer build replaces this one */ }
   harnessMode = true;
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] harness pid ${harnessPidFile}\n`);
@@ -1870,9 +1876,9 @@ function runHarness(which: string, focus: string) {
   walkSessions(root, files);
   const focusKey = focus ? path.resolve(focus) : "";
   harnessRootKey = root;
-  // The session a reader is waiting on first; then the rest, yielding every
-  // few milliseconds, so a watch event or a reader's request is served
-  // between them rather than after the whole walk.
+  // The session a reader is waiting on first; then the rest, yielding after
+  // each slice, so a watch event or a reader's request is served between
+  // sessions rather than after the whole walk.
   if (focusKey) wake(focusKey, true);
   harnessIdleTimer = setInterval(sweepIdleSlots, 250);
   harnessIdleTimer.unref();
@@ -1978,11 +1984,11 @@ function stopHarness(reason: string) {
   if (harnessPidFile) {
     try {
       if (fs.readFileSync(harnessPidFile, "utf8").trim() === String(process.pid)) {
-        fs.unlinkSync(harnessPidFile);
         fs.rmSync(`${harnessPidFile}.focus.d`, { recursive: true, force: true });
-        fs.rmSync(`${harnessPidFile}.version`, { force: true });
+        fs.unlinkSync(harnessPidFile);
       }
     } catch { /* already gone */ }
+    fs.rmSync(harnessVersionFile(process.pid), { force: true });
   }
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] harness shutdown: ${reason}\n`);
@@ -2052,7 +2058,9 @@ function waitUntilExited(pid: number) {
   while (Date.now() < until) {
     try { process.kill(pid, 0); } catch { return; }
   }
-  try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+  try { process.kill(pid, "SIGKILL"); } catch { return; }
+  const killed = Date.now() + 2000;
+  while (Date.now() < killed && procIsDaemon(pid)) { /* until the kernel has it */ }
 }
 
 function reparseOne(file: string): boolean {

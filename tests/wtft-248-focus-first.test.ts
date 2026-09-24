@@ -132,17 +132,24 @@ try {
 		await sleep(500);
 		const { root, files } = makeRoot("c");
 		const first = start(root, []);
+		const read = (f: string) => { try { return fs.readFileSync(f, "utf8").trim(); } catch { return ""; } };
 		const pidFile = () => fs.readdirSync(os.tmpdir()).filter(n => /^wtft-harness-claude-[0-9a-f]+\.pid$/.test(n)).map(n => path.join(os.tmpdir(), n));
-		await until(() => pidFile().some(f => { try { return fs.readFileSync(f, "utf8").trim() === String(first); } catch { return false; } }), 10_000);
-		const owned = pidFile().find(f => fs.readFileSync(f, "utf8").trim() === String(first))!;
-		check(!!owned && fs.readFileSync(`${owned}.version`, "utf8").trim() === WTFT_TAGGER_VERSION, "fixture: the running harness recorded its tagger version");
-		fs.writeFileSync(`${owned}.version`, "0.0.1");
+		await until(() => pidFile().some(f => read(f) === String(first)), 10_000);
+		const owned = pidFile().find(f => read(f) === String(first))!;
+		check(!!owned && read(`${owned}.${first}.version`) === WTFT_TAGGER_VERSION, "fixture: the running harness recorded its tagger version");
+		fs.writeFileSync(`${owned}.${first}.version`, "0.0.1");
 		const target = files[files.length - 1];
 		const second = start(root, ["--session", target]);
 		const replaced = await until(() => { try { process.kill(first, 0); return false; } catch { return true; } }, 10_000);
 		check(replaced !== Infinity, "the older harness is stopped");
-		check(await until(() => fs.readFileSync(owned, "utf8").trim() === String(second), 10_000) !== Infinity, "the newer one holds the harness lease");
+		check(await until(() => read(owned) === String(second), 10_000) !== Infinity, "the newer one holds the harness lease");
 		check(await until(() => tagged(target), 30_000) !== Infinity, "and it serves the session it was started for");
+		const again = files[files.length - 2];
+		start(root, ["--session", again]);
+		check(await until(() => tagged(again), 30_000) !== Infinity, "a same-version spawn hands the live harness its session");
+		let alive = true;
+		try { process.kill(second, 0); } catch { alive = false; }
+		check(alive && read(owned) === String(second), "and leaves that harness running and holding the lease");
 	}
 
 	console.log("\n--watch says a stale tag is being rebuilt");

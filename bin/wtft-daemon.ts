@@ -1084,8 +1084,10 @@ function reapAndWarn() {
   };
 
   for (const [pid, leases] of leasesOf) {
-    let alive = false;
-    try { process.kill(pid, 0); alive = true; } catch (_) {}
+    // Only ESRCH means gone, as in the claim loop: EPERM is a live process
+    // this user cannot signal, and its leases stay.
+    let alive = true;
+    try { process.kill(pid, 0); } catch (err) { alive = (err as NodeJS.ErrnoException).code !== "ESRCH"; }
 
     let sessionFound: string | null = null;
     try {
@@ -2151,7 +2153,7 @@ if (showList || showCleanup || showRestart || stopSession) {
           const value = procEnvValue(pid, key);
           if (value) restartEnv[key] = value;
         }
-        process.kill(pid, "SIGTERM");
+        try { process.kill(pid, "SIGTERM"); } catch (_) { /* already gone */ }
         waitUntilExited(pid);
       }
       try { fs.unlinkSync(fullPath); } catch (_) {}
@@ -2180,7 +2182,7 @@ if (showList || showCleanup || showRestart || stopSession) {
           try { fs.unlinkSync(fullPath); } catch (_) {}
           console.log(`Cleaned up: PID ${pid} — session dropped from harness: ${sessionFound}`);
         } else {
-          process.kill(pid, "SIGTERM");
+          try { process.kill(pid, "SIGTERM"); } catch (_) { /* already gone */ }
           try { fs.unlinkSync(fullPath); } catch (_) {}
           console.log(`Cleaned up: PID ${pid} — session gone: ${sessionFound}`);
         }
@@ -2194,7 +2196,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         try { fs.unlinkSync(fullPath); } catch (_) {}
         console.log(`Stopped: PID ${pid} — session dropped from harness: ${sessionFound}`);
       } else {
-        if (alive) process.kill(pid, "SIGTERM");
+        if (alive) { try { process.kill(pid, "SIGTERM"); } catch (_) { /* already gone */ } }
         try { fs.unlinkSync(fullPath); } catch (_) {}
         console.log(`Stopped: PID ${pid} — ${sessionFound}`);
       }

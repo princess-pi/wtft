@@ -34,8 +34,13 @@ it as dead.
 **Closer, measured 2026-09-24** (`tests/wtft-240-reaper-once-per-pid.test.ts`): 10,000 leases
 naming one live process, whose `--session` tag is over 1 MB and all heartbeats. The per-session
 daemon logs `started, watching` in about 250 ms. `reap.log` gains one line about that pid, and
-the line carries all three findings. The same test against the `main` build at `c7864c0`: 108.7
-s, and 30,000 lines about that pid. On `overcity`, with 10,866 real leases: 96 s.
+the line carries all three findings. For comparison, the same fixture against the `main` build at
+`c7864c0`, with the test's startup wait stretched from 30 s to 200 s so that the old reaper could
+finish: 108.7 s, and 30,000 lines about that pid. On `overcity`, with 10,866 real leases: 96 s.
+
+A process the reaper cannot signal (`EPERM`) now counts as alive, as in the claim loop, so its
+leases stay. `SIGTERM` in `--cleanup`, `--stop` and `--restart` is guarded the same way as in the
+reaper. Those paths still remove a lease without re-proving it; they are run by hand.
 
 The kill rule is unchanged, including for a harness daemon, whose `--session` is only the session
 it was started for. That is #243.

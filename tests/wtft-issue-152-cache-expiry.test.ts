@@ -154,8 +154,7 @@ function usageLine(id: string, ts: string, cr: number, cw: number, model = "clau
 const sessionPath = path.join(dir, "fixture-152.jsonl");
 fs.writeFileSync(sessionPath, [
 	usageLine("msg_full_miss", "2026-07-01T12:00:00Z", 0, 48278),
-	// Partial re-prime: a small prefix survived. Measured shape from session
-	// b1f54c2f — NOT a miss, and the case a cr/cw check on tag lines gets wrong.
+	// Partial re-prime: a small prefix survived.
 	usageLine("msg_partial", "2026-07-01T13:00:00Z", 17266, 333021),
 	usageLine("msg_hit", "2026-07-01T14:00:00Z", 350000, 2000),
 	usageLine("msg_no_cache", "2026-07-01T15:00:00Z", 0, 0),

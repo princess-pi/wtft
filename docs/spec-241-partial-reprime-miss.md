@@ -24,11 +24,31 @@ A parent turn is a Cache Miss when either holds:
   because it needs the previous turn's context. The flag goes on the remainder line, never on
   the `#oh` line.
 
-One rule is shared by the divider and by Ovrhd, so the two cannot disagree about which turn
-re-primed.
+Every turn Ovrhd counts as a recache now also gets a divider. The converse does not hold: a
+zero-read turn that fails the recache test, such as a session's first turn, still gets a divider
+with no Ovrhd share.
 
-**Measured** on the 300 most recent sessions on this host: 3 turns meet the recache rule, all
-after an idle gap longer than 60 minutes, and 4 meet the zero-read rule.
+**Only the session's own lines.** The recache case is decided in the split, and only the
+session's own turns are serialized through it (`flushPending`, `reparseOne`). Subagent lines are
+written by `syncSubagentTranscript` through `serializeClassified`, with no split, so the #115
+parent-only rule still holds. The Pi widget and the CLI both read the session's own turns from
+the tag file (`readTagFileWithVerdict`), so both see the flag.
+
+**Measured 2026-09-24** on the 300 most recently modified sessions on this host, parent turns
+only, each counted once:
+
+| Rule | Turns |
+|---|---|
+| zero-read only (both were a session's first turn) | 2 |
+| recache only (the new cases) | 2 |
+| both | 1 |
+
+Every recache turn came after an idle gap longer than 60 minutes. A repeat run can differ, because
+the set of most recent sessions moves.
+
+**The reported session, verified.** Reparsing a copy of `159d7c78…` with this build writes
+`miss: 1` on the 03:14:42Z turn and on no other line. `wtft -i 20m --cost` then draws the Cache
+Miss divider between the 18:40 and 20:00 rows.
 
 ## Tagger version
 

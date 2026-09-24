@@ -229,6 +229,8 @@ the Step-4 defect:
   the `#oh` line.
 - A partial re-prime splits into two lines, **does** emit a `cr=0/cw>0` line (asserted
   explicitly, so the trap stays documented in executable form), and yet no line is flagged.
+  *Since #241, TEST 9 asserts the opposite: exactly one line, the remainder, is flagged
+  (`docs/spec-241-partial-reprime-miss.md`).*
 - A split full miss round-tripped through tag lines into `buildWtftLines` renders exactly one
   divider — covering the serialize → restore → render path the CLI actually uses.
 
@@ -316,7 +318,7 @@ Manual, divider counts cross-checked against `miss` flags in the regenerated v2.
 
 The `d730d9c3` set includes `2026-08-05T19:59:55Z`, the `opus-4-8` → `opus-5` switch 539
 seconds after the previous turn — the case that motivated the issue. `07:50:38Z`, the partial
-re-prime, is correctly not flagged.
+re-prime, is correctly not flagged. *(Since #241 it is flagged; that result is from before.)*
 
 `docs/EXT_WTFT.html` reconciled to the observed rule and the new label at Step 5.
 

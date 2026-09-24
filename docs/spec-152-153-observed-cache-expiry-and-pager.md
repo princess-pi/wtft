@@ -99,7 +99,8 @@ destroyed the signal, so the signal has to be captured before it reaches the wir
 
 Hence `cacheMiss` is set in `parseEntryToInteraction` from raw usage, propagates onto the
 remainder line via the `{...interaction}` spread, and is explicitly cleared on the `#oh` line so
-one event is reported once.
+one event is reported once. *(Since #241 the split also sets it on the remainder line of any
+recache it finds: `docs/spec-241-partial-reprime-miss.md`.)*
 
 ### Version bump — reversing the Step-2 decision
 
@@ -312,7 +313,7 @@ Manual, divider counts cross-checked against `miss` flags in the regenerated v2.
 
 | session | render | dividers | ground truth |
 |---|---|---:|---|
-| `b1f54c2f` | `-i 1h` | 2 | 2 flagged misses in 2 distinct 1h bins; 5 lines carry `cr=0/cw>0`, so the 3 phantoms are gone |
+| `b1f54c2f` | `-i 1h` | 2 | 2 flagged misses in 2 distinct 1h bins; 5 lines carry `cr=0/cw>0`, so the 3 phantoms are gone. *Since #241 the `08:01:07Z` partial re-prime (cr 17,266, cw 333,021, previous context 347,814) is flagged too, re-measured 2026-09-24* |
 | `b1f54c2f` | `-i 3t` | present | previously zero — the #121 gate |
 | `d730d9c3` | `-i 1d` | 3 | 5 flagged misses across 3 distinct local days (PDT) |
 

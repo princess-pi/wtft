@@ -28,6 +28,11 @@ Every turn Ovrhd counts as a recache now also gets a divider. The converse does 
 zero-read turn that fails the recache test, such as a session's first turn, still gets a divider
 with no Ovrhd share.
 
+**After a daemon restart.** The previous context is not carried across a restart: the daemon
+starts it at 0 and resumes at its offset. So the first turn it reads after a restart is judged
+with no previous context, and neither Ovrhd nor the divider calls it a recache. The two stay in
+step.
+
 **Only the session's own lines.** The recache case is decided in the split, and only the
 session's own turns are serialized through it (`flushPending`, `reparseOne`). Subagent lines are
 written by `syncSubagentTranscript` through `serializeClassified`, with no split, so the #115

@@ -103,7 +103,10 @@ console.log("\nThrough the daemon: the session's own re-prime is flagged, a suba
 	const tag = path.join(dir, "wtft-tags", `session.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
 	const child = spawn(process.execPath, [DAEMON_BIN, "--session", session], { detached: true, stdio: "ignore" });
 	child.unref();
-	const lines = () => (fs.existsSync(tag) ? fs.readFileSync(tag, "utf8") : "").split("\n").filter(Boolean).map(l => JSON.parse(l));
+	// A reader can land inside a write and see one partial last line.
+	const lines = () => (fs.existsSync(tag) ? fs.readFileSync(tag, "utf8") : "").split("\n").flatMap(l => {
+		try { return [JSON.parse(l)]; } catch { return []; }
+	});
 	try {
 		for (let i = 0; i < 60 && !(lines().some(l => l.id === "own-reprime") && lines().some(l => l.id === "sub-reprime")); i++) await sleep(250);
 		const all = lines();

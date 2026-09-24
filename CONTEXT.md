@@ -16,10 +16,13 @@ log on every read. A session under the Claude projects root (`WTFT_CLAUDE_PROJEC
 default `~/.claude/projects`) or the Pi sessions root (`WTFT_PI_SESSIONS_DIR`, default
 `~/.pi/agent/sessions`) is served by that root's one process. A session outside those
 roots keeps its own process, polling every 667ms. The tag file and the pid lease stay
-per session. After 24h with no new lines, that session is dropped: the per-session
-process exits, and the harness process stays up and adopts the session again on a later
-write. Spawned on Pi `session_start` and on a CLI report. A per-session process is
-revived after an idle exit and replaced on a version bump. On Linux, a live harness
+per session. After 24h with no new lines, the per-session process exits. The harness
+process stays up and drops a session: after 5 minutes with no write
+(`WTFT_HARNESS_QUIET_MS`) when no reader asked for it, else after 24h. Dropping removes the
+session's lease, and its next write adopts it again. Spawned on Pi `session_start` and on
+a CLI report. A per-session process is revived after an idle exit and replaced on a
+version bump, and a harness process from an older tagger is replaced by the next start
+from a newer one. On Linux, a live harness
 process is left running; a later start points the session's lease at it, because
 that check reads `/proc/<pid>/cmdline`. Health is exposed via `checkDaemonHealth()` and
 rendered via `renderDaemonStatus()`.

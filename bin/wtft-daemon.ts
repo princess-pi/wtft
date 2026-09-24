@@ -48,8 +48,8 @@ import {
 
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const POLL_MS = 667; // 90bpm throttle
-/** Sessions caught up per turn of the event loop at harness startup. */
-const HARNESS_CATCH_UP_BATCH = 20;
+/** How long the startup catch-up runs before it yields to the event loop. */
+const HARNESS_CATCH_UP_SLICE_MS = 25;
 function envMs(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw === "") return fallback;
@@ -1772,24 +1772,42 @@ function pointSessionAt(livePid: number, file: string) {
   fs.renameSync(replacement, lease);
   try { fs.writeFileSync(`${lease}.display`, ""); } catch { /* the live process still has the old focus */ }
   // The live process may hold no slot for this session yet, or be part-way
-  // through its startup rebuild: ask it by name to serve this one next.
+  // through its startup rebuild: ask it by name to serve this one next. One
+  // file per requester, so two requests never overwrite each other.
   try {
-    const request = `${harnessPidFile}.focus-${process.pid}`;
+    const dir = `${harnessPidFile}.focus.d`;
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const request = path.join(dir, `${process.pid}.tmp`);
     fs.writeFileSync(request, path.resolve(file));
-    fs.renameSync(request, `${harnessPidFile}.focus`);
+    fs.renameSync(request, path.join(dir, `${process.pid}.request`));
   } catch { /* the live process keeps its own order */ }
 }
 
-/** Serves a session another process asked for (`pointSessionAt`) ahead of the rest. */
-function takeFocusRequest() {
+let harnessRootKey = "";
+let harnessStartedMs = 0;
+
+/** Serves the sessions other processes asked for (`pointSessionAt`) ahead of
+ *  the rest. A request is claimed by renaming it before it is read. One
+ *  older than this process, or outside its root, is dropped. */
+function takeFocusRequests() {
   if (!harnessPidFile) return;
-  const request = `${harnessPidFile}.focus`;
-  let file = "";
-  try {
-    file = fs.readFileSync(request, "utf8").trim();
-    fs.unlinkSync(request);
-  } catch { return; }
-  if (file) wake(file, true);
+  const dir = `${harnessPidFile}.focus.d`;
+  let names: string[];
+  try { names = fs.readdirSync(dir).filter(n => n.endsWith(".request")); } catch { return; }
+  for (const name of names) {
+    const claimed = path.join(dir, `${name}.${process.pid}.claimed`);
+    let file = "";
+    let mtimeMs = 0;
+    try {
+      fs.renameSync(path.join(dir, name), claimed);
+      mtimeMs = fs.statSync(claimed).mtimeMs;
+      file = path.resolve(fs.readFileSync(claimed, "utf8").trim());
+    } catch { continue; }
+    try { fs.unlinkSync(claimed); } catch { /* removed with the directory on stop */ }
+    if (mtimeMs < harnessStartedMs) continue;
+    if (!file.startsWith(harnessRootKey + path.sep)) continue;
+    wake(file, true);
+  }
 }
 
 function runHarness(which: string, focus: string) {
@@ -1824,17 +1842,23 @@ function runHarness(which: string, focus: string) {
   const files: string[] = [];
   walkSessions(root, files);
   const focusKey = focus ? path.resolve(focus) : "";
-  // The session a reader is waiting on first; then the rest, a few at a time,
-  // so a watch event or a reader's request is served between them.
+  harnessRootKey = root;
+  harnessStartedMs = Date.now();
+  // The session a reader is waiting on first; then the rest, yielding every
+  // few milliseconds, so a watch event or a reader's request is served
+  // between them rather than after the whole walk.
   if (focusKey) wake(focusKey, true);
   harnessIdleTimer = setInterval(sweepIdleSlots, 250);
   harnessIdleTimer.unref();
   let next = 0;
   const catchUp = () => {
     if (!running) return;
-    takeFocusRequest();
-    const end = Math.min(files.length, next + HARNESS_CATCH_UP_BATCH);
-    for (; next < end; next++) if (files[next] !== focusKey) wake(files[next], false);
+    const sliceStart = Date.now();
+    while (next < files.length && Date.now() - sliceStart < HARNESS_CATCH_UP_SLICE_MS) {
+      takeFocusRequests();
+      const file = files[next++];
+      if (file !== focusKey) wake(file, false);
+    }
     if (next < files.length) {
       setImmediate(catchUp);
       return;
@@ -1882,7 +1906,7 @@ function leaseStillOurs(slot: Slot): boolean {
 
 function sweepIdleSlots() {
   if (!running) return;
-  takeFocusRequest();
+  takeFocusRequests();
   const now = Date.now();
   for (const key of [...harnessSlots.keys()]) {
     const slot = harnessSlots.get(key);
@@ -1927,7 +1951,10 @@ function stopHarness(reason: string) {
   }
   if (harnessPidFile) {
     try {
-      if (fs.readFileSync(harnessPidFile, "utf8").trim() === String(process.pid)) fs.unlinkSync(harnessPidFile);
+      if (fs.readFileSync(harnessPidFile, "utf8").trim() === String(process.pid)) {
+        fs.unlinkSync(harnessPidFile);
+        fs.rmSync(`${harnessPidFile}.focus.d`, { recursive: true, force: true });
+      }
     } catch { /* already gone */ }
   }
   if (process.env.WTFT_DAEMON_DEBUG) {

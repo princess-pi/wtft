@@ -10,7 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
 import { WTFT_TAGGER_VERSION } from "../extensions/lib/wtft-tagger-version.ts";
-import { waitingForDataLine, restartDaemon, getDaemonPidPath, getCurrentVersionTagPath } from "../extensions/lib/wtft-daemon-lib.ts";
+import { waitingForDataLine, restartDaemon, getDaemonPidPath } from "../extensions/lib/wtft-daemon-lib.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("248-focus-first");
@@ -40,7 +40,9 @@ function turnLine(id: string, ts: number): string {
 	}) + "\n";
 }
 
-/** A fresh root of `SESSIONS` sessions with no tags, so the harness rebuilds all of them. */
+/** A fresh root of `SESSIONS` sessions whose only tags are an older version,
+ *  so the harness rebuilds all of them. `files` is in the harness's walk order:
+ *  directory by directory, each in `readdir` order. */
 function makeRoot(label: string): { root: string; files: string[] } {
 	const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), `wtft-248-${label}-`)));
 	const files: string[] = [];
@@ -51,7 +53,14 @@ function makeRoot(label: string): { root: string; files: string[] } {
 		let body = "";
 		for (let k = 0; k < TURNS; k++) body += turnLine(`${label}-${i}-${k}`, T0 + k);
 		fs.writeFileSync(file, body);
-		files.push(file);
+		fs.mkdirSync(path.join(dir, "wtft-tags"), { recursive: true });
+		fs.writeFileSync(path.join(dir, "wtft-tags", `${path.basename(file)}.wtft-tag.v0.9.0.jsonl`), "{}\n");
+	}
+	for (const d of fs.readdirSync(root, { withFileTypes: true })) {
+		if (!d.isDirectory()) continue;
+		for (const f of fs.readdirSync(path.join(root, d.name))) {
+			if (f.endsWith(".jsonl")) files.push(path.join(root, d.name, f));
+		}
 	}
 	return { root, files };
 }
@@ -88,11 +97,12 @@ try {
 	console.log("\nA session named at startup is rebuilt first");
 	{
 		const { root, files } = makeRoot("a");
-		const target = files[Math.floor(files.length * 0.7)];
+		const target = files[files.length - 1];
 		start(root, ["--session", target]);
-		await until(() => tagged(target), 30_000);
+		const took = await until(() => tagged(target), 30_000);
 		const others = countTagged(files.filter(f => f !== target));
-		check(others < 50, `the focused session is rebuilt before the others: ${others} of ${SESSIONS - 1} others had a tag when it did`);
+		check(took !== Infinity, `the focused session was tagged (${took} ms after start)`);
+		check(others < 50, `it came first, not last in walk order: ${others} of ${SESSIONS - 1} others had a tag then`);
 		for (const pid of pids.splice(0)) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 		await sleep(300);
 	}
@@ -101,18 +111,19 @@ try {
 	{
 		const { root, files } = makeRoot("b");
 		start(root, []);
-		await until(() => countTagged(files) > 100, 20_000);
-		const untaggedNow = files.filter(f => !fs.existsSync(tagOf(f)));
-		const target = untaggedNow[Math.floor(untaggedNow.length * 0.8)];
+		const warm = await until(() => countTagged(files) > 100, 20_000);
+		check(warm !== Infinity, "fixture: the harness started its rebuild");
+		const target = [...files].reverse().find(f => !tagged(f))!;
 		const before = countTagged(files);
-		check(before < SESSIONS - 200, `fixture: the rebuild was still running when the request was made (${before} of ${SESSIONS})`);
+		const remaining = files.length - files.indexOf(target) - 1;
+		check(before < SESSIONS - 200, `fixture: the rebuild was still running at the request (${before} of ${SESSIONS})`);
 		start(root, ["--session", target]);
-		await until(() => tagged(target), 30_000);
-		const after = countTagged(files);
-		// The request is made by a second process, which takes a node start-up
-		// to reach the live one; in walk order the target would come after
-		// roughly 1,000 more sessions.
-		check(after - before < 400, `the requested session is served next: ${after - before} other sessions were rebuilt between the request and it`);
+		const took = await until(() => tagged(target), 30_000);
+		const between = countTagged(files) - before;
+		check(took !== Infinity, `the requested session was tagged (${took} ms after the request was spawned)`);
+		// A second process makes the request, so a node start-up passes first.
+		check(between < (files.indexOf(target) - before) / 2,
+			`it was served ahead of its walk position: ${between} others were rebuilt meanwhile, of ${files.indexOf(target) - before} ahead of it (${remaining} after it)`);
 	}
 
 	console.log("\n--watch says a stale tag is being rebuilt");
@@ -120,13 +131,14 @@ try {
 		const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-248-line-")));
 		const session = path.join(dir, "s.jsonl");
 		fs.writeFileSync(session, turnLine("x", T0));
-		const current = getCurrentVersionTagPath(session);
-		check(waitingForDataLine(session, current) === "Waiting for session data...", "no tag at all: the plain waiting line");
+		check(waitingForDataLine(session) === "Waiting for session data...", "no tag at all: the plain waiting line");
 		fs.mkdirSync(path.join(dir, "wtft-tags"));
 		fs.writeFileSync(path.join(dir, "wtft-tags", "s.jsonl.wtft-tag.v0.9.0.jsonl"), "{}\n");
-		const line = waitingForDataLine(session, current);
-		check(line.includes("Rebuilding") && line.includes("v0.9.0") && line.includes(`v${WTFT_TAGGER_VERSION}`),
-			`a stale-version tag: the line names the rebuild and both versions (got ${line})`);
+		const line = waitingForDataLine(session);
+		check(line.includes("v0.9.0") && line.includes(`v${WTFT_TAGGER_VERSION}`) && line.includes("log parser daemon"),
+			`a stale-version tag: the line names both versions and the daemon it waits on (got ${line})`);
+		fs.writeFileSync(path.join(dir, "wtft-tags", `s.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`), "{}\n");
+		check(waitingForDataLine(session).includes("v0.9.0"), "a current tag with no turns yet beside the stale one: still named");
 	}
 
 	console.log("\n'r' in --watch never stops a harness daemon");

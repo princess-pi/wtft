@@ -891,14 +891,21 @@ function isHarnessProcess(pid: number): boolean {
 	}
 }
 
-/** What `--watch` shows before the current tag has any turns. A stale-version
- *  tag means the log parser daemon is rebuilding it, which a reader should be
- *  told rather than left looking at an empty screen. */
-export function waitingForDataLine(sessionPath: string, currentTagPath: string): string {
+/** What `--watch` shows before the current tag has any turns. When a tag for
+ *  another tagger version is on disk, the reader is told that this version's
+ *  is still to be built, rather than left looking at an empty screen. */
+export function waitingForDataLine(sessionPath: string): string {
 	if (!fs.existsSync(sessionPath)) return "Waiting for session .jsonl to be written (first prompt not completed yet)...";
-	const newest = getTagPath(sessionPath);
-	const stale = newest !== currentTagPath && fs.existsSync(newest) ? newest.match(/\.wtft-tag\.v([^/]+)\.jsonl$/)?.[1] : undefined;
-	if (stale) return `Rebuilding this session's tag for tagger v${WTFT_TAGGER_VERSION} (the v${stale} tag is stale); its turns appear here when the log parser daemon reaches it...`;
+	const prefix = path.basename(sessionPath) + ".wtft-tag.v";
+	let stale: string | undefined;
+	try {
+		for (const f of fs.readdirSync(path.join(path.dirname(sessionPath), "wtft-tags"))) {
+			if (!f.startsWith(prefix) || !f.endsWith(".jsonl")) continue;
+			const version = f.slice(prefix.length, -".jsonl".length);
+			if (version !== WTFT_TAGGER_VERSION) stale = version;
+		}
+	} catch { /* no tags dir yet */ }
+	if (stale) return `The tag on disk was written by tagger v${stale}; waiting for the log parser daemon to build this session's v${WTFT_TAGGER_VERSION} tag...`;
 	return "Waiting for session data...";
 }
 
@@ -1131,7 +1138,7 @@ export async function watchTagFile(
 
 			for (const l of lines) buf.push(l);
 		} else {
-			buf.push(`\x1b[90m${waitingForDataLine(sessionPath, tagPath)}\x1b[0m`);
+			buf.push(`\x1b[90m${waitingForDataLine(sessionPath)}\x1b[0m`);
 		}
 
 		const restartHint = settings.daemonPath

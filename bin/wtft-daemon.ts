@@ -1105,9 +1105,13 @@ function reapAndWarn() {
 
     // HARD: session gone (not moved, not never-written). Never our own PID.
     if (pid !== process.pid && sessionFound && sessionIsGone(sessionFound)) {
-      try { process.kill(pid, "SIGTERM"); } catch (_) { /* already gone, or not ours to signal */ }
-      for (const lease of leases) unlinkIfStill(lease, pid);
-      warnings.push(`[${new Date().toISOString()}] KILLED PID ${pid}: session gone — ${sessionFound}`);
+      // A process that refuses the signal is still alive, so its leases stay.
+      let gone = true;
+      try { process.kill(pid, "SIGTERM"); } catch (err) { gone = (err as NodeJS.ErrnoException).code === "ESRCH"; }
+      if (gone) {
+        for (const lease of leases) unlinkIfStill(lease, pid);
+        warnings.push(`[${new Date().toISOString()}] KILLED PID ${pid}: session gone — ${sessionFound}`);
+      }
       continue;
     }
     sessionOf.set(pid, sessionFound);

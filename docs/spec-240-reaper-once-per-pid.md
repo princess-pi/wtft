@@ -39,7 +39,7 @@ the line carries all three findings. For comparison, the same fixture against th
 finish: 108.7 s, and 30,000 lines about that pid. On `overcity`, with 10,866 real leases: 96 s.
 
 A process the reaper cannot signal (`EPERM`) now counts as alive, as in the claim loop, so its
-leases stay. `SIGTERM` in `--cleanup`, `--stop` and `--restart` is guarded the same way as in the
+leases stay, and a gone-session process that refuses `SIGTERM` keeps its leases too. `SIGTERM` in `--cleanup`, `--stop` and `--restart` is guarded the same way as in the
 reaper. Those paths still remove a lease without re-proving it; they are run by hand.
 
 The kill rule is unchanged, including for a harness daemon, whose `--session` is only the session

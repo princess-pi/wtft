@@ -200,15 +200,16 @@ check(
 	"the flag rides the remainder line, not the #oh line"
 );
 
-console.log("--- TEST 9: partial re-prime is NOT flagged, despite its #oh line ---");
+console.log("--- TEST 9: partial re-prime is flagged once, on the remainder line (#241) ---");
 check(partialLines.length === 2, "partial re-prime → split into 2 lines");
 check(
 	partialLines.some(l => (l.cr ?? 0) === 0 && (l.cw ?? 0) > 0),
 	"partial re-prime does emit a cr=0/cw>0 line (the trap)"
 );
 check(
-	partialLines.every(l => l.miss !== 1),
-	"…but no line is flagged as a miss"
+	partialLines.filter(l => l.miss === 1).length === 1
+		&& partialLines.filter(l => l.miss === 1).every(l => !String(l.id ?? "").endsWith("#oh")),
+	"one line is flagged as a miss, and it is not the #oh line"
 );
 
 console.log("--- TEST 10: a flagged tag line renders a divider end-to-end ---");

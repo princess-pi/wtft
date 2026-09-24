@@ -1785,7 +1785,9 @@ function taggerIsOlder(a: string, b: string): boolean {
   return false;
 }
 
-function pointSessionAt(livePid: number, file: string) {
+/** Hands `file` to the live harness; false when the request could not be
+ *  posted (the harness is usually stopping), with the lease it wrote removed. */
+function pointSessionAt(livePid: number, file: string): boolean {
   const lease = getDaemonPidPath(file);
   const replacement = `${lease}.replace-${process.pid}`;
   fs.writeFileSync(replacement, String(livePid));
@@ -1804,9 +1806,12 @@ function pointSessionAt(livePid: number, file: string) {
     // With no request the harness may never adopt this session, so the lease
     // must not claim it is served.
     try { if (fs.readFileSync(lease, "utf8").trim() === String(livePid)) fs.unlinkSync(lease); } catch { /* already gone */ }
-    process.stderr.write(`wtft-daemon: could not ask the running harness (pid ${livePid}) to serve ${file}: ${err instanceof Error ? err.message : String(err)}\n`);
-    process.exit(1);
+    if (process.env.WTFT_DAEMON_DEBUG) {
+      process.stderr.write(`[wtft-log-parser] could not ask harness ${livePid} to serve ${file}: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+    return false;
   }
+  return true;
 }
 
 let harnessRootKey = "";
@@ -1863,7 +1868,7 @@ function runHarness(which: string, focus: string) {
   };
   for (let attempt = 1; claimPidFile(harnessPidFile) === "busy"; attempt++) {
     if (attempt > 5) {
-      process.stderr.write(`wtft-daemon: could not claim ${harnessPidFile} after replacing an older harness\n`);
+      process.stderr.write(`wtft-daemon: could not claim ${harnessPidFile} or hand ${focus || "a session"} to the harness holding it\n`);
       leave(1);
     }
     let live = 0;
@@ -1872,8 +1877,12 @@ function runHarness(which: string, focus: string) {
     let liveVersion = "";
     try { liveVersion = fs.readFileSync(harnessVersionFile(live), "utf8").trim(); } catch { /* a build from before version files */ }
     if (!taggerIsOlder(liveVersion, TAGGER_VERSION)) {
-      if (focus) pointSessionAt(live, focus);
-      leave(0);
+      if (!focus || pointSessionAt(live, focus)) leave(0);
+      // Not posted: that harness is usually stopping, so try to claim the root
+      // once it has gone.
+      const until = Date.now() + 2000;
+      while (Date.now() < until && procIsDaemon(live)) { /* spin; it removes its request dir as it exits */ }
+      continue;
     }
     try { process.kill(live, "SIGTERM"); } catch { /* already gone */ }
     waitUntilExited(live);

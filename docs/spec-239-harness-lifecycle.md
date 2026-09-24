@@ -70,8 +70,9 @@
 - Removing the harness pid file stops the harness.
 - With 40,000 leases naming the running harness, `--restart` followed by a `wtft`-style spawn
   leaves exactly one harness after 5 s: the one `--restart` started, holding the pid file.
-- A harness whose `--session` was deleted survives a per-session daemon's startup and a
-  `--cleanup`, and keeps its live session's lease.
+- A harness whose `--session` was deleted survives a per-session daemon's startup and keeps its
+  live session's lease. The `--cleanup` half is not in the suite: `--cleanup` stops every
+  fixture daemon under `/tmp`, including those of suites running beside it.
 
 #250: `tests/wtft-205-one-daemon-per-harness.test.ts` passes ten consecutive runs while a
 CPU-bound process occupies every core.

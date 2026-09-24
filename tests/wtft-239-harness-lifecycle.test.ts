@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 /**
  * The harness daemon's lifecycle: long-idle sessions hold no slot or lease, one
- * harness per root after --restart, and neither the startup reaper nor
- * --cleanup acts on a harness for its start-up --session.
+ * harness per root after --restart, and the startup reaper never acts on a
+ * harness for its start-up --session. --cleanup is not run here: it stops
+ * every fixture daemon under /tmp, including other suites'.
  */
 
 import * as fs from "node:fs";
@@ -196,7 +197,7 @@ try {
 		await until(() => living.every(p => !alive(p)), 5_000);
 	}
 
-	console.log("\nThe startup reaper and --cleanup leave a harness whose --session is gone");
+	console.log("\nThe startup reaper leaves a harness whose --session is gone");
 	{
 		const { root, files } = makeRoot("g", 3);
 		for (const f of files) fs.utimesSync(f, new Date(), new Date());
@@ -214,9 +215,6 @@ try {
 		await sleep(500);
 		check(alive(h.pid), "the harness is still running");
 		check(read(getDaemonPidPath(files[1])).trim() === String(h.pid), "and still holds its live session's lease");
-		const cleanup = spawnSync("node", [DAEMON, "--cleanup"], { encoding: "utf8", env: envFor(root) });
-		check(cleanup.status === 0, `fixture: --cleanup exited 0 (${cleanup.status})`);
-		check(alive(h.pid) && read(getDaemonPidPath(files[1])).trim() === String(h.pid), "--cleanup leaves the harness and that lease too");
 		for (const pid of [h.pid, per.pid]) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 	}
 } finally {

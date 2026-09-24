@@ -156,6 +156,8 @@ try {
 		const held = leasesNaming(h.pid);
 		check(read(getDaemonPidPath(parent)).trim() === String(h.pid), "a session whose subagent transcript was just appended to keeps its lease");
 		check(held <= 5, `after catch-up the harness holds a handful of leases, not one per session: ${held} for ${files.length + 1} sessions`);
+		const reparse = spawnSync("node", [DAEMON, "--reparse", files[5]], { encoding: "utf8", env: envFor(root) });
+		check(reparse.status === 1 && reparse.stderr.includes("refused"), `--reparse of a released session is refused while its harness runs (exit ${reparse.status})`);
 		const target = `live-${n}`;
 		check(await until(() => classified(live, target), 10_000) !== Infinity, "the session being appended to is still classified");
 		clearInterval(appender);

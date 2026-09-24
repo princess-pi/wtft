@@ -32,9 +32,10 @@
   already there: after `WTFT_DAEMON_IDLE_MS` (24 h) with no new lines, a slot is dropped. It
   counted from the harness's start, so every session under the root was held for a day. The
   catch-up now counts from the last write instead: right after it serves a session whose
-  transcript and every file under its session directory (`subagents/`, nested ones included)
+  transcript and every file under its session directory (`subagents/`, at any depth)
   were last written more than `WTFT_DAEMON_IDLE_MS` ago, that no reader asked for, with nothing pending, no partial line held and no child still
-  in its discovery window, it drops the slot. The idle threshold is unchanged, so a session is
+  in its discovery window, it drops the slot. A directory that appears later, or is watched again
+  after a watcher error, is walked the same way. The idle threshold is unchanged, so a session is
   released only when the running daemon would have dropped it anyway; the in-memory state a
   drop loses (stream state, discovered `claude -p` children) is lost at the same point as
   before. A Claude Code session's next write, or a write to one of its `subagents/`
@@ -47,9 +48,10 @@
   the harness is removed, so the reader is not told a session is served when nothing will
   adopt it; a lease the harness already held stays. The spawn then waits up to 2 s for that
   harness to exit and tries to claim the root itself, exiting 1 after five attempts.
-- **`--reparse` holds the session's lease while it rewrites the tag**, since a released
-  session no longer has one. A harness that adopts it again mid-reparse takes the lease over
-  and stops the reparse, rather than appending to the same tag beside it.
+- **`--reparse` is refused for a session under a root whose harness is running**, not only for
+  one whose lease is held: a released session has no lease, and the harness may adopt it again
+  at any write and append to the tag the reparse is rewriting. `--reparse-range` exits 1,
+  naming how many sessions it left unreparsed, when any was refused or failed.
 - **A harness whose pid file no longer names it stops.** The sweep reads the harness pid file;
   if it was removed or names another process, the harness stops and releases its leases, so two
   harnesses never contend for one root.

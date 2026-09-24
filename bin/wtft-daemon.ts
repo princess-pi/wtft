@@ -1708,7 +1708,10 @@ function watchDir(dir: string, wakeFiles = true) {
       continue;
     }
     if (insideSubagents || !wakeFiles) continue;
-    if (ent.name.endsWith(".jsonl") && !ent.name.includes(".wtft-tag.")) wake(child, false);
+    if (ent.name.endsWith(".jsonl") && !ent.name.includes(".wtft-tag.")) {
+      wake(child, false);
+      releaseIfLongIdle(child);
+    }
   }
 }
 
@@ -1785,8 +1788,11 @@ function taggerIsOlder(a: string, b: string): boolean {
   return false;
 }
 
-/** Hands `file` to the live harness; false when the request could not be
- *  posted (the harness is usually stopping), with the lease it wrote removed. */
+/** Hands `file` to the live harness. When the request cannot be posted (the
+ *  harness is usually stopping), a lease and `.display` this call pointed at
+ *  the harness are removed and it returns false; if the harness already held
+ *  the lease, that lease stays and it returns true, since the harness is
+ *  serving the session. */
 function pointSessionAt(livePid: number, file: string): boolean {
   const lease = getDaemonPidPath(file);
   let held = false;
@@ -1810,6 +1816,7 @@ function pointSessionAt(livePid: number, file: string): boolean {
     // already held is its own and stays.
     if (!held) {
       try { if (fs.readFileSync(lease, "utf8").trim() === String(livePid)) fs.unlinkSync(lease); } catch { /* already gone */ }
+      try { fs.unlinkSync(`${lease}.display`); } catch { /* already gone */ }
     }
     process.stderr.write(`wtft-daemon: could not ask the running harness (pid ${livePid}) to serve ${file}: ${err instanceof Error ? err.message : String(err)}\n`);
     return held;
@@ -1964,17 +1971,16 @@ function releaseLease(slot: Slot) {
 function lastWrittenMs(file: string): number {
   let newest = 0;
   try { newest = fs.statSync(file).mtimeMs; } catch { /* gone */ }
-  const visit = (dir: string, depth: number) => {
-    if (depth > 4) return;
+  const visit = (dir: string) => {
     let entries: fs.Dirent[];
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const ent of entries) {
       const full = path.join(dir, ent.name);
-      if (ent.isDirectory()) { visit(full, depth + 1); continue; }
+      if (ent.isDirectory()) { visit(full); continue; }
       try { newest = Math.max(newest, fs.statSync(full).mtimeMs); } catch { /* gone */ }
     }
   };
-  visit(file.slice(0, -".jsonl".length), 0);
+  visit(file.slice(0, -".jsonl".length));
   return newest;
 }
 
@@ -2165,23 +2171,25 @@ function waitUntilExited(pid: number) {
   while (Date.now() < killed && procIsDaemon(pid)) { /* until the kernel has it */ }
 }
 
-function reparseOne(file: string): boolean {
-  // Held while the tag is rewritten: a harness releases a long-idle session's
-  // lease, and one that adopts it again mid-reparse must take it over (stopping
-  // this process) rather than append to the same tag beside it.
-  const lease = getDaemonPidPath(file);
-  if (sessionDaemonLive(file) || claimPidFile(lease) !== "claimed") {
-    process.stderr.write(`wtft-daemon: --reparse refused while a daemon holds ${file}\n`);
-    return false;
+/** A live harness process serving the root `file` sits under. It holds no
+ *  lease for a session it released, and may adopt it again at any write. */
+function liveHarnessFor(file: string): number {
+  for (const which of ["claude", "pi"]) {
+    const root = path.resolve(harnessRoot(which));
+    if (!file.startsWith(root + path.sep)) continue;
+    const hash = createHash("sha256").update(root).digest("hex").slice(0, 12);
+    let pid = 0;
+    try { pid = Number(fs.readFileSync(path.join(os.tmpdir(), `wtft-harness-${which}-${hash}.pid`), "utf8").trim()); } catch { continue; }
+    if (procIsDaemon(pid)) return pid;
   }
-  try {
-    return reparseHeld(file);
-  } finally {
-    try { if (fs.readFileSync(lease, "utf8").trim() === String(process.pid)) fs.unlinkSync(lease); } catch { /* taken over */ }
-  }
+  return 0;
 }
 
-function reparseHeld(file: string): boolean {
+function reparseOne(file: string): boolean {
+  if (sessionDaemonLive(file) || liveHarnessFor(file)) {
+    process.stderr.write(`wtft-daemon: --reparse refused while a daemon serves ${file}\n`);
+    return false;
+  }
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] reparse begin ${file}\n`);
   }
@@ -2226,16 +2234,22 @@ function runReparse(one: string, from: string, to: string) {
   const files: string[] = [];
   walkSessions(path.resolve(harnessRoot("claude")), files);
   walkSessions(path.resolve(harnessRoot("pi")), files);
+  let failed = 0;
   for (const file of files) {
     let mtime = 0;
     try { mtime = fs.statSync(file).mtimeMs; } catch { continue; }
     if (mtime < fromMs || mtime >= toMs) continue;
     if (tagIsCurrent(file)) continue;
     try {
-      reparseOne(file);
+      if (!reparseOne(file)) failed++;
     } catch (err) {
+      failed++;
       process.stderr.write(`[wtft-log-parser] reparse failed ${file}: ${err instanceof Error ? err.message : String(err)}\n`);
     }
+  }
+  if (failed > 0) {
+    process.stderr.write(`wtft-daemon: --reparse-range left ${failed} session(s) unreparsed\n`);
+    process.exit(1);
   }
 }
 

@@ -405,14 +405,40 @@ export function parseSessionFile(
 	doNotFold: ReadonlySet<string> = new Set(),
 	chunkBytes: number = PARSE_CHUNK_BYTES,
 ): Interaction[] {
+	return parseSessionFileCounted(filePath, doNotFold, chunkBytes).interactions;
+}
+
+/** `parseSessionFile` for a caller that would report its `[]` as a $0 claim:
+ *  a file with non-blank lines and not one that parses as JSON throws, as a
+ *  file that cannot be opened does. Blank lines only is still an empty session. */
+export function parseSessionFileStrict(
+	filePath: string,
+	doNotFold: ReadonlySet<string> = new Set(),
+): Interaction[] {
+	const { interactions, lines, jsonLines } = parseSessionFileCounted(filePath, doNotFold, PARSE_CHUNK_BYTES);
+	if (lines > 0 && jsonLines === 0) {
+		throw new Error(`no line of ${filePath} parses as JSON (${lines} non-blank)`);
+	}
+	return interactions;
+}
+
+function parseSessionFileCounted(
+	filePath: string,
+	doNotFold: ReadonlySet<string>,
+	chunkBytes: number,
+): { interactions: Interaction[]; lines: number; jsonLines: number } {
 	const interactions: Interaction[] = [];
 	const state = newParseStreamState();
+	let lines = 0;
+	let jsonLines = 0;
 	// Unreadable transcript throws (never returns [] as "empty"). Per-line
 	// errors stay swallowed — bad line, not file-level failure.
 	for (const line of fileLines(filePath, chunkBytes)) {
 		if (!line.trim()) continue;
+		lines++;
 		try {
 			const entry = JSON.parse(line);
+			jsonLines++;
 			const isControl = applyControlEntry(entry, state, () => {
 				if (interactions.length > 0) interactions[interactions.length - 1].interrupted = true;
 			});
@@ -430,7 +456,7 @@ export function parseSessionFile(
 
 	attributeClaudeSubAgentCosts(interactions, resolveLastCwd(filePath), new Set([...doNotFold, canonicalTranscriptPath(filePath)]));
 
-	return interactions;
+	return { interactions, lines, jsonLines };
 }
 
 // ---

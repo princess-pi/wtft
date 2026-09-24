@@ -2,11 +2,12 @@
 
 import { readSpawnLedger, type SpawnLedger } from "./wtft-spawn-ledger.js";
 import { getDiscoveries } from "./harness/registry.js";
-import { parseSessionFile, deduplicateInteractions, isModelTagged, type Interaction } from "./wtft-parser.js";
+import { parseSessionFileStrict, discoverSubagentSessionFiles, canonicalTranscriptPath, deduplicateInteractions, isModelTagged, type Interaction } from "./wtft-parser.js";
 import { computeSessionSummary, emptyTotals, type TokenTotals } from "./wtft-renderer.js";
 import { IDLE_THRESHOLD_MS } from "./wtft-daemon-lib.js";
 import { listUnrecordedSpawns, type UnrecordedSpawn } from "./wtft-unrecorded.js";
 import * as fs from "node:fs";
+import * as path from "node:path";
 
 export const SPAWN_TREE_SCHEMA = "wtft/spawn-tree@4";
 
@@ -24,9 +25,9 @@ export type SpawnEdgeSkip =
 	 *  rather than a fact — the others describe the ledger or the walk. */
 	| "unreadable"
 	/** Already counted elsewhere in this tree (a diamond, a cycle among
-	 *  descendants, or a `claude -p` session a resolved descendant's parse folded
-	 *  in). Its
-	 *  money IS in the tree's `total`; this edge is the second way in. */
+	 *  descendants, or a `claude -p` or subagent session priced inside a resolved
+	 *  descendant's total). Its money IS in the tree's `total`; this edge is the
+	 *  second way in. */
 	| "already-counted"
 	/** Reached before, and that visit could not read it. Distinct from
 	 *  `already-counted`, which claims the money landed — here nothing did, and
@@ -117,8 +118,9 @@ export interface SpawnTreeOptions {
 	ledgerPath?: string;
 	maxDepth?: number;
 	/** Session ids whose cost is ALREADY in the caller's self total, so the walk
-	 *  must not add them again. A thunk is called only when the root has an
-	 *  edge, or when `unrecorded` is asked for. */
+	 *  must not add them again; their own ledger children are walked. A thunk is
+	 *  called only when the ledger holds any edge, or when `unrecorded` is asked
+	 *  for. */
 	alreadyAttributed?: Set<string> | (() => Set<string>);
 	now?: number;
 	/** Ask for `unrecorded`. A one-shot report's cost, not a per-poll one. */
@@ -166,6 +168,25 @@ function foldsInTotal(parsed: Interaction[]): Map<string, TokenTotals> {
 		}
 	}
 	return shares;
+}
+
+/**
+ * A descendant's cost as its own SELF would hold it: its transcript plus every
+ * subagent transcript discovery lists for it, each part kept apart so the walk
+ * can leave out one it already counted. Whole or not at all — any part that
+ * cannot be read throws, because a partial total would read as the edge's
+ * whole cost. `files` is every transcript read, for the live check.
+ */
+function parseDescendant(file: string): { own: Interaction[]; subagents: { id: string; interactions: Interaction[] }[]; files: string[] } {
+	const discovered = discoverSubagentSessionFiles(file);
+	if (discovered.unreadable) throw discovered.unreadable;
+	// Every part is priced at top level, so a fold of one into another is a second count.
+	const doNotFold = new Set([file, ...discovered.files].map(canonicalTranscriptPath));
+	return {
+		own: parseSessionFileStrict(file, doNotFold),
+		subagents: discovered.files.map(sub => ({ id: path.basename(sub, ".jsonl"), interactions: parseSessionFileStrict(sub, doNotFold) })),
+		files: [file, ...discovered.files],
+	};
 }
 
 /**
@@ -303,22 +324,31 @@ function walkLedger(
 	// own edge is reached, and they report different skips.
 	type Outcome = "counted" | "unresolved" | "in-self" | "folded";
 	const outcomeOf = new Map<string, Outcome>([[rootSessionId, "in-self"]]);
-	if (!ledger.childrenOf.has(rootSessionId) && !options.unrecorded) return outcomeOf;
-	// The thunk is the lazy path: called only when the root has an edge, or when
-	// `unrecorded` needs the ids to exclude.
+	if (ledger.childrenOf.size === 0 && !options.unrecorded) return outcomeOf;
 	const attributed = typeof options.alreadyAttributed === "function" ? options.alreadyAttributed() : options.alreadyAttributed;
 	// Normalised the same way the ledger and the root id are: a caller may hand
 	// back an id spelled with its file's `.jsonl` suffix.
-	for (const id of attributed ?? []) outcomeOf.set(id.replace(/\.jsonl$/i, ""), "in-self");
-	if (!ledger.childrenOf.has(rootSessionId)) return outcomeOf;
+	const inSelf = [...attributed ?? []].map(id => id.replace(/\.jsonl$/i, ""));
+	for (const id of inSelf) outcomeOf.set(id, "in-self");
+	if (![rootSessionId, ...inSelf].some(id => ledger.childrenOf.has(id))) return outcomeOf;
 	const resolve = makeSessionResolver();
-	const visited = new Set<string>([rootSessionId]);
 
-	type Visit = { parentId: string; depth: number };
-	const queue: Visit[] = [{ parentId: rootSessionId, depth: 1 }];
+	// `parentsAt[d]` holds the sessions whose edges sit at depth `d`. Walked
+	// level by level, a session is reached at its minimum depth even when it
+	// is queued out of order — a fold queues two levels down.
+	const parentsAt: string[][] = [];
+	const visited = new Set<string>();
+	const enqueue = (parentId: string, depth: number) => {
+		if (visited.has(parentId)) return;
+		visited.add(parentId);
+		(parentsAt[depth] ??= []).push(parentId);
+	};
+	enqueue(rootSessionId, 1);
+	// Only an in-self session's own transcript is inside the self total; its
+	// ledger children are not. It stands where a depth-1 child would.
+	for (const id of inSelf) enqueue(id, 2);
 
-	while (queue.length > 0) {
-		const { parentId, depth } = queue.shift()!;
+	for (let depth = 1; depth < parentsAt.length; depth++) for (const parentId of parentsAt[depth] ?? []) {
 		const edges = ledger.childrenOf.get(parentId);
 		if (!edges) continue;
 
@@ -345,13 +375,6 @@ function walkLedger(
 					: prior === "in-self" ? "in-self-total" as const
 					: "already-seen-unresolved" as const;
 				tree.edges.push({ ...base, resolved: false, path: null, total: null, skip });
-				// An `in-self`/`folded` id was marked without being visited —
-				// only that child's OWN transcript is inside the self total; its
-				// launcher children are not.
-				if ((prior === "in-self" || prior === "folded") && !visited.has(edge.child)) {
-					visited.add(edge.child);
-					queue.push({ parentId: edge.child, depth: depth + 1 });
-				}
 				continue;
 			}
 			if (depth > maxDepth) {
@@ -366,30 +389,41 @@ function walkLedger(
 				tree.unattributed.push({ child: edge.child, mechanism: edge.mechanism, ts: edge.ts, ...(edge.label !== undefined ? { label: edge.label } : {}), reason: "not-found" });
 				// KEEP WALKING. Grandchildren are edges in the LEDGER, not
 				// entries in the file we did not find.
-				visited.add(edge.child);
-				queue.push({ parentId: edge.child, depth: depth + 1 });
+				enqueue(edge.child, depth + 1);
 				continue;
 			}
 
-			let parsed: Interaction[];
+			let descendant: ReturnType<typeof parseDescendant>;
 			let live: boolean;
 			try {
-				parsed = parseSessionFile(file);
+				descendant = parseDescendant(file);
 				// Stat AFTER the parse, so an append during it counts; inside the try, so a
 				// transcript that cannot be stat-ed is `unreadable`, never guessed. Bounded on
 				// both sides: a write mid-walk lands after `now`, a far-future mtime is not live.
-				const age = now - fs.statSync(file).mtimeMs;
-				live = age < IDLE_THRESHOLD_MS && age > -IDLE_THRESHOLD_MS;
+				live = descendant.files.some(f => {
+					const age = now - fs.statSync(f).mtimeMs;
+					return age < IDLE_THRESHOLD_MS && age > -IDLE_THRESHOLD_MS;
+				});
 			} catch {
 				outcomeOf.set(edge.child, "unresolved");
 				tree.edges.push({ ...base, resolved: false, path: file, total: null, skip: "unreadable" });
 				tree.unattributed.push({ child: edge.child, mechanism: edge.mechanism, ts: edge.ts, ...(edge.label !== undefined ? { label: edge.label } : {}), reason: "unreadable" });
-				visited.add(edge.child);
-				queue.push({ parentId: edge.child, depth: depth + 1 });
+				enqueue(edge.child, depth + 1);
 				continue;
 			}
 
 			// Drop `untaggedCostUsd`: it would leak into `spawned.edges[].total`.
+			// A subagent session already in some total is left out whole; one that
+			// lands here is folded, as a `claude -p` session this parse folds is.
+			const parsed = [...descendant.own];
+			for (const sub of descendant.subagents) {
+				const prior = outcomeOf.get(sub.id);
+				if (prior === "in-self" || prior === "counted" || prior === "folded") continue;
+				parsed.push(...sub.interactions);
+				if (prior === "unresolved") tree.unattributed = tree.unattributed.filter(gap => gap.child !== sub.id);
+				outcomeOf.set(sub.id, "folded");
+				enqueue(sub.id, depth + 2);
+			}
 			const summary = computeSessionSummary(parsed);
 			const { untaggedCostUsd, ...total } = summary.total;
 			if (summary.untaggedInteractions > 0) {
@@ -405,14 +439,15 @@ function walkLedger(
 				}
 				if (prior === "unresolved") tree.unattributed = tree.unattributed.filter(gap => gap.child !== id);
 				outcomeOf.set(id, "folded");
+				// Folded in where this child's own children stand.
+				enqueue(id, depth + 2);
 			}
 
 			tree.descendants++;
 			outcomeOf.set(edge.child, "counted");
 			addTotals(tree.total, total);
 			tree.edges.push({ ...base, resolved: true, path: file, total, live });
-			visited.add(edge.child);
-			queue.push({ parentId: edge.child, depth: depth + 1 });
+			enqueue(edge.child, depth + 1);
 		}
 	}
 

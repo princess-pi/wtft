@@ -138,9 +138,9 @@ console.log("\nPART B — a descendant's parse folds in an unreached id, which i
 }
 
 // ---
-// PART C — a session the parse did NOT fold in is priced under its own edge
+// PART C — a subagent session discovery lists for a descendant is billed once
 // ---
-console.log("\nPART C — a Pi sibling of a descendant is discovered by directory, not folded into the descendant's total");
+console.log("\nPART C — a Pi sibling of a descendant is priced inside the descendant or under its own edge, once (#230)");
 
 {
 	const ROOT = uuid(21), DESC = uuid(22), SIBLING = uuid(23);
@@ -163,8 +163,12 @@ console.log("\nPART C — a Pi sibling of a descendant is discovered by director
 	})) {
 		const tree = computeSpawnTree(ROOT, { ledgerPath: ledgerOf(edges) });
 		const siblingEdge = tree.edges.find(e => e.child === SIBLING);
-		check(tree.total.outputTokens === 1000 && siblingEdge?.resolved === true && tree.unattributed.length === 0,
-			`C1 [${name}] the sibling is priced under its own edge and nothing is subtracted from the descendant: 300 + 700 (got ${tree.total.outputTokens}, skip ${siblingEdge?.skip})`);
+		const descEdge = tree.edges.find(e => e.child === DESC);
+		check(tree.total.outputTokens === 1000 && tree.unattributed.length === 0,
+			`C1 [${name}] spawned.total is 300 + 700, the sibling once (got ${tree.total.outputTokens})`);
+		const [expectedDesc, expectedSkip] = name === "descendant first" ? [1000, "already-counted"] : [300, undefined];
+		check(descEdge?.total?.outputTokens === expectedDesc && siblingEdge?.skip === expectedSkip,
+			`C2 [${name}] the sibling's 700 sits ${name === "descendant first" ? "inside the descendant, and its own edge is already-counted" : "under its own edge, and the descendant leaves it out"} (got desc ${descEdge?.total?.outputTokens}, skip ${siblingEdge?.skip})`);
 	}
 }
 

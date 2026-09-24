@@ -90,9 +90,11 @@ as part of the rest of #97.
 **What the numbers support.** The whole-string parse's peak was real: 98 MB for 28 MB of
 transcripts. Chunking halves it. Neither build met the issue's first Closer (under 30 MB of PSS,
 not growing). Direction A, reading only appended bytes, and dropping the per-line maps both
-shipped in #219.
+shipped in #219 alongside its one daemon per harness.
 
-## The Closer, restated — 2026-09-24 (Duppy chose A on #97)
+## The Closer, restated — 2026-09-24
+
+#97's body carries this Closer; the PSS Closer it replaces is kept there under *Was*.
 
 **PSS was measuring the allocator, not wtft.** On `main` at `c7864c0` a daemon started at
 23.1 MB of PSS and was at 33.1 MB after 30 minutes. Across four startups of one build, PSS read
@@ -101,8 +103,10 @@ those startups held 5.83 MB live, against 77.7 MB of PSS.
 
 **The Closer is now the live heap:** what a heap snapshot (which collects garbage first) holds.
 It must be at most 10 MB after startup and grow by at most 1 MB over 30 minutes of appends.
-`debug/97-daemon-pss.sh` prints it beside PSS after each sample, and it keeps its fixture under
-`~/.cache/wtft-97`, where a test suite's `wtft-daemon --cleanup` cannot kill the daemon mid-run.
+`debug/97-daemon-pss.sh` prints it beside PSS after each sample, then a
+`closer heap_start_mb=… heap_end_mb=… met=0|1` line, and exits 3 when the Closer is not met. It
+keeps its fixture under `${XDG_CACHE_HOME:-~/.cache}/wtft-97`, outside `/tmp`, where a test
+suite's `wtft-daemon --cleanup` kills fixture daemons.
 
 **Measured 2026-09-24, `main` at `76d887c`**, 28.3 MB of subagent transcripts, 1,800 s of appends
 (359 rounds):
@@ -112,10 +116,9 @@ It must be at most 10 MB after startup and grow by at most 1 MB over 30 minutes 
 | after startup | 23.4 MB | **5.80 MB** |
 | after 1,800 s | 75.8 MB | **6.32 MB** |
 
-The live heap grew 0.52 MB, so the Closer is met. In an earlier two-snapshot run most of that
-growth (0.48 of 0.60 MB) was compiled code. No object type grows with the transcripts. The daemon's
-resident size is V8 heap it has freed and not returned; the resident cost that matters on this
-host is the harness daemon's (#239).
+The live heap grew 0.52 MB, so the Closer is met. The second PSS reading follows the first heap
+snapshot, which allocates inside the daemon, so it is not a clean PSS measurement. The resident
+cost that matters on this host is the harness daemon's (#239).
 
 ## Review record
 
@@ -124,8 +127,8 @@ round 3, Duppy chose to ship the chunked parse only and drop the V8 flag, whose 
 measurements did not establish. That removed the flag's spawn helper and the findings about it:
 which spawners pass the flag, the Pi host's runtime, and a daemon started by hand. The measurement
 script became loud about every failure. The docs now state only measured figures, with the issue's
-4–5× figure attributed to the issue. The Closer is recorded as not met, and #97 stays open for the
-rest.
+4–5× figure attributed to the issue. The PSS Closer was recorded as not met, and #97 stayed open
+until the restatement above.
 
 Macroscope, on the PR (#223): the unfinished-line carry was quadratic on a long line (High) —
 verified, reproduced as PART L, fixed.

@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # usage: debug/97-daemon-pss.sh <daemon.mjs> <label> <append-seconds> [node-flags]
 # Prints PSS and the live heap (a heap snapshot, which collects garbage first)
-# after startup and after the appends. #97's Closer is the live heap.
+# after startup and after the appends, then a closer line:
+#   closer heap_start_mb=<n> heap_end_mb=<n> met=<0|1>
+# and exits 3 when the live heap is over 10 MB at start or grows more than 1 MB.
 set -euo pipefail
 DAEMON=$(realpath "$1"); LABEL=$2; APPEND=$3; NODE_FLAGS=${4:-}
-# Not under /tmp: a test suite's `wtft-daemon --cleanup` kills fixture daemons
-# there, and it ended two 30-minute runs early.
+# Not under /tmp: a test suite's `wtft-daemon --cleanup` kills fixture daemons there.
 CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/wtft-97
 mkdir -p "$CACHE"
 ROOT=$(mktemp -d "$CACHE/run.XXXXXX")
+PID=""
+trap '[ -n "$PID" ] && kill "$PID" 2>/dev/null; rm -rf "$ROOT"' EXIT
 export WTFT_CLAUDE_PROJECTS_DIR=$ROOT/projects XDG_STATE_HOME=$ROOT/state
 # Isolated so the daemon's home-relative reap.log (os.homedir()) and its
 # tmp-relative pid lease (os.tmpdir(), which it also scans to reap other
@@ -55,7 +58,6 @@ echo "[$LABEL] subagents total: $SUBAGENTS_BYTES bytes"
 SNAPS=$ROOT/snapshots; mkdir -p "$SNAPS"
 (cd "$SNAPS" && exec node --heapsnapshot-signal=SIGUSR2 $NODE_FLAGS "$DAEMON" --session "$PROJ/$SID.jsonl" >/dev/null 2>&1) &
 PID=$!
-trap 'kill "$PID" 2>/dev/null || true; rm -rf "$ROOT"' EXIT
 alive() { kill -0 "$PID" 2>/dev/null; }
 pss() { awk '/^Pss:/{s+=$2} END{printf "%.1f", s/1024}' /proc/$PID/smaps_rollup 2>/dev/null; }
 # Never report a PSS number for a dead daemon — a 0.0/empty reading would
@@ -74,31 +76,35 @@ sample() {
   echo "[$LABEL] PSS $1: $val MB"
   heap "$1"
 }
+HEAP=
 # The live heap: every node's self size in a snapshot the daemon writes on SIGUSR2.
 heap() {
-  local before after
-  before=$(ls "$SNAPS" | wc -l)
+  local snap="" size=-1 now stable=0
+  rm -f "$SNAPS"/*.heapsnapshot
   kill -USR2 "$PID"
-  local snap="" size=-1 now
   for _ in $(seq 1 60); do
     sleep 1
-    after=$(ls "$SNAPS" | wc -l)
-    [ "$after" -gt "$before" ] || continue
-    snap=$(ls -t "$SNAPS"/*.heapsnapshot | head -1)
+    snap=$(ls -t "$SNAPS"/*.heapsnapshot 2>/dev/null | head -1)
+    [ -n "$snap" ] || continue
     now=$(stat -c %s "$snap")
     # Written once the size holds still for a second.
-    if [ "$now" -gt 0 ] && [ "$now" -eq "$size" ]; then break; fi
+    if [ "$now" -gt 0 ] && [ "$now" -eq "$size" ]; then stable=1; break; fi
     size=$now
   done
-  if [ -z "$snap" ]; then
-    echo "[$LABEL] ERROR: no heap snapshot written ($1)" >&2
+  if [ "$stable" -ne 1 ]; then
+    echo "[$LABEL] ERROR: no complete heap snapshot within 60 s ($1)" >&2
     exit 1
   fi
-  echo "[$LABEL] live heap $1: $(node -e '
+  HEAP=$(node -e '
     const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
     const f = d.snapshot.meta.node_fields, n = f.length, s = f.indexOf("self_size");
     let t = 0; for (let i = s; i < d.nodes.length; i += n) t += d.nodes[i];
-    console.log((t / 1048576).toFixed(2));' "$snap") MB"
+    console.log((t / 1048576).toFixed(2));' "$snap")
+  if ! awk -v v="$HEAP" 'BEGIN{exit !(v ~ /^[0-9]+(\.[0-9]+)?$/ && v+0 > 0)}'; then
+    echo "[$LABEL] ERROR: live heap ($1) is not a positive number: '$HEAP'" >&2
+    exit 1
+  fi
+  echo "[$LABEL] live heap $1: $HEAP MB"
   rm -f "$snap"
 }
 
@@ -127,9 +133,14 @@ wait_for_tags() {
 }
 wait_for_tags
 sample "after startup"
+HEAP_START=$HEAP
 end=$((SECONDS+APPEND)); n=0
 while [ $SECONDS -lt $end ]; do
   for a in 0 1 2; do for k in 1 2 3 4 5; do echo "$USERLINE" >> "$PROJ/$SID/subagents/agent-$a.jsonl"; done; turn "a$a-live-$n" | sed 's/"cwd"/"isSidechain":true,"cwd"/' >> "$PROJ/$SID/subagents/agent-$a.jsonl"; done
   n=$((n+1)); sleep 5
 done
 sample "after ${APPEND}s of appends ($n rounds)"
+HEAP_END=$HEAP
+MET=$(awk -v a="$HEAP_START" -v b="$HEAP_END" 'BEGIN{print (a <= 10 && b - a <= 1) ? 1 : 0}')
+echo "closer heap_start_mb=$HEAP_START heap_end_mb=$HEAP_END met=$MET"
+[ "$MET" = 1 ] || exit 3

@@ -224,6 +224,15 @@ fs.mkdirSync(path.join(seamless, "extensions", "lib", "harness", "claude-code"),
 fs.writeFileSync(path.join(seamless, "extensions", "lib", "harness", "claude-code", "discovery.ts"),
 	"export function projectsDir(): string { return '/home/x/.claude/projects'; }\n");
 check(!(await honoursProjectsSeam(seamless)), "E9 a checkout whose projectsDir ignores the seam is detected");
+// An older build reads the variable from process.env and takes no argument.
+const envOnly = path.join(dir, "env-only-checkout");
+fs.mkdirSync(path.join(envOnly, "extensions", "lib", "harness", "claude-code"), { recursive: true });
+fs.writeFileSync(path.join(envOnly, "extensions", "lib", "harness", "claude-code", "discovery.ts"),
+	"export function projectsDir(): string { return process.env.WTFT_CLAUDE_PROJECTS_DIR || '/home/x/.claude/projects'; }\n");
+check(await honoursProjectsSeam(envOnly), "E9b a build that reads the seam from process.env with no argument is accepted");
+let loadFailed = false;
+try { await honoursProjectsSeam(path.join(dir, "no-such-checkout")); } catch { loadFailed = true; }
+check(loadFailed, "E9c a --before that cannot be loaded throws instead of reading as an old build");
 const refused = spawnSync("bun", [SCRIPT, "--before", seamless], {
 	cwd: REPO, encoding: "utf8",
 	env: { ...process.env, HOME: emptyHome, TMPDIR: childTmp, WTFT_CLAUDE_PROJECTS_DIR: e2eRoot, WTFT_PI_SESSIONS_DIR: emptyPiRootE2e },

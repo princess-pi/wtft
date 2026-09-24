@@ -348,7 +348,7 @@ probe.
 | **V7** | the mutation probe, M1–M5 | `run-mutants.sh` exits 0, and all five mutations applied — V7b's own check is `M1 && M2 && M3 && M4 && M5` |
 | **V8** | hostile paths | an apostrophe, a newline, and a destination symlink — the review bot's four findings, each reproduced before it was adopted |
 | **V9** | config migration (#156), driven directly through the CLI (V9a–V9i) | install moves every legacy file present to its new name, byte-identical, and deletes the old one; a second run (or `--check`) reports `none` for all; a file already at the new path is `left`, exit `4`, neither copy touched — including one that appears between the check and the move (V9i, a `cp` shim on PATH creates it at that instant); `--check` reports the same leftover and writes nothing. (The `config-left` ESCALATION LOGIC ITSELF is mutation-proofed as **M4**, checked under **V7**, not here — V9 exercises the feature end-to-end and never invokes `run-mutants.sh`.) |
-| **V10** | the `claude-nsp-guard` shim (#30, spec-194 § H3) | the guard first on `PATH` → exit `0`, `nspGuard.state: "ok"`; a decoy `claude` before the guard → exit `5`, `status: "nsp-guard-shadowed"`, both paths named; no `claude` anywhere → exit `0`, `state: "absent"`; a file that only mentions the sentinel mid-line is not a guard; a coexisting wtft shadow outranks the guard check, which still reports `shadowed` in the document and on an `Also:` line; human mode prints the remedy on stderr |
+| **V10** | the `claude-nsp-guard` shim (#30, spec-194 § H3) | the guard first on `PATH` → exit `0`, `nspGuard.state: "ok"`; a decoy `claude` before the guard → exit `5`, `status: "nsp-guard-shadowed"`, both paths named; no `claude` anywhere → exit `0`, `state: "absent"`; a file that only mentions the sentinel mid-line is not a guard; a coexisting wtft shadow outranks the guard check, which still reports `shadowed` in the document and on an `Also:` line; human mode prints the remedy on stderr; a guard whose first 160 lines pass a pipe buffer is still recognised (V10g) |
 
 `0755` is what install *writes* and what V2 asserts; the **tool's** check is any execute
 bit, so a hand-`chmod`ed `0700` copy still reports `ok`.
@@ -386,9 +386,8 @@ suite** — `tests/run.ts` collects only `tests/*.test.ts`, so an instruction to
 reached nobody and left the figures a reader had to re-derive by hand, which is the state
 committing the script was meant to end. M4 (#156) was added alongside the config-migration
 feature, and the script isolates `HOME`/`XDG_CONFIG_HOME` to a throwaway directory for every
-mutant it runs — M2 and M3 already ran the script in INSTALL mode, which now touches config,
-so without that isolation the probe would read (and move) whoever runs it's real
-`~/.config`.
+mutant it runs: the script reads config in every mode and moves it in install mode, so
+without that isolation the probe would read (and move) whoever runs it's real `~/.config`.
 
 | Mutation | Real | Mutant |
 |---|---|---|

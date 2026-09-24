@@ -37,7 +37,8 @@
 # existing artifacts/shadow fields.
 #
 # The claude-nsp-guard shim (princess-pi-tools, deployed as ~/bin/claude) is
-# recognised by this identity line, whole, within its first 160 lines:
+# recognised as an executable regular file carrying this identity line, whole,
+# within its first 160 lines:
 #   # nsp-guard-identity: 9a1c-claude-nsp-guard-sentinel
 # PATH is walked in order, skipping empty entries; a claude run by absolute
 # path bypasses the guard.

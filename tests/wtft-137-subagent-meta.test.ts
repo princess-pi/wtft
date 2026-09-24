@@ -333,15 +333,16 @@ function corpusFiles(): string[] {
 	// M7c — THE HARNESS's names, against the committed corpus of real files.
 	// Runs on every host, CI included, which M7b cannot.
 	const corpus = corpusFiles();
+	const OPTIONAL_CARRIED = ["description", "toolUseId", "model", "parentAgentId", "isFork"];
 	const CORPUS = ["agent-a12b520b52dfc5d2a", "agent-a170388e12a7fa3bc", "agent-a20ea0d14166e9999", "agent-a9b6ca6692517846a",
 		"agent-ab7a653fd7de39292", "agent-ace7ef5933e128a87", "agent-aed7cbd64d6f241d1"].map(b => `${b}.meta.json`);
-	assert(`M7c the committed corpus is the documented seven files`,
+	assert(`M7c the committed corpus is the seven files CORPUS lists`,
 		JSON.stringify(corpus.map(f => path.basename(f))) === JSON.stringify(CORPUS),
 		JSON.stringify(corpus.map(f => path.basename(f))));
 	// Every key in the corpus is one the reader carries or one it knowingly
 	// ignores, so a rename brought in by a refresh fails here rather than
 	// leaving a field silently unread.
-	const CARRIED = [...REQUIRED, "description", "toolUseId", "model", "parentAgentId", "isFork"];
+	const CARRIED = [...REQUIRED, ...OPTIONAL_CARRIED];
 	const IGNORED = ["requestShape", "requestNonInteractive", "name", "cwd"];
 	for (const file of corpus) {
 		let keys: string[] = [];
@@ -365,7 +366,7 @@ function corpusFiles(): string[] {
 		}
 		const meta = readSubagentMeta(file.replace(/\.meta\.json$/, ".jsonl")) as Record<string, unknown> | null;
 		assert(`M7c ${name} is accepted by the reader, types and all`, meta !== null, file);
-		for (const k of ["description", "toolUseId", "model", "parentAgentId", "isFork"]) {
+		for (const k of OPTIONAL_CARRIED) {
 			if (!(k in obj)) continue;
 			assert(`M7c ${name} \`${k}\` survives the reader`, meta?.[k] === obj[k],
 				`corpus ${JSON.stringify(obj[k])}, reader ${JSON.stringify(meta?.[k])}`);

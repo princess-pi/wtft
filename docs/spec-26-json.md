@@ -635,7 +635,7 @@ are all untagged shows `$0.00` on its edge row, and before this change no floor 
 `spawned.descendantUntagged[]` names every counted descendant with at least one untagged turn, with
 its untagged turn count and cost, and it is the fifth condition under which `tree` is a floor
 (Duppy's decision D2 on #194). The edge row still shows `$0.00`. Nothing moves into or out of any
-total.
+total; the reported untagged cost can overlap `spawned.total`, as the field row above says.
 
 - **Two bumps.** `wtft/spawn-tree@3` becomes `@4`, and the document becomes `wtft/session@8`.
 - **`--tokens`**, and the Pi widget, which renders the same block, print one line under the SPAWNED

@@ -63,22 +63,31 @@ interface SubAgentBearing { claudeSubAgentFolds?: { id: string; file?: string }[
 
 /** Sorted, never shuffled — the same directory yields the same list. */
 export function pickTranscripts(root: string, n: number): string[] {
-	// A missing root is a harness this host does not have; any other find
-	// failure throws, so the gate never exits 0 having compared nothing.
-	if (!fs.existsSync(root)) return [];
+	// A root that does not exist is a harness this host does not have; any
+	// other failure, find's included, throws.
+	try { fs.statSync(root); } catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+		throw err;
+	}
 	return execFileSync("find", [root, "-name", "*.jsonl", "-size", "+40k", "-newermt", "-60 days"], { encoding: "utf8", maxBuffer: 1e9 })
 		.trim().split("\n").filter(Boolean).sort().slice(0, n);
 }
 
-/** Whether a checkout's Claude Code discovery honours `WTFT_CLAUDE_PROJECTS_DIR`.
- *  A build without it reads the live projects root in its measured pass, so
- *  the two sides would classify different corpora. */
+/** Whether a checkout's Claude Code discovery honours `WTFT_CLAUDE_PROJECTS_DIR`
+ *  as the measured pass sets it: in `process.env`, read with no argument (older
+ *  builds take none). A build without it reads the live projects root, so the
+ *  two sides would classify different corpora. A checkout that cannot be
+ *  loaded throws: that is a bad `--before`, not an old build. */
 export async function honoursProjectsSeam(checkout: string): Promise<boolean> {
-	try {
-		const mod = await import(`${checkout}/extensions/lib/harness/claude-code/discovery.ts?seam`);
-		return typeof mod.projectsDir === "function"
-			&& mod.projectsDir({ WTFT_CLAUDE_PROJECTS_DIR: "/seam-probe" }) === "/seam-probe";
-	} catch { return false; }
+	const mod = await import(`${checkout}/extensions/lib/harness/claude-code/discovery.ts?seam`);
+	if (typeof mod.projectsDir !== "function") return false;
+	const saved = process.env.WTFT_CLAUDE_PROJECTS_DIR;
+	process.env.WTFT_CLAUDE_PROJECTS_DIR = "/seam-probe";
+	try { return mod.projectsDir() === "/seam-probe"; }
+	finally {
+		if (saved === undefined) delete process.env.WTFT_CLAUDE_PROJECTS_DIR;
+		else process.env.WTFT_CLAUDE_PROJECTS_DIR = saved;
+	}
 }
 
 /** Every subagent transcript path folded into any of these interactions, at
@@ -89,9 +98,14 @@ export function foldFilesOf(
 	interactions: readonly SubAgentBearing[],
 	resolve: (id: string) => string | null = () => null,
 ): string[] {
+	const lookUp = (id: string): string[] => {
+		const found = resolve(id);
+		if (found === null) console.error(`before-after: no transcript found for subagent id ${id}, so it is not frozen`);
+		return found === null ? [] : [found];
+	};
 	return interactions.flatMap(i => {
-		if (!i.claudeSubAgentFolds) return (i.claudeSubAgentSessionIds ?? []).flatMap(id => resolve(id) ?? []);
-		return i.claudeSubAgentFolds.flatMap(f => typeof f.file === "string" ? [f.file] : (resolve(f.id) ?? []));
+		if (!i.claudeSubAgentFolds) return (i.claudeSubAgentSessionIds ?? []).flatMap(lookUp);
+		return i.claudeSubAgentFolds.flatMap(f => typeof f.file === "string" ? [f.file] : lookUp(f.id));
 	});
 }
 
@@ -206,10 +220,14 @@ async function main(): Promise<void> {
 	const foldFiles = new Set<string>();
 	for (const [label, mod] of [["BEFORE", modBEFORE], ["AFTER", modAFTER]] as const) {
 		for (const f of liveFiles) {
-			try { for (const file of foldFilesOf(mod.parseSessionFile(f), resolveId)) foldFiles.add(file); }
+			let parsed;
+			try { parsed = mod.parseSessionFile(f); }
 			catch (err) {
 				console.error(`before-after: ${label}'s discovery parse failed, so the children only it would find are not frozen: ${f} (${err instanceof Error ? err.message : String(err)})`);
+				continue;
 			}
+			// Canonical, like the roots, so a symlinked projects root does not read as "outside".
+			for (const file of foldFilesOf(parsed, resolveId)) foldFiles.add(real(file));
 		}
 	}
 

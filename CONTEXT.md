@@ -414,7 +414,9 @@ self plus every RESOLVED descendant reached through the spawn ledger, so it is a
 anything went uncounted — `unattributed` non-empty, `depthCapped` non-zero, `ledgerError` set,
 `malformedLedgerLines` non-zero (a malformed line was a record, so its edge is lost and the count is
 its only trace), or `descendantUntagged` non-empty (a counted descendant's untagged turns, left out
-of its total; `--tokens` counts them, with their summed untagged cost, on one line under SPAWNED). Both are explicit fields under `--json`; the `--tokens` table shows the
+of its total; `--tokens` counts them, with their summed untagged cost, on one line under SPAWNED.
+That sum can include a `claude -p` child's share that `spawned.total` also counts, when the
+ledger records the child too). Both are explicit fields under `--json`; the `--tokens` table shows the
 split as `TOTAL` / `SPAWNED` / `TREE`, and shows none of the three only when this session recorded
 no edges AND the ledger read cleanly — an unreadable ledger or a skipped line still prints, because
 "no edges" and "could not tell" are different reports. Never write a bare "the session's cost" where the two can differ.

@@ -32,6 +32,6 @@ expects, or carries a key that no file here has. When that happens:
    `CORPUS` in the test. A key the reader does not use goes in the test's `IGNORED` list.
 3. If the harness renamed a field rather than adding one, fix the reader in
    `extensions/lib/wtft-parser.ts` (`parseSubagentMeta`) and run `bun run build`, since the test
-   reads the built bundle, and update `REQUIRED` / `NEAR_UNIVERSAL` in the test. `M7c` then fails on
+   reads the built bundle, and update `REQUIRED`, `NEAR_UNIVERSAL` and `OPTIONAL_CARRIED` in the test. `M7c` then fails on
    the older files here if the reader stopped accepting the old name; decide whether to keep both
    names, then refresh.

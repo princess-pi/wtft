@@ -75,7 +75,8 @@ them records where they came from, when, and how to refresh them.
   the near-universal pair is present unless `agentType` is `workflow-subagent`, and
   `readSubagentMeta` accepts the file with every optional field it carries (`description`,
   `toolUseId`, `model`, `parentAgentId`, `isFork`) intact. It also checks that the corpus is
-  exactly the seven documented files, and that every key in it is one the reader carries or
+  exactly the seven files the test's `CORPUS` list and the README table name, and that every
+  key in it is one the reader carries or
   one the test lists as knowingly ignored, so a renamed key brought in by a refresh fails
   instead of going unread. The presence checks guard the committed data;
   the reader check is the one that exercises code. M7c sees the harness as it was when
@@ -135,7 +136,8 @@ directory there, so a `claude` in the cwd that a shell would run first is not se
 sentinel) with a decoy `claude` earlier on PATH exits 5, `nspGuard.state` is `shadowed`,
 and both paths are named. The guard first is exit 0, `ok`. No guard is exit 0, `absent`.
 A file that only *mentions* the sentinel mid-line does not count as a guard. With a wtft
-shadow as well, the exit is 2 and the guard is named on an `Also:` line.
+shadow as well, the exit is 2 and the guard is named on an `Also:` line. A guard whose first
+160 lines are larger than a pipe buffer, with the sentinel early, is still recognised (V10g).
 
 ## H4 — the subagent read path is pinned (#15)
 
@@ -186,26 +188,32 @@ reported.
 - **Discovery pass, then freeze.** Both builds parse the live selection once. Every
   `claudeSubAgentFolds[].file` either build names, at any depth, is copied into the
   snapshot at its own relative path. A child only one build finds is still in the
-  snapshot, so the lost check can still fire. Two things stay out, each with a stderr
-  note: children only a build whose discovery parse throws would have found, and a fold
-  file outside the Claude Code projects root. A file that fails to copy fails the run,
-  since both measured passes would otherwise skip it and certify a smaller corpus.
+  snapshot, so the lost check can still fire. Every fold path is made canonical first, like
+  the roots. Three things stay out, each with a stderr note: children only a build whose
+  discovery parse throws would have found; a fold file outside the Claude Code projects
+  root; and a path-less id the resolver cannot find. A file that fails to copy fails the
+  run, since both measured passes would otherwise skip it and certify a smaller corpus, and
+  so does a resolver that throws.
 - Both measured passes run with `WTFT_CLAUDE_PROJECTS_DIR` set to the snapshot's projects
   root, the #129 seam. A fake `HOME` does not work, because bun caches `os.homedir()` at
   process start.
 - Subagent ids come from `claudeSubAgentFolds[].id`, falling back to
   `claudeSubAgentSessionIds` for a BEFORE build old enough to carry only that. An id such
   a build, or one whose folds carry no `file` yet, reports without a path is looked up
-  through AFTER's session resolver and frozen like any other child. A BEFORE build older than the #129 seam would
-  read the live projects root in its measured pass, so the script refuses it with exit 2:
-  it probes the checkout's `projectsDir` with the variable set before measuring anything.
-- A `find` failure other than a missing root throws instead of selecting nothing, so the
-  gate never exits 0 having compared nothing.
+  through AFTER's session resolver and frozen like any other child.
+- A BEFORE build whose discovery ignores `WTFT_CLAUDE_PROJECTS_DIR` would read the live
+  projects root in its measured pass, so the script refuses it with exit 2. The probe sets
+  the variable in `process.env` and calls `projectsDir()` with no argument, the way the
+  measured pass relies on it, so an older build that reads the variable from the
+  environment is accepted. A `--before` that cannot be loaded fails the run instead.
+- A root that does not exist selects nothing, and a harness with nothing selected is
+  reported as skipped; when both are, the script still exits 0. Any other failure to read a
+  root, or of `find`, fails the run.
 - The snapshot directory is removed when the script exits, including on an error; a run
   killed by a signal leaves its `wtft-ab-*` directory behind. `--before` is resolved against the current
   directory, so a relative checkout path works.
 - The selection roots honour `WTFT_CLAUDE_PROJECTS_DIR` and `WTFT_PI_SESSIONS_DIR`, so
-  the script can run against a fixture.
+  the script can run against a fixture, and are made canonical with `realpath`.
 
 **Closer** (`tests/wtft-208-before-after-snapshot.test.ts`): a fixture projects root
 with a parent whose turn spawns a `claude -p` child.
@@ -215,7 +223,11 @@ with a parent whose turn spawns a `claude -p` child.
 - **End to end:** the script run with `--before .` from this checkout exits 0, names no
   subagent as lost, reports a total that includes the frozen child's cost, and leaves no
   snapshot directory behind.
-- **Ids:** the fold id is the reported subagent id.
+- **Ids:** the fold id is the reported subagent id, and an id reported without a path is
+  resolved to its transcript (E11).
+- **Seam probe:** this checkout passes; a build whose `projectsDir` ignores the variable is
+  refused with exit 2; a build that reads it from `process.env` with no argument passes; a
+  checkout that cannot be loaded throws (E8–E10, E9b, E9c).
 
 ## Reconciliation record (2026-09-23)
 
@@ -259,3 +271,4 @@ producer-side gap is duppypro/princess-pi-tools#1021.
 | `pr-review` round 3 and Macroscope | 8 Low, plus 1 Medium thread: a BEFORE build without the projects-root seam measures the live root, not the snapshot; `find` failures selecting nothing and exiting 0; M5 failing on a host with a `wtft` in `/usr/bin`; L4–L6 vacuous without an id index; two stale comments; the auditor count; fallback pricing as an untagged-cost source | `main`, `pickTranscripts`, M5's PATH, the L4 fixture | ✅ E8–E10, L4a | Fixed: the script probes `--before`'s `projectsDir` and refuses a build without the seam (exit 2). Declined: `descendantUntagged` read unguarded in the renderer — `SpawnTree` requires the field, and `tsc --noEmit` passes, so every constructor sets it |
 | Macroscope, ready round | 2 Medium threads: a failed snapshot copy let the gate certify a smaller corpus; an unchecked `mktemp -d` in the mutation probe | `copyUnder`; `run-mutants.sh` | reconciled-against-untested | Fixed: a failed copy now fails the run; every probe `mktemp -d` exits on failure |
 | Macroscope, second ready round | 2 Medium threads: an older BEFORE build's path-less child ids were never frozen, so a subagent AFTER lost went undetected; a root-relative path like `..archive/…` read as outside the root | `foldFilesOf`; `copyUnder` | ✅ E11 for the lookup; the `..`-prefixed name untested | Fixed |
+| final reconcile (the review-round commits) | the seam probe refused every build that reads the variable from `process.env` (a regression the Macroscope fix introduced); a bad `--before` misreported as an old build; an unfound path-less id and a throwing resolver silent or misattributed; resolved paths not canonical; "never exits 0"; closer lists missing E8–E11 and V10g; the overlap missing from CONTEXT, Amendment 7 and the manifest | `honoursProjectsSeam`, `foldFilesOf`, the discovery loop | ✅ E9b, E9c | Fixed with the PR back in Draft (duppypro/princess-pi-tools#1027) |

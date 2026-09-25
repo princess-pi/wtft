@@ -74,8 +74,13 @@ function run(root: string, args: string[], extraEnv: Record<string, string> = {}
 	return spawnSync("node", [DAEMON, ...args], { encoding: "utf8", env: { ...envFor(root), ...extraEnv }, cwd, timeout: 30_000 });
 }
 
-const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const read = (f: string) => { try { return fs.readFileSync(f, "utf8"); } catch { return ""; } };
+/** A child this suite spawned stays a zombie until reaped, and signal 0 still reaches it. */
+const alive = (pid: number) => {
+	try { process.kill(pid, 0); } catch { return false; }
+	const stat = read(`/proc/${pid}/stat`);
+	return stat !== "" && stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3) !== "Z";
+};
 const harnessPidFile = (root: string) =>
 	path.join(TMP, `wtft-harness-claude-${createHash("sha256").update(path.resolve(root)).digest("hex").slice(0, 12)}.pid`);
 const classified = (file: string, id: string) => {
@@ -199,6 +204,29 @@ try {
 		const gaveUp = await until(() => read(h.err).includes(`could not adopt ${tagLike}`), 10_000);
 		check(gaveUp !== Infinity, "the harness reports the session it gave up on");
 		check(!fs.existsSync(lease) && !fs.existsSync(`${lease}.display`), "and removes the lease and .display marker naming it");
+		process.kill(h.pid, "SIGTERM");
+	}
+
+	console.log("\nwtft -F on a session a harness serves rebuilds that one session");
+	{
+		const root = makeRoot("force");
+		const target = session(root, "force-target");
+		const other = session(root, "force-other");
+		const h = start(root, ["--harness", "claude", "--session", target], "force.err");
+		check(await until(() => classified(target, "force-target"), 15_000) !== Infinity, "fixture: the harness serves the target");
+		run(root, ["--harness", "claude", "--session", other]);
+		check(await until(() => classified(other, "force-other"), 15_000) !== Infinity, "fixture: and another session");
+		const tag = getCurrentVersionTagPath(target);
+		const row = read(tag).split("\n").find(l => l.includes('"force-target"')) ?? "";
+		fs.appendFileSync(tag, row.replace('"force-target"', '"force-bogus"') + "\n" + JSON.stringify({ _meta: { offset: fs.statSync(target).size } }) + "\n");
+		check(classified(target, "force-bogus"), "fixture: the target's tag carries a row its transcript does not");
+		const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
+		spawnSync("node", [cli, "--json", "-F", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+		const rebuilt = await until(() => classified(target, "force-target") && !classified(target, "force-bogus"), 10_000);
+		check(rebuilt !== Infinity, "the target's tag is rebuilt from its transcript");
+		check(alive(h.pid), "the harness keeps running");
+		check(read(getDaemonPidPath(other)).trim() === String(h.pid), "and keeps serving the other session");
+		check(read(h.err).includes(`lease for ${target} now held by rebuild`), "a daemon that gives up a lease logs who holds it now");
 		process.kill(h.pid, "SIGTERM");
 	}
 } finally {

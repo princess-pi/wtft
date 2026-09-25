@@ -546,6 +546,43 @@ export function getDaemonPidPath(sessionPath: string): string {
 	return path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
 }
 
+/**
+ * `wtft -F`: rederive one session's tag from its transcript. A session a
+ * harness daemon serves gets a `rebuild` lease, which that harness rebuilds on
+ * the next request for it, so the harness and its other sessions keep running
+ * ("rebuild"). Otherwise the per-session daemon is stopped, and the lease and
+ * every version of the tag deleted ("stopped"). Either way the caller then
+ * asks for the session.
+ */
+export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" {
+	const leasePath = getDaemonPidPath(sessionPath);
+	let pid = 0;
+	try { pid = parseInt(fs.readFileSync(leasePath, "utf8").trim(), 10); } catch { /* no lease */ }
+	let args: string[] = [];
+	if (pid > 0) {
+		try { args = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0"); } catch { /* not running */ }
+	}
+	const daemon = args.some(arg => /^wtft-daemon(\.(mjs|js|ts))?$/.test(path.basename(arg)));
+	if (daemon && args.includes("--harness")) {
+		const replacement = `${leasePath}.force-${process.pid}`;
+		fs.writeFileSync(replacement, "rebuild");
+		fs.renameSync(replacement, leasePath);
+		return "rebuild";
+	}
+	if (pid > 0) {
+		try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ }
+	}
+	try { fs.unlinkSync(leasePath); } catch { /* no lease */ }
+	const tagsDir = path.join(path.dirname(sessionPath), "wtft-tags");
+	const prefix = path.basename(sessionPath) + ".wtft-tag.v";
+	try {
+		for (const f of fs.readdirSync(tagsDir)) {
+			if (f.startsWith(prefix) && f.endsWith(".jsonl")) fs.unlinkSync(path.join(tagsDir, f));
+		}
+	} catch { /* no tags yet */ }
+	return "stopped";
+}
+
 function pathIsUnder(file: string, root: string): boolean {
 	const resolvedFile = path.resolve(file);
 	const resolvedRoot = path.resolve(root);

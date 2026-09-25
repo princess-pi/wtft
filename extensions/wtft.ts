@@ -19,6 +19,7 @@ import {
 	getTagPath,
 	getDaemonPidPath,
 	getModelCacheTtlMs,
+	forceRebuildSession,
 } from "./lib/wtft-shared.js";
 import { readConfig, writeConfig, hasConfig } from "@princess-pi/libs/config";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "./lib/wtft-config-dir.js";
@@ -387,19 +388,12 @@ export default function wtftExtension(pi: ExtensionAPI) {
 					ctx.ui.notify("No session file available for re-parse.", "warning");
 					return;
 				}
-				const tagPath = getTagPath(sessionFile);
-				const pidPath = getDaemonPidPath(sessionFile);
-				try {
-					const pid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
-					if (pid > 0) {
-						try { process.kill(pid, "SIGTERM"); } catch {}
-					}
-					try { fs.unlinkSync(pidPath); } catch {}
-				} catch {}
-				try { fs.unlinkSync(tagPath); } catch {}
+				const how = forceRebuildSession(sessionFile);
 				ensureDaemonRunning(sessionFile, _daemonDir);
 				updateWtftWidget(ctx, pi);
-				ctx.ui.notify("Tag file deleted and log parser daemon respawned — full session re-parse in progress.", "info");
+				ctx.ui.notify(how === "rebuild"
+					? "The harness daemon is rebuilding this session's tag — full session re-parse in progress."
+					: "Tag file deleted and log parser daemon respawned — full session re-parse in progress.", "info");
 				return;
 			}
 

@@ -1396,14 +1396,9 @@ function initClassified() {
 // ---
 
 function serviceSession(): "continue" | "stop" | "drop" {
-  try {
-    if (fs.readFileSync(pidPath, "utf8").trim() !== String(process.pid)) {
-      if (harnessMode) return "drop";
-      running = false;
-      process.exit(0);
-    }
-  } catch (_) {
+  if (leaseHolder(pidPath) !== String(process.pid)) {
     if (harnessMode) return "drop";
+    logLeaseLost(sessionPath, pidPath);
     running = false;
     process.exit(0);
   }
@@ -1740,6 +1735,13 @@ function scheduleFlush(key: string) {
 function wake(file: string, displayed: boolean) {
   const key = path.resolve(file);
   let slot = harnessSlots.get(key);
+  // Asked for again after its lease went elsewhere, such as a `rebuild` from
+  // wtft -F: adopted afresh, which honours that lease.
+  if (slot && !leaseStillOurs(slot)) {
+    displayed = displayed || slot.displayed;
+    dropHarnessSlot(key);
+    slot = undefined;
+  }
   if (!slot) {
     slot = freshSlot(key, displayed);
     if (!withSlot(slot, () => adoptSession())) {
@@ -2152,11 +2154,15 @@ function runHarness(which: string, focus: string) {
 
 function dropHarnessSlot(key: string) {
   const slot = harnessSlots.get(key);
-  if (slot && slot.pendingItems.length > 0) {
+  const ours = slot ? leaseStillOurs(slot) : false;
+  // A lease another daemon holds means the tag is its to write; it resumes from
+  // the tag's offset, so these turns are not lost.
+  if (slot && ours && slot.pendingItems.length > 0) {
     withSlot(slot, () => {
       if (pendingItems.length > 0) flushPending();
     });
   }
+  if (slot && !ours) logLeaseLost(key, slot.pidPath);
   const timer = harnessFlushTimers.get(key);
   if (timer) clearTimeout(timer);
   harnessFlushTimers.delete(key);
@@ -2194,11 +2200,16 @@ function slotNeedsChildScan(slot: Slot, now: number): boolean {
 
 function leaseStillOurs(slot: Slot): boolean {
   if (!slot.pidPath) return true;
-  try {
-    return fs.readFileSync(slot.pidPath, "utf8").trim() === String(process.pid);
-  } catch {
-    return false;
-  }
+  return leaseHolder(slot.pidPath) === String(process.pid);
+}
+
+/** What a lease names, or "" when there is none. */
+function leaseHolder(lease: string): string {
+  try { return fs.readFileSync(lease, "utf8").trim(); } catch { return ""; }
+}
+
+function logLeaseLost(session: string, lease: string) {
+  process.stderr.write(`[wtft-log-parser] lease for ${session} now held by ${leaseHolder(lease) || "nobody"}\n`);
 }
 
 function sweepIdleSlots() {

@@ -71,6 +71,7 @@ import {
 	type UncountedBillables,
 	getDaemonPidPath,
 	getTagPath,
+	forceRebuildSession,
 	awaitDaemonUp,
 	checkDaemonHealth,
 	IDLE_THRESHOLD_MS,
@@ -567,25 +568,10 @@ async function main() {
 	// --force: kill existing daemon, delete tag file, re-parse from scratch.
 	// ---
 	if (opts.forceReparse) {
-		const forceTagPath = getTagPath(finalSessionPath);
-		const forcePidPath = getDaemonPidPath(finalSessionPath);
-		try {
-			const pid = parseInt(fs.readFileSync(forcePidPath, "utf8").trim(), 10);
-			if (pid > 0) {
-				try { process.kill(pid, "SIGTERM"); } catch {}
-			}
-			try { fs.unlinkSync(forcePidPath); } catch {}
-		} catch {}
-		const forceTagsDir = path.dirname(forceTagPath);
-		const forceSessionBase = path.basename(finalSessionPath);
-		try {
-			for (const f of fs.readdirSync(forceTagsDir)) {
-				if (f.startsWith(forceSessionBase + ".wtft-tag.v") && f.endsWith(".jsonl")) {
-					fs.unlinkSync(path.join(forceTagsDir, f));
-				}
-			}
-		} catch {}
-		console.error(`\x1b[33mForce re-parse: killed daemon + deleted tag files for ${path.basename(finalSessionPath)}\x1b[0m`);
+		const how = forceRebuildSession(finalSessionPath);
+		console.error(how === "rebuild"
+			? `\x1b[33mForce re-parse: the harness daemon rebuilds the tag for ${path.basename(finalSessionPath)}\x1b[0m`
+			: `\x1b[33mForce re-parse: killed daemon + deleted tag files for ${path.basename(finalSessionPath)}\x1b[0m`);
 	}
 
 	// ---

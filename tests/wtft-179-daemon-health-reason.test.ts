@@ -124,7 +124,7 @@ export function probe(status: DaemonStatus): boolean {
 			);
 			assert(
 				"…and the diagnostic names the offending comparison",
-				/__reason_code_probe__/.test(output),
+				/__reason_code_probe__.*TS2367/.test(output) && /daemon not fuond/.test(output),
 				`tsc output did not mention the probe:\n${output.slice(0, 800)}`,
 			);
 		}

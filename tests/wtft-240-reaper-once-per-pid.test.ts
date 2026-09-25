@@ -73,7 +73,7 @@ try {
 	try { stat = startedAt ? fs.readFileSync(`/proc/${daemonPid}/stat`, "utf8") : ""; } catch { /* exited: no measure */ }
 	const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
 	const cpuMs = stat && tickMs > 0 ? (Number(fields[11]) + Number(fields[12])) * tickMs : Infinity;
-	check(cpuMs < 1000, `a per-session daemon starts on under 1 s of CPU beside ${LEASES} leases of one live pid (${cpuMs} ms of CPU, ${startedAt - started} ms wall)`);
+	check(cpuMs < 1000, `a per-session daemon starts on under 1 s of CPU beside ${LEASES} leases of one live pid (${cpuMs} ms of CPU, ${startedAt ? `${startedAt - started} ms wall` : "never reported starting"})`);
 
 	const reapLog = path.join(home, ".local", "state", "wtft", "reap.log");
 	const lines = fs.existsSync(reapLog) ? fs.readFileSync(reapLog, "utf8").split("\n").filter(l => l.includes(`PID ${holder.pid}`)) : [];

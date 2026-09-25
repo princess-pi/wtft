@@ -124,18 +124,26 @@ try {
 		const root = makeRoot("retry");
 		const served = session(root, "retry-served");
 		const target = session(root, "retry-target");
+		const hidden = session(root, "retry-hidden");
 		const other = stubDaemon(root, ["--harness", "claude"]);
 		await sleep(300);
-		fs.writeFileSync(getDaemonPidPath(target), String(other));
+		for (const file of [target, hidden]) fs.writeFileSync(getDaemonPidPath(file), String(other));
+		const handOff = `${harnessPidFile(root)}.served`;
+		// A predecessor's hand-off is the one way to ask for a session not displayed.
+		fs.writeFileSync(handOff, JSON.stringify({ kind: "served", displayed: false, path: hidden }) + "\n");
 		const h = start(root, ["--harness", "claude", "--session", served], "retry.err");
 		check(await until(() => classified(served, "retry-served"), 15_000) !== Infinity, "fixture: a harness serves a session");
 		run(root, ["--harness", "claude", "--session", target]);
-		const line = JSON.stringify({ kind: "served", displayed: true, path: target });
 		// Retrying means the lease still names the other holder and the harness
 		// has not given up; the line exists only in that window.
-		const retrying = () => read(getDaemonPidPath(target)).trim() === String(other) && !read(h.err).includes(`could not adopt ${target}`);
-		check(await until(() => retrying() && read(`${harnessPidFile(root)}.served`).includes(line), 10_000) !== Infinity,
-			"while its adoption retries, the hand-off lists the session as served and displayed");
+		const retrying = (file: string) => read(getDaemonPidPath(file)).trim() === String(other) && !read(h.err).includes(`could not adopt ${file}`);
+		const listed = (file: string, displayed: boolean) => read(handOff).includes(JSON.stringify({ kind: "served", displayed, path: file }));
+		check(await until(() => retrying(target) && listed(target, true), 10_000) !== Infinity,
+			"while its adoption retries, the hand-off lists a displayed session as served and displayed");
+		check(await until(() => retrying(hidden) && listed(hidden, false), 10_000) !== Infinity,
+			"while its adoption retries, the hand-off lists a session not displayed as served and not displayed");
+		check(await until(() => [target, hidden].every(f => read(h.err).includes(`could not adopt ${f}: its lease names ${other}`)), 15_000) !== Infinity,
+			"fixture: both adoptions retried until they gave up on the other holder");
 		process.kill(h.pid, "SIGTERM");
 		await until(() => !alive(h.pid), 5_000);
 	}
@@ -148,7 +156,7 @@ try {
 		const handOff = `${harnessPidFile(root)}.served`;
 		check(await until(() => read(handOff).includes(JSON.stringify(file)), 15_000) !== Infinity, "fixture: the hand-off names the served session");
 		run(root, ["--stop", file]);
-		check(await until(() => !fs.existsSync(handOff), 3_000) !== Infinity, "once its only session is stopped, the harness removes the hand-off");
+		check(await until(() => !fs.existsSync(handOff), 3_000) !== Infinity && alive(h.pid), "once its only session is stopped, the live harness removes the hand-off");
 		process.kill(h.pid, "SIGTERM");
 		await until(() => !alive(h.pid), 5_000);
 	}
@@ -211,12 +219,16 @@ try {
 		const outside = makeRoot("kthread-out");
 		const file = path.join(outside, "kt-main.jsonl");
 		fs.writeFileSync(file, turnLine("kt-main", Date.now()));
-		check(read("/proc/2/cmdline") === "" && read("/proc/2/stat") !== "", "fixture: pid 2 is a live process with no command line");
-		fs.writeFileSync(getDaemonPidPath(file), "2");
-		const forced = cliRun(root, ["-F", "--json", "-s", file]);
-		check((forced.status === 0 || forced.status === 9) && fs.existsSync(getCurrentVersionTagPath(file)) && !forced.stderr.includes("could not be signalled"),
-			`-F treats it as no daemon, rebuilds and reports (exit ${forced.status})`);
-		stopDaemonsOf(root);
+		const kthread = read("/proc/2/cmdline") === "" && read("/proc/2/stat") !== "";
+		check(kthread, "fixture: pid 2 is a live process with no command line");
+		// In a PID namespace pid 2 may be another suite's daemon; -F would stop it.
+		if (kthread) {
+			fs.writeFileSync(getDaemonPidPath(file), "2");
+			const forced = cliRun(root, ["-F", "--json", "-s", file]);
+			check((forced.status === 0 || forced.status === 9) && fs.existsSync(getCurrentVersionTagPath(file)) && !forced.stderr.includes("could not be signalled"),
+				`-F treats it as no daemon, rebuilds and reports (exit ${forced.status})`);
+			stopDaemonsOf(root);
+		}
 	}
 
 	console.log("\nAn idle session rewritten at the same length is adopted by the next harness");

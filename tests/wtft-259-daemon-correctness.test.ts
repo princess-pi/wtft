@@ -111,6 +111,25 @@ try {
 		check(served < Infinity && read(harnessPidFile(root)).trim() === String(h.pid),
 			"--harness claude-code serves the claude root under its pid file");
 	}
+
+	console.log("\nSwept means every subagent turn is written");
+	{
+		const root = makeRoot("swept");
+		const file = session(root, "swept-main");
+		const sub = path.join(file.slice(0, -".jsonl".length), "subagents");
+		fs.mkdirSync(sub, { recursive: true });
+		fs.writeFileSync(path.join(sub, "agent-a.jsonl"), turnLine("sw-sub-1", Date.now()) + turnLine("sw-sub-2", Date.now()));
+		const tag = getCurrentVersionTagPath(file);
+		const d = start(root, ["--session", file], "swept.err");
+		check(await until(() => classified(file, "sw-sub-2") && read(tag).includes('"swept"'), 15_000) !== Infinity,
+			"fixture: the daemon wrote the subagent's last turn and stamped the tag swept");
+		const lines = read(tag).split("\n");
+		const firstSwept = lines.findIndex(l => l.includes('"swept"'));
+		const lastTurn = lines.findIndex(l => l.includes('"sw-sub-2"'));
+		check(lastTurn >= 0 && lastTurn < firstSwept,
+			`the tag is stamped swept only after the held-back turn is written (turn line ${lastTurn}, swept line ${firstSwept})`);
+		process.kill(d.pid, "SIGTERM");
+	}
 } finally {
 	for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 }

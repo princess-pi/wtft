@@ -936,8 +936,10 @@ function scanForSubAgents() {
     return;
   }
 
-  // Stamp _meta.swept when the poll was clean and the tag grew (or an unswept was retracted).
-  if (!pollHadFailure && (tagGrewSinceMarker || sweptRetracted)) {
+  // Swept means every subagent turn is written, so a held-back turn defers it
+  // to the scan that releases that turn.
+  const turnHeldBack = [...discoveredSubagentFiles.values()].some(state => state.pendingTurn !== null);
+  if (!pollHadFailure && !turnHeldBack && (tagGrewSinceMarker || sweptRetracted)) {
     appendTagFile(tagPath, JSON.stringify({ _meta: { swept: Date.now() } }) + "\n");
     tagGrewSinceMarker = false;
     sweptRetracted = false;

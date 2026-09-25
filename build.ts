@@ -250,9 +250,14 @@ generateHarnessRegistry();
 function writeAtomically(file: string, text: string, mode: number) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, text, { mode });
-  fs.chmodSync(tmp, mode);
-  fs.renameSync(tmp, file);
+  try {
+    fs.writeFileSync(tmp, text, { mode });
+    fs.chmodSync(tmp, mode);
+    fs.renameSync(tmp, file);
+  } catch (err) {
+    fs.rmSync(tmp, { force: true });
+    throw err;
+  }
 }
 
 let errors = 0;

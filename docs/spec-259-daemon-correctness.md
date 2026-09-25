@@ -196,9 +196,11 @@ fix failed before it. These have no check of their own, and why:
   one sweep.
 - **The sweep not re-waking a session whose adoption retry is pending** is reachable, without a
   check yet (#267).
-- **The sweep reading the subagents of a session whose tree cannot be watched**: a directory
-  that cannot be watched here cannot be listed either, so its subagents are not found at all.
-- **The 1 h limit on a never-written session** takes an hour and has no knob.
+- **The sweep reading the subagents of a session whose tree cannot be watched** is reachable,
+  without a check yet (#267): a session directory that is searchable but not readable cannot be
+  watched, while the `subagents` directory beneath it can still be listed.
+- **The 1 h limit on a never-written session**, and the `session never written` stop line it
+  writes, take an hour and have no knob.
 - **A sweep-driven scan keeping a failed session read**: that scan reads the session's first line
   for Pi discovery, so a transcript that cannot be opened fails the scan by itself; only a read
   that fails past the first line reaches this rule, and a fixture cannot make one.

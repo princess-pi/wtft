@@ -170,7 +170,7 @@ try {
 		check(await until(() => classified(parent, "q-3") && classified(parent, "sub-a"), 10_000) !== Infinity, "a session asked for later is served, subagent included");
 		// The requester writes the harness's pid into the lease itself, so the
 		// lease alone cannot tell; the harness's own flush of the session can.
-		const flushedByHarness = read(h.err).split("\n").some(l => l.includes("session flush") && l.endsWith(path.basename(parent)));
+		const flushedByHarness = await until(() => read(h.err).split("\n").some(l => l.includes("session flush") && l.endsWith(path.basename(parent))), 5_000) !== Infinity;
 		check(flushedByHarness && read(getDaemonPidPath(parent)).trim() === String(h.pid), "and the running harness serves it and holds its lease");
 		fs.appendFileSync(path.join(subDir, "agent-a.jsonl"), turnLine("sub-b", Date.now()));
 		check(await until(() => classified(parent, "sub-b"), 10_000) !== Infinity, "a later write to its subagent transcript is read");

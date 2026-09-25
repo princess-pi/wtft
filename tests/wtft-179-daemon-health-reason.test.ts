@@ -113,7 +113,9 @@ export function probe(status: DaemonStatus): boolean {
 			encoding: "utf8",
 			timeout: 180_000,
 		});
-		const status = r.status ?? -1;
+		// A tsc that never ran is not a rejection.
+		assert("fixture: tsc ran", !r.error && r.status !== null, `tsc did not run: ${r.error?.message ?? r.signal}`);
+		const status = r.status ?? 0;
 		const output = `${r.stdout || ""}${r.stderr || ""}`;
 		assert(
 			"typecheck rejects a health code outside the union",

@@ -155,13 +155,17 @@ try {
 	);
 
 	// Every live daemon whose harness roots are this fixture's, not only the
-	// two this suite started, so a third process would be counted.
-	const daemonsHere = fs.readdirSync("/proc").filter(p => /^\d+$/.test(p)).filter(p => {
+	// two this suite started, so a third process would be counted. The
+	// requesters above share that environment and exit once they have posted,
+	// so the count waits for them, to a 15 s ceiling.
+	const daemonsFor = () => fs.readdirSync("/proc").filter(p => /^\d+$/.test(p)).filter(p => {
 		let cmd = "", env = "";
 		try { cmd = fs.readFileSync(`/proc/${p}/cmdline`, "utf8"); env = fs.readFileSync(`/proc/${p}/environ`, "utf8"); } catch { return false; }
 		return cmd.split("\0").some(a => path.basename(a) === "wtft-daemon.mjs")
 			&& env.split("\0").includes(`WTFT_CLAUDE_PROJECTS_DIR=${claudeRoot}`);
 	}).map(Number).filter(alive);
+	for (const until = Date.now() + 15_000; daemonsFor().length > 2 && Date.now() < until;) await sleep(100);
+	const daemonsHere = daemonsFor();
 	assert(`process count for 200 files is 2 (saw ${daemonsHere.length}: ${daemonsHere.join(", ")})`,
 		daemonsHere.length === 2 && daemonsHere.includes(claudePid) && daemonsHere.includes(piPid));
 

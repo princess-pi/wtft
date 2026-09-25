@@ -131,8 +131,11 @@ try {
 		check(await until(() => classified(served, "retry-served"), 15_000) !== Infinity, "fixture: a harness serves a session");
 		run(root, ["--harness", "claude", "--session", target]);
 		const line = JSON.stringify({ kind: "served", displayed: true, path: target });
-		check(await until(() => read(`${harnessPidFile(root)}.served`).includes(line), 3_000) !== Infinity,
-			"the hand-off lists the retrying session as served and displayed");
+		// Retrying means the lease still names the other holder and the harness
+		// has not given up; the line exists only in that window.
+		const retrying = () => read(getDaemonPidPath(target)).trim() === String(other) && !read(h.err).includes(`could not adopt ${target}`);
+		check(await until(() => retrying() && read(`${harnessPidFile(root)}.served`).includes(line), 10_000) !== Infinity,
+			"while its adoption retries, the hand-off lists the session as served and displayed");
 		process.kill(h.pid, "SIGTERM");
 		await until(() => !alive(h.pid), 5_000);
 	}
@@ -211,8 +214,8 @@ try {
 		check(read("/proc/2/cmdline") === "" && read("/proc/2/stat") !== "", "fixture: pid 2 is a live process with no command line");
 		fs.writeFileSync(getDaemonPidPath(file), "2");
 		const forced = cliRun(root, ["-F", "--json", "-s", file]);
-		check(forced.status !== 1 && !forced.stderr.includes("could not be signalled"),
-			`-F treats it as no daemon and rebuilds (exit ${forced.status})`);
+		check((forced.status === 0 || forced.status === 9) && fs.existsSync(getCurrentVersionTagPath(file)) && !forced.stderr.includes("could not be signalled"),
+			`-F treats it as no daemon, rebuilds and reports (exit ${forced.status})`);
 		stopDaemonsOf(root);
 	}
 

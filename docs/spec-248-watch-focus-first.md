@@ -3,6 +3,16 @@
 **Issue:** [#248](https://github.com/princess-pi/wtft/issues/248) ·
 **Test:** `tests/wtft-248-focus-first.test.ts`
 
+**Status:** Superseded in part by #239.
+
+> **Superseded in part by [spec-239](spec-239-harness-lifecycle.md).** The harness no longer
+> walks or catches up the root: it serves only the sessions it is asked for. The startup walk,
+> the catch-up slices and the walk-order Closer below are kept as history. Still live: focus
+> requests, `r` never stopping a harness, a newer build replacing an older harness, and the
+> `--watch` waiting line. How a focus request is served changed too: the harness watches the
+> request directory and serves a request when it is posted, and only a harness that still holds
+> the root removes the directory as it stops. Spec-239 carries the current rule.
+
 ## What went wrong
 
 After the tagger went to 2.11.0 and `wtft-daemon --restart` ran, `wtft --watch` on a live session
@@ -76,5 +86,5 @@ rebuild finishes in about 2 s, so the time alone could not tell focus-first from
 Order is what the test asserts. The time follows from it: the rebuild in progress, then this
 session's, plus a process start.
 
-Not changed here: at startup the harness still adopts every session under its root (#239), and
-two harness processes can still race after `--restart` (#249).
+Not changed here, and since addressed by spec-239: at startup the harness adopted every session
+under its root (#239), and two harness processes could race after `--restart` (#249).

@@ -14,12 +14,16 @@ The log parser daemon (`bin/wtft-daemon.ts` / `wtft-daemon.mjs`, launched by
 pre-computed entries to a tag file so the CLI and Pi widget don't re-parse the whole
 log on every read. A session under the Claude projects root (`WTFT_CLAUDE_PROJECTS_DIR`,
 default `~/.claude/projects`) or the Pi sessions root (`WTFT_PI_SESSIONS_DIR`, default
-`~/.pi/agent/sessions`) is served by that root's one process. A session outside those
-roots keeps its own process, polling every 667ms. The tag file and the pid lease stay
-per session. After 24h with no new lines, that session is dropped: the per-session
-process exits, and the harness process stays up and adopts the session again on a later
-write. Spawned on Pi `session_start` and on a CLI report. A per-session process is
-revived after an idle exit and replaced on a version bump. On Linux, a live harness
+`~/.pi/agent/sessions`) is served by that root's one process, which serves only the
+sessions a reader asked for (and what they spawned), and never adopts or tags the rest of
+the root. Finding a Pi session's subagent sessions reads the first line of each sibling file. A
+session outside those roots keeps its own process, polling every 667ms. The tag file and
+the pid lease stay per session. After 24h with no new lines, the per-session process
+exits, and the harness process drops that session and its lease; the next write to its own transcript,
+or the next request, adopts it again. Spawned on Pi `session_start` and on
+a CLI report. A per-session process is revived after an idle exit and replaced on a
+version bump, and a harness process from an older tagger is replaced by the next start
+from a newer one. On Linux, a live harness
 process is left running; a later start points the session's lease at it, because
 that check reads `/proc/<pid>/cmdline`. Health is exposed via `checkDaemonHealth()` and
 rendered via `renderDaemonStatus()`.

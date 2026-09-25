@@ -50,9 +50,8 @@ const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const POLL_MS = 667; // 90bpm throttle
 /** How long one slice of a harness's subagent scan runs before it yields to the event loop. */
 const HARNESS_SCAN_SLICE_MS = envMs("WTFT_HARNESS_SCAN_SLICE_MS", 25);
-/** Pause between slices; 0 in use. A test sets it, with a slice of 0 (one
- *  transcript per slice), to make a scan outlast a report without writing
- *  hundreds of MB of fixture. */
+/** Pause between slices; 0 in use. A test sets it to make a scan outlast a
+ *  report without writing hundreds of MB of fixture. */
 const HARNESS_SCAN_YIELD_MS = envMs("WTFT_HARNESS_SCAN_YIELD_MS", 0);
 function envMs(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -1655,6 +1654,7 @@ function adoptSession(): boolean {
   tagPath = getCurrentVersionTagPath(sessionPath);
   try { fs.mkdirSync(path.dirname(tagPath), { recursive: true }); } catch { /* exists */ }
   pidPath = getDaemonPidPath(sessionPath);
+  if (reparseRunning(pidPath)) return false;
   try {
     if (fs.readFileSync(pidPath, "utf8").trim() === "rebuild") rebuildTagOnStartup = true;
   } catch { /* no lease yet */ }
@@ -1711,6 +1711,7 @@ function wake(file: string, displayed: boolean) {
       return;
     }
     harnessSlots.set(key, slot);
+    idleDropped.delete(key);
     watchSession(key);
   } else if (displayed) {
     slot.displayed = true;
@@ -1788,10 +1789,15 @@ function watchSession(file: string) {
 
 /** Closes what only `file` needed: its session directory tree, and its
  *  project directory once no served session is left in it. */
+/** Sessions dropped for idling: their project directory stays watched, and
+ *  their next write adopts them again. */
+const idleDropped = new Map<string, boolean>();
+
 function unwatchSession(file: string) {
   const own = sessionDirOf(file);
   const project = path.dirname(file);
-  const projectInUse = [...harnessSlots.keys()].some(k => k !== file && path.dirname(k) === project);
+  const projectInUse = [...harnessSlots.keys()].some(k => k !== file && path.dirname(k) === project)
+    || [...idleDropped.keys()].some(k => path.dirname(k) === project);
   for (const [dir, watcher] of harnessWatchers) {
     const mine = dir === own || dir.startsWith(own + path.sep);
     if (!mine && !(dir === project && !projectInUse)) continue;
@@ -1818,7 +1824,7 @@ function retryAdoptionLater(key: string, displayed: boolean) {
   try { holder = Number(fs.readFileSync(getDaemonPidPath(key), "utf8").trim()); } catch { /* released */ }
   // A reparse lets go when it finishes; any other failure gets a few tries.
   const tries = (adoptionRetries.get(key) ?? 0) + 1;
-  if (!procIsReparse(holder) && tries > 5) {
+  if (!procIsReparse(holder) && !reparseRunning(getDaemonPidPath(key)) && tries > 5) {
     adoptionRetries.delete(key);
     return;
   }
@@ -1832,6 +1838,14 @@ function retryAdoptionLater(key: string, displayed: boolean) {
 
 function sleepMs(ms: number) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** The pid of a --reparse running on the session whose lease is `lease`, or 0.
+ *  Its marker outlives a focus request that points the lease elsewhere. */
+function reparseRunning(lease: string): number {
+  let pid = 0;
+  try { pid = Number(fs.readFileSync(`${lease}.reparse`, "utf8").trim()); } catch { return 0; }
+  return procIsReparse(pid) ? pid : 0;
 }
 
 function procIsReparse(pid: number): boolean {
@@ -1881,6 +1895,11 @@ function onWatch(dir: string, filename: string | null) {
     const slot = harnessSlots.get(full);
     if (slot) {
       wake(full, slot.displayed);
+      return;
+    }
+    const displayed = idleDropped.get(full);
+    if (displayed !== undefined) {
+      wake(full, displayed);
       return;
     }
     // A Pi child session is a sibling file naming its parent inside it, so a
@@ -2156,6 +2175,7 @@ function sweepIdleSlots() {
     if (current.pendingItems.length > 0) continue;
     if (now - current.startupTime < STARTUP_GRACE_MS) continue;
     if (now - current.lastActivityMs < IDLE_EXIT_MS) continue;
+    idleDropped.set(key, current.displayed);
     dropHarnessSlot(key);
   }
 }
@@ -2266,14 +2286,20 @@ function waitUntilExited(pid: number) {
  *  appending beside it. */
 function reparseOne(file: string): boolean {
   const lease = getDaemonPidPath(file);
-  if (sessionDaemonLive(file) || claimPidFile(lease) !== "claimed") {
-    process.stderr.write(`wtft-daemon: --reparse refused while a daemon holds ${file}\n`);
-    return false;
-  }
+  const marker = `${lease}.reparse`;
+  fs.writeFileSync(marker, String(process.pid));
   try {
-    return reparseHeld(file);
+    if (sessionDaemonLive(file) || claimPidFile(lease) !== "claimed") {
+      process.stderr.write(`wtft-daemon: --reparse refused while a daemon holds ${file}\n`);
+      return false;
+    }
+    try {
+      return reparseHeld(file);
+    } finally {
+      try { if (fs.readFileSync(lease, "utf8").trim() === String(process.pid)) fs.unlinkSync(lease); } catch { /* already gone */ }
+    }
   } finally {
-    try { if (fs.readFileSync(lease, "utf8").trim() === String(process.pid)) fs.unlinkSync(lease); } catch { /* already gone */ }
+    try { if (fs.readFileSync(marker, "utf8").trim() === String(process.pid)) fs.unlinkSync(marker); } catch { /* already gone */ }
   }
 }
 
@@ -2698,7 +2724,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   for (;;) {
     let leaseHolder = 0;
     try { leaseHolder = Number(fs.readFileSync(pidPath, "utf8").trim()); } catch { /* no lease */ }
-    if (!procIsReparse(leaseHolder)) break;
+    if (!procIsReparse(leaseHolder) && !reparseRunning(pidPath)) break;
     sleepMs(200);
   }
 

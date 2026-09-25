@@ -59,7 +59,8 @@
 - **A session is dropped after `WTFT_DAEMON_IDLE_MS` (24 h) with no new lines** in it or its
   subagent transcripts, once `WTFT_DAEMON_STARTUP_GRACE_MS` has passed since it was adopted, as before, and
   dropping a slot now removes its lease, unless another slot shares that lease or another
-  process has replaced it since it was read.
+  process has replaced it since it was read. A session dropped for idling keeps its project
+  directory watched, and its next write adopts it again with no new request.
 - **A focus request goes only to a harness that still holds the root.** After posting, the
   requester checks the harness pid file still names that harness. The harness watches its
   request directory, so a request is served when it is posted, not at the next 250 ms sweep (a
@@ -75,7 +76,9 @@
   a reparse to take a lease: asked for a session a reparse holds, it tries again every 667 ms
   until the reparse lets go. Any other failed adoption is retried up to five times. A reparse
   whose lease was taken while it parsed gives up before it rewrites the tag. `--reparse` of a session a daemon is serving is refused, exit 1.
-  A reparse stamps the tag swept only after a clean subagent scan; one that could not read a
+  A reparse marks the session (`<lease>.reparse`) for as long as it runs, and a harness does not
+  adopt a marked session, even when a focus request has pointed its lease at the harness. A
+  reparse stamps the tag swept only after a clean subagent scan; one that could not read a
   subagent transcript exits 1. A per-session daemon started for a session a reparse holds waits
   for it to let go, and a focus request never overwrites a `rebuild` lease, so a session handed
   to a live harness after a failed tag write is rebuilt, not resumed.
@@ -93,8 +96,8 @@
   start-up `--session`.** `--stop` drops a session from a harness only through that session's
   own lease. The harness drops a gone session itself.
 - **The #205 and #239 suites run their long-lived daemons under node** (the #239 suite runs
-  every daemon command under node; the #205 suite's one-shot `--stop`, `--reparse` and
-  `--restart` still run under the test runner's bun), and the #205 suite waits for the event it
+  every daemon command under node; the #205 suite's one-shot `--stop`, `--reparse`,
+  `--reparse-range` and `--restart` still run under the test runner's bun), and the #205 suite waits for the event it
   measures, with wall-time limits of 30 s, instead of a fixed sleep.
 
 ## Closer
@@ -119,6 +122,9 @@
   rebuilt: a row its transcript does not hold is gone.
 - A per-session daemon whose lease a `--reparse` holds stays up without taking it, then claims it
   and classifies the session once the reparse lets go.
+- A harness asked for a session whose `--reparse` marker names a running reparse leaves it
+  untagged, then adopts it once the reparse is gone.
+- A session dropped for idling is read again on its next write, with no new request.
 - Removing the harness pid file stops the harness.
 - With 40,000 leases naming the running harness, `--restart` followed by a `wtft`-style spawn
   leaves exactly one harness after 5 s: the one `--restart` started, holding the pid file.

@@ -64,11 +64,11 @@ const envFor = (root: string) => ({
 
 const pids: number[] = [];
 /** `snapDir`: the daemon writes a heap snapshot there on SIGUSR2. */
-function start(root: string, args: string[], errName: string, snapDir?: string): { pid: number; err: string } {
+function start(root: string, args: string[], errName: string, snapDir?: string, extraEnv: Record<string, string> = {}): { pid: number; err: string } {
 	const err = path.join(root, errName);
 	const fd = fs.openSync(err, "a");
 	const flags = snapDir ? ["--heapsnapshot-signal=SIGUSR2"] : [];
-	const child = spawn("node", [...flags, DAEMON, ...args], { detached: true, stdio: ["ignore", "ignore", fd], env: envFor(root), cwd: snapDir });
+	const child = spawn("node", [...flags, DAEMON, ...args], { detached: true, stdio: ["ignore", "ignore", fd], env: { ...envFor(root), ...extraEnv }, cwd: snapDir });
 	child.unref();
 	fs.closeSync(fd);
 	if (child.pid) pids.push(child.pid);
@@ -314,6 +314,49 @@ try {
 		try { fs.unlinkSync(lease); } catch { /* gone */ }
 		check(await until(() => classified(outside, "pw-0"), 10_000) !== Infinity, "once the reparse lets go, it claims the lease and classifies the session");
 		try { process.kill(per.pid, "SIGTERM"); } catch { /* gone */ }
+	}
+
+	console.log("\nA harness does not adopt a session while a --reparse of it is running");
+	{
+		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-rpmark-")));
+		const dir = path.join(root, "proj");
+		fs.mkdirSync(dir, { recursive: true });
+		const target = path.join(dir, "77777777-8888-4999-8aaa-bbbbbbbbbbbb.jsonl");
+		const other = path.join(dir, "88888888-9999-4aaa-8bbb-cccccccccccc.jsonl");
+		fs.writeFileSync(target, turnLine("rm-0", Date.now() - 60_000));
+		fs.writeFileSync(other, turnLine("rmo-0", Date.now() - 60_000));
+		const h = start(root, ["--harness", "claude", "--session", other], "rm.err");
+		check(await until(() => classified(other, "rmo-0"), 15_000) !== Infinity, "fixture: a harness is serving another session");
+		// A stand-in reparse that has marked the session but whose lease a focus
+		// request has already pointed at the harness.
+		const fake = spawn("node", ["-e", "setTimeout(() => {}, 60000)", path.join(root, "wtft-daemon.mjs"), "--reparse", target], { stdio: "ignore" });
+		const lease = getDaemonPidPath(target);
+		fs.writeFileSync(`${lease}.reparse`, String(fake.pid));
+		await sleep(300);
+		start(root, ["--harness", "claude", "--session", target], "rm-ask.err");
+		await sleep(2_000);
+		check(!fs.existsSync(getCurrentVersionTagPath(target)), "the harness leaves the session alone while the reparse runs");
+		fake.kill("SIGTERM");
+		try { fs.unlinkSync(`${lease}.reparse`); } catch { /* gone */ }
+		check(await until(() => classified(target, "rm-0"), 10_000) !== Infinity, "and adopts it once the reparse has finished");
+		try { process.kill(h.pid, "SIGTERM"); } catch { /* gone */ }
+		await until(() => !alive(h.pid), 5_000);
+	}
+
+	console.log("\nA session dropped for idling is adopted again on its next write");
+	{
+		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-idle-")));
+		const dir = path.join(root, "proj");
+		fs.mkdirSync(dir, { recursive: true });
+		const session = path.join(dir, "99999999-aaaa-4bbb-8ccc-dddddddddddd.jsonl");
+		fs.writeFileSync(session, turnLine("id-0", Date.now() - 60_000));
+		const h = start(root, ["--harness", "claude", "--session", session], "idle.err", undefined, { WTFT_DAEMON_IDLE_MS: "1500", WTFT_DAEMON_STARTUP_GRACE_MS: "0" });
+		check(await until(() => classified(session, "id-0"), 15_000) !== Infinity, "fixture: the session is classified");
+		check(await until(() => read(h.err).includes("session drop"), 15_000) !== Infinity, "fixture: the harness dropped it for idling");
+		fs.appendFileSync(session, turnLine("id-1", Date.now()));
+		check(await until(() => classified(session, "id-1"), 10_000) !== Infinity, "a later write to it is read with no new request");
+		try { process.kill(h.pid, "SIGTERM"); } catch { /* gone */ }
+		await until(() => !alive(h.pid), 5_000);
 	}
 
 	console.log("\nA harness whose pid file no longer names it stops");

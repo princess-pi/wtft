@@ -97,9 +97,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 - **A harness serves every request for its root, whichever harness pid it names.** A request
   addressed to a harness that was displaced after it was posted is served by the harness that
   holds the root now.
-- **A stopping harness passes on unread requests.** Requests still in its request directory go
-  into its hand-off as served sessions. The directory is not removed, so a request posted while
-  it stops is served by the next harness.
+- **A stopping harness leaves unread requests for the next one.** Its request directory is not
+  removed, and the next harness serves any request in it.
 - **The request-directory watch is re-armed** by the next sweep after it fails (A10).
 
 ### Hand-off (I24, I27)
@@ -147,10 +146,10 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 `tests/wtft-259-daemon-correctness.test.ts` checks the behaviours above; each check that pins a
 fix failed before it. These have no check of their own, and why:
 
-- **Held by reading the code, too small to be worth a fixture:** a retrying session handed on with
-  its displayed flag; the hand-off removed when nothing is served or idle; a per-session lease
-  holder still signalled on adoption; the stop line for `session removed` and `session never
-  written`; the resume leaving a folded `claude -p` transcript to the one folding it.
+- **Reachable, but without a test yet** (#262 adds them): a retrying session handed on with its
+  displayed flag; the hand-off removed when nothing is served or idle; a per-session lease holder
+  still signalled on adoption; the stop line for `session removed` and `session never written`;
+  the resume leaving a folded `claude -p` transcript to the one folding it.
 - **The 1 h limit on a never-written session** takes an hour and has no knob.
 
 - **`--cleanup`** stops fixture daemons under `/tmp`, including those of suites running beside
@@ -159,5 +158,3 @@ fix failed before it. These have no check of their own, and why:
   does the 10 s retry of a failed directory watch.
 - **`--stop`'s `Not stopped` path** needs a lease to change inside one syscall gap.
 - **The lease race** needs two processes inside one syscall gap.
-- **A stopping harness passing on unread requests** depends on whether its sweep or its signal
-  handler runs first; the suite checks the served-by-the-new-harness outcome only.

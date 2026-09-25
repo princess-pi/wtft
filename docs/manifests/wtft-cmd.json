@@ -209,7 +209,7 @@
     },
     {
       "flags": "-F, --force",
-      "desc": "Force a full re-parse of the session's tag from its transcript. On Linux, a session a harness log parser daemon serves is rebuilt by that daemon, which keeps serving its other sessions, and the report waits for it to begin. Otherwise a running log parser daemon for the session is stopped and every version of its tag file deleted."
+      "desc": "Force a full re-parse of the session's tag from its transcript. On Linux, a session a harness log parser daemon serves is rebuilt by that daemon, which keeps serving its other sessions, and the report waits for it to begin. If the harness has not taken the session up within 10 s, the report is of the tag as it was, and says so. Otherwise a running log parser daemon for the session is stopped and every version of its tag file deleted; one still running 2 s later keeps its tag, and nothing is deleted."
     },
     {
       "flags": "--harness <pi|claude-code|auto>",

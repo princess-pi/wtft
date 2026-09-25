@@ -26,7 +26,8 @@ the next one, and so does one whose root is removed. Spawned on Pi `session_star
 a CLI report. A per-session process is revived after an idle exit and replaced on a
 version bump, and a harness process from an older tagger is replaced by the next start
 from a newer one. On Linux, a live harness
-process is left running; a later start points the session's lease at it, because
+process is left running; a later start asks it for the session and points the session's lease
+at it unless another live daemon holds that lease, because
 that check reads `/proc/<pid>/cmdline`. Health is exposed via `checkDaemonHealth()` and
 rendered via `renderDaemonStatus()`.
 

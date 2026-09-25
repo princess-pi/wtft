@@ -951,7 +951,16 @@ function scanForSubAgents() {
   // its new path) can never release a turn it holds.
   if (!pollHadFailure) {
     const found = new Set([...taskAgentFiles, ...discoveredClaudeFiles].map(canonicalTranscriptPath));
-    for (const key of [...discoveredSubagentFiles.keys()]) if (!found.has(key)) discoveredSubagentFiles.delete(key);
+    for (const [key, state] of [...discoveredSubagentFiles]) {
+      if (found.has(key)) continue;
+      // Its held turn was read from the file, so it is written; a moved
+      // transcript read again under its new path opens a new generation.
+      if (state.pendingTurn) {
+        appendTagFile(tagPath, serializeClassified(state.pendingTurn, transcriptSourceId(key, path.dirname(sessionPath))));
+        tagGrewSinceMarker = true;
+      }
+      discoveredSubagentFiles.delete(key);
+    }
   }
   // Swept means every subagent turn is written, so a held-back turn defers it
   // to the scan that releases that turn.
@@ -1372,9 +1381,11 @@ function reseedClaudeChildren(tagContent: string, quiet = false): boolean {
     return complete;
   }
   const sessionDir = path.dirname(sessionPath);
+  const foundIds = new Set([...found].map(file => path.basename(file, ".jsonl")));
   for (const [source, id] of children) {
     const holder = foldedBy.get(id);
     if (holder !== undefined && holder !== source) continue;
+    if (foundIds.has(id)) continue;
     for (const dir of dirs) {
       const file = canonicalTranscriptPath(path.join(projectsDir(), dir, `${id}.jsonl`));
       try {
@@ -2296,6 +2307,7 @@ function releaseLease(slot: Slot) {
 
 function slotNeedsChildScan(slot: Slot, now: number): boolean {
   if (slot.pendingClaudeCommands.length > 0) return true;
+  if (reseedPending.has(path.resolve(slot.sessionPath))) return true;
   for (const state of slot.discoveredSubagentFiles.values()) {
     if (state.pendingTurn) return true;
     if (now <= state.spawnWindowClosesAt + MTIME_SETTLE_MS) return true;
@@ -2383,7 +2395,12 @@ function sweepIdleSlots() {
       try { fs.unlinkSync(`${slot.pidPath}.display`); } catch { /* already gone */ }
       withSlot(slot, () => upsertHeartbeat(Date.now()));
     }
-    if (slotNeedsChildScan(slot, now)) withSlot(slot, () => scanForSubAgents());
+    if (slotNeedsChildScan(slot, now)) {
+      withSlot(slot, () => {
+        pollHadFailure = false;
+        scanForSubAgents();
+      });
+    }
     const current = harnessSlots.get(key);
     if (!current) continue;
     if (current.pendingItems.length > 0) continue;
@@ -2422,11 +2439,10 @@ function servedHandOffFile(): string {
   return `${harnessPidFile}.served`;
 }
 
-function handOffLines(adopting?: string, asked: string[] = []): string[] {
+function handOffLines(adopting?: string): string[] {
   const lines: string[] = [];
   const entry = (kind: string, displayed: boolean, key: string) => JSON.stringify({ kind, displayed, path: key });
   for (const [key, slot] of harnessSlots) lines.push(entry("served", slot.displayed, key));
-  for (const key of asked) if (!harnessSlots.has(key)) lines.push(entry("served", true, key));
   // A session whose adoption failed is not in harnessSlots yet.
   if (adopting && !harnessSlots.has(adopting)) lines.push(entry("served", displayedSession, adopting));
   // Asked for, but waiting on an adoption retry.
@@ -2437,8 +2453,8 @@ function handOffLines(adopting?: string, asked: string[] = []): string[] {
   return lines;
 }
 
-function writeServedHandOff(adopting?: string, asked: string[] = []) {
-  const lines = handOffLines(adopting, asked);
+function writeServedHandOff(adopting?: string) {
+  const lines = handOffLines(adopting);
   try {
     if (lines.length === 0) {
       fs.rmSync(servedHandOffFile(), { force: true });
@@ -2534,9 +2550,8 @@ function stopHarness(reason: string, exitCode = 0) {
   if (!running) return;
   running = false;
   // First, before any flush: --restart kills a harness that is slow to exit.
-  // Requests not read yet are handed on with what it served.
-  const asked = holdsHarnessRoot() ? claimFocusRequests() : [];
-  if (holdsHarnessRoot()) writeServedHandOff(undefined, asked);
+  // Requests not read yet stay in the request directory for the next harness.
+  if (holdsHarnessRoot()) writeServedHandOff();
   if (harnessIdleTimer) clearInterval(harnessIdleTimer);
   harnessIdleTimer = null;
   for (const timer of harnessFlushTimers.values()) clearTimeout(timer);

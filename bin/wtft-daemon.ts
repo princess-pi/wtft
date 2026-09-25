@@ -1706,10 +1706,11 @@ function takeOverLease(pidPath: string): boolean {
     try { holder = Number(fs.readFileSync(pidPath, "utf8").trim()); } catch { holder = 0; }
     if (holder === process.pid) return true;
     if (holder > 0 && procIsDaemon(holder)) {
+      // A harness serves other sessions too; one that is stopping lets go itself.
+      if (cmdlineHasHarness(holder)) return false;
       try { process.kill(holder, "SIGTERM"); } catch { /* already gone */ }
     }
-    const until = Date.now() + 50;
-    while (Date.now() < until) { /* the previous daemon exits on SIGTERM */ }
+    sleepMs(50);
   }
   return claimPidFile(pidPath) === "claimed";
 }

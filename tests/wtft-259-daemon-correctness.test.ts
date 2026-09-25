@@ -165,6 +165,24 @@ try {
 			"a turn the claude -p transcript gained while nothing served the session is read after resume");
 		process.kill(second.pid, "SIGTERM");
 	}
+
+	console.log("\nAdoption never signals a harness");
+	{
+		// A session id shared by two roots shares one lease.
+		const id = "cccc3333-3333-4333-8333-333333333333";
+		const rootA = makeRoot("sig-a");
+		const rootB = makeRoot("sig-b");
+		const fileA = session(rootA, id, "sig-a");
+		const fileB = session(rootB, id, "sig-b");
+		const a = start(rootA, ["--harness", "claude", "--session", fileA], "sig-a.err");
+		check(await until(() => classified(fileA, "sig-a") && read(getDaemonPidPath(fileA)).trim() === String(a.pid), 15_000) !== Infinity,
+			"fixture: harness A serves the session and holds its lease");
+		const b = start(rootB, ["--harness", "claude", "--session", fileB], "sig-b.err");
+		await until(() => read(b.err).includes("could not adopt") || !alive(a.pid), 10_000);
+		check(alive(a.pid), "harness B asked for a session whose lease names harness A leaves A running");
+		check(read(getDaemonPidPath(fileA)).trim() === String(a.pid), "and A keeps the lease");
+		for (const pid of [a.pid, b.pid]) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
+	}
 } finally {
 	for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 }

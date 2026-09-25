@@ -508,6 +508,50 @@ try {
 		for (const pid of harnessesFor(root)) { pids.push(pid); try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 	}
 
+	console.log("\nA session asked for while a reparse holds it is passed on by --restart");
+	{
+		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-rspend-")));
+		const dir = path.join(root, "proj");
+		fs.mkdirSync(dir, { recursive: true });
+		const first = path.join(dir, "21212121-2222-4323-8424-252525252525.jsonl");
+		const held = path.join(dir, "26262626-2727-4828-8929-2a2a2a2a2a2a.jsonl");
+		fs.writeFileSync(first, turnLine("rp-0", Date.now() - 60_000));
+		fs.writeFileSync(held, turnLine("rph-0", Date.now() - 60_000));
+		const h = start(root, ["--harness", "claude", "--session", first], "rp.err");
+		check(await until(() => classified(first, "rp-0"), 15_000) !== Infinity, "fixture: the harness serves its start-up session");
+		const fake = spawn("node", ["-e", "setTimeout(() => {}, 60000)", path.join(root, "wtft-daemon.mjs"), "--reparse", held], { stdio: "ignore" });
+		const marker = `${getDaemonPidPath(held)}.reparse`;
+		fs.writeFileSync(marker, String(fake.pid));
+		await sleep(300);
+		start(root, ["--harness", "claude", "--session", held], "rp-ask.err");
+		await sleep(1_500);
+		check(!fs.existsSync(getCurrentVersionTagPath(held)), "fixture: the harness is waiting for the reparse");
+		const restart = spawnSync("node", [DAEMON, "--restart"], { encoding: "utf8", env: envFor(root) });
+		check(restart.status === 0 && await until(() => !alive(h.pid), 5_000) !== Infinity, `fixture: --restart stopped it (exit ${restart.status})`);
+		check(await until(() => harnessesFor(root).length === 1, 10_000) !== Infinity, "fixture: --restart started one harness");
+		fake.kill("SIGTERM");
+		try { fs.unlinkSync(marker); } catch { /* gone */ }
+		check(await until(() => classified(held, "rph-0"), 10_000) !== Infinity, "the next harness adopts it once the reparse is gone");
+		for (const pid of harnessesFor(root)) { pids.push(pid); try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
+	}
+
+	console.log("\nA focus request for a path holding a newline is served");
+	{
+		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-nl-")));
+		const dir = path.join(root, "proj");
+		fs.mkdirSync(dir, { recursive: true });
+		const first = path.join(dir, "2b2b2b2b-2c2c-4d2d-8e2e-2f2f2f2f2f2f.jsonl");
+		const odd = path.join(dir, "new\nline.jsonl");
+		fs.writeFileSync(first, turnLine("nl-0", Date.now() - 60_000));
+		fs.writeFileSync(odd, turnLine("nlo-0", Date.now() - 60_000));
+		const h = start(root, ["--harness", "claude", "--session", first], "nl.err");
+		check(await until(() => classified(first, "nl-0"), 15_000) !== Infinity, "fixture: a harness is serving a session");
+		start(root, ["--harness", "claude", "--session", odd], "nl-ask.err");
+		check(await until(() => classified(odd, "nlo-0"), 10_000) !== Infinity, "the harness adopts the session it was asked for");
+		try { process.kill(h.pid, "SIGTERM"); } catch { /* gone */ }
+		await until(() => !alive(h.pid), 5_000);
+	}
+
 	console.log("\nA harness whose pid file no longer names it stops");
 	{
 		const { root, files } = makeRoot("p", 5);

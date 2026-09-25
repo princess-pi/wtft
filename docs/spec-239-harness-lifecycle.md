@@ -61,7 +61,8 @@
   dropping a slot now removes its lease, unless another slot shares that lease or another
   process has replaced it since it was read. A session dropped for idling keeps its project
   directory watched, and its next write adopts it again with no new request.
-- **A focus request goes only to a harness that still holds the root.** After posting, the
+- **A focus request goes only to a harness that still holds the root.** A request is one JSON
+  object, `{"pid", "path"}`, and a harness reads requests only while its pid file names it. After posting, the
   requester checks the harness pid file still names that harness. The harness watches its
   request directory, so a request is served when it is posted, not at the next 250 ms sweep (a
   request posted while the harness is starting waits for that sweep, and so does every request
@@ -97,7 +98,8 @@
 - **The next harness on a root serves what the last one served.** A harness that stops while it
   still holds the root, or exits on a failed tag write, writes the sessions it served, and those
   it dropped for idling, to `<harness pid file>.served` (one JSON object per line), before it
-  flushes anything. A failed tag write includes the session being adopted. The next harness to claim the root adopts the served ones and
+  flushes anything. A failed tag write includes the session being adopted, and a session waiting
+  on an adoption retry is included too. The next harness to claim the root adopts the served ones and
   watches for the idle ones' next write, including a served session whose transcript is not
   written yet. So `--restart` and a newer build's replacement pass on what the old harness served,
   unless the hand-off cannot be written or read. `--restart` waits for each harness it stops to exit before it removes that harness's pid file,
@@ -140,6 +142,9 @@
 - After `--restart`, a session the old harness was asked for is read on its next write, with no
   new request.
 - A reparse marker whose pid is a reparse of another session does not hold a session back.
+- A session asked for while a reparse holds it, then passed through `--restart`, is adopted by
+  the next harness once the reparse is gone.
+- A focus request for a path holding a newline is served.
 - After `--restart`, a session whose path holds a tab is read on its next write.
 - A session handed to a harness before its project directory exists is read on its first write.
 - After `--restart`, a session asked for before its transcript existed is read on its first write,

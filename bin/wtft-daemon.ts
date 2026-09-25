@@ -1202,7 +1202,7 @@ function reapAndWarn() {
     // HARD: session gone (not moved, not never-written). Never our own PID, and
     // never a harness: its --session is only the one it was started for.
     const harness = cmdlineHasHarness(pid);
-    if (pid !== process.pid && !harness && sessionFound && sessionIsGone(sessionFound)) {
+    if (pid !== process.pid && !harness && sessionFound && procIsDaemon(pid) && sessionIsGone(sessionFound)) {
       // A process that refuses the signal is still alive, so its leases stay.
       let gone = true;
       try { process.kill(pid, "SIGTERM"); } catch (err) { gone = (err as NodeJS.ErrnoException).code === "ESRCH"; }
@@ -1678,7 +1678,7 @@ function takeOverLease(pidPath: string): boolean {
     let holder = 0;
     try { holder = Number(fs.readFileSync(pidPath, "utf8").trim()); } catch { holder = 0; }
     if (holder === process.pid) return true;
-    if (holder > 0 && procIsReparse(holder)) return false;
+    if (holder > 0 && procIsReparseOf(holder, sessionPath)) return false;
     if (holder > 0 && procIsDaemon(holder)) {
       try { process.kill(holder, "SIGTERM"); } catch { /* already gone */ }
     }
@@ -1842,7 +1842,7 @@ function retryAdoptionLater(key: string, displayed: boolean) {
   try { holder = Number(fs.readFileSync(getDaemonPidPath(key), "utf8").trim()); } catch { /* released */ }
   // A reparse lets go when it finishes; any other failure gets a few tries.
   const tries = (adoptionRetries.get(key) ?? 0) + 1;
-  if (!procIsReparse(holder) && !reparseRunning(getDaemonPidPath(key), key) && tries > 5) {
+  if (!procIsReparseOf(holder, key) && !reparseRunning(getDaemonPidPath(key), key) && tries > 5) {
     adoptionRetries.delete(key);
     return;
   }
@@ -1880,6 +1880,17 @@ function procIsReparseOf(pid: number, file: string): boolean {
   let cwd = "/";
   try { cwd = fs.readlinkSync(`/proc/${pid}/cwd`); } catch { /* resolve against / */ }
   return path.resolve(cwd, args[at + 1]) === path.resolve(file);
+}
+
+/** Unlinks `file` only if it holds `value` and was not replaced while it was
+ *  read. */
+function unlinkIfHolds(file: string, value: string) {
+  try {
+    const before = fs.statSync(file);
+    if (fs.readFileSync(file, "utf8").trim() !== value) return;
+    const now = fs.statSync(file);
+    if (now.dev === before.dev && now.ino === before.ino) fs.unlinkSync(file);
+  } catch { /* already gone */ }
 }
 
 function procIsReparse(pid: number): boolean {
@@ -1978,7 +1989,7 @@ function pointSessionAt(livePid: number, file: string): boolean {
   // A --reparse rewriting this session's tag keeps its lease; the harness is
   // only asked, and adopts the session once the reparse lets go. A rebuild
   // token stays for the harness to read when it adopts.
-  if (leaseText !== "rebuild" && !procIsReparse(holder)) {
+  if (leaseText !== "rebuild" && !procIsReparseOf(holder, file)) {
     const replacement = `${lease}.replace-${process.pid}`;
     fs.writeFileSync(replacement, String(livePid));
     fs.renameSync(replacement, lease);
@@ -1992,7 +2003,7 @@ function pointSessionAt(livePid: number, file: string): boolean {
     const dir = `${harnessPidFile}.focus.d`;
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     const request = path.join(dir, `${process.pid}.tmp`);
-    fs.writeFileSync(request, `${livePid}\n${path.resolve(file)}`);
+    fs.writeFileSync(request, JSON.stringify({ pid: livePid, path: path.resolve(file) }));
     fs.renameSync(request, path.join(dir, `${process.pid}.request`));
     if (fs.readFileSync(harnessPidFile, "utf8").trim() !== String(livePid)) {
       try { fs.unlinkSync(path.join(dir, `${process.pid}.request`)); } catch { /* taken */ }
@@ -2005,7 +2016,7 @@ function pointSessionAt(livePid: number, file: string): boolean {
     let stillHarness = false;
     try { stillHarness = fs.readFileSync(harnessPidFile, "utf8").trim() === String(livePid); } catch { /* removed */ }
     if (!held || !stillHarness) {
-      try { if (fs.readFileSync(lease, "utf8").trim() === String(livePid)) fs.unlinkSync(lease); } catch { /* already gone */ }
+      unlinkIfHolds(lease, String(livePid));
       try { fs.unlinkSync(`${lease}.display`); } catch { /* already gone */ }
     }
     process.stderr.write(`wtft-daemon: could not ask the running harness (pid ${livePid}) to serve ${file}: ${err instanceof Error ? err.message : String(err)}\n`);
@@ -2020,7 +2031,7 @@ let harnessWhich = "";
 /** Serves the sessions other processes asked for (`pointSessionAt`). A request is claimed by renaming it before it is read. One
  *  addressed to another harness pid, or outside this root, is dropped. */
 function takeFocusRequests() {
-  if (!harnessPidFile) return;
+  if (!harnessPidFile || !holdsHarnessRoot()) return;
   const dir = `${harnessPidFile}.focus.d`;
   let names: string[];
   try { names = fs.readdirSync(dir).filter(n => n.endsWith(".request")); } catch { return; }
@@ -2032,9 +2043,19 @@ function takeFocusRequests() {
       text = fs.readFileSync(claimed, "utf8");
     } catch { /* taken by another reader, or unreadable */ }
     try { fs.unlinkSync(claimed); } catch { /* never claimed */ }
-    const [to, requested] = text.split("\n");
+    let to = "";
+    let requested = "";
+    try {
+      const request = JSON.parse(text) as { pid?: unknown; path?: unknown };
+      to = String(request.pid ?? "");
+      requested = typeof request.path === "string" ? request.path : "";
+    } catch {
+      // An older build's request: "<pid>\n<path>".
+      [to = "", requested = ""] = text.split("\n");
+      requested = requested.trim();
+    }
     if (to !== String(process.pid) || !requested) continue;
-    const file = path.resolve(requested.trim());
+    const file = path.resolve(requested);
     if (!file.startsWith(harnessRootKey + path.sep)) continue;
     wake(file, true);
   }
@@ -2228,6 +2249,10 @@ function writeServedHandOff(adopting?: string) {
   for (const [key, slot] of harnessSlots) lines.push(entry("served", slot.displayed, key));
   // A session whose adoption failed is not in harnessSlots yet.
   if (adopting && !harnessSlots.has(adopting)) lines.push(entry("served", displayedSession, adopting));
+  // Asked for, but waiting on an adoption retry (a reparse, a failed try).
+  for (const key of adoptionRetries.keys()) {
+    if (!harnessSlots.has(key) && key !== adopting) lines.push(entry("served", true, key));
+  }
   for (const [key, displayed] of idleDropped) lines.push(entry("idle", displayed, key));
   if (lines.length === 0) return;
   try {
@@ -2293,11 +2318,7 @@ function stopHarness(reason: string) {
     withSlot(slot, () => {
       if (pendingItems.length > 0) flushPending();
     });
-    try {
-      if (slot.pidPath && fs.readFileSync(slot.pidPath, "utf8").trim() === String(process.pid)) {
-        fs.unlinkSync(slot.pidPath);
-      }
-    } catch { /* lease already gone */ }
+    if (slot.pidPath) unlinkIfHolds(slot.pidPath, String(process.pid));
   }
   for (const watcher of harnessWatchers.values()) {
     try { watcher.close(); } catch { /* already closed */ }
@@ -2407,10 +2428,10 @@ function reparseOne(file: string): boolean {
     try {
       return reparseHeld(file);
     } finally {
-      try { if (fs.readFileSync(lease, "utf8").trim() === String(process.pid)) fs.unlinkSync(lease); } catch { /* already gone */ }
+      unlinkIfHolds(lease, String(process.pid));
     }
   } finally {
-    try { if (fs.readFileSync(marker, "utf8").trim() === String(process.pid)) fs.unlinkSync(marker); } catch { /* already gone */ }
+    unlinkIfHolds(marker, String(process.pid));
   }
 }
 
@@ -2592,8 +2613,8 @@ if (stopSession) {
   const lease = getDaemonPidPath(path.resolve(stopSession));
   let holder = 0;
   try { holder = Number(fs.readFileSync(lease, "utf8").trim()); } catch { holder = 0; }
-  if (holder > 0 && procIsHarness(holder)) {
-    try { fs.unlinkSync(lease); } catch { /* already gone */ }
+  if (holder > 0 && procIsDaemon(holder) && procIsHarness(holder)) {
+    unlinkIfHolds(lease, String(holder));
     console.log(`Stopped: PID ${holder} — session dropped from harness: ${stopSession}`);
     process.exit(0);
   }
@@ -2831,7 +2852,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   for (;;) {
     let leaseHolder = 0;
     try { leaseHolder = Number(fs.readFileSync(pidPath, "utf8").trim()); } catch { /* no lease */ }
-    if (!procIsReparse(leaseHolder) && !reparseRunning(pidPath, sessionPath)) break;
+    if (!procIsReparseOf(leaseHolder, sessionPath) && !reparseRunning(pidPath, sessionPath)) break;
     sleepMs(200);
   }
 
@@ -2889,7 +2910,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       if (lease === "rebuild") {
         rebuildTagOnStartup = true;
       } else if (Number.isSafeInteger(existingPid) && existingPid > 0) {
-        if (procIsReparse(existingPid)) {
+        if (procIsReparseOf(existingPid, sessionPath)) {
           sleepMs(200);
           continue;
         }

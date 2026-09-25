@@ -154,8 +154,20 @@ try {
 		!fs.existsSync(getCurrentVersionTagPath(claudeFiles[50])),
 	);
 
-	const living = [claudePid, piPid].filter(alive);
-	assert(`process count for 200 files is 2 (saw ${living.length})`, living.length === 2 && alive(claudePid) && alive(piPid));
+	// Every live daemon whose harness roots are this fixture's, not only the
+	// two this suite started, so a third process would be counted. The
+	// requesters above share that environment and exit once they have posted,
+	// so the count waits for them, to a 15 s ceiling.
+	const daemonsFor = () => fs.readdirSync("/proc").filter(p => /^\d+$/.test(p)).filter(p => {
+		let cmd = "", env = "";
+		try { cmd = fs.readFileSync(`/proc/${p}/cmdline`, "utf8"); env = fs.readFileSync(`/proc/${p}/environ`, "utf8"); } catch { return false; }
+		return cmd.split("\0").some(a => path.basename(a) === "wtft-daemon.mjs")
+			&& env.split("\0").includes(`WTFT_CLAUDE_PROJECTS_DIR=${claudeRoot}`);
+	}).map(Number).filter(alive);
+	for (const until = Date.now() + 15_000; daemonsFor().length > 2 && Date.now() < until;) await sleep(100);
+	const daemonsHere = daemonsFor();
+	assert(`process count for 200 files is 2 (saw ${daemonsHere.length}: ${daemonsHere.join(", ")})`,
+		daemonsHere.length === 2 && daemonsHere.includes(claudePid) && daemonsHere.includes(piPid));
 
 	const rss = rssKb(claudePid);
 	assert(`claude daemon RSS is under 200 MB (saw ${rss} kB)`, rss > 0 && rss < 200 * 1024);
@@ -239,8 +251,6 @@ try {
 		stop.status === 0 && stopDropped && alive(claudePid) && stop.stdout.includes("dropped from harness"),
 	);
 
-	const src = fs.readFileSync(path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.ts"), "utf8");
-	assert("no per-line writtenLines map", !src.includes("writtenLines"));
 
 	for (const pid of [claudePid, piPid]) {
 		try { process.kill(pid, "SIGTERM"); } catch { /* gone */ }

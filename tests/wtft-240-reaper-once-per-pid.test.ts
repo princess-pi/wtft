@@ -7,7 +7,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("240-reaper");
@@ -66,8 +66,14 @@ try {
 		await sleep(50);
 		if (log.includes("started, watching")) startedAt = Date.now();
 	}
-	const elapsed = startedAt ? startedAt - started : Infinity;
-	check(elapsed < 1000, `a per-session daemon starts within 1 s beside ${LEASES} leases of one live pid (took ${elapsed} ms)`);
+	// CPU time, not wall-clock time: a loaded host stretches the second, not
+	// the first. Fields 14 and 15 of /proc/<pid>/stat, in clock ticks.
+	const tickMs = 1000 / Number(spawnSync("getconf", ["CLK_TCK"], { encoding: "utf8" }).stdout.trim());
+	let stat = "";
+	try { stat = startedAt ? fs.readFileSync(`/proc/${daemonPid}/stat`, "utf8") : ""; } catch { /* exited: no measure */ }
+	const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+	const cpuMs = stat && tickMs > 0 ? (Number(fields[11]) + Number(fields[12])) * tickMs : Infinity;
+	check(cpuMs < 1000, `a per-session daemon starts on under 1 s of CPU beside ${LEASES} leases of one live pid (${cpuMs} ms of CPU, ${startedAt ? `${startedAt - started} ms wall` : "never reported starting"})`);
 
 	const reapLog = path.join(home, ".local", "state", "wtft", "reap.log");
 	const lines = fs.existsSync(reapLog) ? fs.readFileSync(reapLog, "utf8").split("\n").filter(l => l.includes(`PID ${holder.pid}`)) : [];

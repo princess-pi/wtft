@@ -174,14 +174,39 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 ## Closer
 
 `tests/wtft-259-daemon-correctness.test.ts` checks the behaviours above; each check that pins a
-fix failed before it. These have no check of their own, and why:
+fix failed before it. The rest are checked elsewhere, or have no check yet, or none a fixture can
+make, as follows:
 
-- **Reachable, but without a test yet** (#262 adds them): a retrying session handed on with its
+- **Checked in `tests/wtft-262-daemon-gaps.test.ts`**: a retrying session handed on with its
   displayed flag; the hand-off removed when nothing is served or idle; a per-session lease holder
-  still signalled on adoption; the stop line for `session removed` and `session never written`;
-  the resume leaving a folded `claude -p` transcript to the one folding it; the held turn of a
-  transcript no longer found written under the source its earlier lines carry; the generation record written before that held turn when its transcript opened none; Pi `/wtft -F` not asking for the session when busy; `wtft -F` exiting 1 on a failed daemon spawn; the stale-version remedy for a tag of a newer build; the pruned held turn skipped when its transcript was read again under the same source in the same scan; a later line of the same message merging its claude -p commands into the open lookup; the scan-continuation marker re-keyed on a move; an idle harness serving a request posted since its last read before it stops; the sweep reading the subagents of a session whose tree has an unwatchable directory; the sweep not re-waking an idle session whose adoption retry is pending; a moved or deleted claude -p child's held turn written; a harness -F whose temporary lease cannot be written reported as failed; -F deleting a sibling-project tag while a current local tag exists; reseed of a claude -p child sharing an id with a discovered transcript; an idle session rewritten at the same length adopted again; -F on Linux not signalling a lease pid with no command line.
-- **The 1 h limit on a never-written session** takes an hour and has no knob.
+  still signalled on adoption; the stop line for `session removed`; `-F` deleting a sibling
+  project's tag; `-F` on Linux not signalling a lease pid with no command line; an idle session
+  rewritten at the same length adopted again; `-F` naming a rebuild lease it cannot write; the
+  stale-version remedy for a tag of a newer build.
+- **Reachable, without a check yet** (#267): the resume leaving a folded `claude -p` transcript to
+  the one folding it; the held turn of a transcript no longer found, written under its earlier
+  source and after a generation record when it opened none, or skipped when the transcript was
+  read again under that source; a later line of a message merging its `claude -p` commands into
+  the open lookup; the scan-continuation marker re-keyed on a move; a moved or deleted `claude -p`
+  child's held turn written; reseed of a child sharing an id with a discovered transcript; the
+  children a settled lookup found, read after a restart.
+- **Pi `/wtft -F` not asking for the session when busy**: busy means a daemon holds the lease or
+  took it meanwhile, and asking then starts nothing, so a check cannot tell the two builds apart.
+  The one exception, a lease released between two reads, needs two processes inside one syscall
+  gap.
+- **`-F` exiting 1 on a failed daemon spawn**, and **on a daemon it cannot signal**: node reports
+  a spawn that cannot start as an error event, which ends the CLI with that error, so the exit-1
+  path is reached only by a spawn that throws at once, which a fixture cannot cause; the second
+  needs a `wtft-daemon` owned by another user.
+- **An idle harness serving a request posted since its last read** needs two processes inside
+  one sweep.
+- **The sweep not re-waking a session whose adoption retry is pending** is reachable, without a
+  check yet (#267).
+- **The sweep reading the subagents of a session whose tree cannot be watched** is reachable,
+  without a check yet (#267): a session directory that is searchable but not readable cannot be
+  watched, while the `subagents` directory beneath it can still be listed.
+- **The 1 h limit on a never-written session**, and the `session never written` stop line it
+  writes, take an hour and have no knob.
 - **A sweep-driven scan keeping a failed session read**: that scan reads the session's first line
   for Pi discovery, so a transcript that cannot be opened fails the scan by itself; only a read
   that fails past the first line reaches this rule, and a fixture cannot make one.

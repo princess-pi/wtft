@@ -555,16 +555,31 @@ export function getDaemonPidPath(sessionPath: string): string {
  * deleted, after stopping a live per-session daemon ("stopped") or with none
  * running ("deleted"); a daemon still running 2 s after the signal, or one
  * that claimed the session meanwhile, leaves everything in place ("busy"); a
- * lease or tag that could not be deleted is "failed".
- * Unless busy or failed, the caller then asks for the session. Telling a harness apart reads `/proc`, so off Linux a harness is stopped like a
+ * lease that cannot be read ("unreadable"), a rebuild lease that cannot be
+ * written ("unwritable"), a daemon that cannot be signalled ("unsignalled"),
+ * and a lease or tag that cannot be deleted ("undeletable") are failures.
+ * Unless busy or a failure, the caller then asks for the session. Telling a harness apart reads `/proc`, so off Linux a harness is stopped like a
  * per-session daemon.
  */
-export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" | "deleted" | "busy" | "failed" {
+export type ForceRebuildFailure = "unreadable" | "unwritable" | "unsignalled" | "undeletable";
+
+/** What a failed `-F` could not do, as a sentence fragment, or null. */
+export function describeForceRebuildFailure(how: string): string | null {
+	switch (how) {
+		case "unreadable": return "its lease could not be read";
+		case "unwritable": return "the rebuild lease could not be written";
+		case "unsignalled": return "its log parser daemon could not be signalled";
+		case "undeletable": return "a lease or tag file could not be deleted, so it would be resumed rather than rebuilt";
+		default: return null;
+	}
+}
+
+export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" | "deleted" | "busy" | ForceRebuildFailure {
 	const leasePath = getDaemonPidPath(sessionPath);
 	let pid = 0;
 	let initial = "";
 	try { initial = fs.readFileSync(leasePath, "utf8").trim(); pid = parseInt(initial, 10); }
-	catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "failed"; }
+	catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "unreadable"; }
 	let args: string[] = [];
 	if (pid > 0) {
 		try { args = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0"); } catch { /* not running */ }
@@ -583,7 +598,7 @@ export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" 
 			fs.renameSync(replacement, leasePath);
 		} catch {
 			fs.rmSync(replacement, { force: true });
-			return "failed";
+			return "unwritable";
 		}
 		return "rebuild";
 	}
@@ -593,7 +608,7 @@ export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" 
 	let stopped = false;
 	if (pid > 0 && (daemon || (noProc && args.length === 0))) {
 		try { process.kill(pid, "SIGTERM"); stopped = true; }
-		catch (err) { if ((err as NodeJS.ErrnoException).code !== "ESRCH") return "failed"; }
+		catch (err) { if ((err as NodeJS.ErrnoException).code !== "ESRCH") return "unsignalled"; }
 	}
 	// Its shutdown flushes into the tag, so the tag goes only once it has
 	// exited; one still running after 2 s keeps its tag ("busy").
@@ -606,20 +621,20 @@ export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" 
 	// A daemon that claimed the session since owns lease and tag; leave both.
 	let now = "";
 	try { now = fs.readFileSync(leasePath, "utf8").trim(); }
-	catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "failed"; }
+	catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "unreadable"; }
 	if (now !== "" && now !== initial) return "busy";
 	// Anything left behind would be resumed, not rebuilt, so any error but
 	// "already gone" fails the whole -F.
 	const gone = (err: unknown) => (err as NodeJS.ErrnoException).code === "ENOENT";
-	try { if (now !== "") fs.unlinkSync(leasePath); } catch (err) { if (!gone(err)) return "failed"; }
+	try { if (now !== "") fs.unlinkSync(leasePath); } catch (err) { if (!gone(err)) return "undeletable"; }
 	const prefix = path.basename(sessionPath) + ".wtft-tag.v";
 	const sibling = findSiblingTagPath(sessionPath);
 	for (const tagsDir of new Set([path.join(path.dirname(sessionPath), "wtft-tags"), path.dirname(getTagPath(sessionPath)), ...(sibling ? [path.dirname(sibling)] : [])])) {
 		let names: string[] = [];
-		try { names = fs.readdirSync(tagsDir); } catch (err) { if (!gone(err)) return "failed"; }
+		try { names = fs.readdirSync(tagsDir); } catch (err) { if (!gone(err)) return "undeletable"; }
 		for (const f of names) {
 			if (!f.startsWith(prefix) || !f.endsWith(".jsonl")) continue;
-			try { fs.unlinkSync(path.join(tagsDir, f)); } catch (err) { if (!gone(err)) return "failed"; }
+			try { fs.unlinkSync(path.join(tagsDir, f)); } catch (err) { if (!gone(err)) return "undeletable"; }
 		}
 	}
 	return stopped ? "stopped" : "deleted";

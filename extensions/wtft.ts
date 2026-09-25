@@ -20,6 +20,7 @@ import {
 	getDaemonPidPath,
 	getModelCacheTtlMs,
 	forceRebuildSession,
+	describeForceRebuildFailure,
 } from "./lib/wtft-shared.js";
 import { readConfig, writeConfig, hasConfig } from "@princess-pi/libs/config";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "./lib/wtft-config-dir.js";
@@ -389,15 +390,19 @@ export default function wtftExtension(pi: ExtensionAPI) {
 					return;
 				}
 				const how = forceRebuildSession(sessionFile);
-				if (how === "failed") {
-					ctx.ui.notify("A lease or tag file of this session could not be deleted, so it would be resumed rather than rebuilt — fix its permissions and run /wtft -F again.", "warning");
+				const failure = describeForceRebuildFailure(how);
+				if (failure) {
+					ctx.ui.notify(`Force re-parse: ${failure}. Nothing was rebuilt.`, "warning");
 					return;
 				}
 				if (how === "busy") {
 					ctx.ui.notify("A log parser daemon did not stop within 2 s, or another took the session meanwhile, so nothing was deleted — run /wtft -F again once it has stopped.", "warning");
 					return;
 				}
-				ensureDaemonRunning(sessionFile, _daemonDir);
+				if (!ensureDaemonRunning(sessionFile, _daemonDir)) {
+					ctx.ui.notify("Force re-parse: the log parser daemon could not be started, so nothing is rebuilding the tag — run /wtft -F again.", "warning");
+					return;
+				}
 				updateWtftWidget(ctx, pi);
 				ctx.ui.notify(how === "rebuild"
 					? "The harness log parser daemon is rebuilding this session's tag — full session re-parse in progress."

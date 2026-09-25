@@ -2794,7 +2794,7 @@ ${USAGE}
 Management:
   --list, -l            List every running wtft-daemon, including fixture processes
   --cleanup             Kill per-session daemons whose session is gone, and fixture ones under the tmp dir
-                        that hold no lease here; never a harness process, which stops after 24h serving nothing
+                        that hold no lease here; never a harness process, which stops once it has nothing to serve or watch
   --restart             Kill all running daemons (fresh spawn on next wtft)
   --stop <session>      Drop that session. A per-session process exits. A harness process stays up.
 
@@ -2806,8 +2806,9 @@ Daemon mode:
   -h, --help            Show this help
 
 Environment:
-  WTFT_DAEMON_IDLE_MS          Milliseconds with no new lines before a session is dropped, and with no
-                               session served before a harness stops (default 86400000)
+  WTFT_DAEMON_IDLE_MS          Milliseconds with no new lines before a session is dropped, after which a
+                               harness forgets a dropped session, and with nothing to serve or watch
+                               before a harness stops (default 86400000)
   WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after start before that drop can fire (default 60000)
   WTFT_HARNESS_SCAN_SLICE_MS   Milliseconds one slice of a harness's subagent scan runs before it yields (default 25)
   WTFT_HARNESS_SCAN_YIELD_MS   Milliseconds a harness pauses between those slices (default 0)`);

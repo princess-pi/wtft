@@ -52,7 +52,7 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 |---|---|
 | `session_start` (Pi) or `wtft` / `wtft --watch` invoked (CLI) | Starts the daemon if that session's pid lease is not already held. A session under a harness root attaches to that root's one process. |
 | New session data arrives | Classifies and flushes that session's tag. Flushes for one session are at least 667ms apart. |
-| No new data for 24h | That session is dropped ("idle timeout"). A `--session` process exits. A harness process stays up. It decides from in-memory timestamps on a timer and does not stat the file. While that harness runs, a later write adopts the session again. |
+| No new data for 24h | That session is dropped ("idle timeout"). A `--session` process exits. A harness process stays up. It decides from in-memory timestamps on a timer and does not stat the file. While that harness runs, a write within the next 24h adopts the session again; after that only a request does. |
 | Daemon just spawned (< 60s) | Idle drop suppressed (startup grace period) |
 | Session file deleted | A `--session` process exits ("session removed") unless the transcript moved. A harness process drops that session and stays up. |
 | Session file not yet created | Waits, and writes a heartbeat when this process is the per-session daemon or the session is the one a consumer is displaying, so the widget can show "waiting for session .jsonl..." (#124). Past the wait cap, a `--session` process exits ("session never written") and a harness process drops the slot. |

@@ -138,7 +138,7 @@ _Avoid_: Child session, nested session
 The `.meta.json` the harness writes beside a Claude Code built-in subagent transcript
 (`agent-<hash>.meta.json`): `agentType`, `spawnDepth`, and usually `description`, `toolUseId` and
 `model`. `subagents[].meta` in JSON. **Not the tag file's `_meta` record** — that is always spelled
-with the underscore and is the daemon's own offset/sweep control line, an unrelated thing.
+with the underscore and is the daemon's own control line (offset, sweep, and `claude -p` lookup records), an unrelated thing.
 _Avoid_: bare "meta" (say which), "the meta record"
 
 **Subagents block** (#137):

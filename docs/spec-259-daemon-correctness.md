@@ -101,7 +101,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   CLI says whether a daemon was stopped. On Linux only a lease holder whose command line names
   `wtft-daemon` is signalled; off Linux the lease pid is signalled as before. When the daemon is still running 2 s after the signal,
   or another daemon has claimed the lease meanwhile, nothing is deleted, and `-F` says so and
-  exits 1. So does a lease that cannot be read, a daemon that cannot be signalled, a lease or tag
+  exits 1. So does a lease that cannot be read, a rebuild lease that cannot be written, a daemon that
+  cannot be signalled, a lease or tag
   file that cannot be deleted, since what is left would be resumed
   rather than rebuilt, and a daemon that cannot be started. A harness lease that changed between
   being read and being replaced is left alone, as busy. The CLI and the Pi widget share one implementation, so

@@ -190,8 +190,8 @@ retired in `@4`.
 - **1** — error: no session found or selected, an invalid path, a daemon that
   could not be spawned or that died before producing data, a refused flag
   (`--pager`), `--stop` unable to drop a session, `-F` unable to rebuild (a daemon that did not
-  stop, a session another daemon claimed, a lease that could not be read, a daemon that could
-  not be signalled, a lease or tag file that could not be deleted, a daemon that could not be
+  stop, a session another daemon claimed, a lease that could not be read, a rebuild lease that
+  could not be written, a daemon that could not be signalled, a lease or tag file that could not be deleted, a daemon that could not be
   started, or a harness that did not take the session up within
   10 s), `--list`/`--cleanup`/`--restart`/`--stop`
   unable to run `wtft-daemon` within 10 s, a read error other than a missing path in a harness's session

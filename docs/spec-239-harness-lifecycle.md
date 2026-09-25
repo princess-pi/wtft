@@ -10,7 +10,7 @@
 
 > **Superseded in part by [spec-259](spec-259-daemon-correctness.md).** `--reparse` and
 > `--reparse-range` are gone, a harness serves a request whatever harness pid it names, keeps its
-> hand-off current, re-arms its request watch after an error, and stops after 24 h serving nothing. Where the two disagree, spec-259 is current.
+> hand-off current, re-arms its request watch after an error, and stops once it has nothing to serve or watch. Where the two disagree, spec-259 is current.
 
 ## What went wrong
 

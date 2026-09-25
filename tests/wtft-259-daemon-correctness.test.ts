@@ -230,6 +230,11 @@ try {
 		check(alive(h.pid), "the harness keeps running");
 		check(read(getDaemonPidPath(other)).trim() === String(h.pid), "and keeps serving the other session");
 		check(read(h.err).includes(`gave up ${target}: its lease now reads "rebuild"`), "a daemon that gives up a lease logs who holds it now");
+		run(root, ["--stop", other]);
+		for (let i = 0; i < 10; i++) { fs.appendFileSync(other, turnLine(`force-after-stop-${i}`, Date.now())); await sleep(100); }
+		await sleep(1_000);
+		check(!fs.existsSync(getDaemonPidPath(other)) && !classified(other, "force-after-stop-9"),
+			"a session dropped with --stop is not taken back by its next write");
 		process.kill(h.pid, "SIGTERM");
 	}
 
@@ -306,11 +311,14 @@ try {
 		fs.mkdirSync(handOff);
 		const h = start(root, ["--harness", "claude", "--session", file], "handoff.err");
 		check(await until(() => classified(file, "handoff-main"), 15_000) !== Infinity, "fixture: the harness is up");
-		check(fs.existsSync(handOff) && read(h.err).includes("could not read the previous harness's hand-off"),
-			"a hand-off that cannot be read stays in place and is reported");
+		await until(() => read(h.err).includes("could not read the previous harness's hand-off"), 5_000);
+		const aside = fs.readdirSync(TMP).find(n => n.startsWith(`${path.basename(handOff)}.unreadable-`));
+		check(aside !== undefined && read(h.err).includes(`left at ${path.join(TMP, aside ?? "")}`),
+			"a hand-off that cannot be read is moved aside, kept, and reported");
 		process.kill(h.pid, "SIGTERM");
 		await until(() => !alive(h.pid), 5_000);
 		fs.rmSync(handOff, { recursive: true, force: true });
+		if (aside) fs.rmSync(path.join(TMP, aside), { recursive: true, force: true });
 		fs.writeFileSync(handOff, "not json\n");
 		const h2 = start(root, ["--harness", "claude", "--session", file], "handoff-2.err");
 		check(await until(() => read(h2.err).includes("hand-off line"), 10_000) !== Infinity, "a hand-off line that does not parse is reported");

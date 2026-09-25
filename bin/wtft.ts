@@ -365,7 +365,7 @@ function unpricedModelWarning(model: string): string {
 		`Add an entry to ${getUserPricingPath()} (no rebuild needed).`;
 }
 
-/** The one action that ends the provisional state. Does not name `-F` (that deletes the tag and falls through here). */
+/** The one action that ends the provisional state. Does not name `-F`. */
 function describeProvisionalRemedy(provisional: { reason: string | null }): string {
 	if (provisional.reason === "descendant-live") {
 		return `run wtft again once every descendant has been quiet for ${IDLE_THRESHOLD_MS / 1000} s`;
@@ -468,7 +468,8 @@ async function main() {
 		if (result.stdout) console.log(result.stdout.trim());
 		if (result.stderr) console.error(result.stderr.trim());
 		if (result.error) console.error(result.error.message);
-		process.exit(result.status ?? 1);
+		process.exitCode = result.status ?? 1;
+		return;
 	}
 
 	// Lazy + memoised: only the `-s` fuzzy fallback pays for full discovery.
@@ -559,8 +560,6 @@ async function main() {
 		process.exit(1);
 	}
 
-	// ---
-	// --force: kill existing daemon, delete tag file, re-parse from scratch.
 	// ---
 	if (opts.forceReparse) {
 		const how = forceRebuildSession(finalSessionPath);

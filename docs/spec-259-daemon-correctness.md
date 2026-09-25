@@ -39,8 +39,10 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 - **A resumed session reads again the `claude -p` transcripts it read before.** A daemon adopting
   a tag at its saved offset finds, from the tag's generation records, each subagent transcript an
   earlier daemon read that is not under the session's own directory. Each one written since the
-  tag's last swept stamp is read again from its start, as a new generation, so what it gained
-  while nothing served the session is counted. A `claude -p` session spawned within the 15 s
+  tag's last swept stamp (less 2 s, for coarse mtimes) is read again from its start, as a new
+  generation, so what it gained while nothing served the session is counted. A transcript another
+  one folds (a `_fold` record names it under the other's source) is never read on its own: the
+  one that folds it is read again when either changed. A `claude -p` session spawned within the 15 s
   discovery window before the restart, and not yet on disk at the earlier daemon's last scan, is
   still missed: that is a known limit.
 
@@ -64,11 +66,13 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 
 ### Adoption
 
-- **A failed adoption of an existing transcript gives up loudly** (A3, F14). After the first try and five retries 667 ms apart, the harness
+- **A failed adoption gives up loudly** (A3, F14). After the first try and five retries 667 ms
+  apart, or as soon as the transcript is gone, the harness
   writes `could not adopt <session>: <reason>` to stderr, and removes the lease and `.display`
   marker if they still name it, so no reader is told the session is served.
-- **A wake for a session whose lease is no longer the harness's adopts it again.** The old slot is
-  dropped first. So a `rebuild` lease written over a served session is rebuilt on the next request.
+- **A wake for a session whose lease reads `rebuild` adopts it again.** The old slot is dropped
+  first, so the session is rebuilt on the next request. Any other lease that is not the harness's
+  drops the session, as `--stop` means.
 
 ### `wtft -F` (decision M)
 
@@ -99,7 +103,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   set of sessions it serves or has dropped for idling changes, and removes it when both are empty.
   So a harness killed before its SIGTERM handler runs, which `--restart` does after 2 s, still
   passes on what it served.
-- **A hand-off that cannot be read is left in place** and reported on stderr. A line that does not
+- **A hand-off that cannot be read is moved aside** to `<hand-off>.unreadable-<UTC time>`, kept,
+  and reported on stderr. A line that does not
   parse is reported on stderr. A session waiting on an adoption retry is handed on with the
   displayed flag it was asked with.
 
@@ -137,7 +142,9 @@ its fix. Not reached by the suite, and why:
 
 - **`--cleanup`** stops fixture daemons under `/tmp`, including those of suites running beside
   it, so its harness rule (decision E) is checked by reading the code.
-- **The request-directory watch re-arm** changes latency only, under the 250 ms sweep.
+- **The request-directory watch re-arm** changes latency only, under the 250 ms sweep, and so
+  does the 10 s retry of a failed directory watch.
+- **`--stop`'s `Not stopped` path** needs a lease to change inside one syscall gap.
 - **The lease race** needs two processes inside one syscall gap.
 - **A stopping harness passing on unread requests** depends on whether its sweep or its signal
   handler runs first; the suite checks the served-by-the-new-harness outcome only.

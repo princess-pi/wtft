@@ -205,8 +205,9 @@ retired in `@4`.
   one of its subagent transcripts,
   [#133](https://github.com/princess-pi/wtft/issues/133)) is set only by
   `--tokens` and `--json`, the runs that read the spawn tree.
-- **2** / **3** — `wtft spawn-record` only (see below): the call was wrong, or
-  the ledger could not be written. The report path never returns either, and
+- **2** / **3** — `wtft spawn-record` (see below): the call was wrong, or
+  the ledger could not be written. `--list`/`--cleanup`/`--restart`/`--stop`
+  also pass on `wtft-daemon`'s exit 2 for a bad argument. The report path never returns either, and
   `spawn-record` also returns **0** — on a successful append, and on `--help`,
   which appends nothing.
 - **10** — session not specified precisely enough

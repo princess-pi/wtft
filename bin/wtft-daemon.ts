@@ -1328,12 +1328,15 @@ function reapAndWarn() {
  */
 function reseedClaudeChildren(tagContent: string) {
   const children = new Map<string, string>();
+  /** Child session id to the source of a transcript that folds it. */
+  const foldedBy = new Map<string, string>();
   let sweptAt = 0;
   for (const line of tagContent.split("\n")) {
-    if (!line.includes('"_gen"') && !line.includes('"swept"')) continue;
-    let obj: { _gen?: { s?: unknown; session?: unknown }; _meta?: { swept?: unknown } };
+    if (!line.includes('"_gen"') && !line.includes('"swept"') && !line.includes('"_fold"')) continue;
+    let obj: { _gen?: { s?: unknown; session?: unknown }; _meta?: { swept?: unknown }; _fold?: { child?: unknown; s?: unknown } };
     try { obj = JSON.parse(line); } catch { continue; }
     if (typeof obj._gen?.s === "string" && typeof obj._gen.session === "string") children.set(obj._gen.s, obj._gen.session);
+    if (typeof obj._fold?.child === "string" && typeof obj._fold.s === "string") foldedBy.set(obj._fold.child, obj._fold.s);
     if (typeof obj._meta?.swept === "number") sweptAt = Math.max(sweptAt, obj._meta.swept);
   }
   if (children.size === 0) return;
@@ -1344,15 +1347,33 @@ function reseedClaudeChildren(tagContent: string) {
   let dirs: string[] = [];
   try { dirs = fs.readdirSync(projectsDir()); } catch { return; }
   const sessionDir = path.dirname(sessionPath);
+  // The margin covers an append between a scan's read and its stamp, and a
+  // coarse mtime; reading a transcript again costs a generation, not a total.
+  const resolved = new Map<string, { id: string; file: string; changed: boolean }>();
   for (const [source, id] of children) {
     for (const dir of dirs) {
       const file = canonicalTranscriptPath(path.join(projectsDir(), dir, `${id}.jsonl`));
       let mtimeMs: number;
       try { mtimeMs = fs.statSync(file).mtimeMs; } catch { continue; }
       if (transcriptSourceId(file, sessionDir) !== source) continue;
-      if (!found.has(file) && mtimeMs > sweptAt) discoveredClaudeFiles.add(file);
+      resolved.set(source, { id, file, changed: mtimeMs >= sweptAt - MTIME_SETTLE_MS });
       break;
     }
+  }
+  // A transcript another one folds is counted in that one's lines: read the
+  // holder again when either changed, never the folded one on its own.
+  const reread = new Set<string>();
+  for (const [source, child] of resolved) {
+    const holder = foldedBy.get(child.id);
+    if (holder !== undefined && holder !== source) {
+      if (child.changed && resolved.has(holder)) reread.add(holder);
+      continue;
+    }
+    if (child.changed) reread.add(source);
+  }
+  for (const source of reread) {
+    const file = resolved.get(source)!.file;
+    if (!found.has(file)) discoveredClaudeFiles.add(file);
   }
 }
 
@@ -1755,9 +1776,9 @@ function scheduleFlush(key: string) {
 function wake(file: string, displayed: boolean) {
   const key = path.resolve(file);
   let slot = harnessSlots.get(key);
-  // Asked for again after its lease went elsewhere, such as a `rebuild` from
-  // wtft -F: adopted afresh, which honours that lease.
-  if (slot && !leaseStillOurs(slot)) {
+  // A `rebuild` lease (wtft -F) is adopted afresh, which honours it. Any other
+  // lease that is not ours drops the session in serviceSession, as --stop means.
+  if (slot && slot.pidPath && leaseHolder(slot.pidPath) === "rebuild") {
     displayed = displayed || slot.displayed;
     dropHarnessSlot(key);
     slot = undefined;
@@ -1906,15 +1927,15 @@ function servedSessionOver(dir: string): string | null {
 const adoptionRetries = new Map<string, { tries: number; displayed: boolean }>();
 const adoptionRetryPending = new Set<string>();
 function retryAdoptionLater(key: string, displayed: boolean) {
-  if (!running || !fs.existsSync(key)) return;
+  if (!running) return;
   if (adoptionRetryPending.has(key)) return;
   const tries = (adoptionRetries.get(key)?.tries ?? 0) + 1;
-  if (tries > 5) {
+  if (tries > 5 || !fs.existsSync(key)) {
     adoptionRetries.delete(key);
     const lease = getDaemonPidPath(key);
-    let holder = "";
-    try { holder = fs.readFileSync(lease, "utf8").trim(); } catch { /* no lease */ }
-    const why = key.includes(".wtft-tag.v") ? "it is a tag file"
+    const holder = leaseHolder(lease);
+    const why = !fs.existsSync(key) ? "its transcript is gone"
+      : key.includes(".wtft-tag.v") ? "it is a tag file"
       : holder && holder !== String(process.pid) ? `its lease names ${holder}`
       : "its lease could not be claimed";
     process.stderr.write(`[wtft-log-parser] could not adopt ${key}: ${why}\n`);
@@ -2220,6 +2241,7 @@ function dropHarnessSlot(key: string, reason = "") {
   harnessSlots.delete(key);
   subagentScanPass.delete(key);
   subagentScanPassFailed.delete(key);
+  subagentScansContinuing.delete(key);
   unwatchSession(key);
   if (slot) releaseLease(slot);
   if (process.env.WTFT_DAEMON_DEBUG) {
@@ -2433,10 +2455,10 @@ function takeServedHandOff() {
   try {
     text = fs.readFileSync(claimed, "utf8");
   } catch (err) {
+    // Moved aside, not back: the running harness rewrites the hand-off path.
     let left = claimed;
-    if (!fs.existsSync(file)) {
-      try { fs.renameSync(claimed, file); left = file; } catch { /* stays claimed */ }
-    }
+    const aside = `${file}.unreadable-${new Date().toISOString().replace(/:/g, "-").replace(/\.\d+Z$/, "Z")}`;
+    try { fs.renameSync(claimed, aside); left = aside; } catch { /* stays claimed */ }
     process.stderr.write(`[wtft-log-parser] WARNING: could not read the previous harness's hand-off, left at ${left}: ${err instanceof Error ? err.message : String(err)}\n`);
     return;
   }

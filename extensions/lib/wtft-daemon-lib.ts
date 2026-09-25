@@ -572,9 +572,15 @@ export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" 
 		fs.renameSync(replacement, leasePath);
 		return "rebuild";
 	}
+	// Off Linux the lease pid cannot be checked, and is signalled as before.
 	let stopped = false;
-	if (daemon) {
+	if (pid > 0 && (daemon || args.length === 0)) {
 		try { process.kill(pid, "SIGTERM"); stopped = true; } catch { /* already gone */ }
+	}
+	// Its shutdown flushes into the tag, so the tag goes only once it has exited.
+	for (const until = Date.now() + 2000; stopped && Date.now() < until;) {
+		try { process.kill(pid, 0); } catch { break; }
+		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
 	}
 	try { fs.unlinkSync(leasePath); } catch { /* no lease */ }
 	const prefix = path.basename(sessionPath) + ".wtft-tag.v";

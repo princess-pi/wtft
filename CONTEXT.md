@@ -21,8 +21,9 @@ session outside those roots keeps its own process, polling every 667ms. The tag 
 the pid lease stay per session. After 24h with no new lines, the per-session process
 exits, and the harness process drops that session and its lease; the next write to its own transcript,
 or the next request, adopts it again; while that harness process runs, the write alone does.
-A harness process left with no session to serve for 24h stops, passing its dropped sessions to
-the next one, and so does one whose root is removed. Spawned on Pi `session_start` and on
+A session dropped for idling is forgotten 24h after it was dropped unless written first, and a
+harness process left with nothing to serve or watch for 24h after that stops. One whose root is
+removed stops too, passing its dropped sessions to the next one. Spawned on Pi `session_start` and on
 a CLI report. A per-session process is revived after an idle exit and replaced on a
 version bump, and a harness process from an older tagger is replaced by the next start
 from a newer one. On Linux, a live harness

@@ -131,17 +131,23 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   delays it. A subagent scan the sweep runs keeps a failed read of the session's own transcript,
   so it never stamps swept over it. That covers a
   deleted session, the 1 h limit on a never-written session, and a directory whose watch failed.
+- **A served session whose tree has a directory that cannot be watched has its subagents read**
+  by the sweep, at most once per 667 ms, since no watch event comes for a subagent written there.
 - **A failed directory watch is retried** by the sweep every 10 s while a served session, or a session dropped for idling, needs it.
   Meanwhile the sweep reads the size of each session dropped for idling in such a directory, and
   a write adopts it again.
 
 ### Harness exit (A12, decision B; F17; I28, decision F)
 
-- **A harness with no served session and no adoption pending stops after
-  `WTFT_DAEMON_IDLE_MS`** (24 h), after serving any request posted since its last read of them.
-  A request posted between that read and the pid file's removal is left in the request directory
-  for the next harness; like the lease race, it needs two processes inside one short gap. Sessions it dropped for idling go into its hand-off, so the next
-  harness watches them.
+- **A session dropped for idling is forgotten `WTFT_DAEMON_IDLE_MS` after it was dropped** unless
+  it is written first. The hand-off carries when it was dropped, so a later harness does not
+  restart that clock.
+- **A harness with no served session, no adoption pending and no session dropped for idling stops
+  after `WTFT_DAEMON_IDLE_MS`** (24 h), after serving any request posted since its last read of
+  them, so it hands nothing on. A request posted between that read and the pid file's removal is
+  left in the request directory for the next harness; like the lease race, it needs two processes
+  inside one short gap. A harness stopped for any other reason hands on the sessions it dropped
+  for idling, so the next harness watches them.
 - **A harness whose root directory is gone stops** at its next sweep.
 - **`--cleanup` never stops a harness** (decision E, I26), fixture or not. A harness drops what it
   no longer serves, and stops when it serves nothing.
@@ -166,7 +172,7 @@ fix failed before it. These have no check of their own, and why:
   displayed flag; the hand-off removed when nothing is served or idle; a per-session lease holder
   still signalled on adoption; the stop line for `session removed` and `session never written`;
   the resume leaving a folded `claude -p` transcript to the one folding it; the held turn of a
-  transcript no longer found written under the source its earlier lines carry; the generation record written before that held turn when its transcript opened none; Pi `/wtft -F` not asking for the session when busy; `wtft -F` exiting 1 on a failed daemon spawn; the stale-version remedy for a tag of a newer build; the pruned held turn skipped when its transcript was read again under the same source in the same scan; a later line of the same message merging its claude -p commands into the open lookup; the scan-continuation marker re-keyed on a move; an idle harness serving a request posted since its last read before it stops.
+  transcript no longer found written under the source its earlier lines carry; the generation record written before that held turn when its transcript opened none; Pi `/wtft -F` not asking for the session when busy; `wtft -F` exiting 1 on a failed daemon spawn; the stale-version remedy for a tag of a newer build; the pruned held turn skipped when its transcript was read again under the same source in the same scan; a later line of the same message merging its claude -p commands into the open lookup; the scan-continuation marker re-keyed on a move; an idle harness serving a request posted since its last read before it stops; the sweep reading the subagents of a session whose tree has an unwatchable directory; the sweep not re-waking an idle session whose adoption retry is pending.
 - **The 1 h limit on a never-written session** takes an hour and has no knob.
 - **A sweep-driven scan keeping a failed session read**: that scan reads the session's first line
   for Pi discovery, so a transcript that cannot be opened fails the scan by itself; only a read

@@ -1892,6 +1892,7 @@ function wake(file: string, displayed: boolean) {
     adoptionRetries.delete(key);
     idleDropped.delete(key);
     idleDroppedSize.delete(key);
+    idleDroppedAt.delete(key);
     watchSession(key);
   } else if (displayed) {
     slot.displayed = true;
@@ -2000,8 +2001,12 @@ const idleDropped = new Map<string, boolean>();
 /** Each idle-dropped transcript's size when dropped, for the sweep to notice
  *  a write where the directory cannot be watched. */
 const idleDroppedSize = new Map<string, number>();
-function dropForIdle(key: string, displayed: boolean) {
+/** When each was dropped. One not written for WTFT_DAEMON_IDLE_MS after that
+ *  is forgotten, so a harness serving nothing can stop with nothing to hand on. */
+const idleDroppedAt = new Map<string, number>();
+function dropForIdle(key: string, displayed: boolean, since = idleDroppedAt.get(key) ?? Date.now()) {
   idleDropped.set(key, displayed);
+  idleDroppedAt.set(key, since);
   let size = -1;
   try { size = fs.statSync(key).size; } catch { /* gone */ }
   idleDroppedSize.set(key, size);
@@ -2350,6 +2355,7 @@ function dropHarnessSlot(key: string, reason = "") {
   subagentScansContinuing.delete(key);
   reseedPending.delete(key);
   adoptionRetries.delete(key);
+  unwatchedTreeScanAt.delete(key);
   unwatchSession(key);
   if (slot) releaseLease(slot);
   if (process.env.WTFT_DAEMON_DEBUG) {
@@ -2372,8 +2378,20 @@ function releaseLease(slot: Slot) {
   } catch { /* already gone */ }
 }
 
+/** When each served session last had its subagents read because a directory
+ *  of its tree cannot be watched. */
+const unwatchedTreeScanAt = new Map<string, number>();
+
 function slotNeedsChildScan(slot: Slot, now: number): boolean {
   if (slot.pendingClaudeCommands.length > 0) return true;
+  // No watch event will come for a subagent written there, so it is polled.
+  const tree = slot.sessionPath.replace(/\.jsonl$/, "");
+  const key = path.resolve(slot.sessionPath);
+  if (now - (unwatchedTreeScanAt.get(key) ?? 0) >= POLL_MS
+    && [...unwatchedDirs.keys()].some(dir => dir === tree || dir.startsWith(tree + path.sep) || tree.startsWith(dir + path.sep))) {
+    unwatchedTreeScanAt.set(key, now);
+    return true;
+  }
   if (reseedPending.has(path.resolve(slot.sessionPath))) return true;
   for (const state of slot.discoveredSubagentFiles.values()) {
     if (state.pendingTurn) return true;
@@ -2439,14 +2457,15 @@ function sweepIdleSlots() {
   }
   takeFocusRequests();
   const now = Date.now();
-  if (now - idleDroppedPrunedAt >= 60_000) {
-    idleDroppedPrunedAt = now;
-    for (const key of [...idleDropped.keys()]) {
-      if (fs.existsSync(key)) continue;
-      idleDropped.delete(key);
-      idleDroppedSize.delete(key);
-      unwatchSession(key);
-    }
+  const pruneGone = now - idleDroppedPrunedAt >= 60_000;
+  if (pruneGone) idleDroppedPrunedAt = now;
+  for (const key of [...idleDropped.keys()]) {
+    const aged = now - (idleDroppedAt.get(key) ?? now) >= IDLE_EXIT_MS;
+    if (!aged && !(pruneGone && !fs.existsSync(key))) continue;
+    idleDropped.delete(key);
+    idleDroppedSize.delete(key);
+    idleDroppedAt.delete(key);
+    unwatchSession(key);
   }
   for (const key of [...harnessSlots.keys()]) {
     const slot = harnessSlots.get(key);
@@ -2486,7 +2505,7 @@ function sweepIdleSlots() {
     dropHarnessSlot(key, "idle timeout");
   }
   for (const [key, displayed] of [...idleDropped]) {
-    if (!unwatchedDirs.has(path.dirname(key))) continue;
+    if (!unwatchedDirs.has(path.dirname(key)) || adoptionRetryPending.has(key)) continue;
     let size = -1;
     try { size = fs.statSync(key).size; } catch { /* gone */ }
     if (size >= 0 && size !== idleDroppedSize.get(key)) wake(key, displayed);
@@ -2497,13 +2516,13 @@ function sweepIdleSlots() {
     else watchDir(dir, failed.recurse);
   }
   if (!focusWatcher) watchFocusRequests();
-  if (harnessSlots.size > 0 || adoptionRetryPending.size > 0) emptySinceMs = 0;
+  if (harnessSlots.size > 0 || adoptionRetryPending.size > 0 || idleDropped.size > 0) emptySinceMs = 0;
   else if (emptySinceMs === 0) emptySinceMs = now;
   else if (now - emptySinceMs >= IDLE_EXIT_MS) {
     // A request posted since this sweep read them would otherwise be left
     // with a lease pointing at a harness that is gone.
     takeFocusRequests();
-    if (harnessSlots.size === 0 && adoptionRetryPending.size === 0) {
+    if (harnessSlots.size === 0 && adoptionRetryPending.size === 0 && idleDropped.size === 0) {
       stopHarness("no session served");
       return;
     }
@@ -2525,7 +2544,7 @@ function servedHandOffFile(): string {
 
 function handOffLines(adopting?: string): string[] {
   const lines: string[] = [];
-  const entry = (kind: string, displayed: boolean, key: string) => JSON.stringify({ kind, displayed, path: key });
+  const entry = (kind: string, displayed: boolean, key: string, since?: number) => JSON.stringify({ kind, displayed, path: key, ...(since === undefined ? {} : { since }) });
   // A slot whose lease went elsewhere (--stop, another daemon) is not handed
   // on, except for a rebuild lease, which wants the session adopted again.
   for (const [key, slot] of harnessSlots) {
@@ -2537,7 +2556,7 @@ function handOffLines(adopting?: string): string[] {
   for (const [key, retry] of adoptionRetries) {
     if (!harnessSlots.has(key) && key !== adopting) lines.push(entry("served", retry.displayed, key));
   }
-  for (const [key, displayed] of idleDropped) lines.push(entry("idle", displayed, key));
+  for (const [key, displayed] of idleDropped) lines.push(entry("idle", displayed, key, idleDroppedAt.get(key)));
   return lines;
 }
 
@@ -2616,7 +2635,7 @@ function takeServedHandOff() {
   let unreadable = 0;
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
-    let record: { kind?: unknown; displayed?: unknown; path?: unknown } = {};
+    let record: { kind?: unknown; displayed?: unknown; path?: unknown; since?: unknown } = {};
     try { record = JSON.parse(line); } catch { unreadable++; continue; }
     const kind = record.kind;
     const displayed = record.displayed === true ? "1" : "0";
@@ -2627,7 +2646,7 @@ function takeServedHandOff() {
     // does for any session it is asked for.
     if (kind === "served") wake(key, displayed === "1");
     else if (kind === "idle" && fs.existsSync(key) && !harnessSlots.has(key)) {
-      dropForIdle(key, displayed === "1");
+      dropForIdle(key, displayed === "1", typeof record.since === "number" ? record.since : Date.now());
       watchDir(path.dirname(key), false);
     }
   }

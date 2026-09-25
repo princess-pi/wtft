@@ -416,8 +416,8 @@ try {
 		check(await until(() => read(h.err).includes("session drop empty-main.jsonl"), 15_000) !== Infinity, "fixture: the session is dropped for idling");
 		check(read(tag).includes('{"_hb":"stop","reason":"idle timeout"}'), "a harness dropping a session writes the stop line with its reason");
 		check(await until(() => !alive(h.pid), 10_000) !== Infinity, "a harness serving no session stops after WTFT_DAEMON_IDLE_MS");
-		check(read(`${harnessPidFile(root)}.served`).includes(`"kind":"idle","displayed":true,"path":${JSON.stringify(file)}`),
-			"and hands on the session it dropped for idling");
+		check(!read(`${harnessPidFile(root)}.served`).includes(JSON.stringify(file)),
+			"having forgotten the session it dropped for idling, it hands nothing on");
 		fs.rmSync(`${harnessPidFile(root)}.served`, { force: true });
 
 		const per = start(root, ["--session", file], "per.err");

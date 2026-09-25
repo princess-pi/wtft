@@ -594,10 +594,15 @@ async function main() {
 			stopped: "stopped the log parser daemon and deleted the tag files",
 			deleted: "deleted the tag files",
 			busy: "",
+			failed: "",
 		}[how];
 		// Nothing rebuilt: an error, with no report of the tag as it was.
 		if (how === "busy") {
 			console.error(`❌ Force re-parse: a log parser daemon for ${path.basename(finalSessionPath)} did not stop within 2 s, or another took the session meanwhile, so nothing was deleted. Run -F again once it has stopped.`);
+			process.exit(1);
+		}
+		if (how === "failed") {
+			console.error(`❌ Force re-parse: a lease or tag file of ${path.basename(finalSessionPath)} could not be deleted, so it would be resumed rather than rebuilt. Fix its permissions and run -F again.`);
 			process.exit(1);
 		}
 		if (!adopted) {

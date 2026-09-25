@@ -566,6 +566,19 @@ try {
 		const stale = spawnSync("node", [cli, "-F", "-s", file], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
 		check(stale.status !== 1 && !stale.stderr.includes("nothing was deleted"),
 			`-F over a lease left reading rebuild rebuilds instead of refusing (exit ${stale.status})`);
+		await sleep(1_500);
+		for (const pid of fs.readdirSync("/proc").filter(p => /^\d+$/.test(p)).map(Number)) {
+			if (read(`/proc/${pid}/cmdline`).includes(file)) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
+		}
+		await sleep(1_000);
+		const tagDir = path.dirname(getCurrentVersionTagPath(file));
+		check(fs.readdirSync(tagDir).some(f => f.includes(".wtft-tag.v")), "fixture: the session has a tag");
+		fs.rmSync(getDaemonPidPath(file), { force: true });
+		fs.chmodSync(tagDir, 0o555);
+		const locked = spawnSync("node", [cli, "-F", "-s", file], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+		fs.chmodSync(tagDir, 0o755);
+		check(locked.status === 1 && locked.stderr.includes("could not be deleted") && locked.stdout === "",
+			`-F exits 1 when a tag file cannot be deleted (exit ${locked.status})`);
 	}
 } finally {
 	for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }

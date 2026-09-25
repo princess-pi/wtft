@@ -389,6 +389,10 @@ export default function wtftExtension(pi: ExtensionAPI) {
 					return;
 				}
 				const how = forceRebuildSession(sessionFile);
+				if (how === "failed") {
+					ctx.ui.notify("A lease or tag file of this session could not be deleted, so it would be resumed rather than rebuilt — fix its permissions and run /wtft -F again.", "warning");
+					return;
+				}
 				if (how === "busy") {
 					ctx.ui.notify("A log parser daemon did not stop within 2 s, or another took the session meanwhile, so nothing was deleted — run /wtft -F again once it has stopped.", "warning");
 					return;

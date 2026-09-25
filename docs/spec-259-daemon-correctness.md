@@ -60,7 +60,7 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   session, and waiting keeps two writers off one tag.
 - **An older per-session build never takes over from a newer one** (A9). It takes over only from
   a tag of an older version. With a newer-version tag present and its lease held by a live
-  daemon, it exits 0. It never deletes a newer-version tag.
+  daemon, it exits 0; off Linux, where a daemon cannot be told apart, any live lease holder counts. It never deletes a newer-version tag.
 - **A daemon that gives up a lease logs it** (decision G): `gave up <session>: its lease now reads
   "<text>"`. Losing a lease is how a session passes to a newer build, so this is not an error.
 - **The lease race is a known limit** (decision G, H19). Releasing a lease is stat, read, stat,
@@ -93,7 +93,9 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   tag**, beside the transcript and in the sibling project where a moved session's tag lives. The
   CLI says whether a daemon was stopped. When the daemon is still running 2 s after the signal,
   or another daemon has claimed the lease meanwhile, nothing is deleted, and `-F` says so and
-  exits 1. The CLI and the Pi widget share one implementation, so
+  exits 1. So does a lease or tag file that cannot be deleted, since what is left would be resumed
+  rather than rebuilt, and a daemon that cannot be started. A harness lease that changed between
+  being read and being replaced is left alone, as busy. The CLI and the Pi widget share one implementation, so
   the widget now deletes every version too, not only the current one.
 - **`wtft --list`, `--cleanup`, `--restart` and `--stop` pass `wtft-daemon`'s exit code through**,
   and pass the session path as one argument, so a path with a space is not split.
@@ -158,7 +160,7 @@ fix failed before it. These have no check of their own, and why:
   displayed flag; the hand-off removed when nothing is served or idle; a per-session lease holder
   still signalled on adoption; the stop line for `session removed` and `session never written`;
   the resume leaving a folded `claude -p` transcript to the one folding it; the held turn of a
-  transcript no longer found written under the source its earlier lines carry; the generation record written before that held turn when its transcript opened none; Pi `/wtft -F` not asking for the session when busy; `wtft -F` exiting 1 on a failed daemon spawn; the stale-version remedy for a tag of a newer build.
+  transcript no longer found written under the source its earlier lines carry; the generation record written before that held turn when its transcript opened none; Pi `/wtft -F` not asking for the session when busy; `wtft -F` exiting 1 on a failed daemon spawn; the stale-version remedy for a tag of a newer build; the pruned held turn skipped when its transcript was read again under the same source in the same scan.
 - **The 1 h limit on a never-written session** takes an hour and has no knob.
 - **A sweep-driven scan keeping a failed session read**: that scan reads the session's first line
   for Pi discovery, so a transcript that cannot be opened fails the scan by itself; only a read
@@ -169,4 +171,6 @@ fix failed before it. These have no check of their own, and why:
 - **The request-directory watch re-arm** changes latency only, under the 250 ms sweep, and so
   does the 10 s retry of a failed directory watch.
 - **`--stop`'s `Not stopped` path** needs a lease to change inside one syscall gap.
-- **The lease race** needs two processes inside one syscall gap.
+- **The lease race**, and `-F` finding a harness lease changed before it replaces it, need two
+  processes inside one syscall gap.
+- **A9 off Linux** needs a host without `/proc`.

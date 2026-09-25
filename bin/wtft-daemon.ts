@@ -1000,11 +1000,14 @@ function scanForSubAgents() {
   // its new path) can never release a turn it holds.
   if (!pollHadFailure) {
     const found = new Set([...taskAgentFiles, ...discoveredClaudeFiles].map(canonicalTranscriptPath));
+    // A transcript already read again under the same source this scan has
+    // opened its new generation; a pruned line would land after it.
+    const liveSources = new Set([...discoveredSubagentFiles].filter(([key]) => found.has(key)).map(([, state]) => state.source));
     for (const [key, state] of [...discoveredSubagentFiles]) {
       if (found.has(key)) continue;
       // Its held turn was read from the file, so it is written; a moved
       // transcript read again under its new path opens a new generation.
-      if (state.pendingTurn) {
+      if (state.pendingTurn && !liveSources.has(state.source)) {
         const source = state.source || transcriptSourceId(key, path.dirname(sessionPath));
         const generation = state.newGeneration ? generationRecordLine(source, path.basename(key, ".jsonl")) : "";
         appendTagFile(tagPath, generation + serializeClassified(state.pendingTurn, source));
@@ -1731,6 +1734,13 @@ function withSlot<T>(slot: Slot, fn: () => T): T {
   } finally {
     save(slot);
   }
+}
+
+/** Off Linux a cmdline cannot be read, so any live pid counts. */
+function liveDaemonOrUnknown(pid: number): boolean {
+  if (fs.existsSync("/proc/self/cmdline")) return procIsDaemon(pid);
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (err) { return (err as NodeJS.ErrnoException).code === "EPERM"; }
 }
 
 function procIsDaemon(pid: number): boolean {
@@ -3059,7 +3069,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   try {
     const { older, newer } = otherTagVersions();
     // A newer build serving this session keeps it.
-    if (newer.length > 0 && procIsDaemon(Number(leaseHolder(pidPath)))) process.exit(0);
+    if (newer.length > 0 && liveDaemonOrUnknown(Number(leaseHolder(pidPath)))) process.exit(0);
     if (older.length > 0) {
       // Honor an existing rebuild lease before version-takeover claim.
       if (leaseHolder(pidPath) === "rebuild") rebuildTagOnStartup = true;

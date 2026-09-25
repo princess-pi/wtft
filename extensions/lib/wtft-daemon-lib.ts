@@ -554,11 +554,12 @@ export function getDaemonPidPath(sessionPath: string): string {
  * transcript or in the sibling project a moved session's tag lives in, are
  * deleted, after stopping a live per-session daemon ("stopped") or with none
  * running ("deleted"); a daemon still running 2 s after the signal, or one
- * that claimed the session meanwhile, leaves everything in place ("busy").
- * Unless busy, the caller then asks for the session. Telling a harness apart reads `/proc`, so off Linux a harness is stopped like a
+ * that claimed the session meanwhile, leaves everything in place ("busy"); a
+ * lease or tag that could not be deleted is "failed".
+ * Unless busy or failed, the caller then asks for the session. Telling a harness apart reads `/proc`, so off Linux a harness is stopped like a
  * per-session daemon.
  */
-export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" | "deleted" | "busy" {
+export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" | "deleted" | "busy" | "failed" {
 	const leasePath = getDaemonPidPath(sessionPath);
 	let pid = 0;
 	let initial = "";
@@ -571,6 +572,12 @@ export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" 
 	if (daemon && args.includes("--harness")) {
 		const replacement = `${leasePath}.force-${process.pid}`;
 		fs.writeFileSync(replacement, "rebuild");
+		let still = "";
+		try { still = fs.readFileSync(leasePath, "utf8").trim(); } catch { /* released */ }
+		if (still !== initial) {
+			fs.rmSync(replacement, { force: true });
+			return "busy";
+		}
 		fs.renameSync(replacement, leasePath);
 		return "rebuild";
 	}
@@ -591,14 +598,18 @@ export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" 
 	let now = "";
 	try { now = fs.readFileSync(leasePath, "utf8").trim(); } catch { /* released */ }
 	if (now !== "" && now !== initial) return "busy";
-	try { if (now !== "") fs.unlinkSync(leasePath); } catch { /* released meanwhile */ }
+	// Anything left behind would be resumed, not rebuilt, so any error but
+	// "already gone" fails the whole -F.
+	const gone = (err: unknown) => (err as NodeJS.ErrnoException).code === "ENOENT";
+	try { if (now !== "") fs.unlinkSync(leasePath); } catch (err) { if (!gone(err)) return "failed"; }
 	const prefix = path.basename(sessionPath) + ".wtft-tag.v";
 	for (const tagsDir of new Set([path.join(path.dirname(sessionPath), "wtft-tags"), path.dirname(getTagPath(sessionPath))])) {
-		try {
-			for (const f of fs.readdirSync(tagsDir)) {
-				if (f.startsWith(prefix) && f.endsWith(".jsonl")) fs.unlinkSync(path.join(tagsDir, f));
-			}
-		} catch { /* no tags yet */ }
+		let names: string[] = [];
+		try { names = fs.readdirSync(tagsDir); } catch (err) { if (!gone(err)) return "failed"; }
+		for (const f of names) {
+			if (!f.startsWith(prefix) || !f.endsWith(".jsonl")) continue;
+			try { fs.unlinkSync(path.join(tagsDir, f)); } catch (err) { if (!gone(err)) return "failed"; }
+		}
 	}
 	return stopped ? "stopped" : "deleted";
 }

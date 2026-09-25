@@ -548,8 +548,8 @@ export function getDaemonPidPath(sessionPath: string): string {
 
 /**
  * `wtft -F`: rederive one session's tag from its transcript. A session a
- * harness daemon serves gets a `rebuild` lease, which that harness rebuilds on
- * the next request for it, so the harness and its other sessions keep running
+ * harness daemon serves gets a `rebuild` lease, which that harness rebuilds as
+ * soon as it sees it, so the harness and its other sessions keep running
  * ("rebuild"). Otherwise the lease and every version of the tag, beside the
  * transcript or in the sibling project a moved session's tag lives in, are
  * deleted, after stopping a live per-session daemon ("stopped") or with none

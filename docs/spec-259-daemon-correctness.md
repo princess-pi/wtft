@@ -50,7 +50,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 ### Leases
 
 - **Adoption never signals a harness** (decision H, A5). A harness asked for a session whose
-  lease names another live harness does not take it; it retries (below). A per-session daemon
+  lease names another live harness does not take it; it retries (below). A focus request never
+  repoints a lease another live daemon holds; the harness's adoption takes it by these rules. A per-session daemon
   holding the lease is still stopped with SIGTERM and waited for, because it serves only that
   session, and waiting keeps two writers off one tag.
 - **An older per-session build never takes over from a newer one** (A9). It takes over only from
@@ -97,7 +98,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   addressed to a harness that was displaced after it was posted is served by the harness that
   holds the root now.
 - **A stopping harness passes on unread requests.** Requests still in its request directory go
-  into its hand-off as served sessions, before the directory is removed.
+  into its hand-off as served sessions. The directory is not removed, so a request posted while
+  it stops is served by the next harness.
 - **The request-directory watch is re-armed** by the next sweep after it fails (A10).
 
 ### Hand-off (I24, I27)

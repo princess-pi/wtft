@@ -929,11 +929,12 @@ function scanForSubAgents() {
       subagentScansContinuing.add(key);
       const owner = harnessSlots.get(key);
       const next = () => {
-        subagentScansContinuing.delete(key);
-        // The slot may have moved to a new path since the cut.
+        // The slot may have moved to a new path since the cut. A slot dropped
+        // meanwhile left the marker to whatever slot took its key.
         const current = owner ? path.resolve(owner.sessionPath) : key;
         const slot = harnessSlots.get(current) === owner ? owner : undefined;
         if (!slot || !running) return;
+        subagentScansContinuing.delete(key);
         if (!leaseStillOurs(slot)) {
           leaseLost(current, slot);
           return;
@@ -1122,6 +1123,7 @@ function followMovedSession(): boolean {
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] session moved: ${sessionPath} -> ${moved}\n`);
   }
+  if (reseedPending.delete(path.resolve(sessionPath))) reseedPending.add(path.resolve(moved));
   sessionPath = moved;
   return true;
 }
@@ -1325,6 +1327,10 @@ function reapAndWarn() {
   }
 }
 
+/** Sessions whose reseed could not finish: tried again each scan, and the tag
+ *  is not stamped swept until it does. */
+const reseedPending = new Set<string>();
+
 /**
  * On resume, the turns that ran `claude -p` are before the offset, so
  * discovery never finds their transcripts again; the tag's generation records
@@ -1334,10 +1340,6 @@ function reapAndWarn() {
  * folds is left to that one. Transcripts discovery does find
  * (`<id>/subagents/`, Pi siblings) are left to it.
  */
-/** Sessions whose reseed could not finish: tried again each scan, and the tag
- *  is not stamped swept until it does. */
-const reseedPending = new Set<string>();
-
 function reseedClaudeChildren(tagContent: string, quiet = false): boolean {
   const children = new Map<string, string>();
   /** Child session id to the source of the transcript folding it, as of the
@@ -1962,6 +1964,8 @@ function retryAdoptionLater(key: string, displayed: boolean) {
       : holder && holder !== String(process.pid) ? `its lease names ${holder}`
       : "its lease could not be claimed";
     process.stderr.write(`[wtft-log-parser] could not adopt ${key}: ${why}\n`);
+    // Not tried again until it is written again.
+    if (idleDropped.has(key)) dropForIdle(key, idleDropped.get(key)!);
     // A reader must not be told the session is served.
     unlinkIfHolds(lease, String(process.pid));
     if (!fs.existsSync(lease)) {
@@ -2085,8 +2089,10 @@ function pointSessionAt(livePid: number, file: string): boolean {
   try { leaseText = fs.readFileSync(lease, "utf8").trim(); } catch { /* no lease yet */ }
   const holder = Number(leaseText);
   held = holder === livePid;
-  // A rebuild token stays for the harness to read when it adopts.
-  if (leaseText !== "rebuild") {
+  // A rebuild token stays for the harness to read when it adopts, and a lease
+  // another live daemon holds is left for the harness's adoption to take by
+  // its own rules (never from a harness; a per-session daemon is stopped first).
+  if (leaseText !== "rebuild" && (held || !procIsDaemon(holder))) {
     const replacement = `${lease}.replace-${process.pid}`;
     fs.writeFileSync(replacement, String(livePid));
     fs.renameSync(replacement, lease);
@@ -2367,7 +2373,7 @@ function sweepIdleSlots() {
       slot.checkedAtMs = now;
       let st: fs.Stats | null = null;
       try { st = fs.statSync(slot.sessionPath); } catch { /* gone, or not written yet */ }
-      if (!st || st.ino !== slot.sessionIno || st.size !== slot.lastSize) {
+      if (!st || st.ino !== slot.sessionIno || st.size !== slot.lastSize || slot.pendingFragment.length > 0) {
         wake(key, slot.displayed);
         if (harnessSlots.get(key) !== slot) continue;
       }
@@ -2551,12 +2557,9 @@ function stopHarness(reason: string, exitCode = 0) {
   if (harnessPidFile) {
     try {
       if (fs.readFileSync(harnessPidFile, "utf8").trim() === String(process.pid)) {
-        // Unlinked first, so a requester's check after posting fails from here
-        // on, and a request posted before it is still in the directory.
+        // The request directory stays: a request posted while this harness
+        // stopped is served by the next one, which serves any request.
         fs.unlinkSync(harnessPidFile);
-        const late = claimFocusRequests();
-        if (late.length > 0) writeServedHandOff(undefined, [...asked, ...late]);
-        fs.rmSync(`${harnessPidFile}.focus.d`, { recursive: true, force: true });
       }
     } catch { /* already gone */ }
     fs.rmSync(harnessVersionFile(process.pid), { force: true });

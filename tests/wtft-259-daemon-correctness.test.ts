@@ -186,6 +186,14 @@ try {
 		await until(() => read(b.err).includes("could not adopt") || !alive(a.pid), 10_000);
 		check(alive(a.pid), "harness B asked for a session whose lease names harness A leaves A running");
 		check(read(getDaemonPidPath(fileA)).trim() === String(a.pid), "and A keeps the lease");
+		// The same, through a focus request to a harness B already running.
+		const otherB = session(rootB, "sig-b-other");
+		run(rootB, ["--harness", "claude", "--session", otherB]);
+		check(await until(() => classified(otherB, "sig-b-other") || !alive(b.pid), 10_000) !== Infinity && alive(b.pid), "fixture: harness B serves another session");
+		run(rootB, ["--harness", "claude", "--session", fileB]);
+		await sleep(1_500);
+		check(alive(a.pid) && read(getDaemonPidPath(fileA)).trim() === String(a.pid),
+			"a focus request to harness B does not repoint a lease harness A holds");
 		for (const pid of [a.pid, b.pid]) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 	}
 

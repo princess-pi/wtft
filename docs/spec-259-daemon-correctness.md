@@ -38,11 +38,11 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 
 - **A resumed session reads again the `claude -p` transcripts it read before.** A daemon adopting
   a tag at its saved offset finds, from the tag's generation records, each subagent transcript an
-  earlier daemon read that is not under the session's own directory. Each one written since the
-  tag's last swept stamp (less 2 s, for coarse mtimes) is read again from its start, as a new
-  generation, so what it gained while nothing served the session is counted. A transcript another
-  one folds (a `_fold` record names it under the other's source) is never read on its own: the
-  one that folds it is read again when either changed. A `claude -p` session spawned within the 15 s
+  earlier daemon read that is not under the session's own directory, and reads it again from its
+  start, as a new generation. So what it gained while nothing served the session is counted, and
+  so is what it writes from then on. A transcript another one currently folds (a `_fold` record
+  under the other's source, not retired by a later generation of it) is left to that one. A
+  projects directory or transcript that cannot be read is reported on stderr. A `claude -p` session spawned within the 15 s
   discovery window before the restart, and not yet on disk at the earlier daemon's last scan, is
   still missed: that is a known limit.
 
@@ -67,11 +67,11 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 ### Adoption
 
 - **A failed adoption gives up loudly** (A3, F14). After the first try and five retries 667 ms
-  apart, or as soon as the transcript is gone, the harness
+  apart, the harness
   writes `could not adopt <session>: <reason>` to stderr, and removes the lease and `.display`
   marker if they still name it, so no reader is told the session is served.
-- **A wake for a session whose lease reads `rebuild` adopts it again.** The old slot is dropped
-  first, so the session is rebuilt on the next request. Any other lease that is not the harness's
+- **A served session whose lease reads `rebuild` is adopted again**, whether a wake, the sweep or
+  a flush finds it, so the session is rebuilt at once. Any other lease that is not the harness's
   drops the session, as `--stop` means.
 
 ### `wtft -F` (decision M)
@@ -79,7 +79,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 - **On a session a harness serves, `-F` rebuilds that one session.** It replaces the lease with
   `rebuild` and asks the harness for the session, which rebuilds the tag from the transcript. The
   harness and its other sessions are untouched. The CLI waits until the harness has adopted the
-  session before it reads the tag, so its own report is of the rebuild. Telling a harness apart
+  session before it reads the tag, so its own report is of the rebuild; after 10 s it says the
+  harness has not taken the session up, and reports the tag as it was. Telling a harness apart
   reads `/proc`, so this holds on Linux; elsewhere the harness is stopped as below.
 - **Otherwise `-F` stops a live per-session daemon and deletes every version of the session's
   tag**, beside the transcript and in the sibling project where a moved session's tag lives. The
@@ -137,8 +138,14 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 
 ## Closer
 
-`tests/wtft-259-daemon-correctness.test.ts`, one check per behaviour above, each failing before
-its fix. Not reached by the suite, and why:
+`tests/wtft-259-daemon-correctness.test.ts` checks the behaviours above; each check that pins a
+fix failed before it. These have no check of their own, and why:
+
+- **Held by reading the code, too small to be worth a fixture:** a retrying session handed on with
+  its displayed flag; the hand-off removed when nothing is served or idle; a per-session lease
+  holder still signalled on adoption; the stop line for `session removed` and `session never
+  written`; the resume leaving a folded `claude -p` transcript to the one folding it.
+- **The 1 h limit on a never-written session** takes an hour and has no knob.
 
 - **`--cleanup`** stops fixture daemons under `/tmp`, including those of suites running beside
   it, so its harness rule (decision E) is checked by reading the code.

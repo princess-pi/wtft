@@ -929,7 +929,7 @@ function scanForSubAgents() {
         const slot = harnessSlots.get(current) === owner ? owner : undefined;
         if (!slot || !running) return;
         if (!leaseStillOurs(slot)) {
-          dropHarnessSlot(current);
+          leaseLost(current, slot);
           return;
         }
         withSlot(slot, () => scanForSubAgents());
@@ -1322,58 +1322,58 @@ function reapAndWarn() {
 /**
  * On resume, the turns that ran `claude -p` are before the offset, so
  * discovery never finds their transcripts again; the tag's generation records
- * name them. Each one written since the tag was last stamped swept is read
- * again from its start, as a new generation. Transcripts discovery does find
+ * name them. Each is registered again and read from its start, as a new
+ * generation, so both what it gained while nothing served the session and
+ * what it writes from now on are counted. One another transcript currently
+ * folds is left to that one. Transcripts discovery does find
  * (`<id>/subagents/`, Pi siblings) are left to it.
  */
 function reseedClaudeChildren(tagContent: string) {
   const children = new Map<string, string>();
-  /** Child session id to the source of a transcript that folds it. */
+  /** Child session id to the source of the transcript folding it, as of the
+   *  last generation of that source: a `_gen` retires its earlier folds. */
   const foldedBy = new Map<string, string>();
-  let sweptAt = 0;
   for (const line of tagContent.split("\n")) {
-    if (!line.includes('"_gen"') && !line.includes('"swept"') && !line.includes('"_fold"')) continue;
-    let obj: { _gen?: { s?: unknown; session?: unknown }; _meta?: { swept?: unknown }; _fold?: { child?: unknown; s?: unknown } };
+    if (!line.includes('"_gen"') && !line.includes('"_fold"')) continue;
+    let obj: { _gen?: { s?: unknown; session?: unknown }; _fold?: { child?: unknown; s?: unknown } };
     try { obj = JSON.parse(line); } catch { continue; }
-    if (typeof obj._gen?.s === "string" && typeof obj._gen.session === "string") children.set(obj._gen.s, obj._gen.session);
+    const gen = obj._gen;
+    if (typeof gen?.s === "string" && typeof gen.session === "string") {
+      children.set(gen.s, gen.session);
+      for (const [child, holder] of [...foldedBy]) if (holder === gen.s) foldedBy.delete(child);
+    }
     if (typeof obj._fold?.child === "string" && typeof obj._fold.s === "string") foldedBy.set(obj._fold.child, obj._fold.s);
-    if (typeof obj._meta?.swept === "number") sweptAt = Math.max(sweptAt, obj._meta.swept);
   }
   if (children.size === 0) return;
+  const warn = (what: string, err: unknown) => process.stderr.write(
+    `[wtft-log-parser] WARNING: ${what}, so a claude -p transcript read before this daemon started may be missing from this session's total: ${err instanceof Error ? err.message : String(err)}\n`);
   const found = new Set<string>();
   try {
     for (const file of discoverSubagentSessionFiles(sessionPath).files) found.add(canonicalTranscriptPath(file));
   } catch { /* the scan reports it */ }
   let dirs: string[] = [];
-  try { dirs = fs.readdirSync(projectsDir()); } catch { return; }
+  try {
+    dirs = fs.readdirSync(projectsDir());
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") warn("the projects directory could not be read", err);
+    return;
+  }
   const sessionDir = path.dirname(sessionPath);
-  // The margin covers an append between a scan's read and its stamp, and a
-  // coarse mtime; reading a transcript again costs a generation, not a total.
-  const resolved = new Map<string, { id: string; file: string; changed: boolean }>();
   for (const [source, id] of children) {
+    const holder = foldedBy.get(id);
+    if (holder !== undefined && holder !== source) continue;
     for (const dir of dirs) {
       const file = canonicalTranscriptPath(path.join(projectsDir(), dir, `${id}.jsonl`));
-      let mtimeMs: number;
-      try { mtimeMs = fs.statSync(file).mtimeMs; } catch { continue; }
+      try {
+        fs.statSync(file);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT" && (err as NodeJS.ErrnoException).code !== "ENOTDIR") warn(`${file} could not be stat'd`, err);
+        continue;
+      }
       if (transcriptSourceId(file, sessionDir) !== source) continue;
-      resolved.set(source, { id, file, changed: mtimeMs >= sweptAt - MTIME_SETTLE_MS });
+      if (!found.has(file)) discoveredClaudeFiles.add(file);
       break;
     }
-  }
-  // A transcript another one folds is counted in that one's lines: read the
-  // holder again when either changed, never the folded one on its own.
-  const reread = new Set<string>();
-  for (const [source, child] of resolved) {
-    const holder = foldedBy.get(child.id);
-    if (holder !== undefined && holder !== source) {
-      if (child.changed && resolved.has(holder)) reread.add(holder);
-      continue;
-    }
-    if (child.changed) reread.add(source);
-  }
-  for (const source of reread) {
-    const file = resolved.get(source)!.file;
-    if (!found.has(file)) discoveredClaudeFiles.add(file);
   }
 }
 
@@ -1761,7 +1761,7 @@ function scheduleFlush(key: string) {
     const current = harnessSlots.get(key);
     if (!current) return;
     if (!leaseStillOurs(current)) {
-      dropHarnessSlot(key);
+      leaseLost(key, current);
       return;
     }
     withSlot(current, () => {
@@ -1930,12 +1930,11 @@ function retryAdoptionLater(key: string, displayed: boolean) {
   if (!running) return;
   if (adoptionRetryPending.has(key)) return;
   const tries = (adoptionRetries.get(key)?.tries ?? 0) + 1;
-  if (tries > 5 || !fs.existsSync(key)) {
+  if (tries > 5) {
     adoptionRetries.delete(key);
     const lease = getDaemonPidPath(key);
     const holder = leaseHolder(lease);
-    const why = !fs.existsSync(key) ? "its transcript is gone"
-      : key.includes(".wtft-tag.v") ? "it is a tag file"
+    const why = key.includes(".wtft-tag.v") ? "it is a tag file"
       : holder && holder !== String(process.pid) ? `its lease names ${holder}`
       : "its lease could not be claimed";
     process.stderr.write(`[wtft-log-parser] could not adopt ${key}: ${why}\n`);
@@ -2278,6 +2277,13 @@ function leaseStillOurs(slot: Slot): boolean {
   return leaseHolder(slot.pidPath) === String(process.pid);
 }
 
+/** A served session whose lease is not ours any more: one reading `rebuild`
+ *  (wtft -F) is adopted afresh, anything else dropped. */
+function leaseLost(key: string, slot: Slot) {
+  if (slot.pidPath && leaseHolder(slot.pidPath) === "rebuild") wake(key, slot.displayed);
+  else dropHarnessSlot(key);
+}
+
 /** What a lease names, or "" when there is none. */
 function leaseHolder(lease: string): string {
   try { return fs.readFileSync(lease, "utf8").trim(); } catch { return ""; }
@@ -2326,7 +2332,7 @@ function sweepIdleSlots() {
     const slot = harnessSlots.get(key);
     if (!slot) continue;
     if (!leaseStillOurs(slot)) {
-      dropHarnessSlot(key);
+      leaseLost(key, slot);
       continue;
     }
     // A lost or missing watch event only delays a wake: a transcript that is
@@ -2606,7 +2612,8 @@ Daemon mode:
   -h, --help            Show this help
 
 Environment:
-  WTFT_DAEMON_IDLE_MS          Milliseconds with no new lines before a session is dropped (default 86400000)
+  WTFT_DAEMON_IDLE_MS          Milliseconds with no new lines before a session is dropped, and with no
+                               session served before a harness stops (default 86400000)
   WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after start before that drop can fire (default 60000)
   WTFT_HARNESS_SCAN_SLICE_MS   Milliseconds one slice of a harness's subagent scan runs before it yields (default 25)
   WTFT_HARNESS_SCAN_YIELD_MS   Milliseconds a harness pauses between those slices (default 0)`);

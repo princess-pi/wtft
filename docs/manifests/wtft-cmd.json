@@ -309,15 +309,15 @@
   "exitCodes": [
     {
       "code": 0,
-      "meaning": "Report produced — including when there is nothing to report yet (session file not written, or a tag with no classified data). Under --json the report is one JSON object on stdout; the commands that run instead of a report (--help/--why/--version, and spawn-record on a successful append or --help) also exit 0 and print their own output. --list/--cleanup/--restart/--stop print wtft-daemon's output and exit with its code: 0 when it succeeded, 1 when --stop found the lease changed under it, 2 on a bad argument."
+      "meaning": "Report produced — including when there is nothing to report yet (session file not written, or a tag with no classified data). Under --json the report is one JSON object on stdout; the commands that run instead of a report (--help/--why/--version, and spawn-record on a successful append or --help) also exit 0 and print their own output. --list/--cleanup/--restart/--stop print wtft-daemon's output and exit with its code: 0 when it succeeded, 1 when --stop could not drop a session because its lease changed or could not be removed, or when wtft-daemon could not be run within 10 s."
     },
     {
       "code": 1,
-      "meaning": "Error: no session found or selected, an invalid path, a daemon that could not be spawned or that died before producing data, a refused flag (-p), a read error other than a missing path in a harness's session tree (Claude Code's projects directory today) while --json or --tokens lists unrecorded spawns (#212: never a quiet []), or an unhandled exception. Reason on stderr; under --json stdout carries nothing."
+      "meaning": "Error: no session found or selected, an invalid path, a daemon that could not be spawned or that died before producing data, a refused flag (-p), --stop unable to drop a session, --list/--cleanup/--restart/--stop unable to run wtft-daemon within 10 s, a read error other than a missing path in a harness's session tree (Claude Code's projects directory today) while --json or --tokens lists unrecorded spawns (#212: never a quiet []), or an unhandled exception. Reason on stderr; under --json stdout carries nothing."
     },
     {
       "code": 2,
-      "meaning": "`wtft spawn-record` (#116): the call was wrong -- a missing required flag, an unknown flag, a flag with no value, a malformed session id, or an oversized field. Nothing was appended. Also --list/--cleanup/--restart/--stop passing on wtft-daemon's own exit 2 for a bad argument. The report path never exits 2."
+      "meaning": "`wtft spawn-record` (#116): the call was wrong -- a missing required flag, an unknown flag, a flag with no value, a malformed session id, or an oversized field. Nothing was appended. The report path never exits 2."
     },
     {
       "code": 3,

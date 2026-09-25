@@ -307,9 +307,9 @@
         statement, so on a session the daemon is about to repair, the read races the daemon it
         just started &mdash; and loses. On the measured specimen that was <strong>$79.74 against a
         true $84.59</strong>, a 5.7% undercount printed exactly like a settled total.</p>
-        <p>The daemon now appends a <code>_meta.swept</code> marker once its first sub-agent sweep
-        completes. Its <em>absence</em> means no sub-agent transcript has been read since the tag
-        was written. A read is <strong>provisional</strong> when either holds:</p>
+        <p>The daemon now appends a <code>_meta.swept</code> marker once a sub-agent sweep has read
+        every sub-agent transcript and written every sub-agent turn. Its <em>absence</em> means the
+        sub-agents have not all been read into the tag since it was last written. A read is <strong>provisional</strong> when either holds:</p>
         <ul>
             <li><code>stale-version</code> &mdash; the resolved tag is not at the current tagger
             version, so its numbers are at superseded semantics</li>

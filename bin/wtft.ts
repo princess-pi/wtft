@@ -468,7 +468,7 @@ async function main() {
 		if (result.stdout) console.log(result.stdout.trim());
 		if (result.stderr) console.error(result.stderr.trim());
 		if (result.error) console.error(result.error.message);
-		process.exitCode = result.status ?? 1;
+		process.exitCode = result.error ? 1 : result.status ?? 1;
 		return;
 	}
 
@@ -563,15 +563,18 @@ async function main() {
 	// ---
 	if (opts.forceReparse) {
 		const how = forceRebuildSession(finalSessionPath);
+		let adopted = true;
 		if (how === "rebuild") {
 			// The report below reads the tag, so wait until the harness has
-			// adopted the session, which truncates it; the rebuild follows.
+			// adopted the session; it truncates the tag in the same step as it
+			// claims the lease, and the pause after covers that step.
 			spawnWtftDaemon(finalSessionPath, daemonDir);
 			const lease = getDaemonPidPath(finalSessionPath);
-			for (const until = Date.now() + 10_000; Date.now() < until;) {
+			adopted = false;
+			for (const until = Date.now() + 10_000; Date.now() < until && !adopted;) {
 				let held = "";
 				try { held = fs.readFileSync(lease, "utf8").trim(); } catch { /* not claimed yet */ }
-				if (held !== "rebuild" && held !== "") break;
+				adopted = held !== "rebuild" && held !== "";
 				await new Promise(resolve => setTimeout(resolve, 100));
 			}
 		}
@@ -581,6 +584,9 @@ async function main() {
 			deleted: "deleted the tag files",
 		}[how];
 		console.error(`\x1b[33mForce re-parse: ${what} for ${path.basename(finalSessionPath)}\x1b[0m`);
+		if (!adopted) {
+			console.error(`\x1b[33mThe harness log parser daemon has not taken the session up after 10 s; this report is of the tag as it was, and the rebuild starts when the harness is next asked for the session.\x1b[0m`);
+		}
 	}
 
 	// ---

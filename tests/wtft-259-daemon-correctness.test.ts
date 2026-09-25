@@ -313,6 +313,8 @@ try {
 		const h = start(root, ["--harness", "claude", "--session", first], "focus.err");
 		check(await until(() => classified(first, "focus-first"), 15_000) !== Infinity, "fixture: a harness serves a session");
 		const dir = `${harnessPidFile(root)}.focus.d`;
+		// The harness makes its request directory after it serves its first session.
+		check(await until(() => fs.existsSync(dir), 5_000) !== Infinity, "fixture: the harness made its request directory");
 		// Posted as a requester posts one, by rename: a harness woken by the
 		// create would otherwise claim the file before its text is written.
 		fs.writeFileSync(path.join(dir, "1.tmp"), JSON.stringify({ pid: 1, path: other }));
@@ -479,6 +481,8 @@ try {
 		const h = start(root, ["--harness", "claude", "--session", file], "spin.err");
 		check(await until(() => classified(file, "spin-main"), 15_000) !== Infinity, "fixture: a harness is up");
 		const dir = `${harnessPidFile(root)}.focus.d`;
+		// The harness makes its request directory after it serves its first session.
+		check(await until(() => fs.existsSync(dir), 5_000) !== Infinity, "fixture: the harness made its request directory");
 		fs.chmodSync(dir, 0o500);
 		try {
 			const timed = spawnSync("bash", ["-c", `TIMEFORMAT=%U; time node ${JSON.stringify(DAEMON)} --harness claude --session ${JSON.stringify(other)}`],

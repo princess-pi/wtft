@@ -246,11 +246,19 @@ const pkgVersion = JSON.parse(
 
 generateHarnessRegistry();
 
+/** A suite running beside a rebuild reads the old bundle or the new one, never half of one. */
+function writeAtomically(file: string, text: string, mode: number) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, text, { mode });
+  fs.chmodSync(tmp, mode);
+  fs.renameSync(tmp, file);
+}
+
 let errors = 0;
 for (const { src, out } of entries) {
   const result = await Bun.build({
     entrypoints: [path.join(import.meta.dir, src)],
-    outdir: BIN,
     format: "esm",
     target: "node",
     naming: out,
@@ -280,10 +288,9 @@ for (const { src, out } of entries) {
   // package.json's `engines: >=18` promises. Nothing caught it because every
   // test ran the artifact as `node <file>`, never by its own shebang.
   const file = path.join(BIN, out);
-  const code = fs.readFileSync(file, "utf8");
+  const code = await result.outputs[0].text();
   const nl = code.startsWith("#!") ? code.indexOf("\n") + 1 : 0;
-  fs.writeFileSync(file, "#!/usr/bin/env node\n" + noticeFor(code) + code.slice(nl));
-  fs.chmodSync(file, 0o755);
+  writeAtomically(file, "#!/usr/bin/env node\n" + noticeFor(code) + code.slice(nl), 0o755);
 
   console.log(`✅ bin/${out} (${(fs.statSync(file).size / 1024).toFixed(0)} KB)`);
 }
@@ -295,7 +302,6 @@ for (const { src, out } of entries) {
 for (const { src, out } of extensionEntries) {
   const result = await Bun.build({
     entrypoints: [path.join(import.meta.dir, src)],
-    outdir: PI,
     format: "esm",
     target: "node",
     naming: out,
@@ -311,8 +317,8 @@ for (const { src, out } of extensionEntries) {
   }
 
   const file = path.join(PI, out);
-  const code = fs.readFileSync(file, "utf8");
-  fs.writeFileSync(file, noticeFor(code) + code);
+  const code = await result.outputs[0].text();
+  writeAtomically(file, noticeFor(code) + code, 0o644);
 
   console.log(`✅ pi/${out} (${(fs.statSync(file).size / 1024).toFixed(0)} KB)`);
 }

@@ -244,6 +244,7 @@ function truncatePartialTail(path: string): boolean {
 
 /** Stop after an append whose on-disk extent is unknowable; publish a rebuild lease for the next owner. */
 function fatalTagMutation(filePath: string, operation: "append" | "rebuild truncate" | "partial-tail truncate", err: unknown): never {
+  if (running && harnessMode && holdsHarnessRoot()) writeServedHandOff();
   running = false;
   let markedForRebuild = false;
   try {
@@ -1869,13 +1870,6 @@ function procIsReparse(pid: number): boolean {
   return args.includes("--reparse") || args.includes("--reparse-range");
 }
 
-function parentSessionFile(child: string): string | null {
-  const marker = `${path.sep}subagents${path.sep}`;
-  const at = child.indexOf(marker);
-  if (at < 0) return null;
-  return `${child.slice(0, at)}.jsonl`;
-}
-
 function onWatch(dir: string, filename: string | null) {
   if (!filename) {
     if (process.env.WTFT_DAEMON_DEBUG) {
@@ -2223,11 +2217,23 @@ function writeServedHandOff() {
   }
 }
 
+function holdsHarnessRoot(): boolean {
+  if (!harnessPidFile) return false;
+  try { return fs.readFileSync(harnessPidFile, "utf8").trim() === String(process.pid); } catch { return false; }
+}
+
 /** Takes over what the previous harness on this root served. */
 function takeServedHandOff() {
   const file = servedHandOffFile();
   const claimed = `${file}.${process.pid}.claimed`;
-  try { fs.renameSync(file, claimed); } catch { return; }
+  try {
+    fs.renameSync(file, claimed);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      process.stderr.write(`[wtft-log-parser] WARNING: could not take the previous harness's hand-off: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+    return;
+  }
   let text = "";
   try {
     text = fs.readFileSync(claimed, "utf8");
@@ -2252,6 +2258,8 @@ function takeServedHandOff() {
 function stopHarness(reason: string) {
   if (!running) return;
   running = false;
+  // First, before any flush: --restart kills a harness that is slow to exit.
+  if (holdsHarnessRoot()) writeServedHandOff();
   if (harnessIdleTimer) clearInterval(harnessIdleTimer);
   harnessIdleTimer = null;
   for (const timer of harnessFlushTimers.values()) clearTimeout(timer);
@@ -2271,7 +2279,6 @@ function stopHarness(reason: string) {
   if (harnessPidFile) {
     try {
       if (fs.readFileSync(harnessPidFile, "utf8").trim() === String(process.pid)) {
-        writeServedHandOff();
         fs.rmSync(`${harnessPidFile}.focus.d`, { recursive: true, force: true });
         fs.unlinkSync(harnessPidFile);
       }

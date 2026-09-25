@@ -378,7 +378,7 @@ try {
 		for (const f of [lease, `${lease}.reparse`]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
 	}
 
-	console.log("\nAfter --restart, the new harness serves every session the old one served");
+	console.log("\nAfter --restart, the new harness serves a session the old one was asked for");
 	{
 		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-rsserved-")));
 		const dir = path.join(root, "proj");
@@ -440,6 +440,27 @@ try {
 		fs.writeFileSync(later, turnLine("rn-later", Date.now()));
 		check(await until(() => classified(later, "rn-later"), 10_000) !== Infinity, "its first write is read with no new request");
 		for (const pid of harnessesFor(root)) { pids.push(pid); try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
+	}
+
+	console.log("\nA session asked for before its project directory exists is read once it is written");
+	{
+		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-nodir-")));
+		const dir = path.join(root, "proj");
+		fs.mkdirSync(dir, { recursive: true });
+		const first = path.join(dir, "01010101-0202-4303-8404-050505050505.jsonl");
+		fs.writeFileSync(first, turnLine("nd-0", Date.now() - 60_000));
+		const h = start(root, ["--harness", "claude", "--session", first], "nd.err");
+		check(await until(() => classified(first, "nd-0"), 15_000) !== Infinity, "fixture: a harness is serving a session");
+		const laterDir = path.join(root, "proj-new");
+		const later = path.join(laterDir, "06060606-0707-4808-8909-101010101010.jsonl");
+		start(root, ["--harness", "claude", "--session", later], "nd-ask.err");
+		check(await until(() => read(getDaemonPidPath(later)).trim() === String(h.pid), 10_000) !== Infinity, "fixture: the session was handed to the harness before its directory existed");
+		await sleep(1_000);
+		fs.mkdirSync(laterDir, { recursive: true });
+		fs.writeFileSync(later, turnLine("nd-later", Date.now()));
+		check(await until(() => classified(later, "nd-later"), 10_000) !== Infinity, "its first write is read with no new request");
+		try { process.kill(h.pid, "SIGTERM"); } catch { /* gone */ }
+		await until(() => !alive(h.pid), 5_000);
 	}
 
 	console.log("\nA harness whose pid file no longer names it stops");

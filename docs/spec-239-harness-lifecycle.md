@@ -94,8 +94,8 @@
   claims the root while it is still walking, whether it started it or a `wtft` spawn did, is left
   running. A lease or pid file is removed only if it still names the process that was stopped.
 - **The next harness on a root serves what the last one served.** A harness that stops while it
-  still holds the root writes the sessions it served, and those it dropped for idling, to
-  `<harness pid file>.served`. The next harness to claim the root adopts the served ones and
+  still holds the root, or exits on a failed tag write, writes the sessions it served, and those
+  it dropped for idling, to `<harness pid file>.served`, before it flushes anything. The next harness to claim the root adopts the served ones and
   watches for the idle ones' next write, including a served session whose transcript is not
   written yet. So `--restart` and a newer build's replacement pass on what the old harness served,
   unless the hand-off cannot be written or read. `--restart` waits for each harness it stops to exit before it removes that harness's pid file,
@@ -137,6 +137,7 @@
   marker in place.
 - After `--restart`, a session the old harness was asked for is read on its next write, with no
   new request.
+- A session handed to a harness before its project directory exists is read on its first write.
 - After `--restart`, a session asked for before its transcript existed is read on its first write,
   with no new request.
 - `--restart` of a harness holding no lease, only a session it dropped for idling, waits for it

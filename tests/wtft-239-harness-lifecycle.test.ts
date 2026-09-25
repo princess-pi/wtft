@@ -168,7 +168,10 @@ try {
 
 		start(root, ["--harness", "claude", "--session", parent], "ask.err");
 		check(await until(() => classified(parent, "q-3") && classified(parent, "sub-a"), 10_000) !== Infinity, "a session asked for later is served, subagent included");
-		check(read(getDaemonPidPath(parent)).trim() === String(h.pid), "and the running harness holds its lease");
+		// The requester writes the harness's pid into the lease itself, so the
+		// lease alone cannot tell; the harness's own flush of the session can.
+		const flushedByHarness = read(h.err).split("\n").some(l => l.includes("session flush") && l.endsWith(path.basename(parent)));
+		check(flushedByHarness && read(getDaemonPidPath(parent)).trim() === String(h.pid), "and the running harness serves it and holds its lease");
 		fs.appendFileSync(path.join(subDir, "agent-a.jsonl"), turnLine("sub-b", Date.now()));
 		check(await until(() => classified(parent, "sub-b"), 10_000) !== Infinity, "a later write to its subagent transcript is read");
 
@@ -203,15 +206,19 @@ try {
 		const mainOnly = readClassifiedTagFile(getCurrentVersionTagPath(session)).length;
 		check(doc !== null, `fixture: the first report printed JSON (exit ${first.status})`);
 		check(took < 3_000, `the first report returned in ${took} ms, without waiting for the subagents`);
-		check(first.status === 9 && doc?.provisional?.provisional === true, `it is marked provisional while subagents are still being read (exit ${first.status})`);
+		check(first.status === 9 && doc?.provisional?.provisional === true && doc?.provisional?.reason === "unswept",
+			`it is marked provisional, unswept, while subagents are still being read (exit ${first.status}, reason ${doc?.provisional?.reason})`);
 		check((doc?.total?.costUsd ?? 0) > 0, `it already carries the session's own sum ($${doc?.total?.costUsd})`);
 		const settledAll = await until(() => {
 			const r = spawnSync("node", [cli, "--json", "-s", session], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
 			return r.status === 0;
 		}, 60_000);
 		check(settledAll !== Infinity, "a later report is complete, not provisional");
-		const full = readClassifiedTagFile(getCurrentVersionTagPath(session)).length;
-		check(full > mainOnly, `and it counts the subagent turns the first did not (${full} rows against ${mainOnly})`);
+		const ids = new Set(readClassifiedTagFile(getCurrentVersionTagPath(session)).map((r: { messageId?: string }) => r.messageId));
+		const missing: string[] = [];
+		for (let a = 0; a < 20; a++) for (let i = 0; i < 300; i += 50) if (!ids.has(`a${a}-${i}`)) missing.push(`a${a}-${i}`);
+		check(mainOnly < 121 && missing.length === 0 && ids.has("main-0"),
+			`and it counts every one of the 120 subagent turns, which the first did not (${missing.length} missing, first had ${mainOnly} rows)`);
 		// A second session under the same root, handed to the harness already
 		// running: the first report on it must find its turns, not an empty tag.
 		const other = path.join(dir, "66666666-7777-4888-8999-000000000000.jsonl");

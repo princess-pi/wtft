@@ -398,6 +398,24 @@ try {
 		}
 		process.kill(h.pid, "SIGTERM");
 	}
+
+	console.log("\n--stop resolves its path");
+	{
+		const root = makeRoot("stop");
+		const outside = path.join(root, "elsewhere");
+		fs.mkdirSync(outside, { recursive: true });
+		const rel = path.join(outside, "stop-rel.jsonl");
+		const home = path.join(outside, "stop-home.jsonl");
+		fs.writeFileSync(rel, turnLine("stop-rel", Date.now()));
+		fs.writeFileSync(home, turnLine("stop-home", Date.now()));
+		const a = start(root, ["--session", rel], "stop-rel.err");
+		const b = start(root, ["--session", home], "stop-home.err");
+		check(await until(() => classified(rel, "stop-rel") && classified(home, "stop-home"), 15_000) !== Infinity, "fixture: two per-session daemons are up");
+		const byRelative = run(root, ["--stop", "stop-rel.jsonl"], {}, outside);
+		check(await until(() => !alive(a.pid), 5_000) !== Infinity, `a relative path stops its daemon (exit ${byRelative.status}: ${byRelative.stdout.trim()})`);
+		const byHome = run(root, ["--stop", "~/stop-home.jsonl"], { HOME: outside });
+		check(await until(() => !alive(b.pid), 5_000) !== Infinity, `a ~ path stops its daemon (exit ${byHome.status}: ${byHome.stdout.trim()})`);
+	}
 } finally {
 	for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 }

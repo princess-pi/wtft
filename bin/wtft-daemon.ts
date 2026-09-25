@@ -2633,14 +2633,27 @@ function procEnvValue(pid: number, key: string): string | null {
 }
 
 if (stopSession) {
-  const lease = getDaemonPidPath(path.resolve(stopSession));
+  if (stopSession === "~") stopSession = os.homedir();
+  else if (stopSession.startsWith("~/")) stopSession = path.join(os.homedir(), stopSession.slice(2));
+  stopSession = path.resolve(stopSession);
+  const lease = getDaemonPidPath(stopSession);
   let holder = 0;
   try { holder = Number(fs.readFileSync(lease, "utf8").trim()); } catch { holder = 0; }
   if (holder > 0 && procIsDaemon(holder) && procIsHarness(holder)) {
-    unlinkIfHolds(lease, String(holder));
+    if (!unlinkIfHolds(lease, String(holder))) {
+      console.log(`Not stopped: the lease for ${stopSession} changed`);
+      process.exit(1);
+    }
     console.log(`Stopped: PID ${holder} — session dropped from harness: ${stopSession}`);
     process.exit(0);
   }
+}
+
+/** A daemon's --session, resolved against that daemon's working directory. */
+function resolvedSessionArg(pid: number, session: string): string {
+  let cwd = "/";
+  try { cwd = fs.readlinkSync(`/proc/${pid}/cwd`); } catch { /* resolve against / */ }
+  return path.resolve(cwd, session);
 }
 
 if (showList || showCleanup || showRestart || stopSession) {
@@ -2760,7 +2773,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       }
     }
 
-    if (stopSession && sessionFound === stopSession) {
+    if (stopSession && sessionFound && resolvedSessionArg(pid, sessionFound) === stopSession) {
       // A harness's --session is only the one it was started for; a session it
       // serves was handled above, through that session's own lease.
       if (alive && procIsHarness(pid)) continue;

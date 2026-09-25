@@ -463,6 +463,51 @@ try {
 		await until(() => !alive(h.pid), 5_000);
 	}
 
+	console.log("\nA reparse marker naming a reparse of another session does not hold a session back");
+	{
+		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-rpother-")));
+		const dir = path.join(root, "proj");
+		fs.mkdirSync(dir, { recursive: true });
+		const target = path.join(dir, "12121212-1313-4414-8515-161616161616.jsonl");
+		const other = path.join(dir, "17171717-1818-4919-8a1a-1b1b1b1b1b1b.jsonl");
+		fs.writeFileSync(target, turnLine("ro-0", Date.now() - 60_000));
+		fs.writeFileSync(other, turnLine("roo-0", Date.now() - 60_000));
+		const h = start(root, ["--harness", "claude", "--session", other], "ro.err");
+		check(await until(() => classified(other, "roo-0"), 15_000) !== Infinity, "fixture: a harness is serving another session");
+		// A stale marker whose pid now belongs to a reparse of a different session.
+		const fake = spawn("node", ["-e", "setTimeout(() => {}, 60000)", path.join(root, "wtft-daemon.mjs"), "--reparse", other], { stdio: "ignore" });
+		fs.writeFileSync(`${getDaemonPidPath(target)}.reparse`, String(fake.pid));
+		await sleep(300);
+		start(root, ["--harness", "claude", "--session", target], "ro-ask.err");
+		check(await until(() => classified(target, "ro-0"), 5_000) !== Infinity, "the harness adopts the session");
+		fake.kill("SIGTERM");
+		try { fs.unlinkSync(`${getDaemonPidPath(target)}.reparse`); } catch { /* gone */ }
+		try { process.kill(h.pid, "SIGTERM"); } catch { /* gone */ }
+		await until(() => !alive(h.pid), 5_000);
+	}
+
+	console.log("\nAfter --restart, a session whose path holds a tab is still served");
+	{
+		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-rstab-")));
+		const dir = path.join(root, "proj");
+		fs.mkdirSync(dir, { recursive: true });
+		const first = path.join(dir, "1c1c1c1c-1d1d-4e1e-8f1f-202020202020.jsonl");
+		const tabbed = path.join(dir, "tab\there.jsonl");
+		fs.writeFileSync(first, turnLine("rt-0", Date.now() - 60_000));
+		fs.writeFileSync(tabbed, turnLine("rtt-0", Date.now() - 60_000));
+		const h = start(root, ["--harness", "claude", "--session", first], "rt.err");
+		check(await until(() => classified(first, "rt-0"), 15_000) !== Infinity, "fixture: the harness serves its start-up session");
+		start(root, ["--harness", "claude", "--session", tabbed], "rt-ask.err");
+		check(await until(() => classified(tabbed, "rtt-0"), 15_000) !== Infinity, "fixture: and the session whose path holds a tab");
+		const restart = spawnSync("node", [DAEMON, "--restart"], { encoding: "utf8", env: envFor(root) });
+		check(restart.status === 0 && await until(() => !alive(h.pid), 5_000) !== Infinity, `fixture: --restart stopped it (exit ${restart.status})`);
+		check(await until(() => harnessesFor(root).length === 1, 10_000) !== Infinity, "fixture: --restart started one harness");
+		await sleep(1_000);
+		fs.appendFileSync(tabbed, turnLine("rtt-1", Date.now()));
+		check(await until(() => classified(tabbed, "rtt-1"), 10_000) !== Infinity, "its next write is read with no new request");
+		for (const pid of harnessesFor(root)) { pids.push(pid); try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
+	}
+
 	console.log("\nA harness whose pid file no longer names it stops");
 	{
 		const { root, files } = makeRoot("p", 5);

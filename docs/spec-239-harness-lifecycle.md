@@ -78,7 +78,8 @@
   whose lease was taken while it parsed gives up before it rewrites the tag. `--reparse` of a session a daemon is serving is refused, exit 1.
   A reparse marks the session (`<lease>.reparse`) for as long as it runs, a second reparse of a
   marked session is refused, exit 1, and a harness does not
-  adopt a marked session, even when a focus request has pointed its lease at the harness. A
+  adopt a marked session while the marker names a running reparse of that session (or a
+  `--reparse-range`), even when a focus request has pointed its lease at the harness. A
   reparse stamps the tag swept only after a clean subagent scan; one that could not read a
   subagent transcript exits 1. A per-session daemon started for a session a reparse holds waits
   for it to let go, and a focus request never overwrites a `rebuild` lease, so a session handed
@@ -95,7 +96,8 @@
   running. A lease or pid file is removed only if it still names the process that was stopped.
 - **The next harness on a root serves what the last one served.** A harness that stops while it
   still holds the root, or exits on a failed tag write, writes the sessions it served, and those
-  it dropped for idling, to `<harness pid file>.served`, before it flushes anything. The next harness to claim the root adopts the served ones and
+  it dropped for idling, to `<harness pid file>.served` (one JSON object per line), before it
+  flushes anything. A failed tag write includes the session being adopted. The next harness to claim the root adopts the served ones and
   watches for the idle ones' next write, including a served session whose transcript is not
   written yet. So `--restart` and a newer build's replacement pass on what the old harness served,
   unless the hand-off cannot be written or read. `--restart` waits for each harness it stops to exit before it removes that harness's pid file,
@@ -137,6 +139,8 @@
   marker in place.
 - After `--restart`, a session the old harness was asked for is read on its next write, with no
   new request.
+- A reparse marker whose pid is a reparse of another session does not hold a session back.
+- After `--restart`, a session whose path holds a tab is read on its next write.
 - A session handed to a harness before its project directory exists is read on its first write.
 - After `--restart`, a session asked for before its transcript existed is read on its first write,
   with no new request.

@@ -244,7 +244,7 @@ function truncatePartialTail(path: string): boolean {
 
 /** Stop after an append whose on-disk extent is unknowable; publish a rebuild lease for the next owner. */
 function fatalTagMutation(filePath: string, operation: "append" | "rebuild truncate" | "partial-tail truncate", err: unknown): never {
-  if (running && harnessMode && holdsHarnessRoot()) writeServedHandOff();
+  if (running && harnessMode && holdsHarnessRoot()) writeServedHandOff(path.resolve(sessionPath));
   running = false;
   let markedForRebuild = false;
   try {
@@ -917,7 +917,12 @@ function scanForSubAgents() {
       const next = () => {
         subagentScansContinuing.delete(key);
         const slot = harnessSlots.get(key);
-        if (slot && running) withSlot(slot, () => scanForSubAgents());
+        if (!slot || !running) return;
+        if (!leaseStillOurs(slot)) {
+          dropHarnessSlot(key);
+          return;
+        }
+        withSlot(slot, () => scanForSubAgents());
       };
       if (HARNESS_SCAN_YIELD_MS > 0) setTimeout(next, HARNESS_SCAN_YIELD_MS);
       else setImmediate(next);
@@ -1658,7 +1663,7 @@ function adoptSession(): boolean {
   tagPath = getCurrentVersionTagPath(sessionPath);
   try { fs.mkdirSync(path.dirname(tagPath), { recursive: true }); } catch { /* exists */ }
   pidPath = getDaemonPidPath(sessionPath);
-  if (reparseRunning(pidPath)) return false;
+  if (reparseRunning(pidPath, sessionPath)) return false;
   try {
     if (fs.readFileSync(pidPath, "utf8").trim() === "rebuild") rebuildTagOnStartup = true;
   } catch { /* no lease yet */ }
@@ -1837,7 +1842,7 @@ function retryAdoptionLater(key: string, displayed: boolean) {
   try { holder = Number(fs.readFileSync(getDaemonPidPath(key), "utf8").trim()); } catch { /* released */ }
   // A reparse lets go when it finishes; any other failure gets a few tries.
   const tries = (adoptionRetries.get(key) ?? 0) + 1;
-  if (!procIsReparse(holder) && !reparseRunning(getDaemonPidPath(key)) && tries > 5) {
+  if (!procIsReparse(holder) && !reparseRunning(getDaemonPidPath(key), key) && tries > 5) {
     adoptionRetries.delete(key);
     return;
   }
@@ -1857,10 +1862,24 @@ function sleepMs(ms: number) {
 
 /** The pid of a --reparse running on the session whose lease is `lease`, or 0.
  *  Its marker outlives a focus request that points the lease elsewhere. */
-function reparseRunning(lease: string): number {
+function reparseRunning(lease: string, file: string): number {
   let pid = 0;
   try { pid = Number(fs.readFileSync(`${lease}.reparse`, "utf8").trim()); } catch { return 0; }
-  return procIsReparse(pid) ? pid : 0;
+  return procIsReparseOf(pid, file) ? pid : 0;
+}
+
+/** Whether `pid` is a --reparse of `file`, or a --reparse-range, which may
+ *  reach any session. A reused pid running another reparse is not. */
+function procIsReparseOf(pid: number, file: string): boolean {
+  if (!procIsReparse(pid)) return false;
+  let args: string[] = [];
+  try { args = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0"); } catch { return false; }
+  if (args.includes("--reparse-range")) return true;
+  const at = args.indexOf("--reparse");
+  if (at < 0 || !args[at + 1]) return false;
+  let cwd = "/";
+  try { cwd = fs.readlinkSync(`/proc/${pid}/cwd`); } catch { /* resolve against / */ }
+  return path.resolve(cwd, args[at + 1]) === path.resolve(file);
 }
 
 function procIsReparse(pid: number): boolean {
@@ -2197,16 +2216,19 @@ function sweepIdleSlots() {
   }
 }
 
-/** What this harness served, for the next harness on this root: one line per
- *  session, `<served|idle>\t<displayed 0|1>\t<path>`. */
+/** What this harness served, for the next harness on this root: one JSON
+ *  object per line, `{"kind":"served"|"idle","displayed":boolean,"path":string}`. */
 function servedHandOffFile(): string {
   return `${harnessPidFile}.served`;
 }
 
-function writeServedHandOff() {
+function writeServedHandOff(adopting?: string) {
   const lines: string[] = [];
-  for (const [key, slot] of harnessSlots) lines.push(`served\t${slot.displayed ? 1 : 0}\t${key}`);
-  for (const [key, displayed] of idleDropped) lines.push(`idle\t${displayed ? 1 : 0}\t${key}`);
+  const entry = (kind: string, displayed: boolean, key: string) => JSON.stringify({ kind, displayed, path: key });
+  for (const [key, slot] of harnessSlots) lines.push(entry("served", slot.displayed, key));
+  // A session whose adoption failed is not in harnessSlots yet.
+  if (adopting && !harnessSlots.has(adopting)) lines.push(entry("served", displayedSession, adopting));
+  for (const [key, displayed] of idleDropped) lines.push(entry("idle", displayed, key));
   if (lines.length === 0) return;
   try {
     const tmp = `${servedHandOffFile()}.${process.pid}.tmp`;
@@ -2242,7 +2264,11 @@ function takeServedHandOff() {
   }
   try { fs.unlinkSync(claimed); } catch { /* already gone */ }
   for (const line of text.split("\n")) {
-    const [kind, displayed, key] = line.split("\t");
+    let record: { kind?: unknown; displayed?: unknown; path?: unknown } = {};
+    try { record = JSON.parse(line); } catch { continue; }
+    const kind = record.kind;
+    const displayed = record.displayed === true ? "1" : "0";
+    const key = typeof record.path === "string" ? record.path : "";
     if (!key || !path.isAbsolute(key)) continue;
     if (!key.startsWith(harnessRootKey + path.sep)) continue;
     // A served session may not be written yet; the harness waits for it as it
@@ -2367,7 +2393,7 @@ function reparseOne(file: string): boolean {
   try {
     fs.writeFileSync(marker, String(process.pid), { flag: "wx" });
   } catch {
-    if (reparseRunning(lease)) {
+    if (reparseRunning(lease, file)) {
       process.stderr.write(`wtft-daemon: --reparse refused while another reparse runs on ${file}\n`);
       return false;
     }
@@ -2647,7 +2673,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       }
       restarted.add(pid);
       const restartEnv = { ...process.env };
-      if (alive) {
+      if (alive && procIsDaemon(pid)) {
         for (const key of ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR"]) {
           const value = procEnvValue(pid, key);
           if (value) restartEnv[key] = value;
@@ -2673,7 +2699,7 @@ if (showList || showCleanup || showRestart || stopSession) {
 
     if (showCleanup) {
       if (!alive) {
-        try { fs.unlinkSync(fullPath); } catch (_) {}
+        unlinkIfNames(fullPath, pid);
         continue;
       }
       if (sessionFound && sessionIsGone(sessionFound)) {
@@ -2681,8 +2707,8 @@ if (showList || showCleanup || showRestart || stopSession) {
         // a gone session itself.
         if (procIsHarness(pid)) continue;
         {
-          try { process.kill(pid, "SIGTERM"); } catch (_) { /* already gone */ }
-          try { fs.unlinkSync(fullPath); } catch (_) {}
+          if (procIsDaemon(pid)) { try { process.kill(pid, "SIGTERM"); } catch (_) { /* already gone */ } }
+          unlinkIfNames(fullPath, pid);
           console.log(`Cleaned up: PID ${pid} — session gone: ${sessionFound}`);
         }
         found++;
@@ -2695,8 +2721,8 @@ if (showList || showCleanup || showRestart || stopSession) {
       // serves was handled above, through that session's own lease.
       if (alive && procIsHarness(pid)) continue;
       {
-        if (alive) { try { process.kill(pid, "SIGTERM"); } catch (_) { /* already gone */ } }
-        try { fs.unlinkSync(fullPath); } catch (_) {}
+        if (alive && procIsDaemon(pid)) { try { process.kill(pid, "SIGTERM"); } catch (_) { /* already gone */ } }
+        unlinkIfNames(fullPath, pid);
         console.log(`Stopped: PID ${pid} — ${sessionFound}`);
       }
       found++;
@@ -2747,7 +2773,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         continue;
       }
       seenPids.add(pid);
-      try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ }
+      if (procIsDaemon(pid)) { try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ } }
       // It writes its hand-off only while its pid file still names it.
       waitUntilExited(pid);
       unlinkIfNames(fullPath, pid);
@@ -2805,7 +2831,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   for (;;) {
     let leaseHolder = 0;
     try { leaseHolder = Number(fs.readFileSync(pidPath, "utf8").trim()); } catch { /* no lease */ }
-    if (!procIsReparse(leaseHolder) && !reparseRunning(pidPath)) break;
+    if (!procIsReparse(leaseHolder) && !reparseRunning(pidPath, sessionPath)) break;
     sleepMs(200);
   }
 

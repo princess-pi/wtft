@@ -153,7 +153,7 @@ try {
 		await sleep(1500);
 		const unasked = files.filter(f => fs.existsSync(getCurrentVersionTagPath(f))).length;
 		check(unasked === 0, `no session it was not asked for has a tag: ${unasked} of ${files.length}`);
-		check(leasesNaming(h.pid) === 1, `it holds one lease, for that session (${leasesNaming(h.pid)})`);
+		check(leasesNaming(h.pid) === 1 && read(getDaemonPidPath(live)).trim() === String(h.pid), `it holds one lease, for that session (${leasesNaming(h.pid)})`);
 		const target = `live-${n}`;
 		check(await until(() => classified(live, target), 10_000) !== Infinity, "the session being appended to stays classified");
 		clearInterval(appender);
@@ -398,6 +398,27 @@ try {
 		fs.appendFileSync(asked, turnLine("rsa-1", Date.now()));
 		check(await until(() => classified(asked, "rsa-1"), 10_000) !== Infinity, "a later write to the session asked for before the restart is read with no new request");
 		for (const pid of harnessesFor(root)) { pids.push(pid); try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
+	}
+
+	console.log("\n--restart of a harness holding no lease keeps the sessions it dropped for idling");
+	{
+		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-rsidle-")));
+		const dir = path.join(root, "proj");
+		fs.mkdirSync(dir, { recursive: true });
+		const session = path.join(dir, "dddddddd-eeee-4fff-8000-111111111111.jsonl");
+		fs.writeFileSync(session, turnLine("ri-0", Date.now() - 60_000));
+		const h = start(root, ["--harness", "claude", "--session", session], "ri.err", undefined, { WTFT_DAEMON_IDLE_MS: "1500", WTFT_DAEMON_STARTUP_GRACE_MS: "0" });
+		check(await until(() => classified(session, "ri-0"), 15_000) !== Infinity, "fixture: the session is classified");
+		check(await until(() => read(h.err).includes("session drop") && leasesNaming(h.pid) === 0, 15_000) !== Infinity, "fixture: the harness dropped it for idling and holds no lease");
+		const restart = spawnSync("node", [DAEMON, "--restart"], { encoding: "utf8", env: envFor(root) });
+		check(restart.status === 0 && await until(() => !alive(h.pid), 5_000) !== Infinity, `fixture: --restart stopped it (exit ${restart.status})`);
+		const next = start(root, ["--harness", "claude"], "ri-next.err");
+		check(await until(() => read(harnessPidFile(root)).trim() === String(next.pid), 10_000) !== Infinity, "fixture: the next harness holds the root");
+		await sleep(500);
+		fs.appendFileSync(session, turnLine("ri-1", Date.now()));
+		check(await until(() => classified(session, "ri-1"), 10_000) !== Infinity, "the next harness reads that session's next write with no new request");
+		try { process.kill(next.pid, "SIGTERM"); } catch { /* gone */ }
+		await until(() => !alive(next.pid), 5_000);
 	}
 
 	console.log("\nA harness whose pid file no longer names it stops");

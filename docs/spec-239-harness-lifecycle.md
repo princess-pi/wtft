@@ -97,7 +97,8 @@
   still holds the root writes the sessions it served, and those it dropped for idling, to
   `<harness pid file>.served`. The next harness to claim the root adopts the served ones and
   watches for the idle ones' next write, so `--restart` and a newer build's replacement lose no
-  session.
+  session. `--restart` waits for each harness it stops to exit before it removes that harness's pid file,
+  and a hand-off that cannot be written or read is reported on stderr.
 - **Neither the startup reaper, `--cleanup` nor `--stop` acts on a harness daemon for its
   start-up `--session`.** `--stop` drops a session from a harness only through that session's
   own lease. The harness drops a gone session itself.
@@ -135,6 +136,8 @@
   marker in place.
 - After `--restart`, a session the old harness was asked for is read on its next write, with no
   new request.
+- `--restart` of a harness holding no lease, only a session it dropped for idling, waits for it
+  to exit, so the next harness reads that session's next write with no new request.
 - Removing the harness pid file stops the harness.
 - With 40,000 leases naming the running harness, `--restart` followed by a `wtft`-style spawn
   leaves exactly one harness after 5 s: the one `--restart` started, holding the pid file.

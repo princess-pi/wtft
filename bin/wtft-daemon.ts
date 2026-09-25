@@ -1744,9 +1744,9 @@ function wake(file: string, displayed: boolean) {
 }
 
 /** Watches `dir`, and with `recurse` every directory below it that is not a
- *  skip directory. Only the directories of sessions being served are watched:
- *  the project directory holding the transcript, and the session's own
- *  directory tree (`<id>/`, `<id>/subagents/`, nested ones). */
+ *  skip directory. Only these are watched: the project directory holding a
+ *  served or idle-dropped transcript, a served session's own directory tree
+ *  (`<id>/`, `<id>/subagents/`, nested ones). */
 function watchDir(dir: string, recurse: boolean) {
   const key = path.resolve(dir);
   if (harnessWatchers.has(key)) return;
@@ -1797,6 +1797,7 @@ function watchSession(file: string) {
 const idleDropped = new Map<string, boolean>();
 /** Set by serviceSession when it drops a harness session for idling. */
 let droppedForIdle = false;
+let idleDroppedPrunedAt = 0;
 
 /** Closes what only `file` needed: its session directory tree, and its
  *  project directory once no served session is left in it. */
@@ -2165,6 +2166,14 @@ function sweepIdleSlots() {
   }
   takeFocusRequests();
   const now = Date.now();
+  if (now - idleDroppedPrunedAt >= 60_000) {
+    idleDroppedPrunedAt = now;
+    for (const key of [...idleDropped.keys()]) {
+      if (fs.existsSync(key)) continue;
+      idleDropped.delete(key);
+      unwatchSession(key);
+    }
+  }
   for (const key of [...harnessSlots.keys()]) {
     const slot = harnessSlots.get(key);
     if (!slot) continue;
@@ -2203,7 +2212,9 @@ function writeServedHandOff() {
     const tmp = `${servedHandOffFile()}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, lines.join("\n") + "\n");
     fs.renameSync(tmp, servedHandOffFile());
-  } catch { /* the next harness serves only what it is asked for */ }
+  } catch (err) {
+    process.stderr.write(`[wtft-log-parser] WARNING: could not hand ${lines.length} session(s) to the next harness: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 }
 
 /** Takes over what the previous harness on this root served. */
@@ -2212,7 +2223,11 @@ function takeServedHandOff() {
   const claimed = `${file}.${process.pid}.claimed`;
   try { fs.renameSync(file, claimed); } catch { return; }
   let text = "";
-  try { text = fs.readFileSync(claimed, "utf8"); } catch { /* unreadable */ }
+  try {
+    text = fs.readFileSync(claimed, "utf8");
+  } catch (err) {
+    process.stderr.write(`[wtft-log-parser] WARNING: could not read the previous harness's hand-off: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
   try { fs.unlinkSync(claimed); } catch { /* already gone */ }
   for (const line of text.split("\n")) {
     const [kind, displayed, key] = line.split("\t");
@@ -2724,6 +2739,8 @@ if (showList || showCleanup || showRestart || stopSession) {
       }
       seenPids.add(pid);
       try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ }
+      // It writes its hand-off only while its pid file still names it.
+      waitUntilExited(pid);
       unlinkIfNames(fullPath, pid);
       console.log(`Restarted: PID ${pid} — harness ${pidFile}`);
       found++;

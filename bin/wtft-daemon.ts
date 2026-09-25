@@ -2740,20 +2740,27 @@ if (showList || showCleanup || showRestart || stopSession) {
 
   // Old-version tag: claim the lease; old daemon exits on lost lease (no SIGTERM race).
   const prefix = sessionBase + ".wtft-tag.v";
+  const otherTagVersions = (): { older: string[]; newer: string[] } => {
+    const older: string[] = [];
+    const newer: string[] = [];
+    for (const f of fs.readdirSync(tagsDir)) {
+      if (!f.startsWith(prefix) || !f.endsWith(".jsonl") || f === sessionBase + TAG_SUFFIX) continue;
+      const version = f.slice(prefix.length, -".jsonl".length);
+      if (taggerIsOlder(version, TAGGER_VERSION)) older.push(f);
+      else if (taggerIsOlder(TAGGER_VERSION, version)) newer.push(f);
+    }
+    return { older, newer };
+  };
   let claimedByTakeover = false;
   try {
-    for (const f of fs.readdirSync(tagsDir)) {
-      if (f.indexOf(prefix) === 0 && f !== sessionBase + TAG_SUFFIX) {
-        // Honor an existing rebuild lease before version-takeover claim.
-        try {
-          if (fs.readFileSync(pidPath, "utf8").trim() === "rebuild") {
-            rebuildTagOnStartup = true;
-          }
-        } catch (_) {}
-        replaceLease(String(process.pid));
-        claimedByTakeover = true;
-        break;
-      }
+    const { older, newer } = otherTagVersions();
+    // A newer build serving this session keeps it.
+    if (newer.length > 0 && procIsDaemon(Number(leaseHolder(pidPath)))) process.exit(0);
+    if (older.length > 0) {
+      // Honor an existing rebuild lease before version-takeover claim.
+      if (leaseHolder(pidPath) === "rebuild") rebuildTagOnStartup = true;
+      replaceLease(String(process.pid));
+      claimedByTakeover = true;
     }
   } catch (e) {
     process.stderr.write(`[wtft-log-parser] takeover scan error: ${e instanceof Error ? e.message : String(e)}\n`);
@@ -2814,15 +2821,13 @@ if (showList || showCleanup || showRestart || stopSession) {
     }
   }
 
-  // Drop other-version tag files after claiming the lease; re-sweep once after 5s for a late heartbeat.
+  // Drop older-version tag files after claiming the lease; re-sweep once after 5s for a late heartbeat.
   const sweepOldTagFiles = () => {
     try {
-      for (const f of fs.readdirSync(tagsDir)) {
-        if (f.startsWith(prefix) && f !== sessionBase + TAG_SUFFIX) {
-          try { fs.unlinkSync(path.join(tagsDir, f)); } catch (_) {}
-          if (process.env.WTFT_DAEMON_DEBUG) {
-            process.stderr.write(`[wtft-log-parser] removed stale tag file: ${f}\n`);
-          }
+      for (const f of otherTagVersions().older) {
+        try { fs.unlinkSync(path.join(tagsDir, f)); } catch (_) {}
+        if (process.env.WTFT_DAEMON_DEBUG) {
+          process.stderr.write(`[wtft-log-parser] removed stale tag file: ${f}\n`);
         }
       }
     } catch (_) {}

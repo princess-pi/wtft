@@ -229,6 +229,28 @@ try {
 		check(read(h.err).includes(`lease for ${target} now held by rebuild`), "a daemon that gives up a lease logs who holds it now");
 		process.kill(h.pid, "SIGTERM");
 	}
+
+	console.log("\nAn older per-session build never takes over from a newer one");
+	{
+		const root = makeRoot("older");
+		const file = session(root, "older-main");
+		const newerTag = path.join(path.dirname(file), "wtft-tags", `${path.basename(file)}.wtft-tag.v999.0.0.jsonl`);
+		fs.mkdirSync(path.dirname(newerTag), { recursive: true });
+		fs.writeFileSync(newerTag, "{\"note\":\"NEWER\"}\n");
+		// A stand-in for a newer build's daemon holding the lease.
+		const newer = spawn("node", ["-e", "setTimeout(() => {}, 60000)", path.join(root, "wtft-daemon.mjs")], { stdio: "ignore" });
+		pids.push(newer.pid!);
+		fs.writeFileSync(getDaemonPidPath(file), String(newer.pid));
+		const d = start(root, ["--session", file], "older-1.err");
+		check(await until(() => !alive(d.pid), 10_000) !== Infinity, "it exits while a newer build's daemon holds the lease");
+		check(read(getDaemonPidPath(file)).trim() === String(newer.pid), "and leaves that lease alone");
+		process.kill(newer.pid!, "SIGTERM");
+		await until(() => !alive(newer.pid!), 5_000);
+		const d2 = start(root, ["--session", file], "older-2.err");
+		check(await until(() => classified(file, "older-main"), 15_000) !== Infinity, "with no newer daemon running, it serves the session");
+		check(read(newerTag).includes("NEWER"), "and never deletes the newer build's tag");
+		process.kill(d2.pid, "SIGTERM");
+	}
 } finally {
 	for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 }

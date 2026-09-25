@@ -1418,7 +1418,10 @@ function serviceSession(): "continue" | "stop" | "drop" {
       if (process.env.WTFT_DAEMON_DEBUG) {
         process.stderr.write(`[wtft-log-parser] no new data for ${Math.round((now - lastActivityMs) / 60000)}m, exiting\n`);
       }
-      if (harnessMode) return "drop";
+      if (harnessMode) {
+        droppedForIdle = true;
+        return "drop";
+      }
       shutdown("idle timeout");
       return "stop";
     }
@@ -1716,8 +1719,10 @@ function wake(file: string, displayed: boolean) {
   } else if (displayed) {
     slot.displayed = true;
   }
+  droppedForIdle = false;
   const status = withSlot(slot, () => serviceSession());
   if (status === "drop") {
+    if (droppedForIdle) idleDropped.set(key, slot.displayed);
     dropHarnessSlot(key);
     return;
   }
@@ -1787,12 +1792,14 @@ function watchSession(file: string) {
   if (fs.existsSync(sessionDirOf(file))) watchDir(sessionDirOf(file), true);
 }
 
-/** Closes what only `file` needed: its session directory tree, and its
- *  project directory once no served session is left in it. */
 /** Sessions dropped for idling: their project directory stays watched, and
  *  their next write adopts them again. */
 const idleDropped = new Map<string, boolean>();
+/** Set by serviceSession when it drops a harness session for idling. */
+let droppedForIdle = false;
 
+/** Closes what only `file` needed: its session directory tree, and its
+ *  project directory once no served session is left in it. */
 function unwatchSession(file: string) {
   const own = sessionDirOf(file);
   const project = path.dirname(file);
@@ -2081,6 +2088,7 @@ function runHarness(which: string, focus: string) {
   // Serves only the sessions readers ask for: this one, and later ones named
   // by focus requests. Nothing else under the root is read or watched.
   if (focus) wake(path.resolve(focus), true);
+  takeServedHandOff();
   watchFocusRequests();
   harnessIdleTimer = setInterval(sweepIdleSlots, 250);
   if (process.env.WTFT_DAEMON_DEBUG) {
@@ -2180,6 +2188,44 @@ function sweepIdleSlots() {
   }
 }
 
+/** What this harness served, for the next harness on this root: one line per
+ *  session, `<served|idle>\t<displayed 0|1>\t<path>`. */
+function servedHandOffFile(): string {
+  return `${harnessPidFile}.served`;
+}
+
+function writeServedHandOff() {
+  const lines: string[] = [];
+  for (const [key, slot] of harnessSlots) lines.push(`served\t${slot.displayed ? 1 : 0}\t${key}`);
+  for (const [key, displayed] of idleDropped) lines.push(`idle\t${displayed ? 1 : 0}\t${key}`);
+  if (lines.length === 0) return;
+  try {
+    const tmp = `${servedHandOffFile()}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, lines.join("\n") + "\n");
+    fs.renameSync(tmp, servedHandOffFile());
+  } catch { /* the next harness serves only what it is asked for */ }
+}
+
+/** Takes over what the previous harness on this root served. */
+function takeServedHandOff() {
+  const file = servedHandOffFile();
+  const claimed = `${file}.${process.pid}.claimed`;
+  try { fs.renameSync(file, claimed); } catch { return; }
+  let text = "";
+  try { text = fs.readFileSync(claimed, "utf8"); } catch { /* unreadable */ }
+  try { fs.unlinkSync(claimed); } catch { /* already gone */ }
+  for (const line of text.split("\n")) {
+    const [kind, displayed, key] = line.split("\t");
+    if (!key || !path.isAbsolute(key) || !fs.existsSync(key)) continue;
+    if (!key.startsWith(harnessRootKey + path.sep)) continue;
+    if (kind === "served") wake(key, displayed === "1");
+    else if (kind === "idle" && !harnessSlots.has(key)) {
+      idleDropped.set(key, displayed === "1");
+      watchDir(path.dirname(key), false);
+    }
+  }
+}
+
 function stopHarness(reason: string) {
   if (!running) return;
   running = false;
@@ -2202,6 +2248,7 @@ function stopHarness(reason: string) {
   if (harnessPidFile) {
     try {
       if (fs.readFileSync(harnessPidFile, "utf8").trim() === String(process.pid)) {
+        writeServedHandOff();
         fs.rmSync(`${harnessPidFile}.focus.d`, { recursive: true, force: true });
         fs.unlinkSync(harnessPidFile);
       }
@@ -2287,7 +2334,15 @@ function waitUntilExited(pid: number) {
 function reparseOne(file: string): boolean {
   const lease = getDaemonPidPath(file);
   const marker = `${lease}.reparse`;
-  fs.writeFileSync(marker, String(process.pid));
+  try {
+    fs.writeFileSync(marker, String(process.pid), { flag: "wx" });
+  } catch {
+    if (reparseRunning(lease)) {
+      process.stderr.write(`wtft-daemon: --reparse refused while another reparse runs on ${file}\n`);
+      return false;
+    }
+    fs.writeFileSync(marker, String(process.pid));
+  }
   try {
     if (sessionDaemonLive(file) || claimPidFile(lease) !== "claimed") {
       process.stderr.write(`wtft-daemon: --reparse refused while a daemon holds ${file}\n`);

@@ -359,6 +359,47 @@ try {
 		await until(() => !alive(h.pid), 5_000);
 	}
 
+	console.log("\nA refused --reparse leaves a running reparse's marker alone");
+	{
+		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-rp2-")));
+		const dir = path.join(root, "proj");
+		fs.mkdirSync(dir, { recursive: true });
+		const target = path.join(dir, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jsonl");
+		fs.writeFileSync(target, turnLine("r2-0", Date.now() - 60_000));
+		const fake = spawn("node", ["-e", "setTimeout(() => {}, 60000)", path.join(root, "wtft-daemon.mjs"), "--reparse", target], { stdio: "ignore" });
+		const lease = getDaemonPidPath(target);
+		fs.writeFileSync(lease, String(fake.pid));
+		fs.writeFileSync(`${lease}.reparse`, String(fake.pid));
+		await sleep(300);
+		const second = spawnSync("node", [DAEMON, "--reparse", target], { encoding: "utf8", env: envFor(root) });
+		check(second.status === 1, `the second --reparse is refused (exit ${second.status})`);
+		check(read(`${lease}.reparse`).trim() === String(fake.pid), "and the running reparse's marker still names it");
+		fake.kill("SIGTERM");
+		for (const f of [lease, `${lease}.reparse`]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+	}
+
+	console.log("\nAfter --restart, the new harness serves every session the old one served");
+	{
+		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-rsserved-")));
+		const dir = path.join(root, "proj");
+		fs.mkdirSync(dir, { recursive: true });
+		const first = path.join(dir, "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff.jsonl");
+		const asked = path.join(dir, "cccccccc-dddd-4eee-8fff-000000000000.jsonl");
+		fs.writeFileSync(first, turnLine("rs-0", Date.now() - 60_000));
+		fs.writeFileSync(asked, turnLine("rsa-0", Date.now() - 60_000));
+		const h = start(root, ["--harness", "claude", "--session", first], "rs.err");
+		check(await until(() => classified(first, "rs-0"), 15_000) !== Infinity, "fixture: the harness serves its start-up session");
+		start(root, ["--harness", "claude", "--session", asked], "rs-ask.err");
+		check(await until(() => classified(asked, "rsa-0"), 15_000) !== Infinity, "fixture: and a session asked for later");
+		const restart = spawnSync("node", [DAEMON, "--restart"], { encoding: "utf8", env: envFor(root) });
+		check(restart.status === 0 && await until(() => !alive(h.pid), 5_000) !== Infinity, `fixture: --restart stopped it (exit ${restart.status})`);
+		check(await until(() => harnessesFor(root).length === 1, 10_000) !== Infinity, "fixture: --restart started one harness");
+		await sleep(1_000);
+		fs.appendFileSync(asked, turnLine("rsa-1", Date.now()));
+		check(await until(() => classified(asked, "rsa-1"), 10_000) !== Infinity, "a later write to the session asked for before the restart is read with no new request");
+		for (const pid of harnessesFor(root)) { pids.push(pid); try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
+	}
+
 	console.log("\nA harness whose pid file no longer names it stops");
 	{
 		const { root, files } = makeRoot("p", 5);

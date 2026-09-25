@@ -76,7 +76,8 @@
   a reparse to take a lease: asked for a session a reparse holds, it tries again every 667 ms
   until the reparse lets go. Any other failed adoption is retried up to five times. A reparse
   whose lease was taken while it parsed gives up before it rewrites the tag. `--reparse` of a session a daemon is serving is refused, exit 1.
-  A reparse marks the session (`<lease>.reparse`) for as long as it runs, and a harness does not
+  A reparse marks the session (`<lease>.reparse`) for as long as it runs, a second reparse of a
+  marked session is refused, exit 1, and a harness does not
   adopt a marked session, even when a focus request has pointed its lease at the harness. A
   reparse stamps the tag swept only after a clean subagent scan; one that could not read a
   subagent transcript exits 1. A per-session daemon started for a session a reparse holds waits
@@ -92,6 +93,11 @@
   pid file before it stops anything, and acts on the process each one named then. A harness that
   claims the root while it is still walking, whether it started it or a `wtft` spawn did, is left
   running. A lease or pid file is removed only if it still names the process that was stopped.
+- **The next harness on a root serves what the last one served.** A harness that stops while it
+  still holds the root writes the sessions it served, and those it dropped for idling, to
+  `<harness pid file>.served`. The next harness to claim the root adopts the served ones and
+  watches for the idle ones' next write, so `--restart` and a newer build's replacement lose no
+  session.
 - **Neither the startup reaper, `--cleanup` nor `--stop` acts on a harness daemon for its
   start-up `--session`.** `--stop` drops a session from a harness only through that session's
   own lease. The harness drops a gone session itself.
@@ -125,6 +131,10 @@
 - A harness asked for a session whose `--reparse` marker names a running reparse leaves it
   untagged, then adopts it once the reparse is gone.
 - A session dropped for idling is read again on its next write, with no new request.
+- A second `--reparse` of a session a reparse is running on exits 1 and leaves that reparse's
+  marker in place.
+- After `--restart`, a session the old harness was asked for is read on its next write, with no
+  new request.
 - Removing the harness pid file stops the harness.
 - With 40,000 leases naming the running harness, `--restart` followed by a `wtft`-style spawn
   leaves exactly one harness after 5 s: the one `--restart` started, holding the pid file.

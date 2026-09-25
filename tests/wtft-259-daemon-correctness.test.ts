@@ -511,6 +511,12 @@ try {
 			"the tag stays, and -F says nothing was deleted");
 		check(forced.status === 1 && forced.stdout === "", `and exits 1 with no report (exit ${forced.status})`);
 		process.kill(stubborn.pid!, "SIGKILL");
+		await until(() => !alive(stubborn.pid!), 5_000);
+		// A lease an earlier -F left reading rebuild, with no daemon behind it.
+		fs.writeFileSync(getDaemonPidPath(file), "rebuild");
+		const stale = spawnSync("node", [cli, "-F", "-s", file], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+		check(stale.status !== 1 && !stale.stderr.includes("nothing was deleted"),
+			`-F over a lease left reading rebuild rebuilds instead of refusing (exit ${stale.status})`);
 	}
 } finally {
 	for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }

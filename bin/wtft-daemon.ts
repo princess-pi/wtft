@@ -133,6 +133,9 @@ interface SubagentFileState {
 	owners: FoldOwner[];
 	/** Last ordinary turn not yet written, so a following interrupt can still mark it. */
 	pendingTurn: NonNullable<ReturnType<typeof parseEntryToInteraction>> | null;
+	/** The source its lines were written under; a session move changes what
+	 *  transcriptSourceId would compute for the old path. */
+	source: string;
 	/** The last turn read, of any kind, and whether a Claude command made it an
 	 *  owner: the turn an interrupt at the head of the next read follows. */
 	lastTurn: { turn: NonNullable<ReturnType<typeof parseEntryToInteraction>>; owner: boolean } | null;
@@ -318,6 +321,7 @@ function freshSubagentState(): SubagentFileState {
     spawnWindowClosesAt: 0,
     owners: [],
     pendingTurn: null,
+    source: "",
     lastTurn: null,
     foldedByAnother: "",
   };
@@ -662,6 +666,7 @@ function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<st
     }
 
     const source = transcriptSourceId(file, path.dirname(sessionPath));
+    fileState.source = source;
     let batch = "";
     const nextOwners: FoldOwner[] = owners.map((o, i) => ({ ...o }));
     const consumedQuiet = parsed !== null
@@ -956,7 +961,7 @@ function scanForSubAgents() {
       // Its held turn was read from the file, so it is written; a moved
       // transcript read again under its new path opens a new generation.
       if (state.pendingTurn) {
-        appendTagFile(tagPath, serializeClassified(state.pendingTurn, transcriptSourceId(key, path.dirname(sessionPath))));
+        appendTagFile(tagPath, serializeClassified(state.pendingTurn, state.source || transcriptSourceId(key, path.dirname(sessionPath))));
         tagGrewSinceMarker = true;
       }
       discoveredSubagentFiles.delete(key);

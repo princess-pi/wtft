@@ -33,6 +33,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 - **Swept means every subagent turn is written.** A scan that holds back a subagent transcript's
   last turn (the one an interrupt record arriving next would mark) does not stamp the tag swept.
   The next scan that finds no new bytes writes that turn, and stamps swept if it was clean.
+  A transcript no longer found (its session moved) has its held turn written under the source its
+  earlier lines carry, so the generation that reads it again under the new path retires it.
 
 ### Resume (A1 residual)
 
@@ -82,7 +84,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   `rebuild` and asks the harness for the session, which rebuilds the tag from the transcript. The
   harness and its other sessions are untouched. The CLI waits until the harness has adopted the
   session before it reads the tag, so its own report is of the rebuild; after 10 s it says the
-  harness has not taken the session up, and exits 1 with no report. Telling a harness apart
+  harness has not taken the session up, and exits 1 with no report. A lease an earlier `-F` left
+  reading `rebuild`, with no daemon behind it, is treated as no holder. Telling a harness apart
   reads `/proc`, so this holds on Linux; elsewhere the harness is stopped as below.
 - **Otherwise `-F` stops a live per-session daemon and deletes every version of the session's
   tag**, beside the transcript and in the sibling project where a moved session's tag lives. The
@@ -150,7 +153,8 @@ fix failed before it. These have no check of their own, and why:
 - **Reachable, but without a test yet** (#262 adds them): a retrying session handed on with its
   displayed flag; the hand-off removed when nothing is served or idle; a per-session lease holder
   still signalled on adoption; the stop line for `session removed` and `session never written`;
-  the resume leaving a folded `claude -p` transcript to the one folding it.
+  the resume leaving a folded `claude -p` transcript to the one folding it; the held turn of a
+  transcript no longer found written under the source its earlier lines carry.
 - **The 1 h limit on a never-written session** takes an hour and has no knob.
 
 - **`--cleanup`** stops fixture daemons under `/tmp`, including those of suites running beside

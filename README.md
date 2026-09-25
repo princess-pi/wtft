@@ -189,7 +189,9 @@ retired in `@4`.
   object.
 - **1** — error: no session found or selected, an invalid path, a daemon that
   could not be spawned or that died before producing data, a refused flag
-  (`--pager`), `--stop` unable to drop a session, `--list`/`--cleanup`/`--restart`/`--stop`
+  (`--pager`), `--stop` unable to drop a session, `-F` unable to rebuild (a daemon that did not
+  stop, a session another daemon claimed, or a harness that did not take the session up within
+  10 s), `--list`/`--cleanup`/`--restart`/`--stop`
   unable to run `wtft-daemon` within 10 s, a read error other than a missing path in a harness's session
   tree (Claude Code's projects directory today) while `--json` or `--tokens` lists unrecorded spawns (so `unrecorded: []`
   never hides one), or an unhandled exception. The reason is on stderr; under

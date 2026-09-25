@@ -554,14 +554,15 @@ export function getDaemonPidPath(sessionPath: string): string {
  * transcript or in the sibling project a moved session's tag lives in, are
  * deleted, after stopping a live per-session daemon ("stopped") or with none
  * running ("deleted"); a daemon still running 2 s after the signal, or one
- * that claimed the session meanwhile, leaves everything in place ("busy"). Either way the caller then asks for the session. Telling
- * a harness apart reads `/proc`, so off Linux a harness is stopped like a
+ * that claimed the session meanwhile, leaves everything in place ("busy").
+ * Unless busy, the caller then asks for the session. Telling a harness apart reads `/proc`, so off Linux a harness is stopped like a
  * per-session daemon.
  */
 export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" | "deleted" | "busy" {
 	const leasePath = getDaemonPidPath(sessionPath);
 	let pid = 0;
-	try { pid = parseInt(fs.readFileSync(leasePath, "utf8").trim(), 10); } catch { /* no lease */ }
+	let initial = "";
+	try { initial = fs.readFileSync(leasePath, "utf8").trim(); pid = parseInt(initial, 10); } catch { /* no lease */ }
 	let args: string[] = [];
 	if (pid > 0) {
 		try { args = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0"); } catch { /* not running */ }
@@ -589,7 +590,7 @@ export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" 
 	// A daemon that claimed the session since owns lease and tag; leave both.
 	let now = "";
 	try { now = fs.readFileSync(leasePath, "utf8").trim(); } catch { /* released */ }
-	if (now !== "" && now !== String(pid)) return "busy";
+	if (now !== "" && now !== initial) return "busy";
 	try { if (now !== "") fs.unlinkSync(leasePath); } catch { /* released meanwhile */ }
 	const prefix = path.basename(sessionPath) + ".wtft-tag.v";
 	for (const tagsDir of new Set([path.join(path.dirname(sessionPath), "wtft-tags"), path.dirname(getTagPath(sessionPath))])) {

@@ -174,7 +174,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 ## Closer
 
 `tests/wtft-259-daemon-correctness.test.ts` checks the behaviours above; each check that pins a
-fix failed before it. These have no check of their own, and why:
+fix failed before it. The rest are checked elsewhere, or have no check yet, or none a fixture can
+make, as follows:
 
 - **Checked in `tests/wtft-262-daemon-gaps.test.ts`**: a retrying session handed on with its
   displayed flag; the hand-off removed when nothing is served or idle; a per-session lease holder
@@ -182,8 +183,13 @@ fix failed before it. These have no check of their own, and why:
   project's tag; `-F` on Linux not signalling a lease pid with no command line; an idle session
   rewritten at the same length adopted again; `-F` naming a rebuild lease it cannot write; the
   stale-version remedy for a tag of a newer build.
-- **Reachable, without a check yet** (#267): the `claude -p` lookup and session-move cases in
-  Swept and Resume.
+- **Reachable, without a check yet** (#267): the resume leaving a folded `claude -p` transcript to
+  the one folding it; the held turn of a transcript no longer found, written under its earlier
+  source and after a generation record when it opened none, or skipped when the transcript was
+  read again under that source; a later line of a message merging its `claude -p` commands into
+  the open lookup; the scan-continuation marker re-keyed on a move; a moved or deleted `claude -p`
+  child's held turn written; reseed of a child sharing an id with a discovered transcript; the
+  children a settled lookup found, read after a restart.
 - **Pi `/wtft -F` not asking for the session when busy**: busy means a daemon holds the lease or
   took it meanwhile, and asking then starts nothing, so a check cannot tell the two builds apart.
   The one exception, a lease released between two reads, needs two processes inside one syscall

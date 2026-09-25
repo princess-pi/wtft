@@ -702,11 +702,14 @@ console.log("\n§ C — a crash mid-append is repaired, not built upon\n");
 			env: { ...process.env }, stdio: ["ignore", "ignore", "pipe"],
 		});
 		children.push(second);
-		// A just-truncated tag holding only its _meta or heartbeat line also ends
-		// in a newline, so wait for the rebuilt rows too.
+		// The cut tag's own rows survive a truncate to the last line boundary, so
+		// a row count cannot tell a rebuild from a resume. A rebuild starts the
+		// file over, so its first line changes; wait for that and the rows.
+		const firstLineBefore = afterCut.toString("utf8").split("\n")[0];
 		await pollUntil(() => {
 			try {
-				return fs.readFileSync(tagPath, "utf8").endsWith("\n") && readClassifiedTagFile(tagPath).length >= 3;
+				const now = fs.readFileSync(tagPath, "utf8");
+				return now.endsWith("\n") && now.split("\n")[0] !== firstLineBefore && readClassifiedTagFile(tagPath).length >= 3;
 			} catch { return false; }
 		}, 15000);
 

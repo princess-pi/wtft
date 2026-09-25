@@ -115,18 +115,19 @@ export function probe(status: DaemonStatus): boolean {
 		});
 		// A tsc that never ran is not a rejection.
 		assert("fixture: tsc ran", !r.error && r.status !== null, `tsc did not run: ${r.error?.message ?? r.signal}`);
-		const status = r.status ?? 0;
-		const output = `${r.stdout || ""}${r.stderr || ""}`;
-		assert(
-			"typecheck rejects a health code outside the union",
-			status !== 0,
-			status === 0 ? "tsc exited 0 — the union is NOT gating comparisons." : "",
-		);
-		assert(
-			"…and the diagnostic names the offending comparison",
-			/__reason_code_probe__/.test(output),
-			`tsc output did not mention the probe:\n${output.slice(0, 800)}`,
-		);
+		if (!r.error && r.status !== null) {
+			const output = `${r.stdout || ""}${r.stderr || ""}`;
+			assert(
+				"typecheck rejects a health code outside the union",
+				r.status !== 0,
+				r.status === 0 ? "tsc exited 0 — the union is NOT gating comparisons." : "",
+			);
+			assert(
+				"…and the diagnostic names the offending comparison",
+				/__reason_code_probe__/.test(output),
+				`tsc output did not mention the probe:\n${output.slice(0, 800)}`,
+			);
+		}
 	} finally {
 		fs.rmSync(PROBE_DIR, { recursive: true, force: true });
 	}

@@ -82,12 +82,13 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   `rebuild` and asks the harness for the session, which rebuilds the tag from the transcript. The
   harness and its other sessions are untouched. The CLI waits until the harness has adopted the
   session before it reads the tag, so its own report is of the rebuild; after 10 s it says the
-  harness has not taken the session up, and reports the tag as it was. Telling a harness apart
+  harness has not taken the session up, and exits 1 with no report. Telling a harness apart
   reads `/proc`, so this holds on Linux; elsewhere the harness is stopped as below.
 - **Otherwise `-F` stops a live per-session daemon and deletes every version of the session's
   tag**, beside the transcript and in the sibling project where a moved session's tag lives. The
-  CLI says whether a daemon was stopped. A daemon still running 2 s after the signal keeps its
-  tag: nothing is deleted, and `-F` says so. The CLI and the Pi widget share one implementation, so
+  CLI says whether a daemon was stopped. When the daemon is still running 2 s after the signal,
+  or another daemon has claimed the lease meanwhile, nothing is deleted, and `-F` says so and
+  exits 1. The CLI and the Pi widget share one implementation, so
   the widget now deletes every version too, not only the current one.
 - **`wtft --list`, `--cleanup`, `--restart` and `--stop` pass `wtft-daemon`'s exit code through**,
   and pass the session path as one argument, so a path with a space is not split.

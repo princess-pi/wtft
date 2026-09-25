@@ -370,6 +370,9 @@ function describeProvisionalRemedy(provisional: { reason: string | null }): stri
 	if (provisional.reason === "descendant-live") {
 		return `run wtft again once every descendant has been quiet for ${IDLE_THRESHOLD_MS / 1000} s`;
 	}
+	if (provisional.reason === "stale-version") {
+		return "The daemon is rebuilding this tag at the current version — run wtft again in a moment to read the settled total";
+	}
 	return provisional.reason === "subagent-unreadable"
 		? "restore the unreadable session file's readability, then run wtft again — the daemon re-reads it on its next poll, and wtft reads it directly on the --tokens and --json paths"
 		: "The daemon is still reading this session's subagents into its tag — run wtft again once they have stopped writing to read the settled total";
@@ -582,12 +585,18 @@ async function main() {
 			rebuild: "the harness log parser daemon is rebuilding the tag",
 			stopped: "stopped the log parser daemon and deleted the tag files",
 			deleted: "deleted the tag files",
-			busy: "the log parser daemon did not stop within 2 s, so nothing was deleted; run -F again once it has",
+			busy: "",
 		}[how];
-		console.error(`\x1b[33mForce re-parse: ${what} for ${path.basename(finalSessionPath)}\x1b[0m`);
-		if (!adopted) {
-			console.error(`\x1b[33mThe harness log parser daemon has not taken the session up after 10 s; this report is of the tag as it was, and the rebuild starts when the harness is next asked for the session.\x1b[0m`);
+		// Nothing rebuilt: an error, with no report of the tag as it was.
+		if (how === "busy") {
+			console.error(`❌ Force re-parse: a log parser daemon for ${path.basename(finalSessionPath)} did not stop within 2 s, or another took the session meanwhile, so nothing was deleted. Run -F again once it has stopped.`);
+			process.exit(1);
 		}
+		if (!adopted) {
+			console.error(`❌ Force re-parse: the harness log parser daemon has not taken ${path.basename(finalSessionPath)} up after 10 s. Its tag is unchanged; the rebuild starts when the harness is next asked for the session.`);
+			process.exit(1);
+		}
+		console.error(`\x1b[33mForce re-parse: ${what} for ${path.basename(finalSessionPath)}\x1b[0m`);
 	}
 
 	// ---

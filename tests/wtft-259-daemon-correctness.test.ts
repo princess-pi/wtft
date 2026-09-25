@@ -509,6 +509,7 @@ try {
 		const forced = spawnSync("node", [cli, "-F", "-s", file], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
 		check(fs.existsSync(getCurrentVersionTagPath(file)) && forced.stderr.includes("nothing was deleted"),
 			"the tag stays, and -F says nothing was deleted");
+		check(forced.status === 1 && forced.stdout === "", `and exits 1 with no report (exit ${forced.status})`);
 		process.kill(stubborn.pid!, "SIGKILL");
 	}
 } finally {

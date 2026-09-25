@@ -1815,6 +1815,7 @@ function wake(file: string, displayed: boolean) {
       return;
     }
     harnessSlots.set(key, slot);
+    adoptionRetries.delete(key);
     idleDropped.delete(key);
     idleDroppedSize.delete(key);
     watchSession(key);
@@ -1988,6 +1989,8 @@ function retryAdoptionLater(key: string, displayed: boolean) {
   adoptionRetryPending.add(key);
   const timer = setTimeout(() => {
     adoptionRetryPending.delete(key);
+    // Cancelled by an adoption or a drop since.
+    if (!adoptionRetries.has(key)) return;
     if (running && !harnessSlots.has(key)) wake(key, displayed);
     if (harnessSlots.has(key)) adoptionRetries.delete(key);
   }, POLL_MS);
@@ -2283,6 +2286,7 @@ function dropHarnessSlot(key: string, reason = "") {
   subagentScanPassFailed.delete(key);
   subagentScansContinuing.delete(key);
   reseedPending.delete(key);
+  adoptionRetries.delete(key);
   unwatchSession(key);
   if (slot) releaseLease(slot);
   if (process.env.WTFT_DAEMON_DEBUG) {
@@ -2357,9 +2361,18 @@ function sweepIdleSlots() {
       return;
     }
   }
-  if (!fs.existsSync(harnessRootKey)) {
-    stopHarness("harness root removed");
-    return;
+  try {
+    fs.statSync(harnessRootKey);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      stopHarness("harness root removed");
+      return;
+    }
+    if (!rootStatWarned) {
+      rootStatWarned = true;
+      process.stderr.write(`[wtft-log-parser] WARNING: the harness root ${harnessRootKey} could not be stat'd: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
   }
   takeFocusRequests();
   const now = Date.now();
@@ -2430,6 +2443,8 @@ function sweepIdleSlots() {
   persistHandOff();
 }
 
+let rootStatWarned = false;
+
 /** When the harness last had no session to serve, or 0. */
 let emptySinceMs = 0;
 
@@ -2442,7 +2457,11 @@ function servedHandOffFile(): string {
 function handOffLines(adopting?: string): string[] {
   const lines: string[] = [];
   const entry = (kind: string, displayed: boolean, key: string) => JSON.stringify({ kind, displayed, path: key });
-  for (const [key, slot] of harnessSlots) lines.push(entry("served", slot.displayed, key));
+  // A slot whose lease went elsewhere (--stop, another daemon) is not handed
+  // on, except for a rebuild lease, which wants the session adopted again.
+  for (const [key, slot] of harnessSlots) {
+    if (leaseStillOurs(slot) || (slot.pidPath && leaseHolder(slot.pidPath) === "rebuild")) lines.push(entry("served", slot.displayed, key));
+  }
   // A session whose adoption failed is not in harnessSlots yet.
   if (adopting && !harnessSlots.has(adopting)) lines.push(entry("served", displayedSession, adopting));
   // Asked for, but waiting on an adoption retry.

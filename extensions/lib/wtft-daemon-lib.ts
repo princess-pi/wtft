@@ -563,7 +563,8 @@ export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" 
 	const leasePath = getDaemonPidPath(sessionPath);
 	let pid = 0;
 	let initial = "";
-	try { initial = fs.readFileSync(leasePath, "utf8").trim(); pid = parseInt(initial, 10); } catch { /* no lease */ }
+	try { initial = fs.readFileSync(leasePath, "utf8").trim(); pid = parseInt(initial, 10); }
+	catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "failed"; }
 	let args: string[] = [];
 	if (pid > 0) {
 		try { args = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0"); } catch { /* not running */ }
@@ -591,7 +592,8 @@ export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" 
 	const noProc = !fs.existsSync("/proc/self/cmdline");
 	let stopped = false;
 	if (pid > 0 && (daemon || (noProc && args.length === 0))) {
-		try { process.kill(pid, "SIGTERM"); stopped = true; } catch { /* already gone */ }
+		try { process.kill(pid, "SIGTERM"); stopped = true; }
+		catch (err) { if ((err as NodeJS.ErrnoException).code !== "ESRCH") return "failed"; }
 	}
 	// Its shutdown flushes into the tag, so the tag goes only once it has
 	// exited; one still running after 2 s keeps its tag ("busy").
@@ -603,7 +605,8 @@ export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" 
 	if (!exited) return "busy";
 	// A daemon that claimed the session since owns lease and tag; leave both.
 	let now = "";
-	try { now = fs.readFileSync(leasePath, "utf8").trim(); } catch { /* released */ }
+	try { now = fs.readFileSync(leasePath, "utf8").trim(); }
+	catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "failed"; }
 	if (now !== "" && now !== initial) return "busy";
 	// Anything left behind would be resumed, not rebuilt, so any error but
 	// "already gone" fails the whole -F.

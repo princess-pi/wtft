@@ -361,6 +361,26 @@ try {
 		await until(() => !alive(h.pid), 5_000);
 	}
 
+	console.log("\nA session written while no harness ran is read by the next one");
+	{
+		const root = makeRoot("idle-gap");
+		const idle = session(root, "gap-idle");
+		const other = session(root, "gap-other");
+		const quick = { WTFT_DAEMON_IDLE_MS: "2500", WTFT_DAEMON_STARTUP_GRACE_MS: "0" };
+		const h = start(root, ["--harness", "claude", "--session", idle], "gap.err", quick);
+		const handOff = `${harnessPidFile(root)}.served`;
+		check(await until(() => read(handOff).includes('"kind":"idle"'), 15_000) !== Infinity, "fixture: the harness dropped the session for idling");
+		process.kill(h.pid, "SIGTERM");
+		await until(() => !alive(h.pid), 5_000);
+		check(read(handOff).includes('"sig"'), "fixture: the hand-off names the idle session with its signature");
+		fs.appendFileSync(idle, turnLine("gap-later", Date.now()));
+		const h2 = start(root, ["--harness", "claude", "--session", other], "gap-2.err");
+		check(await until(() => classified(idle, "gap-later"), 10_000) !== Infinity,
+			"a turn written to an idle session while no harness ran is read by the next harness");
+		process.kill(h2.pid, "SIGTERM");
+		await until(() => !alive(h2.pid), 5_000);
+	}
+
 	console.log("\nA hand-off that cannot be read is kept and reported");
 	{
 		const root = makeRoot("handoff");
@@ -580,6 +600,11 @@ try {
 		fs.chmodSync(tagDir, 0o755);
 		check(locked.status === 1 && locked.stderr.includes("could not be deleted") && locked.stdout === "",
 			`-F exits 1 when a tag file cannot be deleted (exit ${locked.status})`);
+		fs.mkdirSync(getDaemonPidPath(file));
+		const unreadable = spawnSync("node", [cli, "-F", "-s", file], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+		fs.rmSync(getDaemonPidPath(file), { recursive: true, force: true });
+		check(unreadable.status === 1 && fs.existsSync(getCurrentVersionTagPath(file)),
+			`-F exits 1 and keeps the tag when the lease cannot be read (exit ${unreadable.status})`);
 	}
 } finally {
 	for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }

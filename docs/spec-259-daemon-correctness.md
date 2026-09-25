@@ -50,7 +50,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   tried again at each scan, and the tag is not stamped swept until it succeeds. A `claude -p` lookup still open when a daemon stops
   (its window not yet over, or a candidate unreadable) is resumed too: the tag records
   `{"_meta":{"spawnPending":{…}}}` when a turn's lookup starts and `{"_meta":{"spawnSettled":…}}`
-  when it ends, and a resumed daemon looks up every turn left open. So a `claude -p` session
+  when it ends, with the children the lookup found, and a resumed daemon looks up every turn left
+  open and reads every such child no earlier daemon read. So a `claude -p` session
   not yet on disk at the earlier daemon's last scan is found after the restart.
 
 ### Leases
@@ -100,7 +101,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   CLI says whether a daemon was stopped. On Linux only a lease holder whose command line names
   `wtft-daemon` is signalled; off Linux the lease pid is signalled as before. When the daemon is still running 2 s after the signal,
   or another daemon has claimed the lease meanwhile, nothing is deleted, and `-F` says so and
-  exits 1. So does a lease or tag file that cannot be deleted, since what is left would be resumed
+  exits 1. So does a lease that cannot be read, a daemon that cannot be signalled, a lease or tag
+  file that cannot be deleted, since what is left would be resumed
   rather than rebuilt, and a daemon that cannot be started. A harness lease that changed between
   being read and being replaced is left alone, as busy. The CLI and the Pi widget share one implementation, so
   the widget now deletes every version too, not only the current one.
@@ -142,6 +144,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 
 ### Harness exit (A12, decision B; F17; I28, decision F)
 
+- **The hand-off carries each idle session's size, inode and mtime**, so a session written while
+  no harness ran is adopted by the next harness at once.
 - **A session dropped for idling is forgotten `WTFT_DAEMON_IDLE_MS` after it was dropped** unless
   it is written first. The hand-off carries when it was dropped, so a later harness does not
   restart that clock.

@@ -337,15 +337,27 @@ function queueClaudeCommand(interaction: NonNullable<ReturnType<typeof parseEntr
 /** Requeue each lookup an earlier life left open. */
 function resumeClaudeLookups(tagContent: string) {
   const open = new Map<string, { at: number; commands: string[] }>();
+  const settledChildren: string[] = [];
+  const readSources = new Set<string>();
   for (const line of tagContent.split("\n")) {
+    if (line.includes('"_gen"')) {
+      try { const s = JSON.parse(line)._gen?.s; if (typeof s === "string") readSources.add(s); } catch { /* skip */ }
+      continue;
+    }
     if (!line.includes('"spawnPending"') && !line.includes('"spawnSettled"')) continue;
-    let meta: { spawnPending?: { key?: unknown; at?: unknown; commands?: unknown }; spawnSettled?: unknown } | undefined;
+    let meta: { spawnPending?: { key?: unknown; at?: unknown; commands?: unknown }; spawnSettled?: unknown; children?: unknown } | undefined;
     try { meta = JSON.parse(line)._meta; } catch { continue; }
+    if (Array.isArray(meta?.children)) settledChildren.push(...meta.children.filter((c): c is string => typeof c === "string"));
     const p = meta?.spawnPending;
     if (p && typeof p.key === "string" && typeof p.at === "number" && Array.isArray(p.commands)) {
       open.set(p.key, { at: p.at, commands: p.commands.filter((c): c is string => typeof c === "string") });
     }
     if (typeof meta?.spawnSettled === "string") open.delete(meta.spawnSettled);
+  }
+  // A child a settled lookup found that no earlier life read.
+  for (const file of settledChildren) {
+    if (readSources.has(transcriptSourceId(file, path.dirname(sessionPath)))) continue;
+    if (fs.existsSync(file)) discoveredClaudeFiles.add(file);
   }
   for (const [key, { at, commands }] of open) {
     if (pendingClaudeCommands.some(item => spawnKey(item.interaction) === key)) continue;
@@ -838,6 +850,7 @@ function scanForSubAgents() {
 
   if (pendingClaudeCommands.length > 0) {
     const stillPending: typeof pendingClaudeCommands = [];
+    const registeredBy = new Map<typeof pendingClaudeCommands[number], string[]>();
     for (const item of pendingClaudeCommands) {
       const interaction = item.interaction;
       const ownCwd = resolveLastCwd(sessionPath);
@@ -873,6 +886,7 @@ function scanForSubAgents() {
         // nothing to collapse them with at all.
         if (canonicalTranscriptPath(file) === canonicalTranscriptPath(sessionPath)) continue;
         discoveredClaudeFiles.add(file);
+        registeredBy.set(item, [...(registeredBy.get(item) ?? []), file]);
         if (process.env.WTFT_DAEMON_DEBUG) {
           process.stderr.write(`[wtft-log-parser] claude -p subagent registered for re-parse (${path.basename(file, '.jsonl')})\n`);
         }
@@ -890,7 +904,10 @@ function scanForSubAgents() {
     }
     for (const item of pendingClaudeCommands) {
       if (!stillPending.includes(item)) {
-        appendTagFile(tagPath, JSON.stringify({ _meta: { spawnSettled: spawnKey(item.interaction) } }) + "\n");
+        // The children it found may not be read before a restart, and only a
+        // child already read has a generation record for the resume to find.
+        const children = registeredBy.get(item) ?? [];
+        appendTagFile(tagPath, JSON.stringify({ _meta: { spawnSettled: spawnKey(item.interaction), ...(children.length ? { children } : {}) } }) + "\n");
       }
     }
     pendingClaudeCommands.length = 0;
@@ -2549,7 +2566,7 @@ function servedHandOffFile(): string {
 
 function handOffLines(adopting?: string): string[] {
   const lines: string[] = [];
-  const entry = (kind: string, displayed: boolean, key: string, since?: number) => JSON.stringify({ kind, displayed, path: key, ...(since === undefined ? {} : { since }) });
+  const entry = (kind: string, displayed: boolean, key: string, idle?: { since?: number; sig?: string }) => JSON.stringify({ kind, displayed, path: key, ...(idle ?? {}) });
   // A slot whose lease went elsewhere (--stop, another daemon) is not handed
   // on, except for a rebuild lease, which wants the session adopted again.
   for (const [key, slot] of harnessSlots) {
@@ -2561,7 +2578,7 @@ function handOffLines(adopting?: string): string[] {
   for (const [key, retry] of adoptionRetries) {
     if (!harnessSlots.has(key) && key !== adopting) lines.push(entry("served", retry.displayed, key));
   }
-  for (const [key, displayed] of idleDropped) lines.push(entry("idle", displayed, key, idleDroppedAt.get(key)));
+  for (const [key, displayed] of idleDropped) lines.push(entry("idle", displayed, key, { since: idleDroppedAt.get(key), sig: idleDroppedSize.get(key) }));
   return lines;
 }
 
@@ -2640,7 +2657,7 @@ function takeServedHandOff() {
   let unreadable = 0;
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
-    let record: { kind?: unknown; displayed?: unknown; path?: unknown; since?: unknown } = {};
+    let record: { kind?: unknown; displayed?: unknown; path?: unknown; since?: unknown; sig?: unknown } = {};
     try { record = JSON.parse(line); } catch { unreadable++; continue; }
     const kind = record.kind;
     const displayed = record.displayed === true ? "1" : "0";
@@ -2651,6 +2668,11 @@ function takeServedHandOff() {
     // does for any session it is asked for.
     if (kind === "served") wake(key, displayed === "1");
     else if (kind === "idle" && fs.existsSync(key) && !harnessSlots.has(key)) {
+      // Written while no harness ran: no watch event will come for it.
+      if (typeof record.sig === "string" && record.sig !== idleSignature(key)) {
+        wake(key, displayed === "1");
+        continue;
+      }
       dropForIdle(key, displayed === "1", typeof record.since === "number" ? record.since : Date.now());
       watchDir(path.dirname(key), false);
     }

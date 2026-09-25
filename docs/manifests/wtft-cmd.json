@@ -209,7 +209,7 @@
     },
     {
       "flags": "-F, --force",
-      "desc": "Force a full re-parse of the session's tag from its transcript. On Linux, a session a harness log parser daemon serves is rebuilt by that daemon, which keeps serving its other sessions, and the report waits for it to begin. If the harness has not taken the session up within 10 s, wtft says so and exits 1 with no report. Otherwise a running log parser daemon for the session is stopped and every version of its tag file deleted; when that daemon is still running 2 s later, or another has claimed the session meanwhile, nothing is deleted and wtft exits 1, as it does when a lease or tag file cannot be deleted."
+      "desc": "Force a full re-parse of the session's tag from its transcript. On Linux, a session a harness log parser daemon serves is rebuilt by that daemon, which keeps serving its other sessions, and the report waits for it to begin. If the harness has not taken the session up within 10 s, wtft says so and exits 1 with no report. Otherwise a running log parser daemon for the session is stopped and every version of its tag file deleted; when that daemon is still running 2 s later, or another has claimed the session meanwhile, nothing is deleted and wtft exits 1, as it does when the lease cannot be read, the daemon cannot be signalled, or a lease or tag file cannot be deleted."
     },
     {
       "flags": "--harness <pi|claude-code|auto>",
@@ -313,7 +313,7 @@
     },
     {
       "code": 1,
-      "meaning": "Error: no session found or selected, an invalid path, a daemon that could not be spawned or that died before producing data, a refused flag (-p), --stop unable to drop a session, -F unable to rebuild (a daemon that did not stop, a session another daemon claimed, a lease or tag file that could not be deleted, a daemon that could not be started, or a harness that did not take the session up within 10 s), --list/--cleanup/--restart/--stop unable to run wtft-daemon within 10 s, a read error other than a missing path in a harness's session tree (Claude Code's projects directory today) while --json or --tokens lists unrecorded spawns (#212: never a quiet []), or an unhandled exception. Reason on stderr; under --json stdout carries nothing."
+      "meaning": "Error: no session found or selected, an invalid path, a daemon that could not be spawned or that died before producing data, a refused flag (-p), --stop unable to drop a session, -F unable to rebuild (a daemon that did not stop, a session another daemon claimed, a lease that could not be read, a daemon that could not be signalled, a lease or tag file that could not be deleted, a daemon that could not be started, or a harness that did not take the session up within 10 s), --list/--cleanup/--restart/--stop unable to run wtft-daemon within 10 s, a read error other than a missing path in a harness's session tree (Claude Code's projects directory today) while --json or --tokens lists unrecorded spawns (#212: never a quiet []), or an unhandled exception. Reason on stderr; under --json stdout carries nothing."
     },
     {
       "code": 2,

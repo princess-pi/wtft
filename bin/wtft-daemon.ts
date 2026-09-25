@@ -1309,6 +1309,43 @@ function reapAndWarn() {
   }
 }
 
+/**
+ * On resume, the turns that ran `claude -p` are before the offset, so
+ * discovery never finds their transcripts again; the tag's generation records
+ * name them. Each one written since the tag was last stamped swept is read
+ * again from its start, as a new generation. Transcripts discovery does find
+ * (`<id>/subagents/`, Pi siblings) are left to it.
+ */
+function reseedClaudeChildren(tagContent: string) {
+  const children = new Map<string, string>();
+  let sweptAt = 0;
+  for (const line of tagContent.split("\n")) {
+    if (!line.includes('"_gen"') && !line.includes('"swept"')) continue;
+    let obj: { _gen?: { s?: unknown; session?: unknown }; _meta?: { swept?: unknown } };
+    try { obj = JSON.parse(line); } catch { continue; }
+    if (typeof obj._gen?.s === "string" && typeof obj._gen.session === "string") children.set(obj._gen.s, obj._gen.session);
+    if (typeof obj._meta?.swept === "number") sweptAt = Math.max(sweptAt, obj._meta.swept);
+  }
+  if (children.size === 0) return;
+  const found = new Set<string>();
+  try {
+    for (const file of discoverSubagentSessionFiles(sessionPath).files) found.add(canonicalTranscriptPath(file));
+  } catch { /* the scan reports it */ }
+  let dirs: string[] = [];
+  try { dirs = fs.readdirSync(projectsDir()); } catch { return; }
+  const sessionDir = path.dirname(sessionPath);
+  for (const [source, id] of children) {
+    for (const dir of dirs) {
+      const file = canonicalTranscriptPath(path.join(projectsDir(), dir, `${id}.jsonl`));
+      let mtimeMs: number;
+      try { mtimeMs = fs.statSync(file).mtimeMs; } catch { continue; }
+      if (transcriptSourceId(file, sessionDir) !== source) continue;
+      if (!found.has(file) && mtimeMs > sweptAt) discoveredClaudeFiles.add(file);
+      break;
+    }
+  }
+}
+
 function initClassified() {
 
   // Mid-line tag tail → rebuild, do not resume (cut alone can double-bill id-less turns).
@@ -1335,6 +1372,7 @@ function initClassified() {
         const metaOffset = readLastMetaOffset(tagPath);
         if (metaOffset !== null) {
           lastSize = metaOffset;
+          reseedClaudeChildren(tagContent);
           // Written by an earlier life; what changed since is not read yet.
           invalidateStaleSweptMarker(sessionPath);
         } else {

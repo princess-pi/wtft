@@ -130,6 +130,41 @@ try {
 			`the tag is stamped swept only after the held-back turn is written (turn line ${lastTurn}, swept line ${firstSwept})`);
 		process.kill(d.pid, "SIGTERM");
 	}
+
+	console.log("\nA resumed session reads again the claude -p transcripts it read before");
+	{
+		const root = makeRoot("resume");
+		const cwd = path.join(root, "work");
+		const projectDir = path.join(root, cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+		fs.mkdirSync(projectDir, { recursive: true });
+		const parentId = "aaaa1111-1111-4111-8111-111111111111";
+		const childId = "bbbb2222-2222-4222-8222-222222222222";
+		const parent = path.join(projectDir, `${parentId}.jsonl`);
+		const child = path.join(projectDir, `${childId}.jsonl`);
+		const t = Date.now() - 60_000;
+		const sessionLine = (id: string, ts: number) => JSON.stringify({ type: "session", version: 3, id, timestamp: new Date(ts).toISOString(), cwd }) + "\n";
+		const spawnTurn = JSON.stringify({
+			type: "message", timestamp: new Date(t + 1_000).toISOString(),
+			message: {
+				role: "assistant", id: "rs-parent", model: "claude-sonnet-4-6", timestamp: new Date(t + 1_000).toISOString(),
+				usage: { input_tokens: 1000, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+				content: [{ type: "toolCall", name: "bash", arguments: { command: "claude -p 'go'" } }],
+			},
+		}) + "\n";
+		fs.writeFileSync(parent, sessionLine(parentId, t) + spawnTurn);
+		fs.writeFileSync(child, sessionLine(childId, t + 2_000) + turnLine("rs-child-1", t + 3_000));
+		const tag = getCurrentVersionTagPath(parent);
+		const first = start(root, ["--session", parent], "resume-1.err");
+		check(await until(() => classified(parent, "rs-child-1") && read(tag).includes('"swept"'), 15_000) !== Infinity,
+			"fixture: the first daemon read the claude -p transcript");
+		process.kill(first.pid, "SIGTERM");
+		await until(() => !alive(first.pid), 5_000);
+		fs.appendFileSync(child, turnLine("rs-child-2", Date.now()));
+		const second = start(root, ["--session", parent], "resume-2.err");
+		check(await until(() => classified(parent, "rs-child-2"), 10_000) !== Infinity,
+			"a turn the claude -p transcript gained while nothing served the session is read after resume");
+		process.kill(second.pid, "SIGTERM");
+	}
 } finally {
 	for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 }

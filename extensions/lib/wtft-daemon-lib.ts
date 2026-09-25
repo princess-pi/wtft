@@ -550,11 +550,14 @@ export function getDaemonPidPath(sessionPath: string): string {
  * `wtft -F`: rederive one session's tag from its transcript. A session a
  * harness daemon serves gets a `rebuild` lease, which that harness rebuilds on
  * the next request for it, so the harness and its other sessions keep running
- * ("rebuild"). Otherwise the per-session daemon is stopped, and the lease and
- * every version of the tag deleted ("stopped"). Either way the caller then
- * asks for the session.
+ * ("rebuild"). Otherwise the lease and every version of the tag, beside the
+ * transcript or in the sibling project a moved session's tag lives in, are
+ * deleted, after stopping a live per-session daemon ("stopped") or with none
+ * running ("deleted"). Either way the caller then asks for the session. Telling
+ * a harness apart reads `/proc`, so off Linux a harness is stopped like a
+ * per-session daemon.
  */
-export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" {
+export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" | "deleted" {
 	const leasePath = getDaemonPidPath(sessionPath);
 	let pid = 0;
 	try { pid = parseInt(fs.readFileSync(leasePath, "utf8").trim(), 10); } catch { /* no lease */ }
@@ -569,18 +572,20 @@ export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" 
 		fs.renameSync(replacement, leasePath);
 		return "rebuild";
 	}
-	if (pid > 0) {
-		try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ }
+	let stopped = false;
+	if (daemon) {
+		try { process.kill(pid, "SIGTERM"); stopped = true; } catch { /* already gone */ }
 	}
 	try { fs.unlinkSync(leasePath); } catch { /* no lease */ }
-	const tagsDir = path.join(path.dirname(sessionPath), "wtft-tags");
 	const prefix = path.basename(sessionPath) + ".wtft-tag.v";
-	try {
-		for (const f of fs.readdirSync(tagsDir)) {
-			if (f.startsWith(prefix) && f.endsWith(".jsonl")) fs.unlinkSync(path.join(tagsDir, f));
-		}
-	} catch { /* no tags yet */ }
-	return "stopped";
+	for (const tagsDir of new Set([path.join(path.dirname(sessionPath), "wtft-tags"), path.dirname(getTagPath(sessionPath))])) {
+		try {
+			for (const f of fs.readdirSync(tagsDir)) {
+				if (f.startsWith(prefix) && f.endsWith(".jsonl")) fs.unlinkSync(path.join(tagsDir, f));
+			}
+		} catch { /* no tags yet */ }
+	}
+	return stopped ? "stopped" : "deleted";
 }
 
 function pathIsUnder(file: string, root: string): boolean {

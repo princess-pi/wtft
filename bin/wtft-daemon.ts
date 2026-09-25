@@ -197,7 +197,7 @@ function upsertHeartbeat(now: number) {
         let isHb = false;
         try {
           const obj = JSON.parse(lineBuf.toString("utf8").trim());
-          isHb = obj !== null && typeof obj === "object" && obj._hb !== undefined;
+          isHb = obj !== null && typeof obj === "object" && typeof obj._hb === "object" && obj._hb !== null;
         } catch (_) { /* not a heartbeat we can recognise — append beside it */ }
         if (isHb) {
           fs.writeSync(fd, hbBuf, 0, hbBuf.length, lineStart);
@@ -2262,7 +2262,7 @@ function leaseHolder(lease: string): string {
 }
 
 function logLeaseLost(session: string, lease: string) {
-  process.stderr.write(`[wtft-log-parser] lease for ${session} now held by ${leaseHolder(lease) || "nobody"}\n`);
+  process.stderr.write(`[wtft-log-parser] gave up ${session}: its lease now reads ${JSON.stringify(leaseHolder(lease))}\n`);
 }
 
 function sweepIdleSlots() {
@@ -2433,8 +2433,11 @@ function takeServedHandOff() {
   try {
     text = fs.readFileSync(claimed, "utf8");
   } catch (err) {
-    process.stderr.write(`[wtft-log-parser] WARNING: could not read the previous harness's hand-off, left at ${file}: ${err instanceof Error ? err.message : String(err)}\n`);
-    try { fs.renameSync(claimed, file); } catch { /* a newer one is there */ }
+    let left = claimed;
+    if (!fs.existsSync(file)) {
+      try { fs.renameSync(claimed, file); left = file; } catch { /* stays claimed */ }
+    }
+    process.stderr.write(`[wtft-log-parser] WARNING: could not read the previous harness's hand-off, left at ${left}: ${err instanceof Error ? err.message : String(err)}\n`);
     return;
   }
   try { fs.unlinkSync(claimed); } catch { /* already gone */ }
@@ -2568,8 +2571,8 @@ ${USAGE}
 
 Management:
   --list, -l            List every running wtft-daemon, including fixture processes
-  --cleanup             Kill per-session daemons whose session is gone, and fixture ones under the tmp dir;
-                        never a harness, which stops itself when it serves nothing
+  --cleanup             Kill per-session daemons whose session is gone, and fixture ones under the tmp dir
+                        that hold no lease here; never a harness process, which stops after 24h serving nothing
   --restart             Kill all running daemons (fresh spawn on next wtft)
   --stop <session>      Drop that session. A per-session process exits. A harness process stays up.
 
@@ -2648,7 +2651,7 @@ if (stopSession) {
   try { holder = Number(fs.readFileSync(lease, "utf8").trim()); } catch { holder = 0; }
   if (holder > 0 && procIsDaemon(holder) && procIsHarness(holder)) {
     if (!unlinkIfHolds(lease, String(holder))) {
-      console.log(`Not stopped: the lease for ${stopSession} changed`);
+      console.error(`Not stopped: the lease for ${stopSession} changed or could not be removed`);
       process.exit(1);
     }
     console.log(`Stopped: PID ${holder} — session dropped from harness: ${stopSession}`);

@@ -25,7 +25,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   the working directory (decision K). A per-session daemon matches when its own `--session`,
   resolved against its working directory, is the same path.
 - **`--stop` of a harness session reports what happened.** When the lease changed between being
-  read and being removed, it prints `Not stopped: the lease for <session> changed` and exits 1.
+  read and being removed, or could not be removed, it prints `Not stopped: the lease for <session>
+  changed or could not be removed` on stderr and exits 1.
 
 ### Swept (A2, decision A)
 
@@ -52,8 +53,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 - **An older per-session build never takes over from a newer one** (A9). It takes over only from
   a tag of an older version. With a newer-version tag present and its lease held by a live
   daemon, it exits 0. It never deletes a newer-version tag.
-- **A daemon that gives up a lease logs it** (decision G): `lease for <session> now held by
-  <holder>`. Losing a lease is how a session passes to a newer build, so this is not an error.
+- **A daemon that gives up a lease logs it** (decision G): `gave up <session>: its lease now reads
+  "<text>"`. Losing a lease is how a session passes to a newer build, so this is not an error.
 - **The lease race is a known limit** (decision G, H19). Releasing a lease is stat, read, stat,
   unlink. A daemon that claims the same lease between the last stat and the unlink loses it, and
   finds out at its next check (250 ms in a harness, one poll in a per-session daemon). The session
@@ -63,7 +64,7 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 
 ### Adoption
 
-- **A failed adoption gives up loudly** (A3, F14). After five tries 667 ms apart, the harness
+- **A failed adoption of an existing transcript gives up loudly** (A3, F14). After the first try and five retries 667 ms apart, the harness
   writes `could not adopt <session>: <reason>` to stderr, and removes the lease and `.display`
   marker if they still name it, so no reader is told the session is served.
 - **A wake for a session whose lease is no longer the harness's adopts it again.** The old slot is
@@ -73,9 +74,15 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 
 - **On a session a harness serves, `-F` rebuilds that one session.** It replaces the lease with
   `rebuild` and asks the harness for the session, which rebuilds the tag from the transcript. The
-  harness and its other sessions are untouched. On a per-session daemon, `-F` is unchanged: it
-  stops the daemon and deletes the session's tag files. The CLI and the Pi widget share one
-  implementation.
+  harness and its other sessions are untouched. The CLI waits until the harness has adopted the
+  session before it reads the tag, so its own report is of the rebuild. Telling a harness apart
+  reads `/proc`, so this holds on Linux; elsewhere the harness is stopped as below.
+- **Otherwise `-F` stops a live per-session daemon and deletes every version of the session's
+  tag**, beside the transcript and in the sibling project where a moved session's tag lives. The
+  CLI says whether a daemon was stopped. The CLI and the Pi widget share one implementation, so
+  the widget now deletes every version too, not only the current one.
+- **`wtft --list`, `--cleanup`, `--restart` and `--stop` pass `wtft-daemon`'s exit code through**,
+  and pass the session path as one argument, so a path with a space is not split.
 
 ### Focus requests (A4, F16)
 
@@ -101,7 +108,7 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 - **The sweep checks each served transcript**, at most once per 667 ms per session. One that is
   gone, has grown, or was replaced is woken, so a lost watch event only delays it. That covers a
   deleted session, the 1 h limit on a never-written session, and a directory whose watch failed.
-- **A failed directory watch is retried** by the sweep every 10 s while a served session needs it.
+- **A failed directory watch is retried** by the sweep every 10 s while a served session, or a session dropped for idling, needs it.
 
 ### Harness exit (A12, decision B; F17; I28, decision F)
 
@@ -120,14 +127,15 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 
 - **The stop line carries its reason**: `{"_hb":"stop","reason":"<reason>"}`. A per-session
   daemon writes it on shutdown, as before. A harness writes it when it drops a session whose lease
-  it still holds (idle, session removed) and when it stops.
+  it still holds for idling, removal or never being written, and when it stops. A stop on a failed
+  tag write writes none.
 
 ## Closer
 
 `tests/wtft-259-daemon-correctness.test.ts`, one check per behaviour above, each failing before
 its fix. Not reached by the suite, and why:
 
-- **`--cleanup`** stops every fixture daemon under `/tmp`, including those of suites running beside
+- **`--cleanup`** stops fixture daemons under `/tmp`, including those of suites running beside
   it, so its harness rule (decision E) is checked by reading the code.
 - **The request-directory watch re-arm** changes latency only, under the 250 ms sweep.
 - **The lease race** needs two processes inside one syscall gap.

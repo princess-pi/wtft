@@ -221,12 +221,15 @@ try {
 		fs.appendFileSync(tag, row.replace('"force-target"', '"force-bogus"') + "\n" + JSON.stringify({ _meta: { offset: fs.statSync(target).size } }) + "\n");
 		check(classified(target, "force-bogus"), "fixture: the target's tag carries a row its transcript does not");
 		const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
-		spawnSync("node", [cli, "--json", "-F", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+		const costOf = (out: string) => { try { return JSON.parse(out)?.total?.costUsd ?? NaN; } catch { return NaN; } };
+		const before = costOf(spawnSync("node", [cli, "--json", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 }).stdout);
+		const forced = costOf(spawnSync("node", [cli, "--json", "-F", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 }).stdout);
+		check(forced < before, `the -F report itself no longer counts the row the transcript does not hold ($${forced} against $${before})`);
 		const rebuilt = await until(() => classified(target, "force-target") && !classified(target, "force-bogus"), 10_000);
 		check(rebuilt !== Infinity, "the target's tag is rebuilt from its transcript");
 		check(alive(h.pid), "the harness keeps running");
 		check(read(getDaemonPidPath(other)).trim() === String(h.pid), "and keeps serving the other session");
-		check(read(h.err).includes(`lease for ${target} now held by rebuild`), "a daemon that gives up a lease logs who holds it now");
+		check(read(h.err).includes(`gave up ${target}: its lease now reads "rebuild"`), "a daemon that gives up a lease logs who holds it now");
 		process.kill(h.pid, "SIGTERM");
 	}
 
@@ -415,6 +418,14 @@ try {
 		check(await until(() => !alive(a.pid), 5_000) !== Infinity, `a relative path stops its daemon (exit ${byRelative.status}: ${byRelative.stdout.trim()})`);
 		const byHome = run(root, ["--stop", "~/stop-home.jsonl"], { HOME: outside });
 		check(await until(() => !alive(b.pid), 5_000) !== Infinity, `a ~ path stops its daemon (exit ${byHome.status}: ${byHome.stdout.trim()})`);
+		const spaced = path.join(outside, "stop spaced.jsonl");
+		fs.writeFileSync(spaced, turnLine("stop-spaced", Date.now()));
+		const c = start(root, ["--session", spaced], "stop-spaced.err");
+		check(await until(() => classified(spaced, "stop-spaced"), 15_000) !== Infinity, "fixture: a daemon serves a path holding a space");
+		const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
+		const viaCli = spawnSync("node", [cli, "--stop", spaced], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+		check(await until(() => !alive(c.pid), 5_000) !== Infinity && viaCli.status === 0,
+			`wtft --stop passes a path holding a space as one argument (exit ${viaCli.status}: ${viaCli.stdout.trim()})`);
 	}
 
 	console.log("\nA session moved while its subagent scan is cut finishes that scan");

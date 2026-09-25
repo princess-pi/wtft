@@ -328,7 +328,8 @@ suggesting `wtft … | less -R`. Any `wtft` run that produces a report spawns th
 parser daemon if one is not already holding the session's lease, and the daemon
 revives after an idle timeout when that process exited. A session under the Claude
 projects directory or the Pi sessions directory is served by that directory's one
-daemon, and an idle session there is dropped while the process stays up. A session
+daemon, and an idle session there is dropped while the process stays up; the process
+stops once it has served nothing for 24h. A session
 outside those directories keeps its own. The commands that run instead of a report —
 `--help`/`--why`/`--version` and the daemon-management group — return before
 that and spawn nothing. `wtft-daemon` exists for debugging, not for normal use.

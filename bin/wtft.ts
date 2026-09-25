@@ -139,7 +139,7 @@ import {
 	type SpawnTree,
 } from "../extensions/lib/wtft-spawn-tree.ts";
 import { subagentRows, type SubagentRow } from "../extensions/lib/wtft-subagent-block.ts";
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { loadConfig, readConfig } from "@princess-pi/libs/config";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "../extensions/lib/wtft-config-dir.ts";
 import {
@@ -463,17 +463,12 @@ async function main() {
 		if (opts.daemonCleanup) daemonArgs.push("--cleanup");
 		if (opts.daemonRestart) daemonArgs.push("--restart");
 		if (opts.daemonStop) daemonArgs.push("--stop", opts.daemonStop);
-		try {
-			const result = execSync(`${process.execPath} ${daemonArgs.join(" ")}`, {
-				encoding: "utf8",
-				timeout: 10000
-			});
-			if (result) console.log(result.trim());
-		} catch (err: any) {
-			if (err.stdout) console.log(err.stdout.trim());
-			if (err.stderr) console.error(err.stderr.trim());
-		}
-		return;
+		// An argument array, so a session path is never split by a shell.
+		const result = spawnSync(process.execPath, daemonArgs, { encoding: "utf8", timeout: 10000 });
+		if (result.stdout) console.log(result.stdout.trim());
+		if (result.stderr) console.error(result.stderr.trim());
+		if (result.error) console.error(result.error.message);
+		process.exit(result.status ?? 1);
 	}
 
 	// Lazy + memoised: only the `-s` fuzzy fallback pays for full discovery.
@@ -569,9 +564,24 @@ async function main() {
 	// ---
 	if (opts.forceReparse) {
 		const how = forceRebuildSession(finalSessionPath);
-		console.error(how === "rebuild"
-			? `\x1b[33mForce re-parse: the harness daemon rebuilds the tag for ${path.basename(finalSessionPath)}\x1b[0m`
-			: `\x1b[33mForce re-parse: killed daemon + deleted tag files for ${path.basename(finalSessionPath)}\x1b[0m`);
+		if (how === "rebuild") {
+			// The report below reads the tag, so wait until the harness has
+			// adopted the session, which truncates it; the rebuild follows.
+			spawnWtftDaemon(finalSessionPath, daemonDir);
+			const lease = getDaemonPidPath(finalSessionPath);
+			for (const until = Date.now() + 10_000; Date.now() < until;) {
+				let held = "";
+				try { held = fs.readFileSync(lease, "utf8").trim(); } catch { /* not claimed yet */ }
+				if (held !== "rebuild" && held !== "") break;
+				await new Promise(resolve => setTimeout(resolve, 100));
+			}
+		}
+		const what = {
+			rebuild: "the harness log parser daemon is rebuilding the tag",
+			stopped: "stopped the log parser daemon and deleted the tag files",
+			deleted: "deleted the tag files",
+		}[how];
+		console.error(`\x1b[33mForce re-parse: ${what} for ${path.basename(finalSessionPath)}\x1b[0m`);
 	}
 
 	// ---

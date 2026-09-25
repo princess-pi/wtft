@@ -197,7 +197,7 @@
     },
     {
       "flags": "--cleanup",
-      "desc": "Kill log parser daemons whose source session no longer exists. A harness process is not killed because the session it was started for is gone; it drops a gone session itself. A per-session fixture daemon under the tmp dir is killed too. A harness process is never killed; it stops itself once it serves nothing."
+      "desc": "Kill log parser daemons whose source session no longer exists. A harness process is not killed because the session it was started for is gone; it drops a gone session itself. A per-session fixture daemon under the tmp dir that holds no lease there is killed too. A harness process is never killed; it stops itself after 24h with no session to serve."
     },
     {
       "flags": "--restart",
@@ -209,7 +209,7 @@
     },
     {
       "flags": "-F, --force",
-      "desc": "Force a full re-parse of the session's tag from its transcript. A session a harness daemon serves is rebuilt by that harness, which keeps serving its other sessions; otherwise the per-session daemon is stopped and the tag files deleted."
+      "desc": "Force a full re-parse of the session's tag from its transcript. On Linux, a session a harness log parser daemon serves is rebuilt by that daemon, which keeps serving its other sessions, and the report waits for it to begin. Otherwise a running log parser daemon for the session is stopped and every version of its tag file deleted."
     },
     {
       "flags": "--harness <pi|claude-code|auto>",
@@ -309,7 +309,7 @@
   "exitCodes": [
     {
       "code": 0,
-      "meaning": "Report produced — including when there is nothing to report yet (session file not written, or a tag with no classified data). Under --json the report is one JSON object on stdout; the commands that run instead of a report (--help/--why/--version, --list/--cleanup/--restart/--stop, and spawn-record on a successful append or --help) also exit 0 and print their own output."
+      "meaning": "Report produced — including when there is nothing to report yet (session file not written, or a tag with no classified data). Under --json the report is one JSON object on stdout; the commands that run instead of a report (--help/--why/--version, and spawn-record on a successful append or --help) also exit 0 and print their own output. --list/--cleanup/--restart/--stop print wtft-daemon's output and exit with its code: 0 when it succeeded, 1 when --stop found the lease changed under it, 2 on a bad argument."
     },
     {
       "code": 1,

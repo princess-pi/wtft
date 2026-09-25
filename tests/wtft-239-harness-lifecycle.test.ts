@@ -552,6 +552,35 @@ try {
 		await until(() => !alive(h.pid), 5_000);
 	}
 
+	console.log("\nA symlinked directory appearing under a served session is not followed");
+	{
+		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-link-")));
+		const dir = path.join(root, "proj");
+		fs.mkdirSync(dir, { recursive: true });
+		const session = path.join(dir, "30303030-3131-4232-8333-343434343434.jsonl");
+		fs.writeFileSync(session, turnLine("ln-0", Date.now() - 60_000));
+		fs.mkdirSync(path.join(session.slice(0, -".jsonl".length), "subagents"), { recursive: true });
+		const elsewhere = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-linktarget-")));
+		for (let i = 0; i < 40; i++) fs.mkdirSync(path.join(elsewhere, `d${i}`));
+		const h = start(root, ["--harness", "claude", "--session", session], "ln.err");
+		check(await until(() => classified(session, "ln-0"), 15_000) !== Infinity, "fixture: the harness serves the session");
+		/** inotify watches this process holds. */
+		const watches = () => {
+			let n = 0;
+			for (const fd of fs.readdirSync(`/proc/${h.pid}/fdinfo`)) n += (read(`/proc/${h.pid}/fdinfo/${fd}`).match(/^inotify wd:/gm) ?? []).length;
+			return n;
+		};
+		await sleep(500);
+		const before = watches();
+		check(before > 0, `fixture: the harness holds inotify watches (${before})`);
+		fs.symlinkSync(elsewhere, path.join(session.slice(0, -".jsonl".length), "subagents", "linked"));
+		await sleep(1_500);
+		const after = watches();
+		check(after - before < 40, `the link's 40 target directories are not watched (${before} → ${after})`);
+		try { process.kill(h.pid, "SIGTERM"); } catch { /* gone */ }
+		await until(() => !alive(h.pid), 5_000);
+	}
+
 	console.log("\nA harness whose pid file no longer names it stops");
 	{
 		const { root, files } = makeRoot("p", 5);

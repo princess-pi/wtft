@@ -38,7 +38,9 @@
   file. There is no catch-up to wait behind.
 - **It watches only what it serves**, plus its own request directory: the project directory
   holding each served transcript, and that session's own directory tree (`<id>/`,
-  `<id>/subagents/`, nested ones; `tool-results/`, `memory/` and `wtft-tags/` are skipped). An
+  `<id>/subagents/`, nested ones; `tool-results/`, `memory/` and `wtft-tags/` are skipped, and a
+  symlinked directory is not followed). A session moved while its subagent scan is cut carries
+  that scan on under its new path. An
   event for another `.jsonl` file is ignored, except that under the Pi root any event on a
   sibling wakes the served sessions in its directory, since a Pi subagent session is a sibling.
   An event with no file name wakes every served session; one for a file that no longer exists
@@ -142,6 +144,8 @@
 - After `--restart`, a session the old harness was asked for is read on its next write, with no
   new request.
 - A reparse marker whose pid is a reparse of another session does not hold a session back.
+- A symlink to a directory with 40 subdirectories, created under a served session, adds no
+  watches: watch events are not followed through symlinks.
 - A session asked for while a reparse holds it, then passed through `--restart`, is adopted by
   the next harness once the reparse is gone.
 - A focus request for a path holding a newline is served.

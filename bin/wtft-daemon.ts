@@ -914,12 +914,15 @@ function scanForSubAgents() {
     const key = path.resolve(sessionPath);
     if (!subagentScansContinuing.has(key)) {
       subagentScansContinuing.add(key);
+      const owner = harnessSlots.get(key);
       const next = () => {
         subagentScansContinuing.delete(key);
-        const slot = harnessSlots.get(key);
+        // The slot may have moved to a new path since the cut.
+        const current = owner ? path.resolve(owner.sessionPath) : key;
+        const slot = harnessSlots.get(current) === owner ? owner : undefined;
         if (!slot || !running) return;
         if (!leaseStillOurs(slot)) {
-          dropHarnessSlot(key);
+          dropHarnessSlot(current);
           return;
         }
         withSlot(slot, () => scanForSubAgents());
@@ -1738,6 +1741,11 @@ function wake(file: string, displayed: boolean) {
     if (other && other !== slot) dropHarnessSlot(movedTo);
     harnessSlots.delete(key);
     harnessSlots.set(movedTo, slot);
+    // A scan cut before the move carries on under the new path.
+    const pass = subagentScanPass.get(key);
+    subagentScanPass.delete(key);
+    if (pass) subagentScanPass.set(movedTo, pass);
+    if (subagentScanPassFailed.delete(key)) subagentScanPassFailed.add(movedTo);
     unwatchSession(key);
     watchSession(movedTo);
     const timer = harnessFlushTimers.get(key);
@@ -1912,7 +1920,8 @@ function onWatch(dir: string, filename: string | null) {
   const full = path.resolve(dir, filename);
   let st: fs.Stats | null = null;
   try {
-    st = fs.statSync(full);
+    // Not followed: a symlinked directory would pull its whole target in.
+    st = fs.lstatSync(full);
   } catch {
     st = null;
   }

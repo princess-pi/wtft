@@ -275,6 +275,44 @@ try {
 			"a request posted to a harness that then stops is served by the next harness");
 		process.kill(h2.pid, "SIGTERM");
 	}
+
+	console.log("\nThe hand-off survives a harness killed without warning");
+	{
+		const root = makeRoot("killed");
+		const served = session(root, "killed-served");
+		const next = session(root, "killed-next");
+		const h = start(root, ["--harness", "claude", "--session", served], "killed.err");
+		check(await until(() => classified(served, "killed-served"), 15_000) !== Infinity, "fixture: a harness serves a session");
+		await sleep(600);
+		process.kill(h.pid, "SIGKILL");
+		await until(() => !alive(h.pid), 5_000);
+		const h2 = start(root, ["--harness", "claude", "--session", next], "killed-2.err");
+		check(await until(() => classified(next, "killed-next"), 15_000) !== Infinity, "fixture: the next harness is up");
+		fs.appendFileSync(served, turnLine("killed-later", Date.now()));
+		check(await until(() => classified(served, "killed-later"), 10_000) !== Infinity,
+			"the next harness serves what a SIGKILLed harness served, with no new request");
+		process.kill(h2.pid, "SIGTERM");
+		await until(() => !alive(h2.pid), 5_000);
+	}
+
+	console.log("\nA hand-off that cannot be read is kept and reported");
+	{
+		const root = makeRoot("handoff");
+		const file = session(root, "handoff-main");
+		const handOff = `${harnessPidFile(root)}.served`;
+		fs.mkdirSync(handOff);
+		const h = start(root, ["--harness", "claude", "--session", file], "handoff.err");
+		check(await until(() => classified(file, "handoff-main"), 15_000) !== Infinity, "fixture: the harness is up");
+		check(fs.existsSync(handOff) && read(h.err).includes("could not read the previous harness's hand-off"),
+			"a hand-off that cannot be read stays in place and is reported");
+		process.kill(h.pid, "SIGTERM");
+		await until(() => !alive(h.pid), 5_000);
+		fs.rmSync(handOff, { recursive: true, force: true });
+		fs.writeFileSync(handOff, "not json\n");
+		const h2 = start(root, ["--harness", "claude", "--session", file], "handoff-2.err");
+		check(await until(() => read(h2.err).includes("hand-off line"), 10_000) !== Infinity, "a hand-off line that does not parse is reported");
+		process.kill(h2.pid, "SIGTERM");
+	}
 } finally {
 	for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 }

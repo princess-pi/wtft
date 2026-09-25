@@ -1865,12 +1865,12 @@ function servedSessionOver(dir: string): string | null {
 
 /** A session that could not be adopted is tried again every POLL_MS, up to
  *  five times. One retry is pending per session at a time. */
-const adoptionRetries = new Map<string, number>();
+const adoptionRetries = new Map<string, { tries: number; displayed: boolean }>();
 const adoptionRetryPending = new Set<string>();
 function retryAdoptionLater(key: string, displayed: boolean) {
   if (!running || !fs.existsSync(key)) return;
   if (adoptionRetryPending.has(key)) return;
-  const tries = (adoptionRetries.get(key) ?? 0) + 1;
+  const tries = (adoptionRetries.get(key)?.tries ?? 0) + 1;
   if (tries > 5) {
     adoptionRetries.delete(key);
     const lease = getDaemonPidPath(key);
@@ -1887,7 +1887,7 @@ function retryAdoptionLater(key: string, displayed: boolean) {
     }
     return;
   }
-  adoptionRetries.set(key, tries);
+  adoptionRetries.set(key, { tries, displayed });
   adoptionRetryPending.add(key);
   const timer = setTimeout(() => {
     adoptionRetryPending.delete(key);
@@ -2264,6 +2264,7 @@ function sweepIdleSlots() {
     idleDropped.set(key, current.displayed);
     dropHarnessSlot(key);
   }
+  persistHandOff();
 }
 
 /** What this harness served, for the next harness on this root: one JSON
@@ -2272,7 +2273,7 @@ function servedHandOffFile(): string {
   return `${harnessPidFile}.served`;
 }
 
-function writeServedHandOff(adopting?: string, asked: string[] = []) {
+function handOffLines(adopting?: string, asked: string[] = []): string[] {
   const lines: string[] = [];
   const entry = (kind: string, displayed: boolean, key: string) => JSON.stringify({ kind, displayed, path: key });
   for (const [key, slot] of harnessSlots) lines.push(entry("served", slot.displayed, key));
@@ -2280,17 +2281,51 @@ function writeServedHandOff(adopting?: string, asked: string[] = []) {
   // A session whose adoption failed is not in harnessSlots yet.
   if (adopting && !harnessSlots.has(adopting)) lines.push(entry("served", displayedSession, adopting));
   // Asked for, but waiting on an adoption retry.
-  for (const key of adoptionRetries.keys()) {
-    if (!harnessSlots.has(key) && key !== adopting) lines.push(entry("served", true, key));
+  for (const [key, retry] of adoptionRetries) {
+    if (!harnessSlots.has(key) && key !== adopting) lines.push(entry("served", retry.displayed, key));
   }
   for (const [key, displayed] of idleDropped) lines.push(entry("idle", displayed, key));
-  if (lines.length === 0) return;
+  return lines;
+}
+
+function writeServedHandOff(adopting?: string, asked: string[] = []) {
+  const lines = handOffLines(adopting, asked);
   try {
+    if (lines.length === 0) {
+      fs.rmSync(servedHandOffFile(), { force: true });
+      return;
+    }
     const tmp = `${servedHandOffFile()}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, lines.join("\n") + "\n");
     fs.renameSync(tmp, servedHandOffFile());
   } catch (err) {
     process.stderr.write(`[wtft-log-parser] WARNING: could not hand ${lines.length} session(s) to the next harness: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
+}
+
+/** The hand-off as it stands, so a harness killed before its SIGTERM handler
+ *  runs still passes on what it served. Rewritten only when it changes. */
+let handOffPersisted = "";
+let handOffWarned = "";
+function persistHandOff() {
+  if (!holdsHarnessRoot()) return;
+  const text = handOffLines().join("\n");
+  if (text === handOffPersisted) return;
+  try {
+    if (text) {
+      const tmp = `${servedHandOffFile()}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, text + "\n");
+      fs.renameSync(tmp, servedHandOffFile());
+    } else {
+      fs.rmSync(servedHandOffFile(), { force: true });
+    }
+    handOffPersisted = text;
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    if (why !== handOffWarned) {
+      handOffWarned = why;
+      process.stderr.write(`[wtft-log-parser] WARNING: could not update the hand-off for the next harness: ${why}\n`);
+    }
   }
 }
 
@@ -2315,12 +2350,16 @@ function takeServedHandOff() {
   try {
     text = fs.readFileSync(claimed, "utf8");
   } catch (err) {
-    process.stderr.write(`[wtft-log-parser] WARNING: could not read the previous harness's hand-off: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(`[wtft-log-parser] WARNING: could not read the previous harness's hand-off, left at ${file}: ${err instanceof Error ? err.message : String(err)}\n`);
+    try { fs.renameSync(claimed, file); } catch { /* a newer one is there */ }
+    return;
   }
   try { fs.unlinkSync(claimed); } catch { /* already gone */ }
+  let unreadable = 0;
   for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
     let record: { kind?: unknown; displayed?: unknown; path?: unknown } = {};
-    try { record = JSON.parse(line); } catch { continue; }
+    try { record = JSON.parse(line); } catch { unreadable++; continue; }
     const kind = record.kind;
     const displayed = record.displayed === true ? "1" : "0";
     const key = typeof record.path === "string" ? record.path : "";
@@ -2333,6 +2372,9 @@ function takeServedHandOff() {
       idleDropped.set(key, displayed === "1");
       watchDir(path.dirname(key), false);
     }
+  }
+  if (unreadable > 0) {
+    process.stderr.write(`[wtft-log-parser] WARNING: skipped ${unreadable} hand-off line(s) that did not parse\n`);
   }
 }
 

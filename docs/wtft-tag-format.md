@@ -68,7 +68,7 @@ one `writeSync` at a `lastLineStartByte` offset, on the one descriptor already o
 does not change, so an offset-tracking reader's position can never go stale, and a torn write
 leaves a mix of two heartbeats that have identical shape and identical length, hence still a
 complete parseable line. The fixed width is what buys that: `first` and `last` are both
-13-digit epoch milliseconds. A line of any other width — `{"_hb":"stop"}`, or a tag from some
+13-digit epoch milliseconds. A line of any other width — a stop line, or a tag from some
 future build — is not ours to overwrite, so it is appended beside instead.
 
 The earlier design truncated the stale heartbeat and appended a fresh one through a second
@@ -147,9 +147,11 @@ The daemon periodically writes heartbeat lines to signal liveness. Shape:
 ```
 
 `first` is the millisecond timestamp at which the current idle run began and `last` the most
-recent beat; `first === last` on the first beat of a run. The daemon also writes
-`{"_hb": "stop"}` on shutdown, so the value is **not** always an object — a reader that
-destructures it must handle the string.
+recent beat; `first === last` on the first beat of a run. The daemon also writes a stop line,
+`{"_hb": "stop", "reason": "<why>"}`, when it stops serving the session: a per-session daemon on
+shutdown, a harness daemon when it drops a session whose lease it still holds and when it stops.
+So the value is **not** always an object — a reader that destructures it must handle the string.
+Tags written before the reason existed carry `{"_hb": "stop"}`.
 
 The top-level `_hb` key identifies a heartbeat. Readers MUST skip all lines that carry
 `_hb` — they are not interaction records.

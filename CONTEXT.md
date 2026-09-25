@@ -20,7 +20,8 @@ the root. Finding a Pi session's subagent sessions reads the first line of each 
 session outside those roots keeps its own process, polling every 667ms. The tag file and
 the pid lease stay per session. After 24h with no new lines, the per-session process
 exits, and the harness process drops that session and its lease; the next write to its own transcript,
-or the next request, adopts it again. Spawned on Pi `session_start` and on
+or the next request, adopts it again. A harness process left with no session to serve for 24h
+stops, and so does one whose root is removed. Spawned on Pi `session_start` and on
 a CLI report. A per-session process is revived after an idle exit and replaced on a
 version bump, and a harness process from an older tagger is replaced by the next start
 from a newer one. On Linux, a live harness
@@ -364,7 +365,8 @@ names the usage mode)
 
 **Provisional (total)** (#443, a field since #26):
 A total that may still change: the tag file was written by another tagger build
-(`stale-version`) or read before the log parser daemon swept it (`unswept`), the CLI's
+(`stale-version`) or read before the log parser daemon swept it — read every subagent
+transcript and wrote every subagent turn (`unswept`), the CLI's
 scan could not list or read a subagent file (`subagent-unreadable`), or a counted descendant
 is still writing its transcript or one of its subagent transcripts (`descendant-live`: its
 spawn-tree edge is **live**; the exact

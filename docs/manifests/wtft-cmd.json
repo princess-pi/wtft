@@ -197,7 +197,7 @@
     },
     {
       "flags": "--cleanup",
-      "desc": "Kill log parser daemons whose source session no longer exists. A harness process is not killed because the session it was started for is gone; it drops a gone session itself. A fixture daemon under the tmp dir is killed too."
+      "desc": "Kill log parser daemons whose source session no longer exists. A harness process is not killed because the session it was started for is gone; it drops a gone session itself. A per-session fixture daemon under the tmp dir is killed too. A harness process is never killed; it stops itself once it serves nothing."
     },
     {
       "flags": "--restart",
@@ -209,7 +209,7 @@
     },
     {
       "flags": "-F, --force",
-      "desc": "Kill the log parser daemon, delete tag files, and force a full session re-parse."
+      "desc": "Force a full re-parse of the session's tag from its transcript. A session a harness daemon serves is rebuilt by that harness, which keeps serving its other sessions; otherwise the per-session daemon is stopped and the tag files deleted."
     },
     {
       "flags": "--harness <pi|claude-code|auto>",

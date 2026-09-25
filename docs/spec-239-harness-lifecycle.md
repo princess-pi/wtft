@@ -6,6 +6,12 @@
 [#250](https://github.com/princess-pi/wtft/issues/250) ·
 **Tests:** `tests/wtft-239-harness-lifecycle.test.ts`, `tests/wtft-205-one-daemon-per-harness.test.ts`
 
+**Status:** Superseded in part by #259.
+
+> **Superseded in part by [spec-259](spec-259-daemon-correctness.md).** `--reparse` and
+> `--reparse-range` are gone, a harness serves a request whatever harness pid it names, keeps its
+> hand-off current, and stops when it serves nothing. Where the two disagree, spec-259 is current.
+
 ## What went wrong
 
 - **#239 — every session stayed adopted.** The harness daemon's startup catch-up adopted every
@@ -72,26 +78,14 @@
   request directory, so a request is served when it is posted, not at the next 250 ms sweep (a
   request posted while the harness is starting waits for that sweep, and so does every request
   after its watch of the directory fails); a
-  one-shot `wtft` on a session handed to a running harness finds its turns in the tag. A request
-  never overwrites a lease a `--reparse` holds. A request that cannot be
+  one-shot `wtft` on a session handed to a running harness finds its turns in the tag. A request that cannot be
   posted is reported on stderr. Unless the harness still holds the root and already held this
   session's lease, the lease and `.display` the call pointed at it are removed, so the reader is
   not told a session is served when nothing will adopt it. The spawn then waits up to 2 s for
   that harness to exit and tries to claim the root itself, exiting 1 after five attempts.
-- **`--reparse` holds the session's lease while it rewrites the tag**, and a harness never stops
-  a reparse to take a lease: asked for a session a reparse holds, it tries again every 667 ms
-  until the reparse lets go. Any other failed adoption of an existing transcript is retried up to five times. A reparse
-  whose lease was taken while it parsed gives up before it rewrites the tag. `--reparse` of a session a daemon is serving is refused, exit 1.
-  A reparse marks the session (`<lease>.reparse`) for as long as it runs, a second reparse of a
-  marked session is refused, exit 1, and a harness does not
-  adopt a marked session while the marker names a running reparse of that session (or a
-  `--reparse-range`), even when a focus request has pointed its lease at the harness. A
-  reparse stamps the tag swept only after a clean subagent scan; one that could not read a
-  subagent transcript exits 1. A per-session daemon started for a session a reparse holds waits
-  for it to let go, and a focus request never overwrites a `rebuild` lease, so a session handed
-  to a live harness after a failed tag write is rebuilt, not resumed.
-  `--reparse-range` exits 1, naming how many sessions it left unreparsed, when any was refused,
-  failed or could not be stat'd, and exits 2 when the second date is missing or a date does not parse.
+- **A focus request never overwrites a `rebuild` lease**, so a session handed to a live harness
+  after a failed tag write is rebuilt, not resumed. A failed adoption of an existing transcript
+  is retried up to five times.
 - **A harness whose pid file no longer names it stops.** The sweep reads the harness pid file;
   if it was removed, is empty, or names another process, the harness stops and releases its leases, so two
   harnesses contend for one root only until the displaced one's next sweep, which the event
@@ -114,8 +108,8 @@
   start-up `--session`.** `--stop` drops a session from a harness only through that session's
   own lease. The harness drops a gone session itself.
 - **The #205 and #239 suites run their long-lived daemons under node** (the #239 suite runs
-  every daemon command under node; the #205 suite's one-shot `--stop`, `--reparse`,
-  `--reparse-range` and `--restart` still run under the test runner's bun), and the #205 suite waits for the event it
+  every daemon command under node; the #205 suite's one-shot `--stop` and `--restart` still run
+  under the test runner's bun), and the #205 suite waits for the event it
   measures, with wall-time limits of 30 s, instead of a fixed sleep.
 
 ## Closer
@@ -127,31 +121,20 @@
   and the harness's live heap (a heap snapshot) is within 1 MiB of a harness on a root of 10
   sessions. A write to a session nobody asked for is not read. A session asked for later from
   another process is served, its subagent transcript included, and a later write to that
-  subagent transcript is read. `--reparse` runs beside the harness on a session it does not
-  serve and is refused on one it does. The issue asked for RSS; RSS keeps heap a parse freed
+  subagent transcript is read. The issue asked for RSS; RSS keeps heap a parse freed
   and did not return (#97), so the test measures live heap.
 - A session with 20 subagent transcripts, scanned in 0 ms slices with 300 ms between them: the first `wtft --json` returns in under 3 s with the session's own sum, marked provisional
   (exit 9); a later report is complete (exit 0) and counts the subagent turns the first did not.
   A second session handed to that running harness gets its sum on its first report.
-- A `--reparse` that cannot read a subagent transcript exits 1 and leaves the tag unswept.
 - A session adopted again after its harness stopped has its old swept verdict retracted, then
   its subagent written while nothing served it is read.
 - A session with a `rebuild` lease, handed to a harness already serving another session, is
   rebuilt: a row its transcript does not hold is gone.
-- A per-session daemon whose lease a `--reparse` holds stays up without taking it, then claims it
-  and classifies the session once the reparse lets go.
-- A harness asked for a session whose `--reparse` marker names a running reparse leaves it
-  untagged, then adopts it once the reparse is gone.
 - A session dropped for idling is read again on its next write, with no new request.
-- A second `--reparse` of a session a reparse is running on exits 1 and leaves that reparse's
-  marker in place.
 - After `--restart`, a session the old harness was asked for is read on its next write, with no
   new request.
-- A reparse marker whose pid is a reparse of another session does not hold a session back.
 - A symlink to a directory with 40 subdirectories, created under a served session, adds no
   watches: watch events are not followed through symlinks.
-- A session asked for while a reparse holds it, then passed through `--restart`, is adopted by
-  the next harness once the reparse is gone.
 - A focus request for a path holding a newline is served.
 - After `--restart`, a session whose path holds a tab is read on its next write.
 - A session handed to a harness before its project directory exists is read on its first write.

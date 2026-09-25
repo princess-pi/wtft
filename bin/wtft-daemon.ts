@@ -2568,7 +2568,8 @@ ${USAGE}
 
 Management:
   --list, -l            List every running wtft-daemon, including fixture processes
-  --cleanup             Kill per-session daemons whose session is gone, and fixture daemons under the tmp dir
+  --cleanup             Kill per-session daemons whose session is gone, and fixture ones under the tmp dir;
+                        never a harness, which stops itself when it serves nothing
   --restart             Kill all running daemons (fresh spawn on next wtft)
   --stop <session>      Drop that session. A per-session process exits. A harness process stays up.
 

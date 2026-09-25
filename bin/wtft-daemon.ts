@@ -1514,6 +1514,8 @@ interface Slot {
   tagGrewSinceMarker: boolean;
   pollHadFailure: boolean;
   sweptRetracted: boolean;
+  /** When the sweep last checked this transcript on disk. */
+  checkedAtMs: number;
 }
 
 const harnessSlots = new Map<string, Slot>();
@@ -1548,6 +1550,7 @@ function freshSlot(file: string, displayed: boolean): Slot {
     tagGrewSinceMarker: true,
     pollHadFailure: false,
     sweptRetracted: false,
+    checkedAtMs: now,
   };
 }
 
@@ -1794,8 +1797,11 @@ function watchDir(dir: string, recurse: boolean) {
   try {
     watcher = fs.watch(key, (event, filename) => onWatch(key, filename ? String(filename) : null));
   } catch {
+    // The sweep reads what this would have woken, and tries again.
+    unwatchedDirs.set(key, { recurse, triedAt: Date.now() });
     return;
   }
+  unwatchedDirs.delete(key);
   watcher.on("error", () => {
     harnessWatchers.delete(key);
     try { watcher.close(); } catch { /* already closed */ }
@@ -1821,6 +1827,20 @@ function watchDir(dir: string, recurse: boolean) {
     if (HARNESS_SKIP_DIRS.has(ent.name) && ent.name !== "subagents") continue;
     watchDir(path.resolve(key, ent.name), true);
   }
+}
+
+/** Directories whose watch failed. */
+const unwatchedDirs = new Map<string, { recurse: boolean; triedAt: number }>();
+const WATCH_RETRY_MS = 10_000;
+
+/** Whether a served or idle-dropped session still needs `dir` watched. */
+function dirStillNeeded(dir: string): boolean {
+  for (const file of harnessSlots.keys()) {
+    const own = sessionDirOf(file);
+    if (path.dirname(file) === dir || dir === own || dir.startsWith(own + path.sep)) return true;
+  }
+  for (const file of idleDropped.keys()) if (path.dirname(file) === dir) return true;
+  return false;
 }
 
 function sessionDirOf(file: string): string {
@@ -2083,12 +2103,18 @@ function claimFocusRequests(): string[] {
 
 /** A request is served as soon as it is posted, not at the next sweep. The
  *  sweep still reads the directory, so a lost event only delays one. */
+let focusWatcher: fs.FSWatcher | null = null;
+/** The sweep re-arms it after an error. */
 function watchFocusRequests() {
   const dir = `${harnessPidFile}.focus.d`;
   try {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     const watcher = fs.watch(dir, () => { if (running) takeFocusRequests(); });
-    watcher.on("error", () => { try { watcher.close(); } catch { /* closed */ } });
+    watcher.on("error", () => {
+      try { watcher.close(); } catch { /* closed */ }
+      if (focusWatcher === watcher) focusWatcher = null;
+    });
+    focusWatcher = watcher;
   } catch { /* the sweep still serves requests */ }
 }
 
@@ -2190,7 +2216,9 @@ function releaseLease(slot: Slot) {
     const before = fs.statSync(slot.pidPath);
     if (fs.readFileSync(slot.pidPath, "utf8").trim() !== String(process.pid)) return;
     const now = fs.statSync(slot.pidPath);
-    if (now.dev === before.dev && now.ino === before.ino) fs.unlinkSync(slot.pidPath);
+    if (now.dev !== before.dev || now.ino !== before.ino) return;
+    fs.unlinkSync(slot.pidPath);
+    fs.rmSync(`${slot.pidPath}.display`, { force: true });
   } catch { /* already gone */ }
 }
 
@@ -2250,6 +2278,17 @@ function sweepIdleSlots() {
       dropHarnessSlot(key);
       continue;
     }
+    // A lost or missing watch event only delays a wake: a transcript that is
+    // gone, has grown or was replaced is woken here.
+    if (now - slot.checkedAtMs >= POLL_MS) {
+      slot.checkedAtMs = now;
+      let st: fs.Stats | null = null;
+      try { st = fs.statSync(slot.sessionPath); } catch { /* gone, or not written yet */ }
+      if (!st || st.ino !== slot.sessionIno || st.size !== slot.lastSize) {
+        wake(key, slot.displayed);
+        if (harnessSlots.get(key) !== slot) continue;
+      }
+    }
     if (slot.pidPath && fs.existsSync(`${slot.pidPath}.display`)) {
       slot.displayed = true;
       try { fs.unlinkSync(`${slot.pidPath}.display`); } catch { /* already gone */ }
@@ -2264,6 +2303,12 @@ function sweepIdleSlots() {
     idleDropped.set(key, current.displayed);
     dropHarnessSlot(key);
   }
+  for (const [dir, failed] of unwatchedDirs) {
+    if (now - failed.triedAt < WATCH_RETRY_MS) continue;
+    if (!dirStillNeeded(dir)) unwatchedDirs.delete(dir);
+    else watchDir(dir, failed.recurse);
+  }
+  if (!focusWatcher) watchFocusRequests();
   persistHandOff();
 }
 

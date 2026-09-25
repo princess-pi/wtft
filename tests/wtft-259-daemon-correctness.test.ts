@@ -313,6 +313,29 @@ try {
 		check(await until(() => read(h2.err).includes("hand-off line"), 10_000) !== Infinity, "a hand-off line that does not parse is reported");
 		process.kill(h2.pid, "SIGTERM");
 	}
+
+	console.log("\nThe sweep reads a session whose directory cannot be watched");
+	{
+		const root = makeRoot("unwatched");
+		const file = session(root, "unwatched-main");
+		const dir = path.dirname(file);
+		// Search and write, but no read: the files stay reachable, a watch fails.
+		fs.chmodSync(dir, 0o311);
+		try {
+			let watchFailed = false;
+			try { fs.watch(dir).close(); } catch { watchFailed = true; }
+			check(watchFailed, "fixture: the session's directory cannot be watched");
+			const h = start(root, ["--harness", "claude", "--session", file], "unwatched.err");
+			check(await until(() => classified(file, "unwatched-main"), 15_000) !== Infinity, "fixture: the harness adopts the session");
+			fs.appendFileSync(file, turnLine("unwatched-later", Date.now()));
+			check(await until(() => classified(file, "unwatched-later"), 10_000) !== Infinity, "a write to it is read");
+			fs.unlinkSync(file);
+			check(await until(() => read(h.err).includes("session drop unwatched-main.jsonl"), 10_000) !== Infinity, "and its deletion drops it");
+			process.kill(h.pid, "SIGTERM");
+		} finally {
+			fs.chmodSync(dir, 0o755);
+		}
+	}
 } finally {
 	for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 }

@@ -47,6 +47,9 @@ import {
 // ---
 
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
+const USAGE = `Usage: wtft-daemon --session <path> [--debug]
+       wtft-daemon --harness <claude|pi> [--session <path>] [--debug]
+       wtft-daemon --list | --cleanup | --restart | --stop <session>`;
 const POLL_MS = 667; // 90bpm throttle
 /** How long one slice of a harness's subagent scan runs before it yields to the event loop. */
 const HARNESS_SCAN_SLICE_MS = envMs("WTFT_HARNESS_SCAN_SLICE_MS", 25);
@@ -1643,30 +1646,11 @@ function harnessRoot(which: string): string {
   process.exit(2);
 }
 
-function walkSessions(dir: string, out: string[]) {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const ent of entries) {
-    const full = path.resolve(dir, ent.name);
-    if (ent.isDirectory()) {
-      if (HARNESS_SKIP_DIRS.has(ent.name)) continue;
-      walkSessions(full, out);
-    } else if (ent.name.endsWith(".jsonl") && !ent.name.includes(".wtft-tag.")) {
-      out.push(full);
-    }
-  }
-}
-
 function adoptSession(): boolean {
   if (sessionPath.includes(".wtft-tag.v")) return false;
   tagPath = getCurrentVersionTagPath(sessionPath);
   try { fs.mkdirSync(path.dirname(tagPath), { recursive: true }); } catch { /* exists */ }
   pidPath = getDaemonPidPath(sessionPath);
-  if (reparseRunning(pidPath, sessionPath)) return false;
   try {
     if (fs.readFileSync(pidPath, "utf8").trim() === "rebuild") rebuildTagOnStartup = true;
   } catch { /* no lease yet */ }
@@ -1681,7 +1665,6 @@ function takeOverLease(pidPath: string): boolean {
     let holder = 0;
     try { holder = Number(fs.readFileSync(pidPath, "utf8").trim()); } catch { holder = 0; }
     if (holder === process.pid) return true;
-    if (holder > 0 && procIsReparseOf(holder, sessionPath)) return false;
     if (holder > 0 && procIsDaemon(holder)) {
       try { process.kill(holder, "SIGTERM"); } catch { /* already gone */ }
     }
@@ -1837,20 +1820,15 @@ function servedSessionOver(dir: string): string | null {
   return null;
 }
 
-/** A session that could not be adopted is tried again every POLL_MS: while a
- *  `--reparse` holds or marks it, until the reparse lets go, so it is never
- *  taken mid-rewrite; after any other failure, up to five times. One retry is
- *  pending per session at a time. */
+/** A session that could not be adopted is tried again every POLL_MS, up to
+ *  five times. One retry is pending per session at a time. */
 const adoptionRetries = new Map<string, number>();
 const adoptionRetryPending = new Set<string>();
 function retryAdoptionLater(key: string, displayed: boolean) {
   if (!running || !fs.existsSync(key)) return;
   if (adoptionRetryPending.has(key)) return;
-  let holder = 0;
-  try { holder = Number(fs.readFileSync(getDaemonPidPath(key), "utf8").trim()); } catch { /* released */ }
-  // A reparse lets go when it finishes; any other failure gets a few tries.
   const tries = (adoptionRetries.get(key) ?? 0) + 1;
-  if (!procIsReparseOf(holder, key) && !reparseRunning(getDaemonPidPath(key), key) && tries > 5) {
+  if (tries > 5) {
     adoptionRetries.delete(key);
     return;
   }
@@ -1868,28 +1846,6 @@ function sleepMs(ms: number) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-/** The pid of a --reparse running on the session whose lease is `lease`, or 0.
- *  Its marker outlives a focus request that points the lease elsewhere. */
-function reparseRunning(lease: string, file: string): number {
-  let pid = 0;
-  try { pid = Number(fs.readFileSync(`${lease}.reparse`, "utf8").trim()); } catch { return 0; }
-  return procIsReparseOf(pid, file) ? pid : 0;
-}
-
-/** Whether `pid` is a --reparse of `file`, or a --reparse-range, which may
- *  reach any session. A reused pid running another reparse is not. */
-function procIsReparseOf(pid: number, file: string): boolean {
-  if (!procIsReparse(pid)) return false;
-  let args: string[] = [];
-  try { args = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0"); } catch { return false; }
-  if (args.includes("--reparse-range")) return true;
-  const at = args.indexOf("--reparse");
-  if (at < 0 || !args[at + 1]) return false;
-  let cwd = "/";
-  try { cwd = fs.readlinkSync(`/proc/${pid}/cwd`); } catch { /* resolve against / */ }
-  return path.resolve(cwd, args[at + 1]) === path.resolve(file);
-}
-
 /** Unlinks `file` only if it holds `value` and was not replaced while it was
  *  read. */
 function unlinkIfHolds(file: string, value: string) {
@@ -1899,13 +1855,6 @@ function unlinkIfHolds(file: string, value: string) {
     const now = fs.statSync(file);
     if (now.dev === before.dev && now.ino === before.ino) fs.unlinkSync(file);
   } catch { /* already gone */ }
-}
-
-function procIsReparse(pid: number): boolean {
-  if (!procIsDaemon(pid)) return false;
-  let args: string[] = [];
-  try { args = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0"); } catch { return false; }
-  return args.includes("--reparse") || args.includes("--reparse-range");
 }
 
 function onWatch(dir: string, filename: string | null) {
@@ -1995,10 +1944,8 @@ function pointSessionAt(livePid: number, file: string): boolean {
   try { leaseText = fs.readFileSync(lease, "utf8").trim(); } catch { /* no lease yet */ }
   const holder = Number(leaseText);
   held = holder === livePid;
-  // A --reparse rewriting this session's tag keeps its lease; the harness is
-  // only asked, and adopts the session once the reparse lets go. A rebuild
-  // token stays for the harness to read when it adopts.
-  if (leaseText !== "rebuild" && !procIsReparseOf(holder, file)) {
+  // A rebuild token stays for the harness to read when it adopts.
+  if (leaseText !== "rebuild") {
     const replacement = `${lease}.replace-${process.pid}`;
     fs.writeFileSync(replacement, String(livePid));
     fs.renameSync(replacement, lease);
@@ -2258,7 +2205,7 @@ function writeServedHandOff(adopting?: string) {
   for (const [key, slot] of harnessSlots) lines.push(entry("served", slot.displayed, key));
   // A session whose adoption failed is not in harnessSlots yet.
   if (adopting && !harnessSlots.has(adopting)) lines.push(entry("served", displayedSession, adopting));
-  // Asked for, but waiting on an adoption retry (a reparse, a failed try).
+  // Asked for, but waiting on an adoption retry.
   for (const key of adoptionRetries.keys()) {
     if (!harnessSlots.has(key) && key !== adopting) lines.push(entry("served", true, key));
   }
@@ -2390,20 +2337,6 @@ function daemonProcs(): { pid: number; session: string | null; harness: boolean;
   return out;
 }
 
-function tagIsCurrent(file: string): boolean {
-  try {
-    return fs.statSync(getCurrentVersionTagPath(file)).size > 0;
-  } catch {
-    return false;
-  }
-}
-
-function sessionDaemonLive(file: string): boolean {
-  let holder = 0;
-  try { holder = Number(fs.readFileSync(getDaemonPidPath(file), "utf8").trim()); } catch { return false; }
-  return procIsDaemon(holder);
-}
-
 function waitUntilExited(pid: number) {
   const until = Date.now() + 2000;
   while (Date.now() < until) {
@@ -2412,122 +2345,6 @@ function waitUntilExited(pid: number) {
   try { process.kill(pid, "SIGKILL"); } catch { return; }
   const killed = Date.now() + 2000;
   while (Date.now() < killed && procIsDaemon(pid)) { /* until the kernel has it */ }
-}
-
-/** Holds the session's lease while the tag is rewritten, so a harness asked
- *  for the session meanwhile waits for it (retryAdoptionLater) instead of
- *  appending beside it. */
-function reparseOne(file: string): boolean {
-  const lease = getDaemonPidPath(file);
-  const marker = `${lease}.reparse`;
-  try {
-    fs.writeFileSync(marker, String(process.pid), { flag: "wx" });
-  } catch {
-    if (reparseRunning(lease, file)) {
-      process.stderr.write(`wtft-daemon: --reparse refused while another reparse runs on ${file}\n`);
-      return false;
-    }
-    fs.writeFileSync(marker, String(process.pid));
-  }
-  try {
-    if (sessionDaemonLive(file) || claimPidFile(lease) !== "claimed") {
-      process.stderr.write(`wtft-daemon: --reparse refused while a daemon holds ${file}\n`);
-      return false;
-    }
-    try {
-      return reparseHeld(file);
-    } finally {
-      unlinkIfHolds(lease, String(process.pid));
-    }
-  } finally {
-    unlinkIfHolds(marker, String(process.pid));
-  }
-}
-
-function reparseHeld(file: string): boolean {
-  if (process.env.WTFT_DAEMON_DEBUG) {
-    process.stderr.write(`[wtft-log-parser] reparse begin ${file}\n`);
-  }
-  sessionPath = file;
-  tagPath = getCurrentVersionTagPath(file);
-  try { fs.mkdirSync(path.dirname(tagPath), { recursive: true }); } catch { /* exists */ }
-  const parsedSize = fs.statSync(file).size;
-  const raw = deduplicateInteractions(parseSessionFile(file));
-  // A harness asked for the session while it was parsed may have taken the
-  // lease; the tag is then its to write.
-  let owner = "";
-  try { owner = fs.readFileSync(getDaemonPidPath(file), "utf8").trim(); } catch { /* removed */ }
-  if (owner !== String(process.pid)) {
-    process.stderr.write(`wtft-daemon: --reparse gave up ${file}: another daemon took its lease\n`);
-    return false;
-  }
-  fs.writeFileSync(tagPath, "");
-  pollHadFailure = false;
-  tagGrewSinceMarker = true;
-  sweptRetracted = false;
-  let prev = 0;
-  let batch = "";
-  pendingClaudeCommands = [];
-  for (const interaction of raw) {
-    batch += serializeClassifiedWithOverheadSplit(interaction, prev);
-    if (!interaction.isSidechain) {
-      prev = interaction.inputTokens + interaction.cacheReadTokens + interaction.cacheWriteTokens;
-    }
-    if (hasClaudeCommand(interaction)) pendingClaudeCommands.push({ interaction, prevCtx: prev });
-  }
-  if (batch) appendTagFile(tagPath, batch);
-  appendTagFile(tagPath, JSON.stringify({ _meta: { offset: parsedSize } }) + "\n");
-  discoveredSubagentFiles = new Map();
-  discoveredClaudeFiles = new Set();
-  // Stamps swept only after a clean scan.
-  scanForSubAgents();
-  if (pollHadFailure) {
-    process.stderr.write(`wtft-daemon: --reparse could not read every subagent transcript of ${file}\n`);
-    return false;
-  }
-  if (process.env.WTFT_DAEMON_DEBUG) {
-    process.stderr.write(`[wtft-log-parser] reparse end ${file}\n`);
-  }
-  return true;
-}
-
-function runReparse(one: string, from: string, to: string) {
-  if (one) {
-    if (!reparseOne(path.resolve(one))) process.exit(1);
-    return;
-  }
-  const fromMs = Date.parse(`${from}T00:00:00Z`);
-  const toMs = Date.parse(`${to}T00:00:00Z`);
-  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) {
-    process.stderr.write("wtft-daemon: --reparse-range needs two YYYY-MM-DD dates\n");
-    process.exit(2);
-  }
-  const files: string[] = [];
-  walkSessions(path.resolve(harnessRoot("claude")), files);
-  walkSessions(path.resolve(harnessRoot("pi")), files);
-  let failed = 0;
-  for (const file of files) {
-    let mtime = 0;
-    try {
-      mtime = fs.statSync(file).mtimeMs;
-    } catch (err) {
-      failed++;
-      process.stderr.write(`[wtft-log-parser] reparse could not stat ${file}: ${err instanceof Error ? err.message : String(err)}\n`);
-      continue;
-    }
-    if (mtime < fromMs || mtime >= toMs) continue;
-    if (tagIsCurrent(file)) continue;
-    try {
-      if (!reparseOne(file)) failed++;
-    } catch (err) {
-      failed++;
-      process.stderr.write(`[wtft-log-parser] reparse failed ${file}: ${err instanceof Error ? err.message : String(err)}\n`);
-    }
-  }
-  if (failed > 0) {
-    process.stderr.write(`wtft-daemon: --reparse-range left ${failed} session(s) unreparsed\n`);
-    process.exit(1);
-  }
 }
 
 async function main() {
@@ -2540,37 +2357,11 @@ async function main() {
   let showList = false;
   let showCleanup = false;
   let showRestart = false;
-  let stopSession = null;
+  let stopSession: string | null = null;
   let harnessName = "";
-  let reparsePath = "";
-  let reparseFrom = "";
-  let reparseTo = "";
 
-  for (let i = 2; i < process.argv.length; i++) {
-    const arg = process.argv[i];
-    if (arg === "--session" || arg === "-s") {
-      sessionPath = process.argv[++i];
-    } else if (arg === "--harness") {
-      harnessName = process.argv[++i] || "";
-    } else if (arg === "--reparse") {
-      reparsePath = process.argv[++i] || "";
-    } else if (arg === "--reparse-range") {
-      reparseFrom = process.argv[++i] || "";
-      reparseTo = process.argv[++i] || "";
-    } else if (arg === "--list" || arg === "-l") {
-      showList = true;
-    } else if (arg === "--cleanup") {
-      showCleanup = true;
-    } else if (arg === "--restart") {
-      showRestart = true;
-    } else if (arg === "--stop") {
-      stopSession = process.argv[++i];
-    } else if (arg === "--help" || arg === "-h") {
-      console.log(`wtft-daemon — Log parser daemon for WTFT
-Usage: wtft-daemon --session <path> [--debug]
-       wtft-daemon --harness <claude|pi> [--session <path>] [--debug]
-       wtft-daemon --reparse <session.jsonl>
-       wtft-daemon --reparse-range <YYYY-MM-DD> <YYYY-MM-DD>
+  const showHelp = () => console.log(`wtft-daemon — Log parser daemon for WTFT
+${USAGE}
 
 Management:
   --list, -l            List every running wtft-daemon, including fixture processes
@@ -2580,11 +2371,8 @@ Management:
 
 Daemon mode:
   -s, --session <path>  Path to session.jsonl to watch
-  --harness <claude|pi> One process for that harness root (WTFT_CLAUDE_PROJECTS_DIR or WTFT_PI_SESSIONS_DIR)
-  --reparse <path>      Classify one session at disk speed and exit. No watch.
-  --reparse-range <from> <to>
-                        Reparse sessions under both harness roots whose mtime is in [from, to),
-                        one at a time, and only when the current tag is missing or empty. No watch.
+  --harness <claude|pi> One process for that harness root (WTFT_CLAUDE_PROJECTS_DIR or WTFT_PI_SESSIONS_DIR);
+                        claude-code is accepted for claude
   --debug               Enable debug logging to stderr
   -h, --help            Show this help
 
@@ -2593,9 +2381,38 @@ Environment:
   WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after start before that drop can fire (default 60000)
   WTFT_HARNESS_SCAN_SLICE_MS   Milliseconds one slice of a harness's subagent scan runs before it yields (default 25)
   WTFT_HARNESS_SCAN_YIELD_MS   Milliseconds a harness pauses between those slices (default 0)`);
+  const usage = (why: string): never => {
+    process.stderr.write(`wtft-daemon: ${why}\n${USAGE}\nRun wtft-daemon --help for more.\n`);
+    process.exit(2);
+  };
+  const valueOf = (flag: string, at: number): string => {
+    const value = process.argv[at];
+    if (value === undefined || value === "") usage(`${flag} needs a value`);
+    return value;
+  };
+
+  for (let i = 2; i < process.argv.length; i++) {
+    const arg = process.argv[i];
+    if (arg === "--session" || arg === "-s") {
+      sessionPath = valueOf(arg, ++i);
+    } else if (arg === "--harness") {
+      harnessName = valueOf(arg, ++i);
+      if (harnessName === "claude-code") harnessName = "claude";
+    } else if (arg === "--list" || arg === "-l") {
+      showList = true;
+    } else if (arg === "--cleanup") {
+      showCleanup = true;
+    } else if (arg === "--restart") {
+      showRestart = true;
+    } else if (arg === "--stop") {
+      stopSession = valueOf(arg, ++i);
+    } else if (arg === "--help" || arg === "-h") {
+      showHelp();
       process.exit(0);
     } else if (arg === "--debug") {
       process.env.WTFT_DAEMON_DEBUG = "1";
+    } else {
+      usage(`unknown argument: ${arg}`);
     }
   }
 
@@ -2826,10 +2643,6 @@ if (showList || showCleanup || showRestart || stopSession) {
 
 // --- Daemon mode (session required) ---
 
-  if (reparsePath || reparseFrom) {
-    runReparse(reparsePath, reparseFrom, reparseTo);
-    return;
-  }
   if (harnessName) {
     runHarness(harnessName, sessionPath);
     return;
@@ -2856,14 +2669,6 @@ if (showList || showCleanup || showRestart || stopSession) {
     isSessionIdBasename(sessionPath) ? sessionBase : sessionPath
   ).digest("hex").slice(0, 12);
   pidPath = path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
-
-  // A --reparse rewriting this session's tag holds its lease until it is done.
-  for (;;) {
-    let leaseHolder = 0;
-    try { leaseHolder = Number(fs.readFileSync(pidPath, "utf8").trim()); } catch { /* no lease */ }
-    if (!procIsReparseOf(leaseHolder, sessionPath) && !reparseRunning(pidPath, sessionPath)) break;
-    sleepMs(200);
-  }
 
   // Old-version tag: claim the lease; old daemon exits on lost lease (no SIGTERM race).
   const prefix = sessionBase + ".wtft-tag.v";
@@ -2919,10 +2724,6 @@ if (showList || showCleanup || showRestart || stopSession) {
       if (lease === "rebuild") {
         rebuildTagOnStartup = true;
       } else if (Number.isSafeInteger(existingPid) && existingPid > 0) {
-        if (procIsReparseOf(existingPid, sessionPath)) {
-          sleepMs(200);
-          continue;
-        }
         try {
           process.kill(existingPid, 0);
           process.exit(0);

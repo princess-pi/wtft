@@ -184,13 +184,18 @@ fix failed before it. These have no check of their own, and why:
   stale-version remedy for a tag of a newer build.
 - **Reachable, without a check yet** (#267): the `claude -p` lookup and session-move cases in
   Swept and Resume.
-- **Pi `/wtft -F` not asking for the session when busy**: busy means a live daemon holds the
-  lease, and asking then starts nothing, so a check cannot tell the two builds apart.
-- **`-F` exiting 1 on a failed daemon spawn**, and **on a daemon it cannot signal**: the first
-  needs `node` itself to fail to start, the second a `wtft-daemon` owned by another user.
-- **An idle harness serving a request posted since its last read**, and **the sweep not
-  re-waking a session whose adoption retry is pending**: each needs two processes inside one
-  sweep.
+- **Pi `/wtft -F` not asking for the session when busy**: busy means a daemon holds the lease or
+  took it meanwhile, and asking then starts nothing, so a check cannot tell the two builds apart.
+  The one exception, a lease released between two reads, needs two processes inside one syscall
+  gap.
+- **`-F` exiting 1 on a failed daemon spawn**, and **on a daemon it cannot signal**: node reports
+  a spawn that cannot start as an error event, which ends the CLI with that error, so the exit-1
+  path is reached only by a spawn that throws at once, which a fixture cannot cause; the second
+  needs a `wtft-daemon` owned by another user.
+- **An idle harness serving a request posted since its last read** needs two processes inside
+  one sweep.
+- **The sweep not re-waking a session whose adoption retry is pending** is reachable, without a
+  check yet (#267).
 - **The sweep reading the subagents of a session whose tree cannot be watched**: a directory
   that cannot be watched here cannot be listed either, so its subagents are not found at all.
 - **The 1 h limit on a never-written session** takes an hour and has no knob.

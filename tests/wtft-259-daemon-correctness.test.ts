@@ -177,8 +177,8 @@ try {
 		const cwd = path.join(root, "work");
 		const projectDir = path.join(root, cwd.replace(/[^a-zA-Z0-9]/g, "-"));
 		fs.mkdirSync(projectDir, { recursive: true });
-		const parentId = "cccc3333-3333-4333-8333-333333333333";
-		const childId = "dddd4444-4444-4444-8444-444444444444";
+		const parentId = "a1a1a1a1-7777-4777-8777-777777777777";
+		const childId = "b2b2b2b2-8888-4888-8888-888888888888";
 		const parent = path.join(projectDir, `${parentId}.jsonl`);
 		const child = path.join(projectDir, `${childId}.jsonl`);
 		const t = Date.now();
@@ -204,6 +204,7 @@ try {
 		check(await until(() => classified(parent, "ro-child-1"), 10_000) !== Infinity,
 			"the resumed daemon finds the claude -p child the earlier one was still looking for");
 		process.kill(second.pid, "SIGTERM");
+		await until(() => !alive(second.pid), 5_000);
 	}
 
 	console.log("\nAdoption never signals a harness");

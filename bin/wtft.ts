@@ -606,7 +606,7 @@ async function main() {
 			process.exit(1);
 		}
 		if (!adopted) {
-			console.error(`❌ Force re-parse: the harness log parser daemon has not taken ${path.basename(finalSessionPath)} up after 10 s. Its tag is unchanged; the rebuild starts when the harness is next asked for the session.`);
+			console.error(`❌ Force re-parse: the harness log parser daemon has not taken ${path.basename(finalSessionPath)} up after 10 s. It rebuilds the tag as soon as it does, with no new request; run wtft again shortly to read the rebuilt tag.`);
 			process.exit(1);
 		}
 		console.error(`\x1b[33mForce re-parse: ${what} for ${path.basename(finalSessionPath)}\x1b[0m`);

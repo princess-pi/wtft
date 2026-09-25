@@ -63,6 +63,9 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   daemon, it exits 0; off Linux, where a daemon cannot be told apart, any live lease holder counts. It never deletes a newer-version tag.
 - **A daemon that gives up a lease logs it** (decision G): `gave up <session>: its lease now reads
   "<text>"`. Losing a lease is how a session passes to a newer build, so this is not an error.
+- **The tagger version goes from 2.11.0 to 2.12.0.** Swept now means no turn held back, and the
+  tag carries `spawnPending` / `spawnSettled` records, so every tag is rebuilt, and a start from
+  this build replaces a harness of an older one.
 - **The lease race is a known limit** (decision G, H19). Releasing a lease is stat, read, stat,
   unlink. A daemon that claims the same lease between the last stat and the unlink loses it, and
   finds out at its next check (250 ms in a harness, one poll in a per-session daemon). The session
@@ -86,7 +89,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   `rebuild` and asks the harness for the session, which rebuilds the tag from the transcript. The
   harness and its other sessions are untouched. The CLI waits until the harness has adopted the
   session before it reads the tag, so its own report is of the rebuild; after 10 s it says the
-  harness has not taken the session up, and exits 1 with no report. A lease an earlier `-F` left
+  harness has not taken the session up, and exits 1 with no report; the harness rebuilds the tag
+  as soon as it does, with no new request. A lease an earlier `-F` left
   reading `rebuild`, with no daemon behind it, is treated as no holder. Telling a harness apart
   reads `/proc`, so this holds on Linux; elsewhere the harness is stopped as below.
 - **Otherwise `-F` stops a live per-session daemon and deletes every version of the session's
@@ -134,7 +138,9 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 ### Harness exit (A12, decision B; F17; I28, decision F)
 
 - **A harness with no served session and no adoption pending stops after
-  `WTFT_DAEMON_IDLE_MS`** (24 h). Sessions it dropped for idling go into its hand-off, so the next
+  `WTFT_DAEMON_IDLE_MS`** (24 h), after serving any request posted since its last read of them.
+  A request posted between that read and the pid file's removal is left in the request directory
+  for the next harness; like the lease race, it needs two processes inside one short gap. Sessions it dropped for idling go into its hand-off, so the next
   harness watches them.
 - **A harness whose root directory is gone stops** at its next sweep.
 - **`--cleanup` never stops a harness** (decision E, I26), fixture or not. A harness drops what it
@@ -160,7 +166,7 @@ fix failed before it. These have no check of their own, and why:
   displayed flag; the hand-off removed when nothing is served or idle; a per-session lease holder
   still signalled on adoption; the stop line for `session removed` and `session never written`;
   the resume leaving a folded `claude -p` transcript to the one folding it; the held turn of a
-  transcript no longer found written under the source its earlier lines carry; the generation record written before that held turn when its transcript opened none; Pi `/wtft -F` not asking for the session when busy; `wtft -F` exiting 1 on a failed daemon spawn; the stale-version remedy for a tag of a newer build; the pruned held turn skipped when its transcript was read again under the same source in the same scan.
+  transcript no longer found written under the source its earlier lines carry; the generation record written before that held turn when its transcript opened none; Pi `/wtft -F` not asking for the session when busy; `wtft -F` exiting 1 on a failed daemon spawn; the stale-version remedy for a tag of a newer build; the pruned held turn skipped when its transcript was read again under the same source in the same scan; a later line of the same message merging its claude -p commands into the open lookup; the scan-continuation marker re-keyed on a move; an idle harness serving a request posted since its last read before it stops.
 - **The 1 h limit on a never-written session** takes an hour and has no knob.
 - **A sweep-driven scan keeping a failed session read**: that scan reads the session's first line
   for Pi discovery, so a transcript that cannot be opened fails the scan by itself; only a read

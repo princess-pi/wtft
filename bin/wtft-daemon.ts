@@ -318,10 +318,19 @@ function spawnKey(interaction: { messageId?: string; timestamp: number }): strin
  *  lookup ends. */
 function queueClaudeCommand(interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>, prevCtx: number) {
   const key = spawnKey(interaction);
-  if (pendingClaudeCommands.some(item => spawnKey(item.interaction) === key)) return;
-  pendingClaudeCommands.push({ interaction, prevCtx });
+  // Claude Code writes one message as several lines sharing its id, and a
+  // later line can carry another spawning command: merge, never drop.
+  let item = pendingClaudeCommands.find(pending => spawnKey(pending.interaction) === key);
+  if (item) {
+    const merged = [...new Set([...item.interaction.commands, ...interaction.commands])];
+    if (merged.length === item.interaction.commands.length) return;
+    item.interaction = { ...item.interaction, commands: merged };
+  } else {
+    item = { interaction, prevCtx };
+    pendingClaudeCommands.push(item);
+  }
   appendTagFile(tagPath, JSON.stringify({ _meta: { spawnPending: {
-    key, at: interaction.timestamp, commands: interaction.commands.filter(commandSpawnsAgent),
+    key, at: item.interaction.timestamp, commands: item.interaction.commands,
   } } }) + "\n");
 }
 
@@ -978,12 +987,11 @@ function scanForSubAgents() {
       subagentScansContinuing.add(key);
       const owner = harnessSlots.get(key);
       const next = () => {
-        // The slot may have moved to a new path since the cut. A slot dropped
-        // meanwhile left the marker to whatever slot took its key.
+        // The slot may have moved to a new path since the cut; a move re-keys the marker.
         const current = owner ? path.resolve(owner.sessionPath) : key;
         const slot = harnessSlots.get(current) === owner ? owner : undefined;
         if (!slot || !running) return;
-        subagentScansContinuing.delete(key);
+        subagentScansContinuing.delete(current);
         if (!leaseStillOurs(slot)) {
           leaseLost(current, slot);
           return;
@@ -1187,6 +1195,7 @@ function followMovedSession(): boolean {
     process.stderr.write(`[wtft-log-parser] session moved: ${sessionPath} -> ${moved}\n`);
   }
   if (reseedPending.delete(path.resolve(sessionPath))) reseedPending.add(path.resolve(moved));
+  if (subagentScansContinuing.delete(path.resolve(sessionPath))) subagentScansContinuing.add(path.resolve(moved));
   sessionPath = moved;
   return true;
 }
@@ -1907,6 +1916,7 @@ function wake(file: string, displayed: boolean) {
     if (pass) subagentScanPass.set(movedTo, pass);
     if (subagentScanPassFailed.delete(key)) subagentScanPassFailed.add(movedTo);
     if (reseedPending.delete(key)) reseedPending.add(movedTo);
+    if (subagentScansContinuing.delete(key)) subagentScansContinuing.add(movedTo);
     unwatchSession(key);
     watchSession(movedTo);
     const timer = harnessFlushTimers.get(key);
@@ -2490,8 +2500,14 @@ function sweepIdleSlots() {
   if (harnessSlots.size > 0 || adoptionRetryPending.size > 0) emptySinceMs = 0;
   else if (emptySinceMs === 0) emptySinceMs = now;
   else if (now - emptySinceMs >= IDLE_EXIT_MS) {
-    stopHarness("no session served");
-    return;
+    // A request posted since this sweep read them would otherwise be left
+    // with a lease pointing at a harness that is gone.
+    takeFocusRequests();
+    if (harnessSlots.size === 0 && adoptionRetryPending.size === 0) {
+      stopHarness("no session served");
+      return;
+    }
+    emptySinceMs = 0;
   }
   persistHandOff();
 }

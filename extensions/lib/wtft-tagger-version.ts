@@ -1,5 +1,5 @@
 /** Tagger version stamped into tag filenames. Bump when tag semantics change so stale tags re-parse. */
-export const WTFT_TAGGER_VERSION = "2.11.0";
+export const WTFT_TAGGER_VERSION = "2.12.0";
 
 /** Whether dotted version `a` is older than `b`; an empty `a` (no version
  *  file, so a build from before it existed) is older than anything. */

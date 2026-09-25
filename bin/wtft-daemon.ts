@@ -40,6 +40,7 @@ import {
 	loadExternalHarnesses,
 	warnUnreadableTranscript,
 	WTFT_TAGGER_VERSION as TAGGER_VERSION,
+	taggerIsOlder,
 	lastLineStartByte,
 } from "../extensions/lib/wtft-shared.js";
 
@@ -97,6 +98,8 @@ let discoveredClaudeFiles = new Set<string>();
 let tagGrewSinceMarker = true;
 // Set when a sweep could not read what it meant to; withholds the swept stamp.
 let pollHadFailure = false;
+/** The last read of the session's own transcript failed; only a read clears it. */
+let sessionReadFailed = false;
 // After unswept retraction, stamp on next clean poll even if the tag did not grow.
 let sweptRetracted = false;
 /** Quiet longer than coarsest mtime tick before a no-change skip is safe. */
@@ -304,6 +307,42 @@ function flushPending() {
 
 function hasClaudeCommand(interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>): boolean {
   return interaction.commands.some(commandSpawnsAgent);
+}
+
+function spawnKey(interaction: { messageId?: string; timestamp: number }): string {
+  return interaction.messageId ?? String(interaction.timestamp);
+}
+
+/** A `claude -p` lookup still open when a daemon stops is resumed from these
+ *  markers: `spawnPending` when the turn is queued, `spawnSettled` when its
+ *  lookup ends. */
+function queueClaudeCommand(interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>, prevCtx: number) {
+  const key = spawnKey(interaction);
+  if (pendingClaudeCommands.some(item => spawnKey(item.interaction) === key)) return;
+  pendingClaudeCommands.push({ interaction, prevCtx });
+  appendTagFile(tagPath, JSON.stringify({ _meta: { spawnPending: {
+    key, at: interaction.timestamp, commands: interaction.commands.filter(commandSpawnsAgent),
+  } } }) + "\n");
+}
+
+/** Requeue each lookup an earlier life left open. */
+function resumeClaudeLookups(tagContent: string) {
+  const open = new Map<string, { at: number; commands: string[] }>();
+  for (const line of tagContent.split("\n")) {
+    if (!line.includes('"spawnPending"') && !line.includes('"spawnSettled"')) continue;
+    let meta: { spawnPending?: { key?: unknown; at?: unknown; commands?: unknown }; spawnSettled?: unknown } | undefined;
+    try { meta = JSON.parse(line)._meta; } catch { continue; }
+    const p = meta?.spawnPending;
+    if (p && typeof p.key === "string" && typeof p.at === "number" && Array.isArray(p.commands)) {
+      open.set(p.key, { at: p.at, commands: p.commands.filter((c): c is string => typeof c === "string") });
+    }
+    if (typeof meta?.spawnSettled === "string") open.delete(meta.spawnSettled);
+  }
+  for (const [key, { at, commands }] of open) {
+    if (pendingClaudeCommands.some(item => spawnKey(item.interaction) === key)) continue;
+    const interaction = { messageId: key, timestamp: at, commands } as unknown as NonNullable<ReturnType<typeof parseEntryToInteraction>>;
+    pendingClaudeCommands.push({ interaction, prevCtx: 0 });
+  }
 }
 
 function freshSubagentState(): SubagentFileState {
@@ -840,6 +879,11 @@ function scanForSubAgents() {
         stillPending.push(item);
       }
     }
+    for (const item of pendingClaudeCommands) {
+      if (!stillPending.includes(item)) {
+        appendTagFile(tagPath, JSON.stringify({ _meta: { spawnSettled: spawnKey(item.interaction) } }) + "\n");
+      }
+    }
     pendingClaudeCommands.length = 0;
     if (stillPending.length > 0) pendingClaudeCommands.push(...stillPending);
   }
@@ -961,7 +1005,9 @@ function scanForSubAgents() {
       // Its held turn was read from the file, so it is written; a moved
       // transcript read again under its new path opens a new generation.
       if (state.pendingTurn) {
-        appendTagFile(tagPath, serializeClassified(state.pendingTurn, state.source || transcriptSourceId(key, path.dirname(sessionPath))));
+        const source = state.source || transcriptSourceId(key, path.dirname(sessionPath));
+        const generation = state.newGeneration ? generationRecordLine(source, path.basename(key, ".jsonl")) : "";
+        appendTagFile(tagPath, generation + serializeClassified(state.pendingTurn, source));
         tagGrewSinceMarker = true;
       }
       discoveredSubagentFiles.delete(key);
@@ -1434,6 +1480,7 @@ function initClassified() {
         if (metaOffset !== null) {
           lastSize = metaOffset;
           if (!reseedClaudeChildren(tagContent)) reseedPending.add(path.resolve(sessionPath));
+          resumeClaudeLookups(tagContent);
           // Written by an earlier life; what changed since is not read yet.
           invalidateStaleSweptMarker(sessionPath);
         } else {
@@ -1496,6 +1543,7 @@ function serviceSession(): "continue" | "stop" | "drop" {
   try {
     pollHadFailure = false;
     const rawInteractions = parseNewLines(sessionPath);
+    sessionReadFailed = pollHadFailure;
     if (stampInterruptOnPending) {
       if (pendingItems.length > 0) {
         pendingItems[pendingItems.length - 1].interaction.interrupted = true;
@@ -1510,9 +1558,7 @@ function serviceSession(): "continue" | "stop" | "drop" {
         if (!interaction.isSidechain) {
           prevCtxTokens = interaction.inputTokens + interaction.cacheReadTokens + interaction.cacheWriteTokens;
         }
-        if (hasClaudeCommand(interaction)) {
-          pendingClaudeCommands.push({ interaction, prevCtx: prevCtxTokens });
-        }
+        if (hasClaudeCommand(interaction)) queueClaudeCommand(interaction, prevCtxTokens);
       }
     }
 
@@ -1581,6 +1627,7 @@ interface Slot {
   discoveredSubagentFiles: Map<string, SubagentFileState>;
   tagGrewSinceMarker: boolean;
   pollHadFailure: boolean;
+  sessionReadFailed: boolean;
   sweptRetracted: boolean;
   /** When the sweep last checked this transcript on disk. */
   checkedAtMs: number;
@@ -1617,6 +1664,7 @@ function freshSlot(file: string, displayed: boolean): Slot {
     discoveredSubagentFiles: new Map(),
     tagGrewSinceMarker: true,
     pollHadFailure: false,
+    sessionReadFailed: false,
     sweptRetracted: false,
     checkedAtMs: now,
   };
@@ -1645,6 +1693,7 @@ function install(slot: Slot) {
   discoveredSubagentFiles = slot.discoveredSubagentFiles;
   tagGrewSinceMarker = slot.tagGrewSinceMarker;
   pollHadFailure = slot.pollHadFailure;
+  sessionReadFailed = slot.sessionReadFailed;
   sweptRetracted = slot.sweptRetracted;
 }
 
@@ -1671,6 +1720,7 @@ function save(slot: Slot) {
   slot.discoveredSubagentFiles = discoveredSubagentFiles;
   slot.tagGrewSinceMarker = tagGrewSinceMarker;
   slot.pollHadFailure = pollHadFailure;
+  slot.sessionReadFailed = sessionReadFailed;
   slot.sweptRetracted = sweptRetracted;
 }
 
@@ -2084,18 +2134,6 @@ function onWatch(dir: string, filename: string | null) {
   }
 }
 
-/** Whether dotted version `a` is older than `b`; an empty `a` (no version
- *  file, so a build from before it existed) is older than anything. */
-function taggerIsOlder(a: string, b: string): boolean {
-  if (!a) return true;
-  const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
-  for (let k = 0; k < Math.max(pa.length, pb.length); k++) {
-    const x = pa[k] || 0, y = pb[k] || 0;
-    if (x !== y) return x < y;
-  }
-  return false;
-}
-
 /** Hands `file` to the live harness. When the request cannot be posted, it
  *  returns true only if that harness still holds the root and already held
  *  this session's lease (it is serving it); otherwise a lease and `.display`
@@ -2403,7 +2441,7 @@ function sweepIdleSlots() {
       slot.checkedAtMs = now;
       let st: fs.Stats | null = null;
       try { st = fs.statSync(slot.sessionPath); } catch { /* gone, or not written yet */ }
-      if (!st || st.ino !== slot.sessionIno || st.size !== slot.lastSize || slot.pendingFragment.length > 0) {
+      if (!st || st.ino !== slot.sessionIno || st.size !== slot.lastSize || slot.pendingFragment.length > 0 || slot.sessionReadFailed) {
         wake(key, slot.displayed);
         if (harnessSlots.get(key) !== slot) continue;
       }
@@ -2415,7 +2453,7 @@ function sweepIdleSlots() {
     }
     if (slotNeedsChildScan(slot, now)) {
       withSlot(slot, () => {
-        pollHadFailure = false;
+        pollHadFailure = sessionReadFailed;
         scanForSubAgents();
       });
     }
@@ -2492,14 +2530,17 @@ function writeServedHandOff(adopting?: string) {
   }
 }
 
-/** The hand-off as it stands, so a harness killed before its SIGTERM handler
- *  runs still passes on what it served. Rewritten only when it changes. */
-let handOffPersisted = "";
 let handOffWarned = "";
+/** The hand-off as it stands, so a harness killed before its SIGTERM handler
+ *  runs still passes on what it served. Rewritten when it differs from the file. */
 function persistHandOff() {
   if (!holdsHarnessRoot()) return;
   const text = handOffLines().join("\n");
-  if (text === handOffPersisted) return;
+  // Compared with the file, not with the last write: a displaced harness may
+  // have written over it since.
+  let onDisk = "";
+  try { onDisk = fs.readFileSync(servedHandOffFile(), "utf8").replace(/\n$/, ""); } catch { /* none yet */ }
+  if (text === onDisk) return;
   try {
     if (text) {
       const tmp = `${servedHandOffFile()}.${process.pid}.tmp`;
@@ -2508,7 +2549,6 @@ function persistHandOff() {
     } else {
       fs.rmSync(servedHandOffFile(), { force: true });
     }
-    handOffPersisted = text;
   } catch (err) {
     const why = err instanceof Error ? err.message : String(err);
     if (why !== handOffWarned) {

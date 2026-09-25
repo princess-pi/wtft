@@ -389,13 +389,15 @@ export default function wtftExtension(pi: ExtensionAPI) {
 					return;
 				}
 				const how = forceRebuildSession(sessionFile);
+				if (how === "busy") {
+					ctx.ui.notify("A log parser daemon did not stop within 2 s, or another took the session meanwhile, so nothing was deleted — run /wtft -F again once it has stopped.", "warning");
+					return;
+				}
 				ensureDaemonRunning(sessionFile, _daemonDir);
 				updateWtftWidget(ctx, pi);
 				ctx.ui.notify(how === "rebuild"
 					? "The harness log parser daemon is rebuilding this session's tag — full session re-parse in progress."
-					: how === "busy"
-						? "The log parser daemon did not stop within 2 s, so nothing was deleted — run /wtft -F again once it has."
-						: "Tag files deleted and log parser daemon respawned — full session re-parse in progress.", how === "busy" ? "warning" : "info");
+					: "Tag files deleted and log parser daemon respawned — full session re-parse in progress.", "info");
 				return;
 			}
 

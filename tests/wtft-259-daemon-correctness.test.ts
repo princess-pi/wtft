@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Daemon correctness items split out of #256: arguments, swept, resume,
+ * Daemon correctness: arguments, swept, resume,
  * leases, adoption, focus requests, the hand-off, sweep liveness, harness
  * exit and the stop reason. Spec: docs/spec-259-daemon-correctness.md.
  * --cleanup is not run here: it stops every fixture daemon under /tmp,
@@ -171,6 +171,41 @@ try {
 		process.kill(second.pid, "SIGTERM");
 	}
 
+	console.log("\nA resumed session finishes a claude -p lookup left open");
+	{
+		const root = makeRoot("resume-open");
+		const cwd = path.join(root, "work");
+		const projectDir = path.join(root, cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+		fs.mkdirSync(projectDir, { recursive: true });
+		const parentId = "cccc3333-3333-4333-8333-333333333333";
+		const childId = "dddd4444-4444-4444-8444-444444444444";
+		const parent = path.join(projectDir, `${parentId}.jsonl`);
+		const child = path.join(projectDir, `${childId}.jsonl`);
+		const t = Date.now();
+		const sessionLine = (id: string, ts: number) => JSON.stringify({ type: "session", version: 3, id, timestamp: new Date(ts).toISOString(), cwd }) + "\n";
+		const spawnTurn = JSON.stringify({
+			type: "message", timestamp: new Date(t).toISOString(),
+			message: {
+				role: "assistant", id: "ro-parent", model: "claude-sonnet-4-6", timestamp: new Date(t).toISOString(),
+				usage: { input_tokens: 1000, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+				content: [{ type: "toolCall", name: "bash", arguments: { command: "claude -p 'go'" } }],
+			},
+		}) + "\n";
+		fs.writeFileSync(parent, sessionLine(parentId, t - 1_000) + spawnTurn);
+		const tag = getCurrentVersionTagPath(parent);
+		const first = start(root, ["--session", parent], "resume-open-1.err");
+		check(await until(() => classified(parent, "ro-parent") && read(tag).includes('"spawnPending"'), 15_000) !== Infinity,
+			"fixture: the first daemon queued the claude -p lookup");
+		process.kill(first.pid, "SIGKILL");
+		await until(() => !alive(first.pid), 5_000);
+		check(!read(tag).includes('"spawnSettled"'), "fixture: the lookup was still open when the daemon stopped");
+		fs.writeFileSync(child, sessionLine(childId, t + 1_000) + turnLine("ro-child-1", t + 2_000));
+		const second = start(root, ["--session", parent], "resume-open-2.err");
+		check(await until(() => classified(parent, "ro-child-1"), 10_000) !== Infinity,
+			"the resumed daemon finds the claude -p child the earlier one was still looking for");
+		process.kill(second.pid, "SIGTERM");
+	}
+
 	console.log("\nAdoption never signals a harness");
 	{
 		// A session id shared by two roots shares one lease.
@@ -309,6 +344,20 @@ try {
 			"the next harness serves what a SIGKILLed harness served, with no new request");
 		process.kill(h2.pid, "SIGTERM");
 		await until(() => !alive(h2.pid), 5_000);
+	}
+
+	console.log("\nA hand-off written over by another harness is corrected");
+	{
+		const root = makeRoot("handoff-over");
+		const served = session(root, "over-served");
+		const h = start(root, ["--harness", "claude", "--session", served], "over.err");
+		const handOff = `${harnessPidFile(root)}.served`;
+		check(await until(() => read(handOff).includes(JSON.stringify(served)), 15_000) !== Infinity, "fixture: the hand-off names the served session");
+		fs.writeFileSync(handOff, JSON.stringify({ kind: "served", displayed: true, path: path.join(root, "proj", "not-mine.jsonl") }) + "\n");
+		check(await until(() => read(handOff).includes(JSON.stringify(served)) && !read(handOff).includes("not-mine"), 5_000) !== Infinity,
+			"the harness rewrites a hand-off that no longer lists what it serves");
+		process.kill(h.pid, "SIGTERM");
+		await until(() => !alive(h.pid), 5_000);
 	}
 
 	console.log("\nA hand-off that cannot be read is kept and reported");

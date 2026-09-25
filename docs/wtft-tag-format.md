@@ -251,7 +251,8 @@ A bump to `WTFT_TAGGER_VERSION` signals that stale tags must be re-parsed.
    shape, is skipped on its own and never fails the read (the per-line tolerance §1 requires):
    - Skip if it has a `_hb` top-level key (heartbeat).
    - Skip if it has a `_gen` top-level key (§2e).
-   - Skip if it has a `_meta` top-level key (the daemon's offset and sweep markers).
+   - Skip if it has a `_meta` top-level key (the daemon's offset and sweep markers, and its
+     `spawnPending` / `spawnSettled` records of a `claude -p` lookup, which only the daemon reads).
    - Collect `_fold.child` if it has a `_fold` top-level key (§2d).
    - Otherwise treat as an interaction line (or overhead line if `id` ends in `#oh`).
 4. After reading all lines, apply dedup (§4) — keep the highest-cost line per bare `id`.

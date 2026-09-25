@@ -444,7 +444,7 @@ export function seedClassifiedTagFile(tagPath: string): { interactions: Interact
 }
 
 
-export { WTFT_TAGGER_VERSION } from "./wtft-tagger-version.js";
+export { WTFT_TAGGER_VERSION, taggerIsOlder } from "./wtft-tagger-version.js";
 import { WTFT_TAGGER_VERSION } from "./wtft-tagger-version.js";
 
 export function serializeClassifiedWithOverheadSplit(interaction: Interaction, prevCtxTokens: number): string {

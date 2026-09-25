@@ -45,9 +45,11 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   so is what it writes from then on. A transcript another one currently folds (a `_fold` record
   under the other's source, not retired by a later generation of it) is left to that one. When the
   projects directory or a transcript cannot be read, that is reported on stderr, the resume is
-  tried again at each scan, and the tag is not stamped swept until it succeeds. A `claude -p` session spawned within the 15 s
-  discovery window before the restart, and not yet on disk at the earlier daemon's last scan, is
-  still missed: that is a known limit.
+  tried again at each scan, and the tag is not stamped swept until it succeeds. A `claude -p` lookup still open when a daemon stops
+  (its window not yet over, or a candidate unreadable) is resumed too: the tag records
+  `{"_meta":{"spawnPending":{…}}}` when a turn's lookup starts and `{"_meta":{"spawnSettled":…}}`
+  when it ends, and a resumed daemon looks up every turn left open. So a `claude -p` session
+  not yet on disk at the earlier daemon's last scan is found after the restart.
 
 ### Leases
 
@@ -119,7 +121,9 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 ### Sweep liveness (A6, A7, G18)
 
 - **The sweep checks each served transcript**, at most once per 667 ms per session. One that is
-  gone, has grown, or was replaced is woken, so a lost watch event only delays it. That covers a
+  gone, has grown, was replaced, or whose last read failed is woken, so a lost watch event only
+  delays it. A subagent scan the sweep runs keeps a failed read of the session's own transcript,
+  so it never stamps swept over it. That covers a
   deleted session, the 1 h limit on a never-written session, and a directory whose watch failed.
 - **A failed directory watch is retried** by the sweep every 10 s while a served session, or a session dropped for idling, needs it.
   Meanwhile the sweep reads the size of each session dropped for idling in such a directory, and
@@ -154,8 +158,11 @@ fix failed before it. These have no check of their own, and why:
   displayed flag; the hand-off removed when nothing is served or idle; a per-session lease holder
   still signalled on adoption; the stop line for `session removed` and `session never written`;
   the resume leaving a folded `claude -p` transcript to the one folding it; the held turn of a
-  transcript no longer found written under the source its earlier lines carry.
+  transcript no longer found written under the source its earlier lines carry; the generation record written before that held turn when its transcript opened none; Pi `/wtft -F` not asking for the session when busy; `wtft -F` exiting 1 on a failed daemon spawn; the stale-version remedy for a tag of a newer build.
 - **The 1 h limit on a never-written session** takes an hour and has no knob.
+- **A sweep-driven scan keeping a failed session read**: that scan reads the session's first line
+  for Pi discovery, so a transcript that cannot be opened fails the scan by itself; only a read
+  that fails past the first line reaches this rule, and a fixture cannot make one.
 
 - **`--cleanup`** stops fixture daemons under `/tmp`, including those of suites running beside
   it, so its harness rule (decision E) is checked by reading the code.

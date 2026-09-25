@@ -76,6 +76,7 @@ import {
 	checkDaemonHealth,
 	IDLE_THRESHOLD_MS,
 	WTFT_TAGGER_VERSION,
+	taggerIsOlder,
 	describeProvisionalReason,
 	splitOverheadCost,
 	serializeClassifiedWithOverheadSplit,
@@ -366,12 +367,16 @@ function unpricedModelWarning(model: string): string {
 }
 
 /** The one action that ends the provisional state. Does not name `-F`. */
-function describeProvisionalRemedy(provisional: { reason: string | null }): string {
+function describeProvisionalRemedy(provisional: { reason: string | null }, tagPath: string): string {
 	if (provisional.reason === "descendant-live") {
 		return `run wtft again once every descendant has been quiet for ${IDLE_THRESHOLD_MS / 1000} s`;
 	}
 	if (provisional.reason === "stale-version") {
-		return "The daemon is rebuilding this tag at the current version — run wtft again in a moment to read the settled total";
+		// A newer build's daemon keeps its tag, so no rebuild comes.
+		const version = /\.wtft-tag\.v([\d.]+)\.jsonl$/.exec(tagPath)?.[1];
+		return version && taggerIsOlder(WTFT_TAGGER_VERSION, version)
+			? "This tag was written by a newer wtft build — update this wtft to read it at its own version"
+			: "The daemon is rebuilding this tag at the current version — run wtft again in a moment to read the settled total";
 	}
 	return provisional.reason === "subagent-unreadable"
 		? "restore the unreadable session file's readability, then run wtft again — the daemon re-reads it on its next poll, and wtft reads it directly on the --tokens and --json paths"
@@ -571,7 +576,10 @@ async function main() {
 			// The report below reads the tag, so wait until the harness has
 			// adopted the session; it truncates the tag in the same step as it
 			// claims the lease, and the pause after covers that step.
-			spawnWtftDaemon(finalSessionPath, daemonDir);
+			if (!spawnWtftDaemon(finalSessionPath, daemonDir)) {
+				console.error(`❌ Force re-parse: the log parser daemon for ${path.basename(finalSessionPath)} could not be started, so the harness was not asked for it. Its lease reads "rebuild"; run -F again.`);
+				process.exit(1);
+			}
 			const lease = getDaemonPidPath(finalSessionPath);
 			adopted = false;
 			for (const until = Date.now() + 10_000; Date.now() < until && !adopted;) {
@@ -730,7 +738,7 @@ async function main() {
 	const warnProvisionalOnce = () => {
 		if (warnedProvisional || !provisional.provisional) return;
 		warnedProvisional = true;
-		console.error(`\x1b[33m⚠ PROVISIONAL: ${describeProvisionalReason(provisional, tagPath)}. ${describeProvisionalRemedy(provisional)}. Exit ${EXIT_PROVISIONAL}.\x1b[0m`);
+		console.error(`\x1b[33m⚠ PROVISIONAL: ${describeProvisionalReason(provisional, tagPath)}. ${describeProvisionalRemedy(provisional, tagPath)}. Exit ${EXIT_PROVISIONAL}.\x1b[0m`);
 	};
 
 	// `pending` pins "file absent" decided before awaitDaemonUp — do not re-derive after.
@@ -808,7 +816,7 @@ async function main() {
 				...(subagentJson?.notices ?? []),
 				// Every arm, empty ones included: the tree can make a pending report provisional.
 				...(provisional.provisional
-					? [{ code: "provisional" as const, text: `${describeProvisionalReason(provisional, tagPath)}. ${describeProvisionalRemedy(provisional)}.` }]
+					? [{ code: "provisional" as const, text: `${describeProvisionalReason(provisional, tagPath)}. ${describeProvisionalRemedy(provisional, tagPath)}.` }]
 					: []),
 			],
 		});
@@ -973,7 +981,7 @@ async function main() {
 	if (provisional.provisional) {
 		const why = describeProvisionalReason(provisional, tagPath);
 		console.error(`\x1b[33m⚠ PROVISIONAL: a number in this report may still change — ${why}.\x1b[0m`);
-		const remedy = describeProvisionalRemedy(provisional);
+		const remedy = describeProvisionalRemedy(provisional, tagPath);
 		console.error(`\x1b[90m  ${remedy}. Exit ${EXIT_PROVISIONAL}.\x1b[0m`);
 		process.exitCode = EXIT_PROVISIONAL;
 		return;

@@ -421,6 +421,27 @@ try {
 		await until(() => !alive(next.pid), 5_000);
 	}
 
+	console.log("\nAfter --restart, a session asked for before its transcript was written is still served");
+	{
+		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-rsnew-")));
+		const dir = path.join(root, "proj");
+		fs.mkdirSync(dir, { recursive: true });
+		const first = path.join(dir, "eeeeeeee-ffff-4000-8111-222222222222.jsonl");
+		const later = path.join(dir, "ffffffff-0000-4111-8222-333333333333.jsonl");
+		fs.writeFileSync(first, turnLine("rn-0", Date.now() - 60_000));
+		const h = start(root, ["--harness", "claude", "--session", first], "rn.err");
+		check(await until(() => classified(first, "rn-0"), 15_000) !== Infinity, "fixture: the harness serves its start-up session");
+		start(root, ["--harness", "claude", "--session", later], "rn-ask.err");
+		check(await until(() => read(getDaemonPidPath(later)).trim() === String(h.pid), 10_000) !== Infinity, "fixture: a session with no transcript yet was handed to it");
+		const restart = spawnSync("node", [DAEMON, "--restart"], { encoding: "utf8", env: envFor(root) });
+		check(restart.status === 0 && await until(() => !alive(h.pid), 5_000) !== Infinity, `fixture: --restart stopped it (exit ${restart.status})`);
+		check(await until(() => harnessesFor(root).length === 1, 10_000) !== Infinity, "fixture: --restart started one harness");
+		await sleep(1_000);
+		fs.writeFileSync(later, turnLine("rn-later", Date.now()));
+		check(await until(() => classified(later, "rn-later"), 10_000) !== Infinity, "its first write is read with no new request");
+		for (const pid of harnessesFor(root)) { pids.push(pid); try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
+	}
+
 	console.log("\nA harness whose pid file no longer names it stops");
 	{
 		const { root, files } = makeRoot("p", 5);

@@ -1823,11 +1823,15 @@ function servedSessionOver(dir: string): string | null {
   return null;
 }
 
-/** A session whose lease a `--reparse` holds is adopted once the reparse lets
- *  it go, not taken from it mid-rewrite. */
+/** A session that could not be adopted is tried again every POLL_MS: while a
+ *  `--reparse` holds or marks it, until the reparse lets go, so it is never
+ *  taken mid-rewrite; after any other failure, up to five times. One retry is
+ *  pending per session at a time. */
 const adoptionRetries = new Map<string, number>();
+const adoptionRetryPending = new Set<string>();
 function retryAdoptionLater(key: string, displayed: boolean) {
   if (!running || !fs.existsSync(key)) return;
+  if (adoptionRetryPending.has(key)) return;
   let holder = 0;
   try { holder = Number(fs.readFileSync(getDaemonPidPath(key), "utf8").trim()); } catch { /* released */ }
   // A reparse lets go when it finishes; any other failure gets a few tries.
@@ -1837,7 +1841,9 @@ function retryAdoptionLater(key: string, displayed: boolean) {
     return;
   }
   adoptionRetries.set(key, tries);
+  adoptionRetryPending.add(key);
   const timer = setTimeout(() => {
+    adoptionRetryPending.delete(key);
     if (running && !harnessSlots.has(key)) wake(key, displayed);
     if (harnessSlots.has(key)) adoptionRetries.delete(key);
   }, POLL_MS);
@@ -2231,10 +2237,12 @@ function takeServedHandOff() {
   try { fs.unlinkSync(claimed); } catch { /* already gone */ }
   for (const line of text.split("\n")) {
     const [kind, displayed, key] = line.split("\t");
-    if (!key || !path.isAbsolute(key) || !fs.existsSync(key)) continue;
+    if (!key || !path.isAbsolute(key)) continue;
     if (!key.startsWith(harnessRootKey + path.sep)) continue;
+    // A served session may not be written yet; the harness waits for it as it
+    // does for any session it is asked for.
     if (kind === "served") wake(key, displayed === "1");
-    else if (kind === "idle" && !harnessSlots.has(key)) {
+    else if (kind === "idle" && fs.existsSync(key) && !harnessSlots.has(key)) {
       idleDropped.set(key, displayed === "1");
       watchDir(path.dirname(key), false);
     }
@@ -2581,9 +2589,6 @@ if (showList || showCleanup || showRestart || stopSession) {
   let found = 0;
   const seenPids = new Set<number>();
   const restarted = new Set<number>();
-  // Processes this command started: the leases and pid files they claim while
-  // it is still walking are theirs, never stopped or removed here.
-  const respawned = new Set<number>();
   const unlinkIfNames = (file: string, pid: number) => {
     try {
       const before = fs.statSync(file);
@@ -2596,7 +2601,6 @@ if (showList || showCleanup || showRestart || stopSession) {
     const fullPath = path.join(pidDir, pidFile);
     const pid = leaseHolders.get(pidFile) ?? NaN;
     if (!(pid > 0)) continue;
-    if (respawned.has(pid)) continue;
     seenPids.add(pid);
 
     let alive = false;
@@ -2653,7 +2657,6 @@ if (showList || showCleanup || showRestart || stopSession) {
             env: restartEnv,
           });
           child.unref();
-          if (child.pid) respawned.add(child.pid);
         } catch (_2) {}
       }
       console.log(`Restarted: PID ${pid} → fresh daemon for ${sessionFound || "(unknown)"}`);
@@ -2732,7 +2735,6 @@ if (showList || showCleanup || showRestart || stopSession) {
       const fullPath = path.join(pidDir, pidFile);
       const pid = harnessHolders.get(pidFile) ?? NaN;
       if (Number.isNaN(pid)) continue;
-      if (respawned.has(pid)) continue;
       if (pid <= 0 || seenPids.has(pid) || pid === process.pid) {
         unlinkIfNames(fullPath, pid);
         continue;

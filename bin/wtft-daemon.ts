@@ -1007,7 +1007,9 @@ function scanForSubAgents() {
   // A transcript no longer found (its session moved, so it is read again under
   // its new path) can never release a turn it holds.
   if (!pollHadFailure) {
-    const found = new Set([...taskAgentFiles, ...discoveredClaudeFiles].map(canonicalTranscriptPath));
+    // A claude -p child stays registered after it moves or is deleted, so it
+    // counts as found only while it is on disk.
+    const found = new Set([...taskAgentFiles, ...[...discoveredClaudeFiles].filter(file => fs.existsSync(file))].map(canonicalTranscriptPath));
     // A transcript already read again under the same source this scan has
     // opened its new generation; a pruned line would land after it.
     const liveSources = new Set([...discoveredSubagentFiles].filter(([key]) => found.has(key)).map(([, state]) => state.source));
@@ -1444,11 +1446,9 @@ function reseedClaudeChildren(tagContent: string, quiet = false): boolean {
     return complete;
   }
   const sessionDir = path.dirname(sessionPath);
-  const foundIds = new Set([...found].map(file => path.basename(file, ".jsonl")));
   for (const [source, id] of children) {
     const holder = foldedBy.get(id);
     if (holder !== undefined && holder !== source) continue;
-    if (foundIds.has(id)) continue;
     for (const dir of dirs) {
       const file = canonicalTranscriptPath(path.join(projectsDir(), dir, `${id}.jsonl`));
       try {
@@ -1998,18 +1998,24 @@ function watchSession(file: string) {
 /** Sessions dropped for idling: their project directory stays watched, and
  *  their next write adopts them again. */
 const idleDropped = new Map<string, boolean>();
-/** Each idle-dropped transcript's size when dropped, for the sweep to notice
+/** Each idle-dropped transcript's size, inode and mtime when dropped, for the sweep to notice
  *  a write where the directory cannot be watched. */
-const idleDroppedSize = new Map<string, number>();
+const idleDroppedSize = new Map<string, string>();
 /** When each was dropped. One not written for WTFT_DAEMON_IDLE_MS after that
  *  is forgotten, so a harness serving nothing can stop with nothing to hand on. */
 const idleDroppedAt = new Map<string, number>();
+/** Size, inode and mtime: a same-length rewrite or a replacement is a write too. */
+function idleSignature(key: string): string {
+  try {
+    const st = fs.statSync(key);
+    return `${st.size}:${st.ino}:${st.mtimeMs}`;
+  } catch { return ""; }
+}
+
 function dropForIdle(key: string, displayed: boolean, since = idleDroppedAt.get(key) ?? Date.now()) {
   idleDropped.set(key, displayed);
   idleDroppedAt.set(key, since);
-  let size = -1;
-  try { size = fs.statSync(key).size; } catch { /* gone */ }
-  idleDroppedSize.set(key, size);
+  idleDroppedSize.set(key, idleSignature(key));
 }
 
 /** Set by serviceSession when it drops a harness session for idling. */
@@ -2506,9 +2512,8 @@ function sweepIdleSlots() {
   }
   for (const [key, displayed] of [...idleDropped]) {
     if (!unwatchedDirs.has(path.dirname(key)) || adoptionRetryPending.has(key)) continue;
-    let size = -1;
-    try { size = fs.statSync(key).size; } catch { /* gone */ }
-    if (size >= 0 && size !== idleDroppedSize.get(key)) wake(key, displayed);
+    const signature = idleSignature(key);
+    if (signature !== "" && signature !== idleDroppedSize.get(key)) wake(key, displayed);
   }
   for (const [dir, failed] of unwatchedDirs) {
     if (now - failed.triedAt < WATCH_RETRY_MS) continue;

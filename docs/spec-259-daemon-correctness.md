@@ -30,6 +30,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 
 ### Swept (A2, decision A)
 
+- **A `claude -p` child that moved or was deleted counts as gone**, so a turn it held back is
+  written and the tag can be stamped swept.
 - **Swept means every subagent turn is written.** A scan that holds back a subagent transcript's
   last turn (the one an interrupt record arriving next would mark) does not stamp the tag swept.
   The next scan that finds no new bytes writes that turn, and stamps swept if it was clean.
@@ -95,7 +97,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   reads `/proc`, so this holds on Linux; elsewhere the harness is stopped as below.
 - **Otherwise `-F` stops a live per-session daemon and deletes every version of the session's
   tag**, beside the transcript and in the sibling project where a moved session's tag lives. The
-  CLI says whether a daemon was stopped. When the daemon is still running 2 s after the signal,
+  CLI says whether a daemon was stopped. On Linux only a lease holder whose command line names
+  `wtft-daemon` is signalled; off Linux the lease pid is signalled as before. When the daemon is still running 2 s after the signal,
   or another daemon has claimed the lease meanwhile, nothing is deleted, and `-F` says so and
   exits 1. So does a lease or tag file that cannot be deleted, since what is left would be resumed
   rather than rebuilt, and a daemon that cannot be started. A harness lease that changed between
@@ -134,8 +137,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 - **A served session whose tree has a directory that cannot be watched has its subagents read**
   by the sweep, at most once per 667 ms, since no watch event comes for a subagent written there.
 - **A failed directory watch is retried** by the sweep every 10 s while a served session, or a session dropped for idling, needs it.
-  Meanwhile the sweep reads the size of each session dropped for idling in such a directory, and
-  a write adopts it again.
+  Meanwhile the sweep reads the size, inode and mtime of each session dropped for idling in such a
+  directory, and a write adopts it again, a same-length rewrite included.
 
 ### Harness exit (A12, decision B; F17; I28, decision F)
 
@@ -172,7 +175,7 @@ fix failed before it. These have no check of their own, and why:
   displayed flag; the hand-off removed when nothing is served or idle; a per-session lease holder
   still signalled on adoption; the stop line for `session removed` and `session never written`;
   the resume leaving a folded `claude -p` transcript to the one folding it; the held turn of a
-  transcript no longer found written under the source its earlier lines carry; the generation record written before that held turn when its transcript opened none; Pi `/wtft -F` not asking for the session when busy; `wtft -F` exiting 1 on a failed daemon spawn; the stale-version remedy for a tag of a newer build; the pruned held turn skipped when its transcript was read again under the same source in the same scan; a later line of the same message merging its claude -p commands into the open lookup; the scan-continuation marker re-keyed on a move; an idle harness serving a request posted since its last read before it stops; the sweep reading the subagents of a session whose tree has an unwatchable directory; the sweep not re-waking an idle session whose adoption retry is pending.
+  transcript no longer found written under the source its earlier lines carry; the generation record written before that held turn when its transcript opened none; Pi `/wtft -F` not asking for the session when busy; `wtft -F` exiting 1 on a failed daemon spawn; the stale-version remedy for a tag of a newer build; the pruned held turn skipped when its transcript was read again under the same source in the same scan; a later line of the same message merging its claude -p commands into the open lookup; the scan-continuation marker re-keyed on a move; an idle harness serving a request posted since its last read before it stops; the sweep reading the subagents of a session whose tree has an unwatchable directory; the sweep not re-waking an idle session whose adoption retry is pending; a moved or deleted claude -p child's held turn written; a harness -F whose temporary lease cannot be written reported as failed; -F deleting a sibling-project tag while a current local tag exists; reseed of a claude -p child sharing an id with a discovered transcript; an idle session rewritten at the same length adopted again; -F on Linux not signalling a lease pid with no command line.
 - **The 1 h limit on a never-written session** takes an hour and has no knob.
 - **A sweep-driven scan keeping a failed session read**: that scan reads the session's first line
   for Pi discovery, so a transcript that cannot be opened fails the scan by itself; only a read

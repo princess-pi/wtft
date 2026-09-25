@@ -571,19 +571,26 @@ export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" 
 	const daemon = args.some(arg => /^wtft-daemon(\.(mjs|js|ts))?$/.test(path.basename(arg)));
 	if (daemon && args.includes("--harness")) {
 		const replacement = `${leasePath}.force-${process.pid}`;
-		fs.writeFileSync(replacement, "rebuild");
-		let still = "";
-		try { still = fs.readFileSync(leasePath, "utf8").trim(); } catch { /* released */ }
-		if (still !== initial) {
+		try {
+			fs.writeFileSync(replacement, "rebuild");
+			let still = "";
+			try { still = fs.readFileSync(leasePath, "utf8").trim(); } catch { /* released */ }
+			if (still !== initial) {
+				fs.rmSync(replacement, { force: true });
+				return "busy";
+			}
+			fs.renameSync(replacement, leasePath);
+		} catch {
 			fs.rmSync(replacement, { force: true });
-			return "busy";
+			return "failed";
 		}
-		fs.renameSync(replacement, leasePath);
 		return "rebuild";
 	}
-	// Off Linux the lease pid cannot be checked, and is signalled as before.
+	// On Linux an unreadable cmdline means no such process. Off Linux the
+	// lease pid cannot be checked, and is signalled as before.
+	const noProc = !fs.existsSync("/proc/self/cmdline");
 	let stopped = false;
-	if (pid > 0 && (daemon || args.length === 0)) {
+	if (pid > 0 && (daemon || (noProc && args.length === 0))) {
 		try { process.kill(pid, "SIGTERM"); stopped = true; } catch { /* already gone */ }
 	}
 	// Its shutdown flushes into the tag, so the tag goes only once it has
@@ -603,7 +610,8 @@ export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" 
 	const gone = (err: unknown) => (err as NodeJS.ErrnoException).code === "ENOENT";
 	try { if (now !== "") fs.unlinkSync(leasePath); } catch (err) { if (!gone(err)) return "failed"; }
 	const prefix = path.basename(sessionPath) + ".wtft-tag.v";
-	for (const tagsDir of new Set([path.join(path.dirname(sessionPath), "wtft-tags"), path.dirname(getTagPath(sessionPath))])) {
+	const sibling = findSiblingTagPath(sessionPath);
+	for (const tagsDir of new Set([path.join(path.dirname(sessionPath), "wtft-tags"), path.dirname(getTagPath(sessionPath)), ...(sibling ? [path.dirname(sibling)] : [])])) {
 		let names: string[] = [];
 		try { names = fs.readdirSync(tagsDir); } catch (err) { if (!gone(err)) return "failed"; }
 		for (const f of names) {

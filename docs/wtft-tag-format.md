@@ -47,7 +47,7 @@ A reader may therefore presume, without writing any code for the alternative:
 | Every line in the file at rest parses as JSON | no COMPLETED write ever ends mid-line, and a crash mid-append is repaired by the next daemon at startup |
 | **No MID-FILE line is ever malformed** — *in a file written by a daemon at or after the #130 fix* | the only line any reader can find incomplete is the LAST one, and only while a write is in flight. A welded or truncated line in the middle of the file is the #130 defect, and a fixed writer cannot recreate it. **This does NOT extend to a file `getTagPath()` reaches through its stale-version reader fallback** (Macroscope, PR #142): those were written by the defective writer and the bad lines are already on disk. Measured on this host 2026-09-17: **119 of 422 tag files carry a malformed mid-file line, 2,852 lines in total.** A reader that follows only the row above will throw or silently skip records on one of them. `getCurrentVersionTagPath` is the writer-side path and never returns a stale name; the reader fallback is the one that can, so a third-party reader must keep a per-line tolerance, not merely a final-line one, whenever it opens a file whose version is not the current one |
 | ANY reader concurrent with a write may see one partial line at the end | this holds for whole-file readers too, not only offset-tracking ones. A large append is not one `write(2)`, so a `readFileSync` can land inside it and return the complete lines plus a fragment. **Every reader keeps its final-line tolerance** — `classifiedInteractionsFromContent`'s `catch` is load-bearing, and `watchTagFile` consumes to the last `\n` and carries the remainder |
-| Writes arrive in bursts no more often than one beat | `POLL_MS = 667` bounds how often a per-session poll comes round, and the minimum gap between flushes of one harness session — **not how many writes one flush makes.** One flush writes the classified batch, then `_meta.offset`, then a `_meta.swept` marker, plus one append per changed subagent transcript; `shutdown` writes outside the cadence entirely. A harness session is woken by `fs.watch`; quiet files are not polled. Expect several notifications per beat |
+| Writes arrive in bursts no more often than one beat | `POLL_MS = 667` bounds how often a per-session poll comes round, and the minimum gap between flushes of one harness session — **not how many writes one flush makes.** One flush writes the classified batch and `_meta.offset`; the subagent scan after it makes one append per changed subagent transcript, then a `_meta.swept` marker when the scan was clean and held no turn back. A turn with a `claude -p` command adds a `_meta.spawnPending` record when it is read, a lookup that ends adds a `_meta.spawnSettled`, and a transcript no longer found may add the turn it held back; `shutdown` writes outside the cadence entirely. A harness session is woken by `fs.watch`, and the harness also stats each served transcript at most once per beat, so a lost event only delays a wake. Expect several notifications per beat |
 
 **This is not the watcher being clever, and it cannot be.** `fs.watch`/inotify report **bytes**;
 there is no "notify me on a newline" anywhere in the stack, and no watcher can be made
@@ -68,7 +68,7 @@ one `writeSync` at a `lastLineStartByte` offset, on the one descriptor already o
 does not change, so an offset-tracking reader's position can never go stale, and a torn write
 leaves a mix of two heartbeats that have identical shape and identical length, hence still a
 complete parseable line. The fixed width is what buys that: `first` and `last` are both
-13-digit epoch milliseconds. A line of any other width — `{"_hb":"stop"}`, or a tag from some
+13-digit epoch milliseconds. A line of any other width — a stop line, or a tag from some
 future build — is not ours to overwrite, so it is appended beside instead.
 
 The earlier design truncated the stale heartbeat and appended a fresh one through a second
@@ -147,9 +147,11 @@ The daemon periodically writes heartbeat lines to signal liveness. Shape:
 ```
 
 `first` is the millisecond timestamp at which the current idle run began and `last` the most
-recent beat; `first === last` on the first beat of a run. The daemon also writes
-`{"_hb": "stop"}` on shutdown, so the value is **not** always an object — a reader that
-destructures it must handle the string.
+recent beat; `first === last` on the first beat of a run. The daemon also writes a stop line,
+`{"_hb": "stop", "reason": "<why>"}`, when it stops serving the session: a per-session daemon on
+shutdown, a harness daemon when it drops a session it still holds the lease of for idling, removal or never being written, and when it stops (a stop on a failed tag write writes none).
+So the value is **not** always an object — a reader that destructures it must handle the string.
+Tags written before the reason existed carry `{"_hb": "stop"}`.
 
 The top-level `_hb` key identifies a heartbeat. Readers MUST skip all lines that carry
 `_hb` — they are not interaction records.
@@ -249,7 +251,8 @@ A bump to `WTFT_TAGGER_VERSION` signals that stale tags must be re-parsed.
    shape, is skipped on its own and never fails the read (the per-line tolerance §1 requires):
    - Skip if it has a `_hb` top-level key (heartbeat).
    - Skip if it has a `_gen` top-level key (§2e).
-   - Skip if it has a `_meta` top-level key (the daemon's offset and sweep markers).
+   - Skip if it has a `_meta` top-level key (the daemon's offset and sweep markers, and its
+     `spawnPending` / `spawnSettled` records of a `claude -p` lookup, which only the daemon reads).
    - Collect `_fold.child` if it has a `_fold` top-level key (§2d).
    - Otherwise treat as an interaction line (or overhead line if `id` ends in `#oh`).
 4. After reading all lines, apply dedup (§4) — keep the highest-cost line per bare `id`.

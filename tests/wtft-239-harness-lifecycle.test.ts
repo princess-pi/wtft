@@ -172,10 +172,6 @@ try {
 		fs.appendFileSync(path.join(subDir, "agent-a.jsonl"), turnLine("sub-b", Date.now()));
 		check(await until(() => classified(parent, "sub-b"), 10_000) !== Infinity, "a later write to its subagent transcript is read");
 
-		const reparse = spawnSync("node", [DAEMON, "--reparse", files[5]], { encoding: "utf8", env: envFor(root) });
-		check(reparse.status === 0, `--reparse of a session nobody is serving runs beside the harness (exit ${reparse.status})`);
-		const refused = spawnSync("node", [DAEMON, "--reparse", parent], { encoding: "utf8", env: envFor(root) });
-		check(refused.status === 1, `--reparse of a session the harness serves is refused (exit ${refused.status})`);
 		for (const pid of [h.pid, s.pid]) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 		await until(() => !alive(h.pid) && !alive(s.pid), 5_000);
 	}
@@ -227,25 +223,6 @@ try {
 		for (const pid of harnessesFor(root)) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 	}
 
-	console.log("\n--reparse whose subagent scan fails does not stamp the tag swept");
-	{
-		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-rpfail-")));
-		const dir = path.join(root, "proj");
-		fs.mkdirSync(dir, { recursive: true });
-		const session = path.join(dir, "33333333-4444-4555-8666-777777777777.jsonl");
-		fs.writeFileSync(session, turnLine("rf-0", Date.now() - 60_000));
-		const sub = path.join(session.slice(0, -".jsonl".length), "subagents");
-		fs.mkdirSync(sub, { recursive: true });
-		const locked = path.join(sub, "agent-locked.jsonl");
-		fs.writeFileSync(locked, turnLine("rf-sub", Date.now() - 50_000));
-		fs.chmodSync(locked, 0o000);
-		check(read(locked) === "", "fixture: the subagent transcript cannot be read");
-		const r = spawnSync("node", [DAEMON, "--reparse", session], { encoding: "utf8", env: envFor(root) });
-		fs.chmodSync(locked, 0o644);
-		check(r.status === 1, `--reparse exits 1 when a subagent transcript could not be read (exit ${r.status})`);
-		check(!read(getCurrentVersionTagPath(session)).includes('"swept"'), "and the tag is not stamped swept");
-	}
-
 	console.log("\nA session adopted again does not keep its previous life's swept verdict");
 	{
 		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-readopt-")));
@@ -280,8 +257,10 @@ try {
 		fs.writeFileSync(target, turnLine("rb-0", Date.now() - 60_000));
 		fs.writeFileSync(other, turnLine("rbo-0", Date.now() - 60_000));
 		const tag = getCurrentVersionTagPath(target);
-		const first = spawnSync("node", [DAEMON, "--reparse", target], { encoding: "utf8", env: envFor(root) });
-		check(first.status === 0 && classified(target, "rb-0"), `fixture: the target has a tag (exit ${first.status})`);
+		const first = start(root, ["--session", target], "rb-first.err");
+		check(await until(() => classified(target, "rb-0"), 15_000) !== Infinity, "fixture: the target has a tag");
+		process.kill(first.pid, "SIGTERM");
+		await until(() => !alive(first.pid), 5_000);
 		// A row no transcript holds, then an offset at the end, so a resume keeps it.
 		const row = read(tag).split("\n").find(l => l.includes('"rb-0"')) ?? "";
 		fs.appendFileSync(tag, row.replace('"rb-0"', '"rb-bogus"') + "\n" + JSON.stringify({ _meta: { offset: fs.statSync(target).size } }) + "\n");
@@ -292,53 +271,6 @@ try {
 		start(root, ["--harness", "claude", "--session", target], "rb-ask.err");
 		await until(() => read(getDaemonPidPath(target)).trim() === String(h.pid) && classified(target, "rb-0") && !classified(target, "rb-bogus"), 10_000);
 		check(classified(target, "rb-0") && !classified(target, "rb-bogus"), "the harness rebuilds the tag instead of resuming it");
-		try { process.kill(h.pid, "SIGTERM"); } catch { /* gone */ }
-		await until(() => !alive(h.pid), 5_000);
-	}
-
-	console.log("\nA per-session daemon waits for a --reparse holding its lease");
-	{
-		const other = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-perwait-")));
-		const outside = path.join(other, "outside-wait.jsonl");
-		fs.writeFileSync(outside, turnLine("pw-0", Date.now()));
-		// A stand-in whose command line reads as a --reparse of this session.
-		const fake = spawn("node", ["-e", "setTimeout(() => {}, 60000)", path.join(other, "wtft-daemon.mjs"), "--reparse", outside], { stdio: "ignore" });
-		const lease = getDaemonPidPath(outside);
-		fs.writeFileSync(lease, String(fake.pid));
-		await sleep(300);
-		const per = start(other, ["--session", outside], "pw.err");
-		await sleep(1_500);
-		check(alive(per.pid), "the per-session daemon does not exit while the reparse holds the lease");
-		check(read(lease).trim() === String(fake.pid), "and does not take the lease from it");
-		fake.kill("SIGTERM");
-		try { fs.unlinkSync(lease); } catch { /* gone */ }
-		check(await until(() => classified(outside, "pw-0"), 10_000) !== Infinity, "once the reparse lets go, it claims the lease and classifies the session");
-		try { process.kill(per.pid, "SIGTERM"); } catch { /* gone */ }
-	}
-
-	console.log("\nA harness does not adopt a session while a --reparse of it is running");
-	{
-		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-rpmark-")));
-		const dir = path.join(root, "proj");
-		fs.mkdirSync(dir, { recursive: true });
-		const target = path.join(dir, "77777777-8888-4999-8aaa-bbbbbbbbbbbb.jsonl");
-		const other = path.join(dir, "88888888-9999-4aaa-8bbb-cccccccccccc.jsonl");
-		fs.writeFileSync(target, turnLine("rm-0", Date.now() - 60_000));
-		fs.writeFileSync(other, turnLine("rmo-0", Date.now() - 60_000));
-		const h = start(root, ["--harness", "claude", "--session", other], "rm.err");
-		check(await until(() => classified(other, "rmo-0"), 15_000) !== Infinity, "fixture: a harness is serving another session");
-		// A stand-in reparse that has marked the session but whose lease a focus
-		// request has already pointed at the harness.
-		const fake = spawn("node", ["-e", "setTimeout(() => {}, 60000)", path.join(root, "wtft-daemon.mjs"), "--reparse", target], { stdio: "ignore" });
-		const lease = getDaemonPidPath(target);
-		fs.writeFileSync(`${lease}.reparse`, String(fake.pid));
-		await sleep(300);
-		start(root, ["--harness", "claude", "--session", target], "rm-ask.err");
-		await sleep(2_000);
-		check(!fs.existsSync(getCurrentVersionTagPath(target)), "the harness leaves the session alone while the reparse runs");
-		fake.kill("SIGTERM");
-		try { fs.unlinkSync(`${lease}.reparse`); } catch { /* gone */ }
-		check(await until(() => classified(target, "rm-0"), 10_000) !== Infinity, "and adopts it once the reparse has finished");
 		try { process.kill(h.pid, "SIGTERM"); } catch { /* gone */ }
 		await until(() => !alive(h.pid), 5_000);
 	}
@@ -357,25 +289,6 @@ try {
 		check(await until(() => classified(session, "id-1"), 10_000) !== Infinity, "a later write to it is read with no new request");
 		try { process.kill(h.pid, "SIGTERM"); } catch { /* gone */ }
 		await until(() => !alive(h.pid), 5_000);
-	}
-
-	console.log("\nA refused --reparse leaves a running reparse's marker alone");
-	{
-		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-rp2-")));
-		const dir = path.join(root, "proj");
-		fs.mkdirSync(dir, { recursive: true });
-		const target = path.join(dir, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jsonl");
-		fs.writeFileSync(target, turnLine("r2-0", Date.now() - 60_000));
-		const fake = spawn("node", ["-e", "setTimeout(() => {}, 60000)", path.join(root, "wtft-daemon.mjs"), "--reparse", target], { stdio: "ignore" });
-		const lease = getDaemonPidPath(target);
-		fs.writeFileSync(lease, String(fake.pid));
-		fs.writeFileSync(`${lease}.reparse`, String(fake.pid));
-		await sleep(300);
-		const second = spawnSync("node", [DAEMON, "--reparse", target], { encoding: "utf8", env: envFor(root) });
-		check(second.status === 1, `the second --reparse is refused (exit ${second.status})`);
-		check(read(`${lease}.reparse`).trim() === String(fake.pid), "and the running reparse's marker still names it");
-		fake.kill("SIGTERM");
-		for (const f of [lease, `${lease}.reparse`]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
 	}
 
 	console.log("\nAfter --restart, the new harness serves a session the old one was asked for");
@@ -463,29 +376,6 @@ try {
 		await until(() => !alive(h.pid), 5_000);
 	}
 
-	console.log("\nA reparse marker naming a reparse of another session does not hold a session back");
-	{
-		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-rpother-")));
-		const dir = path.join(root, "proj");
-		fs.mkdirSync(dir, { recursive: true });
-		const target = path.join(dir, "12121212-1313-4414-8515-161616161616.jsonl");
-		const other = path.join(dir, "17171717-1818-4919-8a1a-1b1b1b1b1b1b.jsonl");
-		fs.writeFileSync(target, turnLine("ro-0", Date.now() - 60_000));
-		fs.writeFileSync(other, turnLine("roo-0", Date.now() - 60_000));
-		const h = start(root, ["--harness", "claude", "--session", other], "ro.err");
-		check(await until(() => classified(other, "roo-0"), 15_000) !== Infinity, "fixture: a harness is serving another session");
-		// A stale marker whose pid now belongs to a reparse of a different session.
-		const fake = spawn("node", ["-e", "setTimeout(() => {}, 60000)", path.join(root, "wtft-daemon.mjs"), "--reparse", other], { stdio: "ignore" });
-		fs.writeFileSync(`${getDaemonPidPath(target)}.reparse`, String(fake.pid));
-		await sleep(300);
-		start(root, ["--harness", "claude", "--session", target], "ro-ask.err");
-		check(await until(() => classified(target, "ro-0"), 5_000) !== Infinity, "the harness adopts the session");
-		fake.kill("SIGTERM");
-		try { fs.unlinkSync(`${getDaemonPidPath(target)}.reparse`); } catch { /* gone */ }
-		try { process.kill(h.pid, "SIGTERM"); } catch { /* gone */ }
-		await until(() => !alive(h.pid), 5_000);
-	}
-
 	console.log("\nAfter --restart, a session whose path holds a tab is still served");
 	{
 		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-rstab-")));
@@ -505,33 +395,6 @@ try {
 		await sleep(1_000);
 		fs.appendFileSync(tabbed, turnLine("rtt-1", Date.now()));
 		check(await until(() => classified(tabbed, "rtt-1"), 10_000) !== Infinity, "its next write is read with no new request");
-		for (const pid of harnessesFor(root)) { pids.push(pid); try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
-	}
-
-	console.log("\nA session asked for while a reparse holds it is passed on by --restart");
-	{
-		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-239-rspend-")));
-		const dir = path.join(root, "proj");
-		fs.mkdirSync(dir, { recursive: true });
-		const first = path.join(dir, "21212121-2222-4323-8424-252525252525.jsonl");
-		const held = path.join(dir, "26262626-2727-4828-8929-2a2a2a2a2a2a.jsonl");
-		fs.writeFileSync(first, turnLine("rp-0", Date.now() - 60_000));
-		fs.writeFileSync(held, turnLine("rph-0", Date.now() - 60_000));
-		const h = start(root, ["--harness", "claude", "--session", first], "rp.err");
-		check(await until(() => classified(first, "rp-0"), 15_000) !== Infinity, "fixture: the harness serves its start-up session");
-		const fake = spawn("node", ["-e", "setTimeout(() => {}, 60000)", path.join(root, "wtft-daemon.mjs"), "--reparse", held], { stdio: "ignore" });
-		const marker = `${getDaemonPidPath(held)}.reparse`;
-		fs.writeFileSync(marker, String(fake.pid));
-		await sleep(300);
-		start(root, ["--harness", "claude", "--session", held], "rp-ask.err");
-		await sleep(1_500);
-		check(!fs.existsSync(getCurrentVersionTagPath(held)), "fixture: the harness is waiting for the reparse");
-		const restart = spawnSync("node", [DAEMON, "--restart"], { encoding: "utf8", env: envFor(root) });
-		check(restart.status === 0 && await until(() => !alive(h.pid), 5_000) !== Infinity, `fixture: --restart stopped it (exit ${restart.status})`);
-		check(await until(() => harnessesFor(root).length === 1, 10_000) !== Infinity, "fixture: --restart started one harness");
-		fake.kill("SIGTERM");
-		try { fs.unlinkSync(marker); } catch { /* gone */ }
-		check(await until(() => classified(held, "rph-0"), 10_000) !== Infinity, "the next harness adopts it once the reparse is gone");
 		for (const pid of harnessesFor(root)) { pids.push(pid); try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 	}
 

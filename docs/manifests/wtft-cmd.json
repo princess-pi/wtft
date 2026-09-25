@@ -197,7 +197,7 @@
     },
     {
       "flags": "--cleanup",
-      "desc": "Kill log parser daemons whose source session no longer exists. A harness process is not killed because the session it was started for is gone; it drops a gone session itself. A fixture daemon under the tmp dir is killed too."
+      "desc": "Kill log parser daemons whose source session no longer exists. A harness process is not killed because the session it was started for is gone; it drops a gone session itself. A per-session fixture daemon under the tmp dir that holds no lease there is killed too. A harness process is never killed; it stops itself after 24h with no session to serve."
     },
     {
       "flags": "--restart",
@@ -209,7 +209,7 @@
     },
     {
       "flags": "-F, --force",
-      "desc": "Kill the log parser daemon, delete tag files, and force a full session re-parse."
+      "desc": "Force a full re-parse of the session's tag from its transcript. On Linux, a session a harness log parser daemon serves is rebuilt by that daemon, which keeps serving its other sessions, and the report waits for it to begin. If the harness has not taken the session up within 10 s, wtft says so and exits 1 with no report. Otherwise a running log parser daemon for the session is stopped and every version of its tag file deleted; when that daemon is still running 2 s later, or another has claimed the session meanwhile, nothing is deleted and wtft exits 1, as it does when the lease cannot be read, the rebuild lease cannot be written, the daemon cannot be signalled, or a lease or tag file cannot be deleted."
     },
     {
       "flags": "--harness <pi|claude-code|auto>",
@@ -309,11 +309,11 @@
   "exitCodes": [
     {
       "code": 0,
-      "meaning": "Report produced — including when there is nothing to report yet (session file not written, or a tag with no classified data). Under --json the report is one JSON object on stdout; the commands that run instead of a report (--help/--why/--version, --list/--cleanup/--restart/--stop, and spawn-record on a successful append or --help) also exit 0 and print their own output."
+      "meaning": "Report produced — including when there is nothing to report yet (session file not written, or a tag with no classified data). Under --json the report is one JSON object on stdout; the commands that run instead of a report (--help/--why/--version, and spawn-record on a successful append or --help) also exit 0 and print their own output. --list/--cleanup/--restart/--stop print wtft-daemon's output and exit with its code: 0 when it succeeded, 1 when --stop could not drop a session because its lease changed or could not be removed, or when wtft-daemon could not be run within 10 s."
     },
     {
       "code": 1,
-      "meaning": "Error: no session found or selected, an invalid path, a daemon that could not be spawned or that died before producing data, a refused flag (-p), a read error other than a missing path in a harness's session tree (Claude Code's projects directory today) while --json or --tokens lists unrecorded spawns (#212: never a quiet []), or an unhandled exception. Reason on stderr; under --json stdout carries nothing."
+      "meaning": "Error: no session found or selected, an invalid path, a daemon that could not be spawned or that died before producing data, a refused flag (-p), --stop unable to drop a session, -F unable to rebuild (a daemon that did not stop, a session another daemon claimed, a lease that could not be read, a rebuild lease that could not be written, a daemon that could not be signalled, a lease or tag file that could not be deleted, a daemon that could not be started, or a harness that did not take the session up within 10 s), --list/--cleanup/--restart/--stop unable to run wtft-daemon within 10 s, a read error other than a missing path in a harness's session tree (Claude Code's projects directory today) while --json or --tokens lists unrecorded spawns (#212: never a quiet []), or an unhandled exception. Reason on stderr; under --json stdout carries nothing."
     },
     {
       "code": 2,

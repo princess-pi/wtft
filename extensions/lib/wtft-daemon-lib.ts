@@ -444,7 +444,7 @@ export function seedClassifiedTagFile(tagPath: string): { interactions: Interact
 }
 
 
-export { WTFT_TAGGER_VERSION } from "./wtft-tagger-version.js";
+export { WTFT_TAGGER_VERSION, taggerIsOlder } from "./wtft-tagger-version.js";
 import { WTFT_TAGGER_VERSION } from "./wtft-tagger-version.js";
 
 export function serializeClassifiedWithOverheadSplit(interaction: Interaction, prevCtxTokens: number): string {
@@ -544,6 +544,100 @@ export function getDaemonPidPath(sessionPath: string): string {
 	const key = isSessionIdBasename(sessionPath) ? path.basename(sessionPath) : sessionPath;
 	const sessionHash = createHash("sha256").update(key).digest("hex").slice(0, 12);
 	return path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
+}
+
+/**
+ * `wtft -F`: rederive one session's tag from its transcript. A session a
+ * harness daemon serves gets a `rebuild` lease, which that harness rebuilds as
+ * soon as it sees it, so the harness and its other sessions keep running
+ * ("rebuild"). Otherwise the lease and every version of the tag, beside the
+ * transcript or in the sibling project a moved session's tag lives in, are
+ * deleted, after stopping a live per-session daemon ("stopped") or with none
+ * running ("deleted"); a daemon still running 2 s after the signal, or one
+ * that claimed the session meanwhile, leaves everything in place ("busy"); a
+ * lease that cannot be read ("unreadable"), a rebuild lease that cannot be
+ * written ("unwritable"), a daemon that cannot be signalled ("unsignalled"),
+ * and a lease or tag that cannot be deleted ("undeletable") are failures.
+ * Unless busy or a failure, the caller then asks for the session. Telling a harness apart reads `/proc`, so off Linux a harness is stopped like a
+ * per-session daemon.
+ */
+export type ForceRebuildFailure = "unreadable" | "unwritable" | "unsignalled" | "undeletable";
+
+/** What a failed `-F` could not do, as a sentence fragment, or null. */
+export function describeForceRebuildFailure(how: string): string | null {
+	switch (how) {
+		case "unreadable": return "its lease could not be read";
+		case "unwritable": return "the rebuild lease could not be written";
+		case "unsignalled": return "its log parser daemon could not be signalled";
+		case "undeletable": return "a lease or tag file could not be deleted, so it would be resumed rather than rebuilt";
+		default: return null;
+	}
+}
+
+export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" | "deleted" | "busy" | ForceRebuildFailure {
+	const leasePath = getDaemonPidPath(sessionPath);
+	let pid = 0;
+	let initial = "";
+	try { initial = fs.readFileSync(leasePath, "utf8").trim(); pid = parseInt(initial, 10); }
+	catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "unreadable"; }
+	let args: string[] = [];
+	if (pid > 0) {
+		try { args = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0"); } catch { /* not running */ }
+	}
+	const daemon = args.some(arg => /^wtft-daemon(\.(mjs|js|ts))?$/.test(path.basename(arg)));
+	if (daemon && args.includes("--harness")) {
+		const replacement = `${leasePath}.force-${process.pid}`;
+		try {
+			fs.writeFileSync(replacement, "rebuild");
+			let still = "";
+			try { still = fs.readFileSync(leasePath, "utf8").trim(); } catch { /* released */ }
+			if (still !== initial) {
+				fs.rmSync(replacement, { force: true });
+				return "busy";
+			}
+			fs.renameSync(replacement, leasePath);
+		} catch {
+			fs.rmSync(replacement, { force: true });
+			return "unwritable";
+		}
+		return "rebuild";
+	}
+	// On Linux an unreadable cmdline means no such process. Off Linux the
+	// lease pid cannot be checked, and is signalled as before.
+	const noProc = !fs.existsSync("/proc/self/cmdline");
+	let stopped = false;
+	if (pid > 0 && (daemon || (noProc && args.length === 0))) {
+		try { process.kill(pid, "SIGTERM"); stopped = true; }
+		catch (err) { if ((err as NodeJS.ErrnoException).code !== "ESRCH") return "unsignalled"; }
+	}
+	// Its shutdown flushes into the tag, so the tag goes only once it has
+	// exited; one still running after 2 s keeps its tag ("busy").
+	let exited = !stopped;
+	for (const until = Date.now() + 2000; !exited && Date.now() < until;) {
+		try { process.kill(pid, 0); } catch { exited = true; break; }
+		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+	}
+	if (!exited) return "busy";
+	// A daemon that claimed the session since owns lease and tag; leave both.
+	let now = "";
+	try { now = fs.readFileSync(leasePath, "utf8").trim(); }
+	catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "unreadable"; }
+	if (now !== "" && now !== initial) return "busy";
+	// Anything left behind would be resumed, not rebuilt, so any error but
+	// "already gone" fails the whole -F.
+	const gone = (err: unknown) => (err as NodeJS.ErrnoException).code === "ENOENT";
+	try { if (now !== "") fs.unlinkSync(leasePath); } catch (err) { if (!gone(err)) return "undeletable"; }
+	const prefix = path.basename(sessionPath) + ".wtft-tag.v";
+	const sibling = findSiblingTagPath(sessionPath);
+	for (const tagsDir of new Set([path.join(path.dirname(sessionPath), "wtft-tags"), path.dirname(getTagPath(sessionPath)), ...(sibling ? [path.dirname(sibling)] : [])])) {
+		let names: string[] = [];
+		try { names = fs.readdirSync(tagsDir); } catch (err) { if (!gone(err)) return "undeletable"; }
+		for (const f of names) {
+			if (!f.startsWith(prefix) || !f.endsWith(".jsonl")) continue;
+			try { fs.unlinkSync(path.join(tagsDir, f)); } catch (err) { if (!gone(err)) return "undeletable"; }
+		}
+	}
+	return stopped ? "stopped" : "deleted";
 }
 
 function pathIsUnder(file: string, root: string): boolean {

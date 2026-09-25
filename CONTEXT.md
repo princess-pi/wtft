@@ -20,11 +20,15 @@ the root. Finding a Pi session's subagent sessions reads the first line of each 
 session outside those roots keeps its own process, polling every 667ms. The tag file and
 the pid lease stay per session. After 24h with no new lines, the per-session process
 exits, and the harness process drops that session and its lease; the next write to its own transcript,
-or the next request, adopts it again. Spawned on Pi `session_start` and on
+or the next request, adopts it again; while that harness process runs, the write alone does.
+A session dropped for idling is forgotten 24h after it was dropped unless written first, and a
+harness process left with nothing to serve or watch for 24h after that stops. One whose root is
+removed stops too, passing its dropped sessions to the next one. Spawned on Pi `session_start` and on
 a CLI report. A per-session process is revived after an idle exit and replaced on a
 version bump, and a harness process from an older tagger is replaced by the next start
 from a newer one. On Linux, a live harness
-process is left running; a later start points the session's lease at it, because
+process is left running; a later start asks it for the session and points the session's lease
+at it unless another live daemon holds that lease, because
 that check reads `/proc/<pid>/cmdline`. Health is exposed via `checkDaemonHealth()` and
 rendered via `renderDaemonStatus()`.
 
@@ -134,7 +138,7 @@ _Avoid_: Child session, nested session
 The `.meta.json` the harness writes beside a Claude Code built-in subagent transcript
 (`agent-<hash>.meta.json`): `agentType`, `spawnDepth`, and usually `description`, `toolUseId` and
 `model`. `subagents[].meta` in JSON. **Not the tag file's `_meta` record** — that is always spelled
-with the underscore and is the daemon's own offset/sweep control line, an unrelated thing.
+with the underscore and is the daemon's own control line (offset, sweep, and `claude -p` lookup records), an unrelated thing.
 _Avoid_: bare "meta" (say which), "the meta record"
 
 **Subagents block** (#137):
@@ -364,7 +368,8 @@ names the usage mode)
 
 **Provisional (total)** (#443, a field since #26):
 A total that may still change: the tag file was written by another tagger build
-(`stale-version`) or read before the log parser daemon swept it (`unswept`), the CLI's
+(`stale-version`) or read before the log parser daemon swept it — read every subagent
+transcript and wrote every subagent turn (`unswept`), the CLI's
 scan could not list or read a subagent file (`subagent-unreadable`), or a counted descendant
 is still writing its transcript or one of its subagent transcripts (`descendant-live`: its
 spawn-tree edge is **live**; the exact

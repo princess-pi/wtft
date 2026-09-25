@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * #205 — one daemon per harness, fs.watch, historical reparse.
+ * #205 — one daemon per harness, fs.watch.
  */
 
 import * as fs from "node:fs";
@@ -245,96 +245,7 @@ try {
 	for (const pid of [claudePid, piPid]) {
 		try { process.kill(pid, "SIGTERM"); } catch { /* gone */ }
 	}
-	await waitFor("harness daemons exit before the reparse", () => !alive(claudePid) && !alive(piPid));
-
-	const fast = path.join(claudeRoot, "proj", "fast.jsonl");
-	let body = "";
-	for (let i = 0; i < 40; i++) body += turnLine(`fast-${i}`, T0 + 800_000 + i, 1);
-	fs.writeFileSync(fast, body);
-	const reparseErr = path.join(root, "reparse.err");
-	const reparseFd = fs.openSync(reparseErr, "w");
-	const started = Date.now();
-	const reparse = spawn(process.execPath, [DAEMON, "--reparse", fast], { stdio: ["ignore", "ignore", reparseFd], env });
-	const reparseCode = await new Promise<number>(resolve => reparse.on("exit", code => resolve(code ?? 1)));
-	fs.closeSync(reparseFd);
-	const elapsed = Date.now() - started;
-	assert(
-		`one-session reparse has no POLL_MS delay per line (${elapsed} ms, exit ${reparseCode})`,
-		reparseCode === 0 && elapsed < 5000,
-	);
-	const fastIds = readClassifiedTagFile(getCurrentVersionTagPath(fast)).map((row: { messageId?: string }) => row.messageId);
-	assert("reparse classifies the fixture", fastIds.includes("fast-0") && fastIds.includes("fast-39"));
-	const fastCost = readClassifiedTagFile(getCurrentVersionTagPath(fast)).reduce((sum: number, row: { cost: number }) => sum + row.cost, 0);
-	const again = spawnSync(process.execPath, [DAEMON, "--reparse", fast], { encoding: "utf8", env });
-	const fastCostAgain = readClassifiedTagFile(getCurrentVersionTagPath(fast)).reduce((sum: number, row: { cost: number }) => sum + row.cost, 0);
-	assert(
-		"a second reparse replaces the tag instead of appending",
-		again.status === 0 && Math.abs(fastCostAgain - fastCost) < 0.000001,
-	);
-
-	const rangeDir = path.join(claudeRoot, "range");
-	fs.mkdirSync(rangeDir, { recursive: true });
-	const missing = path.join(rangeDir, "missing.jsonl");
-	const kept = path.join(rangeDir, "kept.jsonl");
-	const stale = path.join(rangeDir, "stale.jsonl");
-	const outside = path.join(rangeDir, "outside.jsonl");
-	let missingBody = "";
-	for (let i = 0; i < 2000; i++) missingBody += turnLine("range-missing", T0 + i, 5);
-	fs.writeFileSync(missing, missingBody);
-	fs.writeFileSync(kept, turnLine("range-kept", T0, 5));
-	fs.writeFileSync(stale, turnLine("range-stale", T0, 5));
-	fs.writeFileSync(outside, turnLine("range-outside", T0, 5));
-	const stamp = (file: string, iso: string) => {
-		const when = new Date(iso);
-		fs.utimesSync(file, when, when);
-	};
-	stamp(missing, "2026-09-01T12:00:00Z");
-	stamp(kept, "2026-09-01T13:00:00Z");
-	stamp(stale, "2026-09-02T12:00:00Z");
-	stamp(outside, "2026-08-01T12:00:00Z");
-	const keptTag = getCurrentVersionTagPath(kept);
-	fs.mkdirSync(path.dirname(keptTag), { recursive: true });
-	fs.writeFileSync(keptTag, "{\"note\":\"KEEPME\"}\n");
-	const staleTag = path.join(path.dirname(getCurrentVersionTagPath(stale)), `stale.jsonl.wtft-tag.v0.0.0.jsonl`);
-	fs.mkdirSync(path.dirname(staleTag), { recursive: true });
-	fs.writeFileSync(staleTag, "{\"note\":\"OLD\"}\n");
-
-	const rangeErr = path.join(root, "range.err");
-	const rangeFd = fs.openSync(rangeErr, "w");
-	const rangeChild = spawn(process.execPath, [DAEMON, "--reparse-range", "2026-09-01", "2026-09-03"], {
-		stdio: ["ignore", "ignore", rangeFd],
-		env,
-	});
-	let peak = 0;
-	const sampler = setInterval(() => {
-		if (rangeChild.pid && alive(rangeChild.pid)) peak = Math.max(peak, rssKb(rangeChild.pid));
-	}, 5);
-	const rangeCode = await new Promise<number>(resolve => rangeChild.on("exit", code => resolve(code ?? 1)));
-	clearInterval(sampler);
-	fs.closeSync(rangeFd);
-	const rangeLog = fs.readFileSync(rangeErr, "utf8");
-	const opens: string[] = [];
-	let overlap = false;
-	let depth = 0;
-	for (const line of rangeLog.split("\n")) {
-		if (line.includes("reparse begin ")) { depth++; if (depth > 1) overlap = true; opens.push("begin"); }
-		if (line.includes("reparse end ")) { depth--; opens.push("end"); }
-	}
-	assert("a date-range reparse runs one session at a time", rangeCode === 0 && !overlap && depth === 0);
-	assert(
-		`date-range peak RSS stays near one session (saw ${peak} kB)`,
-		peak > 0 && peak < 200 * 1024,
-	);
-	assert(
-		"a missing current tag is rebuilt",
-		readClassifiedTagFile(getCurrentVersionTagPath(missing)).some((row: { messageId?: string }) => row.messageId === "range-missing"),
-	);
-	assert("a current tag is left alone", fs.readFileSync(keptTag, "utf8").includes("KEEPME"));
-	assert(
-		"a stale tag version is rebuilt",
-		readClassifiedTagFile(getCurrentVersionTagPath(stale)).some((row: { messageId?: string }) => row.messageId === "range-stale"),
-	);
-	assert("a session outside the range is not parsed", !fs.existsSync(getCurrentVersionTagPath(outside)));
+	await waitFor("harness daemons exit", () => !alive(claudePid) && !alive(piPid));
 
 	const idleDir = path.join(claudeRoot, "idleproj");
 	fs.mkdirSync(idleDir, { recursive: true });

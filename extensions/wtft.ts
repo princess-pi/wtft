@@ -19,6 +19,8 @@ import {
 	getTagPath,
 	getDaemonPidPath,
 	getModelCacheTtlMs,
+	forceRebuildSession,
+	describeForceRebuildFailure,
 } from "./lib/wtft-shared.js";
 import { readConfig, writeConfig, hasConfig } from "@princess-pi/libs/config";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "./lib/wtft-config-dir.js";
@@ -387,19 +389,24 @@ export default function wtftExtension(pi: ExtensionAPI) {
 					ctx.ui.notify("No session file available for re-parse.", "warning");
 					return;
 				}
-				const tagPath = getTagPath(sessionFile);
-				const pidPath = getDaemonPidPath(sessionFile);
-				try {
-					const pid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
-					if (pid > 0) {
-						try { process.kill(pid, "SIGTERM"); } catch {}
-					}
-					try { fs.unlinkSync(pidPath); } catch {}
-				} catch {}
-				try { fs.unlinkSync(tagPath); } catch {}
-				ensureDaemonRunning(sessionFile, _daemonDir);
+				const how = forceRebuildSession(sessionFile);
+				const failure = describeForceRebuildFailure(how);
+				if (failure) {
+					ctx.ui.notify(`Force re-parse: ${failure}. Nothing was rebuilt.`, "warning");
+					return;
+				}
+				if (how === "busy") {
+					ctx.ui.notify("A log parser daemon did not stop within 2 s, or another took the session meanwhile, so nothing was deleted — run /wtft -F again once it has stopped.", "warning");
+					return;
+				}
+				if (!ensureDaemonRunning(sessionFile, _daemonDir)) {
+					ctx.ui.notify("Force re-parse: the log parser daemon could not be started, so nothing is rebuilding the tag — run /wtft -F again.", "warning");
+					return;
+				}
 				updateWtftWidget(ctx, pi);
-				ctx.ui.notify("Tag file deleted and log parser daemon respawned — full session re-parse in progress.", "info");
+				ctx.ui.notify(how === "rebuild"
+					? "The harness log parser daemon is rebuilding this session's tag — full session re-parse in progress."
+					: "Tag files deleted and log parser daemon respawned — full session re-parse in progress.", "info");
 				return;
 			}
 

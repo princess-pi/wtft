@@ -34,7 +34,7 @@ with no previous context, and neither Ovrhd nor the divider calls it a recache. 
 step.
 
 **Only the session's own lines.** The recache case is decided in the split, and only the
-session's own turns are serialized through it (`flushPending`, `reparseOne`). Subagent lines are
+session's own turns are serialized through it (`flushPending`). Subagent lines are
 written by `syncSubagentTranscript` through `serializeClassified`, with no split, so the #115
 parent-only rule still holds. The Pi widget and the CLI both read the session's own turns from
 the tag file (`readTagFileWithVerdict`), so both see the flag.

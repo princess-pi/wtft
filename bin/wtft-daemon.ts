@@ -1871,6 +1871,18 @@ function retryAdoptionLater(key: string, displayed: boolean) {
   const tries = (adoptionRetries.get(key) ?? 0) + 1;
   if (tries > 5) {
     adoptionRetries.delete(key);
+    const lease = getDaemonPidPath(key);
+    let holder = "";
+    try { holder = fs.readFileSync(lease, "utf8").trim(); } catch { /* no lease */ }
+    const why = key.includes(".wtft-tag.v") ? "it is a tag file"
+      : holder && holder !== String(process.pid) ? `its lease names ${holder}`
+      : "its lease could not be claimed";
+    process.stderr.write(`[wtft-log-parser] could not adopt ${key}: ${why}\n`);
+    // A reader must not be told the session is served.
+    unlinkIfHolds(lease, String(process.pid));
+    if (!fs.existsSync(lease)) {
+      try { fs.unlinkSync(`${lease}.display`); } catch { /* already gone */ }
+    }
     return;
   }
   adoptionRetries.set(key, tries);
@@ -1888,14 +1900,18 @@ function sleepMs(ms: number) {
 }
 
 /** Unlinks `file` only if it holds `value` and was not replaced while it was
- *  read. */
-function unlinkIfHolds(file: string, value: string) {
+ *  read; true if it did. */
+function unlinkIfHolds(file: string, value: string): boolean {
   try {
     const before = fs.statSync(file);
-    if (fs.readFileSync(file, "utf8").trim() !== value) return;
+    if (fs.readFileSync(file, "utf8").trim() !== value) return false;
     const now = fs.statSync(file);
-    if (now.dev === before.dev && now.ino === before.ino) fs.unlinkSync(file);
-  } catch { /* already gone */ }
+    if (now.dev !== before.dev || now.ino !== before.ino) return false;
+    fs.unlinkSync(file);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function onWatch(dir: string, filename: string | null) {

@@ -183,6 +183,24 @@ try {
 		check(read(getDaemonPidPath(fileA)).trim() === String(a.pid), "and A keeps the lease");
 		for (const pid of [a.pid, b.pid]) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 	}
+
+	console.log("\nA failed adoption gives up loudly and lets go of the lease");
+	{
+		const root = makeRoot("giveup");
+		const file = session(root, "giveup-main");
+		const h = start(root, ["--harness", "claude", "--session", file], "giveup.err");
+		check(await until(() => classified(file, "giveup-main"), 15_000) !== Infinity, "fixture: a harness is serving a session");
+		// A tag path is never adopted, so every try fails.
+		const tagLike = path.join(root, "proj", "x.jsonl.wtft-tag.v1.jsonl");
+		fs.writeFileSync(tagLike, "");
+		run(root, ["--harness", "claude", "--session", tagLike]);
+		const lease = getDaemonPidPath(tagLike);
+		check(read(lease).trim() === String(h.pid), "fixture: the request pointed the lease at the harness");
+		const gaveUp = await until(() => read(h.err).includes(`could not adopt ${tagLike}`), 10_000);
+		check(gaveUp !== Infinity, "the harness reports the session it gave up on");
+		check(!fs.existsSync(lease) && !fs.existsSync(`${lease}.display`), "and removes the lease and .display marker naming it");
+		process.kill(h.pid, "SIGTERM");
+	}
 } finally {
 	for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 }

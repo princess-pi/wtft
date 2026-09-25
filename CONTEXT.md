@@ -19,8 +19,8 @@ sessions a reader asked for (and what they spawned), and never adopts or tags th
 the root. Finding a Pi session's subagent sessions reads the first line of each sibling file. A
 session outside those roots keeps its own process, polling every 667ms. The tag file and
 the pid lease stay per session. After 24h with no new lines, the per-session process
-exits, and the harness process drops that session and its lease; its next write, or the next
-request, adopts it again. Spawned on Pi `session_start` and on
+exits, and the harness process drops that session and its lease; the next write to its own transcript,
+or the next request, adopts it again. Spawned on Pi `session_start` and on
 a CLI report. A per-session process is revived after an idle exit and replaced on a
 version bump, and a harness process from an older tagger is replaced by the next start
 from a newer one. On Linux, a live harness

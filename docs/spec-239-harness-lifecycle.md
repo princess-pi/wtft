@@ -31,15 +31,17 @@
 
 - **The harness daemon serves only the sessions it is asked for.** It adopts a session when a
   reader names it: its own `--session` at startup, or a focus request from a later `wtft`, Pi
-  widget or `--watch` start (`pointSessionAt`). It no longer walks the root at startup, and a
+  widget or `--watch` start (`pointSessionAt`). It also adopts what the previous harness on the
+  root handed over, and a session it dropped for idling when that session's transcript is written. It no longer walks the root at startup, and a
   session nobody asked for is never adopted, tagged or leased. A subagent session of a
   served session (under `<id>/subagents/`, a `claude -p` session it ran, or a Pi sibling) is read
   into that session's tag, and finding Pi subagent sessions reads the first line of each sibling
   file. There is no catch-up to wait behind.
-- **It watches only what it serves**, plus its own request directory: the project directory
+- **It watches only what it serves**, plus its own request directory and the project directory of
+  each session it dropped for idling: the project directory
   holding each served transcript, and that session's own directory tree (`<id>/`,
   `<id>/subagents/`, nested ones; `tool-results/`, `memory/` and `wtft-tags/` are skipped, and a
-  symlinked directory is not followed). A session moved while its subagent scan is cut carries
+  symlinked directory that appears under a served session is not followed). A session moved while its subagent scan is cut carries
   that scan on under its new path. An
   event for another `.jsonl` file is ignored, except that under the Pi root any event on a
   sibling wakes the served sessions in its directory, since a Pi subagent session is a sibling.
@@ -62,9 +64,10 @@
   subagent transcripts, once `WTFT_DAEMON_STARTUP_GRACE_MS` has passed since it was adopted, as before, and
   dropping a slot now removes its lease, unless another slot shares that lease or another
   process has replaced it since it was read. A session dropped for idling keeps its project
-  directory watched, and its next write adopts it again with no new request.
+  directory watched, and the next write to its own transcript adopts it again with no new
+  request; a write to one of its subagent transcripts alone does not.
 - **A focus request goes only to a harness that still holds the root.** A request is one JSON
-  object, `{"pid", "path"}`, and a harness reads requests only while its pid file names it. After posting, the
+  object, `{"pid", "path"}` (the older `<pid>\n<path>` text is still read), and a harness reads requests only while its pid file names it. After posting, the
   requester checks the harness pid file still names that harness. The harness watches its
   request directory, so a request is served when it is posted, not at the next 250 ms sweep (a
   request posted while the harness is starting waits for that sweep, and so does every request
@@ -77,7 +80,7 @@
   that harness to exit and tries to claim the root itself, exiting 1 after five attempts.
 - **`--reparse` holds the session's lease while it rewrites the tag**, and a harness never stops
   a reparse to take a lease: asked for a session a reparse holds, it tries again every 667 ms
-  until the reparse lets go. Any other failed adoption is retried up to five times. A reparse
+  until the reparse lets go. Any other failed adoption of an existing transcript is retried up to five times. A reparse
   whose lease was taken while it parsed gives up before it rewrites the tag. `--reparse` of a session a daemon is serving is refused, exit 1.
   A reparse marks the session (`<lease>.reparse`) for as long as it runs, a second reparse of a
   marked session is refused, exit 1, and a harness does not
@@ -103,7 +106,8 @@
   flushes anything. A failed tag write includes the session being adopted, and a session waiting
   on an adoption retry is included too. The next harness to claim the root adopts the served ones and
   watches for the idle ones' next write, including a served session whose transcript is not
-  written yet. So `--restart` and a newer build's replacement pass on what the old harness served,
+  written yet. So `--restart` and a newer build's replacement pass on what the old harness served, when that
+  harness is itself from this change or later,
   unless the hand-off cannot be written or read. `--restart` waits for each harness it stops to exit before it removes that harness's pid file,
   and a hand-off that cannot be written or read is reported on stderr.
 - **Neither the startup reaper, `--cleanup` nor `--stop` acts on a harness daemon for its

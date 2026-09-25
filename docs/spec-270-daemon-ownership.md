@@ -183,3 +183,26 @@ S3–S5, not before.
 - The count of suites that spawn `wtft-daemon` falls below 30 (54 on `main` @ `0082dee`).
 - Two consecutive weeks with issues opened at or below issues closed, no leads-dump issue
   filed, and no regression-class issue within 48 h of a daemon merge.
+
+---
+
+## 4. Decisions taken while building (Princess Pi, for Duppy's later review)
+
+- **S0–S2 land on the spec branch as one PR.** Branches start only from `main` and the merge
+  gate is human, so a slice cannot build on an unmerged earlier slice. S0 is the safety net
+  S1 and S2 are checked against, so they travel together. S3 starts from `main` after that
+  merge. *Road not taken:* one PR per slice as §3b says, which would have left S1 without S0's
+  suite on its branch.
+- **The golden compares a normalised line multiset plus a parsed view, not bytes in order.**
+  The order children are read is `readdir` order, which the filesystem decides, so a byte-order
+  golden would fail on another host with nothing wrong. The multiset catches any content
+  change; the view catches an order change that alters meaning. Normalised away: the sandbox
+  path and its slug, source hashes (relabelled by child), heartbeat and sweep clocks, the byte
+  offset marker (it follows the sandbox path's length), and the order of a `spawnSettled`
+  record's `children` array.
+- **The golden corpus is static.** Every transcript is written whole before its daemon starts,
+  so the run is decided by content. Rotation and interrupt-after-write are timing cases and
+  stay with the suites that own them (114, 220). Two runs on this host agree.
+- **S1's tests are a new suite, `tests/wtft-270-tag-log.test.ts`,** rather than an extension of
+  `tests/wtft-tag-format.test.ts`, which pins the serialise/deserialise round trip of one record
+  kind and is left as it is.

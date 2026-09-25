@@ -1,0 +1,13 @@
+{
+  "turns": 4,
+  "outputTokens": 490,
+  "costUsd": 0.0049,
+  "interrupted": 0,
+  "folded": [
+    "pi-child-0004"
+  ],
+  "provisional": {
+    "provisional": false,
+    "reason": null
+  }
+}

@@ -1,0 +1,12 @@
+{"_fold":{"parent":"pi-root-0003","child":"pi-child-0004","s":"<s:pi-child>"}}
+{"_gen":{"s":"<s:pi-child>","session":"pi-child-0004"}}
+{"_hb":"stop","reason":"SIGTERM"}
+{"_hb":{"first":0,"last":0}}
+{"_hb":{"first":0,"last":0}}
+{"_hb":{"first":0,"last":0}}
+{"_meta":{"offset":0}}
+{"_meta":{"swept":0}}
+{"t":1789898460000,"c":0.0025,"cat":"other","f":[],"cmd":["ls"],"id":"q1","m":"claude-sonnet-4-6","in":1000,"out":250,"cr":500,"cw":100}
+{"t":1789898466000,"c":0.0009,"cat":"prompt","f":[],"cmd":[],"id":"c1","m":"claude-sonnet-4-6","in":1000,"out":90,"cr":500,"cw":100,"s":"<s:pi-child>"}
+{"t":1789898467000,"c":0.0003,"cat":"prompt","f":[],"cmd":[],"id":"c2","m":"claude-sonnet-4-6","in":1000,"out":30,"cr":500,"cw":100,"s":"<s:pi-child>"}
+{"t":1789898520000,"c":0.0012,"cat":"prompt","f":[],"cmd":[],"id":"q2","m":"claude-sonnet-4-6","in":1000,"out":120,"cr":500,"cw":100}

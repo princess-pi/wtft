@@ -1,0 +1,11 @@
+{
+  "turns": 8,
+  "outputTokens": 680,
+  "costUsd": 0.860454,
+  "interrupted": 1,
+  "folded": [],
+  "provisional": {
+    "provisional": false,
+    "reason": null
+  }
+}

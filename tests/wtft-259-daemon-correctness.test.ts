@@ -251,6 +251,30 @@ try {
 		check(read(newerTag).includes("NEWER"), "and never deletes the newer build's tag");
 		process.kill(d2.pid, "SIGTERM");
 	}
+
+	console.log("\nFocus requests reach the harness that holds the root");
+	{
+		const root = makeRoot("focus");
+		const first = session(root, "focus-first");
+		const other = session(root, "focus-other");
+		const late = session(root, "focus-late");
+		const h = start(root, ["--harness", "claude", "--session", first], "focus.err");
+		check(await until(() => classified(first, "focus-first"), 15_000) !== Infinity, "fixture: a harness serves a session");
+		const dir = `${harnessPidFile(root)}.focus.d`;
+		fs.writeFileSync(path.join(dir, "1.request"), JSON.stringify({ pid: 1, path: other }));
+		check(await until(() => classified(other, "focus-other"), 10_000) !== Infinity,
+			"a request addressed to another harness pid is served by the one holding the root");
+
+		process.kill(h.pid, "SIGSTOP");
+		fs.writeFileSync(path.join(dir, `${h.pid}.request`), JSON.stringify({ pid: h.pid, path: late }));
+		process.kill(h.pid, "SIGTERM");
+		process.kill(h.pid, "SIGCONT");
+		await until(() => !alive(h.pid), 5_000);
+		const h2 = start(root, ["--harness", "claude", "--session", first], "focus-2.err");
+		check(await until(() => classified(late, "focus-late"), 10_000) !== Infinity,
+			"a request posted to a harness that then stops is served by the next harness");
+		process.kill(h2.pid, "SIGTERM");
+	}
 } finally {
 	for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 }

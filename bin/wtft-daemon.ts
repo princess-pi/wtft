@@ -2043,13 +2043,21 @@ function pointSessionAt(livePid: number, file: string): boolean {
 let harnessRootKey = "";
 let harnessWhich = "";
 
-/** Serves the sessions other processes asked for (`pointSessionAt`). A request is claimed by renaming it before it is read. One
- *  addressed to another harness pid, or outside this root, is dropped. */
+/** Serves the sessions other processes asked for (`pointSessionAt`). */
 function takeFocusRequests() {
   if (!harnessPidFile || !holdsHarnessRoot()) return;
+  for (const file of claimFocusRequests()) wake(file, true);
+}
+
+/** Claims every posted request by renaming it before it is read, and returns
+ *  the sessions asked for under this root. The harness pid a request names is
+ *  not checked: one addressed to a harness that has since been displaced is
+ *  this one's to serve. */
+function claimFocusRequests(): string[] {
   const dir = `${harnessPidFile}.focus.d`;
   let names: string[];
-  try { names = fs.readdirSync(dir).filter(n => n.endsWith(".request")); } catch { return; }
+  try { names = fs.readdirSync(dir).filter(n => n.endsWith(".request")); } catch { return []; }
+  const files: string[] = [];
   for (const name of names) {
     const claimed = path.join(dir, `${name}.${process.pid}.claimed`);
     let text = "";
@@ -2058,22 +2066,19 @@ function takeFocusRequests() {
       text = fs.readFileSync(claimed, "utf8");
     } catch { /* taken by another reader, or unreadable */ }
     try { fs.unlinkSync(claimed); } catch { /* never claimed */ }
-    let to = "";
     let requested = "";
     try {
-      const request = JSON.parse(text) as { pid?: unknown; path?: unknown };
-      to = String(request.pid ?? "");
+      const request = JSON.parse(text) as { path?: unknown };
       requested = typeof request.path === "string" ? request.path : "";
     } catch {
       // An older build's request: "<pid>\n<path>".
-      [to = "", requested = ""] = text.split("\n");
-      requested = requested.trim();
+      requested = (text.split("\n")[1] ?? "").trim();
     }
-    if (to !== String(process.pid) || !requested) continue;
+    if (!requested) continue;
     const file = path.resolve(requested);
-    if (!file.startsWith(harnessRootKey + path.sep)) continue;
-    wake(file, true);
+    if (file.startsWith(harnessRootKey + path.sep)) files.push(file);
   }
+  return files;
 }
 
 /** A request is served as soon as it is posted, not at the next sweep. The
@@ -2267,10 +2272,11 @@ function servedHandOffFile(): string {
   return `${harnessPidFile}.served`;
 }
 
-function writeServedHandOff(adopting?: string) {
+function writeServedHandOff(adopting?: string, asked: string[] = []) {
   const lines: string[] = [];
   const entry = (kind: string, displayed: boolean, key: string) => JSON.stringify({ kind, displayed, path: key });
   for (const [key, slot] of harnessSlots) lines.push(entry("served", slot.displayed, key));
+  for (const key of asked) if (!harnessSlots.has(key)) lines.push(entry("served", true, key));
   // A session whose adoption failed is not in harnessSlots yet.
   if (adopting && !harnessSlots.has(adopting)) lines.push(entry("served", displayedSession, adopting));
   // Asked for, but waiting on an adoption retry.
@@ -2334,7 +2340,8 @@ function stopHarness(reason: string) {
   if (!running) return;
   running = false;
   // First, before any flush: --restart kills a harness that is slow to exit.
-  if (holdsHarnessRoot()) writeServedHandOff();
+  // Requests not read yet are handed on with what it served.
+  if (holdsHarnessRoot()) writeServedHandOff(undefined, claimFocusRequests());
   if (harnessIdleTimer) clearInterval(harnessIdleTimer);
   harnessIdleTimer = null;
   for (const timer of harnessFlushTimers.values()) clearTimeout(timer);

@@ -416,6 +416,33 @@ try {
 		const byHome = run(root, ["--stop", "~/stop-home.jsonl"], { HOME: outside });
 		check(await until(() => !alive(b.pid), 5_000) !== Infinity, `a ~ path stops its daemon (exit ${byHome.status}: ${byHome.stdout.trim()})`);
 	}
+
+	console.log("\nA session moved while its subagent scan is cut finishes that scan");
+	{
+		const root = makeRoot("moved");
+		const id = "dddd4444-4444-4444-8444-444444444444";
+		const from = path.join(root, "proj-a");
+		const to = path.join(root, "proj-b");
+		fs.mkdirSync(to, { recursive: true });
+		const file = session(root, id, "moved-main");
+		fs.renameSync(path.dirname(file), from);
+		const original = path.join(from, `${id}.jsonl`);
+		const sub = path.join(from, id, "subagents");
+		fs.mkdirSync(sub, { recursive: true });
+		for (let i = 0; i < 20; i++) fs.writeFileSync(path.join(sub, `agent-${i}.jsonl`), turnLine(`moved-sub-${i}`, Date.now()));
+		const tag = getCurrentVersionTagPath(original);
+		const subIds = () => readClassifiedTagFile(tag).filter((r: { messageId?: string }) => r.messageId?.startsWith("moved-sub-")).length;
+		const h = start(root, ["--harness", "claude", "--session", original], "moved.err",
+			{ WTFT_HARNESS_SCAN_SLICE_MS: "0", WTFT_HARNESS_SCAN_YIELD_MS: "300" });
+		await until(() => subIds() > 0, 15_000);
+		const before = subIds();
+		check(before > 0 && before < 20, `fixture: the scan is cut part way (${before} of 20 subagent turns)`);
+		fs.renameSync(path.join(from, id), path.join(to, id));
+		fs.renameSync(original, path.join(to, `${id}.jsonl`));
+		check(await until(() => subIds() === 20 && !read(tag).trimEnd().split("\n").slice(-3).some(l => l.includes('"unswept"')) && read(tag).includes('"swept"'), 30_000) !== Infinity,
+			"after the move the scan reads every subagent transcript and stamps the tag swept");
+		process.kill(h.pid, "SIGTERM");
+	}
 } finally {
 	for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 }

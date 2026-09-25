@@ -940,6 +940,12 @@ function scanForSubAgents() {
     return;
   }
 
+  // A transcript no longer found (its session moved, so it is read again under
+  // its new path) can never release a turn it holds.
+  if (!pollHadFailure) {
+    const found = new Set([...taskAgentFiles, ...discoveredClaudeFiles].map(canonicalTranscriptPath));
+    for (const key of [...discoveredSubagentFiles.keys()]) if (!found.has(key)) discoveredSubagentFiles.delete(key);
+  }
   // Swept means every subagent turn is written, so a held-back turn defers it
   // to the scan that releases that turn.
   const turnHeldBack = [...discoveredSubagentFiles.values()].some(state => state.pendingTurn !== null);

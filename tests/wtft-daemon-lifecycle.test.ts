@@ -201,15 +201,16 @@ console.log("\n3. Spawn-twice singleton");
 	assert("PID file has an owner", owner > 0);
 	assert("owner is alive", isAlive(owner));
 
-	// Exactly one wtft-daemon survives for this session.
-	const survivors = cleanupPids.filter(p => isAlive(p) && p !== 0);
-	// (cleanupPids may contain daemons from other tests already dead)
-	const thisTestAlive = survivors.filter(p => {
+	// Exactly one wtft-daemon survives for this session. The loser exits only
+	// once it reads that the lease is gone, so wait for it, to the same ceiling.
+	const aliveForSession = () => cleanupPids.filter(p => p !== 0 && isAlive(p)).filter(p => {
 		try {
 			const cmdline = fs.readFileSync(`/proc/${p}/cmdline`, "utf8");
 			return cmdline.includes(sessionPath);
 		} catch { return false; }
 	});
+	await pollUntil(() => aliveForSession().length <= 1, 15_000);
+	const thisTestAlive = aliveForSession();
 	assert("exactly one daemon process for the session", thisTestAlive.length === 1);
 	assert("the survivor is the PID-file owner", thisTestAlive.length === 1 && thisTestAlive[0] === owner);
 

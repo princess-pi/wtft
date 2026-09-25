@@ -702,8 +702,12 @@ console.log("\n§ C — a crash mid-append is repaired, not built upon\n");
 			env: { ...process.env }, stdio: ["ignore", "ignore", "pipe"],
 		});
 		children.push(second);
+		// A just-truncated tag holding only its _meta or heartbeat line also ends
+		// in a newline, so wait for the rebuilt rows too.
 		await pollUntil(() => {
-			try { return fs.readFileSync(tagPath, "utf8").endsWith("\n"); } catch { return false; }
+			try {
+				return fs.readFileSync(tagPath, "utf8").endsWith("\n") && readClassifiedTagFile(tagPath).length >= 3;
+			} catch { return false; }
 		}, 15000);
 
 		const raw = fs.readFileSync(tagPath, "utf8");

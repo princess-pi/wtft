@@ -313,7 +313,10 @@ try {
 		const h = start(root, ["--harness", "claude", "--session", first], "focus.err");
 		check(await until(() => classified(first, "focus-first"), 15_000) !== Infinity, "fixture: a harness serves a session");
 		const dir = `${harnessPidFile(root)}.focus.d`;
-		fs.writeFileSync(path.join(dir, "1.request"), JSON.stringify({ pid: 1, path: other }));
+		// Posted as a requester posts one, by rename: a harness woken by the
+		// create would otherwise claim the file before its text is written.
+		fs.writeFileSync(path.join(dir, "1.tmp"), JSON.stringify({ pid: 1, path: other }));
+		fs.renameSync(path.join(dir, "1.tmp"), path.join(dir, "1.request"));
 		check(await until(() => classified(other, "focus-other"), 10_000) !== Infinity,
 			"a request addressed to another harness pid is served by the one holding the root");
 

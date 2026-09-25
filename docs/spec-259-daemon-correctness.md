@@ -41,8 +41,9 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   earlier daemon read that is not under the session's own directory, and reads it again from its
   start, as a new generation. So what it gained while nothing served the session is counted, and
   so is what it writes from then on. A transcript another one currently folds (a `_fold` record
-  under the other's source, not retired by a later generation of it) is left to that one. A
-  projects directory or transcript that cannot be read is reported on stderr. A `claude -p` session spawned within the 15 s
+  under the other's source, not retired by a later generation of it) is left to that one. When the
+  projects directory or a transcript cannot be read, that is reported on stderr, the resume is
+  tried again at each scan, and the tag is not stamped swept until it succeeds. A `claude -p` session spawned within the 15 s
   discovery window before the restart, and not yet on disk at the earlier daemon's last scan, is
   still missed: that is a known limit.
 
@@ -84,7 +85,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   reads `/proc`, so this holds on Linux; elsewhere the harness is stopped as below.
 - **Otherwise `-F` stops a live per-session daemon and deletes every version of the session's
   tag**, beside the transcript and in the sibling project where a moved session's tag lives. The
-  CLI says whether a daemon was stopped. The CLI and the Pi widget share one implementation, so
+  CLI says whether a daemon was stopped. A daemon still running 2 s after the signal keeps its
+  tag: nothing is deleted, and `-F` says so. The CLI and the Pi widget share one implementation, so
   the widget now deletes every version too, not only the current one.
 - **`wtft --list`, `--cleanup`, `--restart` and `--stop` pass `wtft-daemon`'s exit code through**,
   and pass the session path as one argument, so a path with a space is not split.
@@ -115,6 +117,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   gone, has grown, or was replaced is woken, so a lost watch event only delays it. That covers a
   deleted session, the 1 h limit on a never-written session, and a directory whose watch failed.
 - **A failed directory watch is retried** by the sweep every 10 s while a served session, or a session dropped for idling, needs it.
+  Meanwhile the sweep reads the size of each session dropped for idling in such a directory, and
+  a write adopts it again.
 
 ### Harness exit (A12, decision B; F17; I28, decision F)
 

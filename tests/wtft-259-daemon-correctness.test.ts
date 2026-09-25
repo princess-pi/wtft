@@ -462,6 +462,47 @@ try {
 			"after the move the scan reads every subagent transcript and stamps the tag swept");
 		process.kill(h.pid, "SIGTERM");
 	}
+
+	console.log("\nA session dropped for idling in a directory that cannot be watched is read on its next write");
+	{
+		const root = makeRoot("idle-unwatched");
+		const file = session(root, "idle-unwatched-main");
+		const dir = path.dirname(file);
+		fs.chmodSync(dir, 0o311);
+		try {
+			const h = start(root, ["--harness", "claude", "--session", file], "idle-unwatched.err",
+				{ WTFT_DAEMON_IDLE_MS: "1500", WTFT_DAEMON_STARTUP_GRACE_MS: "0" });
+			check(await until(() => read(h.err).includes("session drop idle-unwatched-main.jsonl"), 15_000) !== Infinity, "fixture: the session is dropped for idling");
+			fs.appendFileSync(file, turnLine("idle-unwatched-later", Date.now()));
+			check(await until(() => classified(file, "idle-unwatched-later"), 5_000) !== Infinity, "its next write is read");
+			process.kill(h.pid, "SIGTERM");
+		} finally {
+			fs.chmodSync(dir, 0o755);
+		}
+	}
+
+	console.log("\nwtft -F leaves the tag of a daemon that will not stop");
+	{
+		const root = makeRoot("busy");
+		const outside = path.join(root, "elsewhere");
+		fs.mkdirSync(outside, { recursive: true });
+		const file = path.join(outside, "busy-main.jsonl");
+		fs.writeFileSync(file, turnLine("busy-main", Date.now()));
+		const d = start(root, ["--session", file], "busy.err");
+		check(await until(() => classified(file, "busy-main"), 15_000) !== Infinity, "fixture: a per-session daemon wrote a tag");
+		process.kill(d.pid, "SIGTERM");
+		await until(() => !alive(d.pid), 5_000);
+		// A stand-in daemon that ignores SIGTERM, holding the lease.
+		const stubborn = spawn("node", ["-e", "process.on('SIGTERM', () => {}); setTimeout(() => {}, 60000)", path.join(root, "wtft-daemon.mjs")], { stdio: "ignore" });
+		pids.push(stubborn.pid!);
+		await sleep(300);
+		fs.writeFileSync(getDaemonPidPath(file), String(stubborn.pid));
+		const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
+		const forced = spawnSync("node", [cli, "-F", "-s", file], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+		check(fs.existsSync(getCurrentVersionTagPath(file)) && forced.stderr.includes("nothing was deleted"),
+			"the tag stays, and -F says nothing was deleted");
+		process.kill(stubborn.pid!, "SIGKILL");
+	}
 } finally {
 	for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 }

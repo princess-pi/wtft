@@ -317,7 +317,7 @@
     },
     {
       "code": 2,
-      "meaning": "`wtft spawn-record` (#116): the call was wrong -- a missing required flag, an unknown flag, a flag with no value, a malformed session id, or an oversized field. Nothing was appended. The report path never exits 2."
+      "meaning": "`wtft spawn-record` only (#116): the call was wrong -- a missing required flag, an unknown flag, a flag with no value, a malformed session id, or an oversized field. Nothing was appended. The report path never exits 2."
     },
     {
       "code": 3,

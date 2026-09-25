@@ -582,6 +582,7 @@ async function main() {
 			rebuild: "the harness log parser daemon is rebuilding the tag",
 			stopped: "stopped the log parser daemon and deleted the tag files",
 			deleted: "deleted the tag files",
+			busy: "the log parser daemon did not stop within 2 s, so nothing was deleted; run -F again once it has",
 		}[how];
 		console.error(`\x1b[33mForce re-parse: ${what} for ${path.basename(finalSessionPath)}\x1b[0m`);
 		if (!adopted) {

@@ -775,6 +775,12 @@ function scanForSubAgents() {
   const readThisPass = subagentScanPass.get(scanKey) ?? new Set<string>();
   // A failure in an earlier slice of this pass still counts when the pass ends.
   if (subagentScanPassFailed.has(scanKey)) pollHadFailure = true;
+  if (reseedPending.has(scanKey)) {
+    let content = "";
+    try { content = fs.readFileSync(tagPath, "utf8"); } catch { /* retried next scan */ }
+    if (content && reseedClaudeChildren(content, true)) reseedPending.delete(scanKey);
+    else pollHadFailure = true;
+  }
   // pollHadFailure is reset by the poll loop, not here — flushPending runs first and can fail.
 
   if (pendingClaudeCommands.length > 0) {
@@ -1328,7 +1334,11 @@ function reapAndWarn() {
  * folds is left to that one. Transcripts discovery does find
  * (`<id>/subagents/`, Pi siblings) are left to it.
  */
-function reseedClaudeChildren(tagContent: string) {
+/** Sessions whose reseed could not finish: tried again each scan, and the tag
+ *  is not stamped swept until it does. */
+const reseedPending = new Set<string>();
+
+function reseedClaudeChildren(tagContent: string, quiet = false): boolean {
   const children = new Map<string, string>();
   /** Child session id to the source of the transcript folding it, as of the
    *  last generation of that source: a `_gen` retires its earlier folds. */
@@ -1344,9 +1354,10 @@ function reseedClaudeChildren(tagContent: string) {
     }
     if (typeof obj._fold?.child === "string" && typeof obj._fold.s === "string") foldedBy.set(obj._fold.child, obj._fold.s);
   }
-  if (children.size === 0) return;
-  const warn = (what: string, err: unknown) => process.stderr.write(
-    `[wtft-log-parser] WARNING: ${what}, so a claude -p transcript read before this daemon started may be missing from this session's total: ${err instanceof Error ? err.message : String(err)}\n`);
+  if (children.size === 0) return true;
+  let complete = true;
+  const warn = (what: string, err: unknown) => { complete = false; if (!quiet) process.stderr.write(
+    `[wtft-log-parser] WARNING: ${what}, so a claude -p transcript read before this daemon started may be missing from this session's total: ${err instanceof Error ? err.message : String(err)}\n`); };
   const found = new Set<string>();
   try {
     for (const file of discoverSubagentSessionFiles(sessionPath).files) found.add(canonicalTranscriptPath(file));
@@ -1356,7 +1367,7 @@ function reseedClaudeChildren(tagContent: string) {
     dirs = fs.readdirSync(projectsDir());
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") warn("the projects directory could not be read", err);
-    return;
+    return complete;
   }
   const sessionDir = path.dirname(sessionPath);
   for (const [source, id] of children) {
@@ -1375,6 +1386,7 @@ function reseedClaudeChildren(tagContent: string) {
       break;
     }
   }
+  return complete;
 }
 
 function initClassified() {
@@ -1403,7 +1415,7 @@ function initClassified() {
         const metaOffset = readLastMetaOffset(tagPath);
         if (metaOffset !== null) {
           lastSize = metaOffset;
-          reseedClaudeChildren(tagContent);
+          if (!reseedClaudeChildren(tagContent)) reseedPending.add(path.resolve(sessionPath));
           // Written by an earlier life; what changed since is not read yet.
           invalidateStaleSweptMarker(sessionPath);
         } else {
@@ -1791,6 +1803,7 @@ function wake(file: string, displayed: boolean) {
     }
     harnessSlots.set(key, slot);
     idleDropped.delete(key);
+    idleDroppedSize.delete(key);
     watchSession(key);
   } else if (displayed) {
     slot.displayed = true;
@@ -1799,7 +1812,7 @@ function wake(file: string, displayed: boolean) {
   dropReason = "";
   const status = withSlot(slot, () => serviceSession());
   if (status === "drop") {
-    if (droppedForIdle) idleDropped.set(key, slot.displayed);
+    if (droppedForIdle) dropForIdle(key, slot.displayed);
     dropHarnessSlot(key, dropReason);
     return;
   }
@@ -1814,6 +1827,7 @@ function wake(file: string, displayed: boolean) {
     subagentScanPass.delete(key);
     if (pass) subagentScanPass.set(movedTo, pass);
     if (subagentScanPassFailed.delete(key)) subagentScanPassFailed.add(movedTo);
+    if (reseedPending.delete(key)) reseedPending.add(movedTo);
     unwatchSession(key);
     watchSession(movedTo);
     const timer = harnessFlushTimers.get(key);
@@ -1894,6 +1908,16 @@ function watchSession(file: string) {
 /** Sessions dropped for idling: their project directory stays watched, and
  *  their next write adopts them again. */
 const idleDropped = new Map<string, boolean>();
+/** Each idle-dropped transcript's size when dropped, for the sweep to notice
+ *  a write where the directory cannot be watched. */
+const idleDroppedSize = new Map<string, number>();
+function dropForIdle(key: string, displayed: boolean) {
+  idleDropped.set(key, displayed);
+  let size = -1;
+  try { size = fs.statSync(key).size; } catch { /* gone */ }
+  idleDroppedSize.set(key, size);
+}
+
 /** Set by serviceSession when it drops a harness session for idling. */
 let droppedForIdle = false;
 let idleDroppedPrunedAt = 0;
@@ -2241,6 +2265,7 @@ function dropHarnessSlot(key: string, reason = "") {
   subagentScanPass.delete(key);
   subagentScanPassFailed.delete(key);
   subagentScansContinuing.delete(key);
+  reseedPending.delete(key);
   unwatchSession(key);
   if (slot) releaseLease(slot);
   if (process.env.WTFT_DAEMON_DEBUG) {
@@ -2325,6 +2350,7 @@ function sweepIdleSlots() {
     for (const key of [...idleDropped.keys()]) {
       if (fs.existsSync(key)) continue;
       idleDropped.delete(key);
+      idleDroppedSize.delete(key);
       unwatchSession(key);
     }
   }
@@ -2357,8 +2383,14 @@ function sweepIdleSlots() {
     if (current.pendingItems.length > 0) continue;
     if (now - current.startupTime < STARTUP_GRACE_MS) continue;
     if (now - current.lastActivityMs < IDLE_EXIT_MS) continue;
-    idleDropped.set(key, current.displayed);
+    dropForIdle(key, current.displayed);
     dropHarnessSlot(key, "idle timeout");
+  }
+  for (const [key, displayed] of [...idleDropped]) {
+    if (!unwatchedDirs.has(path.dirname(key))) continue;
+    let size = -1;
+    try { size = fs.statSync(key).size; } catch { /* gone */ }
+    if (size >= 0 && size !== idleDroppedSize.get(key)) wake(key, displayed);
   }
   for (const [dir, failed] of unwatchedDirs) {
     if (now - failed.triedAt < WATCH_RETRY_MS) continue;
@@ -2483,7 +2515,7 @@ function takeServedHandOff() {
     // does for any session it is asked for.
     if (kind === "served") wake(key, displayed === "1");
     else if (kind === "idle" && fs.existsSync(key) && !harnessSlots.has(key)) {
-      idleDropped.set(key, displayed === "1");
+      dropForIdle(key, displayed === "1");
       watchDir(path.dirname(key), false);
     }
   }
@@ -2497,12 +2529,16 @@ function stopHarness(reason: string, exitCode = 0) {
   running = false;
   // First, before any flush: --restart kills a harness that is slow to exit.
   // Requests not read yet are handed on with what it served.
-  if (holdsHarnessRoot()) writeServedHandOff(undefined, claimFocusRequests());
+  const asked = holdsHarnessRoot() ? claimFocusRequests() : [];
+  if (holdsHarnessRoot()) writeServedHandOff(undefined, asked);
   if (harnessIdleTimer) clearInterval(harnessIdleTimer);
   harnessIdleTimer = null;
   for (const timer of harnessFlushTimers.values()) clearTimeout(timer);
-  for (const slot of harnessSlots.values()) {
-    if (!leaseStillOurs(slot)) continue;
+  for (const [key, slot] of harnessSlots) {
+    if (!leaseStillOurs(slot)) {
+      logLeaseLost(key, slot.pidPath);
+      continue;
+    }
     withSlot(slot, () => {
       if (pendingItems.length > 0) flushPending();
       if (fs.existsSync(tagPath)) appendTagFile(tagPath, stopLine(reason));
@@ -2515,8 +2551,12 @@ function stopHarness(reason: string, exitCode = 0) {
   if (harnessPidFile) {
     try {
       if (fs.readFileSync(harnessPidFile, "utf8").trim() === String(process.pid)) {
-        fs.rmSync(`${harnessPidFile}.focus.d`, { recursive: true, force: true });
+        // Unlinked first, so a requester's check after posting fails from here
+        // on, and a request posted before it is still in the directory.
         fs.unlinkSync(harnessPidFile);
+        const late = claimFocusRequests();
+        if (late.length > 0) writeServedHandOff(undefined, [...asked, ...late]);
+        fs.rmSync(`${harnessPidFile}.focus.d`, { recursive: true, force: true });
       }
     } catch { /* already gone */ }
     fs.rmSync(harnessVersionFile(process.pid), { force: true });

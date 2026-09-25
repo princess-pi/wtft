@@ -553,11 +553,12 @@ export function getDaemonPidPath(sessionPath: string): string {
  * ("rebuild"). Otherwise the lease and every version of the tag, beside the
  * transcript or in the sibling project a moved session's tag lives in, are
  * deleted, after stopping a live per-session daemon ("stopped") or with none
- * running ("deleted"). Either way the caller then asks for the session. Telling
+ * running ("deleted"); a daemon still running 2 s after the signal leaves
+ * everything in place ("busy"). Either way the caller then asks for the session. Telling
  * a harness apart reads `/proc`, so off Linux a harness is stopped like a
  * per-session daemon.
  */
-export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" | "deleted" {
+export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" | "deleted" | "busy" {
 	const leasePath = getDaemonPidPath(sessionPath);
 	let pid = 0;
 	try { pid = parseInt(fs.readFileSync(leasePath, "utf8").trim(), 10); } catch { /* no lease */ }
@@ -577,11 +578,14 @@ export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" 
 	if (pid > 0 && (daemon || args.length === 0)) {
 		try { process.kill(pid, "SIGTERM"); stopped = true; } catch { /* already gone */ }
 	}
-	// Its shutdown flushes into the tag, so the tag goes only once it has exited.
-	for (const until = Date.now() + 2000; stopped && Date.now() < until;) {
-		try { process.kill(pid, 0); } catch { break; }
+	// Its shutdown flushes into the tag, so the tag goes only once it has
+	// exited; one still running after 2 s keeps its tag ("busy").
+	let exited = !stopped;
+	for (const until = Date.now() + 2000; !exited && Date.now() < until;) {
+		try { process.kill(pid, 0); } catch { exited = true; break; }
 		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
 	}
+	if (!exited) return "busy";
 	try { fs.unlinkSync(leasePath); } catch { /* no lease */ }
 	const prefix = path.basename(sessionPath) + ".wtft-tag.v";
 	for (const tagsDir of new Set([path.join(path.dirname(sessionPath), "wtft-tags"), path.dirname(getTagPath(sessionPath))])) {

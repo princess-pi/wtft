@@ -393,7 +393,9 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				updateWtftWidget(ctx, pi);
 				ctx.ui.notify(how === "rebuild"
 					? "The harness log parser daemon is rebuilding this session's tag — full session re-parse in progress."
-					: "Tag files deleted and log parser daemon respawned — full session re-parse in progress.", "info");
+					: how === "busy"
+						? "The log parser daemon did not stop within 2 s, so nothing was deleted — run /wtft -F again once it has."
+						: "Tag files deleted and log parser daemon respawned — full session re-parse in progress.", how === "busy" ? "warning" : "info");
 				return;
 			}
 

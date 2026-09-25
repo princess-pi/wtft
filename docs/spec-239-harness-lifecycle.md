@@ -84,8 +84,8 @@
   not told a session is served when nothing will adopt it. The spawn then waits up to 2 s for
   that harness to exit and tries to claim the root itself, exiting 1 after five attempts.
 - **A focus request never overwrites a `rebuild` lease**, so a session handed to a live harness
-  after a failed tag write is rebuilt, not resumed. A failed adoption of an existing transcript
-  is retried up to five times.
+  after a failed tag write is rebuilt, not resumed. A failed adoption is retried up to five
+  times.
 - **A harness whose pid file no longer names it stops.** The sweep reads the harness pid file;
   if it was removed, is empty, or names another process, the harness stops and releases its leases, so two
   harnesses contend for one root only until the displaced one's next sweep, which the event

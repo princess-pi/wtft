@@ -91,18 +91,24 @@ console.log("V1. No reason sentence is compared as a control token");
 
 console.log("V2. A typo'd health-code comparison fails `tsc --noEmit`");
 {
-	const PROBE = path.join(REPO_ROOT, "bin", "__reason_code_probe__.ts");
+	// Not in bin/: pack-and-smoke, running beside this suite, refuses a bin/ with
+	// an untracked file. A config extending the repo's checks the probe alone.
+	const PROBE_DIR = path.join(REPO_ROOT, "tmp", `wtft-179-probe-${process.pid}`);
+	const PROBE = path.join(PROBE_DIR, "__reason_code_probe__.ts");
 	const PROBE_SOURCE = `// Temporary negative control written by tests/wtft-179-daemon-health-reason.test.ts (#179).
 // Deliberately compares a DaemonHealthReason against a value outside the union.
-import type { DaemonStatus } from "../extensions/lib/wtft-daemon-lib.ts";
+import type { DaemonStatus } from "../../extensions/lib/wtft-daemon-lib.ts";
 
 export function probe(status: DaemonStatus): boolean {
 	return status.reason === "daemon not fuond";
 }
 `;
 	try {
+		fs.mkdirSync(PROBE_DIR, { recursive: true });
 		fs.writeFileSync(PROBE, PROBE_SOURCE, "utf8");
-		const r = spawnSync("bun", ["run", "typecheck"], {
+		fs.writeFileSync(path.join(PROBE_DIR, "tsconfig.json"),
+			JSON.stringify({ extends: "../../tsconfig.json", include: ["__reason_code_probe__.ts"] }));
+		const r = spawnSync(path.join(REPO_ROOT, "node_modules", ".bin", "tsc"), ["--noEmit", "-p", PROBE_DIR], {
 			cwd: REPO_ROOT,
 			encoding: "utf8",
 			timeout: 180_000,
@@ -120,7 +126,7 @@ export function probe(status: DaemonStatus): boolean {
 			`tsc output did not mention the probe:\n${output.slice(0, 800)}`,
 		);
 	} finally {
-		try { fs.unlinkSync(PROBE); } catch {}
+		fs.rmSync(PROBE_DIR, { recursive: true, force: true });
 	}
 }
 

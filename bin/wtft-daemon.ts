@@ -149,6 +149,10 @@ let discoveredSubagentFiles = new Map<string, SubagentFileState>();
 
 // ---
 
+function stopLine(reason: string): string {
+  return JSON.stringify({ _hb: "stop", reason }) + "\n";
+}
+
 function shutdown(reason: string) {
   if (!running) return;
   running = false;
@@ -164,7 +168,7 @@ function shutdown(reason: string) {
     flushPending();
     try {
       if (fs.existsSync(tagPath)) {
-        appendTagFile(tagPath, JSON.stringify({ _hb: "stop" }) + "\n");
+        appendTagFile(tagPath, stopLine(reason));
       }
     } catch (_) {}
     try { fs.unlinkSync(pidPath); } catch (_) {}
@@ -1395,6 +1399,13 @@ function initClassified() {
 
 // ---
 
+/** Why serviceSession last dropped a harness session, for its stop line. */
+let dropReason = "";
+function dropFor(reason: string): "drop" {
+  dropReason = reason;
+  return "drop";
+}
+
 function serviceSession(): "continue" | "stop" | "drop" {
   if (leaseHolder(pidPath) !== String(process.pid)) {
     if (harnessMode) return "drop";
@@ -1406,14 +1417,14 @@ function serviceSession(): "continue" | "stop" | "drop" {
   if (!fs.existsSync(sessionPath)) {
     if (sessionExisted) {
       if (!followMovedSession()) {
-        if (harnessMode) return "drop";
+        if (harnessMode) return dropFor("session removed");
         shutdown("session removed");
         return "stop";
       }
     }
     const now = Date.now();
     if (!sessionExisted && now - startupTime >= SESSION_WAIT_MAX_MS) {
-      if (harnessMode) return "drop";
+      if (harnessMode) return dropFor("session never written");
       shutdown("session never written");
       return "stop";
     }
@@ -1467,14 +1478,14 @@ function serviceSession(): "continue" | "stop" | "drop" {
       }
       if (harnessMode) {
         droppedForIdle = true;
-        return "drop";
+        return dropFor("idle timeout");
       }
       shutdown("idle timeout");
       return "stop";
     }
 
     if (!fs.existsSync(sessionPath) && !followMovedSession()) {
-      if (harnessMode) return "drop";
+      if (harnessMode) return dropFor("session removed");
       shutdown("session removed");
       return "stop";
     }
@@ -1758,10 +1769,11 @@ function wake(file: string, displayed: boolean) {
     slot.displayed = true;
   }
   droppedForIdle = false;
+  dropReason = "";
   const status = withSlot(slot, () => serviceSession());
   if (status === "drop") {
     if (droppedForIdle) idleDropped.set(key, slot.displayed);
-    dropHarnessSlot(key);
+    dropHarnessSlot(key, dropReason);
     return;
   }
   const movedTo = slot.sessionPath;
@@ -2159,7 +2171,7 @@ function runHarness(which: string, focus: string) {
       // Not posted: that harness is usually stopping, so try to claim the root
       // once it has gone.
       const until = Date.now() + 2000;
-      while (Date.now() < until && procIsDaemon(live)) { /* spin until it has gone */ }
+      while (Date.now() < until && procIsDaemon(live)) sleepMs(50);
       continue;
     }
     try { process.kill(live, "SIGTERM"); } catch { /* already gone */ }
@@ -2183,14 +2195,16 @@ function runHarness(which: string, focus: string) {
   }
 }
 
-function dropHarnessSlot(key: string) {
+/** `reason`, when given, is written as the session's stop line. */
+function dropHarnessSlot(key: string, reason = "") {
   const slot = harnessSlots.get(key);
   const ours = slot ? leaseStillOurs(slot) : false;
   // A lease another daemon holds means the tag is its to write; it resumes from
   // the tag's offset, so these turns are not lost.
-  if (slot && ours && slot.pendingItems.length > 0) {
+  if (slot && ours && (slot.pendingItems.length > 0 || reason)) {
     withSlot(slot, () => {
       if (pendingItems.length > 0) flushPending();
+      if (reason && fs.existsSync(tagPath)) appendTagFile(tagPath, stopLine(reason));
     });
   }
   if (slot && !ours) logLeaseLost(key, slot.pidPath);
@@ -2250,16 +2264,25 @@ function sweepIdleSlots() {
   // Removed (--restart) or taken by another harness: this one is no longer the
   // root's harness, and two would contend for every session's lease.
   if (harnessPidFile) {
-    let holder = String(process.pid);
+    let holder = "";
     try {
       holder = fs.readFileSync(harnessPidFile, "utf8").trim();
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") holder = "";
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        const why = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`[wtft-log-parser] FATAL: the harness cannot read its pid file ${harnessPidFile}: ${why}\n`);
+        stopHarness(`cannot read its pid file: ${why}`, 1);
+        return;
+      }
     }
     if (holder !== String(process.pid)) {
       stopHarness(holder ? `harness pid file names ${holder}` : "harness pid file removed");
       return;
     }
+  }
+  if (!fs.existsSync(harnessRootKey)) {
+    stopHarness("harness root removed");
+    return;
   }
   takeFocusRequests();
   const now = Date.now();
@@ -2301,7 +2324,7 @@ function sweepIdleSlots() {
     if (now - current.startupTime < STARTUP_GRACE_MS) continue;
     if (now - current.lastActivityMs < IDLE_EXIT_MS) continue;
     idleDropped.set(key, current.displayed);
-    dropHarnessSlot(key);
+    dropHarnessSlot(key, "idle timeout");
   }
   for (const [dir, failed] of unwatchedDirs) {
     if (now - failed.triedAt < WATCH_RETRY_MS) continue;
@@ -2309,8 +2332,17 @@ function sweepIdleSlots() {
     else watchDir(dir, failed.recurse);
   }
   if (!focusWatcher) watchFocusRequests();
+  if (harnessSlots.size > 0 || adoptionRetryPending.size > 0) emptySinceMs = 0;
+  else if (emptySinceMs === 0) emptySinceMs = now;
+  else if (now - emptySinceMs >= IDLE_EXIT_MS) {
+    stopHarness("no session served");
+    return;
+  }
   persistHandOff();
 }
+
+/** When the harness last had no session to serve, or 0. */
+let emptySinceMs = 0;
 
 /** What this harness served, for the next harness on this root: one JSON
  *  object per line, `{"kind":"served"|"idle","displayed":boolean,"path":string}`. */
@@ -2423,7 +2455,7 @@ function takeServedHandOff() {
   }
 }
 
-function stopHarness(reason: string) {
+function stopHarness(reason: string, exitCode = 0) {
   if (!running) return;
   running = false;
   // First, before any flush: --restart kills a harness that is slow to exit.
@@ -2433,8 +2465,10 @@ function stopHarness(reason: string) {
   harnessIdleTimer = null;
   for (const timer of harnessFlushTimers.values()) clearTimeout(timer);
   for (const slot of harnessSlots.values()) {
+    if (!leaseStillOurs(slot)) continue;
     withSlot(slot, () => {
       if (pendingItems.length > 0) flushPending();
+      if (fs.existsSync(tagPath)) appendTagFile(tagPath, stopLine(reason));
     });
     if (slot.pidPath) unlinkIfHolds(slot.pidPath, String(process.pid));
   }
@@ -2453,7 +2487,7 @@ function stopHarness(reason: string) {
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] harness shutdown: ${reason}\n`);
   }
-  process.exit(0);
+  process.exit(exitCode);
 }
 
 function pathIsUnderTmp(file: string): boolean {
@@ -2503,10 +2537,11 @@ function waitUntilExited(pid: number) {
   const until = Date.now() + 2000;
   while (Date.now() < until) {
     try { process.kill(pid, 0); } catch { return; }
+    sleepMs(20);
   }
   try { process.kill(pid, "SIGKILL"); } catch { return; }
   const killed = Date.now() + 2000;
-  while (Date.now() < killed && procIsDaemon(pid)) { /* until the kernel has it */ }
+  while (Date.now() < killed && procIsDaemon(pid)) sleepMs(20);
 }
 
 async function main() {
@@ -2757,7 +2792,8 @@ if (showList || showCleanup || showRestart || stopSession) {
     for (const proc of daemonProcs()) {
       if (seenPids.has(proc.pid) || proc.pid === process.pid) continue;
       const fixture = (proc.session !== null && pathIsUnderTmp(proc.session)) || proc.roots.some(pathIsUnderTmp);
-      if (showCleanup && fixture) {
+      // A harness stops itself once it serves nothing.
+      if (showCleanup && fixture && !proc.harness) {
         try { process.kill(proc.pid, "SIGTERM"); } catch { /* already gone */ }
         const where = proc.session || proc.roots.join(",");
         console.log(`Cleaned up: PID ${proc.pid} — fixture daemon: ${where}`);

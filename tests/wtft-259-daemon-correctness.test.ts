@@ -336,6 +336,68 @@ try {
 			fs.chmodSync(dir, 0o755);
 		}
 	}
+
+	console.log("\nA harness stops on its own");
+	{
+		const root = makeRoot("empty");
+		const file = session(root, "empty-main");
+		const tag = getCurrentVersionTagPath(file);
+		const quick = { WTFT_DAEMON_IDLE_MS: "1500", WTFT_DAEMON_STARTUP_GRACE_MS: "0" };
+		const h = start(root, ["--harness", "claude", "--session", file], "empty.err", quick);
+		check(await until(() => read(h.err).includes("session drop empty-main.jsonl"), 15_000) !== Infinity, "fixture: the session is dropped for idling");
+		check(read(tag).includes('{"_hb":"stop","reason":"idle timeout"}'), "a harness dropping a session writes the stop line with its reason");
+		check(await until(() => !alive(h.pid), 10_000) !== Infinity, "a harness serving no session stops after WTFT_DAEMON_IDLE_MS");
+		check(read(`${harnessPidFile(root)}.served`).includes(`"kind":"idle","displayed":true,"path":${JSON.stringify(file)}`),
+			"and hands on the session it dropped for idling");
+		fs.rmSync(`${harnessPidFile(root)}.served`, { force: true });
+
+		const per = start(root, ["--session", file], "per.err");
+		check(await until(() => read(tag).split("\n").filter(l => l.includes('"_hb":{')).length > 0 && read(per.err).includes("started"), 10_000) !== Infinity,
+			"fixture: a per-session daemon serves the session");
+		process.kill(per.pid, "SIGTERM");
+		await until(() => !alive(per.pid), 5_000);
+		check(read(tag).trimEnd().endsWith('{"_hb":"stop","reason":"SIGTERM"}'), "a per-session daemon's stop line carries its reason");
+
+		const gone = makeRoot("gone");
+		const inner = path.join(gone, "projects");
+		const goneFile = path.join(inner, "proj", "gone-main.jsonl");
+		fs.mkdirSync(path.dirname(goneFile), { recursive: true });
+		fs.writeFileSync(goneFile, turnLine("gone-main", Date.now()));
+		const g = start(gone, ["--harness", "claude", "--session", goneFile], "gone.err", { WTFT_CLAUDE_PROJECTS_DIR: inner });
+		check(await until(() => classified(goneFile, "gone-main"), 15_000) !== Infinity, "fixture: a harness serves a root");
+		fs.rmSync(inner, { recursive: true, force: true });
+		check(await until(() => !alive(g.pid), 10_000) !== Infinity, "a harness whose root is removed stops");
+
+		const bad = makeRoot("badpid");
+		const badFile = session(bad, "badpid-main");
+		const b = start(bad, ["--harness", "claude", "--session", badFile], "badpid.err");
+		check(await until(() => classified(badFile, "badpid-main"), 15_000) !== Infinity, "fixture: a harness is up");
+		fs.unlinkSync(harnessPidFile(bad));
+		fs.mkdirSync(harnessPidFile(bad));
+		check(await until(() => !alive(b.pid), 10_000) !== Infinity && read(b.err).includes("cannot read its pid file"),
+			"a harness that cannot read its pid file exits, saying why");
+		fs.rmSync(harnessPidFile(bad), { recursive: true, force: true });
+	}
+
+	console.log("\nA spawn waiting on a harness sleeps");
+	{
+		const root = makeRoot("spin");
+		const file = session(root, "spin-main");
+		const other = session(root, "spin-other");
+		const h = start(root, ["--harness", "claude", "--session", file], "spin.err");
+		check(await until(() => classified(file, "spin-main"), 15_000) !== Infinity, "fixture: a harness is up");
+		const dir = `${harnessPidFile(root)}.focus.d`;
+		fs.chmodSync(dir, 0o500);
+		try {
+			const timed = spawnSync("bash", ["-c", `TIMEFORMAT=%U; time node ${JSON.stringify(DAEMON)} --harness claude --session ${JSON.stringify(other)}`],
+				{ encoding: "utf8", env: envFor(root), timeout: 60_000 });
+			const cpu = Number(timed.stderr.trim().split("\n").pop());
+			check(timed.status === 1 && cpu < 2, `a spawn whose request cannot be posted exits 1 without spinning (${cpu} s of CPU, exit ${timed.status})`);
+		} finally {
+			fs.chmodSync(dir, 0o700);
+		}
+		process.kill(h.pid, "SIGTERM");
+	}
 } finally {
 	for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 }

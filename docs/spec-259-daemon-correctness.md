@@ -176,11 +176,23 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 `tests/wtft-259-daemon-correctness.test.ts` checks the behaviours above; each check that pins a
 fix failed before it. These have no check of their own, and why:
 
-- **Reachable, but without a test yet** (#262 adds them): a retrying session handed on with its
+- **Checked in `tests/wtft-262-daemon-gaps.test.ts`**: a retrying session handed on with its
   displayed flag; the hand-off removed when nothing is served or idle; a per-session lease holder
-  still signalled on adoption; the stop line for `session removed` and `session never written`;
-  the resume leaving a folded `claude -p` transcript to the one folding it; the held turn of a
-  transcript no longer found written under the source its earlier lines carry; the generation record written before that held turn when its transcript opened none; Pi `/wtft -F` not asking for the session when busy; `wtft -F` exiting 1 on a failed daemon spawn; the stale-version remedy for a tag of a newer build; the pruned held turn skipped when its transcript was read again under the same source in the same scan; a later line of the same message merging its claude -p commands into the open lookup; the scan-continuation marker re-keyed on a move; an idle harness serving a request posted since its last read before it stops; the sweep reading the subagents of a session whose tree has an unwatchable directory; the sweep not re-waking an idle session whose adoption retry is pending; a moved or deleted claude -p child's held turn written; a harness -F whose temporary lease cannot be written reported as failed; -F deleting a sibling-project tag while a current local tag exists; reseed of a claude -p child sharing an id with a discovered transcript; an idle session rewritten at the same length adopted again; -F on Linux not signalling a lease pid with no command line.
+  still signalled on adoption; the stop line for `session removed`; `-F` deleting a sibling
+  project's tag; `-F` on Linux not signalling a lease pid with no command line; an idle session
+  rewritten at the same length adopted again; `-F` naming a rebuild lease it cannot write; the
+  stale-version remedy for a tag of a newer build.
+- **Reachable, without a check yet** (#267): the `claude -p` lookup and session-move cases in
+  Swept and Resume.
+- **Pi `/wtft -F` not asking for the session when busy**: busy means a live daemon holds the
+  lease, and asking then starts nothing, so a check cannot tell the two builds apart.
+- **`-F` exiting 1 on a failed daemon spawn**, and **on a daemon it cannot signal**: the first
+  needs `node` itself to fail to start, the second a `wtft-daemon` owned by another user.
+- **An idle harness serving a request posted since its last read**, and **the sweep not
+  re-waking a session whose adoption retry is pending**: each needs two processes inside one
+  sweep.
+- **The sweep reading the subagents of a session whose tree cannot be watched**: a directory
+  that cannot be watched here cannot be listed either, so its subagents are not found at all.
 - **The 1 h limit on a never-written session** takes an hour and has no knob.
 - **A sweep-driven scan keeping a failed session read**: that scan reads the session's first line
   for Pi discovery, so a transcript that cannot be opened fails the scan by itself; only a read

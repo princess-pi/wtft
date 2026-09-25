@@ -236,6 +236,43 @@ try {
 		process.kill(h2.pid, "SIGTERM");
 		await until(() => !alive(h2.pid), 5_000);
 	}
+	console.log("\nwtft -F reports a rebuild lease it cannot write");
+	{
+		const root = makeRoot("unwritable");
+		const file = session(root, "uw-main");
+		const h = start(root, ["--harness", "claude", "--session", file], "uw.err");
+		check(await until(() => classified(file, "uw-main") && read(getDaemonPidPath(file)).trim() === String(h.pid), 15_000) !== Infinity,
+			"fixture: a harness serves the session and holds its lease");
+		fs.chmodSync(TMP, 0o555);
+		let forced: ReturnType<typeof cliRun>;
+		try { forced = cliRun(root, ["-F", "--json", "-s", file]); } finally { fs.chmodSync(TMP, 0o755); }
+		check(forced.status === 1 && forced.stderr.includes("the rebuild lease could not be written") && forced.stdout === "",
+			`-F exits 1 naming the lease it could not write (exit ${forced.status})`);
+		check(read(getDaemonPidPath(file)).trim() === String(h.pid), "and the harness keeps its lease");
+		process.kill(h.pid, "SIGTERM");
+		await until(() => !alive(h.pid), 5_000);
+	}
+
+	console.log("\nA tag of a newer build is reported with the remedy for a newer build");
+	{
+		const root = makeRoot("newer-remedy");
+		const outside = makeRoot("newer-remedy-out");
+		const file = path.join(outside, "nr-main.jsonl");
+		fs.writeFileSync(file, turnLine("nr-main", Date.now()));
+		const d = start(root, ["--session", file], "nr.err");
+		check(await until(() => classified(file, "nr-main"), 15_000) !== Infinity, "fixture: a daemon wrote a current tag");
+		process.kill(d.pid, "SIGTERM");
+		await until(() => !alive(d.pid), 5_000);
+		const current = getCurrentVersionTagPath(file);
+		fs.renameSync(current, current.replace(`.v${WTFT_TAGGER_VERSION}.jsonl`, ".v99.0.0.jsonl"));
+		// A live newer build holds the lease, so this build's daemon leaves the session alone.
+		fs.writeFileSync(getDaemonPidPath(file), String(stubDaemon(root)));
+		await sleep(300);
+		const report = cliRun(root, ["-s", file]);
+		check(report.stderr.includes("written by a newer wtft build"),
+			`the remedy names a newer build, not a rebuild in a moment (exit ${report.status})`);
+	}
+
 } finally {
 	for (const pid of pids) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } }
 }

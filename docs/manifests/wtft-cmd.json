@@ -134,7 +134,7 @@
       "result": "Instead of hiding the widget or showing stale data, WTFT displays 'Cache Empty' (cloud models) or 'No Cache (local model)' in the widget area, plus the daemon's idle countdown. You know immediately whether the session is just idle or cache-free.",
       "demo": [
         "\u001b[90mCache Empty\u001b[0m",
-        "  \u001b[33m●\u001b[0m idle (0:23 to expire)"
+        "  \u001b[33m●\u001b[0m idle (cache emptied)"
       ]
     }
   ],
@@ -193,7 +193,7 @@
     },
     {
       "flags": "--list",
-      "desc": "List all running log parser daemons with session path, PID, parser version, and idle time."
+      "desc": "List the log parser daemons and their leases: PID, RUNNING or DEAD (stale pid), tagger version, idle age (0s until the session has been idle 2m2s; ? when unknown, including every lease held for a session other than the holder's --session) and session."
     },
     {
       "flags": "--cleanup",

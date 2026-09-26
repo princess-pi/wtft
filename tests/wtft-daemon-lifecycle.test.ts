@@ -20,7 +20,7 @@ import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { pollUntil } from "./lib/poll";
 
 import {
-	checkDaemonHealth,
+	health,
 	getTagPath,
 	getDaemonPidPath,
 	IDLE_THRESHOLD_MS,
@@ -116,7 +116,7 @@ function hbLine(first: number, last: number): string {
 // ---
 // 1. Idle clamp: dual-daemon interleaved heartbeats + fresh classified data
 // ---
-console.log("1. Idle clamped by classified freshness (checkDaemonHealth)");
+console.log("1. Idle clamped by classified freshness (health)");
 {
 	const { sessionPath, tagsDir } = makeSessionFixture("idleclamp");
 	const tagPath = path.join(tagsDir, currentTagFileName(sessionPath));
@@ -134,7 +134,7 @@ console.log("1. Idle clamped by classified freshness (checkDaemonHealth)");
 		hbLine(now - 8 * 60_000, now)      // daemon B: idle 8min  → "expires soon"
 	);
 
-	const results = Array.from({ length: 5 }, () => checkDaemonHealth(sessionPath, tagPath));
+	const results = Array.from({ length: 5 }, () => health(sessionPath, Date.now(), { tagPath }));
 	assert("status is live (not idle) despite stale heartbeats", results.every(r => r.alive && !r.idle));
 	assert("stable across 5 repeated calls", new Set(results.map(r => JSON.stringify({ a: r.alive, i: !!r.idle }))).size === 1);
 
@@ -144,7 +144,7 @@ console.log("1. Idle clamped by classified freshness (checkDaemonHealth)");
 		hbLine(now - 10 * 60_000, now)
 	);
 	fs.utimesSync(sessionPath, new Date(now - 10 * 60_000), new Date(now - 10 * 60_000));
-	const idleResult = checkDaemonHealth(sessionPath, tagPath);
+	const idleResult = health(sessionPath, Date.now(), { tagPath });
 	assert("control: genuinely stale data → idle", idleResult.alive === true && idleResult.idle === true);
 	assert(`control: idleMs ≥ IDLE_THRESHOLD_MS (${IDLE_THRESHOLD_MS})`, (idleResult.idleMs || 0) >= IDLE_THRESHOLD_MS);
 
@@ -381,7 +381,7 @@ console.log("\n8. Cache TTL from usage.cache_creation");
 	delete entryNone.message.usage.cache_creation;
 	assert("no cache_creation breakdown → cacheTtl unset", parseEntryToInteraction(entryNone)?.cacheTtl === undefined);
 
-	// 6b. checkDaemonHealth uses observed TTL over the claude 5-min guess.
+	// 6b. health uses observed TTL over the claude 5-min guess.
 	const { sessionPath, tagsDir } = makeSessionFixture("ttl");
 	const tagPath = path.join(tagsDir, currentTagFileName(sessionPath));
 	const now = Date.now();
@@ -392,7 +392,7 @@ console.log("\n8. Cache TTL from usage.cache_creation");
 		classifiedLine(now - 10 * 60_000, "claude-fable-5", "1h") +
 		hbLine(now - 10 * 60_000, now)
 	);
-	const status1h = checkDaemonHealth(sessionPath, tagPath);
+	const status1h = health(sessionPath, Date.now(), { tagPath });
 	assert("idle with observed 1h TTL → cacheTtlMs 3600000", status1h.idle === true && status1h.cacheTtlMs === 3_600_000);
 
 	// Without ttl in the window → model-name heuristic (claude → 5min).
@@ -400,7 +400,7 @@ console.log("\n8. Cache TTL from usage.cache_creation");
 		classifiedLine(now - 10 * 60_000, "claude-fable-5") +
 		hbLine(now - 10 * 60_000, now)
 	);
-	const statusGuess = checkDaemonHealth(sessionPath, tagPath);
+	const statusGuess = health(sessionPath, Date.now(), { tagPath });
 	assert("no observed TTL → falls back to model heuristic (5min)", statusGuess.idle === true && statusGuess.cacheTtlMs === 300_000);
 
 	fs.unlinkSync(getDaemonPidPath(sessionPath));

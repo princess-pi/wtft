@@ -73,15 +73,19 @@ daemon rebuilds.)
 
 ### D. Idle clamped by classified freshness
 
-In `checkDaemonHealth`'s backward scan, record the newest classified entry's timestamp
+In `decideHealth`'s backward scan, record the newest classified entry's timestamp
 (`t`) in the scan window and clamp:
 
 ```
 idleSinceMs = max(newest _hb.first, newest classified t)
 ```
 
-Heartbeats alone can never declare idle when classified lines are fresher. When the
-clamped idle time is below `IDLE_THRESHOLD_MS`, the status is `live`.
+Heartbeats alone can never declare idle when classified lines are fresher. As built
+(since #270 S5, `docs/spec-270-daemon-health.md` §2): `first` counts only from a heartbeat
+after the newest non-heartbeat, non-stop record, and is raised to that record's `t` when it
+is a later turn; with no such heartbeat there is no heartbeat idle. When that idle time is
+below `IDLE_THRESHOLD_MS`, a session file untouched for `IDLE_THRESHOLD_MS` still reads idle;
+otherwise the status is `live`.
 
 ### E. Cache TTL derived from data, not model name
 
@@ -90,10 +94,12 @@ clamped idle time is below `IDLE_THRESHOLD_MS`, the status is `live`.
   `ephemeral_5m_input_tokens > 0` → `"5m"`, else unset.
 - Wire format: `serializeClassified` writes `line.ttl`; `classifiedToInteraction` reads
   it back. (Tag-file wire-format sync rule: both functions updated together.)
-- `checkDaemonHealth` takes the TTL class from the **newest classified entry carrying
+- `decideHealth` takes the TTL class from the **newest classified entry carrying
   one** (same backward scan); observed `"1h"` → 3 600 000 ms, `"5m"` → 300 000 ms.
   Falls back to the `getModelCacheTtlMs` model-name heuristic only when no entry in the
-  scan window carries a TTL class.
+  scan window carries a TTL class, taking the model from the newest turn in the window
+  that names one, else from the session file; with no model, the TTL is unknown (`null`).
+  The TTL is computed only for an idle answer.
 - Requires a `WTFT_TAGGER_VERSION` bump (**2.4.2 → 2.5.0** — wire format addition +
   lifecycle semantics) so existing caches re-serialize with `ttl`.
 
@@ -111,7 +117,7 @@ Automated (new `tests/wtft-daemon-lifecycle.test.ts`, run against built `bin/*.m
 
 1. **Idle clamp fixture**: tag file with interleaved dual-daemon heartbeats (divergent
    `first`, both ≥ threshold old) + a classified line fresher than both → status is
-   `live`, and **stable across 5 repeated `checkDaemonHealth` calls**.
+   `live`, and **stable across 5 repeated `health` calls**.
 2. **Takeover process test**: spawn the real daemon on a fixture session; overwrite its
    PID file with a foreign PID; daemon exits within 2 beats (~1.4s); the PID file is
    NOT deleted by the exiting daemon.

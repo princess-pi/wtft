@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { projectsDir } from "../extensions/lib/harness/claude-code/discovery.js";
 import { tagRecords, parseTagLine, lastOffset, isDataRecord } from "../extensions/lib/tag-log.js";
 import { claimLease, unlinkLeaseIf, replaceLease as publishLease, leaseHolder } from "../extensions/lib/lease.js";
+import { decideHealth, readHealthFacts } from "../extensions/lib/daemon-health.js";
 import { readSession, flushTurns, scanChildren, resumeTagger, fsWorld, MTIME_SETTLE_MS, type LogLine } from "../extensions/lib/session-tagger.js";
 import {
   newRegistry, newSessionRecord, serve, get, move, drop, markIdle, forgetIdle, expiredIdle, beginRetry, retryFired, cancelRetry,
@@ -25,6 +26,7 @@ import {
 	WTFT_TAGGER_VERSION as TAGGER_VERSION,
 	taggerIsOlder,
 	lastLineStartByte,
+	getTagPath,
 } from "../extensions/lib/wtft-shared.js";
 
 
@@ -1484,7 +1486,8 @@ async function main() {
 ${USAGE}
 
 Management:
-  --list, -l            List every running wtft-daemon, including fixture processes
+  --list, -l            List the daemons and their leases, fixture processes included: RUNNING or DEAD,
+                        tagger version, idle age (0s until idle 2m2s; ? when unknown), session
   --cleanup             Kill per-session daemons whose session is gone, and fixture ones under the tmp dir
                         that hold no lease here; never a harness process, which stops once it has nothing to serve or watch
   --restart             Stop every daemon holding a lease or a root pid file here, and respawn one per live
@@ -1617,7 +1620,6 @@ if (showList || showCleanup || showRestart || stopSession) {
     try { process.kill(pid, 0); alive = true; } catch (_) {}
 
     let sessionFound = null;
-    let tagMtime = 0;
     try {
       const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
       const args = cmdline.split("\0");
@@ -1635,7 +1637,6 @@ if (showList || showCleanup || showRestart || stopSession) {
         const prefix = sessBase + ".wtft-tag.v";
         for (const f of fs.readdirSync(tagsDir)) {
           if (f.startsWith(prefix)) {
-            tagMtime = fs.statSync(path.join(tagsDir, f)).mtimeMs;
             taggerVersion = f.slice(prefix.length, f.length - 6);
             break;
           }
@@ -1715,8 +1716,18 @@ if (showList || showCleanup || showRestart || stopSession) {
       found++;
       const status = alive ? "RUNNING" : "DEAD (stale pid)";
       let idleStr = "?";
-      if (tagMtime > 0) {
-        const idleSec = Math.floor((Date.now() - tagMtime) / 1000);
+      const now = Date.now();
+      const session = sessionFound ? resolvedSessionArg(pid, sessionFound) : null;
+      const ownLease = session !== null && sessionFound !== null
+        && (getDaemonPidPath(sessionFound) === fullPath || getDaemonPidPath(session) === fullPath);
+      // No model read: --list prints no cache TTL, and a transcript can be large.
+      const listed = ownLease
+        ? decideHealth({ ...readHealthFacts(session, fullPath, getTagPath(session)), sessionModel: () => undefined }, now)
+        : null;
+      const since = !listed || listed.alive !== alive || listed.reason === "waiting-session" ? undefined
+        : listed.idle ? listed.idleSinceMs : listed.alive ? now : listed.lastHbMs;
+      if (since !== undefined) {
+        const idleSec = Math.floor((now - since) / 1000);
         if (idleSec < 60) idleStr = `${idleSec}s`;
         else if (idleSec < 3600) idleStr = `${Math.floor(idleSec / 60)}m`;
         else idleStr = `${Math.floor(idleSec / 3600)}h`;

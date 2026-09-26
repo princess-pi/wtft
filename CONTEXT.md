@@ -30,8 +30,8 @@ version bump, and a harness process from an older tagger is replaced by the next
 from a newer one. On Linux, a live harness
 process is left running; a later start asks it for the session and points the session's lease
 at it unless another live daemon holds that lease or it reads `rebuild`, because
-that check reads `/proc/<pid>/cmdline`. Health is exposed via `checkDaemonHealth()` and
-rendered via `renderDaemonStatus()`.
+that check reads `/proc/<pid>/cmdline`. Health is one answer, `health()` in
+`wtft-daemon-lib.ts` over `extensions/lib/daemon-health.ts`, rendered via `renderDaemonStatus()`.
 
 *Two registers, one concept.* Say **"log parser daemon"** in high-level user-facing prose — doc
 headings, the first mention in any `--help` or manifest description, anywhere a reader is meeting

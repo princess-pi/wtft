@@ -935,10 +935,12 @@ function pointSessionAt(livePid: number, file: string): boolean {
   try { leaseText = fs.readFileSync(lease, "utf8").trim(); } catch { /* no lease yet */ }
   const holder = Number(leaseText);
   held = holder === livePid;
+  // The spawner claimed this lease for this process (#281); it is handed on, not held.
+  const mine = holder === process.pid;
   // A rebuild token stays for the harness to read when it adopts, and a lease
   // another live daemon holds is left for the harness's adoption to take by
   // its own rules (never from a harness; a per-session daemon is stopped first).
-  if (leaseText !== "rebuild" && (held || !procIsDaemon(holder))) {
+  if (leaseText !== "rebuild" && (held || mine || !procIsDaemon(holder))) {
     publishLease(lease, String(livePid), String(process.pid));
   }
   try { fs.writeFileSync(`${lease}.display`, ""); } catch { /* the live process still has the old focus */ }

@@ -5,7 +5,8 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn, type ChildProcess } from "node:child_process";
-import { health, daemonLaunchArgs, type DaemonStatus } from "./wtft-shared.js";
+import { health, daemonLaunchArgs, getDaemonPidPath, type DaemonStatus } from "./wtft-shared.js";
+import { claimLeaseForChild } from "./lease.js";
 import { readConfig } from "@princess-pi/libs/config";
 import { formatVersion } from "@princess-pi/libs/build-stamp";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "./wtft-config-dir.js";
@@ -298,6 +299,9 @@ export function spawnWtftDaemon(sessionPath: string, daemonDir: string): ChildPr
 			stdio: "ignore",
 		});
 		child.unref();
+		if (child.pid) {
+			try { claimLeaseForChild(getDaemonPidPath(sessionPath), child.pid); } catch { /* the child claims for itself */ }
+		}
 		return child;
 	} catch {
 		return null;

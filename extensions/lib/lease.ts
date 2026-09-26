@@ -101,3 +101,18 @@ export function claimLease(file: string, owner: string, holderIsLive: (holder: s
 		try { fs.unlinkSync(candidate); } catch { /* already gone */ }
 	}
 }
+
+/**
+ * Claim `file` for a daemon the caller has just spawned, so the lease names a
+ * live process from the moment of the spawn. A `rebuild` token and a live
+ * holder are left for the child to meet as it would without this claim.
+ */
+export function claimLeaseForChild(file: string, childPid: number): "claimed" | "busy" {
+	return claimLease(file, String(childPid), (holder) => {
+		if (holder === "rebuild") return true;
+		const pid = Number(holder);
+		if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+		try { process.kill(pid, 0); return true; }
+		catch (err) { return (err as NodeJS.ErrnoException).code === "EPERM"; }
+	});
+}

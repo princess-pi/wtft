@@ -296,6 +296,14 @@ S3–S5, not before.
   with its reason. The third round's findings were on lines the second round's fixes wrote, or
   header comments the first round had not raised, and the memory rule for this loop is to stop
   at that point rather than raise the limit. The Draft is where Duppy reviews.
+- **A line whose `f`, `cmd` or `tc` is not an array is no turn.** Macroscope found the id
+  merge throwing on a duplicate `{"cmd":{}}` line, which reached it because the decoder took
+  any truthy value as a list. The decoder now returns null for a wrong-shape list field, so the
+  line reads as `unknown`, is never merged and never rendered, and the sweep state still counts
+  it as data. *Road not taken:* coercing the field to `[]`, which would have priced a damaged
+  line; `tests/wtft-114-generation-records.test.ts` R5 pins the skip. *Also not taken:* the
+  error boundary Macroscope proposed in the picker, which would have left the report and the
+  widget with the same abort.
 
 ---
 
@@ -316,7 +324,7 @@ are on the issues named.
 | `CONTEXT.md` Session picker | cost column undefined | — | `tests/wtft-75-doc-claims.test.ts` pins the file | defined here |
 | `CONTEXT.md` Tag file, Tags dir, Watch mode, status text | per source session; one tags dir per root; tails a session file; text rendered only inside `renderDaemonStatus` | `getTagPath`, `watchTagFile`, `renderDaemonStatus` | `wtft-75` pins the file | fixed here; Lease entry added |
 | `CONTEXT.md` Daemon entry, glossary gaps | lifecycle and cadence claims; nine terms undefined | `bin/wtft-daemon.ts` | no | filed on #261 |
-| `docs/wtft-tag-format.md` reader side | Claude Code only; re-parse fallback; `_meta` shapes absent; `required` fields; overhead line carries `sc`; readers skip every `_hb`; append-only; dedup is a subtraction; step 6 absent | `getTagPath`, `recordOf`, `classifiedToInteraction`, `serializeClassifiedWithOverheadSplit`, `deduplicateInteractions`, `sweepState` | `tests/wtft-tag-format.test.ts` (round trip), `tests/wtft-270-tag-log.test.ts` (kinds) | fixed here: §1, §2b, §2c, new §2f, §3, §4, §5, §6 |
+| `docs/wtft-tag-format.md` reader side | Claude Code only; re-parse fallback; `_meta` shapes absent; `required` fields; wrong-shape list fields; overhead line carries `sc`; readers skip every `_hb`; append-only; dedup is a subtraction; step 6 absent | `getTagPath`, `recordOf`, `classifiedToInteraction`, `serializeClassifiedWithOverheadSplit`, `deduplicateInteractions`, `sweepState` | `tests/wtft-tag-format.test.ts` (round trip), `tests/wtft-270-tag-log.test.ts` (kinds) | fixed here: §1, §2b, §2c, new §2f, §3, §4, §5, §6 |
 | `docs/wtft-tag-format.md` writer side | heartbeat, stop, sweep, spawn and generation moments | `bin/wtft-daemon.ts` | no | filed on #261; S3 moves the code |
 | `docs/spec-270-daemon-ownership.md` §1–§2 | writer moments and reader lists, ~50 cells | `bin/wtft-daemon.ts` on the branch | no | corrected here; header says which names are retired |
 | `docs/spec-270-daemon-ownership.md` §3a, §3b | planned interfaces named as built | `tag-log.ts`, `lease.ts` exports | `tests/wtft-270-*` | rewritten here: built rows name the real exports, the rest are marked plan |

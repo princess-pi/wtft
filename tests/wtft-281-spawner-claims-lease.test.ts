@@ -6,7 +6,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { claimLeaseForChild } from "../extensions/lib/lease.ts";
 import { spawnWtftDaemon } from "../extensions/lib/wtft-cli-shared.ts";
 import { getDaemonPidPath, restartDaemon } from "../extensions/lib/wtft-daemon-lib.ts";
@@ -30,6 +30,14 @@ const deadPid = (() => {
 })();
 await new Promise(r => setTimeout(r, 200));
 const CHILD = process.pid;
+
+/** Start `script` as a grandchild, so it is not this process's child: a child
+ *  that exits stays a zombie, alive to kill 0, while this process is blocked. */
+function startOrphan(script: string, args: string[]): number {
+	const quoted = [process.execPath, script, ...args].map(a => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
+	const out = execFileSync("sh", ["-c", `${quoted} </dev/null >/dev/null 2>&1 & echo $!`], { encoding: "utf8", env: process.env });
+	return Number(out.trim());
+}
 
 console.log("C1. claimLeaseForChild");
 {
@@ -60,6 +68,10 @@ console.log("C1. claimLeaseForChild");
 	fs.writeFileSync(f, String(holder.pid));
 	check(claimLeaseForChild(f, CHILD) === "busy" && fs.readFileSync(f, "utf8") === String(holder.pid), "C1e a live holder is left alone, byte for byte");
 	holder.kill("SIGKILL");
+}
+{
+	const f = path.join(dir, "gone-child.pid");
+	check(claimLeaseForChild(f, deadPid) === "busy" && !fs.existsSync(f), "C1f a child already gone is not claimed for: no lease is left naming it");
 }
 
 console.log("\nC2. spawnWtftDaemon claims the lease before the child runs");
@@ -140,8 +152,7 @@ console.log("\nC4. restartDaemon waits for the old per-session daemon, then spaw
 	const session = path.join(dir, "c4-session.jsonl");
 	fs.writeFileSync(session, "");
 	const lease = getDaemonPidPath(session);
-	const old = spawn(process.execPath, [script, "--session", session], { stdio: "ignore", detached: true });
-	old.unref();
+	const old = { pid: startOrphan(script, ["--session", session]) };
 	fs.writeFileSync(lease, String(old.pid));
 	for (let i = 0; i < 100 && !fs.existsSync(log); i++) await new Promise(r => setTimeout(r, 20));
 	check(fs.existsSync(log), "C4 precondition: the old stand-in is running");
@@ -159,6 +170,62 @@ console.log("\nC4. restartDaemon waits for the old per-session daemon, then spaw
 	check(newStart !== undefined && oldExit !== undefined && newStart.t >= oldExit.t, "C4 the new daemon started only after the old one exited");
 	check(newStart !== undefined && leaseNow === String(newStart.pid), "C4 the lease names the new daemon when restartDaemon returns");
 	if (newStart) try { process.kill(newStart.pid, "SIGKILL"); } catch {}
+}
+
+console.log("\nC4b. restartDaemon kills a holder that ignores SIGTERM before it spawns");
+{
+	const log = path.join(dir, "c4b-log.jsonl");
+	const script = path.join(dir, "c4b-daemon.mjs");
+	fs.writeFileSync(script,
+		"import * as fs from 'node:fs';\n" +
+		"fs.appendFileSync(process.env.WTFT281_LOG, JSON.stringify({ pid: process.pid, e: 'start', t: performance.timeOrigin + performance.now() }) + '\\n');\n" +
+		"process.on('SIGTERM', () => {});\n" +
+		"setTimeout(() => {}, 20000);\n");
+	process.env.WTFT281_LOG = log;
+	const session = path.join(dir, "c4b-session.jsonl");
+	fs.writeFileSync(session, "");
+	const lease = getDaemonPidPath(session);
+	const old = { pid: startOrphan(script, ["--session", session]) };
+	fs.writeFileSync(lease, String(old.pid));
+	for (let i = 0; i < 100 && !fs.existsSync(log); i++) await new Promise(r => setTimeout(r, 20));
+	await new Promise(r => setTimeout(r, 200));
+	restartDaemon(session, script);
+	let oldAlive = true;
+	try { process.kill(old.pid!, 0); } catch { oldAlive = false; }
+	check(!oldAlive, "C4b the old holder is gone when restartDaemon returns, so no two daemons share the tag");
+	let leaseNow = ""; try { leaseNow = fs.readFileSync(lease, "utf8").trim(); } catch {}
+	if (leaseNow && leaseNow !== String(old.pid)) try { process.kill(Number(leaseNow), "SIGKILL"); } catch {}
+	if (oldAlive) try { process.kill(old.pid!, "SIGKILL"); } catch {}
+}
+
+console.log("\nC6. a per-session child beside a newer-version tag serves when the lease names itself");
+{
+	const session = path.join(dir, "c6-session.jsonl");
+	fs.writeFileSync(session, "");
+	const tags = path.join(dir, "wtft-tags");
+	fs.mkdirSync(tags, { recursive: true });
+	fs.writeFileSync(path.join(tags, "c6-session.jsonl.wtft-tag.v99.0.0.jsonl"), "");
+	const binDir = path.resolve(import.meta.dirname, "..", "bin");
+	const child = spawnWtftDaemon(session, binDir);
+	await new Promise(r => setTimeout(r, 1500));
+	let alive = false;
+	try { process.kill(child!.pid!, 0); alive = true; } catch {}
+	let leaseNow = ""; try { leaseNow = fs.readFileSync(getDaemonPidPath(session), "utf8").trim(); } catch {}
+	check(alive && leaseNow === String(child!.pid), "C6 it is alive and holds the lease 1.5 s later: a newer tag with no live newer holder does not make it exit");
+	try { process.kill(child!.pid!, "SIGTERM"); } catch {}
+}
+
+console.log("\nC7. a harness start that cannot serve takes back the spawner's claim");
+{
+	const missingRoot = path.join(dir, "no-such-root");
+	const session = path.join(missingRoot, "proj", "c7.jsonl");
+	process.env.WTFT_CLAUDE_PROJECTS_DIR = missingRoot;
+	const binDir = path.resolve(import.meta.dirname, "..", "bin");
+	const child = spawnWtftDaemon(session, binDir);
+	let exited = false;
+	for (let i = 0; i < 200 && !exited; i++) { await new Promise(r => setTimeout(r, 25)); try { process.kill(child!.pid!, 0); } catch { exited = true; } }
+	check(exited, "C7 precondition: the start exited (its root does not exist)");
+	check(!fs.existsSync(getDaemonPidPath(session)), "C7 no lease is left naming the exited start");
 }
 
 fs.rmSync(dir, { recursive: true, force: true });

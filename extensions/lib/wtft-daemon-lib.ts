@@ -683,7 +683,7 @@ export async function awaitDaemonUp(
 		const facts = readHealthFacts(sessionPath, pidPath, getCurrentVersionTagPath(sessionPath));
 		if (!facts.holderAlive) return false;
 		if (!own || leaseHolder(pidPath) !== own) return true;
-		return (facts.tag?.tail ?? []).some(r => r.kind === "heartbeat" && r.last >= start - 1000);
+		return (facts.tag?.tail ?? []).some(r => r.kind === "heartbeat" && r.last >= start);
 	};
 	for (;;) {
 		if (leaseUp()) {
@@ -713,11 +713,19 @@ export function restartDaemon(sessionPath: string, daemonPath: string): boolean 
 		// A harness process serves every session under its root, so it is asked
 		// to serve this one (the spawn below points it here), never stopped.
 		if (pid > 0 && !isHarnessProcess(pid)) {
+			// Its shutdown flushes into the tag; the new daemon must not start beside
+			// it, so one that outlives SIGTERM by 2 s is killed, as --restart does.
+			const gone = (ms: number): boolean => {
+				for (const until = Date.now() + ms; Date.now() < until;) {
+					try { process.kill(pid, 0); } catch { return true; }
+					Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+				}
+				try { process.kill(pid, 0); return false; } catch { return true; }
+			};
 			try { process.kill(pid, "SIGTERM"); } catch {}
-			// Its shutdown flushes into the tag; the new daemon must not start beside it.
-			for (const until = Date.now() + 2000; Date.now() < until;) {
-				try { process.kill(pid, 0); } catch { break; }
-				Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+			if (!gone(2000)) {
+				try { process.kill(pid, "SIGKILL"); } catch {}
+				if (!gone(2000)) return false;
 			}
 			unlinkLeaseIf(pidPath, holder);
 		}

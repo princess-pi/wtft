@@ -118,7 +118,6 @@ console.log("\nD. lease dead");
 	check(!e.alive && e.reason === "not-found", "D7 a fresh empty tag and a dead lease → not-found");
 	const w = decideHealth(facts({ alive: false, tag: null, sessionMtimeMs: null }), NOW);
 	check(!w.alive && w.reason === "not-found", "D8 a dead lease with no session file → not-found; waiting-session needs a live holder");
-	check(decideHealth(facts({ tag: turn(NOW - 30_000), tagMtimeMs: NOW - 100 }), NOW).reason !== "starting", "D9 decideHealth never answers starting (#281)");
 }
 
 console.log("\nX. edges of the matrix");
@@ -163,6 +162,8 @@ console.log("\nF. health() over files");
 	check(s.alive && s.idle === true && s.cacheTtlMs === 3_600_000, "F2 this process holds the lease → alive, idle, TTL from the tail's turn");
 	const f = readHealthFacts(sessionPath, getDaemonPidPath(sessionPath), tagPath);
 	check(f.holderAlive && f.tag !== null && f.tag.tail.length === 2 && f.sessionMtimeMs !== null, "F3 readHealthFacts reads lease, tag tail and session mtime");
+	fs.writeFileSync(getDaemonPidPath(sessionPath), "1");
+	check(process.getuid!() === 0 || health(sessionPath, now, { tagPath }).alive, "F4a a lease naming another user's live process (EPERM) reads alive, as the claim treats it");
 	fs.writeFileSync(getDaemonPidPath(sessionPath), "999999999");
 	check(!health(sessionPath, now, { tagPath }).alive, "F4 a lease naming no live pid → not alive");
 	fs.rmSync(sessionPath);

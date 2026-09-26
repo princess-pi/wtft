@@ -129,7 +129,8 @@ export function readHealthFacts(sessionPath: string, pidPath: string, tagPath: s
 	let holderAlive = false;
 	const pid = parseInt(leaseHolder(pidPath), 10);
 	if (pid > 0) {
-		try { process.kill(pid, 0); holderAlive = true; } catch {}
+		try { process.kill(pid, 0); holderAlive = true; }
+		catch (err) { holderAlive = (err as NodeJS.ErrnoException).code === "EPERM"; }
 	}
 	let tag: HealthFacts["tag"] = null;
 	try {

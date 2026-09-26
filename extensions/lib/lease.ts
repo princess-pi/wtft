@@ -108,11 +108,19 @@ export function claimLease(file: string, owner: string, holderIsLive: (holder: s
  * holder are left for the child to meet as it would without this claim.
  */
 export function claimLeaseForChild(file: string, childPid: number): "claimed" | "busy" {
-	return claimLease(file, String(childPid), (holder) => {
-		if (holder === "rebuild") return true;
-		const pid = Number(holder);
-		if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+	const live = (pid: number): boolean => {
 		try { process.kill(pid, 0); return true; }
 		catch (err) { return (err as NodeJS.ErrnoException).code === "EPERM"; }
+	};
+	const result = claimLease(file, String(childPid), (holder) => {
+		if (holder === "rebuild") return true;
+		const pid = Number(holder);
+		return Number.isSafeInteger(pid) && pid > 0 && live(pid);
 	});
+	// A child gone before the claim landed must not be left named.
+	if (result === "claimed" && !live(childPid)) {
+		unlinkLeaseIf(file, String(childPid));
+		return "busy";
+	}
+	return result;
 }

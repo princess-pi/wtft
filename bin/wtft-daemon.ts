@@ -1037,16 +1037,21 @@ function harnessVersionFile(pid: number): string {
 }
 
 function runHarness(which: string, focus: string) {
+  // A start that serves nothing gives back a lease its spawner claimed for it.
+  const quit = (code: number): never => {
+    if (focus) unlinkLeaseIf(getDaemonPidPath(focus), String(process.pid));
+    process.exit(code);
+  };
   const root = path.resolve(harnessRoot(which));
   if (!fs.existsSync(root)) {
     process.stderr.write(`wtft-daemon: harness root does not exist: ${root}\n`);
-    process.exit(1);
+    quit(1);
   }
   if (focus) {
     const focusKey = path.resolve(focus);
     if (focusKey !== root && !focusKey.startsWith(root + path.sep)) {
       process.stderr.write(`wtft-daemon: --session is outside the harness root: ${focusKey}\n`);
-      process.exit(2);
+      quit(2);
     }
   }
   const hash = createHash("sha256").update(root).digest("hex").slice(0, 12);
@@ -1056,7 +1061,7 @@ function runHarness(which: string, focus: string) {
   fs.writeFileSync(harnessVersionFile(process.pid), TAGGER_VERSION);
   const leave = (code: number): never => {
     try { fs.unlinkSync(harnessVersionFile(process.pid)); } catch { /* already gone */ }
-    process.exit(code);
+    return quit(code);
   };
   for (let attempt = 1; claimPidFile(harnessPidFile) === "busy"; attempt++) {
     if (attempt > 5) {
@@ -1846,7 +1851,11 @@ if (showList || showCleanup || showRestart || stopSession) {
   try {
     const { older, newer } = otherTagVersions();
     // A newer build serving this session keeps it.
-    if (newer.length > 0 && liveDaemonOrUnknown(Number(leaseHolder(pidPath)))) process.exit(0);
+    const holderPid = Number(leaseHolder(pidPath));
+    if (newer.length > 0 && holderPid !== process.pid && liveDaemonOrUnknown(holderPid)) {
+      unlinkLeaseIf(pidPath, String(process.pid));
+      process.exit(0);
+    }
     if (older.length > 0) {
       // Honor an existing rebuild lease before version-takeover claim: replace
       // only the value read, and on a miss read once more so a token written

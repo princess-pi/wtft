@@ -257,7 +257,7 @@ a reader shows, each change listed in its §2: the 2 s tag-write window answered
 (#281 has since removed both). `waiting-session` for a
 live holder comes from `health`, so `--watch` shows it. `--watch`'s restart shows what `health`
 finds from the first ask after it, rather than `starting...` for as long as it runs (since #281
-the view first blocks up to 4 s while the old daemon exits, and a failed stop shows
+the restart first waits up to 4 s for the old daemon to exit, and a failed stop shows
 `restart failed`). And
 `wtft-daemon --list`'s idle column is the session's idle age, not the age of the tag file's last
 write (its exact cases: `docs/spec-270-daemon-health.md` §2).

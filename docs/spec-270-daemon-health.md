@@ -51,8 +51,8 @@ inside a function, so load order does not matter. `checkDaemonHealth` is removed
 
 `alive` is the lease fact and nothing else: a live process holds this session's lease. No grace
 sets it. `ensureDaemonRunning` and `watchTagFile`'s wait for the tag file read `alive` and nothing
-else. `awaitDaemonUp` reads the same fact through `readHealthFacts`, over the current-version tag
-rather than `health`'s default; since #281, for a lease naming its own child it also needs a
+else. `awaitDaemonUp` applies the same rule (`leasePid` and `pidAlive` on one lease read), and reads the
+current-version tag rather than `health`'s default; since #281, for a lease naming its own child it also needs a
 heartbeat written since the wait began, and when it sees the child exit with no other live holder on the lease it unlinks the child's claim.
 
 Since #281 (`docs/spec-281-spawner-claims-lease.md`) the spawner claims the lease for its child,
@@ -85,7 +85,8 @@ grace windows answer `starting` rather than alive, for every reader; #281 then d
   `starting...` for as long as it ran. Now the view shows what `health` finds from the first ask,
   the five-poll interval is gone, and the watchdog asks as it does at any other time. Since #281
   the restart first stops the lease holder (any pid whose cmdline has no `--harness`; #289) with
-  SIGTERM, then SIGKILL after 2 s, and waits up to 2 s more; `--watch` is frozen for that wait.
+  SIGTERM, then SIGKILL after 2 s, and waits up to 2 s more; `--watch` keeps running during that
+  wait.
   A holder still alive after it, EPERM included, is left alone and `--watch` shows
   `restart failed` without asking `health`.
 - **`waiting-session` in `--watch`** renders only once there are chart lines; before that

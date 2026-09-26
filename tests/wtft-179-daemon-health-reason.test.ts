@@ -134,7 +134,7 @@ export function probe(status: DaemonStatus): boolean {
 }
 
 // ---
-// V3 — the #124 startup indicator, with no clock window (#281)
+// V3 — the #124 startup indicator, with no clock window
 // ---
 // The spawner claims the lease for its child, so a stand-in that claims nothing
 // still holds it while it lives: waiting-session with no session file, live with

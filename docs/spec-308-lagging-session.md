@@ -48,7 +48,7 @@ Two review rounds (macroscopeapp; every finding verified against the code before
   `lastReadOffset` from whichever file won.
 - **"The daemon is running and waiting on it" is checked before it is said.**
   `awaitDaemonUp(sessionPath, child, ceilingMs)` polls state (no fixed delay):
-  `up` ⇔ a live process holds the lease (`readHealthFacts`), and, when that process is the
+  `up` ⇔ a live process holds the lease (`leasePid` and `pidAlive` on one lease read), and, when that process is the
   child itself (the spawner claims the lease for it at spawn, #281), a heartbeat record in
   the last 8 KiB of the current-version tag has `last` at or after the wait's start. A live
   holder other than the child is `up` at once: this covers the singleton case where the
@@ -63,7 +63,7 @@ Two review rounds (macroscopeapp; every finding verified against the code before
 
 ## 4. Verification
 
-`tests/wtft-308-lagging-session.test.ts` (41 assertions, every wait a poll on a predicate):
+`tests/wtft-308-lagging-session.test.ts` (every wait a poll on a predicate):
 
 1. non-watch on an absent path: exit 0, no `not found` / `does not exist` / `invalid`, states "not written yet", names the path, daemon holds the lease, file not created by the CLI
 2. session written afterwards: the **same** daemon classifies it, second run renders bars
@@ -71,7 +71,7 @@ Two review rounds (macroscopeapp; every finding verified against the code before
 4. reaper: daemon A (never written) survives daemon C's startup reap; daemon B (written, then removed) is reaped; A never SIGTERMed itself
 5. #155 move: daemon classifies in `proj-a`, transcript moves to `proj-b`, tag left behind — non-watch charts it, `--watch` renders instead of hanging
 6. pending session + a daemon that dies during startup (structural injection: `wtft.mjs` copied next to no `wtft-daemon.mjs`) → exit ≠ 0, names the daemon, never claims "running and waiting"
-7. `awaitDaemonUp` proof rules, child stood in by bare node processes: (a) leftover tag + child exit 1 + no lease → `dead`; (b) SIGKILLed child → `dead` naming the signal; (c) child exit 0 while another process holds the lease → `up`
+7. `awaitDaemonUp` proof rules, child stood in by bare node processes: (a) leftover tag + child exit 1 + no lease → `dead`; (b) SIGKILLed child → `dead` naming the signal; (c) child exit 0 while another process holds the lease → `up`; since #281, with the lease naming the child: (d) only a beat from before the wait → `unknown`, (e) a beat during the wait → `up`, (f) the child exits → `dead` and no lease left
 8. existing session, daemon dead before any data → exit ≠ 0, never "no data yet"
 
 `bun run test wtft`: 32/32 suites green. `tests/wtft-daemon.test.sh`: green.

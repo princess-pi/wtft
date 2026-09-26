@@ -417,7 +417,7 @@ console.log("\n7. awaitDaemonUp proof rules");
 		assert("c. child exit 0 + live lease held elsewhere → up", r.state === "up", JSON.stringify(r));
 		try { fs.unlinkSync(pp); } catch {} try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
 	}
-	// d–f: the lease names the child itself, as the spawner's claim leaves it (#281)
+	// d–f: the lease names the child itself, as the spawner's claim leaves it
 	const tagOf = (d: string, sp: string) => {
 		const tagsDir = path.join(d, "wtft-tags"); fs.mkdirSync(tagsDir, { recursive: true });
 		return path.join(tagsDir, `${path.basename(sp)}.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);

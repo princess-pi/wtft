@@ -167,7 +167,7 @@ try {
 		fs.writeFileSync(getDaemonPidPath(session), String(harness.pid));
 		const noop = path.join(dir, "noop.mjs");
 		fs.writeFileSync(noop, "");
-		restartDaemon(session, noop);
+		await restartDaemon(session, noop);
 		await sleep(300);
 		let alive = true;
 		try { process.kill(harness.pid!, 0); } catch { alive = false; }

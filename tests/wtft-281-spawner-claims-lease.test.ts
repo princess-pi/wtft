@@ -178,7 +178,7 @@ console.log("\nC4. restartDaemon waits for the old per-session daemon, then spaw
 	fs.writeFileSync(lease, String(old.pid));
 	for (let i = 0; i < 100 && !fs.existsSync(log); i++) await new Promise(r => setTimeout(r, 20));
 	check(fs.existsSync(log), "C4 precondition: the old stand-in is running");
-	check(restartDaemon(session, script), "C4 restartDaemon reports a spawn");
+	check(await restartDaemon(session, script), "C4 restartDaemon reports a spawn");
 	let leaseNow = ""; try { leaseNow = fs.readFileSync(lease, "utf8").trim(); } catch { /* no lease */ }
 	for (let i = 0; i < 100; i++) {
 		const n = fs.readFileSync(log, "utf8").trim().split("\n").length;
@@ -211,7 +211,7 @@ console.log("\nC4b. restartDaemon kills a holder that ignores SIGTERM before it 
 	fs.writeFileSync(lease, String(old.pid));
 	for (let i = 0; i < 100 && !fs.existsSync(log); i++) await new Promise(r => setTimeout(r, 20));
 	await new Promise(r => setTimeout(r, 200));
-	restartDaemon(session, script);
+	await restartDaemon(session, script);
 	const oldAlive = pidAlive(old.pid!);
 	check(!oldAlive, "C4b the old holder is gone when restartDaemon returns, so no two daemons share the tag");
 	let leaseNow = ""; try { leaseNow = fs.readFileSync(lease, "utf8").trim(); } catch {}
@@ -229,9 +229,28 @@ console.log("\nC4c. restartDaemon on a holder that is this process's own child: 
 	const old = spawn(process.execPath, [script, "--session", session], { stdio: "ignore" });
 	fs.writeFileSync(lease, String(old.pid));
 	await new Promise(r => setTimeout(r, 300));
-	check(restartDaemon(session, script), "C4c restartDaemon reports a spawn, not restart-failed");
+	check(await restartDaemon(session, script), "C4c restartDaemon reports a spawn, not restart-failed");
 	let leaseNow = ""; try { leaseNow = fs.readFileSync(lease, "utf8").trim(); } catch {}
 	check(leaseNow !== "" && leaseNow !== String(old.pid), `C4c the lease names the new daemon (read "${leaseNow}", old ${old.pid})`);
+	if (leaseNow && leaseNow !== String(old.pid)) try { process.kill(Number(leaseNow), "SIGKILL"); } catch {}
+}
+
+console.log("\nC4e. restartDaemon lets the caller's event loop run while it waits, so its own exited child is reaped on any OS");
+{
+	const script = path.join(dir, "c4e-daemon.mjs");
+	fs.writeFileSync(script, "process.on('SIGTERM', () => setTimeout(() => process.exit(0), 300));\nsetTimeout(() => {}, 10000);\n");
+	const session = path.join(dir, "c4e-session.jsonl");
+	fs.writeFileSync(session, "");
+	const lease = getDaemonPidPath(session);
+	const old = spawn(process.execPath, [script, "--session", session], { stdio: "ignore" });
+	let reaped = false; old.once("exit", () => { reaped = true; });
+	fs.writeFileSync(lease, String(old.pid));
+	await new Promise(r => setTimeout(r, 300));
+	let ticks = 0; const t = setInterval(() => ticks++, 10);
+	const ok = await restartDaemon(session, script);
+	clearInterval(t);
+	check(ok && ticks > 0 && reaped, `C4e the loop ran during the wait (${ticks} ticks) and reaped the old child (${reaped})`);
+	let leaseNow = ""; try { leaseNow = fs.readFileSync(lease, "utf8").trim(); } catch {}
 	if (leaseNow && leaseNow !== String(old.pid)) try { process.kill(Number(leaseNow), "SIGKILL"); } catch {}
 }
 
@@ -242,7 +261,7 @@ else {
 	fs.writeFileSync(session, "");
 	const lease = getDaemonPidPath(session);
 	fs.writeFileSync(lease, "1");
-	const ok = restartDaemon(session, path.join(dir, "c4c-daemon.mjs"));
+	const ok = await restartDaemon(session, path.join(dir, "c4c-daemon.mjs"));
 	let leaseNow = ""; try { leaseNow = fs.readFileSync(lease, "utf8").trim(); } catch {}
 	check(!ok && leaseNow === "1", `C4d restart fails and the lease still names pid 1 (returned ${ok}, lease "${leaseNow}")`);
 	try { fs.unlinkSync(lease); } catch {}

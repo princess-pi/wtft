@@ -707,7 +707,7 @@ export async function awaitDaemonUp(
 	}
 }
 
-export function restartDaemon(sessionPath: string, daemonPath: string): boolean {
+export async function restartDaemon(sessionPath: string, daemonPath: string): Promise<boolean> {
 	const pidPath = getDaemonPidPath(sessionPath);
 	try {
 		const holder = leaseHolder(pidPath);
@@ -717,17 +717,18 @@ export function restartDaemon(sessionPath: string, daemonPath: string): boolean 
 		if (pid > 0 && !isHarnessProcess(pid)) {
 			// Its shutdown flushes into the tag; the new daemon must not start beside
 			// it, so one that outlives SIGTERM by 2 s is killed, as --restart does.
-			const gone = (ms: number): boolean => {
+			// The wait yields, so a holder that is the caller's own child gets reaped.
+			const gone = async (ms: number): Promise<boolean> => {
 				for (const until = Date.now() + ms; Date.now() < until;) {
 					if (!pidAlive(pid)) return true;
-					Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+					await new Promise(r => setTimeout(r, 20));
 				}
 				return !pidAlive(pid);
 			};
 			try { process.kill(pid, "SIGTERM"); } catch {}
-			if (!gone(2000)) {
+			if (!(await gone(2000))) {
 				try { process.kill(pid, "SIGKILL"); } catch {}
-				if (!gone(2000)) return false;
+				if (!(await gone(2000))) return false;
 			}
 		}
 	} catch {}
@@ -833,13 +834,16 @@ export async function watchTagFile(
 		daemonDead = !daemonStatus.alive;
 	};
 
+	let restarting = false;
 	const cleanupStdin = enterRawStdin((key: string) => {
 		if (key === "q" || key === "Q" || key === "\u0003") {
 			exitWatch();
 		}
-		if (key === "r" || key === "R") {
-			if (settings.daemonPath) {
-				if (restartDaemon(sessionPath, settings.daemonPath)) {
+		if ((key === "r" || key === "R") && settings.daemonPath && !restarting) {
+			restarting = true;
+			void restartDaemon(sessionPath, settings.daemonPath).then(ok => {
+				restarting = false;
+				if (ok) {
 					updateDaemonHealth();
 				} else {
 					daemonStatus = { alive: false, reason: "restart-failed" };
@@ -848,7 +852,7 @@ export async function watchTagFile(
 				needsRedraw = true;
 				render();
 				resetWatchdog();
-			}
+			});
 		}
 	});
 

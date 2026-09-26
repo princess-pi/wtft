@@ -27,7 +27,7 @@ export function claimLeaseForChild(file: string, childPid: number): "claimed" | 
 - **Alive:** `pidAlive` is true when `kill 0` accepts the pid or refuses it with EPERM (a live
   process of another user), and `/proc/<pid>/stat` does not show a zombie (where `/proc` is
   absent, `kill 0` alone decides). A spawner's child that has exited stays a zombie until the
-  spawner's event loop reaps it, and a blocking wait never reaps it. `claimLeaseForChild`,
+  spawner's event loop reaps it. `claimLeaseForChild`,
   `readHealthFacts` and `restartDaemon`'s wait all use `pidAlive`.
 - **What it claims:** `claimLease(file, String(childPid), holderIsLive)`, where `holderIsLive`
   answers true for `rebuild` and for a holder that is a pid (`leasePid`: `/^[1-9]\d*$/`, the
@@ -69,9 +69,13 @@ export function claimLeaseForChild(file: string, childPid: number): "claimed" | 
     harness included: SIGTERM, 2 s, SIGKILL, then up to 2 s while the pid is still a daemon. It
     respawns whether or not the holder is gone (#274). It now also claims for the child it
     respawns, which serves the holder's own `--session`, without unlinking that lease first; a
-    harness's other leases are unlinked. A respawn whose spawn throws prints `Stopped: … the
-    respawn … failed`, not `Restarted`.
-  - The wait blocks the caller: `--watch` neither renders nor reads keys for up to 4 s.
+    harness's other leases are unlinked. Its output line says how the respawn went (below).
+  - The wait is async: the caller's event loop runs, so a holder that is its own child is reaped
+    on any OS (off Linux `pidAlive` cannot see a zombie), and `--watch` keeps rendering. A
+    second `r` during a restart is ignored.
+  - `wtft-daemon --restart` prints `Restarted` only when its claim for the respawn landed,
+    `Respawned … left to claim the lease itself` when the claim was busy or threw with the child
+    alive, and `the respawn … failed` when no child is alive.
   - The gap left is the time between the old daemon's exit and `spawn()` returning. That is not a
     clock rule. Health reports the daemon stopped for that time, which is true.
 - **The startup wait:** `awaitDaemonUp` used to treat any live lease holder as up. A lease naming
@@ -99,7 +103,7 @@ member is a breaking change), and `renderDaemonStatus` still renders it for a ca
 | Child exits without serving (crash, bad args) | for the spawner, `starting` (or `waiting-session`) until 5 s pass | `not-found` or `stopped HH:MM`; a crash with nobody waiting leaves the claim naming a dead pid, read as dead |
 | A daemon that really stopped, tag written under 2 s ago | `starting` for up to 2 s | `stopped HH:MM` at once, or `not-found` when the tag tail has no heartbeat |
 | A reader that did not spawn, during another reader's spawn | `stopped` / `not-found` unless the tag was written under 2 s ago | alive, when the claim landed |
-| `--watch` `r` on a per-session daemon | `starting` up to 5 s | the view is frozen while the old one exits (up to 4 s), then alive; other readers see the old daemon alive, `stopped` only between its exit and the new claim |
+| `--watch` `r` on a per-session daemon | `starting` up to 5 s | while the old one exits (up to 4 s) the view shows it alive, then stopped, then the new daemon alive; other readers see the old daemon alive, `stopped` only between its exit and the new claim |
 | Spawn with a `rebuild` lease | the child reads `rebuild` and rebuilds | unchanged: the spawner leaves `rebuild` for the child |
 | Spawn over a live holder | the child exits busy, takes the lease over when an older-version tag exists, or (a harness start) hands off, or takes a per-session holder's lease by SIGTERM (`takeOverLease`) | unchanged: the spawner claims nothing |
 | `ensureDaemonRunning` called twice in one process within one spawn | the second call spawned again; the second child lost the claim and exited | when the first claim landed, the second call finds the lease alive and does not spawn (#261 lead O). Over a `rebuild` lease it still spawns again, and a first call in another process spawns without reading the lease |
@@ -121,6 +125,7 @@ member is a breaking change), and `renderDaemonStatus` still renders it for a ca
   - **C4b:** a holder that ignores SIGTERM is gone when `restartDaemon` returns.
   - **C4c:** a holder that is the caller's own child (a zombie once it exits) is replaced, not
     reported `restart-failed`.
+  - **C4e:** the caller's event loop runs during the wait and reaps its own exited child.
   - **C4d:** a holder the caller may not signal (pid 1, EPERM) is left alone and the restart
     fails. Skipped when run as root.
   - **C6:** a per-session child beside a newer-version tag, with the lease naming itself, is
@@ -148,8 +153,8 @@ member is a breaking change), and `renderDaemonStatus` still renders it for a ca
   reader decide version takeovers.
 - **One liveness rule, `pidAlive`, for the claim, health and `restartDaemon`'s wait.** They
   disagreed on EPERM and on zombies until the audit found it; each disagreement produced a wrong answer (a restart
-  beside a live holder, a restart that failed on its own child). *Road not taken:* making the
-  restart wait async so the event loop reaps the child, which fixes only one caller. The
+  beside a live holder, a restart that failed on its own child). The restart wait is also
+  async, which reaps the caller's own child where `/proc` cannot show a zombie. The
   child's own claim, `--restart`'s wait, `-F`'s wait and `--list` still use a bare `kill 0`
   (#290).
 - **The restart does not rename over the old lease.** #281's approved design had both restart
@@ -161,8 +166,8 @@ member is a breaking change), and `renderDaemonStatus` still renders it for a ca
   between the old daemon's exit and the claim stays, reported truthfully as stopped. *Road not
   taken:* the placeholder, measured as a failing check (the lease was absent on thousands of
   reads during `--restart`) before this was decided.
-- **Restart waits for the old daemon, and kills one that will not go.** Up to 4 s of a frozen
-  `--watch` beats two writers on one tag. *Roads not taken:* swapping the lease to the child
+- **Restart waits for the old daemon, and kills one that will not go.** Up to 4 s of waiting
+  beats two writers on one tag. *Roads not taken:* swapping the lease to the child
   before the old daemon exits, which leaves no gap but runs both at once; and spawning after 2 s
   regardless, which the first cut did and the audit caught.
 - **The startup wait asks for a heartbeat from its own child.** A claimed lease no longer proves

@@ -8,7 +8,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { projectsDir } from "../extensions/lib/harness/claude-code/discovery.js";
 import { tagRecords, parseTagLine, lastOffset, isDataRecord } from "../extensions/lib/tag-log.js";
-import { claimLease, claimLeaseForChild, unlinkLeaseIf, replaceLease as publishLease, leaseHolder } from "../extensions/lib/lease.js";
+import { claimLease, claimLeaseForChild, pidAlive, unlinkLeaseIf, replaceLease as publishLease, leaseHolder } from "../extensions/lib/lease.js";
 import { decideHealth, readHealthFacts } from "../extensions/lib/daemon-health.js";
 import { readSession, flushTurns, scanChildren, resumeTagger, fsWorld, MTIME_SETTLE_MS, type LogLine } from "../extensions/lib/session-tagger.js";
 import {
@@ -1673,8 +1673,9 @@ if (showList || showCleanup || showRestart || stopSession) {
       const respawnLease = wasDaemon && sessionFound ? getDaemonPidPath(sessionFound) : "";
       // The respawn's own lease is left for its claim, which takes a dead holder's.
       if (fullPath !== respawnLease) unlinkIfNames(fullPath, pid);
-      let handed = false;
+      let respawned: "claimed" | "busy" | "failed" = "failed";
       if (respawnLease) {
+        let childPid = 0;
         try {
           const child = spawn(process.execPath, [process.argv[1], ...daemonLaunchArgs(sessionFound!, restartEnv)], {
             detached: true,
@@ -1682,11 +1683,16 @@ if (showList || showCleanup || showRestart || stopSession) {
             env: restartEnv,
           });
           child.unref();
-          if (child.pid) { claimLeaseForChild(respawnLease, child.pid); handed = true; }
+          childPid = child.pid ?? 0;
         } catch (_2) {}
-        if (!handed) unlinkIfNames(fullPath, pid);
+        if (childPid) {
+          try { respawned = claimLeaseForChild(respawnLease, childPid); } catch { respawned = "busy"; }
+          if (respawned === "busy" && !pidAlive(childPid)) respawned = "failed";
+        }
+        if (respawned === "failed") unlinkIfNames(fullPath, pid);
       }
-      console.log(handed ? `Restarted: PID ${pid} → fresh daemon for ${sessionFound}`
+      console.log(respawned === "claimed" ? `Restarted: PID ${pid} → fresh daemon for ${sessionFound}`
+        : respawned === "busy" ? `Respawned: PID ${pid} → a daemon for ${sessionFound}, left to claim the lease itself`
         : respawnLease ? `Stopped: PID ${pid} — the respawn for ${sessionFound} failed`
         : wasDaemon ? `Stopped: PID ${pid} — no --session to respawn (#274)`
         : `Removed lease: PID ${pid} — no live daemon found`);

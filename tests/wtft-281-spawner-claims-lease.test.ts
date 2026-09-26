@@ -6,7 +6,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { claimLeaseForChild } from "../extensions/lib/lease.ts";
 import { spawnWtftDaemon } from "../extensions/lib/wtft-cli-shared.ts";
 import { getDaemonPidPath, restartDaemon } from "../extensions/lib/wtft-daemon-lib.ts";
@@ -226,6 +226,25 @@ console.log("\nC7. a harness start that cannot serve takes back the spawner's cl
 	for (let i = 0; i < 200 && !exited; i++) { await new Promise(r => setTimeout(r, 25)); try { process.kill(child!.pid!, 0); } catch { exited = true; } }
 	check(exited, "C7 precondition: the start exited (its root does not exist)");
 	check(!fs.existsSync(getDaemonPidPath(session)), "C7 no lease is left naming the exited start");
+}
+
+console.log("\nC8. wtft-daemon --restart claims the lease for the daemon it respawns");
+{
+	delete process.env.WTFT_CLAUDE_PROJECTS_DIR;
+	const session = path.join(dir, "c8-session.jsonl");
+	fs.writeFileSync(session, "");
+	const binDir = path.resolve(import.meta.dirname, "..", "bin");
+	const lease = getDaemonPidPath(session);
+	const old = spawnWtftDaemon(session, binDir)!;
+	await new Promise(r => setTimeout(r, 1000));
+	let oldLease = ""; try { oldLease = fs.readFileSync(lease, "utf8").trim(); } catch {}
+	check(oldLease === String(old.pid), "C8 precondition: the old daemon holds the lease");
+	const restart = spawnSync("node", [path.join(binDir, "wtft-daemon.mjs"), "--restart"], { encoding: "utf8", env: process.env });
+	let leaseNow = ""; try { leaseNow = fs.readFileSync(lease, "utf8").trim(); } catch {}
+	let newAlive = false;
+	try { process.kill(Number(leaseNow), 0); newAlive = Number(leaseNow) > 0; } catch {}
+	check(restart.status === 0 && leaseNow !== "" && leaseNow !== String(old.pid) && newAlive, `C8 the lease names the live respawned daemon when --restart returns (exit ${restart.status}, lease "${leaseNow}")`);
+	if (newAlive) try { process.kill(Number(leaseNow), "SIGTERM"); } catch {}
 }
 
 fs.rmSync(dir, { recursive: true, force: true });

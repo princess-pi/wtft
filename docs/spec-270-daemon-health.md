@@ -26,14 +26,14 @@ On `main` @ `c8f2071` "is the daemon alive" (R4 in the parent spec §2) has four
 
 ```ts
 export interface HealthFacts {
-  holderAlive: boolean;                    // the lease pid answers kill 0
+  holderAlive: boolean;                    // the lease pid answers kill 0, or refuses it with EPERM
   tag: { size: number; mtimeMs: number; tail: TagRecord[] } | null;   // last 8 KiB; null: no tag
   sessionMtimeMs: number | null;           // null: no session file
   sessionModel: () => string | undefined;  // read only when an idle answer needs a TTL
 }
 export interface HealthOptions { tagPath?: string }      // spawnedAt removed by #281
 export function readHealthFacts(sessionPath, pidPath, tagPath): HealthFacts;   // the fs adapter
-export function decideHealth(facts, now, opts?): DaemonStatus;                  // pure
+export function decideHealth(facts, now): DaemonStatus;                         // pure
 export function health(sessionPath, now, opts?): DaemonStatus;                  // in wtft-daemon-lib
 ```
 
@@ -50,8 +50,9 @@ inside a function, so load order does not matter. `checkDaemonHealth` is removed
 ## 2. The one answer
 
 `alive` is the lease fact and nothing else: a live process holds this session's lease. No grace
-sets it. `awaitDaemonUp`, `ensureDaemonRunning` and `watchTagFile`'s wait for the tag file read
-`alive` and nothing else, so they see what they saw before.
+sets it. `ensureDaemonRunning` and `watchTagFile`'s wait for the tag file read `alive` and nothing
+else. `awaitDaemonUp` reads the same fact through `readHealthFacts`; since #281, for a lease naming
+its own child it also needs a heartbeat written since the wait began.
 
 Since #281 (`docs/spec-281-spawner-claims-lease.md`) the spawner claims the lease for its child,
 so there is no gap to mask, and the two clock windows S5 kept (5 s after the caller's spawn, 2 s
@@ -81,7 +82,9 @@ grace windows answer `starting` rather than alive, for every reader; #281 then d
 - **`--watch`'s `r` shows what `health` finds.** On `main` the `restarting` flag was cleared
   only by a live lease, polled once a second five times; with none by then, the view showed
   `starting...` for as long as it ran. Now the view shows what `health` finds from the first ask,
-  the five-poll interval is gone, and the watchdog asks as it does at any other time.
+  the five-poll interval is gone, and the watchdog asks as it does at any other time. Since #281
+  the restart first waits for the old per-session daemon to exit (SIGTERM, up to 2 s, then
+  SIGKILL, up to 2 s more), and `--watch` is frozen for that wait.
 - **`waiting-session` in `--watch`** renders only once there are chart lines; before that
   `--watch` prints its waiting line instead.
 - **`--watch`'s idle countdown counts from `idleSinceMs` at each render**, as the widget's
@@ -105,8 +108,8 @@ grace windows answer `starting` rather than alive, for every reader; #281 then d
   axes.
 - `tests/wtft-179-daemon-health-reason.test.ts` unchanged and passing in S5 (#281 rewrote V3,
   whose window it removed).
-- The widget (`getDaemonStatus`), `--watch` (`updateDaemonHealth`), `awaitDaemonUp`,
-  `ensureDaemonRunning` call `health`, and `wtft-daemon --list`'s idle column calls `decideHealth` over the row's own lease; `grep checkDaemonHealth` over
+- The widget (`getDaemonStatus`), `--watch` (`updateDaemonHealth`) and `ensureDaemonRunning`
+  call `health`, `awaitDaemonUp` calls `readHealthFacts`, and `wtft-daemon --list`'s idle column calls `decideHealth` over the row's own lease; `grep checkDaemonHealth` over
   `bin/` and `extensions/` finds nothing.
 - The golden tags suite (S0) and the daemon suites pass unchanged.
 
@@ -123,9 +126,9 @@ grace windows answer `starting` rather than alive, for every reader; #281 then d
   `renderDaemonStatus` and the 179 suite read its field names. One field is added:
   `lastHbMs`, the dead holder's last heartbeat, which `--list` needs and `lastHbTime` was
   formatted from.
-- **The graces answer with a reason, never with `alive`** (both removed since by #281). `awaitDaemonUp` treats `alive` as
-  "the lease is claimed"; a grace that set it would report a daemon up before it claimed
-  anything. *Road not taken:* a separate `shown` field for display, which would have put two
+- **The graces answered with a reason, never with `alive`** (both removed since by #281).
+  `awaitDaemonUp` read `alive` as "the lease is claimed"; a grace that set it would have reported
+  a daemon up before it claimed anything. *Road not taken:* a separate `shown` field for display, which would have put two
   liveness answers back on the interface.
 - **`decideHealth` is pure and `readHealthFacts` is its adapter.** The matrix in §3 is facts in
   memory, so it runs with no daemon and no clock. The session model is a thunk so the whole

@@ -48,12 +48,15 @@ Two review rounds (macroscopeapp; every finding verified against the code before
   `lastReadOffset` from whichever file won.
 - **"The daemon is running and waiting on it" is checked before it is said.**
   `awaitDaemonUp(sessionPath, child, ceilingMs)` polls state (no fixed delay):
-  `up` ⇔ a live process holds the lease (`health().alive`), and, when that process is the child itself (the spawner claims the lease for it at spawn, #281), it has beaten into the tag since the wait began; a child that dies unclaimed has its spawner's claim taken back — the daemon writes
-  its PID file before `initClassified()`, and this covers the singleton case where the
-  child exits 0 because an older daemon owns the session; `dead` ⇔ child gone (exit code
-  **or signal**) AND no lease, re-checked *after* the exit is observed (a concurrent daemon
-  can claim the lease in the gap); `unknown` ⇔ ceiling hit with the child alive (or no child handle) and
-  nothing claimed — still exit 0, a slow box is not a failure. **A tag file is not
+  `up` ⇔ a live process holds the lease (`readHealthFacts`), and, when that process is the
+  child itself (the spawner claims the lease for it at spawn, #281), it has written a
+  heartbeat with `last` at or after the wait's start. A live holder other than the child is
+  `up` at once: this covers the singleton case where the child exits 0 because an older
+  daemon owns the session. `dead` ⇔ child gone (exit code **or signal**) and not `up`,
+  re-checked *after* the exit is observed (a concurrent daemon can claim the lease in the
+  gap); the claim made for the child is then unlinked, and any other lease is left.
+  `unknown` ⇔ ceiling hit with the child alive (or no child handle) and not `up` — still
+  exit 0, a slow box is not a failure. **A tag file is not
   proof:** tags outlive daemons (previous run, or a sibling-dir file the #155 lookup
   adopts) — measured: a stale tag under `/tmp` made a SIGKILLed stand-in read as "up".
   Both the pending-session branch and the "no data yet" branch route through it.

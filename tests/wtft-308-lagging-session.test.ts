@@ -371,6 +371,7 @@ console.log("\n6. Pending session + a daemon that dies during startup");
 //      (a stale tag from a previous run must not read as "up")
 //   b. child killed by SIGKILL, no lease, no tag → dead, with the signal named
 //   c. child exits 0 while another process holds the lease → up (singleton)
+//   d–f. the lease names the child: up needs a beat since the wait began
 // ---
 console.log("\n7. awaitDaemonUp proof rules");
 {
@@ -414,6 +415,44 @@ console.log("\n7. awaitDaemonUp proof rules");
 		await waitExit(c);
 		const r = await awaitDaemonUp(sp, c, 1_000);
 		assert("c. child exit 0 + live lease held elsewhere → up", r.state === "up", JSON.stringify(r));
+		try { fs.unlinkSync(pp); } catch {} try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+	}
+	// d–f: the lease names the child itself, as the spawner's claim leaves it (#281)
+	const tagOf = (d: string, sp: string) => {
+		const tagsDir = path.join(d, "wtft-tags"); fs.mkdirSync(tagsDir, { recursive: true });
+		return path.join(tagsDir, `${path.basename(sp)}.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	};
+	// d. a live child that has not beaten since the wait began is not up, even with an older beat in the tag
+	{
+		const { d, sp, pp } = mk("308c0de0-1a9b-4c3d-9e8f-000000000315");
+		const c = spawn(process.execPath, ["-e", "setTimeout(()=>{}, 60000)"], { stdio: "ignore" });
+		fs.writeFileSync(pp, String(c.pid));
+		fs.writeFileSync(tagOf(d, sp), JSON.stringify({ _hb: { first: 0, last: Date.now() - 200 } }) + "\n");
+		const r = await awaitDaemonUp(sp, c, 400);
+		assert("d. lease names the live child, only a beat from before the wait → unknown, not up", r.state === "unknown", JSON.stringify(r));
+		c.kill("SIGKILL"); await waitExit(c);
+		try { fs.unlinkSync(pp); } catch {} try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+	}
+	// e. the child beats after the wait began → up
+	{
+		const { d, sp, pp } = mk("308c0de0-1a9b-4c3d-9e8f-000000000316");
+		const c = spawn(process.execPath, ["-e", "setTimeout(()=>{}, 60000)"], { stdio: "ignore" });
+		fs.writeFileSync(pp, String(c.pid));
+		const tag = tagOf(d, sp);
+		setTimeout(() => fs.writeFileSync(tag, JSON.stringify({ _hb: { first: 0, last: Date.now() } }) + "\n"), 100);
+		const r = await awaitDaemonUp(sp, c, 2_000);
+		assert("e. lease names the live child and it beats during the wait → up", r.state === "up", JSON.stringify(r));
+		c.kill("SIGKILL"); await waitExit(c);
+		try { fs.unlinkSync(pp); } catch {} try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+	}
+	// f. the child exits without beating → dead, and the claim made for it is taken back
+	{
+		const { d, sp, pp } = mk("308c0de0-1a9b-4c3d-9e8f-000000000317");
+		const c = spawn(process.execPath, ["-e", "setTimeout(()=>process.exit(1), 100)"], { stdio: "ignore" });
+		fs.writeFileSync(pp, String(c.pid));
+		const r = await awaitDaemonUp(sp, c, 2_000);
+		assert("f. lease names the child, which exits → dead", r.state === "dead", JSON.stringify(r));
+		assert("f. …and no lease is left naming it", !fs.existsSync(pp));
 		try { fs.unlinkSync(pp); } catch {} try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
 	}
 }

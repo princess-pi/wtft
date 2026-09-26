@@ -31,7 +31,7 @@ export interface HealthFacts {
   sessionMtimeMs: number | null;           // null: no session file
   sessionModel: () => string | undefined;  // read only when an idle answer needs a TTL
 }
-export interface HealthOptions { tagPath?: string; spawnedAt?: number | null }
+export interface HealthOptions { tagPath?: string }      // spawnedAt removed by #281
 export function readHealthFacts(sessionPath, pidPath, tagPath): HealthFacts;   // the fs adapter
 export function decideHealth(facts, now, opts?): DaemonStatus;                  // pure
 export function health(sessionPath, now, opts?): DaemonStatus;                  // in wtft-daemon-lib
@@ -53,15 +53,17 @@ inside a function, so load order does not matter. `checkDaemonHealth` is removed
 sets it. `awaitDaemonUp`, `ensureDaemonRunning` and `watchTagFile`'s wait for the tag file read
 `alive` and nothing else, so they see what they saw before.
 
-| Lease | Session file | Tag | Caller spawned < 5 s ago | Answer |
-|---|---|---|---|---|
-| alive | absent | any | any | `alive`, `reason: waiting-session` |
-| alive | present | non-empty, and its tail idle ≥ `IDLE_THRESHOLD_MS` or the session mtime that old | any | `alive`, `idle`, `idleMs`, `idleSinceMs`, `cacheTtlMs` |
-| alive | present | otherwise, or unreadable | any | `alive` |
-| dead | any | any | yes | `reason: waiting-session` with no session file, else `starting` |
-| dead | any | size > 0, mtime < 2 s ago | no | `reason: starting` |
-| dead | any | a heartbeat with a `last` in the tail | no | `reason: idle-timeout`, `lastHbMs`, `lastHbTime` from the newest such heartbeat |
-| dead | any | otherwise | no | `reason: not-found` |
+Since #281 (`docs/spec-281-spawner-claims-lease.md`) the spawner claims the lease for its child,
+so there is no gap to mask, and the two clock windows S5 kept (5 s after the caller's spawn, 2 s
+after a tag write) are gone. `decideHealth` never answers `starting`.
+
+| Lease | Session file | Tag | Answer |
+|---|---|---|---|
+| alive | absent | any | `alive`, `reason: waiting-session` |
+| alive | present | non-empty, and its tail idle ≥ `IDLE_THRESHOLD_MS` or the session mtime that old | `alive`, `idle`, `idleMs`, `idleSinceMs`, `cacheTtlMs` |
+| alive | present | otherwise, or unreadable | `alive` |
+| dead | any | a heartbeat with a `last` in the tail | `reason: idle-timeout`, `lastHbMs`, `lastHbTime` from the newest such heartbeat |
+| dead | any | otherwise | `reason: not-found` |
 
 "Tail" is the tag's last 8 KiB. Tail idle is the `first` of the newest heartbeat after the newest
 record that is neither a heartbeat nor a stop (any kind: turn, offset, sweep, fold, generation),
@@ -69,25 +71,17 @@ raised to that record's `t` when it is a later turn; a `first` of 0 counts as no
 is the recorded TTL of the newest tail turn carrying one (`1h` → 3,600,000, `5m` → 300,000),
 else `getModelCacheTtlMs` of the newest tail turn naming a model, else of the session file's last
 assistant model (read only then), else `null`. The widget's `getDaemonStatus` answers
-`not-started` until it has spawned a daemon, then passes its last spawn's time as `spawnedAt` for the session it spawned.
+`not-started` until it has spawned a daemon.
 
-Behaviour that changes, each in the direction of one rule for every reader:
+Behaviour that changes, each in the direction of one rule for every reader. S5 also made the two
+grace windows answer `starting` rather than alive, for every reader; #281 then deleted them.
 
-- **The 2 s tag-mtime grace answers `starting`, not alive.** The widget reported a dead lease
-  as `alive, idle`; `--watch` kept whatever it showed last. Both now show `starting...` until the
-  lease is claimed or the 2 s pass. The widget applied it only after its own spawn; now every
-  reader does.
-- **The spawn grace covers every dead answer, not only `not-found`.** After a spawn over a tag
-  with an old heartbeat, the widget showed `stopped HH:MM` until the new daemon claimed the
-  lease; now `starting...`.
 - **`waiting-session` for a live lease with no session file** comes from `health`, so `--watch`
   shows it too; it was the widget's alone.
-- **`--watch`'s `r` restart uses the spawn grace.** On `main` the `restarting` flag was cleared
+- **`--watch`'s `r` shows what `health` finds.** On `main` the `restarting` flag was cleared
   only by a live lease, polled once a second five times; with none by then, the view showed
-  `starting...` for as long as it ran. Now the restart passes its time as `spawnedAt` and the
-  view shows what `health` finds from the first ask; the five-poll interval is gone, and the
-  watchdog asks as it does at any other time. `--watch` passes its own start time the same way,
-  since it always spawns a daemon first.
+  `starting...` for as long as it ran. Now the view shows what `health` finds from the first ask,
+  the five-poll interval is gone, and the watchdog asks as it does at any other time.
 - **`waiting-session` in `--watch`** renders only once there are chart lines; before that
   `--watch` prints its waiting line instead.
 - **`--watch`'s idle countdown counts from `idleSinceMs` at each render**, as the widget's
@@ -105,11 +99,12 @@ Behaviour that changes, each in the direction of one rule for every reader:
 
 - `tests/wtft-270-daemon-health.test.ts`: `decideHealth` at hand-picked points along each axis
   (lease alive or dead; tag absent, empty, freshly written, turn only, idle heartbeat, clamped
-  heartbeat, heartbeat with `last` or `first` only, stop after a heartbeat; inside and outside
-  each grace; session file present, absent, old), with no process spawned, and `health` over temp
+  heartbeat, heartbeat with `last` or `first` only, stop after a heartbeat; session file present,
+  absent, old), with no process spawned, and `health` over temp
   files (this process as the lease holder) for the adapter. It is not the full product of the
   axes.
-- `tests/wtft-179-daemon-health-reason.test.ts` unchanged and passing.
+- `tests/wtft-179-daemon-health-reason.test.ts` unchanged and passing in S5 (#281 rewrote V3,
+  whose window it removed).
 - The widget (`getDaemonStatus`), `--watch` (`updateDaemonHealth`), `awaitDaemonUp`,
   `ensureDaemonRunning` call `health`, and `wtft-daemon --list`'s idle column calls `decideHealth` over the row's own lease; `grep checkDaemonHealth` over
   `bin/` and `extensions/` finds nothing.
@@ -128,7 +123,7 @@ Behaviour that changes, each in the direction of one rule for every reader:
   `renderDaemonStatus` and the 179 suite read its field names. One field is added:
   `lastHbMs`, the dead holder's last heartbeat, which `--list` needs and `lastHbTime` was
   formatted from.
-- **The graces answer with a reason, never with `alive`.** `awaitDaemonUp` treats `alive` as
+- **The graces answer with a reason, never with `alive`** (both removed since by #281). `awaitDaemonUp` treats `alive` as
   "the lease is claimed"; a grace that set it would report a daemon up before it claimed
   anything. *Road not taken:* a separate `shown` field for display, which would have put two
   liveness answers back on the interface.

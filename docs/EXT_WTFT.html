@@ -287,8 +287,7 @@
             <li><span style="color: #da0;">● idle (cache expires in 3min)</span> — no new data for 2m2s; the minutes left before the model's prompt cache expires (the turn's own 1h or 5m TTL when the tag records one, else a guess from the model name)</li>
             <li><span style="color: #da0;">● idle (cache emptied)</span> — that cache window has passed</li>
             <li><span style="color: #da0;">● idle (local model)</span> — idle, and the model has no remote cache or no model is known</li>
-            <li><span style="color: #da0;">● starting...</span> — no live lease holder yet: within 5 s of the widget's or <code>--watch</code>'s own spawn, or of <code>r</code> (with a session file), or within 2 s of the last write to a non-empty tag</li>
-            <li><span style="color: #da0;">● waiting for session .jsonl...</span> — the session file does not exist yet, and a live process holds the lease or the caller spawned one under 5 s ago</li>
+            <li><span style="color: #da0;">● waiting for session .jsonl...</span> — the session file does not exist yet, and a live process holds the lease (a daemon just spawned holds it from the spawn, #281)</li>
             <li><span style="color: #d44;">● stopped HH:MM</span> — no live lease holder; HH:MM is the last heartbeat carrying a <code>last</code> time in the tag's last 8 KiB</li>
             <li><span style="color: #d44;">● daemon not found</span> — no live lease holder and no such heartbeat</li>
             <li><span style="color: #d44;">● daemon not started</span> — the widget has not spawned a daemon yet</li>
@@ -302,7 +301,7 @@
             <li><strong>Lease pid alive, no session file</strong> → <code>waiting for session .jsonl...</code></li>
             <li><strong>Lease pid alive, a non-empty tag, and either a heartbeat idle ≥ 2m2s (the exact rule: spec-270 S5 §2), or a session file untouched ≥ 2m2s</strong> → <code>idle</code>. The heartbeat's <code>first</code> (or a later turn's time) is the clock baseline, so the countdown ticks between health checks; the session file's mtime covers a daemon restarted on an already-idle session.</li>
             <li><strong>Lease pid alive otherwise</strong> → <code>live</code></li>
-            <li><strong>Lease pid dead, within 5 s of the caller's own spawn, or a non-empty tag written within 2 s</strong> → <code>starting...</code> (the spawn grace answers <code>waiting for session .jsonl...</code> when there is no session file). Masks the gap while a new daemon replaces an old one. Neither grace ever reports the daemon alive, so the startup wait still waits for the lease.</li>
+            <li><strong>No clock window.</strong> A process that spawns a daemon claims the session's lease for it at once (#281, <a href="spec-281-spawner-claims-lease.md">spec-281</a>), so between spawn and serving the lease already names a live process.</li>
             <li><strong>Lease pid dead otherwise</strong> → <code>stopped HH:MM</code> at the last heartbeat, or <code>daemon not found</code> with none.</li>
         </ul>
 

@@ -36,7 +36,7 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 │  incremental append. Renders full chart                 │
 │  on every new data event + per-minute timeline refresh. │
 │  Monitors daemon health via health() (lease, tag tail). │
-│  5s starting grace after its own spawn and after 'r'.   │
+│  The spawner claims the lease: no starting window.      │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -56,7 +56,7 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 | Daemon just spawned (< 60s) | Idle drop suppressed (startup grace period) |
 | Session file deleted | A `--session` process exits ("session removed") unless the transcript moved. A harness process drops that session and stays up. |
 | Session file not yet created | Waits, and writes a heartbeat when this process is the per-session daemon or the session is the one a consumer is displaying, so the widget can show "waiting for session .jsonl..." (#124). Past the wait cap, a `--session` process exits ("session never written") and a harness process drops the slot. |
-| Press `r` in `--watch` | Stops a per-session lease holder (never a `--harness` one), spawns fresh, then asks `health` with a 5 s spawn grace; `● restart failed` if the spawn throws |
+| Press `r` in `--watch` | Stops a per-session lease holder (never a `--harness` one), waits up to 2 s for it to exit, then spawns fresh and claims the lease for it; `● restart failed` if the spawn throws |
 | **New activity after idle timeout** | Pi's `agent_end` handler calls `ensureDaemonRunning`, which spawns a daemon unless it spawned one for this session before and a live process holds the lease |
 
 ## Sub-Agent Transcript Read Path (#270 / #420 / #97)
@@ -562,7 +562,7 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 | Daemon exits (idle timeout, 24h) | Title shows `● stopped HH:MM` in red; footer shows red `'r' to restart` |
 | No activity for 2m2s | Status flips to `● idle (cache expires in Nmin)`, whole minutes rounded up, then `● idle (cache emptied)`. The TTL rule: `docs/spec-270-daemon-health.md` §2. |
 | Local model (no cache), or no model known | Status shows `● idle (local model)` |
-| User presses `r` | Daemon restarts; status shows what `health` finds, with the 5 s spawn grace (`● starting...` until a daemon holds the lease). A spawn that throws shows `● restart failed` |
+| User presses `r` | Daemon restarts; the view blocks up to 2 s while the old one exits, then shows what `health` finds (live at once: the lease names the new child). A spawn that throws shows `● restart failed` |
 | Tag file deleted/truncated | `fs.watch` handler re-reads from zero |
 | Daemon spawned before session file exists | Status shows `● waiting for session .jsonl...` (yellow); daemon polls until file created (#124) |
 | Daemon never started | The widget, before it has spawned one, shows `● daemon not started`; otherwise a dead lease with no heartbeat in the tag's last 8 KiB shows `● daemon not found`, and one with a heartbeat `● stopped HH:MM` |
@@ -576,8 +576,8 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 ## Verification
 
 1. Start `wtft --watch` → confirm `● live` on title line
-2. `kill <daemon-pid>` → within about 3.5 s (the 2 s tag-write grace, then the 1,334 ms watchdog), title shows `● stopped HH:MM` in red
-3. Press `r` on a per-session daemon → status shows `● starting...`, then `● live` (or `● idle` on an idle session) within 5s
+2. `kill <daemon-pid>` → within the 1,334 ms watchdog, title shows `● stopped HH:MM` in red
+3. Press `r` on a per-session daemon → status shows `● live` (or `● idle` on an idle session) within 2 s
 4. Wait 2m2s with no session activity → status flips to `● idle (cache expires in Nmin)`
 5. Wait 24h with no session activity → daemon exits, title shows stopped indicator
 6. Run `wtft --list` → the log parser daemons and their leases, RUNNING or DEAD. Idle is `0s` for a session active in the last 2m2s, and `?` for a harness-held lease whose session is not the harness's `--session` (#276)

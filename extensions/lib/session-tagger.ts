@@ -1056,7 +1056,8 @@ export function scanChildren(state: TaggerState, world: World, opts: ScanOptions
 				const st = world.stat(file);
 				if (st.size === fileState.lastSize && st.mtimeMs === fileState.mtimeMs && st.ino === fileState.ino) continue;
 			} catch (err) {
-				if ((err as NodeJS.ErrnoException).code !== "ENOENT") state.pollHadFailure = true;
+				const code = (err as NodeJS.ErrnoException).code;
+				if (code !== "ENOENT" && code !== "ENOTDIR") state.pollHadFailure = true;
 				continue;
 			}
 			readThisPass.delete(file);

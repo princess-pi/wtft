@@ -203,10 +203,11 @@ _Avoid_: Reset record, epoch
 
 **Source** (tag line `s`, #114):
 Which transcript a tag line came from: the hash of a child transcript's path — relative to the
-session directory when it lies under it, absolute when it does not, decided at the daemon's first
-read of that child and kept for the daemon's life, so a later move of the session does not change it (#263), and a
-child retired as folded elsewhere or gone from disk that is read again opens its next generation
-under the same source — written as `s` on the line
+session directory when it lies under it, absolute when it does not, decided at the first read of
+that child (a resume recovers it from the tag's generation record) and kept while the session
+stays served, so a later move of the session does not change it (#263), and a child retired as
+folded elsewhere or gone from disk that is read again meanwhile opens its next generation under
+the same source — written as `s` on the line
 and inside a fold record. A line with no `s` came
 from the tag's own session. It is what a generation record (above) supersedes lines by, so two
 copies of one session, or two children, never drop each other's lines.

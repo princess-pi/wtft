@@ -88,14 +88,15 @@ Changed on purpose; the three that a check pins name it:
 - **A sliced pass reads a transcript again when it grew after the pass took it** (#257,
   part C). When a continued pass reaches its end, every transcript an earlier slice read is
   stat'd once; one whose size, mtime or inode moved is due again and the pass stays open.
-  Swept is stamped only after that read. A stat that fails for any reason but the file being
-  gone counts as a failed poll.
+  Swept is stamped only after that read. A stat that fails for any reason but the file or its
+  directory being gone counts as a failed poll.
 - **A child transcript keeps one source for the life of its state** (#263, part M). The
   source is decided at the child's first read and carried across a move of the session and
   the child's own rotations, so a later generation of it retires its earlier lines. A child
   retired as folded elsewhere or released as gone loses its state but not its source: synced
-  again in the same daemon life it opens its generation under that source, retiring the earlier
-  lines. On resume,
+  again while the session stays served it opens its generation under that source, retiring the
+  earlier lines. A harness that drops the session for idling and serves it again starts a new
+  state and recovers sources through the resume, like a new daemon. On resume,
   a `_gen` record's source is matched against the path relative to the session's directory or
   to the child's own, and the recovered source seeds the child's state, so the resumed read
   opens its generation under the source the earlier lines carry.
@@ -161,6 +162,11 @@ harness registry concern, S4) and **I**, **J** (the sweep and the watch, daemon-
   test adapter's clock meaningful and the spawn-window and settle cases replayable.
 - **Renaming the `[wtft-log-parser]` log prefix.** `CONTEXT.md` avoids bare "log parser"; the
   prefix is every daemon line's and is on #261 with the other daemon strings.
+- **A fourth reconcile pass.** Five fresh-context auditors, then two narrowed re-audits over
+  the corrected sentences: 84 findings the first pass, 14 the second, 8 the third, every one
+  fixed and the third's all wording precision plus one edge case (`ENOTDIR` as gone in the
+  growth check). The loop stopped there; the PR review lenses and the final reconcile before
+  the merge offer are the next passes.
 - **Rewording the "could not be read at discovery" warning** for the session transcript, which
   fires on any poll's failed read. `tests/wtft-457-unreadable-transcript.test.ts` pins the
   text in several places, so it is on #261 with the other daemon strings.

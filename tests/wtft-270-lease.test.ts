@@ -62,8 +62,11 @@ console.log("\nPART U — unlinkLeaseIf");
 {
 	const f = fresh(ME);
 	const observed = leaseIdentity(f)!;
-	fs.unlinkSync(f);
-	fs.writeFileSync(f, ME);
+	// A replacement written first, then renamed over: a distinct inode for
+	// certain, where unlink-then-write hands the freed inode number straight back.
+	fs.writeFileSync(`${f}.next`, ME);
+	fs.renameSync(`${f}.next`, f);
+	check(leaseIdentity(f)!.ino !== observed.ino, "U4 fixture precondition: the lease is on a new inode");
 	check(unlinkLeaseIf(f, ME, observed) === false && fs.existsSync(f), "U4 the same value on a new inode is not the lease that was observed");
 	check(unlinkLeaseIf(f, ME, leaseIdentity(f)!) === true, "U5 the observed inode unlinks");
 }

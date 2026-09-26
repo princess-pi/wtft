@@ -206,3 +206,23 @@ S3–S5, not before.
 - **S1's tests are a new suite, `tests/wtft-270-tag-log.test.ts`,** rather than an extension of
   `tests/wtft-tag-format.test.ts`, which pins the serialise/deserialise round trip of one record
   kind and is left as it is.
+- **S1 also replaced the session picker's private tag reader.** `session-selector.ts` carried
+  a seventh substring site and its own generation and id-collapse logic, outside the map's
+  §1 count. It now calls `classifiedInteractionsFromContent`, and its allowlist entry in
+  `tests/wtft-tag-reader-collapse-guard.test.ts` is gone.
+- **A sweep marker may share its line with an offset.** `tests/wtft-443-provisional-tag-read.test.ts`
+  pins that shape, which no current writer produces. `recordOf` reads the line as `swept` or
+  `unswept` and carries the offset on the record, so `lastOffset` still finds it.
+- **S2's claim retries once, not forever.** The per-session daemon's old claim loop retried a
+  lost race without bound; `claimLease` retries once and reports `busy`, on which the daemon
+  exits 0 as it did for a live holder. A reader's `awaitDaemonUp` then sees whichever daemon
+  won. *Road not taken:* keeping the unbounded loop inside the module, which would have put a
+  process-exit policy behind a file-level interface.
+- **S2 changed one behaviour on purpose.** `restartDaemon` unlinked the lease unconditionally
+  after signalling its holder; it now unlinks only a lease that still names that holder, the
+  same re-prove every other site already did.
+- **An observed inode identity is a weak witness on Linux.** ext4 hands a freed inode number
+  straight back to the next file created, so unlink-then-write can reproduce the identity the
+  caller observed. The module keeps the check because a rename-replacement (the shape every
+  wtft writer uses) does get a new inode; `tests/wtft-270-lease.test.ts` U4 builds its fixture
+  that way.

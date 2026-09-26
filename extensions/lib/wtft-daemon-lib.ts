@@ -17,6 +17,7 @@ import { getDiscoveries } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.js";
 import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
 import { tagRecords, currentGeneration, sweepState, isDataRecord, type TagRecord } from "./tag-log.js";
+import { replaceLease, unlinkLeaseIf } from "./lease.js";
 export interface WatchSettings {
 	interval: string;
 	limit: number;
@@ -524,18 +525,9 @@ export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" 
 	}
 	const daemon = args.some(arg => /^wtft-daemon(\.(mjs|js|ts))?$/.test(path.basename(arg)));
 	if (daemon && args.includes("--harness")) {
-		const replacement = `${leasePath}.force-${process.pid}`;
 		try {
-			fs.writeFileSync(replacement, "rebuild");
-			let still = "";
-			try { still = fs.readFileSync(leasePath, "utf8").trim(); } catch { /* released */ }
-			if (still !== initial) {
-				fs.rmSync(replacement, { force: true });
-				return "busy";
-			}
-			fs.renameSync(replacement, leasePath);
+			if (!replaceLease(leasePath, "rebuild", String(process.pid), initial)) return "busy";
 		} catch {
-			fs.rmSync(replacement, { force: true });
 			return "unwritable";
 		}
 		return "rebuild";
@@ -564,7 +556,7 @@ export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" 
 	// Anything left behind would be resumed, not rebuilt, so any error but
 	// "already gone" fails the whole -F.
 	const gone = (err: unknown) => (err as NodeJS.ErrnoException).code === "ENOENT";
-	try { if (now !== "") fs.unlinkSync(leasePath); } catch (err) { if (!gone(err)) return "undeletable"; }
+	if (now !== "" && !unlinkLeaseIf(leasePath, now) && fs.existsSync(leasePath)) return "undeletable";
 	const prefix = path.basename(sessionPath) + ".wtft-tag.v";
 	const sibling = findSiblingTagPath(sessionPath);
 	for (const tagsDir of new Set([path.join(path.dirname(sessionPath), "wtft-tags"), path.dirname(getTagPath(sessionPath)), ...(sibling ? [path.dirname(sibling)] : [])])) {
@@ -886,7 +878,7 @@ export function restartDaemon(sessionPath: string, daemonPath: string): boolean 
 		// to serve this one (the spawn below points it here), never stopped.
 		if (pid > 0 && !isHarnessProcess(pid)) {
 			try { process.kill(pid, "SIGTERM"); } catch {}
-			try { fs.unlinkSync(pidPath); } catch {}
+			unlinkLeaseIf(pidPath, String(pid));
 		}
 	} catch {}
 

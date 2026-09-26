@@ -88,7 +88,8 @@ export function claimLease(file: string, owner: string, holderIsLive: (holder: s
 		const holder = leaseHolder(file);
 		if (holder === owner) return "claimed";
 		if (holder && holderIsLive(holder)) return "busy";
-		if (holder) unlinkLeaseIf(file, holder);
+		// An empty lease is a stale one too: `unlinkLeaseIf` matches "" on an empty file.
+		unlinkLeaseIf(file, holder);
 		try {
 			fs.linkSync(candidate, file);
 			return "claimed";

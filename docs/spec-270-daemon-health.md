@@ -69,7 +69,7 @@ raised to that record's `t` when it is a later turn; a `first` of 0 counts as no
 is the recorded TTL of the newest tail turn carrying one (`1h` → 3,600,000, `5m` → 300,000),
 else `getModelCacheTtlMs` of the newest tail turn naming a model, else of the session file's last
 assistant model (read only then), else `null`. The widget's `getDaemonStatus` answers
-`not-started` until it has spawned a daemon, then passes its last spawn's time as `spawnedAt`.
+`not-started` until it has spawned a daemon, then passes its last spawn's time as `spawnedAt` for the session it spawned.
 
 Behaviour that changes, each in the direction of one rule for every reader:
 
@@ -93,8 +93,9 @@ Behaviour that changes, each in the direction of one rule for every reader:
 - **`--watch`'s idle countdown counts from `idleSinceMs` at each render**, as the widget's
   did; it counted from the `idleMs` of the last health check.
 - **`wtft-daemon --list`'s idle age is the session's idle age.** A row whose holder names a
-  `--session` (resolved against the holder's cwd) whose lease is that row's lease gets its idle
-  column from `health` of that session: the time since `idleSinceMs`
+  `--session` whose lease is that row's lease (hashed from the argument as given or resolved
+  against the holder's cwd) gets its idle column from `decideHealth` over that lease, with no
+  session-file read for a model: the time since `idleSinceMs`
   while idle, `0s` while live, the time since `lastHbMs` when `health` has one, else `?` (`waiting-session` included). Any
   other row prints `?`. RUNNING
   and DEAD are unchanged and are not `health`'s: they are `--list`'s own `kill 0`. Which session a

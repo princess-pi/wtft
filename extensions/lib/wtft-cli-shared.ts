@@ -326,7 +326,7 @@ export function ensureDaemonRunning(sessionPath: string, daemonDir: string): boo
 
 export function getDaemonStatus(sessionPath: string): DaemonStatus {
 	if (!_daemonSessionPath) return { alive: false, reason: "not-started" };
-	return health(sessionPath, Date.now(), { spawnedAt: _daemonSpawned ? _daemonSpawnedAt : null });
+	return health(sessionPath, Date.now(), { spawnedAt: _daemonSpawned && _daemonSessionPath === sessionPath ? _daemonSpawnedAt : null });
 }
 
 // ---

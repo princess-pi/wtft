@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { projectsDir } from "../extensions/lib/harness/claude-code/discovery.js";
 import { tagRecords, parseTagLine, lastOffset, isDataRecord } from "../extensions/lib/tag-log.js";
 import { claimLease, unlinkLeaseIf, replaceLease as publishLease, leaseHolder } from "../extensions/lib/lease.js";
+import { decideHealth, readHealthFacts } from "../extensions/lib/daemon-health.js";
 import { readSession, flushTurns, scanChildren, resumeTagger, fsWorld, MTIME_SETTLE_MS, type LogLine } from "../extensions/lib/session-tagger.js";
 import {
   newRegistry, newSessionRecord, serve, get, move, drop, markIdle, forgetIdle, expiredIdle, beginRetry, retryFired, cancelRetry,
@@ -25,7 +26,7 @@ import {
 	WTFT_TAGGER_VERSION as TAGGER_VERSION,
 	taggerIsOlder,
 	lastLineStartByte,
-	health,
+	getTagPath,
 } from "../extensions/lib/wtft-shared.js";
 
 
@@ -1717,7 +1718,12 @@ if (showList || showCleanup || showRestart || stopSession) {
       let idleStr = "?";
       const now = Date.now();
       const session = sessionFound ? resolvedSessionArg(pid, sessionFound) : null;
-      const listed = session && getDaemonPidPath(session) === fullPath ? health(session, now) : null;
+      const ownLease = session !== null && sessionFound !== null
+        && (getDaemonPidPath(sessionFound) === fullPath || getDaemonPidPath(session) === fullPath);
+      // No model read: --list prints no cache TTL, and a transcript can be large.
+      const listed = ownLease
+        ? decideHealth({ ...readHealthFacts(session, fullPath, getTagPath(session)), sessionModel: () => undefined }, now)
+        : null;
       const since = !listed || listed.alive !== alive || listed.reason === "waiting-session" ? undefined
         : listed.idle ? listed.idleSinceMs : listed.alive ? now : listed.lastHbMs;
       if (since !== undefined) {

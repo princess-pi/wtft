@@ -133,6 +133,29 @@ console.log("\nPART P — the caller owns the write cadence");
 	const onlyTurnsBefore = lines.slice(0, offsetAt).every(l => /"id":/.test(l));
 	check(turnLines.length === 8 && offsetAt === 8 && onlyTurnsBefore, `P flush: true then returns the held turns followed by one offset marker (${turnLines.length} turn lines, offset at ${offsetAt})`);
 	check(state.pendingItems.length === 0, "P and nothing stays pending");
+	// A record still being written: the offset marker ends before it, so a resume re-reads it whole.
+	const whole = fs.statSync(s.session).size;
+	const p9 = ccAssistant({ id: "p9", tsMs: T0 + 9 * 60_000, output: 5, cr: 45_000, cw: 10 });
+	fs.appendFileSync(s.session, p9.slice(0, -20));
+	c.tick();
+	const cutRecords = stepTagger(state, c.world, { flush: true }).records;
+	check(state.pendingFragment.length === p9.length - 20 && !cutRecords.includes('"offset"'), "P fixture: the unterminated record is held as a fragment and nothing is flushed");
+	fs.appendFileSync(s.session, p9.slice(-20));
+	c.tick();
+	const flushedAfter = stepTagger(state, c.world, { flush: true }).records;
+	const offsetLine = flushedAfter.split("\n").find(l => l.includes('"offset"'));
+	const offset = offsetLine ? JSON.parse(offsetLine)._meta.offset : -1;
+	check(hasTurn(flushedAfter, "p9") && offset === fs.statSync(s.session).size && offset > whole, `P the completed record is flushed and the offset marker ends at the last byte consumed (${offset} of ${fs.statSync(s.session).size})`);
+	// A turn and then a partial record in one read: the marker ends before the fragment.
+	const p8 = ccAssistant({ id: "p8", tsMs: T0 + 10 * 60_000, output: 5, cr: 45_000, cw: 10 });
+	const p7 = ccAssistant({ id: "p7", tsMs: T0 + 11 * 60_000, output: 5, cr: 45_000, cw: 10 });
+	fs.appendFileSync(s.session, p8 + p7.slice(0, -20));
+	c.tick();
+	const mixed = stepTagger(state, c.world, { flush: true }).records;
+	const offsets = mixed.split("\n").filter(l => l.includes('"offset"')).map(l => JSON.parse(l)._meta.offset);
+	const size = fs.statSync(s.session).size;
+	check(hasTurn(mixed, "p8") && offsets.length === 1 && offsets[0] === size - (p7.length - 20) && state.lastSize === size,
+		`P a marker written while a record is held ends before that record, not at the read offset (${offsets} vs size ${size}, fragment ${p7.length - 20})`);
 }
 
 console.log("\nPART C — a sliced scan reads a transcript that grew after the pass took it (#257)");
@@ -298,6 +321,32 @@ console.log("  H — the children a settled lookup found are read after a restar
 	c.tick();
 	tag.append(runUntilQuiet(resumed, c.world, c.tick).records);
 	check(hasTurn(tag.all, "k1") && hasTurn(tag.all, "k2"), "H and the next steps read it");
+}
+{
+	// The settled child sits in another directory, unreadable at the resume: not absent, so it is registered.
+	const cwd = path.join(root, "resume-25");
+	const other = path.join(root, "resume-25-other");
+	const session = ccProjectFile(corpus.projects, cwd, UUID(25));
+	const subagents = path.join(path.dirname(session), UUID(25), "subagents");
+	fs.mkdirSync(subagents, { recursive: true });
+	fs.writeFileSync(session, ccUser(T0, cwd)
+		+ ccAssistant({ id: "r25", tsMs: T0 + 1_000, output: 100, cr: 0, cw: 20_000, blocks: [{ type: "tool_use", name: "Task", input: { description: "look" } }] })
+		+ ccAssistant({ id: "p25", tsMs: T0 + 5_000, output: 10, cr: 20_000, cw: 10, blocks: [bash(`cd ${other} && claude -p 'go'`)] }));
+	fs.writeFileSync(path.join(subagents, "agent-a0025.jsonl"), childTurn(0, 1) + childTurn(0, 2));
+	const child = ccProjectFile(corpus.projects, other, UUID(125));
+	fs.writeFileSync(child, ccUser(T0 + 6_000, other) + ccAssistant({ id: "k1", tsMs: T0 + 7_000, output: 500, cr: 0, cw: 8_000 }));
+	const tagPath = getCurrentVersionTagPath(session);
+	const state = newTaggerState(session, tagPath);
+	const c = clock({ driftPerRead: 1 });
+	const first = stepTagger(state, c.world, { flush: true, sliceMs: 0 });
+	check(first.cut && first.records.includes('"spawnSettled":"p25"') && first.records.includes(path.basename(child)) && !hasTurn(first.records, "k1"),
+		"H fixture: the lookup settled naming the child and the slice was cut before it was read");
+	fs.chmodSync(path.dirname(child), 0o000);
+	const resumed = newTaggerState(session, tagPath);
+	resumed.lastSize = state.lastSize;
+	resumeTagger(resumed, first.records, c.world);
+	check(resumed.discoveredClaudeFiles.has(child), "H a settled child whose directory cannot be read at the resume is registered, not treated as absent");
+	fs.chmodSync(path.dirname(child), 0o755);
 }
 console.log("  H — a claude -p child discovery also finds is left to discovery on resume");
 {
@@ -505,6 +554,19 @@ console.log("\nPART W — every failure the daemon warned about comes back as on
 	const sixth = runUntilQuiet(state, c.world, c.tick).records;
 	check(hasTurn(sixth, "k2") && sixth.includes('"swept"'), "W once readable the child's held turn is released and the tag is stamped swept");
 	check(first.log.some(l => l.level === "debug"), "W debug lines ride the same log");
+	// Unreadable again with no growth: the session read only stats, so discovery's read reports it, once.
+	fs.chmodSync(f.session, 0o000);
+	c.tick();
+	const again = stepTagger(state, c.world, { flush: true });
+	const againWarns = warns(again);
+	check(againWarns.length === 0, "W fixture: the latch already holds this transcript, so no second warn line");
+	const other = newTaggerState(f.session, tagPath);
+	other.lastSize = state.lastSize;
+	const fresh = stepTagger(other, c.world, { flush: true });
+	check(warns(fresh).length === 1 && warns(fresh)[0].includes("the session transcript could not be read at discovery") && other.pollHadFailure, "W a transcript unreadable after its last read, with no growth, is still warned once and fails the poll");
+	c.tick();
+	check(warns(stepTagger(other, c.world, { flush: true })).length === 0, "W and not again");
+	fs.chmodSync(f.session, 0o644);
 }
 {
 	// A claude -p child in another directory that becomes unreadable at the directory: not gone, a failed poll.

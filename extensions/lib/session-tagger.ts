@@ -123,7 +123,7 @@ export interface World {
 	exists(file: string): boolean;
 	/** One spelling for one file: symlinks resolved. */
 	canonical(file: string): string;
-	discoverTask(sessionPath: string): { files: string[]; unreadable: Error | null };
+	discoverTask(sessionPath: string): { files: string[]; unreadable: Error | null; sessionUnreadable: Error | null };
 	discoverClaude(commands: string[], parentTimestamp: number, ownCwd: string | null): { files: string[]; unreadable: Error | null; searched: number };
 	attribute(turns: Turn[], ownCwd: string | null, doNotFold: ReadonlySet<string>): void;
 	lastCwd(file: string): string | null;
@@ -413,7 +413,7 @@ export function flushTurns(state: TaggerState): string {
 	const batch = state.pendingItems.map(it => serializeClassifiedWithOverheadSplit(it.interaction, it.prevCtx)).join("");
 	state.tagGrewSinceMarker = true;
 	state.pendingItems = [];
-	return batch + JSON.stringify({ _meta: { offset: state.lastSize }}) + "\n";
+	return batch + JSON.stringify({ _meta: { offset: state.lastSize - state.pendingFragment.length }}) + "\n";
 }
 
 // ---
@@ -858,7 +858,14 @@ function resumeClaudeLookups(state: TaggerState, world: World, tagContent: strin
 	// A child a settled lookup found that no earlier life read.
 	for (const file of settledChildren) {
 		if ([...sourceCandidates(state, file)].some(source => readSources.has(source))) continue;
-		if (world.exists(file)) state.discoveredClaudeFiles.add(file);
+		let absent = false;
+		try {
+			world.stat(file);
+		} catch (err) {
+			const code = (err as NodeJS.ErrnoException).code;
+			absent = code === "ENOENT" || code === "ENOTDIR";
+		}
+		if (!absent) state.discoveredClaudeFiles.add(file);
 	}
 	for (const [key, { at, commands }] of open) {
 		if (state.pendingClaudeCommands.some(item => spawnKey(item.interaction) === key)) continue;
@@ -981,6 +988,10 @@ export function scanChildren(state: TaggerState, world: World, opts: ScanOptions
 	try {
 		const discoveredPi = world.discoverTask(state.sessionPath);
 		taskAgentFiles = discoveredPi.files;
+		if (discoveredPi.sessionUnreadable && !state.warned.session.has(state.sessionPath)) {
+			state.warned.session.add(state.sessionPath);
+			warn(out, `the session transcript could not be read at discovery, so its cost may be missing from this session's total (${state.sessionPath}): ${errText(discoveredPi.sessionUnreadable)}`);
+		}
 		if (discoveredPi.unreadable) {
 			state.pollHadFailure = true;
 			debug(out, `subagent discovery candidate unreadable, will retry next poll (${path.basename(state.sessionPath)}): ${discoveredPi.unreadable.message}`);
@@ -1171,11 +1182,11 @@ export interface StepResult {
 export function stepTagger(state: TaggerState, world: World, opts: StepOptions): StepResult {
 	const read = readSession(state, world);
 	let records = read.records;
-	let wrote = read.records.length > 0;
+	let wrote = false;
 	if (opts.flush) {
 		const flushed = flushTurns(state);
 		records += flushed;
-		wrote = wrote || flushed.length > 0;
+		wrote = flushed.length > 0;
 	}
 	const scan = scanChildren(state, world, opts);
 	return {

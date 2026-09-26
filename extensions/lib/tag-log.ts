@@ -18,9 +18,9 @@ export type TagRecord =
 	| { kind: "spawn-settled"; key: string; children: string[] }
 	| { kind: "fold"; parent: string | undefined; child: string; source: string | undefined }
 	| { kind: "generation"; source: string; session: string | undefined }
-	/** A `_meta` object none of the shapes above match: skipped by every reader. */
+	/** A `_meta` object none of the shapes above match: a marker, passed over. */
 	| { kind: "meta-other" }
-	/** A parsed object that is no record of ours: skipped by every reader. */
+	/** A parsed object of no known shape. Not a marker: the sweep state reads it as data. */
 	| { kind: "unknown" };
 
 /** Data records are what a reader counts; markers are the daemon's own state. */

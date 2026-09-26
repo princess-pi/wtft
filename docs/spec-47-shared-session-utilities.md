@@ -90,14 +90,17 @@ export function discoverSessions(
   harness?: 'pi' | 'claude-code' | 'auto'
 ): SessionCandidate[];
 
-/** Read .jsonl → assistant turn count + total cost */
+/** Read the session's tag file (current version, else the highest version number on disk) →
+ *  id-collapsed turn count + summed turn cost; with no tag, the transcript's
+ *  non-blank line count and no cost */
 export function getSessionSummary(
   filePath: string
-): { turns: number; cost: number };
+): { turns: number; cost: number; tagVersion: string | null; rawLines: number | null };
 
-/** Interactive TTY picker (↑/↓/Enter/Ctrl+C), non-TTY fallback to auto-select 1st */
+/** Interactive TTY picker (j/k or arrows, Enter, q/Ctrl+C); the caller guarantees a TTY (exit 10 otherwise) */
 export function selectSessionPrompt(
-  candidates: SessionCandidate[]
+  initialCandidates: SessionCandidate[],
+  opts: { harnessOption: string; cwdOverride?: string; out?: NodeJS.WriteStream }
 ): Promise<string>;
 ```
 

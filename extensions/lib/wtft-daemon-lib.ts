@@ -16,8 +16,8 @@ import { splitOverheadCost, isModelTagged } from "./wtft-parser.js";
 import { getDiscoveries } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.js";
 import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
-import { tagRecords, currentGeneration, sweepState, isDataRecord, type TagRecord } from "./tag-log.js";
-import { replaceLease, unlinkLeaseIf } from "./lease.js";
+import { tagRecords, parseTagLine, currentGeneration, sweepState, isDataRecord, type TagRecord } from "./tag-log.js";
+import { replaceLease, unlinkLeaseIf, leaseHolder } from "./lease.js";
 export interface WatchSettings {
 	interval: string;
 	limit: number;
@@ -738,12 +738,10 @@ function getModelFromSessionFile(sessionPath: string): string | undefined {
 export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonStatus {
 	const pidPath = getDaemonPidPath(sessionPath);
 	let pidAlive = false;
-	try {
-		const pid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
-		if (pid > 0) {
-			try { process.kill(pid, 0); pidAlive = true; } catch {}
-		}
-	} catch {}
+	const pid = parseInt(leaseHolder(pidPath), 10);
+	if (pid > 0) {
+		try { process.kill(pid, 0); pidAlive = true; } catch {}
+	}
 
 	if (pidAlive) {
 		try {
@@ -873,7 +871,7 @@ export async function awaitDaemonUp(
 export function restartDaemon(sessionPath: string, daemonPath: string): boolean {
 	const pidPath = getDaemonPidPath(sessionPath);
 	try {
-		const pid = parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
+		const pid = parseInt(leaseHolder(pidPath), 10);
 		// A harness process serves every session under its root, so it is asked
 		// to serve this one (the spawn below points it here), never stopped.
 		if (pid > 0 && !isHarnessProcess(pid)) {
@@ -1220,16 +1218,10 @@ export async function watchTagFile(
 						const lines = newContent.split("\n");
 						let newCount = 0;
 						for (const line of lines) {
-							if (!line.trim()) continue;
-							try {
-								const obj = JSON.parse(line);
-								if (obj._hb) continue;
-								const interaction = classifiedToInteraction(obj);
-								if (interaction) {
-									allInteractions.push(interaction);
-									newCount++;
-								}
-							} catch {}
+							const record = parseTagLine(line);
+							if (record?.kind !== "turn") continue;
+							allInteractions.push(record.interaction);
+							newCount++;
 						}
 
 						if (newCount > 0) {

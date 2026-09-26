@@ -2,6 +2,13 @@
 
 Issue: https://github.com/princess-pi/wtft/issues/270. Measured on `main` @ `0082dee`, 2026-09-25.
 
+**Read §1 and §2 as a record of `main` @ `0082dee`, the state before the slices, not as current
+behaviour, corrected where the reconcile auditors found a cell wrong about `main` too.** The
+retired names are `tryClaimLease`, `currentGenerationRecords` and `claimPidFile`'s inline claim;
+`unlinkIfStill` and `unlinkIfNames` survive as one-line wrappers over `unlinkLeaseIf`, and
+`readLastMetaOffset` still runs, over `tagRecords`. §4 says what each slice replaced, and the
+code is the authority for what runs now.
+
 Part 1 is the map: every persistent record the daemon, CLI and widgets share, with its writer,
 its readers and the moment each acts. Part 2 lists where a reader re-derives a fact a writer
 already held. Part 3 is the refactor: which modules, what each one's interface is, and the
@@ -15,64 +22,72 @@ Vocabulary is the `codebase-design` skill's: module, interface, seam, adapter, d
 
 ### 1a. Tag file `<sessionDir>/wtft-tags/<base>.wtft-tag.v<V>.jsonl`
 
-Format contract: `docs/wtft-tag-format.md`. Twelve record kinds share one file. "Moment" is
+Format contract: `docs/wtft-tag-format.md`. Twelve record kinds share one file; the reader adds
+`meta-other` and `unknown` (§3a). "Moment" is
 when the write happens; "reader" names every consumer and what it takes from the record.
 
 | # | Record | Writer (function) | Moment | Readers → what they take |
 |---|---|---|---|---|
-| T1 | interaction line, no `s` | `flushPending` via `serializeClassifiedWithOverheadSplit` | ≥ 667 ms after the first pending turn | CLI `readTagFileWithVerdict`; widget same; `token-budget` `readClassifiedTagFile`; `--watch` `seedClassifiedTagFile` / `watchTagFile`; `checkDaemonHealth` → `m`, `ttl`, `t`; daemon `initClassified` → "has data"; `reapAndWarn` → `cat` present; `sessionWasEverParsed` → `cat` present |
-| T2 | interaction line with `s` | `syncSubagentTranscript` | each child-transcript read that produced turns | as T1, filtered by `currentGenerationRecords` |
+| T1 | interaction line, no `s` | `flushPending` via `serializeClassifiedWithOverheadSplit` | ≥ 667 ms after the last tag write (`lastWriteMs`, which heartbeats also set); at once on `shutdown`, `dropHarnessSlot`, `stopHarness` | CLI `readTagFileWithVerdict`; widget same; `token-budget` `readClassifiedTagFile`; `--watch` `seedClassifiedTagFile` / `watchTagFile`; `checkDaemonHealth` → `m`, `ttl`, `t` (last 8 KiB, lease pid alive, no generation filter); `tagProvisionalFromContent` / `sweepState` → data; daemon `initClassified` → "has data" (any turn, fold, generation or `unknown` record); `invalidateStaleSweptMarker` → ends its backward scan; `reapAndWarn` → `cat` present; `sessionWasEverParsed` → `cat` present |
+| T2 | interaction line with `s` | `syncSubagentTranscript`; `scanForSubAgents` for a vanished transcript's held turn | each child-transcript read that produced turns; the last plain turn of a growing read, held back and written by a later read; an owner rewrite with no new bytes when its folded children change; a re-interrupted copy | as T1, filtered by `currentGeneration` |
 | T3 | `#oh` overhead line | `flushPending` | with T1, on a recache or compaction | as T1; never id-collapsed with its bare line |
-| T4 | `_hb {first,last}` | `upsertHeartbeat`, `initClassified` | every poll with nothing pending (per-session, or a harness slot that is displayed) | `checkDaemonHealth` → idle since / last beat; `reapAndWarn` → heartbeat ratio, zombie age; `tagProvisionalFromContent` → skipped; `initClassified` → excluded from "has data" |
-| T5 | `_hb "stop", reason` | `shutdown`, `dropHarnessSlot`, `stopHarness` | exit or drop | `reapAndWarn` → excluded from the ratio; `--watch` reads nothing from it |
-| T6 | `_meta.offset` | `flushPending` | after every T1 batch | daemon `readLastMetaOffset` only |
-| T7 | `_meta.swept` | `scanForSubAgents` | a scan with no failure, no held-back turn, and a tag that grew since the last marker | `tagProvisionalFromContent` (CLI, widget) → settled; daemon `invalidateStaleSweptMarker` |
-| T8 | `_meta.unswept` | `invalidateStaleSweptMarker` | a session read failed after a swept marker; startup resume | `tagProvisionalFromContent` → `unswept` |
-| T9 | `_meta.spawnPending {key,at,commands}` | `queueClaudeCommand` | a turn with a `claude -p` command is read | daemon `resumeClaudeLookups` only |
-| T10 | `_meta.spawnSettled key, children[]` | `scanForSubAgents` | the lookup for a turn ends | daemon `resumeClaudeLookups` only |
-| T11 | `_fold {parent,child,s}` | `syncSubagentTranscript` | a child parse folded a session this generation had not recorded | CLI and widget `foldedIdsFromRecords` → `computeSpawnTree.alreadyAttributed`; daemon `reseedClaudeChildren` |
-| T12 | `_gen {s,session}` | `syncSubagentTranscript`, `skipAsFoldedElsewhere`, the pending-turn release in `scanForSubAgents` | first read of a child in a daemon life; rotation; a child another transcript now folds | `currentGenerationRecords` (CLI, widget, `--watch` reseed); daemon `resumeClaudeLookups` → sources already read; `reseedClaudeChildren` |
+| T4 | `_hb {first,last}` | `upsertHeartbeat`, `initClassified` | every per-session poll with nothing pending, and every poll while the session file does not exist yet; once at every start or adoption, displayed or not; when the sweep finds a `.display` marker. A harness has no timer poll, only `wake`, so an idle displayed slot gets no periodic beat | `checkDaemonHealth` → idle since / last beat; `reapAndWarn` → heartbeat ratio, zombie age; `upsertHeartbeat` → last line's kind, to overwrite in place; `sweepState` / `invalidateStaleSweptMarker` → passed over; `initClassified` → excluded from "has data"; `sessionWasEverParsed` → not parse evidence |
+| T5 | `_hb "stop", reason` | `shutdown`, `dropHarnessSlot`, `stopHarness` | exit or drop, only while the lease still names this pid and, for a drop, with a reason: the lost-lease exit, a drop for a `rebuild` lease or a move collision, and `fatalTagMutation` write none | `reapAndWarn` → excluded from the ratio; `checkDaemonHealth` → skipped; `sweepState` → passed over, so a stop after a swept marker stays swept |
+| T6 | `_meta.offset` | `flushPending` | after every T1 batch | daemon `readLastMetaOffset` (last 8 KiB only); `sessionWasEverParsed` → parse evidence; `lastOffset` also takes one riding on a sweep marker |
+| T7 | `_meta.swept` | `scanForSubAgents` | a scan with no failure, no held-back turn, and a tag that grew since the last marker, or an unswept retraction with no growth; never on a cut harness slice. `tagGrewSinceMarker` starts true in every life and slot, so the first clean scan stamps | `tagProvisionalFromContent` (CLI, widget) → settled, when the file name's version is current and no data or `unknown` record follows; daemon `invalidateStaleSweptMarker`; `sessionWasEverParsed` |
+| T8 | `_meta.unswept` | `invalidateStaleSweptMarker` | a session read failed after a swept marker; startup resume | `tagProvisionalFromContent` → `unswept`; `invalidateStaleSweptMarker` → returns at it; `sessionWasEverParsed` |
+| T9 | `_meta.spawnPending {key,at,commands}` | `queueClaudeCommand` | a turn of the session's own transcript with a `claude -p` command is read, never one in a subagent transcript; a later line with the same key that adds a command appends a second | daemon `resumeClaudeLookups`; `sessionWasEverParsed` |
+| T10 | `_meta.spawnSettled key, children[]` | `scanForSubAgents` | the lookup for a turn ends, or its window closes with nothing searched; `children` is omitted when the lookup registered none | daemon `resumeClaudeLookups`; `sessionWasEverParsed` |
+| T11 | `_fold {parent,child,s}` | `syncSubagentTranscript` | a child's first write in a generation records the child itself; then each session a model-tagged turn folded that this generation had not recorded | CLI and widget `foldedIdsFromRecords` → `computeSpawnTree.alreadyAttributed`; daemon `reseedClaudeChildren`; `initClassified` → "has data"; `sweepState` / `invalidateStaleSweptMarker` → data |
+| T12 | `_gen {s,session}` | `syncSubagentTranscript`, `skipAsFoldedElsewhere`, the pending-turn release in `scanForSubAgents` | first read of a child in a daemon life, turns or none; rotation; a child another transcript now folds; an interrupt that must mark an id-less turn already written; an owner's attributed cost shrinking | `currentGeneration` (CLI, widget, `--watch` reseed via `appendedGeneration`); daemon `resumeClaudeLookups` → sources already read; `reseedClaudeChildren`; `initClassified` → "has data"; `sweepState` / `invalidateStaleSweptMarker` → data |
 
 Whole-file properties that are also read as state:
 
 | Property | Writer | Readers → what they take |
 |---|---|---|
-| size, mtime | every append | `getDaemonStatus` → 2 s grace after a lost lease; `watchTagFile` → 2 s grace; `token-budget` → active if mtime < 2 min; `wtft-daemon --list` → idle age |
-| truncate to 0 | `initClassified` on rebuild, on a partial tail, on a tag with no offset marker | `watchTagFile` → reseed when size < offset |
+| size, mtime | every append; the in-place heartbeat write changes mtime with no append | `getDaemonStatus` → 2 s grace after a lost lease; `watchTagFile` → 2 s grace; `token-budget` → active if mtime < 2 min; `wtft-daemon --list` → idle age, from the first tag file of any version `readdir` returns; `reapAndWarn` → warns above 1 MB; `checkDaemonHealth` → size > 0 gate |
+| truncate to 0 | `initClassified` on rebuild, on a partial tail (cut to `lastLineStartByte` first), on a tag with no data record, and on a tag whose offset marker is not in the last 8 KiB `readLastMetaOffset` reads (a valid tag rebuilt from scratch; lead on #261) | `watchTagFile` → reseed when size < offset, or when the prefix sentinel changed after a regrowth |
 | heartbeat overwritten in place | `upsertHeartbeat` | `watchTagFile` → prefix sentinel unchanged |
-| file name version | `getCurrentVersionTagPath` | `tagProvisionalFromContent` → `stale-version`; `waitingForDataLine` |
+| file name version | `getCurrentVersionTagPath` names the writer's path; per-session `main` deletes older-version tags at start and 5 s later, a harness adoption never does | `tagProvisionalFromContent` → `stale-version`; `waitingForDataLine`; `getTagPath` → the other-version fallback; per-session `main` → exit or take over on a newer tag; `--list` → the printed version; `forceRebuildSession` → deletes every version |
 
 ### 1b. Session lease `$TMPDIR/wtft-daemon-<hash>.pid`
 
 Value is a pid or the token `rebuild`. Hash is of the transcript basename when it is a session
-id, else of the path.
+id, else of the raw `--session` string; `--stop` hashes the resolved path, so a relative
+non-session-id path names a different lease (lead on #261). Two transient siblings exist while
+`lease.ts` works: `<lease>.claim-<pid>` and `<lease>.replace-<pid>`.
 
 | Writer | Moment | Effect |
 |---|---|---|
-| per-session `main` (`tryClaimLease`, hard link) | start | claims |
-| `replaceLease` | version takeover at start; `fatalTagMutation` writes `rebuild` | replaces |
-| `claimPidFile` | harness `adoptSession`; `runHarness` for the root file | claims, unlinks a dead holder |
-| `takeOverLease` | harness adoption against a live per-session daemon | SIGTERMs the holder, then claims |
-| `pointSessionAt` | a CLI-spawned daemon that found a live harness | writes the harness pid, plus a `.display` sidecar, plus a focus request |
-| `forceRebuildSession` (CLI `-F`) | user | writes `rebuild` for a harness; unlinks for a per-session daemon |
-| `wtft-daemon --stop`, `--restart`, `reapAndWarn`, `releaseLease`, `shutdown`, `retryAdoptionLater` | each its own | unlink, each with its own re-prove-then-unlink |
+| per-session `main` (`claimLease`, hard link) | start | claims; any live pid is busy, EPERM included, and busy exits 0; a dead pid, `rebuild`, empty or non-numeric holder is unlinked and the claim retried once |
+| `replaceLease` | version takeover at start, replacing whatever live holder the lease names; `fatalTagMutation` writes `rebuild` for the current slot only, then exits the whole harness with code 1, leaving every other served lease naming a dead pid | replaces |
+| `claimPidFile` (`claimLease` with `holderIsLiveDaemon`) | harness `adoptSession`, through `takeOverLease`; `runHarness` for the root file | claims; `rebuild`, empty, a dead pid and a live non-daemon pid are stale and unlinked; off Linux `procIsDaemon` is always false, so every holder is stale |
+| `takeOverLease` | harness adoption against a live per-session daemon | SIGTERM up to 20 times, 50 ms apart, then claims; returns false at once for a `--harness` holder, and after about 1 s busy, to `retryAdoptionLater` |
+| `pointSessionAt` | any `--harness` start with a session that found a live harness not older than itself | writes the harness pid unless the lease reads `rebuild` or another live daemon holds it, plus a `.display` sidecar, plus a focus request; on a failed request unlinks the lease and `.display` unless the harness held both |
+| `forceRebuildSession` (CLI `-F`) | user | writes `rebuild` for a harness (`replaceLease`, expected the value first read); for a per-session daemon SIGTERMs, then `unlinkLeaseIf`, `undeletable` when the lease changed |
+| `wtft-daemon --stop`, `--restart`, `--cleanup`, `reapAndWarn`, `releaseLease`, `shutdown`, `stopHarness`, `retryAdoptionLater`, `pointSessionAt`'s failure path, `claimLease`'s stale unlink, CLI `restartDaemon` | each its own | unlink, all through `unlinkLeaseIf`; only `reapAndWarn` passes an observed inode |
 
 Readers: `checkDaemonHealth` (pid alive → daemon alive), `serviceSession` (holder is me, every
-poll), `leaseStillOurs`, `wake` (`rebuild` → adopt afresh), `awaitDaemonUp`, `handOffLines`,
-`retryAdoptionLater`, `forceRebuildSession`.
+poll), `leaseStillOurs`, `leaseLost`, `logLeaseLost`, `wake` (`rebuild` → adopt afresh),
+`awaitDaemonUp`, `handOffLines`, `retryAdoptionLater`, `forceRebuildSession`, `shutdown`,
+`adoptSession`, `takeOverLease`, `pointSessionAt`, `reapAndWarn`, `--stop`, `--list`,
+`--cleanup`, `--restart`, per-session `main`, and `claimLease` itself.
 
-Eight functions implement "read the lease, re-prove the inode, unlink": `unlinkIfHolds`,
-`unlinkIfStill`, `unlinkIfNames`, `releaseLease`, `claimPidFile`, `takeOverLease`, `tryClaimLease`,
-and `forceRebuildSession`'s inline copy.
+On `main` eight functions implemented "read the lease, re-prove the inode, unlink":
+`unlinkIfHolds`, `unlinkIfStill`, `unlinkIfNames`, `releaseLease`, `claimPidFile`,
+`takeOverLease`, `tryClaimLease`, and `forceRebuildSession`'s inline copy. S2 left one,
+`unlinkLeaseIf`, plus `claimLease`; `forceRebuildSession` keeps two raw reads (§4).
 
 ### 1c. Harness root files `$TMPDIR/wtft-harness-<which>-<hash>.pid` and sidecars
 
 | File | Writer | Moment | Reader → what it takes |
 |---|---|---|---|
-| `.pid` | `runHarness` (`claimPidFile`); `stopHarness`, `--restart` unlink | start / stop | `sweepIdleSlots` every 250 ms → holder is me, else stop; `holdsHarnessRoot`; `pointSessionAt`; a later `runHarness` → live pid |
-| `.<pid>.version` | `runHarness` | before the claim | a later `runHarness` → `taggerIsOlder` decides replace or hand over |
-| `.focus.d/<pid>.request` | `pointSessionAt` (a second daemon process) | a CLI report or `--watch` on a session the harness does not serve | `claimFocusRequests` (rename-claim) on `fs.watch` and every sweep |
-| `.served` | `writeServedHandOff` at stop; `persistHandOff` every sweep when the text differs | continuous | `takeServedHandOff` (rename-claim) at the next start |
+| `.pid` | `runHarness` (`claimPidFile`); `stopHarness` (a raw read-compare-unlink, outside `lease.ts`), `--restart` unlink | start / stop; a newer starting harness SIGTERMs an older live one and SIGKILLs it 2 s later, as does `--restart` | `sweepIdleSlots` every 250 ms → holder is me, else stop, and exit 1 on any read error but ENOENT; `holdsHarnessRoot`; `pointSessionAt`; `stopHarness`; `--restart`; a later `runHarness` → live pid |
+| `.<pid>.version` | `runHarness`; removed by its `leave()` on every exit path and by `stopHarness` | before the claim | a later `runHarness` → `taggerIsOlder` decides replace or hand over; a missing file reads "", which counts as older |
+| `.focus.d/<pid>.request` | `pointSessionAt` (a second daemon process), written as `<pid>.tmp` then renamed, withdrawn if the root changed hands | any `--harness` start with a session that found a live harness not older than itself | `claimFocusRequests` (rename to `<name>.<pid>.claimed`) on `fs.watch`, every sweep and at the idle stop; JSON or the older `<pid>\n<path>` text; a path outside the root is dropped silently |
+| `.display` | `pointSessionAt` | with the focus request | `sweepIdleSlots` → sets `displayed`, writes a heartbeat, deletes it; removed by `releaseLease`, by `retryAdoptionLater` when no lease is left, by `pointSessionAt`'s failure path; left behind by `--stop` of a harness session |
+| `.served` | `writeServedHandOff` at stop, while this process still holds the root; `persistHandOff` at the end of every full sweep when the text differs; `fatalTagMutation`; both writers remove it when it would be empty | continuous | `takeServedHandOff` (rename-claim `.served.<pid>.claimed`) at the next start; `persistHandOff` reads it; an unreadable file is moved to `.served.unreadable-<UTC>`; entries carry `since` and `sig` for idle sessions |
+| transient | `.served.<pid>.tmp`, `.focus.d/<pid>.tmp`, `.focus.d/*.<pid>.claimed`; the `.focus.d` directory itself (mode 0700, never removed) | | |
 
 ### 1d. Spawn ledger `$XDG_STATE_HOME/wtft/spawns.jsonl`
 
@@ -95,8 +110,9 @@ Session `.jsonl`, `<id>/subagents/agent-*.jsonl` and `.meta.json`, Pi sibling fi
 
 `bin/wtft-daemon.ts` holds 38 module-level `let` bindings and 17 module-level `Map`/`Set`
 collections. In harness mode, `install(slot)` / `save(slot)` copy 25 of the `let` bindings into
-and out of a `Slot` around every call. The 17 collections are keyed by session path and are not
-in the `Slot`: `harnessSlots`, `harnessWatchers`, `harnessFlushTimers`,
+and out of a `Slot` around every call. The 17 collections are not in the `Slot`, and most are
+keyed by session path (`harnessWatchers` and `unwatchedDirs` by directory, the `warned*` sets by
+child transcript path): `harnessSlots`, `harnessWatchers`, `harnessFlushTimers`,
 `subagentScansContinuing`, `subagentScanPass`, `subagentScanPassFailed`, `reseedPending`,
 `adoptionRetries`, `adoptionRetryPending`, `idleDropped`, `idleDroppedSize`, `idleDroppedAt`,
 `unwatchedDirs`, `unwatchedTreeScanAt`, and three `warned*` sets. A session move re-keys six of
@@ -112,18 +128,18 @@ issue that turns on the row, where one exists.
 
 | # | Fact | Held by | Re-derived by | Turns on |
 |---|---|---|---|---|
-| R1 | the tag is settled (every subagent turn written, no read failed) | daemon: `pollHadFailure`, `turnHeldBack`, `tagGrewSinceMarker` | `tagProvisionalFromContent` scans the tail backwards for T7/T8; then the CLI overrides it from its own discovery scan (`subagent-unreadable`) and its own spawn-tree stat (`descendant-live`); the widget overrides from its own subagent parse | #235, #257, #169 |
+| R1 | the tag is settled (every subagent turn written, no read failed) | daemon: `pollHadFailure`, `turnHeldBack`, `tagGrewSinceMarker`, `sweptRetracted`, a cut slice, `subagentScanPassFailed`, `reseedPending`, `sessionReadFailed` | `tagProvisionalFromContent` reads the whole content through `sweepState`, and `invalidateStaleSweptMarker` re-derives the same state; then the CLI overrides it from its own discovery scan (`subagent-unreadable`) and its own spawn-tree stat (`descendant-live`); the widget overrides from its own subagent parse | #235, #257, #169 |
 | R2 | which sessions are inside SELF | daemon: `recordedFolds` per child, written as T11 | CLI reads T11 (settled by D1 in #194); the widget reads T11 **and** re-parses every subagent transcript live, merging both copies and relying on message-id collapse to cancel the tag's copy | #237 |
 | R3 | a descendant's cost | the descendant's own daemon, in its own tag, when a reader has asked for it | `computeSpawnTree` → `parseDescendant` parses the transcript, and its subagents, on every report; `parseSessionFileStrict` re-runs `attributeClaudeSubAgentCosts`, the same fold the daemon ran | #216, #235 |
 | R4 | the daemon is alive | daemon: `running` | four rules: `checkDaemonHealth` (lease pid + `kill 0`, then a T4 tail scan); `getDaemonStatus` adds a 5 s spawn grace and a 2 s tag-mtime grace; `watchTagFile` adds its own 2 s mtime grace and a 1,334 ms watchdog; `--list` reports idle from tag mtime | #266 |
 | R5 | the session is idle | daemon: `lastActivityMs`, `idleStartMs` | `checkDaemonHealth` derives it from T4 `first` against the last T1 `t`, else from the session file's mtime | — |
 | R6 | which transcript a tag line came from | daemon: `SubagentFileState.source` | `transcriptSourceId` is recomputed from the current path at the next read; a session move changes the answer for a child in the session's own directory | #263 |
-| R7 | which `claude -p` lookups are open | daemon: `pendingClaudeCommands` | `resumeClaudeLookups` replays T9, T10 and T12; `reseedClaudeChildren` scans the projects root for every T12 session id | #267 |
-| R8 | which process serves a session | the harness: `harnessSlots` | `daemonLaunchArgs` decides by path prefix in the CLI; `runHarness` decides again from the root file and version file; `restartDaemon` decides from `/proc/<pid>/cmdline` | #221, #260 |
-| R9 | a held-back turn | daemon: `SubagentFileState.pendingTurn`, memory only | nothing: a crash loses it, and the next life reads from the offset after it | #257 |
-| R10 | what the harness serves | the harness: `harnessSlots`, `adoptionRetries`, `idleDropped` | `.served` is rewritten every 250 ms by diffing `handOffLines()` against the file's text | — |
-| R11 | the record kind of a tag line | the writer | five sites decide by substring: `includes('"_hb"')`, `includes('"_meta"')`, `includes('"_gen"')`, `includes('"_fold"')`, `includes('"spawnPending"')` | #140 |
-| R12 | the lease is mine | the claimer | eight read-reprove-unlink implementations (§1b) | #249, #243 |
+| R7 | which `claude -p` lookups are open | daemon: `pendingClaudeCommands`, `discoveredClaudeFiles` | `resumeClaudeLookups` replays T9, T10 and T12; `reseedClaudeChildren` checks `<projectsDir>/<dir>/<id>.jsonl` for every T12 id with a matching source, skipping ids T11 says another source folds and ids discovery finds | #267 |
+| R8 | which process serves a session | the harness: `harnessSlots` | `daemonLaunchArgs` decides by path prefix in the CLI; `runHarness` decides again from the root file and version file; `restartDaemon` decides from `/proc/<pid>/cmdline`; `wtft-daemon --restart` respawns each lease holder's session with the old process's root env | #221, #260 |
+| R9 | a held-back turn, and every subagent read position | daemon: `SubagentFileState`, memory only | nothing: a crash loses it; the next life reads every discovered subagent transcript from byte 0 as a new generation and re-registers `claude -p` children, so the held turn is read again. The T6 offset covers the session transcript only, and it counts a trailing fragment's bytes, so a restart resumes mid-line and drops that line (lead on #261) | #257 |
+| R10 | what the harness serves | the harness: `harnessSlots`, `adoptionRetries`, `idleDropped*`, each slot's lease state | `.served` is rewritten at the end of every full 250 ms sweep, while this process holds the root, by diffing `handOffLines()` against the file's text | — |
+| R11 | the record kind of a tag line | the writer | on `main`, five sites decided by substring: `includes('"_hb"')`, `includes('"_meta"')`, `includes('"_gen"')`, `includes('"_fold"')`, `includes('"spawnPending"')`; none remain after S1 | #140 |
+| R12 | the lease is mine | the claimer | on `main`, eight read-reprove-unlink implementations (§1b); one after S2 | #249, #243 |
 
 Rows R1, R2, R3 and R6 are the spawn-tree chain (#116 → #135 → #178 → #230 → #235 → #237).
 Rows R4, R8, R10 and R12 are the daemon chain (#205 → #239 → #249 → #259 → #263 → #266).
@@ -134,12 +150,14 @@ Rows R4, R8, R10 and R12 are the daemon chain (#205 → #239 → #249 → #259 �
 
 ### 3a. Modules
 
-Six modules. Each row names the interface a caller must know, and what moves behind it.
+Six modules. Each row names the interface a caller must know, and what moves behind it. The
+**TagLog** and **Lease** rows name what S1 and S2 built; the four below them are the plan, and
+no symbol in them exists yet.
 
 | Module | Interface | Behind it | Replaces |
 |---|---|---|---|
-| **TagLog** | `readTag(path) → TagView`; `openTagWriter(path) → { resume(), append(records), heartbeat(now), stop(reason), rebuild() }`; `TagRecord` as a typed union of T1–T12 | line safety, the heartbeat pwrite, generation supersession, id collapse, the offset marker, every substring match | the five R11 sites; `readLastMetaOffset`; `invalidateStaleSweptMarker`; `tagProvisionalFromContent`'s backward scan; `resumeClaudeLookups`' line loop |
-| **Lease** | `claim(path, owner) → claimed \| busy \| rebuild`; `holder(path)`; `release(path, owner)`; `markRebuild(path)`; `takeOver(path, owner)` | read, re-prove inode, unlink; hard-link claim; SIGTERM of a per-session holder | the eight R12 implementations |
+| **TagLog** (`extensions/lib/tag-log.ts`, built) | `TagRecord`, a typed union: `turn`, `heartbeat`, `stop`, `offset`, `swept`, `unswept`, `spawn-pending`, `spawn-settled`, `fold`, `generation`, plus `meta-other` and `unknown`; `parseTagLine(line)`; `recordOf(obj)`; `tagRecords(content)`; `currentGeneration(records)`; `sweepState(records)`; `lastOffset(records)`; `isDataRecord(r)` | shape-decided kinds, generation supersession, the sweep scan, the offset read (an offset may ride on a sweep marker) | the substring sites (R11) and the picker's private reader; `tagProvisionalFromContent`'s backward scan. Id collapse stays `dedupeClassifiedById`; `readLastMetaOffset`, `invalidateStaleSweptMarker` and `resumeClaudeLookups` stay in the daemon and now read through `tagRecords`; the writer (`appendTagFile`, the heartbeat pwrite) stays in the daemon until S3 |
+| **Lease** (`extensions/lib/lease.ts`, built) | `claimLease(file, owner, holderIsLive) → claimed \| busy`; `leaseHolder(file)`; `leaseIdentity(file)`; `unlinkLeaseIf(file, value, observed?)`; `replaceLease(file, value, owner, expected?)` | hard-link claim with one retry; content-and-inode re-prove before an unlink; rename publish | the eight R12 implementations. The `rebuild` mark is `replaceLease(lease, "rebuild", pid[, expected])`: the CLI passes the value it first read, the daemon's `fatalTagMutation` none; the SIGTERM of a holder stays with the callers (`forceRebuildSession`, `restartDaemon`, `takeOverLease`, `reapAndWarn`); `forceRebuildSession` still reads the lease raw where it must tell a missing file from an unreadable one |
 | **SessionTagger** | `step(state, input) → { state, records, verdict, warnings }` where `input` is `{ now, session?: { stat, bytes }, children: { path, stat, bytes? }[], discovered: string[] }` | `parseNewLines`, `syncSubagentTranscript`, `scanForSubAgents`, `queueClaudeCommand`, the owner/fold/generation/held-turn logic. No `fs`, no `Date.now()`, no `process` | the 25-field `Slot` and `install`/`save`; `serviceSession`'s poll body |
 | **HarnessRegistry** | `serve(file, displayed)`; `drop(key, reason)`; `move(from, to)`; `tick(now)`; `snapshot() → HandOff` | one record per session holding its `SessionTagger` state, watchers, timers, retry count, idle stamp, scan cursor | the 17 side collections; `wake`'s re-key block; `handOffLines` |
 | **DaemonHealth** | `health(sessionPath, now) → { alive, idle, since, reason }` | lease read, T4 tail read, the spawn and mtime graces | the four R4 rules |
@@ -157,8 +175,8 @@ first edit. Order matters: S0 is the safety net every later slice runs against.
 | Slice | Change | Test (the closer) |
 |---|---|---|
 | **S0 golden tags** | A characterization suite: run the current daemon over the fixture transcripts under `tests/fixtures/` (session, Task subagents, Pi siblings, a `claude -p` child, a rotation, an interrupt) and commit the tag files it writes, with T4/T7 timestamps normalised | `tests/wtft-270-golden-tags.test.ts`: the daemon on `main` reproduces the committed tags byte for byte after normalisation. Every later slice must pass it unchanged |
-| **S1 TagLog** | `extensions/lib/tag-log.ts`: the typed record union and one parser; every substring site and every tail scan calls it | `tests/wtft-tag-format.test.ts` extended to round-trip all twelve kinds; a parse of every committed golden tag yields the same `TagView` before and after; #140's repro (a command mentioning `_hb`) passes |
-| **S2 Lease** | `extensions/lib/lease.ts`; the eight sites call it | `tests/wtft-270-lease.test.ts`: the matrix {absent, live pid, dead pid, `rebuild`, foreign live daemon, harness holder} × {claim, release, takeOver, markRebuild} on temp files, no daemon spawned |
+| **S1 TagLog** | `extensions/lib/tag-log.ts`: the typed record union and one parser; every substring site and every tail scan calls it | `tests/wtft-270-tag-log.test.ts` reads every kind; the golden suite's parsed view is unchanged before and after; #140's repro (a command mentioning `_hb`) passes |
+| **S2 Lease** | `extensions/lib/lease.ts`; the eight sites call it | `tests/wtft-270-lease.test.ts`, on temp files, no daemon spawned: `claimLease` over {absent, mine, live, dead, rejected by the predicate, empty}; `unlinkLeaseIf` over {mismatch, match, absent, new inode, observed inode}; `replaceLease` over {unconditional, expected mismatch, expected match, absent, write failure}. Liveness is the caller's predicate, so "harness holder" is the daemon's `holderIsLiveDaemon`, tested by the process-level suites |
 | **S3 SessionTagger** | `extensions/lib/session-tagger.ts` with `step`; the daemon's poll calls it; `Slot` becomes the state value | S0 passes; `tests/wtft-270-session-tagger.test.ts` replays each fixture through `step` in memory and compares records to the golden tag; the cases #257 (growth after a sliced scan), #263 (move changes source), #267 (lookup survives restart) as pure `step` sequences |
 | **S4 HarnessRegistry** | one record per session; `move` re-keys one entry; `snapshot` is the hand-off | `tests/wtft-270-harness-registry.test.ts`: serve → move → drop → snapshot round trip in memory; the existing 205/239/259/262 suites stay as the process-level check |
 | **S5 DaemonHealth** | one function; CLI, `--watch`, widget and `--list` call it | `tests/wtft-270-daemon-health.test.ts`: {lease state} × {tag tail} × {age} → one answer; `wtft-179-daemon-health-reason.test.ts` unchanged |
@@ -218,11 +236,56 @@ S3–S5, not before.
   exits 0 as it did for a live holder. A reader's `awaitDaemonUp` then sees whichever daemon
   won. *Road not taken:* keeping the unbounded loop inside the module, which would have put a
   process-exit policy behind a file-level interface.
-- **S2 changed one behaviour on purpose.** `restartDaemon` unlinked the lease unconditionally
-  after signalling its holder; it now unlinks only a lease that still names that holder, the
-  same re-prove every other site already did.
+- **S2 changed five small behaviours, all in the same direction: unlink only what was read.**
+  `restartDaemon` and `shutdown` unlinked the lease unconditionally after signalling or on exit;
+  `claimPidFile` unlinked a stale holder unconditionally; `forceRebuildSession`'s per-session
+  unlink did not re-prove and now answers `busy` when the lease changed since its first read and
+  `undeletable` when the unlink itself fails; `unlinkIfNames`
+  and `unlinkIfStill` compared `parseInt` values and now compare the exact string. Each is the
+  re-prove the other sites already did.
 - **An observed inode identity is a weak witness on Linux.** ext4 hands a freed inode number
   straight back to the next file created, so unlink-then-write can reproduce the identity the
-  caller observed. The module keeps the check because a rename-replacement (the shape every
-  wtft writer uses) does get a new inode; `tests/wtft-270-lease.test.ts` U4 builds its fixture
+  caller observed. The module keeps the check because a rename or a hard-link replacement (the
+  two shapes every wtft lease writer uses) does get a new inode; `tests/wtft-270-lease.test.ts` U4 builds its fixture
   that way.
+- **`forceRebuildSession` keeps two raw lease reads.** Its `unreadable` outcome tells ENOENT
+  from any other read error, and `leaseHolder` folds both into `""`. *Road not taken:* a
+  `leaseHolder` that throws on a non-ENOENT error, which would have changed every other caller.
+- **`--watch`'s incremental read goes through `parseTagLine`.** The reconcile found it still
+  splitting lines and testing `obj._hb` itself, a seventh substring site the map had not
+  counted; it now takes `turn` records only, as before, and leaves generation handling to the
+  `appendedGeneration` reseed.
+- **Reconcile leftovers are filed, not fixed here.** The tag-reader auditor's findings about
+  the writer side of `docs/wtft-tag-format.md` and the daemon-lifecycle entries of
+  `CONTEXT.md`, and the daemon auditor's findings on `docs/spec-259-*.md` and the manifest,
+  describe code S3–S5 will move; they are on #261, the standing daemon-doc leads issue, so the
+  freeze holds.
+
+
+---
+
+## 5. Reconciliation table (S0–S2, 2026-09-25)
+
+Five fresh-context auditors (test variant, picker, host-scoped, tag reader, daemon and lease) and
+one re-audit of the edited passages. One row per artifact and claim class; the per-finding lists
+are on the issues named.
+
+| Artifact | Claim | Contradicted by | Covered by a test? | Action |
+|---|---|---|---|---|
+| `tests/wtft-270-*.test.ts` | check wording and fixture preconditions | the modules' behaviour (16 findings) | yes, the suites themselves | fixed here |
+| `bin/wtft-daemon.ts` | `refusing to watch a tag cache file` | `CONTEXT.md` Tag file _Avoid_ | `tests/wtft-daemon.test.sh` matches the prefix only | fixed here: "tag file as a session" |
+| `bin/wtft-daemon.ts` | `[wtft-log-parser]` stderr prefix, ~48 lines | `CONTEXT.md` _Avoid_ bare "log parser" | no | filed on #261 |
+| `extensions/lib/wtft-daemon-lib.ts` | every reader decides a line's kind through `tagRecords` | `watchTagFile`'s incremental read tested `obj._hb` itself | `wtft-watch-*` suites, indirectly | fixed here: `parseTagLine` |
+| `extensions/lib/wtft-daemon-lib.ts` | every lease read goes through `lease.ts` | four raw `readFileSync` reads | no | two fixed here (`checkDaemonHealth`, `restartDaemon`); two kept in `forceRebuildSession` (§4) |
+| `docs/wtft-incremental-render-spec.md`, `docs/spec-47-*.md`, `docs/EXT_TOKEN_BUDGET.html` | the picker reimplements the id collapse by hand; `getSessionSummary` returns two fields; non-TTY auto-selects | `session-selector.ts` after S1 | `tests/wtft-270-session-summary-dedup.test.ts`, `wtft-tag-reader-collapse-guard` | fixed here |
+| `CONTEXT.md` Session picker | cost column undefined | — | `tests/wtft-75-doc-claims.test.ts` pins the file | defined here |
+| `CONTEXT.md` Tag file, Tags dir, Watch mode, status text | per source session; one tags dir per root; tails a session file; text rendered only inside `renderDaemonStatus` | `getTagPath`, `watchTagFile`, `renderDaemonStatus` | `wtft-75` pins the file | fixed here; Lease entry added |
+| `CONTEXT.md` Daemon entry, glossary gaps | lifecycle and cadence claims; nine terms undefined | `bin/wtft-daemon.ts` | no | filed on #261 |
+| `docs/wtft-tag-format.md` reader side | Claude Code only; re-parse fallback; `_meta` shapes absent; `required` fields; overhead line carries `sc`; readers skip every `_hb`; append-only; dedup is a subtraction; step 6 absent | `getTagPath`, `recordOf`, `classifiedToInteraction`, `serializeClassifiedWithOverheadSplit`, `deduplicateInteractions`, `sweepState` | `tests/wtft-tag-format.test.ts` (round trip), `tests/wtft-270-tag-log.test.ts` (kinds) | fixed here: §1, §2b, §2c, new §2f, §3, §4, §5, §6 |
+| `docs/wtft-tag-format.md` writer side | heartbeat, stop, sweep, spawn and generation moments | `bin/wtft-daemon.ts` | no | filed on #261; S3 moves the code |
+| `docs/spec-270-daemon-ownership.md` §1–§2 | writer moments and reader lists, ~50 cells | `bin/wtft-daemon.ts` on the branch | no | corrected here; header says which names are retired |
+| `docs/spec-270-daemon-ownership.md` §3a, §3b | planned interfaces named as built | `tag-log.ts`, `lease.ts` exports | `tests/wtft-270-*` | rewritten here: built rows name the real exports, the rest are marked plan |
+| `docs/spec-259-*.md` | argument errors, hand-off and takeover details, ~18 findings | `bin/wtft-daemon.ts` | `tests/wtft-259-*` partly | filed on #261 |
+| `docs/manifests/wtft-cmd.json`, README | daemon flag descriptions (`--list`, `--cleanup`, `--restart`, `--stop`), hermetic shell suite, spawned-daemon liveness rule | `bin/wtft-daemon.ts` | `wtft-75` pins README flags, not these sentences | filed on #261 |
+| `docs/manifests/wtft-cmd.json`, README, spec-89 | picker rows, keys, window semantics, ~30 findings | `session-selector.ts` | no | filed on #173 |
+| host-scoped: `~/.claude/CLAUDE.md`, `~/git-projects/CLAUDE.md`, `~/.claude/settings.json`, other clones' `CLAUDE.md`/`AGENTS.md` | none quote wtft's daemon or tag reader | — | — | checked, nothing to change |

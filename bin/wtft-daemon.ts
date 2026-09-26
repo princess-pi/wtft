@@ -2968,7 +2968,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   }
   // Session file may not exist yet; wait in the poll loop with heartbeats.
   if (sessionPath.includes(".wtft-tag.v")) {
-    process.stderr.write(`wtft-daemon: refusing to watch a tag cache file: ${sessionPath}\n`);
+    process.stderr.write(`wtft-daemon: refusing to watch a tag file as a session: ${sessionPath}\n`);
     process.exit(1);
   }
 

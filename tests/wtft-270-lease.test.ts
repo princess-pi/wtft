@@ -45,7 +45,7 @@ console.log("\nPART C — claim");
 }
 {
 	const f = fresh("rebuild");
-	check(claimLease(f, ME, live) === "claimed" && leaseHolder(f) === ME, "C6 the rebuild token is a stale holder to a claim; the caller reads it first");
+	check(claimLease(f, ME, live) === "claimed" && leaseHolder(f) === ME, "C6 a holder the predicate rejects, as production rejects the rebuild token, is replaced");
 }
 {
 	const f = fresh("");
@@ -75,7 +75,7 @@ console.log("\nPART R — replaceLease");
 {
 	const f = fresh(ME);
 	check(replaceLease(f, "rebuild", ME) === true && leaseHolder(f) === "rebuild", "R1 an unconditional replace lands");
-	check(replaceLease(f, "1", ME, "nope") === false && leaseHolder(f) === "rebuild", "R2 an expected value that no longer holds writes nothing");
+	check(replaceLease(f, "1", ME, "nope") === false && leaseHolder(f) === "rebuild", "R2 an expected value that no longer holds leaves the lease untouched");
 	check(replaceLease(f, "1", ME, "rebuild") === true && leaseHolder(f) === "1", "R3 an expected value that holds is replaced");
 	check(fs.readdirSync(dir).every(name => !name.includes(".replace-")), "R4 no replacement file is left behind");
 }

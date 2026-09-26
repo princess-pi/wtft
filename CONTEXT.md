@@ -55,12 +55,23 @@ the parenthetical `(log parser)` is not a third name.
 _Avoid_: bare "log parser" (always promote to "log parser daemon"), watcher, background process,
 session parser
 
+**Lease** (#270):
+The per-session file `$TMPDIR/wtft-daemon-<hash>.pid` whose whole content names who serves the
+session: a daemon's pid, or the token `rebuild` that `wtft -F` leaves for a harness-served
+session and that a harness leaves for a slot whose tag write failed. Every claim, release and
+replacement goes through `extensions/lib/lease.ts`: a claim is an exclusive hard link, a release
+unlinks only a lease that still holds what the caller read (and, when the caller hands over the
+identity it observed, on that inode), a replacement is a rename. A harness process's root pid file is a different
+file.
+_Avoid_: lock file, session pid file
+
 **Daemon health reason** (the code) / **status text** (the sentence):
 Two different things, deliberately (#179). A **health reason** is one of six machine-readable
 codes on the `DaemonHealthReason` union — `not-started`, `starting`, `waiting-session`,
 `not-found`, `idle-timeout`, `restart-failed`. It is the contract: control flow compares codes,
 and `tsc` rejects a typo'd comparison. **Status text** is what the user sees, looked up from
-`DAEMON_REASON_TEXT` by `daemonReasonText()` and rendered only inside `renderDaemonStatus()`.
+`DAEMON_REASON_TEXT` by `daemonReasonText()` and rendered by `renderDaemonStatus()`, which also
+composes the live, idle and stopped lines; `--watch` prints its own "reading..." line.
 Reword the text freely — nothing reads it. Renaming a code is a breaking change.
 
 Say "health reason" (or "the code") when you mean the value a program branches on; say "status
@@ -150,8 +161,9 @@ _Avoid_: Children block, spawned subagents (SPAWNED means the ledger's launcher 
 
 **Tag file**:
 The per-session output file the daemon writes classified entries to:
-`wtft-tags/<session>.wtft-tag.v{N}.jsonl`. One tag file per source session, versioned so a
-daemon upgrade can detect and replace a stale one. The CLI's report path and the widget read
+`wtft-tags/<session>.wtft-tag.v{N}.jsonl`. One tag file per session, holding its own lines and
+every child transcript's, versioned so a daemon upgrade can detect a stale one; a per-session
+start deletes the older versions, a harness adoption leaves them. The CLI's report path and the widget read
 it with `readTagFileWithVerdict()`, which returns the provisional verdict from the same read;
 `readClassifiedTagFile()` returns the interactions alone, and `--watch` seeds from
 `seedClassifiedTagFile()`.
@@ -195,9 +207,10 @@ copies of one session, or two children, never drop each other's lines.
 _Avoid_: Origin, provenance
 
 **Tags dir**:
-The `wtft-tags/` directory itself — one per project/session root, holding every tag file for
-sessions discovered there. It is excluded from session discovery, so the daemon never treats its own
-writes as a session to parse.
+The `wtft-tags/` directory itself — one inside each session directory, beside the transcripts,
+holding their tag files; a session that moved between project directories keeps its tag under the
+old one, and the reader finds it there (`docs/wtft-tag-format.md` §1). It is excluded from
+session discovery, so the daemon never treats its own writes as a session to parse.
 _Avoid_: Tag cache, output dir
 
 **Surge (window / pricing)**:
@@ -340,6 +353,12 @@ sessions in one **scope** — this worktree (default), all worktrees of the repo
 current branch's checkout (`Ctrl+B`), or all projects (`Ctrl+A`/`Tab`) — filtered to one
 **time window**, the age limit `Ctrl+T` cycles through (20m, 1h, 1d, 1w, all). A picker opened
 by an ambiguous `-s` starts at window `all`. `docs/spec-89-scoped-picker.md` is the contract.
+Each row's cost and `(Nt)` count come from the session's tag file through the same parse as the
+report (current generation, collapsed by id): every turn record, folded child lines included,
+summed over `c` — the self scope, without server-tool cost or ledger descendants. The picker
+locates the tag itself — current version, else the highest version number, no sibling-project
+lookup — so a moved session's tag reads `unknown` and `N lines` here while the report prices it
+(#173). A stale tag is priced from its own lines and marked `v<N>`.
 _Avoid_: menu
 
 **JSON mode** (#26):
@@ -395,7 +414,7 @@ available in the CLI, which refuses `-p` and suggests `wtft … | less -R` inste
 _Avoid_: Scroll mode, viewer
 
 **Watch mode**:
-`--watch` (`-W`) — a companion-terminal mode that tails a session file and re-renders in
+`--watch` (`-W`) — a companion-terminal mode that tails a session's tag file and re-renders in
 real-time as new interactions are logged, until `Ctrl+C`/`q`. Distinct from the widget's own
 periodic refresh (which lives inside Pi); watch mode is a standalone CLI process meant to run in
 a separate pane.

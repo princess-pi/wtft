@@ -43,7 +43,7 @@ function stripComments(text: string): string {
 	return text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 }
 
-const CANONICAL = String.raw`(?:readClassifiedTagFile|dedupeClassifiedById)`;
+const CANONICAL = String.raw`(?:readClassifiedTagFile|readTagFileWithVerdict|seedClassifiedTagFile|classifiedInteractionsFromContent|dedupeClassifiedById)`;
 
 /** Routed means the file actually IMPORTS or CALLS the canonical collapse —
  *  never merely mentions it.
@@ -89,11 +89,13 @@ for (const file of scanned) {
 	const touchesTag =
 		text.includes("getTagPath") || text.includes("TAG_SUFFIX") || text.includes(".wtft-tag.");
 	if (!touchesTag) continue;
-	if (!text.includes("JSON.parse")) continue;
+	const readsLines = text.includes("JSON.parse")
+		|| new RegExp(String.raw`\b(?:tagRecords|parseTagLine|` + CANONICAL.slice(3, -1) + String.raw`)\s*\(`).test(stripComments(text));
+	if (!readsLines) continue;
 	readers.push(path.relative(repoRoot, file));
 }
 
-console.log(`1. found ${readers.length} source file(s) that resolve a tag path and parse JSON`);
+console.log(`1. found ${readers.length} source file(s) that resolve a tag path and read tag lines`);
 assert(
 	`the scan finds something — a predicate matching nothing would pass vacuously forever (${readers.length} > 0)`,
 	readers.length > 0,

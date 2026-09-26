@@ -1,8 +1,8 @@
 /**
  * A lease file: one small file whose whole content names its holder, a pid or
  * the token `rebuild`. Every claim, release and replacement of one goes through
- * here, so the re-prove-then-act rule lives once: a lease is only unlinked or
- * replaced when it still holds what the caller read, on the same inode.
+ * here. An unlink happens only when the lease still holds what the caller
+ * read, on the same inode; a conditional replace compares content only.
  */
 
 import * as fs from "node:fs";

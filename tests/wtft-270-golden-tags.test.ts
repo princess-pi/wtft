@@ -16,8 +16,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
-import { readTagFileWithVerdict, getCurrentVersionTagPath } from "../bin/wtft.mjs";
-import { transcriptSourceId } from "../extensions/lib/wtft-daemon-lib.ts";
+import { readTagFileWithVerdict, getCurrentVersionTagPath, transcriptSourceId } from "../extensions/lib/wtft-daemon-lib.ts";
 import { cwdToStrictSlug } from "../extensions/lib/harness/session-cwd.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { writeCorpus, type CorpusSession } from "./lib/golden-corpus.ts";
@@ -107,7 +106,7 @@ async function runDaemon(s: CorpusSession): Promise<string> {
 		try { if (daemon.pid) process.kill(daemon.pid, 0); } catch { break; }
 		await sleep(100);
 	}
-	check(settled, `${s.name}: the daemon settled the tag (swept, no failure)`);
+	check(settled, `${s.name}: the daemon stamped the tag swept`);
 	return tagPath;
 }
 

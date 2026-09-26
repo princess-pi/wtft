@@ -1,7 +1,7 @@
 #!/usr/bin/env -S bun
 /**
- * #270 S2 — the lease module: claim, release and replace on temp files, no
- * daemon spawned.
+ * The lease module: claim, release and replace on temp files, no daemon
+ * spawned.
  */
 
 import * as fs from "node:fs";
@@ -49,6 +49,12 @@ console.log("\nPART C — claim");
 {
 	const f = fresh("");
 	check(claimLease(f, ME, live) === "claimed" && leaseHolder(f) === ME, "C7 an empty lease is claimed");
+}
+{
+	const f = fresh("rebuild");
+	const judged: string[] = [];
+	claimLease(f, ME, h => { judged.push(h); return live(h); });
+	check(judged.length > 0 && judged.every(h => h === "rebuild"), `C8 the predicate is called with the holder the claim displaces, so a caller can act on it (saw ${JSON.stringify(judged)})`);
 }
 
 console.log("\nPART U — unlinkLeaseIf");

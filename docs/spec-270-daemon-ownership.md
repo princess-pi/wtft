@@ -2,8 +2,9 @@
 
 Issue: https://github.com/princess-pi/wtft/issues/270. Measured on `main` @ `0082dee`, 2026-09-25.
 
-**Read §1 and §2 as a record of `main` @ `0082dee`, the state before the slices, not as current
-behaviour, corrected where the reconcile auditors found a cell wrong about `main` too.** The
+**Read §1 and §2 as the map measured on `main` @ `0082dee`, corrected where the reconcile
+auditors found a cell wrong about `main`, and with the lease rows of §1b, the per-session
+`main` row, R11 and R12 saying what S1 and S2 made of them.** The
 retired names are `tryClaimLease`, `currentGenerationRecords` and `claimPidFile`'s inline claim;
 `unlinkIfStill` and `unlinkIfNames` survive as one-line wrappers over `unlinkLeaseIf`, and
 `readLastMetaOffset` still runs, over `tagRecords`. §4 says what each slice replaced, and the
@@ -77,12 +78,12 @@ poll), `leaseStillOurs`, `leaseLost`, `logLeaseLost`, `wake` (`rebuild` → adop
 `adoptSession`, `takeOverLease`, `pointSessionAt`, `reapAndWarn`, `--stop`, `--list`,
 `--cleanup`, `--restart`, per-session `main`, and `claimLease` itself.
 
-On `main` nine sites unlinked a lease. Five re-proved first ("read the lease, re-prove the
-inode, unlink"): `unlinkIfHolds`, `unlinkIfStill`, `unlinkIfNames`, `releaseLease` and
-`tryClaimLease`. Four unlinked without re-proving: `claimPidFile` (which `takeOverLease` reached),
-`forceRebuildSession`'s per-session path, `shutdown` and `restartDaemon`. S2 left one
-implementation, `unlinkLeaseIf`, plus `claimLease`; `forceRebuildSession` keeps two raw reads
-(§4).
+On `main` nine sites unlinked a lease, each with its own check. Five re-proved the inode
+("read the lease, re-prove the inode, unlink"): `unlinkIfHolds`, `unlinkIfStill`,
+`unlinkIfNames`, `releaseLease` and `tryClaimLease`. `shutdown` checked the content and not the
+inode. `claimPidFile` (which `takeOverLease` reached), `forceRebuildSession`'s per-session path
+and `restartDaemon` unlinked unconditionally. S2 left one implementation, `unlinkLeaseIf`, plus
+`claimLease`; `forceRebuildSession` keeps three raw reads (§4).
 
 ### 1c. Harness root files `$TMPDIR/wtft-harness-<which>-<hash>.pid` and sidecars
 
@@ -144,8 +145,8 @@ issue that turns on the row, where one exists.
 | R8 | which process serves a session | the harness: `harnessSlots` | `daemonLaunchArgs` decides by path prefix in the CLI; `runHarness` decides again from the root file and version file; `restartDaemon` decides from `/proc/<pid>/cmdline`; `wtft-daemon --restart` respawns each lease holder's session with the old process's root env | #221, #260 |
 | R9 | a held-back turn, and every subagent read position | daemon: `SubagentFileState`, memory only | nothing: a crash loses it; the next life reads every discovered subagent transcript from byte 0 as a new generation and re-registers `claude -p` children, so the held turn is read again. The T6 offset covers the session transcript only, and it counts a trailing fragment's bytes, so a restart resumes mid-line and drops that line (lead on #261) | #257 |
 | R10 | what the harness serves | the harness: `harnessSlots`, `adoptionRetries`, `idleDropped*`, each slot's lease state | `.served` is rewritten at the end of every full 250 ms sweep, while this process holds the root, by diffing `handOffLines()` against the file's text | — |
-| R11 | the record kind of a tag line | the writer | on `main`, five sites in the daemon decided by substring: `includes('"_hb"')`, `includes('"_meta"')`, `includes('"_gen"')`, `includes('"_fold"')`, `includes('"spawnPending"')`; the picker held a sixth and `watchTagFile` a seventh, both found while building S1; none remain | #140 |
-| R12 | the lease is mine | the claimer | on `main`, nine unlink sites, five re-proving and four not (§1b); one implementation after S2 | #249, #243 |
+| R11 | the record kind of a tag line | the writer | on `main`, four daemon functions (`resumeClaudeLookups`, `reapAndWarn`, `reseedClaudeChildren`, `initClassified`) and `appendedGeneration` tested substrings (`"_hb"`, `"_meta"`, `"_gen"`, `"_fold"`, `"spawnPending"`, `"spawnSettled"`, `"stop"`), and the picker and `watchTagFile` decided kinds on their own; after S1 every reader decides through `tag-log.ts` | #140 |
+| R12 | the lease is mine | the claimer | on `main`, nine unlink sites with three different checks (§1b); one implementation after S2 | #249, #243 |
 
 Rows R1, R2, R3 and R6 are the spawn-tree chain (#116 → #135 → #178 → #230 → #235 → #237).
 Rows R4, R8, R10 and R12 are the daemon chain (#205 → #239 → #249 → #259 → #263 → #266).
@@ -231,7 +232,7 @@ S3–S5, not before.
   `tests/wtft-tag-format.test.ts`, which pins the serialise/deserialise round trip of one record
   kind and is left as it is.
 - **S1 also replaced the session picker's private tag reader.** `session-selector.ts` carried
-  a sixth substring site and its own generation and id-collapse logic, outside the map's
+  its own kind decisions and its own generation and id-collapse logic, outside the map's
   §1 count. It now calls `classifiedInteractionsFromContent`, and its allowlist entry in
   `tests/wtft-tag-reader-collapse-guard.test.ts` is gone.
 - **A sweep marker may share its line with an offset.** `tests/wtft-443-provisional-tag-read.test.ts`
@@ -243,8 +244,8 @@ S3–S5, not before.
   won. *Road not taken:* keeping the unbounded loop inside the module, which would have put a
   process-exit policy behind a file-level interface.
 - **S2 changed five small behaviours, all in the same direction: unlink only what was read.**
-  `restartDaemon` and `shutdown` unlinked the lease unconditionally after signalling or on exit;
-  `claimPidFile` unlinked a stale holder unconditionally; `forceRebuildSession`'s per-session
+  `restartDaemon` unlinked the lease unconditionally after signalling; `shutdown` checked the
+  content but not the inode; `claimPidFile` unlinked a stale holder unconditionally; `forceRebuildSession`'s per-session
   unlink did not re-prove and now answers `busy` when the lease changed since its first read,
   `unreadable` when it cannot re-read it, and `undeletable` when the unlink itself fails;
   `unlinkIfNames`
@@ -252,14 +253,15 @@ S3–S5, not before.
   re-prove the other sites already did.
 - **An observed inode identity is a weak witness on Linux.** ext4 hands a freed inode number
   straight back to the next file created, so unlink-then-write can reproduce the identity the
-  caller observed. The module keeps the check because a rename or a hard-link replacement (the
-  two shapes every wtft lease writer uses) does get a new inode; `tests/wtft-270-lease.test.ts` U4 builds its fixture
-  that way.
-- **`forceRebuildSession` keeps two raw lease reads.** Its `unreadable` outcome tells ENOENT
+  caller observed. The module keeps the check because a rename over an existing lease (how
+  every replacement is published) does get a new inode; a hard-link claim after an unlink may
+  get the freed one back, which is the reuse case above. `tests/wtft-270-lease.test.ts` U4
+  builds its fixture by rename.
+- **`forceRebuildSession` keeps three raw lease reads.** Its `unreadable` outcome tells ENOENT
   from any other read error, and `leaseHolder` folds both into `""`. *Road not taken:* a
   `leaseHolder` that throws on a non-ENOENT error, which would have changed every other caller.
 - **`--watch`'s incremental read goes through `parseTagLine`.** The reconcile found it still
-  splitting lines and testing `obj._hb` itself, a seventh substring site the map had not
+  splitting lines and testing `obj._hb` itself, a kind decision the map had not
   counted; it now takes `turn` records only, as before, and leaves generation handling to the
   `appendedGeneration` reseed.
 - **Reconcile leftovers are filed, not fixed here.** The tag-reader auditor's findings about
@@ -277,6 +279,23 @@ S3–S5, not before.
   read error into "no holder", which is right for a claim but turned EACCES or EIO on the lease
   into a silent exit 0 that looked like a live holder. `main` now reads the lease raw once
   before claiming and rethrows any error but ENOENT, as the old claim loop did.
+- **The rebuild decision comes from the holder the claim displaced.** A start read the lease
+  once for the `rebuild` token and then let `claimLease` read it again to decide what to
+  unlink, so a token written between the two reads was consumed without a rebuild. The caller's
+  liveness predicate now records the holder it judged stale, and the daemon reads that after
+  the claim (`displacedHolder` for the harness, `displaced` in per-session `main`). *Road not
+  taken:* a richer `claimLease` return carrying the displaced value, which would have widened
+  the interface for one caller.
+- **`unlinkLeaseIf`'s check-then-act window stays.** A stat, a read and a second stat narrow
+  it; only a rename-to-private-name-then-verify would close it, and that shape has its own
+  failure (a lease that turns out not to be ours must be linked back, which can itself lose a
+  race). Every one of the nine sites on `main` had the same window; it is #249's shape and is
+  left to it.
+- **The PR was opened with `pr-open --reviewed` after the review round limit.** Three rounds
+  of the local lens: 18, 8 and 14 findings, every one fixed, declined or filed in the ledger
+  with its reason. The third round's findings were on lines the second round's fixes wrote, or
+  header comments the first round had not raised, and the memory rule for this loop is to stop
+  at that point rather than raise the limit. The Draft is where Duppy reviews.
 
 ---
 
@@ -292,7 +311,7 @@ are on the issues named.
 | `bin/wtft-daemon.ts` | `refusing to watch a tag cache file` | `CONTEXT.md` Tag file _Avoid_ | `tests/wtft-daemon.test.sh` matches the prefix only | fixed here: "tag file as a session" |
 | `bin/wtft-daemon.ts` | `[wtft-log-parser]` stderr prefix, ~48 lines | `CONTEXT.md` _Avoid_ bare "log parser" | no | filed on #261 |
 | `extensions/lib/wtft-daemon-lib.ts` | every reader decides a line's kind through `tagRecords` | `watchTagFile`'s incremental read tested `obj._hb` itself | `wtft-watch-*` suites, indirectly | fixed here: `parseTagLine` |
-| `extensions/lib/wtft-daemon-lib.ts` | every lease read goes through `lease.ts` | four raw `readFileSync` reads | no | two fixed here (`checkDaemonHealth`, `restartDaemon`); two kept in `forceRebuildSession` (§4) |
+| `extensions/lib/wtft-daemon-lib.ts` | every lease read goes through `lease.ts` | four raw `readFileSync` reads | no | two fixed here (`checkDaemonHealth`, `restartDaemon`); three kept in `forceRebuildSession` (§4) |
 | `docs/wtft-incremental-render-spec.md`, `docs/spec-47-*.md`, `docs/EXT_TOKEN_BUDGET.html` | the picker reimplements the id collapse by hand; `getSessionSummary` returns two fields; non-TTY auto-selects | `session-selector.ts` after S1 | `tests/wtft-270-session-summary-dedup.test.ts`, `wtft-tag-reader-collapse-guard` | fixed here |
 | `CONTEXT.md` Session picker | cost column undefined | — | `tests/wtft-75-doc-claims.test.ts` pins the file | defined here |
 | `CONTEXT.md` Tag file, Tags dir, Watch mode, status text | per source session; one tags dir per root; tails a session file; text rendered only inside `renderDaemonStatus` | `getTagPath`, `watchTagFile`, `renderDaemonStatus` | `wtft-75` pins the file | fixed here; Lease entry added |

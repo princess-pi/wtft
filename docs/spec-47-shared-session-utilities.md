@@ -74,7 +74,7 @@ Note: Pi slugs use `--` internal separators and never match the `home-*-git-proj
 
 ### Module B: `extensions/lib/session-selector.ts`
 
-Depends on module A + `extensions/lib/wtft-shared.ts` (for `formatCost`, `parseEntryToInteraction`).
+Depends on module A + `extensions/lib/wtft-shared.ts` (for `formatCost`, `parseEntryToInteraction`) + `extensions/lib/wtft-daemon-lib.ts` (for `classifiedInteractionsFromContent`).
 
 ```typescript
 export interface SessionCandidate {

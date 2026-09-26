@@ -1,8 +1,6 @@
 /**
- * The #270 golden corpus: four sessions written whole before any daemon
- * starts, so a run is decided by content, not by timing. Shared by the
- * golden-tag suite (the daemon process) and the session-tagger suite (the
- * pure core), so both read the same bytes.
+ * The golden corpus: four sessions written whole before any daemon starts,
+ * so a run is decided by content, not by timing.
  */
 
 import * as fs from "node:fs";

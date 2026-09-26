@@ -76,7 +76,6 @@ export function recordOf(obj: any): TagRecord {
 		}
 		return { kind: "unknown" };
 	}
-	// A malformed field throws inside the decoder; that line is skipped on its own.
 	let interaction: Interaction | null;
 	try { interaction = classifiedToInteraction(obj); } catch { return { kind: "unknown" }; }
 	if (!interaction) return { kind: "unknown" };

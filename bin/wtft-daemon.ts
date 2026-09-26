@@ -1721,8 +1721,17 @@ function holderIsLiveDaemon(holder: string): boolean {
   return procIsDaemon(pid);
 }
 
+/** The holder the last `claimPidFile` judged stale and displaced, "" when none.
+ *  Read it after the claim, never before: the rebuild decision comes from the
+ *  value actually unlinked, not from an earlier read. */
+let displacedHolder = "";
 function claimPidFile(file: string): "claimed" | "busy" {
-  return claimLease(file, String(process.pid), holderIsLiveDaemon);
+  displacedHolder = "";
+  return claimLease(file, String(process.pid), (holder) => {
+    const live = holderIsLiveDaemon(holder);
+    if (!live) displacedHolder = holder;
+    return live;
+  });
 }
 
 function harnessRoot(which: string): string {
@@ -1741,10 +1750,8 @@ function adoptSession(): boolean {
   tagPath = getCurrentVersionTagPath(sessionPath);
   try { fs.mkdirSync(path.dirname(tagPath), { recursive: true }); } catch { /* exists */ }
   pidPath = getDaemonPidPath(sessionPath);
-  try {
-    if (fs.readFileSync(pidPath, "utf8").trim() === "rebuild") rebuildTagOnStartup = true;
-  } catch { /* no lease yet */ }
   if (!takeOverLease(pidPath)) return false;
+  if (displacedHolder === "rebuild") rebuildTagOnStartup = true;
   initClassified();
   return true;
 }
@@ -3014,15 +3021,18 @@ if (showList || showCleanup || showRestart || stopSession) {
 
 
   if (!claimedByTakeover) {
-    // Only the explicit rebuild token requests replay; a stale numeric PID does not.
-    if (leaseHolder(pidPath) === "rebuild") rebuildTagOnStartup = true;
     // Any live process named by the lease keeps it, daemon or not: only ESRCH is gone.
+    let displaced = "";
     const holderIsLive = (holder: string): boolean => {
       const pid = /^[1-9]\d*$/.test(holder) ? Number(holder) : 0;
-      if (!Number.isSafeInteger(pid) || pid <= 0) return false;
-      try { process.kill(pid, 0); return true; } catch (err) { return (err as NodeJS.ErrnoException).code !== "ESRCH"; }
+      let live = Number.isSafeInteger(pid) && pid > 0;
+      if (live) { try { process.kill(pid, 0); } catch (err) { live = (err as NodeJS.ErrnoException).code !== "ESRCH"; } }
+      if (!live) displaced = holder;
+      return live;
     };
     if (claimLease(pidPath, String(process.pid), holderIsLive) === "busy") process.exit(0);
+    // Only the explicit rebuild token requests replay; a stale numeric PID does not.
+    if (displaced === "rebuild") rebuildTagOnStartup = true;
   }
 
   // Drop older-version tag files after claiming the lease; re-sweep once after 5s for a late heartbeat.

@@ -1,6 +1,6 @@
 #!/usr/bin/env -S bun
 /**
- * #270 S0 — the daemon's tag output over the golden corpus is pinned.
+ * The daemon's tag output over the golden corpus is pinned.
  *
  * Each later slice must leave every golden unchanged. Regenerate with
  * `WTFT_GOLDEN_UPDATE=1 bun tests/wtft-270-golden-tags.test.ts` and read the diff.
@@ -43,7 +43,7 @@ const daemonSources = [
 	...fs.readdirSync(libDir, { recursive: true, encoding: "utf8" }).filter(f => f.endsWith(".ts")).map(f => path.join(libDir, f)),
 ];
 const newestSourceMs = Math.max(...daemonSources.map(f => fs.statSync(f).mtimeMs));
-check(fs.statSync(DAEMON_BIN).mtimeMs >= newestSourceMs, "fixture precondition: bin/wtft-daemon.mjs is not older than any daemon source (else run bun run build)");
+check(fs.statSync(DAEMON_BIN).mtimeMs > newestSourceMs, "fixture precondition: bin/wtft-daemon.mjs is newer than every daemon source (else run bun run build)");
 if (failed > 0) { console.log(`\n${passed} passed, ${failed} failed`); process.exit(1); }
 
 const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-270-golden-")));

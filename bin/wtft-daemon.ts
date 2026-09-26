@@ -1498,7 +1498,7 @@ Management:
   --cleanup             Kill per-session daemons whose session is gone, and fixture ones under the tmp dir
                         that hold no lease here; never a harness process, which stops once it has nothing to serve or watch
   --restart             Stop every daemon holding a lease or a root pid file here (SIGTERM, SIGKILL after 2 s),
-                        and respawn one per daemon holder started with --session, stopped or not, claiming its lease when
+                        and respawn one per stopped holder started with --session, claiming its lease when
                         free; a harness holding no lease starts again on the next wtft. Linux only (/proc)
   --stop <session>      Drop that session. A per-session process exits. A harness process stays up.
 
@@ -1670,9 +1670,11 @@ if (showList || showCleanup || showRestart || stopSession) {
       }
       // Only a daemon this process stopped is respawned: a live pid that is not
       // one (or one that cannot be signalled, #274) was not stopped.
-      const respawnLease = wasDaemon && sessionFound ? getDaemonPidPath(sessionFound) : "";
+      // One that outlived SIGKILL keeps its lease: a respawn would only meet it and exit.
+      const survived = wasDaemon && pidAlive(pid);
+      const respawnLease = wasDaemon && sessionFound && !survived ? getDaemonPidPath(sessionFound) : "";
       // The respawn's own lease is left for its claim, which takes a dead holder's.
-      if (fullPath !== respawnLease) unlinkIfNames(fullPath, pid);
+      if (fullPath !== respawnLease && !survived) unlinkIfNames(fullPath, pid);
       let respawned: "claimed" | "busy" | "failed" = "failed";
       if (respawnLease) {
         let childPid = 0;
@@ -1691,7 +1693,8 @@ if (showList || showCleanup || showRestart || stopSession) {
         }
         if (respawned === "failed") unlinkIfNames(fullPath, pid);
       }
-      console.log(respawned === "claimed" ? `Restarted: PID ${pid} → fresh daemon for ${sessionFound}`
+      console.log(survived ? `Not stopped: PID ${pid} is still running after SIGKILL; its lease is left`
+        : respawned === "claimed" ? `Restarted: PID ${pid} → fresh daemon for ${sessionFound}`
         : respawned === "busy" ? `Respawned: PID ${pid} → a daemon for ${sessionFound}, left to claim the lease itself`
         : respawnLease ? `Stopped: PID ${pid} — the respawn for ${sessionFound} failed`
         : wasDaemon ? `Stopped: PID ${pid} — no --session to respawn (#274)`

@@ -66,8 +66,8 @@ export function claimLeaseForChild(file: string, childPid: number): "claimed" | 
     Linux it cannot tell a harness either (#289). A harness holder is never signalled on Linux;
     the spawn points it at the session.
   - `wtft-daemon --restart` already waited before this change, for every live daemon holder,
-    harness included: SIGTERM, 2 s, SIGKILL, then up to 2 s while the pid is still a daemon. It
-    respawns whether or not the holder is gone (#274). It now also claims for the child it
+    harness included: SIGTERM, 2 s, SIGKILL, then up to 2 s while the pid is still a daemon. A holder
+    still a daemon after that now keeps its lease, is not respawned, and prints `Not stopped`. It now also claims for the child it
     respawns, which serves the holder's own `--session`, without unlinking that lease first; a
     harness's other leases are unlinked. Its output line says how the respawn went (below).
   - The wait is async: the caller's event loop runs, so a holder that is its own child is reaped

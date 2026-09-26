@@ -1,6 +1,6 @@
 #!/usr/bin/env -S bun
 /**
- * #281: the spawner claims the session lease for its child. docs/spec-281-spawner-claims-lease.md § 3.
+ * The spawner claims the session lease for its child. docs/spec-281-spawner-claims-lease.md § 3.
  */
 
 import * as fs from "node:fs";

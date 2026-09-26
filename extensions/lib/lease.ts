@@ -102,7 +102,7 @@ export function claimLease(file: string, owner: string, holderIsLive: (holder: s
 	}
 }
 
-/** The pid a lease holder names, or 0 when it is not one (the daemon's own rule). */
+/** The pid a lease holder names, or 0 when it is not one. */
 export function leasePid(holder: string): number {
 	return /^[1-9]\d*$/.test(holder) ? Number(holder) : 0;
 }

@@ -396,7 +396,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 					return;
 				}
 				if (how === "busy") {
-					ctx.ui.notify("A log parser daemon did not stop within 2 s, or another took the session meanwhile, so nothing was deleted — run /wtft -F again once it has stopped.", "warning");
+					ctx.ui.notify("A log parser daemon did not stop within 2 s, or its lease changed or was released meanwhile, so nothing was deleted — run /wtft -F again once it has stopped.", "warning");
 					return;
 				}
 				if (!ensureDaemonRunning(sessionFile, _daemonDir)) {

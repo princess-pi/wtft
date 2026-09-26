@@ -1,0 +1,14 @@
+{
+  "turns": 5,
+  "outputTokens": 780,
+  "costUsd": 0.253605,
+  "interrupted": 0,
+  "folded": [
+    "agent-a0001",
+    "agent-b0002"
+  ],
+  "provisional": {
+    "provisional": false,
+    "reason": null
+  }
+}

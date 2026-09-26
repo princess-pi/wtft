@@ -1,0 +1,16 @@
+{"_fold":{"parent":"00000005-0000-4000-8000-000000000005","child":"00000006-0000-4000-8000-000000000006","s":"<s:claudep-child>"}}
+{"_fold":{"parent":"00000005-0000-4000-8000-000000000005","child":"00000007-0000-4000-8000-000000000007","s":"<s:claudep-child>"}}
+{"_gen":{"s":"<s:claudep-child>","session":"00000006-0000-4000-8000-000000000006"}}
+{"_gen":{"s":"<s:claudep-grandchild>","session":"00000007-0000-4000-8000-000000000007"}}
+{"_hb":"stop","reason":"SIGTERM"}
+{"_hb":{"first":0,"last":0}}
+{"_hb":{"first":0,"last":0}}
+{"_hb":{"first":0,"last":0}}
+{"_meta":{"offset":0}}
+{"_meta":{"spawnPending":{"key":"s1","at":1789898401000,"commands":["cd <SANDBOX>/target-project && claude -p 'go'"]}}}
+{"_meta":{"spawnSettled":"s1","children":["<SANDBOX>/projects/<SLUG>-target-project/00000006-0000-4000-8000-000000000006.jsonl","<SANDBOX>/projects/<SLUG>-target-project/00000007-0000-4000-8000-000000000007.jsonl"]}}
+{"_meta":{"swept":0}}
+{"t":1789898401000,"c":0.019956,"cat":"agents","f":[],"cmd":["cd <SANDBOX>/target-project && claude -p 'go'"],"id":"s1","m":"claude-sonnet-4-6","in":2,"out":80,"cw":5000,"miss":1}
+{"t":1789898403000,"c":0.055512,"cat":"agents","f":[],"cmd":["claude -p 'deeper'"],"id":"k1","m":"claude-sonnet-4-6","in":4,"out":1200,"cw":10000,"s":"<s:claudep-child>"}
+{"t":1789898430000,"c":0.002893,"cat":"prompt","f":[],"cmd":[],"id":"k2","m":"claude-sonnet-4-6","in":2,"out":20,"cr":8000,"cw":50,"s":"<s:claudep-child>"}
+{"t":1789898460000,"c":0.002331,"cat":"prompt","f":[],"cmd":[],"id":"s2","m":"claude-sonnet-4-6","in":2,"out":30,"cr":5000,"cw":100}

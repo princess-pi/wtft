@@ -1,0 +1,13 @@
+{"_hb":"stop","reason":"SIGTERM"}
+{"_hb":{"first":0,"last":0}}
+{"_hb":{"first":0,"last":0}}
+{"_meta":{"offset":0}}
+{"_meta":{"swept":0}}
+{"t":1789898460000,"c":0.294174,"cat":"spec","f":[{"p":"<SANDBOX>/plain-project/README.md","a":"r"}],"cmd":[],"id":"p1","m":"claude-sonnet-4-6","in":2,"out":300,"cw":48278,"ttl":"1h","miss":1}
+{"t":1789898520000,"c":0.022506,"cat":"interrupted","f":[{"p":"<SANDBOX>/plain-project/src/a.ts","a":"w"}],"cmd":["git status"],"id":"p2","m":"claude-sonnet-4-6","in":2,"out":200,"cr":50000,"cw":1200,"ir":1}
+{"t":1789898580000,"c":0.018681,"cat":"tests","f":[],"cmd":["npm test"],"id":"p3","m":"claude-sonnet-4-6","in":2,"out":100,"cr":51000,"cw":500}
+{"t":1789898700000,"c":0.000756,"cat":"prompt","f":[],"cmd":[],"id":"p4","m":"claude-sonnet-4-6","in":2,"out":50,"ttl":"1h","miss":1}
+{"t":1789898700000,"c":0.24,"cat":"compaction","f":[],"cmd":[],"id":"p4#oh","m":"claude-sonnet-4-6","cw":40000}
+{"t":1789898760000,"c":0.000156,"cat":"prompt","f":[],"cmd":[],"id":"p5","m":"claude-sonnet-4-6","in":2,"out":10,"ttl":"1h","miss":1}
+{"t":1789898760000,"c":0.27,"cat":"overhead","f":[],"cmd":[],"id":"p5#oh","m":"claude-sonnet-4-6","cw":45000}
+{"t":1789898820000,"c":0.014181,"cat":"web","f":[],"cmd":[],"id":"p6","m":"claude-sonnet-4-6","in":2,"out":20,"cr":45000,"cw":100,"sc":0.06,"ws":2,"tc":["web"]}

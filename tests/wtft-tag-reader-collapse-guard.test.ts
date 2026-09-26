@@ -26,12 +26,9 @@ const repoRoot = path.resolve(import.meta.dirname, "..");
 const ALLOWED: Record<string, string> = {
 	// extensions/token-budget.ts routed through readClassifiedTagFile in #17
 	// (filed as #454) — no longer needs an allowlist entry.
-	// Tag WRITER: reads only `_meta.offset` via readLastMetaOffset; sums nothing.
-	"bin/wtft-daemon.ts": "tag WRITER; reads only _meta.offset, sums nothing",
-	// Hand-rolled collapse, pinned value-for-value by
-	// tests/wtft-270-session-summary-dedup.test.ts.
-	"extensions/lib/session-selector.ts":
-		"hand-rolled collapse, pinned by tests/wtft-270-session-summary-dedup.test.ts",
+	// Tag WRITER: reads its own markers and the tail it resumes from, through
+	// tag-log; never sums a cost from a tag.
+	"bin/wtft-daemon.ts": "tag WRITER; reads its own markers through tag-log, sums nothing",
 	// Resolves getTagPath purely to hand it to checkDaemonHealth (liveness by
 	// mtime/PID). Reads no tag CONTENT and sums nothing.
 	"extensions/lib/wtft-cli-shared.ts": "tag path used for daemon health only; reads no tag content",
@@ -47,7 +44,7 @@ function stripComments(text: string): string {
 	return text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 }
 
-const CANONICAL = String.raw`(?:readClassifiedTagFile|dedupeClassifiedById)`;
+const CANONICAL = String.raw`(?:readClassifiedTagFile|readTagFileWithVerdict|seedClassifiedTagFile|classifiedInteractionsFromContent|dedupeClassifiedById)`;
 
 /** Routed means the file actually IMPORTS or CALLS the canonical collapse —
  *  never merely mentions it.
@@ -93,11 +90,13 @@ for (const file of scanned) {
 	const touchesTag =
 		text.includes("getTagPath") || text.includes("TAG_SUFFIX") || text.includes(".wtft-tag.");
 	if (!touchesTag) continue;
-	if (!text.includes("JSON.parse")) continue;
+	const readsLines = text.includes("JSON.parse")
+		|| new RegExp(String.raw`\b(?:tagRecords|parseTagLine|` + CANONICAL.slice(3, -1) + String.raw`)\s*\(`).test(stripComments(text));
+	if (!readsLines) continue;
 	readers.push(path.relative(repoRoot, file));
 }
 
-console.log(`1. found ${readers.length} source file(s) that resolve a tag path and parse JSON`);
+console.log(`1. found ${readers.length} source file(s) that resolve a tag path and read tag lines`);
 assert(
 	`the scan finds something — a predicate matching nothing would pass vacuously forever (${readers.length} > 0)`,
 	readers.length > 0,

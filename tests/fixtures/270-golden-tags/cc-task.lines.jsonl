@@ -1,0 +1,15 @@
+{"_fold":{"parent":"00000002-0000-4000-8000-000000000002","child":"agent-a0001","s":"<s:task-a>"}}
+{"_fold":{"parent":"00000002-0000-4000-8000-000000000002","child":"agent-b0002","s":"<s:task-b>"}}
+{"_gen":{"s":"<s:task-a>","session":"agent-a0001"}}
+{"_gen":{"s":"<s:task-b>","session":"agent-b0002"}}
+{"_hb":"stop","reason":"SIGTERM"}
+{"_hb":{"first":0,"last":0}}
+{"_hb":{"first":0,"last":0}}
+{"_hb":{"first":0,"last":0}}
+{"_meta":{"offset":0}}
+{"_meta":{"swept":0}}
+{"t":1789898460000,"c":0.076506,"cat":"agents","f":[],"cmd":[],"id":"r1","m":"claude-sonnet-4-6","in":2,"out":100,"cw":20000,"tc":["agents"],"miss":1}
+{"t":1789898520000,"c":0.118506,"cat":"grep","f":[],"cmd":["rg TODO"],"id":"a1","m":"claude-sonnet-4-6","in":2,"out":400,"cw":30000,"s":"<s:task-a>"}
+{"t":1789898580000,"c":0.012006,"cat":"prompt","f":[],"cmd":[],"id":"a2","m":"claude-sonnet-4-6","in":2,"out":150,"cr":30000,"cw":200,"s":"<s:task-a>"}
+{"t":1789898640000,"c":0.038556,"cat":"prompt","f":[],"cmd":[],"id":"b1","m":"claude-sonnet-4-6","in":2,"out":70,"cw":10000,"s":"<s:task-b>"}
+{"t":1789898940000,"c":0.008031,"cat":"prompt","f":[],"cmd":[],"id":"r2","m":"claude-sonnet-4-6","in":2,"out":60,"cr":20000,"cw":300}

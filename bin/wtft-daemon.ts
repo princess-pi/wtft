@@ -7,6 +7,8 @@ import * as os from "node:os";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { projectsDir } from "../extensions/lib/harness/claude-code/discovery.js";
+import { tagRecords, parseTagLine, lastOffset, isDataRecord } from "../extensions/lib/tag-log.js";
+import { claimLease, unlinkLeaseIf, replaceLease as publishLease, leaseHolder } from "../extensions/lib/lease.js";
 import {
 	parseEntryToInteraction,
 	parseSessionFile,
@@ -166,18 +168,14 @@ function shutdown(reason: string) {
     process.stderr.write(`[wtft-log-parser] shutdown: ${reason}\n`);
   }
   // Taken-over daemon exits silently — must not recreate the tag or unlink the new owner's lease.
-  let ownsLease = false;
-  try {
-    ownsLease = fs.readFileSync(pidPath, "utf8").trim() === String(process.pid);
-  } catch (_) {}
-  if (ownsLease) {
+  if (leaseHolder(pidPath) === String(process.pid)) {
     flushPending();
     try {
       if (fs.existsSync(tagPath)) {
         appendTagFile(tagPath, stopLine(reason));
       }
     } catch (_) {}
-    try { fs.unlinkSync(pidPath); } catch (_) {}
+    unlinkLeaseIf(pidPath, String(process.pid));
   }
   process.exit(0);
 }
@@ -200,12 +198,7 @@ function upsertHeartbeat(now: number) {
       if (size - lineStart === hbBuf.length) {
         const lineBuf = Buffer.alloc(hbBuf.length);
         fs.readSync(fd, lineBuf, 0, lineBuf.length, lineStart);
-        let isHb = false;
-        try {
-          const obj = JSON.parse(lineBuf.toString("utf8").trim());
-          isHb = obj !== null && typeof obj === "object" && typeof obj._hb === "object" && obj._hb !== null;
-        } catch (_) { /* not a heartbeat we can recognise — append beside it */ }
-        if (isHb) {
+        if (parseTagLine(lineBuf.toString("utf8"))?.kind === "heartbeat") {
           fs.writeSync(fd, hbBuf, 0, hbBuf.length, lineStart);
           return;
         }
@@ -218,16 +211,8 @@ function upsertHeartbeat(now: number) {
   appendTagFile(tagPath, hbLine);
 }
 
-/** Atomically replace the published lease without exposing an empty file. */
 function replaceLease(value: string): void {
-  const replacement = `${pidPath}.replace-${process.pid}`;
-  try {
-    fs.writeFileSync(replacement, value);
-    fs.renameSync(replacement, pidPath);
-  } catch (err) {
-    try { fs.unlinkSync(replacement); } catch (_) {}
-    throw err;
-  }
+  publishLease(pidPath, value, String(process.pid));
 }
 
 /** Cut an unterminated tag tail left by a killed append. Caller rebuilds the tag — resume after a cut can double-bill id-less turns. */
@@ -339,20 +324,10 @@ function resumeClaudeLookups(tagContent: string) {
   const open = new Map<string, { at: number; commands: string[] }>();
   const settledChildren: string[] = [];
   const readSources = new Set<string>();
-  for (const line of tagContent.split("\n")) {
-    if (line.includes('"_gen"')) {
-      try { const s = JSON.parse(line)._gen?.s; if (typeof s === "string") readSources.add(s); } catch { /* skip */ }
-      continue;
-    }
-    if (!line.includes('"spawnPending"') && !line.includes('"spawnSettled"')) continue;
-    let meta: { spawnPending?: { key?: unknown; at?: unknown; commands?: unknown }; spawnSettled?: unknown; children?: unknown } | undefined;
-    try { meta = JSON.parse(line)._meta; } catch { continue; }
-    if (Array.isArray(meta?.children)) settledChildren.push(...meta.children.filter((c): c is string => typeof c === "string"));
-    const p = meta?.spawnPending;
-    if (p && typeof p.key === "string" && typeof p.at === "number" && Array.isArray(p.commands)) {
-      open.set(p.key, { at: p.at, commands: p.commands.filter((c): c is string => typeof c === "string") });
-    }
-    if (typeof meta?.spawnSettled === "string") open.delete(meta.spawnSettled);
+  for (const r of tagRecords(tagContent)) {
+    if (r.kind === "generation") readSources.add(r.source);
+    else if (r.kind === "spawn-pending") open.set(r.key, { at: r.at, commands: r.commands });
+    else if (r.kind === "spawn-settled") { settledChildren.push(...r.children); open.delete(r.key); }
   }
   // A child a settled lookup found that no earlier life read.
   for (const file of settledChildren) {
@@ -1151,27 +1126,18 @@ function parseNewLines(filePath: string) {
 function invalidateStaleSweptMarker(filePath: string) {
   try {
     const tagPath = getCurrentVersionTagPath(filePath);
-    const lines = fs.readFileSync(tagPath, "utf8").split("\n");
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      let obj: Record<string, unknown> | null = null;
-      try {
-        obj = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      // Same backward scan as tagProvisionalFromContent: pass hb/offset; retract swept; stop on classified.
-      if (obj?.["_hb"]) continue;
-      const meta = (obj?.["_meta"] ?? {}) as Record<string, unknown>;
-      if (typeof meta.unswept === "number") return;
-      if (typeof meta.swept === "number") {
+    const records = tagRecords(fs.readFileSync(tagPath, "utf8"));
+    // The same backward scan as sweepState: markers and heartbeats are passed
+    // over, a swept marker is retracted, a data record ends the search.
+    for (let i = records.length - 1; i >= 0; i--) {
+      const r = records[i];
+      if (r.kind === "unswept") return;
+      if (r.kind === "swept") {
         appendTagFile(tagPath, JSON.stringify({ _meta: { unswept: Date.now() } }) + "\n");
         sweptRetracted = true;
         return;
       }
-      if (obj?.["_meta"]) continue;
-      return;
+      if (isDataRecord(r) || r.kind === "unknown") return;
     }
   } catch {
   }
@@ -1189,17 +1155,7 @@ function readLastMetaOffset(tagPath: string): number | null {
     const buf = Buffer.alloc(stat.size - readStart);
     fs.readSync(fd, buf, 0, buf.length, readStart);
     fs.closeSync(fd);
-    const lines = buf.toString("utf8").split("\n");
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      try {
-        const obj = JSON.parse(line);
-        if (obj._meta && typeof obj._meta.offset === "number") {
-          return obj._meta.offset;
-        }
-      } catch { continue; }
-    }
+    return lastOffset(tagRecords(buf.toString("utf8")));
   } catch { /* tag file unreadable */ }
   return null;
 }
@@ -1234,12 +1190,9 @@ function sessionWasEverParsed(sessionCmdlinePath: string): boolean {
     for (const f of fs.readdirSync(tagsDir)) {
       if (!f.startsWith(prefix)) continue;
       const content = fs.readFileSync(path.join(tagsDir, f), "utf8");
-      for (const line of content.split("\n")) {
-        if (!line.trim()) continue;
-        try {
-          const o = JSON.parse(line);
-          if (o.cat !== undefined || o._meta !== undefined) return true;
-        } catch (_) {}
+      for (const r of tagRecords(content)) {
+        if (r.kind === "turn" || r.kind === "offset" || r.kind === "swept" || r.kind === "unswept"
+          || r.kind === "spawn-pending" || r.kind === "spawn-settled" || r.kind === "meta-other") return true;
       }
     }
   } catch (_) {}
@@ -1286,19 +1239,11 @@ function reapAndWarn() {
     else leasesOf.set(pid, [lease]);
   }
   const sessionOf = new Map<number, string | null>();
-  // Re-proved (same file, same pid) before unlinking, as the claim loop does:
-  // a lease read at the start may have been claimed by a new owner since.
-  const unlinkIfStill = (lease: Lease, pid: number) => {
-    try {
-      const now = fs.statSync(lease.path);
-      if (now.dev !== lease.dev || now.ino !== lease.ino) return;
-      if (parseInt(fs.readFileSync(lease.path, "utf8").trim(), 10) === pid) fs.unlinkSync(lease.path);
-    } catch (_) {}
-  };
+  const unlinkIfStill = (lease: Lease, pid: number) => { unlinkLeaseIf(lease.path, String(pid), lease); };
 
   for (const [pid, leases] of leasesOf) {
-    // Only ESRCH means gone, as in the claim loop: EPERM is a live process
-    // this user cannot signal, and its leases stay.
+    // Only ESRCH means gone: EPERM is a live process this user cannot signal,
+    // and its leases stay.
     let alive = true;
     try { process.kill(pid, 0); } catch (err) { alive = (err as NodeJS.ErrnoException).code !== "ESRCH"; }
 
@@ -1351,8 +1296,9 @@ function reapAndWarn() {
           const stat = fs.statSync(tagFound);
           const content = fs.readFileSync(tagFound, "utf8");
           const lines = content.trim().split("\n");
-          const hbLines = lines.filter(l => l.includes('"_hb"') && !l.includes('"stop"'));
-          const hbRatio = lines.length > 0 ? hbLines.length / lines.length : 0;
+          const records = tagRecords(content);
+          const heartbeats = records.filter(r => r.kind === "heartbeat");
+          const hbRatio = lines.length > 0 ? heartbeats.length / lines.length : 0;
 
           if (stat.size > TAG_SIZE_WARN) {
             const mb = (stat.size / (1024 * 1024)).toFixed(1);
@@ -1361,23 +1307,14 @@ function reapAndWarn() {
 
           if (lines.length > 10 && hbRatio >= HB_RATIO_WARN) {
             const pct = Math.round(hbRatio * 100);
-            findings.push(`${pct}% heartbeats (${hbLines.length}/${lines.length} lines) — possible malfunction — ${tagFound}`);
+            findings.push(`${pct}% heartbeats (${heartbeats.length}/${lines.length} lines) — possible malfunction — ${tagFound}`);
           }
 
-          const hasInteractions = lines.some(l => {
-            try { const o = JSON.parse(l.trim()); return o.cat !== undefined; } catch { return false; }
-          });
-          if (!hasInteractions) {
-            const firstHb = hbLines[0];
-            if (firstHb) {
-              try {
-                const hb = JSON.parse(firstHb);
-                const startTime = hb._hb?.first;
-                if (startTime && (Date.now() - startTime) > ZERO_INTERACTIONS_AGE) {
-                  const ageH = Math.round((Date.now() - startTime) / 3600000);
-                  findings.push(`${ageH}h old with zero real interactions — zombie daemon? — ${sessionFound}`);
-                }
-              } catch (_) {}
+          if (!records.some(r => r.kind === "turn")) {
+            const startTime = heartbeats[0]?.first;
+            if (startTime && (Date.now() - startTime) > ZERO_INTERACTIONS_AGE) {
+              const ageH = Math.round((Date.now() - startTime) / 3600000);
+              findings.push(`${ageH}h old with zero real interactions — zombie daemon? — ${sessionFound}`);
             }
           }
         } catch (_) {}
@@ -1436,16 +1373,12 @@ function reseedClaudeChildren(tagContent: string, quiet = false): boolean {
   /** Child session id to the source of the transcript folding it, as of the
    *  last generation of that source: a `_gen` retires its earlier folds. */
   const foldedBy = new Map<string, string>();
-  for (const line of tagContent.split("\n")) {
-    if (!line.includes('"_gen"') && !line.includes('"_fold"')) continue;
-    let obj: { _gen?: { s?: unknown; session?: unknown }; _fold?: { child?: unknown; s?: unknown } };
-    try { obj = JSON.parse(line); } catch { continue; }
-    const gen = obj._gen;
-    if (typeof gen?.s === "string" && typeof gen.session === "string") {
-      children.set(gen.s, gen.session);
-      for (const [child, holder] of [...foldedBy]) if (holder === gen.s) foldedBy.delete(child);
+  for (const r of tagRecords(tagContent)) {
+    if (r.kind === "generation" && r.session !== undefined) {
+      children.set(r.source, r.session);
+      for (const [child, holder] of [...foldedBy]) if (holder === r.source) foldedBy.delete(child);
     }
-    if (typeof obj._fold?.child === "string" && typeof obj._fold.s === "string") foldedBy.set(obj._fold.child, obj._fold.s);
+    if (r.kind === "fold" && r.source !== undefined) foldedBy.set(r.child, r.source);
   }
   if (children.size === 0) return true;
   let complete = true;
@@ -1503,7 +1436,7 @@ function initClassified() {
     try {
       fs.accessSync(tagPath);
       const tagContent = fs.readFileSync(tagPath, "utf8");
-      const hasData = tagContent.split("\n").some(l => l.trim() && !l.includes('"_hb"') && !l.includes('"_meta"'));
+      const hasData = tagRecords(tagContent).some(r => isDataRecord(r) || r.kind === "unknown");
       if (hasData) {
         const metaOffset = readLastMetaOffset(tagPath);
         if (metaOffset !== null) {
@@ -1779,52 +1712,26 @@ function procIsDaemon(pid: number): boolean {
   });
 }
 
+/** A holder that is a live daemon process keeps its lease; `rebuild`, a
+ *  dead pid, or a live process that is not a daemon does not. */
+function holderIsLiveDaemon(holder: string): boolean {
+  const pid = Number(holder);
+  if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) return false;
+  try { process.kill(pid, 0); } catch { return false; }
+  return procIsDaemon(pid);
+}
+
+/** The holder the last `claimPidFile` judged stale and displaced, "" when none.
+ *  Read it after the claim, never before: the rebuild decision comes from the
+ *  value actually unlinked, not from an earlier read. */
+let displacedHolder = "";
 function claimPidFile(file: string): "claimed" | "busy" {
-  const aliveDaemon = (pid: number): boolean => {
-    if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) return false;
-    try { process.kill(pid, 0); } catch { return false; }
-    return procIsDaemon(pid);
-  };
-  try {
-    const existing = Number(fs.readFileSync(file, "utf8").trim());
-    if (existing === process.pid) return "claimed";
-    if (aliveDaemon(existing)) return "busy";
-  } catch { /* no lease yet */ }
-  const candidate = `${file}.claim-${process.pid}`;
-  try {
-    fs.writeFileSync(candidate, String(process.pid));
-    try {
-      fs.linkSync(candidate, file);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-      let holderText = "";
-      try {
-        holderText = fs.readFileSync(file, "utf8").trim();
-      } catch (readErr) {
-        if ((readErr as NodeJS.ErrnoException).code !== "ENOENT") throw readErr;
-        try {
-          fs.linkSync(candidate, file);
-        } catch (linkErr) {
-          if ((linkErr as NodeJS.ErrnoException).code === "EEXIST") return "busy";
-          throw linkErr;
-        }
-        return "claimed";
-      }
-      const holder = Number(holderText);
-      if (holder === process.pid) return "claimed";
-      if (aliveDaemon(holder)) return "busy";
-      try { fs.unlinkSync(file); } catch { /* raced */ }
-      try {
-        fs.linkSync(candidate, file);
-      } catch (linkErr) {
-        if ((linkErr as NodeJS.ErrnoException).code === "EEXIST") return "busy";
-        throw linkErr;
-      }
-    }
-  } finally {
-    try { fs.unlinkSync(candidate); } catch { /* already gone */ }
-  }
-  return "claimed";
+  displacedHolder = "";
+  return claimLease(file, String(process.pid), (holder) => {
+    const live = holderIsLiveDaemon(holder);
+    if (!live) displacedHolder = holder;
+    return live;
+  });
 }
 
 function harnessRoot(which: string): string {
@@ -1843,10 +1750,8 @@ function adoptSession(): boolean {
   tagPath = getCurrentVersionTagPath(sessionPath);
   try { fs.mkdirSync(path.dirname(tagPath), { recursive: true }); } catch { /* exists */ }
   pidPath = getDaemonPidPath(sessionPath);
-  try {
-    if (fs.readFileSync(pidPath, "utf8").trim() === "rebuild") rebuildTagOnStartup = true;
-  } catch { /* no lease yet */ }
   if (!takeOverLease(pidPath)) return false;
+  if (displacedHolder === "rebuild") rebuildTagOnStartup = true;
   initClassified();
   return true;
 }
@@ -2104,19 +2009,8 @@ function sleepMs(ms: number) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-/** Unlinks `file` only if it holds `value` and was not replaced while it was
- *  read; true if it did. */
 function unlinkIfHolds(file: string, value: string): boolean {
-  try {
-    const before = fs.statSync(file);
-    if (fs.readFileSync(file, "utf8").trim() !== value) return false;
-    const now = fs.statSync(file);
-    if (now.dev !== before.dev || now.ino !== before.ino) return false;
-    fs.unlinkSync(file);
-    return true;
-  } catch {
-    return false;
-  }
+  return unlinkLeaseIf(file, value);
 }
 
 function onWatch(dir: string, filename: string | null) {
@@ -2198,9 +2092,7 @@ function pointSessionAt(livePid: number, file: string): boolean {
   // another live daemon holds is left for the harness's adoption to take by
   // its own rules (never from a harness; a per-session daemon is stopped first).
   if (leaseText !== "rebuild" && (held || !procIsDaemon(holder))) {
-    const replacement = `${lease}.replace-${process.pid}`;
-    fs.writeFileSync(replacement, String(livePid));
-    fs.renameSync(replacement, lease);
+    publishLease(lease, String(livePid), String(process.pid));
   }
   try { fs.writeFileSync(`${lease}.display`, ""); } catch { /* the live process still has the old focus */ }
   // The live process may hold no slot for this session yet: ask it by name.
@@ -2391,14 +2283,8 @@ function dropHarnessSlot(key: string, reason = "") {
 function releaseLease(slot: Slot) {
   if (!slot.pidPath) return;
   for (const other of harnessSlots.values()) if (other !== slot && other.pidPath === slot.pidPath) return;
-  try {
-    const before = fs.statSync(slot.pidPath);
-    if (fs.readFileSync(slot.pidPath, "utf8").trim() !== String(process.pid)) return;
-    const now = fs.statSync(slot.pidPath);
-    if (now.dev !== before.dev || now.ino !== before.ino) return;
-    fs.unlinkSync(slot.pidPath);
-    fs.rmSync(`${slot.pidPath}.display`, { force: true });
-  } catch { /* already gone */ }
+  if (!unlinkLeaseIf(slot.pidPath, String(process.pid))) return;
+  try { fs.rmSync(`${slot.pidPath}.display`, { force: true }); } catch { /* already gone */ }
 }
 
 /** When each served session last had its subagents read because a directory
@@ -2433,11 +2319,6 @@ function leaseStillOurs(slot: Slot): boolean {
 function leaseLost(key: string, slot: Slot) {
   if (slot.pidPath && leaseHolder(slot.pidPath) === "rebuild") wake(key, slot.displayed);
   else dropHarnessSlot(key);
-}
-
-/** What a lease names, or "" when there is none. */
-function leaseHolder(lease: string): string {
-  try { return fs.readFileSync(lease, "utf8").trim(); } catch { return ""; }
 }
 
 function logLeaseLost(session: string, lease: string) {
@@ -2913,14 +2794,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   let found = 0;
   const seenPids = new Set<number>();
   const restarted = new Set<number>();
-  const unlinkIfNames = (file: string, pid: number) => {
-    try {
-      const before = fs.statSync(file);
-      if (parseInt(fs.readFileSync(file, "utf8").trim(), 10) !== pid) return;
-      const now = fs.statSync(file);
-      if (now.dev === before.dev && now.ino === before.ino) fs.unlinkSync(file);
-    } catch { /* already gone */ }
-  };
+  const unlinkIfNames = (file: string, pid: number) => { unlinkLeaseIf(file, String(pid)); };
   for (const pidFile of pidFiles) {
     const fullPath = path.join(pidDir, pidFile);
     const pid = leaseHolders.get(pidFile) ?? NaN;
@@ -3099,7 +2973,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   }
   // Session file may not exist yet; wait in the poll loop with heartbeats.
   if (sessionPath.includes(".wtft-tag.v")) {
-    process.stderr.write(`wtft-daemon: refusing to watch a tag cache file: ${sessionPath}\n`);
+    process.stderr.write(`wtft-daemon: refusing to watch a tag file as a session: ${sessionPath}\n`);
     process.exit(1);
   }
 
@@ -3128,15 +3002,23 @@ if (showList || showCleanup || showRestart || stopSession) {
     }
     return { older, newer };
   };
+  // A lease that exists but cannot be read is a fault, never a holder: fail loudly.
+  try { fs.readFileSync(pidPath, "utf8"); } catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err; }
   let claimedByTakeover = false;
   try {
     const { older, newer } = otherTagVersions();
     // A newer build serving this session keeps it.
     if (newer.length > 0 && liveDaemonOrUnknown(Number(leaseHolder(pidPath)))) process.exit(0);
     if (older.length > 0) {
-      // Honor an existing rebuild lease before version-takeover claim.
-      if (leaseHolder(pidPath) === "rebuild") rebuildTagOnStartup = true;
-      replaceLease(String(process.pid));
+      // Honor an existing rebuild lease before version-takeover claim: replace
+      // only the value read, and on a miss read once more so a token written
+      // meanwhile is honoured, not consumed.
+      let holder = leaseHolder(pidPath);
+      if (!publishLease(pidPath, String(process.pid), String(process.pid), holder)) {
+        holder = leaseHolder(pidPath);
+        replaceLease(String(process.pid));
+      }
+      if (holder === "rebuild") rebuildTagOnStartup = true;
       claimedByTakeover = true;
     }
   } catch (e) {
@@ -3145,57 +3027,18 @@ if (showList || showCleanup || showRestart || stopSession) {
 
 
   if (!claimedByTakeover) {
-    // Publish a fully-populated inode with an exclusive hard link (no empty-lease window).
-    const tryClaimLease = (): boolean => {
-      const candidate = `${pidPath}.claim-${process.pid}`;
-      try {
-        fs.writeFileSync(candidate, String(process.pid));
-        fs.linkSync(candidate, pidPath);
-        return true;
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
-        throw err;
-      } finally {
-        try { fs.unlinkSync(candidate); } catch (_) {}
-      }
+    // Any live process named by the lease keeps it, daemon or not: only ESRCH is gone.
+    let displaced = "";
+    const holderIsLive = (holder: string): boolean => {
+      const pid = /^[1-9]\d*$/.test(holder) ? Number(holder) : 0;
+      let live = Number.isSafeInteger(pid) && pid > 0;
+      if (live) { try { process.kill(pid, 0); } catch (err) { live = (err as NodeJS.ErrnoException).code !== "ESRCH"; } }
+      if (!live) displaced = holder;
+      return live;
     };
-
-    while (!tryClaimLease()) {
-      // Only the explicit rebuild token requests replay; a stale numeric PID does not.
-      let lease: string;
-      let observedLease: fs.Stats;
-      try {
-        lease = fs.readFileSync(pidPath, "utf8").trim();
-        observedLease = fs.statSync(pidPath);
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
-        throw err;
-      }
-
-      const existingPid = /^[1-9]\d*$/.test(lease) ? Number(lease) : 0;
-      if (lease === "rebuild") {
-        rebuildTagOnStartup = true;
-      } else if (Number.isSafeInteger(existingPid) && existingPid > 0) {
-        try {
-          process.kill(existingPid, 0);
-          process.exit(0);
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== "ESRCH") {
-            process.exit(0);
-          }
-        }
-      }
-
-      // Re-prove inode+value before unlink — never drop a newer owner's lease on stale evidence.
-      try {
-        const currentLease = fs.statSync(pidPath);
-        if (currentLease.dev !== observedLease.dev || currentLease.ino !== observedLease.ino) continue;
-        if (fs.readFileSync(pidPath, "utf8").trim() !== lease) continue;
-        fs.unlinkSync(pidPath);
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-      }
-    }
+    if (claimLease(pidPath, String(process.pid), holderIsLive) === "busy") process.exit(0);
+    // Only the explicit rebuild token requests replay; a stale numeric PID does not.
+    if (displaced === "rebuild") rebuildTagOnStartup = true;
   }
 
   // Drop older-version tag files after claiming the lease; re-sweep once after 5s for a late heartbeat.

@@ -32,7 +32,7 @@ The `watu` project (Rust TUI, outside scope for JS sharing) will need the same s
 
 ## Extracted Modules
 
-### Module A: `extensions/lib/session-path-shortener.ts`
+### Module A: `session-path-shortener` (now `@princess-pi/libs/session-path-shortener`)
 
 Pure functions, zero deps beyond Node builtins (`path`, `os`).
 
@@ -74,12 +74,12 @@ Note: Pi slugs use `--` internal separators and never match the `home-*-git-proj
 
 ### Module B: `extensions/lib/session-selector.ts`
 
-Depends on module A + `extensions/lib/wtft-shared.ts` (for `formatCost`, `parseEntryToInteraction`).
+Depends on module A + `extensions/lib/wtft-shared.ts` (for `formatCost`) + `extensions/lib/wtft-daemon-lib.ts` (for `classifiedInteractionsFromContent`), plus `wtft-tagger-version.ts`, `tty-helpers.ts`, `picker-state.ts`, `harness-order.ts` and the harness registry (`harness/registry.ts`, `harness/types.ts`, `harness/worktrees.ts`).
 
 ```typescript
 export interface SessionCandidate {
   path: string;
-  harness: 'pi' | 'claude-code';
+  harness: string;   // a harness id from the registry
   timestamp: number;
   name: string;
   displayPath: string;
@@ -87,17 +87,22 @@ export interface SessionCandidate {
 
 /** Walk Pi and/or Claude Code session directories, sorted newest-first */
 export function discoverSessions(
-  harness?: 'pi' | 'claude-code' | 'auto'
+  harness: string = "auto",
+  cwdOverride?: string,
+  scopeOpts?: object
 ): SessionCandidate[];
 
-/** Read .jsonl → assistant turn count + total cost */
+/** Read the session's tag file (current version, else the highest version number on disk) →
+ *  id-collapsed turn count + summed turn cost; with no tag, or one that cannot be read, the
+ *  transcript's non-blank line count and no cost */
 export function getSessionSummary(
   filePath: string
-): { turns: number; cost: number };
+): { turns: number; cost: number; tagVersion: string | null; rawLines: number | null };
 
-/** Interactive TTY picker (↑/↓/Enter/Ctrl+C), non-TTY fallback to auto-select 1st */
+/** Interactive TTY picker (j/k or arrows, Enter, q/Ctrl+C); the caller guarantees a TTY (exit 10 otherwise) */
 export function selectSessionPrompt(
-  candidates: SessionCandidate[]
+  initialCandidates: SessionCandidate[],
+  opts: { harnessOption: string; cwdOverride?: string; out?: NodeJS.WritableStream; substringFilter?: string }
 ): Promise<string>;
 ```
 

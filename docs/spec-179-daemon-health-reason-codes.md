@@ -54,8 +54,8 @@ breaks; that is the whole point.
  */
 export type DaemonHealthReason =
 	| "not-started"      // no daemon spawned for this session yet
-	| "starting"         // spawned, inside the #124 startup grace window
-	| "waiting-session"  // spawned, session .jsonl not created yet
+	| "starting"         // spawned, inside the #124 startup grace window, or the tag written < 2 s ago (#270 S5)
+	| "waiting-session"  // spawned or live, session .jsonl not created yet
 	| "not-found"        // no live PID and no heartbeat on record
 	| "idle-timeout"     // exited after idling out (lastHbTime carries when)
 	| "restart-failed";  // respawn attempted and did not come up

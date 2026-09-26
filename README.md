@@ -143,7 +143,7 @@ wtft --by-model
 wtft --session <path>
 wtft --session <path> --watch
 
-# List the running log parser daemons
+# List the log parser daemons (running ones, and leases whose holder is dead)
 wtft --list
 
 # Machine-readable: one JSON object on stdout, exact numbers, no ANSI

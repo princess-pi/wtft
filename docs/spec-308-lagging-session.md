@@ -52,7 +52,7 @@ Two review rounds (macroscopeapp; every finding verified against the code before
   its PID file before `initClassified()`, and this covers the singleton case where the
   child exits 0 because an older daemon owns the session; `dead` ⇔ child gone (exit code
   **or signal**) AND no lease, re-checked *after* the exit is observed (a concurrent daemon
-  can claim the lease in the gap); `unknown` ⇔ ceiling hit with the child alive and
+  can claim the lease in the gap); `unknown` ⇔ ceiling hit with the child alive (or no child handle) and
   nothing claimed — still exit 0, a slow box is not a failure. **A tag file is not
   proof:** tags outlive daemons (previous run, or a sibling-dir file the #155 lookup
   adopts) — measured: a stale tag under `/tmp` made a SIGKILLed stand-in read as "up".

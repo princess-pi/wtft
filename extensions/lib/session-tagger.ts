@@ -232,7 +232,7 @@ function foldSetSignature(files: ReadonlySet<string>): string {
 	return [...files].sort().join("\u0000");
 }
 
-function freshSubagentState(): SubagentFileState {
+function freshSubagentState(source = ""): SubagentFileState {
 	return {
 		lastSize: 0,
 		mtimeMs: -1,
@@ -247,7 +247,7 @@ function freshSubagentState(): SubagentFileState {
 		spawnWindowClosesAt: 0,
 		owners: [],
 		pendingTurn: null,
-		source: "",
+		source,
 		lastTurn: null,
 		foldedByAnother: "",
 	};
@@ -465,12 +465,25 @@ function skipAsFoldedElsewhere(state: TaggerState, out: Out, rawFile: string, fo
 	if (!foldedElsewhere.has(file)) return { skip: false, retired: false };
 	let retired = false;
 	if (state.discoveredSubagentFiles.has(file)) {
-		out.records += generationRecordLine(transcriptSourceId(file, path.dirname(state.sessionPath)), path.basename(file, ".jsonl"));
+		out.records += generationRecordLine(sourceOf(state, file), path.basename(file, ".jsonl"));
 		state.discoveredSubagentFiles.delete(file);
 		state.tagGrewSinceMarker = true;
 		retired = true;
 	}
 	return { skip: true, retired };
+}
+
+/** The source a child's lines carry: decided at its first read and kept for
+ *  the life of its state, across a move of the session and its own rotations,
+ *  so a later generation retires the earlier lines (#263). */
+function sourceOf(state: TaggerState, file: string): string {
+	return state.discoveredSubagentFiles.get(file)?.source || transcriptSourceId(file, path.dirname(state.sessionPath));
+}
+
+/** The sources a `_gen` record for `file` may carry: relative to the session's
+ *  directory, or to its own when the session was there at the first read. */
+function sourceCandidates(state: TaggerState, file: string): Set<string> {
+	return new Set([transcriptSourceId(file, path.dirname(state.sessionPath)), transcriptSourceId(file, path.dirname(file))]);
 }
 
 /** A nested transcript that grew, or no longer stats, since the parse that folded it. */
@@ -548,7 +561,7 @@ function syncSubagentTranscript(state: TaggerState, world: World, out: Out, now:
 		}
 		if (rotate) {
 			debug(out, `subagent transcript rotated, opening a new generation: ${path.basename(file)}`);
-			fileState = freshSubagentState();
+			fileState = freshSubagentState(fileState.source);
 			state.discoveredSubagentFiles.set(stateKey, fileState);
 		}
 
@@ -615,7 +628,7 @@ function syncSubagentTranscript(state: TaggerState, world: World, out: Out, now:
 			} else if (last && !last.owner && last.turn.messageId) {
 				reinterrupted.push(...clearSubagentCacheMiss([{ ...last.turn, interrupted: true }]));
 			} else if (last && attempt === 0) {
-				fileState = freshSubagentState();
+				fileState = freshSubagentState(fileState.source);
 				state.discoveredSubagentFiles.set(stateKey, fileState);
 				continue;
 			}
@@ -676,14 +689,14 @@ function syncSubagentTranscript(state: TaggerState, world: World, out: Out, now:
 			}
 			const shrunk = owners.some((o, i) => o.lastCost > 0 && clones[i].cost + 1e-9 < o.lastCost);
 			if (shrunk && attempt === 0) {
-				fileState = freshSubagentState();
+				fileState = freshSubagentState(fileState.source);
 				state.discoveredSubagentFiles.set(stateKey, fileState);
 				debug(out, `subagent transcript rotated, opening a new generation: ${path.basename(file)}`);
 				continue;
 			}
 		}
 
-		const source = transcriptSourceId(file, path.dirname(state.sessionPath));
+		const source = fileState.source || transcriptSourceId(file, path.dirname(state.sessionPath));
 		fileState.source = source;
 		let batch = "";
 		const nextOwners: FoldOwner[] = owners.map(o => ({ ...o }));
@@ -812,8 +825,11 @@ function reseedClaudeChildren(state: TaggerState, world: World, out: Out, tagCon
 				if (code !== "ENOENT" && code !== "ENOTDIR") failed(`${file} could not be stat'd`, err);
 				continue;
 			}
-			if (transcriptSourceId(file, sessionDir) !== source) continue;
-			if (!found.has(file)) state.discoveredClaudeFiles.add(file);
+			if (!sourceCandidates(state, file).has(source)) continue;
+			if (!found.has(file)) {
+				state.discoveredClaudeFiles.add(file);
+				if (!state.discoveredSubagentFiles.has(file)) state.discoveredSubagentFiles.set(file, freshSubagentState(source));
+			}
 			break;
 		}
 	}
@@ -832,7 +848,7 @@ function resumeClaudeLookups(state: TaggerState, world: World, tagContent: strin
 	}
 	// A child a settled lookup found that no earlier life read.
 	for (const file of settledChildren) {
-		if (readSources.has(transcriptSourceId(file, path.dirname(state.sessionPath)))) continue;
+		if ([...sourceCandidates(state, file)].some(source => readSources.has(source))) continue;
 		if (world.exists(file)) state.discoveredClaudeFiles.add(file);
 	}
 	for (const [key, { at, commands }] of open) {
@@ -879,6 +895,7 @@ export function scanChildren(state: TaggerState, world: World, opts: ScanOptions
 	const deadline = opts.sliceMs === undefined ? Infinity : now + opts.sliceMs;
 	let cut = false;
 	let readThisSlice = 0;
+	const continued = state.scanPass !== null;
 	const readThisPass = state.scanPass ?? new Set<string>();
 	if (state.scanPassFailed) state.pollHadFailure = true;
 	if (state.reseedPending) {
@@ -1011,10 +1028,27 @@ export function scanChildren(state: TaggerState, world: World, opts: ScanOptions
 
 	for (const file of state.discoveredClaudeFiles) {
 		if (cut) break;
+		// Gone from disk is gone, not a failed read: the release below writes
+		// the turn it held, and the tag can be stamped swept.
+		if (!world.exists(file)) continue;
 		if (!due(file)) continue;
 		const skipped = skipAsFoldedElsewhere(state, out, file, foldedElsewhere);
 		if (skipped.skip) { wroteAny = wroteAny || skipped.retired; continue; }
 		wroteAny = syncSubagentTranscript(state, world, out, now, file, notMine(file)) || wroteAny;
+	}
+	// A transcript an earlier slice of this pass read can have grown since; the
+	// pass stamps swept only after its growth is read, so it is due again.
+	if (!cut && continued) {
+		for (const file of readThisPass) {
+			const fileState = state.discoveredSubagentFiles.get(file);
+			if (!fileState) continue;
+			try {
+				const st = world.stat(file);
+				if (st.size === fileState.lastSize && st.mtimeMs === fileState.mtimeMs && st.ino === fileState.ino) continue;
+			} catch { continue; }
+			readThisPass.delete(file);
+			cut = true;
+		}
 	}
 	if (cut) {
 		state.scanPass = readThisPass;

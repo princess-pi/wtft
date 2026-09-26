@@ -159,21 +159,21 @@ Rows R4, R8, R10 and R12 are the daemon chain (#205 → #239 → #249 → #259 �
 ### 3a. Modules
 
 Six modules. Each row names the interface a caller must know, and what moves behind it. The
-**TagLog** and **Lease** rows name what S1 and S2 built; the four below them are the plan, and
-no symbol in them exists yet.
+**TagLog**, **Lease** and **SessionTagger** rows name what S1–S3 built; the three below them
+are the plan, and no symbol in them exists yet.
 
 | Module | Interface | Behind it | Replaces |
 |---|---|---|---|
 | **TagLog** (`extensions/lib/tag-log.ts`, built) | `TagRecord`, a typed union: `turn`, `heartbeat`, `stop`, `offset`, `swept`, `unswept`, `spawn-pending`, `spawn-settled`, `fold`, `generation`, plus `meta-other` and `unknown`; `parseTagLine(line)`; `recordOf(obj)`; `tagRecords(content)`; `currentGeneration(records)`; `sweepState(records)`; `lastOffset(records)`; `isDataRecord(r)` | shape-decided kinds, generation supersession, the sweep scan, the offset read (an offset may ride on a sweep marker) | the substring sites (R11) and the picker's private reader; `tagProvisionalFromContent`'s backward scan. Id collapse stays `dedupeClassifiedById`; `readLastMetaOffset`, `invalidateStaleSweptMarker` and `resumeClaudeLookups` stay in the daemon and now read through `tagRecords`; the writer (`appendTagFile`, the heartbeat pwrite) stays in the daemon until S3 |
 | **Lease** (`extensions/lib/lease.ts`, built) | `claimLease(file, owner, holderIsLive) → claimed \| busy`; `leaseHolder(file)`; `leaseIdentity(file)`; `unlinkLeaseIf(file, value, observed?)`; `replaceLease(file, value, owner, expected?)` | hard-link claim with one retry; content-and-inode re-prove before an unlink; rename publish | the nine R12 unlink sites. The `rebuild` mark is `replaceLease(lease, "rebuild", pid[, expected])`: the CLI passes the value it first read, the daemon's `fatalTagMutation` none; the SIGTERM of a holder stays with the callers (`forceRebuildSession`, `restartDaemon`, `takeOverLease`, `reapAndWarn`, `--stop`, `--cleanup`, `--restart`, and `runHarness` for the root file); `forceRebuildSession` still reads the lease raw where it must tell a missing file from an unreadable one |
-| **SessionTagger** | `step(state, input) → { state, records, verdict, warnings }` where `input` is `{ now, session?: { stat, bytes }, children: { path, stat, bytes? }[], discovered: string[] }` | `parseNewLines`, `syncSubagentTranscript`, `scanForSubAgents`, `queueClaudeCommand`, the owner/fold/generation/held-turn logic. No `fs`, no `Date.now()`, no `process` | the 25-field `Slot` and `install`/`save`; `serviceSession`'s poll body |
+| **SessionTagger** (`extensions/lib/session-tagger.ts`, built; design in `docs/spec-270-session-tagger.md`) | `TaggerState` (one session's tagging state, a plain object); `World` (the port: every filesystem and clock read) with `fsWorld(now?)` as the daemon's adapter; `newTaggerState(sessionPath, tagPath)`; `resumeTagger(state, tagContent, world) → { complete, records, log }`; `stepTagger(state, world, { flush, sliceMs? }) → { records, cut, wrote, activity, log }`, composed of the exported `readSession`, `flushTurns`, `scanChildren` the harness timers call apart | the session read, the `claude -p` lookup queue, the child sync, the owner/fold/generation/held-turn logic, the scan pass and its slice, the resume's reseed and lookups, the swept stamp and its retraction. No `fs`, no `Date.now()`, no `process`: records come back to the caller, so do log lines | the 24 module-level session bindings, `install`/`save`, `parseNewLines`, `syncSubagentTranscript`, `scanForSubAgents` and the rest of §1's daemon-side tagging functions; `Slot` is `{ state, pidPath, rebuildTagOnStartup, lastWriteMs, lastActivityMs, startupTime, idleStartMs, sessionExisted, displayed, checkedAtMs }` |
 | **HarnessRegistry** | `serve(file, displayed)`; `drop(key, reason)`; `move(from, to)`; `tick(now)`; `snapshot() → HandOff` | one record per session holding its `SessionTagger` state, watchers, timers, retry count, idle stamp, scan cursor | the 17 side collections; `wake`'s re-key block; `handOffLines` |
 | **DaemonHealth** | `health(sessionPath, now) → { alive, idle, since, reason }` | lease read, T4 tail read, the spawn and mtime graces | the four R4 rules |
 | **CLI arms** | `runReport(opts)`, `runWatch(opts)`, `runForceRebuild(opts)`, `runDaemonCommand(opts)` | what `bin/wtft.ts` `main` does after argument parsing | the 555-line `main` |
 
-`SessionTagger` is the deep one. Its interface is one function over values; its implementation
-is what today sits in `syncSubagentTranscript` and `scanForSubAgents`. The daemon
-process becomes a shell: stat and read files, call `step`, hand `records` to `TagLog`, sleep.
+`SessionTagger` is the deep one. Its interface is a state value, a port and a step over them;
+its implementation is what sat in `syncSubagentTranscript` and `scanForSubAgents`. The daemon
+is the shell: it calls the step through `fsWorld()`, appends `records`, prints `log`, sleeps.
 
 ### 3b. Slices
 
@@ -185,13 +185,14 @@ first edit. Order matters: S0 is the safety net every later slice runs against.
 | **S0 golden tags** | A characterization suite: run the built daemon over a static corpus written by `tests/lib/golden-corpus.ts` (a plain session, a session with two Task subagents, a Pi session with a sibling, a `claude -p` child with a grandchild) and commit the tag files it writes under `tests/fixtures/270-golden-tags/` | `tests/wtft-270-golden-tags.test.ts`: the daemon reproduces the committed tags as a normalised line multiset plus a parsed view (§4), and refuses to run on a bundle not newer than `bin/wtft-daemon.ts` and `extensions/lib/**` (the `@princess-pi/libs` package it also bundles is not watched). Every later slice must pass it unchanged |
 | **S1 TagLog** | `extensions/lib/tag-log.ts`: the typed record union and one parser; every substring site and every tail scan calls it | `tests/wtft-270-tag-log.test.ts` reads every kind; the golden suite's parsed view is unchanged before and after; #140's repro (a command mentioning `_hb`) passes |
 | **S2 Lease** | `extensions/lib/lease.ts`; the nine unlink sites call it | `tests/wtft-270-lease.test.ts`, on temp files, no daemon spawned: `claimLease` over {absent, mine, live, dead, rejected by the predicate, empty, the displaced holder seen by the predicate}; `unlinkLeaseIf` over {mismatch, match, absent, new inode, observed inode}; `replaceLease` over {unconditional, expected mismatch, expected match, absent, write failure}. Liveness is the caller's predicate, so "harness holder" is the daemon's `holderIsLiveDaemon`, tested by the process-level suites |
-| **S3 SessionTagger** | `extensions/lib/session-tagger.ts` with `step`; the daemon's poll calls it; `Slot` becomes the state value | S0 passes; `tests/wtft-270-session-tagger.test.ts` replays each fixture through `step` in memory and compares records to the golden tag; the cases #257 (growth after a sliced scan), #263 (move changes source), #267 (lookup survives restart) as pure `step` sequences |
+| **S3 SessionTagger** (built) | `extensions/lib/session-tagger.ts` with `stepTagger`; the daemon's poll calls it; `Slot` holds the state value | S0 passes; `tests/wtft-270-session-tagger.test.ts` replays each fixture through `stepTagger` over the sandbox corpus and compares records to the golden tag; the cases #257 (growth after a sliced scan), #263 (move changes source), #267 A–E, G, H (lookup survives restart, held turns released) as step sequences. Design, behaviour changes and closer: `docs/spec-270-session-tagger.md` |
 | **S4 HarnessRegistry** | one record per session; `move` re-keys one entry; `snapshot` is the hand-off | `tests/wtft-270-harness-registry.test.ts`: serve → move → drop → snapshot round trip in memory; the existing 205/239/259/262 suites stay as the process-level check |
 | **S5 DaemonHealth** | one function; CLI, `--watch`, widget and `--list` call it | `tests/wtft-270-daemon-health.test.ts`: {lease state} × {tag tail} × {age} → one answer; `wtft-179-daemon-health-reason.test.ts` unchanged |
 | **S6 CLI arms** | `bin/wtft.ts` `main` dispatches to four functions in `extensions/lib/cli/` | the existing CLI suites unchanged; `bin/wtft.ts` `main` under 80 lines |
 
 Freeze: no daemon feature lands between S0 and S4. Issues #257, #263, #266, #267 are closed by
-S3–S5, not before.
+S3–S5, not before. S3 closes #257 and #263 and checks #267 A–E, G, H; #267 F is S4's, I and J
+stay on #267.
 
 ### 3c. What stays
 
@@ -213,6 +214,15 @@ S3–S5, not before.
 ---
 
 ## 4. Decisions taken while building (Princess Pi, for Duppy's later review)
+
+S3's own decisions and roads not taken are in `docs/spec-270-session-tagger.md` §4. What S3
+changed beyond a move of code, each with its check: a sliced pass re-reads a transcript that
+grew after it took it (#257); a child transcript keeps one source across a move of its session
+and its own rotations, and a resume recovers it (#263); a registered `claude -p` child gone from
+disk is gone, not a failed read, so its held turn is written and the tag swept (#267 G, a
+pre-existing bug the R part exposed); the swept-marker retraction reads the session's fixed tag
+path. `CONTEXT.md` Source and `docs/wtft-tag-format.md` `s` say the source is fixed at the
+first read.
 
 - **S0–S2 land on the spec branch as one PR.** Branches start only from `main` and the merge
   gate is human, so a slice cannot build on an unmerged earlier slice. S0 is the safety net
@@ -330,7 +340,7 @@ are on the issues named.
 | `CONTEXT.md` Tag file, Tags dir, Watch mode, status text | per source session; one tags dir per root; tails a session file; text rendered only inside `renderDaemonStatus` | `getTagPath`, `watchTagFile`, `renderDaemonStatus` | `wtft-75` pins the file | fixed here; Lease entry added |
 | `CONTEXT.md` Daemon entry, glossary gaps | lifecycle and cadence claims; nine terms undefined | `bin/wtft-daemon.ts` | no | filed on #261 |
 | `docs/wtft-tag-format.md` reader side | Claude Code only; re-parse fallback; `_meta` shapes absent; `required` fields; wrong-shape list fields; overhead line carries `sc`; readers skip every `_hb`; append-only; dedup is a subtraction; step 6 absent | `getTagPath`, `recordOf`, `classifiedToInteraction`, `serializeClassifiedWithOverheadSplit`, `deduplicateInteractions`, `sweepState` | `tests/wtft-tag-format.test.ts` (round trip), `tests/wtft-270-tag-log.test.ts` (kinds) | fixed here: §1, §2b, §2c, new §2f, §3, §4, §5, §6 |
-| `docs/wtft-tag-format.md` writer side | heartbeat, stop, sweep, spawn and generation moments | `bin/wtft-daemon.ts` | no | filed on #261; S3 moves the code |
+| `docs/wtft-tag-format.md` writer side | heartbeat, stop, sweep, spawn and generation moments | `bin/wtft-daemon.ts` | no | filed on #261; S3 moved the sweep, spawn and generation writers into `session-tagger.ts` |
 | `docs/spec-270-daemon-ownership.md` §1–§2 | writer moments and reader lists, ~50 cells | `bin/wtft-daemon.ts` on the branch | no | corrected here; header says which names are retired |
 | `docs/spec-270-daemon-ownership.md` §3a, §3b | planned interfaces named as built | `tag-log.ts`, `lease.ts` exports | `tests/wtft-270-*` | rewritten here: built rows name the real exports, the rest are marked plan |
 | `docs/spec-259-*.md` | argument errors, hand-off and takeover details, ~18 findings | `bin/wtft-daemon.ts` | `tests/wtft-259-*` partly | filed on #261 |

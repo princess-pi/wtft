@@ -183,13 +183,14 @@ make, as follows:
   project's tag; `-F` on Linux not signalling a lease pid with no command line; an idle session
   rewritten at the same length adopted again; `-F` naming a rebuild lease it cannot write; the
   stale-version remedy for a tag of a newer build.
-- **Reachable, without a check yet** (#267): the resume leaving a folded `claude -p` transcript to
-  the one folding it; the held turn of a transcript no longer found, written under its earlier
-  source and after a generation record when it opened none, or skipped when the transcript was
-  read again under that source; a later line of a message merging its `claude -p` commands into
-  the open lookup; the scan-continuation marker re-keyed on a move; a moved or deleted `claude -p`
-  child's held turn written; reseed of a child sharing an id with a discovered transcript; the
-  children a settled lookup found, read after a restart.
+- **Checked in `tests/wtft-270-session-tagger.test.ts`** (#267, as step sequences over the
+  session tagger): the resume leaving a folded `claude -p` transcript to the one folding it; the
+  held turn of a transcript no longer found, written under its earlier source and after a
+  generation record when it opened none, or skipped when the transcript was read again under that
+  source; a later line of a message merging its `claude -p` commands into the open lookup; a moved
+  or deleted `claude -p` child's held turn written; reseed of a child sharing an id with a
+  discovered transcript; the children a settled lookup found, read after a restart.
+- **Reachable, without a check yet** (#267): the scan-continuation marker re-keyed on a move.
 - **Pi `/wtft -F` not asking for the session when busy**: busy means a daemon holds the lease or
   took it meanwhile, and asking then starts nothing, so a check cannot tell the two builds apart.
   The one exception, a lease released between two reads, needs two processes inside one syscall

@@ -29,7 +29,7 @@ export interface Corpus {
 // Claude Code shapes
 // ---
 
-function ccUser(tsMs: number, cwd: string, text = "go"): string {
+export function ccUser(tsMs: number, cwd: string, text = "go"): string {
 	return JSON.stringify({ type: "user", timestamp: new Date(tsMs).toISOString(), cwd,
 		message: { role: "user", content: text } }) + "\n";
 }
@@ -48,7 +48,7 @@ interface CcTurn {
 	webSearch?: number;
 }
 
-function ccAssistant(t: CcTurn): string {
+export function ccAssistant(t: CcTurn): string {
 	const usage: Record<string, unknown> = {
 		input_tokens: t.input ?? 2,
 		output_tokens: t.output,
@@ -69,7 +69,7 @@ function ccAssistant(t: CcTurn): string {
 	}) + "\n";
 }
 
-const bash = (command: string) => ({ type: "tool_use", name: "Bash", input: { command } });
+export const bash = (command: string) => ({ type: "tool_use", name: "Bash", input: { command } });
 const read = (file_path: string) => ({ type: "tool_use", name: "Read", input: { file_path } });
 const edit = (file_path: string) => ({ type: "tool_use", name: "Edit", input: { file_path } });
 
@@ -88,12 +88,12 @@ function ccCompaction(tsMs: number): string {
 // Pi shapes
 // ---
 
-function piHeader(id: string, tsMs: number, cwd: string, parentSession?: string): string {
+export function piHeader(id: string, tsMs: number, cwd: string, parentSession?: string): string {
 	return JSON.stringify({ type: "session", version: 3, id, timestamp: new Date(tsMs).toISOString(), cwd,
 		...(parentSession ? { parentSession } : {}) }) + "\n";
 }
 
-function piTurn(id: string, tsMs: number, output: number, commands: string[] = []): string {
+export function piTurn(id: string, tsMs: number, output: number, commands: string[] = []): string {
 	const iso = new Date(tsMs).toISOString();
 	return JSON.stringify({
 		type: "message", timestamp: iso,
@@ -110,13 +110,13 @@ function piTurn(id: string, tsMs: number, output: number, commands: string[] = [
 // ---
 
 /** A Claude Code child transcript filed where the harness files it. */
-function ccProjectFile(projects: string, cwd: string, sessionId: string): string {
+export function ccProjectFile(projects: string, cwd: string, sessionId: string): string {
 	const dir = path.join(projects, cwdToStrictSlug(cwd));
 	fs.mkdirSync(dir, { recursive: true });
 	return path.join(dir, `${sessionId}.jsonl`);
 }
 
-const UUID = (n: number) => `${String(n).padStart(8, "0")}-0000-4000-8000-${String(n).padStart(12, "0")}`;
+export const UUID = (n: number) => `${String(n).padStart(8, "0")}-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
 /** Writes the corpus under `root` and returns where everything is. */
 export function writeCorpus(root: string): Corpus {

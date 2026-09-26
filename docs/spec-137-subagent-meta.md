@@ -90,7 +90,7 @@ export interface SubagentMeta {
 export function readSubagentMeta(transcriptPath: string): SubagentMeta | null
 ```
 
-**Additive on purpose.** `discoverSubagentSessionFiles` returns `{ files, unreadable }`. Widening its return type to carry
+**Additive on purpose.** `discoverSubagentSessionFiles` returns `{ files, unreadable, sessionUnreadable }`. Widening its return type to carry
 meta would put label lookup inside the function whose job is deciding what counts as an
 unreadable subagent directory — two unrelated failure modes in one signature. A separate reader
 any caller may use keeps the interface small and leaves that boundary exactly where #457 left it.

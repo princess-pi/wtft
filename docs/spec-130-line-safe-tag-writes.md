@@ -116,7 +116,7 @@ line boundary makes the second harmless, because both halves leave the file vali
 
 ### Defect 2 — the reader advances past a line it could not parse
 
-`parseNewLines` (`bin/wtft-daemon.ts`) reads `[lastSize, currentSize)` from the **session**
+`parseNewLines` (`extensions/lib/session-tagger.ts`, since #270 S3) reads `[lastSize, currentSize)` from the **session**
 file and then does:
 
 ```ts

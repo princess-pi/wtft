@@ -784,12 +784,16 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 
 {
 	const daemonSrc = fs.readFileSync(path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.ts"), "utf8");
+	const taggerSrc = fs.readFileSync(path.resolve(import.meta.dirname, "..", "extensions", "lib", "session-tagger.ts"), "utf8");
 
 	// S1 — every tag append goes through the one helper that enforces the
-	// trailing newline. A direct fs.appendFileSync onto the tag path bypasses it.
-	const directAppends = daemonSrc.split("\n")
+	// trailing newline. A direct fs.appendFileSync onto the tag path bypasses it,
+	// however the path is spelled; the tagger returns records and appends nothing.
+	const directAppends = [...daemonSrc.split("\n"), ...taggerSrc.split("\n")]
 		.map((line, i) => ({ line, n: i + 1 }))
-		.filter(({ line }) => /fs\.appendFileSync\(\s*tagPath/.test(line));
+		.filter(({ line }) => /fs\.appendFileSync\(\s*([\w$]+\.)*tagPath/.test(line));
+	assert("S1 self-check: the tagger appends nothing at all",
+		!/fs\.appendFileSync\(/.test(taggerSrc));
 	assert("S1 no append reaches the tag file except through appendTagFile",
 		directAppends.length === 0,
 		directAppends.map(({ line, n }) => `${n}: ${line.trim()}`).join("\n"));
@@ -1139,12 +1143,12 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 // offset discipline that makes the cost linear, which no observable at 667 ms
 // resolution distinguishes — the same reasoning S2 and S3 are written under.
 {
-	const src = fs.readFileSync(path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.ts"), "utf8");
+	const src = fs.readFileSync(path.resolve(import.meta.dirname, "..", "extensions", "lib", "session-tagger.ts"), "utf8");
 	const lines = src.split("\n");
 	const starts: number[] = [];
-	lines.forEach((l, i) => { if (/^(async )?function /.test(l)) starts.push(i + 1); });
+	lines.forEach((l, i) => { if (/^(export )?(async )?function /.test(l)) starts.push(i + 1); });
 	const at = lines.findIndex(l => /^function parseNewLines\(/.test(l)) + 1;
-	assert("A0 parseNewLines is still in the daemon — the check has a subject", at > 0);
+	assert("A0 parseNewLines is in the session tagger — the check has a subject", at > 0);
 	const end = starts.find(n => n > at) ?? lines.length + 1;
 	const body = lines.slice(at - 1, end - 1).join("\n");
 
@@ -1154,22 +1158,22 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 		body.includes("function parseNewLines(") && body.length < src.length,
 		`body=${body.length} src=${src.length}`);
 	assert("A0b self-check: it does not swallow the next function",
-		(body.match(/^function /gm) ?? []).length === 1);
+		(body.match(/^(export )?function /gm) ?? []).length === 1);
 
-	assert("A1 the offset advances to the file size on every read, so no byte is fetched twice",
-		/lastSize = currentSize;/.test(body));
+	assert("A1 the offset advances past every byte a read returned, so no byte is fetched twice",
+		/state\.lastSize = currentSize;/.test(body));
 	assert("A2 and the whole-line-only advance that caused the re-read is gone",
 		!/lastSize \+=/.test(body), "`lastSize +=` is back — the offset is parked behind a partial record again");
 	assert("A3 the partial record is carried as BYTES between polls, not merely as a length",
-		/pendingFragment = Buffer\.from\(/.test(body));
+		/state\.pendingFragment = Buffer\.from\(/.test(body));
 	assert("A4 a quiet poll still evaluates the held fragment, or a dead writer's last record is never released",
-		/!grew && pendingFragment\.length === 0/.test(body));
+		/!grew && state\.pendingFragment\.length === 0/.test(body));
 	// The settled check must compare bytes: a same-length replacement is a
 	// DIFFERENT record, and the old length-equality test called it settled.
 	assert("A5 the writer-died check compares the fragment's bytes, not its length",
-		/fragment\.equals\(pendingFragment\)/.test(body));
+		/fragment\.equals\(state\.pendingFragment\)/.test(body));
 	assert("A6 a truncation clears the carried fragment — bytes from the old file say nothing about the new one",
-		/pendingFragment = Buffer\.alloc\(0\);/.test(src.slice(0, src.indexOf("const grew = currentSize > lastSize"))));
+		/state\.pendingFragment = Buffer\.alloc\(0\);/.test(body.slice(0, body.indexOf("const grew = currentSize > state.lastSize"))));
 }
 
 

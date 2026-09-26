@@ -3,8 +3,8 @@
 > **Authoritative source:** `serializeClassified()` and `classifiedToInteraction()` in
 > `extensions/lib/wtft-daemon-lib.ts` for the interaction line (`serializeClassifiedWithOverheadSplit()`
 > for the §2b pair), `foldRecordLine()` and
-> `generationRecordLine()` there for the fold and generation lines, the heartbeat and `_meta`
-> writers in `bin/wtft-daemon.ts`, and `recordOf()` in `extensions/lib/tag-log.ts` for how
+> `generationRecordLine()` there for the fold and generation lines, the heartbeat writer in
+> `bin/wtft-daemon.ts`, the `_meta` writers in `extensions/lib/session-tagger.ts`, and `recordOf()` in `extensions/lib/tag-log.ts` for how
 > every record kind is read. This document must stay in sync with them. `tests/wtft-tag-format.test.ts` gates the round-trip contract and
 > `tests/wtft-270-tag-log.test.ts` the record kinds.
 
@@ -58,7 +58,7 @@ A reader may therefore presume, without writing any code for the alternative:
 | Every line in the file at rest parses as JSON | no COMPLETED write ever ends mid-line, and a crash mid-append is repaired by the next daemon at startup |
 | **No MID-FILE line is ever malformed** — *in a file written by a daemon at or after the #130 fix* | the only line any reader can find incomplete is the LAST one, and only while a write is in flight. A welded or truncated line in the middle of the file is the #130 defect, and a fixed writer cannot recreate it. **This does NOT extend to a file `getTagPath()` reaches through its stale-version reader fallback** (Macroscope, PR #142): those were written by the defective writer and the bad lines are already on disk. Measured on this host 2026-09-17: **119 of 422 tag files carry a malformed mid-file line, 2,852 lines in total.** A reader that follows only the row above will throw or silently skip records on one of them. `getCurrentVersionTagPath` is the writer-side path and never returns a stale name; the reader fallback is the one that can, so a third-party reader must keep a per-line tolerance, not merely a final-line one, whenever it opens a file whose version is not the current one |
 | ANY reader concurrent with a write may see one partial line at the end | this holds for whole-file readers too, not only offset-tracking ones. A large append is not one `write(2)`, so a `readFileSync` can land inside it and return the complete lines plus a fragment. **Every reader keeps a per-line tolerance** — `parseTagLine` in `extensions/lib/tag-log.ts` returns null for a line that does not parse, which every caller skips on its own, and `watchTagFile` consumes to the last `\n` and re-reads the tail at the next event |
-| Writes arrive in bursts no more often than one beat | `POLL_MS = 667` bounds how often a per-session poll comes round, and the minimum gap between flushes of one harness session — **not how many writes one flush makes.** One flush writes the classified batch and `_meta.offset`; the subagent scan after it makes one append per changed subagent transcript, then a `_meta.swept` marker when the scan was clean and held no turn back. A turn with a `claude -p` command adds a `_meta.spawnPending` record when it is read, a lookup that ends adds a `_meta.spawnSettled`, and a transcript no longer found may add the turn it held back; `shutdown` writes outside the cadence entirely. A harness session is woken by `fs.watch`, and the harness also stats each served transcript at most once per beat, so a lost event only delays a wake. Expect several notifications per beat |
+| Writes arrive in bursts no more often than one beat | `POLL_MS = 667` bounds how often a per-session poll comes round, and the minimum gap between flushes of one harness session — **not how many writes one flush makes.** One flush writes the classified batch and `_meta.offset`; the subagent scan after it makes one append per scan (per slice in a harness) holding every changed subagent transcript's lines and, in that same append, a `_meta.swept` marker when the scan was clean, held no turn back, and the tag grew since the last marker or a retraction is pending; never on a cut slice. A turn with a `claude -p` command adds a `_meta.spawnPending` record when it is read, a lookup that ends adds a `_meta.spawnSettled`, and a transcript no longer found may add the turn it held back; `shutdown` writes outside the cadence entirely. A harness session is woken by `fs.watch`, and the harness also stats each served transcript at most once per beat, so a lost event only delays a wake. Expect several notifications per beat |
 
 **This is not the watcher being clever, and it cannot be.** `fs.watch`/inotify report **bytes**;
 there is no "notify me on a newline" anywhere in the stack, and no watcher can be made
@@ -79,7 +79,8 @@ one `writeSync` at a `lastLineStartByte` offset, on the one descriptor already o
 does not change, so an offset-tracking reader's position can never go stale, and a torn write
 leaves a mix of two heartbeats that have identical shape and identical length, hence still a
 complete parseable line. The fixed width is what buys that: `first` and `last` are both
-13-digit epoch milliseconds. A line of any other width — a stop line, or a tag from some
+13-digit epoch milliseconds on a poll heartbeat. A line of any other width — a stop line, a
+`.display` beat of a harness session with no idle run (`first: 0`), or a tag from some
 future build — is not ours to overwrite, so it is appended beside instead.
 
 The earlier design truncated the stale heartbeat and appended a fresh one through a second
@@ -133,7 +134,7 @@ The daemon writes one interaction line per classified turn. Fields:
 | `miss` | `1` | optional | Cache miss flag — set to `1` when present: a parent turn that read no cache and wrote some, or one the overhead split classifies as a recache (a small prefix still cached, the rest re-primed; `docs/spec-241-partial-reprime-miss.md`). On a split turn it is on the remainder line, never the `#oh` line |
 | `ir` | `1` | optional | Interrupted turn — set to `1` when present |
 | `sp` | `1` | optional | DeepSeek surge-pricing flag — set to `1` when present |
-| `s` | string | optional | Source: set on a line the daemon wrote from a child transcript, absent on the tag's own session's lines. The first 16 hex digits of the SHA-1 of the child transcript's path — relative to the session directory when it lies under it, absolute when it does not. A later `_gen` record for the same `s` supersedes the line (§2e) |
+| `s` | string | optional | Source: set on a line the daemon wrote from a child transcript, absent on the tag's own session's lines. The first 16 hex digits of the SHA-1 of the child transcript's path — relative to the session directory when it lies under it, absolute when it does not — as the paths stood at the first read of that child (a resume recovers it from the tag's `_gen` record instead), kept while the session stays served, so a later move of the session does not change a child's `s` (#263), and a child retired as folded elsewhere or gone from disk that is read again meanwhile opens its next generation under the same `s`. A later `_gen` record for the same `s` supersedes the line (§2e) |
 
 **Optional means absent, not null.** A field absent from the JSON object means its numeric
 value is zero or its boolean value is false. Consumers must treat a missing field identically
@@ -154,14 +155,17 @@ Consumers MUST NOT deduplicate an `#oh` line with its corresponding bare-id line
 
 ### 2c. Heartbeat line (skip)
 
-The daemon periodically writes heartbeat lines to signal liveness. Shape:
+The daemon writes heartbeat lines to signal liveness: one at every start or adoption of a
+session, then a per-session daemon on every poll that leaves no turn unflushed, a harness on
+such a wake of a displayed session and when the sweep finds a `.display` marker. Shape:
 
 ```json
 {"_hb": {"first": 1789597603583, "last": 1789597604925}}
 ```
 
 `first` is the millisecond timestamp at which the current idle run began and `last` the most
-recent beat; `first === last` on the first beat of a run. The daemon also writes a stop line,
+recent beat; `first === last` on the first beat of a run, and `first` is `0` on a `.display`
+beat of a harness session whose idle run has not started. The daemon also writes a stop line,
 `{"_hb": "stop", "reason": "<why>"}`, when it stops serving the session: a per-session daemon on
 shutdown, a harness daemon when it drops a session it still holds the lease of for idling, removal or never being written, and when it stops (a stop on a failed tag write writes none).
 So the value is **not** always an object — a reader that destructures it must handle the string.
@@ -204,13 +208,17 @@ transcript's filename without `.jsonl`, for a human reading the file. **A line c
 an interaction line or a fold record — counts only if no `_gen` record for the same `s` follows
 it.** A line with no `s` always counts.
 
-The daemon writes one on the first successful read of a child transcript in each daemon life,
-and on the first read after that transcript rotated. Rotation is a new inode, a shrink, a
-content-hash mismatch on a same-size file, a prefix-hash mismatch when the file grew, an
-attributed cost that dropped, or a lower cost on a plain message id already tagged
-(`docs/spec-114-14-generation-records.md`). The record goes first in
+The daemon writes one on the first read of a child transcript in each tagger state (a daemon
+life, a harness serving the session again, or a retired or released child read again) that writes a
+line (a read whose only turn is held back writes nothing yet), and on the first read after that
+transcript rotated. Rotation is a new inode, a shrink, a content-hash mismatch on a same-size
+file, a prefix-hash mismatch when the file grew, an attributed cost that dropped, or an
+interrupt at the head of a read whose last turn carries no id (the transcript is read again
+from its start) (`docs/spec-114-14-generation-records.md`). The record goes first in
 the append, followed by every line of that read and every fold record it
-implies. A generation with no lines still writes its record, so a transcript rotated to empty,
+implies. One is also written with nothing after it when another transcript's parse turns out
+to fold this one, retiring the lines written under this source, and one before the held turn
+of a transcript no longer found when that transcript opened none. A generation with no lines still writes its record, so a transcript rotated to empty,
 or a first read that consumed a nonempty file and produced no interaction lines,
 drops its old lines. Like a fold record, it is data: a tag whose last data line is one reads
 unswept (`docs/spec-114-14-generation-records.md`).

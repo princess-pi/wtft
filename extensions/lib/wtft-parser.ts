@@ -963,9 +963,13 @@ function readHeadLines(file: string, count: number): string[] {
 	}
 }
 
+/** `quietSession`: the caller reports the session transcript's own read failure
+ *  (the log parser daemon does, once), so this does not warn for it and returns
+ *  it as `sessionUnreadable` instead. */
 export function discoverSubagentSessionFiles(
 	sessionPath: string,
-): { files: string[]; unreadable: Error | null } {
+	opts: { quietSession?: boolean } = {},
+): { files: string[]; unreadable: Error | null; sessionUnreadable: Error | null } {
 	const files: string[] = [];
 	const sessionDir = path.dirname(sessionPath);
 	const sessionBase = path.basename(sessionPath, ".jsonl");
@@ -998,10 +1002,12 @@ export function discoverSubagentSessionFiles(
 
 	let mainSessionId: string | undefined;
 	let mainHeaderRaw: string | null = null;
+	let sessionUnreadable: Error | null = null;
 	try {
 		mainHeaderRaw = readHeadLines(sessionPath, 1)[0];
 	} catch (err) {
-		warnUnreadableTranscript(sessionPath, "at discovery", err, "the session transcript");
+		if (!opts.quietSession) warnUnreadableTranscript(sessionPath, "at discovery", err, "the session transcript");
+		sessionUnreadable = err instanceof Error ? err : new Error(String(err));
 		if (!firstUnreadable) {
 			firstUnreadable = new Error(
 				`session transcript could not be read at discovery (${sessionPath}): ${err instanceof Error ? err.message : String(err)}`,
@@ -1060,10 +1066,10 @@ export function discoverSubagentSessionFiles(
 
 	if (firstUnreadable) {
 		// Report, not throw — readable files come back; caller owns the fail-safe.
-		return { files, unreadable: firstUnreadable };
+		return { files, unreadable: firstUnreadable, sessionUnreadable };
 	}
 
-	return { files, unreadable: null };
+	return { files, unreadable: null, sessionUnreadable };
 }
 
 /**

@@ -172,5 +172,11 @@ member is a breaking change), and `renderDaemonStatus` still renders it for a ca
   child already dead, the startup wait for one that exited, the harness start for itself.
   A crash with nobody waiting leaves the claim naming a dead pid, which every reader reads as
   dead. A recycled pid would read as alive; that hazard predates #281 and is #289.
+- **`starting` is not re-derived from the start heartbeat.** The approved design had it mean "a
+  live holder that has not written its start heartbeat yet". A daemon beats once at start
+  (ownership spec T4), so that state lasts about as long as the daemon's boot, and only the
+  startup wait acts on it; it asks for the heartbeat itself. Every other reader shows the
+  claimed daemon as alive. *Road not taken:* a tag-derived `starting` in `decideHealth`, which
+  would put a heartbeat read into every health answer for a state readers do not act on.
 - **`starting` stays in the union and leaves `decideHealth`.** Deleting the member would break
   the #179 contract for any reader that compares it.

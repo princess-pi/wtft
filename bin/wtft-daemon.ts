@@ -1716,8 +1716,10 @@ if (showList || showCleanup || showRestart || stopSession) {
       const status = alive ? "RUNNING" : "DEAD (stale pid)";
       let idleStr = "?";
       const now = Date.now();
-      const listed = sessionFound ? health(sessionFound, now) : null;
-      const since = !listed ? undefined : listed.idle ? listed.idleSinceMs : listed.alive ? now : listed.lastHbMs;
+      const session = sessionFound ? resolvedSessionArg(pid, sessionFound) : null;
+      const listed = session && getDaemonPidPath(session) === fullPath ? health(session, now) : null;
+      const since = !listed || listed.reason === "waiting-session" ? undefined
+        : listed.idle ? listed.idleSinceMs : listed.alive ? now : listed.lastHbMs;
       if (since !== undefined) {
         const idleSec = Math.floor((now - since) / 1000);
         if (idleSec < 60) idleStr = `${idleSec}s`;

@@ -332,15 +332,15 @@
         (<a href="spec-26-json.md">spec-26</a>).</p>
 
         <h4>Update Timing</h4>
-        <p>Status updates are triggered by three mechanisms, from fastest to slowest:</p>
+        <p>Status updates are triggered by these mechanisms:</p>
         <table style="width:100%; border-collapse: collapse;">
             <tr style="border-bottom: 1px solid #404040;"><th style="text-align:left; padding: 4px 8px;">Trigger</th><th style="text-align:left; padding: 4px 8px;">Latency</th><th style="text-align:left; padding: 4px 8px;">Applies to</th></tr>
             <tr style="border-bottom: 1px solid #303030;"><td style="padding: 4px 8px;">Inotify (fs.watch) on tag file</td><td style="padding: 4px 8px;">~667ms (daemon write interval)</td><td style="padding: 4px 8px;">CLI <code>--watch</code></td></tr>
-            <tr style="border-bottom: 1px solid #303030;"><td style="padding: 4px 8px;">Pi widget render timer</td><td style="padding: 4px 8px;">~2-5s (widget refresh)</td><td style="padding: 4px 8px;">Pi widget</td></tr>
-            <tr style="border-bottom: 1px solid #303030;"><td style="padding: 4px 8px;">60-second backup timer</td><td style="padding: 4px 8px;">≤ 60s</td><td style="padding: 4px 8px;">CLI <code>--watch</code> (fallback if inotify misses)</td></tr>
-            <tr><td style="padding: 4px 8px;">Initial startup</td><td style="padding: 4px 8px;">500ms</td><td style="padding: 4px 8px;">CLI <code>--watch</code></td></tr>
+            <tr style="border-bottom: 1px solid #303030;"><td style="padding: 4px 8px;">Pi widget refresh: a 60 s timer, and Pi's <code>agent_settled</code> and <code>session_tree</code> events</td><td style="padding: 4px 8px;">≤ 60s</td><td style="padding: 4px 8px;">Pi widget</td></tr>
+            <tr style="border-bottom: 1px solid #303030;"><td style="padding: 4px 8px;">Watchdog</td><td style="padding: 4px 8px;">1,334 ms</td><td style="padding: 4px 8px;">CLI <code>--watch</code>, while it does not read the daemon as dead</td></tr>
+            <tr><td style="padding: 4px 8px;">Initial startup</td><td style="padding: 4px 8px;">500 ms after the tag file appears</td><td style="padding: 4px 8px;">CLI <code>--watch</code></td></tr>
         </table>
-        <p>Inotify-driven updates mean that idle → live transitions are instant — the status flips the moment the daemon writes classified entries to the tag file. The 60-second timer is a safety net, not the primary mechanism.</p>
+        <p>Inotify-driven updates mean that idle → live transitions are instant — the status flips the moment the daemon writes classified entries to the tag file. The watchdog is a safety net, not the primary mechanism.</p>
         <p>The log parser daemon wraps its main poll loop in a <code>try/catch</code>: a transcript it cannot open, stat, hash, attribute or serialise marks the poll failed, so the tag stays provisional, and the next poll retries, with one WARNING line per transcript on stderr (a corrupted JSON line is skipped silently; the poll loop's own error line is printed only under <code>WTFT_DAEMON_DEBUG</code>). A failed write to the tag file (disk full, permission denied) is fatal on purpose: <code>fatalTagMutation</code> marks the lease <code>rebuild</code>, prints the failure and exits 1, so the next <code>wtft</code> rederives the tag rather than trusting a partial one.</p>
         <p>Width is always auto-detected from terminal (clamped at 1023). No <code>-w/--width</code> flag. Watch modes re-render on terminal resize (SIGWINCH).</p>
         <p>In CLI <code>--watch</code> mode, press <code>r</code> to restart the daemon. A per-session daemon is stopped and started again; a harness daemon, which serves every session readers have asked for under its root, is left running and asked to serve this session next (#248). The footer shows <code style="color: #d44;">'r' to restart</code> in red when the daemon is stopped. The Pi widget auto-spawns a daemon on session start to keep the tag file warm for CLI use.</p>

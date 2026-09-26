@@ -252,7 +252,7 @@ one check in it is the scan-continuation flag surviving a move (#267 F), which i
 of the moved record.
 
 S5's decisions and roads not taken are in `docs/spec-270-daemon-health.md` §4. It changes what
-a reader shows in four places, each listed in its §2: the 2 s tag-write grace answers `starting` for every reader, and
+a reader shows, each change listed in its §2: the 2 s tag-write grace answers `starting` for every reader, and
 the 5 s spawn grace, for a caller that passes its spawn time (the widget, `--watch` after `r`),
 answers `starting` or `waiting-session`; neither reports the daemon alive. `waiting-session` for a
 live holder comes from `health`, so `--watch` shows it. `--watch`'s restart shows what `health`

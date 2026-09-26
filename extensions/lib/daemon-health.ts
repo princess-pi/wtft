@@ -88,9 +88,6 @@ export interface DaemonStatus {
 /**
  * Fallback: scan the ENTIRE session file backwards for the most recent
  * assistant message's model.
- * Reads the whole file — session files are typically < 1MB, so this is
- * fast enough. Using an 8KB window caused flickering because the model
- * entry could fall outside the window as the tag file grew.
  */
 function getModelFromSessionFile(sessionPath: string): string | undefined {
 	try {

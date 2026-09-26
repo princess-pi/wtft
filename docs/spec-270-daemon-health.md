@@ -92,18 +92,21 @@ Behaviour that changes, each in the direction of one rule for every reader:
 - **`--watch`'s idle countdown counts from `idleSinceMs` at each render**, as the widget's
   did; it counted from the `idleMs` of the last health check.
 - **`wtft-daemon --list`'s idle age is the session's idle age.** A row whose holder names a
-  `--session` gets its idle column from `health` of that session: the time since `idleSinceMs`
-  while idle, `0s` while live, the time since `lastHbMs` when `health` has one, else `?`. RUNNING
+  `--session` (resolved against the holder's cwd) whose lease is that row's lease gets its idle
+  column from `health` of that session: the time since `idleSinceMs`
+  while idle, `0s` while live, the time since `lastHbMs` when `health` has one, else `?` (`waiting-session` included). Any
+  other row prints `?`. RUNNING
   and DEAD are unchanged and are not `health`'s: they are `--list`'s own `kill 0`. Which session a
   harness-held lease line names is #276.
 
 ## 3. Closer
 
-- `tests/wtft-270-daemon-health.test.ts`: `decideHealth` over {lease alive, dead} × {tag absent,
-  empty, fresh mtime, tail with a turn only, idle heartbeat, idle heartbeat clamped by a later
-  turn, heartbeat with `last` only, stop after heartbeat} × {age inside, outside the grace} ×
-  {session file present, absent, old} → one answer each, with no process spawned; and `health`
-  over temp files (this process as the lease holder) for the adapter.
+- `tests/wtft-270-daemon-health.test.ts`: `decideHealth` at hand-picked points along each axis
+  (lease alive or dead; tag absent, empty, freshly written, turn only, idle heartbeat, clamped
+  heartbeat, heartbeat with `last` or `first` only, stop after a heartbeat; inside and outside
+  each grace; session file present, absent, old), with no process spawned, and `health` over temp
+  files (this process as the lease holder) for the adapter. It is not the full product of the
+  axes.
 - `tests/wtft-179-daemon-health-reason.test.ts` unchanged and passing.
 - The widget (`getDaemonStatus`), `--watch` (`updateDaemonHealth`), `awaitDaemonUp`,
   `ensureDaemonRunning` and `wtft-daemon --list`'s idle column call `health`; `grep checkDaemonHealth` over

@@ -30,8 +30,8 @@ export function claimLeaseForChild(file: string, childPid: number): "claimed" | 
   spawner's event loop reaps it, and a blocking wait never reaps it. `claimLeaseForChild`,
   `readHealthFacts` and `restartDaemon`'s wait all use `pidAlive`.
 - **What it claims:** `claimLease(file, String(childPid), holderIsLive)`, where `holderIsLive`
-  answers true for `rebuild` and for a holder that is a pid (`/^[1-9]\d*$/`, the child's own
-  rule) and `pidAlive`. So it takes an absent, empty, non-pid or dead-pid lease, answers
+  answers true for `rebuild` and for a holder that is a pid (`leasePid`: `/^[1-9]\d*$/`, the
+  child's own rule, which `readHealthFacts` and `restartDaemon` also use) and `pidAlive`. So it takes an absent, empty, non-pid or dead-pid lease, answers
   `claimed` for one already naming the child, and leaves a `rebuild` token and a live holder
   alone. The child then meets those two as it would without the claim.
 - **A child already gone:** if the child is not `pidAlive` once the claim lands, the helper
@@ -75,7 +75,7 @@ export function claimLeaseForChild(file: string, childPid: number): "claimed" | 
   heartbeat record in the last 8 KiB of the current-version tag with `last` at or after the
   wait's start. Any other live holder is up at once, as before. When the child exits without
   being up, the wait unlinks the claim made for it and answers `dead`. The one-shot call with
-  ceiling 0 (`bin/wtft.ts`, after the 1.4 s tag wait) can answer `unknown` for a child whose beats
+  ceiling 0 (`bin/wtft.ts`, after a tag wait of up to about 2 s, skipped when the first read found data) can answer `unknown` for a child whose beats
   all predate it; the CLI prints the same "no data yet" line for `unknown` and `up`.
 
 **Then both grace periods go.** `HealthOptions.spawnedAt`, `SPAWN_GRACE_MS` and
@@ -97,7 +97,7 @@ member is a breaking change), and `renderDaemonStatus` still renders it for a ca
 | A reader that did not spawn, during another reader's spawn | `stopped` / `not-found` unless the tag was written under 2 s ago | alive, when the claim landed |
 | `--watch` `r` on a per-session daemon | `starting` up to 5 s | the view is frozen while the old one exits (up to 4 s), then alive; other readers see the old daemon alive, `stopped` only between its exit and the new claim |
 | Spawn with a `rebuild` lease | the child reads `rebuild` and rebuilds | unchanged: the spawner leaves `rebuild` for the child |
-| Spawn over a live holder | the child exits busy, takes over an older version's lease, or (a harness start) hands off | unchanged: the spawner claims nothing |
+| Spawn over a live holder | the child exits busy, takes the lease over when an older-version tag exists, or (a harness start) hands off, or takes a per-session holder's lease by SIGTERM (`takeOverLease`) | unchanged: the spawner claims nothing |
 | `ensureDaemonRunning` called twice in one process within one spawn | the second call spawned again; the second child lost the claim and exited | when the first claim landed, the second call finds the lease alive and does not spawn (#261 lead O). Over a `rebuild` lease it still spawns again, and a first call in another process spawns without reading the lease |
 
 ## 3. Closer
@@ -106,7 +106,7 @@ member is a breaking change), and `renderDaemonStatus` still renders it for a ca
   - **C1:** `claimLeaseForChild` over {absent, empty, dead pid, `rebuild`, live pid}. It claims
     the first three and leaves the last two, byte for byte. **C1f:** a reaped child is not left
     named. **C1g:** nor is an exited child not yet reaped (a zombie). **C1h:** a holder with a
-    leading zero is taken, as the child takes it.
+    leading zero is taken, as the child takes it. **C1i:** health reads that holder as no pid.
   - **C2:** `spawnWtftDaemon` with a stand-in daemon that claims nothing. The lease names the
     child's pid when `spawn` returns, and the stand-in's first line finds its own pid there.
   - **C3:** a `--harness` start that finds a live harness ends with the lease naming the harness
@@ -142,10 +142,12 @@ member is a breaking change), and `renderDaemonStatus` still renders it for a ca
   holder are left alone, so every rule the child applies to them stays in one place (the
   child). *Road not taken:* the spawner replacing a live holder, which would have made the
   reader decide version takeovers.
-- **One liveness rule, `pidAlive`.** The claim, health and the restart wait disagreed on EPERM
-  and on zombies until the audit found it; each disagreement produced a wrong answer (a restart
+- **One liveness rule, `pidAlive`, for the claim, health and `restartDaemon`'s wait.** They
+  disagreed on EPERM and on zombies until the audit found it; each disagreement produced a wrong answer (a restart
   beside a live holder, a restart that failed on its own child). *Road not taken:* making the
-  restart wait async so the event loop reaps the child, which fixes only one caller.
+  restart wait async so the event loop reaps the child, which fixes only one caller. The
+  child's own claim, `--restart`'s wait, `-F`'s wait and `--list` still use a bare `kill 0`
+  (#290).
 - **Restart waits for the old daemon, and kills one that will not go.** Up to 4 s of a frozen
   `--watch` beats two writers on one tag. *Roads not taken:* swapping the lease to the child
   before the old daemon exits, which leaves no gap but runs both at once; and spawning after 2 s

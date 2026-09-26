@@ -1498,8 +1498,8 @@ Management:
   --cleanup             Kill per-session daemons whose session is gone, and fixture ones under the tmp dir
                         that hold no lease here; never a harness process, which stops once it has nothing to serve or watch
   --restart             Stop every daemon holding a lease or a root pid file here (SIGTERM, SIGKILL after 2 s),
-                        and respawn one per live daemon holder with its own --session, claiming its lease at
-                        once; a harness holding no lease starts again on the next wtft
+                        and respawn one per stopped holder started with --session, claiming its lease when
+                        free; a harness holding no lease starts again on the next wtft. Linux only (/proc)
   --stop <session>      Drop that session. A per-session process exits. A harness process stays up.
 
 Daemon mode:

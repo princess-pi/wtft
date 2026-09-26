@@ -17,7 +17,7 @@ import { getDiscoveries } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.js";
 import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
 import { tagRecords, parseTagLine, currentGeneration, sweepState, isDataRecord, type TagRecord } from "./tag-log.js";
-import { replaceLease, unlinkLeaseIf, leaseHolder, claimLeaseForChild, pidAlive } from "./lease.js";
+import { replaceLease, unlinkLeaseIf, leaseHolder, claimLeaseForChild, leasePid, pidAlive } from "./lease.js";
 import {
 	decideHealth, readHealthFacts, daemonReasonText, IDLE_THRESHOLD_MS,
 	type DaemonStatus, type HealthOptions,
@@ -709,7 +709,7 @@ export function restartDaemon(sessionPath: string, daemonPath: string): boolean 
 	const pidPath = getDaemonPidPath(sessionPath);
 	try {
 		const holder = leaseHolder(pidPath);
-		const pid = parseInt(holder, 10);
+		const pid = leasePid(holder);
 		// A harness process serves every session under its root, so it is asked
 		// to serve this one (the spawn below points it here), never stopped.
 		if (pid > 0 && !isHarnessProcess(pid)) {

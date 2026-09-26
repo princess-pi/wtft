@@ -62,8 +62,8 @@ session, or the daemon just spawned to serve it: a daemon's pid, or the token `r
 session and that any daemon leaves for a session whose tag write failed. Every claim, release and
 replacement goes through `extensions/lib/lease.ts`: a claim is an exclusive hard link, made by the
 daemon itself or, the moment it spawns one, by its spawner for the child's pid (#281; the
-spawner leaves a `rebuild` token or a live holder alone, and takes back a claim for a child that
-will not serve when it sees one), a release
+spawner leaves a `rebuild` token or a live holder alone; it takes the claim back for a child
+already dead, and the CLI's startup wait for one it sees exit), a release
 unlinks only a lease that still holds what the caller read (and, when the caller hands over the
 identity it observed, on that inode), a replacement is a rename. A harness process's root pid file is a different
 file.

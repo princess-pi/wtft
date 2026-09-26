@@ -102,6 +102,11 @@ export function claimLease(file: string, owner: string, holderIsLive: (holder: s
 	}
 }
 
+/** The pid a lease holder names, or 0 when it is not one (the daemon's own rule). */
+export function leasePid(holder: string): number {
+	return /^[1-9]\d*$/.test(holder) ? Number(holder) : 0;
+}
+
 /**
  * Whether `pid` is a running process: `kill 0` accepts it or refuses with
  * EPERM (another user's), and it is not a zombie. A spawner's child that has
@@ -123,7 +128,7 @@ export function pidAlive(pid: number): boolean {
  */
 export function claimLeaseForChild(file: string, childPid: number): "claimed" | "busy" {
 	const result = claimLease(file, String(childPid), (holder) =>
-		holder === "rebuild" || (/^[1-9]\d*$/.test(holder) && pidAlive(Number(holder))));
+		holder === "rebuild" || (leasePid(holder) > 0 && pidAlive(leasePid(holder))));
 	// A child gone before the claim landed must not be left named.
 	if (result === "claimed" && !pidAlive(childPid)) {
 		unlinkLeaseIf(file, String(childPid));

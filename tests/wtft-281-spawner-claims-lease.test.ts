@@ -8,6 +8,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { claimLeaseForChild } from "../extensions/lib/lease.ts";
+import { readHealthFacts } from "../extensions/lib/daemon-health.ts";
 import { spawnWtftDaemon } from "../extensions/lib/wtft-cli-shared.ts";
 import { getDaemonPidPath, restartDaemon } from "../extensions/lib/wtft-daemon-lib.ts";
 import { isolateTmpdir } from "./lib/sandbox";
@@ -86,6 +87,13 @@ console.log("C1. claimLeaseForChild");
 	const f = path.join(dir, "octal.pid");
 	fs.writeFileSync(f, "0" + String(CHILD));
 	check(claimLeaseForChild(f, CHILD) === "claimed", "C1h a holder the child would not read as a pid (leading zero) is taken, as the child takes it");
+}
+
+{
+	const f = path.join(dir, "octal-health.pid");
+	fs.writeFileSync(f, "0" + String(CHILD));
+	const facts = readHealthFacts(path.join(dir, "none.jsonl"), f, path.join(dir, "none.tag"));
+	check(!facts.holderAlive, "C1i health reads the same holder as no pid, as the claim does");
 }
 
 console.log("\nC2. spawnWtftDaemon claims the lease before the child runs");

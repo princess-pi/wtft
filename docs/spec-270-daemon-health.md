@@ -53,7 +53,7 @@ inside a function, so load order does not matter. `checkDaemonHealth` is removed
 sets it. `ensureDaemonRunning` and `watchTagFile`'s wait for the tag file read `alive` and nothing
 else. `awaitDaemonUp` reads the same fact through `readHealthFacts`, over the current-version tag
 rather than `health`'s default; since #281, for a lease naming its own child it also needs a
-heartbeat written since the wait began, and it unlinks that child's claim when the child exits.
+heartbeat written since the wait began, and when it sees the child exit with no other live holder on the lease it unlinks the child's claim.
 
 Since #281 (`docs/spec-281-spawner-claims-lease.md`) the spawner claims the lease for its child,
 so there is no gap to mask, and the two clock windows S5 kept (5 s after the caller's spawn, 2 s

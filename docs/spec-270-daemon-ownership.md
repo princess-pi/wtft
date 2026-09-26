@@ -239,7 +239,8 @@ first read.
 S4's decisions and roads not taken are in `docs/spec-270-harness-registry.md` §4. S4 moves
 state, not behaviour, with one exception: the hand-off read is hardened as `parseHandOff` takes
 it over (a `null` line no longer crashes the start, a non-object line counts as unreadable, a
-`..` path is resolved before the root check; `docs/spec-270-harness-registry.md` §4). The
+`..` path is resolved before the root check; `docs/spec-270-harness-registry.md` §4), and
+`--restart`'s stdout and `--help` wording was corrected to what it does. The
 process-level suites pass unchanged, and S4's own suite runs in memory;
 one check in it is the scan-continuation flag surviving a move (#267 F), which is now a field
 of the moved record.

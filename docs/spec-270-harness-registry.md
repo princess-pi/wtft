@@ -95,7 +95,8 @@ The process-level suites (`tests/wtft-205-*`, `wtft-239-harness-lifecycle`,
 `wtft-259-daemon-correctness`, `wtft-262-daemon-gaps`) pass unchanged; they are the closer
 that the daemon still behaves. Nothing about when a session is adopted, dropped, retried,
 handed on or forgotten changes; only where the daemon keeps that. The one behaviour change is
-the hand-off read, hardened as `parseHandOff` took it over (§4).
+the hand-off read, hardened as `parseHandOff` took it over (§4); the reconcile also reworded
+`--restart`'s stdout lines and `--help` text, which said restarts that did not happen.
 
 ## 3. Closer
 

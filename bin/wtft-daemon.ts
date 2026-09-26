@@ -548,7 +548,7 @@ function serviceSession(): "continue" | "stop" | "drop" {
 
     if (now - slot.lastActivityMs >= IDLE_EXIT_MS && now - slot.startupTime >= STARTUP_GRACE_MS) {
       if (process.env.WTFT_DAEMON_DEBUG) {
-        process.stderr.write(`[wtft-log-parser] no new data for ${Math.round((now - slot.lastActivityMs) / 60000)}m, exiting\n`);
+        process.stderr.write(`[wtft-log-parser] no new data for ${Math.round((now - slot.lastActivityMs) / 60000)}m, ${harnessMode ? "dropping the session" : "exiting"}\n`);
       }
       if (harnessMode) {
         droppedForIdle = true;
@@ -1500,7 +1500,7 @@ Environment:
   WTFT_DAEMON_IDLE_MS          Milliseconds with no new lines before a session is dropped, after which a
                                harness forgets a dropped session, and with nothing to serve or watch
                                before a harness stops (default 86400000)
-  WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after the session's start (its adoption, in a harness) before that drop can fire (default 60000)
+  WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after the daemon starts serving a session (its adoption, in a harness) before that drop can fire (default 60000)
   WTFT_HARNESS_SCAN_SLICE_MS   Milliseconds one slice of a harness's subagent scan runs before it yields (default 25)
   WTFT_HARNESS_SCAN_YIELD_MS   Milliseconds a harness pauses between those slices (default 0)`);
   const usage = (why: string): never => {
@@ -1667,7 +1667,7 @@ if (showList || showCleanup || showRestart || stopSession) {
           child.unref();
         } catch (_2) {}
       }
-      console.log(sessionFound ? `Restarted: PID ${pid} → fresh daemon for ${sessionFound}` : `Restarted: PID ${pid} — lease removed, no session to respawn`);
+      console.log(sessionFound ? `Restarted: PID ${pid} → fresh daemon for ${sessionFound}` : `Removed lease: PID ${pid} — dead, or no --session to respawn`);
       found++;
       continue;
     }
@@ -1753,10 +1753,10 @@ if (showList || showCleanup || showRestart || stopSession) {
       // It writes its hand-off only while its pid file still names it.
       waitUntilExited(pid);
       unlinkIfNames(fullPath, pid);
-      console.log(`Restarted: PID ${pid} — harness ${pidFile}`);
+      console.log(`Stopped: PID ${pid} — harness ${pidFile}; the next wtft starts it again`);
       found++;
     }
-    console.log(`Restarted ${found} daemon(s). A harness holding no lease starts again on the next wtft.`);
+    console.log(`${found} daemon(s) handled: restarted, stopped, or lease removed, as each line says.`);
   }
   if (showCleanup) {
     console.log(`Cleaned up ${found} daemon(s).`);

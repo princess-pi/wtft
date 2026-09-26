@@ -342,7 +342,8 @@ The coding-agent runtime a session log came from — `pi` or `claude-code`, sele
 parse adapter (`extensions/lib/harness/<id>/`) wtft uses. Not the same as "widget" (below) —
 harness is about which agent produced the log; widget is about how wtft displays it. The
 daemon's harness mode is a different referent, the **harness process** (Daemon, above); the
-daemon specs shorten it to "the harness" where the daemon is the subject.
+daemon specs, and the daemon's own `--help`, stdout and stderr, shorten it to "the harness"
+where the daemon is the subject.
 _Avoid_: Agent, client, platform
 
 **Widget**:

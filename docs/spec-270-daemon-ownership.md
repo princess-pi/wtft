@@ -237,10 +237,12 @@ path. `CONTEXT.md` Source and `docs/wtft-tag-format.md` `s` say the source is fi
 first read.
 
 S4's decisions and roads not taken are in `docs/spec-270-harness-registry.md` §4. S4 moves
-state, not behaviour, with one exception: the hand-off read is hardened as `parseHandOff` takes
-it over (a `null` line no longer crashes the start, a non-object line counts as unreadable, a
-`..` path is resolved before the root check; `docs/spec-270-harness-registry.md` §4), and
-`--restart`'s stdout and `--help` wording was corrected to what it does. The
+state, not behaviour, with three exceptions, each in `docs/spec-270-harness-registry.md` §2
+and §4: the hand-off read is hardened as `parseHandOff` takes it over (a `null` line no longer
+crashes the start, a non-object line counts as unreadable, a `..` path is resolved before the
+root check); `--restart` stops, waits for and respawns only a live daemon; and a scan cut in
+the poll that detects a move continues under the new key. `--restart`'s stdout and `--help`
+wording was corrected to what it does. The
 process-level suites pass unchanged, and S4's own suite runs in memory;
 one check in it is the scan-continuation flag surviving a move (#267 F), which is now a field
 of the moved record.

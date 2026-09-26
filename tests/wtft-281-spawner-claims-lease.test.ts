@@ -74,6 +74,20 @@ console.log("C1. claimLeaseForChild");
 	check(claimLeaseForChild(f, deadPid) === "busy" && !fs.existsSync(f), "C1f a child already gone is not claimed for: no lease is left naming it");
 }
 
+{
+	// Blocking, so the event loop cannot reap it: it stays a zombie, as a spawner's fast-exiting child does.
+	const z = spawn(process.execPath, ["-e", "0"], { stdio: "ignore" });
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+	const f = path.join(dir, "zombie.pid");
+	const got = claimLeaseForChild(f, z.pid!);
+	check(got === "busy" && !fs.existsSync(f), `C1g a child that exited but is not yet reaped is not claimed for (got ${got})`);
+}
+{
+	const f = path.join(dir, "octal.pid");
+	fs.writeFileSync(f, "0" + String(CHILD));
+	check(claimLeaseForChild(f, CHILD) === "claimed", "C1h a holder the child would not read as a pid (leading zero) is taken, as the child takes it");
+}
+
 console.log("\nC2. spawnWtftDaemon claims the lease before the child runs");
 {
 	const standIn = path.join(dir, "bin");
@@ -196,6 +210,35 @@ console.log("\nC4b. restartDaemon kills a holder that ignores SIGTERM before it 
 	let leaseNow = ""; try { leaseNow = fs.readFileSync(lease, "utf8").trim(); } catch {}
 	if (leaseNow && leaseNow !== String(old.pid)) try { process.kill(Number(leaseNow), "SIGKILL"); } catch {}
 	if (oldAlive) try { process.kill(old.pid!, "SIGKILL"); } catch {}
+}
+
+console.log("\nC4c. restartDaemon on a holder that is this process's own child: its zombie is not a live daemon");
+{
+	const script = path.join(dir, "c4c-daemon.mjs");
+	fs.writeFileSync(script, "process.on('SIGTERM', () => process.exit(0));\nsetTimeout(() => {}, 10000);\n");
+	const session = path.join(dir, "c4c-session.jsonl");
+	fs.writeFileSync(session, "");
+	const lease = getDaemonPidPath(session);
+	const old = spawn(process.execPath, [script, "--session", session], { stdio: "ignore" });
+	fs.writeFileSync(lease, String(old.pid));
+	await new Promise(r => setTimeout(r, 300));
+	check(restartDaemon(session, script), "C4c restartDaemon reports a spawn, not restart-failed");
+	let leaseNow = ""; try { leaseNow = fs.readFileSync(lease, "utf8").trim(); } catch {}
+	check(leaseNow !== "" && leaseNow !== String(old.pid), `C4c the lease names the new daemon (read "${leaseNow}", old ${old.pid})`);
+	if (leaseNow && leaseNow !== String(old.pid)) try { process.kill(Number(leaseNow), "SIGKILL"); } catch {}
+}
+
+console.log("\nC4d. restartDaemon leaves a holder it may not signal (EPERM) alone");
+if (process.getuid?.() === 0) console.log("  (skipped: root can signal pid 1)");
+else {
+	const session = path.join(dir, "c4d-session.jsonl");
+	fs.writeFileSync(session, "");
+	const lease = getDaemonPidPath(session);
+	fs.writeFileSync(lease, "1");
+	const ok = restartDaemon(session, path.join(dir, "c4c-daemon.mjs"));
+	let leaseNow = ""; try { leaseNow = fs.readFileSync(lease, "utf8").trim(); } catch {}
+	check(!ok && leaseNow === "1", `C4d restart fails and the lease still names pid 1 (returned ${ok}, lease "${leaseNow}")`);
+	try { fs.unlinkSync(lease); } catch {}
 }
 
 console.log("\nC6. a per-session child beside a newer-version tag serves when the lease names itself");

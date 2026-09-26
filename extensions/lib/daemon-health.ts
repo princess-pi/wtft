@@ -6,7 +6,7 @@
  */
 
 import * as fs from "node:fs";
-import { leaseHolder } from "./lease.js";
+import { leaseHolder, pidAlive } from "./lease.js";
 import { tagRecords, type TagRecord } from "./tag-log.js";
 
 /** Threshold for "idle" state: 2m2s — a classic TV commercial break. */
@@ -126,12 +126,8 @@ export interface HealthOptions {
 const TAIL_BYTES = 8192;
 
 export function readHealthFacts(sessionPath: string, pidPath: string, tagPath: string): HealthFacts {
-	let holderAlive = false;
 	const pid = parseInt(leaseHolder(pidPath), 10);
-	if (pid > 0) {
-		try { process.kill(pid, 0); holderAlive = true; }
-		catch (err) { holderAlive = (err as NodeJS.ErrnoException).code === "EPERM"; }
-	}
+	const holderAlive = pid > 0 && pidAlive(pid);
 	let tag: HealthFacts["tag"] = null;
 	try {
 		const stat = fs.statSync(tagPath);

@@ -61,7 +61,9 @@ The per-session file `$TMPDIR/wtft-daemon-<hash>.pid` whose whole content names 
 session, or the daemon just spawned to serve it: a daemon's pid, or the token `rebuild` that `wtft -F` leaves for a harness-served
 session and that any daemon leaves for a session whose tag write failed. Every claim, release and
 replacement goes through `extensions/lib/lease.ts`: a claim is an exclusive hard link, made by the
-daemon itself or, the moment it spawns one, by its spawner for the child's pid (#281), a release
+daemon itself or, the moment it spawns one, by its spawner for the child's pid (#281; the
+spawner leaves a `rebuild` token or a live holder alone, and takes back a claim for a child that
+will not serve when it sees one), a release
 unlinks only a lease that still holds what the caller read (and, when the caller hands over the
 identity it observed, on that inode), a replacement is a rename. A harness process's root pid file is a different
 file.

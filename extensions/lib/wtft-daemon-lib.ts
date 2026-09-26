@@ -17,7 +17,7 @@ import { getDiscoveries } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.js";
 import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
 import { tagRecords, parseTagLine, currentGeneration, sweepState, isDataRecord, type TagRecord } from "./tag-log.js";
-import { replaceLease, unlinkLeaseIf, leaseHolder, claimLeaseForChild } from "./lease.js";
+import { replaceLease, unlinkLeaseIf, leaseHolder, claimLeaseForChild, pidAlive } from "./lease.js";
 import {
 	decideHealth, readHealthFacts, daemonReasonText, IDLE_THRESHOLD_MS,
 	type DaemonStatus, type HealthOptions,
@@ -717,10 +717,10 @@ export function restartDaemon(sessionPath: string, daemonPath: string): boolean 
 			// it, so one that outlives SIGTERM by 2 s is killed, as --restart does.
 			const gone = (ms: number): boolean => {
 				for (const until = Date.now() + ms; Date.now() < until;) {
-					try { process.kill(pid, 0); } catch { return true; }
+					if (!pidAlive(pid)) return true;
 					Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
 				}
-				try { process.kill(pid, 0); return false; } catch { return true; }
+				return !pidAlive(pid);
 			};
 			try { process.kill(pid, "SIGTERM"); } catch {}
 			if (!gone(2000)) {

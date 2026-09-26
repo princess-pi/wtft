@@ -51,8 +51,9 @@ inside a function, so load order does not matter. `checkDaemonHealth` is removed
 
 `alive` is the lease fact and nothing else: a live process holds this session's lease. No grace
 sets it. `ensureDaemonRunning` and `watchTagFile`'s wait for the tag file read `alive` and nothing
-else. `awaitDaemonUp` reads the same fact through `readHealthFacts`; since #281, for a lease naming
-its own child it also needs a heartbeat written since the wait began.
+else. `awaitDaemonUp` reads the same fact through `readHealthFacts`, over the current-version tag
+rather than `health`'s default; since #281, for a lease naming its own child it also needs a
+heartbeat written since the wait began, and it unlinks that child's claim when the child exits.
 
 Since #281 (`docs/spec-281-spawner-claims-lease.md`) the spawner claims the lease for its child,
 so there is no gap to mask, and the two clock windows S5 kept (5 s after the caller's spawn, 2 s
@@ -83,8 +84,10 @@ grace windows answer `starting` rather than alive, for every reader; #281 then d
   only by a live lease, polled once a second five times; with none by then, the view showed
   `starting...` for as long as it ran. Now the view shows what `health` finds from the first ask,
   the five-poll interval is gone, and the watchdog asks as it does at any other time. Since #281
-  the restart first waits for the old per-session daemon to exit (SIGTERM, up to 2 s, then
-  SIGKILL, up to 2 s more), and `--watch` is frozen for that wait.
+  the restart first stops the lease holder (any pid whose cmdline has no `--harness`; #289) with
+  SIGTERM, then SIGKILL after 2 s, and waits up to 2 s more; `--watch` is frozen for that wait.
+  A holder still alive after it, EPERM included, is left alone and `--watch` shows
+  `restart failed` without asking `health`.
 - **`waiting-session` in `--watch`** renders only once there are chart lines; before that
   `--watch` prints its waiting line instead.
 - **`--watch`'s idle countdown counts from `idleSinceMs` at each render**, as the widget's
@@ -94,7 +97,8 @@ grace windows answer `starting` rather than alive, for every reader; #281 then d
   against the holder's cwd) gets its idle column from `decideHealth` over that lease, with no
   session-file read for a model: the time since `idleSinceMs`
   while idle, `0s` while live, the time since `lastHbMs` when `decideHealth` has one, else `?` (`waiting-session` included). Any
-  other row prints `?`. RUNNING
+  other row prints `?`, and so does a row where `decideHealth`'s liveness (`pidAlive`: EPERM live,
+  a zombie dead) disagrees with `--list`'s own `kill 0`. RUNNING
   and DEAD are unchanged and are not `decideHealth`'s: they are `--list`'s own `kill 0`. Which session a
   harness-held lease line names is #276.
 
@@ -106,8 +110,8 @@ grace windows answer `starting` rather than alive, for every reader; #281 then d
   absent, old), with no process spawned, and `health` over temp
   files (this process as the lease holder) for the adapter. It is not the full product of the
   axes.
-- `tests/wtft-179-daemon-health-reason.test.ts` unchanged and passing in S5 (#281 rewrote V3,
-  whose window it removed).
+- `tests/wtft-179-daemon-health-reason.test.ts` unchanged and passing in S5 (#281 later rewrote
+  V3, whose grace it removed).
 - The widget (`getDaemonStatus`), `--watch` (`updateDaemonHealth`) and `ensureDaemonRunning`
   call `health`, `awaitDaemonUp` calls `readHealthFacts`, and `wtft-daemon --list`'s idle column calls `decideHealth` over the row's own lease; `grep checkDaemonHealth` over
   `bin/` and `extensions/` finds nothing.
@@ -115,7 +119,8 @@ grace windows answer `starting` rather than alive, for every reader; #281 then d
 
 ## 4. Decisions made while building, and roads not taken
 
-- **`alive` stays `kill 0` on the lease pid; #266 stays standing.** #266 is `wtft -F` signalling
+- **`alive` stays `kill 0` on the lease pid (since #281 `pidAlive`: EPERM counts as live, a
+  zombie as dead); #266 stays standing.** #266 is `wtft -F` signalling
   a pid it has not verified is a `wtft-daemon`, off Linux. Folding a process-identity check into
   `alive` would make `alive` false for every suite that stands in for a daemon with its own pid
   (`wtft-daemon-lifecycle`, `wtft-179`, `wtft-308`), and it is a signalling question, not a

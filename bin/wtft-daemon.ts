@@ -1497,8 +1497,9 @@ Management:
                         tagger version, idle age (0s until idle 2m2s; ? when unknown), session
   --cleanup             Kill per-session daemons whose session is gone, and fixture ones under the tmp dir
                         that hold no lease here; never a harness process, which stops once it has nothing to serve or watch
-  --restart             Stop every daemon holding a lease or a root pid file here, and respawn one per live
-                        holder with its own --session; a harness holding no lease starts again on the next wtft
+  --restart             Stop every daemon holding a lease or a root pid file here (SIGTERM, SIGKILL after 2 s),
+                        and respawn one per live daemon holder with its own --session, claiming its lease at
+                        once; a harness holding no lease starts again on the next wtft
   --stop <session>      Drop that session. A per-session process exits. A harness process stays up.
 
 Daemon mode:
@@ -1852,10 +1853,7 @@ if (showList || showCleanup || showRestart || stopSession) {
     const { older, newer } = otherTagVersions();
     // A newer build serving this session keeps it.
     const holderPid = Number(leaseHolder(pidPath));
-    if (newer.length > 0 && holderPid !== process.pid && liveDaemonOrUnknown(holderPid)) {
-      unlinkLeaseIf(pidPath, String(process.pid));
-      process.exit(0);
-    }
+    if (newer.length > 0 && holderPid !== process.pid && liveDaemonOrUnknown(holderPid)) process.exit(0);
     if (older.length > 0) {
       // Honor an existing rebuild lease before version-takeover claim: replace
       // only the value read, and on a miss read once more so a token written

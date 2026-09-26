@@ -50,13 +50,13 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 
 | Event | Behavior |
 |---|---|
-| `session_start` (Pi) or `wtft` / `wtft --watch` invoked (CLI) | Spawns a daemon and claims the session's lease for it, unless the lease holds `rebuild` or names a live process (#281). A daemon that meets a live holder exits; a session under a harness root attaches to that root's one process. |
+| `session_start` (Pi) or `wtft` / `wtft --watch` invoked (CLI) | Spawns a daemon and claims the session's lease for it, unless the lease holds `rebuild` or names a live process (#281). A per-session daemon that meets a live holder exits, unless that holder runs an older version, which it takes over; a session under a harness root attaches to that root's one process. |
 | New session data arrives | Classifies and flushes that session's tag. Flushes for one session are at least 667ms apart. |
 | No new data for 24h | That session is dropped ("idle timeout"). A `--session` process exits. A harness process stays up. It decides from in-memory timestamps on a timer and does not stat the file. While that harness runs, a write within the next 24h adopts the session again; after that only a request does. |
 | Daemon just spawned (< 60s) | Idle drop suppressed (startup grace period) |
 | Session file deleted | A `--session` process exits ("session removed") unless the transcript moved. A harness process drops that session and stays up. |
 | Session file not yet created | Waits, and writes a heartbeat when this process is the per-session daemon or the session is the one a consumer is displaying, so the widget can show "waiting for session .jsonl..." (#124). Past the wait cap, a `--session` process exits ("session never written") and a harness process drops the slot. |
-| Press `r` in `--watch` | Stops a per-session lease holder (never a `--harness` one) with SIGTERM, then SIGKILL after 2 s, and waits up to 2 s more; then spawns fresh and claims the lease for it, unless the lease holds `rebuild` or names a live process. `● restart failed` if the old holder outlives both waits or the spawn throws |
+| Press `r` in `--watch` | Stops the lease holder (on Linux never a `--harness` one; the holder is not checked to be a daemon, #289) with SIGTERM, then SIGKILL after 2 s, and waits up to 2 s more; then spawns fresh and claims the lease for it, unless the lease holds `rebuild` or names a live process. `● restart failed` if the old holder outlives both waits (EPERM included) or the spawn throws |
 | **New activity after idle timeout** | Pi's `agent_end` handler calls `ensureDaemonRunning`, which spawns a daemon unless it spawned one for this session before and a live process holds the lease |
 
 ## Sub-Agent Transcript Read Path (#270 / #420 / #97)
@@ -562,9 +562,9 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 | Daemon exits (idle timeout, 24h) | Title shows `● stopped HH:MM` in red; footer shows red `'r' to restart` |
 | No activity for 2m2s | Status flips to `● idle (cache expires in Nmin)`, whole minutes rounded up, then `● idle (cache emptied)`. The TTL rule: `docs/spec-270-daemon-health.md` §2. |
 | Local model (no cache), or no model known | Status shows `● idle (local model)` |
-| User presses `r` | Daemon restarts; the view blocks up to 4 s while the old one exits, then shows what `health` finds. When the claim landed, the lease names the new child at once, so that is alive (`waiting for session`, `live` or `idle`). A holder that outlives SIGKILL, or a spawn that throws, shows `● restart failed` |
+| User presses `r` | Daemon restarts; the view blocks up to 4 s while the old one exits, then shows what `health` finds. When the claim landed, the lease names the new child at once, so that is alive (`waiting for session`, `live` or `idle`). A holder that outlives SIGKILL or may not be signalled (EPERM), or a spawn that throws, shows `● restart failed` |
 | Tag file deleted/truncated | `fs.watch` handler re-reads from zero |
-| Daemon spawned before session file exists | Status shows `● waiting for session .jsonl...` (yellow); daemon polls until file created (#124) |
+| Daemon spawned before session file exists | Status shows `● waiting for session .jsonl...` (yellow) while a live process holds the lease; over a `rebuild` lease it shows `not found` until the daemon adopts. The daemon polls until the file is created (#124) |
 | Daemon never started | The widget, before it has spawned one, shows `● daemon not started`; otherwise a dead lease with no heartbeat in the tag's last 8 KiB shows `● daemon not found`, and one with a heartbeat `● stopped HH:MM` |
 | Daemon restarts after crash | Reads `_meta` offset from tag file for exact resume position; falls back to full re-parse if no meta offset found (#124) |
 | One-shot read beats the daemon to a stale tag | The total prints in full, a `PROVISIONAL` warning names why, and `wtft` exits **9** rather than 0 — `readTagProvisional` reports `stale-version` or `unswept` (#443). It does NOT wait: blocking a one-shot CLI on a repair proportional to subagent volume is the cost read-then-render avoids |

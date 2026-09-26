@@ -556,7 +556,7 @@ export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" 
 	// Anything left behind would be resumed, not rebuilt, so any error but
 	// "already gone" fails the whole -F.
 	const gone = (err: unknown) => (err as NodeJS.ErrnoException).code === "ENOENT";
-	if (now !== "" && !unlinkLeaseIf(leasePath, now) && fs.existsSync(leasePath)) return "undeletable";
+	if (now !== "" && !unlinkLeaseIf(leasePath, now) && fs.existsSync(leasePath)) return leaseHolder(leasePath) !== now ? "busy" : "undeletable";
 	const prefix = path.basename(sessionPath) + ".wtft-tag.v";
 	const sibling = findSiblingTagPath(sessionPath);
 	for (const tagsDir of new Set([path.join(path.dirname(sessionPath), "wtft-tags"), path.dirname(getTagPath(sessionPath)), ...(sibling ? [path.dirname(sibling)] : [])])) {

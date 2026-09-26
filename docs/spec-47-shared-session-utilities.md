@@ -100,7 +100,7 @@ export function getSessionSummary(
 /** Interactive TTY picker (j/k or arrows, Enter, q/Ctrl+C); the caller guarantees a TTY (exit 10 otherwise) */
 export function selectSessionPrompt(
   initialCandidates: SessionCandidate[],
-  opts: { harnessOption: string; cwdOverride?: string; out?: NodeJS.WriteStream }
+  opts: { harnessOption: string; cwdOverride?: string; out?: NodeJS.WritableStream; substringFilter?: string }
 ): Promise<string>;
 ```
 

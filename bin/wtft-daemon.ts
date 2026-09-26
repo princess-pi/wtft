@@ -1239,13 +1239,11 @@ function reapAndWarn() {
     else leasesOf.set(pid, [lease]);
   }
   const sessionOf = new Map<number, string | null>();
-  // Re-proved (same file, same pid) before unlinking, as the claim loop does:
-  // a lease read at the start may have been claimed by a new owner since.
   const unlinkIfStill = (lease: Lease, pid: number) => { unlinkLeaseIf(lease.path, String(pid), lease); };
 
   for (const [pid, leases] of leasesOf) {
-    // Only ESRCH means gone, as in the claim loop: EPERM is a live process
-    // this user cannot signal, and its leases stay.
+    // Only ESRCH means gone: EPERM is a live process this user cannot signal,
+    // and its leases stay.
     let alive = true;
     try { process.kill(pid, 0); } catch (err) { alive = (err as NodeJS.ErrnoException).code !== "ESRCH"; }
 

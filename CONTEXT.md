@@ -58,7 +58,7 @@ session parser
 **Lease** (#270):
 The per-session file `$TMPDIR/wtft-daemon-<hash>.pid` whose whole content names who serves the
 session: a daemon's pid, or the token `rebuild` that `wtft -F` leaves for a harness-served
-session and that a harness leaves for a slot whose tag write failed. Every claim, release and
+session and that any daemon leaves for a session whose tag write failed. Every claim, release and
 replacement goes through `extensions/lib/lease.ts`: a claim is an exclusive hard link, a release
 unlinks only a lease that still holds what the caller read (and, when the caller hands over the
 identity it observed, on that inode), a replacement is a rename. A harness process's root pid file is a different

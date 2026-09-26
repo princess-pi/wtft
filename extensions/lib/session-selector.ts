@@ -104,7 +104,6 @@ function compareVersions(a: string, b: string): number {
 	return 0;
 }
 
-/** The source a generation record opens a generation for, or null. */
 /** Only inspects wtft-tag contents — never parses raw .jsonl turn data. */
 export function getSessionSummary(sessionPath: string): SessionSummary {
 	const sessionDir = path.dirname(sessionPath);

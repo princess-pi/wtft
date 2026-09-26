@@ -1,8 +1,7 @@
 #!/usr/bin/env -S bun
 /**
  * #270 S2 — the lease module: claim, release and replace on temp files, no
- * daemon spawned. The matrix is {absent, mine, live holder, dead holder,
- * rebuild token} × {claim, unlinkLeaseIf, replaceLease}.
+ * daemon spawned.
  */
 
 import * as fs from "node:fs";

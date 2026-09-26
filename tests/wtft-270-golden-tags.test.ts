@@ -35,6 +35,17 @@ function check(cond: boolean, msg: string) {
 	else { failed++; console.error(`  ❌ FAIL: ${msg}`); }
 }
 
+// The suite runs the bundle stock node runs, so an edited source with no build
+// would pass against yesterday's daemon. Refuse that outright.
+const libDir = path.resolve(import.meta.dirname, "..", "extensions", "lib");
+const daemonSources = [
+	path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.ts"),
+	...fs.readdirSync(libDir).filter(f => f.endsWith(".ts")).map(f => path.join(libDir, f)),
+];
+const newestSourceMs = Math.max(...daemonSources.map(f => fs.statSync(f).mtimeMs));
+check(fs.statSync(DAEMON_BIN).mtimeMs >= newestSourceMs, "fixture precondition: bin/wtft-daemon.mjs is not older than any daemon source (else run bun run build)");
+if (failed > 0) { console.log(`\n${passed} passed, ${failed} failed`); process.exit(1); }
+
 const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-270-golden-")));
 const corpus = writeCorpus(root);
 process.env.WTFT_CLAUDE_PROJECTS_DIR = corpus.projects;

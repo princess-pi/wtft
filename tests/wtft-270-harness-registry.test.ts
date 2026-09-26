@@ -167,8 +167,8 @@ console.log("\nH. hand-off");
 	check(handOff(again, () => true).join("\n") === withAdopting.join("\n"), "H8 round trip: the parsed lines served into a fresh registry hand off the same text");
 	const blank = parseHandOff("\n\n", "/srv");
 	check(blank.records.length === 0 && blank.unreadable === 0, "H9 blank lines are neither records nor unreadable");
-	const nul = parseHandOff("null\n42\n", "/srv");
-	check(nul.records.length === 0 && nul.unreadable === 2, "H10 a JSON line that is not an object is unreadable, not a throw");
+	const nul = parseHandOff("null\n42\n[1]\n\"s\"\n", "/srv");
+	check(nul.records.length === 0 && nul.unreadable === 4, "H10 a JSON null, number, array or string line is unreadable, not a throw");
 	const dots = parseHandOff(JSON.stringify({ kind: "served", displayed: true, path: "/srv/a/../../etc/x.jsonl" }) + "\n" + JSON.stringify({ kind: "served", displayed: true, path: "/srv/a/../b/y.jsonl" }), "/srv");
 	check(dots.records.length === 1 && dots.records[0].path === "/srv/b/y.jsonl", "H11 a path that resolves outside the root is skipped; one that resolves inside comes back resolved");
 }

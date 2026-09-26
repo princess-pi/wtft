@@ -1367,7 +1367,7 @@ function takeServedHandOff() {
     }
   }
   if (unreadable > 0) {
-    process.stderr.write(`[wtft-log-parser] WARNING: skipped ${unreadable} hand-off line(s) that did not parse\n`);
+    process.stderr.write(`[wtft-log-parser] WARNING: skipped ${unreadable} hand-off line(s) that were not JSON objects\n`);
   }
 }
 
@@ -1485,8 +1485,8 @@ Management:
   --list, -l            List every running wtft-daemon, including fixture processes
   --cleanup             Kill per-session daemons whose session is gone, and fixture ones under the tmp dir
                         that hold no lease here; never a harness process, which stops once it has nothing to serve or watch
-  --restart             Stop every daemon and respawn one per leased session; a harness holding no lease
-                        is stopped and starts again on the next wtft
+  --restart             Stop every daemon holding a lease or a root pid file here, and respawn one per live
+                        holder with its own --session; a harness holding no lease starts again on the next wtft
   --stop <session>      Drop that session. A per-session process exits. A harness process stays up.
 
 Daemon mode:
@@ -1500,7 +1500,7 @@ Environment:
   WTFT_DAEMON_IDLE_MS          Milliseconds with no new lines before a session is dropped, after which a
                                harness forgets a dropped session, and with nothing to serve or watch
                                before a harness stops (default 86400000)
-  WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after start before that drop can fire (default 60000)
+  WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after the session's start (its adoption, in a harness) before that drop can fire (default 60000)
   WTFT_HARNESS_SCAN_SLICE_MS   Milliseconds one slice of a harness's subagent scan runs before it yields (default 25)
   WTFT_HARNESS_SCAN_YIELD_MS   Milliseconds a harness pauses between those slices (default 0)`);
   const usage = (why: string): never => {
@@ -1667,7 +1667,7 @@ if (showList || showCleanup || showRestart || stopSession) {
           child.unref();
         } catch (_2) {}
       }
-      console.log(`Restarted: PID ${pid} → fresh daemon for ${sessionFound || "(unknown)"}`);
+      console.log(sessionFound ? `Restarted: PID ${pid} → fresh daemon for ${sessionFound}` : `Restarted: PID ${pid} — lease removed, no session to respawn`);
       found++;
       continue;
     }

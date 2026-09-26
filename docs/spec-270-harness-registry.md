@@ -74,8 +74,9 @@ export function parseHandOff(text, root): { records: HandOffRecord[]; unreadable
   and a pending retry keeps the harness alive.
 - **`handOff` is the hand-off's whole text**, given the one thing the registry cannot know: which
   served records still hold their lease (`keep`). `parseHandOff` is its read: a line that is not
-  a JSON object counts as unreadable; a record whose path is relative, or resolves outside
-  `root`, or whose kind is unknown is skipped; a kept path is returned resolved. What the daemon does with each record (wake it, or mark it idle after an fs
+  a JSON object (not JSON, or a null, number, string or array) counts as unreadable; a record
+  whose path is missing, relative, or does not resolve to a path under `root`, or whose kind is
+  unknown, is skipped; a kept path is returned resolved. What the daemon does with each record (wake it, or mark it idle after an fs
   check) stays in `takeServedHandOff`.
 - **No `fs`, no timers, no clock inside.** The registry stores the timer handle the daemon made
   and hands it back; the clock is a `now` argument. The test is a plain registry value; its
@@ -93,7 +94,8 @@ field; §4), the hand-off file I/O (`persistHandOff`, `writeServedHandOff`,
 The process-level suites (`tests/wtft-205-*`, `wtft-239-harness-lifecycle`,
 `wtft-259-daemon-correctness`, `wtft-262-daemon-gaps`) pass unchanged; they are the closer
 that the daemon still behaves. Nothing about when a session is adopted, dropped, retried,
-handed on or forgotten changes; only where the daemon keeps that.
+handed on or forgotten changes; only where the daemon keeps that. The one behaviour change is
+the hand-off read, hardened as `parseHandOff` took it over (§4).
 
 ## 3. Closer
 
@@ -149,6 +151,12 @@ handed on or forgotten changes; only where the daemon keeps that.
   daemon made before and a harness kept alive by a mark it no longer had.
 - **A class.** The repo's modules are functions over a plain state value (`TaggerState`,
   `Registry`); the same shape keeps the test a literal value.
+- **The hand-off read is hardened, not moved as it was.** On `main`, `takeServedHandOff`
+  parsed each line inline: a JSON `null` line threw a TypeError and the harness start exited 1;
+  a number line was skipped silently; a path escaping the root through `..` matched the prefix
+  check and was woken under a key outside the root. `parseHandOff` counts every non-object line
+  as unreadable and resolves a path before the root check. A move-as-it-was would have carried
+  a crash into the module for a later slice to fix.
 - **The current-slot pointer.** `slot` and `withSlot` are the daemon's way of running the
   per-session functions against one record; the registry does not know which record is
   current, and does not need to.

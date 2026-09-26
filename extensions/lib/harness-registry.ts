@@ -260,7 +260,7 @@ export function parseHandOff(text: string, root: string): { records: HandOffReco
 		if (!line.trim()) continue;
 		let raw: { kind?: unknown; displayed?: unknown; path?: unknown; since?: unknown; sig?: unknown } | null = null;
 		try { raw = JSON.parse(line); } catch { unreadable++; continue; }
-		if (!raw || typeof raw !== "object") { unreadable++; continue; }
+		if (!raw || typeof raw !== "object" || Array.isArray(raw)) { unreadable++; continue; }
 		if (raw.kind !== "served" && raw.kind !== "idle") continue;
 		const file = typeof raw.path === "string" && path.isAbsolute(raw.path) ? path.resolve(raw.path) : "";
 		if (!file || !file.startsWith(root + path.sep)) continue;

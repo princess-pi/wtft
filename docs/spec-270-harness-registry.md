@@ -3,7 +3,8 @@
 Issue: https://github.com/princess-pi/wtft/issues/270, slice S4 of
 `docs/spec-270-daemon-ownership.md` §3b. The parent spec's rows for S4 are the commitment; this
 document is the design and the closer. Vocabulary: the `codebase-design` skill's (module,
-interface, seam, adapter, port) and `CONTEXT.md`.
+interface, seam, adapter, port) and `CONTEXT.md`; "harness" below is the daemon's harness
+process (`CONTEXT.md` Daemon), not the Harness entry's coding-agent runtime.
 
 ## 1. What moves, and what the seam is
 
@@ -55,15 +56,17 @@ export function handOff(reg, keep: (record) => boolean, adopting?: { key; displa
 export function parseHandOff(text, root): { records: HandOffRecord[]; unreadable: number };
 ```
 
-- **`move` re-keys one entry.** The record, its scan-continuation flag (#267 F), its flush timer
-  (returned to the caller to clear, since a timer is the daemon's) and its unwatched-tree stamp
-  travel together because they are fields of the record. `to` must be free: a record already
+- **`move` re-keys one entry.** The record, its scan-continuation flag (#267 F) and its
+  unwatched-tree stamp travel together because they are fields of the record; the flush timer
+  is taken off the record and handed back for the caller to clear, since a timer is the
+  daemon's. `to` must be free: a record already
   there is the daemon's to drop first, as `wake` does, and `move` returns null rather than
   displacing it.
 - **`drop` returns what the daemon must close**: the record (for the flush, the stop line and
   the lease release, which are fs work) and the flush timer. It also cancels a retry for that
   key. The idle record is separate on purpose: a session dropped for idling stays idle-known
-  until it is served again or `expiredIdle` ages it out.
+  until it is served again or the daemon forgets it (`forgetIdle`), which the sweep does for
+  the keys `expiredIdle` lists and for one whose transcript is gone.
 - **A retry's pending mark outlives its cancel.** `cancelRetry` on a pending retry zeroes the
   count and leaves the mark, so the daemon's timer, which cannot be recalled from here, fires
   into `retryFired` returning null; the next `beginRetry` then counts from 1 again. That is the
@@ -71,8 +74,8 @@ export function parseHandOff(text, root): { records: HandOffRecord[]; unreadable
   and a pending retry keeps the harness alive.
 - **`handOff` is the hand-off's whole text**, given the one thing the registry cannot know: which
   served records still hold their lease (`keep`). `parseHandOff` is its read: a line that is not
-  JSON counts as unreadable; a record with a relative path, a path outside `root`, or an unknown
-  kind is skipped. What the daemon does with each record (wake it, or mark it idle after an fs
+  a JSON object counts as unreadable; a record whose path is relative, or resolves outside
+  `root`, or whose kind is unknown is skipped; a kept path is returned resolved. What the daemon does with each record (wake it, or mark it idle after an fs
   check) stays in `takeServedHandOff`.
 - **No `fs`, no timers, no clock inside.** The registry stores the timer handle the daemon made
   and hands it back; the clock is a `now` argument. The test is a plain registry value; its
@@ -102,8 +105,8 @@ handed on or forgotten changes; only where the daemon keeps that.
     and gone from the record; an unknown `from`, or a `to` held by another record, returns null
     and moves nothing; `from === to` is a no-op returning the record;
   - **I** idle: `markIdle` keeps the first `since` and refreshes `sig`; an idle-known key keeps
-    `needsDir` and `projectInUse` true for its project directory; `expiredIdle` returns only
-    keys idle for at least `idleMs`; `forgetIdle`; `serve` forgets the idle record;
+    `needsDir` and `projectInUse` true for its project directory; `expiredIdle` lists only
+    keys idle for at least `idleMs` and removes none; `forgetIdle`; `serve` forgets the idle record;
   - **R** retries: `beginRetry` counts 1, 2, … up to `MAX_ADOPTION_TRIES`, then `gave-up` and
     the retry is forgotten; a second begin while pending is `pending`; `retryFired` clears the
     mark and hands the retry back; `cancelRetry` while pending leaves the mark and the fire
@@ -112,8 +115,8 @@ handed on or forgotten changes; only where the daemon keeps that.
     cancelled, `get` is undefined; dropping an unknown key returns nulls;
   - **H** hand-off round trip: served (only records `keep` accepts, then `adopting` unless
     already served), retrying and idle lines in the documented shapes; `parseHandOff` counts an
-    unparsable line and skips a relative or out-of-root path; the parsed records served into a
-    fresh registry hand off the same text.
+    unparsable line and a JSON `null`, skips a relative path and one that resolves outside the
+    root through `..`; the parsed records served into a fresh registry hand off the same text.
 - `bin/wtft-daemon.ts` no longer defines `harnessSlots`, `harnessFlushTimers`,
   `subagentScansContinuing`, `adoptionRetries`, `adoptionRetryPending`, `idleDropped`,
   `idleDroppedSize`, `idleDroppedAt`, `unwatchedTreeScanAt`, `handOffLines`, `dirStillNeeded`,

@@ -641,7 +641,7 @@ function harnessRoot(which: string): string {
   if (which === "pi") {
     return process.env.WTFT_PI_SESSIONS_DIR || path.join(os.homedir(), ".pi", "agent", "sessions");
   }
-  process.stderr.write("wtft-daemon: --harness must be claude or pi\n");
+  process.stderr.write("wtft-daemon: --harness must be claude, claude-code or pi\n");
   process.exit(2);
 }
 
@@ -1485,7 +1485,8 @@ Management:
   --list, -l            List every running wtft-daemon, including fixture processes
   --cleanup             Kill per-session daemons whose session is gone, and fixture ones under the tmp dir
                         that hold no lease here; never a harness process, which stops once it has nothing to serve or watch
-  --restart             Kill all running daemons (fresh spawn on next wtft)
+  --restart             Stop every daemon and respawn one per leased session; a harness holding no lease
+                        is stopped and starts again on the next wtft
   --stop <session>      Drop that session. A per-session process exits. A harness process stays up.
 
 Daemon mode:
@@ -1755,7 +1756,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       console.log(`Restarted: PID ${pid} — harness ${pidFile}`);
       found++;
     }
-    console.log(`Restarted ${found} daemon(s). Run wtft to spawn fresh instances.`);
+    console.log(`Restarted ${found} daemon(s). A harness holding no lease starts again on the next wtft.`);
   }
   if (showCleanup) {
     console.log(`Cleaned up ${found} daemon(s).`);

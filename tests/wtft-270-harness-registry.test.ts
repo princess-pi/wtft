@@ -108,7 +108,8 @@ console.log("\nR. adoption retries");
 	cancelRetry(reg, A);
 	check(retryPending(reg, A) && !isEmpty(reg), "R7 cancelling while pending keeps the pending mark until the timer fires");
 	check(retryFired(reg, A) === null && isEmpty(reg), "R8 that fire returns null and leaves nothing behind");
-	check(beginRetry(reg, A, true).kind === "retry" && (beginRetry(reg, A, true) as { kind: string }).kind === "pending", "R9 after a cancel the count restarts at 1");
+	const restarted = beginRetry(reg, A, true);
+	check(restarted.kind === "retry" && restarted.tries === 1 && beginRetry(reg, A, true).kind === "pending", "R9 after a cancel the count restarts at 1");
 	retryFired(reg, A);
 	for (let i = 2; i <= 5; i++) { check((beginRetry(reg, A, true) as { tries?: number }).tries === i, `R10.${i} try ${i}`); retryFired(reg, A); }
 	check(beginRetry(reg, A, true).kind === "gave-up" && isEmpty(reg) && retryFired(reg, A) === null, "R11 the sixth begin gives up and forgets the retry");
@@ -131,7 +132,7 @@ console.log("\nD. drop");
 	check(dropped.record === rec && dropped.flushTimer === timer, "D1 drop hands back the record and its flush timer");
 	clearTimeout(timer);
 	check(get(reg, A) === undefined, "D2 the record is gone");
-	check(reg.idle.get(A)?.since === T0, "D3 the idle record stays: the session is idle-known until served again or expired");
+	check(reg.idle.get(A)?.since === T0, "D3 the idle record stays after the drop");
 	const none = drop(reg, B);
 	check(none.record === null && none.flushTimer === null, "D4 dropping an unknown key returns nulls");
 	beginRetry(reg, B, true);
@@ -164,7 +165,12 @@ console.log("\nH. hand-off");
 		else markIdle(again, r.path, r.displayed, r.sig ?? "", r.since ?? T0);
 	}
 	check(handOff(again, () => true).join("\n") === withAdopting.join("\n"), "H8 round trip: the parsed lines served into a fresh registry hand off the same text");
-	check(parseHandOff("", "/srv").records.length === 0 && parseHandOff("\n\n", "/srv").unreadable === 0, "H9 blank lines are neither records nor unreadable");
+	const blank = parseHandOff("\n\n", "/srv");
+	check(blank.records.length === 0 && blank.unreadable === 0, "H9 blank lines are neither records nor unreadable");
+	const nul = parseHandOff("null\n42\n", "/srv");
+	check(nul.records.length === 0 && nul.unreadable === 2, "H10 a JSON line that is not an object is unreadable, not a throw");
+	const dots = parseHandOff(JSON.stringify({ kind: "served", displayed: true, path: "/srv/a/../../etc/x.jsonl" }) + "\n" + JSON.stringify({ kind: "served", displayed: true, path: "/srv/a/../b/y.jsonl" }), "/srv");
+	check(dots.records.length === 1 && dots.records[0].path === "/srv/b/y.jsonl", "H11 a path that resolves outside the root is skipped; one that resolves inside comes back resolved");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -250,19 +250,20 @@ export function handOff(reg: Registry, keep: (record: SessionRecord) => boolean,
 	return lines;
 }
 
-/** Reads a hand-off. A line that is not JSON counts as unreadable; a record
- *  whose path is not absolute, not under `root`, or whose kind is unknown is
- *  skipped. */
+/** Reads a hand-off. A line that is not a JSON object counts as unreadable; a
+ *  record whose path is not absolute, does not resolve under `root`, or whose
+ *  kind is unknown is skipped. Paths come back resolved. */
 export function parseHandOff(text: string, root: string): { records: HandOffRecord[]; unreadable: number } {
 	const records: HandOffRecord[] = [];
 	let unreadable = 0;
 	for (const line of text.split("\n")) {
 		if (!line.trim()) continue;
-		let raw: { kind?: unknown; displayed?: unknown; path?: unknown; since?: unknown; sig?: unknown } = {};
+		let raw: { kind?: unknown; displayed?: unknown; path?: unknown; since?: unknown; sig?: unknown } | null = null;
 		try { raw = JSON.parse(line); } catch { unreadable++; continue; }
+		if (!raw || typeof raw !== "object") { unreadable++; continue; }
 		if (raw.kind !== "served" && raw.kind !== "idle") continue;
-		const file = typeof raw.path === "string" ? raw.path : "";
-		if (!file || !path.isAbsolute(file) || !file.startsWith(root + path.sep)) continue;
+		const file = typeof raw.path === "string" && path.isAbsolute(raw.path) ? path.resolve(raw.path) : "";
+		if (!file || !file.startsWith(root + path.sep)) continue;
 		const rec: HandOffRecord = { kind: raw.kind, displayed: raw.displayed === true, path: file };
 		if (typeof raw.since === "number") rec.since = raw.since;
 		if (typeof raw.sig === "string") rec.sig = raw.sig;

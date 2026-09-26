@@ -201,7 +201,7 @@
     },
     {
       "flags": "--restart",
-      "desc": "Kill all running log parser daemons (fresh spawn on next wtft)."
+      "desc": "Stop every running log parser daemon and spawn a fresh one for each session it held a lease for (a harness process for that session's root, with the old process's root environment). A harness process holding no lease is stopped and its root pid file removed; the next wtft starts it again."
     },
     {
       "flags": "--stop <session>",

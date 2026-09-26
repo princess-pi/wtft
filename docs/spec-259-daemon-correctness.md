@@ -65,7 +65,9 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   lease names another live harness does not take it; it retries (below). A focus request never
   repoints a lease another live daemon holds; the harness's adoption takes it by these rules. A per-session daemon
   holding the lease is still stopped with SIGTERM and waited for, because it serves only that
-  session, and waiting keeps two writers off one tag.
+  session, and waiting keeps two writers off one tag. On Linux: the liveness check reads
+  `/proc/<pid>/cmdline`, so off Linux every holder reads as not a daemon, its lease is taken
+  with no retry and no signal, and a focus request repoints it (#266, as for A9 and `-F`).
 - **An older per-session build never takes over from a newer one** (A9). It takes over only from
   a tag of an older version. With a newer-version tag present and its lease held by a live
   daemon, it exits 0; off Linux, where a daemon cannot be told apart, any live lease holder counts. It never deletes a newer-version tag.

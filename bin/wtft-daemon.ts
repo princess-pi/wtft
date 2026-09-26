@@ -9,7 +9,11 @@ import { createHash } from "node:crypto";
 import { projectsDir } from "../extensions/lib/harness/claude-code/discovery.js";
 import { tagRecords, parseTagLine, lastOffset, isDataRecord } from "../extensions/lib/tag-log.js";
 import { claimLease, unlinkLeaseIf, replaceLease as publishLease, leaseHolder } from "../extensions/lib/lease.js";
-import { newTaggerState, readSession, flushTurns, scanChildren, resumeTagger, fsWorld, MTIME_SETTLE_MS, type TaggerState, type LogLine } from "../extensions/lib/session-tagger.js";
+import { readSession, flushTurns, scanChildren, resumeTagger, fsWorld, MTIME_SETTLE_MS, type LogLine } from "../extensions/lib/session-tagger.js";
+import {
+  newRegistry, newSessionRecord, serve, get, move, drop, markIdle, forgetIdle, expiredIdle, beginRetry, retryFired, cancelRetry,
+  retryPending, isEmpty, servedOver, needsDir, projectInUse, sessionDirOf, handOff, parseHandOff, type SessionRecord,
+} from "../extensions/lib/harness-registry.js";
 import {
 	loadUserPricing,
 	resolveMovedSession,
@@ -179,10 +183,6 @@ function flushPending() {
   slot.lastWriteMs = Date.now();
 }
 
-/** Harness sessions whose subagent scan ran out of its slice and continues on
- *  the next turn of the event loop. */
-const subagentScansContinuing = new Set<string>();
-
 function scanForSubAgents() {
   const scan = scanChildren(slot.state, world, harnessMode ? { sliceMs: HARNESS_SCAN_SLICE_MS } : {});
   printLog(scan.log);
@@ -194,21 +194,21 @@ function scanForSubAgents() {
     slot.idleStartMs = 0;
   }
   if (!scan.cut) return;
-  const key = path.resolve(slot.state.sessionPath);
-  if (subagentScansContinuing.has(key)) return;
-  subagentScansContinuing.add(key);
-  const owner = harnessSlots.get(key);
+  // The record in hand, not a lookup: in the poll that detects a move the
+  // registry still keys it by the old path until wake re-keys it.
+  const owner = slot;
+  if (owner.scanContinuing) return;
+  owner.scanContinuing = true;
   const next = () => {
-    // The slot may have moved to a new path since the cut; a move re-keys the marker.
-    const current = owner ? path.resolve(owner.state.sessionPath) : key;
-    const held = harnessSlots.get(current) === owner ? owner : undefined;
-    if (!held || !running) return;
-    subagentScansContinuing.delete(current);
-    if (!leaseStillOurs(held)) {
-      leaseLost(current, held);
+    // The record may have moved since the cut; the flag travels with it.
+    const current = path.resolve(owner.state.sessionPath);
+    if (get(registry, current) !== owner || !running) return;
+    owner.scanContinuing = false;
+    if (!leaseStillOurs(owner)) {
+      leaseLost(current, owner);
       return;
     }
-    withSlot(held, () => scanForSubAgents());
+    withSlot(owner, () => scanForSubAgents());
   };
   if (HARNESS_SCAN_YIELD_MS > 0) setTimeout(next, HARNESS_SCAN_YIELD_MS);
   else setImmediate(next);
@@ -256,7 +256,6 @@ function followMovedSession(): boolean {
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-log-parser] session moved: ${slot.state.sessionPath} -> ${moved}\n`);
   }
-  if (subagentScansContinuing.delete(path.resolve(slot.state.sessionPath))) subagentScansContinuing.add(path.resolve(moved));
   slot.state.sessionPath = moved;
   return true;
 }
@@ -551,7 +550,7 @@ function serviceSession(): "continue" | "stop" | "drop" {
 
     if (now - slot.lastActivityMs >= IDLE_EXIT_MS && now - slot.startupTime >= STARTUP_GRACE_MS) {
       if (process.env.WTFT_DAEMON_DEBUG) {
-        process.stderr.write(`[wtft-log-parser] no new data for ${Math.round((now - slot.lastActivityMs) / 60000)}m, exiting\n`);
+        process.stderr.write(`[wtft-log-parser] no new data for ${Math.round((now - slot.lastActivityMs) / 60000)}m, ${harnessMode ? "dropping the session" : "exiting"}\n`);
       }
       if (harnessMode) {
         droppedForIdle = true;
@@ -576,46 +575,17 @@ function serviceSession(): "continue" | "stop" | "drop" {
 
 const HARNESS_SKIP_DIRS = new Set(["subagents", "tool-results", "memory", "wtft-tags"]);
 
-interface Slot {
-  /** Everything the tagger decides from: docs/spec-270-session-tagger.md. */
-  state: TaggerState;
-  pidPath: string;
-  rebuildTagOnStartup: boolean;
-  lastWriteMs: number;
-  lastActivityMs: number;
-  startupTime: number;
-  idleStartMs: number;
-  sessionExisted: boolean;
-  displayed: boolean;
-  /** When the sweep last checked this transcript on disk. */
-  checkedAtMs: number;
-}
+type Slot = SessionRecord;
 
-const harnessSlots = new Map<string, Slot>();
+/** What the harness knows about each session: docs/spec-270-harness-registry.md. */
+const registry = newRegistry();
 const harnessWatchers = new Map<string, fs.FSWatcher>();
-const harnessFlushTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let harnessPidFile = "";
 let harnessIdleTimer: ReturnType<typeof setInterval> | null = null;
 
-function freshSlot(file: string, displayed: boolean): Slot {
-  const now = Date.now();
-  return {
-    state: newTaggerState(file, ""),
-    pidPath: "",
-    rebuildTagOnStartup: false,
-    lastWriteMs: 0,
-    lastActivityMs: now,
-    startupTime: now,
-    idleStartMs: 0,
-    sessionExisted: false,
-    displayed,
-    checkedAtMs: now,
-  };
-}
-
 /** The session being served right now: the one slot in per-session mode, or
  *  whichever `withSlot` made current. */
-let slot: Slot = freshSlot("", true);
+let slot: Slot = newSessionRecord("", true, Date.now());
 
 function withSlot<T>(next: Slot, fn: () => T): T {
   const prev = slot;
@@ -673,7 +643,7 @@ function harnessRoot(which: string): string {
   if (which === "pi") {
     return process.env.WTFT_PI_SESSIONS_DIR || path.join(os.homedir(), ".pi", "agent", "sessions");
   }
-  process.stderr.write("wtft-daemon: --harness must be claude or pi\n");
+  process.stderr.write("wtft-daemon: --harness must be claude, claude-code or pi\n");
   process.exit(2);
 }
 
@@ -705,14 +675,13 @@ function takeOverLease(pidPath: string): boolean {
 }
 
 function scheduleFlush(key: string) {
-  if (harnessFlushTimers.has(key)) return;
-  const slot = harnessSlots.get(key);
-  if (!slot || slot.state.pendingItems.length === 0) return;
+  const slot = get(registry, key);
+  if (!slot || slot.flushTimer || slot.state.pendingItems.length === 0) return;
   const wait = Math.max(0, POLL_MS - (Date.now() - slot.lastWriteMs));
   const timer = setTimeout(() => {
-    harnessFlushTimers.delete(key);
-    const current = harnessSlots.get(key);
-    if (!current) return;
+    const current = get(registry, key);
+    if (!current || current.flushTimer !== timer) return;
+    current.flushTimer = null;
     if (!leaseStillOurs(current)) {
       leaseLost(key, current);
       return;
@@ -723,12 +692,12 @@ function scheduleFlush(key: string) {
     });
   }, wait);
   timer.unref();
-  harnessFlushTimers.set(key, timer);
+  slot.flushTimer = timer;
 }
 
 function wake(file: string, displayed: boolean) {
   const key = path.resolve(file);
-  let slot = harnessSlots.get(key);
+  let slot = get(registry, key);
   // A `rebuild` lease (wtft -F) is adopted afresh, which honours it. Any other
   // lease that is not ours drops the session in serviceSession, as --stop means.
   if (slot && slot.pidPath && leaseHolder(slot.pidPath) === "rebuild") {
@@ -737,16 +706,12 @@ function wake(file: string, displayed: boolean) {
     slot = undefined;
   }
   if (!slot) {
-    slot = freshSlot(key, displayed);
+    slot = newSessionRecord(key, displayed, Date.now());
     if (!withSlot(slot, () => adoptSession())) {
       retryAdoptionLater(key, displayed);
       return;
     }
-    harnessSlots.set(key, slot);
-    adoptionRetries.delete(key);
-    idleDropped.delete(key);
-    idleDroppedSize.delete(key);
-    idleDroppedAt.delete(key);
+    serve(registry, key, slot);
     watchSession(key);
   } else if (displayed) {
     slot.displayed = true;
@@ -761,19 +726,12 @@ function wake(file: string, displayed: boolean) {
   }
   const movedTo = slot.state.sessionPath;
   if (movedTo !== key) {
-    const other = harnessSlots.get(movedTo);
+    const other = get(registry, movedTo);
     if (other && other !== slot) dropHarnessSlot(movedTo);
-    harnessSlots.delete(key);
-    harnessSlots.set(movedTo, slot);
-    // A scan cut before the move carries on under the new path.
-    if (subagentScansContinuing.delete(key)) subagentScansContinuing.add(movedTo);
+    const moved = move(registry, key, movedTo);
+    if (moved?.flushTimer) clearTimeout(moved.flushTimer);
     unwatchSession(key);
     watchSession(movedTo);
-    const timer = harnessFlushTimers.get(key);
-    if (timer) {
-      clearTimeout(timer);
-      harnessFlushTimers.delete(key);
-    }
   }
   if (slot.state.pendingItems.length > 0) scheduleFlush(movedTo);
 }
@@ -800,8 +758,8 @@ function watchDir(dir: string, recurse: boolean) {
     try {
       if (fs.statSync(key).isDirectory()) watchDir(key, recurse);
     } catch { /* directory is gone */ }
-    for (const [file, slot] of harnessSlots) {
-      if (path.dirname(file) === key || file.slice(0, -".jsonl".length) === key || key.startsWith(file.slice(0, -".jsonl".length) + path.sep)) {
+    for (const [file, slot] of registry.served) {
+      if (path.dirname(file) === key || sessionDirOf(file) === key || key.startsWith(sessionDirOf(file) + path.sep)) {
         wake(file, slot.displayed);
       }
     }
@@ -825,34 +783,11 @@ function watchDir(dir: string, recurse: boolean) {
 const unwatchedDirs = new Map<string, { recurse: boolean; triedAt: number }>();
 const WATCH_RETRY_MS = 10_000;
 
-/** Whether a served or idle-dropped session still needs `dir` watched. */
-function dirStillNeeded(dir: string): boolean {
-  for (const file of harnessSlots.keys()) {
-    const own = sessionDirOf(file);
-    if (path.dirname(file) === dir || dir === own || dir.startsWith(own + path.sep)) return true;
-  }
-  for (const file of idleDropped.keys()) if (path.dirname(file) === dir) return true;
-  return false;
-}
-
-function sessionDirOf(file: string): string {
-  return file.slice(0, -".jsonl".length);
-}
-
 function watchSession(file: string) {
   watchDir(path.dirname(file), false);
   if (fs.existsSync(sessionDirOf(file))) watchDir(sessionDirOf(file), true);
 }
 
-/** Sessions dropped for idling: their project directory stays watched, and
- *  their next write adopts them again. */
-const idleDropped = new Map<string, boolean>();
-/** Each idle-dropped transcript's size, inode and mtime when dropped, for the sweep to notice
- *  a write where the directory cannot be watched. */
-const idleDroppedSize = new Map<string, string>();
-/** When each was dropped. One not written for WTFT_DAEMON_IDLE_MS after that
- *  is forgotten, so a harness serving nothing can stop with nothing to hand on. */
-const idleDroppedAt = new Map<string, number>();
 /** Size, inode and mtime: a same-length rewrite or a replacement is a write too. */
 function idleSignature(key: string): string {
   try {
@@ -861,10 +796,8 @@ function idleSignature(key: string): string {
   } catch { return ""; }
 }
 
-function dropForIdle(key: string, displayed: boolean, since = idleDroppedAt.get(key) ?? Date.now()) {
-  idleDropped.set(key, displayed);
-  idleDroppedAt.set(key, since);
-  idleDroppedSize.set(key, idleSignature(key));
+function dropForIdle(key: string, displayed: boolean, since = Date.now()) {
+  markIdle(registry, key, displayed, idleSignature(key), since);
 }
 
 /** Set by serviceSession when it drops a harness session for idling. */
@@ -876,35 +809,21 @@ let idleDroppedPrunedAt = 0;
 function unwatchSession(file: string) {
   const own = sessionDirOf(file);
   const project = path.dirname(file);
-  const projectInUse = [...harnessSlots.keys()].some(k => k !== file && path.dirname(k) === project)
-    || [...idleDropped.keys()].some(k => path.dirname(k) === project);
+  const inUse = projectInUse(registry, project, file);
   for (const [dir, watcher] of harnessWatchers) {
     const mine = dir === own || dir.startsWith(own + path.sep);
-    if (!mine && !(dir === project && !projectInUse)) continue;
+    if (!mine && !(dir === project && !inUse)) continue;
     try { watcher.close(); } catch { /* already closed */ }
     harnessWatchers.delete(dir);
   }
 }
 
-/** A served session whose directory tree holds `dir`, if any. */
-function servedSessionOver(dir: string): string | null {
-  for (const file of harnessSlots.keys()) {
-    const own = sessionDirOf(file);
-    if (dir === own || dir.startsWith(own + path.sep)) return file;
-  }
-  return null;
-}
-
-/** A session that could not be adopted is tried again every POLL_MS, up to
- *  five times. One retry is pending per session at a time. */
-const adoptionRetries = new Map<string, { tries: number; displayed: boolean }>();
-const adoptionRetryPending = new Set<string>();
+/** A session that could not be adopted is tried again every POLL_MS. */
 function retryAdoptionLater(key: string, displayed: boolean) {
   if (!running) return;
-  if (adoptionRetryPending.has(key)) return;
-  const tries = (adoptionRetries.get(key)?.tries ?? 0) + 1;
-  if (tries > 5) {
-    adoptionRetries.delete(key);
+  const begun = beginRetry(registry, key, displayed);
+  if (begun.kind === "pending") return;
+  if (begun.kind === "gave-up") {
     const lease = getDaemonPidPath(key);
     const holder = leaseHolder(lease);
     const why = key.includes(".wtft-tag.v") ? "it is a tag file"
@@ -912,7 +831,8 @@ function retryAdoptionLater(key: string, displayed: boolean) {
       : "its lease could not be claimed";
     process.stderr.write(`[wtft-log-parser] could not adopt ${key}: ${why}\n`);
     // Not tried again until it is written again.
-    if (idleDropped.has(key)) dropForIdle(key, idleDropped.get(key)!);
+    const idle = registry.idle.get(key);
+    if (idle) dropForIdle(key, idle.displayed);
     // A reader must not be told the session is served.
     unlinkIfHolds(lease, String(process.pid));
     if (!fs.existsSync(lease)) {
@@ -920,14 +840,12 @@ function retryAdoptionLater(key: string, displayed: boolean) {
     }
     return;
   }
-  adoptionRetries.set(key, { tries, displayed });
-  adoptionRetryPending.add(key);
   const timer = setTimeout(() => {
-    adoptionRetryPending.delete(key);
-    // Cancelled by an adoption or a drop since.
-    if (!adoptionRetries.has(key)) return;
-    if (running && !harnessSlots.has(key)) wake(key, displayed);
-    if (harnessSlots.has(key)) adoptionRetries.delete(key);
+    // Null when an adoption or a drop cancelled it since.
+    const fired = retryFired(registry, key);
+    if (!fired) return;
+    if (running && !get(registry, key)) wake(key, fired.displayed);
+    if (get(registry, key)) cancelRetry(registry, key);
   }, POLL_MS);
   timer.unref();
 }
@@ -945,7 +863,7 @@ function onWatch(dir: string, filename: string | null) {
     if (process.env.WTFT_DAEMON_DEBUG) {
       process.stderr.write("[wtft-log-parser] watch overflow, rescanning offsets once\n");
     }
-    for (const [file, slot] of harnessSlots) wake(file, slot.displayed);
+    for (const [file, slot] of registry.served) wake(file, slot.displayed);
     return;
   }
   if (HARNESS_SKIP_DIRS.has(filename) && filename !== "subagents") return;
@@ -957,40 +875,40 @@ function onWatch(dir: string, filename: string | null) {
   } catch {
     st = null;
   }
-  const over = servedSessionOver(full);
+  const over = servedOver(registry, full);
   if (st?.isDirectory()) {
     // A session directory or a subagents directory appearing under a served
     // session; any other directory is not being served.
-    if (over || harnessSlots.has(`${full}.jsonl`)) watchDir(full, true);
-    const parent = over ?? (harnessSlots.has(`${full}.jsonl`) ? `${full}.jsonl` : null);
-    if (parent) wake(parent, harnessSlots.get(parent)?.displayed ?? true);
+    if (over || registry.served.has(`${full}.jsonl`)) watchDir(full, true);
+    const parent = over ?? (registry.served.has(`${full}.jsonl`) ? `${full}.jsonl` : null);
+    if (parent) wake(parent, get(registry, parent)?.displayed ?? true);
     return;
   }
   if (over) {
-    wake(over, harnessSlots.get(over)?.displayed ?? true);
+    wake(over, get(registry, over)?.displayed ?? true);
     return;
   }
   if (st && filename.endsWith(".jsonl") && !filename.includes(".wtft-tag.")) {
-    const slot = harnessSlots.get(full);
+    const slot = get(registry, full);
     if (slot) {
       wake(full, slot.displayed);
       return;
     }
-    const displayed = idleDropped.get(full);
-    if (displayed !== undefined) {
-      wake(full, displayed);
+    const idle = registry.idle.get(full);
+    if (idle) {
+      wake(full, idle.displayed);
       return;
     }
     // A Pi child session is a sibling file naming its parent inside it, so a
     // new or growing sibling may belong to a served session in this directory.
     if (harnessWhich === "pi") {
-      for (const [file, other] of harnessSlots) if (path.dirname(file) === dir) wake(file, other.displayed);
+      for (const [file, other] of registry.served) if (path.dirname(file) === dir) wake(file, other.displayed);
     }
     return;
   }
   // A replace-via-rename often reports only the path that disappeared.
   const watched = path.resolve(dir);
-  for (const [file, slot] of harnessSlots) {
+  for (const [file, slot] of registry.served) {
     if (path.dirname(file) !== watched) continue;
     let now: fs.Stats;
     try {
@@ -1177,7 +1095,7 @@ function runHarness(which: string, focus: string) {
 
 /** `reason`, when given, is written as the session's stop line. */
 function dropHarnessSlot(key: string, reason = "") {
-  const slot = harnessSlots.get(key);
+  const slot = get(registry, key);
   const ours = slot ? leaseStillOurs(slot) : false;
   // A lease another daemon holds means the tag is its to write; it resumes from
   // the tag's offset, so these turns are not lost.
@@ -1188,13 +1106,8 @@ function dropHarnessSlot(key: string, reason = "") {
     });
   }
   if (slot && !ours) logLeaseLost(key, slot.pidPath);
-  const timer = harnessFlushTimers.get(key);
-  if (timer) clearTimeout(timer);
-  harnessFlushTimers.delete(key);
-  harnessSlots.delete(key);
-  subagentScansContinuing.delete(key);
-  adoptionRetries.delete(key);
-  unwatchedTreeScanAt.delete(key);
+  const { flushTimer } = drop(registry, key);
+  if (flushTimer) clearTimeout(flushTimer);
   unwatchSession(key);
   if (slot) releaseLease(slot);
   if (process.env.WTFT_DAEMON_DEBUG) {
@@ -1206,23 +1119,18 @@ function dropHarnessSlot(key: string, reason = "") {
  *  removed; one another process has taken since it was read is left alone. */
 function releaseLease(slot: Slot) {
   if (!slot.pidPath) return;
-  for (const other of harnessSlots.values()) if (other !== slot && other.pidPath === slot.pidPath) return;
+  for (const other of registry.served.values()) if (other !== slot && other.pidPath === slot.pidPath) return;
   if (!unlinkLeaseIf(slot.pidPath, String(process.pid))) return;
   try { fs.rmSync(`${slot.pidPath}.display`, { force: true }); } catch { /* already gone */ }
 }
-
-/** When each served session last had its subagents read because a directory
- *  of its tree cannot be watched. */
-const unwatchedTreeScanAt = new Map<string, number>();
 
 function slotNeedsChildScan(slot: Slot, now: number): boolean {
   if (slot.state.pendingClaudeCommands.length > 0) return true;
   // No watch event will come for a subagent written there, so it is polled.
   const tree = slot.state.sessionPath.replace(/\.jsonl$/, "");
-  const key = path.resolve(slot.state.sessionPath);
-  if (now - (unwatchedTreeScanAt.get(key) ?? 0) >= POLL_MS
+  if (now - slot.unwatchedTreeScanAt >= POLL_MS
     && [...unwatchedDirs.keys()].some(dir => dir === tree || dir.startsWith(tree + path.sep) || tree.startsWith(dir + path.sep))) {
-    unwatchedTreeScanAt.set(key, now);
+    slot.unwatchedTreeScanAt = now;
     return true;
   }
   if (slot.state.reseedPending) return true;
@@ -1287,16 +1195,14 @@ function sweepIdleSlots() {
   const now = Date.now();
   const pruneGone = now - idleDroppedPrunedAt >= 60_000;
   if (pruneGone) idleDroppedPrunedAt = now;
-  for (const key of [...idleDropped.keys()]) {
-    const aged = now - (idleDroppedAt.get(key) ?? now) >= IDLE_EXIT_MS;
-    if (!aged && !(pruneGone && !fs.existsSync(key))) continue;
-    idleDropped.delete(key);
-    idleDroppedSize.delete(key);
-    idleDroppedAt.delete(key);
+  const aged = new Set(expiredIdle(registry, now, IDLE_EXIT_MS));
+  for (const key of [...registry.idle.keys()]) {
+    if (!aged.has(key) && !(pruneGone && !fs.existsSync(key))) continue;
+    forgetIdle(registry, key);
     unwatchSession(key);
   }
-  for (const key of [...harnessSlots.keys()]) {
-    const slot = harnessSlots.get(key);
+  for (const key of [...registry.served.keys()]) {
+    const slot = get(registry, key);
     if (!slot) continue;
     if (!leaseStillOurs(slot)) {
       leaseLost(key, slot);
@@ -1310,7 +1216,7 @@ function sweepIdleSlots() {
       try { st = fs.statSync(slot.state.sessionPath); } catch { /* gone, or not written yet */ }
       if (!st || st.ino !== slot.state.sessionIno || st.size !== slot.state.lastSize || slot.state.pendingFragment.length > 0 || slot.state.sessionReadFailed) {
         wake(key, slot.displayed);
-        if (harnessSlots.get(key) !== slot) continue;
+        if (get(registry, key) !== slot) continue;
       }
     }
     if (slot.pidPath && fs.existsSync(`${slot.pidPath}.display`)) {
@@ -1322,7 +1228,7 @@ function sweepIdleSlots() {
       slot.state.pollHadFailure = slot.state.sessionReadFailed;
       withSlot(slot, () => scanForSubAgents());
     }
-    const current = harnessSlots.get(key);
+    const current = get(registry, key);
     if (!current) continue;
     if (current.state.pendingItems.length > 0) continue;
     if (now - current.startupTime < STARTUP_GRACE_MS) continue;
@@ -1330,24 +1236,24 @@ function sweepIdleSlots() {
     dropForIdle(key, current.displayed);
     dropHarnessSlot(key, "idle timeout");
   }
-  for (const [key, displayed] of [...idleDropped]) {
-    if (!unwatchedDirs.has(path.dirname(key)) || adoptionRetryPending.has(key)) continue;
+  for (const [key, idle] of [...registry.idle]) {
+    if (!unwatchedDirs.has(path.dirname(key)) || retryPending(registry, key)) continue;
     const signature = idleSignature(key);
-    if (signature !== "" && signature !== idleDroppedSize.get(key)) wake(key, displayed);
+    if (signature !== "" && signature !== idle.sig) wake(key, idle.displayed);
   }
   for (const [dir, failed] of unwatchedDirs) {
     if (now - failed.triedAt < WATCH_RETRY_MS) continue;
-    if (!dirStillNeeded(dir)) unwatchedDirs.delete(dir);
+    if (!needsDir(registry, dir)) unwatchedDirs.delete(dir);
     else watchDir(dir, failed.recurse);
   }
   if (!focusWatcher) watchFocusRequests();
-  if (harnessSlots.size > 0 || adoptionRetryPending.size > 0 || idleDropped.size > 0) emptySinceMs = 0;
+  if (!isEmpty(registry)) emptySinceMs = 0;
   else if (emptySinceMs === 0) emptySinceMs = now;
   else if (now - emptySinceMs >= IDLE_EXIT_MS) {
     // A request posted since this sweep read them would otherwise be left
     // with a lease pointing at a harness that is gone.
     takeFocusRequests();
-    if (harnessSlots.size === 0 && adoptionRetryPending.size === 0 && idleDropped.size === 0) {
+    if (isEmpty(registry)) {
       stopHarness("no session served");
       return;
     }
@@ -1367,26 +1273,15 @@ function servedHandOffFile(): string {
   return `${harnessPidFile}.served`;
 }
 
-function handOffLines(adopting?: string): string[] {
-  const lines: string[] = [];
-  const entry = (kind: string, displayed: boolean, key: string, idle?: { since?: number; sig?: string }) => JSON.stringify({ kind, displayed, path: key, ...(idle ?? {}) });
-  // A slot whose lease went elsewhere (--stop, another daemon) is not handed
-  // on, except for a rebuild lease, which wants the session adopted again.
-  for (const [key, slot] of harnessSlots) {
-    if (leaseStillOurs(slot) || (slot.pidPath && leaseHolder(slot.pidPath) === "rebuild")) lines.push(entry("served", slot.displayed, key));
-  }
-  // A session whose adoption failed is not in harnessSlots yet.
-  if (adopting && !harnessSlots.has(adopting)) lines.push(entry("served", slot.displayed, adopting));
-  // Asked for, but waiting on an adoption retry.
-  for (const [key, retry] of adoptionRetries) {
-    if (!harnessSlots.has(key) && key !== adopting) lines.push(entry("served", retry.displayed, key));
-  }
-  for (const [key, displayed] of idleDropped) lines.push(entry("idle", displayed, key, { since: idleDroppedAt.get(key), sig: idleDroppedSize.get(key) }));
-  return lines;
+/** A record whose lease went elsewhere (--stop, another daemon) is not handed
+ *  on, except for a rebuild lease, which wants the session adopted again. */
+function handedOn(record: Slot): boolean {
+  return leaseStillOurs(record) || (record.pidPath !== "" && leaseHolder(record.pidPath) === "rebuild");
 }
 
+/** `adopting` is a session whose adoption is under way: the current slot's. */
 function writeServedHandOff(adopting?: string) {
-  const lines = handOffLines(adopting);
+  const lines = handOff(registry, handedOn, adopting ? { key: adopting, displayed: slot.displayed } : undefined);
   try {
     if (lines.length === 0) {
       fs.rmSync(servedHandOffFile(), { force: true });
@@ -1405,7 +1300,7 @@ let handOffWarned = "";
  *  runs still passes on what it served. Rewritten when it differs from the file. */
 function persistHandOff() {
   if (!holdsHarnessRoot()) return;
-  const text = handOffLines().join("\n");
+  const text = handOff(registry, handedOn).join("\n");
   // Compared with the file, not with the last write: a displaced harness may
   // have written over it since.
   let onDisk = "";
@@ -1457,31 +1352,24 @@ function takeServedHandOff() {
     return;
   }
   try { fs.unlinkSync(claimed); } catch { /* already gone */ }
-  let unreadable = 0;
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    let record: { kind?: unknown; displayed?: unknown; path?: unknown; since?: unknown; sig?: unknown } = {};
-    try { record = JSON.parse(line); } catch { unreadable++; continue; }
-    const kind = record.kind;
-    const displayed = record.displayed === true ? "1" : "0";
-    const key = typeof record.path === "string" ? record.path : "";
-    if (!key || !path.isAbsolute(key)) continue;
-    if (!key.startsWith(harnessRootKey + path.sep)) continue;
+  const { records, unreadable } = parseHandOff(text, harnessRootKey);
+  for (const record of records) {
+    const key = record.path;
     // A served session may not be written yet; the harness waits for it as it
     // does for any session it is asked for.
-    if (kind === "served") wake(key, displayed === "1");
-    else if (kind === "idle" && fs.existsSync(key) && !harnessSlots.has(key)) {
+    if (record.kind === "served") wake(key, record.displayed);
+    else if (fs.existsSync(key) && !registry.served.has(key)) {
       // Written while no harness ran: no watch event will come for it.
-      if (typeof record.sig === "string" && record.sig !== idleSignature(key)) {
-        wake(key, displayed === "1");
+      if (record.sig !== undefined && record.sig !== idleSignature(key)) {
+        wake(key, record.displayed);
         continue;
       }
-      dropForIdle(key, displayed === "1", typeof record.since === "number" ? record.since : Date.now());
+      dropForIdle(key, record.displayed, record.since ?? Date.now());
       watchDir(path.dirname(key), false);
     }
   }
   if (unreadable > 0) {
-    process.stderr.write(`[wtft-log-parser] WARNING: skipped ${unreadable} hand-off line(s) that did not parse\n`);
+    process.stderr.write(`[wtft-log-parser] WARNING: skipped ${unreadable} hand-off line(s) that were not JSON objects\n`);
   }
 }
 
@@ -1493,8 +1381,8 @@ function stopHarness(reason: string, exitCode = 0) {
   if (holdsHarnessRoot()) writeServedHandOff();
   if (harnessIdleTimer) clearInterval(harnessIdleTimer);
   harnessIdleTimer = null;
-  for (const timer of harnessFlushTimers.values()) clearTimeout(timer);
-  for (const [key, slot] of harnessSlots) {
+  for (const record of registry.served.values()) if (record.flushTimer) clearTimeout(record.flushTimer);
+  for (const [key, slot] of registry.served) {
     if (!leaseStillOurs(slot)) {
       logLeaseLost(key, slot.pidPath);
       continue;
@@ -1599,7 +1487,8 @@ Management:
   --list, -l            List every running wtft-daemon, including fixture processes
   --cleanup             Kill per-session daemons whose session is gone, and fixture ones under the tmp dir
                         that hold no lease here; never a harness process, which stops once it has nothing to serve or watch
-  --restart             Kill all running daemons (fresh spawn on next wtft)
+  --restart             Stop every daemon holding a lease or a root pid file here, and respawn one per live
+                        holder with its own --session; a harness holding no lease starts again on the next wtft
   --stop <session>      Drop that session. A per-session process exits. A harness process stays up.
 
 Daemon mode:
@@ -1613,7 +1502,7 @@ Environment:
   WTFT_DAEMON_IDLE_MS          Milliseconds with no new lines before a session is dropped, after which a
                                harness forgets a dropped session, and with nothing to serve or watch
                                before a harness stops (default 86400000)
-  WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after start before that drop can fire (default 60000)
+  WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after the daemon starts serving a session (its adoption, in a harness) before that drop can fire (default 60000)
   WTFT_HARNESS_SCAN_SLICE_MS   Milliseconds one slice of a harness's subagent scan runs before it yields (default 25)
   WTFT_HARNESS_SCAN_YIELD_MS   Milliseconds a harness pauses between those slices (default 0)`);
   const usage = (why: string): never => {
@@ -1761,7 +1650,8 @@ if (showList || showCleanup || showRestart || stopSession) {
       }
       restarted.add(pid);
       const restartEnv = { ...process.env };
-      if (alive && procIsDaemon(pid)) {
+      const wasDaemon = alive && procIsDaemon(pid);
+      if (wasDaemon) {
         for (const key of ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR"]) {
           const value = procEnvValue(pid, key);
           if (value) restartEnv[key] = value;
@@ -1770,7 +1660,9 @@ if (showList || showCleanup || showRestart || stopSession) {
         waitUntilExited(pid);
       }
       unlinkIfNames(fullPath, pid);
-      if (sessionFound) {
+      // Only a daemon this process stopped is respawned: a live pid that is not
+      // one (or one that cannot be signalled, #274) was not stopped.
+      if (wasDaemon && sessionFound) {
         try {
           const child = spawn(process.execPath, [process.argv[1], ...daemonLaunchArgs(sessionFound, restartEnv)], {
             detached: true,
@@ -1780,7 +1672,9 @@ if (showList || showCleanup || showRestart || stopSession) {
           child.unref();
         } catch (_2) {}
       }
-      console.log(`Restarted: PID ${pid} → fresh daemon for ${sessionFound || "(unknown)"}`);
+      console.log(wasDaemon && sessionFound ? `Restarted: PID ${pid} → fresh daemon for ${sessionFound}`
+        : wasDaemon ? `Stopped: PID ${pid} — no --session to respawn (#274)`
+        : `Removed lease: PID ${pid} — no live daemon found`);
       found++;
       continue;
     }
@@ -1862,14 +1756,17 @@ if (showList || showCleanup || showRestart || stopSession) {
         continue;
       }
       seenPids.add(pid);
-      if (procIsDaemon(pid)) { try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ } }
-      // It writes its hand-off only while its pid file still names it.
-      waitUntilExited(pid);
+      const live = procIsDaemon(pid);
+      if (live) {
+        try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ }
+        // It writes its hand-off only while its pid file still names it.
+        waitUntilExited(pid);
+      }
       unlinkIfNames(fullPath, pid);
-      console.log(`Restarted: PID ${pid} — harness ${pidFile}`);
+      console.log(live ? `Stopped: PID ${pid} — harness ${pidFile}; the next wtft starts it again` : `Removed root pid file: PID ${pid} — no live daemon found, harness ${pidFile}`);
       found++;
     }
-    console.log(`Restarted ${found} daemon(s). Run wtft to spawn fresh instances.`);
+    console.log(`${found} holder(s) handled: restarted, stopped, or a lease or root pid file removed, as each line says.`);
   }
   if (showCleanup) {
     console.log(`Cleaned up ${found} daemon(s).`);
@@ -1900,7 +1797,7 @@ if (showList || showCleanup || showRestart || stopSession) {
     process.exit(1);
   }
 
-  slot = freshSlot(sessionArg, true);
+  slot = newSessionRecord(sessionArg, true, Date.now());
   const sessionPath = sessionArg;
   const sessionBase = path.basename(sessionPath);
   // Prefer an existing current-version tag wherever it lives (session may have moved).

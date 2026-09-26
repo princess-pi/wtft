@@ -31,7 +31,8 @@ decide a record (`parseNewLines`, `queueClaudeCommand`, `syncSubagentTranscript`
 `skipAsFoldedElsewhere`, `scanForSubAgents` as `scanChildren`, `flushPending` as
 `flushTurns`, `invalidateStaleSweptMarker`) live in `extensions/lib/session-tagger.ts` and
 return the record; the daemon's `flushPending`, `scanForSubAgents` and `appendTagFile` do
-the append.
+the append. Since S4 the harness's session-keyed collections named below are one `registry`
+value (`extensions/lib/harness-registry.ts`), and `handOffLines` is `handOff(registry, handedOn)`.
 
 | # | Record | Writer (function) | Moment | Readers → what they take |
 |---|---|---|---|---|
@@ -80,7 +81,7 @@ non-session-id path names a different lease (lead on #261). Two transient siblin
 
 Readers: `checkDaemonHealth` (pid alive → daemon alive), `serviceSession` (holder is me, every
 poll), `leaseStillOurs`, `leaseLost`, `logLeaseLost`, `wake` (`rebuild` → adopt afresh),
-`awaitDaemonUp`, `handOffLines`, `retryAdoptionLater`, `forceRebuildSession`, `restartDaemon`,
+`awaitDaemonUp`, `handedOn` (the hand-off's keep predicate), `retryAdoptionLater`, `forceRebuildSession`, `restartDaemon`,
 the CLI's `-F` adoption wait, `shutdown`, `takeOverLease`, `pointSessionAt`, `reapAndWarn`,
 `--stop`, `--list`, `--cleanup`, `--restart`, per-session `main`, and `claimLease` itself.
 
@@ -124,7 +125,9 @@ Session `.jsonl`, `<id>/subagents/agent-*.jsonl` and `.meta.json`, Pi sibling fi
 
 On `main` @ `0082dee`, `bin/wtft-daemon.ts` held 38 module-level `let` bindings and 17
 module-level `Map`/`Set` collections (after S3: 15 bindings, 11 collections, one
-`Slot` holding the `TaggerState`, no `install`/`save`; this section keeps the measurement). In harness mode, `install(slot)` / `save(slot)` copy 24 of the `let` bindings (all but `checkedAtMs`) into
+`Slot` holding the `TaggerState`, no `install`/`save`; after S4: 15 bindings, two
+directory-keyed collections, `harnessWatchers` and `unwatchedDirs`, and one `registry` value
+holding the session-keyed records; this section keeps the measurement). In harness mode, `install(slot)` / `save(slot)` copy 24 of the `let` bindings (all but `checkedAtMs`) into
 and out of a `Slot` around every call. The 17 collections are not in the `Slot`, and most are
 keyed by session path (`harnessWatchers` and `unwatchedDirs` by directory, the `warned*` sets by
 child transcript path): `harnessSlots`, `harnessWatchers`, `harnessFlushTimers`,
@@ -150,9 +153,9 @@ issue that turns on the row, where one exists.
 | R5 | the session is idle | daemon: `lastActivityMs`, `idleStartMs` | `checkDaemonHealth` derives it from T4 `first` against the last T1 `t`, else from the session file's mtime | — |
 | R6 | which transcript a tag line came from | daemon: `SubagentFileState.source` | `transcriptSourceId` is recomputed from the current path at the next read; a session move changes the answer for a child in the session's own directory | #263 |
 | R7 | which `claude -p` lookups are open | daemon: `pendingClaudeCommands`, `discoveredClaudeFiles` | `resumeClaudeLookups` replays T9, T10 and T12; `reseedClaudeChildren` checks `<projectsDir>/<dir>/<id>.jsonl` for every T12 id with a matching source, skipping ids T11 says another source folds and ids discovery finds | #267 |
-| R8 | which process serves a session | the harness: `harnessSlots` | `daemonLaunchArgs` decides by path prefix in the CLI; `runHarness` decides again from the root file and version file; `restartDaemon` decides from `/proc/<pid>/cmdline`; `wtft-daemon --restart` respawns each lease holder's session with the old process's root env | #221, #260 |
+| R8 | which process serves a session | the harness: the registry's `served` map | `daemonLaunchArgs` decides by path prefix in the CLI; `runHarness` decides again from the root file and version file; `restartDaemon` decides from `/proc/<pid>/cmdline`; `wtft-daemon --restart` respawns each lease holder's session with the old process's root env | #221, #260 |
 | R9 | a held-back turn, and every subagent read position | daemon: `SubagentFileState`, memory only | nothing: a crash loses it; the next life reads every discovered subagent transcript from byte 0 as a new generation and re-registers `claude -p` children, so the held turn is read again. The T6 offset covers the session transcript only, and it counts a trailing fragment's bytes, so a restart resumes mid-line and drops that line (lead on #261) | #257 |
-| R10 | what the harness serves | the harness: `harnessSlots`, `adoptionRetries`, `idleDropped*`, each slot's lease state | `.served` is rewritten at the end of every full 250 ms sweep, while this process holds the root, by diffing `handOffLines()` against the file's text | — |
+| R10 | what the harness serves | the harness: the registry's `served`, `retrying` and `idle` maps, each record's lease state | `.served` is rewritten at the end of every full 250 ms sweep, while this process holds the root, by diffing `handOff(registry, handedOn)` against the file's text | — |
 | R11 | the record kind of a tag line | the writer | on `main`, four daemon functions (`resumeClaudeLookups`, `reapAndWarn`, `reseedClaudeChildren`, `initClassified`) and `appendedGeneration` tested substrings (`"_hb"`, `"_meta"`, `"_gen"`, `"_fold"`, `"spawnPending"`, `"spawnSettled"`, `"stop"`), and the picker and `watchTagFile` decided kinds on their own; after S1 every reader decides through `tag-log.ts` | #140 |
 | R12 | the lease is mine | the claimer | on `main`, nine unlink sites with three different checks (§1b); one implementation after S2 | #249, #243 |
 
@@ -166,15 +169,15 @@ Rows R4, R8, R10 and R12 are the daemon chain (#205 → #239 → #249 → #259 �
 ### 3a. Modules
 
 Six modules. Each row names the interface a caller must know, and what moves behind it. The
-**TagLog**, **Lease** and **SessionTagger** rows name what S1–S3 built; the three below them
-are the plan, and no symbol in them exists yet.
+**TagLog**, **Lease**, **SessionTagger** and **HarnessRegistry** rows name what S1–S4 built;
+the two below them are the plan, and no symbol in them exists yet.
 
 | Module | Interface | Behind it | Replaces |
 |---|---|---|---|
 | **TagLog** (`extensions/lib/tag-log.ts`, built) | `TagRecord`, a typed union: `turn`, `heartbeat`, `stop`, `offset`, `swept`, `unswept`, `spawn-pending`, `spawn-settled`, `fold`, `generation`, plus `meta-other` and `unknown`; `parseTagLine(line)`; `recordOf(obj)`; `tagRecords(content)`; `currentGeneration(records)`; `sweepState(records)`; `lastOffset(records)`; `isDataRecord(r)` | shape-decided kinds, generation supersession, the sweep scan, the offset read (an offset may ride on a sweep marker) | the substring sites (R11) and the picker's private reader; `tagProvisionalFromContent`'s backward scan. Id collapse stays `dedupeClassifiedById`; `readLastMetaOffset`, `invalidateStaleSweptMarker` and `resumeClaudeLookups` stay in the daemon and now read through `tagRecords`; the writer (`appendTagFile`, the heartbeat pwrite) stays in the daemon until S3 |
 | **Lease** (`extensions/lib/lease.ts`, built) | `claimLease(file, owner, holderIsLive) → claimed \| busy`; `leaseHolder(file)`; `leaseIdentity(file)`; `unlinkLeaseIf(file, value, observed?)`; `replaceLease(file, value, owner, expected?)` | hard-link claim with one retry; content-and-inode re-prove before an unlink; rename publish | the nine R12 unlink sites. The `rebuild` mark is `replaceLease(lease, "rebuild", pid[, expected])`: the CLI passes the value it first read, the daemon's `fatalTagMutation` none; the SIGTERM of a holder stays with the callers (`forceRebuildSession`, `restartDaemon`, `takeOverLease`, `reapAndWarn`, `--stop`, `--cleanup`, `--restart`, and `runHarness` for the root file); `forceRebuildSession` still reads the lease raw where it must tell a missing file from an unreadable one |
-| **SessionTagger** (`extensions/lib/session-tagger.ts`, built; design in `docs/spec-270-session-tagger.md`) | `TaggerState` (one session's tagging state, a plain object); `World` (the port: every filesystem and clock read) with `fsWorld(now?)` as the daemon's adapter; `newTaggerState(sessionPath, tagPath)`; `resumeTagger(state, tagContent, world) → { complete, records, log }`; `stepTagger(state, world, { flush, sliceMs? }) → { records, cut, wrote, activity, log }`, composed of the exported `readSession`, `flushTurns`, `scanChildren`, which the daemon calls apart | the session read, the `claude -p` lookup queue, the child sync, the owner/fold/generation/held-turn logic, the scan pass and its slice, the resume's reseed and lookups, the swept stamp and its retraction. The tagging code reaches the filesystem and the clock only through `World`; `fsWorld`, in the same file, is the one place `fs` and `Date.now` appear. No `process`: records come back to the caller, so do log lines | the 24 module-level session bindings, `install`/`save`, `parseNewLines`, `syncSubagentTranscript` and the rest of §1's daemon-side tagging functions (the daemon's `flushPending` and `scanForSubAgents` remain as appenders around `flushTurns` and `scanChildren`); `Slot` is `{ state, pidPath, rebuildTagOnStartup, lastWriteMs, lastActivityMs, startupTime, idleStartMs, sessionExisted, displayed, checkedAtMs }` |
-| **HarnessRegistry** | `serve(file, displayed)`; `drop(key, reason)`; `move(from, to)`; `tick(now)`; `snapshot() → HandOff` | one record per session holding its `SessionTagger` state, watchers, timers, retry count, idle stamp, scan cursor | the 17 side collections; `wake`'s re-key block; `handOffLines` |
+| **SessionTagger** (`extensions/lib/session-tagger.ts`, built; design in `docs/spec-270-session-tagger.md`) | `TaggerState` (one session's tagging state, a plain object); `World` (the port: every filesystem and clock read) with `fsWorld(now?)` as the daemon's adapter; `newTaggerState(sessionPath, tagPath)`; `resumeTagger(state, tagContent, world) → { complete, records, log }`; `stepTagger(state, world, { flush, sliceMs? }) → { records, cut, wrote, activity, log }`, composed of the exported `readSession`, `flushTurns`, `scanChildren`, which the daemon calls apart | the session read, the `claude -p` lookup queue, the child sync, the owner/fold/generation/held-turn logic, the scan pass and its slice, the resume's reseed and lookups, the swept stamp and its retraction. The tagging code reaches the filesystem and the clock only through `World`; `fsWorld`, in the same file, is the one place `fs` and `Date.now` appear. No `process`: records come back to the caller, so do log lines | the 24 module-level session bindings, `install`/`save`, `parseNewLines`, `syncSubagentTranscript` and the rest of §1's daemon-side tagging functions (the daemon's `flushPending` and `scanForSubAgents` remain as appenders around `flushTurns` and `scanChildren`); `Slot` was `{ state, pidPath, rebuildTagOnStartup, lastWriteMs, lastActivityMs, startupTime, idleStartMs, sessionExisted, displayed, checkedAtMs }` until S4, and is `SessionRecord` since |
+| **HarnessRegistry** (`extensions/lib/harness-registry.ts`, built; design in `docs/spec-270-harness-registry.md`) | `Registry` (a plain value: `served`, `idle`, `retrying` maps); `SessionRecord` (the `Slot` fields plus `scanContinuing`, `flushTimer`, `unwatchedTreeScanAt`); `newRegistry()`; `newSessionRecord(path, displayed, now)`; `serve`, `get`, `move(reg, from, to)`, `drop(reg, key)`; `markIdle`, `forgetIdle`, `expiredIdle`; `beginRetry`, `retryFired`, `cancelRetry`, `retryPending`; `isEmpty`, `servedOver`, `needsDir`, `projectInUse`, `sessionDirOf`; `handOff(reg, keep, adopting?)` and `parseHandOff(text, root)` | one record per session; a move re-keys one entry with its flag and stamp and hands the flush timer back; the retry count and its pending mark; the idle stamp and signature; the hand-off's text and its parse. No `fs`, no timer, no clock: the daemon makes and clears the timers the record holds, and passes `now` | nine session-keyed collections (`harnessSlots`, `harnessFlushTimers`, `subagentScansContinuing`, `adoptionRetries`, `adoptionRetryPending`, `idleDropped`, `idleDroppedSize`, `idleDroppedAt`, `unwatchedTreeScanAt`); `wake`'s re-key block and `followMovedSession`'s marker re-key; `handOffLines`; `dirStillNeeded`, `servedSessionOver`, `freshSlot`. `harnessWatchers` and `unwatchedDirs` stay in the daemon, keyed by directory (`docs/spec-270-harness-registry.md` §4) |
 | **DaemonHealth** | `health(sessionPath, now) → { alive, idle, since, reason }` | lease read, T4 tail read, the spawn and mtime graces | the four R4 rules |
 | **CLI arms** | `runReport(opts)`, `runWatch(opts)`, `runForceRebuild(opts)`, `runDaemonCommand(opts)` | what `bin/wtft.ts` `main` does after argument parsing | the 555-line `main` |
 
@@ -193,12 +196,12 @@ first edit. Order matters: S0 is the safety net every later slice runs against.
 | **S1 TagLog** | `extensions/lib/tag-log.ts`: the typed record union and one parser; every substring site and every tail scan calls it | `tests/wtft-270-tag-log.test.ts` reads every kind; the golden suite's parsed view is unchanged before and after; #140's repro (a command mentioning `_hb`) passes |
 | **S2 Lease** | `extensions/lib/lease.ts`; the nine unlink sites call it | `tests/wtft-270-lease.test.ts`, on temp files, no daemon spawned: `claimLease` over {absent, mine, live, dead, rejected by the predicate, empty, the displaced holder seen by the predicate}; `unlinkLeaseIf` over {mismatch, match, absent, new inode, observed inode}; `replaceLease` over {unconditional, expected mismatch, expected match, absent, write failure}. Liveness is the caller's predicate, so "harness holder" is the daemon's `holderIsLiveDaemon`, tested by the process-level suites |
 | **S3 SessionTagger** (built) | `extensions/lib/session-tagger.ts` with `stepTagger` and its parts; the daemon's poll calls the parts; `Slot` holds the state value | S0 passes; `tests/wtft-270-session-tagger.test.ts` replays each fixture through `stepTagger` over the sandbox corpus and compares records to the golden tag; the cases #257 (growth after a sliced scan), #263 (move changes source), #267 A–E, G, H (lookup survives restart, held turns released) as step sequences. Design, behaviour changes and closer: `docs/spec-270-session-tagger.md` |
-| **S4 HarnessRegistry** | one record per session; `move` re-keys one entry; `snapshot` is the hand-off | `tests/wtft-270-harness-registry.test.ts`: serve → move → drop → snapshot round trip in memory; the existing 205/239/259/262 suites stay as the process-level check |
+| **S4 HarnessRegistry** (built) | `extensions/lib/harness-registry.ts`: one record per session; `move` re-keys one entry; `handOff` is the hand-off and `parseHandOff` its read | `tests/wtft-270-harness-registry.test.ts`: serve, move (#267 F), idle, retry, drop and a hand-off round trip in memory; the existing 205/239/259/262 suites stay as the process-level check. Design and closer: `docs/spec-270-harness-registry.md` |
 | **S5 DaemonHealth** | one function; CLI, `--watch`, widget and `--list` call it | `tests/wtft-270-daemon-health.test.ts`: {lease state} × {tag tail} × {age} → one answer; `wtft-179-daemon-health-reason.test.ts` unchanged |
 | **S6 CLI arms** | `bin/wtft.ts` `main` dispatches to four functions in `extensions/lib/cli/` | the existing CLI suites unchanged; `bin/wtft.ts` `main` under 80 lines |
 
 Freeze: no daemon feature lands between S0 and S4. Issues #257, #263, #266, #267 are closed by
-S3–S5, not before. S3 closes #257 and #263 and checks #267 A–E, G, H; #267 F is S4's, I and J
+S3–S5, not before. S3 closes #257 and #263 and checks #267 A–E, G, H; S4 checks #267 F; I and J
 stay on #267.
 
 ### 3c. What stays
@@ -232,6 +235,17 @@ written, unless a transcript with that source was read again in the same scan, a
 written turn; the swept-marker retraction reads the session's fixed tag
 path. `CONTEXT.md` Source and `docs/wtft-tag-format.md` `s` say the source is fixed at the
 first read.
+
+S4's decisions and roads not taken are in `docs/spec-270-harness-registry.md` §4. S4 moves
+state, not behaviour, with three exceptions, each in `docs/spec-270-harness-registry.md` §2
+and §4: the hand-off read is hardened as `parseHandOff` takes it over (a `null` line no longer
+crashes the start, a non-object line counts as unreadable, a `..` path is resolved before the
+root check); `--restart` stops, waits for and respawns only a live daemon; and a scan cut in
+the poll that detects a move continues under the new key. `--restart`'s stdout and `--help`
+wording was corrected to what it does. The
+process-level suites pass unchanged, and S4's own suite runs in memory;
+one check in it is the scan-continuation flag surviving a move (#267 F), which is now a field
+of the moved record.
 
 - **S0–S2 land on the spec branch as one PR.** Branches start only from `main` and the merge
   gate is human, so a slice cannot build on an unmerged earlier slice. S0 is the safety net

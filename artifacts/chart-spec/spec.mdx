@@ -1,0 +1,148 @@
+# Chart spec
+
+The bar chart is a frame around a per-bar painter. Binning stays in `getBinInfo`. The painter receives slots and returns one bar string. Columns, rules, ticks, and the legend stay in the frame.
+
+This page is the oracle for that split. The picker beside it draws every combination. The blocks below are five presets of the same sample, so a reader without the picker still sees the pictures.
+
+Picker: [picker.html](picker.html)
+
+<iframe src="chart-spec/picker.html" title="Chart picker" style="width:100%;height:820px;border:1px solid #444;border-radius:8px;background:#161616"></iframe>
+
+## Sample
+
+Five bins, oldest first. The chart draws newest first.
+
+| Bin | When | Turn | Cache miss | Parts |
+|---|---|---|---|---|
+| 1 | 10:00 Sep-25 | 10 | no | code $1.00 / 800 tok, web $0.40 / 0 tok |
+| 2 | 12:00 Sep-25 | 20 | no | code $2.20 / 1400 tok |
+| 3 | 18:00 Sep-25 | 30 | no | research $0.80 / 2200 tok |
+| 4 | 14:00 Sep-26 | 40 | no | plan $0.50 / 600 tok, code $3.10 / 1800 tok |
+| 5 | 15:00 Sep-26 | 100 | yes | code $1.20 / 900 tok, tests $0.70 / 400 tok |
+
+Running totals land on the newest row: $9.90 and 8.1k tokens. A category that did not grow in a bin still occupies its share of a running-total bar.
+
+Bar length is `round(row / max row × 16)` cells. A scatter mark sits at `round(category / max row × 15)`. The max is the largest row of the chosen measure, across the sample.
+
+## Encoding law
+
+A cell has two color slots.
+
+- One category in the cell is `█` in that category's foreground.
+- Two categories in the cell are `▌`. Foreground is the left category. Background is the right category.
+- A third variable, recency, uses a full-width glyph instead. `▃` is carryover. `▇` is new this bin. Half-block is not used.
+- Recency applies to a running-total bar. An incremental bar is entirely new, so recency stays off.
+- The bought painter uses `█` only. A shared cell keeps the left category. The bar stays the same width. Rules and columns do not change.
+
+## Rules
+
+A rule inserts one line on the older side of the boundary, which is where today's cache-miss line sits.
+
+- Cache miss: any interval. The line reads `Cache Miss`.
+- Date change: time interval. The line reads the older bin's date.
+- Every 10 turns, every 100 turns: turn interval. A turn that is a multiple of both draws one line, labelled `100 turns`.
+
+Today, `--no-ticks` also hides the date line. The picker can tie date lines to ticks. The proposed default leaves them independent: date lines follow a time interval.
+
+## Presets
+
+These are the existing flags. New combinations do not pick flag names here.
+
+### Cost, cumulative
+
+Stack. Bar is total latest cost. Columns are incremental cost and total latest cost. Half-block. Recency off.
+
+```
+15:00    +$1.90       $9.90  ██▌█████████████
+── Cache Miss ───────────────────────────────
+14:00    +$3.60       $8.00  ██▌██████████
+── Sep-25 ───────────────────────────────────
+18:00    +$0.80       $4.40  █▌█████
+12:00    +$2.20       $3.60  ▌█████
+10:00    +$1.40       $1.40  ▌█
+```
+
+### Cost, bucket
+
+Scatter. Bar is incremental cost. Column is incremental cost. A collision is a half-block.
+
+```
+15:00    +$1.90     █ █          
+── Cache Miss ───────────────────
+14:00    +$3.60    █          █  
+── Sep-25 ───────────────────────
+18:00    +$0.80     █            
+12:00    +$2.20           █      
+10:00    +$1.40    █ █           
+```
+
+### Tokens, cumulative
+
+Stack. Bar is total latest tokens. Columns are incremental tokens and total latest tokens. Recency on, so the glyph is `▃` or `▇` and the color is the category.
+
+```
+15:00       +1.3k          8.1k  ▃▃▃▃▃▃▃▃▃▃▃▃▃▇▇▇
+── Cache Miss ───────────────────────────────────
+14:00       +2.4k          6.8k  ▇▃▃▃▃▃▃▃▃▇▇▇▇
+── Sep-25 ───────────────────────────────────────
+18:00       +2.2k          4.4k  ▇▇▇▇▇▃▃▃▃
+12:00       +1.4k          2.2k  ▃▇▇▇
+10:00        +800           800  ▇▇
+```
+
+### Tokens, bucket
+
+Stack. Bar is incremental tokens. Column is incremental tokens. Full block. Recency off, so two categories may share a cell. This sample's token bars happen to be one category wide, so the half-block does not appear.
+
+```
+15:00       +1.3k  █████████
+── Cache Miss ──────────────
+14:00       +2.4k  ████████████████
+── Sep-25 ──────────────────
+18:00       +2.2k  ███████████████
+12:00       +1.4k  █████████
+10:00        +800  █████
+```
+
+### All four columns
+
+Same bar as cost cumulative. The row also prints incremental tokens and total latest tokens.
+
+```
+15:00    +$1.90       $9.90       +1.3k          8.1k  ██▌█████████████
+── Cache Miss ─────────────────────────────────────────────────────────
+14:00    +$3.60       $8.00       +2.4k          6.8k  ██▌██████████
+── Sep-25 ─────────────────────────────────────────────────────────────
+18:00    +$0.80       $4.40       +2.2k          4.4k  █▌█████
+12:00    +$2.20       $3.60       +1.4k          2.2k  ▌█████
+10:00    +$1.40       $1.40        +800           800  ▌█
+```
+
+## Outside this chart
+
+- The `$` cell for a web cost with zero tokens stays a wtft segment. This sample's web row has zero tokens, and the token bars simply omit it.
+- The monotonic clamp on cumulative bars stays in the quantizer. These pictures use largest-remainder into the scaled cell count.
+- Padding rows out to the limit is [https://github.com/princess-pi/wtft/issues/264](https://github.com/princess-pi/wtft/issues/264). The Pi 10-line cap is [https://github.com/princess-pi/wtft/issues/269](https://github.com/princess-pi/wtft/issues/269). Each rule line counts against that cap. The picker prints the line count.
+
+## Decisions waiting
+
+The plan's direction is A, C, E, H. The other letters are open.
+
+- **A.** Seam is a per-bar painter. The frame owns rules and columns.
+- **B.** Seam is a whole-chart swap. The bought library would own rounding, rules, and columns.
+- **C.** Date lines follow a time interval.
+- **D.** Date lines stay tied to `--ticks`, as today.
+- **E.** Second painter is `console-toolkit` (BSD-3-Clause, no runtime dependencies).
+- **F.** Second painter is `chartscii`.
+- **G.** No bought painter. A second in-repo full-block painter is enough to test the seam.
+- **H.** `--cost` and `--tokens` stay presets. New combinations wait for flag names after this picker.
+- **I.** All four columns become the default.
+
+## Phases
+
+- Picker, this page: [https://github.com/princess-pi/wtft/issues/282](https://github.com/princess-pi/wtft/issues/282)
+- Home painter extract, no new flags: [https://github.com/princess-pi/wtft/issues/283](https://github.com/princess-pi/wtft/issues/283)
+- Independent columns and bar measure: [https://github.com/princess-pi/wtft/issues/284](https://github.com/princess-pi/wtft/issues/284)
+- Second painter: [https://github.com/princess-pi/wtft/issues/285](https://github.com/princess-pi/wtft/issues/285)
+
+#283, #284, and #285 wait until the letters above are answered.

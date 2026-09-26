@@ -1718,7 +1718,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       const now = Date.now();
       const session = sessionFound ? resolvedSessionArg(pid, sessionFound) : null;
       const listed = session && getDaemonPidPath(session) === fullPath ? health(session, now) : null;
-      const since = !listed || listed.reason === "waiting-session" ? undefined
+      const since = !listed || listed.alive !== alive || listed.reason === "waiting-session" ? undefined
         : listed.idle ? listed.idleSinceMs : listed.alive ? now : listed.lastHbMs;
       if (since !== undefined) {
         const idleSec = Math.floor((now - since) / 1000);

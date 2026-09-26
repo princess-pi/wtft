@@ -86,7 +86,8 @@ Behaviour that changes, each in the direction of one rule for every reader:
   only by a live lease, polled once a second five times; with none by then, the view showed
   `starting...` for as long as it ran. Now the restart passes its time as `spawnedAt` and the
   view shows what `health` finds from the first ask; the five-poll interval is gone, and the
-  watchdog asks as it does at any other time.
+  watchdog asks as it does at any other time. `--watch` started with a daemon it just spawned
+  passes its own start time the same way.
 - **`waiting-session` in `--watch`** renders only once there are chart lines; before that
   `--watch` prints its waiting line instead.
 - **`--watch`'s idle countdown counts from `idleSinceMs` at each render**, as the widget's

@@ -797,7 +797,7 @@ export async function watchTagFile(
 
 	let daemonDead = false;
 	let daemonStatus: DaemonStatus | null = null;
-	let restartedAt: number | null = null;
+	let restartedAt: number | null = settings.daemonChild ? Date.now() : null;
 
 	const updateDaemonHealth = () => {
 		daemonStatus = health(sessionPath, Date.now(), { tagPath, spawnedAt: restartedAt });

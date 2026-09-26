@@ -200,7 +200,7 @@ first edit. Order matters: S0 is the safety net every later slice runs against.
 | **S2 Lease** | `extensions/lib/lease.ts`; the nine unlink sites call it | `tests/wtft-270-lease.test.ts`, on temp files, no daemon spawned: `claimLease` over {absent, mine, live, dead, rejected by the predicate, empty, the displaced holder seen by the predicate}; `unlinkLeaseIf` over {mismatch, match, absent, new inode, observed inode}; `replaceLease` over {unconditional, expected mismatch, expected match, absent, write failure}. Liveness is the caller's predicate, so "harness holder" is the daemon's `holderIsLiveDaemon`, tested by the process-level suites |
 | **S3 SessionTagger** (built) | `extensions/lib/session-tagger.ts` with `stepTagger` and its parts; the daemon's poll calls the parts; `Slot` holds the state value | S0 passes; `tests/wtft-270-session-tagger.test.ts` replays each fixture through `stepTagger` over the sandbox corpus and compares records to the golden tag; the cases #257 (growth after a sliced scan), #263 (move changes source), #267 A–E, G, H (lookup survives restart, held turns released) as step sequences. Design, behaviour changes and closer: `docs/spec-270-session-tagger.md` |
 | **S4 HarnessRegistry** (built) | `extensions/lib/harness-registry.ts`: one record per session; `move` re-keys one entry; `handOff` is the hand-off and `parseHandOff` its read | `tests/wtft-270-harness-registry.test.ts`: serve, move (#267 F), idle, retry, drop and a hand-off round trip in memory; the existing 205/239/259/262 suites stay as the process-level check. Design and closer: `docs/spec-270-harness-registry.md` |
-| **S5 DaemonHealth** (built) | one function; the startup wait, `--watch`, widget and `--list`'s idle column call it | `tests/wtft-270-daemon-health.test.ts`: {lease state} × {tag tail} × {age} → one answer; `wtft-179-daemon-health-reason.test.ts` unchanged. Design and closer: `docs/spec-270-daemon-health.md` |
+| **S5 DaemonHealth** (built) | one function; the startup wait, `--watch`, widget and `--list`'s idle column call it | `tests/wtft-270-daemon-health.test.ts`: hand-picked points along {lease state}, {tag tail}, {age} and {session file}, each → one answer; `wtft-179-daemon-health-reason.test.ts` unchanged. Design and closer: `docs/spec-270-daemon-health.md` |
 | **S6 CLI arms** | `bin/wtft.ts` `main` dispatches to four functions in `extensions/lib/cli/` | the existing CLI suites unchanged; `bin/wtft.ts` `main` under 80 lines |
 
 Freeze: no daemon feature lands between S0 and S4. The plan named #257, #263, #266 and #267 to
@@ -253,7 +253,7 @@ of the moved record.
 
 S5's decisions and roads not taken are in `docs/spec-270-daemon-health.md` §4. It changes what
 a reader shows, each change listed in its §2: the 2 s tag-write grace answers `starting` for every reader, and
-the 5 s spawn grace, for a caller that passes its spawn time (the widget, `--watch` after `r`),
+the 5 s spawn grace, for a caller that passes its spawn time (the widget, and `--watch` after its own spawn or `r`),
 answers `starting` or `waiting-session`; neither reports the daemon alive. `waiting-session` for a
 live holder comes from `health`, so `--watch` shows it. `--watch`'s restart shows what `health`
 finds from the first ask, rather than `starting...` for as long as it runs. And

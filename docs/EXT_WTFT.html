@@ -287,7 +287,7 @@
             <li><span style="color: #da0;">● idle (cache expires in 3min)</span> — no new data for 2m2s; the minutes left before the model's prompt cache expires (the turn's own 1h or 5m TTL when the tag records one, else a guess from the model name)</li>
             <li><span style="color: #da0;">● idle (cache emptied)</span> — that cache window has passed</li>
             <li><span style="color: #da0;">● idle (local model)</span> — idle, and the model has no remote cache or no model is known</li>
-            <li><span style="color: #da0;">● starting...</span> — no live lease holder yet: within 5 s of the caller's own spawn or restart (with a session file), or within 2 s of the last write to a non-empty tag</li>
+            <li><span style="color: #da0;">● starting...</span> — no live lease holder yet: within 5 s of the widget's or <code>--watch</code>'s own spawn, or of <code>r</code> (with a session file), or within 2 s of the last write to a non-empty tag</li>
             <li><span style="color: #da0;">● waiting for session .jsonl...</span> — the session file does not exist yet, and a live process holds the lease or the caller spawned one under 5 s ago</li>
             <li><span style="color: #d44;">● stopped HH:MM</span> — no live lease holder; HH:MM is the last heartbeat carrying a <code>last</code> time in the tag's last 8 KiB</li>
             <li><span style="color: #d44;">● daemon not found</span> — no live lease holder and no such heartbeat</li>

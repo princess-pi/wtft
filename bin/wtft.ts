@@ -597,7 +597,7 @@ async function main() {
 		}[how as "rebuild" | "stopped" | "deleted"];
 		// Nothing rebuilt: an error, with no report of the tag as it was.
 		if (how === "busy") {
-			console.error(`❌ Force re-parse: a log parser daemon for ${path.basename(finalSessionPath)} did not stop within 2 s, or another took the session meanwhile, so nothing was deleted. Run -F again once it has stopped.`);
+			console.error(`❌ Force re-parse: a log parser daemon for ${path.basename(finalSessionPath)} did not stop within 2 s, or its lease changed or was released meanwhile, so nothing was deleted. Run -F again once it has stopped.`);
 			process.exit(1);
 		}
 		const failure = describeForceRebuildFailure(how);

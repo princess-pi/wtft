@@ -113,7 +113,7 @@ The daemon writes one interaction line per classified turn. Fields:
 | `t` | number | **required** | Unix timestamp in milliseconds |
 | `c` | number | **required** | Cost in USD, rounded to 6 decimal places |
 | `cat` | string | **always written** | Pre-classified interaction category (see §3); a reader accepts its absence as undefined |
-| `f` | array | **always written** | Files touched: `[{p: string, a: "w"\|"r"}, ...]`; absent reads as `[]`, present but not an array makes the line no turn (`unknown`, §2f) |
+| `f` | array | **always written** | Files touched: `[{p: string, a: "w"\|"r"}, ...]`; absent reads as `[]`, present but not an array makes the line no turn (`unknown`, §2f); a non-object entry is dropped and a non-string `p` reads as empty |
 | `cmd` | array | **always written** | Shell commands run during the turn; absent reads as `[]`, not an array makes the line no turn, non-string entries are dropped |
 | `id` | string | optional | Message ID — present when the harness provided one; used for cross-run dedup (§4) |
 | `m` | string | optional | Model name |

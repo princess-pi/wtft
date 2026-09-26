@@ -190,7 +190,7 @@ retired in `@4`.
 - **1** — error: no session found or selected, an invalid path, a daemon that
   could not be spawned or that died before producing data, a refused flag
   (`--pager`), `--stop` unable to drop a session, `-F` unable to rebuild (a daemon that did not
-  stop, a session another daemon claimed, a lease that could not be read, a rebuild lease that
+  stop, a lease that changed or was released meanwhile, a lease that could not be read, a rebuild lease that
   could not be written, a daemon that could not be signalled, a lease or tag file that could not be deleted, a daemon that could not be
   started, or a harness that did not take the session up within
   10 s), `--list`/`--cleanup`/`--restart`/`--stop`
@@ -329,9 +329,10 @@ rows' summed cost and how many were unreadable. Pi sessions are not listed yet
 [`docs/spec-128-unrecorded-spawns.md`](./docs/spec-128-unrecorded-spawns.md).
 
 `--pager` is a Pi TUI overlay, not a CLI flag — the CLI says so and exits 1,
-suggesting `wtft … | less -R`. Any `wtft` run that produces a report spawns the log
-parser daemon if one is not already holding the session's lease, and the daemon
-revives after an idle timeout when that process exited. A session under the Claude
+suggesting `wtft … | less -R`. Any `wtft` run that produces a report spawns a log
+parser daemon; the new one exits at once when any live process holds the session's lease, and
+exits 1 on a lease it cannot read, so the daemon revives after an idle timeout when the
+previous process exited. A session under the Claude
 projects directory or the Pi sessions directory is served by that directory's one
 daemon, and an idle session there is dropped while the process stays up; the process
 stops once it has served nothing for 24h. A session

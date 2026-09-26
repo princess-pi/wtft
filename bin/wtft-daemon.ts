@@ -3010,9 +3010,15 @@ if (showList || showCleanup || showRestart || stopSession) {
     // A newer build serving this session keeps it.
     if (newer.length > 0 && liveDaemonOrUnknown(Number(leaseHolder(pidPath)))) process.exit(0);
     if (older.length > 0) {
-      // Honor an existing rebuild lease before version-takeover claim.
-      if (leaseHolder(pidPath) === "rebuild") rebuildTagOnStartup = true;
-      replaceLease(String(process.pid));
+      // Honor an existing rebuild lease before version-takeover claim: replace
+      // only the value read, and on a miss read once more so a token written
+      // meanwhile is honoured, not consumed.
+      let holder = leaseHolder(pidPath);
+      if (!publishLease(pidPath, String(process.pid), String(process.pid), holder)) {
+        holder = leaseHolder(pidPath);
+        replaceLease(String(process.pid));
+      }
+      if (holder === "rebuild") rebuildTagOnStartup = true;
       claimedByTakeover = true;
     }
   } catch (e) {

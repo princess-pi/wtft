@@ -1,8 +1,10 @@
 # wtft Tag File Format
 
 > **Authoritative source:** `serializeClassified()` and `classifiedToInteraction()` in
-> `extensions/lib/wtft-daemon-lib.ts`. This document must stay in sync with both functions.
-> `tests/wtft-tag-format.test.ts` gates the round-trip contract.
+> `extensions/lib/wtft-daemon-lib.ts` for the interaction line, and `recordOf()` in
+> `extensions/lib/tag-log.ts` for every record kind. This document must stay in sync with
+> them. `tests/wtft-tag-format.test.ts` gates the round-trip contract and
+> `tests/wtft-270-tag-log.test.ts` the record kinds.
 
 ---
 
@@ -243,6 +245,11 @@ A bump to `WTFT_TAGGER_VERSION` signals that stale tags must be re-parsed.
 ---
 
 ## 6. Reader contract summary
+
+`tagRecords()` in `extensions/lib/tag-log.ts` is the one reader: it decides each line's kind by
+its shape, never by substring, so a turn whose command or file path is the text `_hb` or
+`_meta` is a turn (#140). Every wtft reader goes through it; a third-party reader follows the
+steps below.
 
 1. Open the file at the expected version path (§1).
 2. Drop every line that carries a source (`s` on an interaction line, `_fold.s` on a fold

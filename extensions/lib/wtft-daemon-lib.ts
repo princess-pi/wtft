@@ -16,6 +16,7 @@ import { splitOverheadCost, isModelTagged } from "./wtft-parser.js";
 import { getDiscoveries } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.js";
 import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
+import { tagRecords, currentGeneration, sweepState, isDataRecord, type TagRecord } from "./tag-log.js";
 export interface WatchSettings {
 	interval: string;
 	limit: number;
@@ -195,39 +196,10 @@ export function tagProvisionalFromContent(tagPath: string, content: string): Tag
 	}
 	if (!content) return { provisional: false, reason: null };
 
-	const lines = content.split("\n");
-
-	let hasClassified = false;
-	for (const line of lines) {
-		if (!line.trim()) continue;
-		try {
-			const obj = JSON.parse(line);
-			if (obj._hb || obj._meta) continue;
-			hasClassified = true;
-			break;
-		} catch { continue; }
-	}
-	if (!hasClassified) return { provisional: false, reason: null };
-
-	for (let i = lines.length - 1; i >= 0; i--) {
-		const line = lines[i];
-		if (!line.trim()) continue;
-		try {
-			const obj = JSON.parse(line);
-			if (obj._hb) continue;
-			if (obj._meta) {
-				if (typeof obj._meta.unswept === "number") {
-					return { provisional: true, reason: "unswept" };
-				}
-				if (typeof obj._meta.swept === "number") {
-					return { provisional: false, reason: null };
-				}
-				continue; // an offset line, or a marker shape this writer never emits
-			}
-			return { provisional: true, reason: "unswept" };
-		} catch { continue; }
-	}
-	return { provisional: true, reason: "unswept" };
+	const records = tagRecords(content);
+	// Nothing but markers and heartbeats: no total was produced to doubt.
+	if (!records.some(r => isDataRecord(r) || r.kind === "unknown")) return { provisional: false, reason: null };
+	return sweepState(records) === "swept" ? { provisional: false, reason: null } : { provisional: true, reason: "unswept" };
 }
 
 export function readTagFileWithVerdict(tagPath: string): {
@@ -240,7 +212,7 @@ export function readTagFileWithVerdict(tagPath: string): {
 	try {
 		content = fs.readFileSync(tagPath, "utf8");
 	} catch { /* missing or unreadable — every part handles "" */ }
-	const records = currentGenerationRecords(content);
+	const records = currentGeneration(tagRecords(content));
 	return {
 		interactions: interactionsFromRecords(records),
 		provisional: tagProvisionalFromContent(tagPath, content),
@@ -285,58 +257,24 @@ export function generationRecordLine(source: string, session: string): string {
 	return JSON.stringify({ _gen: { s: source, session } }) + "\n";
 }
 
-/** Every parsed line of a tag, minus those a later `_gen` record for the same
- *  source superseded. A line with no `s` belongs to the tag's own session and
- *  is never superseded. */
-export function currentGenerationRecords(content: string): any[] {
-	const records: any[] = [];
-	const lastGenAt = new Map<string, number>();
-	for (const line of content.split("\n")) {
-		if (!line.trim()) continue;
-		let obj: any;
-		try { obj = JSON.parse(line); } catch { continue; }
-		if (!obj || typeof obj !== "object") continue;
-		const gen = obj._gen?.s;
-		if (typeof gen === "string") lastGenAt.set(gen, records.length);
-		records.push(obj);
-	}
-	if (lastGenAt.size === 0) return records;
-	return records.filter((obj, at) => {
-		const s = obj._fold ? obj._fold.s : obj.s;
-		if (typeof s !== "string") return true;
-		const genAt = lastGenAt.get(s);
-		return genAt === undefined || at > genAt;
-	});
-}
-
-function foldedIdsFromRecords(records: any[]): Set<string> {
+function foldedIdsFromRecords(records: TagRecord[]): Set<string> {
 	const ids = new Set<string>();
-	for (const obj of records) {
-		const child = obj._fold?.child;
-		if (typeof child === "string" && child) ids.add(child);
-	}
+	for (const r of records) if (r.kind === "fold") ids.add(r.child);
 	return ids;
 }
 
-function interactionsFromRecords(records: any[]): Interaction[] {
+function interactionsFromRecords(records: TagRecord[]): Interaction[] {
 	const interactions: Interaction[] = [];
-	for (const obj of records) {
-		if (obj._hb) continue;
-		try {
-			const interaction = classifiedToInteraction(obj);
-			if (interaction) interactions.push(interaction);
-		} catch {
-		}
-	}
+	for (const r of records) if (r.kind === "turn") interactions.push(r.interaction);
 	return dedupeClassifiedById(interactions);
 }
 
 export function foldedSessionIdsFromContent(content: string): Set<string> {
-	return foldedIdsFromRecords(currentGenerationRecords(content));
+	return foldedIdsFromRecords(currentGeneration(tagRecords(content)));
 }
 
 export function classifiedInteractionsFromContent(content: string): Interaction[] {
-	return interactionsFromRecords(currentGenerationRecords(content));
+	return interactionsFromRecords(currentGeneration(tagRecords(content)));
 }
 
 export function readClassifiedTagFile(tagPath: string): Interaction[] {
@@ -422,7 +360,7 @@ function appendedGeneration(tagPath: string, offset: number, size: number): bool
 		const buf = Buffer.alloc(size - offset);
 		const read = fs.readSync(fd, buf, 0, buf.length, offset);
 		// A short read leaves the tail zero-filled: reseed rather than miss a record.
-		return read < buf.length || buf.subarray(0, read).includes('"_gen"');
+		return read < buf.length || tagRecords(buf.subarray(0, read).toString("utf8")).some(r => r.kind === "generation");
 	} finally {
 		fs.closeSync(fd);
 	}
@@ -823,33 +761,28 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 				const buf = Buffer.alloc(Math.min(stat.size, 8192));
 				fs.readSync(fd, buf, 0, buf.length, Math.max(0, stat.size - 8192));
 				fs.closeSync(fd);
-				const lines = buf.toString("utf8").split("\n");
+				const records = tagRecords(buf.toString("utf8"));
 				let lastModel: string | undefined;
 				let lastTtl: "1h" | "5m" | undefined;
 				let idleMs: number | undefined;
 				let idleSinceMs: number | undefined;
 				let sawClassified = false;
-				for (let i = lines.length - 1; i >= 0; i--) {
-					const line = lines[i].trim();
-					if (!line) continue;
-					try {
-						const obj = JSON.parse(line);
-						if (!lastModel && obj.m) lastModel = obj.m;
-						if (!lastTtl && (obj.ttl === "1h" || obj.ttl === "5m")) lastTtl = obj.ttl;
-						if (obj._hb) {
-							if (typeof obj._hb === "object" && obj._hb.first && idleSinceMs === undefined && !sawClassified) {
-								idleSinceMs = obj._hb.first;
-							}
-							continue;
-						}
-						if (!sawClassified) {
-							sawClassified = true;
-							if (typeof obj.t === "number" && idleSinceMs !== undefined && obj.t > idleSinceMs) {
-								idleSinceMs = obj.t;
-							}
-						}
-						if (lastModel && lastTtl) break;
-					} catch { continue; }
+				for (let i = records.length - 1; i >= 0; i--) {
+					const r = records[i];
+					if (r.kind === "heartbeat") {
+						if (r.first && idleSinceMs === undefined && !sawClassified) idleSinceMs = r.first;
+						continue;
+					}
+					if (r.kind === "stop") continue;
+					if (r.kind === "turn") {
+						if (!lastModel && r.interaction.model) lastModel = r.interaction.model;
+						if (!lastTtl && r.interaction.cacheTtl) lastTtl = r.interaction.cacheTtl;
+					}
+					if (!sawClassified) {
+						sawClassified = true;
+						if (r.kind === "turn" && idleSinceMs !== undefined && r.interaction.timestamp > idleSinceMs) idleSinceMs = r.interaction.timestamp;
+					}
+					if (lastModel && lastTtl) break;
 				}
 				if (idleSinceMs !== undefined) idleMs = Date.now() - idleSinceMs;
 				if (idleMs !== undefined && idleMs >= IDLE_THRESHOLD_MS) {
@@ -885,17 +818,10 @@ export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonS
 		const buf = Buffer.alloc(stat.size - readStart);
 		fs.readSync(fd, buf, 0, buf.length, readStart);
 		fs.closeSync(fd);
-		const lines = buf.toString("utf8").split("\n");
-		for (let i = lines.length - 1; i >= 0; i--) {
-			const line = lines[i].trim();
-			if (!line) continue;
-			try {
-				const obj = JSON.parse(line);
-				if (obj._hb && obj._hb.last) {
-					lastHbMs = obj._hb.last;
-					break;
-				}
-			} catch {}
+		const records = tagRecords(buf.toString("utf8"));
+		for (let i = records.length - 1; i >= 0; i--) {
+			const r = records[i];
+			if (r.kind === "heartbeat" && r.last) { lastHbMs = r.last; break; }
 		}
 	} catch {}
 

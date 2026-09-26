@@ -7,6 +7,7 @@ import * as os from "node:os";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { projectsDir } from "../extensions/lib/harness/claude-code/discovery.js";
+import { tagRecords, parseTagLine, lastOffset, isDataRecord } from "../extensions/lib/tag-log.js";
 import {
 	parseEntryToInteraction,
 	parseSessionFile,
@@ -200,12 +201,7 @@ function upsertHeartbeat(now: number) {
       if (size - lineStart === hbBuf.length) {
         const lineBuf = Buffer.alloc(hbBuf.length);
         fs.readSync(fd, lineBuf, 0, lineBuf.length, lineStart);
-        let isHb = false;
-        try {
-          const obj = JSON.parse(lineBuf.toString("utf8").trim());
-          isHb = obj !== null && typeof obj === "object" && typeof obj._hb === "object" && obj._hb !== null;
-        } catch (_) { /* not a heartbeat we can recognise — append beside it */ }
-        if (isHb) {
+        if (parseTagLine(lineBuf.toString("utf8"))?.kind === "heartbeat") {
           fs.writeSync(fd, hbBuf, 0, hbBuf.length, lineStart);
           return;
         }
@@ -339,20 +335,10 @@ function resumeClaudeLookups(tagContent: string) {
   const open = new Map<string, { at: number; commands: string[] }>();
   const settledChildren: string[] = [];
   const readSources = new Set<string>();
-  for (const line of tagContent.split("\n")) {
-    if (line.includes('"_gen"')) {
-      try { const s = JSON.parse(line)._gen?.s; if (typeof s === "string") readSources.add(s); } catch { /* skip */ }
-      continue;
-    }
-    if (!line.includes('"spawnPending"') && !line.includes('"spawnSettled"')) continue;
-    let meta: { spawnPending?: { key?: unknown; at?: unknown; commands?: unknown }; spawnSettled?: unknown; children?: unknown } | undefined;
-    try { meta = JSON.parse(line)._meta; } catch { continue; }
-    if (Array.isArray(meta?.children)) settledChildren.push(...meta.children.filter((c): c is string => typeof c === "string"));
-    const p = meta?.spawnPending;
-    if (p && typeof p.key === "string" && typeof p.at === "number" && Array.isArray(p.commands)) {
-      open.set(p.key, { at: p.at, commands: p.commands.filter((c): c is string => typeof c === "string") });
-    }
-    if (typeof meta?.spawnSettled === "string") open.delete(meta.spawnSettled);
+  for (const r of tagRecords(tagContent)) {
+    if (r.kind === "generation") readSources.add(r.source);
+    else if (r.kind === "spawn-pending") open.set(r.key, { at: r.at, commands: r.commands });
+    else if (r.kind === "spawn-settled") { settledChildren.push(...r.children); open.delete(r.key); }
   }
   // A child a settled lookup found that no earlier life read.
   for (const file of settledChildren) {
@@ -1151,27 +1137,18 @@ function parseNewLines(filePath: string) {
 function invalidateStaleSweptMarker(filePath: string) {
   try {
     const tagPath = getCurrentVersionTagPath(filePath);
-    const lines = fs.readFileSync(tagPath, "utf8").split("\n");
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      let obj: Record<string, unknown> | null = null;
-      try {
-        obj = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      // Same backward scan as tagProvisionalFromContent: pass hb/offset; retract swept; stop on classified.
-      if (obj?.["_hb"]) continue;
-      const meta = (obj?.["_meta"] ?? {}) as Record<string, unknown>;
-      if (typeof meta.unswept === "number") return;
-      if (typeof meta.swept === "number") {
+    const records = tagRecords(fs.readFileSync(tagPath, "utf8"));
+    // The same backward scan as sweepState: markers and heartbeats are passed
+    // over, a swept marker is retracted, a data record ends the search.
+    for (let i = records.length - 1; i >= 0; i--) {
+      const r = records[i];
+      if (r.kind === "unswept") return;
+      if (r.kind === "swept") {
         appendTagFile(tagPath, JSON.stringify({ _meta: { unswept: Date.now() } }) + "\n");
         sweptRetracted = true;
         return;
       }
-      if (obj?.["_meta"]) continue;
-      return;
+      if (isDataRecord(r) || r.kind === "unknown") return;
     }
   } catch {
   }
@@ -1189,17 +1166,7 @@ function readLastMetaOffset(tagPath: string): number | null {
     const buf = Buffer.alloc(stat.size - readStart);
     fs.readSync(fd, buf, 0, buf.length, readStart);
     fs.closeSync(fd);
-    const lines = buf.toString("utf8").split("\n");
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      try {
-        const obj = JSON.parse(line);
-        if (obj._meta && typeof obj._meta.offset === "number") {
-          return obj._meta.offset;
-        }
-      } catch { continue; }
-    }
+    return lastOffset(tagRecords(buf.toString("utf8")));
   } catch { /* tag file unreadable */ }
   return null;
 }
@@ -1234,12 +1201,9 @@ function sessionWasEverParsed(sessionCmdlinePath: string): boolean {
     for (const f of fs.readdirSync(tagsDir)) {
       if (!f.startsWith(prefix)) continue;
       const content = fs.readFileSync(path.join(tagsDir, f), "utf8");
-      for (const line of content.split("\n")) {
-        if (!line.trim()) continue;
-        try {
-          const o = JSON.parse(line);
-          if (o.cat !== undefined || o._meta !== undefined) return true;
-        } catch (_) {}
+      for (const r of tagRecords(content)) {
+        if (r.kind === "turn" || r.kind === "offset" || r.kind === "swept" || r.kind === "unswept"
+          || r.kind === "spawn-pending" || r.kind === "spawn-settled" || r.kind === "meta-other") return true;
       }
     }
   } catch (_) {}
@@ -1351,8 +1315,9 @@ function reapAndWarn() {
           const stat = fs.statSync(tagFound);
           const content = fs.readFileSync(tagFound, "utf8");
           const lines = content.trim().split("\n");
-          const hbLines = lines.filter(l => l.includes('"_hb"') && !l.includes('"stop"'));
-          const hbRatio = lines.length > 0 ? hbLines.length / lines.length : 0;
+          const records = tagRecords(content);
+          const heartbeats = records.filter(r => r.kind === "heartbeat");
+          const hbRatio = lines.length > 0 ? heartbeats.length / lines.length : 0;
 
           if (stat.size > TAG_SIZE_WARN) {
             const mb = (stat.size / (1024 * 1024)).toFixed(1);
@@ -1361,23 +1326,14 @@ function reapAndWarn() {
 
           if (lines.length > 10 && hbRatio >= HB_RATIO_WARN) {
             const pct = Math.round(hbRatio * 100);
-            findings.push(`${pct}% heartbeats (${hbLines.length}/${lines.length} lines) — possible malfunction — ${tagFound}`);
+            findings.push(`${pct}% heartbeats (${heartbeats.length}/${lines.length} lines) — possible malfunction — ${tagFound}`);
           }
 
-          const hasInteractions = lines.some(l => {
-            try { const o = JSON.parse(l.trim()); return o.cat !== undefined; } catch { return false; }
-          });
-          if (!hasInteractions) {
-            const firstHb = hbLines[0];
-            if (firstHb) {
-              try {
-                const hb = JSON.parse(firstHb);
-                const startTime = hb._hb?.first;
-                if (startTime && (Date.now() - startTime) > ZERO_INTERACTIONS_AGE) {
-                  const ageH = Math.round((Date.now() - startTime) / 3600000);
-                  findings.push(`${ageH}h old with zero real interactions — zombie daemon? — ${sessionFound}`);
-                }
-              } catch (_) {}
+          if (!records.some(r => r.kind === "turn")) {
+            const startTime = heartbeats[0]?.first;
+            if (startTime && (Date.now() - startTime) > ZERO_INTERACTIONS_AGE) {
+              const ageH = Math.round((Date.now() - startTime) / 3600000);
+              findings.push(`${ageH}h old with zero real interactions — zombie daemon? — ${sessionFound}`);
             }
           }
         } catch (_) {}
@@ -1436,16 +1392,12 @@ function reseedClaudeChildren(tagContent: string, quiet = false): boolean {
   /** Child session id to the source of the transcript folding it, as of the
    *  last generation of that source: a `_gen` retires its earlier folds. */
   const foldedBy = new Map<string, string>();
-  for (const line of tagContent.split("\n")) {
-    if (!line.includes('"_gen"') && !line.includes('"_fold"')) continue;
-    let obj: { _gen?: { s?: unknown; session?: unknown }; _fold?: { child?: unknown; s?: unknown } };
-    try { obj = JSON.parse(line); } catch { continue; }
-    const gen = obj._gen;
-    if (typeof gen?.s === "string" && typeof gen.session === "string") {
-      children.set(gen.s, gen.session);
-      for (const [child, holder] of [...foldedBy]) if (holder === gen.s) foldedBy.delete(child);
+  for (const r of tagRecords(tagContent)) {
+    if (r.kind === "generation" && r.session !== undefined) {
+      children.set(r.source, r.session);
+      for (const [child, holder] of [...foldedBy]) if (holder === r.source) foldedBy.delete(child);
     }
-    if (typeof obj._fold?.child === "string" && typeof obj._fold.s === "string") foldedBy.set(obj._fold.child, obj._fold.s);
+    if (r.kind === "fold" && r.source !== undefined) foldedBy.set(r.child, r.source);
   }
   if (children.size === 0) return true;
   let complete = true;
@@ -1503,7 +1455,7 @@ function initClassified() {
     try {
       fs.accessSync(tagPath);
       const tagContent = fs.readFileSync(tagPath, "utf8");
-      const hasData = tagContent.split("\n").some(l => l.trim() && !l.includes('"_hb"') && !l.includes('"_meta"'));
+      const hasData = tagRecords(tagContent).some(r => isDataRecord(r) || r.kind === "unknown");
       if (hasData) {
         const metaOffset = readLastMetaOffset(tagPath);
         if (metaOffset !== null) {

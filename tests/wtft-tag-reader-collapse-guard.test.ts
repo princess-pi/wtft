@@ -28,10 +28,6 @@ const ALLOWED: Record<string, string> = {
 	// (filed as #454) — no longer needs an allowlist entry.
 	// Tag WRITER: reads only `_meta.offset` via readLastMetaOffset; sums nothing.
 	"bin/wtft-daemon.ts": "tag WRITER; reads only _meta.offset, sums nothing",
-	// Hand-rolled collapse, pinned value-for-value by
-	// tests/wtft-270-session-summary-dedup.test.ts.
-	"extensions/lib/session-selector.ts":
-		"hand-rolled collapse, pinned by tests/wtft-270-session-summary-dedup.test.ts",
 	// Resolves getTagPath purely to hand it to checkDaemonHealth (liveness by
 	// mtime/PID). Reads no tag CONTENT and sums nothing.
 	"extensions/lib/wtft-cli-shared.ts": "tag path used for daemon health only; reads no tag content",

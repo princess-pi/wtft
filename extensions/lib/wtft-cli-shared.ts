@@ -310,7 +310,6 @@ export function spawnWtftDaemon(sessionPath: string, daemonDir: string): ChildPr
 
 let _daemonSessionPath: string | null = null;
 let _daemonSpawned = false;
-let _daemonSpawnedAt = 0; // Date.now() when the last spawn was attempted
 
 export function ensureDaemonRunning(sessionPath: string, daemonDir: string): boolean {
 	if (_daemonSpawned && _daemonSessionPath === sessionPath) {
@@ -321,7 +320,6 @@ export function ensureDaemonRunning(sessionPath: string, daemonDir: string): boo
 	const child = spawnWtftDaemon(sessionPath, daemonDir);
 	if (child) {
 		_daemonSpawned = true;
-		_daemonSpawnedAt = Date.now();
 		_daemonSessionPath = sessionPath;
 		return true;
 	}
@@ -330,7 +328,7 @@ export function ensureDaemonRunning(sessionPath: string, daemonDir: string): boo
 
 export function getDaemonStatus(sessionPath: string): DaemonStatus {
 	if (!_daemonSessionPath) return { alive: false, reason: "not-started" };
-	return health(sessionPath, Date.now(), { spawnedAt: _daemonSpawned && _daemonSessionPath === sessionPath ? _daemonSpawnedAt : null });
+	return health(sessionPath, Date.now());
 }
 
 // ---

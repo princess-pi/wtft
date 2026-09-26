@@ -9,7 +9,7 @@ import * as path from "node:path";
 import { spawn } from "node:child_process";
 import { claimLeaseForChild } from "../extensions/lib/lease.ts";
 import { spawnWtftDaemon } from "../extensions/lib/wtft-cli-shared.ts";
-import { getDaemonPidPath } from "../extensions/lib/wtft-daemon-lib.ts";
+import { getDaemonPidPath, restartDaemon } from "../extensions/lib/wtft-daemon-lib.ts";
 import { isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("spawner-claims-lease-281");
@@ -124,6 +124,41 @@ console.log("\nC3. a harness start that finds a live harness leaves the lease na
 	check(atExit === String(harnessPid), `C3 with the harness stopped, the second start's exit leaves session B's lease naming the harness (${harnessPid}), not the exited start (${secondPid}); read ${JSON.stringify(atExit)}`);
 	try { process.kill(harnessPid, "SIGCONT"); process.kill(harnessPid, "SIGTERM"); } catch {}
 	await new Promise(r => setTimeout(r, 300));
+}
+
+console.log("\nC4. restartDaemon waits for the old per-session daemon, then spawns and claims");
+{
+	const log = path.join(dir, "c4-log.jsonl");
+	const script = path.join(dir, "c4-daemon.mjs");
+	fs.writeFileSync(script,
+		"import * as fs from 'node:fs';\n" +
+		"const note = (e) => fs.appendFileSync(process.env.WTFT281_LOG, JSON.stringify({ pid: process.pid, e, t: performance.timeOrigin + performance.now() }) + '\\n');\n" +
+		"note('start');\n" +
+		"process.on('SIGTERM', () => setTimeout(() => { note('exit'); process.exit(0); }, 300));\n" +
+		"setTimeout(() => {}, 10000);\n");
+	process.env.WTFT281_LOG = log;
+	const session = path.join(dir, "c4-session.jsonl");
+	fs.writeFileSync(session, "");
+	const lease = getDaemonPidPath(session);
+	const old = spawn(process.execPath, [script, "--session", session], { stdio: "ignore", detached: true });
+	old.unref();
+	fs.writeFileSync(lease, String(old.pid));
+	for (let i = 0; i < 100 && !fs.existsSync(log); i++) await new Promise(r => setTimeout(r, 20));
+	check(fs.existsSync(log), "C4 precondition: the old stand-in is running");
+	check(restartDaemon(session, script), "C4 restartDaemon reports a spawn");
+	let leaseNow = ""; try { leaseNow = fs.readFileSync(lease, "utf8").trim(); } catch { /* no lease */ }
+	for (let i = 0; i < 100; i++) {
+		const n = fs.readFileSync(log, "utf8").trim().split("\n").length;
+		if (n >= 3) break;
+		await new Promise(r => setTimeout(r, 20));
+	}
+	const events = fs.readFileSync(log, "utf8").trim().split("\n").map(l => JSON.parse(l));
+	const oldExit = events.find(e => e.pid === old.pid && e.e === "exit");
+	const newStart = events.find(e => e.pid !== old.pid && e.e === "start");
+	check(oldExit !== undefined, "C4 the old daemon exited");
+	check(newStart !== undefined && oldExit !== undefined && newStart.t >= oldExit.t, "C4 the new daemon started only after the old one exited");
+	check(newStart !== undefined && leaseNow === String(newStart.pid), "C4 the lease names the new daemon when restartDaemon returns");
+	if (newStart) try { process.kill(newStart.pid, "SIGKILL"); } catch {}
 }
 
 fs.rmSync(dir, { recursive: true, force: true });

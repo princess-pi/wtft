@@ -194,8 +194,10 @@ function scanForSubAgents() {
     slot.idleStartMs = 0;
   }
   if (!scan.cut) return;
-  const owner = get(registry, path.resolve(slot.state.sessionPath));
-  if (!owner || owner.scanContinuing) return;
+  // The record in hand, not a lookup: in the poll that detects a move the
+  // registry still keys it by the old path until wake re-keys it.
+  const owner = slot;
+  if (owner.scanContinuing) return;
   owner.scanContinuing = true;
   const next = () => {
     // The record may have moved since the cut; the flag travels with it.
@@ -1667,7 +1669,9 @@ if (showList || showCleanup || showRestart || stopSession) {
           child.unref();
         } catch (_2) {}
       }
-      console.log(sessionFound ? `Restarted: PID ${pid} → fresh daemon for ${sessionFound}` : `Removed lease: PID ${pid} — dead, or no --session to respawn`);
+      console.log(sessionFound ? `Restarted: PID ${pid} → fresh daemon for ${sessionFound}`
+        : alive && procIsDaemon(pid) ? `Stopped: PID ${pid} — no --session to respawn (#274)`
+        : `Removed lease: PID ${pid} — not a live daemon`);
       found++;
       continue;
     }
@@ -1756,7 +1760,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         waitUntilExited(pid);
       }
       unlinkIfNames(fullPath, pid);
-      console.log(live ? `Stopped: PID ${pid} — harness ${pidFile}; the next wtft starts it again` : `Removed root pid file: PID ${pid} — dead, harness ${pidFile}`);
+      console.log(live ? `Stopped: PID ${pid} — harness ${pidFile}; the next wtft starts it again` : `Removed root pid file: PID ${pid} — not a live daemon, harness ${pidFile}`);
       found++;
     }
     console.log(`${found} daemon(s) handled: restarted, stopped, or lease removed, as each line says.`);

@@ -14,7 +14,7 @@ collections keyed by session path — `harnessSlots`, `harnessFlushTimers`,
 `idleDroppedSize`, `idleDroppedAt`, `unwatchedTreeScanAt` — plus the `Slot` each holds. A
 session move re-keys some of them by hand in `wake` (the slot, the scan-continuation marker,
 the flush timer) and in `followMovedSession` (the marker again); `dropHarnessSlot` deletes from
-five. `handOffLines` reads four of them to write the hand-off. Each collection is one more
+five. `handOffLines` reads five of them to write the hand-off. Each collection is one more
 place a move or a drop can miss; #267 F (the scan-continuation marker re-keyed on a move) is
 the check nobody could write because the marker lived in a set the daemon re-keyed in prose.
 
@@ -94,9 +94,11 @@ field; §4), the hand-off file I/O (`persistHandOff`, `writeServedHandOff`,
 The process-level suites (`tests/wtft-205-*`, `wtft-239-harness-lifecycle`,
 `wtft-259-daemon-correctness`, `wtft-262-daemon-gaps`) pass unchanged; they are the closer
 that the daemon still behaves. Nothing about when a session is adopted, dropped, retried,
-handed on or forgotten changes; only where the daemon keeps that. The one behaviour change is
-the hand-off read, hardened as `parseHandOff` took it over (§4); the reconcile also reworded
-`--restart`'s stdout lines and `--help` text, which said restarts that did not happen.
+handed on or forgotten changes; only where the daemon keeps that. Two hardenings came with the move (§4):
+the hand-off read, as `parseHandOff` took it over, and `--restart`'s harness loop waiting only
+for a live daemon; the reconcile also reworded `--restart`'s stdout lines and `--help` text,
+which said restarts that did not happen. A scan cut in the poll that detects a move continues
+under the new key: the continuation holds the record, not a lookup by path.
 
 ## 3. Closer
 

@@ -784,12 +784,16 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 
 {
 	const daemonSrc = fs.readFileSync(path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.ts"), "utf8");
+	const taggerSrc = fs.readFileSync(path.resolve(import.meta.dirname, "..", "extensions", "lib", "session-tagger.ts"), "utf8");
 
 	// S1 — every tag append goes through the one helper that enforces the
-	// trailing newline. A direct fs.appendFileSync onto the tag path bypasses it.
-	const directAppends = daemonSrc.split("\n")
+	// trailing newline. A direct fs.appendFileSync onto the tag path bypasses it,
+	// however the path is spelled; the tagger returns records and appends nothing.
+	const directAppends = [...daemonSrc.split("\n"), ...taggerSrc.split("\n")]
 		.map((line, i) => ({ line, n: i + 1 }))
-		.filter(({ line }) => /fs\.appendFileSync\(\s*(slot\.state\.)?tagPath/.test(line));
+		.filter(({ line }) => /fs\.appendFileSync\(\s*([\w$]+\.)*tagPath/.test(line));
+	assert("S1 self-check: the tagger appends nothing at all",
+		!/fs\.appendFileSync\(/.test(taggerSrc));
 	assert("S1 no append reaches the tag file except through appendTagFile",
 		directAppends.length === 0,
 		directAppends.map(({ line, n }) => `${n}: ${line.trim()}`).join("\n"));

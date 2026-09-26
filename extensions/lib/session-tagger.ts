@@ -141,8 +141,9 @@ export function fsWorld(now: () => number = Date.now): World {
 		readRange(file, start, length) {
 			const fd = fs.openSync(file, "r");
 			const buf = Buffer.alloc(length);
-			try { fs.readSync(fd, buf, 0, length, start); } finally { fs.closeSync(fd); }
-			return buf;
+			let n = 0;
+			try { n = fs.readSync(fd, buf, 0, length, start); } finally { fs.closeSync(fd); }
+			return n === length ? buf : buf.subarray(0, n);
 		},
 		hashPrefix(file, length) {
 			const hash = createHash("sha1");
@@ -481,7 +482,7 @@ function skipAsFoldedElsewhere(state: TaggerState, world: World, out: Out, rawFi
 
 /** The source a child's lines carry: decided at its first read and kept for
  *  the life of its state, across a move of the session and its own rotations,
- *  so a later generation retires the earlier lines (#263). */
+ *  so a later generation retires the earlier lines. */
 function sourceOf(state: TaggerState, file: string): string {
 	return state.discoveredSubagentFiles.get(file)?.source || state.knownSources.get(file) || transcriptSourceId(file, path.dirname(state.sessionPath));
 }
@@ -870,7 +871,7 @@ function resumeClaudeLookups(state: TaggerState, world: World, tagContent: strin
  * Resume from the tag an earlier life wrote: the `claude -p` children it
  * read are registered again, its open lookups re-queued, and a swept marker it
  * left is retracted (what changed since is not read yet). `complete` is false
- * when the reseed could not finish; the caller sets `reseedPending`.
+ * when the reseed could not finish.
  */
 export function resumeTagger(state: TaggerState, tagContent: string, world: World): { complete: boolean; records: string; log: LogLine[] } {
 	const out: Out = { records: "", log: [] };
@@ -912,7 +913,6 @@ export function scanChildren(state: TaggerState, world: World, opts: ScanOptions
 		if (content && reseedClaudeChildren(state, world, out, content, true)) state.reseedPending = false;
 		else state.pollHadFailure = true;
 	}
-	// pollHadFailure is reset by the caller's read of the session, not here: the flush runs first and can fail.
 
 	if (state.pendingClaudeCommands.length > 0) {
 		const stillPending: PendingItem[] = [];
@@ -1020,6 +1020,42 @@ export function scanChildren(state: TaggerState, world: World, opts: ScanOptions
 		return result;
 	};
 
+	/** Gone from disk, as opposed to unreadable: only a missing file or directory
+	 *  counts, so a check that cannot see its evidence withholds the sweep. */
+	const goneCache = new Map<string, boolean>();
+	const gone = (file: string): boolean => {
+		const known = goneCache.get(file);
+		if (known !== undefined) return known;
+		let result = false;
+		try {
+			world.stat(file);
+		} catch (err) {
+			const code = (err as NodeJS.ErrnoException).code;
+			if (code === "ENOENT" || code === "ENOTDIR") result = true;
+			else {
+				state.pollHadFailure = true;
+				const sessionId = path.basename(file, ".jsonl");
+				if (!state.warned.stat.has(world.canonical(file))) {
+					state.warned.stat.add(world.canonical(file));
+					warn(out, `a subagent transcript could not be stat'd, so its cost may be missing from this session's total (${sessionId}): ${errText(err)}`);
+				}
+			}
+		}
+		goneCache.set(file, result);
+		return result;
+	};
+	/** A read that failed leaves the state behind the file on purpose; the
+	 *  growth check must not take that for growth, or a sliced pass never ends. */
+	const failedThisSlice = new Set<string>();
+	const syncOne = (file: string): boolean => {
+		const failedBefore = state.pollHadFailure;
+		state.pollHadFailure = false;
+		const wrote = syncSubagentTranscript(state, world, out, now, file, notMine(file));
+		if (state.pollHadFailure) failedThisSlice.add(world.canonical(file));
+		state.pollHadFailure = state.pollHadFailure || failedBefore;
+		return wrote;
+	};
+
 	const due = (file: string): boolean => {
 		if (readThisPass.has(file)) return false;
 		if (readThisSlice > 0 && world.now() > deadline) { cut = true; return false; }
@@ -1033,24 +1069,26 @@ export function scanChildren(state: TaggerState, world: World, opts: ScanOptions
 		if (!due(file)) continue;
 		const skipped = skipAsFoldedElsewhere(state, world, out, file, foldedElsewhere);
 		if (skipped.skip) { wroteAny = wroteAny || skipped.retired; continue; }
-		wroteAny = syncSubagentTranscript(state, world, out, now, file, notMine(file)) || wroteAny;
+		wroteAny = syncOne(file) || wroteAny;
 	}
 
 	for (const file of state.discoveredClaudeFiles) {
 		if (cut) break;
 		// Gone from disk is gone, not a failed read: the release below writes
 		// the turn it held, and the tag can be stamped swept.
-		if (!world.exists(file)) continue;
+		if (gone(file)) continue;
 		if (!due(file)) continue;
 		const skipped = skipAsFoldedElsewhere(state, world, out, file, foldedElsewhere);
 		if (skipped.skip) { wroteAny = wroteAny || skipped.retired; continue; }
-		wroteAny = syncSubagentTranscript(state, world, out, now, file, notMine(file)) || wroteAny;
+		wroteAny = syncOne(file) || wroteAny;
 	}
 	// A transcript an earlier slice of this pass read can have grown since; the
 	// pass stamps swept only after its growth is read, so it is due again.
 	if (!cut && continued) {
 		for (const file of readThisPass) {
-			const fileState = state.discoveredSubagentFiles.get(world.canonical(file));
+			const key = world.canonical(file);
+			if (failedThisSlice.has(key)) continue;
+			const fileState = state.discoveredSubagentFiles.get(key);
 			if (!fileState) continue;
 			try {
 				const st = world.stat(file);
@@ -1074,10 +1112,11 @@ export function scanChildren(state: TaggerState, world: World, opts: ScanOptions
 
 	// A transcript no longer found (its session moved, so it is read again under
 	// its new path) can never release a turn it holds.
+	// A claude -p child stays registered after it moves or is deleted, so it
+	// counts as found only while it is on disk.
+	const claudeOnDisk = [...state.discoveredClaudeFiles].filter(file => !gone(file));
 	if (!state.pollHadFailure) {
-		// A claude -p child stays registered after it moves or is deleted, so it
-		// counts as found only while it is on disk.
-		const found = new Set([...taskAgentFiles, ...[...state.discoveredClaudeFiles].filter(file => world.exists(file))].map(file => world.canonical(file)));
+		const found = new Set([...taskAgentFiles, ...claudeOnDisk].map(file => world.canonical(file)));
 		// A transcript already read again under the same source this scan has
 		// opened its new generation; a pruned line would land after it.
 		const liveSources = new Set([...state.discoveredSubagentFiles].filter(([key]) => found.has(key)).map(([, s]) => s.source));
@@ -1121,7 +1160,7 @@ export interface StepResult {
 	records: string;
 	/** The child scan's slice ran out; call again to resume the pass. */
 	cut: boolean;
-	/** A turn, fold, generation or lookup record was produced. */
+	/** A turn, fold or generation record was produced. */
 	wrote: boolean;
 	/** The session transcript gained a turn. */
 	activity: boolean;

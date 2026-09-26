@@ -89,7 +89,8 @@ Changed on purpose; the three that a check pins name it:
   part C). When a continued pass reaches its end, every transcript an earlier slice read is
   stat'd once; one whose size, mtime or inode moved is due again and the pass stays open.
   Swept is stamped only after that read. A stat that fails for any reason but the file or its
-  directory being gone counts as a failed poll.
+  directory being gone counts as a failed poll. A transcript whose read failed in the slice is
+  not taken for grown, or the pass would never end (part C).
 - **A child transcript keeps one source for the life of its state** (#263, part M). The
   source is decided at the child's first read and carried across a move of the session and
   the child's own rotations, so a later generation of it retires its earlier lines. A child
@@ -101,7 +102,8 @@ Changed on purpose; the three that a check pins name it:
   to the child's own, and the recovered source seeds the child's state, so the resumed read
   opens its generation under the source the earlier lines carry.
 - **A registered `claude -p` child that is gone from disk is gone, not a failed read** (#267
-  G, part R). The scan skips it, the release writes the turn it held under the source its
+  G, part R). Gone means a missing file or directory; any other stat error is a failed poll,
+  warned once, so a check that cannot see its evidence withholds the sweep (part W). The scan skips it, the release writes the turn it held under the source its
   earlier lines carry (with its fold record, as any written turn; unless a transcript with that
   source was read again in the same scan, which read the turn itself), and the tag can be
   stamped swept. Before, its stat failed every poll,
@@ -162,6 +164,12 @@ harness registry concern, S4) and **I**, **J** (the sweep and the watch, daemon-
   test adapter's clock meaningful and the spawn-window and settle cases replayable.
 - **Renaming the `[wtft-log-parser]` log prefix.** `CONTEXT.md` avoids bare "log parser"; the
   prefix is every daemon line's and is on #261 with the other daemon strings.
+- **The opening review round** (`pr-open`, 14 findings, 2 blocking) found the growth check
+  re-cutting a pass forever on a transcript whose read fails after its stat, and `exists`
+  reading any stat error as gone; both fixed with checks in parts C and W, along with the
+  `readRange` short-read return and the comment, doc and README findings. Two were declined
+  with evidence: `T0` was already exported, and the pinned warning texts are byte-identical
+  (`wtft-457` passes).
 - **A fourth reconcile pass.** Five fresh-context auditors, then two narrowed re-audits over
   the corrected sentences: 84 findings the first pass, 14 the second, 8 the third, every one
   fixed and the third's all wording precision plus one edge case (`ENOTDIR` as gone in the

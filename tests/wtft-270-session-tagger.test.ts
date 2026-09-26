@@ -200,6 +200,25 @@ const sameCost = (a: number, b: number) => Math.abs(a - b) <= 2e-6;
 const tagCost = (tagPath: string) => costOf(readTagFileWithVerdict(tagPath).interactions);
 const parseCost = (session: string) => costOf(parseSessionFile(session));
 
+{
+	// One child unreadable after its stat: the pass must still end.
+	const f = taskSession(root, 23, 2);
+	const tagPath = getCurrentVersionTagPath(f.session);
+	const state = newTaggerState(f.session, tagPath);
+	const c = clock({ driftPerRead: 1 });
+	fs.chmodSync(f.children[0], 0o000);
+	let ended = false;
+	let slices = 0;
+	for (; slices < 10; slices++) {
+		const r = stepTagger(state, c.world, { flush: true, sliceMs: 0 });
+		c.tick();
+		if (!r.cut) { ended = true; break; }
+	}
+	check(ended, `C a sliced pass with a transcript whose read fails still ends (${slices + 1} slices)`);
+	check(state.pollHadFailure || state.scanPassFailed, "C and the failure is recorded, so the tag is not stamped swept");
+	fs.chmodSync(f.children[0], 0o644);
+}
+
 console.log("\nPART M — a same-directory claude -p child keeps one source across a move of its session (#263)");
 {
 	const f = sameDirClaudep(root, 12);
@@ -486,6 +505,30 @@ console.log("\nPART W — every failure the daemon warned about comes back as on
 	const sixth = runUntilQuiet(state, c.world, c.tick).records;
 	check(hasTurn(sixth, "k2") && sixth.includes('"swept"'), "W once readable the child's held turn is released and the tag is stamped swept");
 	check(first.log.some(l => l.level === "debug"), "W debug lines ride the same log");
+}
+{
+	// A claude -p child in another directory that becomes unreadable at the directory: not gone, a failed poll.
+	const cwd = path.join(root, "unread-24");
+	const other = path.join(root, "unread-24-other");
+	const session = ccProjectFile(corpus.projects, cwd, UUID(24));
+	fs.writeFileSync(session, ccUser(T0, cwd) + ccAssistant({ id: "s24", tsMs: T0 + 1_000, output: 80, cr: 0, cw: 5_000, blocks: [bash(`cd ${other} && claude -p 'go'`)] }));
+	const child = ccProjectFile(corpus.projects, other, UUID(124));
+	fs.writeFileSync(child, ccUser(T0 + 2_000, other) + ccAssistant({ id: "k1", tsMs: T0 + 3_000, output: 500, cr: 0, cw: 8_000 }) + ccAssistant({ id: "k2", tsMs: T0 + 4_000, output: 20, cr: 8_000, cw: 0 }));
+	const tagPath = getCurrentVersionTagPath(session);
+	const state = newTaggerState(session, tagPath);
+	const c = clock();
+	const first = stepTagger(state, c.world, { flush: true });
+	check(hasTurn(first.records, "k1") && !hasTurn(first.records, "k2"), "W fixture: the child was read and its last turn is held");
+	fs.chmodSync(path.dirname(child), 0o000);
+	c.tick();
+	const blind = stepTagger(state, c.world, { flush: true });
+	const warns = blind.log.filter(l => l.level === "warn");
+	check(!hasTurn(blind.records, "k2") && !blind.records.includes('"swept"') && state.pollHadFailure, "W a child whose directory cannot be read is not gone: its held turn stays held and the tag is not stamped swept");
+	check(warns.length === 1 && warns[0].text.includes("could not be stat'd"), `W and the stat failure is one warn line (${JSON.stringify(warns.map(w => w.text.slice(0, 80)))})`);
+	fs.chmodSync(path.dirname(child), 0o755);
+	c.tick();
+	const back = runUntilQuiet(state, c.world, c.tick).records;
+	check(hasTurn(back, "k2") && back.includes('"swept"'), "W once readable again the held turn is released and the tag is stamped swept");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

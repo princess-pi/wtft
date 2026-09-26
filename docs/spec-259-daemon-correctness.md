@@ -196,7 +196,8 @@ make, as follows:
   source; a later line of a message merging its `claude -p` commands into the open lookup; a moved
   or deleted `claude -p` child's held turn written; reseed of a child sharing an id with a
   discovered transcript; the children a settled lookup found, read after a restart.
-- **Reachable, without a check yet** (#267): the scan-continuation marker re-keyed on a move.
+- **Checked in `tests/wtft-270-harness-registry.test.ts`** (#267 F): the scan-continuation
+  marker re-keyed on a move, as a field of the record `move` re-keys.
 - **Pi `/wtft -F` not asking for the session when busy**: busy means a daemon holds the lease or
   took it meanwhile, and asking then starts nothing, so a check cannot tell the two builds apart.
   The one exception, a lease released between two reads, needs two processes inside one syscall

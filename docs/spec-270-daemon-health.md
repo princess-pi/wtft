@@ -66,11 +66,10 @@ sets it. `awaitDaemonUp`, `ensureDaemonRunning` and `watchTagFile`'s wait for th
 "Tail" is the tag's last 8 KiB. Tail idle is the `first` of the newest heartbeat after the newest
 record that is neither a heartbeat nor a stop (any kind: turn, offset, sweep, fold, generation),
 raised to that record's `t` when it is a later turn; a `first` of 0 counts as none. `cacheTtlMs`
-is the newest tail turn's recorded TTL (`1h` → 3,600,000, `5m` → 300,000), else
-`getModelCacheTtlMs` of the newest tail turn's model, else of the session file's last assistant
-model (read only then), else `null`. The widget's `getDaemonStatus` answers `not-started`
-without asking `health` until it has spawned a daemon, and passes its spawn time as `spawnedAt`.
-`ensureDaemonRunning` asks `health` only for a session it spawned before, with no `spawnedAt`.
+is the recorded TTL of the newest tail turn carrying one (`1h` → 3,600,000, `5m` → 300,000),
+else `getModelCacheTtlMs` of the newest tail turn naming a model, else of the session file's last
+assistant model (read only then), else `null`. The widget's `getDaemonStatus` answers
+`not-started` until it has spawned a daemon, then passes its last spawn's time as `spawnedAt`.
 
 Behaviour that changes, each in the direction of one rule for every reader:
 
@@ -85,23 +84,17 @@ Behaviour that changes, each in the direction of one rule for every reader:
   shows it too; it was the widget's alone.
 - **`--watch`'s `r` restart uses the spawn grace.** On `main` the `restarting` flag was cleared
   only by a live lease, polled once a second five times; with none by then, the view showed
-  `starting...` for as long as it ran. Now the restart records its time and the view shows what
-  `health` finds from the first ask: `live` or `idle` once a daemon holds the lease, `starting...`
-  for at most 5 s otherwise, and `restart failed` at once if the spawn throws. The watchdog
-  (1,334 ms) is the only poll; the five-poll interval is gone. `r` exists only when the CLI
-  passes the daemon path, and never stops a `--harness` lease holder (`restartDaemon`).
+  `starting...` for as long as it ran. Now the restart passes its time as `spawnedAt` and the
+  view shows what `health` finds from the first ask; the five-poll interval is gone, and the
+  watchdog asks as it does at any other time.
 - **`waiting-session` in `--watch`** renders only once there are chart lines; before that
   `--watch` prints its waiting line instead.
 - **`--watch`'s idle countdown counts from `idleSinceMs` at each render**, as the widget's
   did; it counted from the `idleMs` of the last health check.
-- **`wtft-daemon --list`'s idle age is the session's idle age.** Its idle column comes from
-  `health(<the holder's --session>)`: the time since `idleSinceMs` while the session is idle,
-  `0s` while its lease holder is live and it is not idle (`waiting-session` included), the time
-  since the last heartbeat when that holder is dead, and `?` when the row has no `--session` to
-  read (a dead holder, an unreadable `/proc/<pid>/cmdline`, a process started without one, every
-  row from the `/proc` scan alone) or a dead holder left no heartbeat. RUNNING and DEAD are
-  unchanged and are not `health`'s: they are `--list`'s own `kill 0` on the listed lease's pid.
-  The tagger version column still reads the first matching tag file name. Which session a
+- **`wtft-daemon --list`'s idle age is the session's idle age.** A row whose holder names a
+  `--session` gets its idle column from `health` of that session: the time since `idleSinceMs`
+  while idle, `0s` while live, the time since `lastHbMs` when `health` has one, else `?`. RUNNING
+  and DEAD are unchanged and are not `health`'s: they are `--list`'s own `kill 0`. Which session a
   harness-held lease line names is #276.
 
 ## 3. Closer

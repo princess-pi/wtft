@@ -193,7 +193,7 @@
     },
     {
       "flags": "--list",
-      "desc": "List the log parser daemons: one line per lease (RUNNING, or DEAD (stale pid) when its holder is not alive) and one per running wtft-daemon holding none, each with PID, tagger version (from the tag file name, v? when none), idle age and the holder's --session. Idle age is how long the session has been idle (0s while live), the time since the last heartbeat when the session's lease holder is dead, or ? when there is no --session to read or no heartbeat. Prints No daemon processes found. when there is nothing to list."
+      "desc": "List the log parser daemons and their leases: PID, RUNNING or DEAD (stale pid), tagger version, idle age (? when unknown) and session."
     },
     {
       "flags": "--cleanup",

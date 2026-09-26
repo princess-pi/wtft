@@ -57,7 +57,7 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 | Session file deleted | A `--session` process exits ("session removed") unless the transcript moved. A harness process drops that session and stays up. |
 | Session file not yet created | Waits, and writes a heartbeat when this process is the per-session daemon or the session is the one a consumer is displaying, so the widget can show "waiting for session .jsonl..." (#124). Past the wait cap, a `--session` process exits ("session never written") and a harness process drops the slot. |
 | Press `r` in `--watch` | Stops a per-session lease holder (never a `--harness` one), spawns fresh, then asks `health` with a 5 s spawn grace; `● restart failed` if the spawn throws |
-| **New activity after idle timeout** | Pi's `agent_end` handler calls `ensureDaemonRunning`, which re-spawns unless its own earlier spawn for this session holds a live lease |
+| **New activity after idle timeout** | Pi's `agent_end` handler calls `ensureDaemonRunning`, which spawns a daemon unless it spawned one for this session before and a live process holds the lease |
 
 ## Sub-Agent Transcript Read Path (#270 / #420 / #97)
 
@@ -491,14 +491,12 @@ The states, what triggers each and the rendered text are one table:
 `docs/spec-270-daemon-health.md` §2, with the rendered legend in `docs/EXT_WTFT.html`
 (`#daemon-health`). Both surfaces render through `renderDaemonStatus`.
 
-`--watch` asks `health`: 500 ms after the tag file appears, on every tag-file change, on `r`,
-and every 1,334 ms (the watchdog) while it does not read the daemon as dead. Once it reads the
-daemon dead (not alive, and neither `starting` nor `waiting-session`), only a tag change or `r`
-asks again.
+`--watch` asks `health` while it waits for the tag file, on tag changes it reads, on `r`, and on
+its 1,334 ms watchdog while it does not read the daemon as dead.
 
 ## Pi Widget Integration
 
-The Pi `/wtft` widget also spawns a log parser daemon on `session_start`, using `ctx.sessionManager.getSessionFile()` to determine the session path. This keeps the wtft-tag file warm for CLI use. The widget renders its own daemon status indicator on the title line (inline or wrapped; under `Cache Empty` when there is no chart), from `getDaemonStatus`: `daemon not started` before it has spawned, else the same `health` answer (`docs/spec-270-daemon-health.md`).
+The Pi `/wtft` widget also spawns a log parser daemon on `session_start`, using `ctx.sessionManager.getSessionFile()` to determine the session path. This keeps the wtft-tag file warm for CLI use. The widget renders its own daemon status indicator on the title line (inline or wrapped; under the cache line when there is no chart), from `getDaemonStatus`: `daemon not started` before it has spawned, else the same `health` answer (`docs/spec-270-daemon-health.md`).
 
 **Daemon auto-revive:** If the daemon died from idle timeout (24h), the Pi `agent_end` handler calls `ensureDaemonRunning`, which, when it spawned for this same session before, checks `health` before trusting the module-level `_daemonSpawned` flag. If the lease has no live holder, the flag is reset and the daemon is re-spawned; with no earlier spawn it spawns without checking. This keeps `wtft --watch` in an external terminal alive even after long idle periods — just type a new prompt and the daemon wakes up.
 
@@ -562,9 +560,9 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 | Situation | Handling |
 |---|---|
 | Daemon exits (idle timeout, 24h) | Title shows `● stopped HH:MM` in red; footer shows red `'r' to restart` |
-| No activity for 2m2s | Status flips to `● idle (cache expires in Nmin)`, whole minutes rounded up, then `● idle (cache emptied)`. The TTL is the newest turn's recorded cache TTL, else a guess from the newest turn's model in the last 8 KiB, else from the session file's last assistant model. |
+| No activity for 2m2s | Status flips to `● idle (cache expires in Nmin)`, whole minutes rounded up, then `● idle (cache emptied)`. The TTL rule: `docs/spec-270-daemon-health.md` §2. |
 | Local model (no cache), or no model known | Status shows `● idle (local model)` |
-| User presses `r` | Daemon restarts, status shows `● starting...` until the new daemon holds the lease, then `● live` or `● idle`; past 5 s it shows what `health` finds. A spawn that throws shows `● restart failed` |
+| User presses `r` | Daemon restarts; status shows what `health` finds, with the 5 s spawn grace (`● starting...` until a daemon holds the lease). A spawn that throws shows `● restart failed` |
 | Tag file deleted/truncated | `fs.watch` handler re-reads from zero |
 | Daemon spawned before session file exists | Status shows `● waiting for session .jsonl...` (yellow); daemon polls until file created (#124) |
 | Daemon never started | The widget, before it has spawned one, shows `● daemon not started`; otherwise a dead lease with no heartbeat in the tag's last 8 KiB shows `● daemon not found`, and one with a heartbeat `● stopped HH:MM` |
@@ -579,10 +577,10 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 
 1. Start `wtft --watch` → confirm `● live` on title line
 2. `kill <daemon-pid>` → within about 3.5 s (the 2 s tag-write grace, then the 1,334 ms watchdog), title shows `● stopped HH:MM` in red
-3. Press `r` → status shows `● starting...`, clears to `● live` (or `● idle` on an idle session) within 5s
+3. Press `r` on a per-session daemon → status shows `● starting...`, then `● live` (or `● idle` on an idle session) within 5s
 4. Wait 2m2s with no session activity → status flips to `● idle (cache expires in Nmin)`
 5. Wait 24h with no session activity → daemon exits, title shows stopped indicator
-6. Run `wtft --list` → one line per log parser daemon and per lease, RUNNING or DEAD, with idle ages
+6. Run `wtft --list` → the log parser daemons and their leases, RUNNING or DEAD, with idle ages
 7. Pi `/wtft` widget → shows same idle/stopped states as CLI (shared `renderDaemonStatus`)
 8. Terminal resize → width auto-fits; status reflows correctly (inline vs. separate line)
 9. Idle for 2m2s with a remote model (Claude/DeepSeek) → status shows `(cache expires in Nmin)`

@@ -1485,9 +1485,8 @@ async function main() {
 ${USAGE}
 
 Management:
-  --list, -l            One line per lease (RUNNING, or DEAD for a holder no longer alive) and per running
-                        wtft-daemon holding none, fixture processes included. idle: how long the session has
-                        been idle (0s while live), or since the last heartbeat of a dead holder; ? when unknown
+  --list, -l            List the daemons and their leases, fixture processes included: RUNNING or DEAD,
+                        tagger version, idle age (? when unknown), session
   --cleanup             Kill per-session daemons whose session is gone, and fixture ones under the tmp dir
                         that hold no lease here; never a harness process, which stops once it has nothing to serve or watch
   --restart             Stop every daemon holding a lease or a root pid file here, and respawn one per live

@@ -158,6 +158,10 @@ the hand-off read, hardened as `parseHandOff` took it over (§4); the reconcile 
   check and was woken under a key outside the root. `parseHandOff` counts every non-object line
   as unreadable and resolves a path before the root check. A move-as-it-was would have carried
   a crash into the module for a later slice to fix.
+- **`--restart`'s harness loop waits only for a live daemon.** The reconcile's final pass found
+  that the loop called `waitUntilExited` for any pid its root pid file named, which SIGKILLs a
+  live pid after two seconds, daemon or not. Guarded on `procIsDaemon` here, as the lease loop
+  already was; the check, and two more `--restart` findings, are #274, after the freeze.
 - **The current-slot pointer.** `slot` and `withSlot` are the daemon's way of running the
   per-session functions against one record; the registry does not know which record is
   current, and does not need to.

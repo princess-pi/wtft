@@ -1749,11 +1749,14 @@ if (showList || showCleanup || showRestart || stopSession) {
         continue;
       }
       seenPids.add(pid);
-      if (procIsDaemon(pid)) { try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ } }
-      // It writes its hand-off only while its pid file still names it.
-      waitUntilExited(pid);
+      const live = procIsDaemon(pid);
+      if (live) {
+        try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ }
+        // It writes its hand-off only while its pid file still names it.
+        waitUntilExited(pid);
+      }
       unlinkIfNames(fullPath, pid);
-      console.log(`Stopped: PID ${pid} — harness ${pidFile}; the next wtft starts it again`);
+      console.log(live ? `Stopped: PID ${pid} — harness ${pidFile}; the next wtft starts it again` : `Removed root pid file: PID ${pid} — dead, harness ${pidFile}`);
       found++;
     }
     console.log(`${found} daemon(s) handled: restarted, stopped, or lease removed, as each line says.`);

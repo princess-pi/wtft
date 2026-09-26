@@ -82,6 +82,16 @@ assert(
 
 const parserCalls = calls.filter((c) => c.file === "extensions/lib/wtft-parser.ts");
 const taggerCalls = calls.filter((c) => c.file === "extensions/lib/session-tagger.ts");
+// The tagger reaches attribution through its port: the one direct call is the
+// fsWorld adapter forwarding, and the call that must carry every retained
+// fold-capable turn together is `world.attribute(...)` in syncSubagentTranscript.
+const taggerSrc = readFileSync(join(REPO_ROOT, "extensions", "lib", "session-tagger.ts"), "utf8");
+const portCalls = taggerSrc.split("\n").filter((l) => /\bworld\.attribute\s*\(/.test(l) && !/^\s*\*|^\s*\/\//.test(l));
+assert(
+	"the tagger calls attribution through its port exactly once, on every retained fold-capable turn of a transcript together (#97)",
+	portCalls.length === 1 && /\(clones,/.test(portCalls[0]),
+	`found ${portCalls.length}: ${JSON.stringify(portCalls)}`,
+);
 const elsewhere = calls.filter((c) => c.file !== "extensions/lib/wtft-parser.ts" && c.file !== "extensions/lib/session-tagger.ts");
 
 assert(
@@ -90,7 +100,7 @@ assert(
 	`found ${parserCalls.length}: ${JSON.stringify(parserCalls)}`,
 );
 assert(
-	"the session tagger calls it once, on every fold-capable turn of that transcript together (#97)",
+	"the session tagger's adapter is the one direct call site",
 	taggerCalls.length === 1,
 	`found ${taggerCalls.length}: ${JSON.stringify(taggerCalls)}\n` +
 		"A poll-sized slice double-counts a nested session. The tagger's call has to pass every\n" +

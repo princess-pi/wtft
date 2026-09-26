@@ -289,7 +289,7 @@ function parseNewLines(state: TaggerState, world: World, out: Out, now: number):
 	try {
 		const stat = world.stat(filePath);
 		debug(out, `session stat ${path.basename(filePath)}`);
-		const currentSize = stat.size;
+		let currentSize = stat.size;
 		if (state.sessionIno !== -1 && stat.ino !== state.sessionIno) {
 			state.lastSize = 0;
 			state.pendingFragment = Buffer.alloc(0);
@@ -313,6 +313,8 @@ function parseNewLines(state: TaggerState, world: World, out: Out, now: number):
 		if (grew) {
 			fresh = world.readRange(filePath, state.lastSize, currentSize - state.lastSize);
 			debug(out, `session delta ${fresh.length} bytes ${path.basename(filePath)}`);
+			// A short read (the file shrank between the stat and the read) advances only past what was read.
+			if (fresh.length < currentSize - state.lastSize) currentSize = state.lastSize + fresh.length;
 			state.lastSize = currentSize;
 		}
 		const buf = state.pendingFragment.length > 0 ? Buffer.concat([state.pendingFragment, fresh]) : fresh;
@@ -580,6 +582,7 @@ function syncSubagentTranscript(state: TaggerState, world: World, out: Out, now:
 				if (grew) {
 					fresh = world.readRange(file, fileState.lastSize, size - fileState.lastSize);
 					debug(out, `subagent delta ${fresh.length} bytes ${path.basename(file)}`);
+					if (fresh.length < size - fileState.lastSize) size = fileState.lastSize + fresh.length;
 				}
 				parsed = parseAppendedBytes(fileState, fresh);
 			} catch (err) {
@@ -898,8 +901,8 @@ export interface ScanOptions {
 /**
  * Read every child transcript: open `claude -p` lookups, Task and Pi children,
  * registered `claude -p` children; release the held turn of a transcript no
- * longer found; stamp swept when the tag is settled. `cut` means the slice ran
- * out: the caller appends `records` and calls again to resume the pass.
+ * longer found; stamp swept when the tag is settled. `cut` means the pass is
+ * not finished: the caller appends `records` and calls again to resume it.
  */
 export function scanChildren(state: TaggerState, world: World, opts: ScanOptions = {}): { records: string; cut: boolean; wrote: boolean; log: LogLine[] } {
 	const out: Out = { records: "", log: [] };
@@ -1169,7 +1172,7 @@ export interface StepOptions extends ScanOptions {
 export interface StepResult {
 	/** Whole tag lines to append, in order. */
 	records: string;
-	/** The child scan's slice ran out; call again to resume the pass. */
+	/** The child scan's pass is not finished; call again to resume it. */
 	cut: boolean;
 	/** A turn, fold or generation record was produced. */
 	wrote: boolean;

@@ -156,6 +156,16 @@ console.log("\nPART P — the caller owns the write cadence");
 	const size = fs.statSync(s.session).size;
 	check(hasTurn(mixed, "p8") && offsets.length === 1 && offsets[0] === size - (p7.length - 20) && state.lastSize === size,
 		`P a marker written while a record is held ends before that record, not at the read offset (${offsets} vs size ${size}, fragment ${p7.length - 20})`);
+	// A short read (the file shrank between the stat and the read): the offset advances only past what was read.
+	fs.appendFileSync(s.session, p7.slice(-20));
+	const before = state.lastSize;
+	const shortWorld: World = { ...c.world, readRange: (file, start, length) => c.world.readRange(file, start, Math.min(length, 5)) };
+	c.tick();
+	stepTagger(state, shortWorld, { flush: true });
+	check(state.lastSize === before + 5, `P a short read advances the offset by the bytes read, not to the stat size (${state.lastSize} vs ${before} + 5)`);
+	c.tick();
+	const rest = stepTagger(state, c.world, { flush: true }).records;
+	check(hasTurn(rest, "p7") && state.lastSize === fs.statSync(s.session).size, "P and the next read takes the rest, so the record is not lost");
 }
 
 console.log("\nPART C — a sliced scan reads a transcript that grew after the pass took it (#257)");

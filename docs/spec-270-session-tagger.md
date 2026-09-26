@@ -170,6 +170,12 @@ harness registry concern, S4) and **I**, **J** (the sweep and the watch, daemon-
   `readRange` short-read return and the comment, doc and README findings. Two were declined
   with evidence: `T0` was already exported, and the pinned warning texts are byte-identical
   (`wtft-457` passes).
+- **Opened with `pr-open --reviewed` after the review round limit.** Three rounds (14, 5, 9
+  findings): every one fixed, declined with evidence, or filed (#272 for the resume branch's
+  swallowed truncate, #261 for two exit-code leads), all in the ledger. Round three's fixes: the
+  session and child reads advance the offset only past the bytes a short read returned; the
+  wtft-420 guard counts the port call `world.attribute` in the tagger; `cut` is documented as
+  "the pass is not finished"; the swept marker rides the scan's one append.
 - **A fourth reconcile pass.** Five fresh-context auditors, then two narrowed re-audits over
   the corrected sentences: 84 findings the first pass, 14 the second, 8 the third, every one
   fixed and the third's all wording precision plus one edge case (`ENOTDIR` as gone in the

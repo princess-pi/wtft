@@ -1660,7 +1660,9 @@ if (showList || showCleanup || showRestart || stopSession) {
         waitUntilExited(pid);
       }
       unlinkIfNames(fullPath, pid);
-      if (sessionFound) {
+      // Only a daemon this process stopped is respawned: a live pid that is not
+      // one (or one that cannot be signalled, #274) was not stopped.
+      if (wasDaemon && sessionFound) {
         try {
           const child = spawn(process.execPath, [process.argv[1], ...daemonLaunchArgs(sessionFound, restartEnv)], {
             detached: true,
@@ -1670,9 +1672,9 @@ if (showList || showCleanup || showRestart || stopSession) {
           child.unref();
         } catch (_2) {}
       }
-      console.log(sessionFound ? `Restarted: PID ${pid} → fresh daemon for ${sessionFound}`
+      console.log(wasDaemon && sessionFound ? `Restarted: PID ${pid} → fresh daemon for ${sessionFound}`
         : wasDaemon ? `Stopped: PID ${pid} — no --session to respawn (#274)`
-        : `Removed lease: PID ${pid} — not a live daemon`);
+        : `Removed lease: PID ${pid} — no live daemon found`);
       found++;
       continue;
     }
@@ -1761,10 +1763,10 @@ if (showList || showCleanup || showRestart || stopSession) {
         waitUntilExited(pid);
       }
       unlinkIfNames(fullPath, pid);
-      console.log(live ? `Stopped: PID ${pid} — harness ${pidFile}; the next wtft starts it again` : `Removed root pid file: PID ${pid} — not a live daemon, harness ${pidFile}`);
+      console.log(live ? `Stopped: PID ${pid} — harness ${pidFile}; the next wtft starts it again` : `Removed root pid file: PID ${pid} — no live daemon found, harness ${pidFile}`);
       found++;
     }
-    console.log(`${found} daemon(s) handled: restarted, stopped, or lease removed, as each line says.`);
+    console.log(`${found} holder(s) handled: restarted, stopped, or a lease or root pid file removed, as each line says.`);
   }
   if (showCleanup) {
     console.log(`Cleaned up ${found} daemon(s).`);

@@ -201,7 +201,7 @@
     },
     {
       "flags": "--restart",
-      "desc": "Stop every log parser daemon that holds a lease or a harness root pid file under this temp dir, remove those files, and spawn one fresh daemon per live holder with that process's own --session and root environment (a harness process comes back for its root and takes its other sessions from the hand-off it wrote on stopping). A dead holder only has its lease removed. A harness process holding no lease is stopped and not respawned; the next wtft starts it again."
+      "desc": "Stop every log parser daemon that holds a lease or a harness root pid file under this temp dir, remove those files, and spawn one fresh daemon per stopped holder with that process's own --session and root environment (a harness process comes back for its root and takes its other sessions from the hand-off it wrote on stopping). A holder that is not a live daemon only has its file removed; a live one started without --session is stopped and not respawned (#274). A harness process holding no lease is stopped and not respawned; the next wtft starts it again. On Linux: the liveness check and the --session read use /proc, so off Linux nothing is stopped or respawned and the files are removed while their daemons keep running (#266)."
     },
     {
       "flags": "--stop <session>",

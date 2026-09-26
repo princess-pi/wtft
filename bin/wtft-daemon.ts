@@ -1650,7 +1650,8 @@ if (showList || showCleanup || showRestart || stopSession) {
       }
       restarted.add(pid);
       const restartEnv = { ...process.env };
-      if (alive && procIsDaemon(pid)) {
+      const wasDaemon = alive && procIsDaemon(pid);
+      if (wasDaemon) {
         for (const key of ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR"]) {
           const value = procEnvValue(pid, key);
           if (value) restartEnv[key] = value;
@@ -1670,7 +1671,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         } catch (_2) {}
       }
       console.log(sessionFound ? `Restarted: PID ${pid} → fresh daemon for ${sessionFound}`
-        : alive && procIsDaemon(pid) ? `Stopped: PID ${pid} — no --session to respawn (#274)`
+        : wasDaemon ? `Stopped: PID ${pid} — no --session to respawn (#274)`
         : `Removed lease: PID ${pid} — not a live daemon`);
       found++;
       continue;

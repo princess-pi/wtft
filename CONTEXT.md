@@ -21,9 +21,10 @@ session outside those roots keeps its own process, polling every 667ms. The tag 
 the pid lease stay per session. After 24h with no new lines, the per-session process
 exits, and the harness process drops that session and its lease; the next write to its own transcript,
 or the next request, adopts it again; while that harness process runs, the write alone does.
-A session dropped for idling is forgotten 24h after it was dropped unless written first, and a
-harness process left with nothing to serve or watch for 24h after that stops. One whose root is
-removed stops too, passing its dropped sessions to the next one. Spawned on Pi `session_start` and on
+A session dropped for idling is forgotten 24h after it was dropped unless written first, or
+within a minute of its transcript being deleted, and a harness process left with nothing to
+serve or watch for 24h after that stops. One whose root is removed stops too, passing the
+sessions it served, was retrying and had dropped for idling to the next one. Spawned on Pi `session_start` and on
 a CLI report. A per-session process is revived after an idle exit and replaced on a
 version bump, and a harness process from an older tagger is replaced by the next start
 from a newer one. On Linux, a live harness
@@ -339,7 +340,10 @@ _Avoid_: rate limiter, TPS, rate-limit tool, TPM-as-a-name (TPM stays, as the me
 The coding-agent runtime a session log came from — `pi` or `claude-code`, selected via
 `--harness <pi|claude-code|auto>` (default `auto`). Determines which session-discovery and
 parse adapter (`extensions/lib/harness/<id>/`) wtft uses. Not the same as "widget" (below) —
-harness is about which agent produced the log; widget is about how wtft displays it.
+harness is about which agent produced the log; widget is about how wtft displays it. The
+daemon's harness mode is a different referent, the **harness process** (Daemon, above); the
+daemon specs, and the daemon's own `--help`, stdout and stderr, shorten it to "the harness"
+where the daemon is the subject.
 _Avoid_: Agent, client, platform
 
 **Widget**:

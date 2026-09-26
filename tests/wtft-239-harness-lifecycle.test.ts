@@ -470,7 +470,7 @@ try {
 		for (let i = 0; i < 40_000; i++) fs.writeFileSync(path.join(TMP, `wtft-daemon-fake${i}.pid`), String(h.pid));
 		const restart = spawnSync("node", [DAEMON, "--restart"], { encoding: "utf8", env: envFor(root) });
 		check(restart.status === 0, `fixture: --restart exited 0 (${restart.status})`);
-		check((restart.stdout.match(/^Restarted: PID/gm) ?? []).length >= 1, "fixture: --restart stopped the harness");
+		check((restart.stdout.match(/^(Restarted|Stopped): PID/gm) ?? []).length >= 1, "fixture: --restart stopped the harness (respawned for its own --session, or stopped)");
 		start(root, ["--harness", "claude", "--session", files[1]], "r-cli.err");
 		await sleep(5_000);
 		const living = harnessesFor(root);

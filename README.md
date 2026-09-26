@@ -332,11 +332,12 @@ rows' summed cost and how many were unreadable. Pi sessions are not listed yet
 suggesting `wtft … | less -R`. Any `wtft` run that produces a report spawns a log
 parser daemon; a per-session start exits at once when a live process holds the session's lease
 for a tag of this version (an older-version tag is taken over) and exits 1 on a lease it cannot
-read, and a harness start takes a per-session holder's lease and retries on another harness's,
+read, and a harness start takes a per-session holder's lease and retries on another harness's
+(on Linux, where the liveness check reads `/proc`; elsewhere it takes either, #266),
 so the daemon revives after an idle timeout when the previous process exited. A session under the Claude
 projects directory or the Pi sessions directory is served by that directory's one
-daemon, and an idle session there is dropped while the process stays up; the process
-stops once it has served nothing for 24h. A session
+daemon, and an idle session there is dropped while the process stays up and watched for
+24h more; the process stops 24h after it last had a session to serve, retry or watch for. A session
 outside those directories keeps its own. The commands that run instead of a report —
 `--help`/`--why`/`--version` and the daemon-management group — return before
 that and spawn nothing. `wtft-daemon` exists for debugging, not for normal use.

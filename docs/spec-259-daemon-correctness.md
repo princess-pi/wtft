@@ -65,7 +65,10 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   lease names another live harness does not take it; it retries (below). A focus request never
   repoints a lease another live daemon holds; the harness's adoption takes it by these rules. A per-session daemon
   holding the lease is still stopped with SIGTERM and waited for, because it serves only that
-  session, and waiting keeps two writers off one tag.
+  session, and waiting keeps two writers off one tag. On Linux: the liveness check reads
+  `/proc/<pid>/cmdline`, so off Linux every holder reads as not a daemon: a lease is taken with
+  no retry and no signal, and a harness start displaces the running harness's root pid file
+  and claims the root itself, so `pointSessionAt` never runs (#266, as for A9 and `-F`).
 - **An older per-session build never takes over from a newer one** (A9). It takes over only from
   a tag of an older version. With a newer-version tag present and its lease held by a live
   daemon, it exits 0; off Linux, where a daemon cannot be told apart, any live lease holder counts. It never deletes a newer-version tag.
@@ -196,7 +199,8 @@ make, as follows:
   source; a later line of a message merging its `claude -p` commands into the open lookup; a moved
   or deleted `claude -p` child's held turn written; reseed of a child sharing an id with a
   discovered transcript; the children a settled lookup found, read after a restart.
-- **Reachable, without a check yet** (#267): the scan-continuation marker re-keyed on a move.
+- **Checked in `tests/wtft-270-harness-registry.test.ts`** (#267 F): the scan-continuation
+  marker re-keyed on a move, as a field of the record `move` re-keys.
 - **Pi `/wtft -F` not asking for the session when busy**: busy means a daemon holds the lease or
   took it meanwhile, and asking then starts nothing, so a check cannot tell the two builds apart.
   The one exception, a lease released between two reads, needs two processes inside one syscall

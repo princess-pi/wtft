@@ -821,7 +821,9 @@ export async function watchTagFile(
 			for (const l of lastBuffer) console.log(l);
 		}
 		console.log(`WTFT watch stopped \u2014 ${interactionCount} interactions, $${totalCost.toFixed(4)} total cost.`);
-		process.exit(0);
+		// A restart already stopped the old daemon; exiting now would leave none.
+		if (pendingRestart) void pendingRestart.finally(() => process.exit(0));
+		else process.exit(0);
 	};
 
 	process.on("SIGINT", exitWatch);
@@ -834,15 +836,15 @@ export async function watchTagFile(
 		daemonDead = !daemonStatus.alive;
 	};
 
-	let restarting = false;
+	let pendingRestart: Promise<boolean> | null = null;
 	const cleanupStdin = enterRawStdin((key: string) => {
 		if (key === "q" || key === "Q" || key === "\u0003") {
 			exitWatch();
 		}
-		if ((key === "r" || key === "R") && settings.daemonPath && !restarting) {
-			restarting = true;
-			void restartDaemon(sessionPath, settings.daemonPath).then(ok => {
-				restarting = false;
+		if ((key === "r" || key === "R") && settings.daemonPath && !pendingRestart) {
+			pendingRestart = restartDaemon(sessionPath, settings.daemonPath);
+			void pendingRestart.then(ok => {
+				pendingRestart = null;
 				if (ok) {
 					updateDaemonHealth();
 				} else {

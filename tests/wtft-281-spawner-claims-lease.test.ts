@@ -249,6 +249,7 @@ console.log("\nC4e. restartDaemon lets the caller's event loop run while it wait
 	let ticks = 0; const t = setInterval(() => ticks++, 10);
 	const ok = await restartDaemon(session, script);
 	clearInterval(t);
+	for (let i = 0; i < 50 && !reaped; i++) await new Promise(r => setTimeout(r, 20));
 	check(ok && ticks > 0 && reaped, `C4e the loop ran during the wait (${ticks} ticks) and reaped the old child (${reaped})`);
 	let leaseNow = ""; try { leaseNow = fs.readFileSync(lease, "utf8").trim(); } catch {}
 	if (leaseNow && leaseNow !== String(old.pid)) try { process.kill(Number(leaseNow), "SIGKILL"); } catch {}
@@ -314,6 +315,47 @@ console.log("\nC8. wtft-daemon --restart claims the lease for the daemon it resp
 	try { process.kill(Number(leaseNow), 0); newAlive = Number(leaseNow) > 0; } catch {}
 	check(restart.status === 0 && leaseNow !== "" && leaseNow !== String(old.pid) && newAlive, `C8 the lease names the live respawned daemon when --restart returns (exit ${restart.status}, lease "${leaseNow}")`);
 	if (newAlive) try { process.kill(Number(leaseNow), "SIGTERM"); } catch {}
+}
+
+console.log("\nC9. q during an r restart in --watch exits only after the new daemon is spawned");
+{
+	const session = path.join(dir, "c9-session.jsonl");
+	fs.writeFileSync(session, "");
+	const lease = getDaemonPidPath(session);
+	const wtft = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
+	const w = spawn("script", ["-q", "-c", `node '${wtft}' --watch -s '${session}' -l 5 --no-emoji`, "/dev/null"], { stdio: ["pipe", "ignore", "ignore"], env: process.env });
+	let exited = false; w.once("exit", () => { exited = true; });
+	let first = 0;
+	for (let i = 0; i < 200 && !first; i++) {
+		await new Promise(r => setTimeout(r, 50));
+		const pid = Number((() => { try { return fs.readFileSync(lease, "utf8").trim(); } catch { return ""; } })());
+		if (pid > 0 && pidAlive(pid)) first = pid;
+	}
+	check(first > 0, "C9 precondition: --watch spawned a daemon that holds the lease");
+	const script = path.join(dir, "c9-slow.mjs");
+	const termed = path.join(dir, "c9-termed");
+	fs.writeFileSync(script.replace(/mjs$/, 'cjs'), `process.on('SIGTERM', () => { require('node:fs').writeFileSync(${JSON.stringify(termed)}, ''); setTimeout(() => process.exit(0), 800); });\nsetTimeout(() => {}, 20000);\n`);
+	const tagsDir = path.join(dir, "wtft-tags");
+	for (let i = 0; i < 100 && !(fs.existsSync(tagsDir) && fs.readdirSync(tagsDir).some(f => f.startsWith("c9-session"))); i++) await new Promise(r => setTimeout(r, 50));
+	await new Promise(r => setTimeout(r, 1500));
+	const slow = startOrphan(script.replace(/mjs$/, "cjs"), ["--session", session]);
+	try { process.kill(first, "SIGKILL"); } catch {}
+	await new Promise(r => setTimeout(r, 200));
+	fs.writeFileSync(lease, String(slow));
+	w.stdin!.write("r");
+	await new Promise(r => setTimeout(r, 150));
+	w.stdin!.write("q");
+	for (let i = 0; i < 100 && !exited; i++) await new Promise(r => setTimeout(r, 50));
+	check(exited, "C9 precondition: --watch exited on q");
+	check(fs.existsSync(termed), "C9 precondition: r stopped the old holder");
+	let now = 0;
+	for (let i = 0; i < 60 && !now; i++) {
+		await new Promise(r => setTimeout(r, 50));
+		const pid = Number((() => { try { return fs.readFileSync(lease, "utf8").trim(); } catch { return ""; } })());
+		if (pid > 0 && pid !== slow && pidAlive(pid)) now = pid;
+	}
+	check(now > 0, `C9 a live new daemon holds the lease after q (lease names ${now || "nobody live"})`);
+	for (const p of [now, slow]) if (p) try { process.kill(p, "SIGKILL"); } catch {}
 }
 
 fs.rmSync(dir, { recursive: true, force: true });

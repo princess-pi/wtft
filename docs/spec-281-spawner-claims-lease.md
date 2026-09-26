@@ -72,7 +72,8 @@ export function claimLeaseForChild(file: string, childPid: number): "claimed" | 
     harness's other leases are unlinked. Its output line says how the respawn went (below).
   - The wait is async: the caller's event loop runs, so a holder that is its own child is reaped
     on any OS (off Linux `pidAlive` cannot see a zombie), and `--watch` keeps rendering. A
-    second `r` during a restart is ignored.
+    second `r` during a restart is ignored, and `q` or Ctrl+C exits only once the restart has
+    spawned, so a stopped daemon is never left without its replacement.
   - `wtft-daemon --restart` prints `Restarted` only when its claim for the respawn landed,
     `Respawned … left to claim the lease itself` when the claim was busy or threw with the child
     alive, and `the respawn … failed` when no child is alive.
@@ -131,6 +132,8 @@ member is a breaking change), and `renderDaemonStatus` still renders it for a ca
   - **C6:** a per-session child beside a newer-version tag, with the lease naming itself, is
     alive and holds the lease 1.5 s later.
   - **C7:** a `--harness` start whose root does not exist leaves no lease naming it.
+  - **C9:** `q` pressed during an `r` restart in `--watch` still leaves a live new daemon holding
+    the lease.
   - **C8:** after `wtft-daemon --restart` returns, the lease names the live respawned daemon.
 - `tests/wtft-308-lagging-session.test.ts` §7 d–f cover `awaitDaemonUp` with the lease naming
   its child: a beat from before the wait answers `unknown`, a beat during the wait answers `up`,

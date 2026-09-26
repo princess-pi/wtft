@@ -1160,7 +1160,7 @@ console.log("\n§ S — no writer can reintroduce a partial line unnoticed\n");
 	assert("A0b self-check: it does not swallow the next function",
 		(body.match(/^(export )?function /gm) ?? []).length === 1);
 
-	assert("A1 the offset advances to the file size on every read, so no byte is fetched twice",
+	assert("A1 the offset advances past every byte a read returned, so no byte is fetched twice",
 		/state\.lastSize = currentSize;/.test(body));
 	assert("A2 and the whole-line-only advance that caused the re-read is gone",
 		!/lastSize \+=/.test(body), "`lastSize +=` is back — the offset is parked behind a partial record again");

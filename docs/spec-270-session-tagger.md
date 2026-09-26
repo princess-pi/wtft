@@ -48,7 +48,8 @@ export function scanChildren(state, world, { sliceMs? }): { records; cut; wrote;
   dropped and adopted again warns again. Discovery's own warning for an unreadable session
   transcript is quiet under the daemon's adapter, so the failure is reported once, as before.
 - **`cut`** replaces the harness scan's `setImmediate` continuation: the module reports that its
-  slice ran out; the caller appends `records` and calls again. The pass's read-set and failure
+  pass is not finished (the slice ran out, or a transcript grew after the pass took it); the
+  caller appends `records` and calls again. The pass's read-set and failure
   flag live in `TaggerState` (`scanPass`, `scanPassFailed`), not in side maps keyed by path, so
   a session move carries them without re-keying. The continuation marker stays with the
   harness, since it is about scheduling.

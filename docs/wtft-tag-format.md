@@ -208,7 +208,8 @@ transcript's filename without `.jsonl`, for a human reading the file. **A line c
 an interaction line or a fold record — counts only if no `_gen` record for the same `s` follows
 it.** A line with no `s` always counts.
 
-The daemon writes one on the first read of a child transcript in each daemon life that writes a
+The daemon writes one on the first read of a child transcript in each tagger state (a daemon
+life, a harness serving the session again, or a retired or released child read again) that writes a
 line (a read whose only turn is held back writes nothing yet), and on the first read after that
 transcript rotated. Rotation is a new inode, a shrink, a content-hash mismatch on a same-size
 file, a prefix-hash mismatch when the file grew, an attributed cost that dropped, or an

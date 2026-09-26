@@ -193,7 +193,8 @@ _Avoid_: Fold cache, attribution list
 **Generation record** (#114):
 A `{"_gen":{"s","session"}}` line in a tag file. It supersedes every earlier line — interaction
 line or fold record — whose source matches. The daemon writes one on the first read of that
-transcript in each daemon life that writes a line or consumes the file whole (a read whose only
+transcript in each tagger state (a daemon life, or a harness serving the session again, or a retired
+or released child read again) that writes a line or consumes the file whole (a read whose only
 turn is held back writes nothing yet), on the first read that drops a written line the reader's
 id dedup cannot collapse, followed by the whole current read, so the tag bills that transcript's
 latest contents once, and before the held turn of a transcript no longer found when it opened

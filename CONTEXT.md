@@ -192,17 +192,21 @@ _Avoid_: Fold cache, attribution list
 
 **Generation record** (#114):
 A `{"_gen":{"s","session"}}` line in a tag file. It supersedes every earlier line — interaction
-line or fold record — whose source matches. The daemon writes one on its first parse of that
-transcript in each daemon life, and on the first parse that drops a written line the reader's id
-dedup cannot collapse, followed by the whole current parse, so the tag bills that transcript's
-latest contents once.
+line or fold record — whose source matches. The daemon writes one on the first read of that
+transcript in each daemon life that writes a line or consumes the file whole (a read whose only
+turn is held back writes nothing yet), on the first read that drops a written line the reader's
+id dedup cannot collapse, followed by the whole current read, so the tag bills that transcript's
+latest contents once, and before the held turn of a transcript no longer found when it opened
+none. It also writes one with nothing after it when another transcript's parse turns out to fold
+this one, retiring the lines written under this source.
 _Avoid_: Reset record, epoch
 
 **Source** (tag line `s`, #114):
 Which transcript a tag line came from: the hash of a child transcript's path — relative to the
 session directory when it lies under it, absolute when it does not, decided at the daemon's first
-read of that child and kept while it serves the session, so a later move of the session does not
-change it (#263) — written as `s` on the line
+read of that child and kept for the daemon's life, so a later move of the session does not change it (#263), and a
+child retired as folded elsewhere or gone from disk that is read again opens its next generation
+under the same source — written as `s` on the line
 and inside a fold record. A line with no `s` came
 from the tag's own session. It is what a generation record (above) supersedes lines by, so two
 copies of one session, or two children, never drop each other's lines.

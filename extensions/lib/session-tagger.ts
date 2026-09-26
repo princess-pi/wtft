@@ -93,6 +93,8 @@ export interface TaggerState {
 	pendingClaudeCommands: PendingItem[];
 	discoveredClaudeFiles: Set<string>;
 	discoveredSubagentFiles: Map<string, SubagentFileState>;
+	/** Each child's source, kept after its state is dropped, so a child that comes back is read under the source its earlier lines carry. */
+	knownSources: Map<string, string>;
 	/** Starts true: an inherited tag's swept marker is untrusted until this life re-stamps after its own sweep. */
 	tagGrewSinceMarker: boolean;
 	/** A sweep could not read what it meant to; withholds the swept stamp. */
@@ -119,6 +121,8 @@ export interface World {
 	hashPrefix(file: string, length: number): string;
 	hashBytes(file: string): string;
 	exists(file: string): boolean;
+	/** One spelling for one file: symlinks resolved. */
+	canonical(file: string): string;
 	discoverTask(sessionPath: string): { files: string[]; unreadable: Error | null };
 	discoverClaude(commands: string[], parentTimestamp: number, ownCwd: string | null): { files: string[]; unreadable: Error | null; searched: number };
 	attribute(turns: Turn[], ownCwd: string | null, doNotFold: ReadonlySet<string>): void;
@@ -171,7 +175,8 @@ export function fsWorld(now: () => number = Date.now): World {
 			return hash.digest("hex");
 		},
 		exists: (file) => fs.existsSync(file),
-		discoverTask: (sessionPath) => discoverSubagentSessionFiles(sessionPath),
+		canonical: (file) => canonicalTranscriptPath(file),
+		discoverTask: (sessionPath) => discoverSubagentSessionFiles(sessionPath, { quietSession: true }),
 		discoverClaude: (commands, ts, cwd) => discoverClaudeSubAgentFilesForTurn(commands, ts, cwd),
 		attribute: (turns, cwd, doNotFold) => attributeClaudeSubAgentCosts(turns, cwd, doNotFold),
 		lastCwd: (file) => resolveLastCwd(file),
@@ -197,6 +202,7 @@ export function newTaggerState(sessionPath: string, tagPath: string): TaggerStat
 		pendingClaudeCommands: [],
 		discoveredClaudeFiles: new Set(),
 		discoveredSubagentFiles: new Map(),
+		knownSources: new Map(),
 		tagGrewSinceMarker: true,
 		pollHadFailure: false,
 		sessionReadFailed: false,
@@ -460,8 +466,8 @@ function parseAppendedBytes(
  * already, so its source opens a new generation, which retires every one.
  * Returns whether to skip, and whether the skip wrote a record.
  */
-function skipAsFoldedElsewhere(state: TaggerState, out: Out, rawFile: string, foldedElsewhere: Set<string>): { skip: boolean; retired: boolean } {
-	const file = canonicalTranscriptPath(rawFile);
+function skipAsFoldedElsewhere(state: TaggerState, world: World, out: Out, rawFile: string, foldedElsewhere: Set<string>): { skip: boolean; retired: boolean } {
+	const file = world.canonical(rawFile);
 	if (!foldedElsewhere.has(file)) return { skip: false, retired: false };
 	let retired = false;
 	if (state.discoveredSubagentFiles.has(file)) {
@@ -477,7 +483,7 @@ function skipAsFoldedElsewhere(state: TaggerState, out: Out, rawFile: string, fo
  *  the life of its state, across a move of the session and its own rotations,
  *  so a later generation retires the earlier lines (#263). */
 function sourceOf(state: TaggerState, file: string): string {
-	return state.discoveredSubagentFiles.get(file)?.source || transcriptSourceId(file, path.dirname(state.sessionPath));
+	return state.discoveredSubagentFiles.get(file)?.source || state.knownSources.get(file) || transcriptSourceId(file, path.dirname(state.sessionPath));
 }
 
 /** The sources a `_gen` record for `file` may carry: relative to the session's
@@ -502,7 +508,7 @@ function warnParse(state: TaggerState, out: Out, stateKey: string, sessionId: st
 	state.pollHadFailure = true;
 	if (state.warned.parse.has(stateKey)) return;
 	state.warned.parse.add(stateKey);
-	warn(out, `a subagent transcript could not be read or parsed, so its cost may be missing from this session's total until it succeeds (${sessionId}): ${errText(err)}`);
+	warn(out, `a subagent transcript, or a nested one it folds, could not be read or parsed, so its cost may be missing from this session's total until it succeeds (${sessionId}): ${errText(err)}`);
 }
 
 function syncSubagentTranscript(state: TaggerState, world: World, out: Out, now: number, rawFile: string, foldedByAnother: ReadonlySet<string>): boolean {
@@ -510,12 +516,12 @@ function syncSubagentTranscript(state: TaggerState, world: World, out: Out, now:
 	// One transcript, one state entry and one source, however the path that
 	// reached us was spelled — discovery joins paths, a fold records the path it
 	// parsed, and a symlink makes those two spellings of one file.
-	const file = canonicalTranscriptPath(rawFile);
+	const file = world.canonical(rawFile);
 	const stateKey = file;
 	const sessionId = path.basename(file, ".jsonl");
 	let fileState = state.discoveredSubagentFiles.get(stateKey);
 	if (!fileState) {
-		fileState = freshSubagentState();
+		fileState = freshSubagentState(state.knownSources.get(stateKey) ?? "");
 		state.discoveredSubagentFiles.set(stateKey, fileState);
 	}
 
@@ -678,8 +684,8 @@ function syncSubagentTranscript(state: TaggerState, world: World, out: Out, now:
 			try {
 				clones = owners.map(o => structuredClone(o.base));
 				const doNotFold = new Set([
-					canonicalTranscriptPath(state.sessionPath),
-					canonicalTranscriptPath(file),
+					world.canonical(state.sessionPath),
+					world.canonical(file),
 					...foldedByAnother,
 				]);
 				world.attribute(clones, world.lastCwd(file), doNotFold);
@@ -698,6 +704,7 @@ function syncSubagentTranscript(state: TaggerState, world: World, out: Out, now:
 
 		const source = fileState.source || transcriptSourceId(file, path.dirname(state.sessionPath));
 		fileState.source = source;
+		state.knownSources.set(stateKey, source);
 		let batch = "";
 		const nextOwners: FoldOwner[] = owners.map(o => ({ ...o }));
 		const consumedQuiet = parsed !== null
@@ -762,7 +769,7 @@ function syncSubagentTranscript(state: TaggerState, world: World, out: Out, now:
 			fileState.foldStamps = new Map();
 			for (const interaction of clones) {
 				for (const fold of interaction.claudeSubAgentFolds ?? []) {
-					fileState.foldStamps.set(canonicalTranscriptPath(fold.file), fold.stamp);
+					fileState.foldStamps.set(world.canonical(fold.file), fold.stamp);
 				}
 			}
 			fileState.spawnWindowClosesAt = world.spawnWindowClosesAt(clones, world.lastCwd(file));
@@ -802,7 +809,7 @@ function reseedClaudeChildren(state: TaggerState, world: World, out: Out, tagCon
 	};
 	const found = new Set<string>();
 	try {
-		for (const file of world.discoverTask(state.sessionPath).files) found.add(canonicalTranscriptPath(file));
+		for (const file of world.discoverTask(state.sessionPath).files) found.add(world.canonical(file));
 	} catch { /* the scan reports it */ }
 	let dirs: string[] = [];
 	try {
@@ -817,7 +824,7 @@ function reseedClaudeChildren(state: TaggerState, world: World, out: Out, tagCon
 		const holder = foldedBy.get(id);
 		if (holder !== undefined && holder !== source) continue;
 		for (const dir of dirs) {
-			const file = canonicalTranscriptPath(path.join(root, dir, `${id}.jsonl`));
+			const file = world.canonical(path.join(root, dir, `${id}.jsonl`));
 			try {
 				world.stat(file);
 			} catch (err) {
@@ -829,6 +836,7 @@ function reseedClaudeChildren(state: TaggerState, world: World, out: Out, tagCon
 			if (!found.has(file)) {
 				state.discoveredClaudeFiles.add(file);
 				if (!state.discoveredSubagentFiles.has(file)) state.discoveredSubagentFiles.set(file, freshSubagentState(source));
+				state.knownSources.set(file, source);
 			}
 			break;
 		}
@@ -942,10 +950,12 @@ export function scanChildren(state: TaggerState, world: World, opts: ScanOptions
 				// session's own turns then competes with the originals in the reader's
 				// max-cost collapse, and for a harness whose turns carry no id there is
 				// nothing to collapse them with at all.
-				if (canonicalTranscriptPath(file) === canonicalTranscriptPath(state.sessionPath)) continue;
-				state.discoveredClaudeFiles.add(file);
+				if (world.canonical(file) === world.canonical(state.sessionPath)) continue;
+				if (!state.discoveredClaudeFiles.has(file)) {
+					state.discoveredClaudeFiles.add(file);
+					debug(out, `claude -p subagent registered, read from its start (${path.basename(file, ".jsonl")})`);
+				}
 				registeredBy.set(item, [...(registeredBy.get(item) ?? []), file]);
-				debug(out, `claude -p subagent registered for re-parse (${path.basename(file, ".jsonl")})`);
 			}
 			if (discovered.unreadable) {
 				state.pollHadFailure = true;
@@ -973,7 +983,7 @@ export function scanChildren(state: TaggerState, world: World, opts: ScanOptions
 		taskAgentFiles = discoveredPi.files;
 		if (discoveredPi.unreadable) {
 			state.pollHadFailure = true;
-			debug(out, `Pi discovery candidate unreadable, will retry next poll (${path.basename(state.sessionPath)}): ${discoveredPi.unreadable.message}`);
+			debug(out, `subagent discovery candidate unreadable, will retry next poll (${path.basename(state.sessionPath)}): ${discoveredPi.unreadable.message}`);
 		}
 	} catch (err) {
 		state.pollHadFailure = true;
@@ -1004,7 +1014,7 @@ export function scanChildren(state: TaggerState, world: World, opts: ScanOptions
 	const foldedElsewhere = new Set(holderOf.keys());
 	/** What one transcript must leave alone: every child another holder owns. */
 	const notMine = (file: string): Set<string> => {
-		const me = canonicalTranscriptPath(file);
+		const me = world.canonical(file);
 		const result = new Set<string>();
 		for (const [folded, holder] of holderOf) if (holder !== me) result.add(folded);
 		return result;
@@ -1021,7 +1031,7 @@ export function scanChildren(state: TaggerState, world: World, opts: ScanOptions
 	for (const file of taskAgentFiles) {
 		if (cut) break;
 		if (!due(file)) continue;
-		const skipped = skipAsFoldedElsewhere(state, out, file, foldedElsewhere);
+		const skipped = skipAsFoldedElsewhere(state, world, out, file, foldedElsewhere);
 		if (skipped.skip) { wroteAny = wroteAny || skipped.retired; continue; }
 		wroteAny = syncSubagentTranscript(state, world, out, now, file, notMine(file)) || wroteAny;
 	}
@@ -1032,7 +1042,7 @@ export function scanChildren(state: TaggerState, world: World, opts: ScanOptions
 		// the turn it held, and the tag can be stamped swept.
 		if (!world.exists(file)) continue;
 		if (!due(file)) continue;
-		const skipped = skipAsFoldedElsewhere(state, out, file, foldedElsewhere);
+		const skipped = skipAsFoldedElsewhere(state, world, out, file, foldedElsewhere);
 		if (skipped.skip) { wroteAny = wroteAny || skipped.retired; continue; }
 		wroteAny = syncSubagentTranscript(state, world, out, now, file, notMine(file)) || wroteAny;
 	}
@@ -1040,12 +1050,15 @@ export function scanChildren(state: TaggerState, world: World, opts: ScanOptions
 	// pass stamps swept only after its growth is read, so it is due again.
 	if (!cut && continued) {
 		for (const file of readThisPass) {
-			const fileState = state.discoveredSubagentFiles.get(file);
+			const fileState = state.discoveredSubagentFiles.get(world.canonical(file));
 			if (!fileState) continue;
 			try {
 				const st = world.stat(file);
 				if (st.size === fileState.lastSize && st.mtimeMs === fileState.mtimeMs && st.ino === fileState.ino) continue;
-			} catch { continue; }
+			} catch (err) {
+				if ((err as NodeJS.ErrnoException).code !== "ENOENT") state.pollHadFailure = true;
+				continue;
+			}
 			readThisPass.delete(file);
 			cut = true;
 		}
@@ -1063,7 +1076,7 @@ export function scanChildren(state: TaggerState, world: World, opts: ScanOptions
 	if (!state.pollHadFailure) {
 		// A claude -p child stays registered after it moves or is deleted, so it
 		// counts as found only while it is on disk.
-		const found = new Set([...taskAgentFiles, ...[...state.discoveredClaudeFiles].filter(file => world.exists(file))].map(canonicalTranscriptPath));
+		const found = new Set([...taskAgentFiles, ...[...state.discoveredClaudeFiles].filter(file => world.exists(file))].map(file => world.canonical(file)));
 		// A transcript already read again under the same source this scan has
 		// opened its new generation; a pruned line would land after it.
 		const liveSources = new Set([...state.discoveredSubagentFiles].filter(([key]) => found.has(key)).map(([, s]) => s.source));
@@ -1073,8 +1086,13 @@ export function scanChildren(state: TaggerState, world: World, opts: ScanOptions
 			// transcript read again under its new path opens a new generation.
 			if (fileState.pendingTurn && !liveSources.has(fileState.source)) {
 				const source = fileState.source || transcriptSourceId(key, path.dirname(state.sessionPath));
-				const generation = fileState.newGeneration ? generationRecordLine(source, path.basename(key, ".jsonl")) : "";
-				out.records += generation + serializeClassified(fileState.pendingTurn, source);
+				const childId = path.basename(key, ".jsonl");
+				const generation = fileState.newGeneration ? generationRecordLine(source, childId) : "";
+				let folds = "";
+				for (const id of foldRecordIds(childId, [fileState.pendingTurn])) {
+					if (!fileState.recordedFolds.has(id)) folds += foldRecordLine(path.basename(state.sessionPath, ".jsonl"), id, source);
+				}
+				out.records += generation + serializeClassified(fileState.pendingTurn, source) + folds;
 				wroteAny = true;
 				state.tagGrewSinceMarker = true;
 			}

@@ -963,8 +963,11 @@ function readHeadLines(file: string, count: number): string[] {
 	}
 }
 
+/** `quietSession`: the caller reports the session transcript's own read failure
+ *  (the log parser daemon does, once), so this does not warn for it too. */
 export function discoverSubagentSessionFiles(
 	sessionPath: string,
+	opts: { quietSession?: boolean } = {},
 ): { files: string[]; unreadable: Error | null } {
 	const files: string[] = [];
 	const sessionDir = path.dirname(sessionPath);
@@ -1001,7 +1004,7 @@ export function discoverSubagentSessionFiles(
 	try {
 		mainHeaderRaw = readHeadLines(sessionPath, 1)[0];
 	} catch (err) {
-		warnUnreadableTranscript(sessionPath, "at discovery", err, "the session transcript");
+		if (!opts.quietSession) warnUnreadableTranscript(sessionPath, "at discovery", err, "the session transcript");
 		if (!firstUnreadable) {
 			firstUnreadable = new Error(
 				`session transcript could not be read at discovery (${sessionPath}): ${err instanceof Error ? err.message : String(err)}`,

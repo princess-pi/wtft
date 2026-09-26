@@ -81,11 +81,11 @@ Two kinds of sub-agent transcript exist. They are DISCOVERED differently and REA
 
 Conflating those two — treating "we have matched this file" as "we have finished reading this file" — is precisely #270's bug, and it survived on the `claude -p` path through several rounds of fixing it on the Task/agent path. That is why there is now ONE reader rather than two paths with two different correctness properties: a second reader is a second place for the same bug to live, and the earlier attempt to manage it (an ungated stderr warning announcing that this path silently undercounts) was a note about the defect rather than a fix for it. `writeSessionToTagFile` is retired with it — it was a strict subset of `syncSubagentTranscript` (parse, dedupe, serialize, append) with no change detection, no append filter, and a bare `catch`.
 
-**Parent and sub-agent are both incremental.** The parent `session.jsonl` is one file the daemon owns and only ever appends to; `parseNewLines` (`bin/wtft-daemon.ts`, `parseNewLines`) tracks a byte offset (`lastSize`) and reads only the delta each poll, threading parse state forward. A sub-agent transcript is a file the daemon does not own. It keeps its own offset on `SubagentFileState`, because a fresh process must not resume a sub-agent from the parent's `_meta` offset. An earlier byte-offset reader was built for that file and reverted: every invariant `deduplicateInteractions` and `attributeClaudeSubAgentCosts` provide is scoped to the array one call is handed, and a poll slice is a smaller array than the turns those two have to see together. Three review rounds found the same shape of defect:
+**Parent and sub-agent are both incremental.** The parent `session.jsonl` is one file the daemon owns and only ever appends to; `parseNewLines` (`extensions/lib/session-tagger.ts`) tracks a byte offset (`lastSize`) and reads only the delta each poll, threading parse state forward. A sub-agent transcript is a file the daemon does not own. It keeps its own offset on `SubagentFileState`, because a fresh process must not resume a sub-agent from the parent's `_meta` offset. An earlier byte-offset reader was built for that file and reverted: every invariant `deduplicateInteractions` and `attributeClaudeSubAgentCosts` provide is scoped to the array one call is handed, and a poll slice is a smaller array than the turns those two have to see together. Three review rounds found the same shape of defect:
 
 - `deduplicateInteractions` (`extensions/lib/wtft-parser.ts`) collapses lines sharing one `message.id`, keeping the max-cost copy. This is the common case, not an edge case — measured across twelve live transcripts, 39–76% of message ids carrying `usage` are re-emitted with growing cost across several lines (`tests/wtft-270-subagent-crosspoll-dedup.test.ts`). Two emissions of the same id landing in *different* poll windows never meet inside one `deduplicateInteractions` call, and get summed instead of collapsed.
 - `attributeClaudeSubAgentCosts` (`extensions/lib/wtft-parser.ts`) opens `const seenSessionIds = new Set<string>()` in its own body — scoped to the single call, not global (see below). Calling it once per poll batch — which that cut did, because each batch went through `parseSessionFile` — attributed the same nested `claude -p` grandchild session's cost twice, once from each batch that referenced it (`tests/wtft-270-subagent-nested-claude-attribution.test.ts`).
-- A failed tag-file append had to rewind the read offset but could not un-mutate the stream state it had already advanced, silently losing compaction attribution.
+- A failed tag-file append had to rewind the read offset but could not un-mutate the stream state it had already advanced, silently losing compaction attribution. (Since #270 S3 the state advances inside `syncSubagentTranscript` before the daemon appends, and a failed append is fatal rather than rewound.)
 
 **#97 keeps the offset, and does not hand either function a poll slice of the turns it has to see together.** `deduplicateInteractions` runs on the lines of one read. Two emissions of one `message.id` in that read collapse there. Two emissions that land in different polls become two tag lines, and `dedupeClassifiedById` keeps the max-cost copy on every read. Every fold-capable turn of one transcript is retained on `SubagentFileState.owners`, cloned from its pre-fold base. `attributeClaudeSubAgentCosts` runs on all of them in one call when a new one arrived, a folded transcript's stamp changed, the set of children another holder owns changed, a spawning window is open, or an owner has not been serialized yet. A nested session referenced from two polls is inside that one call. `fragment`, stream state, the running content hash, and `lastSize` are assigned only after `appendTagFile` returns. A failed append leaves the offset where it was. A transcript another synced transcript folds is not synced on its own, and if it was synced before that fold was seen, a generation record retires the lines it wrote (#107).
 
@@ -121,7 +121,7 @@ What is genuinely unreachable is the 175-file figure itself, for a different rea
 
 **The answer is the next daemon start, and it needs no `WTFT_TAGGER_VERSION` bump — for Task/agent sub-agents.** A fresh daemon process starts with an empty `discoveredSubagentFiles`, so it has no memory of what any previous daemon wrote; `discoverSubagentSessionFiles(sessionPath)` re-lists that session's transcripts from disk on the first poll regardless of the parent's read offset, so it reads every one from offset 0 and appends every line it derives, including exact re-statements of lines already on disk. The tag file then holds both the stale low-cost line and the fresh full-cost line for the same `message.id`, and `dedupeClassifiedById` (`extensions/lib/wtft-daemon-lib.ts`) collapses that pair to the max on every read. **Convergence is a property of the reader's collapse, not of the writer having been careful** — which is also why re-appending is safe rather than merely tolerable.
 
-**It does NOT reach already-finished `claude -p` sub-agent transcripts, and this is a real hole rather than a wording problem** (PR review). Those are discovered from the other direction: a bash turn in the PARENT transcript is matched to a transcript path, and `pendingClaudeCommands` is fed only from lines `parseNewLines` has just read (`bin/wtft-daemon.ts`, the `hasClaudeCommand(interaction)` push). On a restart where the tag file yields a `_meta` offset, `initClassified` resumes `lastSize` at that offset — end of file — so no parent line is re-read, no bash turn is re-matched, and `discoveredClaudeFiles` (empty at process start, and never seeded from disk) stays empty. Nothing re-lists `~/.claude/projects` looking for them, because a `claude -p` transcript lives in an arbitrary cwd's project directory with no structural link back to this session. So a `claude -p` sub-agent that finished under a pre-#270 daemon keeps its undercount across every subsequent restart. Filed as **#456**; the convergence claim above is scoped to the Task/agent path until it is closed.
+**Already-finished `claude -p` sub-agent transcripts are reached by the resume, not by discovery** (PR review, then #259). Those are discovered from the other direction: a bash turn in the PARENT transcript is matched to a transcript path, and `pendingClaudeCommands` is fed from lines `parseNewLines` has just read (`extensions/lib/session-tagger.ts`, the `hasClaudeCommand(interaction)` push) and, on a restart, from the tag's open `spawnPending` records. On a restart where the tag file yields a `_meta` offset, `initClassified` resumes `lastSize` at that offset — end of file — so no parent line is re-read; instead `resumeTagger` re-registers every `claude -p` child the tag's generation records name, listing `~/.claude/projects` for each id, and reads it again from its start as a new generation (`docs/spec-259-daemon-correctness.md` § Resume). A `claude -p` sub-agent that finished under a pre-#270 daemon and never got a generation record is the one case the resume cannot see; that was **#456**.
 
 Measured on #270's own specimen, session `7c0c2b7e` (15 Task subagents, finished 2026-08-13), restoring its genuine pre-#270 v2.7.1 tag (1,132,374 bytes) byte-identical before each trial and killing every daemon for that session first:
 
@@ -218,27 +218,32 @@ It cannot ride the existing `_meta.offset` line: that line is written only by
 session — this issue's own case — it never runs again.
 
 **Withheld on a failed poll.** `pollHadFailure` is set by every failure handler —
-`syncSubagentTranscript`'s stat/parse/serialize/write, and `flushPending`'s own write —
-so a poll that could not write what it was asked to does not claim to have swept: the tag
-stays provisional and the next poll retries.
+`syncSubagentTranscript`'s stat, read, parse, attribution and serialize handlers, the
+discovery and reseed failures in `scanChildren`, and a failed read of the session
+transcript — so a poll that could not read what it was asked to does not claim to have
+swept: the tag stays provisional and the next poll retries. A failed tag append is not a
+poll failure but a fatal one: `appendTagFile` calls `fatalTagMutation`, which stops the
+daemon and marks the lease `rebuild`.
 
-It is reset by the **poll loop**, not on entry to `scanForSubAgents`. Resetting it inside
-the sweep was the obvious placement and was wrong: `flushPending()` runs *before* that
-function in the same poll, so the reset wiped the flush's own failure a few statements
-after it was set, and the marker could stamp the tag settled over a lost parent batch. It
-is per *poll* rather than per daemon because a transcript that failed last poll and
-succeeds this one must not keep the tag provisional forever — the `warned*` Sets are
-cumulative by design and cannot answer "was **this** poll clean".
+It is reset by the session read at the start of the poll (`readSession`), not on entry
+to the child scan; a scan the sweep starts itself sets it to the last session read's result
+first. Resetting it inside the sweep was the obvious placement and was wrong:
+the flush runs *before* the scan in the same poll, so a reset there wiped an earlier
+failure a few statements after it was set, and the marker could stamp the tag settled
+over it. It is per *poll* rather than per daemon because a transcript that failed last
+poll and succeeds this one must not keep the tag provisional forever — the `warned` Sets
+are cumulative by design and cannot answer "was **this** poll clean".
 
-**`flushPending` no longer clears `pendingItems` before writing.** It did, on `main` and
-in this branch's first draft, which lost a whole billed batch permanently whenever the
-append threw — the items were gone before anything could fail. That loss predates #443,
+**A pending batch is never lost silently.** `flushTurns` hands the batch to the daemon and
+clears `pendingItems`; the daemon's append is fatal on failure (above), so the daemon
+stops with the lease marked for a rebuild rather than continuing without the batch. An
+earlier draft cleared the items and then appended with a non-fatal failure path, which
+lost a whole billed batch permanently whenever the append threw. That loss predates #443,
 but the marker made it worse rather than merely inheriting it: a sweep could stamp over
-the gap, turning a silent undercount into an affirmative *settled*. The batch is now kept
-for the next poll unless it actually reached disk, and `tagGrewSinceMarker` is set the
-moment the classified lines land rather than after the `_meta.offset` line — a failure
-*between* the two otherwise left the tag grown and the flag false, so the next sweep
-skipped the re-stamp.
+the gap, turning a silent undercount into an affirmative *settled*. Now the classified lines
+and the `_meta.offset` line go to disk in one append, `tagGrewSinceMarker` is set when
+`flushTurns` builds that batch, and a failed append stops the daemon, so there is no state in
+which the tag grew and the flag is false.
 
 **Append failure is terminal, not a retry protocol.** A tag is a transient derived cache,
 and re-deriving it from the available harness-specific session logs is assumed cheap in

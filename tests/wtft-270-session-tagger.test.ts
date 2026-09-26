@@ -340,6 +340,8 @@ console.log("  B, G — the held turn of a child no longer found is written, und
 	const first = stepTagger(state, c.world, { flush: true });
 	tag.append(first.records);
 	check(hasTurn(first.records, "k1") && !hasTurn(first.records, "k2"), "B fixture: the child's first turn is written and its last is held");
+	// The session moves first, so the source its directory would give now differs from the one the earlier lines carry.
+	state.sessionPath = moveSession(f.session, path.join(root, "own-17-moved"));
 	fs.unlinkSync(f.child);
 	c.tick();
 	const after = stepTagger(state, c.world, { flush: true });
@@ -347,6 +349,16 @@ console.log("  B, G — the held turn of a child no longer found is written, und
 	check(hasTurn(after.records, "k2"), "G a deleted claude -p child's held turn is written by the next scan");
 	check(sourceOfLine(turnLine(after.records, "k2")) === sourceOfLine(turnLine(first.records, "k1")), "B under the source its earlier lines carry");
 	check(after.records.includes('"swept"'), "B and that scan stamps the tag swept: the deleted child counts as gone, not as a failure");
+	// The child comes back with different contents: it is read again under the source its earlier lines carry, which retires them.
+	fs.writeFileSync(f.child, ccUser(T0 + 2_000, f.cwd) + ccAssistant({ id: "k1", tsMs: T0 + 3_000, output: 500, cr: 0, cw: 8_000 }) + ccAssistant({ id: "k3", tsMs: T0 + 4_000, output: 40, cr: 8_000, cw: 0 }));
+	c.tick();
+	const back = runUntilQuiet(state, c.world, c.tick).records;
+	tag.append(back);
+	const gens = genLines(tag.all);
+	check(gens.length === 2 && gens[0] === gens[1] && !hasTurn(back, "k2") && hasTurn(back, "k1") && hasTurn(back, "k3"), `B a child that comes back opens its generation under that same source, retiring the earlier lines (${gens.length} generation records)`);
+	const full = parseCost(state.sessionPath);
+	const got = tagCost(tagPath);
+	check(sameCost(got, full), `B so the tag equals a full parse ($${got} vs $${full})`);
 }
 {
 	const f = sameDirClaudep(root, 18);
@@ -354,12 +366,15 @@ console.log("  B, G — the held turn of a child no longer found is written, und
 	const tag = tagWriter(tagPath);
 	const state = newTaggerState(f.session, tagPath);
 	const c = clock();
-	tag.append(stepTagger(state, c.world, { flush: true }).records);
+	const first = stepTagger(state, c.world, { flush: true });
+	tag.append(first.records);
+	state.sessionPath = moveSession(f.session, path.join(root, "own-18-moved"));
 	fs.renameSync(f.child, path.join(root, "own-18-child-moved.jsonl"));
 	c.tick();
 	const after = stepTagger(state, c.world, { flush: true });
 	tag.append(after.records);
 	check(hasTurn(after.records, "k2") && after.records.includes('"swept"'), "G a moved claude -p child's held turn is written and the tag is stamped swept");
+	check(sourceOfLine(turnLine(after.records, "k2")) === sourceOfLine(turnLine(first.records, "k1")), "G under the source its earlier lines carry");
 }
 console.log("  C — the generation record is written before that held turn, when its transcript opened none");
 {
@@ -379,6 +394,8 @@ console.log("  C — the generation record is written before that held turn, whe
 	const genAt = lines.findIndex(l => l.includes('"_gen"'));
 	const turnAt = lines.findIndex(l => l.includes('"id":"k1"'));
 	check(genAt >= 0 && turnAt === genAt + 1, `C the generation record precedes the released turn (gen at ${genAt}, turn at ${turnAt})`);
+	const foldAt = lines.findIndex(l => l.includes('"_fold"') && l.includes(`"child":"${path.basename(f.child, ".jsonl")}"`));
+	check(foldAt === turnAt + 1, `C and the child's fold record follows it, as it does any written turn (fold at ${foldAt})`);
 }
 console.log("  D — a held turn is pruned when its transcript was read again under the same source in the same scan");
 {

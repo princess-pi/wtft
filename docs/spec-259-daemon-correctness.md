@@ -31,19 +31,24 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 ### Swept (A2, decision A)
 
 - **A `claude -p` child that moved or was deleted counts as gone**, so a turn it held back is
-  written and the tag can be stamped swept.
+  written (unless a transcript with the same source was read again in that scan, which read
+  the turn itself) and the tag can be stamped swept.
 - **Swept means every subagent turn is written.** A scan that holds back a subagent transcript's
-  last turn (the one an interrupt record arriving next would mark) does not stamp the tag swept.
+  last ordinary turn (the one an interrupt record arriving next would mark; a `claude -p` command
+  turn is never held) does not stamp the tag swept.
   The next scan that finds no new bytes writes that turn, and stamps swept if it was clean.
   A transcript no longer found (its session moved) has its held turn written under the source its
-  earlier lines carry, so the generation that reads it again under the new path retires it.
+  earlier lines carry, so the generation that reads it again under the new path retires it; when
+  that read happens in the same scan under the same source, it has read the turn itself and the
+  held copy is dropped.
 
 ### Resume (A1 residual)
 
 - **A resumed session reads again the `claude -p` transcripts it read before.** A daemon adopting
-  a tag at its saved offset finds, from the tag's generation records, each subagent transcript an
-  earlier daemon read that is not under the session's own directory, and reads it again from its
-  start, as a new generation. So what it gained while nothing served the session is counted, and
+  a tag at its saved offset finds, from the tag's generation records, each `claude -p` transcript
+  an earlier daemon read, in the session's own project directory or another, and reads it again
+  from its start, as a new generation; a transcript discovery finds on its own (under
+  `<id>/subagents/`, or a Pi sibling) is left to discovery. So what it gained while nothing served the session is counted, and
   so is what it writes from then on. A transcript another one currently folds (a `_fold` record
   under the other's source, not retired by a later generation of it) is left to that one. When the
   projects directory or a transcript cannot be read, that is reported on stderr, the resume is
@@ -122,7 +127,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 ### Hand-off (I24, I27)
 
 - **The hand-off is kept current.** A harness rewrites `<harness pid file>.served` whenever the
-  set of sessions it serves or has dropped for idling changes, and removes it when both are empty.
+  set of sessions it serves, has dropped for idling or is retrying to adopt changes, and removes
+  it when all three are empty.
   So a harness killed before its SIGTERM handler runs, which `--restart` does after 2 s, still
   passes on what it served.
 - **A hand-off that cannot be read is moved aside** to `<hand-off>.unreadable-<UTC time>`, kept,

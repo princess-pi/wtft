@@ -230,21 +230,6 @@ function appendTagFile(filePath: string, batch: string): void {
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // ---
 
 /** Returns null if no _meta line found (tag file predates offset tracking). */

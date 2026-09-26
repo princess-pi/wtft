@@ -197,7 +197,7 @@
     },
     {
       "flags": "--cleanup",
-      "desc": "Kill log parser daemons whose source session no longer exists. A harness process is not killed because the session it was started for is gone; it drops a gone session itself. A per-session fixture daemon under the tmp dir that holds no lease there is killed too. A harness process is never killed; it stops itself after 24h with no session to serve."
+      "desc": "Kill log parser daemons whose source session no longer exists. A harness process is not killed because the session it was started for is gone; it drops a gone session itself. A per-session fixture daemon under the tmp dir that holds no lease there is killed too. A harness process is never killed; it stops itself once it has served nothing, holds no idle-dropped session and retries no adoption for 24h."
     },
     {
       "flags": "--restart",

@@ -38,7 +38,14 @@ assert(
 	defs.length === 1,
 );
 
-const calls = code.match(/syncSubagentTranscript\s*\([^)]*\bfile\b[^)]*\)/g) || [];
+// Both loops read through `syncOne`, the one wrapper that marks a failed read
+// for the pass; the reader itself is called from that wrapper alone.
+const direct = code.match(/(?<!function )\bsyncSubagentTranscript\s*\(/g) || [];
+assert(
+	`the reader has one call site, inside syncOne (found ${direct.length})`,
+	direct.length === 1 && /const syncOne = [^]*?syncSubagentTranscript\s*\(/.test(code),
+);
+const calls = code.match(/\bsyncOne\s*\(\s*file\b/g) || [];
 assert(
 	`both discovery paths call it — at least 2 call sites (found ${calls.length})`,
 	calls.length >= 2,

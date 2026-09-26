@@ -86,8 +86,8 @@ Behaviour that changes, each in the direction of one rule for every reader:
   only by a live lease, polled once a second five times; with none by then, the view showed
   `starting...` for as long as it ran. Now the restart passes its time as `spawnedAt` and the
   view shows what `health` finds from the first ask; the five-poll interval is gone, and the
-  watchdog asks as it does at any other time. `--watch` started with a daemon it just spawned
-  passes its own start time the same way.
+  watchdog asks as it does at any other time. `--watch` passes its own start time the same way,
+  since it always spawns a daemon first.
 - **`waiting-session` in `--watch`** renders only once there are chart lines; before that
   `--watch` prints its waiting line instead.
 - **`--watch`'s idle countdown counts from `idleSinceMs` at each render**, as the widget's
@@ -96,9 +96,9 @@ Behaviour that changes, each in the direction of one rule for every reader:
   `--session` whose lease is that row's lease (hashed from the argument as given or resolved
   against the holder's cwd) gets its idle column from `decideHealth` over that lease, with no
   session-file read for a model: the time since `idleSinceMs`
-  while idle, `0s` while live, the time since `lastHbMs` when `health` has one, else `?` (`waiting-session` included). Any
+  while idle, `0s` while live, the time since `lastHbMs` when `decideHealth` has one, else `?` (`waiting-session` included). Any
   other row prints `?`. RUNNING
-  and DEAD are unchanged and are not `health`'s: they are `--list`'s own `kill 0`. Which session a
+  and DEAD are unchanged and are not `decideHealth`'s: they are `--list`'s own `kill 0`. Which session a
   harness-held lease line names is #276.
 
 ## 3. Closer
@@ -111,7 +111,7 @@ Behaviour that changes, each in the direction of one rule for every reader:
   axes.
 - `tests/wtft-179-daemon-health-reason.test.ts` unchanged and passing.
 - The widget (`getDaemonStatus`), `--watch` (`updateDaemonHealth`), `awaitDaemonUp`,
-  `ensureDaemonRunning` and `wtft-daemon --list`'s idle column call `health`; `grep checkDaemonHealth` over
+  `ensureDaemonRunning` call `health`, and `wtft-daemon --list`'s idle column calls `decideHealth` over the row's own lease; `grep checkDaemonHealth` over
   `bin/` and `extensions/` finds nothing.
 - The golden tags suite (S0) and the daemon suites pass unchanged.
 

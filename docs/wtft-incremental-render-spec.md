@@ -36,7 +36,7 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 │  incremental append. Renders full chart                 │
 │  on every new data event + per-minute timeline refresh. │
 │  Monitors daemon health via health() (lease, tag tail). │
-│  'r' key restarts the daemon (5s starting grace).       │
+│  5s starting grace after its own spawn and after 'r'.   │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -580,7 +580,7 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 3. Press `r` on a per-session daemon → status shows `● starting...`, then `● live` (or `● idle` on an idle session) within 5s
 4. Wait 2m2s with no session activity → status flips to `● idle (cache expires in Nmin)`
 5. Wait 24h with no session activity → daemon exits, title shows stopped indicator
-6. Run `wtft --list` → the log parser daemons and their leases, RUNNING or DEAD, with idle ages
+6. Run `wtft --list` → the log parser daemons and their leases, RUNNING or DEAD. Idle is `0s` for a session active in the last 2m2s, and `?` for a harness-held lease whose session is not the harness's `--session` (#276)
 7. Pi `/wtft` widget → shows same idle/stopped states as CLI (shared `renderDaemonStatus`)
 8. Terminal resize → width auto-fits; status reflows correctly (inline vs. separate line)
 9. Idle for 2m2s with a remote model (Claude/DeepSeek) → status shows `(cache expires in Nmin)`

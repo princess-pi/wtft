@@ -193,7 +193,7 @@
     },
     {
       "flags": "--list",
-      "desc": "List the log parser daemons and their leases: PID, RUNNING or DEAD (stale pid), tagger version, idle age (? when unknown) and session."
+      "desc": "List the log parser daemons and their leases: PID, RUNNING or DEAD (stale pid), tagger version, idle age (0s until the session has been idle 2m2s; ? when unknown, including every lease held for a session other than the holder's --session) and session."
     },
     {
       "flags": "--cleanup",

@@ -1487,7 +1487,7 @@ ${USAGE}
 
 Management:
   --list, -l            List the daemons and their leases, fixture processes included: RUNNING or DEAD,
-                        tagger version, idle age (? when unknown), session
+                        tagger version, idle age (0s until idle 2m2s; ? when unknown), session
   --cleanup             Kill per-session daemons whose session is gone, and fixture ones under the tmp dir
                         that hold no lease here; never a harness process, which stops once it has nothing to serve or watch
   --restart             Stop every daemon holding a lease or a root pid file here, and respawn one per live

@@ -9,30 +9,8 @@ import { createHash } from "node:crypto";
 import { projectsDir } from "../extensions/lib/harness/claude-code/discovery.js";
 import { tagRecords, parseTagLine, lastOffset, isDataRecord } from "../extensions/lib/tag-log.js";
 import { claimLease, unlinkLeaseIf, replaceLease as publishLease, leaseHolder } from "../extensions/lib/lease.js";
+import { newTaggerState, readSession, flushTurns, scanChildren, resumeTagger, fsWorld, MTIME_SETTLE_MS, type TaggerState, type LogLine } from "../extensions/lib/session-tagger.js";
 import {
-	parseEntryToInteraction,
-	parseSessionFile,
-	deduplicateInteractions,
-	attributeClaudeSubAgentCosts,
-	serializeClassified,
-	serializeClassifiedWithOverheadSplit,
-	foldRecordLine,
-	foldRecordIds,
-	generationRecordLine,
-	transcriptSourceId,
-	fileStamp,
-	claudeSpawnWindowClosesAt,
-	CLAUDE_SUBAGENT_WINDOW_MS,
-	applyControlEntry,
-	newParseStreamState,
-	extractCwdFromBashCommand,
-	resolveLastCwd,
-	commandSpawnsAgent,
-	extractRealCommands,
-	discoverClaudeSubAgentFilesForTurn,
-	canonicalTranscriptPath,
-	discoverSubagentSessionFiles,
-	clearSubagentCacheMiss,
 	loadUserPricing,
 	resolveMovedSession,
 	getCurrentVersionTagPath,
@@ -40,7 +18,6 @@ import {
 	daemonLaunchArgs,
 	isSessionIdBasename,
 	loadExternalHarnesses,
-	warnUnreadableTranscript,
 	WTFT_TAGGER_VERSION as TAGGER_VERSION,
 	taggerIsOlder,
 	lastLineStartByte,
@@ -73,87 +50,9 @@ const SESSION_WAIT_MAX_MS = 60 * 60 * 1000;
 
 // ---
 
-let sessionPath = "";
-let tagPath = "";
-let pidPath = "";
-let rebuildTagOnStartup = false;
-let lastSize = 0;
-// Trailing partial line as BYTES: advance offset each poll; settle a same-bytes fragment that parses as JSON (writer died without newline).
-let pendingFragment: Buffer = Buffer.alloc(0);
-let lastWriteMs = 0; // last time we flushed to the tag file
-let lastActivityMs = Date.now(); // last time we classified a new interaction
-let startupTime = Date.now();
-let pendingItems: { interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>; prevCtx: number }[] = [];
-let idleStartMs = 0;
-let streamState = newParseStreamState();
-let stampInterruptOnPending = false;
-let prevCtxTokens = 0;
 let running = true;
-let sessionExisted = false;
-let sessionIno = -1;
 let harnessMode = false;
-let displayedSession = true;
 
-let pendingClaudeCommands: { interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>; prevCtx: number }[] = [];
-let discoveredClaudeFiles = new Set<string>();
-// Starts true: an inherited tag's swept marker is untrusted until this daemon re-stamps after its own sweep.
-let tagGrewSinceMarker = true;
-// Set when a sweep could not read what it meant to; withholds the swept stamp.
-let pollHadFailure = false;
-/** The last read of the session's own transcript failed; only a read clears it. */
-let sessionReadFailed = false;
-// After unswept retraction, stamp on next clean poll even if the tag did not grow.
-let sweptRetracted = false;
-/** Quiet longer than coarsest mtime tick before a no-change skip is safe. */
-const MTIME_SETTLE_MS = 2000;
-
-const warnedSubagentStatFailure = new Set<string>();
-const warnedSubagentParseFailure = new Set<string>();
-const warnedSubagentSerializeFailure = new Set<string>();
-
-interface FoldOwner {
-	base: NonNullable<ReturnType<typeof parseEntryToInteraction>>;
-	lastLine: string;
-	lastCost: number;
-}
-
-interface SubagentFileState {
-	lastSize: number;
-	mtimeMs: number;
-	/** Stamped when new bytes were read. A same-size rewrite can hide inside MTIME_SETTLE_MS. */
-	readAtMs: number;
-	ino: number;
-	contentHash: ReturnType<typeof createHash>;
-	fragment: Buffer;
-	stream: ReturnType<typeof newParseStreamState>;
-	/** The next write opens a generation: a `_gen` record, then every current line. */
-	newGeneration: boolean;
-	/** Fold ids this generation has recorded. The CLI's spawn walk skips exactly
-	 *  the recorded ids, so a fold with no record is billed twice. */
-	recordedFolds: Set<string>;
-	/** Each nested transcript the last attribution folded, with the stamp it was read at. */
-	foldStamps: Map<string, string>;
-	/** Until then a spawning turn can still gain a `claude -p` child. */
-	spawnWindowClosesAt: number;
-	owners: FoldOwner[];
-	/** Last ordinary turn not yet written, so a following interrupt can still mark it. */
-	pendingTurn: NonNullable<ReturnType<typeof parseEntryToInteraction>> | null;
-	/** The source its lines were written under; a session move changes what
-	 *  transcriptSourceId would compute for the old path. */
-	source: string;
-	/** The last turn read, of any kind, and whether a Claude command made it an
-	 *  owner: the turn an interrupt at the head of the next read follows. */
-	lastTurn: { turn: NonNullable<ReturnType<typeof parseEntryToInteraction>>; owner: boolean } | null;
-	/** Which children another holder owned at the last parse — when that set
-	 *  changes this transcript's own total does too, so the gate must fire. */
-	foldedByAnother: string;
-}
-
-function foldSetSignature(files: ReadonlySet<string>): string {
-	return [...files].sort().join("\u0000");
-}
-
-let discoveredSubagentFiles = new Map<string, SubagentFileState>();
 
 // ---
 
@@ -168,14 +67,14 @@ function shutdown(reason: string) {
     process.stderr.write(`[wtft-log-parser] shutdown: ${reason}\n`);
   }
   // Taken-over daemon exits silently — must not recreate the tag or unlink the new owner's lease.
-  if (leaseHolder(pidPath) === String(process.pid)) {
+  if (leaseHolder(slot.pidPath) === String(process.pid)) {
     flushPending();
     try {
-      if (fs.existsSync(tagPath)) {
-        appendTagFile(tagPath, stopLine(reason));
+      if (fs.existsSync(slot.state.tagPath)) {
+        appendTagFile(slot.state.tagPath, stopLine(reason));
       }
     } catch (_) {}
-    unlinkLeaseIf(pidPath, String(process.pid));
+    unlinkLeaseIf(slot.pidPath, String(process.pid));
   }
   process.exit(0);
 }
@@ -188,10 +87,10 @@ process.on("SIGHUP", () => { if (harnessMode) stopHarness("SIGHUP"); else shutdo
 
 /** Overwrite same-width heartbeat in place (fixed-width pwrite); else append. File never shrinks. */
 function upsertHeartbeat(now: number) {
-  const hbLine = JSON.stringify({ _hb: { first: idleStartMs, last: now } }) + "\n";
+  const hbLine = JSON.stringify({ _hb: { first: slot.idleStartMs, last: now } }) + "\n";
   const hbBuf = Buffer.from(hbLine, "utf8");
   try {
-    const fd = fs.openSync(tagPath, "r+");
+    const fd = fs.openSync(slot.state.tagPath, "r+");
     try {
       const size = fs.fstatSync(fd).size;
       const lineStart = size > 0 ? lastLineStartByte(fd, size) : 0;
@@ -208,11 +107,11 @@ function upsertHeartbeat(now: number) {
     }
   } catch (_) {
   }
-  appendTagFile(tagPath, hbLine);
+  appendTagFile(slot.state.tagPath, hbLine);
 }
 
 function replaceLease(value: string): void {
-  publishLease(pidPath, value, String(process.pid));
+  publishLease(slot.pidPath, value, String(process.pid));
 }
 
 /** Cut an unterminated tag tail left by a killed append. Caller rebuilds the tag — resume after a cut can double-bill id-less turns. */
@@ -242,7 +141,7 @@ function truncatePartialTail(path: string): boolean {
 
 /** Stop after an append whose on-disk extent is unknowable; publish a rebuild lease for the next owner. */
 function fatalTagMutation(filePath: string, operation: "append" | "rebuild truncate" | "partial-tail truncate", err: unknown): never {
-  if (running && harnessMode && holdsHarnessRoot()) writeServedHandOff(path.resolve(sessionPath));
+  if (running && harnessMode && holdsHarnessRoot()) writeServedHandOff(path.resolve(slot.state.sessionPath));
   running = false;
   let markedForRebuild = false;
   try {
@@ -261,6 +160,60 @@ function fatalTagMutation(filePath: string, operation: "append" | "rebuild trunc
   process.exit(1);
 }
 
+const world = fsWorld();
+
+function printLog(log: LogLine[]) {
+  for (const line of log) {
+    if (line.level === "warn" || process.env.WTFT_DAEMON_DEBUG) process.stderr.write(line.text + "\n");
+  }
+}
+
+function flushPending() {
+  const batch = flushTurns(slot.state);
+  if (!batch) return;
+  appendTagFile(slot.state.tagPath, batch);
+  if (process.env.WTFT_DAEMON_DEBUG) {
+    process.stderr.write(`[wtft-log-parser] session flush ${Date.now()} ${path.basename(slot.state.sessionPath)}\n`);
+  }
+  slot.idleStartMs = 0;
+  slot.lastWriteMs = Date.now();
+}
+
+/** Harness sessions whose subagent scan ran out of its slice and continues on
+ *  the next turn of the event loop. */
+const subagentScansContinuing = new Set<string>();
+
+function scanForSubAgents() {
+  const scan = scanChildren(slot.state, world, harnessMode ? { sliceMs: HARNESS_SCAN_SLICE_MS } : {});
+  printLog(scan.log);
+  if (scan.records) appendTagFile(slot.state.tagPath, scan.records);
+  if (scan.wrote) {
+    const now = Date.now();
+    slot.lastWriteMs = now;
+    slot.lastActivityMs = now;
+    slot.idleStartMs = 0;
+  }
+  if (!scan.cut) return;
+  const key = path.resolve(slot.state.sessionPath);
+  if (subagentScansContinuing.has(key)) return;
+  subagentScansContinuing.add(key);
+  const owner = harnessSlots.get(key);
+  const next = () => {
+    // The slot may have moved to a new path since the cut; a move re-keys the marker.
+    const current = owner ? path.resolve(owner.state.sessionPath) : key;
+    const held = harnessSlots.get(current) === owner ? owner : undefined;
+    if (!held || !running) return;
+    subagentScansContinuing.delete(current);
+    if (!leaseStillOurs(held)) {
+      leaseLost(current, held);
+      return;
+    }
+    withSlot(held, () => scanForSubAgents());
+  };
+  if (HARNESS_SCAN_YIELD_MS > 0) setTimeout(next, HARNESS_SCAN_YIELD_MS);
+  else setImmediate(next);
+}
+
 /** Append whole lines only; readers may assume no mid-file fragment. */
 function appendTagFile(filePath: string, batch: string): void {
   if (batch.length > 0 && !batch.endsWith("\n")) {
@@ -276,872 +229,21 @@ function appendTagFile(filePath: string, batch: string): void {
   }
 }
 
-function flushPending() {
-  if (pendingItems.length === 0) return;
-  const batch = pendingItems.map(it => serializeClassifiedWithOverheadSplit(it.interaction, it.prevCtx)).join("");
-  appendTagFile(tagPath, batch);
-  if (process.env.WTFT_DAEMON_DEBUG) {
-    process.stderr.write(`[wtft-log-parser] session flush ${Date.now()} ${path.basename(sessionPath)}\n`);
-  }
-  tagGrewSinceMarker = true;
-  appendTagFile(tagPath, JSON.stringify({ _meta: { offset: lastSize } }) + "\n");
-  pendingItems = [];
-  idleStartMs = 0;
-  lastWriteMs = Date.now();
-}
 
-function hasClaudeCommand(interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>): boolean {
-  return interaction.commands.some(commandSpawnsAgent);
-}
 
-function spawnKey(interaction: { messageId?: string; timestamp: number }): string {
-  return interaction.messageId ?? String(interaction.timestamp);
-}
 
-/** A `claude -p` lookup still open when a daemon stops is resumed from these
- *  markers: `spawnPending` when the turn is queued, `spawnSettled` when its
- *  lookup ends. */
-function queueClaudeCommand(interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>, prevCtx: number) {
-  const key = spawnKey(interaction);
-  // Claude Code writes one message as several lines sharing its id, and a
-  // later line can carry another spawning command: merge, never drop.
-  let item = pendingClaudeCommands.find(pending => spawnKey(pending.interaction) === key);
-  if (item) {
-    const merged = [...new Set([...item.interaction.commands, ...interaction.commands])];
-    if (merged.length === item.interaction.commands.length) return;
-    item.interaction = { ...item.interaction, commands: merged };
-  } else {
-    item = { interaction, prevCtx };
-    pendingClaudeCommands.push(item);
-  }
-  appendTagFile(tagPath, JSON.stringify({ _meta: { spawnPending: {
-    key, at: item.interaction.timestamp, commands: item.interaction.commands,
-  } } }) + "\n");
-}
 
-/** Requeue each lookup an earlier life left open. */
-function resumeClaudeLookups(tagContent: string) {
-  const open = new Map<string, { at: number; commands: string[] }>();
-  const settledChildren: string[] = [];
-  const readSources = new Set<string>();
-  for (const r of tagRecords(tagContent)) {
-    if (r.kind === "generation") readSources.add(r.source);
-    else if (r.kind === "spawn-pending") open.set(r.key, { at: r.at, commands: r.commands });
-    else if (r.kind === "spawn-settled") { settledChildren.push(...r.children); open.delete(r.key); }
-  }
-  // A child a settled lookup found that no earlier life read.
-  for (const file of settledChildren) {
-    if (readSources.has(transcriptSourceId(file, path.dirname(sessionPath)))) continue;
-    if (fs.existsSync(file)) discoveredClaudeFiles.add(file);
-  }
-  for (const [key, { at, commands }] of open) {
-    if (pendingClaudeCommands.some(item => spawnKey(item.interaction) === key)) continue;
-    const interaction = { messageId: key, timestamp: at, commands } as unknown as NonNullable<ReturnType<typeof parseEntryToInteraction>>;
-    pendingClaudeCommands.push({ interaction, prevCtx: 0 });
-  }
-}
 
-function freshSubagentState(): SubagentFileState {
-  return {
-    lastSize: 0,
-    mtimeMs: -1,
-    readAtMs: 0,
-    ino: -1,
-    contentHash: createHash("sha1"),
-    fragment: Buffer.alloc(0),
-    stream: newParseStreamState(),
-    newGeneration: true,
-    recordedFolds: new Set<string>(),
-    foldStamps: new Map<string, string>(),
-    spawnWindowClosesAt: 0,
-    owners: [],
-    pendingTurn: null,
-    source: "",
-    lastTurn: null,
-    foldedByAnother: "",
-  };
-}
 
-function hashFilePrefix(file: string, length: number): string {
-  const hash = createHash("sha1");
-  const fd = fs.openSync(file, "r");
-  try {
-    const buf = Buffer.alloc(64 * 1024);
-    let pos = 0;
-    while (pos < length) {
-      const n = fs.readSync(fd, buf, 0, Math.min(buf.length, length - pos), pos);
-      if (n <= 0) break;
-      hash.update(buf.subarray(0, n));
-      pos += n;
-    }
-  } finally {
-    fs.closeSync(fd);
-  }
-  return hash.digest("hex");
-}
 
-function hashFileBytes(file: string): string {
-  const hash = createHash("sha1");
-  const fd = fs.openSync(file, "r");
-  try {
-    const buf = Buffer.alloc(64 * 1024);
-    let pos = 0;
-    for (;;) {
-      const n = fs.readSync(fd, buf, 0, buf.length, pos);
-      if (n <= 0) break;
-      hash.update(buf.subarray(0, n));
-      pos += n;
-    }
-  } finally {
-    fs.closeSync(fd);
-  }
-  return hash.digest("hex");
-}
 
-function parseAppendedBytes(
-  state: SubagentFileState,
-  fresh: Buffer,
-): {
-  interactions: NonNullable<ReturnType<typeof parseEntryToInteraction>>[];
-  fragment: Buffer;
-  stream: ReturnType<typeof newParseStreamState>;
-  stampInterrupt: boolean;
-} {
-  const stream = { ...state.stream };
-  const buf = state.fragment.length > 0 ? Buffer.concat([state.fragment, fresh]) : fresh;
-  const lastNl = buf.lastIndexOf(0x0a);
-  const tail = buf.subarray(lastNl + 1);
-  let settledFragment = false;
-  if (tail.length > 0 && tail.equals(state.fragment) && fresh.length === 0) {
-    try { JSON.parse(tail.toString("utf8")); settledFragment = true; } catch { /* still mid-record */ }
-  }
-  if (lastNl === -1 && !settledFragment) {
-    return { interactions: [], fragment: Buffer.from(buf), stream, stampInterrupt: false };
-  }
-  const consumeTo = settledFragment ? buf.length : lastNl + 1;
-  const fragment = consumeTo >= buf.length ? Buffer.alloc(0) : Buffer.from(buf.subarray(consumeTo));
-  const newContent = buf.subarray(0, consumeTo).toString("utf8");
-  const interactions: NonNullable<ReturnType<typeof parseEntryToInteraction>>[] = [];
-  let stampInterrupt = false;
-  for (const line of newContent.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      const entry = JSON.parse(line);
-      const isControl = applyControlEntry(entry, stream, () => {
-        if (interactions.length > 0) interactions[interactions.length - 1].interrupted = true;
-        else stampInterrupt = true;
-      });
-      if (isControl) continue;
-      const interaction = parseEntryToInteraction(entry, stream.thinkingLevel, stream.compactionTokensBefore, stream.afterCompaction, stream.model);
-      if (interaction) {
-        interactions.push(interaction);
-        stream.compactionTokensBefore = undefined;
-        stream.afterCompaction = false;
-      }
-    } catch { /* one bad line is not a file failure */ }
-  }
-  return { interactions, fragment, stream, stampInterrupt };
-}
 
-/** Set by {@link skipAsFoldedElsewhere} when its skip also wrote a record. */
-let retiredThisPoll = false;
 
-/**
- * Whether another synced transcript already folds this one — in which case
- * syncing it too would write its turns a second time, under its own source.
- *
- * One synced BEFORE the parse that showed who folds it has those lines on disk
- * already, so its source opens a new generation, which retires every one.
- */
-function skipAsFoldedElsewhere(rawFile: string, foldedElsewhere: Set<string>): boolean {
-  retiredThisPoll = false;
-  const file = canonicalTranscriptPath(rawFile);
-  if (!foldedElsewhere.has(file)) return false;
-  if (discoveredSubagentFiles.has(file)) {
-    appendTagFile(tagPath, generationRecordLine(
-      transcriptSourceId(file, path.dirname(sessionPath)), path.basename(file, ".jsonl")));
-    discoveredSubagentFiles.delete(file);
-    tagGrewSinceMarker = true;
-    retiredThisPoll = true;
-  }
-  return true;
-}
 
-function syncSubagentTranscript(rawFile: string, foldedByAnother: ReadonlySet<string> = new Set()): boolean {
-  let wroteAny = false;
-  // One transcript, one state entry and one source, however the path that
-  // reached us was spelled — discovery joins paths, a fold records the path it
-  // parsed, and a symlink makes those two spellings of one file.
-  const file = canonicalTranscriptPath(rawFile);
-  const stateKey = file;
-  const sessionId = path.basename(file, ".jsonl");
-  let fileState = discoveredSubagentFiles.get(stateKey);
-  if (!fileState) {
-    fileState = freshSubagentState();
-    discoveredSubagentFiles.set(stateKey, fileState);
-  }
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    let size: number;
-    let mtimeMs: number;
-    let ino: number;
-    try {
-      const stat = fs.statSync(file);
-      size = stat.size;
-      mtimeMs = stat.mtimeMs;
-      ino = stat.ino;
-    } catch (err) {
-      pollHadFailure = true;
-      if (!warnedSubagentStatFailure.has(stateKey)) {
-        warnedSubagentStatFailure.add(stateKey);
-        process.stderr.write(
-          `[wtft-log-parser] WARNING: a subagent transcript could not be stat'd, so its cost may be missing from this session's total (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`,
-        );
-      }
-      if (process.env.WTFT_DAEMON_DEBUG) {
-        process.stderr.write(`[wtft-log-parser] subagent stat failed, will retry next poll (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`);
-      }
-      return wroteAny;
-    }
-    const settled = Date.now() - fileState.readAtMs > MTIME_SETTLE_MS;
-    let rotate = fileState.mtimeMs !== -1 && (ino !== fileState.ino || size < fileState.lastSize);
-    if (!rotate && fileState.mtimeMs !== -1 && size === fileState.lastSize && (mtimeMs !== fileState.mtimeMs || !settled)) {
-      try {
-        if (hashFileBytes(file) !== fileState.contentHash.copy().digest("hex")) rotate = true;
-        else {
-          fileState.mtimeMs = mtimeMs;
-          fileState.ino = ino;
-        }
-      } catch (err) {
-        pollHadFailure = true;
-        if (!warnedSubagentParseFailure.has(stateKey)) {
-          warnedSubagentParseFailure.add(stateKey);
-          process.stderr.write(
-            `[wtft-log-parser] WARNING: a subagent transcript could not be read or parsed, so its cost may be missing from this session's total until it succeeds (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`,
-          );
-        }
-        return wroteAny;
-      }
-    }
-    if (!rotate && fileState.lastSize > 0 && size > fileState.lastSize) {
-      try {
-        if (hashFilePrefix(file, fileState.lastSize) !== fileState.contentHash.copy().digest("hex")) rotate = true;
-      } catch (err) {
-        pollHadFailure = true;
-        if (!warnedSubagentParseFailure.has(stateKey)) {
-          warnedSubagentParseFailure.add(stateKey);
-          process.stderr.write(
-            `[wtft-log-parser] WARNING: a subagent transcript could not be read or parsed, so its cost may be missing from this session's total until it succeeds (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`,
-          );
-        }
-        return wroteAny;
-      }
-    }
-    if (rotate) {
-      if (process.env.WTFT_DAEMON_DEBUG) {
-        process.stderr.write(`[wtft-log-parser] subagent transcript rotated, opening a new generation: ${path.basename(file)}\n`);
-      }
-      fileState = freshSubagentState();
-      discoveredSubagentFiles.set(stateKey, fileState);
-    }
 
-    const grew = size > fileState.lastSize;
-    let fresh = Buffer.alloc(0);
-    let parsed: ReturnType<typeof parseAppendedBytes> | null = null;
-    if (grew || fileState.fragment.length > 0) {
-      try {
-        if (grew) {
-          const fd = fs.openSync(file, "r");
-          fresh = Buffer.alloc(size - fileState.lastSize);
-          try {
-            fs.readSync(fd, fresh, 0, fresh.length, fileState.lastSize);
-          } finally {
-            fs.closeSync(fd);
-          }
-          if (process.env.WTFT_DAEMON_DEBUG) {
-            process.stderr.write(`[wtft-log-parser] subagent delta ${fresh.length} bytes ${path.basename(file)}\n`);
-          }
-        }
-        parsed = parseAppendedBytes(fileState, fresh);
-      } catch (err) {
-        pollHadFailure = true;
-        if (!warnedSubagentParseFailure.has(stateKey)) {
-          warnedSubagentParseFailure.add(stateKey);
-          process.stderr.write(
-            `[wtft-log-parser] WARNING: a subagent transcript could not be read or parsed, so its cost may be missing from this session's total until it succeeds (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`,
-          );
-        }
-        if (process.env.WTFT_DAEMON_DEBUG) {
-          process.stderr.write(`[wtft-log-parser] subagent read or parse error (${sessionId}), will retry next poll: ${err instanceof Error ? err.message : String(err)}\n`);
-        }
-        return wroteAny;
-      }
-    }
 
-    const deduped = parsed ? clearSubagentCacheMiss(deduplicateInteractions(parsed.interactions)) : [];
-    const plain: typeof deduped = [];
-    const state = fileState;
-    const absorbIntoOwner = (interaction: (typeof deduped)[number]): boolean => {
-      if (!interaction.messageId) return false;
-      const prior = state.owners.find(owner => owner.base.messageId === interaction.messageId);
-      if (!prior) return false;
-      // A full parse ORs `interrupted` across the copies of one id.
-      if (interaction.interrupted && !prior.base.interrupted) {
-        prior.base.interrupted = true;
-        prior.lastLine = "";
-      }
-      if (interaction.cost + 1e-9 >= prior.base.cost) {
-        prior.base.timestamp = interaction.timestamp;
-        prior.base.cost = interaction.cost;
-        prior.base.model = interaction.model ?? prior.base.model;
-        prior.base.inputTokens = interaction.inputTokens;
-        prior.base.outputTokens = interaction.outputTokens;
-        prior.base.cacheReadTokens = interaction.cacheReadTokens;
-        prior.base.cacheWriteTokens = interaction.cacheWriteTokens;
-        prior.base.reasoningTokens = interaction.reasoningTokens;
-        prior.base.serverToolCost = interaction.serverToolCost;
-        prior.lastLine = "";
-        prior.lastCost = 0;
-      }
-      return true;
-    };
-    // An interrupt marks the turn it follows and never a later one. A turn
-    // already in the tag gets a second copy with the mark, which a reader ORs
-    // across copies of one id; one with no id cannot be matched, so the
-    // transcript is written again as a new generation.
-    const reinterrupted: typeof deduped = [];
-    if (parsed?.stampInterrupt) {
-      const last = fileState.lastTurn;
-      const ownerOfLast = last?.owner && last.turn.messageId
-        ? fileState.owners.find(o => o.base.messageId === last.turn.messageId)
-        : undefined;
-      if (last && !last.owner && fileState.pendingTurn
-        && (!last.turn.messageId || fileState.pendingTurn.messageId === last.turn.messageId)) {
-        fileState.pendingTurn.interrupted = true;
-      } else if (ownerOfLast) {
-        ownerOfLast.base.interrupted = true;
-        ownerOfLast.lastLine = "";
-      } else if (last && !last.owner && last.turn.messageId) {
-        reinterrupted.push(...clearSubagentCacheMiss([{ ...last.turn, interrupted: true }]));
-      } else if (last && attempt === 0) {
-        fileState = freshSubagentState();
-        discoveredSubagentFiles.set(stateKey, fileState);
-        continue;
-      }
-      parsed = { ...parsed, stampInterrupt: false };
-    }
-    if (fileState.pendingTurn && !absorbIntoOwner(fileState.pendingTurn)) plain.push(fileState.pendingTurn);
-    const newOwners: FoldOwner[] = [];
-    for (const interaction of deduped) {
-      if (hasClaudeCommand(interaction)) {
-        const prior = interaction.messageId
-          ? fileState.owners.find(owner => owner.base.messageId === interaction.messageId)
-          : undefined;
-        if (prior) {
-          const interrupted = prior.base.interrupted || interaction.interrupted;
-          prior.base = structuredClone(interaction);
-          if (interrupted) prior.base.interrupted = true;
-          prior.lastLine = "";
-        } else {
-          newOwners.push({ base: structuredClone(interaction), lastLine: "", lastCost: 0 });
-        }
-      } else if (!absorbIntoOwner(interaction)) {
-        plain.push(interaction);
-      }
-    }
-    const holdBack = size > fileState.lastSize && plain.length > 0;
-    // Which turns are held and last is committed with the offset below. A mark
-    // set on them before a failure is set again, identically, by the re-read.
-    const nextPending = holdBack ? plain.pop() ?? null : null;
-    const owners = [...fileState.owners, ...newOwners];
-    const lastRead = parsed?.interactions[parsed.interactions.length - 1];
-    const nextLastTurn = lastRead
-      ? {
-        turn: lastRead,
-        owner: hasClaudeCommand(lastRead)
-          || (!!lastRead.messageId && owners.some(o => o.base.messageId === lastRead.messageId)),
-      }
-      : fileState.lastTurn;
-    const windowOpen = Date.now() <= fileState.spawnWindowClosesAt + MTIME_SETTLE_MS;
-    const foldSig = foldSetSignature(foldedByAnother);
-    const needAttr = owners.length > 0 && (
-      newOwners.length > 0 || foldedTranscriptChanged(fileState.foldStamps) || windowOpen
-      || fileState.foldedByAnother !== foldSig || owners.some(o => o.lastLine === "")
-    );
 
-    let clones: NonNullable<ReturnType<typeof parseEntryToInteraction>>[] = [];
-    if (needAttr) {
-      try {
-        clones = owners.map(o => structuredClone(o.base));
-        const doNotFold = new Set([
-          canonicalTranscriptPath(sessionPath),
-          canonicalTranscriptPath(file),
-          ...foldedByAnother,
-        ]);
-        attributeClaudeSubAgentCosts(clones, resolveLastCwd(file), doNotFold);
-      } catch (err) {
-        pollHadFailure = true;
-        if (!warnedSubagentParseFailure.has(stateKey)) {
-          warnedSubagentParseFailure.add(stateKey);
-          process.stderr.write(
-            `[wtft-log-parser] WARNING: a subagent transcript could not be read or parsed, so its cost may be missing from this session's total until it succeeds (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`,
-          );
-        }
-        return wroteAny;
-      }
-      const shrunk = owners.some((o, i) => o.lastCost > 0 && clones[i].cost + 1e-9 < o.lastCost);
-      if (shrunk && attempt === 0) {
-        fileState = freshSubagentState();
-        discoveredSubagentFiles.set(stateKey, fileState);
-        if (process.env.WTFT_DAEMON_DEBUG) {
-          process.stderr.write(`[wtft-log-parser] subagent transcript rotated, opening a new generation: ${path.basename(file)}\n`);
-        }
-        continue;
-      }
-    }
-
-    const source = transcriptSourceId(file, path.dirname(sessionPath));
-    fileState.source = source;
-    let batch = "";
-    const nextOwners: FoldOwner[] = owners.map((o, i) => ({ ...o }));
-    const consumedQuiet = parsed !== null
-      && parsed.fragment.length === 0
-      && size > 0
-      && nextPending === null;
-    const emitGeneration = fileState.newGeneration && (
-      plain.length > 0 || clones.length > 0 || rotate || consumedQuiet
-    );
-    try {
-      if (emitGeneration) {
-        batch = generationRecordLine(source, sessionId);
-      }
-      for (const interaction of plain) {
-        batch += serializeClassified(interaction, source);
-      }
-      for (const interaction of reinterrupted) batch += serializeClassified(interaction, source);
-      clones.forEach((interaction, i) => {
-        const line = serializeClassified(interaction, source);
-        if (line === nextOwners[i].lastLine) return;
-        batch += line;
-        nextOwners[i].lastLine = line;
-        nextOwners[i].lastCost = interaction.cost;
-      });
-    } catch (err) {
-      pollHadFailure = true;
-      if (!warnedSubagentSerializeFailure.has(stateKey)) {
-        warnedSubagentSerializeFailure.add(stateKey);
-        process.stderr.write(
-          `[wtft-log-parser] WARNING: a subagent's interactions could not be serialized for the tag file, so its cost is missing from this session's total until it succeeds (${sessionId}): ${err instanceof Error ? err.message : String(err)}\n`,
-        );
-      }
-      return wroteAny;
-    }
-
-    const parent = path.basename(sessionPath, ".jsonl");
-    const freshFolds: string[] = [];
-    const foldFrom = clones.length > 0 ? clones : plain;
-    if (foldFrom.length > 0) {
-      for (const id of foldRecordIds(sessionId, foldFrom)) {
-        if (fileState.recordedFolds.has(id)) continue;
-        batch += foldRecordLine(parent, id, source);
-        freshFolds.push(id);
-      }
-    }
-
-    if (batch) {
-      appendTagFile(tagPath, batch);
-      wroteAny = true;
-      tagGrewSinceMarker = true;
-    }
-
-    if (parsed) {
-      fileState.fragment = parsed.fragment;
-      fileState.stream = parsed.stream;
-      if (fresh.length > 0) fileState.contentHash.update(fresh);
-      fileState.lastSize = size;
-      fileState.readAtMs = Date.now();
-    }
-    fileState.mtimeMs = mtimeMs;
-    fileState.ino = ino;
-    fileState.owners = nextOwners;
-    fileState.pendingTurn = nextPending;
-    fileState.lastTurn = nextLastTurn;
-    for (const id of freshFolds) fileState.recordedFolds.add(id);
-    if (emitGeneration) fileState.newGeneration = false;
-    if (clones.length > 0) {
-      fileState.foldStamps = new Map();
-      for (const interaction of clones) {
-        for (const fold of interaction.claudeSubAgentFolds ?? []) {
-          fileState.foldStamps.set(canonicalTranscriptPath(fold.file), fold.stamp);
-        }
-      }
-      fileState.spawnWindowClosesAt = claudeSpawnWindowClosesAt(clones, resolveLastCwd(file));
-    }
-    fileState.foldedByAnother = foldSig;
-    return wroteAny;
-  }
-  return wroteAny;
-}
-
-/** A nested transcript that grew, or no longer stats, since the parse that folded it. */
-function foldedTranscriptChanged(foldStamps: Map<string, string>): boolean {
-  for (const [file, stamp] of foldStamps) {
-    try {
-      if (fileStamp(file) !== stamp) return true;
-    } catch {
-      return true;
-    }
-  }
-  return false;
-}
-
-/** Harness sessions whose subagent scan ran out of its slice and continues on
- *  the next turn of the event loop. */
-const subagentScansContinuing = new Set<string>();
-/** Transcripts a cut scan already read in its current pass, so the next slice
- *  resumes after them. */
-const subagentScanPass = new Map<string, Set<string>>();
-const subagentScanPassFailed = new Set<string>();
-
-function scanForSubAgents() {
-  let wroteAny = false;
-  // In a harness, one slice at a time, so other sessions' events and requests
-  // are served between slices and a reader sees the sum grow. Each slice reads
-  // at least one transcript and resumes after the last one it read.
-  let deadline = Infinity;
-  let cut = false;
-  let readThisSlice = 0;
-  const scanKey = path.resolve(sessionPath);
-  const readThisPass = subagentScanPass.get(scanKey) ?? new Set<string>();
-  // A failure in an earlier slice of this pass still counts when the pass ends.
-  if (subagentScanPassFailed.has(scanKey)) pollHadFailure = true;
-  if (reseedPending.has(scanKey)) {
-    let content = "";
-    try { content = fs.readFileSync(tagPath, "utf8"); } catch { /* retried next scan */ }
-    if (content && reseedClaudeChildren(content, true)) reseedPending.delete(scanKey);
-    else pollHadFailure = true;
-  }
-  // pollHadFailure is reset by the poll loop, not here — flushPending runs first and can fail.
-
-  if (pendingClaudeCommands.length > 0) {
-    const stillPending: typeof pendingClaudeCommands = [];
-    const registeredBy = new Map<typeof pendingClaudeCommands[number], string[]>();
-    for (const item of pendingClaudeCommands) {
-      const interaction = item.interaction;
-      const ownCwd = resolveLastCwd(sessionPath);
-
-      let discovered: ReturnType<typeof discoverClaudeSubAgentFilesForTurn>;
-      try {
-        discovered = discoverClaudeSubAgentFilesForTurn(interaction.commands, interaction.timestamp, ownCwd);
-      } catch (err) {
-        pollHadFailure = true;
-        stillPending.push(item);
-        if (process.env.WTFT_DAEMON_DEBUG) {
-          process.stderr.write(`[wtft-log-parser] claude -p discovery failed, will retry next poll (${path.basename(sessionPath, '.jsonl')}): ${err instanceof Error ? err.message : String(err)}\n`);
-        }
-        continue;
-      }
-      // Nothing to search. One cause can change — a session cwd not yet
-      // readable from the transcript — and the rest (a launcher, an unknowable
-      // or bare `cd`) cannot, so the turn waits out its window rather than
-      // being dropped at the first look or retried forever.
-      if (discovered.searched === 0) {
-        if (Date.now() <= interaction.timestamp + CLAUDE_SUBAGENT_WINDOW_MS + MTIME_SETTLE_MS) stillPending.push(item);
-        continue;
-      }
-      if (discovered.files.length === 0 && !discovered.unreadable) {
-        if (Date.now() <= interaction.timestamp + CLAUDE_SUBAGENT_WINDOW_MS + MTIME_SETTLE_MS) stillPending.push(item);
-        continue;
-      }
-      for (const file of discovered.files) {
-        // The searched directory holds this session's own transcript, and
-        // discovery matches on a time window. A sourced second copy of the
-        // session's own turns then competes with the originals in the reader's
-        // max-cost collapse, and for a harness whose turns carry no id there is
-        // nothing to collapse them with at all.
-        if (canonicalTranscriptPath(file) === canonicalTranscriptPath(sessionPath)) continue;
-        discoveredClaudeFiles.add(file);
-        registeredBy.set(item, [...(registeredBy.get(item) ?? []), file]);
-        if (process.env.WTFT_DAEMON_DEBUG) {
-          process.stderr.write(`[wtft-log-parser] claude -p subagent registered for re-parse (${path.basename(file, '.jsonl')})\n`);
-        }
-      }
-      if (discovered.unreadable) {
-        pollHadFailure = true;
-        stillPending.push(item);
-        if (process.env.WTFT_DAEMON_DEBUG) {
-          process.stderr.write(`[wtft-log-parser] claude -p discovery candidate unreadable, will retry next poll (${path.basename(sessionPath, '.jsonl')}): ${discovered.unreadable.message}\n`);
-        }
-      } else if (Date.now() <= interaction.timestamp + CLAUDE_SUBAGENT_WINDOW_MS + MTIME_SETTLE_MS) {
-        // A later child in the same window is not on disk yet.
-        stillPending.push(item);
-      }
-    }
-    for (const item of pendingClaudeCommands) {
-      if (!stillPending.includes(item)) {
-        // The children it found may not be read before a restart, and only a
-        // child already read has a generation record for the resume to find.
-        const children = registeredBy.get(item) ?? [];
-        appendTagFile(tagPath, JSON.stringify({ _meta: { spawnSettled: spawnKey(item.interaction), ...(children.length ? { children } : {}) } }) + "\n");
-      }
-    }
-    pendingClaudeCommands.length = 0;
-    if (stillPending.length > 0) pendingClaudeCommands.push(...stillPending);
-  }
-
-  let taskAgentFiles: string[] = [];
-  try {
-    const discoveredPi = discoverSubagentSessionFiles(sessionPath);
-    taskAgentFiles = discoveredPi.files;
-    if (discoveredPi.unreadable) {
-      pollHadFailure = true;
-      if (process.env.WTFT_DAEMON_DEBUG) {
-        process.stderr.write(`[wtft-log-parser] Pi discovery candidate unreadable, will retry next poll (${path.basename(sessionPath)}): ${discoveredPi.unreadable.message}\n`);
-      }
-    }
-  } catch (err) {
-    pollHadFailure = true;
-    if (process.env.WTFT_DAEMON_DEBUG) {
-      process.stderr.write(`[wtft-log-parser] subagents dir discovery failed, will retry next poll (${path.basename(sessionPath)}): ${err instanceof Error ? err.message : String(err)}\n`);
-    }
-  }
-  // A transcript some other synced transcript folds must not also be synced
-  // under its own source: the daemon parses each one in its own call, so the
-  // fold pass's within-one-call accounting cannot see across them. Derived from
-  // the CURRENT fold state every poll, never accumulated, so a parent that
-  // rotates and stops folding hands its child straight back.
-  // One child, one holder. Two in-window transcripts in a shared project dir
-  // each discover the other's children, and each parse bakes what it folds into
-  // its own turns, so without an owner the same child's cost lands in both. The
-  // owner is the lexicographically first holder, which cannot flip between polls.
-  const holderOf = new Map<string, string>();
-  for (const [holder, state] of discoveredSubagentFiles) {
-    for (const folded of state.foldStamps.keys()) {
-      if (folded === holder) continue;
-      // Two transcripts that fold each other would each retire the other, and
-      // the poll after would find nothing folding either and re-sync both, for
-      // a total that alternates between double and none.
-      const other = discoveredSubagentFiles.get(folded);
-      if (other?.foldStamps.has(holder) && holder > folded) continue;
-      const current = holderOf.get(folded);
-      if (current === undefined || holder < current) holderOf.set(folded, holder);
-    }
-  }
-  const foldedElsewhere = new Set(holderOf.keys());
-  /** What one transcript must leave alone: every child another holder owns. */
-  const notMine = (file: string): Set<string> => {
-    const me = canonicalTranscriptPath(file);
-    const out = new Set<string>();
-    for (const [folded, holder] of holderOf) if (holder !== me) out.add(folded);
-    return out;
-  };
-
-  if (harnessMode) deadline = Date.now() + HARNESS_SCAN_SLICE_MS;
-  const due = (file: string): boolean => {
-    if (readThisPass.has(file)) return false;
-    if (readThisSlice > 0 && Date.now() > deadline) { cut = true; return false; }
-    readThisSlice++;
-    readThisPass.add(file);
-    return true;
-  };
-
-  for (const file of taskAgentFiles) {
-    if (cut) break;
-    if (!due(file)) continue;
-    if (skipAsFoldedElsewhere(file, foldedElsewhere)) { wroteAny = wroteAny || retiredThisPoll; continue; }
-    wroteAny = syncSubagentTranscript(file, notMine(file)) || wroteAny;
-  }
-
-  for (const file of discoveredClaudeFiles) {
-    if (cut) break;
-    if (!due(file)) continue;
-    if (skipAsFoldedElsewhere(file, foldedElsewhere)) { wroteAny = wroteAny || retiredThisPoll; continue; }
-    wroteAny = syncSubagentTranscript(file, notMine(file)) || wroteAny;
-  }
-  if (cut) {
-    subagentScanPass.set(scanKey, readThisPass);
-    if (pollHadFailure) subagentScanPassFailed.add(scanKey);
-  } else {
-    subagentScanPass.delete(scanKey);
-    subagentScanPassFailed.delete(scanKey);
-  }
-
-  if (wroteAny) {
-    const now = Date.now();
-    lastWriteMs = now;
-    lastActivityMs = now;
-    idleStartMs = 0;
-  }
-
-  if (cut) {
-    const key = path.resolve(sessionPath);
-    if (!subagentScansContinuing.has(key)) {
-      subagentScansContinuing.add(key);
-      const owner = harnessSlots.get(key);
-      const next = () => {
-        // The slot may have moved to a new path since the cut; a move re-keys the marker.
-        const current = owner ? path.resolve(owner.sessionPath) : key;
-        const slot = harnessSlots.get(current) === owner ? owner : undefined;
-        if (!slot || !running) return;
-        subagentScansContinuing.delete(current);
-        if (!leaseStillOurs(slot)) {
-          leaseLost(current, slot);
-          return;
-        }
-        withSlot(slot, () => scanForSubAgents());
-      };
-      if (HARNESS_SCAN_YIELD_MS > 0) setTimeout(next, HARNESS_SCAN_YIELD_MS);
-      else setImmediate(next);
-    }
-    return;
-  }
-
-  // A transcript no longer found (its session moved, so it is read again under
-  // its new path) can never release a turn it holds.
-  if (!pollHadFailure) {
-    // A claude -p child stays registered after it moves or is deleted, so it
-    // counts as found only while it is on disk.
-    const found = new Set([...taskAgentFiles, ...[...discoveredClaudeFiles].filter(file => fs.existsSync(file))].map(canonicalTranscriptPath));
-    // A transcript already read again under the same source this scan has
-    // opened its new generation; a pruned line would land after it.
-    const liveSources = new Set([...discoveredSubagentFiles].filter(([key]) => found.has(key)).map(([, state]) => state.source));
-    for (const [key, state] of [...discoveredSubagentFiles]) {
-      if (found.has(key)) continue;
-      // Its held turn was read from the file, so it is written; a moved
-      // transcript read again under its new path opens a new generation.
-      if (state.pendingTurn && !liveSources.has(state.source)) {
-        const source = state.source || transcriptSourceId(key, path.dirname(sessionPath));
-        const generation = state.newGeneration ? generationRecordLine(source, path.basename(key, ".jsonl")) : "";
-        appendTagFile(tagPath, generation + serializeClassified(state.pendingTurn, source));
-        tagGrewSinceMarker = true;
-      }
-      discoveredSubagentFiles.delete(key);
-    }
-  }
-  // Swept means every subagent turn is written, so a held-back turn defers it
-  // to the scan that releases that turn.
-  const turnHeldBack = [...discoveredSubagentFiles.values()].some(state => state.pendingTurn !== null);
-  if (!pollHadFailure && !turnHeldBack && (tagGrewSinceMarker || sweptRetracted)) {
-    appendTagFile(tagPath, JSON.stringify({ _meta: { swept: Date.now() } }) + "\n");
-    tagGrewSinceMarker = false;
-    sweptRetracted = false;
-  }
-}
-
-function parseNewLines(filePath: string) {
-  try {
-    const stat = fs.statSync(filePath);
-    if (process.env.WTFT_DAEMON_DEBUG) {
-      process.stderr.write(`[wtft-log-parser] session stat ${path.basename(filePath)}\n`);
-    }
-    const currentSize = stat.size;
-    if (sessionIno !== -1 && stat.ino !== sessionIno) {
-      lastSize = 0;
-      pendingFragment = Buffer.alloc(0);
-      streamState = newParseStreamState();
-      prevCtxTokens = 0;
-      if (process.env.WTFT_DAEMON_DEBUG) {
-        process.stderr.write(`[wtft-log-parser] session inode changed, resetting offset ${path.basename(filePath)}\n`);
-      }
-    }
-    sessionIno = stat.ino;
-    if (currentSize < lastSize) {
-      if (process.env.WTFT_DAEMON_DEBUG) {
-        process.stderr.write(`[wtft-log-parser] session truncated, resetting offset\n`);
-      }
-      lastSize = 0;
-      pendingFragment = Buffer.alloc(0);
-      streamState = newParseStreamState();
-      prevCtxTokens = 0;
-    }
-    const grew = currentSize > lastSize;
-    // With a held fragment, still run — quiet poll is when a dead-writer fragment can settle.
-    if (!grew && pendingFragment.length === 0) return [];
-
-    let fresh = Buffer.alloc(0);
-    if (grew) {
-      const fd = fs.openSync(filePath, "r");
-      fresh = Buffer.alloc(currentSize - lastSize);
-      try {
-        fs.readSync(fd, fresh, 0, fresh.length, lastSize);
-      } finally {
-        fs.closeSync(fd);
-      }
-      if (process.env.WTFT_DAEMON_DEBUG) {
-        process.stderr.write(`[wtft-log-parser] session delta ${fresh.length} bytes ${path.basename(filePath)}\n`);
-      }
-      lastSize = currentSize;
-    }
-    const buf = pendingFragment.length > 0 ? Buffer.concat([pendingFragment, fresh]) : fresh;
-    const lastNl = buf.lastIndexOf(0x0a);
-    const fragment = buf.subarray(lastNl + 1);
-
-    // Same-bytes fragment that parses as JSON: writer died without newline — take it.
-    let settledFragment = false;
-    if (fragment.length > 0 && fragment.equals(pendingFragment)) {
-      try { JSON.parse(fragment.toString("utf8")); settledFragment = true; } catch (_) { /* still mid-record */ }
-    }
-
-    if (lastNl === -1 && !settledFragment) {
-      pendingFragment = Buffer.from(buf);
-      return [];
-    }
-    const consumeTo = settledFragment ? buf.length : lastNl + 1;
-    pendingFragment = consumeTo >= buf.length ? Buffer.alloc(0) : Buffer.from(buf.subarray(consumeTo));
-    const newContent = buf.subarray(0, consumeTo).toString("utf8");
-    const interactions: NonNullable<ReturnType<typeof parseEntryToInteraction>>[] = [];
-    for (const line of newContent.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        const entry = JSON.parse(line);
-        const isControl = applyControlEntry(entry, streamState, () => {
-          if (interactions.length > 0) {
-            interactions[interactions.length - 1].interrupted = true;
-          } else {
-            stampInterruptOnPending = true;
-          }
-        });
-        if (isControl) continue;
-
-        const interaction = parseEntryToInteraction(entry, streamState.thinkingLevel, streamState.compactionTokensBefore, streamState.afterCompaction, streamState.model);
-        if (interaction) {
-          interactions.push(interaction);
-          streamState.compactionTokensBefore = undefined;
-          streamState.afterCompaction = false;
-        }
-      } catch (_) {
-      }
-    }
-    return interactions;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return [];
-    warnUnreadableTranscript(filePath, "at discovery", err, "the session transcript");
-    pollHadFailure = true;
-    invalidateStaleSweptMarker(filePath);
-    return [];
-  }
-}
-
-/** Retract a swept marker stamped before this failure so the tag reads provisional. */
-function invalidateStaleSweptMarker(filePath: string) {
-  try {
-    const tagPath = getCurrentVersionTagPath(filePath);
-    const records = tagRecords(fs.readFileSync(tagPath, "utf8"));
-    // The same backward scan as sweepState: markers and heartbeats are passed
-    // over, a swept marker is retracted, a data record ends the search.
-    for (let i = records.length - 1; i >= 0; i--) {
-      const r = records[i];
-      if (r.kind === "unswept") return;
-      if (r.kind === "swept") {
-        appendTagFile(tagPath, JSON.stringify({ _meta: { unswept: Date.now() } }) + "\n");
-        sweptRetracted = true;
-        return;
-      }
-      if (isDataRecord(r) || r.kind === "unknown") return;
-    }
-  } catch {
-  }
-}
 
 // ---
 
@@ -1164,14 +266,13 @@ function readLastMetaOffset(tagPath: string): number | null {
 
 /** Session move: re-point sessionPath only; keep tagPath fixed so --watch survives. */
 function followMovedSession(): boolean {
-  const moved = resolveMovedSession(sessionPath);
+  const moved = resolveMovedSession(slot.state.sessionPath);
   if (!moved) return false;
   if (process.env.WTFT_DAEMON_DEBUG) {
-    process.stderr.write(`[wtft-log-parser] session moved: ${sessionPath} -> ${moved}\n`);
+    process.stderr.write(`[wtft-log-parser] session moved: ${slot.state.sessionPath} -> ${moved}\n`);
   }
-  if (reseedPending.delete(path.resolve(sessionPath))) reseedPending.add(path.resolve(moved));
-  if (subagentScansContinuing.delete(path.resolve(sessionPath))) subagentScansContinuing.add(path.resolve(moved));
-  sessionPath = moved;
+  if (subagentScansContinuing.delete(path.resolve(slot.state.sessionPath))) subagentScansContinuing.add(path.resolve(moved));
+  slot.state.sessionPath = moved;
   return true;
 }
 
@@ -1355,75 +456,16 @@ function reapAndWarn() {
   }
 }
 
-/** Sessions whose reseed could not finish: tried again each scan, and the tag
- *  is not stamped swept until it does. */
-const reseedPending = new Set<string>();
-
-/**
- * On resume, the turns that ran `claude -p` are before the offset, so
- * discovery never finds their transcripts again; the tag's generation records
- * name them. Each is registered again and read from its start, as a new
- * generation, so both what it gained while nothing served the session and
- * what it writes from now on are counted. One another transcript currently
- * folds is left to that one. Transcripts discovery does find
- * (`<id>/subagents/`, Pi siblings) are left to it.
- */
-function reseedClaudeChildren(tagContent: string, quiet = false): boolean {
-  const children = new Map<string, string>();
-  /** Child session id to the source of the transcript folding it, as of the
-   *  last generation of that source: a `_gen` retires its earlier folds. */
-  const foldedBy = new Map<string, string>();
-  for (const r of tagRecords(tagContent)) {
-    if (r.kind === "generation" && r.session !== undefined) {
-      children.set(r.source, r.session);
-      for (const [child, holder] of [...foldedBy]) if (holder === r.source) foldedBy.delete(child);
-    }
-    if (r.kind === "fold" && r.source !== undefined) foldedBy.set(r.child, r.source);
-  }
-  if (children.size === 0) return true;
-  let complete = true;
-  const warn = (what: string, err: unknown) => { complete = false; if (!quiet) process.stderr.write(
-    `[wtft-log-parser] WARNING: ${what}, so a claude -p transcript read before this daemon started may be missing from this session's total: ${err instanceof Error ? err.message : String(err)}\n`); };
-  const found = new Set<string>();
-  try {
-    for (const file of discoverSubagentSessionFiles(sessionPath).files) found.add(canonicalTranscriptPath(file));
-  } catch { /* the scan reports it */ }
-  let dirs: string[] = [];
-  try {
-    dirs = fs.readdirSync(projectsDir());
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") warn("the projects directory could not be read", err);
-    return complete;
-  }
-  const sessionDir = path.dirname(sessionPath);
-  for (const [source, id] of children) {
-    const holder = foldedBy.get(id);
-    if (holder !== undefined && holder !== source) continue;
-    for (const dir of dirs) {
-      const file = canonicalTranscriptPath(path.join(projectsDir(), dir, `${id}.jsonl`));
-      try {
-        fs.statSync(file);
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "ENOENT" && (err as NodeJS.ErrnoException).code !== "ENOTDIR") warn(`${file} could not be stat'd`, err);
-        continue;
-      }
-      if (transcriptSourceId(file, sessionDir) !== source) continue;
-      if (!found.has(file)) discoveredClaudeFiles.add(file);
-      break;
-    }
-  }
-  return complete;
-}
 
 function initClassified() {
-
+  const tagPath = slot.state.tagPath;
   // Mid-line tag tail → rebuild, do not resume (cut alone can double-bill id-less turns).
   if (truncatePartialTail(tagPath)) {
     process.stderr.write(`[wtft-log-parser] ${tagPath} ended mid-line — a previous daemon was killed inside an append; rebuilding this tag from the transcript (#130)\n`);
-    rebuildTagOnStartup = true;
+    slot.rebuildTagOnStartup = true;
   }
 
-  if (rebuildTagOnStartup) {
+  if (slot.rebuildTagOnStartup) {
     try {
       fs.truncateSync(tagPath, 0);
     } catch (err) {
@@ -1431,7 +473,7 @@ function initClassified() {
         fatalTagMutation(tagPath, "rebuild truncate", err);
       }
     }
-    lastSize = 0;
+    slot.state.lastSize = 0;
   } else {
     try {
       fs.accessSync(tagPath);
@@ -1440,27 +482,27 @@ function initClassified() {
       if (hasData) {
         const metaOffset = readLastMetaOffset(tagPath);
         if (metaOffset !== null) {
-          lastSize = metaOffset;
-          if (!reseedClaudeChildren(tagContent)) reseedPending.add(path.resolve(sessionPath));
-          resumeClaudeLookups(tagContent);
+          slot.state.lastSize = metaOffset;
           // Written by an earlier life; what changed since is not read yet.
-          invalidateStaleSweptMarker(sessionPath);
+          const resumed = resumeTagger(slot.state, tagContent, world);
+          printLog(resumed.log);
+          if (resumed.records) appendTagFile(tagPath, resumed.records);
         } else {
           try { fs.truncateSync(tagPath, 0); } catch { /* best effort */ }
-          lastSize = 0;
+          slot.state.lastSize = 0;
         }
       } else {
         try { fs.truncateSync(tagPath, 0); } catch { /* best effort */ }
-        lastSize = 0;
+        slot.state.lastSize = 0;
       }
     } catch (_) {
-      lastSize = 0;
+      slot.state.lastSize = 0;
     }
   }
 
   const startNow = Date.now();
   appendTagFile(tagPath, JSON.stringify({ _hb: { first: startNow, last: startNow } }) + "\n");
-  idleStartMs = startNow;
+  slot.idleStartMs = startNow;
 }
 
 // ---
@@ -1473,15 +515,16 @@ function dropFor(reason: string): "drop" {
 }
 
 function serviceSession(): "continue" | "stop" | "drop" {
-  if (leaseHolder(pidPath) !== String(process.pid)) {
+  const state = slot.state;
+  if (leaseHolder(slot.pidPath) !== String(process.pid)) {
     if (harnessMode) return "drop";
-    logLeaseLost(sessionPath, pidPath);
+    logLeaseLost(state.sessionPath, slot.pidPath);
     running = false;
     process.exit(0);
   }
 
-  if (!fs.existsSync(sessionPath)) {
-    if (sessionExisted) {
+  if (!fs.existsSync(state.sessionPath)) {
+    if (slot.sessionExisted) {
       if (!followMovedSession()) {
         if (harnessMode) return dropFor("session removed");
         shutdown("session removed");
@@ -1489,57 +532,41 @@ function serviceSession(): "continue" | "stop" | "drop" {
       }
     }
     const now = Date.now();
-    if (!sessionExisted && now - startupTime >= SESSION_WAIT_MAX_MS) {
+    if (!slot.sessionExisted && now - slot.startupTime >= SESSION_WAIT_MAX_MS) {
       if (harnessMode) return dropFor("session never written");
       shutdown("session never written");
       return "stop";
     }
-    if (idleStartMs === 0) idleStartMs = now;
-    if (!harnessMode || displayedSession) upsertHeartbeat(now);
-    lastWriteMs = now;
-    lastActivityMs = now;
+    if (slot.idleStartMs === 0) slot.idleStartMs = now;
+    if (!harnessMode || slot.displayed) upsertHeartbeat(now);
+    slot.lastWriteMs = now;
+    slot.lastActivityMs = now;
     return "continue";
   }
-  sessionExisted = true;
+  slot.sessionExisted = true;
 
   try {
-    pollHadFailure = false;
-    const rawInteractions = parseNewLines(sessionPath);
-    sessionReadFailed = pollHadFailure;
-    if (stampInterruptOnPending) {
-      if (pendingItems.length > 0) {
-        pendingItems[pendingItems.length - 1].interaction.interrupted = true;
-      }
-      stampInterruptOnPending = false;
-    }
-    const newInteractions = deduplicateInteractions(rawInteractions);
-    if (newInteractions.length > 0) {
-      lastActivityMs = Date.now();
-      for (const interaction of newInteractions) {
-        pendingItems.push({ interaction, prevCtx: prevCtxTokens });
-        if (!interaction.isSidechain) {
-          prevCtxTokens = interaction.inputTokens + interaction.cacheReadTokens + interaction.cacheWriteTokens;
-        }
-        if (hasClaudeCommand(interaction)) queueClaudeCommand(interaction, prevCtxTokens);
-      }
-    }
+    const read = readSession(state, world);
+    printLog(read.log);
+    if (read.records) appendTagFile(state.tagPath, read.records);
+    if (read.activity) slot.lastActivityMs = Date.now();
 
     const now = Date.now();
-    if (pendingItems.length > 0 && (now - lastWriteMs) >= POLL_MS) {
+    if (state.pendingItems.length > 0 && (now - slot.lastWriteMs) >= POLL_MS) {
       flushPending();
     }
 
     scanForSubAgents();
 
-    if (pendingItems.length === 0 && (!harnessMode || displayedSession)) {
-      if (idleStartMs === 0) idleStartMs = now;
+    if (state.pendingItems.length === 0 && (!harnessMode || slot.displayed)) {
+      if (slot.idleStartMs === 0) slot.idleStartMs = now;
       upsertHeartbeat(now);
-      lastWriteMs = now;
+      slot.lastWriteMs = now;
     }
 
-    if (now - lastActivityMs >= IDLE_EXIT_MS && now - startupTime >= STARTUP_GRACE_MS) {
+    if (now - slot.lastActivityMs >= IDLE_EXIT_MS && now - slot.startupTime >= STARTUP_GRACE_MS) {
       if (process.env.WTFT_DAEMON_DEBUG) {
-        process.stderr.write(`[wtft-log-parser] no new data for ${Math.round((now - lastActivityMs) / 60000)}m, exiting\n`);
+        process.stderr.write(`[wtft-log-parser] no new data for ${Math.round((now - slot.lastActivityMs) / 60000)}m, exiting\n`);
       }
       if (harnessMode) {
         droppedForIdle = true;
@@ -1549,7 +576,7 @@ function serviceSession(): "continue" | "stop" | "drop" {
       return "stop";
     }
 
-    if (!fs.existsSync(sessionPath) && !followMovedSession()) {
+    if (!fs.existsSync(state.sessionPath) && !followMovedSession()) {
       if (harnessMode) return dropFor("session removed");
       shutdown("session removed");
       return "stop";
@@ -1564,33 +591,17 @@ function serviceSession(): "continue" | "stop" | "drop" {
 
 const HARNESS_SKIP_DIRS = new Set(["subagents", "tool-results", "memory", "wtft-tags"]);
 
-type PendingItem = { interaction: NonNullable<ReturnType<typeof parseEntryToInteraction>>; prevCtx: number };
-
 interface Slot {
-  sessionPath: string;
-  tagPath: string;
+  /** Everything the tagger decides from: docs/spec-270-session-tagger.md. */
+  state: TaggerState;
   pidPath: string;
   rebuildTagOnStartup: boolean;
-  lastSize: number;
-  pendingFragment: Buffer;
   lastWriteMs: number;
   lastActivityMs: number;
   startupTime: number;
-  pendingItems: PendingItem[];
   idleStartMs: number;
-  streamState: ReturnType<typeof newParseStreamState>;
-  stampInterruptOnPending: boolean;
-  prevCtxTokens: number;
   sessionExisted: boolean;
-  sessionIno: number;
   displayed: boolean;
-  pendingClaudeCommands: PendingItem[];
-  discoveredClaudeFiles: Set<string>;
-  discoveredSubagentFiles: Map<string, SubagentFileState>;
-  tagGrewSinceMarker: boolean;
-  pollHadFailure: boolean;
-  sessionReadFailed: boolean;
-  sweptRetracted: boolean;
   /** When the sweep last checked this transcript on disk. */
   checkedAtMs: number;
 }
@@ -1604,94 +615,30 @@ let harnessIdleTimer: ReturnType<typeof setInterval> | null = null;
 function freshSlot(file: string, displayed: boolean): Slot {
   const now = Date.now();
   return {
-    sessionPath: file,
-    tagPath: "",
+    state: newTaggerState(file, ""),
     pidPath: "",
     rebuildTagOnStartup: false,
-    lastSize: 0,
-    pendingFragment: Buffer.alloc(0),
     lastWriteMs: 0,
     lastActivityMs: now,
     startupTime: now,
-    pendingItems: [],
     idleStartMs: 0,
-    streamState: newParseStreamState(),
-    stampInterruptOnPending: false,
-    prevCtxTokens: 0,
     sessionExisted: false,
-    sessionIno: -1,
     displayed,
-    pendingClaudeCommands: [],
-    discoveredClaudeFiles: new Set(),
-    discoveredSubagentFiles: new Map(),
-    tagGrewSinceMarker: true,
-    pollHadFailure: false,
-    sessionReadFailed: false,
-    sweptRetracted: false,
     checkedAtMs: now,
   };
 }
 
-function install(slot: Slot) {
-  sessionPath = slot.sessionPath;
-  tagPath = slot.tagPath;
-  pidPath = slot.pidPath;
-  rebuildTagOnStartup = slot.rebuildTagOnStartup;
-  lastSize = slot.lastSize;
-  pendingFragment = slot.pendingFragment;
-  lastWriteMs = slot.lastWriteMs;
-  lastActivityMs = slot.lastActivityMs;
-  startupTime = slot.startupTime;
-  pendingItems = slot.pendingItems;
-  idleStartMs = slot.idleStartMs;
-  streamState = slot.streamState;
-  stampInterruptOnPending = slot.stampInterruptOnPending;
-  prevCtxTokens = slot.prevCtxTokens;
-  sessionExisted = slot.sessionExisted;
-  sessionIno = slot.sessionIno;
-  displayedSession = slot.displayed;
-  pendingClaudeCommands = slot.pendingClaudeCommands;
-  discoveredClaudeFiles = slot.discoveredClaudeFiles;
-  discoveredSubagentFiles = slot.discoveredSubagentFiles;
-  tagGrewSinceMarker = slot.tagGrewSinceMarker;
-  pollHadFailure = slot.pollHadFailure;
-  sessionReadFailed = slot.sessionReadFailed;
-  sweptRetracted = slot.sweptRetracted;
-}
+/** The session being served right now: the one slot in per-session mode, or
+ *  whichever `withSlot` made current. */
+let slot: Slot = freshSlot("", true);
 
-function save(slot: Slot) {
-  slot.sessionPath = sessionPath;
-  slot.tagPath = tagPath;
-  slot.pidPath = pidPath;
-  slot.rebuildTagOnStartup = rebuildTagOnStartup;
-  slot.lastSize = lastSize;
-  slot.pendingFragment = pendingFragment;
-  slot.lastWriteMs = lastWriteMs;
-  slot.lastActivityMs = lastActivityMs;
-  slot.startupTime = startupTime;
-  slot.pendingItems = pendingItems;
-  slot.idleStartMs = idleStartMs;
-  slot.streamState = streamState;
-  slot.stampInterruptOnPending = stampInterruptOnPending;
-  slot.prevCtxTokens = prevCtxTokens;
-  slot.sessionExisted = sessionExisted;
-  slot.sessionIno = sessionIno;
-  slot.displayed = displayedSession;
-  slot.pendingClaudeCommands = pendingClaudeCommands;
-  slot.discoveredClaudeFiles = discoveredClaudeFiles;
-  slot.discoveredSubagentFiles = discoveredSubagentFiles;
-  slot.tagGrewSinceMarker = tagGrewSinceMarker;
-  slot.pollHadFailure = pollHadFailure;
-  slot.sessionReadFailed = sessionReadFailed;
-  slot.sweptRetracted = sweptRetracted;
-}
-
-function withSlot<T>(slot: Slot, fn: () => T): T {
-  install(slot);
+function withSlot<T>(next: Slot, fn: () => T): T {
+  const prev = slot;
+  slot = next;
   try {
     return fn();
   } finally {
-    save(slot);
+    slot = prev;
   }
 }
 
@@ -1746,12 +693,12 @@ function harnessRoot(which: string): string {
 }
 
 function adoptSession(): boolean {
-  if (sessionPath.includes(".wtft-tag.v")) return false;
-  tagPath = getCurrentVersionTagPath(sessionPath);
-  try { fs.mkdirSync(path.dirname(tagPath), { recursive: true }); } catch { /* exists */ }
-  pidPath = getDaemonPidPath(sessionPath);
-  if (!takeOverLease(pidPath)) return false;
-  if (displacedHolder === "rebuild") rebuildTagOnStartup = true;
+  if (slot.state.sessionPath.includes(".wtft-tag.v")) return false;
+  slot.state.tagPath = getCurrentVersionTagPath(slot.state.sessionPath);
+  try { fs.mkdirSync(path.dirname(slot.state.tagPath), { recursive: true }); } catch { /* exists */ }
+  slot.pidPath = getDaemonPidPath(slot.state.sessionPath);
+  if (!takeOverLease(slot.pidPath)) return false;
+  if (displacedHolder === "rebuild") slot.rebuildTagOnStartup = true;
   initClassified();
   return true;
 }
@@ -1775,7 +722,7 @@ function takeOverLease(pidPath: string): boolean {
 function scheduleFlush(key: string) {
   if (harnessFlushTimers.has(key)) return;
   const slot = harnessSlots.get(key);
-  if (!slot || slot.pendingItems.length === 0) return;
+  if (!slot || slot.state.pendingItems.length === 0) return;
   const wait = Math.max(0, POLL_MS - (Date.now() - slot.lastWriteMs));
   const timer = setTimeout(() => {
     harnessFlushTimers.delete(key);
@@ -1786,7 +733,7 @@ function scheduleFlush(key: string) {
       return;
     }
     withSlot(current, () => {
-      if (pendingItems.length > 0) flushPending();
+      flushPending();
       scanForSubAgents();
     });
   }, wait);
@@ -1827,18 +774,13 @@ function wake(file: string, displayed: boolean) {
     dropHarnessSlot(key, dropReason);
     return;
   }
-  const movedTo = slot.sessionPath;
+  const movedTo = slot.state.sessionPath;
   if (movedTo !== key) {
     const other = harnessSlots.get(movedTo);
     if (other && other !== slot) dropHarnessSlot(movedTo);
     harnessSlots.delete(key);
     harnessSlots.set(movedTo, slot);
     // A scan cut before the move carries on under the new path.
-    const pass = subagentScanPass.get(key);
-    subagentScanPass.delete(key);
-    if (pass) subagentScanPass.set(movedTo, pass);
-    if (subagentScanPassFailed.delete(key)) subagentScanPassFailed.add(movedTo);
-    if (reseedPending.delete(key)) reseedPending.add(movedTo);
     if (subagentScansContinuing.delete(key)) subagentScansContinuing.add(movedTo);
     unwatchSession(key);
     watchSession(movedTo);
@@ -1848,7 +790,7 @@ function wake(file: string, displayed: boolean) {
       harnessFlushTimers.delete(key);
     }
   }
-  if (slot.pendingItems.length > 0) scheduleFlush(movedTo);
+  if (slot.state.pendingItems.length > 0) scheduleFlush(movedTo);
 }
 
 /** Watches `dir`, and with `recurse` every directory below it that is not a
@@ -2072,7 +1014,7 @@ function onWatch(dir: string, filename: string | null) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") wake(file, slot.displayed);
       continue;
     }
-    if (now.ino !== slot.sessionIno || now.size !== slot.lastSize) wake(file, slot.displayed);
+    if (now.ino !== slot.state.sessionIno || now.size !== slot.state.lastSize) wake(file, slot.displayed);
   }
 }
 
@@ -2254,10 +1196,10 @@ function dropHarnessSlot(key: string, reason = "") {
   const ours = slot ? leaseStillOurs(slot) : false;
   // A lease another daemon holds means the tag is its to write; it resumes from
   // the tag's offset, so these turns are not lost.
-  if (slot && ours && (slot.pendingItems.length > 0 || reason)) {
+  if (slot && ours && (slot.state.pendingItems.length > 0 || reason)) {
     withSlot(slot, () => {
-      if (pendingItems.length > 0) flushPending();
-      if (reason && fs.existsSync(tagPath)) appendTagFile(tagPath, stopLine(reason));
+      flushPending();
+      if (reason && fs.existsSync(slot.state.tagPath)) appendTagFile(slot.state.tagPath, stopLine(reason));
     });
   }
   if (slot && !ours) logLeaseLost(key, slot.pidPath);
@@ -2265,10 +1207,7 @@ function dropHarnessSlot(key: string, reason = "") {
   if (timer) clearTimeout(timer);
   harnessFlushTimers.delete(key);
   harnessSlots.delete(key);
-  subagentScanPass.delete(key);
-  subagentScanPassFailed.delete(key);
   subagentScansContinuing.delete(key);
-  reseedPending.delete(key);
   adoptionRetries.delete(key);
   unwatchedTreeScanAt.delete(key);
   unwatchSession(key);
@@ -2292,17 +1231,17 @@ function releaseLease(slot: Slot) {
 const unwatchedTreeScanAt = new Map<string, number>();
 
 function slotNeedsChildScan(slot: Slot, now: number): boolean {
-  if (slot.pendingClaudeCommands.length > 0) return true;
+  if (slot.state.pendingClaudeCommands.length > 0) return true;
   // No watch event will come for a subagent written there, so it is polled.
-  const tree = slot.sessionPath.replace(/\.jsonl$/, "");
-  const key = path.resolve(slot.sessionPath);
+  const tree = slot.state.sessionPath.replace(/\.jsonl$/, "");
+  const key = path.resolve(slot.state.sessionPath);
   if (now - (unwatchedTreeScanAt.get(key) ?? 0) >= POLL_MS
     && [...unwatchedDirs.keys()].some(dir => dir === tree || dir.startsWith(tree + path.sep) || tree.startsWith(dir + path.sep))) {
     unwatchedTreeScanAt.set(key, now);
     return true;
   }
-  if (reseedPending.has(path.resolve(slot.sessionPath))) return true;
-  for (const state of slot.discoveredSubagentFiles.values()) {
+  if (slot.state.reseedPending) return true;
+  for (const state of slot.state.discoveredSubagentFiles.values()) {
     if (state.pendingTurn) return true;
     if (now <= state.spawnWindowClosesAt + MTIME_SETTLE_MS) return true;
   }
@@ -2383,8 +1322,8 @@ function sweepIdleSlots() {
     if (now - slot.checkedAtMs >= POLL_MS) {
       slot.checkedAtMs = now;
       let st: fs.Stats | null = null;
-      try { st = fs.statSync(slot.sessionPath); } catch { /* gone, or not written yet */ }
-      if (!st || st.ino !== slot.sessionIno || st.size !== slot.lastSize || slot.pendingFragment.length > 0 || slot.sessionReadFailed) {
+      try { st = fs.statSync(slot.state.sessionPath); } catch { /* gone, or not written yet */ }
+      if (!st || st.ino !== slot.state.sessionIno || st.size !== slot.state.lastSize || slot.state.pendingFragment.length > 0 || slot.state.sessionReadFailed) {
         wake(key, slot.displayed);
         if (harnessSlots.get(key) !== slot) continue;
       }
@@ -2395,14 +1334,12 @@ function sweepIdleSlots() {
       withSlot(slot, () => upsertHeartbeat(Date.now()));
     }
     if (slotNeedsChildScan(slot, now)) {
-      withSlot(slot, () => {
-        pollHadFailure = sessionReadFailed;
-        scanForSubAgents();
-      });
+      slot.state.pollHadFailure = slot.state.sessionReadFailed;
+      withSlot(slot, () => scanForSubAgents());
     }
     const current = harnessSlots.get(key);
     if (!current) continue;
-    if (current.pendingItems.length > 0) continue;
+    if (current.state.pendingItems.length > 0) continue;
     if (now - current.startupTime < STARTUP_GRACE_MS) continue;
     if (now - current.lastActivityMs < IDLE_EXIT_MS) continue;
     dropForIdle(key, current.displayed);
@@ -2454,7 +1391,7 @@ function handOffLines(adopting?: string): string[] {
     if (leaseStillOurs(slot) || (slot.pidPath && leaseHolder(slot.pidPath) === "rebuild")) lines.push(entry("served", slot.displayed, key));
   }
   // A session whose adoption failed is not in harnessSlots yet.
-  if (adopting && !harnessSlots.has(adopting)) lines.push(entry("served", displayedSession, adopting));
+  if (adopting && !harnessSlots.has(adopting)) lines.push(entry("served", slot.displayed, adopting));
   // Asked for, but waiting on an adoption retry.
   for (const [key, retry] of adoptionRetries) {
     if (!harnessSlots.has(key) && key !== adopting) lines.push(entry("served", retry.displayed, key));
@@ -2578,8 +1515,8 @@ function stopHarness(reason: string, exitCode = 0) {
       continue;
     }
     withSlot(slot, () => {
-      if (pendingItems.length > 0) flushPending();
-      if (fs.existsSync(tagPath)) appendTagFile(tagPath, stopLine(reason));
+      flushPending();
+      if (fs.existsSync(slot.state.tagPath)) appendTagFile(slot.state.tagPath, stopLine(reason));
     });
     if (slot.pidPath) unlinkIfHolds(slot.pidPath, String(process.pid));
   }
@@ -2668,6 +1605,7 @@ async function main() {
   let showRestart = false;
   let stopSession: string | null = null;
   let harnessName = "";
+  let sessionArg = "";
 
   const showHelp = () => console.log(`wtft-daemon — Log parser daemon for WTFT
 ${USAGE}
@@ -2706,7 +1644,7 @@ Environment:
   for (let i = 2; i < process.argv.length; i++) {
     const arg = process.argv[i];
     if (arg === "--session" || arg === "-s") {
-      sessionPath = valueOf(arg, ++i);
+      sessionArg = valueOf(arg, ++i);
     } else if (arg === "--harness") {
       harnessName = valueOf(arg, ++i);
       if (harnessName === "claude-code") harnessName = "claude";
@@ -2963,23 +1901,26 @@ if (showList || showCleanup || showRestart || stopSession) {
 // --- Daemon mode (session required) ---
 
   if (harnessName) {
-    runHarness(harnessName, sessionPath);
+    runHarness(harnessName, sessionArg);
     return;
   }
 
-  if (!sessionPath) {
+  if (!sessionArg) {
     process.stderr.write("wtft-daemon: --session <path> is required\n");
     process.exit(1);
   }
   // Session file may not exist yet; wait in the poll loop with heartbeats.
-  if (sessionPath.includes(".wtft-tag.v")) {
-    process.stderr.write(`wtft-daemon: refusing to watch a tag file as a session: ${sessionPath}\n`);
+  if (sessionArg.includes(".wtft-tag.v")) {
+    process.stderr.write(`wtft-daemon: refusing to watch a tag file as a session: ${sessionArg}\n`);
     process.exit(1);
   }
 
+  slot = freshSlot(sessionArg, true);
+  const sessionPath = sessionArg;
   const sessionBase = path.basename(sessionPath);
   // Prefer an existing current-version tag wherever it lives (session may have moved).
-  tagPath = getCurrentVersionTagPath(sessionPath);
+  const tagPath = getCurrentVersionTagPath(sessionPath);
+  slot.state.tagPath = tagPath;
   const tagsDir = path.dirname(tagPath);
   try { fs.mkdirSync(tagsDir, { recursive: true }); } catch (_) {}
 
@@ -2987,7 +1928,8 @@ if (showList || showCleanup || showRestart || stopSession) {
   const sessionHash = createHash("sha256").update(
     isSessionIdBasename(sessionPath) ? sessionBase : sessionPath
   ).digest("hex").slice(0, 12);
-  pidPath = path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
+  const pidPath = path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
+  slot.pidPath = pidPath;
 
   // Old-version tag: claim the lease; old daemon exits on lost lease (no SIGTERM race).
   const prefix = sessionBase + ".wtft-tag.v";
@@ -3018,7 +1960,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         holder = leaseHolder(pidPath);
         replaceLease(String(process.pid));
       }
-      if (holder === "rebuild") rebuildTagOnStartup = true;
+      if (holder === "rebuild") slot.rebuildTagOnStartup = true;
       claimedByTakeover = true;
     }
   } catch (e) {
@@ -3038,7 +1980,7 @@ if (showList || showCleanup || showRestart || stopSession) {
     };
     if (claimLease(pidPath, String(process.pid), holderIsLive) === "busy") process.exit(0);
     // Only the explicit rebuild token requests replay; a stale numeric PID does not.
-    if (displaced === "rebuild") rebuildTagOnStartup = true;
+    if (displaced === "rebuild") slot.rebuildTagOnStartup = true;
   }
 
   // Drop older-version tag files after claiming the lease; re-sweep once after 5s for a late heartbeat.

@@ -81,8 +81,8 @@ assert(
 );
 
 const parserCalls = calls.filter((c) => c.file === "extensions/lib/wtft-parser.ts");
-const daemonCalls = calls.filter((c) => c.file === "bin/wtft-daemon.ts");
-const elsewhere = calls.filter((c) => c.file !== "extensions/lib/wtft-parser.ts" && c.file !== "bin/wtft-daemon.ts");
+const taggerCalls = calls.filter((c) => c.file === "extensions/lib/session-tagger.ts");
+const elsewhere = calls.filter((c) => c.file !== "extensions/lib/wtft-parser.ts" && c.file !== "extensions/lib/session-tagger.ts");
 
 assert(
 	"parseSessionFile is the only parser call site",
@@ -90,10 +90,10 @@ assert(
 	`found ${parserCalls.length}: ${JSON.stringify(parserCalls)}`,
 );
 assert(
-	"the daemon calls it once, on every fold-capable turn of that transcript together (#97)",
-	daemonCalls.length === 1,
-	`found ${daemonCalls.length}: ${JSON.stringify(daemonCalls)}\n` +
-		"A poll-sized slice double-counts a nested session. The daemon call has to pass every\n" +
+	"the session tagger calls it once, on every fold-capable turn of that transcript together (#97)",
+	taggerCalls.length === 1,
+	`found ${taggerCalls.length}: ${JSON.stringify(taggerCalls)}\n` +
+		"A poll-sized slice double-counts a nested session. The tagger's call has to pass every\n" +
 		"retained fold-capable turn of one transcript, cloned from its pre-fold base.",
 );
 assert(

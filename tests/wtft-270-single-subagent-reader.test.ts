@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const REPO_ROOT = join(import.meta.dir, "..");
-const DAEMON = join(REPO_ROOT, "bin", "wtft-daemon.ts");
+const TAGGER = join(REPO_ROOT, "extensions", "lib", "session-tagger.ts");
 
 const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";
@@ -21,7 +21,7 @@ function assert(label: string, ok: boolean, detail = ""): void {
 
 console.log("wtft: one reader for sub-agent transcripts (#270)");
 
-const src = readFileSync(DAEMON, "utf8");
+const src = readFileSync(TAGGER, "utf8");
 
 // Strip comments so a prose mention of a retired symbol is not read as code.
 // Block comments first, then line comments — and only `//` that starts a line
@@ -38,7 +38,7 @@ assert(
 	defs.length === 1,
 );
 
-const calls = code.match(/syncSubagentTranscript\s*\(\s*file\b[^)]*\)/g) || [];
+const calls = code.match(/syncSubagentTranscript\s*\([^)]*\bfile\b[^)]*\)/g) || [];
 assert(
 	`both discovery paths call it — at least 2 call sites (found ${calls.length})`,
 	calls.length >= 2,
@@ -69,7 +69,7 @@ assert(
 // Both loops must iterate for reading; the claude -p one reads the registry.
 assert(
 	"the claude -p registry is iterated for reading every poll",
-	/for\s*\(\s*const\s+file\s+of\s+discoveredClaudeFiles\s*\)/.test(code),
+	/for\s*\(\s*const\s+file\s+of\s+state\.discoveredClaudeFiles\s*\)/.test(code),
 );
 
 assert(

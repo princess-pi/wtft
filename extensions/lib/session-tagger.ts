@@ -53,7 +53,7 @@ export interface SubagentFileState {
 	readAtMs: number;
 	ino: number;
 	contentHash: Hash;
-	fragment: Buffer;
+	fragment: Buffer<ArrayBufferLike>;
 	stream: ParseStreamState;
 	/** The next write opens a generation: a `_gen` record, then every current line. */
 	newGeneration: boolean;
@@ -84,7 +84,7 @@ export interface TaggerState {
 	tagPath: string;
 	lastSize: number;
 	/** Trailing partial line as bytes; a same-bytes fragment that parses as JSON settles (writer died without newline). */
-	pendingFragment: Buffer;
+	pendingFragment: Buffer<ArrayBufferLike>;
 	pendingItems: PendingItem[];
 	streamState: ParseStreamState;
 	stampInterruptOnPending: boolean;
@@ -302,7 +302,7 @@ function parseNewLines(state: TaggerState, world: World, out: Out, now: number):
 		// With a held fragment, still run: a quiet poll is when a dead-writer fragment can settle.
 		if (!grew && state.pendingFragment.length === 0) return [];
 
-		let fresh = Buffer.alloc(0);
+		let fresh: Buffer<ArrayBufferLike> = Buffer.alloc(0);
 		if (grew) {
 			fresh = world.readRange(filePath, state.lastSize, currentSize - state.lastSize);
 			debug(out, `session delta ${fresh.length} bytes ${path.basename(filePath)}`);
@@ -416,7 +416,7 @@ export function flushTurns(state: TaggerState): string {
 function parseAppendedBytes(
 	fileState: SubagentFileState,
 	fresh: Buffer,
-): { interactions: Turn[]; fragment: Buffer; stream: ParseStreamState; stampInterrupt: boolean } {
+): { interactions: Turn[]; fragment: Buffer<ArrayBufferLike>; stream: ParseStreamState; stampInterrupt: boolean } {
 	const stream = { ...fileState.stream };
 	const buf = fileState.fragment.length > 0 ? Buffer.concat([fileState.fragment, fresh]) : fresh;
 	const lastNl = buf.lastIndexOf(0x0a);
@@ -553,7 +553,7 @@ function syncSubagentTranscript(state: TaggerState, world: World, out: Out, now:
 		}
 
 		const grew = size > fileState.lastSize;
-		let fresh = Buffer.alloc(0);
+		let fresh: Buffer<ArrayBufferLike> = Buffer.alloc(0);
 		let parsed: ReturnType<typeof parseAppendedBytes> | null = null;
 		if (grew || fileState.fragment.length > 0) {
 			try {

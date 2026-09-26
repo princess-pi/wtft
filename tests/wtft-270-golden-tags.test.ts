@@ -40,7 +40,7 @@ function check(cond: boolean, msg: string) {
 const libDir = path.resolve(import.meta.dirname, "..", "extensions", "lib");
 const daemonSources = [
 	path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.ts"),
-	...fs.readdirSync(libDir).filter(f => f.endsWith(".ts")).map(f => path.join(libDir, f)),
+	...fs.readdirSync(libDir, { recursive: true, encoding: "utf8" }).filter(f => f.endsWith(".ts")).map(f => path.join(libDir, f)),
 ];
 const newestSourceMs = Math.max(...daemonSources.map(f => fs.statSync(f).mtimeMs));
 check(fs.statSync(DAEMON_BIN).mtimeMs >= newestSourceMs, "fixture precondition: bin/wtft-daemon.mjs is not older than any daemon source (else run bun run build)");

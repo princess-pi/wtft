@@ -2995,6 +2995,8 @@ if (showList || showCleanup || showRestart || stopSession) {
     }
     return { older, newer };
   };
+  // A lease that exists but cannot be read is a fault, never a holder: fail loudly.
+  try { fs.readFileSync(pidPath, "utf8"); } catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err; }
   let claimedByTakeover = false;
   try {
     const { older, newer } = otherTagVersions();

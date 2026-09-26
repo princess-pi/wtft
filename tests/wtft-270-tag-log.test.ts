@@ -1,8 +1,6 @@
 #!/usr/bin/env -S bun
 /**
- * #270 S1 — every tag record kind is decided by the typed reader, never by
- * substring. Closes #140: a turn whose command mentions `_hb` or `_meta` is a
- * turn.
+ * Every tag record kind is decided by the typed reader, never by substring.
  */
 
 import {

@@ -18,6 +18,14 @@ import { projectsDir } from "./harness/claude-code/discovery.js";
 import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
 import { tagRecords, parseTagLine, currentGeneration, sweepState, isDataRecord, type TagRecord } from "./tag-log.js";
 import { replaceLease, unlinkLeaseIf, leaseHolder } from "./lease.js";
+import {
+	decideHealth, readHealthFacts, daemonReasonText, IDLE_THRESHOLD_MS,
+	type DaemonStatus, type HealthOptions,
+} from "./daemon-health.js";
+export {
+	IDLE_THRESHOLD_MS, getModelCacheTtlMs, DAEMON_REASON_TEXT, daemonReasonText,
+	type DaemonHealthReason, type DaemonStatus, type HealthOptions,
+} from "./daemon-health.js";
 export interface WatchSettings {
 	interval: string;
 	limit: number;
@@ -604,84 +612,13 @@ export function resolveMovedSession(sessionPath: string): string | null {
 	return null;
 }
 
-/** Threshold for "idle" state: 2m2s — a classic TV commercial break. */
-export const IDLE_THRESHOLD_MS = 122_000;
-
 /** Daemon self-exit: 24h of no new data. Polite to ps aux browsers. */
 export const IDLE_EXIT_MS = 24 * 60 * 60 * 1000;
 
-export function getModelCacheTtlMs(model: string): number | null {
-	const m = model.toLowerCase();
-
-	if (m.includes("deepseek")) {
-		return 60 * 60 * 1000;
-	}
-
-	if (m.includes("claude")) {
-		return 5 * 60 * 1000;
-	}
-
-	if (m.includes("gemini")) {
-		return 60 * 60 * 1000;
-	}
-
-	if (m.includes("gpt") || m.includes("o1") || m.includes("o3")) {
-		return 30 * 60 * 1000;
-	}
-
-	if (m.includes("together") || m.includes("fireworks") || m.includes("openrouter")) {
-		return 30 * 60 * 1000;
-	}
-
-	if (/\b(haiku|sonnet|opus)\b/.test(m)) {
-		return 5 * 60 * 1000;
-	}
-
-	if (m.includes("ollama") || m.includes("llama") || m.includes("lmstudio") || m.includes("local")) {
-		return null;
-	}
-
-	return 5 * 60 * 1000;
-}
-
-// ---
-
-/**
- * Stable machine-readable daemon health codes. THIS is the contract — control flow
- * compares these, never the rendered text. Adding a member is a feature; renaming or
- * removing one is a breaking change. The human sentences in DAEMON_REASON_TEXT are free
- * to change at any time precisely because this union exists.
- */
-export type DaemonHealthReason =
-	| "not-started"      // no daemon spawned for this session yet
-	| "starting"
-	| "waiting-session"  // spawned, session .jsonl not created yet
-	| "not-found"        // no live PID and no heartbeat on record
-	| "idle-timeout"     // exited after idling out (lastHbTime carries when)
-	| "restart-failed";  // respawn attempted and did not come up
-
-/** Display copy for each code. Change freely — no control flow reads these. */
-export const DAEMON_REASON_TEXT: Record<DaemonHealthReason, string> = {
-	"not-started": "daemon not started",
-	"starting": "starting...",
-	"waiting-session": "waiting for session .jsonl...",
-	"not-found": "daemon not found",
-	"idle-timeout": "idle timeout",
-	"restart-failed": "restart failed",
-};
-
-export function daemonReasonText(reason: DaemonHealthReason | undefined | null): string {
-	return (reason && DAEMON_REASON_TEXT[reason]) || "unknown";
-}
-
-export interface DaemonStatus {
-	alive: boolean;
-	reason?: DaemonHealthReason;
-	lastHbTime?: string; // HH:MM local time of last heartbeat
-	idle?: boolean;
-	idleMs?: number;
-	idleSinceMs?: number;
-	cacheTtlMs?: number | null;
+/** docs/spec-270-daemon-health.md: the one answer to "is this session's daemon alive". */
+export function health(sessionPath: string, now: number, opts: HealthOptions = {}): DaemonStatus {
+	const tagPath = opts.tagPath ?? getTagPath(sessionPath);
+	return decideHealth(readHealthFacts(sessionPath, getDaemonPidPath(sessionPath), tagPath), now, opts);
 }
 
 export function renderDaemonStatus(status: DaemonStatus, restarting = false): string {
@@ -715,126 +652,6 @@ export function renderDaemonStatus(status: DaemonStatus, restarting = false): st
 	return "  \x1b[32m●\x1b[0m live";
 }
 
-/**
- * Fallback: scan the ENTIRE session file backwards for the most recent
- * assistant message's model.
- * Reads the whole file — session files are typically < 1MB, so this is
- * fast enough. Using an 8KB window caused flickering because the model
- * entry could fall outside the window as the tag file grew.
- */
-function getModelFromSessionFile(sessionPath: string): string | undefined {
-	try {
-		const content = fs.readFileSync(sessionPath, "utf8");
-		const lines = content.split("\n");
-		for (let i = lines.length - 1; i >= 0; i--) {
-			const line = lines[i].trim();
-			if (!line) continue;
-			try {
-				const entry = JSON.parse(line);
-				if (entry.type === "message" && entry.message?.role === "assistant" && entry.message?.model) {
-					return entry.message.model;
-				}
-				if (entry.type === "assistant" && entry.message?.role === "assistant" && entry.message?.model) {
-					return entry.message.model;
-				}
-			} catch { continue; }
-		}
-	} catch { /* session file unreadable */ }
-	return undefined;
-}
-
-export function checkDaemonHealth(sessionPath: string, tagPath: string): DaemonStatus {
-	const pidPath = getDaemonPidPath(sessionPath);
-	let pidAlive = false;
-	const pid = parseInt(leaseHolder(pidPath), 10);
-	if (pid > 0) {
-		try { process.kill(pid, 0); pidAlive = true; } catch {}
-	}
-
-	if (pidAlive) {
-		try {
-			const stat = fs.statSync(tagPath);
-			if (stat.size > 0) {
-				const fd = fs.openSync(tagPath, "r");
-				const buf = Buffer.alloc(Math.min(stat.size, 8192));
-				fs.readSync(fd, buf, 0, buf.length, Math.max(0, stat.size - 8192));
-				fs.closeSync(fd);
-				const records = tagRecords(buf.toString("utf8"));
-				let lastModel: string | undefined;
-				let lastTtl: "1h" | "5m" | undefined;
-				let idleMs: number | undefined;
-				let idleSinceMs: number | undefined;
-				let sawClassified = false;
-				for (let i = records.length - 1; i >= 0; i--) {
-					const r = records[i];
-					if (r.kind === "heartbeat") {
-						if (r.first && idleSinceMs === undefined && !sawClassified) idleSinceMs = r.first;
-						continue;
-					}
-					if (r.kind === "stop") continue;
-					if (r.kind === "turn") {
-						if (!lastModel && r.interaction.model) lastModel = r.interaction.model;
-						if (!lastTtl && r.interaction.cacheTtl) lastTtl = r.interaction.cacheTtl;
-					}
-					if (!sawClassified) {
-						sawClassified = true;
-						if (r.kind === "turn" && idleSinceMs !== undefined && r.interaction.timestamp > idleSinceMs) idleSinceMs = r.interaction.timestamp;
-					}
-					if (lastModel && lastTtl) break;
-				}
-				if (idleSinceMs !== undefined) idleMs = Date.now() - idleSinceMs;
-				if (idleMs !== undefined && idleMs >= IDLE_THRESHOLD_MS) {
-					if (!lastModel) lastModel = getModelFromSessionFile(sessionPath);
-					const cacheTtlMs = lastTtl
-						? (lastTtl === "1h" ? 3_600_000 : 300_000)
-						: (lastModel ? getModelCacheTtlMs(lastModel) : null);
-					return { alive: true, idle: true, idleMs, idleSinceMs, cacheTtlMs };
-				}
-				{
-					try {
-						const sessionStat = fs.statSync(sessionPath);
-						const sessionIdleMs = Date.now() - sessionStat.mtimeMs;
-						if (sessionIdleMs >= IDLE_THRESHOLD_MS) {
-							if (!lastModel) lastModel = getModelFromSessionFile(sessionPath);
-							const cacheTtlMs = lastTtl
-								? (lastTtl === "1h" ? 3_600_000 : 300_000)
-								: (lastModel ? getModelCacheTtlMs(lastModel) : null);
-							return { alive: true, idle: true, idleMs: sessionIdleMs, idleSinceMs: sessionStat.mtimeMs, cacheTtlMs };
-						}
-					} catch { /* session file unreadable — fall through to live */ }
-				}
-			}
-		} catch { /* tag file unreadable — assume live */ }
-		return { alive: true };
-	}
-
-	let lastHbMs = 0;
-	try {
-		const stat = fs.statSync(tagPath);
-		const readStart = Math.max(0, stat.size - 8192);
-		const fd = fs.openSync(tagPath, "r");
-		const buf = Buffer.alloc(stat.size - readStart);
-		fs.readSync(fd, buf, 0, buf.length, readStart);
-		fs.closeSync(fd);
-		const records = tagRecords(buf.toString("utf8"));
-		for (let i = records.length - 1; i >= 0; i--) {
-			const r = records[i];
-			if (r.kind === "heartbeat" && r.last) { lastHbMs = r.last; break; }
-		}
-	} catch {}
-
-	if (lastHbMs === 0) {
-		return { alive: false, reason: "not-found" };
-	}
-
-	const d = new Date(lastHbMs);
-	const hh = String(d.getHours()).padStart(2, "0");
-	const mm = String(d.getMinutes()).padStart(2, "0");
-	const timeStr = `${hh}:${mm}`;
-
-	return { alive: false, reason: "idle-timeout", lastHbTime: timeStr };
-}
-
 // ---
 
 /**
@@ -857,7 +674,7 @@ export async function awaitDaemonUp(
 	pollMs = 50
 ): Promise<DaemonStartupResult> {
 	const start = Date.now();
-	const leaseAlive = () => checkDaemonHealth(sessionPath, getCurrentVersionTagPath(sessionPath)).alive;
+	const leaseAlive = () => health(sessionPath, Date.now(), { tagPath: getCurrentVersionTagPath(sessionPath) }).alive;
 	for (;;) {
 		if (leaseAlive()) {
 			return { state: "up", exitCode: child?.exitCode ?? null, signalCode: child?.signalCode ?? null };
@@ -979,50 +796,12 @@ export async function watchTagFile(
 	process.on("SIGINT", exitWatch);
 
 	let daemonDead = false;
-	let daemonStopReason: DaemonHealthReason | null = null;
-	let daemonStopTime = "";
-	let daemonRestarting = false;
-	let daemonIdle = false;
-	let daemonIdleMs = 0;
-	let daemonCacheTtlMs: number | null | undefined = undefined;
-	let daemonChecked = false;  // true after first health check completes
+	let daemonStatus: DaemonStatus | null = null;
+	let restartedAt: number | null = null;
 
 	const updateDaemonHealth = () => {
-		daemonChecked = true;
-		if (daemonRestarting) {
-			const health = checkDaemonHealth(sessionPath, tagPath);
-			if (health.alive) {
-				daemonRestarting = false;
-				daemonDead = false;
-				daemonStopReason = null;
-				daemonStopTime = "";
-				daemonIdle = false;
-			}
-			return;
-		}
-		const health = checkDaemonHealth(sessionPath, tagPath);
-		if (!health.alive) {
-			try {
-				const tagStat = fs.statSync(tagPath);
-				if (Date.now() - tagStat.mtimeMs < 2000 && tagStat.size > 0) return;
-			} catch { /* tag file missing — genuinely dead */ }
-			daemonDead = true;
-			daemonStopReason = health.reason ?? null;
-			daemonStopTime = health.lastHbTime || "";
-			daemonIdle = false;
-		} else if (health.idle) {
-			daemonDead = false;
-			daemonStopReason = null;
-			daemonStopTime = "";
-			daemonIdle = true;
-			daemonIdleMs = health.idleMs || 0;
-			daemonCacheTtlMs = health.cacheTtlMs;
-		} else {
-			daemonDead = false;
-			daemonStopReason = null;
-			daemonStopTime = "";
-			daemonIdle = false;
-		}
+		daemonStatus = health(sessionPath, Date.now(), { tagPath, spawnedAt: restartedAt });
+		daemonDead = !daemonStatus.alive && daemonStatus.reason !== "starting" && daemonStatus.reason !== "waiting-session";
 	};
 
 	const cleanupStdin = enterRawStdin((key: string) => {
@@ -1031,27 +810,17 @@ export async function watchTagFile(
 		}
 		if (key === "r" || key === "R") {
 			if (settings.daemonPath) {
-				daemonRestarting = true;
-				daemonDead = false;
-				daemonIdle = false;
-				const ok = restartDaemon(sessionPath, settings.daemonPath);
-				if (!ok) {
-					daemonRestarting = false;
+				if (restartDaemon(sessionPath, settings.daemonPath)) {
+					restartedAt = Date.now();
+					updateDaemonHealth();
+				} else {
+					restartedAt = null;
+					daemonStatus = { alive: false, reason: "restart-failed" };
 					daemonDead = true;
-					daemonStopReason = "restart-failed";
 				}
 				needsRedraw = true;
 				render();
-				let pollCount = 0;
-				const postRestartPoll = setInterval(() => {
-					pollCount++;
-					updateDaemonHealth();
-					if (!daemonRestarting || pollCount >= 5) {
-						clearInterval(postRestartPoll);
-					}
-					needsRedraw = true;
-					render();
-				}, 1000);
+				resetWatchdog();
 			}
 		}
 	});
@@ -1134,18 +903,9 @@ export async function watchTagFile(
 		totalCost = deduped.reduce((sum, i) => sum + i.cost, 0);
 
 		if (lines && lines.length > 0) {
-			let daemonStatusStr = "";
-			if (!daemonChecked) {
-				daemonStatusStr = "  \x1b[90m●\x1b[0m reading...";
-			} else if (daemonRestarting) {
-				daemonStatusStr = renderDaemonStatus({ alive: true }, true);
-			} else if (daemonDead) {
-				daemonStatusStr = renderDaemonStatus({ alive: false, reason: daemonStopReason ?? undefined, lastHbTime: daemonStopTime || undefined }, false);
-			} else if (daemonIdle) {
-				daemonStatusStr = renderDaemonStatus({ alive: true, idle: true, idleMs: daemonIdleMs, cacheTtlMs: daemonCacheTtlMs }, false);
-			} else {
-				daemonStatusStr = renderDaemonStatus({ alive: true }, false);
-			}
+			const daemonStatusStr = daemonStatus
+				? renderDaemonStatus(daemonStatus, false)
+				: "  \x1b[90m●\x1b[0m reading...";
 
 			if (daemonStatusStr) {
 				const titleVisualLen = getVisualLength(lines[0]);
@@ -1282,7 +1042,7 @@ export async function watchTagFile(
 		const resolved = getCurrentVersionTagPath(sessionPath);
 		if (resolved !== tagPath && fs.existsSync(resolved)) { tagPath = resolved; break; }
 		const childExited = child ? (child.exitCode !== null || child.signalCode !== null) : false;
-		const leaseAlive = checkDaemonHealth(sessionPath, tagPath).alive;
+		const leaseAlive = health(sessionPath, Date.now(), { tagPath }).alive;
 		if (child && childExited && !leaseAlive) {
 			teardownForError();
 			const how = child.signalCode ? `on ${child.signalCode}` : `with code ${child.exitCode}`;

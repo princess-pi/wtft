@@ -75,6 +75,8 @@ Behaviour that changes, each in the direction of one rule for every reader:
 - **`--watch`'s `r` restart uses the spawn grace.** On `main` the `restarting` flag was cleared
   only by a live lease; after five polls with none, the view showed `starting...` for as long as
   it ran. Now the restart records its time, and 5 s later the view shows what `health` finds.
+- **`--watch`'s idle countdown counts from `idleSinceMs` at each render**, as the widget's
+  did; it counted from the `idleMs` of the last health check.
 - **`wtft-daemon --list`'s idle age is the session's idle age.** It is the time since
   `idleSinceMs` while the session is idle, `0s` while it is live and not idle, and the time since
   the last heartbeat when the lease holder is dead; `?` when the lease names no session. RUNNING

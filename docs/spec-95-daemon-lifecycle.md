@@ -31,7 +31,7 @@ line on an **active** session flashing between `● idle (cache emptied)` and
    file forever (24h idle-exit is the only reaper).
 4. **`getTagPath` returns the first readdir match** of any version — with multiple
    version files present, which file a consumer reads is directory-order luck.
-5. **Idle detection trusts heartbeats over classified data**: `checkDaemonHealth` scans
+5. **Idle detection trusts heartbeats over classified data**: `decideHealth` scans
    backwards and takes `idleSinceMs` from the newest `_hb.first` without clamping by the
    newest classified entry's timestamp. With interleaved heartbeats from two daemons
    (divergent `first`), the status alternates per beat.
@@ -73,7 +73,7 @@ daemon rebuilds.)
 
 ### D. Idle clamped by classified freshness
 
-In `checkDaemonHealth`'s backward scan, record the newest classified entry's timestamp
+In `decideHealth`'s backward scan, record the newest classified entry's timestamp
 (`t`) in the scan window and clamp:
 
 ```
@@ -90,7 +90,7 @@ clamped idle time is below `IDLE_THRESHOLD_MS`, the status is `live`.
   `ephemeral_5m_input_tokens > 0` → `"5m"`, else unset.
 - Wire format: `serializeClassified` writes `line.ttl`; `classifiedToInteraction` reads
   it back. (Tag-file wire-format sync rule: both functions updated together.)
-- `checkDaemonHealth` takes the TTL class from the **newest classified entry carrying
+- `decideHealth` takes the TTL class from the **newest classified entry carrying
   one** (same backward scan); observed `"1h"` → 3 600 000 ms, `"5m"` → 300 000 ms.
   Falls back to the `getModelCacheTtlMs` model-name heuristic only when no entry in the
   scan window carries a TTL class.
@@ -111,7 +111,7 @@ Automated (new `tests/wtft-daemon-lifecycle.test.ts`, run against built `bin/*.m
 
 1. **Idle clamp fixture**: tag file with interleaved dual-daemon heartbeats (divergent
    `first`, both ≥ threshold old) + a classified line fresher than both → status is
-   `live`, and **stable across 5 repeated `checkDaemonHealth` calls**.
+   `live`, and **stable across 5 repeated `health` calls**.
 2. **Takeover process test**: spawn the real daemon on a fixture session; overwrite its
    PID file with a foreign PID; daemon exits within 2 beats (~1.4s); the PID file is
    NOT deleted by the exiting daemon.

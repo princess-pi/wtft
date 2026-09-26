@@ -25,6 +25,7 @@ import {
 	WTFT_TAGGER_VERSION as TAGGER_VERSION,
 	taggerIsOlder,
 	lastLineStartByte,
+	health,
 } from "../extensions/lib/wtft-shared.js";
 
 
@@ -1617,7 +1618,6 @@ if (showList || showCleanup || showRestart || stopSession) {
     try { process.kill(pid, 0); alive = true; } catch (_) {}
 
     let sessionFound = null;
-    let tagMtime = 0;
     try {
       const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
       const args = cmdline.split("\0");
@@ -1635,7 +1635,6 @@ if (showList || showCleanup || showRestart || stopSession) {
         const prefix = sessBase + ".wtft-tag.v";
         for (const f of fs.readdirSync(tagsDir)) {
           if (f.startsWith(prefix)) {
-            tagMtime = fs.statSync(path.join(tagsDir, f)).mtimeMs;
             taggerVersion = f.slice(prefix.length, f.length - 6);
             break;
           }
@@ -1715,8 +1714,11 @@ if (showList || showCleanup || showRestart || stopSession) {
       found++;
       const status = alive ? "RUNNING" : "DEAD (stale pid)";
       let idleStr = "?";
-      if (tagMtime > 0) {
-        const idleSec = Math.floor((Date.now() - tagMtime) / 1000);
+      const now = Date.now();
+      const listed = sessionFound ? health(sessionFound, now) : null;
+      const since = !listed ? undefined : listed.idle ? listed.idleSinceMs : listed.alive ? now : listed.lastHbMs;
+      if (since !== undefined) {
+        const idleSec = Math.floor((now - since) / 1000);
         if (idleSec < 60) idleStr = `${idleSec}s`;
         else if (idleSec < 3600) idleStr = `${Math.floor(idleSec / 60)}m`;
         else idleStr = `${Math.floor(idleSec / 3600)}h`;

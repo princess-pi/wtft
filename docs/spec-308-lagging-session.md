@@ -48,7 +48,7 @@ Two review rounds (macroscopeapp; every finding verified against the code before
   `lastReadOffset` from whichever file won.
 - **"The daemon is running and waiting on it" is checked before it is said.**
   `awaitDaemonUp(sessionPath, child, ceilingMs)` polls state (no fixed delay):
-  `up` ⇔ a live process holds the lease (`checkDaemonHealth().alive`) — the daemon writes
+  `up` ⇔ a live process holds the lease (`health().alive`) — the daemon writes
   its PID file before `initClassified()`, and this covers the singleton case where the
   child exits 0 because an older daemon owns the session; `dead` ⇔ child gone (exit code
   **or signal**) AND no lease, re-checked *after* the exit is observed (a concurrent daemon

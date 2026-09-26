@@ -5,7 +5,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn, type ChildProcess } from "node:child_process";
-import { checkDaemonHealth, daemonLaunchArgs, getTagPath, type DaemonStatus } from "./wtft-shared.js";
+import { health, daemonLaunchArgs, type DaemonStatus } from "./wtft-shared.js";
 import { readConfig } from "@princess-pi/libs/config";
 import { formatVersion } from "@princess-pi/libs/build-stamp";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "./wtft-config-dir.js";
@@ -310,9 +310,7 @@ let _daemonSpawnedAt = 0; // Date.now() when the last spawn was attempted
 
 export function ensureDaemonRunning(sessionPath: string, daemonDir: string): boolean {
 	if (_daemonSpawned && _daemonSessionPath === sessionPath) {
-		const tagPath = getTagPath(sessionPath);
-		const health = checkDaemonHealth(sessionPath, tagPath);
-		if (health.alive) return true;
+		if (health(sessionPath, Date.now()).alive) return true;
 		_daemonSpawned = false;
 	}
 
@@ -328,40 +326,7 @@ export function ensureDaemonRunning(sessionPath: string, daemonDir: string): boo
 
 export function getDaemonStatus(sessionPath: string): DaemonStatus {
 	if (!_daemonSessionPath) return { alive: false, reason: "not-started" };
-
-	let sessionExists = false;
-	try { sessionExists = fs.existsSync(sessionPath); } catch {}
-
-	const tagPath = getTagPath(sessionPath);
-	const health = checkDaemonHealth(sessionPath, tagPath);
-
-	if (health.alive && !sessionExists) {
-		return { alive: true, reason: "waiting-session" };
-	}
-
-	// Grace period: if the daemon PID is gone but the tag file was recently
-	// written (within 2s), a new daemon instance is spinning up — mask the
-	// restart gap by reporting alive (idle or live depending on session).
-	if (!health.alive && _daemonSpawned) {
-		const elapsed = Date.now() - _daemonSpawnedAt;
-		// Within 5s of spawn: if PID file doesn't exist, daemon may still
-		// be starting. If session file doesn't exist either, report
-		// "waiting-session" instead of a generic "starting".
-		if (elapsed < 5000 && health.reason === "not-found") {
-			if (!sessionExists) {
-				return { alive: false, reason: "waiting-session" };
-			}
-			return { alive: false, reason: "starting" };
-		}
-		try {
-			const tagStat = fs.statSync(tagPath);
-			const tagAge = Date.now() - tagStat.mtimeMs;
-			if (tagAge < 2000 && tagStat.size > 0) {
-				return { alive: true, idle: true, idleMs: 0 };
-			}
-		} catch { /* tag file missing — genuinely dead */ }
-	}
-	return health;
+	return health(sessionPath, Date.now(), { spawnedAt: _daemonSpawned ? _daemonSpawnedAt : null });
 }
 
 // ---

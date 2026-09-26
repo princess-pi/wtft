@@ -78,6 +78,15 @@ check(tagRecords(hostileTag).some(isDataRecord), "N #140 and it counts as data")
 check(tagProvisionalFromContent(tagPath, hostileTag).provisional === true,
 	"N a tag whose last data record has no sweep marker after it is unswept");
 check(classifiedInteractionsFromContent(hostileTag).length === 1, "N the reader returns it as one interaction");
+// A list field of the wrong shape: two copies of one id force the merge that
+// iterates commands, which is where a non-array threw.
+for (const [name, bad] of [["cmd", { cmd: {} }], ["f", { f: "x" }], ["tc", { tc: 5 }]] as const) {
+	const wrongShape = line({ t: 1, c: 1, id: "w", ...bad });
+	check(parseTagLine(wrongShape)?.kind === "unknown", `N a non-array ${name} makes the line no turn: unknown`);
+	let merged: Interaction[] | null = null;
+	try { merged = classifiedInteractionsFromContent(wrongShape + wrongShape); } catch { merged = null; }
+	check(merged !== null && merged.length === 0, `N two copies of it collect nothing and throw nothing`);
+}
 
 // ---
 console.log("\nPART G — generation and sweep state");

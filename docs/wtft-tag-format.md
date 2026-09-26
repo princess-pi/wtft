@@ -113,8 +113,8 @@ The daemon writes one interaction line per classified turn. Fields:
 | `t` | number | **required** | Unix timestamp in milliseconds |
 | `c` | number | **required** | Cost in USD, rounded to 6 decimal places |
 | `cat` | string | **always written** | Pre-classified interaction category (see §3); a reader accepts its absence as undefined |
-| `f` | array | **always written** | Files touched: `[{p: string, a: "w"\|"r"}, ...]`; absent reads as `[]` |
-| `cmd` | array | **always written** | Shell commands run during the turn; absent reads as `[]` |
+| `f` | array | **always written** | Files touched: `[{p: string, a: "w"\|"r"}, ...]`; absent reads as `[]`, present but not an array makes the line no turn (`unknown`, §2f) |
+| `cmd` | array | **always written** | Shell commands run during the turn; absent reads as `[]`, not an array makes the line no turn, non-string entries are dropped |
 | `id` | string | optional | Message ID — present when the harness provided one; used for cross-run dedup (§4) |
 | `m` | string | optional | Model name |
 | `in` | number | optional | Input tokens (absent ⟹ 0) |
@@ -127,7 +127,7 @@ The daemon writes one interaction line per classified turn. Fields:
 | `wf` | number | optional | Web fetch requests (absent ⟹ 0) |
 | `tl` | string | optional | Thinking effort level |
 | `cb` | number | optional | Compaction tokens recorded before this turn |
-| `tc` | array | optional | Tool-implied categories (subset of §3 values) |
+| `tc` | array | optional | Tool-implied categories (subset of §3 values); not an array makes the line no turn |
 | `ut` | `1` | optional | Unrecognized tool flag — set to `1` when present, absent otherwise |
 | `ttl` | `"1h"\|"5m"` | optional | Observed prompt-cache TTL class; the reader drops any other value |
 | `miss` | `1` | optional | Cache miss flag — set to `1` when present: a parent turn that read no cache and wrote some, or one the overhead split classifies as a recache (a small prefix still cached, the rest re-primed; `docs/spec-241-partial-reprime-miss.md`). On a split turn it is on the remainder line, never the `#oh` line |
@@ -230,7 +230,8 @@ The daemon's own control lines. `recordOf()` reads them in this order, first mat
 
 An object that matches none of §2a–§2f — a non-object JSON value, a `_hb` value that is neither
 `"stop"` nor an object, a `_fold` or `_gen` with the wrong fields, an object with no numeric
-`t` and `c`, or one whose fields the decoder cannot read — is `unknown`: never an interaction,
+`t` and `c`, one with a `f`, `cmd` or `tc` that is not an array, or one whose fields the decoder
+cannot read — is `unknown`: never an interaction,
 never a marker. An object with numeric `t` and `c` that also carries a `_hb`, `_meta`, `_fold`
 or `_gen` key is never a turn.
 

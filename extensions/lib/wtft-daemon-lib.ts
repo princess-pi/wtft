@@ -79,13 +79,16 @@ export function serializeClassified(interaction: Interaction, source?: string): 
 
 export function classifiedToInteraction(obj: any): Interaction | null {
 	if (!obj || typeof obj.t !== "number" || typeof obj.c !== "number") return null;
+	// A list field of the wrong shape makes the line no turn at all, so a hostile
+	// or damaged line can never reach a merge or a render that iterates it.
+	for (const key of ["f", "cmd", "tc"]) if (obj[key] !== undefined && !Array.isArray(obj[key])) return null;
 	return {
 		timestamp: obj.t,
 		cost: obj.c,
 		messageId: obj.id || undefined,
 		model: obj.m || undefined,
-		files: (obj.f || []).map((f: any) => ({ path: f.p || "", action: (f.a === "w" ? "write" : "read") as "read" | "write" })),
-		commands: obj.cmd || [],
+		files: (obj.f || []).filter((f: any) => f && typeof f === "object").map((f: any) => ({ path: typeof f.p === "string" ? f.p : "", action: (f.a === "w" ? "write" : "read") as "read" | "write" })),
+		commands: (obj.cmd || []).filter((c: unknown): c is string => typeof c === "string"),
 		texts: [],
 		inputTokens: obj.in || 0,
 		outputTokens: obj.out || 0,

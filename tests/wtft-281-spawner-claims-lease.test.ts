@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
-import { claimLeaseForChild } from "../extensions/lib/lease.ts";
+import { claimLeaseForChild, pidAlive } from "../extensions/lib/lease.ts";
 import { readHealthFacts } from "../extensions/lib/daemon-health.ts";
 import { spawnWtftDaemon } from "../extensions/lib/wtft-cli-shared.ts";
 import { getDaemonPidPath, restartDaemon } from "../extensions/lib/wtft-daemon-lib.ts";
@@ -212,8 +212,7 @@ console.log("\nC4b. restartDaemon kills a holder that ignores SIGTERM before it 
 	for (let i = 0; i < 100 && !fs.existsSync(log); i++) await new Promise(r => setTimeout(r, 20));
 	await new Promise(r => setTimeout(r, 200));
 	restartDaemon(session, script);
-	let oldAlive = true;
-	try { process.kill(old.pid!, 0); } catch { oldAlive = false; }
+	const oldAlive = pidAlive(old.pid!);
 	check(!oldAlive, "C4b the old holder is gone when restartDaemon returns, so no two daemons share the tag");
 	let leaseNow = ""; try { leaseNow = fs.readFileSync(lease, "utf8").trim(); } catch {}
 	if (leaseNow && leaseNow !== String(old.pid)) try { process.kill(Number(leaseNow), "SIGKILL"); } catch {}

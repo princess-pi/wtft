@@ -676,13 +676,15 @@ export async function awaitDaemonUp(
 	const start = Date.now();
 	const pidPath = getDaemonPidPath(sessionPath);
 	const own = child?.pid ? String(child.pid) : "";
-	// The spawner claims the lease for its child at spawn (#281), so a lease
+	// The spawner claims the lease for its child at spawn, so a lease
 	// naming the child proves only that it is alive. It is up once it has also
 	// beaten into the tag since this wait began; any other live holder is up.
 	const leaseUp = () => {
+		const holder = leaseHolder(pidPath);
+		const pid = leasePid(holder);
+		if (!(pid > 0 && pidAlive(pid))) return false;
+		if (!own || holder !== own) return true;
 		const facts = readHealthFacts(sessionPath, pidPath, getCurrentVersionTagPath(sessionPath));
-		if (!facts.holderAlive) return false;
-		if (!own || leaseHolder(pidPath) !== own) return true;
 		return (facts.tag?.tail ?? []).some(r => r.kind === "heartbeat" && r.last >= start);
 	};
 	for (;;) {
@@ -727,7 +729,6 @@ export function restartDaemon(sessionPath: string, daemonPath: string): boolean 
 				try { process.kill(pid, "SIGKILL"); } catch {}
 				if (!gone(2000)) return false;
 			}
-			unlinkLeaseIf(pidPath, holder);
 		}
 	} catch {}
 

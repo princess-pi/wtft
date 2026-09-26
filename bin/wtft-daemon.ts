@@ -935,7 +935,7 @@ function pointSessionAt(livePid: number, file: string): boolean {
   try { leaseText = fs.readFileSync(lease, "utf8").trim(); } catch { /* no lease yet */ }
   const holder = Number(leaseText);
   held = holder === livePid;
-  // The spawner claimed this lease for this process (#281); it is handed on, not held.
+  // The spawner claimed this lease for this process; it is handed on, not held.
   const mine = holder === process.pid;
   // A rebuild token stays for the harness to read when it adopts, and a lease
   // another live daemon holds is left for the harness's adoption to take by
@@ -1498,7 +1498,7 @@ Management:
   --cleanup             Kill per-session daemons whose session is gone, and fixture ones under the tmp dir
                         that hold no lease here; never a harness process, which stops once it has nothing to serve or watch
   --restart             Stop every daemon holding a lease or a root pid file here (SIGTERM, SIGKILL after 2 s),
-                        and respawn one per stopped holder started with --session, claiming its lease when
+                        and respawn one per daemon holder started with --session, stopped or not, claiming its lease when
                         free; a harness holding no lease starts again on the next wtft. Linux only (/proc)
   --stop <session>      Drop that session. A per-session process exits. A harness process stays up.
 
@@ -1668,21 +1668,26 @@ if (showList || showCleanup || showRestart || stopSession) {
         try { process.kill(pid, "SIGTERM"); } catch (_) { /* already gone */ }
         waitUntilExited(pid);
       }
-      unlinkIfNames(fullPath, pid);
       // Only a daemon this process stopped is respawned: a live pid that is not
       // one (or one that cannot be signalled, #274) was not stopped.
-      if (wasDaemon && sessionFound) {
+      const respawnLease = wasDaemon && sessionFound ? getDaemonPidPath(sessionFound) : "";
+      // The respawn's own lease is left for its claim, which takes a dead holder's.
+      if (fullPath !== respawnLease) unlinkIfNames(fullPath, pid);
+      let handed = false;
+      if (respawnLease) {
         try {
-          const child = spawn(process.execPath, [process.argv[1], ...daemonLaunchArgs(sessionFound, restartEnv)], {
+          const child = spawn(process.execPath, [process.argv[1], ...daemonLaunchArgs(sessionFound!, restartEnv)], {
             detached: true,
             stdio: "ignore",
             env: restartEnv,
           });
           child.unref();
-          if (child.pid) claimLeaseForChild(getDaemonPidPath(sessionFound), child.pid);
+          if (child.pid) { claimLeaseForChild(respawnLease, child.pid); handed = true; }
         } catch (_2) {}
+        if (!handed) unlinkIfNames(fullPath, pid);
       }
-      console.log(wasDaemon && sessionFound ? `Restarted: PID ${pid} → fresh daemon for ${sessionFound}`
+      console.log(handed ? `Restarted: PID ${pid} → fresh daemon for ${sessionFound}`
+        : respawnLease ? `Stopped: PID ${pid} — the respawn for ${sessionFound} failed`
         : wasDaemon ? `Stopped: PID ${pid} — no --session to respawn (#274)`
         : `Removed lease: PID ${pid} — no live daemon found`);
       found++;

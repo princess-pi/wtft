@@ -31,7 +31,8 @@ export function claimLeaseForChild(file: string, childPid: number): "claimed" | 
   `readHealthFacts` and `restartDaemon`'s wait all use `pidAlive`.
 - **What it claims:** `claimLease(file, String(childPid), holderIsLive)`, where `holderIsLive`
   answers true for `rebuild` and for a holder that is a pid (`leasePid`: `/^[1-9]\d*$/`, the
-  child's own rule, which `readHealthFacts` and `restartDaemon` also use) and `pidAlive`. So it takes an absent, empty, non-pid or dead-pid lease, answers
+  per-session child's own rule, which `readHealthFacts`, `restartDaemon` and `awaitDaemonUp`
+  also use; a harness child's adoption reads the holder with `Number`, #290) and `pidAlive`. So it takes an absent, empty, non-pid or dead-pid lease, answers
   `claimed` for one already naming the child, and leaves a `rebuild` token and a live holder
   alone. The child then meets those two as it would without the claim.
 - **A child already gone:** if the child is not `pidAlive` once the claim lands, the helper
@@ -56,7 +57,8 @@ export function claimLeaseForChild(file: string, childPid: number): "claimed" | 
 - **Restart:**
   - `restartDaemon` sends SIGTERM to a lease holder whose cmdline has no `--harness`, and waits
     up to 2 s for it to stop being `pidAlive`. If it is still alive it sends SIGKILL and waits up
-    to 2 s more. Only then does it unlink, spawn and claim. A holder alive after both waits,
+    to 2 s more. Only then does it spawn and claim; it no longer unlinks the lease itself, and
+    the claim takes a dead holder's lease. A holder alive after both waits,
     including one it may not signal (EPERM), is left alone: `restartDaemon` returns false and
     `--watch` shows `restart-failed`. The old order was signal, unlink, spawn at once, which let
     the child start while the old daemon was still flushing into the same tag.
@@ -66,7 +68,9 @@ export function claimLeaseForChild(file: string, childPid: number): "claimed" | 
   - `wtft-daemon --restart` already waited before this change, for every live daemon holder,
     harness included: SIGTERM, 2 s, SIGKILL, then up to 2 s while the pid is still a daemon. It
     respawns whether or not the holder is gone (#274). It now also claims for the child it
-    respawns, which serves the holder's own `--session`; a harness's other leases are unlinked.
+    respawns, which serves the holder's own `--session`, without unlinking that lease first; a
+    harness's other leases are unlinked. A respawn whose spawn throws prints `Stopped: … the
+    respawn … failed`, not `Restarted`.
   - The wait blocks the caller: `--watch` neither renders nor reads keys for up to 4 s.
   - The gap left is the time between the old daemon's exit and `spawn()` returning. That is not a
     clock rule. Health reports the daemon stopped for that time, which is true.
@@ -148,6 +152,15 @@ member is a breaking change), and `renderDaemonStatus` still renders it for a ca
   restart wait async so the event loop reaps the child, which fixes only one caller. The
   child's own claim, `--restart`'s wait, `-F`'s wait and `--list` still use a bare `kill 0`
   (#290).
+- **The restart does not rename over the old lease.** #281's approved design had both restart
+  paths rename the new pid over the old, so the lease is never absent. The old daemon's own
+  shutdown unlinks its lease on SIGTERM, so after it exits the lease is absent whatever the
+  restarter does. Keeping it present would need a placeholder holder during the stop, which
+  health would read as alive while nothing serves. Absent and naming a dead pid read the same
+  to every reader. So the restarter stops unlinking and claims after the spawn, and the gap
+  between the old daemon's exit and the claim stays, reported truthfully as stopped. *Road not
+  taken:* the placeholder, measured as a failing check (the lease was absent on thousands of
+  reads during `--restart`) before this was decided.
 - **Restart waits for the old daemon, and kills one that will not go.** Up to 4 s of a frozen
   `--watch` beats two writers on one tag. *Roads not taken:* swapping the lease to the child
   before the old daemon exits, which leaves no gap but runs both at once; and spawning after 2 s

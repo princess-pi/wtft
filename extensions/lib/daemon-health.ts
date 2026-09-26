@@ -1,7 +1,7 @@
 /**
- * DaemonHealth: is this session's log parser daemon alive, idle, starting or
- * stopped. One pure decision over one set of facts, so every reader (widget,
- * --watch, the startup wait, wtft-daemon --list) gets the same answer.
+ * DaemonHealth: is this session's log parser daemon alive, idle or stopped.
+ * One pure decision over one set of facts, so every reader (widget, --watch,
+ * wtft-daemon --list) gets the same answer.
  * docs/spec-270-daemon-health.md.
  */
 

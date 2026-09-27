@@ -10,8 +10,10 @@ import {
 	parseEntryToInteraction,
 	deduplicateInteractions,
 	classifyInteraction,
-	buildWtftLines
+	buildWtftLines,
+	wholeLimit
 } from "./wtft-shared.js";
+import { isPlaceholderRow } from "./wtft-chart.js";
 import { splitOverheadCost, isModelTagged } from "./wtft-parser.js";
 import { getDiscoveries } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.js";
@@ -167,7 +169,7 @@ export function describeProvisionalReason(provisional: { reason: string | null }
 	if (provisional.reason === "descendant-live") {
 		return `a descendant session wrote to its transcript in the last ${IDLE_THRESHOLD_MS / 1000} s, so the tree total may still grow`;
 	}
-	return "no subagent transcript has been read since this tag was written";
+	return "no clean read of the session and its subagents has finished since this tag was last written, so some cost may still be missing";
 }
 
 export function readTagProvisional(tagPath: string): TagProvisional {
@@ -603,18 +605,15 @@ export function resolveMovedSession(sessionPath: string): string | null {
 /** Daemon self-exit: 24h of no new data. Polite to ps aux browsers. */
 export const IDLE_EXIT_MS = 24 * 60 * 60 * 1000;
 
-/** docs/spec-270-daemon-health.md: the one answer to "is this session's daemon alive". */
+/** docs/spec-daemon-health.md: the one answer to "is this session's daemon alive". */
 export function health(sessionPath: string, now: number, opts: HealthOptions = {}): DaemonStatus {
 	const tagPath = opts.tagPath ?? getTagPath(sessionPath);
 	return decideHealth(readHealthFacts(sessionPath, getDaemonPidPath(sessionPath), tagPath), now);
 }
 
-export function renderDaemonStatus(status: DaemonStatus, restarting = false): string {
+export function renderDaemonStatus(status: DaemonStatus): string {
 	if (status.reason === "waiting-session") {
 		return `  \x1b[33m●\x1b[0m ${daemonReasonText("waiting-session")}`;
-	}
-	if (restarting || status.reason === "starting") {
-		return `  \x1b[33m●\x1b[0m ${daemonReasonText("starting")}`;
 	}
 	if (!status.alive) {
 		const label = status.lastHbTime
@@ -706,7 +705,8 @@ export async function restartDaemon(sessionPath: string, daemonPath: string): Pr
 		if (mayStop(classifyPid(pid)) && (await stopHolder(pid)) !== "stopped") return false;
 	} catch {}
 
-	const childPid = processTable().spawn(process.execPath, [daemonPath, ...daemonLaunchArgs(sessionPath)], process.env);
+	let childPid = 0;
+	try { childPid = processTable().spawn(process.execPath, [daemonPath, ...daemonLaunchArgs(sessionPath)], process.env); } catch {}
 	if (childPid === 0) return false;
 	try { claimLeaseForChild(pidPath, childPid); } catch { /* the child claims for itself */ }
 	return true;
@@ -858,7 +858,7 @@ export async function watchTagFile(
 		const padStr = " ".repeat(actualPad);
 		const paddedWidth = width - 2 * actualPad;
 		const finalInterval = settings.hasInterval ? settings.interval : (sessionInterval ?? settings.interval);
-		const finalLimit = settings.hasLimit ? settings.limit : (sessionLimit ?? settings.limit);
+		const finalLimit = wholeLimit(settings.hasLimit ? settings.limit : (sessionLimit ?? settings.limit));
 		const finalMode = settings.hasMode ? settings.mode : (sessionMode ?? settings.mode);
 		const finalTimezone = settings.hasTimezone ? settings.timezone : (sessionTimezone ?? settings.timezone);
 		const finalWidth = Math.min(paddedWidth, 1023);
@@ -875,6 +875,8 @@ export async function watchTagFile(
 		const lines = buildWtftLines(deduped, defaultSettings, {
 			interval: finalInterval,
 			limit: finalLimit,
+			// No more placeholders than the terminal has rows; the fit below trims the rest.
+			padRowsTo: Math.min(finalLimit, process.stdout.rows || finalLimit),
 			width: finalWidth,
 			mode: finalMode,
 			timezone: finalTimezone,
@@ -890,7 +892,7 @@ export async function watchTagFile(
 
 		if (lines && lines.length > 0) {
 			const daemonStatusStr = daemonStatus
-				? renderDaemonStatus(daemonStatus, false)
+				? renderDaemonStatus(daemonStatus)
 				: "  \x1b[90m●\x1b[0m reading...";
 
 			if (daemonStatusStr) {
@@ -913,12 +915,20 @@ export async function watchTagFile(
 			: "";
 		buf.push(`'q' to exit${restartHint}`);
 
+		// Cursor-up redraw cannot reach lines scrolled off the top, so padding gives way first.
+		// Counted as the redraw counts them (wrapped), plus the line the cursor ends on.
+		const cols = process.stdout.columns || 80;
+		const rows = process.stdout.rows || Infinity;
+		const screenLines = () => visualLineCount(buf.map(l => padStr + l + "\n").join(""), cols) + 1;
+		for (let i = buf.length - 1; i >= 0 && screenLines() > rows; i--) {
+			if (isPlaceholderRow(buf[i]!)) buf.splice(i, 1);
+		}
+
 		lastBuffer = [...buf];
 
 		const allLines = buf.map(l => padStr + l);
 		const out = allLines.map(l => l + "\n").join("");
 		process.stdout.write(out);
-		const cols = process.stdout.columns || 80;
 		lastLineCount = visualLineCount(out, cols);
 		needsRedraw = false;
 	};

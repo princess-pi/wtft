@@ -1,5 +1,7 @@
 # Spec 270 S5 — DaemonHealth
 
+**Superseded by `docs/spec-daemon-health.md`**, the live spec for the module. Read this file as the record of slice S5, not as current behaviour.
+
 Issue: https://github.com/princess-pi/wtft/issues/270, slice S5 of
 `docs/spec-270-daemon-ownership.md` §3b. The parent spec's rows for S5 are the commitment; this
 document is the design and the closer. Vocabulary: the `codebase-design` skill's (module,

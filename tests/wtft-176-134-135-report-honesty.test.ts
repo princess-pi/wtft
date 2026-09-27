@@ -160,7 +160,7 @@ console.log("\n=== #176: the widget reads the tag's own provisional verdict ===\
 	check(doc?.provisional?.provisional === true && doc?.total?.costUsd > 0,
 		"precondition: the CLI reads the unswept tag as provisional, with cost in it", JSON.stringify({ p: doc?.provisional, t: doc?.total?.costUsd }));
 
-	const TAG_LINE = "no subagent transcript has been read since this tag was written — total is provisional";
+	const TAG_LINE = "no clean read of the session and its subagents has finished since this tag was last written, so some cost may still be missing — total is provisional";
 	const w = await render(unswept);
 	check(w.some(l => l.includes("+$0.25")), "precondition: the widget renders the tag's turn", JSON.stringify(w));
 	check(w.some(l => l.includes(TAG_LINE)), "unswept tag -> the widget carries the tag's reason line", JSON.stringify(w));

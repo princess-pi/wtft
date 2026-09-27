@@ -1,5 +1,7 @@
 # Spec 270 S3 — SessionTagger
 
+**Superseded by `docs/spec-session-tagger.md`**, the live spec for the module. Read this file as the record of slice S3, not as current behaviour.
+
 Issue: https://github.com/princess-pi/wtft/issues/270, slice S3 of
 `docs/spec-270-daemon-ownership.md` §3b. Parent spec's rows for S3 are the commitment; this
 document is the design and the closer. Vocabulary: the `codebase-design` skill's (module,
@@ -164,7 +166,7 @@ harness registry concern, S4) and **I**, **J** (the sweep and the watch, daemon-
 - **Keeping `Date.now()` inside the tagging code.** One clock read per part is what makes the
   test adapter's clock meaningful and the spawn-window and settle cases replayable.
 - **Renaming the `[wtft-log-parser]` log prefix.** `CONTEXT.md` avoids bare "log parser"; the
-  prefix is every daemon line's and is on #261 with the other daemon strings.
+  prefix is every daemon line's; PR #321 renamed it with the other daemon strings.
 - **The opening review round** (`pr-open`, 14 findings, 2 blocking) found the growth check
   re-cutting a pass forever on a transcript whose read fails after its stat, and `exists`
   reading any stat error as gone; both fixed with checks in parts C and W, along with the
@@ -173,7 +175,7 @@ harness registry concern, S4) and **I**, **J** (the sweep and the watch, daemon-
   (`wtft-457` passes).
 - **Opened with `pr-open --reviewed` after the review round limit.** Three rounds (14, 5, 9
   findings): every one fixed, declined with evidence, or filed (#272 for the resume branch's
-  swallowed truncate, #261 for two exit-code leads), all in the ledger. Round three's fixes: the
+  swallowed truncate, PR #321 for two exit-code leads), all in the ledger. Round three's fixes: the
   session and child reads advance the offset only past the bytes a short read returned; the
   wtft-420 guard counts the port call `world.attribute` in the tagger; `cut` is documented as
   "the pass is not finished"; the swept marker rides the scan's one append.
@@ -184,7 +186,7 @@ harness registry concern, S4) and **I**, **J** (the sweep and the watch, daemon-
   the merge offer are the next passes.
 - **Rewording the "could not be read at discovery" warning** for the session transcript, which
   fires on any poll's failed read. `tests/wtft-457-unreadable-transcript.test.ts` pins the
-  text in several places, so it is on #261 with the other daemon strings.
+  text in several places; PR #321 reworded it with the other daemon strings.
 - **Moving `initClassified`, heartbeats and the stop line in too.** They are byte-level writes
   to the tag file, the writer half of TagLog, and belong with the daemon until the writer is
   its own module.

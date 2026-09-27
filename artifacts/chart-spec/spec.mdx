@@ -109,7 +109,7 @@ Stack. Bar is incremental tokens. Recency off. One category per cell.
 - The monotonic clamp is on the cost running-total bar. A category that already holds a cell does not shrink below that count. A token running total does not use it. These pictures use largest-remainder into the scaled cell count.
 - The chart's legend lists every category, including ones with no spend in the session. The picker lists the categories in this sample: plan, research, web, code, and tests.
 - The caller passes width, timezone, surge, the session suffix, an other-category warning, and the cache line. Pad is applied before the chart sees the width. The picker does not draw them.
-- Padding rows out to the limit is [https://github.com/princess-pi/wtft/issues/264](https://github.com/princess-pi/wtft/issues/264). The widget's limit is a bin count, default 10. Rule lines are extra. The Pi display cap is [https://github.com/princess-pi/wtft/issues/269](https://github.com/princess-pi/wtft/issues/269). The picker prints how many lines the picture has. Time versus turns is the interval kind. The size stays in binning. The default is `1h`.
+- Padding rows out to the limit is `docs/spec-264-pad-rows.md`: the CLI pads, the widget does not. The widget's limit is a bin count, default 10. Rule lines are extra. The Pi display cap is `docs/spec-269-widget-fit.md`. The picker prints how many lines the picture has. Time versus turns is the interval kind. The size stays in binning. The default is `1h`.
 
 ## Settled
 

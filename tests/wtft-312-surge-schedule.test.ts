@@ -57,7 +57,7 @@ describe("#312 a card carries its own surge schedule", () => {
 		const hours = getSurgeLocalHours("UTC", minute(0), CARD);
 		assert.deepEqual([...hours], [1]);
 		assert.equal(getSurgeLocalHours("UTC", minute(0), "claude-opus-4-6").size, 0);
-		const line = buildTimelineString(hours, 1, "surge", undefined, true, 3);
+		const line = buildTimelineString(hours, 1, "|", "|", "*", "surge", true, 3);
 		assert.ok(line.includes("SURGE 3x"));
 	});
 

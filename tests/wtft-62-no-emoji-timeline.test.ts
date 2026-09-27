@@ -9,7 +9,9 @@ import { buildTimelineString } from "../extensions/lib/wtft-renderer.ts";
 const ANSI = /\x1b\[[0-9;]*m/g;
 
 function timeline(currentHour: number, disabledEmoji: boolean): string {
-	return buildTimelineString(new Set(), currentHour, undefined, undefined, disabledEmoji).replace(ANSI, "");
+	const bookend = disabledEmoji ? "|" : "🌑";
+	const noon = disabledEmoji ? "*" : "☀️";
+	return buildTimelineString(new Set(), currentHour, bookend, bookend, noon, undefined, disabledEmoji).replace(ANSI, "");
 }
 
 // Emoji code points the timeline uses: moon (U+1F311–1F318), clock (U+1F550–1F55B),
@@ -87,7 +89,7 @@ check("emoji mode still renders ☀️ and the clock face (no regression)", () =
 // 4. The surge badge (part of the same timeline string) also swaps ⚡ → !!.
 // ---
 check("no-emoji surge badge swaps ⚡ for !!", () => {
-	const t = buildTimelineString(new Set(), 13, "surge", undefined, true, 2).replace(ANSI, "");
+	const t = buildTimelineString(new Set(), 13, "|", "|", "*", "surge", true, 2).replace(ANSI, "");
 	assert.ok(!t.includes("⚡"), `still contains ⚡: ${t}`);
 	assert.ok(t.includes("!! SURGE 2x"), `expected !! SURGE 2x, got: ${t}`);
 });

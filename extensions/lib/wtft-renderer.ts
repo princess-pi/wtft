@@ -632,7 +632,7 @@ const SYNODIC_MONTH_MS = 29.53058867 * 86400000;
 // Reference new moon: 2026-07-14 09:43 UTC. Re-centre every ~2 years.
 const REF_NEW_MOON = new Date("2026-07-14T09:43:00Z").getTime();
 
-function getMoonPhase(date: Date): string {
+export function getMoonPhase(date: Date): string {
 	const ageMs = (date.getTime() - REF_NEW_MOON) % SYNODIC_MONTH_MS;
 	const ageDays = (ageMs + SYNODIC_MONTH_MS) % SYNODIC_MONTH_MS / 86400000;
 	// Offset by half a phase width so each bucket is centred on its
@@ -644,15 +644,16 @@ function getMoonPhase(date: Date): string {
 }
 
 /**
- * The bookends are the only glyphs guaranteed present at every hour, so they —
- * not the clock face — are what callers and tests should key off to identify
- * the timeline.
+ * The bookends and the noon glyph are the caller's. The clock face for the
+ * current hour stays here.
  */
 export function buildTimelineString(
 	surgeHours: Set<number>,
 	currentHour: number,
+	startGlyph: string,
+	endGlyph: string,
+	noonGlyph: string,
 	proximityStatus?: 'surge' | 'approaching' | 'ending',
-	date?: Date,
 	disabledEmoji?: boolean,
 	multiplier?: number,
 ): string {
@@ -674,7 +675,7 @@ export function buildTimelineString(
 	// surge color so noon surge-pricing still shows, but it is never "current" —
 	// the clock face is the current-hour marker.
 	const noonSurge = surgeHours.has(12);
-	glyphs.splice(12, 0, { color: noonSurge ? "38;5;208" : "32", char: disabledEmoji ? "*" : "☀️" });
+	glyphs.splice(12, 0, { color: noonSurge ? "38;5;208" : "32", char: noonGlyph });
 
 	for (const g of glyphs) {
 		if (g.color !== lastColor) {
@@ -686,8 +687,7 @@ export function buildTimelineString(
 	}
 
 	const timelineBody = segments.map(s => `\x1b[${s.color}m${s.text}\x1b[0m`).join("");
-	const moon = disabledEmoji ? "|" : getMoonPhase(date ?? new Date());
-	let result = `${moon}${timelineBody}${moon}`;
+	let result = `${startGlyph}${timelineBody}${endGlyph}`;
 
 	const bolt = disabledEmoji ? "!!" : "⚡";
 	if (proximityStatus === 'surge' && multiplier !== undefined) {
@@ -716,6 +716,17 @@ export function computeCacheMetrics(interactions: Interaction[]): { hitRate: str
 
 // ---
 
+export const CLI_DEFAULT_LIMIT = 17;
+
+export function chartLimit(opts: { hasLimit: boolean; limit: number }, configLimit: number | undefined): number {
+	return wholeLimit(opts.hasLimit ? opts.limit : (configLimit ?? CLI_DEFAULT_LIMIT));
+}
+
+/** A config file can hold 3.5 or -2; the chart shows, and pads to, a whole count of at least one row. */
+export function wholeLimit(limit: number): number {
+	return Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : CLI_DEFAULT_LIMIT;
+}
+
 export function buildWtftLines(
 	interactions: Interaction[],
 	defaultSettings: {
@@ -739,6 +750,8 @@ export function buildWtftLines(
 		sessionNameSuffix?: string;
 		showCostColumns?: boolean;
 		showTokenColumns?: boolean;
+		/** Placeholder rows fill the chart out to this many interval rows. */
+		padRowsTo?: number;
 	}
 ): string[] | null {
 	const intervalStr = opts?.interval !== undefined ? opts.interval : defaultSettings.interval;
@@ -925,6 +938,7 @@ export function buildWtftLines(
 		cacheLine,
 		showCostColumns: opts?.showCostColumns !== false,
 		showTokenColumns: opts?.showTokenColumns !== false,
+		padRowsTo: opts?.padRowsTo,
 	});
 }
 

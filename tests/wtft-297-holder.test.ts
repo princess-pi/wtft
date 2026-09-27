@@ -1,5 +1,5 @@
 /**
- * The holder module against an in-memory process table. docs/spec-297-holder-module.md § 5.
+ * The holder module against an in-memory process table. docs/spec-holder.md § 4.
  */
 
 import * as assert from "node:assert";
@@ -191,6 +191,12 @@ describe("C3 restartDaemon", () => {
 		assert.strictEqual(await restartDaemon(file, "/x/bin/wtft-daemon.mjs"), false);
 		assert.strictEqual(t.spawned.length, 0);
 		assert.strictEqual(leaseHolder(lease), "603");
+	});
+	it("a spawn that throws resolves false, so --watch shows restart failed", async () => {
+		const t = fakeProcessTable();
+		restore = useProcessTable({ ...t, spawn: () => { throw new Error("EAGAIN"); } });
+		const { file } = session();
+		assert.strictEqual(await restartDaemon(file, "/x/bin/wtft-daemon.mjs"), false);
 	});
 });
 

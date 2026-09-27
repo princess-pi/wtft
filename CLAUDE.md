@@ -17,6 +17,7 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
 - **Shared code goes in `@princess-pi/libs`**, never copied in.
 - **Spec-reconcile does not treat comments as spec.** Reconcile: manifests,
   `--help`, README flags/exit codes, JSON schema, tag-format, `CONTEXT.md`,
+  module specs (`docs/spec-<module>.md`),
   `docs/wtft-incremental-render-spec.md`, user-facing strings.
   Not banner comments, not test-header novels, not glossary provenance, not counts
   in prose. A stale comment is deleted, never reworded.
@@ -27,7 +28,8 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
   seams that exist: `decideHealth` (`extensions/lib/daemon-health.ts`), `stepTagger`
   (`extensions/lib/session-tagger.ts`), the registry functions
   (`extensions/lib/harness-registry.ts`), and `classifyPid` over a fake process table
-  (`extensions/lib/holder.ts`, `tests/lib/fake-process-table.ts`).
+  (`extensions/lib/holder.ts`, `tests/lib/fake-process-table.ts`), `rotateDaemonLog`
+  (`extensions/lib/daemon-log.ts`), and `fitWidget` (`extensions/lib/widget-fit.ts`).
 - **Every feature PR body carries one line:** `Module: <file> · Seam: <function>, tested in <suite>`.
   A PR that touches a second module adds `Also: <file> — <why>` for each one.
 - *Why:* before the daemon ownership refactor (spec-270), one daemon feature touched state spread across `bin/wtft-daemon.ts` and
@@ -45,7 +47,7 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
 | Pricing manifest | `bun run manifest` |
 | Install on this host | `bin/install-wtft` · `--check` for drift (exit codes in README) |
 | PR cost record | `bun run pr-cost --write-pr` in the branch's worktree, just before `pr-offer-merge` (`docs/spec-277-pr-cost.md`) |
-| After every merge | `pr-cleanup <branch>` → `git pull --ff-only` → `bin/install-wtft`, from the main clone. Run the full install, not `--check`: it compares `~/bin` to the clone's built bundles, so after a merge both are stale together and it reports in sync while `~/bin` runs old code (#85) |
+| After every merge | `pr-cleanup <branch>` → `git pull --ff-only` → `bin/install-wtft`, from the main clone. Run the full install, not `--check`: it compares `~/bin` to the clone's built bundles, so after a merge both are stale together and it reports in sync while `~/bin` runs old code (#85). The install stops any daemon on an older build (restarting per-session ones; a harness returns on the next wtft) and says so |
 
 ## Shape
 
@@ -59,4 +61,8 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
 
 - `CONTEXT.md` — vocabulary, including the two-register rule: "log parser daemon" to explain,
   "daemon" to refer.
-- `docs/spec-<issue>-*.md` — the spec behind each numbered change.
+- `docs/spec-<module>.md` with a `Module:` line — the live spec for that file in `extensions/lib/`;
+  a behaviour change there edits it. `ls docs/spec-[a-z]*.md` lists them. A module without one is
+  still described by its per-issue specs.
+- `docs/spec-<issue>-*.md` — the spec behind each numbered change. One whose header says
+  "Superseded by" is a change record, not current behaviour.

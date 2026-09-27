@@ -14,12 +14,13 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 │  fs.watch. Flushes for one session are ≥667ms apart.    │
 │  A session outside the roots keeps its own 667ms poll.  │
 │  Tag format includes message.id for cross-run dedup.    │
-│  Heartbeats: one _hb line, in place. Harness mode       │
+│  Heartbeats: _hb lines, a same-width one in place.      │
+│  Harness mode                                           │
 │  writes it only for a session a consumer is displaying. │
 │  A failed tag write exits the process. A bad session    │
 │  line is skipped. Other poll errors log in debug mode.  │
 │  Idle 24h drops that session. A --session process exits.│
-│  A harness process stays up. Grace: 60s after startup.  │
+│  A harness daemon stays up. Grace: 60s after startup.   │
 │  Costs rounded to 6 decimal places before JSON write    │
 │  (eliminates float drift vs in-memory widget).          │
 │  Version-aware singleton: detects old tag file, takes   │
@@ -52,11 +53,11 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 |---|---|
 | `session_start` (Pi) or `wtft` / `wtft --watch` invoked (CLI) | Spawns a daemon and claims the session's lease for it, unless the lease holds `rebuild` or names a live process (spec-281). A per-session daemon that meets a live holder exits, unless an older-version tag exists, in which case it takes the lease over; a session under a harness root attaches to that root's one process. |
 | New session data arrives | Classifies and flushes that session's tag. Flushes for one session are at least 667ms apart. |
-| No new data for 24h | That session is dropped ("idle timeout"). A `--session` process exits. A harness process stays up. It decides from in-memory timestamps on a timer and does not stat the file. While that harness runs, a write within the next 24h adopts the session again; after that only a request does. |
+| No new data for 24h | That session is dropped ("idle timeout"). A `--session` process exits. A harness daemon stays up. It decides from in-memory timestamps on a timer and does not stat the file. While that harness runs, a write within the next 24h adopts the session again; after that only a request does. |
 | Daemon just spawned (< 60s) | Idle drop suppressed (startup grace period) |
-| Session file deleted | A `--session` process exits ("session removed") unless the transcript moved. A harness process drops that session and stays up. |
-| Session file not yet created | Waits, and writes a heartbeat when this process is the per-session daemon or the session is the one a consumer is displaying, so the widget can show "waiting for session .jsonl..." (#124). Past the wait cap, a `--session` process exits ("session never written") and a harness process drops the slot. |
-| Press `r` in `--watch` | Stops the lease holder when it is a per-session daemon (on Linux never a `--harness` one, a process that is not a daemon, or one whose cmdline cannot be read; off Linux any pid, since none can be told apart; spec-297) with SIGTERM, then SIGKILL after 2 s, and waits up to 2 s more; then spawns fresh and claims the lease for it, unless the lease holds `rebuild` or names a live daemon. `● restart failed` if the old holder outlives both waits (EPERM included) or the spawn throws |
+| Session file deleted | A `--session` process exits ("session removed") unless the transcript moved. A harness daemon drops that session and stays up. |
+| Session file not yet created | Waits, and writes a heartbeat when this process is the per-session daemon or the session is the one a consumer is displaying, so the widget can show "waiting for session .jsonl..." (#124). Past the wait cap, a `--session` process exits ("session never written") and a harness daemon drops the slot. |
+| Press `r` in `--watch` | Stops the lease holder when `mayStop` allows it (`docs/spec-holder.md` §2) with SIGTERM, then SIGKILL after 2 s, and waits up to 2 s more; then spawns fresh and claims the lease for it, unless the lease holds `rebuild` or names a live daemon. `● restart failed` if the old holder outlives both waits (EPERM included) or the spawn throws |
 | **New activity after idle timeout** | Pi's `agent_end` handler calls `ensureDaemonRunning`, which spawns a daemon unless it spawned one for this session before and a live process holds the lease |
 
 ## Sub-Agent Transcript Read Path (princess-pi-tools#270 / #420 / #97)
@@ -480,23 +481,23 @@ Row 1:  sessionPath  (dim)
 Row 2:  💸 WTF Tokens?  (◆--orange--green--|--green---orange--◆) ⚡ SURGE 2x  ● live
 Row 3:  [legend: Spec, Code, Tests, Research, Git, Grep, Prompt, Other]
 Row 4+: ticks line, date dividers, bucket rows
-Footer: q/Ctrl+C to exit, 'r' to restart  (r in red when daemon dead)
+Footer: 'q' to exit[, using v<tagger version>, 'r' to restart]  (the bracket only with a daemon path; r in red when daemon dead)
 ```
 
 The 24-hour SURGE timeline and daemon status indicator are appended inline to the title line if they fit within terminal width; otherwise they wrap to separate lines between title and legend.
 
 ## Daemon Status States
 
-The states, what triggers each and the rendered text are one table:
-`docs/spec-270-daemon-health.md` §2, with the rendered legend in `docs/EXT_WTFT.html`
-(`#daemon-health`). Both surfaces render through `renderDaemonStatus`.
+What triggers each state: `docs/spec-daemon-health.md` §2 and §3. The rendered text and colours:
+`docs/manifests/wtft-status.json`, shown on `docs/EXT_WTFT.html` (`#daemon-health`). Both
+surfaces render through `renderDaemonStatus`.
 
 `--watch` asks `health` while it waits for the tag file, on tag changes it reads, on `r`, and on
 its 1,334 ms watchdog while it does not read the daemon as dead.
 
 ## Pi Widget Integration
 
-The Pi `/wtft` widget also spawns a log parser daemon on `session_start`, using `ctx.sessionManager.getSessionFile()` to determine the session path. This keeps the wtft-tag file warm for CLI use. The widget renders its own daemon status indicator on the title line (inline or wrapped; under the cache line when there is no chart), from `getDaemonStatus`: `daemon not started` before it has spawned, else the same `health` answer (`docs/spec-270-daemon-health.md`).
+The Pi `/wtft` widget also spawns a log parser daemon on `session_start`, using `ctx.sessionManager.getSessionFile()` to determine the session path. This keeps the wtft-tag file warm for CLI use. The widget renders its own daemon status indicator on the title line (inline or wrapped; under the cache line when there is no chart), from `getDaemonStatus`: `daemon not started` before it has spawned, else the same `health` answer (`docs/spec-daemon-health.md`).
 
 **Daemon auto-revive:** If the daemon died from idle timeout (24h), the Pi `agent_end` handler calls `ensureDaemonRunning`, which, when it spawned for this same session before, checks `health` before trusting the module-level `_daemonSpawned` flag. If the lease has no live holder, the flag is reset and the daemon is re-spawned; with no earlier spawn it spawns without checking. This keeps `wtft --watch` in an external terminal alive even after long idle periods — just type a new prompt and the daemon wakes up.
 
@@ -558,19 +559,18 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 
 | Situation | Handling |
 |---|---|
-| Daemon exits (idle timeout, 24h) | Title shows `● stopped HH:MM` in red; footer shows red `'r' to restart` |
-| No activity for 2m2s | Status flips to `● idle (cache expires in Nmin)`, whole minutes rounded up, then `● idle (cache emptied)`. The TTL rule: `docs/spec-270-daemon-health.md` §2. |
-| Local model (no cache), or no model known | Status shows `● idle (local model)` |
+| Daemon exits (idle timeout, 24h) | The status `docs/spec-daemon-health.md` §2 gives a dead holder; footer shows red `'r' to restart` |
+| No activity for the idle threshold | An idle status (`docs/spec-daemon-health.md` §2; the texts in `docs/manifests/wtft-status.json`) |
 | User presses `r` | Daemon restarts; while the old one exits (up to 4 s) the view keeps rendering what `health` finds, and a second `r` is ignored until the restart ends; `q` or Ctrl+C then exits once it has spawned. When the claim landed, the lease names the new child at once, so that is alive (`waiting for session`, `live` or `idle`). A holder that outlives SIGKILL or may not be signalled (EPERM), or a spawn that throws, shows `● restart failed` |
 | Tag file deleted/truncated | `fs.watch` handler re-reads from zero |
-| Daemon spawned before session file exists | Status shows `● waiting for session .jsonl...` (yellow) while a live process holds the lease; over a `rebuild` lease it shows `not found` or `stopped HH:MM` until the daemon adopts. The daemon polls until the file is created (#124) |
-| Daemon never started | The widget, before it has spawned one, shows `● daemon not started`; otherwise a dead lease with no heartbeat in the tag's last 8 KiB shows `● daemon not found`, and one with a heartbeat `● stopped HH:MM` |
+| Daemon spawned before session file exists | Status per `docs/spec-daemon-health.md` §2. The daemon polls until the file is created (#124) |
+| Daemon never started | Status per `docs/spec-daemon-health.md` §2 and §3 |
 | Daemon restarts after crash | Reads `_meta` offset from tag file for exact resume position; falls back to full re-parse if no meta offset found (#124) |
 | One-shot read beats the daemon to a stale tag | The total prints in full, a `PROVISIONAL` warning names why, and `wtft` exits **9** rather than 0 — `readTagProvisional` reports `stale-version` or `unswept` (#443). It does NOT wait: blocking a one-shot CLI on a repair proportional to subagent volume is the cost read-then-render avoids |
 | `--tokens` blind-spot scan loses a subtree | An unreadable subagent transcript — one file (reported, not thrown, since round 6; the readable siblings still scan) or a whole unreadable directory — drops uncounted billables from the token table; the parser warned (latched), the CLI sets `provisional` with reason `subagent-unreadable` and exits **9** (#457, round 5; assigned unconditionally on the CLI's own discovery failure since round 7 — never already-provisional-superseded) — a machine reader never sees a complete-looking report |
 | Daemon encounters transient error | Error logged (debug mode), daemon continues on next poll cycle — does not crash |
 | Terminal too narrow for inline status | Status wraps to separate line between title and legend |
-| Session file gone | While a lease holder is alive, `● waiting for session .jsonl...`; once it has exited, `● stopped HH:MM` (or `● daemon not found` with no heartbeat in the tail). The chart keeps the last-known data |
+| Session file gone | Status per `docs/spec-daemon-health.md` §2. The chart keeps the last-known data |
 
 ## Verification
 

@@ -540,7 +540,7 @@ console.log("\nPART W — every failure the daemon warned about comes back as on
 	fs.chmodSync(f.session, 0o000);
 	const first = stepTagger(state, c.world, { flush: true });
 	const warns = (r: { log: { level: string; text: string }[] }) => r.log.filter(l => l.level === "warn").map(l => l.text);
-	check(warns(first).length === 1 && warns(first)[0].includes("the session transcript could not be read at discovery") && warns(first)[0].includes(f.session),
+	check(warns(first).length === 1 && warns(first)[0].includes("the session transcript could not be read, so") && warns(first)[0].includes(f.session),
 		`W an unreadable session transcript is one warn line naming it (${JSON.stringify(warns(first))})`);
 	check(state.sessionReadFailed && state.pollHadFailure, "W and the step records the read failure");
 	c.tick();

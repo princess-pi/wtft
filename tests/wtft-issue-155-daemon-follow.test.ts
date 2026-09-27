@@ -10,6 +10,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { pollUntil } from "./lib/poll";
+import { parseTagLine } from "../extensions/lib/tag-log.ts";
 
 import {
 	getDaemonPidPath,
@@ -72,7 +73,7 @@ function turnLine(id: string, cwd: string, ts: string): string {
 console.log("\n=== PART A: the singleton key survives a move ===\n");
 {
 	// Real session basenames carry a UUID — that is what makes them a usable
-	// identity across project dirs (#157).
+	// identity across project dirs.
 	const ID1 = "b1f54c2f-5140-4934-8075-c21e2339f4e2.jsonl";
 	const ID2 = "9890440e-05ad-421c-bc03-cd0b845aea42.jsonl";
 	const a = `/home/tester/.claude/projects/-home-tester-demo/${ID1}`;
@@ -87,8 +88,8 @@ console.log("\n=== PART A: the singleton key survives a move ===\n");
 	const pi2 = `/home/tester/.pi/agent/sessions/--elsewhere--/2026-08-06T23-19-38-943Z_019fd960-0ebf-7fb2-85ed-798b50f61b8e.jsonl`;
 	check(getDaemonPidPath(pi1) === getDaemonPidPath(pi2), "Pi session basenames are identities too");
 
-	// The #157 gate: a basename that is NOT a session id is not an identity, so
-	// it keeps the pre-#155 full-path key. Two fixtures both named session.jsonl
+	// A basename that is NOT a session id is not an identity, so it keeps the
+	// full-path key. Two fixtures both named session.jsonl
 	// in different directories must NOT share a daemon lease.
 	const plainA = "/tmp/wtft-fixture-a/session.jsonl";
 	const plainB = "/tmp/wtft-fixture-b/session.jsonl";
@@ -142,7 +143,7 @@ console.log("\n=== PART B: tag path resolution across project dirs ===\n");
 		"a fresh session gets the own-dir current-version default"
 	);
 
-	// The #157 gate on the other cross-dir behaviour: a non-session path must
+	// The same gate on the other cross-dir behaviour: a non-session path must
 	// never trigger a sibling scan, or getTagPath walks the grandparent of an
 	// arbitrary directory (for /tmp/<fixture>/session.jsonl, that is /tmp).
 	const plain = path.join(projects, ownSlug, "session.jsonl");
@@ -201,6 +202,18 @@ console.log("\n=== PART C: a live daemon follows its transcript ===\n");
 			return fs.readFileSync(tagPath, "utf8").split("\n").filter(l => l.trim() && !l.includes('"_hb"')).length;
 		} catch { return NaN; }
 	};
+	// Whether the tag holds a turn record for the transcript line stamped `ts`.
+	const hasTurnAt = (ts: string): boolean => {
+		try {
+			return fs.readFileSync(tagPath, "utf8").split("\n").some(l => {
+				const r = parseTagLine(l);
+				return r?.kind === "turn" && r.interaction.timestamp === Date.parse(ts);
+			});
+		} catch { return false; }
+	};
+	// The move must come after the daemon has read the session: moved before its
+	// first read, the transcript is indistinguishable from one not written yet.
+	check(await pollUntil(() => hasTurnAt("2026-08-01T00:00:00Z"), 10_000), "precondition: the daemon has tagged m1 before the session moves");
 	const linesBefore = countTaggedLines();
 
 	// The worktree switch: the transcript MOVES (one file, same inode, new dir).
@@ -212,7 +225,7 @@ console.log("\n=== PART C: a live daemon follows its transcript ===\n");
 
 	// New work arrives at the new location — the daemon must still parse it.
 	fs.appendFileSync(pathB, turnLine("m2", cwdB, "2026-08-01T00:05:00Z") + "\n");
-	const parsedMore = await pollUntil(() => countTaggedLines() > linesBefore, 10_000);
+	const parsedMore = await pollUntil(() => hasTurnAt("2026-08-01T00:05:00Z"), 10_000);
 	check(fs.existsSync(tagPath), "the tag path is unchanged — an attached --watch survives", `tagPath=${tagPath}`);
 	const linesAfter = countTaggedLines();
 	check(parsedMore && linesAfter > linesBefore, `daemon kept parsing after the move (${linesBefore} → ${linesAfter} tagged lines)`, `parsedMore=${parsedMore}`);

@@ -17,18 +17,24 @@ default `~/.claude/projects`) or the Pi sessions root (`WTFT_PI_SESSIONS_DIR`, d
 `~/.pi/agent/sessions`) is served by that root's one process, which serves only the
 sessions a reader asked for (and what they spawned), and never adopts or tags the rest of
 the root. Finding a Pi session's subagent sessions reads the first line of each sibling file. A
-session outside those roots keeps its own process, polling every 667ms. The tag file and
-the pid lease stay per session. After 24h with no new lines, the per-session process
-exits, and the harness process drops that session and its lease; the next write to its own transcript,
-or the next request, adopts it again; while that harness process runs, the write alone does.
+session outside those roots keeps its own process, polling every 667ms; the harness daemon
+reads on `fs.watch` plus a 250 ms sweep that stats each transcript at most every 667 ms. The tag file and
+the pid lease stay per session. After `WTFT_DAEMON_IDLE_MS` (default 24h) with no activity (a
+new turn, a subagent record written, or a poll of a session not yet written; never within the
+startup grace), the per-session process
+exits, and the harness daemon drops that session and its lease; the next write to its own transcript,
+or the next request, adopts it again; while that harness daemon runs, the write alone does.
 A session dropped for idling is forgotten 24h after it was dropped unless written first, or
-within a minute of its transcript being deleted, and a harness process left with nothing to
+within a minute of its transcript being deleted, and a harness daemon left with nothing to
 serve or watch for 24h after that stops. One whose root is removed stops too, passing the
-sessions it served, was retrying and had dropped for idling to the next one. Spawned on Pi `session_start` and on
-a CLI report. A per-session process is revived after an idle exit and replaced on a
-version bump, and a harness process from an older tagger is replaced by the next start
+sessions it served, was retrying and had dropped for idling to the next one. A harness daemon
+also stops when its root pid file is removed or names another pid, and exits 1 when that file
+cannot be read. A per-session process also exits when its session is removed, when the session
+is still unwritten after 1 h, and when its lease names another holder. Spawned on Pi
+`session_start` and `agent_end`, by `/wtft -F`, on a CLI report, by `r` in `--watch`, and by `wtft-daemon --restart`. A per-session process is revived after an idle exit and replaced on a
+version bump, and a harness daemon from an older tagger is replaced (SIGTERM, SIGKILL after 2 s) by the next start
 from a newer one. On Linux, a live harness
-process is left running; a later start asks it for the session and points the session's lease
+daemon is left running; a later start asks it for the session and points the session's lease
 at it unless another live daemon holds that lease or it reads `rebuild`, because
 that check reads `/proc/<pid>/cmdline`. Health is one answer, `health()` in
 `wtft-daemon-lib.ts` over `extensions/lib/daemon-health.ts`, rendered via `renderDaemonStatus()`.
@@ -62,18 +68,42 @@ session, or the daemon just spawned to serve it: a daemon's pid, or the token `r
 session and that any daemon leaves for a session whose tag write failed. Every claim, release and
 replacement goes through `extensions/lib/lease.ts`: a claim is an exclusive hard link, made by the
 daemon itself or, the moment it spawns one, by its spawner for the child's pid (#281; the
-spawner leaves a `rebuild` token or a live daemon holder alone (a live process that is not a daemon is displaced, spec-297); it takes the claim back for a child
+spawner leaves a `rebuild` token or a live daemon holder alone (a live process that is not a daemon is displaced, spec-holder); it takes the claim back for a child
 already dead, and the CLI's startup wait for one it sees exit), a release
 unlinks only a lease that still holds what the caller read (and, when the caller hands over the
-identity it observed, on that inode), a replacement is a rename. A harness process's root pid file is a different
+identity it observed, on that inode), a replacement is a rename. A harness daemon's root pid file is a different
 file.
 _Avoid_: lock file, session pid file
 
+**Root pid file** (harness pid file):
+`$TMPDIR/wtft-harness-<claude|pi>-<hash>.pid`, one per harness root, naming the harness daemon
+that holds that root. Claimed exclusively at start; a harness daemon that finds it removed,
+empty, or naming another pid stops. Beside it: `.<pid>.version` (that holder's tagger version),
+`.focus.d/` (focus requests) and `.served` (the hand-off).
+_Avoid_: harness lock
+
+**Harness daemon**:
+The log parser daemon started with `--harness <claude|pi>`: one process per harness root that
+serves every session readers asked for under it (Daemon, above). Distinct from a **Harness**
+(below), the coding-agent runtime. The daemon's own text shortens it to "the harness".
+_Avoid_: harness process
+
+**Focus request**:
+A file `<requester pid>.request` in the root pid file's `.focus.d/` directory,
+`{"pid":<harness pid>,"path":…}`, that
+asks the running harness daemon to serve a session it may not serve yet. The harness claims each
+by renaming it, and serves a path under its root whichever pid it names.
+
+**Hand-off**:
+The root pid file's `.served` file: one JSON line per session the harness daemon serves (and
+still holds the lease of, or whose lease reads `rebuild`), is retrying to adopt, or
+dropped for idling; rewritten whenever that text changes while it holds the root, and removed
+when the list is empty. The next harness daemon on that root takes the file, adopts the served
+and retrying sessions and watches the idle ones. A harness that no longer holds the root writes none.
+
 **Daemon health reason** (the code) / **status text** (the sentence):
-Two different things, deliberately (#179). A **health reason** is one of six machine-readable
-codes on the `DaemonHealthReason` union — `not-started`, `starting`, `waiting-session`,
-`not-found`, `idle-timeout`, `restart-failed` (nothing sets `starting` since #281; it stays on the
-union because removing a code is a breaking change). It is the contract: control flow compares codes,
+Two different things, deliberately (#179). A **health reason** is one of the machine-readable
+codes on the `DaemonHealthReason` union, listed in `docs/spec-daemon-health.md` §3. It is the contract: control flow compares codes,
 and `tsc` rejects a typo'd comparison. **Status text** is what the user sees, looked up from
 `DAEMON_REASON_TEXT` by `daemonReasonText()` and rendered by `renderDaemonStatus()`, which also
 composes the live, idle and stopped lines; `--watch` prints its own "reading..." line.
@@ -179,10 +209,11 @@ concurrent with a write — including one woken by `fs.watch`, which reports byt
 be made line-aware — may still find the LAST line incomplete, because a large append is not one
 `write(2)`; every reader keeps its final-line tolerance for that. What cannot happen is a
 corrupted line with valid lines after it. The guarantee lives in the writer (`appendTagFile`
-refuses a batch that does not end in a newline; a tag truncate may cut only to zero or to a
-`lastLineStartByte` offset; the idle heartbeat is overwritten in place at a fixed width rather
-than cut and re-appended, so no WRITE shrinks the file — though a daemon startup truncates it
-to zero to rebuild, so an incremental reader still needs a shrink branch; a crash mid-append is
+refuses a batch that does not end in a newline, and the refusal is fatal: the lease is marked
+`rebuild` and the daemon exits 1; a tag truncate may cut only to zero or to a
+`lastLineStartByte` offset; an idle heartbeat replaces the last line in place only when that
+line is a heartbeat of the same byte width, and is appended otherwise, so no WRITE shrinks the file — though a daemon startup truncates it
+to zero to rebuild, or when it holds no data record or no offset marker in its last 8 KiB (#320 A), so an incremental reader still needs a shrink branch; a crash mid-append is
 repaired at the next
 daemon's startup), never in each reader.
 _Avoid_: Cache file, index file
@@ -348,7 +379,8 @@ The coding-agent runtime a session log came from — `pi` or `claude-code`, sele
 `--harness <pi|claude-code|auto>` (default `auto`). Determines which session-discovery and
 parse adapter (`extensions/lib/harness/<id>/`) wtft uses. Not the same as "widget" (below) —
 harness is about which agent produced the log; widget is about how wtft displays it. The
-daemon's harness mode is a different referent, the **harness process** (Daemon, above); the
+daemon's harness mode is a different referent, the **harness daemon** (Daemon, above), whose
+`--harness` flag takes `claude`, `pi` or `claude-code` (read as `claude`); the
 daemon specs, and the daemon's own `--help`, stdout and stderr, shorten it to "the harness"
 where the daemon is the subject.
 _Avoid_: Agent, client, platform

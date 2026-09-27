@@ -1,5 +1,7 @@
 # Spec 297: one holder module behind a process-table port
 
+**Superseded by `docs/spec-holder.md`**, the live spec for the module. Read this file as the record of the change, not as current behaviour.
+
 A lease names a pid. Before this spec, each caller decided for itself whether that pid is a live
 daemon. The callers used about ten different rules: a bare `kill 0`, `kill 0` with EPERM counted
 as alive, `pidAlive`, and `/proc/<pid>/cmdline` checks with and without `kill 0`. Every #281

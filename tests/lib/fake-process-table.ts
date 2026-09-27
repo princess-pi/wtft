@@ -1,5 +1,5 @@
 /**
- * An in-memory `ProcessTable` (docs/spec-297-holder-module.md § 1).
+ * An in-memory `ProcessTable` (docs/spec-holder.md § 1).
  */
 
 import type { ProcessTable, Signal } from "../../extensions/lib/holder.ts";

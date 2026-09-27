@@ -2,6 +2,7 @@
 
 **Issue:** [#179](https://github.com/duppypro/princess-pi-tools/issues/179)
 **Status:** Code and Spec Approved
+**Superseded by `docs/spec-daemon-health.md`**, the live spec for the codes (§3 there). Read this file as the record of how the reason became a code, not as current behaviour.
 **Related:** #124 (the grace window this protected, until spec-281 replaced it with the spawner's claim), #165 (where the coupling was found), #167
 
 ---

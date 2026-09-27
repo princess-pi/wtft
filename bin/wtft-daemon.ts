@@ -11,6 +11,7 @@ import { tagRecords, parseTagLine, lastOffset, isDataRecord } from "../extension
 import { claimLease, claimLeaseForChild, unlinkLeaseIf, replaceLease as publishLease, leaseHolder } from "../extensions/lib/lease.js";
 import { classifyPid, holdsLease, isDaemonCmdline, pidAlive, processTable, stopHolderSync } from "../extensions/lib/holder.js";
 import { leasePid } from "../extensions/lib/lease.js";
+import { daemonStdio, daemonLogPath, rotateDaemonLog, DAEMON_LOG_MAX_BYTES } from "../extensions/lib/daemon-log.js";
 import { decideHealth, readHealthFacts } from "../extensions/lib/daemon-health.js";
 import { readSession, flushTurns, scanChildren, resumeTagger, fsWorld, MTIME_SETTLE_MS, type LogLine } from "../extensions/lib/session-tagger.js";
 import {
@@ -37,7 +38,7 @@ import {
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const USAGE = `Usage: wtft-daemon --session <path> [--debug]
        wtft-daemon --harness <claude|pi> [--session <path>] [--debug]
-       wtft-daemon --list | --cleanup | --restart | --stop <session>`;
+       wtft-daemon --list | --cleanup | --restart | --stop <session>  (one or more)`;
 const POLL_MS = 667; // 90bpm throttle
 /** How long one slice of a harness's subagent scan runs before it yields to the event loop. */
 const HARNESS_SCAN_SLICE_MS = envMs("WTFT_HARNESS_SCAN_SLICE_MS", 25);
@@ -72,7 +73,7 @@ function shutdown(reason: string) {
   if (!running) return;
   running = false;
   if (process.env.WTFT_DAEMON_DEBUG) {
-    process.stderr.write(`[wtft-log-parser] shutdown: ${reason}\n`);
+    process.stderr.write(`[wtft-daemon] shutdown: ${reason}\n`);
   }
   // Taken-over daemon exits silently — must not recreate the tag or unlink the new owner's lease.
   if (leaseHolder(slot.pidPath) === String(process.pid)) {
@@ -92,6 +93,15 @@ process.on("SIGINT", () => { if (harnessMode) stopHarness("SIGINT"); else shutdo
 process.on("SIGHUP", () => { if (harnessMode) stopHarness("SIGHUP"); else shutdown("SIGHUP"); });
 
 // ---
+
+let daemonLogCheckedAt = 0;
+
+/** At most once a minute, from every poll of every served session. */
+function rotateLogOnCadence(now: number) {
+  if (now - daemonLogCheckedAt < 60_000) return;
+  daemonLogCheckedAt = now;
+  rotateDaemonLog(daemonLogPath(), DAEMON_LOG_MAX_BYTES);
+}
 
 /** Overwrite same-width heartbeat in place (fixed-width pwrite); else append. File never shrinks. */
 function upsertHeartbeat(now: number) {
@@ -158,7 +168,7 @@ function fatalTagMutation(filePath: string, operation: "append" | "rebuild trunc
   } catch (_) {}
   try {
     fs.writeSync(2,
-      `[wtft-log-parser] FATAL: the derived tag ${operation} failed (${err instanceof Error ? err.message : String(err)}). ` +
+      `[wtft-daemon] FATAL: the derived tag ${operation} failed (${err instanceof Error ? err.message : String(err)}). ` +
       (markedForRebuild
         ? "The daemon lease now requires a rebuild; restart wtft to rederive the transient tag."
         : "The rebuild lease could not be recorded; restore storage, then run wtft -F to discard and rederive the transient tag.") +
@@ -181,7 +191,7 @@ function flushPending() {
   if (!batch) return;
   appendTagFile(slot.state.tagPath, batch);
   if (process.env.WTFT_DAEMON_DEBUG) {
-    process.stderr.write(`[wtft-log-parser] session flush ${Date.now()} ${path.basename(slot.state.sessionPath)}\n`);
+    process.stderr.write(`[wtft-daemon] session flush ${Date.now()} ${path.basename(slot.state.sessionPath)}\n`);
   }
   slot.idleStartMs = 0;
   slot.lastWriteMs = Date.now();
@@ -258,7 +268,7 @@ function followMovedSession(): boolean {
   const moved = resolveMovedSession(slot.state.sessionPath);
   if (!moved) return false;
   if (process.env.WTFT_DAEMON_DEBUG) {
-    process.stderr.write(`[wtft-log-parser] session moved: ${slot.state.sessionPath} -> ${moved}\n`);
+    process.stderr.write(`[wtft-daemon] session moved: ${slot.state.sessionPath} -> ${moved}\n`);
   }
   slot.state.sessionPath = moved;
   return true;
@@ -443,7 +453,7 @@ function initClassified() {
   const tagPath = slot.state.tagPath;
   // Mid-line tag tail → rebuild, do not resume (cut alone can double-bill id-less turns).
   if (truncatePartialTail(tagPath)) {
-    process.stderr.write(`[wtft-log-parser] ${tagPath} ended mid-line — a previous daemon was killed inside an append; rebuilding this tag from the transcript (#130)\n`);
+    process.stderr.write(`[wtft-daemon] ${tagPath} ended mid-line — a previous daemon was killed inside an append; rebuilding this tag from the transcript (#130)\n`);
     slot.rebuildTagOnStartup = true;
   }
 
@@ -497,6 +507,7 @@ function dropFor(reason: string): "drop" {
 }
 
 function serviceSession(): "continue" | "stop" | "drop" {
+  rotateLogOnCadence(Date.now());
   const state = slot.state;
   if (leaseHolder(slot.pidPath) !== String(process.pid)) {
     if (harnessMode) return "drop";
@@ -548,7 +559,7 @@ function serviceSession(): "continue" | "stop" | "drop" {
 
     if (now - slot.lastActivityMs >= IDLE_EXIT_MS && now - slot.startupTime >= STARTUP_GRACE_MS) {
       if (process.env.WTFT_DAEMON_DEBUG) {
-        process.stderr.write(`[wtft-log-parser] no new data for ${Math.round((now - slot.lastActivityMs) / 60000)}m, ${harnessMode ? "dropping the session" : "exiting"}\n`);
+        process.stderr.write(`[wtft-daemon] no new data for ${Math.round((now - slot.lastActivityMs) / 60000)}m, ${harnessMode ? "dropping the session" : "exiting"}\n`);
       }
       if (harnessMode) {
         droppedForIdle = true;
@@ -565,7 +576,7 @@ function serviceSession(): "continue" | "stop" | "drop" {
     }
   } catch (err) {
     if (process.env.WTFT_DAEMON_DEBUG) {
-      process.stderr.write(`[wtft-log-parser] poll error: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(`[wtft-daemon] poll error: ${err instanceof Error ? err.message : String(err)}\n`);
     }
   }
   return "continue";
@@ -575,7 +586,7 @@ const HARNESS_SKIP_DIRS = new Set(["subagents", "tool-results", "memory", "wtft-
 
 type Slot = SessionRecord;
 
-/** What the harness knows about each session: docs/spec-270-harness-registry.md. */
+/** What the harness knows about each session: docs/spec-harness-registry.md. */
 const registry = newRegistry();
 const harnessWatchers = new Map<string, fs.FSWatcher>();
 let harnessPidFile = "";
@@ -817,7 +828,7 @@ function retryAdoptionLater(key: string, displayed: boolean) {
     const why = key.includes(".wtft-tag.v") ? "it is a tag file"
       : holder && holder !== String(process.pid) ? `its lease names ${holder}`
       : "its lease could not be claimed";
-    process.stderr.write(`[wtft-log-parser] could not adopt ${key}: ${why}\n`);
+    process.stderr.write(`[wtft-daemon] could not adopt ${key}: ${why}\n`);
     // Not tried again until it is written again.
     const idle = registry.idle.get(key);
     if (idle) dropForIdle(key, idle.displayed);
@@ -849,7 +860,7 @@ function unlinkIfHolds(file: string, value: string): boolean {
 function onWatch(dir: string, filename: string | null) {
   if (!filename) {
     if (process.env.WTFT_DAEMON_DEBUG) {
-      process.stderr.write("[wtft-log-parser] watch overflow, rescanning offsets once\n");
+      process.stderr.write("[wtft-daemon] watch overflow, rescanning offsets once\n");
     }
     for (const [file, slot] of registry.served) wake(file, slot.displayed);
     return;
@@ -1051,7 +1062,7 @@ function runHarness(which: string, focus: string) {
   };
   for (let attempt = 1; claimPidFile(harnessPidFile) === "busy"; attempt++) {
     if (attempt > 5) {
-      process.stderr.write(`wtft-daemon: could not claim ${harnessPidFile} or hand ${focus || "a session"} to the harness holding it\n`);
+      process.stderr.write(`wtft-daemon: could not claim ${harnessPidFile}${focus ? ` or hand ${focus} to the harness holding it` : ""}\n`);
       leave(1);
     }
     const live = leasePid(leaseHolder(harnessPidFile));
@@ -1070,8 +1081,8 @@ function runHarness(which: string, focus: string) {
   }
   harnessMode = true;
   if (process.env.WTFT_DAEMON_DEBUG) {
-    process.stderr.write(`[wtft-log-parser] harness pid ${harnessPidFile}\n`);
-    process.stderr.write(`[wtft-log-parser] harness root ${root}\n`);
+    process.stderr.write(`[wtft-daemon] harness pid ${harnessPidFile}\n`);
+    process.stderr.write(`[wtft-daemon] harness root ${root}\n`);
   }
   harnessRootKey = root;
   harnessWhich = which;
@@ -1082,7 +1093,7 @@ function runHarness(which: string, focus: string) {
   watchFocusRequests();
   harnessIdleTimer = setInterval(sweepIdleSlots, 250);
   if (process.env.WTFT_DAEMON_DEBUG) {
-    process.stderr.write(`[wtft-log-parser] harness settled ${which}\n`);
+    process.stderr.write(`[wtft-daemon] harness settled ${which}\n`);
   }
 }
 
@@ -1104,7 +1115,7 @@ function dropHarnessSlot(key: string, reason = "") {
   unwatchSession(key);
   if (slot) releaseLease(slot);
   if (process.env.WTFT_DAEMON_DEBUG) {
-    process.stderr.write(`[wtft-log-parser] session drop ${path.basename(key)}\n`);
+    process.stderr.write(`[wtft-daemon] session drop ${path.basename(key)}\n`);
   }
 }
 
@@ -1147,7 +1158,7 @@ function leaseLost(key: string, slot: Slot) {
 }
 
 function logLeaseLost(session: string, lease: string) {
-  process.stderr.write(`[wtft-log-parser] gave up ${session}: its lease now reads ${JSON.stringify(leaseHolder(lease))}\n`);
+  process.stderr.write(`[wtft-daemon] gave up ${session}: its lease now reads ${JSON.stringify(leaseHolder(lease))}\n`);
 }
 
 function sweepIdleSlots() {
@@ -1161,13 +1172,13 @@ function sweepIdleSlots() {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
         const why = err instanceof Error ? err.message : String(err);
-        process.stderr.write(`[wtft-log-parser] FATAL: the harness cannot read its pid file ${harnessPidFile}: ${why}\n`);
+        process.stderr.write(`[wtft-daemon] FATAL: the harness cannot read its pid file ${harnessPidFile}: ${why}\n`);
         stopHarness(`cannot read its pid file: ${why}`, 1);
         return;
       }
     }
     if (holder !== String(process.pid)) {
-      stopHarness(holder ? `harness pid file names ${holder}` : "harness pid file removed");
+      stopHarness(holder ? `harness pid file names ${holder}` : "harness pid file removed or empty");
       return;
     }
   }
@@ -1181,7 +1192,7 @@ function sweepIdleSlots() {
     }
     if (!rootStatWarned) {
       rootStatWarned = true;
-      process.stderr.write(`[wtft-log-parser] WARNING: the harness root ${harnessRootKey} could not be stat'd: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(`[wtft-daemon] WARNING: the harness root ${harnessRootKey} could not be stat'd: ${err instanceof Error ? err.message : String(err)}\n`);
     }
   }
   takeFocusRequests();
@@ -1284,7 +1295,7 @@ function writeServedHandOff(adopting?: string) {
     fs.writeFileSync(tmp, lines.join("\n") + "\n");
     fs.renameSync(tmp, servedHandOffFile());
   } catch (err) {
-    process.stderr.write(`[wtft-log-parser] WARNING: could not hand ${lines.length} session(s) to the next harness: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(`[wtft-daemon] WARNING: could not hand ${lines.length} session(s) to the next harness: ${err instanceof Error ? err.message : String(err)}\n`);
   }
 }
 
@@ -1311,7 +1322,7 @@ function persistHandOff() {
     const why = err instanceof Error ? err.message : String(err);
     if (why !== handOffWarned) {
       handOffWarned = why;
-      process.stderr.write(`[wtft-log-parser] WARNING: could not update the hand-off for the next harness: ${why}\n`);
+      process.stderr.write(`[wtft-daemon] WARNING: could not update the hand-off for the next harness: ${why}\n`);
     }
   }
 }
@@ -1329,7 +1340,7 @@ function takeServedHandOff() {
     fs.renameSync(file, claimed);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      process.stderr.write(`[wtft-log-parser] WARNING: could not take the previous harness's hand-off: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(`[wtft-daemon] WARNING: could not take the previous harness's hand-off: ${err instanceof Error ? err.message : String(err)}\n`);
     }
     return;
   }
@@ -1341,7 +1352,7 @@ function takeServedHandOff() {
     let left = claimed;
     const aside = `${file}.unreadable-${new Date().toISOString().replace(/:/g, "-").replace(/\.\d+Z$/, "Z")}`;
     try { fs.renameSync(claimed, aside); left = aside; } catch { /* stays claimed */ }
-    process.stderr.write(`[wtft-log-parser] WARNING: could not read the previous harness's hand-off, left at ${left}: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(`[wtft-daemon] WARNING: could not read the previous harness's hand-off, left at ${left}: ${err instanceof Error ? err.message : String(err)}\n`);
     return;
   }
   try { fs.unlinkSync(claimed); } catch { /* already gone */ }
@@ -1362,7 +1373,7 @@ function takeServedHandOff() {
     }
   }
   if (unreadable > 0) {
-    process.stderr.write(`[wtft-log-parser] WARNING: skipped ${unreadable} hand-off line(s) that were not JSON objects\n`);
+    process.stderr.write(`[wtft-daemon] WARNING: skipped ${unreadable} hand-off line(s) that were not JSON objects\n`);
   }
 }
 
@@ -1400,7 +1411,7 @@ function stopHarness(reason: string, exitCode = 0) {
     fs.rmSync(harnessVersionFile(process.pid), { force: true });
   }
   if (process.env.WTFT_DAEMON_DEBUG) {
-    process.stderr.write(`[wtft-log-parser] harness shutdown: ${reason}\n`);
+    process.stderr.write(`[wtft-daemon] harness shutdown: ${reason}\n`);
   }
   process.exit(exitCode);
 }
@@ -1461,30 +1472,63 @@ async function main() {
   const showHelp = () => console.log(`wtft-daemon — Log parser daemon for WTFT
 ${USAGE}
 
-Management:
-  --list, -l            List the daemons and their leases, fixture processes included: RUNNING or DEAD,
-                        tagger version, idle age (0s until idle 2m2s; ? when unknown), session
-  --cleanup             Kill per-session daemons whose session is gone, and fixture ones under the tmp dir
-                        that hold no lease here; never a harness process, which stops once it has nothing to serve or watch
+Management (any combination runs as one pass over the leases; per holder, --restart
+takes precedence over --cleanup, then --stop, then --list, and a holder an earlier one
+handled is not listed. A --stop of a session a harness serves ends the command at once):
+  --list, -l            List the leases, then every other daemon process found in /proc (none off
+                        Linux, so a harness holding no lease is not shown there): RUNNING or DEAD,
+                        tagger version, idle age (0s until idle 2m2s; ? when unknown), session.
+                        The version is the first tag file found beside the holder's --session, not the
+                        running build's. A lease reading rebuild is not listed; a holder with no readable
+                        --session shows (hash: <lease hash>). Off Linux (no /proc) every live pid reads RUNNING
+  --cleanup             Remove every lease whose holder is dead or not a daemon, uncounted. SIGTERM (no wait)
+                        per-session daemons whose session is gone (no file, not moved, and a tag that
+                        holds a turn or a _meta record), and fixture ones, whose --session or root environment
+                        (WTFT_CLAUDE_PROJECTS_DIR, WTFT_PI_SESSIONS_DIR) is under the tmp dir or /tmp/,
+                        that hold no lease here; never a harness daemon, which stops once it has nothing
+                        to serve or watch
   --restart             Stop every daemon holding a lease or a root pid file here (SIGTERM, SIGKILL after 2 s),
                         and respawn one per stopped holder started with --session, claiming its lease when
                         free; a harness holding no lease starts again on the next wtft. Linux only (/proc)
-  --stop <session>      Drop that session. A per-session process exits. A harness process stays up.
+  --stop <session>      Drop that session; ~ and relative paths are resolved. A harness serving it (found
+                        through the session's lease) keeps running. A per-session process holding a
+                        lease here, found by its own --session resolved against its cwd, gets SIGTERM
+                        and no wait: one that followed a moved session is found by its old path.
+                        Linux only (/proc): off Linux it finds no daemon and exits 0
 
 Daemon mode:
-  -s, --session <path>  Path to session.jsonl to watch
+  -s, --session <path>  Path to session.jsonl to watch. Waits up to 1 h for a file not yet written. Exits 0
+                        at once when a live daemon holds its lease, unless an older-version tag is
+                        beside the session: then it takes the lease over
   --harness <claude|pi> One process for that harness root (WTFT_CLAUDE_PROJECTS_DIR or WTFT_PI_SESSIONS_DIR);
-                        claude-code is accepted for claude
-  --debug               Enable debug logging to stderr
+                        claude-code is accepted for claude. It serves the sessions it is asked for
+                        (--session, a focus request, a hand-off from the harness before it) and their
+                        subagents, and stops when its root or its root pid file is removed or names
+                        another pid
+  --debug               Enable debug logging to stderr (or set WTFT_DAEMON_DEBUG=1)
   -h, --help            Show this help
 
+Exit codes:
+  0  Served until done, a management pass that ran (a --restart that left a holder running
+     says so in its line), --session already served, or a --harness start that finds a live
+     harness of the same or a newer version and hands it its --session (or has none)
+  1  --session missing, or a tag file (without --harness); a harness root missing, its pid file unreadable,
+     or neither claimable nor handed a session;
+     --stop refused (EPERM) or its harness lease changed or could not be removed; a tag
+     write that failed; an unhandled error
+  2  An unknown argument, a flag with no value, a second --stop, a bad --harness name, or a --session
+     outside the harness root
+
 Environment:
-  WTFT_DAEMON_IDLE_MS          Milliseconds with no new lines before a session is dropped, after which a
+  WTFT_DAEMON_IDLE_MS          Milliseconds with no activity (a new turn, a subagent record written,
+                               or a poll of a session not yet written) before a session is dropped, after which a
                                harness forgets a dropped session, and with nothing to serve or watch
                                before a harness stops (default 86400000)
   WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after the daemon starts serving a session (its adoption, in a harness) before that drop can fire (default 60000)
   WTFT_HARNESS_SCAN_SLICE_MS   Milliseconds one slice of a harness's subagent scan runs before it yields (default 25)
-  WTFT_HARNESS_SCAN_YIELD_MS   Milliseconds a harness pauses between those slices (default 0)`);
+  WTFT_HARNESS_SCAN_YIELD_MS   Milliseconds a harness pauses between those slices (default 0)
+  A *_MS value that is not all digits is ignored, and the default used.
+  WTFT_CLAUDE_PROJECTS_DIR, WTFT_PI_SESSIONS_DIR: the harness roots (see --harness).`);
   const usage = (why: string): never => {
     process.stderr.write(`wtft-daemon: ${why}\n${USAGE}\nRun wtft-daemon --help for more.\n`);
     process.exit(2);
@@ -1509,6 +1553,7 @@ Environment:
     } else if (arg === "--restart") {
       showRestart = true;
     } else if (arg === "--stop") {
+      if (stopSession !== null) usage("--stop takes one session");
       stopSession = valueOf(arg, ++i);
     } else if (arg === "--help" || arg === "-h") {
       showHelp();
@@ -1574,7 +1619,8 @@ if (showList || showCleanup || showRestart || stopSession) {
   }
   const harnessHolders = new Map(harnessPidFiles.map(f => [f, readPid(f)] as const));
 
-  let found = 0;
+  let restartedN = 0, cleanedN = 0, stoppedN = 0, listedN = 0;
+  let stopRefused = false;
   const seenPids = new Set<number>();
   const restarted = new Set<number>();
   const keptRunning = new Set<number>();
@@ -1601,7 +1647,7 @@ if (showList || showCleanup || showRestart || stopSession) {
     let taggerVersion = "?";
     if (sessionFound) {
       try {
-        const tagsDir = path.join(path.dirname(sessionFound), "wtft-tags");
+        const tagsDir = path.join(path.dirname(resolvedSessionArg(pid, sessionFound)), "wtft-tags");
         const sessBase = path.basename(sessionFound);
         const prefix = sessBase + ".wtft-tag.v";
         for (const f of fs.readdirSync(tagsDir)) {
@@ -1631,9 +1677,13 @@ if (showList || showCleanup || showRestart || stopSession) {
         stopped = stopHolderSync(pid);
       }
       // Only a daemon this process stopped is respawned: a live pid that is not
-      // one (or one that cannot be signalled, #274) was not stopped.
+      // one (or one that cannot be signalled) was not stopped.
       // One that outlived SIGKILL keeps its lease: a respawn would only meet it and exit.
       const survived = stopped === "survived" || stopped === "denied";
+      if (stopSession && sessionFound && resolvedSessionArg(pid, sessionFound) === stopSession) {
+        stoppedN++;
+        if (survived) stopRefused = true;
+      }
       if (survived) keptRunning.add(pid);
       const respawnLease = wasDaemon && sessionFound && !survived ? getDaemonPidPath(sessionFound) : "";
       // The respawn's own lease is left for its claim, which takes a dead holder's.
@@ -1641,15 +1691,18 @@ if (showList || showCleanup || showRestart || stopSession) {
       let respawned: "claimed" | "busy" | "failed" = "failed";
       if (respawnLease) {
         let childPid = 0;
+        const log = daemonStdio();
         try {
           const child = spawn(process.execPath, [process.argv[1], ...daemonLaunchArgs(sessionFound!, restartEnv)], {
             detached: true,
-            stdio: "ignore",
+            stdio: log.stdio,
             env: restartEnv,
           });
           child.unref();
           childPid = child.pid ?? 0;
-        } catch (_2) {}
+        } catch (_2) {} finally {
+          log.close();
+        }
         if (childPid) {
           try { respawned = claimLeaseForChild(respawnLease, childPid); } catch { respawned = "busy"; }
           if (respawned === "busy" && !pidAlive(childPid)) respawned = "failed";
@@ -1664,7 +1717,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         : wasDaemon ? `Stopped: PID ${pid} — no --session to respawn (#274)`
         : kind === "unverified" ? `Removed lease: PID ${pid} — cannot be verified as a daemon here, so it is left running`
         : `Removed lease: PID ${pid} — no live daemon found`);
-      found++;
+      restartedN++;
       continue;
     }
 
@@ -1679,11 +1732,13 @@ if (showList || showCleanup || showRestart || stopSession) {
         if (kind === "harness") continue;
         if (kind === "daemon" && processTable().signal(pid, "SIGTERM") === "denied") {
           console.log(`Not stopped: PID ${pid} refused the signal (EPERM); its lease is left`);
+          if (stopSession && resolvedSessionArg(pid, sessionFound) === stopSession) { stopRefused = true; stoppedN++; }
           continue;
         }
         unlinkIfNames(fullPath, pid);
         console.log(`Cleaned up: PID ${pid} — session gone: ${sessionFound}`);
-        found++;
+        if (stopSession && resolvedSessionArg(pid, sessionFound) === stopSession) stoppedN++;
+        cleanedN++;
         continue;
       }
     }
@@ -1694,16 +1749,17 @@ if (showList || showCleanup || showRestart || stopSession) {
       if (kind === "harness") continue;
       if (kind === "daemon" && processTable().signal(pid, "SIGTERM") === "denied") {
         console.log(`Not stopped: PID ${pid} refused the signal (EPERM); its lease is left`);
+        stopRefused = true;
       } else {
         unlinkIfNames(fullPath, pid);
         console.log(kind === "daemon" ? `Stopped: PID ${pid} — ${sessionFound}` : `Removed lease: PID ${pid} — no live daemon found, ${sessionFound}`);
       }
-      found++;
+      stoppedN++;
       continue;
     }
 
     if (showList) {
-      found++;
+      listedN++;
       const status = alive ? "RUNNING" : "DEAD (stale pid)";
       let idleStr = "?";
       const now = Date.now();
@@ -1739,11 +1795,12 @@ if (showList || showCleanup || showRestart || stopSession) {
           continue;
         }
         console.log(`Cleaned up: PID ${proc.pid} — fixture daemon: ${where}`);
-        found++;
+        cleanedN++;
         continue;
       }
-      if (showList) {
-        found++;
+      // --restart takes precedence: a harness it is about to stop is not listed.
+      if (showList && !(showRestart && proc.harness && [...harnessHolders.values()].includes(proc.pid))) {
+        listedN++;
         const where = proc.session || (proc.harness ? `harness ${proc.roots.join(",") || "(unknown root)"}` : "(no session arg)");
         console.log(`PID ${String(proc.pid).padEnd(7)} ${"RUNNING".padEnd(20)} v${"?".padEnd(7)} idle: ${"?".padEnd(5)} ${where}`);
       }
@@ -1767,27 +1824,27 @@ if (showList || showCleanup || showRestart || stopSession) {
       if (outcome === "denied" || outcome === "survived") {
         console.log(outcome === "denied" ? `Not stopped: PID ${pid} refused the signal (EPERM); harness ${pidFile} keeps its root pid file`
           : `Not stopped: PID ${pid} is still running after SIGKILL; harness ${pidFile} keeps its root pid file`);
-        found++;
+        restartedN++;
         continue;
       }
       unlinkIfNames(fullPath, pid);
       console.log(live ? `Stopped: PID ${pid} — harness ${pidFile}; the next wtft starts it again`
         : classifyPid(pid) === "unverified" ? `Removed root pid file: PID ${pid} — cannot be verified as a daemon here, so it is left running, harness ${pidFile}`
         : `Removed root pid file: PID ${pid} — no live daemon found, harness ${pidFile}`);
-      found++;
+      restartedN++;
     }
-    console.log(`${found} holder(s) handled: restarted, stopped, left in place, or a lease or root pid file removed, as each line says.`);
+    console.log(`${restartedN} holder(s) handled: restarted, stopped, left in place, or a lease or root pid file removed, as each line says.`);
   }
   if (showCleanup) {
-    console.log(`Cleaned up ${found} daemon(s).`);
+    console.log(`Cleaned up ${cleanedN} daemon(s).`);
   }
-  if (showList && found === 0) {
+  if (showList && listedN === 0) {
     console.log("No daemon processes found.");
   }
-  if (stopSession && found === 0) {
+  if (stopSession && stoppedN === 0) {
     console.log(`No daemon found for: ${stopSession}`);
   }
-  process.exit(0);
+  process.exit(stopRefused ? 1 : 0);
 }
 
 // --- Daemon mode (session required) ---
@@ -1857,7 +1914,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       claimedByTakeover = true;
     }
   } catch (e) {
-    process.stderr.write(`[wtft-log-parser] takeover scan error: ${e instanceof Error ? e.message : String(e)}\n`);
+    process.stderr.write(`[wtft-daemon] version takeover failed (reading the tags dir, or taking the lease from an older build): ${e instanceof Error ? e.message : String(e)}\n`);
   }
 
 
@@ -1879,7 +1936,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       for (const f of otherTagVersions().older) {
         try { fs.unlinkSync(path.join(tagsDir, f)); } catch (_) {}
         if (process.env.WTFT_DAEMON_DEBUG) {
-          process.stderr.write(`[wtft-log-parser] removed stale tag file: ${f}\n`);
+          process.stderr.write(`[wtft-daemon] removed stale tag file: ${f}\n`);
         }
       }
     } catch (_) {}
@@ -1893,9 +1950,9 @@ if (showList || showCleanup || showRestart || stopSession) {
   initClassified();
 
   if (process.env.WTFT_DAEMON_DEBUG) {
-    process.stderr.write(`[wtft-log-parser] started, watching: ${sessionPath}\n`);
-    process.stderr.write(`[wtft-log-parser] classified: ${tagPath}\n`);
-    process.stderr.write(`[wtft-log-parser] pid: ${process.pid}\n`);
+    process.stderr.write(`[wtft-daemon] started, watching: ${sessionPath}\n`);
+    process.stderr.write(`[wtft-daemon] classified: ${tagPath}\n`);
+    process.stderr.write(`[wtft-daemon] pid: ${process.pid}\n`);
   }
 
   const loop = () => {

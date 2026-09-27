@@ -6,7 +6,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync, execSync, spawn } from "node:child_process";
 import { trackSandbox, isolateTmpdir, mkSandbox } from "./lib/sandbox";
 
 isolateTmpdir("46-install-wtft");
@@ -1021,6 +1021,50 @@ console.log("\n10. The claude-nsp-guard shim: ok, shadowed (exit 5), absent, mid
 		try { doc = JSON.parse(out); } catch { /* left null */ }
 		check(doc?.nspGuard?.state === "ok" && doc?.nspGuard?.guard === guard,
 			"V10g: a large guard with an early sentinel is still recognised", JSON.stringify(doc?.nspGuard));
+	}
+}
+
+// ---
+// 11. A daemon running an older build of the installed bundle is restarted
+//     (#260 A13): one started before the installed daemon bundle last changed.
+//     The "daemon" is a sleep whose argv[0] is the installed path.
+// ---
+console.log("\n11. install-wtft restarts a daemon on an older build, and only then");
+if (!fs.existsSync("/proc/self/stat")) {
+	console.log("  ##SKIP## no /proc on this host");
+} else {
+	const dir = mkSandbox(path.join(os.tmpdir(), "46-restart-"));
+	const daemon = path.join(dir, "wtft-daemon.mjs");
+	const first = run(["--json", "--dir", dir]);
+	check(first.code === 0 && fs.existsSync(daemon), "V11 precondition: installed", `got ${first.code}`);
+	const docOf = (out: string) => { try { return JSON.parse(out); } catch { return null; } };
+	const fake = spawn("bash", ["-c", 'exec -a "$0" sleep 30', daemon], { stdio: "ignore" });
+	try {
+		for (const until = Date.now() + 2000; Date.now() < until;) {
+			try { if (fs.readFileSync(`/proc/${fake.pid}/cmdline`, "utf8").startsWith(daemon)) break; } catch { /* not yet */ }
+			execSync("sleep 0.02");
+		}
+		check(fs.readFileSync(`/proc/${fake.pid}/cmdline`, "utf8").startsWith(daemon), "V11 precondition: the stand-in's cmdline names the installed daemon");
+
+		const mtime = fs.statSync(daemon).mtimeMs;
+		const again = run(["--json", "--dir", dir]);
+		check(fs.statSync(daemon).mtimeMs === mtime, "V11a: an identical bundle is not rewritten, so its mtime still dates the build");
+		check(docOf(again.out)?.daemons?.older === 0 && docOf(again.out)?.daemons?.restart === "none",
+			"V11b: a daemon started after the build is not older, and nothing restarts", JSON.stringify(docOf(again.out)?.daemons));
+
+		const later = new Date(Date.now() + 60_000);
+		fs.utimesSync(daemon, later, later);
+		const older = run(["--dir", dir]);
+		check(older.code === 0 && /restarted 1 log parser daemon/.test(older.out),
+			"V11c: a daemon started before the build is restarted, and the run says so", `${older.out}${older.err}`.slice(0, 400));
+		const olderJson = run(["--json", "--dir", dir]);
+		check(docOf(olderJson.out)?.daemons?.older === 1 && docOf(olderJson.out)?.daemons?.restart === "done",
+			"V11d: --json reports it", JSON.stringify(docOf(olderJson.out)?.daemons));
+		const checkMode = run(["--check", "--json", "--dir", dir]);
+		check(docOf(checkMode.out)?.daemons?.older === 1 && docOf(checkMode.out)?.daemons?.restart === "none",
+			"V11e: --check counts it and restarts nothing", JSON.stringify(docOf(checkMode.out)?.daemons));
+	} finally {
+		fake.kill("SIGKILL");
 	}
 }
 

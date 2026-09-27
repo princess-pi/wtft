@@ -174,9 +174,20 @@ now falls through the same evaluation as every other exit.
       "to": "/home/u/.config/wtft/config.json", "state": "moved" | "left" | "none" }
   ],
   "nspGuard": { "state": "ok" | "shadowed" | "absent",
-    "found": "/usr/local/bin/claude" | null, "guard": "/home/u/bin/claude" | null }
+    "found": "/usr/local/bin/claude" | null, "guard": "/home/u/bin/claude" | null },
+  "daemons": { "older": 0, "restart": "none" | "done" | "failed" }
 }
 ```
+
+- **`daemons` (#260): a daemon on an older build is restarted.** `older` counts the processes
+  whose command line names the installed daemon bundle (`<dir>/wtft-daemon.mjs`, its resolved
+  path, or `<dir>/wtft-daemon`) and that started before that bundle's mtime. Install mode leaves an
+  identical, executable copy unwritten, so the mtime dates the last build that changed it. When
+  `older` is above 0, install mode runs `<dir>/wtft-daemon --restart` (its output to stderr) and
+  `restart` says `done` or `failed`; the human report says it restarted them, or, on failure,
+  names the command to run. A failed restart does not change the exit code. `--check` counts and
+  restarts nothing. Off Linux (no `/proc`), and after `build-failed` or `no-dir`, `older` is 0.
+  A harness is not restarted by `--restart`; the next `wtft` starts one from the new bundle.
 
 - **`configMigration` is present on every exit path, install or check, including
   `no-dir` and `build-failed`** (#156) — it is computed independently of `DEST_DIR`/the

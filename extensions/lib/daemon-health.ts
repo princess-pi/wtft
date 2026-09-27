@@ -54,11 +54,11 @@ export function getModelCacheTtlMs(model: string): number | null {
  * to change at any time precisely because this union exists.
  */
 export type DaemonHealthReason =
-	| "not-started"      // no daemon spawned for this session yet
-	| "waiting-session"  // spawned, session .jsonl not created yet
-	| "not-found"        // no live PID and no heartbeat on record
-	| "idle-timeout"     // no live holder; lastHbTime is its last heartbeat
-	| "restart-failed";  // r could not stop the holder or start a new daemon
+	| "not-started"
+	| "waiting-session"
+	| "not-found"
+	| "idle-timeout"
+	| "restart-failed";
 
 /** Display copy for each code. Change freely — no control flow reads these. */
 export const DAEMON_REASON_TEXT: Record<DaemonHealthReason, string> = {

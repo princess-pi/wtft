@@ -225,7 +225,8 @@ console.log("V4. Display text is unchanged for every code");
 
 	// The two removed booleans (`starting`, `waiting`) must not have crept back as
 	// derivable state alongside the code they duplicated.
-	const libSource = fs.readFileSync(path.join(REPO_ROOT, "extensions/lib/wtft-daemon-lib.ts"), "utf8");
+	const libSource = fs.readFileSync(path.join(REPO_ROOT, "extensions/lib/daemon-health.ts"), "utf8");
+	assert("fixture: DaemonStatus is declared there", libSource.includes("export interface DaemonStatus"));
 	assert(
 		"DaemonStatus does not reintroduce `starting?:` / `waiting?:` flags",
 		!/^\s*(starting|waiting)\?:\s*boolean/m.test(libSource),

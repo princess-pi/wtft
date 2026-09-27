@@ -282,7 +282,7 @@
         <p>Status rendering is shared via <code>renderDaemonStatus()</code> in <code>wtft-daemon-lib.ts</code> — DRY between Pi widget and CLI watch modes.</p>
 
         <h4>Health Check Mechanism</h4>
-        <p>Every reader asks one decision, <code>decideHealth</code> in <code>extensions/lib/daemon-health.ts</code>, over the session's lease, the tag's last 8 KiB and the session file's mtime. The rule, the reason codes and the readers: <a href="spec-daemon-health.md">spec-daemon-health</a>, the module's live spec.</p>
+        <p>The widget, <code>--watch</code> and <code>--list</code>'s idle column ask one decision, <code>decideHealth</code> in <code>extensions/lib/daemon-health.ts</code>, over the session's lease, the tag's last 8 KiB and the session file's mtime. The CLI's startup wait and <code>--list</code>'s RUNNING/DEAD apply its liveness rule directly. The rule, the reason codes and the readers: <a href="spec-daemon-health.md">spec-daemon-health</a>, the module's live spec.</p>
 
         <h4>Provisional Reads (#443)</h4>
         <p>A one-shot <code>wtft</code> spawns the daemon and reads the tag file on the next
@@ -510,7 +510,7 @@
                 return;
             }
             container.innerHTML = usage.map(u =>
-                `<li><code>${u.flags}</code> - ${u.desc}</li>`
+                `<li><code>${esc(u.flags)}</code> - ${prose(u.desc)}</li>`
             ).join('');
         }
 
@@ -566,12 +566,12 @@
             let html = '';
             scenarios.forEach(s => {
                 html += `<div style="margin-bottom: 12px; padding-left: 12px;">`;
-                html += `<p style="margin: 0 0 4px 0;">${s.scenario}</p>`;
+                html += `<p style="margin: 0 0 4px 0;">${prose(s.scenario)}</p>`;
                 s.commands.forEach(cmd => {
                     const fullCmd = cmd ? `${invokedAs} ${cmd}` : invokedAs;
-                    html += `<code style="color: var(--accent-orange);">$ ${fullCmd}</code><br>`;
+                    html += `<code style="color: var(--accent-orange);">$ ${esc(fullCmd)}</code><br>`;
                 });
-                html += `<span style="color: var(--accent-green);">→ ${s.result}</span>`;
+                html += `<span style="color: var(--accent-green);">→ ${prose(s.result)}</span>`;
                 html += `</div>`;
             });
             container.innerHTML = html;

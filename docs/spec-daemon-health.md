@@ -18,18 +18,20 @@ Module: `extensions/lib/daemon-health.ts` · Seam: `decideHealth`, tested in `te
 | `getModelCacheTtlMs(model)` | A cache-TTL guess from a model name; `null` for a local model |
 
 `health(sessionPath, now, {tagPath?})` in `extensions/lib/wtft-daemon-lib.ts` composes the two over
-the session's own lease and tag path. Every reader asks it or `decideHealth`:
+the session's own lease and tag path. These readers use it:
 
 - the Pi widget (`getDaemonStatus`, which answers `not-started` until it has spawned a daemon);
 - `--watch` and `ensureDaemonRunning`;
-- the CLI's startup wait (`awaitDaemonUp`), which reads `readHealthFacts` over the current-version tag;
+- the CLI's startup wait (`awaitDaemonUp`), which does not ask `decideHealth`: it applies §2's `alive` rule itself and reads `readHealthFacts` over the current-version tag for a heartbeat of its own child;
 - `wtft-daemon --list`'s idle column, which runs `decideHealth` over the row's own lease with no model read.
 
 ## 2. The decision
 
 `alive` is the lease fact and nothing else: `holdsLease(classifyPid(pid))` from
 `extensions/lib/holder.ts` (`docs/spec-297-holder-module.md`), so a live process that is not a
-daemon holds no lease. No clock window sets it; the spawner claims the lease for its child at spawn.
+daemon holds no lease. A `rebuild` token (`wtft -F` on a harness session) names no pid, so it reads
+as no live holder until the daemon adopts the session. No clock window sets `alive`; the spawner
+claims the lease for its child at spawn.
 
 | Lease | Session file | Tag | Answer |
 |---|---|---|---|

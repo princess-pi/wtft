@@ -13,8 +13,8 @@ const REPO = path.resolve(import.meta.dirname, "..");
 const DOCS = path.join(REPO, "docs");
 const specs = fs.readdirSync(DOCS).filter(f => /^spec-.*\.md$/.test(f));
 const read = (f: string) => fs.readFileSync(path.join(DOCS, f), "utf8");
-// A module spec is one that says so; other unnumbered specs are not module specs.
-const moduleSpecs = specs.filter(f => /^Module: `extensions\/lib\//m.test(read(f)));
+// An unnumbered spec that says so; a numbered one may quote a PR body's Module line.
+const moduleSpecs = specs.filter(f => !/^spec-\d/.test(f) && /^Module: `extensions\/lib\//m.test(read(f)));
 const header = (f: string) => read(f).split("\n").slice(0, 15).join("\n");
 
 describe("module specs", () => {

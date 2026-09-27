@@ -201,6 +201,9 @@ console.log("\n=== PART C: a live daemon follows its transcript ===\n");
 			return fs.readFileSync(tagPath, "utf8").split("\n").filter(l => l.trim() && !l.includes('"_hb"')).length;
 		} catch { return NaN; }
 	};
+	// The move must come after the daemon has read the session: moved before its
+	// first read, the transcript is indistinguishable from one not written yet.
+	check(await pollUntil(() => countTaggedLines() > 0, 10_000), "precondition: the daemon has read the session before it moves", `lines=${countTaggedLines()}`);
 	const linesBefore = countTaggedLines();
 
 	// The worktree switch: the transcript MOVES (one file, same inode, new dir).

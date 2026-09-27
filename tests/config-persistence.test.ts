@@ -66,7 +66,6 @@ function seedConfig(overrides: Record<string, unknown> = {}): void {
 	fs.writeFileSync(configPath, JSON.stringify({
 		interval: "6m",
 		limit: 10,
-		showTicks: true,
 		mode: "cumulative",
 		timezone: "America/Los_Angeles",
 		tokens: true,

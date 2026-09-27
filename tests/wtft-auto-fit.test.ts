@@ -49,7 +49,6 @@ const defaultSettings = {
 	interval: "1h",
 	limit: 10,
 	width: 240, // Reset persisted width to 240 max
-	showTicks: true,
 	mode: "cumulative" as "cumulative" | "bucket",
 	timezone: "UTC"
 };

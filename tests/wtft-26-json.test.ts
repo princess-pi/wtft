@@ -365,7 +365,7 @@ console.log("\n6. --json alongside rendering flags");
 	const { sessionPath } = makeFixture("combo", true);
 	// Every rendering flag the manifest's --json entry names as suppressed, so the
 	// spec's "each rendering flag" claim is the loop, not a summary of it (PR #95
-	for (const extra of [["--tokens"], ["--other"], ["--pad", "4"], ["--no-emoji"], ["--emoji"], ["--bucket"], ["--cumulative"], ["--interval", "5m"], ["--limit", "3"], ["--ticks"], ["--timezone", "UTC"]]) {
+	for (const extra of [["--tokens"], ["--other"], ["--pad", "4"], ["--no-emoji"], ["--emoji"], ["--bucket"], ["--cumulative"], ["--interval", "5m"], ["--limit", "3"], ["--timezone", "UTC"]]) {
 		const r = runCli(["-s", sessionPath, "--json", ...extra]);
 		let ok = false;
 		try { ok = JSON.parse(r.stdout).schema === SCHEMA; } catch { /* reported */ }

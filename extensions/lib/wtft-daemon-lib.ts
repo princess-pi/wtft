@@ -30,7 +30,6 @@ export interface WatchSettings {
 	interval: string;
 	limit: number;
 	mode: "cumulative" | "bucket";
-	showTicks: boolean;
 	timezone?: string;
 	unit?: "cost" | "tokens";
 	daemonPath?: string; // path to wtft-daemon.mjs (CLI watch mode only)
@@ -39,7 +38,6 @@ export interface WatchSettings {
 	hasInterval?: boolean;
 	hasLimit?: boolean;
 	hasMode?: boolean;
-	hasTicks?: boolean;
 	hasTimezone?: boolean;
 	disabledEmoji?: boolean;
 }
@@ -867,7 +865,6 @@ export async function watchTagFile(
 	let sessionInterval: string | undefined;
 	let sessionLimit: number | undefined;
 	let sessionMode: "cumulative" | "bucket" | undefined;
-	let sessionShowTicks: boolean | undefined;
 	let sessionTimezone: string | undefined;
 
 	try {
@@ -885,7 +882,6 @@ export async function watchTagFile(
 						if (typeof entry.data.interval === "string") sessionInterval = entry.data.interval;
 						if (typeof entry.data.limit === "number") sessionLimit = entry.data.limit;
 						if (entry.data.mode === "cumulative" || entry.data.mode === "bucket") sessionMode = entry.data.mode;
-						if (typeof entry.data.showTicks === "boolean") sessionShowTicks = entry.data.showTicks;
 						if (typeof entry.data.timezone === "string") sessionTimezone = entry.data.timezone;
 					}
 				}
@@ -907,13 +903,12 @@ export async function watchTagFile(
 		const finalInterval = settings.hasInterval ? settings.interval : (sessionInterval ?? settings.interval);
 		const finalLimit = settings.hasLimit ? settings.limit : (sessionLimit ?? settings.limit);
 		const finalMode = settings.hasMode ? settings.mode : (sessionMode ?? settings.mode);
-		const finalShowTicks = settings.hasTicks ? settings.showTicks : (sessionShowTicks ?? settings.showTicks);
 		const finalTimezone = settings.hasTimezone ? settings.timezone : (sessionTimezone ?? settings.timezone);
 		const finalWidth = Math.min(paddedWidth, 1023);
 
 		const defaultSettings = {
 			interval: "1h", limit: 100, width: finalWidth,
-			showTicks: true, mode: "cumulative" as "cumulative" | "bucket",
+			mode: "cumulative" as "cumulative" | "bucket",
 			timezone: undefined
 		};
 
@@ -924,7 +919,6 @@ export async function watchTagFile(
 			interval: finalInterval,
 			limit: finalLimit,
 			width: finalWidth,
-			showTicks: finalShowTicks,
 			mode: finalMode,
 			timezone: finalTimezone,
 			unit: settings.unit,

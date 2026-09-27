@@ -48,9 +48,6 @@ import {
 	getDeepSeekPeakMultiplier,
 	getSurgeLocalHours,
 	checkSurgeProximity,
-	distributeHalfSlots,
-	halfSlotCountsToArray,
-	renderHalfBlockBar,
 	CATEGORY_ORDER,
 	watchTagFile,
 	readClassifiedTagFile,
@@ -242,9 +239,6 @@ export {
 	collectSelfAttributedSessionIds,
 	parseInterval,
 	getBinInfo,
-	distributeHalfSlots,
-	halfSlotCountsToArray,
-	renderHalfBlockBar,
 	CATEGORY_ORDER,
 	serializeClassified,
 	classifiedToInteraction,
@@ -633,7 +627,6 @@ async function main() {
 			interval: opts.hasInterval ? opts.interval : "1h",
 			limit: opts.hasLimit ? opts.limit : 100,
 			mode: opts.hasMode ? opts.mode : "cumulative",
-			showTicks: opts.hasTicks ? opts.showTicks : true,
 			timezone: opts.hasTimezone ? opts.timezone : undefined,
 			unit,
 			daemonPath,
@@ -641,7 +634,6 @@ async function main() {
 			hasInterval: opts.hasInterval,
 			hasLimit: opts.hasLimit,
 			hasMode: opts.hasMode,
-			hasTicks: opts.hasTicks,
 			hasTimezone: opts.hasTimezone,
 			disabledEmoji: typeof opts.enableEmoji === "boolean" ? !opts.enableEmoji : undefined,
 		});
@@ -889,7 +881,6 @@ async function main() {
 	const sessionInterval = (typeof config.interval === "string" ? config.interval : undefined) as string | undefined;
 	const sessionLimit = (typeof config.limit === "number" ? config.limit : undefined) as number | undefined;
 	const sessionMode = (config.mode === "cumulative" || config.mode === "bucket" ? config.mode : undefined) as "cumulative" | "bucket" | undefined;
-	const sessionShowTicks = (typeof config.showTicks === "boolean" ? config.showTicks : undefined) as boolean | undefined;
 	const sessionTimezone = (typeof config.timezone === "string" ? config.timezone : undefined) as string | undefined;
 	// ---
 	showReapWarnings();
@@ -920,14 +911,12 @@ async function main() {
 	const finalInterval = opts.hasInterval ? opts.interval : (sessionInterval ?? "1h");
 	const finalLimit = opts.hasLimit ? opts.limit : (sessionLimit ?? 100);
 	const finalMode = opts.hasMode ? opts.mode : (sessionMode ?? "cumulative");
-	const finalShowTicks = opts.hasTicks ? opts.showTicks : (sessionShowTicks ?? true);
 	const finalTimezone = opts.hasTimezone ? opts.timezone : sessionTimezone;
 
 	const defaultSettings = {
 		interval: "1h",
 		limit: 100,
 		width: Math.min(paddedWidth, 1023),
-		showTicks: true,
 		mode: "cumulative" as "cumulative" | "bucket",
 		timezone: undefined
 	};
@@ -936,7 +925,6 @@ async function main() {
 		interval: finalInterval,
 		limit: finalLimit,
 		width: Math.min(paddedWidth, 1023),
-		showTicks: finalShowTicks,
 		mode: finalMode,
 		timezone: finalTimezone,
 		disabledEmoji,

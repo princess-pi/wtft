@@ -23,8 +23,6 @@ export interface WtftCliOptions {
 	hasLimit: boolean;
 	mode: "bucket" | "cumulative";
 	hasMode: boolean;
-	showTicks: boolean;
-	hasTicks: boolean;
 	timezone: string | undefined;
 	hasTimezone: boolean;
 	other: boolean;
@@ -62,7 +60,7 @@ export interface WtftCliOptions {
 
 /**
  * Breaking: `-t` and `-T` shortcuts are intentionally NOT supported.
- * `-t` was overloaded across --timezone, --tokens, --ticks, and a planned
+ * `-t` was overloaded across --timezone, --tokens, and a planned
  * --turns. Use the full `--` names instead.
  */
 export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
@@ -74,7 +72,6 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 	let width = 80;
 	let timezone: string | undefined = undefined;
 	let hideWidget = false;
-	let showTicks = true;
 	let mode: "bucket" | "cumulative" = "cumulative";
 	let pager = false;
 	let other = false;
@@ -86,7 +83,6 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 	let hasInterval = false;
 	let hasLimit = false;
 	let hasWidth = false;
-	let hasTicks = false;
 	let hasMode = false;
 	let hasTimezone = false;
 	let hasOther = false;
@@ -130,12 +126,6 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 			hasCost = true;
 		} else if (arg === "--force" || arg === "-F") {
 			forceReparse = true;
-		} else if (arg === "--ticks") {
-			showTicks = true;
-			hasTicks = true;
-		} else if (arg === "--no-ticks") {
-			showTicks = false;
-			hasTicks = true;
 		} else if (arg === "--cumulative" || arg === "-c") {
 			mode = "cumulative";
 			hasMode = true;
@@ -252,7 +242,6 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 		width, hasWidth,
 		timezone, hasTimezone,
 		hideWidget,
-		showTicks, hasTicks,
 		mode, hasMode,
 		pager,
 		other, hasOther,

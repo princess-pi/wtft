@@ -47,27 +47,27 @@ const ix1 = [mockIx(1.00, Date.now(), "spec")];
 
 // 10t interval — valid
 const r1 = buildWtftLines(ix1,
-	{ interval: "1h", limit: 10, width: 80, showTicks: false, mode: "bucket", timezone: undefined, disabledEmoji: false },
+	{ interval: "1h", limit: 10, width: 80, mode: "bucket", timezone: undefined, disabledEmoji: false },
 	{ interval: "10t", mode: "bucket", width: 80 }
 );
 check(Array.isArray(r1), "10t → produces output");
 
 // Invalid/fallback interval still works (falls back to 1h)
 const r1b = buildWtftLines(ix1,
-	{ interval: "1h", limit: 10, width: 80, showTicks: false, mode: "bucket", timezone: undefined, disabledEmoji: false },
+	{ interval: "1h", limit: 10, width: 80, mode: "bucket", timezone: undefined, disabledEmoji: false },
 	{ interval: "invalid", mode: "bucket", width: 80 }
 );
 check(Array.isArray(r1b), "invalid interval → falls back to 1h");
 
 // 5turns and 1turn forms
 const r1c = buildWtftLines(ix1,
-	{ interval: "1h", limit: 10, width: 80, showTicks: false, mode: "bucket", timezone: undefined, disabledEmoji: false },
+	{ interval: "1h", limit: 10, width: 80, mode: "bucket", timezone: undefined, disabledEmoji: false },
 	{ interval: "5turns", mode: "bucket", width: 80 }
 );
 check(Array.isArray(r1c), "5turns → produces output");
 
 const r1d = buildWtftLines(ix1,
-	{ interval: "1h", limit: 10, width: 80, showTicks: false, mode: "bucket", timezone: undefined, disabledEmoji: false },
+	{ interval: "1h", limit: 10, width: 80, mode: "bucket", timezone: undefined, disabledEmoji: false },
 	{ interval: "1turn", mode: "bucket", width: 80 }
 );
 check(Array.isArray(r1d), "1turn → produces output");
@@ -85,7 +85,7 @@ const ix2 = [
 
 // 10t interval, 3 turns → all in bucket labeled 3t (highest turn #)
 const r2 = buildWtftLines(ix2,
-	{ interval: "1h", limit: 10, width: 80, showTicks: false, mode: "bucket", timezone: undefined, disabledEmoji: false },
+	{ interval: "1h", limit: 10, width: 80, mode: "bucket", timezone: undefined, disabledEmoji: false },
 	{ interval: "10t", mode: "bucket", width: 80 }
 );
 const out2 = (r2 as string[]).join("\n");
@@ -94,7 +94,7 @@ check(out2.includes("0.60"), "3 turns @ 10t → total $0.60");
 
 // 1t interval: each turn gets its own bar
 const r2b = buildWtftLines(ix2,
-	{ interval: "1h", limit: 10, width: 80, showTicks: false, mode: "bucket", timezone: undefined, disabledEmoji: false },
+	{ interval: "1h", limit: 10, width: 80, mode: "bucket", timezone: undefined, disabledEmoji: false },
 	{ interval: "1t", mode: "bucket", width: 80 }
 );
 const out2b = (r2b as string[]).join("\n");
@@ -117,7 +117,7 @@ const ix3 = [
 ];
 
 const lines3 = buildWtftLines(ix3,
-	{ interval: "1h", limit: 100, width: 80, showTicks: false, mode: "bucket", timezone: undefined, disabledEmoji: false },
+	{ interval: "1h", limit: 100, width: 80, mode: "bucket", timezone: undefined, disabledEmoji: false },
 	{ interval: "2t", mode: "bucket", width: 80 }
 );
 check(Array.isArray(lines3), "produces output lines");
@@ -141,7 +141,7 @@ check(out3.includes("1.75"), "6t bucket shows $1.75");
 console.log("--- TEST 4: buildWtftLines cumulative turn mode ---");
 
 const lines4 = buildWtftLines(ix3,
-	{ interval: "1h", limit: 100, width: 80, showTicks: false, mode: "bucket", timezone: undefined, disabledEmoji: false },
+	{ interval: "1h", limit: 100, width: 80, mode: "bucket", timezone: undefined, disabledEmoji: false },
 	{ interval: "2t", mode: "cumulative", width: 80 }
 );
 const out4 = (lines4 as string[]).join("\n");
@@ -163,7 +163,7 @@ const ix5 = [
 
 // 2t interval, 3 interactions → buckets 2t, 3t (not 4t)
 const lines5 = buildWtftLines(ix5,
-	{ interval: "1h", limit: 100, width: 80, showTicks: false, mode: "bucket", timezone: undefined, disabledEmoji: false },
+	{ interval: "1h", limit: 100, width: 80, mode: "bucket", timezone: undefined, disabledEmoji: false },
 	{ interval: "2t", mode: "bucket", width: 80 }
 );
 const out5 = (lines5 as string[]).join("\n");
@@ -188,7 +188,7 @@ const ix6 = [
 ];
 
 const lines6 = buildWtftLines(ix6,
-	{ interval: "1h", limit: 100, width: 80, showTicks: true, mode: "bucket", timezone: undefined, disabledEmoji: false },
+	{ interval: "1h", limit: 100, width: 80, mode: "bucket", timezone: undefined, disabledEmoji: false },
 	{ interval: "1t", mode: "bucket", width: 80 }
 );
 const out6 = (lines6 as string[]).join("\n");

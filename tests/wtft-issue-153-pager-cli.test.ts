@@ -8,7 +8,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { execFileSync } from "node:child_process";
 import { trackSandbox } from "./lib/sandbox";
-
+import { cliWithoutDaemon, tagForCli } from "./lib/cli-harness.ts";
 let passed = 0;
 let failed = 0;
 function check(cond: boolean, msg: string) {
@@ -16,7 +16,7 @@ function check(cond: boolean, msg: string) {
 	else { failed++; console.error(`  ❌ FAIL: ${msg}`); }
 }
 
-const wtftBin = path.join(process.cwd(), "bin", "wtft.mjs");
+const wtftBin = cliWithoutDaemon();
 
 // ---
 // FIXTURE: a minimal one-message session, so the no-flag control has something
@@ -41,6 +41,7 @@ fs.writeFileSync(sessionPath, JSON.stringify({
 		},
 	},
 }) + "\n");
+tagForCli(sessionPath);
 
 /** Run the CLI; never throws. Returns exit status plus both streams. */
 function runCli(args: string[]): { status: number; stdout: string; stderr: string } {

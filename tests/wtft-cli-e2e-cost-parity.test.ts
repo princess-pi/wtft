@@ -7,8 +7,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+import { cliWithoutDaemon, tagForCli } from "./lib/cli-harness.ts";
 
 import {
 	readClassifiedTagFile,
@@ -17,10 +18,6 @@ import {
 	WTFT_TAGGER_VERSION,
 } from "../bin/wtft.mjs";
 
-// Private pid namespace for this suite (#486). It sweeps os.tmpdir() for
-// wtft-daemon-*.pid files itself, so on a shared /tmp that sweep reaches every
-// other session's lease on this host — the raw-glob shape the enforcement gate
-// was widened to see.
 isolateTmpdir("cli-e2e-cost-parity");
 
 // ---
@@ -103,21 +100,6 @@ function makeFixture(): { dir: string; sessionPath: string } {
 // HELPERS
 // ---
 
-function killAllLogParsers() {
-	try {
-		const pidDir = os.tmpdir();
-		for (const pf of fs.readdirSync(pidDir)) {
-			if (pf.startsWith("wtft-daemon-") && pf.endsWith(".pid")) {
-				try {
-					const pid = parseInt(fs.readFileSync(path.join(pidDir, pf), "utf8").trim(), 10);
-					if (pid > 0) process.kill(pid, "SIGTERM");
-				} catch {}
-				try { fs.unlinkSync(path.join(pidDir, pf)); } catch {}
-			}
-		}
-	} catch {}
-}
-
 // ---
 // TEST: Non-watch CLI vs daemon tag file (simulated watch)
 // ---
@@ -131,59 +113,31 @@ function assert(cond: boolean, label: string) {
 
 console.log("=== WTFT CLI End-to-End Cost Parity ===\n");
 
-// Kill any leftover daemons from previous test runs
-killAllLogParsers();
-
 const { dir, sessionPath } = makeFixture();
 
 // ---
-// Path 1: Non-watch CLI (exercises actual bin/wtft.mjs binary).
-// Spawns daemon, reads tag file, renders chart. We capture the exact
-// cost by reading the tag file the daemon produces — not from the
-// formatted (rounded) chart output.
+// Path 1: the session tagged as the daemon tags it, then the built CLI
+// rendering from that tag.
 // ---
 
-const wtftBin = path.join(process.cwd(), "bin", "wtft.mjs");
+const tagPath = tagForCli(sessionPath).tagPath;
+const tagEntries = readClassifiedTagFile(tagPath);
+const daemonCost = tagEntries.reduce((sum, i) => sum + i.cost, 0);
+console.log(`Tag file: $${daemonCost.toFixed(6)} (${tagEntries.length} entries)`);
+
+let cliOut = "";
 try {
-	const result = execSync(
-		`${process.execPath} ${wtftBin} --session ${sessionPath} -l 10`,
-		// env explicit: bun's sync child_process ignores the runtime TMPDIR
-		// mutation isolateTmpdir() made (#486, tests/bun-env-propagation.test.ts).
-		{ encoding: "utf8", env: process.env, timeout: 15000, stdio: "pipe" }
-	);
-	console.log("Non-watch CLI ran successfully");
+	cliOut = execFileSync(process.execPath, [cliWithoutDaemon(), "--session", sessionPath, "-l", "10"],
+		{ encoding: "utf8", env: process.env, timeout: 15000, stdio: "pipe" });
 } catch (err: any) {
 	console.error(`Non-watch CLI: ${err.stderr || err.message}`);
 }
 
 // ---
-// Path 2: Read the daemon's tag file (same data both CLI paths consume).
-// ---
-
-const tagsDir = path.join(dir, "wtft-tags");
-const tagPath = path.join(tagsDir, `${FIXTURE_ID}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
-
-// Wait for daemon to finish processing (spawned by non-watch CLI above).
-let tagEntries: any[] = [];
-let waited = 0;
-while (waited < 5000) {
-	if (fs.existsSync(tagPath)) {
-		const content = fs.readFileSync(tagPath, "utf8");
-		if (content.split("\n").some(l => l.trim() && !l.includes('"_hb"'))) {
-			tagEntries = readClassifiedTagFile(tagPath);
-			break;
-		}
-	}
-	await new Promise(r => setTimeout(r, 250));
-	waited += 250;
-}
-const daemonCost = tagEntries.reduce((sum, i) => sum + i.cost, 0);
-console.log(`Daemon tag file: $${daemonCost.toFixed(6)} (${tagEntries.length} entries)`);
-
-// ---
 // Assertions
 // ---
 
+assert(/\$\d/.test(cliOut), "the CLI renders a cost from the tag");
 assert(daemonCost > 0, `Daemon cost > 0 (got $${daemonCost.toFixed(6)})`);
 
 // Path 3: Reference cost via parseSessionFile + deduplicateInteractions
@@ -207,7 +161,6 @@ assert(dedupedInteractions.length === 2, `Deduped: 2 messages (got ${dedupedInte
 assert(tagPath.includes(`v${WTFT_TAGGER_VERSION}`), `Tag file uses v${WTFT_TAGGER_VERSION}`);
 
 // Cleanup
-killAllLogParsers();
 try { fs.rmSync(dir, { recursive: true }); } catch {}
 
 console.log(`\n${passed} passed, ${failed} failed`);

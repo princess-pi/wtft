@@ -1,4 +1,5 @@
 import { runWtftCli } from "./lib/wtft-cli";
+import { cliWithoutDaemon, tagForCli } from "./lib/cli-harness.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as assert from "node:assert";
@@ -126,7 +127,8 @@ try {
 	// may still grow (#443). execSync throws on any nonzero code, so a correct
 	// provisional run failed this suite — intermittently, since it depends on the
 	// CLI winning the race against the daemon it just spawned (#513).
-	const cliStdout = runWtftCli(`node bin/wtft.mjs --cost -s ${tempLogFile} -w 240`);
+	tagForCli(tempLogFile);
+	const cliStdout = runWtftCli(`node ${cliWithoutDaemon()} --cost -s ${tempLogFile} -w 240`);
 	
 	const cliLines = cliStdout.split("\n").filter(Boolean).map(stripAnsi);
 	const cliTicksLine = cliLines.find(l => l.includes("$0.00"));

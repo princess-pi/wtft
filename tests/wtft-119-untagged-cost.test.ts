@@ -6,6 +6,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { cliWithoutDaemon, tagForCli } from "./lib/cli-harness.ts";
 import { spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
@@ -19,7 +20,7 @@ function check(cond: boolean, msg: string) {
 }
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
-const CLI_BIN = path.join(REPO_ROOT, "bin", "wtft.mjs");
+const CLI_BIN = cliWithoutDaemon();
 const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-119-")));
 
 function usageLine(opts: { id: string; ts: string; model?: string; web?: number }): string {
@@ -38,6 +39,7 @@ let runSeq = 0;
 function cli(source: string, args: string[]): string {
 	const copy = path.join(dir, `run-${runSeq++}-${path.basename(source)}`);
 	fs.copyFileSync(source, copy);
+	tagForCli(copy);
 	const r = spawnSync("node", [CLI_BIN, "-s", copy, ...args], { encoding: "utf8", env: { ...process.env } });
 	if (r.status !== 0 && r.status !== 9) throw new Error(`wtft -s <copy> ${args.join(" ")} exited ${r.status}: ${r.stderr}`);
 	return (r.stdout || "").replace(/\x1b\[[0-9;]*m/g, "");

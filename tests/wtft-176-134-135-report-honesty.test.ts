@@ -7,6 +7,7 @@ import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+import { cliWithoutDaemon, widgetWithoutDaemon } from "./lib/cli-harness.ts";
 import { computeSpawnTree } from "../extensions/lib/wtft-spawn-tree.ts";
 import { SPAWN_RECORD_SCHEMA, serializeSpawnRecord } from "../extensions/lib/wtft-spawn-ledger.ts";
 
@@ -20,7 +21,7 @@ function check(cond: boolean, msg: string, detail?: string) {
 }
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const CLI_BIN = path.join(REPO_ROOT, "bin", "wtft.mjs");
+const CLI_BIN = cliWithoutDaemon();
 
 const sandbox = fs.realpathSync(trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-176-"))));
 
@@ -75,7 +76,7 @@ console.log("\n=== #135 B: the pending arm derives nothing from the file it decl
 	fs.copyFileSync(ledgerWith("pending", [[sid, CHILD]]), path.join(state, "wtft", "spawns.jsonl"));
 	const r = spawnSync(process.execPath, [CLI_BIN, "-s", path.join(dir, `${sid}.jsonl`), "--json"], {
 		cwd: REPO_ROOT, encoding: "utf8", timeout: 60_000, stdio: ["ignore", "pipe", "pipe"],
-		env: { ...process.env, XDG_STATE_HOME: state, WTFT_DAEMON_DEBUG: "" },
+		env: { ...process.env, XDG_STATE_HOME: state, WTFT_DAEMON_DEBUG: "", WTFT_STAND_IN_HEARTBEAT: "1" },
 	});
 	let doc: any = null;
 	try { doc = JSON.parse(r.stdout); } catch { /* reported below */ }
@@ -97,7 +98,7 @@ fs.mkdirSync(path.join(sandbox, "xdg-config", "wtft"), { recursive: true });
 fs.writeFileSync(path.join(sandbox, "xdg-config", "wtft", "config.json"), "{}\n");
 
 const { WTFT_TAGGER_VERSION } = await import("../bin/wtft.mjs");
-const mod = await import("../pi/wtft.js");
+const mod = await import(widgetWithoutDaemon());
 const handlers: Record<string, (event: unknown, ctx: unknown) => Promise<void> | void> = {};
 let command: ((args: string, ctx: unknown) => Promise<void>) | null = null;
 mod.default({
@@ -149,7 +150,6 @@ console.log("\n=== #176: the widget reads the tag's own provisional verdict ===\
 	const unswept = sessionWithTag("unswept", { unswept: Date.now() });
 	const swept = sessionWithTag("swept", { swept: Date.now() });
 
-	// Its own copy: the CLI starts a daemon, which rewrites the tag it watches.
 	const unsweptCli = sessionWithTag("unswept-cli", { unswept: Date.now() });
 	const cli = spawnSync(process.execPath, [CLI_BIN, "-s", unsweptCli, "--json"], {
 		cwd: REPO_ROOT, encoding: "utf8", timeout: 60_000, stdio: ["ignore", "pipe", "pipe"],

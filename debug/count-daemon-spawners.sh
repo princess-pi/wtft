@@ -51,7 +51,10 @@ run_one() {
 	if ! grep -qF "\"$suite\"" "$out/$name.trace" 2>/dev/null; then echo "UNTRACED $name"; return; fi
 	# A failed exec (= -1 ENOENT, a PATH search) started nothing. No -q on the
 	# second grep: it would quit early, and pipefail would read SIGPIPE as no match.
-	if grep -E '"[^"]*bin/wtft-daemon(\.mjs|\.ts|\.js)?"' "$out/$name.trace" | grep -vE '= -1 [A-Z]+' >/dev/null; then
+	# The CLI harness's stand-in (tests/lib/cli-harness.ts) sits in a bin/ dir
+	# under a wtft-cli-harness- temp dir, because the bundles look for ../bin.
+	if grep -E '"[^"]*bin/wtft-daemon(\.mjs|\.ts|\.js)?"' "$out/$name.trace" | grep -v '/wtft-cli-harness-' \
+		| grep -vE '= -1 [A-Z]+' >/dev/null; then
 		echo "$name"
 	elif [[ "$(cat "$out/$name.done")" != 0 ]]; then
 		echo "FAILED $name"

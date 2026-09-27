@@ -1,5 +1,7 @@
 # Spec 270 S4 — HarnessRegistry
 
+**Superseded by `docs/spec-harness-registry.md`**, the live spec for the module. Read this file as the record of slice S4, not as current behaviour.
+
 Issue: https://github.com/princess-pi/wtft/issues/270, slice S4 of
 `docs/spec-270-daemon-ownership.md` §3b. The parent spec's rows for S4 are the commitment; this
 document is the design and the closer. Vocabulary: the `codebase-design` skill's (module,

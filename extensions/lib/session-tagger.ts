@@ -1,7 +1,7 @@
 /**
  * One session's tagging as a state value and a port. Every read of the
  * filesystem or the clock goes through `World`; every tag line comes back as
- * `records` for the caller to append. Design: docs/spec-270-session-tagger.md.
+ * `records` for the caller to append. docs/spec-session-tagger.md.
  */
 
 import * as path from "node:path";

@@ -28,7 +28,7 @@ the session's own lease and tag path. These readers use it:
 ## 2. The decision
 
 `alive` is the lease fact and nothing else: `holdsLease(classifyPid(pid))` from
-`extensions/lib/holder.ts` (`docs/spec-297-holder-module.md`), so a live process that is not a
+`extensions/lib/holder.ts` (`docs/spec-holder.md`), so a live process that is not a
 daemon holds no lease. A `rebuild` token (`wtft -F` on a harness session) names no pid, so it reads
 as no live holder until the daemon adopts the session. No clock window sets `alive`; the spawner
 claims the lease for its child at spawn.
@@ -88,6 +88,5 @@ spec; where one disagrees with this file, this file is current.
 
 ## 7. Related
 
-Live specs this module reads from, not replaced by it: spec-281 (the spawner claims the lease,
-`docs/spec-281-spawner-claims-lease.md`) and spec-297 (what holds a lease,
-`docs/spec-297-holder-module.md`).
+Specs this module reads from, not replaced by it: `docs/spec-281-spawner-claims-lease.md`
+(the spawner claims the lease) and `docs/spec-holder.md` (what holds a lease).

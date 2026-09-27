@@ -4,6 +4,7 @@
  */
 
 import { buildWtftLines, CLI_DEFAULT_LIMIT, chartLimit } from "../extensions/lib/wtft-renderer.ts";
+import { MAX_PADDED_ROWS } from "../extensions/lib/wtft-chart.ts";
 import { isPlaceholderRow } from "../extensions/lib/wtft-chart.ts";
 
 let passed = 0;
@@ -52,6 +53,13 @@ for (const unit of ["cost", "tokens"] as const) {
 	const many = Array.from({ length: 8 }, (_, i) => mockIx(1, t0 + i * hour));
 	const lines = plain(buildWtftLines(many, settings, { limit: 5, padRowsTo: 5 }));
 	check(dataRows(lines).length === 5 && placeholderRows(lines).length === 0, "more intervals than the limit: no padding");
+}
+
+{
+	const started = Date.now();
+	const lines = plain(buildWtftLines(ix, settings, { limit: 1_000_000_000, padRowsTo: 1_000_000_000 }));
+	check(placeholderRows(lines).length === MAX_PADDED_ROWS - 2 && Date.now() - started < 2000,
+		`a huge -l pads only to MAX_PADDED_ROWS (${MAX_PADDED_ROWS}) rows, at once`);
 }
 
 console.log("--- the CLI's effective limit ---");

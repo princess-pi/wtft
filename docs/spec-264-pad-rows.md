@@ -7,6 +7,8 @@
 - **The CLI chart always shows its row limit.** A report and `--watch` pass `padRowsTo` equal to
   the effective limit. With fewer intervals than that, the chart gets placeholder rows after the
   last interval row (and after its cache-miss divider, when it has one).
+- **Padding is capped** at `MAX_PADDED_ROWS` (1000), and in `--watch` at the terminal's height, so a
+  huge `-l` never allocates a row per requested row.
 - **A placeholder row** is a dash under the time label and under each shown column, padded to that
   column's width, and nothing in the bar area. A hidden column pair (`--no-cost`, `--no-tokens`)
   gets no dash.

@@ -875,7 +875,8 @@ export async function watchTagFile(
 		const lines = buildWtftLines(deduped, defaultSettings, {
 			interval: finalInterval,
 			limit: finalLimit,
-			padRowsTo: finalLimit,
+			// No more placeholders than the terminal has rows; the fit below trims the rest.
+			padRowsTo: Math.min(finalLimit, process.stdout.rows || finalLimit),
 			width: finalWidth,
 			mode: finalMode,
 			timezone: finalTimezone,

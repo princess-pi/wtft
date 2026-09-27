@@ -117,8 +117,8 @@ when the file grew or rotated.
 
 ### Out of scope
 
-- **The tag's own transcript rotating.** Its lines carry no `s`, so a rotation of the session
-  transcript itself is not covered. Filed as [#202](https://github.com/princess-pi/wtft/issues/202).
+- **The tag's own transcript rotating.** Its lines carry no `s`; `docs/wtft-tag-format.md` §2e
+  gives them the source `""`.
 
 ## Verification
 

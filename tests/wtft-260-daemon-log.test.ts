@@ -83,6 +83,24 @@ describe("rotateDaemonLog", () => {
 		assert.ok(!fs.existsSync(`${f}.lock`));
 	});
 
+	it("a symlink at the path is not followed: its target is neither copied nor truncated", () => {
+		const target = path.join(sandbox, "target.txt");
+		fs.writeFileSync(target, "t".repeat(12));
+		const link = path.join(sandbox, "link.log");
+		fs.symlinkSync(target, link);
+		rotateDaemonLog(link, 10);
+		assert.strictEqual(fs.readFileSync(target, "utf8"), "t".repeat(12));
+		assert.ok(!fs.existsSync(`${link}.1`));
+	});
+
+	it("the rotated copy is readable by this user only, whatever the log's mode was", () => {
+		const f = path.join(sandbox, "wide.log");
+		fs.writeFileSync(f, "a".repeat(12), { mode: 0o644 });
+		fs.chmodSync(f, 0o644);
+		rotateDaemonLog(f, 10);
+		assert.strictEqual(fs.statSync(`${f}.1`).mode & 0o777, 0o600);
+	});
+
 	it("a missing file is not an error", () => {
 		assert.doesNotThrow(() => rotateDaemonLog(path.join(sandbox, "absent", "none.log"), 10));
 	});

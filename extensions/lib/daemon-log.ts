@@ -25,7 +25,8 @@ function takeLock(lock: string): boolean {
 export function rotateDaemonLog(file: string, maxBytes: number): void {
 	const lock = `${file}.lock`;
 	try {
-		if (fs.statSync(file).size < maxBytes) return;
+		const st = fs.lstatSync(file);
+		if (!st.isFile() || st.size < maxBytes) return;
 		if (!takeLock(lock)) {
 			// Another process is rotating. One that died holding the lock left it
 			// stale: remove it and race for it again, so one taker still wins.
@@ -38,6 +39,7 @@ export function rotateDaemonLog(file: string, maxBytes: number): void {
 			// check has already emptied the file, and copying it now would blank .1.
 			if (fs.statSync(file).size < maxBytes) return;
 			fs.copyFileSync(file, `${file}.1`);
+			fs.chmodSync(`${file}.1`, 0o600);
 			fs.truncateSync(file, 0);
 		} finally {
 			fs.rmSync(lock, { force: true });
@@ -49,10 +51,10 @@ export function daemonStdio(file = daemonLogPath()): { stdio: StdioOptions; clos
 	try {
 		// Session paths and warnings: this user's to read, no one else's.
 		fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-		rotateDaemonLog(file, DAEMON_LOG_MAX_BYTES);
 		// A FIFO with no reader would block the open forever.
 		const existing = fs.lstatSync(file, { throwIfNoEntry: false });
 		if (existing && !existing.isFile()) throw new Error("not a regular file");
+		rotateDaemonLog(file, DAEMON_LOG_MAX_BYTES);
 		const fd = fs.openSync(file, "a", 0o600);
 		try { fs.fchmodSync(fd, 0o600); } catch { /* not ours to change; still logged */ }
 		return { stdio: ["ignore", "ignore", fd], close: () => { try { fs.closeSync(fd); } catch { /* already closed */ } } };

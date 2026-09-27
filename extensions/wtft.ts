@@ -24,6 +24,7 @@ import {
 } from "./lib/wtft-shared.js";
 import { readConfig, writeConfig, hasConfig } from "@princess-pi/libs/config";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "./lib/wtft-config-dir.js";
+import { PI_WIDGET_MAX_LINES, fitWidget, widgetLines } from "./lib/widget-fit.js";
 import { computeSpawnTree, type SpawnTree } from "./lib/wtft-spawn-tree.js";
 import { collectSelfAttributedSessionIds } from "./lib/wtft-parser.js";
 import {
@@ -227,9 +228,9 @@ function buildWtftLines(
 		sessionNameSuffix?: string;
 		showCostColumns?: boolean;
 		showTokenColumns?: boolean;
-	}
+	},
+	interactions: Interaction[] = readInteractions(ctx),
 ): string[] | null {
-	const interactions = readInteractions(ctx);
 	const settings = getSettings(ctx);
 
 	return sharedBuildWtftLines(interactions, settings, {
@@ -271,50 +272,29 @@ function updateWtftWidget(
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	const sessionNameSuffix = sessionFile ? path.basename(sessionFile) : undefined;
 	const buildOpts = { ...opts, model: modelId, sessionNameSuffix };
-	const lines = buildWtftLines(ctx, pi, buildOpts);
-	if (!lines || lines.length === 0) {
+	const parserStatusStr = sessionFile ? renderDaemonStatus(getDaemonStatus(sessionFile)) : "";
+	const width = getTerminalWidth(true, false);
+	// Read once: fitWidget may render several times. The read sets what provisionalLines reports.
+	const interactions = readInteractions(ctx);
+	const tail = provisionalLines();
+	const lines = fitWidget(
+		(limit) => {
+			const chart = buildWtftLines(ctx, pi, { ...buildOpts, limit }, interactions);
+			return chart && chart.length > 0 ? widgetLines(chart, parserStatusStr, width, tail) : null;
+		},
+		opts?.limit ?? current.limit,
+	);
+	if (!lines) {
 		const emptyModel = modelId || "";
 		const cacheTtl = getModelCacheTtlMs(emptyModel);
 		const emptyLine = cacheTtl === null
 			? "\x1b[90mNo Cache (local model)\x1b[0m"
 			: "\x1b[90mCache Empty\x1b[0m";
-
-		let parserStatusStr = "";
-		const sessionFile = ctx.sessionManager.getSessionFile?.();
-		if (sessionFile) {
-			const status = getDaemonStatus(sessionFile);
-			parserStatusStr = renderDaemonStatus(status);
-		}
-
-		const widgetLines = parserStatusStr
-			? [emptyLine, parserStatusStr.trim()]
-			: [emptyLine];
-		widgetLines.push(...provisionalLines());
-		ctx.ui.setWidget("wtft", widgetLines, { placement: "belowEditor" });
+		const emptyLines = parserStatusStr ? [emptyLine, parserStatusStr.trim()] : [emptyLine];
+		emptyLines.push(...tail);
+		ctx.ui.setWidget("wtft", emptyLines.slice(0, PI_WIDGET_MAX_LINES), { placement: "belowEditor" });
 		return;
 	}
-
-	// ---
-	// Append daemon status (inline if it fits, otherwise separate line).
-	// ---
-	let parserStatusStr = "";
-	if (sessionFile) {
-		const status = getDaemonStatus(sessionFile);
-		parserStatusStr = renderDaemonStatus(status);
-	}
-
-	if (parserStatusStr) {
-		const titleVisualLen = getVisualLength(lines[0]);
-		const statusVisualLen = getVisualLength(parserStatusStr);
-		const width = getTerminalWidth(true, false);
-		if (titleVisualLen + statusVisualLen <= width - 2) {
-			lines[0] = lines[0] + parserStatusStr;
-		} else {
-			lines.splice(1, 0, parserStatusStr.trim());
-		}
-	}
-
-	lines.push(...provisionalLines());
 
 	ctx.ui.setWidget("wtft", lines, { placement: "belowEditor" });
 }

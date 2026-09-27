@@ -112,20 +112,17 @@ function runAlignmentTest(mode: "cumulative" | "bucket") {
 			assert.strictEqual(lastDotIdx, lastBarCharIdx, "The decimal point of the maximum cost label must perfectly align with the end of the bar");
 		} else {
 			// Bucket mode: verify that the $0.00 dot aligns with prefixWidth
-			assert.strictEqual(firstDotIdx, 15, "The decimal point of the $0.00 label must perfectly align with prefixWidth (15)");
-			
-			// Verify that the newest bin's marker is exactly on the maximum tick (index 76).
-			// Fixture writes spec+code+tests → classifies "tests" (█) under
-			// latest-stage-wins (#52 amendment 2 removed "mixed").
-			assert.strictEqual(firstBarRow.indexOf("█"), 76, "The point-of-spend marker '█' for the max cost bin must reside exactly at index 76");
-			
-			// Verify that the older bin's Code work character '█' is located at the $5.00 point on the scale.
-			// Scale max is $13.00. Cost is $5.00. 
-			// maxBarWidth = 80 - 15 - 3 = 62.
-			// pos = Math.round((5 / 13) * (62 - 1)) = Math.round(0.3846 * 61) = Math.round(23.46) = 23.
-			// Absolute index = prefixWidth (15) + 23 = 38.
+			assert.strictEqual(firstDotIdx, 35, "The decimal point of the $0.00 label must perfectly align with prefixWidth (35)");
+
+			// Newest bin is the scale max, so its marker sits on the last tick.
+			// prefixWidth is 35. maxBarWidth = 80 - 35 - 3 = 42.
+			// pos = 42 - 1 = 41. Absolute = 35 + 41 = 76.
+			assert.strictEqual(firstBarRow.indexOf("█"), 76, "The point-of-spend marker for the max cost bin must reside exactly at index 76");
+
+			// Older bin is $5 of a $13 scale.
+			// pos = Math.round((5 / 13) * 41) = 16. Absolute = 35 + 16 = 51.
 			const secondBarRow = barRows[1];
-			assert.strictEqual(secondBarRow.indexOf("█"), 38, "The point-of-spend marker '█' for the $5.00 bin must reside exactly at index 38");
+			assert.strictEqual(secondBarRow.indexOf("█"), 51, "The point-of-spend marker for the $5.00 bin must reside exactly at index 51");
 		}
 		console.log(`✅ ${mode.toUpperCase()} ALIGNMENT CHECKS PASSED PERFECTLY!`);
 	} catch (err: any) {

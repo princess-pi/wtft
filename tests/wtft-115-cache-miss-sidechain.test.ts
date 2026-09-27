@@ -112,7 +112,7 @@ const rendered = (buildWtftLines([...parent, ...sub], DEFAULTS,
 // flaky-pricing trap in a different costume.
 const binRows = rendered
 	.map((line, i) => ({ line, i }))
-	.filter(r => /^\d\d:\d\d\s+\$/.test(r.line))
+	.filter(r => /^\d\d:\d\d\s+\+?\$/.test(r.line))
 	.map(r => r.i);
 const hasDividerBelow = (i: number) => (rendered[i + 1] || "").includes("Cache Miss");
 check(binRows.length === 3, `three bins render (${binRows.length})`);

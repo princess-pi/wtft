@@ -22,6 +22,8 @@ export async function runWatch(opts: WtftCliOptions, finalSessionPath: string, d
 		mode: opts.hasMode ? opts.mode : "cumulative",
 		timezone: opts.hasTimezone ? opts.timezone : undefined,
 		unit,
+		showCostColumns: !opts.hideCostColumns,
+		showTokenColumns: !opts.hideTokenColumns,
 		daemonPath,
 		pad: opts.pad,
 		hasInterval: opts.hasInterval,

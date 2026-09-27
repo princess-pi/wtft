@@ -1056,8 +1056,9 @@ if (!fs.existsSync("/proc/self/stat")) {
 	const session = path.join(mkSandbox(path.join(os.tmpdir(), "46-restart-session-")), "s.jsonl");
 	fs.writeFileSync(session, "");
 	const daemon = spawn(process.execPath, [bundle, "--session", session], { stdio: "ignore", env: process.env });
-	// Not a lease holder, so --restart cannot reach it: the failure path.
-	const bystander = spawn("bash", ["-c", 'exec -a "$0" sleep 30', bundle], { stdio: "ignore" });
+	// Not a lease holder, so --restart cannot reach it: the failure path. It must
+	// outlive four builds on a slow runner; the finally kills it.
+	const bystander = spawn("bash", ["-c", 'exec -a "$0" sleep 600', bundle], { stdio: "ignore" });
 	const respawned: number[] = [];
 	try {
 		pause(1.1);

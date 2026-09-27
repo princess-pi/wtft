@@ -45,7 +45,7 @@
 <body>
     <h2>Where The F***ing Tokens?! Utility (<code>wtft.ts</code>)</h2>
     <p><strong>Domain:</strong> Cost Audit, Telemetry & Token Accounting</p>
-    <p style="color: #888; font-size: 0.9em;">This page is the system spec for <code>wtft</code>: concepts and behavior live here, the flag reference below is rendered live from <code>manifests/wtft-cmd.json</code> (the same file that drives <code>--help</code> and <code>--why</code> — drift between this page and the CLI is structurally impossible for anything sourced that way), and <a href="#detailed-specs">Detailed specs</a> indexes every feature-level spec doc.</p>
+    <p style="color: #888; font-size: 0.9em;">This page is the system spec for <code>wtft</code>: concepts and behavior live here, the flag reference, exit codes and <em>Why run /wtft?</em> below are rendered live from <code>manifests/wtft-cmd.json</code> (the same file that drives <code>--help</code> and <code>--why</code>), the daemon status list from <code>manifests/wtft-status.json</code> (pinned to the code that renders each status) — drift between this page and the CLI is structurally impossible for anything sourced that way), and <a href="#detailed-specs">Detailed specs</a> indexes every feature-level spec doc.</p>
 
     <nav aria-label="Section index" style="margin: 1rem 0; padding: 12px 16px; background: var(--box-bg); border: 1px solid #404040; border-radius: 8px; font-size: 0.95em;">
         <strong style="color: var(--accent-yellow);">Jump to:</strong>
@@ -296,11 +296,11 @@
         <h4>Health Check Mechanism</h4>
         <p>Every reader asks one function, <code>health()</code> in <code>wtft-daemon-lib.ts</code>, over the pure decision in <code>extensions/lib/daemon-health.ts</code> (<a href="spec-270-daemon-health.md">spec-270 S5</a>): the Pi widget and <code>--watch</code>. The CLI's startup wait reads the same facts (over the current-version tag), and for a lease naming the daemon it just spawned it also waits for a heartbeat written since it began (#281); any other live holder counts at once. <code>wtft-daemon --list</code>'s idle column uses the same decision over the row's own lease, with no model read; its RUNNING/DEAD column uses the same holder rule (<a href="spec-297-holder-module.md">spec-297</a>). It reads the session's lease, the last 8 KiB of the tag file and the session file's mtime, and the whole session file for a model only when an idle answer needs a cache TTL and the tag tail named none. <code>ensureDaemonRunning</code> asks it too, before trusting its own earlier spawn:</p>
         <ul>
-            <li><strong>Lease pid alive, no session file</strong> → <code>waiting for session .jsonl...</code></li>
-            <li><strong>Lease pid alive, a non-empty tag, and either a heartbeat idle ≥ 2m2s (the exact rule: spec-270 S5 §2), or a session file untouched ≥ 2m2s</strong> → <code>idle</code>. The heartbeat's <code>first</code> (or a later turn's time) is the clock baseline, so the countdown ticks between health checks; the session file's mtime covers a daemon restarted on an already-idle session.</li>
-            <li><strong>Lease pid alive otherwise</strong> → <code>live</code></li>
+            <li><strong>Lease pid alive, no session file</strong> → <code class="wtft-status">waiting for session .jsonl...</code></li>
+            <li><strong>Lease pid alive, a non-empty tag, and either a heartbeat idle ≥ 2m2s (the exact rule: spec-270 S5 §2), or a session file untouched ≥ 2m2s</strong> → <code class="wtft-status">idle</code>. The heartbeat's <code>first</code> (or a later turn's time) is the clock baseline, so the countdown ticks between health checks; the session file's mtime covers a daemon restarted on an already-idle session.</li>
+            <li><strong>Lease pid alive otherwise</strong> → <code class="wtft-status">live</code></li>
             <li><strong>No clock window.</strong> A process that spawns a daemon claims the session's lease for it at once (#281, <a href="spec-281-spawner-claims-lease.md">spec-281</a>) when the lease is absent, empty, not a pid, or names a dead pid or a live process that is not a daemon (spec-297), and takes the claim back if the child is already dead. From the spawn the lease names the new daemon; a <code>rebuild</code> token or a live daemon holder is left for the daemon to meet.</li>
-            <li><strong>Lease pid dead (or a zombie), a <code>rebuild</code> token, or no lease</strong> → <code>stopped HH:MM</code> at the last heartbeat, or <code>daemon not found</code> with none.</li>
+            <li><strong>Lease pid dead (or a zombie), a <code>rebuild</code> token, or no lease</strong> → <code class="wtft-status">stopped HH:MM</code> at the last heartbeat, or <code class="wtft-status">daemon not found</code> with none.</li>
         </ul>
 
         <h4>Provisional Reads (#443)</h4>
@@ -340,7 +340,7 @@
         <p>Inotify-driven updates mean that idle → live transitions are instant — the status flips the moment the daemon writes classified entries to the tag file. The watchdog is a safety net, not the primary mechanism.</p>
         <p>The log parser daemon wraps its main poll loop in a <code>try/catch</code>: a transcript it cannot open, stat, hash, attribute or serialise marks the poll failed, so the tag stays provisional, and the next poll retries, with one WARNING line per transcript on stderr (a corrupted JSON line is skipped silently; the poll loop's own error line is printed only under <code>WTFT_DAEMON_DEBUG</code>). A failed write to the tag file (disk full, permission denied) is fatal on purpose: <code>fatalTagMutation</code> marks the lease <code>rebuild</code>, prints the failure and exits 1, so the next <code>wtft</code> rederives the tag rather than trusting a partial one.</p>
         <p>Width is always auto-detected from terminal (clamped at 1023). No <code>-w/--width</code> flag. Watch modes re-render on terminal resize (SIGWINCH).</p>
-        <p>In CLI <code>--watch</code> mode, press <code>r</code> to restart the daemon. The lease holder, unless it is a harness, is stopped (SIGTERM, then SIGKILL after 2 s) and a new daemon started once it has exited; the wait takes up to 4 s while the view keeps running, and a holder still alive after that, or one it may not signal, is left running and shows <code>restart failed</code>. The holder is stopped only when it is a verified daemon (off Linux, any pid), never a live process that is not a daemon, and off Linux a harness is not told apart (spec-297); a harness daemon, which serves every session readers have asked for under its root, is left running and asked to serve this session next (#248). The footer shows <code style="color: #d44;">'r' to restart</code> in red when the daemon is stopped. The Pi widget auto-spawns a daemon on session start to keep the tag file warm for CLI use.</p>
+        <p>In CLI <code>--watch</code> mode, press <code>r</code> to restart the daemon. The lease holder, unless it is a harness, is stopped (SIGTERM, then SIGKILL after 2 s) and a new daemon started once it has exited; the wait takes up to 4 s while the view keeps running, and a holder still alive after that, or one it may not signal, is left running and shows <code class="wtft-status">restart failed</code>. The holder is stopped only when it is a verified daemon (off Linux, any pid), never a live process that is not a daemon, and off Linux a harness is not told apart (spec-297); a harness daemon, which serves every session readers have asked for under its root, is left running and asked to serve this session next (#248). The footer shows <code style="color: #d44;">'r' to restart</code> in red when the daemon is stopped. The Pi widget auto-spawns a daemon on session start to keep the tag file warm for CLI use.</p>
         <p>Management commands: <code>--list</code> (list the log parser daemons and their leases), <code>--cleanup</code> (stop stale log parser daemons), <code>--restart</code> (restart all), <code>--stop &lt;session&gt;</code> (stop one).</p>
     </div>
 
@@ -434,11 +434,7 @@
     </div>
 
     <script>
-        // Single fetch, two render targets — #161: the flag reference and the --why
-        // scenarios both come from manifests/wtft-cmd.json, the same file --help and
-        // --why read. Extending this fetch (rather than adding a second hand-written
-        // copy) is what makes drift between this page and the CLI structurally
-        // impossible for anything sourced this way.
+        // The same file --help and --why read. Render from it rather than hand-copy.
         fetch('manifests/wtft-cmd.json')
             .then(r => r.json())
             .then(data => {
@@ -559,8 +555,11 @@
         function renderStatusReference(data) {
             const container = document.getElementById('wtft-status-reference');
             if (!container) return;
+            // Manifest text is plain; `backticks` mark code.
+            const esc = t => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const prose = t => esc(t).replace(/`([^`]+)`/g, '<code>$1</code>');
             container.innerHTML = (data.statuses || []).map(s =>
-                `<li><span style="color: ${STATUS_COLORS[s.color]};">● ${s.text}</span> — ${s.meaning}</li>`
+                `<li><span style="color: ${STATUS_COLORS[s.color]};">● ${esc(s.text)}</span> — ${prose(s.meaning)}</li>`
             ).join('');
         }
 

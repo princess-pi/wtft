@@ -16,7 +16,7 @@
     {
       "text": "idle (cache expires in 3min)",
       "color": "yellow",
-      "example": { "alive": true, "idle": true, "idleMs": 120000, "cacheTtlMs": 300000 },
+      "example": { "alive": true, "idle": true, "idleMs": 122000, "cacheTtlMs": 300000 },
       "meaning": "No new data for 2m2s; the minutes left before the model's prompt cache expires (the turn's own 1h or 5m TTL when the tag records one, else a guess from the model name)."
     },
     {
@@ -43,14 +43,14 @@
       "color": "yellow",
       "reason": "starting",
       "example": { "alive": false, "reason": "starting" },
-      "meaning": "--watch's r is restarting the daemon."
+      "meaning": "`--watch`'s `r` is restarting the daemon."
     },
     {
       "text": "stopped HH:MM",
       "color": "red",
       "reason": "idle-timeout",
       "example": { "alive": false, "reason": "idle-timeout", "lastHbTime": "HH:MM" },
-      "meaning": "No live lease holder; HH:MM is the last heartbeat carrying a last time in the tag's last 8 KiB."
+      "meaning": "No live lease holder; HH:MM is the last heartbeat carrying a `last` time in the tag's last 8 KiB."
     },
     {
       "text": "daemon not found",
@@ -71,7 +71,7 @@
       "color": "red",
       "reason": "restart-failed",
       "example": { "alive": false, "reason": "restart-failed" },
-      "meaning": "--watch's r could not restart it."
+      "meaning": "`--watch`'s `r` could not restart it."
     }
   ]
 }

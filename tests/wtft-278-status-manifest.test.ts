@@ -1,5 +1,5 @@
 /**
- * #278: docs/EXT_WTFT.html's daemon status list renders from
+ * docs/EXT_WTFT.html's daemon status list renders from
  * docs/manifests/wtft-status.json, and that manifest is pinned to
  * renderDaemonStatus, so the page cannot describe a status the code never shows.
  */
@@ -68,6 +68,24 @@ describe("#278 EXT_WTFT.html renders from manifests, not by hand", () => {
 	it("hand-writes no status text the manifest owns", () => {
 		for (const s of manifest.statuses) {
 			assert.ok(!doc.includes(`● ${s.text}</span>`), `EXT_WTFT.html still hand-lists "${s.text}"`);
+		}
+	});
+
+	it("names only statuses the manifest has", () => {
+		const texts = manifest.statuses.map(s => s.text);
+		const named = [...doc.matchAll(/<code class="wtft-status">([^<]+)<\/code>/g)].map(m => m[1]);
+		assert.ok(named.length >= 6, `only ${named.length} status names marked`);
+		for (const n of named) {
+			assert.ok(texts.some(t => t === n || t.startsWith(`${n} (`)), `EXT_WTFT.html names "${n}", which is not in the manifest`);
+		}
+	});
+
+	it("marks every status name in the daemon health section", () => {
+		// Elsewhere "live" can mean a live descendant, not a daemon status.
+		const section = doc.slice(doc.indexOf('id="daemon-health"'), doc.indexOf('id="detailed-specs"'));
+		assert.ok(section.length > 0);
+		for (const s of manifest.statuses) {
+			assert.ok(!section.includes(`<code>${s.text}</code>`), `"${s.text}" is named without class="wtft-status"`);
 		}
 	});
 });

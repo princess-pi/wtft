@@ -102,6 +102,26 @@ try {
 		check(r.status === 1, `exit 1 (got ${r.status})`);
 	}
 
+	console.log("--- F: many respawns share one settle wait ---");
+	{
+		const n = 20;
+		for (let i = 0; i < n; i++) {
+			const tagSession = path.join(TMP, `f${i}`, "s.jsonl.wtft-tag.v1.jsonl");
+			fs.mkdirSync(path.dirname(tagSession), { recursive: true });
+			fs.writeFileSync(tagSession, "");
+			const [script] = standInDaemonArgs("setInterval(() => {}, 1000);");
+			const fake = spawn(process.execPath, [script, "--session", tagSession], { stdio: "ignore", env, detached: true });
+			children.push(fake);
+			check(awaitStandIn(fake.pid!), `fixture precondition: stand-in ${i} reads as a daemon`);
+			fs.writeFileSync(getDaemonPidPath(tagSession), String(fake.pid));
+		}
+		const t0 = Date.now();
+		const r = restart();
+		const ms = Date.now() - t0;
+		check((r.stdout.match(/the respawn for .* failed/g) ?? []).length === n, `all ${n} respawns were judged`);
+		check(ms < n * 1000 / 4, `one wait, not one per holder (${ms} ms for ${n})`);
+	}
+
 	console.log("--- E: a holder that refuses the signal ---");
 	console.log("  ##SKIP## E needs a process of another uid; stopHolder's denied outcome is covered over a fake table in tests/wtft-297-holder.test.ts");
 } finally {

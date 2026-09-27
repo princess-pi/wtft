@@ -11,10 +11,13 @@ Issue: https://github.com/princess-pi/wtft/issues/274 · Module: `bin/wtft-daemo
   no `--session` comes back as `wtft-daemon --harness <name>`, and the line reads
   `Restarted: PID n → fresh harness daemon (<name>)`. A harness found only through its root pid
   file is stopped, not respawned: the next `wtft` or widget spawn starts it (spec-46).
-- **D. A respawn counts only if, 300 ms later, it is still running or a live daemon holds what it
+- **D. A respawn counts only if, 1 s later, it is still running or a live daemon holds what it
   was started for** (the session's lease, or a root pid file for its `--harness`); a child that
   handed off and exited 0 counts. Otherwise (a tag-file `--session`, a crash at start) it is a failed respawn: its claim on the lease is
   removed and the line reads `Stopped: PID n — the respawn for <session> failed`.
+- **One wait for all.** Every respawn is started first, then one 1 s wait, then each is judged,
+  so `--restart` stays inside `wtft`'s 10 s timeout however many holders it restarts. A child
+  slower than 1 s to fail is counted as running.
 - **E. A holder that refused the signal (EPERM) or outlived SIGKILL is left running with its
   lease or root pid file,** and the line says `Not stopped`.
 - **Exit code.** `--restart` exits 1 when any holder was left running (E) or any respawn failed

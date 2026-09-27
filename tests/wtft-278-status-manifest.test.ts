@@ -87,8 +87,9 @@ describe("#278 EXT_WTFT.html renders from manifests, not by hand", () => {
 		// Elsewhere "live" can mean a live descendant, not a daemon status.
 		const section = doc.slice(doc.indexOf('id="daemon-health"'), doc.indexOf('id="detailed-specs"'));
 		assert.ok(section.length > 0);
-		for (const s of manifest.statuses) {
-			assert.ok(!section.includes(`<code>${s.text}</code>`), `"${s.text}" is named without class="wtft-status"`);
+		// A family name counts too: "idle" for "idle (local model)".
+		for (const text of new Set(manifest.statuses.flatMap(s => [s.text, s.text.split(" (")[0]]))) {
+			assert.ok(!section.includes(`<code>${text}</code>`), `"${text}" is named without class="wtft-status"`);
 		}
 	});
 });

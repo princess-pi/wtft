@@ -45,7 +45,7 @@
 <body>
     <h2>Where The F***ing Tokens?! Utility (<code>wtft.ts</code>)</h2>
     <p><strong>Domain:</strong> Cost Audit, Telemetry & Token Accounting</p>
-    <p style="color: #888; font-size: 0.9em;">This page is the system spec for <code>wtft</code>: concepts and behavior live here, the flag reference, exit codes and <em>Why run /wtft?</em> below are rendered live from <code>manifests/wtft-cmd.json</code> (the same file that drives <code>--help</code> and <code>--why</code>), the daemon status list from <code>manifests/wtft-status.json</code> (pinned to the code that renders each status) — drift between this page and the CLI is structurally impossible for anything sourced that way), and <a href="#detailed-specs">Detailed specs</a> indexes every feature-level spec doc.</p>
+    <p style="color: #888; font-size: 0.9em;">This page is the system spec for <code>wtft</code>: concepts and behavior live here, the flag reference, exit codes and <em>Why run /wtft?</em> below are rendered live from <code>manifests/wtft-cmd.json</code> (the same file that drives <code>--help</code> and <code>--why</code>), and the daemon status list from <code>manifests/wtft-status.json</code>, whose status names and colours a test pins to the code that renders them (the meanings beside them are prose, not pinned). <a href="#detailed-specs">Detailed specs</a> indexes every feature-level spec doc.</p>
 
     <nav aria-label="Section index" style="margin: 1rem 0; padding: 12px 16px; background: var(--box-bg); border: 1px solid #404040; border-radius: 8px; font-size: 0.95em;">
         <strong style="color: var(--accent-yellow);">Jump to:</strong>
@@ -71,10 +71,6 @@
         <p><strong><code>/wtft</code></strong> [options]</p>
         <p>Analyze and display the session cost breakdown in a persistent TUI widget below the editor.</p>
         <h4 style="color: var(--accent-yellow); margin-bottom: 5px;">Options</h4>
-        <!-- Rendered live from manifests/wtft-cmd.json (see script below) — the same file
-             that drives --help and --why. Do not hand-list flags here: a hardcoded copy is
-             how #161 found this section already stale in three independent ways (a unit
-             letter missing, one flag split into two rows, 16 of 25 flags absent). -->
         <ul id="wtft-flag-reference">
             <li><em style="color:#666">Loading flag reference...</em></li>
         </ul>
@@ -237,13 +233,7 @@
     <h3 id="pricing">Model Pricing</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
         <p>WTFT estimates costs using public per-model pricing. These are directional estimates, not accounting ledgers — provider billing nuances (caching discounts, free-tier credits, surge pricing) may cause minor discrepancies.</p>
-        <!-- Rendered live from manifests/wtft-pricing.json, generated from MODEL_PRICING
-             by `bun run manifest` (#169, #100). The hand-written table this replaces was stale by an
-             entire model family — no Claude 5, no GPT-5.x, no dated or size tiers, and
-             DeepSeek rates from before the 2026-08-16 card — and nothing failed while it
-             was wrong. Edit extensions/lib/wtft-cost.ts, run `bun run manifest`, and commit
-             the regenerated JSON; there is no rate to edit on this page. `bun run build`
-             only CHECKS that file and fails naming the write command (#100). -->
+        <!-- Rendered from manifests/wtft-pricing.json: edit extensions/lib/wtft-cost.ts, then bun run manifest. -->
         <table id="wtft-pricing-table" style="width: 100%; border-collapse: collapse; margin-top: 10px;">
             <tr><td style="color: #666;"><em>Loading pricing registry...</em></td></tr>
         </table>
@@ -286,8 +276,6 @@
     <h3 id="daemon-health">Log Parser Daemon Health Monitoring</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
         <p>The widget title line shows a colored status indicator for the background daemon:</p>
-        <!-- Rendered from manifests/wtft-status.json, which tests/wtft-278-status-manifest.test.ts
-             pins to renderDaemonStatus(). -->
         <ul id="wtft-status-reference">
             <li><em style="color:#666">Loading status reference...</em></li>
         </ul>
@@ -450,10 +438,6 @@
                 });
             });
 
-        // Model Pricing (#169) — generated from MODEL_PRICING by `bun run manifest`,
-        // so a rate change reaches this page by regenerating and committing that JSON.
-        // `bun run build` verifies it and refuses on a stale one, so the step cannot be
-        // forgotten silently — but the build is deliberately not the writer (#100).
         fetch('manifests/wtft-pricing.json')
             .then(r => r.json())
             .then(renderPricingTable)
@@ -465,21 +449,7 @@
         function renderPricingTable(data) {
             const table = document.getElementById('wtft-pricing-table');
             if (!table) return;
-            // Never round away a significant digit. A fixed "< 0.01 ? 4dp : 2dp"
-            // cutoff rendered four-decimal cache-read rates at two decimals. When
-            // #495 measured it the worst case was 31% understated, on a superseded
-            // deepseek-v4-pro rate. #100 made it worse rather than better: the
-            // DeepSeek cache-hit rate dropped by most of an order of magnitude, and
-            // the smallest cache-read rates in the manifest now round to $0.00
-            // outright — a 100% understatement. Not every DeepSeek cache-read rate
-            // does; the larger ones survive a 2dp cutoff. The direction is what
-            // matters, and it points the same way the fix does. In the very table
-            // #169/#495 built to stop hand-typed rates drifting. 4dp, trailing zeros
-            // trimmed to a 2dp floor. (No rate quoted here, deliberately: a live
-            // number hand-typed into this page is the drift this table replaced, and
-            // tests/wtft-pricing-manifest.test.ts bans one of them by name. An
-            // earlier version of this comment quoted five, while still claiming this
-            // sentence.)
+            // Never round away a significant digit: 4dp, trailing zeros trimmed to 2dp.
             const money = n => n === 0 ? '$0'
                 : '$' + n.toFixed(4).replace(/(\.\d\d)(\d*?)0+$/, '$1$2');
             const head =
@@ -496,13 +466,7 @@
                 // IS the distinction, and repeating the name reads like a second model.
                 const border = i === 0 ? ' style="border-top: 1px solid #404040;"' : '';
                 const name = i === 0 ? `<code>${m.model}</code>` : '';
-                // Not "base" (CONTEXT.md's _Avoid_ for the rows this governs), and
-                // NOT "current" either — that was wrong the day it was written:
-                // claude-sonnet-5's intro window runs to 2026-09-01, so its
-                // unconditioned row is not the rate in force. This table is
-                // generated without a clock on purpose, so it cannot say which row
-                // applies today; "standard" states what the row IS, and the note
-                // below says a dated row outranks it while its date stands.
+                // "standard", not "base" (CONTEXT.md _Avoid_) or "current": the table has no clock.
                 const when = r.condition
                     ? `<span style="color:#888;">${r.condition}</span>`
                     : '<span style="color:#666;">standard</span>';
@@ -542,6 +506,10 @@
             ).join('');
         }
 
+        // Manifest text is plain; `backticks` mark code.
+        const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const prose = t => esc(t).replace(/`([^`]+)`/g, '<code>$1</code>');
+
         function renderExitCodes(data) {
             const container = document.getElementById('wtft-exit-codes');
             if (!container) return;
@@ -551,7 +519,7 @@
                 return;
             }
             container.innerHTML = codes.map(e =>
-                `<li><code>${e.code}</code> - ${e.meaning}</li>`
+                `<li><code>${e.code}</code> - ${prose(e.meaning)}</li>`
             ).join('');
         }
 
@@ -560,11 +528,13 @@
         function renderStatusReference(data) {
             const container = document.getElementById('wtft-status-reference');
             if (!container) return;
-            // Manifest text is plain; `backticks` mark code.
-            const esc = t => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            const prose = t => esc(t).replace(/`([^`]+)`/g, '<code>$1</code>');
-            container.innerHTML = (data.statuses || []).map(s =>
-                `<li><span style="color: ${STATUS_COLORS[s.color]};">● ${esc(s.text)}</span> — ${prose(s.meaning)}</li>`
+            const statuses = data.statuses || [];
+            if (statuses.length === 0) {
+                container.innerHTML = '<li style="color:#666">No statuses defined.</li>';
+                return;
+            }
+            container.innerHTML = statuses.map(s =>
+                `<li><span style="color: ${STATUS_COLORS[s.color] || '#888'};">● ${esc(s.text)}</span> — ${prose(s.meaning)}</li>`
             ).join('');
         }
 

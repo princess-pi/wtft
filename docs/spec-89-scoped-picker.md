@@ -19,7 +19,7 @@ reader does not re-litigate them)
   unbounded time) when called with no scope options — this is what
   `tests/wtft-issue-144-145-164-session-discovery.test.ts` and
   `tests/wtft-issue-156-harness-seam.test.ts` already exercise, and their
-  assertions about that default are unchanged. `bin/wtft.ts` opts into the new
+  assertions about that default are unchanged. `extensions/lib/cli/session.ts` opts into the new
   policy for the picker, passing `{ scope: "worktree", windowMs: TIME_WINDOW_MS["20m"] }`
   as its starting state; each rescope passes the new scope and window.
 - **`Ctrl+B` (current branch), mechanism.** The decision names the key and its
@@ -178,7 +178,7 @@ reader does not re-litigate them)
   (pr-review round 2, Low — the first draft only clamped into range, which
   left a growing or same-size rescope's cursor exactly where it was).
 
-### No-TTY `-s` and the new exit code (`bin/wtft.ts`)
+### No-TTY `-s` and the new exit code (`extensions/lib/cli/session.ts`)
 
 - **E1 — an interactive terminal gets the picker**, `--json` included; the
   picker draws to a stream that is never mixed into the `--json` document's
@@ -191,7 +191,7 @@ reader does not re-litigate them)
   that combination is exactly `wtft --tokens | less -R`, a flow the README's
   own Usage section recommends, and stdin stays on the terminal while stdout
   is the pipe. `wtft --json 2>/dev/null` is the same shape under `--json`. The
-  `canShowPicker` check in `bin/wtft.ts` is what actually guards this.
+  `canShowPicker` check in `extensions/lib/cli/session.ts` is what actually guards this.
 - **E2 — no TTY, `-s` matches exactly one → selects it silently**, same as
   today.
 - **E2b — TTY, `-s` matches zero → exit 1** ("matches no discovered sessions"), unchanged

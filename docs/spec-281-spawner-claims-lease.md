@@ -84,7 +84,7 @@ export function claimLeaseForChild(file: string, childPid: number): "claimed" | 
   heartbeat record in the last 8 KiB of the current-version tag with `last` at or after the
   wait's start. Any other live holder is up at once, as before. When the child exits without
   being up, the wait unlinks the claim made for it and answers `dead`. The one-shot call with
-  ceiling 0 (`bin/wtft.ts`, after a tag wait of up to about 2 s, skipped when the first read found data) can answer `unknown` for a child whose beats
+  ceiling 0 (`extensions/lib/cli/report.ts`, after a tag wait of up to about 2 s, skipped when the first read found data) can answer `unknown` for a child whose beats
   all predate it; the CLI prints the same "no data yet" line for `unknown` and `up`.
 
 **Then both grace periods go.** `HealthOptions.spawnedAt`, `SPAWN_GRACE_MS` and

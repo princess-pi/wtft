@@ -36,7 +36,7 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
 
 ## Shape
 
-- `bin/wtft.ts` — the CLI. `bin/wtft-daemon.ts` — the log parser daemon.
+- `bin/wtft.ts` — the CLI's entry; its arms are in `extensions/lib/cli/`. `bin/wtft-daemon.ts` — the log parser daemon.
 - `extensions/wtft.ts`, `extensions/token-budget.ts` — Pi widgets, built to `pi/`.
 - `docs/manifests/wtft-cmd.json` — single source for `--help` / `--why`.
 - `docs/adding-a-harness.md` — how a new harness's session logs get read.

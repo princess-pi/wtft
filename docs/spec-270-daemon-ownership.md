@@ -58,7 +58,7 @@ Whole-file properties that are also read as state:
 | Property | Writer | Readers → what they take |
 |---|---|---|
 | size, mtime | every append; the in-place heartbeat write changes mtime with no append | `readHealthFacts` → both; `decideHealth` → size > 0 before a live holder's tail scan (its 2 s write grace was removed by spec-281); `token-budget` → active if mtime < 2 min; `reapAndWarn` → warns above 1 MB |
-| truncate to 0 | `initClassified` on rebuild, on a partial tail (cut to `lastLineStartByte` first), on a tag with no data record, and on a tag whose offset marker is not in the last 8 KiB `readLastMetaOffset` reads (a valid tag rebuilt from scratch; lead on #261) | `watchTagFile` → reseed when size < offset, or when the prefix sentinel changed after a regrowth |
+| truncate to 0 | `initClassified` on rebuild, on a partial tail (cut to `lastLineStartByte` first), on a tag with no data record, and on a tag whose offset marker is not in the last 8 KiB `readLastMetaOffset` reads (a valid tag rebuilt from scratch; #320 A) | `watchTagFile` → reseed when size < offset, or when the prefix sentinel changed after a regrowth |
 | heartbeat overwritten in place | `upsertHeartbeat` | `watchTagFile` → prefix sentinel unchanged |
 | file name version | `getCurrentVersionTagPath` names the writer's path; per-session `main` deletes older-version tags at start and 5 s later, a harness adoption never does | `tagProvisionalFromContent` → `stale-version`; `waitingForDataLine`; `getTagPath` → the other-version fallback; per-session `main` → on a newer tag, exit 0 when a live daemon other than itself holds the lease (not checked to be the newer version; off Linux any live pid), else serve; on an older tag, take over; `--list` → the printed version; `forceRebuildSession` → deletes every version |
 
@@ -66,7 +66,7 @@ Whole-file properties that are also read as state:
 
 Value is a pid or the token `rebuild`. Hash is of the transcript basename when it is a session
 id, else of the raw `--session` string; `--stop` hashes the resolved path, so a relative
-non-session-id path names a different lease (lead on #261). Two transient siblings exist while
+non-session-id path names a different lease (#320 H). Two transient siblings exist while
 `lease.ts` works: `<lease>.claim-<pid>` and `<lease>.replace-<pid>`.
 
 | Writer | Moment | Effect |
@@ -157,7 +157,7 @@ issue that turns on the row, where one exists.
 | R6 | which transcript a tag line came from | daemon: `SubagentFileState.source` | `transcriptSourceId` is recomputed from the current path at the next read; a session move changes the answer for a child in the session's own directory | #263 |
 | R7 | which `claude -p` lookups are open | daemon: `pendingClaudeCommands`, `discoveredClaudeFiles` | `resumeClaudeLookups` replays T9, T10 and T12; `reseedClaudeChildren` checks `<projectsDir>/<dir>/<id>.jsonl` for every T12 id with a matching source, skipping ids T11 says another source folds and ids discovery finds | #267 |
 | R8 | which process serves a session | the harness: the registry's `served` map | `daemonLaunchArgs` decides by path prefix in the CLI; `runHarness` decides again from the root file and version file; `restartDaemon` decides from `/proc/<pid>/cmdline`; `wtft-daemon --restart` respawns each lease holder's session with the old process's root env | #221 |
-| R9 | a held-back turn, and every subagent read position | daemon: `SubagentFileState`, memory only | nothing: a crash loses it; the next life reads every discovered subagent transcript from byte 0 as a new generation and re-registers `claude -p` children, so the held turn is read again. The T6 offset covers the session transcript only, and it counts a trailing fragment's bytes, so a restart resumes mid-line and drops that line (lead on #261) | #257 |
+| R9 | a held-back turn, and every subagent read position | daemon: `SubagentFileState`, memory only | nothing: a crash loses it; the next life reads every discovered subagent transcript from byte 0 as a new generation and re-registers `claude -p` children, so the held turn is read again. The T6 offset covers the session transcript only, and it leaves out a trailing fragment's bytes, so a restart resumes at a line start | #257 |
 | R10 | what the harness serves | the harness: the registry's `served`, `retrying` and `idle` maps, each record's lease state | `.served` is rewritten at the end of every full 250 ms sweep, while this process holds the root, by diffing `handOff(registry, handedOn)` against the file's text | — |
 | R11 | the record kind of a tag line | the writer | on `main`, four daemon functions (`resumeClaudeLookups`, `reapAndWarn`, `reseedClaudeChildren`, `initClassified`) and `appendedGeneration` tested substrings (`"_hb"`, `"_meta"`, `"_gen"`, `"_fold"`, `"spawnPending"`, `"spawnSettled"`, `"stop"`), and the picker and `watchTagFile` decided kinds on their own; after S1 every reader decides through `tag-log.ts` | #140 |
 | R12 | the lease is mine | the claimer | on `main`, nine unlink sites with three different checks (§1b); one implementation after S2 | #249, #243 |
@@ -317,7 +317,7 @@ write (its exact cases: `docs/spec-270-daemon-health.md` §2).
 - **Reconcile leftovers are filed, not fixed here.** The tag-reader auditor's findings about
   the writer side of `docs/wtft-tag-format.md` and the daemon-lifecycle entries of
   `CONTEXT.md`, and the daemon auditor's findings on `docs/spec-259-*.md` and the manifest,
-  describe code S3–S5 will move; they are on #261, the standing daemon-doc leads issue, so the
+  describe code S3–S5 will move; they were fixed after S6 (PR #321), so the
   freeze holds.
 
 - **§1d and §1g map by record kind, not by field.** The ledger's fields are
@@ -371,18 +371,18 @@ are on the issues named.
 |---|---|---|---|---|
 | `tests/wtft-270-*.test.ts` | check wording and fixture preconditions | the modules' behaviour (16 findings) | yes, the suites themselves | fixed here |
 | `bin/wtft-daemon.ts` | `refusing to watch a tag cache file` | `CONTEXT.md` Tag file _Avoid_ | `tests/wtft-daemon.test.sh` matches the prefix only | fixed here: "tag file as a session" |
-| `bin/wtft-daemon.ts` | `[wtft-log-parser]` stderr prefix, ~48 lines | `CONTEXT.md` _Avoid_ bare "log parser" | no | filed on #261 |
+| `bin/wtft-daemon.ts` | `[wtft-log-parser]` stderr prefix, ~48 lines | `CONTEXT.md` _Avoid_ bare "log parser" | no | fixed (PR #321) |
 | `extensions/lib/wtft-daemon-lib.ts` | every reader decides a line's kind through `tagRecords` | `watchTagFile`'s incremental read tested `obj._hb` itself | `wtft-watch-*` suites, indirectly | fixed here: `parseTagLine` |
 | `extensions/lib/wtft-daemon-lib.ts` | every lease read goes through `lease.ts` | raw `readFileSync` reads | no | two fixed here (`checkDaemonHealth`, `restartDaemon`); three kept in `forceRebuildSession`, one added (§4) |
 | `docs/wtft-incremental-render-spec.md`, `docs/spec-47-*.md`, `docs/EXT_TOKEN_BUDGET.html` | the picker reimplements the id collapse by hand; `getSessionSummary` returns two fields; non-TTY auto-selects | `session-selector.ts` after S1 | `tests/wtft-270-session-summary-dedup.test.ts`, `wtft-tag-reader-collapse-guard` | fixed here |
 | `CONTEXT.md` Session picker | cost column undefined | — | `tests/wtft-75-doc-claims.test.ts` pins the file | defined here |
 | `CONTEXT.md` Tag file, Tags dir, Watch mode, status text | per source session; one tags dir per root; tails a session file; text rendered only inside `renderDaemonStatus` | `getTagPath`, `watchTagFile`, `renderDaemonStatus` | `wtft-75` pins the file | fixed here; Lease entry added |
-| `CONTEXT.md` Daemon entry, glossary gaps | lifecycle and cadence claims; nine terms undefined | `bin/wtft-daemon.ts` | no | filed on #261 |
+| `CONTEXT.md` Daemon entry, glossary gaps | lifecycle and cadence claims; nine terms undefined | `bin/wtft-daemon.ts` | no | fixed (PR #321) |
 | `docs/wtft-tag-format.md` reader side | Claude Code only; re-parse fallback; `_meta` shapes absent; `required` fields; wrong-shape list fields; overhead line carries `sc`; readers skip every `_hb`; append-only; dedup is a subtraction; step 6 absent | `getTagPath`, `recordOf`, `classifiedToInteraction`, `serializeClassifiedWithOverheadSplit`, `deduplicateInteractions`, `sweepState` | `tests/wtft-tag-format.test.ts` (round trip), `tests/wtft-270-tag-log.test.ts` (kinds) | fixed here: §1, §2b, §2c, new §2f, §3, §4, §5, §6 |
-| `docs/wtft-tag-format.md` writer side | heartbeat, stop, sweep, spawn and generation moments | `bin/wtft-daemon.ts` | no | filed on #261; S3 moved the sweep, spawn and generation writers into `session-tagger.ts` |
+| `docs/wtft-tag-format.md` writer side | heartbeat, stop, sweep, spawn and generation moments | `bin/wtft-daemon.ts` | no | fixed (PR #321); S3 moved the sweep, spawn and generation writers into `session-tagger.ts` |
 | `docs/spec-270-daemon-ownership.md` §1–§2 | writer moments and reader lists, ~50 cells | `bin/wtft-daemon.ts` on the branch | no | corrected here; header says which names are retired |
 | `docs/spec-270-daemon-ownership.md` §3a, §3b | planned interfaces named as built | `tag-log.ts`, `lease.ts` exports | `tests/wtft-270-*` | rewritten here: built rows name the real exports, the rest are marked plan |
-| `docs/spec-259-*.md` | argument errors, hand-off and takeover details, ~18 findings | `bin/wtft-daemon.ts` | `tests/wtft-259-*` partly | filed on #261 |
-| `docs/manifests/wtft-cmd.json`, README | daemon flag descriptions (`--list`, `--cleanup`, `--restart`, `--stop`), hermetic shell suite, spawned-daemon liveness rule | `bin/wtft-daemon.ts` | `wtft-75` pins README flags, not these sentences | filed on #261 |
+| `docs/spec-259-*.md` | argument errors, hand-off and takeover details, ~18 findings | `bin/wtft-daemon.ts` | `tests/wtft-259-*` partly | fixed (PR #321) |
+| `docs/manifests/wtft-cmd.json`, README | daemon flag descriptions (`--list`, `--cleanup`, `--restart`, `--stop`), hermetic shell suite, spawned-daemon liveness rule | `bin/wtft-daemon.ts` | `wtft-75` pins README flags, not these sentences | fixed (PR #321) |
 | `docs/manifests/wtft-cmd.json`, README, spec-89 | picker rows, keys, window semantics, ~30 findings | `session-selector.ts` | no | filed on #173 |
 | host-scoped: `~/.claude/CLAUDE.md`, `~/git-projects/CLAUDE.md`, `~/.claude/settings.json`, other clones' `CLAUDE.md`/`AGENTS.md` | none quote wtft's daemon or tag reader | — | — | checked, nothing to change |

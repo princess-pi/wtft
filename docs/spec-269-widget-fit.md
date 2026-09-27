@@ -1,6 +1,6 @@
 # Spec 269 — the Pi widget under Pi's line cap
 
-**Issue:** [#269](https://github.com/princess-pi/wtft/issues/269) · **Tests:** `tests/wtft-269-widget-fit.test.ts`
+**Tests:** `tests/wtft-269-widget-fit.test.ts`
 · **Module:** `extensions/lib/widget-fit.ts`. Vocabulary: `CONTEXT.md` (Widget).
 
 Pi shows at most 10 lines of a string-array widget (`MAX_WIDGET_LINES`, Pi 0.87.1) and replaces the

@@ -4,9 +4,9 @@
 · **Module:** `extensions/lib/widget-fit.ts`. Vocabulary: `CONTEXT.md` (Widget).
 
 Pi shows at most 10 lines of a string-array widget (`MAX_WIDGET_LINES`, Pi 0.87.1) and replaces the
-rest with `... (widget truncated)`. The widget used to hand Pi its whole chart, so on a session with
-8 or more intervals (fewer with a status line or a divider) the newest rows were fine and the footer lines, and with a status line or a date
-divider some rows too, were cut by Pi.
+rest with `... (widget truncated)`. The widget handed Pi its whole chart: title, legend, ticks and a
+row per interval, plus any status, divider and provisional lines. With 8 or more intervals, or
+fewer when those extra lines appear, Pi cut the oldest rows and everything below them.
 
 ## 1. Interface
 
@@ -31,4 +31,6 @@ divider some rows too, were cut by Pi.
 the widget, and a provisional line. The unfitted widget overflows and carries a date divider (both
 asserted as preconditions); the fitted one has at most 10 lines, title then legend, keeps the
 status and provisional lines, and keeps the newest rows in order. Also: a short status joins the
-title; a render that overflows at one row is cut to 10; `null` stays `null`.
+title; a render that overflows at one row is cut to 10 keeping the provisional line; a NaN limit
+ends; `null` stays `null`. End to end: `/wtft -w 80 -l 20` over 20 intervals through the extension
+hands `setWidget` at most 10 lines, title then legend.

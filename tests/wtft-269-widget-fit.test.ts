@@ -3,6 +3,9 @@
  * The Pi widget never hands Pi more lines than Pi shows. docs/spec-269-widget-fit.md.
  */
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { buildWtftLines } from "../extensions/lib/wtft-renderer.ts";
 import { PI_WIDGET_MAX_LINES, fitWidget, keepTail, widgetLines } from "../extensions/lib/widget-fit.ts";
 
@@ -67,6 +70,38 @@ console.log("--- nothing fits ---");
 	const nan = fitWidget(() => { calls++; return huge(); }, "", 60, [], Number.NaN);
 	check(nan !== null && nan.length === 10 && calls <= 10, `a NaN limit ends (${calls} renders)`);
 	check(keepTail(["a", "b", "c", "t"], 1, 3).join() === "a,b,t", "keepTail cuts from the middle");
+}
+
+console.log("--- the array the widget hands setWidget ---");
+{
+	const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-269-"));
+	process.chdir(sandbox);
+	process.env.XDG_CONFIG_HOME = path.join(sandbox, "config");
+	process.env.XDG_STATE_HOME = path.join(sandbox, "state");
+	fs.mkdirSync(process.env.XDG_CONFIG_HOME, { recursive: true });
+	const { WTFT_TAGGER_VERSION } = await import("../extensions/lib/wtft-tagger-version.ts");
+	const registered: Record<string, { handler: (args: string, ctx: any) => Promise<void> }> = {};
+	const wtftExtension = (await import("../extensions/wtft.ts")).default;
+	await wtftExtension({
+		on: () => {}, registerCommand: (name: string, def: any) => { registered[name] = def; },
+		registerFlag: () => {}, getFlag: () => undefined,
+	} as any);
+	const sessionDir = path.join(sandbox, "sess");
+	fs.mkdirSync(path.join(sessionDir, "wtft-tags"), { recursive: true });
+	const session = path.join(sessionDir, "session.jsonl");
+	fs.writeFileSync(session, "{}\n");
+	const tag = path.join(sessionDir, "wtft-tags", `session.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const tagLine = (tt: number) => JSON.stringify({ t: tt, c: 1, cat: "code", f: [], cmd: [], id: `m-${tt}`, m: "claude-sonnet-4-5", in: 1000, out: 500, cr: 0, cw: 0, rs: 0 });
+	fs.writeFileSync(tag, ix.map(i => tagLine(i.timestamp)).join("\n") + "\n");
+	const calls: Array<string[] | undefined> = [];
+	await registered.wtft.handler("-w 80 -l 20 -i 1h", {
+		sessionManager: { getSessionFile: () => session },
+		ui: { setWidget: (_id: string, lines: string[] | undefined) => { calls.push(lines); }, notify: () => {}, custom: async () => {} },
+	});
+	const handed = calls.filter((c): c is string[] => Array.isArray(c)).at(-1) ?? [];
+	check(handed.map(plain).some(l => /^\d\d:\d\d/.test(l)), "fixture precondition: the widget drew interval rows");
+	check(handed.length <= PI_WIDGET_MAX_LINES, `setWidget got at most 10 lines with -l 20 over 20 intervals (got ${handed.length})`);
+	check(plain(handed[0] ?? "").includes("WTF Tokens?") && plain(handed[1] ?? "").includes("Code"), "setWidget's first two lines are the title and legend");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -55,7 +55,9 @@ export function listTranscripts(cloneDir: string, sinceMs: number, root = projec
 			if (fs.existsSync(subagents)) walk(subagents);
 		}
 	}
-	return [...new Set(out)].filter(f => fs.statSync(f).mtimeMs >= sinceMs);
+	return [...new Set(out)].filter(f => {
+		try { return fs.statSync(f).mtimeMs >= sinceMs; } catch { return false; }
+	});
 }
 
 function cwdByMessageId(file: string): Map<string, string> {
@@ -81,13 +83,21 @@ export function collectSessionCost(opts: { cloneDir: string; worktree: string; s
 	const home = opts.home ?? os.homedir();
 	const spellings = [opts.worktree];
 	if (opts.worktree.startsWith(home + path.sep)) spellings.push("~" + opts.worktree.slice(home.length));
-	const mentions = new RegExp(`(?:${spellings.map(escapeRegExp).join("|")})(?=[${escapeRegExp(path.sep)}\\s'"]|$)`);
+	const mentions = new RegExp(`(?:${spellings.map(escapeRegExp).join("|")})(?![A-Za-z0-9._-])`);
 	const reaches = (i: Interaction) => i.files.some(f => under(f.path)) || i.commands.some(c => mentions.test(c));
 	const total: SessionCost = { transcripts: 0, turns: 0, costUsd: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+	// A resumed session's new transcript repeats earlier messages.
+	const seen = new Set<string>();
 	for (const { file, interactions } of parsed) {
 		if (folded.has(canonicalTranscriptPath(file))) continue;
 		const cwds = cwdByMessageId(file);
-		const counted = interactions.filter(i => (i.messageId !== undefined && under(cwds.get(i.messageId))) || reaches(i));
+		const counted = interactions.filter(i => {
+			if (!((i.messageId !== undefined && under(cwds.get(i.messageId))) || reaches(i))) return false;
+			if (i.messageId === undefined) return true;
+			if (seen.has(i.messageId)) return false;
+			seen.add(i.messageId);
+			return true;
+		});
 		if (counted.length === 0) continue;
 		total.transcripts++;
 		for (const i of counted) {
@@ -113,11 +123,13 @@ export function readPrReview(dir: string, branch: string): PrReview | null {
 	if (!fs.existsSync(dir)) return null;
 	const runs: { utc: string; findings: number }[] = [];
 	let unreadableLogs = 0;
+	const ours = new RegExp(`^${escapeRegExp(branch)}-\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}Z-\\d+\\.json$`);
 	for (const name of fs.readdirSync(dir)) {
-		if (!name.startsWith(branch + "-") || !name.endsWith(".json")) continue;
+		if (!ours.test(name)) continue;
 		let log: any;
 		try { log = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8")); } catch { unreadableLogs++; continue; }
-		if (log?.branch !== branch || log.status !== "reviewed" || !Array.isArray(log.findings)) continue;
+		if (log?.branch !== branch || log.status !== "reviewed") continue;
+		if (!Array.isArray(log.findings) || typeof log.utc !== "string") { unreadableLogs++; continue; }
 		runs.push({ utc: String(log.utc), findings: log.findings.length });
 	}
 	runs.sort((x, y) => x.utc.localeCompare(y.utc));
@@ -126,7 +138,7 @@ export function readPrReview(dir: string, branch: string): PrReview | null {
 
 export interface TestRuns { runs: number; suiteRuns: number; failedSuiteRuns: number; reruns: number; unreadableLines: number }
 
-export function readTestRuns(file: string): TestRuns | null {
+export function readTestRuns(file: string, branch: string): TestRuns | null {
 	if (!fs.existsSync(file)) return null;
 	const out: TestRuns = { runs: 0, suiteRuns: 0, failedSuiteRuns: 0, reruns: 0, unreadableLines: 0 };
 	const seen = new Set<string>();
@@ -134,7 +146,9 @@ export function readTestRuns(file: string): TestRuns | null {
 		if (!line.trim()) continue;
 		let run: any;
 		try { run = JSON.parse(line); } catch { out.unreadableLines++; continue; }
-		if (!Array.isArray(run?.suites)) { out.unreadableLines++; continue; }
+		if (typeof run?.branch !== "string" || !Array.isArray(run.suites)
+			|| !run.suites.every((s: any) => typeof s?.name === "string" && typeof s.ok === "boolean")) { out.unreadableLines++; continue; }
+		if (run.branch !== branch) continue;
 		out.runs++;
 		for (const s of run.suites) {
 			out.suiteRuns++;
@@ -197,7 +211,6 @@ function firstLine(err: unknown): string {
 	return err instanceof Error ? err.message.split("\n")[0] : String(err);
 }
 
-/** With `--pr`, the PR's own head: a local branch of that name may be stale or deleted. */
 function resolveHead(clone: string, branch: string, pr: number | undefined): string {
 	if (pr !== undefined) {
 		sh("git", ["-C", clone, "fetch", "--quiet", "origin", `pull/${pr}/head`]);
@@ -219,12 +232,10 @@ function main(): void {
 	if (branch === "HEAD") throw new UsageError("detached HEAD: pass --branch or --pr");
 	const here = sh("git", ["rev-parse", "--show-toplevel"]);
 	const worktree = sh("git", ["rev-parse", "--abbrev-ref", "HEAD"]) === branch ? here : path.join(clone, ".claude", "worktrees", branch);
+	if (worktree === clone) throw new Error(`${branch} is checked out in the main clone, whose turns cannot be told apart from its worktrees'`);
 	const head = resolveHead(clone, branch, args.pr);
 	const base = sh("git", ["-C", clone, "merge-base", "origin/main", head]);
 	if (base === head) throw new Error(`${branch} (${head.slice(0, 7)}) is already in origin/main, so it has no changes of its own to measure`);
-	// The first own commit's parent is main as the branch was cut from it; `base` is
-	// later once main has been merged in. A rebase moves that parent, but not the
-	// author dates, so the earlier of the two bounds the transcripts read.
 	const own = sh("git", ["-C", clone, "rev-list", "--reverse", "--first-parent", `${base}..${head}`]).split("\n").filter(Boolean);
 	const cutMs = Number(sh("git", ["-C", clone, "show", "-s", "--format=%ct", `${own[0]}^`])) * 1000;
 	const authoredMs = Math.min(...sh("git", ["-C", clone, "log", "--format=%at", `${base}..${head}`]).split("\n").filter(Boolean).map(t => Number(t) * 1000));
@@ -238,7 +249,7 @@ function main(): void {
 	else if (prReview.unreadableLogs > 0) gaps.push({ field: "prReview", reason: `${prReview.unreadableLogs} run log(s) did not parse; rounds is a floor` });
 	gaps.push({ field: "prReview.costUsd", reason: "pr-review run logs do not name their lens sessions" });
 
-	const tests = readTestRuns(path.join(worktree, "tmp", "test-runs.jsonl"));
+	const tests = readTestRuns(path.join(worktree, "tmp", "test-runs.jsonl"), branch);
 	if (tests === null) gaps.push({ field: "tests", reason: "no tmp/test-runs.jsonl in the worktree" });
 	else if (tests.unreadableLines > 0) gaps.push({ field: "tests", reason: `${tests.unreadableLines} line(s) did not parse; counts are a floor` });
 

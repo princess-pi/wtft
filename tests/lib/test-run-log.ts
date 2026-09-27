@@ -7,7 +7,7 @@ import * as path from "node:path";
 
 export interface SuiteOutcome { name: string; ok: boolean }
 
-export function appendTestRun(file: string, suites: SuiteOutcome[]): void {
+export function appendTestRun(file: string, branch: string, suites: SuiteOutcome[]): void {
 	fs.mkdirSync(path.dirname(file), { recursive: true });
-	fs.appendFileSync(file, JSON.stringify({ utc: new Date().toISOString(), suites }) + "\n");
+	fs.appendFileSync(file, JSON.stringify({ utc: new Date().toISOString(), branch, suites }) + "\n");
 }

@@ -25,8 +25,13 @@ bun run pr-cost [--branch <name>] [--pr <n>] [--write-pr]
 Run it just before `pr-offer-merge`. Spend keeps growing until the merge, so a record taken at
 `pr-open` would undercount.
 
-Exit codes: 0 when the document was printed and, under `--write-pr`, written. 2 on a bad call. 1 on any other failure. `--write-pr` with no PR, or with a PR lookup that failed, exits 1 before printing anything. So
-does a head that is already in `origin/main`, which has no changes of its own to measure.
+Exit codes:
+- **0:** the document was printed and, under `--write-pr`, written.
+- **2:** a bad call, a detached HEAD with neither flag included.
+- **1:** any other failure. These exit 1 before printing anything:
+  - `--write-pr` with no PR, or with a PR lookup that failed;
+  - a head already in `origin/main`, which has no changes of its own to measure;
+  - a branch checked out in the main clone, whose turns cannot be told apart from its worktrees'.
 Every field the script cannot measure is `null`, and one `gaps[]` entry names the reason. A gap
 is never reported as zero.
 
@@ -34,11 +39,12 @@ is never reported as zero.
 
 | Key | What it holds |
 |---|---|
+| `schema` | `"wtft-pr-cost@1"` |
 | `branch`, `base`, `head`, `pr` | the branch name, its merge-base with `origin/main`, its tip, and the PR number. `pr` is `null` when the branch has no PR, and also when the lookup failed, which adds a `pr` gap |
 | `files` | `{ source, tests, docs }`: counts over `git diff --name-only base..head`. `tests/**` is tests. `docs/**` (manifests included) and every root `*.md` are docs. Everything else, except `bun.lock`, is source |
-| `sessions` | `{ transcripts, turns, costUsd, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }`: every Claude Code turn that ran in the worktree or reached into it (§3) |
+| `sessions` | `{ transcripts, turns, costUsd, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }`: every Claude Code turn that ran in the worktree or reached into it (§3), each message once |
 | `tests` | `{ runs, suiteRuns, failedSuiteRuns, reruns, unreadableLines }`: from the worktree's `tmp/test-runs.jsonl` (§4) |
-| `prReview` | `{ rounds, findings[], unreadableLogs, costUsd }`: one findings count per `reviewed` `pr-review` run log for this branch, oldest first. A run with any other status found nothing to count. `costUsd` is `null` (§5) |
+| `prReview` | `{ rounds, findings[], unreadableLogs, costUsd }`: one findings count per `reviewed` `pr-review` run log for this branch (`<branch>-<utc>-<pid>.json`, schema `pr-review/run@1`), oldest first. A run with any other status found nothing to count. A log for this branch that does not parse, or a `reviewed` one with no `findings` array or `utc` string, counts in `unreadableLogs`. `costUsd` is `null` (§5) |
 | `macroscope` | `{ rounds }`: one round per PR commit that has a Macroscope check run which concluded. A `skipped` run (a Draft) or a `cancelled` run is not a round |
 | `reconcile` | always `null` for now, with a gap (§5) |
 | `gaps[]` | `{ field, reason }`, one per field that could not be measured. It also has an entry when a log line or run log did not parse, since the count is then a floor |
@@ -55,7 +61,11 @@ A main-clone turn that touches no worktree, such as a merge, a cleanup or a stat
 belongs to no branch and is left out. So is a text-only turn between two tool calls that reach in.
 The record is a floor.
 
-A turn that reaches into two worktrees counts in both records.
+A turn that reaches into two worktrees counts in both records. Within one record, a message counts
+once, even when a resumed session's transcript repeats it.
+
+A command names the worktree when the path is not followed by another path-name character, so
+`cd <worktree>;` counts and `<worktree>-else` does not.
 
 - **Transcripts read:** every `*.jsonl` in each `~/.claude/projects` directory named for this
   clone or one of its worktrees, plus every transcript under a session's `subagents/`, at any
@@ -81,7 +91,9 @@ would put a repo-process feature into the tool's public surface.
 ## 4. Test runs
 
 `bun run test` (`tests/run.ts`) appends one line per run to `tmp/test-runs.jsonl` in the
-checkout it runs in: `{ utc, suites: [{ name, ok }] }`. `tmp/` is gitignored, and the file goes
+checkout it runs in: `{ utc, branch, suites: [{ name, ok }] }`. The reader counts only lines
+whose `branch` is the one measured. A line that does not parse, or has no `branch` or a suite with
+no `name` or `ok`, counts in `unreadableLines`. `tmp/` is gitignored, and the file goes
 when `pr-cleanup` removes the worktree. So the record must be taken before cleanup, which §1
 already requires.
 
@@ -108,14 +120,17 @@ already requires.
 - A worktree that no turn reached gives `null`.
 - A folded transcript is not counted twice.
 - `pr-review` logs are read per branch, and a missing directory is a gap, not zero.
-- `tests/run.ts` appends its line, and the reader derives `reruns`.
+- The line writer `tests/run.ts` calls (`appendTestRun`) appends one line per run. The reader
+  derives `reruns`, skips another branch's lines, and counts torn or malformed lines.
+- A message repeated across two transcripts counts once. A missing projects directory lists nothing.
+- An unparseable or malformed `pr-review` log for this branch is counted, and another branch's is not.
 
 Closer (#277): the next three merged PRs carry the block in their bodies.
 
 ## 7. Baseline
 
 Taken 2026-09-27 with `bun run pr-cost --pr <n>` on merged PRs. The `tests` field is `null` for
-all four, because their worktrees are gone.
+all four, because they were built before `tests/run.ts` wrote the log.
 
 | PR | Branch | Sessions USD | Turns | Files src / tests / docs | pr-review findings per round | Macroscope rounds |
 |---|---|---:|---:|---|---|---:|

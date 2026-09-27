@@ -4,7 +4,7 @@
  *   and aggregates the exit codes.
  */
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -202,7 +202,8 @@ try {
 } catch { /* the order hint is an optimisation; a run never fails over it */ }
 
 try {
-	appendTestRun(TEST_RUNS_FILE, results.map(r => ({ name: r.name, ok: r.ok })));
+	const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" }).trim();
+	appendTestRun(TEST_RUNS_FILE, branch, results.map(r => ({ name: r.name, ok: r.ok })));
 } catch (err) {
 	// A run never fails over it, but pr-cost reads this file, so say it is short.
 	console.error(`${RED}could not append to ${TEST_RUNS_FILE}: ${err instanceof Error ? err.message : String(err)}${RESET}`);

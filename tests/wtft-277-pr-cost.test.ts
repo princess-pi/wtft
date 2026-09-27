@@ -70,9 +70,11 @@ const a = write(cloneDir, "a.jsonl", [
 	turn("m9", T0 + 6000, clone, 256, [{ type: "tool_use", name: "Bash", input: { command: `cd ${worktree} && bun run test` } }]),
 	turn("m10", T0 + 7000, clone, 512, [{ type: "tool_use", name: "Edit", input: { file_path: path.join(worktree, "pr-cost.ts"), old_string: "a", new_string: "b" } }]),
 	turn("m11", T0 + 8000, clone, 1024, [{ type: "tool_use", name: "Bash", input: { command: `cd ${worktree}-else && ls` } }]),
-	turn("m12", T0 + 9000, clone, 2048, [{ type: "tool_use", name: "Bash", input: { command: `cd ~${worktree.slice(tmp.length)} && ls` } }]),
+	turn("m12", T0 + 9000, clone, 2048, [{ type: "tool_use", name: "Bash", input: { command: `cd ~${worktree.slice(tmp.length)}; ls` } }]),
 ]);
 const sub = write(path.join(cloneDir, "a", "subagents"), "agent-1.jsonl", [turn("m4", T0 + 5000, worktree, 8)]);
+// A resumed session's new transcript repeats m2: one message, counted once.
+write(cloneDir, "a-resumed.jsonl", [user(T0 + 2000, worktree), turn("m2", T0 + 3000, worktree, 2)]);
 const nested = write(path.join(cloneDir, "a", "subagents", "workflows", "wf_1"), "agent-2.jsonl", [turn("m13", T0 + 10_000, worktree, 4096)]);
 const bTs = T0 + 60_000;
 const b = write(wtDir, "b.jsonl", [
@@ -124,11 +126,13 @@ describe("pr-review", () => {
 	log("7-thing-2026-09-20T10-00-00Z-1.json", { branch: "7-thing", utc: "2026-09-20T10-00-00Z", status: "reviewed", findings: [{}, {}, {}] });
 	log("7-thing-2026-09-20T10-09-00Z-3.json", { branch: "7-thing", utc: "2026-09-20T10-09-00Z", status: "failed", findings: [] });
 	log("7-thing-else-2026-09-20T10-00-00Z-4.json", { branch: "7-thing-else", utc: "2026-09-20T10-00-00Z", status: "reviewed", findings: [{}] });
+	fs.writeFileSync(path.join(dir, "7-thing-else-2026-09-20T10-11-00Z-6.json"), "{ truncated, and not this branch's");
+	log("7-thing-2026-09-20T10-12-00Z-7.json", { branch: "7-thing", utc: "2026-09-20T10-12-00Z", status: "reviewed", findings: "three" });
 	fs.writeFileSync(path.join(dir, "7-thing@abc.ledger.jsonl"), "{}\n");
 	fs.writeFileSync(path.join(dir, "7-thing-2026-09-20T10-10-00Z-5.json"), "{ truncated");
 
 	it("one findings count per reviewed run on this branch, oldest first; an unparseable log is counted, not dropped", () => {
-		assert.deepStrictEqual(readPrReview(dir, "7-thing"), { rounds: 2, findings: [3, 2], unreadableLogs: 1 });
+		assert.deepStrictEqual(readPrReview(dir, "7-thing"), { rounds: 2, findings: [3, 2], unreadableLogs: 2 });
 	});
 	it("a missing log directory is null, not zero", () => {
 		assert.strictEqual(readPrReview(path.join(tmp, "nowhere"), "7-thing"), null);
@@ -137,18 +141,21 @@ describe("pr-review", () => {
 
 describe("test runs", () => {
 	const log = path.join(tmp, "wt", "tmp", "test-runs.jsonl");
-	appendTestRun(log, [{ name: "a", ok: true }, { name: "b", ok: false }]);
-	appendTestRun(log, [{ name: "b", ok: true }]);
+	appendTestRun(log, "7-thing", [{ name: "a", ok: true }, { name: "b", ok: false }]);
+	appendTestRun(log, "7-thing", [{ name: "b", ok: true }]);
+	appendTestRun(log, "6-earlier", [{ name: "a", ok: true }]);
 	fs.appendFileSync(log, "{ torn\n");
+	fs.appendFileSync(log, JSON.stringify({ utc: "x", branch: "7-thing", suites: [null] }) + "\n");
 
 	it("appends one line per run", () => {
-		assert.strictEqual(fs.readFileSync(log, "utf8").trim().split("\n").length, 3, "two runs and the torn line");
+		assert.strictEqual(fs.readFileSync(log, "utf8").trim().split("\n").length, 5, "four runs and the torn line");
 	});
 	it("derives runs, suite runs, failures and reruns", () => {
-		assert.deepStrictEqual(readTestRuns(log), { runs: 2, suiteRuns: 3, failedSuiteRuns: 1, reruns: 1, unreadableLines: 1 });
+		assert.deepStrictEqual(readTestRuns(log, "7-thing"), { runs: 2, suiteRuns: 3, failedSuiteRuns: 1, reruns: 1, unreadableLines: 2 },
+			"another branch's run is not this branch's; a torn line and a malformed suite are unreadable");
 	});
 	it("no log is null, not zero", () => {
-		assert.strictEqual(readTestRuns(path.join(tmp, "none.jsonl")), null);
+		assert.strictEqual(readTestRuns(path.join(tmp, "none.jsonl"), "7-thing"), null);
 	});
 });
 

@@ -21,6 +21,18 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
   Not banner comments, not test-header novels, not glossary provenance, not counts
   in prose. A stale comment is deleted, never reworded.
 
+## One module, one seam per feature
+
+- **A feature lands in one module, behind one interface, with one in-memory test seam.** The
+  seams that exist: `decideHealth` (`extensions/lib/daemon-health.ts`), `stepTagger`
+  (`extensions/lib/session-tagger.ts`), the registry functions
+  (`extensions/lib/harness-registry.ts`), and `classifyPid` over a fake process table
+  (`extensions/lib/holder.ts`, `tests/lib/fake-process-table.ts`).
+- **Every feature PR body carries one line:** `Module: <file> · Seam: <function>, tested in <suite>`.
+  A PR that touches a second module adds `Also: <file> — <why>` for each one.
+- *Why:* before the daemon ownership refactor (spec-270), one daemon feature touched state spread across `bin/wtft-daemon.ts` and
+  several readers. That spread is where the fix-spawns-fix chains came from.
+
 ## Commands
 
 | Purpose | Command |

@@ -18,6 +18,7 @@ import { listUnrecordedSpawns } from "../extensions/lib/wtft-unrecorded.ts";
 import { readClassifiedTagFile, WTFT_TAGGER_VERSION } from "../bin/wtft.mjs";
 import { renderSpawnTree, emptyTotals } from "../extensions/lib/wtft-renderer.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+import { readTagFileWithVerdict } from "../extensions/lib/wtft-daemon-lib.ts";
 import { skip } from "./lib/skips.ts";
 const CLI_BIN_L = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
 
@@ -468,6 +469,9 @@ console.log("\nPART D — a spawning turn that found nothing leaves the queue on
 	const outputInTag = () => readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0);
 	for (let i = 0; i < 40 && outputInTag() < 100; i++) await sleep(250);
 	check(outputInTag() === 100, `D1 fixture precondition: the tag holds the root turn alone (got ${outputInTag()})`);
+	const swept = () => { try { return !readTagFileWithVerdict(tagPath).provisional.provisional; } catch { return false; } };
+	for (let i = 0; i < 40 && !swept(); i++) await sleep(250);
+	check(swept(), "D1 fixture precondition: a child scan has run and stamped the tag swept, so the turn's window was judged before the late child exists");
 
 	// Begins inside the discovery window, but is written after it closed.
 	const late = "a1000001-0000-4000-8000-0000000000d2";

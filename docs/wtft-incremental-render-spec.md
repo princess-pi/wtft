@@ -56,7 +56,7 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 | Daemon just spawned (< 60s) | Idle drop suppressed (startup grace period) |
 | Session file deleted | A `--session` process exits ("session removed") unless the transcript moved. A harness process drops that session and stays up. |
 | Session file not yet created | Waits, and writes a heartbeat when this process is the per-session daemon or the session is the one a consumer is displaying, so the widget can show "waiting for session .jsonl..." (#124). Past the wait cap, a `--session` process exits ("session never written") and a harness process drops the slot. |
-| Press `r` in `--watch` | Stops the lease holder when it is a per-session daemon (on Linux never a `--harness` one, a process that is not a daemon, or one whose cmdline cannot be read; off Linux any pid, since none can be told apart; spec-297) with SIGTERM, then SIGKILL after 2 s, and waits up to 2 s more; then spawns fresh and claims the lease for it, unless the lease holds `rebuild` or names a live daemon. `● restart failed` if the old holder outlives both waits (EPERM included) or the spawn throws |
+| Press `r` in `--watch` | Stops the lease holder when `mayStop` allows it (`docs/spec-holder.md` §2) with SIGTERM, then SIGKILL after 2 s, and waits up to 2 s more; then spawns fresh and claims the lease for it, unless the lease holds `rebuild` or names a live daemon. `● restart failed` if the old holder outlives both waits (EPERM included) or the spawn throws |
 | **New activity after idle timeout** | Pi's `agent_end` handler calls `ensureDaemonRunning`, which spawns a daemon unless it spawned one for this session before and a live process holds the lease |
 
 ## Sub-Agent Transcript Read Path (princess-pi-tools#270 / #420 / #97)
@@ -560,8 +560,7 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 | Situation | Handling |
 |---|---|
 | Daemon exits (idle timeout, 24h) | The status `docs/spec-daemon-health.md` §2 gives a dead holder; footer shows red `'r' to restart` |
-| No activity for 2m2s | Status flips to `● idle (cache expires in Nmin)`, whole minutes rounded up, then `● idle (cache emptied)`. The TTL rule: `docs/spec-daemon-health.md` §2. |
-| Local model (no cache), or no model known | Status shows `● idle (local model)` |
+| No activity for the idle threshold | An idle status (`docs/spec-daemon-health.md` §2; the texts in `docs/manifests/wtft-status.json`) |
 | User presses `r` | Daemon restarts; while the old one exits (up to 4 s) the view keeps rendering what `health` finds, and a second `r` is ignored until the restart ends; `q` or Ctrl+C then exits once it has spawned. When the claim landed, the lease names the new child at once, so that is alive (`waiting for session`, `live` or `idle`). A holder that outlives SIGKILL or may not be signalled (EPERM), or a spawn that throws, shows `● restart failed` |
 | Tag file deleted/truncated | `fs.watch` handler re-reads from zero |
 | Daemon spawned before session file exists | Status per `docs/spec-daemon-health.md` §2. The daemon polls until the file is created (#124) |

@@ -1,5 +1,5 @@
 /**
- * The holder module against an in-memory process table. docs/spec-297-holder-module.md § 5.
+ * The holder module against an in-memory process table. docs/spec-holder.md § 4.
  */
 
 import * as assert from "node:assert";

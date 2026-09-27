@@ -1,5 +1,5 @@
 /**
- * Slice 2 of docs/spec-297-holder-module.md: the daemon's own decisions go
+ * docs/spec-holder.md § 4: the daemon's own decisions go
  * through the holder module. Process-level, because `bin/wtft-daemon.ts` runs
  * at import. The in-memory cases are in wtft-297-holder.test.ts.
  */

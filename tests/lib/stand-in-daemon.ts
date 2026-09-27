@@ -1,6 +1,6 @@
 /**
  * A stand-in process whose cmdline names `wtft-daemon.mjs`, so the holder
- * module (docs/spec-297-holder-module.md § 2) classifies it as a daemon.
+ * module (docs/spec-holder.md § 2) classifies it as a daemon.
  */
 
 import * as fs from "node:fs";

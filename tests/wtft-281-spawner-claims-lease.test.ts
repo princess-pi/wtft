@@ -13,7 +13,7 @@ import { readHealthFacts } from "../extensions/lib/daemon-health.ts";
 import { spawnWtftDaemon } from "../extensions/lib/wtft-cli-shared.ts";
 import { getDaemonPidPath, restartDaemon } from "../extensions/lib/wtft-daemon-lib.ts";
 import { isolateTmpdir } from "./lib/sandbox";
-import { standInDaemonArgs } from "./lib/stand-in-daemon.ts";
+import { awaitStandIn, standInDaemonArgs } from "./lib/stand-in-daemon.ts";
 
 isolateTmpdir("spawner-claims-lease-281");
 
@@ -73,6 +73,7 @@ console.log("C1. claimLeaseForChild");
 {
 	const f = path.join(dir, "live.pid");
 	const holder = spawn(process.execPath, standInDaemonArgs("setTimeout(() => {}, 5000)"));
+	check(awaitStandIn(holder.pid!), "C1e precondition: the holder reads as a daemon");
 	fs.writeFileSync(f, String(holder.pid));
 	check(claimLeaseForChild(f, CHILD) === "busy" && fs.readFileSync(f, "utf8") === String(holder.pid), "C1e a live holder is left alone, byte for byte");
 	holder.kill("SIGKILL");

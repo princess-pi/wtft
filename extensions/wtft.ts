@@ -176,6 +176,9 @@ function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | und
 	}
 }
 
+let widgetHideCostColumns = false;
+let widgetHideTokenColumns = false;
+
 function readInteractions(ctx: any): Interaction[] {
 	_subagentUnreadable = false;
 	_tagProvisional = null;
@@ -222,6 +225,8 @@ function buildWtftLines(
 		mode?: "bucket" | "cumulative";
 		timezone?: string;
 		sessionNameSuffix?: string;
+		showCostColumns?: boolean;
+		showTokenColumns?: boolean;
 	}
 ): string[] | null {
 	const interactions = readInteractions(ctx);
@@ -230,6 +235,8 @@ function buildWtftLines(
 	return sharedBuildWtftLines(interactions, settings, {
 		...opts,
 		unit: settings.tokens ? "tokens" as const : "cost" as const,
+		showCostColumns: opts?.showCostColumns ?? !widgetHideCostColumns,
+		showTokenColumns: opts?.showTokenColumns ?? !widgetHideTokenColumns,
 	});
 }
 
@@ -243,6 +250,8 @@ function updateWtftWidget(
 		visible?: boolean;
 		mode?: "bucket" | "cumulative";
 		timezone?: string;
+		showCostColumns?: boolean;
+		showTokenColumns?: boolean;
 	}
 ) {
 	const current = getSettings(ctx);
@@ -380,6 +389,9 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				hasLimit, limit, hasWidth, width,
 				hasMode, mode, hasTimezone, timezone, pager } = opts;
 
+			if (opts.hideCostColumns) widgetHideCostColumns = true;
+			if (opts.hideTokenColumns) widgetHideTokenColumns = true;
+
 			if (forceReparse) {
 				const sessionFile = ctx.sessionManager.getSessionFile?.();
 				if (!sessionFile) {
@@ -456,10 +468,14 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				return;
 			}
 
+			const columnFlags = {
+				showCostColumns: !widgetHideCostColumns,
+				showTokenColumns: !widgetHideTokenColumns,
+			};
 			if (tokens || cost) {
 			// --cost explicitly switches back to $ units.
 			writeConfig(WTFT_CONFIG_TOOL, { tokens }, undefined, WTFT_CONFIG_DIR);
-			updateWtftWidget(ctx, pi, { visible: true });
+			updateWtftWidget(ctx, pi, { visible: true, ...columnFlags });
 
 			if (tokens) {
 				const BUDGET_MAP: Record<string, number> = {
@@ -495,7 +511,8 @@ export default function wtftExtension(pi: ExtensionAPI) {
 					limit: hasLimit ? nextLimit : 100, // Large default for pager
 					width: nextWidth,
 					mode: nextMode,
-					timezone: nextTimezone
+					timezone: nextTimezone,
+					...columnFlags,
 				});
 
 				if (!lines || lines.length === 0) {
@@ -514,7 +531,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				interval: nextInterval,
 				limit: nextLimit,
 				mode: nextMode,
-				timezone: nextTimezone
+				timezone: nextTimezone,
 			}, undefined, WTFT_CONFIG_DIR);
 
 			updateWtftWidget(ctx, pi, {
@@ -523,7 +540,8 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				width: nextWidth,
 				visible: true,
 				mode: nextMode,
-				timezone: nextTimezone
+				timezone: nextTimezone,
+				...columnFlags,
 			});
 
 			ctx.ui.notify("Token cost audit widget updated below the editor.", "info");

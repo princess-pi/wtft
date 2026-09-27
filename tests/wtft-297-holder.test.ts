@@ -33,7 +33,7 @@ describe("classifyPid", () => {
 		for (const bad of [0, -1, 1.5, Number.NaN]) assert.strictEqual(classifyPid(bad), "gone");
 	});
 
-	it("reads a daemon path only as the program or the runtime's script", () => {
+	it("reads a daemon path after inline code or another script as data", () => {
 		const t = fakeProcessTable();
 		restore = useProcessTable(t);
 		const cases: [string[], string][] = [
@@ -43,6 +43,11 @@ describe("classifyPid", () => {
 			[["/home/u/bin/wtft-daemon", "--session", "/s.jsonl"], "daemon"],
 			[["node", "--heapsnapshot-signal=SIGUSR2", "/b/wtft-daemon.mjs", "--harness", "claude"], "harness"],
 			[["/n/bun/bin/bun.exe", "--preload", "/t/inject.ts", "/b/wtft-daemon.mjs", "--session", "/s.jsonl"], "daemon"],
+			[["node", "--eval=0", "/tmp/wtft-daemon.js"], "other"],
+			[["node", "-pe", "1", "/tmp/wtft-daemon.mjs"], "other"],
+			[["bun", "run", "/b/wtft-daemon.mjs", "--session", "/s.jsonl"], "daemon"],
+			[["node20", "--conditions", "dev", "/b/wtft-daemon.mjs"], "daemon"],
+			[["node", "/Users/a/Library/Application", "Support/x/bin/wtft-daemon.mjs", "--session", "/s"], "daemon"],
 		];
 		cases.forEach(([cmdline], i) => t.add(200 + i, cmdline));
 		for (const [i, [cmdline, kind]] of cases.entries()) assert.strictEqual(classifyPid(200 + i), kind, cmdline.join(" "));

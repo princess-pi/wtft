@@ -100,21 +100,22 @@ export type HolderKind = "gone" | "daemon" | "harness" | "other" | "unverified";
 
 const DAEMON_BASENAMES = new Set(["wtft-daemon", "wtft-daemon.mjs", "wtft-daemon.js", "wtft-daemon.ts"]);
 
-const RUNTIMES = new Set(["node", "nodejs", "bun", "bun.exe"]);
-const RUNTIME_OPTIONS_WITH_VALUE = new Set(["-r", "--require", "--import", "--preload", "--loader", "--experimental-loader"]);
-const RUNTIME_OPTIONS_WITHOUT_SCRIPT = new Set(["-e", "--eval", "-p", "--print"]);
+const OPTIONS_WITH_VALUE = new Set(["-r", "--require", "--import", "--preload", "--loader", "--experimental-loader"]);
+const SCRIPT_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"]);
 
-/** The program is a daemon, or a runtime whose script is one; an argument after the script is data. */
+function isEvalOption(arg: string): boolean {
+	return /^--(eval|print)(=|$)/.test(arg) || /^-[a-zA-Z]*[ep][a-zA-Z]*$/.test(arg);
+}
+
+/** The program is a daemon, or a node or bun runs one; a daemon path after inline code or another script is data. */
 export function isDaemonCmdline(args: string[]): boolean {
-	if (args.length === 0) return false;
-	if (DAEMON_BASENAMES.has(path.basename(args[0]))) return true;
-	if (!RUNTIMES.has(path.basename(args[0]))) return false;
-	for (let i = 1; i < args.length; i++) {
+	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
-		if (RUNTIME_OPTIONS_WITHOUT_SCRIPT.has(arg)) return false;
-		if (RUNTIME_OPTIONS_WITH_VALUE.has(arg)) { i++; continue; }
-		if (arg.startsWith("-")) continue;
-		return DAEMON_BASENAMES.has(path.basename(arg));
+		if (DAEMON_BASENAMES.has(path.basename(arg))) return true;
+		if (i === 0) { if (!/^(node|nodejs|bun)/.test(path.basename(arg))) return false; continue; }
+		if (isEvalOption(arg)) return false;
+		if (OPTIONS_WITH_VALUE.has(arg)) { i++; continue; }
+		if (!arg.startsWith("-") && SCRIPT_EXTENSIONS.has(path.extname(arg))) return false;
 	}
 	return false;
 }

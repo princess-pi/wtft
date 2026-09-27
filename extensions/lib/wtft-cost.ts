@@ -319,16 +319,21 @@ export type PricingRejection = { key: string; reason: string };
 /**
  * Pure merge — reading the pricing file from disk lives in
  * wtft-pricing-config.ts so this module stays fs-free.
- * Returns one entry per surge schedule that could not be walked.
- * That card is stored with its rates and without a schedule.
+ * Returns one entry per card that could not be stored, and one per surge
+ * schedule that could not be walked. A bad rate stores nothing. A bad surge
+ * keeps the rates and drops the schedule.
  */
 export function applyUserPricing(overrides: Record<string, ModelPricing>): PricingRejection[] {
 	const rejected: PricingRejection[] = [];
+	const borrowLater: string[] = [];
 	for (const [key, pricing] of Object.entries(overrides)) {
 		if (!pricing || typeof pricing !== "object") continue;
 		const { input, output, cacheRead, cacheWrite } = pricing;
 		// Why validate: a malformed JSON entry must not poison cost math with NaN.
-		if ([input, output, cacheRead, cacheWrite].some(v => typeof v !== "number" || !isFinite(v))) continue;
+		if ([input, output, cacheRead, cacheWrite].some(v => typeof v !== "number" || !isFinite(v))) {
+			rejected.push({ key, reason: "input, output, cacheRead and cacheWrite must be finite numbers" });
+			continue;
+		}
 		const id = key.toLowerCase().trim();
 		if (pricing.surge !== undefined && pricing.surge !== null) {
 			const reason = surgeRejection(pricing.surge);
@@ -343,11 +348,17 @@ export function applyUserPricing(overrides: Record<string, ModelPricing>): Prici
 		const stored: ModelPricing = { ...pricing };
 		if (pricing.surge === null) delete stored.surge;
 		else if (stored.surge === undefined) {
-			const carried = MODEL_PRICING[id]?.surge
-				?? (id.includes("deepseek") ? MODEL_PRICING[deepSeekSiblingKey(id)]?.surge : undefined);
-			if (carried) stored.surge = carried;
+			const own = MODEL_PRICING[id]?.surge;
+			if (own) stored.surge = own;
+			else if (id.includes("deepseek")) borrowLater.push(id);
 		}
 		MODEL_PRICING[id] = stored;
+	}
+	for (const id of borrowLater) {
+		const card = MODEL_PRICING[id];
+		if (!card || card.surge !== undefined) continue;
+		const carried = MODEL_PRICING[deepSeekSiblingKey(id)]?.surge;
+		if (carried) card.surge = carried;
 	}
 	return rejected;
 }

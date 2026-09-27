@@ -24,8 +24,9 @@ export function getUserPricingPath(): string {
 /**
  * Missing/unreadable/invalid file → no-op (wtft never blocks on config;
  * per-entry validation lives in applyUserPricing).
- * A surge schedule that cannot be walked is dropped, the rates are kept,
- * and each rejection is printed on stderr.
+ * Each rejection is printed on stderr. A surge schedule that cannot be
+ * walked is dropped and the rates are kept. A rate that is not a finite
+ * number stores nothing.
  */
 export function loadUserPricing(filePath: string = getUserPricingPath()): Record<string, ModelPricing> | null {
 	try {

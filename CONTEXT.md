@@ -279,7 +279,10 @@ overlap, including one that starts at 0 on the next UTC day when this one ends
 at 1440. A lead that wraps past midnight asks whether the
 next UTC day bills that window. A user card whose `surge` cannot be walked
 keeps its rates and drops the schedule; `loadUserPricing` prints the key and
-the reason on stderr. Omitting `surge` keeps the built-in schedule. `surge: null`
+the reason on stderr. A rate that is not a finite number stores nothing, and
+the same line names the key. Omitting `surge` keeps the built-in schedule.
+A new DeepSeek id that omits `surge` borrows its sibling's schedule after the
+whole file is applied, so key order does not choose the schedule. `surge: null`
 stores the rates and turns the schedule off. An overnight window is two windows,
 each with start before end. Rendered as the SURGE Timeline badge and orange
 segments. The function that answers the multiplier is `getPeakMultiplier`: the

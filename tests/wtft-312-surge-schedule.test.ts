@@ -128,6 +128,28 @@ describe("#312 a card carries its own surge schedule", () => {
 		assert.equal(MODEL_PRICING["wrapped-window"].input, 5);
 		assert.equal(getPeakMultiplier("wrapped-window", minute(60)), 1);
 		delete MODEL_PRICING["wrapped-window"];
+
+		const badRate = applyUserPricing({
+			"bad-rate": { input: "no", output: 1, cacheRead: 1, cacheWrite: 0, surge: { multiplier: 3, windowsUtcMinutes: [[60, 120]] } } as never,
+		});
+		assert.equal(badRate.length, 1);
+		assert.match(badRate[0].reason, /finite numbers/);
+		assert.equal(MODEL_PRICING["bad-rate"], undefined);
+	});
+
+	it("borrows a sibling schedule after the whole file is applied", () => {
+		const flash = MODEL_PRICING["deepseek-v4-flash"];
+		const rates = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 };
+		const off = { ...rates, surge: null };
+		applyUserPricing({ "deepseek-v5": rates, "deepseek-v4-flash": off });
+		assert.equal(getPeakMultiplier("deepseek-v5", minute(60)), 1);
+		delete MODEL_PRICING["deepseek-v5"];
+		MODEL_PRICING["deepseek-v4-flash"] = flash;
+
+		applyUserPricing({ "deepseek-v4-flash": off, "deepseek-v6": rates });
+		assert.equal(getPeakMultiplier("deepseek-v6", minute(60)), 1);
+		delete MODEL_PRICING["deepseek-v6"];
+		MODEL_PRICING["deepseek-v4-flash"] = flash;
 	});
 
 	it("bills a 1-hour cache write from the card's input, not the surged input", () => {
@@ -252,6 +274,25 @@ describe("a surge schedule that cannot be walked is printed", () => {
 		}
 		assert.match(lines.join("\n"), /loud-surge/);
 		assert.match(lines.join("\n"), /two windows/);
+	});
+
+	it("names a card whose rates are not finite numbers", () => {
+		const tmp = path.join(os.tmpdir(), `wtft-312-bad-rate-${process.pid}.json`);
+		fs.writeFileSync(tmp, JSON.stringify({
+			"loud-rate": { input: "no", output: 1, cacheRead: 1, cacheWrite: 0 },
+		}));
+		const lines: string[] = [];
+		const orig = console.error;
+		console.error = (msg?: unknown) => { lines.push(String(msg)); };
+		try {
+			loadUserPricing(tmp);
+			assert.equal(MODEL_PRICING["loud-rate"], undefined);
+		} finally {
+			console.error = orig;
+			fs.unlinkSync(tmp);
+		}
+		assert.match(lines.join("\n"), /loud-rate/);
+		assert.match(lines.join("\n"), /finite numbers/);
 	});
 });
 

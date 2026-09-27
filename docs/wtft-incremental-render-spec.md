@@ -4,7 +4,7 @@
 
 ## Goal
 
-Provide a live-updating cost chart in wtft `--watch` mode, backed by a persistent log parser daemon that pre-classifies session entries into a harness-agnostic tag file. The TUI watches the tag file via inotify (`fs.watch`) for zero-latency updates, and monitors the daemon's health with a colored status indicator on the title line. All render paths (Pi widget, CLI non-watch, CLI `--watch`) share a single SURGE timeline rendering inside `buildWtftLines`.
+Provide a live-updating cost chart in wtft `--watch` mode, backed by a persistent log parser daemon that pre-classifies session entries into a harness-agnostic tag file. The TUI watches the tag file via inotify (`fs.watch`) for zero-latency updates, and monitors the daemon's health with a colored status indicator on the title line. All render paths (Pi widget, CLI non-watch, CLI `--watch`) share a single SURGE timeline. `buildWtftLines` calls `renderWtftChart`, which computes it.
 
 ## Architecture
 
@@ -523,9 +523,9 @@ The 24-hour timeline on the title line shows the model's surge schedule, when it
   - `⚡ SURGE APPROACHING` — within `SURGE_APPROACH_MINUTES` before the window opens (blinking orange)
   - `⚡ SURGE ENDING` — within `SURGE_ENDING_MINUTES` before billing drops to 1 (blinking green). That instant follows windows that touch or overlap, including one that starts at 0 on the next UTC day when this one ends at 1440
 
-**Unified rendering:** The timeline computation lives in `renderWtftChart`. The `model` opt selects the card:
+**Unified rendering:** The timeline computation lives in `renderWtftChart`, which `buildWtftLines` calls. The `model` opt selects the card:
 - **Pi widget**: passes `sessionCtx.model.modelId` from the session context
-- **CLI paths**: passes the model from the classified interactions
+- **CLI paths**: pass no model, so the strip uses the first classified interaction that names one
 - **A card with no surge schedule**: renders an all-green timeline with no badges
 
 ## SIGWINCH (terminal resize)

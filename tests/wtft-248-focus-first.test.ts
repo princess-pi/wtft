@@ -11,6 +11,7 @@ import { spawn } from "node:child_process";
 import { WTFT_TAGGER_VERSION } from "../extensions/lib/wtft-tagger-version.ts";
 import { waitingForDataLine, restartDaemon, getDaemonPidPath } from "../extensions/lib/wtft-daemon-lib.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+import { standInDaemonArgs } from "./lib/stand-in-daemon.ts";
 
 isolateTmpdir("248-focus-first");
 
@@ -162,7 +163,7 @@ try {
 		const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-248-r-")));
 		const session = path.join(dir, "s.jsonl");
 		fs.writeFileSync(session, turnLine("y", T0));
-		const harness = spawn(process.execPath, ["-e", "setInterval(() => {}, 1e6)", "--harness", "claude"], { stdio: "ignore" });
+		const harness = spawn(process.execPath, standInDaemonArgs("setInterval(() => {}, 1e6)", "--harness", "claude"), { stdio: "ignore" });
 		await sleep(300);
 		fs.writeFileSync(getDaemonPidPath(session), String(harness.pid));
 		const noop = path.join(dir, "noop.mjs");

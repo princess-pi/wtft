@@ -7,11 +7,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
-import { claimLeaseForChild, pidAlive } from "../extensions/lib/lease.ts";
+import { claimLeaseForChild } from "../extensions/lib/lease.ts";
+import { pidAlive } from "../extensions/lib/holder.ts";
 import { readHealthFacts } from "../extensions/lib/daemon-health.ts";
 import { spawnWtftDaemon } from "../extensions/lib/wtft-cli-shared.ts";
 import { getDaemonPidPath, restartDaemon } from "../extensions/lib/wtft-daemon-lib.ts";
 import { isolateTmpdir } from "./lib/sandbox";
+import { standInDaemonArgs } from "./lib/stand-in-daemon.ts";
 
 isolateTmpdir("spawner-claims-lease-281");
 
@@ -23,6 +25,11 @@ function check(cond: boolean, msg: string) {
 }
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lease-281-"));
+/** A stand-in's script path; its basename is the one the holder module reads as a daemon (spec-297). */
+function daemonScript(name: string, ext = "mjs"): string {
+	fs.mkdirSync(path.join(dir, name), { recursive: true });
+	return path.join(dir, name, `wtft-daemon.${ext}`);
+}
 const deadPid = (() => {
 	const child = spawn(process.execPath, ["-e", "0"]);
 	const pid = child.pid!;
@@ -65,7 +72,7 @@ console.log("C1. claimLeaseForChild");
 }
 {
 	const f = path.join(dir, "live.pid");
-	const holder = spawn(process.execPath, ["-e", "setTimeout(() => {}, 5000)"]);
+	const holder = spawn(process.execPath, standInDaemonArgs("setTimeout(() => {}, 5000)"));
 	fs.writeFileSync(f, String(holder.pid));
 	check(claimLeaseForChild(f, CHILD) === "busy" && fs.readFileSync(f, "utf8") === String(holder.pid), "C1e a live holder is left alone, byte for byte");
 	holder.kill("SIGKILL");
@@ -163,7 +170,7 @@ console.log("\nC3. a harness start that finds a live harness leaves the lease na
 console.log("\nC4. restartDaemon waits for the old per-session daemon, then spawns and claims");
 {
 	const log = path.join(dir, "c4-log.jsonl");
-	const script = path.join(dir, "c4-daemon.mjs");
+	const script = daemonScript("c4");
 	fs.writeFileSync(script,
 		"import * as fs from 'node:fs';\n" +
 		"const note = (e) => fs.appendFileSync(process.env.WTFT281_LOG, JSON.stringify({ pid: process.pid, e, t: performance.timeOrigin + performance.now() }) + '\\n');\n" +
@@ -197,7 +204,7 @@ console.log("\nC4. restartDaemon waits for the old per-session daemon, then spaw
 console.log("\nC4b. restartDaemon kills a holder that ignores SIGTERM before it spawns");
 {
 	const log = path.join(dir, "c4b-log.jsonl");
-	const script = path.join(dir, "c4b-daemon.mjs");
+	const script = daemonScript("c4b");
 	fs.writeFileSync(script,
 		"import * as fs from 'node:fs';\n" +
 		"fs.appendFileSync(process.env.WTFT281_LOG, JSON.stringify({ pid: process.pid, e: 'start', t: performance.timeOrigin + performance.now() }) + '\\n');\n" +
@@ -221,7 +228,7 @@ console.log("\nC4b. restartDaemon kills a holder that ignores SIGTERM before it 
 
 console.log("\nC4c. restartDaemon on a holder that is this process's own child: its zombie is not a live daemon");
 {
-	const script = path.join(dir, "c4c-daemon.mjs");
+	const script = daemonScript("c4c");
 	fs.writeFileSync(script, "process.on('SIGTERM', () => process.exit(0));\nsetTimeout(() => {}, 10000);\n");
 	const session = path.join(dir, "c4c-session.jsonl");
 	fs.writeFileSync(session, "");
@@ -237,7 +244,7 @@ console.log("\nC4c. restartDaemon on a holder that is this process's own child: 
 
 console.log("\nC4e. restartDaemon lets the caller's event loop run while it waits, so its own exited child is reaped on any OS");
 {
-	const script = path.join(dir, "c4e-daemon.mjs");
+	const script = daemonScript("c4e");
 	fs.writeFileSync(script, "process.on('SIGTERM', () => setTimeout(() => process.exit(0), 300));\nsetTimeout(() => {}, 10000);\n");
 	const session = path.join(dir, "c4e-session.jsonl");
 	fs.writeFileSync(session, "");
@@ -255,18 +262,7 @@ console.log("\nC4e. restartDaemon lets the caller's event loop run while it wait
 	if (leaseNow && leaseNow !== String(old.pid)) try { process.kill(Number(leaseNow), "SIGKILL"); } catch {}
 }
 
-console.log("\nC4d. restartDaemon leaves a holder it may not signal (EPERM) alone");
-if (process.getuid?.() === 0) console.log("  (skipped: root can signal pid 1)");
-else {
-	const session = path.join(dir, "c4d-session.jsonl");
-	fs.writeFileSync(session, "");
-	const lease = getDaemonPidPath(session);
-	fs.writeFileSync(lease, "1");
-	const ok = await restartDaemon(session, path.join(dir, "c4c-daemon.mjs"));
-	let leaseNow = ""; try { leaseNow = fs.readFileSync(lease, "utf8").trim(); } catch {}
-	check(!ok && leaseNow === "1", `C4d restart fails and the lease still names pid 1 (returned ${ok}, lease "${leaseNow}")`);
-	try { fs.unlinkSync(lease); } catch {}
-}
+// C4d (an EPERM holder is left alone) runs in memory: tests/wtft-297-holder.test.ts C3.
 
 console.log("\nC6. a per-session child beside a newer-version tag serves when the lease names itself");
 {
@@ -332,13 +328,13 @@ console.log("\nC9. q during an r restart in --watch exits only after the new dae
 		if (pid > 0 && pidAlive(pid)) first = pid;
 	}
 	check(first > 0, "C9 precondition: --watch spawned a daemon that holds the lease");
-	const script = path.join(dir, "c9-slow.mjs");
+	const script = daemonScript("c9", "js");
 	const termed = path.join(dir, "c9-termed");
-	fs.writeFileSync(script.replace(/mjs$/, 'cjs'), `process.on('SIGTERM', () => { require('node:fs').writeFileSync(${JSON.stringify(termed)}, ''); setTimeout(() => process.exit(0), 800); });\nsetTimeout(() => {}, 20000);\n`);
+	fs.writeFileSync(script, `process.on('SIGTERM', () => { require('node:fs').writeFileSync(${JSON.stringify(termed)}, ''); setTimeout(() => process.exit(0), 800); });\nsetTimeout(() => {}, 20000);\n`);
 	const tagsDir = path.join(dir, "wtft-tags");
 	for (let i = 0; i < 100 && !(fs.existsSync(tagsDir) && fs.readdirSync(tagsDir).some(f => f.startsWith("c9-session"))); i++) await new Promise(r => setTimeout(r, 50));
 	await new Promise(r => setTimeout(r, 1500));
-	const slow = startOrphan(script.replace(/mjs$/, "cjs"), ["--session", session]);
+	const slow = startOrphan(script, ["--session", session]);
 	try { process.kill(first, "SIGKILL"); } catch {}
 	await new Promise(r => setTimeout(r, 200));
 	fs.writeFileSync(lease, String(slow));

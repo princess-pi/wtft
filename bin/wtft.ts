@@ -338,6 +338,7 @@ export {
 }
 
 export { EXIT_PROVISIONAL, EXIT_SESSION_AMBIGUOUS } from "../extensions/lib/cli/exit-codes.ts";
+export { useProcessTable } from "../extensions/lib/holder.ts";
 
 // ---
 

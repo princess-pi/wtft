@@ -56,9 +56,10 @@ describe("#330 the chart spec is a browser page", () => {
 		const route = parseRoute("#chart-spec/spec.mdx#sample");
 		assert.equal(route.path, "chart-spec/spec.mdx");
 		assert.equal(route.frag, "sample");
-		const encoded = parseRoute("#chart-spec/other.mdx%23part");
-		assert.equal(encoded.path, "chart-spec/other.mdx");
-		assert.equal(encoded.frag, "part");
+		const encoded = parseRoute("#chart-spec/picker.html?q=a%23b");
+		assert.equal(encoded.path, "chart-spec/picker.html");
+		assert.equal(encoded.search, "?q=a%23b");
+		assert.equal(encoded.frag, "");
 	});
 
 	it("drops a frontmatter fence that is the last line", () => {

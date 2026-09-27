@@ -15,7 +15,7 @@ function fillToc(root, basePath) {
   toc.replaceChildren();
   const used = new Set();
   const items = [];
-  for (const heading of root.querySelectorAll("h2, h3")) {
+  for (const heading of root.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
     let n = 1;
     let id = headingDomId(heading.textContent, n);
     while (used.has(id)) {
@@ -24,7 +24,10 @@ function fillToc(root, basePath) {
     }
     used.add(id);
     heading.id = id;
-    items.push({ id, level: heading.tagName.toLowerCase(), text: heading.textContent.trim() });
+    const level = heading.tagName.toLowerCase();
+    if (level === "h2" || level === "h3") {
+      items.push({ id, level, text: heading.textContent.trim() });
+    }
   }
   if (items.length < 2) return;
   const list = document.createElement("ul");
@@ -133,7 +136,18 @@ function markActive(path) {
   });
 }
 
+function liveFrag(path, fallback) {
+  const route = parseRoute(location.hash);
+  if (route && route.path === path) return route.frag;
+  return fallback;
+}
+
 async function renderDoc(index, path, frag, search) {
+  if (path === inflightPath) {
+    const id = headingFrag(liveFrag(path, frag));
+    if (id) document.getElementById(id)?.scrollIntoView();
+    return;
+  }
   if (path === shownPath) {
     if (inflightPath && inflightPath !== path) {
       renderGen += 1;
@@ -146,7 +160,7 @@ async function renderDoc(index, path, frag, search) {
       if (frame && frame.getAttribute("src") !== next) frame.src = next;
       return;
     }
-    const id = headingFrag(frag);
+    const id = headingFrag(liveFrag(path, frag));
     if (id) document.getElementById(id)?.scrollIntoView();
     return;
   }
@@ -230,8 +244,6 @@ async function renderDoc(index, path, frag, search) {
     block.closest("pre").replaceWith(div);
   });
   content.replaceChildren(root);
-  shownPath = path;
-  shownKind = "md";
   document.title = pageTitle(split.meta, index.title || "Artifacts");
   if (content.querySelector(".mermaid")) {
     for (let i = 0; i < 20 && !window.mermaid; i += 1) {
@@ -242,8 +254,12 @@ async function renderDoc(index, path, frag, search) {
       content.querySelectorAll(".mermaid").forEach((el) => {
         el.textContent = "Diagram did not load.";
       });
+      if (gen !== renderGen) return;
+      shownPath = path;
+      shownKind = "md";
       if (inflightPath === path) inflightPath = "";
-      if (frag && gen === renderGen) document.getElementById(headingFrag(frag))?.scrollIntoView();
+      const id = headingFrag(liveFrag(path, frag));
+      if (id) document.getElementById(id)?.scrollIntoView();
       return;
     }
     try {
@@ -255,8 +271,12 @@ async function renderDoc(index, path, frag, search) {
       });
     }
   }
+  if (gen !== renderGen) return;
+  shownPath = path;
+  shownKind = "md";
   if (inflightPath === path) inflightPath = "";
-  if (frag && gen === renderGen) document.getElementById(headingFrag(frag))?.scrollIntoView();
+  const id = headingFrag(liveFrag(path, frag));
+  if (id) document.getElementById(id)?.scrollIntoView();
 }
 
 async function main() {

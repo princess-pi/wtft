@@ -35,18 +35,19 @@ export function pageTitle(meta, fallback) {
 }
 
 export function parseRoute(hash) {
-  let raw = hash.startsWith("#") ? hash.slice(1) : hash;
+  const raw = hash.startsWith("#") ? hash.slice(1) : hash;
+  const cut = raw.indexOf("#");
+  const pathPart = cut === -1 ? raw : raw.slice(0, cut);
+  let frag = cut === -1 ? "" : raw.slice(cut + 1);
+  const q = pathPart.indexOf("?");
+  const search = q === -1 ? "" : pathPart.slice(q);
+  let path = q === -1 ? pathPart : pathPart.slice(0, q);
   try {
-    raw = decodeURIComponent(raw);
+    path = decodeURIComponent(path);
+    if (frag) frag = decodeURIComponent(frag);
   } catch {
     return null;
   }
-  const cut = raw.indexOf("#");
-  let path = cut === -1 ? raw : raw.slice(0, cut);
-  const frag = cut === -1 ? "" : raw.slice(cut + 1);
-  const q = path.indexOf("?");
-  const search = q === -1 ? "" : path.slice(q);
-  if (q !== -1) path = path.slice(0, q);
   return { path, frag, search };
 }
 

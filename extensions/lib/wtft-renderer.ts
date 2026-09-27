@@ -509,8 +509,8 @@ export function getTerminalWidth(isWidget = false, disabledEmoji = false): numbe
 
 // SURGE TIMELINE: 24-hour bar showing normal (green) vs surge (orange) pricing
 
-export function getCurrentLocalHour(tz?: string): number {
-	const parts = getZonedParts(Date.now(), tz);
+export function getCurrentLocalHour(tz?: string, now: number = Date.now()): number {
+	const parts = getZonedParts(now, tz);
 	return parts.hour;
 }
 
@@ -603,6 +603,10 @@ export function checkSurgeProximity(at: number = Date.now(), model?: string): { 
 		if (currentUtcMinute >= start - SURGE_APPROACH_MINUTES && currentUtcMinute < start) {
 			return { status: 'approaching', multiplier };
 		}
+		if (start < SURGE_APPROACH_MINUTES) {
+			const leadFrom = 1440 - (SURGE_APPROACH_MINUTES - start);
+			if (currentUtcMinute >= leadFrom) return { status: 'approaching', multiplier };
+		}
 	}
 	return { status: undefined, multiplier: 1 };
 }
@@ -670,9 +674,8 @@ export function buildTimelineString(
 	let result = `${moon}${timelineBody}${moon}`;
 
 	const bolt = disabledEmoji ? "!!" : "⚡";
-	if (proximityStatus === 'surge') {
-		const factor = multiplier ?? 1;
-		result += ` \x1b[1;38;5;208m${bolt} SURGE ${String(factor)}x\x1b[0m`;
+	if (proximityStatus === 'surge' && multiplier !== undefined) {
+		result += ` \x1b[1;38;5;208m${bolt} SURGE ${String(multiplier)}x\x1b[0m`;
 	} else if (proximityStatus === 'approaching') {
 		result += ` \x1b[1;5;38;5;208m${bolt} SURGE APPROACHING\x1b[0m`;
 	} else if (proximityStatus === 'ending') {

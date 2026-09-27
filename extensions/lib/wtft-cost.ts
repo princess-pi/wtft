@@ -285,10 +285,6 @@ export function resolveTieredRates(
 	return rates;
 }
 
-/**
- * Pure merge — reading the pricing file from disk lives in
- * wtft-pricing-config.ts so this module stays fs-free.
- */
 function finiteNumber(value: unknown): value is number {
 	return typeof value === "number" && isFinite(value);
 }
@@ -297,15 +293,20 @@ function finiteNumber(value: unknown): value is number {
 function validSurge(surge: unknown): surge is SurgeSchedule {
 	if (!surge || typeof surge !== "object") return false;
 	const schedule = surge as SurgeSchedule;
-	if (!finiteNumber(schedule.multiplier)) return false;
+	if (!finiteNumber(schedule.multiplier) || schedule.multiplier <= 1) return false;
 	if (!Array.isArray(schedule.windowsUtcMinutes)) return false;
 	for (const pair of schedule.windowsUtcMinutes) {
 		if (!Array.isArray(pair) || !finiteNumber(pair[0]) || !finiteNumber(pair[1])) return false;
+		if (!(pair[0] >= 0 && pair[0] < pair[1] && pair[1] <= 1440)) return false;
 	}
 	if (schedule.weekendOffPeakFrom !== undefined && !finiteNumber(schedule.weekendOffPeakFrom)) return false;
 	return true;
 }
 
+/**
+ * Pure merge — reading the pricing file from disk lives in
+ * wtft-pricing-config.ts so this module stays fs-free.
+ */
 export function applyUserPricing(overrides: Record<string, ModelPricing>): void {
 	for (const [key, pricing] of Object.entries(overrides)) {
 		if (!pricing || typeof pricing !== "object") continue;
@@ -439,6 +440,7 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 	// Cache write: 1.25x input (5-min TTL), 2.00x input (1-hour TTL)
 	// Cache read: 0.10x input (Anthropic standard)
 	let inputPrice = 3.00;
+	let unpeakedInput = inputPrice;
 	let outputPrice = 15.00;
 	let cacheReadPrice = 0.30;
 	let cacheWritePrice = 3.75; // 1.25x input for 5-min TTL
@@ -448,6 +450,7 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 	const registryPricing = lookupModelPricing(model);
 	if (registryPricing) {
 		const rates = resolveTieredRates(registryPricing, usage, timestamp);
+		unpeakedInput = rates.input;
 		const peak = getPeakMultiplier(model, timestamp);
 		rates.input *= peak;
 		rates.output *= peak;
@@ -491,7 +494,7 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 	if (registryPricing) {
 		// 1h-TTL writes bill at 2x BASE INPUT (API rule), not 2x the 5m rate —
 		// Free-cache-write models stay free.
-		const cw1hPrice = cacheWritePrice === 0 ? 0 : inputPrice * 2.00;
+		const cw1hPrice = cacheWritePrice === 0 ? 0 : unpeakedInput * 2.00;
 		cacheWriteCost =
 			cw5m * (cacheWritePrice / 1000000) +
 			cw1h * (cw1hPrice / 1000000) +

@@ -21,10 +21,17 @@ export interface ManifestRates {
 	cacheWrite: number;
 }
 
+export interface ManifestSurge {
+	multiplier: number;
+	windowsUtc: string[];
+	weekendOffPeakFrom?: string;
+}
+
 export interface ManifestModel {
 	model: string;
 	/** Standard row first, then any dated windows, then any size tiers. */
 	rates: ManifestRates[];
+	surge?: ManifestSurge;
 }
 
 export interface PricingManifest {
@@ -131,10 +138,20 @@ export function buildPricingManifest(): PricingManifest {
 				+ "deepseek-flash as its own name. Only deepseek-v4-pro's dated "
 				+ "row still differs from the other three.",
 		},
-		models: Object.keys(MODEL_PRICING).sort().map(model => ({
-			model,
-			rates: ratesFor(MODEL_PRICING[model]),
-		})),
+		models: Object.keys(MODEL_PRICING).sort().map(model => {
+			const pricing = MODEL_PRICING[model];
+			const row: ManifestModel = { model, rates: ratesFor(pricing) };
+			if (pricing.surge) {
+				row.surge = {
+					multiplier: pricing.surge.multiplier,
+					windowsUtc: pricing.surge.windowsUtcMinutes.map(formatWindow),
+					...(pricing.surge.weekendOffPeakFrom !== undefined
+						? { weekendOffPeakFrom: isoInstant(pricing.surge.weekendOffPeakFrom) }
+						: {}),
+				};
+			}
+			return row;
+		}),
 	};
 }
 

@@ -85,6 +85,39 @@ describe("#312 a card carries its own surge schedule", () => {
 		applyUserPricing({ "deepseek-v5": { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } });
 		assert.equal(getPeakMultiplier("deepseek-v5", minute(60)), 2);
 		delete MODEL_PRICING["deepseek-v5"];
+
+		applyUserPricing({
+			"flat-surge": { input: 1, output: 1, cacheRead: 1, cacheWrite: 0, surge: { multiplier: 1, windowsUtcMinutes: [[60, 120]] } } as never,
+		});
+		assert.equal(MODEL_PRICING["flat-surge"], undefined);
+		applyUserPricing({
+			"wrapped-window": { input: 1, output: 1, cacheRead: 1, cacheWrite: 0, surge: { multiplier: 2, windowsUtcMinutes: [[1380, 60]] } } as never,
+		});
+		assert.equal(MODEL_PRICING["wrapped-window"], undefined);
+	});
+
+	it("bills a 1-hour cache write from the card's input, not the surged input", () => {
+		MODEL_PRICING["acme-write"] = {
+			input: 1, output: 1, cacheRead: 1, cacheWrite: 1.25,
+			surge: { multiplier: 3, windowsUtcMinutes: [[60, 120]] },
+		};
+		const write = {
+			input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0,
+			cache_creation_input_tokens: 1_000_000,
+			cache_creation: { ephemeral_1h_input_tokens: 1_000_000 },
+		};
+		assert.equal(calculateClaudeCost("acme-write", write, minute(60)), 2);
+		delete MODEL_PRICING["acme-write"];
+	});
+
+	it("warns before a window that opens in the first approach minutes after midnight", () => {
+		MODEL_PRICING["acme-midnight"] = {
+			input: 1, output: 1, cacheRead: 1, cacheWrite: 0,
+			surge: { multiplier: 2, windowsUtcMinutes: [[0, 60]] },
+		};
+		assert.equal(checkSurgeProximity(minute(1420), "acme-midnight").status, "approaching");
+		assert.equal(checkSurgeProximity(minute(1419), "acme-midnight").status, undefined);
+		delete MODEL_PRICING["acme-midnight"];
 	});
 });
 

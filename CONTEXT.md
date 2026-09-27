@@ -241,8 +241,8 @@ written so far has been wrong; `grep` is the authority.
 way that hour is billed. It resolves the day containing the instant passed to it, and the
 renderer passes `now` — so the bar describes today while the bins under it may be older.
 `checkSurgeProximity()` asks whether the day surges at all, then reads
-`SURGE_APPROACH_MINUTES` and `SURGE_ENDING_MINUTES` (both 20). Ending is the last of those
-minutes inside the window. Approaching is the same length before it opens.
+`SURGE_APPROACH_MINUTES` before a window opens, and `SURGE_ENDING_MINUTES` before it
+closes. Both are 20. Ending is the last of those minutes inside the window.
 Rendered as the SURGE Timeline badge and orange segments.
 _Avoid_: Peak pricing, rush hour, premium window
 

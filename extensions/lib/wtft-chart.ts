@@ -105,9 +105,10 @@ export function renderWtftChart(input: {
 	const sessionSuffix = opts?.sessionNameSuffix ? ` \x1b[90m...${opts.sessionNameSuffix.replace(/.jsonl$/, "").slice(-4)}\x1b[0m` : "";
 	const titleLeftFinal = titleLeft + sessionSuffix;
 	
-	const surgeHours = getSurgeLocalHours(tz, Date.now(), opts?.model);
-	const currentHour = getCurrentLocalHour(tz);
-	const proximity = checkSurgeProximity(Date.now(), opts?.model);
+	const now = Date.now();
+	const surgeHours = getSurgeLocalHours(tz, now, opts?.model);
+	const currentHour = getCurrentLocalHour(tz, now);
+	const proximity = checkSurgeProximity(now, opts?.model);
 	const timelineStr = buildTimelineString(surgeHours, currentHour, proximity.status, undefined, disabledEmoji, proximity.multiplier);
 
 	const legendItems = CATEGORY_ORDER

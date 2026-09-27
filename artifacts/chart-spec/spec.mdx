@@ -6,7 +6,7 @@ This page is the picture of that chart. The picker draws this sample under inter
 
 Picker: [picker.html](https://wtft-artifacts.princess-pi.dev/chart-spec/picker.html)
 
-<iframe src="chart-spec/picker.html" title="Chart picker" style="width:100%;height:820px;border:1px solid #444;border-radius:8px;background:#161616"></iframe>
+<iframe src="https://wtft-artifacts.princess-pi.dev/chart-spec/picker.html" title="Chart picker" style="width:100%;height:820px;border:1px solid #444;border-radius:8px;background:#161616"></iframe>
 
 ## Sample
 
@@ -107,7 +107,7 @@ Stack. Bar is incremental tokens. Recency off. One category per cell.
 
 - A token bar draws one `$` when web cost is positive and web tokens are 0, and the bar still has a free cell. These pictures omit that cell. The sample's web row has zero tokens.
 - The monotonic clamp is on the cost running-total bar. A category that already holds a cell does not shrink below that count. A token running total does not use it. These pictures use largest-remainder into the scaled cell count.
-- The legend lists every category, including ones with no spend in this sample. The sample uses plan, research, web, code, and tests.
+- The chart's legend lists every category, including ones with no spend in the session. The picker lists the categories in this sample: plan, research, web, code, and tests.
 - The caller passes width, timezone, surge, the session suffix, an other-category warning, and the cache line. Pad is applied before the chart sees the width. The picker does not draw them.
 - Padding rows out to the limit is [https://github.com/princess-pi/wtft/issues/264](https://github.com/princess-pi/wtft/issues/264). The widget's limit is a bin count, default 10. Rule lines are extra. The Pi display cap is [https://github.com/princess-pi/wtft/issues/269](https://github.com/princess-pi/wtft/issues/269). The picker prints how many lines the picture has. Time versus turns is the interval kind. The size stays in binning. The default is `1h`.
 

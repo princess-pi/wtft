@@ -4,6 +4,7 @@ const content = document.getElementById("content");
 const md = window.markdownit({ html: true, linkify: true });
 
 function hint(text) {
+  document.querySelectorAll("#nav-list a").forEach((a) => a.classList.remove("active"));
   content.replaceChildren();
   const p = document.createElement("p");
   p.className = "hint";
@@ -70,6 +71,7 @@ async function renderDoc(index, path) {
   const gen = ++renderGen;
   const doc = findDoc(index, path);
   if (!doc) {
+    document.querySelectorAll("#nav-list a").forEach((a) => a.classList.remove("active"));
     hint(`Not in docs.json: ${path}`);
     return;
   }
@@ -113,7 +115,14 @@ async function renderDoc(index, path) {
     hint(`Failed to load ${path} (${res.status})`);
     return;
   }
-  const text = await res.text();
+  let text;
+  try {
+    text = await res.text();
+  } catch (err) {
+    if (gen !== renderGen) return;
+    hint(`Failed to read ${path} (${err.message})`);
+    return;
+  }
   if (gen !== renderGen) return;
   content.innerHTML = md.render(text);
   content.querySelectorAll("pre code.language-mermaid").forEach((block) => {
@@ -122,7 +131,13 @@ async function renderDoc(index, path) {
     div.textContent = block.textContent;
     block.closest("pre").replaceWith(div);
   });
-  if (window.mermaid) window.mermaid.run({ querySelector: ".mermaid" });
+  if (content.querySelector(".mermaid")) {
+    for (let i = 0; i < 20 && !window.mermaid; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (gen !== renderGen) return;
+    }
+    if (window.mermaid) window.mermaid.run({ querySelector: ".mermaid" });
+  }
 }
 
 async function main() {
@@ -130,7 +145,13 @@ async function main() {
   if (!index) return;
   renderNav(index);
   const go = () => {
-    const path = decodeURIComponent(location.hash.slice(1));
+    let path = location.hash.slice(1);
+    try {
+      path = decodeURIComponent(path);
+    } catch {
+      hint(`Not in docs.json: ${path}`);
+      return;
+    }
     if (path) renderDoc(index, path);
   };
   window.addEventListener("hashchange", go);

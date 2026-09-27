@@ -45,15 +45,19 @@ export function listTranscripts(cloneDir: string, sinceMs: number, root = projec
 		out.push(...jsonl(dir));
 		for (const e of fs.readdirSync(dir, { withFileTypes: true })) if (e.isDirectory()) walk(path.join(dir, e.name));
 	};
-	for (const name of fs.readdirSync(root)) {
-		if (!prefixes.some(p => name === p || name.startsWith(p + "-"))) continue;
-		const dir = path.join(root, name);
-		if (!fs.statSync(dir).isDirectory()) continue;
+	// Older installs keep sessions in `<project>/sessions/`.
+	const project = (dir: string) => {
 		out.push(...jsonl(dir));
 		for (const entry of fs.readdirSync(dir)) {
+			if (entry === "sessions" && fs.statSync(path.join(dir, entry)).isDirectory()) project(path.join(dir, entry));
 			const subagents = path.join(dir, entry, "subagents");
 			if (fs.existsSync(subagents)) walk(subagents);
 		}
+	};
+	for (const name of fs.readdirSync(root)) {
+		if (!prefixes.some(p => name === p || name.startsWith(p + "-"))) continue;
+		const dir = path.join(root, name);
+		if (fs.statSync(dir).isDirectory()) project(dir);
 	}
 	return [...new Set(out)].filter(f => {
 		try { return fs.statSync(f).mtimeMs >= sinceMs; } catch { return false; }

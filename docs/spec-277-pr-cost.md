@@ -68,7 +68,8 @@ A command names the worktree when the path is not followed by another path-name 
 `cd <worktree>;` counts and `<worktree>-else` does not.
 
 - **Transcripts read:** every `*.jsonl` in each `~/.claude/projects` directory named for this
-  clone or one of its worktrees, plus every transcript under a session's `subagents/`, at any
+  clone or one of its worktrees (and in its `sessions/` subdirectory, where older installs keep
+  them), plus every transcript under a session's `subagents/`, at any
   depth (workflow agents sit one level deeper). A directory counts when its name is the clone's
   slug, or starts with it, under either slug encoding the discovery code accepts. A missing
   projects directory lists nothing.

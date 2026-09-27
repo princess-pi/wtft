@@ -76,6 +76,7 @@ const sub = write(path.join(cloneDir, "a", "subagents"), "agent-1.jsonl", [turn(
 // A resumed session's new transcript repeats m2: one message, counted once.
 write(cloneDir, "a-resumed.jsonl", [user(T0 + 2000, worktree), turn("m2", T0 + 3000, worktree, 2)]);
 const nested = write(path.join(cloneDir, "a", "subagents", "workflows", "wf_1"), "agent-2.jsonl", [turn("m13", T0 + 10_000, worktree, 4096)]);
+const legacy = write(path.join(cloneDir, "sessions"), "e.jsonl", [user(T0 + 11_000, worktree), turn("m14", T0 + 12_000, worktree, 8192)]);
 const bTs = T0 + 60_000;
 const b = write(wtDir, "b.jsonl", [
 	user(bTs, worktree),
@@ -97,10 +98,10 @@ describe("sessions", () => {
 		assert.ok(m5.claudeSubAgentFolds?.some(f => f.file === d), "m5 folds d.jsonl");
 	});
 	it("counts turns run in the worktree or reaching into it, subagent transcripts included, folded transcripts once", () => {
-		assert.strictEqual(got!.turns, 8, "m2, m3, m9, m10, m12 (~ for home), m4, m13 (nested), m5");
-		assert.strictEqual(got!.transcripts, 4, "a, agent-1, agent-2, b");
-		assert.strictEqual(got!.outputTokens, 2 + 4 + 256 + 512 + 2048 + 8 + 4096 + 16 + 32, "m7 inside m5's fold; not m11, a sibling path");
-		const expected = costOf(a, ["m2", "m3", "m9", "m10", "m12"]) + costOf(sub, ["m4"]) + costOf(nested, ["m13"]) + costOf(b, ["m5"]);
+		assert.strictEqual(got!.turns, 9, "m2, m3, m9, m10, m12 (~ for home), m4, m13 (nested), m14 (sessions/), m5");
+		assert.strictEqual(got!.transcripts, 5, "a, agent-1, agent-2, e, b");
+		assert.strictEqual(got!.outputTokens, 2 + 4 + 256 + 512 + 2048 + 8 + 4096 + 8192 + 16 + 32, "m7 inside m5's fold; not m11, a sibling path");
+		const expected = costOf(a, ["m2", "m3", "m9", "m10", "m12"]) + costOf(sub, ["m4"]) + costOf(nested, ["m13"]) + costOf(legacy, ["m14"]) + costOf(b, ["m5"]);
 		assert.ok(Math.abs(got!.costUsd - expected) < 1e-12, `${got!.costUsd} vs ${expected}`);
 		assert.ok(got!.costUsd > costOf(a, ["m2", "m3", "m9", "m10", "m12"]) + costOf(sub, ["m4"]), "fold priced in");
 	});

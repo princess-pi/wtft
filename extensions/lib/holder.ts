@@ -7,6 +7,7 @@
 import { spawn as spawnChild } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { daemonStdio } from "./daemon-log.js";
 
 export type Signal = 0 | "SIGTERM" | "SIGKILL";
 
@@ -20,7 +21,7 @@ export interface ProcessTable {
 	inspectable(): boolean;
 	/** A value that changes when the pid is reused; null when it cannot be read. */
 	startTime(pid: number): string | null;
-	/** Detached and unref'd; 0 when it failed. */
+	/** Detached and unref'd, stderr to the daemon log; 0 when it failed. */
 	spawn(command: string, args: string[], env: NodeJS.ProcessEnv): number;
 }
 
@@ -52,12 +53,15 @@ export const linuxProcessTable: ProcessTable = {
 		}
 	},
 	spawn(command, args, env) {
+		const log = daemonStdio();
 		try {
-			const child = spawnChild(command, args, { detached: true, stdio: "ignore", env });
+			const child = spawnChild(command, args, { detached: true, stdio: log.stdio, env });
 			child.unref();
 			return child.pid ?? 0;
 		} catch {
 			return 0;
+		} finally {
+			log.close();
 		}
 	},
 };

@@ -248,6 +248,10 @@ generateHarnessRegistry();
 
 /** A suite running beside a rebuild reads the old bundle or the new one, never half of one. */
 function writeAtomically(file: string, text: string, mode: number) {
+  // An unchanged bundle keeps its mtime: install-wtft dates a running daemon's build by it.
+  try {
+    if (fs.readFileSync(file, "utf8") === text && (fs.statSync(file).mode & 0o777) === mode) return;
+  } catch { /* not built yet */ }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   // Beside the repo's other scratch files, not in bin/ or pi/, where
   // pack-and-smoke refuses any untracked file. Same filesystem, so rename holds.

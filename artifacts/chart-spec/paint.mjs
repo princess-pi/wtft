@@ -325,8 +325,8 @@ export function render(opts) {
 		};
 	};
 
-	const sample = body(newestFirst[0], labels[0]);
-	const lineWidth = sample.plain.length;
+	const bodies = newestFirst.map((row, index) => body(row, labels[index]));
+	const lineWidth = Math.max(...bodies.map((drawn) => drawn.plain.length));
 	const plain = [];
 	const ansi = [];
 	const push = (text) => {
@@ -346,9 +346,8 @@ export function render(opts) {
 				if (stride) push(divider(stride, lineWidth));
 			}
 		}
-		const drawn = body(row, labels[i]);
-		plain.push(drawn.plain);
-		ansi.push(drawn.ansi);
+		plain.push(bodies[i].plain);
+		ansi.push(bodies[i].ansi);
 	}
 
 	const oldest = newestFirst[newestFirst.length - 1];

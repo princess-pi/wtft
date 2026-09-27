@@ -28,24 +28,34 @@ describe("chart spec picker", () => {
 			assert.ok(row.includes("+1.3k"));
 			assert.ok(row.includes("8.1k tok"));
 		}
+		for (const preset of Object.values(PRESETS)) {
+			assert.deepStrictEqual(render(preset).notes, []);
+			const picture = render(preset).plain.join("\n");
+			if (preset.measure === "total-tokens") assert.match(picture, /[▃▇]/);
+			else assert.match(picture, /█/);
+		}
 		const cost = render(PRESETS["cost-cumulative"]).plain.join("\n");
-		assert.match(cost, /█/);
 		assert.match(cost, /Sep-25/);
-		const tokens = render(PRESETS["tokens-cumulative"]).plain.join("\n");
-		assert.match(tokens, /[▃▇]/);
 		const turns = render({ ...PRESETS["cost-cumulative"], interval: "turns" }).plain.join("\n");
 		assert.match(turns, /Sep-25/);
 		assert.match(turns, /100t/);
 	});
+
+	function fenceUnder(spec: string, heading: string): string[] {
+		const start = spec.indexOf(`### ${heading}`);
+		assert.ok(start >= 0, heading);
+		const fence = spec.indexOf("```\n", start);
+		const end = spec.indexOf("\n```", fence + 4);
+		assert.ok(fence >= 0 && end > fence, heading);
+		return spec.slice(fence + 4, end).split("\n");
+	}
 
 	it("the spec page shows those pictures", () => {
 		const spec = fs.readFileSync(new URL("../artifacts/chart-spec/spec.mdx", import.meta.url), "utf8");
 		const page = fs.readFileSync(new URL("../artifacts/chart-spec/picker.html", import.meta.url), "utf8");
 		const paint = fs.readFileSync(new URL("../artifacts/chart-spec/paint.mjs", import.meta.url), "utf8");
 		for (const preset of Object.values(PRESETS)) {
-			for (const line of render(preset).plain) {
-				assert.ok(spec.includes(line), line);
-			}
+			assert.deepStrictEqual(fenceUnder(spec, preset.label), render(preset).plain);
 		}
 		for (const text of [spec, page, paint]) {
 			assert.equal(text.includes("dateNeedsTicks"), false);

@@ -177,7 +177,6 @@
   }
 
   function draw() {
-    for (const item of presets.querySelectorAll("button")) item.classList.remove("on");
     const picture = render(read());
     document.getElementById("law").textContent = picture.law;
     const notes = document.getElementById("notes");
@@ -199,7 +198,10 @@
     document.getElementById("count").textContent = `${picture.lineCount} lines in this picture. The widget limit counts bins.`;
   }
 
-  document.body.addEventListener("change", draw);
+  document.body.addEventListener("change", () => {
+    for (const item of presets.querySelectorAll("button")) item.classList.remove("on");
+    draw();
+  });
   apply(PRESETS["cost-cumulative"], presets.querySelector("button"));
 </script>
 </body>

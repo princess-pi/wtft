@@ -59,6 +59,7 @@ function hint(text) {
   renderGen += 1;
   shownPath = "";
   shownKind = "";
+  inflightPath = "";
   clearToc();
   document.querySelectorAll("#nav-list a").forEach((a) => a.classList.remove("active"));
   content.replaceChildren();
@@ -124,15 +125,25 @@ function findDoc(index, path) {
 let renderGen = 0;
 let shownPath = "";
 let shownKind = "";
+let inflightPath = "";
+
+function markActive(path) {
+  document.querySelectorAll("#nav-list a").forEach((a) => {
+    a.classList.toggle("active", a.dataset.path === path);
+  });
+}
 
 async function renderDoc(index, path, frag, search) {
   if (path === shownPath) {
-    renderGen += 1;
+    if (inflightPath && inflightPath !== path) {
+      renderGen += 1;
+      inflightPath = "";
+    }
+    markActive(path);
     if (shownKind === "html") {
-      if (search || frag) {
-        const frame = content.querySelector("iframe");
-        if (frame) frame.src = path + (search || "") + (frag ? "#" + frag : "");
-      }
+      const frame = content.querySelector("iframe");
+      const next = path + (search || "") + (frag ? "#" + frag : "");
+      if (frame && frame.getAttribute("src") !== next) frame.src = next;
       return;
     }
     const id = headingFrag(frag);
@@ -140,6 +151,7 @@ async function renderDoc(index, path, frag, search) {
     return;
   }
   const gen = ++renderGen;
+  inflightPath = path;
   const doc = findDoc(index, path);
   if (!doc) {
     document.querySelectorAll("#nav-list a").forEach((a) => a.classList.remove("active"));
@@ -161,6 +173,7 @@ async function renderDoc(index, path, frag, search) {
     clearToc();
     shownPath = path;
     shownKind = "html";
+    if (inflightPath === path) inflightPath = "";
     document.title = pageTitle(null, index.title || "Artifacts");
     return;
   }
@@ -177,6 +190,7 @@ async function renderDoc(index, path, frag, search) {
     content.appendChild(p);
     shownPath = path;
     shownKind = "file";
+    if (inflightPath === path) inflightPath = "";
     document.title = pageTitle(null, index.title || "Artifacts");
     return;
   }
@@ -228,6 +242,7 @@ async function renderDoc(index, path, frag, search) {
       content.querySelectorAll(".mermaid").forEach((el) => {
         el.textContent = "Diagram did not load.";
       });
+      if (inflightPath === path) inflightPath = "";
       if (frag && gen === renderGen) document.getElementById(headingFrag(frag))?.scrollIntoView();
       return;
     }
@@ -240,6 +255,7 @@ async function renderDoc(index, path, frag, search) {
       });
     }
   }
+  if (inflightPath === path) inflightPath = "";
   if (frag && gen === renderGen) document.getElementById(headingFrag(frag))?.scrollIntoView();
 }
 

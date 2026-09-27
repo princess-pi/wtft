@@ -75,7 +75,7 @@ export function rewriteHref(basePath, href, known, htmlPaths) {
   const resolved = resolveRelative(basePath, file);
   const pathOnly = resolved.split("?")[0].split("#")[0];
   const query = resolved.includes("?") ? resolved.slice(resolved.indexOf("?")).split("#")[0] : "";
-  if (known.has(pathOnly) || file.endsWith(".md") || file.endsWith(".mdx")) {
+  if (known.has(pathOnly) || pathOnly.endsWith(".md") || pathOnly.endsWith(".mdx")) {
     const html = htmlPaths && htmlPaths.has(pathOnly);
     const id = !frag ? "" : html ? frag : (frag.startsWith("doc-") ? frag : headingDomId(frag, 1));
     return "#" + pathOnly + query + (id ? "#" + id : "");

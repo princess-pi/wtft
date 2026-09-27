@@ -121,11 +121,12 @@ try {
 		fs.mkdirSync(path.dirname(session), { recursive: true });
 		fs.writeFileSync(session, "");
 		const [script] = standInDaemonArgs("setInterval(() => {}, 1000);");
-		const fake = spawn(process.execPath, [script, "--session", session], { stdio: "ignore", env, cwd: gone, detached: true });
+		const fake = spawn("node", [script, "--session", session], { stdio: "ignore", env, cwd: gone, detached: true });
 		children.push(fake);
 		check(awaitStandIn(fake.pid!), "fixture precondition: the stand-in reads as a daemon");
 		fs.rmdirSync(gone);
-		check(fs.readlinkSync(`/proc/${fake.pid}/cwd`).endsWith("(deleted)"), "fixture precondition: its cwd reads as deleted");
+		sleep(300);
+		check(fs.readlinkSync(`/proc/${fake.pid}/cwd`).endsWith("(deleted)") && classifyPid(fake.pid!) === "daemon", "fixture precondition: it still runs with its cwd deleted");
 		fs.writeFileSync(getDaemonPidPath(session), String(fake.pid));
 		const r = restart();
 		check(/Restarted: PID \d+ → fresh daemon for /.test(r.stdout), `restarted:\n${r.stdout}`);

@@ -1495,8 +1495,9 @@ handled is not listed. A --stop of a session a harness serves ends the command a
                         to serve or watch
   --restart             Stop every daemon holding a lease or a root pid file here (SIGTERM, SIGKILL after 2 s),
                         and respawn one per stopped lease holder with its own --session or --harness,
-                        claiming its lease when free; a harness holding no lease starts again on the next
-                        wtft. A holder left running, or a respawn that neither runs nor hands off within
+                        claiming its lease when free; a harness holding no lease is stopped (unless a respawn
+                        handed its session to it) and starts again on the next wtft. A holder that refuses the stop or
+                        outlives SIGKILL, or a respawn that neither runs nor hands off within
                         1 s (one wait for all), makes it exit 1. Linux only (/proc)
   --stop <session>      Drop that session; ~ and relative paths are resolved. A harness serving it (found
                         through the session's lease) keeps running. A per-session process holding a
@@ -1652,6 +1653,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   const handedTo = new Set<number>();
   const liveHarnessFor = (which: string, env: NodeJS.ProcessEnv, cwd: string | undefined): number => {
     const key = which === "claude-code" ? "claude" : which;
+    if (key !== "claude" && key !== "pi") return 0;
     return liveHolderIn(harnessPidFileFor(key, path.resolve(cwd ?? process.cwd(), harnessRoot(key, env))));
   };
   const seenPids = new Set<number>();
@@ -1712,7 +1714,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       let stopped: ReturnType<typeof stopHolderSync> | null = null;
       if (wasDaemon) {
         let environReadable = false;
-        try { fs.accessSync(`/proc/${pid}/environ`, fs.constants.R_OK); environReadable = true; } catch { /* unreadable */ }
+        try { fs.readFileSync(`/proc/${pid}/environ`); environReadable = true; } catch { /* unreadable */ }
         for (const key of ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR"]) {
           const value = procEnvValue(pid, key);
           if (value) restartEnv[key] = value;
@@ -1861,10 +1863,9 @@ if (showList || showCleanup || showRestart || stopSession) {
   if (showRestart) {
     if (pendingRespawns.length > 0) sleepMs(RESPAWN_SETTLE_MS);
     for (const r of pendingRespawns) {
-      if (pidAlive(r.childPid)) { r.settle(true); continue; }
       const servedBy = r.served();
-      if (servedBy > 0) handedTo.add(servedBy);
-      r.settle(servedBy > 0);
+      if (servedBy > 0 && servedBy !== r.childPid) handedTo.add(servedBy);
+      r.settle(pidAlive(r.childPid) || servedBy > 0);
     }
     for (const pidFile of harnessPidFiles) {
       const fullPath = path.join(pidDir, pidFile);

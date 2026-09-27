@@ -10,7 +10,7 @@ Issue: https://github.com/princess-pi/wtft/issues/274 · Module: `bin/wtft-daemo
   comes back through `daemonLaunchArgs` for its `--session`. A harness daemon holding a lease with
   no `--session` comes back as `wtft-daemon --harness <name>`, and the line reads
   `Restarted: PID n → fresh harness daemon (<name>)`. A harness found only through its root pid
-  file is stopped, not respawned: the next `wtft` or widget spawn starts it (spec-46).
+  file is stopped, not respawned: the next `wtft` or widget spawn starts it.
 - **D. A respawn counts only if, 1 s later, it is still running or a live daemon holds what it
   was started for** (the session's lease, or a root pid file for its `--harness`); a child that
   handed off and exited 0 counts. Otherwise (a tag-file `--session`, a crash at start) it is a failed respawn: its claim on the lease is
@@ -32,7 +32,7 @@ Issue: https://github.com/princess-pi/wtft/issues/274 · Module: `bin/wtft-daemo
 
 ## Roads not taken
 
-- **Respawning a root-only harness.** Kept as spec-46 has it: nothing is waiting on a harness
+- **Respawning a root-only harness.** Kept: nothing is waiting on a harness
   between readers, and the next reader starts one from the current bundle.
 - **Re-running the holder's whole argv.** Only `--harness` and `--session` are read back; a
   daemon takes no other launch argument that `--restart` should preserve.

@@ -4,7 +4,7 @@
  *   glyph, not by consuming hour 12's slot.
  */
 import * as assert from "node:assert";
-import { buildTimelineString } from "../bin/wtft.mjs";
+import { buildTimelineString } from "../extensions/lib/wtft-renderer.ts";
 
 const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";

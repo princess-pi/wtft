@@ -509,8 +509,8 @@ export function getTerminalWidth(isWidget = false, disabledEmoji = false): numbe
 
 // SURGE TIMELINE: 24-hour bar showing normal (green) vs surge (orange) pricing
 
-export function getCurrentLocalHour(tz?: string): number {
-	const parts = getZonedParts(Date.now(), tz);
+export function getCurrentLocalHour(tz?: string, now: number = Date.now()): number {
+	const parts = getZonedParts(now, tz);
 	return parts.hour;
 }
 

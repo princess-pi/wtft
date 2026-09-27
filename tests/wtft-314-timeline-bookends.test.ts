@@ -20,10 +20,12 @@ describe("#314 timeline bookends are arguments", () => {
 		const text = plain(raw);
 		assert.equal(text.startsWith("🌑"), true);
 		const sunAt = text.indexOf("☀️");
-		assert.ok(sunAt > 0);
-		const endAt = text.lastIndexOf("🌒");
-		assert.ok(endAt > sunAt);
-		assert.equal(text.slice(endAt), "🌒");
+		const left = text.slice(0, sunAt);
+		const right = text.slice(sunAt + "☀️".length);
+		const hours = (s: string) => (s.match(/─/g) ?? []).length + (s.match(/[\u{1F550}-\u{1F55B}]/gu) ?? []).length;
+		assert.equal(hours(left), 12);
+		assert.equal(hours(right.replace(/🌒$/, "")), 12);
+		assert.equal(text.endsWith("🌒"), true);
 		assert.ok(text.includes("🕐"));
 	});
 
@@ -53,6 +55,11 @@ describe("#314 timeline bookends are arguments", () => {
 		assert.equal(glyphs.end, found.end);
 		assert.equal(glyphs.noon, "☀️");
 		assert.notEqual(glyphs.start, glyphs.end);
+		const rendered = plain(buildTimelineString(
+			new Set(), 12, glyphs.start, glyphs.end, glyphs.noon,
+		));
+		assert.equal(rendered.startsWith(glyphs.start), true);
+		assert.equal(rendered.endsWith(glyphs.end), true);
 		const off = timelineGlyphs(found.now, "UTC", true);
 		assert.deepEqual(off, { start: "|", end: "|", noon: "*" });
 	});

@@ -19,7 +19,7 @@ import {
 	formatTokenCount,
 } from "./wtft-renderer.js";
 
-/** Local midnight that opens the strip's day, and local midnight 24 hours later. */
+/** Local midnight that opens the strip's day, and the next local midnight. */
 export function stripMidnights(now: number, tz?: string): { start: Date; end: Date } {
 	if (!tz) {
 		const start = new Date(now);
@@ -135,11 +135,12 @@ export function renderWtftChart(input: {
 	const sessionSuffix = opts?.sessionNameSuffix ? ` \x1b[90m...${opts.sessionNameSuffix.replace(/.jsonl$/, "").slice(-4)}\x1b[0m` : "";
 	const titleLeftFinal = titleLeft + sessionSuffix;
 	
+	const now = Date.now();
 	const isDeepSeek = (opts?.model || "").toLowerCase().includes("deepseek");
-	const surgeHours = isDeepSeek ? getSurgeLocalHours(tz) : new Set<number>();
-	const currentHour = getCurrentLocalHour(tz);
-	const proximity = isDeepSeek ? checkSurgeProximity() : { status: undefined as ReturnType<typeof checkSurgeProximity>["status"], multiplier: 1.0 };
-	const glyphs = timelineGlyphs(Date.now(), tz, disabledEmoji);
+	const surgeHours = isDeepSeek ? getSurgeLocalHours(tz, now) : new Set<number>();
+	const currentHour = getCurrentLocalHour(tz, now);
+	const proximity = isDeepSeek ? checkSurgeProximity(now) : { status: undefined as ReturnType<typeof checkSurgeProximity>["status"], multiplier: 1.0 };
+	const glyphs = timelineGlyphs(now, tz, disabledEmoji);
 	const timelineStr = buildTimelineString(
 		surgeHours, currentHour, glyphs.start, glyphs.end, glyphs.noon, proximity.status, disabledEmoji,
 	);

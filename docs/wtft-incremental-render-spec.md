@@ -489,7 +489,7 @@ The 24-hour SURGE timeline and daemon status indicator are appended inline to th
 ## Daemon Status States
 
 What triggers each state: `docs/spec-daemon-health.md` §2 and §3. The rendered text and colours:
-`docs/manifests/wtft-status.json`, shown on `docs/EXT_WTFT.html` (`#daemon-health`). Both
+`docs/manifests/wtft-status.json`, shown on `docs/wtft.html` (`#daemon-health`). Both
 surfaces render through `renderDaemonStatus`.
 
 `--watch` asks `health` while it waits for the tag file, on tag changes it reads, on `r`, and on
@@ -550,7 +550,7 @@ trigger `main()`.
 
 ## Settings Persistence (Cross-Harness Config)
 
-All WTFT settings are persisted in harness-agnostic JSON config files via the shared `extensions/lib/config.ts` module. No `.jsonl` persistence — settings survive across Pi sessions, Claude Code invocations, and machine restarts. Config hierarchy: code defaults → `~/.config/princess-pi/wtft.json` → `./.princess-pi/wtft.json` → CLI flags. Widget auto-shows on session start if a config file exists. See `EXT_WTFT.html` for the full config reference.
+All WTFT settings are persisted in harness-agnostic JSON config files via the shared `extensions/lib/config.ts` module. No `.jsonl` persistence — settings survive across Pi sessions, Claude Code invocations, and machine restarts. Config hierarchy: code defaults → `~/.config/princess-pi/wtft.json` → `./.princess-pi/wtft.json` → CLI flags. Widget auto-shows on session start if a config file exists. See `wtft.html` for the full config reference.
 
 ## SIGINT / 'q'
 

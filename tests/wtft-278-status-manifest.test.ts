@@ -1,5 +1,5 @@
 /**
- * docs/EXT_WTFT.html's daemon status list renders from
+ * docs/wtft.html's daemon status list renders from
  * docs/manifests/wtft-status.json, and that manifest is pinned to
  * renderDaemonStatus, so the page cannot describe a status the code never shows.
  */
@@ -13,7 +13,7 @@ import { renderDaemonStatus } from "../extensions/lib/wtft-daemon-lib.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const MANIFEST_PATH = path.join(REPO, "docs", "manifests", "wtft-status.json");
-const DOC_PATH = path.join(REPO, "docs", "EXT_WTFT.html");
+const DOC_PATH = path.join(REPO, "docs", "wtft.html");
 const COLORS: Record<string, string> = { green: "32", yellow: "33", red: "31", grey: "90" };
 
 interface StatusEntry {
@@ -52,7 +52,7 @@ describe("#278 the status manifest matches renderDaemonStatus", () => {
 	});
 });
 
-describe("#278 EXT_WTFT.html renders from manifests, not by hand", () => {
+describe("#278 wtft.html renders from manifests, not by hand", () => {
 	const doc = fs.readFileSync(DOC_PATH, "utf8");
 
 	it("fetches the status manifest into the status list", () => {
@@ -70,7 +70,7 @@ describe("#278 EXT_WTFT.html renders from manifests, not by hand", () => {
 
 	it("hand-writes no status text the manifest owns", () => {
 		for (const s of manifest.statuses) {
-			assert.ok(!doc.includes(`● ${s.text}</span>`), `EXT_WTFT.html still hand-lists "${s.text}"`);
+			assert.ok(!doc.includes(`● ${s.text}</span>`), `wtft.html still hand-lists "${s.text}"`);
 		}
 	});
 
@@ -79,7 +79,7 @@ describe("#278 EXT_WTFT.html renders from manifests, not by hand", () => {
 		const named = [...doc.matchAll(/<code class="wtft-status">([^<]+)<\/code>/g)].map(m => m[1]);
 		assert.ok(named.length > 0, "no status names marked");
 		for (const n of named) {
-			assert.ok(texts.some(t => t === n || t.startsWith(`${n} (`)), `EXT_WTFT.html names "${n}", which is not in the manifest`);
+			assert.ok(texts.some(t => t === n || t.startsWith(`${n} (`)), `wtft.html names "${n}", which is not in the manifest`);
 		}
 	});
 

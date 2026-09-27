@@ -145,7 +145,7 @@ const mockPiEntry = {
 				type: "toolCall",
 				name: "bash",
 				arguments: {
-					command: "cat docs/EXT_WTFT.html"
+					command: "cat docs/wtft.html"
 				}
 			}
 		],
@@ -161,7 +161,7 @@ const parsed = parseEntryToInteraction(mockPiEntry);
 try {
 	assert.ok(parsed, "Parsed interaction must not be null");
 	assert.strictEqual(parsed.files.length, 1, "Must extract 1 file read from Pi bash cat command");
-	assert.strictEqual(parsed.files[0].path, "docs/EXT_WTFT.html", "Extracted path must be docs/EXT_WTFT.html");
+	assert.strictEqual(parsed.files[0].path, "docs/wtft.html", "Extracted path must be docs/wtft.html");
 	assert.strictEqual(parsed.files[0].action, "read", "Action must be read");
 	
 	const classification = classifyInteraction(parsed);
@@ -405,7 +405,7 @@ try {
 // ---
 // MANIFEST/PARSER ALIGNMENT GATE (#160)
 //
-// docs/manifests/wtft-cmd.json is what drives --help, --why, and EXT_WTFT.html — it is the
+// docs/manifests/wtft-cmd.json is what drives --help, --why, and wtft.html — it is the
 // one place a user or agent reads to learn what parseInterval accepts. #160 happened because
 // parseInterval grew a turn unit (#121) and nobody updated the manifest's -i entry to match;
 // nothing failed, because nothing checked. This test is that check, and it is deliberately

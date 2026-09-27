@@ -461,7 +461,7 @@ nothing gates it"). Not fixed here: Step 5 forbids production-code changes, and 
 Pass performed 2026-08-10T17:20Z against the code at `f67425c` (Code Approved). Scope was
 **file-level**: every file the branch touched was audited whole, plus every readable surface
 that describes them — `docs/manifests/wtft-cmd.json` (drives `--help`, `--why` and the HTML
-docs), `docs/adding-a-harness.md`, `docs/EXT_WTFT.html`, `CONTEXT.md`, module docstrings,
+docs), `docs/adding-a-harness.md`, `docs/wtft.html`, `CONTEXT.md`, module docstrings,
 test header comments, and the rendered CLI output itself.
 
 Two passes were run; the second found nothing new.
@@ -485,7 +485,7 @@ Two passes were run; the second found nothing new.
 | `docs/agents/tool-conventions.md` | "Manifest `why` entries have three fields" | the shared help renderer (`extensions/lib/merge/help.ts:44-45`) also renders a fourth, `demo` — used throughout `wtft-cmd.json`, including the entry added by this pass | no | **fixed** — fourth field documented as optional, with the ANSI-escape convention (written `\u001b[…m` in the JSON, never a raw control byte) and the rule to paste real output rather than invent it. Not a file this branch touched, but it is the doc that governs the manifest this branch edits, and it would have misled the next author. |
 | `docs/agents/build-and-toolchain.md` | states the GENERATED rule and that "tests must run against the built `.mjs`", and stops there | the two rules together produce a failure it never mentions: a suite cannot import a symbol missing from `bin/wtft.ts`'s explicit `export { … }` block, even one the file itself uses | yes — the Step-4 failure was exactly this | **fixed** — new subsection with the real error text and the `renderTokenSummary` case. The most reusable finding of this branch; it will recur for any suite reaching for an existing helper. |
 | §4 counts | step counts stated without scope | they exclude `e0d2ec4b`'s later, unsound steps | n/a | **fixed** — snapshot + non-subagent scope stated inline; `ee53e779`'s nine-step table re-verified byte-identical at Step 5 |
-| `docs/EXT_WTFT.html` | — | audited; describes the bar chart, cache-miss divider and pricing tables, and never enumerates `--tokens` summary rows, so the UNCOUNTED line contradicts nothing there | n/a | **no change**. Its own separate staleness is already tracked as #169/#167. |
+| `docs/wtft.html` | — | audited; describes the bar chart, cache-miss divider and pricing tables, and never enumerates `--tokens` summary rows, so the UNCOUNTED line contradicts nothing there | n/a | **no change**. Its own separate staleness is already tracked as #169/#167. |
 | `CONTEXT.md` | — | has only a `Language — Serve` section; no WTFT glossary exists yet to contradict | n/a | **no change** — a `Language — WTFT` section is #166's scope, and "uncounted billable" belongs in it when written |
 | `bin/*.mjs` | — | rebuilt from `.ts` at Step 4 and committed; re-verified at Step 5 that `bin/wtft.mjs` exports all five new symbols and the live CLI prints the line | yes, end to end | **no change** |
 

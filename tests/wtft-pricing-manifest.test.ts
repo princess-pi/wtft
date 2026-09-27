@@ -1,5 +1,5 @@
 /**
- * Tests for #169 — docs/EXT_WTFT.html's Model Pricing table is generated from
+ * Tests for #169 — docs/wtft.html's Model Pricing table is generated from
  * MODEL_PRICING, not hand-maintained.
  */
 
@@ -26,7 +26,7 @@ import { MODEL_PRICING } from "../extensions/lib/wtft-cost.ts";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MANIFEST_PATH = path.join(REPO, "docs", "manifests", "wtft-pricing.json");
-const DOC_PATH = path.join(REPO, "docs", "EXT_WTFT.html");
+const DOC_PATH = path.join(REPO, "docs", "wtft.html");
 
 describe("#169 the pricing manifest is committed and current", () => {
 	it("exists", () => {
@@ -180,7 +180,7 @@ describe("#169 the docs page reads the manifest instead of hardcoding rates", ()
 		// appears in the committed manifest. It is banned from the MARKUP precisely
 		// because a live number hand-typed into the page is the drift this replaced.
 		for (const stale of ["Claude Opus 4<", "Claude Sonnet 4<", "$0.0145", "as of July 2026"]) {
-			assert.ok(!html().includes(stale), `docs/EXT_WTFT.html still hardcodes: ${stale}`);
+			assert.ok(!html().includes(stale), `docs/wtft.html still hardcodes: ${stale}`);
 		}
 	});
 });

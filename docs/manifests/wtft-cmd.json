@@ -1,7 +1,7 @@
 {
   "name": "/wtft",
   "tagline": "Where The F***ing Tokens?! (WTFT) - Cost Auditing Widget",
-  "description": "Displays a horizontal, stacked TUI bar chart widget of your session's cost during each activity (Spec, Code, Plan, Agents, ...). Bars are cost totals tagged by each turn's action - every turn's cost includes the context re-send overhead regardless of category, and Prompt means pure conversational replies. For an input/output token decomposition use --tokens.",
+  "description": "Displays a horizontal, stacked TUI bar chart widget of your session's cost during each activity (Spec, Code, Plan, Agents, ...). Bars are cost totals tagged by each turn's action - every turn's cost includes the context re-send overhead regardless of category, and Prompt means pure conversational replies. For an input/output token decomposition use --tokens. Each row also prints four numbers: incremental cost, total latest cost, incremental tokens, and total latest tokens. --cost and --tokens choose the bar, not those numbers. On a narrow width the token numbers drop first, then the cost numbers, so the bar keeps at least 15 cells.",
   "why": [
     {
       "scenario": "You just finished a coding session and want to see where your token costs went — was it all spec-writing or code refactoring?",
@@ -11,9 +11,9 @@
       "result": "A stacked bar chart widget appears showing your cost during each activity (Spec, Code, Plan, Agents, ...) over 1-hour intervals. You see exactly which hours cost the most.",
       "demo": [
         "\u001b[90m── Jul-01 ──────────────────────────────────────────────────────\u001b[0m",
-        "\u001b[90m13:00\u001b[0m  \u001b[90m+$0.12\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m████\u001b[0m\u001b[38;5;173m███\u001b[0m\u001b[38;5;238m░\u001b[0m",
-        "\u001b[90m14:00\u001b[0m  \u001b[90m+$0.51\u001b[0m  \u001b[1;37m$1.74\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m██████\u001b[0m\u001b[38;5;108m█\u001b[0m\u001b[38;5;173m█\u001b[0m",
-        "\u001b[90m15:00\u001b[0m  \u001b[90m+$0.09\u001b[0m  \u001b[1;37m$1.83\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m██\u001b[0m\u001b[38;5;238m░░\u001b[0m"
+        "\u001b[90m13:00\u001b[0m  \u001b[90m+$0.12\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m████\u001b[0m\u001b[38;5;173m███\u001b[0m\u001b[38;5;238m█\u001b[0m",
+        "\u001b[90m14:00\u001b[0m  \u001b[90m+$0.51\u001b[0m  \u001b[1;37m$1.74\u001b[0m  \u001b[90m+1.5k\u001b[0m  \u001b[1;37m3.5k tok\u001b[0m  \u001b[38;5;108m██████\u001b[0m\u001b[38;5;108m█\u001b[0m\u001b[38;5;173m█\u001b[0m",
+        "\u001b[90m15:00\u001b[0m  \u001b[90m+$0.09\u001b[0m  \u001b[1;37m$1.83\u001b[0m  \u001b[90m+0.5k\u001b[0m  \u001b[1;37m4.0k tok\u001b[0m  \u001b[38;5;108m██\u001b[0m\u001b[38;5;238m██\u001b[0m"
       ]
     },
     {
@@ -25,8 +25,8 @@
       "demo": [
         "\u001b[90m── Jul-01 ───────────────────────────\u001b[0m",
         "\u001b[90m00:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$3.45\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m████\u001b[0m\u001b[38;5;173m███\u001b[0m\u001b[38;5;134m█\u001b[0m",
-        "\u001b[90m04:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$8.12\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m███████\u001b[0m\u001b[38;5;173m████\u001b[0m",
-        "\u001b[90m08:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$2.10\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m██\u001b[0m\u001b[38;5;168m░\u001b[0m\u001b[38;5;238m░\u001b[0m"
+        "\u001b[90m04:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$3.95\u001b[0m  \u001b[90m+1.5k\u001b[0m  \u001b[1;37m3.5k tok\u001b[0m  \u001b[38;5;108m███████\u001b[0m\u001b[38;5;173m████\u001b[0m",
+        "\u001b[90m08:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$4.45\u001b[0m  \u001b[90m+0.5k\u001b[0m  \u001b[1;37m4.0k tok\u001b[0m  \u001b[38;5;108m██\u001b[0m\u001b[38;5;168m█\u001b[0m\u001b[38;5;238m█\u001b[0m"
       ]
     },
     {
@@ -38,7 +38,7 @@
       "demo": [
         "\u001b[90m── Jul-01 (Claude Code) ────────────\u001b[0m",
         "\u001b[90m10:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$5.67\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m██████\u001b[0m\u001b[38;5;173m██\u001b[0m\u001b[38;5;108m█\u001b[0m",
-        "\u001b[90m11:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$2.34\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m███\u001b[0m\u001b[38;5;73m█\u001b[0m\u001b[38;5;67m█\u001b[0m"
+        "\u001b[90m11:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$6.17\u001b[0m  \u001b[90m+1.5k\u001b[0m  \u001b[1;37m3.5k tok\u001b[0m  \u001b[38;5;108m███\u001b[0m\u001b[38;5;73m█\u001b[0m\u001b[38;5;67m█\u001b[0m"
       ]
     },
     {
@@ -62,8 +62,8 @@
       "result": "A fullscreen scrollable pager overlay opens with the expanded cost timeline. (Pi TUI only — not available in the CLI.)",
       "demo": [
         "\u001b[1;36m┌── WTFT Cost Audit Scrollable Pager ──┐\u001b[0m",
-        "\u001b[90m│\u001b[0m \u001b[90m13:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m████\u001b[0m\u001b[38;5;173m███\u001b[0m\u001b[38;5;238m░\u001b[0m      \u001b[90m│\u001b[0m",
-        "\u001b[90m│\u001b[0m \u001b[90m14:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$1.74\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m██████\u001b[0m\u001b[38;5;173m█\u001b[0m      \u001b[90m│\u001b[0m",
+        "\u001b[90m│\u001b[0m \u001b[90m13:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m████\u001b[0m\u001b[38;5;173m███\u001b[0m\u001b[38;5;238m█\u001b[0m      \u001b[90m│\u001b[0m",
+        "\u001b[90m│\u001b[0m \u001b[90m14:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$1.73\u001b[0m  \u001b[90m+1.5k\u001b[0m  \u001b[1;37m3.5k tok\u001b[0m  \u001b[38;5;108m██████\u001b[0m\u001b[38;5;173m█\u001b[0m      \u001b[90m│\u001b[0m",
         "\u001b[1;36m└── ↑↓/j/k  ·  q/Esc exit (Row 1/32) ──┘\u001b[0m"
       ]
     },
@@ -97,8 +97,8 @@
       "demo": [
         "\u001b[90m/home/pi/sessions/session-abc123.jsonl\u001b[0m",
         "\u001b[90m── Jul-01 ──────────────────────────────────────────────────────\u001b[0m",
-        "\u001b[90m13:00\u001b[0m  \u001b[90m+$0.12\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m████\u001b[0m\u001b[38;5;173m███\u001b[0m\u001b[38;5;238m░\u001b[0m",
-        "\u001b[90m14:00\u001b[0m  \u001b[90m+$0.51\u001b[0m  \u001b[1;37m$1.74\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m██████\u001b[0m\u001b[38;5;108m█\u001b[0m\u001b[38;5;173m█\u001b[0m",
+        "\u001b[90m13:00\u001b[0m  \u001b[90m+$0.12\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m████\u001b[0m\u001b[38;5;173m███\u001b[0m\u001b[38;5;238m█\u001b[0m",
+        "\u001b[90m14:00\u001b[0m  \u001b[90m+$0.51\u001b[0m  \u001b[1;37m$1.74\u001b[0m  \u001b[90m+1.5k\u001b[0m  \u001b[1;37m3.5k tok\u001b[0m  \u001b[38;5;108m██████\u001b[0m\u001b[38;5;108m█\u001b[0m\u001b[38;5;173m█\u001b[0m",
         "'q' to exit, using v2.5.1"
       ]
     },
@@ -221,11 +221,11 @@
     },
     {
       "flags": "--no-cost",
-      "desc": "Hide the incremental-cost and total-cost columns. Does not change the bar. --cost still chooses a cost bar."
+      "desc": "Hide the incremental-cost and total-cost columns. Does not change the bar. --cost still chooses a cost bar. On the Pi widget the hide lasts for the rest of the process. Passing the flag again keeps them hidden. The CLI hides for that run only."
     },
     {
       "flags": "--no-tokens",
-      "desc": "Hide the incremental-token and total-token columns. Does not change the bar. --tokens still chooses a token bar."
+      "desc": "Hide the incremental-token and total-token columns. Does not change the bar. --tokens still chooses a token bar. On the Pi widget the hide lasts for the rest of the process. Passing the flag again keeps them hidden. The CLI hides for that run only."
     },
     {
       "flags": "--tokens, -C, --cost",

@@ -43,8 +43,8 @@ export function renderWtftChart(input: {
 		cacheMissBins, totalSessionCost, totalSessionTokens,
 		otherWarning, tokenFooter, cacheLine,
 	} = input;
-	const showCost = input.showCostColumns !== false;
-	const showTokens = input.showTokenColumns !== false;
+	let showCost = input.showCostColumns !== false;
+	let showTokens = input.showTokenColumns !== false;
 	const opts = { model: input.model, sessionNameSuffix: input.sessionNameSuffix };
 	const ALL_CATEGORIES = CATEGORY_ORDER;
 
@@ -68,17 +68,31 @@ export function renderWtftChart(input: {
 		return `${sign}${formatTokenCount(n)}`;
 	};
 	const totalTokText = (bin: Bin) => `${formatTokenCount(bin.column_total_tokens ?? bin.total_tokens ?? 0)} tok`;
-	const columnText: ((bin: Bin) => string)[] = [];
-	if (showCost) columnText.push(incCostText, totalCostText);
-	if (showTokens) columnText.push(incTokText, totalTokText);
-	const columnWidths = columnText.map((text) => Math.max(...displayedBins.map((bin) => text(bin).length), 1));
-	let prefixWidth = labelWidth + 2;
-	for (const columnWidth of columnWidths) prefixWidth += columnWidth + 2;
-
 	const finalWidth = Math.max(width, 40);
-	
 	const tickReserve = unit === "tokens" ? 5 : 3;
-	const maxBarWidth = finalWidth - prefixWidth - tickReserve;
+	// buildTickLine and buildTokenTickLine return null below 15 cells.
+	const minBar = 15;
+	const layoutFor = (cost: boolean, tokens: boolean) => {
+		const texts: ((bin: Bin) => string)[] = [];
+		if (cost) texts.push(incCostText, totalCostText);
+		if (tokens) texts.push(incTokText, totalTokText);
+		const widths = texts.map((text) => Math.max(...displayedBins.map((bin) => text(bin).length), 1));
+		let prefix = labelWidth + 2;
+		for (const columnWidth of widths) prefix += columnWidth + 2;
+		return { widths, prefix, bar: finalWidth - prefix - tickReserve };
+	};
+	let laid = layoutFor(showCost, showTokens);
+	if (laid.bar < minBar && showTokens) {
+		showTokens = false;
+		laid = layoutFor(showCost, false);
+	}
+	if (laid.bar < minBar && showCost) {
+		showCost = false;
+		laid = layoutFor(false, showTokens);
+	}
+	const columnWidths = laid.widths;
+	const prefixWidth = laid.prefix;
+	const maxBarWidth = Math.max(0, laid.bar);
 
 	const titleDateStr = formatMmmDdStr(displayedBins[0].dateStr);
 

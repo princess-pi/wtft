@@ -140,14 +140,12 @@ function getSettings(_ctx: any) {
 	const timezone: string | undefined = (typeof config.timezone === "string" ? config.timezone : "America/Los_Angeles") as string | undefined;
 	const disabledEmoji = isEmojiDisabled();
 	const tokens = (typeof config.tokens === "boolean" ? config.tokens : false) as boolean;
-	const hideCostColumns = config.hideCostColumns === true;
-	const hideTokenColumns = config.hideTokenColumns === true;
 
 	const width = Math.min(getTerminalWidth(true, disabledEmoji), 240);
 
 	const visible = hasConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR);
 
-	return { interval, limit, width, visible, mode, timezone, disabledEmoji, tokens, hideCostColumns, hideTokenColumns };
+	return { interval, limit, width, visible, mode, timezone, disabledEmoji, tokens };
 }
 
 // ---
@@ -177,6 +175,9 @@ function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | und
 		return undefined;
 	}
 }
+
+let widgetHideCostColumns = false;
+let widgetHideTokenColumns = false;
 
 function readInteractions(ctx: any): Interaction[] {
 	_subagentUnreadable = false;
@@ -234,8 +235,8 @@ function buildWtftLines(
 	return sharedBuildWtftLines(interactions, settings, {
 		...opts,
 		unit: settings.tokens ? "tokens" as const : "cost" as const,
-		showCostColumns: opts?.showCostColumns ?? !settings.hideCostColumns,
-		showTokenColumns: opts?.showTokenColumns ?? !settings.hideTokenColumns,
+		showCostColumns: opts?.showCostColumns ?? !widgetHideCostColumns,
+		showTokenColumns: opts?.showTokenColumns ?? !widgetHideTokenColumns,
 	});
 }
 
@@ -464,16 +465,12 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			const hideCostColumns = opts.hideCostColumns ? !current.hideCostColumns : current.hideCostColumns;
-			const hideTokenColumns = opts.hideTokenColumns ? !current.hideTokenColumns : current.hideTokenColumns;
+			if (opts.hideCostColumns) widgetHideCostColumns = true;
+			if (opts.hideTokenColumns) widgetHideTokenColumns = true;
 			const columnFlags = {
-				showCostColumns: !hideCostColumns,
-				showTokenColumns: !hideTokenColumns,
+				showCostColumns: !widgetHideCostColumns,
+				showTokenColumns: !widgetHideTokenColumns,
 			};
-			writeConfig(WTFT_CONFIG_TOOL, {
-				hideCostColumns,
-				hideTokenColumns,
-			}, undefined, WTFT_CONFIG_DIR);
 			if (tokens || cost) {
 			// --cost explicitly switches back to $ units.
 			writeConfig(WTFT_CONFIG_TOOL, { tokens }, undefined, WTFT_CONFIG_DIR);

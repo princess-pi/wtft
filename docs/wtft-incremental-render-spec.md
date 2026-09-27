@@ -22,8 +22,8 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 │  A harness process stays up. Grace: 60s after startup.  │
 │  Costs rounded to 6 decimal places before JSON write    │
 │  (eliminates float drift vs in-memory widget).          │
-│  Version-aware singleton: detects old tag file, kills    │
-│  old daemon, auto-upgrades — no manual restart needed.  │
+│  Version-aware singleton: detects old tag file, takes   │
+│  the lease; the old daemon exits once it has lost it.   │
 └────────────┬────────────────────────────────────────────┘
              │  tag file (fs.watch / inotify)
              ▼
@@ -56,7 +56,7 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 | Daemon just spawned (< 60s) | Idle drop suppressed (startup grace period) |
 | Session file deleted | A `--session` process exits ("session removed") unless the transcript moved. A harness process drops that session and stays up. |
 | Session file not yet created | Waits, and writes a heartbeat when this process is the per-session daemon or the session is the one a consumer is displaying, so the widget can show "waiting for session .jsonl..." (#124). Past the wait cap, a `--session` process exits ("session never written") and a harness process drops the slot. |
-| Press `r` in `--watch` | Stops the lease holder (on Linux never a `--harness` one; the holder is not checked to be a daemon, #289) with SIGTERM, then SIGKILL after 2 s, and waits up to 2 s more; then spawns fresh and claims the lease for it, unless the lease holds `rebuild` or names a live process. `● restart failed` if the old holder outlives both waits (EPERM included) or the spawn throws |
+| Press `r` in `--watch` | Stops the lease holder when it is a per-session daemon (on Linux never a `--harness` one, and never a process that is not a daemon; off Linux any pid, since none can be told apart; spec-297) with SIGTERM, then SIGKILL after 2 s, and waits up to 2 s more; then spawns fresh and claims the lease for it, unless the lease holds `rebuild` or names a live daemon. `● restart failed` if the old holder outlives both waits (EPERM included) or the spawn throws |
 | **New activity after idle timeout** | Pi's `agent_end` handler calls `ensureDaemonRunning`, which spawns a daemon unless it spawned one for this session before and a live process holds the lease |
 
 ## Sub-Agent Transcript Read Path (princess-pi-tools#270 / #420 / #97)

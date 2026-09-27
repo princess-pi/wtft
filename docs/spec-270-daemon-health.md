@@ -26,7 +26,7 @@ On `main` @ `c8f2071` "is the daemon alive" (R4 in the parent spec §2) has four
 
 ```ts
 export interface HealthFacts {
-  holderAlive: boolean;                    // the lease pid answers kill 0, or refuses it with EPERM
+  holderAlive: boolean;                    // the lease names a live daemon, harness or unverifiable pid (spec-297 holdsLease)
   tag: { size: number; mtimeMs: number; tail: TagRecord[] } | null;   // last 8 KiB; null: no tag
   sessionMtimeMs: number | null;           // null: no session file
   sessionModel: () => string | undefined;  // read only when an idle answer needs a TTL
@@ -51,7 +51,7 @@ inside a function, so load order does not matter. `checkDaemonHealth` is removed
 
 `alive` is the lease fact and nothing else: a live process holds this session's lease. No grace
 sets it. `ensureDaemonRunning` and `watchTagFile`'s wait for the tag file read `alive` and nothing
-else. `awaitDaemonUp` applies the same rule (`leasePid` and `pidAlive` on one lease read), and reads the
+else. `awaitDaemonUp` applies the same rule (`leasePid`, then, since spec-297, `holdsLease(classifyPid)`, on one lease read), and reads the
 current-version tag rather than `health`'s default; since spec-281, for a lease naming its own child it also needs a
 heartbeat written since the wait began, and when it sees the child exit with no other live holder on the lease it unlinks the child's claim.
 
@@ -84,7 +84,7 @@ grace windows answer `starting` rather than alive, for every reader; spec-281 th
   only by a live lease, polled once a second five times; with none by then, the view showed
   `starting...` for as long as it ran. Now the view shows what `health` finds from the first ask,
   the five-poll interval is gone, and the watchdog asks as it does at any other time. Since spec-281
-  the restart first stops the lease holder (any pid whose cmdline has no `--harness`, and off Linux any pid at all, since a harness cannot be told apart there; #289) with
+  the restart first stops the lease holder (since spec-297 only a per-session daemon on Linux, never a harness or a process that is not a daemon, and off Linux any pid at all, since none can be told apart there) with
   SIGTERM, then SIGKILL after 2 s, and waits up to 2 s more; `--watch` keeps running during that
   wait.
   A holder still alive after it, EPERM included, is left alone and `--watch` shows
@@ -98,9 +98,9 @@ grace windows answer `starting` rather than alive, for every reader; spec-281 th
   against the holder's cwd) gets its idle column from `decideHealth` over that lease, with no
   session-file read for a model: the time since `idleSinceMs`
   while idle, `0s` while live, the time since `lastHbMs` when `decideHealth` has one, else `?` (`waiting-session` included). Any
-  other row prints `?`, and so does a row where `decideHealth`'s liveness (`pidAlive`: EPERM live,
-  a zombie dead) disagrees with `--list`'s own `kill 0`. RUNNING
-  and DEAD are unchanged and are not `decideHealth`'s: they are `--list`'s own `kill 0`. Which session a
+  other row prints `?`, and so does a row where `decideHealth`'s liveness disagrees with `--list`'s
+  RUNNING/DEAD. Since spec-297 both are `holdsLease(classifyPid)` on the same lease pid, so they
+  disagree only when the process changes between the two reads. Which session a
   harness-held lease line names is #276.
 
 ## 3. Closer
@@ -121,12 +121,13 @@ grace windows answer `starting` rather than alive, for every reader; spec-281 th
 ## 4. Decisions made while building, and roads not taken
 
 - **`alive` stays `kill 0` on the lease pid (since spec-281 `pidAlive`: EPERM counts as live, a
-  zombie as dead); #266 stays standing.** #266 is `wtft -F` signalling
+  zombie as dead; since spec-297 `holdsLease(classifyPid)`, which also reads a live process that
+  is not a daemon as not alive); #266 stays standing.** #266 is `wtft -F` signalling
   a pid it has not verified is a `wtft-daemon`, off Linux. Folding a process-identity check into
   `alive` would make `alive` false for every suite that stands in for a daemon with its own pid
   (`wtft-daemon-lifecycle`, `wtft-179`, `wtft-308`), and it is a signalling question, not a
-  health one. *Road not taken:* an identity-checked `alive`, which would close #266 here at the
-  cost of rewriting those fixtures.
+  health one. *Road not taken here:* an identity-checked `alive`. spec-297 then took it, and moved
+  those suites' stand-ins to daemon-named scripts or the fake process table.
 - **The interface returns `DaemonStatus`, not `{ alive, idle, since, reason }`.** The parent
   spec's plan named a `since`; `DaemonStatus` already carries `idleSinceMs`, and
   `renderDaemonStatus` and the 179 suite read its field names. One field is added:

@@ -34,19 +34,28 @@ interface ProcessTable {
 
 | Kind | When |
 |---|---|
-| `gone` | `signal 0` says gone, or `state` says zombie. A pid that is not a positive safe integer is `gone` too |
+| `gone` | `signal 0` says gone, or `state` says zombie or gone (a process that exits between the two reads). A pid that is not a positive safe integer is `gone` too |
 | `daemon` | alive, and its cmdline names `wtft-daemon` (`.mjs`, `.js`, `.ts` or bare) without `--harness` |
 | `harness` | alive, and its cmdline names `wtft-daemon` with `--harness` |
 | `other` | alive, and its cmdline is readable and names something else. A recycled pid lands here |
 | `unverified` | alive, but its cmdline cannot be read. This is always the case off Linux |
 
-"Alive" means `signal 0` was sent or denied. EPERM is another user's live process.
+"Alive" means `signal 0` was sent or denied, and `state` does not say otherwise. EPERM is another
+user's live process.
 
-Two predicates cover every caller:
+Three rules cover every caller:
 - `holdsLease(kind)`: `daemon`, `harness` or `unverified`. A lease naming such a pid is not
-  stale. `other` is stale: that process is not the daemon the lease was written for.
-- `mayStop(kind)`: `daemon` or `unverified`. Only these get signalled. A harness is never stopped
-  on behalf of one session, and an `other` is never signalled at all.
+  stale. `other` is stale: that process is not the daemon the lease was written for. Used by
+  health, the startup wait, the spawner's claim, the per-session child's claim, the newer-tag
+  check, `--list`, `--cleanup` and the reaper.
+- `mayStop(kind)`: `daemon` or `unverified`. These are the only kinds a one-session caller
+  (`restartDaemon`, `-F`) signals. A harness is never stopped on behalf of one session.
+- **A verified daemon:** `daemon` or `harness`, with the cmdline read. The harness's own claims
+  (`holderIsLiveDaemon`, `takeOverLease`, the root claim, `pointSessionAt`) and the daemon
+  management commands act only on these. `--restart` stops a harness as well, as its `--help`
+  says. Off Linux nothing is verified, so these callers do nothing there, as before.
+
+An `other` is never signalled by anyone.
 
 `leasePid(holder)` (`/^[1-9]\d*$/`) stays the only way a lease's text becomes a pid.
 
@@ -57,7 +66,7 @@ say `gone`. If the pid is still there, it sends SIGKILL and waits up to `killMs`
 The wait yields to the event loop, so a holder that is the caller's own child gets reaped.
 `stopHolderSync` is the same without yielding, for the daemon's synchronous paths. Both return:
 - `stopped`: gone before the time ran out;
-- `denied`: the signal was refused, and nothing was waited for;
+- `denied`: a signal was refused. A refused SIGTERM returns at once; a refused SIGKILL returns after the SIGTERM wait;
 - `survived`: still there after SIGKILL.
 
 ## 4. Callers, and what changes for each
@@ -73,10 +82,10 @@ cannot be two PRs, because a branch starts only from main, and slice 2 needs sli
 | `forceRebuildSession` (`-F`) | cmdline, then bare `kill 0` wait | `classifyPid`, then `stopHolderSync` without SIGKILL | **C4:** the wait counts EPERM as alive, and an `other` holder is neither signalled nor waited for (#290 J) |
 | slice 2: the per-session child's claim | any live pid keeps the lease | `holdsLease` | **C5:** a recycled pid or a zombie no longer keeps a session unserved (#290 J) |
 | slice 2: `holderIsLiveDaemon`, `takeOverLease`, harness root claim, `pointSessionAt` | `Number()` + `kill 0` + cmdline | `leasePid` + `classifyPid` | **C6:** `0123` is not pid 123 (#290 K) |
-| slice 2: `--restart`, `--cleanup`, `--stop`; `waitUntilExited` is gone | bare `kill 0` | `classifyPid`, `stopHolderSync` | **C7:** EPERM is alive. Another user's daemon is reported "Not stopped: PID n refused the signal (EPERM); its lease is left", where it used to have its lease removed with "no live daemon found" (#290 J) |
+| slice 2: `--restart`, `--cleanup`, `--stop`; `waitUntilExited` is gone | bare `kill 0`, `parseInt` | `leasePid`, `classifyPid`; `--restart` waits with `stopHolderSync`, `--cleanup` and `--stop` signal once | **C7:** EPERM is alive. A lease or root pid file whose daemon refuses the signal is left in place, and the line says "Not stopped: PID n refused the signal (EPERM)". It used to be removed, with "no live daemon found", "Stopped" or "Cleaned up" (#290 J). A harness still running after SIGKILL keeps its root pid file too |
 | slice 2: `--list` RUNNING/DEAD | bare `kill 0` | `holdsLease` | **C8:** the column agrees with health on EPERM, zombies and recycled pids (#290 A) |
 | slice 2: `reapAndWarn` | ESRCH only | `holdsLease(classifyPid)` | **C9:** a lease naming a zombie, or a live process that is not a daemon, is unlinked |
-| slice 2: the newer-tag check at startup | `liveDaemonOrUnknown` | `holdsLease(classifyPid)` | none: the same rule under its one name |
+| slice 2: the newer-tag check at startup | `Number()` + `liveDaemonOrUnknown` | `leasePid` + `holdsLease(classifyPid)` | **C10:** a `0123` holder no longer counts, and on Linux a live pid whose cmdline cannot be read now keeps the session for the newer build |
 
 ## 5. Verification
 

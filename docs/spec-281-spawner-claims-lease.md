@@ -4,6 +4,12 @@ Issue: https://github.com/princess-pi/wtft/issues/281 (design approved by Duppy 
 builds on spec-270 S5 (`docs/spec-270-daemon-health.md`), whose `decideHealth` held both clock rules
 this removes. Vocabulary: `CONTEXT.md` (Lease, Daemon, Session).
 
+**Superseded in part by spec-297** (`docs/spec-297-holder-module.md`). `pidAlive` now lives in
+`extensions/lib/holder.ts`. The claim, health and `restartDaemon` decide with
+`holdsLease(classifyPid)` and `mayStop`, so a live process that is not a daemon holds no lease and
+is never signalled. Where this spec's liveness or restart rules disagree with spec-297 §2–§4,
+spec-297 is current.
+
 ## 1. The gap, and the change
 
 A daemon claims its session's lease as one of its first acts. Between `spawn()` returning in the
@@ -19,7 +25,7 @@ grace periods in `decideHealth`:
 the moment `spawn()` returns, through one helper:
 
 ```ts
-// extensions/lib/lease.ts
+// extensions/lib/lease.ts (pidAlive: extensions/lib/holder.ts since spec-297)
 export function pidAlive(pid: number): boolean;
 export function claimLeaseForChild(file: string, childPid: number): "claimed" | "busy";
 ```
@@ -140,7 +146,8 @@ member is a breaking change), and `renderDaemonStatus` still renders it for a ca
   and a child that exits answers `dead` and leaves no lease.
 - `tests/wtft-270-daemon-health.test.ts` has no `spawnedAt` and no tag-write-grace case, and
   asserts that a dead lease with a fresh tag answers `idle-timeout` or `not-found`. **F4a:** a
-  lease naming pid 1 (EPERM to `kill 0`) reads alive; it asserts nothing when run as root.
+  a lease naming another user's live daemon (EPERM) reads alive. Since spec-297 that holder is a
+  fake-table entry, and F4b adds a live process that is not a daemon, which reads not alive.
 - `tests/wtft-179-daemon-health-reason.test.ts` V3 is rewritten, because the grace it tested is
   gone. With a stand-in that lives 1.5 s: `waiting-session` right after the spawn with no session
   file; alive right after a spawn with one; `not-found` once the second stand-in has exited.
@@ -158,8 +165,8 @@ member is a breaking change), and `renderDaemonStatus` still renders it for a ca
   disagreed on EPERM and on zombies until the audit found it; each disagreement produced a wrong answer (a restart
   beside a live holder, a restart that failed on its own child). The restart wait is also
   async, which reaps the caller's own child where `/proc` cannot show a zombie. The
-  child's own claim, `--restart`'s wait, `-F`'s wait and `--list` still use a bare `kill 0`
-  (#290).
+  child's own claim, `--restart`'s wait, `-F`'s wait and `--list` used a bare `kill 0` until
+  spec-297 moved every one of them to the holder module.
 - **The restart does not rename over the old lease.** The approved design had both restart
   paths rename the new pid over the old, so the lease is never absent. The old daemon's own
   shutdown unlinks its lease on SIGTERM, so after it exits the lease is absent whatever the

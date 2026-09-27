@@ -316,7 +316,7 @@ function reapAndWarn() {
     try {
       const stat = fs.statSync(fullPath);
       lease = { path: fullPath, dev: stat.dev, ino: stat.ino };
-      pid = parseInt(fs.readFileSync(fullPath, "utf8").trim(), 10);
+      pid = leasePid(fs.readFileSync(fullPath, "utf8").trim());
     } catch (_) { continue; }
     if (!(pid > 0)) continue;
     const leases = leasesOf.get(pid);
@@ -1563,7 +1563,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   // Read before anything is stopped: a process that claims a lease or the root
   // after this point started after the command, and is not one it stops.
   const readPid = (file: string): number => {
-    try { return parseInt(fs.readFileSync(path.join(pidDir, file), "utf8").trim(), 10); } catch { return NaN; }
+    try { return leasePid(fs.readFileSync(path.join(pidDir, file), "utf8").trim()); } catch { return NaN; }
   };
   const leaseHolders = new Map(pidFiles.map(f => [f, readPid(f)] as const));
   let harnessPidFiles: string[] = [];
@@ -1673,8 +1673,9 @@ if (showList || showCleanup || showRestart || stopSession) {
         // A harness's --session is only the one it was started for; it drops
         // a gone session itself.
         if (kind === "harness") continue;
-        {
-          if (kind === "daemon") processTable().signal(pid, "SIGTERM");
+        if (kind === "daemon" && processTable().signal(pid, "SIGTERM") === "denied") {
+          console.log(`Not stopped: PID ${pid} refused the signal (EPERM); its lease is left`);
+        } else {
           unlinkIfNames(fullPath, pid);
           console.log(`Cleaned up: PID ${pid} — session gone: ${sessionFound}`);
         }
@@ -1687,8 +1688,9 @@ if (showList || showCleanup || showRestart || stopSession) {
       // A harness's --session is only the one it was started for; a session it
       // serves was handled above, through that session's own lease.
       if (kind === "harness") continue;
-      {
-        if (kind === "daemon") processTable().signal(pid, "SIGTERM");
+      if (kind === "daemon" && processTable().signal(pid, "SIGTERM") === "denied") {
+        console.log(`Not stopped: PID ${pid} refused the signal (EPERM); its lease is left`);
+      } else {
         unlinkIfNames(fullPath, pid);
         console.log(`Stopped: PID ${pid} — ${sessionFound}`);
       }
@@ -1753,7 +1755,13 @@ if (showList || showCleanup || showRestart || stopSession) {
       seenPids.add(pid);
       const live = procIsDaemon(pid);
       // It writes its hand-off only while its pid file still names it.
-      if (live) stopHolderSync(pid);
+      const outcome = live ? stopHolderSync(pid) : null;
+      if (outcome === "denied" || outcome === "survived") {
+        console.log(outcome === "denied" ? `Not stopped: PID ${pid} refused the signal (EPERM); harness ${pidFile} keeps its root pid file`
+          : `Not stopped: PID ${pid} is still running after SIGKILL; harness ${pidFile} keeps its root pid file`);
+        found++;
+        continue;
+      }
       unlinkIfNames(fullPath, pid);
       console.log(live ? `Stopped: PID ${pid} — harness ${pidFile}; the next wtft starts it again` : `Removed root pid file: PID ${pid} — no live daemon found, harness ${pidFile}`);
       found++;

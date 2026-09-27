@@ -48,7 +48,7 @@ Two review rounds (macroscopeapp; every finding verified against the code before
   `lastReadOffset` from whichever file won.
 - **"The daemon is running and waiting on it" is checked before it is said.**
   `awaitDaemonUp(sessionPath, child, ceilingMs)` polls state (no fixed delay):
-  `up` ⇔ a live process holds the lease (`leasePid` and `pidAlive` on one lease read), and, when that process is the
+  `up` ⇔ a live daemon holds the lease (`leasePid`, then `holdsLease(classifyPid)` since spec-297, on one lease read), and, when that process is the
   child itself (the spawner claims the lease for it at spawn, spec-281), a heartbeat record in
   the last 8 KiB of the current-version tag has `last` at or after the wait's start. A live
   holder other than the child is `up` at once: this covers the singleton case where the

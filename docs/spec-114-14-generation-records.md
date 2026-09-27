@@ -44,8 +44,8 @@ when the file grew or rotated.
   a human reading the file. A `_gen` for the tag's own session carries `s: ""`
   (`docs/wtft-tag-format.md` §2e).
 - **Reader rule:** a line carrying `s` counts only if no `_gen` record for the same `s` follows
-  it in the file. This covers interaction lines and fold records alike. A line with no `s` always
-  counts. Every tag reader applies it, including the session picker's summary, which keeps its own
+  it in the file. This covers interaction lines and fold records alike. A line with no `s` has the
+  source `""`. Every tag reader applies it, including the session picker's summary, which keeps its own
   collapse rather than importing the daemon library.
 - **A generation record is data, not a marker**, like a fold record: a tag whose last data line
   is one reads unswept.
@@ -62,6 +62,8 @@ when the file grew or rotated.
   rotated to empty, and a first read that consumed a nonempty file and produced no interaction
   lines. Either one drops the old lines for that source. A held fragment, or the one plain
   turn held back on a growth read, waits for a later poll.
+- **The session's own transcript** gets a `_gen` with `s: ""` when it is replaced or shrinks,
+  followed by an offset marker of 0 (`docs/spec-session-tagger.md` §2).
 - **Rotation is an inode change, a shrink, a same-size content-hash mismatch, a prefix-hash
   mismatch when the file grew, an attributed cost that dropped, or a lower cost on a plain
   message id already tagged.** A same-length rewrite on the same inode matches neither size nor inode.
@@ -116,17 +118,12 @@ when the file grew or rotated.
     closes is no longer looked for. The alternative is a directory scan every poll for the
     daemon's life.
 
-### Out of scope
-
-- **The tag's own transcript rotating.** Its lines carry no `s`; `docs/wtft-tag-format.md` §2e
-  gives them the source `""`.
-
 ## Verification
 
 `tests/wtft-114-generation-records.test.ts`:
 
 - **Reader:** lines and fold records before a `_gen` for their `s` are dropped; lines of another
-  `s`, and lines with no `s`, are kept; a `_gen` makes the tag read unswept.
+  `s` are kept; a `_gen` makes the tag read unswept.
 - **#114 closer:** the daemon writes N interactions from a child, the child is replaced by M
   different ones (by truncation, by a larger file under a new inode, and by a same-length rewrite
   in place), and the tag's total equals the M interactions' total plus the session's own turns.

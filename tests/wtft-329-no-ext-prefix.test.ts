@@ -27,12 +27,15 @@ describe("#329 spec pages drop the extension prefix", () => {
 		for (const file of files) {
 			if (banned.some((needle) => file.includes(needle))) hits.push(file);
 			const abs = path.join(root, file);
-			if (!fs.statSync(abs).isFile()) continue;
-			const data = fs.readFileSync(abs);
-			if (data.includes(0)) continue;
-			const text = data.toString("utf8");
+			let data: Buffer;
+			try {
+				if (!fs.statSync(abs).isFile()) continue;
+				data = fs.readFileSync(abs);
+			} catch {
+				continue;
+			}
 			for (const needle of banned) {
-				if (text.includes(needle)) hits.push(`${file} contains ${needle}`);
+				if (data.includes(Buffer.from(needle))) hits.push(`${file} contains ${needle}`);
 			}
 		}
 		assert.deepEqual(hits, []);

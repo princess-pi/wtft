@@ -283,7 +283,7 @@ File-level blast radius (`git diff ad91cdc..HEAD --name-only`): `extensions/lib/
 `tests/wtft-pricing-tiers.test.ts`, `bin/wtft.mjs`, `bin/wtft-daemon.mjs` (generated, verified
 byte-consistent with a clean `bun run build`), plus this spec. Every docstring/comment in each
 `.ts` file was swept in file order against the shipped code; `README.md`, `docs/manifests/*.json`,
-and `docs/EXT_*.html` were grepped for any Sonnet-5/`dateTiers`/pricing-figure claim.
+and the living manuals (`docs/wtft.html`, `docs/token-budget.html`) were grepped for any Sonnet-5/`dateTiers`/pricing-figure claim.
 
 | Artifact | Claim | Contradicted by | Covered by a test? | Action |
 |---|---|---|---|---|

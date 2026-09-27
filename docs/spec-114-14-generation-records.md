@@ -41,7 +41,8 @@ when the file grew or rotated.
     shorter than a session id.
 - **Generation record, a line kind of its own:** `{"_gen":{"s":"<hash>","session":"<id>"}}`. It opens
   a new generation for that source. `session` is the transcript's filename without `.jsonl`, for
-  a human reading the file.
+  a human reading the file. A `_gen` for the tag's own session carries `s: ""`
+  (`docs/wtft-tag-format.md` §2e).
 - **Reader rule:** a line carrying `s` counts only if no `_gen` record for the same `s` follows
   it in the file. This covers interaction lines and fold records alike. A line with no `s` always
   counts. Every tag reader applies it, including the session picker's summary, which keeps its own

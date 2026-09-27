@@ -173,8 +173,8 @@ Rows R4, R8, R10 and R12 are the daemon chain (#205 → #239 → #249 → #259 �
 ### 3a. Modules
 
 Six modules. Each row names the interface a caller must know, and what moves behind it. The
-**TagLog**, **Lease**, **SessionTagger**, **HarnessRegistry** and **DaemonHealth** rows name what
-S1–S6 built.
+**TagLog**, **Lease**, **SessionTagger**, **HarnessRegistry**, **DaemonHealth** and **CLI arms** rows
+name what S1–S6 built.
 
 | Module | Interface | Behind it | Replaces |
 |---|---|---|---|
@@ -202,7 +202,7 @@ first edit. Order matters: S0 is the safety net every later slice runs against.
 | **S3 SessionTagger** (built) | `extensions/lib/session-tagger.ts` with `stepTagger` and its parts; the daemon's poll calls the parts; `Slot` holds the state value | S0 passes; `tests/wtft-270-session-tagger.test.ts` replays each fixture through `stepTagger` over the sandbox corpus and compares records to the golden tag; the cases #257 (growth after a sliced scan), #263 (move changes source), #267 A–E, G, H (lookup survives restart, held turns released) as step sequences. Design, behaviour changes and closer: `docs/spec-270-session-tagger.md` |
 | **S4 HarnessRegistry** (built) | `extensions/lib/harness-registry.ts`: one record per session; `move` re-keys one entry; `handOff` is the hand-off and `parseHandOff` its read | `tests/wtft-270-harness-registry.test.ts`: serve, move (#267 F), idle, retry, drop and a hand-off round trip in memory; the existing 205/239/259/262 suites stay as the process-level check. Design and closer: `docs/spec-270-harness-registry.md` |
 | **S5 DaemonHealth** (built) | one function, `health`, which `--watch`, the widget and `ensureDaemonRunning` call; `--list`'s idle column calls `decideHealth`, and the startup wait reads `readHealthFacts` | `tests/wtft-270-daemon-health.test.ts`: hand-picked points along {lease state}, {tag tail}, {age} and {session file}, each → one answer; `wtft-179-daemon-health-reason.test.ts` unchanged in S5 (spec-281 rewrote V3). Design and closer: `docs/spec-270-daemon-health.md` |
-| **S6 CLI arms** (built) | `bin/wtft.ts` `main` dispatches to five functions in `extensions/lib/cli/` | the existing CLI suites unchanged; `bin/wtft.ts` `main` under 80 lines |
+| **S6 CLI arms** (built) | `bin/wtft.ts` `main` dispatches to five functions in `extensions/lib/cli/` | the existing CLI suites pass, two source scans widened to `extensions/lib/cli/` (`docs/spec-270-cli-arms.md` §3); `bin/wtft.ts` `main` under 80 lines |
 
 Freeze: no daemon feature lands between S0 and S4. The plan named #257, #263, #266 and #267 to
 close by S3–S5, not before. S3 closes #257 and #263 and checks #267 A–E, G, H; S4 checks #267 F; I and J

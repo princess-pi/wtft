@@ -1,6 +1,6 @@
 #!/usr/bin/env -S bun
 /**
- * #270 S6: bin/wtft.ts `main` dispatches to the CLI arms in extensions/lib/cli/.
+ * bin/wtft.ts `main` dispatches to the CLI arms in extensions/lib/cli/.
  * docs/spec-270-cli-arms.md § 3. Behaviour is pinned by the existing CLI suites.
  */
 

@@ -8,7 +8,7 @@ export async function runForceRebuild(finalSessionPath: string, daemonDir: strin
 	const how = forceRebuildSession(finalSessionPath);
 	let adopted = true;
 	if (how === "rebuild") {
-		// The report below reads the tag, so wait until the harness has
+		// Wait until the harness has
 		// adopted the session; it truncates the tag in the same step as it
 		// claims the lease, and the pause after covers that step.
 		if (!spawnWtftDaemon(finalSessionPath, daemonDir)) {

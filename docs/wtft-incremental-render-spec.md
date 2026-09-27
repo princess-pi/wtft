@@ -163,7 +163,7 @@ So the zero above is a property of this host's traffic, not of the wire format: 
 
 **Why not a version bump.** A `WTFT_TAGGER_VERSION` bump is the remedy #270 lists first, and it is the wrong tool here. It orphans every existing tag file and forces a from-zero re-parse of every session's parent transcript as well as its subagents, and it leaves both the old and new tag files on disk; the in-place repair reaches the identical number incrementally, reusing everything already classified. A bump earns its cost when old tags are *unreadable or mispriced* — the 2.6.0/2.6.1/2.7.0/2.7.1 entries above are all of that kind, where no amount of appending can correct what is already written. #270's staleness is the other kind: the old lines are correct as far as they go, and the missing ones can simply be added.
 
-**Residual, filed as #443**: the FIRST read after a stale tag still reports the pre-repair number. The CLI's report arm (`extensions/lib/cli/report.ts`) resolves the tag path, spawns the daemon, and reads the tag immediately, so the read races the repair and loses; `awaitDaemonUp` is entered only when the tag yields nothing AND the session file is absent, and a populated-but-stale tag satisfies neither. Pre-existing on `main`, unchanged by #270, and a genuine trap for one-shot audits (#176) — hence its own issue rather than a note here.
+**Residual, filed as #443**: the FIRST read after a stale tag still reports the pre-repair number. The CLI's report arm (`extensions/lib/cli/report.ts`) resolves the tag path, spawns the daemon, and reads the tag immediately, so the read races the repair and loses; `awaitDaemonUp` is entered only when the tag yields no interactions (at once when the session file is absent, else after a short tag wait), and a populated-but-stale tag yields some. Pre-existing on `main`, unchanged by #270, and a genuine trap for one-shot audits (#176) — hence its own issue rather than a note here.
 
 ## Provisional Reads: Saying So When run 1 Is Not run 2 (#443)
 
@@ -391,7 +391,7 @@ remembering: it is not enough to call the two functions adjacently, because each
 the file itself — the daemon is a separate OS process appending to that same file, so it
 can land the repaired lines *and* the marker in the gap between two adjacent reads, after
 which the interactions are stale and the verdict says settled. The same silent undercount,
-through a narrower window, is still the bug. Reading the tag a second time at the end of `main` would
+through a narrower window, is still the bug. Reading the tag a second time at the end of `runReport` would
 straddle everything in between — building the output lines, printing the chart, and under
 `--tokens` scanning uncounted billables across the session and every subagent transcript
 — which is wall-clock comparable to a daemon poll (~667ms). A sweep landing in that window

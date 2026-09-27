@@ -140,12 +140,14 @@ function getSettings(_ctx: any) {
 	const timezone: string | undefined = (typeof config.timezone === "string" ? config.timezone : "America/Los_Angeles") as string | undefined;
 	const disabledEmoji = isEmojiDisabled();
 	const tokens = (typeof config.tokens === "boolean" ? config.tokens : false) as boolean;
+	const hideCostColumns = config.hideCostColumns === true;
+	const hideTokenColumns = config.hideTokenColumns === true;
 
 	const width = Math.min(getTerminalWidth(true, disabledEmoji), 240);
 
 	const visible = hasConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR);
 
-	return { interval, limit, width, visible, mode, timezone, disabledEmoji, tokens };
+	return { interval, limit, width, visible, mode, timezone, disabledEmoji, tokens, hideCostColumns, hideTokenColumns };
 }
 
 // ---
@@ -232,8 +234,8 @@ function buildWtftLines(
 	return sharedBuildWtftLines(interactions, settings, {
 		...opts,
 		unit: settings.tokens ? "tokens" as const : "cost" as const,
-		showCostColumns: opts?.showCostColumns,
-		showTokenColumns: opts?.showTokenColumns,
+		showCostColumns: opts?.showCostColumns ?? !settings.hideCostColumns,
+		showTokenColumns: opts?.showTokenColumns ?? !settings.hideTokenColumns,
 	});
 }
 
@@ -462,10 +464,18 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				return;
 			}
 
+			const columnFlags = {
+				showCostColumns: !opts.hideCostColumns,
+				showTokenColumns: !opts.hideTokenColumns,
+			};
 			if (tokens || cost) {
 			// --cost explicitly switches back to $ units.
-			writeConfig(WTFT_CONFIG_TOOL, { tokens }, undefined, WTFT_CONFIG_DIR);
-			updateWtftWidget(ctx, pi, { visible: true });
+			writeConfig(WTFT_CONFIG_TOOL, {
+				tokens,
+				hideCostColumns: opts.hideCostColumns,
+				hideTokenColumns: opts.hideTokenColumns,
+			}, undefined, WTFT_CONFIG_DIR);
+			updateWtftWidget(ctx, pi, { visible: true, ...columnFlags });
 
 			if (tokens) {
 				const BUDGET_MAP: Record<string, number> = {
@@ -495,10 +505,6 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			const nextMode = hasMode ? mode : current.mode;
 			const nextTimezone = hasTimezone ? timezone : current.timezone;
 
-			const columnFlags = {
-				showCostColumns: !opts.hideCostColumns,
-				showTokenColumns: !opts.hideTokenColumns,
-			};
 			if (pager) {
 				const lines = buildWtftLines(ctx, pi, {
 					interval: nextInterval,
@@ -525,7 +531,9 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				interval: nextInterval,
 				limit: nextLimit,
 				mode: nextMode,
-				timezone: nextTimezone
+				timezone: nextTimezone,
+				hideCostColumns: opts.hideCostColumns,
+				hideTokenColumns: opts.hideTokenColumns,
 			}, undefined, WTFT_CONFIG_DIR);
 
 			updateWtftWidget(ctx, pi, {

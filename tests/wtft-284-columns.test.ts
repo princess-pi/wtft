@@ -42,12 +42,16 @@ function row(lines: string[] | null): string {
 	return found;
 }
 
-console.log("--- default columns ---");
-const all = row(buildWtftLines(ix, settings, { unit: "cost", mode: "cumulative" }));
-check(all.includes("+$2.00"), "incremental cost is on a cost bar");
-check(all.includes("$3.00"), "total latest cost is on a cost bar");
-check(all.includes("+1.5k"), "incremental tokens are on a cost bar");
-check(all.includes("3.0k tok"), "total latest tokens are on a cost bar");
+console.log("--- default columns, four presets ---");
+for (const [unit, mode] of [["cost", "cumulative"], ["cost", "bucket"], ["tokens", "cumulative"], ["tokens", "bucket"]] as const) {
+	const line = row(buildWtftLines(ix, settings, { unit, mode }));
+	check(line.includes("+$2.00"), `${unit} ${mode} prints incremental cost`);
+	check(line.includes("$3.00"), `${unit} ${mode} prints total cost`);
+	check(line.includes("+1.5k"), `${unit} ${mode} prints incremental tokens`);
+	check(line.includes("3.0k tok"), `${unit} ${mode} prints total tokens`);
+}
+const costBar = row(buildWtftLines(ix, settings, { unit: "cost", mode: "cumulative" }));
+check(costBar.includes("█"), "the cost preset still draws a cost bar");
 
 console.log("--- --no-cost leaves the cost bar and the token columns ---");
 const noCost = row(buildWtftLines(ix, settings, { unit: "cost", mode: "cumulative", showCostColumns: false }));
@@ -56,12 +60,12 @@ check(noCost.includes("+1.5k"), "--no-cost keeps incremental tokens");
 check(noCost.includes("3.0k tok"), "--no-cost keeps total tokens");
 check(noCost.includes("█"), "--no-cost keeps the bar");
 
-console.log("--- --no-tokens leaves the token bar and the cost columns ---");
-const noTok = row(buildWtftLines(ix, settings, { unit: "tokens", mode: "cumulative", showTokenColumns: false }));
+console.log("--- --no-tokens on the same cost bar ---");
+const noTok = row(buildWtftLines(ix, settings, { unit: "cost", mode: "cumulative", showTokenColumns: false }));
 check(!noTok.includes("tok"), "--no-tokens drops the token columns");
 check(noTok.includes("+$2.00"), "--no-tokens keeps incremental cost");
 check(noTok.includes("$3.00"), "--no-tokens keeps total cost");
-check(noTok.includes("▇") || noTok.includes("▃"), "--no-tokens keeps the token bar");
+check(noTok.includes("█"), "--no-tokens keeps the cost bar");
 
 console.log("--- both flags leave the bar and no numbers ---");
 const neither = row(buildWtftLines(ix, settings, { unit: "cost", showCostColumns: false, showTokenColumns: false }));

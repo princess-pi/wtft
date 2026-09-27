@@ -115,8 +115,8 @@ function runAlignmentTest(mode: "cumulative" | "bucket") {
 			assert.strictEqual(firstDotIdx, 35, "The decimal point of the $0.00 label must perfectly align with prefixWidth (35)");
 
 			// Newest bin is the scale max, so its marker sits on the last tick.
-			// Four columns widened the prefix from 15 to 35.
-			// maxBarWidth = 80 - 35 - 3 = 42. pos = 42 - 1 = 41. Absolute = 35 + 41 = 76.
+			// prefixWidth is 35. maxBarWidth = 80 - 35 - 3 = 42.
+			// pos = 42 - 1 = 41. Absolute = 35 + 41 = 76.
 			assert.strictEqual(firstBarRow.indexOf("█"), 76, "The point-of-spend marker for the max cost bin must reside exactly at index 76");
 
 			// Older bin is $5 of a $13 scale.

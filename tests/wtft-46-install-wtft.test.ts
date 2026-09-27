@@ -1025,8 +1025,8 @@ console.log("\n10. The claude-nsp-guard shim: ok, shadowed (exit 5), absent, mid
 }
 
 // ---
-// 11. A daemon running an older build is stopped and, per session, restarted
-//     (#260 A13): one started no later than its bundle last changed. The
+// 11. A daemon running an older build (one started no later than its bundle
+//     last changed) is stopped and, per session, restarted. The
 //     bundle is touched between the daemon's start and the install, which is
 //     what a changed build does to it.
 // ---

@@ -6,21 +6,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { spawn } from "node:child_process";
-import {
-	parseSessionFile,
-	deduplicateInteractions,
-	readClassifiedTagFile,
-	WTFT_TAGGER_VERSION,
-} from "../bin/wtft.mjs";
+import { readClassifiedTagFile } from "../extensions/lib/wtft-daemon-lib.ts";
+import { parseSessionFile, deduplicateInteractions } from "../extensions/lib/wtft-parser.ts";
+import { WTFT_TAGGER_VERSION } from "../extensions/lib/wtft-tagger-version.ts";
 import type { Interaction } from "../extensions/lib/wtft-shared.ts";
-import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
-
-
-// Private pid namespace for this suite (#486). Must precede the first
-// getDaemonPidPath() and the first daemon spawn — the daemon keys its lease on
-// os.tmpdir() and sweeps every wtft-daemon-*.pid there at startup.
-isolateTmpdir("cost-cross-validation");
+import { trackSandbox } from "./lib/sandbox";
+import { tagSession } from "./lib/tagger-harness.ts";
 
 // ---
 // FIXTURE: Claude Code multi-block response with shared message.id
@@ -135,46 +126,13 @@ function computeReferenceCost(sessionPath: string): {
 }
 
 // ---
-// DAEMON: run daemon on fixture, read classified output
+// TAGGER: tag the fixture as the daemon does, read the classified output
 // ---
 
-function runDaemon(sessionPath: string): string {
-	// Tag file path the daemon will write
-	const sessionDir = path.dirname(sessionPath);
-	const sessionBase = path.basename(sessionPath);
-	const tagsDir = path.join(sessionDir, "wtft-tags");
-	const tagPath = path.join(tagsDir, sessionBase + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
-
-	// Remove any stale tag files
-	try { fs.rmSync(tagsDir, { recursive: true }); } catch {}
-
-	const daemonPath = path.join(process.cwd(), "bin", "wtft-daemon.mjs");
-
-	// Run daemon with --session, wait for it to process the fixture
-	const child = spawn(process.execPath, [daemonPath, "--session", sessionPath], {
-		detached: true,
-		stdio: "ignore",
-	});
-	child.unref();
-
-	// Busy-wait for the tag file to appear and stabilize (daemon poll cycle is 667ms).
-	// In a real test suite we'd use async/await, but this test runs via tsx directly.
-	const start = Date.now();
-	while (Date.now() - start < 5000) {
-		try {
-			if (fs.existsSync(tagPath)) {
-				const content = fs.readFileSync(tagPath, "utf8");
-				// Daemon writes heartbeat first, then classified entries.
-				// Wait until we see a classified entry (non-heartbeat line).
-				const hasClassified = content
-					.split("\n")
-					.some((l) => l.trim() && !l.includes('"_hb"'));
-				if (hasClassified) break;
-			}
-		} catch {}
-	}
-
-	return tagPath;
+function runTagger(sessionPath: string): string {
+	const tagger = tagSession(sessionPath);
+	tagger.until(() => readClassifiedTagFile(tagger.tagPath).length > 0);
+	return tagger.tagPath;
 }
 
 function computeDaemonCost(tagPath: string): {
@@ -214,7 +172,7 @@ console.log(
 );
 
 // 2. Daemon cost
-const tagPath = runDaemon(sessionPath);
+const tagPath = runTagger(sessionPath);
 const daemon = computeDaemonCost(tagPath);
 console.log(
 	`Daemon:    ${daemon.interactionCount} interactions, $${daemon.totalCost.toFixed(6)}\n`
@@ -251,23 +209,6 @@ assert(hasExpectedVersion, `Tag file uses v${WTFT_TAGGER_VERSION} version`);
 
 // Cleanup
 try { fs.rmSync(dir, { recursive: true }); } catch {}
-// Kill any remaining daemons
-try {
-	const pidDir = os.tmpdir();
-	const pidFiles = fs
-		.readdirSync(pidDir)
-		.filter((f) => f.startsWith("wtft-daemon-") && f.endsWith(".pid"));
-	for (const pf of pidFiles) {
-		try {
-			const pid = parseInt(
-				fs.readFileSync(path.join(pidDir, pf), "utf8").trim(),
-				10
-			);
-			if (pid > 0) process.kill(pid, "SIGTERM");
-		} catch {}
-		try { fs.unlinkSync(path.join(pidDir, pf)); } catch {}
-	}
-} catch {}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

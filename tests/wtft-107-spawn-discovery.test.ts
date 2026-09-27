@@ -7,14 +7,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { claudeSpawnCwds, discoverSubagentSessionFiles, loadSubagentInteractionsChecked, parseSessionFile } from "../extensions/lib/wtft-parser.ts";
-import { spawn } from "node:child_process";
-import { readClassifiedTagFile, WTFT_TAGGER_VERSION } from "../bin/wtft.mjs";
-import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
-
-const DAEMON_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-isolateTmpdir("107-spawn-discovery");
+import { readClassifiedTagFile } from "../extensions/lib/wtft-daemon-lib.ts";
+import { trackSandbox } from "./lib/sandbox";
+import { tagSession } from "./lib/tagger-harness.ts";
 
 let passed = 0;
 let failed = 0;
@@ -211,9 +206,9 @@ console.log("\nPART S — the searched directory holds the session's own transcr
 }
 
 // ---
-// PART D — the daemon puts a bare spawn's child in the tag file
+// PART D — the tagger puts a bare spawn's child in the tag file
 // ---
-console.log("\nPART D — the daemon retries a bare spawn instead of dropping it");
+console.log("\nPART D — the tagger retries a bare spawn instead of dropping it");
 
 {
 	const rootDir = path.join(dir, "d-daemon");
@@ -225,21 +220,19 @@ console.log("\nPART D — the daemon retries a bare spawn instead of dropping it
 		sessionLine(sessionId, now - 6_000, rootDir)
 		+ turnLine("d-root-turn", now - 5_000, 100, ["claude -p 'go'"]));
 
-	const daemon = spawn(process.execPath, [DAEMON_BIN, "--session", rootPath], { detached: true, stdio: "ignore", env: { ...process.env } });
-	daemon.unref();
-	const tagPath = path.join(rootDir, "wtft-tags", `${sessionId}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const tagger = tagSession(rootPath);
+	const tagPath = tagger.tagPath;
 	const outputInTag = () => readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0);
 
-	// The child appears AFTER the daemon has already seen the spawning turn — the
+	// the child appears AFTER the tagger has already seen the spawning turn — the
 	// case a drop makes unrecoverable, since nothing re-queues the turn.
-	for (let i = 0; i < 40 && outputInTag() < 100; i++) await sleep(250);
+	tagger.until(() => !(outputInTag() < 100), 40);
 	check(outputInTag() === 100,
 		`D1 fixture precondition: the tag holds the root turn's 100 before the child exists (got ${outputInTag()})`);
 
 	writeChild(rootDir, "eeee5555-5555-4555-8555-555555555555", now - 4_000, 600);
-	for (let i = 0; i < 60 && outputInTag() < 700; i++) await sleep(250);
+	tagger.until(() => !(outputInTag() < 700), 60);
 	const total = outputInTag();
-	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
 
 	check(total === 700,
 		`D2 #107 A a bare claude -p child reaches the tag file: 100 plus 600 (got ${total})`);
@@ -259,17 +252,15 @@ console.log("\nPART D — the daemon retries a bare spawn instead of dropping it
 		sessionLine(sessionId, now - 3_000, selfCwd)
 		+ turnLine("d-self-turn", now - 2_000, 100, ["claude -p 'go'"]));
 
-	const daemon = spawn(process.execPath, [DAEMON_BIN, "--session", rootPath], { detached: true, stdio: "ignore", env: { ...process.env } });
-	daemon.unref();
-	const tagPath = path.join(selfProjectDir, "wtft-tags", `${sessionId}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const tagger = tagSession(rootPath);
+	const tagPath = tagger.tagPath;
 	const outputInTag = () => readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0);
 
-	for (let i = 0; i < 40 && outputInTag() < 100; i++) await sleep(250);
+	tagger.until(() => !(outputInTag() < 100), 40);
 	// Past the discovery window plus the settle margin, so every poll that could
 	// have registered the session as its own child has run.
-	await sleep(3_000);
+	for (let i = 0; i < 5; i++) tagger.poll();
 	const raw = fs.existsSync(tagPath) ? fs.readFileSync(tagPath, "utf8") : "";
-	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
 
 	// Asserted on the SOURCED lines, not on the total: this session's turns carry
 	// a message id, so the reader's id dedup would hide the second copy. A
@@ -278,7 +269,7 @@ console.log("\nPART D — the daemon retries a bare spawn instead of dropping it
 		.map(l => { try { return JSON.parse(l); } catch { return null; } })
 		.filter(o => o && (typeof o.s === "string" || o._fold || o._gen));
 	check(sourced.length === 0,
-		`D3 the daemon does not register the session's own transcript as its own child — no sourced line in its tag (got ${JSON.stringify(sourced).slice(0, 160)})`);
+		`D3 the tagger does not register the session's own transcript as its own child — no sourced line in its tag (got ${JSON.stringify(sourced).slice(0, 160)})`);
 }
 
 {
@@ -299,15 +290,13 @@ console.log("\nPART D — the daemon retries a bare spawn instead of dropping it
 		sessionLine(childId, now - 4_000, cwd)
 		+ turnLine("d-cycle-child", now - 4_000, 60, ["claude -p 'deeper'"]));
 
-	const daemon = spawn(process.execPath, [DAEMON_BIN, "--session", rootPath], { detached: true, stdio: "ignore", env: { ...process.env } });
-	daemon.unref();
-	const tagPath = path.join(projectDir, "wtft-tags", `${sessionId}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const tagger = tagSession(rootPath);
+	const tagPath = tagger.tagPath;
 	const outputInTag = () => readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0);
 
-	for (let i = 0; i < 60 && outputInTag() < 160; i++) await sleep(250);
-	await sleep(3_000);
+	tagger.until(() => !(outputInTag() < 160), 60);
+	for (let i = 0; i < 5; i++) tagger.poll();
 	const total = outputInTag();
-	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
 
 	check(total === 160,
 		`D4 a discovered child does not fold the session that spawned it back in: 100 plus 60 (got ${total})`);
@@ -333,13 +322,12 @@ console.log("\nPART D — the daemon retries a bare spawn instead of dropping it
 		sessionLine("5555eeee-5555-4555-8555-eeeeeeeeeeee", now - 3_000, cwd)
 		+ turnLine("d-gc-grand", now - 3_000, 20));
 
-	const daemon = spawn(process.execPath, [DAEMON_BIN, "--session", rootPath], { detached: true, stdio: "ignore", env: { ...process.env } });
-	daemon.unref();
-	const tagPath = path.join(projectDir, "wtft-tags", `${rootId}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const tagger = tagSession(rootPath);
+	const tagPath = tagger.tagPath;
 	const outputInTag = () => readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0);
 
-	for (let i = 0; i < 60 && outputInTag() < 170; i++) await sleep(250);
-	await sleep(4_000);
+	tagger.until(() => !(outputInTag() < 170), 60);
+	for (let i = 0; i < 6; i++) tagger.poll();
 	const total = outputInTag();
 	check(total === 170,
 		`D5 a grandchild another transcript already folded is not also synced on its own: 100 + 50 + 20 (got ${total})`);
@@ -349,9 +337,8 @@ console.log("\nPART D — the daemon retries a bare spawn instead of dropping it
 	fs.writeFileSync(path.join(projectDir, "4444dddd-4444-4444-8444-dddddddddddd.jsonl"),
 		sessionLine("4444dddd-4444-4444-8444-dddddddddddd", now - 4_000, cwd)
 		+ turnLine("d-gc-child-2", now - 4_000, 55));
-	for (let i = 0; i < 80 && outputInTag() !== 175; i++) await sleep(250);
+	tagger.until(() => !(outputInTag() !== 175), 80);
 	const afterRotate = outputInTag();
-	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
 
 	check(afterRotate === 175,
 		`D6 when the folder stops folding it, the grandchild is billed under its own source again: 100 + 55 + 20 (got ${afterRotate})`);
@@ -377,19 +364,17 @@ console.log("\nPART D — the daemon retries a bare spawn instead of dropping it
 		sessionLine("8888bbbb-8888-4888-8888-bbbbbbbbbbbb", now - 3_500, cwd)
 		+ turnLine("d-mut-two", now - 3_500, 30, ["claude -p 'y'"]));
 
-	const daemon = spawn(process.execPath, [DAEMON_BIN, "--session", rootPath], { detached: true, stdio: "ignore", env: { ...process.env } });
-	daemon.unref();
-	const tagPath = path.join(projectDir, "wtft-tags", `${rootId}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const tagger = tagSession(rootPath);
+	const tagPath = tagger.tagPath;
 	const outputInTag = () => readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0);
 
 	// Both children are synced before either parse reveals the mutual fold, so
 	// the tag passes through 240 on the way; what matters is where it lands and
 	// that it stays there.
-	for (let i = 0; i < 80 && outputInTag() !== 170; i++) await sleep(250);
+	tagger.until(() => !(outputInTag() !== 170), 80);
 	const first = outputInTag();
-	await sleep(4_000);
+	for (let i = 0; i < 6; i++) tagger.poll();
 	const second = outputInTag();
-	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
 
 	check(first === 170 && second === 170,
 		`D7 two transcripts that fold each other settle at one of them, and the total does not oscillate: 100 + 40 + 30 (got ${first} then ${second})`);
@@ -418,16 +403,14 @@ console.log("\nPART D — the daemon retries a bare spawn instead of dropping it
 		sessionLine("aaaa0001-0001-4001-8001-000000000001", now - 3_500, cwd)
 		+ turnLine("d-sib-nested", now - 3_500, 20));
 
-	const daemon = spawn(process.execPath, [DAEMON_BIN, "--session", rootPath], { detached: true, stdio: "ignore", env: { ...process.env } });
-	daemon.unref();
-	const tagPath = path.join(projectDir, "wtft-tags", `${rootId}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const tagger = tagSession(rootPath);
+	const tagPath = tagger.tagPath;
 	const outputInTag = () => readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0);
 
-	for (let i = 0; i < 80 && outputInTag() !== 190; i++) await sleep(250);
+	tagger.until(() => !(outputInTag() !== 190), 80);
 	const first = outputInTag();
-	await sleep(4_000);
+	for (let i = 0; i < 6; i++) tagger.poll();
 	const second = outputInTag();
-	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
 
 	check(first === 190 && second === 190,
 		`D8 a nested child two sibling transcripts both discover is billed once: 100 + 40 + 30 + 20 (got ${first} then ${second})`);
@@ -462,16 +445,14 @@ console.log("\nPART D — the daemon retries a bare spawn instead of dropping it
 		&& foldsOf(path.join(projectDir, "cccc0003-0003-4003-8003-000000000003.jsonl")).includes("dddd0004-0004-4004-8004-000000000004"),
 		"D9 fixture precondition: the subagent folds the middle transcript, which folds the leaf");
 
-	const daemon = spawn(process.execPath, [DAEMON_BIN, "--session", rootPath], { detached: true, stdio: "ignore", env: { ...process.env } });
-	daemon.unref();
-	const tagPath = path.join(projectDir, "wtft-tags", `${rootId}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
+	const tagger = tagSession(rootPath);
+	const tagPath = tagger.tagPath;
 	const outputInTag = () => readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0);
 
-	for (let i = 0; i < 80 && outputInTag() !== 210; i++) await sleep(250);
+	tagger.until(() => !(outputInTag() !== 210), 80);
 	const first = outputInTag();
-	await sleep(4_000);
+	for (let i = 0; i < 6; i++) tagger.poll();
 	const second = outputInTag();
-	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
 
 	check(first === 210 && second === 210,
 		`D9 a chain of folds bills each transcript once, and stays there: 100 + 40 + 50 + 20 (got ${first} then ${second})`);

@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 import { trackSandbox } from "./lib/sandbox";
 import { daemonLogPath, daemonStdio, rotateDaemonLog } from "../extensions/lib/daemon-log.ts";
 import { spawnWtftDaemon } from "../extensions/lib/wtft-cli-shared.ts";
@@ -109,6 +110,14 @@ describe("a spawned daemon's stderr reaches the log", () => {
 });
 
 describe("daemonStdio", () => {
+	it("anything but a regular file at the log path is left alone, and stderr is ignored", () => {
+		const fifo = path.join(sandbox, "fifo", "daemon.log");
+		fs.mkdirSync(path.dirname(fifo), { recursive: true });
+		execFileSync("mkfifo", [fifo]);
+		// Opening a FIFO with no reader blocks; this returns at once or the suite times out.
+		assert.strictEqual(daemonStdio(fifo).stdio, "ignore");
+	});
+
 	it("creates the log readable by this user only, and tightens an existing one", () => {
 		const f = path.join(sandbox, "perm", "wtft", "daemon.log");
 		daemonStdio(f).close();

@@ -2,7 +2,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import { createHash } from "node:crypto";
-import { execSync, spawn } from "node:child_process";
+import { execSync } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import type { Interaction, Category } from "./wtft-parser.js";
 import { getVisualLength, getTerminalWidth } from "./wtft-shared.js";
@@ -17,7 +17,8 @@ import { getDiscoveries } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.js";
 import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
 import { tagRecords, parseTagLine, currentGeneration, sweepState, isDataRecord, type TagRecord } from "./tag-log.js";
-import { replaceLease, unlinkLeaseIf, leaseHolder, claimLeaseForChild, leasePid, pidAlive } from "./lease.js";
+import { replaceLease, unlinkLeaseIf, leaseHolder, claimLeaseForChild, leasePid } from "./lease.js";
+import { classifyPid, holdsLease, mayStop, processTable, stopHolder, stopHolderSync, type StopOptions } from "./holder.js";
 import {
 	decideHealth, readHealthFacts, daemonReasonText, IDLE_THRESHOLD_MS,
 	type DaemonStatus, type HealthOptions,
@@ -524,18 +525,13 @@ export function describeForceRebuildFailure(how: string): string | null {
 	}
 }
 
-export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" | "deleted" | "busy" | ForceRebuildFailure {
+export function forceRebuildSession(sessionPath: string, stopOpts: StopOptions = {}): "rebuild" | "stopped" | "deleted" | "busy" | ForceRebuildFailure {
 	const leasePath = getDaemonPidPath(sessionPath);
-	let pid = 0;
 	let initial = "";
-	try { initial = fs.readFileSync(leasePath, "utf8").trim(); pid = parseInt(initial, 10); }
+	try { initial = fs.readFileSync(leasePath, "utf8").trim(); }
 	catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "unreadable"; }
-	let args: string[] = [];
-	if (pid > 0) {
-		try { args = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0"); } catch { /* not running */ }
-	}
-	const daemon = args.some(arg => /^wtft-daemon(\.(mjs|js|ts))?$/.test(path.basename(arg)));
-	if (daemon && args.includes("--harness")) {
+	const kind = classifyPid(leasePid(initial));
+	if (kind === "harness") {
 		try {
 			if (!replaceLease(leasePath, "rebuild", String(process.pid), initial)) return "busy";
 		} catch {
@@ -543,22 +539,14 @@ export function forceRebuildSession(sessionPath: string): "rebuild" | "stopped" 
 		}
 		return "rebuild";
 	}
-	// On Linux an unreadable cmdline means no such process. Off Linux the
-	// lease pid cannot be checked, and is signalled as before.
-	const noProc = !fs.existsSync("/proc/self/cmdline");
-	let stopped = false;
-	if (pid > 0 && (daemon || (noProc && args.length === 0))) {
-		try { process.kill(pid, "SIGTERM"); stopped = true; }
-		catch (err) { if ((err as NodeJS.ErrnoException).code !== "ESRCH") return "unsignalled"; }
-	}
 	// Its shutdown flushes into the tag, so the tag goes only once it has
 	// exited; one still running after 2 s keeps its tag ("busy").
-	let exited = !stopped;
-	for (const until = Date.now() + 2000; !exited && Date.now() < until;) {
-		try { process.kill(pid, 0); } catch { exited = true; break; }
-		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+	const stopped = mayStop(kind);
+	if (stopped) {
+		const outcome = stopHolderSync(leasePid(initial), { ...stopOpts, killMs: 0 });
+		if (outcome === "denied") return "unsignalled";
+		if (outcome === "survived") return "busy";
 	}
-	if (!exited) return "busy";
 	// A daemon that claimed the session since owns lease and tag; leave both.
 	let now = "";
 	try { now = fs.readFileSync(leasePath, "utf8").trim(); }
@@ -682,7 +670,7 @@ export async function awaitDaemonUp(
 	const leaseUp = () => {
 		const holder = leaseHolder(pidPath);
 		const pid = leasePid(holder);
-		if (!(pid > 0 && pidAlive(pid))) return false;
+		if (!holdsLease(classifyPid(pid))) return false;
 		if (!own || holder !== own) return true;
 		const facts = readHealthFacts(sessionPath, pidPath, getCurrentVersionTagPath(sessionPath));
 		return (facts.tag?.tail ?? []).some(r => r.kind === "heartbeat" && r.last >= start);
@@ -710,51 +698,18 @@ export async function awaitDaemonUp(
 export async function restartDaemon(sessionPath: string, daemonPath: string): Promise<boolean> {
 	const pidPath = getDaemonPidPath(sessionPath);
 	try {
-		const holder = leaseHolder(pidPath);
-		const pid = leasePid(holder);
-		// A harness process serves every session under its root, so it is asked
-		// to serve this one (the spawn below points it here), never stopped.
-		if (pid > 0 && !isHarnessProcess(pid)) {
-			// Its shutdown flushes into the tag; the new daemon must not start beside
-			// it, so one that outlives SIGTERM by 2 s is killed, as --restart does.
-			// The wait yields, so a holder that is the caller's own child gets reaped.
-			const gone = async (ms: number): Promise<boolean> => {
-				for (const until = Date.now() + ms; Date.now() < until;) {
-					if (!pidAlive(pid)) return true;
-					await new Promise(r => setTimeout(r, 20));
-				}
-				return !pidAlive(pid);
-			};
-			try { process.kill(pid, "SIGTERM"); } catch {}
-			if (!(await gone(2000))) {
-				try { process.kill(pid, "SIGKILL"); } catch {}
-				if (!(await gone(2000))) return false;
-			}
-		}
+		const pid = leasePid(leaseHolder(pidPath));
+		// A harness is asked to serve this session (the spawn below points it
+		// here), never stopped; a pid that is not a daemon is not ours to signal,
+		// and the claim below displaces it. The new daemon must not start beside
+		// the old one, whose shutdown flushes into the tag.
+		if (mayStop(classifyPid(pid)) && (await stopHolder(pid)) !== "stopped") return false;
 	} catch {}
 
-	try {
-		const child = spawn(process.execPath, [daemonPath, ...daemonLaunchArgs(sessionPath)], {
-			detached: true,
-			stdio: "ignore"
-		});
-		child.unref();
-		if (child.pid) {
-			try { claimLeaseForChild(pidPath, child.pid); } catch { /* the child claims for itself */ }
-		}
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-
-function isHarnessProcess(pid: number): boolean {
-	try {
-		return fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").includes("--harness");
-	} catch {
-		return false;
-	}
+	const childPid = processTable().spawn(process.execPath, [daemonPath, ...daemonLaunchArgs(sessionPath)], process.env);
+	if (childPid === 0) return false;
+	try { claimLeaseForChild(pidPath, childPid); } catch { /* the child claims for itself */ }
+	return true;
 }
 
 /** What `--watch` shows before the current tag has any turns. When a tag for

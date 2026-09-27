@@ -11,6 +11,8 @@ import { tagRecords } from "../extensions/lib/tag-log.ts";
 import { decideHealth, readHealthFacts, IDLE_THRESHOLD_MS, type HealthFacts } from "../extensions/lib/daemon-health.ts";
 import { health, getDaemonPidPath, getTagPath } from "../extensions/lib/wtft-daemon-lib.ts";
 import { isolateTmpdir } from "./lib/sandbox";
+import { useProcessTable } from "../extensions/lib/holder.ts";
+import { fakeProcessTable } from "./lib/fake-process-table.ts";
 
 isolateTmpdir("daemon-health-270");
 
@@ -157,13 +159,21 @@ console.log("\nF. health() over files");
 	fs.utimesSync(tagPath, new Date(now - 10_000), new Date(now - 10_000));
 	const none = health(sessionPath, now, { tagPath });
 	check(!none.alive && none.reason === "idle-timeout" && none.lastHbMs === now, "F1 no lease file → dead, stopped at the tag's last heartbeat");
+	// Who a lease names is the holder module's business (spec-297): this process stands in as a daemon.
+	const table = fakeProcessTable();
+	const restoreTable = useProcessTable(table);
+	table.daemon(process.pid, ["--session", sessionPath]);
+	table.daemon(1, [], "denied");
+	table.add(2, ["sleep", "30"]);
 	fs.writeFileSync(getDaemonPidPath(sessionPath), String(process.pid));
 	const s = health(sessionPath, now, { tagPath });
 	check(s.alive && s.idle === true && s.cacheTtlMs === 3_600_000, "F2 this process holds the lease → alive, idle, TTL from the tail's turn");
 	const f = readHealthFacts(sessionPath, getDaemonPidPath(sessionPath), tagPath);
 	check(f.holderAlive && f.tag !== null && f.tag.tail.length === 2 && f.sessionMtimeMs !== null, "F3 readHealthFacts reads lease, tag tail and session mtime");
 	fs.writeFileSync(getDaemonPidPath(sessionPath), "1");
-	check(process.getuid!() === 0 || health(sessionPath, now, { tagPath }).alive, "F4a a lease naming another user's live process (EPERM) reads alive, as the claim treats it");
+	check(health(sessionPath, now, { tagPath }).alive, "F4a a lease naming another user's live daemon (EPERM) reads alive, as the claim treats it");
+	fs.writeFileSync(getDaemonPidPath(sessionPath), "2");
+	check(!health(sessionPath, now, { tagPath }).alive, "F4b a lease naming a live process that is not a daemon (a recycled pid) → not alive");
 	fs.writeFileSync(getDaemonPidPath(sessionPath), "999999999");
 	check(!health(sessionPath, now, { tagPath }).alive, "F4 a lease naming no live pid → not alive");
 	fs.rmSync(sessionPath);
@@ -178,6 +188,7 @@ console.log("\nF. health() over files");
 	fs.writeFileSync(getDaemonPidPath(sessionPath), String(process.pid));
 	const dflt = health(sessionPath, now);
 	check(defaultTag.startsWith(tagsDir) && dflt.alive && !dflt.idle, "F7 with no tagPath, health reads getTagPath's tag (a fresh turn there clamps the heartbeat → live)");
+	restoreTable();
 	fs.rmSync(dir, { recursive: true, force: true });
 }
 

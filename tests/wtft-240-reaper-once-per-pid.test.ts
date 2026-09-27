@@ -9,6 +9,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+import { standInDaemonArgs } from "./lib/stand-in-daemon.ts";
 
 isolateTmpdir("240-reaper");
 
@@ -36,7 +37,7 @@ fs.mkdirSync(path.join(dir, "held", "wtft-tags"), { recursive: true });
 fs.writeFileSync(heldSession, "{}\n");
 fs.writeFileSync(path.join(dir, "held", "wtft-tags", "held.jsonl.wtft-tag.v0.jsonl"),
 	(JSON.stringify({ _hb: { first: 1, last: 2 } }) + "\n").repeat(40_000));
-const holder = spawn(process.execPath, ["-e", "setInterval(() => {}, 1e6)", "--session", heldSession], { stdio: "ignore" });
+const holder = spawn(process.execPath, standInDaemonArgs("setInterval(() => {}, 1e6)", "--session", heldSession), { stdio: "ignore" });
 
 const session = path.join(dir, "watched", "session.jsonl");
 fs.mkdirSync(path.join(dir, "watched", "wtft-tags"), { recursive: true });

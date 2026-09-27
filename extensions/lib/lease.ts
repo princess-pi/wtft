@@ -6,6 +6,7 @@
  */
 
 import * as fs from "node:fs";
+import { classifyPid, holdsLease, pidAlive } from "./holder.js";
 
 export interface LeaseIdentity {
 	dev: number;
@@ -108,27 +109,13 @@ export function leasePid(holder: string): number {
 }
 
 /**
- * Whether `pid` is a running process: `kill 0` accepts it or refuses with
- * EPERM (another user's), and it is not a zombie. A spawner's child that has
- * exited stays a zombie until the spawner's event loop reaps it.
- */
-export function pidAlive(pid: number): boolean {
-	try { process.kill(pid, 0); }
-	catch (err) { if ((err as NodeJS.ErrnoException).code !== "EPERM") return false; }
-	try {
-		const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
-		return stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3) !== "Z";
-	} catch { return true; }
-}
-
-/**
  * Claim `file` for a daemon the caller has just spawned, so the lease names a
  * live process from the moment of the spawn. A `rebuild` token and a live
  * holder are left for the child to meet as it would without this claim.
  */
 export function claimLeaseForChild(file: string, childPid: number): "claimed" | "busy" {
 	const result = claimLease(file, String(childPid), (holder) =>
-		holder === "rebuild" || (leasePid(holder) > 0 && pidAlive(leasePid(holder))));
+		holder === "rebuild" || holdsLease(classifyPid(leasePid(holder))));
 	// A child gone before the claim landed must not be left named.
 	if (result === "claimed" && !pidAlive(childPid)) {
 		unlinkLeaseIf(file, String(childPid));

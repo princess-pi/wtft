@@ -211,8 +211,9 @@ empty string, for the tag's own session. `session` is that transcript's filename
 `_gen` record for its source follows it**, where a line with no `s` has the source `""`.
 
 The daemon writes a `_gen` with `s: ""` on the first read after the session's own transcript was
-replaced (a new inode) or shrank; turns it had read but not yet written are dropped, and the
-record goes before the lines of that read.
+replaced (a new inode) or shrank; turns it had read but not yet written are dropped, a
+`spawnSettled` marker closes each `claude -p` lookup they opened, and the record, followed by an
+offset marker of 0, goes before the lines of that read.
 
 The daemon writes one on the first read of a child transcript in each tagger state (a daemon
 life, a harness serving the session again, or a retired or released child read again) that writes a

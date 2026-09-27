@@ -221,6 +221,8 @@ export function newTaggerState(sessionPath: string, tagPath: string): TaggerStat
 interface Out {
 	records: string;
 	log: LogLine[];
+	/** A generation record is among `records`. */
+	generation?: boolean;
 }
 
 function debug(out: Out, text: string) { out.log.push({ level: "debug", text: `[wtft-daemon] ${text}` }); }
@@ -301,7 +303,14 @@ function parseNewLines(state: TaggerState, world: World, out: Out, now: number):
 			state.streamState = newParseStreamState();
 			state.prevCtxTokens = 0;
 			state.pendingItems = [];
+			for (const item of state.pendingClaudeCommands) {
+				out.records += JSON.stringify({ _meta: { spawnSettled: spawnKey(item.interaction) } }) + "\n";
+			}
+			state.pendingClaudeCommands = [];
 			out.records += generationRecordLine(OWN_SOURCE, path.basename(filePath, ".jsonl"));
+			out.records += JSON.stringify({ _meta: { offset: 0 } }) + "\n";
+			state.tagGrewSinceMarker = true;
+			out.generation = true;
 		}
 		const grew = currentSize > state.lastSize;
 		// With a held fragment, still run: a quiet poll is when a dead-writer fragment can settle.
@@ -386,7 +395,7 @@ function queueClaudeCommand(state: TaggerState, out: Out, interaction: Turn, pre
 
 /** Read what the session transcript gained: new turns are queued as pending,
  *  a spawning turn opens a lookup. Clears and re-derives `pollHadFailure`. */
-export function readSession(state: TaggerState, world: World): { records: string; log: LogLine[]; activity: boolean } {
+export function readSession(state: TaggerState, world: World): { records: string; log: LogLine[]; activity: boolean; wrote: boolean } {
 	const out: Out = { records: "", log: [] };
 	const now = world.now();
 	state.pollHadFailure = false;
@@ -404,7 +413,7 @@ export function readSession(state: TaggerState, world: World): { records: string
 		}
 		if (hasClaudeCommand(interaction)) queueClaudeCommand(state, out, interaction, state.prevCtxTokens);
 	}
-	return { records: out.records, log: out.log, activity: newInteractions.length > 0 };
+	return { records: out.records, log: out.log, activity: newInteractions.length > 0, wrote: out.generation === true };
 }
 
 /** The pending turns as tag lines, then the offset marker. Empty when nothing is pending. */
@@ -1183,11 +1192,11 @@ export interface StepResult {
 export function stepTagger(state: TaggerState, world: World, opts: StepOptions): StepResult {
 	const read = readSession(state, world);
 	let records = read.records;
-	let wrote = false;
+	let wrote = read.wrote;
 	if (opts.flush) {
 		const flushed = flushTurns(state);
 		records += flushed;
-		wrote = flushed.length > 0;
+		wrote ||= flushed.length > 0;
 	}
 	const scan = scanChildren(state, world, opts);
 	return {

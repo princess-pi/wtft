@@ -69,7 +69,7 @@ const a = write(cloneDir, "a.jsonl", [
 	turn("m3", T0 + 4000, path.join(worktree, "docs"), 4),
 	turn("m9", T0 + 6000, clone, 256, [{ type: "tool_use", name: "Bash", input: { command: `cd ${worktree} && bun run test` } }]),
 	turn("m10", T0 + 7000, clone, 512, [{ type: "tool_use", name: "Edit", input: { file_path: path.join(worktree, "pr-cost.ts"), old_string: "a", new_string: "b" } }]),
-	turn("m11", T0 + 8000, clone, 1024, [{ type: "tool_use", name: "Bash", input: { command: `cd ${worktree}-else && ls` } }]),
+	turn("m11", T0 + 8000, clone, 1024, [{ type: "tool_use", name: "Bash", input: { command: `cd ${worktree}-else && ls; cd ${worktree}+other` } }]),
 	turn("m12", T0 + 9000, clone, 2048, [{ type: "tool_use", name: "Bash", input: { command: `cd ~${worktree.slice(tmp.length)}; ls` } }]),
 ]);
 const sub = write(path.join(cloneDir, "a", "subagents"), "agent-1.jsonl", [turn("m4", T0 + 5000, worktree, 8)]);
@@ -104,6 +104,18 @@ describe("sessions", () => {
 		const expected = costOf(a, ["m2", "m3", "m9", "m10", "m12"]) + costOf(sub, ["m4"]) + costOf(nested, ["m13"]) + costOf(legacy, ["m14"]) + costOf(b, ["m5"]);
 		assert.ok(Math.abs(got!.costUsd - expected) < 1e-12, `${got!.costUsd} vs ${expected}`);
 		assert.ok(got!.costUsd > costOf(a, ["m2", "m3", "m9", "m10", "m12"]) + costOf(sub, ["m4"]), "fold priced in");
+	});
+	it("a worktree outside the clone has its own transcripts read", () => {
+		const outside = path.join(tmp, "elsewhere", "7-thing");
+		write(path.join(projects, cwdToStrictSlug(outside)), "f.jsonl", [user(T0, outside), turn("m15", T0 + 1000, outside, 3)]);
+		assert.strictEqual(collectSessionCost({ cloneDir: clone, worktree: outside, sinceMs: 0 })?.outputTokens, 3);
+	});
+	it("a sessions symlink back to its own project directory is not followed", () => {
+		const loopRoot = path.join(tmp, "loop-projects");
+		const dir = path.join(loopRoot, cwdToStrictSlug(clone));
+		write(dir, "g.jsonl", [turn("m16", T0, worktree, 1)]);
+		fs.symlinkSync(".", path.join(dir, "sessions"));
+		assert.strictEqual(listTranscripts(clone, 0, loopRoot).length, 1);
 	});
 	it("a missing projects directory lists nothing rather than throwing", () => {
 		assert.deepStrictEqual(listTranscripts(clone, 0, path.join(tmp, "no-projects")), []);

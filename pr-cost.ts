@@ -49,7 +49,7 @@ export function listTranscripts(cloneDir: string, sinceMs: number, root = projec
 	const project = (dir: string) => {
 		out.push(...jsonl(dir));
 		for (const entry of fs.readdirSync(dir)) {
-			if (entry === "sessions" && fs.statSync(path.join(dir, entry)).isDirectory()) project(path.join(dir, entry));
+			if (entry === "sessions" && fs.lstatSync(path.join(dir, entry)).isDirectory()) project(path.join(dir, entry));
 			const subagents = path.join(dir, entry, "subagents");
 			if (fs.existsSync(subagents)) walk(subagents);
 		}
@@ -78,7 +78,8 @@ function cwdByMessageId(file: string): Map<string, string> {
 
 /** docs/spec-277-pr-cost.md § 3: null when no turn reached the worktree. */
 export function collectSessionCost(opts: { cloneDir: string; worktree: string; sinceMs: number; home?: string }): SessionCost | null {
-	const parsed = listTranscripts(opts.cloneDir, opts.sinceMs).map(file => ({
+	const files = new Set([...listTranscripts(opts.cloneDir, opts.sinceMs), ...listTranscripts(opts.worktree, opts.sinceMs)]);
+	const parsed = [...files].map(file => ({
 		file, interactions: deduplicateInteractions(parseSessionFile(file)),
 	}));
 	const folded = new Set(parsed.flatMap(p => p.interactions.flatMap(
@@ -87,7 +88,7 @@ export function collectSessionCost(opts: { cloneDir: string; worktree: string; s
 	const home = opts.home ?? os.homedir();
 	const spellings = [opts.worktree];
 	if (opts.worktree.startsWith(home + path.sep)) spellings.push("~" + opts.worktree.slice(home.length));
-	const mentions = new RegExp(`(?:${spellings.map(escapeRegExp).join("|")})(?![A-Za-z0-9._-])`);
+	const mentions = new RegExp(`(?:${spellings.map(escapeRegExp).join("|")})(?=$|[/\\s'";&|)<>])`);
 	const reaches = (i: Interaction) => i.files.some(f => under(f.path)) || i.commands.some(c => mentions.test(c));
 	const total: SessionCost = { transcripts: 0, turns: 0, costUsd: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 	// A resumed session's new transcript repeats earlier messages.

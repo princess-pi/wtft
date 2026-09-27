@@ -64,15 +64,16 @@ The record is a floor.
 A turn that reaches into two worktrees counts in both records. Within one record, a message counts
 once, even when a resumed session's transcript repeats it.
 
-A command names the worktree when the path is not followed by another path-name character, so
-`cd <worktree>;` counts and `<worktree>-else` does not.
+A command names the worktree when the path ends the command or is followed by `/`, whitespace,
+a quote, or one of `; & | ) < >`. So `cd <worktree>;` counts, and `<worktree>-else` and
+`<worktree>+other` do not.
 
 - **Transcripts read:** every `*.jsonl` in each `~/.claude/projects` directory named for this
-  clone or one of its worktrees (and in its `sessions/` subdirectory, where older installs keep
+  clone, one of its worktrees, or the measured worktree wherever it lives (and in its `sessions/` subdirectory, where older installs keep
   them), plus every transcript under a session's `subagents/`, at any
   depth (workflow agents sit one level deeper). A directory counts when its name is the clone's
   slug, or starts with it, under either slug encoding the discovery code accepts. A missing
-  projects directory lists nothing.
+  projects directory lists nothing, and a `sessions` symlink is not followed.
 - **Time bound:** only files modified since the branch began are read. The start is the earlier
   of two times: when the parent of the branch's first own commit was committed, and when the
   earliest own commit was authored. `base` is later than both once main has been merged in. A

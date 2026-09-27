@@ -37,7 +37,7 @@ import {
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const USAGE = `Usage: wtft-daemon --session <path> [--debug]
        wtft-daemon --harness <claude|pi> [--session <path>] [--debug]
-       wtft-daemon [--list] [--cleanup] [--restart] [--stop <session>]`;
+       wtft-daemon --list | --cleanup | --restart | --stop <session>  (one or more)`;
 const POLL_MS = 667; // 90bpm throttle
 /** How long one slice of a harness's subagent scan runs before it yields to the event loop. */
 const HARNESS_SCAN_SLICE_MS = envMs("WTFT_HARNESS_SCAN_SLICE_MS", 25);
@@ -1472,7 +1472,7 @@ handled is not listed. A --stop of a session a harness serves ends the command a
                         --session shows (hash: <lease hash>). Off Linux (no /proc) every live pid reads RUNNING
   --cleanup             Remove every lease whose holder is dead or not a daemon, uncounted. SIGTERM (no wait)
                         per-session daemons whose session is gone (no file, not moved, and a tag that
-                        holds a turn or marker), and fixture ones, whose --session or root environment
+                        holds a turn or a _meta record), and fixture ones, whose --session or root environment
                         (WTFT_CLAUDE_PROJECTS_DIR, WTFT_PI_SESSIONS_DIR) is under the tmp dir or /tmp/,
                         that hold no lease here; never a harness daemon, which stops once it has nothing
                         to serve or watch
@@ -1606,7 +1606,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   }
   const harnessHolders = new Map(harnessPidFiles.map(f => [f, readPid(f)] as const));
 
-  let found = 0;
+  let restartedN = 0, cleanedN = 0, stoppedN = 0, listedN = 0;
   let stopRefused = false;
   const seenPids = new Set<number>();
   const restarted = new Set<number>();
@@ -1697,7 +1697,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         : wasDaemon ? `Stopped: PID ${pid} — no --session to respawn (#274)`
         : kind === "unverified" ? `Removed lease: PID ${pid} — cannot be verified as a daemon here, so it is left running`
         : `Removed lease: PID ${pid} — no live daemon found`);
-      found++;
+      restartedN++;
       continue;
     }
 
@@ -1712,11 +1712,13 @@ if (showList || showCleanup || showRestart || stopSession) {
         if (kind === "harness") continue;
         if (kind === "daemon" && processTable().signal(pid, "SIGTERM") === "denied") {
           console.log(`Not stopped: PID ${pid} refused the signal (EPERM); its lease is left`);
+          if (stopSession && resolvedSessionArg(pid, sessionFound) === stopSession) { stopRefused = true; stoppedN++; }
           continue;
         }
         unlinkIfNames(fullPath, pid);
         console.log(`Cleaned up: PID ${pid} — session gone: ${sessionFound}`);
-        found++;
+        if (stopSession && resolvedSessionArg(pid, sessionFound) === stopSession) stoppedN++;
+        cleanedN++;
         continue;
       }
     }
@@ -1732,12 +1734,12 @@ if (showList || showCleanup || showRestart || stopSession) {
         unlinkIfNames(fullPath, pid);
         console.log(kind === "daemon" ? `Stopped: PID ${pid} — ${sessionFound}` : `Removed lease: PID ${pid} — no live daemon found, ${sessionFound}`);
       }
-      found++;
+      stoppedN++;
       continue;
     }
 
     if (showList) {
-      found++;
+      listedN++;
       const status = alive ? "RUNNING" : "DEAD (stale pid)";
       let idleStr = "?";
       const now = Date.now();
@@ -1773,11 +1775,11 @@ if (showList || showCleanup || showRestart || stopSession) {
           continue;
         }
         console.log(`Cleaned up: PID ${proc.pid} — fixture daemon: ${where}`);
-        found++;
+        cleanedN++;
         continue;
       }
       if (showList) {
-        found++;
+        listedN++;
         const where = proc.session || (proc.harness ? `harness ${proc.roots.join(",") || "(unknown root)"}` : "(no session arg)");
         console.log(`PID ${String(proc.pid).padEnd(7)} ${"RUNNING".padEnd(20)} v${"?".padEnd(7)} idle: ${"?".padEnd(5)} ${where}`);
       }
@@ -1801,24 +1803,24 @@ if (showList || showCleanup || showRestart || stopSession) {
       if (outcome === "denied" || outcome === "survived") {
         console.log(outcome === "denied" ? `Not stopped: PID ${pid} refused the signal (EPERM); harness ${pidFile} keeps its root pid file`
           : `Not stopped: PID ${pid} is still running after SIGKILL; harness ${pidFile} keeps its root pid file`);
-        found++;
+        restartedN++;
         continue;
       }
       unlinkIfNames(fullPath, pid);
       console.log(live ? `Stopped: PID ${pid} — harness ${pidFile}; the next wtft starts it again`
         : classifyPid(pid) === "unverified" ? `Removed root pid file: PID ${pid} — cannot be verified as a daemon here, so it is left running, harness ${pidFile}`
         : `Removed root pid file: PID ${pid} — no live daemon found, harness ${pidFile}`);
-      found++;
+      restartedN++;
     }
-    console.log(`${found} holder(s) handled: restarted, stopped, left in place, or a lease or root pid file removed, as each line says.`);
+    console.log(`${restartedN} holder(s) handled: restarted, stopped, left in place, or a lease or root pid file removed, as each line says.`);
   }
   if (showCleanup) {
-    console.log(`Cleaned up ${found} daemon(s).`);
+    console.log(`Cleaned up ${cleanedN} daemon(s).`);
   }
-  if (showList && found === 0) {
+  if (showList && listedN === 0) {
     console.log("No daemon processes found.");
   }
-  if (stopSession && found === 0) {
+  if (stopSession && stoppedN === 0) {
     console.log(`No daemon found for: ${stopSession}`);
   }
   process.exit(stopRefused ? 1 : 0);

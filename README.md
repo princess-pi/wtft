@@ -343,7 +343,7 @@ daemon, and an idle session there is dropped while the process stays up and watc
 24h more; the process stops 24h after it last had a session to serve, retry or watch for. A session
 outside those directories keeps its own. The commands that run instead of a report —
 `--help`/`--why`/`--version` and the daemon-management group — return before
-that, and spawn nothing except `--restart`, which respawns each daemon it stops that was started with `--session`. `wtft-daemon` exists for debugging, not for normal use.
+that, and spawn nothing except `--restart`, which respawns each lease-holding daemon it stops that was started with `--session`. `wtft-daemon` exists for debugging, not for normal use.
 
 `wtft --help` is the flag reference — the examples above are a tour, not the
 list.

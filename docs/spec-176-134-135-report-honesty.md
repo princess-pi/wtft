@@ -62,7 +62,7 @@ the same report says is not written yet.
 `tests/wtft-176-134-135-report-honesty.test.ts`:
 
 - **#176:** a tag whose last marker is `_meta.unswept` makes the widget, `/wtft --tokens` and
-  `/wtft --pager` print the tag's reason line ("no clean subagent sweep has finished since this tag was last written, so a subagent's cost may still be missing"). The same tag stamped `swept`
+  `/wtft --pager` print the tag's reason line ("no clean read of the session and its subagents has finished since this tag was last written, so some cost may still be missing"). The same tag stamped `swept`
   renders its turn and no provisional line. `wtft --json` on the same session reports
   `provisional.provisional: true`.
 - **#134 A:** with the ledger path unreadable, `/wtft --tokens` contains the `ledgerError` text; a

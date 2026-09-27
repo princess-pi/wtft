@@ -1135,10 +1135,7 @@ function walkSubagentDir(
 // Latched per file per process — these sites run every poll/refresh.
 const warnedUnreadableFile = new Set<string>();
 
-/**
- * `phase`: "at discovery" (head-scan) or "or parsed" (whole-file parse —
- * phrasing is load-bearing for daemon warnings and tests).
- */
+/** `phase`: "at discovery" (head-scan) or "or parsed" (whole-file parse). */
 export function warnUnreadableTranscript(file: string, phase: "at discovery" | "or parsed", err: unknown, what = "a subagent transcript"): void {
 	if (warnedUnreadableFile.has(file)) return;
 	warnedUnreadableFile.add(file);

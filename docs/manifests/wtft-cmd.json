@@ -193,7 +193,7 @@
     },
     {
       "flags": "--cleanup",
-      "desc": "Remove every lease whose holder is dead or not a log parser daemon (not counted in the total). Send SIGTERM, without waiting, to each per-session log parser daemon whose session is gone: its file is absent, it was not moved, and its tag holds a turn or marker record. One that refuses the signal (another user's, EPERM) keeps its lease. A harness daemon is not killed because the session it was started for is gone; it drops a gone session itself. A per-session fixture daemon, one whose --session or root environment (WTFT_CLAUDE_PROJECTS_DIR, WTFT_PI_SESSIONS_DIR) is under the tmp dir or /tmp/, that holds no lease there is sent SIGTERM too. A harness daemon is never killed; it stops itself once it has served nothing, holds no idle-dropped session and retries no adoption for 24h."
+      "desc": "Remove every lease whose holder is dead or not a log parser daemon (not counted in the total). Send SIGTERM, without waiting, to each per-session log parser daemon whose session is gone: its file is absent, it was not moved, and its tag holds a turn or a _meta record. One that refuses the signal (another user's, EPERM) keeps its lease. A harness daemon is not killed because the session it was started for is gone; it drops a gone session itself. A per-session fixture daemon, one whose --session or root environment (WTFT_CLAUDE_PROJECTS_DIR, WTFT_PI_SESSIONS_DIR) is under the tmp dir or /tmp/, that holds no lease there is sent SIGTERM too. A harness daemon is never killed; it stops itself once it has served nothing, holds no idle-dropped session and retries no adoption for 24h."
     },
     {
       "flags": "--restart",

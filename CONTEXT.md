@@ -21,7 +21,7 @@ session outside those roots keeps its own process, polling every 667ms; the harn
 reads on `fs.watch` plus a 250 ms sweep that stats each transcript at most every 667 ms. The tag file and
 the pid lease stay per session. After `WTFT_DAEMON_IDLE_MS` (default 24h) with no activity (a
 new turn, a subagent record written, or a poll of a session not yet written; never within the
-startup grace, and never while a harness session holds a turn back), the per-session process
+startup grace), the per-session process
 exits, and the harness daemon drops that session and its lease; the next write to its own transcript,
 or the next request, adopts it again; while that harness daemon runs, the write alone does.
 A session dropped for idling is forgotten 24h after it was dropped unless written first, or
@@ -96,7 +96,7 @@ by renaming it, and serves a path under its root whichever pid it names.
 
 **Hand-off**:
 The root pid file's `.served` file: one JSON line per session the harness daemon serves (and
-still holds the lease of, or whose lease reads `rebuild`), is retrying after a first retry, or
+still holds the lease of, or whose lease reads `rebuild`), is retrying to adopt, or
 dropped for idling; rewritten whenever that text changes while it holds the root, and removed
 when the list is empty. The next harness daemon on that root takes the file, adopts the served
 and retrying sessions and watches the idle ones. A harness that no longer holds the root writes none.
@@ -213,7 +213,7 @@ refuses a batch that does not end in a newline, and the refusal is fatal: the le
 `rebuild` and the daemon exits 1; a tag truncate may cut only to zero or to a
 `lastLineStartByte` offset; an idle heartbeat replaces the last line in place only when that
 line is a heartbeat of the same byte width, and is appended otherwise, so no WRITE shrinks the file — though a daemon startup truncates it
-to zero to rebuild, or when it holds no data record, so an incremental reader still needs a shrink branch; a crash mid-append is
+to zero to rebuild, or when it holds no data record or no offset marker, so an incremental reader still needs a shrink branch; a crash mid-append is
 repaired at the next
 daemon's startup), never in each reader.
 _Avoid_: Cache file, index file

@@ -37,7 +37,7 @@ interface ProcessTable {
 
 | Kind | When |
 |---|---|
-| `gone` | `signal 0` says gone, or `state` says gone or zombie. An unreadable `/proc/<pid>/stat` (hidepid) is not evidence either way, so `signal 0` decides. A pid that is not a positive safe integer is `gone` too |
+| `gone` | `signal 0` says gone, or `state` says zombie (a test's table may also say gone). An unreadable `/proc/<pid>/stat` (hidepid) is not evidence either way, so `signal 0` decides. A pid that is not a positive safe integer is `gone` too |
 | `daemon` | alive, and its cmdline names `wtft-daemon` (`.mjs`, `.js`, `.ts` or bare) without `--harness` |
 | `harness` | alive, and its cmdline names `wtft-daemon` with `--harness` |
 | `other` | alive, and its cmdline is readable and names something else. A recycled pid lands here |

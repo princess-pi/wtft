@@ -71,8 +71,9 @@ The `TaggerState` inside a record is `docs/spec-session-tagger.md`'s.
   and the next `beginRetry` counts from 1. One retry is pending per session at a time.
 - **`isEmpty`** is true when nothing is served, nothing is idle-known and no retry is pending: the
   harness may stop.
-- **`handOff` is the hand-off's whole text**, one JSON line per session: the served records that
-  still hold their lease (`keep`), then `adopting` unless it is already served, then sessions
+- **`handOff` is the hand-off's whole text**, one JSON line per session: the served records the
+  caller's `keep` accepts (the daemon's: those still holding their lease, or holding a `rebuild`
+  token, which wants the session adopted again), then `adopting` unless it is already served, then sessions
   being retried (as served), then idle-known ones with `since` and `sig`. `parseHandOff` reads it back: a line that
   is not a JSON object counts as unreadable; a record whose path is missing, relative, or does not
   resolve under `root`, or whose kind is unknown, is skipped; a kept path is returned resolved.

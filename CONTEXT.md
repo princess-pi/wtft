@@ -70,10 +70,8 @@ file.
 _Avoid_: lock file, session pid file
 
 **Daemon health reason** (the code) / **status text** (the sentence):
-Two different things, deliberately (#179). A **health reason** is one of six machine-readable
-codes on the `DaemonHealthReason` union — `not-started`, `starting`, `waiting-session`,
-`not-found`, `idle-timeout`, `restart-failed` (nothing sets `starting` since #281; it stays on the
-union because removing a code is a breaking change). It is the contract: control flow compares codes,
+Two different things, deliberately (#179). A **health reason** is one of the machine-readable
+codes on the `DaemonHealthReason` union, listed in `docs/spec-daemon-health.md` §3. It is the contract: control flow compares codes,
 and `tsc` rejects a typo'd comparison. **Status text** is what the user sees, looked up from
 `DAEMON_REASON_TEXT` by `daemonReasonText()` and rendered by `renderDaemonStatus()`, which also
 composes the live, idle and stopped lines; `--watch` prints its own "reading..." line.

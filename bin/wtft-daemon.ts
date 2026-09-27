@@ -1631,7 +1631,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         stopped = stopHolderSync(pid);
       }
       // Only a daemon this process stopped is respawned: a live pid that is not
-      // one (or one that cannot be signalled, #274) was not stopped.
+      // one (or one that cannot be signalled) was not stopped.
       // One that outlived SIGKILL keeps its lease: a respawn would only meet it and exit.
       const survived = stopped === "survived" || stopped === "denied";
       if (survived) keptRunning.add(pid);

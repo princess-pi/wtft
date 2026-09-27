@@ -88,5 +88,5 @@ spec; where one disagrees with this file, this file is current.
 
 ## 7. Related
 
-Live specs this module reads from, not replaced by it: `docs/spec-281-spawner-claims-lease.md`
+Specs this module reads from, not replaced by it: `docs/spec-281-spawner-claims-lease.md`
 (the spawner claims the lease) and `docs/spec-holder.md` (what holds a lease).

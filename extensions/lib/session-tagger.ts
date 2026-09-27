@@ -30,7 +30,7 @@ import {
 	clearSubagentCacheMiss,
 	type ParseStreamState,
 } from "./wtft-shared.js";
-import { tagRecords, isDataRecord } from "./tag-log.js";
+import { tagRecords, isDataRecord, OWN_SOURCE } from "./tag-log.js";
 import { projectsDir } from "./harness/claude-code/discovery.js";
 
 export type Turn = NonNullable<ReturnType<typeof parseEntryToInteraction>>;
@@ -290,20 +290,18 @@ function parseNewLines(state: TaggerState, world: World, out: Out, now: number):
 		const stat = world.stat(filePath);
 		debug(out, `session stat ${path.basename(filePath)}`);
 		let currentSize = stat.size;
-		if (state.sessionIno !== -1 && stat.ino !== state.sessionIno) {
-			state.lastSize = 0;
-			state.pendingFragment = Buffer.alloc(0);
-			state.streamState = newParseStreamState();
-			state.prevCtxTokens = 0;
-			debug(out, `session inode changed, resetting offset ${path.basename(filePath)}`);
-		}
+		const replaced = state.sessionIno !== -1 && stat.ino !== state.sessionIno;
+		if (replaced) debug(out, `session inode changed, resetting offset ${path.basename(filePath)}`);
 		state.sessionIno = stat.ino;
-		if (currentSize < state.lastSize) {
-			debug(out, "session truncated, resetting offset");
+		const shrank = !replaced && currentSize < state.lastSize;
+		if (shrank) debug(out, "session truncated, resetting offset");
+		if (replaced || shrank) {
 			state.lastSize = 0;
 			state.pendingFragment = Buffer.alloc(0);
 			state.streamState = newParseStreamState();
 			state.prevCtxTokens = 0;
+			state.pendingItems = [];
+			out.records += generationRecordLine(OWN_SOURCE, path.basename(filePath, ".jsonl"));
 		}
 		const grew = currentSize > state.lastSize;
 		// With a held fragment, still run: a quiet poll is when a dead-writer fragment can settle.
@@ -799,7 +797,7 @@ function reseedClaudeChildren(state: TaggerState, world: World, out: Out, tagCon
 	 *  last generation of that source: a `_gen` retires its earlier folds. */
 	const foldedBy = new Map<string, string>();
 	for (const r of tagRecords(tagContent)) {
-		if (r.kind === "generation" && r.session !== undefined) {
+		if (r.kind === "generation" && r.session !== undefined && r.source !== OWN_SOURCE) {
 			children.set(r.source, r.session);
 			for (const [child, holder] of [...foldedBy]) if (holder === r.source) foldedBy.delete(child);
 		}

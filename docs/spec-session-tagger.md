@@ -63,6 +63,10 @@ timers.
   later generation retires its earlier lines. A child retired as folded elsewhere, or released as
   gone, loses its state but not its source. On resume, a `_gen` record's source is matched against
   the path relative to the session's directory or to the child's own, and seeds the child's state.
+- **The session's own transcript opens a generation too.** When it is replaced (a new inode) or
+  shrinks, `readSession` drops the turns it had not written, returns a `_gen` record with source
+  `""` (`OWN_SOURCE`), and reads the transcript from its start; readers then count only what
+  follows that record (`docs/wtft-tag-format.md` §2e). A resume never treats `""` as a child.
 - **A registered `claude -p` child that is gone from disk is gone, not a failed read.** Gone means
   a missing file or directory; any other stat error is a failed poll, warned once, which withholds
   the sweep. The scan skips a gone child, writes the turn it held under the source its earlier

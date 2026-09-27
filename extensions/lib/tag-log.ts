@@ -93,15 +93,18 @@ export function tagRecords(content: string): TagRecord[] {
 	return out;
 }
 
-/** `records` minus every sourced record a later generation record for the
- *  same source supersedes. A record with no source always counts. */
+/** The source a generation record names for the tag's own session: its lines carry none. */
+export const OWN_SOURCE = "";
+
+/** `records` minus every turn or fold a later generation record for the same
+ *  source supersedes; a record with no source is the own session's (`OWN_SOURCE`). */
 export function currentGeneration(records: TagRecord[]): TagRecord[] {
 	const lastGenAt = new Map<string, number>();
 	records.forEach((r, at) => { if (r.kind === "generation") lastGenAt.set(r.source, at); });
 	if (lastGenAt.size === 0) return records;
 	return records.filter((r, at) => {
-		const s = r.kind === "turn" || r.kind === "fold" ? r.source : undefined;
-		if (s === undefined) return true;
+		if (r.kind !== "turn" && r.kind !== "fold") return true;
+		const s = r.source ?? OWN_SOURCE;
 		const genAt = lastGenAt.get(s);
 		return genAt === undefined || at > genAt;
 	});

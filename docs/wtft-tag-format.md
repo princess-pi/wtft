@@ -205,10 +205,14 @@ walk skips every recorded child as `in-self-total`, because its money is already
 {"_gen": {"s": "<source>", "session": "<session id>"}}
 ```
 
-Opens a new generation for the child transcript whose source is `s` (§2a). `session` is that
-transcript's filename without `.jsonl`, for a human reading the file. **A line carrying `s` —
-an interaction line or a fold record — counts only if no `_gen` record for the same `s` follows
-it.** A line with no `s` always counts.
+Opens a new generation for the child transcript whose source is `s` (§2a), or, with `s` the
+empty string, for the tag's own session. `session` is that transcript's filename without
+`.jsonl`, for a human reading the file. **An interaction line or a fold record counts only if no
+`_gen` record for its source follows it**, where a line with no `s` has the source `""`.
+
+The daemon writes a `_gen` with `s: ""` on the first read after the session's own transcript was
+replaced (a new inode) or shrank; turns it had read but not yet written are dropped, and the
+record goes before the lines of that read.
 
 The daemon writes one on the first read of a child transcript in each tagger state (a daemon
 life, a harness serving the session again, or a retired or released child read again) that writes a
@@ -311,8 +315,8 @@ file path is the text `_hb` or `_meta` is a turn (#140). Every wtft reader goes 
 third-party reader follows the steps below.
 
 1. Open the file `getTagPath()` picks (§1).
-2. Drop every line that carries a source (`s` on an interaction line, `_fold.s` on a fold
-   record) and is followed by a `_gen` record for the same source (§2e).
+2. Drop every interaction line or fold record followed by a `_gen` record for its source (§2e):
+   `s` on an interaction line, `_fold.s` on a fold record, and `""` for either when it has none.
 3. For each remaining line — a line that fails to parse, or that the decoder cannot read, is
    skipped on its own and never fails the read (the per-line tolerance §2 requires):
    - Skip if it has a `_hb` top-level key (heartbeat or stop line, §2c). An object of no known

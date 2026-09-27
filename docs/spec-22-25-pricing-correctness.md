@@ -184,7 +184,7 @@ the diff removed, plus Tier 4's host-scoped set.
 | Artifact | Claim | Contradicted by | Covered by a test? | Action |
 |---|---|---|---|---|
 | `wtft-renderer.ts` (`renderTokenSummary` legend) | `? = model not in pricing registry — priced at default $3/$15 rates` | a `?`-marked DeepSeek id takes the sibling-guess branch, not the Sonnet default (`wtft-cost.ts`, `calculateClaudeCost`) | ❌ `reconciled-against-untested` — no suite renders an unpriced row | Fixed: the legend now composes `describeFallbackPricing` over the marked models |
-| `docs/manifests/wtft-cmd.json` (`--by-model`) | `marked '?' (priced at default rates)` | two different defaults exist, and this names neither | ❌ `reconciled-against-untested` | Fixed; Tier 1, so `--help` and `docs/EXT_WTFT.html` correct together |
+| `docs/manifests/wtft-cmd.json` (`--by-model`) | `marked '?' (priced at default rates)` | two different defaults exist, and this names neither | ❌ `reconciled-against-untested` | Fixed; Tier 1, so `--help` and `docs/wtft.html` correct together |
 | `spec-139-140-141-…md` §#140 | `isModelPriced` true when a legacy branch `(deepseek/haiku/opus)` applies | `deepseek` names a guess, not a branch — `isModelPriced` (`wtft-cost.ts`) | ✅ `wtft-claude5-pricing.test.ts` | Fixed, with a pointer to this spec |
 | `spec-139-140-141-…md` §#140 | the warning reads `using default $3/$15 rates` | `bin/wtft.ts` now interpolates `describeFallbackPricing` | ✅ `wtft-claude5-pricing.test.ts` | Fixed |
 | `spec-139-140-141-…md` verification list | `isModelPriced("deepseek-chat")` true | now false | ✅ same suite | Fixed |

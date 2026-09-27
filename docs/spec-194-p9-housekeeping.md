@@ -281,7 +281,7 @@ producer-side gap is duppypro/princess-pi-tools#1021.
 | read-path layout | `wf_<id>` "one level down"; "only `agent-*.jsonl`"; "only reader"; subagent "never listed" | two levels; Pi siblings; meta reader and daemon watch; Pi lists siblings | ✅ L3–L7 | Fixed |
 | read-path per-call | the invariant, unqualified | an attributed turn is skipped and seeds nothing | ✅ A5–A7 | Fixed; the second-call double count is now stated and pinned |
 | spec-194 H2/H4, corpus README, spec-137 | "shape the reader distinguishes"; M7c "checks the harness"; "harness treats `subagents` oppositely"; "producer half is §4" | the reader has no shapes; M7c reads a snapshot; both skip it; §4 states both halves | ✅ M7b/M7c | Fixed |
-| spec-194 H5, EXT_WTFT | "every fold file is copied" | three exclusions; old BEFORE builds | reconciled-against-untested | Fixed: stated |
+| spec-194 H5, wtft.html | "every fold file is copied" | three exclusions; old BEFORE builds | reconciled-against-untested | Fixed: stated |
 | `before-after.ts` | a relative `--before` fails; the snapshot is never removed; a fold with no `file` crashes; a failed per-file `mkdir` aborts the run | the import specifier; `mkdtemp`; `foldFilesOf`; `copyUnder` | ✅ E5–E7 for the first three; the per-file `mkdir` untested | Fixed in code |
 | `tests/wtft-208` E | passes with discovery broken | never checked the child | — | Fixed: E4 |
 | spec-107, spec-52 | #107 C "is P9, not in this change"; command without `bun` | shipped; needs `bun` | — | Fixed |

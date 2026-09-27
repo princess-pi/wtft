@@ -137,7 +137,7 @@ being counted, and `--tokens` rendering one row per edge, which is #216.
 | The test file's banner comment cites the issue number | Verified | Removed the `#138 — ` prefix |
 | An `indexSessionsById` throw was swallowed with no warning, so a broken harness index goes silent for the rest of the walk | Verified | **Code fixed**: `makeSessionResolver` writes one stderr warning per walk, naming the harness and the failure; test Q1/Q2. A root `readdirSync` failure other than `ENOENT` now throws instead of returning an empty index; test Q1 |
 | No work bound on the walk | Declined | Road not taken — see "Road not taken — a work bound" above; the issue's Closer accepts either outcome, and a bound would buy nothing at today's per-walk cost |
-| `docs/EXT_WTFT.html`'s spec-138 row claims the whole ledger resolves in well under a second | Verified | Corrected: the claim is limited to resolution cost — a ledger of thousands of unresolvable or already-counted edges resolves in well under a second; each resolvable child is still parsed |
+| `docs/wtft.html`'s spec-138 row claims the whole ledger resolves in well under a second | Verified | Corrected: the claim is limited to resolution cost — a ledger of thousands of unresolvable or already-counted edges resolves in well under a second; each resolvable child is still parsed |
 | `alreadyAttributed` ids and `claudeSubAgentFolds` fold ids were compared without the `.jsonl` normalisation the ledger and root id already get | Verified | **Code fixed**: both are stripped of a trailing `.jsonl` before being compared; test N1 |
 
 ## pr-review round 5 (Claude Opus, the last authorised)

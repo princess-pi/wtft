@@ -176,11 +176,11 @@ const BADGE_CASES: Array<{ status: 'surge' | 'approaching' | 'ending'; text: str
 for (const { status, text, color } of BADGE_CASES) {
 	const noEmojiText = text.replace("⚡", "!!");
 	check(`badge "${text}" (emoji mode)`, () => {
-		const raw = buildTimelineString(new Set(), 0, status, FIXED_DATE);
+		const raw = buildTimelineString(new Set(), 0, status, FIXED_DATE, undefined, status === "surge" ? 2 : undefined);
 		assert.ok(raw.endsWith(` ${color}${text}\x1b[0m`), `expected suffix, got: ${raw.slice(-40)}`);
 	});
 	check(`badge "${noEmojiText}" (no-emoji mode)`, () => {
-		const raw = buildTimelineString(new Set(), 0, status, FIXED_DATE, true);
+		const raw = buildTimelineString(new Set(), 0, status, FIXED_DATE, true, status === "surge" ? 2 : undefined);
 		assert.ok(raw.endsWith(` ${color}${noEmojiText}\x1b[0m`), `expected suffix, got: ${raw.slice(-40)}`);
 	});
 }

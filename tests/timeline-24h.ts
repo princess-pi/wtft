@@ -53,11 +53,10 @@ function parseArgs(argv: string[]): { model?: string; tz?: string } {
 
 const args = parseArgs(process.argv.slice(2));
 const model = args.model ?? process.env.PI_MODEL ?? "unknown";
-const isDeepSeek = model.toLowerCase().includes("deepseek");
-const surgeHours = isDeepSeek ? getSurgeLocalHours(args.tz) : new Set<number>();
+const surgeHours = getSurgeLocalHours(args.tz, Date.now(), model);
 
 console.log(`model:        ${model}`);
-console.log(`deepseek:     ${isDeepSeek ? "yes (surge applies)" : "no (all off-peak)"}`);
+console.log(`surge:        ${surgeHours.size > 0 ? "card has open hours today" : "no open hours"}`);
 console.log(`timezone:     ${args.tz ?? "(host local)"}`);
 console.log(`surge hours:  ${[...surgeHours].sort((a, b) => a - b).join(", ") || "(none)"}`);
 console.log("");

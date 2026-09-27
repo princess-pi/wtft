@@ -8,8 +8,6 @@ import {
 	DEEPSEEK_V41_FLASH_FROM,
 	DEEPSEEK_V4_PRO_REROUTE_FROM,
 	MODEL_PRICING,
-	DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES,
-	DEEPSEEK_WEEKEND_OFFPEAK_FROM,
 	type ModelPricing,
 } from "./wtft-cost.js";
 
@@ -93,17 +91,21 @@ function ratesFor(pricing: ModelPricing): ManifestRates[] {
  * test can compare it against the committed file without either drifting.
  */
 export function buildPricingManifest(): PricingManifest {
+	const surge = MODEL_PRICING["deepseek-flash"]?.surge;
+	if (!surge || surge.weekendOffPeakFrom === undefined) {
+		throw new Error("deepseek-flash card has no surge schedule");
+	}
 	return {
 		schema: PRICING_MANIFEST_SCHEMA,
 		generatedFrom: "extensions/lib/wtft-cost.ts MODEL_PRICING",
 		units: "USD per 1M tokens",
 		deepseekSurge: {
-			multiplier: 2.0,
-			windowsUtc: DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES.map(formatWindow),
-			weekendOffPeakFrom: isoInstant(DEEPSEEK_WEEKEND_OFFPEAK_FROM),
+			multiplier: surge.multiplier,
+			windowsUtc: surge.windowsUtcMinutes.map(formatWindow),
+			weekendOffPeakFrom: isoInstant(surge.weekendOffPeakFrom),
 			// No backticks or markup: the page renders this through .textContent,
 			// which would print them literally.
-			note: "DeepSeek rows are the off-peak card; peak is 2x on the windows "
+			note: `DeepSeek rows are the off-peak card; peak is ${surge.multiplier}x on the windows `
 				+ "and weekdays given here. For DeepSeek only, the Input column is "
 				+ "the cache-MISS rate and Cache Read the cache-HIT rate — the "
 				+ "Anthropic-format endpoint reports no cache-creation tokens and "

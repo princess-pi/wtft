@@ -45,7 +45,7 @@ import {
 	getBinInfo,
 	calculateClaudeCost,
 	calculateServerToolCost,
-	getDeepSeekPeakMultiplier,
+	getPeakMultiplier,
 	getSurgeLocalHours,
 	checkSurgeProximity,
 	CATEGORY_ORDER,
@@ -199,7 +199,7 @@ import {
 export {
 	calculateClaudeCost,
 	calculateServerToolCost,
-	getDeepSeekPeakMultiplier,
+	getPeakMultiplier,
 	getSurgeLocalHours,
 	checkSurgeProximity,
 	resolveTieredRates,

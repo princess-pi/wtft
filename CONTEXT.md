@@ -227,21 +227,22 @@ session discovery, so the daemon never treats its own writes as a session to par
 _Avoid_: Tag cache, output dir
 
 **Surge (window / pricing)**:
-DeepSeek's peak-valley pricing: `input`, `output` and `cacheRead` are billed at 2× inside
-certain UTC hour ranges on weekdays. (`cacheWrite` is never surged — for DeepSeek it is 0
-anyway.) The schedule is `DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES` in `extensions/lib/wtft-cost.ts`,
+A model card's `surge` field: `input`, `output` and `cacheRead` are billed at that field's
+multiplier inside its UTC windows. (`cacheWrite` is never surged — for DeepSeek it is 0
+anyway.) A card with no `surge` stays at 1. DeepSeek's four cards share one schedule,
 weekday-gated from `DEEPSEEK_WEEKEND_OFFPEAK_FROM`. **The hours are deliberately not written
-here** — read them from those constants, or from the generated
+here** — read them from the card, or from the generated
 `docs/manifests/wtft-pricing.json`. They used to be re-typed in code and in prose across the
 repo, with nothing that failed when a change missed one, and one prose copy said "as of July
 2026" nine days after the rates moved (#495). No count is given, because every count of them
 written so far has been wrong; `grep` is the authority.
 `getSurgeLocalHours()` maps the schedule onto display-timezone hours by asking
-`getDeepSeekPeakMultiplier` what each hour costs, so no hour is coloured differently from the
+`getPeakMultiplier` what each hour costs, so no hour is coloured differently from the
 way that hour is billed. It resolves the day containing the instant passed to it, and the
-renderer passes `now` — so the bar describes today while the bins under it may be older
-(#496). `checkSurgeProximity()` asks it only whether the day surges at all; the
-inside/approaching/ending decision is minute arithmetic over the same shared window constant.
+renderer passes `now` — so the bar describes today while the bins under it may be older.
+`checkSurgeProximity()` asks whether the day surges at all, then reads
+`SURGE_APPROACH_MINUTES` and `SURGE_ENDING_MINUTES` (both 20). Ending is the last of those
+minutes inside the window. Approaching is the same length before it opens.
 Rendered as the SURGE Timeline badge and orange segments.
 _Avoid_: Peak pricing, rush hour, premium window
 

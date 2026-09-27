@@ -502,31 +502,30 @@ The Pi `/wtft` widget also spawns a log parser daemon on `session_start`, using 
 
 ## SURGE Timeline (24-hour pricing bar)
 
-The 24-hour timeline on the title line shows DeepSeek peak-valley surge pricing windows:
-- **Orange segments**: Local hours that fall within surge windows. The schedule is
-  `DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES` in `extensions/lib/wtft-cost.ts`, weekday-gated
-  from `DEEPSEEK_WEEKEND_OFFPEAK_FROM` (#495). **The hours are deliberately not written
-  here** — read them from those constants: they were hardcoded in four places plus four
-  prose copies, and a schedule change had no way to fail when it missed one. The renderer
-  asks `getDeepSeekPeakMultiplier` per hour, so the bar's colours cannot disagree with what
-  that hour is billed at. It paints the schedule for **the day containing `now`**, while the
-  bins below it may be older; on a weekend the bar shows no surge hours even where weekday
-  bins are still flagged. Which day the bar should describe is #496.
+The 24-hour timeline on the title line shows the model's surge schedule, when its card has one:
+- **Orange segments**: Local hours that fall within that card's windows. DeepSeek's four
+  cards share one schedule, weekday-gated from `DEEPSEEK_WEEKEND_OFFPEAK_FROM` (#495).
+  **The hours are deliberately not written here** — read them from the card, or from the
+  generated manifest: they were hardcoded in four places plus four prose copies, and a
+  schedule change had no way to fail when it missed one. The renderer asks `getPeakMultiplier`
+  per hour, so the bar's colours cannot disagree with what that hour is billed at. It paints
+  the schedule for **the day containing `now`**, while the bins below it may be older; on a
+  weekend the DeepSeek bar shows no surge hours even where weekday bins are still flagged.
 - **Green segments**: All other hours (normal pricing)
 - **Clock-face marker**: The current local hour renders as a clock-face emoji
   (<code>🕐</code>–<code>🕛</code>, including <code>🕛</code> at the noon hour), and is
   additionally bold — which starts its own colour segment. Solar noon is a separate
   `☀️` glyph between hour 11 and hour 12, never a replacement for the noon hour's slot
   (#7). There is no `◆` and has not been for some time; this line said there was (#503).
-- **Surge badges**: Appended when in or near a surge window:
-  - `⚡ SURGE 2x` — currently in a surge window (2× pricing active)
-  - `⚡ SURGE APPROACHING` — within 20 minutes of surge start (blinking orange)
-  - `⚡ SURGE ENDING` — within 20 minutes of surge end (blinking green)
+- **Surge badges**: Appended when the card has a schedule and the instant is in or near a window. The active badge prints that card's multiplier. The leads are `SURGE_APPROACH_MINUTES` and `SURGE_ENDING_MINUTES`, both 20:
+  - `⚡ SURGE 2x` — inside a DeepSeek window, before the ending lead (DeepSeek's multiplier is 2)
+  - `⚡ SURGE APPROACHING` — within `SURGE_APPROACH_MINUTES` before the window opens (blinking orange)
+  - `⚡ SURGE ENDING` — within `SURGE_ENDING_MINUTES` before the window closes (blinking green)
 
-**Unified rendering:** The timeline computation lives in `buildWtftLines` (one function, one call site). The `model` opt controls whether DeepSeek surge coloring is applied:
+**Unified rendering:** The timeline computation lives in `renderWtftChart`. The `model` opt selects the card:
 - **Pi widget**: passes `sessionCtx.model.modelId` from the session context
-- **CLI paths**: auto-detects model from classified interactions (scans for "deepseek" substring)
-- **Non-DeepSeek models**: renders an all-green timeline with no badges
+- **CLI paths**: passes the model from the classified interactions
+- **A card with no surge schedule**: renders an all-green timeline with no badges
 
 ## SIGWINCH (terminal resize)
 

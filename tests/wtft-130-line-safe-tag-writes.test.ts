@@ -10,6 +10,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { lastLineStartByte, seedClassifiedTagFile, getCurrentVersionTagPath, readClassifiedTagFile, parseSessionFile, readPrefixSentinel, sentinelMatches, watcherAction, PREFIX_SENTINEL_BYTES } from "../bin/wtft.mjs";
 import { pollUntil, sleep } from "./lib/poll";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+import { lastBuildMs } from "./lib/last-build";
 
 isolateTmpdir("130-line-safe");
 
@@ -38,23 +39,11 @@ function assert(label: string, ok: boolean, detail?: string) {
 // by accident, and it is the "fixture stops testing its subject" failure at the
 // largest scale available here.
 {
-	const pairs: [string, string][] = [
-		["bin/wtft-daemon.mjs", "bin/wtft-daemon.ts"],
-		["bin/wtft.mjs", "bin/wtft.ts"],
-		["bin/wtft.mjs", "extensions/lib/wtft-daemon-lib.ts"],
-	];
-	for (const [out, src] of pairs) {
-		const outPath = path.resolve(import.meta.dirname, "..", out);
-		const srcPath = path.resolve(import.meta.dirname, "..", src);
-		let ok = false, detail = "";
-		try {
-			const o = fs.statSync(outPath).mtimeMs, i = fs.statSync(srcPath).mtimeMs;
-			ok = o >= i;
-			detail = `${out} is ${Math.round((i - o) / 1000)}s older than ${src} — run \`bun run build\``;
-		} catch (err) {
-			detail = `${out} or ${src} is missing (${(err as Error).message}) — run \`bun run build\``;
-		}
-		assert(`B0 ${out} is at least as new as ${src}`, ok, detail);
+	const built = lastBuildMs();
+	for (const src of ["bin/wtft-daemon.ts", "bin/wtft.ts", "extensions/lib/wtft-daemon-lib.ts"]) {
+		const i = fs.statSync(path.resolve(import.meta.dirname, "..", src)).mtimeMs;
+		assert(`B0 the last build is at least as new as ${src}`, built !== null && built >= i,
+			built === null ? "no build recorded — run `bun run build`" : `${src} changed ${Math.round((i - built) / 1000)}s after the last build — run \`bun run build\``);
 	}
 }
 

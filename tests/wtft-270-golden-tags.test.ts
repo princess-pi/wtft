@@ -20,6 +20,7 @@ import { readTagFileWithVerdict, getCurrentVersionTagPath } from "../extensions/
 import { normaliseTag, viewOf } from "./lib/golden-normalise.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { writeCorpus, type CorpusSession } from "./lib/golden-corpus.ts";
+import { lastBuildMs } from "./lib/last-build";
 
 const DAEMON_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
 const GOLDEN_DIR = path.resolve(import.meta.dirname, "fixtures", "270-golden-tags");
@@ -43,7 +44,7 @@ const daemonSources = [
 	...fs.readdirSync(libDir, { recursive: true, encoding: "utf8" }).filter(f => f.endsWith(".ts")).map(f => path.join(libDir, f)),
 ];
 const newestSourceMs = Math.max(...daemonSources.map(f => fs.statSync(f).mtimeMs));
-check(fs.statSync(DAEMON_BIN).mtimeMs > newestSourceMs, "fixture precondition: bin/wtft-daemon.mjs is newer than every daemon source (else run bun run build)");
+check((lastBuildMs() ?? 0) >= newestSourceMs, "fixture precondition: the last build is at least as new as every daemon source (else run bun run build)");
 if (failed > 0) { console.log(`\n${passed} passed, ${failed} failed`); process.exit(1); }
 
 const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-270-golden-")));

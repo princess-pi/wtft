@@ -187,7 +187,8 @@ now falls through the same evaluation as every other exit.
   non-option argument under `node` or `bun` (so `node --inspect <bundle>` counts): an editor with the
   file open is not counted. A relative path is resolved against
   the process's own cwd. `bun run build` and install mode leave
-  an unchanged bundle unwritten, so its mtime dates the last build that changed it. When `older` is
+  an unchanged bundle unwritten, so its mtime dates the last build that changed it. The time of the
+  last successful build is `tmp/last-build`'s mtime, which the suites' freshness checks read. When `older` is
   above 0 and every artifact checked out (not `drift`, so a failed copy never restarts daemons into
   the old build), install mode runs `<dir>/wtft-daemon --restart` (its output to stderr), then checks the
   same processes by pid and start time: `left` is how many still run, not counting a zombie, and

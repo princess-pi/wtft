@@ -358,4 +358,6 @@ if (manifestState === "current") {
 // signal said success (#60).
 if (errors > 0) process.exit(1);
 
+fs.mkdirSync(path.join(import.meta.dir, "tmp"), { recursive: true });
+fs.writeFileSync(path.join(import.meta.dir, "tmp", "last-build"), new Date().toISOString() + "\n");
 console.log("\n✅ build complete");

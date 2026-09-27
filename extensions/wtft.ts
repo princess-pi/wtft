@@ -222,6 +222,8 @@ function buildWtftLines(
 		mode?: "bucket" | "cumulative";
 		timezone?: string;
 		sessionNameSuffix?: string;
+		showCostColumns?: boolean;
+		showTokenColumns?: boolean;
 	}
 ): string[] | null {
 	const interactions = readInteractions(ctx);
@@ -230,6 +232,8 @@ function buildWtftLines(
 	return sharedBuildWtftLines(interactions, settings, {
 		...opts,
 		unit: settings.tokens ? "tokens" as const : "cost" as const,
+		showCostColumns: opts?.showCostColumns,
+		showTokenColumns: opts?.showTokenColumns,
 	});
 }
 
@@ -243,6 +247,8 @@ function updateWtftWidget(
 		visible?: boolean;
 		mode?: "bucket" | "cumulative";
 		timezone?: string;
+		showCostColumns?: boolean;
+		showTokenColumns?: boolean;
 	}
 ) {
 	const current = getSettings(ctx);
@@ -489,13 +495,18 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			const nextMode = hasMode ? mode : current.mode;
 			const nextTimezone = hasTimezone ? timezone : current.timezone;
 
+			const columnFlags = {
+				showCostColumns: !opts.hideCostColumns,
+				showTokenColumns: !opts.hideTokenColumns,
+			};
 			if (pager) {
 				const lines = buildWtftLines(ctx, pi, {
 					interval: nextInterval,
 					limit: hasLimit ? nextLimit : 100, // Large default for pager
 					width: nextWidth,
 					mode: nextMode,
-					timezone: nextTimezone
+					timezone: nextTimezone,
+					...columnFlags,
 				});
 
 				if (!lines || lines.length === 0) {
@@ -523,7 +534,8 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				width: nextWidth,
 				visible: true,
 				mode: nextMode,
-				timezone: nextTimezone
+				timezone: nextTimezone,
+				...columnFlags,
 			});
 
 			ctx.ui.notify("Token cost audit widget updated below the editor.", "info");

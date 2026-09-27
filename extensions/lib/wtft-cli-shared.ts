@@ -31,6 +31,8 @@ export interface WtftCliOptions {
 	hasTokens: boolean;
 	cost: boolean;
 	hasCost: boolean;
+	hideCostColumns: boolean;
+	hideTokenColumns: boolean;
 	forceReparse: boolean;
 	// Extension-only
 	hideWidget: boolean;
@@ -87,6 +89,8 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 	let hasOther = false;
 	let hasTokens = false;
 	let hasCost = false;
+	let hideCostColumns = false;
+	let hideTokenColumns = false;
 
 	let targetSession: string | undefined = undefined;
 	let cwdOverride: string | undefined = undefined;
@@ -123,6 +127,10 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 			cost = true;
 			tokens = false;
 			hasCost = true;
+		} else if (arg === "--no-cost") {
+			hideCostColumns = true;
+		} else if (arg === "--no-tokens") {
+			hideTokenColumns = true;
 		} else if (arg === "--force" || arg === "-F") {
 			forceReparse = true;
 		} else if (arg === "--cumulative" || arg === "-c") {
@@ -246,6 +254,7 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 		other, hasOther,
 		tokens, hasTokens,
 		cost, hasCost,
+		hideCostColumns, hideTokenColumns,
 		enableEmoji,
 		forceReparse,
 		targetSession, cwdOverride, harnessOption,

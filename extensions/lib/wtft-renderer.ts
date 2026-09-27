@@ -27,9 +27,11 @@ export interface Bin {
 	costs: Record<Category, number>;
 	total_cost: number;
 	incremental_cost?: number;
+	column_total_cost?: number;
 	tokens?: Record<Category, { total: number; output: number }>;
 	total_tokens?: number;
 	incremental_tokens?: number;
+	column_total_tokens?: number;
 	_incTokens?: Record<Category, { total: number }>;
 	surgePriced?: boolean;
 }
@@ -95,8 +97,14 @@ export function accumulateTokens(bin: Bin, category: Category, interaction: { in
 		}
 		bin.total_tokens = 0;
 	}
-	const t = interactionTotalTokens(interaction);
-	const o = interaction.outputTokens + interaction.reasoningTokens;
+	const t = interactionTotalTokens({
+		inputTokens: interaction.inputTokens ?? 0,
+		outputTokens: interaction.outputTokens ?? 0,
+		cacheReadTokens: interaction.cacheReadTokens ?? 0,
+		cacheWriteTokens: interaction.cacheWriteTokens ?? 0,
+		reasoningTokens: interaction.reasoningTokens ?? 0,
+	});
+	const o = (interaction.outputTokens ?? 0) + (interaction.reasoningTokens ?? 0);
 	bin.tokens[category].total += t;
 	bin.tokens[category].output += o;
 	bin.total_tokens! += t;
@@ -696,6 +704,8 @@ export function buildWtftLines(
 		model?: string;
 		unit?: "cost" | "tokens";
 		sessionNameSuffix?: string;
+		showCostColumns?: boolean;
+		showTokenColumns?: boolean;
 	}
 ): string[] | null {
 	const intervalStr = opts?.interval !== undefined ? opts.interval : defaultSettings.interval;
@@ -758,14 +768,25 @@ export function buildWtftLines(
 			totalSessionCost += interaction.serverToolCost;
 		}
 
-		if (unit === "tokens") {
-			accumulateTokens(bin, classification, interaction);
-		}
+		accumulateTokens(bin, classification, interaction);
 	}
 
 	const sortedBins = Array.from(binMap.entries())
 		.sort((a, b) => a[0].localeCompare(b[0]))
 		.map(entry => entry[1]);
+
+	for (const bin of sortedBins) {
+		bin.incremental_cost = bin.total_cost;
+		bin.incremental_tokens = bin.total_tokens ?? 0;
+	}
+	let columnRunCost = 0;
+	let columnRunTokens = 0;
+	for (const bin of sortedBins) {
+		columnRunCost += bin.incremental_cost ?? 0;
+		columnRunTokens += bin.incremental_tokens ?? 0;
+		bin.column_total_cost = columnRunCost;
+		bin.column_total_tokens = columnRunTokens;
+	}
 
 	if (mode === "cumulative") {
 		if (unit === "tokens") {
@@ -869,6 +890,8 @@ export function buildWtftLines(
 		otherWarning,
 		tokenFooter: unit === "tokens" ? (tokenFooterSummary(interactions) || null) : null,
 		cacheLine,
+		showCostColumns: opts?.showCostColumns !== false,
+		showTokenColumns: opts?.showTokenColumns !== false,
 	});
 }
 

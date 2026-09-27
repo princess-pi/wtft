@@ -35,12 +35,16 @@ export function renderWtftChart(input: {
 	otherWarning: string | null;
 	tokenFooter: string | null;
 	cacheLine: string | null;
+	showCostColumns?: boolean;
+	showTokenColumns?: boolean;
 }): string[] {
 	const {
 		displayedBins, mode, unit, width, disabledEmoji, tz,
 		cacheMissBins, totalSessionCost, totalSessionTokens,
 		otherWarning, tokenFooter, cacheLine,
 	} = input;
+	const showCost = input.showCostColumns !== false;
+	const showTokens = input.showTokenColumns !== false;
 	const opts = { model: input.model, sessionNameSuffix: input.sessionNameSuffix };
 	const ALL_CATEGORIES = CATEGORY_ORDER;
 
@@ -52,34 +56,24 @@ export function renderWtftChart(input: {
 		: calculateScaleMax(maxBarValue);
 
 	const labelWidth = Math.max(...displayedBins.map(b => b.label.length), 5);
+	const incCostText = (bin: Bin) => {
+		const n = bin.incremental_cost ?? 0;
+		const sign = n >= 0 ? "+" : "";
+		return `${sign}${formatCost(n)}`;
+	};
+	const totalCostText = (bin: Bin) => formatCost(bin.column_total_cost ?? bin.total_cost);
+	const incTokText = (bin: Bin) => {
+		const n = bin.incremental_tokens ?? 0;
+		const sign = n >= 0 ? "+" : "";
+		return `${sign}${formatTokenCount(n)}`;
+	};
+	const totalTokText = (bin: Bin) => `${formatTokenCount(bin.column_total_tokens ?? bin.total_tokens ?? 0)} tok`;
+	const columnText: ((bin: Bin) => string)[] = [];
+	if (showCost) columnText.push(incCostText, totalCostText);
+	if (showTokens) columnText.push(incTokText, totalTokText);
+	const columnWidths = columnText.map((text) => Math.max(...displayedBins.map((bin) => text(bin).length), 1));
 	let prefixWidth = labelWidth + 2;
-	
-	let maxIncLen = 6;
-	let maxCostLen = 6;
-
-	if (unit === "tokens") {
-		if (mode === "cumulative") {
-			maxIncLen = Math.max(...displayedBins.map(bin => {
-				const incSign = (bin.incremental_tokens ?? 0) >= 0 ? "+" : "";
-				return `${incSign}${formatTokenCount(bin.incremental_tokens ?? 0)}`.length;
-			}), 6);
-			maxCostLen = Math.max(...displayedBins.map(b => formatTokenCount(b.total_tokens ?? 0).length), 6);
-			prefixWidth += maxIncLen + 2 + maxCostLen + 2 + 4;
-		} else {
-			maxCostLen = Math.max(...displayedBins.map(b => formatTokenCount(b.total_tokens ?? 0).length), 6);
-			prefixWidth += maxCostLen + 2 + 4;
-		}
-	} else if (mode === "cumulative") {
-		maxIncLen = Math.max(...displayedBins.map(bin => {
-			const incSign = (bin.incremental_cost ?? 0) >= 0 ? "+" : "";
-			return `${incSign}${formatCost(bin.incremental_cost ?? 0)}`.length;
-		}), 6);
-		maxCostLen = Math.max(...displayedBins.map(b => formatCost(b.total_cost).length), 6);
-		prefixWidth += maxIncLen + 2 + maxCostLen + 2;
-	} else {
-		maxCostLen = Math.max(...displayedBins.map(b => formatCost(b.total_cost).length), 6);
-		prefixWidth += maxCostLen + 2;
-	}
+	for (const columnWidth of columnWidths) prefixWidth += columnWidth + 2;
 
 	const finalWidth = Math.max(width, 40);
 	
@@ -210,6 +204,35 @@ export function renderWtftChart(input: {
 	const cacheMissLine = `\x1b[90m${buildDividerLine("Cache Miss")}\x1b[0m`;
 	const missed = (b: typeof displayedBins[number] | undefined) => !!b?.key && cacheMissBins.has(b.key);
 
+	const rowWithColumns = (
+		coloredLabel: string,
+		surgeInc: string,
+		costColor: string,
+		boltGap: string,
+		surgeActive: boolean,
+		barStr: string,
+		bin: Bin,
+	): string => {
+		let widthIndex = 0;
+		const colored: string[] = [];
+		const pushCol = (text: string, color: string) => {
+			colored.push(`${color}${padString(text, columnWidths[widthIndex++])}\x1b[0m`);
+		};
+		if (showCost) {
+			pushCol(incCostText(bin), surgeInc);
+			pushCol(totalCostText(bin), costColor);
+		}
+		if (showTokens) {
+			pushCol(incTokText(bin), surgeInc);
+			pushCol(totalTokText(bin), costColor);
+		}
+		if (colored.length === 0) {
+			return surgeActive ? `${coloredLabel}${boltGap}${barStr}` : `${coloredLabel}  ${barStr}`;
+		}
+		if (colored.length === 1) return `${coloredLabel}${boltGap}${colored[0]}  ${barStr}`;
+		return `${coloredLabel}  ${colored[0]}${boltGap}${colored.slice(1).join("  ")}  ${barStr}`;
+	};
+
 	for (let i = 0; i < displayedBins.length; i++) {
 		const bin = displayedBins[i];
 
@@ -262,16 +285,7 @@ export function renderWtftChart(input: {
 				allChars++;
 			}
 
-			if (mode === "cumulative") {
-				const incSign = (bin.incremental_tokens ?? 0) >= 0 ? "+" : "";
-				const incStr = `${incSign}${formatTokenCount(bin.incremental_tokens ?? 0)}`;
-				const incPart = padString(incStr, maxIncLen);
-				const tokPart = padString(formatTokenCount(bin.total_tokens ?? 0), maxCostLen);
-				widgetLines.push(`${coloredLabel}  ${surgeInc}${incPart}\x1b[0m${boltGap}${costColor}${tokPart} tok\x1b[0m  ${barStr}`);
-			} else {
-				const tokPart = padString(formatTokenCount(bin.total_tokens ?? 0), maxCostLen);
-				widgetLines.push(`${coloredLabel}${boltGap}${costColor}${tokPart} tok\x1b[0m  ${barStr}`);
-			}
+			widgetLines.push(rowWithColumns(coloredLabel, surgeInc, costColor, boltGap, surgeActive, barStr, bin));
 		} else {
 			let barStr = "";
 			if (mode === "cumulative") {
@@ -307,19 +321,7 @@ export function renderWtftChart(input: {
 				}
 			}
 
-			if (mode === "cumulative") {
-				const incSign = (bin.incremental_cost ?? 0) >= 0 ? "+" : "";
-				const incStr = `${incSign}${formatCost(bin.incremental_cost ?? 0)}`;
-				const incPart = padString(incStr, maxIncLen);
-				const coloredInc = `${surgeInc}${incPart}\x1b[0m`;
-				const costPart = padString(formatCost(bin.total_cost), maxCostLen);
-				const coloredCost = `${costColor}${costPart}\x1b[0m`;
-				widgetLines.push(`${coloredLabel}  ${coloredInc}${boltGap}${coloredCost}  ${barStr}`);
-			} else {
-				const costPart = padString(formatCost(bin.total_cost), maxCostLen);
-				const coloredCost = `${costColor}${costPart}\x1b[0m`;
-				widgetLines.push(`${coloredLabel}${boltGap}${coloredCost}  ${barStr}`);
-			}
+			widgetLines.push(rowWithColumns(coloredLabel, surgeInc, costColor, boltGap, surgeActive, barStr, bin));
 		}
 	}
 	if (missed(displayedBins[displayedBins.length - 1])) widgetLines.push(cacheMissLine);

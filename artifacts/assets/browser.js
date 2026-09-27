@@ -1,10 +1,69 @@
+import { splitFrontmatter, parseRoute, resolveRelative, rewriteHref, headingDomId, headingFrag, pageTitle } from "./route.mjs";
+
 const nav = document.getElementById("nav-list");
 const navTitle = document.querySelector(".nav-title");
 const content = document.getElementById("content");
 const md = window.markdownit({ html: true, linkify: true });
 
+function clearToc() {
+  document.getElementById("toc")?.replaceChildren();
+}
+
+function fillToc(root, basePath) {
+  const toc = document.getElementById("toc");
+  if (!toc) return;
+  toc.replaceChildren();
+  const used = new Set();
+  const items = [];
+  for (const heading of root.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
+    let n = 1;
+    let id = headingDomId(heading.textContent, n);
+    while (used.has(id)) {
+      n += 1;
+      id = headingDomId(heading.textContent, n);
+    }
+    used.add(id);
+    heading.id = id;
+    const level = heading.tagName.toLowerCase();
+    if (level === "h2" || level === "h3") {
+      items.push({ id, level, text: heading.textContent.trim() });
+    }
+  }
+  if (items.length < 2) return;
+  const list = document.createElement("ul");
+  for (const item of items) {
+    const li = document.createElement("li");
+    li.className = item.level;
+    const link = document.createElement("a");
+    link.href = "#" + basePath + "#" + item.id;
+    link.textContent = item.text;
+    li.appendChild(link);
+    list.appendChild(li);
+  }
+  toc.appendChild(list);
+}
+
+function rewriteDocLinks(root, basePath, index) {
+  const known = new Set((index.docs || []).map((doc) => doc.path));
+  const htmlPaths = new Set((index.docs || []).filter((doc) => doc.kind === "html").map((doc) => doc.path));
+  for (const link of root.querySelectorAll("a[href]")) {
+    const href = link.getAttribute("href");
+    const next = rewriteHref(basePath, href, known, htmlPaths);
+    if (next && next !== href) link.setAttribute("href", next);
+  }
+  for (const el of root.querySelectorAll("iframe[src], img[src]")) {
+    const src = el.getAttribute("src");
+    if (!src || /^([a-z]+:|\/\/|\/|#)/i.test(src)) continue;
+    el.setAttribute("src", resolveRelative(basePath, src));
+  }
+}
+
 function hint(text) {
   renderGen += 1;
+  shownPath = "";
+  shownKind = "";
+  inflightPath = "";
+  clearToc();
   document.querySelectorAll("#nav-list a").forEach((a) => a.classList.remove("active"));
   content.replaceChildren();
   const p = document.createElement("p");
@@ -67,9 +126,51 @@ function findDoc(index, path) {
 }
 
 let renderGen = 0;
+let shownPath = "";
+let shownKind = "";
+let inflightPath = "";
 
-async function renderDoc(index, path) {
+function markActive(path) {
+  document.querySelectorAll("#nav-list a").forEach((a) => {
+    a.classList.toggle("active", a.dataset.path === path);
+  });
+}
+
+function scrollTo(frag) {
+  if (!frag) return;
+  const direct = document.getElementById(frag);
+  const target = direct || document.getElementById(headingFrag(frag));
+  target?.scrollIntoView();
+}
+
+function liveFrag(path, fallback) {
+  const route = parseRoute(location.hash);
+  if (route && route.path === path) return route.frag;
+  return fallback;
+}
+
+async function renderDoc(index, path, frag, search) {
+  if (path === inflightPath) {
+    scrollTo(liveFrag(path, frag));
+    return;
+  }
+  if (path === shownPath) {
+    if (inflightPath && inflightPath !== path) {
+      renderGen += 1;
+      inflightPath = "";
+    }
+    markActive(path);
+    if (shownKind === "html") {
+      const frame = content.querySelector("iframe");
+      const next = path + (search || "") + (frag ? "#" + frag : "");
+      if (frame && frame.getAttribute("src") !== next) frame.src = next;
+      return;
+    }
+    scrollTo(liveFrag(path, frag));
+    return;
+  }
   const gen = ++renderGen;
+  inflightPath = path;
   const doc = findDoc(index, path);
   if (!doc) {
     document.querySelectorAll("#nav-list a").forEach((a) => a.classList.remove("active"));
@@ -84,14 +185,20 @@ async function renderDoc(index, path) {
     if (gen !== renderGen) return;
     content.replaceChildren();
     const frame = document.createElement("iframe");
-    frame.src = path;
+    frame.src = path + (search || "") + (frag ? "#" + frag : "");
     frame.title = doc.title || path;
     frame.style.cssText = "width:100%;height:80vh;border:1px solid var(--border);border-radius:6px;";
     content.appendChild(frame);
+    clearToc();
+    shownPath = path;
+    shownKind = "html";
+    if (inflightPath === path) inflightPath = "";
+    document.title = pageTitle(null, index.title || "Artifacts");
     return;
   }
   if (doc.kind === "file") {
     if (gen !== renderGen) return;
+    clearToc();
     content.replaceChildren();
     const p = document.createElement("p");
     const a = document.createElement("a");
@@ -100,6 +207,10 @@ async function renderDoc(index, path) {
     a.textContent = doc.title || path;
     p.append(a, " (binary — download to view)");
     content.appendChild(p);
+    shownPath = path;
+    shownKind = "file";
+    if (inflightPath === path) inflightPath = "";
+    document.title = pageTitle(null, index.title || "Artifacts");
     return;
   }
 
@@ -125,35 +236,67 @@ async function renderDoc(index, path) {
     return;
   }
   if (gen !== renderGen) return;
-  content.innerHTML = md.render(text);
-  content.querySelectorAll("pre code.language-mermaid").forEach((block) => {
+  const split = splitFrontmatter(text);
+  const holder = document.createElement("template");
+  holder.innerHTML = md.render(split.body);
+  const root = holder.content;
+  fillToc(root, path);
+  rewriteDocLinks(root, path, index);
+  root.querySelectorAll("pre code.language-mermaid").forEach((block) => {
     const div = document.createElement("div");
     div.className = "mermaid";
     div.textContent = block.textContent;
     block.closest("pre").replaceWith(div);
   });
+  content.replaceChildren(root);
+  document.title = pageTitle(split.meta, index.title || "Artifacts");
   if (content.querySelector(".mermaid")) {
     for (let i = 0; i < 20 && !window.mermaid; i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 100));
       if (gen !== renderGen) return;
     }
-    if (window.mermaid) window.mermaid.run({ querySelector: ".mermaid" });
+    if (!window.mermaid) {
+      content.querySelectorAll(".mermaid").forEach((el) => {
+        el.textContent = "Diagram did not load.";
+      });
+      if (gen !== renderGen) return;
+      shownPath = path;
+      shownKind = "md";
+      if (inflightPath === path) inflightPath = "";
+      scrollTo(liveFrag(path, frag));
+      return;
+    }
+    try {
+      await window.mermaid.run({ querySelector: ".mermaid" });
+    } catch {
+      if (gen !== renderGen) return;
+      content.querySelectorAll(".mermaid").forEach((el) => {
+        if (!el.querySelector("svg")) el.textContent = "Diagram did not render.";
+      });
+    }
   }
+  if (gen !== renderGen) return;
+  shownPath = path;
+  shownKind = "md";
+  if (inflightPath === path) inflightPath = "";
+  scrollTo(liveFrag(path, frag));
 }
 
 async function main() {
   const index = await loadIndex();
   if (!index) return;
+  if (!Array.isArray(index.docs)) {
+    hint("docs.json has no docs list.");
+    return;
+  }
   renderNav(index);
   const go = () => {
-    let path = location.hash.slice(1);
-    try {
-      path = decodeURIComponent(path);
-    } catch {
-      hint(`Not in docs.json: ${path}`);
+    const route = parseRoute(location.hash);
+    if (!route) {
+      hint("That address did not decode.");
       return;
     }
-    if (path) renderDoc(index, path);
+    if (route.path) renderDoc(index, route.path, route.frag, route.search).catch((err) => hint(err.message));
   };
   window.addEventListener("hashchange", go);
   if (location.hash) go();

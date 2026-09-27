@@ -5,6 +5,12 @@
       "path": "chart-spec/spec.mdx",
       "title": "Chart spec",
       "group": "Chart"
+    },
+    {
+      "path": "chart-spec/picker.html",
+      "title": "Chart picker",
+      "group": "Chart",
+      "kind": "html"
     }
   ]
 }

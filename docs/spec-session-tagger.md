@@ -18,7 +18,7 @@ export function newTaggerState(sessionPath, tagPath): TaggerState;
 export function resumeTagger(state, tagContent, world): { complete; records; log };
 export function stepTagger(state, world, { flush, sliceMs? }): { records; cut; wrote; activity; log };
 // stepTagger's three parts, exported for the harness timers that run them apart:
-export function readSession(state, world): { records; log; activity };
+export function readSession(state, world): { records; log; activity; wrote };
 export function flushTurns(state): string;
 export function scanChildren(state, world, { sliceMs? }): { records; cut; wrote; log };
 ```
@@ -64,11 +64,13 @@ timers.
   gone, loses its state but not its source. On resume, a `_gen` record's source is matched against
   the path relative to the session's directory or to the child's own, and seeds the child's state.
 - **The session's own transcript opens a generation too.** When it is replaced (a new inode) or
-  shrinks, `readSession` drops the turns it had not written, settles every `claude -p` lookup
-  they opened, returns a `_gen` record with source `""` (`OWN_SOURCE`) and an offset marker of 0,
-  and reads the transcript from its start. The step reports `wrote`, and the next clean pass
-  stamps swept; readers then count only what
-  follows that record (`docs/wtft-tag-format.md` §2e). A resume never treats `""` as a child.
+  shrinks, `readSession` drops the turns it had not written, settles every open `claude -p`
+  lookup, returns a `_gen` record with source `""` (`OWN_SOURCE`) and an offset marker of 0,
+  and reads the transcript from its start; readers then count only the session's own lines that
+  follow that record (`docs/wtft-tag-format.md` §2e). `readSession` reports `wrote`, and the next
+  clean pass stamps swept. A resume never treats `""` as a child. `claude -p` and subagent
+  transcripts the old turns spawned stay counted: they are still on disk as this session's
+  children, and discovery would read them again.
 - **A registered `claude -p` child that is gone from disk is gone, not a failed read.** Gone means
   a missing file or directory; any other stat error is a failed poll, warned once, which withholds
   the sweep. The scan skips a gone child, writes the turn it held under the source its earlier

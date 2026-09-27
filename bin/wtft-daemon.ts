@@ -529,6 +529,11 @@ function serviceSession(): "continue" | "stop" | "drop" {
     printLog(read.log);
     if (read.records) appendTagFile(state.tagPath, read.records);
     if (read.activity) slot.lastActivityMs = Date.now();
+    if (read.wrote) {
+      slot.lastWriteMs = Date.now();
+      slot.lastActivityMs = slot.lastWriteMs;
+      slot.idleStartMs = 0;
+    }
 
     const now = Date.now();
     if (state.pendingItems.length > 0 && (now - slot.lastWriteMs) >= POLL_MS) {

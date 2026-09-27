@@ -1,7 +1,7 @@
 # Spec 281 — the spawner claims the lease
 
 Issue: https://github.com/princess-pi/wtft/issues/281 (design approved by Duppy 2026-09-26). It
-builds on #270 S5 (`docs/spec-270-daemon-health.md`), whose `decideHealth` held both clock rules
+builds on spec-270 S5 (`docs/spec-270-daemon-health.md`), whose `decideHealth` held both clock rules
 this removes. Vocabulary: `CONTEXT.md` (Lease, Daemon, Session).
 
 ## 1. The gap, and the change

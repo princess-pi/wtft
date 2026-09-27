@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Counts the test suites that start the real log parser daemon.
 # A suite counts when, under strace, any process it starts execs an argv naming
-# bin/wtft-daemon (bare, .mjs, .ts or .js). Stand-ins live outside a bin/ dir.
+# bin/wtft-daemon (bare, .mjs, .ts or .js). docs/spec-279-in-memory-suites.md § 1.
 # Usage: debug/count-daemon-spawners.sh [jobs]
 # Prints one suite per line, then "spawners: <n> of <total>", and exits 0.
 # Exits 4 after the count when a suite that started no daemon also failed: it
@@ -33,7 +33,7 @@ run_one() {
 	# setsid gives the tracer and the suite their own process group, so a suite
 	# that runs past the limit is killed with it.
 	XDG_CONFIG_HOME="$home/config" XDG_STATE_HOME="$home/state" TMPDIR="$home/tmp" \
-		setsid strace -f -qq -I 1 -s 512 -e trace=execve -o "$out/$name.trace" \
+		setsid strace -f -ff -qq -I 1 -s 512 -e trace=execve -o "$out/$name.trace" \
 		bash -c '$0 "$1" >/dev/null 2>&1; echo $? > "$2"' "$runner" "$suite" "$out/$name.done" &
 	local tracer=$! ticks=0
 	while [[ ! -e "$out/$name.done" ]] && kill -0 "$tracer" 2>/dev/null && (( ticks < limit * 10 )); do
@@ -48,10 +48,15 @@ run_one() {
 	fi
 	kill "$tracer" 2>/dev/null
 	wait "$tracer" 2>/dev/null
-	if ! grep -qF "\"$suite\"" "$out/$name.trace" 2>/dev/null; then echo "UNTRACED $name"; return; fi
-	# A failed exec (= -1 ENOENT, a PATH search) started nothing. No -q on the
-	# second grep: it would quit early, and pipefail would read SIGPIPE as no match.
-	if grep -E '"[^"]*bin/wtft-daemon(\.mjs|\.ts|\.js)?"' "$out/$name.trace" | grep -vE '= -1 [A-Z]+' >/dev/null; then
+	# -ff writes one file per process, so an exec is never split across an
+	# <unfinished ...> line and its result.
+	# No -q on either grep: it would quit early, and pipefail would read cat's
+	# SIGPIPE as no match.
+	if ! cat "$out/$name.trace".* 2>/dev/null | grep -F "\"$suite\"" >/dev/null; then echo "UNTRACED $name"; return; fi
+	# A failed exec (= -1 ENOENT, a PATH search) started nothing.
+	# The CLI harness's stand-in (tests/lib/cli-harness.ts) is excluded by path.
+	if cat "$out/$name.trace".* | grep -E '"[^"]*bin/wtft-daemon(\.mjs|\.ts|\.js)?"' \
+		| grep -vE '"[^"]*/wtft-cli-harness-[^"/]*/bin/wtft-daemon\.mjs"' | grep -vE '= -1 [A-Z]+' >/dev/null; then
 		echo "$name"
 	elif [[ "$(cat "$out/$name.done")" != 0 ]]; then
 		echo "FAILED $name"

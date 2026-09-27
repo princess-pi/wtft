@@ -7,6 +7,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
+import { cliWithoutDaemon, tagForCli } from "./lib/cli-harness.ts";
 import { calculateServerToolCost } from "../bin/wtft.mjs";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
@@ -20,7 +21,7 @@ function check(cond: boolean, msg: string) {
 }
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
-const CLI_BIN = path.join(REPO_ROOT, "bin", "wtft.mjs");
+const CLI_BIN = cliWithoutDaemon();
 const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-90-")));
 
 const WEB_REQUESTS = 5;
@@ -67,22 +68,15 @@ function fixture(name: string, web: number): string {
 const withWeb = fixture("with-web.jsonl", WEB_REQUESTS);
 const noWeb = fixture("no-web.jsonl", 0);
 
-/** Each invocation gets its OWN copy of the fixture
- *
- *  Three surfaces read by three separate processes is a snapshot comparison, not
- *  a single-state one: a provisional read is defined as one whose total MAY STILL
- *  GROW under the daemon, and the first run's tag repair would legitimately move
- *  the second run's number — which a 1e-9 equality forbids. A fresh file per run
- *  means every surface reads the same state, from nothing. (The sibling #26 suite
- *  hit this and fixed it the same way.) */
+/** Each invocation gets its own copy of the fixture, tagged before the run. */
 let runSeq = 0;
 function cli(source: string, args: string[]): string {
 	const copy = path.join(dir, `run-${runSeq++}-${path.basename(source)}`);
 	fs.copyFileSync(source, copy);
+	tagForCli(copy);
 	const r = spawnSync("node", [CLI_BIN, "-s", copy, ...args], { encoding: "utf8", env: { ...process.env } });
-	// Exit 9 is PROVISIONAL — a report in full, whose total may still grow. It is
-	// not a failure, and a fresh fixture is what keeps it from being a moving one.
-	if (r.status !== 0 && r.status !== 9) {
+	// The tag is settled, so a provisional exit 9 is a failure here too.
+	if (r.status !== 0) {
 		throw new Error(`wtft -s <copy> ${args.join(" ")} exited ${r.status}: ${r.stderr}`);
 	}
 	return (r.stdout || "").replace(/\x1b\[[0-9;]*m/g, "");
@@ -195,22 +189,13 @@ for (const [name, doc] of [["with", docWeb], ["without", docNone]] as const) {
 }
 
 console.log("--- TEST 3b: the WARM path, which is what a user actually hits ---");
-// Every run above copies the fixture first, so all of them read a session with
-// no tag file — the cold, freshly-parsed path. The steady state is the other
-// one: `readClassifiedTagFile` rebuilds an Interaction field by field from what
-// the tag writer chose to persist, so a `serverToolCost` that did not survive
-// that projection would revert to the pre-#90 numbers on every run after the
-// first, and a suite that always starts from nothing could never see it (PR
-// review). It does survive — written as `sc`, read back as `serverToolCost` —
-// and this is what holds it to that.
+// `readClassifiedTagFile` rebuilds an Interaction field by field from what the
+// tag writer chose to persist, so a `serverToolCost` that did not survive that
+// projection would revert to the pre-#90 numbers. It is written as `sc` and read
+// back as `serverToolCost`; this holds it to that over repeated runs.
 const warmFixture = path.join(dir, "warm.jsonl");
 fs.copyFileSync(withWeb, warmFixture);
 
-// Back-to-back runs with exit 9 tolerated can all three read a session whose
-// tag file does not exist yet —
-// three COLD runs, reporting coverage of a warm path that never ran. So the
-// first run primes, and the warm runs wait for the tag file to actually carry a
-// classified line before they are allowed to mean anything.
 const warmTagsDir = path.join(dir, "wtft-tags");
 function tagLineCount(): number {
 	try {
@@ -223,26 +208,24 @@ function tagLineCount(): number {
 }
 function runJson(): any {
 	const r = spawnSync("node", [CLI_BIN, "-s", warmFixture, "--json"], { encoding: "utf8" });
-	if (r.status !== 0 && r.status !== 9) throw new Error(`warm run exited ${r.status}: ${r.stderr}`);
+	if (r.status !== 0) throw new Error(`warm run exited ${r.status}: ${r.stderr}`);
 	return JSON.parse((r.stdout || "").replace(/\x1b\[[0-9;]*m/g, ""));
 }
-runJson(); // prime: spawns the daemon that writes the tag file
-const tagDeadline = Date.now() + 20_000;
-while (Date.now() < tagDeadline && tagLineCount() === 0) { /* daemon poll is 667ms */ }
+tagForCli(warmFixture);
 const tagged = tagLineCount();
-check(tagged > 0, `a tag file exists before the warm runs (${tagged} classified line(s)) — otherwise these are three cold runs`);
+check(tagged > 0, `a tag file exists before the warm runs (${tagged} classified line(s))`);
 
 const warmRuns = [1, 2, 3].map(() => runJson());
 check(
 	warmRuns.every(d => Math.abs(d.total.costUsd - docWeb.total.costUsd) < 0.005),
-	`three runs against the SAME, already-tagged fixture agree with the cold one ($${warmRuns.map(d => d.total.costUsd).join(", $")})`
+	`three runs against the same tagged fixture agree with TEST 1's read ($${warmRuns.map(d => d.total.costUsd).join(", $")})`
 );
 check(
 	warmRuns.every(d => {
 		const w = d.categories.find((c: any) => c.category === "web");
 		return Math.abs(w.costUsd - EXPECTED_WEB_COST) < 0.005;
 	}),
-	"…and the web category still carries the server-tool cost after the round-trip"
+	"…and the web category carries the server-tool cost the meter prices, read back from the tag"
 );
 
 console.log("--- TEST 4: no token field moved ---");
@@ -338,19 +321,6 @@ check(
 	Math.abs(webCat(docNative).costUsd - EXPECTED_WEB_COST) < 1e-9,
 	`…while the server-tool charge is still added once ($${EXPECTED_WEB_COST}); #118 owns the Pi case, which needs a Pi transcript to reach`
 );
-
-// TEARDOWN — stop the daemons before removing the tree they write into.
-//
-// Exit 9 means "a report in full, whose total may still grow under the daemon",
-// so by definition a background process is still parsing and writing tag files
-// beside every fixture copy when the CLI returns. Removing `dir` under them is a
-// race: orphaned processes, stray files, and on an unlucky interleaving a
-// directory-removal error `isolateTmpdir` already gives this suite
-
-// its own daemon lease, so stopping by session path reaps only ours.
-for (const session of fs.readdirSync(dir).filter(n => n.endsWith(".jsonl"))) {
-	spawnSync("node", [CLI_BIN, "--stop", path.join(dir, session)], { encoding: "utf8", timeout: 10_000 });
-}
 
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(`\n${passed} passed, ${failed} failed`);

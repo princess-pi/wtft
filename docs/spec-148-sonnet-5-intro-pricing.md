@@ -43,8 +43,9 @@ new plumbing:
 - `wtft-parser.ts:426-429` (the overhead-cost split) passes `interaction.timestamp` the same way,
   for both the `full` and `withoutCw` calls.
 - `calculateClaudeCost(model, usage, timestamp?)` signature already exists (`wtft-cost.ts:227`)
-  and already forwards `timestamp` into `getDeepSeekPeakMultiplier(timestamp)` for DeepSeek surge
-  pricing (`wtft-cost.ts:66`, `:245`, `:256`).
+  and already forwards `timestamp` into the surge multiplier. At that baseline the call was
+  `getDeepSeekPeakMultiplier(timestamp)`, gated on an id containing `deepseek`. It is now
+  `getPeakMultiplier(model, timestamp)`, which reads the card's `surge` field.
 
 So the only structurally new thing this issue needs is: **a Sonnet-5-shaped `ModelPricing` entry
 that resolves different base rates depending on where `timestamp` falls**, generalized so any
@@ -154,7 +155,7 @@ $6.00/MTok standard — with no new code at that line.
   rodeo), so the next one hits the same problem again. The registry-field direction reuses the
   exact shape (`tiers?`) the codebase already chose for GPT-5.x size-based tiering.
 - **Defaulting an absent `timestamp` to `Date.now()`**, mirroring
-  `getDeepSeekPeakMultiplier`'s `timestamp || Date.now()` (`wtft-cost.ts:67`). Rejected on
+  `getPeakMultiplier` when its timestamp argument is omitted. Rejected on
   purpose: DeepSeek's surge multiplier is *supposed* to reflect "right now" when nothing else is
   known (it's a live-pricing feature, not a historical fact). Sonnet 5's intro window is a
   historical fact about when an interaction happened — defaulting to wall-clock would make

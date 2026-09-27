@@ -16,14 +16,15 @@ then `spawners: <n> of <total>`.
 - **Why runtime, not a grep:** a grep of the source counts a suite that names the daemon's path
   and misses one that reaches it through the `wtft` CLI, which starts a daemon on every report
   (`runReport` in `extensions/lib/cli/report.ts`).
-- **Stand-ins do not count:** `tests/lib/stand-in-daemon.ts` writes its scripts outside any `bin/`
-  directory.
+- **Stand-ins do not count:** `tests/lib/stand-in-daemon.ts`, and the stand-ins 179 and 281 write,
+  live outside any `bin/` directory.
+- **Each suite gets its own config, state and tmp roots,** as `tests/run.ts` gives it.
 - **The runner's solo suites run alone here too,** after the pool. The list is read from `SOLO` in
   `tests/run.ts`.
 - **Each suite runs as `tests/run.ts` runs it,** with `bun test`.
 - **A suite is stopped when it returns.** strace follows every daemon a suite leaves running, so it
   is sent SIGTERM then, which `-I 1` lets through: it detaches, flushes the trace and exits, and
-  those daemons run on as they would untraced. A suite still running after 300 s is unfinished.
+  those daemons run on as they would untraced. A suite still running after 300 s is unfinished, and it is killed with its process group.
 - **Only an exec that succeeded counts.** An exec of a `bin/wtft-daemon` path that returned -1 (a
   PATH search) started nothing.
 - **No count rather than a low one:** when a suite is unfinished, or its trace does not show the
@@ -51,13 +52,13 @@ becomes ⌈*n* / 667⌉ polls.
 N), 115 (the daemon section), 220, 241 (the daemon section), 443 swept marker, cost
 cross-validation, and tree navigation.
 
-**Stays on the real daemon, and why.** After this slice, 43 of 123 suites count (main gained a suite):
+**Stays on the real daemon, and why.** After this slice, 42 of 123 suites count:
 - **A restart or a start-up read, 4:** tag-file staleness, 130 line-safe writes, 457, 512 fatal
   replay. What a new daemon does with a tag an earlier one wrote is `initClassified` in
   `bin/wtft-daemon.ts`, which is not in the tagger. 114's restart case (D5) moved into the
   tag-file staleness suite, which already restarts a daemon.
-- **The process itself, 16:** daemon lifecycle, the shell suite, golden tags, pack-and-smoke, 46
-  install, 96, 155, 179, 205, 239, 240, 248, 259, 262, 281, 308.
+- **The process itself, 15:** daemon lifecycle, the shell suite, golden tags, pack-and-smoke, 46
+  install, 96, 155, 205, 239, 240, 248, 259, 262, 281, 308.
 - **The CLI, 23:** § 4.
 
 ## 4. The CLI suites

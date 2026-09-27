@@ -105,7 +105,7 @@ console.log("C1. claimLeaseForChild");
 
 console.log("\nC2. spawnWtftDaemon claims the lease before the child runs");
 {
-	const standIn = path.join(dir, "bin");
+	const standIn = path.join(dir, "stand-in");
 	fs.mkdirSync(standIn);
 	fs.writeFileSync(path.join(standIn, "wtft-daemon.mjs"),
 		"import * as fs from 'node:fs';\n" +

@@ -22,19 +22,31 @@ run_one() {
 	name="$(basename "$suite")"
 	[[ "$suite" == *.sh ]] && runner=bash
 	# As tests/run.ts runs it. $0 is unquoted so "bun test" splits.
+	# Each suite gets its own config, state and tmp roots, as tests/run.ts gives it.
+	local home
+	home="$(mktemp -d "$out/suite.XXXXXX")" || { echo "UNFINISHED $name"; return; }
+	mkdir -p "$home/config" "$home/state" "$home/tmp"
 	# strace -f also follows the daemons a suite leaves running, so it is stopped
 	# when the suite returns. -I 1 lets SIGTERM through: strace then detaches,
 	# flushes the trace and exits, and the daemons run on as they would untraced.
-	strace -f -qq -I 1 -s 512 -e trace=execve -o "$out/$name.trace" \
+	# setsid gives the tracer and the suite their own process group, so a suite
+	# that runs past the limit is killed with it.
+	XDG_CONFIG_HOME="$home/config" XDG_STATE_HOME="$home/state" TMPDIR="$home/tmp" \
+		setsid strace -f -qq -I 1 -s 512 -e trace=execve -o "$out/$name.trace" \
 		bash -c '$0 "$1" >/dev/null 2>&1; echo $? > "$2"' "$runner" "$suite" "$out/$name.done" &
 	local tracer=$! ticks=0
 	while [[ ! -e "$out/$name.done" ]] && kill -0 "$tracer" 2>/dev/null && (( ticks < limit * 10 )); do
 		sleep 0.1
 		ticks=$((ticks + 1))
 	done
+	if [[ ! -e "$out/$name.done" ]]; then
+		kill -KILL -- "-$tracer" 2>/dev/null
+		wait "$tracer" 2>/dev/null
+		echo "UNFINISHED $name"
+		return
+	fi
 	kill "$tracer" 2>/dev/null
 	wait "$tracer" 2>/dev/null
-	if [[ ! -e "$out/$name.done" ]]; then echo "UNFINISHED $name"; return; fi
 	if ! grep -qF "\"$suite\"" "$out/$name.trace" 2>/dev/null; then echo "UNTRACED $name"; return; fi
 	# A failed exec (= -1 ENOENT, a PATH search) started nothing.
 	if grep -E '"[^"]*bin/wtft-daemon(\.mjs|\.ts|\.js)?"' "$out/$name.trace" | grep -qvE '= -1 [A-Z]+'; then

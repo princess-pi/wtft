@@ -1480,8 +1480,8 @@ handled is not listed. A --stop of a session a harness serves ends the command a
                         and respawn one per stopped holder started with --session, claiming its lease when
                         free; a harness holding no lease starts again on the next wtft. Linux only (/proc)
   --stop <session>      Drop that session; ~ and relative paths are resolved. A harness serving it (found
-                        through the session's lease) keeps running. A per-session process, found by its
-                        own --session resolved against its cwd, gets SIGTERM and no wait: one that
+                        through the session's lease; Linux only, /proc) keeps running. A per-session
+                        process holding a lease here, found by its own --session resolved against its cwd, gets SIGTERM and no wait: one that
                         followed a moved session is found by its old path
 
 Daemon mode:
@@ -1498,13 +1498,13 @@ Daemon mode:
 
 Exit codes:
   0  Served until done, a management pass that ran (a --restart that left a holder running
-     says so in its line), --session already served, or a --harness start with no --session
-     that finds a live harness of the same or a newer version
+     says so in its line), --session already served, or a --harness start that finds a live
+     harness of the same or a newer version and hands it its --session (or has none)
   1  --session missing, or a tag file (without --harness); a harness root missing, its pid file unreadable,
      or neither claimable nor handed a session;
      --stop refused (EPERM) or its harness lease changed or could not be removed; a tag
      write that failed; an unhandled error
-  2  An unknown argument, a flag with no value, a bad --harness name, or a --session
+  2  An unknown argument, a flag with no value, a second --stop, a bad --harness name, or a --session
      outside the harness root
 
 Environment:
@@ -1541,6 +1541,7 @@ Environment:
     } else if (arg === "--restart") {
       showRestart = true;
     } else if (arg === "--stop") {
+      if (stopSession !== null) usage("--stop takes one session");
       stopSession = valueOf(arg, ++i);
     } else if (arg === "--help" || arg === "-h") {
       showHelp();
@@ -1667,6 +1668,10 @@ if (showList || showCleanup || showRestart || stopSession) {
       // one (or one that cannot be signalled) was not stopped.
       // One that outlived SIGKILL keeps its lease: a respawn would only meet it and exit.
       const survived = stopped === "survived" || stopped === "denied";
+      if (stopSession && sessionFound && resolvedSessionArg(pid, sessionFound) === stopSession) {
+        stoppedN++;
+        if (survived) stopRefused = true;
+      }
       if (survived) keptRunning.add(pid);
       const respawnLease = wasDaemon && sessionFound && !survived ? getDaemonPidPath(sessionFound) : "";
       // The respawn's own lease is left for its claim, which takes a dead holder's.
@@ -1778,7 +1783,8 @@ if (showList || showCleanup || showRestart || stopSession) {
         cleanedN++;
         continue;
       }
-      if (showList) {
+      // --restart takes precedence: a harness it is about to stop is not listed.
+      if (showList && !(showRestart && proc.harness && [...harnessHolders.values()].includes(proc.pid))) {
         listedN++;
         const where = proc.session || (proc.harness ? `harness ${proc.roots.join(",") || "(unknown root)"}` : "(no session arg)");
         console.log(`PID ${String(proc.pid).padEnd(7)} ${"RUNNING".padEnd(20)} v${"?".padEnd(7)} idle: ${"?".padEnd(5)} ${where}`);

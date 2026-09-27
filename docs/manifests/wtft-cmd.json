@@ -201,7 +201,7 @@
     },
     {
       "flags": "--stop <session>",
-      "desc": "Stop the log parser daemon for a specific session path; ~ and a relative path are resolved first. A harness session, found through the session's lease, is dropped from the shared process, which stays up. A per-session daemon holding a lease here is found by its own --session resolved against its working directory, so one that followed a moved session is found by its old path; it is sent SIGTERM and reported stopped without waiting. A daemon that refuses the signal (another user's, EPERM) keeps its lease, and the command exits 1."
+      "desc": "Stop the log parser daemon for a specific session path; ~ and a relative path are resolved first. A harness session, found through the session's lease, is dropped from the shared process, which stays up; that check reads /proc, so off Linux such a session is reported as having no daemon and stays served. A per-session daemon holding a lease here is found by its own --session resolved against its working directory, so one that followed a moved session is found by its old path; it is sent SIGTERM and reported stopped without waiting. A daemon that refuses the signal (another user's, EPERM) keeps its lease, and the command exits 1."
     },
     {
       "flags": "-F, --force",

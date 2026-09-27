@@ -7,7 +7,8 @@
 #                                    princess-pi-tools path into
 #                                    ~/.config/wtft/ (once — no fallback read),
 #                                    and run wtft-daemon --restart when a daemon
-#                                    runs an older build of the installed bundle
+#                                    runs an older build (a harness then starts
+#                                    again on the next wtft)
 #   install-wtft --check [--json]    report drift, write nothing (doctor mode)
 #   install-wtft --dir <dir>         install somewhere else (the test seam)
 #   install-wtft --json              machine-readable document, either mode
@@ -37,9 +38,10 @@
 # configMigration array (from, to, state: "moved"|"left"|"none") and an nspGuard
 # object (state: "ok"|"shadowed"|"absent", found, guard) alongside the
 # existing artifacts/shadow fields, and a daemons object (older: how many
-# processes run the installed daemon bundle and started before it last changed;
-# restart: "none"|"done"|"failed"). Linux only: elsewhere older is 0. A failed
-# restart does not change the exit code; it is reported on stderr.
+# processes run a wtft-daemon bundle from this clone or the install dir and
+# started no later than it last changed; restart: "none"|"done"|"failed"; left:
+# how many are still older after the restart). Linux only: elsewhere older is 0.
+# A failed restart does not change the exit code; it is reported on stderr.
 #
 # The claude-nsp-guard shim (princess-pi-tools, deployed as ~/bin/claude) is
 # recognised as an executable regular file carrying this identity line, whole,
@@ -264,10 +266,10 @@ fi
 # exception: no JSON document.
 finish() {
   if [ "$JSON" = 1 ]; then
-    printf '{"schema":"install-wtft@1","mode":"%s","dir":"%s","status":"%s","onPath":%s,"artifacts":[%s],"shadow":%s,"configMigration":[%s],"nspGuard":{"state":"%s","found":%s,"guard":%s},"daemons":{"older":%s,"restart":"%s"}}\n' \
+    printf '{"schema":"install-wtft@1","mode":"%s","dir":"%s","status":"%s","onPath":%s,"artifacts":[%s],"shadow":%s,"configMigration":[%s],"nspGuard":{"state":"%s","found":%s,"guard":%s},"daemons":{"older":%s,"restart":"%s","left":%s}}\n' \
       "$MODE" "$(json_str "$DEST_DIR")" "$STATUS" "${ON_PATH:-false}" "${STATE_JSON:-}" "${SHADOW_JSON:-null}" "${CONFIG_JSON:-}" \
       "${NSP_GUARD_STATE:-absent}" "${NSPGUARD_FOUND_JSON:-null}" "${NSPGUARD_GUARD_JSON:-null}" \
-      "${OLDER_DAEMONS:-0}" "${DAEMON_RESTART:-none}"
+      "${OLDER_DAEMONS:-0}" "${DAEMON_RESTART:-none}" "${DAEMONS_LEFT:-0}"
   else
     case "$STATUS" in
       build-failed) echo "❌ install-wtft: build failed — see the output above" >&2 ;;
@@ -308,10 +310,12 @@ finish() {
                     # The guard ships from a private repo — absence is a normal host, not drift.
                     [ "${NSP_GUARD_STATE:-absent}" != absent ] || echo "   Note: no claude-nsp-guard on PATH (ships from princess-pi-tools; absent is not a failure)." ;;
     esac
+    # Same stream rule as the report above: stdout only when STATUS is ok.
+    restart_note() { if [ "$STATUS" = ok ]; then echo "$1"; else echo "$1" >&2; fi; }
     case "${DAEMON_RESTART:-none}:$MODE" in
-      done:*)    echo "   install-wtft: restarted $OLDER_DAEMONS log parser daemon(s) running an older build" ;;
-      failed:*)  echo "⚠️  install-wtft: $OLDER_DAEMONS log parser daemon(s) run an older build, and wtft-daemon --restart failed. Run: $DEST_DIR/wtft-daemon --restart" >&2 ;;
-      none:check) [ "${OLDER_DAEMONS:-0}" = 0 ] || echo "   Note: $OLDER_DAEMONS log parser daemon(s) run an older build; install-wtft restarts them." ;;
+      done:*)    restart_note "   Stopped $OLDER_DAEMONS log parser daemon(s) on an older build: per-session ones restarted, a harness starts again from the new build on the next wtft." ;;
+      failed:*)  echo "⚠️  install-wtft: $DAEMONS_LEFT of $OLDER_DAEMONS log parser daemon(s) on an older build still run after wtft-daemon --restart. Run: $DEST_DIR/wtft-daemon --list" >&2 ;;
+      none:check) [ "${OLDER_DAEMONS:-0}" = 0 ] || restart_note "   Note: $OLDER_DAEMONS log parser daemon(s) run an older build; install-wtft stops them." ;;
     esac
   fi
   exit "$EXIT"
@@ -360,34 +364,47 @@ if [ "$MODE" = install ] && [ "$STATUS" != build-failed ]; then
 fi
 
 # ---
-# Daemons on an older build (#260): a process running the installed daemon bundle
-# that started before that bundle last changed. Install mode restarts them with
-# the installed wtft-daemon --restart; --check only counts them. Linux only (/proc).
+# Daemons on an older build: a process running a wtft-daemon bundle from this
+# clone's bin/ or the install dir that started no later than that file last
+# changed (build and install leave an unchanged bundle's mtime alone). Install
+# mode runs the installed wtft-daemon --restart for them and counts again;
+# --check only counts. Linux only (/proc).
 # ---
 OLDER_DAEMONS=0
+DAEMONS_LEFT=0
 DAEMON_RESTART=none
 count_older_daemons() {
-  local bundle="$DEST_DIR/wtft-daemon.mjs" real built btime hz p cmd ticks
-  [ -f "$bundle" ] && [ -r /proc/stat ] || return 0
-  real="$(resolve "$bundle")"
-  built="$(stat -c %Y "$bundle" 2>/dev/null)" || return 0
+  local n=0 btime hz p arg ticks built dir real_src real_dst
+  [ -r /proc/stat ] || { echo 0; return; }
   btime="$(awk '/^btime /{print $2}' /proc/stat)"
-  hz="$(getconf CLK_TCK 2>/dev/null)" || return 0
-  [ -n "$btime" ] && [ -n "$hz" ] || return 0
+  hz="$(getconf CLK_TCK 2>/dev/null)"
+  [ -n "$btime" ] && [ -n "$hz" ] || { echo 0; return; }
+  real_src="$(cd "$SRC_DIR" 2>/dev/null && pwd -P)"
+  real_dst="$(cd "$DEST_DIR" 2>/dev/null && pwd -P)"
   for p in /proc/[0-9]*; do
-    cmd="$(tr '\0' '\n' < "$p/cmdline" 2>/dev/null)" || continue
-    printf '%s\n' "$cmd" | grep -qxF -e "$bundle" -e "$real" -e "$DEST_DIR/wtft-daemon" || continue
-    # Field 22, starttime in clock ticks since boot; fields after ")" of comm start at 3.
-    ticks="$(sed 's/.*) //' "$p/stat" 2>/dev/null | awk '{print $20}')" || continue
-    [ -n "$ticks" ] || continue
-    [ $(( btime + ticks / hz )) -lt "$built" ] && OLDER_DAEMONS=$((OLDER_DAEMONS + 1))
+    [ -r "$p/cmdline" ] || continue
+    while IFS= read -r -d '' arg; do
+      case "$(basename -- "$arg")" in wtft-daemon|wtft-daemon.mjs|wtft-daemon.js|wtft-daemon.ts) ;; *) continue ;; esac
+      [ -f "$arg" ] || continue
+      dir="$(cd "$(dirname -- "$arg")" 2>/dev/null && pwd -P)" || continue
+      [ "$dir" = "$real_src" ] || [ "$dir" = "$real_dst" ] || continue
+      built="$(stat -L -c %Y "$arg" 2>/dev/null)" || continue
+      # Field 22, starttime in clock ticks since boot; fields after ")" of comm start at 3.
+      ticks="$(sed 's/.*) //' "$p/stat" 2>/dev/null | awk '{print $20}')"
+      [ -n "$ticks" ] || continue
+      # A tie counts as older: one second's resolution cannot order them.
+      [ $(( btime + ticks / hz )) -le "$built" ] && n=$((n + 1))
+      break
+    done < "$p/cmdline"
   done
-  return 0
+  echo "$n"
 }
 if [ "$STATUS" != build-failed ] && [ "$STATUS" != no-dir ]; then
-  count_older_daemons
+  OLDER_DAEMONS="$(count_older_daemons)"
   if [ "$MODE" = install ] && [ "$OLDER_DAEMONS" -gt 0 ]; then
-    if "$DEST_DIR/wtft-daemon" --restart >&2; then DAEMON_RESTART=done; else DAEMON_RESTART=failed; fi
+    "$DEST_DIR/wtft-daemon" --restart >&2
+    DAEMONS_LEFT="$(count_older_daemons)"
+    if [ "$DAEMONS_LEFT" = 0 ]; then DAEMON_RESTART=done; else DAEMON_RESTART=failed; fi
   fi
 fi
 

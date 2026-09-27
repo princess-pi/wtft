@@ -16,11 +16,28 @@ export function daemonLogPath(env: NodeJS.ProcessEnv = process.env): string {
 	return path.join(state, "wtft", "daemon.log");
 }
 
+const STALE_LOCK_MS = 60_000;
+
 export function rotateDaemonLog(file: string, maxBytes: number): void {
+	const lock = `${file}.lock`;
 	try {
 		if (fs.statSync(file).size < maxBytes) return;
-		fs.copyFileSync(file, `${file}.1`);
-		fs.truncateSync(file, 0);
+		try {
+			fs.closeSync(fs.openSync(lock, "wx"));
+		} catch {
+			// Another process is rotating; one that died holding the lock is overtaken.
+			if (Date.now() - fs.statSync(lock).mtimeMs < STALE_LOCK_MS) return;
+			fs.utimesSync(lock, new Date(), new Date());
+		}
+		try {
+			// Checked again under the lock: a rotation that finished since the first
+			// check has already emptied the file, and copying it now would blank .1.
+			if (fs.statSync(file).size < maxBytes) return;
+			fs.copyFileSync(file, `${file}.1`);
+			fs.truncateSync(file, 0);
+		} finally {
+			fs.rmSync(lock, { force: true });
+		}
 	} catch { /* no log yet, or unwritable: the spawn goes on without it */ }
 }
 

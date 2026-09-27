@@ -175,19 +175,23 @@ now falls through the same evaluation as every other exit.
   ],
   "nspGuard": { "state": "ok" | "shadowed" | "absent",
     "found": "/usr/local/bin/claude" | null, "guard": "/home/u/bin/claude" | null },
-  "daemons": { "older": 0, "restart": "none" | "done" | "failed" }
+  "daemons": { "older": 0, "restart": "none" | "done" | "failed", "left": 0 }
 }
 ```
 
-- **`daemons` (#260): a daemon on an older build is restarted.** `older` counts the processes
-  whose command line names the installed daemon bundle (`<dir>/wtft-daemon.mjs`, its resolved
-  path, or `<dir>/wtft-daemon`) and that started before that bundle's mtime. Install mode leaves an
-  identical, executable copy unwritten, so the mtime dates the last build that changed it. When
-  `older` is above 0, install mode runs `<dir>/wtft-daemon --restart` (its output to stderr) and
-  `restart` says `done` or `failed`; the human report says it restarted them, or, on failure,
-  names the command to run. A failed restart does not change the exit code. `--check` counts and
-  restarts nothing. Off Linux (no `/proc`), and after `build-failed` or `no-dir`, `older` is 0.
-  A harness is not restarted by `--restart`; the next `wtft` starts one from the new bundle.
+- **`daemons` (#260): a daemon on an older build is stopped.** `older` counts the processes whose
+  command line names a `wtft-daemon` bundle (`wtft-daemon`, `.mjs`, `.js` or `.ts`) in this clone's
+  `bin/` (where the Pi widget's daemons run from) or in `<dir>`, and that started no later than that
+  file's mtime; a start in the same second counts as older. `bun run build` and install mode leave
+  an unchanged bundle unwritten, so its mtime dates the last build that changed it. When `older` is
+  above 0, install mode runs `<dir>/wtft-daemon --restart` (its output to stderr) and counts again:
+  `left` is how many are still older, and `restart` is `done` when none are, else `failed`.
+  `--restart` stops each lease and harness holder and restarts the per-session ones; **a harness is
+  stopped, not restarted, and the next `wtft` or widget spawn starts it from the new bundle.** A
+  process that holds no lease is out of `--restart`'s reach and stays in `left`. The human report
+  says what was stopped, or names what is left, on stderr; the note follows the stream rule above.
+  A failed restart does not change the exit code. `--check` counts and restarts nothing. Off Linux
+  (no `/proc`), and after `build-failed` or `no-dir`, `older` is 0.
 
 - **`configMigration` is present on every exit path, install or check, including
   `no-dir` and `build-failed`** (#156) — it is computed independently of `DEST_DIR`/the

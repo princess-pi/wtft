@@ -6,7 +6,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execFileSync, execSync, spawn } from "node:child_process";
+import { execFileSync, execSync, spawn, spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir, mkSandbox } from "./lib/sandbox";
 
 isolateTmpdir("46-install-wtft");
@@ -1025,46 +1025,61 @@ console.log("\n10. The claude-nsp-guard shim: ok, shadowed (exit 5), absent, mid
 }
 
 // ---
-// 11. A daemon running an older build of the installed bundle is restarted
-//     (#260 A13): one started before the installed daemon bundle last changed.
-//     The "daemon" is a sleep whose argv[0] is the installed path.
+// 11. A daemon running an older build is stopped and, per session, restarted
+//     (#260 A13): one started no later than its bundle last changed. The
+//     bundle is touched between the daemon's start and the install, which is
+//     what a changed build does to it.
 // ---
 console.log("\n11. install-wtft restarts a daemon on an older build, and only then");
 if (!fs.existsSync("/proc/self/stat")) {
 	console.log("  ##SKIP## no /proc on this host");
 } else {
 	const dir = mkSandbox(path.join(os.tmpdir(), "46-restart-"));
-	const daemon = path.join(dir, "wtft-daemon.mjs");
+	const bundle = path.join(dir, "wtft-daemon.mjs");
 	const first = run(["--json", "--dir", dir]);
-	check(first.code === 0 && fs.existsSync(daemon), "V11 precondition: installed", `got ${first.code}`);
+	check(first.code === 0 && fs.existsSync(bundle), "V11 precondition: installed", `got ${first.code}`);
 	const docOf = (out: string) => { try { return JSON.parse(out); } catch { return null; } };
-	const fake = spawn("bash", ["-c", 'exec -a "$0" sleep 30', daemon], { stdio: "ignore" });
+	const pause = (s: number) => execSync(`sleep ${s}`);
+	// A stopped child of this process stays a zombie until reaped, which kill 0 reads as alive.
+	const alive = (pid: number) => { try { return fs.readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1]?.[0] !== "Z"; } catch { return false; } };
+
+	const mtime = fs.statSync(bundle).mtimeMs;
+	const again = run(["--json", "--dir", dir]);
+	check(fs.statSync(bundle).mtimeMs === mtime, "V11a: an identical bundle is not rewritten, so its mtime still dates the build");
+	check(docOf(again.out)?.daemons?.older === 0 && docOf(again.out)?.daemons?.restart === "none",
+		"V11b: with no daemon on an older build, nothing restarts", JSON.stringify(docOf(again.out)?.daemons));
+
+	const session = path.join(mkSandbox(path.join(os.tmpdir(), "46-restart-session-")), "s.jsonl");
+	fs.writeFileSync(session, "");
+	const daemon = spawn(process.execPath, [bundle, "--session", session], { stdio: "ignore", env: process.env });
+	// Not a lease holder, so --restart cannot reach it: the failure path.
+	const bystander = spawn("bash", ["-c", 'exec -a "$0" sleep 30', bundle], { stdio: "ignore" });
+	const respawned: number[] = [];
 	try {
-		for (const until = Date.now() + 2000; Date.now() < until;) {
-			try { if (fs.readFileSync(`/proc/${fake.pid}/cmdline`, "utf8").startsWith(daemon)) break; } catch { /* not yet */ }
-			execSync("sleep 0.02");
-		}
-		check(fs.readFileSync(`/proc/${fake.pid}/cmdline`, "utf8").startsWith(daemon), "V11 precondition: the stand-in's cmdline names the installed daemon");
-
-		const mtime = fs.statSync(daemon).mtimeMs;
-		const again = run(["--json", "--dir", dir]);
-		check(fs.statSync(daemon).mtimeMs === mtime, "V11a: an identical bundle is not rewritten, so its mtime still dates the build");
-		check(docOf(again.out)?.daemons?.older === 0 && docOf(again.out)?.daemons?.restart === "none",
-			"V11b: a daemon started after the build is not older, and nothing restarts", JSON.stringify(docOf(again.out)?.daemons));
-
-		const later = new Date(Date.now() + 60_000);
-		fs.utimesSync(daemon, later, later);
-		const older = run(["--dir", dir]);
-		check(older.code === 0 && /restarted 1 log parser daemon/.test(older.out),
-			"V11c: a daemon started before the build is restarted, and the run says so", `${older.out}${older.err}`.slice(0, 400));
-		const olderJson = run(["--json", "--dir", dir]);
-		check(docOf(olderJson.out)?.daemons?.older === 1 && docOf(olderJson.out)?.daemons?.restart === "done",
-			"V11d: --json reports it", JSON.stringify(docOf(olderJson.out)?.daemons));
-		const checkMode = run(["--check", "--json", "--dir", dir]);
-		check(docOf(checkMode.out)?.daemons?.older === 1 && docOf(checkMode.out)?.daemons?.restart === "none",
-			"V11e: --check counts it and restarts nothing", JSON.stringify(docOf(checkMode.out)?.daemons));
+		pause(1.1);
+		const now = new Date();
+		fs.utimesSync(bundle, now, now);
+		pause(1.1);
+		const { code, out } = run(["--json", "--dir", dir]);
+		const doc = docOf(out);
+		check(code === 0 && doc?.daemons?.older === 2, "V11c: both processes on the older build are counted", JSON.stringify(doc?.daemons));
+		check(!alive(daemon.pid!), "V11d: the lease-holding daemon was stopped");
+		const lease = path.join(process.env.TMPDIR!, fs.readdirSync(process.env.TMPDIR!).find(f => f.startsWith("wtft-daemon-") && f.endsWith(".pid")) ?? "none");
+		const leaseHolder = () => Number(fs.existsSync(lease) ? fs.readFileSync(lease, "utf8").trim() : 0);
+		const holder = leaseHolder();
+		if (holder > 0) respawned.push(holder);
+		check(holder > 0 && holder !== daemon.pid && alive(holder), "V11e: a new daemon was started for its session", `lease=${lease} holder=${holder}`);
+		check(doc?.daemons?.restart === "failed" && doc?.daemons?.left === 1,
+			"V11f: the one --restart could not reach is still counted, and the restart reads failed", JSON.stringify(doc?.daemons));
+		// run() drops stderr on exit 0, and the failure line is on stderr.
+		const human = spawnSync(INSTALLER, ["--dir", dir], { encoding: "utf8", env: { ...process.env, HOME: mkSandbox(path.join(os.tmpdir(), "46-restart-home-")), PATH: [BUN_DIR, "/usr/bin", "/bin"].join(":") } });
+		if (leaseHolder() > 0) respawned.push(leaseHolder());
+		check(/1 of 1 log parser daemon\(s\) on an older build still run after wtft-daemon --restart/.test(human.stderr),
+			"V11g: the human report names what is left", `${human.stdout}${human.stderr}`.slice(0, 400));
 	} finally {
-		fake.kill("SIGKILL");
+		daemon.kill("SIGKILL");
+		bystander.kill("SIGKILL");
+		for (const pid of respawned) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } }
 	}
 }
 

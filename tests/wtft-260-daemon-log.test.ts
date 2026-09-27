@@ -62,6 +62,26 @@ describe("rotateDaemonLog", () => {
 		assert.strictEqual(fs.readFileSync(f, "utf8"), "c");
 	});
 
+	it("a rotation under way elsewhere (its lock present) is left to it", () => {
+		const f = path.join(sandbox, "locked.log");
+		fs.writeFileSync(f, "a".repeat(12));
+		fs.writeFileSync(`${f}.lock`, "");
+		rotateDaemonLog(f, 10);
+		assert.strictEqual(fs.statSync(f).size, 12);
+		assert.ok(!fs.existsSync(`${f}.1`));
+	});
+
+	it("a lock left by a rotation that died a minute ago is taken over", () => {
+		const f = path.join(sandbox, "stale-lock.log");
+		fs.writeFileSync(f, "a".repeat(12));
+		fs.writeFileSync(`${f}.lock`, "");
+		const old = new Date(Date.now() - 61_000);
+		fs.utimesSync(`${f}.lock`, old, old);
+		rotateDaemonLog(f, 10);
+		assert.strictEqual(fs.readFileSync(`${f}.1`, "utf8"), "a".repeat(12));
+		assert.ok(!fs.existsSync(`${f}.lock`));
+	});
+
 	it("a missing file is not an error", () => {
 		assert.doesNotThrow(() => rotateDaemonLog(path.join(sandbox, "absent", "none.log"), 10));
 	});

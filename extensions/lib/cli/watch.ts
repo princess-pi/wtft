@@ -1,7 +1,14 @@
 import * as path from "node:path";
-import { watchTagFile, getCurrentVersionTagPath } from "../wtft-shared.js";
+import { readConfig } from "@princess-pi/libs/config";
+import { watchTagFile, getCurrentVersionTagPath, chartLimit } from "../wtft-shared.js";
+import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "../wtft-config-dir.js";
 import { spawnWtftDaemon } from "../wtft-cli-shared.js";
 import type { WtftCliOptions } from "../wtft-cli-shared.js";
+
+function configLimit(): number | undefined {
+	const limit = readConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR).limit;
+	return typeof limit === "number" ? limit : undefined;
+}
 
 /** `--watch`: spawn the daemon and render its tag until `q`. */
 export async function runWatch(opts: WtftCliOptions, finalSessionPath: string, daemonDir: string, unit: "cost" | "tokens"): Promise<void> {
@@ -18,7 +25,7 @@ export async function runWatch(opts: WtftCliOptions, finalSessionPath: string, d
 	await watchTagFile(finalSessionPath, tagPath, {
 		daemonChild,
 		interval: opts.hasInterval ? opts.interval : "1h",
-		limit: opts.hasLimit ? opts.limit : 100,
+		limit: chartLimit(opts, configLimit()),
 		mode: opts.hasMode ? opts.mode : "cumulative",
 		timezone: opts.hasTimezone ? opts.timezone : undefined,
 		unit,

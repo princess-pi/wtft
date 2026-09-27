@@ -50,6 +50,16 @@ const BLOCK_OLD = "\u2583" as const;
 const BLOCK_NEW = "\u2587" as const;
 const BLOCK_BUCKET = "\u2588" as const;
 
+const PLACEHOLDER_PREFIX = "\x1b[90m-";
+
+/** Padding stops here whatever the limit: `-l 1000000000` is a valid row limit, not a request for a billion rows. */
+export const MAX_PADDED_ROWS = 1000;
+
+/** A padding row: the watch drops these first when the frame is taller than the terminal. */
+export function isPlaceholderRow(line: string): boolean {
+	return line.startsWith(PLACEHOLDER_PREFIX);
+}
+
 export function renderWtftChart(input: {
 	displayedBins: Bin[];
 	mode: "bucket" | "cumulative";
@@ -67,6 +77,7 @@ export function renderWtftChart(input: {
 	cacheLine: string | null;
 	showCostColumns?: boolean;
 	showTokenColumns?: boolean;
+	padRowsTo?: number;
 }): string[] {
 	const {
 		displayedBins, mode, unit, width, disabledEmoji, tz,
@@ -373,6 +384,9 @@ export function renderWtftChart(input: {
 		}
 	}
 	if (missed(displayedBins[displayedBins.length - 1])) widgetLines.push(cacheMissLine);
+
+	const placeholder = PLACEHOLDER_PREFIX + [padString("-", labelWidth), ...columnWidths.map(w => padString("-", w))].join("  ").slice(1) + "\x1b[0m";
+	for (let n = displayedBins.length; n < Math.min(input.padRowsTo ?? 0, MAX_PADDED_ROWS); n++) widgetLines.push(placeholder);
 
 	if (otherWarning) widgetLines.push(otherWarning);
 

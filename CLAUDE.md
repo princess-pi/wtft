@@ -12,14 +12,26 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
   test fails on any other import.
 - **The README is tested.** `tests/wtft-75-doc-claims.test.ts` checks README flags against the
   parser and the manifest, and `install-wtft` exit codes against the script, so a README edit can
-  fail the suite. It pins `CONTEXT.md` and `docs/adding-a-harness.md` too, so an edit there can
-  fail it as well.
+  fail the suite. It pins `CONTEXT.md`, `docs/adding-a-harness.md` and this file's seam list too,
+  so an edit there can fail it as well.
 - **Shared code goes in `@princess-pi/libs`**, never copied in.
 - **Spec-reconcile does not treat comments as spec.** Reconcile: manifests,
   `--help`, README flags/exit codes, JSON schema, tag-format, `CONTEXT.md`,
   `docs/wtft-incremental-render-spec.md`, user-facing strings.
   Not banner comments, not test-header novels, not glossary provenance, not counts
   in prose. A stale comment is deleted, never reworded.
+
+## One module, one seam per feature
+
+- **A feature lands in one module, behind one interface, with one in-memory test seam.** The
+  seams that exist: `decideHealth` (`extensions/lib/daemon-health.ts`), `stepTagger`
+  (`extensions/lib/session-tagger.ts`), the registry functions
+  (`extensions/lib/harness-registry.ts`), and `classifyPid` over a fake process table
+  (`extensions/lib/holder.ts`, `tests/lib/fake-process-table.ts`).
+- **Every feature PR body carries one line:** `Module: <file> · Seam: <function>, tested in <suite>`.
+  A PR that touches a second module adds `Also: <file> — <why>` for each one.
+- *Why:* before the daemon ownership refactor (spec-270), one daemon feature touched state spread across `bin/wtft-daemon.ts` and
+  several readers. That spread is where the fix-spawns-fix chains came from.
 
 ## Commands
 

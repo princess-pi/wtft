@@ -1,6 +1,6 @@
 # Spec 264 — pad the CLI chart to its row limit
 
-**Issue:** [#264](https://github.com/princess-pi/wtft/issues/264) · **Tests:** `tests/wtft-264-pad-rows.test.ts`
+**Tests:** `tests/wtft-264-pad-rows.test.ts`
 
 ## Behaviour
 

@@ -219,7 +219,9 @@ answer (`docs/spec-270-daemon-health.md` §4).
 
 ### 3d. Closer for the issue
 
-- Every function in #270's table under an approximate cyclomatic count of 30.
+- Each of these under an approximate cyclomatic count of 30: the daemon's `main`, the CLI's `main`,
+  `syncSubagentTranscript`, `scanForSubAgents`, `reapAndWarn`, `sweepIdleSlots` and
+  `getModelShortName`, or the functions that took their work.
 - `tests/wtft-270-session-tagger.test.ts` exercises fold, generation, held-turn, rotation and
   interrupt logic with no daemon process spawned.
 - The count of suites that spawn `wtft-daemon` falls below 30 (54 on `main` @ `0082dee`).

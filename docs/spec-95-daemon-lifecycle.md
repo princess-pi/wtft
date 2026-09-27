@@ -81,7 +81,7 @@ idleSinceMs = max(newest _hb.first, newest classified t)
 ```
 
 Heartbeats alone can never declare idle when classified lines are fresher. As built
-(since #270 S5, `docs/spec-270-daemon-health.md` §2): `first` counts only from a heartbeat
+(since spec-270 S5, `docs/spec-270-daemon-health.md` §2): `first` counts only from a heartbeat
 after the newest non-heartbeat, non-stop record, and is raised to that record's `t` when it
 is a later turn; with no such heartbeat there is no heartbeat idle. When that idle time is
 below `IDLE_THRESHOLD_MS`, a session file untouched for `IDLE_THRESHOLD_MS` still reads idle;

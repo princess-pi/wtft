@@ -1,6 +1,6 @@
 # Spec 270 S6 — the CLI arms
 
-Slice S6 of #270 (`docs/spec-270-daemon-ownership.md` §3a CLI arms row, §3b S6 row). `bin/wtft.ts`
+Slice S6 of the daemon ownership refactor (`docs/spec-270-daemon-ownership.md` §3a CLI arms row, §3b S6 row). `bin/wtft.ts`
 `main` becomes a dispatcher; what it did after argument parsing moves, unchanged, into
 `extensions/lib/cli/`.
 
@@ -40,5 +40,5 @@ None changes. The code moved byte for byte; a function's parameters replace the 
   about 90 lines of `main` that every non-daemon arm needs first. *Road not taken:* folding it
   into `runReport` and `runWatch`, which would have copied it.
 - **A move, not a rewrite.** `runReport` is still about 340 lines. Splitting it is a behaviour
-  risk this slice does not take; #270's closer (every listed function under CC 30) is measured on
-  its own.
+  risk this slice does not take; `runReport` takes the CLI `main`'s place in the refactor's closer
+  (`docs/spec-270-daemon-ownership.md` §3d), so that closer stays unmet until it is split.

@@ -577,10 +577,11 @@ export function getSurgeLocalHours(tz?: string, now: number = Date.now(), model?
 }
 
 /**
- * Ending is the last {@link SURGE_ENDING_MINUTES} inside a window that bills
- * above 1 on that UTC day. Approaching is the {@link SURGE_APPROACH_MINUTES}
- * before such a window opens. A lead that wraps past midnight asks about the
- * next UTC day.
+ * Ending is the last {@link SURGE_ENDING_MINUTES} before the surge stops.
+ * A window that still bills at the minute this one ends does not stop it,
+ * including one that starts at 0 on the next UTC day when this one ends at
+ * 1440. Approaching is the {@link SURGE_APPROACH_MINUTES} before a window
+ * opens. A lead that wraps past midnight asks about the next UTC day.
  */
 export function checkSurgeProximity(at: number = Date.now(), model?: string): { status: 'surge' | 'approaching' | 'ending' | undefined; multiplier: number } {
 	const schedule = model ? surgeScheduleFor(model) : null;
@@ -598,10 +599,20 @@ export function checkSurgeProximity(at: number = Date.now(), model?: string): { 
 		return getPeakMultiplier(model, probe) > 1;
 	};
 
+	const continuesPast = (selfStart: number, selfEnd: number) => {
+		const covered = schedule.windowsUtcMinutes.some(([start, otherEnd]) =>
+			!(start === selfStart && otherEnd === selfEnd) && start <= selfEnd && selfEnd < otherEnd);
+		if (covered) return true;
+		if (selfEnd === 1440 && schedule.windowsUtcMinutes.some(([start]) => start === 0)) {
+			return opensOn(next.getUTCFullYear(), next.getUTCMonth(), next.getUTCDate(), 0);
+		}
+		return false;
+	};
+
 	for (const [start, end] of schedule.windowsUtcMinutes) {
 		if (currentUtcMinute >= start && currentUtcMinute < end && opensOn(y, mo, d, start)) {
 			const endingAt = end - SURGE_ENDING_MINUTES;
-			if (currentUtcMinute >= endingAt) return { status: 'ending', multiplier };
+			if (currentUtcMinute >= endingAt && !continuesPast(start, end)) return { status: 'ending', multiplier };
 			return { status: 'surge', multiplier };
 		}
 	}

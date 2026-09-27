@@ -5,14 +5,19 @@
  */
 
 import * as assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { describe, it, after } from "node:test";
 import {
 	MODEL_PRICING,
 	applyUserPricing,
 	calculateClaudeCost,
+	describeFallbackPricing,
 	getPeakMultiplier,
 	type ModelPricing,
 } from "../extensions/lib/wtft-cost.ts";
+import { loadUserPricing } from "../extensions/lib/wtft-pricing-config.ts";
 import {
 	SURGE_APPROACH_MINUTES,
 	SURGE_ENDING_MINUTES,
@@ -81,13 +86,16 @@ describe("#312 a card carries its own surge schedule", () => {
 		assert.equal(checkSurgeProximity(minute(120 - SURGE_ENDING_MINUTES - 1), CARD).status, "surge");
 	});
 
-	it("rejects a surge schedule that cannot be walked, and keeps DeepSeek's schedule when an override omits it", () => {
+	it("keeps the rates when a surge schedule cannot be walked, and says why", () => {
 		const flash = MODEL_PRICING["deepseek-flash"];
-		applyUserPricing({
+		const bad = applyUserPricing({
 			"bad-surge": { input: 1, output: 1, cacheRead: 1, cacheWrite: 0, surge: { multiplier: "no" } } as never,
 		});
-		assert.equal(MODEL_PRICING["bad-surge"], undefined);
+		assert.equal(bad.length, 1);
+		assert.match(bad[0].reason, /above 1/);
+		assert.equal(MODEL_PRICING["bad-surge"].input, 1);
 		assert.equal(getPeakMultiplier("bad-surge", minute(60)), 1);
+		delete MODEL_PRICING["bad-surge"];
 
 		applyUserPricing({ "deepseek-flash": { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } });
 		assert.equal(getPeakMultiplier("deepseek-flash", minute(60)), 2);
@@ -104,14 +112,22 @@ describe("#312 a card carries its own surge schedule", () => {
 		assert.equal(calculateClaudeCost("deepseek-flash", usage, minute(60)), 9);
 		MODEL_PRICING["deepseek-flash"] = flash;
 
-		applyUserPricing({
-			"flat-surge": { input: 1, output: 1, cacheRead: 1, cacheWrite: 0, surge: { multiplier: 1, windowsUtcMinutes: [[60, 120]] } } as never,
+		const flat = applyUserPricing({
+			"flat-surge": { input: 4, output: 1, cacheRead: 1, cacheWrite: 0, surge: { multiplier: 1, windowsUtcMinutes: [[60, 120]] } } as never,
 		});
-		assert.equal(MODEL_PRICING["flat-surge"], undefined);
-		applyUserPricing({
-			"wrapped-window": { input: 1, output: 1, cacheRead: 1, cacheWrite: 0, surge: { multiplier: 2, windowsUtcMinutes: [[1380, 60]] } } as never,
+		assert.equal(flat.length, 1);
+		assert.equal(MODEL_PRICING["flat-surge"].input, 4);
+		assert.equal(getPeakMultiplier("flat-surge", minute(60)), 1);
+		delete MODEL_PRICING["flat-surge"];
+
+		const wrapped = applyUserPricing({
+			"wrapped-window": { input: 5, output: 1, cacheRead: 1, cacheWrite: 0, surge: { multiplier: 2, windowsUtcMinutes: [[1380, 60]] } } as never,
 		});
-		assert.equal(MODEL_PRICING["wrapped-window"], undefined);
+		assert.equal(wrapped.length, 1);
+		assert.match(wrapped[0].reason, /two windows/);
+		assert.equal(MODEL_PRICING["wrapped-window"].input, 5);
+		assert.equal(getPeakMultiplier("wrapped-window", minute(60)), 1);
+		delete MODEL_PRICING["wrapped-window"];
 	});
 
 	it("bills a 1-hour cache write from the card's input, not the surged input", () => {
@@ -151,13 +167,28 @@ describe("#312 a card carries its own surge schedule", () => {
 		delete MODEL_PRICING["acme-weekend"];
 	});
 
-	it("reports ending inside a later window before an earlier window's midnight lead", () => {
+	it("keeps surge while the next window still bills, including across midnight", () => {
 		MODEL_PRICING["acme-split"] = {
 			input: 1, output: 1, cacheRead: 1, cacheWrite: 0,
 			surge: { multiplier: 2, windowsUtcMinutes: [[0, 60], [1380, 1440]] },
 		};
-		assert.equal(checkSurgeProximity(minute(1425), "acme-split").status, "ending");
+		assert.equal(checkSurgeProximity(minute(1425), "acme-split").status, "surge");
 		delete MODEL_PRICING["acme-split"];
+
+		MODEL_PRICING["acme-touch"] = {
+			input: 1, output: 1, cacheRead: 1, cacheWrite: 0,
+			surge: { multiplier: 2, windowsUtcMinutes: [[60, 240], [240, 300]] },
+		};
+		assert.equal(checkSurgeProximity(minute(220), "acme-touch").status, "surge");
+		assert.equal(checkSurgeProximity(minute(280), "acme-touch").status, "ending");
+		delete MODEL_PRICING["acme-touch"];
+
+		MODEL_PRICING["acme-late"] = {
+			input: 1, output: 1, cacheRead: 1, cacheWrite: 0,
+			surge: { multiplier: 2, windowsUtcMinutes: [[1380, 1440]] },
+		};
+		assert.equal(checkSurgeProximity(minute(1425), "acme-late").status, "ending");
+		delete MODEL_PRICING["acme-late"];
 	});
 });
 
@@ -179,5 +210,44 @@ describe("#20 SURGE ENDING is the last lead inside a DeepSeek window", () => {
 		const saturday = count(29);
 		assert.equal(saturday.undefined, 1440);
 		assert.equal(saturday.ending, undefined);
+	});
+});
+
+describe("a surge schedule that cannot be walked is printed", () => {
+	it("loadUserPricing names the key and the reason on stderr", () => {
+		const tmp = path.join(os.tmpdir(), `wtft-312-bad-surge-${process.pid}.json`);
+		fs.writeFileSync(tmp, JSON.stringify({
+			"loud-surge": {
+				input: 1, output: 1, cacheRead: 1, cacheWrite: 0,
+				surge: { multiplier: 2, windowsUtcMinutes: [[1380, 60]] },
+			},
+		}));
+		const lines: string[] = [];
+		const orig = console.error;
+		console.error = (msg?: unknown) => { lines.push(String(msg)); };
+		try {
+			loadUserPricing(tmp);
+			assert.equal(MODEL_PRICING["loud-surge"].input, 1);
+		} finally {
+			console.error = orig;
+			fs.unlinkSync(tmp);
+			delete MODEL_PRICING["loud-surge"];
+		}
+		assert.match(lines.join("\n"), /loud-surge/);
+		assert.match(lines.join("\n"), /two windows/);
+	});
+});
+
+describe("fallback warning follows the sibling schedule", () => {
+	it("omits the surge note when the sibling card has no schedule", () => {
+		assert.match(describeFallbackPricing("deepseek-reasoner"), /surge multiplier applied/);
+		const flash = MODEL_PRICING["deepseek-v4-flash"];
+		const saved = flash.surge;
+		flash.surge = null;
+		try {
+			assert.doesNotMatch(describeFallbackPricing("deepseek-reasoner"), /surge multiplier applied/);
+		} finally {
+			flash.surge = saved;
+		}
 	});
 });

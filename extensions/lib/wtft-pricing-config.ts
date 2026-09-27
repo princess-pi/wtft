@@ -24,13 +24,17 @@ export function getUserPricingPath(): string {
 /**
  * Missing/unreadable/invalid file → no-op (wtft never blocks on config;
  * per-entry validation lives in applyUserPricing).
+ * A surge schedule that cannot be walked is dropped, the rates are kept,
+ * and each rejection is printed on stderr.
  */
 export function loadUserPricing(filePath: string = getUserPricingPath()): Record<string, ModelPricing> | null {
 	try {
 		if (!fs.existsSync(filePath)) return null;
 		const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
 		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-		applyUserPricing(parsed as Record<string, ModelPricing>);
+		for (const item of applyUserPricing(parsed as Record<string, ModelPricing>)) {
+			console.error(`\x1b[33m⚠ pricing ${item.key}: ${item.reason}\x1b[0m`);
+		}
 		return parsed as Record<string, ModelPricing>;
 	} catch {
 		return null; // unreadable or malformed JSON — keep built-ins

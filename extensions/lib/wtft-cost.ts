@@ -290,31 +290,56 @@ function finiteNumber(value: unknown): value is number {
 }
 
 /** Multiplier above 1, and each window satisfies 0 <= start < end <= 1440. */
-function validSurge(surge: unknown): surge is SurgeSchedule {
-	if (!surge || typeof surge !== "object") return false;
+function surgeRejection(surge: unknown): string | null {
+	if (!surge || typeof surge !== "object") return "surge must be an object";
 	const schedule = surge as SurgeSchedule;
-	if (!finiteNumber(schedule.multiplier) || schedule.multiplier <= 1) return false;
-	if (!Array.isArray(schedule.windowsUtcMinutes)) return false;
-	for (const pair of schedule.windowsUtcMinutes) {
-		if (!Array.isArray(pair) || !finiteNumber(pair[0]) || !finiteNumber(pair[1])) return false;
-		if (!(pair[0] >= 0 && pair[0] < pair[1] && pair[1] <= 1440)) return false;
+	if (!finiteNumber(schedule.multiplier) || schedule.multiplier <= 1) {
+		return "multiplier must be a finite number above 1";
 	}
-	if (schedule.weekendOffPeakFrom !== undefined && !finiteNumber(schedule.weekendOffPeakFrom)) return false;
-	return true;
+	if (!Array.isArray(schedule.windowsUtcMinutes)) return "windowsUtcMinutes must be a list of windows";
+	for (const pair of schedule.windowsUtcMinutes) {
+		if (!Array.isArray(pair) || !finiteNumber(pair[0]) || !finiteNumber(pair[1])) {
+			return "each window is a pair of minute numbers";
+		}
+		if (pair[0] > pair[1]) {
+			return "a window that wraps past midnight is two windows, each with start < end";
+		}
+		if (!(pair[0] >= 0 && pair[0] < pair[1] && pair[1] <= 1440)) {
+			return "each window must satisfy 0 <= start < end <= 1440";
+		}
+	}
+	if (schedule.weekendOffPeakFrom !== undefined && !finiteNumber(schedule.weekendOffPeakFrom)) {
+		return "weekendOffPeakFrom must be a finite number";
+	}
+	return null;
 }
+
+export type PricingRejection = { key: string; reason: string };
 
 /**
  * Pure merge — reading the pricing file from disk lives in
  * wtft-pricing-config.ts so this module stays fs-free.
+ * Returns one entry per surge schedule that could not be walked.
+ * That card is stored with its rates and without a schedule.
  */
-export function applyUserPricing(overrides: Record<string, ModelPricing>): void {
+export function applyUserPricing(overrides: Record<string, ModelPricing>): PricingRejection[] {
+	const rejected: PricingRejection[] = [];
 	for (const [key, pricing] of Object.entries(overrides)) {
 		if (!pricing || typeof pricing !== "object") continue;
 		const { input, output, cacheRead, cacheWrite } = pricing;
 		// Why validate: a malformed JSON entry must not poison cost math with NaN.
 		if ([input, output, cacheRead, cacheWrite].some(v => typeof v !== "number" || !isFinite(v))) continue;
-		if (pricing.surge !== undefined && pricing.surge !== null && !validSurge(pricing.surge)) continue;
 		const id = key.toLowerCase().trim();
+		if (pricing.surge !== undefined && pricing.surge !== null) {
+			const reason = surgeRejection(pricing.surge);
+			if (reason) {
+				rejected.push({ key, reason });
+				const stored: ModelPricing = { ...pricing };
+				delete stored.surge;
+				MODEL_PRICING[id] = stored;
+				continue;
+			}
+		}
 		const stored: ModelPricing = { ...pricing };
 		if (pricing.surge === null) delete stored.surge;
 		else if (stored.surge === undefined) {
@@ -324,6 +349,7 @@ export function applyUserPricing(overrides: Record<string, ModelPricing>): void 
 		}
 		MODEL_PRICING[id] = stored;
 	}
+	return rejected;
 }
 
 /**
@@ -367,7 +393,8 @@ export function deepSeekSiblingKey(model: string): "deepseek-v4-pro" | "deepseek
 export function describeFallbackPricing(model: string): string {
 	const m = (model || "").toLowerCase();
 	if (m.includes("deepseek")) {
-		return `guessing with the ${deepSeekSiblingKey(m)} rate card (surge multiplier applied)`;
+		const note = surgeScheduleFor(model) ? " (surge multiplier applied)" : "";
+		return `guessing with the ${deepSeekSiblingKey(m)} rate card${note}`;
 	}
 	return "using default $3/$15 rates";
 }

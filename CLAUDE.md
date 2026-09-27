@@ -1,7 +1,7 @@
 # wtft
 
 Where The F'ing Tokens: live token-spend tracker for Claude Code and Pi sessions, as a CLI, a log
-parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29). Origin: btw#63.
+parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29).
 
 ## Hard gates
 
@@ -15,7 +15,7 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
   fail the suite. It pins `CONTEXT.md` and `docs/adding-a-harness.md` too, so an edit there can
   fail it as well.
 - **Shared code goes in `@princess-pi/libs`**, never copied in.
-- **Spec-reconcile does not treat comments as spec** (#183). Reconcile: manifests,
+- **Spec-reconcile does not treat comments as spec.** Reconcile: manifests,
   `--help`, README flags/exit codes, JSON schema, tag-format, `CONTEXT.md`,
   `docs/wtft-incremental-render-spec.md`, user-facing strings.
   Not banner comments, not test-header novels, not glossary provenance, not counts

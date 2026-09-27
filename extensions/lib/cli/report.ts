@@ -357,6 +357,8 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 		disabledEmoji,
 		sessionNameSuffix: path.basename(finalSessionPath),
 		unit,
+		showCostColumns: !opts.hideCostColumns,
+		showTokenColumns: !opts.hideTokenColumns,
 	});
 
 	if (!outputLines) {

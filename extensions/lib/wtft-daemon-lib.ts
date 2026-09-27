@@ -33,6 +33,8 @@ export interface WatchSettings {
 	mode: "cumulative" | "bucket";
 	timezone?: string;
 	unit?: "cost" | "tokens";
+	showCostColumns?: boolean;
+	showTokenColumns?: boolean;
 	daemonPath?: string; // path to wtft-daemon.mjs (CLI watch mode only)
 	daemonChild?: ChildProcess | null;
 	pad?: number;
@@ -877,6 +879,8 @@ export async function watchTagFile(
 			mode: finalMode,
 			timezone: finalTimezone,
 			unit: settings.unit,
+			showCostColumns: settings.showCostColumns,
+			showTokenColumns: settings.showTokenColumns,
 			disabledEmoji,
 		});
 

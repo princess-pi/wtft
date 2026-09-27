@@ -38,6 +38,11 @@ describe("#330 the chart spec is a browser page", () => {
 		assert.equal(heading, "#chart-spec/spec.mdx#doc-sample");
 		assert.equal(headingDomId("***", 1), "doc-section");
 		assert.equal(headingFrag("sample"), "doc-sample");
+		assert.equal(headingFrag("My%20Heading"), "doc-my-heading");
+		assert.equal(
+			rewriteHref("chart-spec/spec.mdx", "#My%20Heading", new Set()),
+			"#chart-spec/spec.mdx#doc-my-heading",
+		);
 		assert.equal(rewriteHref("chart-spec/spec.mdx", "/foo.html", new Set()), "/foo.html");
 		assert.equal(rewriteHref("chart-spec/spec.mdx", "other.mdx?v=1", new Set()), "#chart-spec/other.mdx?v=1");
 		const html = new Set(["chart-spec/picker.html"]);

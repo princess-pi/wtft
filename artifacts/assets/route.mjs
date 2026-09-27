@@ -51,9 +51,18 @@ export function parseRoute(hash) {
   return { path, frag, search };
 }
 
+function decodePart(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 export function headingFrag(frag) {
   if (!frag) return "";
-  return frag.startsWith("doc-") ? frag : headingDomId(frag, 1);
+  const text = decodePart(frag);
+  return text.startsWith("doc-") ? text : headingDomId(text, 1);
 }
 
 export function resolveRelative(basePath, href) {
@@ -65,20 +74,18 @@ export function resolveRelative(basePath, href) {
 export function rewriteHref(basePath, href, known, htmlPaths) {
   if (!href || /^([a-z]+:|\/\/)/i.test(href) || href.startsWith("/")) return href;
   if (href.startsWith("#")) {
-    const frag = href.slice(1);
-    const id = frag.startsWith("doc-") ? frag : headingDomId(frag, 1);
-    return "#" + basePath + "#" + id;
+    return "#" + basePath + "#" + headingFrag(href.slice(1));
   }
   const hash = href.indexOf("#");
   const file = hash === -1 ? href : href.slice(0, hash);
-  const frag = hash === -1 ? "" : href.slice(hash + 1);
+  const frag = hash === -1 ? "" : decodePart(href.slice(hash + 1));
   if (!file) return href;
   const resolved = resolveRelative(basePath, file);
   const pathOnly = resolved.split("?")[0].split("#")[0];
   const query = resolved.includes("?") ? resolved.slice(resolved.indexOf("?")).split("#")[0] : "";
   if (known.has(pathOnly) || pathOnly.endsWith(".md") || pathOnly.endsWith(".mdx")) {
     const html = htmlPaths && htmlPaths.has(pathOnly);
-    const id = !frag ? "" : html ? frag : (frag.startsWith("doc-") ? frag : headingDomId(frag, 1));
+    const id = !frag ? "" : html ? frag : headingFrag(frag);
     return "#" + pathOnly + query + (id ? "#" + id : "");
   }
   return pathOnly + query + (frag ? "#" + frag : "");

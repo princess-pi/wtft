@@ -42,7 +42,7 @@ interface ProcessTable {
 | `daemon` | alive, and its cmdline names `wtft-daemon` (`.mjs`, `.js`, `.ts` or bare) without `--harness` |
 | `harness` | alive, and its cmdline names `wtft-daemon` with `--harness` |
 | `other` | alive, and its cmdline is readable and names something else. A recycled pid lands here |
-| `unverified` | alive, but its cmdline cannot be read: `/proc/<pid>/cmdline` on Linux (hidepid), `ps -o command=` on a host with no `/proc` (`psCmdline`, split on whitespace) |
+| `unverified` | alive, but its cmdline cannot be read. This is always the case off Linux; `verifiedKind` below reads it again for two callers |
 
 "Alive" means `signal 0` was sent or denied, and `state` does not say otherwise. EPERM is another
 user's live process. `pidAlive(pid)` is `classifyPid(pid) !== "gone"`.
@@ -56,7 +56,9 @@ Three rules cover every caller:
   signals. Those two classify with **`verifiedKind(pid)`**: `classifyPid`, except that on a host
   with no `/proc` an `unverified` pid is read again through `psCmdline`. A pid still `unverified`
   may be anything, so it is never signalled, on any host; `-F` then answers `busy` and
-  `restartDaemon` fails. A harness is never stopped on behalf of one session.
+  `restartDaemon` fails. On Linux a harness is never stopped on behalf of one session; with no
+  `/proc` a harness start cannot hand it the session, so there it is stopped like a daemon, with
+  no SIGKILL, since a reused pid cannot be told apart. An `other` holder's lease is removed.
 - **A verified daemon:** `daemon` or `harness`, with the cmdline read. The harness's own claims
   and the daemon management commands signal only these. `--restart` stops a harness as well. They
   use `classifyPid` alone, so off Linux they verify nothing and stop nothing. Removing a lease is not

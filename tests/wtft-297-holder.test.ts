@@ -280,4 +280,33 @@ describe("restartDaemon off Linux (#266)", () => {
 		assert.deepStrictEqual(t.signals, []);
 		assert.deepStrictEqual(t.spawned, []);
 	});
+	it("sends a verified daemon SIGTERM only, never SIGKILL", async () => {
+		const t = fakeProcessTable({ linux: false });
+		restore = useProcessTable(t);
+		const { file, lease } = session();
+		t.daemon(710, ["--session", file], "ignores-term");
+		fs.writeFileSync(lease, "710");
+		assert.strictEqual(await restartDaemon(file, "/x/bin/wtft-daemon.mjs"), false);
+		assert.deepStrictEqual(t.signals.map(s => s.sig), ["SIGTERM"]);
+	});
+	it("removes the lease of a holder the ps read names as something else, and spawns", async () => {
+		const t = fakeProcessTable({ linux: false });
+		restore = useProcessTable(t);
+		const { file, lease } = session();
+		t.add(711, ["sleep", "600"]);
+		fs.writeFileSync(lease, "711");
+		assert.strictEqual(await restartDaemon(file, "/x/bin/wtft-daemon.mjs"), true);
+		assert.deepStrictEqual(t.signals, []);
+		assert.strictEqual(t.spawned.length, 1);
+		assert.notStrictEqual(fs.readFileSync(lease, "utf8").trim(), "711");
+	});
+	it("-F stops a verified harness, since a harness start cannot hand it the session", () => {
+		const t = fakeProcessTable({ linux: false });
+		restore = useProcessTable(t);
+		const { file, lease } = session();
+		t.daemon(712, ["--harness", "claude"]);
+		fs.writeFileSync(lease, "712");
+		assert.strictEqual(forceRebuildSession(file, { termMs: 30, pollMs: 1 }), "stopped");
+		assert.deepStrictEqual(t.signals.map(s => s.sig), ["SIGTERM"]);
+	});
 });

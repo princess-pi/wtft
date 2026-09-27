@@ -75,7 +75,7 @@ export const linuxProcessTable: ProcessTable = {
 export function psCmdline(pid: number): string[] | null {
 	if (!Number.isSafeInteger(pid) || pid <= 0) return null;
 	try {
-		const out = execFileSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2000 });
+		const out = execFileSync("ps", ["-ww", "-o", "command=", "-p", String(pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2000 });
 		const args = out.trim().split(/\s+/).filter(a => a.length > 0);
 		return args.length > 0 ? args : null;
 	} catch {
@@ -137,9 +137,10 @@ export function verifiedKind(pid: number): HolderKind {
 }
 
 /** Only a daemon is signalled by a one-session caller: a harness serves other sessions, an
- *  `other` is not ours, and an unverified pid may be anything. */
+ *  `other` is not ours, and an unverified pid may be anything. With no /proc a harness start
+ *  cannot hand a session to a running harness, so there a harness is stopped too. */
 export function mayStop(kind: HolderKind): boolean {
-	return kind === "daemon";
+	return kind === "daemon" || (kind === "harness" && !table.inspectable());
 }
 
 export interface StopOptions { termMs?: number; killMs?: number; pollMs?: number }

@@ -76,7 +76,7 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   session, and waiting keeps two writers off one tag. On Linux: the liveness check reads
   `/proc/<pid>/cmdline`, so off Linux every holder reads as not a daemon: a lease is taken with
   no retry and no signal, and a harness start displaces the running harness's root pid file
-  and claims the root itself, so `pointSessionAt` never runs (#266, as for A9 and `-F`).
+  and claims the root itself, so `pointSessionAt` never runs (as for A9; `-F` stops a harness there instead, `docs/spec-holder.md`).
 - **An older per-session build never takes over from a newer one** (A9). It takes over only from
   a tag of an older version. With a newer-version tag present and its lease held by a live
   daemon, it exits 0; off Linux, where a daemon cannot be told apart, any live lease holder counts. It never deletes a newer-version tag.

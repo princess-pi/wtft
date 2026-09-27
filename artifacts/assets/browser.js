@@ -4,6 +4,7 @@ const content = document.getElementById("content");
 const md = window.markdownit({ html: true, linkify: true });
 
 function hint(text) {
+  renderGen += 1;
   document.querySelectorAll("#nav-list a").forEach((a) => a.classList.remove("active"));
   content.replaceChildren();
   const p = document.createElement("p");

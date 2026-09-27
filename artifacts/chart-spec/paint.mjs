@@ -289,9 +289,10 @@ export function render(opts) {
 		ten: false,
 		hundred: false,
 		...opts.rules,
+		miss: true,
+		date: true,
 	};
 	if (opts.interval !== "turns" && (rules.ten || rules.hundred)) notes.push("Turn lines are off: the interval is time.");
-	if (!rules.miss || !rules.date) notes.push("The chart always draws a cache-miss line and a date change.");
 	const shipped = (opts.layout === "stack" && opts.measure === "total-cost" && !opts.recency)
 		|| (opts.layout === "scatter" && opts.measure === "inc-cost" && !opts.recency)
 		|| (opts.layout === "stack" && opts.measure === "total-tokens" && opts.recency)
@@ -313,9 +314,10 @@ export function render(opts) {
 	const body = (row, label) => {
 		const fields = columns.map((id, index) => columnText(row, id).padStart(columnWidths[index], " "));
 		const parts = orderedParts(row, opts.measure);
-		const slots = opts.layout === "scatter" ? width : barSlots(row);
+		const scatter = opts.layout === "scatter" && opts.measure !== "inc-tokens" && opts.measure !== "total-tokens";
+		const slots = scatter ? width : barSlots(row);
 		let bar;
-		if (opts.layout === "scatter") bar = paintScatter(parts, slots, scaleMax);
+		if (scatter) bar = paintScatter(parts, slots, scaleMax);
 		else if (encoding === "recency") bar = paintRecency(parts, slots);
 		else bar = paintFull(parts, slots);
 		const head = [label.padEnd(labelWidth, " "), ...fields].join("  ");

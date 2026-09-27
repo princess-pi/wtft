@@ -81,8 +81,6 @@
     </fieldset>
     <fieldset>
       <legend>Rules</legend>
-      <label><input type="checkbox" id="miss" checked> cache miss</label>
-      <label><input type="checkbox" id="date" checked> date change</label>
       <label><input type="checkbox" id="ten"> every 10 turns</label>
       <label><input type="checkbox" id="hundred"> every 100 turns</label>
     </fieldset>
@@ -114,8 +112,6 @@
     document.getElementById("cost-columns").checked = preset.columns.includes("inc-cost");
     document.getElementById("token-columns").checked = preset.columns.includes("inc-tokens");
     document.getElementById("recency").checked = preset.recency;
-    document.getElementById("miss").checked = preset.rules.miss;
-    document.getElementById("date").checked = preset.rules.date;
     document.getElementById("ten").checked = preset.rules.ten;
     document.getElementById("hundred").checked = preset.rules.hundred;
     draw();
@@ -138,8 +134,6 @@
       ],
       recency: document.getElementById("recency").checked,
       rules: {
-        miss: document.getElementById("miss").checked,
-        date: document.getElementById("date").checked,
         ten: document.getElementById("ten").checked,
         hundred: document.getElementById("hundred").checked,
       },

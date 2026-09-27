@@ -109,6 +109,8 @@ try {
 		check(range.status === 2, `--reparse-range is an unknown argument (exit ${range.status})`);
 		const noValue = run(root, ["--stop"]);
 		check(noValue.status === 2 && noValue.stderr.includes("Usage:"), `a flag missing its value exits 2 (exit ${noValue.status})`);
+		const twoStops = run(root, ["--stop", path.join(root, "a.jsonl"), "--stop", path.join(root, "b.jsonl")]);
+		check(twoStops.status === 2 && twoStops.stderr.includes("--stop takes one session"), `a second --stop exits 2 (exit ${twoStops.status})`);
 
 		const file = session(root, "alias");
 		const h = start(root, ["--harness", "claude-code", "--session", file], "alias.err");

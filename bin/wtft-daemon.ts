@@ -636,12 +636,12 @@ function claimPidFile(file: string): "claimed" | "busy" {
   });
 }
 
-function harnessRoot(which: string): string {
+function harnessRoot(which: string, env: NodeJS.ProcessEnv = process.env): string {
   if (which === "claude") {
-    return projectsDir();
+    return projectsDir(env);
   }
   if (which === "pi") {
-    return process.env.WTFT_PI_SESSIONS_DIR || path.join(os.homedir(), ".pi", "agent", "sessions");
+    return env.WTFT_PI_SESSIONS_DIR || path.join(os.homedir(), ".pi", "agent", "sessions");
   }
   process.stderr.write("wtft-daemon: --harness must be claude, claude-code or pi\n");
   process.exit(2);
@@ -1031,6 +1031,11 @@ function watchFocusRequests() {
   } catch { /* the sweep still serves requests */ }
 }
 
+function harnessPidFileFor(which: string, root: string): string {
+  const hash = createHash("sha256").update(root).digest("hex").slice(0, 12);
+  return path.join(os.tmpdir(), `wtft-harness-${which}-${hash}.pid`);
+}
+
 function harnessVersionFile(pid: number): string {
   return `${harnessPidFile}.${pid}.version`;
 }
@@ -1053,8 +1058,7 @@ function runHarness(which: string, focus: string) {
       quit(2);
     }
   }
-  const hash = createHash("sha256").update(root).digest("hex").slice(0, 12);
-  harnessPidFile = path.join(os.tmpdir(), `wtft-harness-${which}-${hash}.pid`);
+  harnessPidFile = harnessPidFileFor(which, root);
   // Written before the claim, so a harness that holds the pid file always has
   // one; keyed by pid, so one left by a killed harness names nobody live.
   fs.writeFileSync(harnessVersionFile(process.pid), TAGGER_VERSION);
@@ -1642,11 +1646,9 @@ if (showList || showCleanup || showRestart || stopSession) {
   const liveHolderIn = (file: string): boolean => {
     try { return holdsLease(classifyPid(leasePid(fs.readFileSync(file, "utf8").trim()))); } catch { return false; }
   };
-  const liveHarnessFor = (which: string): boolean => {
-    try {
-      return fs.readdirSync(pidDir).some(f => f.startsWith(`wtft-harness-${which}-`) && f.endsWith(".pid")
-        && liveHolderIn(path.join(pidDir, f)));
-    } catch { return false; }
+  const liveHarnessFor = (which: string, env: NodeJS.ProcessEnv): boolean => {
+    const key = which === "claude-code" ? "claude" : which;
+    return liveHolderIn(harnessPidFileFor(key, path.resolve(harnessRoot(key, env))));
   };
   const seenPids = new Set<number>();
   const restarted = new Set<number>();
@@ -1749,7 +1751,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       } else if (harnessOnly) {
         const childPid = spawnDetached([process.argv[1], "--harness", harnessFound!], restartEnv);
         if (childPid) {
-          pendingRespawns.push({ childPid, served: () => liveHarnessFor(harnessFound!), settle: ok => { harnessBack = ok; if (!ok) restartFailed = true; report(); } });
+          pendingRespawns.push({ childPid, served: () => liveHarnessFor(harnessFound!, restartEnv), settle: ok => { harnessBack = ok; if (!ok) restartFailed = true; report(); } });
           continue;
         }
         restartFailed = true;

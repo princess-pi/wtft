@@ -65,7 +65,7 @@ try {
 		check(r.status === 0, `nothing failed, so exit 0 (got ${r.status})`);
 	}
 
-	console.log("--- C2: a respawn that hands off to a live harness and exits 0 counts ---");
+	console.log("--- C2: a respawn that hands off to a live harness and exits 0 counts, under the claude-code alias too ---");
 	{
 		const real = spawn("node", [DAEMON, "--harness", "claude"], { stdio: "ignore", env, detached: true });
 		children.push(real);
@@ -76,14 +76,14 @@ try {
 		}
 		check(holder === real.pid, "fixture precondition: a real harness holds the root");
 		const [script] = standInDaemonArgs("setInterval(() => {}, 1000);");
-		const fake = spawn(process.execPath, [script, "--harness", "claude"], { stdio: "ignore", env, detached: true });
+		const fake = spawn(process.execPath, [script, "--harness", "claude-code"], { stdio: "ignore", env, detached: true });
 		children.push(fake);
 		check(awaitStandIn(fake.pid!) || classifyPid(fake.pid!) === "harness", "fixture precondition: the stand-in reads as a harness");
 		const session = path.join(root, "proj", "b.jsonl");
 		fs.writeFileSync(session, "");
 		fs.writeFileSync(getDaemonPidPath(session), String(fake.pid));
 		const r = restart();
-		check(/Restarted: PID \d+ → fresh harness daemon \(claude\)/.test(r.stdout), `the hand-off counts as restarted:\n${r.stdout}`);
+		check(/Restarted: PID \d+ → fresh harness daemon \(claude-code\)/.test(r.stdout), `the hand-off under the claude-code alias counts as restarted:\n${r.stdout}`);
 		check(r.status === 0, `exit 0 (got ${r.status})`);
 	}
 

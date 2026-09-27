@@ -20,7 +20,7 @@ import { projectsDir } from "./harness/claude-code/discovery.js";
 import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
 import { tagRecords, parseTagLine, currentGeneration, sweepState, isDataRecord, type TagRecord } from "./tag-log.js";
 import { replaceLease, unlinkLeaseIf, leaseHolder, claimLeaseForChild, leasePid } from "./lease.js";
-import { classifyPid, holdsLease, mayStop, processTable, stopHolder, stopHolderSync, type StopOptions } from "./holder.js";
+import { classifyPid, holdsLease, mayStop, processTable, stopHolder, stopHolderSync, verifiedKind, type StopOptions } from "./holder.js";
 import {
 	decideHealth, readHealthFacts, daemonReasonText, IDLE_THRESHOLD_MS,
 	type DaemonStatus, type HealthOptions,
@@ -511,8 +511,7 @@ export function getDaemonPidPath(sessionPath: string): string {
  * lease that cannot be read ("unreadable"), a rebuild lease that cannot be
  * written ("unwritable"), a daemon that cannot be signalled ("unsignalled"),
  * and a lease or tag that cannot be deleted ("undeletable") are failures.
- * Unless busy or a failure, the caller then asks for the session. Telling a harness apart reads `/proc`, so off Linux a harness is stopped like a
- * per-session daemon.
+ * Unless busy or a failure, the caller then asks for the session.
  */
 export type ForceRebuildFailure = "unreadable" | "unwritable" | "unsignalled" | "undeletable";
 
@@ -532,8 +531,8 @@ export function forceRebuildSession(sessionPath: string, stopOpts: StopOptions =
 	let initial = "";
 	try { initial = fs.readFileSync(leasePath, "utf8").trim(); }
 	catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "unreadable"; }
-	const kind = classifyPid(leasePid(initial));
-	if (kind === "harness") {
+	const kind = verifiedKind(leasePid(initial));
+	if (kind === "harness" && processTable().inspectable()) {
 		try {
 			if (!replaceLease(leasePath, "rebuild", String(process.pid), initial)) return "busy";
 		} catch {
@@ -541,6 +540,7 @@ export function forceRebuildSession(sessionPath: string, stopOpts: StopOptions =
 		}
 		return "rebuild";
 	}
+	if (kind === "unverified") return "busy";
 	// Its shutdown flushes into the tag, so the tag goes only once it has
 	// exited; one still running after 2 s keeps its tag ("busy").
 	const stopped = mayStop(kind);
@@ -698,11 +698,11 @@ export async function restartDaemon(sessionPath: string, daemonPath: string): Pr
 	const pidPath = getDaemonPidPath(sessionPath);
 	try {
 		const pid = leasePid(leaseHolder(pidPath));
-		// A harness is asked to serve this session (the spawn below points it
-		// here), never stopped; a pid that is not a daemon is not ours to signal,
-		// and the claim below displaces it. The new daemon must not start beside
-		// the old one, whose shutdown flushes into the tag.
-		if (mayStop(classifyPid(pid)) && (await stopHolder(pid)) !== "stopped") return false;
+		const kind = verifiedKind(pid);
+		if (kind === "unverified") return false;
+		// With no /proc a reused pid cannot be told apart before SIGKILL.
+		if (mayStop(kind) && (await stopHolder(pid, processTable().inspectable() ? {} : { killMs: 0 })) !== "stopped") return false;
+		if (kind === "other") unlinkLeaseIf(pidPath, String(pid));
 	} catch {}
 
 	let childPid = 0;

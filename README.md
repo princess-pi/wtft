@@ -191,7 +191,7 @@ retired in `@4`.
 - **1** — error: no session found or selected, an invalid path, a daemon that
   could not be spawned or that died before producing data, a refused flag
   (`--pager`), `--stop` unable to drop a session, `-F` unable to rebuild (a daemon that did not
-  stop, a lease another daemon claimed meanwhile, a lease that could not be read, a rebuild lease that
+  stop, a holder that could not be verified as a daemon, a lease another daemon claimed meanwhile, a lease that could not be read, a rebuild lease that
   could not be written, a daemon that could not be signalled, a lease or tag file that could not be deleted, a daemon that could not be
   started, or a harness that did not take the session up within
   10 s), `--list`/`--cleanup`/`--restart`/`--stop`
@@ -336,7 +336,7 @@ dead process or one that is not a daemon; a per-session start exits at once when
 for a tag of this version (an older-version tag is taken over; beside a newer-version tag any live
 daemon holder keeps it) and exits 1 on a lease it cannot
 read, and a harness start takes a per-session holder's lease and retries on another harness's
-(on Linux, where the liveness check reads `/proc`; elsewhere it takes either, #266),
+(on Linux, where the liveness check reads `/proc`; elsewhere it takes either),
 so the daemon revives after an idle timeout when the previous process exited. A session under the Claude
 projects directory or the Pi sessions directory is served by that directory's one
 daemon, and an idle session there is dropped while the process stays up and watched for

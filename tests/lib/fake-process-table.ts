@@ -22,7 +22,7 @@ export interface FakeProcessTable extends ProcessTable {
 	spawned: { pid: number; command: string; args: string[] }[];
 }
 
-export function fakeProcessTable(opts: { linux?: boolean } = {}): FakeProcessTable {
+export function fakeProcessTable(opts: { linux?: boolean; ps?: boolean } = {}): FakeProcessTable {
 	const linux = opts.linux ?? true;
 	const procs = new Map<number, Proc>();
 	let nextPid = 50_000;
@@ -82,6 +82,10 @@ export function fakeProcessTable(opts: { linux?: boolean } = {}): FakeProcessTab
 			if (!linux) return null;
 			const p = procs.get(pid);
 			return p && !p.hidden ? (p.state === "zombie" ? [] : p.cmdline) : null;
+		},
+		psCmdline(pid) {
+			const p = procs.get(pid);
+			return opts.ps !== false && p ? p.cmdline : null;
 		},
 		spawn(command, args) {
 			const pid = nextPid++;

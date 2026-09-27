@@ -18,12 +18,13 @@ interface ProcessTable {
   state(pid): "running" | "zombie" | "gone" | null;  // null: this host cannot tell, or /proc/<pid>/stat is unreadable
   cmdline(pid): string[] | null;                      // null: unreadable
   inspectable(): boolean;                             // a /proc to read at all
+  psCmdline(pid): string[] | null;                    // `ps -o command=`, split on whitespace; for a host with no /proc
   startTime(pid): string | null;                      // changes when the pid is reused
   spawn(command, args, env): number;                  // detached, unref'd, stderr to docs/spec-daemon-log.md's log; 0 when it failed
 }
 ```
 
-- **Production:** `linuxProcessTable`. Off Linux, `state`, `cmdline` and `startTime` are always `null`.
+- **Production:** `linuxProcessTable`. Off Linux, `state`, `cmdline` and `startTime` are always `null`; `psCmdline` still reads.
 - **Tests:** `fakeProcessTable()` in `tests/lib/fake-process-table.ts`. A test adds processes with
   a cmdline and says how each reacts to a signal: it dies, it ignores SIGTERM, it becomes a
   zombie, or it refuses (EPERM). Its `spawn` creates a live entry with the given command line,
@@ -41,7 +42,7 @@ interface ProcessTable {
 | `daemon` | alive, and its cmdline names `wtft-daemon` (`.mjs`, `.js`, `.ts` or bare) without `--harness` |
 | `harness` | alive, and its cmdline names `wtft-daemon` with `--harness` |
 | `other` | alive, and its cmdline is readable and names something else. A recycled pid lands here |
-| `unverified` | alive, but its cmdline cannot be read. This is always the case off Linux |
+| `unverified` | alive, but its cmdline cannot be read. This is always the case off Linux; `verifiedKind` below reads it again for two callers |
 
 "Alive" means `signal 0` was sent or denied, and `state` does not say otherwise. EPERM is another
 user's live process. `pidAlive(pid)` is `classifyPid(pid) !== "gone"`.
@@ -51,13 +52,16 @@ Three rules cover every caller:
   stale. `other` is stale: that process is not the daemon the lease was written for. Health
   (`docs/spec-daemon-health.md`), the startup wait, the spawner's claim, the per-session child's
   claim, the newer-tag check, `--list`, `--cleanup` and the reaper use it.
-- **`mayStop(kind)`:** `daemon`, or `unverified` on a host with no `/proc` at all (off Linux).
-  These are the only kinds a one-session caller (`restartDaemon`, `-F`) signals. On Linux an
-  `unverified` pid (hidepid) may be anything, so it is never signalled. A harness is never
-  stopped on behalf of one session.
+- **`mayStop(kind)`:** `daemon` only: the one kind a one-session caller (`restartDaemon`, `-F`)
+  signals. Those two classify with **`verifiedKind(pid)`**: `classifyPid`, except that on a host
+  with no `/proc` an `unverified` pid is read again through `psCmdline`. A pid still `unverified`
+  may be anything, so it is never signalled, on any host; `-F` then answers `busy` and
+  `restartDaemon` fails. On Linux a harness is never stopped on behalf of one session; with no
+  `/proc` a harness start cannot hand it the session, so there it is stopped like a daemon, with
+  no SIGKILL, since a reused pid cannot be told apart. An `other` holder's lease is removed.
 - **A verified daemon:** `daemon` or `harness`, with the cmdline read. The harness's own claims
-  and the daemon management commands signal only these. `--restart` stops a harness as well. Off
-  Linux nothing is verified, so these callers stop nothing there. Removing a lease is not
+  and the daemon management commands signal only these. `--restart` stops a harness as well. They
+  use `classifyPid` alone, so off Linux they verify nothing and stop nothing. Removing a lease is not
   signalling: `--stop` removes the lease of any live non-harness holder, `--cleanup` that of an
   `unverified` holder whose session is gone, and `--restart` removes the leases and root pid files
   off Linux too.

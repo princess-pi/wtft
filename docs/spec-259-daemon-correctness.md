@@ -76,7 +76,7 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   session, and waiting keeps two writers off one tag. On Linux: the liveness check reads
   `/proc/<pid>/cmdline`, so off Linux every holder reads as not a daemon: a lease is taken with
   no retry and no signal, and a harness start displaces the running harness's root pid file
-  and claims the root itself, so `pointSessionAt` never runs (#266, as for A9 and `-F`).
+  and claims the root itself, so `pointSessionAt` never runs (as for A9; `-F` stops a harness there instead, `docs/spec-holder.md`).
 - **An older per-session build never takes over from a newer one** (A9). It takes over only from
   a tag of an older version. With a newer-version tag present and its lease held by a live
   daemon, it exits 0; off Linux, where a daemon cannot be told apart, any live lease holder counts. It never deletes a newer-version tag.
@@ -119,7 +119,7 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 - **Otherwise `-F` stops a live per-session daemon and deletes every version of the session's
   tag**, beside the transcript and in the sibling project where a moved session's tag lives. The
   CLI says whether a daemon was stopped. On Linux only a lease holder whose command line names
-  `wtft-daemon` is signalled; off Linux the lease pid is signalled as before. When the daemon is still running 2 s after the signal,
+  `wtft-daemon` is signalled; off Linux the command line is read through `ps` instead, and a holder neither read can verify is not signalled: `-F` says busy (`verifiedKind`, `docs/spec-holder.md`). When the daemon is still running 2 s after the signal,
   or another daemon has claimed the lease meanwhile, nothing is deleted, and `-F` says so and
   exits 1. So does a lease that cannot be read, a rebuild lease that cannot be written, a daemon that
   cannot be signalled, a lease or tag

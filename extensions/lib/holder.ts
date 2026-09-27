@@ -4,7 +4,7 @@
  * a process-table port a test replaces. docs/spec-holder.md.
  */
 
-import { spawn as spawnChild } from "node:child_process";
+import { execFileSync, spawn as spawnChild } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { daemonStdio } from "./daemon-log.js";
@@ -19,6 +19,8 @@ export interface ProcessTable {
 	cmdline(pid: number): string[] | null;
 	/** Whether this host has a readable process table at all (Linux's /proc). */
 	inspectable(): boolean;
+	/** The command line as `ps` prints it, for a host with no /proc; null when it cannot say. */
+	psCmdline(pid: number): string[] | null;
 	/** A value that changes when the pid is reused; null when it cannot be read. */
 	startTime(pid: number): string | null;
 	/** Detached and unref'd, stderr to the daemon log; 0 when it failed. */
@@ -43,6 +45,9 @@ export const linuxProcessTable: ProcessTable = {
 	inspectable() {
 		return fs.existsSync("/proc/self/stat");
 	},
+	psCmdline(pid) {
+		return psCmdline(pid);
+	},
 	startTime(pid) {
 		try {
 			const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -65,6 +70,18 @@ export const linuxProcessTable: ProcessTable = {
 		}
 	},
 };
+
+/** A pid's command line from `ps`, split on whitespace; null when `ps` cannot say. */
+export function psCmdline(pid: number): string[] | null {
+	if (!Number.isSafeInteger(pid) || pid <= 0) return null;
+	try {
+		const out = execFileSync("ps", ["-ww", "-o", "command=", "-p", String(pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2000 });
+		const args = out.trim().split(/\s+/).filter(a => a.length > 0);
+		return args.length > 0 ? args : null;
+	} catch {
+		return null;
+	}
+}
 
 let table: ProcessTable = linuxProcessTable;
 
@@ -108,10 +125,22 @@ export function holdsLease(kind: HolderKind): boolean {
 	return kind === "daemon" || kind === "harness" || kind === "unverified";
 }
 
-/** Only these are signalled by a one-session caller: a harness serves other sessions, an
- *  `other` is not ours, and on a host with /proc an unverified pid may be anything. */
+/** `classifyPid`, except that on a host with no /proc an unverified pid is read again through
+ *  `ps`. Only the one-session callers that may signal (`-F`, `restartDaemon`) pay for that. */
+export function verifiedKind(pid: number): HolderKind {
+	const kind = classifyPid(pid);
+	if (kind !== "unverified" || table.inspectable()) return kind;
+	const args = table.psCmdline(pid);
+	if (args === null) return "unverified";
+	if (!isDaemonCmdline(args)) return "other";
+	return args.includes("--harness") ? "harness" : "daemon";
+}
+
+/** Only a daemon is signalled by a one-session caller: a harness serves other sessions, an
+ *  `other` is not ours, and an unverified pid may be anything. With no /proc a harness start
+ *  cannot hand a session to a running harness, so there a harness is stopped too. */
 export function mayStop(kind: HolderKind): boolean {
-	return kind === "daemon" || (kind === "unverified" && !table.inspectable());
+	return kind === "daemon" || (kind === "harness" && !table.inspectable());
 }
 
 export interface StopOptions { termMs?: number; killMs?: number; pollMs?: number }

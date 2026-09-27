@@ -8,12 +8,10 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawn } from "node:child_process";
 import { parseEntryToInteraction } from "../extensions/lib/wtft-parser.ts";
-import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+import { trackSandbox } from "./lib/sandbox";
+import { tagSession } from "./lib/tagger-harness.ts";
 import { serializeClassifiedWithOverheadSplit, classifiedInteractionsFromContent } from "../extensions/lib/wtft-daemon-lib.ts";
-
-isolateTmpdir("241-partial-reprime-miss");
 
 let passed = 0;
 let failed = 0;
@@ -77,11 +75,8 @@ console.log("\nNot a miss");
 		"with no previous context to compare against, a partial prefix is not called a miss");
 }
 
-console.log("\nThrough the daemon: the session's own re-prime is flagged, a subagent's is not");
+console.log("\nThrough the tagger: the session's own re-prime is flagged, a subagent's is not");
 {
-	const DAEMON_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
-	const { WTFT_TAGGER_VERSION } = await import("../extensions/lib/wtft-tagger-version.ts");
-	const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-241-daemon-")));
 	const line = (id: string, t: number, cr: number, cw: number) => JSON.stringify({
 		type: "message",
@@ -99,25 +94,18 @@ console.log("\nThrough the daemon: the session's own re-prime is flagged, a suba
 	fs.mkdirSync(path.join(dir, "session", "subagents"), { recursive: true });
 	fs.writeFileSync(path.join(dir, "session", "subagents", "agent-241.jsonl"),
 		body.replace(/"id":"warm"/, '"id":"sub-warm"').replace(/"id":"reprime"/, '"id":"sub-reprime"'));
-	fs.mkdirSync(path.join(dir, "wtft-tags"), { recursive: true });
-	const tag = path.join(dir, "wtft-tags", `session.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
-	const child = spawn(process.execPath, [DAEMON_BIN, "--session", session], { detached: true, stdio: "ignore" });
-	child.unref();
-	// A reader can land inside a write and see one partial last line.
-	const lines = () => (fs.existsSync(tag) ? fs.readFileSync(tag, "utf8") : "").split("\n").flatMap(l => {
+	const tagger = tagSession(session);
+	const lines = () => fs.readFileSync(tagger.tagPath, "utf8").split("\n").flatMap(l => {
 		try { return [JSON.parse(l)]; } catch { return []; }
 	});
-	try {
-		for (let i = 0; i < 60 && !(lines().some(l => l.id === "own-reprime") && lines().some(l => l.id === "sub-reprime")); i++) await sleep(250);
+	{
+		tagger.until(() => lines().some(l => l.id === "own-reprime") && lines().some(l => l.id === "sub-reprime"));
 		const all = lines();
 		check(all.some(l => l.id === "own-reprime") && all.some(l => l.id === "sub-reprime"),
-			"fixture: the daemon tagged both the session's and the subagent's re-prime turn");
+			"fixture: the tagger tagged both the session's and the subagent's re-prime turn");
 		check(all.some(l => l.id === "own-reprime" && l.miss === 1), "the session's own re-prime carries miss: 1");
 		check(!all.some(l => typeof l.id === "string" && l.id.startsWith("sub-") && l.miss === 1),
 			"no subagent line carries miss: 1, although the same shape re-primes");
-	} finally {
-		try { process.kill(child.pid!, "SIGTERM"); } catch { /* gone */ }
-		await sleep(200);
 	}
 }
 

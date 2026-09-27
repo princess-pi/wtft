@@ -6,8 +6,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { spawn } from "node:child_process";
 import { trackSandbox } from "./lib/sandbox";
+import { tagSession } from "./lib/tagger-harness.ts";
 
 import {
 	buildWtftLines,
@@ -197,12 +197,8 @@ check(
 );
 
 console.log("--- TEST 6: the daemon's own reader is gated too ---");
-// The CLI renders from the TAG FILE, and the daemon writes subagent tag lines
-// through its OWN reader — parseSessionFile + deduplicateInteractions +
-// serializeClassified in syncSubagentTranscript — never through
-// loadSubagentInteractions.
-//
-// THIS DRIVES THE REAL DAEMON, not a hand-rebuilt copy of its pipeline.
+// The CLI renders from the TAG FILE, which the daemon writes through the
+// session tagger (stepTagger), never through loadSubagentInteractions.
 const live = path.join(dir, "live");
 const sessionPath = path.join(live, "5aa1f33e-0000-4000-8000-000000000115.jsonl");
 fs.mkdirSync(live, { recursive: true });
@@ -224,11 +220,7 @@ fs.writeFileSync(path.join(daemonSubDir, "agent-deadbeef.jsonl"), [
 ].join("\n") + "\n");
 
 const tagsDir = path.join(live, "wtft-tags");
-const daemonBin = path.join(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
-const child = spawn(process.execPath, [daemonBin, "--session", sessionPath], {
-	detached: true, stdio: "ignore",
-});
-child.unref();
+const tagger = tagSession(sessionPath);
 
 /** Every classified tag line the daemon wrote for this session. The subagent's
  *  lines land in the PARENT's tag file, so this reads the directory rather than
@@ -248,20 +240,15 @@ function tagLines(): any[] {
 	return out;
 }
 
-// Poll cycle is 667ms. Wait for the SUBAGENT's lines specifically: the parent's
-// land first, so waiting on any line at all would end the wait too early.
-const deadline = Date.now() + 25_000;
-let written: any[] = [];
+// Wait for the SUBAGENT's lines specifically: the parent's land first, so
+// waiting on any line at all would end the wait too early.
 const subIds = new Set(["d_sub_start", "d_sub_hit"]);
-while (Date.now() < deadline) {
-	written = tagLines();
-	if (written.filter(l => subIds.has(l.id)).length >= 2) break;
-}
-try { process.kill(-child.pid!, "SIGTERM"); } catch { /* already reaped */ }
+tagger.until(() => tagLines().filter(l => subIds.has(l.id)).length >= 2);
+const written = tagLines();
 
 const subLines = written.filter(l => subIds.has(l.id));
 const parentMiss = written.find(l => l.id === "d_parent_miss");
-check(subLines.length >= 2, `the daemon tagged the unstamped subagent transcript (${subLines.length} line(s))`);
+check(subLines.length >= 2, `the tagger tagged the unstamped subagent transcript (${subLines.length} line(s))`);
 check(
 	subLines.every((l: any) => l.miss !== 1),
 	"…and not one of its tag lines carries miss=1, so the tag file cannot resurrect the divider"

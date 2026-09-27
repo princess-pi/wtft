@@ -11,6 +11,7 @@ import * as path from "node:path";
 
 import { collectSkips, renderSkipSummary } from "./lib/skips.ts";
 import { reapFixtureDaemons } from "./lib/reap-fixture-daemons.ts";
+import { appendTestRun } from "./lib/test-run-log.ts";
 
 // ---
 // Layout
@@ -49,6 +50,9 @@ const SOLO = [
 /** Last run's per-suite times, so the slowest start first and the pool's tail
  *  is not one long suite started last. Scratch: `tmp/` is gitignored. */
 const TIMES_FILE = path.join(REPO_ROOT, "tmp", "test-times.json");
+
+/** One line per run, for `pr-cost.ts` (docs/spec-277-pr-cost.md § 4). */
+const TEST_RUNS_FILE = path.join(REPO_ROOT, "tmp", "test-runs.jsonl");
 
 const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";
@@ -196,6 +200,10 @@ try {
 	fs.mkdirSync(path.dirname(TIMES_FILE), { recursive: true });
 	fs.writeFileSync(TIMES_FILE, JSON.stringify(times, null, "\t") + "\n");
 } catch { /* the order hint is an optimisation; a run never fails over it */ }
+
+try {
+	appendTestRun(TEST_RUNS_FILE, results.map(r => ({ name: r.name, ok: r.ok })));
+} catch { /* the cost record's input; a run never fails over it */ }
 
 // ---
 // Report

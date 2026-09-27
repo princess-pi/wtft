@@ -9,20 +9,10 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawn } from "node:child_process";
-import {
-	readClassifiedTagFile,
-	parseSessionFile,
-	deduplicateInteractions,
-	classifyInteraction,
-	WTFT_TAGGER_VERSION,
-} from "../bin/wtft.mjs";
-import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
-
-isolateTmpdir("220-subagent-offset-cases");
-
-const DAEMON_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+import { readClassifiedTagFile } from "../extensions/lib/wtft-daemon-lib.ts";
+import { parseSessionFile, deduplicateInteractions, classifyInteraction } from "../extensions/lib/wtft-parser.ts";
+import { trackSandbox } from "./lib/sandbox";
+import { tagSession, type TaggedSession } from "./lib/tagger-harness.ts";
 
 const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";
@@ -51,52 +41,30 @@ const rows = (list: any[]) => JSON.stringify(list
 	.map(i => ({ id: i.messageId ?? "-", cost: Number(i.cost.toFixed(9)), interrupted: !!i.interrupted, cat: i._cat ?? classifyInteraction(i) }))
 	.sort((a, b) => a.id.localeCompare(b.id) || a.cost - b.cost));
 
-/** Starts a daemon on a fresh session whose one subagent transcript holds
+/** Tags a fresh session whose one subagent transcript holds
  *  `initial`, waits until `ready` holds for the tag, runs `mutate`, then waits
  *  for the tag to match a full parse of the transcript. Returns both, as rows. */
-async function runCase(
+function runCase(
 	name: string,
 	initial: string,
-	mutate: (file: string) => Promise<void>,
+	mutate: (file: string, tagger: TaggedSession) => void,
 	ready: (tagged: any[]) => boolean = tagged => tagged.length > 0,
-): Promise<{ tag: string; full: string; initialTagged: boolean; generations: number }> {
+): { tag: string; full: string; initialTagged: boolean; generations: number } {
 	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), `wtft-220-${name}-`)));
 	const session = path.join(dir, "session.jsonl");
 	fs.writeFileSync(session, JSON.stringify({ type: "session", version: 3, id: `parent-220-${name}`, timestamp: new Date().toISOString(), cwd: dir }) + "\n");
-	fs.mkdirSync(path.join(dir, "wtft-tags"), { recursive: true });
 	const subDir = path.join(dir, "session", "subagents");
 	fs.mkdirSync(subDir, { recursive: true });
 	const sub = path.join(subDir, "agent-case.jsonl");
 	fs.writeFileSync(sub, initial);
-	const tag = path.join(dir, "wtft-tags", `session.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
-	const stderrFd = fs.openSync(path.join(dir, "daemon-stderr.log"), "a");
-	const child = spawn(process.execPath, [DAEMON_BIN, "--session", session], {
-		detached: true,
-		stdio: ["ignore", "ignore", stderrFd],
-		env: { ...process.env, WTFT_DAEMON_DEBUG: "1" },
-	});
-	fs.closeSync(stderrFd);
-	child.unref();
-	try {
-		let initialTagged = false;
-		for (let i = 0; i < 200 && !initialTagged; i++) {
-			await sleep(50);
-			initialTagged = ready(readClassifiedTagFile(tag));
-		}
-		await mutate(sub);
-		const full = rows(deduplicateInteractions(parseSessionFile(sub)));
-		let got = rows(readClassifiedTagFile(tag));
-		for (let i = 0; i < 40 && got !== full; i++) {
-			await sleep(250);
-			got = rows(readClassifiedTagFile(tag));
-		}
-		const generations = (fs.readFileSync(tag, "utf8").match(/"_gen"/g) ?? []).length;
-		return { tag: got, full, initialTagged, generations };
-	} finally {
-		try { process.kill(child.pid!, "SIGTERM"); } catch { /* gone */ }
-		await sleep(200);
-		fs.rmSync(dir, { recursive: true, force: true });
-	}
+	const tagger = tagSession(session);
+	const tag = tagger.tagPath;
+	const initialTagged = tagger.until(() => ready(readClassifiedTagFile(tag)), 40);
+	mutate(sub, tagger);
+	const full = rows(deduplicateInteractions(parseSessionFile(sub)));
+	tagger.until(() => rows(readClassifiedTagFile(tag)) === full);
+	const generations = (fs.readFileSync(tag, "utf8").match(/"_gen"/g) ?? []).length;
+	return { tag: rows(readClassifiedTagFile(tag)), full, initialTagged, generations };
 }
 
 console.log("wtft subagent offset reader cases (#220)");
@@ -104,11 +72,11 @@ console.log("wtft subagent offset reader cases (#220)");
 const T0 = Date.now() - 60_000;
 
 {
-	const r = await runCase("interrupt", turn("msg_a", T0, 100), async file => {
+	const r = runCase("interrupt", turn("msg_a", T0, 100), (file, tagger) => {
 		fs.appendFileSync(file, INTERRUPT);
-		await sleep(1500);
+		for (let i = 0; i < 3; i++) tagger.poll();
 		fs.appendFileSync(file, turn("msg_b", T0 + 1000, 200));
-		await sleep(300);
+		tagger.poll();
 		fs.appendFileSync(file, turn("msg_c", T0 + 2000, 300));
 	});
 	assert("fixture: the turn before the interrupt was tagged before the interrupt was written", r.initialTagged);
@@ -128,7 +96,7 @@ const T0 = Date.now() - 60_000;
 	}) + "\n";
 	// Appended the moment the owner turn is tagged, while the ordinary turn
 	// before it is most likely still held back.
-	const r = await runCase("interrupt-after-owner", turn("msg_plain", T0, 100) + owner, async file => {
+	const r = runCase("interrupt-after-owner", turn("msg_plain", T0, 100) + owner, file => {
 		fs.appendFileSync(file, INTERRUPT);
 	}, tagged => tagged.some((i: any) => i.messageId === "msg_owner"));
 	assert("fixture: the turn a Claude command started was tagged before the interrupt", r.initialTagged);
@@ -150,7 +118,7 @@ const T0 = Date.now() - 60_000;
 	}) + "\n";
 	// One message written as two lines, its command first; the second line and
 	// the interrupt that follows it arrive in a later read.
-	const r = await runCase("interrupt-on-owner-copy", ownerCopy(false), async file => {
+	const r = runCase("interrupt-on-owner-copy", ownerCopy(false), file => {
 		fs.appendFileSync(file, ownerCopy(true) + INTERRUPT);
 	}, tagged => tagged.some((i: any) => i.messageId === "msg_split"));
 	assert("fixture: the command line of the message was tagged first", r.initialTagged);
@@ -158,7 +126,7 @@ const T0 = Date.now() - 60_000;
 }
 
 {
-	const r = await runCase("rewrite", turn("msg_a", T0, 100), async file => {
+	const r = runCase("rewrite", turn("msg_a", T0, 100), file => {
 		const body = turn("msg_b", T0 + 1000, 200) + turn("msg_c", T0 + 2000, 300);
 		const fd = fs.openSync(file, "r+");
 		try { fs.writeSync(fd, body, 0); } finally { fs.closeSync(fd); }
@@ -169,21 +137,18 @@ const T0 = Date.now() - 60_000;
 
 {
 	let readLower = false;
-	const r = await runCase("lower-cost", turn("msg_a", T0, 5000), async file => {
+	const r = runCase("lower-cost", turn("msg_a", T0, 5000), (file, tagger) => {
 		const lower = turn("msg_a", T0, 100);
 		fs.appendFileSync(file, lower);
-		// The tag already matches a full parse before the daemon reads the
+		// The tag already matches a full parse before the tagger reads the
 		// lower copy, so wait until its debug log shows that read.
-		const log = path.join(path.dirname(path.dirname(path.dirname(file))), "daemon-stderr.log");
-		const read = () => fs.readFileSync(log, "utf8").includes(`subagent delta ${Buffer.byteLength(lower)} bytes`);
-		for (let i = 0; i < 40 && !read(); i++) await sleep(250);
-		readLower = read();
+		readLower = tagger.until(() => tagger.log.some(l => l.text.includes(`subagent delta ${Buffer.byteLength(lower)} bytes`)));
 		// A new generation would land a poll or two after that read: a turn is
 		// held back one poll before it is written.
-		await sleep(2000);
+		for (let i = 0; i < 3; i++) tagger.poll();
 	});
 	assert("fixture: the first copy was tagged before the lower one", r.initialTagged);
-	assert("fixture: the daemon read the lower copy", readLower);
+	assert("fixture: the tagger read the lower copy", readLower);
 	assert(`a lower copy does not write the transcript again (${r.generations} generation record(s))`, r.generations === 1);
 	assert("an ordinary turn re-emitted at a lower cost matches a full parse", r.tag === r.full, `tag:  ${r.tag}\n       full: ${r.full}`);
 }

@@ -144,7 +144,7 @@ export function probe(status: DaemonStatus): boolean {
 console.log("V3. #124 startup indicator — the spawner's claim, not a grace window (#281)");
 {
 	const fixture = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-179-")));
-	const fakeDaemonDir = path.join(fixture, "bin");
+	const fakeDaemonDir = path.join(fixture, "stand-in");
 	fs.mkdirSync(fakeDaemonDir, { recursive: true });
 	// Stand-in daemon: lives 1.5 s, writes no PID file, claims nothing.
 	fs.writeFileSync(path.join(fakeDaemonDir, "wtft-daemon.mjs"), "setTimeout(() => process.exit(0), 1500);\n", "utf8");

@@ -8,23 +8,10 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawn } from "node:child_process";
-import {
-	getDaemonPidPath,
-	readClassifiedTagFile,
-	parseSessionFile,
-	deduplicateInteractions,
-	WTFT_TAGGER_VERSION,
-} from "../bin/wtft.mjs";
-import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
-
-
-// Private pid namespace for this suite (#486). Must precede the first
-// getDaemonPidPath() and the first daemon spawn — the daemon keys its lease on
-// os.tmpdir() and sweeps every wtft-daemon-*.pid there at startup.
-isolateTmpdir("subagent-crosspoll");
-
-const DAEMON_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
+import { readClassifiedTagFile } from "../extensions/lib/wtft-daemon-lib.ts";
+import { parseSessionFile, deduplicateInteractions } from "../extensions/lib/wtft-parser.ts";
+import { trackSandbox } from "./lib/sandbox";
+import { tagSession } from "./lib/tagger-harness.ts";
 
 const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";
@@ -36,12 +23,6 @@ function assert(label: string, ok: boolean) {
 	if (ok) { console.log(`  ${GREEN}PASS${RESET} ${label}`); passed++; }
 	else { console.log(`  ${RED}FAIL${RESET} ${label}`); failed++; }
 }
-
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-const cleanupPids: number[] = [];
-const cleanupPidFiles: string[] = [];
-const fixtureDirs: string[] = [];
 
 /** One assistant line. Two lines sharing `id` with different usage is the
  *  streaming-partial shape deduplicateInteractions exists to collapse. */
@@ -74,18 +55,14 @@ function rawTagLinesFor(tagPath: string, messageId: string): number {
 	} catch { return 0; }
 }
 
-console.log("wtft daemon subagent cross-poll dedup (#270 review)");
+console.log("subagent cross-poll dedup, tagged in process (#270 review)");
 
 const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-270-dedup-")));
-fixtureDirs.push(dir);
 
 const sessionPath = path.join(dir, "session.jsonl");
 fs.writeFileSync(sessionPath, JSON.stringify({
 	type: "session", version: 3, id: "parent-270-dedup", timestamp: new Date().toISOString(), cwd: dir,
 }) + "\n");
-const tagsDir = path.join(dir, "wtft-tags");
-fs.mkdirSync(tagsDir, { recursive: true });
-cleanupPidFiles.push(getDaemonPidPath(sessionPath));
 
 const subagentDir = path.join(dir, "session", "subagents");
 fs.mkdirSync(subagentDir, { recursive: true });
@@ -97,33 +74,21 @@ const STREAMED_ID = "msg_270_streamed";
 // Poll window N: the partial. 8 output tokens, as first flushed.
 fs.writeFileSync(subagentPath, turnLine(STREAMED_ID, T0, 5000, 8));
 
-const tagPath = path.join(tagsDir, path.basename(sessionPath) + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
 
-try {
-	const child = spawn(process.execPath, [DAEMON_BIN, "--session", sessionPath], {
-		detached: true, stdio: "ignore",
-	});
-	child.unref();
-	if (child.pid) cleanupPids.push(child.pid);
+{
+	const tagger = tagSession(sessionPath);
+	const tagPath = tagger.tagPath;
 
-	let sawPartial = false;
-	for (let i = 0; i < 24 && !sawPartial; i++) {
-		await sleep(250);
-		sawPartial = rawTagLinesFor(tagPath, STREAMED_ID) >= 1;
-	}
-	assert("daemon writes the streaming partial in the first poll window", sawPartial);
+	const sawPartial = tagger.until(() => rawTagLinesFor(tagPath, STREAMED_ID) >= 1);
+	assert("the tagger writes the streaming partial in the first poll window", sawPartial);
 
 	// Poll window N+1: the SAME message id, re-emitted with the final usage.
 	fs.appendFileSync(subagentPath, turnLine(STREAMED_ID, T0 + 2_000, 5000, 457));
 
 	// Wait for the daemon to have processed the second line at all. Read the RAW
 	// tag file, not the reader — the fix is allowed to leave two lines on disk.
-	let sawSecondWrite = false;
-	for (let i = 0; i < 24 && !sawSecondWrite; i++) {
-		await sleep(250);
-		sawSecondWrite = rawTagLinesFor(tagPath, STREAMED_ID) >= 2;
-	}
-	assert("daemon reads the re-emitted line in a later poll window", sawSecondWrite);
+	const sawSecondWrite = tagger.until(() => rawTagLinesFor(tagPath, STREAMED_ID) >= 2);
+	assert("the tagger reads the re-emitted line in a later poll window", sawSecondWrite);
 
 	// The money assertions: what a consumer sees.
 	const seen = readClassifiedTagFile(tagPath).filter((int: any) => int.messageId === STREAMED_ID);
@@ -148,11 +113,6 @@ try {
 		`cost matches full re-parse within $0.000001 (daemon=$${seenCost.toFixed(6)} ref=$${refCost.toFixed(6)})`,
 		Math.abs(seenCost - refCost) < 0.000001
 	);
-} finally {
-	for (const pid of cleanupPids) { try { process.kill(pid, "SIGTERM"); } catch {} }
-	for (const pf of cleanupPidFiles) { try { fs.unlinkSync(pf); } catch {} }
-	await sleep(200);
-	for (const d of fixtureDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }
 
 console.log("\n──────────────────────────────");

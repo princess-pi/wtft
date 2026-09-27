@@ -7,22 +7,10 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawn, execFileSync } from "node:child_process";
-import {
-	getDaemonPidPath,
-	readClassifiedTagFile,
-	WTFT_TAGGER_VERSION,
-} from "../bin/wtft.mjs";
-import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
-
-
-// Private pid namespace for this suite (#486). Must precede the first
-// getDaemonPidPath() and the first daemon spawn — the daemon keys its lease on
-// os.tmpdir() and sweeps every wtft-daemon-*.pid there at startup.
-isolateTmpdir("nested-claude-attr");
-
-const DAEMON_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
-const WTFT_LIB = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
+import { readClassifiedTagFile } from "../extensions/lib/wtft-daemon-lib.ts";
+import { deduplicateInteractions, parseSessionFile } from "../extensions/lib/wtft-parser.ts";
+import { trackSandbox } from "./lib/sandbox";
+import { tagSession } from "./lib/tagger-harness.ts";
 
 const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";
@@ -34,12 +22,6 @@ function assert(label: string, ok: boolean) {
 	if (ok) { console.log(`  ${GREEN}PASS${RESET} ${label}`); passed++; }
 	else { console.log(`  ${RED}FAIL${RESET} ${label}`); failed++; }
 }
-
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-const cleanupPids: number[] = [];
-const cleanupPidFiles: string[] = [];
-const cleanupDirs: string[] = [];
 
 /** A plain assistant turn (no tools) — the nested session's own billed work. */
 function turnLine(id: string, tsMs: number, inputTokens: number, outputTokens: number): string {
@@ -90,19 +72,12 @@ function claudeBashTurnLine(id: string, tsMs: number, inputTokens: number, outpu
 	}) + "\n";
 }
 
-console.log("wtft daemon nested claude-bash attribution across poll windows (#270 review r3)");
+console.log("nested claude-bash attribution across poll windows, tagged in process (#270 review r3)");
 
 const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-270-nested-")));
-cleanupDirs.push(dir);
 
-// A scratch home directory, isolated from the real ~/.claude/projects. The
-// Node/Bun home-directory resolver honours the process's HOME environment
-// variable on POSIX systems, so pointing every process that resolves
-// ~/.claude/projects (the daemon spawned below, and the reference-parse child
-// process further down) at this directory keeps every session-discovery
-// lookup inside the fixture instead of the host's live transcript store.
+// A scratch projects root, so discovery never reads the host's ~/.claude/projects.
 const tempHome = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-270-home-")));
-cleanupDirs.push(tempHome);
 
 // The cwd the subagent's bash turns cd into. Its Claude Code project slug is
 // derived from this path, so a unique fixture dir gives us a project directory
@@ -110,16 +85,14 @@ cleanupDirs.push(tempHome);
 const nestedCwd = path.join(dir, "nested-project");
 fs.mkdirSync(nestedCwd, { recursive: true });
 const slug = nestedCwd.replace(/\//g, "-");
-const projectDir = path.join(tempHome, ".claude", "projects", slug);
+process.env.WTFT_CLAUDE_PROJECTS_DIR = path.join(tempHome, ".claude", "projects");
+const projectDir = path.join(process.env.WTFT_CLAUDE_PROJECTS_DIR, slug);
 fs.mkdirSync(projectDir, { recursive: true });
 
 const sessionPath = path.join(dir, "session.jsonl");
 fs.writeFileSync(sessionPath, JSON.stringify({
 	type: "session", version: 3, id: "parent-270-nested", timestamp: new Date().toISOString(), cwd: dir,
 }) + "\n");
-const tagsDir = path.join(dir, "wtft-tags");
-fs.mkdirSync(tagsDir, { recursive: true });
-cleanupPidFiles.push(getDaemonPidPath(sessionPath));
 
 const subagentDir = path.join(dir, "session", "subagents");
 fs.mkdirSync(subagentDir, { recursive: true });
@@ -145,27 +118,13 @@ const DOUBLE_COUNTED_TOTAL = EXPECTED_TOTAL + NESTED_COST;    // $0.027000
 
 fs.writeFileSync(subagentPath, claudeBashTurnLine(TURN_A_ID, T0, 2000, 100, nestedCwd));
 
-const tagPath = path.join(tagsDir, path.basename(sessionPath) + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
-
-try {
-	const child = spawn(process.execPath, [DAEMON_BIN, "--session", sessionPath], {
-		detached: true, stdio: "ignore",
-		// The daemon runs discoverClaudeSubAgentSessionFiles in its own process,
-		// which resolves ~/.claude/projects off the process's home directory.
-		// Point it at the fixture home so it finds the fixture's project dir,
-		// not the host's real one.
-		env: { ...process.env, HOME: tempHome },
-	});
-	child.unref();
-	if (child.pid) cleanupPids.push(child.pid);
+{
+	const tagger = tagSession(sessionPath);
+	const tagPath = tagger.tagPath;
 
 	// Poll window N: only turn A exists. It attributes the nested session.
-	let sawA = false;
-	for (let i = 0; i < 24 && !sawA; i++) {
-		await sleep(250);
-		sawA = readClassifiedTagFile(tagPath).some((int: any) => int.messageId === TURN_A_ID);
-	}
-	assert("daemon writes the first claude-invoking bash turn", sawA);
+	const sawA = tagger.until(() => readClassifiedTagFile(tagPath).some((int: any) => int.messageId === TURN_A_ID));
+	assert("the tagger writes the first claude-invoking bash turn", sawA);
 
 	const seenAOnly = readClassifiedTagFile(tagPath).filter((int: any) => int.messageId === TURN_A_ID);
 	const aCost = seenAOnly.reduce((s: number, i: any) => s + i.cost, 0);
@@ -177,61 +136,31 @@ try {
 	// Poll window N+1: turn B arrives, resolving to the SAME nested session.
 	fs.appendFileSync(subagentPath, claudeBashTurnLine(TURN_B_ID, T0 + 5_000, 3000, 100, nestedCwd));
 
-	let sawB = false;
-	for (let i = 0; i < 24 && !sawB; i++) {
-		await sleep(250);
-		sawB = readClassifiedTagFile(tagPath).some((int: any) => int.messageId === TURN_B_ID);
-	}
-	assert("daemon writes the second claude-invoking bash turn", sawB);
+	const sawB = tagger.until(() => readClassifiedTagFile(tagPath).some((int: any) => int.messageId === TURN_B_ID));
+	assert("the tagger writes the second claude-invoking bash turn", sawB);
 
 	// Let a few more polls run — a re-parse design must not keep re-adding.
-	await sleep(2000);
+	for (let i = 0; i < 3; i++) tagger.poll();
 
 	const seen = readClassifiedTagFile(tagPath).filter(
 		(int: any) => int.messageId === TURN_A_ID || int.messageId === TURN_B_ID
 	);
 	const seenCost = seen.reduce((s: number, i: any) => s + i.cost, 0);
 
-	// parseSessionFile runs attributeClaudeSubAgentCosts internally, which calls
-	// discoverClaudeSubAgentSessionFiles, and that resolves the process's home
-	// directory IN THIS PROCESS. Bun captures that value once at process start
-	// and never re-reads the environment afterward — probing a fresh Bun
-	// process shows reassigning its home-directory environment variable
-	// mid-run does not change what the resolver reports — so mutating this
-	// process's environment here would be a no-op and silently fall back to
-	// the host's real ~/.claude/projects. Instead, compute the reference in a
-	// short-lived CHILD process spawned with its own scratch home directory,
-	// the same way the daemon itself is spawned above.
-	const referenceScript = path.join(dir, "reference-parse.mjs");
-	fs.writeFileSync(referenceScript, `
-		import { parseSessionFile, deduplicateInteractions } from ${JSON.stringify(WTFT_LIB)};
-		const interactions = deduplicateInteractions(parseSessionFile(process.argv[2]));
-		const cost = interactions.reduce((s, i) => s + i.cost, 0);
-		process.stdout.write(JSON.stringify({ cost }));
-	`);
-	const referenceOut = execFileSync(process.execPath, [referenceScript, subagentPath], {
-		env: { ...process.env, HOME: tempHome },
-		encoding: "utf8",
-	});
-	const referenceCost = JSON.parse(referenceOut).cost as number;
+	const referenceCost = deduplicateInteractions(parseSessionFile(subagentPath)).reduce((sum: number, i: any) => sum + i.cost, 0);
 
 	assert(
 		`whole-file reference attributes the nested session ONCE (ref=$${referenceCost.toFixed(6)} expected=$${EXPECTED_TOTAL.toFixed(6)})`,
 		Math.abs(referenceCost - EXPECTED_TOTAL) < 0.000001
 	);
 	assert(
-		`daemon attributes the nested session ONCE, not once per poll window (daemon=$${seenCost.toFixed(6)} expected=$${EXPECTED_TOTAL.toFixed(6)}, double-counted would be $${DOUBLE_COUNTED_TOTAL.toFixed(6)})`,
+		`the tagger attributes the nested session ONCE, not once per poll window (daemon=$${seenCost.toFixed(6)} expected=$${EXPECTED_TOTAL.toFixed(6)}, double-counted would be $${DOUBLE_COUNTED_TOTAL.toFixed(6)})`,
 		Math.abs(seenCost - EXPECTED_TOTAL) < 0.000001
 	);
 	assert(
-		`daemon total matches the whole-file reference within $0.000001 (daemon=$${seenCost.toFixed(6)} ref=$${referenceCost.toFixed(6)})`,
+		`the tagged total matches the whole-file reference within $0.000001 (daemon=$${seenCost.toFixed(6)} ref=$${referenceCost.toFixed(6)})`,
 		Math.abs(seenCost - referenceCost) < 0.000001
 	);
-} finally {
-	for (const pid of cleanupPids) { try { process.kill(pid, "SIGTERM"); } catch {} }
-	for (const pf of cleanupPidFiles) { try { fs.unlinkSync(pf); } catch {} }
-	await sleep(200);
-	for (const d of cleanupDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }
 
 console.log("\n──────────────────────────────");

@@ -7,22 +7,9 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawn } from "node:child_process";
-import {
-	getDaemonPidPath,
-	readClassifiedTagFile,
-	WTFT_TAGGER_VERSION,
-} from "../bin/wtft.mjs";
-import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
-
-
-// Private pid namespace for this suite (#486). Must precede the first
-// getDaemonPidPath() and the first daemon spawn — the daemon keys its lease on
-// os.tmpdir() and sweeps every wtft-daemon-*.pid there at startup.
-isolateTmpdir("tagfile-growth");
-
-const DAEMON_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
-const BEAT_MS = 667;
+import { readClassifiedTagFile } from "../extensions/lib/wtft-daemon-lib.ts";
+import { trackSandbox } from "./lib/sandbox";
+import { tagSession } from "./lib/tagger-harness.ts";
 
 const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";
@@ -34,12 +21,6 @@ function assert(label: string, ok: boolean) {
 	if (ok) { console.log(`  ${GREEN}PASS${RESET} ${label}`); passed++; }
 	else { console.log(`  ${RED}FAIL${RESET} ${label}`); failed++; }
 }
-
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-const cleanupPids: number[] = [];
-const cleanupPidFiles: string[] = [];
-const fixtureDirs: string[] = [];
 
 function turnLine(id: string, tsMs: number, inputTokens: number, outputTokens: number): string {
 	return JSON.stringify({
@@ -73,18 +54,14 @@ function rawClassifiedLineCount(tagPath: string): number {
 	} catch { return 0; }
 }
 
-console.log("wtft daemon subagent tag-file growth is bounded (#270)");
+console.log("subagent tag-file growth is bounded, tagged in process (#270)");
 
 const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-270-growth-")));
-fixtureDirs.push(dir);
 
 const sessionPath = path.join(dir, "session.jsonl");
 fs.writeFileSync(sessionPath, JSON.stringify({
 	type: "session", version: 3, id: "parent-270-growth", timestamp: new Date().toISOString(), cwd: dir,
 }) + "\n");
-const tagsDir = path.join(dir, "wtft-tags");
-fs.mkdirSync(tagsDir, { recursive: true });
-cleanupPidFiles.push(getDaemonPidPath(sessionPath));
 
 const subagentDir = path.join(dir, "session", "subagents");
 fs.mkdirSync(subagentDir, { recursive: true });
@@ -101,58 +78,41 @@ for (let i = 0; i < SEED_TURNS; i++) {
 }
 fs.writeFileSync(subagentPath, seed);
 
-const tagPath = path.join(tagsDir, path.basename(sessionPath) + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
 const LAST_SEED_ID = `msg_270_growth_${SEED_TURNS - 1}`;
 const NEW_TURN_ID = "msg_270_growth_new";
 
-try {
-	const child = spawn(process.execPath, [DAEMON_BIN, "--session", sessionPath], {
-		detached: true, stdio: "ignore",
-	});
-	child.unref();
-	if (child.pid) cleanupPids.push(child.pid);
+{
+	const tagger = tagSession(sessionPath);
+	const tagPath = tagger.tagPath;
 
-	let sawSeed = false;
-	for (let i = 0; i < 24 && !sawSeed; i++) {
-		await sleep(250);
-		sawSeed = readClassifiedTagFile(tagPath).some((int: any) => int.messageId === LAST_SEED_ID);
-	}
-	assert("daemon writes the seeded subagent turns", sawSeed);
+	const sawSeed = tagger.until(() => readClassifiedTagFile(tagPath).some((int: any) => int.messageId === LAST_SEED_ID));
+	assert("the tagger writes the seeded subagent turns", sawSeed);
 
 	const afterSeed = rawClassifiedLineCount(tagPath);
 	assert(`the seeded turns land once each (${afterSeed} === ${SEED_TURNS})`, afterSeed === SEED_TURNS);
 
 	// ~5 poll cycles with the transcript untouched.
-	await sleep(BEAT_MS * 5 + 500);
+	for (let i = 0; i < 6; i++) tagger.poll();
 	const afterIdle = rawClassifiedLineCount(tagPath);
 	assert(
-		`5 polls over an UNCHANGED transcript append nothing (${afterIdle} === ${afterSeed})`,
+		`6 polls over an UNCHANGED transcript append nothing (${afterIdle} === ${afterSeed})`,
 		afterIdle === afterSeed
 	);
 
 	// One new turn — the tag file may grow by exactly one line.
 	fs.appendFileSync(subagentPath, turnLine(NEW_TURN_ID, T0 + 30_000, 2000, 60));
 
-	let sawNew = false;
-	for (let i = 0; i < 24 && !sawNew; i++) {
-		await sleep(250);
-		sawNew = readClassifiedTagFile(tagPath).some((int: any) => int.messageId === NEW_TURN_ID);
-	}
-	assert("daemon picks up the appended turn", sawNew);
+	const sawNew = tagger.until(() => readClassifiedTagFile(tagPath).some((int: any) => int.messageId === NEW_TURN_ID));
+	assert("the tagger picks up the appended turn", sawNew);
 
 	// Another ~5 quiet polls, so a re-append design cannot hide inside the beat
 	// that carried the new turn.
-	await sleep(BEAT_MS * 5 + 500);
+	for (let i = 0; i < 6; i++) tagger.poll();
 	const afterGrowth = rawClassifiedLineCount(tagPath);
 	assert(
 		`one appended turn costs exactly one tag line, quiet polls after it cost none (${afterGrowth} === ${afterSeed + 1})`,
 		afterGrowth === afterSeed + 1
 	);
-} finally {
-	for (const pid of cleanupPids) { try { process.kill(pid, "SIGTERM"); } catch {} }
-	for (const pf of cleanupPidFiles) { try { fs.unlinkSync(pf); } catch {} }
-	await sleep(200);
-	for (const d of fixtureDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }
 
 console.log("\n──────────────────────────────");

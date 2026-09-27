@@ -7,19 +7,9 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawn } from "node:child_process";
-import {
-	getDaemonPidPath,
-	readTagProvisional,
-	WTFT_TAGGER_VERSION,
-} from "../bin/wtft.mjs";
-import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
-
-// Private pid namespace for this suite (#486). Must precede the first
-// getDaemonPidPath() and the first daemon spawn.
-isolateTmpdir("443-swept");
-
-const DAEMON_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
+import { readTagProvisional } from "../extensions/lib/wtft-daemon-lib.ts";
+import { trackSandbox } from "./lib/sandbox";
+import { tagSession, type TaggedSession } from "./lib/tagger-harness.ts";
 
 const RED = "\x1b[31m", GREEN = "\x1b[32m", RESET = "\x1b[0m";
 let passed = 0, failed = 0;
@@ -27,10 +17,6 @@ function assert(label: string, ok: boolean) {
 	if (ok) { console.log(`  ${GREEN}PASS${RESET} ${label}`); passed++; }
 	else { console.log(`  ${RED}FAIL${RESET} ${label}`); failed++; }
 }
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-const cleanupPids: number[] = [];
-const cleanupPidFiles: string[] = [];
 
 function turnLine(id: string, tsMs: number, inputTokens: number, outputTokens: number): string {
 	return JSON.stringify({
@@ -51,7 +37,7 @@ function turnLine(id: string, tsMs: number, inputTokens: number, outputTokens: n
 	}) + "\n";
 }
 
-/** A session fixture: transcript, tags dir, and (optionally) one subagent. */
+/** A session fixture: transcript and (optionally) one subagent. */
 function makeSession(slug: string, withSubagent: boolean) {
 	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), `wtft-443-${slug}-`)));
 	const sessionPath = path.join(dir, "session.jsonl");
@@ -59,9 +45,6 @@ function makeSession(slug: string, withSubagent: boolean) {
 		type: "session", version: 3, id: `parent-443-${slug}`,
 		timestamp: new Date().toISOString(), cwd: dir,
 	}) + "\n");
-	const tagsDir = path.join(dir, "wtft-tags");
-	fs.mkdirSync(tagsDir, { recursive: true });
-	cleanupPidFiles.push(getDaemonPidPath(sessionPath));
 
 	const T0 = Date.now() - 60_000;
 	if (withSubagent) {
@@ -75,24 +58,18 @@ function makeSession(slug: string, withSubagent: boolean) {
 	// deliberately says "not provisional" for a tag that yields no total.
 	fs.appendFileSync(sessionPath, turnLine(`msg_443_${slug}_parent_0`, T0, 900, 40));
 
-	const tagPath = path.join(tagsDir, path.basename(sessionPath) + `.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
-	return { dir, sessionPath, tagPath };
+	tagger = tagSession(sessionPath);
+	return { dir, sessionPath, tagPath: tagger.tagPath };
 }
 
-function startDaemon(sessionPath: string) {
-	const child = spawn(process.execPath, [DAEMON_BIN, "--session", sessionPath], {
-		detached: true, stdio: "ignore",
-	});
-	child.unref();
-	if (child.pid) cleanupPids.push(child.pid);
-	return child;
-}
+/** The session the last makeSession tagged. */
+let tagger: TaggedSession;
 
 /** Poll until `fn()` is true, or give up. Returns whether it became true. */
-async function waitFor(fn: () => boolean, tries = 40, ms = 250): Promise<boolean> {
+function waitFor(fn: () => boolean, tries = 40): boolean {
 	for (let i = 0; i < tries; i++) {
 		if (fn()) return true;
-		await sleep(ms);
+		tagger.poll();
 	}
 	return fn();
 }
@@ -123,43 +100,35 @@ function tagHasSweptMarker(tagPath: string): boolean {
 	} catch { return false; }
 }
 
-console.log("wtft daemon writes the _meta.swept marker (#443)");
+console.log("the tagger writes the _meta.swept marker (#443)");
 console.log("──────────────────────────────");
 
-try {
+{
 	// --- A session WITH a subagent: the issue's shape ----------------------
 	{
-		const { sessionPath, tagPath } = makeSession("sub", true);
-		// Before any daemon exists there is no marker, so a populated tag reads
-		// provisional. Proven against a hand-built tag in slice 1; asserted here
-		// against the real writer so the two halves cannot drift apart.
-		startDaemon(sessionPath);
-		const gotData = await waitFor(() => fs.existsSync(tagPath) && fs.readFileSync(tagPath, "utf8").includes('"cat"'));
-		assert("daemon writes classified data for a session with a subagent", gotData);
+		const { tagPath } = makeSession("sub", true);
+		const gotData = waitFor(() => fs.existsSync(tagPath) && fs.readFileSync(tagPath, "utf8").includes('"cat"'));
+		assert("the tagger writes classified data for a session with a subagent", gotData);
 
-		const gotMarker = await waitFor(() => tagHasSweptMarker(tagPath));
-		assert("daemon appends _meta.swept once its first sweep completes", gotMarker);
+		const gotMarker = waitFor(() => tagHasSweptMarker(tagPath));
+		assert("the tagger appends _meta.swept once its first sweep completes", gotMarker);
 		assert("  ...and readTagProvisional flips to settled", readTagProvisional(tagPath).provisional === false);
 	}
 
 	// --- A session with NO subagent: nothing to sweep IS swept -------------
 	{
-		const { sessionPath, tagPath } = makeSession("nosub", false);
-		startDaemon(sessionPath);
-		const gotMarker = await waitFor(() => tagHasSweptMarker(tagPath));
+		const { tagPath } = makeSession("nosub", false);
+		const gotMarker = waitFor(() => tagHasSweptMarker(tagPath));
 		assert("a session with no subagents still gets the marker", gotMarker);
 		assert("  ...so it does not read provisional forever", readTagProvisional(tagPath).provisional === false);
 	}
 
 	// --- A live session RE-STAMPS; it does not lean on the old marker -------
-	// flushPending() runs BEFORE scanForSubAgents() in the same poll, so new
-	// parent turns land after whatever marker the tag already holds. The
-	// daemon must write a NEW marker after the new data, and the reader must
-	// refuse the old one until it does.
+	// New parent turns land after whatever marker the tag already holds, so a
+	// NEW marker must follow them, and the reader refuses the old one until then.
 	{
 		const { sessionPath, tagPath } = makeSession("busy", true);
-		startDaemon(sessionPath);
-		assert("busy fixture: marker present before the flood", await waitFor(() => tagHasSweptMarker(tagPath)));
+		assert("busy fixture: marker present before the flood", waitFor(() => tagHasSweptMarker(tagPath)));
 		const markersBefore = countSweptMarkers(tagPath);
 
 		const T1 = Date.now();
@@ -169,26 +138,21 @@ try {
 
 		// Wait for the flooded turns to REACH the tag, so what follows describes a
 		// tag that really does hold data newer than the first marker.
-		const landed = await waitFor(() => {
+		const landed = waitFor(() => {
 			try { return fs.readFileSync(tagPath, "utf8").includes("msg_443_busy_flood_159"); }
 			catch { return false; }
 		});
 		assert("  (the flooded turns reached the tag)", landed);
 
-		const settled = await waitFor(() => readTagProvisional(tagPath).provisional === false);
+		const settled = waitFor(() => readTagProvisional(tagPath).provisional === false);
 		assert("the tag returns to settled after the flood", settled);
 		// The non-vacuous half: it is settled because a NEW marker was written,
 		// not because the reader accepted the old one. "A marker exists" is true
 		// before and after, so only the COUNT can tell those two apart.
-		assert("  ...because the daemon re-stamped, not because the old marker was reused",
+		assert("  ...because the tagger re-stamped, not because the old marker was reused",
 			countSweptMarkers(tagPath) > markersBefore);
 	}
 
-} finally {
-	for (const pid of cleanupPids) { try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ } }
-	await sleep(300);
-	for (const pid of cleanupPids) { try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ } }
-	for (const f of cleanupPidFiles) { try { fs.unlinkSync(f); } catch { /* not there */ } }
 }
 
 console.log("\n──────────────────────────────");

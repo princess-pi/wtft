@@ -6,16 +6,11 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawn } from "node:child_process";
 import { deduplicateInteractions, parseSessionFile } from "../extensions/lib/wtft-parser.ts";
 import { readTagFileWithVerdict, transcriptSourceId, WTFT_TAGGER_VERSION } from "../extensions/lib/wtft-daemon-lib.ts";
 import { getSessionSummary } from "../extensions/lib/session-selector.ts";
-import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
-
-isolateTmpdir("114-generation-records");
-
-const DAEMON_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+import { trackSandbox } from "./lib/sandbox";
+import { tagSession, type TaggedSession } from "./lib/tagger-harness.ts";
 
 let passed = 0;
 let failed = 0;
@@ -109,28 +104,16 @@ console.log("\nPART R — readTagFileWithVerdict honours `_gen`");
 }
 
 // ---
-// PART D — the daemon opens a new generation when a child transcript rotates (#114)
+// PART D — the tagger opens a new generation when a child transcript rotates (#114)
 // ---
 console.log("\nPART D — a rotated child is billed for its latest generation only");
 
-function startDaemon(rootPath: string) {
-	const daemon = spawn(process.execPath, [DAEMON_BIN, "--session", rootPath], { detached: true, stdio: "ignore", env: { ...process.env } });
-	daemon.unref();
-	return daemon;
-}
-async function stopDaemon(daemon: ReturnType<typeof spawn>) {
-	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
-	for (let i = 0; i < 40; i++) {
-		try { if (daemon.pid) process.kill(daemon.pid, 0); } catch { return; }
-		await sleep(100);
-	}
-}
-/** Poll the tag until `done` holds and it reads swept, or ten seconds pass. */
-async function settle(tagPath: string, done: (read: ReturnType<typeof readTagFileWithVerdict>) => boolean) {
-	let read = readTagFileWithVerdict(tagPath);
+/** Poll until `done` holds and the tag reads swept, at most 40 polls. */
+function settle(tagger: TaggedSession, done: (read: ReturnType<typeof readTagFileWithVerdict>) => boolean) {
+	let read = readTagFileWithVerdict(tagger.tagPath);
 	for (let i = 0; i < 40 && !(done(read) && !read.provisional.provisional); i++) {
-		await sleep(250);
-		read = readTagFileWithVerdict(tagPath);
+		tagger.poll();
+		read = readTagFileWithVerdict(tagger.tagPath);
 	}
 	return read;
 }
@@ -142,19 +125,18 @@ function taskRoot(name: string, root: string) {
 	return {
 		rootPath,
 		child: path.join(rootDir, root, "subagents", "agent-rot.jsonl"),
-		tagPath: path.join(rootDir, "wtft-tags", `${root}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`),
 	};
 }
 const turns = (prefix: string, outs: number[], base: number) =>
 	outs.map((out, k) => turnLine(`${prefix}-${k}`, base + k * 1_000, out)).join("");
 
 for (const how of ["truncate", "replace"] as const) {
-	const { rootPath, child, tagPath } = taskRoot(`d-${how}`, uuid(how === "truncate" ? 11 : 12));
+	const { rootPath, child } = taskRoot(`d-${how}`, uuid(how === "truncate" ? 11 : 12));
 	const base = Date.now() - 50_000;
 	// Old run: 3 interactions, 700 output tokens. New run: different ones totalling 40.
 	fs.writeFileSync(child, turns(`old-${how}`, [100, 200, 400], base));
-	const daemon = startDaemon(rootPath);
-	const before = await settle(tagPath, r => outOf(r.interactions) === 701);
+	const tagger = tagSession(rootPath);
+	const before = settle(tagger, r => outOf(r.interactions) === 701);
 	check(outOf(before.interactions) === 701,
 		`D${how === "truncate" ? 1 : 3}a fixture precondition: the tag holds the old run's 700 plus the root's 1 before the rotation (got ${outOf(before.interactions)})`);
 	if (how === "truncate") {
@@ -166,56 +148,28 @@ for (const how of ["truncate", "replace"] as const) {
 		check(fs.statSync(next).size > fs.statSync(child).size, "D3b fixture precondition: the replacement is larger than the original");
 		fs.renameSync(next, child);
 	}
-	const after = await settle(tagPath, r => outOf(r.interactions) === 41);
-	await stopDaemon(daemon);
+	const after = settle(tagger, r => outOf(r.interactions) === 41);
 	check(outOf(after.interactions) === 41,
 		`D${how === "truncate" ? 2 : 4} #114 after a ${how}, the tag's total is the new run's 40 plus the root's 1, not the old 700 on top (got ${outOf(after.interactions)})`);
 }
 
 {
 	// A rewrite of the same byte length on the same inode: neither size nor inode moves.
-	const { rootPath, child, tagPath } = taskRoot("d-same-size", uuid(14));
+	const { rootPath, child } = taskRoot("d-same-size", uuid(14));
 	const base = Date.now() - 50_000;
 	fs.writeFileSync(child, turns("old-same", [100, 200, 400], base));
 	const before = fs.statSync(child);
-	const daemon = startDaemon(rootPath);
-	const read1 = await settle(tagPath, r => outOf(r.interactions) === 701);
+	const tagger = tagSession(rootPath);
+	const read1 = settle(tagger, r => outOf(r.interactions) === 701);
 	check(outOf(read1.interactions) === 701,
 		`D6a fixture precondition: the tag holds the old run's 700 plus the root's 1 (got ${outOf(read1.interactions)})`);
 	fs.writeFileSync(child, turns("new-same", [111, 222, 444], base + 10_000));
 	const after = fs.statSync(child);
 	check(after.size === before.size && after.ino === before.ino,
 		`D6b fixture precondition: the rewrite kept the byte length and the inode (${before.size}/${after.size}, ${before.ino}/${after.ino})`);
-	const read2 = await settle(tagPath, r => outOf(r.interactions) === 778);
-	await stopDaemon(daemon);
+	const read2 = settle(tagger, r => outOf(r.interactions) === 778);
 	check(outOf(read2.interactions) === 778,
 		`D7 #114 a rewrite that neither shrinks the file nor changes its inode still opens a new generation: 777 plus the root's 1 (got ${outOf(read2.interactions)})`);
-}
-
-{
-	// A restart re-appends every child line; an id-less line must not be billed twice.
-	const { rootPath, child, tagPath } = taskRoot("d-restart", uuid(13));
-	const iso = new Date(Date.now() - 40_000).toISOString();
-	fs.writeFileSync(child, JSON.stringify({
-		type: "message", timestamp: iso,
-		message: { role: "assistant", model: "claude-sonnet-4-6", timestamp: iso,
-			usage: { input_tokens: 1000, output_tokens: 300, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
-			content: [{ type: "text", text: "no id" }] },
-	}) + "\n");
-	check(parseSessionFile(child).length === 1 && !parseSessionFile(child)[0].messageId,
-		"D5a fixture precondition: the child's one turn parses, with no message id");
-	let daemon = startDaemon(rootPath);
-	const first = await settle(tagPath, r => outOf(r.interactions) === 301);
-	await stopDaemon(daemon);
-	daemon = startDaemon(rootPath);
-	await sleep(1_500);
-	const second = await settle(tagPath, r => outOf(r.interactions) >= 301);
-	await stopDaemon(daemon);
-	const appended = fs.readFileSync(tagPath, "utf8").split("\n").filter(l => l.includes('"no id"') || (l.includes('"out":300') && !l.includes('"_'))).length;
-	check(outOf(first.interactions) === 301 && appended >= 2,
-		`D5b fixture precondition: the first life billed it once, and the restart appended the line again (${appended} copies on disk)`);
-	check(outOf(second.interactions) === 301,
-		`D5 a restart that re-appends an id-less child line bills it once (got ${outOf(second.interactions)})`);
 }
 
 // ---
@@ -231,25 +185,24 @@ const spawnCostReparsed = (child: string, id: string) =>
 {
 	// The child spawned GRAND long ago and has stopped writing; GRAND keeps going.
 	const ROOT = uuid(21), GRAND = uuid(22);
-	const { rootPath, child, tagPath } = taskRoot("n-grow", ROOT);
+	const { rootPath, child } = taskRoot("n-grow", ROOT);
 	const spawnedAt = Date.now() - 50_000;
 	fs.writeFileSync(child, turnLine("n-grow-spawn", spawnedAt, 10, cwdOf(GRAND)));
 	fs.mkdirSync(projectDirOf(GRAND), { recursive: true });
 	const grand = path.join(projectDirOf(GRAND), `${GRAND}.jsonl`);
 	fs.writeFileSync(grand, turnLine("n-grow-g0", spawnedAt + 2_000, 100));
-	const daemon = startDaemon(rootPath);
-	const early = await settle(tagPath, r => r.folded.has(GRAND));
+	const tagger = tagSession(rootPath);
+	const early = settle(tagger, r => r.folded.has(GRAND));
 	const earlyCost = spawnCostInTag(early, "n-grow-spawn");
 	check(early.folded.has(GRAND) && Math.abs(earlyCost - spawnCostReparsed(child, "n-grow-spawn")) < 1e-6,
-		`N1a fixture precondition: the daemon folded GRAND's first turn onto the spawning turn ($${earlyCost})`);
-	await sleep(3_000);
+		`N1a fixture precondition: the tagger folded GRAND's first turn onto the spawning turn ($${earlyCost})`);
+	for (let i = 0; i < 5; i++) tagger.poll();
 	fs.appendFileSync(grand, turnLine("n-grow-g1", spawnedAt + 30_000, 2_000));
-	await sleep(1_000);
+	for (let i = 0; i < 2; i++) tagger.poll();
 	fs.appendFileSync(grand, turnLine("n-grow-g2", spawnedAt + 40_000, 4_000));
 	const full = spawnCostReparsed(child, "n-grow-spawn");
 	check(full > earlyCost + 1e-6, `N1b fixture precondition: a full re-parse now costs more than the first fold ($${full} > $${earlyCost})`);
-	const late = await settle(tagPath, r => Math.abs(spawnCostInTag(r, "n-grow-spawn") - full) < 1e-6);
-	await stopDaemon(daemon);
+	const late = settle(tagger, r => Math.abs(spawnCostInTag(r, "n-grow-spawn") - full) < 1e-6);
 	check(Math.abs(spawnCostInTag(late, "n-grow-spawn") - full) < 1e-6,
 		`N1 #14 the tag's cost for the spawning turn equals a full re-parse within $0.000001 ($${spawnCostInTag(late, "n-grow-spawn")} vs $${full})`);
 	check(Math.abs(costOf(late.interactions) - costOf(deduplicateInteractions(parseSessionFile(rootPath))) - costOf(deduplicateInteractions(parseSessionFile(child)))) < 1e-5,
@@ -257,22 +210,21 @@ const spawnCostReparsed = (child: string, id: string) =>
 }
 
 {
-	// GRAND's transcript appears after the daemon parsed the child, inside the discovery window.
+	// GRAND's transcript appears after the tagger parsed the child, inside the discovery window.
 	const ROOT = uuid(23), GRAND = uuid(24);
-	const { rootPath, child, tagPath } = taskRoot("n-late", ROOT);
+	const { rootPath, child } = taskRoot("n-late", ROOT);
 	const spawnedAt = Date.now();
 	fs.writeFileSync(child, turnLine("n-late-spawn", spawnedAt, 10, cwdOf(GRAND)));
-	const daemon = startDaemon(rootPath);
-	const first = await settle(tagPath, r => spawnCostInTag(r, "n-late-spawn") > 0);
+	const tagger = tagSession(rootPath);
+	const first = settle(tagger, r => spawnCostInTag(r, "n-late-spawn") > 0);
 	check(spawnCostInTag(first, "n-late-spawn") > 0 && !first.folded.has(GRAND),
-		"N3a fixture precondition: the daemon billed the spawning turn before GRAND existed");
+		"N3a fixture precondition: the tagger billed the spawning turn before GRAND existed");
 	// Past the settle re-reads that follow the child's own write, so only the window can catch it.
-	await sleep(3_000);
+	for (let i = 0; i < 5; i++) tagger.poll();
 	fs.mkdirSync(projectDirOf(GRAND), { recursive: true });
 	fs.writeFileSync(path.join(projectDirOf(GRAND), `${GRAND}.jsonl`), turnLine("n-late-g0", spawnedAt + 5_000, 900));
 	const full = spawnCostReparsed(child, "n-late-spawn");
-	const late = await settle(tagPath, r => r.folded.has(GRAND));
-	await stopDaemon(daemon);
+	const late = settle(tagger, r => r.folded.has(GRAND));
 	check(late.folded.has(GRAND) && Math.abs(spawnCostInTag(late, "n-late-spawn") - full) < 1e-6,
 		`N3 #14 a nested session that appears after the child's parse is folded and recorded ($${spawnCostInTag(late, "n-late-spawn")} vs $${full})`);
 }
@@ -283,18 +235,16 @@ const spawnCostReparsed = (child: string, id: string) =>
 	const rootDir = path.join(dir, "n-pending");
 	fs.mkdirSync(rootDir, { recursive: true });
 	const rootPath = path.join(rootDir, `${ROOT}.jsonl`);
-	const tagPath = path.join(rootDir, "wtft-tags", `${ROOT}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
 	const spawnedAt = Date.now();
 	fs.mkdirSync(projectDirOf(KID), { recursive: true });
 	fs.writeFileSync(path.join(projectDirOf(KID), `${KID}.jsonl`), turnLine("n-pend-k1", spawnedAt + 1_000, 50));
 	fs.writeFileSync(rootPath, turnLine("n-pend-root", spawnedAt, 1, cwdOf(KID)));
-	const daemon = startDaemon(rootPath);
-	const first = await settle(tagPath, r => r.folded.has(KID));
+	const tagger = tagSession(rootPath);
+	const first = settle(tagger, r => r.folded.has(KID));
 	check(first.folded.has(KID) && !first.folded.has(KID2),
-		"N4a fixture precondition: the daemon found the first child before the second existed");
+		"N4a fixture precondition: the tagger found the first child before the second existed");
 	fs.writeFileSync(path.join(projectDirOf(KID), `${KID2}.jsonl`), turnLine("n-pend-k2", spawnedAt + 4_000, 70));
-	const late = await settle(tagPath, r => r.folded.has(KID2));
-	await stopDaemon(daemon);
+	const late = settle(tagger, r => r.folded.has(KID2));
 	check(late.folded.has(KID2) && outOf(late.interactions) === 121,
 		`N4 #14 a second child in the same window is read too: 1 + 50 + 70 (got ${outOf(late.interactions)}, folded ${JSON.stringify([...late.folded])})`);
 }

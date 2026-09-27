@@ -11,7 +11,9 @@ import * as path from "node:path";
 import { spawn } from "node:child_process";
 import {
 	getDaemonPidPath,
+	getCurrentVersionTagPath,
 	readClassifiedTagFile,
+	readTagFileWithVerdict,
 	parseSessionFile,
 	deduplicateInteractions,
 	WTFT_TAGGER_VERSION,
@@ -223,6 +225,52 @@ try {
 	for (const pid of cleanupPids) { try { process.kill(pid, "SIGTERM"); } catch {} }
 	for (const pf of cleanupPidFiles) { try { fs.unlinkSync(pf); } catch {} }
 	await sleep(200);
+}
+
+// ---
+// A restart re-appends every child line; an id-less line must not be billed twice.
+// ---
+console.log("\nwtft restart over an id-less child line");
+{
+	const root = path.join(dir, "d-restart");
+	const rootPath = path.join(root, "d-restart.jsonl");
+	const child = path.join(root, "d-restart", "subagents", "agent-rot.jsonl");
+	fs.mkdirSync(path.dirname(child), { recursive: true });
+	fs.writeFileSync(rootPath, turnLine("turn-root-d-restart", Date.now() - 60_000, 0, 1));
+	cleanupPidFiles.push(getDaemonPidPath(rootPath));
+	const restartTag = getCurrentVersionTagPath(rootPath);
+	const outOf = () => readTagFileWithVerdict(restartTag).interactions.reduce((n, i) => n + i.outputTokens, 0);
+	const iso = new Date(Date.now() - 40_000).toISOString();
+	fs.writeFileSync(child, JSON.stringify({
+		type: "message", timestamp: iso,
+		message: { role: "assistant", model: "claude-sonnet-4-6", timestamp: iso,
+			usage: { input_tokens: 1000, output_tokens: 300, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+			content: [{ type: "text", text: "no id" }] },
+	}) + "\n");
+	assert("D5a fixture precondition: the child's one turn parses, with no message id",
+		parseSessionFile(child).length === 1 && !parseSessionFile(child)[0].messageId);
+	const settle = async (done: () => boolean) => {
+		for (let i = 0; i < 40 && !(done() && !readTagFileWithVerdict(restartTag).provisional.provisional); i++) await sleep(250);
+	};
+	let pid = 0;
+	let first = 0, second = 0;
+	try {
+		pid = spawnDaemon(rootPath);
+		await settle(() => outOf() === 301);
+		first = outOf();
+		await stopDaemon(pid, rootPath);
+		pid = 0;
+		pid = spawnDaemon(rootPath);
+		await sleep(1_500);
+		await settle(() => outOf() >= 301);
+		second = outOf();
+	} finally {
+		if (pid > 0) await stopDaemon(pid, rootPath);
+	}
+	const appended = fs.readFileSync(restartTag, "utf8").split("\n").filter(l => l.includes('"no id"') || (l.includes('"out":300') && !l.includes('"_'))).length;
+	assert(`D5b fixture precondition: the first life billed it once, and the restart appended the line again (${appended} copies on disk)`,
+		first === 301 && appended >= 2);
+	assert(`D5 a restart that re-appends an id-less child line bills it once (got ${second})`, second === 301);
 }
 
 console.log("\n──────────────────────────────");

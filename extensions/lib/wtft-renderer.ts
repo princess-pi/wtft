@@ -616,7 +616,7 @@ export function checkSurgeProximity(at: number = Date.now(), model?: string): { 
 	};
 
 	for (const [start, end] of schedule.windowsUtcMinutes) {
-		if (currentUtcMinute >= start && currentUtcMinute < end && opensOn(y, mo, d, start)) {
+		if (currentUtcMinute >= start && currentUtcMinute < end && opensOn(y, mo, d, start) && getPeakMultiplier(model, at) > 1) {
 			const billedToday = schedule.windowsUtcMinutes.filter(([windowStart]) => opensOn(y, mo, d, windowStart));
 			const containing = billedToday.filter(([windowStart, windowEnd]) =>
 				currentUtcMinute >= windowStart && currentUtcMinute < windowEnd);

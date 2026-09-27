@@ -238,6 +238,8 @@ describe("#312 a card carries its own surge schedule", () => {
 		assert.equal(checkSurgeProximity(saturdayAt(2, 9), "acme-cutoff").status, "surge");
 		assert.equal(checkSurgeProximity(saturdayAt(2, 10), "acme-cutoff").status, "ending");
 		assert.equal(checkSurgeProximity(saturdayAt(2, 15), "acme-cutoff").status, "ending");
+		assert.equal(checkSurgeProximity(saturdayAt(2, 31), "acme-cutoff").status, undefined);
+		assert.equal(checkSurgeProximity(saturdayAt(3, 0), "acme-cutoff").status, undefined);
 		assert.equal(getPeakMultiplier("acme-cutoff", saturdayAt(2, 29)), 2);
 		assert.equal(getPeakMultiplier("acme-cutoff", saturdayAt(2, 30)), 1);
 		assert.equal(checkSurgeProximity(Date.UTC(2026, 8, 5, 2, 15, 0), "acme-cutoff").status, undefined);

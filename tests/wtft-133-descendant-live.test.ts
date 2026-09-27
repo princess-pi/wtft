@@ -6,6 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+import { cliWithoutDaemon } from "./lib/cli-harness.ts";
 import { computeSpawnTree } from "../extensions/lib/wtft-spawn-tree.ts";
 import { SPAWN_RECORD_SCHEMA, serializeSpawnRecord } from "../extensions/lib/wtft-spawn-ledger.ts";
 
@@ -87,13 +88,12 @@ console.log("\n=== computeSpawnTree marks a counted edge live from its transcrip
 // ---
 const { WTFT_TAGGER_VERSION, EXIT_PROVISIONAL } = await import("../bin/wtft.mjs");
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
-const CLI_BIN = path.join(REPO_ROOT, "bin", "wtft.mjs");
+const CLI_BIN = cliWithoutDaemon();
 const state = path.join(dir, "state");
 fs.mkdirSync(path.join(state, "wtft"), { recursive: true });
 fs.copyFileSync(ledgerOf("cli", [[PARENT, CHILD]]), path.join(state, "wtft", "spawns.jsonl"));
 
-/** The parent session, with a tag ending on `marker`. A fresh copy per run:
- *  the CLI starts a daemon that rewrites the tag it watches. */
+/** The parent session, with a tag ending on `marker`. */
 let parentSeq = 0;
 function parentWithTag(marker: Record<string, number>): string {
 	const parentDir = path.join(dir, `parent-${parentSeq++}`);
@@ -106,10 +106,10 @@ function parentWithTag(marker: Record<string, number>): string {
 	return session;
 }
 
-function runCli(args: string[]): { code: number; stdout: string; stderr: string; doc: any } {
+function runCli(args: string[], standIn = ""): { code: number; stdout: string; stderr: string; doc: any } {
 	const r = spawnSync(process.execPath, [CLI_BIN, ...args], {
 		cwd: REPO_ROOT, encoding: "utf8", timeout: 60_000, stdio: ["ignore", "pipe", "pipe"],
-		env: { ...process.env, XDG_STATE_HOME: state, WTFT_DAEMON_DEBUG: "" },
+		env: { ...process.env, XDG_STATE_HOME: state, WTFT_DAEMON_DEBUG: "", WTFT_STAND_IN: standIn },
 	});
 	let doc: any = null;
 	try { doc = JSON.parse(r.stdout); } catch { /* not JSON mode, or reported by the caller */ }
@@ -148,7 +148,7 @@ console.log("\n=== wtft --json on a not-yet-written parent: the empty arm carrie
 	fs.copyFileSync(ledgerOf("cli-pending", [[PARENT, CHILD], [PENDING, CHILD]]), path.join(state, "wtft", "spawns.jsonl"));
 	fs.mkdirSync(path.join(dir, "pending-parent"), { recursive: true });
 	const absent = path.join(dir, "pending-parent", `${PENDING}.jsonl`);
-	const pending = runCli(["-s", absent, "--json"]);
+	const pending = runCli(["-s", absent, "--json"], "heartbeat");
 	check((pending.doc?.notices ?? []).some((n: any) => n.code === "pending-session"),
 		"precondition: the run took the pending arm", JSON.stringify(pending.doc?.notices));
 	check(pending.doc?.provisional?.reason === "descendant-live",

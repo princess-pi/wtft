@@ -10,6 +10,7 @@ import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { skip } from "./lib/skips";
+import { cliWithoutDaemon, tagForCli } from "./lib/cli-harness.ts";
 
 isolateTmpdir("138-resolution-index");
 
@@ -129,17 +130,18 @@ console.log("\nPART E — the rendered report");
 	fs.copyFileSync(ledgerWith(Array.from({ length: 10_000 }, (_, i) => uuid(i, "e138"))), path.join(stateHome, "wtft", "spawns.jsonl"));
 	const session = path.join(dir, "e-session", `${PARENT}.jsonl`);
 	transcript(session, PARENT, 50);
+	tagForCli(session);
 	const ledgerFile = path.join(stateHome, "wtft", "spawns.jsonl");
 	const runCli = () => {
 		const t0 = performance.now();
-		const r = spawnSync("node", [path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs"), "-s", session, "--tokens"], {
+		const r = spawnSync("node", [cliWithoutDaemon(), "-s", session, "--tokens"], {
 			encoding: "utf8", env: { ...process.env, XDG_STATE_HOME: stateHome },
 		});
 		return { r, ms: performance.now() - t0 };
 	};
 	const { r, ms } = runCli();
 	const out = (r.stdout || "").replace(/\x1b\[[0-9;]*m/g, "");
-	check((r.status === 0 || r.status === 9) && /10000 unattributed/.test(out),
+	check(r.status === 0 && /10000 unattributed/.test(out),
 		`E1 --tokens renders the tree and names all 10,000 gaps (exit ${r.status}): ${out.split("\n").filter(l => /SPAWNED|unattributed|TREE|PROVISIONAL/.test(l)).join(" | ")} ${(r.stderr || "").slice(0, 200)}`);
 	check(ms < 5000, `E2 the whole report, CLI start to exit, stays well inside 5 s (took ${Math.round(ms)} ms)`);
 

@@ -6,13 +6,14 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
+import { cliWithoutDaemon } from "./lib/cli-harness.ts";
 import { WTFT_TAGGER_VERSION, EXIT_PROVISIONAL, EXIT_SESSION_AMBIGUOUS, WTFT_JSON_SCHEMA } from "../bin/wtft.mjs";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("26-json");
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
-const CLI_BIN = path.join(REPO_ROOT, "bin", "wtft.mjs");
+const CLI_BIN = cliWithoutDaemon();
 /** The fourteen category names, in CATEGORY_ORDER, written out INDEPENDENTLY.
  *  Importing CATEGORY_ORDER and asserting the JSON matches it is tautological —
  *  `computeSessionSummary` builds `categories[]` by mapping over that same
@@ -111,11 +112,11 @@ function makeFixture(slug: string, swept: boolean) {
  *  both fields, so the split has to survive a zero exit.
  *  (tests/wtft-443-cli-exit-9.test.ts has the execFileSync shape and one
  *  assertion that is vacuous for exactly this reason; it is fixed there too.) */
-function runCli(args: string[]): { code: number; stdout: string; stderr: string } {
+function runCli(args: string[], standIn = "alive"): { code: number; stdout: string; stderr: string } {
 	const r = spawnSync(process.execPath, [CLI_BIN, ...args], {
 		cwd: REPO_ROOT, encoding: "utf8", timeout: 60_000,
 		stdio: ["ignore", "pipe", "pipe"],
-		env: { ...process.env, WTFT_DAEMON_DEBUG: "" },
+		env: { ...process.env, WTFT_DAEMON_DEBUG: "", WTFT_STAND_IN: standIn },
 	});
 	return { code: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
@@ -501,7 +502,7 @@ console.log("\n8b. a pending session is not provisional");
 {
 	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-26-pending-")));
 	const sessionPath = path.join(dir, "308c0de0-0000-0000-0000-000000000026.jsonl");
-	const r = runCli(["-s", sessionPath, "--json"]);
+	const r = runCli(["-s", sessionPath, "--json"], "heartbeat");
 	let doc: any = null;
 	try { doc = JSON.parse(r.stdout); } catch { /* reported below */ }
 	assert("a pending session still yields one JSON object", doc !== null, r.stdout.slice(0, 400));
@@ -569,12 +570,6 @@ console.log("\n9. rendered and --json agree on the exit code, empty or not");
 		fs.writeFileSync(path.join(tagsDir, name), JSON.stringify({ _meta: stale ? { offset: 0 } : { offset: 0, swept: Date.now() } }) + "\n");
 		return sessionPath;
 	};
-	// A FRESH fixture per mode, never one session run twice. The first run spawns
-	// the log parser daemon, which repairs the tag and writes a current-version
-	// one — so a second run against the same directory reads a settled tag and
-	// legitimately exits 0. Comparing the two modes across that repair compares
-	// two different states and fails an entirely correct build, which is what the
-	// first cut of this section did.
 	for (const [slug, stale, want] of [["renderprov", true, EXIT_PROVISIONAL], ["rendersettled", false, 0]] as const) {
 		const rendered = runCli(["-s", mk(`${slug}-r`, stale), "--pad", "0"]);
 		const asJson = runCli(["-s", mk(`${slug}-j`, stale), "--json"]);

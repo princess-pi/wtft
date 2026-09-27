@@ -130,6 +130,28 @@ describe("#312 a card carries its own surge schedule", () => {
 		assert.equal(checkSurgeProximity(minute(1419), "acme-midnight").status, undefined);
 		delete MODEL_PRICING["acme-midnight"];
 	});
+
+	it("asks the next UTC day whether a midnight window will bill", () => {
+		const from = Date.parse("2026-08-23T00:00:00Z");
+		MODEL_PRICING["acme-weekend"] = {
+			input: 1, output: 1, cacheRead: 1, cacheWrite: 0,
+			surge: { multiplier: 2, windowsUtcMinutes: [[0, 60]], weekendOffPeakFrom: from },
+		};
+		const friday = Date.UTC(2026, 7, 28, 23, 40, 0);
+		const sunday = Date.UTC(2026, 7, 30, 23, 40, 0);
+		assert.equal(checkSurgeProximity(friday, "acme-weekend").status, undefined);
+		assert.equal(checkSurgeProximity(sunday, "acme-weekend").status, "approaching");
+		delete MODEL_PRICING["acme-weekend"];
+	});
+
+	it("reports ending inside a later window before an earlier window's midnight lead", () => {
+		MODEL_PRICING["acme-split"] = {
+			input: 1, output: 1, cacheRead: 1, cacheWrite: 0,
+			surge: { multiplier: 2, windowsUtcMinutes: [[0, 60], [1380, 1440]] },
+		};
+		assert.equal(checkSurgeProximity(minute(1425), "acme-split").status, "ending");
+		delete MODEL_PRICING["acme-split"];
+	});
 });
 
 describe("#20 SURGE ENDING is the last lead inside a DeepSeek window", () => {

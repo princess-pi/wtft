@@ -578,11 +578,10 @@ export function getSurgeLocalHours(tz?: string, now: number = Date.now(), model?
 }
 
 /**
- * Windows come from the model's surge schedule rather than a
- * hardcoded copy; a day that is entirely off-peak reports no proximity.
- *
- * Ending is the last {@link SURGE_ENDING_MINUTES} inside the window.
- * Approaching is the {@link SURGE_APPROACH_MINUTES} before it opens.
+ * Ending is the last {@link SURGE_ENDING_MINUTES} inside a window that bills
+ * above 1 on that UTC day. Approaching is the {@link SURGE_APPROACH_MINUTES}
+ * before such a window opens. A lead that wraps past midnight asks about the
+ * next UTC day.
  */
 export function checkSurgeProximity(at: number = Date.now(), model?: string): { status: 'surge' | 'approaching' | 'ending' | undefined; multiplier: number } {
 	const schedule = model ? surgeScheduleFor(model) : null;
@@ -590,25 +589,39 @@ export function checkSurgeProximity(at: number = Date.now(), model?: string): { 
 	const now = new Date(at);
 	const currentUtcMinute = now.getUTCHours() * 60 + now.getUTCMinutes();
 	const multiplier = schedule.multiplier;
+	const y = now.getUTCFullYear();
+	const mo = now.getUTCMonth();
+	const d = now.getUTCDate();
+	const next = new Date(Date.UTC(y, mo, d + 1));
 
-	const daySurges = schedule.windowsUtcMinutes.some(([start]) => {
-		const probe = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0) + start * 60000;
+	const opensOn = (year: number, month: number, day: number, start: number) => {
+		const probe = Date.UTC(year, month, day, 0, 0, 0) + start * 60_000;
 		return getPeakMultiplier(model, probe) > 1;
-	});
-	if (!daySurges) return { status: undefined, multiplier: 1 };
+	};
 
 	for (const [start, end] of schedule.windowsUtcMinutes) {
-		if (currentUtcMinute >= start && currentUtcMinute < end) {
+		if (currentUtcMinute >= start && currentUtcMinute < end && opensOn(y, mo, d, start)) {
 			const endingAt = end - SURGE_ENDING_MINUTES;
 			if (currentUtcMinute >= endingAt) return { status: 'ending', multiplier };
 			return { status: 'surge', multiplier };
 		}
-		if (currentUtcMinute >= start - SURGE_APPROACH_MINUTES && currentUtcMinute < start) {
+	}
+	for (const [start] of schedule.windowsUtcMinutes) {
+		if (
+			currentUtcMinute >= start - SURGE_APPROACH_MINUTES
+			&& currentUtcMinute < start
+			&& opensOn(y, mo, d, start)
+		) {
 			return { status: 'approaching', multiplier };
 		}
 		if (start < SURGE_APPROACH_MINUTES) {
 			const leadFrom = 1440 - (SURGE_APPROACH_MINUTES - start);
-			if (currentUtcMinute >= leadFrom) return { status: 'approaching', multiplier };
+			if (
+				currentUtcMinute >= leadFrom
+				&& opensOn(next.getUTCFullYear(), next.getUTCMonth(), next.getUTCDate(), start)
+			) {
+				return { status: 'approaching', multiplier };
+			}
 		}
 	}
 	return { status: undefined, multiplier: 1 };

@@ -240,11 +240,13 @@ written so far has been wrong; `grep` is the authority.
 `getPeakMultiplier` what each hour costs, so no hour is coloured differently from the
 way that hour is billed. It resolves the day containing the instant passed to it, and the
 renderer passes `now` — so the bar describes today while the bins under it may be older.
-`checkSurgeProximity()` asks whether the day surges at all, then reads
-`SURGE_APPROACH_MINUTES` before a window opens, and `SURGE_ENDING_MINUTES` before it
-closes. Both are 20. Ending is the last of those minutes inside the window.
-Rendered as the SURGE Timeline badge and orange segments.
-_Avoid_: Peak pricing, rush hour, premium window
+`checkSurgeProximity()` reads `SURGE_APPROACH_MINUTES` before a window opens, and
+`SURGE_ENDING_MINUTES` before it closes. Both are 20. Ending is the last of those
+minutes inside a window that bills above 1 on that UTC day. A lead that wraps past
+midnight asks whether the next UTC day bills that window. Rendered as the SURGE
+Timeline badge and orange segments. The function that answers the multiplier is
+`getPeakMultiplier`: the brand is what that name drops.
+_Avoid_: Rush hour, premium window
 
 **Rate card (DeepSeek)**:
 The published per-1M quad. A `MODEL_PRICING` entry's unconditioned rates are the **off-peak**

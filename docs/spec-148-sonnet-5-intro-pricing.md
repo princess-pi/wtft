@@ -43,8 +43,8 @@ new plumbing:
 - `wtft-parser.ts:426-429` (the overhead-cost split) passes `interaction.timestamp` the same way,
   for both the `full` and `withoutCw` calls.
 - `calculateClaudeCost(model, usage, timestamp?)` signature already exists (`wtft-cost.ts:227`)
-  and already forwards `timestamp` into `getPeakMultiplier(model, timestamp)` for a card's surge
-  pricing.
+  and already forwards `timestamp` into `getDeepSeekPeakMultiplier(timestamp)` when the
+  model id contains `deepseek`.
 
 So the only structurally new thing this issue needs is: **a Sonnet-5-shaped `ModelPricing` entry
 that resolves different base rates depending on where `timestamp` falls**, generalized so any
@@ -173,7 +173,7 @@ $6.00/MTok standard — with no new code at that line.
 ## 3. Test hazard (#96) — how this spec avoids it
 
 #96: a DeepSeek surge test asserted a non-peak price by comparing against whatever
-`getPeakMultiplier(model, undefined)` resolved to at whatever moment the suite happened to run,
+`getDeepSeekPeakMultiplier(undefined)` resolved to at whatever moment the suite happened to run,
 which flips value near UTC peak-window boundaries. The fix pattern already in this repo
 (`wtft-pricing-tiers.test.ts`, the two DeepSeek v4-pro surge tests — renamed in #495 when the
 rate card moved, which is why this cites them by subject rather than by title) is to construct a fixed

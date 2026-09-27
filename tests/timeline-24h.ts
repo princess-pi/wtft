@@ -4,6 +4,7 @@
  *   human can eyeball clock-face placement and surge coloring.
  */
 
+import { surgeScheduleFor } from "../extensions/lib/wtft-cost.ts";
 import { buildTimelineString, getSurgeLocalHours } from "../extensions/lib/wtft-renderer.ts";
 
 const CLOCK_FACES = ["🕛","🕐","🕑","🕒","🕓","🕔","🕕","🕖","🕗","🕘","🕙","🕚"];
@@ -54,9 +55,14 @@ function parseArgs(argv: string[]): { model?: string; tz?: string } {
 const args = parseArgs(process.argv.slice(2));
 const model = args.model ?? process.env.PI_MODEL ?? "unknown";
 const surgeHours = getSurgeLocalHours(args.tz, Date.now(), model);
+const surgeLine = surgeHours.size > 0
+	? "card has surge hours today"
+	: surgeScheduleFor(model)
+		? "schedule is off today"
+		: "card has no surge schedule";
 
 console.log(`model:        ${model}`);
-console.log(`surge:        ${surgeHours.size > 0 ? "card has open hours today" : "no open hours"}`);
+console.log(`surge:        ${surgeLine}`);
 console.log(`timezone:     ${args.tz ?? "(host local)"}`);
 console.log(`surge hours:  ${[...surgeHours].sort((a, b) => a - b).join(", ") || "(none)"}`);
 console.log("");

@@ -39,11 +39,6 @@ const JERUSALEM_EXPECTED_INSTANTS: readonly string[] = [
 	"2026-03-27T19:00:00.000Z", "2026-03-27T20:00:00.000Z",
 ];
 
-// getPeakMultiplier's windows are 01:00-04:00 and 06:00-10:00 UTC,
-// Mon-Fri only (#495) — applied to JERUSALEM_EXPECTED_INSTANTS by hand:
-// 01:00Z,02:00Z,03:00Z (hours 4,5,6) and 06:00Z..09:00Z (hours 9,10,11,12)
-// charge 2x; every other instant above (including both copies of the
-// 00:00Z collision at hours 2 and 3) does not.
 const JERUSALEM_EXPECTED_SURGE_HOURS = [4, 5, 6, 9, 10, 11, 12];
 
 describe("#24 getSurgeLocalHours (tz branch) resolves each local hour with its own DST offset", () => {

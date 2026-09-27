@@ -251,9 +251,7 @@ assert(
 	piOffPeak?.surgePriced === false
 );
 
-// Same entry at a PEAK instant. Two things make it peak and only one is the
-// hour: 02:00 UTC is inside a window, and 2025-01-01 is a Wednesday. Since #495 the weekday
-// matters: the same hour on a Sat/Sun after 2026-08-23 bills at 1x.
+// Same entry at a peak instant. 02:00 UTC is inside a window, and 2025-01-01 is a Wednesday.
 const piAssistantPeak = {
 	type: "message",
 	message: {

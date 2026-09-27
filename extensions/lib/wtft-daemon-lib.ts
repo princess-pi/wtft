@@ -10,8 +10,10 @@ import {
 	parseEntryToInteraction,
 	deduplicateInteractions,
 	classifyInteraction,
-	buildWtftLines
+	buildWtftLines,
+	wholeLimit
 } from "./wtft-shared.js";
+import { isPlaceholderRow } from "./wtft-chart.js";
 import { splitOverheadCost, isModelTagged } from "./wtft-parser.js";
 import { getDiscoveries } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.js";
@@ -856,7 +858,7 @@ export async function watchTagFile(
 		const padStr = " ".repeat(actualPad);
 		const paddedWidth = width - 2 * actualPad;
 		const finalInterval = settings.hasInterval ? settings.interval : (sessionInterval ?? settings.interval);
-		const finalLimit = settings.hasLimit ? settings.limit : (sessionLimit ?? settings.limit);
+		const finalLimit = wholeLimit(settings.hasLimit ? settings.limit : (sessionLimit ?? settings.limit));
 		const finalMode = settings.hasMode ? settings.mode : (sessionMode ?? settings.mode);
 		const finalTimezone = settings.hasTimezone ? settings.timezone : (sessionTimezone ?? settings.timezone);
 		const finalWidth = Math.min(paddedWidth, 1023);
@@ -873,6 +875,8 @@ export async function watchTagFile(
 		const lines = buildWtftLines(deduped, defaultSettings, {
 			interval: finalInterval,
 			limit: finalLimit,
+			// No more placeholders than the terminal has rows; the fit below trims the rest.
+			padRowsTo: Math.min(finalLimit, process.stdout.rows || finalLimit),
 			width: finalWidth,
 			mode: finalMode,
 			timezone: finalTimezone,
@@ -911,12 +915,20 @@ export async function watchTagFile(
 			: "";
 		buf.push(`'q' to exit${restartHint}`);
 
+		// Cursor-up redraw cannot reach lines scrolled off the top, so padding gives way first.
+		// Counted as the redraw counts them (wrapped), plus the line the cursor ends on.
+		const cols = process.stdout.columns || 80;
+		const rows = process.stdout.rows || Infinity;
+		const screenLines = () => visualLineCount(buf.map(l => padStr + l + "\n").join(""), cols) + 1;
+		for (let i = buf.length - 1; i >= 0 && screenLines() > rows; i--) {
+			if (isPlaceholderRow(buf[i]!)) buf.splice(i, 1);
+		}
+
 		lastBuffer = [...buf];
 
 		const allLines = buf.map(l => padStr + l);
 		const out = allLines.map(l => l + "\n").join("");
 		process.stdout.write(out);
-		const cols = process.stdout.columns || 80;
 		lastLineCount = visualLineCount(out, cols);
 		needsRedraw = false;
 	};

@@ -1,17 +1,9 @@
-import { splitFrontmatter, parseRoute, resolveRelative } from "./route.mjs";
+import { splitFrontmatter, parseRoute, resolveRelative, rewriteHref, headingDomId, pageTitle } from "./route.mjs";
 
 const nav = document.getElementById("nav-list");
 const navTitle = document.querySelector(".nav-title");
 const content = document.getElementById("content");
 const md = window.markdownit({ html: true, linkify: true });
-
-function slugify(value) {
-  return value.toLowerCase().trim()
-    .replace(/[`*_[\]()]/g, "")
-    .replace(/[^\w\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .slice(0, 60);
-}
 
 function clearToc() {
   document.getElementById("toc")?.replaceChildren();
@@ -24,10 +16,10 @@ function fillToc(root, basePath) {
   const seen = new Map();
   const items = [];
   for (const heading of root.querySelectorAll("h2, h3")) {
-    let id = slugify(heading.textContent);
-    const count = (seen.get(id) || 0) + 1;
-    seen.set(id, count);
-    if (count > 1) id += "-" + count;
+    const slug = headingDomId(heading.textContent, 1).slice(4);
+    const count = (seen.get(slug) || 0) + 1;
+    seen.set(slug, count);
+    const id = headingDomId(heading.textContent, count);
     heading.id = id;
     items.push({ id, level: heading.tagName.toLowerCase(), text: heading.textContent.trim() });
   }
@@ -49,17 +41,8 @@ function rewriteDocLinks(root, basePath, index) {
   const known = new Set((index.docs || []).map((doc) => doc.path));
   for (const link of root.querySelectorAll("a[href]")) {
     const href = link.getAttribute("href");
-    if (!href || /^([a-z]+:|\/\/)/i.test(href)) continue;
-    if (href.startsWith("#")) {
-      link.setAttribute("href", "#" + basePath + href);
-      continue;
-    }
-    const [file, frag] = href.split("#");
-    if (!file) continue;
-    const resolved = resolveRelative(basePath, file);
-    if (known.has(resolved) || file.endsWith(".md") || file.endsWith(".mdx")) {
-      link.setAttribute("href", "#" + resolved + (frag ? "#" + frag : ""));
-    }
+    const next = rewriteHref(basePath, href, known);
+    if (next && next !== href) link.setAttribute("href", next);
   }
   for (const el of root.querySelectorAll("iframe[src], img[src]")) {
     const src = el.getAttribute("src");
@@ -70,6 +53,7 @@ function rewriteDocLinks(root, basePath, index) {
 
 function hint(text) {
   renderGen += 1;
+  shownPath = "";
   clearToc();
   document.querySelectorAll("#nav-list a").forEach((a) => a.classList.remove("active"));
   content.replaceChildren();
@@ -133,8 +117,13 @@ function findDoc(index, path) {
 }
 
 let renderGen = 0;
+let shownPath = "";
 
 async function renderDoc(index, path, frag) {
+  if (path === shownPath) {
+    if (frag) document.getElementById(frag)?.scrollIntoView();
+    return;
+  }
   const gen = ++renderGen;
   const doc = findDoc(index, path);
   if (!doc) {
@@ -155,6 +144,8 @@ async function renderDoc(index, path, frag) {
     frame.style.cssText = "width:100%;height:80vh;border:1px solid var(--border);border-radius:6px;";
     content.appendChild(frame);
     clearToc();
+    shownPath = path;
+    document.title = pageTitle(null, index.title || "Artifacts");
     return;
   }
   if (doc.kind === "file") {
@@ -168,6 +159,8 @@ async function renderDoc(index, path, frag) {
     a.textContent = doc.title || path;
     p.append(a, " (binary — download to view)");
     content.appendChild(p);
+    shownPath = path;
+    document.title = pageTitle(null, index.title || "Artifacts");
     return;
   }
 
@@ -194,16 +187,20 @@ async function renderDoc(index, path, frag) {
   }
   if (gen !== renderGen) return;
   const split = splitFrontmatter(text);
-  content.innerHTML = md.render(split.body);
-  fillToc(content, path);
-  rewriteDocLinks(content, path, index);
-  if (frag && gen === renderGen) document.getElementById(frag)?.scrollIntoView();
-  content.querySelectorAll("pre code.language-mermaid").forEach((block) => {
+  const holder = document.createElement("template");
+  holder.innerHTML = md.render(split.body);
+  const root = holder.content;
+  fillToc(root, path);
+  rewriteDocLinks(root, path, index);
+  root.querySelectorAll("pre code.language-mermaid").forEach((block) => {
     const div = document.createElement("div");
     div.className = "mermaid";
     div.textContent = block.textContent;
     block.closest("pre").replaceWith(div);
   });
+  content.replaceChildren(root);
+  shownPath = path;
+  document.title = pageTitle(split.meta, index.title || "Artifacts");
   if (content.querySelector(".mermaid")) {
     for (let i = 0; i < 20 && !window.mermaid; i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -213,6 +210,7 @@ async function renderDoc(index, path, frag) {
       content.querySelectorAll(".mermaid").forEach((el) => {
         el.textContent = "Diagram did not load.";
       });
+      if (frag && gen === renderGen) document.getElementById(frag)?.scrollIntoView();
       return;
     }
     try {
@@ -224,11 +222,16 @@ async function renderDoc(index, path, frag) {
       });
     }
   }
+  if (frag && gen === renderGen) document.getElementById(frag)?.scrollIntoView();
 }
 
 async function main() {
   const index = await loadIndex();
   if (!index) return;
+  if (!Array.isArray(index.docs)) {
+    hint("docs.json has no docs list.");
+    return;
+  }
   renderNav(index);
   const go = () => {
     const route = parseRoute(location.hash);
@@ -236,7 +239,7 @@ async function main() {
       hint("That address did not decode.");
       return;
     }
-    if (route.path) renderDoc(index, route.path, route.frag);
+    if (route.path) renderDoc(index, route.path, route.frag).catch((err) => hint(err.message));
   };
   window.addEventListener("hashchange", go);
   if (location.hash) go();

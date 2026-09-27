@@ -7,7 +7,7 @@ import * as assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, it } from "node:test";
-import { parseRoute, resolveRelative, splitFrontmatter } from "../artifacts/assets/route.mjs";
+import { headingDomId, pageTitle, parseRoute, resolveRelative, rewriteHref, splitFrontmatter } from "../artifacts/assets/route.mjs";
 
 const artifacts = path.resolve(import.meta.dirname, "../artifacts");
 
@@ -25,6 +25,18 @@ describe("#330 the chart spec is a browser page", () => {
 		const spec = fs.readFileSync(path.join(artifacts, "chart-spec/spec.mdx"), "utf8");
 		assert.match(spec, /src="picker\.html"/);
 		assert.equal(resolveRelative("chart-spec/spec.mdx", "picker.html"), "chart-spec/picker.html");
+		assert.equal(
+			resolveRelative("chart-spec/spec.mdx", "picker.html?preset=cost#tokens"),
+			"chart-spec/picker.html?preset=cost#tokens",
+		);
+	});
+
+	it("points a plain file at the document directory", () => {
+		const href = rewriteHref("chart-spec/spec.mdx", "data.csv", new Set());
+		assert.equal(href, "chart-spec/data.csv");
+		const heading = rewriteHref("chart-spec/spec.mdx", "#sample", new Set());
+		assert.equal(heading, "#chart-spec/spec.mdx#doc-sample");
+		assert.equal(headingDomId("***", 1), "doc-section");
 	});
 
 	it("keeps a heading on the document route", () => {
@@ -43,5 +55,9 @@ describe("#330 the chart spec is a browser page", () => {
 		const rule = splitFrontmatter("---\ntitle: Chart\n----\n\n# Hi\n");
 		assert.equal(rule.meta.title, undefined);
 		assert.match(rule.body, /# Hi/);
+		const opener = splitFrontmatter("-----\n\n# Hi\n");
+		assert.equal(opener.meta.title, undefined);
+		assert.match(opener.body, /# Hi/);
+		assert.equal(pageTitle({ title: "Chart" }, "Artifacts"), "Chart");
 	});
 });

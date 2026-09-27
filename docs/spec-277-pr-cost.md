@@ -22,7 +22,7 @@ bun run pr-cost [--branch <name>] [--pr <n>] [--write-pr]
 Run it just before `pr-offer-merge`. Spend keeps growing until the merge, so a record taken at
 `pr-open` would undercount.
 
-Exit codes: 0 when the document was printed (or written), 2 on a bad call, 1 on any other failure.
+Exit codes: 0 when the document was printed and, under `--write-pr`, written. 2 on a bad call. 1 on any other failure. `--write-pr` with no PR, or with a PR lookup that failed, exits 1 before printing anything.
 Every field the script cannot measure is `null`, and one `gaps[]` entry names the reason. A gap
 is never reported as zero.
 
@@ -30,12 +30,12 @@ is never reported as zero.
 
 | Key | What it holds |
 |---|---|
-| `branch`, `base`, `head`, `pr` | the branch name, its merge-base with `origin/main`, its tip, and the PR number or `null` |
+| `branch`, `base`, `head`, `pr` | the branch name, its merge-base with `origin/main`, its tip, and the PR number. `pr` is `null` when the branch has no PR, and also when the lookup failed, which adds a `pr` gap |
 | `files` | `{ source, tests, docs }`: counts over `git diff --name-only base..head`. `tests/**` is tests. `docs/**` (manifests included) and every root `*.md` are docs. Everything else, except `bun.lock`, is source |
 | `sessions` | `{ transcripts, turns, costUsd, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }`: every Claude Code turn that ran in the worktree or reached into it (§3) |
 | `tests` | `{ runs, suiteRuns, failedSuiteRuns, reruns }`: from the worktree's `tmp/test-runs.jsonl` (§4) |
 | `prReview` | `{ rounds, findings[], costUsd }`: one findings count per `reviewed` `pr-review` run log for this branch, oldest first. A run with any other status found nothing to count. `costUsd` is `null` (§5) |
-| `macroscope` | `{ rounds }`: the Macroscope check runs across the PR's commits that concluded |
+| `macroscope` | `{ rounds }`: one round per PR commit that has a Macroscope check run which concluded. A `skipped` run (a Draft) or a `cancelled` run is not a round |
 | `reconcile` | always `null` for now, with a gap (§5) |
 | `gaps[]` | `{ field, reason }`, one per field that could not be measured |
 

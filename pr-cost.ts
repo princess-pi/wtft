@@ -188,6 +188,10 @@ function parseArgs(argv: string[]): { branch?: string; pr?: number; writePr: boo
 
 class UsageError extends Error {}
 
+function firstLine(err: unknown): string {
+	return err instanceof Error ? err.message.split("\n")[0] : String(err);
+}
+
 /** A merged branch is deleted; its PR's head is still on the remote. */
 function resolveHead(clone: string, branch: string, pr: number | undefined): string {
 	try {
@@ -226,18 +230,24 @@ function main(): void {
 
 	let pr = args.pr ?? null;
 	let macroscope: { rounds: number } | null = null;
-	try {
-		if (pr === null) {
+	if (pr === null) {
+		try {
 			const found = sh("gh", ["pr", "list", "--head", branch, "--state", "all", "--json", "number", "--jq", ".[0].number // empty"]);
 			pr = found ? Number(found) : null;
+		} catch (err) {
+			gaps.push({ field: "pr", reason: `gh failed: ${firstLine(err)}` });
+			if (args.writePr) throw new Error(`--write-pr: could not look up the PR: ${firstLine(err)}`);
 		}
+	}
+	if (args.writePr && pr === null) throw new Error("--write-pr: no PR for this branch");
+	try {
 		if (pr !== null) {
 			const shas = sh("gh", ["pr", "view", String(pr), "--json", "commits", "--jq", ".commits[].oid"]).split("\n").filter(Boolean);
 			macroscope = { rounds: macroscopeRounds(shas.map(sha => JSON.parse(sh("gh", ["api", `repos/{owner}/{repo}/commits/${sha}/check-runs`,
 				"--jq", "[.check_runs[] | {name, conclusion}]"])) as CheckRun[])) };
-		} else gaps.push({ field: "macroscope", reason: "no PR for this branch" });
+		} else gaps.push({ field: "macroscope", reason: gaps.some(g => g.field === "pr") ? "the PR lookup failed" : "no PR for this branch" });
 	} catch (err) {
-		gaps.push({ field: "macroscope", reason: `gh failed: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}` });
+		gaps.push({ field: "macroscope", reason: `gh failed: ${firstLine(err)}` });
 	}
 	gaps.push({ field: "reconcile", reason: "spec-reconcile writes no record of its findings" });
 
@@ -257,8 +267,7 @@ function main(): void {
 	};
 	console.log(JSON.stringify(record));
 
-	if (args.writePr) {
-		if (pr === null) throw new Error("--write-pr: no PR for this branch");
+	if (args.writePr && pr !== null) {
 		const body = sh("gh", ["pr", "view", String(pr), "--json", "body", "--jq", ".body"]);
 		const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pr-cost-")), "body.md");
 		fs.writeFileSync(tmp, withPrCostBlock(body + "\n", record));

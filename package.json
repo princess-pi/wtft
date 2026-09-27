@@ -39,7 +39,7 @@
     "node": ">=18"
   },
   "devDependencies": {
-    "@princess-pi/libs": "git+https://github.com/princess-pi/libs.git#1cb26e3a1dc227a49cf314f3f1ca1731a6c4b93f",
+    "@princess-pi/libs": "git+https://github.com/princess-pi/libs.git#0e93514decd95adaa0b6bccfef90879f7f3fc057",
     "@types/node": "^26",
     "@types/wcwidth": "^1",
     "bun-types": "latest",

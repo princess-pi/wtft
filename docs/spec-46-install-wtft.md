@@ -179,7 +179,7 @@ now falls through the same evaluation as every other exit.
 }
 ```
 
-- **`daemons` (#260): a daemon on an older build is stopped.** `older` counts the processes that run a
+- **`daemons`: a daemon on an older build is stopped.** `older` counts the processes that run a
   `wtft-daemon` bundle (`wtft-daemon`, `.mjs`, `.js` or `.ts`) from this clone's `bin/` (where the
   Pi widget's daemons run from) or from `<dir>`, and that started no later than that file's mtime. A start
   time read from `/proc` can be up to 2 s early (`btime` and clock ticks both truncate), so a daemon

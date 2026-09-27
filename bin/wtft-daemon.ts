@@ -1675,10 +1675,10 @@ if (showList || showCleanup || showRestart || stopSession) {
         if (kind === "harness") continue;
         if (kind === "daemon" && processTable().signal(pid, "SIGTERM") === "denied") {
           console.log(`Not stopped: PID ${pid} refused the signal (EPERM); its lease is left`);
-        } else {
-          unlinkIfNames(fullPath, pid);
-          console.log(`Cleaned up: PID ${pid} — session gone: ${sessionFound}`);
+          continue;
         }
+        unlinkIfNames(fullPath, pid);
+        console.log(`Cleaned up: PID ${pid} — session gone: ${sessionFound}`);
         found++;
         continue;
       }
@@ -1692,7 +1692,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         console.log(`Not stopped: PID ${pid} refused the signal (EPERM); its lease is left`);
       } else {
         unlinkIfNames(fullPath, pid);
-        console.log(`Stopped: PID ${pid} — ${sessionFound}`);
+        console.log(kind === "daemon" ? `Stopped: PID ${pid} — ${sessionFound}` : `Removed lease: PID ${pid} — no live daemon found, ${sessionFound}`);
       }
       found++;
       continue;
@@ -1729,8 +1729,11 @@ if (showList || showCleanup || showRestart || stopSession) {
       const fixture = (proc.session !== null && pathIsUnderTmp(proc.session)) || proc.roots.some(pathIsUnderTmp);
       // A harness stops itself once it serves nothing.
       if (showCleanup && fixture && !proc.harness) {
-        processTable().signal(proc.pid, "SIGTERM");
         const where = proc.session || proc.roots.join(",");
+        if (processTable().signal(proc.pid, "SIGTERM") === "denied") {
+          console.log(`Not stopped: PID ${proc.pid} refused the signal (EPERM) — fixture daemon: ${where}`);
+          continue;
+        }
         console.log(`Cleaned up: PID ${proc.pid} — fixture daemon: ${where}`);
         found++;
         continue;
@@ -1766,7 +1769,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       console.log(live ? `Stopped: PID ${pid} — harness ${pidFile}; the next wtft starts it again` : `Removed root pid file: PID ${pid} — no live daemon found, harness ${pidFile}`);
       found++;
     }
-    console.log(`${found} holder(s) handled: restarted, stopped, or a lease or root pid file removed, as each line says.`);
+    console.log(`${found} holder(s) handled: restarted, stopped, left in place, or a lease or root pid file removed, as each line says.`);
   }
   if (showCleanup) {
     console.log(`Cleaned up ${found} daemon(s).`);

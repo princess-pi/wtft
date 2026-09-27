@@ -24,7 +24,7 @@ interface ProcessTable {
 - **Production:** `linuxProcessTable`. Off Linux, `state` and `cmdline` are always `null`.
 - **Tests:** `fakeProcessTable()` in `tests/lib/fake-process-table.ts`. A test adds processes with
   a cmdline and says how each one reacts to a signal: it dies, it ignores SIGTERM, it becomes a
-  zombie, or it refuses (EPERM). Its `spawn` creates a live daemon entry.
+  zombie, or it refuses (EPERM). Its `spawn` creates a live entry with the given command line, which is a daemon when it names `wtft-daemon`.
 - `useProcessTable(table)` swaps the table in and returns a function that restores the previous
   one. Production code never calls it. `processTable()` returns the current table.
 
@@ -49,11 +49,13 @@ Three rules cover every caller:
   health, the startup wait, the spawner's claim, the per-session child's claim, the newer-tag
   check, `--list`, `--cleanup` and the reaper.
 - `mayStop(kind)`: `daemon` or `unverified`. These are the only kinds a one-session caller
-  (`restartDaemon`, `-F`) signals. A harness is never stopped on behalf of one session.
+  (`restartDaemon`, `-F`) signals. `unverified` includes a live pid on Linux whose cmdline cannot
+  be read. A harness is never stopped on behalf of one session.
 - **A verified daemon:** `daemon` or `harness`, with the cmdline read. The harness's own claims
   (`holderIsLiveDaemon`, `takeOverLease`, the root claim, `pointSessionAt`) and the daemon
   management commands act only on these. `--restart` stops a harness as well, as its `--help`
-  says. Off Linux nothing is verified, so these callers do nothing there, as before.
+  says. Off Linux nothing is verified, so these callers stop nothing there, as before;
+  `--restart` still removes the leases and root pid files, as its `--help` says (#266).
 
 An `other` is never signalled by anyone.
 
@@ -82,7 +84,7 @@ cannot be two PRs, because a branch starts only from main, and slice 2 needs sli
 | `forceRebuildSession` (`-F`) | cmdline, then bare `kill 0` wait | `classifyPid`, then `stopHolderSync` without SIGKILL | **C4:** the wait counts EPERM as alive, and an `other` holder is neither signalled nor waited for (#290 J) |
 | slice 2: the per-session child's claim | any live pid keeps the lease | `holdsLease` | **C5:** a recycled pid or a zombie no longer keeps a session unserved (#290 J) |
 | slice 2: `holderIsLiveDaemon`, `takeOverLease`, harness root claim, `pointSessionAt` | `Number()` + `kill 0` + cmdline | `leasePid` + `classifyPid` | **C6:** `0123` is not pid 123 (#290 K) |
-| slice 2: `--restart`, `--cleanup`, `--stop`; `waitUntilExited` is gone | bare `kill 0`, `parseInt` | `leasePid`, `classifyPid`; `--restart` waits with `stopHolderSync`, `--cleanup` and `--stop` signal once | **C7:** EPERM is alive. A lease or root pid file whose daemon refuses the signal is left in place, and the line says "Not stopped: PID n refused the signal (EPERM)". It used to be removed, with "no live daemon found", "Stopped" or "Cleaned up" (#290 J). A harness still running after SIGKILL keeps its root pid file too |
+| slice 2: `--restart`, `--cleanup`, `--stop`; `waitUntilExited` is gone | bare `kill 0`, `parseInt` | `leasePid`, `classifyPid`; `--restart` waits with `stopHolderSync`, `--cleanup` and `--stop` signal once | **C7:** EPERM is alive. A lease or root pid file whose daemon refuses the signal is left in place, and the line says "Not stopped: PID n refused the signal (EPERM)". It used to be removed, with "no live daemon found", "Stopped" or "Cleaned up" (#290 J). A harness still running after SIGKILL keeps its root pid file too. `--stop` on a lease whose holder is not a daemon removes it with "Removed lease: … no live daemon found", not "Stopped"; `--cleanup` counts only what it cleaned up |
 | slice 2: `--list` RUNNING/DEAD | bare `kill 0` | `holdsLease` | **C8:** the column agrees with health on EPERM, zombies and recycled pids (#290 A) |
 | slice 2: `reapAndWarn` | ESRCH only | `holdsLease(classifyPid)` | **C9:** a lease naming a zombie, or a live process that is not a daemon, is unlinked |
 | slice 2: the newer-tag check at startup | `Number()` + `liveDaemonOrUnknown` | `leasePid` + `holdsLease(classifyPid)` | **C10:** a `0123` holder no longer counts, and on Linux a live pid whose cmdline cannot be read now keeps the session for the newer build |

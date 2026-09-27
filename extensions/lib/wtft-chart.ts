@@ -1,5 +1,4 @@
-import type { Interaction, Category } from "./wtft-shared.js";
-import { classifyInteraction } from "./wtft-shared.js";
+import type { Category } from "./wtft-shared.js";
 import {
 	type Bin,
 	CATEGORY_ORDER,
@@ -10,15 +9,11 @@ import {
 	padString,
 	formatCost,
 	formatMmmDdStr,
-	getVisualLength,
-	getZonedParts,
 	getSurgeLocalHours,
 	getCurrentLocalHour,
 	checkSurgeProximity,
 	buildTimelineString,
-	tokenFooterSummary,
 	formatTokenCount,
-	computeCacheMetrics,
 } from "./wtft-renderer.js";
 
 const BLOCK_OLD = "\u2583" as const;
@@ -37,11 +32,14 @@ export function renderWtftChart(input: {
 	cacheMissBins: ReadonlySet<string>;
 	totalSessionCost: number;
 	totalSessionTokens: number;
-	interactions: Interaction[];
+	otherWarning: string | null;
+	tokenFooter: string | null;
+	cacheLine: string | null;
 }): string[] {
 	const {
 		displayedBins, mode, unit, width, disabledEmoji, tz,
-		cacheMissBins, totalSessionCost, totalSessionTokens, interactions,
+		cacheMissBins, totalSessionCost, totalSessionTokens,
+		otherWarning, tokenFooter, cacheLine,
 	} = input;
 	const opts = { model: input.model, sessionNameSuffix: input.sessionNameSuffix };
 	const ALL_CATEGORIES = CATEGORY_ORDER;
@@ -52,11 +50,6 @@ export function renderWtftChart(input: {
 	const scaleMax = unit === "tokens"
 		? Math.ceil(maxBarValue / 1000) * 1000
 		: calculateScaleMax(maxBarValue);
-
-	const formatScaleLabel = (v: number): string => {
-		if (unit === "tokens") return formatTokenCount(v);
-		return formatCost(v);
-	};
 
 	const labelWidth = Math.max(...displayedBins.map(b => b.label.length), 5);
 	let prefixWidth = labelWidth + 2;
@@ -93,16 +86,7 @@ export function renderWtftChart(input: {
 	const tickReserve = unit === "tokens" ? 5 : 3;
 	const maxBarWidth = finalWidth - prefixWidth - tickReserve;
 
-	const newestBin = displayedBins[0];
-	let titleDateStr = "";
-	if (newestBin) {
-		titleDateStr = formatMmmDdStr(newestBin.dateStr);
-	} else {
-		const nowParts = getZonedParts(Date.now(), tz);
-		const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-		const pad = (n: number) => String(n).padStart(2, "0");
-		titleDateStr = `${months[nowParts.month - 1]}-${pad(nowParts.day)}`;
-	}
+	const titleDateStr = formatMmmDdStr(displayedBins[0].dateStr);
 
 	const widgetLines: string[] = [];
 	
@@ -113,28 +97,17 @@ export function renderWtftChart(input: {
 	const sessionSuffix = opts?.sessionNameSuffix ? ` \x1b[90m...${opts.sessionNameSuffix.replace(/.jsonl$/, "").slice(-4)}\x1b[0m` : "";
 	const titleLeftFinal = titleLeft + sessionSuffix;
 	
-	let surgeModel = opts?.model;
-	if (!surgeModel) {
-		for (const i of interactions) {
-			if (i.model) { surgeModel = i.model; break; }
-		}
-	}
-	const isDeepSeek = (surgeModel || "").toLowerCase().includes("deepseek");
+	const isDeepSeek = (opts?.model || "").toLowerCase().includes("deepseek");
 	const surgeHours = isDeepSeek ? getSurgeLocalHours(tz) : new Set<number>();
 	const currentHour = getCurrentLocalHour(tz);
 	const proximity = isDeepSeek ? checkSurgeProximity() : { status: undefined as ReturnType<typeof checkSurgeProximity>["status"], multiplier: 1.0 };
 	const timelineStr = buildTimelineString(surgeHours, currentHour, proximity.status, undefined, disabledEmoji);
-	const timelineLen = getVisualLength(timelineStr);
 
 	const legendItems = CATEGORY_ORDER
 		.filter(c => CATEGORY_STYLE[c].label !== null)
 		.map(c => `\x1b[38;5;${CATEGORY_STYLE[c].fg}m${CATEGORY_STYLE[c].char}\x1b[0m${CATEGORY_STYLE[c].label}`);
 	const legendStr = legendItems.join(" ");
-	
 
-	// Putting the legend on its own row avoids layout flip-flop when the
-	// SURGE proximity badge appears/disappears (shifts timelineLen,
-	// potentially crossing an inline-fit threshold).
 	widgetLines.push(titleLeftFinal + "  " + timelineStr);
 	widgetLines.push(legendStr);
 
@@ -258,7 +231,6 @@ export function renderWtftChart(input: {
 
 		if (unit === "tokens" && bin.tokens) {
 			const barMax = Math.max(0, maxBarWidth - 2);
-			const barWidth = scaleMax > 0 && barMax > 0 ? Math.round(((bin.total_tokens ?? 0) / scaleMax) * barMax) : 0;
 			let barStr = "";
 			let allChars: number = 0;
 			for (const cat of ALL_CATEGORIES) {
@@ -352,37 +324,15 @@ export function renderWtftChart(input: {
 	}
 	if (missed(displayedBins[displayedBins.length - 1])) widgetLines.push(cacheMissLine);
 
-	if (unit === "cost") {
-		const totalOtherCost = interactions
-			.filter(i => classifyInteraction(i) === "other")
-			.reduce((sum, i) => sum + i.cost, 0);
-		if (totalSessionCost > 0) {
-			const otherPct = totalOtherCost / totalSessionCost;
-			if (otherPct > 0.20 && totalOtherCost > 6.00) {
-				const pctStr = `${Math.round(otherPct * 100)}%`;
-				const costStr = formatCost(totalOtherCost);
-				widgetLines.push(`\x1b[1;33m⚠️  "Other" category: ${pctStr} of session cost (${costStr}). Run wtft --other to drill down.\x1b[0m`);
-			}
-		}
-	}
+	if (otherWarning) widgetLines.push(otherWarning);
 
 	if (unit === "tokens") {
 		widgetLines.push(`\x1b[90m  \x1b[37m▃\x1b[0m\x1b[90m cached/carryover  \x1b[37m▇\x1b[0m\x1b[90m new/uncached  \x1b[90m\$ = cost-only (web tools)\x1b[0m`);
-		const summary = tokenFooterSummary(interactions);
-		if (summary) {
-			widgetLines.push(`\x1b[37m  ${summary}\x1b[0m`);
-		}
-		const cacheMetrics = computeCacheMetrics(interactions);
-		if (cacheMetrics) {
-			widgetLines.push(`\x1b[90m  CH: ${cacheMetrics.hitRate}% cache hit (${cacheMetrics.readTokens} read / ${cacheMetrics.totalOps} total ops)\x1b[0m`);
-		}
+		if (tokenFooter) widgetLines.push(`\x1b[37m  ${tokenFooter}\x1b[0m`);
 	}
 
-	if (unit === "cost") {
-		const cacheMetrics = computeCacheMetrics(interactions);
-		if (cacheMetrics) {
-			widgetLines.push(`\x1b[90m  CH: ${cacheMetrics.hitRate}% cache hit (${cacheMetrics.readTokens} read / ${cacheMetrics.totalOps} total ops)\x1b[0m`);
-		}
+	if (cacheLine) {
+		widgetLines.push(`\x1b[90m  CH: ${cacheLine}\x1b[0m`);
 	}
 
 	return widgetLines;

@@ -63,10 +63,6 @@ export const CATEGORY_STYLE: Record<Category, { fg: number; bg: number; char: st
 	other:       { fg: 245, bg: 236, char: "█", label: "Other" },
 };
 
-const BLOCK_OLD = "▃" as const;   // cached carryover from past bins
-const BLOCK_NEW = "▇" as const;
-const BLOCK_BUCKET = "█" as const;
-
 export function interactionTotalTokens(i: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number }): number {
 	return i.inputTokens + i.outputTokens + i.cacheReadTokens + i.cacheWriteTokens + i.reasoningTokens;
 }
@@ -835,6 +831,29 @@ export function buildWtftLines(
 		return null;
 	}
 
+	let chartModel = opts?.model;
+	if (!chartModel) {
+		for (const interaction of interactions) {
+			if (interaction.model) { chartModel = interaction.model; break; }
+		}
+	}
+	const totalOtherCost = interactions
+		.filter(i => classifyInteraction(i) === "other")
+		.reduce((sum, i) => sum + i.cost, 0);
+	let otherWarning: string | null = null;
+	if (unit === "cost" && totalSessionCost > 0) {
+		const otherPct = totalOtherCost / totalSessionCost;
+		if (otherPct > 0.20 && totalOtherCost > 6.00) {
+			const pctStr = `${Math.round(otherPct * 100)}%`;
+			const costStr = formatCost(totalOtherCost);
+			otherWarning = `\x1b[1;33m⚠️  "Other" category: ${pctStr} of session cost (${costStr}). Run wtft --other to drill down.\x1b[0m`;
+		}
+	}
+	const cacheMetrics = computeCacheMetrics(interactions);
+	const cacheLine = cacheMetrics
+		? `${cacheMetrics.hitRate}% cache hit (${cacheMetrics.readTokens} read / ${cacheMetrics.totalOps} total ops)`
+		: null;
+
 	return renderWtftChart({
 		displayedBins,
 		mode,
@@ -842,12 +861,14 @@ export function buildWtftLines(
 		width,
 		disabledEmoji,
 		tz,
-		model: opts?.model,
+		model: chartModel,
 		sessionNameSuffix: opts?.sessionNameSuffix,
 		cacheMissBins,
 		totalSessionCost,
 		totalSessionTokens,
-		interactions,
+		otherWarning,
+		tokenFooter: unit === "tokens" ? (tokenFooterSummary(interactions) || null) : null,
+		cacheLine,
 	});
 }
 

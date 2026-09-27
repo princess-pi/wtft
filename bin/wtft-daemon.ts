@@ -158,7 +158,7 @@ function truncatePartialTail(path: string): boolean {
 }
 
 /** Stop after an append whose on-disk extent is unknowable; publish a rebuild lease for the next owner. */
-function fatalTagMutation(filePath: string, operation: "append" | "rebuild truncate" | "partial-tail truncate", err: unknown): never {
+function fatalTagMutation(filePath: string, operation: "append" | "rebuild truncate" | "partial-tail truncate" | "resume read" | "resume truncate", err: unknown): never {
   if (running && harnessMode && holdsHarnessRoot()) writeServedHandOff(path.resolve(slot.state.sessionPath));
   running = false;
   let markedForRebuild = false;
@@ -467,27 +467,26 @@ function initClassified() {
     }
     slot.state.lastSize = 0;
   } else {
+    // A tag that cannot be read or cleared is never appended onto: a re-parse from byte 0
+    // would add every turn after the old ones, and id-less turns would bill twice.
+    let tagContent: string | null = null;
     try {
-      fs.accessSync(tagPath);
-      const tagContent = fs.readFileSync(tagPath, "utf8");
-      const hasData = tagRecords(tagContent).some(r => isDataRecord(r) || r.kind === "unknown");
-      if (hasData) {
-        const metaOffset = readLastMetaOffset(tagPath);
-        if (metaOffset !== null) {
-          slot.state.lastSize = metaOffset;
-          // Written by an earlier life; what changed since is not read yet.
-          const resumed = resumeTagger(slot.state, tagContent, world);
-          printLog(resumed.log);
-          if (resumed.records) appendTagFile(tagPath, resumed.records);
-        } else {
-          try { fs.truncateSync(tagPath, 0); } catch { /* best effort */ }
-          slot.state.lastSize = 0;
-        }
-      } else {
-        try { fs.truncateSync(tagPath, 0); } catch { /* best effort */ }
-        slot.state.lastSize = 0;
+      tagContent = fs.readFileSync(tagPath, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") fatalTagMutation(tagPath, "resume read", err);
+    }
+    const hasData = tagContent !== null && tagRecords(tagContent).some(r => isDataRecord(r) || r.kind === "unknown");
+    const metaOffset = hasData ? readLastMetaOffset(tagPath) : null;
+    if (tagContent !== null && metaOffset !== null) {
+      slot.state.lastSize = metaOffset;
+      // Written by an earlier life; what changed since is not read yet.
+      const resumed = resumeTagger(slot.state, tagContent, world);
+      printLog(resumed.log);
+      if (resumed.records) appendTagFile(tagPath, resumed.records);
+    } else {
+      if (tagContent !== null) {
+        try { fs.truncateSync(tagPath, 0); } catch (err) { fatalTagMutation(tagPath, "resume truncate", err); }
       }
-    } catch (_) {
       slot.state.lastSize = 0;
     }
   }

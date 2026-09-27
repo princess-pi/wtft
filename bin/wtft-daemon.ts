@@ -1480,9 +1480,10 @@ handled is not listed. A --stop of a session a harness serves ends the command a
                         and respawn one per stopped holder started with --session, claiming its lease when
                         free; a harness holding no lease starts again on the next wtft. Linux only (/proc)
   --stop <session>      Drop that session; ~ and relative paths are resolved. A harness serving it (found
-                        through the session's lease; Linux only, /proc) keeps running. A per-session
-                        process holding a lease here, found by its own --session resolved against its cwd, gets SIGTERM and no wait: one that
-                        followed a moved session is found by its old path
+                        through the session's lease) keeps running. A per-session process holding a
+                        lease here, found by its own --session resolved against its cwd, gets SIGTERM
+                        and no wait: one that followed a moved session is found by its old path.
+                        Linux only (/proc): off Linux it finds no daemon and exits 0
 
 Daemon mode:
   -s, --session <path>  Path to session.jsonl to watch. Waits up to 1 h for a file not yet written. Exits 0
@@ -1635,7 +1636,7 @@ if (showList || showCleanup || showRestart || stopSession) {
     let taggerVersion = "?";
     if (sessionFound) {
       try {
-        const tagsDir = path.join(path.dirname(sessionFound), "wtft-tags");
+        const tagsDir = path.join(path.dirname(resolvedSessionArg(pid, sessionFound)), "wtft-tags");
         const sessBase = path.basename(sessionFound);
         const prefix = sessBase + ".wtft-tag.v";
         for (const f of fs.readdirSync(tagsDir)) {

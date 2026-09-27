@@ -45,12 +45,13 @@ interface ProcessTable {
 | `unverified` | alive, but its cmdline cannot be read. This is always the case off Linux; `verifiedKind` below reads it again for two callers |
 
 "Names `wtft-daemon`" means the program's basename is one, or the program's basename starts with
-`node`, `nodejs` or `bun` and an argument's basename is one, unless it comes after inline code
-(`-e`, `--eval`, `-p`, `--print`, their `=` forms, or a short-flag cluster holding `e` or `p`) or
-after another program's script (a non-option argument ending in `.js`, `.mjs`, `.cjs`, `.ts`,
-`.mts` or `.cts`). The value of `-r`, `--require`, `--import`, `--preload`, `--loader` and
-`--experimental-loader` is skipped. So `node app.js --input /tmp/wtft-daemon.js` and `vim wtft-daemon.ts` are `other`, and
-`bun run <bundle>` or a path split at a space off Linux still reads as a daemon.
+`node`, `nodejs` or `bun` and its script's basename is one. The script is the first argument that
+is not an option and not `run`; the value of `-r`, `--require`, `--import`, `--preload`, `--loader`
+and `--experimental-loader` is skipped. Inline code (`--eval`, `--print`, their `=` forms, or a
+short option starting a cluster that holds `e` or `p`) means there is no script. So
+`node app.js --input /tmp/wtft-daemon.js` and `vim wtft-daemon.ts` are `other`. Off Linux the
+`ps` command line is split on whitespace and cannot be read by position, so there any word naming
+`wtft-daemon` counts.
 
 "Alive" means `signal 0` was sent or denied, and `state` does not say otherwise. EPERM is another
 user's live process. `pidAlive(pid)` is `classifyPid(pid) !== "gone"`.

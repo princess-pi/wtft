@@ -101,23 +101,29 @@ export type HolderKind = "gone" | "daemon" | "harness" | "other" | "unverified";
 const DAEMON_BASENAMES = new Set(["wtft-daemon", "wtft-daemon.mjs", "wtft-daemon.js", "wtft-daemon.ts"]);
 
 const OPTIONS_WITH_VALUE = new Set(["-r", "--require", "--import", "--preload", "--loader", "--experimental-loader"]);
-const SCRIPT_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"]);
 
-function isEvalOption(arg: string): boolean {
-	return /^--(eval|print)(=|$)/.test(arg) || /^-[a-zA-Z]*[ep][a-zA-Z]*$/.test(arg);
+function isDaemonPath(arg: string): boolean {
+	return DAEMON_BASENAMES.has(path.basename(arg));
 }
 
-/** The program is a daemon, or a node or bun runs one; a daemon path after inline code or another script is data. */
+/** The program is a daemon, or a node or bun whose script is one. */
 export function isDaemonCmdline(args: string[]): boolean {
-	for (let i = 0; i < args.length; i++) {
+	if (args.length === 0) return false;
+	if (isDaemonPath(args[0])) return true;
+	if (!/^(node|nodejs|bun)/.test(path.basename(args[0]))) return false;
+	for (let i = 1; i < args.length; i++) {
 		const arg = args[i];
-		if (DAEMON_BASENAMES.has(path.basename(arg))) return true;
-		if (i === 0) { if (!/^(node|nodejs|bun)/.test(path.basename(arg))) return false; continue; }
-		if (isEvalOption(arg)) return false;
+		if (/^--(eval|print)(=|$)/.test(arg) || /^-[a-zA-Z]*[ep]/.test(arg)) return false;
 		if (OPTIONS_WITH_VALUE.has(arg)) { i++; continue; }
-		if (!arg.startsWith("-") && SCRIPT_EXTENSIONS.has(path.extname(arg))) return false;
+		if (arg.startsWith("-") || arg === "run") continue;
+		return isDaemonPath(arg);
 	}
 	return false;
+}
+
+/** A `ps` command line split on whitespace cannot be read by position: any word naming one counts. */
+function isDaemonCommandWords(words: string[]): boolean {
+	return words.some(isDaemonPath);
 }
 
 export function classifyPid(pid: number): HolderKind {
@@ -148,7 +154,7 @@ export function verifiedKind(pid: number): HolderKind {
 	if (kind !== "unverified" || table.inspectable()) return kind;
 	const args = table.psCmdline(pid);
 	if (args === null) return "unverified";
-	if (!isDaemonCmdline(args)) return "other";
+	if (!isDaemonCommandWords(args)) return "other";
 	return args.includes("--harness") ? "harness" : "daemon";
 }
 

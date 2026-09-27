@@ -33,7 +33,7 @@ describe("classifyPid", () => {
 		for (const bad of [0, -1, 1.5, Number.NaN]) assert.strictEqual(classifyPid(bad), "gone");
 	});
 
-	it("reads a daemon path after inline code or another script as data", () => {
+	it("reads a daemon path only as the program or the script a node or bun runs", () => {
 		const t = fakeProcessTable();
 		restore = useProcessTable(t);
 		const cases: [string[], string][] = [
@@ -45,9 +45,10 @@ describe("classifyPid", () => {
 			[["/n/bun/bin/bun.exe", "--preload", "/t/inject.ts", "/b/wtft-daemon.mjs", "--session", "/s.jsonl"], "daemon"],
 			[["node", "--eval=0", "/tmp/wtft-daemon.js"], "other"],
 			[["node", "-pe", "1", "/tmp/wtft-daemon.mjs"], "other"],
+			[["node", "-e=0", "/tmp/wtft-daemon.mjs"], "other"],
 			[["bun", "run", "/b/wtft-daemon.mjs", "--session", "/s.jsonl"], "daemon"],
-			[["node20", "--conditions", "dev", "/b/wtft-daemon.mjs"], "daemon"],
-			[["node", "/Users/a/Library/Application", "Support/x/bin/wtft-daemon.mjs", "--session", "/s"], "daemon"],
+			[["node20", "/b/wtft-daemon.mjs"], "daemon"],
+			[["node", "/usr/local/bin/prettier", "--write", "/x/wtft-daemon.js"], "other"],
 		];
 		cases.forEach(([cmdline], i) => t.add(200 + i, cmdline));
 		for (const [i, [cmdline, kind]] of cases.entries()) assert.strictEqual(classifyPid(200 + i), kind, cmdline.join(" "));
@@ -275,6 +276,15 @@ describe("C4 -F", () => {
 		const { file, lease } = session();
 		t.daemon(707, ["--session", file]);
 		fs.writeFileSync(lease, "707");
+		assert.strictEqual(forceRebuildSession(file, { termMs: 30, pollMs: 1 }), "stopped");
+		assert.deepStrictEqual(t.signals.map(s => s.sig), ["SIGTERM"]);
+	});
+	it("off Linux a daemon whose runtime path the ps read split at a space is still stopped", () => {
+		const t = fakeProcessTable({ linux: false });
+		restore = useProcessTable(t);
+		const { file, lease } = session();
+		t.add(708, ["/Users/Jane", "Doe/.nvm/bin/node", "/Users/Jane", "Doe/bin/wtft-daemon.mjs", "--session", file]);
+		fs.writeFileSync(lease, "708");
 		assert.strictEqual(forceRebuildSession(file, { termMs: 30, pollMs: 1 }), "stopped");
 		assert.deepStrictEqual(t.signals.map(s => s.sig), ["SIGTERM"]);
 	});

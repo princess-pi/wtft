@@ -835,7 +835,7 @@ async function main() {
 		const startup = await awaitDaemonUp(finalSessionPath, daemonChild, DAEMON_START_CEILING_MS);
 		if (startup.state === "dead") {
 			const how = startup.signalCode ? `on ${startup.signalCode}` : `with code ${startup.exitCode}`;
-			console.error(`\x1b[31m❌ wtft-daemon exited ${how} before claiming this session — nothing is waiting on ${finalSessionPath}\x1b[0m`);
+			console.error(`\x1b[31m❌ wtft-daemon exited ${how} before serving this session — nothing is waiting on ${finalSessionPath}\x1b[0m`);
 			console.error(`\x1b[90mExpected the daemon at ${path.join(daemonDir, "wtft-daemon.mjs")}\x1b[0m`);
 			process.exit(1);
 		}

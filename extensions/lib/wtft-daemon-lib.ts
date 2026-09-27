@@ -17,7 +17,7 @@ import { getDiscoveries } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.js";
 import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
 import { tagRecords, parseTagLine, currentGeneration, sweepState, isDataRecord, type TagRecord } from "./tag-log.js";
-import { replaceLease, unlinkLeaseIf, leaseHolder } from "./lease.js";
+import { replaceLease, unlinkLeaseIf, leaseHolder, claimLeaseForChild, leasePid, pidAlive } from "./lease.js";
 import {
 	decideHealth, readHealthFacts, daemonReasonText, IDLE_THRESHOLD_MS,
 	type DaemonStatus, type HealthOptions,
@@ -618,7 +618,7 @@ export const IDLE_EXIT_MS = 24 * 60 * 60 * 1000;
 /** docs/spec-270-daemon-health.md: the one answer to "is this session's daemon alive". */
 export function health(sessionPath: string, now: number, opts: HealthOptions = {}): DaemonStatus {
 	const tagPath = opts.tagPath ?? getTagPath(sessionPath);
-	return decideHealth(readHealthFacts(sessionPath, getDaemonPidPath(sessionPath), tagPath), now, opts);
+	return decideHealth(readHealthFacts(sessionPath, getDaemonPidPath(sessionPath), tagPath), now);
 }
 
 export function renderDaemonStatus(status: DaemonStatus, restarting = false): string {
@@ -674,16 +674,30 @@ export async function awaitDaemonUp(
 	pollMs = 50
 ): Promise<DaemonStartupResult> {
 	const start = Date.now();
-	const leaseAlive = () => health(sessionPath, Date.now(), { tagPath: getCurrentVersionTagPath(sessionPath) }).alive;
+	const pidPath = getDaemonPidPath(sessionPath);
+	const own = child?.pid ? String(child.pid) : "";
+	// The spawner claims the lease for its child at spawn, so a lease
+	// naming the child proves only that it is alive. It is up once it has also
+	// beaten into the tag since this wait began; any other live holder is up.
+	const leaseUp = () => {
+		const holder = leaseHolder(pidPath);
+		const pid = leasePid(holder);
+		if (!(pid > 0 && pidAlive(pid))) return false;
+		if (!own || holder !== own) return true;
+		const facts = readHealthFacts(sessionPath, pidPath, getCurrentVersionTagPath(sessionPath));
+		return (facts.tag?.tail ?? []).some(r => r.kind === "heartbeat" && r.last >= start);
+	};
 	for (;;) {
-		if (leaseAlive()) {
+		if (leaseUp()) {
 			return { state: "up", exitCode: child?.exitCode ?? null, signalCode: child?.signalCode ?? null };
 		}
 		const exitCode = child ? child.exitCode : null;
 		const signalCode = child ? child.signalCode : null;
 		if (child && (exitCode !== null || signalCode !== null)) {
 			// Exit observed — but was the lease claimed between our check and its exit?
-			if (leaseAlive()) return { state: "up", exitCode, signalCode };
+			if (leaseUp()) return { state: "up", exitCode, signalCode };
+			// The claim made for it at spawn is the spawner's to take back.
+			if (own) unlinkLeaseIf(pidPath, own);
 			return { state: "dead", exitCode, signalCode };
 		}
 		if (Date.now() - start >= ceilingMs) {
@@ -693,15 +707,29 @@ export async function awaitDaemonUp(
 	}
 }
 
-export function restartDaemon(sessionPath: string, daemonPath: string): boolean {
+export async function restartDaemon(sessionPath: string, daemonPath: string): Promise<boolean> {
 	const pidPath = getDaemonPidPath(sessionPath);
 	try {
-		const pid = parseInt(leaseHolder(pidPath), 10);
+		const holder = leaseHolder(pidPath);
+		const pid = leasePid(holder);
 		// A harness process serves every session under its root, so it is asked
 		// to serve this one (the spawn below points it here), never stopped.
 		if (pid > 0 && !isHarnessProcess(pid)) {
+			// Its shutdown flushes into the tag; the new daemon must not start beside
+			// it, so one that outlives SIGTERM by 2 s is killed, as --restart does.
+			// The wait yields, so a holder that is the caller's own child gets reaped.
+			const gone = async (ms: number): Promise<boolean> => {
+				for (const until = Date.now() + ms; Date.now() < until;) {
+					if (!pidAlive(pid)) return true;
+					await new Promise(r => setTimeout(r, 20));
+				}
+				return !pidAlive(pid);
+			};
 			try { process.kill(pid, "SIGTERM"); } catch {}
-			unlinkLeaseIf(pidPath, String(pid));
+			if (!(await gone(2000))) {
+				try { process.kill(pid, "SIGKILL"); } catch {}
+				if (!(await gone(2000))) return false;
+			}
 		}
 	} catch {}
 
@@ -711,6 +739,9 @@ export function restartDaemon(sessionPath: string, daemonPath: string): boolean 
 			stdio: "ignore"
 		});
 		child.unref();
+		if (child.pid) {
+			try { claimLeaseForChild(pidPath, child.pid); } catch { /* the child claims for itself */ }
+		}
 		return true;
 	} catch {
 		return false;
@@ -790,38 +821,40 @@ export async function watchTagFile(
 			for (const l of lastBuffer) console.log(l);
 		}
 		console.log(`WTFT watch stopped \u2014 ${interactionCount} interactions, $${totalCost.toFixed(4)} total cost.`);
-		process.exit(0);
+		// A restart already stopped the old daemon; exiting now would leave none.
+		if (pendingRestart) void pendingRestart.finally(() => process.exit(0));
+		else process.exit(0);
 	};
 
 	process.on("SIGINT", exitWatch);
 
 	let daemonDead = false;
 	let daemonStatus: DaemonStatus | null = null;
-	let restartedAt: number | null = settings.daemonChild ? Date.now() : null;
 
 	const updateDaemonHealth = () => {
-		daemonStatus = health(sessionPath, Date.now(), { tagPath, spawnedAt: restartedAt });
-		daemonDead = !daemonStatus.alive && daemonStatus.reason !== "starting" && daemonStatus.reason !== "waiting-session";
+		daemonStatus = health(sessionPath, Date.now(), { tagPath });
+		daemonDead = !daemonStatus.alive;
 	};
 
+	let pendingRestart: Promise<boolean> | null = null;
 	const cleanupStdin = enterRawStdin((key: string) => {
 		if (key === "q" || key === "Q" || key === "\u0003") {
 			exitWatch();
 		}
-		if (key === "r" || key === "R") {
-			if (settings.daemonPath) {
-				if (restartDaemon(sessionPath, settings.daemonPath)) {
-					restartedAt = Date.now();
+		if ((key === "r" || key === "R") && settings.daemonPath && !pendingRestart) {
+			pendingRestart = restartDaemon(sessionPath, settings.daemonPath);
+			void pendingRestart.then(ok => {
+				pendingRestart = null;
+				if (ok) {
 					updateDaemonHealth();
 				} else {
-					restartedAt = null;
 					daemonStatus = { alive: false, reason: "restart-failed" };
 					daemonDead = true;
 				}
 				needsRedraw = true;
 				render();
 				resetWatchdog();
-			}
+			});
 		}
 	});
 

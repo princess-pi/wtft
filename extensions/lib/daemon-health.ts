@@ -1,12 +1,12 @@
 /**
- * DaemonHealth: is this session's log parser daemon alive, idle, starting or
- * stopped. One pure decision over one set of facts, so every reader (widget,
- * --watch, the startup wait, wtft-daemon --list) gets the same answer.
+ * DaemonHealth: is this session's log parser daemon alive, idle or stopped.
+ * One pure decision over one set of facts, so every reader (widget, --watch,
+ * wtft-daemon --list) gets the same answer.
  * docs/spec-270-daemon-health.md.
  */
 
 import * as fs from "node:fs";
-import { leaseHolder } from "./lease.js";
+import { leaseHolder, leasePid, pidAlive } from "./lease.js";
 import { tagRecords, type TagRecord } from "./tag-log.js";
 
 /** Threshold for "idle" state: 2m2s — a classic TV commercial break. */
@@ -121,20 +121,13 @@ export interface HealthFacts {
 
 export interface HealthOptions {
 	tagPath?: string;
-	/** When the caller last spawned a daemon for this session. */
-	spawnedAt?: number | null;
 }
 
 const TAIL_BYTES = 8192;
-const SPAWN_GRACE_MS = 5000;
-const TAG_WRITE_GRACE_MS = 2000;
 
 export function readHealthFacts(sessionPath: string, pidPath: string, tagPath: string): HealthFacts {
-	let holderAlive = false;
-	const pid = parseInt(leaseHolder(pidPath), 10);
-	if (pid > 0) {
-		try { process.kill(pid, 0); holderAlive = true; } catch {}
-	}
+	const pid = leasePid(leaseHolder(pidPath));
+	const holderAlive = pid > 0 && pidAlive(pid);
 	let tag: HealthFacts["tag"] = null;
 	try {
 		const stat = fs.statSync(tagPath);
@@ -149,18 +142,13 @@ export function readHealthFacts(sessionPath: string, pidPath: string, tagPath: s
 	return { holderAlive, tag, sessionMtimeMs, sessionModel: () => getModelFromSessionFile(sessionPath) };
 }
 
-export function decideHealth(facts: HealthFacts, now: number, opts: HealthOptions = {}): DaemonStatus {
+export function decideHealth(facts: HealthFacts, now: number): DaemonStatus {
 	if (facts.holderAlive) {
 		if (facts.sessionMtimeMs === null) return { alive: true, reason: "waiting-session" };
 		return liveHealth(facts, now);
 	}
-	if (opts.spawnedAt != null && now - opts.spawnedAt < SPAWN_GRACE_MS) {
-		return { alive: false, reason: facts.sessionMtimeMs === null ? "waiting-session" : "starting" };
-	}
-	const tag = facts.tag;
-	if (tag && tag.size > 0 && now - tag.mtimeMs < TAG_WRITE_GRACE_MS) return { alive: false, reason: "starting" };
 	let lastHbMs = 0;
-	const records = tag?.tail ?? [];
+	const records = facts.tag?.tail ?? [];
 	for (let i = records.length - 1; i >= 0; i--) {
 		const r = records[i];
 		if (r.kind === "heartbeat" && r.last) { lastHbMs = r.last; break; }

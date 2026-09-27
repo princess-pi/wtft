@@ -112,24 +112,12 @@ console.log("\nD. lease dead");
 	check(s.lastHbTime === hhmm, "D5 lastHbTime is that time as local HH:MM");
 }
 {
-	const s = decideHealth(facts({ alive: false, tag: hb(NOW - 30 * MIN, NOW - 20 * MIN), tagMtimeMs: NOW - 1_000 }), NOW);
-	check(!s.alive && s.reason === "starting", "D6 tag written under 2 s ago → starting, never alive");
-	const e = decideHealth(facts({ alive: false, tag: "", tagMtimeMs: NOW - 1_000 }), NOW);
-	check(!e.alive && e.reason === "not-found", "D7 an empty tag gets no mtime grace");
-	const o = decideHealth(facts({ alive: false, tag: hb(NOW - 30 * MIN, NOW - 20 * MIN), tagMtimeMs: NOW - 2_000 }), NOW);
-	check(o.reason === "idle-timeout", "D8 at 2 s the mtime grace is over");
-}
-
-console.log("\nG. spawn grace");
-{
-	const f = facts({ alive: false, tag: hb(NOW - 30 * MIN, NOW - 20 * MIN) });
-	check(decideHealth(f, NOW, { spawnedAt: NOW - 1_000 }).reason === "starting", "G1 dead lease 1 s after the caller's spawn → starting, even over an old heartbeat");
-	check(decideHealth(f, NOW, { spawnedAt: NOW - 5_000 }).reason === "idle-timeout", "G2 at 5 s the spawn grace is over");
-	check(decideHealth(f, NOW, { spawnedAt: null }).reason === "idle-timeout", "G3 no spawn → no grace");
-	const w = decideHealth(facts({ alive: false, tag: null, sessionMtimeMs: null }), NOW, { spawnedAt: NOW - 1_000 });
-	check(!w.alive && w.reason === "waiting-session", "G4 inside the spawn grace with no session file → waiting-session");
-	const a = decideHealth(facts({ tag: turn(NOW - 30_000) }), NOW, { spawnedAt: NOW - 1_000 });
-	check(a.alive && a.reason === undefined, "G5 a live lease ignores the spawn grace");
+	const s = decideHealth(facts({ alive: false, tag: hb(NOW - 30 * MIN, NOW - 20 * MIN), tagMtimeMs: NOW - 100 }), NOW);
+	check(!s.alive && s.reason === "idle-timeout", "D6 a tag written 0.1 s ago does not mask a dead lease: no clock window (#281)");
+	const e = decideHealth(facts({ alive: false, tag: "", tagMtimeMs: NOW - 100 }), NOW);
+	check(!e.alive && e.reason === "not-found", "D7 a fresh empty tag and a dead lease → not-found");
+	const w = decideHealth(facts({ alive: false, tag: null, sessionMtimeMs: null }), NOW);
+	check(!w.alive && w.reason === "not-found", "D8 a dead lease with no session file → not-found; waiting-session needs a live holder");
 }
 
 console.log("\nX. edges of the matrix");
@@ -174,6 +162,8 @@ console.log("\nF. health() over files");
 	check(s.alive && s.idle === true && s.cacheTtlMs === 3_600_000, "F2 this process holds the lease → alive, idle, TTL from the tail's turn");
 	const f = readHealthFacts(sessionPath, getDaemonPidPath(sessionPath), tagPath);
 	check(f.holderAlive && f.tag !== null && f.tag.tail.length === 2 && f.sessionMtimeMs !== null, "F3 readHealthFacts reads lease, tag tail and session mtime");
+	fs.writeFileSync(getDaemonPidPath(sessionPath), "1");
+	check(process.getuid!() === 0 || health(sessionPath, now, { tagPath }).alive, "F4a a lease naming another user's live process (EPERM) reads alive, as the claim treats it");
 	fs.writeFileSync(getDaemonPidPath(sessionPath), "999999999");
 	check(!health(sessionPath, now, { tagPath }).alive, "F4 a lease naming no live pid → not alive");
 	fs.rmSync(sessionPath);

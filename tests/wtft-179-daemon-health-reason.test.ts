@@ -134,20 +134,19 @@ export function probe(status: DaemonStatus): boolean {
 }
 
 // ---
-// V3 — the #124 startup grace window (the behaviour test that was missing)
+// V3 — the startup indicator, with no clock window
 // ---
-// Deterministic by construction: we point ensureDaemonRunning at a stand-in daemon that
-// starts and never claims the PID file. checkDaemonHealth therefore reports `not-found`
-// for the whole run, which is precisely the state the grace window exists to mask. A real
-// daemon would race us to `alive` and make the assertion flaky.
+// The spawner claims the lease for its child, so a stand-in that claims nothing
+// still holds it while it lives: waiting-session with no session file, live with
+// one, not-found once it has exited. Nothing waits out a timer.
 
-console.log("V3. #124 grace window — `starting`/`waiting-session`, never `not-found`, inside 5s");
+console.log("V3. #124 startup indicator — the spawner's claim, not a grace window (#281)");
 {
 	const fixture = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-179-")));
 	const fakeDaemonDir = path.join(fixture, "bin");
 	fs.mkdirSync(fakeDaemonDir, { recursive: true });
-	// Stand-in daemon: exits immediately, writes no PID file, claims nothing.
-	fs.writeFileSync(path.join(fakeDaemonDir, "wtft-daemon.mjs"), "process.exit(0);\n", "utf8");
+	// Stand-in daemon: lives 1.5 s, writes no PID file, claims nothing.
+	fs.writeFileSync(path.join(fakeDaemonDir, "wtft-daemon.mjs"), "setTimeout(() => process.exit(0), 1500);\n", "utf8");
 
 	try {
 		// --- 3a. Spawned, session .jsonl does not exist yet → waiting-session
@@ -155,7 +154,7 @@ console.log("V3. #124 grace window — `starting`/`waiting-session`, never `not-
 		ensureDaemonRunning(missingSession, fakeDaemonDir);
 		const waiting = getDaemonStatus(missingSession);
 		assert(
-			"no session file inside the window → code `waiting-session`",
+			"no session file while the child lives → code `waiting-session`",
 			waiting.reason === "waiting-session",
 			`got ${JSON.stringify(waiting.reason)}`,
 		);
@@ -165,30 +164,24 @@ console.log("V3. #124 grace window — `starting`/`waiting-session`, never `not-
 			renderDaemonStatus(waiting),
 		);
 
-		// --- 3b. Spawned, session .jsonl exists → starting
+		// --- 3b. Spawned, session .jsonl exists → alive from the first ask
 		const realSession = path.join(fixture, "session.jsonl");
 		fs.writeFileSync(realSession, "", "utf8");
 		ensureDaemonRunning(realSession, fakeDaemonDir);
-		const starting = getDaemonStatus(realSession);
+		const up = getDaemonStatus(realSession);
 		assert(
-			"session file present inside the window → code `starting`",
-			starting.reason === "starting",
-			`got ${JSON.stringify(starting.reason)}`,
-		);
-		assert(
-			"…and the indicator reads 'starting...' — the #124 requirement",
-			renderDaemonStatus(starting).includes(DAEMON_REASON_TEXT["starting"]),
-			renderDaemonStatus(starting),
+			"session file present, child alive → alive with no reason code",
+			up.alive && up.reason === undefined,
+			`got ${JSON.stringify(up)}`,
 		);
 
-		// --- 3c. Past the 5s window → the mask lifts and the truth shows through
-		console.log("     (waiting out the 5s grace window…)");
-		await sleep(5200);
-		const expired = getDaemonStatus(realSession);
+		// --- 3c. The child exits without serving → the truth shows at the next ask
+		await sleep(2000);
+		const gone = getDaemonStatus(realSession);
 		assert(
-			"after 5s the window closes → code `not-found`",
-			expired.reason === "not-found",
-			`got ${JSON.stringify(expired.reason)}`,
+			"after the child exits → code `not-found`",
+			gone.reason === "not-found",
+			`got ${JSON.stringify(gone.reason)}`,
 		);
 	} finally {
 		try { fs.rmSync(fixture, { recursive: true, force: true }); } catch {}

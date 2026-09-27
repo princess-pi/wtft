@@ -143,7 +143,7 @@ wtft --by-model
 wtft --session <path>
 wtft --session <path> --watch
 
-# List the log parser daemons (running ones, and leases whose holder is dead)
+# List the log parser daemons (running ones, and leases whose holder is dead or not a daemon)
 wtft --list
 
 # Machine-readable: one JSON object on stdout, exact numbers, no ANSI
@@ -330,8 +330,8 @@ rows' summed cost and how many were unreadable. Pi sessions are not listed yet
 
 `--pager` is a Pi TUI overlay, not a CLI flag — the CLI says so and exits 1,
 suggesting `wtft … | less -R`. Any `wtft` run that produces a report spawns a log
-parser daemon and claims the session's lease for it at once when the lease is absent, empty, not a pid or names a
-dead one; a per-session start exits at once when another live process holds the session's lease
+parser daemon and claims the session's lease for it at once when the lease is absent, empty, neither a pid nor a `rebuild` token, or names a
+dead process or one that is not a daemon; a per-session start exits at once when another live daemon holds the session's lease
 for a tag of this version (an older-version tag is taken over; beside a newer-version tag any live
 daemon holder keeps it) and exits 1 on a lease it cannot
 read, and a harness start takes a per-session holder's lease and retries on another harness's

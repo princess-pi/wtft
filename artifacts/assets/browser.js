@@ -3,6 +3,71 @@ const navTitle = document.querySelector(".nav-title");
 const content = document.getElementById("content");
 const md = window.markdownit({ html: true, linkify: true });
 
+function splitFrontmatter(text) {
+  if (!text.startsWith("---")) return { meta: {}, body: text };
+  const end = text.indexOf("\n---", 3);
+  if (end === -1) return { meta: {}, body: text };
+  const raw = text.slice(3, end);
+  const body = text.slice(text.indexOf("\n", end + 1) + 1);
+  const meta = {};
+  for (const line of raw.split("\n")) {
+    const match = line.match(/^\s*([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
+    if (match) meta[match[1]] = match[2].trim().replace(/^["']|["']$/g, "");
+  }
+  return { meta, body };
+}
+
+function slugify(value) {
+  return value.toLowerCase().trim()
+    .replace(/[`*_[\]()]/g, "")
+    .replace(/[^\w\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .slice(0, 60);
+}
+
+function fillToc(root) {
+  const toc = document.getElementById("toc");
+  if (!toc) return;
+  toc.replaceChildren();
+  const seen = new Map();
+  const items = [];
+  for (const heading of root.querySelectorAll("h2, h3")) {
+    let id = slugify(heading.textContent);
+    const count = (seen.get(id) || 0) + 1;
+    seen.set(id, count);
+    if (count > 1) id += "-" + count;
+    heading.id = id;
+    items.push({ id, level: heading.tagName.toLowerCase(), text: heading.textContent.trim() });
+  }
+  if (items.length < 2) return;
+  const list = document.createElement("ul");
+  for (const item of items) {
+    const li = document.createElement("li");
+    li.className = item.level;
+    const link = document.createElement("a");
+    link.href = "#" + item.id;
+    link.textContent = item.text;
+    li.appendChild(link);
+    list.appendChild(li);
+  }
+  toc.appendChild(list);
+}
+
+function rewriteDocLinks(root, basePath, index) {
+  const known = new Set((index.docs || []).map((doc) => doc.path));
+  const baseDir = basePath.includes("/") ? basePath.replace(/\/[^/]*$/, "/") : "";
+  for (const link of root.querySelectorAll("a[href]")) {
+    const href = link.getAttribute("href");
+    if (!href || /^([a-z]+:|#|\/\/)/i.test(href)) continue;
+    const [file, frag] = href.split("#");
+    if (!file) continue;
+    const resolved = new URL(baseDir + file, location.origin + "/").pathname.replace(/^\//, "");
+    if (known.has(resolved) || file.endsWith(".md") || file.endsWith(".mdx")) {
+      link.setAttribute("href", "#" + resolved + (frag ? "%23" + frag : ""));
+    }
+  }
+}
+
 function hint(text) {
   renderGen += 1;
   document.querySelectorAll("#nav-list a").forEach((a) => a.classList.remove("active"));
@@ -88,6 +153,7 @@ async function renderDoc(index, path) {
     frame.title = doc.title || path;
     frame.style.cssText = "width:100%;height:80vh;border:1px solid var(--border);border-radius:6px;";
     content.appendChild(frame);
+    document.getElementById("toc")?.replaceChildren();
     return;
   }
   if (doc.kind === "file") {
@@ -125,7 +191,10 @@ async function renderDoc(index, path) {
     return;
   }
   if (gen !== renderGen) return;
-  content.innerHTML = md.render(text);
+  const split = splitFrontmatter(text);
+  content.innerHTML = md.render(split.body);
+  fillToc(content);
+  rewriteDocLinks(content, path, index);
   content.querySelectorAll("pre code.language-mermaid").forEach((block) => {
     const div = document.createElement("div");
     div.className = "mermaid";

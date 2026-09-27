@@ -39,10 +39,10 @@ describe("module specs", () => {
 		});
 
 		it(`every change record ${f} lists says so in its own header`, () => {
-			const section = read(f).split(/^## \d+\. Change records$/m)[1]?.split(/^## /m)[0];
-			assert.ok(section, `${f} has no "Change records" section`);
+			// A module born with its spec has no change records yet.
+			const section = read(f).split(/^## \d+\. Change records$/m)[1]?.split(/^## /m)[0] ?? "";
 			const records = [...section.matchAll(/`docs\/(spec-\d[^`]+\.md)`/g)].map(r => r[1]);
-			assert.ok(records.length > 0);
+			assert.ok(!section || records.length > 0, `${f}'s Change records section lists none`);
 			for (const r of records) {
 				assert.ok(specs.includes(r), `${r} does not exist`);
 				assert.match(header(r), new RegExp(`Superseded[^\\n]*${f.replace(/[.-]/g, "\\$&")}`), `${r}'s header does not point at ${f}`);

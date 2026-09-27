@@ -213,8 +213,8 @@ refuses a batch that does not end in a newline, and the refusal is fatal: the le
 `rebuild` and the daemon exits 1; a tag truncate may cut only to zero or to a
 `lastLineStartByte` offset; an idle heartbeat replaces the last line in place only when that
 line is a heartbeat of the same byte width, and is appended otherwise, so no WRITE shrinks the file — though a daemon startup truncates it
-to zero to rebuild, or when it holds no data record or no offset marker in its last 8 KiB (#320 A); a tag it cannot
-read or truncate there is fatal, as a failed write is, so an incremental reader still needs a shrink branch; a crash mid-append is
+to zero to rebuild, or when it holds no data record or no offset marker in its last 8 KiB (#320 A), so an incremental
+reader still needs a shrink branch (a tag it cannot read or truncate there is fatal, as a failed write is); a crash mid-append is
 repaired at the next
 daemon's startup), never in each reader.
 _Avoid_: Cache file, index file

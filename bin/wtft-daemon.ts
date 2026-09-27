@@ -157,8 +157,8 @@ function truncatePartialTail(path: string): boolean {
   }
 }
 
-/** Stop after an append whose on-disk extent is unknowable; publish a rebuild lease for the next owner. */
-function fatalTagMutation(filePath: string, operation: "append" | "rebuild truncate" | "partial-tail truncate" | "resume read" | "resume truncate", err: unknown): never {
+/** Stop when the tag cannot be trusted (a failed write, truncate or startup read); publish a rebuild lease for the next owner. */
+function fatalTagMutation(filePath: string, operation: "append" | "rebuild truncate" | "partial-tail truncate" | "resume read" | "resume truncate" | "resume", err: unknown): never {
   if (running && harnessMode && holdsHarnessRoot()) writeServedHandOff(path.resolve(slot.state.sessionPath));
   running = false;
   let markedForRebuild = false;
@@ -480,7 +480,8 @@ function initClassified() {
     if (tagContent !== null && metaOffset !== null) {
       slot.state.lastSize = metaOffset;
       // Written by an earlier life; what changed since is not read yet.
-      const resumed = resumeTagger(slot.state, tagContent, world);
+      let resumed: ReturnType<typeof resumeTagger>;
+      try { resumed = resumeTagger(slot.state, tagContent, world); } catch (err) { fatalTagMutation(tagPath, "resume", err); }
       printLog(resumed.log);
       if (resumed.records) appendTagFile(tagPath, resumed.records);
     } else {

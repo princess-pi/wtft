@@ -61,7 +61,7 @@ check(chartLimit({ hasLimit: true, limit: 5 }, 30) === 5, "-l wins over config")
 check(chartLimit({ hasLimit: false, limit: 10 }, 30) === 30, "config limit wins over the default");
 
 check(chartLimit({ hasLimit: false, limit: 10 }, 3.5) === 3, "a fractional config limit is rounded down, so slice and padding agree");
-check(chartLimit({ hasLimit: false, limit: 10 }, -2) === 0, "a negative config limit is 0");
+check(chartLimit({ hasLimit: false, limit: 10 }, -2) === 1 && chartLimit({ hasLimit: false, limit: 10 }, 0.5) === 1, "a limit below 1 is 1, so the chart never reads as empty");
 {
 	const lines = plain(buildWtftLines(ix, settings, { limit: 5, padRowsTo: 5 }));
 	check(placeholderRows(lines).length === 3 && (buildWtftLines(ix, settings, { limit: 5, padRowsTo: 5 }) ?? []).filter(isPlaceholderRow).length === 3,

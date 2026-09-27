@@ -683,16 +683,15 @@ export function computeCacheMetrics(interactions: Interaction[]): { hitRate: str
 
 // ---
 
-/** The CLI's row limit when neither `-l` nor the session's config sets one. The Pi widget has its own. */
 export const CLI_DEFAULT_LIMIT = 17;
 
 export function chartLimit(opts: { hasLimit: boolean; limit: number }, configLimit: number | undefined): number {
 	return wholeLimit(opts.hasLimit ? opts.limit : (configLimit ?? CLI_DEFAULT_LIMIT));
 }
 
-/** A config file can hold 3.5 or -2; the chart shows, and pads to, a whole count. */
+/** A config file can hold 3.5 or -2; the chart shows, and pads to, a whole count of at least one row. */
 export function wholeLimit(limit: number): number {
-	return Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : CLI_DEFAULT_LIMIT;
+	return Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : CLI_DEFAULT_LIMIT;
 }
 
 export function buildWtftLines(

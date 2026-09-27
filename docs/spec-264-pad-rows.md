@@ -13,10 +13,10 @@
 - **The effective limit** is `chartLimit`: `-l` when given, else the wtft config's `limit`, else
   `CLI_DEFAULT_LIMIT`, 17 (was 100). `--watch` also lets a `wtft-settings` entry in the session log
   override the config, as it did before. `wholeLimit` rounds any of them down to a whole number, at
-  least 0, so the slice and the padding agree.
+  least 1, so the slice and the padding agree and a stray 0 never hides the chart.
 - **`--watch` never grows past the terminal for padding.** Its redraw moves the cursor up over the
-  last frame, which cannot reach lines scrolled off the top, so when a frame is taller than the
-  terminal it drops placeholder rows (`isPlaceholderRow`) first. No test drives this; it runs only
+  last frame, which cannot reach lines scrolled off the top, so when a frame, counted in wrapped screen lines plus the line the
+  cursor ends on, would not fit the terminal it drops placeholder rows (`isPlaceholderRow`) first. No test drives this; it runs only
   under a real terminal height.
 - **The Pi widget does not pad** and keeps its own default of 10. Pi caps a string-array widget at
   10 lines; fitting under that is #269.

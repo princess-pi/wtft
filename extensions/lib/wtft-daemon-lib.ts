@@ -905,11 +905,6 @@ export async function watchTagFile(
 			}
 
 			for (const l of lines) buf.push(l);
-			// Cursor-up redraw cannot reach lines scrolled off the top: padding gives way first.
-			let over = buf.length + 1 - (process.stdout.rows || Infinity);
-			for (let i = buf.length - 1; i >= 0 && over > 0; i--) {
-				if (isPlaceholderRow(buf[i]!)) { buf.splice(i, 1); over--; }
-			}
 		} else {
 			buf.push(`\x1b[90m${waitingForDataLine(sessionPath)}\x1b[0m`);
 		}
@@ -919,12 +914,20 @@ export async function watchTagFile(
 			: "";
 		buf.push(`'q' to exit${restartHint}`);
 
+		// Cursor-up redraw cannot reach lines scrolled off the top, so padding gives way first.
+		// Counted as the redraw counts them (wrapped), plus the line the cursor ends on.
+		const cols = process.stdout.columns || 80;
+		const rows = process.stdout.rows || Infinity;
+		const screenLines = () => visualLineCount(buf.map(l => padStr + l + "\n").join(""), cols) + 1;
+		for (let i = buf.length - 1; i >= 0 && screenLines() > rows; i--) {
+			if (isPlaceholderRow(buf[i]!)) buf.splice(i, 1);
+		}
+
 		lastBuffer = [...buf];
 
 		const allLines = buf.map(l => padStr + l);
 		const out = allLines.map(l => l + "\n").join("");
 		process.stdout.write(out);
-		const cols = process.stdout.columns || 80;
 		lastLineCount = visualLineCount(out, cols);
 		needsRedraw = false;
 	};

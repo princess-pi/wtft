@@ -72,23 +72,17 @@
     </fieldset>
     <fieldset>
       <legend>Columns</legend>
-      <label><input type="checkbox" name="column" value="inc-cost" checked> incremental cost</label>
-      <label><input type="checkbox" name="column" value="total-cost" checked> total latest cost</label>
-      <label><input type="checkbox" name="column" value="inc-tokens"> incremental tokens</label>
-      <label><input type="checkbox" name="column" value="total-tokens"> total latest tokens</label>
+      <label><input type="checkbox" id="cost-columns" checked> cost pair</label>
+      <label><input type="checkbox" id="token-columns" checked> token pair</label>
     </fieldset>
     <fieldset>
-      <legend>Painter</legend>
-      <label><input type="radio" name="painter" value="home" checked> home</label>
-      <label><input type="radio" name="painter" value="bought"> bought, full block</label>
+      <legend>Recency</legend>
       <label><input type="checkbox" id="recency"> recency glyph</label>
-      <label><input type="checkbox" id="ticks" checked> ticks on</label>
     </fieldset>
     <fieldset>
       <legend>Rules</legend>
       <label><input type="checkbox" id="miss" checked> cache miss</label>
       <label><input type="checkbox" id="date" checked> date change</label>
-      <label><input type="checkbox" id="dateNeedsTicks"> date lines need ticks</label>
       <label><input type="checkbox" id="ten"> every 10 turns</label>
       <label><input type="checkbox" id="hundred"> every 100 turns</label>
     </fieldset>
@@ -117,15 +111,11 @@
     setRadio("interval", preset.interval);
     setRadio("layout", preset.layout);
     setRadio("measure", preset.measure);
-    setRadio("painter", preset.painter);
-    for (const box of document.querySelectorAll('input[name="column"]')) {
-      box.checked = preset.columns.includes(box.value);
-    }
+    document.getElementById("cost-columns").checked = preset.columns.includes("inc-cost");
+    document.getElementById("token-columns").checked = preset.columns.includes("inc-tokens");
     document.getElementById("recency").checked = preset.recency;
-    document.getElementById("ticks").checked = preset.ticks;
     document.getElementById("miss").checked = preset.rules.miss;
     document.getElementById("date").checked = preset.rules.date;
-    document.getElementById("dateNeedsTicks").checked = preset.rules.dateNeedsTicks;
     document.getElementById("ten").checked = preset.rules.ten;
     document.getElementById("hundred").checked = preset.rules.hundred;
     draw();
@@ -142,14 +132,14 @@
       interval: checked("interval"),
       layout: checked("layout"),
       measure: checked("measure"),
-      painter: checked("painter"),
-      columns: [...document.querySelectorAll('input[name="column"]:checked')].map((box) => box.value),
+      columns: [
+        ...(document.getElementById("cost-columns").checked ? ["inc-cost", "total-cost"] : []),
+        ...(document.getElementById("token-columns").checked ? ["inc-tokens", "total-tokens"] : []),
+      ],
       recency: document.getElementById("recency").checked,
-      ticks: document.getElementById("ticks").checked,
       rules: {
         miss: document.getElementById("miss").checked,
         date: document.getElementById("date").checked,
-        dateNeedsTicks: document.getElementById("dateNeedsTicks").checked,
         ten: document.getElementById("ten").checked,
         hundred: document.getElementById("hundred").checked,
       },
@@ -206,7 +196,7 @@
       return [swatch, name];
     }));
     document.getElementById("chart").innerHTML = picture.ansi.map(ansiToHtml).join("\n");
-    document.getElementById("count").textContent = `${picture.lineCount} lines. The Pi widget cap is 10.`;
+    document.getElementById("count").textContent = `${picture.lineCount} lines in this picture. The widget limit counts bins.`;
   }
 
   document.body.addEventListener("change", draw);

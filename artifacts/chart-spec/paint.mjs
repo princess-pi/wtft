@@ -35,61 +35,44 @@ const RAW = [
 	]},
 ];
 
+const FOUR = ["inc-cost", "total-cost", "inc-tokens", "total-tokens"];
+
 export const PRESETS = {
 	"cost-cumulative": {
-		label: "Today: cost, cumulative",
+		label: "Cost, cumulative",
 		interval: "time",
 		layout: "stack",
 		measure: "total-cost",
-		columns: ["inc-cost", "total-cost"],
+		columns: FOUR,
 		recency: false,
-		rules: { miss: true, date: true, ten: false, hundred: false, dateNeedsTicks: true },
-		ticks: true,
-		painter: "home",
+		rules: { miss: true, date: true, ten: false, hundred: false },
 	},
 	"cost-bucket": {
-		label: "Today: cost, bucket",
+		label: "Cost, bucket",
 		interval: "time",
 		layout: "scatter",
 		measure: "inc-cost",
-		columns: ["inc-cost"],
+		columns: FOUR,
 		recency: false,
-		rules: { miss: true, date: true, ten: false, hundred: false, dateNeedsTicks: true },
-		ticks: true,
-		painter: "home",
+		rules: { miss: true, date: true, ten: false, hundred: false },
 	},
 	"tokens-cumulative": {
-		label: "Today: tokens, cumulative",
+		label: "Tokens, cumulative",
 		interval: "time",
 		layout: "stack",
 		measure: "total-tokens",
-		columns: ["inc-tokens", "total-tokens"],
+		columns: FOUR,
 		recency: true,
-		rules: { miss: true, date: true, ten: false, hundred: false, dateNeedsTicks: true },
-		ticks: true,
-		painter: "home",
+		rules: { miss: true, date: true, ten: false, hundred: false },
 	},
 	"tokens-bucket": {
-		label: "Today: tokens, bucket",
+		label: "Tokens, bucket",
 		interval: "time",
 		layout: "stack",
 		measure: "inc-tokens",
-		columns: ["inc-tokens"],
+		columns: FOUR,
 		recency: false,
-		rules: { miss: true, date: true, ten: false, hundred: false, dateNeedsTicks: true },
-		ticks: true,
-		painter: "home",
-	},
-	"all-four": {
-		label: "All four columns",
-		interval: "time",
-		layout: "stack",
-		measure: "total-cost",
-		columns: ["inc-cost", "total-cost", "inc-tokens", "total-tokens"],
-		recency: false,
-		rules: { miss: true, date: true, ten: false, hundred: false, dateNeedsTicks: false },
-		ticks: true,
-		painter: "home",
+		rules: { miss: true, date: true, ten: false, hundred: false },
 	},
 };
 
@@ -104,17 +87,18 @@ function money(n, incremental) {
 	return incremental ? `+${body}` : body;
 }
 
-function toks(n, incremental) {
+function toks(n) {
 	const abs = Math.abs(n);
-	const body = abs >= 1000 ? `${(abs / 1000).toFixed(abs >= 10000 ? 0 : 1)}k` : String(abs);
-	return incremental ? `+${body}` : body;
+	if (abs >= 1_000_000) return `${(abs / 1_000_000).toFixed(1)}M`;
+	if (abs >= 1000) return `${(abs / 1000).toFixed(1)}k`;
+	return String(abs);
 }
 
 function columnText(row, id) {
 	if (id === "inc-cost") return money(row.incCost, true);
 	if (id === "total-cost") return money(row.totalCost, false);
-	if (id === "inc-tokens") return toks(row.incTokens, true);
-	return toks(row.totalTokens, false);
+	if (id === "inc-tokens") return `+${toks(row.incTokens)}`;
+	return `${toks(row.totalTokens)} tok`;
 }
 
 function withRunning(raw) {
@@ -261,18 +245,18 @@ function paintScatter(parts, width, scaleMax) {
 }
 
 function encodingOf(opts, notes) {
-	const incremental = incrementalMeasure(opts.measure);
-	if (opts.painter === "bought") {
-		if (opts.recency && !incremental) notes.push("Bought painter drops the recency glyph. Every cell is a full block.");
+	if (opts.layout === "scatter" && (opts.measure === "inc-tokens" || opts.measure === "total-tokens")) {
+		notes.push("Scatter is the cost bucket bar. A token bar is a stack.");
+	}
+	if (opts.measure !== "total-tokens") {
+		if (opts.recency) notes.push("Recency stays off. It is the token running-total bar.");
 		return "full";
 	}
-	if (opts.recency && incremental) {
-		notes.push("Recency is off: an incremental bar is entirely new, so a third variable has nothing to show.");
-	}
-	if (opts.recency && !incremental && opts.layout === "stack") return "recency";
-	if (opts.recency && opts.layout === "scatter") {
+	if (opts.layout === "scatter") {
 		notes.push("Scatter has no recency glyph. A column keeps the larger category.");
+		return "full";
 	}
+	if (opts.recency) return "recency";
 	return "full";
 }
 
@@ -287,10 +271,7 @@ function strideLabel(turn, rules) {
 	return null;
 }
 
-function lawText(encoding, painter) {
-	if (painter === "bought") {
-		return "Bought painter. Every cell is █ in the category color. Recency glyphs are not drawn. Rules and columns stay.";
-	}
+function lawText(encoding) {
 	if (encoding === "recency") {
 		return "A cell is one category. Color is the category. ▃ is carryover. ▇ is new this bin.";
 	}
@@ -307,14 +288,15 @@ export function render(opts) {
 		date: true,
 		ten: false,
 		hundred: false,
-		dateNeedsTicks: false,
 		...opts.rules,
 	};
-	if (opts.interval !== "time" && rules.date) notes.push("Date lines are off: the interval is turns.");
 	if (opts.interval !== "turns" && (rules.ten || rules.hundred)) notes.push("Turn lines are off: the interval is time.");
-	if (rules.date && rules.dateNeedsTicks && !opts.ticks && opts.interval === "time") {
-		notes.push("Date lines are hidden because ticks are off. Today's renderer does this.");
-	}
+	if (!rules.miss || !rules.date) notes.push("The chart always draws a cache-miss line and a date change.");
+	const shipped = (opts.layout === "stack" && opts.measure === "total-cost" && !opts.recency)
+		|| (opts.layout === "scatter" && opts.measure === "inc-cost" && !opts.recency)
+		|| (opts.layout === "stack" && opts.measure === "total-tokens" && opts.recency)
+		|| (opts.layout === "stack" && opts.measure === "inc-tokens" && !opts.recency);
+	if (!shipped) notes.push("This combination is not one of the four shipped pictures.");
 
 	const newestFirst = [...ROWS].reverse();
 	const labels = newestFirst.map((row) => (opts.interval === "turns" ? `${row.turn}t` : row.time));
@@ -338,8 +320,8 @@ export function render(opts) {
 		else bar = paintFull(parts, slots);
 		const head = [label.padEnd(labelWidth, " "), ...fields].join("  ");
 		return {
-			plain: `${head}  ${bar.plain}`,
-			ansi: `${head}  ${bar.ansi}`,
+			plain: `${head}  ${bar.plain}`.replace(/ +$/g, ""),
+			ansi: `${head}  ${bar.ansi}`.replace(/ +$/g, ""),
 		};
 	};
 
@@ -357,7 +339,7 @@ export function render(opts) {
 		if (i > 0) {
 			const newer = newestFirst[i - 1];
 			if (rules.miss && newer.miss) push(divider("Cache Miss", lineWidth));
-			const dateOn = rules.date && opts.interval === "time" && !(rules.dateNeedsTicks && !opts.ticks);
+			const dateOn = rules.date;
 			if (dateOn && newer.date !== row.date) push(divider(row.date, lineWidth));
 			if (opts.interval === "turns") {
 				const stride = strideLabel(newer.turn, rules);
@@ -381,7 +363,7 @@ export function render(opts) {
 		.map((cat) => ({ cat, label: CATS[cat].label, fg: CATS[cat].fg }));
 
 	return {
-		law: lawText(encoding, opts.painter),
+		law: lawText(encoding),
 		notes,
 		legend,
 		plain,

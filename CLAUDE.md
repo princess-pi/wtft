@@ -28,7 +28,8 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
   seams that exist: `decideHealth` (`extensions/lib/daemon-health.ts`), `stepTagger`
   (`extensions/lib/session-tagger.ts`), the registry functions
   (`extensions/lib/harness-registry.ts`), and `classifyPid` over a fake process table
-  (`extensions/lib/holder.ts`, `tests/lib/fake-process-table.ts`).
+  (`extensions/lib/holder.ts`, `tests/lib/fake-process-table.ts`), and `rotateDaemonLog`
+  (`extensions/lib/daemon-log.ts`).
 - **Every feature PR body carries one line:** `Module: <file> · Seam: <function>, tested in <suite>`.
   A PR that touches a second module adds `Also: <file> — <why>` for each one.
 - *Why:* before the daemon ownership refactor (spec-270), one daemon feature touched state spread across `bin/wtft-daemon.ts` and
@@ -46,7 +47,7 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
 | Pricing manifest | `bun run manifest` |
 | Install on this host | `bin/install-wtft` · `--check` for drift (exit codes in README) |
 | PR cost record | `bun run pr-cost --write-pr` in the branch's worktree, just before `pr-offer-merge` (`docs/spec-277-pr-cost.md`) |
-| After every merge | `pr-cleanup <branch>` → `git pull --ff-only` → `bin/install-wtft`, from the main clone. Run the full install, not `--check`: it compares `~/bin` to the clone's built bundles, so after a merge both are stale together and it reports in sync while `~/bin` runs old code (#85) |
+| After every merge | `pr-cleanup <branch>` → `git pull --ff-only` → `bin/install-wtft`, from the main clone. Run the full install, not `--check`: it compares `~/bin` to the clone's built bundles, so after a merge both are stale together and it reports in sync while `~/bin` runs old code (#85). The install stops any daemon on an older build (restarting per-session ones; a harness returns on the next wtft) and says so |
 
 ## Shape
 

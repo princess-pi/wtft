@@ -5,6 +5,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn, type ChildProcess } from "node:child_process";
+import { daemonStdio } from "./daemon-log.js";
 import { health, daemonLaunchArgs, getDaemonPidPath, type DaemonStatus } from "./wtft-shared.js";
 import { claimLeaseForChild } from "./lease.js";
 import { readConfig } from "@princess-pi/libs/config";
@@ -291,10 +292,16 @@ export function isPendingSessionPath(p: string): boolean {
 export function spawnWtftDaemon(sessionPath: string, daemonDir: string): ChildProcess | null {
 	const daemonPath = path.join(daemonDir, "wtft-daemon.mjs");
 	try {
-		const child = spawn(process.execPath, [daemonPath, ...daemonLaunchArgs(sessionPath)], {
-			detached: true,
-			stdio: "ignore",
-		});
+		const log = daemonStdio();
+		let child: ChildProcess;
+		try {
+			child = spawn(process.execPath, [daemonPath, ...daemonLaunchArgs(sessionPath)], {
+				detached: true,
+				stdio: log.stdio,
+			});
+		} finally {
+			log.close();
+		}
 		child.unref();
 		if (child.pid) {
 			try { claimLeaseForChild(getDaemonPidPath(sessionPath), child.pid); } catch { /* the child claims for itself */ }

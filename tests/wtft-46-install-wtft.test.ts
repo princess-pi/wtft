@@ -6,7 +6,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync, execSync, spawn, spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir, mkSandbox } from "./lib/sandbox";
 
 isolateTmpdir("46-install-wtft");
@@ -1021,6 +1021,71 @@ console.log("\n10. The claude-nsp-guard shim: ok, shadowed (exit 5), absent, mid
 		try { doc = JSON.parse(out); } catch { /* left null */ }
 		check(doc?.nspGuard?.state === "ok" && doc?.nspGuard?.guard === guard,
 			"V10g: a large guard with an early sentinel is still recognised", JSON.stringify(doc?.nspGuard));
+	}
+}
+
+// ---
+// 11. A daemon running an older build (one started no later than its bundle
+//     last changed) is stopped and, per session, restarted. The
+//     bundle is touched between the daemon's start and the install, which is
+//     what a changed build does to it.
+// ---
+console.log("\n11. install-wtft restarts a daemon on an older build, and only then");
+if (!fs.existsSync("/proc/self/stat")) {
+	console.log("  ##SKIP## no /proc on this host");
+} else {
+	const dir = mkSandbox(path.join(os.tmpdir(), "46-restart-"));
+	const bundle = path.join(dir, "wtft-daemon.mjs");
+	// install runs the installed wtft-daemon, whose shebang needs node on PATH;
+	// the PATH run() builds holds only bun and /usr/bin, where CI has no node.
+	const nodeDir = mkSandbox(path.join(os.tmpdir(), "46-nodeshim-"));
+	fs.symlinkSync(execSync("command -v node", { encoding: "utf8" }).trim(), path.join(nodeDir, "node"));
+	const first = run(["--json", "--dir", dir], [nodeDir]);
+	check(first.code === 0 && fs.existsSync(bundle), "V11 precondition: installed", `got ${first.code}`);
+	const docOf = (out: string) => { try { return JSON.parse(out); } catch { return null; } };
+	const pause = (s: number) => execSync(`sleep ${s}`);
+	// A stopped child of this process stays a zombie until reaped, which kill 0 reads as alive.
+	const alive = (pid: number) => { try { return fs.readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1]?.[0] !== "Z"; } catch { return false; } };
+
+	const mtime = fs.statSync(bundle).mtimeMs;
+	const again = run(["--json", "--dir", dir], [nodeDir]);
+	check(fs.statSync(bundle).mtimeMs === mtime, "V11a: an identical bundle is not rewritten, so its mtime still dates the build");
+	check(docOf(again.out)?.daemons?.older === 0 && docOf(again.out)?.daemons?.restart === "none",
+		"V11b: with no daemon on an older build, nothing restarts", JSON.stringify(docOf(again.out)?.daemons));
+
+	const session = path.join(mkSandbox(path.join(os.tmpdir(), "46-restart-session-")), "s.jsonl");
+	fs.writeFileSync(session, "");
+	const daemon = spawn(process.execPath, [bundle, "--session", session], { stdio: "ignore", env: process.env });
+	// Not a lease holder, so --restart cannot reach it: the failure path. It must
+	// outlive four builds on a slow runner; the finally kills it.
+	const bystander = spawn("bash", ["-c", 'exec -a "$0" sleep 600', bundle], { stdio: "ignore" });
+	const respawned: number[] = [];
+	try {
+		pause(1.1);
+		const now = new Date();
+		fs.utimesSync(bundle, now, now);
+		// Past install-wtft's 2 s start-time error, so the daemon --restart spawns is newer.
+		pause(2.1);
+		const { code, out } = run(["--json", "--dir", dir], [nodeDir]);
+		const doc = docOf(out);
+		check(code === 0 && doc?.daemons?.older === 2, "V11c: both processes on the older build are counted", JSON.stringify(doc?.daemons));
+		check(!alive(daemon.pid!), "V11d: the lease-holding daemon was stopped");
+		const lease = path.join(process.env.TMPDIR!, fs.readdirSync(process.env.TMPDIR!).find(f => f.startsWith("wtft-daemon-") && f.endsWith(".pid")) ?? "none");
+		const leaseHolder = () => Number(fs.existsSync(lease) ? fs.readFileSync(lease, "utf8").trim() : 0);
+		const holder = leaseHolder();
+		if (holder > 0) respawned.push(holder);
+		check(holder > 0 && holder !== daemon.pid && alive(holder), "V11e: a new daemon was started for its session", `lease=${lease} holder=${holder}`);
+		check(doc?.daemons?.restart === "failed" && doc?.daemons?.left === 1,
+			"V11f: the one --restart could not reach is still counted, and the restart reads failed", JSON.stringify(doc?.daemons));
+		// run() drops stderr on exit 0, and the failure line is on stderr.
+		const human = spawnSync(INSTALLER, ["--dir", dir], { encoding: "utf8", env: { ...process.env, HOME: mkSandbox(path.join(os.tmpdir(), "46-restart-home-")), PATH: [nodeDir, BUN_DIR, "/usr/bin", "/bin"].join(":") } });
+		if (leaseHolder() > 0) respawned.push(leaseHolder());
+		check(/1 of 1 log parser daemon\(s\) on an older build still run after wtft-daemon --restart/.test(human.stderr),
+			"V11g: the human report names what is left", `stderr: ${human.stderr.slice(0, 600)}`);
+	} finally {
+		daemon.kill("SIGKILL");
+		bystander.kill("SIGKILL");
+		for (const pid of respawned) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } }
 	}
 }
 

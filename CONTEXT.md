@@ -272,9 +272,9 @@ bills above 1. It resolves the day containing the instant passed to it, and the
 renderer passes `now` — so the bar describes today while the bins under it may be older.
 `checkSurgeProximity()` reads `SURGE_APPROACH_MINUTES` before a window opens, and
 `SURGE_ENDING_MINUTES` before the surge stops. Both are 20. Ending is those
-minutes before billing drops to 1. A window that still bills at the minute this
-one ends does not stop it, including one that starts at 0 on the next UTC day
-when this one ends at 1440. A lead that wraps past midnight asks whether the
+minutes before billing drops to 1. That instant follows windows that touch or
+overlap, including one that starts at 0 on the next UTC day when this one ends
+at 1440. A lead that wraps past midnight asks whether the
 next UTC day bills that window. A user card whose `surge` cannot be walked
 keeps its rates and drops the schedule; `loadUserPricing` prints the key and
 the reason on stderr. Omitting `surge` keeps the built-in schedule. `surge: null`

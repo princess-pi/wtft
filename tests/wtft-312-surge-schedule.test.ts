@@ -189,6 +189,23 @@ describe("#312 a card carries its own surge schedule", () => {
 		};
 		assert.equal(checkSurgeProximity(minute(1425), "acme-late").status, "ending");
 		delete MODEL_PRICING["acme-late"];
+
+		MODEL_PRICING["acme-short"] = {
+			input: 1, output: 1, cacheRead: 1, cacheWrite: 0,
+			surge: { multiplier: 2, windowsUtcMinutes: [[60, 240], [240, 250]] },
+		};
+		assert.equal(checkSurgeProximity(minute(220), "acme-short").status, "surge");
+		assert.equal(checkSurgeProximity(minute(230), "acme-short").status, "ending");
+		assert.equal(checkSurgeProximity(minute(235), "acme-short").status, "ending");
+		delete MODEL_PRICING["acme-short"];
+
+		MODEL_PRICING["acme-short-midnight"] = {
+			input: 1, output: 1, cacheRead: 1, cacheWrite: 0,
+			surge: { multiplier: 2, windowsUtcMinutes: [[0, 10], [1380, 1440]] },
+		};
+		assert.equal(checkSurgeProximity(minute(1429), "acme-short-midnight").status, "surge");
+		assert.equal(checkSurgeProximity(minute(1430), "acme-short-midnight").status, "ending");
+		delete MODEL_PRICING["acme-short-midnight"];
 	});
 });
 

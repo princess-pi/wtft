@@ -577,11 +577,11 @@ export function getSurgeLocalHours(tz?: string, now: number = Date.now(), model?
 }
 
 /**
- * Ending is the last {@link SURGE_ENDING_MINUTES} before the surge stops.
- * A window that still bills at the minute this one ends does not stop it,
- * including one that starts at 0 on the next UTC day when this one ends at
- * 1440. Approaching is the {@link SURGE_APPROACH_MINUTES} before a window
- * opens. A lead that wraps past midnight asks about the next UTC day.
+ * Ending is the last {@link SURGE_ENDING_MINUTES} before billing drops to 1.
+ * That instant follows windows that touch or overlap, including one that
+ * starts at 0 on the next UTC day when this one ends at 1440. Approaching is
+ * the {@link SURGE_APPROACH_MINUTES} before a window opens. A lead that wraps
+ * past midnight asks about the next UTC day.
  */
 export function checkSurgeProximity(at: number = Date.now(), model?: string): { status: 'surge' | 'approaching' | 'ending' | undefined; multiplier: number } {
 	const schedule = model ? surgeScheduleFor(model) : null;
@@ -599,20 +599,38 @@ export function checkSurgeProximity(at: number = Date.now(), model?: string): { 
 		return getPeakMultiplier(model, probe) > 1;
 	};
 
-	const continuesPast = (selfStart: number, selfEnd: number) => {
-		const covered = schedule.windowsUtcMinutes.some(([start, otherEnd]) =>
-			!(start === selfStart && otherEnd === selfEnd) && start <= selfEnd && selfEnd < otherEnd);
-		if (covered) return true;
-		if (selfEnd === 1440 && schedule.windowsUtcMinutes.some(([start]) => start === 0)) {
-			return opensOn(next.getUTCFullYear(), next.getUTCMonth(), next.getUTCDate(), 0);
+	const extend = (windows: ReadonlyArray<readonly [number, number]>, from: number) => {
+		let end = from;
+		let changed = true;
+		while (changed) {
+			changed = false;
+			for (const [start, otherEnd] of windows) {
+				if (start <= end && otherEnd > end) {
+					end = otherEnd;
+					changed = true;
+				}
+			}
 		}
-		return false;
+		return end;
 	};
 
 	for (const [start, end] of schedule.windowsUtcMinutes) {
 		if (currentUtcMinute >= start && currentUtcMinute < end && opensOn(y, mo, d, start)) {
-			const endingAt = end - SURGE_ENDING_MINUTES;
-			if (currentUtcMinute >= endingAt && !continuesPast(start, end)) return { status: 'ending', multiplier };
+			const billedToday = schedule.windowsUtcMinutes.filter(([windowStart]) => opensOn(y, mo, d, windowStart));
+			const containing = billedToday.filter(([windowStart, windowEnd]) =>
+				currentUtcMinute >= windowStart && currentUtcMinute < windowEnd);
+			let stopsAt = extend(billedToday, Math.max(...containing.map(([, windowEnd]) => windowEnd)));
+			if (stopsAt === 1440) {
+				const ny = next.getUTCFullYear();
+				const nm = next.getUTCMonth();
+				const nd = next.getUTCDate();
+				const billedTomorrow = schedule.windowsUtcMinutes.filter(([windowStart]) => opensOn(ny, nm, nd, windowStart));
+				if (billedTomorrow.some(([windowStart, windowEnd]) => windowStart <= 0 && 0 < windowEnd)) {
+					const tomorrowEnd = extend(billedTomorrow, 0);
+					if (tomorrowEnd > 0) stopsAt = 1440 + tomorrowEnd;
+				}
+			}
+			if (stopsAt - currentUtcMinute <= SURGE_ENDING_MINUTES) return { status: 'ending', multiplier };
 			return { status: 'surge', multiplier };
 		}
 	}

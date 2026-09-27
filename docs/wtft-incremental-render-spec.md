@@ -521,7 +521,7 @@ The 24-hour timeline on the title line shows the model's surge schedule, when it
 - **Surge badges**: Appended when the card has a schedule and the instant is in or near a window. The active badge prints that card's multiplier. The leads are `SURGE_APPROACH_MINUTES` and `SURGE_ENDING_MINUTES`, both 20:
   - `⚡ SURGE 2x` — inside a window that still bills, before the surge stops (DeepSeek's multiplier is 2)
   - `⚡ SURGE APPROACHING` — within `SURGE_APPROACH_MINUTES` before the window opens (blinking orange)
-  - `⚡ SURGE ENDING` — within `SURGE_ENDING_MINUTES` before the surge stops (blinking green). A window that still bills at the minute this one ends does not stop it, including one that starts at 0 on the next UTC day when this one ends at 1440
+  - `⚡ SURGE ENDING` — within `SURGE_ENDING_MINUTES` before billing drops to 1 (blinking green). That instant follows windows that touch or overlap, including one that starts at 0 on the next UTC day when this one ends at 1440
 
 **Unified rendering:** The timeline computation lives in `renderWtftChart`. The `model` opt selects the card:
 - **Pi widget**: passes `sessionCtx.model.modelId` from the session context

@@ -364,22 +364,6 @@ describe("#495 deepseek-v4-flash-vision-exp resolves to its own entry", () => {
 	});
 });
 
-// --- One definition of the windows ---
-//
-// The schedule was hardcoded in four places, with nothing that failed when a
-// change missed one. These tests do NOT grep for the literals: a source-text
-// check would survive deleting the thing it names (#408).
-//
-// What they actually guard, stated exactly, because an earlier wording here
-// claimed more than the assertions deliver: they pin that the renderer
-// DELEGATES to the pricing module rather than deciding surge itself. Today
-// `getSurgeLocalHours` calls `getPeakMultiplier`, so with tz="UTC" the
-// comparison below is a tautology and CANNOT fail — that is the point. It goes
-// red the moment someone re-introduces an independent copy in the renderer that
-// answers differently, which is the regression #495 removed. It is not, and
-// cannot be, a check that a schedule change reached two places; there is only
-// one place left for it to reach.
-
 describe("#495 the renderer's surge display agrees with the pricing module", () => {
 	it("marks exactly the hours the cost module charges 2x for, on a weekday", () => {
 		const surge = getSurgeLocalHours("UTC", MON_OUTSIDE_WINDOWS, "deepseek-flash");

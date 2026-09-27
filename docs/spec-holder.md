@@ -56,9 +56,11 @@ Three rules cover every caller:
   `unverified` pid (hidepid) may be anything, so it is never signalled. A harness is never
   stopped on behalf of one session.
 - **A verified daemon:** `daemon` or `harness`, with the cmdline read. The harness's own claims
-  and the daemon management commands act only on these. `--restart` stops a harness as well. Off
-  Linux nothing is verified, so these callers stop nothing there; `--restart` still removes the
-  leases and root pid files.
+  and the daemon management commands signal only these. `--restart` stops a harness as well. Off
+  Linux nothing is verified, so these callers stop nothing there. Removing a lease is not
+  signalling: `--stop` removes the lease of any live non-harness holder, `--cleanup` that of an
+  `unverified` holder whose session is gone, and `--restart` removes the leases and root pid files
+  off Linux too.
 
 An `other` is never signalled by anyone. `leasePid(holder)` in `extensions/lib/lease.ts`
 (`/^[1-9]\d*$/`, else 0) is the only way a lease's text becomes a pid.

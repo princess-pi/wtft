@@ -560,8 +560,7 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 | Situation | Handling |
 |---|---|
 | Daemon exits (idle timeout, 24h) | The status `docs/spec-daemon-health.md` §2 gives a dead holder; footer shows red `'r' to restart` |
-| No activity for 2m2s | Status flips to `● idle (cache expires in Nmin)`, whole minutes rounded up, then `● idle (cache emptied)`. The TTL rule: `docs/spec-daemon-health.md` §2. |
-| Local model (no cache), or no model known | Status shows `● idle (local model)` |
+| No activity for the idle threshold | An idle status (`docs/spec-daemon-health.md` §2; the texts in `docs/manifests/wtft-status.json`) |
 | User presses `r` | Daemon restarts; while the old one exits (up to 4 s) the view keeps rendering what `health` finds, and a second `r` is ignored until the restart ends; `q` or Ctrl+C then exits once it has spawned. When the claim landed, the lease names the new child at once, so that is alive (`waiting for session`, `live` or `idle`). A holder that outlives SIGKILL or may not be signalled (EPERM), or a spawn that throws, shows `● restart failed` |
 | Tag file deleted/truncated | `fs.watch` handler re-reads from zero |
 | Daemon spawned before session file exists | Status per `docs/spec-daemon-health.md` §2. The daemon polls until the file is created (#124) |

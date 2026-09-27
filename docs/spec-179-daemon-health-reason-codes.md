@@ -2,7 +2,7 @@
 
 **Issue:** [#179](https://github.com/duppypro/princess-pi-tools/issues/179)
 **Status:** Code and Spec Approved
-**Related:** #124 (the grace window this protects), #165 (where the coupling was found), #167
+**Related:** #124 (the grace window this protected, until spec-281 replaced it with the spawner's claim), #165 (where the coupling was found), #167
 
 ---
 
@@ -54,7 +54,7 @@ breaks; that is the whole point.
  */
 export type DaemonHealthReason =
 	| "not-started"      // no daemon spawned for this session yet
-	| "starting"         // spawned, inside the #124 startup grace window (removed by #281; nothing sets it now)
+	| "starting"         // spawned, inside the #124 startup grace window (removed by spec-281; nothing sets it now)
 	| "waiting-session"  // spawned, session .jsonl not created yet
 	| "not-found"        // no live PID and no heartbeat on record
 	| "idle-timeout"     // exited after idling out (lastHbTime carries when)

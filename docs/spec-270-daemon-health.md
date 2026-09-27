@@ -84,7 +84,7 @@ grace windows answer `starting` rather than alive, for every reader; spec-281 th
   only by a live lease, polled once a second five times; with none by then, the view showed
   `starting...` for as long as it ran. Now the view shows what `health` finds from the first ask,
   the five-poll interval is gone, and the watchdog asks as it does at any other time. Since spec-281
-  the restart first stops the lease holder (any pid whose cmdline has no `--harness`; #289) with
+  the restart first stops the lease holder (any pid whose cmdline has no `--harness`, and off Linux any pid at all, since a harness cannot be told apart there; #289) with
   SIGTERM, then SIGKILL after 2 s, and waits up to 2 s more; `--watch` keeps running during that
   wait.
   A holder still alive after it, EPERM included, is left alone and `--watch` shows

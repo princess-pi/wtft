@@ -60,8 +60,7 @@ export interface WtftCliOptions {
 
 /**
  * Breaking: `-t` and `-T` shortcuts are intentionally NOT supported.
- * `-t` was overloaded across --timezone, --tokens, and a planned
- * --turns. Use the full `--` names instead.
+ * Use the full `--` names instead.
  */
 export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 	let showHelp = false;

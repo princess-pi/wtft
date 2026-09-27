@@ -58,9 +58,9 @@ const prevXdg = process.env.XDG_CONFIG_HOME;
 process.env.XDG_CONFIG_HOME = xdgRoot;
 
 /** Seed a config that looks like a real user's. Every key here is one the
- *  `/wtft` handler writes (extensions/wtft.ts:465, :522-528), which is what
- *  makes the byte-identical comparison in cliRun meaningful rather than a
- *  comparison of fields nothing could have changed. */
+ *  `/wtft` handler writes through `writeConfig`, which is what makes the
+ *  byte-identical comparison in cliRun meaningful rather than a comparison
+ *  of fields nothing could have changed. */
 function seedConfig(overrides: Record<string, unknown> = {}): void {
 	fs.mkdirSync(path.dirname(configPath), { recursive: true });
 	fs.writeFileSync(configPath, JSON.stringify({
@@ -128,7 +128,7 @@ process.on("exit", () => {
  *  `exitCode` is a verdict, not a status — 9 is folded into 0 before it is
  *  returned, so a caller cannot tell the two apart and must not try. #443
  *  defines 9 as "the run SUCCEEDED and the number printed is not yet final"
- *  (bin/wtft.ts:210-215): the CLI spawns the daemon and reads the tag
+ *  (`EXIT_PROVISIONAL`): the CLI spawns the daemon and reads the tag
  *  immediately, so a brand-new session sometimes wins that race. Both codes
  *  mean the render happened, which is the only thing these three checks ask.
  *

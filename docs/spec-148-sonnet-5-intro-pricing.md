@@ -43,8 +43,9 @@ new plumbing:
 - `wtft-parser.ts:426-429` (the overhead-cost split) passes `interaction.timestamp` the same way,
   for both the `full` and `withoutCw` calls.
 - `calculateClaudeCost(model, usage, timestamp?)` signature already exists (`wtft-cost.ts:227`)
-  and already forwards `timestamp` into `getDeepSeekPeakMultiplier(timestamp)` when the
-  model id contains `deepseek`.
+  and already forwards `timestamp` into the surge multiplier. At that baseline the call was
+  `getDeepSeekPeakMultiplier(timestamp)`, gated on an id containing `deepseek`. It is now
+  `getPeakMultiplier(model, timestamp)`, which reads the card's `surge` field.
 
 So the only structurally new thing this issue needs is: **a Sonnet-5-shaped `ModelPricing` entry
 that resolves different base rates depending on where `timestamp` falls**, generalized so any

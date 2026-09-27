@@ -44,7 +44,7 @@ export interface ModelPricing {
 	cacheWrite: number;
 	tiers?: CostTier[];
 	dateTiers?: DateTier[];
-	surge?: SurgeSchedule;
+	surge?: SurgeSchedule | null;
 }
 
 // ---
@@ -289,7 +289,7 @@ function finiteNumber(value: unknown): value is number {
 	return typeof value === "number" && isFinite(value);
 }
 
-/** A surge schedule that getPeakMultiplier can walk without throwing or producing NaN. */
+/** Multiplier above 1, and each window satisfies 0 <= start < end <= 1440. */
 function validSurge(surge: unknown): surge is SurgeSchedule {
 	if (!surge || typeof surge !== "object") return false;
 	const schedule = surge as SurgeSchedule;
@@ -313,10 +313,11 @@ export function applyUserPricing(overrides: Record<string, ModelPricing>): void 
 		const { input, output, cacheRead, cacheWrite } = pricing;
 		// Why validate: a malformed JSON entry must not poison cost math with NaN.
 		if ([input, output, cacheRead, cacheWrite].some(v => typeof v !== "number" || !isFinite(v))) continue;
-		if (pricing.surge !== undefined && !validSurge(pricing.surge)) continue;
+		if (pricing.surge !== undefined && pricing.surge !== null && !validSurge(pricing.surge)) continue;
 		const id = key.toLowerCase().trim();
 		const stored: ModelPricing = { ...pricing };
-		if (stored.surge === undefined) {
+		if (pricing.surge === null) delete stored.surge;
+		else if (stored.surge === undefined) {
 			const carried = MODEL_PRICING[id]?.surge
 				?? (id.includes("deepseek") ? MODEL_PRICING[deepSeekSiblingKey(id)]?.surge : undefined);
 			if (carried) stored.surge = carried;

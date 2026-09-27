@@ -545,8 +545,7 @@ export const SURGE_APPROACH_MINUTES = 20;
 export const SURGE_ENDING_MINUTES = 20;
 
 /**
- * The schedule is NOT re-typed here. This asks `getPeakMultiplier`
- * what each hour actually costs, so the display cannot disagree with the bill.
+ * Marks a local hour when any minute of it bills above 1.
  * Per-hour offset, not per-day: on a day the zone's offset changes, a single
  * offset applied to all 24 local hours puts far-side hours an hour off. Each
  * candidate hour resolves its own offset via {@link resolveZonedLocalHour}.
@@ -690,8 +689,9 @@ export function buildTimelineString(
 	let result = `${startGlyph}${timelineBody}${endGlyph}`;
 
 	const bolt = disabledEmoji ? "!!" : "⚡";
-	if (proximityStatus === 'surge' && multiplier !== undefined) {
-		result += ` \x1b[1;38;5;208m${bolt} SURGE ${String(multiplier)}x\x1b[0m`;
+	if (proximityStatus === 'surge') {
+		const factor = multiplier !== undefined ? ` ${String(multiplier)}x` : "";
+		result += ` \x1b[1;38;5;208m${bolt} SURGE${factor}\x1b[0m`;
 	} else if (proximityStatus === 'approaching') {
 		result += ` \x1b[1;5;38;5;208m${bolt} SURGE APPROACHING\x1b[0m`;
 	} else if (proximityStatus === 'ending') {

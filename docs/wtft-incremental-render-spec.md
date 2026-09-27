@@ -509,7 +509,7 @@ The 24-hour timeline on the title line shows the model's surge schedule, when it
   **The hours are deliberately not written here** — read them from the card, or from the
   generated manifest: they were hardcoded in four places plus four prose copies, and a
   schedule change had no way to fail when it missed one. The renderer asks `getPeakMultiplier`
-  per hour, so the bar's colours cannot disagree with what that hour is billed at. It paints
+  for each minute of a local hour and marks the hour when any minute bills above 1. It paints
   the schedule for **the day containing `now`**, while the bins below it may be older; on a
   weekend the DeepSeek bar shows no surge hours even where weekday bins are still flagged.
 - **Green segments**: All other hours (normal pricing)

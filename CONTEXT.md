@@ -267,9 +267,8 @@ here** — read them from the card, or from the generated
 repo, with nothing that failed when a change missed one, and one prose copy said "as of July
 2026" nine days after the rates moved (#495). No count is given, because every count of them
 written so far has been wrong; `grep` is the authority.
-`getSurgeLocalHours()` maps the schedule onto display-timezone hours by asking
-`getPeakMultiplier` what each hour costs, so no hour is coloured differently from the
-way that hour is billed. It resolves the day containing the instant passed to it, and the
+`getSurgeLocalHours()` marks a display-timezone hour when any minute of that hour
+bills above 1. It resolves the day containing the instant passed to it, and the
 renderer passes `now` — so the bar describes today while the bins under it may be older.
 `checkSurgeProximity()` reads `SURGE_APPROACH_MINUTES` before a window opens, and
 `SURGE_ENDING_MINUTES` before it closes. Both are 20. Ending is the last of those

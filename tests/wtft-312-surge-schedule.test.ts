@@ -98,6 +98,13 @@ describe("#312 a card carries its own surge schedule", () => {
 		delete MODEL_PRICING["deepseek-v5"];
 
 		applyUserPricing({
+			"deepseek-flash": { input: 9, output: 9, cacheRead: 0, cacheWrite: 0, surge: null },
+		});
+		assert.equal(getPeakMultiplier("deepseek-flash", minute(60)), 1);
+		assert.equal(calculateClaudeCost("deepseek-flash", usage, minute(60)), 9);
+		MODEL_PRICING["deepseek-flash"] = flash;
+
+		applyUserPricing({
 			"flat-surge": { input: 1, output: 1, cacheRead: 1, cacheWrite: 0, surge: { multiplier: 1, windowsUtcMinutes: [[60, 120]] } } as never,
 		});
 		assert.equal(MODEL_PRICING["flat-surge"], undefined);

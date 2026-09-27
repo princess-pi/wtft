@@ -157,7 +157,6 @@ function truncatePartialTail(path: string): boolean {
   }
 }
 
-/** Stop when the tag cannot be trusted (a failed write, truncate or startup read); publish a rebuild lease for the next owner. */
 function fatalTagMutation(filePath: string, operation: "append" | "rebuild truncate" | "partial-tail truncate" | "resume read" | "resume truncate" | "resume", err: unknown): never {
   if (running && harnessMode && holdsHarnessRoot()) writeServedHandOff(path.resolve(slot.state.sessionPath));
   running = false;
@@ -246,20 +245,6 @@ function appendTagFile(filePath: string, batch: string): void {
 
 // ---
 
-/** Returns null if no _meta line found (tag file predates offset tracking). */
-function readLastMetaOffset(tagPath: string): number | null {
-  try {
-    const stat = fs.statSync(tagPath);
-    if (stat.size === 0) return null;
-    const readStart = Math.max(0, stat.size - 8192);
-    const fd = fs.openSync(tagPath, "r");
-    const buf = Buffer.alloc(stat.size - readStart);
-    fs.readSync(fd, buf, 0, buf.length, readStart);
-    fs.closeSync(fd);
-    return lastOffset(tagRecords(buf.toString("utf8")));
-  } catch { /* tag file unreadable */ }
-  return null;
-}
 
 // ---
 
@@ -475,8 +460,9 @@ function initClassified() {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") fatalTagMutation(tagPath, "resume read", err);
     }
-    const hasData = tagContent !== null && tagRecords(tagContent).some(r => isDataRecord(r) || r.kind === "unknown");
-    const metaOffset = hasData ? readLastMetaOffset(tagPath) : null;
+    const records = tagContent === null ? [] : tagRecords(tagContent);
+    const hasData = records.some(r => isDataRecord(r) || r.kind === "unknown");
+    const metaOffset = hasData ? lastOffset(records) : null;
     if (tagContent !== null && metaOffset !== null) {
       slot.state.lastSize = metaOffset;
       // Written by an earlier life; what changed since is not read yet.
@@ -1515,7 +1501,7 @@ Exit codes:
   1  --session missing, or a tag file (without --harness); a harness root missing, its pid file unreadable,
      or neither claimable nor handed a session;
      --stop refused (EPERM) or its harness lease changed or could not be removed; a tag
-     write that failed; an unhandled error
+     write that failed, or a tag it cannot read or truncate at start; an unhandled error
   2  An unknown argument, a flag with no value, a second --stop, a bad --harness name, or a --session
      outside the harness root
 

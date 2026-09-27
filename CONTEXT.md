@@ -65,7 +65,8 @@ session parser
 **Lease** (#270):
 The per-session file `$TMPDIR/wtft-daemon-<hash>.pid` whose whole content names who serves the
 session, or the daemon just spawned to serve it: a daemon's pid, or the token `rebuild` that `wtft -F` leaves for a harness-served
-session and that any daemon leaves for a session whose tag write failed. Every claim, release and
+session and that any daemon leaves for a session whose tag it could not write, or could not read or
+truncate at start. Every claim, release and
 replacement goes through `extensions/lib/lease.ts`: a claim is an exclusive hard link, made by the
 daemon itself or, the moment it spawns one, by its spawner for the child's pid (#281; the
 spawner leaves a `rebuild` token or a live daemon holder alone (a live process that is not a daemon is displaced, spec-holder); it takes the claim back for a child
@@ -213,8 +214,8 @@ refuses a batch that does not end in a newline, and the refusal is fatal: the le
 `rebuild` and the daemon exits 1; a tag truncate may cut only to zero or to a
 `lastLineStartByte` offset; an idle heartbeat replaces the last line in place only when that
 line is a heartbeat of the same byte width, and is appended otherwise, so no WRITE shrinks the file — though a daemon startup truncates it
-to zero to rebuild, or when it holds no data record or no offset marker in its last 8 KiB (#320 A), so an incremental
-reader still needs a shrink branch (a tag it cannot read or truncate there is fatal, as a failed write is); a crash mid-append is
+to zero to rebuild, or when it holds no data record or no offset marker, so an incremental
+reader still needs a shrink branch; a crash mid-append is
 repaired at the next
 daemon's startup), never in each reader.
 _Avoid_: Cache file, index file

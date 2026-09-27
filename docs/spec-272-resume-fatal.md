@@ -6,9 +6,14 @@
 
 - **At start, without a rebuild lease, `initClassified` reads the existing tag.** When the read
   fails for any reason but "no such file", or a truncate it needs (a tag with no data record, or
-  no offset marker in its last 8 KiB) fails, it calls `fatalTagMutation` with `resume read` or
+  no offset marker) fails, it calls `fatalTagMutation` with `resume read` or
   `resume truncate`: the lease reads `rebuild`, the FATAL line names the tag, and the daemon exits 1.
-  The next `wtft` rebuilds the tag from the transcript.
+  The next `wtft` rebuilds the tag from the transcript when the tag can still be truncated (a
+  write-only tag); one that cannot (mode 000, an unsearchable tags directory) fails the rebuild
+  truncate too, and stays fatal until storage is fixed, as the FATAL line says.
+- **The last offset marker is found in the tag already read**, anywhere in it (`lastOffset` over
+  the whole file). The second read of the last 8 KiB is gone, and with it both its swallowed
+  failure and #320 A: a marker further back than 8 KiB read as none, and a valid tag was rebuilt.
 - **Before**, both failures were swallowed: the daemon set its read position to 0 and appended a
   full re-parse after content it could not clear, so id-less turns were billed twice. The rebuild
   branch already treated a failed truncate this way.

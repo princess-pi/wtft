@@ -8,6 +8,7 @@ import * as assert from "node:assert/strict";
 import { describe, it, after } from "node:test";
 import {
 	MODEL_PRICING,
+	applyUserPricing,
 	calculateClaudeCost,
 	getPeakMultiplier,
 	type ModelPricing,
@@ -67,6 +68,23 @@ describe("#312 a card carries its own surge schedule", () => {
 		assert.equal(checkSurgeProximity(minute(60 - SURGE_APPROACH_MINUTES - 1), CARD).status, undefined);
 		assert.equal(checkSurgeProximity(minute(120 - SURGE_ENDING_MINUTES), CARD).status, "ending");
 		assert.equal(checkSurgeProximity(minute(120 - SURGE_ENDING_MINUTES - 1), CARD).status, "surge");
+	});
+
+	it("rejects a surge schedule that cannot be walked, and keeps DeepSeek's schedule when an override omits it", () => {
+		const flash = MODEL_PRICING["deepseek-flash"];
+		applyUserPricing({
+			"bad-surge": { input: 1, output: 1, cacheRead: 1, cacheWrite: 0, surge: { multiplier: "no" } } as never,
+		});
+		assert.equal(MODEL_PRICING["bad-surge"], undefined);
+		assert.equal(getPeakMultiplier("bad-surge", minute(60)), 1);
+
+		applyUserPricing({ "deepseek-flash": { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } });
+		assert.equal(getPeakMultiplier("deepseek-flash", minute(60)), 2);
+		MODEL_PRICING["deepseek-flash"] = flash;
+
+		applyUserPricing({ "deepseek-v5": { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } });
+		assert.equal(getPeakMultiplier("deepseek-v5", minute(60)), 2);
+		delete MODEL_PRICING["deepseek-v5"];
 	});
 });
 

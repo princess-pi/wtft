@@ -105,10 +105,7 @@ export const DEEPSEEK_V4_PRO_REROUTE_FROM = Date.UTC(2026, 8, 14, 4, 0, 0);
 
 // ---
 
-/**
- * Prices are per-1M tokens. Tiers apply when total input tokens
- * (input + cacheRead + cacheWrite) exceed inputTokensAbove.
- */
+/** The schedule DeepSeek's four cards share. */
 const peakSchedule: SurgeSchedule = {
 	multiplier: 2,
 	windowsUtcMinutes: [
@@ -118,6 +115,10 @@ const peakSchedule: SurgeSchedule = {
 	weekendOffPeakFrom: DEEPSEEK_WEEKEND_OFFPEAK_FROM,
 };
 
+/**
+ * Prices are per-1M tokens. Tiers apply when total input tokens
+ * (input + cacheRead + cacheWrite) exceed inputTokensAbove.
+ */
 export const MODEL_PRICING: Record<string, ModelPricing> = {
 	// Claude — list rates per MTok. cacheWrite is the 5-min-TTL rate
 	// (1.25x input); the 1h-TTL rate is derived as 2x input by the cw1h
@@ -288,13 +289,38 @@ export function resolveTieredRates(
  * Pure merge — reading the pricing file from disk lives in
  * wtft-pricing-config.ts so this module stays fs-free.
  */
+function finiteNumber(value: unknown): value is number {
+	return typeof value === "number" && isFinite(value);
+}
+
+/** A surge schedule that getPeakMultiplier can walk without throwing or producing NaN. */
+function validSurge(surge: unknown): surge is SurgeSchedule {
+	if (!surge || typeof surge !== "object") return false;
+	const schedule = surge as SurgeSchedule;
+	if (!finiteNumber(schedule.multiplier)) return false;
+	if (!Array.isArray(schedule.windowsUtcMinutes)) return false;
+	for (const pair of schedule.windowsUtcMinutes) {
+		if (!Array.isArray(pair) || !finiteNumber(pair[0]) || !finiteNumber(pair[1])) return false;
+	}
+	if (schedule.weekendOffPeakFrom !== undefined && !finiteNumber(schedule.weekendOffPeakFrom)) return false;
+	return true;
+}
+
 export function applyUserPricing(overrides: Record<string, ModelPricing>): void {
 	for (const [key, pricing] of Object.entries(overrides)) {
 		if (!pricing || typeof pricing !== "object") continue;
 		const { input, output, cacheRead, cacheWrite } = pricing;
 		// Why validate: a malformed JSON entry must not poison cost math with NaN.
 		if ([input, output, cacheRead, cacheWrite].some(v => typeof v !== "number" || !isFinite(v))) continue;
-		MODEL_PRICING[key.toLowerCase().trim()] = pricing;
+		if (pricing.surge !== undefined && !validSurge(pricing.surge)) continue;
+		const id = key.toLowerCase().trim();
+		const stored: ModelPricing = { ...pricing };
+		if (stored.surge === undefined) {
+			const carried = MODEL_PRICING[id]?.surge
+				?? (id.includes("deepseek") ? MODEL_PRICING[deepSeekSiblingKey(id)]?.surge : undefined);
+			if (carried) stored.surge = carried;
+		}
+		MODEL_PRICING[id] = stored;
 	}
 }
 

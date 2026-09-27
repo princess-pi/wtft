@@ -44,7 +44,7 @@ new plumbing:
   for both the `full` and `withoutCw` calls.
 - `calculateClaudeCost(model, usage, timestamp?)` signature already exists (`wtft-cost.ts:227`)
   and already forwards `timestamp` into `getPeakMultiplier(model, timestamp)` for a card's surge
-  pricing (`wtft-cost.ts:66`, `:245`, `:256`).
+  pricing.
 
 So the only structurally new thing this issue needs is: **a Sonnet-5-shaped `ModelPricing` entry
 that resolves different base rates depending on where `timestamp` falls**, generalized so any

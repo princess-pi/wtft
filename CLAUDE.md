@@ -28,8 +28,8 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
   seams that exist: `decideHealth` (`extensions/lib/daemon-health.ts`), `stepTagger`
   (`extensions/lib/session-tagger.ts`), the registry functions
   (`extensions/lib/harness-registry.ts`), and `classifyPid` over a fake process table
-  (`extensions/lib/holder.ts`, `tests/lib/fake-process-table.ts`), and `rotateDaemonLog`
-  (`extensions/lib/daemon-log.ts`).
+  (`extensions/lib/holder.ts`, `tests/lib/fake-process-table.ts`), `rotateDaemonLog`
+  (`extensions/lib/daemon-log.ts`), and `fitWidget` (`extensions/lib/widget-fit.ts`).
 - **Every feature PR body carries one line:** `Module: <file> · Seam: <function>, tested in <suite>`.
   A PR that touches a second module adds `Also: <file> — <why>` for each one.
 - *Why:* before the daemon ownership refactor (spec-270), one daemon feature touched state spread across `bin/wtft-daemon.ts` and

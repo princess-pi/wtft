@@ -15,6 +15,8 @@ Issue: https://github.com/princess-pi/wtft/issues/274 · Module: `bin/wtft-daemo
   was started for** (the session's lease, or a root pid file for its `--harness`); a child that
   handed off and exited 0 counts. Otherwise (a tag-file `--session`, a crash at start) it is a failed respawn: its claim on the lease is
   removed and the line reads `Stopped: PID n — the respawn for <session> failed`.
+- **A respawn runs in the stopped holder's cwd** (read from `/proc/<pid>/cwd`), with its root
+  environment, so a relative `--session` or root directory names what it named before.
 - **One wait for all.** Every respawn is started first, then one 1 s wait, then each is judged,
   so `--restart` stays inside `wtft`'s 10 s timeout however many holders it restarts. A child
   slower than 1 s to fail is counted as running.

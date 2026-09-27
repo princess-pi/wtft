@@ -1630,10 +1630,10 @@ if (showList || showCleanup || showRestart || stopSession) {
   let restartedN = 0, cleanedN = 0, stoppedN = 0, listedN = 0;
   let stopRefused = false;
   let restartFailed = false;
-  const spawnDetached = (args: string[], env: NodeJS.ProcessEnv): number => {
+  const spawnDetached = (args: string[], env: NodeJS.ProcessEnv, cwd: string | undefined): number => {
     const log = daemonStdio();
     try {
-      const child = spawn(process.execPath, args, { detached: true, stdio: log.stdio, env });
+      const child = spawn(process.execPath, args, { detached: true, stdio: log.stdio, env, cwd });
       child.unref();
       return child.pid ?? 0;
     } catch {
@@ -1646,9 +1646,9 @@ if (showList || showCleanup || showRestart || stopSession) {
   const liveHolderIn = (file: string): boolean => {
     try { return holdsLease(classifyPid(leasePid(fs.readFileSync(file, "utf8").trim()))); } catch { return false; }
   };
-  const liveHarnessFor = (which: string, env: NodeJS.ProcessEnv): boolean => {
+  const liveHarnessFor = (which: string, env: NodeJS.ProcessEnv, cwd: string | undefined): boolean => {
     const key = which === "claude-code" ? "claude" : which;
-    return liveHolderIn(harnessPidFileFor(key, path.resolve(harnessRoot(key, env))));
+    return liveHolderIn(harnessPidFileFor(key, path.resolve(cwd ?? process.cwd(), harnessRoot(key, env))));
   };
   const seenPids = new Set<number>();
   const restarted = new Set<number>();
@@ -1699,6 +1699,8 @@ if (showList || showCleanup || showRestart || stopSession) {
       }
       restarted.add(pid);
       const restartEnv = { ...process.env };
+      let holderCwd: string | undefined;
+      try { holderCwd = fs.readlinkSync(`/proc/${pid}/cwd`); } catch { holderCwd = undefined; }
       const wasDaemon = kind === "daemon" || kind === "harness";
       let stopped: ReturnType<typeof stopHolderSync> | null = null;
       if (wasDaemon) {
@@ -1741,7 +1743,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       };
       restartedN++;
       if (respawnLease) {
-        const childPid = spawnDetached([process.argv[1], ...daemonLaunchArgs(sessionFound!, restartEnv)], restartEnv);
+        const childPid = spawnDetached([process.argv[1], ...daemonLaunchArgs(sessionFound!, restartEnv)], restartEnv, holderCwd);
         if (childPid) {
           try { respawned = claimLeaseForChild(respawnLease, childPid); } catch { respawned = "busy"; }
           pendingRespawns.push({ childPid, served: () => liveHolderIn(respawnLease), settle: ok => { if (!ok) respawnFailed(childPid); report(); } });
@@ -1749,9 +1751,9 @@ if (showList || showCleanup || showRestart || stopSession) {
         }
         respawnFailed(0);
       } else if (harnessOnly) {
-        const childPid = spawnDetached([process.argv[1], "--harness", harnessFound!], restartEnv);
+        const childPid = spawnDetached([process.argv[1], "--harness", harnessFound!], restartEnv, holderCwd);
         if (childPid) {
-          pendingRespawns.push({ childPid, served: () => liveHarnessFor(harnessFound!, restartEnv), settle: ok => { harnessBack = ok; if (!ok) restartFailed = true; report(); } });
+          pendingRespawns.push({ childPid, served: () => liveHarnessFor(harnessFound!, restartEnv, holderCwd), settle: ok => { harnessBack = ok; if (!ok) restartFailed = true; report(); } });
           continue;
         }
         restartFailed = true;

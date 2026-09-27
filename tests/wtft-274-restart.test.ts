@@ -87,6 +87,30 @@ try {
 		check(r.status === 0, `exit 0 (got ${r.status})`);
 	}
 
+	console.log("--- C3: a harness with a relative root comes back in its own cwd ---");
+	{
+		const home = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-274-cwd-")));
+		fs.mkdirSync(path.join(home, "projects", "p"), { recursive: true });
+		const relEnv = { ...env, WTFT_CLAUDE_PROJECTS_DIR: "projects" };
+		const relRootPid = path.join(TMP, `wtft-harness-claude-${createHash("sha256").update(path.join(home, "projects")).digest("hex").slice(0, 12)}.pid`);
+		const [script] = standInDaemonArgs("setInterval(() => {}, 1000);");
+		const fake = spawn(process.execPath, [script, "--harness", "claude"], { stdio: "ignore", env: relEnv, cwd: home, detached: true });
+		children.push(fake);
+		check(awaitStandIn(fake.pid!) || classifyPid(fake.pid!) === "harness", "fixture precondition: the stand-in reads as a harness");
+		const session = path.join(home, "projects", "p", "c.jsonl");
+		fs.writeFileSync(session, "");
+		fs.writeFileSync(getDaemonPidPath(session), String(fake.pid));
+		const r = spawnSync("node", [DAEMON, "--restart"], { encoding: "utf8", env, cwd: os.tmpdir(), timeout: 30_000 });
+		check(/Restarted: PID \d+ → fresh harness daemon \(claude\)/.test(r.stdout), `restarted:\n${r.stdout}`);
+		let holder = 0;
+		for (let i = 0; i < 50 && !(holder > 0 && classifyPid(holder) === "harness"); i++) {
+			sleep(100);
+			try { holder = Number(fs.readFileSync(relRootPid, "utf8").trim()); } catch { holder = 0; }
+		}
+		check(holder > 0 && classifyPid(holder) === "harness", "the new harness serves the original root, not one under the caller's cwd");
+		if (holder > 0) { try { process.kill(holder, "SIGTERM"); } catch { /* gone */ } }
+	}
+
 	console.log("--- D: a respawn that dies at once is reported, and exits 1 ---");
 	{
 		const tagSession = path.join(TMP, "x", "s.jsonl.wtft-tag.v1.jsonl");

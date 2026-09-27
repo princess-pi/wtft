@@ -61,11 +61,11 @@ function decodePart(value) {
 
 export function headingFrag(frag) {
   if (!frag) return "";
-  const text = decodePart(frag);
-  return text.startsWith("doc-") ? text : headingDomId(text, 1);
+  return headingDomId(decodePart(frag), 1);
 }
 
 export function resolveRelative(basePath, href) {
+  if (href.startsWith("?") || href.startsWith("#")) return basePath + href;
   const baseDir = basePath.includes("/") ? basePath.replace(/\/[^/]*$/, "/") : "";
   const url = new URL(baseDir + href, "https://assets.invalid/");
   return url.pathname.replace(/^\//, "") + url.search + url.hash;

@@ -136,6 +136,13 @@ function markActive(path) {
   });
 }
 
+function scrollTo(frag) {
+  if (!frag) return;
+  const direct = document.getElementById(frag);
+  const target = direct || document.getElementById(headingFrag(frag));
+  target?.scrollIntoView();
+}
+
 function liveFrag(path, fallback) {
   const route = parseRoute(location.hash);
   if (route && route.path === path) return route.frag;
@@ -144,8 +151,7 @@ function liveFrag(path, fallback) {
 
 async function renderDoc(index, path, frag, search) {
   if (path === inflightPath) {
-    const id = headingFrag(liveFrag(path, frag));
-    if (id) document.getElementById(id)?.scrollIntoView();
+    scrollTo(liveFrag(path, frag));
     return;
   }
   if (path === shownPath) {
@@ -160,8 +166,7 @@ async function renderDoc(index, path, frag, search) {
       if (frame && frame.getAttribute("src") !== next) frame.src = next;
       return;
     }
-    const id = headingFrag(liveFrag(path, frag));
-    if (id) document.getElementById(id)?.scrollIntoView();
+    scrollTo(liveFrag(path, frag));
     return;
   }
   const gen = ++renderGen;
@@ -258,8 +263,7 @@ async function renderDoc(index, path, frag, search) {
       shownPath = path;
       shownKind = "md";
       if (inflightPath === path) inflightPath = "";
-      const id = headingFrag(liveFrag(path, frag));
-      if (id) document.getElementById(id)?.scrollIntoView();
+      scrollTo(liveFrag(path, frag));
       return;
     }
     try {
@@ -275,8 +279,7 @@ async function renderDoc(index, path, frag, search) {
   shownPath = path;
   shownKind = "md";
   if (inflightPath === path) inflightPath = "";
-  const id = headingFrag(liveFrag(path, frag));
-  if (id) document.getElementById(id)?.scrollIntoView();
+  scrollTo(liveFrag(path, frag));
 }
 
 async function main() {

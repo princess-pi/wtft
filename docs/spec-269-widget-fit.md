@@ -5,7 +5,7 @@
 
 Pi shows at most 10 lines of a string-array widget (`MAX_WIDGET_LINES`, Pi 0.87.1) and replaces the
 rest with `... (widget truncated)`. The widget used to hand Pi its whole chart, so on a session with
-7 or more intervals the newest rows were fine and the footer lines, and with a status line or a date
+8 or more intervals (fewer with a status line or a divider) the newest rows were fine and the footer lines, and with a status line or a date
 divider some rows too, were cut by Pi.
 
 ## 1. Interface
@@ -14,14 +14,15 @@ divider some rows too, were cut by Pi.
 |---|---|
 | `PI_WIDGET_MAX_LINES` | 10 |
 | `widgetLines(chart, status, width, tail)` | The chart lines with the daemon status appended to the title line when both fit in `width - 2` columns, else as its own line under the legend (third line), and `tail` (the provisional lines) at the end |
-| `fitWidget(render, limit, max?)` | Calls `render(rows)` from `min(limit, max)` rows down, and returns the first result of at most `max` lines. Fewer rows drop the oldest, since the chart is newest-first. If one row still overflows, the first `max` lines. `null` from `render` is returned as `null` |
+| `fitWidget(renderChart, status, width, tail, limit, max?)` | The widget's whole line array. Asks `renderChart(rows)` for `min(limit, max)` rows down to 1 (a limit that is not a finite number starts at `max`), puts each through `widgetLines`, and returns the first result of at most `max` lines. Fewer rows drop the oldest, since the chart is newest-first. If one row still overflows, `keepTail` cuts it. `null` when there is no chart |
+| `keepTail(lines, tailLength, max?)` | Cuts to `max` lines from the middle, keeping the first lines and the last `tailLength` (the provisional lines), so a provisional total never loses its warning |
 
 - **Title and legend stay the first two lines.** The status line moved from under the title to
   under the legend so that holds when it does not fit the title line.
 - **The widget reads its session once per update** and hands the same interactions to every
   render `fitWidget` asks for.
 - **The empty widget** ("Cache Empty" or "No Cache (local model)", the status, the provisional
-  lines) is cut to 10 lines too.
+  lines) is cut to 10 lines by `keepTail` too.
 - **The widget is not padded** to its limit (#264); only the CLI chart is.
 
 ## 2. Tests

@@ -18,12 +18,32 @@ export function widgetLines(chart: string[], status: string, width: number, tail
 	return lines;
 }
 
-/** Renders with fewer interval rows until the widget fits: rows go oldest-first, since the chart is newest-first. */
-export function fitWidget(render: (limit: number) => string[] | null, limit: number, max = PI_WIDGET_MAX_LINES): string[] | null {
+/**
+ * The widget's whole line array: `renderChart(rows)` is asked for fewer interval rows, oldest
+ * first since the chart is newest-first, until the widget fits. `null` when there is no chart.
+ */
+export function fitWidget(
+	renderChart: (rows: number) => string[] | null,
+	status: string,
+	width: number,
+	tail: string[],
+	limit: number,
+	max = PI_WIDGET_MAX_LINES,
+): string[] | null {
 	// A widget line holds at most one row, so a limit above the cap can never fit.
-	for (let rows = Math.max(1, Math.min(limit, max)); ; rows--) {
-		const lines = render(rows);
-		if (!lines) return null;
-		if (lines.length <= max || rows <= 1) return lines.slice(0, max);
+	const start = Number.isFinite(limit) ? Math.max(1, Math.min(Math.floor(limit), max)) : max;
+	for (let rows = start; rows >= 1; rows--) {
+		const chart = renderChart(rows);
+		if (!chart || chart.length === 0) return null;
+		const lines = widgetLines(chart, status, width, tail);
+		if (lines.length <= max || rows === 1) return keepTail(lines, tail.length, max);
 	}
+	return null;
+}
+
+/** Cut to `max` lines from the middle, so the provisional lines at the end are the last to go. */
+export function keepTail(lines: string[], tailLength: number, max = PI_WIDGET_MAX_LINES): string[] {
+	if (lines.length <= max) return lines;
+	const keep = Math.min(tailLength, max);
+	return [...lines.slice(0, max - keep), ...lines.slice(lines.length - keep)];
 }

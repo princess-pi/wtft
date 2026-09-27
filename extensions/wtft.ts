@@ -24,7 +24,7 @@ import {
 } from "./lib/wtft-shared.js";
 import { readConfig, writeConfig, hasConfig } from "@princess-pi/libs/config";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "./lib/wtft-config-dir.js";
-import { PI_WIDGET_MAX_LINES, fitWidget, widgetLines } from "./lib/widget-fit.js";
+import { fitWidget, keepTail } from "./lib/widget-fit.js";
 import { computeSpawnTree, type SpawnTree } from "./lib/wtft-spawn-tree.js";
 import { collectSelfAttributedSessionIds } from "./lib/wtft-parser.js";
 import {
@@ -278,11 +278,8 @@ function updateWtftWidget(
 	const interactions = readInteractions(ctx);
 	const tail = provisionalLines();
 	const lines = fitWidget(
-		(limit) => {
-			const chart = buildWtftLines(ctx, pi, { ...buildOpts, limit }, interactions);
-			return chart && chart.length > 0 ? widgetLines(chart, parserStatusStr, width, tail) : null;
-		},
-		opts?.limit ?? current.limit,
+		(limit) => buildWtftLines(ctx, pi, { ...buildOpts, limit }, interactions),
+		parserStatusStr, width, tail, opts?.limit ?? current.limit,
 	);
 	if (!lines) {
 		const emptyModel = modelId || "";
@@ -292,7 +289,7 @@ function updateWtftWidget(
 			: "\x1b[90mCache Empty\x1b[0m";
 		const emptyLines = parserStatusStr ? [emptyLine, parserStatusStr.trim()] : [emptyLine];
 		emptyLines.push(...tail);
-		ctx.ui.setWidget("wtft", emptyLines.slice(0, PI_WIDGET_MAX_LINES), { placement: "belowEditor" });
+		ctx.ui.setWidget("wtft", keepTail(emptyLines, tail.length), { placement: "belowEditor" });
 		return;
 	}
 

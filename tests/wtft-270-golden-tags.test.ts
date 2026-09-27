@@ -44,7 +44,7 @@ const daemonSources = [
 	...fs.readdirSync(libDir, { recursive: true, encoding: "utf8" }).filter(f => f.endsWith(".ts")).map(f => path.join(libDir, f)),
 ];
 const newestSourceMs = Math.max(...daemonSources.map(f => fs.statSync(f).mtimeMs));
-check((lastBuildMs() ?? 0) >= newestSourceMs, "fixture precondition: the last build is at least as new as every daemon source (else run bun run build)");
+check((lastBuildMs() ?? 0) > newestSourceMs, "fixture precondition: the last build started after every daemon source was saved (else run bun run build)");
 if (failed > 0) { console.log(`\n${passed} passed, ${failed} failed`); process.exit(1); }
 
 const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-270-golden-")));

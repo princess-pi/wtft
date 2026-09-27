@@ -24,25 +24,11 @@ function assert(label: string, ok: boolean, detail?: string) {
 	}
 }
 
-// B0 — THE BUNDLE UNDER TEST MUST BE NEWER THAN THE SOURCE BEING SOURCE-CHECKED.
-//
-// This suite has two halves that can disagree without anything noticing
-// (#130 local audit round). §E/R/C spawn `bin/wtft-daemon.mjs` and §W imports
-// `bin/wtft.mjs` — gitignored BUILD OUTPUT. §S and P0 read `bin/wtft-daemon.ts`
-// and `extensions/lib/wtft-daemon-lib.ts` — SOURCE. Nothing compares them, and
-// `tests/run.ts` does not build; suites run sorted, so this one runs before the
-// only suite that does.
-//
-// Edit the daemon, run `bun run test` without building, and the behavioural half
-// green-lights the OLD daemon while the structural half certifies the NEW source.
-// That is exactly the round-1 RED procedure — revert the .ts, rebuild — happening
-// by accident, and it is the "fixture stops testing its subject" failure at the
-// largest scale available here.
 {
 	const built = lastBuildMs();
 	for (const src of ["bin/wtft-daemon.ts", "bin/wtft.ts", "extensions/lib/wtft-daemon-lib.ts"]) {
 		const i = fs.statSync(path.resolve(import.meta.dirname, "..", src)).mtimeMs;
-		assert(`B0 the last build is at least as new as ${src}`, built !== null && built >= i,
+		assert(`B0 the last build started after ${src} was saved`, built !== null && built > i,
 			built === null ? "no build recorded — run `bun run build`" : `${src} changed ${Math.round((i - built) / 1000)}s after the last build — run \`bun run build\``);
 	}
 }

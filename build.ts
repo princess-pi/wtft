@@ -244,6 +244,7 @@ const pkgVersion = JSON.parse(
   fs.readFileSync(path.join(import.meta.dir, "package.json"), "utf8"),
 ).version as string;
 
+const buildStart = new Date();
 generateHarnessRegistry();
 
 /** A suite running beside a rebuild reads the old bundle or the new one, never half of one. */
@@ -359,5 +360,7 @@ if (manifestState === "current") {
 if (errors > 0) process.exit(1);
 
 fs.mkdirSync(path.join(import.meta.dir, "tmp"), { recursive: true });
-fs.writeFileSync(path.join(import.meta.dir, "tmp", "last-build"), new Date().toISOString() + "\n");
+const lastBuild = path.join(import.meta.dir, "tmp", "last-build");
+fs.writeFileSync(lastBuild, buildStart.toISOString() + "\n");
+fs.utimesSync(lastBuild, buildStart, buildStart);
 console.log("\n✅ build complete");

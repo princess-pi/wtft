@@ -100,8 +100,23 @@ export type HolderKind = "gone" | "daemon" | "harness" | "other" | "unverified";
 
 const DAEMON_BASENAMES = new Set(["wtft-daemon", "wtft-daemon.mjs", "wtft-daemon.js", "wtft-daemon.ts"]);
 
+const RUNTIMES = new Set(["node", "nodejs", "bun", "bun.exe"]);
+const RUNTIME_OPTIONS_WITH_VALUE = new Set(["-r", "--require", "--import", "--preload", "--loader", "--experimental-loader"]);
+const RUNTIME_OPTIONS_WITHOUT_SCRIPT = new Set(["-e", "--eval", "-p", "--print"]);
+
+/** The program is a daemon, or a runtime whose script is one; an argument after the script is data. */
 export function isDaemonCmdline(args: string[]): boolean {
-	return args.some(arg => DAEMON_BASENAMES.has(path.basename(arg)));
+	if (args.length === 0) return false;
+	if (DAEMON_BASENAMES.has(path.basename(args[0]))) return true;
+	if (!RUNTIMES.has(path.basename(args[0]))) return false;
+	for (let i = 1; i < args.length; i++) {
+		const arg = args[i];
+		if (RUNTIME_OPTIONS_WITHOUT_SCRIPT.has(arg)) return false;
+		if (RUNTIME_OPTIONS_WITH_VALUE.has(arg)) { i++; continue; }
+		if (arg.startsWith("-")) continue;
+		return DAEMON_BASENAMES.has(path.basename(arg));
+	}
+	return false;
 }
 
 export function classifyPid(pid: number): HolderKind {

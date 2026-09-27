@@ -33,6 +33,21 @@ describe("classifyPid", () => {
 		for (const bad of [0, -1, 1.5, Number.NaN]) assert.strictEqual(classifyPid(bad), "gone");
 	});
 
+	it("reads a daemon path only as the program or the runtime's script", () => {
+		const t = fakeProcessTable();
+		restore = useProcessTable(t);
+		const cases: [string[], string][] = [
+			[["node", "app.js", "--input", "/tmp/wtft-daemon.js"], "other"],
+			[["node", "-e", "0", "/tmp/wtft-daemon.mjs"], "other"],
+			[["vim", "/tmp/wtft-daemon.ts"], "other"],
+			[["/home/u/bin/wtft-daemon", "--session", "/s.jsonl"], "daemon"],
+			[["node", "--heapsnapshot-signal=SIGUSR2", "/b/wtft-daemon.mjs", "--harness", "claude"], "harness"],
+			[["/n/bun/bin/bun.exe", "--preload", "/t/inject.ts", "/b/wtft-daemon.mjs", "--session", "/s.jsonl"], "daemon"],
+		];
+		cases.forEach(([cmdline], i) => t.add(200 + i, cmdline));
+		for (const [i, [cmdline, kind]] of cases.entries()) assert.strictEqual(classifyPid(200 + i), kind, cmdline.join(" "));
+	});
+
 	it("cannot verify anything off Linux", () => {
 		const t = fakeProcessTable({ linux: false });
 		restore = useProcessTable(t);

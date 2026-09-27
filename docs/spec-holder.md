@@ -44,6 +44,12 @@ interface ProcessTable {
 | `other` | alive, and its cmdline is readable and names something else. A recycled pid lands here |
 | `unverified` | alive, but its cmdline cannot be read. This is always the case off Linux; `verifiedKind` below reads it again for two callers |
 
+"Names `wtft-daemon`" means the program is one, or the program is `node`, `nodejs`, `bun` or
+`bun.exe` and its script is one. The script is the first argument that is not an option, skipping
+the value of `-r`, `--require`, `--import`, `--preload`, `--loader` and `--experimental-loader`.
+After `-e`, `--eval`, `-p` or `--print` there is no script. An argument after the script is data:
+`node app.js --input /tmp/wtft-daemon.js` is `other`.
+
 "Alive" means `signal 0` was sent or denied, and `state` does not say otherwise. EPERM is another
 user's live process. `pidAlive(pid)` is `classifyPid(pid) !== "gone"`.
 

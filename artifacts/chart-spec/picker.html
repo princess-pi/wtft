@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chart picker</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      background: #161616;
+      color: #e8e8e8;
+      font: 15px/1.4 ui-sans-serif, system-ui, sans-serif;
+    }
+    main { padding: 16px; max-width: 920px; }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    .presets, .grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+    button, select {
+      background: #2a2a2a;
+      color: inherit;
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font: inherit;
+    }
+    button.on { border-color: #d7b56d; color: #f3e2b8; }
+    fieldset {
+      border: 1px solid #333;
+      border-radius: 8px;
+      margin: 0;
+      min-width: 140px;
+    }
+    legend { padding: 0 6px; color: #aaa; }
+    label { display: block; margin: 4px 0; }
+    .law { margin: 12px 0 4px; }
+    .notes { margin: 4px 0 12px; padding-left: 18px; color: #c8c8c8; }
+    pre {
+      background: #0e0e0e;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 12px;
+      overflow-x: auto;
+      font: 14px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre;
+    }
+    .swatch { display: inline-block; width: 0.8em; }
+    .meta { color: #999; font-size: 13px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Chart picker</h1>
+  <p class="meta">Sample session, five bins. The glyphs illustrate the encoding law. They are not a cell-for-cell port of the production quantizer.</p>
+  <div class="presets" id="presets"></div>
+  <div class="grid">
+    <fieldset>
+      <legend>Interval</legend>
+      <label><input type="radio" name="interval" value="time" checked> time</label>
+      <label><input type="radio" name="interval" value="turns"> turns</label>
+    </fieldset>
+    <fieldset>
+      <legend>Layout</legend>
+      <label><input type="radio" name="layout" value="stack" checked> stack</label>
+      <label><input type="radio" name="layout" value="scatter"> scatter</label>
+    </fieldset>
+    <fieldset>
+      <legend>Bar measure</legend>
+      <label><input type="radio" name="measure" value="inc-cost"> incremental cost</label>
+      <label><input type="radio" name="measure" value="total-cost" checked> total latest cost</label>
+      <label><input type="radio" name="measure" value="inc-tokens"> incremental tokens</label>
+      <label><input type="radio" name="measure" value="total-tokens"> total latest tokens</label>
+    </fieldset>
+    <fieldset>
+      <legend>Columns</legend>
+      <label><input type="checkbox" id="cost-columns" checked> cost pair</label>
+      <label><input type="checkbox" id="token-columns" checked> token pair</label>
+    </fieldset>
+    <fieldset>
+      <legend>Recency</legend>
+      <label><input type="checkbox" id="recency"> recency glyph</label>
+    </fieldset>
+    <fieldset>
+      <legend>Rules</legend>
+      <label><input type="checkbox" id="ten"> every 10 turns</label>
+      <label><input type="checkbox" id="hundred"> every 100 turns</label>
+    </fieldset>
+  </div>
+  <p class="law" id="law"></p>
+  <ul class="notes" id="notes"></ul>
+  <p class="meta" id="legend"></p>
+  <pre id="chart"></pre>
+  <p class="meta" id="count"></p>
+</main>
+<script type="module">
+  import { PRESETS, render, xtermRgb } from "./paint.mjs";
+
+  const presets = document.getElementById("presets");
+  for (const [id, preset] of Object.entries(PRESETS)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = preset.label;
+    button.dataset.preset = id;
+    button.addEventListener("click", () => apply(preset, button));
+    presets.appendChild(button);
+  }
+
+  function apply(preset, button) {
+    for (const item of presets.querySelectorAll("button")) item.classList.toggle("on", item === button);
+    setRadio("interval", preset.interval);
+    setRadio("layout", preset.layout);
+    setRadio("measure", preset.measure);
+    document.getElementById("cost-columns").checked = preset.columns.includes("inc-cost");
+    document.getElementById("token-columns").checked = preset.columns.includes("inc-tokens");
+    document.getElementById("recency").checked = preset.recency;
+    document.getElementById("ten").checked = preset.rules.ten;
+    document.getElementById("hundred").checked = preset.rules.hundred;
+    draw();
+  }
+
+  function setRadio(name, value) {
+    const input = document.querySelector(`input[name="${name}"][value="${value}"]`);
+    if (input) input.checked = true;
+  }
+
+  function read() {
+    const checked = (name) => document.querySelector(`input[name="${name}"]:checked`).value;
+    return {
+      interval: checked("interval"),
+      layout: checked("layout"),
+      measure: checked("measure"),
+      columns: [
+        ...(document.getElementById("cost-columns").checked ? ["inc-cost", "total-cost"] : []),
+        ...(document.getElementById("token-columns").checked ? ["inc-tokens", "total-tokens"] : []),
+      ],
+      recency: document.getElementById("recency").checked,
+      rules: {
+        ten: document.getElementById("ten").checked,
+        hundred: document.getElementById("hundred").checked,
+      },
+    };
+  }
+
+  function ansiToHtml(text) {
+    const parts = text.split(/\u001b\[/);
+    let html = escape(parts[0] ?? "");
+    for (let i = 1; i < parts.length; i += 1) {
+      const split = parts[i].split("m");
+      const code = split.shift();
+      const body = escape(split.join("m"));
+      if (code === "0") {
+        html += body;
+        continue;
+      }
+      if (code === "90") {
+        html += `<span style="color:#888">${body}</span>`;
+        continue;
+      }
+      const fg = /38;5;(\d+)/.exec(code);
+      const bg = /48;5;(\d+)/.exec(code);
+      const style = [
+        fg ? `color:${xtermRgb(Number(fg[1]))}` : "",
+        bg ? `background:${xtermRgb(Number(bg[1]))}` : "",
+      ].filter(Boolean).join(";");
+      html += style ? `<span style="${style}">${body}</span>` : body;
+    }
+    return html;
+  }
+
+  function escape(text) {
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  }
+
+  function draw() {
+    const picture = render(read());
+    document.getElementById("law").textContent = picture.law;
+    const notes = document.getElementById("notes");
+    notes.replaceChildren(...picture.notes.map((note) => {
+      const li = document.createElement("li");
+      li.textContent = note;
+      return li;
+    }));
+    const legend = document.getElementById("legend");
+    legend.replaceChildren(...picture.legend.flatMap((item, index) => {
+      const swatch = document.createElement("span");
+      swatch.className = "swatch";
+      swatch.style.color = xtermRgb(item.fg);
+      swatch.textContent = "█";
+      const name = document.createTextNode(` ${item.label}${index < picture.legend.length - 1 ? "  " : ""}`);
+      return [swatch, name];
+    }));
+    document.getElementById("chart").innerHTML = picture.ansi.map(ansiToHtml).join("\n");
+    document.getElementById("count").textContent = `${picture.lineCount} lines in this picture. The widget limit counts bins.`;
+  }
+
+  document.body.addEventListener("change", () => {
+    for (const item of presets.querySelectorAll("button")) item.classList.remove("on");
+    draw();
+  });
+  apply(PRESETS["cost-cumulative"], presets.querySelector("button"));
+</script>
+</body>
+</html>

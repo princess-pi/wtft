@@ -48,8 +48,9 @@ run_one() {
 	kill "$tracer" 2>/dev/null
 	wait "$tracer" 2>/dev/null
 	if ! grep -qF "\"$suite\"" "$out/$name.trace" 2>/dev/null; then echo "UNTRACED $name"; return; fi
-	# A failed exec (= -1 ENOENT, a PATH search) started nothing.
-	if grep -E '"[^"]*bin/wtft-daemon(\.mjs|\.ts|\.js)?"' "$out/$name.trace" | grep -qvE '= -1 [A-Z]+'; then
+	# A failed exec (= -1 ENOENT, a PATH search) started nothing. No -q on the
+	# second grep: it would quit early, and pipefail would read SIGPIPE as no match.
+	if grep -E '"[^"]*bin/wtft-daemon(\.mjs|\.ts|\.js)?"' "$out/$name.trace" | grep -vE '= -1 [A-Z]+' >/dev/null; then
 		echo "$name"
 	elif [[ "$(cat "$out/$name.done")" != 0 ]]; then
 		echo "FAILED $name"

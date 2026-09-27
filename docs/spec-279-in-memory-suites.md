@@ -52,13 +52,13 @@ becomes ⌈*n* / 667⌉ polls.
 N), 115 (the daemon section), 220, 241 (the daemon section), 443 swept marker, cost
 cross-validation, and tree navigation.
 
-**Stays on the real daemon, and why.** After this slice, 42 of 123 suites count:
+**Stays on the real daemon, and why.** After this slice, 43 of 123 suites count:
 - **A restart or a start-up read, 4:** tag-file staleness, 130 line-safe writes, 457, 512 fatal
   replay. What a new daemon does with a tag an earlier one wrote is `initClassified` in
   `bin/wtft-daemon.ts`, which is not in the tagger. 114's restart case (D5) moved into the
   tag-file staleness suite, which already restarts a daemon.
-- **The process itself, 15:** daemon lifecycle, the shell suite, golden tags, pack-and-smoke, 46
-  install, 96, 155, 205, 239, 240, 248, 259, 262, 281, 308.
+- **The process itself, 16:** daemon lifecycle, the shell suite, golden tags, pack-and-smoke, 46
+  install, 96, 155, 205, 239, 240, 248, 259, 262, 281, 297 daemon holders, 308.
 - **The CLI, 23:** § 4.
 
 ## 4. The CLI suites

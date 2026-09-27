@@ -509,8 +509,8 @@ export function getTerminalWidth(isWidget = false, disabledEmoji = false): numbe
 
 // SURGE TIMELINE: 24-hour bar showing normal (green) vs surge (orange) pricing
 
-export function getCurrentLocalHour(tz?: string): number {
-	const parts = getZonedParts(Date.now(), tz);
+export function getCurrentLocalHour(tz?: string, now: number = Date.now()): number {
+	const parts = getZonedParts(now, tz);
 	return parts.hour;
 }
 
@@ -600,7 +600,7 @@ const SYNODIC_MONTH_MS = 29.53058867 * 86400000;
 // Reference new moon: 2026-07-14 09:43 UTC. Re-centre every ~2 years.
 const REF_NEW_MOON = new Date("2026-07-14T09:43:00Z").getTime();
 
-function getMoonPhase(date: Date): string {
+export function getMoonPhase(date: Date): string {
 	const ageMs = (date.getTime() - REF_NEW_MOON) % SYNODIC_MONTH_MS;
 	const ageDays = (ageMs + SYNODIC_MONTH_MS) % SYNODIC_MONTH_MS / 86400000;
 	// Offset by half a phase width so each bucket is centred on its
@@ -612,16 +612,17 @@ function getMoonPhase(date: Date): string {
 }
 
 /**
- * The bookends are the only glyphs guaranteed present at every hour, so they —
- * not the clock face — are what callers and tests should key off to identify
- * the timeline.
+ * The bookends and the noon glyph are the caller's. The clock face for the
+ * current hour stays here.
  */
 export function buildTimelineString(
 	surgeHours: Set<number>,
 	currentHour: number,
+	startGlyph: string,
+	endGlyph: string,
+	noonGlyph: string,
 	proximityStatus?: 'surge' | 'approaching' | 'ending',
-	date?: Date,
-	disabledEmoji?: boolean
+	disabledEmoji?: boolean,
 ): string {
 	const segments: { color: string; text: string }[] = [];
 	let lastColor: string | null = null;
@@ -641,7 +642,7 @@ export function buildTimelineString(
 	// surge color so noon surge-pricing still shows, but it is never "current" —
 	// the clock face is the current-hour marker.
 	const noonSurge = surgeHours.has(12);
-	glyphs.splice(12, 0, { color: noonSurge ? "38;5;208" : "32", char: disabledEmoji ? "*" : "☀️" });
+	glyphs.splice(12, 0, { color: noonSurge ? "38;5;208" : "32", char: noonGlyph });
 
 	for (const g of glyphs) {
 		if (g.color !== lastColor) {
@@ -653,8 +654,7 @@ export function buildTimelineString(
 	}
 
 	const timelineBody = segments.map(s => `\x1b[${s.color}m${s.text}\x1b[0m`).join("");
-	const moon = disabledEmoji ? "|" : getMoonPhase(date ?? new Date());
-	let result = `${moon}${timelineBody}${moon}`;
+	let result = `${startGlyph}${timelineBody}${endGlyph}`;
 
 	const bolt = disabledEmoji ? "!!" : "⚡";
 	if (proximityStatus === 'surge') {

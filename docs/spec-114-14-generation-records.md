@@ -129,7 +129,8 @@ when the file grew or rotated.
 - **#114 closer:** the daemon writes N interactions from a child, the child is replaced by M
   different ones (by truncation, by a larger file under a new inode, and by a same-length rewrite
   in place), and the tag's total equals the M interactions' total plus the session's own turns.
-- **Restart:** a daemon restart does not double an id-less child line.
+- **Restart:** a daemon restart does not double an id-less child line. This case runs a real
+  daemon twice, so it lives in `tests/wtft-270-tagfile-staleness.test.ts`.
 - **#14 closer:** a child's spawning turn folds a subagent session, the child stops writing, the
   folded session grows; the tag's cost for the spawning turn equals a full re-parse within
   $0.000001, with no `wtft -F`.

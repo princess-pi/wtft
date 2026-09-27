@@ -12,7 +12,7 @@ trap 'rm -rf "$out"' EXIT
 run_one() {
 	local suite="$1" out="$2" runner=bun
 	[[ "$suite" == *.sh ]] && runner=bash
-	timeout 300 strace -f -qq -s 512 -e trace=execve -o "$out/$(basename "$suite").trace" \
+	timeout -k 10 300 strace -f -qq -s 512 -e trace=execve -o "$out/$(basename "$suite").trace" \
 		"$runner" "$suite" >/dev/null 2>&1
 	grep -qE '"[^"]*bin/wtft-daemon(\.mjs|\.ts|\.js)?"' "$out/$(basename "$suite").trace" \
 		&& basename "$suite"

@@ -1,0 +1,127 @@
+# Chart spec
+
+`renderWtftChart` draws the chart lines. `getBinInfo` labels one interaction. `buildWtftLines` groups those labels into bins and hands them over newest first. One cell is one category. The columns, the cache-miss line, and the date line are part of that draw. This page specifies that encoding, the four pictures, and the lines between rows.
+
+This page is the picture of that chart. The picker draws this sample under interval, layout, bar measure, column pairs, recency, and rules. The blocks below are the four presets, so a reader without the picker still sees them.
+
+Picker: [picker.html](https://wtft-artifacts.princess-pi.dev/chart-spec/picker.html)
+
+<iframe src="https://wtft-artifacts.princess-pi.dev/chart-spec/picker.html" title="Chart picker" style="width:100%;height:820px;border:1px solid #444;border-radius:8px;background:#161616"></iframe>
+
+## Sample
+
+Five bins, oldest first. The caller hands them to the chart newest first.
+
+| Bin | When | Turn | Cache miss | Parts |
+|---|---|---|---|---|
+| 1 | 10:00 Sep-25 | 10 | no | code $1.00 / 800 tok, web $0.40 / 0 tok |
+| 2 | 12:00 Sep-25 | 20 | no | code $2.20 / 1400 tok |
+| 3 | 18:00 Sep-25 | 30 | no | research $0.80 / 2200 tok |
+| 4 | 14:00 Sep-26 | 40 | no | plan $0.50 / 600 tok, code $3.10 / 1800 tok |
+| 5 | 15:00 Sep-26 | 100 | yes | code $1.20 / 900 tok, tests $0.70 / 400 tok |
+
+Running totals land on the newest row: $9.90 and 8.1k tokens. A category that did not grow in a bin still occupies its share of a running-total bar.
+
+These pictures set the bar length to `round(row / max row × 16)` cells. A scatter mark sits at `round(category / max row × 15)`. The max is the largest row of the chosen measure, across the sample. The chart's scale is the session total for a running total, and the largest displayed bin for a bucket. A cost scale of 0 or less becomes 1; above 20 it ceils to a multiple of 5; otherwise it ceils to an integer. A token scale ceils to a multiple of 1000, and 0 stays 0. The layout width is at least 40. The bar is what remains after the label, the columns, and the scale's reserved cells.
+
+## Encoding law
+
+A cell is one category.
+
+- Color is the category. The glyph is `█`.
+- On a running-total bar, recency is the second axis, and it uses the glyph. `▃` is carryover. `▇` is new this bin. Both glyphs are that one category.
+- Recency applies to a token running total. An incremental bar is entirely new, so recency stays off. A cost bar stays `█`.
+- A scatter column that two categories round onto keeps the larger cost. The cell stays one category. An equal cost keeps the earlier category in the category order. Scatter is the cost bucket bar. A token bucket bar is a stack of `█` when that bin has token counts.
+
+## Rules
+
+A rule inserts one line on the older side of the boundary, which is where the cache-miss line sits.
+
+- Cache miss: the line reads `Cache Miss`, on the older side of the missed row. A miss on the oldest row still draws the line under it. When a miss and a date change share a boundary, the miss line comes first.
+- Date change: the line reads the older bin's date as `Mmm-DD`, whenever the date changes. A turn chart that crosses a date still draws it. The scale line carries the newest bin's date.
+- Every 10 turns and every 100 turns are on the picker, default off. The chart does not draw them. A turn divisible by both draws one line, labelled `100 turns`.
+
+The scale line draws when the scale is above 0 and the bar is at least 15 cells. These pictures omit the scale line, the tick marks on the rule lines, the title, the legend, and the token glyph key. The chart left-aligns the numbers. These pictures right-align them. The chart dims the label and the incremental columns, and draws the totals in bold white.
+
+## Presets
+
+Each row prints incremental cost, total latest cost, incremental tokens, and total latest tokens. On a narrow width the token columns go first, then the cost columns, while the bar would be under 15 cells. A positive amount under one cent uses four decimal places. `--cost` and `-C` choose the cost bar. `--tokens` and `--by-model` choose the token bar. With neither unit flag, the bar is cost, unless config sets tokens. `--cumulative` and `-c`, or `--bucket` and `-b`, choose a running total versus this bin. With neither mode flag, the mode is cumulative, unless config sets it. `--no-cost` hides the cost pair. `--no-tokens` hides the token pair. The picker hides a pair, not one column of it.
+
+### Cost, cumulative
+
+Stack. Bar is total latest cost. Recency off. One category per cell. The plain rows show the shape. The picker colors each category.
+
+```
+15:00    +$1.90       $9.90       +1.3k      8.1k tok  ████████████████
+── Cache Miss ─────────────────────────────────────────────────────────
+14:00    +$3.60       $8.00       +2.4k      6.8k tok  █████████████
+── Sep-25 ─────────────────────────────────────────────────────────────
+18:00    +$0.80       $4.40       +2.2k      4.4k tok  ███████
+12:00    +$2.20       $3.60       +1.4k      2.2k tok  ██████
+10:00    +$1.40       $1.40        +800       800 tok  ██
+```
+
+### Cost, bucket
+
+Scatter. Bar is incremental cost. This is the only scatter bar. Two categories on one column keep the larger one.
+
+```
+15:00    +$1.90       $9.90       +1.3k      8.1k tok     █ █
+── Cache Miss ───────────────────────────────────────────────────────
+14:00    +$3.60       $8.00       +2.4k      6.8k tok    █          █
+── Sep-25 ───────────────────────────────────────────────────────────
+18:00    +$0.80       $4.40       +2.2k      4.4k tok     █
+12:00    +$2.20       $3.60       +1.4k      2.2k tok           █
+10:00    +$1.40       $1.40        +800       800 tok    █ █
+```
+
+### Tokens, cumulative
+
+Stack. Bar is total latest tokens. Recency on, so the glyph is `▃` or `▇` and the color is the category.
+
+```
+15:00    +$1.90       $9.90       +1.3k      8.1k tok  ▃▃▃▃▃▃▃▃▃▃▃▃▃▇▇▇
+── Cache Miss ─────────────────────────────────────────────────────────
+14:00    +$3.60       $8.00       +2.4k      6.8k tok  ▇▃▃▃▃▃▃▃▃▇▇▇▇
+── Sep-25 ─────────────────────────────────────────────────────────────
+18:00    +$0.80       $4.40       +2.2k      4.4k tok  ▇▇▇▇▇▃▃▃▃
+12:00    +$2.20       $3.60       +1.4k      2.2k tok  ▃▇▇▇
+10:00    +$1.40       $1.40        +800       800 tok  ▇▇
+```
+
+### Tokens, bucket
+
+Stack. Bar is incremental tokens. Recency off. One category per cell.
+
+```
+15:00    +$1.90       $9.90       +1.3k      8.1k tok  █████████
+── Cache Miss ─────────────────────────────────────────────────────────
+14:00    +$3.60       $8.00       +2.4k      6.8k tok  ████████████████
+── Sep-25 ─────────────────────────────────────────────────────────────
+18:00    +$0.80       $4.40       +2.2k      4.4k tok  ███████████████
+12:00    +$2.20       $3.60       +1.4k      2.2k tok  █████████
+10:00    +$1.40       $1.40        +800       800 tok  █████
+```
+
+## Outside this chart
+
+- A token bar draws one `$` when web cost is positive and web tokens are 0, and the bar still has a free cell. These pictures omit that cell. The sample's web row has zero tokens.
+- The monotonic clamp is on the cost running-total bar. A category that already holds a cell does not shrink below that count. A token running total does not use it. These pictures use largest-remainder into the scaled cell count.
+- The chart's legend lists every category, including ones with no spend in the session. The picker lists the categories in this sample: plan, research, web, code, and tests.
+- The caller passes width, timezone, surge, the session suffix, an other-category warning, and the cache line. Pad is applied before the chart sees the width. The picker does not draw them.
+- Padding rows out to the limit is [https://github.com/princess-pi/wtft/issues/264](https://github.com/princess-pi/wtft/issues/264). The widget's limit is a bin count, default 10. Rule lines are extra. The Pi display cap is [https://github.com/princess-pi/wtft/issues/269](https://github.com/princess-pi/wtft/issues/269). The picker prints how many lines the picture has. Time versus turns is the interval kind. The size stays in binning. The default is `1h`.
+
+## Settled
+
+- A cell is one category. https://github.com/princess-pi/wtft/pull/298
+- The scale line draws when the scale is above 0 and the bar is at least 15 cells. A date line is drawn when the date changes. https://github.com/princess-pi/wtft/pull/298
+- `renderWtftChart` draws the chart lines. https://github.com/princess-pi/wtft/pull/302
+- All four columns are the default. `--no-cost` hides the two cost columns. `--no-tokens` hides the two token columns. https://github.com/princess-pi/wtft/pull/304
+- A second painter stays unstarted. https://github.com/princess-pi/wtft/issues/285
+
+## Phases
+
+- Picker, this page: [https://github.com/princess-pi/wtft/issues/282](https://github.com/princess-pi/wtft/issues/282)
+- Chart module: [https://github.com/princess-pi/wtft/issues/283](https://github.com/princess-pi/wtft/issues/283), merged in [https://github.com/princess-pi/wtft/pull/302](https://github.com/princess-pi/wtft/pull/302)
+- Four columns: [https://github.com/princess-pi/wtft/issues/284](https://github.com/princess-pi/wtft/issues/284), merged in [https://github.com/princess-pi/wtft/pull/304](https://github.com/princess-pi/wtft/pull/304)
+- Second painter: [https://github.com/princess-pi/wtft/issues/285](https://github.com/princess-pi/wtft/issues/285), unstarted

@@ -1,0 +1,10 @@
+{
+  "title": "wtft",
+  "docs": [
+    {
+      "path": "chart-spec/spec.mdx",
+      "title": "Chart spec",
+      "group": "Chart"
+    }
+  ]
+}

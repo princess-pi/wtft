@@ -579,7 +579,8 @@ export function getSurgeLocalHours(tz?: string, now: number = Date.now(), model?
 /**
  * Ending is the last {@link SURGE_ENDING_MINUTES} before billing drops to 1.
  * That instant follows windows that touch or overlap, including one that
- * starts at 0 on the next UTC day when this one ends at 1440. Approaching is
+ * starts at 0 on the next UTC day when this one ends at 1440, and a weekend
+ * cutoff that falls inside the run. Approaching is
  * the {@link SURGE_APPROACH_MINUTES} before a window opens. A lead that wraps
  * past midnight asks about the next UTC day.
  */
@@ -628,6 +629,16 @@ export function checkSurgeProximity(at: number = Date.now(), model?: string): { 
 				if (billedTomorrow.some(([windowStart, windowEnd]) => windowStart <= 0 && 0 < windowEnd)) {
 					const tomorrowEnd = extend(billedTomorrow, 0);
 					if (tomorrowEnd > 0) stopsAt = 1440 + tomorrowEnd;
+				}
+			}
+			if (schedule.weekendOffPeakFrom !== undefined) {
+				const dayStart = Date.UTC(y, mo, d, 0, 0, 0);
+				const horizon = stopsAt - currentUtcMinute;
+				for (let i = 1; i <= horizon; i++) {
+					if (!(getPeakMultiplier(model, dayStart + (currentUtcMinute + i) * 60_000) > 1)) {
+						stopsAt = currentUtcMinute + i;
+						break;
+					}
 				}
 			}
 			if (stopsAt - currentUtcMinute <= SURGE_ENDING_MINUTES) return { status: 'ending', multiplier };

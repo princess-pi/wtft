@@ -276,7 +276,7 @@ renderer passes `now` — so the bar describes today while the bins under it may
 `SURGE_ENDING_MINUTES` before the surge stops. Both are 20. Ending is those
 minutes before billing drops to 1. That instant follows windows that touch or
 overlap, including one that starts at 0 on the next UTC day when this one ends
-at 1440. A lead that wraps past midnight asks whether the
+at 1440, and a weekend cutoff that falls inside the run. A lead that wraps past midnight asks whether the
 next UTC day bills that window. A user card whose `surge` cannot be walked
 keeps its rates and drops the schedule; `loadUserPricing` prints the key and
 the reason on stderr. A rate that is not a finite number stores nothing, and

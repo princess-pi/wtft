@@ -228,6 +228,20 @@ describe("#312 a card carries its own surge schedule", () => {
 		assert.equal(checkSurgeProximity(minute(1429), "acme-short-midnight").status, "surge");
 		assert.equal(checkSurgeProximity(minute(1430), "acme-short-midnight").status, "ending");
 		delete MODEL_PRICING["acme-short-midnight"];
+
+		const cutoff = Date.UTC(2026, 7, 29, 2, 30, 0);
+		MODEL_PRICING["acme-cutoff"] = {
+			input: 1, output: 1, cacheRead: 1, cacheWrite: 0,
+			surge: { multiplier: 2, windowsUtcMinutes: [[60, 240]], weekendOffPeakFrom: cutoff },
+		};
+		const saturdayAt = (hour: number, min: number) => Date.UTC(2026, 7, 29, hour, min, 0);
+		assert.equal(checkSurgeProximity(saturdayAt(2, 9), "acme-cutoff").status, "surge");
+		assert.equal(checkSurgeProximity(saturdayAt(2, 10), "acme-cutoff").status, "ending");
+		assert.equal(checkSurgeProximity(saturdayAt(2, 15), "acme-cutoff").status, "ending");
+		assert.equal(getPeakMultiplier("acme-cutoff", saturdayAt(2, 29)), 2);
+		assert.equal(getPeakMultiplier("acme-cutoff", saturdayAt(2, 30)), 1);
+		assert.equal(checkSurgeProximity(Date.UTC(2026, 8, 5, 2, 15, 0), "acme-cutoff").status, undefined);
+		delete MODEL_PRICING["acme-cutoff"];
 	});
 });
 

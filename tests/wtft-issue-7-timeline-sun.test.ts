@@ -4,7 +4,7 @@
  *   glyph, not by consuming hour 12's slot.
  */
 import * as assert from "node:assert";
-import { buildTimelineString } from "../bin/wtft.mjs";
+import { buildTimelineString } from "../extensions/lib/wtft-renderer.ts";
 
 const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
@@ -33,7 +33,7 @@ function hourGlyphCount(s: string): number {
 }
 
 function timeline(surgeHours: number[], currentHour: number): string {
-	return buildTimelineString(new Set(surgeHours), currentHour).replace(ANSI, "");
+	return buildTimelineString(new Set(surgeHours), currentHour, "🌑", "🌑", "☀️").replace(ANSI, "");
 }
 
 console.log("=== RUNNING WTFT ISSUE #7 TIMELINE SUN TESTS ===");

@@ -5,6 +5,7 @@
  */
 
 import { buildTimelineString, getSurgeLocalHours } from "../extensions/lib/wtft-renderer.ts";
+import { timelineGlyphs } from "../extensions/lib/wtft-chart.ts";
 
 const CLOCK_FACES = ["🕛","🕐","🕑","🕒","🕓","🕔","🕕","🕖","🕗","🕘","🕙","🕚"];
 
@@ -62,7 +63,8 @@ console.log(`timezone:     ${args.tz ?? "(host local)"}`);
 console.log(`surge hours:  ${[...surgeHours].sort((a, b) => a - b).join(", ") || "(none)"}`);
 console.log("");
 
+const glyphs = timelineGlyphs(Date.now(), args.tz, false);
 for (let h = 0; h < 24; h++) {
-	const raw = buildTimelineString(surgeHours, h);
+	const raw = buildTimelineString(surgeHours, h, glyphs.start, glyphs.end, glyphs.noon);
 	console.log(`  ${String(h).padStart(2, "0")}  ${CLOCK_FACES[h % 12]}  ${raw}`);
 }

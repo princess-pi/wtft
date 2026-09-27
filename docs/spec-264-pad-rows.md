@@ -14,7 +14,8 @@
   gets no dash.
 - **The effective limit** is `chartLimit`: `-l` when given, else the wtft config's `limit`, else
   `CLI_DEFAULT_LIMIT`, 17 (was 100). `--watch` also lets a `wtft-settings` entry in the session log
-  override the config, as it did before. `wholeLimit` rounds any of them down to a whole number, at
+  override the config, as it did before. `-l` accepts only a positive whole number (anything else is ignored, as before). `wholeLimit` rounds the
+  config and session-log values down to a whole number, at
   least 1, so the slice and the padding agree and a stray 0 never hides the chart.
 - **`--watch` never grows past the terminal for padding.** Its redraw moves the cursor up over the
   last frame, which cannot reach lines scrolled off the top, so when a frame, counted in wrapped screen lines plus the line the

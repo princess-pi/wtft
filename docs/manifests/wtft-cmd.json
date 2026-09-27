@@ -145,7 +145,7 @@
     },
     {
       "flags": "-l, --limit <number>",
-      "desc": "Limit the number of interval bars displayed. Default: the wtft config's limit when it sets one, else 17 in the CLI and 10 in the Pi extension; --watch also takes a limit from a wtft-settings entry in the session log first. A fractional or negative limit is rounded down to a whole number, at least 1. The CLI chart, in a report and in --watch, always shows exactly that many rows: with fewer intervals it is padded (to at most 1000 rows, and in --watch at most the terminal's height) with placeholder rows, a dash under each label column and an empty bar area. --watch drops placeholder rows first when the frame would not fit the terminal. The Pi widget is not padded."
+      "desc": "Limit the number of interval bars displayed. Default: the wtft config's limit when it sets one, else 17 in the CLI and 10 in the Pi extension; --watch also takes a limit from a wtft-settings entry in the session log first. -l takes a positive whole number; any other value is ignored and the next source used. A fractional or negative limit from the config or a session log is rounded down to a whole number, at least 1. The CLI chart, in a report and in --watch, always shows exactly that many rows: with fewer intervals it is padded (to at most 1000 rows, and in --watch at most the terminal's height) with placeholder rows, a dash under each label column and an empty bar area. --watch drops placeholder rows first when the frame would not fit the terminal. The Pi widget is not padded."
     },
     {
       "flags": "-s, --session <path|filter>",

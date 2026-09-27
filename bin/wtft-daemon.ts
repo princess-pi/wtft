@@ -1642,11 +1642,15 @@ if (showList || showCleanup || showRestart || stopSession) {
       log.close();
     }
   };
-  const pendingRespawns: { childPid: number; served: () => boolean; settle: (ok: boolean) => void }[] = [];
-  const liveHolderIn = (file: string): boolean => {
-    try { return holdsLease(classifyPid(leasePid(fs.readFileSync(file, "utf8").trim()))); } catch { return false; }
+  const pendingRespawns: { childPid: number; served: () => number; settle: (ok: boolean) => void }[] = [];
+  const liveHolderIn = (file: string): number => {
+    try {
+      const holder = leasePid(fs.readFileSync(file, "utf8").trim());
+      return holdsLease(classifyPid(holder)) ? holder : 0;
+    } catch { return 0; }
   };
-  const liveHarnessFor = (which: string, env: NodeJS.ProcessEnv, cwd: string | undefined): boolean => {
+  const handedTo = new Set<number>();
+  const liveHarnessFor = (which: string, env: NodeJS.ProcessEnv, cwd: string | undefined): number => {
     const key = which === "claude-code" ? "claude" : which;
     return liveHolderIn(harnessPidFileFor(key, path.resolve(cwd ?? process.cwd(), harnessRoot(key, env))));
   };
@@ -1700,13 +1704,19 @@ if (showList || showCleanup || showRestart || stopSession) {
       restarted.add(pid);
       const restartEnv = { ...process.env };
       let holderCwd: string | undefined;
-      try { holderCwd = fs.readlinkSync(`/proc/${pid}/cwd`); } catch { holderCwd = undefined; }
+      try {
+        holderCwd = fs.readlinkSync(`/proc/${pid}/cwd`);
+        if (!fs.statSync(holderCwd).isDirectory()) holderCwd = undefined;
+      } catch { holderCwd = undefined; }
       const wasDaemon = kind === "daemon" || kind === "harness";
       let stopped: ReturnType<typeof stopHolderSync> | null = null;
       if (wasDaemon) {
+        let environReadable = false;
+        try { fs.accessSync(`/proc/${pid}/environ`, fs.constants.R_OK); environReadable = true; } catch { /* unreadable */ }
         for (const key of ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR"]) {
           const value = procEnvValue(pid, key);
           if (value) restartEnv[key] = value;
+          else if (environReadable) delete restartEnv[key];
         }
         stopped = stopHolderSync(pid);
       }
@@ -1850,7 +1860,12 @@ if (showList || showCleanup || showRestart || stopSession) {
 
   if (showRestart) {
     if (pendingRespawns.length > 0) sleepMs(RESPAWN_SETTLE_MS);
-    for (const r of pendingRespawns) r.settle(pidAlive(r.childPid) || r.served());
+    for (const r of pendingRespawns) {
+      if (pidAlive(r.childPid)) { r.settle(true); continue; }
+      const servedBy = r.served();
+      if (servedBy > 0) handedTo.add(servedBy);
+      r.settle(servedBy > 0);
+    }
     for (const pidFile of harnessPidFiles) {
       const fullPath = path.join(pidDir, pidFile);
       const pid = harnessHolders.get(pidFile) ?? NaN;
@@ -1861,6 +1876,11 @@ if (showList || showCleanup || showRestart || stopSession) {
         continue;
       }
       seenPids.add(pid);
+      if (handedTo.has(pid)) {
+        console.log(`Left running: PID ${pid} — harness ${pidFile}; a respawn handed its session to it`);
+        restartedN++;
+        continue;
+      }
       const live = procIsDaemon(pid);
       // It writes its hand-off only while its pid file still names it.
       const outcome = live ? stopHolderSync(pid) : null;

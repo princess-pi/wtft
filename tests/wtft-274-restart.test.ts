@@ -85,6 +85,9 @@ try {
 		const r = restart();
 		check(/Restarted: PID \d+ → fresh harness daemon \(claude-code\)/.test(r.stdout), `the hand-off under the claude-code alias counts as restarted:\n${r.stdout}`);
 		check(r.status === 0, `exit 0 (got ${r.status})`);
+		check(classifyPid(real.pid!) === "harness" && Number(fs.readFileSync(rootPidFile, "utf8").trim()) === real.pid, "the harness it handed off to still serves the root");
+		check(/Left running: PID \d+ — harness .*a respawn handed its session to it/.test(r.stdout), "the line says why it was left running");
+		try { process.kill(real.pid!, "SIGTERM"); } catch { /* gone */ }
 	}
 
 	console.log("--- C3: a harness with a relative root comes back in its own cwd ---");
@@ -108,6 +111,25 @@ try {
 			try { holder = Number(fs.readFileSync(relRootPid, "utf8").trim()); } catch { holder = 0; }
 		}
 		check(holder > 0 && classifyPid(holder) === "harness", "the new harness serves the original root, not one under the caller's cwd");
+		if (holder > 0) { try { process.kill(holder, "SIGTERM"); } catch { /* gone */ } }
+	}
+
+	console.log("--- C4: a holder whose cwd was deleted is still respawned ---");
+	{
+		const gone = fs.mkdtempSync(path.join(TMP, "gone-"));
+		const session = path.join(TMP, "c4", "s.jsonl");
+		fs.mkdirSync(path.dirname(session), { recursive: true });
+		fs.writeFileSync(session, "");
+		const [script] = standInDaemonArgs("setInterval(() => {}, 1000);");
+		const fake = spawn(process.execPath, [script, "--session", session], { stdio: "ignore", env, cwd: gone, detached: true });
+		children.push(fake);
+		check(awaitStandIn(fake.pid!), "fixture precondition: the stand-in reads as a daemon");
+		fs.rmdirSync(gone);
+		check(fs.readlinkSync(`/proc/${fake.pid}/cwd`).endsWith("(deleted)"), "fixture precondition: its cwd reads as deleted");
+		fs.writeFileSync(getDaemonPidPath(session), String(fake.pid));
+		const r = restart();
+		check(/Restarted: PID \d+ → fresh daemon for /.test(r.stdout), `restarted:\n${r.stdout}`);
+		const holder = Number(fs.readFileSync(getDaemonPidPath(session), "utf8").trim());
 		if (holder > 0) { try { process.kill(holder, "SIGTERM"); } catch { /* gone */ } }
 	}
 

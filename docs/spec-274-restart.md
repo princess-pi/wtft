@@ -17,9 +17,14 @@ Issue: https://github.com/princess-pi/wtft/issues/274 · Module: `bin/wtft-daemo
   removed and the line reads `Stopped: PID n — the respawn for <session> failed`.
 - **A respawn runs in the stopped holder's cwd** (read from `/proc/<pid>/cwd`), with its root
   environment, so a relative `--session` or root directory names what it named before.
-- **One wait for all.** Every respawn is started first, then one 1 s wait, then each is judged,
-  so `--restart` stays inside `wtft`'s 10 s timeout however many holders it restarts. A child
-  slower than 1 s to fail is counted as running.
+- **One wait for all.** Every respawn is started first, then one 1 s wait, then each is judged.
+  A child slower than 1 s to fail is counted as running.
+- **A harness a respawn handed off to is left running,** with the line `Left running: PID n —
+  harness …; a respawn handed its session to it`. Every other harness found only through its
+  root pid file is stopped.
+- **A respawn runs with the holder's root environment:** a root variable the holder did not have
+  is removed, when its environment is readable. A cwd that no longer exists falls back to the
+  caller's.
 - **E. A holder that refused the signal (EPERM) or outlived SIGKILL is left running with its
   lease or root pid file,** and the line says `Not stopped`.
 - **Exit code.** `--restart` exits 1 when any holder was left running (E) or any respawn failed

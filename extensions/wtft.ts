@@ -389,6 +389,9 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				hasLimit, limit, hasWidth, width,
 				hasMode, mode, hasTimezone, timezone, pager } = opts;
 
+			if (opts.hideCostColumns) widgetHideCostColumns = true;
+			if (opts.hideTokenColumns) widgetHideTokenColumns = true;
+
 			if (forceReparse) {
 				const sessionFile = ctx.sessionManager.getSessionFile?.();
 				if (!sessionFile) {
@@ -465,8 +468,6 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			if (opts.hideCostColumns) widgetHideCostColumns = true;
-			if (opts.hideTokenColumns) widgetHideTokenColumns = true;
 			const columnFlags = {
 				showCostColumns: !widgetHideCostColumns,
 				showTokenColumns: !widgetHideTokenColumns,

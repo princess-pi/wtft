@@ -7,8 +7,10 @@ import * as assert from "node:assert";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { getConfigPaths } from "@princess-pi/libs/config";
 import { buildWtftLines } from "../extensions/lib/wtft-renderer.ts";
 import { parseWtftCliArgs } from "../extensions/lib/wtft-cli-shared.ts";
+import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "../extensions/lib/wtft-config-dir.ts";
 
 let passed = 0;
 let failed = 0;
@@ -115,7 +117,7 @@ process.chdir(sandbox);
 process.env.XDG_CONFIG_HOME = path.join(sandbox, "config");
 process.env.XDG_STATE_HOME = path.join(sandbox, "state");
 fs.mkdirSync(process.env.XDG_CONFIG_HOME, { recursive: true });
-const configPath = path.join(process.env.XDG_CONFIG_HOME, "wtft", "config.json");
+const configPath = getConfigPaths(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR).global;
 const { WTFT_TAGGER_VERSION } = await import("../extensions/lib/wtft-tagger-version.ts");
 const registered: Record<string, { handler: (args: string, ctx: any) => Promise<void> }> = {};
 const handlers: Record<string, (event: unknown, ctx: any) => Promise<void> | void> = {};
@@ -172,6 +174,9 @@ async function render(args: string): Promise<string> {
 }
 const shown = await render("-w 80");
 check(shown.includes("+$2.00") && shown.includes("3.0k tok"), "a plain /wtft shows cost and token columns");
+check(fs.existsSync(configPath), "a plain /wtft writes the config the hide checks read");
+const withEmoji = await render("--no-emoji --no-cost -w 80");
+check(!withEmoji.includes("$") && withEmoji.includes("tok") && withEmoji.includes("█"), "--no-emoji --no-cost still hides the cost columns");
 const hidden = await render("--no-cost -w 80");
 check(!hidden.includes("$") && hidden.includes("tok") && hidden.includes("█"), "--no-cost hides the cost columns on the widget");
 const again = await render("--no-cost -w 80");

@@ -5,7 +5,7 @@
 
 import * as assert from "node:assert";
 import { describe, it } from "node:test";
-import { getSurgeLocalHours, getDeepSeekPeakMultiplier } from "../bin/wtft.mjs";
+import { getSurgeLocalHours, getPeakMultiplier } from "../bin/wtft.mjs";
 // Imported from the `.ts` source directly (the same pattern
 // `tests/timeline-24h.ts` already uses), not the built `bin/wtft.mjs`:
 // `resolveZonedLocalHour` has no reason to be part of the CLI's public
@@ -39,24 +39,19 @@ const JERUSALEM_EXPECTED_INSTANTS: readonly string[] = [
 	"2026-03-27T19:00:00.000Z", "2026-03-27T20:00:00.000Z",
 ];
 
-// getDeepSeekPeakMultiplier's windows are 01:00-04:00 and 06:00-10:00 UTC,
-// Mon-Fri only (#495) — applied to JERUSALEM_EXPECTED_INSTANTS by hand:
-// 01:00Z,02:00Z,03:00Z (hours 4,5,6) and 06:00Z..09:00Z (hours 9,10,11,12)
-// charge 2x; every other instant above (including both copies of the
-// 00:00Z collision at hours 2 and 3) does not.
 const JERUSALEM_EXPECTED_SURGE_HOURS = [4, 5, 6, 9, 10, 11, 12];
 
 describe("#24 getSurgeLocalHours (tz branch) resolves each local hour with its own DST offset", () => {
 	it("(repro) the pre-fix code returned a different surge set depending only on which side of the transition `now` sampled — this asserts the discrepancy is gone", () => {
-		const pre = getSurgeLocalHours(JERUSALEM, JERUSALEM_NOW_PRE_TRANSITION);
-		const post = getSurgeLocalHours(JERUSALEM, JERUSALEM_NOW_POST_TRANSITION);
+		const pre = getSurgeLocalHours(JERUSALEM, JERUSALEM_NOW_PRE_TRANSITION, "deepseek-flash");
+		const post = getSurgeLocalHours(JERUSALEM, JERUSALEM_NOW_POST_TRANSITION, "deepseek-flash");
 		assert.deepStrictEqual(sortedHours(pre), sortedHours(post));
 	});
 
-	it("matches exactly the hours getDeepSeekPeakMultiplier charges 2x for, converting each hour with the tzdata-correct offset for ITS side of the transition", () => {
-		const surge = getSurgeLocalHours(JERUSALEM, JERUSALEM_NOW_POST_TRANSITION);
+	it("matches exactly the hours getPeakMultiplier charges 2x for, converting each hour with the tzdata-correct offset for ITS side of the transition", () => {
+		const surge = getSurgeLocalHours(JERUSALEM, JERUSALEM_NOW_POST_TRANSITION, "deepseek-flash");
 		for (let hour = 0; hour < 24; hour++) {
-			const charged = getDeepSeekPeakMultiplier(Date.parse(JERUSALEM_EXPECTED_INSTANTS[hour])) === 2.0;
+			const charged = getPeakMultiplier("deepseek-flash", Date.parse(JERUSALEM_EXPECTED_INSTANTS[hour])) === 2.0;
 			assert.strictEqual(
 				surge.has(hour), charged,
 				`hour ${hour}: renderer says surge=${surge.has(hour)}, oracle instant ${JERUSALEM_EXPECTED_INSTANTS[hour]} charges ${charged ? "2x" : "1x"}`,
@@ -69,7 +64,7 @@ describe("#24 getSurgeLocalHours (tz branch) resolves each local hour with its o
 		// Both are off-peak here, so this alone cannot distinguish "resolves
 		// to hour 3's instant" from "resolves to any other off-peak instant"
 		// — the next test closes that gap with a direct instant assertion.
-		const surge = getSurgeLocalHours(JERUSALEM, JERUSALEM_NOW_POST_TRANSITION);
+		const surge = getSurgeLocalHours(JERUSALEM, JERUSALEM_NOW_POST_TRANSITION, "deepseek-flash");
 		assert.strictEqual(surge.has(2), surge.has(3));
 		assert.strictEqual(surge.has(2), false);
 	});
@@ -111,15 +106,15 @@ const CAIRO_EXPECTED_SURGE_HOURS = [4, 5, 6, 9, 10, 11, 12];
 
 describe("#24 getSurgeLocalHours (tz branch) on a fall-back day", () => {
 	it("returns the same surge set for a `now` sampled before the fold and one sampled inside its later occurrence", () => {
-		const pre = getSurgeLocalHours(CAIRO, CAIRO_NOW_PRE_TRANSITION);
-		const post = getSurgeLocalHours(CAIRO, CAIRO_NOW_POST_TRANSITION);
+		const pre = getSurgeLocalHours(CAIRO, CAIRO_NOW_PRE_TRANSITION, "deepseek-flash");
+		const post = getSurgeLocalHours(CAIRO, CAIRO_NOW_POST_TRANSITION, "deepseek-flash");
 		assert.deepStrictEqual(sortedHours(pre), sortedHours(post));
 	});
 
-	it("matches exactly the hours getDeepSeekPeakMultiplier charges 2x for, resolving the repeated hour to its later occurrence", () => {
-		const surge = getSurgeLocalHours(CAIRO, CAIRO_NOW_POST_TRANSITION);
+	it("matches exactly the hours getPeakMultiplier charges 2x for, resolving the repeated hour to its later occurrence", () => {
+		const surge = getSurgeLocalHours(CAIRO, CAIRO_NOW_POST_TRANSITION, "deepseek-flash");
 		for (let hour = 0; hour < 24; hour++) {
-			const charged = getDeepSeekPeakMultiplier(Date.parse(CAIRO_EXPECTED_INSTANTS[hour])) === 2.0;
+			const charged = getPeakMultiplier("deepseek-flash", Date.parse(CAIRO_EXPECTED_INSTANTS[hour])) === 2.0;
 			assert.strictEqual(
 				surge.has(hour), charged,
 				`hour ${hour}: renderer says surge=${surge.has(hour)}, oracle instant ${CAIRO_EXPECTED_INSTANTS[hour]} charges ${charged ? "2x" : "1x"}`,
@@ -199,22 +194,22 @@ const NY_FALL_EXPECTED_SURGE_HOURS = [20, 21, 22];
 
 describe("#24 getSurgeLocalHours (tz branch) on America/New_York — the negative-offset proof", () => {
 	it("spring forward: same surge set on both sides of the transition, matching the tzdata oracle (including the UTC-Monday-crossing hours)", () => {
-		const pre = getSurgeLocalHours(NEW_YORK, NY_SPRING_NOW_PRE_TRANSITION);
-		const post = getSurgeLocalHours(NEW_YORK, NY_SPRING_NOW_POST_TRANSITION);
+		const pre = getSurgeLocalHours(NEW_YORK, NY_SPRING_NOW_PRE_TRANSITION, "deepseek-flash");
+		const post = getSurgeLocalHours(NEW_YORK, NY_SPRING_NOW_POST_TRANSITION, "deepseek-flash");
 		assert.deepStrictEqual(sortedHours(pre), sortedHours(post));
 		for (let hour = 0; hour < 24; hour++) {
-			const charged = getDeepSeekPeakMultiplier(Date.parse(NY_SPRING_EXPECTED_INSTANTS[hour])) === 2.0;
+			const charged = getPeakMultiplier("deepseek-flash", Date.parse(NY_SPRING_EXPECTED_INSTANTS[hour])) === 2.0;
 			assert.strictEqual(post.has(hour), charged, `hour ${hour}: oracle instant ${NY_SPRING_EXPECTED_INSTANTS[hour]}`);
 		}
 		assert.deepStrictEqual(sortedHours(post), NY_SPRING_EXPECTED_SURGE_HOURS);
 	});
 
 	it("fall back: same surge set on both sides of the fold, matching the tzdata oracle, with the repeated hour resolved to its later occurrence", () => {
-		const pre = getSurgeLocalHours(NEW_YORK, NY_FALL_NOW_PRE_TRANSITION);
-		const post = getSurgeLocalHours(NEW_YORK, NY_FALL_NOW_POST_TRANSITION);
+		const pre = getSurgeLocalHours(NEW_YORK, NY_FALL_NOW_PRE_TRANSITION, "deepseek-flash");
+		const post = getSurgeLocalHours(NEW_YORK, NY_FALL_NOW_POST_TRANSITION, "deepseek-flash");
 		assert.deepStrictEqual(sortedHours(pre), sortedHours(post));
 		for (let hour = 0; hour < 24; hour++) {
-			const charged = getDeepSeekPeakMultiplier(Date.parse(NY_FALL_EXPECTED_INSTANTS[hour])) === 2.0;
+			const charged = getPeakMultiplier("deepseek-flash", Date.parse(NY_FALL_EXPECTED_INSTANTS[hour])) === 2.0;
 			assert.strictEqual(post.has(hour), charged, `hour ${hour}: oracle instant ${NY_FALL_EXPECTED_INSTANTS[hour]}`);
 		}
 		assert.deepStrictEqual(sortedHours(post), NY_FALL_EXPECTED_SURGE_HOURS);
@@ -236,8 +231,8 @@ describe("#24 getSurgeLocalHours (tz branch) on America/New_York — the negativ
 		const originalTz = process.env.TZ;
 		process.env.TZ = NEW_YORK;
 		try {
-			const hostSurge = getSurgeLocalHours(undefined, NY_SPRING_NOW_PRE_TRANSITION);
-			const tzSurge = getSurgeLocalHours(NEW_YORK, NY_SPRING_NOW_PRE_TRANSITION);
+			const hostSurge = getSurgeLocalHours(undefined, NY_SPRING_NOW_PRE_TRANSITION, "deepseek-flash");
+			const tzSurge = getSurgeLocalHours(NEW_YORK, NY_SPRING_NOW_PRE_TRANSITION, "deepseek-flash");
 			assert.deepStrictEqual(sortedHours(hostSurge), sortedHours(tzSurge));
 
 			const d = new Date(NY_SPRING_NOW_PRE_TRANSITION);
@@ -289,7 +284,7 @@ describe("#24 resolveZonedLocalHour, direct: Lord Howe's non-whole-hour shift", 
 
 // --- The `else` (no-`tz`) branch, made hermetic with an explicit TZ ---
 //
-// `getSurgeLocalHours(undefined, now)` reads the HOST's local time zone via
+// `getSurgeLocalHours(undefined, now, "deepseek-flash")` reads the HOST's local time zone via
 // `Date.prototype.setHours`. Pinning it here requires actually setting the
 // host zone rather than trusting whatever the CI runner defaults to (this
 // repo's CI runs a clean Ubuntu runner in UTC, where neither transition
@@ -304,8 +299,8 @@ describe("#24 getSurgeLocalHours (no-tz branch), hermetic via explicit TZ", () =
 	it("already had no once-per-day defect — same spring-forward day, sampled on both sides of the transition, agrees with itself", () => {
 		process.env.TZ = JERUSALEM;
 		try {
-			const pre = getSurgeLocalHours(undefined, JERUSALEM_NOW_PRE_TRANSITION);
-			const post = getSurgeLocalHours(undefined, JERUSALEM_NOW_POST_TRANSITION);
+			const pre = getSurgeLocalHours(undefined, JERUSALEM_NOW_PRE_TRANSITION, "deepseek-flash");
+			const post = getSurgeLocalHours(undefined, JERUSALEM_NOW_POST_TRANSITION, "deepseek-flash");
 			assert.deepStrictEqual(sortedHours(pre), sortedHours(post));
 			assert.deepStrictEqual(sortedHours(post), JERUSALEM_EXPECTED_SURGE_HOURS);
 		} finally {
@@ -316,7 +311,7 @@ describe("#24 getSurgeLocalHours (no-tz branch), hermetic via explicit TZ", () =
 	it("resolves the Cairo fall-back day the same as the tz branch, EXCEPT it picks the EARLIER occurrence of the repeated hour — a documented, tested divergence, not a bug", () => {
 		process.env.TZ = CAIRO;
 		try {
-			const surge = getSurgeLocalHours(undefined, CAIRO_NOW_POST_TRANSITION);
+			const surge = getSurgeLocalHours(undefined, CAIRO_NOW_POST_TRANSITION, "deepseek-flash");
 			// Neither occurrence of hour 23 is inside a peak window on this date
 			// (21:00Z and 20:00Z are both outside [01:00,04:00) and [06:00,10:00)),
 			// so the earlier-vs-later choice does not move the surge SET itself —

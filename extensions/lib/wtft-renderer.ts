@@ -12,8 +12,8 @@ import {
 import {
 	isModelPriced,
 	describeFallbackPricing,
-	getDeepSeekPeakMultiplier,
-	DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES,
+	getPeakMultiplier,
+	surgeScheduleFor,
 } from "./wtft-cost.js";
 import { execSync } from "node:child_process";
 import wcwidth from "wcwidth";
@@ -538,15 +538,23 @@ export function resolveZonedLocalHour(year: number, month: number, day: number, 
 	return lateIsReal ? candidateLate : candidateEarly;
 }
 
+/** Minutes before a window opens that the badge says the surge is approaching. */
+export const SURGE_APPROACH_MINUTES = 20;
+
+/** Minutes before a window closes that the badge says the surge is ending. */
+export const SURGE_ENDING_MINUTES = 20;
+
 /**
- * The schedule is NOT re-typed here. This asks `getDeepSeekPeakMultiplier`
- * what each hour actually costs, so the display cannot disagree with the bill.
+ * Marks a local hour when any minute of it bills above 1.
  * Per-hour offset, not per-day: on a day the zone's offset changes, a single
  * offset applied to all 24 local hours puts far-side hours an hour off. Each
  * candidate hour resolves its own offset via {@link resolveZonedLocalHour}.
+ *
+ * No model, or a card with no surge schedule, marks no hours.
  */
-export function getSurgeLocalHours(tz?: string, now: number = Date.now()): Set<number> {
+export function getSurgeLocalHours(tz?: string, now: number = Date.now(), model?: string): Set<number> {
 	const result = new Set<number>();
+	if (!model || !surgeScheduleFor(model)) return result;
 	const parts = tz ? getZonedParts(now, tz) : null;
 
 	for (let localHour = 0; localHour < 24; localHour++) {
@@ -558,41 +566,104 @@ export function getSurgeLocalHours(tz?: string, now: number = Date.now()): Set<n
 			d.setHours(localHour, 0, 0, 0);
 			ts = d.getTime();
 		}
-		if (getDeepSeekPeakMultiplier(ts) > 1.0) {
-			result.add(localHour);
+		for (let minute = 0; minute < 60; minute++) {
+			if (getPeakMultiplier(model, ts + minute * 60_000) > 1) {
+				result.add(localHour);
+				break;
+			}
 		}
 	}
 	return result;
 }
 
 /**
- * Windows come from `DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES` rather than a
- * hardcoded copy; a day that is entirely off-peak reports no proximity.
+ * Ending is the last {@link SURGE_ENDING_MINUTES} before billing drops to 1.
+ * That instant follows windows that touch or overlap, including one that
+ * starts at 0 on the next UTC day when this one ends at 1440, and a weekend
+ * cutoff that falls inside the run. Approaching is
+ * the {@link SURGE_APPROACH_MINUTES} before a window opens. A lead that wraps
+ * past midnight asks about the next UTC day.
  */
-export function checkSurgeProximity(at: number = Date.now()): { status: 'surge' | 'approaching' | 'ending' | undefined; multiplier: number } {
+export function checkSurgeProximity(at: number = Date.now(), model?: string): { status: 'surge' | 'approaching' | 'ending' | undefined; multiplier: number } {
+	const schedule = model ? surgeScheduleFor(model) : null;
+	if (!schedule) return { status: undefined, multiplier: 1 };
 	const now = new Date(at);
 	const currentUtcMinute = now.getUTCHours() * 60 + now.getUTCMinutes();
+	const multiplier = schedule.multiplier;
+	const y = now.getUTCFullYear();
+	const mo = now.getUTCMonth();
+	const d = now.getUTCDate();
+	const next = new Date(Date.UTC(y, mo, d + 1));
 
-	// Weekends are off-peak end to end, so "approaching" a window that will
-	// never open would be a warning about a charge that is not coming.
-	const daySurges = DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES.some(([start]) => {
-		const probe = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0) + start * 60000;
-		return getDeepSeekPeakMultiplier(probe) > 1.0;
-	});
-	if (!daySurges) return { status: undefined, multiplier: 1.0 };
+	const opensOn = (year: number, month: number, day: number, start: number) => {
+		const probe = Date.UTC(year, month, day, 0, 0, 0) + start * 60_000;
+		return getPeakMultiplier(model, probe) > 1;
+	};
 
-	for (const [start, end] of DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES) {
-		if (currentUtcMinute >= start && currentUtcMinute < end) {
-			return { status: 'surge', multiplier: 2.0 };
+	const extend = (windows: ReadonlyArray<readonly [number, number]>, from: number) => {
+		let end = from;
+		let changed = true;
+		while (changed) {
+			changed = false;
+			for (const [start, otherEnd] of windows) {
+				if (start <= end && otherEnd > end) {
+					end = otherEnd;
+					changed = true;
+				}
+			}
 		}
-		if (currentUtcMinute >= start - 20 && currentUtcMinute < start) {
-			return { status: 'approaching', multiplier: 2.0 };
-		}
-		if (currentUtcMinute >= end - 20 && currentUtcMinute < end) {
-			return { status: 'ending', multiplier: 2.0 };
+		return end;
+	};
+
+	for (const [start, end] of schedule.windowsUtcMinutes) {
+		if (currentUtcMinute >= start && currentUtcMinute < end && opensOn(y, mo, d, start) && getPeakMultiplier(model, at) > 1) {
+			const billedToday = schedule.windowsUtcMinutes.filter(([windowStart]) => opensOn(y, mo, d, windowStart));
+			const containing = billedToday.filter(([windowStart, windowEnd]) =>
+				currentUtcMinute >= windowStart && currentUtcMinute < windowEnd);
+			let stopsAt = extend(billedToday, Math.max(...containing.map(([, windowEnd]) => windowEnd)));
+			if (stopsAt === 1440) {
+				const ny = next.getUTCFullYear();
+				const nm = next.getUTCMonth();
+				const nd = next.getUTCDate();
+				const billedTomorrow = schedule.windowsUtcMinutes.filter(([windowStart]) => opensOn(ny, nm, nd, windowStart));
+				if (billedTomorrow.some(([windowStart, windowEnd]) => windowStart <= 0 && 0 < windowEnd)) {
+					const tomorrowEnd = extend(billedTomorrow, 0);
+					if (tomorrowEnd > 0) stopsAt = 1440 + tomorrowEnd;
+				}
+			}
+			if (schedule.weekendOffPeakFrom !== undefined) {
+				const dayStart = Date.UTC(y, mo, d, 0, 0, 0);
+				const horizon = stopsAt - currentUtcMinute;
+				for (let i = 1; i <= horizon; i++) {
+					if (!(getPeakMultiplier(model, dayStart + (currentUtcMinute + i) * 60_000) > 1)) {
+						stopsAt = currentUtcMinute + i;
+						break;
+					}
+				}
+			}
+			if (stopsAt - currentUtcMinute <= SURGE_ENDING_MINUTES) return { status: 'ending', multiplier };
+			return { status: 'surge', multiplier };
 		}
 	}
-	return { status: undefined, multiplier: 1.0 };
+	for (const [start] of schedule.windowsUtcMinutes) {
+		if (
+			currentUtcMinute >= start - SURGE_APPROACH_MINUTES
+			&& currentUtcMinute < start
+			&& opensOn(y, mo, d, start)
+		) {
+			return { status: 'approaching', multiplier };
+		}
+		if (start < SURGE_APPROACH_MINUTES) {
+			const leadFrom = 1440 - (SURGE_APPROACH_MINUTES - start);
+			if (
+				currentUtcMinute >= leadFrom
+				&& opensOn(next.getUTCFullYear(), next.getUTCMonth(), next.getUTCDate(), start)
+			) {
+				return { status: 'approaching', multiplier };
+			}
+		}
+	}
+	return { status: undefined, multiplier: 1 };
 }
 
 const MOON_PHASES = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"];
@@ -623,6 +694,7 @@ export function buildTimelineString(
 	noonGlyph: string,
 	proximityStatus?: 'surge' | 'approaching' | 'ending',
 	disabledEmoji?: boolean,
+	multiplier?: number,
 ): string {
 	const segments: { color: string; text: string }[] = [];
 	let lastColor: string | null = null;
@@ -658,7 +730,8 @@ export function buildTimelineString(
 
 	const bolt = disabledEmoji ? "!!" : "⚡";
 	if (proximityStatus === 'surge') {
-		result += ` \x1b[1;38;5;208m${bolt} SURGE 2x\x1b[0m`;
+		const factor = multiplier !== undefined ? ` ${String(multiplier)}x` : "";
+		result += ` \x1b[1;38;5;208m${bolt} SURGE${factor}\x1b[0m`;
 	} else if (proximityStatus === 'approaching') {
 		result += ` \x1b[1;5;38;5;208m${bolt} SURGE APPROACHING\x1b[0m`;
 	} else if (proximityStatus === 'ending') {

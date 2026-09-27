@@ -160,7 +160,7 @@ member is a breaking change), and `renderDaemonStatus` still renders it for a ca
   async, which reaps the caller's own child where `/proc` cannot show a zombie. The
   child's own claim, `--restart`'s wait, `-F`'s wait and `--list` still use a bare `kill 0`
   (#290).
-- **The restart does not rename over the old lease.** #281's approved design had both restart
+- **The restart does not rename over the old lease.** The approved design had both restart
   paths rename the new pid over the old, so the lease is never absent. The old daemon's own
   shutdown unlinks its lease on SIGTERM, so after it exits the lease is absent whatever the
   restarter does. Keeping it present would need a placeholder holder during the stop, which
@@ -179,7 +179,7 @@ member is a breaking change), and `renderDaemonStatus` still renders it for a ca
 - **Whoever claimed for a child that will not serve takes the claim back:** the helper for a
   child already dead, the startup wait for one that exited, the harness start for itself.
   A crash with nobody waiting leaves the claim naming a dead pid, which every reader reads as
-  dead. A recycled pid would read as alive; that hazard predates #281 and is #289.
+  dead. A recycled pid would read as alive; that hazard predates this change and is #289.
 - **`starting` is not re-derived from the start heartbeat.** The approved design had it mean "a
   live holder that has not written its start heartbeat yet". A daemon beats once at start
   (ownership spec T4), so that state lasts about as long as the daemon's boot, and only the

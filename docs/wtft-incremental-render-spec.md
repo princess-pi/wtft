@@ -50,7 +50,7 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 
 | Event | Behavior |
 |---|---|
-| `session_start` (Pi) or `wtft` / `wtft --watch` invoked (CLI) | Spawns a daemon and claims the session's lease for it, unless the lease holds `rebuild` or names a live process (#281). A per-session daemon that meets a live holder exits, unless an older-version tag exists, in which case it takes the lease over; a session under a harness root attaches to that root's one process. |
+| `session_start` (Pi) or `wtft` / `wtft --watch` invoked (CLI) | Spawns a daemon and claims the session's lease for it, unless the lease holds `rebuild` or names a live process (spec-281). A per-session daemon that meets a live holder exits, unless an older-version tag exists, in which case it takes the lease over; a session under a harness root attaches to that root's one process. |
 | New session data arrives | Classifies and flushes that session's tag. Flushes for one session are at least 667ms apart. |
 | No new data for 24h | That session is dropped ("idle timeout"). A `--session` process exits. A harness process stays up. It decides from in-memory timestamps on a timer and does not stat the file. While that harness runs, a write within the next 24h adopts the session again; after that only a request does. |
 | Daemon just spawned (< 60s) | Idle drop suppressed (startup grace period) |

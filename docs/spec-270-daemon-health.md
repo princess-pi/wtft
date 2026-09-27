@@ -52,10 +52,10 @@ inside a function, so load order does not matter. `checkDaemonHealth` is removed
 `alive` is the lease fact and nothing else: a live process holds this session's lease. No grace
 sets it. `ensureDaemonRunning` and `watchTagFile`'s wait for the tag file read `alive` and nothing
 else. `awaitDaemonUp` applies the same rule (`leasePid` and `pidAlive` on one lease read), and reads the
-current-version tag rather than `health`'s default; since #281, for a lease naming its own child it also needs a
+current-version tag rather than `health`'s default; since spec-281, for a lease naming its own child it also needs a
 heartbeat written since the wait began, and when it sees the child exit with no other live holder on the lease it unlinks the child's claim.
 
-Since #281 (`docs/spec-281-spawner-claims-lease.md`) the spawner claims the lease for its child,
+Since spec-281 (`docs/spec-281-spawner-claims-lease.md`) the spawner claims the lease for its child,
 so there is no gap to mask, and the two clock windows S5 kept (5 s after the caller's spawn, 2 s
 after a tag write) are gone. `decideHealth` never answers `starting`.
 
@@ -76,14 +76,14 @@ assistant model (read only then), else `null`. The widget's `getDaemonStatus` an
 `not-started` until it has spawned a daemon.
 
 Behaviour that changes, each in the direction of one rule for every reader. S5 also made the two
-grace windows answer `starting` rather than alive, for every reader; #281 then deleted them.
+grace windows answer `starting` rather than alive, for every reader; spec-281 then deleted them.
 
 - **`waiting-session` for a live lease with no session file** comes from `health`, so `--watch`
   shows it too; it was the widget's alone.
 - **`--watch`'s `r` shows what `health` finds.** On `main` the `restarting` flag was cleared
   only by a live lease, polled once a second five times; with none by then, the view showed
   `starting...` for as long as it ran. Now the view shows what `health` finds from the first ask,
-  the five-poll interval is gone, and the watchdog asks as it does at any other time. Since #281
+  the five-poll interval is gone, and the watchdog asks as it does at any other time. Since spec-281
   the restart first stops the lease holder (any pid whose cmdline has no `--harness`; #289) with
   SIGTERM, then SIGKILL after 2 s, and waits up to 2 s more; `--watch` keeps running during that
   wait.
@@ -111,7 +111,7 @@ grace windows answer `starting` rather than alive, for every reader; #281 then d
   absent, old), with no process spawned, and `health` over temp
   files (this process as the lease holder) for the adapter. It is not the full product of the
   axes.
-- `tests/wtft-179-daemon-health-reason.test.ts` unchanged and passing in S5 (#281 later rewrote
+- `tests/wtft-179-daemon-health-reason.test.ts` unchanged and passing in S5 (spec-281 later rewrote
   V3, whose grace it removed).
 - The widget (`getDaemonStatus`), `--watch` (`updateDaemonHealth`) and `ensureDaemonRunning`
   call `health`, `awaitDaemonUp` calls `readHealthFacts`, and `wtft-daemon --list`'s idle column calls `decideHealth` over the row's own lease; `grep checkDaemonHealth` over
@@ -120,7 +120,7 @@ grace windows answer `starting` rather than alive, for every reader; #281 then d
 
 ## 4. Decisions made while building, and roads not taken
 
-- **`alive` stays `kill 0` on the lease pid (since #281 `pidAlive`: EPERM counts as live, a
+- **`alive` stays `kill 0` on the lease pid (since spec-281 `pidAlive`: EPERM counts as live, a
   zombie as dead); #266 stays standing.** #266 is `wtft -F` signalling
   a pid it has not verified is a `wtft-daemon`, off Linux. Folding a process-identity check into
   `alive` would make `alive` false for every suite that stands in for a daemon with its own pid
@@ -132,7 +132,7 @@ grace windows answer `starting` rather than alive, for every reader; #281 then d
   `renderDaemonStatus` and the 179 suite read its field names. One field is added:
   `lastHbMs`, the dead holder's last heartbeat, which `--list` needs and `lastHbTime` was
   formatted from.
-- **The graces answered with a reason, never with `alive`** (both removed since by #281).
+- **The graces answered with a reason, never with `alive`** (both removed since by spec-281).
   `awaitDaemonUp` read `alive` as "the lease is claimed"; a grace that set it would have reported
   a daemon up before it claimed anything. *Road not taken:* a separate `shown` field for display, which would have put two
   liveness answers back on the interface.

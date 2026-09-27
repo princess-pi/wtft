@@ -141,7 +141,7 @@ declared runner (V5). **Result: 17 assertions, 0 failures; full suite 53/53.**
 |---|---|---|---|
 | V1 | No reason sentence survives in control flow | Scans the four consumer sources for `=== "<sentence>"` / `!== "<sentence>"` against every value in `DAEMON_REASON_TEXT`, exempting the table's own declaration. Derived from the table rather than a hardcoded list, so a sentence added later is covered without editing the test. | pass |
 | V2 | A typo'd comparison fails typecheck | Negative-control probe in the style of `tests/typecheck-gate.test.ts`: writes `bin/__reason_code_probe__.ts` comparing `status.reason` to `"daemon not fuond"`, asserts `bun run typecheck` exits non-zero **and** that the diagnostic names the probe. Removed in a `finally`. | pass |
-| V3 | **A just-spawned daemon is not reported dead** (rewritten by #281, which replaced the #124 grace window with the spawner's claim: `docs/spec-281-spawner-claims-lease.md` §3) | Points `ensureDaemonRunning` at a stand-in daemon that lives 1.5 s and claims nothing itself, so only the spawner's claim names it; each of the two asks spawns its own stand-in. Asserts `waiting-session` right after the spawn with no session file (and that it does not render as `daemon not found`), alive right after a spawn with one, and `not-found` once that stand-in has exited. | pass |
+| V3 | **A just-spawned daemon is not reported dead** (rewritten by spec-281, which replaced the #124 grace window with the spawner's claim: `docs/spec-281-spawner-claims-lease.md` §3) | Points `ensureDaemonRunning` at a stand-in daemon that lives 1.5 s and claims nothing itself, so only the spawner's claim names it; each of the two asks spawns its own stand-in. Asserts `waiting-session` right after the spawn with no session file (and that it does not render as `daemon not found`), alive right after a spawn with one, and `not-found` once that stand-in has exited. | pass |
 | V4 | Display text unchanged for the user | Pins all six code→sentence pairs, asserts the table has no missing member, asserts `undefined` degrades to `"unknown"` rather than throwing, and asserts the deleted `starting?:`/`waiting?:` booleans have not crept back. | pass |
 | V5 | Existing suites green | `bun run test` — 53 suites. | 53/53 |
 
@@ -150,7 +150,7 @@ daemon races the assertion to `alive`, and a test that sometimes passes for the 
 reason is worse than no test. The stand-in pins the health state deterministically and
 still exercises the real `ensureDaemonRunning` → `getDaemonStatus` path.
 
-**V3 was shown to go red.** Without the spawner's claim (#281), the asks right after each spawn
+**V3 was shown to go red.** Without the spawner's claim (spec-281), the asks right after each spawn
 read `not-found`, the literal #124 symptom. A guard never observed failing is not known to be a guard
 (the lesson of #168, restated here because it is what makes V3 worth more than V1 and V2
 combined: V1/V2 protect the *representation*, V3 protects the *behaviour*, so it survives any

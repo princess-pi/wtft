@@ -18,6 +18,14 @@ import * as path from "node:path";
 import { spawn } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { pollUntil } from "./lib/poll";
+import { fakeProcessTable } from "./lib/fake-process-table.ts";
+
+/** This process stands in as the lease's daemon, through the holder module's table (spec-297). */
+function standInDaemon(): () => void {
+	const table = fakeProcessTable();
+	table.daemon(process.pid);
+	return useProcessTable(table);
+}
 
 import {
 	health,
@@ -28,6 +36,7 @@ import {
 	parseEntryToInteraction,
 	serializeClassified,
 	classifiedToInteraction,
+	useProcessTable,
 } from "../bin/wtft.mjs";
 
 
@@ -122,7 +131,7 @@ console.log("1. Idle clamped by classified freshness (health)");
 	const tagPath = path.join(tagsDir, currentTagFileName(sessionPath));
 	const now = Date.now();
 
-	// Own PID file → "alive" path (this test process is the daemon stand-in).
+	const restoreTable = standInDaemon();
 	fs.writeFileSync(getDaemonPidPath(sessionPath), String(process.pid));
 	// Session file freshly written (mtime ≈ now) — session-mtime branch stays quiet.
 
@@ -149,6 +158,7 @@ console.log("1. Idle clamped by classified freshness (health)");
 	assert(`control: idleMs ≥ IDLE_THRESHOLD_MS (${IDLE_THRESHOLD_MS})`, (idleResult.idleMs || 0) >= IDLE_THRESHOLD_MS);
 
 	fs.unlinkSync(getDaemonPidPath(sessionPath));
+	restoreTable();
 }
 
 // ---
@@ -385,6 +395,7 @@ console.log("\n8. Cache TTL from usage.cache_creation");
 	const { sessionPath, tagsDir } = makeSessionFixture("ttl");
 	const tagPath = path.join(tagsDir, currentTagFileName(sessionPath));
 	const now = Date.now();
+	const restoreTable = standInDaemon();
 	fs.writeFileSync(getDaemonPidPath(sessionPath), String(process.pid));
 	fs.utimesSync(sessionPath, new Date(now - 10 * 60_000), new Date(now - 10 * 60_000));
 
@@ -404,6 +415,7 @@ console.log("\n8. Cache TTL from usage.cache_creation");
 	assert("no observed TTL → falls back to model heuristic (5min)", statusGuess.idle === true && statusGuess.cacheTtlMs === 300_000);
 
 	fs.unlinkSync(getDaemonPidPath(sessionPath));
+	restoreTable();
 }
 
 // ---

@@ -10,6 +10,7 @@ import { execSync, spawn } from "node:child_process";
 import { getDaemonPidPath, WTFT_TAGGER_VERSION, awaitDaemonUp } from "../extensions/lib/wtft-daemon-lib.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { pollUntil } from "./lib/poll";
+import { standInDaemonArgs } from "./lib/stand-in-daemon.ts";
 
 // Private pid namespace for this suite (#486). Must precede the first
 // getDaemonPidPath() and the first daemon spawn. Beyond the lease race this
@@ -389,7 +390,7 @@ console.log("\n7. awaitDaemonUp proof rules");
 		const { d, sp, pp } = mk("308c0de0-1a9b-4c3d-9e8f-000000000311");
 		const tagsDir = path.join(d, "wtft-tags"); fs.mkdirSync(tagsDir);
 		fs.writeFileSync(path.join(tagsDir, `${path.basename(sp)}.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`), JSON.stringify({ _hb: "stop" }) + "\n");
-		const c = spawn(process.execPath, ["-e", "process.exit(1)"], { stdio: "ignore" });
+		const c = spawn(process.execPath, standInDaemonArgs("process.exit(1)"), { stdio: "ignore" });
 		await waitExit(c);
 		const r = await awaitDaemonUp(sp, c, 1_000);
 		assert("a. leftover tag + dead child + no lease → dead, not up", r.state === "dead", JSON.stringify(r));
@@ -399,7 +400,7 @@ console.log("\n7. awaitDaemonUp proof rules");
 	// b. child killed by signal
 	{
 		const { d, sp, pp } = mk("308c0de0-1a9b-4c3d-9e8f-000000000312");
-		const c = spawn(process.execPath, ["-e", "setTimeout(()=>{}, 60000)"], { stdio: "ignore" });
+		const c = spawn(process.execPath, standInDaemonArgs("setTimeout(()=>{}, 60000)"), { stdio: "ignore" });
 		c.kill("SIGKILL");
 		await waitExit(c);
 		const r = await awaitDaemonUp(sp, c, 1_000);
@@ -407,14 +408,16 @@ console.log("\n7. awaitDaemonUp proof rules");
 		assert("b. …naming the signal", r.signalCode === "SIGKILL", JSON.stringify(r));
 		try { fs.unlinkSync(pp); } catch {} try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
 	}
-	// c. child exits 0 because another daemon (stood in by this test process) owns the lease
+	// c. child exits 0 because another daemon (a stand-in) owns the lease
 	{
 		const { d, sp, pp } = mk("308c0de0-1a9b-4c3d-9e8f-000000000313");
-		fs.writeFileSync(pp, String(process.pid));
-		const c = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
+		const elsewhere = spawn(process.execPath, standInDaemonArgs("setTimeout(()=>{}, 60000)"), { stdio: "ignore" });
+		fs.writeFileSync(pp, String(elsewhere.pid));
+		const c = spawn(process.execPath, standInDaemonArgs("process.exit(0)"), { stdio: "ignore" });
 		await waitExit(c);
 		const r = await awaitDaemonUp(sp, c, 1_000);
 		assert("c. child exit 0 + live lease held elsewhere → up", r.state === "up", JSON.stringify(r));
+		elsewhere.kill("SIGKILL"); await waitExit(elsewhere);
 		try { fs.unlinkSync(pp); } catch {} try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
 	}
 	// d–f: the lease names the child itself, as the spawner's claim leaves it
@@ -425,7 +428,7 @@ console.log("\n7. awaitDaemonUp proof rules");
 	// d. a live child that has not beaten since the wait began is not up, even with an older beat in the tag
 	{
 		const { d, sp, pp } = mk("308c0de0-1a9b-4c3d-9e8f-000000000315");
-		const c = spawn(process.execPath, ["-e", "setTimeout(()=>{}, 60000)"], { stdio: "ignore" });
+		const c = spawn(process.execPath, standInDaemonArgs("setTimeout(()=>{}, 60000)"), { stdio: "ignore" });
 		fs.writeFileSync(pp, String(c.pid));
 		fs.writeFileSync(tagOf(d, sp), JSON.stringify({ _hb: { first: 0, last: Date.now() - 200 } }) + "\n");
 		const r = await awaitDaemonUp(sp, c, 400);
@@ -436,7 +439,7 @@ console.log("\n7. awaitDaemonUp proof rules");
 	// e. the child beats after the wait began → up
 	{
 		const { d, sp, pp } = mk("308c0de0-1a9b-4c3d-9e8f-000000000316");
-		const c = spawn(process.execPath, ["-e", "setTimeout(()=>{}, 60000)"], { stdio: "ignore" });
+		const c = spawn(process.execPath, standInDaemonArgs("setTimeout(()=>{}, 60000)"), { stdio: "ignore" });
 		fs.writeFileSync(pp, String(c.pid));
 		const tag = tagOf(d, sp);
 		setTimeout(() => fs.writeFileSync(tag, JSON.stringify({ _hb: { first: 0, last: Date.now() } }) + "\n"), 100);
@@ -448,7 +451,7 @@ console.log("\n7. awaitDaemonUp proof rules");
 	// f. the child exits without beating → dead, and the claim made for it is taken back
 	{
 		const { d, sp, pp } = mk("308c0de0-1a9b-4c3d-9e8f-000000000317");
-		const c = spawn(process.execPath, ["-e", "setTimeout(()=>process.exit(1), 100)"], { stdio: "ignore" });
+		const c = spawn(process.execPath, standInDaemonArgs("setTimeout(()=>process.exit(1), 100)"), { stdio: "ignore" });
 		fs.writeFileSync(pp, String(c.pid));
 		const r = await awaitDaemonUp(sp, c, 2_000);
 		assert("f. lease names the child, which exits → dead", r.state === "dead", JSON.stringify(r));

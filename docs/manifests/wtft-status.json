@@ -1,0 +1,77 @@
+{
+  "schema": "wtft/status-manifest@1",
+  "statuses": [
+    {
+      "text": "reading...",
+      "color": "grey",
+      "example": null,
+      "meaning": "CLI startup placeholder, shown before the first health check completes (500 ms)."
+    },
+    {
+      "text": "live",
+      "color": "green",
+      "example": { "alive": true },
+      "meaning": "A live process holds the session's lease and the session is not idle (or its tag is missing or empty, when idle is not checked)."
+    },
+    {
+      "text": "idle (cache expires in 3min)",
+      "color": "yellow",
+      "example": { "alive": true, "idle": true, "idleMs": 120000, "cacheTtlMs": 300000 },
+      "meaning": "No new data for 2m2s; the minutes left before the model's prompt cache expires (the turn's own 1h or 5m TTL when the tag records one, else a guess from the model name)."
+    },
+    {
+      "text": "idle (cache emptied)",
+      "color": "yellow",
+      "example": { "alive": true, "idle": true, "idleMs": 400000, "cacheTtlMs": 300000 },
+      "meaning": "Idle, and that cache window has passed."
+    },
+    {
+      "text": "idle (local model)",
+      "color": "yellow",
+      "example": { "alive": true, "idle": true, "idleMs": 130000, "cacheTtlMs": null },
+      "meaning": "Idle, and the model has no remote cache or no model is known."
+    },
+    {
+      "text": "waiting for session .jsonl...",
+      "color": "yellow",
+      "reason": "waiting-session",
+      "example": { "alive": true, "reason": "waiting-session" },
+      "meaning": "The session file does not exist yet, and a live process holds the lease (a daemon just spawned holds it from the spawn when the lease was free, #281)."
+    },
+    {
+      "text": "starting...",
+      "color": "yellow",
+      "reason": "starting",
+      "example": { "alive": false, "reason": "starting" },
+      "meaning": "--watch's r is restarting the daemon."
+    },
+    {
+      "text": "stopped HH:MM",
+      "color": "red",
+      "reason": "idle-timeout",
+      "example": { "alive": false, "reason": "idle-timeout", "lastHbTime": "HH:MM" },
+      "meaning": "No live lease holder; HH:MM is the last heartbeat carrying a last time in the tag's last 8 KiB."
+    },
+    {
+      "text": "daemon not found",
+      "color": "red",
+      "reason": "not-found",
+      "example": { "alive": false, "reason": "not-found" },
+      "meaning": "No live lease holder and no such heartbeat."
+    },
+    {
+      "text": "daemon not started",
+      "color": "red",
+      "reason": "not-started",
+      "example": { "alive": false, "reason": "not-started" },
+      "meaning": "The widget has not spawned a daemon yet."
+    },
+    {
+      "text": "restart failed",
+      "color": "red",
+      "reason": "restart-failed",
+      "example": { "alive": false, "reason": "restart-failed" },
+      "meaning": "--watch's r could not restart it."
+    }
+  ]
+}

@@ -260,23 +260,34 @@ session discovery, so the daemon never treats its own writes as a session to par
 _Avoid_: Tag cache, output dir
 
 **Surge (window / pricing)**:
-DeepSeek's peak-valley pricing: `input`, `output` and `cacheRead` are billed at 2× inside
-certain UTC hour ranges on weekdays. (`cacheWrite` is never surged — for DeepSeek it is 0
-anyway.) The schedule is `DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES` in `extensions/lib/wtft-cost.ts`,
+A model card's `surge` field: `input`, `output` and `cacheRead` are billed at that field's
+multiplier inside its UTC windows. (`cacheWrite` is never surged — for DeepSeek it is 0
+anyway.) A card with no `surge` stays at 1. DeepSeek's four cards share one schedule,
 weekday-gated from `DEEPSEEK_WEEKEND_OFFPEAK_FROM`. **The hours are deliberately not written
-here** — read them from those constants, or from the generated
+here** — read them from the card, or from the generated
 `docs/manifests/wtft-pricing.json`. They used to be re-typed in code and in prose across the
 repo, with nothing that failed when a change missed one, and one prose copy said "as of July
 2026" nine days after the rates moved (#495). No count is given, because every count of them
 written so far has been wrong; `grep` is the authority.
-`getSurgeLocalHours()` maps the schedule onto display-timezone hours by asking
-`getDeepSeekPeakMultiplier` what each hour costs, so no hour is coloured differently from the
-way that hour is billed. It resolves the day containing the instant passed to it, and the
-renderer passes `now` — so the bar describes today while the bins under it may be older
-(#496). `checkSurgeProximity()` asks it only whether the day surges at all; the
-inside/approaching/ending decision is minute arithmetic over the same shared window constant.
-Rendered as the SURGE Timeline badge and orange segments.
-_Avoid_: Peak pricing, rush hour, premium window
+`getSurgeLocalHours()` marks a display-timezone hour when any minute of that hour
+bills above 1. It resolves the day containing the instant passed to it, and the
+renderer passes `now` — so the bar describes today while the bins under it may be older.
+`checkSurgeProximity()` reads `SURGE_APPROACH_MINUTES` before a window opens, and
+`SURGE_ENDING_MINUTES` before the surge stops. Both are 20. Ending is those
+minutes before billing drops to 1. That instant follows windows that touch or
+overlap, including one that starts at 0 on the next UTC day when this one ends
+at 1440, and a weekend cutoff that falls inside the run. A lead that wraps past midnight asks whether the
+next UTC day bills that window. A user card whose `surge` cannot be walked
+keeps its rates and drops the schedule; `loadUserPricing` prints the key and
+the reason on stderr. A rate that is not a finite number stores nothing, and
+the same line names the key. Omitting `surge` keeps the built-in schedule.
+A new DeepSeek id that omits `surge` borrows its sibling's schedule after the
+whole file is applied, so key order does not choose the schedule. `surge: null`
+stores the rates and turns the schedule off. An overnight window is two windows,
+each with start before end. Rendered as the SURGE Timeline badge and orange
+segments. The function that answers the multiplier is `getPeakMultiplier`: the
+brand is what that name drops.
+_Avoid_: Rush hour, premium window
 
 **Rate card (DeepSeek)**:
 The published per-1M quad. A `MODEL_PRICING` entry's unconditioned rates are the **off-peak**

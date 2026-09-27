@@ -124,7 +124,7 @@ it is serving neither. Split it, and derive the person's half from the program's
   grace-window comparison.
 - Rebuild `bin/wtft.mjs` / `bin/wtft-daemon.mjs` from source (generated).
 - `CONTEXT.md` — a `Daemon health reason` entry in `Language — WTFT`.
-- `docs/EXT_WTFT.html` — index row for this spec. Not anticipated when this section was
+- `docs/wtft.html` — index row for this spec. Not anticipated when this section was
   first written; `tests/wtft-doc-spec-index.test.ts` failed the run until it was added,
   which is the gate doing its job.
 
@@ -161,7 +161,7 @@ future change to how the reason is represented).
 
 This branch merged into `main` behind [#181](https://github.com/duppypro/princess-pi-tools/issues/181),
 which is the same family of bug one layer out: `serve` inferring process *identity* from a
-`ps aux` substring. One conflict, in `docs/EXT_WTFT.html` — both branches added a spec-index
+`ps aux` substring. One conflict, in `docs/wtft.html` — both branches added a spec-index
 row after `spec-168`. Both rows kept; nothing semantic overlapped, and the full suite is
 54/54 on the merged tree.
 

@@ -135,7 +135,7 @@ contains a turn that paid a full re-prime.
 
 Renaming makes the label state what was measured and stops the divider from making a claim the
 new implementation deliberately gave up the ability to check. Touch points: the divider string
-at `wtft-renderer.ts:1214` and its description in `docs/EXT_WTFT.html:164`.
+at `wtft-renderer.ts:1214` and its description in `docs/wtft.html:164`.
 
 ### Subagent cold starts are marked too — SUPERSEDED by Amendment 1 (#115)
 
@@ -321,7 +321,7 @@ The `d730d9c3` set includes `2026-08-05T19:59:55Z`, the `opus-4-8` → `opus-5` 
 seconds after the previous turn — the case that motivated the issue. `07:50:38Z`, the partial
 re-prime, is correctly not flagged. *(Since #241 it is flagged: re-measured 2026-09-24, it meets the recache rule against a previous context of 179,375 tokens.)*
 
-`docs/EXT_WTFT.html` reconciled to the observed rule and the new label at Step 5.
+`docs/wtft.html` reconciled to the observed rule and the new label at Step 5.
 
 ---
 
@@ -360,7 +360,7 @@ boolean stops being set on sidechain lines.
 **What the bump costs, stated rather than waved past.** The version is the key a reader resolves a
 tag file by, so every already-tagged session on every machine becomes `stale-version` provisional
 until the daemon re-tags it: `wtft` still prints the full total, adds a `PROVISIONAL` warning, and
-**exits 9 instead of 0** (`docs/EXT_WTFT.html`, *Provisional reads*). A scripted caller testing
+**exits 9 instead of 0** (`docs/wtft.html`, *Provisional reads*). A scripted caller testing
 `$? -eq 0` fails during that window, over a change whose visible effect is one fewer divider. It
 is transient and inherent to any bump — but it is exactly the trade the superseded section above
 declined, so it belongs in the record next to the reversal rather than only in the section that

@@ -4,7 +4,7 @@
 
 ## Goal
 
-Provide a live-updating cost chart in wtft `--watch` mode, backed by a persistent log parser daemon that pre-classifies session entries into a harness-agnostic tag file. The TUI watches the tag file via inotify (`fs.watch`) for zero-latency updates, and monitors the daemon's health with a colored status indicator on the title line. All render paths (Pi widget, CLI non-watch, CLI `--watch`) share a single SURGE timeline rendering inside `buildWtftLines`.
+Provide a live-updating cost chart in wtft `--watch` mode, backed by a persistent log parser daemon that pre-classifies session entries into a harness-agnostic tag file. The TUI watches the tag file via inotify (`fs.watch`) for zero-latency updates, and monitors the daemon's health with a colored status indicator on the title line. All render paths (Pi widget, CLI non-watch, CLI `--watch`) share a single SURGE timeline. `buildWtftLines` calls `renderWtftChart`, which computes it.
 
 ## Architecture
 
@@ -489,7 +489,7 @@ The 24-hour SURGE timeline and daemon status indicator are appended inline to th
 ## Daemon Status States
 
 What triggers each state: `docs/spec-daemon-health.md` §2 and §3. The rendered text and colours:
-`docs/manifests/wtft-status.json`, shown on `docs/EXT_WTFT.html` (`#daemon-health`). Both
+`docs/manifests/wtft-status.json`, shown on `docs/wtft.html` (`#daemon-health`). Both
 surfaces render through `renderDaemonStatus`.
 
 `--watch` asks `health` while it waits for the tag file, on tag changes it reads, on `r`, and on
@@ -503,31 +503,30 @@ The Pi `/wtft` widget also spawns a log parser daemon on `session_start`, using 
 
 ## SURGE Timeline (24-hour pricing bar)
 
-The 24-hour timeline on the title line shows DeepSeek peak-valley surge pricing windows:
-- **Orange segments**: Local hours that fall within surge windows. The schedule is
-  `DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES` in `extensions/lib/wtft-cost.ts`, weekday-gated
-  from `DEEPSEEK_WEEKEND_OFFPEAK_FROM` (#495). **The hours are deliberately not written
-  here** — read them from those constants: they were hardcoded in four places plus four
-  prose copies, and a schedule change had no way to fail when it missed one. The renderer
-  asks `getDeepSeekPeakMultiplier` per hour, so the bar's colours cannot disagree with what
-  that hour is billed at. It paints the schedule for **the day containing `now`**, while the
-  bins below it may be older; on a weekend the bar shows no surge hours even where weekday
-  bins are still flagged. Which day the bar should describe is #496.
+The 24-hour timeline on the title line shows the model's surge schedule, when its card has one:
+- **Orange segments**: Local hours that fall within that card's windows. DeepSeek's four
+  cards share one schedule, weekday-gated from `DEEPSEEK_WEEKEND_OFFPEAK_FROM` (#495).
+  **The hours are deliberately not written here** — read them from the card, or from the
+  generated manifest: they were hardcoded in four places plus four prose copies, and a
+  schedule change had no way to fail when it missed one. The renderer asks `getPeakMultiplier`
+  for each minute of a local hour and marks the hour when any minute bills above 1. It paints
+  the schedule for **the day containing `now`**, while the bins below it may be older; on a
+  weekend the DeepSeek bar shows no surge hours even where weekday bins are still flagged.
 - **Green segments**: All other hours (normal pricing)
 - **Clock-face marker**: The current local hour renders as a clock-face emoji
   (<code>🕐</code>–<code>🕛</code>, including <code>🕛</code> at the noon hour), and is
   additionally bold — which starts its own colour segment. Solar noon is a separate
   `☀️` glyph between hour 11 and hour 12, never a replacement for the noon hour's slot
   (#7). There is no `◆` and has not been for some time; this line said there was (#503).
-- **Surge badges**: Appended when in or near a surge window:
-  - `⚡ SURGE 2x` — currently in a surge window (2× pricing active)
-  - `⚡ SURGE APPROACHING` — within 20 minutes of surge start (blinking orange)
-  - `⚡ SURGE ENDING` — within 20 minutes of surge end (blinking green)
+- **Surge badges**: Appended when the card has a schedule and the instant is in or near a window. The active badge prints that card's multiplier. The leads are `SURGE_APPROACH_MINUTES` and `SURGE_ENDING_MINUTES`, both 20:
+  - `⚡ SURGE 2x` — inside a window that still bills, before the surge stops (DeepSeek's multiplier is 2)
+  - `⚡ SURGE APPROACHING` — within `SURGE_APPROACH_MINUTES` before the window opens (blinking orange)
+  - `⚡ SURGE ENDING` — within `SURGE_ENDING_MINUTES` before billing drops to 1 (blinking green). That instant follows windows that touch or overlap, including one that starts at 0 on the next UTC day when this one ends at 1440, and a weekend cutoff that falls inside the run
 
-**Unified rendering:** The timeline computation lives in `buildWtftLines` (one function, one call site). The `model` opt controls whether DeepSeek surge coloring is applied:
+**Unified rendering:** The timeline computation lives in `renderWtftChart`, which `buildWtftLines` calls. The `model` opt selects the card:
 - **Pi widget**: passes `sessionCtx.model.modelId` from the session context
-- **CLI paths**: auto-detects model from classified interactions (scans for "deepseek" substring)
-- **Non-DeepSeek models**: renders an all-green timeline with no badges
+- **CLI paths**: pass no model, so the strip uses the first classified interaction that names one
+- **A card with no surge schedule**: renders an all-green timeline with no badges
 
 ## SIGWINCH (terminal resize)
 
@@ -550,7 +549,7 @@ trigger `main()`.
 
 ## Settings Persistence (Cross-Harness Config)
 
-All WTFT settings are persisted in harness-agnostic JSON config files via the shared `extensions/lib/config.ts` module. No `.jsonl` persistence — settings survive across Pi sessions, Claude Code invocations, and machine restarts. Config hierarchy: code defaults → `~/.config/princess-pi/wtft.json` → `./.princess-pi/wtft.json` → CLI flags. Widget auto-shows on session start if a config file exists. See `EXT_WTFT.html` for the full config reference.
+All WTFT settings are persisted in harness-agnostic JSON config files via the shared `extensions/lib/config.ts` module. No `.jsonl` persistence — settings survive across Pi sessions, Claude Code invocations, and machine restarts. Config hierarchy: code defaults → `~/.config/princess-pi/wtft.json` → `./.princess-pi/wtft.json` → CLI flags. Widget auto-shows on session start if a config file exists. See `wtft.html` for the full config reference.
 
 ## SIGINT / 'q'
 

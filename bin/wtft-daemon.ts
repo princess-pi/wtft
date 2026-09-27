@@ -622,12 +622,12 @@ function claimPidFile(file: string): "claimed" | "busy" {
   });
 }
 
-function harnessRoot(which: string): string {
+function harnessRoot(which: string, env: NodeJS.ProcessEnv = process.env): string {
   if (which === "claude") {
-    return projectsDir();
+    return projectsDir(env);
   }
   if (which === "pi") {
-    return process.env.WTFT_PI_SESSIONS_DIR || path.join(os.homedir(), ".pi", "agent", "sessions");
+    return env.WTFT_PI_SESSIONS_DIR || path.join(os.homedir(), ".pi", "agent", "sessions");
   }
   process.stderr.write("wtft-daemon: --harness must be claude, claude-code or pi\n");
   process.exit(2);
@@ -835,6 +835,8 @@ function retryAdoptionLater(key: string, displayed: boolean) {
   timer.unref();
 }
 
+const RESPAWN_SETTLE_MS = 1000;
+
 function sleepMs(ms: number) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -1015,6 +1017,11 @@ function watchFocusRequests() {
   } catch { /* the sweep still serves requests */ }
 }
 
+function harnessPidFileFor(which: string, root: string): string {
+  const hash = createHash("sha256").update(root).digest("hex").slice(0, 12);
+  return path.join(os.tmpdir(), `wtft-harness-${which}-${hash}.pid`);
+}
+
 function harnessVersionFile(pid: number): string {
   return `${harnessPidFile}.${pid}.version`;
 }
@@ -1037,8 +1044,7 @@ function runHarness(which: string, focus: string) {
       quit(2);
     }
   }
-  const hash = createHash("sha256").update(root).digest("hex").slice(0, 12);
-  harnessPidFile = path.join(os.tmpdir(), `wtft-harness-${which}-${hash}.pid`);
+  harnessPidFile = harnessPidFileFor(which, root);
   // Written before the claim, so a harness that holds the pid file always has
   // one; keyed by pid, so one left by a killed harness names nobody live.
   fs.writeFileSync(harnessVersionFile(process.pid), TAGGER_VERSION);
@@ -1474,8 +1480,11 @@ handled is not listed. A --stop of a session a harness serves ends the command a
                         that hold no lease here; never a harness daemon, which stops once it has nothing
                         to serve or watch
   --restart             Stop every daemon holding a lease or a root pid file here (SIGTERM, SIGKILL after 2 s),
-                        and respawn one per stopped holder started with --session, claiming its lease when
-                        free; a harness holding no lease starts again on the next wtft. Linux only (/proc)
+                        and respawn one per stopped lease holder with its own --session or --harness,
+                        claiming its lease when free; a harness holding no lease is stopped (unless a respawn
+                        handed its session to it) and starts again on the next wtft. A holder that refuses the stop or
+                        outlives SIGKILL, or a respawn that neither runs nor hands off within
+                        1 s (one wait for all), makes it exit 1. Linux only (/proc)
   --stop <session>      Drop that session; ~ and relative paths are resolved. A harness serving it (found
                         through the session's lease) keeps running. A per-session process holding a
                         lease here, found by its own --session resolved against its cwd, gets SIGTERM
@@ -1495,12 +1504,12 @@ Daemon mode:
   -h, --help            Show this help
 
 Exit codes:
-  0  Served until done, a management pass that ran (a --restart that left a holder running
-     says so in its line), --session already served, or a --harness start that finds a live
+  0  Served until done, a management pass that ran, --session already served, or a --harness start that finds a live
      harness of the same or a newer version and hands it its --session (or has none)
   1  --session missing, or a tag file (without --harness); a harness root missing, its pid file unreadable,
      or neither claimable nor handed a session;
-     --stop refused (EPERM) or its harness lease changed or could not be removed; a tag
+     --stop refused (EPERM) or its harness lease changed or could not be removed;
+     --restart left a holder running or a respawn neither ran nor handed off; a tag
      write that failed, or a tag it cannot read or truncate at start; an unhandled error
   2  An unknown argument, a flag with no value, a second --stop, a bad --harness name, or a --session
      outside the harness root
@@ -1607,6 +1616,32 @@ if (showList || showCleanup || showRestart || stopSession) {
 
   let restartedN = 0, cleanedN = 0, stoppedN = 0, listedN = 0;
   let stopRefused = false;
+  let restartFailed = false;
+  const spawnDetached = (args: string[], env: NodeJS.ProcessEnv, cwd: string | undefined): number => {
+    const log = daemonStdio();
+    try {
+      const child = spawn(process.execPath, args, { detached: true, stdio: log.stdio, env, cwd });
+      child.unref();
+      return child.pid ?? 0;
+    } catch {
+      return 0;
+    } finally {
+      log.close();
+    }
+  };
+  const pendingRespawns: { childPid: number; served: () => number; settle: (ok: boolean) => void }[] = [];
+  const liveHolderIn = (file: string): number => {
+    try {
+      const holder = leasePid(fs.readFileSync(file, "utf8").trim());
+      return holdsLease(classifyPid(holder)) ? holder : 0;
+    } catch { return 0; }
+  };
+  const handedTo = new Set<number>();
+  const liveHarnessFor = (which: string, env: NodeJS.ProcessEnv, cwd: string | undefined): number => {
+    const key = which === "claude-code" ? "claude" : which;
+    if (key !== "claude" && key !== "pi") return 0;
+    return liveHolderIn(harnessPidFileFor(key, path.resolve(cwd ?? process.cwd(), harnessRoot(key, env))));
+  };
   const seenPids = new Set<number>();
   const restarted = new Set<number>();
   const keptRunning = new Set<number>();
@@ -1621,6 +1656,7 @@ if (showList || showCleanup || showRestart || stopSession) {
     const alive = holdsLease(kind);
 
     let sessionFound = null;
+    let harnessFound: string | null = null;
     try {
       const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
       const args = cmdline.split("\0");
@@ -1628,6 +1664,8 @@ if (showList || showCleanup || showRestart || stopSession) {
       if (sessIdx >= 0 && sessIdx + 1 < args.length) {
         sessionFound = args[sessIdx + 1];
       }
+      const harnessIdx = args.indexOf("--harness");
+      if (harnessIdx >= 0 && harnessIdx + 1 < args.length) harnessFound = args[harnessIdx + 1];
     } catch (_) {}
 
     let taggerVersion = "?";
@@ -1653,12 +1691,20 @@ if (showList || showCleanup || showRestart || stopSession) {
       }
       restarted.add(pid);
       const restartEnv = { ...process.env };
+      let holderCwd: string | undefined;
+      try {
+        holderCwd = fs.readlinkSync(`/proc/${pid}/cwd`);
+        if (!fs.statSync(holderCwd).isDirectory()) holderCwd = undefined;
+      } catch { holderCwd = undefined; }
       const wasDaemon = kind === "daemon" || kind === "harness";
       let stopped: ReturnType<typeof stopHolderSync> | null = null;
       if (wasDaemon) {
+        let environReadable = false;
+        try { fs.readFileSync(`/proc/${pid}/environ`); environReadable = true; } catch { /* unreadable */ }
         for (const key of ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR"]) {
           const value = procEnvValue(pid, key);
           if (value) restartEnv[key] = value;
+          else if (environReadable) delete restartEnv[key];
         }
         stopped = stopHolderSync(pid);
       }
@@ -1670,40 +1716,47 @@ if (showList || showCleanup || showRestart || stopSession) {
         stoppedN++;
         if (survived) stopRefused = true;
       }
-      if (survived) keptRunning.add(pid);
+      if (survived) { keptRunning.add(pid); restartFailed = true; }
       const respawnLease = wasDaemon && sessionFound && !survived ? getDaemonPidPath(sessionFound) : "";
       // The respawn's own lease is left for its claim, which takes a dead holder's.
       if (fullPath !== respawnLease && !survived) unlinkIfNames(fullPath, pid);
       let respawned: "claimed" | "busy" | "failed" = "failed";
-      if (respawnLease) {
-        let childPid = 0;
-        const log = daemonStdio();
-        try {
-          const child = spawn(process.execPath, [process.argv[1], ...daemonLaunchArgs(sessionFound!, restartEnv)], {
-            detached: true,
-            stdio: log.stdio,
-            env: restartEnv,
-          });
-          child.unref();
-          childPid = child.pid ?? 0;
-        } catch (_2) {} finally {
-          log.close();
-        }
-        if (childPid) {
-          try { respawned = claimLeaseForChild(respawnLease, childPid); } catch { respawned = "busy"; }
-          if (respawned === "busy" && !pidAlive(childPid)) respawned = "failed";
-        }
-        if (respawned === "failed") unlinkIfNames(fullPath, pid);
-      }
-      console.log(stopped === "denied" ? `Not stopped: PID ${pid} refused the signal (EPERM); its lease is left`
+      const harnessOnly = wasDaemon && !sessionFound && !survived && harnessFound !== null;
+      let harnessBack = false;
+      const report = () => console.log(stopped === "denied" ? `Not stopped: PID ${pid} refused the signal (EPERM); its lease is left`
         : survived ? `Not stopped: PID ${pid} is still running after SIGKILL; its lease is left`
         : respawned === "claimed" ? `Restarted: PID ${pid} → fresh daemon for ${sessionFound}`
         : respawned === "busy" ? `Respawned: PID ${pid} → a daemon for ${sessionFound}, left to claim the lease itself`
         : respawnLease ? `Stopped: PID ${pid} — the respawn for ${sessionFound} failed`
-        : wasDaemon ? `Stopped: PID ${pid} — no --session to respawn (#274)`
+        : harnessBack ? `Restarted: PID ${pid} → fresh harness daemon (${harnessFound})`
+        : harnessOnly ? `Stopped: PID ${pid} — the respawn of harness daemon (${harnessFound}) failed`
+        : wasDaemon ? `Stopped: PID ${pid} — no --session or --harness to respawn`
         : kind === "unverified" ? `Removed lease: PID ${pid} — cannot be verified as a daemon here, so it is left running`
         : `Removed lease: PID ${pid} — no live daemon found`);
+      const respawnFailed = (childPid: number) => {
+        respawned = "failed";
+        unlinkIfNames(fullPath, pid);
+        if (childPid) unlinkIfNames(respawnLease, childPid);
+        restartFailed = true;
+      };
       restartedN++;
+      if (respawnLease) {
+        const childPid = spawnDetached([process.argv[1], ...daemonLaunchArgs(sessionFound!, restartEnv)], restartEnv, holderCwd);
+        if (childPid) {
+          try { respawned = claimLeaseForChild(respawnLease, childPid); } catch { respawned = "busy"; }
+          pendingRespawns.push({ childPid, served: () => liveHolderIn(respawnLease), settle: ok => { if (!ok) respawnFailed(childPid); report(); } });
+          continue;
+        }
+        respawnFailed(0);
+      } else if (harnessOnly) {
+        const childPid = spawnDetached([process.argv[1], "--harness", harnessFound!], restartEnv, holderCwd);
+        if (childPid) {
+          pendingRespawns.push({ childPid, served: () => liveHarnessFor(harnessFound!, restartEnv, holderCwd), settle: ok => { harnessBack = ok; if (!ok) restartFailed = true; report(); } });
+          continue;
+        }
+        restartFailed = true;
+      }
+      report();
       continue;
     }
 
@@ -1794,6 +1847,12 @@ if (showList || showCleanup || showRestart || stopSession) {
   }
 
   if (showRestart) {
+    if (pendingRespawns.length > 0) sleepMs(RESPAWN_SETTLE_MS);
+    for (const r of pendingRespawns) {
+      const servedBy = r.served();
+      if (servedBy > 0 && servedBy !== r.childPid) handedTo.add(servedBy);
+      r.settle(pidAlive(r.childPid) || servedBy > 0);
+    }
     for (const pidFile of harnessPidFiles) {
       const fullPath = path.join(pidDir, pidFile);
       const pid = harnessHolders.get(pidFile) ?? NaN;
@@ -1804,10 +1863,16 @@ if (showList || showCleanup || showRestart || stopSession) {
         continue;
       }
       seenPids.add(pid);
+      if (handedTo.has(pid)) {
+        console.log(`Left running: PID ${pid} — harness ${pidFile}; a respawn handed its session to it`);
+        restartedN++;
+        continue;
+      }
       const live = procIsDaemon(pid);
       // It writes its hand-off only while its pid file still names it.
       const outcome = live ? stopHolderSync(pid) : null;
       if (outcome === "denied" || outcome === "survived") {
+        restartFailed = true;
         console.log(outcome === "denied" ? `Not stopped: PID ${pid} refused the signal (EPERM); harness ${pidFile} keeps its root pid file`
           : `Not stopped: PID ${pid} is still running after SIGKILL; harness ${pidFile} keeps its root pid file`);
         restartedN++;
@@ -1830,7 +1895,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   if (stopSession && stoppedN === 0) {
     console.log(`No daemon found for: ${stopSession}`);
   }
-  process.exit(stopRefused ? 1 : 0);
+  process.exit(stopRefused || restartFailed ? 1 : 0);
 }
 
 // --- Daemon mode (session required) ---

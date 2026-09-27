@@ -70,7 +70,7 @@ branch the same day, recorded in #196.
 |---|---|---|---|---|
 | this spec, spec-26 Amendment 4 | `descendant-live` behaves "exactly as the other reasons", notice included | `--json` built `notices[]` before the tree set the reason | ✅ this spec's test | **Code fixed**: the tree runs before the notices are built |
 | this spec, README, manifest | "within the last 2 minutes" | `IDLE_THRESHOLD_MS` is 122 s | ✅ this spec's test | Sentences derive the number from the constant |
-| spec-26, README, manifest, CONTEXT, EXT_WTFT | `wtft/session@4`, `spawn-tree@1`, a three-value reason set | the bumps this branch made | ✅ `wtft-26-json`, `wtft-116`, `wtft-119` | Updated |
+| spec-26, README, manifest, CONTEXT, wtft.html | `wtft/session@4`, `spawn-tree@1`, a three-value reason set | the bumps this branch made | ✅ `wtft-26-json`, `wtft-116`, `wtft-119` | Updated |
 | spec-26, README, manifest | exit 9 means the total may still grow "under the daemon" | `descendant-live` and `subagent-unreadable` are not daemon lag | `reconciled-against-untested` | Reworded to name `provisional.reason` |
 | this spec, spec-26 | a plain run "exits 0" with a live descendant | a plain run still exits 9 on a provisional tag | `reconciled-against-untested` | "does not make it provisional" |
 | this spec | liveness is an mtime test | an unstat-able transcript counted as live, forever (Macroscope, PR #199) | `reconciled-against-untested` | **Code fixed**: stat inside the parse's `try`; the edge is `unreadable` |

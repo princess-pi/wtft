@@ -416,7 +416,7 @@ assertions in this pass, and to 112 after PR review round 1.
 
 **Filed rather than fixed** — the file-level sweep surfaced substantial drift that predates this
 branch and is not about the spawn ledger: #123 (`wtft-renderer.ts` docstrings and banners), #124
-(`docs/EXT_WTFT.html`), #125 (`CONTEXT.md` `_Avoid_` lists vs settled practice), #126 (the
+(`docs/wtft.html`), #125 (`CONTEXT.md` `_Avoid_` lists vs settled practice), #126 (the
 manifest's CLI-vs-Pi divergences) and #127 (two exit-code paths that report success on failure).
 Fixing them here would have buried a 600-line change in a 2,000-line one.
 
@@ -556,7 +556,7 @@ commit message rather than in a promise.
 |---|---|---|---|
 | 1 | `CONTEXT.md` glossary teaches the retired 8 MiB tail-window read | Yes | Prose — the ledger is read whole or refused |
 | 2 | `CONTEXT.md` Self/tree lists "older than the ledger's tail read" as a floor condition | Yes | Prose — the three real floor conditions, matching README and this spec |
-| 3 | `docs/EXT_WTFT.html` spec index repeats the 8 MiB claim | Yes | Prose |
+| 3 | `docs/wtft.html` spec index repeats the 8 MiB claim | Yes | Prose |
 | 4 | "roughly 2.2 KiB" maximum record is not derivable from the constants | Yes | Prose — recomputed at just under 3 KiB; the "4 KiB only via escape expansion" conclusion survives |
 | 5 | Walk comment names `seen` and `alreadyCounted`, neither of which exists | Yes | Prose — `outcomeOf`, `visited`, `countedTotals`; the spec's walk section too |
 | 6 | `bin/wtft.ts` still claims spawn-record "shares nothing with the report path" | Yes | Prose — the module-scope work is admitted |

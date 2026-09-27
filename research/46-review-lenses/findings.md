@@ -29,7 +29,7 @@ Reviewed the diff, read the whole of `bin/install-wtft`, `build.ts`, both suites
 
 **Low** — `tests/wtft-36-relocatable-build.test.ts:239` — "build.ts's define compiles the fallback out of the bundle altogether" is false; verified the `unknown (cannot read …)` fallback survives at `bin/wtft.mjs:5618–5625`, merely unreachable behind `if (injected) return`. The conclusion drawn from it happens to hold, for a different reason.
 
-**Low** — `docs/EXT_WTFT.html:90` — says install-wtft "copies `wtft`, `wtft-daemon` and `wtft-daemon.mjs` into `~/bin`": three names, omitting `wtft.mjs`, and calling the two symlinks copies. spec:43/108 and README:22–24 say four entries, two copies and two symlinks.
+**Low** — `docs/wtft.html:90` — says install-wtft "copies `wtft`, `wtft-daemon` and `wtft-daemon.mjs` into `~/bin`": three names, omitting `wtft.mjs`, and calling the two symlinks copies. spec:43/108 and README:22–24 say four entries, two copies and two symlinks.
 
 **Low** — `README.md:30` — "`--json` gives the whole report as one document, on every exit path" — false for exit 64 (see the `:132` finding).
 
@@ -59,7 +59,7 @@ Closer 1's *second* half is not.
 
 **Flag table (spec:41-50)** — all six rows hold. `--check` creates nothing; `--json` is ignored by `--version`/`--help`; `--dir` rejects `--*` and `""`, is last-wins, defaults to `~/bin`; `--version` prints the absolute script path even through a symlink; `--` exits `64`.
 
-- **G · Medium · `bin/install-wtft:14`** — `--help` prints "build, then install **three** files into ~/bin". The layout is four. spec:43, `README.md:23` and `docs/EXT_WTFT.html:90` all say four; `--help` is the only surface still saying three, and spec:47 promises `--help` *is* this header.
+- **G · Medium · `bin/install-wtft:14`** — `--help` prints "build, then install **three** files into ~/bin". The layout is four. spec:43, `README.md:23` and `docs/wtft.html:90` all say four; `--help` is the only surface still saying three, and spec:47 promises `--help` *is* this header.
 - **H · Low · spec:46 vs spec:73** — the flag table's `--dir` row rejects only "a value beginning with `--`"; the exit-code table adds the empty string. The code (`bin/install-wtft:127`) rejects both. One row is stale against the other.
 
 **Exit codes (spec:67-73)** — each verified separately: `0` (install / in-sync / `--version` / `--help`); `1` (missing, stale, not-executable, no-source, no-dir — all five reproduced); `2` (install wording and `--check` wording both correct, decoy survives); `3` (measured with `node_modules` absent); `64` (unknown arg, bare `--dir`, `--dir --json`, `--dir ""`, unset `HOME`).

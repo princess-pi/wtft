@@ -43,8 +43,9 @@ new plumbing:
 - `wtft-parser.ts:426-429` (the overhead-cost split) passes `interaction.timestamp` the same way,
   for both the `full` and `withoutCw` calls.
 - `calculateClaudeCost(model, usage, timestamp?)` signature already exists (`wtft-cost.ts:227`)
-  and already forwards `timestamp` into `getDeepSeekPeakMultiplier(timestamp)` for DeepSeek surge
-  pricing (`wtft-cost.ts:66`, `:245`, `:256`).
+  and already forwards `timestamp` into the surge multiplier. At that baseline the call was
+  `getDeepSeekPeakMultiplier(timestamp)`, gated on an id containing `deepseek`. It is now
+  `getPeakMultiplier(model, timestamp)`, which reads the card's `surge` field.
 
 So the only structurally new thing this issue needs is: **a Sonnet-5-shaped `ModelPricing` entry
 that resolves different base rates depending on where `timestamp` falls**, generalized so any
@@ -154,7 +155,7 @@ $6.00/MTok standard — with no new code at that line.
   rodeo), so the next one hits the same problem again. The registry-field direction reuses the
   exact shape (`tiers?`) the codebase already chose for GPT-5.x size-based tiering.
 - **Defaulting an absent `timestamp` to `Date.now()`**, mirroring
-  `getDeepSeekPeakMultiplier`'s `timestamp || Date.now()` (`wtft-cost.ts:67`). Rejected on
+  `getPeakMultiplier` when its timestamp argument is omitted. Rejected on
   purpose: DeepSeek's surge multiplier is *supposed* to reflect "right now" when nothing else is
   known (it's a live-pricing feature, not a historical fact). Sonnet 5's intro window is a
   historical fact about when an interaction happened — defaulting to wall-clock would make
@@ -282,7 +283,7 @@ File-level blast radius (`git diff ad91cdc..HEAD --name-only`): `extensions/lib/
 `tests/wtft-pricing-tiers.test.ts`, `bin/wtft.mjs`, `bin/wtft-daemon.mjs` (generated, verified
 byte-consistent with a clean `bun run build`), plus this spec. Every docstring/comment in each
 `.ts` file was swept in file order against the shipped code; `README.md`, `docs/manifests/*.json`,
-and `docs/EXT_*.html` were grepped for any Sonnet-5/`dateTiers`/pricing-figure claim.
+and the living manuals (`docs/wtft.html`, `docs/token-budget.html`) were grepped for any Sonnet-5/`dateTiers`/pricing-figure claim.
 
 | Artifact | Claim | Contradicted by | Covered by a test? | Action |
 |---|---|---|---|---|
@@ -294,7 +295,7 @@ and `docs/EXT_*.html` were grepped for any Sonnet-5/`dateTiers`/pricing-figure c
 | `tests/wtft-claude5-pricing.test.ts:1-10` header (pre-fix) | Describes only #139/#140 | File now also carries a "Sonnet 5 intro pricing (#148)" `describe` block (5 tests) | ✅ (the tests themselves) | Fixed this commit — header now names #148 too |
 | `extensions/lib/wtft-cost.ts` — `DateTier`/`ModelPricing`/`resolveTieredRates` docstrings | Describe the dated-window resolution order, the falsy `timestamp` gate, and the `claude-sonnet-5` entry's dual rates | Read against `resolveTieredRates` (`:185-238`) and the registry entry (`:134-140`) — no discrepancy found | ✅ V1-V9 | No action — verified accurate |
 | `extensions/lib/wtft-daemon-lib.ts` `WTFT_TAGGER_VERSION` changelog comment | `2.7.1` bump, dated, cites the 50% overbill figure | `"2.7.1"` (`:197`) confirmed; `(3.00-2.00)/2.00 = 50%` checks out arithmetically | ✅ V11 | No action — verified accurate |
-| `docs/EXT_WTFT.html` "Model Pricing" table | Lists only Opus 4 / Sonnet 4 / Haiku 4.5 / DeepSeek — no Fable 5, Mythos 5, Opus 5, Sonnet 5 (or its `dateTiers`), or any GPT-5.x row | `MODEL_PRICING` (`wtft-cost.ts:113-169`) has carried the full Claude 5 + GPT-5.x lineup since #139/#141, well before this branch | N/A (doc-only) | **Not fixed here** — predates #148, this branch never touched the file, and a correct fix needs a design call (generate the table from the registry, per the doc's existing manifest-fetch pattern) rather than a mechanical edit. Filed as [#169](https://github.com/duppypro/princess-pi-tools/issues/169) |
+| `docs/wtft.html` "Model Pricing" table | Lists only Opus 4 / Sonnet 4 / Haiku 4.5 / DeepSeek — no Fable 5, Mythos 5, Opus 5, Sonnet 5 (or its `dateTiers`), or any GPT-5.x row | `MODEL_PRICING` (`wtft-cost.ts:113-169`) has carried the full Claude 5 + GPT-5.x lineup since #139/#141, well before this branch | N/A (doc-only) | **Not fixed here** — predates #148, this branch never touched the file, and a correct fix needs a design call (generate the table from the registry, per the doc's existing manifest-fetch pattern) rather than a mechanical edit. Filed as [#169](https://github.com/duppypro/princess-pi-tools/issues/169) |
 | `docs/manifests/wtft-cmd.json` (`--by-model`/`--cost` flag descriptions) | No model names or dollar figures asserted | N/A — manifest describes flags, not rates | N/A | No action — not a contradiction, out of scope for this table |
 | `README.md` | No Sonnet-5/pricing-figure claims | N/A | N/A | No action |
 

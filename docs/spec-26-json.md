@@ -267,7 +267,7 @@ carries. The table lives in `docs/manifests/wtft-cmd.json`, which is what
 
 | Code | Meaning | stdout under `--json` |
 |---|---|---|
-| **0** | A report was produced, including when there is nothing to report yet — a session file not written, or a tag with no classified data. Also the exit for the commands that run *instead* of a report (`--help`/`--why`/`--version`, `--list`/`--cleanup`/`--restart`/`--stop`, and `spawn-record`). | one JSON object for a report; the command's own output for the others |
+| **0** | A report was produced, including when there is nothing to report yet — a session file not written, or a tag with no classified data. Also the exit for the commands that run *instead* of a report (`--help`/`--why`/`--version` and `spawn-record`); `--list`/`--cleanup`/`--restart`/`--stop` exit with wtft-daemon's code. | one JSON object for a report; the command's own output for the others |
 | **1** | Error: no session found or selected, an invalid path, a daemon that could not be spawned or that died before producing data, a refused flag (`-p`), a read error other than a missing path in a harness's session tree while `--json` or `--tokens` lists unrecorded spawns (#212), or an unhandled exception. The reason is on stderr. | nothing |
 | **2** | `wtft spawn-record` only: the call was wrong — a missing or unknown flag, a flag with no value, a malformed session id, an oversized field. Nothing was appended. The report path never returns 2. | n/a |
 | **3** | `wtft spawn-record` only: the record was valid and the ledger could not be written — usually a full disk. The edge is not recorded, so the child is **invisible** to the tree, not `unattributed` (which means an edge we have whose child we could not read). Any partial line left behind is reported as a counted `malformedLedgerLines` on the next read; nothing tries to repair it. | n/a |
@@ -334,7 +334,7 @@ covers them:
 | Flag | What `--json` alongside it does |
 |---|---|
 | `--help`, `--why`, `--version` | prints that text on stdout, exit 0, no object |
-| `--list`, `--cleanup`, `--restart`, `--stop` | prints the daemon output on stdout, exit 0, no object |
+| `--list`, `--cleanup`, `--restart`, `--stop` | prints the daemon output on stdout, exits with wtft-daemon's code, no object |
 | `--watch` | enters the live re-render loop and never returns until SIGINT; no object |
 | `-p`/`--pager` | refused on stderr, exit 1, stdout empty |
 

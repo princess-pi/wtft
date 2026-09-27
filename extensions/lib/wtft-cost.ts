@@ -25,6 +25,18 @@ export interface DateTier {
 	cacheWrite: number;
 }
 
+/**
+ * Peak pricing for one model. Absent on a card means the multiplier is 1
+ * at every instant. `windowsUtcMinutes` are minutes since UTC midnight,
+ * half-open `[start, end)`.
+ */
+export interface SurgeSchedule {
+	multiplier: number;
+	windowsUtcMinutes: ReadonlyArray<readonly [number, number]>;
+	/** At and after this instant, Saturday and Sunday stay at multiplier 1. */
+	weekendOffPeakFrom?: number;
+}
+
 export interface ModelPricing {
 	input: number;
 	output: number;
@@ -32,6 +44,7 @@ export interface ModelPricing {
 	cacheWrite: number;
 	tiers?: CostTier[];
 	dateTiers?: DateTier[];
+	surge?: SurgeSchedule | null;
 }
 
 // ---
@@ -59,15 +72,6 @@ export function calculateServerToolCost(
 	}
 	return (webSearchRequests * WEB_SEARCH_PRICE) + (webFetchRequests * WEB_FETCH_PRICE);
 }
-
-/**
- * The DeepSeek peak windows, as minutes since UTC midnight, half-open
- * `[start, end)` — 01:00–04:00 and 06:00–10:00 UTC.
- */
-export const DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES: ReadonlyArray<readonly [number, number]> = [
-	[60, 240],   // 01:00–04:00 UTC
-	[360, 600],  // 06:00–10:00 UTC
-];
 
 /**
  * The instant weekends stopped being peak.
@@ -99,31 +103,17 @@ export const DEEPSEEK_V41_FLASH_FROM = Date.UTC(2026, 8, 10, 4, 0, 0);
  */
 export const DEEPSEEK_V4_PRO_REROUTE_FROM = Date.UTC(2026, 8, 14, 4, 0, 0);
 
-/**
- * The DeepSeek surge multiplier at `timestamp` — 2.0 inside a peak window on a
- * weekday, 1.0 otherwise.
- *
- * Reads the passed instant, never the host clock, except when the argument is
- * omitted (live callers). Zero means "unknown date" and surges at 1.0.
- */
-export function getDeepSeekPeakMultiplier(timestamp?: number): number {
-	if (timestamp === 0) return 1.0;
-	const ts = timestamp === undefined ? Date.now() : timestamp;
-	const d = new Date(ts);
-	const utcTime = d.getUTCHours() * 60 + d.getUTCMinutes(); // minutes since UTC midnight
-
-	if (ts >= DEEPSEEK_WEEKEND_OFFPEAK_FROM) {
-		const utcDay = d.getUTCDay(); // 0 = Sunday, 6 = Saturday
-		if (utcDay === 0 || utcDay === 6) return 1.0;
-	}
-
-	for (const [start, end] of DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES) {
-		if (utcTime >= start && utcTime < end) return 2.0;
-	}
-	return 1.0;
-}
-
 // ---
+
+/** The schedule DeepSeek's four cards share. */
+const peakSchedule: SurgeSchedule = {
+	multiplier: 2,
+	windowsUtcMinutes: [
+		[60, 240],
+		[360, 600],
+	],
+	weekendOffPeakFrom: DEEPSEEK_WEEKEND_OFFPEAK_FROM,
+};
 
 /**
  * Prices are per-1M tokens. Tiers apply when total input tokens
@@ -154,8 +144,6 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 	"claude-sonnet-4-6": { input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
 	"claude-sonnet-4-5": { input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
 	"claude-haiku-4-5":  { input: 1.00, output: 5.00, cacheRead: 0.10, cacheWrite: 1.25 },
-	// DeepSeek — no size tiers; surge is getDeepSeekPeakMultiplier's job.
-	//
 	// Base rates are OFF-PEAK, which is the card DeepSeek publishes as "half of
 	// the peak rates". `input` is the CACHE-MISS rate and `cacheRead` the
 	// CACHE-HIT rate, because DeepSeek's Anthropic-format endpoint reports
@@ -166,6 +154,7 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 	// The dateTiers windows carry every superseded card so historical sessions
 	// still report what they actually cost.
 	"deepseek-v4-flash-vision-exp": {
+		surge: peakSchedule,
 		input: 0.15, output: 0.60, cacheRead: 0.003, cacheWrite: 0,
 		// The standard row is the V4.1 FLASH card, not this model's own: from
 		// 2026-09-10T04:00Z the name routes to V4.1 Flash. Its real card
@@ -178,6 +167,7 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 		],
 	},
 	"deepseek-v4-flash": {
+		surge: peakSchedule,
 		// Standard row is the V4.1 Flash card — the name routes there from
 		// 2026-09-10T04:00Z.
 		input: 0.15, output: 0.60, cacheRead: 0.003, cacheWrite: 0,
@@ -189,6 +179,7 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 		],
 	},
 	"deepseek-v4-pro": {
+		surge: peakSchedule,
 		// Standard row is the V4.1 Flash card — the name routes there from
 		// 2026-09-14T04:00Z, four days after the Flash line, and there is no
 		// opt-out and no V4.1 Pro to route to instead.
@@ -201,6 +192,7 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 		],
 	},
 	"deepseek-flash": {
+		surge: peakSchedule,
 		input: 0.15, output: 0.60, cacheRead: 0.003, cacheWrite: 0,
 	},
 	// GPT-5.x — tiered pricing (short-context ≤272K, long-context >272K total input)
@@ -293,18 +285,82 @@ export function resolveTieredRates(
 	return rates;
 }
 
+function finiteNumber(value: unknown): value is number {
+	return typeof value === "number" && isFinite(value);
+}
+
+/** Multiplier above 1, and each window satisfies 0 <= start < end <= 1440. */
+function surgeRejection(surge: unknown): string | null {
+	if (!surge || typeof surge !== "object") return "surge must be an object";
+	const schedule = surge as SurgeSchedule;
+	if (!finiteNumber(schedule.multiplier) || schedule.multiplier <= 1) {
+		return "multiplier must be a finite number above 1";
+	}
+	if (!Array.isArray(schedule.windowsUtcMinutes)) return "windowsUtcMinutes must be a list of windows";
+	for (const pair of schedule.windowsUtcMinutes) {
+		if (!Array.isArray(pair) || !finiteNumber(pair[0]) || !finiteNumber(pair[1])) {
+			return "each window is a pair of minute numbers";
+		}
+		if (pair[0] > pair[1]) {
+			return "a window that wraps past midnight is two windows, each with start < end";
+		}
+		if (!(pair[0] >= 0 && pair[0] < pair[1] && pair[1] <= 1440)) {
+			return "each window must satisfy 0 <= start < end <= 1440";
+		}
+	}
+	if (schedule.weekendOffPeakFrom !== undefined && !finiteNumber(schedule.weekendOffPeakFrom)) {
+		return "weekendOffPeakFrom must be a finite number";
+	}
+	return null;
+}
+
+export type PricingRejection = { key: string; reason: string };
+
 /**
  * Pure merge — reading the pricing file from disk lives in
  * wtft-pricing-config.ts so this module stays fs-free.
+ * Returns one entry per card that could not be stored, and one per surge
+ * schedule that could not be walked. A bad rate stores nothing. A bad surge
+ * keeps the rates and drops the schedule.
  */
-export function applyUserPricing(overrides: Record<string, ModelPricing>): void {
+export function applyUserPricing(overrides: Record<string, ModelPricing>): PricingRejection[] {
+	const rejected: PricingRejection[] = [];
+	const borrowLater: string[] = [];
 	for (const [key, pricing] of Object.entries(overrides)) {
 		if (!pricing || typeof pricing !== "object") continue;
 		const { input, output, cacheRead, cacheWrite } = pricing;
 		// Why validate: a malformed JSON entry must not poison cost math with NaN.
-		if ([input, output, cacheRead, cacheWrite].some(v => typeof v !== "number" || !isFinite(v))) continue;
-		MODEL_PRICING[key.toLowerCase().trim()] = pricing;
+		if ([input, output, cacheRead, cacheWrite].some(v => typeof v !== "number" || !isFinite(v))) {
+			rejected.push({ key, reason: "input, output, cacheRead and cacheWrite must be finite numbers" });
+			continue;
+		}
+		const id = key.toLowerCase().trim();
+		if (pricing.surge !== undefined && pricing.surge !== null) {
+			const reason = surgeRejection(pricing.surge);
+			if (reason) {
+				rejected.push({ key, reason });
+				const stored: ModelPricing = { ...pricing };
+				delete stored.surge;
+				MODEL_PRICING[id] = stored;
+				continue;
+			}
+		}
+		const stored: ModelPricing = { ...pricing };
+		if (pricing.surge === null) delete stored.surge;
+		else if (stored.surge === undefined) {
+			const own = MODEL_PRICING[id]?.surge;
+			if (own) stored.surge = own;
+			else if (id.includes("deepseek")) borrowLater.push(id);
+		}
+		MODEL_PRICING[id] = stored;
 	}
+	for (const id of borrowLater) {
+		const card = MODEL_PRICING[id];
+		if (!card || card.surge !== undefined) continue;
+		const carried = MODEL_PRICING[deepSeekSiblingKey(id)]?.surge;
+		if (carried) card.surge = carried;
+	}
+	return rejected;
 }
 
 /**
@@ -348,7 +404,8 @@ export function deepSeekSiblingKey(model: string): "deepseek-v4-pro" | "deepseek
 export function describeFallbackPricing(model: string): string {
 	const m = (model || "").toLowerCase();
 	if (m.includes("deepseek")) {
-		return `guessing with the ${deepSeekSiblingKey(m)} rate card (surge multiplier applied)`;
+		const note = surgeScheduleFor(model) ? " (surge multiplier applied)" : "";
+		return `guessing with the ${deepSeekSiblingKey(m)} rate card${note}`;
 	}
 	return "using default $3/$15 rates";
 }
@@ -375,6 +432,46 @@ export function lookupModelPricing(model: string): ModelPricing | null {
 	return null;
 }
 
+/**
+ * The card's surge schedule, or null when the card has none.
+ *
+ * An id that matches no card and contains `deepseek` borrows
+ * {@link deepSeekSiblingKey}'s schedule, the same borrow
+ * {@link calculateClaudeCost} uses for the rates.
+ */
+export function surgeScheduleFor(model: string | undefined): SurgeSchedule | null {
+	if (!model) return null;
+	const found = lookupModelPricing(model);
+	if (found) return found.surge ?? null;
+	const m = model.toLowerCase();
+	if (!m.includes("deepseek")) return null;
+	return MODEL_PRICING[deepSeekSiblingKey(model)]?.surge ?? null;
+}
+
+/**
+ * The card's surge multiplier at `timestamp`, or 1 when the card has no
+ * surge schedule.
+ *
+ * Reads the passed instant, never the host clock, except when the argument
+ * is omitted (live callers). Zero means "unknown date" and returns 1.
+ */
+export function getPeakMultiplier(model: string | undefined, timestamp?: number): number {
+	const surge = surgeScheduleFor(model);
+	if (!surge) return 1;
+	if (timestamp === 0) return 1;
+	const ts = timestamp === undefined ? Date.now() : timestamp;
+	const d = new Date(ts);
+	if (surge.weekendOffPeakFrom !== undefined && ts >= surge.weekendOffPeakFrom) {
+		const utcDay = d.getUTCDay();
+		if (utcDay === 0 || utcDay === 6) return 1;
+	}
+	const utcTime = d.getUTCHours() * 60 + d.getUTCMinutes();
+	for (const [start, end] of surge.windowsUtcMinutes) {
+		if (utcTime >= start && utcTime < end) return surge.multiplier;
+	}
+	return 1;
+}
+
 export function calculateClaudeCost(model: string, usage: any, timestamp?: number): number {
 	if (!usage) return 0;
 	
@@ -382,6 +479,7 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 	// Cache write: 1.25x input (5-min TTL), 2.00x input (1-hour TTL)
 	// Cache read: 0.10x input (Anthropic standard)
 	let inputPrice = 3.00;
+	let unpeakedInput = inputPrice;
 	let outputPrice = 15.00;
 	let cacheReadPrice = 0.30;
 	let cacheWritePrice = 3.75; // 1.25x input for 5-min TTL
@@ -391,12 +489,11 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 	const registryPricing = lookupModelPricing(model);
 	if (registryPricing) {
 		const rates = resolveTieredRates(registryPricing, usage, timestamp);
-		if (m.includes("deepseek")) {
-			const peak = getDeepSeekPeakMultiplier(timestamp);
-			rates.input *= peak;
-			rates.output *= peak;
-			rates.cacheRead *= peak;
-		}
+		unpeakedInput = rates.input;
+		const peak = getPeakMultiplier(model, timestamp);
+		rates.input *= peak;
+		rates.output *= peak;
+		rates.cacheRead *= peak;
 		inputPrice = rates.input;
 		outputPrice = rates.output;
 		cacheReadPrice = rates.cacheRead;
@@ -407,7 +504,7 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 		// registry.
 		const sibling = MODEL_PRICING[deepSeekSiblingKey(m)];
 		const rates = resolveTieredRates(sibling, usage, timestamp);
-		const peak = getDeepSeekPeakMultiplier(timestamp);
+		const peak = getPeakMultiplier(model, timestamp);
 		inputPrice = rates.input * peak;
 		outputPrice = rates.output * peak;
 		cacheReadPrice = rates.cacheRead * peak;
@@ -436,7 +533,7 @@ export function calculateClaudeCost(model: string, usage: any, timestamp?: numbe
 	if (registryPricing) {
 		// 1h-TTL writes bill at 2x BASE INPUT (API rule), not 2x the 5m rate —
 		// Free-cache-write models stay free.
-		const cw1hPrice = cacheWritePrice === 0 ? 0 : inputPrice * 2.00;
+		const cw1hPrice = cacheWritePrice === 0 ? 0 : unpeakedInput * 2.00;
 		cacheWriteCost =
 			cw5m * (cacheWritePrice / 1000000) +
 			cw1h * (cw1hPrice / 1000000) +

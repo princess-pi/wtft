@@ -96,12 +96,15 @@ process.on("SIGHUP", () => { if (harnessMode) stopHarness("SIGHUP"); else shutdo
 
 let daemonLogCheckedAt = 0;
 
+/** At most once a minute, from every poll of every served session. */
+function rotateLogOnCadence(now: number) {
+  if (now - daemonLogCheckedAt < 60_000) return;
+  daemonLogCheckedAt = now;
+  rotateDaemonLog(daemonLogPath(), DAEMON_LOG_MAX_BYTES);
+}
+
 /** Overwrite same-width heartbeat in place (fixed-width pwrite); else append. File never shrinks. */
 function upsertHeartbeat(now: number) {
-  if (now - daemonLogCheckedAt >= 60_000) {
-    daemonLogCheckedAt = now;
-    rotateDaemonLog(daemonLogPath(), DAEMON_LOG_MAX_BYTES);
-  }
   const hbLine = JSON.stringify({ _hb: { first: slot.idleStartMs, last: now } }) + "\n";
   const hbBuf = Buffer.from(hbLine, "utf8");
   try {
@@ -504,6 +507,7 @@ function dropFor(reason: string): "drop" {
 }
 
 function serviceSession(): "continue" | "stop" | "drop" {
+  rotateLogOnCadence(Date.now());
   const state = slot.state;
   if (leaseHolder(slot.pidPath) !== String(process.pid)) {
     if (harnessMode) return "drop";

@@ -373,37 +373,52 @@ fi
 OLDER_DAEMONS=0
 DAEMONS_LEFT=0
 DAEMON_RESTART=none
-count_older_daemons() {
-  local n=0 btime hz p arg ticks built dir real_src real_dst
-  [ -r /proc/stat ] || { echo 0; return; }
+# Prints "<pid>:<starttime ticks>" per process on an older build. The daemon is
+# the script a node or bun runs (argv[1]), or argv[0] itself; an editor or pager
+# with the file open is not a daemon. A relative path is the process's own cwd's.
+older_daemons() {
+  local btime hz p a0 a1 arg ticks built dir real_src real_dst
+  [ -r /proc/stat ] || return 0
   btime="$(awk '/^btime /{print $2}' /proc/stat)"
   hz="$(getconf CLK_TCK 2>/dev/null)"
-  [ -n "$btime" ] && [ -n "$hz" ] || { echo 0; return; }
+  [ -n "$btime" ] && [ -n "$hz" ] || return 0
   real_src="$(cd "$SRC_DIR" 2>/dev/null && pwd -P)"
   real_dst="$(cd "$DEST_DIR" 2>/dev/null && pwd -P)"
   for p in /proc/[0-9]*; do
     [ -r "$p/cmdline" ] || continue
-    while IFS= read -r -d '' arg; do
-      case "$(basename -- "$arg")" in wtft-daemon|wtft-daemon.mjs|wtft-daemon.js|wtft-daemon.ts) ;; *) continue ;; esac
-      [ -f "$arg" ] || continue
-      dir="$(cd "$(dirname -- "$arg")" 2>/dev/null && pwd -P)" || continue
-      [ "$dir" = "$real_src" ] || [ "$dir" = "$real_dst" ] || continue
-      built="$(stat -L -c %Y "$arg" 2>/dev/null)" || continue
-      # Field 22, starttime in clock ticks since boot; fields after ")" of comm start at 3.
-      ticks="$(sed 's/.*) //' "$p/stat" 2>/dev/null | awk '{print $20}')"
-      [ -n "$ticks" ] || continue
-      # A tie counts as older: one second's resolution cannot order them.
-      [ $(( btime + ticks / hz )) -le "$built" ] && n=$((n + 1))
-      break
-    done < "$p/cmdline"
+    a0=""; a1=""
+    { IFS= read -r -d '' a0; IFS= read -r -d '' a1; } < "$p/cmdline" 2>/dev/null
+    case "$(basename -- "$a0")" in
+      wtft-daemon|wtft-daemon.mjs|wtft-daemon.js) arg="$a0" ;;
+      node|nodejs|bun|bun.exe) arg="$a1" ;;
+      *) continue ;;
+    esac
+    case "$(basename -- "$arg")" in wtft-daemon|wtft-daemon.mjs|wtft-daemon.js|wtft-daemon.ts) ;; *) continue ;; esac
+    case "$arg" in /*) ;; *) arg="$(readlink "$p/cwd" 2>/dev/null)/$arg" ;; esac
+    [ -f "$arg" ] || continue
+    dir="$(cd "$(dirname -- "$arg")" 2>/dev/null && pwd -P)" || continue
+    [ "$dir" = "$real_src" ] || [ "$dir" = "$real_dst" ] || continue
+    built="$(stat -L -c %Y "$arg" 2>/dev/null)" || continue
+    # Field 22, starttime in clock ticks since boot; fields after ")" of comm start at 3.
+    ticks="$(sed 's/.*) //' "$p/stat" 2>/dev/null | awk '{print $20}')"
+    [ -n "$ticks" ] || continue
+    # A tie counts as older: one second's resolution cannot order them.
+    [ $(( btime + ticks / hz )) -le "$built" ] && echo "${p#/proc/}:$ticks"
   done
-  echo "$n"
+  return 0
 }
 if [ "$STATUS" != build-failed ] && [ "$STATUS" != no-dir ]; then
-  OLDER_DAEMONS="$(count_older_daemons)"
+  OLDER_LIST="$(older_daemons)"
+  OLDER_DAEMONS="$(printf '%s' "$OLDER_LIST" | grep -c . || true)"
   if [ "$MODE" = install ] && [ "$OLDER_DAEMONS" -gt 0 ]; then
     "$DEST_DIR/wtft-daemon" --restart >&2
-    DAEMONS_LEFT="$(count_older_daemons)"
+    # Left: the same processes still running, by pid and start time, so a daemon
+    # --restart has just started is never counted.
+    # A zombie was stopped.
+    for entry in $OLDER_LIST; do
+      pid="${entry%%:*}"
+      [ "$(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null | awk '$1 != "Z" {print $20}')" = "${entry#*:}" ] && DAEMONS_LEFT=$((DAEMONS_LEFT + 1))
+    done
     if [ "$DAEMONS_LEFT" = 0 ]; then DAEMON_RESTART=done; else DAEMON_RESTART=failed; fi
   fi
 fi

@@ -18,16 +18,20 @@ export function daemonLogPath(env: NodeJS.ProcessEnv = process.env): string {
 
 const STALE_LOCK_MS = 60_000;
 
+function takeLock(lock: string): boolean {
+	try { fs.closeSync(fs.openSync(lock, "wx")); return true; } catch { return false; }
+}
+
 export function rotateDaemonLog(file: string, maxBytes: number): void {
 	const lock = `${file}.lock`;
 	try {
 		if (fs.statSync(file).size < maxBytes) return;
-		try {
-			fs.closeSync(fs.openSync(lock, "wx"));
-		} catch {
-			// Another process is rotating; one that died holding the lock is overtaken.
+		if (!takeLock(lock)) {
+			// Another process is rotating. One that died holding the lock left it
+			// stale: remove it and race for it again, so one taker still wins.
 			if (Date.now() - fs.statSync(lock).mtimeMs < STALE_LOCK_MS) return;
-			fs.utimesSync(lock, new Date(), new Date());
+			fs.rmSync(lock, { force: true });
+			if (!takeLock(lock)) return;
 		}
 		try {
 			// Checked again under the lock: a rotation that finished since the first

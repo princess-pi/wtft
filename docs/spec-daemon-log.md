@@ -15,15 +15,15 @@ shared log; stdout stays ignored.
 |---|---|
 | `DAEMON_LOG_MAX_BYTES` | 1,000,000 |
 | `daemonLogPath(env = process.env)` | `$XDG_STATE_HOME/wtft/daemon.log`, defaulting to `~/.local/state/wtft/daemon.log` |
-| `rotateDaemonLog(file, maxBytes)` | When `file` holds `maxBytes` or more: copies it to `file.1` (replacing any earlier one), then truncates `file` to 0. Otherwise does nothing. Rotates only while holding `file.lock` (created exclusively), and checks the size again under it; a lock older than a minute is taken over. Never throws |
+| `rotateDaemonLog(file, maxBytes)` | When `file` holds `maxBytes` or more: copies it to `file.1` (replacing any earlier one), then truncates `file` to 0. Otherwise does nothing. Rotates only while holding `file.lock` (created exclusively), and checks the size again under it. A lock older than a minute is removed and raced for again; two takers of the same stale lock can still both rotate, the second copying a short file over `.1`, a window accepted as rare. Never throws |
 | `daemonStdio(file?)` | Rotates, then opens `file` for append, creating its directory. Returns the `stdio` for a spawn, `["ignore", "ignore", fd]`, and a `close()` the spawner calls once the child has it. On any failure: `"ignore"`, as before |
 
 - **Truncate, not rename.** Every daemon on the host appends to the same file with `O_APPEND`. A
   rename would leave the running ones writing into `file.1`; a truncate lets each one's next write
   land at the new end of `file`. A line written between the copy and the truncate is lost, which
   is the price of not coordinating writers.
-- **When it rotates:** at every spawn, and in a running daemon at most once a minute, from its
-  heartbeat, so a harness that runs for days still keeps the file near 1 MB. That second call has
+- **When it rotates:** at every spawn, and in a running daemon at most once a minute, from every
+  poll of every session it serves, so a harness that runs for days still keeps the file near 1 MB. That second call has
   no test of its own; it is the same `rotateDaemonLog`.
 
 ## 2. Spawn sites

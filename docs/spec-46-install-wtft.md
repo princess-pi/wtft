@@ -179,13 +179,17 @@ now falls through the same evaluation as every other exit.
 }
 ```
 
-- **`daemons` (#260): a daemon on an older build is stopped.** `older` counts the processes whose
-  command line names a `wtft-daemon` bundle (`wtft-daemon`, `.mjs`, `.js` or `.ts`) in this clone's
-  `bin/` (where the Pi widget's daemons run from) or in `<dir>`, and that started no later than that
-  file's mtime; a start in the same second counts as older. `bun run build` and install mode leave
+- **`daemons` (#260): a daemon on an older build is stopped.** `older` counts the processes that run a
+  `wtft-daemon` bundle (`wtft-daemon`, `.mjs`, `.js` or `.ts`) from this clone's `bin/` (where the
+  Pi widget's daemons run from) or from `<dir>`, and that started no later than that file's mtime; a
+  start in the same second counts as older. "Run" means the bundle is argv[0], or argv[1] under
+  `node` or `bun`: an editor with the file open is not counted. A relative path is resolved against
+  the process's own cwd. `bun run build` and install mode leave
   an unchanged bundle unwritten, so its mtime dates the last build that changed it. When `older` is
-  above 0, install mode runs `<dir>/wtft-daemon --restart` (its output to stderr) and counts again:
-  `left` is how many are still older, and `restart` is `done` when none are, else `failed`.
+  above 0, install mode runs `<dir>/wtft-daemon --restart` (its output to stderr), then checks the
+  same processes by pid and start time: `left` is how many still run, not counting a zombie, and
+  `restart` is `done` when none do, else `failed`. A daemon `--restart` has just started is never
+  counted.
   `--restart` stops each lease and harness holder and restarts the per-session ones; **a harness is
   stopped, not restarted, and the next `wtft` or widget spawn starts it from the new bundle.** A
   process that holds no lease is out of `--restart`'s reach and stays in `left`. The human report

@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { watchTagFile, getCurrentVersionTagPath } from "../wtft-shared.js";
+import { watchTagFile, getCurrentVersionTagPath, CLI_DEFAULT_LIMIT } from "../wtft-shared.js";
 import { spawnWtftDaemon } from "../wtft-cli-shared.js";
 import type { WtftCliOptions } from "../wtft-cli-shared.js";
 
@@ -18,7 +18,7 @@ export async function runWatch(opts: WtftCliOptions, finalSessionPath: string, d
 	await watchTagFile(finalSessionPath, tagPath, {
 		daemonChild,
 		interval: opts.hasInterval ? opts.interval : "1h",
-		limit: opts.hasLimit ? opts.limit : 100,
+		limit: opts.hasLimit ? opts.limit : CLI_DEFAULT_LIMIT,
 		mode: opts.hasMode ? opts.mode : "cumulative",
 		timezone: opts.hasTimezone ? opts.timezone : undefined,
 		unit,

@@ -683,6 +683,13 @@ export function computeCacheMetrics(interactions: Interaction[]): { hitRate: str
 
 // ---
 
+/** The CLI's row limit when neither `-l` nor the session's config sets one. The Pi widget has its own. */
+export const CLI_DEFAULT_LIMIT = 17;
+
+export function chartLimit(opts: { hasLimit: boolean; limit: number }, configLimit: number | undefined): number {
+	return opts.hasLimit ? opts.limit : (configLimit ?? CLI_DEFAULT_LIMIT);
+}
+
 export function buildWtftLines(
 	interactions: Interaction[],
 	defaultSettings: {
@@ -706,6 +713,8 @@ export function buildWtftLines(
 		sessionNameSuffix?: string;
 		showCostColumns?: boolean;
 		showTokenColumns?: boolean;
+		/** Placeholder rows fill the chart out to this many interval rows. */
+		padRowsTo?: number;
 	}
 ): string[] | null {
 	const intervalStr = opts?.interval !== undefined ? opts.interval : defaultSettings.interval;
@@ -892,6 +901,7 @@ export function buildWtftLines(
 		cacheLine,
 		showCostColumns: opts?.showCostColumns !== false,
 		showTokenColumns: opts?.showTokenColumns !== false,
+		padRowsTo: opts?.padRowsTo,
 	});
 }
 

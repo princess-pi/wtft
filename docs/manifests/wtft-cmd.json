@@ -145,7 +145,7 @@
     },
     {
       "flags": "-l, --limit <number>",
-      "desc": "Limit the number of interval bars displayed. Default: 100 in the CLI, 10 in the Pi extension."
+      "desc": "Limit the number of interval bars displayed. Default: 17 in the CLI (or the session config's limit), 10 in the Pi extension. The CLI chart, in a report and in --watch, always shows exactly that many rows: with fewer intervals it is padded with placeholder rows, a dash under each label column and an empty bar area. The Pi widget is not padded."
     },
     {
       "flags": "-s, --session <path|filter>",

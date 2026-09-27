@@ -873,6 +873,7 @@ export async function watchTagFile(
 		const lines = buildWtftLines(deduped, defaultSettings, {
 			interval: finalInterval,
 			limit: finalLimit,
+			padRowsTo: finalLimit,
 			width: finalWidth,
 			mode: finalMode,
 			timezone: finalTimezone,

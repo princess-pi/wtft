@@ -37,6 +37,7 @@ export function renderWtftChart(input: {
 	cacheLine: string | null;
 	showCostColumns?: boolean;
 	showTokenColumns?: boolean;
+	padRowsTo?: number;
 }): string[] {
 	const {
 		displayedBins, mode, unit, width, disabledEmoji, tz,
@@ -339,6 +340,9 @@ export function renderWtftChart(input: {
 		}
 	}
 	if (missed(displayedBins[displayedBins.length - 1])) widgetLines.push(cacheMissLine);
+
+	const placeholder = [padString("-", labelWidth), ...columnWidths.map(w => padString("-", w))].join("  ");
+	for (let n = displayedBins.length; n < (input.padRowsTo ?? 0); n++) widgetLines.push(`\x1b[90m${placeholder}\x1b[0m`);
 
 	if (otherWarning) widgetLines.push(otherWarning);
 

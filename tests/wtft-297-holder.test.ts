@@ -41,11 +41,15 @@ describe("classifyPid", () => {
 		assert.strictEqual(classifyPid(999), "gone");
 	});
 
-	it("holdsLease and mayStop split the kinds as the spec says", () => {
+	it("holdsLease and mayStop split the kinds as the spec says; an unverified pid is stopped only off Linux", () => {
+		restore = useProcessTable(fakeProcessTable());
 		assert.deepStrictEqual(
 			(["gone", "daemon", "harness", "other", "unverified"] as const).map(k => [k, holdsLease(k), mayStop(k)]),
-			[["gone", false, false], ["daemon", true, true], ["harness", true, false], ["other", false, false], ["unverified", true, true]],
+			[["gone", false, false], ["daemon", true, true], ["harness", true, false], ["other", false, false], ["unverified", true, false]],
 		);
+		restore();
+		restore = useProcessTable(fakeProcessTable({ linux: false }));
+		assert.strictEqual(mayStop("unverified"), true);
 	});
 });
 
@@ -76,6 +80,15 @@ describe("stopping", () => {
 		assert.strictEqual(await stopHolder(401, fast), "stopped", "the daemon it was asked to stop is gone");
 		assert.deepStrictEqual(t.signals.map(s => s.sig), ["SIGTERM"]);
 		assert.ok(t.alive(401), "the new process was not signalled");
+	});
+
+	it("no SIGKILL for a pid recycled into another daemon during the SIGTERM wait", async () => {
+		const t = fakeProcessTable();
+		restore = useProcessTable(t);
+		t.daemon(402, [], "ignores-term");
+		t.afterTerm(402, () => { t.daemon(402); });
+		assert.strictEqual(await stopHolder(402, fast), "stopped");
+		assert.deepStrictEqual(t.signals.map(s => s.sig), ["SIGTERM"]);
 	});
 
 	it("killMs 0 sends no SIGKILL", () => {
@@ -209,6 +222,16 @@ describe("C4 -F", () => {
 		fs.writeFileSync(lease, "704");
 		assert.strictEqual(forceRebuildSession(file, { termMs: 30, pollMs: 1 }), "busy");
 		assert.deepStrictEqual(t.signals.map(s => s.sig), ["SIGTERM"]);
+	});
+	it("on Linux an unverifiable holder (hidepid) is not signalled", () => {
+		const t = fakeProcessTable();
+		restore = useProcessTable(t);
+		const { file, lease } = session();
+		t.daemon(706, ["--session", file]);
+		t.hide(706);
+		fs.writeFileSync(lease, "706");
+		forceRebuildSession(file, { termMs: 30, pollMs: 1 });
+		assert.deepStrictEqual(t.signals, []);
 	});
 	it("off Linux an unverifiable holder is signalled, as before", () => {
 		const t = fakeProcessTable({ linux: false });

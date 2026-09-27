@@ -18,6 +18,8 @@ interface ProcessTable {
   state(pid): "running" | "zombie" | "gone" | null;  // null: this host cannot tell (no /proc)
   cmdline(pid): string[] | null;                      // null: unreadable
   spawn(command, args, env): number;                  // detached, unref'd; 0 when it failed
+  inspectable(): boolean;                             // a /proc to read at all
+  startTime(pid): string | null;                      // changes when the pid is reused
 }
 ```
 
@@ -48,9 +50,9 @@ Three rules cover every caller:
   stale. `other` is stale: that process is not the daemon the lease was written for. Used by
   health, the startup wait, the spawner's claim, the per-session child's claim, the newer-tag
   check, `--list`, `--cleanup` and the reaper.
-- `mayStop(kind)`: `daemon` or `unverified`. These are the only kinds a one-session caller
-  (`restartDaemon`, `-F`) signals. `unverified` includes a live pid on Linux whose cmdline cannot
-  be read. A harness is never stopped on behalf of one session.
+- `mayStop(kind)`: `daemon`, or `unverified` on a host with no `/proc` at all (off Linux), as
+  before this spec. These are the only kinds a one-session caller (`restartDaemon`, `-F`)
+  signals. On Linux an `unverified` pid (hidepid) may be anything, so it is never signalled. A harness is never stopped on behalf of one session.
 - **A verified daemon:** `daemon` or `harness`, with the cmdline read. The harness's own claims
   (`holderIsLiveDaemon`, `takeOverLease`, the root claim, `pointSessionAt`) and the daemon
   management commands act only on these. `--restart` stops a harness as well, as its `--help`
@@ -67,7 +69,8 @@ An `other` is never signalled by anyone.
 say `gone`. If the pid is still there, it sends SIGKILL and waits up to `killMs` (2000 ms) more.
 The wait yields to the event loop, so a holder that is the caller's own child gets reaped.
 `stopHolderSync` is the same without yielding, for the daemon's synchronous paths. Before SIGKILL
-it classifies the pid again: if the kind changed (the pid was recycled during the wait), the
+it checks the pid is still the process it signalled: the same kind and the same start time
+(`/proc/<pid>/stat` field 22). If either changed, the pid was reused during the wait, the
 process it was asked to stop is gone, and nothing more is sent. Both return:
 - `stopped`: gone before the time ran out;
 - `denied`: a signal was refused. A refused SIGTERM returns at once; a refused SIGKILL returns after the SIGTERM wait;

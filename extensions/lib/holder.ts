@@ -16,6 +16,10 @@ export interface ProcessTable {
 	state(pid: number): "running" | "zombie" | "gone" | null;
 	/** null: unreadable. */
 	cmdline(pid: number): string[] | null;
+	/** Whether this host has a readable process table at all (Linux's /proc). */
+	inspectable(): boolean;
+	/** A value that changes when the pid is reused; null when it cannot be read. */
+	startTime(pid: number): string | null;
 	/** Detached and unref'd; 0 when it failed. */
 	spawn(command: string, args: string[], env: NodeJS.ProcessEnv): number;
 }
@@ -34,6 +38,18 @@ export const linuxProcessTable: ProcessTable = {
 	cmdline(pid) {
 		try { return fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(a => a.length > 0); }
 		catch { return null; }
+	},
+	inspectable() {
+		return fs.existsSync("/proc/self/stat");
+	},
+	startTime(pid) {
+		try {
+			const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+			// Field 22, starttime; fields after the ")" of comm start at 3.
+			return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] ?? null;
+		} catch {
+			return null;
+		}
 	},
 	spawn(command, args, env) {
 		try {
@@ -88,9 +104,10 @@ export function holdsLease(kind: HolderKind): boolean {
 	return kind === "daemon" || kind === "harness" || kind === "unverified";
 }
 
-/** Only these are signalled: a harness serves other sessions, and an `other` is not ours. */
+/** Only these are signalled by a one-session caller: a harness serves other sessions, an
+ *  `other` is not ours, and on a host with /proc an unverified pid may be anything. */
 export function mayStop(kind: HolderKind): boolean {
-	return kind === "daemon" || kind === "unverified";
+	return kind === "daemon" || (kind === "unverified" && !table.inspectable());
 }
 
 export interface StopOptions { termMs?: number; killMs?: number; pollMs?: number }
@@ -103,11 +120,12 @@ function sleepSync(ms: number): void {
 function* stopSteps(pid: number, opts: StopOptions): Generator<number, StopOutcome, void> {
 	const { termMs = 2000, killMs = 2000, pollMs = 20 } = opts;
 	const kind = classifyPid(pid);
+	const started = table.startTime(pid);
 	const phases: [Signal, number][] = [["SIGTERM", termMs]];
 	if (killMs > 0) phases.push(["SIGKILL", killMs]);
 	for (const [sig, ms] of phases) {
 		// A pid recycled during the wait is some other process: never signal it.
-		if (sig === "SIGKILL" && classifyPid(pid) !== kind) return "stopped";
+		if (sig === "SIGKILL" && (classifyPid(pid) !== kind || table.startTime(pid) !== started)) return "stopped";
 		const sent = table.signal(pid, sig);
 		if (sent === "gone") return "stopped";
 		if (sent === "denied") return "denied";

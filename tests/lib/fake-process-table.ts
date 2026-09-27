@@ -7,7 +7,7 @@ import type { ProcessTable, Signal } from "../../extensions/lib/holder.ts";
 /** How a process answers a signal. `dies` is the default. */
 export type OnSignal = "dies" | "ignores-term" | "zombie" | "denied" | "survives";
 
-interface Proc { cmdline: string[]; state: "running" | "zombie"; onSignal: OnSignal; hidden: boolean }
+interface Proc { cmdline: string[]; state: "running" | "zombie"; onSignal: OnSignal; hidden: boolean; started: number }
 
 export interface FakeProcessTable extends ProcessTable {
 	add(pid: number, cmdline: string[], onSignal?: OnSignal): number;
@@ -27,11 +27,12 @@ export function fakeProcessTable(opts: { linux?: boolean } = {}): FakeProcessTab
 	const procs = new Map<number, Proc>();
 	let nextPid = 50_000;
 	const hooks = new Map<number, () => void>();
+	let starts = 1;
 	const table: FakeProcessTable = {
 		signals: [],
 		spawned: [],
 		add(pid, cmdline, onSignal = "dies") {
-			procs.set(pid, { cmdline, state: "running", onSignal, hidden: false });
+			procs.set(pid, { cmdline, state: "running", onSignal, hidden: false, started: starts++ });
 			return pid;
 		},
 		hide(pid) {
@@ -69,6 +70,13 @@ export function fakeProcessTable(opts: { linux?: boolean } = {}): FakeProcessTab
 			const p = procs.get(pid);
 			if (p?.hidden) return null;
 			return p?.state ?? "gone";
+		},
+		inspectable() {
+			return linux;
+		},
+		startTime(pid) {
+			const p = procs.get(pid);
+			return linux && p && !p.hidden ? String(p.started) : null;
 		},
 		cmdline(pid) {
 			if (!linux) return null;

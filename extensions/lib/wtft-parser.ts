@@ -1143,7 +1143,7 @@ export function warnUnreadableTranscript(file: string, phase: "at discovery" | "
 	if (warnedUnreadableFile.has(file)) return;
 	warnedUnreadableFile.add(file);
 	process.stderr.write(
-		`[wtft-log-parser] WARNING: ${what} could not be read ${phase}, so its cost may be missing from this session's total (${file}): ${err instanceof Error ? err.message : String(err)}\n`,
+		`[wtft] WARNING: ${what} could not be read ${phase}, so its cost may be missing from this session's total (${file}): ${err instanceof Error ? err.message : String(err)}\n`,
 	);
 }
 
@@ -1153,7 +1153,7 @@ function warnUnreadableSubagentDir(dir: string, err: unknown): void {
 	if (warnedUnreadableDir.has(dir)) return;
 	warnedUnreadableDir.add(dir);
 	process.stderr.write(
-		`[wtft-log-parser] WARNING: a subagent transcripts directory could not be read, so its transcripts' costs may be missing from this session's total (${dir}): ${err instanceof Error ? err.message : String(err)}\n`,
+		`[wtft] WARNING: a subagent transcripts directory could not be read, so its transcripts' costs may be missing from this session's total (${dir}): ${err instanceof Error ? err.message : String(err)}\n`,
 	);
 }
 

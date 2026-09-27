@@ -167,7 +167,7 @@ export function describeProvisionalReason(provisional: { reason: string | null }
 	if (provisional.reason === "descendant-live") {
 		return `a descendant session wrote to its transcript in the last ${IDLE_THRESHOLD_MS / 1000} s, so the tree total may still grow`;
 	}
-	return "no subagent transcript has been read since this tag was written";
+	return "no clean subagent sweep has finished since this tag was last written, so a subagent's cost may still be missing";
 }
 
 export function readTagProvisional(tagPath: string): TagProvisional {

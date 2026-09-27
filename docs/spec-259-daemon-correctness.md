@@ -19,7 +19,10 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 ### Arguments
 
 - **An unknown argument exits 2** with the usage line on stderr (decision I), and so does a flag
-  missing its value (`--session`, `--harness`, `--stop` last on the line).
+  missing its value or given an empty one (`--session`, `--harness`, `--stop` last on the line).
+  A bad `--harness` name and a `--session` outside the harness root exit 2 with no usage line; a
+  missing `--session`, a tag file given as one, and a missing harness root exit 1. The full table:
+  `wtft-daemon --help` § Exit codes.
 - **`--harness claude-code` is `--harness claude`** (decision O). Both use one pid file.
 - **`--stop <session>` resolves its path**: `~` and `~/…` against `$HOME`, a relative path against
   the working directory (decision K). A per-session daemon matches when its own `--session`,
@@ -88,8 +91,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 
 - **A failed adoption gives up loudly** (A3, F14). After the first try and five retries 667 ms
   apart, the harness
-  writes `could not adopt <session>: <reason>` to stderr, and removes the lease and `.display`
-  marker if they still name it, so no reader is told the session is served.
+  writes `could not adopt <session>: <reason>` to stderr, and removes the lease if it still names
+  it, and the `.display` marker once no lease is left, so no reader is told the session is served.
 - **A served session whose lease reads `rebuild` is adopted again**, whether a wake, the sweep or
   a flush finds it, so the session is rebuilt at once. Any other lease that is not the harness's
   drops the session, as `--stop` means.
@@ -142,12 +145,14 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 ### Sweep liveness (A6, A7, G18)
 
 - **The sweep checks each served transcript**, at most once per 667 ms per session. One that is
-  gone, has grown, was replaced, or whose last read failed is woken, so a lost watch event only
+  gone, has grown or shrunk, was replaced, holds a partial last line, or whose last read failed is woken, so a lost watch event only
   delays it. A subagent scan the sweep runs keeps a failed read of the session's own transcript,
   so it never stamps swept over it. That covers a
   deleted session, the 1 h limit on a never-written session, and a directory whose watch failed.
 - **A served session whose tree has a directory that cannot be watched has its subagents read**
   by the sweep, at most once per 667 ms, since no watch event comes for a subagent written there.
+  While a `claude -p` lookup, a reseed, a held turn or a spawn window is open, the subagent scan
+  runs on every 250 ms sweep, unthrottled.
 - **A failed directory watch is retried** by the sweep every 10 s while a served session, or a session dropped for idling, needs it.
   Meanwhile the sweep reads the size, inode and mtime of each session dropped for idling in such a
   directory, and a write adopts it again, a same-length rewrite included.
@@ -163,8 +168,9 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   after `WTFT_DAEMON_IDLE_MS`** (24 h), after serving any request posted since its last read of
   them, so it hands nothing on. A request posted between that read and the pid file's removal is
   left in the request directory for the next harness; like the lease race, it needs two processes
-  inside one short gap. A harness stopped for any other reason hands on the sessions it dropped
-  for idling, so the next harness watches them.
+  inside one short gap. A harness stopped for any other reason while it still holds its root
+  pid file hands on the sessions it dropped for idling, so the next harness watches them; one
+  stopped because that file was removed or names another pid hands on nothing.
 - **A harness whose root directory is gone stops** at its next sweep.
 - **`--cleanup` never stops a harness** (decision E, I26), fixture or not. A harness drops what it
   no longer serves, and stops when it serves nothing.
@@ -176,7 +182,7 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 ### Stop reason (decision P)
 
 - **The stop line carries its reason**: `{"_hb":"stop","reason":"<reason>"}`. A per-session
-  daemon writes it on shutdown, as before. A harness writes it when it drops a session whose lease
+  daemon writes it on shutdown while its lease still names it; one that lost its lease writes none. A harness writes it when it drops a session whose lease
   it still holds for idling, removal or never being written, and when it stops. A stop on a failed
   tag write writes none.
 

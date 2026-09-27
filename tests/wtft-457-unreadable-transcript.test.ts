@@ -1192,7 +1192,7 @@ try {
 			for (let i = 0; i < 30 && !warned; i++) {
 				await sleep(250);
 				const stderr = daemon.stderr.join("");
-				warned = stderr.includes("the session transcript could not be read at discovery") && stderr.includes(sessionPath);
+				warned = stderr.includes("the session transcript could not be read") && stderr.includes(sessionPath);
 			}
 			assert("daemon warns that the unreadable main session transcript could not be read", warned);
 

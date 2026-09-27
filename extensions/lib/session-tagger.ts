@@ -223,8 +223,8 @@ interface Out {
 	log: LogLine[];
 }
 
-function debug(out: Out, text: string) { out.log.push({ level: "debug", text: `[wtft-log-parser] ${text}` }); }
-function warn(out: Out, text: string) { out.log.push({ level: "warn", text: `[wtft-log-parser] WARNING: ${text}` }); }
+function debug(out: Out, text: string) { out.log.push({ level: "debug", text: `[wtft-daemon] ${text}` }); }
+function warn(out: Out, text: string) { out.log.push({ level: "warn", text: `[wtft-daemon] WARNING: ${text}` }); }
 function errText(err: unknown): string { return err instanceof Error ? err.message : String(err); }
 
 function hasClaudeCommand(interaction: Turn): boolean {
@@ -357,7 +357,7 @@ function parseNewLines(state: TaggerState, world: World, out: Out, now: number):
 		if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return [];
 		if (!state.warned.session.has(filePath)) {
 			state.warned.session.add(filePath);
-			warn(out, `the session transcript could not be read at discovery, so its cost may be missing from this session's total (${filePath}): ${errText(err)}`);
+			warn(out, `the session transcript could not be read, so its cost may be missing from this session's total (${filePath}): ${errText(err)}`);
 		}
 		state.pollHadFailure = true;
 		invalidateStaleSweptMarker(state, world, out, now);
@@ -511,7 +511,7 @@ function warnParse(state: TaggerState, out: Out, stateKey: string, sessionId: st
 	state.pollHadFailure = true;
 	if (state.warned.parse.has(stateKey)) return;
 	state.warned.parse.add(stateKey);
-	warn(out, `a subagent transcript, or a nested one it folds, could not be read or parsed, so its cost may be missing from this session's total until it succeeds (${sessionId}): ${errText(err)}`);
+	warn(out, `a subagent transcript, or a nested one it folds, could not be read or parsed, so its cost may be missing from this session's total until it succeeds (subagent ${sessionId}; the error names the file): ${errText(err)}`);
 }
 
 function syncSubagentTranscript(state: TaggerState, world: World, out: Out, now: number, rawFile: string, foldedByAnother: ReadonlySet<string>): boolean {

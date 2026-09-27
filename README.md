@@ -109,8 +109,9 @@ unchanged and will run once re-enabled.
 `tests/wtft-daemon.test.sh` was a second known-red row here until
 [#72](https://github.com/princess-pi/wtft/issues/72): it looked for the tag
 file beside the session, where the daemon has not written it since `wtft-tags/`
-arrived. It is a plain gating step now, and hermetic — it exports a private
-`TMPDIR`, so it never touches a daemon it did not start.
+arrived. It is a plain gating step now. It exports a private `TMPDIR`, but its
+`--cleanup` step scans every process: a per-session daemon of yours under
+`/tmp/` that holds no lease in that `TMPDIR` is sent SIGTERM too.
 
 Once the package is on the registry, `stock-node-registry` is re-enabled — the
 `if: false` line deleted in the same PR that un-parks
@@ -342,7 +343,7 @@ daemon, and an idle session there is dropped while the process stays up and watc
 24h more; the process stops 24h after it last had a session to serve, retry or watch for. A session
 outside those directories keeps its own. The commands that run instead of a report —
 `--help`/`--why`/`--version` and the daemon-management group — return before
-that and spawn nothing. `wtft-daemon` exists for debugging, not for normal use.
+that, and spawn nothing except `--restart`, which respawns each per-session daemon it stops. `wtft-daemon` exists for debugging, not for normal use.
 
 `wtft --help` is the flag reference — the examples above are a tour, not the
 list.

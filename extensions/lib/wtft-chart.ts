@@ -147,13 +147,13 @@ export function renderWtftChart(input: {
 	const titleLeftFinal = titleLeft + sessionSuffix;
 	
 	const now = Date.now();
-	const isDeepSeek = (opts?.model || "").toLowerCase().includes("deepseek");
-	const surgeHours = isDeepSeek ? getSurgeLocalHours(tz, now) : new Set<number>();
+	const surgeHours = getSurgeLocalHours(tz, now, opts?.model);
 	const currentHour = getCurrentLocalHour(tz, now);
-	const proximity = isDeepSeek ? checkSurgeProximity(now) : { status: undefined as ReturnType<typeof checkSurgeProximity>["status"], multiplier: 1.0 };
+	const proximity = checkSurgeProximity(now, opts?.model);
 	const glyphs = timelineGlyphs(now, tz, disabledEmoji);
 	const timelineStr = buildTimelineString(
-		surgeHours, currentHour, glyphs.start, glyphs.end, glyphs.noon, proximity.status, disabledEmoji,
+		surgeHours, currentHour, glyphs.start, glyphs.end, glyphs.noon,
+		proximity.status, disabledEmoji, proximity.multiplier,
 	);
 
 	const legendItems = CATEGORY_ORDER

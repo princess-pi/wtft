@@ -6,7 +6,7 @@
 import * as assert from "node:assert";
 import { describe, it } from "node:test";
 import {
-	getDeepSeekPeakMultiplier,
+	getPeakMultiplier,
 	calculateClaudeCost,
 	lookupModelPricing,
 	MODEL_PRICING,
@@ -18,7 +18,7 @@ import {
 // --- Fixed instants, named by what makes them interesting ---
 
 // Named by what makes each instant interesting. The window hours are NOT
-// re-typed here — read them from DEEPSEEK_PEAK_WINDOWS_UTC_MINUTES; these
+// re-typed here — read them from the deepseek-flash card's surge schedule; these
 // fixtures say only "inside window 1", "outside both", and so on, so a
 // schedule change makes the assertions fail rather than the comments lie.
 const MON_INSIDE_WINDOW_1 = Date.UTC(2026, 7, 24, 2, 0, 0);   // Mon 2026-08-24 02:00Z
@@ -30,28 +30,28 @@ const SUN_INSIDE_WINDOW_2 = Date.UTC(2026, 7, 30, 7, 0, 0);   // Sun 2026-08-30 
 // Before the 2026-08-23 schedule change, a weekend inside a window was peak.
 const SAT_BEFORE_SCHEDULE_CHANGE = Date.UTC(2026, 7, 15, 2, 0, 0); // Sat 2026-08-15 02:00Z
 
-describe("#495 getDeepSeekPeakMultiplier — weekends are off-peak from 2026-08-23", () => {
+describe("#495 getPeakMultiplier — weekends are off-peak from 2026-08-23", () => {
 	it("is peak on a weekday inside either window", () => {
-		assert.strictEqual(getDeepSeekPeakMultiplier(MON_INSIDE_WINDOW_1), 2.0);
-		assert.strictEqual(getDeepSeekPeakMultiplier(MON_INSIDE_WINDOW_2), 2.0);
+		assert.strictEqual(getPeakMultiplier("deepseek-flash", MON_INSIDE_WINDOW_1), 2.0);
+		assert.strictEqual(getPeakMultiplier("deepseek-flash", MON_INSIDE_WINDOW_2), 2.0);
 	});
 
 	it("is off-peak on a weekday outside both windows", () => {
-		assert.strictEqual(getDeepSeekPeakMultiplier(MON_OUTSIDE_WINDOWS), 1.0);
+		assert.strictEqual(getPeakMultiplier("deepseek-flash", MON_OUTSIDE_WINDOWS), 1.0);
 	});
 
 	it("is off-peak on a Saturday inside a window", () => {
-		assert.strictEqual(getDeepSeekPeakMultiplier(SAT_INSIDE_WINDOW_1), 1.0);
+		assert.strictEqual(getPeakMultiplier("deepseek-flash", SAT_INSIDE_WINDOW_1), 1.0);
 	});
 
 	it("is off-peak on a Sunday inside a window", () => {
-		assert.strictEqual(getDeepSeekPeakMultiplier(SUN_INSIDE_WINDOW_2), 1.0);
+		assert.strictEqual(getPeakMultiplier("deepseek-flash", SUN_INSIDE_WINDOW_2), 1.0);
 	});
 
 	it("still charges peak on a weekend before the 2026-08-23 change", () => {
 		// The schedule change is not retroactive: a July or early-August
 		// weekend session really was billed at the surge rate.
-		assert.strictEqual(getDeepSeekPeakMultiplier(SAT_BEFORE_SCHEDULE_CHANGE), 2.0);
+		assert.strictEqual(getPeakMultiplier("deepseek-flash", SAT_BEFORE_SCHEDULE_CHANGE), 2.0);
 	});
 });
 
@@ -248,7 +248,7 @@ describe("#100 deepseek-flash is priced from its own entry, not guessed", () => 
 		// deepseek-flash carries no dated window, so the case would have passed
 		// for a model whose card had not started yet.
 		const peakInstant = Date.UTC(2026, 8, 11, 2, 0, 0);
-		assert.strictEqual(getDeepSeekPeakMultiplier(peakInstant), 2.0);
+		assert.strictEqual(getPeakMultiplier("deepseek-flash", peakInstant), 2.0);
 		// That the instant is past the cutover is asserted BEHAVIOURALLY rather
 		// than against the constant: deepseek-v4-flash does carry a dated window,
 		// so it prices at the Flash card here only if the cutover has passed.
@@ -364,31 +364,15 @@ describe("#495 deepseek-v4-flash-vision-exp resolves to its own entry", () => {
 	});
 });
 
-// --- One definition of the windows ---
-//
-// The schedule was hardcoded in four places, with nothing that failed when a
-// change missed one. These tests do NOT grep for the literals: a source-text
-// check would survive deleting the thing it names (#408).
-//
-// What they actually guard, stated exactly, because an earlier wording here
-// claimed more than the assertions deliver: they pin that the renderer
-// DELEGATES to the pricing module rather than deciding surge itself. Today
-// `getSurgeLocalHours` calls `getDeepSeekPeakMultiplier`, so with tz="UTC" the
-// comparison below is a tautology and CANNOT fail — that is the point. It goes
-// red the moment someone re-introduces an independent copy in the renderer that
-// answers differently, which is the regression #495 removed. It is not, and
-// cannot be, a check that a schedule change reached two places; there is only
-// one place left for it to reach.
-
 describe("#495 the renderer's surge display agrees with the pricing module", () => {
 	it("marks exactly the hours the cost module charges 2x for, on a weekday", () => {
-		const surge = getSurgeLocalHours("UTC", MON_OUTSIDE_WINDOWS);
+		const surge = getSurgeLocalHours("UTC", MON_OUTSIDE_WINDOWS, "deepseek-flash");
 		for (let hour = 0; hour < 24; hour++) {
 			const ts = Date.UTC(2026, 7, 24, hour, 0, 0); // Mon 2026-08-24
-			const charged = getDeepSeekPeakMultiplier(ts) === 2.0;
+			const charged = getPeakMultiplier("deepseek-flash", ts) === 2.0;
 			assert.strictEqual(
 				surge.has(hour), charged,
-				`hour ${hour}: renderer says surge=${surge.has(hour)}, pricing charges ${getDeepSeekPeakMultiplier(ts)}x`,
+				`hour ${hour}: renderer says surge=${surge.has(hour)}, pricing charges ${getPeakMultiplier("deepseek-flash", ts)}x`,
 			);
 		}
 	});
@@ -396,7 +380,7 @@ describe("#495 the renderer's surge display agrees with the pricing module", () 
 	it("marks no hours at all on a Saturday", () => {
 		// Weekends have been off-peak since 2026-08-23, so a surge band drawn
 		// across a Saturday timeline is a claim the bill will not back up.
-		const surge = getSurgeLocalHours("UTC", SAT_INSIDE_WINDOW_1);
+		const surge = getSurgeLocalHours("UTC", SAT_INSIDE_WINDOW_1, "deepseek-flash");
 		assert.strictEqual(surge.size, 0);
 	});
 
@@ -405,19 +389,19 @@ describe("#495 the renderer's surge display agrees with the pricing module", () 
 		// Date.now()` used to hand that turn the wall clock, so the same historical
 		// turn priced differently on every run. Unknown instant => no surge, which
 		// is how resolveTieredRates already treats the same 0.
-		assert.strictEqual(getDeepSeekPeakMultiplier(0), 1.0);
+		assert.strictEqual(getPeakMultiplier("deepseek-flash", 0), 1.0);
 	});
 
 	it("reports surge proximity from the passed instant, never the host clock", () => {
-		assert.strictEqual(checkSurgeProximity(MON_INSIDE_WINDOW_1).status, "surge");
-		assert.strictEqual(checkSurgeProximity(MON_INSIDE_WINDOW_1).multiplier, 2.0);
-		assert.strictEqual(checkSurgeProximity(MON_OUTSIDE_WINDOWS).status, undefined);
-		assert.strictEqual(checkSurgeProximity(MON_OUTSIDE_WINDOWS).multiplier, 1.0);
+		assert.strictEqual(checkSurgeProximity(MON_INSIDE_WINDOW_1, "deepseek-flash").status, "surge");
+		assert.strictEqual(checkSurgeProximity(MON_INSIDE_WINDOW_1, "deepseek-flash").multiplier, 2.0);
+		assert.strictEqual(checkSurgeProximity(MON_OUTSIDE_WINDOWS, "deepseek-flash").status, undefined);
+		assert.strictEqual(checkSurgeProximity(MON_OUTSIDE_WINDOWS, "deepseek-flash").multiplier, 1.0);
 	});
 
 	it("reports no surge inside a window on a weekend", () => {
-		assert.strictEqual(checkSurgeProximity(SAT_INSIDE_WINDOW_1).status, undefined);
-		assert.strictEqual(checkSurgeProximity(SAT_INSIDE_WINDOW_1).multiplier, 1.0);
-		assert.strictEqual(checkSurgeProximity(SUN_INSIDE_WINDOW_2).status, undefined);
+		assert.strictEqual(checkSurgeProximity(SAT_INSIDE_WINDOW_1, "deepseek-flash").status, undefined);
+		assert.strictEqual(checkSurgeProximity(SAT_INSIDE_WINDOW_1, "deepseek-flash").multiplier, 1.0);
+		assert.strictEqual(checkSurgeProximity(SUN_INSIDE_WINDOW_2, "deepseek-flash").status, undefined);
 	});
 });

@@ -3,7 +3,7 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { StringDecoder } from "node:string_decoder";
-import { calculateClaudeCost, calculateServerToolCost, getDeepSeekPeakMultiplier } from "./wtft-cost.js";
+import { calculateClaudeCost, calculateServerToolCost, getPeakMultiplier, surgeScheduleFor } from "./wtft-cost.js";
 import { getParseAdapters } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.ts";
 import { cwdSlugVariants, resolveLastCwd } from "./harness/session-cwd.ts";
@@ -200,8 +200,9 @@ function buildInteraction(
 		serverToolRequests.web_fetch_requests || 0
 	);
 
-	const surgePriced = effectiveModel.toLowerCase().includes("deepseek")
-		? getDeepSeekPeakMultiplier(timestamp) > 1.0 : undefined;
+	const surgePriced = surgeScheduleFor(effectiveModel)
+		? getPeakMultiplier(effectiveModel, timestamp) > 1
+		: undefined;
 
 	const files: { path: string; action: "read" | "write" }[] = [];
 	const commands: string[] = [];

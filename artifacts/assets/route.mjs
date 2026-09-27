@@ -45,8 +45,14 @@ export function parseRoute(hash) {
   let path = cut === -1 ? raw : raw.slice(0, cut);
   const frag = cut === -1 ? "" : raw.slice(cut + 1);
   const q = path.indexOf("?");
+  const search = q === -1 ? "" : path.slice(q);
   if (q !== -1) path = path.slice(0, q);
-  return { path, frag };
+  return { path, frag, search };
+}
+
+export function headingFrag(frag) {
+  if (!frag) return "";
+  return frag.startsWith("doc-") ? frag : headingDomId(frag, 1);
 }
 
 export function resolveRelative(basePath, href) {
@@ -55,21 +61,24 @@ export function resolveRelative(basePath, href) {
   return url.pathname.replace(/^\//, "") + url.search + url.hash;
 }
 
-export function rewriteHref(basePath, href, known) {
-  if (!href || /^([a-z]+:|\/\/)/i.test(href)) return href;
+export function rewriteHref(basePath, href, known, htmlPaths) {
+  if (!href || /^([a-z]+:|\/\/)/i.test(href) || href.startsWith("/")) return href;
   if (href.startsWith("#")) {
     const frag = href.slice(1);
     const id = frag.startsWith("doc-") ? frag : headingDomId(frag, 1);
     return "#" + basePath + "#" + id;
   }
-  const [file, frag] = href.split("#");
+  const hash = href.indexOf("#");
+  const file = hash === -1 ? href : href.slice(0, hash);
+  const frag = hash === -1 ? "" : href.slice(hash + 1);
   if (!file) return href;
   const resolved = resolveRelative(basePath, file);
   const pathOnly = resolved.split("?")[0].split("#")[0];
-  const query = resolved.includes("?") ? resolved.slice(resolved.indexOf("?")) : "";
+  const query = resolved.includes("?") ? resolved.slice(resolved.indexOf("?")).split("#")[0] : "";
   if (known.has(pathOnly) || file.endsWith(".md") || file.endsWith(".mdx")) {
-    const id = !frag ? "" : (frag.startsWith("doc-") ? frag : headingDomId(frag, 1));
+    const html = htmlPaths && htmlPaths.has(pathOnly);
+    const id = !frag ? "" : html ? frag : (frag.startsWith("doc-") ? frag : headingDomId(frag, 1));
     return "#" + pathOnly + query + (id ? "#" + id : "");
   }
-  return resolved;
+  return pathOnly + query + (frag ? "#" + frag : "");
 }

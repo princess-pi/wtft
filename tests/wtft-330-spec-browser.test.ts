@@ -7,7 +7,7 @@ import * as assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, it } from "node:test";
-import { headingDomId, pageTitle, parseRoute, resolveRelative, rewriteHref, splitFrontmatter } from "../artifacts/assets/route.mjs";
+import { headingDomId, headingFrag, pageTitle, parseRoute, resolveRelative, rewriteHref, splitFrontmatter } from "../artifacts/assets/route.mjs";
 
 const artifacts = path.resolve(import.meta.dirname, "../artifacts");
 
@@ -32,11 +32,23 @@ describe("#330 the chart spec is a browser page", () => {
 	});
 
 	it("points a plain file at the document directory", () => {
-		const href = rewriteHref("chart-spec/spec.mdx", "data.csv", new Set());
-		assert.equal(href, "chart-spec/data.csv");
+		const href = rewriteHref("chart-spec/spec.mdx", "data.csv#x", new Set());
+		assert.equal(href, "chart-spec/data.csv#x");
 		const heading = rewriteHref("chart-spec/spec.mdx", "#sample", new Set());
 		assert.equal(heading, "#chart-spec/spec.mdx#doc-sample");
 		assert.equal(headingDomId("***", 1), "doc-section");
+		assert.equal(headingFrag("sample"), "doc-sample");
+		assert.equal(rewriteHref("chart-spec/spec.mdx", "/foo.html", new Set()), "/foo.html");
+		const html = new Set(["chart-spec/picker.html"]);
+		const known = new Set(["chart-spec/picker.html"]);
+		assert.equal(
+			rewriteHref("chart-spec/spec.mdx", "picker.html?preset=cost#tokens", known, html),
+			"#chart-spec/picker.html?preset=cost#tokens",
+		);
+		const route = parseRoute("#chart-spec/picker.html?preset=cost#tokens");
+		assert.equal(route.path, "chart-spec/picker.html");
+		assert.equal(route.search, "?preset=cost");
+		assert.equal(route.frag, "tokens");
 	});
 
 	it("keeps a heading on the document route", () => {

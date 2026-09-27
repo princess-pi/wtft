@@ -1,4 +1,4 @@
-import { splitFrontmatter, parseRoute, resolveRelative, rewriteHref, headingDomId, pageTitle } from "./route.mjs";
+import { splitFrontmatter, parseRoute, resolveRelative, rewriteHref, headingDomId, headingFrag, pageTitle } from "./route.mjs";
 
 const nav = document.getElementById("nav-list");
 const navTitle = document.querySelector(".nav-title");
@@ -13,13 +13,16 @@ function fillToc(root, basePath) {
   const toc = document.getElementById("toc");
   if (!toc) return;
   toc.replaceChildren();
-  const seen = new Map();
+  const used = new Set();
   const items = [];
   for (const heading of root.querySelectorAll("h2, h3")) {
-    const slug = headingDomId(heading.textContent, 1).slice(4);
-    const count = (seen.get(slug) || 0) + 1;
-    seen.set(slug, count);
-    const id = headingDomId(heading.textContent, count);
+    let n = 1;
+    let id = headingDomId(heading.textContent, n);
+    while (used.has(id)) {
+      n += 1;
+      id = headingDomId(heading.textContent, n);
+    }
+    used.add(id);
     heading.id = id;
     items.push({ id, level: heading.tagName.toLowerCase(), text: heading.textContent.trim() });
   }
@@ -39,9 +42,10 @@ function fillToc(root, basePath) {
 
 function rewriteDocLinks(root, basePath, index) {
   const known = new Set((index.docs || []).map((doc) => doc.path));
+  const htmlPaths = new Set((index.docs || []).filter((doc) => doc.kind === "html").map((doc) => doc.path));
   for (const link of root.querySelectorAll("a[href]")) {
     const href = link.getAttribute("href");
-    const next = rewriteHref(basePath, href, known);
+    const next = rewriteHref(basePath, href, known, htmlPaths);
     if (next && next !== href) link.setAttribute("href", next);
   }
   for (const el of root.querySelectorAll("iframe[src], img[src]")) {
@@ -54,6 +58,7 @@ function rewriteDocLinks(root, basePath, index) {
 function hint(text) {
   renderGen += 1;
   shownPath = "";
+  shownKind = "";
   clearToc();
   document.querySelectorAll("#nav-list a").forEach((a) => a.classList.remove("active"));
   content.replaceChildren();
@@ -118,10 +123,20 @@ function findDoc(index, path) {
 
 let renderGen = 0;
 let shownPath = "";
+let shownKind = "";
 
-async function renderDoc(index, path, frag) {
+async function renderDoc(index, path, frag, search) {
   if (path === shownPath) {
-    if (frag) document.getElementById(frag)?.scrollIntoView();
+    renderGen += 1;
+    if (shownKind === "html") {
+      if (search || frag) {
+        const frame = content.querySelector("iframe");
+        if (frame) frame.src = path + (search || "") + (frag ? "#" + frag : "");
+      }
+      return;
+    }
+    const id = headingFrag(frag);
+    if (id) document.getElementById(id)?.scrollIntoView();
     return;
   }
   const gen = ++renderGen;
@@ -139,12 +154,13 @@ async function renderDoc(index, path, frag) {
     if (gen !== renderGen) return;
     content.replaceChildren();
     const frame = document.createElement("iframe");
-    frame.src = path;
+    frame.src = path + (search || "") + (frag ? "#" + frag : "");
     frame.title = doc.title || path;
     frame.style.cssText = "width:100%;height:80vh;border:1px solid var(--border);border-radius:6px;";
     content.appendChild(frame);
     clearToc();
     shownPath = path;
+    shownKind = "html";
     document.title = pageTitle(null, index.title || "Artifacts");
     return;
   }
@@ -160,6 +176,7 @@ async function renderDoc(index, path, frag) {
     p.append(a, " (binary — download to view)");
     content.appendChild(p);
     shownPath = path;
+    shownKind = "file";
     document.title = pageTitle(null, index.title || "Artifacts");
     return;
   }
@@ -200,6 +217,7 @@ async function renderDoc(index, path, frag) {
   });
   content.replaceChildren(root);
   shownPath = path;
+  shownKind = "md";
   document.title = pageTitle(split.meta, index.title || "Artifacts");
   if (content.querySelector(".mermaid")) {
     for (let i = 0; i < 20 && !window.mermaid; i += 1) {
@@ -210,7 +228,7 @@ async function renderDoc(index, path, frag) {
       content.querySelectorAll(".mermaid").forEach((el) => {
         el.textContent = "Diagram did not load.";
       });
-      if (frag && gen === renderGen) document.getElementById(frag)?.scrollIntoView();
+      if (frag && gen === renderGen) document.getElementById(headingFrag(frag))?.scrollIntoView();
       return;
     }
     try {
@@ -222,7 +240,7 @@ async function renderDoc(index, path, frag) {
       });
     }
   }
-  if (frag && gen === renderGen) document.getElementById(frag)?.scrollIntoView();
+  if (frag && gen === renderGen) document.getElementById(headingFrag(frag))?.scrollIntoView();
 }
 
 async function main() {
@@ -239,7 +257,7 @@ async function main() {
       hint("That address did not decode.");
       return;
     }
-    if (route.path) renderDoc(index, route.path, route.frag).catch((err) => hint(err.message));
+    if (route.path) renderDoc(index, route.path, route.frag, route.search).catch((err) => hint(err.message));
   };
   window.addEventListener("hashchange", go);
   if (location.hash) go();

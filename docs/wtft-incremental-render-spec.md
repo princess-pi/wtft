@@ -478,7 +478,7 @@ This is a narrower, different guarantee than `dedupeClassifiedById` (`dedupeClas
 ```
 Row 1:  sessionPath  (dim)
 Row 2:  💸 WTF Tokens?  (◆--orange--green--|--green---orange--◆) ⚡ SURGE 2x  ● live
-Row 3:  [legend: Spec, Mixed, Code, Tests, Research, Git, Grep, Prompt, Other]
+Row 3:  [legend: Spec, Code, Tests, Research, Git, Grep, Prompt, Other]
 Row 4+: ticks line, date dividers, bucket rows
 Footer: q/Ctrl+C to exit, 'r' to restart  (r in red when daemon dead)
 ```

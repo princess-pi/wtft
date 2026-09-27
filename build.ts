@@ -170,7 +170,7 @@ function generateHarnessRegistry(): void {
 // THE PRICING MANIFEST IS CHECKED HERE, NEVER WRITTEN HERE (#100).
 //
 // `docs/manifests/wtft-pricing.json` is derived from MODEL_PRICING and drives
-// docs/EXT_WTFT.html's rate table. Two facts had to be reconciled:
+// docs/wtft.html's rate table. Two facts had to be reconciled:
 //
 //   1. Nothing generated it. tests/wtft-pricing-manifest.test.ts fails in five
 //      places telling you to run a command, and that command wrote nothing:

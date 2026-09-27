@@ -325,7 +325,7 @@ found in text this branch did not change is filed as
 | `listSpawnCandidates` docstring said "began at or after" | Verified | Corrected |
 | spec-116, the `spawn-record` help: a never-recorded child is invisible / leaves no trace | Verified | Corrected for the listing and the `named` tier |
 | spec-128 "nothing is lost by the bound" | Verified for a transcript that lands on disk late | Corrected, with the measured file-birth lag |
-| EXT_WTFT spec-176 row: the thunk runs only with a ledger edge | Verified | Corrected |
+| wtft.html spec-176 row: the thunk runs only with a ledger edge | Verified | Corrected |
 | Docstrings citing #128 | Verified | Citation removed |
 
 ### pr-review round 3 (the round limit)

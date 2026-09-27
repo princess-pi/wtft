@@ -431,7 +431,7 @@ was live.
 
 | Claim | Where it was | What is true |
 |---|---|---|
-| "A whole-file reader never sees a partial line" | `wtft-tag-format.md`, `CONTEXT.md`, `EXT_WTFT.html`, two comments in `wtft-daemon-lib.ts` | a `readFileSync` concurrent with a multi-`write(2)` append returns the fragment too. The guarantee is that a fragment can only be **last**, never mid-file |
+| "A whole-file reader never sees a partial line" | `wtft-tag-format.md`, `CONTEXT.md`, `wtft.html`, two comments in `wtft-daemon-lib.ts` | a `readFileSync` concurrent with a multi-`write(2)` append returns the fragment too. The guarantee is that a fragment can only be **last**, never mid-file |
 | "their existing `catch { continue; }` becomes dead weight" | this spec | it is load-bearing, and removing it would have broken every whole-file reader |
 | the bump "makes every existing tag stale and rederived" | this spec, `wtft-tagger-version.ts` | it is rederived when that session's daemon next starts. Until then the old file is served flagged `stale-version`; a session nobody reopens keeps its welded tag forever. See the table above |
 | "Patch: no cost moves" | `wtft-tagger-version.ts` | no counted line changes value, but `parseNewLines` used to skip turns, so a rederived total can come out **higher**. Recovered money, not moved money — still a patch, but worth naming |

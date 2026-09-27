@@ -67,7 +67,7 @@ codes, so `starting`, which nothing had set since spec-281, was deleted rather t
 
 `renderDaemonStatus` in `extensions/lib/wtft-daemon-lib.ts` turns a `DaemonStatus` into the
 coloured indicator. The list of what it can show, with colours and meanings, is
-`docs/manifests/wtft-status.json`, rendered on `docs/EXT_WTFT.html` and pinned to the code by
+`docs/manifests/wtft-status.json`, rendered on `docs/wtft.html` and pinned to the code by
 `tests/wtft-278-status-manifest.test.ts`.
 
 ## 5. Tests

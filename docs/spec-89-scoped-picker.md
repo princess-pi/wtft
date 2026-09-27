@@ -52,7 +52,7 @@ reader does not re-litigate them)
   did too — it does not, and cannot need to: `"all"` skips folder matching
   entirely, so there is no non-matching population left for a union arm to
   search, and `discoverScoped` returns before reaching one on that path;
-  S3/S6, `session-cwd.ts`'s own header and `docs/EXT_WTFT.html` all already
+  S3/S6, `session-cwd.ts`'s own header and `docs/wtft.html` all already
   said "worktrees" only, and this note is what's being brought into line with
   them), bounded to transcripts whose mtime falls inside the active time
   window — so the arm's cost is bounded by the window the human is already

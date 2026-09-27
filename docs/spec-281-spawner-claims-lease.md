@@ -38,7 +38,7 @@ export function claimLeaseForChild(file: string, childPid: number): "claimed" | 
 - **What it claims:** `claimLease(file, String(childPid), holderIsLive)`, where `holderIsLive`
   answers true for `rebuild` and for a holder that is a pid (`leasePid`: `/^[1-9]\d*$/`, the
   per-session child's own rule, which `readHealthFacts`, `restartDaemon` and `awaitDaemonUp`
-  also use; a harness child's adoption reads the holder with `Number`, #290) and `pidAlive`. So it takes an absent, empty, non-pid or dead-pid lease, answers
+  also use; a harness child's adoption read the holder with `Number` until spec-297) and `pidAlive`. So it takes an absent, empty, non-pid or dead-pid lease, answers
   `claimed` for one already naming the child, and leaves a `rebuild` token and a live holder
   alone. The child then meets those two as it would without the claim.
 - **A child already gone:** if the child is not `pidAlive` once the claim lands, the helper
@@ -145,7 +145,7 @@ member is a breaking change), and `renderDaemonStatus` still renders it for a ca
   its child: a beat from before the wait answers `unknown`, a beat during the wait answers `up`,
   and a child that exits answers `dead` and leaves no lease.
 - `tests/wtft-270-daemon-health.test.ts` has no `spawnedAt` and no tag-write-grace case, and
-  asserts that a dead lease with a fresh tag answers `idle-timeout` or `not-found`. **F4a:** a
+  asserts that a dead lease with a fresh tag answers `idle-timeout` or `not-found`. **F4a:**
   a lease naming another user's live daemon (EPERM) reads alive. Since spec-297 that holder is a
   fake-table entry, and F4b adds a live process that is not a daemon, which reads not alive.
 - `tests/wtft-179-daemon-health-reason.test.ts` V3 is rewritten, because the grace it tested is

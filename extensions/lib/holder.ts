@@ -12,7 +12,7 @@ export type Signal = 0 | "SIGTERM" | "SIGKILL";
 
 export interface ProcessTable {
 	signal(pid: number, sig: Signal): "sent" | "gone" | "denied";
-	/** null: this host cannot tell. */
+	/** null: this host cannot tell, or the entry cannot be read (hidepid); signal 0 decides then. */
 	state(pid: number): "running" | "zombie" | "gone" | null;
 	/** null: unreadable. */
 	cmdline(pid: number): string[] | null;
@@ -28,7 +28,7 @@ export const linuxProcessTable: ProcessTable = {
 	state(pid) {
 		let stat: string;
 		try { stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8"); }
-		catch { return fs.existsSync("/proc/self/stat") ? "gone" : null; }
+		catch { return null; }
 		return stat.charAt(stat.lastIndexOf(")") + 2) === "Z" ? "zombie" : "running";
 	},
 	cmdline(pid) {
@@ -102,9 +102,12 @@ function sleepSync(ms: number): void {
 
 function* stopSteps(pid: number, opts: StopOptions): Generator<number, StopOutcome, void> {
 	const { termMs = 2000, killMs = 2000, pollMs = 20 } = opts;
+	const kind = classifyPid(pid);
 	const phases: [Signal, number][] = [["SIGTERM", termMs]];
 	if (killMs > 0) phases.push(["SIGKILL", killMs]);
 	for (const [sig, ms] of phases) {
+		// A pid recycled during the wait is some other process: never signal it.
+		if (sig === "SIGKILL" && classifyPid(pid) !== kind) return "stopped";
 		const sent = table.signal(pid, sig);
 		if (sent === "gone") return "stopped";
 		if (sent === "denied") return "denied";

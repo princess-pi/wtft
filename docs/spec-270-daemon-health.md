@@ -84,7 +84,7 @@ grace windows answer `starting` rather than alive, for every reader; spec-281 th
   only by a live lease, polled once a second five times; with none by then, the view showed
   `starting...` for as long as it ran. Now the view shows what `health` finds from the first ask,
   the five-poll interval is gone, and the watchdog asks as it does at any other time. Since spec-281
-  the restart first stops the lease holder (since spec-297 a per-session daemon, or a live pid whose cmdline cannot be read, which off Linux is any pid; never a harness or a process that is not a daemon) with
+  the restart first stops the lease holder (since spec-297 a per-session daemon, or a live pid whose cmdline cannot be read, which off Linux is any pid, a harness included; on Linux never a harness, and never a process that is not a daemon) with
   SIGTERM, then SIGKILL after 2 s, and waits up to 2 s more; `--watch` keeps running during that
   wait.
   A holder still alive after it, EPERM included, is left alone and `--watch` shows
@@ -99,8 +99,8 @@ grace windows answer `starting` rather than alive, for every reader; spec-281 th
   session-file read for a model: the time since `idleSinceMs`
   while idle, `0s` while live, the time since `lastHbMs` when `decideHealth` has one, else `?` (`waiting-session` included). Any
   other row prints `?`, and so does a row where `decideHealth`'s liveness disagrees with `--list`'s
-  RUNNING/DEAD. Since spec-297 both are `holdsLease(classifyPid)` on the same lease pid, so they
-  disagree only when the process changes between the two reads. Which session a
+  RUNNING/DEAD. Since spec-297 both are `holdsLease(classifyPid)`, so they disagree only when the
+  lease or its process changes between `--list`'s read and `readHealthFacts`' own. Which session a
   harness-held lease line names is #276.
 
 ## 3. Closer

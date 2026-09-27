@@ -1577,6 +1577,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   let found = 0;
   const seenPids = new Set<number>();
   const restarted = new Set<number>();
+  const keptRunning = new Set<number>();
   const unlinkIfNames = (file: string, pid: number) => { unlinkLeaseIf(file, String(pid)); };
   for (const pidFile of pidFiles) {
     const fullPath = path.join(pidDir, pidFile);
@@ -1614,7 +1615,8 @@ if (showList || showCleanup || showRestart || stopSession) {
 
     if (showRestart) {
       if (restarted.has(pid)) {
-        unlinkIfNames(fullPath, pid);
+        // A holder that refused the stop or outlived it still serves this lease too.
+        if (!keptRunning.has(pid)) unlinkIfNames(fullPath, pid);
         continue;
       }
       restarted.add(pid);
@@ -1632,6 +1634,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       // one (or one that cannot be signalled, #274) was not stopped.
       // One that outlived SIGKILL keeps its lease: a respawn would only meet it and exit.
       const survived = stopped === "survived" || stopped === "denied";
+      if (survived) keptRunning.add(pid);
       const respawnLease = wasDaemon && sessionFound && !survived ? getDaemonPidPath(sessionFound) : "";
       // The respawn's own lease is left for its claim, which takes a dead holder's.
       if (fullPath !== respawnLease && !survived) unlinkIfNames(fullPath, pid);
@@ -1659,6 +1662,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         : respawned === "busy" ? `Respawned: PID ${pid} → a daemon for ${sessionFound}, left to claim the lease itself`
         : respawnLease ? `Stopped: PID ${pid} — the respawn for ${sessionFound} failed`
         : wasDaemon ? `Stopped: PID ${pid} — no --session to respawn (#274)`
+        : kind === "unverified" ? `Removed lease: PID ${pid} — cannot be verified as a daemon here, so it is left running`
         : `Removed lease: PID ${pid} — no live daemon found`);
       found++;
       continue;

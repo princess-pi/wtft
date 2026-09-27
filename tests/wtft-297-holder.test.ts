@@ -27,6 +27,9 @@ describe("classifyPid", () => {
 		assert.strictEqual(classifyPid(104), "gone", "a zombie");
 		assert.strictEqual(classifyPid(105), "daemon", "EPERM is alive, and its cmdline still reads");
 		assert.strictEqual(classifyPid(999), "gone");
+		t.daemon(106, [], "denied");
+		t.hide(106);
+		assert.strictEqual(classifyPid(106), "unverified", "hidepid: alive by signal 0, /proc unreadable");
 		for (const bad of [0, -1, 1.5, Number.NaN]) assert.strictEqual(classifyPid(bad), "gone");
 	});
 
@@ -63,6 +66,16 @@ describe("stopping", () => {
 		assert.strictEqual(stopHolderSync(205, fast), "stopped", "a zombie is gone");
 		assert.deepStrictEqual(t.signals.filter(s => s.pid === 201).map(s => s.sig), ["SIGTERM"]);
 		assert.deepStrictEqual(t.signals.filter(s => s.pid === 202).map(s => s.sig), ["SIGTERM", "SIGKILL"]);
+	});
+
+	it("no SIGKILL for a pid recycled into another process during the SIGTERM wait", async () => {
+		const t = fakeProcessTable();
+		restore = useProcessTable(t);
+		t.daemon(401, [], "ignores-term");
+		t.afterTerm(401, () => { t.add(401, ["sleep", "30"]); });
+		assert.strictEqual(await stopHolder(401, fast), "stopped", "the daemon it was asked to stop is gone");
+		assert.deepStrictEqual(t.signals.map(s => s.sig), ["SIGTERM"]);
+		assert.ok(t.alive(401), "the new process was not signalled");
 	});
 
 	it("killMs 0 sends no SIGKILL", () => {

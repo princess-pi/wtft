@@ -8,7 +8,7 @@ regression came through the differences between them. This spec puts the whole d
 table.
 
 *Make vs buy:* the bundles may import only `node:` builtins (CLAUDE.md), so a process-listing
-package is not an option. The port is about 60 lines over `process.kill`, `/proc` and `spawn`.
+package is not an option. The port is a thin layer over `process.kill`, `/proc` and `spawn`.
 
 ## 1. The port
 
@@ -34,7 +34,7 @@ interface ProcessTable {
 
 | Kind | When |
 |---|---|
-| `gone` | `signal 0` says gone, or `state` says zombie or gone (a process that exits between the two reads). A pid that is not a positive safe integer is `gone` too |
+| `gone` | `signal 0` says gone, or `state` says zombie. An unreadable `/proc/<pid>/stat` (hidepid) is not evidence either way, so `signal 0` decides. A pid that is not a positive safe integer is `gone` too |
 | `daemon` | alive, and its cmdline names `wtft-daemon` (`.mjs`, `.js`, `.ts` or bare) without `--harness` |
 | `harness` | alive, and its cmdline names `wtft-daemon` with `--harness` |
 | `other` | alive, and its cmdline is readable and names something else. A recycled pid lands here |
@@ -66,7 +66,9 @@ An `other` is never signalled by anyone.
 `stopHolder(pid, opts)` sends SIGTERM and waits up to `termMs` (2000 ms) for `classifyPid` to
 say `gone`. If the pid is still there, it sends SIGKILL and waits up to `killMs` (2000 ms) more.
 The wait yields to the event loop, so a holder that is the caller's own child gets reaped.
-`stopHolderSync` is the same without yielding, for the daemon's synchronous paths. Both return:
+`stopHolderSync` is the same without yielding, for the daemon's synchronous paths. Before SIGKILL
+it classifies the pid again: if the kind changed (the pid was recycled during the wait), the
+process it was asked to stop is gone, and nothing more is sent. Both return:
 - `stopped`: gone before the time ran out;
 - `denied`: a signal was refused. A refused SIGTERM returns at once; a refused SIGKILL returns after the SIGTERM wait;
 - `survived`: still there after SIGKILL.
@@ -84,7 +86,7 @@ cannot be two PRs, because a branch starts only from main, and slice 2 needs sli
 | `forceRebuildSession` (`-F`) | cmdline, then bare `kill 0` wait | `classifyPid`, then `stopHolderSync` without SIGKILL | **C4:** the wait counts EPERM as alive, and an `other` holder is neither signalled nor waited for (#290 J) |
 | slice 2: the per-session child's claim | any live pid keeps the lease | `holdsLease` | **C5:** a recycled pid or a zombie no longer keeps a session unserved (#290 J) |
 | slice 2: `holderIsLiveDaemon`, `takeOverLease`, harness root claim, `pointSessionAt` | `Number()` + `kill 0` + cmdline | `leasePid` + `classifyPid` | **C6:** `0123` is not pid 123 (#290 K) |
-| slice 2: `--restart`, `--cleanup`, `--stop`; `waitUntilExited` is gone | bare `kill 0`, `parseInt` | `leasePid`, `classifyPid`; `--restart` waits with `stopHolderSync`, `--cleanup` and `--stop` signal once | **C7:** EPERM is alive. A lease or root pid file whose daemon refuses the signal is left in place, and the line says "Not stopped: PID n refused the signal (EPERM)". It used to be removed, with "no live daemon found", "Stopped" or "Cleaned up" (#290 J). A harness still running after SIGKILL keeps its root pid file too. `--stop` on a lease whose holder is not a daemon removes it with "Removed lease: … no live daemon found", not "Stopped"; `--cleanup` counts only what it cleaned up |
+| slice 2: `--restart`, `--cleanup`, `--stop`; `waitUntilExited` is gone | bare `kill 0`, `parseInt` | `leasePid`, `classifyPid`; `--restart` waits with `stopHolderSync`, `--cleanup` and `--stop` signal once | **C7:** EPERM is alive. A lease or root pid file whose daemon refuses the signal is left in place, and the line says "Not stopped: PID n refused the signal (EPERM)". It used to be removed, with "no live daemon found", "Stopped" or "Cleaned up" (#290 J). A harness still running after SIGKILL keeps its root pid file too, and a holder of several leases that refused or outlived the stop keeps all of them. `--stop` on a lease whose holder is not a daemon removes it with "Removed lease: … no live daemon found", not "Stopped"; `--cleanup` counts only what it cleaned up |
 | slice 2: `--list` RUNNING/DEAD | bare `kill 0` | `holdsLease` | **C8:** the column agrees with health on EPERM, zombies and recycled pids (#290 A) |
 | slice 2: `reapAndWarn` | ESRCH only | `holdsLease(classifyPid)` | **C9:** a lease naming a zombie, or a live process that is not a daemon, is unlinked |
 | slice 2: the newer-tag check at startup | `Number()` + `liveDaemonOrUnknown` | `leasePid` + `holdsLease(classifyPid)` | **C10:** a `0123` holder no longer counts, and on Linux a live pid whose cmdline cannot be read now keeps the session for the newer build |
@@ -101,7 +103,8 @@ cannot be two PRs, because a branch starts only from main, and slice 2 needs sli
   - C5: the child claims a lease naming a live `sleep`, and leaves it running;
   - C8: `--list` says DEAD for that lease;
   - the closer: no `process.kill(` in `bin/*.ts` or `extensions/**` outside
-    `extensions/lib/holder.ts`.
+    `extensions/lib/holder.ts`. Test suites still signal their own fixtures directly; the closer
+    is about product code.
 - **C6, C7 and C9 have no test of their own.** Their sites now call `leasePid`, `classifyPid`
   and `stopHolderSync`, which the in-memory suite covers. An EPERM daemon needs a second user,
   which the test host does not have.

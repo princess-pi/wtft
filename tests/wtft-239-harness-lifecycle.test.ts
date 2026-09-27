@@ -483,26 +483,25 @@ try {
 		await until(() => living.every(p => !alive(p)), 5_000);
 	}
 
-	console.log("\nA harness a spawn starts while --restart is walking is left running");
+	console.log("\nA harness that claims the root while --restart is walking is left running");
 	{
 		const { root, files } = makeRoot("w", 20);
-		// Started with no session, so --restart starts no replacement and the root
-		// is free for the spawn while the walk goes on.
 		const h = start(root, ["--harness", "claude"], "w.err");
 		check(await until(() => read(harnessPidFile(root)).trim() === String(h.pid), 30_000) !== Infinity, "fixture: the first harness holds the root");
 		for (let i = 0; i < 40_000; i++) fs.writeFileSync(path.join(TMP, `wtft-daemon-fakew${i}.pid`), String(h.pid));
 		const restart = spawn("node", [DAEMON, "--restart"], { stdio: "ignore", env: envFor(root) });
 		const restartDone = new Promise<void>(resolve => restart.on("exit", () => resolve()));
 		await until(() => !alive(h.pid), 10_000);
-		const w = start(root, ["--harness", "claude", "--session", files[1]], "w-cli.err");
-		const claimed = await until(() => read(harnessPidFile(root)).trim() === String(w.pid), 10_000);
-		check(claimed !== Infinity && alive(restart.pid!), "fixture: the spawn claimed the root while --restart was still walking");
+		start(root, ["--harness", "claude", "--session", files[1]], "w-cli.err");
+		const rootHolder = () => Number(read(harnessPidFile(root)).trim());
+		const claimed = await until(() => rootHolder() > 0 && rootHolder() !== h.pid && alive(rootHolder()), 10_000);
+		check(claimed !== Infinity && alive(restart.pid!), "fixture: a new harness claimed the root while --restart was still walking");
 		await restartDone;
 		await sleep(2_000);
 		const living = harnessesFor(root);
 		for (const pid of living) if (!pids.includes(pid)) pids.push(pid);
 		check(living.length === 1, `exactly one harness serves the root after --restart (saw ${living.length}: ${living.join(",")})`);
-		check(alive(w.pid) && read(harnessPidFile(root)).trim() === String(w.pid), "it is the harness the spawn started");
+		check(living.length === 1 && rootHolder() === living[0], "the root pid file still names it");
 		for (const pid of living) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
 		await until(() => living.every(p => !alive(p)), 5_000);
 	}

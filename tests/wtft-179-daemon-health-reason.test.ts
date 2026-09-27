@@ -12,9 +12,12 @@ import * as path from "node:path";
 import {
 	DAEMON_REASON_TEXT,
 	daemonReasonText,
+	getDaemonPidPath,
 	renderDaemonStatus,
 	type DaemonHealthReason,
 } from "../extensions/lib/wtft-daemon-lib.ts";
+import { leaseHolder, leasePid } from "../extensions/lib/lease.ts";
+import { awaitStandIn } from "./lib/stand-in-daemon.ts";
 import { ensureDaemonRunning, getDaemonStatus } from "../extensions/lib/wtft-cli-shared.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
@@ -153,6 +156,7 @@ console.log("V3. #124 startup indicator — the spawner's claim, not a grace win
 		// --- 3a. Spawned, session .jsonl does not exist yet → waiting-session
 		const missingSession = path.join(fixture, "never-created.jsonl");
 		ensureDaemonRunning(missingSession, fakeDaemonDir);
+		assert("3a precondition: the claimed child reads as a daemon", awaitStandIn(leasePid(leaseHolder(getDaemonPidPath(missingSession)))), "");
 		const waiting = getDaemonStatus(missingSession);
 		assert(
 			"no session file while the child lives → code `waiting-session`",
@@ -169,6 +173,7 @@ console.log("V3. #124 startup indicator — the spawner's claim, not a grace win
 		const realSession = path.join(fixture, "session.jsonl");
 		fs.writeFileSync(realSession, "", "utf8");
 		ensureDaemonRunning(realSession, fakeDaemonDir);
+		assert("3b precondition: the claimed child reads as a daemon", awaitStandIn(leasePid(leaseHolder(getDaemonPidPath(realSession)))), "");
 		const up = getDaemonStatus(realSession);
 		assert(
 			"session file present, child alive → alive with no reason code",

@@ -26,13 +26,13 @@ Bar length is `round(row / max row × 16)` cells. A scatter mark sits at `round(
 
 ## Encoding law
 
-A cell has two color slots.
+A cell is one category.
 
-- One category in the cell is `█` in that category's foreground.
-- Two categories in the cell are `▌`. Foreground is the left category. Background is the right category.
-- A third variable, recency, uses a full-width glyph instead. `▃` is carryover. `▇` is new this bin. Half-block is not used.
-- Recency applies to a running-total bar. An incremental bar is entirely new, so recency stays off.
-- The bought painter uses `█` only. A shared cell keeps the left category. The bar stays the same width. Rules and columns do not change.
+- Color is the category. The glyph is `█`.
+- On a running-total bar, recency is the second axis, and it uses the glyph. `▃` is carryover. `▇` is new this bin. Both glyphs are that one category.
+- Recency applies to a running total. An incremental bar is entirely new, so recency stays off.
+- A scatter column that two categories round onto keeps the larger one. The smaller is dropped. The cell stays one category.
+- The bought painter draws `█` only. Recency glyphs are not drawn. Rules and columns stay.
 
 ## Rules
 
@@ -50,21 +50,21 @@ These are the existing flags. New combinations do not pick flag names here.
 
 ### Cost, cumulative
 
-Stack. Bar is total latest cost. Columns are incremental cost and total latest cost. Half-block. Recency off.
+Stack. Bar is total latest cost. Columns are incremental cost and total latest cost. One category per cell. Recency off. The plain rows show the shape. The picker colors each category.
 
 ```
-15:00    +$1.90       $9.90  ██▌█████████████
+15:00    +$1.90       $9.90  ████████████████
 ── Cache Miss ───────────────────────────────
-14:00    +$3.60       $8.00  ██▌██████████
+14:00    +$3.60       $8.00  █████████████
 ── Sep-25 ───────────────────────────────────
-18:00    +$0.80       $4.40  █▌█████
-12:00    +$2.20       $3.60  ▌█████
-10:00    +$1.40       $1.40  ▌█
+18:00    +$0.80       $4.40  ███████
+12:00    +$2.20       $3.60  ██████
+10:00    +$1.40       $1.40  ██
 ```
 
 ### Cost, bucket
 
-Scatter. Bar is incremental cost. Column is incremental cost. A collision is a half-block.
+Scatter. Bar is incremental cost. Column is incremental cost. Two categories on one column keep the larger one.
 
 ```
 15:00    +$1.90     █ █          
@@ -92,7 +92,7 @@ Stack. Bar is total latest tokens. Columns are incremental tokens and total late
 
 ### Tokens, bucket
 
-Stack. Bar is incremental tokens. Column is incremental tokens. Full block. Recency off, so two categories may share a cell. This sample's token bars happen to be one category wide, so the half-block does not appear.
+Stack. Bar is incremental tokens. Column is incremental tokens. One category per cell. Recency off.
 
 ```
 15:00       +1.3k  █████████
@@ -109,13 +109,13 @@ Stack. Bar is incremental tokens. Column is incremental tokens. Full block. Rece
 Same bar as cost cumulative. The row also prints incremental tokens and total latest tokens.
 
 ```
-15:00    +$1.90       $9.90       +1.3k          8.1k  ██▌█████████████
+15:00    +$1.90       $9.90       +1.3k          8.1k  ████████████████
 ── Cache Miss ─────────────────────────────────────────────────────────
-14:00    +$3.60       $8.00       +2.4k          6.8k  ██▌██████████
+14:00    +$3.60       $8.00       +2.4k          6.8k  █████████████
 ── Sep-25 ─────────────────────────────────────────────────────────────
-18:00    +$0.80       $4.40       +2.2k          4.4k  █▌█████
-12:00    +$2.20       $3.60       +1.4k          2.2k  ▌█████
-10:00    +$1.40       $1.40        +800           800  ▌█
+18:00    +$0.80       $4.40       +2.2k          4.4k  ███████
+12:00    +$2.20       $3.60       +1.4k          2.2k  ██████
+10:00    +$1.40       $1.40        +800           800  ██
 ```
 
 ## Outside this chart

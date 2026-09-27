@@ -99,10 +99,6 @@ function ansiFg(n, text) {
 	return `${ESC}[38;5;${n}m${text}${ESC}[0m`;
 }
 
-function ansiFgBg(fg, bg, text) {
-	return `${ESC}[38;5;${fg};48;5;${bg}m${text}${ESC}[0m`;
-}
-
 function money(n, incremental) {
 	const body = `$${Math.abs(n).toFixed(2)}`;
 	return incremental ? `+${body}` : body;
@@ -202,25 +198,6 @@ function orderedParts(row, measure) {
 		.map((part) => ({ cat: part.cat, value: part[key], inc: part[incKey], bar: part[key] }));
 }
 
-function paintHalf(parts, width) {
-	const alloc = largestRemainder(parts, width * 2);
-	const slots = [];
-	for (const part of alloc) {
-		for (let i = 0; i < part.slots; i += 1) slots.push(part.cat);
-	}
-	let plain = "";
-	let ansi = "";
-	for (let i = 0; i < slots.length; i += 2) {
-		const left = slots[i];
-		const right = slots[i + 1];
-		const glyph = !right || left === right ? "█" : "▌";
-		plain += glyph;
-		if (!right || left === right) ansi += ansiFg(CATS[left].fg, glyph);
-		else ansi += ansiFgBg(CATS[left].fg, CATS[right].fg, glyph);
-	}
-	return { plain, ansi };
-}
-
 function paintRecency(parts, width) {
 	const alloc = largestRemainder(parts, width);
 	let plain = "";
@@ -257,7 +234,7 @@ function paintFull(parts, width) {
 	return { plain, ansi };
 }
 
-function paintScatter(parts, width, scaleMax, painter) {
+function paintScatter(parts, width, scaleMax) {
 	const columns = Array.from({ length: width }, () => []);
 	if (scaleMax > 0) {
 		for (const part of parts) {
@@ -275,14 +252,10 @@ function paintScatter(parts, width, scaleMax, painter) {
 			ansi += " ";
 			continue;
 		}
-		entries.sort((a, b) => b.value - a.value);
-		if (entries.length === 1 || painter === "bought") {
-			plain += "█";
-			ansi += ansiFg(CATS[entries[0].cat].fg, "█");
-		} else {
-			plain += "▌";
-			ansi += ansiFgBg(CATS[entries[0].cat].fg, CATS[entries[1].cat].fg, "▌");
-		}
+		let best = entries[0];
+		for (const entry of entries) if (entry.value > best.value) best = entry;
+		plain += "█";
+		ansi += ansiFg(CATS[best.cat].fg, "█");
 	}
 	return { plain, ansi };
 }
@@ -298,9 +271,9 @@ function encodingOf(opts, notes) {
 	}
 	if (opts.recency && !incremental && opts.layout === "stack") return "recency";
 	if (opts.recency && opts.layout === "scatter") {
-		notes.push("Scatter has no recency glyph. A collision still uses a half-block.");
+		notes.push("Scatter has no recency glyph. A column keeps the larger category.");
 	}
-	return "half";
+	return "full";
 }
 
 function divider(label, width) {
@@ -316,12 +289,12 @@ function strideLabel(turn, rules) {
 
 function lawText(encoding, painter) {
 	if (painter === "bought") {
-		return "Bought painter. One full block per category. A shared cell keeps the left category. Rules and columns stay.";
+		return "Bought painter. Every cell is █ in the category color. Recency glyphs are not drawn. Rules and columns stay.";
 	}
 	if (encoding === "recency") {
-		return "Three variables: category color, carryover (▃), new this bin (▇). Full block. Half-block is not used.";
+		return "A cell is one category. Color is the category. ▃ is carryover. ▇ is new this bin.";
 	}
-	return "Two color slots. One category in a cell is █. Two categories share a cell as ▌, foreground left, background right.";
+	return "A cell is one category, drawn as █. Color is the category.";
 }
 
 export function render(opts) {
@@ -360,9 +333,8 @@ export function render(opts) {
 		const parts = orderedParts(row, opts.measure);
 		const slots = opts.layout === "scatter" ? width : barSlots(row);
 		let bar;
-		if (opts.layout === "scatter") bar = paintScatter(parts, slots, scaleMax, opts.painter);
+		if (opts.layout === "scatter") bar = paintScatter(parts, slots, scaleMax);
 		else if (encoding === "recency") bar = paintRecency(parts, slots);
-		else if (encoding === "half" && opts.painter !== "bought") bar = paintHalf(parts, slots);
 		else bar = paintFull(parts, slots);
 		const head = [label.padEnd(labelWidth, " "), ...fields].join("  ");
 		return {

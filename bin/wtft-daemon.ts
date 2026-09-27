@@ -1490,8 +1490,10 @@ handled is not listed. A --stop of a session a harness serves ends the command a
                         that hold no lease here; never a harness daemon, which stops once it has nothing
                         to serve or watch
   --restart             Stop every daemon holding a lease or a root pid file here (SIGTERM, SIGKILL after 2 s),
-                        and respawn one per stopped holder started with --session, claiming its lease when
-                        free; a harness holding no lease starts again on the next wtft. Linux only (/proc)
+                        and respawn one per stopped lease holder with its own --session or --harness,
+                        claiming its lease when free; a harness holding no lease starts again on the next
+                        wtft. A holder left running, or a respawn that neither runs nor hands off within
+                        300 ms, makes it exit 1. Linux only (/proc)
   --stop <session>      Drop that session; ~ and relative paths are resolved. A harness serving it (found
                         through the session's lease) keeps running. A per-session process holding a
                         lease here, found by its own --session resolved against its cwd, gets SIGTERM
@@ -1636,7 +1638,19 @@ if (showList || showCleanup || showRestart || stopSession) {
       log.close();
     }
   };
-  const respawnSurvives = (childPid: number): boolean => { sleepMs(RESPAWN_SETTLE_MS); return pidAlive(childPid); };
+  const respawnServed = (childPid: number, served: () => boolean): boolean => {
+    sleepMs(RESPAWN_SETTLE_MS);
+    return pidAlive(childPid) || served();
+  };
+  const liveHolderIn = (file: string): boolean => {
+    try { return holdsLease(classifyPid(leasePid(fs.readFileSync(file, "utf8").trim()))); } catch { return false; }
+  };
+  const liveHarnessFor = (which: string): boolean => {
+    try {
+      return fs.readdirSync(pidDir).some(f => f.startsWith(`wtft-harness-${which}-`) && f.endsWith(".pid")
+        && liveHolderIn(path.join(pidDir, f)));
+    } catch { return false; }
+  };
   const seenPids = new Set<number>();
   const restarted = new Set<number>();
   const keptRunning = new Set<number>();
@@ -1712,7 +1726,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         const childPid = spawnDetached([process.argv[1], ...daemonLaunchArgs(sessionFound!, restartEnv)], restartEnv);
         if (childPid) {
           try { respawned = claimLeaseForChild(respawnLease, childPid); } catch { respawned = "busy"; }
-          if (!respawnSurvives(childPid)) respawned = "failed";
+          if (!respawnServed(childPid, () => liveHolderIn(respawnLease))) respawned = "failed";
         }
         if (respawned === "failed") {
           unlinkIfNames(fullPath, pid);
@@ -1724,7 +1738,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       let harnessBack = false;
       if (harnessOnly) {
         const childPid = spawnDetached([process.argv[1], "--harness", harnessFound!], restartEnv);
-        harnessBack = childPid > 0 && respawnSurvives(childPid);
+        harnessBack = childPid > 0 && respawnServed(childPid, () => liveHarnessFor(harnessFound!));
         if (!harnessBack) restartFailed = true;
       }
       console.log(stopped === "denied" ? `Not stopped: PID ${pid} refused the signal (EPERM); its lease is left`

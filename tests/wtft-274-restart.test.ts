@@ -65,6 +65,28 @@ try {
 		check(r.status === 0, `nothing failed, so exit 0 (got ${r.status})`);
 	}
 
+	console.log("--- C2: a respawn that hands off to a live harness and exits 0 counts ---");
+	{
+		const real = spawn("node", [DAEMON, "--harness", "claude"], { stdio: "ignore", env, detached: true });
+		children.push(real);
+		let holder = 0;
+		for (let i = 0; i < 50 && holder !== real.pid; i++) {
+			sleep(100);
+			try { holder = Number(fs.readFileSync(rootPidFile, "utf8").trim()); } catch { holder = 0; }
+		}
+		check(holder === real.pid, "fixture precondition: a real harness holds the root");
+		const [script] = standInDaemonArgs("setInterval(() => {}, 1000);");
+		const fake = spawn(process.execPath, [script, "--harness", "claude"], { stdio: "ignore", env, detached: true });
+		children.push(fake);
+		check(awaitStandIn(fake.pid!) || classifyPid(fake.pid!) === "harness", "fixture precondition: the stand-in reads as a harness");
+		const session = path.join(root, "proj", "b.jsonl");
+		fs.writeFileSync(session, "");
+		fs.writeFileSync(getDaemonPidPath(session), String(fake.pid));
+		const r = restart();
+		check(/Restarted: PID \d+ → fresh harness daemon \(claude\)/.test(r.stdout), `the hand-off counts as restarted:\n${r.stdout}`);
+		check(r.status === 0, `exit 0 (got ${r.status})`);
+	}
+
 	console.log("--- D: a respawn that dies at once is reported, and exits 1 ---");
 	{
 		const tagSession = path.join(TMP, "x", "s.jsonl.wtft-tag.v1.jsonl");

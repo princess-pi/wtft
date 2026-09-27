@@ -76,7 +76,7 @@ console.log("\n=== #135 B: the pending arm derives nothing from the file it decl
 	fs.copyFileSync(ledgerWith("pending", [[sid, CHILD]]), path.join(state, "wtft", "spawns.jsonl"));
 	const r = spawnSync(process.execPath, [CLI_BIN, "-s", path.join(dir, `${sid}.jsonl`), "--json"], {
 		cwd: REPO_ROOT, encoding: "utf8", timeout: 60_000, stdio: ["ignore", "pipe", "pipe"],
-		env: { ...process.env, XDG_STATE_HOME: state, WTFT_DAEMON_DEBUG: "", WTFT_STAND_IN_HEARTBEAT: "1" },
+		env: { ...process.env, XDG_STATE_HOME: state, WTFT_DAEMON_DEBUG: "", WTFT_STAND_IN: "heartbeat" },
 	});
 	let doc: any = null;
 	try { doc = JSON.parse(r.stdout); } catch { /* reported below */ }

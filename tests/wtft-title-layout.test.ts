@@ -8,11 +8,12 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execSync, spawn } from "node:child_process";
+import { execSync } from "node:child_process";
 import { trackSandbox } from "./lib/sandbox";
+import { cliWithoutDaemon, tagForCli } from "./lib/cli-harness.ts";
 
 const SCRIPT = path.resolve(import.meta.dirname, "..", "wtft");
-const CLI_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
+const CLI_BIN = cliWithoutDaemon();
 
 const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";
@@ -82,6 +83,7 @@ lines.push(JSON.stringify({
 }));
 
 fs.writeFileSync(sessionPath, lines.join("\n") + "\n");
+tagForCli(sessionPath);
 
 // ---
 // Helper: run wtft CLI with controlled width and capture title line

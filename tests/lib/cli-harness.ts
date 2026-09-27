@@ -4,9 +4,12 @@
  * bundles are copies whose sibling bin/wtft-daemon.mjs is a stand-in, so the
  * daemon the CLI starts on every report does no work.
  *
- * The stand-in exits at once. With WTFT_STAND_IN_HEARTBEAT set it instead
- * stays up for a few seconds and heartbeats into the session's tag, which is
- * what the CLI waits for on a session whose log is not written yet.
+ * The stand-in exits at once, unless WTFT_STAND_IN says otherwise:
+ * - `alive`: it stays up for 3 s and writes nothing, as a daemon that has not
+ *   read the session yet. The CLI reads that as "no data yet", not as a dead
+ *   daemon, on a session with nothing tagged.
+ * - `heartbeat`: it also heartbeats into the session's tag, which is what the
+ *   CLI waits for on a session whose log is not written yet.
  */
 
 import * as fs from "node:fs";
@@ -25,8 +28,10 @@ export const CLI_HARNESS_PREFIX = "wtft-cli-harness-";
 
 const STAND_IN = `import * as fs from "node:fs";
 import * as path from "node:path";
+const mode = process.env.WTFT_STAND_IN;
 const at = process.argv.indexOf("--session");
-if (process.env.WTFT_STAND_IN_HEARTBEAT && at > 0) {
+if (mode === "alive" || mode === "heartbeat") setTimeout(() => {}, 3000);
+if (mode === "heartbeat" && at > 0) {
 	const session = process.argv[at + 1];
 	const tag = path.join(path.dirname(session), "wtft-tags", path.basename(session) + ".wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl");
 	fs.mkdirSync(path.dirname(tag), { recursive: true });

@@ -11,7 +11,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { trackSandbox } from "./lib/sandbox";
 import { WTFT_EXIT_PROVISIONAL } from "./lib/wtft-cli";
-import { getDaemonPidPath } from "../extensions/lib/wtft-daemon-lib.ts";
+import { cliWithoutDaemon, tagForCli } from "./lib/cli-harness.ts";
 
 const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
@@ -50,7 +50,7 @@ async function checkAsync(label: string, fn: () => Promise<void>) {
 // ---
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
-const CLI_BIN = path.join(REPO_ROOT, "bin", "wtft.mjs");
+const CLI_BIN = cliWithoutDaemon();
 
 const xdgRoot = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-config-persistence-")));
 const configPath = path.join(xdgRoot, "wtft", "config.json");
@@ -112,14 +112,7 @@ fs.writeFileSync(sessionPath, [
 	}),
 ].join("\n") + "\n");
 
-// `-s` spawns a daemon for that session; reap it rather than leaving one behind
-// per suite run.
-process.on("exit", () => {
-	try {
-		const pid = parseInt(fs.readFileSync(getDaemonPidPath(sessionPath), "utf8").trim(), 10);
-		if (pid > 0) process.kill(pid, "SIGTERM");
-	} catch { /* no daemon, or already gone */ }
-});
+tagForCli(sessionPath);
 
 /** Run the CLI and report mutation AND a run VERDICT. Both matter: a CLI that
  *  fails to start also never writes, so "no mutation" alone would pass
@@ -128,9 +121,8 @@ process.on("exit", () => {
  *  `exitCode` is a verdict, not a status — 9 is folded into 0 before it is
  *  returned, so a caller cannot tell the two apart and must not try. #443
  *  defines 9 as "the run SUCCEEDED and the number printed is not yet final"
- *  (`EXIT_PROVISIONAL`): the CLI spawns the daemon and reads the tag
- *  immediately, so a brand-new session sometimes wins that race. Both codes
- *  mean the render happened, which is the only thing these three checks ask.
+ *  (`EXIT_PROVISIONAL`). Both codes mean the render happened, which is the
+ *  only thing these three checks ask.
  *
  *  tests/lib/wtft-cli.ts owns the same contract for suites that want stdout;
  *  this one wants the code, and that helper returns text, so the mapping is

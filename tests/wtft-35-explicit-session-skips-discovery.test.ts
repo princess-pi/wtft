@@ -8,9 +8,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { execSync } from "node:child_process";
-import { getDaemonPidPath } from "../extensions/lib/wtft-daemon-lib.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
-import { pollUntil } from "./lib/poll";
+import { cliWithoutDaemon, tagForCli } from "./lib/cli-harness.ts";
 
 isolateTmpdir("explicit-session-skips-discovery");
 
@@ -18,7 +17,7 @@ isolateTmpdir("explicit-session-skips-discovery");
 // made, so every child takes this explicitly — same rule as #486.
 const CHILD_ENV = process.env;
 
-const SCRIPT = path.resolve(import.meta.dirname, "..", "wtft");
+const SCRIPT = `${process.execPath} ${cliWithoutDaemon()}`;
 const RED = "\x1b[31m", GREEN = "\x1b[32m", RESET = "\x1b[0m";
 let passed = 0, failed = 0;
 function assert(label: string, ok: boolean, detail?: string) {
@@ -26,9 +25,6 @@ function assert(label: string, ok: boolean, detail?: string) {
 	else { console.log(`  ${RED}FAIL${RESET} ${label}${detail ? `\n       ${detail}` : ""}`); failed++; }
 }
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-const readPid = (p: string): number => {
-	try { return parseInt(fs.readFileSync(p, "utf8").trim(), 10) || 0; } catch { return 0; }
-};
 
 const SESSION_ID = "35c0de00-1a9b-4c3d-9e8f-000000000035";
 const TS = Date.now();
@@ -55,12 +51,7 @@ const sessionLines = () => [
 
 const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-35-")));
 const sessionPath = path.join(dir, `${SESSION_ID}.jsonl`);
-const pidPath = getDaemonPidPath(sessionPath);
-try { fs.unlinkSync(pidPath); } catch {}
 process.on("exit", () => {
-	const pid = readPid(pidPath);
-	if (pid > 0) { try { process.kill(pid, "SIGTERM"); } catch {} }
-	try { fs.unlinkSync(pidPath); } catch {}
 	try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
 });
 
@@ -107,21 +98,12 @@ const emptyClaude = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-35-
 const emptyPi = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-35-empty-p-")));
 
 // ---
-// 0. Warm the session first, so the A/B below times a pure read: daemon already
-//    up, tag file written, interactions classified. Otherwise the first timed run
-//    carries a daemon spawn the others do not.
+// 0. Tag the session first, so the A/B below times a pure read.
 // ---
-console.log("0. Warm the session (daemon up, tag classified)");
+console.log("0. Tag the session");
 {
 	fs.writeFileSync(sessionPath, sessionLines());
-	run(`-s '${sessionPath}' -l 5 --no-emoji`, corpus(emptyClaude, emptyPi));
-	const tagsDir = path.join(dir, "wtft-tags");
-	const classified = await pollUntil(() => fs.readdirSync(tagsDir).some(f => {
-		if (!f.startsWith(SESSION_ID)) return false;
-		const c = fs.readFileSync(path.join(tagsDir, f), "utf8");
-		return c.split("\n").some(l => l.trim() && !l.includes('"_hb"') && !l.includes('"_meta"'));
-	}), 20_000, 250);
-	assert("session is classified and ready to render", classified);
+	tagForCli(sessionPath);
 }
 
 // ---

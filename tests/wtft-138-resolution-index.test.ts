@@ -10,6 +10,7 @@ import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { skip } from "./lib/skips";
+import { cliWithoutDaemon, tagForCli } from "./lib/cli-harness.ts";
 
 isolateTmpdir("138-resolution-index");
 
@@ -129,10 +130,11 @@ console.log("\nPART E — the rendered report");
 	fs.copyFileSync(ledgerWith(Array.from({ length: 10_000 }, (_, i) => uuid(i, "e138"))), path.join(stateHome, "wtft", "spawns.jsonl"));
 	const session = path.join(dir, "e-session", `${PARENT}.jsonl`);
 	transcript(session, PARENT, 50);
+	tagForCli(session);
 	const ledgerFile = path.join(stateHome, "wtft", "spawns.jsonl");
 	const runCli = () => {
 		const t0 = performance.now();
-		const r = spawnSync("node", [path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs"), "-s", session, "--tokens"], {
+		const r = spawnSync("node", [cliWithoutDaemon(), "-s", session, "--tokens"], {
 			encoding: "utf8", env: { ...process.env, XDG_STATE_HOME: stateHome },
 		});
 		return { r, ms: performance.now() - t0 };

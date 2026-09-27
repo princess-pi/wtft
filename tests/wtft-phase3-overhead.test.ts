@@ -11,6 +11,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+import { cliWithoutDaemon, tagForCli } from "./lib/cli-harness.ts";
 
 
 // Private pid namespace for this suite (#486). Must precede the first
@@ -29,7 +30,7 @@ import {
 	readClassifiedTagFile,
 } from "../bin/wtft.mjs";
 
-const CLI_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
+const CLI_BIN = cliWithoutDaemon();
 
 const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";
@@ -259,21 +260,11 @@ console.log("\n5. Legend renders Ovrhd/Waste/Cmpct (built CLI, daemon pipeline)"
 		JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] } }),
 	].join("\n") + "\n");
 
-	// First invocation spawns the daemon; under batch-run load the tag file
-	// can miss the CLI's ~1.4s wait window ("no data yet"), so poll for
-	// classified output before the render whose legend we assert on.
-	let out = "";
-	for (let attempt = 0; attempt < 5; attempt++) {
-		out = execSync(
-			`${process.execPath} ${CLI_BIN} -s '${sessionPath}' -i 10m -l 3 -w 200 --no-emoji 2>&1 || true`,
-			// env explicit: bun's sync child_process ignores the runtime TMPDIR
-			// mutation isolateTmpdir() made, so without this the CLI's daemon
-			// lands in the real /tmp (#486, tests/bun-env-propagation.test.ts).
-			{ encoding: "utf8", env: process.env, timeout: 20_000 }
-		);
-		if (!out.includes("no data yet")) break;
-		execSync("sleep 1");
-	}
+	tagForCli(sessionPath);
+	const out = execSync(
+		`${process.execPath} ${CLI_BIN} -s '${sessionPath}' -i 10m -l 3 -w 200 --no-emoji 2>&1 || true`,
+		{ encoding: "utf8", env: process.env, timeout: 20_000 }
+	);
 	const clean = out.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
 	assert("legend shows Cmpct", clean.includes("Cmpct"));
 	assert("legend shows Waste", clean.includes("Waste"));
@@ -283,7 +274,7 @@ console.log("\n5. Legend renders Ovrhd/Waste/Cmpct (built CLI, daemon pipeline)"
 		clean.indexOf("Waste") < clean.indexOf("Cmpct") &&
 		clean.indexOf("Cmpct") < clean.indexOf("Other"));
 
-	// Daemon pipeline correctness: read the tag file back
+	// Tagger correctness: read the tag file back
 	const tagsDir = path.join(dir, "wtft-tags");
 	const tagFile = fs.readdirSync(tagsDir).find(f => f.endsWith(".jsonl"))!;
 	const tagged = readClassifiedTagFile(path.join(tagsDir, tagFile));
@@ -296,12 +287,6 @@ console.log("\n5. Legend renders Ovrhd/Waste/Cmpct (built CLI, daemon pipeline)"
 	const rawTotal = deduplicateInteractions(parseSessionFile(sessionPath)).reduce((s, i) => s + i.cost, 0);
 	assert("conservation: tag total = raw session total", approx(totalTagged, rawTotal, 1e-4));
 
-	// cleanup daemon spawned for the fixture
-	try {
-		const { getDaemonPidPath } = await import("../bin/wtft.mjs");
-		const pid = parseInt(fs.readFileSync(getDaemonPidPath(sessionPath), "utf8").trim(), 10);
-		if (pid > 0) process.kill(pid, "SIGTERM");
-	} catch {}
 	fs.rmSync(dir, { recursive: true, force: true });
 }
 

@@ -19,7 +19,11 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 ### Arguments
 
 - **An unknown argument exits 2** with the usage line on stderr (decision I), and so does a flag
-  missing its value (`--session`, `--harness`, `--stop` last on the line).
+  missing its value or given an empty one (`--session`/`-s`, `--harness`, `--stop`).
+  A bad `--harness` name and a `--session` outside the harness root exit 2 with no usage line; a
+  missing `--session`, a tag file given as one to a per-session daemon, and a missing harness root
+  exit 1 (a harness given a tag file retries its adoption and gives up, below). The full table:
+  `wtft-daemon --help` § Exit codes.
 - **`--harness claude-code` is `--harness claude`** (decision O). Both use one pid file.
 - **`--stop <session>` resolves its path**: `~` and `~/…` against `$HOME`, a relative path against
   the working directory (decision K). A per-session daemon matches when its own `--session`,
@@ -36,7 +40,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 - **Swept means every subagent turn is written.** A scan that holds back a subagent transcript's
   last ordinary turn (the one an interrupt record arriving next would mark; a `claude -p` command
   turn is never held) does not stamp the tag swept.
-  The next scan that finds no new bytes writes that turn, and stamps swept if it was clean.
+  The next scan that finds no new bytes, reads every transcript and is not cut short writes that
+  turn, after any `_gen` record its generation needs, and stamps swept if it was clean.
   A transcript no longer found (its session moved) has its held turn written under the source its
   earlier lines carry, so the generation that reads it again under the new path retires it; when
   that read happens in the same scan under the same source, it has read the turn itself and the
@@ -48,11 +53,13 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   a tag at its saved offset finds, from the tag's generation records, each `claude -p` transcript
   an earlier daemon read, in the session's own project directory or another, and reads it again
   from its start, as a new generation; a transcript discovery finds on its own (under
-  `<id>/subagents/`, or a Pi sibling) is left to discovery. So what it gained while nothing served the session is counted, and
+  `<id>/subagents/`, or a Pi sibling) is left to discovery. The search looks for
+  `<dir>/<id>.jsonl` under the Claude projects root, for a Pi session too. So what it gained while nothing served the session is counted, and
   so is what it writes from then on. A transcript another one currently folds (a `_fold` record
   under the other's source, not retired by a later generation of it) is left to that one. When the
-  projects directory or a transcript cannot be read, that is reported on stderr, the resume is
-  tried again at each scan, and the tag is not stamped swept until it succeeds. A `claude -p` lookup still open when a daemon stops
+  projects directory cannot be listed or a transcript cannot be stat'd, the first attempt reports it
+  on stderr and later ones are quiet (a projects directory that does not exist counts as searched),
+  the resume is tried again at each scan, and the tag is not stamped swept until it succeeds. A `claude -p` lookup still open when a daemon stops
   (its window not yet over, or a candidate unreadable) is resumed too: the tag records
   `{"_meta":{"spawnPending":{…}}}` when a turn's lookup starts and `{"_meta":{"spawnSettled":…}}`
   when it ends, with the children the lookup found, and a resumed daemon looks up every turn left
@@ -64,7 +71,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 - **Adoption never signals a harness** (decision H, A5). A harness asked for a session whose
   lease names another live harness does not take it; it retries (below). A focus request never
   repoints a lease another live daemon holds; the harness's adoption takes it by these rules. A per-session daemon
-  holding the lease is still stopped with SIGTERM and waited for, because it serves only that
+  holding the lease is still stopped with SIGTERM and waited for, about 1 s (20 × 50 ms) before
+  the adoption goes to its retries, because it serves only that
   session, and waiting keeps two writers off one tag. On Linux: the liveness check reads
   `/proc/<pid>/cmdline`, so off Linux every holder reads as not a daemon: a lease is taken with
   no retry and no signal, and a harness start displaces the running harness's root pid file
@@ -76,7 +84,10 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   "<text>"`. Losing a lease is how a session passes to a newer build, so this is not an error.
 - **The tagger version goes from 2.11.0 to 2.12.0.** Swept now means no turn held back, and the
   tag carries `spawnPending` / `spawnSettled` records, so every tag is rebuilt, and a start from
-  this build replaces a harness of an older one.
+  this build replaces a harness of an older one (SIGTERM, then SIGKILL after 2 s).
+- **A failed tag write in a harness exits the whole process 1**, after marking that session's
+  lease `rebuild` and writing the hand-off; the other sessions it served are taken up by the next
+  harness (#320 B).
 - **The lease race is a known limit** (decision G, H19). Releasing a lease is stat, read, stat,
   unlink. A daemon that claims the same lease between the last stat and the unlink loses it, and
   finds out at its next check (250 ms in a harness, one poll in a per-session daemon). The session
@@ -88,8 +99,9 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 
 - **A failed adoption gives up loudly** (A3, F14). After the first try and five retries 667 ms
   apart, the harness
-  writes `could not adopt <session>: <reason>` to stderr, and removes the lease and `.display`
-  marker if they still name it, so no reader is told the session is served.
+  writes `could not adopt <session>: <reason>` to stderr, and removes the lease if it still names
+  it, and the `.display` marker once no lease is left, so no reader is told the session is served.
+  A session it had dropped for idling goes back to being idle-dropped.
 - **A served session whose lease reads `rebuild` is adopted again**, whether a wake, the sweep or
   a flush finds it, so the session is rebuilt at once. Any other lease that is not the harness's
   drops the session, as `--stop` means.
@@ -129,25 +141,29 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 
 ### Hand-off (I24, I27)
 
-- **The hand-off is kept current.** A harness rewrites `<harness pid file>.served` whenever the
-  set of sessions it serves, has dropped for idling or is retrying to adopt changes, and removes
-  it when all three are empty.
+- **The hand-off is kept current.** While it holds its root pid file, a harness rewrites
+  `<harness pid file>.served` whenever its text changes (the sessions it serves and still holds
+  the lease of or that read `rebuild`, has dropped for idling, or is retrying to adopt, and each
+  one's displayed flag and idle size, inode and mtime), and removes it when that list is empty.
   So a harness killed before its SIGTERM handler runs, which `--restart` does after 2 s, still
   passes on what it served.
 - **A hand-off that cannot be read is moved aside** to `<hand-off>.unreadable-<UTC time>`, kept,
   and reported on stderr. A line that does not
-  parse is reported on stderr. A session waiting on an adoption retry is handed on with the
+  parse is reported on stderr; a record with a relative or out-of-root path or an unknown kind is
+  skipped silently, as is an idle one whose file is gone. A session waiting on an adoption retry is handed on with the
   displayed flag it was asked with.
 
 ### Sweep liveness (A6, A7, G18)
 
 - **The sweep checks each served transcript**, at most once per 667 ms per session. One that is
-  gone, has grown, was replaced, or whose last read failed is woken, so a lost watch event only
+  gone, has grown or shrunk, was replaced, holds a partial last line, or whose last read failed is woken, so a lost watch event only
   delays it. A subagent scan the sweep runs keeps a failed read of the session's own transcript,
   so it never stamps swept over it. That covers a
   deleted session, the 1 h limit on a never-written session, and a directory whose watch failed.
 - **A served session whose tree has a directory that cannot be watched has its subagents read**
   by the sweep, at most once per 667 ms, since no watch event comes for a subagent written there.
+  While a `claude -p` lookup, a reseed, a held turn or a spawn window is open, the subagent scan
+  runs on every 250 ms sweep, unthrottled.
 - **A failed directory watch is retried** by the sweep every 10 s while a served session, or a session dropped for idling, needs it.
   Meanwhile the sweep reads the size, inode and mtime of each session dropped for idling in such a
   directory, and a write adopts it again, a same-length rewrite included.
@@ -157,14 +173,15 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 - **The hand-off carries each idle session's size, inode and mtime**, so a session written while
   no harness ran is adopted by the next harness at once.
 - **A session dropped for idling is forgotten `WTFT_DAEMON_IDLE_MS` after it was dropped** unless
-  it is written first. The hand-off carries when it was dropped, so a later harness does not
+  it is written first, or within a minute of its transcript being deleted. The hand-off carries when it was dropped, so a later harness does not
   restart that clock.
 - **A harness with no served session, no adoption pending and no session dropped for idling stops
   after `WTFT_DAEMON_IDLE_MS`** (24 h), after serving any request posted since its last read of
   them, so it hands nothing on. A request posted between that read and the pid file's removal is
   left in the request directory for the next harness; like the lease race, it needs two processes
-  inside one short gap. A harness stopped for any other reason hands on the sessions it dropped
-  for idling, so the next harness watches them.
+  inside one short gap. A harness stopped for any other reason while it still holds its root
+  pid file hands on the sessions it dropped for idling, so the next harness watches them; one
+  stopped because that file was removed, names another pid or cannot be read hands on nothing.
 - **A harness whose root directory is gone stops** at its next sweep.
 - **`--cleanup` never stops a harness** (decision E, I26), fixture or not. A harness drops what it
   no longer serves, and stops when it serves nothing.
@@ -176,7 +193,7 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 ### Stop reason (decision P)
 
 - **The stop line carries its reason**: `{"_hb":"stop","reason":"<reason>"}`. A per-session
-  daemon writes it on shutdown, as before. A harness writes it when it drops a session whose lease
+  daemon writes it on shutdown while its lease still names it; one that lost its lease writes none. A harness writes it when it drops a session whose lease
   it still holds for idling, removal or never being written, and when it stops. A stop on a failed
   tag write writes none.
 

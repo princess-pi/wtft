@@ -1184,15 +1184,13 @@ try {
 			fs.appendFileSync(sessionPath, turnLine(C2, T0 + 2_000, 1500, 75));
 			fs.chmodSync(sessionPath, 0o000);
 
-			// The #457 warning names the SESSION TRANSCRIPT (the round-7 noun for
-			// the main file) at discovery. The latch is shared with the pattern-2
-			// discovery read of the same file, so exactly one warning fires; both
-			// paths emit the identical phrase, so the anchor holds either way.
+			// The latch is shared with the discovery read of the same file, so
+			// exactly one warning fires, from whichever path reads first.
 			let warned = false;
 			for (let i = 0; i < 30 && !warned; i++) {
 				await sleep(250);
 				const stderr = daemon.stderr.join("");
-				warned = stderr.includes("the session transcript could not be read at discovery") && stderr.includes(sessionPath);
+				warned = stderr.includes("the session transcript could not be read") && stderr.includes(sessionPath);
 			}
 			assert("daemon warns that the unreadable main session transcript could not be read", warned);
 

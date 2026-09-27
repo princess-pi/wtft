@@ -5,7 +5,7 @@
       "text": "reading...",
       "color": "grey",
       "example": null,
-      "meaning": "CLI startup placeholder, shown before the first health check completes (500 ms)."
+      "meaning": "CLI startup placeholder, shown until the first health check: whichever comes first of the 1,334 ms watchdog armed at the first render, the check 500 ms after the tag file appears, or a tag change."
     },
     {
       "text": "live",

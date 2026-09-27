@@ -2,7 +2,7 @@
 
 The live spec for `extensions/lib/harness-registry.ts`. A behaviour change in this module edits
 this file; the per-issue specs behind it are change records (§5). Vocabulary: `CONTEXT.md`
-(Daemon, Session); "harness" is the daemon's harness process, not a coding-agent runtime.
+(Daemon, Session); "harness" is the harness daemon, not a coding-agent runtime.
 
 Module: `extensions/lib/harness-registry.ts` · Seam: `move`, tested in `tests/wtft-270-harness-registry.test.ts`
 

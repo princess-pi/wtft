@@ -62,7 +62,7 @@
   next turn of the event loop, skips the transcripts this pass has already taken. A failure in any slice of a pass keeps the tag
   from being stamped swept when the pass ends, and dropping a session forgets its pass. `WTFT_HARNESS_SCAN_YIELD_MS` (default 0) pauses
   between slices; the suite sets it to make a scan outlast a report. A one-shot `wtft` that finds turns in the tag reports them at once, marked
-  provisional (exit 9, "no subagent transcript has been read since this tag was written") until
+  provisional (exit 9, "no clean read of the session and its subagents has finished since this tag was last written, so some cost may still be missing") until
   the scan finishes and stamps the tag swept; `--watch` shows the sum grow. A session adopted on
   a tag an earlier daemon wrote has that tag's swept verdict retracted first, since whatever was
   written while nothing served it has not been read yet.

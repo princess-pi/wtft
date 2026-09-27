@@ -50,14 +50,15 @@ daemon holds no lease. No clock window sets it; the spawner claims the lease for
 ## 3. Reason codes
 
 `DaemonHealthReason` is the contract. Adding a member is a feature; renaming or removing one is a
-breaking change. The text beside each is free to change.
+breaking change. The text beside each is free to change. Nothing outside this repo reads the
+codes, so `starting`, which nothing had set since spec-281, was deleted rather than kept.
 
 | Code | Set by | Meaning |
 |---|---|---|
 | `not-started` | the widget's `getDaemonStatus` | no daemon spawned for this session yet |
 | `waiting-session` | `decideHealth` | a live holder, no session file yet |
 | `not-found` | `decideHealth` | no live holder and no heartbeat with a `last` |
-| `idle-timeout` | `decideHealth` | no live holder; `lastHbTime` says when it last beat |
+| `idle-timeout` | `decideHealth` | no live holder, however it stopped; `lastHbTime` says when it last beat |
 | `restart-failed` | `--watch` | `r` could not stop the holder or start a new daemon |
 
 ## 4. What a reader shows

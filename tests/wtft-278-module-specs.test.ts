@@ -12,8 +12,9 @@ import * as path from "node:path";
 const REPO = path.resolve(import.meta.dirname, "..");
 const DOCS = path.join(REPO, "docs");
 const specs = fs.readdirSync(DOCS).filter(f => /^spec-.*\.md$/.test(f));
-const moduleSpecs = specs.filter(f => !/^spec-\d/.test(f));
 const read = (f: string) => fs.readFileSync(path.join(DOCS, f), "utf8");
+// A module spec is one that says so; other unnumbered specs are not module specs.
+const moduleSpecs = specs.filter(f => /^Module: `extensions\/lib\//m.test(read(f)));
 const header = (f: string) => read(f).split("\n").slice(0, 15).join("\n");
 
 describe("module specs", () => {
@@ -27,7 +28,7 @@ describe("module specs", () => {
 
 		it(`${f} names its module, and the module exists`, () => {
 			assert.ok(fs.existsSync(source), `${f} has no extensions/lib/${name}.ts`);
-			assert.ok(read(f).includes(`Module: \`extensions/lib/${name}.ts\``), `${f} has no Module line`);
+			assert.ok(read(f).includes(`Module: \`extensions/lib/${name}.ts\``), `${f}'s Module line does not name extensions/lib/${name}.ts`);
 		});
 
 		it(`${f}'s seam is exported by the module and tested by a suite that exists`, () => {

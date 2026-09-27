@@ -17,6 +17,7 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
 - **Shared code goes in `@princess-pi/libs`**, never copied in.
 - **Spec-reconcile does not treat comments as spec.** Reconcile: manifests,
   `--help`, README flags/exit codes, JSON schema, tag-format, `CONTEXT.md`,
+  module specs (`docs/spec-<module>.md`),
   `docs/wtft-incremental-render-spec.md`, user-facing strings.
   Not banner comments, not test-header novels, not glossary provenance, not counts
   in prose. A stale comment is deleted, never reworded.

@@ -703,7 +703,8 @@ export async function restartDaemon(sessionPath: string, daemonPath: string): Pr
 		if (mayStop(classifyPid(pid)) && (await stopHolder(pid)) !== "stopped") return false;
 	} catch {}
 
-	const childPid = processTable().spawn(process.execPath, [daemonPath, ...daemonLaunchArgs(sessionPath)], process.env);
+	let childPid = 0;
+	try { childPid = processTable().spawn(process.execPath, [daemonPath, ...daemonLaunchArgs(sessionPath)], process.env); } catch {}
 	if (childPid === 0) return false;
 	try { claimLeaseForChild(pidPath, childPid); } catch { /* the child claims for itself */ }
 	return true;

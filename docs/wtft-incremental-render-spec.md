@@ -487,7 +487,7 @@ The 24-hour SURGE timeline and daemon status indicator are appended inline to th
 
 ## Daemon Status States
 
-What triggers each state: `docs/spec-daemon-health.md` §2. The rendered text and colours:
+What triggers each state: `docs/spec-daemon-health.md` §2 and §3. The rendered text and colours:
 `docs/manifests/wtft-status.json`, shown on `docs/EXT_WTFT.html` (`#daemon-health`). Both
 surfaces render through `renderDaemonStatus`.
 
@@ -496,7 +496,7 @@ its 1,334 ms watchdog while it does not read the daemon as dead.
 
 ## Pi Widget Integration
 
-The Pi `/wtft` widget also spawns a log parser daemon on `session_start`, using `ctx.sessionManager.getSessionFile()` to determine the session path. This keeps the wtft-tag file warm for CLI use. The widget renders its own daemon status indicator on the title line (inline or wrapped; under the cache line when there is no chart), from `getDaemonStatus`: `daemon not started` before it has spawned, else the same `health` answer (`docs/spec-270-daemon-health.md`).
+The Pi `/wtft` widget also spawns a log parser daemon on `session_start`, using `ctx.sessionManager.getSessionFile()` to determine the session path. This keeps the wtft-tag file warm for CLI use. The widget renders its own daemon status indicator on the title line (inline or wrapped; under the cache line when there is no chart), from `getDaemonStatus`: `daemon not started` before it has spawned, else the same `health` answer (`docs/spec-daemon-health.md`).
 
 **Daemon auto-revive:** If the daemon died from idle timeout (24h), the Pi `agent_end` handler calls `ensureDaemonRunning`, which, when it spawned for this same session before, checks `health` before trusting the module-level `_daemonSpawned` flag. If the lease has no live holder, the flag is reset and the daemon is re-spawned; with no earlier spawn it spawns without checking. This keeps `wtft --watch` in an external terminal alive even after long idle periods — just type a new prompt and the daemon wakes up.
 
@@ -559,19 +559,19 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 
 | Situation | Handling |
 |---|---|
-| Daemon exits (idle timeout, 24h) | Title shows `● stopped HH:MM` in red; footer shows red `'r' to restart` |
+| Daemon exits (idle timeout, 24h) | The status `docs/spec-daemon-health.md` §2 gives a dead holder; footer shows red `'r' to restart` |
 | No activity for 2m2s | Status flips to `● idle (cache expires in Nmin)`, whole minutes rounded up, then `● idle (cache emptied)`. The TTL rule: `docs/spec-daemon-health.md` §2. |
 | Local model (no cache), or no model known | Status shows `● idle (local model)` |
 | User presses `r` | Daemon restarts; while the old one exits (up to 4 s) the view keeps rendering what `health` finds, and a second `r` is ignored until the restart ends; `q` or Ctrl+C then exits once it has spawned. When the claim landed, the lease names the new child at once, so that is alive (`waiting for session`, `live` or `idle`). A holder that outlives SIGKILL or may not be signalled (EPERM), or a spawn that throws, shows `● restart failed` |
 | Tag file deleted/truncated | `fs.watch` handler re-reads from zero |
-| Daemon spawned before session file exists | Status shows `● waiting for session .jsonl...` (yellow) while a live process holds the lease; over a `rebuild` lease it shows `not found` or `stopped HH:MM` until the daemon adopts. The daemon polls until the file is created (#124) |
-| Daemon never started | The widget, before it has spawned one, shows `● daemon not started`; otherwise a dead lease with no heartbeat in the tag's last 8 KiB shows `● daemon not found`, and one with a heartbeat `● stopped HH:MM` |
+| Daemon spawned before session file exists | Status per `docs/spec-daemon-health.md` §2. The daemon polls until the file is created (#124) |
+| Daemon never started | Status per `docs/spec-daemon-health.md` §2 and §3 |
 | Daemon restarts after crash | Reads `_meta` offset from tag file for exact resume position; falls back to full re-parse if no meta offset found (#124) |
 | One-shot read beats the daemon to a stale tag | The total prints in full, a `PROVISIONAL` warning names why, and `wtft` exits **9** rather than 0 — `readTagProvisional` reports `stale-version` or `unswept` (#443). It does NOT wait: blocking a one-shot CLI on a repair proportional to subagent volume is the cost read-then-render avoids |
 | `--tokens` blind-spot scan loses a subtree | An unreadable subagent transcript — one file (reported, not thrown, since round 6; the readable siblings still scan) or a whole unreadable directory — drops uncounted billables from the token table; the parser warned (latched), the CLI sets `provisional` with reason `subagent-unreadable` and exits **9** (#457, round 5; assigned unconditionally on the CLI's own discovery failure since round 7 — never already-provisional-superseded) — a machine reader never sees a complete-looking report |
 | Daemon encounters transient error | Error logged (debug mode), daemon continues on next poll cycle — does not crash |
 | Terminal too narrow for inline status | Status wraps to separate line between title and legend |
-| Session file gone | While a lease holder is alive, `● waiting for session .jsonl...`; once it has exited, `● stopped HH:MM` (or `● daemon not found` with no heartbeat in the tail). The chart keeps the last-known data |
+| Session file gone | Status per `docs/spec-daemon-health.md` §2. The chart keeps the last-known data |
 
 ## Verification
 

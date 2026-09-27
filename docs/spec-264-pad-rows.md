@@ -22,7 +22,7 @@
   cursor ends on, would not fit the terminal it drops placeholder rows (`isPlaceholderRow`) first. No test drives this; it runs only
   under a real terminal height.
 - **The Pi widget does not pad** and keeps its own default of 10. Pi caps a string-array widget at
-  10 lines; fitting under that is #269.
+  10 lines; `docs/spec-269-widget-fit.md` fits it under that.
 - **`--json` is unchanged**: it renders no chart.
 
 ## Closer

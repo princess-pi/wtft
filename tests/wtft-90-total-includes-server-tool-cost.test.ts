@@ -68,22 +68,14 @@ function fixture(name: string, web: number): string {
 const withWeb = fixture("with-web.jsonl", WEB_REQUESTS);
 const noWeb = fixture("no-web.jsonl", 0);
 
-/** Each invocation gets its OWN copy of the fixture
- *
- *  Three surfaces read by three separate processes is a snapshot comparison, not
- *  a single-state one: a provisional read is defined as one whose total MAY STILL
- *  GROW under the daemon, and the first run's tag repair would legitimately move
- *  the second run's number — which a 1e-9 equality forbids. A fresh file per run
- *  means every surface reads the same state, from nothing. (The sibling #26 suite
- *  hit this and fixed it the same way.) */
+/** Each invocation gets its own copy of the fixture, tagged before the run. */
 let runSeq = 0;
 function cli(source: string, args: string[]): string {
 	const copy = path.join(dir, `run-${runSeq++}-${path.basename(source)}`);
 	fs.copyFileSync(source, copy);
 	tagForCli(copy);
 	const r = spawnSync("node", [CLI_BIN, "-s", copy, ...args], { encoding: "utf8", env: { ...process.env } });
-	// Exit 9 is PROVISIONAL — a report in full, whose total may still grow. It is
-	// not a failure, and a fresh fixture is what keeps it from being a moving one.
+	// Exit 9 is PROVISIONAL: a report in full, whose total may still grow.
 	if (r.status !== 0 && r.status !== 9) {
 		throw new Error(`wtft -s <copy> ${args.join(" ")} exited ${r.status}: ${r.stderr}`);
 	}
@@ -221,19 +213,19 @@ function runJson(): any {
 }
 tagForCli(warmFixture);
 const tagged = tagLineCount();
-check(tagged > 0, `a tag file exists before the warm runs (${tagged} classified line(s)) — otherwise these are three cold runs`);
+check(tagged > 0, `a tag file exists before the warm runs (${tagged} classified line(s))`);
 
 const warmRuns = [1, 2, 3].map(() => runJson());
 check(
 	warmRuns.every(d => Math.abs(d.total.costUsd - docWeb.total.costUsd) < 0.005),
-	`three runs against the SAME, already-tagged fixture agree with the cold one ($${warmRuns.map(d => d.total.costUsd).join(", $")})`
+	`three runs against the same tagged fixture agree with TEST 1's read ($${warmRuns.map(d => d.total.costUsd).join(", $")})`
 );
 check(
 	warmRuns.every(d => {
 		const w = d.categories.find((c: any) => c.category === "web");
 		return Math.abs(w.costUsd - EXPECTED_WEB_COST) < 0.005;
 	}),
-	"…and the web category still carries the server-tool cost after the round-trip"
+	"…and the web category carries the server-tool cost the meter prices, read back from the tag"
 );
 
 console.log("--- TEST 4: no token field moved ---");

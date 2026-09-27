@@ -1,7 +1,6 @@
 /**
- * End-to-end test: runs the actual `wtft` CLI binary on a fixture
- *   session and asserts that non-watch, watch-mode (simulated), and direct
- *   daemon output all produce the same total cost.
+ * Runs the built `wtft` CLI on a fixture session tagged in process, and
+ *   asserts that the tag, the CLI and a straight parse agree on the total.
  */
 
 import * as fs from "node:fs";
@@ -22,7 +21,7 @@ isolateTmpdir("cli-e2e-cost-parity");
 
 // ---
 // FIXTURE: Claude Code multi-block response plus a second distinct message.
-// Tests dedup across messages — two message.ids, 5 raw lines, 2 deduped.
+// Tests dedup across messages — two message.ids, 4 raw lines, 2 deduped.
 // ---
 
 const FIXTURE_ID = "fixture-e2e-cost-parity";
@@ -122,8 +121,8 @@ const { dir, sessionPath } = makeFixture();
 
 const tagPath = tagForCli(sessionPath).tagPath;
 const tagEntries = readClassifiedTagFile(tagPath);
-const daemonCost = tagEntries.reduce((sum, i) => sum + i.cost, 0);
-console.log(`Tag file: $${daemonCost.toFixed(6)} (${tagEntries.length} entries)`);
+const tagCost = tagEntries.reduce((sum, i) => sum + i.cost, 0);
+console.log(`Tag file: $${tagCost.toFixed(6)} (${tagEntries.length} entries)`);
 
 let cliOut = "";
 try {
@@ -137,8 +136,8 @@ try {
 // Assertions
 // ---
 
-assert(/\$\d/.test(cliOut), "the CLI renders a cost from the tag");
-assert(daemonCost > 0, `Daemon cost > 0 (got $${daemonCost.toFixed(6)})`);
+assert(cliOut.includes(`$${tagCost.toFixed(2)}`), `the CLI renders the tag's total, $${tagCost.toFixed(2)}`);
+assert(tagCost > 0, `Tag cost > 0 (got $${tagCost.toFixed(6)})`);
 
 // Path 3: Reference cost via parseSessionFile + deduplicateInteractions
 // (same functions the daemon inlines — should produce identical results).
@@ -147,13 +146,13 @@ const dedupedInteractions = deduplicateInteractions(rawInteractions);
 const referenceCost = dedupedInteractions.reduce((sum, i) => sum + i.cost, 0);
 console.log(`Reference (parseSessionFile + dedup): $${referenceCost.toFixed(6)} (${dedupedInteractions.length} interactions)`);
 
-const tagDelta = Math.abs(daemonCost - referenceCost);
+const tagDelta = Math.abs(tagCost - referenceCost);
 assert(
 	tagDelta < 0.001,
-	`Daemon vs reference within 0.1¢: ref=$${daemonCost.toFixed(6)} ref=$${referenceCost.toFixed(6)} (delta=$${tagDelta.toFixed(6)})`
+	`Tag vs reference within 0.1¢: tag=$${tagCost.toFixed(6)} ref=$${referenceCost.toFixed(6)} (delta=$${tagDelta.toFixed(6)})`
 );
 
-// Verify dedup: raw 5 lines → 2 deduped messages
+// Verify dedup: raw 4 lines → 2 deduped messages
 assert(rawInteractions.length === 4, `Raw parse: 4 lines (got ${rawInteractions.length})`);
 assert(dedupedInteractions.length === 2, `Deduped: 2 messages (got ${dedupedInteractions.length})`);
 

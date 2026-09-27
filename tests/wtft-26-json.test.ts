@@ -570,7 +570,6 @@ console.log("\n9. rendered and --json agree on the exit code, empty or not");
 		fs.writeFileSync(path.join(tagsDir, name), JSON.stringify({ _meta: stale ? { offset: 0 } : { offset: 0, swept: Date.now() } }) + "\n");
 		return sessionPath;
 	};
-	// A fresh fixture per mode: a real daemon repairs the tag after the first run.
 	for (const [slug, stale, want] of [["renderprov", true, EXIT_PROVISIONAL], ["rendersettled", false, 0]] as const) {
 		const rendered = runCli(["-s", mk(`${slug}-r`, stale), "--pad", "0"]);
 		const asJson = runCli(["-s", mk(`${slug}-j`, stale), "--json"]);

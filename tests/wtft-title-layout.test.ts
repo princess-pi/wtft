@@ -1,7 +1,7 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
  * Strictly validates title row layout consistency across all
- *   code paths (CLI cost, CLI tokens, CLI --watch) at narrow/medium/wide
+ *   code paths (CLI cost, CLI tokens) at narrow/medium/wide
  *   terminal widths.
  */
 

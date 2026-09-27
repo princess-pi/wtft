@@ -13,10 +13,6 @@ import { execSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { cliWithoutDaemon, tagForCli } from "./lib/cli-harness.ts";
 
-
-// Private pid namespace for this suite (#486). Must precede the first
-// getDaemonPidPath() and the first daemon spawn — the daemon keys its lease on
-// os.tmpdir() and sweeps every wtft-daemon-*.pid there at startup.
 isolateTmpdir("phase3-overhead");
 
 import {
@@ -243,7 +239,7 @@ console.log("\n4. Compaction flags — Claude isCompactSummary and Pi type:compa
 // ---
 // 5. Legend + stacking via built CLI on a fixture with all three overheads
 // ---
-console.log("\n5. Legend renders Ovrhd/Waste/Cmpct (built CLI, daemon pipeline)");
+console.log("\n5. Legend renders Ovrhd/Waste/Cmpct (built CLI over an in-process tag)");
 {
 	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-p3-legend-")));
 	const sessionPath = path.join(dir, "session.jsonl");

@@ -31,6 +31,8 @@ import * as path from "node:path";
 const mode = process.env.WTFT_STAND_IN;
 const at = process.argv.indexOf("--session");
 if (mode === "alive" || mode === "heartbeat") setTimeout(() => {}, 3000);
+// daemonLaunchArgs always passes --session; without it there is no tag to beat into.
+if (mode === "heartbeat" && at < 0) process.exit(3);
 if (mode === "heartbeat" && at > 0) {
 	const session = process.argv[at + 1];
 	const tag = path.join(path.dirname(session), "wtft-tags", path.basename(session) + ".wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl");

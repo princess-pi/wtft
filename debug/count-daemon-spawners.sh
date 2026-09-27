@@ -53,8 +53,8 @@ run_one() {
 	# second grep: it would quit early, and pipefail would read SIGPIPE as no match.
 	# The CLI harness's stand-in (tests/lib/cli-harness.ts) sits in a bin/ dir
 	# under a wtft-cli-harness- temp dir, because the bundles look for ../bin.
-	if grep -E '"[^"]*bin/wtft-daemon(\.mjs|\.ts|\.js)?"' "$out/$name.trace" | grep -v '/wtft-cli-harness-' \
-		| grep -vE '= -1 [A-Z]+' >/dev/null; then
+	if grep -E '"[^"]*bin/wtft-daemon(\.mjs|\.ts|\.js)?"' "$out/$name.trace" \
+		| grep -vE '"[^"]*/wtft-cli-harness-[^"/]*/bin/wtft-daemon\.mjs"' | grep -vE '= -1 [A-Z]+' >/dev/null; then
 		echo "$name"
 	elif [[ "$(cat "$out/$name.done")" != 0 ]]; then
 		echo "FAILED $name"

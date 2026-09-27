@@ -259,12 +259,13 @@ console.log("\nwtft restart over an id-less child line");
 		await settle(() => outOf() === 301);
 		first = outOf();
 		await stopDaemon(pid, rootPath);
+		pid = 0;
 		pid = spawnDaemon(rootPath);
 		await sleep(1_500);
 		await settle(() => outOf() >= 301);
 		second = outOf();
 	} finally {
-		await stopDaemon(pid, rootPath);
+		if (pid > 0) await stopDaemon(pid, rootPath);
 	}
 	const appended = fs.readFileSync(restartTag, "utf8").split("\n").filter(l => l.includes('"no id"') || (l.includes('"out":300') && !l.includes('"_'))).length;
 	assert(`D5b fixture precondition: the first life billed it once, and the restart appended the line again (${appended} copies on disk)`,

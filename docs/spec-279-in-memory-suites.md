@@ -20,11 +20,17 @@ then `spawners: <n> of <total>`.
   directory.
 - **The runner's solo suites run alone here too,** after the pool. The list is read from `SOLO` in
   `tests/run.ts`.
-- **A suite is stopped when it returns.** strace follows every daemon a suite leaves running, so the
-  tracer is killed then, and the daemons with it. A suite still running after 300 s is unfinished.
+- **Each suite runs as `tests/run.ts` runs it,** with `bun test`.
+- **A suite is stopped when it returns.** strace follows every daemon a suite leaves running, so it
+  is sent SIGTERM then, which `-I 1` lets through: it detaches, flushes the trace and exits, and
+  those daemons run on as they would untraced. A suite still running after 300 s is unfinished.
+- **Only an exec that succeeded counts.** An exec of a `bin/wtft-daemon` path that returned -1 (a
+  PATH search) started nothing.
 - **No count rather than a low one:** when a suite is unfinished, or its trace does not show the
-  suite itself starting, the script names it on stderr and exits 3 without a count. Exit 2 is a
-  setup failure.
+  suite itself starting, the script names it on stderr and exits 3 without a count.
+- **A failed suite that started no daemon is named:** it may have failed before reaching one. The
+  count is printed, the suites are named on stderr, and the exit is 4. The #214 suites fail on
+  this host, so read that list before trusting the count. Exit 2 is a setup failure.
 
 ## 2. The harness
 
@@ -45,7 +51,7 @@ becomes ⌈*n* / 667⌉ polls.
 N), 115 (the daemon section), 220, 241 (the daemon section), 443 swept marker, cost
 cross-validation, and tree navigation.
 
-**Stays on the real daemon, and why.** After this slice, 43 of 122 suites count:
+**Stays on the real daemon, and why.** After this slice, 43 of 123 suites count (main gained a suite):
 - **A restart or a start-up read, 4:** tag-file staleness, 130 line-safe writes, 457, 512 fatal
   replay. What a new daemon does with a tag an earlier one wrote is `initClassified` in
   `bin/wtft-daemon.ts`, which is not in the tagger. 114's restart case (D5) moved into the
@@ -61,7 +67,9 @@ the CLI that this spec does not add. It is the next slice of #279.
 
 ## 5. Verification
 
-- Each moved suite passes, and asserts the same things as before, with "the daemon" now "the
-  tagger" in its labels.
+- Each moved suite passes and asserts the same outcomes as before, with "the daemon" now "the
+  tagger" in its labels. One thing is no longer asserted by them: that a debug line reaches stderr
+  under `WTFT_DAEMON_DEBUG`. 97 and the truncate diagnostic now read the tagger's log lines, and the
+  printing is `printLog` in `bin/wtft-daemon.ts`.
 - The truncate diagnostic was checked by mutation: renaming the rotation log line fails it.
 - The count, before and after, is in the PR body.

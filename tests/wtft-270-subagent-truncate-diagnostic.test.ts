@@ -78,7 +78,7 @@ fs.writeFileSync(subagentPath, turnLine(BIG_ID, T0, 200, "x".repeat(4096)));
 
 	const rotated = () => tagger.log.some(l => l.level === "debug" && /subagent transcript rotated/.test(l.text));
 	const sawDiagnostic = tagger.until(rotated);
-	assert("a rotated subagent transcript names itself in a debug log line (stderr under WTFT_DAEMON_DEBUG)", sawDiagnostic);
+	assert("a rotated subagent transcript names itself in a debug log line", sawDiagnostic);
 
 	// And the reset still does its job: the post-rotation content is picked up.
 	const sawSmall = tagger.until(() => readClassifiedTagFile(tagPath).some((int: any) => int.messageId === SMALL_ID));

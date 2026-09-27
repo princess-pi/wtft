@@ -95,7 +95,7 @@ const NEW_TURN_ID = "msg_270_growth_new";
 	for (let i = 0; i < 6; i++) tagger.poll();
 	const afterIdle = rawClassifiedLineCount(tagPath);
 	assert(
-		`5 polls over an UNCHANGED transcript append nothing (${afterIdle} === ${afterSeed})`,
+		`6 polls over an UNCHANGED transcript append nothing (${afterIdle} === ${afterSeed})`,
 		afterIdle === afterSeed
 	);
 

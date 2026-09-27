@@ -4,6 +4,7 @@
  */
 
 import { buildWtftLines, CLI_DEFAULT_LIMIT, chartLimit } from "../extensions/lib/wtft-renderer.ts";
+import { isPlaceholderRow } from "../extensions/lib/wtft-chart.ts";
 
 let passed = 0;
 let failed = 0;
@@ -58,6 +59,14 @@ check(CLI_DEFAULT_LIMIT === 17, "the CLI default limit is 17");
 check(chartLimit({ hasLimit: false, limit: 10 }, undefined) === 17, "no -l and no config: 17");
 check(chartLimit({ hasLimit: true, limit: 5 }, 30) === 5, "-l wins over config");
 check(chartLimit({ hasLimit: false, limit: 10 }, 30) === 30, "config limit wins over the default");
+
+check(chartLimit({ hasLimit: false, limit: 10 }, 3.5) === 3, "a fractional config limit is rounded down, so slice and padding agree");
+check(chartLimit({ hasLimit: false, limit: 10 }, -2) === 0, "a negative config limit is 0");
+{
+	const lines = plain(buildWtftLines(ix, settings, { limit: 5, padRowsTo: 5 }));
+	check(placeholderRows(lines).length === 3 && (buildWtftLines(ix, settings, { limit: 5, padRowsTo: 5 }) ?? []).filter(isPlaceholderRow).length === 3,
+		"isPlaceholderRow finds exactly the padding rows");
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

@@ -10,8 +10,10 @@ import {
 	parseEntryToInteraction,
 	deduplicateInteractions,
 	classifyInteraction,
-	buildWtftLines
+	buildWtftLines,
+	wholeLimit
 } from "./wtft-shared.js";
+import { isPlaceholderRow } from "./wtft-chart.js";
 import { splitOverheadCost, isModelTagged } from "./wtft-parser.js";
 import { getDiscoveries } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.js";
@@ -856,7 +858,7 @@ export async function watchTagFile(
 		const padStr = " ".repeat(actualPad);
 		const paddedWidth = width - 2 * actualPad;
 		const finalInterval = settings.hasInterval ? settings.interval : (sessionInterval ?? settings.interval);
-		const finalLimit = settings.hasLimit ? settings.limit : (sessionLimit ?? settings.limit);
+		const finalLimit = wholeLimit(settings.hasLimit ? settings.limit : (sessionLimit ?? settings.limit));
 		const finalMode = settings.hasMode ? settings.mode : (sessionMode ?? settings.mode);
 		const finalTimezone = settings.hasTimezone ? settings.timezone : (sessionTimezone ?? settings.timezone);
 		const finalWidth = Math.min(paddedWidth, 1023);
@@ -903,6 +905,11 @@ export async function watchTagFile(
 			}
 
 			for (const l of lines) buf.push(l);
+			// Cursor-up redraw cannot reach lines scrolled off the top: padding gives way first.
+			let over = buf.length + 1 - (process.stdout.rows || Infinity);
+			for (let i = buf.length - 1; i >= 0 && over > 0; i--) {
+				if (isPlaceholderRow(buf[i]!)) { buf.splice(i, 1); over--; }
+			}
 		} else {
 			buf.push(`\x1b[90m${waitingForDataLine(sessionPath)}\x1b[0m`);
 		}

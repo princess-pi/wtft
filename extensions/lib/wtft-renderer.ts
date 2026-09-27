@@ -687,7 +687,12 @@ export function computeCacheMetrics(interactions: Interaction[]): { hitRate: str
 export const CLI_DEFAULT_LIMIT = 17;
 
 export function chartLimit(opts: { hasLimit: boolean; limit: number }, configLimit: number | undefined): number {
-	return opts.hasLimit ? opts.limit : (configLimit ?? CLI_DEFAULT_LIMIT);
+	return wholeLimit(opts.hasLimit ? opts.limit : (configLimit ?? CLI_DEFAULT_LIMIT));
+}
+
+/** A config file can hold 3.5 or -2; the chart shows, and pads to, a whole count. */
+export function wholeLimit(limit: number): number {
+	return Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : CLI_DEFAULT_LIMIT;
 }
 
 export function buildWtftLines(

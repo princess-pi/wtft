@@ -8,7 +8,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { canonicalTranscriptPath, deduplicateInteractions, parseSessionFile, type Interaction } from "./extensions/lib/wtft-parser.ts";
-import { cwdToStrictSlug } from "./extensions/lib/harness/session-cwd.ts";
+import { cwdSlugVariants } from "./extensions/lib/harness/session-cwd.ts";
 import { projectsDir } from "./extensions/lib/harness/claude-code/discovery.ts";
 
 export interface FileCounts { source: number; tests: number; docs: number }
@@ -37,20 +37,25 @@ export interface SessionCost {
 /** Transcripts in every projects directory named for the clone or one of its
  *  worktrees, subagent transcripts included, modified at or after `sinceMs`. */
 export function listTranscripts(cloneDir: string, sinceMs: number, root = projectsDir()): string[] {
-	const prefix = cwdToStrictSlug(cloneDir);
+	if (!fs.existsSync(root)) return [];
+	const prefixes = cwdSlugVariants(cloneDir);
 	const out: string[] = [];
 	const jsonl = (dir: string) => fs.readdirSync(dir).filter(f => f.endsWith(".jsonl")).map(f => path.join(dir, f));
+	const walk = (dir: string) => {
+		out.push(...jsonl(dir));
+		for (const e of fs.readdirSync(dir, { withFileTypes: true })) if (e.isDirectory()) walk(path.join(dir, e.name));
+	};
 	for (const name of fs.readdirSync(root)) {
-		if (name !== prefix && !name.startsWith(prefix + "-")) continue;
+		if (!prefixes.some(p => name === p || name.startsWith(p + "-"))) continue;
 		const dir = path.join(root, name);
 		if (!fs.statSync(dir).isDirectory()) continue;
 		out.push(...jsonl(dir));
 		for (const entry of fs.readdirSync(dir)) {
 			const subagents = path.join(dir, entry, "subagents");
-			if (fs.existsSync(subagents)) out.push(...jsonl(subagents));
+			if (fs.existsSync(subagents)) walk(subagents);
 		}
 	}
-	return out.filter(f => fs.statSync(f).mtimeMs >= sinceMs);
+	return [...new Set(out)].filter(f => fs.statSync(f).mtimeMs >= sinceMs);
 }
 
 function cwdByMessageId(file: string): Map<string, string> {
@@ -101,34 +106,35 @@ function escapeRegExp(s: string): string {
 	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export interface PrReview { rounds: number; findings: number[] }
+export interface PrReview { rounds: number; findings: number[]; unreadableLogs: number }
 
-/** Only `reviewed` runs count: a run that failed produced no findings to count. */
+
 export function readPrReview(dir: string, branch: string): PrReview | null {
 	if (!fs.existsSync(dir)) return null;
 	const runs: { utc: string; findings: number }[] = [];
+	let unreadableLogs = 0;
 	for (const name of fs.readdirSync(dir)) {
 		if (!name.startsWith(branch + "-") || !name.endsWith(".json")) continue;
 		let log: any;
-		try { log = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8")); } catch { continue; }
+		try { log = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8")); } catch { unreadableLogs++; continue; }
 		if (log?.branch !== branch || log.status !== "reviewed" || !Array.isArray(log.findings)) continue;
 		runs.push({ utc: String(log.utc), findings: log.findings.length });
 	}
 	runs.sort((x, y) => x.utc.localeCompare(y.utc));
-	return { rounds: runs.length, findings: runs.map(r => r.findings) };
+	return { rounds: runs.length, findings: runs.map(r => r.findings), unreadableLogs };
 }
 
-export interface TestRuns { runs: number; suiteRuns: number; failedSuiteRuns: number; reruns: number }
+export interface TestRuns { runs: number; suiteRuns: number; failedSuiteRuns: number; reruns: number; unreadableLines: number }
 
 export function readTestRuns(file: string): TestRuns | null {
 	if (!fs.existsSync(file)) return null;
-	const out: TestRuns = { runs: 0, suiteRuns: 0, failedSuiteRuns: 0, reruns: 0 };
+	const out: TestRuns = { runs: 0, suiteRuns: 0, failedSuiteRuns: 0, reruns: 0, unreadableLines: 0 };
 	const seen = new Set<string>();
 	for (const line of fs.readFileSync(file, "utf8").split("\n")) {
 		if (!line.trim()) continue;
 		let run: any;
-		try { run = JSON.parse(line); } catch { continue; }
-		if (!Array.isArray(run?.suites)) continue;
+		try { run = JSON.parse(line); } catch { out.unreadableLines++; continue; }
+		if (!Array.isArray(run?.suites)) { out.unreadableLines++; continue; }
 		out.runs++;
 		for (const s of run.suites) {
 			out.suiteRuns++;
@@ -142,7 +148,6 @@ export function readTestRuns(file: string): TestRuns | null {
 
 export interface CheckRun { name: string; conclusion: string | null }
 
-/** One round per commit whose Macroscope run concluded; a skipped run is a Draft's. */
 export function macroscopeRounds(commits: CheckRun[][]): number {
 	return commits.filter(runs => runs.some(r =>
 		r.name.startsWith("Macroscope") && r.conclusion !== null && r.conclusion !== "skipped" && r.conclusion !== "cancelled",
@@ -155,7 +160,7 @@ const END = "<!-- pr-cost:end -->";
 export function withPrCostBlock(body: string, record: object): string {
 	const block = `${BEGIN}\n\`\`\`json\n${JSON.stringify(record)}\n\`\`\`\n${END}\n`;
 	const start = body.indexOf(BEGIN);
-	const end = body.indexOf(END);
+	const end = start >= 0 ? body.indexOf(END, start) : -1;
 	if (start >= 0 && end > start) {
 		let after = end + END.length;
 		if (body[after] === "\n") after++;
@@ -179,7 +184,7 @@ function parseArgs(argv: string[]): { branch?: string; pr?: number; writePr: boo
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === "--write-pr") out.writePr = true;
-		else if (a === "--branch" && argv[i + 1]) out.branch = argv[++i];
+		else if (a === "--branch" && argv[i + 1] && !argv[i + 1].startsWith("-")) out.branch = argv[++i];
 		else if (a === "--pr" && /^[1-9]\d*$/.test(argv[i + 1] ?? "")) out.pr = Number(argv[++i]);
 		else throw new UsageError(`unknown or incomplete argument: ${a}`);
 	}
@@ -192,14 +197,16 @@ function firstLine(err: unknown): string {
 	return err instanceof Error ? err.message.split("\n")[0] : String(err);
 }
 
-/** A merged branch is deleted; its PR's head is still on the remote. */
+/** With `--pr`, the PR's own head: a local branch of that name may be stale or deleted. */
 function resolveHead(clone: string, branch: string, pr: number | undefined): string {
+	if (pr !== undefined) {
+		sh("git", ["-C", clone, "fetch", "--quiet", "origin", `pull/${pr}/head`]);
+		return sh("git", ["-C", clone, "rev-parse", "FETCH_HEAD"]);
+	}
 	try {
 		return sh("git", ["-C", clone, "rev-parse", "--verify", "--quiet", `${branch}^{commit}`]);
 	} catch {
-		if (pr === undefined) throw new Error(`no branch ${branch} here; pass --pr for a merged one`);
-		sh("git", ["-C", clone, "fetch", "--quiet", "origin", `pull/${pr}/head`]);
-		return sh("git", ["-C", clone, "rev-parse", "FETCH_HEAD"]);
+		throw new Error(`no branch ${branch} here; pass --pr for a merged one`);
 	}
 }
 
@@ -209,24 +216,31 @@ function main(): void {
 	const branch = args.branch
 		?? (args.pr !== undefined ? sh("gh", ["pr", "view", String(args.pr), "--json", "headRefName", "--jq", ".headRefName"]) : null)
 		?? sh("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
-	const worktree = path.join(clone, ".claude", "worktrees", branch);
+	if (branch === "HEAD") throw new UsageError("detached HEAD: pass --branch or --pr");
+	const here = sh("git", ["rev-parse", "--show-toplevel"]);
+	const worktree = sh("git", ["rev-parse", "--abbrev-ref", "HEAD"]) === branch ? here : path.join(clone, ".claude", "worktrees", branch);
 	const head = resolveHead(clone, branch, args.pr);
 	const base = sh("git", ["-C", clone, "merge-base", "origin/main", head]);
-	// The first own commit's parent is main as the branch was cut from it. `base` is
-	// later than that once main has been merged in.
+	if (base === head) throw new Error(`${branch} (${head.slice(0, 7)}) is already in origin/main, so it has no changes of its own to measure`);
+	// The first own commit's parent is main as the branch was cut from it; `base` is
+	// later once main has been merged in. A rebase moves that parent, but not the
+	// author dates, so the earlier of the two bounds the transcripts read.
 	const own = sh("git", ["-C", clone, "rev-list", "--reverse", "--first-parent", `${base}..${head}`]).split("\n").filter(Boolean);
-	const cutFrom = own.length > 0 ? `${own[0]}^` : base;
-	const sinceMs = Number(sh("git", ["-C", clone, "show", "-s", "--format=%ct", cutFrom])) * 1000;
+	const cutMs = Number(sh("git", ["-C", clone, "show", "-s", "--format=%ct", `${own[0]}^`])) * 1000;
+	const authoredMs = Math.min(...sh("git", ["-C", clone, "log", "--format=%at", `${base}..${head}`]).split("\n").filter(Boolean).map(t => Number(t) * 1000));
+	const sinceMs = Math.min(cutMs, authoredMs);
 	const changed = sh("git", ["-C", clone, "diff", "--name-only", `${base}..${head}`]).split("\n").filter(Boolean);
 	const gaps: { field: string; reason: string }[] = [];
 
 	const stateHome = process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state");
 	const prReview = readPrReview(path.join(stateHome, "pr-review", path.basename(clone)), branch);
 	if (prReview === null) gaps.push({ field: "prReview", reason: "no pr-review log directory for this repo" });
+	else if (prReview.unreadableLogs > 0) gaps.push({ field: "prReview", reason: `${prReview.unreadableLogs} run log(s) did not parse; rounds is a floor` });
 	gaps.push({ field: "prReview.costUsd", reason: "pr-review run logs do not name their lens sessions" });
 
 	const tests = readTestRuns(path.join(worktree, "tmp", "test-runs.jsonl"));
 	if (tests === null) gaps.push({ field: "tests", reason: "no tmp/test-runs.jsonl in the worktree" });
+	else if (tests.unreadableLines > 0) gaps.push({ field: "tests", reason: `${tests.unreadableLines} line(s) did not parse; counts are a floor` });
 
 	let pr = args.pr ?? null;
 	let macroscope: { rounds: number } | null = null;
@@ -243,8 +257,8 @@ function main(): void {
 	try {
 		if (pr !== null) {
 			const shas = sh("gh", ["pr", "view", String(pr), "--json", "commits", "--jq", ".commits[].oid"]).split("\n").filter(Boolean);
-			macroscope = { rounds: macroscopeRounds(shas.map(sha => JSON.parse(sh("gh", ["api", `repos/{owner}/{repo}/commits/${sha}/check-runs`,
-				"--jq", "[.check_runs[] | {name, conclusion}]"])) as CheckRun[])) };
+			macroscope = { rounds: macroscopeRounds(shas.map(sha => sh("gh", ["api", "--paginate", `repos/{owner}/{repo}/commits/${sha}/check-runs`,
+				"--jq", ".check_runs[] | {name, conclusion}"]).split("\n").filter(Boolean).map(l => JSON.parse(l) as CheckRun))) };
 		} else gaps.push({ field: "macroscope", reason: gaps.some(g => g.field === "pr") ? "the PR lookup failed" : "no PR for this branch" });
 	} catch (err) {
 		gaps.push({ field: "macroscope", reason: `gh failed: ${firstLine(err)}` });
@@ -269,10 +283,14 @@ function main(): void {
 
 	if (args.writePr && pr !== null) {
 		const body = sh("gh", ["pr", "view", String(pr), "--json", "body", "--jq", ".body"]);
-		const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pr-cost-")), "body.md");
-		fs.writeFileSync(tmp, withPrCostBlock(body + "\n", record));
-		sh("gh", ["pr", "edit", String(pr), "--body-file", tmp]);
-		fs.rmSync(path.dirname(tmp), { recursive: true, force: true });
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pr-cost-"));
+		try {
+			const file = path.join(dir, "body.md");
+			fs.writeFileSync(file, withPrCostBlock(body + "\n", record));
+			sh("gh", ["pr", "edit", String(pr), "--body-file", file]);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
 	}
 }
 

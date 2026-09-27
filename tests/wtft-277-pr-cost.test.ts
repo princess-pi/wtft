@@ -9,7 +9,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { trackSandbox } from "./lib/sandbox";
 
-import { classifyFiles, collectSessionCost, macroscopeRounds, readPrReview, readTestRuns, withPrCostBlock } from "../pr-cost.ts";
+import { classifyFiles, collectSessionCost, listTranscripts, macroscopeRounds, readPrReview, readTestRuns, withPrCostBlock } from "../pr-cost.ts";
 import { appendTestRun } from "./lib/test-run-log.ts";
 import { parseSessionFile } from "../extensions/lib/wtft-parser.ts";
 import { cwdToStrictSlug } from "../extensions/lib/harness/session-cwd.ts";
@@ -73,6 +73,7 @@ const a = write(cloneDir, "a.jsonl", [
 	turn("m12", T0 + 9000, clone, 2048, [{ type: "tool_use", name: "Bash", input: { command: `cd ~${worktree.slice(tmp.length)} && ls` } }]),
 ]);
 const sub = write(path.join(cloneDir, "a", "subagents"), "agent-1.jsonl", [turn("m4", T0 + 5000, worktree, 8)]);
+const nested = write(path.join(cloneDir, "a", "subagents", "workflows", "wf_1"), "agent-2.jsonl", [turn("m13", T0 + 10_000, worktree, 4096)]);
 const bTs = T0 + 60_000;
 const b = write(wtDir, "b.jsonl", [
 	user(bTs, worktree),
@@ -94,12 +95,15 @@ describe("sessions", () => {
 		assert.ok(m5.claudeSubAgentFolds?.some(f => f.file === d), "m5 folds d.jsonl");
 	});
 	it("counts turns run in the worktree or reaching into it, subagent transcripts included, folded transcripts once", () => {
-		assert.strictEqual(got!.turns, 7, "m2, m3, m9, m10, m12 (~ for home), m4, m5");
-		assert.strictEqual(got!.transcripts, 3, "a, agent-1, b");
-		assert.strictEqual(got!.outputTokens, 2 + 4 + 256 + 512 + 2048 + 8 + 16 + 32, "m7 inside m5's fold; not m11, a sibling path");
-		const expected = costOf(a, ["m2", "m3", "m9", "m10", "m12"]) + costOf(sub, ["m4"]) + costOf(b, ["m5"]);
+		assert.strictEqual(got!.turns, 8, "m2, m3, m9, m10, m12 (~ for home), m4, m13 (nested), m5");
+		assert.strictEqual(got!.transcripts, 4, "a, agent-1, agent-2, b");
+		assert.strictEqual(got!.outputTokens, 2 + 4 + 256 + 512 + 2048 + 8 + 4096 + 16 + 32, "m7 inside m5's fold; not m11, a sibling path");
+		const expected = costOf(a, ["m2", "m3", "m9", "m10", "m12"]) + costOf(sub, ["m4"]) + costOf(nested, ["m13"]) + costOf(b, ["m5"]);
 		assert.ok(Math.abs(got!.costUsd - expected) < 1e-12, `${got!.costUsd} vs ${expected}`);
 		assert.ok(got!.costUsd > costOf(a, ["m2", "m3", "m9", "m10", "m12"]) + costOf(sub, ["m4"]), "fold priced in");
+	});
+	it("a missing projects directory lists nothing rather than throwing", () => {
+		assert.deepStrictEqual(listTranscripts(clone, 0, path.join(tmp, "no-projects")), []);
 	});
 	it("a worktree no turn reached is null, not zero", () => {
 		assert.strictEqual(collectSessionCost({ cloneDir: clone, worktree: path.join(clone, ".claude", "worktrees", "9-none"), sinceMs: 0 }), null);
@@ -121,9 +125,10 @@ describe("pr-review", () => {
 	log("7-thing-2026-09-20T10-09-00Z-3.json", { branch: "7-thing", utc: "2026-09-20T10-09-00Z", status: "failed", findings: [] });
 	log("7-thing-else-2026-09-20T10-00-00Z-4.json", { branch: "7-thing-else", utc: "2026-09-20T10-00-00Z", status: "reviewed", findings: [{}] });
 	fs.writeFileSync(path.join(dir, "7-thing@abc.ledger.jsonl"), "{}\n");
+	fs.writeFileSync(path.join(dir, "7-thing-2026-09-20T10-10-00Z-5.json"), "{ truncated");
 
-	it("one findings count per reviewed run on this branch, oldest first", () => {
-		assert.deepStrictEqual(readPrReview(dir, "7-thing"), { rounds: 2, findings: [3, 2] });
+	it("one findings count per reviewed run on this branch, oldest first; an unparseable log is counted, not dropped", () => {
+		assert.deepStrictEqual(readPrReview(dir, "7-thing"), { rounds: 2, findings: [3, 2], unreadableLogs: 1 });
 	});
 	it("a missing log directory is null, not zero", () => {
 		assert.strictEqual(readPrReview(path.join(tmp, "nowhere"), "7-thing"), null);
@@ -134,12 +139,13 @@ describe("test runs", () => {
 	const log = path.join(tmp, "wt", "tmp", "test-runs.jsonl");
 	appendTestRun(log, [{ name: "a", ok: true }, { name: "b", ok: false }]);
 	appendTestRun(log, [{ name: "b", ok: true }]);
+	fs.appendFileSync(log, "{ torn\n");
 
 	it("appends one line per run", () => {
-		assert.strictEqual(fs.readFileSync(log, "utf8").trim().split("\n").length, 2);
+		assert.strictEqual(fs.readFileSync(log, "utf8").trim().split("\n").length, 3, "two runs and the torn line");
 	});
 	it("derives runs, suite runs, failures and reruns", () => {
-		assert.deepStrictEqual(readTestRuns(log), { runs: 2, suiteRuns: 3, failedSuiteRuns: 1, reruns: 1 });
+		assert.deepStrictEqual(readTestRuns(log), { runs: 2, suiteRuns: 3, failedSuiteRuns: 1, reruns: 1, unreadableLines: 1 });
 	});
 	it("no log is null, not zero", () => {
 		assert.strictEqual(readTestRuns(path.join(tmp, "none.jsonl")), null);
@@ -168,6 +174,12 @@ describe("PR body block", () => {
 		const out = withPrCostBlock("Part of #7.\n", record);
 		assert.ok(out.startsWith("Part of #7.\n"));
 		assert.match(out, /<!-- pr-cost:begin -->\n```json\n\{"schema":"wtft-pr-cost@1","branch":"7-thing"\}\n```\n<!-- pr-cost:end -->\n$/);
+	});
+	it("an end marker before the begin marker is not taken as the block's end", () => {
+		const body = "<!-- pr-cost:end -->\n" + withPrCostBlock("Top.\n", { old: true });
+		const out = withPrCostBlock(body, record);
+		assert.strictEqual((out.match(/pr-cost:begin/g) ?? []).length, 1);
+		assert.ok(!out.includes('"old"'));
 	});
 	it("replaces an existing block and keeps the text around it", () => {
 		const once = withPrCostBlock("Top.\n", { old: true }) + "Tail.\n";

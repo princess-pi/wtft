@@ -203,7 +203,10 @@ try {
 
 try {
 	appendTestRun(TEST_RUNS_FILE, results.map(r => ({ name: r.name, ok: r.ok })));
-} catch { /* the cost record's input; a run never fails over it */ }
+} catch (err) {
+	// A run never fails over it, but pr-cost reads this file, so say it is short.
+	console.error(`${RED}could not append to ${TEST_RUNS_FILE}: ${err instanceof Error ? err.message : String(err)}${RESET}`);
+}
 
 // ---
 // Report

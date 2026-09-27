@@ -11,10 +11,13 @@ so it is not shipped or installed, and `--help` does not list it.
 bun run pr-cost [--branch <name>] [--pr <n>] [--write-pr]
 ```
 
-- `--branch`: defaults to the current branch. The worktree is `<clone>/.claude/worktrees/<branch>`.
+- `--branch`: defaults to the current branch. A detached HEAD with neither flag is a bad call.
+  The worktree is the current checkout when it is on that branch, else
+  `<clone>/.claude/worktrees/<branch>`.
 - `--pr`: defaults to the PR whose head is the branch, if there is one. `--pr` alone names a
-  merged PR: its branch comes from the PR, and its head from `pull/<n>/head` once the branch is
-  deleted. That is how the baseline for past PRs is taken.
+  merged PR. Its branch comes from the PR, and its head is always the PR's own head, fetched from
+  `pull/<n>/head`, because a local branch of that name may be stale or deleted. That is how the
+  baseline for past PRs is taken.
 - `--write-pr`: writes the document into that PR's body, between `<!-- pr-cost:begin -->` and
   `<!-- pr-cost:end -->`. If the markers are there, the block between them is replaced. If they
   are not, the block is added at the end.
@@ -22,7 +25,8 @@ bun run pr-cost [--branch <name>] [--pr <n>] [--write-pr]
 Run it just before `pr-offer-merge`. Spend keeps growing until the merge, so a record taken at
 `pr-open` would undercount.
 
-Exit codes: 0 when the document was printed and, under `--write-pr`, written. 2 on a bad call. 1 on any other failure. `--write-pr` with no PR, or with a PR lookup that failed, exits 1 before printing anything.
+Exit codes: 0 when the document was printed and, under `--write-pr`, written. 2 on a bad call. 1 on any other failure. `--write-pr` with no PR, or with a PR lookup that failed, exits 1 before printing anything. So
+does a head that is already in `origin/main`, which has no changes of its own to measure.
 Every field the script cannot measure is `null`, and one `gaps[]` entry names the reason. A gap
 is never reported as zero.
 
@@ -33,11 +37,11 @@ is never reported as zero.
 | `branch`, `base`, `head`, `pr` | the branch name, its merge-base with `origin/main`, its tip, and the PR number. `pr` is `null` when the branch has no PR, and also when the lookup failed, which adds a `pr` gap |
 | `files` | `{ source, tests, docs }`: counts over `git diff --name-only base..head`. `tests/**` is tests. `docs/**` (manifests included) and every root `*.md` are docs. Everything else, except `bun.lock`, is source |
 | `sessions` | `{ transcripts, turns, costUsd, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }`: every Claude Code turn that ran in the worktree or reached into it (§3) |
-| `tests` | `{ runs, suiteRuns, failedSuiteRuns, reruns }`: from the worktree's `tmp/test-runs.jsonl` (§4) |
-| `prReview` | `{ rounds, findings[], costUsd }`: one findings count per `reviewed` `pr-review` run log for this branch, oldest first. A run with any other status found nothing to count. `costUsd` is `null` (§5) |
+| `tests` | `{ runs, suiteRuns, failedSuiteRuns, reruns, unreadableLines }`: from the worktree's `tmp/test-runs.jsonl` (§4) |
+| `prReview` | `{ rounds, findings[], unreadableLogs, costUsd }`: one findings count per `reviewed` `pr-review` run log for this branch, oldest first. A run with any other status found nothing to count. `costUsd` is `null` (§5) |
 | `macroscope` | `{ rounds }`: one round per PR commit that has a Macroscope check run which concluded. A `skipped` run (a Draft) or a `cancelled` run is not a round |
 | `reconcile` | always `null` for now, with a gap (§5) |
-| `gaps[]` | `{ field, reason }`, one per field that could not be measured |
+| `gaps[]` | `{ field, reason }`, one per field that could not be measured. It also has an entry when a log line or run log did not parse, since the count is then a floor |
 
 ## 3. Which turns count
 
@@ -54,10 +58,14 @@ The record is a floor.
 A turn that reaches into two worktrees counts in both records.
 
 - **Transcripts read:** every `*.jsonl` in each `~/.claude/projects` directory named for this
-  clone or one of its worktrees (the clone's slug, and every slug starting with it), plus their
-  `subagents/` transcripts. Only files modified since the branch was cut are read. The cut is the
-  parent of the branch's first own commit. `base` is later than the cut once main has been merged
-  into the branch.
+  clone or one of its worktrees, plus every transcript under a session's `subagents/`, at any
+  depth (workflow agents sit one level deeper). A directory counts when its name is the clone's
+  slug, or starts with it, under either slug encoding the discovery code accepts. A missing
+  projects directory lists nothing.
+- **Time bound:** only files modified since the branch began are read. The start is the earlier
+  of two times: when the parent of the branch's first own commit was committed, and when the
+  earliest own commit was authored. `base` is later than both once main has been merged in. A
+  rebase moves the parent but keeps the author dates.
 - **None found:** `sessions` is `null`, with a gap. That happens when the work ran on another host
   or in another harness.
 - **Pricing:** the wtft parser (`parseSessionFile`), the same code that prices `wtft --json`. A

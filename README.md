@@ -110,8 +110,8 @@ unchanged and will run once re-enabled.
 [#72](https://github.com/princess-pi/wtft/issues/72): it looked for the tag
 file beside the session, where the daemon has not written it since `wtft-tags/`
 arrived. It is a plain gating step now. It exports a private `TMPDIR`, but its
-`--cleanup` step scans every process: a per-session daemon of yours under
-`/tmp/` that holds no lease in that `TMPDIR` is sent SIGTERM too.
+`--cleanup` step scans every process: a per-session daemon of yours whose session or root
+environment is under `/tmp/`, and that holds no lease in that `TMPDIR`, is sent SIGTERM too.
 
 Once the package is on the registry, `stock-node-registry` is re-enabled — the
 `if: false` line deleted in the same PR that un-parks
@@ -191,7 +191,7 @@ retired in `@4`.
 - **1** — error: no session found or selected, an invalid path, a daemon that
   could not be spawned or that died before producing data, a refused flag
   (`--pager`), `--stop` unable to drop a session, `-F` unable to rebuild (a daemon that did not
-  stop, a lease that changed or was released meanwhile, a lease that could not be read, a rebuild lease that
+  stop, a lease another daemon claimed meanwhile, a lease that could not be read, a rebuild lease that
   could not be written, a daemon that could not be signalled, a lease or tag file that could not be deleted, a daemon that could not be
   started, or a harness that did not take the session up within
   10 s), `--list`/`--cleanup`/`--restart`/`--stop`
@@ -343,7 +343,7 @@ daemon, and an idle session there is dropped while the process stays up and watc
 24h more; the process stops 24h after it last had a session to serve, retry or watch for. A session
 outside those directories keeps its own. The commands that run instead of a report —
 `--help`/`--why`/`--version` and the daemon-management group — return before
-that, and spawn nothing except `--restart`, which respawns each per-session daemon it stops. `wtft-daemon` exists for debugging, not for normal use.
+that, and spawn nothing except `--restart`, which respawns each daemon it stops that was started with `--session`. `wtft-daemon` exists for debugging, not for normal use.
 
 `wtft --help` is the flag reference — the examples above are a tour, not the
 list.

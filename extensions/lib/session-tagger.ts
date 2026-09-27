@@ -511,7 +511,7 @@ function warnParse(state: TaggerState, out: Out, stateKey: string, sessionId: st
 	state.pollHadFailure = true;
 	if (state.warned.parse.has(stateKey)) return;
 	state.warned.parse.add(stateKey);
-	warn(out, `a subagent transcript, or a nested one it folds, could not be read or parsed, so its cost may be missing from this session's total until it succeeds (subagent ${sessionId}; the error names the file): ${errText(err)}`);
+	warn(out, `a subagent transcript, or a nested one it folds, could not be read or parsed, so its cost may be missing from this session's total until it succeeds (subagent ${sessionId}, or one it folds): ${errText(err)}`);
 }
 
 function syncSubagentTranscript(state: TaggerState, world: World, out: Out, now: number, rawFile: string, foldedByAnother: ReadonlySet<string>): boolean {

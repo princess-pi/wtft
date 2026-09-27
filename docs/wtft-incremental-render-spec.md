@@ -14,12 +14,13 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 │  fs.watch. Flushes for one session are ≥667ms apart.    │
 │  A session outside the roots keeps its own 667ms poll.  │
 │  Tag format includes message.id for cross-run dedup.    │
-│  Heartbeats: one _hb line, in place. Harness mode       │
+│  Heartbeats: _hb lines, a same-width one in place.      │
+│  Harness mode                                           │
 │  writes it only for a session a consumer is displaying. │
 │  A failed tag write exits the process. A bad session    │
 │  line is skipped. Other poll errors log in debug mode.  │
 │  Idle 24h drops that session. A --session process exits.│
-│  A harness daemon stays up. Grace: 60s after startup.  │
+│  A harness daemon stays up. Grace: 60s after startup.   │
 │  Costs rounded to 6 decimal places before JSON write    │
 │  (eliminates float drift vs in-memory widget).          │
 │  Version-aware singleton: detects old tag file, takes   │
@@ -480,7 +481,7 @@ Row 1:  sessionPath  (dim)
 Row 2:  💸 WTF Tokens?  (◆--orange--green--|--green---orange--◆) ⚡ SURGE 2x  ● live
 Row 3:  [legend: Spec, Code, Tests, Research, Git, Grep, Prompt, Other]
 Row 4+: ticks line, date dividers, bucket rows
-Footer: 'q' to exit, using v<tagger version>, 'r' to restart  (r in red when daemon dead)
+Footer: 'q' to exit[, using v<tagger version>, 'r' to restart]  (the bracket only with a daemon path; r in red when daemon dead)
 ```
 
 The 24-hour SURGE timeline and daemon status indicator are appended inline to the title line if they fit within terminal width; otherwise they wrap to separate lines between title and legend.

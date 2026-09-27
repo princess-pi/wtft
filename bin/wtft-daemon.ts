@@ -1463,15 +1463,17 @@ ${USAGE}
 
 Management (any combination runs as one pass over the leases; per holder, --restart
 takes precedence over --cleanup, then --stop, then --list, and a holder an earlier one
-handled is not listed):
-  --list, -l            List the daemons and their leases, fixture processes included: RUNNING or DEAD,
+handled is not listed. A --stop of a session a harness serves ends the command at once):
+  --list, -l            List the leases, then every other daemon process found in /proc (none off
+                        Linux, so a harness holding no lease is not shown there): RUNNING or DEAD,
                         tagger version, idle age (0s until idle 2m2s; ? when unknown), session.
                         The version is the first tag file found beside the holder's --session, not the
-                        running build's. A lease being rebuilt is not listed; a holder with no readable
+                        running build's. A lease reading rebuild is not listed; a holder with no readable
                         --session shows (hash: <lease hash>). Off Linux (no /proc) every live pid reads RUNNING
   --cleanup             Remove every lease whose holder is dead or not a daemon, uncounted. SIGTERM (no wait)
-                        per-session daemons whose session is gone (no file, not moved, and a tag with data),
-                        and fixture ones, whose --session or harness root is under the tmp dir or /tmp/,
+                        per-session daemons whose session is gone (no file, not moved, and a tag that
+                        holds a turn or marker), and fixture ones, whose --session or root environment
+                        (WTFT_CLAUDE_PROJECTS_DIR, WTFT_PI_SESSIONS_DIR) is under the tmp dir or /tmp/,
                         that hold no lease here; never a harness daemon, which stops once it has nothing
                         to serve or watch
   --restart             Stop every daemon holding a lease or a root pid file here (SIGTERM, SIGKILL after 2 s),
@@ -1484,7 +1486,8 @@ handled is not listed):
 
 Daemon mode:
   -s, --session <path>  Path to session.jsonl to watch. Waits up to 1 h for a file not yet written. Exits 0
-                        at once when a live daemon holds its lease or a newer-version tag holds it
+                        at once when a live daemon holds its lease, unless an older-version tag is
+                        beside the session: then it takes the lease over
   --harness <claude|pi> One process for that harness root (WTFT_CLAUDE_PROJECTS_DIR or WTFT_PI_SESSIONS_DIR);
                         claude-code is accepted for claude. It serves the sessions it is asked for
                         (--session, a focus request, a hand-off from the harness before it) and their
@@ -1495,8 +1498,9 @@ Daemon mode:
 
 Exit codes:
   0  Served until done, a management pass that ran (a --restart that left a holder running
-     says so in its line), or --session already served
-  1  --session missing, or a tag file; a harness root missing, its pid file unreadable,
+     says so in its line), --session already served, or a --harness start with no --session
+     that finds a live harness of the same or a newer version
+  1  --session missing, or a tag file (without --harness); a harness root missing, its pid file unreadable,
      or neither claimable nor handed a session;
      --stop refused (EPERM) or its harness lease changed or could not be removed; a tag
      write that failed; an unhandled error
@@ -1504,7 +1508,8 @@ Exit codes:
      outside the harness root
 
 Environment:
-  WTFT_DAEMON_IDLE_MS          Milliseconds with no new lines before a session is dropped, after which a
+  WTFT_DAEMON_IDLE_MS          Milliseconds with no activity (a new turn, a subagent record written,
+                               or a poll of a session not yet written) before a session is dropped, after which a
                                harness forgets a dropped session, and with nothing to serve or watch
                                before a harness stops (default 86400000)
   WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after the daemon starts serving a session (its adoption, in a harness) before that drop can fire (default 60000)

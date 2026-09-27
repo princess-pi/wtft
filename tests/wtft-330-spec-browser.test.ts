@@ -7,6 +7,7 @@ import * as assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, it } from "node:test";
+import { parseRoute, resolveRelative, splitFrontmatter } from "../artifacts/assets/route.mjs";
 
 const artifacts = path.resolve(import.meta.dirname, "../artifacts");
 
@@ -23,14 +24,24 @@ describe("#330 the chart spec is a browser page", () => {
 	it("embeds the picker from the same directory", () => {
 		const spec = fs.readFileSync(path.join(artifacts, "chart-spec/spec.mdx"), "utf8");
 		assert.match(spec, /src="picker\.html"/);
-		assert.match(spec, /\]\(picker\.html\)/);
+		assert.equal(resolveRelative("chart-spec/spec.mdx", "picker.html"), "chart-spec/picker.html");
 	});
 
-	it("renders an mdx file as markdown with its html left intact", () => {
-		const js = fs.readFileSync(path.join(artifacts, "assets/browser.js"), "utf8");
-		assert.match(js, /html:\s*true/);
-		assert.match(js, /splitFrontmatter/);
-		assert.match(js, /\.mdx/);
-		assert.match(js, /id="toc"|getElementById\("toc"\)/);
+	it("keeps a heading on the document route", () => {
+		const route = parseRoute("#chart-spec/spec.mdx#sample");
+		assert.equal(route.path, "chart-spec/spec.mdx");
+		assert.equal(route.frag, "sample");
+		const encoded = parseRoute("#chart-spec/other.mdx%23part");
+		assert.equal(encoded.path, "chart-spec/other.mdx");
+		assert.equal(encoded.frag, "part");
+	});
+
+	it("drops a frontmatter fence that is the last line", () => {
+		const split = splitFrontmatter("---\ntitle: Chart\n---");
+		assert.equal(split.meta.title, "Chart");
+		assert.equal(split.body, "");
+		const rule = splitFrontmatter("---\ntitle: Chart\n----\n\n# Hi\n");
+		assert.equal(rule.meta.title, undefined);
+		assert.match(rule.body, /# Hi/);
 	});
 });

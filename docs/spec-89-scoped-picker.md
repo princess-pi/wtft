@@ -191,7 +191,7 @@ reader does not re-litigate them)
   that combination is exactly `wtft --tokens | less -R`, a flow the README's
   own Usage section recommends, and stdin stays on the terminal while stdout
   is the pipe. `wtft --json 2>/dev/null` is the same shape under `--json`. The
-  `canShowPicker` check in `bin/wtft.ts` is what actually guards this.
+  `canShowPicker` check in `extensions/lib/cli/session.ts` is what actually guards this.
 - **E2 — no TTY, `-s` matches exactly one → selects it silently**, same as
   today.
 - **E2b — TTY, `-s` matches zero → exit 1** ("matches no discovered sessions"), unchanged

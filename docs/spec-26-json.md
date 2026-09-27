@@ -396,7 +396,7 @@ sections:
    `--bucket`/`--cumulative`, `--interval`, `--limit`, `--ticks`, `--timezone`)
    yields an object and does not crash. Which flag wins is deliberately not
    pinned.
-7. **§7** every exit code the CLI can return — scanned from `bin/wtft.ts` **and**
+7. **§7** every exit code the CLI can return — scanned from `bin/wtft.ts`, the CLI arms in `extensions/lib/cli/`, **and**
    `extensions/lib/session-selector.ts`, which is where 130 lives — appears in
    the manifest table, and `wtft --help` renders that table.
 8. **§8** an *empty* report obeys the exit-code contract too: a provisional one

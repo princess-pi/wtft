@@ -173,7 +173,15 @@
           "cacheRead": 0.003,
           "cacheWrite": 0
         }
-      ]
+      ],
+      "surge": {
+        "multiplier": 2,
+        "windowsUtc": [
+          "01:00–04:00",
+          "06:00–10:00"
+        ],
+        "weekendOffPeakFrom": "2026-08-23T00:00:00Z"
+      }
     },
     {
       "model": "deepseek-v4-flash",
@@ -199,7 +207,15 @@
           "cacheRead": 0.007,
           "cacheWrite": 0
         }
-      ]
+      ],
+      "surge": {
+        "multiplier": 2,
+        "windowsUtc": [
+          "01:00–04:00",
+          "06:00–10:00"
+        ],
+        "weekendOffPeakFrom": "2026-08-23T00:00:00Z"
+      }
     },
     {
       "model": "deepseek-v4-flash-vision-exp",
@@ -225,7 +241,15 @@
           "cacheRead": 0.007,
           "cacheWrite": 0
         }
-      ]
+      ],
+      "surge": {
+        "multiplier": 2,
+        "windowsUtc": [
+          "01:00–04:00",
+          "06:00–10:00"
+        ],
+        "weekendOffPeakFrom": "2026-08-23T00:00:00Z"
+      }
     },
     {
       "model": "deepseek-v4-pro",
@@ -251,7 +275,15 @@
           "cacheRead": 0.022,
           "cacheWrite": 0
         }
-      ]
+      ],
+      "surge": {
+        "multiplier": 2,
+        "windowsUtc": [
+          "01:00–04:00",
+          "06:00–10:00"
+        ],
+        "weekendOffPeakFrom": "2026-08-23T00:00:00Z"
+      }
     },
     {
       "model": "gpt-5.4",

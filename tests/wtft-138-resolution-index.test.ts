@@ -141,7 +141,7 @@ console.log("\nPART E — the rendered report");
 	};
 	const { r, ms } = runCli();
 	const out = (r.stdout || "").replace(/\x1b\[[0-9;]*m/g, "");
-	check((r.status === 0 || r.status === 9) && /10000 unattributed/.test(out),
+	check(r.status === 0 && /10000 unattributed/.test(out),
 		`E1 --tokens renders the tree and names all 10,000 gaps (exit ${r.status}): ${out.split("\n").filter(l => /SPAWNED|unattributed|TREE|PROVISIONAL/.test(l)).join(" | ")} ${(r.stderr || "").slice(0, 200)}`);
 	check(ms < 5000, `E2 the whole report, CLI start to exit, stays well inside 5 s (took ${Math.round(ms)} ms)`);
 

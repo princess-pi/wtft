@@ -109,7 +109,7 @@ function isLegendRow(line: string): boolean {
 
 // --- Helper: does a row carry the SURGE timeline? ---
 // Keyed off the moon-phase bookends, which buildTimelineString() emits
-// unconditionally. See the header note on why not the hour marker.
+// unconditionally.
 const MOON_PHASES = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"];
 function hasTimeline(line: string): boolean {
 	return MOON_PHASES.some(m => line.includes(m));

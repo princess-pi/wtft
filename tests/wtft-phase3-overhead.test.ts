@@ -9,7 +9,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { cliWithoutDaemon, tagForCli } from "./lib/cli-harness.ts";
 
@@ -257,11 +257,10 @@ console.log("\n5. Legend renders Ovrhd/Waste/Cmpct (built CLI over an in-process
 	].join("\n") + "\n");
 
 	tagForCli(sessionPath);
-	const out = execSync(
-		`${process.execPath} ${CLI_BIN} -s '${sessionPath}' -i 10m -l 3 -w 200 --no-emoji 2>&1 || true`,
-		{ encoding: "utf8", env: process.env, timeout: 20_000 }
-	);
-	const clean = out.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+	const run = spawnSync(process.execPath, [CLI_BIN, "-s", sessionPath, "-i", "10m", "-l", "3", "-w", "200", "--no-emoji"],
+		{ encoding: "utf8", env: process.env, timeout: 20_000 });
+	assert(`CLI exits 0 (got ${run.status}: ${run.stderr})`, run.status === 0);
+	const clean = run.stdout.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
 	assert("legend shows Cmpct", clean.includes("Cmpct"));
 	assert("legend shows Waste", clean.includes("Waste"));
 	assert("legend shows Ovrhd", clean.includes("Ovrhd"));

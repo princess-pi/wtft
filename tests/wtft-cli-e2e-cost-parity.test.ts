@@ -95,14 +95,6 @@ function makeFixture(): { dir: string; sessionPath: string } {
 	return { dir, sessionPath };
 }
 
-// ---
-// HELPERS
-// ---
-
-// ---
-// TEST: Non-watch CLI vs daemon tag file (simulated watch)
-// ---
-
 let passed = 0;
 let failed = 0;
 function assert(cond: boolean, label: string) {
@@ -115,7 +107,7 @@ console.log("=== WTFT CLI End-to-End Cost Parity ===\n");
 const { dir, sessionPath } = makeFixture();
 
 // ---
-// Path 1: the session tagged as the daemon tags it, then the built CLI
+// The session tagged as the daemon tags it, then the built CLI
 // rendering from that tag.
 // ---
 
@@ -129,7 +121,7 @@ try {
 	cliOut = execFileSync(process.execPath, [cliWithoutDaemon(), "--session", sessionPath, "-l", "10"],
 		{ encoding: "utf8", env: process.env, timeout: 15000, stdio: "pipe" });
 } catch (err: any) {
-	console.error(`Non-watch CLI: ${err.stderr || err.message}`);
+	console.error(`CLI: ${err.stderr || err.message}`);
 }
 
 // ---
@@ -139,7 +131,7 @@ try {
 assert(cliOut.includes(`$${tagCost.toFixed(2)}`), `the CLI renders the tag's total, $${tagCost.toFixed(2)}`);
 assert(tagCost > 0, `Tag cost > 0 (got $${tagCost.toFixed(6)})`);
 
-// Path 3: Reference cost via parseSessionFile + deduplicateInteractions
+// Reference cost via parseSessionFile + deduplicateInteractions
 // (same functions the daemon inlines — should produce identical results).
 const rawInteractions = parseSessionFile(sessionPath);
 const dedupedInteractions = deduplicateInteractions(rawInteractions);

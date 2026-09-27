@@ -75,8 +75,8 @@ function cli(source: string, args: string[]): string {
 	fs.copyFileSync(source, copy);
 	tagForCli(copy);
 	const r = spawnSync("node", [CLI_BIN, "-s", copy, ...args], { encoding: "utf8", env: { ...process.env } });
-	// Exit 9 is PROVISIONAL: a report in full, whose total may still grow.
-	if (r.status !== 0 && r.status !== 9) {
+	// The tag is settled, so a provisional exit 9 is a failure here too.
+	if (r.status !== 0) {
 		throw new Error(`wtft -s <copy> ${args.join(" ")} exited ${r.status}: ${r.stderr}`);
 	}
 	return (r.stdout || "").replace(/\x1b\[[0-9;]*m/g, "");
@@ -208,7 +208,7 @@ function tagLineCount(): number {
 }
 function runJson(): any {
 	const r = spawnSync("node", [CLI_BIN, "-s", warmFixture, "--json"], { encoding: "utf8" });
-	if (r.status !== 0 && r.status !== 9) throw new Error(`warm run exited ${r.status}: ${r.stderr}`);
+	if (r.status !== 0) throw new Error(`warm run exited ${r.status}: ${r.stderr}`);
 	return JSON.parse((r.stdout || "").replace(/\x1b\[[0-9;]*m/g, ""));
 }
 tagForCli(warmFixture);

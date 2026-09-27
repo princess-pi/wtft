@@ -41,7 +41,7 @@ function cli(source: string, args: string[]): string {
 	fs.copyFileSync(source, copy);
 	tagForCli(copy);
 	const r = spawnSync("node", [CLI_BIN, "-s", copy, ...args], { encoding: "utf8", env: { ...process.env } });
-	if (r.status !== 0 && r.status !== 9) throw new Error(`wtft -s <copy> ${args.join(" ")} exited ${r.status}: ${r.stderr}`);
+	if (r.status !== 0) throw new Error(`wtft -s <copy> ${args.join(" ")} exited ${r.status}: ${r.stderr}`);
 	return (r.stdout || "").replace(/\x1b\[[0-9;]*m/g, "");
 }
 

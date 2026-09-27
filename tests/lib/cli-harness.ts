@@ -48,6 +48,13 @@ let root: string | null = null;
 
 function harnessRoot(): string {
 	if (root) return root;
+	// The session is tagged by the source tagger and read by the built bundles.
+	for (const bundle of ["bin/wtft.mjs", "pi/wtft.js"]) {
+		const built = fs.readFileSync(path.join(REPO, bundle), "utf8").match(/WTFT_TAGGER_VERSION = "([^"]+)"/)?.[1];
+		if (built !== WTFT_TAGGER_VERSION) {
+			throw new Error(`cli-harness: ${bundle} was built for tagger ${built}, the source is ${WTFT_TAGGER_VERSION}; run bun run build`);
+		}
+	}
 	const dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), CLI_HARNESS_PREFIX)));
 	fs.mkdirSync(path.join(dir, "bin"));
 	fs.mkdirSync(path.join(dir, "pi"));

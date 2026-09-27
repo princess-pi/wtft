@@ -33,7 +33,7 @@ function hourGlyphCount(s: string): number {
 }
 
 function timeline(surgeHours: number[], currentHour: number): string {
-	return buildTimelineString(new Set(surgeHours), currentHour).replace(ANSI, "");
+	return buildTimelineString(new Set(surgeHours), currentHour, "🌑", "🌑", "☀️").replace(ANSI, "");
 }
 
 console.log("=== RUNNING WTFT ISSUE #7 TIMELINE SUN TESTS ===");

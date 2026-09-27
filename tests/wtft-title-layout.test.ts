@@ -1,18 +1,19 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
  * Strictly validates title row layout consistency across all
- *   code paths (CLI cost, CLI tokens, CLI --watch) at narrow/medium/wide
+ *   code paths (CLI cost, CLI tokens) at narrow/medium/wide
  *   terminal widths.
  */
 
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execSync, spawn } from "node:child_process";
+import { execSync } from "node:child_process";
 import { trackSandbox } from "./lib/sandbox";
+import { cliWithoutDaemon, tagForCli } from "./lib/cli-harness.ts";
 
 const SCRIPT = path.resolve(import.meta.dirname, "..", "wtft");
-const CLI_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
+const CLI_BIN = cliWithoutDaemon();
 
 const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";
@@ -82,6 +83,7 @@ lines.push(JSON.stringify({
 }));
 
 fs.writeFileSync(sessionPath, lines.join("\n") + "\n");
+tagForCli(sessionPath);
 
 // ---
 // Helper: run wtft CLI with controlled width and capture title line
@@ -107,7 +109,7 @@ function isLegendRow(line: string): boolean {
 
 // --- Helper: does a row carry the SURGE timeline? ---
 // Keyed off the moon-phase bookends, which buildTimelineString() emits
-// unconditionally. See the header note on why not the hour marker.
+// unconditionally.
 const MOON_PHASES = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"];
 function hasTimeline(line: string): boolean {
 	return MOON_PHASES.some(m => line.includes(m));

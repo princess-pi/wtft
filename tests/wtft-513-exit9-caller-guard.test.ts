@@ -9,12 +9,13 @@ import * as path from "node:path";
 import { execSync } from "node:child_process";
 import { WTFT_TAGGER_VERSION } from "../bin/wtft.mjs";
 import { runWtftCli, WTFT_EXIT_PROVISIONAL } from "./lib/wtft-cli";
+import { cliWithoutDaemon } from "./lib/cli-harness.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("513-exit9");
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
-const CLI_BIN = path.join(REPO_ROOT, "bin", "wtft.mjs");
+const CLI_BIN = cliWithoutDaemon();
 
 const RED = "\x1b[31m", GREEN = "\x1b[32m", RESET = "\x1b[0m";
 let passed = 0, failed = 0;

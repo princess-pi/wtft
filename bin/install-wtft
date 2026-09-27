@@ -438,7 +438,8 @@ older_daemons() {
     # Field 22, starttime in clock ticks since boot; fields after ")" of comm start at 3.
     ticks="$(sed 's/.*) //' "$p/stat" 2>/dev/null | awk '{print $20}')"
     [ -n "$ticks" ] || continue
-    # A tie counts as older: one second's resolution cannot order them.
+    # btime and ticks/hz both truncate, so a start reads up to 2 s early: a daemon
+    # started within 2 s after the build counts as older, and is restarted.
     [ $(( btime + ticks / hz )) -le "$built" ] && echo "${p#/proc/}:$ticks"
   done
   return 0

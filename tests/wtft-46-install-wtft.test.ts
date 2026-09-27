@@ -1064,7 +1064,8 @@ if (!fs.existsSync("/proc/self/stat")) {
 		pause(1.1);
 		const now = new Date();
 		fs.utimesSync(bundle, now, now);
-		pause(1.1);
+		// Past install-wtft's 2 s start-time error, so the daemon --restart spawns is newer.
+		pause(2.1);
 		const { code, out } = run(["--json", "--dir", dir], [nodeDir]);
 		const doc = docOf(out);
 		check(code === 0 && doc?.daemons?.older === 2, "V11c: both processes on the older build are counted", JSON.stringify(doc?.daemons));
@@ -1080,7 +1081,7 @@ if (!fs.existsSync("/proc/self/stat")) {
 		const human = spawnSync(INSTALLER, ["--dir", dir], { encoding: "utf8", env: { ...process.env, HOME: mkSandbox(path.join(os.tmpdir(), "46-restart-home-")), PATH: [nodeDir, BUN_DIR, "/usr/bin", "/bin"].join(":") } });
 		if (leaseHolder() > 0) respawned.push(leaseHolder());
 		check(/1 of 1 log parser daemon\(s\) on an older build still run after wtft-daemon --restart/.test(human.stderr),
-			"V11g: the human report names what is left", `${human.stdout}${human.stderr}`.slice(0, 400));
+			"V11g: the human report names what is left", `stderr: ${human.stderr.slice(0, 600)}`);
 	} finally {
 		daemon.kill("SIGKILL");
 		bystander.kill("SIGKILL");

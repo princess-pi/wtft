@@ -1,7 +1,7 @@
 #!/usr/bin/env -S bun
 /**
  * HarnessRegistry in memory, no daemon process: serve → move → drop → hand-off
- * round trip. docs/spec-270-harness-registry.md § 3.
+ * round trip. docs/spec-harness-registry.md § 3.
  */
 
 import * as path from "node:path";

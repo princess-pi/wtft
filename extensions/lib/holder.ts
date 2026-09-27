@@ -1,7 +1,7 @@
 /**
  * Who a lease's pid is: a live daemon, a harness, something else, or nothing.
  * Every liveness and identity decision about a lease holder is made here, over
- * a process-table port a test replaces. docs/spec-297-holder-module.md.
+ * a process-table port a test replaces. docs/spec-holder.md.
  */
 
 import { spawn as spawnChild } from "node:child_process";

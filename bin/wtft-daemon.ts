@@ -575,7 +575,7 @@ const HARNESS_SKIP_DIRS = new Set(["subagents", "tool-results", "memory", "wtft-
 
 type Slot = SessionRecord;
 
-/** What the harness knows about each session: docs/spec-270-harness-registry.md. */
+/** What the harness knows about each session: docs/spec-harness-registry.md. */
 const registry = newRegistry();
 const harnessWatchers = new Map<string, fs.FSWatcher>();
 let harnessPidFile = "";

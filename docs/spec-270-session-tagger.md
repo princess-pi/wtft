@@ -1,5 +1,7 @@
 # Spec 270 S3 — SessionTagger
 
+**Superseded by `docs/spec-session-tagger.md`**, the live spec for the module. Read this file as the record of slice S3, not as current behaviour.
+
 Issue: https://github.com/princess-pi/wtft/issues/270, slice S3 of
 `docs/spec-270-daemon-ownership.md` §3b. Parent spec's rows for S3 are the commitment; this
 document is the design and the closer. Vocabulary: the `codebase-design` skill's (module,

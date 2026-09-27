@@ -1,7 +1,7 @@
 /**
  * HarnessRegistry: what a harness knows about each session it serves, has
  * dropped for idling, or is retrying to adopt. One record per session; no
- * filesystem, no timers, no clock. docs/spec-270-harness-registry.md.
+ * filesystem, no timers, no clock. docs/spec-harness-registry.md.
  */
 
 import * as path from "node:path";
@@ -10,7 +10,7 @@ import { newTaggerState, type TaggerState } from "./session-tagger.ts";
 export type FlushTimer = ReturnType<typeof setTimeout>;
 
 export interface SessionRecord {
-	/** Everything the tagger decides from: docs/spec-270-session-tagger.md. */
+	/** Everything the tagger decides from: docs/spec-session-tagger.md. */
 	state: TaggerState;
 	pidPath: string;
 	rebuildTagOnStartup: boolean;

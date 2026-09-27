@@ -41,7 +41,7 @@ describe("classifyPid", () => {
 		assert.strictEqual(classifyPid(999), "gone");
 	});
 
-	it("holdsLease and mayStop split the kinds as the spec says; an unverified pid is stopped only off Linux", () => {
+	it("holdsLease and mayStop split the kinds as the spec says; an unverified pid is never stopped, on any host", () => {
 		restore = useProcessTable(fakeProcessTable());
 		assert.deepStrictEqual(
 			(["gone", "daemon", "harness", "other", "unverified"] as const).map(k => [k, holdsLease(k), mayStop(k)]),
@@ -49,7 +49,7 @@ describe("classifyPid", () => {
 		);
 		restore();
 		restore = useProcessTable(fakeProcessTable({ linux: false }));
-		assert.strictEqual(mayStop("unverified"), true);
+		assert.strictEqual(mayStop("unverified"), false);
 	});
 });
 
@@ -236,15 +236,48 @@ describe("C4 -F", () => {
 		t.daemon(706, ["--session", file]);
 		t.hide(706);
 		fs.writeFileSync(lease, "706");
-		forceRebuildSession(file, { termMs: 30, pollMs: 1 });
+		assert.strictEqual(forceRebuildSession(file, { termMs: 30, pollMs: 1 }), "busy");
 		assert.deepStrictEqual(t.signals, []);
 	});
-	it("off Linux an unverifiable holder is signalled, as before", () => {
+	it("off Linux a holder the ps read names as something else is not signalled, and its lease is stale (#266)", () => {
 		const t = fakeProcessTable({ linux: false });
 		restore = useProcessTable(t);
 		const { file, lease } = session();
-		t.add(705, ["anything"]);
+		t.add(705, ["sleep", "600"]);
 		fs.writeFileSync(lease, "705");
-		assert.strictEqual(forceRebuildSession(file), "stopped");
+		assert.strictEqual(forceRebuildSession(file), "deleted");
+		assert.deepStrictEqual(t.signals, []);
+		assert.ok(t.alive(705));
+	});
+	it("off Linux a daemon the ps read verifies is stopped", () => {
+		const t = fakeProcessTable({ linux: false });
+		restore = useProcessTable(t);
+		const { file, lease } = session();
+		t.daemon(707, ["--session", file]);
+		fs.writeFileSync(lease, "707");
+		assert.strictEqual(forceRebuildSession(file, { termMs: 30, pollMs: 1 }), "stopped");
+		assert.deepStrictEqual(t.signals.map(s => s.sig), ["SIGTERM"]);
+	});
+	it("off Linux a holder no read can verify is not signalled, and -F is busy", () => {
+		const t = fakeProcessTable({ linux: false, ps: false });
+		restore = useProcessTable(t);
+		const { file, lease } = session();
+		t.daemon(708, ["--session", file]);
+		fs.writeFileSync(lease, "708");
+		assert.strictEqual(forceRebuildSession(file), "busy");
+		assert.deepStrictEqual(t.signals, []);
+	});
+});
+
+describe("restartDaemon off Linux (#266)", () => {
+	it("does not signal or replace a holder no read can verify", async () => {
+		const t = fakeProcessTable({ linux: false, ps: false });
+		restore = useProcessTable(t);
+		const { file, lease } = session();
+		t.daemon(709, ["--session", file]);
+		fs.writeFileSync(lease, "709");
+		assert.strictEqual(await restartDaemon(file, "/x/bin/wtft-daemon.mjs"), false);
+		assert.deepStrictEqual(t.signals, []);
+		assert.deepStrictEqual(t.spawned, []);
 	});
 });

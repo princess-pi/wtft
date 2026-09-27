@@ -336,7 +336,7 @@ dead process or one that is not a daemon; a per-session start exits at once when
 for a tag of this version (an older-version tag is taken over; beside a newer-version tag any live
 daemon holder keeps it) and exits 1 on a lease it cannot
 read, and a harness start takes a per-session holder's lease and retries on another harness's
-(on Linux, where the liveness check reads `/proc`; elsewhere it takes either, #266),
+(on Linux, where the liveness check reads `/proc`; elsewhere it takes either),
 so the daemon revives after an idle timeout when the previous process exited. A session under the Claude
 projects directory or the Pi sessions directory is served by that directory's one
 daemon, and an idle session there is dropped while the process stays up and watched for

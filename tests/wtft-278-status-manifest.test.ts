@@ -63,6 +63,9 @@ describe("#278 EXT_WTFT.html renders from manifests, not by hand", () => {
 	it("renders the exit codes from wtft-cmd.json", () => {
 		assert.match(doc, /<ul id="wtft-exit-codes">\s*<li><em[^>]*>Loading/);
 		assert.ok(doc.includes("renderExitCodes(data)"));
+		const cmd = JSON.parse(fs.readFileSync(path.join(REPO, "docs", "manifests", "wtft-cmd.json"), "utf8"));
+		assert.ok(Array.isArray(cmd.exitCodes) && cmd.exitCodes.length > 0, "wtft-cmd.json has no exitCodes");
+		for (const e of cmd.exitCodes) assert.ok(Number.isInteger(e.code) && e.meaning, `malformed exit code entry ${JSON.stringify(e)}`);
 	});
 
 	it("hand-writes no status text the manifest owns", () => {

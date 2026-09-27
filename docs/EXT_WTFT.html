@@ -545,7 +545,12 @@
         function renderExitCodes(data) {
             const container = document.getElementById('wtft-exit-codes');
             if (!container) return;
-            container.innerHTML = (data.exitCodes || []).map(e =>
+            const codes = data.exitCodes || [];
+            if (codes.length === 0) {
+                container.innerHTML = '<li style="color:#666">No exit codes defined.</li>';
+                return;
+            }
+            container.innerHTML = codes.map(e =>
                 `<li><code>${e.code}</code> - ${e.meaning}</li>`
             ).join('');
         }

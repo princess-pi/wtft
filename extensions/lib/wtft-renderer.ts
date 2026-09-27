@@ -567,8 +567,11 @@ export function getSurgeLocalHours(tz?: string, now: number = Date.now(), model?
 			d.setHours(localHour, 0, 0, 0);
 			ts = d.getTime();
 		}
-		if (getPeakMultiplier(model, ts) > 1.0) {
-			result.add(localHour);
+		for (let minute = 0; minute < 60; minute++) {
+			if (getPeakMultiplier(model, ts + minute * 60_000) > 1) {
+				result.add(localHour);
+				break;
+			}
 		}
 	}
 	return result;

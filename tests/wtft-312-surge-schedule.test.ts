@@ -61,6 +61,17 @@ describe("#312 a card carries its own surge schedule", () => {
 		assert.ok(line.includes("SURGE 3x"));
 	});
 
+	it("colors an hour when the window covers part of it", () => {
+		MODEL_PRICING["acme-partial"] = {
+			input: 1, output: 1, cacheRead: 1, cacheWrite: 0,
+			surge: { multiplier: 3, windowsUtcMinutes: [[70, 110]] },
+		};
+		assert.deepEqual([...getSurgeLocalHours("UTC", minute(0), "acme-partial")], [1]);
+		assert.equal(getPeakMultiplier("acme-partial", minute(60)), 1);
+		assert.equal(getPeakMultiplier("acme-partial", minute(70)), 3);
+		delete MODEL_PRICING["acme-partial"];
+	});
+
 	it("reads the two lead constants, both 20 minutes", () => {
 		assert.equal(SURGE_APPROACH_MINUTES, 20);
 		assert.equal(SURGE_ENDING_MINUTES, 20);

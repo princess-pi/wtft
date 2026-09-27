@@ -297,7 +297,7 @@ The Pi TUI path (`extensions/wtft.ts:464`) is untouched and keeps working.
 | `tests/wtft-issue-152-cache-expiry.test.ts` | 20 passed, 0 failed |
 | `tests/wtft-issue-153-pager-cli.test.ts` | 10 passed, 0 failed |
 | `tests/wtft-issue-121.test.ts` (regression) | 27 passed, 0 failed |
-| `wtft-compaction-tracking`, `wtft-claude5-pricing`, `wtft-half-block`, `wtft-issue-21` | pass |
+| `wtft-compaction-tracking`, `wtft-claude5-pricing`, `wtft-issue-21` | pass |
 | `wtft-issue-141-workflow-discovery` | 7 passed, 0 failed |
 | `wtft-daemon-lifecycle` | 30 passed, 0 failed |
 | `wtft-daemon-cost-cross-validation` | 5 passed, 0 failed |

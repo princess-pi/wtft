@@ -87,7 +87,7 @@ fs.writeFileSync(sessionPath, lines.join("\n") + "\n");
 // Helper: run wtft CLI with controlled width and capture title line
 // ---
 function runWtft(session: string, args: string[], columns: number): { titleRow: string; allRows: string[] } {
-	const allArgs = ["-i", "1h", "-l", "2", "-w", String(columns), "--no-ticks", ...args, "-s", session];
+	const allArgs = ["-i", "1h", "-l", "2", "-w", String(columns), ...args, "-s", session];
 	const result = execSync(`${process.execPath} ${CLI_BIN} ${allArgs.join(" ")}`, {
 		encoding: "utf8",
 		env: { ...process.env, COLUMNS: String(columns) },

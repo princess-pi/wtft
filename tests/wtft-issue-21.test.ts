@@ -114,7 +114,6 @@ try {
 		interval: "1h",
 		limit: 10,
 		width: 80,
-		showTicks: false,
 		mode: "cumulative" as "cumulative" | "bucket",
 		timezone: "UTC"
 	};

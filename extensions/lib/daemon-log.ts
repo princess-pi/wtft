@@ -47,9 +47,11 @@ export function rotateDaemonLog(file: string, maxBytes: number): void {
 
 export function daemonStdio(file = daemonLogPath()): { stdio: StdioOptions; close(): void } {
 	try {
-		fs.mkdirSync(path.dirname(file), { recursive: true });
+		// Session paths and warnings: this user's to read, no one else's.
+		fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 		rotateDaemonLog(file, DAEMON_LOG_MAX_BYTES);
-		const fd = fs.openSync(file, "a");
+		const fd = fs.openSync(file, "a", 0o600);
+		try { fs.fchmodSync(fd, 0o600); } catch { /* not ours to change; still logged */ }
 		return { stdio: ["ignore", "ignore", fd], close: () => { try { fs.closeSync(fd); } catch { /* already closed */ } } };
 	} catch {
 		return { stdio: "ignore", close: () => {} };

@@ -8,7 +8,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { trackSandbox } from "./lib/sandbox";
-import { daemonLogPath, rotateDaemonLog } from "../extensions/lib/daemon-log.ts";
+import { daemonLogPath, daemonStdio, rotateDaemonLog } from "../extensions/lib/daemon-log.ts";
 import { spawnWtftDaemon } from "../extensions/lib/wtft-cli-shared.ts";
 import { restartDaemon } from "../extensions/lib/wtft-daemon-lib.ts";
 import { standInDaemonArgs } from "./lib/stand-in-daemon.ts";
@@ -105,5 +105,17 @@ describe("a spawned daemon's stderr reaches the log", () => {
 		const [script] = standInDaemonArgs('process.stderr.write("from restartDaemon\\n");');
 		assert.strictEqual(await restartDaemon(session(), script), true);
 		assert.ok(await logGets("from restartDaemon"), "the stand-in's stderr is not in the log");
+	});
+});
+
+describe("daemonStdio", () => {
+	it("creates the log readable by this user only, and tightens an existing one", () => {
+		const f = path.join(sandbox, "perm", "wtft", "daemon.log");
+		daemonStdio(f).close();
+		assert.strictEqual(fs.statSync(f).mode & 0o777, 0o600);
+		assert.strictEqual(fs.statSync(path.dirname(f)).mode & 0o777, 0o700);
+		fs.chmodSync(f, 0o644);
+		daemonStdio(f).close();
+		assert.strictEqual(fs.statSync(f).mode & 0o777, 0o600);
 	});
 });

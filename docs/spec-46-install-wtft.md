@@ -182,11 +182,13 @@ now falls through the same evaluation as every other exit.
 - **`daemons` (#260): a daemon on an older build is stopped.** `older` counts the processes that run a
   `wtft-daemon` bundle (`wtft-daemon`, `.mjs`, `.js` or `.ts`) from this clone's `bin/` (where the
   Pi widget's daemons run from) or from `<dir>`, and that started no later than that file's mtime; a
-  start in the same second counts as older. "Run" means the bundle is argv[0], or argv[1] under
-  `node` or `bun`: an editor with the file open is not counted. A relative path is resolved against
+  start in the same second counts as older. "Run" means the bundle is argv[0], or the first
+  non-option argument under `node` or `bun` (so `node --inspect <bundle>` counts): an editor with the
+  file open is not counted. A relative path is resolved against
   the process's own cwd. `bun run build` and install mode leave
   an unchanged bundle unwritten, so its mtime dates the last build that changed it. When `older` is
-  above 0, install mode runs `<dir>/wtft-daemon --restart` (its output to stderr), then checks the
+  above 0 and every artifact checked out (not `drift`, so a failed copy never restarts daemons into
+  the old build), install mode runs `<dir>/wtft-daemon --restart` (its output to stderr), then checks the
   same processes by pid and start time: `left` is how many still run, not counting a zombie, and
   `restart` is `done` when none do, else `failed`. A daemon `--restart` has just started is never
   counted.

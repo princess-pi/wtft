@@ -363,66 +363,6 @@ if [ "$MODE" = install ] && [ "$STATUS" != build-failed ]; then
   done
 fi
 
-# ---
-# Daemons on an older build: a process running a wtft-daemon bundle from this
-# clone's bin/ or the install dir that started no later than that file last
-# changed (build and install leave an unchanged bundle's mtime alone). Install
-# mode runs the installed wtft-daemon --restart for them and counts again;
-# --check only counts. Linux only (/proc).
-# ---
-OLDER_DAEMONS=0
-DAEMONS_LEFT=0
-DAEMON_RESTART=none
-# Prints "<pid>:<starttime ticks>" per process on an older build. The daemon is
-# the script a node or bun runs (argv[1]), or argv[0] itself; an editor or pager
-# with the file open is not a daemon. A relative path is the process's own cwd's.
-older_daemons() {
-  local btime hz p a0 a1 arg ticks built dir real_src real_dst
-  [ -r /proc/stat ] || return 0
-  btime="$(awk '/^btime /{print $2}' /proc/stat)"
-  hz="$(getconf CLK_TCK 2>/dev/null)"
-  [ -n "$btime" ] && [ -n "$hz" ] || return 0
-  real_src="$(cd "$SRC_DIR" 2>/dev/null && pwd -P)"
-  real_dst="$(cd "$DEST_DIR" 2>/dev/null && pwd -P)"
-  for p in /proc/[0-9]*; do
-    [ -r "$p/cmdline" ] || continue
-    a0=""; a1=""
-    { IFS= read -r -d '' a0; IFS= read -r -d '' a1; } < "$p/cmdline" 2>/dev/null
-    case "$(basename -- "$a0")" in
-      wtft-daemon|wtft-daemon.mjs|wtft-daemon.js) arg="$a0" ;;
-      node|nodejs|bun|bun.exe) arg="$a1" ;;
-      *) continue ;;
-    esac
-    case "$(basename -- "$arg")" in wtft-daemon|wtft-daemon.mjs|wtft-daemon.js|wtft-daemon.ts) ;; *) continue ;; esac
-    case "$arg" in /*) ;; *) arg="$(readlink "$p/cwd" 2>/dev/null)/$arg" ;; esac
-    [ -f "$arg" ] || continue
-    dir="$(cd "$(dirname -- "$arg")" 2>/dev/null && pwd -P)" || continue
-    [ "$dir" = "$real_src" ] || [ "$dir" = "$real_dst" ] || continue
-    built="$(stat -L -c %Y "$arg" 2>/dev/null)" || continue
-    # Field 22, starttime in clock ticks since boot; fields after ")" of comm start at 3.
-    ticks="$(sed 's/.*) //' "$p/stat" 2>/dev/null | awk '{print $20}')"
-    [ -n "$ticks" ] || continue
-    # A tie counts as older: one second's resolution cannot order them.
-    [ $(( btime + ticks / hz )) -le "$built" ] && echo "${p#/proc/}:$ticks"
-  done
-  return 0
-}
-if [ "$STATUS" != build-failed ] && [ "$STATUS" != no-dir ]; then
-  OLDER_LIST="$(older_daemons)"
-  OLDER_DAEMONS="$(printf '%s' "$OLDER_LIST" | grep -c . || true)"
-  if [ "$MODE" = install ] && [ "$OLDER_DAEMONS" -gt 0 ]; then
-    "$DEST_DIR/wtft-daemon" --restart >&2
-    # Left: the same processes still running, by pid and start time, so a daemon
-    # --restart has just started is never counted.
-    # A zombie was stopped.
-    for entry in $OLDER_LIST; do
-      pid="${entry%%:*}"
-      [ "$(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null | awk '$1 != "Z" {print $20}')" = "${entry#*:}" ] && DAEMONS_LEFT=$((DAEMONS_LEFT + 1))
-    done
-    if [ "$DAEMONS_LEFT" = 0 ]; then DAEMON_RESTART=done; else DAEMON_RESTART=failed; fi
-  fi
-fi
-
 STATE_JSON=""
 STATE_LINES=""
 EVAL_LIST=()
@@ -453,6 +393,73 @@ for spec in "${EVAL_LIST[@]}"; do
 "
 done
 [ "$STATUS" = drift ] && EXIT=1
+
+# ---
+# Daemons on an older build: a process running a wtft-daemon bundle from this
+# clone's bin/ or the install dir that started no later than that file last
+# changed (build and install leave an unchanged bundle's mtime alone). Install
+# mode runs the installed wtft-daemon --restart for them and counts again;
+# --check only counts. Linux only (/proc).
+# ---
+OLDER_DAEMONS=0
+DAEMONS_LEFT=0
+DAEMON_RESTART=none
+# Prints "<pid>:<starttime ticks>" per process on an older build. The daemon is
+# the script a node or bun runs (its first non-option argument), or argv[0]; an editor or pager
+# with the file open is not a daemon. A relative path is the process's own cwd's.
+older_daemons() {
+  local btime hz p a arg ticks built dir real_src real_dst
+  local -a argv
+  [ -r /proc/stat ] || return 0
+  btime="$(awk '/^btime /{print $2}' /proc/stat)"
+  hz="$(getconf CLK_TCK 2>/dev/null)"
+  [ -n "$btime" ] && [ -n "$hz" ] || return 0
+  real_src="$(cd "$SRC_DIR" 2>/dev/null && pwd -P)"
+  real_dst="$(cd "$DEST_DIR" 2>/dev/null && pwd -P)"
+  for p in /proc/[0-9]*; do
+    [ -r "$p/cmdline" ] || continue
+    argv=()
+    while IFS= read -r -d '' arg; do argv+=("$arg"); done < "$p/cmdline" 2>/dev/null
+    [ "${#argv[@]}" -gt 0 ] || continue
+    case "$(basename -- "${argv[0]}")" in
+      wtft-daemon|wtft-daemon.mjs|wtft-daemon.js) arg="${argv[0]}" ;;
+      node|nodejs|bun|bun.exe)
+        # The script is the first argument that is not a runtime option (--inspect).
+        arg=""
+        for a in "${argv[@]:1}"; do case "$a" in -*) ;; *) arg="$a"; break ;; esac; done ;;
+      *) continue ;;
+    esac
+    case "$(basename -- "$arg")" in wtft-daemon|wtft-daemon.mjs|wtft-daemon.js|wtft-daemon.ts) ;; *) continue ;; esac
+    case "$arg" in /*) ;; *) arg="$(readlink "$p/cwd" 2>/dev/null)/$arg" ;; esac
+    [ -f "$arg" ] || continue
+    dir="$(cd "$(dirname -- "$arg")" 2>/dev/null && pwd -P)" || continue
+    [ "$dir" = "$real_src" ] || [ "$dir" = "$real_dst" ] || continue
+    built="$(stat -L -c %Y "$arg" 2>/dev/null)" || continue
+    # Field 22, starttime in clock ticks since boot; fields after ")" of comm start at 3.
+    ticks="$(sed 's/.*) //' "$p/stat" 2>/dev/null | awk '{print $20}')"
+    [ -n "$ticks" ] || continue
+    # A tie counts as older: one second's resolution cannot order them.
+    [ $(( btime + ticks / hz )) -le "$built" ] && echo "${p#/proc/}:$ticks"
+  done
+  return 0
+}
+# After the artifacts are checked: a failed copy must not restart daemons into the old build.
+if [ "$STATUS" != build-failed ] && [ "$STATUS" != no-dir ] && [ "$STATUS" != drift ]; then
+  OLDER_LIST="$(older_daemons)"
+  OLDER_DAEMONS="$(printf '%s' "$OLDER_LIST" | grep -c . || true)"
+  if [ "$MODE" = install ] && [ "$OLDER_DAEMONS" -gt 0 ]; then
+    "$DEST_DIR/wtft-daemon" --restart >&2
+    # Left: the same processes still running, by pid and start time, so a daemon
+    # --restart has just started is never counted.
+    # A zombie was stopped.
+    for entry in $OLDER_LIST; do
+      pid="${entry%%:*}"
+      [ "$(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null | awk '$1 != "Z" {print $20}')" = "${entry#*:}" ] && DAEMONS_LEFT=$((DAEMONS_LEFT + 1))
+    done
+    if [ "$DAEMONS_LEFT" = 0 ]; then DAEMON_RESTART=done; else DAEMON_RESTART=failed; fi
+  fi
+fi
+
 
 # config-left only when nothing worse (build-failed/no-dir/drift outrank it).
 [ "$STATUS" = ok ] && [ "$CONFIG_LEFT" = 1 ] && { STATUS=config-left; EXIT=4; }

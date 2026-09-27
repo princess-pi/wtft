@@ -133,8 +133,9 @@ member is a breaking change), and `renderDaemonStatus` still renders it for a ca
   - **C4c:** a holder that is the caller's own child (a zombie once it exits) is replaced, not
     reported `restart-failed`.
   - **C4e:** the caller's event loop runs during the wait and reaps its own exited child.
-  - **C4d:** a holder the caller may not signal (pid 1, EPERM) is left alone and the restart
-    fails. Skipped when run as root.
+  - **C4d:** a holder the caller may not signal (EPERM) is left alone and the restart fails.
+    Since spec-297 this runs in memory, as `tests/wtft-297-holder.test.ts` C3; pid 1 is not a
+    daemon, so it no longer stands in for one.
   - **C6:** a per-session child beside a newer-version tag, with the lease naming itself, is
     alive and holds the lease 1.5 s later.
   - **C7:** a `--harness` start whose root does not exist leaves no lease naming it.

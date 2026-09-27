@@ -1756,7 +1756,8 @@ if (showList || showCleanup || showRestart || stopSession) {
       const pid = harnessHolders.get(pidFile) ?? NaN;
       if (Number.isNaN(pid)) continue;
       if (pid <= 0 || seenPids.has(pid) || pid === process.pid) {
-        unlinkIfNames(fullPath, pid);
+        // A harness left running above still serves its root.
+        if (!keptRunning.has(pid)) unlinkIfNames(fullPath, pid);
         continue;
       }
       seenPids.add(pid);
@@ -1770,7 +1771,9 @@ if (showList || showCleanup || showRestart || stopSession) {
         continue;
       }
       unlinkIfNames(fullPath, pid);
-      console.log(live ? `Stopped: PID ${pid} — harness ${pidFile}; the next wtft starts it again` : `Removed root pid file: PID ${pid} — no live daemon found, harness ${pidFile}`);
+      console.log(live ? `Stopped: PID ${pid} — harness ${pidFile}; the next wtft starts it again`
+        : classifyPid(pid) === "unverified" ? `Removed root pid file: PID ${pid} — cannot be verified as a daemon here, so it is left running, harness ${pidFile}`
+        : `Removed root pid file: PID ${pid} — no live daemon found, harness ${pidFile}`);
       found++;
     }
     console.log(`${found} holder(s) handled: restarted, stopped, left in place, or a lease or root pid file removed, as each line says.`);

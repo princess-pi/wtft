@@ -10,7 +10,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { lastLineStartByte, seedClassifiedTagFile, getCurrentVersionTagPath, readClassifiedTagFile, parseSessionFile, readPrefixSentinel, sentinelMatches, watcherAction, PREFIX_SENTINEL_BYTES } from "../bin/wtft.mjs";
 import { pollUntil, sleep } from "./lib/poll";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
-import { lastBuildMs } from "./lib/last-build";
+import { bundleSources, lastBuildMs } from "./lib/last-build";
 
 isolateTmpdir("130-line-safe");
 
@@ -26,7 +26,7 @@ function assert(label: string, ok: boolean, detail?: string) {
 
 {
 	const built = lastBuildMs();
-	for (const src of ["bin/wtft-daemon.ts", "bin/wtft.ts", "extensions/lib/wtft-daemon-lib.ts"]) {
+	for (const src of bundleSources()) {
 		const i = fs.statSync(path.resolve(import.meta.dirname, "..", src)).mtimeMs;
 		assert(`B0 the last build started after ${src} was saved`, built !== null && built > i,
 			built === null ? "no build recorded — run `bun run build`" : `${src} changed ${Math.round((i - built) / 1000)}s after the last build — run \`bun run build\``);

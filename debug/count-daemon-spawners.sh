@@ -11,6 +11,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 jobs="${1:-8}"
+[[ "$jobs" =~ ^[1-9][0-9]*$ ]] || { echo "count-daemon-spawners: jobs must be a positive integer, got '$jobs'" >&2; exit 2; }
 out="$(mktemp -d)" || exit 2
 trap 'rm -rf "$out"' EXIT
 

@@ -49,13 +49,18 @@ for (const [unit, mode] of [["cost", "cumulative"], ["cost", "bucket"], ["tokens
 	check(line.includes("$3.00"), `${unit} ${mode} prints total cost`);
 	check(line.includes("+1.5k"), `${unit} ${mode} prints incremental tokens`);
 	check(line.includes("3.0k tok"), `${unit} ${mode} prints total tokens`);
+	if (unit === "tokens" && mode === "cumulative") {
+		check(line.includes("▇") || line.includes("▃"), `${unit} ${mode} keeps the recency glyph`);
+	} else if (unit === "cost" && mode === "bucket") {
+		check(/\s{2,}█/.test(line), `${unit} ${mode} keeps a scatter mark`);
+	} else {
+		check(line.includes("█"), `${unit} ${mode} keeps a full-block bar`);
+	}
 }
-const costBar = row(buildWtftLines(ix, settings, { unit: "cost", mode: "cumulative" }));
-check(costBar.includes("█"), "the cost preset still draws a cost bar");
 
 console.log("--- --no-cost leaves the cost bar and the token columns ---");
 const noCost = row(buildWtftLines(ix, settings, { unit: "cost", mode: "cumulative", showCostColumns: false }));
-check(!noCost.includes("+$"), "--no-cost drops the cost columns");
+check(!noCost.includes("+$") && !noCost.includes("$3.00"), "--no-cost drops both cost columns");
 check(noCost.includes("+1.5k"), "--no-cost keeps incremental tokens");
 check(noCost.includes("3.0k tok"), "--no-cost keeps total tokens");
 check(noCost.includes("█"), "--no-cost keeps the bar");

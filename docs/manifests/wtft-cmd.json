@@ -24,9 +24,9 @@
       "result": "The last 12 four-hour intervals are displayed, giving you a two-day cost breakdown at quarter-day resolution.",
       "demo": [
         "\u001b[90m── Jul-01 ───────────────────────────\u001b[0m",
-        "\u001b[90m00:00\u001b[0m  \u001b[1;37m$3.45\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m████\u001b[0m\u001b[38;5;173m███\u001b[0m\u001b[38;5;134m█\u001b[0m",
-        "\u001b[90m04:00\u001b[0m  \u001b[1;37m$8.12\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m███████\u001b[0m\u001b[38;5;173m████\u001b[0m",
-        "\u001b[90m08:00\u001b[0m  \u001b[1;37m$2.10\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m██\u001b[0m\u001b[38;5;168m░\u001b[0m\u001b[38;5;238m░\u001b[0m"
+        "\u001b[90m00:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$3.45\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m████\u001b[0m\u001b[38;5;173m███\u001b[0m\u001b[38;5;134m█\u001b[0m",
+        "\u001b[90m04:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$8.12\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m███████\u001b[0m\u001b[38;5;173m████\u001b[0m",
+        "\u001b[90m08:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$2.10\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m██\u001b[0m\u001b[38;5;168m░\u001b[0m\u001b[38;5;238m░\u001b[0m"
       ]
     },
     {
@@ -37,8 +37,8 @@
       "result": "The chart pulls session data from your Claude Code session directory instead of Pi's, rendering the same bar chart for Claude interactions. (CLI only — the Pi extension auto-discovers Pi sessions.)",
       "demo": [
         "\u001b[90m── Jul-01 (Claude Code) ────────────\u001b[0m",
-        "\u001b[90m10:00\u001b[0m  \u001b[1;37m$5.67\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m██████\u001b[0m\u001b[38;5;173m██\u001b[0m\u001b[38;5;108m█\u001b[0m",
-        "\u001b[90m11:00\u001b[0m  \u001b[1;37m$2.34\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m███\u001b[0m\u001b[38;5;73m█\u001b[0m\u001b[38;5;67m█\u001b[0m"
+        "\u001b[90m10:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$5.67\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m██████\u001b[0m\u001b[38;5;173m██\u001b[0m\u001b[38;5;108m█\u001b[0m",
+        "\u001b[90m11:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$2.34\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m███\u001b[0m\u001b[38;5;73m█\u001b[0m\u001b[38;5;67m█\u001b[0m"
       ]
     },
     {
@@ -62,8 +62,8 @@
       "result": "A fullscreen scrollable pager overlay opens with the expanded cost timeline. (Pi TUI only — not available in the CLI.)",
       "demo": [
         "\u001b[1;36m┌── WTFT Cost Audit Scrollable Pager ──┐\u001b[0m",
-        "\u001b[90m│\u001b[0m \u001b[90m13:00\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m████\u001b[0m\u001b[38;5;173m███\u001b[0m\u001b[38;5;238m░\u001b[0m      \u001b[90m│\u001b[0m",
-        "\u001b[90m│\u001b[0m \u001b[90m14:00\u001b[0m  \u001b[1;37m$1.74\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m██████\u001b[0m\u001b[38;5;173m█\u001b[0m      \u001b[90m│\u001b[0m",
+        "\u001b[90m│\u001b[0m \u001b[90m13:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$1.23\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m████\u001b[0m\u001b[38;5;173m███\u001b[0m\u001b[38;5;238m░\u001b[0m      \u001b[90m│\u001b[0m",
+        "\u001b[90m│\u001b[0m \u001b[90m14:00\u001b[0m  \u001b[90m+$0.50\u001b[0m  \u001b[1;37m$1.74\u001b[0m  \u001b[90m+1.0k\u001b[0m  \u001b[1;37m2.0k tok\u001b[0m  \u001b[38;5;108m██████\u001b[0m\u001b[38;5;173m█\u001b[0m      \u001b[90m│\u001b[0m",
         "\u001b[1;36m└── ↑↓/j/k  ·  q/Esc exit (Row 1/32) ──┘\u001b[0m"
       ]
     },

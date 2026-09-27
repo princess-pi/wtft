@@ -464,17 +464,19 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				return;
 			}
 
+			const hideCostColumns = opts.hideCostColumns ? !current.hideCostColumns : current.hideCostColumns;
+			const hideTokenColumns = opts.hideTokenColumns ? !current.hideTokenColumns : current.hideTokenColumns;
 			const columnFlags = {
-				showCostColumns: !opts.hideCostColumns,
-				showTokenColumns: !opts.hideTokenColumns,
+				showCostColumns: !hideCostColumns,
+				showTokenColumns: !hideTokenColumns,
 			};
+			writeConfig(WTFT_CONFIG_TOOL, {
+				hideCostColumns,
+				hideTokenColumns,
+			}, undefined, WTFT_CONFIG_DIR);
 			if (tokens || cost) {
 			// --cost explicitly switches back to $ units.
-			writeConfig(WTFT_CONFIG_TOOL, {
-				tokens,
-				hideCostColumns: opts.hideCostColumns,
-				hideTokenColumns: opts.hideTokenColumns,
-			}, undefined, WTFT_CONFIG_DIR);
+			writeConfig(WTFT_CONFIG_TOOL, { tokens }, undefined, WTFT_CONFIG_DIR);
 			updateWtftWidget(ctx, pi, { visible: true, ...columnFlags });
 
 			if (tokens) {
@@ -532,8 +534,6 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				limit: nextLimit,
 				mode: nextMode,
 				timezone: nextTimezone,
-				hideCostColumns: opts.hideCostColumns,
-				hideTokenColumns: opts.hideTokenColumns,
 			}, undefined, WTFT_CONFIG_DIR);
 
 			updateWtftWidget(ctx, pi, {

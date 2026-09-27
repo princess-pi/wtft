@@ -27,8 +27,8 @@ Issue: https://github.com/princess-pi/wtft/issues/274 · Module: `bin/wtft-daemo
   caller's.
 - **E. A holder that refused the signal (EPERM) or outlived SIGKILL is left running with its
   lease or root pid file,** and the line says `Not stopped`.
-- **Exit code.** `--restart` exits 1 when any holder was left running (E) or any respawn failed
-  (C, D); otherwise 0. It used to exit 0 in every case, with the failure only in its line.
+- **Exit code.** `--restart` exits 1 when a holder refused the signal or outlived SIGKILL (E), or
+  a respawn failed (C, D); otherwise 0.
 
 ## Roads not taken
 

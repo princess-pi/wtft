@@ -700,10 +700,6 @@ export async function restartDaemon(sessionPath: string, daemonPath: string): Pr
 		const pid = leasePid(leaseHolder(pidPath));
 		const kind = verifiedKind(pid);
 		if (kind === "unverified") return false;
-		// A harness is asked to serve this session (the spawn below points it
-		// here), never stopped; a pid that is not a daemon is not ours to signal,
-		// and the claim below displaces it. The new daemon must not start beside
-		// the old one, whose shutdown flushes into the tag.
 		// With no /proc a reused pid cannot be told apart before SIGKILL.
 		if (mayStop(kind) && (await stopHolder(pid, processTable().inspectable() ? {} : { killMs: 0 })) !== "stopped") return false;
 		if (kind === "other") unlinkLeaseIf(pidPath, String(pid));

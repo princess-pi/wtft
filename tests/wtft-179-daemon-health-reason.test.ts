@@ -57,6 +57,7 @@ console.log("V1. No reason sentence is compared as a control token");
 		"extensions/lib/wtft-cli-shared.ts",
 		"extensions/wtft.ts",
 		"bin/wtft.ts",
+		...fs.readdirSync(path.join(REPO_ROOT, "extensions", "lib", "cli")).map(f => `extensions/lib/cli/${f}`),
 	];
 	const sentences = Object.values(DAEMON_REASON_TEXT);
 	const offenders: string[] = [];

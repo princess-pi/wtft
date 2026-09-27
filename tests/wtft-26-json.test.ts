@@ -393,7 +393,7 @@ console.log("\n7. the exit-code table is a contract");
 	// 130 on `q`/Ctrl-C from inside `session-selector.ts`. A scan of the entry
 	// point alone reported "every exit code" while missing one the tool really
 	// returns — the exact class of false green this section exists to prevent.
-	const sources = ["bin/wtft.ts", "extensions/lib/session-selector.ts"]
+	const sources = ["bin/wtft.ts", "extensions/lib/session-selector.ts", ...fs.readdirSync(path.join(REPO_ROOT, "extensions", "lib", "cli")).map(f => `extensions/lib/cli/${f}`)]
 		.map(rel => fs.readFileSync(path.join(REPO_ROOT, rel), "utf8"))
 		.join("\n")
 		.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");

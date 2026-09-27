@@ -59,4 +59,7 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
 
 - `CONTEXT.md` — vocabulary, including the two-register rule: "log parser daemon" to explain,
   "daemon" to refer.
-- `docs/spec-<issue>-*.md` — the spec behind each numbered change.
+- `docs/spec-<module>.md` — the live spec for `extensions/lib/<module>.ts`.
+  A behaviour change in that module edits it.
+- `docs/spec-<issue>-*.md` — the spec behind each numbered change. One whose header says
+  "Superseded by" is a change record, not current behaviour.

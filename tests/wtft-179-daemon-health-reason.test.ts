@@ -204,7 +204,6 @@ console.log("V4. Display text is unchanged for every code");
 {
 	const EXPECTED: Record<DaemonHealthReason, string> = {
 		"not-started": "daemon not started",
-		"starting": "starting...",
 		"waiting-session": "waiting for session .jsonl...",
 		"not-found": "daemon not found",
 		"idle-timeout": "idle timeout",

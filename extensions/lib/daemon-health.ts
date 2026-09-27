@@ -2,7 +2,7 @@
  * DaemonHealth: is this session's log parser daemon alive, idle or stopped.
  * One pure decision over one set of facts, so every reader (widget, --watch,
  * wtft-daemon --list) gets the same answer.
- * docs/spec-270-daemon-health.md.
+ * docs/spec-daemon-health.md.
  */
 
 import * as fs from "node:fs";
@@ -55,7 +55,6 @@ export function getModelCacheTtlMs(model: string): number | null {
  */
 export type DaemonHealthReason =
 	| "not-started"      // no daemon spawned for this session yet
-	| "starting"
 	| "waiting-session"  // spawned, session .jsonl not created yet
 	| "not-found"        // no live PID and no heartbeat on record
 	| "idle-timeout"     // exited after idling out (lastHbTime carries when)
@@ -64,7 +63,6 @@ export type DaemonHealthReason =
 /** Display copy for each code. Change freely — no control flow reads these. */
 export const DAEMON_REASON_TEXT: Record<DaemonHealthReason, string> = {
 	"not-started": "daemon not started",
-	"starting": "starting...",
 	"waiting-session": "waiting for session .jsonl...",
 	"not-found": "daemon not found",
 	"idle-timeout": "idle timeout",

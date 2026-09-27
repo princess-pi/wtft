@@ -487,9 +487,9 @@ The 24-hour SURGE timeline and daemon status indicator are appended inline to th
 
 ## Daemon Status States
 
-The states, what triggers each and the rendered text are one table:
-`docs/spec-270-daemon-health.md` §2, with the rendered legend in `docs/EXT_WTFT.html`
-(`#daemon-health`). Both surfaces render through `renderDaemonStatus`.
+What triggers each state: `docs/spec-daemon-health.md` §2. The rendered text and colours:
+`docs/manifests/wtft-status.json`, shown on `docs/EXT_WTFT.html` (`#daemon-health`). Both
+surfaces render through `renderDaemonStatus`.
 
 `--watch` asks `health` while it waits for the tag file, on tag changes it reads, on `r`, and on
 its 1,334 ms watchdog while it does not read the daemon as dead.
@@ -560,7 +560,7 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 | Situation | Handling |
 |---|---|
 | Daemon exits (idle timeout, 24h) | Title shows `● stopped HH:MM` in red; footer shows red `'r' to restart` |
-| No activity for 2m2s | Status flips to `● idle (cache expires in Nmin)`, whole minutes rounded up, then `● idle (cache emptied)`. The TTL rule: `docs/spec-270-daemon-health.md` §2. |
+| No activity for 2m2s | Status flips to `● idle (cache expires in Nmin)`, whole minutes rounded up, then `● idle (cache emptied)`. The TTL rule: `docs/spec-daemon-health.md` §2. |
 | Local model (no cache), or no model known | Status shows `● idle (local model)` |
 | User presses `r` | Daemon restarts; while the old one exits (up to 4 s) the view keeps rendering what `health` finds, and a second `r` is ignored until the restart ends; `q` or Ctrl+C then exits once it has spawned. When the claim landed, the lease names the new child at once, so that is alive (`waiting for session`, `live` or `idle`). A holder that outlives SIGKILL or may not be signalled (EPERM), or a spawn that throws, shows `● restart failed` |
 | Tag file deleted/truncated | `fs.watch` handler re-reads from zero |

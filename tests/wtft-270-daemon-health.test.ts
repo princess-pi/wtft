@@ -1,7 +1,7 @@
 #!/usr/bin/env -S bun
 /**
  * DaemonHealth: {lease} × {tag tail} × {age} × {session file} → one answer, with no
- * process spawned. docs/spec-270-daemon-health.md § 2, § 3.
+ * process spawned. docs/spec-daemon-health.md § 2.
  */
 
 import * as fs from "node:fs";

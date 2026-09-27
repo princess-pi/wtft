@@ -20,9 +20,6 @@ const CLOCK_RE = /[\u{1F550}-\u{1F55B}]/gu;
 // 01:00–04:00 → hours 1,2,3; 06:00–10:00 → hours 6,7,8,9.
 const SURGE_HOURS = [1, 2, 3, 6, 7, 8, 9];
 
-// Pin the date so the moon-phase bookend is deterministic across runs.
-const FIXED_DATE = new Date("2026-09-03T12:00:00Z");
-
 const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";
 const RESET = "\x1b[0m";
@@ -115,7 +112,7 @@ console.log("\n=== WTFT TIMELINE 24H (FULL SPEC) ===");
 // ---
 for (let h = 0; h < 24; h++) {
 	check(`hour ${String(h).padStart(2, "0")}: clock face ${CLOCK_FACES[h % 12]} on the ${h < 12 ? "first" : "second"} 12`, () => {
-		const t = stripAnsi(buildTimelineString(new Set(), h, undefined, FIXED_DATE));
+		const t = stripAnsi(buildTimelineString(new Set(), h, "🌑", "🌑", SUN));
 
 		const cps = Array.from(t);
 		assert.ok(isMoon(cps[0]), `expected a moon bookend at the start, got: ${t.slice(0, 4)}`);
@@ -148,7 +145,7 @@ for (let h = 0; h < 24; h++) {
 const surge = new Set(SURGE_HOURS);
 for (let h = 0; h < 24; h++) {
 	check(`full sequence for currentHour=${h} with surge ${SURGE_HOURS.join(",")}`, () => {
-		const raw = buildTimelineString(surge, h, undefined, FIXED_DATE);
+		const raw = buildTimelineString(surge, h, "🌑", "🌑", SUN);
 		assert.deepStrictEqual(coloredGlyphs(raw), expectedSequence(surge, h));
 	});
 }
@@ -158,7 +155,7 @@ for (let h = 0; h < 24; h++) {
 // Pin that branch: the sun borrows hour 12's surge color.
 check("sun renders surge-orange when hour 12 is surge-priced", () => {
 	const noonSurge = new Set([...SURGE_HOURS, 12]);
-	const raw = buildTimelineString(noonSurge, 13, undefined, FIXED_DATE);
+	const raw = buildTimelineString(noonSurge, 13, "🌑", "🌑", SUN);
 	assert.deepStrictEqual(coloredGlyphs(raw), expectedSequence(noonSurge, 13));
 });
 
@@ -176,17 +173,17 @@ const BADGE_CASES: Array<{ status: 'surge' | 'approaching' | 'ending'; text: str
 for (const { status, text, color } of BADGE_CASES) {
 	const noEmojiText = text.replace("⚡", "!!");
 	check(`badge "${text}" (emoji mode)`, () => {
-		const raw = buildTimelineString(new Set(), 0, status, FIXED_DATE);
+		const raw = buildTimelineString(new Set(), 0, "🌑", "🌑", SUN, status);
 		assert.ok(raw.endsWith(` ${color}${text}\x1b[0m`), `expected suffix, got: ${raw.slice(-40)}`);
 	});
 	check(`badge "${noEmojiText}" (no-emoji mode)`, () => {
-		const raw = buildTimelineString(new Set(), 0, status, FIXED_DATE, true);
+		const raw = buildTimelineString(new Set(), 0, "|", "|", "*", status, true);
 		assert.ok(raw.endsWith(` ${color}${noEmojiText}\x1b[0m`), `expected suffix, got: ${raw.slice(-40)}`);
 	});
 }
 
 check("no badge when proximityStatus is undefined", () => {
-	const raw = buildTimelineString(new Set(), 0, undefined, FIXED_DATE);
+	const raw = buildTimelineString(new Set(), 0, "🌑", "🌑", SUN);
 	assert.ok(!/SURGE/.test(raw), `expected no SURGE badge, got: ${raw.slice(-40)}`);
 });
 

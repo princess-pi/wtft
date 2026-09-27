@@ -13,12 +13,52 @@ import {
 	getCurrentLocalHour,
 	checkSurgeProximity,
 	buildTimelineString,
+	getMoonPhase,
+	getZonedParts,
+	resolveZonedLocalHour,
 	formatTokenCount,
 } from "./wtft-renderer.js";
+
+/** Local midnight that opens the strip's day, and the next local midnight. */
+export function stripMidnights(now: number, tz?: string): { start: Date; end: Date } {
+	if (!tz) {
+		const start = new Date(now);
+		start.setHours(0, 0, 0, 0);
+		const end = new Date(start);
+		end.setDate(end.getDate() + 1);
+		return { start, end };
+	}
+	const parts = getZonedParts(now, tz);
+	const start = new Date(resolveZonedLocalHour(parts.year, parts.month, parts.day, 0, tz));
+	const next = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + 1));
+	const end = new Date(resolveZonedLocalHour(
+		next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate(), 0, tz,
+	));
+	return { start, end };
+}
+
+/** Beginning moon, ending moon, and the noon glyph. Emoji-off uses `|` and `*`. */
+export function timelineGlyphs(now: number, tz: string | undefined, disabledEmoji?: boolean): {
+	start: string; end: string; noon: string;
+} {
+	if (disabledEmoji) return { start: "|", end: "|", noon: "*" };
+	const { start, end } = stripMidnights(now, tz);
+	return { start: getMoonPhase(start), end: getMoonPhase(end), noon: "☀️" };
+}
 
 const BLOCK_OLD = "\u2583" as const;
 const BLOCK_NEW = "\u2587" as const;
 const BLOCK_BUCKET = "\u2588" as const;
+
+const PLACEHOLDER_PREFIX = "\x1b[90m-";
+
+/** Padding stops here whatever the limit: `-l 1000000000` is a valid row limit, not a request for a billion rows. */
+export const MAX_PADDED_ROWS = 1000;
+
+/** A padding row: the watch drops these first when the frame is taller than the terminal. */
+export function isPlaceholderRow(line: string): boolean {
+	return line.startsWith(PLACEHOLDER_PREFIX);
+}
 
 export function renderWtftChart(input: {
 	displayedBins: Bin[];
@@ -37,6 +77,7 @@ export function renderWtftChart(input: {
 	cacheLine: string | null;
 	showCostColumns?: boolean;
 	showTokenColumns?: boolean;
+	padRowsTo?: number;
 }): string[] {
 	const {
 		displayedBins, mode, unit, width, disabledEmoji, tz,
@@ -105,11 +146,15 @@ export function renderWtftChart(input: {
 	const sessionSuffix = opts?.sessionNameSuffix ? ` \x1b[90m...${opts.sessionNameSuffix.replace(/.jsonl$/, "").slice(-4)}\x1b[0m` : "";
 	const titleLeftFinal = titleLeft + sessionSuffix;
 	
+	const now = Date.now();
 	const isDeepSeek = (opts?.model || "").toLowerCase().includes("deepseek");
-	const surgeHours = isDeepSeek ? getSurgeLocalHours(tz) : new Set<number>();
-	const currentHour = getCurrentLocalHour(tz);
-	const proximity = isDeepSeek ? checkSurgeProximity() : { status: undefined as ReturnType<typeof checkSurgeProximity>["status"], multiplier: 1.0 };
-	const timelineStr = buildTimelineString(surgeHours, currentHour, proximity.status, undefined, disabledEmoji);
+	const surgeHours = isDeepSeek ? getSurgeLocalHours(tz, now) : new Set<number>();
+	const currentHour = getCurrentLocalHour(tz, now);
+	const proximity = isDeepSeek ? checkSurgeProximity(now) : { status: undefined as ReturnType<typeof checkSurgeProximity>["status"], multiplier: 1.0 };
+	const glyphs = timelineGlyphs(now, tz, disabledEmoji);
+	const timelineStr = buildTimelineString(
+		surgeHours, currentHour, glyphs.start, glyphs.end, glyphs.noon, proximity.status, disabledEmoji,
+	);
 
 	const legendItems = CATEGORY_ORDER
 		.filter(c => CATEGORY_STYLE[c].label !== null)
@@ -339,6 +384,9 @@ export function renderWtftChart(input: {
 		}
 	}
 	if (missed(displayedBins[displayedBins.length - 1])) widgetLines.push(cacheMissLine);
+
+	const placeholder = PLACEHOLDER_PREFIX + [padString("-", labelWidth), ...columnWidths.map(w => padString("-", w))].join("  ").slice(1) + "\x1b[0m";
+	for (let n = displayedBins.length; n < Math.min(input.padRowsTo ?? 0, MAX_PADDED_ROWS); n++) widgetLines.push(placeholder);
 
 	if (otherWarning) widgetLines.push(otherWarning);
 

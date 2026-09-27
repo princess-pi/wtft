@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { buildWtftLines, renderSpawnTree, emptyTotals, renderOtherHistogram, renderTokenSummary, renderSubagentBlock, deduplicateInteractions, scanUncountedBillables, scanUncountedBillablesChecked, newUncountedBillables, addUncountedBillables, discoverSubagentSessionFiles, readSubagentMetaChecked, readTagProvisional, readTagFileWithVerdict, detectSessionHarness, buildSessionJson, type WtftSubagentJson, renderSessionJson, type WtftNotice, type UncountedBillables, getTagPath, awaitDaemonUp, IDLE_THRESHOLD_MS, WTFT_TAGGER_VERSION, taggerIsOlder, describeProvisionalReason, isModelPriced, describeFallbackPricing, getUserPricingPath, getCurrentVersionTagPath, resolveLastCwd, type Interaction, getTerminalWidth } from "../wtft-shared.js";
+import { buildWtftLines, chartLimit, renderSpawnTree, emptyTotals, renderOtherHistogram, renderTokenSummary, renderSubagentBlock, deduplicateInteractions, scanUncountedBillables, scanUncountedBillablesChecked, newUncountedBillables, addUncountedBillables, discoverSubagentSessionFiles, readSubagentMetaChecked, readTagProvisional, readTagFileWithVerdict, detectSessionHarness, buildSessionJson, type WtftSubagentJson, renderSessionJson, type WtftNotice, type UncountedBillables, getTagPath, awaitDaemonUp, IDLE_THRESHOLD_MS, WTFT_TAGGER_VERSION, taggerIsOlder, describeProvisionalReason, isModelPriced, describeFallbackPricing, getUserPricingPath, getCurrentVersionTagPath, resolveLastCwd, type Interaction, getTerminalWidth } from "../wtft-shared.js";
 import { computeSpawnTree, type SpawnTree } from "../wtft-spawn-tree.js";
 import { subagentRows, type SubagentRow } from "../wtft-subagent-block.js";
 import { readConfig } from "@princess-pi/libs/config";
@@ -336,7 +336,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	const padStr = " ".repeat(pad);
 	const paddedWidth = termColumns - 2 * pad;
 	const finalInterval = opts.hasInterval ? opts.interval : (sessionInterval ?? "1h");
-	const finalLimit = opts.hasLimit ? opts.limit : (sessionLimit ?? 100);
+	const finalLimit = chartLimit(opts, sessionLimit);
 	const finalMode = opts.hasMode ? opts.mode : (sessionMode ?? "cumulative");
 	const finalTimezone = opts.hasTimezone ? opts.timezone : sessionTimezone;
 
@@ -351,6 +351,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	const outputLines = buildWtftLines(interactions, defaultSettings, {
 		interval: finalInterval,
 		limit: finalLimit,
+		padRowsTo: finalLimit,
 		width: Math.min(paddedWidth, 1023),
 		mode: finalMode,
 		timezone: finalTimezone,

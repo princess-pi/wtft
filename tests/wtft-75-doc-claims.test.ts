@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Five doc claims pinned against the code or doc they describe
+ * Doc claims pinned against the code or doc they describe
  */
 
 import * as fs from "node:fs";
@@ -171,6 +171,22 @@ console.log("\n5. adding-a-harness.md states the native-cost/server-tool-cost ru
 		"adding-a-harness.md says a harness-native per-turn cost MUST NOT include server-side tool charges");
 	check(/zero\s+`server_tool_use`/.test(doc),
 		"adding-a-harness.md says an adapter whose native cost already includes them must zero server_tool_use");
+}
+
+// ---
+// 6. CLAUDE.md's seams name files that exist and functions they export (#280).
+// ---
+console.log("\n6. CLAUDE.md names real seams");
+{
+	const section = read("CLAUDE.md").split("## One module, one seam per feature")[1]?.split("\n## ")[0] ?? "";
+	check(section !== "", "CLAUDE.md has the one-module section");
+	const paths = [...section.matchAll(/`((?:extensions|tests|bin)\/[^`]+\.ts)`/g)].map(m => m[1]);
+	check(paths.length >= 5, "the section names the seam files", `found ${paths.length}`);
+	for (const p of paths) check(fs.existsSync(path.join(REPO, p)), `${p} exists`);
+	for (const [fn, file] of [["decideHealth", "extensions/lib/daemon-health.ts"], ["stepTagger", "extensions/lib/session-tagger.ts"], ["classifyPid", "extensions/lib/holder.ts"]]) {
+		check(section.includes(`\`${fn}\``), `the section names ${fn}`);
+		check(new RegExp(`export function ${fn}\\b`).test(read(file)), `${file} exports ${fn}`);
+	}
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

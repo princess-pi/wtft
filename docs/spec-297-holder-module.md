@@ -62,8 +62,8 @@ The wait yields to the event loop, so a holder that is the caller's own child ge
 
 ## 4. Callers, and what changes for each
 
-Slice 1 (`extensions/lib/`) and slice 2 (`bin/wtft-daemon.ts`) are separate PRs, and this
-issue closes with slice 2.
+Slice 1 (`extensions/lib/`) and slice 2 (`bin/wtft-daemon.ts`) are two commits in one PR. They
+cannot be two PRs, because a branch starts only from main, and slice 2 needs slice 1.
 
 | Caller | Was | Is now | Behaviour change |
 |---|---|---|---|
@@ -73,9 +73,10 @@ issue closes with slice 2.
 | `forceRebuildSession` (`-F`) | cmdline, then bare `kill 0` wait | `classifyPid`, then `stopHolderSync` without SIGKILL | **C4:** the wait counts EPERM as alive, and an `other` holder is neither signalled nor waited for (#290 J) |
 | slice 2: the per-session child's claim | any live pid keeps the lease | `holdsLease` | **C5:** a recycled pid or a zombie no longer keeps a session unserved (#290 J) |
 | slice 2: `holderIsLiveDaemon`, `takeOverLease`, harness root claim, `pointSessionAt` | `Number()` + `kill 0` + cmdline | `leasePid` + `classifyPid` | **C6:** `0123` is not pid 123 (#290 K) |
-| slice 2: `--restart`, `--cleanup`, `--stop`, `waitUntilExited` | bare `kill 0` | `classifyPid`, `stopHolderSync` | **C7:** EPERM is alive. Another user's daemon is reported "Not stopped" and keeps its lease, where it used to have its lease removed with "no live daemon found" (#290 J) |
+| slice 2: `--restart`, `--cleanup`, `--stop`; `waitUntilExited` is gone | bare `kill 0` | `classifyPid`, `stopHolderSync` | **C7:** EPERM is alive. Another user's daemon is reported "Not stopped: PID n refused the signal (EPERM); its lease is left", where it used to have its lease removed with "no live daemon found" (#290 J) |
 | slice 2: `--list` RUNNING/DEAD | bare `kill 0` | `holdsLease` | **C8:** the column agrees with health on EPERM, zombies and recycled pids (#290 A) |
-| slice 2: `reapAndWarn` | ESRCH only | `classifyPid` | **C9:** a zombie holder's lease is unlinked |
+| slice 2: `reapAndWarn` | ESRCH only | `holdsLease(classifyPid)` | **C9:** a lease naming a zombie, or a live process that is not a daemon, is unlinked |
+| slice 2: the newer-tag check at startup | `liveDaemonOrUnknown` | `holdsLease(classifyPid)` | none: the same rule under its one name |
 
 ## 5. Verification
 
@@ -84,8 +85,15 @@ issue closes with slice 2.
   - `stopHolder`'s three outcomes;
   - C1 to C4 through the real callers with the fake table swapped in, with each test taking
     milliseconds.
-- **Slice 2 adds:** C5 to C9. The closer is that `grep` finds no `process.kill(` outside
-  `extensions/lib/holder.ts`.
+- **Slice 2:** `tests/wtft-297-daemon-holders.test.ts` runs the real daemon, because
+  `bin/wtft-daemon.ts` runs when it is imported. It covers:
+  - C5: the child claims a lease naming a live `sleep`, and leaves it running;
+  - C8: `--list` says DEAD for that lease;
+  - the closer: no `process.kill(` in `bin/*.ts` or `extensions/**` outside
+    `extensions/lib/holder.ts`.
+- **C6, C7 and C9 have no test of their own.** Their sites now call `leasePid`, `classifyPid`
+  and `stopHolderSync`, which the in-memory suite covers. An EPERM daemon needs a second user,
+  which the test host does not have.
 - **The process-level suites keep running real processes.** They used any live process as a
   stand-in holder, which is exactly what C1 to C3 now reject. So each stand-in's script is now
   named `wtft-daemon.mjs` (`tests/lib/stand-in-daemon.ts`). A suite that used the test process

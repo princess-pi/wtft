@@ -11,6 +11,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { getCurrentVersionTagPath, getDaemonPidPath, readClassifiedTagFile } from "../bin/wtft.mjs";
 import { pollUntil, sleep } from "./lib/poll";
 import { isolateTmpdir, trackSandbox } from "./lib/sandbox";
+import { standInDaemonArgs } from "./lib/stand-in-daemon.ts";
 
 isolateTmpdir("fatal-replay");
 
@@ -183,18 +184,21 @@ try {
 	staleRestart.child.kill("SIGKILL");
 	await new Promise<void>(resolve => staleRestart.child.once("exit", () => resolve()));
 	fs.writeFileSync(pidPath, "rebuild");
+	// The successor must read as a live daemon to the holder module (spec-297).
+	const successor = spawn(process.execPath, standInDaemonArgs("setInterval(() => {}, 1e6)"), { stdio: "ignore" });
+	children.push(successor);
 	const contender = spawn(process.execPath, ["--preload", reclaimPreloadPath, daemonPath, "--session", sessionPath], {
 		env: {
 			...process.env,
 			WTFT_512_PID_PATH: pidPath,
-			WTFT_512_SUCCESSOR_PID: String(process.pid),
+			WTFT_512_SUCCESSOR_PID: String(successor.pid),
 		},
 		stdio: "ignore",
 	});
 	children.push(contender);
 	const contenderExit = await waitForExit(contender);
 	if (contenderExit !== 0) throw new Error(`stale-lease contender exited ${contenderExit ?? "never"}`);
-	if (fs.readFileSync(pidPath, "utf8").trim() !== String(process.pid)) {
+	if (fs.readFileSync(pidPath, "utf8").trim() !== String(successor.pid)) {
 		throw new Error("stale-lease contender unlinked a newly published live lease");
 	}
 

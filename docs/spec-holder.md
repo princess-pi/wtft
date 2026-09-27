@@ -19,7 +19,7 @@ interface ProcessTable {
   cmdline(pid): string[] | null;                      // null: unreadable
   inspectable(): boolean;                             // a /proc to read at all
   startTime(pid): string | null;                      // changes when the pid is reused
-  spawn(command, args, env): number;                  // detached, unref'd; 0 when it failed
+  spawn(command, args, env): number;                  // detached, unref'd, stderr to docs/spec-daemon-log.md's log; 0 when it failed
 }
 ```
 

@@ -11,6 +11,7 @@ import { tagRecords, parseTagLine, lastOffset, isDataRecord } from "../extension
 import { claimLease, claimLeaseForChild, unlinkLeaseIf, replaceLease as publishLease, leaseHolder } from "../extensions/lib/lease.js";
 import { classifyPid, holdsLease, isDaemonCmdline, pidAlive, processTable, stopHolderSync } from "../extensions/lib/holder.js";
 import { leasePid } from "../extensions/lib/lease.js";
+import { daemonStdio, daemonLogPath, rotateDaemonLog, DAEMON_LOG_MAX_BYTES } from "../extensions/lib/daemon-log.js";
 import { decideHealth, readHealthFacts } from "../extensions/lib/daemon-health.js";
 import { readSession, flushTurns, scanChildren, resumeTagger, fsWorld, MTIME_SETTLE_MS, type LogLine } from "../extensions/lib/session-tagger.js";
 import {
@@ -93,8 +94,14 @@ process.on("SIGHUP", () => { if (harnessMode) stopHarness("SIGHUP"); else shutdo
 
 // ---
 
+let daemonLogCheckedAt = 0;
+
 /** Overwrite same-width heartbeat in place (fixed-width pwrite); else append. File never shrinks. */
 function upsertHeartbeat(now: number) {
+  if (now - daemonLogCheckedAt >= 60_000) {
+    daemonLogCheckedAt = now;
+    rotateDaemonLog(daemonLogPath(), DAEMON_LOG_MAX_BYTES);
+  }
   const hbLine = JSON.stringify({ _hb: { first: slot.idleStartMs, last: now } }) + "\n";
   const hbBuf = Buffer.from(hbLine, "utf8");
   try {
@@ -1641,15 +1648,18 @@ if (showList || showCleanup || showRestart || stopSession) {
       let respawned: "claimed" | "busy" | "failed" = "failed";
       if (respawnLease) {
         let childPid = 0;
+        const log = daemonStdio();
         try {
           const child = spawn(process.execPath, [process.argv[1], ...daemonLaunchArgs(sessionFound!, restartEnv)], {
             detached: true,
-            stdio: "ignore",
+            stdio: log.stdio,
             env: restartEnv,
           });
           child.unref();
           childPid = child.pid ?? 0;
-        } catch (_2) {}
+        } catch (_2) {} finally {
+          log.close();
+        }
         if (childPid) {
           try { respawned = claimLeaseForChild(respawnLease, childPid); } catch { respawned = "busy"; }
           if (respawned === "busy" && !pidAlive(childPid)) respawned = "failed";

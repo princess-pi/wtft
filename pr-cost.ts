@@ -151,9 +151,10 @@ export function readTestRuns(file: string, branch: string): TestRuns | null {
 		if (!line.trim()) continue;
 		let run: any;
 		try { run = JSON.parse(line); } catch { out.unreadableLines++; continue; }
-		if (typeof run?.branch !== "string" || !Array.isArray(run.suites)
-			|| !run.suites.every((s: any) => typeof s?.name === "string" && typeof s.ok === "boolean")) { out.unreadableLines++; continue; }
+		if (typeof run?.branch !== "string") { out.unreadableLines++; continue; }
 		if (run.branch !== branch) continue;
+		if (!Array.isArray(run.suites)
+			|| !run.suites.every((s: any) => typeof s?.name === "string" && typeof s.ok === "boolean")) { out.unreadableLines++; continue; }
 		out.runs++;
 		for (const s of run.suites) {
 			out.suiteRuns++;

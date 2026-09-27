@@ -94,8 +94,8 @@ would put a repo-process feature into the tool's public surface.
 
 `bun run test` (`tests/run.ts`) appends one line per run to `tmp/test-runs.jsonl` in the
 checkout it runs in: `{ utc, branch, suites: [{ name, ok }] }`. The reader counts only lines
-whose `branch` is the one measured. A line that does not parse, or has no `branch` or a suite with
-no `name` or `ok`, counts in `unreadableLines`. `tmp/` is gitignored, and the file goes
+whose `branch` is the one measured. A line that does not parse or has no `branch` counts in
+`unreadableLines`, and so does this branch's line with a suite that has no `name` or `ok`. `tmp/` is gitignored, and the file goes
 when `pr-cleanup` removes the worktree. So the record must be taken before cleanup, which §1
 already requires.
 

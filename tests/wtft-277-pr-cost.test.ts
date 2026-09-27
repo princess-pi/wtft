@@ -159,13 +159,14 @@ describe("test runs", () => {
 	appendTestRun(log, "6-earlier", [{ name: "a", ok: true }]);
 	fs.appendFileSync(log, "{ torn\n");
 	fs.appendFileSync(log, JSON.stringify({ utc: "x", branch: "7-thing", suites: [null] }) + "\n");
+	fs.appendFileSync(log, JSON.stringify({ utc: "x", branch: "6-earlier", suites: [null] }) + "\n");
 
 	it("appends one line per run", () => {
-		assert.strictEqual(fs.readFileSync(log, "utf8").trim().split("\n").length, 5, "four runs and the torn line");
+		assert.strictEqual(fs.readFileSync(log, "utf8").trim().split("\n").length, 6, "five runs and the torn line");
 	});
 	it("derives runs, suite runs, failures and reruns", () => {
 		assert.deepStrictEqual(readTestRuns(log, "7-thing"), { runs: 2, suiteRuns: 3, failedSuiteRuns: 1, reruns: 1, unreadableLines: 2 },
-			"another branch's run is not this branch's; a torn line and a malformed suite are unreadable");
+			"another branch's run, malformed or not, is not this branch's; a torn line and a malformed suite are unreadable");
 	});
 	it("no log is null, not zero", () => {
 		assert.strictEqual(readTestRuns(path.join(tmp, "none.jsonl"), "7-thing"), null);

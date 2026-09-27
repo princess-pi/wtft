@@ -1636,7 +1636,6 @@ if (showList || showCleanup || showRestart || stopSession) {
       log.close();
     }
   };
-  // A daemon that refuses its arguments exits within its first few hundred ms.
   const respawnSurvives = (childPid: number): boolean => { sleepMs(RESPAWN_SETTLE_MS); return pidAlive(childPid); };
   const seenPids = new Set<number>();
   const restarted = new Set<number>();
@@ -1721,7 +1720,6 @@ if (showList || showCleanup || showRestart || stopSession) {
           restartFailed = true;
         }
       }
-      // A harness started without --session holds its root, not this lease.
       const harnessOnly = wasDaemon && !sessionFound && !survived && harnessFound !== null;
       let harnessBack = false;
       if (harnessOnly) {

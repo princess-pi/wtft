@@ -1,9 +1,4 @@
 #!/usr/bin/env bun
-/**
- * wtft-daemon --restart: what it may kill, what it brings back, and what it reports.
- * docs/spec-274-restart.md.
- */
-
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -72,7 +67,6 @@ try {
 
 	console.log("--- D: a respawn that dies at once is reported, and exits 1 ---");
 	{
-		// A --session that names a tag file: the real daemon refuses it and exits 1 at start.
 		const tagSession = path.join(TMP, "x", "s.jsonl.wtft-tag.v1.jsonl");
 		fs.mkdirSync(path.dirname(tagSession), { recursive: true });
 		fs.writeFileSync(tagSession, "");

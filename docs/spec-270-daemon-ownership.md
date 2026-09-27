@@ -50,7 +50,7 @@ value (`extensions/lib/harness-registry.ts`), and `handOffLines` is `handOff(reg
 | T11 | `_fold {parent,child,s}` | `syncSubagentTranscript` | a child's first write in a generation records the child itself; then each session a model-tagged turn folded that this generation had not recorded | CLI and widget `foldedIdsFromRecords` → `computeSpawnTree.alreadyAttributed`; daemon `reseedClaudeChildren`; `initClassified` → "has data"; `sweepState` / `invalidateStaleSweptMarker` → data |
 | T12 | `_gen {s,session}` | `syncSubagentTranscript`, `skipAsFoldedElsewhere`, the pending-turn release in `scanForSubAgents` | first read of a child in a daemon life, turns or none; rotation; a child another transcript now folds; an interrupt that must mark an id-less turn already written; an owner's attributed cost shrinking | `currentGeneration` (CLI, widget, `--watch` reseed via `appendedGeneration`); daemon `resumeClaudeLookups` → sources already read; `reseedClaudeChildren`; `initClassified` → "has data"; `sweepState` / `invalidateStaleSweptMarker` → data |
 
-Which open issue turns on each record: T4 → #266; T7, T8 → #235, #257; T9, T10, T12 → #267;
+Which open issue turns on each record: T7, T8 → #235, #257; T9, T10, T12 → #267;
 T11 → #237; T12 → #263. The lease (§1b) → #249, #243, #221. Rows without a number have no open issue on them today.
 
 Whole-file properties that are also read as state:
@@ -152,7 +152,7 @@ issue that turns on the row, where one exists.
 | R1 | the tag is settled (every subagent turn written, no read failed) | daemon: `pollHadFailure`, `turnHeldBack`, `tagGrewSinceMarker`, `sweptRetracted`, a cut slice, `subagentScanPassFailed`, `reseedPending`, `sessionReadFailed` | `tagProvisionalFromContent` reads the whole content through `sweepState`, and `invalidateStaleSweptMarker` re-derives the same state; then the CLI overrides it from its own discovery scan (`subagent-unreadable`) and its own spawn-tree stat (`descendant-live`); the widget overrides from its own subagent parse | #235, #257, #169 |
 | R2 | which sessions are inside SELF | daemon: `recordedFolds` per child, written as T11 | CLI reads T11 (settled by D1 in #194); the widget reads T11 **and** re-parses every subagent transcript live, merging both copies and relying on message-id collapse to cancel the tag's copy | #237 |
 | R3 | a descendant's cost | the descendant's own daemon, in its own tag, when a reader has asked for it | `computeSpawnTree` → `parseDescendant` parses the transcript, and its subagents, on every report; `parseSessionFileStrict` re-runs `attributeClaudeSubAgentCosts`, the same fold the daemon ran | #216, #235 |
-| R4 | the daemon is alive | daemon: `running` | on `main`, four rules: `checkDaemonHealth` (lease pid + `kill 0`, then a T4 tail scan); `getDaemonStatus` adds a 5 s spawn grace and a 2 s tag-mtime grace; `watchTagFile` adds its own 2 s mtime grace and a 1,334 ms watchdog; `--list` reports idle from tag mtime. Since S5 one: `health`, which the widget, `--watch` (and its wait for the tag file) and `ensureDaemonRunning` call; the startup wait reads the same facts through `readHealthFacts` over the current-version tag, and since spec-281 needs a heartbeat from a lease holder that is its own child (any other live holder is up at once); `--list`'s idle column calls `decideHealth` over the row's own lease, with no model read; `--list`'s RUNNING/DEAD is `holdsLease(classifyPid)` on the listed lease since spec-297. `--watch` asks on its watchdog (1,334 ms) while it does not read the daemon as dead, and on tag changes it reads | #266 |
+| R4 | the daemon is alive | daemon: `running` | on `main`, four rules: `checkDaemonHealth` (lease pid + `kill 0`, then a T4 tail scan); `getDaemonStatus` adds a 5 s spawn grace and a 2 s tag-mtime grace; `watchTagFile` adds its own 2 s mtime grace and a 1,334 ms watchdog; `--list` reports idle from tag mtime. Since S5 one: `health`, which the widget, `--watch` (and its wait for the tag file) and `ensureDaemonRunning` call; the startup wait reads the same facts through `readHealthFacts` over the current-version tag, and since spec-281 needs a heartbeat from a lease holder that is its own child (any other live holder is up at once); `--list`'s idle column calls `decideHealth` over the row's own lease, with no model read; `--list`'s RUNNING/DEAD is `holdsLease(classifyPid)` on the listed lease since spec-297. `--watch` asks on its watchdog (1,334 ms) while it does not read the daemon as dead, and on tag changes it reads | — |
 | R5 | the session is idle | daemon: `lastActivityMs`, `idleStartMs` | `decideHealth`, only while a live holder has the lease, the session file exists and the tag is non-empty: idle when the newest heartbeat after the newest other non-stop record has `first` (raised to a later turn's `t`) ≥ 122 s ago, or else when the session file's mtime is | — |
 | R6 | which transcript a tag line came from | daemon: `SubagentFileState.source` | `transcriptSourceId` is recomputed from the current path at the next read; a session move changes the answer for a child in the session's own directory | #263 |
 | R7 | which `claude -p` lookups are open | daemon: `pendingClaudeCommands`, `discoveredClaudeFiles` | `resumeClaudeLookups` replays T9, T10 and T12; `reseedClaudeChildren` checks `<projectsDir>/<dir>/<id>.jsonl` for every T12 id with a matching source, skipping ids T11 says another source folds and ids discovery finds | #267 |
@@ -163,7 +163,7 @@ issue that turns on the row, where one exists.
 | R12 | the lease is mine | the claimer | on `main`, nine unlink sites with three different checks (§1b); one implementation after S2 | #249, #243 |
 
 Rows R1, R2, R3 and R6 are the spawn-tree chain (#116 → #135 → #178 → #230 → #235 → #237).
-Rows R4, R8, R10 and R12 are the daemon chain (#205 → #239 → #249 → #259 → #263 → #266).
+Rows R4, R8, R10 and R12 are the daemon chain (#205 → #239 → #249 → #259 → #263).
 
 ---
 
@@ -203,10 +203,9 @@ first edit. Order matters: S0 is the safety net every later slice runs against.
 | **S5 DaemonHealth** (built) | one function, `health`, which `--watch`, the widget and `ensureDaemonRunning` call; `--list`'s idle column calls `decideHealth`, and the startup wait reads `readHealthFacts` | `tests/wtft-270-daemon-health.test.ts`: hand-picked points along {lease state}, {tag tail}, {age} and {session file}, each → one answer; `wtft-179-daemon-health-reason.test.ts` unchanged in S5 (spec-281 rewrote V3). Design and closer: `docs/spec-270-daemon-health.md` |
 | **S6 CLI arms** (built) | `bin/wtft.ts` `main` dispatches to five functions in `extensions/lib/cli/` | the existing CLI suites pass, two source scans widened to `extensions/lib/cli/` (`docs/spec-270-cli-arms.md` §3); `bin/wtft.ts` `main` under 80 lines |
 
-Freeze: no daemon feature lands between S0 and S4. The plan named #257, #263, #266 and #267 to
+Freeze: no daemon feature lands between S0 and S4. The plan named #257, #263 and #267 to
 close by S3–S5, not before. S3 closes #257 and #263 and checks #267 A–E, G, H; S4 checks #267 F; I and J
-stay on #267. S5 leaves #266 standing: it is `-F` signalling an unverified pid, not a health
-answer (`docs/spec-270-daemon-health.md` §4).
+stay on #267.
 
 ### 3c. What stays
 

@@ -113,7 +113,7 @@ member is a breaking change), and `renderDaemonStatus` still renders it for a ca
 | `--watch` `r` on a per-session daemon | `starting` up to 5 s | while the old one exits (up to 4 s) the view shows it alive, then stopped, then the new daemon alive; other readers see the old daemon alive, `stopped` only between its exit and the new claim |
 | Spawn with a `rebuild` lease | the child reads `rebuild` and rebuilds | unchanged: the spawner leaves `rebuild` for the child |
 | Spawn over a live holder | the child exits busy, takes the lease over when an older-version tag exists, or (a harness start) hands off, or takes a per-session holder's lease by SIGTERM (`takeOverLease`) | unchanged: the spawner claims nothing |
-| `ensureDaemonRunning` called twice in one process within one spawn | the second call spawned again; the second child lost the claim and exited | when the first claim landed, the second call finds the lease alive and does not spawn (#261 lead O). Over a `rebuild` lease it still spawns again, and a first call in another process spawns without reading the lease |
+| `ensureDaemonRunning` called twice in one process within one spawn | the second call spawned again; the second child lost the claim and exited | when the first claim landed, the second call finds the lease alive and does not spawn (PR #321 (lead O)). Over a `rebuild` lease it still spawns again, and a first call in another process spawns without reading the lease |
 
 ## 3. Closer
 

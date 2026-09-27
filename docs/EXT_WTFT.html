@@ -282,14 +282,7 @@
         <p>Status rendering is shared via <code>renderDaemonStatus()</code> in <code>wtft-daemon-lib.ts</code> — DRY between Pi widget and CLI watch modes.</p>
 
         <h4>Health Check Mechanism</h4>
-        <p>Every reader asks one function, <code>health()</code> in <code>wtft-daemon-lib.ts</code>, over the pure decision in <code>extensions/lib/daemon-health.ts</code> (<a href="spec-270-daemon-health.md">spec-270 S5</a>): the Pi widget and <code>--watch</code>. The CLI's startup wait reads the same facts (over the current-version tag), and for a lease naming the daemon it just spawned it also waits for a heartbeat written since it began (#281); any other live holder counts at once. <code>wtft-daemon --list</code>'s idle column uses the same decision over the row's own lease, with no model read; its RUNNING/DEAD column uses the same holder rule (<a href="spec-297-holder-module.md">spec-297</a>). It reads the session's lease, the last 8 KiB of the tag file and the session file's mtime, and the whole session file for a model only when an idle answer needs a cache TTL and the tag tail named none. <code>ensureDaemonRunning</code> asks it too, before trusting its own earlier spawn:</p>
-        <ul>
-            <li><strong>Lease pid alive, no session file</strong> → <code class="wtft-status">waiting for session .jsonl...</code></li>
-            <li><strong>Lease pid alive, a non-empty tag, and either a heartbeat idle ≥ 2m2s (the exact rule: spec-270 S5 §2), or a session file untouched ≥ 2m2s</strong> → <code class="wtft-status">idle</code>. The heartbeat's <code>first</code> (or a later turn's time) is the clock baseline, so the countdown ticks between health checks; the session file's mtime covers a daemon restarted on an already-idle session.</li>
-            <li><strong>Lease pid alive otherwise</strong> → <code class="wtft-status">live</code></li>
-            <li><strong>No clock window.</strong> A process that spawns a daemon claims the session's lease for it at once (#281, <a href="spec-281-spawner-claims-lease.md">spec-281</a>) when the lease is absent, empty, not a pid, or names a dead pid or a live process that is not a daemon (spec-297), and takes the claim back if the child is already dead. From the spawn the lease names the new daemon; a <code>rebuild</code> token or a live daemon holder is left for the daemon to meet.</li>
-            <li><strong>Lease pid dead (or a zombie), a <code>rebuild</code> token, or no lease</strong> → <code class="wtft-status">stopped HH:MM</code> at the last heartbeat, or <code class="wtft-status">daemon not found</code> with none.</li>
-        </ul>
+        <p>The widget, <code>--watch</code> and <code>--list</code>'s idle column ask one decision, <code>decideHealth</code> in <code>extensions/lib/daemon-health.ts</code>, over the session's lease, the tag's last 8 KiB and the session file's mtime. The CLI's startup wait and <code>--list</code>'s RUNNING/DEAD apply its liveness rule directly. The rule, the reason codes and the readers: <a href="spec-daemon-health.md">spec-daemon-health</a>, the module's live spec.</p>
 
         <h4>Provisional Reads (#443)</h4>
         <p>A one-shot <code>wtft</code> spawns the daemon and reads the tag file on the next
@@ -334,7 +327,22 @@
 
     <h3 id="detailed-specs">Detailed Specs</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
-        <p>Every <code>docs/spec-*.md</code> feature spec belonging to <code>wtft</code>, linked so a reader landing on this page can reach the detailed record of any feature. <strong>Superseded-spec policy (#161):</strong> a spec whose behavior a later branch supersedes is marked <code>**Status:** Superseded by #NNN</code> at its top rather than deleted or unlinked — it stays here, visibly marked. As of this page's last edit, two specs below are superseded in part: <a href="spec-248-watch-focus-first.md">spec-248</a>, by #239, and <a href="spec-239-harness-lifecycle.md">spec-239</a>, by #259.</p>
+        <p>Every <code>docs/spec-*.md</code> feature spec belonging to <code>wtft</code>, linked so a reader landing on this page can reach the detailed record of any feature. <strong>Module specs first.</strong> A module's live spec is <code>docs/spec-&lt;module&gt;.md</code>, named for its file in <code>extensions/lib/</code>; a behaviour change in that module edits it. A per-issue spec whose behaviour moved there says <code>Superseded by</code> at its top and stays linked below as the record of that change, not as current behaviour.</p>
+
+        <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+            <thead>
+                <tr style="border-bottom: 1px solid #404040;">
+                    <th style="text-align: left; padding: 6px;">Module spec</th>
+                    <th style="text-align: left; padding: 6px;">Module</th>
+                    <th style="text-align: left; padding: 6px;">Summary</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td style="padding: 6px;"><a href="spec-daemon-health.md">spec-daemon-health</a></td><td style="padding: 6px;"><code>daemon-health.ts</code></td><td style="padding: 6px;">Is this session's daemon alive, idle or stopped: one pure decision for every reader, and the reason codes.</td></tr>
+            </tbody>
+        </table>
+
+        <p style="margin-top: 12px;">Per-issue specs:</p>
 
         <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
             <thead>
@@ -386,7 +394,7 @@
                 <tr><td style="padding: 6px;"><a href="spec-270-daemon-ownership.md">spec-270</a></td><td style="padding: 6px;">#270</td><td style="padding: 6px;">The ownership map: every shared record with its writer and readers, and the re-derivations behind the fix-spawns-fix chains. The refactor in slices: golden tags, one typed tag reader (<code>extensions/lib/tag-log.ts</code>), one lease module, a session tagger behind a port, a harness registry, one health function, a CLI dispatcher.</td></tr>
                 <tr><td style="padding: 6px;"><a href="spec-270-session-tagger.md">spec-270 S3</a></td><td style="padding: 6px;">#270</td><td style="padding: 6px;">SessionTagger: one session's tagging as a state value, a port for every filesystem and clock read, and <code>stepTagger</code> returning the tag records to append; the daemon keeps the lease, the byte-level writer and the cadence.</td></tr>
                 <tr><td style="padding: 6px;"><a href="spec-270-harness-registry.md">spec-270 S4</a></td><td style="padding: 6px;">#270</td><td style="padding: 6px;">HarnessRegistry: one record per served session holding its tagger state, scan-continuation flag, flush timer and sweep stamp, with idle and adoption-retry records beside it; a move re-keys one entry and the hand-off is one function over the registry.</td></tr>
-                <tr><td style="padding: 6px;"><a href="spec-270-daemon-health.md">spec-270 S5</a></td><td style="padding: 6px;">#270</td><td style="padding: 6px;">DaemonHealth: one pure decision over the lease, the tag tail and the session file, behind which every reader of daemon health asks whether the daemon is alive, idle or stopped (the startup wait reads the same facts under its own rule; <code>--list</code>'s RUNNING/DEAD is the holder module's rule, spec-297).</td></tr>
+                <tr><td style="padding: 6px;"><a href="spec-270-daemon-health.md">spec-270 S5</a></td><td style="padding: 6px;">#270</td><td style="padding: 6px;"><em>Superseded by spec-daemon-health.</em> DaemonHealth: one pure decision over the lease, the tag tail and the session file, behind which every reader of daemon health asks whether the daemon is alive, idle or stopped (the startup wait reads the same facts under its own rule; <code>--list</code>'s RUNNING/DEAD is the holder module's rule, spec-297).</td></tr>
                 <tr><td style="padding: 6px;"><a href="spec-270-cli-arms.md">spec-270 S6</a></td><td style="padding: 6px;">#270</td><td style="padding: 6px;">CLI arms: <code>bin/wtft.ts</code> <code>main</code> dispatches to five functions in <code>extensions/lib/cli/</code> (session selection, <code>-F</code>, <code>--watch</code>, the report, the daemon commands); behaviour unchanged.</td></tr>
                 <tr><td style="padding: 6px;"><a href="spec-277-pr-cost.md">spec-277</a></td><td style="padding: 6px;">#277</td><td style="padding: 6px;">The per-PR cost record: <code>bun run pr-cost</code> prints <code>wtft-pr-cost@1</code> (session spend in the worktree, files touched, test runs, review rounds) and <code>--write-pr</code> puts it in the PR body. A repo tool, not shipped.</td></tr>
                 <tr><td style="padding: 6px;"><a href="spec-279-in-memory-suites.md">spec-279</a></td><td style="padding: 6px;">#279</td><td style="padding: 6px;">Suites that check a tagging decision drive <code>stepTagger</code> through <code>tests/lib/tagger-harness.ts</code>, and suites that run the CLI tag in process and run a copy of it beside a stand-in daemon (<code>tests/lib/cli-harness.ts</code>); <code>debug/count-daemon-spawners.sh</code> counts the suites that still start one. A test change, not shipped.</td></tr>
@@ -395,7 +403,7 @@
                 <tr><td style="padding: 6px;"><a href="spec-242-drop-noop-retraction.md">spec-242</a></td><td style="padding: 6px;">#242</td><td style="padding: 6px;">A lower copy of a subagent turn already in the tag is written as its own line instead of rewriting the transcript: readers keep the highest cost per id, as a full parse does.</td></tr>
                 <tr><td style="padding: 6px;"><a href="spec-128-unrecorded-spawns.md">spec-128</a></td><td style="padding: 6px;">#128</td><td style="padding: 6px;"><code>spawned.unrecorded[]</code> lists sessions that look like this session's launcher children and that no spawn record names, each with its own cost and a tier (<code>named</code> or <code>inferred</code>). A list, never a claim: nothing in it reaches <code>tree</code> or <code>total</code>.</td></tr>
                 <tr><td style="padding: 6px;"><a href="spec-107-spawn-discovery.md">spec-107</a></td><td style="padding: 6px;">#107 A/B</td><td style="padding: 6px;">Discovery runs once per spawn rather than once per turn, so a turn that spawns in two directories bills both children; a spawn with no <code>cd</code> searches the session's own working directory instead of being dropped.</td></tr>
-                <tr><td style="padding: 6px;"><a href="spec-179-daemon-health-reason-codes.md">spec-179</a></td><td style="padding: 6px;">#179</td><td style="padding: 6px;">Daemon health reason becomes a machine code (<code>DaemonHealthReason</code>) with the status text derived from it — so <code>tsc</code> rejects a typo'd comparison and a reason can no longer regress on a reword.</td></tr>
+                <tr><td style="padding: 6px;"><a href="spec-179-daemon-health-reason-codes.md">spec-179</a></td><td style="padding: 6px;">#179</td><td style="padding: 6px;"><em>Superseded by spec-daemon-health.</em> Daemon health reason becomes a machine code (<code>DaemonHealthReason</code>) with the status text derived from it — so <code>tsc</code> rejects a typo'd comparison and a reason can no longer regress on a reword.</td></tr>
                 <tr><td style="padding: 6px;"><a href="spec-308-lagging-session.md">spec-308</a></td><td style="padding: 6px;">#308</td><td style="padding: 6px;">A session <code>.jsonl</code> that is not written <em>yet</em> is not "not found": <code>wtft -s</code> accepts a pending path, watch waits on daemon state instead of a 5 s clock, and the startup reaper no longer treats "never written" as "gone" (it was SIGTERMing itself).</td></tr>
             </tbody>
         </table>
@@ -502,7 +510,7 @@
                 return;
             }
             container.innerHTML = usage.map(u =>
-                `<li><code>${u.flags}</code> - ${u.desc}</li>`
+                `<li><code>${esc(u.flags)}</code> - ${prose(u.desc)}</li>`
             ).join('');
         }
 
@@ -558,12 +566,12 @@
             let html = '';
             scenarios.forEach(s => {
                 html += `<div style="margin-bottom: 12px; padding-left: 12px;">`;
-                html += `<p style="margin: 0 0 4px 0;">${s.scenario}</p>`;
+                html += `<p style="margin: 0 0 4px 0;">${prose(s.scenario)}</p>`;
                 s.commands.forEach(cmd => {
                     const fullCmd = cmd ? `${invokedAs} ${cmd}` : invokedAs;
-                    html += `<code style="color: var(--accent-orange);">$ ${fullCmd}</code><br>`;
+                    html += `<code style="color: var(--accent-orange);">$ ${esc(fullCmd)}</code><br>`;
                 });
-                html += `<span style="color: var(--accent-green);">→ ${s.result}</span>`;
+                html += `<span style="color: var(--accent-green);">→ ${prose(s.result)}</span>`;
                 html += `</div>`;
             });
             container.innerHTML = html;

@@ -39,13 +39,6 @@
       "meaning": "The session file does not exist yet, and a live process holds the lease (a daemon just spawned holds it from the spawn when the lease was free, #281)."
     },
     {
-      "text": "starting...",
-      "color": "yellow",
-      "reason": "starting",
-      "example": { "alive": false, "reason": "starting" },
-      "meaning": "`--watch`'s `r` is restarting the daemon."
-    },
-    {
       "text": "stopped HH:MM",
       "color": "red",
       "reason": "idle-timeout",

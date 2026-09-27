@@ -17,6 +17,7 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
 - **Shared code goes in `@princess-pi/libs`**, never copied in.
 - **Spec-reconcile does not treat comments as spec.** Reconcile: manifests,
   `--help`, README flags/exit codes, JSON schema, tag-format, `CONTEXT.md`,
+  module specs (`docs/spec-<module>.md`),
   `docs/wtft-incremental-render-spec.md`, user-facing strings.
   Not banner comments, not test-header novels, not glossary provenance, not counts
   in prose. A stale comment is deleted, never reworded.
@@ -59,4 +60,8 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
 
 - `CONTEXT.md` — vocabulary, including the two-register rule: "log parser daemon" to explain,
   "daemon" to refer.
-- `docs/spec-<issue>-*.md` — the spec behind each numbered change.
+- `docs/spec-<module>.md` with a `Module:` line — the live spec for that file in `extensions/lib/`;
+  a behaviour change there edits it. `ls docs/spec-[a-z]*.md` lists them. A module without one is
+  still described by its per-issue specs.
+- `docs/spec-<issue>-*.md` — the spec behind each numbered change. One whose header says
+  "Superseded by" is a change record, not current behaviour.

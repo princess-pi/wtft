@@ -283,7 +283,7 @@ function updateWtftWidget(
 		const sessionFile = ctx.sessionManager.getSessionFile?.();
 		if (sessionFile) {
 			const status = getDaemonStatus(sessionFile);
-			parserStatusStr = renderDaemonStatus(status, false);
+			parserStatusStr = renderDaemonStatus(status);
 		}
 
 		const widgetLines = parserStatusStr
@@ -300,7 +300,7 @@ function updateWtftWidget(
 	let parserStatusStr = "";
 	if (sessionFile) {
 		const status = getDaemonStatus(sessionFile);
-		parserStatusStr = renderDaemonStatus(status, false);
+		parserStatusStr = renderDaemonStatus(status);
 	}
 
 	if (parserStatusStr) {

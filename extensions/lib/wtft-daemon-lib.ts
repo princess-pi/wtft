@@ -603,18 +603,15 @@ export function resolveMovedSession(sessionPath: string): string | null {
 /** Daemon self-exit: 24h of no new data. Polite to ps aux browsers. */
 export const IDLE_EXIT_MS = 24 * 60 * 60 * 1000;
 
-/** docs/spec-270-daemon-health.md: the one answer to "is this session's daemon alive". */
+/** docs/spec-daemon-health.md: the one answer to "is this session's daemon alive". */
 export function health(sessionPath: string, now: number, opts: HealthOptions = {}): DaemonStatus {
 	const tagPath = opts.tagPath ?? getTagPath(sessionPath);
 	return decideHealth(readHealthFacts(sessionPath, getDaemonPidPath(sessionPath), tagPath), now);
 }
 
-export function renderDaemonStatus(status: DaemonStatus, restarting = false): string {
+export function renderDaemonStatus(status: DaemonStatus): string {
 	if (status.reason === "waiting-session") {
 		return `  \x1b[33m●\x1b[0m ${daemonReasonText("waiting-session")}`;
-	}
-	if (restarting || status.reason === "starting") {
-		return `  \x1b[33m●\x1b[0m ${daemonReasonText("starting")}`;
 	}
 	if (!status.alive) {
 		const label = status.lastHbTime
@@ -706,7 +703,8 @@ export async function restartDaemon(sessionPath: string, daemonPath: string): Pr
 		if (mayStop(classifyPid(pid)) && (await stopHolder(pid)) !== "stopped") return false;
 	} catch {}
 
-	const childPid = processTable().spawn(process.execPath, [daemonPath, ...daemonLaunchArgs(sessionPath)], process.env);
+	let childPid = 0;
+	try { childPid = processTable().spawn(process.execPath, [daemonPath, ...daemonLaunchArgs(sessionPath)], process.env); } catch {}
 	if (childPid === 0) return false;
 	try { claimLeaseForChild(pidPath, childPid); } catch { /* the child claims for itself */ }
 	return true;
@@ -890,7 +888,7 @@ export async function watchTagFile(
 
 		if (lines && lines.length > 0) {
 			const daemonStatusStr = daemonStatus
-				? renderDaemonStatus(daemonStatus, false)
+				? renderDaemonStatus(daemonStatus)
 				: "  \x1b[90m●\x1b[0m reading...";
 
 			if (daemonStatusStr) {

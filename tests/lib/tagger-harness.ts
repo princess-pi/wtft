@@ -1,6 +1,6 @@
 /**
  * One session tagged in this process, poll by poll, with the clock the test
- * advances: what the daemon does for a session, minus the process (#279).
+ * advances: what the daemon does for a session, minus the process.
  */
 
 import * as fs from "node:fs";

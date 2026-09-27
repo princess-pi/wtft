@@ -18,7 +18,13 @@ then `spawners: <n> of <total>`.
   (`runReport` in `extensions/lib/cli/report.ts`).
 - **Stand-ins do not count:** `tests/lib/stand-in-daemon.ts` writes its scripts outside any `bin/`
   directory.
-- **The runner's three solo suites run alone here too,** after the pool, as in `tests/run.ts`.
+- **The runner's solo suites run alone here too,** after the pool. The list is read from `SOLO` in
+  `tests/run.ts`.
+- **A suite is stopped when it returns.** strace follows every daemon a suite leaves running, so the
+  tracer is killed then, and the daemons with it. A suite still running after 300 s is unfinished.
+- **No count rather than a low one:** when a suite is unfinished, or its trace does not show the
+  suite itself starting, the script names it on stderr and exits 3 without a count. Exit 2 is a
+  setup failure.
 
 ## 2. The harness
 

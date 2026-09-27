@@ -14,7 +14,6 @@ import {
 	parseSessionFile,
 	deduplicateInteractions,
 	loadSubagentInteractions,
-	WTFT_TAGGER_VERSION,
 } from "../bin/wtft.mjs";
 
 let passed = 0;
@@ -219,23 +218,15 @@ fs.writeFileSync(path.join(daemonSubDir, "agent-deadbeef.jsonl"), [
 	usageLine({ id: "d_sub_hit", ts: "2026-07-01T16:02:00Z", cr: 72000, cw: 700 }),
 ].join("\n") + "\n");
 
-const tagsDir = path.join(live, "wtft-tags");
 const tagger = tagSession(sessionPath);
 
-/** Every classified tag line the daemon wrote for this session. The subagent's
- *  lines land in the PARENT's tag file, so this reads the directory rather than
- *  guessing a filename, and selects by message id below. */
+/** Every classified tag line in this session's tag. The subagent's lines land
+ *  in the PARENT's tag, and are selected by message id below. */
 function tagLines(): any[] {
-	let names: string[] = [];
-	try { names = fs.readdirSync(tagsDir); } catch { return []; }
 	const out: any[] = [];
-	for (const name of names.filter(n => n.includes(`.wtft-tag.v${WTFT_TAGGER_VERSION}.`))) {
-		let text = "";
-		try { text = fs.readFileSync(path.join(tagsDir, name), "utf8"); } catch { continue; }
-		for (const line of text.split("\n")) {
-			if (!line.trim() || line.includes('"_hb"') || line.includes('"_meta"')) continue;
-			try { out.push(JSON.parse(line)); } catch { /* partial write — retry next poll */ }
-		}
+	for (const line of fs.readFileSync(tagger.tagPath, "utf8").split("\n")) {
+		if (!line.trim() || line.includes('"_hb"') || line.includes('"_meta"')) continue;
+		try { out.push(JSON.parse(line)); } catch { /* not a record */ }
 	}
 	return out;
 }
@@ -257,12 +248,11 @@ check(
 	!!parentMiss && parentMiss.miss === 1,
 	"…while the PARENT's own re-prime still gets miss=1 — cleared for subagents, not for everyone"
 );
-// Not vacuous: the same transcript parsed WITHOUT the daemon's clear does look
-// like a miss, so the assertion above is about the daemon, not about the fixture.
+// Not vacuous: the same transcript parsed without the tagger's clear does look like a miss.
 check(
 	parseSessionFile(path.join(daemonSubDir, "agent-deadbeef.jsonl"))
 		.some((i: any) => i.cacheMiss === true),
-	"…and its raw parse still reports one, which is the gap the daemon's call closes"
+	"…and its raw parse still reports one, which is the gap the tagger's clear closes"
 );
 
 fs.rmSync(dir, { recursive: true, force: true });

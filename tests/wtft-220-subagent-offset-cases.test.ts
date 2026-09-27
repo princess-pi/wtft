@@ -74,8 +74,7 @@ const T0 = Date.now() - 60_000;
 {
 	const r = runCase("interrupt", turn("msg_a", T0, 100), (file, tagger) => {
 		fs.appendFileSync(file, INTERRUPT);
-		tagger.poll();
-		tagger.poll();
+		for (let i = 0; i < 3; i++) tagger.poll();
 		fs.appendFileSync(file, turn("msg_b", T0 + 1000, 200));
 		tagger.poll();
 		fs.appendFileSync(file, turn("msg_c", T0 + 2000, 300));

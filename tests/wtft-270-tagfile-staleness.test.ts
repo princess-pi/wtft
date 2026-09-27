@@ -228,9 +228,9 @@ try {
 }
 
 // ---
-// A restart re-appends every child line; an id-less line must not be billed twice (#114 D5).
+// A restart re-appends every child line; an id-less line must not be billed twice.
 // ---
-console.log("\nwtft restart over an id-less child line (#114)");
+console.log("\nwtft restart over an id-less child line");
 {
 	const root = path.join(dir, "d-restart");
 	const rootPath = path.join(root, "d-restart.jsonl");
@@ -252,15 +252,20 @@ console.log("\nwtft restart over an id-less child line (#114)");
 	const settle = async (done: () => boolean) => {
 		for (let i = 0; i < 40 && !(done() && !readTagFileWithVerdict(restartTag).provisional.provisional); i++) await sleep(250);
 	};
-	let pid = spawnDaemon(rootPath);
-	await settle(() => outOf() === 301);
-	const first = outOf();
-	await stopDaemon(pid, rootPath);
-	pid = spawnDaemon(rootPath);
-	await sleep(1_500);
-	await settle(() => outOf() >= 301);
-	const second = outOf();
-	await stopDaemon(pid, rootPath);
+	let pid = 0;
+	let first = 0, second = 0;
+	try {
+		pid = spawnDaemon(rootPath);
+		await settle(() => outOf() === 301);
+		first = outOf();
+		await stopDaemon(pid, rootPath);
+		pid = spawnDaemon(rootPath);
+		await sleep(1_500);
+		await settle(() => outOf() >= 301);
+		second = outOf();
+	} finally {
+		await stopDaemon(pid, rootPath);
+	}
 	const appended = fs.readFileSync(restartTag, "utf8").split("\n").filter(l => l.includes('"no id"') || (l.includes('"out":300') && !l.includes('"_'))).length;
 	assert(`D5b fixture precondition: the first life billed it once, and the restart appended the line again (${appended} copies on disk)`,
 		first === 301 && appended >= 2);

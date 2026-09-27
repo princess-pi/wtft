@@ -92,7 +92,7 @@ const NEW_TURN_ID = "msg_270_growth_new";
 	assert(`the seeded turns land once each (${afterSeed} === ${SEED_TURNS})`, afterSeed === SEED_TURNS);
 
 	// ~5 poll cycles with the transcript untouched.
-	for (let i = 0; i < 5; i++) tagger.poll();
+	for (let i = 0; i < 6; i++) tagger.poll();
 	const afterIdle = rawClassifiedLineCount(tagPath);
 	assert(
 		`5 polls over an UNCHANGED transcript append nothing (${afterIdle} === ${afterSeed})`,
@@ -107,7 +107,7 @@ const NEW_TURN_ID = "msg_270_growth_new";
 
 	// Another ~5 quiet polls, so a re-append design cannot hide inside the beat
 	// that carried the new turn.
-	for (let i = 0; i < 5; i++) tagger.poll();
+	for (let i = 0; i < 6; i++) tagger.poll();
 	const afterGrowth = rawClassifiedLineCount(tagPath);
 	assert(
 		`one appended turn costs exactly one tag line, quiet polls after it cost none (${afterGrowth} === ${afterSeed + 1})`,

@@ -22,7 +22,7 @@ function check(cond: boolean, msg: string) {
 }
 
 const DEFAULTS = {
-	interval: "1h", limit: 100, width: 80, showTicks: false,
+	interval: "1h", limit: 100, width: 80,
 	mode: "bucket" as const, timezone: undefined, disabledEmoji: false,
 };
 

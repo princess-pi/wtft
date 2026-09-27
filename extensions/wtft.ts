@@ -136,7 +136,6 @@ function getSettings(_ctx: any) {
 
 	const interval = (config.interval as string) || "1h";
 	const limit = (typeof config.limit === "number" ? config.limit : 10) as number;
-	const showTicks = (typeof config.showTicks === "boolean" ? config.showTicks : true) as boolean;
 	const mode: "bucket" | "cumulative" = (config.mode === "bucket" || config.mode === "cumulative" ? config.mode : "cumulative") as "bucket" | "cumulative";
 	const timezone: string | undefined = (typeof config.timezone === "string" ? config.timezone : "America/Los_Angeles") as string | undefined;
 	const disabledEmoji = isEmojiDisabled();
@@ -146,7 +145,7 @@ function getSettings(_ctx: any) {
 
 	const visible = hasConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR);
 
-	return { interval, limit, width, visible, showTicks, mode, timezone, disabledEmoji, tokens };
+	return { interval, limit, width, visible, mode, timezone, disabledEmoji, tokens };
 }
 
 // ---
@@ -220,7 +219,6 @@ function buildWtftLines(
 		interval?: string;
 		limit?: number;
 		width?: number;
-		showTicks?: boolean;
 		mode?: "bucket" | "cumulative";
 		timezone?: string;
 		sessionNameSuffix?: string;
@@ -243,7 +241,6 @@ function updateWtftWidget(
 		limit?: number;
 		width?: number;
 		visible?: boolean;
-		showTicks?: boolean;
 		mode?: "bucket" | "cumulative";
 		timezone?: string;
 	}
@@ -380,7 +377,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			const opts = parseWtftCliArgs((args || "").trim().split(/\s+/).filter(Boolean));
 			const { forceReparse, enableEmoji, showVersion, showHelp, showWhy,
 				other, tokens, cost, hideWidget, hasInterval, interval,
-				hasLimit, limit, hasWidth, width, hasTicks, showTicks,
+				hasLimit, limit, hasWidth, width,
 				hasMode, mode, hasTimezone, timezone, pager } = opts;
 
 			if (forceReparse) {
@@ -489,7 +486,6 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			const termColumns = getTerminalWidth(true, isEmojiDisabled());
 			const nextWidth = hasWidth ? Math.min(width, 240) : Math.min(termColumns, 240);
 
-			const nextTicks = hasTicks ? showTicks : current.showTicks;
 			const nextMode = hasMode ? mode : current.mode;
 			const nextTimezone = hasTimezone ? timezone : current.timezone;
 
@@ -498,7 +494,6 @@ export default function wtftExtension(pi: ExtensionAPI) {
 					interval: nextInterval,
 					limit: hasLimit ? nextLimit : 100, // Large default for pager
 					width: nextWidth,
-					showTicks: nextTicks,
 					mode: nextMode,
 					timezone: nextTimezone
 				});
@@ -518,7 +513,6 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			writeConfig(WTFT_CONFIG_TOOL, {
 				interval: nextInterval,
 				limit: nextLimit,
-				showTicks: nextTicks,
 				mode: nextMode,
 				timezone: nextTimezone
 			}, undefined, WTFT_CONFIG_DIR);
@@ -528,7 +522,6 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				limit: nextLimit,
 				width: nextWidth,
 				visible: true,
-				showTicks: nextTicks,
 				mode: nextMode,
 				timezone: nextTimezone
 			});

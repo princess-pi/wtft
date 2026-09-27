@@ -322,7 +322,7 @@ file discovered during the `uncounted` scan sets `provisional.reason` to
 ### Interaction with other flags
 
 **Suppressed.** Every rendering flag: `--tokens`, `--other`, `--pad`, `--emoji`,
-`--interval`, `--limit`, `--bucket`/`--cumulative`, `--ticks`, `--timezone`.
+`--interval`, `--limit`, `--bucket`/`--cumulative`, `--timezone`.
 Passing one alongside `--json` is not an error and never crashes; the JSON object
 is what you get. Which flag "wins" in any *other* contradictory pairing is not
 pinned by this spec or by its suite.
@@ -393,7 +393,7 @@ sections:
    both members rather than absent.
 6. **§6** `--json` beside each rendering flag the manifest's `--json` entry
    names as suppressed (`--tokens`, `--other`, `--pad`, `--emoji`/`--no-emoji`,
-   `--bucket`/`--cumulative`, `--interval`, `--limit`, `--ticks`, `--timezone`)
+   `--bucket`/`--cumulative`, `--interval`, `--limit`, `--timezone`)
    yields an object and does not crash. Which flag wins is deliberately not
    pinned.
 7. **§7** every exit code the CLI can return — scanned from `bin/wtft.ts`, the CLI arms in `extensions/lib/cli/`, **and**

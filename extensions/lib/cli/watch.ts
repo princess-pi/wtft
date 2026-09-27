@@ -20,7 +20,6 @@ export async function runWatch(opts: WtftCliOptions, finalSessionPath: string, d
 		interval: opts.hasInterval ? opts.interval : "1h",
 		limit: opts.hasLimit ? opts.limit : 100,
 		mode: opts.hasMode ? opts.mode : "cumulative",
-		showTicks: opts.hasTicks ? opts.showTicks : true,
 		timezone: opts.hasTimezone ? opts.timezone : undefined,
 		unit,
 		daemonPath,
@@ -28,7 +27,6 @@ export async function runWatch(opts: WtftCliOptions, finalSessionPath: string, d
 		hasInterval: opts.hasInterval,
 		hasLimit: opts.hasLimit,
 		hasMode: opts.hasMode,
-		hasTicks: opts.hasTicks,
 		hasTimezone: opts.hasTimezone,
 		disabledEmoji: typeof opts.enableEmoji === "boolean" ? !opts.enableEmoji : undefined,
 	});

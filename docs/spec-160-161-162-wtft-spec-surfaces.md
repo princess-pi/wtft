@@ -140,10 +140,8 @@ a page with two flag references, one correct-forever (fetched) and one stale-for
 ### 3.3 Superseded-spec ruling
 
 Audited all 10 spec files currently on disk against the shipped code they describe, spot-checked
-the two most likely to have drifted:
+spec-52, which remained:
 
-- **spec-109** (half-block bars): `rg -c '▌' extensions/lib/wtft-renderer.ts` → non-zero, and the
-  code comments cite `#109` directly at the render call sites (`:1281`, `:1316`). Still current.
 - **spec-52** (category phases 1-2): the `Category` union in `extensions/lib/wtft-parser.ts:30`
   and the overhead-trio comment in `wtft-renderer.ts:41,54-55` (`Ovrhd`/`Waste`/`Cmpct`,
   "Phase 3 (#52) wired the overhead trio") match what spec-52 describes for the phases it covers.

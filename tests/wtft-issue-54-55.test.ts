@@ -420,7 +420,6 @@ console.log("\n=== Integration: #54 + #55 via buildWtftLines ===");
 		interval: "1h",
 		limit: 5,
 		width: 80,
-		showTicks: false,
 		mode: "cumulative" as "cumulative" | "bucket",
 		timezone: "UTC"
 	};

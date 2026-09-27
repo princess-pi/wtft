@@ -48,7 +48,6 @@ function runAlignmentTest(mode: "cumulative" | "bucket") {
 		interval: "1h",
 		limit: 5,
 		width: width,
-		showTicks: true,
 		mode: mode,
 		timezone: "UTC"
 	};
@@ -378,7 +377,6 @@ const settingsWithEmoji = {
 	interval: "1h",
 	limit: 5,
 	width: 80,
-	showTicks: true,
 	mode: "cumulative" as const,
 	timezone: "UTC",
 	disabledEmoji: false
@@ -388,7 +386,6 @@ const settingsNoEmoji = {
 	interval: "1h",
 	limit: 5,
 	width: 80,
-	showTicks: true,
 	mode: "cumulative" as const,
 	timezone: "UTC",
 	disabledEmoji: true

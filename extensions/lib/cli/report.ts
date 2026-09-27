@@ -308,7 +308,6 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	const sessionInterval = (typeof config.interval === "string" ? config.interval : undefined) as string | undefined;
 	const sessionLimit = (typeof config.limit === "number" ? config.limit : undefined) as number | undefined;
 	const sessionMode = (config.mode === "cumulative" || config.mode === "bucket" ? config.mode : undefined) as "cumulative" | "bucket" | undefined;
-	const sessionShowTicks = (typeof config.showTicks === "boolean" ? config.showTicks : undefined) as boolean | undefined;
 	const sessionTimezone = (typeof config.timezone === "string" ? config.timezone : undefined) as string | undefined;
 	// ---
 	showReapWarnings();
@@ -339,14 +338,12 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	const finalInterval = opts.hasInterval ? opts.interval : (sessionInterval ?? "1h");
 	const finalLimit = opts.hasLimit ? opts.limit : (sessionLimit ?? 100);
 	const finalMode = opts.hasMode ? opts.mode : (sessionMode ?? "cumulative");
-	const finalShowTicks = opts.hasTicks ? opts.showTicks : (sessionShowTicks ?? true);
 	const finalTimezone = opts.hasTimezone ? opts.timezone : sessionTimezone;
 
 	const defaultSettings = {
 		interval: "1h",
 		limit: 100,
 		width: Math.min(paddedWidth, 1023),
-		showTicks: true,
 		mode: "cumulative" as "cumulative" | "bucket",
 		timezone: undefined
 	};
@@ -355,7 +352,6 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 		interval: finalInterval,
 		limit: finalLimit,
 		width: Math.min(paddedWidth, 1023),
-		showTicks: finalShowTicks,
 		mode: finalMode,
 		timezone: finalTimezone,
 		disabledEmoji,

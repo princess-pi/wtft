@@ -260,82 +260,6 @@ export function distributeChars(costs: Record<Category, number>, barWidth: numbe
 	return result;
 }
 
-// ---
-// HALF-BLOCK RENDERING: double resolution inside each terminal cell.
-// Each cell encodes 2 half-slots via a single glyph:
-//   █ (full block) when both half-slots are the same category (FG only)
-//   ▌ (left half block) when they differ (FG=left category, BG=right category)
-// ---
-
-export function distributeHalfSlots(costs: Record<Category, number>, barWidth: number): Record<Category, number> {
-	const total = Object.values(costs).reduce((sum, val) => sum + val, 0);
-	const result = {} as Record<Category, number>;
-	const remainders = {} as Record<Category, number>;
-	const categories = Object.keys(costs) as Category[];
-	const halfSlots = barWidth * 2;
-
-	if (total <= 0 || halfSlots <= 0) {
-		for (const cat of categories) result[cat] = 0;
-		return result;
-	}
-
-	let allocated = 0;
-	for (const cat of categories) {
-		const raw = (costs[cat] / total) * halfSlots;
-		result[cat] = Math.floor(raw);
-		remainders[cat] = raw - result[cat];
-		allocated += result[cat];
-	}
-
-	while (allocated < halfSlots) {
-		let maxCat: Category | null = null;
-		let maxRemainder = -1;
-		for (const cat of categories) {
-			if (remainders[cat] > maxRemainder) {
-				maxRemainder = remainders[cat];
-				maxCat = cat;
-			}
-		}
-		if (maxCat) {
-			result[maxCat]++;
-			remainders[maxCat] = -1;
-			allocated++;
-		} else {
-			break;
-		}
-	}
-	return result;
-}
-
-export function renderHalfBlockBar(
-	halfSlots: Category[],
-	styles: Record<Category, { fg: number }>
-): string {
-	let out = "";
-	for (let i = 0; i < halfSlots.length; i += 2) {
-		const left = halfSlots[i];
-		const right = halfSlots[i + 1];
-		const fgLeft = styles[left]?.fg ?? 245;
-		if (left === right || right === undefined) {
-			out += `\x1b[38;5;${fgLeft}m█\x1b[0m`;
-		} else {
-			const fgRight = styles[right]?.fg ?? 245;
-			out += `\x1b[38;5;${fgLeft};48;5;${fgRight}m▌\x1b[0m`;
-		}
-	}
-	return out;
-}
-
-export function halfSlotCountsToArray(counts: Record<Category, number>): Category[] {
-	const result: Category[] = [];
-	for (const cat of CATEGORY_ORDER) {
-		for (let i = 0; i < (counts[cat] || 0); i++) {
-			result.push(cat);
-		}
-	}
-	return result;
-}
-
 export function calculateScaleMax(total: number): number {
 	if (total <= 0) return 1.0;
 	if (total > 20) {
@@ -760,7 +684,6 @@ export function buildWtftLines(
 		interval: string;
 		limit: number;
 		width: number;
-		showTicks: boolean;
 		mode: "bucket" | "cumulative";
 		timezone?: string;
 		disabledEmoji?: boolean;
@@ -769,7 +692,6 @@ export function buildWtftLines(
 		interval?: string;
 		limit?: number;
 		width?: number;
-		showTicks?: boolean;
 		mode?: "bucket" | "cumulative";
 		timezone?: string;
 		isWidget?: boolean;
@@ -788,7 +710,6 @@ export function buildWtftLines(
 	const termWidth = getTerminalWidth(isWidget, disabledEmoji);
 	const rawWidth = opts?.width !== undefined ? opts.width : defaultSettings.width;
 	const width = Math.min(rawWidth, termWidth);
-	const showTicks = opts?.showTicks !== undefined ? opts.showTicks : defaultSettings.showTicks;
 	const mode = opts?.mode !== undefined ? opts.mode : defaultSettings.mode;
 	const tz = opts?.timezone !== undefined ? opts.timezone : defaultSettings.timezone;
 
@@ -1005,7 +926,7 @@ export function buildWtftLines(
 	widgetLines.push(titleLeftFinal + "  " + timelineStr);
 	widgetLines.push(legendStr);
 
-	if (showTicks && scaleMax > 0) {
+	if (scaleMax > 0) {
 		const dateLabel = `── ${titleDateStr} `;
 		const paddingLen = Math.max(0, prefixWidth - dateLabel.length);
 		const labelPrefix = dateLabel + "─".repeat(paddingLen);
@@ -1017,39 +938,28 @@ export function buildWtftLines(
 		}
 	}
 
-	const precomputedHalfSlots: Map<Bin, Record<Category, number>> = new Map();
+	const precomputedCells: Map<Bin, Record<Category, number>> = new Map();
 	if (mode === "cumulative" && unit === "cost") {
 		const chronological = [...displayedBins].reverse();
 		let prevSlots: Record<Category, number> | null = null;
 		for (const bin of chronological) {
-			const barWidthCells = scaleMax > 0 ? Math.round((bin.total_cost / scaleMax) * maxBarWidth) : 0;
-			const halfSlotWidth = barWidthCells * 2;
+			const cellWidth = scaleMax > 0 ? Math.round((bin.total_cost / scaleMax) * maxBarWidth) : 0;
 			const slots = {} as Record<Category, number>;
 			let allocated = 0;
-			const remainders = {} as Record<Category, number>;
 
 			for (const cat of CATEGORY_ORDER) {
-				const raw = scaleMax > 0 ? (bin.costs[cat] / scaleMax) * halfSlotWidth : 0;
+				const raw = scaleMax > 0 ? (bin.costs[cat] / scaleMax) * cellWidth : 0;
 				slots[cat] = Math.floor(raw);
-				remainders[cat] = raw - slots[cat];
 				allocated += slots[cat];
 			}
 
-			// Clamp to previous bin — only for categories with ≥ 2 half-slots
-			// (1 full char). Tiny 1-half-slot allocations from remainder
-			// distribution are allowed to flicker; clamping them would make
-			// every category permanently visible.
 			if (prevSlots) {
 				let clampedTotal = 0;
 				for (const cat of CATEGORY_ORDER) {
-					if (prevSlots[cat] >= 2) {
-						slots[cat] = Math.max(slots[cat], prevSlots[cat]);
-					}
+					if (prevSlots[cat] >= 1) slots[cat] = Math.max(slots[cat], prevSlots[cat]);
 					clampedTotal += slots[cat];
 				}
-				// If clamping overshot halfSlotWidth, trim from categories that grew
-				// the most (they stole from others' remainder slots).
-				let excess = clampedTotal - halfSlotWidth;
+				let excess = clampedTotal - cellWidth;
 				while (excess > 0) {
 					let maxGrow = -1, maxCat: Category | null = null;
 					for (const cat of CATEGORY_ORDER) {
@@ -1060,17 +970,15 @@ export function buildWtftLines(
 					if (maxCat) { slots[maxCat]--; excess--; }
 					else break;
 				}
-								// When clampedTotal < halfSlotWidth, excess is negative and
-				// halfSlotWidth - excess overshoots — remainder loop would skip.
 				allocated = 0;
 				for (const cat of CATEGORY_ORDER) allocated += slots[cat];
 			}
 
-			while (allocated < halfSlotWidth) {
+			while (allocated < cellWidth && bin.total_cost > 0) {
 				let maxDeficit = -Infinity;
 				let maxCat: Category | null = null;
 				for (const cat of CATEGORY_ORDER) {
-					const ideal = (bin.costs[cat] / bin.total_cost) * halfSlotWidth;
+					const ideal = (bin.costs[cat] / bin.total_cost) * cellWidth;
 					const deficit = ideal - slots[cat];
 					if (deficit > maxDeficit) {
 						maxDeficit = deficit;
@@ -1085,7 +993,7 @@ export function buildWtftLines(
 				}
 			}
 
-			precomputedHalfSlots.set(bin, slots);
+			precomputedCells.set(bin, slots);
 			prevSlots = { ...slots };
 		}
 	}
@@ -1122,7 +1030,7 @@ export function buildWtftLines(
 
 		if (i > 0 && missed(displayedBins[i - 1])) widgetLines.push(cacheMissLine);
 
-		if (showTicks && i > 0 && bin.dateStr !== displayedBins[i - 1].dateStr) {
+		if (i > 0 && bin.dateStr !== displayedBins[i - 1].dateStr) {
 			widgetLines.push(`\x1b[90m${buildDividerLine(formatMmmDdStr(bin.dateStr))}\x1b[0m`);
 		}
 
@@ -1183,9 +1091,13 @@ export function buildWtftLines(
 		} else {
 			let barStr = "";
 			if (mode === "cumulative") {
-				const halfSlotCounts = precomputedHalfSlots.get(bin)!;
-				const halfSlots = halfSlotCountsToArray(halfSlotCounts);
-				barStr = renderHalfBlockBar(halfSlots, CATEGORY_STYLE);
+				const counts = precomputedCells.get(bin);
+				for (const cat of CATEGORY_ORDER) {
+					const n = counts?.[cat] ?? 0;
+					if (n <= 0) continue;
+					const fg = CATEGORY_STYLE[cat]?.fg ?? 245;
+					barStr += `\x1b[38;5;${fg}m${"█".repeat(n)}\x1b[0m`;
+				}
 			} else {
 				const buckets = new Map<number, { cat: Category; cost: number }[]>();
 				for (const cat of CATEGORY_ORDER) {
@@ -1202,14 +1114,11 @@ export function buildWtftLines(
 					const entries = buckets.get(pos);
 					if (!entries || entries.length === 0) {
 						barStr += " ";
-					} else if (entries.length === 1) {
-						const fg = CATEGORY_STYLE[entries[0].cat].fg;
-						barStr += `\x1b[38;5;${fg}m█\x1b[0m`;
 					} else {
-						entries.sort((a, b) => b.cost - a.cost);
-						const fg = CATEGORY_STYLE[entries[0].cat].fg;
-						const bg = CATEGORY_STYLE[entries[1].cat].fg;
-						barStr += `\x1b[38;5;${fg};48;5;${bg}m▌\x1b[0m`;
+						let best = entries[0];
+						for (const entry of entries) if (entry.cost > best.cost) best = entry;
+						const fg = CATEGORY_STYLE[best.cat].fg;
+						barStr += `\x1b[38;5;${fg}m█\x1b[0m`;
 					}
 				}
 			}

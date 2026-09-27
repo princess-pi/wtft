@@ -25,8 +25,8 @@ function ix(ts: number, cacheMiss = false) {
 	};
 }
 
-function render(interactions: any[], opts: { limit?: number; showTicks?: boolean } = {}) {
-	const settings = { interval: "1h", limit: opts.limit ?? 100, width: 100, showTicks: opts.showTicks ?? false,
+function render(interactions: any[], opts: { limit?: number } = {}) {
+	const settings = { interval: "1h", limit: opts.limit ?? 100, width: 100,
 		mode: "bucket" as const, timezone: "UTC", disabledEmoji: true };
 	const lines = (buildWtftLines(interactions as any, settings, { ...settings }) as string[])
 		.map(l => l.replace(/\x1b\[[0-9;]*m/g, ""));
@@ -66,7 +66,7 @@ console.log("\nPART B — a limit cuts the older rows off");
 console.log("\nPART C — the missed row is the first of its day");
 {
 	const day2 = Date.UTC(2026, 8, 23);
-	const { lines, rowOf, divider } = render([ix(day2 - 1 * HOUR), ix(day2 + 8 * HOUR + 48 * 60000, true)], { showTicks: true });
+	const { lines, rowOf, divider } = render([ix(day2 - 1 * HOUR), ix(day2 + 8 * HOUR + 48 * 60000, true)]);
 	const missed = rowOf("08:00"), older = rowOf("23:00");
 	const dateLine = lines.findIndex((l, i) => i > missed && /Sep-22/.test(l));
 	check(missed >= 0 && older > missed && dateLine > missed, `C0 fixture precondition: the older row is on the previous day, under its date divider (08:00 ${missed}, Sep-22 ${dateLine}, 23:00 ${older})`);

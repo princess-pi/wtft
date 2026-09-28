@@ -110,7 +110,8 @@ unchanged and will run once re-enabled.
 [#72](https://github.com/princess-pi/wtft/issues/72): it looked for the tag
 file beside the session, where the daemon has not written it since `wtft-tags/`
 arrived. It is a plain gating step now. It exports a private `TMPDIR`, and its
-`--cleanup` step reaches only daemons whose session or root environment is under it.
+`--cleanup` step reaches only daemons holding a lease in it or whose session or root
+environment is under it.
 
 Once the package is on the registry, `stock-node-registry` is re-enabled — the
 `if: false` line deleted in the same PR that un-parks

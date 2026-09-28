@@ -67,14 +67,19 @@ console.log("--cleanup stops the fixture daemons under its own tmp dir, and no o
 	a.unref();
 	b.unref();
 	try {
-		assert("fixture precondition: both stand-ins read as daemons", awaitStandIn(a.pid!) && awaitStandIn(b.pid!));
-		assert("fixture precondition: the tmp dir is not /tmp itself", path.resolve(os.tmpdir()) !== "/tmp");
-		const run = spawnSync(process.execPath, [DAEMON, "--cleanup"], { encoding: "utf8", env: { ...process.env, TMPDIR: os.tmpdir() } });
-		await sleep(300);
-		assert(`it stops the one under its tmp dir (${run.stdout.trim()})`, run.stdout.includes(`Cleaned up: PID ${a.pid}`) && !alive(a.pid!));
-		assert("and leaves one under /tmp/ outside it running", !run.stdout.includes(String(b.pid)) && alive(b.pid!));
+		const ready = awaitStandIn(a.pid!) && awaitStandIn(b.pid!);
+		const scoped = path.resolve(os.tmpdir()) !== "/tmp";
+		assert("fixture precondition: both stand-ins read as daemons", ready);
+		assert("fixture precondition: the tmp dir is not /tmp itself", scoped);
+		if (ready && scoped) {
+			const run = spawnSync(process.execPath, [DAEMON, "--cleanup"], { encoding: "utf8", env: { ...process.env, TMPDIR: os.tmpdir() } });
+			await sleep(300);
+			const names = (pid: number) => new RegExp(`^Cleaned up: PID ${pid} `, "m").test(run.stdout);
+			assert(`it stops the one under its tmp dir (${run.stdout.trim()})`, names(a.pid!) && !alive(a.pid!));
+			assert("and leaves one under /tmp/ outside it running", !names(b.pid!) && alive(b.pid!));
+		}
 	} finally {
-		for (const p of [a.pid, b.pid]) try { process.kill(p!, "SIGTERM"); } catch { /* gone */ }
+		for (const c of [a, b]) if (c.exitCode === null && c.signalCode === null) try { c.kill("SIGTERM"); } catch { /* gone */ }
 	}
 }
 

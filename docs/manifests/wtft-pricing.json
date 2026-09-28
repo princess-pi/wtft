@@ -25,6 +25,18 @@
       ]
     },
     {
+      "model": "claude-fable-5-1",
+      "rates": [
+        {
+          "condition": "",
+          "input": 10,
+          "output": 50,
+          "cacheRead": 0.25,
+          "cacheWrite": 12.5
+        }
+      ]
+    },
+    {
       "model": "claude-haiku-4-5",
       "rates": [
         {
@@ -44,6 +56,18 @@
           "input": 10,
           "output": 50,
           "cacheRead": 1,
+          "cacheWrite": 12.5
+        }
+      ]
+    },
+    {
+      "model": "claude-mythos-5-1",
+      "rates": [
+        {
+          "condition": "",
+          "input": 10,
+          "output": 50,
+          "cacheRead": 0.25,
           "cacheWrite": 12.5
         }
       ]

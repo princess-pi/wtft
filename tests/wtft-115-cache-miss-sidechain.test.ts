@@ -16,6 +16,8 @@ import {
 	loadSubagentInteractions,
 } from "../bin/wtft.mjs";
 
+process.env.COLUMNS = "250";
+
 let passed = 0;
 let failed = 0;
 function check(cond: boolean, msg: string) {
@@ -24,7 +26,7 @@ function check(cond: boolean, msg: string) {
 }
 
 const DEFAULTS = {
-	interval: "1h", limit: 100, width: 80,
+	interval: "1h", limit: 100, width: 250,
 	mode: "bucket" as const, timezone: undefined, disabledEmoji: false,
 };
 
@@ -49,7 +51,7 @@ function usageLine(opts: {
 }
 
 function dividerCount(ix: any[]): number {
-	const lines = buildWtftLines(ix, DEFAULTS, { interval: "1h", mode: "bucket", width: 80 });
+	const lines = buildWtftLines(ix, DEFAULTS, { interval: "1h", mode: "bucket", width: 250 });
 	return (lines as string[]).filter((l: string) => l.includes("Cache Miss")).length;
 }
 
@@ -104,7 +106,7 @@ check(
 // so a divider drawn on the wrong bin, or a suppressed one resurfacing inside a
 // bin that already has one, keeps the counts at 2 and 0 and passes regardless.
 const rendered = (buildWtftLines([...parent, ...sub], DEFAULTS,
-	{ interval: "1h", mode: "bucket", width: 80 }) as string[])
+	{ interval: "1h", mode: "bucket", width: 250 }) as string[])
 	.map((l: string) => l.replace(/\x1b\[[0-9;]*m/g, ""));
 // Bin rows are newest-first and labelled in LOCAL time, so they are matched by
 // shape rather than by hour — an assertion pinned to a clock reading is the #96

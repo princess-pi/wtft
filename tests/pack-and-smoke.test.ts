@@ -229,7 +229,7 @@ try {
 
 	function runInstalled(bin: string, args: string[], xdgHome: string) {
 		return spawnSync(bin, args, {
-			env: { ...stockEnv, XDG_CONFIG_HOME: xdgHome },
+			env: { ...stockEnv, XDG_CONFIG_HOME: xdgHome, COLUMNS: "250" },
 			encoding: "utf8",
 		});
 	}

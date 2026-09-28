@@ -62,8 +62,7 @@ export function isPlaceholderRow(line: string): boolean {
 
 /** Past this share of the width, the label area (time label and number columns) is compacted. */
 const MAX_LABEL_SHARE = 0.25;
-/** Compaction steps: 1 single spacing, 2 whole units, 3 no `+` on deltas, 4 no `$` on the cost delta. */
-const MAX_COMPACT = 4;
+const MAX_COMPACT = 5;
 
 /** `$487.25` → `$487`; under $1 unchanged. */
 export function wholeCost(n: number): string {
@@ -95,7 +94,7 @@ function columnTexts(compact: number) {
 			const n = bin.incremental_tokens ?? 0;
 			return `${plus(n)}${tokens(n)}`;
 		},
-		totalTok: (bin: Bin) => `${tokens(bin.column_total_tokens ?? bin.total_tokens ?? 0)} tok`,
+		totalTok: (bin: Bin) => `${tokens(bin.column_total_tokens ?? bin.total_tokens ?? 0)}${compact >= 5 ? "t" : " tok"}`,
 	};
 }
 

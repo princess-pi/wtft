@@ -18,6 +18,7 @@ import { splitOverheadCost, isModelTagged } from "./wtft-parser.js";
 import { getDiscoveries } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.js";
 import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
+import { repaint, type RepaintFrame } from "./watch-repaint.js";
 import { tagRecords, parseTagLine, currentGeneration, sweepState, isDataRecord, type TagRecord } from "./tag-log.js";
 import { replaceLease, unlinkLeaseIf, leaseHolder, claimLeaseForChild, leasePid } from "./lease.js";
 import { classifyPid, holdsLease, mayStop, processTable, stopHolder, stopHolderSync, verifiedKind, type StopOptions } from "./holder.js";
@@ -764,6 +765,7 @@ export async function watchTagFile(
 
 	hideCursor();
 	let lastLineCount = 0;
+	let lastFrame: RepaintFrame | null = null;
 	let lastBuffer: string[] = [];
 
 	const exitWatch = () => {
@@ -849,8 +851,6 @@ export async function watchTagFile(
 	}
 
 	const render = () => {
-		if (lastLineCount > 0) clearPreviousLines(lastLineCount);
-
 		const width = getTerminalWidth();
 		const pad = settings.pad || 0;
 		const maxPad = Math.max(0, Math.floor(width / 2) - 1);
@@ -927,9 +927,10 @@ export async function watchTagFile(
 		lastBuffer = [...buf];
 
 		const allLines = buf.map(l => padStr + l);
-		const out = allLines.map(l => l + "\n").join("");
-		process.stdout.write(out);
-		lastLineCount = visualLineCount(out, cols);
+		const painted = repaint(lastFrame, allLines, cols, rows);
+		process.stdout.write(painted.out);
+		lastFrame = painted.frame;
+		lastLineCount = painted.frame.total;
 		needsRedraw = false;
 	};
 

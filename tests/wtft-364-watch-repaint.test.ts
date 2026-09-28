@@ -1,0 +1,123 @@
+#!/usr/bin/env -S bun
+/**
+ * `--watch` refreshes by overwriting only the lines that changed, each padded to the full width,
+ * with no erase sequence. Spec: docs/spec-364-watch-repaint.md.
+ */
+
+import { repaint, type RepaintFrame } from "../extensions/lib/watch-repaint.ts";
+
+let passed = 0;
+let failed = 0;
+function check(cond: boolean, msg: string) {
+	if (cond) { passed++; console.log(`  ✅ ${msg}`); }
+	else { failed++; console.error(`  ❌ FAIL: ${msg}`); }
+}
+
+/** A minimal terminal: printable text, \r, \n, CSI A/B/J and SGR, with deferred wrap. */
+class Term {
+	rows: string[][] = [[]];
+	r = 0;
+	c = 0;
+	pendingWrap = false;
+	touched = new Set<number>();
+	erased = false;
+	constructor(readonly cols: number) {}
+	private ensure(r: number) { while (this.rows.length <= r) this.rows.push([]); }
+	feed(s: string) {
+		for (let i = 0; i < s.length; i++) {
+			const ch = s[i]!;
+			if (ch === "\x1b" && s[i + 1] === "[") {
+				const m = /^\x1b\[([0-9;]*)([A-Za-z])/.exec(s.slice(i))!;
+				const n = Number(m[1] || "1");
+				if (m[2] === "A") { this.r = Math.max(0, this.r - n); this.pendingWrap = false; }
+				else if (m[2] === "B") { this.r = Math.min(this.rows.length - 1, this.r + n); this.pendingWrap = false; }
+				else if (m[2] === "J") { this.erased = true; this.rows[this.r]!.length = this.c; this.rows.length = this.r + 1; }
+				else if (m[2] === "K") { this.erased = true; this.rows[this.r]!.length = this.c; }
+				i += m[0].length - 1;
+				continue;
+			}
+			if (ch === "\r") { this.c = 0; this.pendingWrap = false; continue; }
+			if (ch === "\n") { this.r++; this.ensure(this.r); this.pendingWrap = false; continue; }
+			if (this.pendingWrap) { this.r++; this.c = 0; this.ensure(this.r); this.pendingWrap = false; }
+			this.rows[this.r]![this.c] = ch;
+			this.touched.add(this.r);
+			if (this.c === this.cols - 1) this.pendingWrap = true;
+			else this.c++;
+		}
+	}
+	screen(): string[] { return this.rows.map(r => Array.from(r, ch => ch ?? " ").join("").trimEnd()); }
+}
+
+const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
+function step(term: Term, prev: RepaintFrame | null, lines: string[], termRows = 50) {
+	term.touched.clear();
+	term.erased = false;
+	const { out, frame } = repaint(prev, lines, term.cols, termRows);
+	term.feed(out);
+	return { frame, out };
+}
+const screenMatches = (term: Term, lines: string[]) => {
+	const want = lines.map(l => strip(l).trimEnd());
+	const got = term.screen().slice(0, want.length);
+	return JSON.stringify(got) === JSON.stringify(want) && term.r === want.length && term.c === 0;
+};
+
+console.log("\nThe first frame is written in full, padded, with no erase");
+const term = new Term(20);
+const f1 = ["title", "\x1b[90m04:00\x1b[0m $1 ███", "03:00 $1 ██", "'q' to exit"];
+let s = step(term, null, f1);
+check(screenMatches(term, f1), `the screen is the frame, cursor on the line after it (${JSON.stringify(term.screen())})`);
+check(!term.erased, "no erase sequence");
+check(term.rows.slice(0, 4).every(r => r.length === 20), "every line is padded to the full width");
+
+console.log("\nA refresh that changes one row writes only that row");
+const f2 = ["title", "\x1b[90m04:00\x1b[0m $2 ████", "03:00 $1 ██", "'q' to exit"];
+s = step(term, s.frame, f2);
+check(screenMatches(term, f2), `the screen is the new frame (${JSON.stringify(term.screen())})`);
+check(JSON.stringify([...term.touched]) === "[1]", `only row 1 is written (${JSON.stringify([...term.touched])})`);
+check(!term.erased, "no erase sequence");
+
+console.log("\nA shorter line fully covers the longer one it replaces");
+const f3 = ["title", "04:00 $2 █", "03:00 $1 ██", "'q' to exit"];
+s = step(term, s.frame, f3);
+check(screenMatches(term, f3), `no trace of the old bar (${JSON.stringify(term.screen())})`);
+
+console.log("\nAn unchanged frame writes nothing");
+s = step(term, s.frame, f3);
+check(term.touched.size === 0 && s.out === "", `nothing is written (${JSON.stringify(s.out)})`);
+
+console.log("\nA new row grows the frame");
+const f4 = ["title", "05:00 $3 ███", "04:00 $2 █", "03:00 $1 ██", "'q' to exit"];
+s = step(term, s.frame, f4);
+check(screenMatches(term, f4), `the screen is the grown frame (${JSON.stringify(term.screen())})`);
+check(!term.touched.has(0), "the unchanged title is not written");
+check(!term.erased, "no erase sequence");
+
+console.log("\nA shorter frame blanks the rows below it with spaces");
+const f5 = ["title", "'q' to exit"];
+s = step(term, s.frame, f5);
+check(screenMatches(term, f5), `the screen is the shorter frame (${JSON.stringify(term.screen())})`);
+check(term.screen().slice(2).every(r => r === ""), "the rows it left are blank");
+check(!term.erased, "no erase sequence");
+
+console.log("\nA line wider than the terminal fills every row it wraps onto");
+const wide = ["title", "x".repeat(25), "'q' to exit"];
+const t2 = new Term(20);
+let w = step(t2, null, wide);
+const w2 = ["title", "y".repeat(5), "'q' to exit"];
+w = step(t2, w.frame, w2);
+check(screenMatches(t2, w2) && t2.screen()[3] === "", `the wrapped rows are covered (${JSON.stringify(t2.screen())})`);
+check(!t2.erased, "no erase sequence");
+
+console.log("\nFallbacks: a width change or a frame taller than the terminal redraw from the top");
+{
+	const t3 = new Term(20);
+	const a = step(t3, null, f1);
+	const resized = repaint(a.frame, f2, 30, 50);
+	check(resized.out.includes("\x1b[J"), "a width change erases and redraws");
+	const tall = repaint(a.frame, f2, 20, 4);
+	check(tall.out.includes("\x1b[J"), "a frame that does not fit the terminal's rows erases and redraws");
+}
+
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed > 0 ? 1 : 0);

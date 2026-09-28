@@ -97,7 +97,7 @@ check(bothOrders.hideTokenColumns, "--no-tokens stays set when --tokens is also 
 console.log("--- a 40-column chart keeps the bar ---");
 const narrow = { ...settings, width: 40 };
 const narrowCost = row(buildWtftLines(ix, narrow, { unit: "cost", mode: "cumulative" }));
-check(narrowCost.includes(" 2k 3k tok "), `width 40 keeps the token columns too once compacted: ${JSON.stringify(narrowCost)}`);
+check(narrowCost.includes(" 2 $3 2k 3kt "), `width 40 keeps the token columns too once compacted: ${JSON.stringify(narrowCost)}`);
 check(narrowCost.includes(" 2 $3 "), `width 40 keeps the cost columns, compacted, when they fit: ${JSON.stringify(narrowCost)}`);
 check(narrowCost.includes("█"), "width 40 keeps the cost bar");
 const narrowPlain = (buildWtftLines(ix, narrow, { unit: "cost", mode: "cumulative" }) ?? [])

@@ -35,7 +35,8 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 │  sharing a message.id to one interaction at max cost    │
 │  (ppt#270 review) — on the initial read AND on every    │
 │  incremental append. Renders full chart                 │
-│  on every new data event + per-minute timeline refresh. │
+│  on every new data event + per-minute timeline refresh, │
+│  and writes only the lines that changed (spec-364).     │
 │  Monitors daemon health via health() (lease, tag tail). │
 │  The spawner claims the lease: no starting window.      │
 └─────────────────────────────────────────────────────────┘

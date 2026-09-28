@@ -19,8 +19,9 @@ at the first step that brings the label area to 25% or less:
    (`-589.5k` → `-590k`).
 3. **No `+`** on the cost and token deltas.
 4. **No `$`** on the cost delta.
+5. **`t` for ` tok`** on the token total (`802M tok` → `802Mt`).
 
-After step 4 nothing more is removed. Every row, the tick line and the placeholder rows use the same
+After step 5 nothing more is removed. Every row, the tick line and the placeholder rows use the same
 step.
 
 ## Interaction with the existing fallbacks

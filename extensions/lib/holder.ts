@@ -100,8 +100,30 @@ export type HolderKind = "gone" | "daemon" | "harness" | "other" | "unverified";
 
 const DAEMON_BASENAMES = new Set(["wtft-daemon", "wtft-daemon.mjs", "wtft-daemon.js", "wtft-daemon.ts"]);
 
+const OPTIONS_WITH_VALUE = new Set(["-r", "--require", "--import", "--preload", "--loader", "--experimental-loader"]);
+
+function isDaemonPath(arg: string): boolean {
+	return DAEMON_BASENAMES.has(path.basename(arg));
+}
+
+/** The program is a daemon, or a node or bun whose script is one. */
 export function isDaemonCmdline(args: string[]): boolean {
-	return args.some(arg => DAEMON_BASENAMES.has(path.basename(arg)));
+	if (args.length === 0) return false;
+	if (isDaemonPath(args[0])) return true;
+	if (!/^(node|nodejs|bun)/.test(path.basename(args[0]))) return false;
+	for (let i = 1; i < args.length; i++) {
+		const arg = args[i];
+		if (/^--(eval|print)(=|$)/.test(arg) || /^-[a-zA-Z]*[ep]/.test(arg)) return false;
+		if (OPTIONS_WITH_VALUE.has(arg)) { i++; continue; }
+		if (arg.startsWith("-") || arg === "run") continue;
+		return isDaemonPath(arg);
+	}
+	return false;
+}
+
+/** A `ps` command line split on whitespace cannot be read by position: any word naming one counts. */
+function isDaemonCommandWords(words: string[]): boolean {
+	return words.some(isDaemonPath);
 }
 
 export function classifyPid(pid: number): HolderKind {
@@ -132,7 +154,7 @@ export function verifiedKind(pid: number): HolderKind {
 	if (kind !== "unverified" || table.inspectable()) return kind;
 	const args = table.psCmdline(pid);
 	if (args === null) return "unverified";
-	if (!isDaemonCmdline(args)) return "other";
+	if (!isDaemonCommandWords(args)) return "other";
 	return args.includes("--harness") ? "harness" : "daemon";
 }
 

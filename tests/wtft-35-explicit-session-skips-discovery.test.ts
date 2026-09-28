@@ -7,9 +7,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { cliWithoutDaemon, tagForCli } from "./lib/cli-harness.ts";
+import { skip } from "./lib/skips.ts";
 
 isolateTmpdir("explicit-session-skips-discovery");
 
@@ -18,6 +19,7 @@ isolateTmpdir("explicit-session-skips-discovery");
 const CHILD_ENV = process.env;
 
 const SCRIPT = `${process.execPath} ${cliWithoutDaemon()}`;
+const COUNT_PRELOAD = path.resolve(import.meta.dirname, "lib", "count-fs-under.mjs");
 const RED = "\x1b[31m", GREEN = "\x1b[32m", RESET = "\x1b[0m";
 let passed = 0, failed = 0;
 function assert(label: string, ok: boolean, detail?: string) {
@@ -71,34 +73,26 @@ const run = (args: string, env: NodeJS.ProcessEnv, timeout = 30_000) => {
 	}
 };
 
-/** Median of three, so one scheduler hiccup cannot decide the verdict.
- *
- *  A duration ratio says nothing on its own: if a regression made `-s` fail fast under BOTH
- *  corpora, both medians would be small and roughly equal, `ratio < 2` would
- *  hold, and this suite would certify the very contract it exists to protect
- *  while the command underneath was broken. `ok` is what stops a fast failure
- *  from reading as a fast success. */
-function medianRunMs(args: string, env: NodeJS.ProcessEnv): { ms: number; ok: boolean; detail: string } {
-	const times: number[] = [];
-	let ok = true, detail = "";
-	for (let i = 0; i < 3; i++) {
-		const t0 = performance.now();
-		const { out, code } = run(args, env);
-		times.push(performance.now() - t0);
-		const rendered = /[\u2588\u2591\u2592\u2593]/.test(out) || /\$\d/.test(stripAnsi(out));
-		if (code !== 0 || !rendered) {
-			ok = false;
-			detail = `run ${i + 1} exit ${code}, rendered=${rendered}: ${stripAnsi(out).trim().slice(0, 200)}`;
-		}
-	}
-	return { ms: times.sort((a, b) => a - b)[1], ok, detail };
+/** One CLI run under a preload that counts node:fs calls on paths under `watched`.
+ *  `ok` is false when the run failed or rendered nothing, so a fast failure never
+ *  reads as zero reads. */
+function countedRun(args: string[], env: NodeJS.ProcessEnv, watched: string): { reads: number; ok: boolean; detail: string } {
+	const countFile = path.join(dir, "fs-count");
+	try { fs.rmSync(countFile, { force: true }); } catch {}
+	const r = spawnSync(process.execPath, ["--preload", COUNT_PRELOAD, cliWithoutDaemon(), ...args], {
+		encoding: "utf8", env: { ...env, WTFT_COUNT_FS_UNDER: watched, WTFT_COUNT_FS_OUT: countFile }, timeout: 30_000,
+	});
+	const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+	const rendered = /[\u2588\u2591\u2592\u2593]/.test(out) || /\$\d/.test(stripAnsi(out));
+	let reads = NaN;
+	try { reads = Number(fs.readFileSync(countFile, "utf8")); } catch {}
+	return { reads, ok: r.status === 0 && rendered, detail: `exit ${r.status}, rendered=${rendered}, reads=${reads}: ${stripAnsi(out).trim().slice(0, 200)}` };
 }
 
-const emptyClaude = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-35-empty-c-")));
 const emptyPi = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-35-empty-p-")));
 
 // ---
-// 0. Tag the session first, so the A/B below times a pure read.
+// 0. Tag the session first, so the runs below only read it.
 // ---
 console.log("0. Tag the session");
 {
@@ -109,41 +103,31 @@ console.log("0. Tag the session");
 // ---
 // 1. The A/B: the same explicit -s, against an empty corpus and a stranded one.
 // ---
-console.log("\n1. Explicit -s costs the same with or without a corpus");
-{
+console.log("\n1. Explicit -s reads nothing in a stranded corpus");
+if (typeof (globalThis as { Bun?: unknown }).Bun === "undefined") {
+	skip("the corpus reads are counted from a bun --preload hook; run the suite under bun");
+} else {
 	// Stranded = the state `pr-cleanup` leaves behind: a recorded cwd whose
 	// directory is gone, which costs discovery a tail scan per transcript.
 	const bigClaude = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-35-big-c-")));
 	const proj = path.join(bigClaude, "-home-gone-worktree");
 	fs.mkdirSync(proj, { recursive: true });
-	const one = JSON.stringify({
-		type: "assistant",
-		message: {
-			role: "assistant", id: "filler", model: "claude-sonnet-4-20250514",
-			usage: { input_tokens: 10, output_tokens: 10 },
-			content: [{ type: "text", text: "y".repeat(900) }],
-		},
-	}) + "\n";
-	const body = one.repeat(Math.ceil(8 * 1024 / one.length));
-	for (let i = 0; i < 6000; i++) {
+	for (let i = 0; i < 50; i++) {
 		const id = `35c0de00-1a9b-4c3d-9e8f-${String(i).padStart(12, "0")}`;
 		fs.writeFileSync(path.join(proj, `${id}.jsonl`),
-			body + JSON.stringify({ type: "user", cwd: `/home/princess-pi/NO-SUCH-DIR-${i}`, message: { role: "user", content: "hi" } }) + "\n");
+			sessionLines() + JSON.stringify({ type: "user", cwd: `/home/princess-pi/NO-SUCH-DIR-${i}`, message: { role: "user", content: "hi" } }) + "\n");
 	}
 
-	const args = `-s '${sessionPath}' -l 5 --no-emoji`;
-	const empty = medianRunMs(args, corpus(emptyClaude, emptyPi));
-	const stranded = medianRunMs(args, corpus(bigClaude, emptyPi));
-	const ratio = stranded.ms / empty.ms;
-	const detail = `empty ${empty.ms.toFixed(0)}ms, stranded ${stranded.ms.toFixed(0)}ms, ratio ${ratio.toFixed(1)}x`;
+	const fuzzy = spawnSync(process.execPath, ["--preload", COUNT_PRELOAD, cliWithoutDaemon(), "-s", "zzz-matches-nothing", "-l", "5", "--no-emoji"], {
+		encoding: "utf8", env: { ...corpus(bigClaude, emptyPi), WTFT_COUNT_FS_UNDER: bigClaude, WTFT_COUNT_FS_OUT: path.join(dir, "fuzzy-count") }, timeout: 30_000,
+	});
+	let fuzzyReads = 0;
+	try { fuzzyReads = Number(fs.readFileSync(path.join(dir, "fuzzy-count"), "utf8")); } catch {}
+	assert("precondition: the counter sees a fuzzy -s scan the corpus", fuzzyReads > 0, `exit ${fuzzy.status}, reads=${fuzzyReads}`);
 
-	// Order matters: a ratio computed from two broken runs is meaningless, so the
-	// timings are only allowed to testify once both sides are known to have worked.
-	assert("every timed run rendered the session named by -s", empty.ok && stranded.ok,
-		[empty.detail, stranded.detail].filter(Boolean).join(" | "));
-	assert("a 6000-transcript stranded corpus costs under 2x an empty one",
-		empty.ok && stranded.ok && ratio < 2, detail);
-	console.log(`       (${detail})`);
+	const explicit = countedRun(["-s", sessionPath, "-l", "5", "--no-emoji"], corpus(bigClaude, emptyPi), bigClaude);
+	assert("an explicit -s renders the session", explicit.ok, explicit.detail);
+	assert("and makes no file-system call under the corpus", explicit.ok && explicit.reads === 0, explicit.detail);
 
 	try { fs.rmSync(bigClaude, { recursive: true, force: true }); } catch {}
 }

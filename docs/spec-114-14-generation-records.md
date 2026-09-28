@@ -143,8 +143,7 @@ Four fresh-context auditors (daemon, reader, parser, host-scoped documents) and 
 rounds ran against this branch. Everything they raised about text or code this branch changed was
 fixed here — the source key, the session picker's summary, the watch-mode short read, and the
 claims in `docs/wtft-tag-format.md`, `CONTEXT.md`, `docs/wtft-incremental-render-spec.md` and
-`CLAUDE.md`. Drift that predates the branch is recorded as leads on
-[#200](https://github.com/princess-pi/wtft/issues/200).
+`CLAUDE.md`.
 
 **Left standing here, with the reason:**
 

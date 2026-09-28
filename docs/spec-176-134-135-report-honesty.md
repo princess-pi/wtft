@@ -95,5 +95,4 @@ on DeepSeek V4.1 Flash); rounds 2-4 re-audited only what the previous round edit
 | this spec §1 | swept/unswept mechanics, stated three ways across rounds 1-3 | each wording missed a path | — | Deleted; points to the owning spec |
 | this spec's test | four checks that could not fail (vacuous control, unasserted precondition, shared-suffix match, a conjunct no fixture reaches) | — | — | Tightened or deleted |
 
-Older drift in the same files, not caused by this branch: [#196](https://github.com/princess-pi/wtft/issues/196)
-(leads, unverified), plus #124, #126, #169 and #91 where they already cover it.
+Older drift in the same files, not caused by this branch: #126, #169 and #91 where they already cover it.

@@ -262,9 +262,7 @@ transcript in it; and one head read per recent transcript. Pricing is one `parse
 ## Reconciliation record (spec-reconcile, 2026-09-22)
 
 Six fresh-context auditors: listing and tree, harness seam, CLI and renderer, daemon, the test
-file, and the host-scoped documents (none of which makes a #128 claim). Pre-existing drift they
-found in text this branch did not change is filed as
-[#210](https://github.com/princess-pi/wtft/issues/210).
+file, and the host-scoped documents (none of which makes a #128 claim).
 
 | Artifact | Claim | Contradicted by | Covered by a test? | Action |
 |---|---|---|---|---|
@@ -359,4 +357,4 @@ unreadable project directory and for an unreadable transcript.
 | spec-128 | a still-written older transcript is skipped | only when its directory is older too | reconciled-against-untested (C4 sets both mtimes old) | Corrected |
 | spec-128 | `[]` meanings | a disabled harness, or one without the method, is not looked in | n/a | Stated |
 | README, manifest | "the Claude projects tree" | any harness implementing the method can throw | n/a | Generalised |
-| (pre-existing) | the auditor's other findings | — | — | Filed on #210 as AJ–AN |
+| (pre-existing) | the auditor's other findings | — | — | Left standing: predates this branch, and the doc leads were folded into #278 |

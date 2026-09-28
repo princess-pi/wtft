@@ -45,6 +45,14 @@ const killed = reapFixtureDaemons(suiteA);
 check(killed === 1 && await until(() => !alive(a.pid!)), `R1 reaping suite A's directory stops suite A's daemon (killed ${killed})`);
 check(alive(b.pid!), "R2 and leaves suite B's daemon running");
 
-for (const p of [a.pid!, b.pid!]) try { process.kill(p, "SIGTERM"); } catch {}
+const elsewhere = path.join(root, "elsewhere");
+fs.mkdirSync(elsewhere);
+const c = spawn(process.execPath, [fake, "--session", path.join(elsewhere, "s.jsonl")], { stdio: "ignore", env: { ...process.env, TMPDIR: suiteA } });
+check(await until(() => alive(c.pid!)), "R3 fixture precondition: a daemon whose session is outside suite A but whose TMPDIR is suite A's is running");
+const killedByTmp = reapFixtureDaemons(suiteA);
+check(killedByTmp === 1 && await until(() => !alive(c.pid!)), `R3 reaping suite A's directory stops it too (killed ${killedByTmp})`);
+check(alive(b.pid!), "R4 and still leaves suite B's daemon running");
+
+for (const p of [a.pid!, b.pid!, c.pid!]) try { process.kill(p, "SIGTERM"); } catch {}
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

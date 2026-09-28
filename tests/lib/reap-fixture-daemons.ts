@@ -1,24 +1,10 @@
-/**
- * Suites spawn detached daemons. This reaps the ones left on a fixture:
- * a `--session` under the tmp dir, or a harness daemon whose root is.
- */
-
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 
-export function pathIsUnderTmp(file: string): boolean {
-	const resolved = path.resolve(file);
-	const tmp = path.resolve(os.tmpdir());
-	return resolved === tmp || resolved.startsWith(tmp + path.sep) || resolved.startsWith("/tmp/");
-}
-
-/** `under`: reap only daemons whose session or harness root lies under this
- *  directory — one suite's own, when suites run side by side. */
-export function reapFixtureDaemons(under?: string): number {
-	const inScope = under === undefined
-		? pathIsUnderTmp
-		: (file: string) => { const r = path.relative(path.resolve(under), path.resolve(file)); return r === "" || (!r.startsWith("..") && !path.isAbsolute(r)); };
+/** `under`: reap only daemons whose session, harness root or TMPDIR lies under this
+ *  directory — one suite's or one run's own, when they run side by side. */
+export function reapFixtureDaemons(under: string): number {
+	const inScope = (file: string) => { const r = path.relative(path.resolve(under), path.resolve(file)); return r === "" || (!r.startsWith("..") && !path.isAbsolute(r)); };
 	let killed = 0;
 	let entries: string[];
 	try {
@@ -47,7 +33,8 @@ export function reapFixtureDaemons(under?: string): number {
 		let roots: string[] = [];
 		try {
 			roots = fs.readFileSync(`/proc/${pid}/environ`, "utf8").split("\0")
-				.filter(row => row.startsWith("WTFT_CLAUDE_PROJECTS_DIR=") || row.startsWith("WTFT_PI_SESSIONS_DIR="))
+				.filter(row => row.startsWith("WTFT_CLAUDE_PROJECTS_DIR=") || row.startsWith("WTFT_PI_SESSIONS_DIR=")
+					|| row.startsWith("TMPDIR="))
 				.map(row => row.slice(row.indexOf("=") + 1))
 				.filter(row => row.length > 0);
 		} catch { /* environ unreadable */ }

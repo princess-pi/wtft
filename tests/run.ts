@@ -114,16 +114,18 @@ const solo = SOLO.filter(f => suites.includes(f));
 console.log(`${BOLD}Running ${suites.length} suite${suites.length === 1 ? "" : "s"}${RESET} ${DIM}(process-per-suite, jobs=${JOBS})${RESET}\n`);
 
 const results: Result[] = [];
+/** Every suite's directories live here, so the final reap stops only this run's daemons. */
+const RUN_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-run-"));
 
 function runSuite(file: string): Promise<Result> {
 	const name = file.replace(/\.test\.ts$/, "");
 	let configHome: string, suiteTmp: string;
 	try {
 		// Fresh config root per suite — no developer config can reach the code under test.
-		configHome = fs.mkdtempSync(path.join(os.tmpdir(), "pp-test-config-"));
+		configHome = fs.mkdtempSync(path.join(RUN_ROOT, "pp-test-config-"));
 		// Its own tmp root, so its fixture daemons can be reaped without touching a
 		// neighbour's.
-		suiteTmp = fs.mkdtempSync(path.join(os.tmpdir(), `wtft-suite-${name}-`));
+		suiteTmp = fs.mkdtempSync(path.join(RUN_ROOT, `wtft-suite-${name}-`));
 	} catch (err) {
 		const output = `runner: could not create the suite's directories: ${(err as Error).message}\n`;
 		return Promise.resolve({ name, ok: false, ms: 0, timedOut: false, output, skips: [], leaked: 0 });
@@ -189,10 +191,9 @@ await Promise.all(Array.from({ length: Math.min(JOBS, queue.length) }, async () 
 	for (let file = queue.shift(); file !== undefined; file = queue.shift()) report(await runSuite(file));
 }));
 for (const file of solo) report(await runSuite(file));
-// Nothing is running now, so the host-wide reaper is safe: it catches a daemon
-// a suite started outside its own TMPDIR.
-const stray = reapFixtureDaemons();
+const stray = reapFixtureDaemons(RUN_ROOT);
 if (stray > 0) console.log(`${DIM}stopped ${stray} fixture daemon(s) left outside any suite's tmp dir${RESET}`);
+try { fs.rmSync(RUN_ROOT, { recursive: true, force: true }); } catch {}
 
 try {
 	const times = { ...lastTimes };

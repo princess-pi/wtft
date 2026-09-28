@@ -50,7 +50,7 @@ try {
 	}
 	assert("fixture daemon started", up);
 
-	const killed = reapFixtureDaemons();
+	const killed = reapFixtureDaemons(os.tmpdir());
 	await sleep(300);
 	assert(`the reaper kills a daemon whose session is under tmp (signalled ${killed})`, killed >= 1 && !alive(pid));
 
@@ -82,7 +82,7 @@ try {
 	);
 } finally {
 	try { process.kill(pid, "SIGTERM"); } catch { /* gone */ }
-	reapFixtureDaemons();
+	reapFixtureDaemons(os.tmpdir());
 }
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);

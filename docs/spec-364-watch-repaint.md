@@ -25,7 +25,7 @@ A `--watch` refresh never erases the screen:
 - **The terminal's width changed.** The terminal has rewrapped the old frame, so its rows are no
   longer where the last frame put them and the old frame's top cannot be found. That refresh
   clears the visible screen and writes the frame from its top.
-- **A wrapped line holds a non-ASCII character.** A terminal wraps a double-width character early
+- **A wrapped line holds a non-ASCII character,** in the new frame or the last one. A terminal wraps a double-width character early
   when it would straddle the last column, so the rows it takes cannot be counted. That refresh
   moves to the old frame's top, erases to the end of the screen, and writes every line.
 - **The frame does not fit the terminal's rows.** Rows scrolled off the top cannot be reached with

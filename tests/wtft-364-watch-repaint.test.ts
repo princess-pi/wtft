@@ -1,9 +1,4 @@
 #!/usr/bin/env -S bun
-/**
- * `--watch` refreshes by overwriting only the lines that changed, each padded to the full width,
- * with no erase sequence. Spec: docs/spec-364-watch-repaint.md.
- */
-
 import { repaint, type RepaintFrame } from "../extensions/lib/watch-repaint.ts";
 
 let passed = 0;
@@ -118,6 +113,24 @@ console.log("\nA line as wide as the terminal, replaced by a shorter one, leaves
 	check(t6.screen()[1] === "-".repeat(20) && screenMatches(t6, ["title", "-".repeat(20), "q"]), `fixture precondition: the full-width line fills the row (${JSON.stringify(t6.screen())})`);
 	step(t6, full.frame, ["title", "short", "q"]);
 	check(screenMatches(t6, ["title", "short", "q"]) && !t6.erased, `the last column is covered without an erase (${JSON.stringify(t6.screen())})`);
+}
+
+console.log("\nA full-width line rewritten as another full-width line stays on its row");
+{
+	const t7 = new Term(20);
+	const a = step(t7, null, ["title", "-".repeat(20), "row below", "q"]);
+	const b = step(t7, a.frame, ["title", "=".repeat(20), "row below", "q"]);
+	check(screenMatches(t7, ["title", "=".repeat(20), "row below", "q"]), `the row below is untouched and the cursor ends after the frame (${JSON.stringify(t7.screen())}, cursor ${t7.r},${t7.c})`);
+	step(t7, b.frame, ["title", "=".repeat(20), "row below!", "q"]);
+	check(screenMatches(t7, ["title", "=".repeat(20), "row below!", "q"]), "and the next refresh still lands on the right row");
+}
+
+console.log("\nLeaving a frame with a wrapped non-ASCII line redraws from the top");
+{
+	const t8 = new Term(20);
+	const a = step(t8, null, ["title", "☀".repeat(25), "q"]);
+	const b = step(t8, a.frame, ["title", "short", "q"]);
+	check(t8.erased && b.out.includes("\x1b[J"), "the refresh after it erases and redraws");
 }
 
 console.log("\nFallbacks: a width change or a frame taller than the terminal redraw from the top");

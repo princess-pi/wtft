@@ -915,7 +915,7 @@ export async function watchTagFile(
 			: "";
 		buf.push(`'q' to exit${restartHint}`);
 
-		const cols = process.stdout.columns || 80;
+		const cols = width;
 		const rows = process.stdout.rows || Infinity;
 		const screenLines = () => frameRows(buf.map(l => padStr + l), cols) + 1;
 		for (let i = buf.length - 1; i >= 0 && screenLines() > rows; i--) {

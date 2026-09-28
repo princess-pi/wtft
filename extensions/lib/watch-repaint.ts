@@ -15,6 +15,8 @@ export interface RepaintFrame {
 	cols: number;
 	/** Rows whose last column holds text: a line as wide as the terminal, and every row of a wrapped line but its last. */
 	fullRows: Set<number>;
+	/** A wrapped line holds a non-ASCII character, so `tops` and `total` may not match the screen. */
+	wideWrap: boolean;
 }
 
 const ANSI = /\x1b\[[0-9;]*[a-zA-Z]/g;
@@ -23,6 +25,7 @@ function layout(lines: string[], cols: number) {
 	const padded: string[] = [];
 	const tops: number[] = [];
 	const heights: number[] = [];
+	const reaches: boolean[] = [];
 	let wideWrap = false;
 	const fullRows = new Set<number>();
 	let row = 0;
@@ -35,10 +38,11 @@ function layout(lines: string[], cols: number) {
 		padded.push(line + " ".repeat(reachesLast ? 0 : height * cols - 1 - width));
 		tops.push(row);
 		heights.push(height);
+		reaches.push(reachesLast);
 		for (let r = row; r < row + height - (reachesLast ? 0 : 1); r++) fullRows.add(r);
 		row += height;
 	}
-	return { padded, tops, heights, total: row, wideWrap, fullRows };
+	return { padded, tops, heights, reaches, total: row, wideWrap, fullRows };
 }
 
 /** Rows `lines` take at `cols` columns, as `repaint` lays them out. */
@@ -52,15 +56,15 @@ export function frameRows(lines: string[], cols: number): number {
  * row changed are written, each padded with spaces to one cell short of whole rows (through the last
  * cell over a row whose last column holds text), and rows a shorter frame leaves are written with spaces. A width change clears the screen and writes the
  * frame from the top; a frame that does not fit above the cursor's row, or a wrapped line holding
- * a non-ASCII character, erases from the old frame's top and writes every line.
+ * a non-ASCII character in either frame, erases from the old frame's top and writes every line.
  */
 export function repaint(prev: RepaintFrame | null, lines: string[], cols: number, termRows: number): { out: string; frame: RepaintFrame } {
 	const next = layout(lines, cols);
-	const frame: RepaintFrame = { lines: [...lines], tops: next.tops, total: next.total, cols, fullRows: next.fullRows };
+	const frame: RepaintFrame = { lines: [...lines], tops: next.tops, total: next.total, cols, fullRows: next.fullRows, wideWrap: next.wideWrap };
 	const body = `${next.padded.join("\r\n")}\r\n`;
 	if (prev && prev.cols !== cols) return { out: `\x1b[H\x1b[2J${body}`, frame };
 	const fits = next.total < termRows && (!prev || prev.total < termRows);
-	if (prev && (!fits || next.wideWrap)) {
+	if (prev && (!fits || next.wideWrap || prev.wideWrap)) {
 		const up = prev.total > 0 ? `\x1b[${prev.total}A` : "";
 		return { out: `${up}\r\x1b[J${body}`, frame };
 	}
@@ -91,7 +95,8 @@ export function repaint(prev: RepaintFrame | null, lines: string[], cols: number
 		const same = prev && prev.lines[i] === lines[i] && prev.tops[i] === next.tops[i];
 		if (same) continue;
 		const lastRow = next.tops[i]! + next.heights[i]! - 1;
-		write(next.tops[i]!, next.padded[i]! + (prev?.fullRows.has(lastRow) ? " " : ""), next.heights[i]!);
+		const coverLast = prev?.fullRows.has(lastRow) && !next.reaches[i];
+		write(next.tops[i]!, next.padded[i]! + (coverLast ? " " : ""), next.heights[i]!);
 	}
 	for (let row = next.total; row < prevTotal; row++) write(row, " ".repeat(prev?.fullRows.has(row) ? cols : cols - 1), 1);
 	if (out === "") return { out, frame };

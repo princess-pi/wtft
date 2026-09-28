@@ -317,10 +317,11 @@ function readFileSync(file, ...rest) {
 }
 mock.module("node:fs", () => ({ ...realFs, readFileSync, default: { ...realFs, readFileSync } }));
 `);
-		spawnSync(process.execPath, ["--preload", preload, DAEMON, "--harness", "claude", "--session", target], {
+		const racer = spawnSync(process.execPath, ["--preload", preload, DAEMON, "--harness", "claude", "--session", target], {
 			encoding: "utf8", timeout: 30_000, env: { ...envFor(root), WTFT_293_LEASE: lease, WTFT_293_FIRED: fired },
 		});
 		check(fs.existsSync(fired), "fixture precondition: rebuild was written after the start read the lease");
+		check(racer.status === 0, `fixture precondition: the start handed the session to the harness and exited 0 (exit ${racer.status}${racer.error ? `, ${racer.error.message}` : ""}: ${racer.stderr.trim()})`);
 		const rebuilt = await until(() => classified(target, "race-target") && !classified(target, "race-bogus"), 10_000);
 		check(rebuilt !== Infinity, `the harness still rebuilds the tag (lease reads ${JSON.stringify(read(lease).trim())}, harness ${h.pid})`);
 		process.kill(h.pid, "SIGTERM");

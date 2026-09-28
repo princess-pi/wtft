@@ -3,8 +3,6 @@
  * Daemon correctness: arguments, swept, resume,
  * leases, adoption, focus requests, the hand-off, sweep liveness, harness
  * exit and the stop reason. Spec: docs/spec-259-daemon-correctness.md.
- * --cleanup is not run here: it stops every fixture daemon under /tmp,
- * including other suites'.
  */
 
 import * as fs from "node:fs";
@@ -15,6 +13,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { getCurrentVersionTagPath, getDaemonPidPath, readClassifiedTagFile } from "../extensions/lib/wtft-daemon-lib.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { standInDaemonArgs, awaitStandIn } from "./lib/stand-in-daemon";
+import { skip } from "./lib/skips.ts";
 
 const TMP = isolateTmpdir("259-correctness");
 
@@ -282,6 +281,48 @@ try {
 		await sleep(1_000);
 		check(!fs.existsSync(getDaemonPidPath(other)) && !classified(other, "force-after-stop-9"),
 			"a session dropped with --stop is not taken back by its next write");
+		process.kill(h.pid, "SIGTERM");
+	}
+
+	console.log("\nA harness start that read the lease before -F wrote rebuild leaves the rebuild token");
+	if (typeof (globalThis as { Bun?: unknown }).Bun === "undefined") {
+		skip("the -F race is staged from a bun --preload hook; run the suite under bun");
+	} else {
+		const root = makeRoot("force-race");
+		const target = session(root, "race-target");
+		const h = start(root, ["--harness", "claude", "--session", target], "race.err");
+		check(await until(() => classified(target, "race-target"), 15_000) !== Infinity, "fixture: the harness serves the target");
+		const tag = getCurrentVersionTagPath(target);
+		const row = read(tag).split("\n").find(l => l.includes('"race-target"')) ?? "";
+		fs.appendFileSync(tag, row.replace('"race-target"', '"race-bogus"') + "\n" + JSON.stringify({ _meta: { offset: fs.statSync(target).size } }) + "\n");
+		check(classified(target, "race-bogus"), "fixture: the target's tag carries a row its transcript does not");
+		const lease = getDaemonPidPath(target);
+		const fired = path.join(root, "rebuild-written");
+		// -F's write lands just after a starting harness has read the lease.
+		const preload = path.join(root, "rebuild-after-read.mjs");
+		fs.writeFileSync(preload, `
+import * as realFs from "node:fs";
+import { mock } from "bun:test";
+const originalRead = realFs.readFileSync.bind(realFs);
+let done = false;
+function readFileSync(file, ...rest) {
+  const out = originalRead(file, ...rest);
+  if (!done && String(file) === process.env.WTFT_293_LEASE) {
+    done = true;
+    realFs.writeFileSync(process.env.WTFT_293_LEASE + ".replace-test", "rebuild");
+    realFs.renameSync(process.env.WTFT_293_LEASE + ".replace-test", process.env.WTFT_293_LEASE);
+    realFs.writeFileSync(process.env.WTFT_293_FIRED, "");
+  }
+  return out;
+}
+mock.module("node:fs", () => ({ ...realFs, readFileSync, default: { ...realFs, readFileSync } }));
+`);
+		spawnSync(process.execPath, ["--preload", preload, DAEMON, "--harness", "claude", "--session", target], {
+			encoding: "utf8", timeout: 30_000, env: { ...envFor(root), WTFT_293_LEASE: lease, WTFT_293_FIRED: fired },
+		});
+		check(fs.existsSync(fired), "fixture precondition: rebuild was written after the start read the lease");
+		const rebuilt = await until(() => classified(target, "race-target") && !classified(target, "race-bogus"), 10_000);
+		check(rebuilt !== Infinity, `the harness still rebuilds the tag (lease reads ${JSON.stringify(read(lease).trim())}, harness ${h.pid})`);
 		process.kill(h.pid, "SIGTERM");
 	}
 

@@ -6,7 +6,8 @@ import * as path from "node:path";
  *  directory — one suite's or one run's own, when they run side by side. */
 export function reapFixtureDaemons(under: string): number {
 	const root = path.resolve(under);
-	if (root === "/" || root === "/tmp" || root === os.homedir()) throw new Error(`reapFixtureDaemons: scope ${root} would reach daemons outside the tests`);
+	const home = path.resolve(os.homedir());
+	if (root === "/tmp" || root === "/var/tmp" || home === root || home.startsWith(root + path.sep) || root === "/") throw new Error(`reapFixtureDaemons: scope ${root} would reach daemons outside the tests`);
 	const inScope = (file: string) => { const r = path.relative(path.resolve(under), path.resolve(file)); return r === "" || (!r.startsWith("..") && !path.isAbsolute(r)); };
 	let killed = 0;
 	let entries: string[];

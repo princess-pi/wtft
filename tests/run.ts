@@ -116,7 +116,10 @@ try {
 	console.error(`runner: could not create the run's directory: ${(err as Error).message}`);
 	process.exit(2);
 }
-process.on("exit", () => { try { fs.rmSync(RUN_ROOT, { recursive: true, force: true }); } catch {} });
+process.on("exit", () => {
+	reapFixtureDaemons(RUN_ROOT);
+	try { fs.rmSync(RUN_ROOT, { recursive: true, force: true }); } catch {}
+});
 for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => process.exit(130));
 
 function runSuite(file: string): Promise<Result> {
@@ -194,7 +197,7 @@ await Promise.all(Array.from({ length: Math.min(JOBS, queue.length) }, async () 
 }));
 for (const file of solo) report(await runSuite(file));
 const stray = reapFixtureDaemons(RUN_ROOT);
-if (stray > 0) console.log(`${DIM}stopped ${stray} fixture daemon(s) left outside any suite's tmp dir${RESET}`);
+if (stray > 0) console.log(`${DIM}stopped ${stray} fixture daemon(s) still running after their suite ended${RESET}`);
 
 try {
 	const times = { ...lastTimes };

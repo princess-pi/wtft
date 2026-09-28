@@ -259,6 +259,16 @@ function followMovedSession(): boolean {
   return true;
 }
 
+/** A daemon started on a pre-move path (a `--restart` respawn) follows the move instead of waiting. */
+function sessionExistsOrMoved(sessionPath: string): boolean {
+  return fs.existsSync(sessionPath) || movedSessionById(sessionPath) !== null;
+}
+
+/** Only a session-id basename names one transcript; any other basename can match an unrelated file. */
+function movedSessionById(sessionPath: string): string | null {
+  return isSessionIdBasename(sessionPath) ? resolveMovedSession(sessionPath) : null;
+}
+
 /** Gone means not merely moved, and not never-written. */
 function sessionIsGone(sessionCmdlinePath: string): boolean {
   if (fs.existsSync(sessionCmdlinePath)) return false;
@@ -695,8 +705,13 @@ function wake(file: string, displayed: boolean) {
     dropHarnessSlot(key);
     slot = undefined;
   }
+  if (!slot && !fs.existsSync(key)) {
+    const movedTo = movedSessionById(key);
+    if (movedTo && get(registry, path.resolve(movedTo))) return wake(movedTo, displayed);
+  }
   if (!slot) {
     slot = newSessionRecord(key, displayed, Date.now());
+    slot.sessionExisted = sessionExistsOrMoved(key);
     if (!withSlot(slot, () => adoptSession())) {
       retryAdoptionLater(key, displayed);
       return;
@@ -1921,6 +1936,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   }
 
   slot = newSessionRecord(sessionArg, true, Date.now());
+  slot.sessionExisted = sessionExistsOrMoved(sessionArg);
   const sessionPath = sessionArg;
   const sessionBase = path.basename(sessionPath);
   // Prefer an existing current-version tag wherever it lives (session may have moved).

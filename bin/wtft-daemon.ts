@@ -1490,7 +1490,7 @@ handled is not listed. A --stop of a session a harness serves ends the command a
   --cleanup             Remove every lease whose holder is dead or not a daemon, uncounted. SIGTERM (no wait)
                         per-session daemons whose session is gone (no file, not moved, and a tag that
                         holds a turn or a _meta record), and fixture ones, whose --session or root environment
-                        (WTFT_CLAUDE_PROJECTS_DIR, WTFT_PI_SESSIONS_DIR) is under the tmp dir or /tmp/,
+                        (WTFT_CLAUDE_PROJECTS_DIR, WTFT_PI_SESSIONS_DIR) is under the tmp dir ($TMPDIR, else /tmp),
                         that hold no lease here; never a harness daemon, which stops once it has nothing
                         to serve or watch
   --restart             Stop every daemon holding a lease or a root pid file here (SIGTERM, SIGKILL after 2 s),

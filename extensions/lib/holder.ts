@@ -213,11 +213,11 @@ export function stopHolderSync(pid: number, opts: StopOptions = {}): StopOutcome
 function isUnder(file: string, tmpDir: string): boolean {
 	const resolved = path.resolve(file);
 	const tmp = path.resolve(tmpDir);
-	return resolved === tmp || resolved.startsWith(tmp + path.sep) || resolved.startsWith("/tmp/");
+	return resolved === tmp || resolved.startsWith(tmp + path.sep);
 }
 
 /** Whether `--cleanup` treats a daemon as a test fixture: its session or a harness root is under
- *  `tmpDir` or `/tmp/`. */
+ *  `tmpDir`. */
 export function isFixtureDaemon(proc: { session: string | null; roots: string[] }, tmpDir: string): boolean {
 	return (proc.session !== null && isUnder(proc.session, tmpDir)) || proc.roots.some(root => isUnder(root, tmpDir));
 }

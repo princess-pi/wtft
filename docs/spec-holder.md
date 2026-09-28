@@ -54,9 +54,9 @@ short option starting a cluster that holds `e` or `p`) means there is no script.
 `wtft-daemon` counts.
 
 `isFixtureDaemon({ session, roots }, tmpDir)` is `--cleanup`'s rule for a test's leftover: the
-session or a harness root is under `tmpDir` or `/tmp/`. It is checked in memory
-(`tests/wtft-96-fixture-daemons.test.ts`): `--cleanup` itself signals every such daemon on the
-host, another test run's included.
+session or a harness root is under `tmpDir`, the caller's `os.tmpdir()`. A test run gives each
+suite its own `TMPDIR`, so a suite's `--cleanup` reaches only its own fixtures
+(`tests/wtft-96-fixture-daemons.test.ts`).
 
 "Alive" means `signal 0` was sent or denied, and `state` does not say otherwise. EPERM is another
 user's live process. `pidAlive(pid)` is `classifyPid(pid) !== "gone"`.

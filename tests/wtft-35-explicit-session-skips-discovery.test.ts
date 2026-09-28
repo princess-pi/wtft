@@ -100,9 +100,6 @@ console.log("0. Tag the session");
 	tagForCli(sessionPath);
 }
 
-// ---
-// 1. The A/B: the same explicit -s, against an empty corpus and a stranded one.
-// ---
 console.log("\n1. Explicit -s reads nothing in a stranded corpus");
 if (typeof (globalThis as { Bun?: unknown }).Bun === "undefined") {
 	skip("the corpus reads are counted from a bun --preload hook; run the suite under bun");
@@ -134,7 +131,6 @@ if (typeof (globalThis as { Bun?: unknown }).Bun === "undefined") {
 
 // ---
 // 2. Guard: the fuzzy path still discovers, and still counts what it found.
-//    A fix that simply removed discovery would pass part 1 and fail here.
 // ---
 console.log("\n2. Fuzzy -s still scans the corpus");
 {

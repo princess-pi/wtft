@@ -22,9 +22,13 @@ function under(arg) {
 function wrapAll(source) {
 	const wrapped = {};
 	for (const [name, value] of Object.entries(source)) {
-		wrapped[name] = typeof value === "function" && /^[a-z]/.test(name)
-			? function (...args) { if (under(args[0])) count++; return value.apply(this, args); }
-			: value;
+		if (typeof value !== "function" || !/^[a-z]/.test(name)) { wrapped[name] = value; continue; }
+		const wrapper = function (...args) { if (under(args[0])) count++; return value.apply(this, args); };
+		for (const key of Reflect.ownKeys(value)) {
+			if (key === "length" || key === "name" || key === "prototype") continue;
+			Object.defineProperty(wrapper, key, Object.getOwnPropertyDescriptor(value, key));
+		}
+		wrapped[name] = wrapper;
 	}
 	return wrapped;
 }

@@ -60,6 +60,43 @@ export function isPlaceholderRow(line: string): boolean {
 	return line.startsWith(PLACEHOLDER_PREFIX);
 }
 
+/** Past this share of the width, the label area (time label and number columns) is compacted. */
+const MAX_LABEL_SHARE = 0.25;
+/** Compaction steps: 1 single spacing, 2 whole units, 3 no `+` on deltas, 4 no `$` on the cost delta. */
+const MAX_COMPACT = 4;
+
+/** `$487.25` → `$487`; under $1 unchanged. */
+function wholeCost(n: number): string {
+	return Math.abs(n) >= 1 ? `$${Math.round(n)}` : formatCost(n);
+}
+
+/** `778.8M` → `779M`, `589.5k` → `590k`; under 1k unchanged. */
+function wholeTokens(n: number): string {
+	const k = Math.round(n / 1_000);
+	if (k >= 1_000) return `${Math.round(n / 1_000_000)}M`;
+	return n >= 1_000 ? `${k}k` : String(n);
+}
+
+/** The four number columns' text at compaction step `compact` (0 to MAX_COMPACT). */
+function columnTexts(compact: number) {
+	const cost = compact >= 2 ? wholeCost : formatCost;
+	const tokens = compact >= 2 ? wholeTokens : formatTokenCount;
+	const plus = (n: number) => (n >= 0 && compact < 3 ? "+" : "");
+	return {
+		incCost: (bin: Bin) => {
+			const n = bin.incremental_cost ?? 0;
+			const text = `${plus(n)}${cost(n)}`;
+			return compact >= 4 ? text.replace("$", "") : text;
+		},
+		totalCost: (bin: Bin) => cost(bin.column_total_cost ?? bin.total_cost),
+		incTok: (bin: Bin) => {
+			const n = bin.incremental_tokens ?? 0;
+			return `${plus(n)}${tokens(n)}`;
+		},
+		totalTok: (bin: Bin) => `${tokens(bin.column_total_tokens ?? bin.total_tokens ?? 0)} tok`,
+	};
+}
+
 export function renderWtftChart(input: {
 	displayedBins: Bin[];
 	mode: "bucket" | "cumulative";
@@ -97,43 +134,41 @@ export function renderWtftChart(input: {
 		: calculateScaleMax(maxBarValue);
 
 	const labelWidth = Math.max(...displayedBins.map(b => b.label.length), 5);
-	const incCostText = (bin: Bin) => {
-		const n = bin.incremental_cost ?? 0;
-		const sign = n >= 0 ? "+" : "";
-		return `${sign}${formatCost(n)}`;
-	};
-	const totalCostText = (bin: Bin) => formatCost(bin.column_total_cost ?? bin.total_cost);
-	const incTokText = (bin: Bin) => {
-		const n = bin.incremental_tokens ?? 0;
-		const sign = n >= 0 ? "+" : "";
-		return `${sign}${formatTokenCount(n)}`;
-	};
-	const totalTokText = (bin: Bin) => `${formatTokenCount(bin.column_total_tokens ?? bin.total_tokens ?? 0)} tok`;
 	const finalWidth = Math.max(width, 40);
 	const tickReserve = unit === "tokens" ? 5 : 3;
 	// buildTickLine and buildTokenTickLine return null below 15 cells.
 	const minBar = 15;
-	const layoutFor = (cost: boolean, tokens: boolean) => {
-		const texts: ((bin: Bin) => string)[] = [];
-		if (cost) texts.push(incCostText, totalCostText);
-		if (tokens) texts.push(incTokText, totalTokText);
-		const widths = texts.map((text) => Math.max(...displayedBins.map((bin) => text(bin).length), 1));
-		let prefix = labelWidth + 2;
-		for (const columnWidth of widths) prefix += columnWidth + 2;
-		return { widths, prefix, bar: finalWidth - prefix - tickReserve };
+	const layoutFor = (cost: boolean, tokens: boolean, compact: number) => {
+		const texts = columnTexts(compact);
+		const shown: ((bin: Bin) => string)[] = [];
+		if (cost) shown.push(texts.incCost, texts.totalCost);
+		if (tokens) shown.push(texts.incTok, texts.totalTok);
+		const widths = shown.map((text) => Math.max(...displayedBins.map((bin) => text(bin).length), 1));
+		const gap = compact >= 1 ? 1 : 2;
+		let prefix = labelWidth + gap;
+		for (const columnWidth of widths) prefix += columnWidth + gap;
+		return { widths, prefix, gap, texts, bar: finalWidth - prefix - tickReserve };
 	};
-	let laid = layoutFor(showCost, showTokens);
+	const fit = (cost: boolean, tokens: boolean) => {
+		let compact = 0;
+		let candidate = layoutFor(cost, tokens, compact);
+		while (candidate.prefix > finalWidth * MAX_LABEL_SHARE && compact < MAX_COMPACT) candidate = layoutFor(cost, tokens, ++compact);
+		return candidate;
+	};
+	let laid = fit(showCost, showTokens);
 	if (laid.bar < minBar && showTokens) {
 		showTokens = false;
-		laid = layoutFor(showCost, false);
+		laid = fit(showCost, false);
 	}
 	if (laid.bar < minBar && showCost) {
 		showCost = false;
-		laid = layoutFor(false, showTokens);
+		laid = fit(false, showTokens);
 	}
 	const columnWidths = laid.widths;
 	const prefixWidth = laid.prefix;
 	const maxBarWidth = Math.max(0, laid.bar);
+	const gap = " ".repeat(laid.gap);
+	const { incCost: incCostText, totalCost: totalCostText, incTok: incTokText, totalTok: totalTokText } = laid.texts;
 
 	const titleDateStr = formatMmmDdStr(displayedBins[0].dateStr);
 
@@ -286,10 +321,10 @@ export function renderWtftChart(input: {
 			pushCol(totalTokText(bin), costColor);
 		}
 		if (colored.length === 0) {
-			return surgeActive ? `${coloredLabel}${boltGap}${barStr}` : `${coloredLabel}  ${barStr}`;
+			return surgeActive ? `${coloredLabel}${boltGap}${barStr}` : `${coloredLabel}${gap}${barStr}`;
 		}
-		if (colored.length === 1) return `${coloredLabel}${boltGap}${colored[0]}  ${barStr}`;
-		return `${coloredLabel}  ${colored[0]}${boltGap}${colored.slice(1).join("  ")}  ${barStr}`;
+		if (colored.length === 1) return `${coloredLabel}${boltGap}${colored[0]}${gap}${barStr}`;
+		return `${coloredLabel}${gap}${colored[0]}${boltGap}${colored.slice(1).join(gap)}${gap}${barStr}`;
 	};
 
 	for (let i = 0; i < displayedBins.length; i++) {
@@ -309,7 +344,7 @@ export function renderWtftChart(input: {
 		const costColor = surgeActive ? "\x1b[1;38;5;208m" : "\x1b[1;37m";
 		const coloredLabel = `${surgeLabel}${labelPart}\x1b[0m`;
 		// ⚡ is double-width — it fills the 2-char column gap on its own, numbers stay aligned.
-		const boltGap = surgeActive ? "\x1b[1;38;5;208m\u26A1\x1b[0m" : "  ";
+		const boltGap = surgeActive && gap.length === 2 ? "\x1b[1;38;5;208m\u26A1\x1b[0m" : gap;
 
 		if (unit === "tokens" && bin.tokens) {
 			const barMax = Math.max(0, maxBarWidth - 2);
@@ -385,7 +420,7 @@ export function renderWtftChart(input: {
 	}
 	if (missed(displayedBins[displayedBins.length - 1])) widgetLines.push(cacheMissLine);
 
-	const placeholder = PLACEHOLDER_PREFIX + [padString("-", labelWidth), ...columnWidths.map(w => padString("-", w))].join("  ").slice(1) + "\x1b[0m";
+	const placeholder = PLACEHOLDER_PREFIX + [padString("-", labelWidth), ...columnWidths.map(w => padString("-", w))].join(gap).slice(1) + "\x1b[0m";
 	for (let n = displayedBins.length; n < Math.min(input.padRowsTo ?? 0, MAX_PADDED_ROWS); n++) widgetLines.push(placeholder);
 
 	if (otherWarning) widgetLines.push(otherWarning);

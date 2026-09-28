@@ -242,7 +242,8 @@ slot and leaves the process up. A `--session` process still calls `shutdown("ses
 A transcript that exists, or already resolves elsewhere, when its slot is created counts as
 existing from then on. So a move before the daemon's first read is followed, and so is a daemon
 started on a path the transcript already left (a `--restart` respawn). Only a transcript found
-nowhere at slot creation waits as not yet written.
+nowhere at slot creation waits as not yet written. A harness asked for a pre-move path whose
+transcript it already serves at the new path wakes that slot rather than opening a second one.
 
 Incremental parsing survives untouched: `parseNewLines` keys off `lastSize`, and a move
 preserves both inode and size — the next poll reads from exactly where it left off.

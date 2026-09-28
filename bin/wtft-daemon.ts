@@ -700,6 +700,10 @@ function wake(file: string, displayed: boolean) {
     dropHarnessSlot(key);
     slot = undefined;
   }
+  if (!slot && !fs.existsSync(key)) {
+    const movedTo = resolveMovedSession(key);
+    if (movedTo && get(registry, path.resolve(movedTo))) return wake(movedTo, displayed);
+  }
   if (!slot) {
     slot = newSessionRecord(key, displayed, Date.now());
     slot.sessionExisted = sessionExistsOrMoved(key);

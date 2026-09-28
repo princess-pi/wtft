@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { getCurrentVersionTagPath, getDaemonPidPath, readClassifiedTagFile } from "../extensions/lib/wtft-daemon-lib.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+import { standInDaemonArgs, awaitStandIn } from "./lib/stand-in-daemon";
 
 const TMP = isolateTmpdir("259-correctness");
 
@@ -292,8 +293,9 @@ try {
 		fs.mkdirSync(path.dirname(newerTag), { recursive: true });
 		fs.writeFileSync(newerTag, "{\"note\":\"NEWER\"}\n");
 		// A stand-in for a newer build's daemon holding the lease.
-		const newer = spawn("node", ["-e", "setTimeout(() => {}, 60000)", path.join(root, "wtft-daemon.mjs")], { stdio: "ignore" });
+		const newer = spawn("node", standInDaemonArgs("setTimeout(() => {}, 60000)"), { stdio: "ignore" });
 		pids.push(newer.pid!);
+		check(awaitStandIn(newer.pid!), "fixture precondition: the stand-in reads as a daemon");
 		fs.writeFileSync(getDaemonPidPath(file), String(newer.pid));
 		const d = start(root, ["--session", file], "older-1.err");
 		check(await until(() => !alive(d.pid), 10_000) !== Infinity, "it exits while a newer build's daemon holds the lease");
@@ -580,8 +582,9 @@ try {
 		process.kill(d.pid, "SIGTERM");
 		await until(() => !alive(d.pid), 5_000);
 		// A stand-in daemon that ignores SIGTERM, holding the lease.
-		const stubborn = spawn("node", ["-e", "process.on('SIGTERM', () => {}); setTimeout(() => {}, 60000)", path.join(root, "wtft-daemon.mjs")], { stdio: "ignore" });
+		const stubborn = spawn("node", standInDaemonArgs("process.on('SIGTERM', () => {}); setTimeout(() => {}, 60000)"), { stdio: "ignore" });
 		pids.push(stubborn.pid!);
+		check(awaitStandIn(stubborn.pid!), "fixture precondition: the stand-in reads as a daemon");
 		await sleep(300);
 		fs.writeFileSync(getDaemonPidPath(file), String(stubborn.pid));
 		const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");

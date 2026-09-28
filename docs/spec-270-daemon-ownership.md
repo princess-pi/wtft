@@ -383,5 +383,5 @@ are on the issues named.
 | `docs/spec-270-daemon-ownership.md` §3a, §3b | planned interfaces named as built | `tag-log.ts`, `lease.ts` exports | `tests/wtft-270-*` | rewritten here: built rows name the real exports, the rest are marked plan |
 | `docs/spec-259-*.md` | argument errors, hand-off and takeover details, ~18 findings | `bin/wtft-daemon.ts` | `tests/wtft-259-*` partly | fixed (PR #321) |
 | `docs/manifests/wtft-cmd.json`, README | daemon flag descriptions (`--list`, `--cleanup`, `--restart`, `--stop`), hermetic shell suite, spawned-daemon liveness rule | `bin/wtft-daemon.ts` | `wtft-75` pins README flags, not these sentences | fixed (PR #321) |
-| `docs/manifests/wtft-cmd.json`, README, spec-89 | picker rows, keys, window semantics, ~30 findings | `session-selector.ts` | no | filed on #173 |
+| `docs/manifests/wtft-cmd.json`, README, spec-89 | picker rows, keys, window semantics, ~30 findings | `session-selector.ts` | no | folded into #278 |
 | host-scoped: `~/.claude/CLAUDE.md`, `~/git-projects/CLAUDE.md`, `~/.claude/settings.json`, other clones' `CLAUDE.md`/`AGENTS.md` | none quote wtft's daemon or tag reader | — | — | checked, nothing to change |

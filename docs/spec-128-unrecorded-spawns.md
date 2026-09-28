@@ -357,4 +357,4 @@ unreadable project directory and for an unreadable transcript.
 | spec-128 | a still-written older transcript is skipped | only when its directory is older too | reconciled-against-untested (C4 sets both mtimes old) | Corrected |
 | spec-128 | `[]` meanings | a disabled harness, or one without the method, is not looked in | n/a | Stated |
 | README, manifest | "the Claude projects tree" | any harness implementing the method can throw | n/a | Generalised |
-| (pre-existing) | the auditor's other findings | — | — | Left standing: predates this branch |
+| (pre-existing) | the auditor's other findings | — | — | Left standing: predates this branch, and the doc leads were folded into #278 |

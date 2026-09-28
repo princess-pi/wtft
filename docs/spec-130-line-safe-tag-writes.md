@@ -659,14 +659,11 @@ v2.7.2, so there is no v2.8.1 to match — but it is the wrong scope to publish.
 
 ### Filed, not fixed here
 
-Two pre-existing defects the audit surfaced that are not #130's to fix:
+A pre-existing defect the audit surfaced that is not #130's to fix:
 
 - **#139** — `--watch` never re-arms its inotify watch, so a tag file replaced at the same path
   (`wtft --force`, or a version-bumped daemon's sweep) freezes the chart against a live daemon.
   #130's shrink branch does not help: after an unlink there are no events at all.
-- **#140** — `initClassified` decides "has classified data" by substring, so a turn whose command
-  mentions `_hb` or `_meta` discards the tag and forces a full re-parse. Bounded and
-  self-correcting; the one place left that reads a tag line without parsing it.
 
 ### What the auditors checked and cleared
 

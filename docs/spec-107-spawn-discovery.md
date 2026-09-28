@@ -239,8 +239,7 @@ would read the real one):
 
 ## Reconciliation record (2026-09-22, before offering #219)
 
-The code is the authority. These rows are the claims this pass changed. Widget status
-text that does not match `renderDaemonStatus` stays [#218](https://github.com/princess-pi/wtft/issues/218).
+The code is the authority. These rows are the claims this pass changed.
 
 | Artifact | Claim | Contradicted by | Covered by a test? | Action |
 |---|---|---|---|---|

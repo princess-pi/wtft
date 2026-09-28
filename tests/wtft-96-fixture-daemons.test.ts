@@ -56,8 +56,6 @@ try {
 	reapFixtureDaemons(dir);
 }
 
-// --cleanup itself signals every fixture daemon on the host, another run's included, so its rule
-// is checked here without running it.
 console.log("--cleanup's fixture rule");
 {
 	const tmp = "/var/folders/xy/T";

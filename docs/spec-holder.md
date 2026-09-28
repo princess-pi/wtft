@@ -53,6 +53,11 @@ short option starting a cluster that holds `e` or `p`) means there is no script.
 `ps` command line is split on whitespace and cannot be read by position, so there any word naming
 `wtft-daemon` counts.
 
+`isFixtureDaemon({ session, roots }, tmpDir)` is `--cleanup`'s rule for a test's leftover: the
+session or a harness root is under `tmpDir` or `/tmp/`. It is checked in memory
+(`tests/wtft-96-fixture-daemons.test.ts`): `--cleanup` itself signals every such daemon on the
+host, another test run's included.
+
 "Alive" means `signal 0` was sent or denied, and `state` does not say otherwise. EPERM is another
 user's live process. `pidAlive(pid)` is `classifyPid(pid) !== "gone"`.
 

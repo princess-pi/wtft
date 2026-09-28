@@ -1,5 +1,5 @@
 #!/usr/bin/env -S bun
-import { repaint, type RepaintFrame } from "../extensions/lib/watch-repaint.ts";
+import { repaint, eraseFrame, type RepaintFrame } from "../extensions/lib/watch-repaint.ts";
 
 let passed = 0;
 let failed = 0;
@@ -35,14 +35,17 @@ class Term {
 			}
 			if (ch === "\r") { this.c = 0; this.pendingWrap = false; continue; }
 			if (ch === "\n") { this.r++; this.ensure(this.r); this.pendingWrap = false; continue; }
-			if (this.pendingWrap) { this.r++; this.c = 0; this.ensure(this.r); this.pendingWrap = false; }
+			const wide = ch.codePointAt(0)! >= 0x2600 && ch.codePointAt(0)! <= 0x27bf;
+			if (this.pendingWrap || (wide && this.c === this.cols - 1)) { this.r++; this.c = 0; this.ensure(this.r); this.pendingWrap = false; }
 			this.rows[this.r]![this.c] = ch;
 			this.touched.add(this.r);
+			if (wide) { this.c++; this.rows[this.r]![this.c] = ""; }
 			if (this.c === this.cols - 1) this.pendingWrap = true;
 			else this.c++;
 		}
 	}
 	screen(): string[] { return this.rows.map(r => Array.from(r, ch => ch ?? " ").join("").trimEnd()); }
+	cells(row: number): number { return this.rows[row]?.length ?? 0; }
 }
 
 const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
@@ -53,6 +56,8 @@ function step(term: Term, prev: RepaintFrame | null, lines: string[], termRows =
 	term.feed(out);
 	return { frame, out };
 }
+const screenIs = (term: Term, rows: string[]) =>
+	JSON.stringify(term.screen().slice(0, rows.length)) === JSON.stringify(rows) && term.screen().slice(rows.length).every(r => r === "") && term.r === rows.length && term.c === 0;
 const screenMatches = (term: Term, lines: string[]) => {
 	const want = lines.map(l => strip(l).trimEnd());
 	const got = term.screen().slice(0, want.length);
@@ -65,7 +70,8 @@ const f1 = ["title", "\x1b[90m04:00\x1b[0m $1 ███", "03:00 $1 ██", "'q
 let s = step(term, null, f1);
 check(screenMatches(term, f1), `the screen is the frame, cursor on the line after it (${JSON.stringify(term.screen())})`);
 check(!term.erased, "no erase sequence");
-check(term.rows.slice(0, 4).every(r => r.length === 19), "every line is padded to one cell short of the width");
+check(term.rows[0]!.length === 19 && term.rows[3]!.length === 19, `a plain line is padded to one cell short of the width (${term.rows[0]!.length}, ${term.rows[3]!.length})`);
+check(term.rows[1]!.length === 17, `a line holding a non-ASCII character is padded to three cells short (${term.rows[1]!.length})`);
 
 console.log("\nA refresh that changes one row writes only that row");
 const f2 = ["title", "\x1b[90m04:00\x1b[0m $2 ████", "03:00 $1 ██", "'q' to exit"];
@@ -129,8 +135,32 @@ console.log("\nLeaving a frame with a wrapped non-ASCII line redraws from the to
 {
 	const t8 = new Term(20);
 	const a = step(t8, null, ["title", "☀".repeat(25), "q"]);
+	check(screenIs(t8, ["title", "☀".repeat(10), "☀".repeat(10), "☀".repeat(5), "q"]), `fixture precondition: the wrapped line is on screen (${JSON.stringify(t8.screen())})`);
 	const b = step(t8, a.frame, ["title", "short", "q"]);
-	check(t8.erased && b.out.includes("\x1b[J"), "the refresh after it erases and redraws");
+	check(t8.erased && /\x1b\[2?J/.test(b.out) && screenIs(t8, ["title", "short", "q"]), `the refresh after it erases and redraws (${JSON.stringify(t8.screen())})`);
+}
+
+console.log("\nA line holding a non-ASCII character keeps two more cells of slack, and a later line covers what it reached");
+{
+	const t9 = new Term(20);
+	const a = step(t9, null, ["☀ title", "x".repeat(19), "q"]);
+	check(t9.cells(0) === 17, `the emoji line is padded to three cells short (${t9.cells(0)} cells)`);
+	step(t9, a.frame, ["☀ title", "short", "q"]);
+	check(screenMatches(t9, ["☀ title", "short", "q"]) && !t9.erased, `a shorter line over a longer one leaves nothing behind (${JSON.stringify(t9.screen())})`);
+	const t10 = new Term(20);
+	const c = step(t10, null, ["x".repeat(19), "q"]);
+	step(t10, c.frame, ["☀ ok", "q"]);
+	check(screenMatches(t10, ["☀ ok", "q"]), `an emoji line written over a longer row pads as far as that row reached (${JSON.stringify(t10.screen())})`);
+}
+
+console.log("\nExit erases the frame from its top, or clears the screen after a wrapped non-ASCII line");
+{
+	const t11 = new Term(20);
+	t11.feed("above\r\n");
+	const a = step(t11, null, ["title", "row", "q"]);
+	t11.feed(eraseFrame(a.frame));
+	check(t11.screen()[0] === "above" && t11.r === 1 && t11.screen().slice(1).every(r => r === ""), `the frame is erased and the text above it is kept (${JSON.stringify(t11.screen())})`);
+	check(eraseFrame({ ...a.frame, wideWrap: true }) === "\x1b[H\x1b[2J", "after a wrapped non-ASCII line exit clears the screen");
 }
 
 console.log("\nFallbacks: a width change or a frame taller than the terminal redraw from the top");
@@ -149,7 +179,7 @@ console.log("\nFallbacks: a width change or a frame taller than the terminal red
 	const t5 = new Term(20);
 	const b = step(t5, null, ["title", "☀".repeat(25), "q"]);
 	const after = step(t5, b.frame, ["title", "☀".repeat(24), "q"]);
-	check(t5.erased && after.out.includes("\x1b[J"), "a wrapped line holding a non-ASCII character erases and redraws");
+	check(t5.erased && /\x1b\[2?J/.test(after.out) && screenIs(t5, ["title", "☀".repeat(10), "☀".repeat(10), "☀".repeat(4), "q"]), `a wrapped line holding a non-ASCII character erases and redraws (${JSON.stringify(t5.screen())})`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -17,8 +17,8 @@ import { isPlaceholderRow } from "./wtft-chart.js";
 import { splitOverheadCost, isModelTagged } from "./wtft-parser.js";
 import { getDiscoveries } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.js";
-import { showCursor, hideCursor, enterRawStdin, clearPreviousLines } from "./tty-helpers.js";
-import { repaint, frameRows, type RepaintFrame } from "./watch-repaint.js";
+import { showCursor, hideCursor, enterRawStdin } from "./tty-helpers.js";
+import { repaint, frameRows, eraseFrame, type RepaintFrame } from "./watch-repaint.js";
 import { tagRecords, parseTagLine, currentGeneration, sweepState, isDataRecord, type TagRecord } from "./tag-log.js";
 import { replaceLease, unlinkLeaseIf, leaseHolder, claimLeaseForChild, leasePid } from "./lease.js";
 import { classifyPid, holdsLease, mayStop, processTable, stopHolder, stopHolderSync, verifiedKind, type StopOptions } from "./holder.js";
@@ -764,14 +764,13 @@ export async function watchTagFile(
 	};
 
 	hideCursor();
-	let lastLineCount = 0;
 	let lastFrame: RepaintFrame | null = null;
 	let lastBuffer: string[] = [];
 
 	const exitWatch = () => {
 		if (watcher) watcher.close();
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
-		if (lastLineCount > 0) clearPreviousLines(lastLineCount);
+		process.stdout.write(eraseFrame(lastFrame));
 		showCursor();
 		cleanupStdin();
 		if (lastBuffer.length > 0) {
@@ -928,7 +927,6 @@ export async function watchTagFile(
 		const painted = repaint(lastFrame, allLines, cols, rows);
 		process.stdout.write(painted.out);
 		lastFrame = painted.frame;
-		lastLineCount = painted.frame.total;
 		needsRedraw = false;
 	};
 
@@ -1027,7 +1025,7 @@ export async function watchTagFile(
 	// restore the cursor and cooked stdin. (exitWatch() would exit 0 — wrong here.)
 	const teardownForError = () => {
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
-		if (lastLineCount > 0) clearPreviousLines(lastLineCount);
+		process.stdout.write(eraseFrame(lastFrame));
 		showCursor();
 		cleanupStdin();
 	};

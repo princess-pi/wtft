@@ -1,10 +1,4 @@
 #!/usr/bin/env -S bun
-/**
- * A chart whose label area (the time label and the number columns) is over 25% of the width
- * gets narrower one step at a time: single spacing, whole units, no `+` on deltas, no `$` on
- * the cost delta. Spec: docs/spec-362-compact-label-columns.md.
- */
-
 import { buildWtftLines } from "../extensions/lib/wtft-renderer.ts";
 
 process.env.COLUMNS = "250";
@@ -46,8 +40,10 @@ console.log("\nEach step applies only while the label area is still over 25% of 
 	check(two === "04:00 +$244 $487 +389M 779M tok ", `at 160 (limit 40) values of $1 or 1k and over lose their fraction: ${JSON.stringify(two)}`);
 	const three = labels(rowAt(big, 124, "04:00"));
 	check(three === "04:00 $244 $487 389M 779M tok ", `at 124 (limit 31) the deltas lose their +: ${JSON.stringify(three)}`);
-	const four = labels(rowAt(big, 100, "04:00"));
-	check(four === "04:00 244 $487 389M 779M tok ", `at 100 (limit 25) the cost delta loses its $: ${JSON.stringify(four)}`);
+	const four = labels(rowAt(big, 116, "04:00"));
+	check(four === "04:00 244 $487 389M 779M tok ", `at 116 (limit 29) the cost delta loses its $: ${JSON.stringify(four)}`);
+	const five = labels(rowAt(big, 100, "04:00"));
+	check(five === "04:00 244 $487 389M 779Mt ", `at 100 (limit 25) " tok" becomes "t": ${JSON.stringify(five)}`);
 	const narrow = labels(rowAt(big, 40, "04:00"));
 	check(narrow === "04:00 244 $487 ", `at 40 the token columns go, and the cost columns stay compact: ${JSON.stringify(narrow)}`);
 }

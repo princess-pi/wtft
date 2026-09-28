@@ -17,7 +17,8 @@ import { isPlaceholderRow } from "./wtft-chart.js";
 import { splitOverheadCost, isModelTagged } from "./wtft-parser.js";
 import { getDiscoveries } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.js";
-import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
+import { showCursor, hideCursor, enterRawStdin } from "./tty-helpers.js";
+import { repaint, frameRows, eraseFrame, type RepaintFrame } from "./watch-repaint.js";
 import { tagRecords, parseTagLine, currentGeneration, sweepState, isDataRecord, type TagRecord } from "./tag-log.js";
 import { replaceLease, unlinkLeaseIf, leaseHolder, claimLeaseForChild, leasePid } from "./lease.js";
 import { classifyPid, holdsLease, mayStop, processTable, stopHolder, stopHolderSync, verifiedKind, type StopOptions } from "./holder.js";
@@ -763,13 +764,13 @@ export async function watchTagFile(
 	};
 
 	hideCursor();
-	let lastLineCount = 0;
+	let lastFrame: RepaintFrame | null = null;
 	let lastBuffer: string[] = [];
 
 	const exitWatch = () => {
 		if (watcher) watcher.close();
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
-		if (lastLineCount > 0) clearPreviousLines(lastLineCount);
+		process.stdout.write(eraseFrame(lastFrame));
 		showCursor();
 		cleanupStdin();
 		if (lastBuffer.length > 0) {
@@ -849,8 +850,6 @@ export async function watchTagFile(
 	}
 
 	const render = () => {
-		if (lastLineCount > 0) clearPreviousLines(lastLineCount);
-
 		const width = getTerminalWidth();
 		const pad = settings.pad || 0;
 		const maxPad = Math.max(0, Math.floor(width / 2) - 1);
@@ -915,11 +914,9 @@ export async function watchTagFile(
 			: "";
 		buf.push(`'q' to exit${restartHint}`);
 
-		// Cursor-up redraw cannot reach lines scrolled off the top, so padding gives way first.
-		// Counted as the redraw counts them (wrapped), plus the line the cursor ends on.
-		const cols = process.stdout.columns || 80;
+		const cols = width;
 		const rows = process.stdout.rows || Infinity;
-		const screenLines = () => visualLineCount(buf.map(l => padStr + l + "\n").join(""), cols) + 1;
+		const screenLines = () => frameRows(buf.map(l => padStr + l), cols) + 1;
 		for (let i = buf.length - 1; i >= 0 && screenLines() > rows; i--) {
 			if (isPlaceholderRow(buf[i]!)) buf.splice(i, 1);
 		}
@@ -927,9 +924,9 @@ export async function watchTagFile(
 		lastBuffer = [...buf];
 
 		const allLines = buf.map(l => padStr + l);
-		const out = allLines.map(l => l + "\n").join("");
-		process.stdout.write(out);
-		lastLineCount = visualLineCount(out, cols);
+		const painted = repaint(lastFrame, allLines, cols, rows);
+		process.stdout.write(painted.out);
+		lastFrame = painted.frame;
 		needsRedraw = false;
 	};
 
@@ -1028,7 +1025,7 @@ export async function watchTagFile(
 	// restore the cursor and cooked stdin. (exitWatch() would exit 0 — wrong here.)
 	const teardownForError = () => {
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
-		if (lastLineCount > 0) clearPreviousLines(lastLineCount);
+		process.stdout.write(eraseFrame(lastFrame));
 		showCursor();
 		cleanupStdin();
 	};

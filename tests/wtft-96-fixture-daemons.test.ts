@@ -3,9 +3,10 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { reapFixtureDaemons } from "./lib/reap-fixture-daemons.ts";
 import { isFixtureDaemon } from "../extensions/lib/holder.ts";
+import { standInDaemonArgs, awaitStandIn } from "./lib/stand-in-daemon.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("96-fixture");
@@ -56,11 +57,37 @@ try {
 	reapFixtureDaemons(dir);
 }
 
+console.log("--cleanup stops the fixture daemons under its own tmp dir, and no others");
+{
+	const inside = standInDaemonArgs("setInterval(() => {}, 1000);", "--session", path.join(dir, "inside.jsonl"));
+	const outsideDir = trackSandbox(fs.mkdtempSync("/tmp/wtft-96-outside-"));
+	const outside = standInDaemonArgs("setInterval(() => {}, 1000);", "--session", path.join(outsideDir, "outside.jsonl"));
+	const a = spawn(process.execPath, inside, { detached: true, stdio: "ignore" });
+	const b = spawn(process.execPath, outside, { detached: true, stdio: "ignore", env: { ...process.env, TMPDIR: outsideDir } });
+	a.unref();
+	b.unref();
+	try {
+		const ready = awaitStandIn(a.pid!) && awaitStandIn(b.pid!);
+		const scoped = path.resolve(os.tmpdir()) !== "/tmp";
+		assert("fixture precondition: both stand-ins read as daemons", ready);
+		assert("fixture precondition: the tmp dir is not /tmp itself", scoped);
+		if (ready && scoped) {
+			const run = spawnSync(process.execPath, [DAEMON, "--cleanup"], { encoding: "utf8", env: { ...process.env, TMPDIR: os.tmpdir() } });
+			await sleep(300);
+			const names = (pid: number) => new RegExp(`^Cleaned up: PID ${pid} `, "m").test(run.stdout);
+			assert(`it stops the one under its tmp dir (${run.stdout.trim()})`, names(a.pid!) && !alive(a.pid!));
+			assert("and leaves one under /tmp/ outside it running", !names(b.pid!) && alive(b.pid!));
+		}
+	} finally {
+		for (const c of [a, b]) if (c.exitCode === null && c.signalCode === null) try { c.kill("SIGTERM"); } catch { /* gone */ }
+	}
+}
+
 console.log("--cleanup's fixture rule");
 {
 	const tmp = "/var/folders/xy/T";
 	assert("a session under the tmp dir is a fixture", isFixtureDaemon({ session: `${tmp}/wtft-96-a/s.jsonl`, roots: [] }, tmp));
-	assert("a session under /tmp/ is a fixture whatever the tmp dir", isFixtureDaemon({ session: "/tmp/wtft-96-b/s.jsonl", roots: [] }, tmp));
+	assert("a session under /tmp/ outside the tmp dir is not", !isFixtureDaemon({ session: "/tmp/wtft-96-b/s.jsonl", roots: [] }, tmp));
 	assert("a harness root under the tmp dir is a fixture", isFixtureDaemon({ session: null, roots: [`${tmp}/projects`] }, tmp));
 	assert("a real session is not", !isFixtureDaemon({ session: "/home/u/.claude/projects/p/s.jsonl", roots: ["/home/u/.claude/projects"] }, tmp));
 	assert("a path that only starts with the tmp dir's name is not", !isFixtureDaemon({ session: `${tmp}-other/s.jsonl`, roots: [] }, tmp));

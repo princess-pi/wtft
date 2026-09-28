@@ -149,8 +149,7 @@
   replacement, a harness spawned while `--restart` is still walking claims the root and is the
   one harness left when it exits.
 - A harness whose `--session` was deleted survives a per-session daemon's startup and keeps its
-  live session's lease. The `--cleanup` half is not in the suite: `--cleanup` stops every
-  fixture daemon under `/tmp`, including those of suites running beside it.
+  live session's lease. The `--cleanup` half is not in the suite.
 
 `tests/wtft-248-focus-first.test.ts`: of 1,500 sessions, only the one named at startup and one
 asked for later are rebuilt.

@@ -312,7 +312,7 @@ version and rebuilds for a per-session daemon; for a harness-served session it m
 
 `parseTagLine()` in `extensions/lib/tag-log.ts` (`tagRecords()` over a whole file) is the one
 reader: it decides each line's kind by its shape, never by substring, so a turn whose command or
-file path is the text `_hb` or `_meta` is a turn (#140). Every wtft reader goes through it; a
+file path is the text `_hb` or `_meta` is a turn. Every wtft reader goes through it; a
 third-party reader follows the steps below.
 
 1. Open the file `getTagPath()` picks (§1).

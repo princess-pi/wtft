@@ -12,6 +12,8 @@ import { buildWtftLines } from "../extensions/lib/wtft-renderer.ts";
 import { parseWtftCliArgs } from "../extensions/lib/wtft-cli-shared.ts";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "../extensions/lib/wtft-config-dir.ts";
 
+process.env.COLUMNS = "250";
+
 let passed = 0;
 let failed = 0;
 function check(cond: boolean, msg: string) {
@@ -39,7 +41,7 @@ function mockIx(cost: number, timestamp: number): any {
 const hour = 60 * 60 * 1000;
 const t0 = Date.parse("2026-09-26T10:00:00Z");
 const ix = [mockIx(1, t0), mockIx(2, t0 + hour)];
-const settings = { interval: "1h", limit: 10, width: 80, mode: "cumulative" as const, disabledEmoji: true };
+const settings = { interval: "1h", limit: 10, width: 250, mode: "cumulative" as const, disabledEmoji: true };
 
 function row(lines: string[] | null): string {
 	const found = (lines ?? []).map(l => l.replace(/\x1b\[[0-9;]*m/g, "")).find(l => /^\d\d:\d\d/.test(l.trim()));
@@ -95,17 +97,17 @@ check(bothOrders.hideTokenColumns, "--no-tokens stays set when --tokens is also 
 console.log("--- a 40-column chart keeps the bar ---");
 const narrow = { ...settings, width: 40 };
 const narrowCost = row(buildWtftLines(ix, narrow, { unit: "cost", mode: "cumulative" }));
-check(!narrowCost.includes("tok"), "width 40 drops the token columns before the bar");
-check(narrowCost.includes("+$2.00") && narrowCost.includes("$3.00"), "width 40 keeps the cost columns when they fit");
+check(narrowCost.includes(" 2k 3k tok "), `width 40 keeps the token columns too once compacted: ${JSON.stringify(narrowCost)}`);
+check(narrowCost.includes(" 2 $3 "), `width 40 keeps the cost columns, compacted, when they fit: ${JSON.stringify(narrowCost)}`);
 check(narrowCost.includes("█"), "width 40 keeps the cost bar");
 const narrowPlain = (buildWtftLines(ix, narrow, { unit: "cost", mode: "cumulative" }) ?? [])
 	.map(l => l.replace(/\x1b\[[0-9;]*m/g, ""));
 check(narrowPlain.some(l => l.includes("$0")), "width 40 keeps the scale line");
 const narrowTok = row(buildWtftLines(ix, narrow, { unit: "tokens", mode: "cumulative" }));
 check(narrowTok.includes("▇") || narrowTok.includes("▃"), "width 40 keeps the recency glyph");
-const big = [mockIx(100000, t0), mockIx(100000, t0 + hour)];
+const big = [mockIx(100_000_000, t0), mockIx(100_000_000, t0 + hour)];
 const squeezed = row(buildWtftLines(big, narrow, { unit: "cost", mode: "cumulative" }));
-check(!squeezed.includes("$"), "width 40 drops every number column when they do not fit");
+check(!squeezed.includes("$") && !squeezed.includes("tok"), `width 40 drops every number column when they do not fit: ${JSON.stringify(squeezed)}`);
 check(squeezed.includes("█"), "width 40 still draws the bar after dropping every column");
 
 console.log("--- the Pi widget hides for the process and does not write it ---");
@@ -172,7 +174,7 @@ async function render(args: string): Promise<string> {
 	await registered.wtft.handler(args, ctxFor(session, drawn));
 	return binText(drawn.widget);
 }
-const shown = await render("-w 80");
+const shown = await render("-w 250");
 check(shown.includes("+$2.00") && shown.includes("3.0k tok"), "a plain /wtft shows cost and token columns");
 check(fs.existsSync(configPath), "a plain /wtft writes the config the hide checks read");
 const withEmoji = await render("--no-emoji --no-cost -w 80");

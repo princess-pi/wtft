@@ -74,7 +74,7 @@ function cli(source: string, args: string[]): string {
 	const copy = path.join(dir, `run-${runSeq++}-${path.basename(source)}`);
 	fs.copyFileSync(source, copy);
 	tagForCli(copy);
-	const r = spawnSync("node", [CLI_BIN, "-s", copy, ...args], { encoding: "utf8", env: { ...process.env } });
+	const r = spawnSync("node", [CLI_BIN, "-s", copy, ...args], { encoding: "utf8", env: { ...process.env, COLUMNS: "250" } });
 	// The tag is settled, so a provisional exit 9 is a failure here too.
 	if (r.status !== 0) {
 		throw new Error(`wtft -s <copy> ${args.join(" ")} exited ${r.status}: ${r.stderr}`);

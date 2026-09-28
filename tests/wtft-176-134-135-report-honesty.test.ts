@@ -11,6 +11,8 @@ import { cliWithoutDaemon, widgetWithoutDaemon } from "./lib/cli-harness.ts";
 import { computeSpawnTree } from "../extensions/lib/wtft-spawn-tree.ts";
 import { SPAWN_RECORD_SCHEMA, serializeSpawnRecord } from "../extensions/lib/wtft-spawn-ledger.ts";
 
+process.env.COLUMNS = "250";
+
 isolateTmpdir("176-report-honesty");
 
 let passed = 0;

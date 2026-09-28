@@ -112,17 +112,12 @@ function runAlignmentTest(mode: "cumulative" | "bucket") {
 			assert.strictEqual(lastDotIdx, lastBarCharIdx, "The decimal point of the maximum cost label must perfectly align with the end of the bar");
 		} else {
 			// Bucket mode: verify that the $0.00 dot aligns with prefixWidth
-			assert.strictEqual(firstDotIdx, 35, "The decimal point of the $0.00 label must perfectly align with prefixWidth (35)");
+			assert.strictEqual(firstDotIdx, 21, "The decimal point of the $0.00 label must perfectly align with prefixWidth (21)");
 
-			// Newest bin is the scale max, so its marker sits on the last tick.
-			// prefixWidth is 35. maxBarWidth = 80 - 35 - 3 = 42.
-			// pos = 42 - 1 = 41. Absolute = 35 + 41 = 76.
 			assert.strictEqual(firstBarRow.indexOf("█"), 76, "The point-of-spend marker for the max cost bin must reside exactly at index 76");
 
-			// Older bin is $5 of a $13 scale.
-			// pos = Math.round((5 / 13) * 41) = 16. Absolute = 35 + 16 = 51.
 			const secondBarRow = barRows[1];
-			assert.strictEqual(secondBarRow.indexOf("█"), 51, "The point-of-spend marker for the $5.00 bin must reside exactly at index 51");
+			assert.strictEqual(secondBarRow.indexOf("█"), 42, "The point-of-spend marker for the $5.00 bin must reside exactly at index 42");
 		}
 		console.log(`✅ ${mode.toUpperCase()} ALIGNMENT CHECKS PASSED PERFECTLY!`);
 	} catch (err: any) {

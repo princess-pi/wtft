@@ -245,6 +245,7 @@ const pkgVersion = JSON.parse(
 ).version as string;
 
 generateHarnessRegistry();
+const buildStart = new Date();
 
 /** A suite running beside a rebuild reads the old bundle or the new one, never half of one. */
 function writeAtomically(file: string, text: string, mode: number) {
@@ -358,4 +359,10 @@ if (manifestState === "current") {
 // signal said success (#60).
 if (errors > 0) process.exit(1);
 
+fs.mkdirSync(path.join(import.meta.dir, "tmp"), { recursive: true });
+const lastBuild = path.join(import.meta.dir, "tmp", "last-build");
+const lastBuildTmp = `${lastBuild}.${process.pid}.tmp`;
+fs.writeFileSync(lastBuildTmp, buildStart.toISOString() + "\n");
+fs.utimesSync(lastBuildTmp, buildStart, buildStart);
+fs.renameSync(lastBuildTmp, lastBuild);
 console.log("\n✅ build complete");

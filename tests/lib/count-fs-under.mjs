@@ -1,10 +1,11 @@
-// bun --preload: counts node:fs calls whose path argument is under $WTFT_COUNT_FS_UNDER,
+// bun --preload: counts node:fs calls whose path argument is under a directory in $WTFT_COUNT_FS_UNDER
+// (path-delimiter separated),
 // and writes the count to $WTFT_COUNT_FS_OUT when the process exits.
 import * as realFs from "node:fs";
 import * as nodePath from "node:path";
 import { mock } from "bun:test";
 
-const root = nodePath.resolve(process.env.WTFT_COUNT_FS_UNDER);
+const roots = process.env.WTFT_COUNT_FS_UNDER.split(nodePath.delimiter).map(r => nodePath.resolve(r));
 const out = process.env.WTFT_COUNT_FS_OUT;
 const writeOut = realFs.writeFileSync;
 let count = 0;
@@ -16,19 +17,25 @@ function under(arg) {
 	else if (Buffer.isBuffer(arg)) p = arg.toString();
 	else return false;
 	const abs = nodePath.resolve(p);
-	return abs === root || abs.startsWith(root + nodePath.sep);
+	return roots.some(root => abs === root || abs.startsWith(root + nodePath.sep));
+}
+
+function counting(fn) {
+	const wrapper = function (...args) { if (under(args[0])) count++; return fn.apply(this, args); };
+	for (const key of Reflect.ownKeys(fn)) {
+		if (key === "length" || key === "name" || key === "prototype") continue;
+		const desc = Object.getOwnPropertyDescriptor(fn, key);
+		if (typeof desc.value === "function") desc.value = counting(desc.value);
+		Object.defineProperty(wrapper, key, desc);
+	}
+	return wrapper;
 }
 
 function wrapAll(source) {
 	const wrapped = {};
 	for (const [name, value] of Object.entries(source)) {
 		if (typeof value !== "function" || !/^[a-z]/.test(name)) { wrapped[name] = value; continue; }
-		const wrapper = function (...args) { if (under(args[0])) count++; return value.apply(this, args); };
-		for (const key of Reflect.ownKeys(value)) {
-			if (key === "length" || key === "name" || key === "prototype") continue;
-			Object.defineProperty(wrapper, key, Object.getOwnPropertyDescriptor(value, key));
-		}
-		wrapped[name] = wrapper;
+		wrapped[name] = counting(value);
 	}
 	return wrapped;
 }

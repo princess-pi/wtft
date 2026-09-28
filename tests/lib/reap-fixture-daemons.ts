@@ -1,9 +1,12 @@
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 
 /** `under`: reap only daemons whose session, harness root or TMPDIR lies under this
  *  directory — one suite's or one run's own, when they run side by side. */
 export function reapFixtureDaemons(under: string): number {
+	const root = path.resolve(under);
+	if (root === "/" || root === "/tmp" || root === os.homedir()) throw new Error(`reapFixtureDaemons: scope ${root} would reach daemons outside the tests`);
 	const inScope = (file: string) => { const r = path.relative(path.resolve(under), path.resolve(file)); return r === "" || (!r.startsWith("..") && !path.isAbsolute(r)); };
 	let killed = 0;
 	let entries: string[];

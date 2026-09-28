@@ -36,11 +36,6 @@ const JOBS = (() => {
 	return n;
 })();
 
-/** Run alone, after the pool, in this order, because they reach outside their
- *  own sandbox: two stop daemons host-wide (the unscoped fixture reaper,
- *  `wtft-daemon --cleanup`, `wtft-daemon --restart`), which would kill a
- *  neighbour's daemon mid-test; the last rebuilds `bin/`, which every suite
- *  importing a bundle would see half-written. */
 const SOLO = [
 	"wtft-96-fixture-daemons.test.ts",
 	"wtft-205-one-daemon-per-harness.test.ts",
@@ -114,8 +109,15 @@ const solo = SOLO.filter(f => suites.includes(f));
 console.log(`${BOLD}Running ${suites.length} suite${suites.length === 1 ? "" : "s"}${RESET} ${DIM}(process-per-suite, jobs=${JOBS})${RESET}\n`);
 
 const results: Result[] = [];
-/** Every suite's directories live here, so the final reap stops only this run's daemons. */
-const RUN_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-run-"));
+let RUN_ROOT: string;
+try {
+	RUN_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-run-"));
+} catch (err) {
+	console.error(`runner: could not create the run's directory: ${(err as Error).message}`);
+	process.exit(2);
+}
+process.on("exit", () => { try { fs.rmSync(RUN_ROOT, { recursive: true, force: true }); } catch {} });
+for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => process.exit(130));
 
 function runSuite(file: string): Promise<Result> {
 	const name = file.replace(/\.test\.ts$/, "");
@@ -193,7 +195,6 @@ await Promise.all(Array.from({ length: Math.min(JOBS, queue.length) }, async () 
 for (const file of solo) report(await runSuite(file));
 const stray = reapFixtureDaemons(RUN_ROOT);
 if (stray > 0) console.log(`${DIM}stopped ${stray} fixture daemon(s) left outside any suite's tmp dir${RESET}`);
-try { fs.rmSync(RUN_ROOT, { recursive: true, force: true }); } catch {}
 
 try {
 	const times = { ...lastTimes };

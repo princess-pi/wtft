@@ -126,7 +126,6 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 	// New top-tier names
 	// (fable, mythos) MUST be here — they match no legacy fallback branch and
 	// would otherwise silently price at Sonnet-tier defaults, ~3.3x under.
-	// Fable 5.1 / Mythos 5.1 cache reads are 0.025x base input; the 5.0 rows keep 0.1x.
 	"claude-fable-5-1":  { input: 10.00, output: 50.00, cacheRead: 0.25, cacheWrite: 12.50 },
 	"claude-mythos-5-1": { input: 10.00, output: 50.00, cacheRead: 0.25, cacheWrite: 12.50 },
 	"claude-fable-5":    { input: 10.00, output: 50.00, cacheRead: 1.00, cacheWrite: 12.50 },

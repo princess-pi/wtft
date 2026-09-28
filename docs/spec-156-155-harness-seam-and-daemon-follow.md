@@ -239,6 +239,10 @@ re-point `sessionPath`, log the move under `WTFT_DAEMON_DEBUG`, continue.
 In harness mode (`serviceSession`), a session that is genuinely gone drops that session's
 slot and leaves the process up. A `--session` process still calls `shutdown("session removed")`.
 
+A transcript that exists when its slot is created counts as existing from then on, so a move
+before the daemon's first read is followed too. Only a transcript absent at slot creation waits
+as not yet written (`tests/wtft-issue-155-daemon-follow.test.ts` part C2).
+
 Incremental parsing survives untouched: `parseNewLines` keys off `lastSize`, and a move
 preserves both inode and size — the next poll reads from exactly where it left off.
 

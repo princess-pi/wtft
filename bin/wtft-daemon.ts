@@ -697,6 +697,7 @@ function wake(file: string, displayed: boolean) {
   }
   if (!slot) {
     slot = newSessionRecord(key, displayed, Date.now());
+    slot.sessionExisted = fs.existsSync(key);
     if (!withSlot(slot, () => adoptSession())) {
       retryAdoptionLater(key, displayed);
       return;
@@ -1921,6 +1922,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   }
 
   slot = newSessionRecord(sessionArg, true, Date.now());
+  slot.sessionExisted = fs.existsSync(sessionArg);
   const sessionPath = sessionArg;
   const sessionBase = path.basename(sessionPath);
   // Prefer an existing current-version tag wherever it lives (session may have moved).

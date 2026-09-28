@@ -211,8 +211,6 @@ console.log("\n=== PART C: a live daemon follows its transcript ===\n");
 			});
 		} catch { return false; }
 	};
-	// The move must come after the daemon has read the session: moved before its
-	// first read, the transcript is indistinguishable from one not written yet.
 	check(await pollUntil(() => hasTurnAt("2026-08-01T00:00:00Z"), 10_000), "precondition: the daemon has tagged m1 before the session moves");
 	const linesBefore = countTaggedLines();
 
@@ -245,6 +243,72 @@ console.log("\n=== PART C: a live daemon follows its transcript ===\n");
 	await pollUntil(() => child.exitCode !== null, 10_000);
 	check(child.exitCode === 0, "daemon exits cleanly when the session is genuinely gone", `exitCode=${child.exitCode} signalCode=${child.signalCode}`);
 	check(stderr.includes("shutdown: session removed"), "…reporting 'session removed' as the reason", stderr.slice(-400));
+
+	delete process.env.WTFT_CLAUDE_PROJECTS_DIR;
+	resetCwdCache();
+	resetHarnessRegistry();
+}
+
+console.log("\n=== PART C2: a transcript moved before the daemon's first read is followed ===\n");
+{
+	const projects = mktmp("wtft-155-c2-");
+	process.env.WTFT_CLAUDE_PROJECTS_DIR = projects;
+	resetCwdCache();
+	resetHarnessRegistry();
+
+	const cwdA = "/home/tester/git-projects/early";
+	const cwdB = "/home/tester/worktrees/early/317-branch";
+	const base = "3b7d2e90-1c4f-4a8e-9d06-7f5e2a41c8b3.jsonl";
+	const pathA = path.join(projects, cwdToSlug(cwdA), base);
+	const pathB = path.join(projects, cwdToSlug(cwdB), base);
+	fs.mkdirSync(path.dirname(pathA), { recursive: true });
+	fs.mkdirSync(path.dirname(pathB), { recursive: true });
+	fs.writeFileSync(pathA, turnLine("e1", cwdA, "2026-08-01T00:00:00Z") + "\n");
+	const pidPath = getDaemonPidPath(pathA);
+	pidFiles.push(pidPath);
+	try { fs.unlinkSync(pidPath); } catch {}
+
+	// Moves the transcript the moment the daemon's lease lands, before its first poll reads it.
+	const preload = path.join(projects, "move-on-lease.mjs");
+	fs.writeFileSync(preload, `
+import * as realFs from "node:fs";
+import { mock } from "bun:test";
+const originalLink = realFs.linkSync.bind(realFs);
+let moved = false;
+function linkSync(from, to) {
+  const out = originalLink(from, to);
+  if (!moved && String(to) === process.env.WTFT_317_PID_PATH) {
+    moved = true;
+    realFs.renameSync(process.env.WTFT_317_FROM, process.env.WTFT_317_TO);
+  }
+  return out;
+}
+mock.module("node:fs", () => ({ ...realFs, linkSync, default: { ...realFs, linkSync } }));
+`);
+	const child = spawn(process.execPath, ["--preload", preload, DAEMON, "--session", pathA], {
+		stdio: ["ignore", "ignore", "pipe"],
+		env: { ...process.env, WTFT_DAEMON_DEBUG: "1", WTFT_CLAUDE_PROJECTS_DIR: projects, WTFT_317_PID_PATH: pidPath, WTFT_317_FROM: pathA, WTFT_317_TO: pathB },
+	});
+	children.push(child);
+	let stderr = "";
+	child.stderr?.on("data", (d) => { stderr += d.toString(); });
+
+	const tagPath = getCurrentVersionTagPath(pathA);
+	const hasTurnAt = (ts: string): boolean => {
+		try {
+			return fs.readFileSync(tagPath, "utf8").split("\n").some(l => {
+				const r = parseTagLine(l);
+				return r?.kind === "turn" && r.interaction.timestamp === Date.parse(ts);
+			});
+		} catch { return false; }
+	};
+	await pollUntil(() => !fs.existsSync(pathA) || child.exitCode !== null, 10_000);
+	check(!fs.existsSync(pathA) && fs.existsSync(pathB), "fixture precondition: the transcript moved when the lease landed");
+	await pollUntil(() => stderr.includes("session moved") || child.exitCode !== null, 10_000);
+	check(stderr.includes("session moved"), "the daemon follows a transcript it had not read yet", stderr.slice(-400) || "(no stderr yet)");
+	check(await pollUntil(() => hasTurnAt("2026-08-01T00:00:00Z"), 10_000), "and tags it at its new path");
+	check(child.exitCode === null, "the daemon is still running", `exitCode=${child.exitCode}`);
+	child.kill("SIGTERM");
 
 	delete process.env.WTFT_CLAUDE_PROJECTS_DIR;
 	resetCwdCache();

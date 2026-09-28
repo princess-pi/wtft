@@ -1,6 +1,6 @@
 #!/usr/bin/env -S bun
 /**
- * #128 — sessions no spawn record names, listed with a tier and never summed.
+ * Sessions no spawn record names, listed with a tier and never summed.
  * Spec: docs/spec-128-unrecorded-spawns.md.
  */
 
@@ -369,9 +369,6 @@ console.log("\nPART L — loud read errors, quiet absences");
 	process.env.WTFT_CLAUDE_PROJECTS_DIR = saved;
 }
 
-// ---
-// PART E — #116's Closer, second clause, through the CLI
-// ---
 console.log("\nPART E — delete the record and the child is still reported, never summed");
 
 const CLI_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
@@ -466,8 +463,8 @@ console.log("\nPART D — a spawning turn that found nothing leaves the queue on
 	const daemon = spawn(process.execPath, [DAEMON_BIN, "--session", rootPath], { detached: true, stdio: "ignore", env: { ...process.env } });
 	daemon.unref();
 	const tagPath = path.join(rootDir, "wtft-tags", `${sessionId}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
-	const outputInTag = () => { try { return readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0); } catch { return 0; } };
-	const settled = () => { try { return tagRecords(fs.readFileSync(tagPath, "utf8")).some(r => r.kind === "spawn-settled"); } catch { return false; } };
+	const outputInTag = () => fs.existsSync(tagPath) ? readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0) : 0;
+	const settled = () => fs.existsSync(tagPath) && tagRecords(fs.readFileSync(tagPath, "utf8")).some(r => r.kind === "spawn-settled");
 	const late = "a1000001-0000-4000-8000-0000000000d2";
 	let total = -1;
 	try {
@@ -483,7 +480,7 @@ console.log("\nPART D — a spawning turn that found nothing leaves the queue on
 		await sleep(3_000);
 		total = outputInTag();
 	} finally {
-		try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
+		daemon.kill("SIGTERM");
 	}
 	check(total === 100, `D3 the turn left the queue once its discovery window closed, so the late child is not folded (got ${total})`);
 

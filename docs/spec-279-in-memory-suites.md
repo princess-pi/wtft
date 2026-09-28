@@ -31,8 +31,7 @@ then `spawners: <n> of <total>`.
 - **No count rather than a low one:** when a suite is unfinished, or its trace does not show the
   suite itself starting, the script names it on stderr and exits 3 without a count.
 - **A failed suite that started no daemon is named:** it may have failed before reaching one. The
-  count is printed, the suites are named on stderr, and the exit is 4. The #214 suites fail on
-  this host, so read that list before trusting the count. Exit 2 is a setup failure.
+  count is printed, the suites are named on stderr, and the exit is 4. Exit 2 is a setup failure.
 
 ## 2. The harness
 

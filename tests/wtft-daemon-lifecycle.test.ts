@@ -281,11 +281,14 @@ console.log("\n5. Reap on spawn kills orphan daemons");
 	assert("daemon A started and holds its lease", leaseA && isAlive(pidA));
 	// The reap takes a missing session for gone only when its tag shows it was read; before that it
 	// is "not written yet", and A is rightly left alone.
+	const tagA = getTagPath(sessA);
 	const readByA = await pollUntil(() => {
-		try { return fs.readFileSync(getTagPath(sessA), "utf8").split("\n").some(l => l.trim() !== "" && !l.includes('"_hb"')); } catch { return false; }
+		try { return fs.readFileSync(tagA, "utf8").split("\n").some(l => l.trim() !== "" && !l.includes('"_hb"')); } catch { return false; }
 	}, 15_000);
 	assert("fixture precondition: daemon A has read its session into the tag", readByA);
 
+	// Stopped, A cannot notice the deletion and exit by itself; only B's reap can end it.
+	process.kill(pidA, "SIGSTOP");
 	fs.unlinkSync(sessA);
 
 	// Start daemon B — its startup reap should kill A. Wait for B's own lease
@@ -298,13 +301,15 @@ console.log("\n5. Reap on spawn kills orphan daemons");
 	}, 15_000);
 	assert("daemon B started and holds its lease", leaseB);
 
+	// A is still stopped, so a lease gone now was taken by B's reap, not given up by A.
+	assert("B's reap removed stopped A's lease", await pollUntil(() => !fs.existsSync(pidPathA), 15_000));
+	process.kill(pidA, "SIGCONT");
 	assert("orphan daemon A killed by reap on B's spawn", await pollUntil(() => !isAlive(pidA), 15_000));
+	const stopLines = (() => { try { return fs.readFileSync(tagA, "utf8").split("\n").filter(l => l.includes('"_hb":"stop"')); } catch { return []; } })();
+	assert(`…not by noticing the deletion itself (${stopLines.join(" ") || "no stop line"})`, !stopLines.some(l => l.includes("session removed")));
 	assert("daemon B still alive", isAlive(pidB));
 
-	// PID file A should be cleaned up
-	assert("orphan pidfile cleaned up", await pollUntil(() => !fs.existsSync(pidPathA), 15_000));
-
-	// Cleanup
+	try { process.kill(pidA, "SIGCONT"); process.kill(pidA, "SIGTERM"); } catch {}
 	try { process.kill(pidB, "SIGTERM"); } catch {}
 	try { fs.unlinkSync(WARN_LOG); } catch {}
 }

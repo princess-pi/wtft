@@ -64,6 +64,16 @@ describe("Claude 5 family pricing (#139)", () => {
 		assert.deepStrictEqual(lookupModelPricing("claude-mythos-5"), lookupModelPricing("claude-fable-5"));
 	});
 
+	it("prices claude-fable-5-1 cache reads at $0.25/MTok, the rest as claude-fable-5 (#355)", () => {
+		assert.strictEqual(calculateClaudeCost("claude-fable-5-1", { cache_read_input_tokens: MTOK }), 0.25);
+		assert.strictEqual(calculateClaudeCost("claude-fable-5-1", { input_tokens: MTOK }), 10.00);
+		assert.strictEqual(calculateClaudeCost("claude-fable-5-1", { output_tokens: MTOK }), 50.00);
+		assert.strictEqual(calculateClaudeCost("claude-fable-5-1", { cache_creation_input_tokens: MTOK }), 12.50);
+		assert.strictEqual(calculateClaudeCost("claude-fable-5", { cache_read_input_tokens: MTOK }), 1.00);
+		assert.deepStrictEqual(lookupModelPricing("claude-mythos-5-1"), lookupModelPricing("claude-fable-5-1"));
+		assert.strictEqual(isModelPriced("claude-fable-5-1"), true);
+	});
+
 	it("prices claude-opus-5 at $5/$25/$0.50/$6.25 per MTok", () => {
 		assert.strictEqual(calculateClaudeCost("claude-opus-5", { input_tokens: MTOK }), 5.00);
 		assert.strictEqual(calculateClaudeCost("claude-opus-5", { output_tokens: MTOK }), 25.00);

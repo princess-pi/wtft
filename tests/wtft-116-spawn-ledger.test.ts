@@ -1071,7 +1071,7 @@ let selfCostWithRecord = 0;
 
 	const lines = cli(["--tokens"]).out.split("\n");
 	const wideRow = lines.find(l => l.includes("貓"));
-	const narrowRow = lines.find(l => l.includes("cat"));
+	const narrowRow = lines.find(l => l.includes("catcatcatcat"));
 	check(wideRow !== undefined && narrowRow !== undefined,
 		`D28b both edges render a row (wide=${wideRow !== undefined}, narrow=${narrowRow !== undefined})`);
 	// No magic column constant here on purpose: the money field is `padStart(12)`

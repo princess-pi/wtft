@@ -337,9 +337,10 @@ console.log("\nC9. q during an r restart in --watch exits only after the new dae
 	for (let i = 0; i < 100 && !(fs.existsSync(tagsDir) && fs.readdirSync(tagsDir).some(f => f.startsWith("c9-session"))); i++) await new Promise(r => setTimeout(r, 50));
 	await new Promise(r => setTimeout(r, 1500));
 	const slow = startOrphan(script, ["--session", session]);
-	try { process.kill(first, "SIGKILL"); } catch {}
 	for (let i = 0; i < 200 && !fs.existsSync(ready); i++) await new Promise(r => setTimeout(r, 50));
 	check(fs.existsSync(ready), "C9 precondition: the stand-in holder installed its SIGTERM handler");
+	try { process.kill(first, "SIGKILL"); } catch {}
+	await new Promise(r => setTimeout(r, 200));
 	fs.writeFileSync(lease, String(slow));
 	w.stdin!.write("r");
 	await new Promise(r => setTimeout(r, 150));

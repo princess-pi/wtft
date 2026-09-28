@@ -66,15 +66,17 @@ const MAX_LABEL_SHARE = 0.25;
 const MAX_COMPACT = 4;
 
 /** `$487.25` → `$487`; under $1 unchanged. */
-function wholeCost(n: number): string {
-	return Math.abs(n) >= 1 ? `$${Math.round(n)}` : formatCost(n);
+export function wholeCost(n: number): string {
+	return Math.abs(n) >= 1 ? `$${Math.sign(n) * Math.round(Math.abs(n))}` : formatCost(n);
 }
 
 /** `778.8M` → `779M`, `589.5k` → `590k`; under 1k unchanged. */
-function wholeTokens(n: number): string {
-	const k = Math.round(n / 1_000);
-	if (k >= 1_000) return `${Math.round(n / 1_000_000)}M`;
-	return n >= 1_000 ? `${k}k` : String(n);
+export function wholeTokens(n: number): string {
+	const sign = n < 0 ? "-" : "";
+	const a = Math.abs(n);
+	const k = Math.round(a / 1_000);
+	if (k >= 1_000) return `${sign}${Math.round(a / 1_000_000)}M`;
+	return a >= 1_000 ? `${sign}${k}k` : String(n);
 }
 
 /** The four number columns' text at compaction step `compact` (0 to MAX_COMPACT). */

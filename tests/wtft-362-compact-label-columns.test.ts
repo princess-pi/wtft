@@ -68,5 +68,13 @@ console.log("\nRounding is to the nearest whole unit");
 	check(row.includes("590k"), `589.5k reads 590k: ${JSON.stringify(row)}`);
 }
 
+console.log("\nNegative deltas stay abbreviated and round symmetrically");
+{
+	const { wholeTokens, wholeCost } = await import("../extensions/lib/wtft-chart.ts");
+	check(wholeTokens(-389_400_000) === "-389M", `-389.4M reads -389M (${wholeTokens(-389_400_000)})`);
+	check(wholeTokens(-589_500) === "-590k", `-589.5k reads -590k (${wholeTokens(-589_500)})`);
+	check(wholeCost(-243.5) === "$-244" && wholeCost(243.5) === "$244", `-$243.50 and $243.50 round away from zero alike (${wholeCost(-243.5)}, ${wholeCost(243.5)})`);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

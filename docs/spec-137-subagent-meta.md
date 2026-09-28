@@ -231,7 +231,7 @@ was not evidence; the mutation was.
 ### Filed, not fixed here
 
 #143 (the suite certifies the bundle — repo-wide: 45 of 45 suites import `bin/wtft.mjs`, 0 import
-the source), #144 (`/tmp` sandbox leak), #145 (`wtft.html`'s on-disk table), #146 (an
+the source), #144 (`/tmp` sandbox leak), #146 (an
 unreadable `.meta.json` reads as an absent one), #147 (discovery reads the whole parent transcript
 to look at line 1 — 885.6 MB per run on a 212 MB session), #148 (depth truncation and symlink
 loops), #149 (#137's own invariants are deletable with the suite green), #150 (no glossary entry

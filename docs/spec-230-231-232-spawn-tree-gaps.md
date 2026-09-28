@@ -22,7 +22,7 @@ folds another. The parts are parsed in order, and a `claude -p` session a kept p
 deduplicated, model-tagged turn (the folds `spawned.total` counts) is added to `doNotFold` for the
 parts after it, so no session lands in the edge total twice. Which files discovery lists, and which it skips without reporting, is
 `discoverSubagentSessionFiles`'s contract (`docs/wtft-incremental-render-spec.md` § *Where the
-transcripts are on disk*; its unreported skips are listed in #236); this change prices what it
+transcripts are on disk*); this change prices what it
 lists.
 
 **Each subagent session is billed once.** A subagent transcript's id is its file name without
@@ -163,4 +163,4 @@ behaviour older than this branch:
   sits in `descendantUntagged`, as `CONTEXT.md` § Self / tree already says.
 - "Minimum depth" is the smallest of the assigned queue depths (§2), not a position in the ledger.
 - One unreadable unrelated transcript in a `claude -p` child's project directory fails the fold
-  discovery, and with it the edge. That behaviour predates this branch; it is on #236.
+  discovery, and with it the edge. That behaviour predates this branch; it is #369.

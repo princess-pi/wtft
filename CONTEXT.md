@@ -418,8 +418,8 @@ Each row's cost and `(Nt)` count come from the session's tag file through the sa
 report (current generation, collapsed by id): every turn record, folded child lines included,
 summed over `c` — the self scope, without server-tool cost or ledger descendants. The picker
 locates the tag itself — current version, else the highest version number, no sibling-project
-lookup — so a moved session's tag reads `unknown` and `N lines` here while the report prices it
-(#173). A stale tag is priced from its own lines and marked `v<N>`.
+lookup — so a moved session's tag reads `unknown` and `N lines` here while the report prices it.
+A stale tag is priced from its own lines and marked `v<N>`.
 _Avoid_: menu
 
 **JSON mode** (#26):

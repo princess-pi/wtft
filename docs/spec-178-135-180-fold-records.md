@@ -185,4 +185,3 @@ Declined, each checked against the code:
 - **An in-self id can become `folded`.** An in-self id `continue`s before the mark.
 - **The `"_fold"` substring pre-filter misses spaced JSON.** The substring survives any spacing.
 
-Older drift found in the same passes, not caused by this branch: #200.

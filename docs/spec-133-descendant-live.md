@@ -64,7 +64,7 @@ compute the spawn tree, which it does not do today: [#198](https://github.com/pr
 Two `spec-reconcile` rounds (fresh-context auditors on DeepSeek V4.1 Flash). Round 1 audited P2's
 claims, `extensions/lib/wtft-json.ts` in full, and the test; round 2 re-audited what round 1 edited.
 `bin/wtft.ts`, `wtft-spawn-tree.ts` and `wtft-daemon-lib.ts` had a full file-level pass on the #176
-branch the same day, recorded in #196.
+branch the same day.
 
 | Artifact | Claim | Contradicted by | Covered by a test? | Action |
 |---|---|---|---|---|
@@ -77,4 +77,3 @@ branch the same day, recorded in #196.
 | `--json` empty arms | `notices[]` carries the provisional notice "as for every other reason" | only the populated arm built it, for any reason | ✅ this spec's test (pending arm) | **Code fixed** (pre-PR review): built once, in `emitSessionJson` |
 | this spec's test | "stderr names the live descendant"; exit checks compare against the constant | the sentence names no descendant; the constant could change | — | Message renamed; literal 9 pinned |
 
-Older drift found in the same pass, not caused by this branch: #196 (comments).

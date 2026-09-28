@@ -259,6 +259,11 @@ function followMovedSession(): boolean {
   return true;
 }
 
+/** A daemon started on a pre-move path (a `--restart` respawn) follows the move instead of waiting. */
+function sessionExistsOrMoved(sessionPath: string): boolean {
+  return fs.existsSync(sessionPath) || resolveMovedSession(sessionPath) !== null;
+}
+
 /** Gone means not merely moved, and not never-written. */
 function sessionIsGone(sessionCmdlinePath: string): boolean {
   if (fs.existsSync(sessionCmdlinePath)) return false;
@@ -697,7 +702,7 @@ function wake(file: string, displayed: boolean) {
   }
   if (!slot) {
     slot = newSessionRecord(key, displayed, Date.now());
-    slot.sessionExisted = fs.existsSync(key);
+    slot.sessionExisted = sessionExistsOrMoved(key);
     if (!withSlot(slot, () => adoptSession())) {
       retryAdoptionLater(key, displayed);
       return;
@@ -1922,7 +1927,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   }
 
   slot = newSessionRecord(sessionArg, true, Date.now());
-  slot.sessionExisted = fs.existsSync(sessionArg);
+  slot.sessionExisted = sessionExistsOrMoved(sessionArg);
   const sessionPath = sessionArg;
   const sessionBase = path.basename(sessionPath);
   // Prefer an existing current-version tag wherever it lives (session may have moved).

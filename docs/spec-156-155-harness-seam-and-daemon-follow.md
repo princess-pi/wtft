@@ -239,9 +239,10 @@ re-point `sessionPath`, log the move under `WTFT_DAEMON_DEBUG`, continue.
 In harness mode (`serviceSession`), a session that is genuinely gone drops that session's
 slot and leaves the process up. A `--session` process still calls `shutdown("session removed")`.
 
-A transcript that exists when its slot is created counts as existing from then on, so a move
-before the daemon's first read is followed too. Only a transcript absent at slot creation waits
-as not yet written (`tests/wtft-issue-155-daemon-follow.test.ts` part C2).
+A transcript that exists, or already resolves elsewhere, when its slot is created counts as
+existing from then on. So a move before the daemon's first read is followed, and so is a daemon
+started on a path the transcript already left (a `--restart` respawn). Only a transcript found
+nowhere at slot creation waits as not yet written.
 
 Incremental parsing survives untouched: `parseNewLines` keys off `lastSize`, and a move
 preserves both inode and size — the next poll reads from exactly where it left off.
@@ -392,13 +393,11 @@ these to one normalized field. Verified across 40 Pi transcripts: `reasoning_tok
 
 ## Verification — as run
 
-Tests are standalone scripts run with `node --experimental-strip-types`, importing through the
-built `bin/wtft.mjs` bundle (repo convention; the spec draft said `bun test`, which this repo
-does not use).
+The suites run under the repo's runner, which uses bun, importing through the built
+`bin/wtft.mjs` bundle:
 
 ```
-node --experimental-strip-types tests/wtft-issue-156-harness-seam.test.ts   → 63 passed, 0 failed
-node --experimental-strip-types tests/wtft-issue-155-daemon-follow.test.ts  → 23 passed, 0 failed
+bun run test wtft-issue-156 wtft-issue-155
 ```
 
 ### #156 — `tests/wtft-issue-156-harness-seam.test.ts`
@@ -423,6 +422,8 @@ and the guide it exercises is `docs/adding-a-harness.md`.
 | A | The singleton key is identical for the same session in two project dirs, distinct between sessions, and still matches the `wtft-daemon-*.pid` glob that `--list`/`--cleanup` scan |
 | B | Tag resolution: sibling current-version outranks a stale own-dir tag (the case #155 measured); own-dir current outranks a sibling; a fresh session gets the own-dir current-version default and never a stale filename |
 | C | A **real daemon** is spawned, its transcript renamed into another project dir, and it survives: logs `session moved`, does not shut down, keeps its original tag path, keeps parsing (2 → 4 tagged lines), and the PID file resolved from the new path is the same one, still held by the original process. Deleting the transcript then exits it cleanly with reason `session removed` |
+| C2 | Under bun: the transcript is moved the moment the daemon's lease lands, before its first read; the daemon follows it and tags it at the new path |
+| C3 | A daemon started on a path the transcript already left follows it at once |
 | D | The reap predicate: a moved session resolves elsewhere and is not reapable; a deleted one still is |
 
 ### Full suite

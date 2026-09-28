@@ -306,8 +306,8 @@ mock.module("node:fs", () => ({ ...realFs, linkSync, default: { ...realFs, linkS
 	check(!fs.existsSync(pathA) && fs.existsSync(pathB), "fixture precondition: the transcript moved when the lease landed");
 	await pollUntil(() => stderr.includes("session moved") || child.exitCode !== null, 10_000);
 	check(stderr.includes("session moved"), "the daemon follows a transcript it had not read yet", stderr.slice(-400) || "(no stderr yet)");
-	check(await pollUntil(() => hasTurnAt("2026-08-01T00:00:00Z"), 10_000), "and tags it at its new path");
-	check(child.exitCode === null, "the daemon is still running", `exitCode=${child.exitCode}`);
+	check(await pollUntil(() => hasTurnAt("2026-08-01T00:00:00Z"), 10_000), "and tags it at its new path", stderr.slice(-600));
+	check(child.exitCode === null, "the daemon is still running", `exitCode=${child.exitCode} ${stderr.slice(-600)}`);
 	child.kill("SIGTERM");
 
 	delete process.env.WTFT_CLAUDE_PROJECTS_DIR;

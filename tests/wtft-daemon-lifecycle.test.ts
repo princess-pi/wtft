@@ -279,8 +279,13 @@ console.log("\n5. Reap on spawn kills orphan daemons");
 		try { return parseInt(fs.readFileSync(pidPathA, "utf8").trim(), 10) === pidA; } catch { return false; }
 	}, 15_000);
 	assert("daemon A started and holds its lease", leaseA && isAlive(pidA));
+	// The reap takes a missing session for gone only when its tag shows it was read; before that it
+	// is "not written yet", and A is rightly left alone.
+	const readByA = await pollUntil(() => {
+		try { return fs.readFileSync(getTagPath(sessA), "utf8").split("\n").some(l => l.trim() !== "" && !l.includes('"_hb"')); } catch { return false; }
+	}, 15_000);
+	assert("fixture precondition: daemon A has read its session into the tag", readByA);
 
-	// Delete session A's file
 	fs.unlinkSync(sessA);
 
 	// Start daemon B — its startup reap should kill A. Wait for B's own lease

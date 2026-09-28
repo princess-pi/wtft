@@ -28,7 +28,7 @@ Add per-MTok entries to `MODEL_PRICING` in `extensions/lib/wtft-cost.ts`
 
 | key(s) | input | output | cacheRead | cacheWrite (5m) |
 |---|---|---|---|---|
-| `claude-fable-5-1`, `claude-mythos-5-1` (#355) | 10.00 | 50.00 | 0.25 | 12.50 |
+| `claude-fable-5-1`, `claude-mythos-5-1` | 10.00 | 50.00 | 0.25 | 12.50 |
 | `claude-fable-5`, `claude-mythos-5` | 10.00 | 50.00 | 1.00 | 12.50 |
 | `claude-opus-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-opus-4-5`, `claude-opus-4-1` | 5.00 | 25.00 | 0.50 | 6.25 |
 | `claude-sonnet-5`, `claude-sonnet-4-6`, `claude-sonnet-4-5` | 3.00 | 15.00 | 0.30 | 3.75 |

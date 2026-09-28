@@ -1,6 +1,6 @@
 #!/usr/bin/env -S bun
 /**
- * #128 — sessions no spawn record names, listed with a tier and never summed.
+ * Sessions no spawn record names, listed with a tier and never summed.
  * Spec: docs/spec-128-unrecorded-spawns.md.
  */
 
@@ -18,6 +18,7 @@ import { listUnrecordedSpawns } from "../extensions/lib/wtft-unrecorded.ts";
 import { readClassifiedTagFile, WTFT_TAGGER_VERSION } from "../bin/wtft.mjs";
 import { renderSpawnTree, emptyTotals } from "../extensions/lib/wtft-renderer.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+import { tagRecords } from "../extensions/lib/tag-log.ts";
 import { skip } from "./lib/skips.ts";
 const CLI_BIN_L = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
 
@@ -368,9 +369,6 @@ console.log("\nPART L — loud read errors, quiet absences");
 	process.env.WTFT_CLAUDE_PROJECTS_DIR = saved;
 }
 
-// ---
-// PART E — #116's Closer, second clause, through the CLI
-// ---
 console.log("\nPART E — delete the record and the child is still reported, never summed");
 
 const CLI_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
@@ -465,18 +463,25 @@ console.log("\nPART D — a spawning turn that found nothing leaves the queue on
 	const daemon = spawn(process.execPath, [DAEMON_BIN, "--session", rootPath], { detached: true, stdio: "ignore", env: { ...process.env } });
 	daemon.unref();
 	const tagPath = path.join(rootDir, "wtft-tags", `${sessionId}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`);
-	const outputInTag = () => readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0);
-	for (let i = 0; i < 40 && outputInTag() < 100; i++) await sleep(250);
-	check(outputInTag() === 100, `D1 fixture precondition: the tag holds the root turn alone (got ${outputInTag()})`);
-
-	// Begins inside the discovery window, but is written after it closed.
+	const outputInTag = () => fs.existsSync(tagPath) ? readClassifiedTagFile(tagPath).reduce((sum: number, i: any) => sum + (i.outputTokens || 0), 0) : 0;
+	const settled = () => fs.existsSync(tagPath) && tagRecords(fs.readFileSync(tagPath, "utf8")).some(r => r.kind === "spawn-settled");
 	const late = "a1000001-0000-4000-8000-0000000000d2";
-	writeChild({ id: late, slug: rootCwd.replace(/[^a-zA-Z0-9]/g, "-"), cwd: rootCwd, startedAt: spawnedAt + 5_000, entrypoint: "sdk-cli" });
-	check(discoverClaudeSubAgentFilesForTurn(commands, spawnedAt, rootCwd).files.some(f => f.endsWith(`${late}.jsonl`)),
-		"D2 fixture precondition: discovery for the turn does find the late child — only the queue can drop it");
-	await sleep(3_000);
-	const total = outputInTag();
-	try { if (daemon.pid) process.kill(daemon.pid, "SIGTERM"); } catch { /* already gone */ }
+	let total = -1;
+	try {
+		for (let i = 0; i < 40 && outputInTag() < 100; i++) await sleep(250);
+		check(outputInTag() === 100, `D1 fixture precondition: the tag holds the root turn alone (got ${outputInTag()})`);
+		for (let i = 0; i < 40 && !settled(); i++) await sleep(250);
+		check(settled(), "D1 fixture precondition: the turn's lookup settled before the late child exists");
+
+		// Begins inside the discovery window, but is written after it closed.
+		writeChild({ id: late, slug: rootCwd.replace(/[^a-zA-Z0-9]/g, "-"), cwd: rootCwd, startedAt: spawnedAt + 5_000, entrypoint: "sdk-cli" });
+		check(discoverClaudeSubAgentFilesForTurn(commands, spawnedAt, rootCwd).files.some(f => f.endsWith(`${late}.jsonl`)),
+			"D2 fixture precondition: discovery for the turn does find the late child — only the queue can drop it");
+		await sleep(3_000);
+		total = outputInTag();
+	} finally {
+		daemon.kill("SIGTERM");
+	}
 	check(total === 100, `D3 the turn left the queue once its discovery window closed, so the late child is not folded (got ${total})`);
 
 	const rows = listUnrecordedSpawns({ rootSessionId: sessionId, rootCwd, turns: readClassifiedTagFile(tagPath), exclude: new Set() });

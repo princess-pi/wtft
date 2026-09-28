@@ -946,7 +946,7 @@ function pointSessionAt(livePid: number, file: string): boolean {
   // another live daemon holds is left for the harness's adoption to take by
   // its own rules (never from a harness; a per-session daemon is stopped first).
   if (leaseText !== "rebuild" && (held || mine || !procIsDaemon(holder))) {
-    publishLease(lease, String(livePid), String(process.pid));
+    publishLease(lease, String(livePid), String(process.pid), leaseText);
   }
   try { fs.writeFileSync(`${lease}.display`, ""); } catch { /* the live process still has the old focus */ }
   // The live process may hold no slot for this session yet: ask it by name.

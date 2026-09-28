@@ -239,7 +239,7 @@ re-point `sessionPath`, log the move under `WTFT_DAEMON_DEBUG`, continue.
 In harness mode (`serviceSession`), a session that is genuinely gone drops that session's
 slot and leaves the process up. A `--session` process still calls `shutdown("session removed")`.
 
-A transcript that exists, or already resolves elsewhere, when its slot is created counts as
+A transcript that exists, or whose session-id basename already resolves elsewhere, when its slot is created counts as
 existing from then on. So a move before the daemon's first read is followed, and so is a daemon
 started on a path the transcript already left (a `--restart` respawn). Only a transcript found
 nowhere at slot creation waits as not yet written. A harness asked for a pre-move path whose

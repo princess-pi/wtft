@@ -41,7 +41,7 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
 |---|---|
 | Install deps | `bun install` |
 | Build | `bun run build` |
-| Test | `bun run test` — each suite in its own process, 2 × CPUs at a time (`WTFT_TEST_JOBS=1` for serial); skips shell suites |
+| Test | `bun run test` — each suite in its own process, 2 × CPUs at a time (`WTFT_TEST_JOBS=1` for serial); skips shell suites. Each suite gets its own `XDG_CONFIG_HOME` and `XDG_STATE_HOME`, and `PRINCESS_PI_CONFIG_NO_WALKUP=1`, so no `.wtft/config.json` above the checkout reaches it; a test of the walk-up deletes the variable |
 | Shell suite | `bash tests/wtft-daemon.test.sh` |
 | Typecheck | `bun run typecheck` |
 | Pricing manifest | `bun run manifest` |

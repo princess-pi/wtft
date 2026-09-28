@@ -114,6 +114,8 @@ console.log("\n3. Walk-up finds .wtft/config.json from a subdirectory");
 	fs.writeFileSync(path.join(projectRoot, ".wtft", "config.json"), JSON.stringify({ disabledEmoji: true }));
 
 	const originalCwd = process.cwd();
+	const prevNoWalkup = process.env.PRINCESS_PI_CONFIG_NO_WALKUP;
+	delete process.env.PRINCESS_PI_CONFIG_NO_WALKUP;
 	process.chdir(sub);
 	try {
 		// Same import as §2, re-used rather than cache-busted: `loadConfig`
@@ -127,6 +129,7 @@ console.log("\n3. Walk-up finds .wtft/config.json from a subdirectory");
 		process.chdir(originalCwd);
 		if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
 		else process.env.XDG_CONFIG_HOME = prevXdg;
+		if (prevNoWalkup !== undefined) process.env.PRINCESS_PI_CONFIG_NO_WALKUP = prevNoWalkup;
 	}
 }
 

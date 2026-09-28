@@ -134,7 +134,7 @@ function runSuite(file: string): Promise<Result> {
 	return new Promise(resolve => {
 		const child = spawn("bun", ["test", path.join("tests", file)], {
 			cwd: REPO_ROOT,
-			env: { ...process.env, XDG_CONFIG_HOME: configHome, XDG_STATE_HOME: stateHome, TMPDIR: suiteTmp },
+			env: { ...process.env, XDG_CONFIG_HOME: configHome, XDG_STATE_HOME: stateHome, TMPDIR: suiteTmp, PRINCESS_PI_CONFIG_NO_WALKUP: "1" },
 		});
 		let output = "";
 		child.stdout.setEncoding("utf8");

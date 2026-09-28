@@ -31,7 +31,9 @@ class Term {
 				const n = Number(m[1] || "1");
 				if (m[2] === "A") { this.r = Math.max(0, this.r - n); this.pendingWrap = false; }
 				else if (m[2] === "B") { this.r = Math.min(this.rows.length - 1, this.r + n); this.pendingWrap = false; }
+				else if (m[2] === "J" && m[1] === "2") { this.erased = true; this.rows = this.rows.map(() => []); }
 				else if (m[2] === "J") { this.erased = true; this.rows[this.r]!.length = this.c; this.rows.length = this.r + 1; }
+				else if (m[2] === "H") { this.r = 0; this.c = 0; this.pendingWrap = false; }
 				else if (m[2] === "K") { this.erased = true; this.rows[this.r]!.length = this.c; }
 				i += m[0].length - 1;
 				continue;
@@ -68,7 +70,7 @@ const f1 = ["title", "\x1b[90m04:00\x1b[0m $1 ███", "03:00 $1 ██", "'q
 let s = step(term, null, f1);
 check(screenMatches(term, f1), `the screen is the frame, cursor on the line after it (${JSON.stringify(term.screen())})`);
 check(!term.erased, "no erase sequence");
-check(term.rows.slice(0, 4).every(r => r.length === 20), "every line is padded to the full width");
+check(term.rows.slice(0, 4).every(r => r.length === 19), "every line is padded to one cell short of the width");
 
 console.log("\nA refresh that changes one row writes only that row");
 const f2 = ["title", "\x1b[90m04:00\x1b[0m $2 ████", "03:00 $1 ██", "'q' to exit"];
@@ -109,14 +111,32 @@ w = step(t2, w.frame, w2);
 check(screenMatches(t2, w2) && t2.screen()[3] === "", `the wrapped rows are covered (${JSON.stringify(t2.screen())})`);
 check(!t2.erased, "no erase sequence");
 
+console.log("\nA line as wide as the terminal, replaced by a shorter one, leaves nothing in the last column");
+{
+	const t6 = new Term(20);
+	const full = step(t6, null, ["title", "-".repeat(20), "q"]);
+	check(t6.screen()[1] === "-".repeat(20) && screenMatches(t6, ["title", "-".repeat(20), "q"]), `fixture precondition: the full-width line fills the row (${JSON.stringify(t6.screen())})`);
+	step(t6, full.frame, ["title", "short", "q"]);
+	check(screenMatches(t6, ["title", "short", "q"]) && !t6.erased, `the last column is covered without an erase (${JSON.stringify(t6.screen())})`);
+}
+
 console.log("\nFallbacks: a width change or a frame taller than the terminal redraw from the top");
 {
 	const t3 = new Term(20);
 	const a = step(t3, null, f1);
+	const t4 = new Term(30);
+	t4.feed("junk above\r\n");
 	const resized = repaint(a.frame, f2, 30, 50);
-	check(resized.out.includes("\x1b[J"), "a width change erases and redraws");
-	const tall = repaint(a.frame, f2, 20, 4);
-	check(tall.out.includes("\x1b[J"), "a frame that does not fit the terminal's rows erases and redraws");
+	t4.feed(resized.out);
+	check(t4.erased && JSON.stringify(t4.screen().slice(0, 4)) === JSON.stringify(f2.map(l => strip(l))) && t4.r === 4 && t4.c === 0,
+		`a width change clears the screen and writes the frame from the top (${JSON.stringify(t4.screen())})`);
+	const tall = step(t3, a.frame, f2, 4);
+	check(t3.erased && screenMatches(t3, f2), `a frame that does not fit the terminal's rows erases and redraws (${JSON.stringify(t3.screen())})`);
+
+	const t5 = new Term(20);
+	const b = step(t5, null, ["title", "☀".repeat(25), "q"]);
+	const after = step(t5, b.frame, ["title", "☀".repeat(24), "q"]);
+	check(t5.erased && after.out.includes("\x1b[J"), "a wrapped line holding a non-ASCII character erases and redraws");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

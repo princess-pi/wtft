@@ -17,8 +17,8 @@ import { isPlaceholderRow } from "./wtft-chart.js";
 import { splitOverheadCost, isModelTagged } from "./wtft-parser.js";
 import { getDiscoveries } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.js";
-import { showCursor, hideCursor, enterRawStdin, clearPreviousLines, visualLineCount } from "./tty-helpers.js";
-import { repaint, type RepaintFrame } from "./watch-repaint.js";
+import { showCursor, hideCursor, enterRawStdin, clearPreviousLines } from "./tty-helpers.js";
+import { repaint, frameRows, type RepaintFrame } from "./watch-repaint.js";
 import { tagRecords, parseTagLine, currentGeneration, sweepState, isDataRecord, type TagRecord } from "./tag-log.js";
 import { replaceLease, unlinkLeaseIf, leaseHolder, claimLeaseForChild, leasePid } from "./lease.js";
 import { classifyPid, holdsLease, mayStop, processTable, stopHolder, stopHolderSync, verifiedKind, type StopOptions } from "./holder.js";
@@ -915,11 +915,9 @@ export async function watchTagFile(
 			: "";
 		buf.push(`'q' to exit${restartHint}`);
 
-		// Cursor-up redraw cannot reach lines scrolled off the top, so padding gives way first.
-		// Counted as the redraw counts them (wrapped), plus the line the cursor ends on.
 		const cols = process.stdout.columns || 80;
 		const rows = process.stdout.rows || Infinity;
-		const screenLines = () => visualLineCount(buf.map(l => padStr + l + "\n").join(""), cols) + 1;
+		const screenLines = () => frameRows(buf.map(l => padStr + l), cols) + 1;
 		for (let i = buf.length - 1; i >= 0 && screenLines() > rows; i--) {
 			if (isPlaceholderRow(buf[i]!)) buf.splice(i, 1);
 		}

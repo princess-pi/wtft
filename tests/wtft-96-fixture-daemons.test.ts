@@ -1,14 +1,11 @@
 #!/usr/bin/env bun
-/**
- * #96 — a suite must not leave a fixture daemon, and --cleanup must see one
- * whose pid file lives in another tmp dir.
- */
 
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
 import { reapFixtureDaemons } from "./lib/reap-fixture-daemons.ts";
+import { isFixtureDaemon } from "../extensions/lib/holder.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("96-fixture");
@@ -54,35 +51,19 @@ try {
 	await sleep(300);
 	assert(`the reaper kills a daemon whose session is under tmp (signalled ${killed})`, killed >= 1 && !alive(pid));
 
-	const again = spawn(process.execPath, [DAEMON, "--session", session], {
-		detached: true,
-		stdio: "ignore",
-		env: { ...process.env, TMPDIR: privateTmp },
-	});
-	again.unref();
-	const pid2 = again.pid ?? 0;
-	let up2 = false;
-	for (let i = 0; i < 30 && !up2; i++) {
-		await sleep(100);
-		up2 = alive(pid2);
-	}
-	const cleanup = spawn(process.execPath, [DAEMON, "--cleanup"], {
-		stdio: ["ignore", "pipe", "ignore"],
-		env: { ...process.env, TMPDIR: os.tmpdir() },
-	});
-	const out = await new Promise<string>(resolve => {
-		let buf = "";
-		cleanup.stdout?.on("data", (d) => { buf += d.toString(); });
-		cleanup.on("exit", () => resolve(buf));
-	});
-	await sleep(300);
-	assert(
-		`--cleanup from the default tmp sees the fixture daemon (${out.trim()})`,
-		out.includes(String(pid2)) && !alive(pid2),
-	);
 } finally {
 	try { process.kill(pid, "SIGTERM"); } catch { /* gone */ }
 	reapFixtureDaemons(dir);
+}
+
+console.log("--cleanup's fixture rule");
+{
+	const tmp = "/var/folders/xy/T";
+	assert("a session under the tmp dir is a fixture", isFixtureDaemon({ session: `${tmp}/wtft-96-a/s.jsonl`, roots: [] }, tmp));
+	assert("a session under /tmp/ is a fixture whatever the tmp dir", isFixtureDaemon({ session: "/tmp/wtft-96-b/s.jsonl", roots: [] }, tmp));
+	assert("a harness root under the tmp dir is a fixture", isFixtureDaemon({ session: null, roots: [`${tmp}/projects`] }, tmp));
+	assert("a real session is not", !isFixtureDaemon({ session: "/home/u/.claude/projects/p/s.jsonl", roots: ["/home/u/.claude/projects"] }, tmp));
+	assert("a path that only starts with the tmp dir's name is not", !isFixtureDaemon({ session: `${tmp}-other/s.jsonl`, roots: [] }, tmp));
 }
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);

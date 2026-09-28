@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { projectsDir } from "../extensions/lib/harness/claude-code/discovery.js";
 import { tagRecords, parseTagLine, lastOffset, isDataRecord } from "../extensions/lib/tag-log.js";
 import { claimLease, claimLeaseForChild, unlinkLeaseIf, replaceLease as publishLease, leaseHolder } from "../extensions/lib/lease.js";
-import { classifyPid, holdsLease, isDaemonCmdline, pidAlive, processTable, stopHolderSync } from "../extensions/lib/holder.js";
+import { classifyPid, holdsLease, isDaemonCmdline, isFixtureDaemon, pidAlive, processTable, stopHolderSync } from "../extensions/lib/holder.js";
 import { leasePid } from "../extensions/lib/lease.js";
 import { daemonStdio, daemonLogPath, rotateDaemonLog, DAEMON_LOG_MAX_BYTES } from "../extensions/lib/daemon-log.js";
 import { decideHealth, readHealthFacts } from "../extensions/lib/daemon-health.js";
@@ -1428,12 +1428,6 @@ function stopHarness(reason: string, exitCode = 0) {
   process.exit(exitCode);
 }
 
-function pathIsUnderTmp(file: string): boolean {
-  const resolved = path.resolve(file);
-  const tmp = path.resolve(os.tmpdir());
-  return resolved === tmp || resolved.startsWith(tmp + path.sep) || resolved.startsWith("/tmp/");
-}
-
 function daemonProcs(): { pid: number; session: string | null; harness: boolean; roots: string[] }[] {
   const out: { pid: number; session: string | null; harness: boolean; roots: string[] }[] = [];
   let entries: string[];
@@ -1845,7 +1839,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   if (showList || showCleanup) {
     for (const proc of daemonProcs()) {
       if (seenPids.has(proc.pid) || proc.pid === process.pid) continue;
-      const fixture = (proc.session !== null && pathIsUnderTmp(proc.session)) || proc.roots.some(pathIsUnderTmp);
+      const fixture = isFixtureDaemon(proc, os.tmpdir());
       // A harness stops itself once it serves nothing.
       if (showCleanup && fixture && !proc.harness) {
         const where = proc.session || proc.roots.join(",");

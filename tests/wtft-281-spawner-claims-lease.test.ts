@@ -331,11 +331,14 @@ console.log("\nC9. q during an r restart in --watch exits only after the new dae
 	check(first > 0, "C9 precondition: --watch spawned a daemon that holds the lease");
 	const script = daemonScript("c9", "js");
 	const termed = path.join(dir, "c9-termed");
-	fs.writeFileSync(script, `process.on('SIGTERM', () => { require('node:fs').writeFileSync(${JSON.stringify(termed)}, ''); setTimeout(() => process.exit(0), 800); });\nsetTimeout(() => {}, 20000);\n`);
+	const ready = path.join(dir, "c9-ready");
+	fs.writeFileSync(script, `process.on('SIGTERM', () => { require('node:fs').writeFileSync(${JSON.stringify(termed)}, ''); setTimeout(() => process.exit(0), 800); });\nrequire('node:fs').writeFileSync(${JSON.stringify(ready)}, '');\nsetTimeout(() => {}, 20000);\n`);
 	const tagsDir = path.join(dir, "wtft-tags");
 	for (let i = 0; i < 100 && !(fs.existsSync(tagsDir) && fs.readdirSync(tagsDir).some(f => f.startsWith("c9-session"))); i++) await new Promise(r => setTimeout(r, 50));
 	await new Promise(r => setTimeout(r, 1500));
 	const slow = startOrphan(script, ["--session", session]);
+	for (let i = 0; i < 200 && !fs.existsSync(ready); i++) await new Promise(r => setTimeout(r, 50));
+	check(fs.existsSync(ready), "C9 precondition: the stand-in holder installed its SIGTERM handler");
 	try { process.kill(first, "SIGKILL"); } catch {}
 	await new Promise(r => setTimeout(r, 200));
 	fs.writeFileSync(lease, String(slow));

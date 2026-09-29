@@ -246,7 +246,7 @@
 
         <h4 style="color: var(--accent-yellow);">Config Hierarchy (lowest → highest precedence)</h4>
         <ol>
-            <li><strong>Code defaults</strong> — hardcoded (interval=1h, limit=10 in the Pi widget and 17 in the CLI, mode=cumulative, timezone=America/Los_Angeles, disabledEmoji=false).</li>
+            <li><strong>Code defaults</strong> — hardcoded (interval=1h, limit=10 in the Pi widget and 17 in the CLI, mode=cumulative, timezone=America/Los_Angeles in the Pi widget and the system's local zone in the CLI, disabledEmoji=false).</li>
             <li><strong>User-global config:</strong> <code>~/.config/wtft/config.json</code> (<code>$XDG_CONFIG_HOME/wtft</code>)</li>
             <li><strong>Project-local config:</strong> <code>.wtft/config.json</code> (overrides global keys)</li>
             <li><strong>Session log</strong>, <code>--watch</code> only: a <code>wtft-settings</code> entry in the session <code>.jsonl</code> overrides the config's interval, limit, mode and timezone.</li>

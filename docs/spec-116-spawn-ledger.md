@@ -129,7 +129,7 @@ registered harness in turn (since #138, through each harness's `indexSessionsByI
 one, built once per walk and giving the same answers), so a Pi child resolves through Pi's discovery and a Claude Code child
 through its own. This is not a preference: the repo's lookup already recurses past the `sessions/`
 subdirectory older Claude Code installs use, skips the derived-data dirs, and takes the **newest**
-copy where one id exists in several project dirs — the moved-session case (#155, #6), which is
+copy where one id exists in several project dirs — the moved-session case (#155), which is
 precisely where a second implementation would price a child from a stale copy. A hand-rolled scan
 of `<root>/<slug>/<id>.jsonl` was doing exactly that until the PR review caught it.
 
@@ -140,7 +140,7 @@ bounded at 128 bytes. A bare-uuid rule would mean a Pi session — whose basenam
 only harness it runs in.
 
 The ledger deliberately does **not** record the session file's path: a worktree move relocates the
-file (#6) and a recorded path would rot, while the id does not. A recorded `cwd` is carried into
+file and a recorded path would rot, while the id does not. A recorded `cwd` is carried into
 the report for a human to read — it is never used to find anything.
 
 **An unreadable ledger is not an empty one.** `computeSpawnTree` owns the read, and a failure

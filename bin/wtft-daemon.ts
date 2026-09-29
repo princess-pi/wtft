@@ -16,7 +16,7 @@ import { decideHealth, readHealthFacts } from "../extensions/lib/daemon-health.j
 import { readSession, flushTurns, scanChildren, resumeTagger, fsWorld, MTIME_SETTLE_MS, type LogLine } from "../extensions/lib/session-tagger.js";
 import {
   newRegistry, newSessionRecord, serve, get, move, drop, markIdle, forgetIdle, expiredIdle, beginRetry, retryFired, cancelRetry,
-  retryPending, isEmpty, servedOver, needsDir, projectInUse, sessionDirOf, handOff, parseHandOff, type SessionRecord,
+  retryPending, isEmpty, servedOver, needsDir, projectInUse, sessionDirOf, handOff, parseHandOff, sessionsByLease, type SessionRecord,
 } from "../extensions/lib/harness-registry.js";
 import {
 	loadUserPricing,
@@ -1628,6 +1628,17 @@ if (showList || showCleanup || showRestart || stopSession) {
     } catch { /* tmp dir unreadable */ }
   }
   const harnessHolders = new Map(harnessPidFiles.map(f => [f, readPid(f)] as const));
+  const leaseSessions = new Map<string, string>();
+  if (showList) {
+    const handOffs: string[] = [];
+    try {
+      for (const f of fs.readdirSync(pidDir)) {
+        if (!f.startsWith("wtft-harness-") || !f.endsWith(".pid.served")) continue;
+        try { handOffs.push(fs.readFileSync(path.join(pidDir, f), "utf8")); } catch { /* skipped, like a non-match */ }
+      }
+    } catch { /* tmp dir unreadable */ }
+    for (const [lease, session] of sessionsByLease(handOffs, s => path.basename(getDaemonPidPath(s)))) leaseSessions.set(lease, session);
+  }
 
   let restartedN = 0, cleanedN = 0, stoppedN = 0, listedN = 0;
   let stopRefused = false;
@@ -1683,20 +1694,16 @@ if (showList || showCleanup || showRestart || stopSession) {
       if (harnessIdx >= 0 && harnessIdx + 1 < args.length) harnessFound = args[harnessIdx + 1];
     } catch (_) {}
 
-    let taggerVersion = "?";
-    if (sessionFound) {
+    const tagVersionOf = (session: string): string => {
       try {
-        const tagsDir = path.join(path.dirname(resolvedSessionArg(pid, sessionFound)), "wtft-tags");
-        const sessBase = path.basename(sessionFound);
-        const prefix = sessBase + ".wtft-tag.v";
+        const tagsDir = path.join(path.dirname(session), "wtft-tags");
+        const prefix = path.basename(session) + ".wtft-tag.v";
         for (const f of fs.readdirSync(tagsDir)) {
-          if (f.startsWith(prefix)) {
-            taggerVersion = f.slice(prefix.length, f.length - 6);
-            break;
-          }
+          if (f.startsWith(prefix)) return f.slice(prefix.length, f.length - 6);
         }
       } catch (_) {}
-    }
+      return "?";
+    };
 
     if (showRestart) {
       if (restarted.has(pid)) {
@@ -1817,9 +1824,9 @@ if (showList || showCleanup || showRestart || stopSession) {
       const status = alive ? "RUNNING" : "DEAD (stale pid)";
       let idleStr = "?";
       const now = Date.now();
-      const session = sessionFound ? resolvedSessionArg(pid, sessionFound) : null;
-      const ownLease = session !== null && sessionFound !== null
-        && (getDaemonPidPath(sessionFound) === fullPath || getDaemonPidPath(session) === fullPath);
+      const session = (kind === "harness" ? leaseSessions.get(pidFile) : undefined)
+        ?? (sessionFound ? resolvedSessionArg(pid, sessionFound) : null);
+      const ownLease = session !== null && getDaemonPidPath(session) === fullPath;
       // No model read: --list prints no cache TTL, and a transcript can be large.
       const listed = ownLease
         ? decideHealth({ ...readHealthFacts(session, fullPath, getTagPath(session)), sessionModel: () => undefined }, now)
@@ -1832,8 +1839,9 @@ if (showList || showCleanup || showRestart || stopSession) {
         else if (idleSec < 3600) idleStr = `${Math.floor(idleSec / 60)}m`;
         else idleStr = `${Math.floor(idleSec / 3600)}h`;
       }
-      const sessionDisplay = sessionFound || `(hash: ${pidFile.replace(/^wtft-daemon-/, "").replace(/\.pid$/, "")})`;
-      console.log(`PID ${String(pid).padEnd(7)} ${status.padEnd(20)} v${taggerVersion.padEnd(7)} idle: ${idleStr.padEnd(5)} ${sessionDisplay}`);
+      const sessionDisplay = session ?? `(hash: ${pidFile.replace(/^wtft-daemon-/, "").replace(/\.pid$/, "")})`;
+      const listedVersion = session ? tagVersionOf(session) : "?";
+      console.log(`PID ${String(pid).padEnd(7)} ${status.padEnd(20)} v${listedVersion.padEnd(7)} idle: ${idleStr.padEnd(5)} ${sessionDisplay}`);
     }
   }
 

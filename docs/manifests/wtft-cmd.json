@@ -189,7 +189,7 @@
     },
     {
       "flags": "--list",
-      "desc": "List the log parser daemons and their leases: PID, RUNNING or DEAD (stale pid: gone, a zombie, or a live process that is not a log parser daemon), tagger version, idle age (0s until the session has been idle 2m2s; ? when unknown, including every lease held for a session other than the holder's --session) and session. The tagger version is the first tag file found beside the holder's --session, not the running build's. A lease reading rebuild (left by -F or a failed tag write) is not listed; a holder with no readable --session shows (hash: <lease hash>), and a daemon holding no lease here shows v? and idle ?. Off Linux (no /proc) every live pid reads RUNNING, and daemons holding no lease here, a harness among them, are not listed."
+      "desc": "List the log parser daemons and their leases: PID, RUNNING or DEAD (stale pid: gone, a zombie, or a live process that is not a log parser daemon), tagger version, idle age (0s until the session has been idle 2m2s; ? when unknown) and session. A harness's lease names the session its .served hand-off lists for that lease; any other lease names its holder's --session, resolved against the holder's working directory. The tagger version is the first tag file found beside that session, not the running build's. A lease reading rebuild (left by -F or a failed tag write) is not listed; a holder with no readable --session shows (hash: <lease hash>), and a daemon holding no lease here shows v? and idle ?. Off Linux (no /proc) every live pid reads RUNNING, and daemons holding no lease here, a harness among them, are not listed."
     },
     {
       "flags": "--cleanup",

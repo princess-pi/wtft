@@ -45,6 +45,7 @@ export function projectInUse(reg, project, except?): boolean;
 export function sessionDirOf(file): string;
 export function handOff(reg, keep: (record) => boolean, adopting?: { key; displayed }): string[];
 export function parseHandOff(text, root): { records: HandOffRecord[]; unreadable: number };
+export function sessionsByLease(handOffs: string[], leaseName: (session) => string): Map<string, string>;
 ```
 
 The `TaggerState` inside a record is `docs/spec-session-tagger.md`'s.
@@ -88,6 +89,8 @@ across sessions), the hand-off file I/O, and starting and stopping the harness.
 **I** idle, **R** retries, **D** drop and **H** the hand-off round trip, each as §2 states it. The
 process-level suites (`tests/wtft-205-*`, `wtft-239-harness-lifecycle`,
 `wtft-259-daemon-correctness`, `wtft-262-daemon-gaps`) check the daemon around it.
+`tests/wtft-276-list-lease-session.test.ts` checks `sessionsByLease` in memory, then that
+`wtft-daemon --list` names each of a harness's two leases by its own session.
 
 ## 4. Related
 

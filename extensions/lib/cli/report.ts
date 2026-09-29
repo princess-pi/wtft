@@ -283,7 +283,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 		}
 	}
 	if (interactions.length === 0) {
-		const sessionName = path.basename(finalSessionPath).replace(/.jsonl$/, "");
+		const sessionName = path.basename(finalSessionPath).replace(/\.jsonl$/, "");
 		// Ceiling 0: tag wait already spent the time; one-shot state check.
 		const startup = await awaitDaemonUp(finalSessionPath, daemonChild, 0);
 		if (startup.state === "dead") {

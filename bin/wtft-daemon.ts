@@ -1485,9 +1485,10 @@ handled is not listed. A --stop of a session a harness serves ends the command a
   --list, -l            List the leases, then every other daemon process found in /proc (none off
                         Linux, so a harness holding no lease is not shown there): RUNNING or DEAD,
                         tagger version, idle age (0s until idle 2m2s; ? when unknown), session.
-                        The version is the first tag file found beside the holder's --session, not the
-                        running build's. A lease reading rebuild is not listed; a holder with no readable
-                        --session shows (hash: <lease hash>). Off Linux (no /proc) every live pid reads RUNNING
+                        A harness's lease names the session its .served hand-off lists for that lease;
+                        any other holder's, its --session. The version is the first tag file found beside
+                        that session, not the running build's. A lease reading rebuild is not listed; a
+                        lease with no such session shows (hash: <lease hash>). Off Linux (no /proc) every live pid reads RUNNING
   --cleanup             Remove every lease whose holder is dead or not a daemon, uncounted. SIGTERM (no wait)
                         per-session daemons whose session is gone (no file, not moved, and a tag that
                         holds a turn or a _meta record), and fixture ones, whose --session or root environment
@@ -1628,16 +1629,17 @@ if (showList || showCleanup || showRestart || stopSession) {
     } catch { /* tmp dir unreadable */ }
   }
   const harnessHolders = new Map(harnessPidFiles.map(f => [f, readPid(f)] as const));
-  const leaseSessions = new Map<string, string>();
+  const leaseSessionsByHarness = new Map<number, Map<string, string>>();
   if (showList) {
-    const handOffs: string[] = [];
     try {
       for (const f of fs.readdirSync(pidDir)) {
-        if (!f.startsWith("wtft-harness-") || !f.endsWith(".pid.served")) continue;
-        try { handOffs.push(fs.readFileSync(path.join(pidDir, f), "utf8")); } catch { /* skipped, like a non-match */ }
+        if (!f.startsWith("wtft-harness-") || !f.endsWith(".pid")) continue;
+        const holder = readPid(f);
+        let text: string;
+        try { text = fs.readFileSync(path.join(pidDir, `${f}.served`), "utf8"); } catch { continue; }
+        leaseSessionsByHarness.set(holder, sessionsByLease([text], s => path.basename(getDaemonPidPath(s))));
       }
     } catch { /* tmp dir unreadable */ }
-    for (const [lease, session] of sessionsByLease(handOffs, s => path.basename(getDaemonPidPath(s)))) leaseSessions.set(lease, session);
   }
 
   let restartedN = 0, cleanedN = 0, stoppedN = 0, listedN = 0;
@@ -1824,9 +1826,10 @@ if (showList || showCleanup || showRestart || stopSession) {
       const status = alive ? "RUNNING" : "DEAD (stale pid)";
       let idleStr = "?";
       const now = Date.now();
-      const session = (kind === "harness" ? leaseSessions.get(pidFile) : undefined)
-        ?? (sessionFound ? resolvedSessionArg(pid, sessionFound) : null);
-      const ownLease = session !== null && getDaemonPidPath(session) === fullPath;
+      const session = kind === "harness" ? leaseSessionsByHarness.get(pid)?.get(pidFile) ?? null
+        : sessionFound ? resolvedSessionArg(pid, sessionFound) : null;
+      const ownLease = session !== null
+        && (getDaemonPidPath(session) === fullPath || (sessionFound !== null && getDaemonPidPath(sessionFound) === fullPath));
       // No model read: --list prints no cache TTL, and a transcript can be large.
       const listed = ownLease
         ? decideHealth({ ...readHealthFacts(session, fullPath, getTagPath(session)), sessionModel: () => undefined }, now)

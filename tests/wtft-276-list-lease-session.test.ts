@@ -53,7 +53,8 @@ function start(args: string[]): number {
 try {
 	const harness = start(["--harness", "claude", "--session", s1]);
 	await sleep(1500);
-	start(["--harness", "claude", "--session", s2]);
+	const asker = spawn("node", [DAEMON, "--harness", "claude", "--session", s2], { stdio: "ignore", env });
+	await new Promise(r => asker.on("exit", r));
 
 	let lines: string[] = [];
 	for (const until = Date.now() + 30_000; Date.now() < until;) {

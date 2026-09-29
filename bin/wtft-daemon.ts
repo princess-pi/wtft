@@ -1486,7 +1486,7 @@ handled is not listed. A --stop of a session a harness serves ends the command a
                         Linux, so a harness holding no lease is not shown there): RUNNING or DEAD,
                         tagger version, idle age (0s until idle 2m2s; ? when unknown), session.
                         A harness's lease names the session its .served hand-off lists for that lease;
-                        any other holder's, its --session. The version is the first tag file found beside
+                        any other holder's, its --session resolved against its cwd. The version is the first tag file found beside
                         that session, not the running build's. A lease reading rebuild is not listed; a
                         lease with no such session shows (hash: <lease hash>). Off Linux (no /proc) every live pid reads RUNNING
   --cleanup             Remove every lease whose holder is dead or not a daemon, uncounted. SIGTERM (no wait)

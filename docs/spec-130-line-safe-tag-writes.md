@@ -657,14 +657,6 @@ lines**, against the 327/96/2,562 this spec reported from one root. The conclusi
 and the damage is 10% larger. (Inert for this particular glob — Pi's newest tag version here is
 v2.7.2, so there is no v2.8.1 to match — but it is the wrong scope to publish.)
 
-### Filed, not fixed here
-
-A pre-existing defect the audit surfaced that is not #130's to fix:
-
-- **#139** — `--watch` never re-arms its inotify watch, so a tag file replaced at the same path
-  (`wtft --force`, or a version-bumped daemon's sweep) freezes the chart against a live daemon.
-  #130's shrink branch does not help: after an unlink there are no events at all.
-
 ### What the auditors checked and cleared
 
 Recorded because "no finding" is most of the result and the reasoning is the deliverable: the

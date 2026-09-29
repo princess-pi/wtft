@@ -110,7 +110,7 @@ and `restartDaemon` unlinked unconditionally. S2 left one implementation, `unlin
 Writer: `wtft spawn-record`, called by launchers. Readers: `computeSpawnTree` (CLI report,
 widget), `listUnrecordedSpawns` (exclusion set). Format: `docs/spec-116-spawn-ledger.md`.
 
-### 1e. `~/.local/state/wtft/reap.log`
+### 1e. Reap log `$XDG_STATE_HOME/wtft/reap.log`
 
 Writer: `reapAndWarn`, at every per-session daemon start. Reader: CLI `showReapWarnings`.
 

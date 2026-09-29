@@ -266,7 +266,6 @@ console.log("\n4. Session deleted → daemon exits");
 // ---
 console.log("\n5. Reap on spawn kills orphan daemons");
 {
-	const WARN_LOG = path.join(os.homedir(), ".local", "state", "wtft", "reap.log");
 	const { sessionPath: sessA } = makeSessionFixture("reap-orphan");
 	const { sessionPath: sessB } = makeSessionFixture("reap-new");
 
@@ -311,7 +310,6 @@ console.log("\n5. Reap on spawn kills orphan daemons");
 
 	try { process.kill(pidA, "SIGCONT"); process.kill(pidA, "SIGTERM"); } catch {}
 	try { process.kill(pidB, "SIGTERM"); } catch {}
-	try { fs.unlinkSync(WARN_LOG); } catch {}
 }
 
 // ---

@@ -15,6 +15,7 @@ shared log; stdout stays ignored.
 |---|---|
 | `DAEMON_LOG_MAX_BYTES` | 1,000,000 |
 | `daemonLogPath(env = process.env)` | `$XDG_STATE_HOME/wtft/daemon.log`, defaulting to `~/.local/state/wtft/daemon.log` |
+| `reapLogPath(env = process.env)` | `$XDG_STATE_HOME/wtft/reap.log`, defaulting to `~/.local/state/wtft/reap.log`: the reap warnings `reapAndWarn` appends and the CLI's `showReapWarnings` reads |
 | `rotateDaemonLog(file, maxBytes)` | When `file` holds `maxBytes` or more: copies it to `file.1` (replacing any earlier one), then truncates `file` to 0. The copy is set to 0600. Otherwise does nothing, and a path that is not a regular file (a symlink included: it is not followed) is never rotated. Rotates only while holding `file.lock` (created exclusively), and checks the size again under it. A lock older than a minute is removed and raced for again; two takers of the same stale lock can still both rotate, the second copying a short file over `.1`, a window accepted as rare. Never throws |
 | `daemonStdio(file?)` | Rotates, then opens `file` for append, creating its directory (mode 0700) and the file (0600), and setting an existing file to 0600: it holds session paths. Anything at the path that is not a regular file (a FIFO, a directory, a symlink) is left alone: opening a FIFO with no reader would block the spawn forever. Returns the `stdio` for a spawn, `["ignore", "ignore", fd]`, and a `close()` the spawner calls once the child has it. On any failure: `"ignore"`, as before |
 
@@ -40,6 +41,6 @@ All three spawn a daemon with `daemonStdio()`:
 - `rotateDaemonLog` below, at and above the cap, and twice (the second `.1` replaces the first);
   a held lock is left alone and a stale one taken over; a symlink's target is untouched; `.1` is 0600;
 - `daemonStdio` on a FIFO returns `"ignore"` at once; it creates the file 0600 in a 0700 directory and tightens an existing one;
-- `daemonLogPath` under `XDG_STATE_HOME` and without it;
+- `daemonLogPath` and `reapLogPath` under `XDG_STATE_HOME` and without it;
 - a spawn through `spawnWtftDaemon` and `restartDaemon` whose stand-in daemon writes to stderr:
   the text is in the log. `--restart`'s respawn runs the real daemon, so it has no test here.

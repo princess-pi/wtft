@@ -237,8 +237,8 @@ renders its **Exit codes** section from.
 
 Some agent sessions are started by a *launcher*, not by a `claude` command in the
 parent's own transcript: a `pr-review` lens in a `/tmp` sandbox, a
-`herdr agent start` child in a worktree. Those children are invisible to the
-tree, and not because the parser is missing something —
+`herdr agent start` child in a worktree. Unless the spawner records it, such a
+child is not in the tree, and not because the parser is missing something —
 **neither transcript contains a field naming the other** (unless the launcher put
 the parent's id in the child's cwd, which #128's `named` tier reads), so there is
 no edge to re-derive and no amount of re-parsing can reach the money. Measured on one real
@@ -252,8 +252,22 @@ before the child runs:
 
 ```sh
 wtft spawn-record --parent "$PARENT_SESSION" --child "$CHILD_SESSION" \
-  --mechanism pr-review-lens --label correctness --model opus
+  --mechanism pr-review --label correctness --model opus
 ```
+
+`--mechanism` is free text. The writers today live in princess-pi-tools, and
+each records only when the parent is a Claude Code session
+(`CLAUDE_CODE_SESSION_ID` set) and `wtft` is on PATH:
+
+| Mechanism | Writer | Child |
+|---|---|---|
+| `shell` | the `~/bin/claude` PATH shim (`claude-nsp-guard`) | any new `claude` session a session's shell starts |
+| `herdr`, `tmux` | `agent-new start` | a claude child on that backend |
+| `pr-review` | `pr-review` | each lens, cluster and verify child |
+
+Still unrecorded: a raw `herdr agent start` outside `agent-new`, Pi and Codex
+children, and any child whose parent is not a Claude Code session. #128's
+listing reports those it can match instead.
 
 `--flag value` and `--flag=value` both work, `--json` echoes the line written,
 and without it nothing is printed at all. `--help` prints the usage. There is no

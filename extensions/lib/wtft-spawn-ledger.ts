@@ -29,7 +29,7 @@ export interface SpawnRecord {
 	ts: string;
 	parent: string;
 	child: string;
-	/** Who made the edge: `pr-review-lens`, `herdr-agent-start`, … */
+	/** Who made the edge: `shell`, `herdr`, `tmux`, `pr-review`, … Free text. */
 	mechanism: string;
 	/** The child's cwd, when the spawner knows it. Never used to FIND the child
 	 *  — a worktree move relocates the transcript and a recorded path would
